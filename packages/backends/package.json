@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@assay/agent": "workspace:*",
-    "@assay/core": "workspace:*"
+    "@assay/core": "workspace:*",
+    "zod": "^3.24.1"
   }
 }

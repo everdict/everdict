@@ -23,6 +23,34 @@ sentinel → the Backend parses it.
 Cloud vs on-prem K8s is the **same** `K8sBackend` — differences are config (kubeconfig/context/
 registry/runtimeClass/namespace).
 
+## Routing across many clusters (control plane)
+**1 Backend instance = 1 target** (one Nomad endpoint / one kubeconfig context / one Windows pool).
+Multiplicity lives in the control plane, not the Backend:
+
+- `BackendRegistry` — a name → Backend map (e.g. `nomad-seoul`, `nomad-onprem`, `k8s-cloud`, `win-pool`).
+- `Router(registry, defaultTarget)` — picks a backend per job from `evalCase.placement.target`
+  (falling back to the default) and calls `dispatch`.
+- `buildRegistry(config)` — constructs the registry from a JSON config so the control plane can
+  declare several backends at once.
+
+```jsonc
+// backends.config.json
+{
+  "default": "nomad-seoul",
+  "backends": [
+    { "name": "dev",         "kind": "local" },
+    { "name": "nomad-seoul", "kind": "nomad", "addr": "http://nomad-seoul:4646", "image": "reg/assay-agent:1", "runtime": "runsc" },
+    { "name": "nomad-onprem","kind": "nomad", "addr": "http://nomad-b:4646",     "image": "reg/assay-agent:1" }
+  ]
+}
+```
+```bash
+pnpm assay run --backends-config backends.config.json --target nomad-onprem --task "..."
+```
+`EvalCase.placement` ({target, os?, isolation?}) is a control-plane hint — the **agent ignores it**.
+(K8s/Windows backends register into the same registry once built; capability-based matching —
+`{os, isolation}` instead of an explicit `target` — is a later enhancement.)
+
 ## Nomad (phase 1)
 ```bash
 # 1) build + push the agent image to your internal registry

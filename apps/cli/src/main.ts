@@ -1,5 +1,13 @@
+import { readFileSync } from "node:fs";
 import { collectAuthEnv, hasClaudeAuth } from "@assay/agent";
-import { type Backend, LocalBackend, NomadBackend } from "@assay/backends";
+import {
+  BackendRegistry,
+  BackendsConfigSchema,
+  LocalBackend,
+  NomadBackend,
+  Router,
+  buildRegistry,
+} from "@assay/backends";
 import { type AgentJob, AppError, type GraderSpec } from "@assay/core";
 
 function parseFlags(argv: string[]): Map<string, string> {
@@ -24,10 +32,11 @@ function usage(): void {
     [
       "assay run --task <text> [options]",
       "  --harness     claude-code | scripted   (default: claude-code)",
-      "  --backend     local | nomad            (default: local)",
+      "  --backend     local | nomad            (single-backend mode; default: local)",
       "  --git <url> --ref <ref>                (default: empty repo)",
       "  --test <cmd>                           (tests-pass grader, run in work/)",
-      "  nomad: --nomad-addr <url> --image <ref> [--runtime runsc]",
+      "  nomad:   --nomad-addr <url> --image <ref> [--runtime runsc]",
+      "  routing: --backends-config <file.json> [--target <name>]  (multi-cluster)",
     ].join("\n"),
   );
 }
@@ -53,6 +62,7 @@ async function main(): Promise<void> {
   const backendName = flags.get("backend") ?? "local";
   const testCmd = flags.get("test");
   const git = flags.get("git");
+  const explicitTarget = flags.get("target");
 
   const graders: GraderSpec[] = [{ id: "steps" }, { id: "cost" }, { id: "latency" }];
   if (testCmd) graders.push({ id: "tests-pass", config: { cmd: testCmd } });
@@ -68,11 +78,20 @@ async function main(): Promise<void> {
       graders,
       timeoutSec: Number(process.env.ASSAY_TIMEOUT_SEC ?? "300"),
       tags: ["cli"],
+      ...(explicitTarget ? { placement: { target: explicitTarget } } : {}),
     },
   };
 
-  let backend: Backend;
-  if (backendName === "nomad") {
+  // 컨트롤플레인: 백엔드 레지스트리 + 라우터를 구성한다.
+  let registry: BackendRegistry;
+  let defaultTarget: string | undefined;
+  const configPath = flags.get("backends-config") ?? process.env.ASSAY_BACKENDS_CONFIG;
+
+  if (configPath) {
+    // 멀티클러스터 모드: 설정 파일에서 여러 백엔드(여러 Nomad/K8s/Windows)를 등록.
+    const cfg = BackendsConfigSchema.parse(JSON.parse(readFileSync(configPath, "utf8")));
+    ({ registry, defaultTarget } = buildRegistry(cfg, { secretEnv: collectAuthEnv() }));
+  } else if (backendName === "nomad") {
     const addr = flags.get("nomad-addr") ?? process.env.NOMAD_ADDR;
     const image = flags.get("image") ?? process.env.ASSAY_AGENT_IMAGE;
     if (!addr || !image) {
@@ -92,17 +111,23 @@ async function main(): Promise<void> {
       process.exitCode = 2;
       return;
     }
-    backend = new NomadBackend({ addr, image, secretEnv: collectAuthEnv(), runtime: flags.get("runtime") });
+    registry = new BackendRegistry().register(
+      "nomad",
+      new NomadBackend({ addr, image, secretEnv: collectAuthEnv(), runtime: flags.get("runtime") }),
+    );
+    defaultTarget = "nomad";
   } else {
-    backend = new LocalBackend();
+    registry = new BackendRegistry().register("local", new LocalBackend());
+    defaultTarget = "local";
   }
 
-  console.error(`▶ ${harnessName} via ${backendName} 백엔드 …`);
+  const target = explicitTarget ?? defaultTarget;
+  console.error(`▶ ${harnessName} via ${target ?? "(no target)"} 백엔드 …`);
   try {
-    const result = await backend.dispatch(job);
+    const result = await new Router(registry, defaultTarget).dispatch(job);
     console.log(
       JSON.stringify(
-        { harness: result.harness, scores: result.scores, trace: result.trace, diff: result.snapshot.diff },
+        { target, harness: result.harness, scores: result.scores, trace: result.trace, diff: result.snapshot.diff },
         null,
         2,
       ),

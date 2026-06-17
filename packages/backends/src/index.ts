@@ -8,3 +8,12 @@ export {
   type NomadHttp,
   type NomadJobSpec,
 } from "./nomad.js";
+export {
+  BackendRegistry,
+  Router,
+  buildRegistry,
+  BackendConfigSchema,
+  BackendsConfigSchema,
+  type BackendConfig,
+  type BackendsConfig,
+} from "./registry.js";

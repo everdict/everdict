@@ -11,6 +11,15 @@ export const GraderSpecSchema = z.object({
 });
 export type GraderSpec = z.infer<typeof GraderSpecSchema>;
 
+// 배치(placement) 힌트 — 컨트롤플레인 라우터가 어느 백엔드로 보낼지 결정할 때 본다.
+// 에이전트는 이 필드를 무시한다(실행 위치는 에이전트의 관심사가 아니다).
+export const PlacementSchema = z.object({
+  target: z.string().optional(), // 등록된 백엔드 이름 (예: "nomad-seoul")
+  os: z.enum(["linux", "windows", "macos"]).optional(),
+  isolation: z.string().optional(), // 예: "gvisor"
+});
+export type Placement = z.infer<typeof PlacementSchema>;
+
 export const EvalCaseSchema = z.object({
   id: z.string(),
   env: EnvSpecSchema,
@@ -19,6 +28,7 @@ export const EvalCaseSchema = z.object({
   image: z.string().optional(),
   timeoutSec: z.number().default(1800),
   tags: z.array(z.string()).default([]),
+  placement: PlacementSchema.optional(),
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 
