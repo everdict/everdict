@@ -36,7 +36,14 @@ export class MlflowTraceSource implements TraceSource {
   async fetch(runId: string): Promise<TraceEvent[]> {
     const base = this.opts.endpoint.replace(/\/$/, "");
     const res = await fetch(`${base}/api/2.0/mlflow/traces/${encodeURIComponent(runId)}`);
-    const body = (await res.json()) as { trace?: MlflowTrace };
+    // 트레이스가 아직 없거나(404) 인증·서버 오류면 빈 트레이스로 degrade — 그레이더는 0건으로 평가.
+    if (!res.ok) return [];
+    let body: { trace?: MlflowTrace };
+    try {
+      body = (await res.json()) as { trace?: MlflowTrace };
+    } catch {
+      return [];
+    }
     return spansToTraceEvents(parseMlflowTrace(body.trace ?? {}));
   }
 }

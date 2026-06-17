@@ -18,9 +18,20 @@ Chromium loading a client browser extension (the extension drives the browser).
 
 ## Orchestrator-agnostic (Nomad AND K8s)
 `ServiceTopologyBackend` (a `Backend`) is orchestrator-agnostic; only `TopologyRuntime` differs:
-- `buildNomadTopologyJob(spec)` → Nomad **service** job (task groups, docker + `runsc`, Consul discovery)
+- `buildNomadTopologyJob(spec)` → Nomad **service** job (task groups, docker + `runsc`, dynamic ports)
 - `buildK8sManifests(spec)` → Deployments/Services (+ `runtimeClassName` gVisor)
 Register one `ServiceTopologyBackend` per target cluster in the `BackendRegistry`; Router/orchestrator unchanged.
+
+### `NomadTopologyRuntime` (live)
+The live Nomad runtime (`@assay/topology`) implements `TopologyRuntime` against the Nomad HTTP API:
+- `ensureTopology(spec)` → register the warm **service** job, poll each group's alloc to `running`, and
+  **discover endpoints** from the alloc (`resolvePort` reads `AllocatedResources.Shared.Ports`, falling back
+  to `Resources.Networks`); cache per `id@version` so a version deploys once.
+- `provisionBrowserEnv(spec, runId)` → register a per-case browser **service** job (headless Chromium), discover
+  its CDP port, return a `BrowserEnvHandle` whose `cdpUrl` comes from `/json/version` and whose `snapshot()`
+  reads `/json/list`. Registration failures are cleaned up (no leaked allocs); `dispose()`/`teardown()` purge.
+- Services declare a `port` → the builder attaches a group `network` dynamic port (label `http`, browser `cdp`)
+  and maps it into the container, so endpoints are reachable from the control plane without Consul.
 
 ## Trace (`@assay/trace`)
 The harness emits a trace to OTel/MLflow; Assay **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →
@@ -32,8 +43,23 @@ Over `{trace, snapshot}` (no `ComputeHandle`): trace-based (`steps`/`cost`/`late
 task + DOM/screenshot, via an injected `Judge`). Cases pick graders via `EvalCase.graders` (resolved by
 `makeGraders`); judge graders are wired where a `Judge` is configured.
 
+## Live validation (Nomad)
+`scripts/live/service-topology-nomad.mjs` runs a full service-topology case on a real Nomad cluster:
+warm front-door deployed as a Nomad service job → endpoint discovered from the alloc → per-case headless
+Chromium provisioned with a real CDP endpoint → real `POST /runs` with per-run wiring (verified by the
+front-door's HTTP 200) → trace pulled from real MLflow → `dom-contains`/`url-matches` graded over the real
+browser snapshot → both jobs purged on teardown. Confirmed end-to-end (~6s) on Nomad v2.0.3 dev (docker
+driver) with stand-ins: front-door = `mendhak/http-https-echo`, browser = `chromedp/headless-shell`.
+
+```bash
+NOMAD_ADDR=http://127.0.0.1:4646 MLFLOW_ENDPOINT=http://127.0.0.1:5501 \
+  node scripts/live/service-topology-nomad.mjs
+```
+
 ## Status
 - **Phase 1 (built, unit-tested):** `HarnessSpec(service)`, OTel/MLflow trace mappers, **both** topology
   builders (Nomad + K8s), env-manager runId keying, orchestrator-agnostic `ServiceTopologyBackend` (mock runtime).
-- **Phase 2 (needs infra):** live `NomadTopologyRuntime`/`K8sTopologyRuntime` apply, real browser+extension
-  provisioning (headful + xvfb), real OTel/MLflow ingestion, the harness images + extension in a registry.
+- **Phase 2 — live `NomadTopologyRuntime`: DONE** (real Nomad apply + endpoint discovery + per-case CDP browser
+  + drive + MLflow pull + grade + teardown; see above). **Still pending:** `K8sTopologyRuntime` apply, the real
+  browser+extension (headful + xvfb + `--load-extension`) and the real browser-use images, real OTel/MLflow
+  span ingestion (the stand-in emits no GenAI spans → trace is empty), the harness images + extension registry.

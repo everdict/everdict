@@ -3,7 +3,7 @@ import type { TraceSource } from "@assay/trace";
 import { describe, expect, it } from "vitest";
 import { keysFor } from "./environment-manager.js";
 import { buildK8sManifests } from "./k8s-topology.js";
-import { buildNomadTopologyJob } from "./nomad-topology.js";
+import { type AllocLike, browserJobId, buildBrowserJob, buildNomadTopologyJob, resolvePort } from "./nomad-topology.js";
 import { ServiceTopologyBackend, type SubmitFn } from "./service-backend.js";
 import type { BrowserEnvHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -48,6 +48,49 @@ describe("buildNomadTopologyJob", () => {
     expect(agent?.Config.image).toBe("reg/bu-agent:1");
     expect(agent?.Config.runtime).toBe("runsc");
     expect(agent?.Env.PG_URL).toBe("x");
+  });
+
+  it("port 가 있는 서비스에 dynamic port + docker 매핑을 단다 (호스트 발견용)", () => {
+    const job = buildNomadTopologyJob(SPEC);
+    const agentGroup = job.Job.TaskGroups[0];
+    expect(agentGroup?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "http", To: 8000 });
+    expect(agentGroup?.Tasks[0]?.Config.ports).toEqual(["http"]);
+  });
+});
+
+describe("buildBrowserJob", () => {
+  it("per-case headless Chromium(service) + CDP dynamic port 로 렌더한다", () => {
+    const job = buildBrowserJob(SPEC, "abc", { runtime: "runsc" });
+    expect(job.Job.ID).toBe(browserJobId("abc"));
+    expect(job.Job.Type).toBe("service");
+    const g = job.Job.TaskGroups[0];
+    expect(g?.Name).toBe("browser");
+    expect(g?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "cdp", To: 9222 });
+    const task = g?.Tasks[0];
+    expect(task?.Config.image).toBe("chromedp/headless-shell:latest");
+    expect(task?.Config.runtime).toBe("runsc");
+    expect(task?.Config.ports).toEqual(["cdp"]);
+    // headless-shell 은 CDP 를 스스로 9222 로 노출 → 포트 덮어쓰기 금지, allow-origins 만 추가.
+    expect(task?.Config.args).toEqual(["--remote-allow-origins=*"]);
+    expect(task?.Env.ASSAY_RUN_ID).toBe("abc");
+  });
+});
+
+describe("resolvePort", () => {
+  it("AllocatedResources.Shared.Ports 에서 label 로 host:port 를 찾는다", () => {
+    const alloc: AllocLike = {
+      AllocatedResources: { Shared: { Ports: [{ Label: "http", Value: 21500, To: 8080, HostIP: "127.0.0.1" }] } },
+    };
+    expect(resolvePort(alloc, "http")).toEqual({ hostIp: "127.0.0.1", port: 21500 });
+  });
+
+  it("구 Resources.Networks 형태도 지원하고, HostIP 없으면 127.0.0.1 로 채운다", () => {
+    const alloc: AllocLike = { Resources: { Networks: [{ DynamicPorts: [{ Label: "cdp", Value: 30222 }] }] } };
+    expect(resolvePort(alloc, "cdp")).toEqual({ hostIp: "127.0.0.1", port: 30222 });
+  });
+
+  it("label 이 없으면 undefined", () => {
+    expect(resolvePort({}, "http")).toBeUndefined();
   });
 });
 
