@@ -35,7 +35,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `packages/graders`      — scoring, fully separate from the harness (tests-pass / cost / steps / latency).
 - `packages/runner`       — the eval loop (`runCase`).
 - `packages/agent`        — the dispatched unit (model B): runs `runCase` inside an isolated job, emits the result.
-- `packages/backends`     — *placement* (`Backend`): dispatch the agent to an orchestrator (LocalBackend, NomadBackend; K8s/Windows later) + `Router`/`BackendRegistry`.
+- `packages/backends`     — *placement* (`Backend`): dispatch the agent to an orchestrator (LocalBackend, NomadBackend; K8s/Windows later) + `Router` (static) / `Scheduler` (capacity-aware: `Backend.capacity()` + queue + backpressure) / `BackendRegistry`.
 - `packages/orchestrator` — durable control plane on Temporal: `DirectOrchestrator` / `TemporalOrchestrator` + the worker (workflow=deterministic, activity=`dispatchCase`).
 - `packages/trace`        — pull a harness trace from OTel/MLflow → normalized `TraceEvent` (for service harnesses).
 - `packages/topology`     — **service-topology** harnesses (multi-service + target env): `HarnessSpec(service)`, orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s topology builders + runId-keyed env manager. See `docs/service-harness.md`.

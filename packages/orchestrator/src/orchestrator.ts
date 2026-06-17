@@ -1,4 +1,4 @@
-import type { Router } from "@assay/backends";
+import type { Dispatcher } from "@assay/backends";
 import type { AgentJob, CaseResult } from "@assay/core";
 import { Client, Connection } from "@temporalio/client";
 import { TASK_QUEUE } from "./constants.js";
@@ -8,11 +8,11 @@ export interface Orchestrator {
   run(job: AgentJob): Promise<CaseResult>;
 }
 
-// 비-durable: 같은 프로세스에서 Router 직접 호출 (개발/단순).
+// 비-durable: 같은 프로세스에서 Dispatcher(Router/Scheduler) 직접 호출 (개발/단순).
 export class DirectOrchestrator implements Orchestrator {
-  constructor(private readonly router: Router) {}
+  constructor(private readonly dispatcher: Dispatcher) {}
   run(job: AgentJob): Promise<CaseResult> {
-    return this.router.dispatch(job);
+    return this.dispatcher.dispatch(job);
   }
 }
 

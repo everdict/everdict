@@ -5,6 +5,9 @@ import { BackendRegistry, Router, buildRegistry } from "./registry.js";
 
 class FakeBackend implements Backend {
   constructor(readonly id: string) {}
+  async capacity() {
+    return { total: 1, used: 0 };
+  }
   async dispatch(_job: AgentJob): Promise<CaseResult> {
     return {
       caseId: "c",

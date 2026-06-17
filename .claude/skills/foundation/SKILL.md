@@ -21,7 +21,7 @@ core ← { drivers · environments · harnesses · graders } ← runner ← agen
 - `drivers` / `environments` / `harnesses` / `graders` — adapters; depend on `core` only.
 - `runner` — the eval loop (`runCase`); composes adapters.
 - `agent` — the dispatched unit (model B): runs `runCase` over `LocalDriver` inside an isolated job, emits `__ASSAY_RESULT__`.
-- `backends` — placement: `Backend.dispatch(AgentJob)` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later) + `Router`/`BackendRegistry`.
+- `backends` — placement: `Backend.dispatch(AgentJob)` + `capacity()` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later) + `Router` (static) / `Scheduler` (capacity-aware + queue + backpressure) / `BackendRegistry`.
 - `orchestrator` — durable control plane (Temporal): `DirectOrchestrator` / `TemporalOrchestrator` + worker.
 - `trace` — pull a harness trace from OTel/MLflow → `TraceEvent`. `topology` — service-topology harnesses
   (multi-service + target env): orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s builders.

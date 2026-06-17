@@ -1,5 +1,13 @@
-export type { Backend } from "./backend.js";
+export type { Backend, BackendCapacity, Dispatcher } from "./backend.js";
 export { LocalBackend } from "./local.js";
+export {
+  Scheduler,
+  leastLoadedPolicy,
+  binPackPolicy,
+  type PlacementPolicy,
+  type BackendSlot,
+  type SchedulerOptions,
+} from "./scheduler.js";
 export {
   NomadBackend,
   buildNomadJob,

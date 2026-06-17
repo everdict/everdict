@@ -4,7 +4,7 @@ Above routing, the control plane can run each case as a **durable Temporal workf
 survive control-plane restarts and retry transient backend failures.
 
 ## Two orchestrators (`@assay/orchestrator`)
-- `DirectOrchestrator(router)` — runs in-process via the Router. Simple; dies with the process.
+- `DirectOrchestrator(dispatcher)` — runs in-process via a `Dispatcher` (Router or Scheduler). Simple; dies with the process.
 - `TemporalOrchestrator({address, taskQueue})` — client: starts a workflow and awaits its result.
 
 ## Topology (model B + Temporal)
@@ -12,12 +12,15 @@ survive control-plane restarts and retry transient backend failures.
 assay run --orchestrator temporal  (client)  ── start workflow ──▶ Temporal Server
                                                                         │  task queue
 assay worker  (long-running)  ◀── poll ─────────────────────────────────┘
-   holds Router(registry) → activity dispatchCase(job) = Router.dispatch → Backend → agent → CaseResult
+   holds Scheduler(registry) → activity dispatchCase(job) = Scheduler.dispatch → Backend → agent → CaseResult
 ```
 - **Workflow** (`evalCaseWorkflow` / `suiteWorkflow`) is deterministic — it only calls the
   `dispatchCase` **activity** (retry + 1h start-to-close timeout). No I/O in the workflow.
-- **Activity** `dispatchCase` does the real backend dispatch (Router → Nomad/K8s/…).
-- The **worker** holds the BackendRegistry; the **client** (CLI) just starts + awaits.
+  `suiteWorkflow` uses a **bounded** lane count so a big suite can't flood activity slots.
+- **Activity** `dispatchCase` does the real backend dispatch via a `Dispatcher`. The worker wires a
+  capacity-aware **`Scheduler`** (gates on `Backend.capacity()`, queues when full) — see
+  `docs/execution-backends.md`.
+- The **worker** holds the BackendRegistry + Scheduler; the **client** (CLI) just starts + awaits.
 
 ## Run it (self-hosted dev)
 ```bash

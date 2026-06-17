@@ -7,6 +7,9 @@ import { DirectOrchestrator } from "./orchestrator.js";
 
 class FakeBackend implements Backend {
   constructor(readonly id: string) {}
+  async capacity() {
+    return { total: 1, used: 0 };
+  }
   async dispatch(_job: AgentJob): Promise<CaseResult> {
     return {
       caseId: "c",

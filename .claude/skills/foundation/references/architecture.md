@@ -10,7 +10,7 @@
 | `@assay/graders` | `Grader` impls — scoring | core |
 | `@assay/runner` | the eval loop (`runCase`) | core, drivers, environments, harnesses, graders |
 | `@assay/agent` | dispatched unit (model B): runs runCase inside a job, emits result | core, runner, drivers, environments, harnesses, graders |
-| `@assay/backends` | `Backend` impls — placement (Local, Nomad; K8s/Windows later) + `Router`/`BackendRegistry` | core, agent |
+| `@assay/backends` | `Backend` impls (+ `capacity()`) — placement (Local, Nomad; K8s/Windows later) + `Router` (static) / `Scheduler` (capacity-aware + queue) / `BackendRegistry` | core, agent |
 | `@assay/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | core, backends, agent |
 | `@assay/trace` | pull a harness trace from OTel/MLflow → `TraceEvent` | core |
 | `@assay/topology` | service-topology harnesses: `ServiceTopologyBackend` + Nomad/K8s builders + env manager | core, backends, graders, trace |
@@ -45,9 +45,10 @@ phase 1), `K8sBackend` + `WindowsBackend` (later). See skill `backends` + `docs/
 
 Fan out cases × harness-versions; regression = run a suite against `harness@vA` and `@vB`, diff
 scorecards. Durable dispatch+await is implemented in `@assay/orchestrator` (Temporal):
-`evalCaseWorkflow`/`suiteWorkflow` call the `dispatchCase` activity (which runs the Router); the
-`assay worker` holds the registry, the client (`assay run --orchestrator temporal`) starts+awaits.
-See `docs/orchestration.md`.
+`evalCaseWorkflow`/`suiteWorkflow` call the `dispatchCase` activity (which runs a `Dispatcher`); the
+`assay worker` holds the registry + a capacity-aware `Scheduler` (gates on `Backend.capacity()`,
+queues when full, backpressure via `RateLimitError`), the client (`assay run --orchestrator temporal`)
+starts+awaits. `suiteWorkflow` fan-out is bounded. See `docs/orchestration.md` + `docs/execution-backends.md`.
 
 ## How new things plug in (no core rewrite)
 - New compute target (Nomad / K8s / Windows pool) → new `Backend`; the agent + loop are unchanged.

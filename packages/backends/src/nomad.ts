@@ -1,6 +1,6 @@
 import { RESULT_SENTINEL } from "@assay/agent";
 import { type AgentJob, type CaseResult, CaseResultSchema, UpstreamError } from "@assay/core";
-import type { Backend } from "./backend.js";
+import type { Backend, BackendCapacity } from "./backend.js";
 
 // --- Nomad HTTP 추상화 (테스트에서 모킹 가능) ---
 export interface NomadHttp {
@@ -32,6 +32,7 @@ export interface NomadBackendOptions {
   memMb?: number;
   pollIntervalMs?: number;
   maxPolls?: number;
+  maxConcurrent?: number; // 이 클러스터에 허용할 동시 잡 상한(용량 인지 배치용)
 }
 
 // --- Nomad 잡 스펙(필요한 부분만 타입화) ---
@@ -106,6 +107,23 @@ export class NomadBackend implements Backend {
 
   constructor(private readonly opts: NomadBackendOptions) {
     this.http = opts.http ?? fetchHttp(opts.addr);
+  }
+
+  // 용량: total=설정 상한, used=클러스터에서 관측된 진행중 assay 잡 수(라이브 프로브).
+  // 프로브가 실패하면 used=0 으로 두고 스케줄러의 in-flight 로만 게이팅한다.
+  async capacity(): Promise<BackendCapacity> {
+    const total = this.opts.maxConcurrent ?? 20;
+    try {
+      const res = await this.http.request("GET", "/v1/jobs?prefix=assay-");
+      if (res.status < 300) {
+        const jobs = JSON.parse(res.text) as Array<{ Status?: string }>;
+        const used = jobs.filter((j) => j.Status === "running" || j.Status === "pending").length;
+        return { total, used };
+      }
+    } catch {
+      // 프로브 실패 → used 0
+    }
+    return { total, used: 0 };
   }
 
   async dispatch(job: AgentJob): Promise<CaseResult> {

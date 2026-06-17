@@ -14,7 +14,24 @@ export async function evalCaseWorkflow(job: AgentJob): Promise<CaseResult> {
   return dispatchCase(job);
 }
 
-// 스위트 = 여러 케이스를 병렬 디스패치(각 액티비티가 독립적으로 재시도).
+// 워크플로 레벨 팬아웃 상한 — 대형 스위트가 액티비티 슬롯을 한꺼번에 점유하지 않게 한다.
+// (세밀한 클러스터 용량 게이팅은 워커의 Scheduler 가 추가로 수행한다.)
+const SUITE_FANOUT = 8;
+
+// 스위트 = 여러 케이스를 bounded 팬아웃으로 디스패치(각 액티비티가 독립적으로 재시도).
+// 결정적: 레인 worker 들이 공유 카운터로 인덱스를 집고, 결과는 인덱스로 채운다(Temporal replay 안전).
 export async function suiteWorkflow(jobs: AgentJob[]): Promise<CaseResult[]> {
-  return Promise.all(jobs.map((job) => dispatchCase(job)));
+  const results = new Array<CaseResult>(jobs.length);
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < jobs.length) {
+      const i = next++;
+      const job = jobs[i];
+      if (job === undefined) continue;
+      results[i] = await dispatchCase(job);
+    }
+  };
+  const lanes = Math.max(1, Math.min(SUITE_FANOUT, jobs.length));
+  await Promise.all(Array.from({ length: lanes }, () => lane()));
+  return results;
 }

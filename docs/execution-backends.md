@@ -28,8 +28,11 @@ registry/runtimeClass/namespace).
 Multiplicity lives in the control plane, not the Backend:
 
 - `BackendRegistry` — a name → Backend map (e.g. `nomad-seoul`, `nomad-onprem`, `k8s-cloud`, `win-pool`).
-- `Router(registry, defaultTarget)` — picks a backend per job from `evalCase.placement.target`
-  (falling back to the default) and calls `dispatch`.
+- `Router(registry, defaultTarget)` — *static* placement: picks a backend per job from
+  `evalCase.placement.target` (falling back to the default) and calls `dispatch`. Simple/dev.
+- `Scheduler(registry, opts)` — *capacity-aware* placement (the SaaS control-plane path). Same
+  `dispatch(job)` signature (drop-in `Dispatcher`), but it queries each backend's live `capacity()`
+  and only dispatches where a slot is free; otherwise it **queues** and drains as slots free. See below.
 - `buildRegistry(config)` — constructs the registry from a JSON config so the control plane can
   declare several backends at once.
 
@@ -50,6 +53,34 @@ pnpm assay run --backends-config backends.config.json --target nomad-onprem --ta
 `EvalCase.placement` ({target, os?, isolation?}) is a control-plane hint — the **agent ignores it**.
 (K8s/Windows backends register into the same registry once built; capability-based matching —
 `{os, isolation}` instead of an explicit `target` — is a later enhancement.)
+
+## Capacity-aware scheduling (SaaS, multi-tenant, elastic)
+At SaaS scale many users submit many cases against finite/elastic infra, so placement must be
+*capacity-aware*, not static. `Scheduler` is the placement layer that does this:
+
+- **`Backend.capacity()` → `{total, used}`** — each backend reports its concurrent-slot budget.
+  `LocalBackend`/`ServiceTopologyBackend` report a configured `maxConcurrent`; `NomadBackend`
+  reports `maxConcurrent` and **live-probes** the cluster (`/v1/jobs?prefix=assay-`) for observed load.
+- **placement** — for each queued job the scheduler computes `free = total − max(used, in-flight)`
+  per eligible backend and picks one via a `PlacementPolicy`: `leastLoadedPolicy` (spread, default) or
+  `binPackPolicy` (consolidate → enables scale-to-zero). `placement.target` is honored as a hard pin.
+- **queue + backpressure** — if no backend has a free slot the job waits in an in-memory queue and is
+  dispatched the moment a slot frees (a dispatch settling re-pumps the queue). `maxQueueDepth` rejects
+  with `RateLimitError` (429) when the queue is saturated. The scheduler avoids head-of-line blocking
+  by scanning the queue for the first placeable job.
+- **wiring** — the Temporal `assay worker` builds a `Scheduler` over its registry (replacing `Router`),
+  and `suiteWorkflow` fans out with a bounded lane count so a large suite can't flood activity slots;
+  the scheduler then does fine-grained per-cluster capacity gating on top.
+
+```
+N cases ─▶ Scheduler ─┬─ free slot? ─▶ dispatch to chosen backend (policy)
+                      └─ none free  ─▶ queue ─▶ (slot frees) ─▶ pump ─▶ dispatch
+```
+
+Live proof: `scripts/live/scheduler-nomad.mjs` submits N cases at once to a real `NomadBackend`
+capped at `CAP`; a poller confirms the cluster never runs more than `CAP` allocs concurrently while
+the rest queue and drain. (Next slices: per-tenant fair queue/WFQ, tenant trust-zone isolation of
+warm pools, autoscaling driven by queue depth — see the SaaS design discussion.)
 
 ## Nomad (phase 1)
 ```bash

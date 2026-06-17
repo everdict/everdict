@@ -1,4 +1,4 @@
-import type { Backend } from "@assay/backends";
+import type { Backend, BackendCapacity } from "@assay/backends";
 import {
   type AgentJob,
   type CaseResult,
@@ -34,6 +34,7 @@ export interface ServiceTopologyBackendOptions {
   graders?: Grader[]; // 기본: trace 기반(steps/cost/latency). 브라우저 그레이더(dom/vlm)는 Phase 2.
   submit?: SubmitFn;
   newRunId?: () => string;
+  maxConcurrent?: number; // 동시 per-case 브라우저 상한(용량 인지 배치용)
 }
 
 // 오케스트레이터-비종속 서비스 토폴로지 백엔드 (Backend 구현).
@@ -42,6 +43,11 @@ export class ServiceTopologyBackend implements Backend {
   readonly id: string;
   constructor(private readonly opts: ServiceTopologyBackendOptions) {
     this.id = `service:${opts.runtime.id}`;
+  }
+
+  // 용량: 동시에 띄울 수 있는 per-case 브라우저 수(warm 서비스는 공유 풀이라 per-case 가 병목).
+  async capacity(): Promise<BackendCapacity> {
+    return { total: this.opts.maxConcurrent ?? 8, used: 0 };
   }
 
   async dispatch(job: AgentJob): Promise<CaseResult> {
