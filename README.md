@@ -20,8 +20,9 @@ world it acts on) · **Driver** (where it runs) · **Grader** (how we judge). Se
 and `.claude/skills/foundation/`.
 
 ## Stack
-TypeScript (Node 22) · pnpm + Turborepo · Fastify · Zod · Temporal · E2B (Linux v1) ·
-Drizzle + Postgres · ClickHouse · Biome · Vitest · Docker/K8s/Helm.
+TypeScript (Node 22) · pnpm + Turborepo · Fastify · Zod · Temporal · Nomad / K8s / Windows
+backends (self-hosted; isolation via the orchestrator) · Drizzle + Postgres · ClickHouse ·
+Biome · Vitest · Docker/K8s/Helm.
 
 ## Develop
 ```bash

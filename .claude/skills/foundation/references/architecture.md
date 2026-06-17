@@ -4,7 +4,7 @@
 | Package | Role | Depends on |
 |---|---|---|
 | `@assay/core` | contracts: interfaces + Zod schemas + errors | (none) |
-| `@assay/drivers` | `Driver` impls — in-sandbox compute (Local, E2B) | core |
+| `@assay/drivers` | `Driver` impls — in-sandbox compute (Local) | core |
 | `@assay/environments` | `Environment` impls — the world acted on (Repo) | core |
 | `@assay/harnesses` | `EvaluableHarness` impls — the agent under test | core |
 | `@assay/graders` | `Grader` impls — scoring | core |
@@ -51,7 +51,7 @@ scorecards. Durable dispatch+await (Temporal) is the cross-cutting next step.
 - New metric → new `Grader` (+ a registry entry).
 
 ## Build status & order
-Built: core → drivers(Local/E2B) → environments(Repo) → harnesses(claude-code/scripted) →
+Built: core → drivers(Local) → environments(Repo) → harnesses(claude-code/scripted) →
 graders(tests-pass/cost/steps/latency) → runner → agent → backends(Local/Nomad) → cli.
 Next: `K8sBackend` → `WindowsBackend` → Temporal (durable dispatch+await) + routing → registry,
 apps/api, Postgres(Drizzle)/ClickHouse, deploy (Helm/K8s), dashboard.

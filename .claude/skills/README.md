@@ -21,7 +21,7 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
 - `foundation/`     — module deps, the spine (4 concerns + Backend placement), error model, conventions.
 - `backends/`       — distributed execution: Backend vs Driver, `AgentJob`, model B (Nomad/K8s/Windows).
 - `core-contracts/` — the EvaluableHarness / Environment / Driver / Grader contracts + Zod (planned).
-- `drivers/`        — implementing a Driver (Local/E2B; pool drivers later) (planned).
+- `drivers/`        — implementing a Driver (in-sandbox compute; Local) (planned).
 - `harnesses/`      — implementing an EvaluableHarness + trace normalization (planned).
 - `graders/`        — implementing a Grader; the metric families (planned).
 - `api-layer/`      — Fastify route/schema/service split, envelope, pagination (planned).

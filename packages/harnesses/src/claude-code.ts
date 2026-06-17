@@ -2,7 +2,7 @@ import { type ComputeHandle, type EvaluableHarness, type RunContext, type TraceE
 import { mapClaudeStreamJson } from "./stream-json.js";
 
 export interface ClaudeCodeOptions {
-  install?: boolean; // true면 compute에 CLI를 npm 설치 (E2B 등). LocalDriver는 PATH의 claude 사용.
+  install?: boolean; // true면 compute에 CLI를 npm 설치 (샌드박스 잡 등). LocalDriver는 PATH의 claude 사용.
   workDir?: string;
 }
 

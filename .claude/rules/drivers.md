@@ -3,10 +3,11 @@ paths: "packages/drivers/**"
 ---
 # Driver rules (push)
 
-A Driver = "where a run executes". See skill `drivers`.
+A Driver = *in-sandbox compute* (`ComputeHandle`): it runs the harness as a subprocess inside an
+already-isolated unit. `LocalDriver` is the only one (dev, and inside the agent). **Placement and
+isolation are the Backend's job** (Nomad/K8s/Windows — see skill `backends`), not the Driver's.
 
 - Implement the `Driver` interface from `@assay/core`; export it by a `*Driver` name.
 - The returned `ComputeHandle` MUST be releasable via `dispose()`; callers release in `finally`.
-- Never leak the backend SDK type (E2B/KubeVirt/Tart) above the adapter — return `ComputeHandle` only.
-- Map every backend failure to an `AppError` (`DRIVER_PROVISION_FAILED` / `COMPUTE_EXEC_FAILED`). No raw SDK errors escape.
-- v1 = Linux only (`os: "linux"`). Windows/macOS arrive as Pool drivers (runner-agent + VM checkpoint).
+- Map failures to an `AppError` (`COMPUTE_EXEC_FAILED`); never leak a raw OS/SDK error.
+- A non-zero command exit is a *result* (`{exitCode, stdout, stderr}`), not a thrown error.

@@ -8,7 +8,7 @@ human-facing map.
 |---|---|---|
 | Harness (under test) | `EvaluableHarness` | `claude-code`, `scripted` |
 | Environment (world acted on) | `Environment<EnvSnapshot>` | `RepoEnvironment` |
-| Driver (in-sandbox compute) | `Driver` / `ComputeHandle` | `LocalDriver` (dev), `E2BLinuxDriver` (optional) |
+| Driver (in-sandbox compute) | `Driver` / `ComputeHandle` | `LocalDriver` (dev / inside the agent) |
 | Grader (how we judge) | `Grader` | `tests-pass`, `cost`, `steps`, `latency` |
 | **Backend** (placement, model B) | `Backend` | `LocalBackend`, `NomadBackend` (K8s/Windows later) |
 

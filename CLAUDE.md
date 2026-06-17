@@ -29,7 +29,7 @@ Quality is non-negotiable: all five must pass before a PR.
 core ← { drivers · environments · harnesses · graders } ← runner ← agent ← backends ← apps/cli
 ```
 - `packages/core`         — contracts only (interfaces + Zod schemas + errors). Dependency ROOT. No I/O, no SDKs.
-- `packages/drivers`      — *in-sandbox compute* (`ComputeHandle`): LocalDriver (dev), E2BLinuxDriver (optional).
+- `packages/drivers`      — *in-sandbox compute* (`ComputeHandle`): LocalDriver (dev / inside the agent).
 - `packages/environments` — the world a run acts on (`RepoEnvironment`: seed + git-diff snapshot).
 - `packages/harnesses`    — the agent under test, driven over a process boundary (ClaudeCodeHarness, ScriptedHarness).
 - `packages/graders`      — scoring, fully separate from the harness (tests-pass / cost / steps / latency).

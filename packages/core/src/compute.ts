@@ -32,8 +32,8 @@ export interface ComputeHandle {
   dispose(): Promise<void>;
 }
 
-// "어디서 실행되나" — infra-agnostic.
-// 구현: E2BLinuxDriver(v1) / WindowsPoolDriver / MacPoolDriver (모두 같은 인터페이스).
+// 샌드박스 내부의 컴퓨트(in-sandbox compute). 구현: LocalDriver (개발/에이전트 내부).
+// 실제 격리/배치는 Backend(Nomad/K8s/Windows)가 담당한다 — Driver 가 아니다.
 export interface Driver {
   readonly id: string;
   provision(spec: ComputeSpec): Promise<ComputeHandle>;

@@ -16,7 +16,7 @@ const pexec = promisify(exec);
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 // 로컬 호스트(임시 디렉터리 + child_process)에서 도는 개발용 Driver.
-// 격리는 약하다(호스트 공유) — 빠른 개발/테스트용. 프로덕션 격리는 E2BLinuxDriver/Pool Driver.
+// 격리는 약하다(호스트 공유) — 개발/테스트 및 에이전트 내부용. 실제 격리는 Backend(Nomad/K8s/Windows)가 담당.
 class LocalComputeHandle implements ComputeHandle {
   constructor(private readonly root: string) {}
 

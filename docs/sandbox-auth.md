@@ -1,34 +1,35 @@
-# Harness auth across drivers
+# Harness auth across backends
 
-How `claude` (Claude Code) authenticates depends on the driver.
+How `claude` (Claude Code) authenticates depends on where the run lands.
 
-## LocalDriver (dev) — subscription, no key
-`claude` uses **this machine's existing login** (Pro/Max subscription). `runContextFromEnv()`
-injects nothing, so the sandboxed `claude -p` inherits the host login. Just:
+## LocalBackend (dev) — subscription, no key
+The run executes in-process on this host, so `claude` uses **this machine's existing login**
+(Pro/Max subscription). Nothing to inject. Just:
 ```bash
 pnpm assay run --task "..."
 ```
 
-## Sandbox drivers (E2B / future pool) — no host login present
-A fresh sandbox has **no** `claude` login. Inject a credential as an env var — Assay forwards
-`RunContext.apiKeyEnv` into the harness command env (and the driver passes it to the sandbox):
+## Sandbox backends (Nomad / K8s / Windows) — no host login present
+A dispatched job runs in a fresh isolated unit with **no** `claude` login. Inject a credential as
+an env var — Assay forwards `RunContext.apiKeyEnv` into the harness command env, and the Backend
+injects it into the job (Nomad alloc env / K8s Secret / Windows secure env):
 
 | Mode | Env var | How to get it |
 |------|---------|---------------|
 | **Subscription** (recommended) | `CLAUDE_CODE_OAUTH_TOKEN` | on the host run `claude setup-token` (requires a Claude subscription) → copy the token |
 | API billing | `ANTHROPIC_API_KEY` | Anthropic console |
 
-Put it in `assay/.env` (gitignored), then:
+Put it in `assay/.env` (gitignored), then run against a sandbox backend, e.g. Nomad:
 ```bash
-pnpm assay run --driver e2b --task "..."
+pnpm assay run --backend nomad --nomad-addr http://<nomad>:4646 \
+  --image <registry>/assay-agent:<tag> --runtime runsc --task "..."
 ```
-(`--driver e2b` also requires `E2B_API_KEY` / `E2B_DOMAIN` and `pnpm add e2b`.)
 
 ### Sandbox requirements
-- The E2B template needs **Node ≥ 18** — the harness installs `@anthropic-ai/claude-code`
-  with `npm i -g` (`install: true` is set automatically for `--driver e2b`).
+- The **agent image** (`packages/agent/Dockerfile`) bakes Node + git + `@anthropic-ai/claude-code`,
+  so the dispatched job already has the harness toolchain. Build & push it to your internal registry.
 
 ### ⚠ Security
-`CLAUDE_CODE_OAUTH_TOKEN` is your **subscription credential**; `ANTHROPIC_API_KEY` is a
-billing secret. Both are sent **into the sandbox**. Only use a **trusted / self-hosted**
-sandbox. Never commit them — `.env` is gitignored.
+`CLAUDE_CODE_OAUTH_TOKEN` is your **subscription credential**; `ANTHROPIC_API_KEY` is a billing
+secret. Both are injected **into the job** in the target cluster. Only use **trusted / self-hosted**
+backends (your own Nomad/K8s/Windows). Never commit them — `.env` is gitignored.
