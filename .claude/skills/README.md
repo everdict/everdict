@@ -8,7 +8,7 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
   otherwise "do the standard TS way" and get wrong for Assay.
 - Keep each file thin (~20 lines): inlined critical rules + a pointer to the matching skill.
 - Current rules: `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `agent`,
-  `backends`, `orchestrator`, `api-layer`, `testing`, `infra-deploy`.
+  `backends`, `orchestrator`, `trace`, `topology`, `api-layer`, `testing`, `infra-deploy`.
 
 ## PULL layer — `.claude/skills/*/`
 - Model-driven: matched via frontmatter `description`, or invoked explicitly as `/name`.
@@ -20,6 +20,7 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
 ## Skills (pull)
 - `foundation/`     — module deps, the spine (4 concerns + Backend placement), error model, conventions.
 - `backends/`       — distributed execution: Backend vs Driver, `AgentJob`, model B (Nomad/K8s/Windows).
+- `topology/`       — service-topology harnesses: HarnessSpec(service), warm-pool/shared-store/per-case efficiency, Nomad+K8s, OTel/MLflow trace.
 - `core-contracts/` — the EvaluableHarness / Environment / Driver / Grader contracts + Zod (planned).
 - `drivers/`        — implementing a Driver (in-sandbox compute; Local) (planned).
 - `harnesses/`      — implementing an EvaluableHarness + trace normalization (planned).

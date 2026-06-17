@@ -17,6 +17,7 @@ describe("runAgentJob", () => {
     };
 
     const result = await runAgentJob(job);
+    if (result.snapshot.kind !== "repo") throw new Error("repo 스냅샷이 기대됨");
 
     expect(result.harness).toBe("scripted@0.0.0");
     const pass = result.scores.find((s) => s.graderId === "tests-pass");

@@ -8,4 +8,5 @@ export * from "./harness.js";
 export * from "./grader.js";
 export * from "./eval-case.js";
 export * from "./agent-job.js";
+export * from "./harness-spec.js";
 export * from "./shell.js";

@@ -139,7 +139,7 @@ async function runCommand(flags: Map<string, string>): Promise<void> {
         harness: result.harness,
         scores: result.scores,
         trace: result.trace,
-        diff: result.snapshot.diff,
+        snapshot: result.snapshot,
       },
       null,
       2,

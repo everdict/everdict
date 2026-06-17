@@ -27,6 +27,8 @@ See `docs/execution-backends.md` (Backend vs Driver) and `docs/sandbox-auth.md` 
 - OS Win/macOS on a pool → `Backend` + per-run VM checkpoint isolation.
 - env browser/os-use → new `Environment` + snapshot variant (+ a `Computer` capability for os-use).
 - harness Codex/LangGraph → new `EvaluableHarness` (+ registry entry in `@assay/agent`).
+- **service-topology harness** (multi-service + browser/OS target env) → `HarnessSpec(service)` +
+  orchestrator-agnostic `ServiceTopologyBackend` (Nomad/K8s) + `@assay/trace` (OTel/MLflow). See `docs/service-harness.md`.
 - metric → new `Grader` (+ registry entry).
 
 ## Cross-cutting

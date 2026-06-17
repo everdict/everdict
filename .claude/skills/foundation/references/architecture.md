@@ -12,6 +12,8 @@
 | `@assay/agent` | dispatched unit (model B): runs runCase inside a job, emits result | core, runner, drivers, environments, harnesses, graders |
 | `@assay/backends` | `Backend` impls — placement (Local, Nomad; K8s/Windows later) + `Router`/`BackendRegistry` | core, agent |
 | `@assay/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | core, backends, agent |
+| `@assay/trace` | pull a harness trace from OTel/MLflow → `TraceEvent` | core |
+| `@assay/topology` | service-topology harnesses: `ServiceTopologyBackend` + Nomad/K8s builders + env manager | core, backends, graders, trace |
 | `apps/cli` | control plane PoC (`assay run`, `assay worker`) | core, agent, backends, orchestrator |
 | `@assay/registry`, `apps/api` | harness versioning + Fastify control plane | (planned) |
 
@@ -58,5 +60,9 @@ See `docs/orchestration.md`.
 Built: core → drivers(Local) → environments(Repo) → harnesses(claude-code/scripted) →
 graders(tests-pass/cost/steps/latency) → runner → agent → backends(Local/Nomad) + Router/Registry →
 orchestrator(Direct/Temporal + worker) → cli (`run`/`worker`).
-Next: `K8sBackend` → `WindowsBackend` (register into the registry) → suite/version-regression
-workflows → `registry` (harness versions), apps/api, Postgres(Drizzle)/ClickHouse, deploy (Helm/K8s), dashboard.
+Service-topology harnesses (browser-use-langgraph etc.): `@assay/trace` (OTel/MLflow → TraceEvent) +
+`@assay/topology` (HarnessSpec(service), orchestrator-agnostic `ServiceTopologyBackend`, Nomad+K8s builders,
+runId-keyed isolation) — Phase 1 built+tested; live runtimes/browser+ext provisioning = Phase 2. See
+`docs/service-harness.md`.
+Next: live TopologyRuntimes (Nomad/K8s apply) + browser+extension provisioning + real OTel/MLflow; process
+`K8sBackend`/`WindowsBackend`; suite/version-regression; `registry`, apps/api, Postgres/ClickHouse, deploy, dashboard.

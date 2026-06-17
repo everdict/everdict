@@ -144,6 +144,27 @@ importers:
         specifier: workspace:*
         version: link:../harnesses
 
+  packages/topology:
+    dependencies:
+      '@assay/backends':
+        specifier: workspace:*
+        version: link:../backends
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
+      '@assay/graders':
+        specifier: workspace:*
+        version: link:../graders
+      '@assay/trace':
+        specifier: workspace:*
+        version: link:../trace
+
+  packages/trace:
+    dependencies:
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
+
 packages:
 
   '@biomejs/biome@1.9.4':

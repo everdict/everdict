@@ -23,6 +23,8 @@ core ← { drivers · environments · harnesses · graders } ← runner ← agen
 - `agent` — the dispatched unit (model B): runs `runCase` over `LocalDriver` inside an isolated job, emits `__ASSAY_RESULT__`.
 - `backends` — placement: `Backend.dispatch(AgentJob)` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later) + `Router`/`BackendRegistry`.
 - `orchestrator` — durable control plane (Temporal): `DirectOrchestrator` / `TemporalOrchestrator` + worker.
+- `trace` — pull a harness trace from OTel/MLflow → `TraceEvent`. `topology` — service-topology harnesses
+  (multi-service + target env): orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s builders.
 - `apps/cli` — control plane PoC (`assay run`, `assay worker`). `apps/api` (Fastify) + `registry` are planned.
 
 ## The spine: 4 in-sandbox concerns + 1 placement layer

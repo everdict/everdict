@@ -17,7 +17,8 @@ export interface GradeContext {
   case: EvalCase;
   trace: TraceEvent[];
   snapshot: EnvSnapshot;
-  compute: ComputeHandle; // 결과 그레이더는 환경에서 테스트를 실행할 수 있다
+  // 결과 그레이더는 환경에서 명령을 실행할 수 있다(process 하니스). service/browser 하니스엔 compute 가 없으므로 optional.
+  compute?: ComputeHandle;
   baseline?: Scorecard; // 회귀 비교용
 }
 

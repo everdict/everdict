@@ -1,6 +1,6 @@
-import type { GradeContext, Grader, Score } from "@assay/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@assay/core";
 
-// ⓐ 과업 성공(객관적) — 환경에서 테스트 명령을 실행하고 종료코드로 판정.
+// ⓐ 과업 성공(객관적) — 환경에서 테스트 명령을 실행하고 종료코드로 판정. compute(환경) 필요.
 export class TestsPassGrader implements Grader {
   readonly id = "tests-pass";
   constructor(
@@ -9,6 +9,8 @@ export class TestsPassGrader implements Grader {
   ) {}
 
   async grade(ctx: GradeContext): Promise<Score> {
+    if (!ctx.compute)
+      throw new BadRequestError("BAD_REQUEST", undefined, "tests-pass 그레이더는 compute(환경)가 필요합니다.");
     const r = await ctx.compute.exec(this.testCmd, { cwd: this.cwd, timeoutSec: 600 });
     const pass = r.exitCode === 0;
     return {
