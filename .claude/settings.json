@@ -1,0 +1,15 @@
+{
+  "projectName": "assay",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm:*)",
+      "Bash(turbo:*)",
+      "Bash(git:*)",
+      "Bash(docker:*)",
+      "Edit(packages/**)",
+      "Edit(apps/**)",
+      "Edit(.claude/skills/**)",
+      "Edit(docs/**)"
+    ]
+  }
+}

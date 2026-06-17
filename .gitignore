@@ -1,0 +1,16 @@
+node_modules/
+dist/
+.turbo/
+coverage/
+
+# env / secrets — never commit (digo-infra 이디엄: no secret in git)
+.env
+.env.*
+!.env.example
+*.local
+*.pem
+*_credentials
+
+# editor / os
+.DS_Store
+*.log

@@ -1,0 +1,16 @@
+# digo-api(format+lint) + digo-infra(gitleaks) 이디엄 재해석.
+# 무거운 test는 pre-commit이 아니라 CI에서 (digo-api는 pre-commit test까지 돌리지만
+# 모노레포 초기엔 turbo 캐시 안정화 전까지 CI로 둔다).
+repos:
+  - repo: local
+    hooks:
+      - id: biome-check
+        name: biome check (format + lint)
+        entry: pnpm biome check --write --no-errors-on-unmatched
+        language: system
+        types: [ts]
+        require_serial: true
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
