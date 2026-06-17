@@ -31,7 +31,8 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 | `@assay/orchestrator` | durable control plane on Temporal (Direct / Temporal + worker). |
 | `@assay/trace` | pull a harness trace from OTel/MLflow → `TraceEvent`. |
 | `@assay/topology` | service-topology harnesses (multi-service + target env), Nomad/K8s. |
-| `apps/cli` | control plane: `assay run`, `assay worker`. |
+| `@assay/suite` | suites + version regression (`runSuite` / scorecard diff). |
+| `apps/cli` | control plane: `assay run`, `assay worker`, `assay suite`. |
 
 ## Two kinds of harness
 - **Process harness** (Claude Code, Codex): one binary run in a sandbox.

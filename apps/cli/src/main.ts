@@ -8,8 +8,9 @@ import {
   Router,
   buildRegistry,
 } from "@assay/backends";
-import { type AgentJob, AppError, type GraderSpec } from "@assay/core";
+import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@assay/core";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@assay/orchestrator";
+import { diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -42,6 +43,9 @@ function usage(): void {
       "",
       "assay worker [--backends-config <file>] [--temporal-address <addr>] [--task-queue <q>]",
       "  long-running control-plane worker (runs activities = backend dispatch)",
+      "",
+      "assay suite --suite <file.json> [--harness-version <v>] [--baseline <scorecard.json>] [--concurrency N]",
+      "  run a suite (cases × a version) → Scorecard + summary; --baseline diffs two versions (regression)",
     ].join("\n"),
   );
 }
@@ -109,6 +113,18 @@ function buildDirectRouter(flags: Map<string, string>): Router | undefined {
   return new Router(new BackendRegistry().register("local", new LocalBackend()), "local");
 }
 
+// orchestrator(direct/temporal) 구성. 에러를 출력했으면 undefined.
+function buildOrchestrator(flags: Map<string, string>): Orchestrator | undefined {
+  const orchestratorName = flags.get("orchestrator") ?? "direct";
+  if (orchestratorName === "temporal") {
+    // durable: 워크플로를 시작하고 결과를 기다린다. 실제 디스패치는 워커가 수행.
+    return new TemporalOrchestrator({ address: flags.get("temporal-address"), taskQueue: flags.get("task-queue") });
+  }
+  const router = buildDirectRouter(flags);
+  if (!router) return undefined;
+  return new DirectOrchestrator(router);
+}
+
 async function runCommand(flags: Map<string, string>): Promise<void> {
   const task = flags.get("task");
   if (!task) {
@@ -119,16 +135,8 @@ async function runCommand(flags: Map<string, string>): Promise<void> {
   }
   const job = buildJob(flags, task);
   const orchestratorName = flags.get("orchestrator") ?? "direct";
-
-  let orch: Orchestrator;
-  if (orchestratorName === "temporal") {
-    // durable: 워크플로를 시작하고 결과를 기다린다. 실제 디스패치는 워커가 수행.
-    orch = new TemporalOrchestrator({ address: flags.get("temporal-address"), taskQueue: flags.get("task-queue") });
-  } else {
-    const router = buildDirectRouter(flags);
-    if (!router) return; // 에러 출력됨
-    orch = new DirectOrchestrator(router);
-  }
+  const orch = buildOrchestrator(flags);
+  if (!orch) return; // 에러 출력됨
 
   console.error(`▶ ${job.harness.id} via ${orchestratorName} 오케스트레이터 …`);
   const result = await orch.run(job);
@@ -159,6 +167,32 @@ async function workerCommand(flags: Map<string, string>): Promise<void> {
   await runWorker({ address: flags.get("temporal-address"), taskQueue: flags.get("task-queue"), config });
 }
 
+async function suiteCommand(flags: Map<string, string>): Promise<void> {
+  const suitePath = flags.get("suite");
+  if (!suitePath) {
+    console.error("✗ --suite <file.json> 는 필수입니다.");
+    process.exitCode = 1;
+    return;
+  }
+  const suite = SuiteSchema.parse(JSON.parse(readFileSync(suitePath, "utf8")));
+  const version = flags.get("harness-version") ?? "latest";
+  const orch = buildOrchestrator(flags);
+  if (!orch) return;
+
+  console.error(`▶ suite '${suite.id}' (${suite.cases.length} cases) × ${suite.harness.id}@${version} …`);
+  const scorecard = await runSuite(suite, version, (job) => orch.run(job), {
+    concurrency: Number(flags.get("concurrency") ?? "4"),
+  });
+
+  const out: Record<string, unknown> = { scorecard, summary: summarizeScorecard(scorecard) };
+  const baselinePath = flags.get("baseline");
+  if (baselinePath) {
+    const baseline = ScorecardSchema.parse(JSON.parse(readFileSync(baselinePath, "utf8")));
+    out.diff = diffScorecards(baseline, scorecard);
+  }
+  console.log(JSON.stringify(out, null, 2));
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
@@ -169,6 +203,10 @@ async function main(): Promise<void> {
     }
     if (cmd === "worker") {
       await workerCommand(parseFlags(argv.slice(1)));
+      return;
+    }
+    if (cmd === "suite") {
+      await suiteCommand(parseFlags(argv.slice(1)));
       return;
     }
     usage();

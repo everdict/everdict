@@ -26,7 +26,7 @@ Quality is non-negotiable: all five must pass before a PR.
 
 ## Architecture — one-way dependency, by concern (idiom from digo-api)
 ```
-core ← { drivers · environments · harnesses · graders · trace } ← runner ← agent ← backends ← { orchestrator · topology } ← apps/cli
+core ← { drivers · environments · harnesses · graders · trace } ← runner ← agent ← backends ← { orchestrator · topology · suite } ← apps/cli
 ```
 - `packages/core`         — contracts only (interfaces + Zod schemas + errors). Dependency ROOT. No I/O, no SDKs.
 - `packages/drivers`      — *in-sandbox compute* (`ComputeHandle`): LocalDriver (dev / inside the agent).
@@ -39,6 +39,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `packages/orchestrator` — durable control plane on Temporal: `DirectOrchestrator` / `TemporalOrchestrator` + the worker (workflow=deterministic, activity=`dispatchCase`).
 - `packages/trace`        — pull a harness trace from OTel/MLflow → normalized `TraceEvent` (for service harnesses).
 - `packages/topology`     — **service-topology** harnesses (multi-service + target env): `HarnessSpec(service)`, orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s topology builders + runId-keyed env manager. See `docs/service-harness.md`.
+- `packages/suite`        — suites + **version regression**: `runSuite` / `summarizeScorecard` / `diffScorecards` (over any backend). See `docs/suites.md`.
 - `apps/cli`              — control plane PoC (`assay run [--orchestrator temporal]`, `assay worker`). `apps/api` (Fastify) + `packages/registry` are planned.
 Reverse imports are bugs. The same concern name recurs per package (vertical slices).
 

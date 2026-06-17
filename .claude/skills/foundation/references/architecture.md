@@ -14,7 +14,8 @@
 | `@assay/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | core, backends, agent |
 | `@assay/trace` | pull a harness trace from OTel/MLflow → `TraceEvent` | core |
 | `@assay/topology` | service-topology harnesses: `ServiceTopologyBackend` + Nomad/K8s builders + env manager | core, backends, graders, trace |
-| `apps/cli` | control plane PoC (`assay run`, `assay worker`) | core, agent, backends, orchestrator |
+| `@assay/suite` | suites + version regression: `runSuite` / `summarizeScorecard` / `diffScorecards` | core |
+| `apps/cli` | control plane PoC (`assay run`, `assay worker`, `assay suite`) | core, agent, backends, orchestrator, suite |
 | `@assay/registry`, `apps/api` | harness versioning + Fastify control plane | (planned) |
 
 ## The eval loop (runs inside the agent)

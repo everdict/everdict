@@ -4,6 +4,7 @@
 - [service-harness.md](service-harness.md) — service-topology harnesses (multi-service + browser/OS target env), Nomad/K8s, OTel/MLflow trace
 - [execution-backends.md](execution-backends.md) — Backend (placement) vs Driver (in-sandbox), multi-cluster routing
 - [orchestration.md](orchestration.md) — durable control plane on Temporal (Direct/Temporal orchestrators + worker)
+- [suites.md](suites.md) — suites & version regression (`assay suite`, scorecard diff)
 - [sandbox-auth.md](sandbox-auth.md) — how `claude` authenticates across backends (subscription / token injection)
 - [migration/README.md](migration/README.md) — DB migration discipline (expand→contract + preflight)
 

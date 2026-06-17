@@ -38,6 +38,9 @@ importers:
       '@assay/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator
+      '@assay/suite':
+        specifier: workspace:*
+        version: link:../../packages/suite
 
   packages/agent:
     dependencies:
@@ -143,6 +146,12 @@ importers:
       '@assay/harnesses':
         specifier: workspace:*
         version: link:../harnesses
+
+  packages/suite:
+    dependencies:
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/topology:
     dependencies:
