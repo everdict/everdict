@@ -4,7 +4,7 @@ import { RepoEnvironment } from "@assay/environments";
 import { TestsPassGrader, costGrader, latencyGrader, stepsGrader } from "@assay/graders";
 import { ClaudeCodeHarness, ScriptedHarness } from "@assay/harnesses";
 import { runCase } from "@assay/runner";
-import { runContextFromEnv } from "./config.js";
+import { hasClaudeAuth, runContextFromEnv } from "./config.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -59,17 +59,27 @@ async function main(): Promise<void> {
 
   const ctx = runContextFromEnv();
 
-  // claude CLI 는 이 머신의 구독(subscription) 로그인으로 동작한다 — LocalDriver 에선 별도 키 불필요.
-  // 로그인이 없는 샌드박스 드라이버에선 ANTHROPIC_API_KEY 가 필요할 수 있다.
-  if (harnessName === "claude-code" && driverName !== "local" && !ctx.apiKeyEnv.ANTHROPIC_API_KEY) {
-    console.error("ℹ 샌드박스 드라이버인데 ANTHROPIC_API_KEY 가 없습니다 — claude 인증이 실패할 수 있습니다.");
+  // LocalDriver 는 이 머신의 claude 구독 로그인을 그대로 쓴다(키 불필요).
+  // 샌드박스(비-local)엔 로그인이 없으므로 구독 토큰/키가 env 로 주입돼야 한다.
+  if (harnessName === "claude-code" && driverName !== "local" && !hasClaudeAuth(ctx)) {
+    console.error(
+      [
+        "✗ 샌드박스 드라이버엔 claude 인증이 없습니다. 다음 중 하나를 .env 에 설정하세요:",
+        "  • CLAUDE_CODE_OAUTH_TOKEN  (구독: 호스트에서 `claude setup-token` 실행 후 그 토큰)",
+        "  • ANTHROPIC_API_KEY        (API 과금)",
+        "  ⚠ 이 값은 샌드박스로 전달됩니다 — 신뢰되는/셀프호스팅 샌드박스에서만 쓰세요.",
+      ].join("\n"),
+    );
+    process.exitCode = 2;
+    return;
   }
 
+  const harnessVersion = flags.get("harness-version") ?? (driverName === "e2b" ? "latest" : "cli");
   const driver: Driver = driverName === "e2b" ? new E2BLinuxDriver() : new LocalDriver();
   const harness: EvaluableHarness =
     harnessName === "scripted"
       ? new ScriptedHarness("demo", () => [{ tool: "bash", cmd: "echo hello > out.txt" }])
-      : new ClaudeCodeHarness(flags.get("harness-version") ?? "cli", { install: driverName === "e2b" });
+      : new ClaudeCodeHarness(harnessVersion, { install: driverName === "e2b" });
 
   const graders: Grader[] = [stepsGrader, costGrader, latencyGrader];
   if (testCmd) graders.push(new TestsPassGrader(testCmd));
