@@ -10,6 +10,12 @@ export {
 } from "./scheduler.js";
 export { FairQueue, type FairQueueOptions } from "./fair-queue.js";
 export {
+  type TrustZonePolicy,
+  perTenantTrustZones,
+  staticTrustZones,
+  type PerTenantTrustZoneOptions,
+} from "./trust-zone.js";
+export {
   NomadBackend,
   buildNomadJob,
   nomadJobId,

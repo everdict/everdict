@@ -1,7 +1,8 @@
 import { RESULT_SENTINEL } from "@assay/agent";
-import type { AgentJob, CaseResult } from "@assay/core";
+import { type AgentJob, BadRequestError, type CaseResult } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import { NomadBackend, type NomadHttp, buildNomadJob } from "./nomad.js";
+import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
 const JOB: AgentJob = {
   harness: { id: "claude-code", version: "latest" },
@@ -64,5 +65,50 @@ describe("NomadBackend.dispatch", () => {
     expect(calls.some((c) => c === "POST /v1/jobs")).toBe(true);
     expect(calls.some((c) => c.includes("/allocations"))).toBe(true);
     expect(calls.some((c) => c.includes("/logs/alloc1"))).toBe(true);
+  });
+
+  it("trustZones: 테넌트 존을 잡마다 적용한다 (네임스페이스 + 강격리 런타임)", async () => {
+    let posted: {
+      Job?: { Namespace?: string; TaskGroups?: Array<{ Tasks: Array<{ Config: { runtime?: string } }> }> };
+    } = {};
+    const http: NomadHttp = {
+      async request(method, path, body) {
+        if (method === "POST" && path.startsWith("/v1/jobs")) {
+          posted = body as typeof posted;
+          return { status: 200, text: "{}" };
+        }
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "a1", ClientStatus: "complete" }]) };
+        if (path.includes("/logs/")) return { status: 200, text: `${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      pollIntervalMs: 1,
+      trustZones: perTenantTrustZones(),
+    });
+
+    await backend.dispatch({ ...JOB, tenant: "acme" });
+
+    expect(posted.Job?.Namespace).toBe("assay-acme");
+    expect(posted.Job?.TaskGroups?.[0]?.Tasks[0]?.Config.runtime).toBe("runsc");
+  });
+
+  it("trustZones: untrusted 테넌트에 runc 를 강제하면 디스패치를 거부한다", async () => {
+    const http: NomadHttp = {
+      async request() {
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      trustZones: staticTrustZones({}, { id: "weak", isolationRuntime: "runc", network: "open", trusted: false }),
+    });
+    await expect(backend.dispatch({ ...JOB, tenant: "x" })).rejects.toBeInstanceOf(BadRequestError);
   });
 });

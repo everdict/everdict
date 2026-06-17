@@ -1,4 +1,4 @@
-import type { Backend, BackendCapacity } from "@assay/backends";
+import type { Backend, BackendCapacity, TrustZonePolicy } from "@assay/backends";
 import {
   type AgentJob,
   type CaseResult,
@@ -6,6 +6,8 @@ import {
   InternalError,
   type Score,
   type ServiceHarnessSpec,
+  type TrustZone,
+  assertHardenedIsolation,
 } from "@assay/core";
 import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@assay/graders";
 import type { TraceSource } from "@assay/trace";
@@ -35,6 +37,7 @@ export interface ServiceTopologyBackendOptions {
   submit?: SubmitFn;
   newRunId?: () => string;
   maxConcurrent?: number; // 동시 per-case 브라우저 상한(용량 인지 배치용)
+  trustZones?: TrustZonePolicy; // 테넌트별 격리 — warm 풀을 존별로 분리(공유 금지)
 }
 
 // 오케스트레이터-비종속 서비스 토폴로지 백엔드 (Backend 구현).
@@ -55,8 +58,15 @@ export class ServiceTopologyBackend implements Backend {
     const runId = (this.opts.newRunId ?? newRunId)();
     const keys = keysFor(runId);
 
-    const topo = await this.opts.runtime.ensureTopology(spec);
-    const browser = await this.opts.runtime.provisionBrowserEnv(spec, runId);
+    // 테넌트 존 해석 — untrusted 는 강격리 강제, warm 풀은 존별로 분리된다.
+    let zone: TrustZone | undefined;
+    if (this.opts.trustZones) {
+      zone = this.opts.trustZones.resolve(job.tenant ?? "default");
+      assertHardenedIsolation(zone);
+    }
+
+    const topo = await this.opts.runtime.ensureTopology(spec, zone);
+    const browser = await this.opts.runtime.provisionBrowserEnv(spec, runId, zone);
     try {
       const base = topo.endpoints[spec.frontDoor.service];
       if (!base) {

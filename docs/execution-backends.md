@@ -89,8 +89,28 @@ Live proof:
 - `scripts/live/fair-scheduler-nomad.mjs` — tenant A submits 4, tenant B submits 1, `cap=1`; WFQ serves
   B at position 2 (FIFO would serve it last), proving no-starvation across tenants on real Nomad.
 
-Next slices: tenant trust-zone isolation of warm pools (eval runs untrusted harness code), autoscaling
-driven by queue depth, async API + result store — see the SaaS design discussion.
+## Tenant isolation (trust zones)
+Eval runs **untrusted code** — a tenant uploads its own harness image/code, which executes arbitrarily.
+So multi-tenancy is a *security* boundary, not just fairness. A `TrustZone` (`@assay/core`) maps a tenant
+to enforced isolation: `{isolationRuntime, namespace, network, trusted}`. A `TrustZonePolicy`
+(`@assay/backends`) resolves `tenant → TrustZone`; `perTenantTrustZones()` is the safe default — **every
+tenant gets its own zone** (hardened `runsc`, dedicated `assay-<tenant>` namespace, `deny-cross-tenant`,
+`trusted:false`); `overrides`/`staticTrustZones` relax only declared first-party (`trusted`) tenants.
+
+- **enforcement** — `assertHardenedIsolation(zone)` rejects an untrusted tenant on a shared-kernel runtime
+  (`runc`/none); only `trusted` (first-party) zones may relax. `NomadBackend`/`ServiceTopologyBackend`
+  apply this per dispatch, setting the docker `runtime` + Nomad `Namespace` from the resolved zone.
+- **warm pools are NOT shared across tenants** — the single most important rule for service-topology
+  harnesses. `NomadTopologyRuntime` keys its warm pool by `(spec.id, version, zone.id)` and suffixes the
+  topology job ID with the zone, so two tenants on the same harness version get **separate** warm
+  deployments (a shared LangGraph/agent process would leak state/secrets across tenants).
+
+Live proof: `scripts/live/tenant-isolation-nomad.mjs` — the same `spec@version` for tenants `alpha` and
+`beta` yields two distinct warm jobs (`assay-harness-…-alpha`, `…-beta`) on different endpoints, not a
+shared pool. (gVisor `runsc` + Nomad namespaces are enforced in code + unit-tested; the dev cluster ships
+only `runc`/no namespaces, so that live demo uses `trusted` zones — a real deployment needs runsc/namespaces.)
+
+Next slices: autoscaling driven by queue depth, per-tenant secret scoping + budgets, async API + result store.
 
 ## Nomad (phase 1)
 ```bash

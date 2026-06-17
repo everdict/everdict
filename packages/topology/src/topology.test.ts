@@ -1,9 +1,17 @@
-import type { AgentJob, BrowserSnapshot, ServiceHarnessSpec, TraceEvent } from "@assay/core";
+import { perTenantTrustZones } from "@assay/backends";
+import type { AgentJob, BrowserSnapshot, ServiceHarnessSpec, TraceEvent, TrustZone } from "@assay/core";
 import type { TraceSource } from "@assay/trace";
 import { describe, expect, it } from "vitest";
 import { keysFor } from "./environment-manager.js";
 import { buildK8sManifests } from "./k8s-topology.js";
-import { type AllocLike, browserJobId, buildBrowserJob, buildNomadTopologyJob, resolvePort } from "./nomad-topology.js";
+import {
+  type AllocLike,
+  browserJobId,
+  buildBrowserJob,
+  buildNomadTopologyJob,
+  resolvePort,
+  topologyJobId,
+} from "./nomad-topology.js";
 import { ServiceTopologyBackend, type SubmitFn } from "./service-backend.js";
 import type { BrowserEnvHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -73,6 +81,14 @@ describe("buildBrowserJob", () => {
     // headless-shell 은 CDP 를 스스로 9222 로 노출 → 포트 덮어쓰기 금지, allow-origins 만 추가.
     expect(task?.Config.args).toEqual(["--remote-allow-origins=*"]);
     expect(task?.Env.ASSAY_RUN_ID).toBe("abc");
+  });
+});
+
+describe("topologyJobId (trust-zone keying)", () => {
+  it("zoneId 가 있으면 warm 잡 ID 에 섞어 테넌트 간 공유를 막는다", () => {
+    expect(topologyJobId(SPEC)).toBe("assay-harness-browser-use-langgraph-1.0.0");
+    expect(topologyJobId(SPEC, "acme")).toBe("assay-harness-browser-use-langgraph-1.0.0-acme");
+    expect(topologyJobId(SPEC, "a")).not.toBe(topologyJobId(SPEC, "b"));
   });
 });
 
@@ -181,5 +197,50 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.thread_id).toBe(keysFor("fixed").threadId);
     expect(recorded[0]?.browser_cdp_url).toBe("ws://browser/ctx");
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
+  });
+
+  it("멀티테넌트: 테넌트마다 다른 trust-zone 으로 warm 토폴로지를 분리한다(공유 금지)", async () => {
+    const zonesSeen: Array<TrustZone | undefined> = [];
+    const browser: BrowserEnvHandle = {
+      cdpUrl: "ws://b",
+      async snapshot() {
+        return { kind: "browser", url: "about:blank", dom: "", console: [] };
+      },
+      async dispose() {},
+    };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology(_spec, zone) {
+        zonesSeen.push(zone);
+        return { endpoints: { "agent-server": "http://agent:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return browser;
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+      submit: async () => {},
+      newRunId: () => "r",
+      trustZones: perTenantTrustZones(),
+    });
+    const mk = (tenant: string): AgentJob => ({
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      tenant,
+      evalCase: { id: `c-${tenant}`, env: { kind: "browser" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    });
+
+    await backend.dispatch(mk("alpha"));
+    await backend.dispatch(mk("beta"));
+
+    expect(zonesSeen.map((z) => z?.id)).toEqual(["alpha", "beta"]);
+    expect(zonesSeen.map((z) => z?.namespace)).toEqual(["assay-alpha", "assay-beta"]); // 존별 분리
+    expect(zonesSeen.every((z) => z?.isolationRuntime === "runsc")).toBe(true); // 강격리 강제
   });
 });

@@ -1,4 +1,4 @@
-import { type BrowserSnapshot, type ServiceHarnessSpec, UpstreamError } from "@assay/core";
+import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, UpstreamError } from "@assay/core";
 import {
   type AllocLike,
   browserJobId,
@@ -52,24 +52,27 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     this.http = opts.http ?? fetchNomadHttp(opts.addr);
   }
 
-  async ensureTopology(spec: ServiceHarnessSpec): Promise<TopologyHandle> {
-    const key = `${spec.id}@${spec.version}`;
+  async ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle> {
+    // warm 풀을 테넌트(존)별로 분리 — 임의 코드 실행을 같은 프로세스에서 공유하지 않게.
+    const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const cached = this.warm.get(key);
-    if (cached) return cached; // warm: 버전당 한 번만 배포
+    if (cached) return cached; // warm: (버전,존)당 한 번만 배포
 
     const job = buildNomadTopologyJob(spec, {
       datacenters: this.opts.datacenters,
-      runtime: this.opts.runtime,
-      namespace: this.opts.namespace,
+      runtime: zone?.isolationRuntime ?? this.opts.runtime,
+      namespace: zone?.namespace ?? this.opts.namespace,
       storeEnv: this.opts.storeEnv,
+      zoneId: zone?.id,
     });
-    await this.register(job);
+    const ns = zone?.namespace ?? this.opts.namespace;
+    await this.register(job, ns);
 
-    const jobId = topologyJobId(spec);
+    const jobId = topologyJobId(spec, zone?.id);
     const endpoints: Record<string, string> = {};
     for (const svc of spec.services) {
       if (svc.port === undefined) continue; // 포트 없는 서비스는 발견 대상 아님
-      const alloc = await this.waitForGroupRunning(jobId, svc.name);
+      const alloc = await this.waitForGroupRunning(jobId, svc.name, ns);
       const p = resolvePort(alloc, "http");
       if (!p) {
         throw new UpstreamError("UPSTREAM_ERROR", { service: svc.name }, "서비스 포트를 alloc 에서 찾지 못했습니다.");
@@ -84,25 +87,26 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     return handle;
   }
 
-  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string): Promise<BrowserEnvHandle> {
+  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<BrowserEnvHandle> {
+    const ns = zone?.namespace ?? this.opts.namespace;
     const job = buildBrowserJob(spec, runId, {
       datacenters: this.opts.datacenters,
-      runtime: this.opts.runtime,
-      namespace: this.opts.namespace,
+      runtime: zone?.isolationRuntime ?? this.opts.runtime,
+      namespace: ns,
       image: this.opts.browserImage,
     });
-    await this.register(job);
+    await this.register(job, ns);
     // register 이후 어디서든 실패하면 alloc 이 새므로(핸들 미반환 → dispose 불가) 즉시 정리한다.
     try {
-      return await this.connectBrowser(runId);
+      return await this.connectBrowser(runId, ns);
     } catch (err) {
-      await this.deregister(browserJobId(runId));
+      await this.deregister(browserJobId(runId), ns);
       throw err;
     }
   }
 
-  private async connectBrowser(runId: string): Promise<BrowserEnvHandle> {
-    const alloc = await this.waitForGroupRunning(browserJobId(runId), "browser");
+  private async connectBrowser(runId: string, ns?: string): Promise<BrowserEnvHandle> {
+    const alloc = await this.waitForGroupRunning(browserJobId(runId), "browser", ns);
     const p = resolvePort(alloc, "cdp");
     if (!p) {
       throw new UpstreamError("UPSTREAM_ERROR", { runId }, "브라우저 CDP 포트를 alloc 에서 찾지 못했습니다.");
@@ -124,7 +128,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       // 탭 생성 실패는 치명적 아님 — 스냅샷은 빈 타깃 목록을 그대로 관측.
     }
 
-    const deregister = () => this.deregister(browserJobId(runId));
+    const deregister = () => this.deregister(browserJobId(runId), ns);
     return {
       cdpUrl,
       async snapshot(): Promise<BrowserSnapshot> {
@@ -149,29 +153,33 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     };
   }
 
-  // warm 토폴로지 정리 (라이브 실행 후 teardown 용).
-  async teardown(spec: ServiceHarnessSpec): Promise<void> {
-    this.warm.delete(`${spec.id}@${spec.version}`);
-    await this.deregister(topologyJobId(spec));
+  // warm 토폴로지 정리 (라이브 실행 후 teardown 용). 존을 주면 그 존의 warm 만 정리한다.
+  async teardown(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<void> {
+    this.warm.delete(`${spec.id}@${spec.version}@${zone?.id ?? "default"}`);
+    await this.deregister(topologyJobId(spec, zone?.id), zone?.namespace ?? this.opts.namespace);
   }
 
-  private async register(job: { Job: { ID: string } }): Promise<void> {
-    const res = await this.http.request("POST", "/v1/jobs", job);
+  private nsq(namespace: string | undefined, sep: "?" | "&"): string {
+    return namespace ? `${sep}namespace=${encodeURIComponent(namespace)}` : "";
+  }
+
+  private async register(job: { Job: { ID: string } }, namespace?: string): Promise<void> {
+    const res = await this.http.request("POST", `/v1/jobs${this.nsq(namespace, "?")}`, job);
     if (res.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: res.status, job: job.Job.ID }, "Nomad 잡 제출 실패");
     }
   }
 
-  private async deregister(jobId: string): Promise<void> {
-    await this.http.request("DELETE", `/v1/job/${jobId}?purge=true`);
+  private async deregister(jobId: string, namespace?: string): Promise<void> {
+    await this.http.request("DELETE", `/v1/job/${jobId}?purge=true${this.nsq(namespace, "&")}`);
   }
 
   // 그룹의 alloc 이 running 이 될 때까지 폴링하고, 전체 alloc(포트 포함)을 돌려준다.
-  private async waitForGroupRunning(jobId: string, group: string): Promise<AllocLike> {
+  private async waitForGroupRunning(jobId: string, group: string, namespace?: string): Promise<AllocLike> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 150;
     for (let i = 0; i < maxPolls; i++) {
-      const res = await this.http.request("GET", `/v1/job/${jobId}/allocations`);
+      const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${this.nsq(namespace, "?")}`);
       if (res.status < 300) {
         const allocs = JSON.parse(res.text) as AllocLike[];
         const mine = allocs.filter((a) => a.TaskGroup === group);
@@ -181,7 +189,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         }
         const running = mine.find((a) => a.ClientStatus === "running");
         if (running?.ID) {
-          const full = await this.http.request("GET", `/v1/allocation/${running.ID}`);
+          const full = await this.http.request("GET", `/v1/allocation/${running.ID}${this.nsq(namespace, "?")}`);
           if (full.status < 300) return JSON.parse(full.text) as AllocLike;
         }
       }

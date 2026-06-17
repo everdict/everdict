@@ -1,6 +1,7 @@
 import { RESULT_SENTINEL } from "@assay/agent";
-import { type AgentJob, type CaseResult, CaseResultSchema, UpstreamError } from "@assay/core";
+import { type AgentJob, type CaseResult, CaseResultSchema, UpstreamError, assertHardenedIsolation } from "@assay/core";
 import type { Backend, BackendCapacity } from "./backend.js";
+import type { TrustZonePolicy } from "./trust-zone.js";
 
 // --- Nomad HTTP 추상화 (테스트에서 모킹 가능) ---
 export interface NomadHttp {
@@ -27,7 +28,9 @@ export interface NomadBackendOptions {
   http?: NomadHttp;
   secretEnv?: Record<string, string>; // alloc 에 주입할 인증(예: CLAUDE_CODE_OAUTH_TOKEN)
   datacenters?: string[];
-  runtime?: string; // docker 격리 런타임 (예: "runsc" = gVisor)
+  runtime?: string; // docker 격리 런타임 (예: "runsc" = gVisor). trustZones 가 있으면 그쪽이 우선.
+  namespace?: string; // 기본 네임스페이스(테넌트 존이 없을 때)
+  trustZones?: TrustZonePolicy; // 테넌트별 격리 정책 — 런타임/네임스페이스를 잡마다 강제한다.
   cpuMhz?: number;
   memMb?: number;
   pollIntervalMs?: number;
@@ -47,6 +50,7 @@ export interface NomadJobSpec {
   Job: {
     ID: string;
     Type: string;
+    Namespace?: string;
     Datacenters: string[];
     TaskGroups: Array<{
       Name: string;
@@ -71,6 +75,7 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJo
     Job: {
       ID: nomadJobId(job),
       Type: "batch",
+      Namespace: opts.namespace,
       Datacenters: opts.datacenters ?? ["dc1"],
       TaskGroups: [
         {
@@ -109,12 +114,12 @@ export class NomadBackend implements Backend {
     this.http = opts.http ?? fetchHttp(opts.addr);
   }
 
-  // 용량: total=설정 상한, used=클러스터에서 관측된 진행중 assay 잡 수(라이브 프로브).
+  // 용량: total=설정 상한, used=클러스터에서 관측된 진행중 assay 잡 수(라이브 프로브, 전 네임스페이스).
   // 프로브가 실패하면 used=0 으로 두고 스케줄러의 in-flight 로만 게이팅한다.
   async capacity(): Promise<BackendCapacity> {
     const total = this.opts.maxConcurrent ?? 20;
     try {
-      const res = await this.http.request("GET", "/v1/jobs?prefix=assay-");
+      const res = await this.http.request("GET", "/v1/jobs?prefix=assay-&namespace=*");
       if (res.status < 300) {
         const jobs = JSON.parse(res.text) as Array<{ Status?: string }>;
         const used = jobs.filter((j) => j.Status === "running" || j.Status === "pending").length;
@@ -126,22 +131,37 @@ export class NomadBackend implements Backend {
     return { total, used: 0 };
   }
 
+  // 테넌트 존을 잡마다 적용·강제: untrusted 테넌트는 강격리 런타임 필수, 전용 네임스페이스로 격리.
+  private effectiveOpts(job: AgentJob): NomadBackendOptions {
+    const zone = this.opts.trustZones?.resolve(job.tenant ?? "default");
+    if (!zone) return this.opts;
+    assertHardenedIsolation(zone);
+    return { ...this.opts, runtime: zone.isolationRuntime, namespace: zone.namespace ?? this.opts.namespace };
+  }
+
   async dispatch(job: AgentJob): Promise<CaseResult> {
-    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, this.opts));
+    const opts = this.effectiveOpts(job);
+    const ns = opts.namespace;
+    const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts));
     if (submit.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad 잡 제출 실패");
     }
-    const allocId = await this.waitForAlloc(nomadJobId(job));
-    const logs = await this.http.request("GET", `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true`);
+    const allocId = await this.waitForAlloc(nomadJobId(job), ns);
+    const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
+    const logs = await this.http.request(
+      "GET",
+      `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
+    );
     if (logs.status >= 300) throw new UpstreamError("UPSTREAM_ERROR", { status: logs.status }, "alloc 로그 조회 실패");
     return parseResult(logs.text);
   }
 
-  private async waitForAlloc(jobId: string): Promise<string> {
+  private async waitForAlloc(jobId: string, namespace?: string): Promise<string> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 900;
+    const nsq = namespace ? `?namespace=${encodeURIComponent(namespace)}` : "";
     for (let i = 0; i < maxPolls; i++) {
-      const res = await this.http.request("GET", `/v1/job/${jobId}/allocations`);
+      const res = await this.http.request("GET", `/v1/job/${jobId}/allocations${nsq}`);
       if (res.status < 300) {
         const allocs = JSON.parse(res.text) as Array<{ ID: string; ClientStatus: string }>;
         const alloc = allocs[0];

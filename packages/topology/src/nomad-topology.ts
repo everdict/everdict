@@ -38,16 +38,18 @@ export interface NomadTopologyOptions {
   runtime?: string; // 격리 런타임 (예: "runsc")
   namespace?: string;
   storeEnv?: Record<string, string>; // 공유 스토어 엔드포인트 등
+  zoneId?: string; // trust-zone(테넌트) 식별자 — warm 잡 ID 에 섞어 테넌트 간 공유를 막는다
 }
 
-export function topologyJobId(spec: ServiceHarnessSpec): string {
-  return `assay-harness-${spec.id}-${spec.version}`;
+export function topologyJobId(spec: ServiceHarnessSpec, zoneId?: string): string {
+  const base = `assay-harness-${spec.id}-${spec.version}`;
+  return zoneId ? `${base}-${zoneId}` : base;
 }
 
 export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopologyOptions = {}): NomadTopologyJobSpec {
   return {
     Job: {
-      ID: topologyJobId(spec),
+      ID: topologyJobId(spec, opts.zoneId),
       Type: "service",
       Namespace: opts.namespace,
       Datacenters: opts.datacenters ?? ["dc1"],

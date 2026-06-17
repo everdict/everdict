@@ -19,3 +19,8 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
   the `assay worker` uses it). Both satisfy `Dispatcher` — depend on that, not the class. `PlacementPolicy`
   must be pure/deterministic. Backpressure = `RateLimitError` (429), never a silent drop. A multi-tenant
   scheduler must never let one tenant starve another — fairness is enforced, not best-effort.
+- Tenant isolation: eval = untrusted code. A backend with a `TrustZonePolicy` resolves `tenant → TrustZone`
+  and applies it per dispatch — set the docker `runtime`/`Namespace` from the zone and call
+  `assertHardenedIsolation` (untrusted tenants MUST get runsc/kata, never shared-kernel runc). Default to
+  `perTenantTrustZones()` (each tenant its own zone). **Never share a warm pool across tenants** — key it by
+  `(spec, version, zone.id)`. Only relax for explicitly `trusted` first-party tenants.
