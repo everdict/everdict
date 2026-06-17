@@ -35,4 +35,4 @@ A run = provision(Driver) → seed(Environment) → install+run(Harness)→trace
 ## Critical rules (also pushed via .claude/rules)
 - No `any` / no `!` / no silent nullable defaults; Zod-validate boundaries.
 - Interfaces live in `core` (deliberate inversion of digo-api's no-interface rule — Assay is a plugin runtime).
-- Harness model calls go through the LLM proxy for harness-agnostic cost capture.
+- Cost is read from the harness trace (Claude reports `total_cost_usd`); LocalDriver uses the machine's `claude` login (no API key).

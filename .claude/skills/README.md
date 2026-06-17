@@ -19,7 +19,7 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
 - `foundation/`     — module deps, contracts, error model, conventions, workflow.
 - `core-contracts/` — the EvaluableHarness / Environment / Driver / Grader contracts + Zod.
 - `drivers/`        — implementing a Driver (E2B v1; pool drivers later).
-- `harnesses/`      — implementing an EvaluableHarness + trace normalization + LLM proxy.
+- `harnesses/`      — implementing an EvaluableHarness + trace normalization (native output -> TraceEvent).
 - `graders/`        — implementing a Grader; the metric families.
 - `api-layer/`      — Fastify route/schema/service split, envelope, pagination.
 - `testing/`        — Vitest, scenario E2E, regression-on-fix.

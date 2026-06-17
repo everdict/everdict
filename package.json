@@ -10,7 +10,8 @@
     "lint": "biome check .",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "build": "turbo run build"
+    "build": "turbo run build",
+    "assay": "node --env-file-if-exists=.env apps/cli/dist/main.js"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

@@ -23,5 +23,5 @@ activity; suites fan out over cases × harness versions; regression = diff two s
 - metric → new `Grader`.
 
 ## Cross-cutting
-- Cost/token capture is harness-agnostic via the LLM proxy (`ANTHROPIC_BASE_URL` → LiteLLM).
+- Cost/token capture comes from the harness trace (e.g. Claude's `total_cost_usd` in stream-json).
 - External failures are remapped to `AppError` (never propagated raw).

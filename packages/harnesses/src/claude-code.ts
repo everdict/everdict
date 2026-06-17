@@ -7,7 +7,7 @@ export interface ClaudeCodeOptions {
 }
 
 // 실제 Claude Code 어댑터. compute(샌드박스) 안에서 `claude -p ... --output-format stream-json`을
-// 구동하고 출력을 정규화 TraceEvent로 변환한다. 모델 호출은 LLM 프록시로 라우팅(비용 균일 수집).
+// 구동하고 출력을 정규화 TraceEvent로 변환한다. claude 는 머신의 구독 로그인을 사용한다.
 export class ClaudeCodeHarness implements EvaluableHarness {
   readonly id = "claude-code";
   constructor(
@@ -22,7 +22,8 @@ export class ClaudeCodeHarness implements EvaluableHarness {
   }
 
   async *run(compute: ComputeHandle, task: string, ctx: RunContext): AsyncIterable<TraceEvent> {
-    const env = { ...ctx.apiKeyEnv, ANTHROPIC_BASE_URL: ctx.llmProxyBaseUrl };
+    // claude CLI 는 머신의 구독 로그인으로 동작 — apiKeyEnv 는 보통 비어있다(샌드박스에서만 키 주입).
+    const env: Record<string, string> = { ...ctx.apiKeyEnv };
     const cwd = this.opts.workDir ?? "work";
     const cmd = `claude -p ${shq(task)} --output-format stream-json --verbose --dangerously-skip-permissions`;
     const res = await compute.exec(cmd, { cwd, env, timeoutSec: ctx.timeoutSec });

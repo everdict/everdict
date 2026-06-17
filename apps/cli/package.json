@@ -1,0 +1,20 @@
+{
+  "name": "@assay/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "assay": "./dist/main.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@assay/core": "workspace:*",
+    "@assay/drivers": "workspace:*",
+    "@assay/environments": "workspace:*",
+    "@assay/graders": "workspace:*",
+    "@assay/harnesses": "workspace:*",
+    "@assay/runner": "workspace:*"
+  }
+}

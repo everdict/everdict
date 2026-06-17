@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// 비용/토큰 — LLM 프록시(LiteLLM)에서 하니스 무관하게 균일 수집
+// 비용/토큰 — 하니스가 자기 트레이스에 보고하는 값(예: Claude 의 total_cost_usd).
 export const CostSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),

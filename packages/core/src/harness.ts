@@ -2,8 +2,7 @@ import type { ComputeHandle } from "./compute.js";
 import type { TraceEvent } from "./trace.js";
 
 export interface RunContext {
-  // 하니스의 모델 호출을 이 프록시(LiteLLM)로 라우팅 → 비용/토큰 균일 수집
-  llmProxyBaseUrl: string;
+  // 보통 비어있음 — claude CLI 는 머신의 구독 로그인으로 동작. 로그인 없는 샌드박스에서만 키 주입.
   apiKeyEnv: Record<string, string>;
   timeoutSec: number;
 }

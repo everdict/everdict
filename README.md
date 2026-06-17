@@ -21,7 +21,7 @@ and `.claude/skills/foundation/`.
 
 ## Stack
 TypeScript (Node 22) · pnpm + Turborepo · Fastify · Zod · Temporal · E2B (Linux v1) ·
-LiteLLM proxy · Drizzle + Postgres · ClickHouse · Biome · Vitest · Docker/K8s/Helm.
+Drizzle + Postgres · ClickHouse · Biome · Vitest · Docker/K8s/Helm.
 
 ## Develop
 ```bash

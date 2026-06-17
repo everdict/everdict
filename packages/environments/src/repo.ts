@@ -18,6 +18,8 @@ export class RepoEnvironment implements Environment<RepoSnapshot> {
     if (spec.kind !== "repo") throw new BadRequestError("BAD_REQUEST", { kind: spec.kind });
     const src = spec.source;
     if ("files" in src) {
+      // 빈 files({})여도 work 디렉터리는 있어야 한다(코딩 에이전트의 작업 디렉터리).
+      await compute.exec(`mkdir -p ${WORK}`);
       for (const [path, content] of Object.entries(src.files)) {
         await compute.writeFile(`${WORK}/${path}`, content);
       }

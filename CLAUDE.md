@@ -47,7 +47,7 @@ everywhere else (null discipline, error model, naming, layering) we follow it.
 - No `any`, no non-null `!`, no silent nullable defaults; validate every boundary with Zod.
 - Errors: throw an `AppError` subclass (`@assay/core`); HTTP status derives from the subtype.
 - External/SDK failures are remapped to our `AppError` (never propagated raw) so monitoring blames us, not the user. (digo idiom)
-- Harness model calls route through the LLM proxy (`ANTHROPIC_BASE_URL` → LiteLLM) so cost/tokens are captured harness-agnostically.
+- Cost/tokens come from the harness's own trace (e.g. Claude reports `total_cost_usd`); for LocalDriver the harness uses the machine's existing login (no API key).
 - `ComputeHandle` is always released in a `finally`.
 
 ## Key principles
