@@ -20,7 +20,7 @@ describe("runCase — 실제 하니스 실행 → 트레이스 → 채점 (전�
         },
       },
       task: "value.txt 의 값을 42 로 고쳐줘",
-      graders: ["tests-pass", "steps", "cost"],
+      graders: [{ id: "tests-pass", config: { cmd: "sh check.sh" } }, { id: "steps" }, { id: "cost" }],
       timeoutSec: 120,
       tags: [],
     };

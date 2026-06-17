@@ -26,24 +26,45 @@ importers:
 
   apps/cli:
     dependencies:
+      '@assay/agent':
+        specifier: workspace:*
+        version: link:../../packages/agent
+      '@assay/backends':
+        specifier: workspace:*
+        version: link:../../packages/backends
       '@assay/core':
         specifier: workspace:*
         version: link:../../packages/core
+
+  packages/agent:
+    dependencies:
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
       '@assay/drivers':
         specifier: workspace:*
-        version: link:../../packages/drivers
+        version: link:../drivers
       '@assay/environments':
         specifier: workspace:*
-        version: link:../../packages/environments
+        version: link:../environments
       '@assay/graders':
         specifier: workspace:*
-        version: link:../../packages/graders
+        version: link:../graders
       '@assay/harnesses':
         specifier: workspace:*
-        version: link:../../packages/harnesses
+        version: link:../harnesses
       '@assay/runner':
         specifier: workspace:*
-        version: link:../../packages/runner
+        version: link:../runner
+
+  packages/backends:
+    dependencies:
+      '@assay/agent':
+        specifier: workspace:*
+        version: link:../agent
+      '@assay/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/core:
     dependencies:
