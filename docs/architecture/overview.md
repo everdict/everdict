@@ -3,25 +3,33 @@
 Detailed conventions live in `.claude/skills/` (single source of truth). This file is the
 human-facing map.
 
-## The 4-way separation
-| Concern | Interface (`@assay/core`) | v1 impl |
+## The spine: 4 in-sandbox concerns + a placement layer
+| Concern | Interface (`@assay/core`) | impl |
 |---|---|---|
-| Harness (under test) | `EvaluableHarness` | `claude-code` |
+| Harness (under test) | `EvaluableHarness` | `claude-code`, `scripted` |
 | Environment (world acted on) | `Environment<EnvSnapshot>` | `RepoEnvironment` |
-| Driver (where it runs) | `Driver` / `ComputeHandle` | `E2BLinuxDriver` |
+| Driver (in-sandbox compute) | `Driver` / `ComputeHandle` | `LocalDriver` (dev), `E2BLinuxDriver` (optional) |
 | Grader (how we judge) | `Grader` | `tests-pass`, `cost`, `steps`, `latency` |
+| **Backend** (placement, model B) | `Backend` | `LocalBackend`, `NomadBackend` (K8s/Windows later) |
 
-## The eval loop
+## The eval loop (runs inside the dispatched agent)
 provision(Driver) → seed(Environment) → install+run(Harness)→normalized trace →
-snapshot(Environment) → grade(Grader[]) → Scorecard. Each case run is a durable Temporal
-activity; suites fan out over cases × harness versions; regression = diff two scorecards.
+snapshot(Environment) → grade(Grader[]) → `CaseResult`.
+
+The **Backend** dispatches the runner-agent (`@assay/agent`) — which runs the loop above via
+`LocalDriver` inside an isolated job — and parses the returned result. Isolation is the
+orchestrator's (Nomad task `runtime` / K8s `runtimeClassName` / Windows VM). Suites fan out over
+cases × harness versions; regression = diff two scorecards.
+See `docs/execution-backends.md` (Backend vs Driver) and `docs/sandbox-auth.md` (claude auth).
 
 ## Extension (no core rewrite)
-- OS Win/macOS → new `Driver` (physical pool + runner-agent + VM checkpoint).
+- new compute target (Nomad/K8s/Windows) → new `Backend` (agent + loop unchanged).
+- OS Win/macOS on a pool → `Backend` + per-run VM checkpoint isolation.
 - env browser/os-use → new `Environment` + snapshot variant (+ a `Computer` capability for os-use).
-- harness Codex/LangGraph → new `EvaluableHarness`.
-- metric → new `Grader`.
+- harness Codex/LangGraph → new `EvaluableHarness` (+ registry entry in `@assay/agent`).
+- metric → new `Grader` (+ registry entry).
 
 ## Cross-cutting
 - Cost/token capture comes from the harness trace (e.g. Claude's `total_cost_usd` in stream-json).
-- External failures are remapped to `AppError` (never propagated raw).
+- External/orchestrator failures are remapped to `AppError` (never propagated raw).
+- Durable dispatch+await (Temporal) + multi-backend routing are the next cross-cutting steps.

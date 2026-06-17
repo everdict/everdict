@@ -26,20 +26,28 @@ Quality is non-negotiable: all five must pass before a PR.
 
 ## Architecture — one-way dependency, by concern (idiom from digo-api)
 ```
-core  ←  drivers | harnesses | graders  ←  runner  ←  apps/api
+core ← { drivers · environments · harnesses · graders } ← runner ← agent ← backends ← apps/cli
 ```
-- `packages/core`     — contracts only (interfaces + Zod schemas + errors). Dependency ROOT. No I/O, no SDKs.
-- `packages/drivers`  — where a run executes (E2BLinuxDriver v1; WindowsPoolDriver/MacPoolDriver later).
-- `packages/harnesses`— the agent under test, driven over a process boundary (ClaudeCodeHarness v1).
-- `packages/graders`  — scoring, fully separate from the harness (tests-pass / cost / steps / latency v1).
-- `packages/runner`   — the eval loop; orchestrated durably with Temporal.
-- `packages/registry` — harness version management.
-- `apps/api`          — Fastify control plane (submit suite, read scorecard).
+- `packages/core`         — contracts only (interfaces + Zod schemas + errors). Dependency ROOT. No I/O, no SDKs.
+- `packages/drivers`      — *in-sandbox compute* (`ComputeHandle`): LocalDriver (dev), E2BLinuxDriver (optional).
+- `packages/environments` — the world a run acts on (`RepoEnvironment`: seed + git-diff snapshot).
+- `packages/harnesses`    — the agent under test, driven over a process boundary (ClaudeCodeHarness, ScriptedHarness).
+- `packages/graders`      — scoring, fully separate from the harness (tests-pass / cost / steps / latency).
+- `packages/runner`       — the eval loop (`runCase`).
+- `packages/agent`        — the dispatched unit (model B): runs `runCase` inside an isolated job, emits the result.
+- `packages/backends`     — *placement* (`Backend`): dispatch the agent to an orchestrator (LocalBackend, NomadBackend; K8s/Windows later).
+- `apps/cli`              — control plane PoC (`assay run --backend …`). `apps/api` (Fastify) + `packages/registry` are planned.
 Reverse imports are bugs. The same concern name recurs per package (vertical slices).
+
+### Two execution layers (Backend vs Driver) — model B
+- **Backend** (`@assay/backends`) = *placement*: dispatch a runner-agent job to an orchestrator
+  (Nomad/K8s/Windows) and return the `CaseResult`. Isolation = the orchestrator's runtime.
+- **Driver** (`@assay/core`/`drivers`) = *in-sandbox compute*: the agent runs the harness via
+  `LocalDriver` inside its already-isolated job. See `docs/execution-backends.md`.
 
 ### ⚠️ Deliberate deviation from digo-api: interfaces ARE used
 digo-api bans interfaces for DI because it has exactly one implementation per concept.
-Assay's *whole product* is pluggable adapters (many Drivers / Harnesses / Graders), so the
+Assay's *whole product* is pluggable adapters (many Backends / Drivers / Harnesses / Graders), so the
 `core` contracts MUST be interfaces. This is the one digo idiom we intentionally invert —
 everywhere else (null discipline, error model, naming, layering) we follow it.
 
@@ -49,6 +57,7 @@ everywhere else (null discipline, error model, naming, layering) we follow it.
 - External/SDK failures are remapped to our `AppError` (never propagated raw) so monitoring blames us, not the user. (digo idiom)
 - Cost/tokens come from the harness's own trace (e.g. Claude reports `total_cost_usd`); for LocalDriver the harness uses the machine's existing login (no API key).
 - `ComputeHandle` is always released in a `finally`.
+- Backends never run the harness; they dispatch the `@assay/agent` image and parse its `__ASSAY_RESULT__` stdout sentinel.
 
 ## Key principles
 1. **Read first, code second — NO EXCEPTIONS.**
