@@ -64,23 +64,33 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
 - **placement** — for each queued job the scheduler computes `free = total − max(used, in-flight)`
   per eligible backend and picks one via a `PlacementPolicy`: `leastLoadedPolicy` (spread, default) or
   `binPackPolicy` (consolidate → enables scale-to-zero). `placement.target` is honored as a hard pin.
-- **queue + backpressure** — if no backend has a free slot the job waits in an in-memory queue and is
-  dispatched the moment a slot frees (a dispatch settling re-pumps the queue). `maxQueueDepth` rejects
-  with `RateLimitError` (429) when the queue is saturated. The scheduler avoids head-of-line blocking
-  by scanning the queue for the first placeable job.
+- **fair queue (multi-tenant)** — pending jobs are ordered by a **weighted fair queue** (`FairQueue`,
+  WFQ) keyed by `AgentJob.tenant`, so one tenant's large batch can't starve another: each job gets a
+  virtual-finish time `max(globalClock, tenantLastFinish) + 1/weight`, and the scheduler serves lowest
+  first. Heavier `weightFor(tenant)` ⇒ served more often; an idle tenant can't hoard credit (the global
+  virtual clock advances on every dequeue). `tenantQuota(tenant)` caps a tenant's concurrent in-flight
+  runs even when slots are free.
+- **queue + backpressure** — if no backend has a free slot (or the tenant is at quota) the job waits and
+  is dispatched the moment a slot frees (a dispatch settling re-pumps the queue). `maxQueueDepth` rejects
+  with `RateLimitError` (429) when the queue is saturated. The scheduler avoids head-of-line blocking by
+  scanning the fair-ordered queue for the first placeable job.
 - **wiring** — the Temporal `assay worker` builds a `Scheduler` over its registry (replacing `Router`),
   and `suiteWorkflow` fans out with a bounded lane count so a large suite can't flood activity slots;
-  the scheduler then does fine-grained per-cluster capacity gating on top.
+  the scheduler then does fine-grained per-cluster capacity gating + tenant fairness on top.
 
 ```
 N cases ─▶ Scheduler ─┬─ free slot? ─▶ dispatch to chosen backend (policy)
                       └─ none free  ─▶ queue ─▶ (slot frees) ─▶ pump ─▶ dispatch
 ```
 
-Live proof: `scripts/live/scheduler-nomad.mjs` submits N cases at once to a real `NomadBackend`
-capped at `CAP`; a poller confirms the cluster never runs more than `CAP` allocs concurrently while
-the rest queue and drain. (Next slices: per-tenant fair queue/WFQ, tenant trust-zone isolation of
-warm pools, autoscaling driven by queue depth — see the SaaS design discussion.)
+Live proof:
+- `scripts/live/scheduler-nomad.mjs` — submits N cases at once to a real `NomadBackend` capped at `CAP`;
+  a poller confirms the cluster never runs more than `CAP` allocs concurrently while the rest queue/drain.
+- `scripts/live/fair-scheduler-nomad.mjs` — tenant A submits 4, tenant B submits 1, `cap=1`; WFQ serves
+  B at position 2 (FIFO would serve it last), proving no-starvation across tenants on real Nomad.
+
+Next slices: tenant trust-zone isolation of warm pools (eval runs untrusted harness code), autoscaling
+driven by queue depth, async API + result store — see the SaaS design discussion.
 
 ## Nomad (phase 1)
 ```bash

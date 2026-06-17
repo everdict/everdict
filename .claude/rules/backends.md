@@ -14,6 +14,8 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
 - Isolation is the orchestrator's (`Nomad task runtime` / K8s `runtimeClassName`), set via config — never hardcoded.
 - Inject auth via `collectAuthEnv()` (`@assay/agent`) into the job env; never log or commit it.
 - Map orchestrator failures to `UpstreamError`; never leak a raw HTTP/SDK error.
-- Placement: `Router` = static (pin/default, dev); `Scheduler` = capacity-aware + queue + backpressure
-  (the SaaS path; the `assay worker` uses it). Both satisfy `Dispatcher` — depend on that, not the class.
-  `PlacementPolicy` must be pure/deterministic. Backpressure = `RateLimitError` (429), never a silent drop.
+- Placement: `Router` = static (pin/default, dev); `Scheduler` = capacity-aware + **tenant-fair** (WFQ via
+  `FairQueue` keyed by `AgentJob.tenant`, `weightFor`/`tenantQuota`) + queue + backpressure (the SaaS path;
+  the `assay worker` uses it). Both satisfy `Dispatcher` — depend on that, not the class. `PlacementPolicy`
+  must be pure/deterministic. Backpressure = `RateLimitError` (429), never a silent drop. A multi-tenant
+  scheduler must never let one tenant starve another — fairness is enforced, not best-effort.

@@ -8,6 +8,7 @@ export {
   type BackendSlot,
   type SchedulerOptions,
 } from "./scheduler.js";
+export { FairQueue, type FairQueueOptions } from "./fair-queue.js";
 export {
   NomadBackend,
   buildNomadJob,

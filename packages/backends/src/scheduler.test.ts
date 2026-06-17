@@ -19,6 +19,7 @@ class ControlledBackend implements Backend {
   inFlight = 0;
   maxSeen = 0;
   handled = 0;
+  dispatchedIds: string[] = []; // 디스패치된 케이스 id 순서(공정성 검증용)
   private pending: Array<() => void> = [];
   constructor(
     readonly id: string,
@@ -28,9 +29,10 @@ class ControlledBackend implements Backend {
   async capacity() {
     return { total: this.total, used: this.used };
   }
-  dispatch(_job: AgentJob): Promise<CaseResult> {
+  dispatch(job: AgentJob): Promise<CaseResult> {
     this.inFlight++;
     this.handled++;
+    this.dispatchedIds.push(job.evalCase.id);
     this.maxSeen = Math.max(this.maxSeen, this.inFlight);
     return new Promise<CaseResult>((resolve) => {
       this.pending.push(() => {
@@ -59,6 +61,15 @@ function job(target?: string): AgentJob {
       tags: [],
       ...(target ? { placement: { target } } : {}),
     },
+  };
+}
+
+// 테넌트 + 케이스 id 를 가진 잡(공정성/쿼터 테스트용).
+function tjob(tenant: string, id: string): AgentJob {
+  return {
+    harness: { id: "scripted", version: "0" },
+    tenant,
+    evalCase: { id, env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 1, tags: [] },
   };
 }
 
@@ -158,6 +169,49 @@ describe("Scheduler", () => {
   it("미등록 pin 은 즉시 거절한다", async () => {
     const sched = new Scheduler(new BackendRegistry().register("a", new ControlledBackend("a", 1)));
     await expect(sched.dispatch(job("missing"))).rejects.toThrow();
+  });
+
+  it("테넌트 공정성(WFQ): 한 테넌트의 대량 제출이 다른 테넌트를 굶기지 않는다", async () => {
+    const b = new ControlledBackend("a", 1); // cap=1 → 한 번에 하나씩
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+
+    // A 가 4건 먼저, B 가 1건 나중에 — FIFO 라면 B 는 마지막(5번째). WFQ 라면 A 한 건 뒤에 끼어든다.
+    const p = [
+      sched.dispatch(tjob("A", "A0")),
+      sched.dispatch(tjob("A", "A1")),
+      sched.dispatch(tjob("A", "A2")),
+      sched.dispatch(tjob("A", "A3")),
+      sched.dispatch(tjob("B", "B0")),
+    ];
+    await flush();
+    for (let i = 0; i < 5; i++) {
+      b.releaseAll();
+      await flush();
+    }
+    await Promise.all(p);
+
+    expect(b.dispatchedIds).toEqual(["A0", "B0", "A1", "A2", "A3"]); // B 가 2번째로 끼어듦
+  });
+
+  it("테넌트 쿼터: 자리가 남아도 테넌트별 동시 실행 상한을 넘지 않는다", async () => {
+    const b = new ControlledBackend("a", 5); // 슬롯은 넉넉
+    const sched = new Scheduler(new BackendRegistry().register("a", b), { tenantQuota: () => 1 });
+
+    const p = [sched.dispatch(tjob("A", "A0")), sched.dispatch(tjob("A", "A1")), sched.dispatch(tjob("B", "B0"))];
+    await flush();
+
+    // 슬롯 5개지만 테넌트당 1 → A0, B0 만 진행, A1 은 쿼터로 대기.
+    expect(b.dispatchedIds.sort()).toEqual(["A0", "B0"]);
+    expect(sched.stats().queued).toBe(1);
+    expect(sched.stats().tenantInFlight).toEqual({ A: 1, B: 1 });
+
+    b.releaseAll(); // A0, B0 완료 → A1 의 쿼터가 풀림
+    await flush();
+    expect(b.dispatchedIds).toContain("A1");
+
+    b.releaseAll();
+    await flush();
+    await Promise.all(p);
   });
 
   it("백프레셔: 큐가 maxQueueDepth 를 넘으면 RateLimitError", async () => {
