@@ -9,6 +9,7 @@ import {
   buildRegistry,
 } from "@assay/backends";
 import { type AgentJob, AppError, type GraderSpec } from "@assay/core";
+import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@assay/orchestrator";
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -31,44 +32,32 @@ function usage(): void {
   console.error(
     [
       "assay run --task <text> [options]",
-      "  --harness     claude-code | scripted   (default: claude-code)",
-      "  --backend     local | nomad            (single-backend mode; default: local)",
-      "  --git <url> --ref <ref>                (default: empty repo)",
-      "  --test <cmd>                           (tests-pass grader, run in work/)",
-      "  nomad:   --nomad-addr <url> --image <ref> [--runtime runsc]",
-      "  routing: --backends-config <file.json> [--target <name>]  (multi-cluster)",
+      "  --orchestrator direct | temporal       (default: direct)",
+      "  --harness      claude-code | scripted   (default: claude-code)",
+      "  --backend      local | nomad            (direct mode; default: local)",
+      "  --git <url> --ref <ref> / --test <cmd>",
+      "  nomad:    --nomad-addr <url> --image <ref> [--runtime runsc]",
+      "  routing:  --backends-config <file> [--target <name>]",
+      "  temporal: --temporal-address <addr> [--task-queue <q>]",
+      "",
+      "assay worker [--backends-config <file>] [--temporal-address <addr>] [--task-queue <q>]",
+      "  long-running control-plane worker (runs activities = backend dispatch)",
     ].join("\n"),
   );
 }
 
-async function main(): Promise<void> {
-  const argv = process.argv.slice(2);
-  if (argv[0] !== "run") {
-    usage();
-    process.exitCode = 1;
-    return;
-  }
-  const flags = parseFlags(argv.slice(1));
-
-  const task = flags.get("task");
-  if (!task) {
-    console.error("✗ --task 는 필수입니다.");
-    usage();
-    process.exitCode = 1;
-    return;
-  }
-
-  const harnessName = flags.get("harness") ?? "claude-code";
+function buildJob(flags: Map<string, string>, task: string): AgentJob {
   const backendName = flags.get("backend") ?? "local";
-  const testCmd = flags.get("test");
-  const git = flags.get("git");
   const explicitTarget = flags.get("target");
-
+  const git = flags.get("git");
   const graders: GraderSpec[] = [{ id: "steps" }, { id: "cost" }, { id: "latency" }];
+  const testCmd = flags.get("test");
   if (testCmd) graders.push({ id: "tests-pass", config: { cmd: testCmd } });
-
-  const job: AgentJob = {
-    harness: { id: harnessName, version: flags.get("harness-version") ?? (backendName === "local" ? "cli" : "latest") },
+  return {
+    harness: {
+      id: flags.get("harness") ?? "claude-code",
+      version: flags.get("harness-version") ?? (backendName === "local" ? "cli" : "latest"),
+    },
     evalCase: {
       id: `cli-${process.pid}`,
       env: git
@@ -81,57 +70,109 @@ async function main(): Promise<void> {
       ...(explicitTarget ? { placement: { target: explicitTarget } } : {}),
     },
   };
+}
 
-  // 컨트롤플레인: 백엔드 레지스트리 + 라우터를 구성한다.
-  let registry: BackendRegistry;
-  let defaultTarget: string | undefined;
+// direct 모드용 Router 구성. 에러를 출력하고 exitCode 를 세팅했으면 undefined 반환.
+function buildDirectRouter(flags: Map<string, string>): Router | undefined {
+  const harnessName = flags.get("harness") ?? "claude-code";
+  const backendName = flags.get("backend") ?? "local";
   const configPath = flags.get("backends-config") ?? process.env.ASSAY_BACKENDS_CONFIG;
 
   if (configPath) {
-    // 멀티클러스터 모드: 설정 파일에서 여러 백엔드(여러 Nomad/K8s/Windows)를 등록.
     const cfg = BackendsConfigSchema.parse(JSON.parse(readFileSync(configPath, "utf8")));
-    ({ registry, defaultTarget } = buildRegistry(cfg, { secretEnv: collectAuthEnv() }));
-  } else if (backendName === "nomad") {
+    const { registry, defaultTarget } = buildRegistry(cfg, { secretEnv: collectAuthEnv() });
+    return new Router(registry, defaultTarget);
+  }
+  if (backendName === "nomad") {
     const addr = flags.get("nomad-addr") ?? process.env.NOMAD_ADDR;
     const image = flags.get("image") ?? process.env.ASSAY_AGENT_IMAGE;
     if (!addr || !image) {
       console.error("✗ nomad 백엔드엔 --nomad-addr 와 --image (또는 NOMAD_ADDR / ASSAY_AGENT_IMAGE) 가 필요합니다.");
       process.exitCode = 1;
-      return;
+      return undefined;
     }
     if (harnessName === "claude-code" && !hasClaudeAuth()) {
       console.error(
-        [
-          "✗ 샌드박스 잡엔 claude 인증이 필요합니다. .env 에 다음 중 하나:",
-          "  • CLAUDE_CODE_OAUTH_TOKEN  (구독: 호스트 `claude setup-token`)",
-          "  • ANTHROPIC_API_KEY        (API 과금)",
-          "  ⚠ 이 값은 alloc 으로 전달됩니다 — 신뢰되는/셀프호스팅 Nomad 에서만.",
-        ].join("\n"),
+        "✗ 샌드박스 잡엔 CLAUDE_CODE_OAUTH_TOKEN 또는 ANTHROPIC_API_KEY 가 필요합니다(.env). ⚠ alloc 으로 전달됩니다.",
       );
       process.exitCode = 2;
-      return;
+      return undefined;
     }
-    registry = new BackendRegistry().register(
+    return new Router(
+      new BackendRegistry().register(
+        "nomad",
+        new NomadBackend({ addr, image, secretEnv: collectAuthEnv(), runtime: flags.get("runtime") }),
+      ),
       "nomad",
-      new NomadBackend({ addr, image, secretEnv: collectAuthEnv(), runtime: flags.get("runtime") }),
     );
-    defaultTarget = "nomad";
+  }
+  return new Router(new BackendRegistry().register("local", new LocalBackend()), "local");
+}
+
+async function runCommand(flags: Map<string, string>): Promise<void> {
+  const task = flags.get("task");
+  if (!task) {
+    console.error("✗ --task 는 필수입니다.");
+    usage();
+    process.exitCode = 1;
+    return;
+  }
+  const job = buildJob(flags, task);
+  const orchestratorName = flags.get("orchestrator") ?? "direct";
+
+  let orch: Orchestrator;
+  if (orchestratorName === "temporal") {
+    // durable: 워크플로를 시작하고 결과를 기다린다. 실제 디스패치는 워커가 수행.
+    orch = new TemporalOrchestrator({ address: flags.get("temporal-address"), taskQueue: flags.get("task-queue") });
   } else {
-    registry = new BackendRegistry().register("local", new LocalBackend());
-    defaultTarget = "local";
+    const router = buildDirectRouter(flags);
+    if (!router) return; // 에러 출력됨
+    orch = new DirectOrchestrator(router);
   }
 
-  const target = explicitTarget ?? defaultTarget;
-  console.error(`▶ ${harnessName} via ${target ?? "(no target)"} 백엔드 …`);
+  console.error(`▶ ${job.harness.id} via ${orchestratorName} 오케스트레이터 …`);
+  const result = await orch.run(job);
+  console.log(
+    JSON.stringify(
+      {
+        orchestrator: orchestratorName,
+        harness: result.harness,
+        scores: result.scores,
+        trace: result.trace,
+        diff: result.snapshot.diff,
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+async function workerCommand(flags: Map<string, string>): Promise<void> {
+  const configPath = flags.get("backends-config") ?? process.env.ASSAY_BACKENDS_CONFIG;
+  const config = configPath ? BackendsConfigSchema.parse(JSON.parse(readFileSync(configPath, "utf8"))) : undefined;
+  if (!hasClaudeAuth()) {
+    console.error("ℹ worker env 에 claude 인증이 없습니다 — claude-code 잡이 샌드박스 백엔드에서 실패할 수 있습니다.");
+  }
+  console.error(
+    `▶ assay worker — task queue '${flags.get("task-queue") ?? "assay-eval"}' @ ${flags.get("temporal-address") ?? "localhost:7233"} (Ctrl-C 종료) …`,
+  );
+  await runWorker({ address: flags.get("temporal-address"), taskQueue: flags.get("task-queue"), config });
+}
+
+async function main(): Promise<void> {
+  const argv = process.argv.slice(2);
+  const cmd = argv[0];
   try {
-    const result = await new Router(registry, defaultTarget).dispatch(job);
-    console.log(
-      JSON.stringify(
-        { target, harness: result.harness, scores: result.scores, trace: result.trace, diff: result.snapshot.diff },
-        null,
-        2,
-      ),
-    );
+    if (cmd === "run") {
+      await runCommand(parseFlags(argv.slice(1)));
+      return;
+    }
+    if (cmd === "worker") {
+      await workerCommand(parseFlags(argv.slice(1)));
+      return;
+    }
+    usage();
+    process.exitCode = 1;
   } catch (err) {
     if (err instanceof AppError) {
       console.error(`✗ ${err.code}: ${err.message}`);

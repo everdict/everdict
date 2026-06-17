@@ -8,7 +8,7 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
   otherwise "do the standard TS way" and get wrong for Assay.
 - Keep each file thin (~20 lines): inlined critical rules + a pointer to the matching skill.
 - Current rules: `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `agent`,
-  `backends`, `api-layer`, `testing`, `infra-deploy`.
+  `backends`, `orchestrator`, `api-layer`, `testing`, `infra-deploy`.
 
 ## PULL layer — `.claude/skills/*/`
 - Model-driven: matched via frontmatter `description`, or invoked explicitly as `/name`.

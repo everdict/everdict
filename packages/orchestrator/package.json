@@ -1,9 +1,11 @@
 {
-  "name": "@assay/cli",
+  "name": "@assay/orchestrator",
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "assay": "./dist/main.js" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" } },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -13,6 +15,9 @@
     "@assay/agent": "workspace:*",
     "@assay/backends": "workspace:*",
     "@assay/core": "workspace:*",
-    "@assay/orchestrator": "workspace:*"
+    "@temporalio/activity": "^1.18.1",
+    "@temporalio/client": "^1.18.1",
+    "@temporalio/worker": "^1.18.1",
+    "@temporalio/workflow": "^1.18.1"
   }
 }

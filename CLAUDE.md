@@ -26,7 +26,7 @@ Quality is non-negotiable: all five must pass before a PR.
 
 ## Architecture — one-way dependency, by concern (idiom from digo-api)
 ```
-core ← { drivers · environments · harnesses · graders } ← runner ← agent ← backends ← apps/cli
+core ← { drivers · environments · harnesses · graders } ← runner ← agent ← backends ← orchestrator ← apps/cli
 ```
 - `packages/core`         — contracts only (interfaces + Zod schemas + errors). Dependency ROOT. No I/O, no SDKs.
 - `packages/drivers`      — *in-sandbox compute* (`ComputeHandle`): LocalDriver (dev / inside the agent).
@@ -35,8 +35,9 @@ core ← { drivers · environments · harnesses · graders } ← runner ← agen
 - `packages/graders`      — scoring, fully separate from the harness (tests-pass / cost / steps / latency).
 - `packages/runner`       — the eval loop (`runCase`).
 - `packages/agent`        — the dispatched unit (model B): runs `runCase` inside an isolated job, emits the result.
-- `packages/backends`     — *placement* (`Backend`): dispatch the agent to an orchestrator (LocalBackend, NomadBackend; K8s/Windows later).
-- `apps/cli`              — control plane PoC (`assay run --backend …`). `apps/api` (Fastify) + `packages/registry` are planned.
+- `packages/backends`     — *placement* (`Backend`): dispatch the agent to an orchestrator (LocalBackend, NomadBackend; K8s/Windows later) + `Router`/`BackendRegistry`.
+- `packages/orchestrator` — durable control plane on Temporal: `DirectOrchestrator` / `TemporalOrchestrator` + the worker (workflow=deterministic, activity=`dispatchCase`).
+- `apps/cli`              — control plane PoC (`assay run [--orchestrator temporal]`, `assay worker`). `apps/api` (Fastify) + `packages/registry` are planned.
 Reverse imports are bugs. The same concern name recurs per package (vertical slices).
 
 ### Two execution layers (Backend vs Driver) — model B
@@ -58,6 +59,7 @@ everywhere else (null discipline, error model, naming, layering) we follow it.
 - Cost/tokens come from the harness's own trace (e.g. Claude reports `total_cost_usd`); for LocalDriver the harness uses the machine's existing login (no API key).
 - `ComputeHandle` is always released in a `finally`.
 - Backends never run the harness; they dispatch the `@assay/agent` image and parse its `__ASSAY_RESULT__` stdout sentinel.
+- Temporal workflow code (`@assay/orchestrator` `workflows.ts`) MUST be deterministic — no I/O; side effects go in activities.
 
 ## Key principles
 1. **Read first, code second — NO EXCEPTIONS.**

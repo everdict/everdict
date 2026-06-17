@@ -32,4 +32,5 @@ See `docs/execution-backends.md` (Backend vs Driver) and `docs/sandbox-auth.md` 
 ## Cross-cutting
 - Cost/token capture comes from the harness trace (e.g. Claude's `total_cost_usd` in stream-json).
 - External/orchestrator failures are remapped to `AppError` (never propagated raw).
-- Durable dispatch+await (Temporal) + multi-backend routing are the next cross-cutting steps.
+- Durable dispatch+await is implemented via `@assay/orchestrator` (Temporal): a worker runs the
+  `dispatchCase` activity (Router → backend); the client starts/awaits a workflow. See `docs/orchestration.md`.

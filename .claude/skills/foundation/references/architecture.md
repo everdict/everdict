@@ -10,8 +10,9 @@
 | `@assay/graders` | `Grader` impls — scoring | core |
 | `@assay/runner` | the eval loop (`runCase`) | core, drivers, environments, harnesses, graders |
 | `@assay/agent` | dispatched unit (model B): runs runCase inside a job, emits result | core, runner, drivers, environments, harnesses, graders |
-| `@assay/backends` | `Backend` impls — placement (Local, Nomad; K8s/Windows later) | core, agent |
-| `apps/cli` | control plane PoC (`assay run --backend …`) | core, agent, backends |
+| `@assay/backends` | `Backend` impls — placement (Local, Nomad; K8s/Windows later) + `Router`/`BackendRegistry` | core, agent |
+| `@assay/orchestrator` | durable control plane (Temporal): Direct/Temporal orchestrators + worker | core, backends, agent |
+| `apps/cli` | control plane PoC (`assay run`, `assay worker`) | core, agent, backends, orchestrator |
 | `@assay/registry`, `apps/api` | harness versioning + Fastify control plane | (planned) |
 
 ## The eval loop (runs inside the agent)
@@ -40,7 +41,10 @@ Windows VM), not Assay's. Backends: `LocalBackend` (in-process dev), `NomadBacke
 phase 1), `K8sBackend` + `WindowsBackend` (later). See skill `backends` + `docs/execution-backends.md`.
 
 Fan out cases × harness-versions; regression = run a suite against `harness@vA` and `@vB`, diff
-scorecards. Durable dispatch+await (Temporal) is the cross-cutting next step.
+scorecards. Durable dispatch+await is implemented in `@assay/orchestrator` (Temporal):
+`evalCaseWorkflow`/`suiteWorkflow` call the `dispatchCase` activity (which runs the Router); the
+`assay worker` holds the registry, the client (`assay run --orchestrator temporal`) starts+awaits.
+See `docs/orchestration.md`.
 
 ## How new things plug in (no core rewrite)
 - New compute target (Nomad / K8s / Windows pool) → new `Backend`; the agent + loop are unchanged.
@@ -52,6 +56,7 @@ scorecards. Durable dispatch+await (Temporal) is the cross-cutting next step.
 
 ## Build status & order
 Built: core → drivers(Local) → environments(Repo) → harnesses(claude-code/scripted) →
-graders(tests-pass/cost/steps/latency) → runner → agent → backends(Local/Nomad) → cli.
-Next: `K8sBackend` → `WindowsBackend` → Temporal (durable dispatch+await) + routing → registry,
-apps/api, Postgres(Drizzle)/ClickHouse, deploy (Helm/K8s), dashboard.
+graders(tests-pass/cost/steps/latency) → runner → agent → backends(Local/Nomad) + Router/Registry →
+orchestrator(Direct/Temporal + worker) → cli (`run`/`worker`).
+Next: `K8sBackend` → `WindowsBackend` (register into the registry) → suite/version-regression
+workflows → `registry` (harness versions), apps/api, Postgres(Drizzle)/ClickHouse, deploy (Helm/K8s), dashboard.

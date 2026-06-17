@@ -15,14 +15,15 @@ Assay is a harness-agnostic, infra-agnostic **agent evaluation runtime**. Eval-f
 
 ## Module dependency (one-way; reverse import = bug)
 ```
-core ← { drivers · environments · harnesses · graders } ← runner ← agent ← backends ← apps/cli
+core ← { drivers · environments · harnesses · graders } ← runner ← agent ← backends ← orchestrator ← apps/cli
 ```
 - `core` — contracts only (interfaces + Zod + errors). No I/O, no SDK. Dependency root.
 - `drivers` / `environments` / `harnesses` / `graders` — adapters; depend on `core` only.
 - `runner` — the eval loop (`runCase`); composes adapters.
 - `agent` — the dispatched unit (model B): runs `runCase` over `LocalDriver` inside an isolated job, emits `__ASSAY_RESULT__`.
-- `backends` — placement: `Backend.dispatch(AgentJob)` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later).
-- `apps/cli` — control plane PoC. `apps/api` (Fastify) + `registry` are planned.
+- `backends` — placement: `Backend.dispatch(AgentJob)` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later) + `Router`/`BackendRegistry`.
+- `orchestrator` — durable control plane (Temporal): `DirectOrchestrator` / `TemporalOrchestrator` + worker.
+- `apps/cli` — control plane PoC (`assay run`, `assay worker`). `apps/api` (Fastify) + `registry` are planned.
 
 ## The spine: 4 in-sandbox concerns + 1 placement layer
 Harness (under test) · Environment (the world it acts on) · Driver (where it runs *in-sandbox*) · Grader (how we judge).
