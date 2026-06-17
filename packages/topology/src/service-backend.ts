@@ -7,7 +7,7 @@ import {
   type Score,
   type ServiceHarnessSpec,
 } from "@assay/core";
-import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
+import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@assay/graders";
 import type { TraceSource } from "@assay/trace";
 import { keysFor, newRunId } from "./environment-manager.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
@@ -72,7 +72,12 @@ export class ServiceTopologyBackend implements Backend {
       const trace = await this.opts.traceSource.fetch(runId);
       const snapshot = await browser.snapshot();
 
-      const graders = this.opts.graders ?? [stepsGrader, costGrader, latencyGrader];
+      // 케이스가 그레이더를 지정하면 그것으로(dom-contains/url-matches 등), 아니면 trace 기반 기본값.
+      const graders =
+        this.opts.graders ??
+        (job.evalCase.graders.length > 0
+          ? makeGraders(job.evalCase.graders)
+          : [stepsGrader, costGrader, latencyGrader]);
       const scores: Score[] = [];
       for (const grader of graders) {
         scores.push(await grader.grade({ case: job.evalCase, trace, snapshot }));

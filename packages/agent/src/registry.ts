@@ -1,6 +1,8 @@
-import { BadRequestError, type EvaluableHarness, type Grader, type GraderSpec } from "@assay/core";
-import { TestsPassGrader, costGrader, latencyGrader, stepsGrader } from "@assay/graders";
+import { BadRequestError, type EvaluableHarness } from "@assay/core";
 import { ClaudeCodeHarness, ScriptedHarness } from "@assay/harnesses";
+
+// 그레이더 spec→인스턴스 매핑은 @assay/graders 가 소유한다(여기선 재노출).
+export { makeGraders } from "@assay/graders";
 
 // id → 하니스. 에이전트 이미지엔 claude 가 사전설치되므로 install:false.
 export function makeHarness(id: string, version: string): EvaluableHarness {
@@ -12,22 +14,4 @@ export function makeHarness(id: string, version: string): EvaluableHarness {
     default:
       throw new BadRequestError("BAD_REQUEST", { harness: id });
   }
-}
-
-// GraderSpec[] → Grader[]. tests-pass 는 config.cmd 가 필요하다.
-export function makeGraders(specs: GraderSpec[]): Grader[] {
-  return specs.map((s) => {
-    switch (s.id) {
-      case "tests-pass":
-        return new TestsPassGrader(String(s.config?.cmd ?? "true"));
-      case "steps":
-        return stepsGrader;
-      case "cost":
-        return costGrader;
-      case "latency":
-        return latencyGrader;
-      default:
-        throw new BadRequestError("BAD_REQUEST", { grader: s.id });
-    }
-  });
 }

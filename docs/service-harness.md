@@ -24,8 +24,13 @@ Register one `ServiceTopologyBackend` per target cluster in the `BackendRegistry
 
 ## Trace (`@assay/trace`)
 The harness emits a trace to OTel/MLflow; Assay **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →
-`spansToTraceEvents` → normalized `TraceEvent[]` (OTel GenAI semantic conventions). Grading reads the browser
-snapshot (DOM/screenshot → MinIO) + the trace.
+`spansToTraceEvents` → normalized `TraceEvent[]` (OTel GenAI semantic conventions).
+
+## Grading (browser/service)
+Over `{trace, snapshot}` (no `ComputeHandle`): trace-based (`steps`/`cost`/`latency`), browser-outcome
+(`dom-contains`, `url-matches` — read the `BrowserSnapshot`), and model judge (`JudgeGrader` — LLM/VLM over
+task + DOM/screenshot, via an injected `Judge`). Cases pick graders via `EvalCase.graders` (resolved by
+`makeGraders`); judge graders are wired where a `Judge` is configured.
 
 ## Status
 - **Phase 1 (built, unit-tested):** `HarnessSpec(service)`, OTel/MLflow trace mappers, **both** topology
