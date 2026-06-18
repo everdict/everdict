@@ -37,5 +37,15 @@ records the resolved `id@version` (e.g. `bu@1.1.0`), so scorecards/regression al
 Live-verified on the local kind cluster (`scripts/live/registry-k8s.mjs`): load the dir → resolve `bu@latest` →
 `1.1.0` → drive a real K8s service-topology run with the registry-resolved spec.
 
-> Backing store: in-memory + file loader today. A persisted (Postgres) registry would implement the same
-> `HarnessRegistry` interface (mirroring `RunStore` → `PgRunStore`); version immutability makes it cache-friendly.
+## Persistence (`PgHarnessRegistry`)
+`HarnessRegistry` is async, so a Postgres-backed impl is a drop-in: `PgHarnessRegistry` stores each version as a
+row in `assay_harnesses` (`spec` as `jsonb`, PK `(id, version)`), shares the `@assay/db` `SqlClient` + migrator
+(migration `0002_create_harnesses`), and enforces the same immutability (re-register with a different spec →
+`ConflictError`, using an order-independent compare since `jsonb` doesn't preserve key order). Seed it from the
+file SSOT with `loadHarnessDir(dir, pgRegistry)`. `latest`/semver resolution is identical to in-memory.
+
+Live-verified against real Postgres (`scripts/live/pg-harness-registry.mjs`): migrate → seed files → resolve
+`bu@latest` → `1.1.0` → re-register-different-spec is rejected → spec survives a fresh connection.
+
+> Tenant ownership (a `tenant` column + scoped reads) is a future expand migration, landing with the tenant
+> access layer (API keys → tenant). Today the registry is global.

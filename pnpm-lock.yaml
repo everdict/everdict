@@ -171,6 +171,9 @@ importers:
       '@assay/core':
         specifier: workspace:*
         version: link:../core
+      '@assay/db':
+        specifier: workspace:*
+        version: link:../db
 
   packages/runner:
     dependencies:

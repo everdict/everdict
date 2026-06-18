@@ -17,7 +17,7 @@
 | `@assay/suite` | suites + version regression: `runSuite` / `summarizeScorecard` / `diffScorecards` | core |
 | `apps/cli` | dev control plane (`assay run`, `assay worker`, `assay suite`) | core, agent, backends, orchestrator, suite |
 | `@assay/db` | result store: `RunStore` (`InMemoryRunStore`/`PgRunStore`) + numbered SQL migrations + `migrate`/`preflight` | core |
-| `@assay/registry` | harness version SSOT: `(id, version)→HarnessSpec`, immutable versions, file/GitOps loader | core |
+| `@assay/registry` | harness version SSOT: `(id, version)→HarnessSpec`, immutable versions, file/GitOps loader + `PgHarnessRegistry` | core, db |
 | `apps/api` | multi-tenant control-plane HTTP (Fastify): async `POST /runs`/poll/webhook + `RunStore` | core, agent, backends, db |
 | `@assay/registry` | harness versioning | (planned) |
 

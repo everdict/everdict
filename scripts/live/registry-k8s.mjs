@@ -19,9 +19,9 @@ const banner = (s) => console.log(`\n=== ${s} ===`);
 
 async function main() {
   banner("harness version SSOT (file-backed)");
-  const registry = loadHarnessDir(DIR);
-  for (const { id, versions } of registry.list()) console.log(`  ${id}: ${versions.join(", ")}`);
-  const latest = registry.getService("bu", LATEST);
+  const registry = await loadHarnessDir(DIR);
+  for (const { id, versions } of await registry.list()) console.log(`  ${id}: ${versions.join(", ")}`);
+  const latest = await registry.getService("bu", LATEST);
   console.log(
     `  resolve bu@latest → ${latest.id}@${latest.version}  (deps: ${latest.dependencies.map((d) => d.store).join("+")})`,
   );

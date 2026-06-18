@@ -33,7 +33,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 | `@assay/topology` | service-topology harnesses (multi-service + target env), Nomad/K8s. |
 | `@assay/suite` | suites + version regression (`runSuite` / scorecard diff). |
 | `@assay/db` | result store: `RunStore` (`InMemoryRunStore` / `PgRunStore`) + SQL migrations + migrator. |
-| `@assay/registry` | harness version SSOT: `(id, version) → HarnessSpec`, immutable versions, file/GitOps loader. |
+| `@assay/registry` | harness version SSOT: `(id, version) → HarnessSpec`, immutable versions, file/GitOps loader + Postgres (`PgHarnessRegistry`). |
 | `apps/cli` | dev control plane: `assay run`, `assay worker`, `assay suite`. |
 | `apps/api` | multi-tenant control-plane HTTP API (Fastify): async `POST /runs` + poll/webhook + result store. |
 
