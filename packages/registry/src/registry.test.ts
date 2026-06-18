@@ -58,6 +58,16 @@ describe("InMemoryHarnessRegistry (tenant-owned)", () => {
     await expect(r.register("acme", mutated as HarnessSpec)).rejects.toBeInstanceOf(ConflictError);
   });
 
+  it("ownVersions 는 _shared 폴백 없이 이 테넌트가 직접 등록한 버전만(충돌 판정용)", async () => {
+    const r = new InMemoryHarnessRegistry();
+    await r.register(SHARED_TENANT, svc("bu", "1.0.0"));
+    await r.register("acme", svc("bu", "2.0.0"));
+    expect(await r.versions("acme", "bu")).toEqual(["2.0.0"]); // 소유 우선
+    expect(await r.ownVersions("acme", "bu")).toEqual(["2.0.0"]); // 직접 등록
+    expect(await r.versions("beta", "bu")).toEqual(["1.0.0"]); // 공유 폴백으로 보임
+    expect(await r.ownVersions("beta", "bu")).toEqual([]); // 직접 등록한 건 없음 → 등록 시 충돌 아님
+  });
+
   it("list 는 테넌트 소유 + 공유를 보여주고 owner 를 표기", async () => {
     const r = new InMemoryHarnessRegistry();
     await r.register(SHARED_TENANT, svc("bu", "1.0.0"));

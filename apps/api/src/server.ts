@@ -58,6 +58,11 @@ function constantTimeEq(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
+// Zod 이슈 → 사람이 읽는 "path: message" 목록 (검증 응답용).
+function zodIssues(err: z.ZodError): string[] {
+  return err.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);
+}
+
 // MCP 전용 Principal 해석: 반드시 Bearer(JWT/ak_)만 — dev 헤더 폴백 없음(미인증이면 401+로그인 챌린지).
 async function resolveBearerPrincipal(req: FastifyRequest, deps: ServerDeps): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
@@ -162,6 +167,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     } catch (err) {
       return sendError(reply, err); // 권한 없음 403 / 불변성 409
     }
+  });
+
+  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). 등록 플로우의 사전 점검.
+  app.post("/harnesses/validate", async (req, reply) => {
+    if (!deps.registry) return reply.code(404).send({ code: "NOT_FOUND", message: "registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:register");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = HarnessSpecSchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
+    const existingVersions = await deps.registry.ownVersions(principal.workspace, parsed.data.id);
+    return reply.send({
+      ok: true,
+      kind: parsed.data.kind,
+      id: parsed.data.id,
+      version: parsed.data.version,
+      existingVersions,
+      versionExists: existingVersions.includes(parsed.data.version),
+    });
   });
 
   app.get("/harnesses", async (req, reply) => {

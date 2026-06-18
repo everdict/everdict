@@ -33,4 +33,6 @@ export const controlPlane = {
   listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),
   registerHarness: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/harnesses', { method: 'POST', body: JSON.stringify(spec) }),
+  validateHarness: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/harnesses/validate', { method: 'POST', body: JSON.stringify(spec) }),
 }

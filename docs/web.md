@@ -45,8 +45,12 @@ Import order enforces downward layer deps (app → widgets → features → enti
 - **하니스 `/dashboard/harnesses`** — owned vs `_shared` harnesses with versions.
 - **새 run `/dashboard/runs/new`** — submit-run form (react-hook-form) → `submitRunAction` (server action) →
   control plane `POST /runs` → redirect to the run detail.
-- **하니스 등록 `/dashboard/harnesses/new`** — register-harness form (HarnessSpec JSON) → `registerHarnessAction`
-  → control plane `POST /harnesses` (409 on the immutable-version violation, surfaced inline).
+- **하니스 등록 `/dashboard/harnesses/new`** — a **structured wizard** (`features/register-harness`): pick
+  kind, fill id/version and (for `service`) `services[]`/`dependencies[]`/`frontDoor`/`traceSource`/`target` via
+  field arrays, with a **dry-run validate** step (`validateHarnessAction` → `POST /harnesses/validate`: schema +
+  existing versions/conflict, no write) + a JSON preview + a raw-JSON mode toggle, then register
+  (`registerHarnessAction` → `POST /harnesses`, 409 on the immutable-version violation). Validate + register are
+  the same operations exposed on the API and MCP (`docs/mcp.md`).
 The **새 run** and **하니스 등록** pages (and their list-page CTAs) are role-gated off `/me`: a viewer sees a
 "권한이 없습니다" notice instead of the form, a member can submit runs, only an admin can register harnesses.
 All under a shared app shell (sidebar nav + topbar **workspace + role** chip / sign-in-out). Mutations are

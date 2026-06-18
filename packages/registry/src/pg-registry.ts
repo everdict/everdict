@@ -75,6 +75,10 @@ export class PgHarnessRegistry implements HarnessRegistry {
     return owner ? this.ownerVersions(owner, id) : [];
   }
 
+  async ownVersions(tenant: string, id: string): Promise<string[]> {
+    return this.ownerVersions(tenant, id); // 정확히 이 테넌트 소유만(폴백 없음)
+  }
+
   async get(tenant: string, id: string, ref = "latest"): Promise<HarnessSpec> {
     const owner = await this.ownerOf(tenant, id);
     if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `하니스 '${id}' 가 없습니다.`);

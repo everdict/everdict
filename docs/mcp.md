@@ -15,6 +15,7 @@ the HTTP routes (`RunService` + `HarnessRegistry`), is **role-gated** (`authoriz
 | `get_run` | `runs:read` | one run (other workspace → `NOT_FOUND`) |
 | `submit_run` | `runs:submit` (member+) | submit an eval run (repo empty seed + default graders) |
 | `list_harnesses` | `harnesses:read` (viewer+) | workspace-owned + `_shared` |
+| `validate_harness` | `harnesses:register` (admin) | dry-run: schema + this workspace's existing versions/conflict (no write) |
 | `register_harness` | `harnesses:register` (admin) | register a `HarnessSpec` (immutable → `CONFLICT`) |
 
 Authorization/validation failures come back as MCP tool errors (`isError`), e.g. `FORBIDDEN: …`.

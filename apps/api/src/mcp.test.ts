@@ -56,7 +56,29 @@ describe("MCP tools", () => {
   it("tools/list 에 run/harness 도구가 노출된다", async () => {
     const client = await connect(harness(), ["admin"]);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
-    expect(names).toEqual(["get_run", "list_harnesses", "list_runs", "register_harness", "submit_run"]);
+    expect(names).toEqual([
+      "get_run",
+      "list_harnesses",
+      "list_runs",
+      "register_harness",
+      "submit_run",
+      "validate_harness",
+    ]);
+  });
+
+  it("validate_harness: 스키마+기존버전 검증(등록하지 않음); viewer 는 권한오류", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"]);
+    const v1 = JSON.parse(text(await admin.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })));
+    expect(v1).toMatchObject({ ok: true, id: "bu", existingVersions: [], versionExists: false });
+    await admin.callTool({ name: "register_harness", arguments: { spec: HARNESS } });
+    const v2 = JSON.parse(text(await admin.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })));
+    expect(v2).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    const bad = JSON.parse(text(await admin.callTool({ name: "validate_harness", arguments: { spec: "{not json" } })));
+    expect(bad.ok).toBe(false);
+
+    const viewer = await connect(deps, ["viewer"]);
+    expect((await viewer.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })).isError).toBe(true);
   });
 
   it("member: submit_run 가능, register_harness 는 권한오류(isError)", async () => {

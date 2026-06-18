@@ -13,6 +13,10 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   return <textarea className={cn(base, 'min-h-24 font-mono', className)} {...props} />
 }
 
+export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
+  return <select className={cn(base, 'pr-8', className)} {...props} />
+}
+
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return <label className={cn('text-sm font-medium', className)} {...props} />
 }

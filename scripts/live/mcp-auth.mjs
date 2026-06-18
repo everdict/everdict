@@ -63,7 +63,7 @@ if (un.status !== 401 || !wa.includes("resource_metadata")) fails.push("401-chal
   const { client, transport } = await connect(await ropc("alice", "alice"));
   const tools = (await client.listTools()).tools.map((t) => t.name).sort();
   console.log("[alice/member] tools:", tools.join(","));
-  if (tools.length !== 5) fails.push("alice.tools");
+  if (tools.length !== 6) fails.push("alice.tools");
   const lr = await client.callTool({ name: "list_runs", arguments: {} });
   if (lr.isError) fails.push("alice.list_runs");
   const sr = await client.callTool({ name: "submit_run", arguments: { harness_id: "scripted", task: "mcp e2e" } });
@@ -107,7 +107,7 @@ if (un.status !== 401 || !wa.includes("resource_metadata")) fails.push("401-chal
     const { client, transport } = await connect(issued.apiKey);
     const tools = (await client.listTools()).tools;
     console.log("[api-key/admin] tools:", tools.length);
-    if (tools.length !== 5) fails.push("apikey.tools");
+    if (tools.length !== 6) fails.push("apikey.tools");
     await transport.close();
   }
 }

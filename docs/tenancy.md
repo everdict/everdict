@@ -27,6 +27,7 @@ harnesses; resolution falls back to the **`_shared`** owner for first-party harn
 | Method | Path | Action (role) | Effect |
 |---|---|---|---|
 | `POST` | `/harnesses` | `harnesses:register` (**admin**) | register a `HarnessSpec` under the caller's workspace (immutable; re-register-different → **409**) |
+| `POST` | `/harnesses/validate` | `harnesses:register` (**admin**) | dry-run: schema + the workspace's own `existingVersions`/`versionExists` (no write) — the registration flow's pre-check |
 | `GET`  | `/harnesses` | `harnesses:read` (viewer+) | list the workspace's own + `_shared` (`{id, owner, versions}`) |
 | `GET`  | `/harnesses/:id` | `harnesses:read` (viewer+) | versions of that harness visible to the workspace (404 if none) |
 

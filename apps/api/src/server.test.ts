@@ -244,3 +244,52 @@ describe("API — MCP OAuth (login like Linear)", () => {
     await app.close();
   });
 });
+
+describe("API — harness validate (dry-run)", () => {
+  it("admin: 유효 스펙 → ok + 기존버전/충돌 표시 (등록하지 않음)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const v1 = await app.inject({ method: "POST", url: "/harnesses/validate", headers: h, payload: HARNESS });
+    expect(v1.statusCode).toBe(200);
+    expect(v1.json()).toMatchObject({
+      ok: true,
+      id: "bu",
+      version: "1.0.0",
+      existingVersions: [],
+      versionExists: false,
+    });
+    await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS }); // 실제 등록
+    const v2 = await app.inject({ method: "POST", url: "/harnesses/validate", headers: h, payload: HARNESS });
+    expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    const list = await app.inject({ method: "GET", url: "/harnesses", headers: h });
+    expect(list.json().find((x: { id: string }) => x.id === "bu").versions).toEqual(["1.0.0"]); // validate 가 중복등록 안 함
+    await app.close();
+  });
+
+  it("스키마 오류 → ok:false + errors (200)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const res = await app.inject({
+      method: "POST",
+      url: "/harnesses/validate",
+      headers: h,
+      payload: { kind: "service", id: "x" },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().ok).toBe(false);
+    expect(res.json().errors.length).toBeGreaterThan(0);
+    await app.close();
+  });
+
+  it("member 는 검증 불가 (403)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/harnesses/validate",
+      headers: { authorization: "Bearer x" },
+      payload: HARNESS,
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});

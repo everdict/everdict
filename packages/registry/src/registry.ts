@@ -11,7 +11,8 @@ export interface HarnessRegistry {
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<HarnessSpec>;
   getService(tenant: string, id: string, ref?: string): Promise<ServiceHarnessSpec>;
-  versions(tenant: string, id: string): Promise<string[]>; // 정렬됨(semver 우선)
+  versions(tenant: string, id: string): Promise<string[]>; // 정렬됨(semver 우선) — 소유 우선/_shared 폴백
+  ownVersions(tenant: string, id: string): Promise<string[]>; // 이 테넌트가 직접 등록한 버전만(폴백 없음 — 충돌 판정용)
   list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>>;
 }
 
@@ -120,6 +121,10 @@ export class InMemoryHarnessRegistry implements HarnessRegistry {
   async versions(tenant: string, id: string): Promise<string[]> {
     const owner = this.ownerOf(tenant, id);
     return owner ? this.ownerVersions(owner, id) : [];
+  }
+
+  async ownVersions(tenant: string, id: string): Promise<string[]> {
+    return this.ownerVersions(tenant, id); // 정확히 이 테넌트 소유만(폴백 없음)
   }
 
   async get(tenant: string, id: string, ref: string = LATEST): Promise<HarnessSpec> {

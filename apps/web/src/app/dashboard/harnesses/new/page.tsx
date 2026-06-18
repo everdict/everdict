@@ -1,6 +1,6 @@
 import Link from 'next/link'
 
-import { RegisterHarnessForm } from '@/features/register-harness'
+import { RegisterHarnessWizard } from '@/features/register-harness'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { Card } from '@/shared/ui/card'
@@ -21,7 +21,7 @@ export default async function NewHarnessPage() {
       <PageHeader title="하니스 등록" description="HarnessSpec 을 이 워크스페이스 소유로 등록합니다." />
       {allowed ? (
         <Card className="p-6">
-          <RegisterHarnessForm />
+          <RegisterHarnessWizard />
         </Card>
       ) : (
         <EmptyState

@@ -93,6 +93,38 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
 
     server.registerTool(
+      "validate_harness",
+      {
+        description: "HarnessSpec(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
+        inputSchema: { spec: z.string().describe("HarnessSpec JSON") },
+      },
+      ({ spec }) =>
+        run(principal, "harnesses:register", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(spec);
+          } catch {
+            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+          }
+          const result = HarnessSpecSchema.safeParse(parsed);
+          if (!result.success)
+            return ok({
+              ok: false,
+              errors: result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+            });
+          const existingVersions = await registry.ownVersions(ws, result.data.id);
+          return ok({
+            ok: true,
+            kind: result.data.kind,
+            id: result.data.id,
+            version: result.data.version,
+            existingVersions,
+            versionExists: existingVersions.includes(result.data.version),
+          });
+        }),
+    );
+
+    server.registerTool(
       "register_harness",
       {
         description: "HarnessSpec(JSON 문자열)을 이 워크스페이스 소유로 등록(불변; 충돌 시 CONFLICT)",

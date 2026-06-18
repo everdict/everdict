@@ -1,2 +1,7 @@
-export { RegisterHarnessForm } from './ui/register-harness-form'
-export { registerHarnessAction, type RegisterHarnessResult } from './api/register-harness'
+export { RegisterHarnessWizard } from './ui/register-harness-wizard'
+export {
+  registerHarnessAction,
+  validateHarnessAction,
+  type RegisterHarnessResult,
+  type ValidateHarnessResult,
+} from './api/register-harness'
