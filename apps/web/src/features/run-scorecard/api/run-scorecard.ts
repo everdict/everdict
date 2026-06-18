@@ -10,6 +10,7 @@ export interface RunScorecardInput {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
+  judgeIds: string[]
 }
 
 export interface RunScorecardResult {
@@ -25,6 +26,7 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
   const body = {
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
+    judges: input.judgeIds.map((id) => ({ id, version: 'latest' })),
   }
   try {
     const rec = await controlPlane.runScorecard<{ id: string }>(ctx, body)

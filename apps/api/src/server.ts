@@ -17,10 +17,11 @@ export const SubmitBodySchema = z.object({
   webhookUrl: z.string().url().optional(),
 });
 
-// 스코어카드 실행 본문 — 데이터셋×하니스(버전 기본 latest, 서비스가 구체 버전으로 해석).
+// 스코어카드 실행 본문 — 데이터셋×하니스(버전 기본 latest, 서비스가 구체 버전으로 해석) + 선택한 judge 들.
 export const RunScorecardBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
+  judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
 });
 
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).

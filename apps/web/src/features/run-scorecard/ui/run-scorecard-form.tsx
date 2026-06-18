@@ -16,10 +16,19 @@ interface Values {
   harnessVersion: string
 }
 
-// 데이터셋×하니스를 골라 배치 평가를 실행. 목록은 자동완성용(datalist), 실제 해석은 컨트롤플레인이 한다.
-export function RunScorecardForm({ datasets, harnesses }: { datasets: { id: string }[]; harnesses: { id: string }[] }) {
+// 데이터셋×하니스를 골라 배치 평가를 실행 + 적용할 judge 선택. 실제 해석은 컨트롤플레인이 한다.
+export function RunScorecardForm({
+  datasets,
+  harnesses,
+  judges,
+}: {
+  datasets: { id: string }[]
+  harnesses: { id: string }[]
+  judges: { id: string }[]
+}) {
   const router = useRouter()
   const [serverError, setServerError] = useState<string>()
+  const [judgeIds, setJudgeIds] = useState<string[]>([])
   const {
     register,
     handleSubmit,
@@ -35,7 +44,7 @@ export function RunScorecardForm({ datasets, harnesses }: { datasets: { id: stri
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const res = await runScorecardAction(values)
+    const res = await runScorecardAction({ ...values, judgeIds })
     if (res.ok && res.id) router.push(`/dashboard/scorecards/${res.id}`)
     else setServerError(res.error ?? '실행 실패')
   }
@@ -85,6 +94,24 @@ export function RunScorecardForm({ datasets, harnesses }: { datasets: { id: stri
           <Input id="harnessVersion" placeholder="latest" {...register('harnessVersion')} />
         </div>
       </div>
+
+      {judges.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>Agent Judge (선택 — 트레이스에 적용)</Label>
+          <div className="flex flex-wrap gap-3 rounded-xl border p-3 text-sm">
+            {judges.map((j) => (
+              <label key={j.id} className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={judgeIds.includes(j.id)}
+                  onChange={(e) => setJudgeIds(e.target.checked ? [...judgeIds, j.id] : judgeIds.filter((x) => x !== j.id))}
+                />
+                {j.id}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {serverError && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">

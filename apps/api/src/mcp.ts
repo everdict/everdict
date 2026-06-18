@@ -307,15 +307,20 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           dataset_version: z.string().optional(),
           harness_id: z.string(),
           harness_version: z.string().optional(),
+          judges: z
+            .array(z.object({ id: z.string(), version: z.string().optional() }))
+            .optional()
+            .describe("트레이스에 적용할 Agent Judge 들(version 기본 latest)"),
         },
       },
-      ({ dataset_id, dataset_version, harness_id, harness_version }) =>
+      ({ dataset_id, dataset_version, harness_id, harness_version, judges }) =>
         run(principal, "scorecards:run", async () =>
           ok(
             await scorecards.submit({
               tenant: ws,
               dataset: { id: dataset_id, version: dataset_version ?? "latest" },
               harness: { id: harness_id, version: harness_version ?? "latest" },
+              judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
             }),
           ),
         ),

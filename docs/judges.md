@@ -46,8 +46,19 @@ Migration: `packages/db/migrations/0008_create_judges.sql`.
 - **등록 `/dashboard/judges/new`** — a **kind-toggle form** (model | harness) with a **validate (dry-run)** step,
   then register (`POST /judges`). Role-gated off `/me` (`judges:write` = member+).
 
-## Execution (next increment)
-Judges are **registered** here; **applying** a judge to a trace → scores runs in the **control plane**
-(trace-based): a scorecard run will select judges, the control plane resolves each `JudgeSpec` → builds a
-`Judge`/`Grader` (`packages/graders` `JudgeGrader`; model judges use the tenant's **SecretStore** provider key)
-→ appends scores. See `docs/scorecards.md`, `docs/graders` (`packages/graders/src/judge.ts`).
+## Execution (control plane, trace-based)
+A scorecard run **selects judges** (`POST /scorecards` `judges:[{id,version?}]`). After each case's harness run
+produces a trace, the control plane (`apps/api` `ScorecardService.applyJudges` + `JudgeRunner`) resolves each
+`JudgeSpec` via `JudgeRegistry` and applies it to that case's trace → appends a `judge:<id>` `Score` (which then
+flows into the scorecard summary). No re-run; judging is purely trace-based.
+
+- **`model`** judges call the provider via `packages/graders` `modelJudge(anthropicComplete(...))`, keyed by the
+  tenant's **`ANTHROPIC_API_KEY`** from the **SecretStore**. `passThreshold` maps `score → pass`. Missing key →
+  a **skip** score (`detail: "skipped: …"`) so a selected judge never silently vanishes. Errors are remapped to
+  `UpstreamError` and become skip scores.
+- **`harness`** judges (delegate to an agent) and non-anthropic providers currently produce a **skip** score —
+  full execution is the next step.
+
+`Judge` is injected at the service boundary (`JudgeRunner`), so the wiring is deterministically testable with a
+fake; the real model call is exercised only when a key is configured. See `docs/scorecards.md`,
+`packages/graders/src/{judge,model-judge}.ts`.

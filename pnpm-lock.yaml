@@ -41,6 +41,9 @@ importers:
       '@assay/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@assay/graders':
+        specifier: workspace:*
+        version: link:../../packages/graders
       '@assay/registry':
         specifier: workspace:*
         version: link:../../packages/registry

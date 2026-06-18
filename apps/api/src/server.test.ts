@@ -12,6 +12,7 @@ import {
 } from "@assay/db";
 import { InMemoryDatasetRegistry, InMemoryHarnessRegistry, InMemoryJudgeRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
+import { defaultJudgeRunner } from "./judge-runner.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
@@ -86,6 +87,7 @@ function server(
 ) {
   const keyStore = new InMemoryTenantKeyStore();
   const datasetRegistry = new InMemoryDatasetRegistry();
+  const judgeRegistry = new InMemoryJudgeRegistry();
   const svc = new RunService({
     dispatcher: okDispatcher,
     store: new InMemoryRunStore(),
@@ -96,6 +98,9 @@ function server(
     dispatcher: scoringDispatcher,
     store: new InMemoryScorecardStore(),
     datasets: datasetRegistry,
+    judges: judgeRegistry,
+    // 시크릿 없음 → model judge 는 skip 점수(실제 모델 호출 없이 와이어링 검증).
+    judgeRunner: defaultJudgeRunner({ secretsFor: async () => ({}) }),
     newId: () => `sc-${n++}`,
   });
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
@@ -104,7 +109,7 @@ function server(
     scorecardService,
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
-    judgeRegistry: new InMemoryJudgeRegistry(),
+    judgeRegistry,
     secretStore,
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
@@ -411,7 +416,11 @@ async function pollScorecard(
   app: ReturnType<typeof server>["app"],
   id: string,
   headers: Record<string, string>,
-): Promise<{ status: string; summary?: unknown[]; scorecard?: { results: unknown[] } }> {
+): Promise<{
+  status: string;
+  summary?: Array<{ metric: string; count?: number; mean?: number; passRate?: number }>;
+  scorecard?: { results: Array<{ caseId?: string; scores: Array<{ metric: string; detail?: string }> }> };
+}> {
   for (let i = 0; i < 50; i++) {
     const res = await app.inject({ method: "GET", url: `/scorecards/${id}`, headers });
     const rec = res.json();
@@ -443,6 +452,29 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
     const list = await app.inject({ method: "GET", url: "/scorecards", headers: h });
     expect(list.json()[0]).toMatchObject({ id, status: "succeeded" });
     expect(list.json()[0].scorecard).toBeUndefined();
+    await app.close();
+  });
+
+  it("judge 선택: 트레이스에 적용돼 judge:<id> 점수가 케이스에 붙는다(키 없음 → skip 점수)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    await app.inject({ method: "POST", url: "/judges", headers: h, payload: JUDGE }); // model judge "correctness"
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" }, judges: [{ id: "correctness" }] },
+    });
+    expect(post.statusCode).toBe(202);
+    const settled = await pollScorecard(app, post.json().id, h);
+    expect(settled.status).toBe("succeeded");
+    const scores = settled.scorecard?.results?.[0]?.scores ?? [];
+    const judgeScore = scores.find((s) => s.metric === "judge:correctness");
+    expect(judgeScore).toBeDefined();
+    expect(judgeScore?.detail).toContain("skipped"); // 시크릿 없음 → 실제 호출 없이 skip
+    // judge 메트릭이 요약에도 반영
+    expect((settled.summary ?? []).map((m) => m.metric)).toContain("judge:correctness");
     await app.close();
   });
 

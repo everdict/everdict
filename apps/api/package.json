@@ -17,6 +17,7 @@
     "@assay/backends": "workspace:*",
     "@assay/core": "workspace:*",
     "@assay/db": "workspace:*",
+    "@assay/graders": "workspace:*",
     "@assay/registry": "workspace:*",
     "@assay/suite": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",

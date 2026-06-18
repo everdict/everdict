@@ -29,9 +29,12 @@ Migration: `packages/db/migrations/0006_create_scorecards.sql`.
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|
-| `POST /scorecards` `{dataset, harness}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards` `{dataset, harness, judges?}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |
 | `GET /scorecards/:id` (full) | `get_scorecard` | `scorecards:read` |
+
+Optional `judges:[{id,version?}]` applies registered **Agent Judges** to each case's trace after the run →
+`judge:<id>` scores in the summary (control-plane, trace-based). See `docs/judges.md`.
 
 All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service core, one auth core. See
 `docs/api.md`, `docs/mcp.md`, `docs/web.md`, `docs/datasets.md`, `docs/suites.md`.

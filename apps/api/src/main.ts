@@ -40,6 +40,7 @@ import {
   loadDatasetDir,
   loadJudgeDir,
 } from "@assay/registry";
+import { defaultJudgeRunner } from "./judge-runner.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
@@ -85,12 +86,18 @@ async function main(): Promise<void> {
     // 선언형 command 하니스: 레지스트리에서 spec 을 풀어 잡에 임베드(없으면 빌트인 폴백).
     resolveHarness: (tenant, id, version) => registry.get(tenant, id, version),
   });
-  // 배치 평가: 데이터셋(케이스 묶음)을 하니스@버전으로 돌려 스코어카드 집계. 단일 run 과 같은 디스패처/레지스트리 재사용.
+  // judge 실행기: model judge 는 테넌트 시크릿(ANTHROPIC_API_KEY)으로 실제 호출, 없으면 skip. harness 는 다음 증분.
+  const judgeRunner = defaultJudgeRunner({
+    secretsFor: (tenant) => (secretStore ? secretStore.entries(tenant) : Promise.resolve({})),
+  });
+  // 배치 평가: 데이터셋(케이스 묶음)을 하니스@버전으로 돌려 스코어카드 집계 + 선택한 judge 를 트레이스에 적용.
   const scorecardService = new ScorecardService({
     dispatcher: scheduler,
     store: scorecardStore,
     datasets: datasetRegistry,
     harnesses: registry,
+    judges: judgeRegistry,
+    judgeRunner,
     budget,
   });
   const app = buildServer({

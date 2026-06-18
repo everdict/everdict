@@ -1,13 +1,24 @@
 import { type BudgetTracker, type Dispatcher, costOf } from "@assay/backends";
-import { type AgentJob, AppError, type Dataset, type HarnessSpec, type Suite } from "@assay/core";
+import {
+  type AgentJob,
+  AppError,
+  type CaseResult,
+  type Dataset,
+  type GradeContext,
+  type HarnessSpec,
+  type JudgeSpec,
+  type Suite,
+} from "@assay/core";
 import type { ScorecardRecord, ScorecardStore } from "@assay/db";
-import type { DatasetRegistry, HarnessRegistry } from "@assay/registry";
+import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
 import { type Dispatch, runSuite, summarizeScorecard } from "@assay/suite";
+import type { JudgeRunner } from "./judge-runner.js";
 
 export interface RunScorecardInput {
   tenant: string;
   dataset: { id: string; version: string };
   harness: { id: string; version: string };
+  judges?: Array<{ id: string; version: string }>; // 선택한 Agent Judge 들 — 트레이스에 적용
 }
 
 export interface ScorecardServiceDeps {
@@ -15,6 +26,8 @@ export interface ScorecardServiceDeps {
   store: ScorecardStore;
   datasets: DatasetRegistry; // 데이터셋 해석(소유/_shared 폴백) + 케이스 로드
   harnesses?: HarnessRegistry; // 하니스 버전 해석(latest→구체) + spec 임베드(선언형). 빌트인은 폴백.
+  judges?: JudgeRegistry; // judge 해석(소유/_shared 폴백)
+  judgeRunner?: JudgeRunner; // 트레이스 기반 judge 실행(model 호출 / skip)
   budget?: BudgetTracker; // 케이스마다 admission/settle
   concurrency?: number;
   newId?: () => string;
@@ -62,7 +75,15 @@ export class ScorecardService {
       updatedAt: ts,
     };
     await this.deps.store.create(record);
-    void this.track(record.id, input.tenant, dataset, input.harness.id, harnessVersion, harnessSpec);
+    void this.track(
+      record.id,
+      input.tenant,
+      dataset,
+      input.harness.id,
+      harnessVersion,
+      harnessSpec,
+      input.judges ?? [],
+    );
     return record;
   }
 
@@ -81,6 +102,7 @@ export class ScorecardService {
     harnessId: string,
     harnessVersion: string,
     harnessSpec: HarnessSpec | undefined,
+    judges: Array<{ id: string; version: string }>,
   ): Promise<void> {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
     // 각 케이스 디스패치에 tenant/spec 을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
@@ -94,6 +116,7 @@ export class ScorecardService {
     try {
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases: dataset.cases };
       const scorecard = await runSuite(suite, harnessVersion, dispatch, { concurrency: this.concurrency });
+      await this.applyJudges(tenant, dataset, scorecard.results, judges); // 트레이스 → judge 점수(컨트롤플레인)
       const summary = summarizeScorecard(scorecard);
       await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
     } catch (err) {
@@ -102,6 +125,34 @@ export class ScorecardService {
           ? { code: err.code, message: err.message }
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
       await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
+    }
+  }
+
+  // 선택된 judge 들을 각 케이스 트레이스에 적용 → judge:<id> 점수를 결과 scores 에 덧붙인다(요약에 반영).
+  // 없는 judge 는 스킵; judge/runner 미설정이면 no-op(judge 미선택 run 과 동일).
+  private async applyJudges(
+    tenant: string,
+    dataset: Dataset,
+    results: CaseResult[],
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<void> {
+    if (judges.length === 0 || !this.deps.judges || !this.deps.judgeRunner) return;
+    const registry = this.deps.judges;
+    const runner = this.deps.judgeRunner;
+    const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
+    for (const sel of judges) {
+      let spec: JudgeSpec;
+      try {
+        spec = await registry.get(tenant, sel.id, sel.version || "latest");
+      } catch {
+        continue; // 없는 judge 는 조용히 스킵
+      }
+      for (const result of results) {
+        const evalCase = caseById.get(result.caseId);
+        if (!evalCase) continue;
+        const ctx: GradeContext = { case: evalCase, trace: result.trace, snapshot: result.snapshot };
+        result.scores.push(await runner.run(spec, tenant, ctx));
+      }
     }
   }
 }
