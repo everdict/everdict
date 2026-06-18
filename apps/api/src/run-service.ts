@@ -1,6 +1,6 @@
 import type { Dispatcher } from "@assay/backends";
 import { type BudgetTracker, costOf } from "@assay/backends";
-import { type AgentJob, AppError, type EvalCase } from "@assay/core";
+import { type AgentJob, AppError, type EvalCase, type HarnessSpec } from "@assay/core";
 import type { RunRecord, RunStore } from "@assay/db";
 
 export interface SubmitInput {
@@ -14,6 +14,8 @@ export interface RunServiceDeps {
   dispatcher: Dispatcher; // Scheduler(권장) 또는 Router — placement/공정성/오토스케일은 그쪽이 담당
   store: RunStore;
   budget?: BudgetTracker; // API 가 admission 게이트(초과 시 402)와 cost settle 을 담당
+  // 선언형 하니스 spec 을 레지스트리에서 풀어 잡에 임베드(없으면 빌트인 id 분기). 없는 하니스는 reject → undefined 폴백.
+  resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
   newId?: () => string;
   now?: () => string;
   fetch?: typeof fetch; // 웹훅용 (테스트 주입)
@@ -59,7 +61,17 @@ export class RunService {
   }
 
   private async track(id: string, input: SubmitInput): Promise<void> {
-    const job: AgentJob = { evalCase: input.case, harness: input.harness, tenant: input.tenant };
+    // 선언형 하니스(command 등)는 레지스트리에서 spec 을 풀어 잡에 임베드 — 에이전트가 코드 없이 해석.
+    // 빌트인(claude-code/scripted)은 레지스트리에 없으므로 undefined → id 분기로 폴백.
+    const harnessSpec = this.deps.resolveHarness
+      ? await this.deps.resolveHarness(input.tenant, input.harness.id, input.harness.version).catch(() => undefined)
+      : undefined;
+    const job: AgentJob = {
+      evalCase: input.case,
+      harness: input.harness,
+      tenant: input.tenant,
+      ...(harnessSpec ? { harnessSpec } : {}),
+    };
     try {
       const result = await this.deps.dispatcher.dispatch(job);
       this.deps.budget?.settle(input.tenant, costOf(result));

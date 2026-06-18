@@ -53,7 +53,13 @@ async function main(): Promise<void> {
 
   const { store, keyStore, registry, datasetRegistry } = await makePersistence();
   await seedSharedDatasets(datasetRegistry);
-  const service = new RunService({ dispatcher: scheduler, store, budget });
+  const service = new RunService({
+    dispatcher: scheduler,
+    store,
+    budget,
+    // 선언형 command 하니스: 레지스트리에서 spec 을 풀어 잡에 임베드(없으면 빌트인 폴백).
+    resolveHarness: (tenant, id, version) => registry.get(tenant, id, version),
+  });
   const app = buildServer({
     service,
     registry,

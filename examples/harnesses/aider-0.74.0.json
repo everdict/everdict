@@ -1,0 +1,10 @@
+{
+  "kind": "command",
+  "id": "aider",
+  "version": "0.74.0",
+  "setup": ["pip install --quiet aider-chat==0.74.0"],
+  "command": "aider --yes --no-git --no-auto-commits --message {{task}} --model {{model}} .",
+  "model": "sonnet",
+  "env": {},
+  "trace": { "kind": "none" }
+}

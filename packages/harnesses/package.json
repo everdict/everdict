@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@assay/core": "workspace:*"
+    "@assay/core": "workspace:*",
+    "@assay/trace": "workspace:*"
   }
 }

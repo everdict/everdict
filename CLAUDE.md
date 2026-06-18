@@ -31,7 +31,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `packages/core`         — contracts only (interfaces + Zod schemas + errors). Dependency ROOT. No I/O, no SDKs.
 - `packages/drivers`      — *in-sandbox compute* (`ComputeHandle`): LocalDriver (dev / inside the agent).
 - `packages/environments` — the world a run acts on (`RepoEnvironment`: seed + git-diff snapshot).
-- `packages/harnesses`    — the agent under test, driven over a process boundary (ClaudeCodeHarness, ScriptedHarness).
+- `packages/harnesses`    — the agent under test, driven over a process boundary (ClaudeCodeHarness, ScriptedHarness, + declarative `CommandHarness` — any CLI agent from a `HarnessSpec(command)`, no code. See `docs/command-harness.md`).
 - `packages/graders`      — scoring, fully separate from the harness (tests-pass / cost / steps / latency).
 - `packages/runner`       — the eval loop (`runCase`).
 - `packages/agent`        — the dispatched unit (model B): runs `runCase` inside an isolated job, emits the result.

@@ -56,5 +56,33 @@ export const ServiceHarnessSpecSchema = z.object({
 });
 export type ServiceHarnessSpec = z.infer<typeof ServiceHarnessSpecSchema>;
 
-export const HarnessSpecSchema = z.discriminatedUnion("kind", [ProcessHarnessSpecSchema, ServiceHarnessSpecSchema]);
+// command 하니스의 트레이스 추출: 없음(결과만) | OTel/MLflow pull(runId 로 상관).
+export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("none") }),
+  z.object({ kind: z.literal("otel"), endpoint: z.string() }),
+  z.object({ kind: z.literal("mlflow"), endpoint: z.string() }),
+]);
+export type CommandTraceSpec = z.infer<typeof CommandTraceSpecSchema>;
+
+// command 하니스: 선언형 프로세스 — 어떤 CLI 에이전트(aider 등)든 코드 어댑터 없이 스펙만으로 등록.
+// setup(설치) → command(템플릿 {{task}}/{{model}}/{{run_id}}) 실행 → trace(none/otel/mlflow) 추출.
+// 제너릭 CommandHarness(@assay/harnesses) 가 해석한다. 임의 코드 실행이므로 trust-zone 격리가 강제된다.
+export const CommandHarnessSpecSchema = z.object({
+  kind: z.literal("command"),
+  id: z.string(),
+  version: z.string(),
+  image: z.string().optional(), // 디스패치 이미지(없으면 기본 에이전트 이미지). setup 으로 도구 설치.
+  setup: z.array(z.string()).default([]), // 샌드박스에서 1회 실행(예: "pip install aider-chat==0.74.0")
+  command: z.string(), // 예: "aider --yes --message {{task}} --model {{model}} ."
+  env: z.record(z.string()).default({}),
+  model: z.string().optional(),
+  trace: CommandTraceSpecSchema.default({ kind: "none" }),
+});
+export type CommandHarnessSpec = z.infer<typeof CommandHarnessSpecSchema>;
+
+export const HarnessSpecSchema = z.discriminatedUnion("kind", [
+  ProcessHarnessSpecSchema,
+  ServiceHarnessSpecSchema,
+  CommandHarnessSpecSchema,
+]);
 export type HarnessSpec = z.infer<typeof HarnessSpecSchema>;
