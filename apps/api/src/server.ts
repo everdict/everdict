@@ -1,7 +1,7 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
 import { AppError, DatasetSchema, EvalCaseSchema, HarnessSpecSchema } from "@assay/core";
-import { type TenantKeyStore, issueKey } from "@assay/db";
+import { type SecretStore, type TenantKeyStore, issueKey } from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry } from "@assay/registry";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -23,11 +23,15 @@ export const RunScorecardBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
 });
 
+// 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
+export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
+
 export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
   registry?: HarnessRegistry; // 하니스 CRUD (없으면 해당 라우트 비활성)
   datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
+  secretStore?: SecretStore; // 워크스페이스 시크릿 관리 (없으면=ASSAY_SECRETS_KEY 미설정 → 해당 라우트 비활성)
   authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
   keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
   internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
@@ -349,6 +353,50 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- secrets (워크스페이스 모델/프로바이더 키 관리; 값은 at-rest 암호화 + 절대 read-back 안 함) ---
+  app.get("/secrets", async (req, reply) => {
+    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "secrets:read");
+      return reply.send(await deps.secretStore.list(principal.workspace)); // 이름 + 메타만(값 없음)
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.put<{ Params: { name: string } }>("/secrets/:name", async (req, reply) => {
+    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const name = SecretNameSchema.safeParse(req.params.name);
+    if (!name.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "시크릿 이름은 env 형식(^[A-Z_][A-Z0-9_]*$)" });
+    const body = z.object({ value: z.string().min(1) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      gate(principal, "secrets:write");
+      await deps.secretStore.set(principal.workspace, name.data, body.data.value);
+      return reply.code(204).send(); // 값은 다시 돌려주지 않는다
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { name: string } }>("/secrets/:name", async (req, reply) => {
+    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "secrets:write");
+      await deps.secretStore.remove(principal.workspace, req.params.name);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- internal: 키 발급 (x-internal-token 가드, 미설정 시 fail-closed) ---
   app.post("/internal/tenant-keys", async (req, reply) => {
     if (!deps.internalToken || !deps.keyStore)
@@ -397,6 +445,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           scorecardService: deps.scorecardService,
           registry: deps.registry,
           datasetRegistry: deps.datasetRegistry,
+          secretStore: deps.secretStore,
         },
         principal,
       ).connect(transport);

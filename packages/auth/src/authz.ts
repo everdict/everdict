@@ -11,7 +11,9 @@ export type Action =
   | "datasets:read"
   | "datasets:write"
   | "scorecards:read"
-  | "scorecards:run";
+  | "scorecards:run"
+  | "secrets:read"
+  | "secrets:write";
 
 export const ASSAY_ROLES = ["viewer", "member", "admin"] as const;
 export type AssayRole = (typeof ASSAY_ROLES)[number];
@@ -36,6 +38,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "datasets:write",
     "scorecards:read",
     "scorecards:run",
+    "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
+    "secrets:write",
   ]),
 };
 

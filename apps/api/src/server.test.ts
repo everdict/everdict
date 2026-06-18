@@ -2,7 +2,14 @@ import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from 
 import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
-import { InMemoryRunStore, InMemoryScorecardStore, InMemoryTenantKeyStore, issueKey } from "@assay/db";
+import {
+  InMemoryRunStore,
+  InMemoryScorecardStore,
+  InMemorySecretStore,
+  InMemoryTenantKeyStore,
+  aesGcmCipher,
+  issueKey,
+} from "@assay/db";
 import { InMemoryDatasetRegistry, InMemoryHarnessRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { RunService } from "./run-service.js";
@@ -84,18 +91,20 @@ function server(
     datasets: datasetRegistry,
     newId: () => `sc-${n++}`,
   });
+  const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
   const app = buildServer({
     service: svc,
     scorecardService,
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
+    secretStore,
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
     internalToken: opts.internalToken,
     requireAuth: opts.requireAuth,
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
   });
-  return { app, keyStore, datasetRegistry };
+  return { app, keyStore, datasetRegistry, secretStore };
 }
 
 describe("API — dev fallback (no auth required)", () => {
@@ -473,6 +482,43 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
     expect((await app.inject({ method: "GET", url: "/scorecards", headers: { authorization: beta } })).json()).toEqual(
       [],
     );
+    await app.close();
+  });
+});
+
+describe("API — secrets (workspace model/provider keys)", () => {
+  it("admin: set/list(이름만)/delete; 값은 절대 반환하지 않음", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    expect(
+      (await app.inject({ method: "PUT", url: "/secrets/OPENAI_API_KEY", headers: h, payload: { value: "sk-secret" } }))
+        .statusCode,
+    ).toBe(204);
+    const list = await app.inject({ method: "GET", url: "/secrets", headers: h });
+    expect(list.json().map((s: { name: string }) => s.name)).toEqual(["OPENAI_API_KEY"]);
+    expect(list.payload).not.toContain("sk-secret"); // 값 미노출
+    expect((await app.inject({ method: "DELETE", url: "/secrets/OPENAI_API_KEY", headers: h })).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: "/secrets", headers: h })).json()).toEqual([]);
+    await app.close();
+  });
+
+  it("env 형식이 아닌 이름은 400", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    expect(
+      (await app.inject({ method: "PUT", url: "/secrets/bad-name", headers: h, payload: { value: "x" } })).statusCode,
+    ).toBe(400);
+    await app.close();
+  });
+
+  it("member 는 시크릿 관리 불가 (403)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await app.inject({ method: "GET", url: "/secrets", headers: h })).statusCode).toBe(403);
+    expect(
+      (await app.inject({ method: "PUT", url: "/secrets/OPENAI_API_KEY", headers: h, payload: { value: "x" } }))
+        .statusCode,
+    ).toBe(403);
     await app.close();
   });
 });

@@ -34,3 +34,15 @@ export {
   generateKey,
   issueKey,
 } from "./tenant-auth.js";
+export {
+  type SecretCipher,
+  type EncryptedSecret,
+  aesGcmCipher,
+  cipherFromEnv,
+} from "./secret-cipher.js";
+export {
+  type SecretStore,
+  type SecretMeta,
+  InMemorySecretStore,
+  PgSecretStore,
+} from "./secret-store.js";

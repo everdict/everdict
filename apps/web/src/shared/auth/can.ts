@@ -9,6 +9,8 @@ export type WebAction =
   | 'datasets:write'
   | 'scorecards:read'
   | 'scorecards:run'
+  | 'secrets:read'
+  | 'secrets:write'
 
 const PERMS: Record<string, WebAction[]> = {
   viewer: ['runs:read', 'harnesses:read', 'datasets:read', 'scorecards:read'],
@@ -30,6 +32,8 @@ const PERMS: Record<string, WebAction[]> = {
     'datasets:write',
     'scorecards:read',
     'scorecards:run',
+    'secrets:read', // 시크릿 관리 = admin
+    'secrets:write',
   ],
 }
 

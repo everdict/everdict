@@ -136,12 +136,12 @@ export class NomadBackend implements Backend {
   }
 
   // 테넌트 존/시크릿을 잡마다 적용·강제: untrusted 는 강격리 필수, 전용 네임스페이스, 그 테넌트의 키만 주입.
-  private effectiveOpts(job: AgentJob): NomadBackendOptions {
+  private async effectiveOpts(job: AgentJob): Promise<NomadBackendOptions> {
     const tenant = job.tenant ?? "default";
     const zone = this.opts.trustZones?.resolve(tenant);
     if (zone) assertHardenedIsolation(zone);
     // 시크릿 스코핑: provider 가 있으면 그 테넌트 것만, 없으면 기존 secretEnv.
-    const secretEnv = this.opts.secrets ? this.opts.secrets.secretsFor(tenant) : this.opts.secretEnv;
+    const secretEnv = this.opts.secrets ? await this.opts.secrets.secretsFor(tenant) : this.opts.secretEnv;
     if (!zone) return { ...this.opts, secretEnv };
     return {
       ...this.opts,
@@ -152,7 +152,7 @@ export class NomadBackend implements Backend {
   }
 
   async dispatch(job: AgentJob): Promise<CaseResult> {
-    const opts = this.effectiveOpts(job);
+    const opts = await this.effectiveOpts(job);
     const ns = opts.namespace;
     const submit = await this.http.request("POST", "/v1/jobs", buildNomadJob(job, opts));
     if (submit.status >= 300) {

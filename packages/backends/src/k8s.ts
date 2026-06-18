@@ -199,10 +199,12 @@ export class K8sBackend implements Backend {
   }
 
   // 테넌트 존/시크릿을 잡마다 적용·강제: untrusted 는 강격리 필수, 전용 네임스페이스, 그 테넌트 키만 주입.
-  private resolve(job: AgentJob): { ns: string; runtimeClassName?: string; secretEnv?: Record<string, string> } {
+  private async resolve(
+    job: AgentJob,
+  ): Promise<{ ns: string; runtimeClassName?: string; secretEnv?: Record<string, string> }> {
     const tenant = job.tenant ?? "default";
     const zone = this.opts.trustZones?.resolve(tenant);
-    const secretEnv = this.opts.secrets ? this.opts.secrets.secretsFor(tenant) : this.opts.secretEnv;
+    const secretEnv = this.opts.secrets ? await this.opts.secrets.secretsFor(tenant) : this.opts.secretEnv;
     if (!zone) return { ns: this.opts.namespace ?? "default", runtimeClassName: this.opts.runtimeClass, secretEnv };
     assertHardenedIsolation(zone);
     // 하드닝 런타임만 RuntimeClass 로 매핑(runsc→gvisor/kata). runc/none(trusted dev)은 클러스터 기본 런타임.
@@ -211,7 +213,7 @@ export class K8sBackend implements Backend {
   }
 
   async dispatch(job: AgentJob): Promise<CaseResult> {
-    const { ns, runtimeClassName, secretEnv } = this.resolve(job);
+    const { ns, runtimeClassName, secretEnv } = await this.resolve(job);
     const name = k8sJobName(job);
     await this.api.ensureNamespace(ns);
     await this.api.applyJob(buildK8sJob(job, { ...this.opts, secretEnv }, name, ns, runtimeClassName), ns);

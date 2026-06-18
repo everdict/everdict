@@ -1,5 +1,6 @@
 import { type Action, type Principal, authorize } from "@assay/auth";
 import { AppError, DatasetSchema, EvalCaseSchema, HarnessSpecSchema } from "@assay/core";
+import type { SecretStore } from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry } from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -14,6 +15,7 @@ export interface McpDeps {
   scorecardService?: ScorecardService;
   registry?: HarnessRegistry;
   datasetRegistry?: DatasetRegistry;
+  secretStore?: SecretStore;
 }
 
 function ok(data: unknown): CallToolResult {
@@ -264,6 +266,38 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const record = await scorecards.get(id);
           if (!record || record.tenant !== ws) return fail("NOT_FOUND: scorecard 를 찾을 수 없습니다.");
           return ok(record);
+        }),
+    );
+  }
+
+  if (deps.secretStore) {
+    const secrets = deps.secretStore;
+    server.registerTool(
+      "list_secrets",
+      { description: "이 워크스페이스의 시크릿 이름 목록(값은 반환하지 않음)", inputSchema: {} },
+      () => run(principal, "secrets:read", async () => ok(await secrets.list(ws))),
+    );
+    server.registerTool(
+      "set_secret",
+      {
+        description:
+          "워크스페이스 시크릿 설정/갱신(at-rest 암호화; 값은 다시 못 봄). 모델/프로바이더 키. name 은 env 형식.",
+        inputSchema: { name: z.string().describe("env 이름 ^[A-Z_][A-Z0-9_]*$"), value: z.string() },
+      },
+      ({ name, value }) =>
+        run(principal, "secrets:write", async () => {
+          if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) return fail("BAD_REQUEST: 시크릿 이름은 ^[A-Z_][A-Z0-9_]*$ 형식");
+          await secrets.set(ws, name, value);
+          return ok({ workspace: ws, name, set: true });
+        }),
+    );
+    server.registerTool(
+      "delete_secret",
+      { description: "워크스페이스 시크릿 삭제", inputSchema: { name: z.string() } },
+      ({ name }) =>
+        run(principal, "secrets:write", async () => {
+          await secrets.remove(ws, name);
+          return ok({ workspace: ws, name, deleted: true });
         }),
     );
   }

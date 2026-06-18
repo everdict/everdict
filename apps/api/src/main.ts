@@ -12,13 +12,17 @@ import {
 import {
   InMemoryRunStore,
   InMemoryScorecardStore,
+  InMemorySecretStore,
   InMemoryTenantKeyStore,
   PgRunStore,
   PgScorecardStore,
+  PgSecretStore,
   PgTenantKeyStore,
   type RunStore,
   type ScorecardStore,
+  type SecretStore,
   type TenantKeyStore,
+  cipherFromEnv,
   makePool,
   migrate,
   sqlClient,
@@ -44,19 +48,30 @@ async function main(): Promise<void> {
   const k8sContext = process.env.ASSAY_K8S_CONTEXT;
   const image = process.env.ASSAY_AGENT_IMAGE;
 
+  const { store, scorecardStore, keyStore, registry, datasetRegistry, secretStore } = await makePersistence();
+  await seedSharedDatasets(datasetRegistry);
+
+  // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소 있을 때만.
+  const ss = secretStore;
+  const secrets = ss ? { secretsFor: (tenant: string) => ss.entries(tenant) } : undefined;
+
   const backends = new BackendRegistry();
   if (nomadAddr && image) {
-    backends.register("nomad", new NomadBackend({ addr: nomadAddr, image, secretEnv: collectAuthEnv() }));
+    backends.register(
+      "nomad",
+      new NomadBackend({ addr: nomadAddr, image, secretEnv: collectAuthEnv(), ...(secrets ? { secrets } : {}) }),
+    );
   } else if (k8sContext && image) {
-    backends.register("k8s", new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv() }));
+    backends.register(
+      "k8s",
+      new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv(), ...(secrets ? { secrets } : {}) }),
+    );
   } else {
     backends.register("local", new LocalBackend());
   }
   const scheduler = new Scheduler(backends);
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
-  const { store, scorecardStore, keyStore, registry, datasetRegistry } = await makePersistence();
-  await seedSharedDatasets(datasetRegistry);
   const service = new RunService({
     dispatcher: scheduler,
     store,
@@ -77,6 +92,7 @@ async function main(): Promise<void> {
     scorecardService,
     registry,
     datasetRegistry,
+    ...(secretStore ? { secretStore } : {}),
     authenticator: buildAuthenticator(keyStore),
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
@@ -97,10 +113,13 @@ interface Persistence {
   keyStore: TenantKeyStore;
   registry: HarnessRegistry;
   datasetRegistry: DatasetRegistry;
+  secretStore?: SecretStore; // ASSAY_SECRETS_KEY 있을 때만(fail-closed: 키 없으면 시크릿 기능 비활성)
 }
 
 // DATABASE_URL 이 있으면 Postgres(기동 시 마이그레이션 적용), 없으면 in-memory.
+// 시크릿 저장소는 ASSAY_SECRETS_KEY(base64 32B) 가 있을 때만(at-rest 암호화 KEK). 없으면 secretStore=undefined.
 async function makePersistence(): Promise<Persistence> {
+  const cipher = cipherFromEnv();
   const url = process.env.DATABASE_URL;
   if (!url) {
     return {
@@ -109,6 +128,7 @@ async function makePersistence(): Promise<Persistence> {
       keyStore: new InMemoryTenantKeyStore(),
       registry: new InMemoryHarnessRegistry(),
       datasetRegistry: new InMemoryDatasetRegistry(),
+      ...(cipher ? { secretStore: new InMemorySecretStore(cipher) } : {}),
     };
   }
   const client = sqlClient(makePool(url));
@@ -120,6 +140,7 @@ async function makePersistence(): Promise<Persistence> {
     keyStore: new PgTenantKeyStore(client),
     registry: new PgHarnessRegistry(client),
     datasetRegistry: new PgDatasetRegistry(client),
+    ...(cipher ? { secretStore: new PgSecretStore(client, cipher) } : {}),
   };
 }
 
