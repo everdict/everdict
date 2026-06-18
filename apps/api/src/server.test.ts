@@ -10,7 +10,7 @@ import {
   aesGcmCipher,
   issueKey,
 } from "@assay/db";
-import { InMemoryDatasetRegistry, InMemoryHarnessRegistry } from "@assay/registry";
+import { InMemoryDatasetRegistry, InMemoryHarnessRegistry, InMemoryJudgeRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
@@ -59,6 +59,13 @@ const DATASET = {
   version: "1.0.0",
   cases: [{ id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [{ id: "steps" }] }],
 };
+const JUDGE = {
+  kind: "model",
+  id: "correctness",
+  version: "1.0.0",
+  model: "claude-opus-4-8",
+  rubric: "Did the agent complete the task correctly?",
+};
 
 // 토큰 무관하게 고정 역할 Principal 을 주는 스텁(authZ 테스트용).
 const roleAuth = (roles: string[], workspace = "acme"): Authenticator => ({
@@ -97,6 +104,7 @@ function server(
     scorecardService,
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
+    judgeRegistry: new InMemoryJudgeRegistry(),
     secretStore,
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
@@ -519,6 +527,74 @@ describe("API — secrets (workspace model/provider keys)", () => {
       (await app.inject({ method: "PUT", url: "/secrets/OPENAI_API_KEY", headers: h, payload: { value: "x" } }))
         .statusCode,
     ).toBe(403);
+    await app.close();
+  });
+});
+
+describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
+  it("viewer 는 읽기만(write 403); member 는 등록 가능", async () => {
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await viewer.app.inject({ method: "GET", url: "/judges", headers: h })).statusCode).toBe(200);
+    expect((await viewer.app.inject({ method: "POST", url: "/judges", headers: h, payload: JUDGE })).statusCode).toBe(
+      403,
+    );
+    await viewer.app.close();
+
+    const member = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    expect((await member.app.inject({ method: "POST", url: "/judges", headers: h, payload: JUDGE })).statusCode).toBe(
+      201,
+    );
+    await member.app.close();
+  });
+
+  it("등록 → 본인은 보이고 타 워크스페이스는 못 봄(get 404); 불변성 409", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    expect(
+      (await app.inject({ method: "POST", url: "/judges", headers: { authorization: acme }, payload: JUDGE }))
+        .statusCode,
+    ).toBe(201);
+    const aGet = await app.inject({
+      method: "GET",
+      url: "/judges/correctness/versions/latest",
+      headers: { authorization: acme },
+    });
+    expect(aGet.statusCode).toBe(200);
+    expect(aGet.json()).toMatchObject({ kind: "model", id: "correctness", model: "claude-opus-4-8" });
+    const bGet = await app.inject({
+      method: "GET",
+      url: "/judges/correctness/versions/latest",
+      headers: { authorization: beta },
+    });
+    expect(bGet.statusCode).toBe(404);
+
+    const mutated = { ...JUDGE, rubric: "changed" };
+    const dup = await app.inject({
+      method: "POST",
+      url: "/judges",
+      headers: { authorization: acme },
+      payload: mutated,
+    });
+    expect(dup.statusCode).toBe(409);
+    await app.close();
+  });
+
+  it("validate dry-run: harness 종류도 검증 + versionExists 표시, 등록 안 함", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const harnessJudge = {
+      kind: "harness",
+      id: "reviewer",
+      version: "1.0.0",
+      harness: { id: "claude-code", version: "latest" },
+    };
+    const v1 = await app.inject({ method: "POST", url: "/judges/validate", headers: h, payload: harnessJudge });
+    expect(v1.json()).toMatchObject({ ok: true, kind: "harness", id: "reviewer", versionExists: false });
+    await app.inject({ method: "POST", url: "/judges", headers: h, payload: harnessJudge }); // 실제 등록
+    const v2 = await app.inject({ method: "POST", url: "/judges/validate", headers: h, payload: harnessJudge });
+    expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
     await app.close();
   });
 });

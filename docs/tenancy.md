@@ -49,6 +49,20 @@ fallback (first-party benchmark datasets seeded from `examples/datasets`), immut
 
 See `docs/datasets.md`.
 
+## Agent Judges (`@assay/registry`)
+Judges reuse the identical ownership model — `(tenant, id, version)`, owner-first with `_shared` fallback
+(first-party default judges from `examples/judges`), immutable versions. A judge is `model` (LLM/VLM call) or
+`harness` (delegate to a registered harness). Writes are **member+** (users self-register their judges).
+
+| Method | Path | Action (role) | Effect |
+|---|---|---|---|
+| `POST` | `/judges` | `judges:write` (**member+**) | register a `JudgeSpec` (immutable → **409**) |
+| `POST` | `/judges/validate` | `judges:write` (**member+**) | dry-run: schema + own `existingVersions`/`versionExists` (no write) |
+| `GET`  | `/judges` | `judges:read` (viewer+) | list own + `_shared` (`{id, owner, versions}`) |
+| `GET`  | `/judges/:id/versions/:version` | `judges:read` (viewer+) | full `JudgeSpec` (`version` may be `latest`; other workspace → **404**) |
+
+See `docs/judges.md`.
+
 ## Scorecards (batch evals)
 `POST /scorecards` (a dataset × `harness@version` → aggregated `Scorecard`) requires `scorecards:run`
 (**member+**); `GET /scorecards`, `GET /scorecards/:id` require `scorecards:read` (viewer+). All

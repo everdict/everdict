@@ -1,7 +1,7 @@
 import { type Action, type Principal, authorize } from "@assay/auth";
-import { AppError, DatasetSchema, EvalCaseSchema, HarnessSpecSchema } from "@assay/core";
+import { AppError, DatasetSchema, EvalCaseSchema, HarnessSpecSchema, JudgeSpecSchema } from "@assay/core";
 import type { SecretStore } from "@assay/db";
-import type { DatasetRegistry, HarnessRegistry } from "@assay/registry";
+import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -15,6 +15,7 @@ export interface McpDeps {
   scorecardService?: ScorecardService;
   registry?: HarnessRegistry;
   datasetRegistry?: DatasetRegistry;
+  judgeRegistry?: JudgeRegistry;
   secretStore?: SecretStore;
 }
 
@@ -218,6 +219,77 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const result = DatasetSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           await datasets.register(ws, result.data);
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+        }),
+    );
+  }
+
+  if (deps.judgeRegistry) {
+    const judges = deps.judgeRegistry;
+    server.registerTool(
+      "list_judges",
+      { description: "이 워크스페이스가 보는 Agent Judge(소유 + _shared 기본 judge)", inputSchema: {} },
+      () => run(principal, "judges:read", async () => ok(await judges.list(ws))),
+    );
+
+    server.registerTool(
+      "get_judge",
+      {
+        description: "JudgeSpec 1건 전체(model | harness). version 기본 latest. 다른 워크스페이스는 NOT_FOUND",
+        inputSchema: { id: z.string(), version: z.string().optional() },
+      },
+      ({ id, version }) => run(principal, "judges:read", async () => ok(await judges.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "validate_judge",
+      {
+        description: "JudgeSpec(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
+        inputSchema: { judge: z.string().describe("JudgeSpec JSON (kind: model | harness)") },
+      },
+      ({ judge }) =>
+        run(principal, "judges:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(judge);
+          } catch {
+            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+          }
+          const result = JudgeSpecSchema.safeParse(parsed);
+          if (!result.success)
+            return ok({
+              ok: false,
+              errors: result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+            });
+          const existingVersions = await judges.ownVersions(ws, result.data.id);
+          return ok({
+            ok: true,
+            kind: result.data.kind,
+            id: result.data.id,
+            version: result.data.version,
+            existingVersions,
+            versionExists: existingVersions.includes(result.data.version),
+          });
+        }),
+    );
+
+    server.registerTool(
+      "create_judge",
+      {
+        description: "JudgeSpec(JSON 문자열)을 이 워크스페이스 소유로 등록(model/harness; 불변; 충돌 시 CONFLICT)",
+        inputSchema: { judge: z.string().describe("JudgeSpec JSON") },
+      },
+      ({ judge }) =>
+        run(principal, "judges:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(judge);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 JudgeSpec JSON 이 아닙니다.");
+          }
+          const result = JudgeSpecSchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          await judges.register(ws, result.data);
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );

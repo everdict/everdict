@@ -12,6 +12,8 @@ export type Action =
   | "datasets:write"
   | "scorecards:read"
   | "scorecards:run"
+  | "judges:read"
+  | "judges:write"
   | "secrets:read"
   | "secrets:write";
 
@@ -19,7 +21,7 @@ export const ASSAY_ROLES = ["viewer", "member", "admin"] as const;
 export type AssayRole = (typeof ASSAY_ROLES)[number];
 
 const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
-  viewer: new Set<Action>(["runs:read", "harnesses:read", "datasets:read", "scorecards:read"]),
+  viewer: new Set<Action>(["runs:read", "harnesses:read", "datasets:read", "scorecards:read", "judges:read"]),
   member: new Set<Action>([
     "runs:read",
     "runs:submit",
@@ -28,6 +30,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "datasets:write",
     "scorecards:read",
     "scorecards:run",
+    "judges:read",
+    "judges:write",
   ]),
   admin: new Set<Action>([
     "runs:read",
@@ -38,6 +42,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "datasets:write",
     "scorecards:read",
     "scorecards:run",
+    "judges:read",
+    "judges:write",
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
     "secrets:write",
   ]),

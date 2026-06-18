@@ -16,6 +16,10 @@ arrives by polling or webhook.
 | `POST` | `/datasets/validate` | dry-run: schema + existing versions/conflict, no write (`datasets:write`) |
 | `GET`  | `/datasets` | workspace-owned + `_shared` datasets (`datasets:read`) |
 | `GET`  | `/datasets/:id/versions/:version` | full `Dataset` incl. cases; `version` may be `latest` (`datasets:read`) |
+| `POST` | `/judges` | register a `JudgeSpec` (model \| harness; immutable → `409`) (`judges:write`, member+) |
+| `POST` | `/judges/validate` | dry-run: schema + existing versions/conflict, no write (`judges:write`) |
+| `GET`  | `/judges` | workspace-owned + `_shared` Agent Judges (`judges:read`) |
+| `GET`  | `/judges/:id/versions/:version` | full `JudgeSpec`; `version` may be `latest` (`judges:read`) |
 | `POST` | `/scorecards` | `{ dataset:{id,version?}, harness:{id,version?} }` → **202** `ScorecardRecord(queued)` (`scorecards:run`, member+) |
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |
 | `GET`  | `/scorecards/:id` | full `ScorecardRecord` (incl. per-case `scorecard`) or 404 (`scorecards:read`) |

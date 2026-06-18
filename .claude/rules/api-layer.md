@@ -15,8 +15,8 @@ See skill `api-layer`.
   `Principal{subject,workspace,roles,via}` (OIDC/Keycloak + API key, composed). With `requireAuth` a
   missing/invalid credential is 401, else dev falls back to `x-assay-tenant` (admin). Gate mutating routes with
   `authorize(principal, action)` (403 on deny); EVERY read/write is **workspace-scoped** (runs + harnesses +
-  datasets + scorecards) — never trust a client-supplied tenant when auth is on; another workspace's resource
-  reads 404, not 403. See `docs/auth.md` + rule `auth`.
+  datasets + judges + scorecards) — never trust a client-supplied tenant when auth is on; another workspace's
+  resource reads 404, not 403. See `docs/auth.md` + rule `auth`.
 - **BFF↔MCP parity**: a new capability = one service core + two transports (HTTP route in `server.ts` + MCP tool
-  in `mcp.ts`), never a fork. Datasets/scorecards mirror this; see rule `mcp` + `docs/datasets.md` +
-  `docs/scorecards.md`.
+  in `mcp.ts`), never a fork. Datasets/judges/scorecards mirror this; see rule `mcp` + `docs/datasets.md` +
+  `docs/judges.md` + `docs/scorecards.md`.

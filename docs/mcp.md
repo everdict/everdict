@@ -6,8 +6,8 @@ validates the token. Humans use the web; agents (Claude Code, CI, custom) use MC
 
 ## Tools
 Streamable-HTTP MCP endpoint at `POST /mcp` (stateful sessions). Each tool runs over the **same service core** as
-the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `DatasetRegistry`), is **role-gated**
-(`authorize(principal, action)`) and **workspace-scoped**:
+the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `DatasetRegistry` + `JudgeRegistry`), is
+**role-gated** (`authorize(principal, action)`) and **workspace-scoped**:
 
 | Tool | Action (role) | Effect |
 |---|---|---|
@@ -21,6 +21,10 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `get_dataset` | `datasets:read` | one dataset incl. cases (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_dataset` | `datasets:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
 | `create_dataset` | `datasets:write` (member+) | register a `Dataset` (immutable → `CONFLICT`) |
+| `list_judges` | `judges:read` (viewer+) | workspace-owned + `_shared` Agent Judges (model \| harness) |
+| `get_judge` | `judges:read` | one `JudgeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
+| `validate_judge` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
+| `create_judge` | `judges:write` (member+) | register a `JudgeSpec` (immutable → `CONFLICT`) |
 | `run_scorecard` | `scorecards:run` (member+) | batch-eval a dataset × `harness@version` → queued `ScorecardRecord` (poll with `get_scorecard`) |
 | `list_scorecards` | `scorecards:read` (viewer+) | the workspace's scorecards (summary only) |
 | `get_scorecard` | `scorecards:read` | one scorecard incl. per-case results (other workspace → `NOT_FOUND`) |

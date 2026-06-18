@@ -32,9 +32,13 @@ import {
   type HarnessRegistry,
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
+  InMemoryJudgeRegistry,
+  type JudgeRegistry,
   PgDatasetRegistry,
   PgHarnessRegistry,
+  PgJudgeRegistry,
   loadDatasetDir,
+  loadJudgeDir,
 } from "@assay/registry";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
@@ -48,8 +52,10 @@ async function main(): Promise<void> {
   const k8sContext = process.env.ASSAY_K8S_CONTEXT;
   const image = process.env.ASSAY_AGENT_IMAGE;
 
-  const { store, scorecardStore, keyStore, registry, datasetRegistry, secretStore } = await makePersistence();
+  const { store, scorecardStore, keyStore, registry, datasetRegistry, judgeRegistry, secretStore } =
+    await makePersistence();
   await seedSharedDatasets(datasetRegistry);
+  await seedSharedJudges(judgeRegistry);
 
   // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소 있을 때만.
   const ss = secretStore;
@@ -92,6 +98,7 @@ async function main(): Promise<void> {
     scorecardService,
     registry,
     datasetRegistry,
+    judgeRegistry,
     ...(secretStore ? { secretStore } : {}),
     authenticator: buildAuthenticator(keyStore),
     keyStore,
@@ -113,6 +120,7 @@ interface Persistence {
   keyStore: TenantKeyStore;
   registry: HarnessRegistry;
   datasetRegistry: DatasetRegistry;
+  judgeRegistry: JudgeRegistry;
   secretStore?: SecretStore; // ASSAY_SECRETS_KEY 있을 때만(fail-closed: 키 없으면 시크릿 기능 비활성)
 }
 
@@ -128,6 +136,7 @@ async function makePersistence(): Promise<Persistence> {
       keyStore: new InMemoryTenantKeyStore(),
       registry: new InMemoryHarnessRegistry(),
       datasetRegistry: new InMemoryDatasetRegistry(),
+      judgeRegistry: new InMemoryJudgeRegistry(),
       ...(cipher ? { secretStore: new InMemorySecretStore(cipher) } : {}),
     };
   }
@@ -140,6 +149,7 @@ async function makePersistence(): Promise<Persistence> {
     keyStore: new PgTenantKeyStore(client),
     registry: new PgHarnessRegistry(client),
     datasetRegistry: new PgDatasetRegistry(client),
+    judgeRegistry: new PgJudgeRegistry(client),
     ...(cipher ? { secretStore: new PgSecretStore(client, cipher) } : {}),
   };
 }
@@ -151,6 +161,17 @@ async function seedSharedDatasets(registry: DatasetRegistry): Promise<void> {
   try {
     await loadDatasetDir(dir, { into: registry });
     console.error(`▶ shared datasets seeded from ${dir}`);
+  } catch {
+    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+  }
+}
+
+// _shared(first-party 기본 judge)를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 기본 judge 사용 가능. best-effort/멱등.
+async function seedSharedJudges(registry: JudgeRegistry): Promise<void> {
+  const dir = process.env.ASSAY_JUDGES_DIR ?? `${process.cwd()}/examples/judges`;
+  try {
+    await loadJudgeDir(dir, { into: registry });
+    console.error(`▶ shared judges seeded from ${dir}`);
   } catch {
     // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
   }

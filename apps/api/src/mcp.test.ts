@@ -2,7 +2,7 @@ import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@assay/db";
-import { InMemoryDatasetRegistry, InMemoryHarnessRegistry } from "@assay/registry";
+import { InMemoryDatasetRegistry, InMemoryHarnessRegistry, InMemoryJudgeRegistry } from "@assay/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
@@ -46,6 +46,7 @@ function harness() {
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
+    judgeRegistry: new InMemoryJudgeRegistry(),
     scorecardService: new ScorecardService({
       dispatcher: okDispatcher,
       store: new InMemoryScorecardStore(),
@@ -73,11 +74,14 @@ describe("MCP tools", () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "create_dataset",
+      "create_judge",
       "get_dataset",
+      "get_judge",
       "get_run",
       "get_scorecard",
       "list_datasets",
       "list_harnesses",
+      "list_judges",
       "list_runs",
       "list_scorecards",
       "register_harness",
@@ -85,6 +89,7 @@ describe("MCP tools", () => {
       "submit_run",
       "validate_dataset",
       "validate_harness",
+      "validate_judge",
     ]);
   });
 
@@ -200,6 +205,33 @@ describe("MCP tools", () => {
 
     const beta = await connect(deps, ["member"], "beta");
     const notFound = await beta.callTool({ name: "get_scorecard", arguments: { id } });
+    expect(notFound.isError).toBe(true);
+    expect(text(notFound)).toContain("NOT_FOUND");
+  });
+
+  it("judges: member 가 model/harness judge 등록·조회; viewer 는 write 권한오류", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"], "acme");
+    const modelJudge = JSON.stringify({
+      kind: "model",
+      id: "correctness",
+      version: "1.0.0",
+      model: "claude-opus-4-8",
+      rubric: "did it work?",
+    });
+    const created = await member.callTool({ name: "create_judge", arguments: { judge: modelJudge } });
+    expect(created.isError).toBeFalsy();
+    expect(text(created)).toContain("correctness");
+    const got = JSON.parse(text(await member.callTool({ name: "get_judge", arguments: { id: "correctness" } })));
+    expect(got).toMatchObject({ kind: "model", model: "claude-opus-4-8" });
+
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const denied = await viewer.callTool({ name: "create_judge", arguments: { judge: modelJudge } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+
+    const beta = await connect(deps, ["member"], "beta");
+    const notFound = await beta.callTool({ name: "get_judge", arguments: { id: "correctness" } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
   });

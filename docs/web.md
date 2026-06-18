@@ -28,10 +28,10 @@ excluded from root Biome). The web is a pure HTTP client of the control plane �
 ## FSD layout (`src/`)
 ```
 app/        Next App Router — landing, dashboard/{layout(shell), page(overview), runs, runs/[id], harnesses,
-            datasets(+[id],new), scorecards(+[id],new)}, api/auth/[...nextauth], middleware
+            datasets(+[id],new), scorecards(+[id],new), judges(+[id],new)}, api/auth/[...nextauth], middleware
 widgets/    page-level composition: app-shell (sidebar+topbar), scorecard-summary, runs-table, trace-timeline
-features/   business actions: submit-run, register-harness, register-dataset, run-scorecard (client form + 'use server' action → control plane)
-entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard)
+features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge (client form + 'use server' action → control plane)
+entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state), lib (utils, control-plane),
             config (env), providers (query), auth (Keycloak token store/refresh, server-only access-token (getToken),
             authContext + currentPrincipal + can)
@@ -51,6 +51,10 @@ Import order enforces downward layer deps (app → widgets → features → enti
   chips; rows link to detail). **상세 `/dashboard/scorecards/[id]`** shows per-metric stat cards + per-case
   scores. **실행 `/dashboard/scorecards/new`** — pick dataset + harness → `POST /scorecards`. Role-gated off
   `/me` (`scorecards:run` = member+). See `docs/scorecards.md`.
+- **Judge `/dashboard/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
+  **상세 `/dashboard/judges/[id]`** shows kind + fields + rubric. **등록 `/dashboard/judges/new`** — a
+  **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
+  (`judges:write` = member+). See `docs/judges.md`.
 - **새 run `/dashboard/runs/new`** — submit-run form (react-hook-form) → `submitRunAction` (server action) →
   control plane `POST /runs` → redirect to the run detail.
 - **하니스 등록 `/dashboard/harnesses/new`** — a **structured wizard** (`features/register-harness`): pick

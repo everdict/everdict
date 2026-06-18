@@ -24,6 +24,10 @@ describe("authz", () => {
     expect(can(p(["viewer"]), "scorecards:read")).toBe(true);
     expect(can(p(["viewer"]), "scorecards:run")).toBe(false);
     expect(can(p(["member"]), "scorecards:run")).toBe(true);
+    // judges: 읽기는 viewer+, 등록은 member+(유저가 자기 judge 를 직접 등록)
+    expect(can(p(["viewer"]), "judges:read")).toBe(true);
+    expect(can(p(["viewer"]), "judges:write")).toBe(false);
+    expect(can(p(["member"]), "judges:write")).toBe(true);
   });
   it("authorize 는 권한 없으면 403", () => {
     expect(() => authorize(p(["member"]), "harnesses:register")).toThrow(ForbiddenError);

@@ -1,0 +1,12 @@
+{
+  "kind": "model",
+  "id": "repo-correctness",
+  "version": "1.0.0",
+  "description": "first-party 기본 judge — repo 과제의 정답 여부를 트레이스로 판정하는 model judge (LLM).",
+  "provider": "anthropic",
+  "model": "claude-opus-4-8",
+  "rubric": "Given the task and the agent's execution trace, judge whether the agent correctly and completely accomplished the task. Return a score in [0,1] and a brief reason. Penalize partial completion, wrong files, or unverified claims.",
+  "inputs": ["trace"],
+  "passThreshold": 0.7,
+  "tags": ["benchmark", "correctness"]
+}
