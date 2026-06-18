@@ -34,6 +34,21 @@ harnesses; resolution falls back to the **`_shared`** owner for first-party harn
 `POST /runs` requires `runs:submit` (**member+**); `GET /runs`, `GET /runs/:id` require `runs:read` (viewer+).
 All are workspace-scoped: a tenant can only see and act on its own runs (another workspace's run → **404**).
 
+## Tenant-owned datasets (`@assay/registry`)
+Datasets reuse the identical ownership model — keyed by **`(tenant, id, version)`**, owner-first with `_shared`
+fallback (first-party benchmark datasets seeded from `examples/datasets`), immutable versions. They are
+**harness-agnostic** (one dataset, many `harness@version`s). The one difference from harnesses: writes are
+**member+**, not admin (datasets are collaborative eval *content*; harness specs define execution → admin).
+
+| Method | Path | Action (role) | Effect |
+|---|---|---|---|
+| `POST` | `/datasets` | `datasets:write` (**member+**) | register a `Dataset` under the caller's workspace (immutable → **409**) |
+| `POST` | `/datasets/validate` | `datasets:write` (**member+**) | dry-run: schema + own `existingVersions`/`versionExists` (no write) |
+| `GET`  | `/datasets` | `datasets:read` (viewer+) | list own + `_shared` (`{id, owner, versions}`) |
+| `GET`  | `/datasets/:id/versions/:version` | `datasets:read` (viewer+) | full `Dataset` incl. cases (`version` may be `latest`; other workspace → **404**) |
+
+See `docs/datasets.md`.
+
 ## Live-verified (real Postgres)
 `ASSAY_REQUIRE_AUTH=1 ASSAY_INTERNAL_TOKEN=… DATABASE_URL=… node apps/api/dist/main.js`, then: issue keys for
 `acme`/`beta` → no-key request is `401` → `acme` registers `bu@1.0.0` (`201`) → `acme` lists it, `beta` sees `[]`
