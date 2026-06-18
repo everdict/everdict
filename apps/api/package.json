@@ -1,0 +1,19 @@
+{
+  "name": "@assay/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": { "assay-api": "./dist/main.js" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@assay/agent": "workspace:*",
+    "@assay/backends": "workspace:*",
+    "@assay/core": "workspace:*",
+    "fastify": "^5.2.0",
+    "zod": "^3.24.1"
+  }
+}

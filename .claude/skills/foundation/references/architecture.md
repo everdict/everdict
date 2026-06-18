@@ -15,8 +15,9 @@
 | `@assay/trace` | pull a harness trace from OTel/MLflow → `TraceEvent` | core |
 | `@assay/topology` | service-topology harnesses: `ServiceTopologyBackend` + Nomad/K8s builders + env manager | core, backends, graders, trace |
 | `@assay/suite` | suites + version regression: `runSuite` / `summarizeScorecard` / `diffScorecards` | core |
-| `apps/cli` | control plane PoC (`assay run`, `assay worker`, `assay suite`) | core, agent, backends, orchestrator, suite |
-| `@assay/registry`, `apps/api` | harness versioning + Fastify control plane | (planned) |
+| `apps/cli` | dev control plane (`assay run`, `assay worker`, `assay suite`) | core, agent, backends, orchestrator, suite |
+| `apps/api` | multi-tenant control-plane HTTP (Fastify): async `POST /runs`/poll/webhook + `RunStore` | core, agent, backends |
+| `@assay/registry` | harness versioning | (planned) |
 
 ## The eval loop (runs inside the agent)
 ```

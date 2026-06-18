@@ -32,7 +32,8 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 | `@assay/trace` | pull a harness trace from OTel/MLflow → `TraceEvent`. |
 | `@assay/topology` | service-topology harnesses (multi-service + target env), Nomad/K8s. |
 | `@assay/suite` | suites + version regression (`runSuite` / scorecard diff). |
-| `apps/cli` | control plane: `assay run`, `assay worker`, `assay suite`. |
+| `apps/cli` | dev control plane: `assay run`, `assay worker`, `assay suite`. |
+| `apps/api` | multi-tenant control-plane HTTP API (Fastify): async `POST /runs` + poll/webhook + result store. |
 
 ## Two kinds of harness
 - **Process harness** (Claude Code, Codex): one binary run in a sandbox.
