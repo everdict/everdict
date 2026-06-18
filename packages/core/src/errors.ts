@@ -18,6 +18,7 @@ export const ErrorCode = {
   UPSTREAM_MISCONFIGURED: "외부 서비스 설정 오류입니다.",
   UPSTREAM_ERROR: "외부 서비스 오류입니다.",
   RATE_LIMITED: "요청이 너무 많습니다.",
+  BUDGET_EXCEEDED: "테넌트 예산을 초과했습니다.",
 } as const;
 
 export type ErrorCode = keyof typeof ErrorCode;
@@ -56,6 +57,9 @@ export class ConflictError extends AppError {
 }
 export class RateLimitError extends AppError {
   readonly status = 429;
+}
+export class PaymentRequiredError extends AppError {
+  readonly status = 402;
 }
 export class UpstreamError extends AppError {
   readonly status = 502;

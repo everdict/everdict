@@ -1,6 +1,7 @@
-import type { AgentJob, CaseResult } from "@assay/core";
+import { type AgentJob, type CaseResult, PaymentRequiredError } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "./backend.js";
+import { inMemoryBudget } from "./budget.js";
 import { BackendRegistry } from "./registry.js";
 import { Scheduler, binPackPolicy } from "./scheduler.js";
 
@@ -212,6 +213,48 @@ describe("Scheduler", () => {
     b.releaseAll();
     await flush();
     await Promise.all(p);
+  });
+
+  it("예산: runs 상한을 넘는 제출은 402 로 즉시 거절(버스트 포함)", async () => {
+    const b = new ControlledBackend("a", 5);
+    const sched = new Scheduler(new BackendRegistry().register("a", b), {
+      budget: inMemoryBudget({ limitFor: () => ({ runs: 2 }) }),
+    });
+    const p0 = sched.dispatch(tjob("free", "0"));
+    const p1 = sched.dispatch(tjob("free", "1"));
+    await expect(sched.dispatch(tjob("free", "2"))).rejects.toBeInstanceOf(PaymentRequiredError); // 3번째 거절
+    await flush();
+    expect(b.dispatchedIds.sort()).toEqual(["0", "1"]); // 2건만 실행
+    b.releaseAll();
+    await Promise.all([p0, p1]);
+  });
+
+  it("예산: 완료 시 cost 가 settle 되어 usd 상한을 넘기면 다음 제출 거절", async () => {
+    // cost 가 있는 결과를 주는 백엔드.
+    const costly: Backend = {
+      id: "c",
+      async capacity() {
+        return { total: 5, used: 0 };
+      },
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: "h",
+          trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.06 } }],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [],
+        };
+      },
+    };
+    const budget = inMemoryBudget({ limitFor: () => ({ usd: 0.1 }) });
+    const sched = new Scheduler(new BackendRegistry().register("c", costly), { budget });
+
+    await sched.dispatch(tjob("free", "0")); // +0.06
+    await flush();
+    await sched.dispatch(tjob("free", "1")); // +0.06 → 0.12
+    await flush();
+    expect(budget.usage("free").usd).toBeCloseTo(0.12);
+    await expect(sched.dispatch(tjob("free", "2"))).rejects.toBeInstanceOf(PaymentRequiredError); // 0.12 >= 0.1
   });
 
   it("백프레셔: 큐가 maxQueueDepth 를 넘으면 RateLimitError", async () => {

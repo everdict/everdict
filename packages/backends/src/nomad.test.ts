@@ -2,6 +2,7 @@ import { RESULT_SENTINEL } from "@assay/agent";
 import { type AgentJob, BadRequestError, type CaseResult } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import { NomadBackend, type NomadHttp, buildNomadJob } from "./nomad.js";
+import { staticSecrets } from "./secrets.js";
 import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
 const JOB: AgentJob = {
@@ -110,5 +111,36 @@ describe("NomadBackend.dispatch", () => {
       trustZones: staticTrustZones({}, { id: "weak", isolationRuntime: "runc", network: "open", trusted: false }),
     });
     await expect(backend.dispatch({ ...JOB, tenant: "x" })).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("secrets: 잡마다 그 테넌트의 키만 alloc env 에 주입한다 (누출 없음)", async () => {
+    const posted: Array<Record<string, string>> = [];
+    const http: NomadHttp = {
+      async request(method, path, body) {
+        if (method === "POST" && path.startsWith("/v1/jobs")) {
+          const env = (body as { Job: { TaskGroups: Array<{ Tasks: Array<{ Env: Record<string, string> }> }> } }).Job
+            .TaskGroups[0]?.Tasks[0]?.Env;
+          posted.push(env ?? {});
+          return { status: 200, text: "{}" };
+        }
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "a1", ClientStatus: "complete" }]) };
+        if (path.includes("/logs/")) return { status: 200, text: `${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n` };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({
+      addr: "http://nomad:4646",
+      image: "img",
+      http,
+      pollIntervalMs: 1,
+      secrets: staticSecrets({ acme: { ANTHROPIC_API_KEY: "sk-acme" }, globex: { ANTHROPIC_API_KEY: "sk-globex" } }),
+    });
+
+    await backend.dispatch({ ...JOB, tenant: "acme" });
+    await backend.dispatch({ ...JOB, tenant: "globex" });
+
+    expect(posted[0]?.ANTHROPIC_API_KEY).toBe("sk-acme");
+    expect(posted[1]?.ANTHROPIC_API_KEY).toBe("sk-globex"); // globex 의 잡에 acme 키가 새지 않음
   });
 });

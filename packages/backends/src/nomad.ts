@@ -1,6 +1,7 @@
 import { RESULT_SENTINEL } from "@assay/agent";
 import { type AgentJob, type CaseResult, CaseResultSchema, UpstreamError, assertHardenedIsolation } from "@assay/core";
 import type { Backend, BackendCapacity } from "./backend.js";
+import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
 
 // --- Nomad HTTP 추상화 (테스트에서 모킹 가능) ---
@@ -26,7 +27,8 @@ export interface NomadBackendOptions {
   addr: string; // Nomad HTTP endpoint, e.g. http://nomad.internal:4646
   image: string; // 러너 에이전트 이미지 (사내 레지스트리)
   http?: NomadHttp;
-  secretEnv?: Record<string, string>; // alloc 에 주입할 인증(예: CLAUDE_CODE_OAUTH_TOKEN)
+  secretEnv?: Record<string, string>; // alloc 에 주입할 인증(예: CLAUDE_CODE_OAUTH_TOKEN). secrets 가 없을 때의 기본.
+  secrets?: SecretProvider; // 테넌트별 시크릿 스코핑 — 잡마다 그 테넌트의 키만 주입(누출 금지).
   datacenters?: string[];
   runtime?: string; // docker 격리 런타임 (예: "runsc" = gVisor). trustZones 가 있으면 그쪽이 우선.
   namespace?: string; // 기본 네임스페이스(테넌트 존이 없을 때)
@@ -133,12 +135,20 @@ export class NomadBackend implements Backend {
     return { total, used: 0 };
   }
 
-  // 테넌트 존을 잡마다 적용·강제: untrusted 테넌트는 강격리 런타임 필수, 전용 네임스페이스로 격리.
+  // 테넌트 존/시크릿을 잡마다 적용·강제: untrusted 는 강격리 필수, 전용 네임스페이스, 그 테넌트의 키만 주입.
   private effectiveOpts(job: AgentJob): NomadBackendOptions {
-    const zone = this.opts.trustZones?.resolve(job.tenant ?? "default");
-    if (!zone) return this.opts;
-    assertHardenedIsolation(zone);
-    return { ...this.opts, runtime: zone.isolationRuntime, namespace: zone.namespace ?? this.opts.namespace };
+    const tenant = job.tenant ?? "default";
+    const zone = this.opts.trustZones?.resolve(tenant);
+    if (zone) assertHardenedIsolation(zone);
+    // 시크릿 스코핑: provider 가 있으면 그 테넌트 것만, 없으면 기존 secretEnv.
+    const secretEnv = this.opts.secrets ? this.opts.secrets.secretsFor(tenant) : this.opts.secretEnv;
+    if (!zone) return { ...this.opts, secretEnv };
+    return {
+      ...this.opts,
+      secretEnv,
+      runtime: zone.isolationRuntime,
+      namespace: zone.namespace ?? this.opts.namespace,
+    };
   }
 
   async dispatch(job: AgentJob): Promise<CaseResult> {

@@ -129,7 +129,25 @@ slot changes take effect in the very next placement pass.
 Live proof: `scripts/live/autoscaler-nomad.mjs` — 8 cases submitted at once with slots starting at 1; the
 autoscaler scales 1→4 under backlog (peak 4 concurrent Nomad allocs, never above `MAX`) then back to 1 when idle.
 
-Next slices: per-tenant secret scoping + budgets (`Cost` enforcement), async API + result store.
+## Per-tenant secrets & budgets
+Two more multi-tenant guarantees, both keyed by `AgentJob.tenant`:
+
+- **Secret scoping** (`SecretProvider`, `staticSecrets`) — each tenant's model keys (e.g. `ANTHROPIC_API_KEY`,
+  `CLAUDE_CODE_OAUTH_TOKEN`) are injected into **only that tenant's** alloc env. `NomadBackend({secrets})`
+  resolves `secretsFor(tenant)` per dispatch, so one tenant's key never lands in another's sandbox. (Returned
+  maps are copies — no shared mutable secret state.)
+- **Budgets** (`BudgetTracker`, `inMemoryBudget`) — per-tenant `{usd, tokens, runs}` limits enforced at the
+  `Scheduler`. `dispatch` calls `budget.admit(tenant)` *before* queuing: over-limit ⇒ `PaymentRequiredError`
+  (402, `BUDGET_EXCEEDED`). `runs` is **reserved at admit** so a burst of concurrent submits can't overshoot;
+  `usd`/`tokens` are committed on completion via `settle(tenant, costOf(result))` (`sumCost` over the trace's
+  `llm_call` costs) — a cost budget may be exceeded only by the single run that tips it over (cost is unknown
+  until the run finishes).
+
+Live proof: `scripts/live/budget-nomad.mjs` — tenant `free` capped at `runs=3`; submitting 5 at once runs exactly
+3 and rejects 2 with `402 BUDGET_EXCEEDED`, while `acme`/`globex` jobs each carry only their own injected key.
+
+Next slices: async API + result store (`apps/api` Fastify: run-id + webhook/polling + Postgres/ClickHouse),
+`K8sTopologyRuntime` apply.
 
 ## Nomad (phase 1)
 ```bash

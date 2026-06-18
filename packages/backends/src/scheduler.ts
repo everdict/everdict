@@ -1,4 +1,5 @@
 import { type AgentJob, type CaseResult, NotFoundError, RateLimitError } from "@assay/core";
+import { type BudgetTracker, costOf } from "./budget.js";
 import { FairQueue } from "./fair-queue.js";
 import type { BackendRegistry } from "./registry.js";
 
@@ -45,6 +46,8 @@ export interface SchedulerOptions {
   // 멀티테넌트 공정성: WFQ 가중치(클수록 더 자주) + 테넌트별 동시 실행 상한(쿼터).
   weightFor?: (tenant: string) => number; // 기본 1
   tenantQuota?: (tenant: string) => number; // 기본 무제한
+  // 테넌트 예산: dispatch 에서 admit(초과 시 402), 완료 시 cost 를 settle.
+  budget?: BudgetTracker;
 }
 
 // 용량 인지 + 테넌트 공정 스케줄러: 백엔드 여유를 보고 자리 있는 곳에 배치하되,
@@ -69,6 +72,12 @@ export class Scheduler {
   }
 
   dispatch(job: AgentJob): Promise<CaseResult> {
+    // 예산 admit — 초과면 큐잉 전에 즉시 거절(402). 통과하면 run 1건 예약(버스트 상한 보호).
+    try {
+      this.opts.budget?.admit(tenantOf(job));
+    } catch (err) {
+      return Promise.reject(err);
+    }
     const max = this.opts.maxQueueDepth ?? Number.POSITIVE_INFINITY;
     if (this.queue.size >= max) {
       return Promise.reject(
@@ -176,7 +185,10 @@ export class Scheduler {
     this.registry
       .get(name)
       .dispatch(entry.job)
-      .then(entry.resolve, entry.reject)
+      .then((result) => {
+        this.opts.budget?.settle(tenant, costOf(result)); // 완료 후 실제 비용 commit
+        entry.resolve(result);
+      }, entry.reject)
       .finally(() => {
         this.inFlight.set(name, Math.max(0, (this.inFlight.get(name) ?? 1) - 1));
         this.tenantInFlight.set(tenant, Math.max(0, (this.tenantInFlight.get(tenant) ?? 1) - 1));

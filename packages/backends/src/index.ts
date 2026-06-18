@@ -25,6 +25,15 @@ export {
   staticTrustZones,
   type PerTenantTrustZoneOptions,
 } from "./trust-zone.js";
+export { type SecretProvider, staticSecrets } from "./secrets.js";
+export {
+  type BudgetTracker,
+  type BudgetLimit,
+  type BudgetUsage,
+  inMemoryBudget,
+  sumCost,
+  costOf,
+} from "./budget.js";
 export {
   NomadBackend,
   buildNomadJob,

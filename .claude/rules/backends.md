@@ -19,6 +19,11 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
   the `assay worker` uses it). Both satisfy `Dispatcher` — depend on that, not the class. `PlacementPolicy`
   must be pure/deterministic. Backpressure = `RateLimitError` (429), never a silent drop. A multi-tenant
   scheduler must never let one tenant starve another — fairness is enforced, not best-effort.
+- Multi-tenant secrets & budgets (keyed by `AgentJob.tenant`): inject a tenant's model keys via a
+  `SecretProvider` (`secretsFor(tenant)`) into ONLY that tenant's alloc env — never a global key, never cross
+  tenants. Enforce per-tenant `BudgetTracker` at the `Scheduler`: `admit` before queuing (over-limit ⇒
+  `PaymentRequiredError` 402; reserve `runs` so bursts can't overshoot), `settle(cost)` on completion. Budget
+  rejection is explicit (402), never a silent drop.
 - Autoscaling: the `Autoscaler` reads `Scheduler.stats()` (queue depth + in-flight) and drives `ScalingTarget`s
   to grow/shrink capacity (`desiredCapacity` is pure; upscale immediate, downscale after hysteresis). A backend's
   `maxConcurrent` may be `() => number` so scaling takes effect next placement pass; after a scale, re-pump via
