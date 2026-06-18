@@ -2,20 +2,26 @@ import Link from 'next/link'
 
 import { type Harness, harnessesSchema } from '@/entities/harness'
 import { SubmitRunForm } from '@/features/submit-run'
-import { currentTenant } from '@/shared/auth/tenant'
+import { can } from '@/shared/auth/can'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
+import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
 export default async function NewRunPage() {
-  const { tenant } = await currentTenant()
+  const { principal, ctx } = await currentPrincipal()
+  const allowed = can(principal?.roles, 'runs:submit')
+
   let harnesses: Harness[] = []
-  try {
-    harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(tenant))
-  } catch {
-    // 하니스 목록 실패해도 폼은 텍스트 입력으로 동작
+  if (allowed) {
+    try {
+      harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
+    } catch {
+      // 하니스 목록 실패해도 폼은 텍스트 입력으로 동작
+    }
   }
 
   return (
@@ -24,9 +30,16 @@ export default async function NewRunPage() {
         ← Runs
       </Link>
       <PageHeader title="새 run" description="하니스를 골라 평가를 제출합니다." />
-      <Card className="p-6">
-        <SubmitRunForm harnesses={harnesses} />
-      </Card>
+      {allowed ? (
+        <Card className="p-6">
+          <SubmitRunForm harnesses={harnesses} />
+        </Card>
+      ) : (
+        <EmptyState
+          title="run 제출 권한이 없습니다."
+          hint="member 이상 역할이 필요합니다(runs:submit). 워크스페이스 관리자에게 문의하세요."
+        />
+      )}
     </div>
   )
 }

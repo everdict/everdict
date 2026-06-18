@@ -5,14 +5,17 @@ import Link from 'next/link'
 import { Badge } from '@/shared/ui/badge'
 import { Sidebar } from './sidebar'
 
-// 대시보드 공통 셸: 좌측 사이드바 + 상단 바(테넌트/인증) + 본문.
+// 대시보드 공통 셸: 좌측 사이드바 + 상단 바(워크스페이스/역할/인증) + 본문.
+// workspace·roles 는 컨트롤플레인 GET /me 가 권위(웹은 토큰을 직접 해석하지 않는다).
 export function AppShell({
-  tenant,
+  workspace,
+  roles,
   authed,
   showLogin,
   children,
 }: {
-  tenant: string
+  workspace: string
+  roles: string[]
   authed: boolean
   showLogin: boolean
   children: ReactNode
@@ -25,8 +28,9 @@ export function AppShell({
           <span className="text-sm text-muted-foreground md:hidden">Assay</span>
           <div className="ml-auto flex items-center gap-3">
             <span className="text-sm text-muted-foreground">
-              tenant <span className="font-mono text-foreground">{tenant}</span>
+              workspace <span className="font-mono text-foreground">{workspace}</span>
             </span>
+            {roles.length > 0 && <Badge tone="neutral">{roles.join(', ')}</Badge>}
             <Badge tone={authed ? 'success' : 'neutral'}>{authed ? 'authenticated' : 'dev'}</Badge>
             {showLogin &&
               (authed ? (

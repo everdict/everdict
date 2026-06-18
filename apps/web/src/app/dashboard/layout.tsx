@@ -1,13 +1,18 @@
-import { currentTenant } from '@/shared/auth/tenant'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { keycloakConfigured } from '@/shared/config/env'
 import { AppShell } from '@/widgets/app-shell'
 
 export const dynamic = 'force-dynamic'
 
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
-  const { tenant, authed } = await currentTenant()
+  const { principal } = await currentPrincipal()
   return (
-    <AppShell tenant={tenant} authed={authed} showLogin={keycloakConfigured}>
+    <AppShell
+      workspace={principal?.workspace ?? '—'}
+      roles={principal?.roles ?? []}
+      authed={principal?.via === 'oidc'}
+      showLogin={keycloakConfigured}
+    >
       {children}
     </AppShell>
   )

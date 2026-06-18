@@ -1,13 +1,57 @@
 import NextAuth from 'next-auth'
+import type { JWT } from 'next-auth/jwt'
 import Keycloak from 'next-auth/providers/keycloak'
 
 import { env, keycloakConfigured } from '@/shared/config/env'
 
-// Keycloak(OIDC)로 사람(테넌트 유저) 인증. tenant 는 토큰 클레임(기본 "tenant")에서 파생.
-// (에이전트/MCP/CI 는 별도 API 키로 컨트롤플레인에 직접 인증 — 상보적.)
+// Keycloak(OIDC)로 사람(테넌트 유저)을 인증하고, 발급된 액세스 토큰을 그대로 컨트롤플레인에 전달한다.
+// 인증/인가의 권위는 컨트롤플레인(@assay/api + @assay/auth)이 가진다 — 웹은 토큰 운반자(courier)일 뿐,
+// 워크스페이스/역할을 토큰에서 직접 해석하지 않는다(그건 GET /me 가 한다).
+// (에이전트/MCP/CI 는 API 키로 컨트롤플레인에 직접 인증 — 상보적.)
 declare module 'next-auth' {
   interface Session {
-    tenant?: string
+    accessToken?: string
+    error?: 'RefreshFailed'
+  }
+}
+declare module 'next-auth/jwt' {
+  interface JWT {
+    accessToken?: string
+    refreshToken?: string
+    expiresAt?: number // epoch 초
+    error?: 'RefreshFailed'
+  }
+}
+
+// 리프레시 토큰으로 액세스 토큰 갱신(Keycloak 토큰 엔드포인트). 실패 시 error 를 실어 보낸다.
+async function refresh(token: JWT): Promise<JWT> {
+  if (!token.refreshToken) return { ...token, error: 'RefreshFailed' }
+  try {
+    const res = await fetch(`${env.KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: env.KEYCLOAK_CLIENT_ID ?? '',
+        client_secret: env.KEYCLOAK_CLIENT_SECRET ?? '',
+        refresh_token: token.refreshToken,
+      }),
+    })
+    const data = (await res.json()) as {
+      access_token?: string
+      refresh_token?: string
+      expires_in?: number
+    }
+    if (!res.ok || !data.access_token) return { ...token, error: 'RefreshFailed' }
+    return {
+      ...token,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token ?? token.refreshToken,
+      expiresAt: Math.floor(Date.now() / 1000) + (data.expires_in ?? 300),
+      error: undefined,
+    }
+  } catch {
+    return { ...token, error: 'RefreshFailed' }
   }
 }
 
@@ -22,16 +66,22 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       ]
     : [],
   callbacks: {
-    // 첫 로그인 시 프로필 클레임에서 tenant 를 JWT 에 싣는다.
-    jwt({ token, profile }) {
-      if (profile) {
-        const claim = (profile as Record<string, unknown>)[env.TENANT_CLAIM]
-        token.tenant = typeof claim === 'string' ? claim : token.tenant
+    async jwt({ token, account }) {
+      // 첫 로그인: 액세스/리프레시 토큰 묶음 저장.
+      if (account) {
+        token.accessToken = account.access_token
+        token.refreshToken = account.refresh_token
+        token.expiresAt = account.expires_at
+        return token
       }
-      return token
+      // 아직 유효(만료 60초 전까지)하면 그대로, 아니면 갱신.
+      if (token.expiresAt && Date.now() / 1000 < token.expiresAt - 60) return token
+      return refresh(token)
     },
     session({ session, token }) {
-      session.tenant = typeof token.tenant === 'string' ? token.tenant : undefined
+      // 액세스 토큰은 서버 전용 control-plane.ts 에서만 사용한다(컨트롤플레인에 그대로 전달).
+      session.accessToken = token.accessToken
+      session.error = token.error
       return session
     },
   },

@@ -1,7 +1,8 @@
 import Link from 'next/link'
 
 import { harnessesSchema } from '@/entities/harness'
-import { currentTenant } from '@/shared/auth/tenant'
+import { can } from '@/shared/auth/can'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
@@ -12,11 +13,11 @@ import { PageHeader } from '@/shared/ui/page-header'
 export const dynamic = 'force-dynamic'
 
 export default async function HarnessesPage() {
-  const { tenant } = await currentTenant()
+  const { principal, ctx } = await currentPrincipal()
   let error: string | undefined
   let harnesses = harnessesSchema.parse([])
   try {
-    harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(tenant))
+    harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -25,11 +26,13 @@ export default async function HarnessesPage() {
     <div className="space-y-6">
       <PageHeader
         title="하니스"
-        description="이 테넌트가 등록한 하니스 + 공유(first-party)"
+        description="이 워크스페이스가 등록한 하니스 + 공유(first-party)"
         actions={
-          <Link href="/dashboard/harnesses/new" className={buttonVariants({ size: 'sm' })}>
-            하니스 등록
-          </Link>
+          can(principal?.roles, 'harnesses:register') ? (
+            <Link href="/dashboard/harnesses/new" className={buttonVariants({ size: 'sm' })}>
+              하니스 등록
+            </Link>
+          ) : null
         }
       />
       {error ? (
@@ -48,8 +51,8 @@ export default async function HarnessesPage() {
               <CardContent className="space-y-2 pt-5">
                 <div className="flex items-center justify-between">
                   <span className="font-semibold">{h.id}</span>
-                  <Badge tone={h.owner === tenant ? 'success' : 'neutral'}>
-                    {h.owner === tenant ? 'owned' : 'shared'}
+                  <Badge tone={h.owner === principal?.workspace ? 'success' : 'neutral'}>
+                    {h.owner === principal?.workspace ? 'owned' : 'shared'}
                   </Badge>
                 </div>
                 <div className="flex flex-wrap gap-1">

@@ -4,7 +4,7 @@ import { harnessesSchema } from '@/entities/harness'
 import { runsSchema } from '@/entities/run'
 import { RunsTable } from '@/widgets/runs-table'
 import { ScorecardSummary } from '@/widgets/scorecard-summary'
-import { currentTenant } from '@/shared/auth/tenant'
+import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -13,12 +13,12 @@ import { PageHeader } from '@/shared/ui/page-header'
 export const dynamic = 'force-dynamic'
 
 export default async function OverviewPage() {
-  const { tenant } = await currentTenant()
+  const ctx = await authContext()
   let error: string | undefined
   let runs = runsSchema.parse([])
   let harnesses = harnessesSchema.parse([])
   try {
-    const [r, h] = await Promise.all([controlPlane.listRuns(tenant), controlPlane.listHarnesses(tenant)])
+    const [r, h] = await Promise.all([controlPlane.listRuns(ctx), controlPlane.listHarnesses(ctx)])
     runs = runsSchema.parse(r)
     harnesses = harnessesSchema.parse(h)
   } catch (e) {
@@ -27,7 +27,7 @@ export default async function OverviewPage() {
 
   return (
     <div className="space-y-8">
-      <PageHeader title="개요" description="이 테넌트의 평가 현황" />
+      <PageHeader title="개요" description="이 워크스페이스의 평가 현황" />
 
       {error ? (
         <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">

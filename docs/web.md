@@ -4,14 +4,18 @@ The multi-tenant SaaS frontend — a Next.js app (FSD architecture, Toss-style d
 log in (Keycloak), see their **per-tenant scores**, runs, and harnesses. Reference architecture: digo-admin.
 
 ## Two complementary auth paths
-- **Humans → Keycloak (OIDC)** via Auth.js in `apps/web`. The tenant is derived from a token claim
-  (`TENANT_CLAIM`, default `tenant`). The web is a trusted gateway: it authenticates the user, then calls the
-  control plane (`@assay/api`) server-side, forwarding `x-assay-tenant`.
+- **Humans → Keycloak (OIDC)** via Auth.js in `apps/web`. The web is a **token courier, not an auth authority**:
+  Auth.js stores (and refreshes) the Keycloak **access token**, and the server-only `control-plane.ts` forwards
+  it as `Authorization: Bearer <jwt>` to `@assay/api`. The control plane resolves identity — `workspace` + roles
+  come from `GET /me`, never decoded from the token by the web. UI is role-gated off `/me` (mirror in
+  `shared/auth/can.ts`), but enforcement is always the control plane's (403). Without Keycloak configured the web
+  falls back to the dev `x-assay-tenant=default` path. See `docs/auth.md`.
 - **Agents / MCP / CI → API keys** (the `@assay/db` tenant-key layer) calling `@assay/api` directly with
   `Authorization: Bearer ak_…`. (MCP toolization of the platform — exposing run/harness actions as agent tools —
   is the next slice, served from `@assay/api`, reusing this key auth.)
 
-These don't conflict: Keycloak = people in the browser, API keys = machines.
+These don't conflict: Keycloak = people in the browser, API keys = machines. Both resolve to the same
+control-plane `Principal{workspace, roles}`.
 
 ## Stack (mirrors digo-admin)
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 (`@theme inline` tokens) · shadcn-style UI
@@ -27,7 +31,7 @@ widgets/    page-level composition: app-shell (sidebar+topbar), scorecard-summar
 features/   business actions: submit-run, register-harness (client form + 'use server' action → control plane)
 entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state), lib (utils, control-plane),
-            config (env), providers (query), auth (Keycloak + currentTenant)
+            config (env), providers (query), auth (Keycloak token store/refresh + authContext + currentPrincipal + can)
 ```
 Import order enforces downward layer deps (app → widgets → features → entities → shared).
 
@@ -40,8 +44,11 @@ Import order enforces downward layer deps (app → widgets → features → enti
   control plane `POST /runs` → redirect to the run detail.
 - **하니스 등록 `/dashboard/harnesses/new`** — register-harness form (HarnessSpec JSON) → `registerHarnessAction`
   → control plane `POST /harnesses` (409 on the immutable-version violation, surfaced inline).
-All under a shared app shell (sidebar nav + topbar tenant chip / sign-in-out). Mutations are **server actions**
-(`'use server'`) that resolve the tenant and call the control plane server-side, then `revalidatePath`.
+The **새 run** and **하니스 등록** pages (and their list-page CTAs) are role-gated off `/me`: a viewer sees a
+"권한이 없습니다" notice instead of the form, a member can submit runs, only an admin can register harnesses.
+All under a shared app shell (sidebar nav + topbar **workspace + role** chip / sign-in-out). Mutations are
+**server actions** (`'use server'`) that forward the user's token and call the control plane server-side, then
+`revalidatePath`.
 
 The dev server runs on **port 3001** (`pnpm --filter @assay/web dev`).
 
@@ -54,11 +61,14 @@ docker compose -f deploy/keycloak/docker-compose.yaml up -d        # then config
 cp apps/web/.env.example apps/web/.env                              # set CONTROL_PLANE_URL + Keycloak vars
 pnpm --filter @assay/web dev                                       # http://localhost:3001
 ```
-Without Keycloak configured, `/dashboard` renders for tenant `default` (no login required) — handy for local dev.
-With Keycloak configured, `/dashboard` is protected (middleware redirects to login) and the tenant comes from the
-authenticated user. The dashboard degrades gracefully if the control plane is unreachable.
+Without Keycloak configured, `/dashboard` renders for the dev `default` workspace (no login required) — handy for
+local dev. With Keycloak configured, `/dashboard` is protected (middleware redirects to login) and the
+workspace/roles come from the control plane's `GET /me` over the forwarded token. The dashboard degrades
+gracefully if the control plane is unreachable.
 
 ## Verified
-`next build` compiles + type-checks (routes `/`, `/dashboard` [dynamic], `/api/auth/[...nextauth]`, middleware);
-`/dashboard` renders server-side (scorecard + runs + harnesses for the resolved tenant). Root gate (Biome /
-turbo typecheck / test) stays green with `apps/web` self-contained.
+`next build` compiles + type-checks (9 routes); root gate (Biome / turbo typecheck / test) stays green with
+`apps/web` self-contained. **Live (headless OAuth, real Keycloak)** via `scripts/live/web-auth-flow.py`: drives
+the Auth.js + Keycloak authorization-code flow with a cookie jar (no browser) for `alice` (member) and `carol`
+(admin) → the web forwards each user's token → `/dashboard` shows `workspace=acme` (from `/me`); `runs/new` is
+allowed for both; `harnesses/new` is gated for the member and allowed for the admin.

@@ -3,12 +3,18 @@ import 'server-only'
 import { env } from '@/shared/config/env'
 
 // 컨트롤플레인(@assay/api) HTTP 클라이언트 — 서버에서만 호출.
-// 웹은 Keycloak 으로 사람을 인증하는 신뢰 게이트웨이이므로, 내부망의 컨트롤플레인에는
-// 인증된 tenant 를 x-assay-tenant 로 전달한다(운영에선 서비스 토큰 + 서명된 acts-as 로 강화).
-async function call<T>(tenant: string, path: string, init?: RequestInit): Promise<T> {
+// 인증 컨텍스트: 로그인 사용자는 Keycloak 액세스 토큰을 Authorization: Bearer 로 그대로 전달하고
+// (인증/인가 판단은 컨트롤플레인이 한다), Keycloak 미설정(dev)에선 x-assay-tenant 로 폴백한다.
+export type AuthContext = { bearer: string } | { devTenant: string }
+
+function authHeaders(auth: AuthContext): Record<string, string> {
+  return 'bearer' in auth ? { authorization: `Bearer ${auth.bearer}` } : { 'x-assay-tenant': auth.devTenant }
+}
+
+async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', 'x-assay-tenant': tenant, ...(init?.headers ?? {}) },
+    headers: { 'content-type': 'application/json', ...authHeaders(auth), ...(init?.headers ?? {}) },
     cache: 'no-store',
   })
   if (!res.ok) {
@@ -19,11 +25,12 @@ async function call<T>(tenant: string, path: string, init?: RequestInit): Promis
 }
 
 export const controlPlane = {
-  listRuns: <T>(tenant: string) => call<T>(tenant, '/runs'),
-  getRun: <T>(tenant: string, id: string) => call<T>(tenant, `/runs/${encodeURIComponent(id)}`),
-  submitRun: <T>(tenant: string, body: unknown) =>
-    call<T>(tenant, '/runs', { method: 'POST', body: JSON.stringify(body) }),
-  listHarnesses: <T>(tenant: string) => call<T>(tenant, '/harnesses'),
-  registerHarness: <T>(tenant: string, spec: unknown) =>
-    call<T>(tenant, '/harnesses', { method: 'POST', body: JSON.stringify(spec) }),
+  me: <T>(auth: AuthContext) => call<T>(auth, '/me'),
+  listRuns: <T>(auth: AuthContext) => call<T>(auth, '/runs'),
+  getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
+  submitRun: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/runs', { method: 'POST', body: JSON.stringify(body) }),
+  listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),
+  registerHarness: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/harnesses', { method: 'POST', body: JSON.stringify(spec) }),
 }

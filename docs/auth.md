@@ -122,10 +122,18 @@ Verified end-to-end against a running Keycloak: no token → **401**; forged/exp
 `alice` (member) → `/me` ok, `POST /runs` **202**, `POST /harnesses` **403**; `carol` (admin) →
 `POST /harnesses` **201**.
 
+## Web (token courier — done)
+`apps/web` forwards the Keycloak access token as `Bearer` to the control plane: Auth.js's `jwt` callback stores
+**and refreshes** `accessToken`, and the server-only `control-plane.ts` forwards it (falling back to the dev
+`x-assay-tenant` path only when Keycloak is unconfigured). Identity comes from `GET /me` — the web never decodes
+the token for `workspace`/roles — and the UI is role-gated off `/me` (`shared/auth/can.ts` mirror), with the
+control plane still the enforcer. Live-verified headless via `scripts/live/web-auth-flow.py` (Auth.js + Keycloak
+authorization-code flow with a cookie jar): `alice`(member) sees the run form but the harness-register page is
+gated; `carol`(admin) sees both; both render `workspace=acme`. See `docs/web.md`.
+
 ## Not yet (next)
-- **Web rewiring** — `apps/web` forwards the Keycloak access token as `Bearer` to the control plane (Auth.js
-  `jwt` callback stores `accessToken`; `control-plane.ts` forwards it instead of `x-assay-tenant`) and gates UI
-  off `GET /me`. Until then the web uses the dev `x-assay-tenant` path.
 - **MCP** — expose run/harness operations as MCP tools inside `apps/api`, reusing the same `apiKeyAuthenticator`.
 - Per-key scopes/expiry, key rotation, self-service signup/plans.
+- Hardening: keep the access token out of the client session entirely (BFF), or use a service token + signed
+  acts-as instead of forwarding the user's token.
 ```

@@ -2,7 +2,8 @@ import Link from 'next/link'
 
 import { runsSchema } from '@/entities/run'
 import { RunsTable } from '@/widgets/runs-table'
-import { currentTenant } from '@/shared/auth/tenant'
+import { can } from '@/shared/auth/can'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { buttonVariants } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
@@ -11,11 +12,11 @@ import { PageHeader } from '@/shared/ui/page-header'
 export const dynamic = 'force-dynamic'
 
 export default async function RunsPage() {
-  const { tenant } = await currentTenant()
+  const { principal, ctx } = await currentPrincipal()
   let error: string | undefined
   let runs = runsSchema.parse([])
   try {
-    runs = runsSchema.parse(await controlPlane.listRuns(tenant))
+    runs = runsSchema.parse(await controlPlane.listRuns(ctx))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -24,11 +25,13 @@ export default async function RunsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Runs"
-        description={`${runs.length}건 · tenant ${tenant}`}
+        description={`${runs.length}건 · workspace ${principal?.workspace ?? '—'}`}
         actions={
-          <Link href="/dashboard/runs/new" className={buttonVariants({ size: 'sm' })}>
-            새 run
-          </Link>
+          can(principal?.roles, 'runs:submit') ? (
+            <Link href="/dashboard/runs/new" className={buttonVariants({ size: 'sm' })}>
+              새 run
+            </Link>
+          ) : null
         }
       />
       {error ? (

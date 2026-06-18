@@ -39,6 +39,6 @@ All are workspace-scoped: a tenant can only see and act on its own runs (another
 (isolation) → mutated re-register is `409` → the row is `acme | bu | 1.0.0` in `assay_harnesses`.
 
 ## Not yet (next)
-Self-service tenant signup/plans; per-key scopes/expiry; rotating keys; web rewiring so `apps/web` forwards the
-Keycloak token (today it uses the dev `x-assay-tenant` path — see `docs/auth.md`); **per-tenant scored
-dashboard** over these scoped reads (the original motivation — now unblocked).
+Self-service tenant signup/plans; per-key scopes/expiry; rotating keys; **per-tenant scored dashboard** over
+these scoped reads (the original motivation — now unblocked; `apps/web` already forwards the Keycloak token and
+gates UI off `GET /me` — see `docs/auth.md` + `docs/web.md`).

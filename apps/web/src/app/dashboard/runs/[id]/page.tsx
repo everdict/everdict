@@ -2,7 +2,7 @@ import Link from 'next/link'
 
 import { type Run, runSchema } from '@/entities/run'
 import { TraceTimeline } from '@/widgets/trace-timeline'
-import { currentTenant } from '@/shared/auth/tenant'
+import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { Card, CardContent } from '@/shared/ui/card'
@@ -22,12 +22,12 @@ function Meta({ label, value }: { label: string; value: string }) {
 
 export default async function RunDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const { tenant } = await currentTenant()
+  const ctx = await authContext()
 
   let run: Run | undefined
   let error: string | undefined
   try {
-    run = runSchema.parse(await controlPlane.getRun(tenant, id))
+    run = runSchema.parse(await controlPlane.getRun(ctx, id))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }

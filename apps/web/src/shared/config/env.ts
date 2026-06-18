@@ -6,11 +6,9 @@ const schema = z.object({
   CONTROL_PLANE_URL: z.string().url().default('http://127.0.0.1:8787'),
   // Keycloak (Auth.js)
   AUTH_SECRET: z.string().optional(),
-  KEYCLOAK_ISSUER: z.string().url().optional(), // 예: http://localhost:8080/realms/assay
+  KEYCLOAK_ISSUER: z.string().url().optional(), // 예: http://localhost:8081/realms/assay
   KEYCLOAK_CLIENT_ID: z.string().optional(),
   KEYCLOAK_CLIENT_SECRET: z.string().optional(),
-  // 토큰에서 tenant 를 읽을 클레임 이름 (기본 "tenant").
-  TENANT_CLAIM: z.string().default('tenant'),
 })
 
 export const env = schema.parse({
@@ -19,7 +17,6 @@ export const env = schema.parse({
   KEYCLOAK_ISSUER: process.env.KEYCLOAK_ISSUER,
   KEYCLOAK_CLIENT_ID: process.env.KEYCLOAK_CLIENT_ID,
   KEYCLOAK_CLIENT_SECRET: process.env.KEYCLOAK_CLIENT_SECRET,
-  TENANT_CLAIM: process.env.TENANT_CLAIM,
 })
 
 export const keycloakConfigured = Boolean(env.KEYCLOAK_ISSUER && env.KEYCLOAK_CLIENT_ID)
