@@ -5,11 +5,13 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { RunService } from "./run-service.js";
+import type { ScorecardService } from "./scorecard-service.js";
 
 // MCP 도구 표면 — HTTP 라우트와 같은 서비스 코어를 공유하는 "에이전트용 트랜스포트".
 // 각 도구는 Principal 의 역할로 authorize 되고 workspace 로 스코프된다(컨트롤플레인이 인증/인가 권위).
 export interface McpDeps {
   service: RunService;
+  scorecardService?: ScorecardService;
   registry?: HarnessRegistry;
   datasetRegistry?: DatasetRegistry;
 }
@@ -215,6 +217,53 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           await datasets.register(ws, result.data);
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+        }),
+    );
+  }
+
+  if (deps.scorecardService) {
+    const scorecards = deps.scorecardService;
+    server.registerTool(
+      "run_scorecard",
+      {
+        description:
+          "데이터셋을 하니스@버전으로 돌려 스코어카드 집계(비동기 — queued 레코드 반환, 이후 get_scorecard 로 폴링)",
+        inputSchema: {
+          dataset_id: z.string(),
+          dataset_version: z.string().optional(),
+          harness_id: z.string(),
+          harness_version: z.string().optional(),
+        },
+      },
+      ({ dataset_id, dataset_version, harness_id, harness_version }) =>
+        run(principal, "scorecards:run", async () =>
+          ok(
+            await scorecards.submit({
+              tenant: ws,
+              dataset: { id: dataset_id, version: dataset_version ?? "latest" },
+              harness: { id: harness_id, version: harness_version ?? "latest" },
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
+      "list_scorecards",
+      { description: "이 워크스페이스의 스코어카드 목록(summary 만 — 무거운 케이스 결과 제외)", inputSchema: {} },
+      () => run(principal, "scorecards:read", async () => ok(await scorecards.list(ws))),
+    );
+
+    server.registerTool(
+      "get_scorecard",
+      {
+        description: "스코어카드 1건 전체(케이스별 결과 포함). 다른 워크스페이스는 NOT_FOUND",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) =>
+        run(principal, "scorecards:read", async () => {
+          const record = await scorecards.get(id);
+          if (!record || record.tenant !== ws) return fail("NOT_FOUND: scorecard 를 찾을 수 없습니다.");
+          return ok(record);
         }),
     );
   }

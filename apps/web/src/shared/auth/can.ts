@@ -7,11 +7,30 @@ export type WebAction =
   | 'harnesses:register'
   | 'datasets:read'
   | 'datasets:write'
+  | 'scorecards:read'
+  | 'scorecards:run'
 
 const PERMS: Record<string, WebAction[]> = {
-  viewer: ['runs:read', 'harnesses:read', 'datasets:read'],
-  member: ['runs:read', 'harnesses:read', 'runs:submit', 'datasets:read', 'datasets:write'],
-  admin: ['runs:read', 'harnesses:read', 'runs:submit', 'harnesses:register', 'datasets:read', 'datasets:write'],
+  viewer: ['runs:read', 'harnesses:read', 'datasets:read', 'scorecards:read'],
+  member: [
+    'runs:read',
+    'harnesses:read',
+    'runs:submit',
+    'datasets:read',
+    'datasets:write',
+    'scorecards:read',
+    'scorecards:run',
+  ],
+  admin: [
+    'runs:read',
+    'harnesses:read',
+    'runs:submit',
+    'harnesses:register',
+    'datasets:read',
+    'datasets:write',
+    'scorecards:read',
+    'scorecards:run',
+  ],
 }
 
 export function can(roles: string[] | undefined, action: WebAction): boolean {

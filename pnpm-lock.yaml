@@ -44,6 +44,9 @@ importers:
       '@assay/registry':
         specifier: workspace:*
         version: link:../../packages/registry
+      '@assay/suite':
+        specifier: workspace:*
+        version: link:../../packages/suite
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)

@@ -20,6 +20,10 @@ describe("authz", () => {
     expect(can(p(["viewer"]), "datasets:read")).toBe(true);
     expect(can(p(["viewer"]), "datasets:write")).toBe(false);
     expect(can(p(["member"]), "datasets:write")).toBe(true);
+    // scorecards: 읽기는 viewer+, 실행(배치 평가)은 member+
+    expect(can(p(["viewer"]), "scorecards:read")).toBe(true);
+    expect(can(p(["viewer"]), "scorecards:run")).toBe(false);
+    expect(can(p(["member"]), "scorecards:run")).toBe(true);
   });
   it("authorize 는 권한 없으면 403", () => {
     expect(() => authorize(p(["member"]), "harnesses:register")).toThrow(ForbiddenError);

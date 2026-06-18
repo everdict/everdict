@@ -11,10 +11,13 @@ import {
 } from "@assay/backends";
 import {
   InMemoryRunStore,
+  InMemoryScorecardStore,
   InMemoryTenantKeyStore,
   PgRunStore,
+  PgScorecardStore,
   PgTenantKeyStore,
   type RunStore,
+  type ScorecardStore,
   type TenantKeyStore,
   makePool,
   migrate,
@@ -30,6 +33,7 @@ import {
   loadDatasetDir,
 } from "@assay/registry";
 import { RunService } from "./run-service.js";
+import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
 
 // 멀티테넌트 컨트롤플레인 서버. tenant 는 Bearer API 키에서 파생(없으면 dev 헤더 폴백).
@@ -51,7 +55,7 @@ async function main(): Promise<void> {
   const scheduler = new Scheduler(backends);
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
-  const { store, keyStore, registry, datasetRegistry } = await makePersistence();
+  const { store, scorecardStore, keyStore, registry, datasetRegistry } = await makePersistence();
   await seedSharedDatasets(datasetRegistry);
   const service = new RunService({
     dispatcher: scheduler,
@@ -60,8 +64,17 @@ async function main(): Promise<void> {
     // 선언형 command 하니스: 레지스트리에서 spec 을 풀어 잡에 임베드(없으면 빌트인 폴백).
     resolveHarness: (tenant, id, version) => registry.get(tenant, id, version),
   });
+  // 배치 평가: 데이터셋(케이스 묶음)을 하니스@버전으로 돌려 스코어카드 집계. 단일 run 과 같은 디스패처/레지스트리 재사용.
+  const scorecardService = new ScorecardService({
+    dispatcher: scheduler,
+    store: scorecardStore,
+    datasets: datasetRegistry,
+    harnesses: registry,
+    budget,
+  });
   const app = buildServer({
     service,
+    scorecardService,
     registry,
     datasetRegistry,
     authenticator: buildAuthenticator(keyStore),
@@ -80,6 +93,7 @@ async function main(): Promise<void> {
 
 interface Persistence {
   store: RunStore;
+  scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
   registry: HarnessRegistry;
   datasetRegistry: DatasetRegistry;
@@ -91,6 +105,7 @@ async function makePersistence(): Promise<Persistence> {
   if (!url) {
     return {
       store: new InMemoryRunStore(),
+      scorecardStore: new InMemoryScorecardStore(),
       keyStore: new InMemoryTenantKeyStore(),
       registry: new InMemoryHarnessRegistry(),
       datasetRegistry: new InMemoryDatasetRegistry(),
@@ -101,6 +116,7 @@ async function makePersistence(): Promise<Persistence> {
   if (applied.length > 0) console.error(`▶ db migrations applied: ${applied.join(", ")}`);
   return {
     store: new PgRunStore(client),
+    scorecardStore: new PgScorecardStore(client),
     keyStore: new PgTenantKeyStore(client),
     registry: new PgHarnessRegistry(client),
     datasetRegistry: new PgDatasetRegistry(client),

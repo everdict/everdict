@@ -1,13 +1,14 @@
 import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
-import { InMemoryRunStore } from "@assay/db";
+import { InMemoryRunStore, InMemoryScorecardStore } from "@assay/db";
 import { InMemoryDatasetRegistry, InMemoryHarnessRegistry } from "@assay/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { buildMcpServer } from "./mcp.js";
 import { RunService } from "./run-service.js";
+import { ScorecardService } from "./scorecard-service.js";
 
 const result: CaseResult = {
   caseId: "c1",
@@ -40,10 +41,17 @@ const DATASET = JSON.stringify({
 
 let n = 0;
 function harness() {
+  const datasetRegistry = new InMemoryDatasetRegistry();
   return {
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     registry: new InMemoryHarnessRegistry(),
-    datasetRegistry: new InMemoryDatasetRegistry(),
+    datasetRegistry,
+    scorecardService: new ScorecardService({
+      dispatcher: okDispatcher,
+      store: new InMemoryScorecardStore(),
+      datasets: datasetRegistry,
+      newId: () => `sc-${n++}`,
+    }),
   };
 }
 
@@ -67,10 +75,13 @@ describe("MCP tools", () => {
       "create_dataset",
       "get_dataset",
       "get_run",
+      "get_scorecard",
       "list_datasets",
       "list_harnesses",
       "list_runs",
+      "list_scorecards",
       "register_harness",
+      "run_scorecard",
       "submit_run",
       "validate_dataset",
       "validate_harness",
@@ -157,5 +168,39 @@ describe("MCP tools", () => {
     const denied = await beta.callTool({ name: "get_dataset", arguments: { id: "smoke" } });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("NOT_FOUND");
+  });
+
+  it("scorecards: member 가 데이터셋을 돌려 집계(run→poll succeeded); viewer 는 실행 권한오류; 타 ws 는 NOT_FOUND", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"], "acme");
+    await member.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+    const run = await member.callTool({
+      name: "run_scorecard",
+      arguments: { dataset_id: "smoke", harness_id: "scripted" },
+    });
+    expect(run.isError).toBeFalsy();
+    const id = JSON.parse(text(run)).id as string;
+
+    let rec: { status: string; scorecard?: { results: unknown[] } } = { status: "queued" };
+    for (let i = 0; i < 50; i++) {
+      rec = JSON.parse(text(await member.callTool({ name: "get_scorecard", arguments: { id } })));
+      if (rec.status === "succeeded" || rec.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(rec.status).toBe("succeeded");
+    expect(rec.scorecard?.results).toHaveLength(1);
+
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const denied = await viewer.callTool({
+      name: "run_scorecard",
+      arguments: { dataset_id: "smoke", harness_id: "scripted" },
+    });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+
+    const beta = await connect(deps, ["member"], "beta");
+    const notFound = await beta.callTool({ name: "get_scorecard", arguments: { id } });
+    expect(notFound.isError).toBe(true);
+    expect(text(notFound)).toContain("NOT_FOUND");
   });
 });

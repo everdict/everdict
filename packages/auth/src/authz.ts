@@ -9,14 +9,24 @@ export type Action =
   | "harnesses:read"
   | "harnesses:register"
   | "datasets:read"
-  | "datasets:write";
+  | "datasets:write"
+  | "scorecards:read"
+  | "scorecards:run";
 
 export const ASSAY_ROLES = ["viewer", "member", "admin"] as const;
 export type AssayRole = (typeof ASSAY_ROLES)[number];
 
 const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
-  viewer: new Set<Action>(["runs:read", "harnesses:read", "datasets:read"]),
-  member: new Set<Action>(["runs:read", "runs:submit", "harnesses:read", "datasets:read", "datasets:write"]),
+  viewer: new Set<Action>(["runs:read", "harnesses:read", "datasets:read", "scorecards:read"]),
+  member: new Set<Action>([
+    "runs:read",
+    "runs:submit",
+    "harnesses:read",
+    "datasets:read",
+    "datasets:write",
+    "scorecards:read",
+    "scorecards:run",
+  ]),
   admin: new Set<Action>([
     "runs:read",
     "runs:submit",
@@ -24,6 +34,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "harnesses:register",
     "datasets:read",
     "datasets:write",
+    "scorecards:read",
+    "scorecards:run",
   ]),
 };
 

@@ -2,10 +2,11 @@ import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from 
 import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
-import { InMemoryRunStore, InMemoryTenantKeyStore, issueKey } from "@assay/db";
+import { InMemoryRunStore, InMemoryScorecardStore, InMemoryTenantKeyStore, issueKey } from "@assay/db";
 import { InMemoryDatasetRegistry, InMemoryHarnessRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { RunService } from "./run-service.js";
+import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
 
 const result: CaseResult = {
@@ -18,6 +19,18 @@ const result: CaseResult = {
 const okDispatcher: Dispatcher = {
   async dispatch() {
     return result;
+  },
+};
+// 케이스별 점수를 돌려주는 디스패처(스코어카드 집계가 의미 있도록).
+const scoringDispatcher: Dispatcher = {
+  async dispatch(job) {
+    return {
+      caseId: job.evalCase.id,
+      harness: `${job.harness.id}@${job.harness.version}`,
+      trace: [],
+      snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+      scores: [{ graderId: "steps", metric: "steps", value: 2, pass: true }],
+    };
   },
 };
 
@@ -58,23 +71,31 @@ function server(
   } = {},
 ) {
   const keyStore = new InMemoryTenantKeyStore();
+  const datasetRegistry = new InMemoryDatasetRegistry();
   const svc = new RunService({
     dispatcher: okDispatcher,
     store: new InMemoryRunStore(),
     newId: () => `run-${n++}`,
     budget: opts.budget,
   });
+  const scorecardService = new ScorecardService({
+    dispatcher: scoringDispatcher,
+    store: new InMemoryScorecardStore(),
+    datasets: datasetRegistry,
+    newId: () => `sc-${n++}`,
+  });
   const app = buildServer({
     service: svc,
+    scorecardService,
     registry: new InMemoryHarnessRegistry(),
-    datasetRegistry: new InMemoryDatasetRegistry(),
+    datasetRegistry,
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
     internalToken: opts.internalToken,
     requireAuth: opts.requireAuth,
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
   });
-  return { app, keyStore };
+  return { app, keyStore, datasetRegistry };
 }
 
 describe("API — dev fallback (no auth required)", () => {
@@ -364,6 +385,94 @@ describe("API — datasets (workspace-owned, member+ write)", () => {
     await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET }); // 실제 등록
     const v2 = await app.inject({ method: "POST", url: "/datasets/validate", headers: h, payload: DATASET });
     expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    await app.close();
+  });
+});
+
+// 스코어카드 run 이 종결(succeeded/failed)될 때까지 폴링.
+async function pollScorecard(
+  app: ReturnType<typeof server>["app"],
+  id: string,
+  headers: Record<string, string>,
+): Promise<{ status: string; summary?: unknown[]; scorecard?: { results: unknown[] } }> {
+  for (let i = 0; i < 50; i++) {
+    const res = await app.inject({ method: "GET", url: `/scorecards/${id}`, headers });
+    const rec = res.json();
+    if (rec.status === "succeeded" || rec.status === "failed") return rec;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error("scorecard did not settle");
+}
+
+describe("API — scorecards (dataset×harness 배치 평가)", () => {
+  it("member: 데이터셋을 하니스로 돌려 스코어카드 집계(succeeded + summary)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET })).statusCode).toBe(201);
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    expect(post.statusCode).toBe(202);
+    const { id, status } = post.json();
+    expect(status).toBe("queued");
+    const settled = await pollScorecard(app, id, h);
+    expect(settled.status).toBe("succeeded");
+    expect(settled.scorecard?.results).toHaveLength(1);
+    expect(settled.summary).toEqual([{ metric: "steps", count: 1, mean: 2, passRate: 1 }]);
+    // 목록은 무거운 scorecard 생략(summary 만)
+    const list = await app.inject({ method: "GET", url: "/scorecards", headers: h });
+    expect(list.json()[0]).toMatchObject({ id, status: "succeeded" });
+    expect(list.json()[0].scorecard).toBeUndefined();
+    await app.close();
+  });
+
+  it("없는 데이터셋 → 404", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: { authorization: "Bearer x" },
+      payload: { dataset: { id: "nope" }, harness: { id: "scripted" } },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("viewer 는 실행 불가(403)이나 목록 읽기는 가능(200)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await app.inject({ method: "GET", url: "/scorecards", headers: h })).statusCode).toBe(200);
+    const res = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("workspace 스코프: 타 워크스페이스의 스코어카드는 get 404", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    await app.inject({ method: "POST", url: "/datasets", headers: { authorization: acme }, payload: DATASET });
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: { authorization: acme },
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    const { id } = post.json();
+    await pollScorecard(app, id, { authorization: acme });
+    const bGet = await app.inject({ method: "GET", url: `/scorecards/${id}`, headers: { authorization: beta } });
+    expect(bGet.statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/scorecards", headers: { authorization: beta } })).json()).toEqual(
+      [],
+    );
     await app.close();
   });
 });

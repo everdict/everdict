@@ -9,6 +9,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from "zod";
 import { buildMcpServer } from "./mcp.js";
 import type { RunService } from "./run-service.js";
+import type { ScorecardService } from "./scorecard-service.js";
 
 export const SubmitBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
@@ -16,8 +17,15 @@ export const SubmitBodySchema = z.object({
   webhookUrl: z.string().url().optional(),
 });
 
+// 스코어카드 실행 본문 — 데이터셋×하니스(버전 기본 latest, 서비스가 구체 버전으로 해석).
+export const RunScorecardBodySchema = z.object({
+  dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
+  harness: z.object({ id: z.string(), version: z.string().default("latest") }),
+});
+
 export interface ServerDeps {
   service: RunService;
+  scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
   registry?: HarnessRegistry; // 하니스 CRUD (없으면 해당 라우트 비활성)
   datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
   authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
@@ -290,6 +298,57 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- scorecards (데이터셋×하니스 배치 평가 → 집계 결과) ---
+  app.post("/scorecards", async (req, reply) => {
+    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof RunScorecardBodySchema>;
+    try {
+      body = RunScorecardBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      // 데이터셋 없으면 NotFoundError → 404. 통과하면 202 + queued 레코드(배치는 백그라운드).
+      return reply.code(202).send(await deps.scorecardService.submit({ tenant: principal.workspace, ...body }));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get("/scorecards", async (req, reply) => {
+    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+      return reply.send(await deps.scorecardService.list(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/scorecards/:id", async (req, reply) => {
+    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+      const record = await deps.scorecardService.get(req.params.id);
+      if (!record || record.tenant !== principal.workspace)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 를 찾을 수 없습니다." });
+      return reply.send(record);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- internal: 키 발급 (x-internal-token 가드, 미설정 시 fail-closed) ---
   app.post("/internal/tenant-keys", async (req, reply) => {
     if (!deps.internalToken || !deps.keyStore)
@@ -333,7 +392,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         if (transport?.sessionId) sessions.delete(transport.sessionId);
       };
       await buildMcpServer(
-        { service: deps.service, registry: deps.registry, datasetRegistry: deps.datasetRegistry },
+        {
+          service: deps.service,
+          scorecardService: deps.scorecardService,
+          registry: deps.registry,
+          datasetRegistry: deps.datasetRegistry,
+        },
         principal,
       ).connect(transport);
     }

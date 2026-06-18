@@ -42,4 +42,8 @@ export const controlPlane = {
     call<T>(auth, '/datasets', { method: 'POST', body: JSON.stringify(dataset) }),
   validateDataset: <T>(auth: AuthContext, dataset: unknown) =>
     call<T>(auth, '/datasets/validate', { method: 'POST', body: JSON.stringify(dataset) }),
+  listScorecards: <T>(auth: AuthContext) => call<T>(auth, '/scorecards'),
+  getScorecard: <T>(auth: AuthContext, id: string) => call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
+  runScorecard: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
 }
