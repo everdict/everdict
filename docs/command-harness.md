@@ -53,5 +53,11 @@ image/install versions.
   **gpt-5.4-mini** served by workclaw's LiteLLM (`--model openai/chatgpt/gpt-5.4-mini` + `OPENAI_API_BASE`/
   `OPENAI_API_KEY`), and Assay graded it **tests-pass = PASS** — end-to-end, zero adapter code. Gotchas for a
   LiteLLM responses-bridged model: aider needs **`--no-stream`** (streaming garbles the bridged output → no edit
-  applied) and **`--edit-format whole`** (robust for weaker models). On Nomad/K8s the key comes from the
-  workspace secret store and the base agent image needs `python`/`pip`. See `examples/harnesses/aider-litellm.json`.
+  applied) and **`--edit-format whole`** (robust for weaker models). See `examples/harnesses/aider-litellm.json`.
+- **aider live on Nomad** (`scripts/live/aider-nomad.mjs`): the same aider+gpt-5.4-mini eval run **inside a real
+  Nomad alloc** (docker driver) → `tests-pass = PASS` in ~10s. `NomadBackend` injects the LiteLLM key via
+  `secretEnv` (→ alloc env → inherited by aider); the base **`assay-agent` image bakes in `python3` + `aider`**
+  (`packages/agent/Dockerfile`) so runs are fast and `setup` is empty. **Gotcha (container→host networking):** use
+  the **docker bridge gateway `172.17.0.1`** for `OPENAI_API_BASE`, not the host LAN IP — from inside the alloc
+  the LAN IP TCP-connects but the model-completion response doesn't return cleanly, hanging aider until timeout;
+  the gateway path works in ~10s. On K8s, expose LiteLLM as a Service/endpoint reachable from the pod.
