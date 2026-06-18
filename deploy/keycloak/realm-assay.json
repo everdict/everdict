@@ -88,6 +88,17 @@
       "attributes": { "workspace": ["acme"] },
       "credentials": [{ "type": "password", "value": "carol", "temporary": false }],
       "realmRoles": ["admin"]
+    },
+    {
+      "username": "dave",
+      "enabled": true,
+      "email": "dave@globex.test",
+      "emailVerified": true,
+      "firstName": "Dave",
+      "lastName": "Globex",
+      "attributes": { "workspace": ["globex"] },
+      "credentials": [{ "type": "password", "value": "dave", "temporary": false }],
+      "realmRoles": ["member"]
     }
   ]
 }

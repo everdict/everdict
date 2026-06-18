@@ -21,3 +21,10 @@ services:
       - "${KEYCLOAK_PORT:-8080}:8080"
     volumes:
       - ./realm-assay.json:/opt/keycloak/data/import/realm-assay.json:ro
+      # 영속화: realm/유저/세션이 재시작해도 유지된다. --import-realm 은 realm 이 없을 때(첫 기동)만
+      # 임포트하므로, 이후 admin 콘솔 변경분은 보존된다. 처음부터 다시 임포트하려면 이 볼륨을 삭제:
+      #   docker compose -f deploy/keycloak/docker-compose.yaml down -v
+      - keycloak-data:/opt/keycloak/data
+
+volumes:
+  keycloak-data:
