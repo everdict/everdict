@@ -48,5 +48,10 @@ image/install versions.
 - **Live, no key** (`scripts/live/command-harness.mjs`): a user-declared `command` spec
   (`echo … > result.txt`) dispatched through `LocalBackend` → ran in the real `LocalDriver` sandbox →
   `CaseResult` with `result.txt` in the git-diff snapshot. **Zero code, zero LLM key.**
-- **aider live** (next): same path with `setup: pip install aider-chat` + an `ANTHROPIC_API_KEY`/`OPENAI_API_KEY`
-  injected via per-tenant secrets, on Nomad/K8s. See `examples/harnesses/aider-0.74.0.json`.
+- **aider live, real model** (`scripts/live/aider-litellm-live.mjs`): the real OSS coding agent **aider**
+  (`setup: pip install aider-chat` into a venv) fixed a seeded bug (`add` returned `a-b`) using
+  **gpt-5.4-mini** served by workclaw's LiteLLM (`--model openai/chatgpt/gpt-5.4-mini` + `OPENAI_API_BASE`/
+  `OPENAI_API_KEY`), and Assay graded it **tests-pass = PASS** — end-to-end, zero adapter code. Gotchas for a
+  LiteLLM responses-bridged model: aider needs **`--no-stream`** (streaming garbles the bridged output → no edit
+  applied) and **`--edit-format whole`** (robust for weaker models). On Nomad/K8s the key comes from the
+  workspace secret store and the base agent image needs `python`/`pip`. See `examples/harnesses/aider-litellm.json`.

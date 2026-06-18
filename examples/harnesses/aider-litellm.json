@@ -3,7 +3,7 @@
   "id": "aider-litellm",
   "version": "0.74.0",
   "setup": ["pip install --quiet aider-chat==0.74.0"],
-  "command": "aider --yes --no-git --no-auto-commits --no-show-model-warnings --message {{task}} --model openai/{{model}} .",
+  "command": "aider --yes --no-git --no-auto-commits --no-show-model-warnings --no-check-update --no-stream --edit-format whole --message {{task}} --model openai/{{model}} .",
   "model": "chatgpt/gpt-5.4-mini",
   "env": { "OPENAI_API_BASE": "http://litellm.internal:4000" },
   "trace": { "kind": "none" }
