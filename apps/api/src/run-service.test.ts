@@ -1,9 +1,9 @@
 import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
 import type { AgentJob, CaseResult, EvalCase } from "@assay/core";
+import { InMemoryRunStore } from "@assay/db";
 import { describe, expect, it } from "vitest";
 import { RunService } from "./run-service.js";
-import { InMemoryRunStore } from "./run-store.js";
 
 const CASE: EvalCase = {
   id: "c1",

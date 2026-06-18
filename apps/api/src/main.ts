@@ -7,8 +7,8 @@ import {
   Scheduler,
   inMemoryBudget,
 } from "@assay/backends";
+import { InMemoryRunStore, PgRunStore, type RunStore, makePool, migrate, sqlClient } from "@assay/db";
 import { RunService } from "./run-service.js";
-import { InMemoryRunStore } from "./run-store.js";
 import { buildServer } from "./server.js";
 
 // 기본 컨트롤플레인 서버. NOMAD_ADDR 가 있으면 Nomad 백엔드, 아니면 in-process Local.
@@ -30,11 +30,26 @@ async function main(): Promise<void> {
   // 데모용 테넌트 예산 — 운영에선 테넌트 DB/플랜에서 조회.
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
-  const service = new RunService({ dispatcher: scheduler, store: new InMemoryRunStore(), budget });
+  // 결과 스토어: DATABASE_URL 이 있으면 Postgres(마이그레이션 후), 아니면 in-memory.
+  const store = await makeStore();
+
+  const service = new RunService({ dispatcher: scheduler, store, budget });
   const app = buildServer({ service });
 
   await app.listen({ port, host: "0.0.0.0" });
-  console.error(`▶ assay-api on :${port}  (backend: ${nomadAddr ? "nomad" : "local"})`);
+  console.error(
+    `▶ assay-api on :${port}  (backend: ${nomadAddr ? "nomad" : "local"}, store: ${process.env.DATABASE_URL ? "postgres" : "memory"})`,
+  );
+}
+
+// DATABASE_URL 이 있으면 Postgres 스토어(기동 시 마이그레이션 적용), 없으면 in-memory.
+async function makeStore(): Promise<RunStore> {
+  const url = process.env.DATABASE_URL;
+  if (!url) return new InMemoryRunStore();
+  const client = sqlClient(makePool(url));
+  const { applied } = await migrate(client);
+  if (applied.length > 0) console.error(`▶ db migrations applied: ${applied.join(", ")}`);
+  return new PgRunStore(client);
 }
 
 // ASSAY_TENANT_RUNS / ASSAY_TENANT_USD 로 모든 테넌트에 동일 상한(데모). 미설정이면 무제한.

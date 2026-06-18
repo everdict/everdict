@@ -26,9 +26,11 @@ Tenant from the `x-assay-tenant` header (default `default`) — keys fairness, q
 on error `store.update(failed, envelope)` → optional `webhookUrl` POST of the final record. The dispatcher is a
 `Dispatcher` — an in-process `Scheduler` (default) or the Temporal orchestrator for the durable path.
 
-## Result store
-`RunStore` (create/update/get/list). Default `InMemoryRunStore`; production swaps a Postgres/ClickHouse impl
-behind the same interface (migrations per `docs/migration/`) — service, routes, lifecycle unchanged.
+## Result store (`@assay/db`)
+`RunStore` (create/update/get/list). Default `InMemoryRunStore`; with `DATABASE_URL` the API uses `PgRunStore`
+(Postgres, `result`/`error` as jsonb) and runs idempotent SQL migrations at boot — service/routes/lifecycle
+unchanged. Migrations: `packages/db/migrations/` + discipline in `docs/migration/`. The store + migrator share an
+injectable `SqlClient` (fake in tests, `pg.Pool` in prod).
 
 ## Reference impl
 `apps/api/src/{server,run-service,run-store,main}.ts`. Live-verified end-to-end against real Nomad

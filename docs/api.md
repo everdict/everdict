@@ -32,18 +32,21 @@ POST /runs ──▶ RunService.submit
 GET /runs/:id ◀── poll until status is terminal     (or receive the webhook)
 ```
 
-## Result store
-`RunStore` (create/update/get/list) — the default is `InMemoryRunStore`. Production swaps in a
-Postgres/ClickHouse implementation behind the same interface (with migrations per `docs/migration/`); the API,
-service, and lifecycle are unchanged.
+## Result store (`@assay/db`)
+`RunStore` (create/update/get/list). Default `InMemoryRunStore`; set `DATABASE_URL` and the API uses
+**`PgRunStore`** (real Postgres) — it runs migrations at boot (`migrate()` over `packages/db/migrations/`,
+idempotent) and persists `RunRecord`s (`result`/`error` as `jsonb`). Same interface, so the service +
+lifecycle are unchanged. Migration discipline: `docs/migration/`. ClickHouse (analytics) can be added the
+same way behind `RunStore`.
 
 ## Run it
 ```bash
 pnpm build
 # local backend (this machine's claude subscription):
 PORT=8787 node apps/api/dist/main.js
-# distributed backend + per-tenant run cap:
-PORT=8787 NOMAD_ADDR=http://127.0.0.1:4646 ASSAY_AGENT_IMAGE=<img> ASSAY_TENANT_RUNS=3 node apps/api/dist/main.js
+# distributed backend + per-tenant run cap + Postgres result store:
+PORT=8787 NOMAD_ADDR=http://127.0.0.1:4646 ASSAY_AGENT_IMAGE=<img> ASSAY_TENANT_RUNS=3 \
+  DATABASE_URL=postgresql://user:pass@host:5432/db node apps/api/dist/main.js   # migrations run at boot
 
 curl -XPOST localhost:8787/runs -H 'x-assay-tenant: acme' -H 'content-type: application/json' -d '{
   "harness": {"id":"scripted","version":"latest"},
@@ -52,7 +55,8 @@ curl -XPOST localhost:8787/runs -H 'x-assay-tenant: acme' -H 'content-type: appl
 curl localhost:8787/runs/<runId>   # poll until "succeeded"
 ```
 Live-verified end-to-end against real Nomad: `POST /runs` → `202` → poll → `succeeded` with trace + snapshot +
-scores; a 4th submit past `ASSAY_TENANT_RUNS=3` returns `402 BUDGET_EXCEEDED`.
+scores; a 4th submit past `ASSAY_TENANT_RUNS=3` returns `402 BUDGET_EXCEEDED`. With `DATABASE_URL` set, the
+succeeded run is confirmed persisted in the `assay_runs` Postgres table (survives a server restart).
 
 > The CLI (`assay run`) is the dev/single-run path; this API is the multi-tenant control-plane surface.
 > Durable orchestration (Temporal) and the API can be combined: point the service's dispatcher at the Temporal

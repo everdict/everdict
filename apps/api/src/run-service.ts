@@ -1,7 +1,7 @@
 import type { Dispatcher } from "@assay/backends";
 import { type BudgetTracker, costOf } from "@assay/backends";
 import { type AgentJob, AppError, type EvalCase } from "@assay/core";
-import type { RunRecord, RunStore } from "./run-store.js";
+import type { RunRecord, RunStore } from "@assay/db";
 
 export interface SubmitInput {
   tenant: string;

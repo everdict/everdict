@@ -20,7 +20,7 @@ export const RunRecordSchema = z.object({
 });
 export type RunRecord = z.infer<typeof RunRecordSchema>;
 
-// 결과 스토어 계약. 기본은 in-memory; 운영은 Postgres/ClickHouse 구현으로 교체(같은 인터페이스).
+// 결과 스토어 계약. in-memory(개발/테스트) 또는 Postgres(운영) — 같은 인터페이스 뒤로 교체.
 export interface RunStore {
   create(record: RunRecord): Promise<void>;
   update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined>;
