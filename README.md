@@ -64,6 +64,10 @@ pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 - conventions: `CLAUDE.md` + `.claude/` (reinterpreted from `digo-api` / `digo-infra-dev`)
 
 ## Status
-Local end-to-end works live (real Claude Code via subscription). Distributed backends (Nomad/K8s),
-Temporal orchestration, and service-topology harnesses are built + unit-tested; live runs need your
-infra (cluster / Temporal server / harness images). Permissive-licensed, self-hosted stack only.
+Permissive-licensed, self-hosted stack only. Validated **live**: local + real Claude Code (subscription);
+durable Temporal end-to-end; Nomad batch dispatch (runner-agent image); service-topology on Nomad
+(`NomadTopologyRuntime`: warm topology + per-case CDP browser); the SaaS operational layer end-to-end on real
+Nomad — capacity-aware + tenant-fair `Scheduler`, per-tenant trust-zone isolation + warm-pool separation,
+queue-depth autoscaling, per-tenant secrets + budgets, and the async `apps/api` HTTP surface (`POST /runs` →
+poll/webhook). Still Phase-2 (need your infra/images): `K8sTopologyRuntime` apply, real browser+extension &
+browser-use images, real OTel/MLflow span ingestion, Postgres/ClickHouse result store.

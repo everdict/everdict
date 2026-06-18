@@ -19,17 +19,18 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
 
 ## Skills (pull)
 - `foundation/`     — module deps, the spine (4 concerns + Backend placement), error model, conventions.
-- `backends/`       — distributed execution: Backend vs Driver, `AgentJob`, model B (Nomad/K8s/Windows).
-- `topology/`       — service-topology harnesses: HarnessSpec(service), warm-pool/shared-store/per-case efficiency, Nomad+K8s, OTel/MLflow trace.
+- `backends/`       — distributed execution: Backend vs Driver, `AgentJob`, model B; the SaaS operational layer
+  (capacity-aware + tenant-fair `Scheduler`, trust-zone isolation, secrets, budgets, autoscaling).
+- `topology/`       — service-topology harnesses: HarnessSpec(service), warm-pool/shared-store/per-case efficiency, live `NomadTopologyRuntime` + per-tenant warm pools, Nomad+K8s, OTel/MLflow trace.
+- `api-layer/`      — control-plane HTTP (`apps/api`, Fastify): async `POST /runs`/poll/webhook, `RunStore`, flat envelopes.
 - `core-contracts/` — the EvaluableHarness / Environment / Driver / Grader contracts + Zod (planned).
 - `drivers/`        — implementing a Driver (in-sandbox compute; Local) (planned).
 - `harnesses/`      — implementing an EvaluableHarness + trace normalization (planned).
 - `graders/`        — implementing a Grader; the metric families (planned).
-- `api-layer/`      — Fastify route/schema/service split, envelope, pagination (planned).
 - `testing/`        — Vitest, scenario E2E, regression-on-fix (planned).
 - `infra-deploy/`   — Docker/K8s/Helm, IaC, secrets, GitOps (planned).
 - `docs-update`     — `/docs-update` command: audit drift between code and skill references (planned).
 
-(`foundation` and `backends` exist today; the rest are stubs to fill as those areas grow.)
+(`foundation`, `backends`, `topology`, `api-layer` exist today; the rest are stubs to fill as those areas grow.)
 
 Language: all skill/rule bodies are **English** (see CLAUDE.md language policy).

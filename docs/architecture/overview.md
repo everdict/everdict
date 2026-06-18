@@ -31,8 +31,21 @@ See `docs/execution-backends.md` (Backend vs Driver) and `docs/sandbox-auth.md` 
   orchestrator-agnostic `ServiceTopologyBackend` (Nomad/K8s) + `@assay/trace` (OTel/MLflow). See `docs/service-harness.md`.
 - metric → new `Grader` (+ registry entry).
 
+## Operational layer (multi-tenant SaaS)
+Above placement, the control plane turns "run one case" into "serve many tenants on finite/elastic infra":
+- **Scheduler** (`@assay/backends`) — capacity-aware placement (`Backend.capacity()`, `PlacementPolicy`) +
+  tenant-fair queue (WFQ, `tenantQuota`) + backpressure (`RateLimitError` 429). Drop-in `Dispatcher` for `Router`.
+- **Trust zones** (`TrustZonePolicy`) — eval runs untrusted code, so each tenant is isolated (hardened runtime +
+  namespace) and **warm pools are never shared across tenants**. **Secrets** (`SecretProvider`) are per-tenant.
+- **Budgets** (`BudgetTracker`) — per-tenant `{usd, tokens, runs}` admission (`PaymentRequiredError` 402) + cost
+  accounting. **Autoscaler** — grows/shrinks capacity from queue depth.
+- **HTTP surface** (`apps/api`, Fastify) — async `POST /runs` → run-id, `GET /runs/:id` poll, webhooks, `RunStore`
+  (in-memory; Postgres/ClickHouse behind the interface). See `docs/api.md` + `docs/execution-backends.md`.
+
 ## Cross-cutting
-- Cost/token capture comes from the harness trace (e.g. Claude's `total_cost_usd` in stream-json).
-- External/orchestrator failures are remapped to `AppError` (never propagated raw).
+- Cost/token capture comes from the harness trace (e.g. Claude's `total_cost_usd` in stream-json); the same
+  trace cost feeds per-tenant budgets (`sumCost`).
+- External/orchestrator failures are remapped to `AppError` (never propagated raw); HTTP maps `AppError.status`.
 - Durable dispatch+await is implemented via `@assay/orchestrator` (Temporal): a worker runs the
-  `dispatchCase` activity (Router → backend); the client starts/awaits a workflow. See `docs/orchestration.md`.
+  `dispatchCase` activity (a `Dispatcher` — the capacity-aware `Scheduler` → backend); the client starts/awaits a
+  workflow. See `docs/orchestration.md`.

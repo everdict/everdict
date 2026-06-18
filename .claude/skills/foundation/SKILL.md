@@ -15,17 +15,17 @@ Assay is a harness-agnostic, infra-agnostic **agent evaluation runtime**. Eval-f
 
 ## Module dependency (one-way; reverse import = bug)
 ```
-core ← { drivers · environments · harnesses · graders } ← runner ← agent ← backends ← orchestrator ← apps/cli
+core ← { drivers · environments · harnesses · graders · trace } ← runner ← agent ← backends ← { orchestrator · topology } ← { apps/cli · apps/api }
 ```
 - `core` — contracts only (interfaces + Zod + errors). No I/O, no SDK. Dependency root.
 - `drivers` / `environments` / `harnesses` / `graders` — adapters; depend on `core` only.
 - `runner` — the eval loop (`runCase`); composes adapters.
 - `agent` — the dispatched unit (model B): runs `runCase` over `LocalDriver` inside an isolated job, emits `__ASSAY_RESULT__`.
-- `backends` — placement: `Backend.dispatch(AgentJob)` + `capacity()` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later) + `Router` (static) / `Scheduler` (capacity-aware + queue + backpressure) / `BackendRegistry`.
+- `backends` — placement + SaaS operational layer: `Backend.dispatch(AgentJob)` + `capacity()` → orchestrator (LocalBackend/NomadBackend; K8s/Windows later); `Router` (static) / `Scheduler` (capacity-aware + tenant-fair WFQ + quotas + backpressure) / `BackendRegistry`; `TrustZonePolicy` (per-tenant isolation), `SecretProvider`, `BudgetTracker`, `Autoscaler`.
 - `orchestrator` — durable control plane (Temporal): `DirectOrchestrator` / `TemporalOrchestrator` + worker.
 - `trace` — pull a harness trace from OTel/MLflow → `TraceEvent`. `topology` — service-topology harnesses
   (multi-service + target env): orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s builders.
-- `apps/cli` — control plane PoC (`assay run`, `assay worker`). `apps/api` (Fastify) + `registry` are planned.
+- `apps/cli` — dev control plane (`assay run`, `assay worker`). `apps/api` — multi-tenant HTTP surface (Fastify): async `POST /runs`/poll/webhook + `RunStore`. `registry` is planned.
 
 ## The spine: 4 in-sandbox concerns + 1 placement layer
 Harness (under test) · Environment (the world it acts on) · Driver (where it runs *in-sandbox*) · Grader (how we judge).

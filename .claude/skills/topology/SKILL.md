@@ -22,6 +22,17 @@ stateless services = per-version warm; stores = shared + per-case logical isolat
 `ServiceTopologyBackend` (a `Backend`) holds a `TopologyRuntime`. Only the runtime differs:
 `buildNomadTopologyJob` (Nomad) vs `buildK8sManifests` (K8s). Both pure + deterministic-tested.
 
+## Live Nomad runtime
+`NomadTopologyRuntime` implements `TopologyRuntime` against the Nomad API: `ensureTopology` registers the
+warm service job, polls each group to running, and discovers endpoints from the alloc via pure `resolvePort`
+(`AllocatedResources.Shared.Ports` → `Resources.Networks`); `provisionBrowserEnv` runs a per-case headless
+Chromium and discovers its CDP from `/json/version`. Services with a `port` get a group dynamic-port (no Consul).
+**Tenant isolation:** `ensureTopology`/`provisionBrowserEnv` take an optional `TrustZone`; the warm pool is keyed
+by `(spec, version, zone.id)` and the job ID/namespace carry the zone — warm topologies are **never shared across
+tenants** (a shared agent/LangGraph process would leak state/secrets). Verified live on Nomad.
+
 ## Reference impls
-`packages/topology/src/{nomad-topology,k8s-topology,service-backend,environment-manager}.ts`,
-`packages/trace/src/{otel,mlflow,trace-source}.ts`. Phase 2 = live runtimes + browser/extension provisioning.
+`packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,service-backend,environment-manager}.ts`,
+`packages/trace/src/{otel,mlflow,trace-source}.ts`. Live now: NomadTopologyRuntime apply + per-case CDP browser
+(see `scripts/live/service-topology-nomad.mjs`). Still Phase 2: K8sTopologyRuntime apply, real browser+extension
+(headful+xvfb+`--load-extension`) & browser-use images, real OTel/MLflow span ingestion.
