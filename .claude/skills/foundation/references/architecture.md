@@ -18,7 +18,7 @@
 | `apps/cli` | dev control plane (`assay run`, `assay worker`, `assay suite`) | core, agent, backends, orchestrator, suite |
 | `@assay/db` | result store: `RunStore` (`InMemoryRunStore`/`PgRunStore`) + numbered SQL migrations + `migrate`/`preflight` | core |
 | `@assay/registry` | harness version SSOT: `(id, version)→HarnessSpec`, immutable versions, file/GitOps loader + `PgHarnessRegistry` | core, db |
-| `apps/api` | multi-tenant control-plane HTTP (Fastify): async `POST /runs`/poll/webhook + `RunStore` | core, agent, backends, db |
+| `apps/api` | multi-tenant control-plane HTTP (Fastify): API-key auth + tenant-owned harnesses + async `POST /runs`/poll/webhook + `RunStore` | core, agent, backends, db, registry |
 | `@assay/registry` | harness versioning | (planned) |
 
 ## The eval loop (runs inside the agent)

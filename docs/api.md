@@ -13,8 +13,11 @@ arrives by polling or webhook.
 | `GET`  | `/runs` | `RunRecord[]` for the caller's tenant |
 | `GET`  | `/healthz` | `{ ok: true }` |
 
-Tenant comes from the `x-assay-tenant` header (default `default`); it keys fairness, quotas, trust-zone
-isolation, secret scoping, and budgets.
+Tenant comes from the `Authorization: Bearer ak_…` API key (`TenantAuth`); with `ASSAY_REQUIRE_AUTH=1` a
+missing/invalid key is **401**, otherwise dev falls back to the `x-assay-tenant` header. The resolved tenant
+keys fairness, quotas, trust-zone isolation, secret scoping, budgets — and scopes every read. Harness
+registration (`POST/GET /harnesses`, tenant-owned) and key issuance (`POST /internal/tenant-keys`) are covered
+in [tenancy.md](tenancy.md).
 
 `RunRecord` = `{ id, tenant, harness, caseId, status: queued|running|succeeded|failed, result?, error?,
 createdAt, updatedAt }`. Errors map by `AppError.status`: budget → **402** `BUDGET_EXCEEDED`, queue full →

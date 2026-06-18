@@ -47,5 +47,8 @@ file SSOT with `loadHarnessDir(dir, pgRegistry)`. `latest`/semver resolution is 
 Live-verified against real Postgres (`scripts/live/pg-harness-registry.mjs`): migrate → seed files → resolve
 `bu@latest` → `1.1.0` → re-register-different-spec is rejected → spec survives a fresh connection.
 
-> Tenant ownership (a `tenant` column + scoped reads) is a future expand migration, landing with the tenant
-> access layer (API keys → tenant). Today the registry is global.
+## Tenant ownership
+The registry is keyed by **`(tenant, id, version)`** (migration `0004_harness_tenant`). Resolution prefers the
+tenant's own harness and falls back to the **`_shared`** owner for first-party harnesses (the file loader
+registers under `_shared` by default). `loadHarnessDir(dir, { into, tenant })` chooses the owner. The HTTP
+surface (`POST/GET /harnesses`, authed) exposes this per-tenant — see `docs/tenancy.md`.

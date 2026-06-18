@@ -71,6 +71,7 @@ durable Temporal end-to-end; Nomad batch dispatch (runner-agent image); service-
 Kubernetes (kind)** (`NomadTopologyRuntime`/`K8sTopologyRuntime`: warm topology + per-case CDP browser +
 per-tenant namespace isolation); the SaaS operational layer end-to-end on real Nomad — capacity-aware +
 tenant-fair `Scheduler`, per-tenant trust-zone isolation + warm-pool separation, queue-depth autoscaling,
-per-tenant secrets + budgets, the async `apps/api` HTTP surface (`POST /runs` → poll/webhook), and a Postgres
-result store (`PgRunStore` + migrations). Still Phase-2 (need your infra/images): real browser+extension &
-browser-use images, real OTel/MLflow span ingestion, ClickHouse analytics store.
+per-tenant secrets + budgets, the async `apps/api` HTTP surface (`POST /runs` → poll/webhook) with **API-key
+auth + tenant-owned harnesses + tenant-scoped reads**, and Postgres persistence (`PgRunStore` + `PgHarnessRegistry`
++ migrations). Still Phase-2 (need your infra/images): real browser+extension & browser-use images, real
+OTel/MLflow span ingestion, ClickHouse analytics, the per-tenant dashboard.

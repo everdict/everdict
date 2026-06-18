@@ -2,6 +2,7 @@ export {
   type HarnessRegistry,
   InMemoryHarnessRegistry,
   LATEST,
+  SHARED_TENANT,
   compareVersions,
   sortVersions,
   specsEqual,

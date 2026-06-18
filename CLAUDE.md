@@ -43,7 +43,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `packages/db`           — result store: `RunStore` (`InMemoryRunStore` / `PgRunStore` on Postgres) + numbered SQL migrations + idempotent `migrate`/`preflight`. See `docs/migration/`.
 - `packages/registry`     — **harness version SSOT**: `(id, version) → HarnessSpec` (immutable versions, semver `latest`; in-memory / file-GitOps / `PgHarnessRegistry` on Postgres — async interface); `ServiceTopologyBackend.specFor` wires to it. See `docs/registry.md`.
 - `apps/cli`              — dev/single-run control plane (`assay run [--orchestrator temporal]`, `assay worker`).
-- `apps/api`              — **multi-tenant control-plane HTTP surface** (Fastify): async `POST /runs` → run-id, `GET /runs/:id` poll, webhooks, `RunStore` (in-memory or Postgres via `DATABASE_URL`). See `docs/api.md`.
+- `apps/api`              — **multi-tenant control-plane HTTP surface** (Fastify): API-key auth (`Bearer`→tenant, `TenantAuth`), tenant-owned harnesses (`POST/GET /harnesses`), `POST /internal/tenant-keys`, async `POST /runs`→run-id + tenant-scoped reads, `RunStore` (in-memory or Postgres via `DATABASE_URL`). See `docs/api.md` + `docs/tenancy.md`.
 Reverse imports are bugs. The same concern name recurs per package (vertical slices).
 
 ### Two execution layers (Backend vs Driver) — model B

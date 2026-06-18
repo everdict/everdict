@@ -13,3 +13,5 @@ Result store (`RunStore`) + Postgres impl + migrations. See `docs/migration/`, s
   (`OK_TO_APPLY`/`ALREADY_APPLIED`/`BLOCKED`) + a note in `docs/migration/preflight/`. Additive ships normally.
 - `result`/`error` are `jsonb`; map rows → `RunRecord` through `RunRecordSchema.parse` (validate at the boundary).
 - Keep `RunStore` impls interchangeable — `apps/api` swaps in-memory ↔ Postgres by `DATABASE_URL` alone.
+- Tenant API keys (`assay_tenant_keys`): store ONLY the SHA-256 hash (`hashKey`), never the plaintext; the
+  plaintext from `generateKey`/`issueKey` is shown once. `keyStoreAuth` resolves key→tenant.

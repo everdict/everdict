@@ -32,7 +32,7 @@ function joinUrl(base: string, path: string): string {
 export interface ServiceTopologyBackendOptions {
   runtime: TopologyRuntime;
   traceSource: TraceSource;
-  specFor: (id: string, version: string) => ServiceHarnessSpec | Promise<ServiceHarnessSpec>;
+  specFor: (tenant: string, id: string, version: string) => ServiceHarnessSpec | Promise<ServiceHarnessSpec>;
   graders?: Grader[]; // 기본: trace 기반(steps/cost/latency). 브라우저 그레이더(dom/vlm)는 Phase 2.
   submit?: SubmitFn;
   newRunId?: () => string;
@@ -55,7 +55,7 @@ export class ServiceTopologyBackend implements Backend {
   }
 
   async dispatch(job: AgentJob): Promise<CaseResult> {
-    const spec = await this.opts.specFor(job.harness.id, job.harness.version);
+    const spec = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);
     const runId = (this.opts.newRunId ?? newRunId)();
     const keys = keysFor(runId);
 

@@ -38,6 +38,9 @@ importers:
       '@assay/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@assay/registry':
+        specifier: workspace:*
+        version: link:../../packages/registry
       fastify:
         specifier: ^5.2.0
         version: 5.8.5

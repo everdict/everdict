@@ -21,7 +21,7 @@ async function main() {
   banner("harness version SSOT (file-backed)");
   const registry = await loadHarnessDir(DIR);
   for (const { id, versions } of await registry.list()) console.log(`  ${id}: ${versions.join(", ")}`);
-  const latest = await registry.getService("bu", LATEST);
+  const latest = await registry.getService("acme", "bu", LATEST);
   console.log(
     `  resolve bu@latest → ${latest.id}@${latest.version}  (deps: ${latest.dependencies.map((d) => d.store).join("+")})`,
   );
@@ -37,7 +37,7 @@ async function main() {
   const backend = new ServiceTopologyBackend({
     runtime,
     traceSource: new MlflowTraceSource({ endpoint: MLFLOW }),
-    specFor: (id, ref) => registry.getService(id, ref), // ← 레지스트리가 spec 의 SSOT
+    specFor: (tenant, id, ref) => registry.getService(tenant, id, ref), // ← 레지스트리가 spec 의 SSOT
     trustZones: perTenantTrustZones(),
     submit: async (url, payload) => {
       console.log(`  → POST ${url}`);

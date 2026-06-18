@@ -15,3 +15,13 @@ export {
   preflight,
   readMigrations,
 } from "./migrate.js";
+export {
+  type TenantKeyStore,
+  type TenantAuth,
+  InMemoryTenantKeyStore,
+  PgTenantKeyStore,
+  keyStoreAuth,
+  hashKey,
+  generateKey,
+  issueKey,
+} from "./tenant-auth.js";

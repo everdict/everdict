@@ -1,19 +1,20 @@
 import { BadRequestError, ConflictError, type HarnessSpec, NotFoundError, type ServiceHarnessSpec } from "@assay/core";
 
 export const LATEST = "latest";
+// first-party/공유 하니스의 소유자. 테넌트가 자기 것을 안 가졌으면 여기로 폴백한다.
+export const SHARED_TENANT = "_shared";
 
-// 하니스 버전 SSOT — (id, version) → HarnessSpec 해석. 버전은 불변(immutable). "latest" 는 semver(가능하면)
-// 또는 등록순으로 최신. async 인터페이스 — Postgres 등 영속 백엔드도 같은 계약으로 구현된다.
+// 하니스 버전 SSOT — (tenant, id, version) → HarnessSpec. 버전 불변. "latest" 는 semver(가능하면)/등록순 최신.
+// 해석은 테넌트 소유 우선, 없으면 SHARED_TENANT(first-party) 폴백. async — Postgres 백엔드도 같은 계약.
 export interface HarnessRegistry {
-  register(spec: HarnessSpec): Promise<void>;
-  has(id: string, version: string): Promise<boolean>;
-  get(id: string, ref?: string): Promise<HarnessSpec>; // ref = 정확한 버전 또는 "latest"(기본)
-  getService(id: string, ref?: string): Promise<ServiceHarnessSpec>; // service 로 좁힘
-  versions(id: string): Promise<string[]>; // 정렬됨(semver 우선)
-  list(): Promise<Array<{ id: string; versions: string[] }>>;
+  register(tenant: string, spec: HarnessSpec): Promise<void>;
+  has(tenant: string, id: string, version: string): Promise<boolean>;
+  get(tenant: string, id: string, ref?: string): Promise<HarnessSpec>;
+  getService(tenant: string, id: string, ref?: string): Promise<ServiceHarnessSpec>;
+  versions(tenant: string, id: string): Promise<string[]>; // 정렬됨(semver 우선)
+  list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>>;
 }
 
-// "1.2.3" → [1,2,3]. semver 가 아니면 undefined.
 function parseSemver(v: string): [number, number, number] | undefined {
   const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : undefined;
@@ -28,15 +29,13 @@ export function compareVersions(a: string, b: string): number {
       if (d !== 0) return d;
     }
   }
-  return 0; // semver 아님 → 안정 정렬(호출부가 등록순 tie-break)
+  return 0;
 }
-
-// semver 우선 정렬(가장 오래된 → 최신). latest = 마지막.
 export function sortVersions(versions: string[]): string[] {
   return [...versions].sort(compareVersions);
 }
 
-// 키 순서 무관 비교 — Postgres jsonb 는 키 순서를 보존하지 않으므로 안정 직렬화로 비교한다.
+// 키 순서 무관 비교 (Postgres jsonb 는 키 순서 미보존).
 function stableStringify(v: unknown): string {
   if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`;
@@ -50,14 +49,9 @@ export function specsEqual(a: unknown, b: unknown): boolean {
   return stableStringify(a) === stableStringify(b);
 }
 
-// ref 를 정확한 버전으로 해석 (sorted 는 versions(id) 결과). 순수.
 export function resolveRef(id: string, ref: string, sorted: string[]): string {
-  if (sorted.length === 0) throw new NotFoundError("NOT_FOUND", { id }, `하니스 '${id}' 가 레지스트리에 없습니다.`);
-  if (ref === LATEST) {
-    const last = sorted[sorted.length - 1];
-    if (!last) throw new NotFoundError("NOT_FOUND", { id }, `하니스 '${id}' 버전이 없습니다.`);
-    return last;
-  }
+  if (sorted.length === 0) throw new NotFoundError("NOT_FOUND", { id }, `하니스 '${id}' 가 없습니다.`);
+  if (ref === LATEST) return sorted[sorted.length - 1] as string;
   if (!sorted.includes(ref))
     throw new NotFoundError("NOT_FOUND", { id, version: ref }, `하니스 ${id}@${ref} 가 없습니다.`);
   return ref;
@@ -72,26 +66,44 @@ export function asService(spec: HarnessSpec, id: string): ServiceHarnessSpec {
 
 interface Entry {
   spec: HarnessSpec;
-  seq: number; // 등록 순서(semver 아닐 때 latest 판단)
+  seq: number;
 }
 
 export class InMemoryHarnessRegistry implements HarnessRegistry {
-  private readonly byId = new Map<string, Map<string, Entry>>();
+  private readonly byOwner = new Map<string, Map<string, Map<string, Entry>>>(); // tenant → id → version → Entry
   private seq = 0;
 
-  async register(spec: HarnessSpec): Promise<void> {
-    let versions = this.byId.get(spec.id);
+  private ownerVersions(owner: string, id: string): string[] {
+    const ids = this.byOwner.get(owner)?.get(id);
+    if (!ids) return [];
+    return [...ids.values()]
+      .sort((a, b) => compareVersions(a.spec.version, b.spec.version) || a.seq - b.seq)
+      .map((e) => e.spec.version);
+  }
+  // 해석 소유자: 테넌트가 id 를 가졌으면 테넌트, 아니면 SHARED(있으면), 아니면 undefined.
+  private ownerOf(tenant: string, id: string): string | undefined {
+    if (this.byOwner.get(tenant)?.has(id)) return tenant;
+    if (this.byOwner.get(SHARED_TENANT)?.has(id)) return SHARED_TENANT;
+    return undefined;
+  }
+
+  async register(tenant: string, spec: HarnessSpec): Promise<void> {
+    let ids = this.byOwner.get(tenant);
+    if (!ids) {
+      ids = new Map();
+      this.byOwner.set(tenant, ids);
+    }
+    let versions = ids.get(spec.id);
     if (!versions) {
       versions = new Map();
-      this.byId.set(spec.id, versions);
+      ids.set(spec.id, versions);
     }
     const existing = versions.get(spec.version);
     if (existing) {
-      // 불변성: 동일 스펙이면 멱등, 다르면 충돌(드리프트 방지).
       if (!specsEqual(existing.spec, spec)) {
         throw new ConflictError(
           "CONFLICT",
-          { id: spec.id, version: spec.version },
+          { tenant, id: spec.id, version: spec.version },
           `하니스 ${spec.id}@${spec.version} 가 다른 스펙으로 이미 등록되어 있습니다(버전은 불변).`,
         );
       }
@@ -100,30 +112,33 @@ export class InMemoryHarnessRegistry implements HarnessRegistry {
     versions.set(spec.version, { spec, seq: this.seq++ });
   }
 
-  async has(id: string, version: string): Promise<boolean> {
-    return this.byId.get(id)?.has(version) ?? false;
+  async has(tenant: string, id: string, version: string): Promise<boolean> {
+    const owner = this.ownerOf(tenant, id);
+    return owner ? (this.byOwner.get(owner)?.get(id)?.has(version) ?? false) : false;
   }
 
-  async versions(id: string): Promise<string[]> {
-    const versions = this.byId.get(id);
-    if (!versions) return [];
-    return [...versions.values()]
-      .sort((a, b) => compareVersions(a.spec.version, b.spec.version) || a.seq - b.seq)
-      .map((e) => e.spec.version);
+  async versions(tenant: string, id: string): Promise<string[]> {
+    const owner = this.ownerOf(tenant, id);
+    return owner ? this.ownerVersions(owner, id) : [];
   }
 
-  async get(id: string, ref: string = LATEST): Promise<HarnessSpec> {
-    const version = resolveRef(id, ref, await this.versions(id));
-    return (this.byId.get(id)?.get(version) as Entry).spec;
+  async get(tenant: string, id: string, ref: string = LATEST): Promise<HarnessSpec> {
+    const owner = this.ownerOf(tenant, id);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `하니스 '${id}' 가 없습니다.`);
+    const version = resolveRef(id, ref, this.ownerVersions(owner, id));
+    return (this.byOwner.get(owner)?.get(id)?.get(version) as Entry).spec;
   }
 
-  async getService(id: string, ref: string = LATEST): Promise<ServiceHarnessSpec> {
-    return asService(await this.get(id, ref), id);
+  async getService(tenant: string, id: string, ref: string = LATEST): Promise<ServiceHarnessSpec> {
+    return asService(await this.get(tenant, id, ref), id);
   }
 
-  async list(): Promise<Array<{ id: string; versions: string[] }>> {
-    const out: Array<{ id: string; versions: string[] }> = [];
-    for (const id of [...this.byId.keys()].sort()) out.push({ id, versions: await this.versions(id) });
-    return out;
+  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
+    const ids = new Map<string, string>(); // id → owner (테넌트 우선)
+    for (const id of this.byOwner.get(SHARED_TENANT)?.keys() ?? []) ids.set(id, SHARED_TENANT);
+    for (const id of this.byOwner.get(tenant)?.keys() ?? []) ids.set(id, tenant);
+    return [...ids.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([id, owner]) => ({ id, owner, versions: this.ownerVersions(owner, id) }));
   }
 }
