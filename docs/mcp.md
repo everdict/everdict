@@ -6,8 +6,8 @@ validates the token. Humans use the web; agents (Claude Code, CI, custom) use MC
 
 ## Tools
 Streamable-HTTP MCP endpoint at `POST /mcp` (stateful sessions). Each tool runs over the **same service core** as
-the HTTP routes (`RunService` + `HarnessRegistry`), is **role-gated** (`authorize(principal, action)`) and
-**workspace-scoped**:
+the HTTP routes (`RunService` + `HarnessRegistry` + `DatasetRegistry`), is **role-gated**
+(`authorize(principal, action)`) and **workspace-scoped**:
 
 | Tool | Action (role) | Effect |
 |---|---|---|
@@ -17,6 +17,10 @@ the HTTP routes (`RunService` + `HarnessRegistry`), is **role-gated** (`authoriz
 | `list_harnesses` | `harnesses:read` (viewer+) | workspace-owned + `_shared` |
 | `validate_harness` | `harnesses:register` (admin) | dry-run: schema + this workspace's existing versions/conflict (no write) |
 | `register_harness` | `harnesses:register` (admin) | register a `HarnessSpec` (immutable → `CONFLICT`) |
+| `list_datasets` | `datasets:read` (viewer+) | workspace-owned + `_shared` benchmark datasets |
+| `get_dataset` | `datasets:read` | one dataset incl. cases (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
+| `validate_dataset` | `datasets:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
+| `create_dataset` | `datasets:write` (member+) | register a `Dataset` (immutable → `CONFLICT`) |
 
 Authorization/validation failures come back as MCP tool errors (`isError`), e.g. `FORBIDDEN: …`.
 

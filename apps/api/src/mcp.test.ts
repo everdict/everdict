@@ -2,7 +2,7 @@ import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
 import { InMemoryRunStore } from "@assay/db";
-import { InMemoryHarnessRegistry } from "@assay/registry";
+import { InMemoryDatasetRegistry, InMemoryHarnessRegistry } from "@assay/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
@@ -32,11 +32,18 @@ const HARNESS = JSON.stringify({
   traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
 });
 
+const DATASET = JSON.stringify({
+  id: "smoke",
+  version: "1.0.0",
+  cases: [{ id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [{ id: "steps" }] }],
+});
+
 let n = 0;
 function harness() {
   return {
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     registry: new InMemoryHarnessRegistry(),
+    datasetRegistry: new InMemoryDatasetRegistry(),
   };
 }
 
@@ -57,11 +64,15 @@ describe("MCP tools", () => {
     const client = await connect(harness(), ["admin"]);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "create_dataset",
+      "get_dataset",
       "get_run",
+      "list_datasets",
       "list_harnesses",
       "list_runs",
       "register_harness",
       "submit_run",
+      "validate_dataset",
       "validate_harness",
     ]);
   });
@@ -117,5 +128,34 @@ describe("MCP tools", () => {
     const got = await beta.callTool({ name: "get_run", arguments: { id } });
     expect(got.isError).toBe(true);
     expect(text(got)).toContain("NOT_FOUND");
+  });
+
+  it("datasets: member 는 create 가능, viewer 는 write 권한오류", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"]);
+    const created = await member.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+    expect(created.isError).toBeFalsy();
+    expect(text(created)).toContain("smoke");
+
+    const viewer = await connect(deps, ["viewer"]);
+    const denied = await viewer.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+    // viewer 는 읽기는 됨
+    expect((await viewer.callTool({ name: "list_datasets", arguments: {} })).isError).toBeFalsy();
+  });
+
+  it("datasets: get_dataset 는 전체(케이스 포함) 반환; 다른 워크스페이스는 NOT_FOUND", async () => {
+    const deps = harness();
+    const acme = await connect(deps, ["member"], "acme");
+    await acme.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+    const got = JSON.parse(text(await acme.callTool({ name: "get_dataset", arguments: { id: "smoke" } })));
+    expect(got).toMatchObject({ id: "smoke", version: "1.0.0" });
+    expect(got.cases).toHaveLength(1);
+
+    const beta = await connect(deps, ["member"], "beta");
+    const denied = await beta.callTool({ name: "get_dataset", arguments: { id: "smoke" } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("NOT_FOUND");
   });
 });

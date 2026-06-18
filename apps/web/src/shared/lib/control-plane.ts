@@ -35,4 +35,11 @@ export const controlPlane = {
     call<T>(auth, '/harnesses', { method: 'POST', body: JSON.stringify(spec) }),
   validateHarness: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/harnesses/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  listDatasets: <T>(auth: AuthContext) => call<T>(auth, '/datasets'),
+  getDataset: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  createDataset: <T>(auth: AuthContext, dataset: unknown) =>
+    call<T>(auth, '/datasets', { method: 'POST', body: JSON.stringify(dataset) }),
+  validateDataset: <T>(auth: AuthContext, dataset: unknown) =>
+    call<T>(auth, '/datasets/validate', { method: 'POST', body: JSON.stringify(dataset) }),
 }

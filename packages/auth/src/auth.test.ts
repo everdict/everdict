@@ -16,6 +16,10 @@ describe("authz", () => {
     expect(can(p(["member"]), "runs:submit")).toBe(true);
     expect(can(p(["member"]), "harnesses:register")).toBe(false);
     expect(can(p(["admin"]), "harnesses:register")).toBe(true);
+    // datasets: 읽기는 viewer+, 쓰기는 member+(harnesses:register 가 admin 인 것과 구분)
+    expect(can(p(["viewer"]), "datasets:read")).toBe(true);
+    expect(can(p(["viewer"]), "datasets:write")).toBe(false);
+    expect(can(p(["member"]), "datasets:write")).toBe(true);
   });
   it("authorize 는 권한 없으면 403", () => {
     expect(() => authorize(p(["member"]), "harnesses:register")).toThrow(ForbiddenError);

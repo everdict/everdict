@@ -20,7 +20,15 @@ import {
   migrate,
   sqlClient,
 } from "@assay/db";
-import { type HarnessRegistry, InMemoryHarnessRegistry, PgHarnessRegistry } from "@assay/registry";
+import {
+  type DatasetRegistry,
+  type HarnessRegistry,
+  InMemoryDatasetRegistry,
+  InMemoryHarnessRegistry,
+  PgDatasetRegistry,
+  PgHarnessRegistry,
+  loadDatasetDir,
+} from "@assay/registry";
 import { RunService } from "./run-service.js";
 import { buildServer } from "./server.js";
 
@@ -43,11 +51,13 @@ async function main(): Promise<void> {
   const scheduler = new Scheduler(backends);
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
-  const { store, keyStore, registry } = await makePersistence();
+  const { store, keyStore, registry, datasetRegistry } = await makePersistence();
+  await seedSharedDatasets(datasetRegistry);
   const service = new RunService({ dispatcher: scheduler, store, budget });
   const app = buildServer({
     service,
     registry,
+    datasetRegistry,
     authenticator: buildAuthenticator(keyStore),
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
@@ -66,6 +76,7 @@ interface Persistence {
   store: RunStore;
   keyStore: TenantKeyStore;
   registry: HarnessRegistry;
+  datasetRegistry: DatasetRegistry;
 }
 
 // DATABASE_URL 이 있으면 Postgres(기동 시 마이그레이션 적용), 없으면 in-memory.
@@ -76,6 +87,7 @@ async function makePersistence(): Promise<Persistence> {
       store: new InMemoryRunStore(),
       keyStore: new InMemoryTenantKeyStore(),
       registry: new InMemoryHarnessRegistry(),
+      datasetRegistry: new InMemoryDatasetRegistry(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -85,7 +97,20 @@ async function makePersistence(): Promise<Persistence> {
     store: new PgRunStore(client),
     keyStore: new PgTenantKeyStore(client),
     registry: new PgHarnessRegistry(client),
+    datasetRegistry: new PgDatasetRegistry(client),
   };
+}
+
+// _shared(first-party 벤치마크) 데이터셋을 파일 SSOT 에서 시드 — 새 테넌트도 즉시 baseline 비교 가능.
+// ASSAY_DATASETS_DIR(없으면 cwd/examples/datasets) 에서 best-effort 로드(불변 → 재기동 시 멱등). 디렉터리 없으면 조용히 스킵.
+async function seedSharedDatasets(registry: DatasetRegistry): Promise<void> {
+  const dir = process.env.ASSAY_DATASETS_DIR ?? `${process.cwd()}/examples/datasets`;
+  try {
+    await loadDatasetDir(dir, { into: registry });
+    console.error(`▶ shared datasets seeded from ${dir}`);
+  } catch {
+    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+  }
 }
 
 // 컨트롤플레인이 소유하는 인증: KEYCLOAK_ISSUER 면 OIDC(JWT) + 항상 API 키. 둘 다 workspace 로 해석.

@@ -12,6 +12,10 @@ arrives by polling or webhook.
 | `POST` | `/runs` | `{ harness:{id,version}, case:EvalCase, webhookUrl? }` → **202** `RunRecord` (`runs:submit`) |
 | `GET`  | `/runs/:id` | `RunRecord` (200) or 404 (`runs:read`) |
 | `GET`  | `/runs` | `RunRecord[]` for the caller's workspace (`runs:read`) |
+| `POST` | `/datasets` | register a `Dataset` (immutable → `409`) (`datasets:write`, member+) |
+| `POST` | `/datasets/validate` | dry-run: schema + existing versions/conflict, no write (`datasets:write`) |
+| `GET`  | `/datasets` | workspace-owned + `_shared` datasets (`datasets:read`) |
+| `GET`  | `/datasets/:id/versions/:version` | full `Dataset` incl. cases; `version` may be `latest` (`datasets:read`) |
 | `GET`  | `/healthz` | `{ ok: true }` |
 
 Identity is resolved by the **auth core** (`@assay/auth`): `Authorization: Bearer <jwt|ak_…>` → a
@@ -19,7 +23,8 @@ Identity is resolved by the **auth core** (`@assay/auth`): `Authorization: Beare
 missing/invalid credential is **401**, otherwise dev falls back to the `x-assay-tenant` header (admin). The
 resolved `workspace` (= tenant = trust-zone) keys fairness, quotas, isolation, secret scoping, budgets — and
 scopes every read; roles gate every route (`viewer/member/admin`). See [auth.md](auth.md). Harness registration
-(`POST/GET /harnesses`, workspace-owned) and key issuance (`POST /internal/tenant-keys`) are covered in
+(`POST/GET /harnesses`, workspace-owned), datasets (`POST/GET /datasets`, workspace-owned + `_shared`, see
+[datasets.md](datasets.md)) and key issuance (`POST /internal/tenant-keys`) are covered in
 [tenancy.md](tenancy.md).
 
 `RunRecord` = `{ id, tenant, harness, caseId, status: queued|running|succeeded|failed, result?, error?,

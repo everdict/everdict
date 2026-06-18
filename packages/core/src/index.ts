@@ -11,4 +11,5 @@ export * from "./agent-job.js";
 export * from "./trust-zone.js";
 export * from "./harness-spec.js";
 export * from "./suite.js";
+export * from "./dataset.js";
 export * from "./shell.js";

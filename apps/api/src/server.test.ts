@@ -3,7 +3,7 @@ import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
 import { InMemoryRunStore, InMemoryTenantKeyStore, issueKey } from "@assay/db";
-import { InMemoryHarnessRegistry } from "@assay/registry";
+import { InMemoryDatasetRegistry, InMemoryHarnessRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { RunService } from "./run-service.js";
 import { buildServer } from "./server.js";
@@ -34,6 +34,11 @@ const HARNESS = {
   frontDoor: { service: "agent-server", submit: "POST /runs" },
   traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
 };
+const DATASET = {
+  id: "smoke",
+  version: "1.0.0",
+  cases: [{ id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [{ id: "steps" }] }],
+};
 
 // 토큰 무관하게 고정 역할 Principal 을 주는 스텁(authZ 테스트용).
 const roleAuth = (roles: string[], workspace = "acme"): Authenticator => ({
@@ -62,6 +67,7 @@ function server(
   const app = buildServer({
     service: svc,
     registry: new InMemoryHarnessRegistry(),
+    datasetRegistry: new InMemoryDatasetRegistry(),
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
     internalToken: opts.internalToken,
@@ -290,6 +296,74 @@ describe("API — harness validate (dry-run)", () => {
       payload: HARNESS,
     });
     expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});
+
+describe("API — datasets (workspace-owned, member+ write)", () => {
+  it("viewer 는 읽기만 (write 403); member 는 등록 가능", async () => {
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const vh = { authorization: "Bearer x" };
+    expect((await viewer.app.inject({ method: "GET", url: "/datasets", headers: vh })).statusCode).toBe(200);
+    expect(
+      (await viewer.app.inject({ method: "POST", url: "/datasets", headers: vh, payload: DATASET })).statusCode,
+    ).toBe(403);
+    await viewer.app.close();
+
+    const member = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    expect(
+      (await member.app.inject({ method: "POST", url: "/datasets", headers: vh, payload: DATASET })).statusCode,
+    ).toBe(201);
+    await member.app.close();
+  });
+
+  it("등록 → 본인은 보이고 타 워크스페이스는 못 봄(get 404); 불변성 409", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    expect(
+      (await app.inject({ method: "POST", url: "/datasets", headers: { authorization: acme }, payload: DATASET }))
+        .statusCode,
+    ).toBe(201);
+    const aList = await app.inject({ method: "GET", url: "/datasets", headers: { authorization: acme } });
+    expect(aList.json().map((x: { id: string }) => x.id)).toContain("smoke");
+    expect((await app.inject({ method: "GET", url: "/datasets", headers: { authorization: beta } })).json()).toEqual(
+      [],
+    );
+
+    const aGet = await app.inject({
+      method: "GET",
+      url: "/datasets/smoke/versions/latest",
+      headers: { authorization: acme },
+    });
+    expect(aGet.statusCode).toBe(200);
+    expect(aGet.json()).toMatchObject({ id: "smoke", version: "1.0.0" });
+    const bGet = await app.inject({
+      method: "GET",
+      url: "/datasets/smoke/versions/latest",
+      headers: { authorization: beta },
+    });
+    expect(bGet.statusCode).toBe(404);
+
+    const mutated = { ...DATASET, description: "changed" };
+    const dup = await app.inject({
+      method: "POST",
+      url: "/datasets",
+      headers: { authorization: acme },
+      payload: mutated,
+    });
+    expect(dup.statusCode).toBe(409);
+    await app.close();
+  });
+
+  it("validate dry-run: 유효 → ok + versionExists 표시, 등록 안 함", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const v1 = await app.inject({ method: "POST", url: "/datasets/validate", headers: h, payload: DATASET });
+    expect(v1.json()).toMatchObject({ ok: true, id: "smoke", version: "1.0.0", versionExists: false, cases: 1 });
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET }); // 실제 등록
+    const v2 = await app.inject({ method: "POST", url: "/datasets/validate", headers: h, payload: DATASET });
+    expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
     await app.close();
   });
 });

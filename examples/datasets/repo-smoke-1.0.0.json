@@ -1,0 +1,24 @@
+{
+  "id": "repo-smoke",
+  "version": "1.0.0",
+  "description": "first-party 벤치마크 — repo 환경 기본 스모크(파일 생성/수정). 하니스 무관: 어느 하니스든 같은 케이스로 평가.",
+  "tags": ["benchmark", "repo"],
+  "cases": [
+    {
+      "id": "create-file",
+      "env": { "kind": "repo", "source": { "files": {} } },
+      "task": "Create a file named ok.txt whose contents are exactly: done",
+      "graders": [{ "id": "steps" }, { "id": "cost" }, { "id": "latency" }],
+      "timeoutSec": 300,
+      "tags": ["smoke"]
+    },
+    {
+      "id": "edit-readme",
+      "env": { "kind": "repo", "source": { "files": { "README.md": "# demo\n" } } },
+      "task": "Append a line that reads 'updated by agent' to the end of README.md",
+      "graders": [{ "id": "steps" }, { "id": "cost" }],
+      "timeoutSec": 300,
+      "tags": ["smoke"]
+    }
+  ]
+}

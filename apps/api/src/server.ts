@@ -1,8 +1,8 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
-import { AppError, EvalCaseSchema, HarnessSpecSchema } from "@assay/core";
+import { AppError, DatasetSchema, EvalCaseSchema, HarnessSpecSchema } from "@assay/core";
 import { type TenantKeyStore, issueKey } from "@assay/db";
-import type { HarnessRegistry } from "@assay/registry";
+import type { DatasetRegistry, HarnessRegistry } from "@assay/registry";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -19,6 +19,7 @@ export const SubmitBodySchema = z.object({
 export interface ServerDeps {
   service: RunService;
   registry?: HarnessRegistry; // 하니스 CRUD (없으면 해당 라우트 비활성)
+  datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
   authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
   keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
   internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
@@ -220,6 +221,75 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- datasets (workspace-owned SSOT, 하니스 무관 eval 케이스 묶음) ---
+  app.post("/datasets", async (req, reply) => {
+    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:write");
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 (검증 전에 게이트 — 미인가에 검증 정보 노출 안 함)
+    }
+    const parsed = DatasetSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      await deps.datasetRegistry.register(principal.workspace, parsed.data);
+      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+    } catch (err) {
+      return sendError(reply, err); // 불변성 409
+    }
+  });
+
+  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). 등록 플로우의 사전 점검.
+  app.post("/datasets/validate", async (req, reply) => {
+    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = DatasetSchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
+    const existingVersions = await deps.datasetRegistry.ownVersions(principal.workspace, parsed.data.id);
+    return reply.send({
+      ok: true,
+      id: parsed.data.id,
+      version: parsed.data.version,
+      cases: parsed.data.cases.length,
+      existingVersions,
+      versionExists: existingVersions.includes(parsed.data.version),
+    });
+  });
+
+  app.get("/datasets", async (req, reply) => {
+    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:read");
+      return reply.send(await deps.datasetRegistry.list(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 특정 버전의 전체 데이터셋(케이스 포함). version 은 "latest" 가능. 다른 워크스페이스 → NOT_FOUND.
+  app.get<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version", async (req, reply) => {
+    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:read");
+      return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
+    } catch (err) {
+      return sendError(reply, err); // 없으면 NotFoundError → 404
+    }
+  });
+
   // --- internal: 키 발급 (x-internal-token 가드, 미설정 시 fail-closed) ---
   app.post("/internal/tenant-keys", async (req, reply) => {
     if (!deps.internalToken || !deps.keyStore)
@@ -262,7 +332,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       transport.onclose = () => {
         if (transport?.sessionId) sessions.delete(transport.sessionId);
       };
-      await buildMcpServer({ service: deps.service, registry: deps.registry }, principal).connect(transport);
+      await buildMcpServer(
+        { service: deps.service, registry: deps.registry, datasetRegistry: deps.datasetRegistry },
+        principal,
+      ).connect(transport);
     }
     reply.hijack(); // 트랜스포트가 raw 응답을 직접 소유한다.
     await transport.handleRequest(req.raw, reply.raw, req.body);

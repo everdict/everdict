@@ -1,6 +1,6 @@
 import { type Action, type Principal, authorize } from "@assay/auth";
-import { AppError, EvalCaseSchema, HarnessSpecSchema } from "@assay/core";
-import type { HarnessRegistry } from "@assay/registry";
+import { AppError, DatasetSchema, EvalCaseSchema, HarnessSpecSchema } from "@assay/core";
+import type { DatasetRegistry, HarnessRegistry } from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -11,6 +11,7 @@ import type { RunService } from "./run-service.js";
 export interface McpDeps {
   service: RunService;
   registry?: HarnessRegistry;
+  datasetRegistry?: DatasetRegistry;
 }
 
 function ok(data: unknown): CallToolResult {
@@ -141,6 +142,78 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const result = HarnessSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           await registry.register(ws, result.data);
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+        }),
+    );
+  }
+
+  if (deps.datasetRegistry) {
+    const datasets = deps.datasetRegistry;
+    server.registerTool(
+      "list_datasets",
+      { description: "이 워크스페이스가 보는 데이터셋(소유 + _shared 벤치마크)", inputSchema: {} },
+      () => run(principal, "datasets:read", async () => ok(await datasets.list(ws))),
+    );
+
+    server.registerTool(
+      "get_dataset",
+      {
+        description: "데이터셋 1건 전체(케이스 포함). version 기본 latest. 다른 워크스페이스는 NOT_FOUND",
+        inputSchema: { id: z.string(), version: z.string().optional() },
+      },
+      ({ id, version }) =>
+        run(principal, "datasets:read", async () => ok(await datasets.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "validate_dataset",
+      {
+        description: "Dataset(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
+        inputSchema: { dataset: z.string().describe("Dataset JSON") },
+      },
+      ({ dataset }) =>
+        run(principal, "datasets:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(dataset);
+          } catch {
+            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+          }
+          const result = DatasetSchema.safeParse(parsed);
+          if (!result.success)
+            return ok({
+              ok: false,
+              errors: result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+            });
+          const existingVersions = await datasets.ownVersions(ws, result.data.id);
+          return ok({
+            ok: true,
+            id: result.data.id,
+            version: result.data.version,
+            cases: result.data.cases.length,
+            existingVersions,
+            versionExists: existingVersions.includes(result.data.version),
+          });
+        }),
+    );
+
+    server.registerTool(
+      "create_dataset",
+      {
+        description: "Dataset(JSON 문자열)을 이 워크스페이스 소유로 등록(불변; 충돌 시 CONFLICT)",
+        inputSchema: { dataset: z.string().describe("Dataset JSON") },
+      },
+      ({ dataset }) =>
+        run(principal, "datasets:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(dataset);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 Dataset JSON 이 아닙니다.");
+          }
+          const result = DatasetSchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          await datasets.register(ws, result.data);
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );

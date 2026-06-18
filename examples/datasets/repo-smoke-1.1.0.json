@@ -1,0 +1,32 @@
+{
+  "id": "repo-smoke",
+  "version": "1.1.0",
+  "description": "first-party 벤치마크 — repo 스모크 v1.1 (rename 케이스 추가). 버전 불변 → 과거 스코어카드는 1.0.0 으로 재현 가능.",
+  "tags": ["benchmark", "repo"],
+  "cases": [
+    {
+      "id": "create-file",
+      "env": { "kind": "repo", "source": { "files": {} } },
+      "task": "Create a file named ok.txt whose contents are exactly: done",
+      "graders": [{ "id": "steps" }, { "id": "cost" }, { "id": "latency" }],
+      "timeoutSec": 300,
+      "tags": ["smoke"]
+    },
+    {
+      "id": "edit-readme",
+      "env": { "kind": "repo", "source": { "files": { "README.md": "# demo\n" } } },
+      "task": "Append a line that reads 'updated by agent' to the end of README.md",
+      "graders": [{ "id": "steps" }, { "id": "cost" }],
+      "timeoutSec": 300,
+      "tags": ["smoke"]
+    },
+    {
+      "id": "rename-file",
+      "env": { "kind": "repo", "source": { "files": { "old.txt": "keep me\n" } } },
+      "task": "Rename old.txt to new.txt, preserving its contents",
+      "graders": [{ "id": "steps" }, { "id": "cost" }],
+      "timeoutSec": 300,
+      "tags": ["smoke"]
+    }
+  ]
+}

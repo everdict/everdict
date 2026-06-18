@@ -2,15 +2,29 @@ import { ForbiddenError } from "@assay/core";
 import type { Principal } from "./principal.js";
 
 // 워크스페이스 내 역할 → 액션 권한. 컨트롤플레인이 엔드포인트마다 강제(authZ).
-export type Action = "runs:read" | "runs:submit" | "harnesses:read" | "harnesses:register";
+// datasets:write 는 member+(eval 데이터는 협업 콘텐츠) — harnesses:register 가 admin 인 것과 의도적으로 구분.
+export type Action =
+  | "runs:read"
+  | "runs:submit"
+  | "harnesses:read"
+  | "harnesses:register"
+  | "datasets:read"
+  | "datasets:write";
 
 export const ASSAY_ROLES = ["viewer", "member", "admin"] as const;
 export type AssayRole = (typeof ASSAY_ROLES)[number];
 
 const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
-  viewer: new Set<Action>(["runs:read", "harnesses:read"]),
-  member: new Set<Action>(["runs:read", "runs:submit", "harnesses:read"]),
-  admin: new Set<Action>(["runs:read", "runs:submit", "harnesses:read", "harnesses:register"]),
+  viewer: new Set<Action>(["runs:read", "harnesses:read", "datasets:read"]),
+  member: new Set<Action>(["runs:read", "runs:submit", "harnesses:read", "datasets:read", "datasets:write"]),
+  admin: new Set<Action>([
+    "runs:read",
+    "runs:submit",
+    "harnesses:read",
+    "harnesses:register",
+    "datasets:read",
+    "datasets:write",
+  ]),
 };
 
 export function can(principal: Principal, action: Action): boolean {
