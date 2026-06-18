@@ -1,1 +1,11 @@
-export { runSchema, runsSchema, scoreSchema, type Run, type Score } from './model/schema'
+export {
+  runSchema,
+  runsSchema,
+  scoreSchema,
+  traceEventSchema,
+  resultSchema,
+  type Run,
+  type RunStatus,
+  type Score,
+  type TraceEvent,
+} from './model/schema'

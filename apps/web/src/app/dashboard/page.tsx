@@ -1,86 +1,75 @@
-import { harnessesSchema, type Harness } from '@/entities/harness'
-import { runsSchema, type Run } from '@/entities/run'
+import Link from 'next/link'
+
+import { harnessesSchema } from '@/entities/harness'
+import { runsSchema } from '@/entities/run'
 import { RunsTable } from '@/widgets/runs-table'
 import { ScorecardSummary } from '@/widgets/scorecard-summary'
-import { auth } from '@/shared/auth/auth'
-import { keycloakConfigured } from '@/shared/config/env'
+import { currentTenant } from '@/shared/auth/tenant'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { Badge } from '@/shared/ui/badge'
-import { Card, CardContent, CardDescription, CardTitle } from '@/shared/ui/card'
+import { Card, CardContent } from '@/shared/ui/card'
+import { EmptyState } from '@/shared/ui/empty-state'
+import { PageHeader } from '@/shared/ui/page-header'
 
-// 컨트롤플레인을 매 요청 조회 → 프리렌더 금지.
 export const dynamic = 'force-dynamic'
 
-async function load(tenant: string): Promise<{ runs: Run[]; harnesses: Harness[]; error?: string }> {
+export default async function OverviewPage() {
+  const { tenant } = await currentTenant()
+  let error: string | undefined
+  let runs = runsSchema.parse([])
+  let harnesses = harnessesSchema.parse([])
   try {
-    const [runs, harnesses] = await Promise.all([
-      controlPlane.listRuns(tenant).then((d) => runsSchema.parse(d)),
-      controlPlane.listHarnesses(tenant).then((d) => harnessesSchema.parse(d)),
-    ])
-    return { runs, harnesses }
+    const [r, h] = await Promise.all([controlPlane.listRuns(tenant), controlPlane.listHarnesses(tenant)])
+    runs = runsSchema.parse(r)
+    harnesses = harnessesSchema.parse(h)
   } catch (e) {
-    return { runs: [], harnesses: [], error: e instanceof Error ? e.message : String(e) }
+    error = e instanceof Error ? e.message : String(e)
   }
-}
-
-export default async function DashboardPage() {
-  // Keycloak 설정 시에만 세션 확인(미설정 dev 에선 AUTH_SECRET 불필요). tenant 기본 = default.
-  const session = keycloakConfigured ? await auth() : null
-  const tenant = session?.tenant ?? 'default'
-  const { runs, harnesses, error } = await load(tenant)
 
   return (
-    <main className="mx-auto max-w-5xl space-y-8 px-6 py-10">
-      <header className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold tracking-tight">대시보드</h1>
-          <p className="text-sm text-muted-foreground">
-            tenant <span className="font-mono">{tenant}</span>
-          </p>
-        </div>
-        <Badge tone="info">{session ? 'authenticated' : 'dev'}</Badge>
-      </header>
+    <div className="space-y-8">
+      <PageHeader title="개요" description="이 테넌트의 평가 현황" />
 
       {error ? (
         <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
           컨트롤플레인에 연결할 수 없습니다: {error}
-          <div className="mt-1 text-muted-foreground">
-            `CONTROL_PLANE_URL` 과 `assay-api` 가동 여부를 확인하세요.
-          </div>
+          <div className="mt-1 text-muted-foreground">`CONTROL_PLANE_URL` 과 `assay-api` 가동 여부를 확인하세요.</div>
         </Card>
       ) : (
         <ScorecardSummary runs={runs} />
       )}
 
       <section className="space-y-3">
-        <CardTitle className="text-lg">최근 runs</CardTitle>
-        <RunsTable runs={runs} />
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold tracking-tight">최근 runs</h2>
+          <Link href="/dashboard/runs" className="text-sm text-primary hover:opacity-80">
+            전체 보기
+          </Link>
+        </div>
+        <RunsTable runs={runs} limit={5} />
       </section>
 
       <section className="space-y-3">
-        <div>
-          <CardTitle className="text-lg">하니스</CardTitle>
-          <CardDescription>이 테넌트가 등록한 하니스 + 공유(first-party)</CardDescription>
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg font-semibold tracking-tight">하니스</h2>
+          <Link href="/dashboard/harnesses" className="text-sm text-primary hover:opacity-80">
+            전체 보기
+          </Link>
         </div>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {harnesses.map((h) => (
-            <Card key={h.id}>
-              <CardContent className="space-y-2 pt-5">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold">{h.id}</span>
-                  <Badge tone={h.owner === tenant ? 'success' : 'neutral'}>
-                    {h.owner === tenant ? 'owned' : 'shared'}
-                  </Badge>
-                </div>
-                <div className="font-mono text-xs text-muted-foreground">{h.versions.join(', ')}</div>
-              </CardContent>
-            </Card>
-          ))}
-          {harnesses.length === 0 && (
-            <Card className="p-5 text-sm text-muted-foreground">등록된 하니스가 없습니다.</Card>
-          )}
-        </div>
+        {harnesses.length === 0 ? (
+          <EmptyState title="등록된 하니스가 없습니다." hint="API(POST /harnesses) 또는 파일 SSOT 로 등록하세요." />
+        ) : (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {harnesses.slice(0, 6).map((h) => (
+              <Card key={h.id}>
+                <CardContent className="space-y-1.5 pt-5">
+                  <div className="font-semibold">{h.id}</div>
+                  <div className="font-mono text-xs text-muted-foreground">{h.versions.join(', ')}</div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </section>
-    </main>
+    </div>
   )
 }

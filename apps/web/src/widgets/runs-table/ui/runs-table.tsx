@@ -1,13 +1,8 @@
-import { type Run } from '@/entities/run'
-import { Badge } from '@/shared/ui/badge'
-import { Card } from '@/shared/ui/card'
+import Link from 'next/link'
 
-const STATUS_TONE = {
-  succeeded: 'success',
-  failed: 'danger',
-  running: 'info',
-  queued: 'neutral',
-} as const
+import type { Run } from '@/entities/run'
+import { EmptyState } from '@/shared/ui/empty-state'
+import { StatusPill } from '@/shared/ui/status-pill'
 
 function scoreSummary(run: Run): string {
   const scores = run.result?.scores ?? []
@@ -15,16 +10,15 @@ function scoreSummary(run: Run): string {
   return scores.map((s) => `${s.graderId}:${s.value}`).join('  ')
 }
 
-export function RunsTable({ runs }: { runs: Run[] }) {
-  if (runs.length === 0) {
-    return (
-      <Card className="p-8 text-center text-sm text-muted-foreground">아직 실행한 run 이 없습니다.</Card>
-    )
+export function RunsTable({ runs, limit }: { runs: Run[]; limit?: number }) {
+  const rows = limit ? runs.slice(0, limit) : runs
+  if (rows.length === 0) {
+    return <EmptyState title="아직 실행한 run 이 없습니다." hint="하니스를 골라 평가를 제출하면 여기에 표시됩니다." />
   }
   return (
-    <Card className="overflow-hidden">
+    <div className="overflow-hidden rounded-2xl border bg-card shadow-sm">
       <table className="w-full text-sm">
-        <thead className="border-b bg-secondary/50 text-left text-muted-foreground">
+        <thead className="border-b bg-secondary/40 text-left text-xs uppercase tracking-wide text-muted-foreground">
           <tr>
             <th className="px-4 py-3 font-medium">run</th>
             <th className="px-4 py-3 font-medium">harness</th>
@@ -34,15 +28,19 @@ export function RunsTable({ runs }: { runs: Run[] }) {
           </tr>
         </thead>
         <tbody>
-          {runs.map((run) => (
-            <tr key={run.id} className="border-b last:border-0">
-              <td className="px-4 py-3 font-mono text-xs">{run.id.slice(0, 8)}</td>
+          {rows.map((run) => (
+            <tr key={run.id} className="border-b transition-colors last:border-0 hover:bg-accent/40">
+              <td className="px-4 py-3">
+                <Link href={`/dashboard/runs/${run.id}`} className="font-mono text-xs text-primary hover:underline">
+                  {run.id.slice(0, 8)}
+                </Link>
+              </td>
               <td className="px-4 py-3">
                 {run.harness.id}
                 <span className="text-muted-foreground">@{run.harness.version}</span>
               </td>
               <td className="px-4 py-3">
-                <Badge tone={STATUS_TONE[run.status]}>{run.status}</Badge>
+                <StatusPill status={run.status} />
               </td>
               <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{scoreSummary(run)}</td>
               <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -52,6 +50,6 @@ export function RunsTable({ runs }: { runs: Run[] }) {
           ))}
         </tbody>
       </table>
-    </Card>
+    </div>
   )
 }

@@ -21,13 +21,22 @@ excluded from root Biome). The web is a pure HTTP client of the control plane �
 
 ## FSD layout (`src/`)
 ```
-app/        Next App Router (layout, page, dashboard, api/auth/[...nextauth])
-widgets/    page-level composition (scorecard-summary, runs-table)
+app/        Next App Router — landing, dashboard/{layout(shell), page(overview), runs, runs/[id], harnesses},
+            api/auth/[...nextauth], middleware
+widgets/    page-level composition: app-shell (sidebar+topbar), scorecard-summary, runs-table, trace-timeline
 features/   business actions (e.g. submit-run, register-harness) — grow here
-entities/   domain models + zod schemas mirroring the API (run, harness)
-shared/     ui, lib (utils, control-plane client), config (env), providers (query), auth (Keycloak)
+entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness)
+shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state), lib (utils, control-plane),
+            config (env), providers (query), auth (Keycloak + currentTenant)
 ```
 Import order enforces downward layer deps (app → widgets → features → entities → shared).
+
+## Screens
+- **개요 `/dashboard`** — scorecard stat cards (total / success / fail / pass-rate) + recent runs + harness summary.
+- **Runs `/dashboard/runs`** — full runs table (rows link to detail).
+- **Run detail `/dashboard/runs/[id]`** — status, meta, scores, **trace timeline**, snapshot, error.
+- **하니스 `/dashboard/harnesses`** — owned vs `_shared` harnesses with versions.
+All under a shared app shell (sidebar nav + topbar tenant chip / sign-in-out).
 
 ## Run
 ```bash
