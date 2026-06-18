@@ -28,10 +28,10 @@ excluded from root Biome). The web is a pure HTTP client of the control plane �
 ## FSD layout (`src/`)
 ```
 app/        Next App Router — landing, dashboard/{layout(shell), page(overview), runs, runs/[id], harnesses,
-            datasets, datasets/[id], datasets/new}, api/auth/[...nextauth], middleware
+            datasets(+[id],new), scorecards(+[id],new)}, api/auth/[...nextauth], middleware
 widgets/    page-level composition: app-shell (sidebar+topbar), scorecard-summary, runs-table, trace-timeline
-features/   business actions: submit-run, register-harness, register-dataset (client form + 'use server' action → control plane)
-entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset)
+features/   business actions: submit-run, register-harness, register-dataset, run-scorecard (client form + 'use server' action → control plane)
+entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state), lib (utils, control-plane),
             config (env), providers (query), auth (Keycloak token store/refresh, server-only access-token (getToken),
             authContext + currentPrincipal + can)
@@ -47,6 +47,10 @@ Import order enforces downward layer deps (app → widgets → features → enti
   detail). **상세 `/dashboard/datasets/[id]`** shows the latest version's eval cases. **데이터셋 등록
   `/dashboard/datasets/new`** — id/version/description + cases-JSON with a **validate (dry-run)** step then
   register (`POST /datasets`). Role-gated off `/me` (`datasets:write` = member+). See `docs/datasets.md`.
+- **스코어카드 `/dashboard/scorecards`** — batch-eval runs (dataset@v → harness@v, status, per-metric summary
+  chips; rows link to detail). **상세 `/dashboard/scorecards/[id]`** shows per-metric stat cards + per-case
+  scores. **실행 `/dashboard/scorecards/new`** — pick dataset + harness → `POST /scorecards`. Role-gated off
+  `/me` (`scorecards:run` = member+). See `docs/scorecards.md`.
 - **새 run `/dashboard/runs/new`** — submit-run form (react-hook-form) → `submitRunAction` (server action) →
   control plane `POST /runs` → redirect to the run detail.
 - **하니스 등록 `/dashboard/harnesses/new`** — a **structured wizard** (`features/register-harness`): pick

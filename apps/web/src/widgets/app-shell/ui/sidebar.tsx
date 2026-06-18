@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 
-import { Boxes, Database, FlaskConical, LayoutDashboard } from 'lucide-react'
+import { BarChart3, Boxes, Database, FlaskConical, LayoutDashboard } from 'lucide-react'
 
 import { cn } from '@/shared/lib/utils'
 
@@ -11,6 +11,7 @@ const NAV = [
   { href: '/dashboard', label: '개요', icon: LayoutDashboard, exact: true },
   { href: '/dashboard/runs', label: 'Runs', icon: LayoutDashboard, exact: false },
   { href: '/dashboard/datasets', label: '데이터셋', icon: Database, exact: false },
+  { href: '/dashboard/scorecards', label: '스코어카드', icon: BarChart3, exact: false },
   { href: '/dashboard/harnesses', label: '하니스', icon: Boxes, exact: false },
 ] as const
 

@@ -25,9 +25,9 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `orchestrator` — durable control plane (Temporal): `DirectOrchestrator` / `TemporalOrchestrator` + worker.
 - `trace` — pull a harness trace from OTel/MLflow → `TraceEvent`. `topology` — service-topology harnesses
   (multi-service + target env): orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s builders.
-- `db` — result store: `RunStore` (`InMemoryRunStore`/`PgRunStore`) + numbered SQL migrations + idempotent `migrate`/`preflight`.
+- `db` — result stores: `RunStore` (single runs) + `ScorecardStore` (batch evals; `list` omits heavy per-case results) (`InMemory*`/`Pg*`) + numbered SQL migrations + idempotent `migrate`/`preflight`.
 - `registry` — versioned SSOT (harnesses + datasets): `(tenant, id, version)→HarnessSpec` / `→Dataset` (immutable versions, semver `latest`, tenant-owned + `_shared` fallback, file/GitOps loader); backs `ServiceTopologyBackend.specFor`. Datasets are harness-agnostic eval-case bundles (`docs/datasets.md`).
-- `apps/cli` — dev control plane (`assay run`, `assay worker`). `apps/api` — multi-tenant HTTP surface (Fastify): async `POST /runs`/poll/webhook + `RunStore` (Postgres via `DATABASE_URL`) + workspace-owned harnesses/datasets + agent-facing MCP (full BFF↔MCP parity).
+- `apps/cli` — dev control plane (`assay run`, `assay worker`). `apps/api` — multi-tenant HTTP surface (Fastify): async `POST /runs`/poll/webhook + `RunStore` + workspace-owned harnesses/datasets + async batch evals (`POST /scorecards`, dataset×harness→`Scorecard`) + agent-facing MCP (full BFF↔MCP parity). Postgres via `DATABASE_URL`.
 
 ## The spine: 4 in-sandbox concerns + 1 placement layer
 Harness (under test) · Environment (the world it acts on) · Driver (where it runs *in-sandbox*) · Grader (how we judge).

@@ -49,6 +49,12 @@ fallback (first-party benchmark datasets seeded from `examples/datasets`), immut
 
 See `docs/datasets.md`.
 
+## Scorecards (batch evals)
+`POST /scorecards` (a dataset × `harness@version` → aggregated `Scorecard`) requires `scorecards:run`
+(**member+**); `GET /scorecards`, `GET /scorecards/:id` require `scorecards:read` (viewer+). All
+workspace-scoped (another workspace's scorecard → **404**); the dataset is resolved with the same
+owner-first/`_shared` rule. See `docs/scorecards.md`.
+
 ## Live-verified (real Postgres)
 `ASSAY_REQUIRE_AUTH=1 ASSAY_INTERNAL_TOKEN=… DATABASE_URL=… node apps/api/dist/main.js`, then: issue keys for
 `acme`/`beta` → no-key request is `401` → `acme` registers `bu@1.0.0` (`201`) → `acme` lists it, `beta` sees `[]`

@@ -16,7 +16,13 @@ arrives by polling or webhook.
 | `POST` | `/datasets/validate` | dry-run: schema + existing versions/conflict, no write (`datasets:write`) |
 | `GET`  | `/datasets` | workspace-owned + `_shared` datasets (`datasets:read`) |
 | `GET`  | `/datasets/:id/versions/:version` | full `Dataset` incl. cases; `version` may be `latest` (`datasets:read`) |
+| `POST` | `/scorecards` | `{ dataset:{id,version?}, harness:{id,version?} }` → **202** `ScorecardRecord(queued)` (`scorecards:run`, member+) |
+| `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |
+| `GET`  | `/scorecards/:id` | full `ScorecardRecord` (incl. per-case `scorecard`) or 404 (`scorecards:read`) |
 | `GET`  | `/healthz` | `{ ok: true }` |
+
+Scorecards are **batch evals** (a dataset × a `harness@version` → aggregated `Scorecard` + per-metric summary),
+async like runs. See [scorecards.md](scorecards.md).
 
 Identity is resolved by the **auth core** (`@assay/auth`): `Authorization: Bearer <jwt|ak_…>` → a
 `Principal{subject, workspace, roles, via}` (OIDC/Keycloak JWT or API key). With `ASSAY_REQUIRE_AUTH=1` a
