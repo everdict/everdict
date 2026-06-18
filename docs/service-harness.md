@@ -90,7 +90,8 @@ The cluster persists across runs (`kind get clusters`); `kind delete cluster --n
 ## Status
 - **Phase 1 (built, unit-tested):** `HarnessSpec(service)`, OTel/MLflow trace mappers, **both** topology
   builders (Nomad + K8s), env-manager runId keying, orchestrator-agnostic `ServiceTopologyBackend` (mock runtime).
-- **Phase 2 — live `NomadTopologyRuntime`: DONE** (real Nomad apply + endpoint discovery + per-case CDP browser
-  + drive + MLflow pull + grade + teardown; see above). **Still pending:** `K8sTopologyRuntime` apply, the real
-  browser+extension (headful + xvfb + `--load-extension`) and the real browser-use images, real OTel/MLflow
-  span ingestion (the stand-in emits no GenAI spans → trace is empty), the harness images + extension registry.
+- **Phase 2 — live `NomadTopologyRuntime` AND `K8sTopologyRuntime`: DONE** (real apply + endpoint discovery +
+  per-case CDP browser + drive + MLflow pull + grade + teardown on **both** Nomad and K8s/kind; see above —
+  Nomad↔K8s parity through the same `ServiceTopologyBackend`). **Still pending:** the real browser+extension
+  (headful + xvfb + `--load-extension`) and the real browser-use images, real OTel/MLflow span ingestion (the
+  stand-in emits no GenAI spans → trace is empty), the harness images + extension registry.

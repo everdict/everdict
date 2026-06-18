@@ -40,7 +40,14 @@ Above placement, the control plane turns "run one case" into "serve many tenants
 - **Budgets** (`BudgetTracker`) — per-tenant `{usd, tokens, runs}` admission (`PaymentRequiredError` 402) + cost
   accounting. **Autoscaler** — grows/shrinks capacity from queue depth.
 - **HTTP surface** (`apps/api`, Fastify) — async `POST /runs` → run-id, `GET /runs/:id` poll, webhooks, `RunStore`
-  (in-memory; Postgres/ClickHouse behind the interface). See `docs/api.md` + `docs/execution-backends.md`.
+  (in-memory or **`PgRunStore`** on Postgres via `DATABASE_URL`; ClickHouse analytics behind the same interface
+  later). See `docs/api.md` + `docs/execution-backends.md`.
+- **Harness registry** (`@assay/registry`) — the version SSOT: `(tenant, id, version) → HarnessSpec` (immutable
+  versions, semver `latest`; in-memory / file-GitOps / `PgHarnessRegistry` on Postgres). `ServiceTopologyBackend.specFor`
+  resolves a job's `{id, version}` reference to a concrete spec at dispatch. See `docs/registry.md`.
+- **Tenant access + SaaS web** — API-key auth (`Authorization: Bearer ak_…` → tenant) with tenant-owned harnesses
+  and tenant-scoped reads (`docs/tenancy.md`); the `apps/web` Next.js dashboard (Keycloak user login, per-tenant
+  scores/runs/harnesses) is a pure HTTP client of the control plane (`docs/web.md`). Humans → Keycloak; agents → API keys.
 
 ## Cross-cutting
 - Cost/token capture comes from the harness trace (e.g. Claude's `total_cost_usd` in stream-json); the same

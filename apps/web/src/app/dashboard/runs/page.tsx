@@ -1,7 +1,10 @@
+import Link from 'next/link'
+
 import { runsSchema } from '@/entities/run'
 import { RunsTable } from '@/widgets/runs-table'
 import { currentTenant } from '@/shared/auth/tenant'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { buttonVariants } from '@/shared/ui/button'
 import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -19,7 +22,15 @@ export default async function RunsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Runs" description={`${runs.length}건 · tenant ${tenant}`} />
+      <PageHeader
+        title="Runs"
+        description={`${runs.length}건 · tenant ${tenant}`}
+        actions={
+          <Link href="/dashboard/runs/new" className={buttonVariants({ size: 'sm' })}>
+            새 run
+          </Link>
+        }
+      />
       {error ? (
         <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
           컨트롤플레인 연결 실패: {error}

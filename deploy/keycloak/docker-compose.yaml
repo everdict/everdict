@@ -3,7 +3,7 @@
 #
 # 최초 1회 설정(콘솔):
 #  1) realm `assay` 생성
-#  2) client `assay-web` (OpenID Connect, confidential, redirect: http://localhost:3000/api/auth/callback/keycloak)
+#  2) client `assay-web` (OpenID Connect, confidential, redirect: http://localhost:3001/api/auth/callback/keycloak)
 #  3) client scope/mapper: 유저 attribute `tenant` → token claim `tenant` (apps/web 가 이 클레임으로 테넌트 식별)
 #  4) 유저 생성 + attribute `tenant=<테넌트id>` 지정
 # 그다음 apps/web .env: KEYCLOAK_ISSUER=http://localhost:8080/realms/assay, KEYCLOAK_CLIENT_ID=assay-web, KEYCLOAK_CLIENT_SECRET=...

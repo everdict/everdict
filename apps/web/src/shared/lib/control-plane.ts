@@ -21,5 +21,9 @@ async function call<T>(tenant: string, path: string, init?: RequestInit): Promis
 export const controlPlane = {
   listRuns: <T>(tenant: string) => call<T>(tenant, '/runs'),
   getRun: <T>(tenant: string, id: string) => call<T>(tenant, `/runs/${encodeURIComponent(id)}`),
+  submitRun: <T>(tenant: string, body: unknown) =>
+    call<T>(tenant, '/runs', { method: 'POST', body: JSON.stringify(body) }),
   listHarnesses: <T>(tenant: string) => call<T>(tenant, '/harnesses'),
+  registerHarness: <T>(tenant: string, spec: unknown) =>
+    call<T>(tenant, '/harnesses', { method: 'POST', body: JSON.stringify(spec) }),
 }

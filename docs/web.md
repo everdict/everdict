@@ -24,7 +24,7 @@ excluded from root Biome). The web is a pure HTTP client of the control plane �
 app/        Next App Router — landing, dashboard/{layout(shell), page(overview), runs, runs/[id], harnesses},
             api/auth/[...nextauth], middleware
 widgets/    page-level composition: app-shell (sidebar+topbar), scorecard-summary, runs-table, trace-timeline
-features/   business actions (e.g. submit-run, register-harness) — grow here
+features/   business actions: submit-run, register-harness (client form + 'use server' action → control plane)
 entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state), lib (utils, control-plane),
             config (env), providers (query), auth (Keycloak + currentTenant)
@@ -36,7 +36,14 @@ Import order enforces downward layer deps (app → widgets → features → enti
 - **Runs `/dashboard/runs`** — full runs table (rows link to detail).
 - **Run detail `/dashboard/runs/[id]`** — status, meta, scores, **trace timeline**, snapshot, error.
 - **하니스 `/dashboard/harnesses`** — owned vs `_shared` harnesses with versions.
-All under a shared app shell (sidebar nav + topbar tenant chip / sign-in-out).
+- **새 run `/dashboard/runs/new`** — submit-run form (react-hook-form) → `submitRunAction` (server action) →
+  control plane `POST /runs` → redirect to the run detail.
+- **하니스 등록 `/dashboard/harnesses/new`** — register-harness form (HarnessSpec JSON) → `registerHarnessAction`
+  → control plane `POST /harnesses` (409 on the immutable-version violation, surfaced inline).
+All under a shared app shell (sidebar nav + topbar tenant chip / sign-in-out). Mutations are **server actions**
+(`'use server'`) that resolve the tenant and call the control plane server-side, then `revalidatePath`.
+
+The dev server runs on **port 3001** (`pnpm --filter @assay/web dev`).
 
 ## Run
 ```bash
@@ -45,7 +52,7 @@ pnpm install
 # Keycloak (optional; without it the web runs in dev mode as tenant "default"):
 docker compose -f deploy/keycloak/docker-compose.yaml up -d        # then configure realm/client (see file)
 cp apps/web/.env.example apps/web/.env                              # set CONTROL_PLANE_URL + Keycloak vars
-pnpm --filter @assay/web dev                                       # http://localhost:3000
+pnpm --filter @assay/web dev                                       # http://localhost:3001
 ```
 Without Keycloak configured, `/dashboard` renders for tenant `default` (no login required) — handy for local dev.
 With Keycloak configured, `/dashboard` is protected (middleware redirects to login) and the tenant comes from the

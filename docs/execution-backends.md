@@ -146,8 +146,13 @@ Two more multi-tenant guarantees, both keyed by `AgentJob.tenant`:
 Live proof: `scripts/live/budget-nomad.mjs` — tenant `free` capped at `runs=3`; submitting 5 at once runs exactly
 3 and rejects 2 with `402 BUDGET_EXCEEDED`, while `acme`/`globex` jobs each carry only their own injected key.
 
-Next slices: async API + result store (`apps/api` Fastify: run-id + webhook/polling + Postgres/ClickHouse),
-`K8sTopologyRuntime` apply.
+Shipped since: async control-plane API + result store (`apps/api` Fastify: run-id + webhook/polling, `PgRunStore`
+on Postgres via `DATABASE_URL` — see `docs/api.md`); live `K8sTopologyRuntime` (Nomad↔K8s parity — see
+`docs/service-harness.md`); the harness version SSOT (`@assay/registry` + `PgHarnessRegistry`); the tenant access
+layer (API-key auth + tenant-owned harnesses — `docs/tenancy.md`); the SaaS web dashboard (`apps/web` —
+`docs/web.md`).
+Next slices: ClickHouse analytics store behind `RunStore`, MCP toolization of the platform, and the model-B
+`K8sBackend`/`WindowsBackend` (table above).
 
 ## Nomad (phase 1)
 ```bash

@@ -1,7 +1,10 @@
+import Link from 'next/link'
+
 import { harnessesSchema } from '@/entities/harness'
 import { currentTenant } from '@/shared/auth/tenant'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
+import { buttonVariants } from '@/shared/ui/button'
 import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -20,7 +23,15 @@ export default async function HarnessesPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="하니스" description="이 테넌트가 등록한 하니스 + 공유(first-party)" />
+      <PageHeader
+        title="하니스"
+        description="이 테넌트가 등록한 하니스 + 공유(first-party)"
+        actions={
+          <Link href="/dashboard/harnesses/new" className={buttonVariants({ size: 'sm' })}>
+            하니스 등록
+          </Link>
+        }
+      />
       {error ? (
         <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
           컨트롤플레인 연결 실패: {error}
