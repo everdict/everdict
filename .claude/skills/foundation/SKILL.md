@@ -26,6 +26,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `trace` — pull a harness trace from OTel/MLflow → `TraceEvent`. `topology` — service-topology harnesses
   (multi-service + target env): orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s builders.
 - `db` — result store: `RunStore` (`InMemoryRunStore`/`PgRunStore`) + numbered SQL migrations + idempotent `migrate`/`preflight`.
+- `registry` — harness version SSOT: `(id, version)→HarnessSpec` (immutable versions, semver `latest`, file/GitOps loader); backs `ServiceTopologyBackend.specFor`.
 - `apps/cli` — dev control plane (`assay run`, `assay worker`). `apps/api` — multi-tenant HTTP surface (Fastify): async `POST /runs`/poll/webhook + `RunStore` (Postgres via `DATABASE_URL`). `registry` is planned.
 
 ## The spine: 4 in-sandbox concerns + 1 placement layer
