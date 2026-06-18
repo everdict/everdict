@@ -69,6 +69,12 @@ local dev. With Keycloak configured, `/dashboard` is protected (middleware redir
 workspace/roles come from the control plane's `GET /me` over the forwarded token. The dashboard degrades
 gracefully if the control plane is unreachable.
 
+**Production (`next start`) gotchas** — the config bakes `trustHost: true` (self-hosted; otherwise Auth.js
+throws **`UntrustedHost`** 500 on every `/api/auth/*`). For real Keycloak login you still must set **`AUTH_SECRET`**
+(`openssl rand -base64 32`) plus the `KEYCLOAK_*` vars and run the control plane (`CONTROL_PLANE_URL`); a stable
+`AUTH_SECRET` is required or sessions reset on restart. With Keycloak unconfigured, `/api/auth/*` uses a throwaway
+dev secret so it doesn't 500.
+
 ## Verified
 `next build` compiles + type-checks (9 routes); root gate (Biome / turbo typecheck / test) stays green with
 `apps/web` self-contained. **Live (headless OAuth, real Keycloak)** via `scripts/live/web-auth-flow.py`: drives
