@@ -43,6 +43,14 @@ export {
   type NomadJobSpec,
 } from "./nomad.js";
 export {
+  K8sBackend,
+  kubectlApi,
+  buildK8sJob,
+  k8sJobName,
+  type K8sApi,
+  type K8sBackendOptions,
+} from "./k8s.js";
+export {
   BackendRegistry,
   Router,
   buildRegistry,

@@ -3,6 +3,7 @@ import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator, oidcAu
 import {
   BackendRegistry,
   type BudgetLimit,
+  K8sBackend,
   LocalBackend,
   NomadBackend,
   Scheduler,
@@ -28,11 +29,14 @@ import { buildServer } from "./server.js";
 async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? "8787");
   const nomadAddr = process.env.NOMAD_ADDR;
+  const k8sContext = process.env.ASSAY_K8S_CONTEXT;
   const image = process.env.ASSAY_AGENT_IMAGE;
 
   const backends = new BackendRegistry();
   if (nomadAddr && image) {
     backends.register("nomad", new NomadBackend({ addr: nomadAddr, image, secretEnv: collectAuthEnv() }));
+  } else if (k8sContext && image) {
+    backends.register("k8s", new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv() }));
   } else {
     backends.register("local", new LocalBackend());
   }

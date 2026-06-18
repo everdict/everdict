@@ -27,7 +27,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 | `@assay/graders` | scoring (tests-pass / cost / steps / latency). |
 | `@assay/runner` | the eval loop (`runCase`). |
 | `@assay/agent` | the dispatched unit (model B): runs `runCase` in an isolated job. |
-| `@assay/backends` | placement: `Backend` (Local, Nomad) + `Router` (static) / `Scheduler` (capacity-aware) / `BackendRegistry`. |
+| `@assay/backends` | placement: `Backend` (Local, Nomad, K8s) + `Router` (static) / `Scheduler` (capacity-aware) / `BackendRegistry`. |
 | `@assay/orchestrator` | durable control plane on Temporal (Direct / Temporal + worker). |
 | `@assay/trace` | pull a harness trace from OTel/MLflow → `TraceEvent`. |
 | `@assay/topology` | service-topology harnesses (multi-service + target env), Nomad/K8s. |

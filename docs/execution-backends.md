@@ -17,7 +17,7 @@ sentinel → the Backend parses it.
 |---------|--------|-----------|--------|
 | `LocalBackend` | this host (in-process) | none | dev |
 | `NomadBackend` | on-prem Nomad (batch alloc, docker driver) | docker `runtime` (e.g. `runsc`=gVisor) | **phase 1** |
-| `K8sBackend` | cloud + on-prem K8s (Job) | `runtimeClassName` (gVisor/Kata) | phase 2 |
+| `K8sBackend` | cloud + on-prem K8s (Job) | `runtimeClassName` (gVisor/Kata) | **built** (live on kind; `scripts/live/k8s-backend.mjs`) |
 | `WindowsBackend` | on-prem Windows node pool | Hyper-V VM checkpoint | phase 3 |
 
 Cloud vs on-prem K8s is the **same** `K8sBackend` — differences are config (kubeconfig/context/

@@ -1,6 +1,7 @@
 import { type AgentJob, BadRequestError, type CaseResult, NotFoundError } from "@assay/core";
 import { z } from "zod";
 import type { Backend } from "./backend.js";
+import { K8sBackend } from "./k8s.js";
 import { LocalBackend } from "./local.js";
 import { NomadBackend } from "./nomad.js";
 
@@ -58,6 +59,14 @@ export const BackendConfigSchema = z.discriminatedUnion("kind", [
     runtime: z.string().optional(),
     datacenters: z.array(z.string()).optional(),
   }),
+  z.object({
+    name: z.string(),
+    kind: z.literal("k8s"),
+    image: z.string(),
+    context: z.string().optional(), // kubeconfig 컨텍스트(예: kind-assay)
+    namespace: z.string().optional(),
+    runtimeClass: z.string().optional(), // gVisor=gvisor 등
+  }),
 ]);
 export type BackendConfig = z.infer<typeof BackendConfigSchema>;
 
@@ -75,6 +84,17 @@ export function buildRegistry(
   for (const b of cfg.backends) {
     if (b.kind === "local") {
       registry.register(b.name, new LocalBackend());
+    } else if (b.kind === "k8s") {
+      registry.register(
+        b.name,
+        new K8sBackend({
+          image: b.image,
+          context: b.context,
+          namespace: b.namespace,
+          runtimeClass: b.runtimeClass,
+          secretEnv: opts.secretEnv,
+        }),
+      );
     } else {
       registry.register(
         b.name,
