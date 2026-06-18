@@ -4,12 +4,13 @@
 Drives the Auth.js + Keycloak authorization-code flow with a cookie jar (no browser), then fetches
 dashboard pages and asserts workspace + role-gated UI come from the control-plane GET /me.
 """
+import os
 import re
 import sys
 import requests
 from bs4 import BeautifulSoup
 
-WEB = "http://localhost:3001"
+WEB = os.environ.get("WEB", "http://localhost:3001")
 USERS = {"alice": ("alice", "member"), "carol": ("carol", "admin")}
 
 

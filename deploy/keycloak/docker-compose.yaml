@@ -17,6 +17,11 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HTTP_ENABLED: "true"
+      # 공개(external) 접속용 정규 호스트. 브라우저 리다이렉트·토큰 issuer 가 이 URL 로 통일된다.
+      # localhost 면 외부 접속이 깨지므로 외부 접속 시 KC_HOSTNAME 을 외부 호스트로 설정해야 한다
+      # (scripts/dev/up.sh 가 ASSAY_PUBLIC_HOST 로 자동 설정). 기본값은 로컬 전용.
+      KC_HOSTNAME: ${KC_HOSTNAME:-http://localhost:${KEYCLOAK_PORT:-8080}}
+      KC_HOSTNAME_STRICT: "false"
     ports:
       - "${KEYCLOAK_PORT:-8080}:8080"
     volumes:

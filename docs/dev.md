@@ -38,6 +38,26 @@ harnesses); `dave` (globex) vs the acme users to see workspace isolation. Keyclo
 http://localhost:8081 (`admin`/`admin`) — add users/workspaces there; changes persist (the `keycloak-data`
 volume). To re-import the realm fixtures from scratch: `docker compose -f deploy/keycloak/docker-compose.yaml down -v`.
 
+## External access (Tailscale / LAN / domain)
+`localhost` only works on the same machine — an external browser resolves `localhost` to *itself*, so OAuth
+redirects and the token `iss` break. Pick **one canonical externally-reachable host** and make these agree:
+
+1. **Keycloak** — `KC_HOSTNAME` = `http://<host>:8081` (so issuer + browser redirects use that host).
+   `scripts/dev/.env` (git-ignored) drives it: set `ASSAY_PUBLIC_HOST=<host>`, and `up.sh` exports `KC_HOSTNAME`.
+2. **Web** — `apps/web/.env.local`: `AUTH_URL=http://<host>:3001`, `KEYCLOAK_ISSUER=http://<host>:8081/realms/assay`
+   (`CONTROL_PLANE_URL` stays `127.0.0.1:8787` — the browser never calls the API directly).
+3. **API** — `apps/api/.env`: `KEYCLOAK_ISSUER=http://<host>:8081/realms/assay` (must equal the token `iss`).
+4. **Realm** — `assay-web` `redirectUris`/`webOrigins` must include `http://<host>:3001` (see `realm-assay.json`;
+   re-import with `down -v` after editing, or add via the admin console).
+
+This repo is wired for **Tailscale `100.69.164.81`** → open `http://100.69.164.81:3001` from any tailnet device.
+To switch hosts, change `ASSAY_PUBLIC_HOST` + the two `.env` files + the realm `redirectUris` to the new host.
+
+> **HTTP on non-private hosts:** Keycloak's realm `sslRequired` defaults to `external`, which **refuses plain HTTP**
+> on any non-RFC1918 address (Tailscale `100.64.0.0/10`, public IPs) → `403 "HTTPS required"`. The dev realm sets
+> `sslRequired: "none"` so HTTP works (Tailscale/WireGuard already encrypts the wire). For a real public deployment,
+> terminate **HTTPS** and revert `sslRequired`.
+
 ## How auth flows (recap)
 Web logs the user in via Keycloak (OIDC) and is a **BFF token courier**: the access token stays in a server-only
 httpOnly cookie and is forwarded as `Authorization: Bearer` to the control plane, which verifies it (JWKS) and
