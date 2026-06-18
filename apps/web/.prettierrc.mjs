@@ -1,0 +1,28 @@
+/** @type {import('prettier').Options} */
+export default {
+  endOfLine: 'lf',
+  semi: false,
+  useTabs: false,
+  singleQuote: true,
+  arrowParens: 'always',
+  tabWidth: 2,
+  printWidth: 100,
+  trailingComma: 'es5',
+  bracketSpacing: true,
+  plugins: ['@ianvs/prettier-plugin-sort-imports'],
+  importOrder: [
+    '^(react/(.*)$)|^(react$)',
+    '^(next/(.*)$)|^(next$)',
+    '<THIRD_PARTY_MODULES>',
+    '',
+    '^@/app/(.*)$',
+    '^@/widgets/(.*)$',
+    '^@/features/(.*)$',
+    '^@/entities/(.*)$',
+    '^@/shared/(.*)$',
+    '',
+    '^[./]',
+  ],
+  importOrderParserPlugins: ['typescript', 'jsx'],
+  importOrderTypeScriptVersion: '5.0.0',
+}

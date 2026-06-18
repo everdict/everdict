@@ -6,6 +6,7 @@
 - [api.md](api.md) — the control-plane HTTP API (`@assay/api`): async `POST /runs` + poll/webhook + result store
 - [registry.md](registry.md) — harness version SSOT (`@assay/registry`): `(id, version) → HarnessSpec`, immutable versions, file/GitOps source
 - [tenancy.md](tenancy.md) — tenant access layer: API-key auth (`Bearer`), tenant-owned harnesses, scoped reads, internal key issuance
+- [web.md](web.md) — the SaaS web (`apps/web`, Next.js FSD + Toss-style): Keycloak user login, per-tenant dashboard; agents use MCP/API keys
 - [orchestration.md](orchestration.md) — durable control plane on Temporal (Direct/Temporal orchestrators + worker)
 - [suites.md](suites.md) — suites & version regression (`assay suite`, scorecard diff)
 - [sandbox-auth.md](sandbox-auth.md) — how `claude` authenticates across backends (subscription / token injection)

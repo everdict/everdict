@@ -19,6 +19,7 @@
 | `@assay/db` | result store: `RunStore` (`InMemoryRunStore`/`PgRunStore`) + numbered SQL migrations + `migrate`/`preflight` | core |
 | `@assay/registry` | harness version SSOT: `(id, version)→HarnessSpec`, immutable versions, file/GitOps loader + `PgHarnessRegistry` | core, db |
 | `apps/api` | multi-tenant control-plane HTTP (Fastify): API-key auth + tenant-owned harnesses + async `POST /runs`/poll/webhook + `RunStore` | core, agent, backends, db, registry |
+| `apps/web` | SaaS web (Next.js 16 FSD, Tailwind v4 + shadcn Toss-style): Keycloak login + per-tenant dashboard | (HTTP client of apps/api; no `@assay/*` deps) |
 | `@assay/registry` | harness versioning | (planned) |
 
 ## The eval loop (runs inside the agent)

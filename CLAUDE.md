@@ -44,6 +44,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `packages/registry`     — **harness version SSOT**: `(id, version) → HarnessSpec` (immutable versions, semver `latest`; in-memory / file-GitOps / `PgHarnessRegistry` on Postgres — async interface); `ServiceTopologyBackend.specFor` wires to it. See `docs/registry.md`.
 - `apps/cli`              — dev/single-run control plane (`assay run [--orchestrator temporal]`, `assay worker`).
 - `apps/api`              — **multi-tenant control-plane HTTP surface** (Fastify): API-key auth (`Bearer`→tenant, `TenantAuth`), tenant-owned harnesses (`POST/GET /harnesses`), `POST /internal/tenant-keys`, async `POST /runs`→run-id + tenant-scoped reads, `RunStore` (in-memory or Postgres via `DATABASE_URL`). See `docs/api.md` + `docs/tenancy.md`.
+- `apps/web`              — **SaaS web** (Next.js 16 App Router, FSD, Tailwind v4 + shadcn Toss-style): Keycloak (Auth.js) user login, per-tenant dashboard (runs/scores/harnesses) over the control plane. Self-contained eslint+prettier (excluded from root Biome). Pure HTTP client of `@assay/api` (no `@assay/*` deps). See `docs/web.md`. (Humans→Keycloak; agents→API keys/MCP.)
 Reverse imports are bugs. The same concern name recurs per package (vertical slices).
 
 ### Two execution layers (Backend vs Driver) — model B

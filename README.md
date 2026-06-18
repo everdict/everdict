@@ -36,6 +36,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 | `@assay/registry` | harness version SSOT: `(id, version) → HarnessSpec`, immutable versions, file/GitOps loader + Postgres (`PgHarnessRegistry`). |
 | `apps/cli` | dev control plane: `assay run`, `assay worker`, `assay suite`. |
 | `apps/api` | multi-tenant control-plane HTTP API (Fastify): async `POST /runs` + poll/webhook + result store. |
+| `apps/web` | SaaS web (Next.js FSD, Tailwind/shadcn Toss-style): Keycloak login + per-tenant dashboard. |
 
 ## Two kinds of harness
 - **Process harness** (Claude Code, Codex): one binary run in a sandbox.
