@@ -1,19 +1,23 @@
-# 로컬 Keycloak (사람=테넌트 유저 인증, OIDC) — apps/web 의 Auth.js Keycloak provider 가 붙는다.
+# 로컬 Keycloak (사람=테넌트 유저 인증, OIDC) — apps/api 가 JWT 를 검증(인증 코어는 컨트롤플레인 소유).
 # 기동: docker compose -f deploy/keycloak/docker-compose.yaml up -d   (admin 콘솔: http://localhost:8080, admin/admin)
 #
-# 최초 1회 설정(콘솔):
-#  1) realm `assay` 생성
-#  2) client `assay-web` (OpenID Connect, confidential, redirect: http://localhost:3001/api/auth/callback/keycloak)
-#  3) client scope/mapper: 유저 attribute `tenant` → token claim `tenant` (apps/web 가 이 클레임으로 테넌트 식별)
-#  4) 유저 생성 + attribute `tenant=<테넌트id>` 지정
-# 그다음 apps/web .env: KEYCLOAK_ISSUER=http://localhost:8080/realms/assay, KEYCLOAK_CLIENT_ID=assay-web, KEYCLOAK_CLIENT_SECRET=...
+# realm-assay.json 을 --import-realm 로 자동 임포트한다:
+#  - realm `assay`, realm roles viewer/member/admin
+#  - client `assay-web` (confidential, secret=assay-web-secret, standard flow + direct grant, redirect 3001)
+#  - protocol mapper: user attribute `workspace` → token claim `workspace` (apps/api 가 이 클레임으로 워크스페이스 식별)
+#  - demo users: alice/alice (member, workspace=acme), carol/carol (admin, workspace=acme)
+#
+# apps/api 측: KEYCLOAK_ISSUER=http://localhost:8080/realms/assay ASSAY_REQUIRE_AUTH=1 node apps/api/dist/main.js
+# apps/web 측 .env: KEYCLOAK_ISSUER=…/realms/assay, KEYCLOAK_CLIENT_ID=assay-web, KEYCLOAK_CLIENT_SECRET=assay-web-secret
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
-    command: start-dev
+    command: ["start-dev", "--import-realm"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HTTP_ENABLED: "true"
     ports:
-      - "8080:8080"
+      - "${KEYCLOAK_PORT:-8080}:8080"
+    volumes:
+      - ./realm-assay.json:/opt/keycloak/data/import/realm-assay.json:ro

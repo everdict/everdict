@@ -8,16 +8,19 @@ arrives by polling or webhook.
 ## Endpoints
 | Method | Path | Body / result |
 |---|---|---|
-| `POST` | `/runs` | `{ harness:{id,version}, case:EvalCase, webhookUrl? }` → **202** `RunRecord` (status `queued`) |
-| `GET`  | `/runs/:id` | `RunRecord` (200) or 404 |
-| `GET`  | `/runs` | `RunRecord[]` for the caller's tenant |
+| `GET`  | `/me` | the caller's `Principal{subject,workspace,roles,via}` |
+| `POST` | `/runs` | `{ harness:{id,version}, case:EvalCase, webhookUrl? }` → **202** `RunRecord` (`runs:submit`) |
+| `GET`  | `/runs/:id` | `RunRecord` (200) or 404 (`runs:read`) |
+| `GET`  | `/runs` | `RunRecord[]` for the caller's workspace (`runs:read`) |
 | `GET`  | `/healthz` | `{ ok: true }` |
 
-Tenant comes from the `Authorization: Bearer ak_…` API key (`TenantAuth`); with `ASSAY_REQUIRE_AUTH=1` a
-missing/invalid key is **401**, otherwise dev falls back to the `x-assay-tenant` header. The resolved tenant
-keys fairness, quotas, trust-zone isolation, secret scoping, budgets — and scopes every read. Harness
-registration (`POST/GET /harnesses`, tenant-owned) and key issuance (`POST /internal/tenant-keys`) are covered
-in [tenancy.md](tenancy.md).
+Identity is resolved by the **auth core** (`@assay/auth`): `Authorization: Bearer <jwt|ak_…>` → a
+`Principal{subject, workspace, roles, via}` (OIDC/Keycloak JWT or API key). With `ASSAY_REQUIRE_AUTH=1` a
+missing/invalid credential is **401**, otherwise dev falls back to the `x-assay-tenant` header (admin). The
+resolved `workspace` (= tenant = trust-zone) keys fairness, quotas, isolation, secret scoping, budgets — and
+scopes every read; roles gate every route (`viewer/member/admin`). See [auth.md](auth.md). Harness registration
+(`POST/GET /harnesses`, workspace-owned) and key issuance (`POST /internal/tenant-keys`) are covered in
+[tenancy.md](tenancy.md).
 
 `RunRecord` = `{ id, tenant, harness, caseId, status: queued|running|succeeded|failed, result?, error?,
 createdAt, updatedAt }`. Errors map by `AppError.status`: budget → **402** `BUDGET_EXCEEDED`, queue full →

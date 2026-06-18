@@ -34,8 +34,9 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 | `@assay/suite` | suites + version regression (`runSuite` / scorecard diff). |
 | `@assay/db` | result store: `RunStore` (`InMemoryRunStore` / `PgRunStore`) + SQL migrations + migrator. |
 | `@assay/registry` | harness version SSOT: `(id, version) → HarnessSpec`, immutable versions, file/GitOps loader + Postgres (`PgHarnessRegistry`). |
+| `@assay/auth` | control-plane auth core: OIDC (Keycloak) + API keys → `Principal{workspace,roles}` + role-based authZ. |
 | `apps/cli` | dev control plane: `assay run`, `assay worker`, `assay suite`. |
-| `apps/api` | multi-tenant control-plane HTTP API (Fastify): async `POST /runs` + poll/webhook + result store. |
+| `apps/api` | multi-tenant control-plane HTTP API (Fastify): owns auth (OIDC + API keys, role-gated, `/me`), async `POST /runs` + poll/webhook + result store. |
 | `apps/web` | SaaS web (Next.js FSD, Tailwind/shadcn Toss-style): Keycloak login + per-tenant dashboard. |
 
 ## Two kinds of harness
@@ -62,6 +63,7 @@ pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 - `docs/service-harness.md` — multi-service topologies (Nomad/K8s, OTel/MLflow trace)
 - `docs/execution-backends.md` — Backend vs Driver, multi-cluster routing
 - `docs/orchestration.md` — Temporal durable control plane
+- `docs/auth.md` — control-plane-owned auth core (OIDC/Keycloak + API keys, roles)
 - `docs/sandbox-auth.md` — how `claude` authenticates across backends
 - `docs/migration/` — DB migration discipline
 - conventions: `CLAUDE.md` + `.claude/` (reinterpreted from `digo-api` / `digo-infra-dev`)
@@ -72,7 +74,9 @@ durable Temporal end-to-end; Nomad batch dispatch (runner-agent image); service-
 Kubernetes (kind)** (`NomadTopologyRuntime`/`K8sTopologyRuntime`: warm topology + per-case CDP browser +
 per-tenant namespace isolation); the SaaS operational layer end-to-end on real Nomad — capacity-aware +
 tenant-fair `Scheduler`, per-tenant trust-zone isolation + warm-pool separation, queue-depth autoscaling,
-per-tenant secrets + budgets, the async `apps/api` HTTP surface (`POST /runs` → poll/webhook) with **API-key
-auth + tenant-owned harnesses + tenant-scoped reads**, and Postgres persistence (`PgRunStore` + `PgHarnessRegistry`
-+ migrations). Still Phase-2 (need your infra/images): real browser+extension & browser-use images, real
-OTel/MLflow span ingestion, ClickHouse analytics, the per-tenant dashboard.
+per-tenant secrets + budgets, the async `apps/api` HTTP surface (`POST /runs` → poll/webhook) with
+**control-plane-owned auth** (OIDC via real Keycloak + API keys → `Principal{workspace,roles}`, role-based
+authZ), tenant-owned harnesses + workspace-scoped reads, and Postgres persistence (`PgRunStore` +
+`PgHarnessRegistry` + migrations). Still Phase-2 (need your infra/images): web token-forwarding rewiring, MCP
+toolization, real browser+extension & browser-use images, real OTel/MLflow span ingestion, ClickHouse
+analytics, the per-tenant dashboard.

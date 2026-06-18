@@ -19,6 +19,9 @@ export const ErrorCode = {
   UPSTREAM_ERROR: "외부 서비스 오류입니다.",
   RATE_LIMITED: "요청이 너무 많습니다.",
   BUDGET_EXCEEDED: "테넌트 예산을 초과했습니다.",
+  // auth
+  UNAUTHENTICATED: "인증이 필요합니다.",
+  FORBIDDEN: "권한이 없습니다.",
 } as const;
 
 export type ErrorCode = keyof typeof ErrorCode;
@@ -54,6 +57,12 @@ export class NotFoundError extends AppError {
 }
 export class ConflictError extends AppError {
   readonly status = 409;
+}
+export class UnauthenticatedError extends AppError {
+  readonly status = 401;
+}
+export class ForbiddenError extends AppError {
+  readonly status = 403;
 }
 export class RateLimitError extends AppError {
   readonly status = 429;

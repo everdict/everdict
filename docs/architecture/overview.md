@@ -45,9 +45,13 @@ Above placement, the control plane turns "run one case" into "serve many tenants
 - **Harness registry** (`@assay/registry`) — the version SSOT: `(tenant, id, version) → HarnessSpec` (immutable
   versions, semver `latest`; in-memory / file-GitOps / `PgHarnessRegistry` on Postgres). `ServiceTopologyBackend.specFor`
   resolves a job's `{id, version}` reference to a concrete spec at dispatch. See `docs/registry.md`.
-- **Tenant access + SaaS web** — API-key auth (`Authorization: Bearer ak_…` → tenant) with tenant-owned harnesses
-  and tenant-scoped reads (`docs/tenancy.md`); the `apps/web` Next.js dashboard (Keycloak user login, per-tenant
-  scores/runs/harnesses) is a pure HTTP client of the control plane (`docs/web.md`). Humans → Keycloak; agents → API keys.
+- **Auth core** (`@assay/auth`, owned by `apps/api`) — every credential resolves to a `Principal{subject,
+  workspace, roles, via}`: OIDC/Keycloak JWT (verified via `jose` JWKS) for humans, API keys (`ak_…`) for
+  agents/MCP/CI, behind one `compositeAuthenticator`. `workspace = tenant = trust-zone`; a role→action matrix
+  (`viewer/member/admin`) gates every route. The web is a token courier, **not** an auth authority. See `docs/auth.md`.
+- **Tenant access + SaaS web** — tenant-owned harnesses and workspace-scoped reads (`docs/tenancy.md`); the
+  `apps/web` Next.js dashboard (Keycloak user login, per-tenant scores/runs/harnesses) is a pure HTTP client of
+  the control plane (`docs/web.md`). Humans → Keycloak; agents → API keys.
 
 ## Cross-cutting
 - Cost/token capture comes from the harness trace (e.g. Claude's `total_cost_usd` in stream-json); the same

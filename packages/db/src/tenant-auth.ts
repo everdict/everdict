@@ -44,22 +44,10 @@ export function generateKey(): string {
 }
 
 // 테넌트에 새 키 발급 → 해시 저장, 평문 반환(호출부가 한 번 보여주고 버린다).
+// Bearer 키 → workspace 해석은 컨트롤플레인 인증 코어(`@assay/auth`의 apiKeyAuthenticator)가
+// `tenantForHash(hashKey(...))` 로 직접 수행한다. 여기는 저장소 프리미티브만 제공한다.
 export async function issueKey(store: TenantKeyStore, tenant: string): Promise<string> {
   const key = generateKey();
   await store.add(tenant, hashKey(key));
   return key;
-}
-
-// Bearer 키 → tenant 해석.
-export interface TenantAuth {
-  authenticate(apiKey: string): Promise<string | undefined>;
-}
-
-export function keyStoreAuth(store: TenantKeyStore): TenantAuth {
-  return {
-    async authenticate(apiKey: string): Promise<string | undefined> {
-      if (!apiKey) return undefined;
-      return store.tenantForHash(hashKey(apiKey));
-    },
-  };
 }

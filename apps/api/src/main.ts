@@ -1,4 +1,5 @@
 import { collectAuthEnv } from "@assay/agent";
+import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator, oidcAuthenticator } from "@assay/auth";
 import {
   BackendRegistry,
   type BudgetLimit,
@@ -14,7 +15,6 @@ import {
   PgTenantKeyStore,
   type RunStore,
   type TenantKeyStore,
-  keyStoreAuth,
   makePool,
   migrate,
   sqlClient,
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   const app = buildServer({
     service,
     registry,
-    auth: keyStoreAuth(keyStore),
+    authenticator: buildAuthenticator(keyStore),
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
     requireAuth: process.env.ASSAY_REQUIRE_AUTH === "1",
@@ -80,6 +80,22 @@ async function makePersistence(): Promise<Persistence> {
     keyStore: new PgTenantKeyStore(client),
     registry: new PgHarnessRegistry(client),
   };
+}
+
+// 컨트롤플레인이 소유하는 인증: KEYCLOAK_ISSUER 면 OIDC(JWT) + 항상 API 키. 둘 다 workspace 로 해석.
+function buildAuthenticator(keyStore: TenantKeyStore): Authenticator {
+  const authers: Authenticator[] = [];
+  if (process.env.KEYCLOAK_ISSUER) {
+    authers.push(
+      oidcAuthenticator({
+        issuer: process.env.KEYCLOAK_ISSUER,
+        ...(process.env.OIDC_AUDIENCE ? { audience: process.env.OIDC_AUDIENCE } : {}),
+        ...(process.env.WORKSPACE_CLAIM ? { workspaceClaim: process.env.WORKSPACE_CLAIM } : {}),
+      }),
+    );
+  }
+  authers.push(apiKeyAuthenticator({ keyStore }));
+  return compositeAuthenticator(authers);
 }
 
 function budgetFromEnv(): (tenant: string) => BudgetLimit | undefined {

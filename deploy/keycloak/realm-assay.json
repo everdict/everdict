@@ -1,0 +1,67 @@
+{
+  "realm": "assay",
+  "enabled": true,
+  "roles": {
+    "realm": [{ "name": "viewer" }, { "name": "member" }, { "name": "admin" }]
+  },
+  "groups": [
+    {
+      "name": "workspaces",
+      "subGroups": [
+        { "name": "acme", "attributes": { "workspace": ["acme"] } },
+        { "name": "globex", "attributes": { "workspace": ["globex"] } }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "assay-web",
+      "enabled": true,
+      "secret": "assay-web-secret",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:3001/*"],
+      "webOrigins": ["http://localhost:3001"],
+      "protocolMappers": [
+        {
+          "name": "workspace",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "config": {
+            "user.attribute": "workspace",
+            "claim.name": "workspace",
+            "jsonType.label": "String",
+            "access.token.claim": "true",
+            "id.token.claim": "true",
+            "userinfo.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "alice",
+      "enabled": true,
+      "email": "alice@acme.test",
+      "emailVerified": true,
+      "firstName": "Alice",
+      "lastName": "Acme",
+      "attributes": { "workspace": ["acme"] },
+      "credentials": [{ "type": "password", "value": "alice", "temporary": false }],
+      "realmRoles": ["member"]
+    },
+    {
+      "username": "carol",
+      "enabled": true,
+      "email": "carol@acme.test",
+      "emailVerified": true,
+      "firstName": "Carol",
+      "lastName": "Acme",
+      "attributes": { "workspace": ["acme"] },
+      "credentials": [{ "type": "password", "value": "carol", "temporary": false }],
+      "realmRoles": ["admin"]
+    }
+  ]
+}
