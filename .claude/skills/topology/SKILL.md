@@ -31,8 +31,16 @@ Chromium and discovers its CDP from `/json/version`. Services with a `port` get 
 by `(spec, version, zone.id)` and the job ID/namespace carry the zone — warm topologies are **never shared across
 tenants** (a shared agent/LangGraph process would leak state/secrets). Verified live on Nomad.
 
+## Live K8s runtime
+`K8sTopologyRuntime` is the same shape via an injectable `Kubectl` (default shells to `kubectl`):
+`ensureNamespace` (per-tenant namespace = isolation) → `apply` Deployment+Service → `rollout status` → endpoint
+via `kubectl port-forward svc/… :<port>` (parse the local port from stdout). `provisionBrowserEnv` runs a
+headless-Chromium Deployment+Service; `dispose()` deletes only the browser (warm topology survives), `teardown()`
+deletes the namespace. `imagePullPolicy`/`runtimeClass` are options (kind: pre-`kind load` images + IfNotPresent).
+Verified live on kind — Nomad↔K8s parity.
+
 ## Reference impls
-`packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,service-backend,environment-manager}.ts`,
-`packages/trace/src/{otel,mlflow,trace-source}.ts`. Live now: NomadTopologyRuntime apply + per-case CDP browser
-(see `scripts/live/service-topology-nomad.mjs`). Still Phase 2: K8sTopologyRuntime apply, real browser+extension
+`packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,
+`packages/trace/src/{otel,mlflow,trace-source}.ts`. Live now: both NomadTopologyRuntime + K8sTopologyRuntime apply
++ per-case CDP browser (`scripts/live/service-topology-{nomad,k8s}.mjs`). Still Phase 2: real browser+extension
 (headful+xvfb+`--load-extension`) & browser-use images, real OTel/MLflow span ingestion.

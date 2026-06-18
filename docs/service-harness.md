@@ -33,6 +33,19 @@ The live Nomad runtime (`@assay/topology`) implements `TopologyRuntime` against 
 - Services declare a `port` → the builder attaches a group `network` dynamic port (label `http`, browser `cdp`)
   and maps it into the container, so endpoints are reachable from the control plane without Consul.
 
+### `K8sTopologyRuntime` (live)
+The live K8s runtime is the same shape against the Kubernetes API (via an injectable `Kubectl`, default shells
+to `kubectl`):
+- `ensureTopology(spec, zone)` → `ensureNamespace` (per-tenant **namespace** = the isolation boundary) →
+  `apply` `buildK8sManifests` (Deployment + Service per service) → `kubectl rollout status` →
+  **discover endpoints** via `kubectl port-forward svc/… :<port>` (kubectl picks the local port; the runtime
+  parses it from stdout). Cached per `(id, version, zone)`.
+- `provisionBrowserEnv(spec, runId, zone)` → `buildBrowserManifests` (headless-Chromium Deployment + Service) →
+  rollout → port-forward CDP → `BrowserEnvHandle`. `dispose()` deletes **only** the browser Deployment/Service
+  (the warm topology in the same namespace survives); `teardown()` deletes the namespace.
+- Tenant isolation is K8s-native: each zone is its own namespace, so two tenants on the same harness version get
+  separate Deployments. `runtimeClass` (gVisor) and `imagePullPolicy` are runtime options.
+
 ## Trace (`@assay/trace`)
 The harness emits a trace to OTel/MLflow; Assay **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →
 `spansToTraceEvents` → normalized `TraceEvent[]` (OTel GenAI semantic conventions).
@@ -55,6 +68,24 @@ driver) with stand-ins: front-door = `mendhak/http-https-echo`, browser = `chrom
 NOMAD_ADDR=http://127.0.0.1:4646 MLFLOW_ENDPOINT=http://127.0.0.1:5501 \
   node scripts/live/service-topology-nomad.mjs
 ```
+
+## Live validation (Kubernetes / kind)
+`scripts/live/service-topology-k8s.mjs` runs the same case on a real K8s cluster via `K8sTopologyRuntime`:
+namespace-per-tenant (`assay-acme`) → Deployment+Service applied → rollout → endpoint via `port-forward` →
+per-case headless-Chromium with a real CDP endpoint → real `POST /runs` (HTTP 200) → MLflow trace → `dom`/`url`
+graded over the real browser snapshot → namespace deleted on teardown. Confirmed end-to-end (~3s) on a local
+**kind** cluster — proving Nomad↔K8s parity through the orchestrator-agnostic `ServiceTopologyBackend`.
+
+### Local kind cluster (persistent, for experiments)
+```bash
+# one-time: kubectl + kind to ~/.local/bin, then
+kind create cluster --name assay
+# load the stand-in images into the kind node (its own containerd; no registry needed)
+kind load docker-image mendhak/http-https-echo:latest chromedp/headless-shell:latest --name assay
+PATH=$HOME/.local/bin:$PATH node scripts/live/service-topology-k8s.mjs
+```
+The cluster persists across runs (`kind get clusters`); `kind delete cluster --name assay` to remove. gVisor
+(`runtimeClass`) is not installed on kind, so the demo uses the default runtime; namespace isolation is real.
 
 ## Status
 - **Phase 1 (built, unit-tested):** `HarnessSpec(service)`, OTel/MLflow trace mappers, **both** topology

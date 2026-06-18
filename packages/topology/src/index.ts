@@ -18,5 +18,15 @@ export {
   type NomadTopologyRuntimeOptions,
   type NomadHttp,
 } from "./nomad-runtime.js";
-export { buildK8sManifests, type K8sManifest, type K8sTopologyOptions } from "./k8s-topology.js";
+export {
+  buildK8sManifests,
+  buildBrowserManifests,
+  namespaceManifest,
+  browserDeployName,
+  type K8sManifest,
+  type K8sTopologyOptions,
+  type K8sBrowserOptions,
+} from "./k8s-topology.js";
+export { K8sTopologyRuntime, type K8sTopologyRuntimeOptions } from "./k8s-runtime.js";
+export { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
 export { ServiceTopologyBackend, type ServiceTopologyBackendOptions, type SubmitFn } from "./service-backend.js";
