@@ -6,11 +6,13 @@ import type { Backend, BackendCapacity } from "./backend.js";
 // claude 는 이 머신의 구독 로그인을 사용.
 export class LocalBackend implements Backend {
   readonly id = "local";
-  constructor(private readonly maxConcurrent = 4) {}
+  // maxConcurrent 는 함수도 가능 — 오토스케일러가 동적으로 바꾸는 슬롯을 읽게 한다.
+  constructor(private readonly maxConcurrent: number | (() => number) = 4) {}
 
   async capacity(): Promise<BackendCapacity> {
     // in-process 실행 — 슬롯은 설정값, 사용량은 스케줄러의 in-flight 로 게이팅.
-    return { total: this.maxConcurrent, used: 0 };
+    const total = typeof this.maxConcurrent === "function" ? this.maxConcurrent() : this.maxConcurrent;
+    return { total, used: 0 };
   }
 
   dispatch(job: AgentJob): Promise<CaseResult> {

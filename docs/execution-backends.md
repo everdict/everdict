@@ -110,7 +110,26 @@ Live proof: `scripts/live/tenant-isolation-nomad.mjs` — the same `spec@version
 shared pool. (gVisor `runsc` + Nomad namespaces are enforced in code + unit-tested; the dev cluster ships
 only `runc`/no namespaces, so that live demo uses `trusted` zones — a real deployment needs runsc/namespaces.)
 
-Next slices: autoscaling driven by queue depth, per-tenant secret scoping + budgets, async API + result store.
+## Autoscaling (queue-depth driven)
+Capacity-aware placement *queues* when full; the `Autoscaler` closes the loop by *adding capacity* when the
+backlog grows and removing it when idle. It reads a `LoadSignal` (`{queued, inFlight}` from `Scheduler.stats()`
+via `aggregateLoad`) each tick and drives `ScalingTarget`s:
+
+- **decision** (`desiredCapacity`, pure) — `desired = clamp(inFlight + queued, min, max)`: provision enough
+  slots to absorb the backlog, capped at `max` (the real infra ceiling); `min` may be `0` (scale-to-zero).
+- **up fast, down slow** — upscale applies immediately (drain backlog); downscale only after
+  `scaleDownAfterTicks` consecutive over-provisioned ticks (hysteresis ⇒ no flapping).
+- **actuation** is abstracted by `ScalingTarget.scaleTo(n)`: `MutableSlots` (in-memory, drives a backend whose
+  `maxConcurrent` is a getter — closes the loop end-to-end), or a callback to the **Nomad Autoscaler** / cloud
+  ASG / K8s replica patch. After a scale the autoscaler calls `onChanged` → `Scheduler.poke()` to re-pump.
+
+`Backend.capacity().total` reads a `maxConcurrent` that can be `number | (() => number)`, so the autoscaler's
+slot changes take effect in the very next placement pass.
+
+Live proof: `scripts/live/autoscaler-nomad.mjs` — 8 cases submitted at once with slots starting at 1; the
+autoscaler scales 1→4 under backlog (peak 4 concurrent Nomad allocs, never above `MAX`) then back to 1 when idle.
+
+Next slices: per-tenant secret scoping + budgets (`Cost` enforcement), async API + result store.
 
 ## Nomad (phase 1)
 ```bash

@@ -10,6 +10,16 @@ export {
 } from "./scheduler.js";
 export { FairQueue, type FairQueueOptions } from "./fair-queue.js";
 export {
+  Autoscaler,
+  MutableSlots,
+  desiredCapacity,
+  aggregateLoad,
+  type LoadSignal,
+  type AutoscalePolicy,
+  type ScalingTarget,
+  type AutoscalerOptions,
+} from "./autoscaler.js";
+export {
   type TrustZonePolicy,
   perTenantTrustZones,
   staticTrustZones,

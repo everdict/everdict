@@ -35,7 +35,8 @@ export interface NomadBackendOptions {
   memMb?: number;
   pollIntervalMs?: number;
   maxPolls?: number;
-  maxConcurrent?: number; // 이 클러스터에 허용할 동시 잡 상한(용량 인지 배치용)
+  // 이 클러스터의 동시 잡 상한(용량 인지 배치용). 함수면 오토스케일러가 바꾸는 값을 동적으로 읽는다.
+  maxConcurrent?: number | (() => number);
 }
 
 // --- Nomad 잡 스펙(필요한 부분만 타입화) ---
@@ -117,7 +118,8 @@ export class NomadBackend implements Backend {
   // 용량: total=설정 상한, used=클러스터에서 관측된 진행중 assay 잡 수(라이브 프로브, 전 네임스페이스).
   // 프로브가 실패하면 used=0 으로 두고 스케줄러의 in-flight 로만 게이팅한다.
   async capacity(): Promise<BackendCapacity> {
-    const total = this.opts.maxConcurrent ?? 20;
+    const mc = this.opts.maxConcurrent;
+    const total = (typeof mc === "function" ? mc() : mc) ?? 20;
     try {
       const res = await this.http.request("GET", "/v1/jobs?prefix=assay-&namespace=*");
       if (res.status < 300) {

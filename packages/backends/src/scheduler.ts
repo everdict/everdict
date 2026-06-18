@@ -81,6 +81,11 @@ export class Scheduler {
     });
   }
 
+  // 용량이 외부에서 늘어났을 때(오토스케일러) 큐를 다시 평가하도록 깨운다.
+  poke(): void {
+    void this.pump();
+  }
+
   // 관측용 스냅샷(테스트/모니터링).
   stats(): {
     queued: number;

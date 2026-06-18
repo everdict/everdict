@@ -36,7 +36,7 @@ export interface ServiceTopologyBackendOptions {
   graders?: Grader[]; // 기본: trace 기반(steps/cost/latency). 브라우저 그레이더(dom/vlm)는 Phase 2.
   submit?: SubmitFn;
   newRunId?: () => string;
-  maxConcurrent?: number; // 동시 per-case 브라우저 상한(용량 인지 배치용)
+  maxConcurrent?: number | (() => number); // 동시 per-case 브라우저 상한(함수면 오토스케일러가 동적 조정)
   trustZones?: TrustZonePolicy; // 테넌트별 격리 — warm 풀을 존별로 분리(공유 금지)
 }
 
@@ -50,7 +50,8 @@ export class ServiceTopologyBackend implements Backend {
 
   // 용량: 동시에 띄울 수 있는 per-case 브라우저 수(warm 서비스는 공유 풀이라 per-case 가 병목).
   async capacity(): Promise<BackendCapacity> {
-    return { total: this.opts.maxConcurrent ?? 8, used: 0 };
+    const mc = this.opts.maxConcurrent;
+    return { total: (typeof mc === "function" ? mc() : mc) ?? 8, used: 0 };
   }
 
   async dispatch(job: AgentJob): Promise<CaseResult> {
