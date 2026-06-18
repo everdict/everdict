@@ -51,3 +51,8 @@ have LiteLLM emit OTel and use the harness `trace: otel`.
   set/list(names-only)/entries(decrypted)/delete + cross-workspace isolation + upsert.
 - API (`apps/api/src/server.test.ts`): admin set/list/delete, **value never returned**, bad name → 400,
   member → 403.
+- **Live LiteLLM** (`scripts/live/litellm-gpt54mini.mjs`): connected the real LiteLLM proxy serving
+  `chatgpt/gpt-5.4-mini` (workclaw `infra/litellm`). A declarative `command` harness (zero code) called
+  `/v1/chat/completions` with the eval task → the real model's answer was captured in the run's git-diff
+  snapshot. (Run on `LocalBackend`; for Nomad/K8s the key comes from the workspace secret store and the proxy
+  must be sandbox-reachable.)
