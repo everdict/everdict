@@ -60,4 +60,12 @@ image/install versions.
   (`packages/agent/Dockerfile`) so runs are fast and `setup` is empty. **Gotcha (container→host networking):** use
   the **docker bridge gateway `172.17.0.1`** for `OPENAI_API_BASE`, not the host LAN IP — from inside the alloc
   the LAN IP TCP-connects but the model-completion response doesn't return cleanly, hanging aider until timeout;
-  the gateway path works in ~10s. On K8s, expose LiteLLM as a Service/endpoint reachable from the pod.
+  the gateway path works in ~10s.
+- **aider on K8s (kind)** (`scripts/live/aider-k8s.mjs`, `K8sBackend({hostNetwork})`): the K8s path is verified for
+  everything except the local model hop — the Job dispatches, the agent runs the command harness, aider is
+  pre-baked and gets the correct `OPENAI_API_BASE`/key, and the model is reachable from the pod (plain `urllib`,
+  small and 12 KB bodies, <1 s). **Open blocker (local-infra, not Assay):** aider's **litellm/httpx** call hangs
+  from a kind pod to the host's **host-network** LiteLLM, while `urllib` to the same address works — an
+  httpx-in-kind-netns quirk. **Production answer:** run LiteLLM as an **in-cluster Service** so eval pods reach it
+  on the normal pod network (httpx works there); then aider-on-K8s matches the Local/Nomad result. The real
+  aider+model eval is PASS-verified on **Local + Nomad**.

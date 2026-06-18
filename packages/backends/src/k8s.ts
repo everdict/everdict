@@ -116,6 +116,7 @@ export interface K8sBackendOptions {
   runtimeClass?: string; // 명시 runtimeClassName(gVisor=gvisor 등). trustZones 가 우선.
   trustZones?: TrustZonePolicy; // 테넌트별 격리 — 네임스페이스 + runtimeClassName 강제
   imagePullPolicy?: string; // 기본 IfNotPresent (kind 로드 이미지)
+  hostNetwork?: boolean; // 파드가 노드 네트워크 공유 — 호스트 서비스(예: dev LiteLLM) 접근용. ⚠️ 격리 약화: dev 전용.
   ttlSecondsAfterFinished?: number; // 잡 자동 정리(기본 300)
   pollIntervalMs?: number;
   maxPolls?: number;
@@ -160,6 +161,7 @@ export function buildK8sJob(
         spec: {
           restartPolicy: "Never",
           ...(runtimeClassName ? { runtimeClassName } : {}),
+          ...(opts.hostNetwork ? { hostNetwork: true } : {}),
           containers: [
             {
               name: "agent",

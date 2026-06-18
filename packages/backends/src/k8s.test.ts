@@ -80,6 +80,17 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(m.spec.template.spec.runtimeClassName).toBe("gvisor");
   });
 
+  it("hostNetwork 옵션이 파드 스펙에 실린다(dev: 호스트 서비스 접근용)", () => {
+    const m = buildK8sJob(JOB, { image: "img", hostNetwork: true }, "n", "ns") as unknown as {
+      spec: { template: { spec: { hostNetwork?: boolean } } };
+    };
+    expect(m.spec.template.spec.hostNetwork).toBe(true);
+    const off = buildK8sJob(JOB, { image: "img" }, "n", "ns") as unknown as {
+      spec: { template: { spec: { hostNetwork?: boolean } } };
+    };
+    expect(off.spec.template.spec.hostNetwork).toBeUndefined();
+  });
+
   it("k8sJobName 은 DNS-1123 으로 정규화한다", () => {
     expect(k8sJobName({ ...JOB, evalCase: { ...JOB.evalCase, id: "Web_Case#1" } })).toBe("assay-web-case-1");
   });
