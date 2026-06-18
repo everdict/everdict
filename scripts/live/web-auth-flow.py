@@ -56,10 +56,17 @@ def main():
     for username, (password, role) in USERS.items():
         s = login(username, password)
         code, body = get(s, "/dashboard")
-        ok_ws = code == 200 and "acme" in body  # workspace from GET /me
+        ok_ws = code == 200 and "acme" in body  # workspace from GET /me (server-side token read works)
         print(f"[{username}/{role}] GET /dashboard → {code}  workspace=acme:{ok_ws}")
         if not ok_ws:
             failures.append(f"{username}: dashboard missing workspace (code {code})")
+
+        # BFF hardening: the client-visible session must NOT carry the access token (no JWT leak).
+        _, sess = get(s, "/api/auth/session")
+        leaked = ("accessToken" in sess) or ("eyJ" in sess)
+        print(f"           /api/auth/session token-leak:{leaked} (want False)")
+        if leaked:
+            failures.append(f"{username}: access token leaked to client session")
 
         # role-gated UI (mirrors the control-plane authz matrix, driven by /me roles)
         rc, rbody = get(s, "/dashboard/runs/new")

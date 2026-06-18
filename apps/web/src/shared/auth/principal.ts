@@ -2,7 +2,7 @@ import 'server-only'
 
 import { keycloakConfigured } from '@/shared/config/env'
 import { type AuthContext, controlPlane } from '@/shared/lib/control-plane'
-import { auth } from './auth'
+import { getAccessToken } from './access-token'
 
 // 컨트롤플레인이 돌려주는 Principal (= GET /me). 웹은 이 값을 해석하지 않고 그대로 신뢰한다.
 export interface WebPrincipal {
@@ -15,7 +15,7 @@ export interface WebPrincipal {
 // 현재 요청의 컨트롤플레인 인증 컨텍스트. 로그인 사용자 → Keycloak Bearer, dev(미설정) → x-assay-tenant=default.
 export async function authContext(): Promise<AuthContext> {
   if (!keycloakConfigured) return { devTenant: 'default' }
-  const token = (await auth())?.accessToken
+  const token = await getAccessToken() // 서버 전용 — 클라이언트 세션에 토큰을 노출하지 않는다(BFF)
   return token ? { bearer: token } : { devTenant: 'default' }
 }
 

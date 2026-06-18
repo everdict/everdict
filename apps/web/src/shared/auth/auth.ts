@@ -4,13 +4,14 @@ import Keycloak from 'next-auth/providers/keycloak'
 
 import { env, keycloakConfigured } from '@/shared/config/env'
 
-// Keycloak(OIDC)로 사람(테넌트 유저)을 인증하고, 발급된 액세스 토큰을 그대로 컨트롤플레인에 전달한다.
+// Keycloak(OIDC)로 사람(테넌트 유저)을 인증하고, 발급된 액세스 토큰을 컨트롤플레인에 전달한다(BFF).
 // 인증/인가의 권위는 컨트롤플레인(@assay/api + @assay/auth)이 가진다 — 웹은 토큰 운반자(courier)일 뿐,
 // 워크스페이스/역할을 토큰에서 직접 해석하지 않는다(그건 GET /me 가 한다).
+// 하드닝(BFF): 액세스/리프레시 토큰은 서버 전용 httpOnly 암호화 쿠키(JWT)에만 두고, 클라이언트 세션에는
+// 절대 싣지 않는다 — 서버에서 getAccessToken()(getToken)으로만 읽는다. session 에는 비민감 플래그만.
 // (에이전트/MCP/CI 는 API 키로 컨트롤플레인에 직접 인증 — 상보적.)
 declare module 'next-auth' {
   interface Session {
-    accessToken?: string
     error?: 'RefreshFailed'
   }
 }
@@ -79,8 +80,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return refresh(token)
     },
     session({ session, token }) {
-      // 액세스 토큰은 서버 전용 control-plane.ts 에서만 사용한다(컨트롤플레인에 그대로 전달).
-      session.accessToken = token.accessToken
+      // 액세스 토큰은 절대 세션(=클라이언트 노출)에 싣지 않는다. 비민감 상태 플래그만 노출.
       session.error = token.error
       return session
     },

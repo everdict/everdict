@@ -4,10 +4,12 @@ The multi-tenant SaaS frontend — a Next.js app (FSD architecture, Toss-style d
 log in (Keycloak), see their **per-tenant scores**, runs, and harnesses. Reference architecture: digo-admin.
 
 ## Two complementary auth paths
-- **Humans → Keycloak (OIDC)** via Auth.js in `apps/web`. The web is a **token courier, not an auth authority**:
-  Auth.js stores (and refreshes) the Keycloak **access token**, and the server-only `control-plane.ts` forwards
-  it as `Authorization: Bearer <jwt>` to `@assay/api`. The control plane resolves identity — `workspace` + roles
-  come from `GET /me`, never decoded from the token by the web. UI is role-gated off `/me` (mirror in
+- **Humans → Keycloak (OIDC)** via Auth.js in `apps/web`. The web is a **BFF token courier, not an auth
+  authority**: Auth.js stores (and refreshes) the Keycloak **access token** in the **server-only httpOnly
+  encrypted cookie** — it is **never put on the client session** (no `/api/auth/session` leak). The server reads
+  it via `getAccessToken()` (`getToken` over the cookie) and `control-plane.ts` forwards it as
+  `Authorization: Bearer <jwt>` to `@assay/api`. The control plane resolves identity — `workspace` + roles come
+  from `GET /me`, never decoded from the token by the web. UI is role-gated off `/me` (mirror in
   `shared/auth/can.ts`), but enforcement is always the control plane's (403). Without Keycloak configured the web
   falls back to the dev `x-assay-tenant=default` path. See `docs/auth.md`.
 - **Agents / MCP / CI → API keys** (the `@assay/db` tenant-key layer) calling `@assay/api` directly with
@@ -31,7 +33,8 @@ widgets/    page-level composition: app-shell (sidebar+topbar), scorecard-summar
 features/   business actions: submit-run, register-harness (client form + 'use server' action → control plane)
 entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state), lib (utils, control-plane),
-            config (env), providers (query), auth (Keycloak token store/refresh + authContext + currentPrincipal + can)
+            config (env), providers (query), auth (Keycloak token store/refresh, server-only access-token (getToken),
+            authContext + currentPrincipal + can)
 ```
 Import order enforces downward layer deps (app → widgets → features → entities → shared).
 
@@ -71,4 +74,6 @@ gracefully if the control plane is unreachable.
 `apps/web` self-contained. **Live (headless OAuth, real Keycloak)** via `scripts/live/web-auth-flow.py`: drives
 the Auth.js + Keycloak authorization-code flow with a cookie jar (no browser) for `alice` (member) and `carol`
 (admin) → the web forwards each user's token → `/dashboard` shows `workspace=acme` (from `/me`); `runs/new` is
-allowed for both; `harnesses/new` is gated for the member and allowed for the admin.
+allowed for both; `harnesses/new` is gated for the member and allowed for the admin. **BFF hardening proven**: the
+same script asserts `/api/auth/session` carries **no** access token (no `eyJ…`/`accessToken` leak) while the
+server-side path still works — the token lives only in the httpOnly cookie.
