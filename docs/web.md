@@ -12,9 +12,9 @@ log in (Keycloak), see their **per-tenant scores**, runs, and harnesses. Referen
   from `GET /me`, never decoded from the token by the web. UI is role-gated off `/me` (mirror in
   `shared/auth/can.ts`), but enforcement is always the control plane's (403). Without Keycloak configured the web
   falls back to the dev `x-assay-tenant=default` path. See `docs/auth.md`.
-- **Agents / MCP / CI → API keys** (the `@assay/db` tenant-key layer) calling `@assay/api` directly with
-  `Authorization: Bearer ak_…`. (MCP toolization of the platform — exposing run/harness actions as agent tools —
-  is the next slice, served from `@assay/api`, reusing this key auth.)
+- **Agents / MCP / CI → MCP or API keys**: the agent-facing **MCP server** (`@assay/api` `/mcp`) exposes
+  run/harness tools, OAuth-protected via Keycloak ("login like Linear MCP") or an `Authorization: Bearer ak_…`
+  API key — same auth core, role-gated. See `docs/mcp.md`.
 
 These don't conflict: Keycloak = people in the browser, API keys = machines. Both resolve to the same
 control-plane `Principal{workspace, roles}`.

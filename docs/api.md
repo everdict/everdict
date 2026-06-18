@@ -67,3 +67,7 @@ succeeded run is confirmed persisted in the `assay_runs` Postgres table (survive
 > The CLI (`assay run`) is the dev/single-run path; this API is the multi-tenant control-plane surface.
 > Durable orchestration (Temporal) and the API can be combined: point the service's dispatcher at the Temporal
 > orchestrator instead of an in-process Scheduler. See `docs/orchestration.md`.
+
+The same control plane also serves the **agent-facing MCP server** at `/mcp` (run/harness tools, OAuth-protected
+via Keycloak or API keys, role-gated) plus the OAuth metadata at `/.well-known/oauth-protected-resource`. See
+`docs/mcp.md`.

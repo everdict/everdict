@@ -134,8 +134,14 @@ authorization-code flow with a cookie jar): `alice`(member) sees the run form bu
 gated; `carol`(admin) sees both; both render `workspace=acme` — and `/api/auth/session` carries **no** access
 token (BFF leak check passes) while the server-side path still works. See `docs/web.md`.
 
+## MCP (agent-facing — done)
+The agent surface (`apps/api` `/mcp`) is OAuth-protected the same way Linear's MCP is: `/mcp` returns
+`401 + WWW-Authenticate: resource_metadata=…`, `/.well-known/oauth-protected-resource` (RFC 9728) names
+**Keycloak** as the authorization server, and the MCP client runs OAuth 2.1 + PKCE login. The Bearer is validated
+by the **same `compositeAuthenticator`** (Keycloak JWT via JWKS, or `ak_…` API key) → `Principal`, and tools are
+role-gated/workspace-scoped. No separate MCP auth path. See `docs/mcp.md`.
+
 ## Not yet (next)
-- **MCP** — expose run/harness operations as MCP tools inside `apps/api`, reusing the same `apiKeyAuthenticator`.
 - Per-key scopes/expiry, key rotation, self-service signup/plans.
 - Further hardening: a service token + signed **acts-as** assertion (the BFF authenticates with its own identity
   and asserts the user) so the user's Keycloak token never traverses the internal wire at all.

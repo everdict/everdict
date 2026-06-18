@@ -49,6 +49,7 @@ function server(
     requireAuth?: boolean;
     internalToken?: string;
     authenticator?: Authenticator;
+    authorizationServers?: string[];
   } = {},
 ) {
   const keyStore = new InMemoryTenantKeyStore();
@@ -65,6 +66,7 @@ function server(
     keyStore,
     internalToken: opts.internalToken,
     requireAuth: opts.requireAuth,
+    ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
   });
   return { app, keyStore };
 }
@@ -201,6 +203,44 @@ describe("API — internal key issuance", () => {
   it("healthz", async () => {
     const { app } = server();
     expect((await app.inject({ method: "GET", url: "/healthz" })).json()).toEqual({ ok: true });
+    await app.close();
+  });
+});
+
+describe("API — MCP OAuth (login like Linear)", () => {
+  it("미인증 POST /mcp → 401 + WWW-Authenticate(resource_metadata)", async () => {
+    const { app } = server();
+    const res = await app.inject({ method: "POST", url: "/mcp", payload: { jsonrpc: "2.0", id: 1, method: "ping" } });
+    expect(res.statusCode).toBe(401);
+    expect(res.headers["www-authenticate"]).toContain('resource_metadata="');
+    expect(res.headers["www-authenticate"]).toContain("/.well-known/oauth-protected-resource");
+    await app.close();
+  });
+
+  it("protected-resource 메타데이터가 Keycloak 을 인가서버로 가리킨다", async () => {
+    const { app } = server({ authorizationServers: ["http://kc/realms/assay"] });
+    const res = await app.inject({ method: "GET", url: "/.well-known/oauth-protected-resource" });
+    expect(res.statusCode).toBe(200);
+    const meta = res.json();
+    expect(meta.resource).toMatch(/\/mcp$/);
+    expect(meta.authorization_servers).toEqual(["http://kc/realms/assay"]);
+    expect(meta.bearer_methods_supported).toContain("header");
+    await app.close();
+  });
+
+  it("인증됐지만 세션 없는 GET /mcp → 400 (initialize 먼저)", async () => {
+    const { app, keyStore } = server();
+    const key = await issueKey(keyStore, "acme");
+    const res = await app.inject({ method: "GET", url: "/mcp", headers: { authorization: `Bearer ${key}` } });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("미인증 GET /mcp → 401 챌린지", async () => {
+    const { app } = server();
+    const res = await app.inject({ method: "GET", url: "/mcp" });
+    expect(res.statusCode).toBe(401);
+    expect(res.headers["www-authenticate"]).toContain("resource_metadata");
     await app.close();
   });
 });

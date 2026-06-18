@@ -48,6 +48,8 @@ async function main(): Promise<void> {
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
     requireAuth: process.env.ASSAY_REQUIRE_AUTH === "1",
+    // MCP OAuth: Keycloak 을 인가서버로 광고(클라이언트가 로그인 시작). 미설정이면 API 키만.
+    ...(process.env.KEYCLOAK_ISSUER ? { authorizationServers: [process.env.KEYCLOAK_ISSUER] } : {}),
   });
 
   await app.listen({ port, host: "0.0.0.0" });

@@ -1,10 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
 import { AppError, EvalCaseSchema, HarnessSpecSchema } from "@assay/core";
 import { type TenantKeyStore, issueKey } from "@assay/db";
 import type { HarnessRegistry } from "@assay/registry";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import { buildMcpServer } from "./mcp.js";
 import type { RunService } from "./run-service.js";
 
 export const SubmitBodySchema = z.object({
@@ -21,6 +24,7 @@ export interface ServerDeps {
   internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
   requireAuth?: boolean; // true 면 인증 필수(dev 폴백 금지)
   devTenantHeader?: string; // 미인증 dev 폴백 헤더 (기본 x-assay-tenant)
+  authorizationServers?: string[]; // MCP OAuth: protected-resource 메타데이터의 인가서버(Keycloak issuer)
 }
 
 // 인증된 Principal 해석: Bearer(JWT 또는 ak_) → Authenticator. 미인증 dev 는 헤더 워크스페이스 + admin.
@@ -52,6 +56,40 @@ function constantTimeEq(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
   return ab.length === bb.length && timingSafeEqual(ab, bb);
+}
+
+// MCP 전용 Principal 해석: 반드시 Bearer(JWT/ak_)만 — dev 헤더 폴백 없음(미인증이면 401+로그인 챌린지).
+async function resolveBearerPrincipal(req: FastifyRequest, deps: ServerDeps): Promise<Principal | undefined> {
+  const authz = req.headers.authorization;
+  if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer "))
+    return deps.authenticator.authenticate(authz.slice(7).trim());
+  return undefined;
+}
+
+function baseUrl(req: FastifyRequest): string {
+  const proto = (req.headers["x-forwarded-proto"] as string | undefined) ?? req.protocol;
+  return `${proto}://${req.headers.host}`;
+}
+
+// RFC 9728 — MCP 클라이언트가 OAuth 로그인(Linear MCP 처럼)을 시작하도록 인가서버를 가리킨다.
+function protectedResourceMetadata(req: FastifyRequest, deps: ServerDeps): Record<string, unknown> {
+  const base = baseUrl(req);
+  return {
+    resource: `${base}/mcp`,
+    authorization_servers: deps.authorizationServers ?? [],
+    bearer_methods_supported: ["header"],
+    scopes_supported: ["openid", "profile"],
+    resource_name: "Assay MCP",
+  };
+}
+
+// 미인증 → 401 + WWW-Authenticate(resource_metadata). 클라이언트는 이걸 보고 OAuth 디스커버리/로그인 시작.
+function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyReply {
+  const metaUrl = `${baseUrl(req)}/.well-known/oauth-protected-resource`;
+  return reply
+    .code(401)
+    .header("WWW-Authenticate", `Bearer resource_metadata="${metaUrl}"`)
+    .send({ code: "UNAUTHENTICATED", message: "MCP 는 OAuth 인증이 필요합니다(resource_metadata 참고)." });
 }
 
 // 컨트롤플레인 HTTP 표면. 인증은 컨트롤플레인이 소유(OIDC/JWT + API 키), workspace=tenant, authZ 강제.
@@ -165,6 +203,54 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const apiKey = await issueKey(deps.keyStore, body.data.workspace);
     return reply.code(201).send({ workspace: body.data.workspace, apiKey }); // 평문은 여기서 한 번만
   });
+
+  // --- MCP (에이전트용 표면, OAuth 보호) ---
+  // OAuth Protected Resource Metadata (RFC 9728) — 인증 불필요(디스커버리). path-suffix 변형도 동일.
+  const metaHandler = async (req: FastifyRequest, reply: FastifyReply) =>
+    reply.send(protectedResourceMetadata(req, deps));
+  app.get("/.well-known/oauth-protected-resource", metaHandler);
+  app.get("/.well-known/oauth-protected-resource/mcp", metaHandler);
+
+  // Streamable HTTP MCP 엔드포인트(stateful 세션). 모든 메서드는 유효한 Bearer 필요(없으면 401 로그인 챌린지).
+  // initialize 시 Principal 에 묶인 서버 + 세션 생성, 이후 요청은 mcp-session-id 로 그 세션에 라우팅.
+  const sessions = new Map<string, StreamableHTTPServerTransport>();
+  app.post("/mcp", async (req, reply) => {
+    const principal = await resolveBearerPrincipal(req, deps);
+    if (!principal) return mcpChallenge(req, reply);
+    const sid = req.headers["mcp-session-id"] as string | undefined;
+    let transport = sid ? sessions.get(sid) : undefined;
+    if (!transport) {
+      if (sid || !isInitializeRequest(req.body))
+        return reply
+          .code(400)
+          .send({ code: "BAD_REQUEST", message: "initialize 요청 또는 유효한 mcp-session-id 필요." });
+      transport = new StreamableHTTPServerTransport({
+        sessionIdGenerator: () => randomUUID(),
+        onsessioninitialized: (id) => {
+          sessions.set(id, transport as StreamableHTTPServerTransport);
+        },
+      });
+      transport.onclose = () => {
+        if (transport?.sessionId) sessions.delete(transport.sessionId);
+      };
+      await buildMcpServer({ service: deps.service, registry: deps.registry }, principal).connect(transport);
+    }
+    reply.hijack(); // 트랜스포트가 raw 응답을 직접 소유한다.
+    await transport.handleRequest(req.raw, reply.raw, req.body);
+  });
+
+  // GET(SSE 알림 스트림) / DELETE(세션 종료) — 기존 세션으로 라우팅.
+  const bySession = async (req: FastifyRequest, reply: FastifyReply) => {
+    const principal = await resolveBearerPrincipal(req, deps);
+    if (!principal) return mcpChallenge(req, reply);
+    const sid = req.headers["mcp-session-id"] as string | undefined;
+    const transport = sid ? sessions.get(sid) : undefined;
+    if (!transport) return reply.code(400).send({ code: "BAD_REQUEST", message: "알 수 없는 mcp-session-id." });
+    reply.hijack();
+    await transport.handleRequest(req.raw, reply.raw);
+  };
+  app.get("/mcp", bySession);
+  app.delete("/mcp", bySession);
 
   return app;
 }

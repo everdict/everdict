@@ -36,7 +36,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 | `@assay/registry` | harness version SSOT: `(id, version) → HarnessSpec`, immutable versions, file/GitOps loader + Postgres (`PgHarnessRegistry`). |
 | `@assay/auth` | control-plane auth core: OIDC (Keycloak) + API keys → `Principal{workspace,roles}` + role-based authZ. |
 | `apps/cli` | dev control plane: `assay run`, `assay worker`, `assay suite`. |
-| `apps/api` | multi-tenant control-plane HTTP API (Fastify): owns auth (OIDC + API keys, role-gated, `/me`), async `POST /runs` + poll/webhook + result store. |
+| `apps/api` | multi-tenant control-plane HTTP API (Fastify): owns auth (OIDC + API keys, role-gated, `/me`), async `POST /runs` + poll/webhook + result store, agent-facing **MCP server** (`/mcp`, OAuth via Keycloak + API keys). |
 | `apps/web` | SaaS web (Next.js FSD, Tailwind/shadcn Toss-style): Keycloak login + per-tenant dashboard. |
 
 ## Two kinds of harness
@@ -76,7 +76,8 @@ per-tenant namespace isolation); the SaaS operational layer end-to-end on real N
 tenant-fair `Scheduler`, per-tenant trust-zone isolation + warm-pool separation, queue-depth autoscaling,
 per-tenant secrets + budgets, the async `apps/api` HTTP surface (`POST /runs` → poll/webhook) with
 **control-plane-owned auth** (OIDC via real Keycloak + API keys → `Principal{workspace,roles}`, role-based
-authZ), tenant-owned harnesses + workspace-scoped reads, and Postgres persistence (`PgRunStore` +
-`PgHarnessRegistry` + migrations). Still Phase-2 (need your infra/images): web token-forwarding rewiring, MCP
-toolization, real browser+extension & browser-use images, real OTel/MLflow span ingestion, ClickHouse
-analytics, the per-tenant dashboard.
+authZ), tenant-owned harnesses + workspace-scoped reads, Postgres persistence (`PgRunStore` +
+`PgHarnessRegistry` + migrations), the web as a **BFF token courier** (Keycloak login, token off the client),
+and the agent-facing **MCP server** (`/mcp`, OAuth via Keycloak "login like Linear" + API keys, role-gated
+tools — verified against real Keycloak). Still Phase-2 (need your infra/images): real browser+extension &
+browser-use images, real OTel/MLflow span ingestion, ClickHouse analytics, the per-tenant dashboard.

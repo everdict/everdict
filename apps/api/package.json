@@ -3,7 +3,9 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "bin": { "assay-api": "./dist/main.js" },
+  "bin": {
+    "assay-api": "./dist/main.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -16,6 +18,7 @@
     "@assay/core": "workspace:*",
     "@assay/db": "workspace:*",
     "@assay/registry": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "fastify": "^5.2.0",
     "zod": "^3.24.1"
   }
