@@ -56,7 +56,9 @@ describe("parseMlflowTrace (MLflow 3.x OTLP AnyValue)", () => {
 
 describe("MlflowTraceSource.fetch", () => {
   it("실제 응답 모양 → llm_call(model) + tool_call(bash) 로 정규화", async () => {
-    const fetchImpl = vi.fn(() => Promise.resolve(new Response(JSON.stringify(REAL_TRACE), { status: 200 })));
+    const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
+      Promise.resolve(new Response(JSON.stringify(REAL_TRACE), { status: 200 })),
+    );
     const src = new MlflowTraceSource({ endpoint: "http://mlflow:5000", fetchImpl: fetchImpl as typeof fetch });
     const ev = await src.fetch("tr-abc");
     expect(ev.find((e) => e.kind === "llm_call")).toMatchObject({ model: "gpt-5.4-mini" });
