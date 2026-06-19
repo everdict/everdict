@@ -61,11 +61,17 @@ image/install versions.
   the **docker bridge gateway `172.17.0.1`** for `OPENAI_API_BASE`, not the host LAN IP — from inside the alloc
   the LAN IP TCP-connects but the model-completion response doesn't return cleanly, hanging aider until timeout;
   the gateway path works in ~10s.
-- **aider on K8s (kind)** (`scripts/live/aider-k8s.mjs`, `K8sBackend({hostNetwork})`): the K8s path is verified for
-  everything except the local model hop — the Job dispatches, the agent runs the command harness, aider is
-  pre-baked and gets the correct `OPENAI_API_BASE`/key, and the model is reachable from the pod (plain `urllib`,
-  small and 12 KB bodies, <1 s). **Open blocker (local-infra, not Assay):** aider's **litellm/httpx** call hangs
-  from a kind pod to the host's **host-network** LiteLLM, while `urllib` to the same address works — an
-  httpx-in-kind-netns quirk. **Production answer:** run LiteLLM as an **in-cluster Service** so eval pods reach it
-  on the normal pod network (httpx works there); then aider-on-K8s matches the Local/Nomad result. The real
-  aider+model eval is PASS-verified on **Local + Nomad**.
+- **aider on K8s (kind)** (`scripts/live/aider-k8s.mjs`, `K8sBackend({hostNetwork})`): **PASS** — real aider fixes
+  the seeded bug using **gpt-5.4-mini** (workclaw LiteLLM) inside a real **K8s Job** → `tests-pass` in ~13 s.
+  **Nomad↔K8s real-agent parity complete** (Local + Nomad + K8s all green). Two things were needed:
+  - **Networking:** a kind pod can't reach the host's host-network LiteLLM normally, so the eval pod uses
+    **`hostNetwork: true`** (`K8sBackend.hostNetwork`) and the node is joined to the docker default bridge
+    (`docker network connect bridge assay-control-plane`) → reaches `172.17.0.1:4000`. (Normal-pod paths —
+    direct, or Service+manual-Endpoints — can't reach the host at all in kind.)
+  - **Model name (the real root cause of the earlier "hang"):** this litellm version routes any model whose name
+    contains **`chatgpt/`** to its native **ChatGPT-OAuth device-code** provider, which blocks forever waiting
+    for an interactive login in a non-interactive pod. (SLICE-25's "httpx hangs" was a misdiagnosis — raw `httpx`
+    POSTs fine; only litellm's OAuth path stalls.) Fix: give aider a **clean alias** (`gpt-5.4-mini`, no
+    `chatgpt/` prefix) registered on the LiteLLM proxy → litellm uses the plain OpenAI-compatible path. Use
+    `--model openai/gpt-5.4-mini`. **Production note:** in a real cluster, run LiteLLM as an **in-cluster
+    Service** (normal pod network) and expose models under non-`chatgpt/` names.

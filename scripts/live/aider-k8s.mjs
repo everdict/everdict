@@ -2,16 +2,18 @@
 // 채점한다 — 실행은 **실제 K8s Job(파드)** 안에서. K8sBackend 가 assay-agent 이미지를 Job 으로 띄우고,
 // agent 가 선언형 command 하니스(코드 0)를 해석한다: (aider 사전설치) → aider 실행 → tests-pass.
 //
-// 준비: kind 클러스터 `assay` + assay-agent:local 이미지(python+aider) 를 kind 노드에 로드
-//   docker build -f packages/agent/Dockerfile -t assay-agent:local . && kind load docker-image assay-agent:local --name assay
-// 사용: CONTEXT=kind-assay OPENAI_API_KEY=<litellm key> node scripts/live/aider-k8s.mjs
+// ✅ 검증됨(PASS): 실제 K8s Job 안에서 aider(gpt-5.4-mini) 가 시드 버그 수정 + tests-pass 통과. Nomad↔K8s 실 에이전트 패리티.
 //
-// ⚠️ 상태(정직): K8sBackend 디스패치/하니스/aider 설정/모델 도달성(파드에서 urllib)은 모두 검증됨.
-// 그러나 이 로컬 kind 에서는 aider 의 litellm/httpx 호출이 hostNetwork 파드 → 호스트(host-network) LiteLLM
-// 경로에서 멈춘다(같은 주소로 urllib 은 됨 = httpx/kind-netns 환경 quirk; Assay/모델 문제 아님).
-// 운영 정석: LiteLLM 을 in-cluster Service 로 띄워 일반 파드 네트워크로 접근(그러면 httpx 정상).
-// aider+모델 실평가는 Local + Nomad 에서 PASS 검증됨(scripts/live/aider-litellm-live.mjs, aider-nomad.mjs).
-// (위 hostNetwork 경로를 쓰려면: docker network connect bridge assay-control-plane 로 노드를 기본 브리지에 연결.)
+// 준비:
+//   1) kind 클러스터 `assay` + assay-agent:local(python+aider) 를 노드에 로드:
+//      docker build -f packages/agent/Dockerfile -t assay-agent:local . && kind load docker-image assay-agent:local --name assay
+//   2) hostNetwork 파드가 호스트 LiteLLM(:4000)에 닿도록 노드를 기본 도커 브리지에 연결:
+//      docker network connect bridge assay-control-plane   (→ 172.17.0.1 게이트웨이로 도달)
+//   3) **클린 모델 별칭**: LiteLLM 에 `chatgpt/` 접두사 없는 이름(gpt-5.4-mini)을 등록.
+//      (이유: 이 litellm 버전은 모델명에 `chatgpt/` 가 있으면 자체 ChatGPT-OAuth 디바이스코드 로그인으로 가로채
+//       비대화형 파드에서 무한 대기 → "hang"의 진짜 원인. 별칭으로 우회. SLICE 25 의 "httpx hang" 진단은 오진이었음 —
+//       raw httpx 는 정상; litellm 이 OAuth 로 빠진 것.)
+// 사용: CONTEXT=kind-assay OPENAI_API_KEY=<litellm key> ASSAY_MODEL=gpt-5.4-mini node scripts/live/aider-k8s.mjs
 import process from "node:process";
 import { K8sBackend } from "../../packages/backends/dist/index.js";
 
@@ -21,7 +23,8 @@ const NS = process.env.NS ?? "assay-ci";
 const KEY = process.env.OPENAI_API_KEY;
 const HOST = process.env.LITELLM_HOST ?? "172.17.0.1"; // hostNetwork 파드 → 기본 브리지 게이트웨이 = 호스트
 const BASE = process.env.OPENAI_API_BASE ?? `http://${HOST}:4000`;
-const MODEL = process.env.ASSAY_MODEL ?? "chatgpt/gpt-5.4-mini";
+// 클린 별칭(prefix 없음) — litellm 의 chatgpt-OAuth 가로채기 회피.
+const MODEL = process.env.ASSAY_MODEL ?? "gpt-5.4-mini";
 if (!KEY) {
   console.error("✗ OPENAI_API_KEY (LiteLLM key) 가 필요합니다.");
   process.exit(1);
