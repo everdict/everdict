@@ -242,8 +242,20 @@ The cluster persists across runs (`kind get clusters`); `kind delete cluster --n
 - **Phase 2 — live `NomadTopologyRuntime` AND `K8sTopologyRuntime`: DONE** (real apply + endpoint discovery +
   per-case CDP browser + drive + MLflow pull + grade + teardown on **both** Nomad and K8s/kind; see above —
   Nomad↔K8s parity through the same `ServiceTopologyBackend`). **Real MLflow AND OTel/Jaeger span ingestion: DONE**
-  (live vs MLflow 3.11 + Jaeger 1.62 — see Trace section). **Still pending:** the real browser+extension (headful +
-  xvfb + `--load-extension`) and the real browser-use images, the harness images + extension registry.
+  (live vs MLflow 3.11 + Jaeger 1.62 — see Trace section). **Real browser-use library: integrated** (see below).
+  **Still pending:** the real browser+extension (headful + xvfb + `--load-extension`), the harness images +
+  extension registry, and a fast-enough LLM endpoint to let browser-use complete its reasoning loop.
+
+### Real browser-use library — integrated (`scripts/live/browser-use-agent.py`)
+The actual OSS **browser-use 0.13.1** (autonomous multi-step browser agent) is wired to Assay's infra: it connects
+to our per-case **CDP browser** (`chromedp/headless-shell`, `BrowserSession(cdp_url=…)`) and uses our model
+(`gpt-5.4-mini` via LiteLLM, OpenAI-compatible, `ChatOpenAI(base_url, api_key)`), DOM-only (`use_vision=False`).
+**Verified live:** the agent parses the task, drives the real browser, and **autonomously navigates to
+`https://example.com`** via CDP (browser-driving path works). **Not completed:** the reasoning loop — each LLM call
+times out (>200s) because the dev LiteLLM/`gpt-5.4-mini` endpoint (a ChatGPT-subscription model) is too slow for
+browser-use's prompts (even on a trivial page). This is an LLM-endpoint throughput limit, **not** an integration
+flaw; a faster model endpoint completes the loop, after which the run's trace (OTel → Jaeger / MLflow) is ingested
++ graded by the now-live trace pipeline.
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we
