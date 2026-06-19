@@ -1,6 +1,6 @@
 import { createHmac } from "node:crypto";
 import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
-import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
+import { STORE_DEFS, dependencyConnEnv, dependencyStores } from "./dependencies.js";
 
 // 공유 스토어의 테넌트 격리 모델.
 //   pool     = 공유 PG/Redis 1대 + 테넌트별 논리격리(전용 DATABASE+role / Redis ACL user+key-prefix) + scoped creds.
@@ -20,6 +20,9 @@ export function resolveStoreIsolation(zone?: TrustZone): StoreIsolation {
 export interface StoreBindingOptions {
   poolNamespace?: string; // 공유 스토어가 사는 네임스페이스 (기본 "assay-shared")
   storeSecret?: string; // 테넌트별 비밀번호 mint 시드(프로덕션: KEK/Vault). 동일 시드→idempotent.
+  // 스토어 접속 엔드포인트("host:port") 해석 — orchestrator 별로 다름:
+  //   K8s = 안정적 Service DNS(빌드타임 확정, 기본값), Nomad = 런타임에 발견한 alloc host:port(주입).
+  storeEndpoint?: (store: string) => string;
 }
 
 const DEFAULT_POOL_NS = "assay-shared";
@@ -87,14 +90,17 @@ export function planTenantStores(
   const slug = sanitizeIdent(zoneId);
   const serviceEnv: Record<string, string> = {};
   const tenants: TenantStorePlan[] = [];
+  // 기본 엔드포인트 = K8s Service DNS:port. Nomad 는 opts.storeEndpoint 로 발견한 host:port 주입.
+  const endpointFor = (store: string): string =>
+    opts.storeEndpoint?.(store) ?? `${sharedStoreHost(store, poolNs)}:${STORE_DEFS[store]?.port ?? 0}`;
 
   for (const { store } of dependencyStores(spec)) {
     const pw = mintPassword(secret, zoneId, store);
     if (store === "postgres") {
       const database = `tenant_${slug}`;
       const role = `r_${slug}`;
-      const host = sharedStoreHost("postgres", poolNs);
-      const env = { DATABASE_URL: `postgresql://${role}:${pw}@${host}:5432/${database}` };
+      const endpoint = endpointFor("postgres");
+      const env = { DATABASE_URL: `postgresql://${role}:${pw}@${endpoint}/${database}` };
       Object.assign(serviceEnv, env);
       tenants.push({
         store,
@@ -117,11 +123,11 @@ export function planTenantStores(
     } else if (store === "redis") {
       const aclUser = slug;
       const keyPrefix = `t:${slug}:`;
-      const host = sharedStoreHost("redis", poolNs);
+      const endpoint = endpointFor("redis");
       // 접속 URL 은 ACL user 로, 키는 prefix 네임스페이스(케이스별 isolateBy 가 그 아래 중첩).
       const env = {
-        REDIS_URL: `redis://${aclUser}:${pw}@${host}:6379`,
-        REDIS_URI: `redis://${aclUser}:${pw}@${host}:6379`,
+        REDIS_URL: `redis://${aclUser}:${pw}@${endpoint}`,
+        REDIS_URI: `redis://${aclUser}:${pw}@${endpoint}`,
         REDIS_KEY_PREFIX: keyPrefix,
       };
       Object.assign(serviceEnv, env);

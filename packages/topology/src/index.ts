@@ -21,6 +21,8 @@ export {
 export {
   buildNomadTopologyJob,
   buildDependencyGroups,
+  buildSharedStoreJob,
+  SHARED_STORE_JOB_ID,
   buildBrowserJob,
   topologyJobId,
   browserJobId,
@@ -36,6 +38,7 @@ export {
   NomadTopologyRuntime,
   type NomadTopologyRuntimeOptions,
   type NomadHttp,
+  type NomadExec,
 } from "./nomad-runtime.js";
 export {
   buildK8sManifests,

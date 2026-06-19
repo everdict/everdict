@@ -72,6 +72,14 @@ describe("planTenantStores — pool", () => {
     );
   });
 
+  it("storeEndpoint 주입 시 그 host:port 로 접속 URL 생성(Nomad 런타임 발견 host:port)", () => {
+    const np = planTenantStores(SPEC, zone({ storeIsolation: "pool" }), {
+      storeEndpoint: (store) => (store === "postgres" ? "10.0.0.7:35432" : "10.0.0.7:36379"),
+    });
+    expect(np.serviceEnv.DATABASE_URL).toContain("@10.0.0.7:35432/tenant_acme"); // K8s DNS 대신 주입 host:port
+    expect(np.serviceEnv.REDIS_URL).toContain("@10.0.0.7:36379");
+  });
+
   it("비밀번호는 시드 결정적(idempotent), 테넌트마다 다른 DB(테넌트 경계)", () => {
     const again = planTenantStores(SPEC, zone({ storeIsolation: "pool" }));
     expect(again.serviceEnv.DATABASE_URL).toBe(plan.serviceEnv.DATABASE_URL); // 동일 시드 → 동일

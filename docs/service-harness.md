@@ -85,6 +85,16 @@ i.e. even hostile tenant code holding its own creds cannot reach another tenant'
 enforce the boundary). The shared store deploys once across both tenants. (NetworkPolicy denying cross-tenant
 store reach is a complementary hardening layer, not yet wired; the proof here is the PG-auth boundary.)
 
+**Orchestrator-agnostic (K8s + Nomad parity).** `planTenantStores` is orchestrator-neutral — the only difference
+is the store endpoint: K8s uses a stable **Service DNS** (build-time), Nomad has no DNS without Consul so the
+runtime **discovers the alloc `host:port`** and injects it (`opts.storeEndpoint`). `NomadTopologyRuntime` mirrors
+the K8s pool path: deploy a shared-store **Nomad service job** (`assay-shared-stores`, deploy-once) → discover
+`host:port` via `resolvePort` → mint per-tenant DB/role/ACL via **`nomad alloc exec`** (the kubectl-exec analog) →
+inject scoped creds into the topology job's service env. Verified live on `nomad agent -dev`
+(`scripts/live/pool-isolation-nomad.mjs`): same result — one shared PG, `acme` creds → `tenant_globex` = **DENIED**,
+own DB = OK. So pool multi-tenant store isolation holds identically on **both** orchestrators. (Nomad silo
+service→store endpoint wiring follows the same discover-then-inject pattern and is the remaining follow-up.)
+
 ## Network isolation — NetworkPolicy (`TrustZone.network`)
 Per-tenant DB credentials (pool) stop a tenant from *reading* another tenant's data, but a hostile harness pod
 could still reach other tenants' **pods** or scan the shared store at the network layer. `TrustZone.network`
@@ -111,6 +121,12 @@ unit-tested for correctness and verified live on a dedicated **Calico** kind clu
 = reachable; (B) `acme` (managed) → shared PG = reachable, a `rogue` non-managed namespace → shared PG =
 **BLOCKED**. So with a policy-CNI the tenant network boundary holds end-to-end; on a non-enforcing CNI the
 policies are applied but inert (same honesty as runsc/gVisor not being installed on kind).
+
+**Nomad** has no NetworkPolicy equivalent — network isolation there is **Consul Connect** (sidecar proxies +
+deny-by-default intentions) or a CNI, which requires Connect-enabling the service jobs. That's the documented
+follow-up; today the Nomad tenant boundary is the per-tenant DB/role/creds (pool, verified above) plus the Nomad
+namespace as a logical boundary. The store-level isolation is fully at parity on both orchestrators; the
+network-level enforcement is K8s-only for now.
 
 ## Trace (`@assay/trace`)
 The harness emits a trace to OTel/MLflow; Assay **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →

@@ -71,6 +71,26 @@ export function buildDependencyGroups(spec: ServiceHarnessSpec, opts: NomadTopol
   });
 }
 
+// pool 공유 스토어 잡 — 클러스터에 1개(테넌트 무관). 그룹명 = assay-shared-<store>, dynamic port "store".
+// 런타임이 이 잡을 deploy-once 하고 host:port 를 발견 → 테넌트별 scoped creds 의 엔드포인트로 쓴다.
+export const SHARED_STORE_JOB_ID = "assay-shared-stores";
+export function buildSharedStoreJob(stores: string[], opts: NomadTopologyOptions = {}): NomadTopologyJobSpec {
+  const spec = {
+    id: "assay-shared",
+    dependencies: [...new Set(stores)].map((store) => ({ store, role: "shared", isolateBy: "schema" })),
+    services: [],
+  } as unknown as ServiceHarnessSpec;
+  return {
+    Job: {
+      ID: SHARED_STORE_JOB_ID,
+      Type: "service",
+      Namespace: opts.namespace,
+      Datacenters: opts.datacenters ?? ["dc1"],
+      TaskGroups: buildDependencyGroups(spec, opts),
+    },
+  };
+}
+
 export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopologyOptions = {}): NomadTopologyJobSpec {
   const serviceGroups = spec.services.map((svc) => {
     const config: NomadTopoTask["Config"] = opts.runtime

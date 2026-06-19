@@ -1,17 +1,67 @@
+import { spawn } from "node:child_process";
 import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, UpstreamError } from "@assay/core";
+import { STORE_DEFS, dependencyStores } from "./dependencies.js";
 import {
   type AllocLike,
+  SHARED_STORE_JOB_ID,
   browserJobId,
   buildBrowserJob,
   buildNomadTopologyJob,
+  buildSharedStoreJob,
   resolvePort,
   topologyJobId,
 } from "./nomad-topology.js";
+import { type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
 import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 // Nomad HTTP 추상화 (테스트에서 모킹 가능; @assay/backends 의 NomadHttp 와 동일 형태).
 export interface NomadHttp {
   request(method: string, path: string, body?: unknown): Promise<{ status: number; text: string }>;
+}
+
+// alloc 안에서 명령 실행(공유 스토어 DDL/ACL 용). 기본 impl 은 `nomad alloc exec` CLI 로 셸아웃(K8s 의 kubectl exec 대응).
+export interface NomadExec {
+  exec(
+    allocId: string,
+    task: string,
+    command: string[],
+    opts?: { namespace?: string; stdin?: string },
+  ): Promise<string>;
+}
+
+function nomadCliExec(addr: string, bin = "nomad"): NomadExec {
+  return {
+    exec(allocId, task, command, opts) {
+      return new Promise<string>((resolve, reject) => {
+        const args = [
+          "alloc",
+          "exec",
+          ...(opts?.namespace ? ["-namespace", opts.namespace] : []),
+          "-task",
+          task,
+          allocId,
+          ...command,
+        ];
+        const proc = spawn(bin, args, { stdio: ["pipe", "pipe", "pipe"], env: { ...process.env, NOMAD_ADDR: addr } });
+        let out = "";
+        let err = "";
+        proc.stdout.on("data", (d) => {
+          out += d.toString();
+        });
+        proc.stderr.on("data", (d) => {
+          err += d.toString();
+        });
+        proc.on("error", reject);
+        proc.on("close", (code) =>
+          code === 0
+            ? resolve(out)
+            : reject(new Error(`nomad alloc exec ${command[0]} failed (${code}): ${err || out}`)),
+        );
+        if (opts?.stdin !== undefined) proc.stdin.write(opts.stdin);
+        proc.stdin.end();
+      });
+    },
+  };
 }
 
 function fetchNomadHttp(addr: string): NomadHttp {
@@ -31,10 +81,13 @@ function fetchNomadHttp(addr: string): NomadHttp {
 export interface NomadTopologyRuntimeOptions {
   addr: string; // Nomad HTTP endpoint
   http?: NomadHttp;
+  exec?: NomadExec; // alloc exec (pool DDL/ACL); 기본 = nomad CLI
   datacenters?: string[];
   runtime?: string; // docker 격리 런타임 (예: "runsc" = gVisor)
   namespace?: string;
   storeEnv?: Record<string, string>; // 공유 스토어 엔드포인트 주입 (postgres/redis/minio)
+  poolNamespace?: string; // pool 공유 스토어 Nomad 네임스페이스(미설정=default)
+  storeSecret?: string; // pool 테넌트 비번 mint 시드(프로덕션: KEK/Vault)
   browserImage?: string;
   pollIntervalMs?: number;
   maxPolls?: number;
@@ -46,10 +99,14 @@ export interface NomadTopologyRuntimeOptions {
 export class NomadTopologyRuntime implements TopologyRuntime {
   readonly id = "nomad";
   private readonly http: NomadHttp;
+  private readonly execImpl: NomadExec;
   private readonly warm = new Map<string, TopologyHandle>(); // key: id@version
+  // pool 공유 스토어: 클러스터 1회 배포 → host:port + allocId 발견(테넌트 scoped creds 엔드포인트로 사용).
+  private readonly sharedStores = new Map<string, { hostPort: string; allocId: string; task: string }>();
 
   constructor(private readonly opts: NomadTopologyRuntimeOptions) {
     this.http = opts.http ?? fetchNomadHttp(opts.addr);
+    this.execImpl = opts.exec ?? nomadCliExec(opts.addr);
   }
 
   async ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle> {
@@ -58,14 +115,21 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     const cached = this.warm.get(key);
     if (cached) return cached; // warm: (버전,존)당 한 번만 배포
 
+    const ns = zone?.namespace ?? this.opts.namespace;
+    // pool: 공유 스토어(클러스터 1회) → 테넌트별 DB/role/ACL mint(alloc exec) → scoped creds 를 서비스 env 로.
+    // (Nomad 는 Consul 없이 DNS 가 없어 K8s 와 달리 런타임에 host:port 를 발견해 주입한다.)
+    let storeEnv = this.opts.storeEnv;
+    if (zone && resolveStoreIsolation(zone) === "pool") {
+      storeEnv = { ...(await this.provisionPool(spec, zone)), ...this.opts.storeEnv };
+    }
+
     const job = buildNomadTopologyJob(spec, {
       datacenters: this.opts.datacenters,
       runtime: zone?.isolationRuntime ?? this.opts.runtime,
-      namespace: zone?.namespace ?? this.opts.namespace,
-      storeEnv: this.opts.storeEnv,
+      namespace: ns,
+      storeEnv,
       zoneId: zone?.id,
     });
-    const ns = zone?.namespace ?? this.opts.namespace;
     await this.register(job, ns);
 
     const jobId = topologyJobId(spec, zone?.id);
@@ -85,6 +149,75 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     const handle: TopologyHandle = { endpoints };
     this.warm.set(key, handle);
     return handle;
+  }
+
+  // pool: 공유 스토어를 한 번 띄우고(host:port 발견), 테넌트별 논리객체(전용 DB+role / Redis ACL)를 alloc exec 로 mint.
+  // 적대적 테넌트 코드여도 자기 DB creds 만 받으므로 교차 접근은 PG 인증/Redis ACL 에서 거부된다(K8s pool 과 동일 보장).
+  private async provisionPool(spec: ServiceHarnessSpec, zone: TrustZone): Promise<Record<string, string>> {
+    const ns = this.opts.poolNamespace;
+    const stores = dependencyStores(spec).map((s) => s.store);
+    await this.ensureSharedStores(stores);
+    const plan: StorePlan = planTenantStores(spec, zone, {
+      poolNamespace: this.opts.poolNamespace,
+      storeSecret: this.opts.storeSecret,
+      storeEndpoint: (store) => this.sharedStores.get(store)?.hostPort ?? "",
+    });
+    for (const t of plan.tenants) {
+      const rec = this.sharedStores.get(t.store);
+      if (!rec) continue;
+      if (t.store === "postgres" && t.postgresSetup) {
+        await this.execImpl.exec(
+          rec.allocId,
+          rec.task,
+          ["psql", "-U", "assay", "-d", "assay", "-v", "ON_ERROR_STOP=1"],
+          {
+            namespace: ns,
+            stdin: t.postgresSetup,
+          },
+        );
+      } else if (t.store === "redis" && t.redisSetup) {
+        for (const cmd of t.redisSetup)
+          await this.execImpl.exec(rec.allocId, rec.task, ["redis-cli", ...cmd], { namespace: ns });
+      }
+    }
+    return plan.serviceEnv;
+  }
+
+  private async ensureSharedStores(stores: string[]): Promise<void> {
+    const ns = this.opts.poolNamespace;
+    const missing = [...new Set(stores)].filter((s) => STORE_DEFS[s] && !this.sharedStores.has(s));
+    if (missing.length === 0) return;
+    await this.register(buildSharedStoreJob(missing, { datacenters: this.opts.datacenters, namespace: ns }), ns);
+    for (const s of missing) {
+      const task = `assay-shared-${s}`;
+      const alloc = await this.waitForGroupRunning(SHARED_STORE_JOB_ID, task, ns);
+      const p = resolvePort(alloc, "store");
+      if (!p || !alloc.ID) {
+        throw new UpstreamError("UPSTREAM_ERROR", { store: s }, "공유 스토어 포트를 alloc 에서 찾지 못했습니다.");
+      }
+      const rec = { hostPort: `${p.hostIp}:${p.port}`, allocId: alloc.ID, task };
+      await this.waitStoreAccepting(s, rec);
+      this.sharedStores.set(s, rec);
+    }
+  }
+
+  // 스토어가 실제 연결을 받을 때까지 폴링(rollout running ≠ accepting; postgres initdb 등). DDL 전에 호출.
+  private async waitStoreAccepting(store: string, rec: { allocId: string; task: string }): Promise<void> {
+    const probe =
+      store === "postgres" ? ["pg_isready", "-U", "assay"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
+    if (!probe) return;
+    const interval = this.opts.pollIntervalMs ?? 2000;
+    const steps = this.opts.maxPolls ?? 60;
+    for (let i = 0; i < steps; i++) {
+      try {
+        await this.execImpl.exec(rec.allocId, rec.task, probe, { namespace: this.opts.poolNamespace });
+        return;
+      } catch {
+        // 아직 안 받음 → 재시도
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+    throw new UpstreamError("UPSTREAM_ERROR", { store }, "공유 스토어 준비 대기 시간초과");
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<BrowserEnvHandle> {

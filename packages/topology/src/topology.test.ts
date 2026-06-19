@@ -6,9 +6,11 @@ import { keysFor } from "./environment-manager.js";
 import { buildK8sManifests } from "./k8s-topology.js";
 import {
   type AllocLike,
+  SHARED_STORE_JOB_ID,
   browserJobId,
   buildBrowserJob,
   buildNomadTopologyJob,
+  buildSharedStoreJob,
   resolvePort,
   topologyJobId,
 } from "./nomad-topology.js";
@@ -161,6 +163,14 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
     const pg = job.Job.TaskGroups.find((g) => g.Name === "browser-use-langgraph-postgres");
     expect(pg?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "store", To: 5432 });
     expect(pg?.Tasks[0]?.Config.image).toBe("postgres:16-alpine");
+  });
+
+  it("Nomad pool: buildSharedStoreJob 은 공유 스토어 잡(클러스터 1개)을 렌더한다", () => {
+    const job = buildSharedStoreJob(["postgres", "redis"]);
+    expect(job.Job.ID).toBe(SHARED_STORE_JOB_ID);
+    expect(job.Job.TaskGroups.map((g) => g.Name).sort()).toEqual(["assay-shared-postgres", "assay-shared-redis"]);
+    const pg = job.Job.TaskGroups.find((g) => g.Name === "assay-shared-postgres");
+    expect(pg?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "store", To: 5432 });
   });
 });
 
