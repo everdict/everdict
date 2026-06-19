@@ -4,6 +4,7 @@ import type { SqlClient } from "./client.js";
 import { migrate, preflight } from "./migrate.js";
 import { PgRunStore } from "./pg-run-store.js";
 import { InMemoryRunStore, type RunRecord } from "./run-store.js";
+import { InMemoryWorkspaceSettingsStore, PgWorkspaceSettingsStore } from "./workspace-settings.js";
 
 // 쿼리를 기록하고 canned row 를 돌려주는 가짜 SqlClient.
 function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unknown[] }): {
@@ -83,6 +84,29 @@ describe("PgRunStore", () => {
     await new PgRunStore(client).list("acme");
     expect(calls[0]?.text).toMatch(/ORDER BY created_at DESC, id DESC/);
     expect(calls[0]?.params?.[0]).toBe("acme");
+  });
+});
+
+describe("WorkspaceSettingsStore", () => {
+  it("InMemory: get(미설정)→undefined; set 은 부분 병합 upsert", async () => {
+    const s = new InMemoryWorkspaceSettingsStore();
+    expect(await s.get("acme")).toBeUndefined();
+    expect(await s.set("acme", { meterUsage: true })).toEqual({ meterUsage: true });
+    expect(await s.set("acme", {})).toEqual({ meterUsage: true }); // 빈 패치는 기존 보존(병합)
+    expect((await s.get("acme"))?.meterUsage).toBe(true);
+    expect(await s.get("beta")).toBeUndefined(); // 워크스페이스 격리
+  });
+
+  it("Pg: set 은 jsonb 병합(||) upsert + RETURNING; get 은 settings 파싱", async () => {
+    const { client, calls } = fakeClient((text) =>
+      text.startsWith("INSERT")
+        ? { rows: [{ settings: { meterUsage: true } }] }
+        : { rows: [{ settings: { meterUsage: false } }] },
+    );
+    const store = new PgWorkspaceSettingsStore(client);
+    expect(await store.set("acme", { meterUsage: true })).toEqual({ meterUsage: true });
+    expect(calls[0]?.text).toMatch(/settings \|\| \$2::jsonb/); // 원자적 병합
+    expect(await store.get("acme")).toEqual({ meterUsage: false });
   });
 });
 

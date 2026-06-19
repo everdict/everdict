@@ -8,7 +8,7 @@ import {
   JudgeSpecSchema,
   RuntimeSpecSchema,
 } from "@assay/core";
-import { type SecretStore, type TenantKeyStore, issueKey } from "@assay/db";
+import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -16,7 +16,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from "zod";
 import { buildMcpServer } from "./mcp.js";
 import type { RunService } from "./run-service.js";
-import type { ScorecardService } from "./scorecard-service.js";
+import { IngestScorecardBodySchema, type ScorecardService } from "./scorecard-service.js";
 
 export const SubmitBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
@@ -36,6 +36,9 @@ export const RunScorecardBodySchema = z.object({
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
+// 워크스페이스 설정 패치(부분). 지금은 계측 on/off 만.
+export const WorkspaceSettingsBodySchema = z.object({ meterUsage: z.boolean().optional() });
+
 export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
@@ -44,6 +47,7 @@ export interface ServerDeps {
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (없으면 해당 라우트 비활성)
   runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 (없으면=ASSAY_SECRETS_KEY 미설정 → 해당 라우트 비활성)
+  settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
   keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
   internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
@@ -474,6 +478,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 트레이스 인제스트 — 외부에서 이미 수행한 트레이스(TraceEvent[])를 올려 scorecard 로(하니스 미실행). 경계에서 검증.
+  app.post("/scorecards/ingest", async (req, reply) => {
+    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = IngestScorecardBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.code(202).send(await deps.scorecardService.ingest({ tenant: principal.workspace, ...parsed.data }));
+    } catch (err) {
+      return sendError(reply, err); // 데이터셋 없으면 404
+    }
+  });
+
   app.get("/scorecards", async (req, reply) => {
     if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -558,6 +581,33 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       gate(principal, "secrets:write");
       await deps.secretStore.remove(principal.workspace, req.params.name);
       return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- workspace settings (계측 정책 등; admin 전용) ---
+  app.get("/workspace/settings", async (req, reply) => {
+    if (!deps.settingsStore) return reply.code(404).send({ code: "NOT_FOUND", message: "설정 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:read");
+      return reply.send((await deps.settingsStore.get(principal.workspace)) ?? {});
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.put("/workspace/settings", async (req, reply) => {
+    if (!deps.settingsStore) return reply.code(404).send({ code: "NOT_FOUND", message: "설정 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = WorkspaceSettingsBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(await deps.settingsStore.set(principal.workspace, body.data)); // 병합된 설정 반환
     } catch (err) {
       return sendError(reply, err);
     }

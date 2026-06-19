@@ -7,6 +7,7 @@ import {
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
+  InMemoryWorkspaceSettingsStore,
   aesGcmCipher,
   issueKey,
 } from "@assay/db";
@@ -116,6 +117,7 @@ function server(
     newId: () => `sc-${n++}`,
   });
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
+  const settingsStore = new InMemoryWorkspaceSettingsStore();
   const app = buildServer({
     service: svc,
     scorecardService,
@@ -124,13 +126,14 @@ function server(
     judgeRegistry,
     runtimeRegistry: new InMemoryRuntimeRegistry(),
     secretStore,
+    settingsStore,
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
     internalToken: opts.internalToken,
     requireAuth: opts.requireAuth,
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
   });
-  return { app, keyStore, datasetRegistry, secretStore };
+  return { app, keyStore, datasetRegistry, secretStore, settingsStore };
 }
 
 describe("API — dev fallback (no auth required)", () => {
@@ -432,7 +435,9 @@ async function pollScorecard(
 ): Promise<{
   status: string;
   summary?: Array<{ metric: string; count?: number; mean?: number; passRate?: number }>;
-  scorecard?: { results: Array<{ caseId?: string; scores: Array<{ metric: string; detail?: string }> }> };
+  scorecard?: {
+    results: Array<{ caseId?: string; scores: Array<{ metric: string; value?: number; detail?: string }> }>;
+  };
 }> {
   for (let i = 0; i < 50; i++) {
     const res = await app.inject({ method: "GET", url: `/scorecards/${id}`, headers });
@@ -578,6 +583,73 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
     expect(body.improvements).toEqual([]);
     await app.close();
   });
+
+  it("ingest: 업로드 트레이스로 scorecard(트레이스 그레이더 재도출 + judge), 하니스 미실행", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET }); // caseId c1
+    await app.inject({ method: "POST", url: "/judges", headers: h, payload: JUDGE });
+    const ingest = await app.inject({
+      method: "POST",
+      url: "/scorecards/ingest",
+      headers: h,
+      payload: {
+        dataset: { id: "smoke" },
+        harness: { id: "external-agent" },
+        traces: [
+          {
+            caseId: "c1",
+            trace: [
+              { t: 0, kind: "tool_call", id: "x", name: "bash", args: {} },
+              { t: 1, kind: "llm_call", model: "m", cost: { inputTokens: 5, outputTokens: 3, usd: 0.01 } },
+            ],
+          },
+        ],
+        judges: [{ id: "correctness" }],
+      },
+    });
+    expect(ingest.statusCode).toBe(202);
+    const settled = await pollScorecard(app, ingest.json().id, h);
+    expect(settled.status).toBe("succeeded");
+    const scores = settled.scorecard?.results?.[0]?.scores ?? [];
+    expect(scores.map((s) => s.metric)).toEqual(
+      expect.arrayContaining(["tool_calls", "usd", "span", "judge:correctness"]),
+    );
+    expect(scores.find((s) => s.metric === "usd")?.value).toBeCloseTo(0.01); // 트레이스에서 재도출
+    await app.close();
+  });
+
+  it("ingest: 없는 데이터셋 → 404; 빈 traces/잘못된 trace → 400(경계 검증)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const nf = await app.inject({
+      method: "POST",
+      url: "/scorecards/ingest",
+      headers: h,
+      payload: { dataset: { id: "nope" }, harness: { id: "x" }, traces: [{ caseId: "c1", trace: [] }] },
+    });
+    expect(nf.statusCode).toBe(404);
+    const empty = await app.inject({
+      method: "POST",
+      url: "/scorecards/ingest",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "x" }, traces: [] },
+    });
+    expect(empty.statusCode).toBe(400); // traces min(1)
+    const badTrace = await app.inject({
+      method: "POST",
+      url: "/scorecards/ingest",
+      headers: h,
+      payload: {
+        dataset: { id: "smoke" },
+        harness: { id: "x" },
+        traces: [{ caseId: "c1", trace: [{ t: 0, kind: "bogus" }] }],
+      },
+    });
+    expect(badTrace.statusCode).toBe(400); // TraceEventSchema 경계 검증
+    await app.close();
+  });
 });
 
 describe("API — secrets (workspace model/provider keys)", () => {
@@ -611,6 +683,39 @@ describe("API — secrets (workspace model/provider keys)", () => {
     expect((await app.inject({ method: "GET", url: "/secrets", headers: h })).statusCode).toBe(403);
     expect(
       (await app.inject({ method: "PUT", url: "/secrets/OPENAI_API_KEY", headers: h, payload: { value: "x" } }))
+        .statusCode,
+    ).toBe(403);
+    await app.close();
+  });
+});
+
+describe("API — workspace settings (계측 정책 등)", () => {
+  it("admin: 빈 설정 조회 → {}, set 후 병합 반환 + 워크스페이스 격리", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    expect((await app.inject({ method: "GET", url: "/workspace/settings", headers: acme })).json()).toEqual({});
+    const put = await app.inject({
+      method: "PUT",
+      url: "/workspace/settings",
+      headers: acme,
+      payload: { meterUsage: true },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toEqual({ meterUsage: true });
+    expect((await app.inject({ method: "GET", url: "/workspace/settings", headers: acme })).json()).toEqual({
+      meterUsage: true,
+    });
+    const beta = { authorization: `Bearer ${await issueKey(keyStore, "beta")}` };
+    expect((await app.inject({ method: "GET", url: "/workspace/settings", headers: beta })).json()).toEqual({}); // 격리
+    await app.close();
+  });
+
+  it("member 는 설정 변경/조회 불가 (403)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await app.inject({ method: "GET", url: "/workspace/settings", headers: h })).statusCode).toBe(403);
+    expect(
+      (await app.inject({ method: "PUT", url: "/workspace/settings", headers: h, payload: { meterUsage: true } }))
         .statusCode,
     ).toBe(403);
     await app.close();

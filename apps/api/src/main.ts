@@ -14,14 +14,17 @@ import {
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
+  InMemoryWorkspaceSettingsStore,
   PgRunStore,
   PgScorecardStore,
   PgSecretStore,
   PgTenantKeyStore,
+  PgWorkspaceSettingsStore,
   type RunStore,
   type ScorecardStore,
   type SecretStore,
   type TenantKeyStore,
+  type WorkspaceSettingsStore,
   cipherFromEnv,
   makePool,
   migrate,
@@ -58,8 +61,17 @@ async function main(): Promise<void> {
   const k8sContext = process.env.ASSAY_K8S_CONTEXT;
   const image = process.env.ASSAY_AGENT_IMAGE;
 
-  const { store, scorecardStore, keyStore, registry, datasetRegistry, judgeRegistry, runtimeRegistry, secretStore } =
-    await makePersistence();
+  const {
+    store,
+    scorecardStore,
+    keyStore,
+    registry,
+    datasetRegistry,
+    judgeRegistry,
+    runtimeRegistry,
+    settingsStore,
+    secretStore,
+  } = await makePersistence();
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
   await seedSharedRuntimes(runtimeRegistry);
@@ -94,14 +106,15 @@ async function main(): Promise<void> {
     secretsFor: runtimeSecretsFor,
   });
 
+  const envMeterPolicy = meterUsagePolicyFromEnv(); // 워크스페이스 DB 설정이 없을 때의 기본 정책
   const service = new RunService({
     dispatcher,
     store,
     budget,
     // 선언형 command 하니스: 레지스트리에서 spec 을 풀어 잡에 임베드(없으면 빌트인 폴백).
     resolveHarness: (tenant, id, version) => registry.get(tenant, id, version),
-    // 워크스페이스 단위 계측 정책(요청별 override 가 우선). 글로벌 ASSAY_METER_USAGE 또는 테넌트 화이트리스트.
-    meterUsageFor: meterUsagePolicyFromEnv(),
+    // 워크스페이스 단위 계측 정책(요청별 override 가 우선): DB 설정 스토어 우선, 미설정이면 env 정책 폴백.
+    meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
   });
   // judge 실행기: model(anthropic/openai)은 테넌트 시크릿 키로 실제 호출, harness 는 참조 에이전트를 디스패치해 판정.
   // 키/시크릿 없으면 skip(사유 명시). openai 베이스(LiteLLM 등)는 OPENAI_BASE_URL 시크릿 또는 env.
@@ -128,6 +141,7 @@ async function main(): Promise<void> {
     datasetRegistry,
     judgeRegistry,
     runtimeRegistry,
+    settingsStore,
     ...(secretStore ? { secretStore } : {}),
     authenticator: buildAuthenticator(keyStore),
     keyStore,
@@ -151,6 +165,7 @@ interface Persistence {
   datasetRegistry: DatasetRegistry;
   judgeRegistry: JudgeRegistry;
   runtimeRegistry: RuntimeRegistry;
+  settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
   secretStore?: SecretStore; // ASSAY_SECRETS_KEY 있을 때만(fail-closed: 키 없으면 시크릿 기능 비활성)
 }
 
@@ -168,6 +183,7 @@ async function makePersistence(): Promise<Persistence> {
       datasetRegistry: new InMemoryDatasetRegistry(),
       judgeRegistry: new InMemoryJudgeRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
+      settingsStore: new InMemoryWorkspaceSettingsStore(),
       ...(cipher ? { secretStore: new InMemorySecretStore(cipher) } : {}),
     };
   }
@@ -182,6 +198,7 @@ async function makePersistence(): Promise<Persistence> {
     datasetRegistry: new PgDatasetRegistry(client),
     judgeRegistry: new PgJudgeRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
+    settingsStore: new PgWorkspaceSettingsStore(client),
     ...(cipher ? { secretStore: new PgSecretStore(client, cipher) } : {}),
   };
 }

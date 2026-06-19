@@ -46,3 +46,10 @@ export {
   InMemorySecretStore,
   PgSecretStore,
 } from "./secret-store.js";
+export {
+  type WorkspaceSettings,
+  type WorkspaceSettingsStore,
+  WorkspaceSettingsSchema,
+  InMemoryWorkspaceSettingsStore,
+  PgWorkspaceSettingsStore,
+} from "./workspace-settings.js";

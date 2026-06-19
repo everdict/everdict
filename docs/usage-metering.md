@@ -29,9 +29,12 @@ the original architecture.) **Tokens always; `$` when the gateway prices the mod
 The proxy lives **in the agent's sandbox**, on `localhost` — so it works on every backend (Local/Nomad/K8s)
 without any cross-network reconfiguration (the agent→upstream path is the one that already works):
 1. **Control plane decides** whether to meter a run and sets **`AgentJob.meterUsage`** (authoritative).
-   Resolution in `RunService`: per-run override (`POST /runs` body `meterUsage`) → per-workspace policy
-   (`meterUsageFor(tenant)`) → `false`. `main.ts` builds the policy from env: **`ASSAY_METER_TENANTS`**
-   (comma list → only those workspaces) or **`ASSAY_METER_USAGE=1`** (all workspaces).
+   Resolution in `RunService` (async): per-run override (`POST /runs` body `meterUsage`) → per-workspace policy
+   (`meterUsageFor(tenant)`) → `false`. `main.ts` wires the policy as **durable per-workspace settings → env
+   fallback**: `(await settingsStore.get(tenant))?.meterUsage ?? envPolicy(tenant)`, where the
+   `WorkspaceSettingsStore` (`@assay/db`, InMemory/Pg, table `assay_workspace_settings`) is managed by admins via
+   **`PUT/GET /workspace/settings`** (`settings:write`/`settings:read`, admin-only), and `envPolicy` is the
+   default from **`ASSAY_METER_TENANTS`** (comma list) or **`ASSAY_METER_USAGE=1`** (all).
 2. `runAgentJob` uses `job.meterUsage` (falls back to the `ASSAY_METER_USAGE` env only for direct
    `LocalBackend.dispatch` with no control plane) → passes `meterUsage` to `makeHarness`.
 3. `CommandHarness.run` (only when `trace:none` + the model-base env var is present — avoids double-counting a
@@ -64,7 +67,6 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
   yet **tokens are metered**.
 
 ## Not yet (next)
-- A durable per-workspace settings store for the policy (today: env `ASSAY_METER_TENANTS` / `ASSAY_METER_USAGE`
-  + per-run override; MCP/web could expose the override too).
+- Web/MCP surface for `PUT /workspace/settings` (today: HTTP route + `can()` mirror; no web page yet).
 - Note: `$` capture is **live-ready** but reads `0` on workclaw's LiteLLM because its models are subscription
   (unpriced); it yields real `$` for any metered model the gateway prices.

@@ -15,6 +15,8 @@ export type WebAction =
   | 'runtimes:write'
   | 'secrets:read'
   | 'secrets:write'
+  | 'settings:read'
+  | 'settings:write'
 
 const PERMS: Record<string, WebAction[]> = {
   viewer: ['runs:read', 'harnesses:read', 'datasets:read', 'scorecards:read', 'judges:read', 'runtimes:read'],
@@ -45,6 +47,8 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:write', // 실행 인프라 정의 = admin
     'secrets:read', // 시크릿 관리 = admin
     'secrets:write',
+    'settings:read', // 워크스페이스 정책(계측 등) = admin
+    'settings:write',
   ],
 }
 

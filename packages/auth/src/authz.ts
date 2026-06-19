@@ -17,7 +17,9 @@ export type Action =
   | "runtimes:read"
   | "runtimes:write"
   | "secrets:read"
-  | "secrets:write";
+  | "secrets:write"
+  | "settings:read"
+  | "settings:write";
 
 export const ASSAY_ROLES = ["viewer", "member", "admin"] as const;
 export type AssayRole = (typeof ASSAY_ROLES)[number];
@@ -58,6 +60,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:write", // 실행 인프라 정의 = 실행/배치 결정 → admin 전용(harnesses:register 와 동일 이유)
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
     "secrets:write",
+    "settings:read", // 워크스페이스 정책(계측 등) = admin 전용 설정
+    "settings:write",
   ]),
 };
 

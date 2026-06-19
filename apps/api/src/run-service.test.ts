@@ -95,6 +95,26 @@ describe("RunService", () => {
     expect(seen).toEqual([true, false, false, true]);
   });
 
+  it("계측 정책은 async 가능(DB 설정 스토어) — await 해서 job 에 싣는다", async () => {
+    let seen: boolean | undefined;
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        seen = job.meterUsage;
+        return resultFor(job);
+      },
+    };
+    // DB 조회처럼 Promise<boolean> 반환
+    const svc = new RunService({
+      dispatcher,
+      store: new InMemoryRunStore(),
+      newId: ids,
+      meterUsageFor: async (t) => t === "acme",
+    });
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(seen).toBe(true);
+  });
+
   it("정책 없으면 기본 off (job.meterUsage=false)", async () => {
     let seen: boolean | undefined;
     const dispatcher: Dispatcher = {

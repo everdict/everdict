@@ -18,7 +18,8 @@ export interface RunServiceDeps {
   // 선언형 하니스 spec 을 레지스트리에서 풀어 잡에 임베드(없으면 빌트인 id 분기). 없는 하니스는 reject → undefined 폴백.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
   // 워크스페이스 단위 계측 정책(기본 off). 요청별 override(SubmitInput.meterUsage)가 이보다 우선.
-  meterUsageFor?: (tenant: string) => boolean;
+  // async 허용 — DB 기반 워크스페이스 설정 스토어를 그대로 끼울 수 있다.
+  meterUsageFor?: (tenant: string) => boolean | Promise<boolean>;
   newId?: () => string;
   now?: () => string;
   fetch?: typeof fetch; // 웹훅용 (테스트 주입)
@@ -69,8 +70,9 @@ export class RunService {
     const harnessSpec = this.deps.resolveHarness
       ? await this.deps.resolveHarness(input.tenant, input.harness.id, input.harness.version).catch(() => undefined)
       : undefined;
-    // 계측: 요청 override → 워크스페이스 정책 → off. 컨트롤플레인이 권위 — 잡에 실어 에이전트로 보낸다(글로벌 플래그 대체).
-    const meterUsage = input.meterUsage ?? this.deps.meterUsageFor?.(input.tenant) ?? false;
+    // 계측: 요청 override → 워크스페이스 정책(DB) → off. 컨트롤플레인이 권위 — 잡에 실어 에이전트로 보낸다.
+    const meterUsage =
+      input.meterUsage ?? (this.deps.meterUsageFor ? await this.deps.meterUsageFor(input.tenant) : false);
     const job: AgentJob = {
       evalCase: input.case,
       harness: input.harness,
