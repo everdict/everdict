@@ -31,6 +31,28 @@ describe("spansToTraceEvents", () => {
     expect(llm?.kind === "llm_call" && llm.cost?.usd).toBe(0.01);
     expect(events[0]?.t).toBe(0); // 첫 스팬 기준 상대시간
   });
+
+  it("MLflow 네이티브 속성(gen_ai.* 없음)도 llm_call 로 매핑한다 — MLflow 3.x autolog 트레이스", () => {
+    // 실 MLflow 3.11 이 LLM 스팬에 싣는 형태(parseMlflowTrace 가 kvlist→객체로 풀어줌).
+    const spans: Span[] = [
+      {
+        name: "chat gpt-5.4-mini",
+        startMs: 0,
+        endMs: 8,
+        attrs: {
+          "mlflow.llm.model": "gpt-5.4-mini",
+          "mlflow.chat.tokenUsage": { input_tokens: 42, output_tokens: 7, total_tokens: 49 },
+          "mlflow.llm.cost": { input_cost: 3.15e-5, output_cost: 3.15e-5, total_cost: 6.3e-5 },
+        },
+      },
+    ];
+    const e = spansToTraceEvents(spans)[0];
+    expect(e?.kind).toBe("llm_call");
+    expect(e?.kind === "llm_call" && e.model).toBe("gpt-5.4-mini");
+    expect(e?.kind === "llm_call" && e.cost?.inputTokens).toBe(42);
+    expect(e?.kind === "llm_call" && e.cost?.outputTokens).toBe(7);
+    expect(e?.kind === "llm_call" && e.cost?.usd).toBe(6.3e-5);
+  });
 });
 
 describe("parseOtlpSpans", () => {

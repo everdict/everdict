@@ -172,7 +172,18 @@ intentions), each verified at the decision/enforcement layer their platform expo
 
 ## Trace (`@assay/trace`)
 The harness emits a trace to OTel/MLflow; Assay **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →
-`spansToTraceEvents` → normalized `TraceEvent[]` (OTel GenAI semantic conventions).
+`spansToTraceEvents` → normalized `TraceEvent[]` (OTel GenAI semantic conventions). `spansToTraceEvents` reads OTel
+GenAI keys (`gen_ai.request.model`, `gen_ai.usage.input_tokens`/`output_tokens`/`cost`) **and** MLflow-native
+fallbacks (`mlflow.llm.model`, `mlflow.chat.tokenUsage`, `mlflow.llm.cost`) — so both OTel-instrumented and
+MLflow-autolog spans map to `llm_call`/`tool_call`.
+
+**Real MLflow span ingestion — live ✅.** Verified against a real **MLflow 3.11** backend (Basic auth) with
+`scripts/live/mlflow-trace-ingest.mjs` (+ `mlflow-emit-trace.py`): emit a browser-use-shaped trace (agent → LLM →
+tool spans) to MLflow → `MlflowTraceSource.fetch(trace_id)` pulls it via `GET /api/3.0/mlflow/traces/get?trace_id=`
+(returns `{trace:{spans}}`; MLflow normalizes gen_ai → `mlflow.chat.tokenUsage`/`mlflow.llm.model`) →
+`TraceEvent[]` = `llm_call(model gpt-5.4-mini, in 42/out 7 tokens, $)` + `tool_call(browser.navigate)` →
+`steps`/`cost` graders score the **real** trace. This closes the stand-in's empty-trace gap: the eval runtime now
+grades real agent trajectories pulled from a real trace backend.
 
 ## Grading (browser/service)
 Over `{trace, snapshot}` (no `ComputeHandle`): trace-based (`steps`/`cost`/`latency`), browser-outcome
@@ -222,9 +233,11 @@ The cluster persists across runs (`kind get clusters`); `kind delete cluster --n
   builders (Nomad + K8s), env-manager runId keying, orchestrator-agnostic `ServiceTopologyBackend` (mock runtime).
 - **Phase 2 — live `NomadTopologyRuntime` AND `K8sTopologyRuntime`: DONE** (real apply + endpoint discovery +
   per-case CDP browser + drive + MLflow pull + grade + teardown on **both** Nomad and K8s/kind; see above —
-  Nomad↔K8s parity through the same `ServiceTopologyBackend`). **Still pending:** the real browser+extension
-  (headful + xvfb + `--load-extension`) and the real browser-use images, real OTel/MLflow span ingestion (the
-  stand-in emits no GenAI spans → trace is empty), the harness images + extension registry.
+  Nomad↔K8s parity through the same `ServiceTopologyBackend`). **Real MLflow span ingestion: DONE** (live vs
+  MLflow 3.11 — see Trace section). **Still pending:** the real browser+extension (headful + xvfb +
+  `--load-extension`) and the real browser-use images, real **OTel/Jaeger** span ingestion (no Jaeger running yet;
+  the `OtelTraceSource` mapper is unit-tested + MLflow-native fallbacks live-validated), the harness images +
+  extension registry.
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we

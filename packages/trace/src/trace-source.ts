@@ -32,9 +32,13 @@ export function spansToTraceEvents(spans: Span[]): TraceEvent[] {
     if (!s) continue;
     const t = s.startMs - base;
     const a = s.attrs;
-    const model = str(a["gen_ai.request.model"]) ?? str(a["gen_ai.response.model"]);
-    const inTok = num(a["gen_ai.usage.input_tokens"]);
-    const outTok = num(a["gen_ai.usage.output_tokens"]);
+    // OTel GenAI conventions(주) + MLflow 3.x 네이티브(mlflow.chat.tokenUsage/mlflow.llm.model/.cost) 폴백 —
+    // 실 MLflow 3.11 autolog 트레이스는 gen_ai.* 없이도 mlflow.* 로 토큰/모델을 싣는다(라이브 검증).
+    const tu = (a["mlflow.chat.tokenUsage"] ?? {}) as Record<string, unknown>;
+    const llmCost = (a["mlflow.llm.cost"] ?? {}) as Record<string, unknown>;
+    const model = str(a["gen_ai.request.model"]) ?? str(a["gen_ai.response.model"]) ?? str(a["mlflow.llm.model"]);
+    const inTok = num(a["gen_ai.usage.input_tokens"]) ?? num(tu.input_tokens);
+    const outTok = num(a["gen_ai.usage.output_tokens"]) ?? num(tu.output_tokens);
     const toolName = str(a["tool.name"]) ?? str(a["gen_ai.tool.name"]);
 
     if (model !== undefined || inTok !== undefined || outTok !== undefined) {
@@ -42,7 +46,11 @@ export function spansToTraceEvents(spans: Span[]): TraceEvent[] {
         t,
         kind: "llm_call",
         model: model ?? "",
-        cost: { inputTokens: inTok ?? 0, outputTokens: outTok ?? 0, usd: num(a["gen_ai.usage.cost"]) ?? 0 },
+        cost: {
+          inputTokens: inTok ?? 0,
+          outputTokens: outTok ?? 0,
+          usd: num(a["gen_ai.usage.cost"]) ?? num(llmCost.total_cost) ?? 0,
+        },
         latencyMs: s.endMs - s.startMs,
       });
     } else if (toolName !== undefined) {
