@@ -56,6 +56,12 @@ Over `{trace, snapshot}` (no `ComputeHandle`): trace-based (`steps`/`cost`/`late
 task + DOM/screenshot, via an injected `Judge`). Cases pick graders via `EvalCase.graders` (resolved by
 `makeGraders`); judge graders are wired where a `Judge` is configured.
 
+**Trace-source failures don't kill the run.** The browser **snapshot** is the primary signal in a service
+topology; the trace is secondary. So `ServiceTopologyBackend.dispatch` wraps `traceSource.fetch` in a guard: a
+fetch failure (auth, transient down, harness emitted no spans) is recorded as a single `error` `TraceEvent`
+(visible, not silently lost) and grading proceeds over the snapshot. This is why the K8s/kind live e2e completes
+end-to-end even when the stand-in front-door emits no GenAI spans and MLflow rejects the pull.
+
 ## Live validation (Nomad)
 `scripts/live/service-topology-nomad.mjs` runs a full service-topology case on a real Nomad cluster:
 warm front-door deployed as a Nomad service job → endpoint discovered from the alloc → per-case headless

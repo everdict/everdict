@@ -6,6 +6,7 @@ import {
   InternalError,
   type Score,
   type ServiceHarnessSpec,
+  type TraceEvent,
   type TrustZone,
   assertHardenedIsolation,
 } from "@assay/core";
@@ -86,7 +87,16 @@ export class ServiceTopologyBackend implements Backend {
         browser_cdp_url: browser.cdpUrl,
       });
 
-      const trace = await this.opts.traceSource.fetch(runId);
+      // 트레이스 소스 장애(인증/일시 down/미배출)는 run 을 죽이지 않는다 — error 이벤트로 기록하고 스냅샷+채점은 진행.
+      // (서비스 토폴로지의 1차 신호는 브라우저 스냅샷; 트레이스는 보조. 침묵 손실 대신 가시화.)
+      let trace: TraceEvent[];
+      try {
+        trace = await this.opts.traceSource.fetch(runId);
+      } catch (err) {
+        trace = [
+          { t: 0, kind: "error", message: `trace fetch 실패: ${err instanceof Error ? err.message : String(err)}` },
+        ];
+      }
       const snapshot = await browser.snapshot();
 
       // 케이스가 그레이더를 지정하면 그것으로(dom-contains/url-matches 등), 아니면 trace 기반 기본값.

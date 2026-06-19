@@ -1,5 +1,5 @@
 import { perTenantTrustZones } from "@assay/backends";
-import type { AgentJob, BrowserSnapshot, ServiceHarnessSpec, TraceEvent, TrustZone } from "@assay/core";
+import type { AgentJob, BrowserSnapshot, Grader, ServiceHarnessSpec, TraceEvent, TrustZone } from "@assay/core";
 import type { TraceSource } from "@assay/trace";
 import { describe, expect, it } from "vitest";
 import { keysFor } from "./environment-manager.js";
@@ -197,6 +197,60 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.thread_id).toBe(keysFor("fixed").threadId);
     expect(recorded[0]?.browser_cdp_url).toBe("ws://browser/ctx");
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
+  });
+
+  it("트레이스 소스 장애는 run 을 죽이지 않는다 — error 이벤트로 기록하고 스냅샷+채점은 진행", async () => {
+    const browserSnap: BrowserSnapshot = { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return {
+          cdpUrl: "ws://b",
+          async snapshot() {
+            return browserSnap;
+          },
+          async dispose() {},
+        };
+      },
+    };
+    // 트레이스 소스가 던진다(인증/일시 down/미배출 모사).
+    const traceSource: TraceSource = {
+      async fetch() {
+        throw new Error("MLflow 401 Unauthorized");
+      },
+    };
+    // 스냅샷 기반 그레이더만 — 트레이스가 비어도 브라우저 결과로 채점 가능.
+    const urlGrader: Grader = {
+      id: "url-ok",
+      async grade(ctx) {
+        const u = ctx.snapshot?.kind === "browser" ? ctx.snapshot.url : "";
+        return { graderId: "url-ok", metric: "url", value: u ? 1 : 0, pass: u === "https://x", detail: u };
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource,
+      specFor: () => SPEC,
+      submit: async () => {},
+      graders: [urlGrader],
+      newRunId: () => "fixed",
+    });
+    const job: AgentJob = {
+      harness: { id: "browser-use-langgraph", version: "1.0.0" },
+      evalCase: { id: "c1", env: { kind: "browser" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    };
+
+    const result = await backend.dispatch(job);
+
+    // dispatch 가 throw 하지 않고 완료된다.
+    expect(result.scores.find((s) => s.graderId === "url-ok")?.pass).toBe(true);
+    // 트레이스는 침묵 손실 대신 error 이벤트로 가시화된다.
+    expect(result.trace).toHaveLength(1);
+    expect(result.trace[0]?.kind).toBe("error");
+    expect((result.trace[0] as { message?: string }).message).toContain("MLflow 401");
   });
 
   it("멀티테넌트: 테넌트마다 다른 trust-zone 으로 warm 토폴로지를 분리한다(공유 금지)", async () => {
