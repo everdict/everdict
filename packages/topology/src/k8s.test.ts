@@ -16,11 +16,13 @@ const SPEC: ServiceHarnessSpec = {
 };
 
 // 호출을 기록하는 가짜 kubectl; port-forward 는 고정 로컬 포트를 돌려준다.
-function fakeKubectl(): { kubectl: Kubectl; calls: string[] } {
+function fakeKubectl(): { kubectl: Kubectl; calls: string[]; applied: Array<Record<string, unknown>> } {
   const calls: string[] = [];
+  const applied: Array<Record<string, unknown>> = [];
   let port = 40000;
   const kubectl: Kubectl = {
     async apply(manifests) {
+      for (const m of manifests) applied.push(m as Record<string, unknown>);
       calls.push(`apply:${manifests.map((m) => `${(m as { kind: string }).kind}`).join(",")}`);
     },
     async ensureNamespace(ns) {
@@ -39,8 +41,16 @@ function fakeKubectl(): { kubectl: Kubectl; calls: string[] } {
     async deleteNamespace(ns) {
       calls.push(`delns:${ns}`);
     },
+    async podFor(selector, ns) {
+      calls.push(`podFor:${ns}/${selector}`);
+      return `${selector.replace(/^app=/, "")}-pod`;
+    },
+    async exec(pod, ns, command, stdin) {
+      calls.push(`exec:${ns}/${pod}:${command[0]}${stdin ? ":stdin" : ""}`);
+      return "";
+    },
   };
-  return { kubectl, calls };
+  return { kubectl, calls, applied };
 }
 
 const okFetch = (async () =>
@@ -99,6 +109,52 @@ describe("K8sTopologyRuntime", () => {
     await rt.ensureTopology(SPEC, ZONE("acme"));
     await rt.ensureTopology(SPEC, ZONE("acme")); // 두 번째는 캐시
     expect(calls.filter((c) => c === "ns:assay-acme")).toHaveLength(1);
+  });
+
+  const POOL_ZONE = (id: string): TrustZone => ({
+    id,
+    isolationRuntime: "runc",
+    namespace: `assay-${id}`,
+    network: "deny-cross-tenant",
+    trusted: true,
+    storeIsolation: "pool",
+  });
+  const SPEC_PG: ServiceHarnessSpec = {
+    ...SPEC,
+    dependencies: [{ store: "postgres", role: "checkpoints", isolateBy: "thread_id" }],
+  };
+
+  it("pool: 공유 스토어 1회 배포 + 테넌트 DB/role mint(psql exec) + 서비스에 scoped DATABASE_URL 주입", async () => {
+    const { kubectl, calls, applied } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
+    // 공유 스토어를 pool 네임스페이스에 배포 + rollout.
+    expect(calls).toContain("ns:assay-shared");
+    expect(calls).toContain("rollout:assay-shared/assay-shared-postgres");
+    // 어드민 psql 로 테넌트 DB/role mint(stdin 으로 DDL).
+    expect(calls.some((c) => c.startsWith("exec:assay-shared/") && c.includes("psql") && c.includes("stdin"))).toBe(
+      true,
+    );
+    // 서비스에 scoped DATABASE_URL(tenant_acme/r_acme, 공유 스토어 DNS) 주입.
+    const agent = applied.find(
+      (m) => m.kind === "Deployment" && (m.metadata as { name: string }).name === "bu-agent-server",
+    ) as { spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } } };
+    const env = Object.fromEntries(agent.spec.template.spec.containers[0]?.env.map((e) => [e.name, e.value]) ?? []);
+    expect(env.DATABASE_URL).toMatch(
+      /^postgresql:\/\/r_acme:.+@assay-shared-postgres\.assay-shared\.svc\.cluster\.local:5432\/tenant_acme$/,
+    );
+    // pool 은 전용 스토어를 zone ns 에 띄우지 않는다(공유만).
+    expect(applied.some((m) => (m.metadata as { name?: string })?.name === "bu-postgres")).toBe(false);
+  });
+
+  it("pool: 공유 스토어는 클러스터에 1회만 배포(여러 테넌트가 공유)", async () => {
+    const { kubectl, calls } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
+    await rt.ensureTopology(SPEC_PG, POOL_ZONE("globex"));
+    expect(calls.filter((c) => c === "rollout:assay-shared/assay-shared-postgres")).toHaveLength(1);
+    // 그래도 테넌트별 mint 는 각각 실행(2회).
+    expect(calls.filter((c) => c.startsWith("exec:assay-shared/") && c.includes("psql"))).toHaveLength(2);
   });
 
   it("per-case 브라우저 dispose 는 브라우저 리소스만 지운다(네임스페이스 유지)", async () => {

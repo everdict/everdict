@@ -1,7 +1,8 @@
 import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, UpstreamError } from "@assay/core";
-import { dependencyStores } from "./dependencies.js";
+import { STORE_DEFS, buildSharedStoreManifests, dependencyStores } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
+import { DEFAULT_POOL_NS, type StorePlan, planTenantStores } from "./store-binding.js";
 import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface K8sTopologyRuntimeOptions {
@@ -10,7 +11,9 @@ export interface K8sTopologyRuntimeOptions {
   runtimeClass?: string; // 클러스터의 RuntimeClass (예: "gvisor") — 있으면 모든 파드에 적용
   namespacePrefix?: string; // 존 네임스페이스 접두사 (기본 "assay-")
   storeEnv?: Record<string, string>;
-  provisionDependencies?: boolean; // spec.dependencies[](postgres/redis)를 토폴로지와 함께 배포
+  provisionDependencies?: boolean; // zone 없을 때의 기본 스토어 격리: true→silo(전용 배포), false→external
+  poolNamespace?: string; // pool 공유 스토어 네임스페이스 (기본 "assay-shared")
+  storeSecret?: string; // pool 테넌트 비번 mint 시드 (프로덕션: KEK/Vault)
   browserImage?: string;
   imagePullPolicy?: string; // kind 등 사전 로드 이미지: "IfNotPresent"
   readyTimeoutMs?: number;
@@ -31,6 +34,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   private readonly kubectl: Kubectl;
   private readonly fetchImpl: typeof fetch;
   private readonly warm = new Map<string, WarmEntry>();
+  private readonly sharedStoresReady = new Set<string>(); // pool 공유 스토어 배포는 클러스터에 1회만(deploy-once)
 
   constructor(private readonly opts: K8sTopologyRuntimeOptions = {}) {
     this.kubectl = opts.kubectl ?? kubectlCli({ context: opts.context });
@@ -50,18 +54,29 @@ export class K8sTopologyRuntime implements TopologyRuntime {
 
     const ns = this.nsFor(zone);
     await this.kubectl.ensureNamespace(ns);
+    const readySec = Math.floor((this.opts.readyTimeoutMs ?? 120_000) / 1000);
+
+    // 스토어 격리 모델 결정: zone 이 있으면 plan(pool/silo/external), 없으면 provisionDependencies(silo/external).
+    const plan: StorePlan = zone
+      ? planTenantStores(spec, zone, { poolNamespace: this.opts.poolNamespace, storeSecret: this.opts.storeSecret })
+      : { isolation: this.opts.provisionDependencies ? "silo" : "external", serviceEnv: {}, tenants: [] };
+
+    // pool: 공유 스토어(클러스터 1회) → 테넌트별 DB/role/ACL mint(공유 스토어에 DDL) → scoped creds 를 서비스 env 로.
+    if (plan.isolation === "pool") await this.provisionPool(spec, plan, readySec);
+
+    const isSilo = plan.isolation === "silo";
+    const storeEnv = plan.isolation === "pool" ? { ...plan.serviceEnv, ...this.opts.storeEnv } : this.opts.storeEnv;
     const manifests = buildK8sManifests(spec, {
       namespace: ns,
       runtimeClass: this.opts.runtimeClass,
-      storeEnv: this.opts.storeEnv,
+      storeEnv,
       imagePullPolicy: this.opts.imagePullPolicy,
-      provisionDependencies: this.opts.provisionDependencies,
+      provisionDependencies: isSilo, // silo 만 전용 스토어를 zone ns 에 배포(SLICE 39); pool/external 은 안 함.
     });
     await this.kubectl.apply(manifests);
 
-    const readySec = Math.floor((this.opts.readyTimeoutMs ?? 120_000) / 1000);
-    // 스토어(PG/Redis)를 먼저 Ready — 서비스가 부팅 시 접속하므로. 스토어는 in-cluster DNS 라 port-forward 불필요.
-    if (this.opts.provisionDependencies) {
+    // silo: 전용 스토어를 서비스보다 먼저 Ready (서비스가 부팅 시 접속). in-cluster DNS 라 port-forward 불필요.
+    if (isSilo) {
       for (const { name } of dependencyStores(spec)) await this.kubectl.rolloutStatus(name, ns, readySec);
     }
 
@@ -81,6 +96,63 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     const handle: TopologyHandle = { endpoints };
     this.warm.set(key, { handle, forwards, ns });
     return handle;
+  }
+
+  // pool: 공유 스토어를 한 번 띄우고, 테넌트별 논리객체(전용 DB+role / Redis ACL)를 공유 스토어에 mint.
+  // 적대적 테넌트 코드여도 자기 DB creds 만 받으므로 교차 접근은 PG 인증/Redis ACL 에서 거부된다.
+  private async provisionPool(spec: ServiceHarnessSpec, plan: StorePlan, readySec: number): Promise<void> {
+    const poolNs = this.opts.poolNamespace ?? DEFAULT_POOL_NS;
+    const stores = plan.tenants.map((t) => t.store);
+    await this.ensureSharedStores(stores, poolNs, readySec);
+
+    for (const t of plan.tenants) {
+      const sharedApp = `assay-shared-${t.store}`;
+      const pod = await this.kubectl.podFor(`app=${sharedApp}`, poolNs);
+      if (t.store === "postgres" && t.postgresSetup) {
+        // psql 이 stdin 에서 명령을 읽음(\gexec 포함). 어드민 user = POSTGRES_USER(=assay, superuser).
+        await this.kubectl.exec(
+          pod,
+          poolNs,
+          ["psql", "-U", "assay", "-d", "assay", "-v", "ON_ERROR_STOP=1"],
+          t.postgresSetup,
+        );
+      } else if (t.store === "redis" && t.redisSetup) {
+        for (const cmd of t.redisSetup) await this.kubectl.exec(pod, poolNs, ["redis-cli", ...cmd]);
+      }
+    }
+  }
+
+  private async ensureSharedStores(stores: string[], poolNs: string, readySec: number): Promise<void> {
+    const missing = [...new Set(stores)].filter((s) => STORE_DEFS[s] && !this.sharedStoresReady.has(s));
+    if (missing.length === 0) return;
+    await this.kubectl.ensureNamespace(poolNs);
+    await this.kubectl.apply(buildSharedStoreManifests(missing, poolNs, this.opts.imagePullPolicy));
+    for (const s of missing) {
+      await this.kubectl.rolloutStatus(`assay-shared-${s}`, poolNs, readySec);
+      // rollout Ready ≠ accepting connections (postgres initdb 등 — readiness probe 없음). 실접속까지 대기.
+      await this.waitStoreAccepting(s, poolNs);
+      this.sharedStoresReady.add(s);
+    }
+  }
+
+  // 스토어가 실제 연결을 받을 때까지 폴링(pg_isready / redis-cli ping). DDL/ACL 전에 호출.
+  private async waitStoreAccepting(store: string, poolNs: string): Promise<void> {
+    const probe =
+      store === "postgres" ? ["pg_isready", "-U", "assay"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
+    if (!probe) return;
+    const interval = this.opts.pollIntervalMs ?? 1000;
+    const steps = Math.max(1, Math.floor((this.opts.readyTimeoutMs ?? 60_000) / interval));
+    for (let i = 0; i < steps; i++) {
+      try {
+        const pod = await this.kubectl.podFor(`app=assay-shared-${store}`, poolNs);
+        await this.kubectl.exec(pod, poolNs, probe);
+        return;
+      } catch {
+        // 아직 안 받음 → 재시도
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+    throw new UpstreamError("UPSTREAM_ERROR", { store }, "공유 스토어 준비 대기 시간초과");
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<BrowserEnvHandle> {

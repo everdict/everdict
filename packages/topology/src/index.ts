@@ -5,8 +5,19 @@ export {
   STORE_DEFS,
   dependencyStores,
   dependencyConnEnv,
+  buildSharedStoreManifests,
   storeName,
 } from "./dependencies.js";
+export {
+  type StoreIsolation,
+  type StoreBindingOptions,
+  type TenantStorePlan,
+  type StorePlan,
+  resolveStoreIsolation,
+  planTenantStores,
+  sanitizeIdent,
+  sharedStoreHost,
+} from "./store-binding.js";
 export {
   buildNomadTopologyJob,
   buildDependencyGroups,

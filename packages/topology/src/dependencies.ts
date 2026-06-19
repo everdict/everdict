@@ -53,3 +53,42 @@ export function dependencyConnEnv(spec: ServiceHarnessSpec): Record<string, stri
 export function storeName(spec: ServiceHarnessSpec, store: string): string {
   return `${spec.id}-${store}`;
 }
+
+// pool 모델용 공유 스토어 Deployment+Service (클러스터에 1대; 이름 고정 assay-shared-<store>).
+// 빌더는 순수 — K8s manifest object 만 반환(런타임이 apply/rollout).
+export function buildSharedStoreManifests(
+  stores: string[],
+  ns: string,
+  imagePullPolicy?: string,
+): Array<Record<string, unknown>> {
+  const out: Array<Record<string, unknown>> = [];
+  for (const store of [...new Set(stores)]) {
+    const def = STORE_DEFS[store];
+    if (!def) continue;
+    const name = `assay-shared-${store}`;
+    const labels = { app: name, "assay/shared-store": store };
+    const env = Object.entries(def.env ?? {}).map(([n, value]) => ({ name: n, value }));
+    out.push({
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      metadata: { name, namespace: ns, labels },
+      spec: {
+        replicas: 1,
+        selector: { matchLabels: { app: name } },
+        template: {
+          metadata: { labels },
+          spec: {
+            containers: [{ name: store, image: def.image, imagePullPolicy, env, ports: [{ containerPort: def.port }] }],
+          },
+        },
+      },
+    });
+    out.push({
+      apiVersion: "v1",
+      kind: "Service",
+      metadata: { name, namespace: ns },
+      spec: { selector: { app: name }, ports: [{ port: def.port, targetPort: def.port }] },
+    });
+  }
+  return out;
+}

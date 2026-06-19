@@ -54,6 +54,37 @@ to `kubectl`):
 - Tenant isolation is K8s-native: each zone is its own namespace, so two tenants on the same harness version get
   separate Deployments. `runtimeClass` (gVisor) and `imagePullPolicy` are runtime options.
 
+## Multi-tenant store isolation — pool / silo / external (`TrustZone.storeIsolation`)
+A real multi-tenant SaaS can't just bolt a dedicated store onto every tenant×harness — that explodes the
+instance count. And the per-case `isolateBy` (thread_id / key-prefix) is **not a tenant boundary** — it isolates
+*one tenant's own cases* from each other. The tenant boundary is the **database / role / credentials** (+ network).
+So there are three isolation layers, nested: **physical store fleet** → **per-tenant logical namespace** →
+**per-case isolateBy**. `TrustZone.storeIsolation` selects the model (the AWS SaaS-lens silo/pool framing):
+
+- **`pool`** (default for `trusted` zones) — one platform-managed **shared** PG/Redis (deployed once per cluster
+  in `assay-shared`), with per-tenant **logical** isolation: Postgres gets a dedicated `tenant_<zone>` **database**
+  + a non-superuser `r_<zone>` **role** (and `REVOKE CONNECT … FROM PUBLIC`, so other tenants' roles are refused);
+  Redis gets an **ACL user** scoped to `~t:<zone>:*`. The service is injected with **scoped creds** (`DATABASE_URL`
+  with the tenant role+db, `REDIS_URL`/`REDIS_KEY_PREFIX`). The hot path mints only cheap logical objects
+  (DB/role/ACL) — it never spins up a DB engine per run. This is "shared infra, minimally managed for performance,
+  logically isolated per trust-zone."
+- **`silo`** (default for `untrusted`/compliance zones) — a **dedicated** store instance per zone (SLICE 39's
+  `provisionDependencies` in the zone namespace). Strong blast-radius containment for hostile arbitrary code;
+  higher cost. Use when logical isolation isn't enough.
+- **`external`** — BYO endpoint via `storeEnv`; Assay deploys no store.
+
+Default when a zone doesn't set it: `trusted → pool`, `untrusted → silo`; an explicit `storeIsolation` overrides.
+Password minting is HMAC(secret, `zone:store`) — deterministic (idempotent re-provision); production sources the
+secret from a KEK/Vault and would store minted creds. The pure planner is `planTenantStores(spec, zone)`
+(`@assay/topology`); `K8sTopologyRuntime` executes it (shared-store deploy-once → tenant DDL/ACL via
+`kubectl exec` into the admin pod → scoped env into services).
+
+Verified live on **kind** (`scripts/live/pool-isolation-k8s.mjs`): one shared PG, zones `acme`+`globex` each got
+`tenant_acme`/`tenant_globex` + `r_acme`/`r_globex`; **`r_acme` creds → `tenant_globex` = DENIED**, own DB = OK —
+i.e. even hostile tenant code holding its own creds cannot reach another tenant's data (PG auth + CONNECT-revoke
+enforce the boundary). The shared store deploys once across both tenants. (NetworkPolicy denying cross-tenant
+store reach is a complementary hardening layer, not yet wired; the proof here is the PG-auth boundary.)
+
 ## Trace (`@assay/trace`)
 The harness emits a trace to OTel/MLflow; Assay **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →
 `spansToTraceEvents` → normalized `TraceEvent[]` (OTel GenAI semantic conventions).

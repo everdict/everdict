@@ -14,6 +14,9 @@ export interface Kubectl {
   portForward(target: string, ns: string, remotePort: number): Promise<PortForward>; // target 예: svc/x
   deleteResources(targets: string[], ns: string): Promise<void>; // target 예: deployment/x, svc/x
   deleteNamespace(ns: string): Promise<void>;
+  // 파드 안에서 명령 실행(스토어 어드민 DDL/ACL 용). selector 로 파드명 해석 → exec.
+  exec(pod: string, ns: string, command: string[], stdin?: string): Promise<string>;
+  podFor(selector: string, ns: string): Promise<string>; // label selector (예: app=x) → 첫 파드명
 }
 
 interface RunResult {
@@ -113,6 +116,27 @@ export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubec
     },
     async deleteNamespace(ns) {
       await run(bin, [...ctx, "delete", "namespace", ns, "--ignore-not-found", "--wait=false"]);
+    },
+    async podFor(selector, ns) {
+      const res = await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "get",
+        "pod",
+        "-l",
+        selector,
+        "-o",
+        "jsonpath={.items[0].metadata.name}",
+      ]);
+      if (res.code !== 0 || !res.stdout.trim()) throw new Error(`podFor ${selector} failed: ${res.stderr || "no pod"}`);
+      return res.stdout.trim();
+    },
+    async exec(pod, ns, command, stdin) {
+      const args = [...ctx, "-n", ns, "exec", ...(stdin !== undefined ? ["-i"] : []), pod, "--", ...command];
+      const res = await run(bin, args, stdin);
+      if (res.code !== 0) throw new Error(`exec ${command[0]} in ${pod} failed: ${res.stderr || res.stdout}`);
+      return res.stdout;
     },
   };
 }

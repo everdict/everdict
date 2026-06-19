@@ -9,6 +9,9 @@ export const TrustZoneSchema = z.object({
   namespace: z.string().optional(), // Nomad/K8s 네임스페이스 (논리 경계)
   network: z.enum(["deny-cross-tenant", "deny-egress", "open"]).default("deny-cross-tenant"),
   trusted: z.boolean().default(false), // first-party 하니스만 true — 격리 완화(runc) 허용
+  // 공유 스토어 격리 모델: pool=공유 인프라+테넌트별 논리격리(DB/role·ACL), silo=테넌트 전용 인스턴스,
+  // external=BYO 엔드포인트(storeEnv). 미지정 시 trusted→pool, untrusted→silo 로 파생.
+  storeIsolation: z.enum(["pool", "silo", "external"]).optional(),
 });
 export type TrustZone = z.infer<typeof TrustZoneSchema>;
 
