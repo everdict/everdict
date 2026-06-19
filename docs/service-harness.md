@@ -120,7 +120,16 @@ Gotchas: use the **`gpt-5.4-mini` alias** (no `chatgpt/` prefix — else litellm
 device-code login that hangs in containers); the harness reaches the host LiteLLM only via the default bridge
 gateway `172.17.0.1`.
 
-**Next:** drive aegra **through `ServiceTopologyBackend`** (deploy via `NomadTopologyRuntime`/`K8sTopologyRuntime`
-warm topology + per-run `thread_id` isolation + auto-grade) — the Agent-Protocol multi-step frontDoor
-(assistant→thread→run) needs `ServiceHarness.drive` to support it. Today `aegra-langgraph.mjs` drives the
-frontDoor directly and grades the response.
+### Driven through `ServiceTopologyBackend` ✅
+`scripts/live/service-topology-aegra.mjs` runs a real `EvalCase` through our **`ServiceTopologyBackend`** against
+aegra — using only the backend's injection points (`runtime` / `submit` / `traceSource` / `graders`), no package
+changes. The full path executes: `dispatch` → `ensureTopology` (external aegra endpoint) → `provisionBrowserEnv`
+(no-op, no browser target) → **`submit`** (Agent-Protocol frontDoor: assistant→thread→run/wait, with the backend's
+per-run **`thread_id`** = aegra's Postgres-checkpoint isolation key) → **`traceSource`** (the harness's `run/wait`
+response messages → `TraceEvent[]`) → **grade**. Verified: `answer-ok: pass` — the agent answered via
+`gpt-5.4-mini` and followed instructions. This proves the orchestrator-agnostic backend drives a real OSS
+service-harness end-to-end with per-run isolation + grading; the only synthetic part is the `runtime` (points at
+the already-running aegra instead of deploying it via `NomadTopologyRuntime`/`K8sTopologyRuntime`).
+
+**Next:** deploy aegra **via** `K8sTopologyRuntime`/`NomadTopologyRuntime` (warm topology + per-zone isolation)
+instead of the external endpoint, and fold the Agent-Protocol multi-step drive into a reusable `ServiceHarness`.
