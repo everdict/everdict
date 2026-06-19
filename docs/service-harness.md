@@ -131,5 +131,25 @@ response messages → `TraceEvent[]`) → **grade**. Verified: `answer-ok: pass`
 service-harness end-to-end with per-run isolation + grading; the only synthetic part is the `runtime` (points at
 the already-running aegra instead of deploying it via `NomadTopologyRuntime`/`K8sTopologyRuntime`).
 
-**Next:** deploy aegra **via** `K8sTopologyRuntime`/`NomadTopologyRuntime` (warm topology + per-zone isolation)
-instead of the external endpoint, and fold the Agent-Protocol multi-step drive into a reusable `ServiceHarness`.
+### With a real browser environment ✅ (browser-use-langgraph shape)
+`scripts/live/service-topology-aegra-browser.mjs` adds the **per-case browser target** — the missing piece that
+makes this an actual browser-use harness. A real **`chromedp/headless-shell`** (Chromium, CDP `:9222`) is the
+per-case browser; a LangGraph **`browser_agent`** graph in aegra (`scripts/live/aegra-browser-agent/graph.py`,
+Playwright `connect_over_cdp`) **drives** it; Assay **observes** the same browser and grades it. Full path:
+`dispatch` → `ensureTopology`(aegra) → **`provisionBrowserEnv`(per-case chromedp CDP)** → `submit` (Agent-Protocol
++ the backend's **`browser_cdp_url`** in `config.configurable`) → the agent navigates/extracts via CDP →
+`traceSource`(response) + **`browser.snapshot()`** (the chromedp `/json/list` → `{url, dom}`) → grade.
+
+Verified (`gpt-5.4-mini`): the agent navigated to `https://example.com`, answered "...Example Domain...DONE", and
+Assay's browser snapshot was `{url: "https://example.com/", dom: "Example Domain"}` → **`browser-url: pass`**
+(agent moved the shared browser) **+ `answer-ok: pass`**. So the topology now exercises a real browser target +
+DOM/URL grading, on the same orchestrator-agnostic `ServiceTopologyBackend`.
+
+aegra setup for the browser graph: copy `scripts/live/aegra-browser-agent/` into aegra's `examples/browser_agent/`,
+register `"browser_agent": "./examples/browser_agent/graph.py:graph"` in `aegra.json`, `pip install playwright`
+(as root; `connect_over_cdp` needs no browser binary), restart. The graph forces a writable `HOME` and splits
+`MODEL=openai/gpt-5.4-mini` into `init_chat_model(name, model_provider=provider)`.
+
+**Next:** deploy aegra+chromedp **via** `K8sTopologyRuntime`/`NomadTopologyRuntime` (warm topology + per-zone
+isolation + per-case browser pod — the runtimes already provision CDP browsers) instead of the external endpoint,
+and fold the Agent-Protocol multi-step drive into a reusable `ServiceHarness`.
