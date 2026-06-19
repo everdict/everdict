@@ -95,3 +95,32 @@ The cluster persists across runs (`kind get clusters`); `kind delete cluster --n
   Nomad↔K8s parity through the same `ServiceTopologyBackend`). **Still pending:** the real browser+extension
   (headful + xvfb + `--load-extension`) and the real browser-use images, real OTel/MLflow span ingestion (the
   stand-in emits no GenAI spans → trace is empty), the harness images + extension registry.
+
+## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
+To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we
+ran **[aegra](https://github.com/aegra/aegra)** — an OSS, license-free self-hosted LangGraph server (FastAPI +
+**Postgres** checkpoints + **Redis** + **Agent Protocol** HTTP API). It's "browser-use-**langgraph**" minus the
+browser, and maps 1:1 to `HarnessSpec(service)`: `agent-server` (aegra) + a `postgres` checkpoints dependency
+isolated by **`thread_id`** + an HTTP **frontDoor** (Agent Protocol: assistant → thread → run).
+
+Verified e2e: aegra's ReAct agent answered a task using **our model** (workclaw LiteLLM **`gpt-5.4-mini`** via the
+clean alias) and followed instructions, in ~2 s — proving the topology's drive + store + model layers against
+real OSS. Driver/grader: `scripts/live/aegra-langgraph.mjs`.
+
+Recipe (host LiteLLM on `:4000`):
+```
+git clone https://github.com/aegra/aegra && cd aegra
+# .env: OPENAI_API_KEY=<litellm key>, OPENAI_BASE_URL=http://172.17.0.1:4000, MODEL=openai/gpt-5.4-mini
+docker compose up -d --build
+docker network connect bridge aegra-aegra-1   # only the default docker bridge (172.17.0.1) reaches the
+                                              # host's host-network LiteLLM (compose/kind subnets are blocked)
+node scripts/live/aegra-langgraph.mjs
+```
+Gotchas: use the **`gpt-5.4-mini` alias** (no `chatgpt/` prefix — else litellm hijacks it into a ChatGPT-OAuth
+device-code login that hangs in containers); the harness reaches the host LiteLLM only via the default bridge
+gateway `172.17.0.1`.
+
+**Next:** drive aegra **through `ServiceTopologyBackend`** (deploy via `NomadTopologyRuntime`/`K8sTopologyRuntime`
+warm topology + per-run `thread_id` isolation + auto-grade) — the Agent-Protocol multi-step frontDoor
+(assistant→thread→run) needs `ServiceHarness.drive` to support it. Today `aegra-langgraph.mjs` drives the
+frontDoor directly and grades the response.
