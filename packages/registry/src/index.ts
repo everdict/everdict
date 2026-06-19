@@ -15,3 +15,6 @@ export { loadDatasetDir } from "./load-datasets.js";
 export { type JudgeRegistry, InMemoryJudgeRegistry } from "./judge-registry.js";
 export { PgJudgeRegistry } from "./pg-judge-registry.js";
 export { loadJudgeDir } from "./load-judges.js";
+export { type RuntimeRegistry, InMemoryRuntimeRegistry } from "./runtime-registry.js";
+export { PgRuntimeRegistry } from "./pg-runtime-registry.js";
+export { loadRuntimeDir } from "./load-runtimes.js";

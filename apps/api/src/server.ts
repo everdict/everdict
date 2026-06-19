@@ -1,8 +1,15 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import { type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
-import { AppError, DatasetSchema, EvalCaseSchema, HarnessSpecSchema, JudgeSpecSchema } from "@assay/core";
+import {
+  AppError,
+  DatasetSchema,
+  EvalCaseSchema,
+  HarnessSpecSchema,
+  JudgeSpecSchema,
+  RuntimeSpecSchema,
+} from "@assay/core";
 import { type SecretStore, type TenantKeyStore, issueKey } from "@assay/db";
-import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
+import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -23,6 +30,7 @@ export const RunScorecardBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+  runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
 });
 
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
@@ -34,6 +42,7 @@ export interface ServerDeps {
   registry?: HarnessRegistry; // 하니스 CRUD (없으면 해당 라우트 비활성)
   datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (없으면 해당 라우트 비활성)
+  runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 (없으면=ASSAY_SECRETS_KEY 미설정 → 해당 라우트 비활성)
   authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
   keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
@@ -374,6 +383,73 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- runtimes (workspace-owned SSOT, 실행 인프라: local | nomad | k8s) ---
+  app.post("/runtimes", async (req, reply) => {
+    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runtimes:write");
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 (실행 인프라 = admin)
+    }
+    const parsed = RuntimeSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      await deps.runtimeRegistry.register(principal.workspace, parsed.data);
+      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+    } catch (err) {
+      return sendError(reply, err); // 불변성 409
+    }
+  });
+
+  app.post("/runtimes/validate", async (req, reply) => {
+    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runtimes:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = RuntimeSpecSchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
+    const existingVersions = await deps.runtimeRegistry.ownVersions(principal.workspace, parsed.data.id);
+    return reply.send({
+      ok: true,
+      kind: parsed.data.kind,
+      id: parsed.data.id,
+      version: parsed.data.version,
+      existingVersions,
+      versionExists: existingVersions.includes(parsed.data.version),
+    });
+  });
+
+  app.get("/runtimes", async (req, reply) => {
+    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runtimes:read");
+      return reply.send(await deps.runtimeRegistry.list(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string; version: string } }>("/runtimes/:id/versions/:version", async (req, reply) => {
+    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runtimes:read");
+      return reply.send(await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- scorecards (데이터셋×하니스 배치 평가 → 집계 결과) ---
   app.post("/scorecards", async (req, reply) => {
     if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
@@ -536,6 +612,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           registry: deps.registry,
           datasetRegistry: deps.datasetRegistry,
           judgeRegistry: deps.judgeRegistry,
+          runtimeRegistry: deps.runtimeRegistry,
           secretStore: deps.secretStore,
         },
         principal,

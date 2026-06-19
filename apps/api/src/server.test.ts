@@ -10,7 +10,12 @@ import {
   aesGcmCipher,
   issueKey,
 } from "@assay/db";
-import { InMemoryDatasetRegistry, InMemoryHarnessRegistry, InMemoryJudgeRegistry } from "@assay/registry";
+import {
+  InMemoryDatasetRegistry,
+  InMemoryHarnessRegistry,
+  InMemoryJudgeRegistry,
+  InMemoryRuntimeRegistry,
+} from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { RunService } from "./run-service.js";
@@ -67,6 +72,13 @@ const JUDGE = {
   model: "claude-opus-4-8",
   rubric: "Did the agent complete the task correctly?",
 };
+const RUNTIME = {
+  kind: "nomad",
+  id: "seoul",
+  version: "1.0.0",
+  addr: "http://nomad:4646",
+  image: "ghcr.io/acme/agent:1",
+};
 
 // 토큰 무관하게 고정 역할 Principal 을 주는 스텁(authZ 테스트용).
 const roleAuth = (roles: string[], workspace = "acme"): Authenticator => ({
@@ -110,6 +122,7 @@ function server(
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
     judgeRegistry,
+    runtimeRegistry: new InMemoryRuntimeRegistry(),
     secretStore,
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
@@ -667,6 +680,67 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
     expect(v1.json()).toMatchObject({ ok: true, kind: "harness", id: "reviewer", versionExists: false });
     await app.inject({ method: "POST", url: "/judges", headers: h, payload: harnessJudge }); // 실제 등록
     const v2 = await app.inject({ method: "POST", url: "/judges/validate", headers: h, payload: harnessJudge });
+    expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    await app.close();
+  });
+});
+
+describe("API — runtimes (실행 인프라, workspace-owned, admin write)", () => {
+  it("member 는 읽기만(write 403); admin 은 등록 가능", async () => {
+    const member = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const mh = { authorization: "Bearer x" };
+    expect((await member.app.inject({ method: "GET", url: "/runtimes", headers: mh })).statusCode).toBe(200);
+    expect(
+      (await member.app.inject({ method: "POST", url: "/runtimes", headers: mh, payload: RUNTIME })).statusCode,
+    ).toBe(403);
+    await member.app.close();
+
+    const admin = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    expect(
+      (await admin.app.inject({ method: "POST", url: "/runtimes", headers: mh, payload: RUNTIME })).statusCode,
+    ).toBe(201);
+    await admin.app.close();
+  });
+
+  it("등록 → 조회(전체 spec); 타 워크스페이스 404; 불변성 409", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    expect(
+      (await app.inject({ method: "POST", url: "/runtimes", headers: { authorization: acme }, payload: RUNTIME }))
+        .statusCode,
+    ).toBe(201);
+    const got = await app.inject({
+      method: "GET",
+      url: "/runtimes/seoul/versions/latest",
+      headers: { authorization: acme },
+    });
+    expect(got.statusCode).toBe(200);
+    expect(got.json()).toMatchObject({ kind: "nomad", id: "seoul", addr: "http://nomad:4646" });
+    const bGet = await app.inject({
+      method: "GET",
+      url: "/runtimes/seoul/versions/latest",
+      headers: { authorization: beta },
+    });
+    expect(bGet.statusCode).toBe(404);
+    const dup = await app.inject({
+      method: "POST",
+      url: "/runtimes",
+      headers: { authorization: acme },
+      payload: { ...RUNTIME, image: "other" },
+    });
+    expect(dup.statusCode).toBe(409);
+    await app.close();
+  });
+
+  it("validate dry-run: local 종류 → ok + versionExists 표시", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const local = { kind: "local", id: "mylocal", version: "1.0.0" };
+    const v1 = await app.inject({ method: "POST", url: "/runtimes/validate", headers: h, payload: local });
+    expect(v1.json()).toMatchObject({ ok: true, kind: "local", id: "mylocal", versionExists: false });
+    await app.inject({ method: "POST", url: "/runtimes", headers: h, payload: local });
+    const v2 = await app.inject({ method: "POST", url: "/runtimes/validate", headers: h, payload: local });
     expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
     await app.close();
   });

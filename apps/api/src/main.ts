@@ -33,15 +33,20 @@ import {
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
   InMemoryJudgeRegistry,
+  InMemoryRuntimeRegistry,
   type JudgeRegistry,
   PgDatasetRegistry,
   PgHarnessRegistry,
   PgJudgeRegistry,
+  PgRuntimeRegistry,
+  type RuntimeRegistry,
   loadDatasetDir,
   loadJudgeDir,
+  loadRuntimeDir,
 } from "@assay/registry";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { RunService } from "./run-service.js";
+import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
 
@@ -53,10 +58,11 @@ async function main(): Promise<void> {
   const k8sContext = process.env.ASSAY_K8S_CONTEXT;
   const image = process.env.ASSAY_AGENT_IMAGE;
 
-  const { store, scorecardStore, keyStore, registry, datasetRegistry, judgeRegistry, secretStore } =
+  const { store, scorecardStore, keyStore, registry, datasetRegistry, judgeRegistry, runtimeRegistry, secretStore } =
     await makePersistence();
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
+  await seedSharedRuntimes(runtimeRegistry);
 
   // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소 있을 때만.
   const ss = secretStore;
@@ -79,8 +85,17 @@ async function main(): Promise<void> {
   const scheduler = new Scheduler(backends);
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
+  // 테넌트 런타임 라우팅: placement.target 이 테넌트 등록 Runtime 이면 그 백엔드를 빌드/등록해 라우팅(아니면 글로벌 백엔드 그대로).
+  const runtimeSecretsFor = (tenant: string) => (secretStore ? secretStore.entries(tenant) : Promise.resolve({}));
+  const dispatcher = new RuntimeDispatcher({
+    inner: scheduler,
+    backends,
+    runtimes: runtimeRegistry,
+    secretsFor: runtimeSecretsFor,
+  });
+
   const service = new RunService({
-    dispatcher: scheduler,
+    dispatcher,
     store,
     budget,
     // 선언형 command 하니스: 레지스트리에서 spec 을 풀어 잡에 임베드(없으면 빌트인 폴백).
@@ -91,14 +106,14 @@ async function main(): Promise<void> {
   // judge 실행기: model(anthropic/openai)은 테넌트 시크릿 키로 실제 호출, harness 는 참조 에이전트를 디스패치해 판정.
   // 키/시크릿 없으면 skip(사유 명시). openai 베이스(LiteLLM 등)는 OPENAI_BASE_URL 시크릿 또는 env.
   const judgeRunner = defaultJudgeRunner({
-    secretsFor: (tenant) => (secretStore ? secretStore.entries(tenant) : Promise.resolve({})),
-    dispatch: (job) => scheduler.dispatch(job),
+    secretsFor: runtimeSecretsFor,
+    dispatch: (job) => dispatcher.dispatch(job), // harness judge 도 테넌트 런타임 라우팅 경유
     harnesses: registry,
     ...(process.env.ASSAY_JUDGE_OPENAI_BASE_URL ? { openaiBaseUrl: process.env.ASSAY_JUDGE_OPENAI_BASE_URL } : {}),
   });
   // 배치 평가: 데이터셋(케이스 묶음)을 하니스@버전으로 돌려 스코어카드 집계 + 선택한 judge 를 트레이스에 적용.
   const scorecardService = new ScorecardService({
-    dispatcher: scheduler,
+    dispatcher,
     store: scorecardStore,
     datasets: datasetRegistry,
     harnesses: registry,
@@ -112,6 +127,7 @@ async function main(): Promise<void> {
     registry,
     datasetRegistry,
     judgeRegistry,
+    runtimeRegistry,
     ...(secretStore ? { secretStore } : {}),
     authenticator: buildAuthenticator(keyStore),
     keyStore,
@@ -134,6 +150,7 @@ interface Persistence {
   registry: HarnessRegistry;
   datasetRegistry: DatasetRegistry;
   judgeRegistry: JudgeRegistry;
+  runtimeRegistry: RuntimeRegistry;
   secretStore?: SecretStore; // ASSAY_SECRETS_KEY 있을 때만(fail-closed: 키 없으면 시크릿 기능 비활성)
 }
 
@@ -150,6 +167,7 @@ async function makePersistence(): Promise<Persistence> {
       registry: new InMemoryHarnessRegistry(),
       datasetRegistry: new InMemoryDatasetRegistry(),
       judgeRegistry: new InMemoryJudgeRegistry(),
+      runtimeRegistry: new InMemoryRuntimeRegistry(),
       ...(cipher ? { secretStore: new InMemorySecretStore(cipher) } : {}),
     };
   }
@@ -163,6 +181,7 @@ async function makePersistence(): Promise<Persistence> {
     registry: new PgHarnessRegistry(client),
     datasetRegistry: new PgDatasetRegistry(client),
     judgeRegistry: new PgJudgeRegistry(client),
+    runtimeRegistry: new PgRuntimeRegistry(client),
     ...(cipher ? { secretStore: new PgSecretStore(client, cipher) } : {}),
   };
 }
@@ -185,6 +204,17 @@ async function seedSharedJudges(registry: JudgeRegistry): Promise<void> {
   try {
     await loadJudgeDir(dir, { into: registry });
     console.error(`▶ shared judges seeded from ${dir}`);
+  } catch {
+    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+  }
+}
+
+// _shared(공용) Runtime 정의를 파일 SSOT 에서 시드 — 새 테넌트도 기본 런타임 선택 가능. best-effort/멱등.
+async function seedSharedRuntimes(registry: RuntimeRegistry): Promise<void> {
+  const dir = process.env.ASSAY_RUNTIMES_DIR ?? `${process.cwd()}/examples/runtimes`;
+  try {
+    await loadRuntimeDir(dir, { into: registry });
+    console.error(`▶ shared runtimes seeded from ${dir}`);
   } catch {
     // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
   }

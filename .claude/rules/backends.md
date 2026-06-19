@@ -5,6 +5,13 @@ paths: "packages/backends/**"
 
 A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill `backends`.
 
+- **Tenant-registered runtimes** (BYO compute): a `RuntimeSpec` (`@assay/core`, local|nomad|k8s, no secrets) →
+  live `Backend` via `buildRuntimeBackend(spec, {secretEnv})`. The control plane's `RuntimeDispatcher` resolves a
+  job's `placement.target` to the tenant's `RuntimeSpec`, builds + registers the backend under
+  `rt:<tenant>:<id>@<version>`, and routes via the `Scheduler` (fairness/budget/capacity preserved). Credentials
+  (Nomad token, kubeconfig) come from the tenant `SecretStore` as `secretEnv` — never from the spec. See
+  `docs/runtimes.md`.
+
 - Implement `Backend.dispatch(job: AgentJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
   (`./backend`, `@assay/core`). `capacity()` is what the `Scheduler` gates on — report a configured
   `maxConcurrent` as `total`; live-probe the cluster for `used` where cheap (else `used: 0`).

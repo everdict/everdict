@@ -1,4 +1,4 @@
-import { type AgentJob, BadRequestError, type CaseResult, NotFoundError } from "@assay/core";
+import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
 import { z } from "zod";
 import type { Backend } from "./backend.js";
 import { K8sBackend } from "./k8s.js";
@@ -75,6 +75,30 @@ export const BackendsConfigSchema = z.object({
   backends: z.array(BackendConfigSchema),
 });
 export type BackendsConfig = z.infer<typeof BackendsConfigSchema>;
+
+// 테넌트가 등록한 RuntimeSpec(@assay/core) → 라이브 Backend. 자격증명은 secretEnv 로 주입(스펙엔 비밀 없음).
+// 컨트롤플레인이 디스패치 시 이걸로 테넌트 런타임을 만들어 Scheduler 레지스트리에 올린다.
+export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> } = {}): Backend {
+  const secretEnv = opts.secretEnv;
+  if (spec.kind === "local") return new LocalBackend();
+  if (spec.kind === "k8s") {
+    return new K8sBackend({
+      image: spec.image,
+      ...(spec.context ? { context: spec.context } : {}),
+      ...(spec.namespace ? { namespace: spec.namespace } : {}),
+      ...(spec.runtimeClass ? { runtimeClass: spec.runtimeClass } : {}),
+      ...(secretEnv ? { secretEnv } : {}),
+    });
+  }
+  return new NomadBackend({
+    addr: spec.addr,
+    image: spec.image,
+    ...(spec.runtime ? { runtime: spec.runtime } : {}),
+    ...(spec.datacenters ? { datacenters: spec.datacenters } : {}),
+    ...(spec.namespace ? { namespace: spec.namespace } : {}),
+    ...(secretEnv ? { secretEnv } : {}),
+  });
+}
 
 export function buildRegistry(
   cfg: BackendsConfig,

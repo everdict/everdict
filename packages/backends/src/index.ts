@@ -54,6 +54,7 @@ export {
   BackendRegistry,
   Router,
   buildRegistry,
+  buildRuntimeBackend,
   BackendConfigSchema,
   BackendsConfigSchema,
   type BackendConfig,

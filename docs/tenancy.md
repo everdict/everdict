@@ -63,6 +63,14 @@ Judges reuse the identical ownership model — `(tenant, id, version)`, owner-fi
 
 See `docs/judges.md`.
 
+## Runtimes (tenant execution infrastructure)
+Runtimes reuse the same ownership model — `(tenant, id, version)`, owner-first with `_shared` fallback,
+immutable versions. A runtime is `local` | `nomad` | `k8s` (no secrets in the spec). Writes are **admin**
+(defining execution infra = placement/security, like `harnesses:register`). `POST/GET /runtimes`
+(+`/validate`, `/:id/versions/:version`); `runtimes:read` = viewer+, `runtimes:write` = admin. At dispatch the
+`RuntimeDispatcher` builds the tenant's chosen runtime (credentials from the tenant SecretStore) and routes via
+the Scheduler. See `docs/runtimes.md`.
+
 ## Scorecards (batch evals)
 `POST /scorecards` (a dataset × `harness@version` → aggregated `Scorecard`) requires `scorecards:run`
 (**member+**); `GET /scorecards`, `GET /scorecards/:id` require `scorecards:read` (viewer+). All

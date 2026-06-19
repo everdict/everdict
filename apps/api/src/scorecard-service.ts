@@ -22,6 +22,7 @@ export interface RunScorecardInput {
   dataset: { id: string; version: string };
   harness: { id: string; version: string };
   judges?: Array<{ id: string; version: string }>; // 선택한 Agent Judge 들 — 트레이스에 적용
+  runtime?: string; // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
 }
 
 export interface ScorecardServiceDeps {
@@ -86,6 +87,7 @@ export class ScorecardService {
       harnessVersion,
       harnessSpec,
       input.judges ?? [],
+      input.runtime,
     );
     return record;
   }
@@ -127,6 +129,7 @@ export class ScorecardService {
     harnessVersion: string,
     harnessSpec: HarnessSpec | undefined,
     judges: Array<{ id: string; version: string }>,
+    runtime: string | undefined,
   ): Promise<void> {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
     // 각 케이스 디스패치에 tenant/spec 을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
@@ -138,7 +141,11 @@ export class ScorecardService {
       return result;
     };
     try {
-      const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases: dataset.cases };
+      // runtime 선택 시 각 케이스 placement.target 으로 주입 → RuntimeDispatcher 가 테넌트 런타임으로 라우팅.
+      const cases = runtime
+        ? dataset.cases.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
+        : dataset.cases;
+      const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
       const scorecard = await runSuite(suite, harnessVersion, dispatch, { concurrency: this.concurrency });
       await this.applyJudges(tenant, dataset, scorecard.results, judges); // 트레이스 → judge 점수(컨트롤플레인)
       const summary = summarizeScorecard(scorecard);

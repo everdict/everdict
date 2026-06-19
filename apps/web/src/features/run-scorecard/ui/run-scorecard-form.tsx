@@ -6,7 +6,7 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 
 import { Button } from '@/shared/ui/button'
-import { FieldError, Input, Label } from '@/shared/ui/input'
+import { FieldError, Input, Label, Select } from '@/shared/ui/input'
 import { runScorecardAction } from '../api/run-scorecard'
 
 interface Values {
@@ -14,17 +14,20 @@ interface Values {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
+  runtime: string
 }
 
-// 데이터셋×하니스를 골라 배치 평가를 실행 + 적용할 judge 선택. 실제 해석은 컨트롤플레인이 한다.
+// 데이터셋×하니스를 골라 배치 평가를 실행 + 적용할 judge + 실행 런타임 선택. 실제 해석은 컨트롤플레인이 한다.
 export function RunScorecardForm({
   datasets,
   harnesses,
   judges,
+  runtimes,
 }: {
   datasets: { id: string }[]
   harnesses: { id: string }[]
   judges: { id: string }[]
+  runtimes: { id: string }[]
 }) {
   const router = useRouter()
   const [serverError, setServerError] = useState<string>()
@@ -39,6 +42,7 @@ export function RunScorecardForm({
       datasetVersion: 'latest',
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
+      runtime: '',
     },
   })
 
@@ -112,6 +116,18 @@ export function RunScorecardForm({
           </div>
         </div>
       )}
+
+      <div className="space-y-1.5">
+        <Label htmlFor="runtime">런타임 (실행 인프라)</Label>
+        <Select id="runtime" {...register('runtime')}>
+          <option value="">기본 백엔드</option>
+          {runtimes.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.id}
+            </option>
+          ))}
+        </Select>
+      </div>
 
       {serverError && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">

@@ -11,11 +11,13 @@ export type WebAction =
   | 'scorecards:run'
   | 'judges:read'
   | 'judges:write'
+  | 'runtimes:read'
+  | 'runtimes:write'
   | 'secrets:read'
   | 'secrets:write'
 
 const PERMS: Record<string, WebAction[]> = {
-  viewer: ['runs:read', 'harnesses:read', 'datasets:read', 'scorecards:read', 'judges:read'],
+  viewer: ['runs:read', 'harnesses:read', 'datasets:read', 'scorecards:read', 'judges:read', 'runtimes:read'],
   member: [
     'runs:read',
     'harnesses:read',
@@ -26,6 +28,7 @@ const PERMS: Record<string, WebAction[]> = {
     'scorecards:run',
     'judges:read',
     'judges:write',
+    'runtimes:read',
   ],
   admin: [
     'runs:read',
@@ -38,6 +41,8 @@ const PERMS: Record<string, WebAction[]> = {
     'scorecards:run',
     'judges:read',
     'judges:write',
+    'runtimes:read',
+    'runtimes:write', // 실행 인프라 정의 = admin
     'secrets:read', // 시크릿 관리 = admin
     'secrets:write',
   ],

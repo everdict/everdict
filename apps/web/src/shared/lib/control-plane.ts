@@ -58,4 +58,11 @@ export const controlPlane = {
     call<T>(auth, '/judges', { method: 'POST', body: JSON.stringify(spec) }),
   validateJudge: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/judges/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  listRuntimes: <T>(auth: AuthContext) => call<T>(auth, '/runtimes'),
+  getRuntime: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  createRuntime: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/runtimes', { method: 'POST', body: JSON.stringify(spec) }),
+  validateRuntime: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/runtimes/validate', { method: 'POST', body: JSON.stringify(spec) }),
 }

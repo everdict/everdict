@@ -1,7 +1,14 @@
 import { type Action, type Principal, authorize } from "@assay/auth";
-import { AppError, DatasetSchema, EvalCaseSchema, HarnessSpecSchema, JudgeSpecSchema } from "@assay/core";
+import {
+  AppError,
+  DatasetSchema,
+  EvalCaseSchema,
+  HarnessSpecSchema,
+  JudgeSpecSchema,
+  RuntimeSpecSchema,
+} from "@assay/core";
 import type { SecretStore } from "@assay/db";
-import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
+import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -16,6 +23,7 @@ export interface McpDeps {
   registry?: HarnessRegistry;
   datasetRegistry?: DatasetRegistry;
   judgeRegistry?: JudgeRegistry;
+  runtimeRegistry?: RuntimeRegistry;
   secretStore?: SecretStore;
 }
 
@@ -290,6 +298,79 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const result = JudgeSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           await judges.register(ws, result.data);
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+        }),
+    );
+  }
+
+  if (deps.runtimeRegistry) {
+    const runtimes = deps.runtimeRegistry;
+    server.registerTool(
+      "list_runtimes",
+      { description: "이 워크스페이스가 보는 실행 인프라(Runtime: 소유 + _shared)", inputSchema: {} },
+      () => run(principal, "runtimes:read", async () => ok(await runtimes.list(ws))),
+    );
+
+    server.registerTool(
+      "get_runtime",
+      {
+        description: "RuntimeSpec 1건 전체(local | nomad | k8s). version 기본 latest. 다른 워크스페이스는 NOT_FOUND",
+        inputSchema: { id: z.string(), version: z.string().optional() },
+      },
+      ({ id, version }) =>
+        run(principal, "runtimes:read", async () => ok(await runtimes.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "validate_runtime",
+      {
+        description: "RuntimeSpec(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
+        inputSchema: { runtime: z.string().describe("RuntimeSpec JSON (kind: local | nomad | k8s)") },
+      },
+      ({ runtime }) =>
+        run(principal, "runtimes:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(runtime);
+          } catch {
+            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+          }
+          const result = RuntimeSpecSchema.safeParse(parsed);
+          if (!result.success)
+            return ok({
+              ok: false,
+              errors: result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+            });
+          const existingVersions = await runtimes.ownVersions(ws, result.data.id);
+          return ok({
+            ok: true,
+            kind: result.data.kind,
+            id: result.data.id,
+            version: result.data.version,
+            existingVersions,
+            versionExists: existingVersions.includes(result.data.version),
+          });
+        }),
+    );
+
+    server.registerTool(
+      "create_runtime",
+      {
+        description:
+          "RuntimeSpec(JSON 문자열)을 이 워크스페이스 소유로 등록(불변; 충돌 시 CONFLICT). 자격증명은 SecretStore",
+        inputSchema: { runtime: z.string().describe("RuntimeSpec JSON") },
+      },
+      ({ runtime }) =>
+        run(principal, "runtimes:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(runtime);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 RuntimeSpec JSON 이 아닙니다.");
+          }
+          const result = RuntimeSpecSchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          await runtimes.register(ws, result.data);
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );

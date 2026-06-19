@@ -1,0 +1,7 @@
+{
+  "kind": "local",
+  "id": "local",
+  "version": "1.0.0",
+  "description": "first-party 공용 런타임 — 컨트롤플레인 호스트에서 in-process 실행(dev/단일 머신). 외부 자격증명 불필요.",
+  "tags": ["shared", "dev"]
+}

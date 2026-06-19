@@ -2,7 +2,12 @@ import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
 import { InMemoryRunStore, InMemoryScorecardStore } from "@assay/db";
-import { InMemoryDatasetRegistry, InMemoryHarnessRegistry, InMemoryJudgeRegistry } from "@assay/registry";
+import {
+  InMemoryDatasetRegistry,
+  InMemoryHarnessRegistry,
+  InMemoryJudgeRegistry,
+  InMemoryRuntimeRegistry,
+} from "@assay/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
@@ -47,6 +52,7 @@ function harness() {
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
     judgeRegistry: new InMemoryJudgeRegistry(),
+    runtimeRegistry: new InMemoryRuntimeRegistry(),
     scorecardService: new ScorecardService({
       dispatcher: okDispatcher,
       store: new InMemoryScorecardStore(),
@@ -75,15 +81,18 @@ describe("MCP tools", () => {
     expect(names).toEqual([
       "create_dataset",
       "create_judge",
+      "create_runtime",
       "diff_scorecards",
       "get_dataset",
       "get_judge",
       "get_run",
+      "get_runtime",
       "get_scorecard",
       "list_datasets",
       "list_harnesses",
       "list_judges",
       "list_runs",
+      "list_runtimes",
       "list_scorecards",
       "register_harness",
       "run_scorecard",
@@ -91,6 +100,7 @@ describe("MCP tools", () => {
       "validate_dataset",
       "validate_harness",
       "validate_judge",
+      "validate_runtime",
     ]);
   });
 
@@ -242,5 +252,29 @@ describe("MCP tools", () => {
     const res = await client.callTool({ name: "diff_scorecards", arguments: { baseline: "x", candidate: "y" } });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain("NOT_FOUND");
+  });
+
+  it("runtimes: admin 이 등록·조회; member 는 write 권한오류(실행 인프라=admin)", async () => {
+    const deps = harness();
+    const runtime = JSON.stringify({
+      kind: "nomad",
+      id: "seoul",
+      version: "1.0.0",
+      addr: "http://nomad:4646",
+      image: "ghcr.io/acme/agent:1",
+    });
+    const admin = await connect(deps, ["admin"], "acme");
+    const created = await admin.callTool({ name: "create_runtime", arguments: { runtime } });
+    expect(created.isError).toBeFalsy();
+    expect(text(created)).toContain("seoul");
+    const got = JSON.parse(text(await admin.callTool({ name: "get_runtime", arguments: { id: "seoul" } })));
+    expect(got).toMatchObject({ kind: "nomad", addr: "http://nomad:4646" });
+
+    const member = await connect(deps, ["member"], "acme");
+    const denied = await member.callTool({ name: "create_runtime", arguments: { runtime } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+    // member 는 읽기는 됨
+    expect((await member.callTool({ name: "list_runtimes", arguments: {} })).isError).toBeFalsy();
   });
 });

@@ -28,6 +28,10 @@ describe("authz", () => {
     expect(can(p(["viewer"]), "judges:read")).toBe(true);
     expect(can(p(["viewer"]), "judges:write")).toBe(false);
     expect(can(p(["member"]), "judges:write")).toBe(true);
+    // runtimes: 읽기는 viewer+, 쓰기는 admin(실행 인프라 = 실행/배치 결정)
+    expect(can(p(["member"]), "runtimes:read")).toBe(true);
+    expect(can(p(["member"]), "runtimes:write")).toBe(false);
+    expect(can(p(["admin"]), "runtimes:write")).toBe(true);
   });
   it("authorize 는 권한 없으면 403", () => {
     expect(() => authorize(p(["member"]), "harnesses:register")).toThrow(ForbiddenError);

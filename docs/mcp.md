@@ -6,8 +6,8 @@ validates the token. Humans use the web; agents (Claude Code, CI, custom) use MC
 
 ## Tools
 Streamable-HTTP MCP endpoint at `POST /mcp` (stateful sessions). Each tool runs over the **same service core** as
-the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `DatasetRegistry` + `JudgeRegistry`), is
-**role-gated** (`authorize(principal, action)`) and **workspace-scoped**:
+the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `DatasetRegistry` + `JudgeRegistry` +
+`RuntimeRegistry`), is **role-gated** (`authorize(principal, action)`) and **workspace-scoped**:
 
 | Tool | Action (role) | Effect |
 |---|---|---|
@@ -25,6 +25,10 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `get_judge` | `judges:read` | one `JudgeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_judge` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
 | `create_judge` | `judges:write` (member+) | register a `JudgeSpec` (immutable → `CONFLICT`) |
+| `list_runtimes` | `runtimes:read` (viewer+) | workspace-owned + `_shared` execution runtimes (local \| nomad \| k8s) |
+| `get_runtime` | `runtimes:read` | one `RuntimeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
+| `validate_runtime` | `runtimes:write` (admin) | dry-run: schema + existing versions/conflict (no write) |
+| `create_runtime` | `runtimes:write` (admin) | register a `RuntimeSpec` (immutable → `CONFLICT`) |
 | `run_scorecard` | `scorecards:run` (member+) | batch-eval a dataset × `harness@version` → queued `ScorecardRecord` (poll with `get_scorecard`) |
 | `list_scorecards` | `scorecards:read` (viewer+) | the workspace's scorecards (summary only) |
 | `get_scorecard` | `scorecards:read` | one scorecard incl. per-case results (other workspace → `NOT_FOUND`) |

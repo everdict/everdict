@@ -20,6 +20,10 @@ arrives by polling or webhook.
 | `POST` | `/judges/validate` | dry-run: schema + existing versions/conflict, no write (`judges:write`) |
 | `GET`  | `/judges` | workspace-owned + `_shared` Agent Judges (`judges:read`) |
 | `GET`  | `/judges/:id/versions/:version` | full `JudgeSpec`; `version` may be `latest` (`judges:read`) |
+| `POST` | `/runtimes` | register a `RuntimeSpec` (local \| nomad \| k8s; immutable → `409`) (`runtimes:write`, admin) |
+| `POST` | `/runtimes/validate` | dry-run: schema + existing versions/conflict, no write (`runtimes:write`) |
+| `GET`  | `/runtimes` | workspace-owned + `_shared` execution runtimes (`runtimes:read`) |
+| `GET`  | `/runtimes/:id/versions/:version` | full `RuntimeSpec`; `version` may be `latest` (`runtimes:read`) |
 | `POST` | `/scorecards` | `{ dataset:{id,version?}, harness:{id,version?} }` → **202** `ScorecardRecord(queued)` (`scorecards:run`, member+) |
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |
 | `GET`  | `/scorecards/:id` | full `ScorecardRecord` (incl. per-case `scorecard`) or 404 (`scorecards:read`) |
