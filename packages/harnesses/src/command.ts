@@ -79,7 +79,8 @@ export class CommandHarness implements EvaluableHarness {
     try {
       await compute.exec(cmd, { cwd: this.opts.workDir ?? "work", env, timeoutSec: ctx.timeoutSec });
 
-      // 계측된 토큰을 합성 llm_call 로 — sumCost/cost 그레이더가 기존 경로로 집계($는 0, 토큰만).
+      // 계측된 토큰+비용을 합성 llm_call 로 — sumCost/cost 그레이더가 기존 경로로 집계.
+      // usd 는 게이트웨이 비용 헤더에서 회수(계량 모델은 실 비용, 구독 모델은 0).
       if (proxy) {
         const u = proxy.tally.get(runId);
         if (u.calls > 0)
@@ -87,7 +88,7 @@ export class CommandHarness implements EvaluableHarness {
             t: Date.now(),
             kind: "llm_call",
             model: this.spec.model ?? "",
-            cost: { inputTokens: u.promptTokens, outputTokens: u.completionTokens, usd: 0 },
+            cost: { inputTokens: u.promptTokens, outputTokens: u.completionTokens, usd: u.usd },
           };
       }
 

@@ -1,6 +1,6 @@
 import http from "node:http";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createUsageProxy, extractUsage, inMemoryUsageTally } from "./usage-proxy.js";
+import { costFromHeaders, createUsageProxy, extractUsage, inMemoryUsageTally } from "./usage-proxy.js";
 
 function listen(server: http.Server): Promise<number> {
   return new Promise((resolve) => {
@@ -34,6 +34,15 @@ describe("extractUsage", () => {
   });
 });
 
+describe("costFromHeaders", () => {
+  it("LiteLLM 비용 헤더(버전별 이름)에서 $ 를 읽고, 없으면 0", () => {
+    expect(costFromHeaders({ "x-litellm-response-cost": "0.0031" })).toBeCloseTo(0.0031);
+    expect(costFromHeaders({ "x-litellm-response-cost-original": "0.5" })).toBe(0.5); // 이 버전 헤더명
+    expect(costFromHeaders({ "content-type": "application/json" })).toBe(0);
+    expect(costFromHeaders({ "x-litellm-response-cost": "nope" })).toBe(0);
+  });
+});
+
 describe("createUsageProxy", () => {
   let upstream: http.Server;
   let proxy: http.Server;
@@ -50,7 +59,8 @@ describe("createUsageProxy", () => {
         choices: [{ message: { role: "assistant", content: "hi" } }],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       });
-      res.writeHead(200, { "content-type": "application/json" });
+      // 계량 모델처럼 비용 헤더를 함께 반환(프록시가 $도 회수하는지 검증).
+      res.writeHead(200, { "content-type": "application/json", "x-litellm-response-cost-original": "0.002" });
       res.end(body);
     });
     const upPort = await listen(upstream);
@@ -70,7 +80,7 @@ describe("createUsageProxy", () => {
       body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "u" }] }),
     });
 
-  it("응답을 그대로 통과시키고(passthrough) run 별 토큰을 누적", async () => {
+  it("응답을 그대로 통과시키고(passthrough) run 별 토큰+비용을 누적", async () => {
     const r = await callThrough("r1");
     expect(r.status).toBe(200);
     const j = (await r.json()) as { choices: { message: { content: string } }[] };
@@ -78,8 +88,12 @@ describe("createUsageProxy", () => {
     await callThrough("r1");
     await callThrough("r2");
 
-    expect(tally.get("r1")).toEqual({ promptTokens: 20, completionTokens: 10, totalTokens: 30, calls: 2 });
-    expect(tally.get("r2")).toEqual({ promptTokens: 10, completionTokens: 5, totalTokens: 15, calls: 1 });
+    const r1 = tally.get("r1");
+    expect(r1).toMatchObject({ promptTokens: 20, completionTokens: 10, totalTokens: 30, calls: 2 });
+    expect(r1.usd).toBeCloseTo(0.004); // 0.002 × 2 (비용 헤더 누적)
+    const r2 = tally.get("r2");
+    expect(r2).toMatchObject({ promptTokens: 10, completionTokens: 5, totalTokens: 15, calls: 1 });
+    expect(r2.usd).toBeCloseTo(0.002);
   });
 
   it("귀속 헤더는 업스트림으로 새지 않는다(프록시가 제거)", async () => {

@@ -10,7 +10,22 @@ export interface RunUsage {
   promptTokens: number;
   completionTokens: number;
   totalTokens: number;
+  usd: number; // 계량 모델의 실제 비용(게이트웨이 헤더). 구독 모델은 0.
   calls: number; // 이 run 으로 귀속된 LLM 호출 수
+}
+
+// LiteLLM 응답 헤더에서 이 호출의 비용($)을 읽는다. 버전별 헤더명 차이 대응(없거나 0 이면 0).
+const COST_HEADERS = ["x-litellm-response-cost", "x-litellm-response-cost-original"] as const;
+export function costFromHeaders(headers: Record<string, string | string[] | undefined>): number {
+  for (const name of COST_HEADERS) {
+    const v = headers[name];
+    const s = Array.isArray(v) ? v[0] : v;
+    if (s !== undefined) {
+      const n = Number(s);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return 0;
 }
 
 // OpenAI-호환 응답 body 에서 usage 추출. 스트리밍/비JSON/usage 없음 → null.
@@ -34,7 +49,7 @@ export function extractUsage(body: string): { prompt: number; completion: number
 }
 
 export interface UsageTally {
-  record(runId: string, u: { prompt: number; completion: number; total: number }): void;
+  record(runId: string, u: { prompt: number; completion: number; total: number; usd?: number }): void;
   get(runId: string): RunUsage;
   snapshot(): Record<string, RunUsage>;
 }
@@ -44,7 +59,7 @@ export function inMemoryUsageTally(): UsageTally {
   const get = (runId: string): RunUsage => {
     let u = m.get(runId);
     if (!u) {
-      u = { promptTokens: 0, completionTokens: 0, totalTokens: 0, calls: 0 };
+      u = { promptTokens: 0, completionTokens: 0, totalTokens: 0, usd: 0, calls: 0 };
       m.set(runId, u);
     }
     return u;
@@ -55,6 +70,7 @@ export function inMemoryUsageTally(): UsageTally {
       u.promptTokens += c.prompt;
       u.completionTokens += c.completion;
       u.totalTokens += c.total;
+      u.usd += c.usd ?? 0;
       u.calls += 1;
     },
     get(runId) {
@@ -140,7 +156,7 @@ export function createUsageProxy(opts: UsageProxyOptions): UsageProxy {
           upRes.on("end", () => {
             const rb = Buffer.concat(rc);
             const u = extractUsage(rb.toString("utf8"));
-            if (u) tally.record(runId, u);
+            if (u) tally.record(runId, { ...u, usd: costFromHeaders(upRes.headers) }); // 토큰(body) + 비용(헤더)
             // 응답 헤더: 버퍼 전체를 다시 보내므로 길이/인코딩은 Node 가 다시 설정하게 둔다.
             const respHeaders = omitHeaders(upRes.headers, ["transfer-encoding", "content-length"]);
             res.writeHead(upRes.statusCode ?? 502, respHeaders);

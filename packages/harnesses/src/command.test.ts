@@ -75,7 +75,7 @@ describe("CommandHarness", () => {
   });
 
   // 사용량 계측: trace:none 하니스의 모델 호출을 usage-proxy 로 통과시켜 토큰을 합성 llm_call 로 회수.
-  function fakeMeter(usage = { promptTokens: 100, completionTokens: 20, totalTokens: 120, calls: 1 }) {
+  function fakeMeter(usage = { promptTokens: 100, completionTokens: 20, totalTokens: 120, usd: 0.012, calls: 1 }) {
     const calls: { upstream: string; closed: boolean } = { upstream: "", closed: false };
     const start = async (opts: { upstreamBaseUrl: string; defaultRunId?: string }): Promise<StartedUsageProxy> => {
       calls.upstream = opts.upstreamBaseUrl;
@@ -106,7 +106,7 @@ describe("CommandHarness", () => {
         t: expect.any(Number),
         kind: "llm_call",
         model: "sonnet",
-        cost: { inputTokens: 100, outputTokens: 20, usd: 0 },
+        cost: { inputTokens: 100, outputTokens: 20, usd: 0.012 }, // $도 헤더에서 회수
       },
     ]);
     expect(calls.closed).toBe(true);

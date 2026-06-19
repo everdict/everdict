@@ -5,6 +5,7 @@ export {
   createUsageProxy,
   startUsageProxy,
   extractUsage,
+  costFromHeaders,
   inMemoryUsageTally,
   type RunUsage,
   type UsageTally,
