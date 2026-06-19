@@ -1,7 +1,7 @@
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { AgentJob, CaseResult, RuntimeSpec } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "./backend.js";
-import { BackendRegistry, Router, buildRegistry } from "./registry.js";
+import { BackendRegistry, Router, buildRegistry, k8sRuntimeOptions, nomadRuntimeOptions } from "./registry.js";
 
 class FakeBackend implements Backend {
   constructor(readonly id: string) {}
@@ -65,5 +65,50 @@ describe("buildRegistry", () => {
     });
     expect(registry.names().sort()).toEqual(["dev", "nomad-a"]);
     expect(defaultTarget).toBe("nomad-a");
+  });
+});
+
+describe("nomadRuntimeOptions (외부 클러스터 API 인증)", () => {
+  const spec = (authSecret?: string): Extract<RuntimeSpec, { kind: "nomad" }> => ({
+    kind: "nomad",
+    id: "rt",
+    version: "1.0.0",
+    tags: [],
+    addr: "http://nomad:4646",
+    image: "img",
+    ...(authSecret ? { authSecret } : {}),
+  });
+
+  it("authSecret 을 API 토큰으로 풀고, alloc env 에서는 제외한다(클러스터 토큰 노출 금지)", () => {
+    const opts = nomadRuntimeOptions(spec("NOMAD_TOKEN"), {
+      NOMAD_TOKEN: "acl-xyz",
+      ANTHROPIC_API_KEY: "sk-model",
+    });
+    expect(opts.apiToken).toBe("acl-xyz");
+    expect(opts.secretEnv).toEqual({ ANTHROPIC_API_KEY: "sk-model" }); // 토큰은 빠지고 모델 키만 alloc 으로
+  });
+
+  it("authSecret 미지정이면 apiToken 없음 + secretEnv 그대로", () => {
+    const opts = nomadRuntimeOptions(spec(), { ANTHROPIC_API_KEY: "sk-model" });
+    expect(opts.apiToken).toBeUndefined();
+    expect(opts.secretEnv).toEqual({ ANTHROPIC_API_KEY: "sk-model" });
+  });
+});
+
+describe("k8sRuntimeOptions (외부 클러스터 API 인증)", () => {
+  it("authSecret→bearer 토큰 + server 전달, alloc env 에서 토큰 제외", () => {
+    const spec: Extract<RuntimeSpec, { kind: "k8s" }> = {
+      kind: "k8s",
+      id: "rt",
+      version: "1.0.0",
+      tags: [],
+      image: "img",
+      server: "https://k8s.acme.internal:6443",
+      authSecret: "K8S_TOKEN",
+    };
+    const opts = k8sRuntimeOptions(spec, { K8S_TOKEN: "bearer-xyz", OPENAI_API_KEY: "sk-model" });
+    expect(opts.apiToken).toBe("bearer-xyz");
+    expect(opts.server).toBe("https://k8s.acme.internal:6443");
+    expect(opts.secretEnv).toEqual({ OPENAI_API_KEY: "sk-model" });
   });
 });

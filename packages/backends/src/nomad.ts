@@ -9,13 +9,18 @@ export interface NomadHttp {
   request(method: string, path: string, body?: unknown): Promise<{ status: number; text: string }>;
 }
 
-function fetchHttp(addr: string): NomadHttp {
+// Nomad HTTP 클라이언트. apiToken 이 있으면 모든 요청에 X-Nomad-Token(ACL 인증)을 싣는다.
+export function fetchHttp(addr: string, apiToken?: string, fetchImpl?: typeof fetch): NomadHttp {
   const base = addr.replace(/\/$/, "");
+  const f = fetchImpl ?? fetch;
   return {
     async request(method, path, body) {
-      const res = await fetch(`${base}${path}`, {
+      const headers: Record<string, string> = {};
+      if (body) headers["content-type"] = "application/json";
+      if (apiToken) headers["x-nomad-token"] = apiToken; // 컨트롤플레인↔Nomad API 인증
+      const res = await f(`${base}${path}`, {
         method,
-        headers: body ? { "content-type": "application/json" } : undefined,
+        ...(Object.keys(headers).length > 0 ? { headers } : {}),
         body: body ? JSON.stringify(body) : undefined,
       });
       return { status: res.status, text: await res.text() };
@@ -26,6 +31,7 @@ function fetchHttp(addr: string): NomadHttp {
 export interface NomadBackendOptions {
   addr: string; // Nomad HTTP endpoint, e.g. http://nomad.internal:4646
   image: string; // 러너 에이전트 이미지 (사내 레지스트리)
+  apiToken?: string; // Nomad ACL 토큰(X-Nomad-Token) — 컨트롤플레인↔Nomad API 인증. alloc env 와 무관.
   http?: NomadHttp;
   secretEnv?: Record<string, string>; // alloc 에 주입할 인증(예: CLAUDE_CODE_OAUTH_TOKEN). secrets 가 없을 때의 기본.
   secrets?: SecretProvider; // 테넌트별 시크릿 스코핑 — 잡마다 그 테넌트의 키만 주입(누출 금지).
@@ -114,7 +120,7 @@ export class NomadBackend implements Backend {
   private readonly http: NomadHttp;
 
   constructor(private readonly opts: NomadBackendOptions) {
-    this.http = opts.http ?? fetchHttp(opts.addr);
+    this.http = opts.http ?? fetchHttp(opts.addr, opts.apiToken);
   }
 
   // 용량: total=설정 상한, used=클러스터에서 관측된 진행중 assay 잡 수(라이브 프로브, 전 네임스페이스).

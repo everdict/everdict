@@ -1,9 +1,9 @@
 import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
 import { z } from "zod";
 import type { Backend } from "./backend.js";
-import { K8sBackend } from "./k8s.js";
+import { K8sBackend, type K8sBackendOptions } from "./k8s.js";
 import { LocalBackend } from "./local.js";
-import { NomadBackend } from "./nomad.js";
+import { NomadBackend, type NomadBackendOptions } from "./nomad.js";
 
 // 이름 → Backend 인스턴스. 1 인스턴스 = 1 타깃(클러스터/풀).
 // 여러 Nomad/K8s/Windows 타깃은 각각 별개 인스턴스로 등록한다.
@@ -76,28 +76,60 @@ export const BackendsConfigSchema = z.object({
 });
 export type BackendsConfig = z.infer<typeof BackendsConfigSchema>;
 
-// 테넌트가 등록한 RuntimeSpec(@assay/core) → 라이브 Backend. 자격증명은 secretEnv 로 주입(스펙엔 비밀 없음).
-// 컨트롤플레인이 디스패치 시 이걸로 테넌트 런타임을 만들어 Scheduler 레지스트리에 올린다.
-export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> } = {}): Backend {
-  const secretEnv = opts.secretEnv;
-  if (spec.kind === "local") return new LocalBackend();
-  if (spec.kind === "k8s") {
-    return new K8sBackend({
-      image: spec.image,
-      ...(spec.context ? { context: spec.context } : {}),
-      ...(spec.namespace ? { namespace: spec.namespace } : {}),
-      ...(spec.runtimeClass ? { runtimeClass: spec.runtimeClass } : {}),
-      ...(secretEnv ? { secretEnv } : {}),
-    });
-  }
-  return new NomadBackend({
+// 시크릿맵에서 한 키를 제외한 새 맵(없으면 그대로). 클러스터 API 토큰을 alloc env 에서 분리할 때 쓴다.
+function withoutKey(
+  env: Record<string, string> | undefined,
+  key: string | undefined,
+): Record<string, string> | undefined {
+  if (!env || !key || !(key in env)) return env;
+  const { [key]: _omitted, ...rest } = env;
+  return rest;
+}
+
+// RuntimeSpec(nomad) + 테넌트 시크릿맵 → NomadBackendOptions.
+// authSecret(이름)은 Nomad API(ACL) 토큰으로 풀려 X-Nomad-Token 으로 쓰이고, alloc env 에서는 제외(에이전트에 노출 금지).
+export function nomadRuntimeOptions(
+  spec: Extract<RuntimeSpec, { kind: "nomad" }>,
+  secretEnv?: Record<string, string>,
+): NomadBackendOptions {
+  const apiToken = spec.authSecret ? secretEnv?.[spec.authSecret] : undefined;
+  const allocEnv = withoutKey(secretEnv, spec.authSecret);
+  return {
     addr: spec.addr,
     image: spec.image,
     ...(spec.runtime ? { runtime: spec.runtime } : {}),
     ...(spec.datacenters ? { datacenters: spec.datacenters } : {}),
     ...(spec.namespace ? { namespace: spec.namespace } : {}),
-    ...(secretEnv ? { secretEnv } : {}),
-  });
+    ...(apiToken ? { apiToken } : {}),
+    ...(allocEnv && Object.keys(allocEnv).length > 0 ? { secretEnv: allocEnv } : {}),
+  };
+}
+
+// RuntimeSpec(k8s) + 테넌트 시크릿맵 → K8sBackendOptions. authSecret 은 K8s API bearer 토큰으로 풀려(server 와 함께) alloc env 에서 제외.
+export function k8sRuntimeOptions(
+  spec: Extract<RuntimeSpec, { kind: "k8s" }>,
+  secretEnv?: Record<string, string>,
+): K8sBackendOptions {
+  const apiToken = spec.authSecret ? secretEnv?.[spec.authSecret] : undefined;
+  const allocEnv = withoutKey(secretEnv, spec.authSecret);
+  return {
+    image: spec.image,
+    ...(spec.context ? { context: spec.context } : {}),
+    ...(spec.namespace ? { namespace: spec.namespace } : {}),
+    ...(spec.runtimeClass ? { runtimeClass: spec.runtimeClass } : {}),
+    ...(spec.server ? { server: spec.server } : {}),
+    ...(apiToken ? { apiToken } : {}),
+    ...(allocEnv && Object.keys(allocEnv).length > 0 ? { secretEnv: allocEnv } : {}),
+  };
+}
+
+// 테넌트가 등록한 RuntimeSpec(@assay/core) → 라이브 Backend. 모델/클러스터 자격증명은 secretEnv 로 주입(스펙엔 비밀 없음).
+// 클러스터 API 토큰(authSecret)은 인증 헤더로 쓰이고 alloc env 에서는 분리된다(위 옵션 빌더).
+// 컨트롤플레인이 디스패치 시 이걸로 테넌트 런타임을 만들어 Scheduler 레지스트리에 올린다.
+export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> } = {}): Backend {
+  if (spec.kind === "local") return new LocalBackend();
+  if (spec.kind === "k8s") return new K8sBackend(k8sRuntimeOptions(spec, opts.secretEnv));
+  return new NomadBackend(nomadRuntimeOptions(spec, opts.secretEnv));
 }
 
 export function buildRegistry(

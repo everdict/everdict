@@ -8,11 +8,16 @@ compute") and select one per scorecard run; the control plane routes dispatch th
 ## Contract (`@assay/core`)
 `RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`) with `id, version, description?, tags`:
 - **local** — in-process on the control-plane host (dev / single machine).
-- **nomad** — `{ addr, image, runtime?, datacenters?, namespace? }`.
-- **k8s** — `{ image, context?, namespace?, runtimeClass? }`.
+- **nomad** — `{ addr, image, runtime?, datacenters?, namespace?, authSecret? }`.
+- **k8s** — `{ image, context?, namespace?, runtimeClass?, server?, authSecret? }`.
 
-⚠️ **No secrets in the spec** (it's an immutable, readable SSOT). Credentials (Nomad token, kubeconfig) and the
-agent's model keys come from the tenant's **SecretStore**, injected at dispatch time.
+⚠️ **No secrets in the spec** (it's an immutable, readable SSOT). Credentials and the agent's model keys come from
+the tenant's **SecretStore**, injected at dispatch time. `authSecret` is the *name* of the SecretStore entry that
+holds the **control-plane→cluster-API** credential — Nomad ACL token (sent as `X-Nomad-Token`, live-verified over
+HTTP) or K8s API bearer token (`kubectl --token` with `server`). It is resolved by name and used **only** as the
+API auth header; it is **stripped from the alloc/pod env** so the cluster admin token is never handed to the
+untrusted agent (distinct from the model keys, which ARE injected into the job env). k8s can instead auth via a
+local kubeconfig `context` (no token needed).
 
 ## Ownership & lifecycle
 `RuntimeRegistry` (`@assay/registry`, `InMemory`/`Pg`, migration `0009_create_runtimes.sql`) — workspace-owned +

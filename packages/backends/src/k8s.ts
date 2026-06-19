@@ -41,9 +41,14 @@ function run(bin: string, args: string[], stdin?: string): Promise<RunResult> {
 }
 
 // kind/kubeconfig 컨텍스트로 동작하는 실 kubectl 구현.
-export function kubectlApi(opts: { context?: string; bin?: string } = {}): K8sApi {
+// 외부 클러스터를 bearer 토큰으로 인증하려면 context 대신 server+token 을 준다(kubectl --server/--token).
+export function kubectlApi(opts: { context?: string; bin?: string; server?: string; token?: string } = {}): K8sApi {
   const bin = opts.bin ?? "kubectl";
-  const ctx = opts.context ? ["--context", opts.context] : [];
+  const ctx = [
+    ...(opts.context ? ["--context", opts.context] : []),
+    ...(opts.server ? ["--server", opts.server] : []),
+    ...(opts.token ? ["--token", opts.token] : []),
+  ];
   return {
     async ensureNamespace(ns) {
       const res = await run(
@@ -110,6 +115,8 @@ export interface K8sBackendOptions {
   image: string; // 러너 에이전트 이미지
   api?: K8sApi;
   context?: string; // kubeconfig 컨텍스트(예: kind-assay)
+  server?: string; // 외부 API 서버 URL(context 대신 bearer 인증할 때)
+  apiToken?: string; // K8s API bearer 토큰(kubectl --token) — 컨트롤플레인↔K8s API 인증. alloc env 와 무관.
   secretEnv?: Record<string, string>; // 잡에 주입할 인증(secrets 없을 때 기본)
   secrets?: SecretProvider; // 테넌트별 시크릿 스코핑
   namespace?: string; // 기본 네임스페이스(테넌트 존이 없을 때)
@@ -190,7 +197,13 @@ export class K8sBackend implements Backend {
   private readonly api: K8sApi;
 
   constructor(private readonly opts: K8sBackendOptions) {
-    this.api = opts.api ?? kubectlApi({ context: opts.context });
+    this.api =
+      opts.api ??
+      kubectlApi({
+        ...(opts.context ? { context: opts.context } : {}),
+        ...(opts.server ? { server: opts.server } : {}),
+        ...(opts.apiToken ? { token: opts.apiToken } : {}),
+      });
   }
 
   async capacity(): Promise<BackendCapacity> {

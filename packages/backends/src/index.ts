@@ -37,6 +37,7 @@ export {
 export {
   NomadBackend,
   buildNomadJob,
+  fetchHttp,
   nomadJobId,
   type NomadBackendOptions,
   type NomadHttp,
@@ -55,6 +56,8 @@ export {
   Router,
   buildRegistry,
   buildRuntimeBackend,
+  nomadRuntimeOptions,
+  k8sRuntimeOptions,
   BackendConfigSchema,
   BackendsConfigSchema,
   type BackendConfig,

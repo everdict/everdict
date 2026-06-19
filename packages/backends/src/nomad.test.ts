@@ -1,7 +1,7 @@
 import { RESULT_SENTINEL } from "@assay/agent";
 import { type AgentJob, BadRequestError, type CaseResult } from "@assay/core";
-import { describe, expect, it } from "vitest";
-import { NomadBackend, type NomadHttp, buildNomadJob } from "./nomad.js";
+import { describe, expect, it, vi } from "vitest";
+import { NomadBackend, type NomadHttp, buildNomadJob, fetchHttp } from "./nomad.js";
 import { staticSecrets } from "./secrets.js";
 import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
@@ -40,6 +40,25 @@ describe("buildNomadJob", () => {
     const decoded = JSON.parse(Buffer.from(task?.Env.ASSAY_AGENT_JOB ?? "", "base64").toString("utf8"));
     expect(decoded.evalCase.id).toBe("c1");
     expect(decoded.harness.id).toBe("claude-code");
+  });
+});
+
+describe("fetchHttp (Nomad API 인증)", () => {
+  it("apiToken 이 있으면 X-Nomad-Token 헤더를 싣는다", async () => {
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) => Promise.resolve(new Response("{}", { status: 200 })));
+    const http = fetchHttp("http://nomad:4646", "secret-acl-token", fetchImpl as typeof fetch);
+    await http.request("GET", "/v1/jobs");
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toBe("http://nomad:4646/v1/jobs");
+    expect((init.headers as Record<string, string>)["x-nomad-token"]).toBe("secret-acl-token");
+  });
+
+  it("apiToken 이 없으면 X-Nomad-Token 을 싣지 않는다", async () => {
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) => Promise.resolve(new Response("{}", { status: 200 })));
+    const http = fetchHttp("http://nomad:4646", undefined, fetchImpl as typeof fetch);
+    await http.request("GET", "/v1/jobs");
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit | undefined;
+    expect((init?.headers as Record<string, string> | undefined)?.["x-nomad-token"]).toBeUndefined();
   });
 });
 

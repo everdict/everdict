@@ -9,8 +9,11 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
   live `Backend` via `buildRuntimeBackend(spec, {secretEnv})`. The control plane's `RuntimeDispatcher` resolves a
   job's `placement.target` to the tenant's `RuntimeSpec`, builds + registers the backend under
   `rt:<tenant>:<id>@<version>`, and routes via the `Scheduler` (fairness/budget/capacity preserved). Credentials
-  (Nomad token, kubeconfig) come from the tenant `SecretStore` as `secretEnv` — never from the spec. See
-  `docs/runtimes.md`.
+  come from the tenant `SecretStore` (`secretEnv`) — never from the spec. **Two distinct credential roles, keep
+  them separate**: (a) the agent's model keys → injected into the job/alloc env; (b) the **control-plane→cluster-API**
+  token (`spec.authSecret` names the SecretStore entry) → sent as the API auth header (`X-Nomad-Token` /
+  `kubectl --token`+`server`) and **stripped from the alloc/pod env** (`nomadRuntimeOptions`/`k8sRuntimeOptions`)
+  so the cluster admin token is never exposed to untrusted eval code. See `docs/runtimes.md`.
 
 - Implement `Backend.dispatch(job: AgentJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
   (`./backend`, `@assay/core`). `capacity()` is what the `Scheduler` gates on — report a configured
