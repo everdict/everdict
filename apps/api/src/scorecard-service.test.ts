@@ -1,7 +1,15 @@
 import type { Dispatcher } from "@assay/backends";
-import { BadRequestError, type CaseResult, NotFoundError, type Scorecard } from "@assay/core";
+import {
+  BadRequestError,
+  type CaseResult,
+  type Dataset,
+  NotFoundError,
+  type Scorecard,
+  type TraceEvent,
+} from "@assay/core";
 import { InMemoryScorecardStore, type ScorecardRecord } from "@assay/db";
 import { InMemoryDatasetRegistry } from "@assay/registry";
+import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { describe, expect, it } from "vitest";
 import { ScorecardService } from "./scorecard-service.js";
 
@@ -68,5 +76,112 @@ describe("ScorecardService.diff", () => {
     await store.create(record("base", { scorecard: scorecard(true) }));
     await store.create(record("queued", { status: "queued" }));
     await expect(svc(store).diff("acme", "base", "queued")).rejects.toBeInstanceOf(BadRequestError);
+  });
+});
+
+// 한 케이스(c1)만 가진 데이터셋. pull 인제스트 정렬 대상.
+const datasetWithCase = (): Dataset => ({
+  id: "d",
+  version: "1.0.0",
+  cases: [
+    {
+      id: "c1",
+      env: { kind: "repo", source: { files: { "a.txt": "x" } } },
+      task: "do",
+      graders: [],
+      timeoutSec: 1800,
+      tags: [],
+    },
+  ],
+  tags: [],
+});
+
+// 백그라운드 trackPull 이 끝날 때까지(terminal status) 폴링한다.
+async function waitTerminal(store: InMemoryScorecardStore, id: string): Promise<ScorecardRecord> {
+  for (let i = 0; i < 50; i++) {
+    const rec = await store.get(id);
+    if (rec && (rec.status === "succeeded" || rec.status === "failed")) return rec;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  throw new Error("pull 인제스트가 끝나지 않음");
+}
+
+describe("ScorecardService.ingestPull", () => {
+  it("trace source 에서 트레이스를 당겨와 메트릭을 도출하고 succeeded 로 저장한다", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+
+    const trace: TraceEvent[] = [
+      { t: 0, kind: "llm_call", model: "m" },
+      { t: 1, kind: "tool_call", id: "t1", name: "bash", args: {} },
+    ];
+    let captured: TraceSourceConfig | undefined;
+    const buildTraceSource = (cfg: TraceSourceConfig): TraceSource => {
+      captured = cfg;
+      return { fetch: async () => trace };
+    };
+
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      buildTraceSource,
+      secretsFor: async () => ({ OTEL_TOKEN: "secret-xyz" }),
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      harness: { id: "h", version: "1.0.0" },
+      source: { kind: "otel", endpoint: "http://jaeger:16686", authSecret: "OTEL_TOKEN" },
+      runs: [{ caseId: "c1", runId: "trace-1" }],
+      judges: [],
+    });
+    expect(created.status).toBe("queued");
+
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("succeeded");
+    expect(done.scorecard?.results.map((r) => r.caseId)).toEqual(["c1"]);
+    expect(done.scorecard?.results[0]?.scores.some((s) => s.metric === "tool_calls")).toBe(true);
+    // authSecret → SecretStore 값 → Authorization: Bearer 헤더로 trace source 에 주입
+    expect(captured?.headers?.authorization).toBe("Bearer secret-xyz");
+  });
+
+  it("없는 데이터셋 → NotFoundError(404)", async () => {
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets: new InMemoryDatasetRegistry(),
+      buildTraceSource: () => ({ fetch: async () => [] }),
+    });
+    await expect(
+      service.ingestPull({
+        tenant: "acme",
+        dataset: { id: "missing", version: "latest" },
+        harness: { id: "h", version: "1.0.0" },
+        source: { kind: "otel", endpoint: "http://j" },
+        runs: [{ caseId: "c1", runId: "r1" }],
+        judges: [],
+      }),
+    ).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("buildTraceSource 미설정 → run 이 failed 로 종료(BAD_REQUEST)", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const service = new ScorecardService({ dispatcher, store, datasets });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      harness: { id: "h", version: "1.0.0" },
+      source: { kind: "otel", endpoint: "http://j" },
+      runs: [{ caseId: "c1", runId: "r1" }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    expect(done.status).toBe("failed");
+    expect(done.error?.code).toBe("BAD_REQUEST");
   });
 });

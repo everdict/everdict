@@ -16,7 +16,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from "zod";
 import { buildMcpServer } from "./mcp.js";
 import type { RunService } from "./run-service.js";
-import { IngestScorecardBodySchema, type ScorecardService } from "./scorecard-service.js";
+import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
 
 export const SubmitBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
@@ -492,6 +492,27 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       return reply.code(202).send(await deps.scorecardService.ingest({ tenant: principal.workspace, ...parsed.data }));
+    } catch (err) {
+      return sendError(reply, err); // 데이터셋 없으면 404
+    }
+  });
+
+  // pull 인제스트 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 채점(하니스 미실행). source 자격증명은 authSecret(SecretStore).
+  app.post("/scorecards/ingest/pull", async (req, reply) => {
+    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = PullIngestBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply
+        .code(202)
+        .send(await deps.scorecardService.ingestPull({ tenant: principal.workspace, ...parsed.data }));
     } catch (err) {
       return sendError(reply, err); // 데이터셋 없으면 404
     }

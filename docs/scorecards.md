@@ -31,6 +31,7 @@ Migration: `packages/db/migrations/0006_create_scorecards.sql`.
 |---|---|---|
 | `POST /scorecards` `{dataset, harness, judges?, runtime?}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest` `{dataset, harness, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards/ingest/pull` `{dataset, harness, source{kind,endpoint,authSecret?}, runs[], judges?}` → 202 | `pull_scorecard` | `scorecards:run` (member+) |
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |
 | `GET /scorecards/:id` (full) | `get_scorecard` | `scorecards:read` |
 | `GET /scorecards/diff?baseline=&candidate=` | `diff_scorecards` | `scorecards:read` |
@@ -46,8 +47,21 @@ The seam is the normalized `TraceEvent` (`@assay/core`) — per-harness trace va
 wraps each uploaded trace as a `CaseResult`, **re-derives the trace-only graders** (`steps`/`cost`/`latency` →
 `tool_calls`/`usd`/`span`, so ingested scorecards are diff-comparable to live runs), applies selected judges, and
 stores a `ScorecardRecord`. Unknown `caseId`s are skipped; a bad `TraceEvent` is a `400` at the boundary. From
-there judges/diff/dashboard reuse the same pipeline. (Pull-mode — fetch from a tenant's OTel/MLflow via
-`packages/trace` `TraceSource` + SecretStore — is the natural follow-on.)
+there judges/diff/dashboard reuse the same pipeline.
+
+### Pull-mode trace ingestion (`POST /scorecards/ingest/pull`)
+Two ways to get the trace in: **push** (upload `TraceEvent[]`, above) or **pull** (the control plane fetches it).
+Pull is for harnesses that already emit to a tenant's own **OTel/MLflow** — instead of re-uploading, you give the
+`source` (`kind` `otel`|`mlflow` + `endpoint`) and a `runs:[{caseId, runId}]` mapping. `ScorecardService.ingestPull`
+builds a `TraceSource` (`packages/trace` `buildTraceSource`), fetches each `runId` (→ normalized `TraceEvent[]` via
+the same `spansToTraceEvents` seam — per-harness span variance is absorbed by the adapter), then runs the **same**
+`finishIngest` pipeline as push (re-derive `tool_calls`/`usd`/`span`, apply judges, store). So push and pull converge
+on one scoring path; only the *acquisition* differs.
+
+**Credentials never live in the request.** `source.authSecret` is the *name* of a workspace SecretStore entry; the
+control plane resolves it server-side and injects it as `Authorization: Bearer <value>` on the fetch (`secretsFor`
++ `buildTraceSource` deps). No raw token crosses the API boundary — same discipline as runtimes (`docs/runtimes.md`).
+An upstream fetch failure surfaces as the run going `failed` (`UpstreamError`), not a partial scorecard.
 
 All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service core, one auth core. See
 `docs/api.md`, `docs/mcp.md`, `docs/web.md`, `docs/datasets.md`, `docs/suites.md`.
@@ -61,5 +75,7 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
 - **비교 `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
   mean Δ table + **regressions (pass→fail) / improvements (fail→pass)** via `diffScorecards`. This is the
   baseline-vs-candidate payoff. `scorecards:read`.
-- **인제스트 `/dashboard/scorecards/ingest`** — upload `TraceEvent[]` (dataset + harness label + judges) →
-  `POST /scorecards/ingest`. `scorecards:run` (member+).
+- **인제스트 `/dashboard/scorecards/ingest`** — a push|pull mode toggle. **push**: upload `TraceEvent[]` →
+  `POST /scorecards/ingest`. **pull**: pick a `source` (OTel/MLflow endpoint + optional auth-secret name) + a
+  `runs:[{caseId, runId}]` mapping → `POST /scorecards/ingest/pull`. Both add dataset + harness label + judges.
+  `scorecards:run` (member+).

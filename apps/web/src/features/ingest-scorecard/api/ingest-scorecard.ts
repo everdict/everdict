@@ -44,3 +44,45 @@ export async function ingestScorecardAction(input: IngestScorecardInput): Promis
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+export interface PullScorecardInput {
+  datasetId: string
+  datasetVersion: string
+  harnessId: string
+  harnessVersion: string
+  judgeIds: string[]
+  sourceKind: 'otel' | 'mlflow'
+  endpoint: string
+  authSecret: string
+  runsJson: string
+}
+
+// 서버 액션: pull 모드 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 scorecard 로. 자격증명은 authSecret 이름(SecretStore).
+// runsJson 은 [{caseId, runId}] 형태. 파싱 실패는 여기서 400, 스키마/네트워크 오류는 컨트롤플레인이 처리.
+export async function pullScorecardAction(input: PullScorecardInput): Promise<IngestScorecardResult> {
+  const ctx = await authContext()
+  let runs: unknown
+  try {
+    runs = JSON.parse(input.runsJson)
+  } catch {
+    return { ok: false, error: 'runs JSON 파싱 실패' }
+  }
+  const body = {
+    dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
+    harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
+    source: {
+      kind: input.sourceKind,
+      endpoint: input.endpoint,
+      ...(input.authSecret ? { authSecret: input.authSecret } : {}),
+    },
+    runs,
+    judges: input.judgeIds.map((id) => ({ id, version: 'latest' })),
+  }
+  try {
+    const rec = await controlPlane.ingestScorecardPull<{ id: string }>(ctx, body)
+    revalidatePath('/dashboard/scorecards')
+    return { ok: true, id: rec.id }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

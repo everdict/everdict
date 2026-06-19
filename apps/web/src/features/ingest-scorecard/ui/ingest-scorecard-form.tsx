@@ -3,11 +3,16 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Input, Label, Textarea } from '@/shared/ui/input'
-import { type IngestScorecardResult, ingestScorecardAction } from '../api/ingest-scorecard'
+import {
+  type IngestScorecardResult,
+  ingestScorecardAction,
+  pullScorecardAction,
+} from '../api/ingest-scorecard'
 
-const SAMPLE = `[
+const SAMPLE_TRACES = `[
   {
     "caseId": "case-1",
     "trace": [
@@ -19,29 +24,48 @@ const SAMPLE = `[
   }
 ]`
 
-// 외부에서 이미 수행한 트레이스를 업로드해 scorecard 로. dataset/judge 는 선택, traces 는 TraceEvent[] JSON.
+const SAMPLE_RUNS = `[
+  { "caseId": "case-1", "runId": "trace-abc-123" }
+]`
+
+type Mode = 'push' | 'pull'
+
+// 트레이스 인제스트 — push(업로드한 TraceEvent[]) | pull(테넌트 OTel/MLflow 에서 runId 로 당겨오기) 두 모드.
+// dataset/judge/harness 라벨은 공통. push 는 traces JSON, pull 은 source + runs JSON.
 export function IngestScorecardForm({ datasets, judges }: { datasets: { id: string }[]; judges: { id: string }[] }) {
   const router = useRouter()
+  const [mode, setMode] = useState<Mode>('push')
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '')
   const [datasetVersion, setDatasetVersion] = useState('latest')
   const [harnessId, setHarnessId] = useState('')
   const [harnessVersion, setHarnessVersion] = useState('external')
   const [judgeIds, setJudgeIds] = useState<string[]>([])
-  const [tracesJson, setTracesJson] = useState(SAMPLE)
+  const [tracesJson, setTracesJson] = useState(SAMPLE_TRACES)
+  // pull 모드 전용
+  const [sourceKind, setSourceKind] = useState<'otel' | 'mlflow'>('otel')
+  const [endpoint, setEndpoint] = useState('')
+  const [authSecret, setAuthSecret] = useState('')
+  const [runsJson, setRunsJson] = useState(SAMPLE_RUNS)
   const [serverError, setServerError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
   async function onSubmit() {
     setBusy(true)
     setServerError(undefined)
-    const res: IngestScorecardResult = await ingestScorecardAction({
-      datasetId,
-      datasetVersion,
-      harnessId,
-      harnessVersion,
-      judgeIds,
-      tracesJson,
-    })
+    const res: IngestScorecardResult =
+      mode === 'push'
+        ? await ingestScorecardAction({ datasetId, datasetVersion, harnessId, harnessVersion, judgeIds, tracesJson })
+        : await pullScorecardAction({
+            datasetId,
+            datasetVersion,
+            harnessId,
+            harnessVersion,
+            judgeIds,
+            sourceKind,
+            endpoint,
+            authSecret,
+            runsJson,
+          })
     setBusy(false)
     if (res.ok && res.id) router.push(`/dashboard/scorecards/${res.id}`)
     else setServerError(res.error ?? '인제스트 실패')
@@ -49,6 +73,28 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
 
   return (
     <div className="max-w-2xl space-y-5">
+      {/* 모드 토글 */}
+      <div className="inline-flex rounded-xl border p-1 text-sm">
+        {(['push', 'pull'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setMode(m)}
+            className={cn(
+              'rounded-lg px-4 py-1.5 transition-colors',
+              mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+            )}
+          >
+            {m === 'push' ? '업로드 (push)' : '소스에서 당겨오기 (pull)'}
+          </button>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground">
+        {mode === 'push'
+          ? '이미 가진 TraceEvent[] 를 직접 올립니다.'
+          : '테넌트 OTel/MLflow 에서 runId 별로 트레이스를 당겨옵니다. 자격증명은 워크스페이스 시크릿 이름으로 지정합니다(평문 금지).'}
+      </p>
+
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label htmlFor="datasetId">데이터셋 (caseId 정렬용)</Label>
@@ -76,23 +122,78 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
         </div>
       </div>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="traces">트레이스 (`[{'{'} caseId, trace: TraceEvent[] {'}'}]` JSON)</Label>
-        <Textarea
-          id="traces"
-          className="min-h-72 font-mono text-xs"
-          value={tracesJson}
-          onChange={(e) => setTracesJson(e.target.value)}
-          spellCheck={false}
-        />
-        <p className="text-xs text-muted-foreground">
-          caseId 는 데이터셋의 케이스와 맞춰주세요(없는 caseId 는 스킵). 트레이스에서 tool_calls/usd/span 이 자동 재도출됩니다.
-        </p>
-      </div>
+      {mode === 'push' ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="traces">트레이스 (`[{'{'} caseId, trace: TraceEvent[] {'}'}]` JSON)</Label>
+          <Textarea
+            id="traces"
+            className="min-h-72 font-mono text-xs"
+            value={tracesJson}
+            onChange={(e) => setTracesJson(e.target.value)}
+            spellCheck={false}
+          />
+          <p className="text-xs text-muted-foreground">
+            caseId 는 데이터셋의 케이스와 맞춰주세요(없는 caseId 는 스킵). 트레이스에서 tool_calls/usd/span 이 자동 재도출됩니다.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div className="grid grid-cols-3 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="sourceKind">소스 종류</Label>
+              <select
+                id="sourceKind"
+                value={sourceKind}
+                onChange={(e) => setSourceKind(e.target.value === 'mlflow' ? 'mlflow' : 'otel')}
+                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
+              >
+                <option value="otel">OTel</option>
+                <option value="mlflow">MLflow</option>
+              </select>
+            </div>
+            <div className="col-span-2 space-y-1.5">
+              <Label htmlFor="endpoint">엔드포인트</Label>
+              <Input
+                id="endpoint"
+                value={endpoint}
+                onChange={(e) => setEndpoint(e.target.value)}
+                placeholder={sourceKind === 'mlflow' ? 'http://mlflow:5000' : 'http://jaeger:16686'}
+              />
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="authSecret">자격증명 시크릿 이름 (선택 — 워크스페이스 시크릿)</Label>
+            <Input
+              id="authSecret"
+              value={authSecret}
+              onChange={(e) => setAuthSecret(e.target.value)}
+              placeholder="OTEL_TOKEN"
+            />
+            <p className="text-xs text-muted-foreground">
+              시크릿 값이 `Authorization: Bearer &lt;값&gt;` 으로 소스에 주입됩니다. 토큰 평문이 아니라 시크릿 이름만 입력하세요.
+            </p>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label htmlFor="runs">실행 매핑 (`[{'{'} caseId, runId {'}'}]` JSON)</Label>
+            <Textarea
+              id="runs"
+              className="min-h-48 font-mono text-xs"
+              value={runsJson}
+              onChange={(e) => setRunsJson(e.target.value)}
+              spellCheck={false}
+            />
+            <p className="text-xs text-muted-foreground">
+              각 runId 의 트레이스를 소스에서 당겨와 caseId 에 맞춥니다. tool_calls/usd/span 이 자동 재도출됩니다.
+            </p>
+          </div>
+        </>
+      )}
 
       {judges.length > 0 && (
         <div className="space-y-1.5">
-          <Label>Agent Judge (선택 — 업로드된 트레이스에 적용)</Label>
+          <Label>Agent Judge (선택 — 인제스트된 트레이스에 적용)</Label>
           <div className="flex flex-wrap gap-3 rounded-xl border p-3 text-sm">
             {judges.map((j) => (
               <label key={j.id} className="flex items-center gap-1.5">
@@ -115,7 +216,7 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
       )}
 
       <Button type="button" onClick={onSubmit} disabled={busy}>
-        {busy ? '인제스트 중…' : '트레이스 인제스트'}
+        {busy ? '인제스트 중…' : mode === 'push' ? '트레이스 인제스트' : '소스에서 인제스트'}
       </Button>
     </div>
   )

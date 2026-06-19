@@ -51,8 +51,10 @@ Import order enforces downward layer deps (app → widgets → features → enti
   chips; rows link to detail). **상세 `/dashboard/scorecards/[id]`** shows per-metric stat cards + per-case
   scores. **실행 `/dashboard/scorecards/new`** — pick dataset + harness (+ optional judges) → `POST /scorecards`.
   **비교 `/dashboard/scorecards/compare`** — two scorecard pickers → metric Δ table + regressions/improvements
-  (`diffScorecards`). **인제스트 `/dashboard/scorecards/ingest`** — upload externally-run `TraceEvent[]` → scorecard
-  (no harness run). Role-gated off `/me` (run/ingest = member+, read/compare = viewer+). See `docs/scorecards.md`.
+  (`diffScorecards`). **인제스트 `/dashboard/scorecards/ingest`** — push|pull toggle: **push** uploads externally-run
+  `TraceEvent[]`; **pull** fetches from a tenant's OTel/MLflow (`source` + `runs:[{caseId,runId}]`, auth-secret name).
+  Both produce a scorecard with no harness run. Role-gated off `/me` (run/ingest = member+, read/compare = viewer+).
+  See `docs/scorecards.md`.
 - **Judge `/dashboard/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **상세 `/dashboard/judges/[id]`** shows kind + fields + rubric. **등록 `/dashboard/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`

@@ -114,6 +114,9 @@ function server(
     judges: judgeRegistry,
     // 시크릿 없음 → model judge 는 skip 점수(실제 모델 호출 없이 와이어링 검증).
     judgeRunner: defaultJudgeRunner({ secretsFor: async () => ({}) }),
+    // pull 인제스트용 fake trace source + 시크릿(authSecret→헤더 주입 검증).
+    buildTraceSource: () => ({ fetch: async () => [{ t: 0, kind: "tool_call", id: "x", name: "bash", args: {} }] }),
+    secretsFor: async () => ({ OTEL_TOKEN: "secret-xyz" }),
     newId: () => `sc-${n++}`,
   });
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
@@ -517,6 +520,45 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
       url: "/scorecards",
       headers: h,
       payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("POST /scorecards/ingest/pull: trace source 에서 트레이스를 당겨와 scorecard 생성(member)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET }); // caseId c1
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards/ingest/pull",
+      headers: h,
+      payload: {
+        dataset: { id: "smoke" },
+        harness: { id: "external" },
+        source: { kind: "otel", endpoint: "http://jaeger:16686", authSecret: "OTEL_TOKEN" },
+        runs: [{ caseId: "c1", runId: "trace-1" }],
+      },
+    });
+    expect(post.statusCode).toBe(202);
+    const settled = await pollScorecard(app, post.json().id, h);
+    expect(settled.status).toBe("succeeded");
+    expect(settled.scorecard?.results?.[0]?.caseId).toBe("c1");
+    await app.close();
+  });
+
+  it("POST /scorecards/ingest/pull: viewer 는 403", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/scorecards/ingest/pull",
+      headers: { authorization: "Bearer x" },
+      payload: {
+        dataset: { id: "smoke" },
+        harness: { id: "external" },
+        source: { kind: "otel", endpoint: "http://j" },
+        runs: [{ caseId: "c1", runId: "r1" }],
+      },
     });
     expect(res.statusCode).toBe(403);
     await app.close();

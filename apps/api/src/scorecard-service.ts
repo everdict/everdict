@@ -19,6 +19,7 @@ import type { ScorecardRecord, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
 import { type Dispatch, type ScorecardDiff, diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
+import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { z } from "zod";
 import type { JudgeRunner } from "./judge-runner.js";
 
@@ -42,6 +43,22 @@ export const IngestScorecardBodySchema = z.object({
 export type IngestScorecardBody = z.infer<typeof IngestScorecardBodySchema>;
 export type IngestScorecardInput = IngestScorecardBody & { tenant: string };
 
+// pull 인제스트 본문 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 채점(하니스 미실행).
+// source 자격증명은 authSecret 이름(SecretStore)으로만 — spec 에 평문 토큰 금지.
+export const PullIngestBodySchema = z.object({
+  dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
+  harness: z.object({ id: z.string(), version: z.string().default("latest") }),
+  source: z.object({
+    kind: z.enum(["otel", "mlflow"]),
+    endpoint: z.string().url(),
+    authSecret: z.string().optional(), // SecretStore 키 이름 → Authorization: Bearer <값>
+  }),
+  runs: z.array(z.object({ caseId: z.string(), runId: z.string() })).min(1),
+  judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+});
+export type PullIngestBody = z.infer<typeof PullIngestBodySchema>;
+export type PullIngestInput = PullIngestBody & { tenant: string };
+
 export interface RunScorecardInput {
   tenant: string;
   dataset: { id: string; version: string };
@@ -58,6 +75,8 @@ export interface ScorecardServiceDeps {
   judges?: JudgeRegistry; // judge 해석(소유/_shared 폴백)
   judgeRunner?: JudgeRunner; // 트레이스 기반 judge 실행(model 호출 / skip)
   budget?: BudgetTracker; // 케이스마다 admission/settle
+  buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@assay/trace)
+  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(서버 내부 주입)
   concurrency?: number;
   newId?: () => string;
   now?: () => string;
@@ -144,9 +163,35 @@ export class ScorecardService {
       record.id,
       input.tenant,
       dataset,
-      input.harness.id,
-      harnessVersion,
+      `${input.harness.id}@${harnessVersion}`,
       input.traces,
+      input.judges ?? [],
+    );
+    return record;
+  }
+
+  // pull 인제스트 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 scorecard 생성. dataset 해석(없으면 404) → queued → 비동기.
+  async ingestPull(input: PullIngestInput): Promise<ScorecardRecord> {
+    const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
+    const harnessVersion = input.harness.version || "latest";
+    const ts = this.now();
+    const record: ScorecardRecord = {
+      id: this.newId(),
+      tenant: input.tenant,
+      dataset: { id: dataset.id, version: dataset.version },
+      harness: { id: input.harness.id, version: harnessVersion }, // 트레이스를 만든 하니스(라벨)
+      status: "queued",
+      createdAt: ts,
+      updatedAt: ts,
+    };
+    await this.deps.store.create(record);
+    void this.trackPull(
+      record.id,
+      input.tenant,
+      dataset,
+      `${input.harness.id}@${harnessVersion}`,
+      input.source,
+      input.runs,
       input.judges ?? [],
     );
     return record;
@@ -211,47 +256,98 @@ export class ScorecardService {
     }
   }
 
-  // 업로드된 트레이스 → CaseResult(트레이스 그레이더 재도출 + 업로드 점수) → judge 적용 → 집계. 하니스 디스패치 없음.
+  // push 인제스트: 업로드된 트레이스를 그대로 finishIngest 로.
   private async trackIngest(
     id: string,
     tenant: string,
     dataset: Dataset,
-    harnessId: string,
-    harnessVersion: string,
+    harnessLabel: string,
     traces: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
   ): Promise<void> {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
     try {
-      const harnessLabel = `${harnessId}@${harnessVersion}`;
-      const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
-      const results: CaseResult[] = [];
-      for (const up of traces) {
-        const evalCase = caseById.get(up.caseId);
-        if (!evalCase) continue; // 데이터셋에 없는 caseId 는 스킵(정렬 불가)
-        const snapshot = up.snapshot ?? { kind: "repo", diff: "", changedFiles: [], headSha: "ingested" };
-        const ctx: GradeContext = { case: evalCase, trace: up.trace, snapshot };
-        // 트레이스 전용 그레이더 재도출(steps/cost/latency) — 라이브 run 과 같은 메트릭으로 diff 정렬.
-        const derived = await Promise.all([stepsGrader, costGrader, latencyGrader].map((g) => g.grade(ctx)));
-        results.push({
-          caseId: up.caseId,
-          harness: harnessLabel,
-          trace: up.trace,
-          snapshot,
-          scores: [...derived, ...(up.scores ?? [])],
-        });
-      }
-      const scorecard: Scorecard = { suiteId: dataset.id, harness: harnessLabel, results };
-      await this.applyJudges(tenant, dataset, results, judges); // 트레이스 → judge 점수(컨트롤플레인)
-      const summary = summarizeScorecard(scorecard);
-      await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
+      await this.finishIngest(id, tenant, dataset, harnessLabel, traces, judges);
     } catch (err) {
-      const error =
-        err instanceof AppError
-          ? { code: err.code, message: err.message }
-          : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-      await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
+      await this.failIngest(id, err);
     }
+  }
+
+  // pull 인제스트: 테넌트 trace source(OTel/MLflow)에서 runId 별로 트레이스를 당겨와 finishIngest 로.
+  private async trackPull(
+    id: string,
+    tenant: string,
+    dataset: Dataset,
+    harnessLabel: string,
+    source: PullIngestBody["source"],
+    runs: PullIngestBody["runs"],
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<void> {
+    await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
+    try {
+      if (!this.deps.buildTraceSource)
+        throw new BadRequestError("BAD_REQUEST", {}, "trace source 빌더가 설정되지 않았습니다(pull 비활성).");
+      // 자격증명: source.authSecret 이름 → 테넌트 SecretStore 값 → Authorization: Bearer 헤더.
+      let headers: Record<string, string> | undefined;
+      if (source.authSecret) {
+        const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
+        const token = secrets[source.authSecret];
+        if (token) headers = { authorization: `Bearer ${token}` };
+      }
+      const src = this.deps.buildTraceSource({
+        kind: source.kind,
+        endpoint: source.endpoint,
+        ...(headers ? { headers } : {}),
+      });
+      const perCase: IngestScorecardBody["traces"] = [];
+      for (const r of runs) {
+        const trace = await src.fetch(r.runId); // 외부 실패는 UpstreamError → catch → failed
+        perCase.push({ caseId: r.caseId, trace });
+      }
+      await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges);
+    } catch (err) {
+      await this.failIngest(id, err);
+    }
+  }
+
+  // 공유: perCase 트레이스 → CaseResult(트레이스 그레이더 재도출 + 업로드 점수) → judge → 집계 저장(succeeded). 실패는 throw.
+  private async finishIngest(
+    id: string,
+    tenant: string,
+    dataset: Dataset,
+    harnessLabel: string,
+    perCase: IngestScorecardBody["traces"],
+    judges: Array<{ id: string; version: string }>,
+  ): Promise<void> {
+    const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
+    const results: CaseResult[] = [];
+    for (const up of perCase) {
+      const evalCase = caseById.get(up.caseId);
+      if (!evalCase) continue; // 데이터셋에 없는 caseId 는 스킵(정렬 불가)
+      const snapshot = up.snapshot ?? { kind: "repo", diff: "", changedFiles: [], headSha: "ingested" };
+      const ctx: GradeContext = { case: evalCase, trace: up.trace, snapshot };
+      // 트레이스 전용 그레이더 재도출(steps/cost/latency) — 라이브 run 과 같은 메트릭으로 diff 정렬.
+      const derived = await Promise.all([stepsGrader, costGrader, latencyGrader].map((g) => g.grade(ctx)));
+      results.push({
+        caseId: up.caseId,
+        harness: harnessLabel,
+        trace: up.trace,
+        snapshot,
+        scores: [...derived, ...(up.scores ?? [])],
+      });
+    }
+    const scorecard: Scorecard = { suiteId: dataset.id, harness: harnessLabel, results };
+    await this.applyJudges(tenant, dataset, results, judges); // 트레이스 → judge 점수(컨트롤플레인)
+    const summary = summarizeScorecard(scorecard);
+    await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
+  }
+
+  private async failIngest(id: string, err: unknown): Promise<void> {
+    const error =
+      err instanceof AppError
+        ? { code: err.code, message: err.message }
+        : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
+    await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
   }
 
   // 선택된 judge 들을 각 케이스 트레이스에 적용 → judge:<id> 점수를 결과 scores 에 덧붙인다(요약에 반영).

@@ -1,2 +1,8 @@
 export { IngestScorecardForm } from './ui/ingest-scorecard-form'
-export { ingestScorecardAction, type IngestScorecardInput, type IngestScorecardResult } from './api/ingest-scorecard'
+export {
+  ingestScorecardAction,
+  pullScorecardAction,
+  type IngestScorecardInput,
+  type IngestScorecardResult,
+  type PullScorecardInput,
+} from './api/ingest-scorecard'

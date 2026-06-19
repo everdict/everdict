@@ -95,6 +95,7 @@ describe("MCP tools", () => {
       "list_runs",
       "list_runtimes",
       "list_scorecards",
+      "pull_scorecard",
       "register_harness",
       "run_scorecard",
       "submit_run",
@@ -284,6 +285,46 @@ describe("MCP tools", () => {
     expect(rec.scorecard?.results?.[0]?.scores.map((s) => s.metric)).toEqual(
       expect.arrayContaining(["tool_calls", "usd", "span"]),
     );
+  });
+
+  it("pull_scorecard: trace source 에서 트레이스를 당겨와 scorecard(하니스 미실행); authSecret→헤더 주입", async () => {
+    const base = harness();
+    const datasetRegistry = base.datasetRegistry;
+    let captured: { headers?: Record<string, string> } | undefined;
+    const deps = {
+      ...base,
+      scorecardService: new ScorecardService({
+        dispatcher: okDispatcher,
+        store: new InMemoryScorecardStore(),
+        datasets: datasetRegistry,
+        newId: () => `scp-${n++}`,
+        buildTraceSource: (cfg) => {
+          captured = cfg;
+          return { fetch: async () => [{ t: 0, kind: "tool_call", id: "x", name: "bash", args: {} }] };
+        },
+        secretsFor: async () => ({ OTEL_TOKEN: "secret-xyz" }),
+      }),
+    };
+    const client = await connect(deps, ["member"], "acme");
+    await client.callTool({ name: "create_dataset", arguments: { dataset: DATASET } }); // caseId c1
+    const body = JSON.stringify({
+      dataset: { id: "smoke" },
+      harness: { id: "external" },
+      source: { kind: "otel", endpoint: "http://jaeger:16686", authSecret: "OTEL_TOKEN" },
+      runs: [{ caseId: "c1", runId: "trace-1" }],
+    });
+    const pull = await client.callTool({ name: "pull_scorecard", arguments: { body } });
+    expect(pull.isError).toBeFalsy();
+    const id = JSON.parse(text(pull)).id as string;
+    let rec: { status: string; scorecard?: { results: Array<{ caseId: string }> } } = { status: "queued" };
+    for (let i = 0; i < 50; i++) {
+      rec = JSON.parse(text(await client.callTool({ name: "get_scorecard", arguments: { id } })));
+      if (rec.status === "succeeded" || rec.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(rec.status).toBe("succeeded");
+    expect(rec.scorecard?.results?.[0]?.caseId).toBe("c1");
+    expect(captured?.headers?.authorization).toBe("Bearer secret-xyz");
   });
 
   it("runtimes: admin 이 등록·조회; member 는 write 권한오류(실행 인프라=admin)", async () => {

@@ -48,6 +48,8 @@ export const controlPlane = {
     call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
   ingestScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards/ingest', { method: 'POST', body: JSON.stringify(body) }),
+  ingestScorecardPull: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/scorecards/ingest/pull', { method: 'POST', body: JSON.stringify(body) }),
   diffScorecards: <T>(auth: AuthContext, baseline: string, candidate: string) =>
     call<T>(
       auth,

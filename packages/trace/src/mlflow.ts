@@ -28,14 +28,19 @@ export function parseMlflowTrace(trace: MlflowTrace): Span[] {
 
 export interface MlflowTraceSourceOptions {
   endpoint: string;
+  headers?: Record<string, string>; // 테넌트 자격증명 등(예: Authorization). SecretStore 에서 주입.
+  fetchImpl?: typeof fetch; // 테스트 주입
 }
 
 // MLflow tracing REST 에서 trace(runId)를 가져와 TraceEvent 로 정규화.
 export class MlflowTraceSource implements TraceSource {
   constructor(private readonly opts: MlflowTraceSourceOptions) {}
   async fetch(runId: string): Promise<TraceEvent[]> {
+    const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
-    const res = await fetch(`${base}/api/2.0/mlflow/traces/${encodeURIComponent(runId)}`);
+    const res = await f(`${base}/api/2.0/mlflow/traces/${encodeURIComponent(runId)}`, {
+      ...(this.opts.headers ? { headers: this.opts.headers } : {}),
+    });
     // 트레이스가 아직 없거나(404) 인증·서버 오류면 빈 트레이스로 degrade — 그레이더는 0건으로 평가.
     if (!res.ok) return [];
     let body: { trace?: MlflowTrace };

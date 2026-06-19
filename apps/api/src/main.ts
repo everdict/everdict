@@ -47,6 +47,7 @@ import {
   loadJudgeDir,
   loadRuntimeDir,
 } from "@assay/registry";
+import { buildTraceSource } from "@assay/trace";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { RunService } from "./run-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
@@ -133,6 +134,9 @@ async function main(): Promise<void> {
     judges: judgeRegistry,
     judgeRunner,
     budget,
+    // pull 인제스트: 테넌트 OTel/MLflow 에서 트레이스를 당겨 채점. 자격증명은 테넌트 SecretStore(authSecret 이름).
+    buildTraceSource,
+    secretsFor: runtimeSecretsFor,
   });
   const app = buildServer({
     service,

@@ -25,7 +25,8 @@ arrives by polling or webhook.
 | `GET`  | `/runtimes` | workspace-owned + `_shared` execution runtimes (`runtimes:read`) |
 | `GET`  | `/runtimes/:id/versions/:version` | full `RuntimeSpec`; `version` may be `latest` (`runtimes:read`) |
 | `POST` | `/scorecards` | `{ dataset, harness, judges?, runtime? }` → **202** `ScorecardRecord(queued)` (`scorecards:run`, member+) |
-| `POST` | `/scorecards/ingest` | `{ dataset, harness, traces:[{caseId,trace:TraceEvent[]}], judges? }` → **202** (no harness run) (`scorecards:run`) |
+| `POST` | `/scorecards/ingest` | `{ dataset, harness, traces:[{caseId,trace:TraceEvent[]}], judges? }` → **202** (no harness run; push) (`scorecards:run`) |
+| `POST` | `/scorecards/ingest/pull` | `{ dataset, harness, source:{kind:otel\|mlflow,endpoint,authSecret?}, runs:[{caseId,runId}], judges? }` → **202** (pull from tenant OTel/MLflow; `authSecret`=SecretStore key) (`scorecards:run`) |
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |
 | `GET`  | `/scorecards/:id` | full `ScorecardRecord` (incl. per-case `scorecard`) or 404 (`scorecards:read`) |
 | `GET`  | `/scorecards/diff?baseline=&candidate=` | `ScorecardDiff` (metric Δ + regressions/improvements) (`scorecards:read`) |
