@@ -1,5 +1,6 @@
 import type { ServiceHarnessSpec } from "@assay/core";
 import { dependencyStores } from "./dependencies.js";
+import { sanitizeIdent } from "./store-binding.js";
 
 // warm 토폴로지를 Nomad service 잡으로 렌더 (서비스당 task group; docker + runsc 격리).
 // 공유 스토어 엔드포인트는 storeEnv(Consul/static)로 주입. per-run wiring 은 front-door API 로 별도.
@@ -87,6 +88,36 @@ export function buildSharedStoreJob(stores: string[], opts: NomadTopologyOptions
       Namespace: opts.namespace,
       Datacenters: opts.datacenters ?? ["dc1"],
       TaskGroups: buildDependencyGroups(spec, opts),
+    },
+  };
+}
+
+// silo 전용 스토어 잡 — 테넌트(존)마다 별도 스토어 인스턴스(전용). 그룹명 = assay-store-<zone>-<store>.
+// 런타임이 이걸 띄우고 host:port 를 발견해 서비스 connEnv 로 와이어링(pool 과 같은 discover-then-inject, DDL 없음).
+export function dedicatedStoreJobId(spec: ServiceHarnessSpec, zoneId: string): string {
+  return `assay-store-${spec.id}-${sanitizeIdent(zoneId)}`;
+}
+export function dedicatedStoreGroup(zoneId: string, store: string): string {
+  return `assay-store-${sanitizeIdent(zoneId)}-${store}`;
+}
+export function buildDedicatedStoreJob(
+  spec: ServiceHarnessSpec,
+  stores: string[],
+  zoneId: string,
+  opts: NomadTopologyOptions = {},
+): NomadTopologyJobSpec {
+  const synth = {
+    id: `assay-store-${sanitizeIdent(zoneId)}`,
+    dependencies: [...new Set(stores)].map((store) => ({ store, role: "dedicated", isolateBy: "schema" })),
+    services: [],
+  } as unknown as ServiceHarnessSpec;
+  return {
+    Job: {
+      ID: dedicatedStoreJobId(spec, zoneId),
+      Type: "service",
+      Namespace: opts.namespace,
+      Datacenters: opts.datacenters ?? ["dc1"],
+      TaskGroups: buildDependencyGroups(synth, opts), // 그룹명 = assay-store-<zone>-<store>
     },
   };
 }

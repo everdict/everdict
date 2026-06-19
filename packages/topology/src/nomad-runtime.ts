@@ -12,8 +12,11 @@ import {
   SHARED_STORE_JOB_ID,
   browserJobId,
   buildBrowserJob,
+  buildDedicatedStoreJob,
   buildNomadTopologyJob,
   buildSharedStoreJob,
+  dedicatedStoreGroup,
+  dedicatedStoreJobId,
   resolvePort,
   topologyJobId,
 } from "./nomad-topology.js";
@@ -126,8 +129,11 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     // pool: 공유 스토어(클러스터 1회) → 테넌트별 DB/role/ACL mint(alloc exec) → scoped creds 를 서비스 env 로.
     // (Nomad 는 Consul 없이 DNS 가 없어 K8s 와 달리 런타임에 host:port 를 발견해 주입한다.)
     let storeEnv = this.opts.storeEnv;
-    if (zone && resolveStoreIsolation(zone) === "pool") {
-      storeEnv = { ...(await this.provisionPool(spec, zone)), ...this.opts.storeEnv };
+    if (zone) {
+      const isolation = resolveStoreIsolation(zone);
+      // pool=공유 스토어+테넌트 DDL, silo=테넌트 전용 스토어 인스턴스(둘 다 host:port 발견 후 주입), external=storeEnv.
+      if (isolation === "pool") storeEnv = { ...(await this.provisionPool(spec, zone)), ...this.opts.storeEnv };
+      else if (isolation === "silo") storeEnv = { ...(await this.provisionSilo(spec, zone)), ...this.opts.storeEnv };
     }
 
     // 네트워크 격리: Consul Connect intentions(같은 테넌트만 allow + 그 외 deny). enforce 엔 Connect-enabled 잡 필요.
@@ -193,6 +199,29 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       }
     }
     return plan.serviceEnv;
+  }
+
+  // silo: 테넌트 전용 스토어 잡을 띄우고 host:port 를 발견해 서비스 connEnv 로 주입(DDL 불필요 — 인스턴스 전체가 테넌트 것).
+  private async provisionSilo(spec: ServiceHarnessSpec, zone: TrustZone): Promise<Record<string, string>> {
+    const ns = zone.namespace ?? this.opts.namespace;
+    const stores = [...new Set(dependencyStores(spec).map((s) => s.store))];
+    if (stores.length === 0) return {};
+    await this.register(
+      buildDedicatedStoreJob(spec, stores, zone.id, { datacenters: this.opts.datacenters, namespace: ns }),
+      ns,
+    );
+    const env: Record<string, string> = {};
+    for (const store of stores) {
+      const alloc = await this.waitForGroupRunning(
+        dedicatedStoreJobId(spec, zone.id),
+        dedicatedStoreGroup(zone.id, store),
+        ns,
+      );
+      const p = resolvePort(alloc, "store");
+      if (!p) throw new UpstreamError("UPSTREAM_ERROR", { store }, "전용 스토어 포트를 alloc 에서 찾지 못했습니다.");
+      Object.assign(env, STORE_DEFS[store]?.connEnv(`${p.hostIp}:${p.port}`) ?? {});
+    }
+    return env;
   }
 
   private async ensureSharedStores(stores: string[]): Promise<void> {
@@ -308,7 +337,10 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         await this.opts.consul.deleteIntention(meshServiceName(zone.id, svc.name)).catch(() => {});
       }
     }
-    await this.deregister(topologyJobId(spec, zone?.id), zone?.namespace ?? this.opts.namespace);
+    const ns = zone?.namespace ?? this.opts.namespace;
+    // silo 전용 스토어 잡도 정리(존이 있으면; 없으면 no-op).
+    if (zone) await this.deregister(dedicatedStoreJobId(spec, zone.id), ns);
+    await this.deregister(topologyJobId(spec, zone?.id), ns);
   }
 
   private nsq(namespace: string | undefined, sep: "?" | "&"): string {

@@ -92,8 +92,14 @@ the K8s pool path: deploy a shared-store **Nomad service job** (`assay-shared-st
 `host:port` via `resolvePort` → mint per-tenant DB/role/ACL via **`nomad alloc exec`** (the kubectl-exec analog) →
 inject scoped creds into the topology job's service env. Verified live on `nomad agent -dev`
 (`scripts/live/pool-isolation-nomad.mjs`): same result — one shared PG, `acme` creds → `tenant_globex` = **DENIED**,
-own DB = OK. So pool multi-tenant store isolation holds identically on **both** orchestrators. (Nomad silo
-service→store endpoint wiring follows the same discover-then-inject pattern and is the remaining follow-up.)
+own DB = OK. So pool multi-tenant store isolation holds identically on **both** orchestrators.
+
+**Silo on Nomad** uses the same discover-then-inject path minus the DDL: `buildDedicatedStoreJob` renders a
+**per-zone dedicated** store job (`assay-store-<harness>-<zone>`), the runtime discovers its `host:port` and injects
+the default-creds connection env into the services (the whole instance is the tenant's — no per-tenant DB needed).
+Verified live (`scripts/live/silo-isolation-nomad.mjs`): zones `acme`+`globex` each got a **distinct** dedicated PG
+instance (different host:ports), services wired to the discovered endpoint, both reachable — physical isolation.
+So **store isolation is at full parity** across `{pool, silo} × {K8s, Nomad}`.
 
 ## Network isolation — NetworkPolicy (`TrustZone.network`)
 Per-tenant DB credentials (pool) stop a tenant from *reading* another tenant's data, but a hostile harness pod

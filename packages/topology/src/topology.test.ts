@@ -9,6 +9,7 @@ import {
   SHARED_STORE_JOB_ID,
   browserJobId,
   buildBrowserJob,
+  buildDedicatedStoreJob,
   buildNomadTopologyJob,
   buildSharedStoreJob,
   resolvePort,
@@ -171,6 +172,13 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
     expect(job.Job.TaskGroups.map((g) => g.Name).sort()).toEqual(["assay-shared-postgres", "assay-shared-redis"]);
     const pg = job.Job.TaskGroups.find((g) => g.Name === "assay-shared-postgres");
     expect(pg?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "store", To: 5432 });
+  });
+
+  it("Nomad silo: buildDedicatedStoreJob 은 존별 전용 스토어 잡(zone-suffixed)을 렌더한다", () => {
+    const job = buildDedicatedStoreJob(SPEC, ["postgres"], "acme");
+    expect(job.Job.ID).toBe("assay-store-browser-use-langgraph-acme");
+    expect(job.Job.TaskGroups.map((g) => g.Name)).toEqual(["assay-store-acme-postgres"]);
+    expect(job.Job.TaskGroups[0]?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "store", To: 5432 });
   });
 });
 

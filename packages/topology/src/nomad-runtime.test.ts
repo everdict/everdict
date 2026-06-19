@@ -100,4 +100,49 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
     const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
     await expect(rt.ensureTopology(SPEC, POOL_ZONE)).resolves.toBeDefined(); // consul 없이도 정상
   });
+
+  it("silo: 전용 스토어 잡 배포 + 발견된 host:port 로 서비스에 connEnv 주입(DDL 없음)", async () => {
+    const { registered, execCalls, http } = fakes();
+    const SILO_ZONE: TrustZone = {
+      id: "acme",
+      isolationRuntime: "runsc",
+      network: "deny-cross-tenant",
+      trusted: false,
+      storeIsolation: "silo",
+    };
+    // 전용 스토어 그룹 alloc 을 돌려주도록 http 를 보강(allocations 가 dedicated 그룹도 매칭).
+    const http2: NomadHttp = {
+      async request(method, path, body) {
+        if (path.includes("/allocations")) {
+          return {
+            status: 200,
+            text: JSON.stringify([
+              { TaskGroup: "assay-store-acme-postgres", ClientStatus: "running", ID: "alloc-silo-pg" },
+            ]),
+          };
+        }
+        if (path.startsWith("/v1/allocation/")) {
+          return {
+            status: 200,
+            text: JSON.stringify({
+              ID: "alloc-silo-pg",
+              TaskGroup: "assay-store-acme-postgres",
+              AllocatedResources: { Shared: { Ports: [{ Label: "store", Value: 41999, HostIP: "10.1.2.3" }] } },
+            }),
+          };
+        }
+        return http.request(method, path, body);
+      },
+    };
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http: http2, pollIntervalMs: 1, maxPolls: 5 });
+    await rt.ensureTopology(SPEC, SILO_ZONE);
+    // 전용 스토어 잡(zone-suffixed) 배포.
+    expect(registered.some((j) => j.Job.ID === "assay-store-aegra-acme")).toBe(true);
+    // silo 는 per-tenant DDL 없음(pool 과 차이).
+    expect(execCalls.some((c) => c.cmd === "psql")).toBe(false);
+    // 서비스 env 에 발견된 host:port(10.1.2.3:41999) 로 DATABASE_URL(전용 인스턴스, 기본 creds).
+    const topo = registered.find((j) => j.Job.ID === topologyJobId(SPEC, "acme"));
+    const env = topo?.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
+    expect(env.DATABASE_URL).toBe("postgresql://assay:assay@10.1.2.3:41999/assay");
+  });
 });

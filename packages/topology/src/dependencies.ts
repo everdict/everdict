@@ -18,13 +18,14 @@ export const STORE_DEFS: Record<string, StoreDef> = {
     image: "postgres:16-alpine",
     port: 5432,
     env: { POSTGRES_USER: "assay", POSTGRES_PASSWORD: "assay", POSTGRES_DB: "assay" },
-    connEnv: (h) => ({ DATABASE_URL: `postgresql://assay:assay@${h}:5432/assay` }),
+    // connEnv 는 "host:port" 엔드포인트를 받는다 — K8s=Service DNS:port(빌드타임), Nomad=발견한 alloc host:port.
+    connEnv: (ep) => ({ DATABASE_URL: `postgresql://assay:assay@${ep}/assay` }),
   },
   redis: {
     image: "redis:7-alpine",
     port: 6379,
     // REDIS_URL(드팩토) + REDIS_URI(aegra/일부 LangGraph) 둘 다 — 명시 storeEnv 가 있으면 그게 이긴다.
-    connEnv: (h) => ({ REDIS_URL: `redis://${h}:6379`, REDIS_URI: `redis://${h}:6379` }),
+    connEnv: (ep) => ({ REDIS_URL: `redis://${ep}`, REDIS_URI: `redis://${ep}` }),
   },
 };
 
@@ -43,9 +44,10 @@ export function dependencyStores(spec: ServiceHarnessSpec): Array<{ store: strin
 }
 
 // 배포될 스토어들로부터 서비스에 주입할 접속 env(컨벤션). 명시 storeEnv 가 이긴다.
+// K8s: 엔드포인트 = Service DNS:port (배포명:기본포트, 빌드타임 확정).
 export function dependencyConnEnv(spec: ServiceHarnessSpec): Record<string, string> {
   const out: Record<string, string> = {};
-  for (const { name, def } of dependencyStores(spec)) Object.assign(out, def.connEnv(name));
+  for (const { name, def } of dependencyStores(spec)) Object.assign(out, def.connEnv(`${name}:${def.port}`));
   return out;
 }
 
