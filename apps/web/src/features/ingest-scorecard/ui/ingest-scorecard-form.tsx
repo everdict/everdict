@@ -171,7 +171,8 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
               placeholder="OTEL_TOKEN"
             />
             <p className="text-xs text-muted-foreground">
-              시크릿 값이 `Authorization: Bearer &lt;값&gt;` 으로 소스에 주입됩니다. 토큰 평문이 아니라 시크릿 이름만 입력하세요.
+              시크릿 값이 `Authorization` 헤더로 그대로 주입됩니다(스킴 포함 — OTel: `Bearer &lt;token&gt;`, MLflow: `Basic
+              &lt;base64&gt;`). 여기엔 토큰 평문이 아니라 워크스페이스 시크릿 이름만 입력하세요.
             </p>
           </div>
 

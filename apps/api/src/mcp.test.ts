@@ -302,7 +302,7 @@ describe("MCP tools", () => {
           captured = cfg;
           return { fetch: async () => [{ t: 0, kind: "tool_call", id: "x", name: "bash", args: {} }] };
         },
-        secretsFor: async () => ({ OTEL_TOKEN: "secret-xyz" }),
+        secretsFor: async () => ({ OTEL_TOKEN: "Bearer secret-xyz" }),
       }),
     };
     const client = await connect(deps, ["member"], "acme");

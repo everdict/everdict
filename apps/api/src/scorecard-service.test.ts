@@ -127,7 +127,7 @@ describe("ScorecardService.ingestPull", () => {
       store,
       datasets,
       buildTraceSource,
-      secretsFor: async () => ({ OTEL_TOKEN: "secret-xyz" }),
+      secretsFor: async () => ({ OTEL_TOKEN: "Bearer secret-xyz" }),
     });
     const created = await service.ingestPull({
       tenant: "acme",

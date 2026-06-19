@@ -51,7 +51,7 @@ export const PullIngestBodySchema = z.object({
   source: z.object({
     kind: z.enum(["otel", "mlflow"]),
     endpoint: z.string().url(),
-    authSecret: z.string().optional(), // SecretStore 키 이름 → Authorization: Bearer <값>
+    authSecret: z.string().optional(), // SecretStore 키 이름 → 그 값을 Authorization 헤더로 그대로(스킴 포함: "Bearer …"|"Basic …")
   }),
   runs: z.array(z.object({ caseId: z.string(), runId: z.string() })).min(1),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
@@ -287,12 +287,13 @@ export class ScorecardService {
     try {
       if (!this.deps.buildTraceSource)
         throw new BadRequestError("BAD_REQUEST", {}, "trace source 빌더가 설정되지 않았습니다(pull 비활성).");
-      // 자격증명: source.authSecret 이름 → 테넌트 SecretStore 값 → Authorization: Bearer 헤더.
+      // 자격증명: source.authSecret 이름 → 테넌트 SecretStore 값을 Authorization 헤더로 그대로 주입.
+      // 값에 스킴을 포함한다(예: "Bearer <token>" [OTel/Jaeger] 또는 "Basic <base64>" [MLflow]) — 스킴 하드코딩 금지.
       let headers: Record<string, string> | undefined;
       if (source.authSecret) {
         const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
         const token = secrets[source.authSecret];
-        if (token) headers = { authorization: `Bearer ${token}` };
+        if (token) headers = { authorization: token };
       }
       const src = this.deps.buildTraceSource({
         kind: source.kind,

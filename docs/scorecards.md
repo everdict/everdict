@@ -59,9 +59,12 @@ the same `spansToTraceEvents` seam — per-harness span variance is absorbed by 
 on one scoring path; only the *acquisition* differs.
 
 **Credentials never live in the request.** `source.authSecret` is the *name* of a workspace SecretStore entry; the
-control plane resolves it server-side and injects it as `Authorization: Bearer <value>` on the fetch (`secretsFor`
-+ `buildTraceSource` deps). No raw token crosses the API boundary — same discipline as runtimes (`docs/runtimes.md`).
-An upstream fetch failure surfaces as the run going `failed` (`UpstreamError`), not a partial scorecard.
+control plane resolves it server-side and injects it as the **verbatim `Authorization` header** on the fetch
+(`secretsFor` + `buildTraceSource` deps). The secret value carries its own scheme — `Bearer <token>` for
+OTel/Jaeger, `Basic <base64(user:pass)>` for MLflow (verified live against MLflow 3.11.1) — so no scheme is
+hardcoded. No raw token crosses the API boundary — same discipline as runtimes (`docs/runtimes.md`). An upstream
+non-2xx surfaces as the run going `failed` (`UpstreamError`); a `404` (trace not present yet) degrades to an empty
+trace. MLflow uses the 3.x tracing REST (`GET /api/3.0/mlflow/traces/get`, OTLP-style spans).
 
 All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service core, one auth core. See
 `docs/api.md`, `docs/mcp.md`, `docs/web.md`, `docs/datasets.md`, `docs/suites.md`.

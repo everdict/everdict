@@ -55,18 +55,19 @@ describe("parseOtlpSpans", () => {
 });
 
 describe("parseMlflowTrace", () => {
-  it("MLflow trace 를 정규화한다", () => {
+  it("MLflow 3.x OTLP 스팬(attributes 배열)을 정규화한다", () => {
     const spans = parseMlflowTrace({
       spans: [
         {
           name: "tool",
           start_time_unix_nano: 2000000000,
           end_time_unix_nano: 2100000000,
-          attributes: { "tool.name": "x" },
+          attributes: [{ key: "tool.name", value: { string_value: "x" } }],
         },
       ],
     });
     expect(spans[0]?.startMs).toBe(2000);
+    expect(spans[0]?.attrs["tool.name"]).toBe("x");
     expect(spansToTraceEvents(spans).map((e) => e.kind)).toEqual(["tool_call", "tool_result"]);
   });
 });

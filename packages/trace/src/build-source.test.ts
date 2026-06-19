@@ -37,11 +37,17 @@ describe("buildTraceSource", () => {
     await expect(src.fetch("t")).rejects.toBeInstanceOf(AppError);
   });
 
-  it("mlflow: 헤더 주입 + 가져와 정규화", async () => {
+  it("mlflow: 3.x OTLP 스팬(snake_case AnyValue 배열) + 헤더 주입 → 정규화", async () => {
+    // 실제 MLflow 3.x `/api/3.0/mlflow/traces/get` 응답: attributes 는 {key,value:{string_value}} 배열(OTLP, snake_case).
     const body = {
       trace: {
         spans: [
-          { name: "tool", start_time_unix_nano: 0, end_time_unix_nano: 1000000, attributes: { "tool.name": "bash" } },
+          {
+            name: "tool_call",
+            start_time_unix_nano: 0,
+            end_time_unix_nano: 1000000,
+            attributes: [{ key: "tool.name", value: { string_value: "bash" } }],
+          },
         ],
       },
     };
@@ -51,11 +57,13 @@ describe("buildTraceSource", () => {
     const src = buildTraceSource({
       kind: "mlflow",
       endpoint: "http://mlflow:5000",
-      headers: { authorization: "Bearer sk" },
+      headers: { authorization: "Basic c2s=" },
       fetchImpl: fetchImpl as typeof fetch,
     });
-    const trace = await src.fetch("run-1");
+    const trace = await src.fetch("tr-1");
     expect(trace.some((e) => e.kind === "tool_call")).toBe(true);
-    expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer sk");
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(url).toMatch(/\/api\/3\.0\/mlflow\/traces\/get\?trace_id=tr-1$/);
+    expect((init.headers as Record<string, string>).authorization).toBe("Basic c2s=");
   });
 });
