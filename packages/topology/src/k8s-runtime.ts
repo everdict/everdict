@@ -1,4 +1,5 @@
 import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, UpstreamError } from "@assay/core";
+import { dependencyStores } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
 import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
@@ -9,6 +10,7 @@ export interface K8sTopologyRuntimeOptions {
   runtimeClass?: string; // 클러스터의 RuntimeClass (예: "gvisor") — 있으면 모든 파드에 적용
   namespacePrefix?: string; // 존 네임스페이스 접두사 (기본 "assay-")
   storeEnv?: Record<string, string>;
+  provisionDependencies?: boolean; // spec.dependencies[](postgres/redis)를 토폴로지와 함께 배포
   browserImage?: string;
   imagePullPolicy?: string; // kind 등 사전 로드 이미지: "IfNotPresent"
   readyTimeoutMs?: number;
@@ -53,15 +55,22 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       runtimeClass: this.opts.runtimeClass,
       storeEnv: this.opts.storeEnv,
       imagePullPolicy: this.opts.imagePullPolicy,
+      provisionDependencies: this.opts.provisionDependencies,
     });
     await this.kubectl.apply(manifests);
+
+    const readySec = Math.floor((this.opts.readyTimeoutMs ?? 120_000) / 1000);
+    // 스토어(PG/Redis)를 먼저 Ready — 서비스가 부팅 시 접속하므로. 스토어는 in-cluster DNS 라 port-forward 불필요.
+    if (this.opts.provisionDependencies) {
+      for (const { name } of dependencyStores(spec)) await this.kubectl.rolloutStatus(name, ns, readySec);
+    }
 
     const endpoints: Record<string, string> = {};
     const forwards: PortForward[] = [];
     for (const svc of spec.services) {
       if (svc.port === undefined) continue;
       const deploy = `${spec.id}-${svc.name}`;
-      await this.kubectl.rolloutStatus(deploy, ns, Math.floor((this.opts.readyTimeoutMs ?? 120_000) / 1000));
+      await this.kubectl.rolloutStatus(deploy, ns, readySec);
       const pf = await this.kubectl.portForward(`svc/${deploy}`, ns, svc.port);
       forwards.push(pf);
       const url = `http://127.0.0.1:${pf.localPort}`;

@@ -1,4 +1,5 @@
 import type { ServiceHarnessSpec } from "@assay/core";
+import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 
 // warm 토폴로지를 K8s Deployment/Service 로 렌더 (서비스당; runtimeClass 로 격리).
 export interface K8sManifest {
@@ -13,12 +14,57 @@ export interface K8sTopologyOptions {
   runtimeClass?: string; // 예: "gvisor"
   storeEnv?: Record<string, string>;
   imagePullPolicy?: string; // 예: "IfNotPresent" (kind 처럼 사전 로드한 이미지를 쓸 때)
+  provisionDependencies?: boolean; // spec.dependencies[](postgres/redis)도 함께 배포 + 접속 env 자동 주입
+}
+
+// 공유 스토어(spec.dependencies[])를 Deployment+Service 로 렌더. (harness-version, ns) 당 한 번.
+export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
+  const ns = opts.namespace ?? "assay-platform";
+  const out: K8sManifest[] = [];
+  for (const { store, name, def } of dependencyStores(spec)) {
+    const labels = { app: name, "assay/harness": spec.id, "assay/version": spec.version, "assay/store": store };
+    const env = Object.entries(def.env ?? {}).map(([n, value]) => ({ name: n, value }));
+    out.push({
+      apiVersion: "apps/v1",
+      kind: "Deployment",
+      metadata: { name, namespace: ns, labels },
+      spec: {
+        replicas: 1,
+        selector: { matchLabels: { app: name } },
+        template: {
+          metadata: { labels },
+          spec: {
+            runtimeClassName: opts.runtimeClass,
+            containers: [
+              {
+                name: store,
+                image: def.image,
+                imagePullPolicy: opts.imagePullPolicy,
+                env,
+                ports: [{ containerPort: def.port }],
+              },
+            ],
+          },
+        },
+      },
+    });
+    out.push({
+      apiVersion: "v1",
+      kind: "Service",
+      metadata: { name, namespace: ns },
+      spec: { selector: { app: name }, ports: [{ port: def.port, targetPort: def.port }] },
+    });
+  }
+  return out;
 }
 
 export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
   const ns = opts.namespace ?? "assay-platform";
-  const env = Object.entries(opts.storeEnv ?? {}).map(([name, value]) => ({ name, value }));
+  // 스토어를 함께 띄우면 접속 env 를 자동 주입 — 단, 명시 storeEnv 가 이긴다(harness 별 변수명 오버라이드).
+  const depEnv = opts.provisionDependencies ? dependencyConnEnv(spec) : {};
+  const env = Object.entries({ ...depEnv, ...(opts.storeEnv ?? {}) }).map(([name, value]) => ({ name, value }));
   const out: K8sManifest[] = [];
+  if (opts.provisionDependencies) out.push(...buildDependencyManifests(spec, opts));
   for (const svc of spec.services) {
     const labels = { app: svc.name, "assay/harness": spec.id, "assay/version": spec.version };
     out.push({

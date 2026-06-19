@@ -110,6 +110,60 @@ describe("resolvePort", () => {
   });
 });
 
+describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와이어링)", () => {
+  it("K8s: provisionDependencies 면 PG/Redis Deployment+Service 를 렌더한다(타입별 1개)", () => {
+    const manifests = buildK8sManifests(SPEC, { namespace: "assay-acme", provisionDependencies: true });
+    const names = manifests
+      .filter((m) => m.kind === "Deployment")
+      .map((m) => m.metadata.name)
+      .sort();
+    // 서비스 3 + postgres + redis (minio 는 자동 connEnv 부적합이라 STORE_DEFS 에 없음 → 미배포).
+    expect(names).toContain("browser-use-langgraph-postgres");
+    expect(names).toContain("browser-use-langgraph-redis");
+    const pg = manifests.find(
+      (m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-postgres",
+    ) as { spec: { template: { spec: { containers: Array<{ image: string }> } } } };
+    expect(pg.spec.template.spec.containers[0]?.image).toBe("postgres:16-alpine");
+  });
+
+  it("K8s: 서비스 env 에 DATABASE_URL/REDIS_URL 을 스토어 DNS 로 자동 주입한다", () => {
+    const manifests = buildK8sManifests(SPEC, { namespace: "assay-acme", provisionDependencies: true });
+    const agent = manifests.find(
+      (m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-agent-server",
+    ) as { spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } } };
+    const env = Object.fromEntries(agent.spec.template.spec.containers[0]?.env.map((e) => [e.name, e.value]) ?? []);
+    expect(env.DATABASE_URL).toBe("postgresql://assay:assay@browser-use-langgraph-postgres:5432/assay");
+    expect(env.REDIS_URL).toBe("redis://browser-use-langgraph-redis:6379");
+  });
+
+  it("K8s: 명시 storeEnv 가 자동 connEnv 를 덮어쓴다(harness 별 변수명)", () => {
+    const manifests = buildK8sManifests(SPEC, {
+      provisionDependencies: true,
+      storeEnv: { DATABASE_URL: "postgresql://custom/db" },
+    });
+    const agent = manifests.find(
+      (m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-agent-server",
+    ) as { spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } } };
+    const env = Object.fromEntries(agent.spec.template.spec.containers[0]?.env.map((e) => [e.name, e.value]) ?? []);
+    expect(env.DATABASE_URL).toBe("postgresql://custom/db"); // 명시값 우선
+  });
+
+  it("K8s: provisionDependencies 없으면 스토어를 배포하지 않는다(기존 동작)", () => {
+    const manifests = buildK8sManifests(SPEC);
+    expect(manifests.some((m) => m.metadata.name.endsWith("-postgres"))).toBe(false);
+  });
+
+  it("Nomad: provisionDependencies 면 스토어 task group 을 같은 잡에 추가한다(dynamic port)", () => {
+    const job = buildNomadTopologyJob(SPEC, { provisionDependencies: true });
+    const groups = job.Job.TaskGroups.map((g) => g.Name);
+    expect(groups).toContain("browser-use-langgraph-postgres");
+    expect(groups).toContain("browser-use-langgraph-redis");
+    const pg = job.Job.TaskGroups.find((g) => g.Name === "browser-use-langgraph-postgres");
+    expect(pg?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "store", To: 5432 });
+    expect(pg?.Tasks[0]?.Config.image).toBe("postgres:16-alpine");
+  });
+});
+
 describe("buildK8sManifests", () => {
   it("서비스마다 Deployment(+runtimeClass) + Service 로 렌더한다", () => {
     const manifests = buildK8sManifests(SPEC, { runtimeClass: "gvisor" });

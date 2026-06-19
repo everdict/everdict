@@ -1,7 +1,15 @@
 export type { TopologyRuntime, TopologyHandle, BrowserEnvHandle } from "./topology-runtime.js";
 export { type RunKeys, keysFor, newRunId, EnvironmentManager } from "./environment-manager.js";
 export {
+  type StoreDef,
+  STORE_DEFS,
+  dependencyStores,
+  dependencyConnEnv,
+  storeName,
+} from "./dependencies.js";
+export {
   buildNomadTopologyJob,
+  buildDependencyGroups,
   buildBrowserJob,
   topologyJobId,
   browserJobId,
@@ -20,6 +28,7 @@ export {
 } from "./nomad-runtime.js";
 export {
   buildK8sManifests,
+  buildDependencyManifests,
   buildBrowserManifests,
   namespaceManifest,
   browserDeployName,

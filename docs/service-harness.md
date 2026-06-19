@@ -40,6 +40,14 @@ to `kubectl`):
   `apply` `buildK8sManifests` (Deployment + Service per service) → `kubectl rollout status` →
   **discover endpoints** via `kubectl port-forward svc/… :<port>` (kubectl picks the local port; the runtime
   parses it from stdout). Cached per `(id, version, zone)`.
+- **`provisionDependencies`** (option) → also brings up the declared `dependencies[]` (**postgres**/**redis**)
+  as Deployment+Service from a standard store registry (`STORE_DEFS`: `postgres:16-alpine`/`redis:7-alpine`),
+  one per store type per `(harness-version, zone)` — shared across that harness's cases, isolated per case by
+  `isolateBy` (thread_id / key-prefix). Stores roll out **before** the services (services connect on boot) and
+  the services' env is auto-wired with connection URLs (`DATABASE_URL`, `REDIS_URL`/`REDIS_URI`) pointing at the
+  in-cluster Service DNS — no port-forward needed (in-cluster). An explicit `storeEnv` **overrides** the
+  auto-wired vars (for harness-specific variable names). This is what lets a real stateful harness (aegra needs
+  PG+Redis) deploy **via** the runtime, not just point at an external endpoint.
 - `provisionBrowserEnv(spec, runId, zone)` → `buildBrowserManifests` (headless-Chromium Deployment + Service) →
   rollout → port-forward CDP → `BrowserEnvHandle`. `dispose()` deletes **only** the browser Deployment/Service
   (the warm topology in the same namespace survives); `teardown()` deletes the namespace.
@@ -156,6 +164,21 @@ register `"browser_agent": "./examples/browser_agent/graph.py:graph"` in `aegra.
 (as root; `connect_over_cdp` needs no browser binary), restart. The graph forces a writable `HOME` and splits
 `MODEL=openai/gpt-5.4-mini` into `init_chat_model(name, model_provider=provider)`.
 
-**Next:** deploy aegra+chromedp **via** `K8sTopologyRuntime`/`NomadTopologyRuntime` (warm topology + per-zone
-isolation + per-case browser pod — the runtimes already provision CDP browsers) instead of the external endpoint,
-and fold the Agent-Protocol multi-step drive into a reusable `ServiceHarness`.
+### Dependency provisioning — stores deployed by the runtime ✅
+A real stateful harness (aegra = LangGraph + **Postgres** checkpoints + **Redis**) can't run unless its stores
+exist. The topology builders previously deployed only `spec.services` and assumed external/shared stores (via
+`storeEnv` URLs). Now `K8sTopologyRuntime({provisionDependencies:true})` brings up the declared
+`dependencies[]` itself — see the `provisionDependencies` bullet above. Verified live on **kind**
+(`scripts/live/topology-deps-k8s.mjs`): `ensureTopology` deployed `deps-demo-postgres` + `deps-demo-redis`
+alongside the front-door, the front-door pod's env carried the auto-wired
+`DATABASE_URL=postgresql://assay:assay@deps-demo-postgres:5432/assay` + `REDIS_URL=redis://deps-demo-redis:6379`,
+and a `pg_isready -h deps-demo-postgres` probe confirmed the store is reachable **by its Service DNS** in-cluster
+(`accepting connections`) — i.e. the same URL the services get actually connects. `buildNomadTopologyJob`
+renders matching dependency task groups (dynamic `store` port) for parity; the Nomad runtime's service→store
+endpoint wiring (host:port discovery → `storeEnv`) is the remaining follow-up (K8s is build-time via DNS, Nomad
+needs runtime discovery).
+
+**Next:** deploy the full aegra+chromedp topology **via** `K8sTopologyRuntime` (now that the runtime provisions
+PG+Redis) — needs the aegra image loaded into the node + the aegra pod reaching the host LiteLLM (the
+`hostNetwork`+default-bridge trick from the aider-on-kind recipe) — and fold the Agent-Protocol multi-step drive
+into a reusable `ServiceHarness`.

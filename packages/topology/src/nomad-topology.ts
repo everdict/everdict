@@ -1,4 +1,5 @@
 import type { ServiceHarnessSpec } from "@assay/core";
+import { dependencyStores } from "./dependencies.js";
 
 // warm 토폴로지를 Nomad service 잡으로 렌더 (서비스당 task group; docker + runsc 격리).
 // 공유 스토어 엔드포인트는 storeEnv(Consul/static)로 주입. per-run wiring 은 front-door API 로 별도.
@@ -39,6 +40,7 @@ export interface NomadTopologyOptions {
   namespace?: string;
   storeEnv?: Record<string, string>; // 공유 스토어 엔드포인트 등
   zoneId?: string; // trust-zone(테넌트) 식별자 — warm 잡 ID 에 섞어 테넌트 간 공유를 막는다
+  provisionDependencies?: boolean; // spec.dependencies[](postgres/redis)도 같은 잡에 task group 으로 배포
 }
 
 export function topologyJobId(spec: ServiceHarnessSpec, zoneId?: string): string {
@@ -46,37 +48,62 @@ export function topologyJobId(spec: ServiceHarnessSpec, zoneId?: string): string
   return zoneId ? `${base}-${zoneId}` : base;
 }
 
+// 공유 스토어(spec.dependencies[])를 Nomad task group 으로 렌더(타입별 1개). dynamic port "store" 로 노출 →
+// 런타임이 호스트 포트를 발견해 서비스 storeEnv 로 와이어링(K8s 는 DNS 라 빌드타임 확정, Nomad 는 런타임 발견).
+export function buildDependencyGroups(spec: ServiceHarnessSpec, opts: NomadTopologyOptions = {}): NomadTopoGroup[] {
+  return dependencyStores(spec).map(({ name, def }) => {
+    const config: NomadTopoTask["Config"] = { image: def.image, ports: ["store"] };
+    if (opts.runtime) config.runtime = opts.runtime;
+    return {
+      Name: name,
+      Count: 1,
+      Networks: [{ DynamicPorts: [{ Label: "store", To: def.port }] }],
+      Tasks: [
+        {
+          Name: name,
+          Driver: "docker",
+          Config: config,
+          Env: { ...def.env },
+          Resources: { CPU: 1000, MemoryMB: 1024 },
+        },
+      ],
+    };
+  });
+}
+
 export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopologyOptions = {}): NomadTopologyJobSpec {
+  const serviceGroups = spec.services.map((svc) => {
+    const config: NomadTopoTask["Config"] = opts.runtime
+      ? { image: svc.image, runtime: opts.runtime }
+      : { image: svc.image };
+    const group: NomadTopoGroup = {
+      Name: svc.name,
+      Count: svc.replicas,
+      Tasks: [
+        {
+          Name: svc.name,
+          Driver: "docker",
+          Config: config,
+          Env: { ...opts.storeEnv },
+          Resources: { CPU: 1000, MemoryMB: 1024 },
+        },
+      ],
+    };
+    // port 가 있으면 dynamic port + docker 매핑 → 호스트에서 엔드포인트 발견 가능.
+    if (svc.port !== undefined) {
+      group.Networks = [{ DynamicPorts: [{ Label: "http", To: svc.port }] }];
+      config.ports = ["http"];
+    }
+    return group;
+  });
+  const depGroups = opts.provisionDependencies ? buildDependencyGroups(spec, opts) : [];
   return {
     Job: {
       ID: topologyJobId(spec, opts.zoneId),
       Type: "service",
       Namespace: opts.namespace,
       Datacenters: opts.datacenters ?? ["dc1"],
-      TaskGroups: spec.services.map((svc) => {
-        const config: NomadTopoTask["Config"] = opts.runtime
-          ? { image: svc.image, runtime: opts.runtime }
-          : { image: svc.image };
-        const group: NomadTopoGroup = {
-          Name: svc.name,
-          Count: svc.replicas,
-          Tasks: [
-            {
-              Name: svc.name,
-              Driver: "docker",
-              Config: config,
-              Env: { ...opts.storeEnv },
-              Resources: { CPU: 1000, MemoryMB: 1024 },
-            },
-          ],
-        };
-        // port 가 있으면 dynamic port + docker 매핑 → 호스트에서 엔드포인트 발견 가능.
-        if (svc.port !== undefined) {
-          group.Networks = [{ DynamicPorts: [{ Label: "http", To: svc.port }] }];
-          config.ports = ["http"];
-        }
-        return group;
-      }),
+      TaskGroups: [...depGroups, ...serviceGroups],
     },
   };
 }
