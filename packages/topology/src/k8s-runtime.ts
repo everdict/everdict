@@ -2,6 +2,7 @@ import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, Upstream
 import { STORE_DEFS, buildSharedStoreManifests, dependencyStores } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
+import { MANAGED_LABEL, buildSharedStoreIngressPolicy, buildZoneNetworkPolicies } from "./network-policy.js";
 import { DEFAULT_POOL_NS, type StorePlan, planTenantStores } from "./store-binding.js";
 import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -14,6 +15,8 @@ export interface K8sTopologyRuntimeOptions {
   provisionDependencies?: boolean; // zone 없을 때의 기본 스토어 격리: true→silo(전용 배포), false→external
   poolNamespace?: string; // pool 공유 스토어 네임스페이스 (기본 "assay-shared")
   storeSecret?: string; // pool 테넌트 비번 mint 시드 (프로덕션: KEK/Vault)
+  networkPolicies?: boolean; // zone.network 로 NetworkPolicy 생성/적용 (기본 true; enforce 엔 정책-CNI 필요)
+  egressAllowCIDRs?: string[]; // deny-egress 일 때 외부로 허용할 CIDR (모델 엔드포인트 등)
   browserImage?: string;
   imagePullPolicy?: string; // kind 등 사전 로드 이미지: "IfNotPresent"
   readyTimeoutMs?: number;
@@ -53,8 +56,20 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     if (cached) return cached.handle;
 
     const ns = this.nsFor(zone);
-    await this.kubectl.ensureNamespace(ns);
+    await this.kubectl.ensureNamespace(ns, { [MANAGED_LABEL.key]: MANAGED_LABEL.value });
     const readySec = Math.floor((this.opts.readyTimeoutMs ?? 120_000) / 1000);
+
+    // 네트워크 격리: zone.network 로 NetworkPolicy 적용(같은-ns ingress 만 → cross-tenant 차단; deny-egress 면 egress 제한).
+    if (this.opts.networkPolicies !== false && zone) {
+      const policies = buildZoneNetworkPolicies({
+        namespace: ns,
+        network: zone.network,
+        poolNamespace: this.opts.poolNamespace ?? DEFAULT_POOL_NS,
+        storePorts: dependencyStores(spec).map((s) => s.def.port),
+        egressAllowCIDRs: this.opts.egressAllowCIDRs,
+      });
+      if (policies.length > 0) await this.kubectl.apply(policies);
+    }
 
     // 스토어 격리 모델 결정: zone 이 있으면 plan(pool/silo/external), 없으면 provisionDependencies(silo/external).
     const plan: StorePlan = zone
@@ -125,8 +140,13 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   private async ensureSharedStores(stores: string[], poolNs: string, readySec: number): Promise<void> {
     const missing = [...new Set(stores)].filter((s) => STORE_DEFS[s] && !this.sharedStoresReady.has(s));
     if (missing.length === 0) return;
-    await this.kubectl.ensureNamespace(poolNs);
+    await this.kubectl.ensureNamespace(poolNs, { [MANAGED_LABEL.key]: MANAGED_LABEL.value });
     await this.kubectl.apply(buildSharedStoreManifests(missing, poolNs, this.opts.imagePullPolicy));
+    // 공유 스토어 ns: assay-managed 네임스페이스에서만 스토어 포트로 ingress 허용(플랫폼 외부 도달 차단).
+    if (this.opts.networkPolicies !== false) {
+      const ports = missing.map((s) => STORE_DEFS[s]?.port).filter((p): p is number => p !== undefined);
+      await this.kubectl.apply([buildSharedStoreIngressPolicy(poolNs, ports)]);
+    }
     for (const s of missing) {
       await this.kubectl.rolloutStatus(`assay-shared-${s}`, poolNs, readySec);
       // rollout Ready ≠ accepting connections (postgres initdb 등 — readiness probe 없음). 실접속까지 대기.

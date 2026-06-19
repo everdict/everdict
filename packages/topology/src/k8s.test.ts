@@ -147,6 +147,23 @@ describe("K8sTopologyRuntime", () => {
     expect(applied.some((m) => (m.metadata as { name?: string })?.name === "bu-postgres")).toBe(false);
   });
 
+  it("network: zone ingress 정책 + 공유스토어 ingress 정책을 적용한다(cross-tenant 차단)", async () => {
+    const { kubectl, applied } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
+    await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
+    const policies = applied.filter((m) => m.kind === "NetworkPolicy");
+    const names = policies.map((m) => (m.metadata as { name: string }).name);
+    expect(names).toContain("assay-zone-ingress"); // 존 ns: 같은-ns ingress 만
+    expect(names).toContain("assay-shared-store-ingress"); // 공유스토어: managed ns 만
+  });
+
+  it("network: networkPolicies:false 면 정책을 적용하지 않는다", async () => {
+    const { kubectl, applied } = fakeKubectl();
+    const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1, networkPolicies: false });
+    await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
+    expect(applied.some((m) => m.kind === "NetworkPolicy")).toBe(false);
+  });
+
   it("pool: 공유 스토어는 클러스터에 1회만 배포(여러 테넌트가 공유)", async () => {
     const { kubectl, calls } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });

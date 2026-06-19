@@ -9,7 +9,7 @@ export interface PortForward {
 // kubectl 추상화 (테스트에서 모킹 가능; NomadHttp 패턴의 K8s 버전).
 export interface Kubectl {
   apply(manifests: unknown[]): Promise<void>; // kubectl apply -f - (List)
-  ensureNamespace(ns: string): Promise<void>;
+  ensureNamespace(ns: string, labels?: Record<string, string>): Promise<void>;
   rolloutStatus(deployment: string, ns: string, timeoutSec?: number): Promise<void>;
   portForward(target: string, ns: string, remotePort: number): Promise<PortForward>; // target 예: svc/x
   deleteResources(targets: string[], ns: string): Promise<void>; // target 예: deployment/x, svc/x
@@ -58,8 +58,8 @@ export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubec
 
   return {
     apply,
-    async ensureNamespace(ns) {
-      await apply([{ apiVersion: "v1", kind: "Namespace", metadata: { name: ns } }]);
+    async ensureNamespace(ns, labels) {
+      await apply([{ apiVersion: "v1", kind: "Namespace", metadata: { name: ns, labels } }]);
     },
     async rolloutStatus(deployment, ns, timeoutSec = 120) {
       const res = await run(bin, [

@@ -47,6 +47,13 @@ export {
   type K8sTopologyOptions,
   type K8sBrowserOptions,
 } from "./k8s-topology.js";
+export {
+  type NetworkPolicyManifest,
+  type ZoneNetworkPolicyOptions,
+  MANAGED_LABEL,
+  buildZoneNetworkPolicies,
+  buildSharedStoreIngressPolicy,
+} from "./network-policy.js";
 export { K8sTopologyRuntime, type K8sTopologyRuntimeOptions } from "./k8s-runtime.js";
 export { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
 export { ServiceTopologyBackend, type ServiceTopologyBackendOptions, type SubmitFn } from "./service-backend.js";
