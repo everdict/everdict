@@ -35,15 +35,6 @@ export {
   costOf,
 } from "./budget.js";
 export {
-  createUsageProxy,
-  extractUsage,
-  inMemoryUsageTally,
-  type RunUsage,
-  type UsageTally,
-  type UsageProxy,
-  type UsageProxyOptions,
-} from "./usage-proxy.js";
-export {
   NomadBackend,
   buildNomadJob,
   nomadJobId,

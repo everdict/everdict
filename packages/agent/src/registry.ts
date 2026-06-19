@@ -7,8 +7,17 @@ export { makeGraders } from "@assay/graders";
 // id → 하니스. 선언형 command 스펙(컨트롤플레인이 레지스트리에서 풀어 임베드)이 오면 제너릭
 // CommandHarness 로 해석한다 — SaaS 유저가 코드 어댑터 없이 CLI 에이전트를 등록할 수 있다.
 // 빌트인(claude-code/scripted)은 id 로 분기(에이전트 이미지에 사전설치).
-export function makeHarness(id: string, version: string, spec?: HarnessSpec): EvaluableHarness {
-  if (spec?.kind === "command") return new CommandHarness(spec);
+export interface MakeHarnessOptions {
+  meterUsage?: boolean; // command 하니스의 모델 호출을 usage-proxy 로 계측(trace:none 일 때만 동작)
+}
+
+export function makeHarness(
+  id: string,
+  version: string,
+  spec?: HarnessSpec,
+  opts: MakeHarnessOptions = {},
+): EvaluableHarness {
+  if (spec?.kind === "command") return new CommandHarness(spec, { meterUsage: opts.meterUsage });
   switch (id) {
     case "claude-code":
       return new ClaudeCodeHarness(version, { install: false });

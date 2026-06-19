@@ -1,5 +1,5 @@
 import type { CommandHarnessSpec, ComputeHandle, RunContext, TraceEvent } from "@assay/core";
-import type { TraceSource } from "@assay/trace";
+import type { StartedUsageProxy, TraceSource } from "@assay/trace";
 import { describe, expect, it } from "vitest";
 import { CommandHarness } from "./command.js";
 
@@ -72,6 +72,65 @@ describe("CommandHarness", () => {
     const events = await collect(h.run(compute, "t", ctx));
     expect(fetched).toBe("otel:http://j:rid2");
     expect(events).toHaveLength(1);
+  });
+
+  // 사용량 계측: trace:none 하니스의 모델 호출을 usage-proxy 로 통과시켜 토큰을 합성 llm_call 로 회수.
+  function fakeMeter(usage = { promptTokens: 100, completionTokens: 20, totalTokens: 120, calls: 1 }) {
+    const calls: { upstream: string; closed: boolean } = { upstream: "", closed: false };
+    const start = async (opts: { upstreamBaseUrl: string; defaultRunId?: string }): Promise<StartedUsageProxy> => {
+      calls.upstream = opts.upstreamBaseUrl;
+      return {
+        url: "http://127.0.0.1:9999",
+        tally: { record() {}, get: () => ({ ...usage }), snapshot: () => ({}) },
+        close: async () => {
+          calls.closed = true;
+        },
+      };
+    };
+    return { start, calls };
+  }
+
+  it("meterUsage: 베이스를 프록시로 바꾸고, 회수 토큰을 합성 llm_call 로 내보내고, 프록시를 닫는다", async () => {
+    const { compute, execs } = fakeCompute();
+    const { start, calls } = fakeMeter();
+    const h = new CommandHarness(spec({ env: { OPENAI_API_BASE: "http://litellm:4000" } }), {
+      runId: () => "rid",
+      meterUsage: true,
+      startUsageProxy: start,
+    });
+    const events = await collect(h.run(compute, "t", ctx));
+    expect(calls.upstream).toBe("http://litellm:4000"); // 원래 베이스가 업스트림
+    expect(execs[0]?.env?.OPENAI_API_BASE).toBe("http://127.0.0.1:9999"); // 자식은 프록시로
+    expect(events).toEqual([
+      {
+        t: expect.any(Number),
+        kind: "llm_call",
+        model: "sonnet",
+        cost: { inputTokens: 100, outputTokens: 20, usd: 0 },
+      },
+    ]);
+    expect(calls.closed).toBe(true);
+  });
+
+  it("meterUsage 라도 trace 가 none 이 아니면 계측 안 함(자기 트레이스 사용 — 이중집계 방지)", async () => {
+    const { compute, execs } = fakeCompute();
+    const { start, calls } = fakeMeter();
+    const h = new CommandHarness(
+      spec({ trace: { kind: "otel", endpoint: "http://j" }, env: { OPENAI_API_BASE: "http://litellm:4000" } }),
+      {
+        runId: () => "rid",
+        meterUsage: true,
+        startUsageProxy: start,
+        traceSourceFor: () => ({
+          async fetch() {
+            return [];
+          },
+        }),
+      },
+    );
+    await collect(h.run(compute, "t", ctx));
+    expect(calls.upstream).toBe(""); // 프록시 미시작
+    expect(execs[0]?.env?.OPENAI_API_BASE).toBe("http://litellm:4000"); // 베이스 그대로
   });
 
   it("setup 실패(exit≠0)는 에러", async () => {

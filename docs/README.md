@@ -8,7 +8,7 @@
 - [command-harness.md](command-harness.md) — declarative `command` harness: bring any CLI agent (aider, …) as a `HarnessSpec`, no code adapter; runs on Local/Nomad/K8s
 - [auth.md](auth.md) — the control-plane-owned auth core (`@assay/auth`): OIDC (Keycloak) + API keys → `Principal{workspace,roles}`, role-based authZ, `apps/api` enforcement
 - [secrets.md](secrets.md) — workspace secret management: encrypted-at-rest model/provider keys (incl. LiteLLM), CRUD on API/MCP (admin), injected per-tenant into runs
-- [usage-metering.md](usage-metering.md) — BYO model gateway + Assay-owned budget: a usage-proxy sidecar recovers per-run token usage from a black-box harness (aider/trace:none) — `createUsageProxy` in `@assay/backends`
+- [usage-metering.md](usage-metering.md) — BYO model gateway + Assay-owned budget: a usage-proxy sidecar (`@assay/trace`, wired into `CommandHarness` via `ASSAY_METER_USAGE`) recovers per-run token usage from a black-box harness (aider/trace:none) → synthetic `llm_call` → `budget.settle`
 - [mcp.md](mcp.md) — the agent-facing **MCP server** (`apps/api` `/mcp`): run/harness tools, OAuth-protected (Keycloak, "login like Linear MCP") + API keys, role-gated
 - [tenancy.md](tenancy.md) — tenant access layer: workspace=tenant=trust-zone, tenant-owned harnesses, scoped reads, internal key issuance
 - [web.md](web.md) — the SaaS web (`apps/web`, Next.js FSD + Toss-style): Keycloak user login, per-tenant dashboard; agents use MCP/API keys

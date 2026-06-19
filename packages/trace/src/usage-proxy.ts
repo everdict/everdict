@@ -78,6 +78,21 @@ export interface UsageProxy {
   tally: UsageTally;
 }
 
+export interface StartedUsageProxy {
+  url: string; // http://127.0.0.1:<port> — 하니스의 OPENAI_API_BASE 로 꽂는다
+  tally: UsageTally;
+  close(): Promise<void>;
+}
+
+// 127.0.0.1 임시 포트로 즉시 띄운 사이드카. CommandHarness 가 자식(aider 등)의 OPENAI_API_BASE 를 url 로 돌린다.
+export async function startUsageProxy(opts: UsageProxyOptions): Promise<StartedUsageProxy> {
+  const { server, tally } = createUsageProxy(opts);
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", () => resolve()));
+  const addr = server.address();
+  const port = typeof addr === "object" && addr ? addr.port : 0;
+  return { url: `http://127.0.0.1:${port}`, tally, close: () => new Promise((r) => server.close(() => r())) };
+}
+
 // 주어진 키(대소문자 무시)를 뺀 새 헤더 객체. (delete 회피 — biome noDelete)
 function omitHeaders(src: http.IncomingHttpHeaders, drop: string[]): http.OutgoingHttpHeaders {
   const dropSet = new Set(drop.map((d) => d.toLowerCase()));

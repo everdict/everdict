@@ -11,7 +11,10 @@ export const RESULT_SENTINEL = "__ASSAY_RESULT__";
 // AgentJob 한 건을 끝까지 수행한다(샌드박스 안에서 LocalDriver 로 하니스를 로컬 구동).
 // harnessSpec(컨트롤플레인이 레지스트리에서 임베드)이 있으면 선언형 command 하니스로 해석된다.
 export async function runAgentJob(job: AgentJob): Promise<CaseResult> {
-  const harness = makeHarness(job.harness.id, job.harness.version, job.harnessSpec);
+  // 사용량 계측 opt-in(BYO + Assay 소유 버짓): 켜지면 command 하니스가 모델 호출을 usage-proxy 로 통과시켜
+  // 토큰을 회수 → 합성 trace 이벤트로 결과에 실린다(컨트롤플레인이 budget.settle 로 집계).
+  const meterUsage = process.env.ASSAY_METER_USAGE === "1";
+  const harness = makeHarness(job.harness.id, job.harness.version, job.harnessSpec, { meterUsage });
   const graders: Grader[] = makeGraders(job.evalCase.graders);
   return runCase(job.evalCase, {
     driver: new LocalDriver(),
