@@ -144,8 +144,14 @@ iptables) against a Consul exposing **gRPC/xDS** (the shared workclaw Consul has
 `consul agent -dev` is used) — Envoy sidecars deploy healthy, services register, apps are reachable in-netns. A
 clean **allow/deny differential** at the data plane was **not** yet demonstrated: the probe's upstream routing
 reset for *all* destinations (a blanket reset isn't proof of enforcement), and the distroless Envoy image lacks
-curl/wget to introspect `/clusters`, so the upstream-xDS cause is unresolved (follow-up). **So the authoritative
-network-isolation proof remains the Consul-intention decision** —
+curl/wget to introspect `/clusters` directly. **Root-caused** by querying Envoy's admin from the probe's *main*
+task (shared netns): xDS is fine — both upstream clusters carry **healthy endpoints** and the bind listeners are up
+— but Nomad registers the Connect sidecar at **`ServiceAddress: 127.0.0.1`** (loopback). From another alloc's
+bridge netns, `127.0.0.1` is its *own* loopback, so the upstream can't reach the destination sidecar (the consul
+`NodeAddr` was made routable, but the *service* address stays loopback). This is a **single-node dev address-
+advertisement limitation** — cross-alloc Connect needs a node-routable Consul client agent (production Nomad+Consul
+supplies this); it is **not** a flaw in the model, the builder, or the enforcement mechanism (xDS + intentions both
+work). **So the authoritative network-isolation proof remains the Consul-intention decision** —
 
 **Consul Connect intentions** (service-identity authz) are the Nomad analog of NetworkPolicy. `buildTenantIntentions` (`@assay/topology`) emits a
 `service-intentions` config entry per tenant service: `Sources = [allow each same-tenant mesh service, deny *]`.

@@ -71,6 +71,34 @@ export function buildZoneNetworkPolicies(opts: ZoneNetworkPolicyOptions): Networ
   return out;
 }
 
+// deny-egress 모드에서 모델 엔드포인트(외부, 예: LiteLLM) egress 를 허용할 /32 CIDR 로 해석.
+// IP 는 그대로 /32, 호스트명은 주입 resolver(기본 dns)로 IP 들을 찾아 /32. egressAllowCIDRs 에 자동 합쳐진다.
+function hostOf(endpoint: string): string {
+  let h = endpoint.replace(/^[a-z]+:\/\//i, ""); // scheme 제거
+  h = h.split("/")[0] ?? h; // path 제거
+  h = h.replace(/:\d+$/, ""); // port 제거
+  return h;
+}
+function isIpv4(s: string): boolean {
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(s);
+}
+export async function resolveEgressCidrs(
+  endpoints: string[],
+  lookup: (host: string) => Promise<string[]>,
+): Promise<string[]> {
+  const out = new Set<string>();
+  for (const ep of endpoints) {
+    const host = hostOf(ep);
+    if (!host) continue;
+    if (isIpv4(host)) {
+      out.add(`${host}/32`);
+      continue;
+    }
+    for (const ip of await lookup(host).catch(() => [])) if (isIpv4(ip)) out.add(`${ip}/32`);
+  }
+  return [...out];
+}
+
 // 공유 스토어 ns: assay-managed 네임스페이스에서 스토어 포트로 오는 ingress 만 허용(플랫폼 외부 도달 차단).
 // pool 은 모든 테넌트가 스토어를 공유하므로 테넌트별 차단은 불가 — 대신 "플랫폼 밖" 을 막고, 테넌트별 격리는
 // DB/role/creds(+케이스 isolateBy)로 한다(SLICE 40).

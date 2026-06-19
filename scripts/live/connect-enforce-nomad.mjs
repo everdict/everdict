@@ -1,13 +1,15 @@
 // 라이브 하니스: Nomad **데이터플레인 enforce**(Consul Connect/Envoy) 시도. Connect-enabled echo 서버(테넌트별) +
 // upstream 2개(같은/다른 테넌트)를 가진 probe + intention deny-default → 같은 테넌트 ALLOWED, 다른 테넌트 DENIED 를 노린다.
 //
-// 상태(2026-06-20): **부분 검증.** 전제 인프라는 충족 — root nomad(bridge/iptables) + self-contained Consul(gRPC/xDS,
-//   18500/18502) + Envoy 사이드카가 healthy 로 뜨고 서비스 등록·앱 도달까지 확인됨. 그러나 probe 의 upstream 라우팅이
-//   **모든 목적지에서 reset**(같은/다른 테넌트 둘 다) → allow/deny 차등을 깔끔히 못 보였다(블랭킷 reset 은 enforce 증명이
-//   아님). Envoy 이미지에 curl/wget 부재로 admin(/clusters @127.0.0.2:19001) 인트로스펙션이 막혀 원인(upstream xDS 엔드포인트
-//   미수신 추정) 미해결. **권위 있는 네트워크 격리 증명은 여전히 intention 결정(SLICE 43, /v1/connect/intentions/check)**;
-//   이 하니스는 (a) Connect 빌더(buildConnectService)가 정상 잡을 렌더하고 (b) 메시가 Nomad-as-root+gRPC-Consul 에서
-//   기동함을 보인다. FOLLOW-UP: upstream xDS 라우팅 원인 규명(인트로스펙션 가능한 envoy 이미지/디버그 잡).
+// 상태(2026-06-20): **부분 검증 — 근본원인 규명 완료.** 메시는 정상 기동: root nomad(bridge/iptables) +
+//   self-contained Consul(gRPC/xDS) + Envoy 사이드카 healthy + 서비스 등록 + 앱 in-netns 도달(APP-OK). xDS 도 정상 —
+//   probe envoy /clusters 에 두 upstream 이 **healthy endpoint** 로 박혀있음(t-acme-echo, t-globex-echo). 그러나 양쪽
+//   upstream 다 reset. **근본원인: Nomad 가 Connect 사이드카를 ServiceAddress=127.0.0.1(루프백)로 등록** → probe 의
+//   bridge netns 안에서 127.0.0.1 은 *자기* 루프백이라 echo 사이드카에 도달 불가(NodeAddr 는 라우터블 192.168.x 로
+//   고쳐졌지만 ServiceAddress 는 Nomad 가 루프백으로 박음). 즉 단일노드 dev 의 **주소 광고 한계** — 교차-alloc Connect 는
+//   노드-라우터블 주소를 광고하는 제대로 된 Consul 클라이언트 에이전트가 필요(프로덕션 Nomad+Consul 은 충족).
+//   **모델/빌더/enforce 메커니즘 문제 아님**(xDS·intention 결정 모두 정상). 권위 있는 Nomad 네트워크 격리 증명은
+//   intention 결정(SLICE 43). FOLLOW-UP: 노드-라우터블 Consul 클라이언트 에이전트로 사이드카 주소를 라우터블하게.
 // 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/connect-enforce-nomad.mjs (root nomad + alt consul-dev 필요)
 import { execFileSync } from "node:child_process";
 import process from "node:process";

@@ -62,6 +62,7 @@ export {
   MANAGED_LABEL,
   buildZoneNetworkPolicies,
   buildSharedStoreIngressPolicy,
+  resolveEgressCidrs,
 } from "./network-policy.js";
 export {
   type ServiceIntention,

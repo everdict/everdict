@@ -1,8 +1,14 @@
+import { lookup as dnsLookup } from "node:dns/promises";
 import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, UpstreamError } from "@assay/core";
 import { STORE_DEFS, buildSharedStoreManifests, dependencyStores } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
-import { MANAGED_LABEL, buildSharedStoreIngressPolicy, buildZoneNetworkPolicies } from "./network-policy.js";
+import {
+  MANAGED_LABEL,
+  buildSharedStoreIngressPolicy,
+  buildZoneNetworkPolicies,
+  resolveEgressCidrs,
+} from "./network-policy.js";
 import { DEFAULT_POOL_NS, type StorePlan, planTenantStores } from "./store-binding.js";
 import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -17,6 +23,8 @@ export interface K8sTopologyRuntimeOptions {
   storeSecret?: string; // pool 테넌트 비번 mint 시드 (프로덕션: KEK/Vault)
   networkPolicies?: boolean; // zone.network 로 NetworkPolicy 생성/적용 (기본 true; enforce 엔 정책-CNI 필요)
   egressAllowCIDRs?: string[]; // deny-egress 일 때 외부로 허용할 CIDR (모델 엔드포인트 등)
+  modelEndpoints?: string[]; // deny-egress: 이 호스트/URL 들을 DNS 해석해 egress 허용 CIDR 로 자동 추가(LiteLLM 등)
+  dnsLookup?: (host: string) => Promise<string[]>; // 테스트 주입용 resolver (기본 node:dns)
   browserImage?: string;
   imagePullPolicy?: string; // kind 등 사전 로드 이미지: "IfNotPresent"
   readyTimeoutMs?: number;
@@ -61,12 +69,19 @@ export class K8sTopologyRuntime implements TopologyRuntime {
 
     // 네트워크 격리: zone.network 로 NetworkPolicy 적용(같은-ns ingress 만 → cross-tenant 차단; deny-egress 면 egress 제한).
     if (this.opts.networkPolicies !== false && zone) {
+      // deny-egress: 모델 엔드포인트(LiteLLM 등)를 DNS 해석해 egress 허용 CIDR 자동 추가.
+      const lookup =
+        this.opts.dnsLookup ?? ((host: string) => dnsLookup(host, { all: true }).then((a) => a.map((x) => x.address)));
+      const autoCidrs =
+        zone.network === "deny-egress" && this.opts.modelEndpoints?.length
+          ? await resolveEgressCidrs(this.opts.modelEndpoints, lookup)
+          : [];
       const policies = buildZoneNetworkPolicies({
         namespace: ns,
         network: zone.network,
         poolNamespace: this.opts.poolNamespace ?? DEFAULT_POOL_NS,
         storePorts: dependencyStores(spec).map((s) => s.def.port),
-        egressAllowCIDRs: this.opts.egressAllowCIDRs,
+        egressAllowCIDRs: [...(this.opts.egressAllowCIDRs ?? []), ...autoCidrs],
       });
       if (policies.length > 0) await this.kubectl.apply(policies);
     }
