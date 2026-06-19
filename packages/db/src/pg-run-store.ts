@@ -1,5 +1,5 @@
 import type { SqlClient } from "./client.js";
-import { type RunRecord, RunRecordSchema, type RunStore } from "./run-store.js";
+import { type RunRecord, RunRecordSchema, type RunStore, withRunUsage } from "./run-store.js";
 
 interface RunRow {
   id: string;
@@ -18,7 +18,7 @@ const iso = (v: string | Date): string => (typeof v === "string" ? v : v.toISOSt
 
 // row → RunRecord (jsonb 는 pg 가 이미 파싱; timestamptz 는 Date → ISO). 계약은 Zod 로 한 번 검증.
 function rowToRecord(row: RunRow): RunRecord {
-  return RunRecordSchema.parse({
+  const rec = RunRecordSchema.parse({
     id: row.id,
     tenant: row.tenant,
     harness: { id: row.harness_id, version: row.harness_version },
@@ -29,6 +29,7 @@ function rowToRecord(row: RunRow): RunRecord {
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
+  return withRunUsage(rec); // usage 는 컬럼이 아니라 result.trace 에서 파생
 }
 
 // Postgres 기반 결과 스토어. 인메모리와 동일한 RunStore 계약 — apps/api 는 둘을 교체만 한다.

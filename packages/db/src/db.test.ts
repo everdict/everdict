@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { SqlClient } from "./client.js";
 import { migrate, preflight } from "./migrate.js";
 import { PgRunStore } from "./pg-run-store.js";
-import type { RunRecord } from "./run-store.js";
+import { InMemoryRunStore, type RunRecord } from "./run-store.js";
 
 // 쿼리를 기록하고 canned row 를 돌려주는 가짜 SqlClient.
 function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unknown[] }): {
@@ -60,13 +60,15 @@ describe("PgRunStore", () => {
     expect(calls[0]?.params?.[6]).toBeNull(); // result 없음
   });
 
-  it("get → row 를 RunRecord 로 매핑(Date→ISO, jsonb→object)", async () => {
+  it("get → row 를 RunRecord 로 매핑(Date→ISO, jsonb→object) + usage 파생", async () => {
     const { client } = fakeClient(() => ({ rows: [ROW] }));
     const rec = await new PgRunStore(client).get("r1");
     expect(rec?.harness).toEqual({ id: "scripted", version: "0" });
     expect(rec?.caseId).toBe("c1");
     expect(rec?.createdAt).toBe("2026-06-18T00:00:00.000Z");
     expect(rec?.result?.harness).toBe("scripted@0");
+    // usage 는 result.trace 에서 파생(컬럼 아님).
+    expect(rec?.usage).toEqual({ promptTokens: 1, completionTokens: 1, totalTokens: 2, usd: 0.02, calls: 1 });
   });
 
   it("update → 패치 필드만 동적 SET + RETURNING", async () => {
@@ -81,6 +83,29 @@ describe("PgRunStore", () => {
     await new PgRunStore(client).list("acme");
     expect(calls[0]?.text).toMatch(/ORDER BY created_at DESC, id DESC/);
     expect(calls[0]?.params?.[0]).toBe("acme");
+  });
+});
+
+describe("InMemoryRunStore — usage 파생", () => {
+  const base: RunRecord = {
+    id: "r1",
+    tenant: "acme",
+    harness: { id: "s", version: "0" },
+    caseId: "c1",
+    status: "queued",
+    createdAt: "t",
+    updatedAt: "t",
+  };
+
+  it("result 없으면 usage 없음; result 있으면 trace 에서 파생(get/list/update)", async () => {
+    const store = new InMemoryRunStore();
+    await store.create(base);
+    expect((await store.get("r1"))?.usage).toBeUndefined(); // queued, result 없음
+
+    const updated = await store.update("r1", { status: "succeeded", result: RESULT });
+    expect(updated?.usage).toEqual({ promptTokens: 1, completionTokens: 1, totalTokens: 2, usd: 0.02, calls: 1 });
+    expect((await store.get("r1"))?.usage?.totalTokens).toBe(2);
+    expect((await store.list("acme"))[0]?.usage?.usd).toBeCloseTo(0.02);
   });
 });
 

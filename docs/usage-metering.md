@@ -41,6 +41,10 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
    outputTokens, usd }` — `usd` from the gateway cost header, `0` for subscription models).
 4. That event rides `runCase` → `result.trace`, so the **existing** path settles it: `RunService.track` already
    does `budget.settle(tenant, costOf(result))` and persists `result` in the `RunStore`. No RunService change.
+5. **Surfaced on the run record:** `RunStore` get/list/update return `RunRecord.usage`
+   (`{promptTokens, completionTokens, totalTokens, usd, calls}`), **derived** from `result.trace` via
+   `usageFromTrace` (`@assay/core`) on read — no column, no migration, always consistent. Clients (API/MCP/web)
+   read `record.usage` without parsing the trace.
 
 ## Verified
 - Deterministic (`packages/trace/src/usage-proxy.test.ts`): `extractUsage` (incl. `total` fallback, null on
@@ -62,6 +66,5 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
 ## Not yet (next)
 - A durable per-workspace settings store for the policy (today: env `ASSAY_METER_TENANTS` / `ASSAY_METER_USAGE`
   + per-run override; MCP/web could expose the override too).
-- Optional explicit `RunUsage` summary on the `RunRecord` (today it's derivable from `result.trace`).
 - Note: `$` capture is **live-ready** but reads `0` on workclaw's LiteLLM because its models are subscription
   (unpriced); it yields real `$` for any metered model the gateway prices.
