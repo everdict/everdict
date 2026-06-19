@@ -122,11 +122,23 @@ unit-tested for correctness and verified live on a dedicated **Calico** kind clu
 **BLOCKED**. So with a policy-CNI the tenant network boundary holds end-to-end; on a non-enforcing CNI the
 policies are applied but inert (same honesty as runsc/gVisor not being installed on kind).
 
-**Nomad** has no NetworkPolicy equivalent — network isolation there is **Consul Connect** (sidecar proxies +
-deny-by-default intentions) or a CNI, which requires Connect-enabling the service jobs. That's the documented
-follow-up; today the Nomad tenant boundary is the per-tenant DB/role/creds (pool, verified above) plus the Nomad
-namespace as a logical boundary. The store-level isolation is fully at parity on both orchestrators; the
-network-level enforcement is K8s-only for now.
+**Nomad** has no NetworkPolicy equivalent — network isolation there is **Consul Connect intentions** (service-
+identity authz), the Nomad analog of NetworkPolicy. `buildTenantIntentions` (`@assay/topology`) emits a
+`service-intentions` config entry per tenant service: `Sources = [allow each same-tenant mesh service, deny *]`.
+Consul evaluates by **precedence** (exact name > `*`), so a service in another tenant matches only the `*` deny —
+per-destination deny-by-default without touching global Consul config. The shared store gets an `allow *` intention
+(mesh-only; tenant isolation is the DB creds). Mesh service names are `t-<zone>-<svc>`; `NomadTopologyRuntime`
+(given a `consul` client) applies the intentions in `ensureTopology` + the store intention in `ensureSharedStores`,
+and cleans them up in `teardown`.
+
+Verified live against a **real Consul** (Connect CA on; `scripts/live/consul-intentions-nomad.mjs`) using Consul's
+`/v1/connect/intentions/check` API — the authoritative allow/deny **decision the Envoy mesh enforces**: same-tenant
+`acme-mcp → acme-agent` = **ALLOWED**, cross-tenant `acme-agent → globex-agent` = **DENIED**, tenant → shared store
+= ALLOWED, `rogue → globex-agent` = **DENIED**. So the authorization decision is proven; **full data-plane
+enforcement additionally needs the service jobs to be Connect-enabled** (Envoy sidecars + `network bridge` +
+`connect { sidecar_service {} }`) — the remaining follow-up, the Nomad analog of "needs a policy-CNI" on K8s. So
+both store-level and network-level isolation are now at parity on K8s (NetworkPolicy) and Nomad (Connect
+intentions), each verified at the decision/enforcement layer their platform exposes.
 
 ## Trace (`@assay/trace`)
 The harness emits a trace to OTel/MLflow; Assay **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →

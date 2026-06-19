@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
 import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, UpstreamError } from "@assay/core";
+import {
+  type ConsulClient,
+  buildSharedStoreIntention,
+  buildTenantIntentions,
+  meshServiceName,
+} from "./consul-intentions.js";
 import { STORE_DEFS, dependencyStores } from "./dependencies.js";
 import {
   type AllocLike,
@@ -82,6 +88,7 @@ export interface NomadTopologyRuntimeOptions {
   addr: string; // Nomad HTTP endpoint
   http?: NomadHttp;
   exec?: NomadExec; // alloc exec (pool DDL/ACL); 기본 = nomad CLI
+  consul?: ConsulClient; // 설정 시 zone.network 로 Consul Connect intentions 생성(네트워크 격리)
   datacenters?: string[];
   runtime?: string; // docker 격리 런타임 (예: "runsc" = gVisor)
   namespace?: string;
@@ -121,6 +128,11 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     let storeEnv = this.opts.storeEnv;
     if (zone && resolveStoreIsolation(zone) === "pool") {
       storeEnv = { ...(await this.provisionPool(spec, zone)), ...this.opts.storeEnv };
+    }
+
+    // 네트워크 격리: Consul Connect intentions(같은 테넌트만 allow + 그 외 deny). enforce 엔 Connect-enabled 잡 필요.
+    if (zone && this.opts.consul && zone.network !== "open") {
+      for (const intent of buildTenantIntentions(spec, zone)) await this.opts.consul.applyIntention(intent);
     }
 
     const job = buildNomadTopologyJob(spec, {
@@ -198,6 +210,8 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       const rec = { hostPort: `${p.hostIp}:${p.port}`, allocId: alloc.ID, task };
       await this.waitStoreAccepting(s, rec);
       this.sharedStores.set(s, rec);
+      // 공유 스토어 intention: 메시 서비스만 도달(테넌트 격리는 DB creds). enforce 엔 Connect-enabled 잡 필요.
+      if (this.opts.consul) await this.opts.consul.applyIntention(buildSharedStoreIntention(s));
     }
   }
 
@@ -289,6 +303,11 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   // warm 토폴로지 정리 (라이브 실행 후 teardown 용). 존을 주면 그 존의 warm 만 정리한다.
   async teardown(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<void> {
     this.warm.delete(`${spec.id}@${spec.version}@${zone?.id ?? "default"}`);
+    if (zone && this.opts.consul) {
+      for (const svc of spec.services) {
+        await this.opts.consul.deleteIntention(meshServiceName(zone.id, svc.name)).catch(() => {});
+      }
+    }
     await this.deregister(topologyJobId(spec, zone?.id), zone?.namespace ?? this.opts.namespace);
   }
 

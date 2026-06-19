@@ -1,5 +1,6 @@
 import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
 import { describe, expect, it } from "vitest";
+import type { ConsulClient, ServiceIntention } from "./consul-intentions.js";
 import { type NomadExec, type NomadHttp, NomadTopologyRuntime } from "./nomad-runtime.js";
 import { topologyJobId } from "./nomad-topology.js";
 
@@ -75,5 +76,28 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
     const topo = registered.find((j) => j.Job.ID === topologyJobId(SPEC, "acme"));
     const env = topo?.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
     expect(env.DATABASE_URL).toMatch(/^postgresql:\/\/r_acme:.+@10\.0\.0\.7:35432\/tenant_acme$/);
+  });
+
+  it("consul 주입 시 네트워크 격리 intention 적용(테넌트 서비스 + 공유 스토어)", async () => {
+    const { http, exec } = fakes();
+    const applied: ServiceIntention[] = [];
+    const consul: ConsulClient = {
+      async applyIntention(e) {
+        applied.push(e);
+      },
+      async deleteIntention() {},
+    };
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, consul, pollIntervalMs: 1, maxPolls: 5 });
+    await rt.ensureTopology(SPEC, POOL_ZONE);
+    // 테넌트 서비스 intention(같은 테넌트 allow + * deny) + 공유 스토어 intention.
+    const agent = applied.find((i) => i.Name === "t-acme-agent-server");
+    expect(agent?.Sources.find((s) => s.Name === "*")?.Action).toBe("deny");
+    expect(applied.some((i) => i.Name === "assay-shared-postgres")).toBe(true);
+  });
+
+  it("consul 미주입 시 intention 미적용(기본)", async () => {
+    const { http, exec } = fakes();
+    const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
+    await expect(rt.ensureTopology(SPEC, POOL_ZONE)).resolves.toBeDefined(); // consul 없이도 정상
   });
 });
