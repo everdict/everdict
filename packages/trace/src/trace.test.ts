@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseMlflowTrace } from "./mlflow.js";
-import { parseOtlpSpans } from "./otel.js";
+import { parseJaegerSpans, parseOtlpSpans } from "./otel.js";
 import { type Span, spansToTraceEvents } from "./trace-source.js";
 
 describe("spansToTraceEvents", () => {
@@ -73,6 +73,31 @@ describe("parseOtlpSpans", () => {
     expect(spans[0]?.attrs["gen_ai.usage.input_tokens"]).toBe(42);
     // end-to-end: OTLP → TraceEvent
     expect(spansToTraceEvents(spans)[0]?.kind).toBe("llm_call");
+  });
+});
+
+describe("parseJaegerSpans (Jaeger query 형식)", () => {
+  it("operationName/μs시간/타입드 태그를 정규화한다 → TraceEvent", () => {
+    // 실 Jaeger /api/traces/{id} 의 spans[] 형태(태그 value 가 이미 타입 디코딩됨).
+    const spans = parseJaegerSpans([
+      {
+        operationName: "chat gpt-5.4-mini",
+        startTime: 1781891481611118, // microseconds
+        duration: 2000, // 2ms
+        tags: [
+          { key: "gen_ai.request.model", value: "gpt-5.4-mini" },
+          { key: "gen_ai.usage.input_tokens", value: 42 },
+          { key: "gen_ai.usage.output_tokens", value: 7 },
+        ],
+      },
+    ]);
+    expect(spans[0]?.name).toBe("chat gpt-5.4-mini");
+    expect(spans[0]?.startMs).toBe(1781891481611); // μs→ms
+    expect(spans[0]?.endMs).toBe(1781891481613); // +2ms
+    expect(spans[0]?.attrs["gen_ai.usage.input_tokens"]).toBe(42);
+    const e = spansToTraceEvents(spans)[0];
+    expect(e?.kind === "llm_call" && e.model).toBe("gpt-5.4-mini");
+    expect(e?.kind === "llm_call" && e.cost?.inputTokens).toBe(42);
   });
 });
 

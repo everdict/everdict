@@ -34,6 +34,34 @@ export function parseOtlpSpans(spans: OtlpSpan[]): Span[] {
   });
 }
 
+// Jaeger query API(`GET /api/traces/{id}`) 형식: data[].spans[] {operationName, startTime/duration(μs), tags:[{key,value}]}.
+// 태그 value 는 이미 타입 디코딩됨(string/number/bool) — OTLP 의 {stringValue/intValue} 와 다름.
+interface JaegerTag {
+  key: string;
+  value?: unknown;
+}
+interface JaegerSpan {
+  operationName?: string;
+  startTime?: number; // microseconds
+  duration?: number; // microseconds
+  tags?: JaegerTag[];
+}
+function microToMs(v: number | undefined): number {
+  return Math.floor((v ?? 0) / 1000);
+}
+export function parseJaegerSpans(spans: JaegerSpan[]): Span[] {
+  return spans.map((s) => {
+    const attrs: Record<string, unknown> = {};
+    for (const t of s.tags ?? []) attrs[t.key] = t.value;
+    return {
+      name: s.operationName ?? "",
+      startMs: microToMs(s.startTime),
+      endMs: microToMs((s.startTime ?? 0) + (s.duration ?? 0)),
+      attrs,
+    };
+  });
+}
+
 export interface OtelTraceSourceOptions {
   endpoint: string;
   headers?: Record<string, string>; // 테넌트 자격증명 등(예: Authorization). SecretStore 에서 주입.
@@ -57,7 +85,11 @@ export class OtelTraceSource implements TraceSource {
         `OTel 트레이스 조회 ${res.status}: ${text.slice(0, 200)}`,
       );
     }
-    const body = (await res.json()) as { spans?: OtlpSpan[] };
+    // 응답 형식 자동 감지: Jaeger query(`{data:[{spans}]}`) vs OTLP-네이티브(`{spans:[...]}`).
+    const body = (await res.json()) as { spans?: OtlpSpan[]; data?: Array<{ spans?: JaegerSpan[] }> };
+    if (Array.isArray(body.data)) {
+      return spansToTraceEvents(parseJaegerSpans(body.data.flatMap((t) => t.spans ?? [])));
+    }
     return spansToTraceEvents(parseOtlpSpans(body.spans ?? []));
   }
 }

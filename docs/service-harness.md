@@ -185,6 +185,14 @@ tool spans) to MLflow → `MlflowTraceSource.fetch(trace_id)` pulls it via `GET 
 `steps`/`cost` graders score the **real** trace. This closes the stand-in's empty-trace gap: the eval runtime now
 grades real agent trajectories pulled from a real trace backend.
 
+**Real OTel/Jaeger span ingestion — live ✅.** `OtelTraceSource` now auto-detects the response shape: a real
+**Jaeger** query (`GET /api/traces/{id}` → `{data:[{spans}]}`, tags pre-typed, μs times) via `parseJaegerSpans`, or
+an OTLP-native `{spans:[…]}` via `parseOtlpSpans`. Verified against **Jaeger 1.62** (all-in-one, OTLP receiver)
+with `scripts/live/otel-trace-ingest.mjs` (+ `otel-emit-trace.py`, real OTel SDK → OTLP/HTTP): emit a
+browser-use-shaped trace → `OtelTraceSource.fetch(trace_id)` → `llm_call(gpt-5.4-mini, 42/7 tokens, $)` +
+`tool_call(browser.navigate)` → `steps`/`cost` graded. So both trace backends — **MLflow 3.x and OTel/Jaeger** —
+are live-validated for ingestion + grading.
+
 ## Grading (browser/service)
 Over `{trace, snapshot}` (no `ComputeHandle`): trace-based (`steps`/`cost`/`latency`), browser-outcome
 (`dom-contains`, `url-matches` — read the `BrowserSnapshot`), and model judge (`JudgeGrader` — LLM/VLM over
@@ -233,11 +241,9 @@ The cluster persists across runs (`kind get clusters`); `kind delete cluster --n
   builders (Nomad + K8s), env-manager runId keying, orchestrator-agnostic `ServiceTopologyBackend` (mock runtime).
 - **Phase 2 — live `NomadTopologyRuntime` AND `K8sTopologyRuntime`: DONE** (real apply + endpoint discovery +
   per-case CDP browser + drive + MLflow pull + grade + teardown on **both** Nomad and K8s/kind; see above —
-  Nomad↔K8s parity through the same `ServiceTopologyBackend`). **Real MLflow span ingestion: DONE** (live vs
-  MLflow 3.11 — see Trace section). **Still pending:** the real browser+extension (headful + xvfb +
-  `--load-extension`) and the real browser-use images, real **OTel/Jaeger** span ingestion (no Jaeger running yet;
-  the `OtelTraceSource` mapper is unit-tested + MLflow-native fallbacks live-validated), the harness images +
-  extension registry.
+  Nomad↔K8s parity through the same `ServiceTopologyBackend`). **Real MLflow AND OTel/Jaeger span ingestion: DONE**
+  (live vs MLflow 3.11 + Jaeger 1.62 — see Trace section). **Still pending:** the real browser+extension (headful +
+  xvfb + `--load-extension`) and the real browser-use images, the harness images + extension registry.
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we
