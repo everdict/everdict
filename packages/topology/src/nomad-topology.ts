@@ -1,4 +1,5 @@
 import type { ServiceHarnessSpec } from "@assay/core";
+import { meshServiceName } from "./consul-intentions.js";
 import { dependencyStores } from "./dependencies.js";
 import { sanitizeIdent } from "./store-binding.js";
 
@@ -17,12 +18,24 @@ interface NomadDynamicPort {
   To: number;
 }
 interface NomadNetwork {
+  Mode?: string; // Connect 는 "bridge" 필요
   DynamicPorts: NomadDynamicPort[];
+}
+// Consul Connect: 그룹 service + Envoy sidecar (+ 다른 메시 서비스로의 upstream). 메시가 intentions 로 enforce.
+export interface NomadConnectUpstream {
+  DestinationName: string;
+  LocalBindPort: number;
+}
+export interface NomadConnectService {
+  Name: string; // 메시 서비스명 t-<zone>-<svc>
+  PortLabel: string;
+  Connect: { SidecarService: { Proxy?: { Upstreams: NomadConnectUpstream[] } } };
 }
 interface NomadTopoGroup {
   Name: string;
   Count: number;
   Networks?: NomadNetwork[];
+  Services?: NomadConnectService[];
   Tasks: NomadTopoTask[];
 }
 export interface NomadTopologyJobSpec {
@@ -42,6 +55,20 @@ export interface NomadTopologyOptions {
   storeEnv?: Record<string, string>; // 공유 스토어 엔드포인트 등
   zoneId?: string; // trust-zone(테넌트) 식별자 — warm 잡 ID 에 섞어 테넌트 간 공유를 막는다
   provisionDependencies?: boolean; // spec.dependencies[](postgres/redis)도 같은 잡에 task group 으로 배포
+  connect?: boolean; // Consul Connect mesh 활성화(bridge + sidecar) → intentions 가 데이터플레인에서 enforce
+}
+
+// Connect 그룹 service(sidecar + upstream). 토폴로지 빌더와 라이브 enforce 프루프가 공유하는 빌딩블록.
+export function buildConnectService(
+  name: string,
+  portLabel: string,
+  upstreams: NomadConnectUpstream[] = [],
+): NomadConnectService {
+  return {
+    Name: name,
+    PortLabel: portLabel,
+    Connect: { SidecarService: upstreams.length > 0 ? { Proxy: { Upstreams: upstreams } } : {} },
+  };
 }
 
 export function topologyJobId(spec: ServiceHarnessSpec, zoneId?: string): string {
@@ -145,6 +172,17 @@ export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopol
     if (svc.port !== undefined) {
       group.Networks = [{ DynamicPorts: [{ Label: "http", To: svc.port }] }];
       config.ports = ["http"];
+    }
+    // Connect mesh: bridge 네트워크 + 메시 service(sidecar). 서비스 needs 중 다른 서비스는 upstream 으로 →
+    // intra-토폴로지 통신이 메시를 타고 intentions 로 통제(같은 테넌트 allow). 외부 front-door 는 mesh gateway(별도).
+    if (opts.connect && svc.port !== undefined) {
+      const serviceNeeds = svc.needs.filter((n) => spec.services.some((s) => s.name === n));
+      const upstreams = serviceNeeds.map((n, i) => ({
+        DestinationName: meshServiceName(opts.zoneId ?? "default", n),
+        LocalBindPort: 7000 + i,
+      }));
+      group.Networks = [{ Mode: "bridge", DynamicPorts: [{ Label: "http", To: svc.port }] }];
+      group.Services = [buildConnectService(meshServiceName(opts.zoneId ?? "default", svc.name), "http", upstreams)];
     }
     return group;
   });

@@ -70,6 +70,26 @@ describe("buildNomadTopologyJob", () => {
   });
 });
 
+describe("buildNomadTopologyJob — Connect mesh", () => {
+  it("connect 면 bridge 네트워크 + 메시 service(sidecar) + 같은 테넌트 needs 를 upstream 으로 렌더한다", () => {
+    const job = buildNomadTopologyJob(SPEC, { connect: true, zoneId: "acme" });
+    const agent = job.Job.TaskGroups.find((g) => g.Name === "agent-server");
+    expect(agent?.Networks?.[0]?.Mode).toBe("bridge");
+    const svc = agent?.Services?.[0];
+    expect(svc?.Name).toBe("t-acme-agent-server"); // 메시 서비스명(테넌트 prefix)
+    expect(svc?.Connect.SidecarService).toBeDefined();
+    // agent-server.needs = [postgres, redis, browser-mcp] → 서비스인 browser-mcp 만 upstream(스토어 제외).
+    const ups = svc?.Connect.SidecarService.Proxy?.Upstreams ?? [];
+    expect(ups.map((u) => u.DestinationName)).toEqual(["t-acme-browser-mcp"]);
+  });
+
+  it("connect 없으면 메시 service 를 렌더하지 않는다(기존 동작)", () => {
+    const job = buildNomadTopologyJob(SPEC, { zoneId: "acme" });
+    expect(job.Job.TaskGroups.every((g) => g.Services === undefined)).toBe(true);
+    expect(job.Job.TaskGroups[0]?.Networks?.[0]?.Mode).toBeUndefined();
+  });
+});
+
 describe("buildBrowserJob", () => {
   it("per-case headless Chromium(service) + CDP dynamic port 로 렌더한다", () => {
     const job = buildBrowserJob(SPEC, "abc", { runtime: "runsc" });

@@ -136,8 +136,18 @@ unit-tested for correctness and verified live on a dedicated **Calico** kind clu
 **BLOCKED**. So with a policy-CNI the tenant network boundary holds end-to-end; on a non-enforcing CNI the
 policies are applied but inert (same honesty as runsc/gVisor not being installed on kind).
 
-**Nomad** has no NetworkPolicy equivalent — network isolation there is **Consul Connect intentions** (service-
-identity authz), the Nomad analog of NetworkPolicy. `buildTenantIntentions` (`@assay/topology`) emits a
+**Nomad — data-plane enforce status.** The decision layer is proven (intentions, below). For the actual Envoy
+data-plane block, the prerequisites are now satisfied and scripted (`scripts/live/connect-enforce-nomad.mjs`):
+`buildNomadTopologyJob({connect:true})` / `buildConnectService` render Connect-enabled jobs (bridge + sidecar +
+upstreams), and the mesh **stands up** on a Nomad client running **as root** (Connect bridge needs root for
+iptables) against a Consul exposing **gRPC/xDS** (the shared workclaw Consul has gRPC off, so a self-contained
+`consul agent -dev` is used) — Envoy sidecars deploy healthy, services register, apps are reachable in-netns. A
+clean **allow/deny differential** at the data plane was **not** yet demonstrated: the probe's upstream routing
+reset for *all* destinations (a blanket reset isn't proof of enforcement), and the distroless Envoy image lacks
+curl/wget to introspect `/clusters`, so the upstream-xDS cause is unresolved (follow-up). **So the authoritative
+network-isolation proof remains the Consul-intention decision** —
+
+**Consul Connect intentions** (service-identity authz) are the Nomad analog of NetworkPolicy. `buildTenantIntentions` (`@assay/topology`) emits a
 `service-intentions` config entry per tenant service: `Sources = [allow each same-tenant mesh service, deny *]`.
 Consul evaluates by **precedence** (exact name > `*`), so a service in another tenant matches only the `*` deny —
 per-destination deny-by-default without touching global Consul config. The shared store gets an `allow *` intention
