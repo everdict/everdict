@@ -67,4 +67,7 @@ export const controlPlane = {
     call<T>(auth, '/runtimes', { method: 'POST', body: JSON.stringify(spec) }),
   validateRuntime: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/runtimes/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
+  setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
+    call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),
 }

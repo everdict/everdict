@@ -67,6 +67,8 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
   yet **tokens are metered**.
 
 ## Not yet (next)
-- Web/MCP surface for `PUT /workspace/settings` (today: HTTP route + `can()` mirror; no web page yet).
+- **Web page done**: `/dashboard/settings` (admin) toggles `meterUsage` via `PUT /workspace/settings`
+  (`@/features/workspace-settings`, gated by `can(roles, 'settings:write')`). **MCP tool deferred** (agents
+  don't manage workspace policy; settings is human/admin config like secrets-on-web).
 - Note: `$` capture is **live-ready** but reads `0` on workclaw's LiteLLM because its models are subscription
   (unpriced); it yields real `$` for any metered model the gateway prices.
