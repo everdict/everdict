@@ -5,7 +5,11 @@ export {
   fullScorecardSchema,
   scorecardRecordSchema,
   scorecardsSchema,
+  caseDeltaSchema,
+  scorecardDiffSchema,
   type ScorecardStatus,
   type MetricSummary,
   type ScorecardRecord,
+  type CaseDelta,
+  type ScorecardDiff,
 } from './model/schema'

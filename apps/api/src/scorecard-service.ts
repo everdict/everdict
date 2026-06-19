@@ -2,16 +2,19 @@ import { type BudgetTracker, type Dispatcher, costOf } from "@assay/backends";
 import {
   type AgentJob,
   AppError,
+  BadRequestError,
   type CaseResult,
   type Dataset,
   type GradeContext,
   type HarnessSpec,
   type JudgeSpec,
+  NotFoundError,
+  type Scorecard,
   type Suite,
 } from "@assay/core";
 import type { ScorecardRecord, ScorecardStore } from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
-import { type Dispatch, runSuite, summarizeScorecard } from "@assay/suite";
+import { type Dispatch, type ScorecardDiff, diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
 import type { JudgeRunner } from "./judge-runner.js";
 
 export interface RunScorecardInput {
@@ -93,6 +96,27 @@ export class ScorecardService {
 
   list(tenant?: string): Promise<ScorecardRecord[]> {
     return this.deps.store.list(tenant);
+  }
+
+  // baseline vs candidate 비교 — 같은 케이스 위 메트릭 delta + pass 전이(회귀/개선). 둘 다 이 워크스페이스 소유 + 완료여야.
+  async diff(tenant: string, baselineId: string, candidateId: string): Promise<ScorecardDiff> {
+    const baseline = await this.requireSucceeded(tenant, baselineId);
+    const candidate = await this.requireSucceeded(tenant, candidateId);
+    return diffScorecards(baseline, candidate);
+  }
+
+  // 워크스페이스 스코프 + 완료(scorecard 존재) 보장. 없으면 404(존재 누출 금지), 미완료면 400.
+  private async requireSucceeded(tenant: string, id: string): Promise<Scorecard> {
+    const record = await this.deps.store.get(id);
+    if (!record || record.tenant !== tenant)
+      throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' 를 찾을 수 없습니다.`);
+    if (!record.scorecard)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { id, status: record.status },
+        `scorecard '${id}' 가 아직 완료되지 않았습니다(status=${record.status}).`,
+      );
+    return record.scorecard;
   }
 
   private async track(

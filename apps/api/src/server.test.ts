@@ -524,6 +524,47 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
     );
     await app.close();
   });
+
+  it("diff: 두 스코어카드 비교(메트릭 delta + 회귀/개선); 누락 파라미터 400, 없는 id 404", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const runOne = async () => {
+      const post = await app.inject({
+        method: "POST",
+        url: "/scorecards",
+        headers: h,
+        payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+      });
+      const { id } = post.json();
+      await pollScorecard(app, id, h);
+      return id as string;
+    };
+    const base = await runOne();
+    const cand = await runOne();
+
+    expect(
+      (await app.inject({ method: "GET", url: "/scorecards/diff", headers: h })).statusCode, // 파라미터 없음
+    ).toBe(400);
+    const notFound = await app.inject({
+      method: "GET",
+      url: `/scorecards/diff?baseline=${base}&candidate=nope`,
+      headers: h,
+    });
+    expect(notFound.statusCode).toBe(404); // candidate 없음
+
+    const diff = await app.inject({
+      method: "GET",
+      url: `/scorecards/diff?baseline=${base}&candidate=${cand}`,
+      headers: h,
+    });
+    expect(diff.statusCode).toBe(200);
+    const body = diff.json();
+    expect(body.metrics.map((m: { metric: string }) => m.metric)).toContain("steps");
+    expect(body.regressions).toEqual([]); // 동일 디스패처 → 회귀 없음
+    expect(body.improvements).toEqual([]);
+    await app.close();
+  });
 });
 
 describe("API — secrets (workspace model/provider keys)", () => {

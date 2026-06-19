@@ -75,6 +75,7 @@ describe("MCP tools", () => {
     expect(names).toEqual([
       "create_dataset",
       "create_judge",
+      "diff_scorecards",
       "get_dataset",
       "get_judge",
       "get_run",
@@ -234,5 +235,12 @@ describe("MCP tools", () => {
     const notFound = await beta.callTool({ name: "get_judge", arguments: { id: "correctness" } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
+  });
+
+  it("diff_scorecards: 없는 스코어카드는 NOT_FOUND(워크스페이스 스코프)", async () => {
+    const client = await connect(harness(), ["member"]);
+    const res = await client.callTool({ name: "diff_scorecards", arguments: { baseline: "x", candidate: "y" } });
+    expect(res.isError).toBe(true);
+    expect(text(res)).toContain("NOT_FOUND");
   });
 });

@@ -46,6 +46,11 @@ export const controlPlane = {
   getScorecard: <T>(auth: AuthContext, id: string) => call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
   runScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
+  diffScorecards: <T>(auth: AuthContext, baseline: string, candidate: string) =>
+    call<T>(
+      auth,
+      `/scorecards/diff?baseline=${encodeURIComponent(baseline)}&candidate=${encodeURIComponent(candidate)}`,
+    ),
   listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),

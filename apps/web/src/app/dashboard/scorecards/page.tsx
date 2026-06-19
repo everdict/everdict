@@ -32,11 +32,16 @@ export default async function ScorecardsPage() {
         title="스코어카드"
         description={`${scorecards.length}건 · 데이터셋×하니스 배치 평가 결과`}
         actions={
-          can(principal?.roles, 'scorecards:run') ? (
-            <Link href="/dashboard/scorecards/new" className={buttonVariants({ size: 'sm' })}>
-              스코어카드 실행
+          <div className="flex gap-2">
+            <Link href="/dashboard/scorecards/compare" className={buttonVariants({ size: 'sm', variant: 'secondary' })}>
+              비교
             </Link>
-          ) : null
+            {can(principal?.roles, 'scorecards:run') ? (
+              <Link href="/dashboard/scorecards/new" className={buttonVariants({ size: 'sm' })}>
+                스코어카드 실행
+              </Link>
+            ) : null}
+          </div>
         }
       />
       {error ? (

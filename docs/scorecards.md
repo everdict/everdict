@@ -32,6 +32,7 @@ Migration: `packages/db/migrations/0006_create_scorecards.sql`.
 | `POST /scorecards` `{dataset, harness, judges?}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |
 | `GET /scorecards/:id` (full) | `get_scorecard` | `scorecards:read` |
+| `GET /scorecards/diff?baseline=&candidate=` | `diff_scorecards` | `scorecards:read` |
 
 Optional `judges:[{id,version?}]` applies registered **Agent Judges** to each case's trace after the run →
 `judge:<id>` scores in the summary (control-plane, trace-based). See `docs/judges.md`.
@@ -43,5 +44,8 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
 - **스코어카드 `/dashboard/scorecards`** — runs list (dataset@v → harness@v, status, per-metric summary chips).
 - **상세 `/dashboard/scorecards/[id]`** — status, meta, per-metric **stat cards** (mean + pass-rate), per-case
   scores, error.
-- **실행 `/dashboard/scorecards/new`** — pick dataset + harness (datalist) → `runScorecardAction` →
-  `POST /scorecards`. Role-gated off `/me` (`scorecards:run` = member+).
+- **실행 `/dashboard/scorecards/new`** — pick dataset + harness (datalist) + optional judges → `runScorecardAction`
+  → `POST /scorecards`. Role-gated off `/me` (`scorecards:run` = member+).
+- **비교 `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
+  mean Δ table + **regressions (pass→fail) / improvements (fail→pass)** via `diffScorecards`. This is the
+  baseline-vs-candidate payoff. `scorecards:read`.

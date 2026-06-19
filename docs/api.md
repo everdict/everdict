@@ -23,6 +23,7 @@ arrives by polling or webhook.
 | `POST` | `/scorecards` | `{ dataset:{id,version?}, harness:{id,version?} }` → **202** `ScorecardRecord(queued)` (`scorecards:run`, member+) |
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |
 | `GET`  | `/scorecards/:id` | full `ScorecardRecord` (incl. per-case `scorecard`) or 404 (`scorecards:read`) |
+| `GET`  | `/scorecards/diff?baseline=&candidate=` | `ScorecardDiff` (metric Δ + regressions/improvements) (`scorecards:read`) |
 | `GET`  | `/healthz` | `{ ok: true }` |
 
 Scorecards are **batch evals** (a dataset × a `harness@version` → aggregated `Scorecard` + per-metric summary),

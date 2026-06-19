@@ -345,6 +345,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           return ok(record);
         }),
     );
+
+    server.registerTool(
+      "diff_scorecards",
+      {
+        description:
+          "두 스코어카드 비교(baseline vs candidate) → 메트릭 delta + 케이스 회귀/개선. 둘 다 이 워크스페이스 완료여야",
+        inputSchema: { baseline: z.string(), candidate: z.string() },
+      },
+      ({ baseline, candidate }) =>
+        run(principal, "scorecards:read", async () => ok(await scorecards.diff(ws, baseline, candidate))),
+    );
   }
 
   if (deps.secretStore) {

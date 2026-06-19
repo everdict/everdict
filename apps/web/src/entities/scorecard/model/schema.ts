@@ -49,3 +49,25 @@ export const scorecardRecordSchema = z.object({
 })
 export type ScorecardRecord = z.infer<typeof scorecardRecordSchema>
 export const scorecardsSchema = z.array(scorecardRecordSchema)
+
+// GET /scorecards/diff 응답: baseline vs candidate (메트릭 mean delta + 케이스 회귀/개선).
+export const caseDeltaSchema = z.object({
+  caseId: z.string(),
+  metric: z.string(),
+  baseline: z.number(),
+  candidate: z.number(),
+  delta: z.number(),
+  passChange: z.enum(['fixed', 'broke']).optional(),
+})
+export type CaseDelta = z.infer<typeof caseDeltaSchema>
+
+export const scorecardDiffSchema = z.object({
+  baseline: z.string(),
+  candidate: z.string(),
+  metrics: z.array(
+    z.object({ metric: z.string(), baselineMean: z.number(), candidateMean: z.number(), delta: z.number() }),
+  ),
+  regressions: z.array(caseDeltaSchema),
+  improvements: z.array(caseDeltaSchema),
+})
+export type ScorecardDiff = z.infer<typeof scorecardDiffSchema>

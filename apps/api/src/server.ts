@@ -409,6 +409,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // baseline vs candidate 비교(회귀/개선). 정적 경로 → :id 보다 먼저 매칭. 둘 다 이 워크스페이스 소유 + 완료여야.
+  app.get<{ Querystring: { baseline?: string; candidate?: string } }>("/scorecards/diff", async (req, reply) => {
+    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const { baseline, candidate } = req.query;
+    if (!baseline || !candidate)
+      return reply
+        .code(400)
+        .send({ code: "BAD_REQUEST", message: "baseline 과 candidate 쿼리 파라미터가 필요합니다." });
+    try {
+      gate(principal, "scorecards:read");
+      return reply.send(await deps.scorecardService.diff(principal.workspace, baseline, candidate));
+    } catch (err) {
+      return sendError(reply, err); // 없으면 404, 미완료면 400
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/scorecards/:id", async (req, reply) => {
     if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
