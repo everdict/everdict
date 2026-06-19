@@ -12,5 +12,8 @@ export const AgentJobSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   harnessSpec: HarnessSpecSchema.optional(),
   tenant: z.string().optional(),
+  // 사용량 계측 여부 — 컨트롤플레인이 워크스페이스/요청 정책으로 결정해 잡에 실어 보낸다(글로벌 플래그 대체).
+  // 에이전트는 이 값을 우선한다(미지정이면 dev 폴백으로 ASSAY_METER_USAGE env). command 하니스에서만 의미.
+  meterUsage: z.boolean().optional(),
 });
 export type AgentJob = z.infer<typeof AgentJobSchema>;

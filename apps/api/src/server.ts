@@ -15,6 +15,7 @@ export const SubmitBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   case: EvalCaseSchema,
   webhookUrl: z.string().url().optional(),
+  meterUsage: z.boolean().optional(), // 이 요청만 사용량 계측 override(미지정이면 워크스페이스 정책)
 });
 
 // 스코어카드 실행 본문 — 데이터셋×하니스(버전 기본 latest, 서비스가 구체 버전으로 해석) + 선택한 judge 들.

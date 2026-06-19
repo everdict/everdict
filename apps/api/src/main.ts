@@ -85,6 +85,8 @@ async function main(): Promise<void> {
     budget,
     // 선언형 command 하니스: 레지스트리에서 spec 을 풀어 잡에 임베드(없으면 빌트인 폴백).
     resolveHarness: (tenant, id, version) => registry.get(tenant, id, version),
+    // 워크스페이스 단위 계측 정책(요청별 override 가 우선). 글로벌 ASSAY_METER_USAGE 또는 테넌트 화이트리스트.
+    meterUsageFor: meterUsagePolicyFromEnv(),
   });
   // judge 실행기: model(anthropic/openai)은 테넌트 시크릿 키로 실제 호출, harness 는 참조 에이전트를 디스패치해 판정.
   // 키/시크릿 없으면 skip(사유 명시). openai 베이스(LiteLLM 등)는 OPENAI_BASE_URL 시크릿 또는 env.
@@ -202,6 +204,23 @@ function buildAuthenticator(keyStore: TenantKeyStore): Authenticator {
   }
   authers.push(apiKeyAuthenticator({ keyStore }));
   return compositeAuthenticator(authers);
+}
+
+// 워크스페이스 단위 계측 정책: ASSAY_METER_TENANTS(콤마 목록)이 있으면 그 테넌트만, 없으면 ASSAY_METER_USAGE=1 이
+// 전 테넌트 기본값. 요청별 override(POST /runs body.meterUsage)가 항상 우선한다.
+function meterUsagePolicyFromEnv(): (tenant: string) => boolean {
+  const list = process.env.ASSAY_METER_TENANTS;
+  if (list) {
+    const allow = new Set(
+      list
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+    return (tenant) => allow.has(tenant);
+  }
+  const all = process.env.ASSAY_METER_USAGE === "1";
+  return () => all;
 }
 
 function budgetFromEnv(): (tenant: string) => BudgetLimit | undefined {

@@ -72,6 +72,43 @@ describe("RunService", () => {
     });
   });
 
+  it("계측: 요청 override > 워크스페이스 정책 > off, 결정값을 job.meterUsage 로 실어 보낸다", async () => {
+    const seen: Array<boolean | undefined> = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        seen.push(job.meterUsage);
+        return resultFor(job);
+      },
+    };
+    // 정책: acme 만 on. 요청 override 가 정책을 이긴다.
+    const svc = new RunService({
+      dispatcher,
+      store: new InMemoryRunStore(),
+      newId: ids,
+      meterUsageFor: (t) => t === "acme",
+    });
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE }); // 정책 on
+    await svc.submit({ tenant: "beta", harness: { id: "s", version: "0" }, case: CASE }); // 정책 off
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE, meterUsage: false }); // override off
+    await svc.submit({ tenant: "beta", harness: { id: "s", version: "0" }, case: CASE, meterUsage: true }); // override on
+    await flush();
+    expect(seen).toEqual([true, false, false, true]);
+  });
+
+  it("정책 없으면 기본 off (job.meterUsage=false)", async () => {
+    let seen: boolean | undefined;
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        seen = job.meterUsage;
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({ dispatcher, store: new InMemoryRunStore(), newId: ids });
+    await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(seen).toBe(false);
+  });
+
   it("완료 시 cost 가 settle 된다", async () => {
     const store = new InMemoryRunStore();
     const budget = inMemoryBudget({ limitFor: () => ({ usd: 1 }) });

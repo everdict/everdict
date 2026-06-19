@@ -23,16 +23,21 @@ original architecture.) Token metering first; $ later (metered models, via the u
   `x-assay-run` header (stripped before forwarding, never leaks upstream) or `defaultRunId` (per-run proxy
   instance). `inMemoryUsageTally()` keeps `{promptTokens, completionTokens, totalTokens, calls}` per run.
 
-## Wired into the run lifecycle (opt-in)
+## Wired into the run lifecycle (per-workspace / per-run)
 The proxy lives **in the agent's sandbox**, on `localhost` — so it works on every backend (Local/Nomad/K8s)
 without any cross-network reconfiguration (the agent→upstream path is the one that already works):
-1. `runAgentJob` reads **`ASSAY_METER_USAGE=1`** → passes `meterUsage` to `makeHarness`.
-2. `CommandHarness.run` (only when `trace:none` + the model-base env var is present — avoids double-counting a
+1. **Control plane decides** whether to meter a run and sets **`AgentJob.meterUsage`** (authoritative).
+   Resolution in `RunService`: per-run override (`POST /runs` body `meterUsage`) → per-workspace policy
+   (`meterUsageFor(tenant)`) → `false`. `main.ts` builds the policy from env: **`ASSAY_METER_TENANTS`**
+   (comma list → only those workspaces) or **`ASSAY_METER_USAGE=1`** (all workspaces).
+2. `runAgentJob` uses `job.meterUsage` (falls back to the `ASSAY_METER_USAGE` env only for direct
+   `LocalBackend.dispatch` with no control plane) → passes `meterUsage` to `makeHarness`.
+3. `CommandHarness.run` (only when `trace:none` + the model-base env var is present — avoids double-counting a
    harness that already reports its own cost) starts a per-run `startUsageProxy(upstream = OPENAI_API_BASE)`,
    **rewrites `OPENAI_API_BASE` to the proxy**, runs the command (aider/any CLI — **zero harness code**), then
    emits the captured tokens as a synthetic **`llm_call`** trace event (`cost: { inputTokens, outputTokens,
    usd: 0 }`).
-3. That event rides `runCase` → `result.trace`, so the **existing** path settles it: `RunService.track` already
+4. That event rides `runCase` → `result.trace`, so the **existing** path settles it: `RunService.track` already
    does `budget.settle(tenant, costOf(result))` and persists `result` in the `RunStore`. No RunService change.
 
 ## Verified
@@ -41,6 +46,8 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
   leaked** upstream, header-less → `default`.
 - Deterministic (`packages/harnesses/src/command.test.ts`): `meterUsage` rewrites the base to the proxy, emits
   the synthetic `llm_call` with the captured tokens, and closes the proxy; **not** metered when `trace` ≠ `none`.
+- Deterministic (`apps/api/src/run-service.test.ts`): resolution order — per-run override > per-workspace policy
+  > off — and the decided value is carried on `AgentJob.meterUsage`.
 - Live proxy (`scripts/live/usage-proxy.mjs`) vs real workclaw LiteLLM `gpt-5.4-mini`: `run-A` = 2 calls / 3276
   tokens, `run-B` = 1 call / 1642 tokens — captured while responses pass through intact.
 - Live lifecycle (`scripts/live/usage-proxy-run.mjs`): a `command` harness dispatched via `LocalBackend` with
@@ -49,6 +56,7 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
   yet **tokens are metered**.
 
 ## Not yet (next)
-- Per-workspace/run control of metering (instead of the global `ASSAY_METER_USAGE` flag).
+- A durable per-workspace settings store for the policy (today: env `ASSAY_METER_TENANTS` / `ASSAY_METER_USAGE`
+  + per-run override; MCP/web could expose the override too).
 - $ capture for **metered** models (upstream `x-litellm-response-cost` header) — tokens-only by decision for now.
 - Optional explicit `RunUsage` summary on the `RunRecord` (today it's derivable from `result.trace`).
