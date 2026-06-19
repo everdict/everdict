@@ -1,7 +1,8 @@
 # Architecture overview
 
 Detailed conventions live in `.claude/skills/` (single source of truth). This file is the
-human-facing map.
+human-facing map. For the *collaboration* view — who calls whom, drawn as diagrams at two zoom
+levels (whole-mesh + per-module) — see [`collaboration.md`](collaboration.md).
 
 ## The spine: 4 in-sandbox concerns + a placement layer
 | Concern | Interface (`@assay/core`) | impl |

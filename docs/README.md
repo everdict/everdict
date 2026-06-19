@@ -1,6 +1,7 @@
 # Assay docs
 
 - [architecture/overview.md](architecture/overview.md) — the architecture map (spine, eval loop, extension points)
+- [architecture/collaboration.md](architecture/collaboration.md) — module collaboration diagrams (Mermaid): bird's-eye dependency/eval-loop/control-plane + one detailed diagram per package & app
 - [service-harness.md](service-harness.md) — service-topology harnesses (multi-service + browser/OS target env), Nomad/K8s, OTel/MLflow trace
 - [execution-backends.md](execution-backends.md) — Backend (placement) vs Driver (in-sandbox), multi-cluster routing, capacity-aware + tenant-fair scheduling, trust zones, secrets/budgets, autoscaling
 - [api.md](api.md) — the control-plane HTTP API (`@assay/api`): async `POST /runs` + poll/webhook + result store
