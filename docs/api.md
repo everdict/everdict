@@ -24,7 +24,8 @@ arrives by polling or webhook.
 | `POST` | `/runtimes/validate` | dry-run: schema + existing versions/conflict, no write (`runtimes:write`) |
 | `GET`  | `/runtimes` | workspace-owned + `_shared` execution runtimes (`runtimes:read`) |
 | `GET`  | `/runtimes/:id/versions/:version` | full `RuntimeSpec`; `version` may be `latest` (`runtimes:read`) |
-| `POST` | `/scorecards` | `{ dataset:{id,version?}, harness:{id,version?} }` → **202** `ScorecardRecord(queued)` (`scorecards:run`, member+) |
+| `POST` | `/scorecards` | `{ dataset, harness, judges?, runtime? }` → **202** `ScorecardRecord(queued)` (`scorecards:run`, member+) |
+| `POST` | `/scorecards/ingest` | `{ dataset, harness, traces:[{caseId,trace:TraceEvent[]}], judges? }` → **202** (no harness run) (`scorecards:run`) |
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |
 | `GET`  | `/scorecards/:id` | full `ScorecardRecord` (incl. per-case `scorecard`) or 404 (`scorecards:read`) |
 | `GET`  | `/scorecards/diff?baseline=&candidate=` | `ScorecardDiff` (metric Δ + regressions/improvements) (`scorecards:read`) |

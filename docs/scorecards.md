@@ -29,13 +29,25 @@ Migration: `packages/db/migrations/0006_create_scorecards.sql`.
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|
-| `POST /scorecards` `{dataset, harness, judges?}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards` `{dataset, harness, judges?, runtime?}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards/ingest` `{dataset, harness, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |
 | `GET /scorecards/:id` (full) | `get_scorecard` | `scorecards:read` |
 | `GET /scorecards/diff?baseline=&candidate=` | `diff_scorecards` | `scorecards:read` |
 
 Optional `judges:[{id,version?}]` applies registered **Agent Judges** to each case's trace after the run →
 `judge:<id>` scores in the summary (control-plane, trace-based). See `docs/judges.md`.
+
+### Trace ingestion (`POST /scorecards/ingest`)
+The "이미 수행한 트레이스" path: produce a scorecard from **externally-run traces without dispatching a harness**.
+The seam is the normalized `TraceEvent` (`@assay/core`) — per-harness trace variance is absorbed at the **edge**
+(the harness/SDK uploads already-normalized `TraceEvent[]`; the control plane only validates via `TraceEventSchema`).
+`ScorecardService.ingest` resolves the referenced **dataset** (for `caseId`→task alignment + diff alignment),
+wraps each uploaded trace as a `CaseResult`, **re-derives the trace-only graders** (`steps`/`cost`/`latency` →
+`tool_calls`/`usd`/`span`, so ingested scorecards are diff-comparable to live runs), applies selected judges, and
+stores a `ScorecardRecord`. Unknown `caseId`s are skipped; a bad `TraceEvent` is a `400` at the boundary. From
+there judges/diff/dashboard reuse the same pipeline. (Pull-mode — fetch from a tenant's OTel/MLflow via
+`packages/trace` `TraceSource` + SecretStore — is the natural follow-on.)
 
 All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service core, one auth core. See
 `docs/api.md`, `docs/mcp.md`, `docs/web.md`, `docs/datasets.md`, `docs/suites.md`.
@@ -49,3 +61,5 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
 - **비교 `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
   mean Δ table + **regressions (pass→fail) / improvements (fail→pass)** via `diffScorecards`. This is the
   baseline-vs-candidate payoff. `scorecards:read`.
+- **인제스트 `/dashboard/scorecards/ingest`** — upload `TraceEvent[]` (dataset + harness label + judges) →
+  `POST /scorecards/ingest`. `scorecards:run` (member+).

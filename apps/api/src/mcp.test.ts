@@ -88,6 +88,7 @@ describe("MCP tools", () => {
       "get_run",
       "get_runtime",
       "get_scorecard",
+      "ingest_scorecard",
       "list_datasets",
       "list_harnesses",
       "list_judges",
@@ -252,6 +253,37 @@ describe("MCP tools", () => {
     const res = await client.callTool({ name: "diff_scorecards", arguments: { baseline: "x", candidate: "y" } });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain("NOT_FOUND");
+  });
+
+  it("ingest_scorecard: 업로드 트레이스로 scorecard(하니스 미실행) → 트레이스 그레이더 재도출", async () => {
+    const deps = harness();
+    const client = await connect(deps, ["member"], "acme");
+    await client.callTool({ name: "create_dataset", arguments: { dataset: DATASET } }); // caseId c1
+    const body = JSON.stringify({
+      dataset: { id: "smoke" },
+      harness: { id: "external" },
+      traces: [
+        {
+          caseId: "c1",
+          trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.02 } }],
+        },
+      ],
+    });
+    const ing = await client.callTool({ name: "ingest_scorecard", arguments: { body } });
+    expect(ing.isError).toBeFalsy();
+    const id = JSON.parse(text(ing)).id as string;
+    let rec: { status: string; scorecard?: { results: Array<{ scores: Array<{ metric: string }> }> } } = {
+      status: "queued",
+    };
+    for (let i = 0; i < 50; i++) {
+      rec = JSON.parse(text(await client.callTool({ name: "get_scorecard", arguments: { id } })));
+      if (rec.status === "succeeded" || rec.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(rec.status).toBe("succeeded");
+    expect(rec.scorecard?.results?.[0]?.scores.map((s) => s.metric)).toEqual(
+      expect.arrayContaining(["tool_calls", "usd", "span"]),
+    );
   });
 
   it("runtimes: admin 이 등록·조회; member 는 write 권한오류(실행 인프라=admin)", async () => {

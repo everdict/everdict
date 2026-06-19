@@ -33,6 +33,7 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `list_scorecards` | `scorecards:read` (viewer+) | the workspace's scorecards (summary only) |
 | `get_scorecard` | `scorecards:read` | one scorecard incl. per-case results (other workspace → `NOT_FOUND`) |
 | `diff_scorecards` | `scorecards:read` | compare two scorecards → metric Δ + regressions/improvements |
+| `ingest_scorecard` | `scorecards:run` | upload externally-run `TraceEvent[]` → scorecard (no harness run) |
 
 Authorization/validation failures come back as MCP tool errors (`isError`), e.g. `FORBIDDEN: …`.
 

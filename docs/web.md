@@ -30,7 +30,7 @@ excluded from root Biome). The web is a pure HTTP client of the control plane �
 app/        Next App Router — landing, dashboard/{layout(shell), page(overview), runs, runs/[id], harnesses,
             datasets(+[id],new), scorecards(+[id],new,compare), judges(+[id],new), runtimes(+[id],new)}, api/auth/[...nextauth], middleware
 widgets/    page-level composition: app-shell (sidebar+topbar), scorecard-summary, runs-table, trace-timeline
-features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime (client form + 'use server' action → control plane)
+features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard (client form + 'use server' action → control plane)
 entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state), lib (utils, control-plane),
             config (env), providers (query), auth (Keycloak token store/refresh, server-only access-token (getToken),
@@ -51,7 +51,8 @@ Import order enforces downward layer deps (app → widgets → features → enti
   chips; rows link to detail). **상세 `/dashboard/scorecards/[id]`** shows per-metric stat cards + per-case
   scores. **실행 `/dashboard/scorecards/new`** — pick dataset + harness (+ optional judges) → `POST /scorecards`.
   **비교 `/dashboard/scorecards/compare`** — two scorecard pickers → metric Δ table + regressions/improvements
-  (`diffScorecards`). Role-gated off `/me` (run = member+, read/compare = viewer+). See `docs/scorecards.md`.
+  (`diffScorecards`). **인제스트 `/dashboard/scorecards/ingest`** — upload externally-run `TraceEvent[]` → scorecard
+  (no harness run). Role-gated off `/me` (run/ingest = member+, read/compare = viewer+). See `docs/scorecards.md`.
 - **Judge `/dashboard/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **상세 `/dashboard/judges/[id]`** shows kind + fields + rubric. **등록 `/dashboard/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`

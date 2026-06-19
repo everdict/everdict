@@ -37,9 +37,17 @@ export default async function ScorecardsPage() {
               비교
             </Link>
             {can(principal?.roles, 'scorecards:run') ? (
-              <Link href="/dashboard/scorecards/new" className={buttonVariants({ size: 'sm' })}>
-                스코어카드 실행
-              </Link>
+              <>
+                <Link
+                  href="/dashboard/scorecards/ingest"
+                  className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+                >
+                  인제스트
+                </Link>
+                <Link href="/dashboard/scorecards/new" className={buttonVariants({ size: 'sm' })}>
+                  스코어카드 실행
+                </Link>
+              </>
             ) : null}
           </div>
         }

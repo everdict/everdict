@@ -13,7 +13,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { RunService } from "./run-service.js";
-import type { ScorecardService } from "./scorecard-service.js";
+import { IngestScorecardBodySchema, type ScorecardService } from "./scorecard-service.js";
 
 // MCP 도구 표면 — HTTP 라우트와 같은 서비스 코어를 공유하는 "에이전트용 트랜스포트".
 // 각 도구는 Principal 의 역할로 authorize 되고 workspace 로 스코프된다(컨트롤플레인이 인증/인가 권위).
@@ -436,6 +436,27 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ baseline, candidate }) =>
         run(principal, "scorecards:read", async () => ok(await scorecards.diff(ws, baseline, candidate))),
+    );
+
+    server.registerTool(
+      "ingest_scorecard",
+      {
+        description:
+          "외부에서 이미 수행한 트레이스(TraceEvent[])를 올려 scorecard 로(하니스 미실행). body=IngestScorecard JSON {dataset,harness,traces:[{caseId,trace}],judges?}",
+        inputSchema: { body: z.string().describe("IngestScorecard JSON") },
+      },
+      ({ body }) =>
+        run(principal, "scorecards:run", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 IngestScorecard JSON 이 아닙니다.");
+          }
+          const result = IngestScorecardBodySchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          return ok(await scorecards.ingest({ tenant: ws, ...result.data }));
+        }),
     );
   }
 
