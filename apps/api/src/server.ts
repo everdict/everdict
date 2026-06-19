@@ -685,6 +685,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           judgeRegistry: deps.judgeRegistry,
           runtimeRegistry: deps.runtimeRegistry,
           secretStore: deps.secretStore,
+          settingsStore: deps.settingsStore,
         },
         principal,
       ).connect(transport);

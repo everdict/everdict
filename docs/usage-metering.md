@@ -66,9 +66,12 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
   `sumCost = { usd: 0, tokens: 1643 }` (the exact value `budget.settle` receives). Subscription model = `$0`,
   yet **tokens are metered**.
 
+## Management surfaces (admin)
+- **HTTP**: `PUT/GET /workspace/settings` (`settings:write`/`settings:read`).
+- **Web**: `/dashboard/settings` toggles `meterUsage` (`@/features/workspace-settings`, `can()`-gated).
+- **MCP**: `get_workspace_settings` / `set_workspace_settings` tools (`apps/api/src/mcp.ts`, admin-gated,
+  workspace-scoped) — full BFF↔MCP parity.
+
 ## Not yet (next)
-- **Web page done**: `/dashboard/settings` (admin) toggles `meterUsage` via `PUT /workspace/settings`
-  (`@/features/workspace-settings`, gated by `can(roles, 'settings:write')`). **MCP tool deferred** (agents
-  don't manage workspace policy; settings is human/admin config like secrets-on-web).
 - Note: `$` capture is **live-ready** but reads `0` on workclaw's LiteLLM because its models are subscription
   (unpriced); it yields real `$` for any metered model the gateway prices.

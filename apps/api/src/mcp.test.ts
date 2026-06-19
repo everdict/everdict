@@ -1,7 +1,7 @@
 import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
-import { InMemoryRunStore, InMemoryScorecardStore } from "@assay/db";
+import { InMemoryRunStore, InMemoryScorecardStore, InMemoryWorkspaceSettingsStore } from "@assay/db";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
@@ -349,5 +349,22 @@ describe("MCP tools", () => {
     expect(text(denied)).toContain("FORBIDDEN");
     // member 는 읽기는 됨
     expect((await member.callTool({ name: "list_runtimes", arguments: {} })).isError).toBeFalsy();
+  });
+
+  it("workspace settings: admin get(빈)→{} / set 병합 반영; member 는 권한오류", async () => {
+    const deps = { ...harness(), settingsStore: new InMemoryWorkspaceSettingsStore() };
+    const admin = await connect(deps, ["admin"], "acme");
+    expect(JSON.parse(text(await admin.callTool({ name: "get_workspace_settings", arguments: {} })))).toEqual({});
+    const set = await admin.callTool({ name: "set_workspace_settings", arguments: { meterUsage: true } });
+    expect(JSON.parse(text(set))).toEqual({ meterUsage: true });
+    expect(JSON.parse(text(await admin.callTool({ name: "get_workspace_settings", arguments: {} })))).toEqual({
+      meterUsage: true,
+    });
+
+    const member = await connect(deps, ["member"], "acme");
+    expect((await member.callTool({ name: "get_workspace_settings", arguments: {} })).isError).toBe(true);
+    expect((await member.callTool({ name: "set_workspace_settings", arguments: { meterUsage: false } })).isError).toBe(
+      true,
+    );
   });
 });

@@ -7,7 +7,7 @@ import {
   JudgeSpecSchema,
   RuntimeSpecSchema,
 } from "@assay/core";
-import type { SecretStore } from "@assay/db";
+import type { SecretStore, WorkspaceSettingsStore } from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -25,6 +25,7 @@ export interface McpDeps {
   judgeRegistry?: JudgeRegistry;
   runtimeRegistry?: RuntimeRegistry;
   secretStore?: SecretStore;
+  settingsStore?: WorkspaceSettingsStore;
 }
 
 function ok(data: unknown): CallToolResult {
@@ -510,6 +511,26 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           await secrets.remove(ws, name);
           return ok({ workspace: ws, name, deleted: true });
         }),
+    );
+  }
+
+  if (deps.settingsStore) {
+    const settings = deps.settingsStore;
+    server.registerTool(
+      "get_workspace_settings",
+      { description: "이 워크스페이스의 설정(계측 정책 등). 미설정이면 빈 객체.", inputSchema: {} },
+      () => run(principal, "settings:read", async () => ok((await settings.get(ws)) ?? {})),
+    );
+    server.registerTool(
+      "set_workspace_settings",
+      {
+        description: "워크스페이스 설정 부분 갱신(병합). meterUsage: 이 워크스페이스 run 의 사용량 계측 on/off.",
+        inputSchema: { meterUsage: z.boolean().optional().describe("사용량 계측 기본값(요청별 override 가 우선)") },
+      },
+      ({ meterUsage }) =>
+        run(principal, "settings:write", async () =>
+          ok(await settings.set(ws, meterUsage === undefined ? {} : { meterUsage })),
+        ),
     );
   }
 
