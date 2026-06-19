@@ -2,6 +2,7 @@ import { perTenantTrustZones } from "@assay/backends";
 import type { AgentJob, BrowserSnapshot, Grader, ServiceHarnessSpec, TraceEvent, TrustZone } from "@assay/core";
 import type { TraceSource } from "@assay/trace";
 import { describe, expect, it } from "vitest";
+import { buildSharedStoreManifests } from "./dependencies.js";
 import { keysFor } from "./environment-manager.js";
 import { buildK8sManifests } from "./k8s-topology.js";
 import {
@@ -120,9 +121,10 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
       .filter((m) => m.kind === "Deployment")
       .map((m) => m.metadata.name)
       .sort();
-    // 서비스 3 + postgres + redis (minio 는 자동 connEnv 부적합이라 STORE_DEFS 에 없음 → 미배포).
+    // 서비스 3 + 선언된 스토어(postgres/redis/minio) 전부 배포.
     expect(names).toContain("browser-use-langgraph-postgres");
     expect(names).toContain("browser-use-langgraph-redis");
+    expect(names).toContain("browser-use-langgraph-minio");
     const pg = manifests.find(
       (m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-postgres",
     ) as { spec: { template: { spec: { containers: Array<{ image: string }> } } } };
@@ -172,6 +174,18 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
     expect(job.Job.TaskGroups.map((g) => g.Name).sort()).toEqual(["assay-shared-postgres", "assay-shared-redis"]);
     const pg = job.Job.TaskGroups.find((g) => g.Name === "assay-shared-postgres");
     expect(pg?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "store", To: 5432 });
+  });
+
+  it("minio: 스토어 args(server /data)를 K8s/Nomad 빌더에 모두 렌더한다", () => {
+    const k8s = buildSharedStoreManifests(["minio"], "assay-shared") as Array<{
+      kind: string;
+      spec?: { template?: { spec: { containers: Array<{ image: string; args?: string[] }> } } };
+    }>;
+    const dep = k8s.find((m) => m.kind === "Deployment");
+    expect(dep?.spec?.template?.spec.containers[0]?.image).toBe("quay.io/minio/minio:latest");
+    expect(dep?.spec?.template?.spec.containers[0]?.args).toEqual(["server", "/data"]);
+    const nomad = buildSharedStoreJob(["minio"]);
+    expect(nomad.Job.TaskGroups[0]?.Tasks[0]?.Config.args).toEqual(["server", "/data"]);
   });
 
   it("Nomad silo: buildDedicatedStoreJob 은 존별 전용 스토어 잡(zone-suffixed)을 렌더한다", () => {

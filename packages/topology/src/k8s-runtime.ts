@@ -133,6 +133,9 @@ export class K8sTopologyRuntime implements TopologyRuntime {
         );
       } else if (t.store === "redis" && t.redisSetup) {
         for (const cmd of t.redisSetup) await this.kubectl.exec(pod, poolNs, ["redis-cli", ...cmd]);
+      } else if (t.store === "minio" && t.minioSetup) {
+        // mc(루트, 이미지 내장)로 버킷/유저/버킷-한정 정책 생성.
+        await this.kubectl.exec(pod, poolNs, ["sh", "-c", t.minioSetup]);
       }
     }
   }
@@ -158,7 +161,13 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   // 스토어가 실제 연결을 받을 때까지 폴링(pg_isready / redis-cli ping). DDL/ACL 전에 호출.
   private async waitStoreAccepting(store: string, poolNs: string): Promise<void> {
     const probe =
-      store === "postgres" ? ["pg_isready", "-U", "assay"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
+      store === "postgres"
+        ? ["pg_isready", "-U", "assay"]
+        : store === "redis"
+          ? ["redis-cli", "ping"]
+          : store === "minio"
+            ? ["sh", "-c", "mc alias set local http://localhost:9000 assay assaysecret"]
+            : undefined;
     if (!probe) return;
     const interval = this.opts.pollIntervalMs ?? 1000;
     const steps = Math.max(1, Math.floor((this.opts.readyTimeoutMs ?? 60_000) / interval));

@@ -62,6 +62,9 @@ export interface TenantStorePlan {
   env: Record<string, string>; // 서비스 주입(scoped creds)
   postgresSetup?: string; // pg 어드민에서 psql -f - 로 실행할 스크립트(idempotent)
   redisSetup?: string[][]; // redis-cli 인자 배열들(idempotent)
+  bucket?: string; // minio 전용 버킷
+  accessKey?: string; // minio 전용 access key
+  minioSetup?: string; // minio 어드민(mc)에서 sh -c 로 실행할 스크립트(버킷/유저/정책, idempotent)
 }
 
 export interface StorePlan {
@@ -138,6 +141,38 @@ export function planTenantStores(
         env,
         // ACL: 이 user 는 자기 prefix 키만(+@all -@dangerous), 비번 필요. 교차 prefix 접근은 NOPERM.
         redisSetup: [["ACL", "SETUSER", aclUser, "on", `>${pw}`, `~${keyPrefix}*`, "+@all", "-@dangerous"]],
+      });
+    } else if (store === "minio") {
+      const accessKey = `t-${slug}`;
+      const bucket = `tenant-${slug}`;
+      const endpoint = endpointFor("minio");
+      // 테넌트 전용 access key + 버킷 + 그 버킷만 허용하는 정책 → 다른 버킷 접근은 AccessDenied(교차차단의 핵심).
+      const env = {
+        AWS_S3_ENDPOINT: `http://${endpoint}`,
+        MINIO_ENDPOINT: `http://${endpoint}`,
+        AWS_ACCESS_KEY_ID: accessKey,
+        AWS_SECRET_ACCESS_KEY: pw,
+        S3_BUCKET: bucket,
+        MINIO_BUCKET: bucket,
+      };
+      Object.assign(serviceEnv, env);
+      const policy = `{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Action":["s3:*"],"Resource":["arn:aws:s3:::${bucket}","arn:aws:s3:::${bucket}/*"]}]}`;
+      tenants.push({
+        store,
+        accessKey,
+        bucket,
+        env,
+        // mc(루트)로 버킷+유저+버킷-한정 정책 생성/연결. 이미 있으면 무시(idempotent). 어드민 alias=local(localhost).
+        minioSetup: [
+          "set -e",
+          "mc alias set local http://localhost:9000 assay assaysecret",
+          `mc mb -p local/${bucket} || true`,
+          `mc admin user add local ${accessKey} '${pw}' || true`,
+          `printf '%s' '${policy}' > /tmp/${accessKey}.json`,
+          `mc admin policy create local p-${slug} /tmp/${accessKey}.json || true`,
+          `mc admin policy attach local p-${slug} --user ${accessKey} || true`,
+          "",
+        ].join("\n"),
       });
     }
   }

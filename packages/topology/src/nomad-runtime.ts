@@ -196,6 +196,8 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       } else if (t.store === "redis" && t.redisSetup) {
         for (const cmd of t.redisSetup)
           await this.execImpl.exec(rec.allocId, rec.task, ["redis-cli", ...cmd], { namespace: ns });
+      } else if (t.store === "minio" && t.minioSetup) {
+        await this.execImpl.exec(rec.allocId, rec.task, ["sh", "-c", t.minioSetup], { namespace: ns });
       }
     }
     return plan.serviceEnv;
@@ -247,7 +249,13 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   // 스토어가 실제 연결을 받을 때까지 폴링(rollout running ≠ accepting; postgres initdb 등). DDL 전에 호출.
   private async waitStoreAccepting(store: string, rec: { allocId: string; task: string }): Promise<void> {
     const probe =
-      store === "postgres" ? ["pg_isready", "-U", "assay"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
+      store === "postgres"
+        ? ["pg_isready", "-U", "assay"]
+        : store === "redis"
+          ? ["redis-cli", "ping"]
+          : store === "minio"
+            ? ["sh", "-c", "mc alias set local http://localhost:9000 assay assaysecret"]
+            : undefined;
     if (!probe) return;
     const interval = this.opts.pollIntervalMs ?? 2000;
     const steps = this.opts.maxPolls ?? 60;

@@ -8,17 +8,16 @@ export interface StoreDef {
   image: string;
   port: number;
   env?: Record<string, string>; // 부트 env (예: POSTGRES_PASSWORD)
-  // 배포된 스토어 호스트명으로부터 서비스 접속 env 를 만든다. K8s 는 Service DNS = 배포명이라 빌드타임에 확정.
-  connEnv: (host: string) => Record<string, string>;
+  args?: string[]; // 컨테이너 실행 인자/커맨드 (예: minio "server /data")
+  // "host:port" 엔드포인트로부터 서비스 접속 env 를 만든다. K8s=Service DNS:port(빌드타임), Nomad=발견 host:port.
+  connEnv: (endpoint: string) => Record<string, string>;
 }
 
-// minio 는 접속에 access key + 버킷이 필요해 자동 connEnv 가 부적절 → 배포만(connEnv 없음); 접속은 storeEnv 로.
 export const STORE_DEFS: Record<string, StoreDef> = {
   postgres: {
     image: "postgres:16-alpine",
     port: 5432,
     env: { POSTGRES_USER: "assay", POSTGRES_PASSWORD: "assay", POSTGRES_DB: "assay" },
-    // connEnv 는 "host:port" 엔드포인트를 받는다 — K8s=Service DNS:port(빌드타임), Nomad=발견한 alloc host:port.
     connEnv: (ep) => ({ DATABASE_URL: `postgresql://assay:assay@${ep}/assay` }),
   },
   redis: {
@@ -26,6 +25,20 @@ export const STORE_DEFS: Record<string, StoreDef> = {
     port: 6379,
     // REDIS_URL(드팩토) + REDIS_URI(aegra/일부 LangGraph) 둘 다 — 명시 storeEnv 가 있으면 그게 이긴다.
     connEnv: (ep) => ({ REDIS_URL: `redis://${ep}`, REDIS_URI: `redis://${ep}` }),
+  },
+  // minio: 오브젝트 스토어(스냅샷). 서버 이미지에 mc 포함 → pool 프로비저닝(버킷/유저/정책)을 exec 로. 루트 비번 ≥8자.
+  minio: {
+    image: "quay.io/minio/minio:latest",
+    port: 9000,
+    args: ["server", "/data"],
+    env: { MINIO_ROOT_USER: "assay", MINIO_ROOT_PASSWORD: "assaysecret" },
+    // 기본/silo(전용 인스턴스) = 루트 creds. pool 은 planner 가 테넌트별 scoped 키/버킷으로 덮어쓴다.
+    connEnv: (ep) => ({
+      AWS_S3_ENDPOINT: `http://${ep}`,
+      MINIO_ENDPOINT: `http://${ep}`,
+      AWS_ACCESS_KEY_ID: "assay",
+      AWS_SECRET_ACCESS_KEY: "assaysecret",
+    }),
   },
 };
 
@@ -80,7 +93,16 @@ export function buildSharedStoreManifests(
         template: {
           metadata: { labels },
           spec: {
-            containers: [{ name: store, image: def.image, imagePullPolicy, env, ports: [{ containerPort: def.port }] }],
+            containers: [
+              {
+                name: store,
+                image: def.image,
+                imagePullPolicy,
+                args: def.args,
+                env,
+                ports: [{ containerPort: def.port }],
+              },
+            ],
           },
         },
       },

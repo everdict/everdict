@@ -89,6 +89,26 @@ describe("planTenantStores — pool", () => {
   });
 });
 
+describe("planTenantStores — minio pool", () => {
+  const MINIO_SPEC: ServiceHarnessSpec = {
+    ...SPEC,
+    dependencies: [{ store: "minio", role: "snapshots", isolateBy: "object-prefix" }],
+  };
+  const plan = planTenantStores(MINIO_SPEC, zone({ storeIsolation: "pool" }));
+
+  it("테넌트 전용 access key + 버킷 + 버킷-한정 정책(scoped creds)", () => {
+    expect(plan.serviceEnv.AWS_ACCESS_KEY_ID).toBe("t-acme");
+    expect(plan.serviceEnv.S3_BUCKET).toBe("tenant-acme");
+    expect(plan.serviceEnv.AWS_S3_ENDPOINT).toMatch(/^http:\/\/assay-shared-minio\.assay-shared\..+:9000$/);
+    const minio = plan.tenants.find((t) => t.store === "minio");
+    expect(minio?.minioSetup).toContain("mc mb -p local/tenant-acme");
+    expect(minio?.minioSetup).toContain("mc admin user add local t-acme");
+    // 정책은 그 버킷만 허용(교차차단의 핵심).
+    expect(minio?.minioSetup).toContain("arn:aws:s3:::tenant-acme");
+    expect(minio?.minioSetup).toContain("mc admin policy attach local p-acme --user t-acme");
+  });
+});
+
 describe("planTenantStores — silo / external", () => {
   it("silo: 전용 스토어 connEnv(케이스별 격리는 builder), provisioning 없음", () => {
     const plan = planTenantStores(SPEC, zone({ storeIsolation: "silo" }));

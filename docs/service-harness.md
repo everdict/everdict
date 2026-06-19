@@ -64,10 +64,12 @@ So there are three isolation layers, nested: **physical store fleet** → **per-
 - **`pool`** (default for `trusted` zones) — one platform-managed **shared** PG/Redis (deployed once per cluster
   in `assay-shared`), with per-tenant **logical** isolation: Postgres gets a dedicated `tenant_<zone>` **database**
   + a non-superuser `r_<zone>` **role** (and `REVOKE CONNECT … FROM PUBLIC`, so other tenants' roles are refused);
-  Redis gets an **ACL user** scoped to `~t:<zone>:*`. The service is injected with **scoped creds** (`DATABASE_URL`
-  with the tenant role+db, `REDIS_URL`/`REDIS_KEY_PREFIX`). The hot path mints only cheap logical objects
-  (DB/role/ACL) — it never spins up a DB engine per run. This is "shared infra, minimally managed for performance,
-  logically isolated per trust-zone."
+  Redis gets an **ACL user** scoped to `~t:<zone>:*`. **MinIO** (object store / snapshots) gets a per-tenant
+  **access key** + a `tenant-<zone>` **bucket** + an IAM **policy** scoping that key to only its bucket (minted via
+  `mc`, which the minio server image bundles). The service is injected with **scoped creds** (`DATABASE_URL` with
+  the tenant role+db, `REDIS_URL`/`REDIS_KEY_PREFIX`, `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`S3_BUCKET`). The
+  hot path mints only cheap logical objects (DB/role/ACL/bucket) — it never spins up a store engine per run. This is
+  "shared infra, minimally managed for performance, logically isolated per trust-zone."
 - **`silo`** (default for `untrusted`/compliance zones) — a **dedicated** store instance per zone (SLICE 39's
   `provisionDependencies` in the zone namespace). Strong blast-radius containment for hostile arbitrary code;
   higher cost. Use when logical isolation isn't enough.
@@ -100,6 +102,12 @@ the default-creds connection env into the services (the whole instance is the te
 Verified live (`scripts/live/silo-isolation-nomad.mjs`): zones `acme`+`globex` each got a **distinct** dedicated PG
 instance (different host:ports), services wired to the discovered endpoint, both reachable — physical isolation.
 So **store isolation is at full parity** across `{pool, silo} × {K8s, Nomad}`.
+
+**All three declared store types** (postgres / redis / **minio**) are provisionable. MinIO pool isolation verified
+live on kind (`scripts/live/minio-pool-k8s.mjs`): one shared minio, zones `acme`+`globex` each got a per-tenant
+access key + `tenant-<zone>` bucket + a bucket-scoped IAM policy; **`acme`'s key → `tenant-globex` bucket =
+DENIED**, own bucket = OK. So a tenant's object snapshots are isolated by minted S3 credentials, same model as the
+PG/Redis pool.
 
 ## Network isolation — NetworkPolicy (`TrustZone.network`)
 Per-tenant DB credentials (pool) stop a tenant from *reading* another tenant's data, but a hostile harness pod

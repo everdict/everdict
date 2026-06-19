@@ -40,6 +40,7 @@ export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopo
                 name: store,
                 image: def.image,
                 imagePullPolicy: opts.imagePullPolicy,
+                args: def.args,
                 env,
                 ports: [{ containerPort: def.port }],
               },

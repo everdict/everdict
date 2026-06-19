@@ -55,6 +55,7 @@ export function buildDependencyGroups(spec: ServiceHarnessSpec, opts: NomadTopol
   return dependencyStores(spec).map(({ name, def }) => {
     const config: NomadTopoTask["Config"] = { image: def.image, ports: ["store"] };
     if (opts.runtime) config.runtime = opts.runtime;
+    if (def.args) config.args = def.args;
     return {
       Name: name,
       Count: 1,
