@@ -52,13 +52,17 @@ produces a trace, the control plane (`apps/api` `ScorecardService.applyJudges` +
 `JudgeSpec` via `JudgeRegistry` and applies it to that case's trace → appends a `judge:<id>` `Score` (which then
 flows into the scorecard summary). No re-run; judging is purely trace-based.
 
-- **`model`** judges call the provider via `packages/graders` `modelJudge(anthropicComplete(...))`, keyed by the
-  tenant's **`ANTHROPIC_API_KEY`** from the **SecretStore**. `passThreshold` maps `score → pass`. Missing key →
-  a **skip** score (`detail: "skipped: …"`) so a selected judge never silently vanishes. Errors are remapped to
-  `UpstreamError` and become skip scores.
-- **`harness`** judges (delegate to an agent) and non-anthropic providers currently produce a **skip** score —
-  full execution is the next step.
+Both kinds unify as **`modelJudge(transport)`** (`packages/graders`) — only the *transport* differs. The
+`JudgeRunner` picks it from the spec; missing key / dispatcher → a **skip** score (`detail: "skipped: …"`) so a
+selected judge never silently vanishes, and `UpstreamError`s become skip scores too.
 
-`Judge` is injected at the service boundary (`JudgeRunner`), so the wiring is deterministically testable with a
-fake; the real model call is exercised only when a key is configured. See `docs/scorecards.md`,
-`packages/graders/src/{judge,model-judge}.ts`.
+- **`model` · anthropic** → `anthropicComplete` (Messages API), keyed by the tenant's **`ANTHROPIC_API_KEY`**.
+- **`model` · openai** → `openaiComplete` (Chat Completions), keyed by **`OPENAI_API_KEY`**; OpenAI-compatible so
+  a **LiteLLM** proxy works via the **`OPENAI_BASE_URL`** secret (or `ASSAY_JUDGE_OPENAI_BASE_URL`).
+- **`harness`** → `harnessComplete`: dispatches the referenced harness (same path as a run) with the judge prompt
+  as its task, then extracts the verdict from that agent's own trace (`traceToText` → tolerant JSON parse). The
+  judge-agent must emit a JSON verdict as its output; otherwise it's a skip. (One agent run per case × judge.)
+
+`passThreshold` maps `score → pass` (model). The transport is injected at the service boundary (`JudgeRunner`),
+so the wiring is deterministically testable with a fake; real provider/agent calls run only when keys/dispatch
+are configured. See `docs/scorecards.md`, `packages/graders/src/{judge,model-judge}.ts`.

@@ -1,4 +1,4 @@
-import { UpstreamError } from "@assay/core";
+import { type TraceEvent, UpstreamError } from "@assay/core";
 import type { Judge, JudgeVerdict } from "./judge.js";
 
 // 모델 호출 프리미티브 — 프롬프트 → 원문 텍스트. 전송(transport)을 판정 로직과 분리(테스트 시 주입).
@@ -103,4 +103,61 @@ export function anthropicComplete(cfg: {
     if (typeof text !== "string") throw new UpstreamError("UPSTREAM_ERROR", {}, "judge 모델 응답에 텍스트가 없습니다.");
     return text;
   };
+}
+
+// OpenAI Chat Completions 전송(fetch). OpenAI-호환이면 LiteLLM 프록시 등도 baseUrl 로 지원.
+export function openaiComplete(cfg: {
+  apiKey: string;
+  model: string;
+  baseUrl?: string;
+  maxTokens?: number;
+  fetchImpl?: typeof fetch;
+}): JudgeCompletion {
+  const f = cfg.fetchImpl ?? fetch;
+  const base = (cfg.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
+  return async (prompt) => {
+    let res: Response;
+    try {
+      res = await f(`${base}/chat/completions`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${cfg.apiKey}` },
+        body: JSON.stringify({
+          model: cfg.model,
+          ...(cfg.maxTokens ? { max_tokens: cfg.maxTokens } : {}),
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+    } catch (err) {
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        {},
+        `judge 모델 호출 실패: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        { status: res.status },
+        `judge 모델 ${res.status}: ${body.slice(0, 200)}`,
+      );
+    }
+    const json = (await res.json()) as { choices?: Array<{ message?: { content?: string } }> };
+    const text = json.choices?.[0]?.message?.content;
+    if (typeof text !== "string") throw new UpstreamError("UPSTREAM_ERROR", {}, "judge 모델 응답에 텍스트가 없습니다.");
+    return text;
+  };
+}
+
+// 트레이스에서 에이전트의 산출 텍스트를 모은다(assistant 메시지 우선, 없으면 전체 메시지). harness judge 의 verdict 추출용.
+export function traceToText(trace: TraceEvent[]): string {
+  const messages = trace.filter((e): e is Extract<TraceEvent, { kind: "message" }> => e.kind === "message");
+  const assistant = messages.filter((m) => m.role === "assistant");
+  return (assistant.length > 0 ? assistant : messages).map((m) => m.text).join("\n");
+}
+
+// harness judge 전송 — 참조 하니스(에이전트)를 판정 프롬프트로 띄우고, 그 트레이스의 출력 텍스트를 verdict 로.
+// model judge 와 동일한 modelJudge(전송) 구조로 통일 — 전송만 "에이전트 디스패치"로 바뀐다.
+export function harnessComplete(cfg: { dispatch: (task: string) => Promise<TraceEvent[]> }): JudgeCompletion {
+  return async (prompt) => traceToText(await cfg.dispatch(prompt));
 }

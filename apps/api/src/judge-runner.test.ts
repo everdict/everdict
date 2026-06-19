@@ -1,4 +1,4 @@
-import type { GradeContext, JudgeSpec } from "@assay/core";
+import type { AgentJob, CaseResult, GradeContext, JudgeSpec } from "@assay/core";
 import { describe, expect, it, vi } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";
 
@@ -16,6 +16,15 @@ const modelSpec: JudgeSpec = {
   model: "claude-opus-4-8",
   rubric: "correct?",
   inputs: ["trace"],
+  tags: [],
+};
+
+const harnessSpec: JudgeSpec = {
+  kind: "harness",
+  id: "reviewer",
+  version: "1.0.0",
+  harness: { id: "claude-code", version: "latest" },
+  rubric: "review it",
   tags: [],
 };
 
@@ -65,15 +74,44 @@ describe("defaultJudgeRunner", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
   });
 
-  it("harness 종류 → skip(다음 증분)", async () => {
-    const runner = defaultJudgeRunner({ secretsFor: async () => ({ ANTHROPIC_API_KEY: "sk" }) });
-    const harnessSpec: JudgeSpec = {
-      kind: "harness",
-      id: "reviewer",
-      version: "1.0.0",
-      harness: { id: "claude-code", version: "latest" },
-      tags: [],
+  it("model+openai + 키 있음: chat/completions(베이스 URL 적용) 호출 → 점수", async () => {
+    const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ choices: [{ message: { content: '{"pass":true,"score":0.7,"reason":"ok"}' } }] }),
+          { status: 200 },
+        ),
+      ),
+    );
+    const runner = defaultJudgeRunner({
+      secretsFor: async () => ({ OPENAI_API_KEY: "sk", OPENAI_BASE_URL: "http://litellm/v1" }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    const score = await runner.run({ ...modelSpec, provider: "openai", model: "gpt-5.4-mini" }, "acme", ctx);
+    expect(score).toMatchObject({ metric: "judge:correctness", value: 0.7, pass: true });
+    const url = fetchImpl.mock.calls[0]?.[0];
+    expect(url).toMatch(/\/chat\/completions$/);
+    expect(url).toContain("litellm"); // OPENAI_BASE_URL(LiteLLM 등) 적용
+  });
+
+  it("harness 종류 + dispatch: 참조 에이전트를 띄워 그 트레이스에서 verdict 추출", async () => {
+    const result: CaseResult = {
+      caseId: "judge",
+      harness: "claude-code@1",
+      trace: [{ t: 0, kind: "message", role: "assistant", text: '{"pass":true,"score":0.9,"reason":"good"}' }],
+      snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+      scores: [],
     };
+    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(result));
+    const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
+    const score = await runner.run(harnessSpec, "acme", ctx);
+    expect(score).toMatchObject({ metric: "judge:reviewer", value: 0.9, pass: true });
+    expect(dispatch).toHaveBeenCalledOnce();
+    expect(dispatch.mock.calls[0]?.[0]?.harness).toEqual({ id: "claude-code", version: "latest" });
+  });
+
+  it("harness 종류 + dispatch 없음 → skip", async () => {
+    const runner = defaultJudgeRunner({ secretsFor: async () => ({}) });
     const score = await runner.run(harnessSpec, "acme", ctx);
     expect(score.detail).toContain("skipped");
   });

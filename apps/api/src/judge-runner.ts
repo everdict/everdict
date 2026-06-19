@@ -1,8 +1,16 @@
-import type { GradeContext, Grader, JudgeSpec, Score } from "@assay/core";
-import { JudgeGrader, anthropicComplete, modelJudge } from "@assay/graders";
+import type { AgentJob, CaseResult, EvalCase, GradeContext, Grader, HarnessSpec, JudgeSpec, Score } from "@assay/core";
+import {
+  type JudgeCompletion,
+  JudgeGrader,
+  anthropicComplete,
+  harnessComplete,
+  modelJudge,
+  openaiComplete,
+} from "@assay/graders";
+import type { HarnessRegistry } from "@assay/registry";
 
 // judge 실행기 — JudgeSpec + tenant + GradeContext(트레이스) → Score. 컨트롤플레인이 트레이스 기반으로 판정.
-// model 종류는 테넌트 시크릿 키로 실제 모델 호출, harness/미지원 프로바이더는 skip(요약에 보이되 판정 아님).
+// model(anthropic/openai)·harness 모두 modelJudge(전송)로 통일 — 전송만 다르다(API 호출 / 에이전트 디스패치).
 export interface JudgeRunner {
   run(spec: JudgeSpec, tenant: string, ctx: GradeContext): Promise<Score>;
 }
@@ -10,45 +18,105 @@ export interface JudgeRunner {
 // 여러 judge 를 요약에서 구분하기 위한 메트릭 키.
 const metricOf = (spec: JudgeSpec): string => `judge:${spec.id}`;
 
-// skip score — 키 없음/미지원 등. 사용자가 고른 judge 가 조용히 사라지지 않도록 detail 로 사유 명시.
+// skip score — 키 없음/디스패치 없음 등. 사용자가 고른 judge 가 조용히 사라지지 않도록 detail 로 사유 명시.
 function skip(spec: JudgeSpec, reason: string): Score {
   return { graderId: spec.id, metric: metricOf(spec), value: 0, pass: undefined, detail: `skipped: ${reason}` };
 }
 
-const ANTHROPIC_KEY = "ANTHROPIC_API_KEY"; // 테넌트 SecretStore 에서 model judge 가 찾는 키 이름
+const ANTHROPIC_KEY = "ANTHROPIC_API_KEY"; // 테넌트 SecretStore 에서 찾는 키 이름
+const OPENAI_KEY = "OPENAI_API_KEY";
+const OPENAI_BASE_URL = "OPENAI_BASE_URL"; // LiteLLM 등 OpenAI-호환 프록시 베이스(선택)
 
 export interface DefaultJudgeRunnerDeps {
   secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries (복호화, 서버 내부 전용)
+  dispatch?: (job: AgentJob) => Promise<CaseResult>; // harness judge 용 에이전트 디스패치(단일 run 과 동일 경로)
+  harnesses?: HarnessRegistry; // judge 가 참조하는 하니스 버전 해석(latest→구체) + 선언형 spec 임베드
   fetchImpl?: typeof fetch;
-  baseUrl?: string; // anthropic 베이스(프록시/게이트웨이로 바꿀 때)
+  anthropicBaseUrl?: string;
+  openaiBaseUrl?: string;
 }
 
-// 기본 구현: model+anthropic 은 테넌트의 ANTHROPIC_API_KEY 로 실제 호출. harness/openai 는 다음 증분(skip).
+// 참조 하니스 해석: 구체 버전 + (선언형) spec. 빌트인/미등록은 as-given.
+async function resolveJudgeHarness(
+  harnesses: HarnessRegistry | undefined,
+  tenant: string,
+  ref: { id: string; version: string },
+): Promise<{ version: string; spec?: HarnessSpec }> {
+  if (!harnesses) return { version: ref.version || "latest" };
+  try {
+    const spec = await harnesses.get(tenant, ref.id, ref.version || "latest");
+    return { version: spec.version, spec };
+  } catch {
+    return { version: ref.version || "latest" };
+  }
+}
+
+// 기본 구현: model 은 테넌트 시크릿 키로 프로바이더 호출(anthropic/openai), harness 는 참조 에이전트를 띄워 판정.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
     async run(spec, tenant, ctx) {
-      if (spec.kind === "harness") return skip(spec, "harness judge 실행은 다음 증분");
-      if (spec.provider !== "anthropic") return skip(spec, `${spec.provider} 프로바이더는 아직 미지원`);
-      const secrets = await deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
-      const apiKey = secrets[ANTHROPIC_KEY];
-      if (!apiKey) return skip(spec, `${ANTHROPIC_KEY} 시크릿 미설정`);
-      try {
-        const judge = modelJudge(
-          anthropicComplete({
+      // 1) 전송 선택. 키/디스패처 없으면 skip(사유 명시).
+      let complete: JudgeCompletion;
+      if (spec.kind === "harness") {
+        if (!deps.dispatch) return skip(spec, "harness judge dispatch 미설정");
+        const dispatch = deps.dispatch;
+        const ref = spec.harness;
+        const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref);
+        complete = harnessComplete({
+          dispatch: async (task) => {
+            const evalCase: EvalCase = {
+              id: `judge-${spec.id}-${ctx.case.id}`,
+              env: { kind: "repo", source: { files: {} } },
+              task, // 판정 프롬프트(rubric + 트레이스 + JSON 요구)를 에이전트에 그대로 전달
+              graders: [],
+              timeoutSec: 300,
+              tags: ["judge"],
+            };
+            const job: AgentJob = {
+              evalCase,
+              harness: { id: ref.id, version: resolved.version },
+              tenant,
+              ...(resolved.spec ? { harnessSpec: resolved.spec } : {}),
+            };
+            return (await dispatch(job)).trace;
+          },
+        });
+      } else {
+        const secrets = await deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
+        if (spec.provider === "anthropic") {
+          const apiKey = secrets[ANTHROPIC_KEY];
+          if (!apiKey) return skip(spec, `${ANTHROPIC_KEY} 시크릿 미설정`);
+          complete = anthropicComplete({
             apiKey,
             model: spec.model,
-            ...(deps.baseUrl ? { baseUrl: deps.baseUrl } : {}),
+            ...(deps.anthropicBaseUrl ? { baseUrl: deps.anthropicBaseUrl } : {}),
             ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
-          }),
-        );
-        const grader: Grader = new JudgeGrader(judge, {
+          });
+        } else {
+          const apiKey = secrets[OPENAI_KEY];
+          if (!apiKey) return skip(spec, `${OPENAI_KEY} 시크릿 미설정`);
+          const baseUrl = secrets[OPENAI_BASE_URL] ?? deps.openaiBaseUrl;
+          complete = openaiComplete({
+            apiKey,
+            model: spec.model,
+            ...(baseUrl ? { baseUrl } : {}),
+            ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+          });
+        }
+      }
+
+      // 2) 통일된 판정: modelJudge(전송)을 JudgeGrader 로 감싸 트레이스 채점 → judge:<id> 점수.
+      try {
+        const rubric = spec.rubric;
+        const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");
+        const grader: Grader = new JudgeGrader(modelJudge(complete), {
           id: spec.id,
-          ...(spec.rubric ? { rubric: spec.rubric } : {}),
-          useScreenshot: (spec.inputs ?? []).includes("screenshot"),
+          ...(rubric ? { rubric } : {}),
+          useScreenshot,
         });
         const score = await grader.grade(ctx);
-        // 메트릭을 judge:<id> 로(여러 judge 구분); passThreshold 가 있으면 score→pass 재판정.
-        const pass = spec.passThreshold != null ? score.value >= spec.passThreshold : score.pass;
+        const threshold = spec.kind === "model" ? spec.passThreshold : undefined;
+        const pass = threshold != null ? score.value >= threshold : score.pass;
         return { ...score, metric: metricOf(spec), ...(pass != null ? { pass } : {}) };
       } catch (err) {
         return skip(spec, err instanceof Error ? err.message : String(err));

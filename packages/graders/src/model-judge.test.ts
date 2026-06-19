@@ -1,6 +1,6 @@
 import { AppError, type TraceEvent } from "@assay/core";
 import { describe, expect, it, vi } from "vitest";
-import { anthropicComplete, modelJudge } from "./model-judge.js";
+import { anthropicComplete, harnessComplete, modelJudge, openaiComplete, traceToText } from "./model-judge.js";
 
 const TRACE: TraceEvent[] = [{ t: 0, kind: "llm_call", model: "m" }];
 
@@ -50,5 +50,51 @@ describe("anthropicComplete", () => {
     );
     const complete = anthropicComplete({ apiKey: "k", model: "m", fetchImpl: fetchImpl as typeof fetch });
     await expect(complete("p")).rejects.toBeInstanceOf(AppError);
+  });
+});
+
+describe("openaiComplete", () => {
+  it("chat/completions 를 호출하고 choices[0].message.content 를 돌려준다(베이스 URL 적용)", async () => {
+    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(
+        new Response(JSON.stringify({ choices: [{ message: { content: "verdict" } }] }), { status: 200 }),
+      ),
+    );
+    const complete = openaiComplete({
+      apiKey: "k",
+      model: "gpt-5.4-mini",
+      baseUrl: "http://litellm/v1",
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+    expect(await complete("p")).toBe("verdict");
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe("http://litellm/v1/chat/completions");
+    expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer k");
+  });
+});
+
+describe("traceToText", () => {
+  it("assistant 메시지를 모은다(없으면 전체 메시지)", () => {
+    expect(
+      traceToText([
+        { t: 0, kind: "message", role: "user", text: "q" },
+        { t: 1, kind: "llm_call", model: "m" },
+        { t: 2, kind: "message", role: "assistant", text: "a1" },
+        { t: 3, kind: "message", role: "assistant", text: "a2" },
+      ]),
+    ).toBe("a1\na2");
+    // assistant 없으면 전체 메시지
+    expect(traceToText([{ t: 0, kind: "message", role: "user", text: "only-user" }])).toBe("only-user");
+  });
+});
+
+describe("harnessComplete", () => {
+  it("디스패치된 에이전트 트레이스의 출력 텍스트를 verdict 로(modelJudge 와 결합)", async () => {
+    const complete = harnessComplete({
+      dispatch: async () => [
+        { t: 0, kind: "message", role: "assistant", text: '{"pass":true,"score":1,"reason":"ok"}' },
+      ],
+    });
+    const verdict = await modelJudge(complete).judge({ task: "t", trace: TRACE, rubric: "r" });
+    expect(verdict).toEqual({ pass: true, score: 1, reason: "ok" });
   });
 });
