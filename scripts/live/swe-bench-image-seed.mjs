@@ -4,8 +4,8 @@
 //   3) buildNomadJob 이 case.image 를 per-case 컨테이너 이미지로 사용(기본 에이전트 이미지 대신)
 // (이미지 pull/run 은 수 GB 라 여기선 안 함 — 명명/존재/배선까지 검증.)
 import process from "node:process";
-import { getBenchmark, importBenchmark, sweBenchImage } from "../../packages/datasets/dist/index.js";
 import { buildNomadJob } from "../../packages/backends/dist/index.js";
+import { getBenchmark, importBenchmark, sweBenchImage } from "../../packages/datasets/dist/index.js";
 
 const ds = await importBenchmark(getBenchmark("swe-bench-lite"), { id: "swe-lite", version: "test" }, { limit: 1 });
 const c = ds.cases[0];
@@ -17,7 +17,9 @@ const nameOk = c.image === expected;
 console.log(`명명 규칙 일치(__→_1776_): ${nameOk}`);
 
 // Docker Hub 에 실제 발행됐는지 확인.
-const repo = String(c.image).replace(/^swebench\//, "swebench/").replace(/:latest$/, "");
+const repo = String(c.image)
+  .replace(/^swebench\//, "swebench/")
+  .replace(/:latest$/, "");
 const tagsUrl = `https://hub.docker.com/v2/repositories/${repo}/tags?page_size=5`;
 let published = false;
 let tags = [];

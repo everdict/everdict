@@ -92,7 +92,11 @@ export class DockerDriver implements Driver {
   async provision(spec: ComputeSpec): Promise<ComputeHandle> {
     const image = spec.image ?? this.opts.defaultImage;
     if (!image) {
-      throw new BadRequestError("BAD_REQUEST", undefined, "DockerDriver 는 spec.image 또는 defaultImage 가 필요합니다.");
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        undefined,
+        "DockerDriver 는 spec.image 또는 defaultImage 가 필요합니다.",
+      );
     }
     const keep = this.opts.keepAlive ?? "infinity";
     // 이미지 ENTRYPOINT/CMD 무시 + base 디렉터리 보장 + keep-alive. 그 안에서 docker exec 로 명령 실행.

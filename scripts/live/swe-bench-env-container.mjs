@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 // 라이브 e2e (SLICE 64): SWE-bench 를 "환경 컨테이너"에서 채점 — 케이스를 env 이미지(repo+deps 동봉, 에이전트 미포함)
 // 로 띄운 docker 컨테이너 안에서 SweBenchGrader 가 실 git apply + 실 pytest 로 resolution 판정. (공식 SWE-bench 방식:
 // 에이전트는 패치만 만들고, 평가는 prebuilt 이미지 컨테이너에서.) 여기선 작은 이미지로 메커니즘을 실제로 증명.
@@ -6,7 +7,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { Buffer } from "node:buffer";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
 import { SweBenchGrader } from "../../packages/graders/dist/index.js";
 
@@ -14,7 +14,8 @@ const IMAGE = "assay-sweenv:demo";
 const BUGGY = "def add(a, b):\n    return a - b  # BUG\n\ndef mul(a, b):\n    return a * b\n";
 const FIXED = "def add(a, b):\n    return a + b\n\ndef mul(a, b):\n    return a * b\n";
 const TEST_BASE = "from calc import mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n";
-const TEST_ADD = "from calc import add, mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n\ndef test_add():\n    assert add(2, 3) == 5\n";
+const TEST_ADD =
+  "from calc import add, mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n\ndef test_add():\n    assert add(2, 3) == 5\n";
 
 // 1) 유효 패치 생성(호스트 git): baseline → fixed(calc) / test_add 추가(test) 의 unified diff.
 const wd = mkdtempSync(join(tmpdir(), "swegen-"));
@@ -53,7 +54,14 @@ const cfg = {
 };
 const grader = new SweBenchGrader(cfg);
 const ctx = (compute) => ({
-  case: { id: "calc", env: { kind: "repo", source: { files: {} } }, task: "fix add", graders: [], timeoutSec: 60, tags: [] },
+  case: {
+    id: "calc",
+    env: { kind: "repo", source: { files: {} } },
+    task: "fix add",
+    graders: [],
+    timeoutSec: 60,
+    tags: [],
+  },
   trace: [],
   snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
   compute,

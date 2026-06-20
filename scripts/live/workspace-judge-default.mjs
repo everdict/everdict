@@ -3,11 +3,13 @@
 // 모든 run 이 그 모델로 inline judge 채점된다. 요청별 override 가 워크스페이스 기본을 이긴다.
 // process.env.ASSAY_JUDGE_MODEL 은 일부러 비운다 → 모델은 오직 워크스페이스 설정 → job.judge 에서 와야 한다.
 import process from "node:process";
+import { RunService } from "../../apps/api/dist/run-service.js";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { InMemoryRunStore, InMemoryWorkspaceSettingsStore } from "../../packages/db/dist/index.js";
-import { RunService } from "../../apps/api/dist/run-service.js";
 
+// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(워크스페이스 기본값만 적용됨을 검증)
 delete process.env.ASSAY_JUDGE_MODEL;
+// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(테스트 격리)
 delete process.env.ASSAY_JUDGE_PROVIDER;
 
 const settings = new InMemoryWorkspaceSettingsStore();
@@ -28,7 +30,13 @@ const judgeCase = {
   task: "Create a file out.txt containing hello.",
   graders: [
     { id: "steps" },
-    { id: "judge", config: { id: "task-judge", rubric: "Did the agent run a command that creates out.txt? Pass only if a tool call did so." } },
+    {
+      id: "judge",
+      config: {
+        id: "task-judge",
+        rubric: "Did the agent run a command that creates out.txt? Pass only if a tool call did so.",
+      },
+    },
   ],
   timeoutSec: 120,
   tags: [],

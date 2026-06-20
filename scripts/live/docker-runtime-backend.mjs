@@ -7,7 +7,8 @@ import { buildRuntimeBackend } from "../../packages/backends/dist/index.js";
 const IMAGE = "assay-dockerbe:demo";
 
 // env 이미지(git+sh; RepoEnvironment 인라인 시드가 git init 필요). 에이전트 미포함 — 케이스가 이 이미지에서 돈다.
-const dockerfile = "FROM debian:stable-slim\nRUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*\n";
+const dockerfile =
+  "FROM debian:stable-slim\nRUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*\n";
 console.log("=== env 이미지 빌드(git, 에이전트 미포함) ===");
 execFileSync("docker", ["build", "-t", IMAGE, "-"], { input: dockerfile, stdio: ["pipe", "ignore", "inherit"] });
 

@@ -6,7 +6,9 @@ import process from "node:process";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { buildNomadJob } from "../../packages/backends/dist/index.js";
 
-delete process.env.ASSAY_JUDGE_MODEL; // 모델은 env 가 아니라 job.judge 로만 와야 함을 강제
+// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(모델은 env 가 아니라 job.judge 로만 와야 함을 강제)
+delete process.env.ASSAY_JUDGE_MODEL;
+// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(테스트 격리)
 delete process.env.ASSAY_JUDGE_PROVIDER;
 
 const job = {
@@ -19,7 +21,13 @@ const job = {
     task: "Create a file out.txt containing hello.",
     graders: [
       { id: "steps" },
-      { id: "judge", config: { id: "task-judge", rubric: "Did the agent run a command that creates out.txt? Pass only if a tool call did so." } },
+      {
+        id: "judge",
+        config: {
+          id: "task-judge",
+          rubric: "Did the agent run a command that creates out.txt? Pass only if a tool call did so.",
+        },
+      },
     ],
     timeoutSec: 120,
     tags: [],
@@ -35,7 +43,9 @@ const spec = buildNomadJob(job, {
 const allocEnv = spec.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
 console.log("=== 컨트롤플레인 → Nomad alloc env 주입 ===");
 console.log(`  ASSAY_JUDGE_MODEL=${allocEnv.ASSAY_JUDGE_MODEL}  ASSAY_JUDGE_PROVIDER=${allocEnv.ASSAY_JUDGE_PROVIDER}`);
-console.log(`  OPENAI_API_KEY=${allocEnv.OPENAI_API_KEY ? "<set via secretEnv>" : "<missing>"}  OPENAI_BASE_URL=${allocEnv.OPENAI_BASE_URL || "<unset>"}`);
+console.log(
+  `  OPENAI_API_KEY=${allocEnv.OPENAI_API_KEY ? "<set via secretEnv>" : "<missing>"}  OPENAI_BASE_URL=${allocEnv.OPENAI_BASE_URL || "<unset>"}`,
+);
 
 // 2) 실제 dispatch(runAgentJob): 모델은 job.judge 에서, 키는 env(secretEnv 모사)에서 → 실 모델 판정.
 console.log("\n=== runAgentJob — 모델은 job.judge, 키는 env(secretEnv) → 실 judge ===");

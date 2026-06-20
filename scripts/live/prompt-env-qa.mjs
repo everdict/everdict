@@ -29,8 +29,14 @@ const promptCase = {
   tags: [],
 };
 console.log("\n=== B) runAgentJob(prompt 케이스, scripted 하니스) — env 선택 ===");
-const jobResult = await runAgentJob({ evalCase: promptCase, harness: { id: "scripted", version: "1.0.0" }, tenant: "acme" });
-console.log(`  result.snapshot.kind = ${jobResult.snapshot.kind} (PromptEnvironment 선택됨; RepoEnvironment 였다면 seed throw)`);
+const jobResult = await runAgentJob({
+  evalCase: promptCase,
+  harness: { id: "scripted", version: "1.0.0" },
+  tenant: "acme",
+});
+console.log(
+  `  result.snapshot.kind = ${jobResult.snapshot.kind} (PromptEnvironment 선택됨; RepoEnvironment 였다면 seed throw)`,
+);
 const bOk = jobResult.snapshot.kind === "prompt";
 
 // C) runCase(PromptEnvironment + QA 하니스 + answer-match) — browser/repo 없이 QA 평가.

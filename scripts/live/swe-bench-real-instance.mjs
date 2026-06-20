@@ -21,7 +21,9 @@ const failToPass = JSON.parse(row.FAIL_TO_PASS ?? "[]");
 const image = sweBenchImage(INSTANCE);
 console.log(`인스턴스: ${INSTANCE}`);
 console.log(`이미지: ${image}`);
-console.log(`gold patch=${(row.patch ?? "").length}B  test_patch=${(row.test_patch ?? "").length}B  FAIL_TO_PASS=${failToPass.length}`);
+console.log(
+  `gold patch=${(row.patch ?? "").length}B  test_patch=${(row.test_patch ?? "").length}B  FAIL_TO_PASS=${failToPass.length}`,
+);
 
 const driver = new DockerDriver();
 
@@ -56,7 +58,14 @@ async function gradeWith(applyGold) {
       cwd: "/testbed",
     });
     const score = await grader.grade({
-      case: { id: INSTANCE, env: { kind: "repo", source: { path: "/testbed" } }, task: row.problem_statement ?? "", graders: [], timeoutSec: 600, tags: [] },
+      case: {
+        id: INSTANCE,
+        env: { kind: "repo", source: { path: "/testbed" } },
+        task: row.problem_statement ?? "",
+        graders: [],
+        timeoutSec: 600,
+        tags: [],
+      },
       trace: [],
       snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
       compute: c,

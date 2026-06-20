@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 // 라이브 e2e (SLICE 66): in-image repo env-mode — 코딩 에이전트가 prebuilt 이미지의 repo(/testbed)에 직접 작업.
 // 완전 자율 흐름(실 docker, full runCase): DockerDriver 가 env 이미지로 컨테이너 → RepoEnvironment(source:{path:/testbed})
 // 가 clone 없이 work→/testbed 심볼릭링크 → 하니스(에이전트)가 /testbed 의 코드를 고침 → SweBenchGrader 가 /testbed 에서
@@ -7,7 +8,6 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import process from "node:process";
-import { Buffer } from "node:buffer";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
 import { RepoEnvironment } from "../../packages/environments/dist/index.js";
 import { SweBenchGrader } from "../../packages/graders/dist/index.js";
@@ -18,7 +18,8 @@ const IMAGE = "assay-testbed:demo";
 const BUGGY = "def add(a, b):\n    return a - b  # BUG\n\ndef mul(a, b):\n    return a * b\n";
 const FIXED = "def add(a, b):\n    return a + b\n\ndef mul(a, b):\n    return a * b\n";
 const TEST_BASE = "from calc import mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n";
-const TEST_ADD = "from calc import add, mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n\ndef test_add():\n    assert add(2, 3) == 5\n";
+const TEST_ADD =
+  "from calc import add, mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n\ndef test_add():\n    assert add(2, 3) == 5\n";
 const b64 = (s) => Buffer.from(s).toString("base64");
 
 // 1) gold test_patch 생성(호스트 git): baseline → test_add 추가.
@@ -73,7 +74,9 @@ async function run(label, plan) {
     runCtx: { apiKeyEnv: {}, timeoutSec: 300 },
   });
   const r = result.scores.find((s) => s.metric === "resolved");
-  console.log(`[${label}] resolved=${r?.pass}  changed=${JSON.stringify(result.snapshot.changedFiles)}  ${String(r?.detail).split("\n")[0]}`);
+  console.log(
+    `[${label}] resolved=${r?.pass}  changed=${JSON.stringify(result.snapshot.changedFiles)}  ${String(r?.detail).split("\n")[0]}`,
+  );
   return r;
 }
 
@@ -83,10 +86,7 @@ const noop = await run("no fix    ", noopPlan);
 
 execFileSync("docker", ["rmi", "-f", IMAGE], { stdio: "ignore" });
 
-const ok =
-  fixed?.pass === true &&
-  (fixed?.changed ?? []) &&
-  noop?.pass === false;
+const ok = fixed?.pass === true && (fixed?.changed ?? []) && noop?.pass === false;
 console.log(
   ok
     ? "\n✅ SLICE 66: in-image repo env-mode — RepoEnvironment(source:{path:/testbed})가 clone 없이 work→/testbed 링크 → 에이전트(scripted)가 이미지의 repo 를 직접 고침 → SweBenchGrader 가 /testbed 에서 test_patch+pytest → 고치면 resolved, 안 고치면 unresolved. 실 prebuilt 이미지로 SWE-bench 완전 자율 실행 경로 완성(deps+repo 는 이미지, 에이전트는 안 구움)."

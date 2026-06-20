@@ -15,7 +15,13 @@ const baseJob = {
     task: "Create a file out.txt containing hello.",
     graders: [
       { id: "steps" },
-      { id: "judge", config: { id: "task-judge", rubric: "Did the agent run a command that creates out.txt? Pass only if a tool call did so." } },
+      {
+        id: "judge",
+        config: {
+          id: "task-judge",
+          rubric: "Did the agent run a command that creates out.txt? Pass only if a tool call did so.",
+        },
+      },
     ],
     timeoutSec: 120,
     tags: [],
@@ -37,6 +43,7 @@ const real = await runAgentJob(baseJob);
 const realJudge = showJudge("env O", real);
 
 // 2) judge 모델 미구성 → judge 만 skip(나머지 정상).
+// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(미구성 상태 재현)
 delete process.env.ASSAY_JUDGE_MODEL;
 console.log("\n=== runAgentJob (judge 환경 X) — judge 는 skip, eval 은 계속 ===");
 const skipped = await runAgentJob(baseJob);

@@ -20,9 +20,13 @@ const judge = modelJudge(openaiComplete({ apiKey, model: MODEL, baseUrl }));
 
 // ── 1) WebVoyager: judge(실 모델)로 트라젝토리 판정 ───────────────────────────────────────────
 console.log("=== WebVoyager — judge(실 LLM) + answer-match + steps ===");
-const wv = await importBenchmark(getBenchmark("webvoyager"), { id: "wv-mini", version: "1.0.0" }, {
-  text: readFileSync("datasets/webvoyager-mini.jsonl", "utf8"),
-});
+const wv = await importBenchmark(
+  getBenchmark("webvoyager"),
+  { id: "wv-mini", version: "1.0.0" },
+  {
+    text: readFileSync("datasets/webvoyager-mini.jsonl", "utf8"),
+  },
+);
 console.log(`graders preset: ${wv.cases[0]?.graders.map((g) => g.id).join(" + ")}\n`);
 
 for (let i = 0; i < wv.cases.length; i++) {

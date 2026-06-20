@@ -24,7 +24,9 @@ await reg.register("acme", {
   category: "coding",
   source: { kind: "jsonl" },
   mapping: { idField: "iid", taskField: "problem", gitField: "_git", refField: "base" },
-  graderTemplates: [{ id: "command", config: { applyPatch: "{test_patch}", cmd: "python -m pytest -q", metric: "resolved" } }],
+  graderTemplates: [
+    { id: "command", config: { applyPatch: "{test_patch}", cmd: "python -m pytest -q", metric: "resolved" } },
+  ],
 });
 // 테넌트 globex 의 private QA 벤치마크.
 await reg.register("globex", {
@@ -54,13 +56,17 @@ const acmeSpec = await reg.get("acme", "acme-code");
 const acmeDs = await importFromSpec(
   acmeSpec,
   { id: "acme-code", version: "1.0.0" },
-  { text: '{"iid":"bug-1","problem":"fix add","_git":"https://github.com/acme/lib.git","base":"abc123","test_patch":"diff --git a/t.py b/t.py\\n+def test(): assert add(2,3)==5"}' },
+  {
+    text: '{"iid":"bug-1","problem":"fix add","_git":"https://github.com/acme/lib.git","base":"abc123","test_patch":"diff --git a/t.py b/t.py\\n+def test(): assert add(2,3)==5"}',
+  },
 );
 await datasets.register("acme", acmeDs);
 const c = acmeDs.cases[0];
 const cmd = c.graders.find((g) => g.id === "command");
 console.log(`\nacme 인입: ${acmeDs.id}@${acmeDs.version} (${acmeDs.cases.length} case)  env=${c.env.kind}`);
-console.log(`  command grader applyPatch(보간)=${JSON.stringify(cmd?.config?.applyPatch)}  cmd=${JSON.stringify(cmd?.config?.cmd)}`);
+console.log(
+  `  command grader applyPatch(보간)=${JSON.stringify(cmd?.config?.applyPatch)}  cmd=${JSON.stringify(cmd?.config?.cmd)}`,
+);
 const interpolated = String(cmd?.config?.applyPatch).includes("def test()");
 
 // globex 가 _shared gsm8k 레시피로 실 HF 인입(등록된 spec → 데이터셋).
@@ -68,7 +74,9 @@ let realHf = false;
 try {
   const g = await importFromSpec(await reg.get("globex", "gsm8k"), { id: "gsm8k", version: "1.0.0" }, { limit: 2 });
   await datasets.register("globex", g);
-  console.log(`\nglobex 인입(_shared gsm8k, 실 HF): ${g.cases.length} case, grader=${g.cases[0]?.graders.map((x) => x.id).join(",")}`);
+  console.log(
+    `\nglobex 인입(_shared gsm8k, 실 HF): ${g.cases.length} case, grader=${g.cases[0]?.graders.map((x) => x.id).join(",")}`,
+  );
   realHf = g.cases.length === 2;
 } catch (e) {
   console.log(`\nglobex gsm8k 실 HF 인입 실패: ${(e.message ?? "").slice(0, 80)}`);

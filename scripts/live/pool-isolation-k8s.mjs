@@ -45,7 +45,16 @@ const runtime = new K8sTopologyRuntime({
 
 // pg pod 에서 임의 접속 URL 로 psql 실행 → 성공/실패(거부) 판정.
 const pgPod = () =>
-  kc(["-n", POOL_NS, "get", "pod", "-l", "app=assay-shared-postgres", "-o", "jsonpath={.items[0].metadata.name}"]).trim();
+  kc([
+    "-n",
+    POOL_NS,
+    "get",
+    "pod",
+    "-l",
+    "app=assay-shared-postgres",
+    "-o",
+    "jsonpath={.items[0].metadata.name}",
+  ]).trim();
 const tryConnect = (url) => {
   try {
     kc(["-n", POOL_NS, "exec", "-i", pgPod(), "--", "psql", url, "-tAc", "select 1"]);
@@ -65,10 +74,29 @@ try {
   await runtime.ensureTopology(spec, zone("globex"));
 
   // 공유 스토어에 두 테넌트 DB 가 생겼나.
-  const dbs = kc(["-n", POOL_NS, "exec", "-i", pgPod(), "--", "psql", "-U", "assay", "-tAc", "SELECT datname FROM pg_database"]);
+  const dbs = kc([
+    "-n",
+    POOL_NS,
+    "exec",
+    "-i",
+    pgPod(),
+    "--",
+    "psql",
+    "-U",
+    "assay",
+    "-tAc",
+    "SELECT datname FROM pg_database",
+  ]);
   const hasAcme = /tenant_acme/.test(dbs);
   const hasGlobex = /tenant_globex/.test(dbs);
-  console.log("shared PG databases:", dbs.trim().split("\n").filter((d) => d.startsWith("tenant_")).join(", "));
+  console.log(
+    "shared PG databases:",
+    dbs
+      .trim()
+      .split("\n")
+      .filter((d) => d.startsWith("tenant_"))
+      .join(", "),
+  );
 
   // 두 테넌트의 scoped 접속 URL(런타임이 서비스에 주입하는 것과 동일 — 동일 plan).
   const acme = planTenantStores(spec, zone("acme"), { poolNamespace: POOL_NS }).serviceEnv.DATABASE_URL;

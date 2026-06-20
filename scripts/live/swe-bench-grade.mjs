@@ -6,17 +6,18 @@
 //   test_patch = test_add 추가(FAIL_TO_PASS), 기존 test_mul = PASS_TO_PASS.
 // + 실 SWE-bench_Lite 행 1건을 인입해 grader spec(test_patch/F2P/P2P)이 실 데이터로 채워지는지 확인.
 import process from "node:process";
-import { importBenchmark, getBenchmark } from "../../packages/datasets/dist/index.js";
+import { getBenchmark, importBenchmark } from "../../packages/datasets/dist/index.js";
 import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { SweBenchGrader } from "../../packages/graders/dist/index.js";
 
 const TESTCMD = "python3 -m pytest -q --no-header";
-const GIT = 'git -c user.email=a@b.c -c user.name=assay';
+const GIT = "git -c user.email=a@b.c -c user.name=assay";
 
 const BUGGY = "def add(a, b):\n    return a - b  # BUG\n\ndef mul(a, b):\n    return a * b\n";
 const FIXED = "def add(a, b):\n    return a + b\n\ndef mul(a, b):\n    return a * b\n";
 const TEST_BASE = "from calc import mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n";
-const TEST_WITH_ADD = "from calc import add, mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n\ndef test_add():\n    assert add(2, 3) == 5\n";
+const TEST_WITH_ADD =
+  "from calc import add, mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n\ndef test_add():\n    assert add(2, 3) == 5\n";
 
 const compute = await new LocalDriver().provision({ os: "linux", needs: ["shell"] });
 
@@ -47,7 +48,14 @@ try {
   };
   const grader = new SweBenchGrader(cfg);
   const ctx = () => ({
-    case: { id: "calc-add", env: { kind: "repo", source: { files: {} } }, task: "fix add", graders: [], timeoutSec: 60, tags: [] },
+    case: {
+      id: "calc-add",
+      env: { kind: "repo", source: { files: {} } },
+      task: "fix add",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    },
     trace: [],
     snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
     compute,
@@ -76,7 +84,9 @@ try {
     const c = ds.cases[0];
     const sb = c.graders.find((g) => g.id === "swe-bench");
     console.log(`  ${c.id}  env=${c.env.kind}(${c.env.source?.git?.split("/").slice(-2).join("/")})`);
-    console.log(`  swe-bench grader: test_patch=${(sb?.config?.testPatch ?? "").length}B  F2P=${sb?.config?.failToPass?.length}  P2P=${sb?.config?.passToPass?.length}`);
+    console.log(
+      `  swe-bench grader: test_patch=${(sb?.config?.testPatch ?? "").length}B  F2P=${sb?.config?.failToPass?.length}  P2P=${sb?.config?.passToPass?.length}`,
+    );
     realOk = !!sb && (sb.config.testPatch ?? "").length > 0 && sb.config.failToPass.length > 0;
   } catch (e) {
     console.log(`  (HF 인출 실패: ${(e.message ?? "").slice(0, 80)})`);
