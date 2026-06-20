@@ -841,6 +841,22 @@ the honest capability score (2/3) while exposing exactly which task the agent ca
 gap a more capable agent would close (cf. the harness-A/B diff). repo lint, typecheck 35/35, test 35/35 (+1 guard).
 (Image removed afterward; judge key from env, never committed.)
 
+### Service-topology Phase 2 — `K8sTopologyRuntime` run on a real cluster (kind) ✅
+The topology builders/runtimes were only ever unit-tested with a *mock* kubectl. This runs `K8sTopologyRuntime` against a
+**real Kubernetes cluster** (a local `kind`), the core Phase-2 claim ("apply against a real K8s cluster"). A minimal
+service-topology harness (one stub front-door service `assay-topo-stub:demo` — `scripts/live/topology-stub/`, kind-loaded;
+a browser target; no stores) drives the real orchestration path.
+
+**Verified live** (`scripts/live/topology-k8s.mjs`, context `kind-assay`): `ensureTopology(spec)` →
+`kubectl apply` of the generated Deployment+Service into namespace `assay-default` → `rolloutStatus` waited for the real
+pod (`topo-demo-agent` ready **1/1**, confirmed by `kubectl get deploy`) → `kubectl port-forward` discovered the endpoint
+(`http://127.0.0.1:<port>`). Then the per-run **front-door drive**: `GET /health` → `200`, `POST /runs` with the
+`{task, thread_id, stream_channel}` wiring → `200`. `teardown(spec)` stopped the forwards and deleted the namespace (clean,
+exit 0). So the orchestrator-agnostic runtime genuinely deploys a warm topology, discovers it, and drives it on a real
+cluster — not a mock. (The per-case browser CDP + the full browser-use agent-server/extension loop and trace pull are the
+remaining Phase-2 rungs — they need the real browser-use images, which the unit-tested `provisionBrowserEnv`/builders
+already target. Stub image removed from the host afterward; namespace deleted.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
