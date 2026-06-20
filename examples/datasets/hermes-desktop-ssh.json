@@ -1,7 +1,7 @@
 {
   "id": "hermes-desktop-ssh",
   "version": "1.0.0",
-  "description": "os-use 데스크탑 컴퓨터-유즈 벤치마크: hermes-desktop(Electron)을 구동해 SSH 로 원격 연결한다. 에이전트가 SSH 폼을 실 OS 입력으로 채우고 hermes 가 진짜 SSH 터널을 열어 메인 진입 → 최종 화면을 VLM judge 가 채점. 이미지는 scripts/live/Dockerfile.hermes-ssh-agent 로 빌드(hermes + sshd + /agent.cjs).",
+  "description": "os-use 데스크탑 컴퓨터-유즈 벤치마크(hermes-desktop). 여러 케이스로 에이전트 능력을 측정한다: (1) SSH 로 원격 연결(에이전트가 SSH 폼을 실 OS 입력으로 채우고 hermes 가 진짜 SSH 터널을 열어 메인 진입), (2) 연결 후 Settings 화면으로 내비게이션. 각 케이스의 최종 화면을 VLM judge 가 채점 → 스코어카드(케이스별 pass + 집계 pass-rate)로 하니스 간 공정 비교. 이미지는 scripts/live/Dockerfile.hermes-ssh-agent 로 빌드(hermes + sshd + /agent.cjs).",
   "tags": ["os-use", "desktop", "ssh", "computer-use", "shared"],
   "cases": [
     {
@@ -36,6 +36,39 @@
       "placement": { "target": "docker" },
       "timeoutSec": 300,
       "tags": ["os-use", "ssh"]
+    },
+    {
+      "id": "hermes-open-settings",
+      "env": {
+        "kind": "os-use",
+        "display": ":99",
+        "setup": [
+          "mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh",
+          "ssh-keygen -A",
+          "test -f /root/.ssh/id_rsa || ssh-keygen -t ed25519 -f /root/.ssh/id_rsa -N '' -q",
+          "cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys",
+          "grep -q '^PermitRootLogin' /etc/ssh/sshd_config || echo 'PermitRootLogin prohibit-password' >> /etc/ssh/sshd_config",
+          "/usr/sbin/sshd",
+          "node -e 'require(\"http\").createServer((q,s)=>{s.writeHead(200);s.end(\"ok\")}).listen(8642,\"127.0.0.1\")' >/tmp/health.log 2>&1 & sleep 1",
+          "Xvfb :99 -screen 0 1280x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & sleep 2",
+          "cd /app && ENABLE_CDP=1 CDP_PORT=9222 DISPLAY=:99 ./node_modules/.bin/electron . --no-sandbox --disable-gpu --disable-dev-shm-usage >/tmp/electron.log 2>&1 & sleep 10"
+        ],
+        "screenshotPath": "/tmp/osuse.png"
+      },
+      "image": "assay-hermes-dispatch:demo",
+      "task": "After connecting, open the application Settings screen and show its configuration options.",
+      "graders": [
+        {
+          "id": "judge",
+          "config": {
+            "useScreenshot": true,
+            "rubric": "PASS only if the Hermes Settings/preferences page is OPEN — the main content area shows settings/configuration controls. The Chat screen, the SSH/remote connection forms, or the welcome screen are NOT the goal (a 'Settings' link in the sidebar alone is NOT sufficient)."
+          }
+        }
+      ],
+      "placement": { "target": "docker" },
+      "timeoutSec": 300,
+      "tags": ["os-use", "navigation"]
     }
   ]
 }

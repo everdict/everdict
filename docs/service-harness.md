@@ -639,6 +639,26 @@ env-container (a `local` host fallback has neither the agent nor Xvfb). So a ten
 benchmark by picking a registered dataset + harness and POSTing one run — no bespoke code, no live orchestration script.
 (Desktop image built from `Dockerfile.hermes-ssh-agent`; removed afterward, disk returned to prior level.)
 
+### os-use scorecard — `POST /scorecards`, multi-case batch + aggregate ✅
+A single run grades one case; a **scorecard** runs a *dataset's cases × a harness* and aggregates — the unit that lets you
+**compare harnesses fairly** and measure *which capabilities* an agent has. The batch path already existed
+(`ScorecardService.submit` → `runSuite(cases × harness, dispatch, {concurrency})` → `applyJudges` → `summarizeScorecard`,
+with per-case `placement.target` routing and `RunScorecardBodySchema` carrying `runtime`/`judge` like `POST /runs`), so
+os-use needed **no new code** — only a genuinely multi-case dataset. `hermes-desktop-ssh` now has two os-use cases that
+probe *different* capabilities of the same desktop image: `hermes-ssh-connect` (open a real SSH tunnel → reach the main
+app) and `hermes-open-settings` (navigate to the Settings page after connecting). The scripted reference agent only does
+the SSH flow, so the scorecard should split.
+
+**Verified live** (`POST /scorecards { dataset, harness, judge }` against the running API): `202 queued` →
+`GET /scorecards/:id` → `succeeded` with two per-case rows judged by the VLM and an aggregate —
+`hermes-ssh-connect → pass=true 0.98` ("main app, advanced past the SSH form"); `hermes-open-settings → pass=false 0.03`
+("Chat screen with a modal, **not** the Settings page; a Settings link in the sidebar alone isn't sufficient"); summary
+`{ metric:"judge", count:2, mean:0.505, passRate:0.5 }`. The fail is honest signal, not a bug: the reference agent
+connects but doesn't navigate, so the scorecard records `passRate:0.5` — exactly the capability gap a better agent would
+close, and the comparison axis `diffScorecards`/`GET /scorecards/:a/diff/:b` reports across harness versions. So desktop
+computer-use is now a first-class **benchmark** (multi-case dataset → batch scorecard → aggregate + diff), reached over the
+same HTTP control plane. (Seed-guard test asserts the multi-case dataset parses to `_shared`; image removed afterward.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
