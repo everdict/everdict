@@ -1,0 +1,3 @@
+{"id":"writer-note","instruction":"Create a text file note.txt in the home directory containing 'OSWorld save test'.","snapshot":"writer","source":"demo","verify":"test -f /root/note.txt && grep -q 'OSWorld save test' /root/note.txt"}
+{"id":"writer-todo","instruction":"Create a text file todo.txt in the home directory containing 'buy milk'.","snapshot":"writer","source":"demo","verify":"test -f /root/todo.txt && grep -q 'buy milk' /root/todo.txt"}
+{"id":"files-folder","instruction":"Create a folder named reports in the home directory.","snapshot":"os","source":"demo","verify":"test -d /root/reports"}

@@ -821,6 +821,26 @@ The decoded screenshot shows the title bar `/root/note.txt - Mousepad` (no unsav
 save worked. This is exactly why OSWorld grades on **state**: the state grader is decisive (task done), the VLM is a
 complementary signal, and assay runs **both** over the same os-use result. (Image removed afterward; key from env.)
 
+### OSWorld multi-task scorecard — batch + per-metric aggregate ✅
+One OSWorld task is a run; a *suite* is a scorecard. `examples/benchmarks/osworld-sample.jsonl` is a committed 3-task
+OSWorld suite (two text-file saves + one folder-create), each with a `verify` state check. Imported via the `osworld`
+adapter it becomes a 3-case os-use dataset (each case = VLM judge + state `command` grader); a guard test asserts that
+mapping. Running it as a scorecard exercises the batch path (`runSuite`) over real desktop tasks and aggregates **per
+metric**.
+
+**Verified live** (`POST /benchmarks/import` the suite → `POST /scorecards` with `desktop-osworld-agent`, real Docker +
+real VLM): three os-use cases ran (parallel), each driven + dual-graded —
+- `writer-note` state **PASS** (file on disk), `writer-todo` state **PASS**, `files-folder` state **fail** (the
+  text-editor agent doesn't create folders);
+- aggregate `state` **passRate 0.667 (2/3)** — the authoritative, OSWorld-style number: *the agent completes two of the
+  three tasks*; `judge` passRate 0 (the VLM stays cautious on disk-save and clearly fails the folder), shown alongside as
+  the complementary signal.
+
+So a multi-task OSWorld suite runs as a single scorecard with a per-case + aggregate report, and the **state metric** gives
+the honest capability score (2/3) while exposing exactly which task the agent can't do yet (folder-create) — the same
+gap a more capable agent would close (cf. the harness-A/B diff). repo lint, typecheck 35/35, test 35/35 (+1 guard).
+(Image removed afterward; judge key from env, never committed.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

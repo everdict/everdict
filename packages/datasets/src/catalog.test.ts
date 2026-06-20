@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { DatasetSchema } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import { BENCHMARK_CATALOG, adapterToDataset, importBenchmark, listBenchmarks, sweBenchImage } from "./catalog.js";
@@ -70,6 +72,22 @@ describe("BenchmarkAdapter 카탈로그", () => {
     expect(ids).toEqual(["gaia", "gsm8k", "mind2web", "osworld", "swe-bench-lite", "webvoyager"]);
     expect(listBenchmarks().find((b) => b.id === "gaia")?.gated).toBe(true); // GAIA gated 표기
     expect(listBenchmarks().find((b) => b.id === "osworld")?.category).toBe("desktop"); // os-use 데스크탑
+  });
+
+  it("osworld 멀티-태스크 샘플(examples/benchmarks)을 import → os-use 케이스들 + verify→command grader(이중 채점)", async () => {
+    const text = readFileSync(
+      fileURLToPath(new URL("../../../examples/benchmarks/osworld-sample.jsonl", import.meta.url)),
+      "utf8",
+    );
+    const ds = await importBenchmark(BENCHMARK_CATALOG.osworld, { id: "osworld-suite", version: "1.0.0" }, { text });
+    expect(ds.cases.map((c) => c.id)).toEqual(["writer-note", "writer-todo", "files-folder"]);
+    expect(ds.cases.every((c) => c.env.kind === "os-use")).toBe(true);
+    for (const c of ds.cases) {
+      expect(c.graders.map((g) => g.id).sort()).toEqual(["command", "judge"]); // VLM judge + verify(상태검사)
+      const cmd = c.graders.find((g) => g.id === "command");
+      expect(cmd?.config?.cwd).toBe("/tmp"); // os-use 는 work 없음 → 절대경로
+      expect(String(cmd?.config?.cmd)).toContain("test"); // verify 명령 전달됨
+    }
   });
 
   it("osworld: os-use env + 행별 instruction 을 박은 VLM judge(스크린샷) — 데스크탑 컴퓨터-유즈", async () => {
