@@ -511,6 +511,26 @@ browser-less stopgap.
 `repo` env would have thrown at seed); and `runCase(PromptEnvironment + a QA harness + answer-match)` grades the
 answer (`pass=true`) with no browser/repo stage. So non-browser QA is a first-class environment, not a workaround.
 
+### os-use env kind — desktop (computer-use) as a first-class environment ✅
+Desktop-automation benchmarks (OSWorld, and apps like **hermes-desktop**) need an agent to *see a screen and drive
+GUI apps*. Added an **`os-use`** env kind (`EnvSpec` `{kind:"os-use", display?, setup?, screenshotCmd?, screenshotPath?}`
++ `EnvSnapshot` `{kind:"os-use", screenshotRef, windows}`) and an `OsUseEnvironment` that runs inside a desktop
+compute image (Xvfb + the app): `seed` runs the `setup` commands (start Xvfb / window manager / the desktop app, with
+`DISPLAY` injected), `snapshot` captures a screenshot (`scrot`) + the window list (`wmctrl`). `runAgentJob` selects it
+by `env.kind` (`os-use` → `OsUseEnvironment`); pairs with the `DockerDriver` env-container so the desktop image is the
+case compute (same model as SWE-bench prebuilt). VLM `judge` over the screenshot is the natural grader.
+
+**Verified live** (`scripts/live/os-use-desktop.mjs`, real Docker + Xvfb): a desktop image (Xvfb + `scrot` + `xclock`)
+runs through `runCase` — `OsUseEnvironment` brings up the display + app and captures a real screenshot
+(`snapshot.kind="os-use"`, a non-empty 13 KB PNG), graded inside the container.
+
+**Real hermes-desktop experiment**: the actual [hermes-desktop](https://github.com/fathah/hermes-desktop) Electron app
+was built into a desktop image (`npm install` + `electron-vite build` + the Electron binary + Chromium runtime libs)
+and launched headless under Xvfb (`electron … --no-sandbox`); `OsUseEnvironment`'s screenshot captured its real
+first-run UI ("Welcome to Hermes One" — Get Started / Connect via SSH), a 44 KB rendered PNG (vs the 13 KB blank
+root). So os-use observes a real third-party desktop app end-to-end. (The multi-GB image was removed + build cache
+pruned afterward; disk returned to its prior level.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

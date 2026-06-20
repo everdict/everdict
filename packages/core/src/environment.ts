@@ -27,10 +27,19 @@ export const PromptSnapshotSchema = z.object({
 });
 export type PromptSnapshot = z.infer<typeof PromptSnapshotSchema>;
 
+// 데스크탑(OS) 컴퓨터-유즈 결과 관측 — 화면 스크린샷 + 창 목록(OSWorld 류, 데스크탑 앱 자동화). VLM judge 의 입력.
+export const OsUseSnapshotSchema = z.object({
+  kind: z.literal("os-use"),
+  screenshotRef: z.string().default(""), // 캡처한 스크린샷 경로/ref (이미지 컴퓨트 안)
+  windows: z.array(z.string()).default([]), // 보이는 창 제목들(있으면)
+});
+export type OsUseSnapshot = z.infer<typeof OsUseSnapshotSchema>;
+
 export const EnvSnapshotSchema = z.discriminatedUnion("kind", [
   RepoSnapshotSchema,
   BrowserSnapshotSchema,
   PromptSnapshotSchema,
+  OsUseSnapshotSchema,
 ]);
 export type EnvSnapshot = z.infer<typeof EnvSnapshotSchema>;
 
@@ -58,6 +67,15 @@ export const EnvSpecSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("prompt"),
     context: z.string().optional(),
+  }),
+  // 타깃 환경: 데스크탑(OS). 에이전트가 화면을 보고 마우스/키보드로 GUI 앱을 조작(OSWorld/컴퓨터-유즈, 예: hermes-desktop).
+  // 데스크탑 컴퓨트 이미지(Xvfb+앱)에서 동작 — setup 으로 디스플레이/앱 기동, screenshotCmd 로 관측.
+  z.object({
+    kind: z.literal("os-use"),
+    display: z.string().optional(), // X DISPLAY (기본 ":99")
+    setup: z.array(z.string()).optional(), // 디스플레이/윈도우매니저/앱 기동 명령(Xvfb, wm, 데스크탑 앱)
+    screenshotCmd: z.string().optional(), // 스크린샷 캡처 명령(기본 scrot). 산출물 경로 = screenshotPath
+    screenshotPath: z.string().optional(), // 스크린샷 저장 경로(기본 /tmp/assay-screen.png)
   }),
 ]);
 export type EnvSpec = z.infer<typeof EnvSpecSchema>;
