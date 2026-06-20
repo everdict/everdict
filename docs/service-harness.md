@@ -877,9 +877,17 @@ Jaeger's OTLP endpoint; then `OtelTraceSource({endpoint: "http://…:16686"}).fe
 API (`/api/traces/{id}`) and normalized it to
 `[{ kind:"llm_call", model:"gpt-5.4-mini", cost:{ inputTokens:100, outputTokens:42, usd:0.0012 }, latencyMs:1500 }]`. So
 the pull path (emit → ingest → fetch → normalize) works against a real tracing backend, not a mock — the same path that
-grades a black-box harness's trace, with cost/tokens flowing into the cost/budget graders. (`MlflowTraceSource` is the
-same `spansToTraceEvents` mapping over MLflow 3.x's trace REST — unit-tested; a live check needs a logged MLflow trace +
-that server's auth, the running `infra-mlflow` being the target.)
+grades a black-box harness's trace, with cost/tokens flowing into the cost/budget graders.
+
+**MLflow too, symmetric** (`scripts/live/trace-mlflow.mjs`, real `infra-mlflow` 3.10 with Basic auth): a trace is logged
+via the `mlflow` Python SDK (a `chat` span carrying `mlflow.llm.model`, `mlflow.chat.tokenUsage`, `mlflow.llm.cost`), then
+`MlflowTraceSource({endpoint, headers:{authorization:"Basic …"}}).fetch(trace_id)` pulls it from MLflow 3.x's trace REST
+(`GET /api/3.0/mlflow/traces/get?trace_id=`) and normalizes the same way →
+`[{ kind:"llm_call", model:"gpt-5.4-mini", cost:{ inputTokens:100, outputTokens:42, usd:0.0012 }, latencyMs:… }]`. This
+confirmed the MLflow-specific decode against the real server: attributes arrive as OTLP `keyvalue`s with `kvlist_value`
+(`tokenUsage`/`cost` structured, `model` a `string_value`), which `parseMlflowTrace` + the `mlflow.*` fallbacks in
+`spansToTraceEvents` handle. So **both** trace backends (OTel/Jaeger and MLflow 3.x) pull live into the same normalized
+`TraceEvent[]`. (Credentials read from `infra/.env` at runtime, never committed.)
 
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
