@@ -1,10 +1,14 @@
+import { JudgeRunConfigSchema } from "@assay/core";
 import { z } from "zod";
 import type { SqlClient } from "./client.js";
 
-// 워크스페이스 단위 설정(컨트롤플레인 정책). 지금은 사용량 계측 on/off 만 — JSONB 로 저장해 추후 확장 용이.
-// 요청별 override(POST /runs body.meterUsage)가 이보다 우선; 이 값은 env 기본 정책을 덮어쓴다.
+// 워크스페이스 단위 설정(컨트롤플레인 정책). JSONB 로 저장해 추후 확장 용이.
+// 요청별 override(POST /runs·/scorecards body.*)가 이보다 우선; 이 값은 env 기본 정책을 덮어쓴다.
 export const WorkspaceSettingsSchema = z.object({
   meterUsage: z.boolean().optional(), // 미지정이면 env 정책(ASSAY_METER_TENANTS/ASSAY_METER_USAGE) 폴백
+  // inline judge grader(예: WebVoyager 프리셋) 채점에 쓸 기본 모델. 컨트롤플레인이 잡(job.judge)으로 자동 주입.
+  // 키는 시크릿(SecretStore)에서 별도 주입, 여기엔 모델/프로바이더만(시크릿 아님). 요청별 override 가 우선.
+  judge: JudgeRunConfigSchema.optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;
 

@@ -95,6 +95,35 @@ describe("RunService", () => {
     expect(seen).toEqual([true, false, false, true]);
   });
 
+  it("judge 모델: 요청 override > 워크스페이스 기본 > 없음, 결정값을 job.judge 로 실어 보낸다", async () => {
+    const seen: Array<AgentJob["judge"]> = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        seen.push(job.judge);
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({
+      dispatcher,
+      store: new InMemoryRunStore(),
+      newId: ids,
+      // 워크스페이스 기본: acme 만 judge 모델 설정.
+      judgeFor: async (t) => (t === "acme" ? { provider: "openai", model: "gpt-5.4-mini" } : undefined),
+    });
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE }); // 기본 적용
+    await svc.submit({ tenant: "beta", harness: { id: "s", version: "0" }, case: CASE }); // 기본 없음
+    await svc.submit({
+      tenant: "beta",
+      harness: { id: "s", version: "0" },
+      case: CASE,
+      judge: { model: "claude-opus-4-8", provider: "anthropic" },
+    }); // override
+    await flush();
+    expect(seen[0]).toEqual({ provider: "openai", model: "gpt-5.4-mini" });
+    expect(seen[1]).toBeUndefined(); // 기본 없으면 job.judge 미설정 → agent 에서 judge skip
+    expect(seen[2]).toEqual({ provider: "anthropic", model: "claude-opus-4-8" });
+  });
+
   it("계측 정책은 async 가능(DB 설정 스토어) — await 해서 job 에 싣는다", async () => {
     let seen: boolean | undefined;
     const dispatcher: Dispatcher = {

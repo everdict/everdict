@@ -369,10 +369,24 @@ passthrough). `runAgentJob` merges the same `judgeEnv(job.judge)` so local and r
 deliberately unset, `buildNomadJob` puts `ASSAY_JUDGE_MODEL`/`ASSAY_JUDGE_PROVIDER` in the alloc env (key arriving
 separately via `secretEnv`), and `runAgentJob` — taking the model **only from `job.judge`** — runs the real model
 judge (`pass=true`, 1.00, "A tool call executed `echo hello > out.txt`…"). So a per-run judge config reaches a remote
-alloc end-to-end, with the credential kept on the separate secret channel. (Open follow-ups: a workspace/suite-level
-default judge config so the control plane fills `job.judge` automatically; SWE-bench harness setup [deps/conda env +
-patch apply] for real test execution; GitHub-sourced harness-coupled benchmarks; a `prompt` env kind for non-browser
-QA.)
+alloc end-to-end, with the credential kept on the separate secret channel.
+
+#### Workspace-default judge config (control plane fills `job.judge`) ✅
+A user shouldn't repeat the judge model on every run — they set it once on the workspace and the control plane fills
+`job.judge` automatically (mirroring the existing `meterUsage` policy). `WorkspaceSettings.judge` (`{provider?, model}`,
+stored in the settings JSONB; **model/provider only, never the key**) is read by `RunService` and `ScorecardService`
+via a `judgeFor(tenant)` resolver (wired in `main.ts` from the `WorkspaceSettingsStore`), and merged into the job:
+**request override → workspace default → none** (none ⇒ the inline judge grader degrades to a skip score). Exposed
+over HTTP: `PUT /workspace/settings {judge}` to set the default, and a per-request `judge` override on `POST /runs`
+and `POST /scorecards`.
+
+**Verified live** (`scripts/live/workspace-judge-default.mjs`, real LiteLLM, `process.env.ASSAY_JUDGE_MODEL` unset):
+with a workspace default judge set, `RunService.submit` for that tenant auto-fills `job.judge` and the run is graded
+by the **real model judge** (`pass=true`, 1.00, "ran `echo hello > out.txt`…"); a tenant with no default gets a skip
+score and the run still succeeds. So a user only puts a `judge` grader on the case (no model), sets the model once on
+the workspace, and every run is model-judged. (Open follow-ups: SWE-bench harness setup [deps/conda env + patch
+apply] for real test execution; GitHub-sourced harness-coupled benchmarks; a `prompt` env kind for non-browser QA;
+API/web catalog + benchmark-import UX.)
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we

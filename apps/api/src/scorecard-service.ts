@@ -8,6 +8,7 @@ import {
   EnvSnapshotSchema,
   type GradeContext,
   type HarnessSpec,
+  type JudgeRunConfig,
   type JudgeSpec,
   NotFoundError,
   ScoreSchema,
@@ -65,6 +66,7 @@ export interface RunScorecardInput {
   harness: { id: string; version: string };
   judges?: Array<{ id: string; version: string }>; // 선택한 Agent Judge 들 — 트레이스에 적용
   runtime?: string; // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
+  judge?: JudgeRunConfig; // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
 }
 
 export interface ScorecardServiceDeps {
@@ -74,6 +76,8 @@ export interface ScorecardServiceDeps {
   harnesses?: HarnessRegistry; // 하니스 버전 해석(latest→구체) + spec 임베드(선언형). 빌트인은 폴백.
   judges?: JudgeRegistry; // judge 해석(소유/_shared 폴백)
   judgeRunner?: JudgeRunner; // 트레이스 기반 judge 실행(model 호출 / skip)
+  // 워크스페이스 기본 judge 모델(inline judge grader 채점용). 요청별 override(RunScorecardInput.judge)가 우선.
+  judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
   budget?: BudgetTracker; // 케이스마다 admission/settle
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@assay/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(서버 내부 주입)
@@ -122,6 +126,9 @@ export class ScorecardService {
       createdAt: ts,
       updatedAt: ts,
     };
+    // judge 모델: 요청 override → 워크스페이스 기본(DB) → 없음(inline judge grader 는 agent 에서 skip).
+    const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
+
     await this.deps.store.create(record);
     void this.track(
       record.id,
@@ -132,6 +139,7 @@ export class ScorecardService {
       harnessSpec,
       input.judges ?? [],
       input.runtime,
+      judge,
     );
     return record;
   }
@@ -227,12 +235,18 @@ export class ScorecardService {
     harnessSpec: HarnessSpec | undefined,
     judges: Array<{ id: string; version: string }>,
     runtime: string | undefined,
+    judge: JudgeRunConfig | undefined,
   ): Promise<void> {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
-    // 각 케이스 디스패치에 tenant/spec 을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
+    // 각 케이스 디스패치에 tenant/spec/judge 모델을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // 초과 시 throw → 배치 실패
-      const enriched: AgentJob = { ...job, tenant, ...(harnessSpec ? { harnessSpec } : {}) };
+      const enriched: AgentJob = {
+        ...job,
+        tenant,
+        ...(harnessSpec ? { harnessSpec } : {}),
+        ...(judge ? { judge } : {}),
+      };
       const result = await this.deps.dispatcher.dispatch(enriched);
       this.deps.budget?.settle(tenant, costOf(result));
       return result;

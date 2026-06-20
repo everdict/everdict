@@ -752,6 +752,25 @@ describe("API — workspace settings (계측 정책 등)", () => {
     await app.close();
   });
 
+  it("기본 judge 모델 설정: PUT 후 병합 보존(meterUsage 와 공존)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "PUT", url: "/workspace/settings", headers: acme, payload: { meterUsage: true } });
+    const put = await app.inject({
+      method: "PUT",
+      url: "/workspace/settings",
+      headers: acme,
+      payload: { judge: { provider: "openai", model: "gpt-5.4-mini" } },
+    });
+    expect(put.statusCode).toBe(200);
+    // jsonb 병합: judge 추가해도 meterUsage 보존.
+    expect((await app.inject({ method: "GET", url: "/workspace/settings", headers: acme })).json()).toEqual({
+      meterUsage: true,
+      judge: { provider: "openai", model: "gpt-5.4-mini" },
+    });
+    await app.close();
+  });
+
   it("member 는 설정 변경/조회 불가 (403)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };

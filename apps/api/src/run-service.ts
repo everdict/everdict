@@ -1,6 +1,6 @@
 import type { Dispatcher } from "@assay/backends";
 import { type BudgetTracker, costOf } from "@assay/backends";
-import { type AgentJob, AppError, type EvalCase, type HarnessSpec } from "@assay/core";
+import { type AgentJob, AppError, type EvalCase, type HarnessSpec, type JudgeRunConfig } from "@assay/core";
 import type { RunRecord, RunStore } from "@assay/db";
 
 export interface SubmitInput {
@@ -9,6 +9,7 @@ export interface SubmitInput {
   case: EvalCase;
   webhookUrl?: string;
   meterUsage?: boolean; // 이 요청만의 계측 override(미지정이면 워크스페이스 정책)
+  judge?: JudgeRunConfig; // 이 요청만의 judge 모델 override(미지정이면 워크스페이스 기본)
 }
 
 export interface RunServiceDeps {
@@ -20,6 +21,8 @@ export interface RunServiceDeps {
   // 워크스페이스 단위 계측 정책(기본 off). 요청별 override(SubmitInput.meterUsage)가 이보다 우선.
   // async 허용 — DB 기반 워크스페이스 설정 스토어를 그대로 끼울 수 있다.
   meterUsageFor?: (tenant: string) => boolean | Promise<boolean>;
+  // 워크스페이스 기본 judge 모델(inline judge grader 채점용). 요청별 override(SubmitInput.judge)가 우선.
+  judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
   newId?: () => string;
   now?: () => string;
   fetch?: typeof fetch; // 웹훅용 (테스트 주입)
@@ -73,12 +76,15 @@ export class RunService {
     // 계측: 요청 override → 워크스페이스 정책(DB) → off. 컨트롤플레인이 권위 — 잡에 실어 에이전트로 보낸다.
     const meterUsage =
       input.meterUsage ?? (this.deps.meterUsageFor ? await this.deps.meterUsageFor(input.tenant) : false);
+    // judge 모델: 요청 override → 워크스페이스 기본(DB) → 없음(judge grader 는 skip). 키는 백엔드가 secretEnv 로 주입.
+    const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
     const job: AgentJob = {
       evalCase: input.case,
       harness: input.harness,
       tenant: input.tenant,
       meterUsage,
       ...(harnessSpec ? { harnessSpec } : {}),
+      ...(judge ? { judge } : {}),
     };
     try {
       const result = await this.deps.dispatcher.dispatch(job);

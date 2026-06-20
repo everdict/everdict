@@ -5,6 +5,7 @@ import {
   DatasetSchema,
   EvalCaseSchema,
   HarnessSpecSchema,
+  JudgeRunConfigSchema,
   JudgeSpecSchema,
   RuntimeSpecSchema,
 } from "@assay/core";
@@ -23,6 +24,7 @@ export const SubmitBodySchema = z.object({
   case: EvalCaseSchema,
   webhookUrl: z.string().url().optional(),
   meterUsage: z.boolean().optional(), // 이 요청만 사용량 계측 override(미지정이면 워크스페이스 정책)
+  judge: JudgeRunConfigSchema.optional(), // 이 요청만 judge 모델 override(미지정이면 워크스페이스 기본)
 });
 
 // 스코어카드 실행 본문 — 데이터셋×하니스(버전 기본 latest, 서비스가 구체 버전으로 해석) + 선택한 judge 들.
@@ -31,13 +33,17 @@ export const RunScorecardBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
+  judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
 });
 
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
-// 워크스페이스 설정 패치(부분). 지금은 계측 on/off 만.
-export const WorkspaceSettingsBodySchema = z.object({ meterUsage: z.boolean().optional() });
+// 워크스페이스 설정 패치(부분). 계측 on/off + 기본 judge 모델.
+export const WorkspaceSettingsBodySchema = z.object({
+  meterUsage: z.boolean().optional(),
+  judge: JudgeRunConfigSchema.optional(), // 워크스페이스 기본 judge 모델(컨트롤플레인이 잡에 자동 주입)
+});
 
 export interface ServerDeps {
   service: RunService;

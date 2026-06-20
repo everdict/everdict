@@ -116,6 +116,8 @@ async function main(): Promise<void> {
     resolveHarness: (tenant, id, version) => registry.get(tenant, id, version),
     // 워크스페이스 단위 계측 정책(요청별 override 가 우선): DB 설정 스토어 우선, 미설정이면 env 정책 폴백.
     meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
+    // 워크스페이스 기본 judge 모델(요청별 override 가 우선): inline judge grader 가 이 모델로 채점되도록 잡에 주입.
+    judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
   });
   // judge 실행기: model(anthropic/openai)은 테넌트 시크릿 키로 실제 호출, harness 는 참조 에이전트를 디스패치해 판정.
   // 키/시크릿 없으면 skip(사유 명시). openai 베이스(LiteLLM 등)는 OPENAI_BASE_URL 시크릿 또는 env.
@@ -134,6 +136,8 @@ async function main(): Promise<void> {
     judges: judgeRegistry,
     judgeRunner,
     budget,
+    // 워크스페이스 기본 judge 모델(요청별 override 우선): 배치 eval 의 inline judge grader 가 이 모델로 채점.
+    judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // pull 인제스트: 테넌트 OTel/MLflow 에서 트레이스를 당겨 채점. 자격증명은 테넌트 SecretStore(authSecret 이름).
     buildTraceSource,
     secretsFor: runtimeSecretsFor,
