@@ -1,0 +1,10 @@
+{
+  "kind": "command",
+  "id": "desktop-ssh-agent",
+  "version": "1.0.0",
+  "workDir": "/tmp",
+  "env": { "DISPLAY": ":99" },
+  "setup": [],
+  "command": "node /agent.cjs {{task}}",
+  "trace": { "kind": "none" }
+}

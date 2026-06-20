@@ -616,6 +616,29 @@ SSH error." So the full computer-use loop — provision desktop → drive with r
 genuine SSH tunnel) → observe → VLM judge — is now a **one-call control-plane dispatch**, not a live script. (Image build
 is a documented pre-step in `scripts/live/Dockerfile.hermes-ssh-agent`; removed afterward, disk returned to prior level.)
 
+### os-use benchmark over the HTTP API — `POST /runs`, registered as data ✅
+SLICE 76 dispatched via `runAgentJob` in a node script. This registers the whole os-use task as **first-party catalog
+data** and dispatches it through the **real HTTP control plane** — what a SaaS tenant actually calls:
+- `examples/datasets/hermes-desktop-ssh.json` — a `Dataset` whose single `EvalCase` is the os-use SSH task (env
+  `os-use` + setup, `graders:[judge useScreenshot]`, `placement.target:"docker"`); seeded to `_shared`, served at
+  `GET /datasets`.
+- `examples/harnesses/desktop-ssh-agent.json` — the `command` desktop agent (`workDir:"/tmp"`); served at
+  `GET /harnesses`.
+- `examples/runtimes/docker-1.0.0.json` — a `docker` `RuntimeSpec`; `RuntimeDispatcher` resolves `placement.target`
+  `"docker"` → `buildRuntimeBackend` → `DockerBackend` → `runAgentJob(DockerDriver)`. No new dispatch code: the existing
+  control-plane path (`RunService.submit` → `RuntimeDispatcher` → `Scheduler` → backend) already carries an os-use job.
+- Seed-guard tests (`harness-seed.test.ts`, +3) assert all three catalogs parse with their schemas and land in `_shared`.
+
+**Verified live** against the running API server (`apps/api` on a port, InMemory store, dev-tenant header): `GET /datasets`
+lists `hermes-desktop-ssh`, `GET /harnesses` lists `desktop-ssh-agent`; then `POST /runs` with `{harness, case, judge}`
+→ `202 {id, status:"queued"}`; polling `GET /runs/:id` → `status:"succeeded"` in ~27 s with
+`result.snapshot.kind="os-use"` and `scores:[{ graderId:"judge", pass:true, value:0.99 }]` ("Hermes main app screen,
+sidebar Chat/Discover, 'Ask anything' box, advanced past the SSH form, no error"). Since the agent program
+(`/agent.cjs`) exists only baked in the desktop image, a real `main`-app screenshot proves it ran in the docker
+env-container (a `local` host fallback has neither the agent nor Xvfb). So a tenant runs the full desktop computer-use
+benchmark by picking a registered dataset + harness and POSTing one run — no bespoke code, no live orchestration script.
+(Desktop image built from `Dockerfile.hermes-ssh-agent`; removed afterward, disk returned to prior level.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

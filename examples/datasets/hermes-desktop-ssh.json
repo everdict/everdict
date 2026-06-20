@@ -1,0 +1,41 @@
+{
+  "id": "hermes-desktop-ssh",
+  "version": "1.0.0",
+  "description": "os-use 데스크탑 컴퓨터-유즈 벤치마크: hermes-desktop(Electron)을 구동해 SSH 로 원격 연결한다. 에이전트가 SSH 폼을 실 OS 입력으로 채우고 hermes 가 진짜 SSH 터널을 열어 메인 진입 → 최종 화면을 VLM judge 가 채점. 이미지는 scripts/live/Dockerfile.hermes-ssh-agent 로 빌드(hermes + sshd + /agent.cjs).",
+  "tags": ["os-use", "desktop", "ssh", "computer-use", "shared"],
+  "cases": [
+    {
+      "id": "hermes-ssh-connect",
+      "env": {
+        "kind": "os-use",
+        "display": ":99",
+        "setup": [
+          "mkdir -p /run/sshd /root/.ssh && chmod 700 /root/.ssh",
+          "ssh-keygen -A",
+          "test -f /root/.ssh/id_rsa || ssh-keygen -t ed25519 -f /root/.ssh/id_rsa -N '' -q",
+          "cp /root/.ssh/id_rsa.pub /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys",
+          "grep -q '^PermitRootLogin' /etc/ssh/sshd_config || echo 'PermitRootLogin prohibit-password' >> /etc/ssh/sshd_config",
+          "/usr/sbin/sshd",
+          "node -e 'require(\"http\").createServer((q,s)=>{s.writeHead(200);s.end(\"ok\")}).listen(8642,\"127.0.0.1\")' >/tmp/health.log 2>&1 & sleep 1",
+          "Xvfb :99 -screen 0 1280x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & sleep 2",
+          "cd /app && ENABLE_CDP=1 CDP_PORT=9222 DISPLAY=:99 ./node_modules/.bin/electron . --no-sandbox --disable-gpu --disable-dev-shm-usage >/tmp/electron.log 2>&1 & sleep 10"
+        ],
+        "screenshotPath": "/tmp/osuse.png"
+      },
+      "image": "assay-hermes-dispatch:demo",
+      "task": "Connect Hermes to the SSH server at 127.0.0.1 as user root (key /root/.ssh/id_rsa).",
+      "graders": [
+        {
+          "id": "judge",
+          "config": {
+            "useScreenshot": true,
+            "rubric": "PASS only if the app has advanced PAST the SSH connection form — e.g. a splash like 'Starting SSH tunnel…' or the main app screen (sidebar with Chat/Discover, an 'Ask anything' box) — with NO connection-error message. The SSH connection form itself or a red connection error is NOT the goal."
+          }
+        }
+      ],
+      "placement": { "target": "docker" },
+      "timeoutSec": 300,
+      "tags": ["os-use", "ssh"]
+    }
+  ]
+}
