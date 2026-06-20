@@ -93,10 +93,22 @@ const WEBVOYAGER_RUBRIC =
   "Judge whether the agent successfully completed the web browsing task and reported a correct, " +
   "well-supported final answer. Pass only if the task goal was actually achieved by the actions in the trace.";
 
-// SWE-bench 정규화: repo→git URL(repo env). test_patch/FAIL_TO_PASS/PASS_TO_PASS 는 graderBuilder 가 swe-bench grader 로.
+// 공식 SWE-bench prebuilt 이미지(deps + repo@base_commit 동봉) 명. Docker Hub 규칙(검증됨): instance_id 의 __ → _1776_.
+// 예: astropy__astropy-12907 → swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest
+export function sweBenchImage(instanceId: string, arch = "x86_64"): string {
+  return `swebench/sweb.eval.${arch}.${instanceId.replaceAll("__", "_1776_")}:latest`;
+}
+
+// SWE-bench 정규화: repo→git URL(repo env), instance_id→공식 prebuilt 이미지(_image, deps 동봉).
+// test_patch/FAIL_TO_PASS/PASS_TO_PASS 는 graderBuilder 가 swe-bench grader 로.
 function sweBenchRow(row: Record<string, unknown>): Record<string, unknown> {
   const repo = String(row.repo ?? "");
-  return { ...row, _git: repo ? `https://github.com/${repo}.git` : "" };
+  const instanceId = String(row.instance_id ?? "");
+  return {
+    ...row,
+    _git: repo ? `https://github.com/${repo}.git` : "",
+    _image: instanceId ? sweBenchImage(instanceId) : "",
+  };
 }
 
 // FAIL_TO_PASS/PASS_TO_PASS 는 JSON 배열 문자열 → 문자열 배열.
@@ -183,6 +195,7 @@ export const BENCHMARK_CATALOG = {
       taskField: "problem_statement",
       gitField: "_git",
       refField: "base_commit",
+      imageField: "_image", // 공식 prebuilt 이미지(deps+repo) — per-case 컴퓨트 이미지로
       tagFields: ["repo", "version"],
     },
     rowTransform: sweBenchRow,

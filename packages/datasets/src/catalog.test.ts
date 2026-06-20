@@ -1,7 +1,16 @@
 import { DatasetSchema } from "@assay/core";
 import { describe, expect, it } from "vitest";
-import { BENCHMARK_CATALOG, adapterToDataset, importBenchmark, listBenchmarks } from "./catalog.js";
+import { BENCHMARK_CATALOG, adapterToDataset, importBenchmark, listBenchmarks, sweBenchImage } from "./catalog.js";
 import { type FetchLike, fetchHfRows } from "./sources.js";
+
+describe("sweBenchImage (공식 prebuilt 이미지 명명, 검증된 Docker Hub 규칙)", () => {
+  it("instance_id 의 __ → _1776_, 기본 arch x86_64", () => {
+    expect(sweBenchImage("astropy__astropy-12907")).toBe("swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest");
+    expect(sweBenchImage("django__django-11099", "arm64")).toBe(
+      "swebench/sweb.eval.arm64.django_1776_django-11099:latest",
+    );
+  });
+});
 
 // HF datasets-server /rows 응답을 흉내내는 mock fetch (네트워크 없음).
 function mockHf(pages: Array<Array<Record<string, unknown>>>, numRowsTotal: number): { f: FetchLike; calls: string[] } {
@@ -105,6 +114,8 @@ describe("BenchmarkAdapter 카탈로그", () => {
     expect(sb?.config?.failToPass).toEqual(["astropy/modeling/tests/test_separable.py::test_x"]);
     expect(sb?.config?.passToPass).toEqual(["astropy/modeling/tests/test_separable.py::test_y"]);
     expect(c?.tags).toEqual(["astropy/astropy", "4.3"]);
+    // 공식 SWE-bench prebuilt 이미지(deps+repo)를 per-case 이미지로 시드 (__ → _1776_).
+    expect(c?.image).toBe("swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest");
   });
 
   it("gsm8k: rowTransform 가 '…#### 18' 에서 최종답을 뽑아 answer-match 부여", () => {

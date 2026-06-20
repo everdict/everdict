@@ -163,6 +163,8 @@ export function buildK8sJob(
     ...judgeEnv(job.judge), // per-run judge 모델 설정(키는 secretEnv). inline judge grader 가 이 모델로 판정.
     ...opts.secretEnv,
   };
+  // per-case 이미지(예: SWE-bench 공식 prebuilt = deps+repo 동봉) 우선, 없으면 기본 에이전트 이미지.
+  const image = job.evalCase.image ?? opts.image;
   const tenant = job.tenant ?? "default";
   return {
     apiVersion: "batch/v1",
@@ -180,7 +182,7 @@ export function buildK8sJob(
           containers: [
             {
               name: "agent",
-              image: opts.image,
+              image,
               imagePullPolicy: opts.imagePullPolicy ?? "IfNotPresent",
               env: Object.entries(env).map(([n, value]) => ({ name: n, value })),
             },

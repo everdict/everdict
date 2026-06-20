@@ -75,6 +75,14 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(decoded.harness.id).toBe("aider");
   });
 
+  it("evalCase.image 가 있으면 per-case 컨테이너 이미지로 override(SWE-bench prebuilt)", () => {
+    const withImage = { ...JOB, evalCase: { ...JOB.evalCase, image: "swebench/sweb.eval.x86_64.x_1776_y-1:latest" } };
+    const m = buildK8sJob(withImage, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
+    expect(m.spec.template.spec.containers[0]?.image).toBe("swebench/sweb.eval.x86_64.x_1776_y-1:latest");
+    const off = buildK8sJob(JOB, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
+    expect(off.spec.template.spec.containers[0]?.image).toBe("reg/agent:1");
+  });
+
   it("job.judge 가 있으면 judge 모델 env 를 파드에 주입한다(키는 secretEnv)", () => {
     const m = buildK8sJob(
       { ...JOB, judge: { model: "gpt-5.4-mini" } },

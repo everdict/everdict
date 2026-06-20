@@ -15,6 +15,7 @@ export interface CaseMapping {
   answerMode?: "contains" | "exact"; // answer-match 모드(기본 contains). GAIA 류 정답대조는 exact.
   gitField?: string; // 있으면 repo env(source.git) — SWE-bench 류 코딩 벤치마크
   refField?: string; // repo env ref(없으면 HEAD)
+  imageField?: string; // 있으면 EvalCase.image(per-case 컴퓨트 이미지) — 예: SWE-bench 공식 prebuilt(deps+repo)
   testCmdField?: string; // 있으면 tests-pass{cmd} (행별 테스트 명령)
   tagFields?: string[]; // 태그로 쓸 필드들
   extraGraders?: GraderSpec[]; // 항상 추가(예: steps, judge{rubric})
@@ -52,11 +53,13 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   }
   for (const g of m.extraGraders ?? []) graders.push(g);
   const tags = (m.tagFields ?? []).map((f) => str(row[f])).filter(Boolean);
+  const image = m.imageField ? str(row[m.imageField]) : "";
   return {
     id: str(row[m.idField]) || `${meta.id}-${i}`,
     env,
     task: str(row[m.taskField]),
     graders,
+    ...(image ? { image } : {}),
     timeoutSec: 600,
     tags,
   };

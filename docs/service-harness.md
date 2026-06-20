@@ -410,8 +410,24 @@ HTTP: `POST /benchmark-recipes` (`datasets:write`), `GET /benchmark-recipes` + `
 (`/dashboard/datasets/recipes`) lists recipes + registers one from a JSON `BenchmarkAdapterSpec`, and the **벤치마크
 추가** page now offers catalog benchmarks *and* the workspace's own recipes in one picker. Verified at the HTTP layer
 by `server.test.ts` (register → list/get with tenant isolation [`globex` gets 404 on `acme`'s recipe] → import from
-recipe). So a user manages reusable benchmark recipes entirely from the browser, persisted per tenant. (Remaining:
-official SWE-bench prebuilt images as a first-party `env.image` seed; a `prompt` env kind for non-browser QA.)
+recipe). So a user manages reusable benchmark recipes entirely from the browser, persisted per tenant.
+
+#### SWE-bench dependency provisioning — official prebuilt images as a per-case `env.image` seed ✅
+The remaining piece for running SWE-bench at scale is **per-repo dependencies** — solved as **data**, not code, by
+pointing the case at the official prebuilt image (which bundles the repo at `base_commit` + the conda/pip env). The
+SWE-bench adapter seeds `EvalCase.image` to the official Docker Hub image via `sweBenchImage(instance_id)` — the
+verified naming `swebench/sweb.eval.x86_64.<instance_id with __→_1776_>:latest` — using a new data-driven
+`CaseMapping.imageField`. The backends now honor a per-case image: `buildNomadJob` / `buildK8sJob` use
+`job.evalCase.image ?? opts.image`, so a case runs in its own image instead of the default agent image (a general
+capability, not SWE-bench-specific).
+
+**Verified live** (`scripts/live/swe-bench-image-seed.mjs`, real HF + real Docker Hub): a real SWE-bench_Lite row
+(`astropy__astropy-12907`) → `case.image = swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest`, which is
+**actually published** on Docker Hub (`tags: latest, v2, v1`), and `buildNomadJob` puts that image on the container
+(not the default agent image). So dependency provisioning is now a data seed pointing at a real image. (The image is
+an *environment* image — repo + deps; the remaining infra for a fully autonomous run is the agent-in-image or a
+separate env-container; the common SWE-bench flow of "apply the predicted patch + run tests in this image" is already
+covered by `SweBenchGrader`. Other follow-ups: a `prompt` env kind for non-browser QA.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner

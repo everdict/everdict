@@ -61,6 +61,13 @@ describe("buildNomadJob", () => {
     const spec = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "i" });
     expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Env.ASSAY_JUDGE_MODEL).toBeUndefined();
   });
+  it("evalCase.image 가 있으면 per-case 이미지로 override(예: SWE-bench prebuilt)", () => {
+    const withImage = { ...JOB, evalCase: { ...JOB.evalCase, image: "swebench/sweb.eval.x86_64.x_1776_y-1:latest" } };
+    const on = buildNomadJob(withImage, { addr: "http://nomad:4646", image: "reg/agent:1" });
+    expect(on.Job.TaskGroups[0]?.Tasks[0]?.Config.image).toBe("swebench/sweb.eval.x86_64.x_1776_y-1:latest");
+    const off = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "reg/agent:1" });
+    expect(off.Job.TaskGroups[0]?.Tasks[0]?.Config.image).toBe("reg/agent:1"); // 없으면 기본
+  });
 });
 
 describe("fetchHttp (Nomad API 인증)", () => {

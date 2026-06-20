@@ -88,6 +88,8 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJo
     ...judgeEnv(job.judge), // per-run judge 모델 설정(키는 secretEnv). inline judge grader 가 이 모델로 판정.
     ...opts.secretEnv,
   };
+  // per-case 이미지(예: SWE-bench 공식 prebuilt = deps+repo 동봉) 우선, 없으면 기본 에이전트 이미지.
+  const image = job.evalCase.image ?? opts.image;
   return {
     Job: {
       ID: nomadJobId(job),
@@ -103,7 +105,7 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJo
             {
               Name: "agent",
               Driver: "docker",
-              Config: opts.runtime ? { image: opts.image, runtime: opts.runtime } : { image: opts.image },
+              Config: opts.runtime ? { image, runtime: opts.runtime } : { image },
               Env: env,
               Resources: { CPU: opts.cpuMhz ?? 1000, MemoryMB: opts.memMb ?? 1024 },
             },
