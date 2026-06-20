@@ -362,9 +362,27 @@ live** (`scripts/live/swe-bench-grade.mjs`, real `git apply` + real pytest on a 
 bug fixed by a gold patch, `test_add` as FAIL_TO_PASS, `test_mul` as PASS_TO_PASS): with no fix the grader applies the
 test patch and pytest reports `test_add` failing (`assert -1 == 5`) → `resolved=false`; after the gold patch is
 applied (the agent's prediction) the same grader yields `2 passed` → `resolved=true`. The same `swe-bench` grader spec
-is populated from a real SWE-bench_Lite row, so the grading mechanism is real and benchmark-faithful. (The remaining
-piece for arbitrary instances at scale is **per-repo dependency provisioning** — the official SWE-bench prebuilt
-per-instance Docker images plugged as the env / `env.setup` — not the grader, which is done.)
+is populated from a real SWE-bench_Lite row, so the grading mechanism is real and benchmark-faithful.
+
+#### Benchmark-agnostic: a user onboards a *new* test-execution benchmark with zero first-party code ✅
+SWE-bench shouldn't be special-cased — in a multi-tenant SaaS a user must bring a **new** benchmark (a just-released
+one, or their private one) without us writing code. Both halves are **data**, not code:
+- **Dependency provisioning** = `EvalCase.env.setup` (shell install commands, run by `RepoEnvironment` after seeding)
+  + `env.image` (custom base image). SWE-bench at scale = point `env.image` at the official prebuilt per-instance
+  images — still data. No per-benchmark code.
+- **Grading** = the generic **`CommandGrader`** (`{cmd, cwd?, applyPatch?, passPattern?, metric?}`): run a command in
+  the env, exit-code (or output regex) → pass, with an optional grade-time `git apply` of a gold patch hidden from the
+  agent. Any test-execution benchmark is one configuration of it; `swe-bench` (and `tests-pass`) are first-party
+  presets of the same pattern.
+
+**Verified live** (`scripts/live/user-benchmark-selfserve.mjs`, real `runCase` loop + real pytest): a **user-defined**
+benchmark — provided purely as an `EvalCase` (`env.source` files + `env.setup` deps + a `command` grader), with **no
+catalog adapter and no benchmark-specific grader** — runs through the full loop. With the fix → `resolved=true`
+(`1 passed`); without the fix → `unresolved` (`1 failed`); with the fix but `env.setup` removed → `unresolved`
+(`ImportError` — deps not provisioned), proving `env.setup` is the load-bearing, user-configurable dependency hook. So
+"bring any/new benchmark" holds for test-execution benchmarks too — the user owns the dataset, the deps, and the
+grading, all as data. (Remaining: official SWE-bench prebuilt images as a first-party `env.image` seed for that family
+at scale; a `prompt` env kind for non-browser QA.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner
