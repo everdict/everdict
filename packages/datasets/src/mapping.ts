@@ -17,7 +17,13 @@ export interface CaseMapping {
   gitField?: string; // 있으면 repo env(source.git) — clone 기반 코딩 벤치마크
   refField?: string; // repo env ref(없으면 HEAD)
   repoPath?: string; // 있으면 repo env(source.path = 이미지-내 repo, 예: SWE-bench "/testbed") — clone 안 함
+  osUseEnv?: boolean; // true 면 os-use(데스크탑/컴퓨터-유즈) env — OSWorld 류. repo/git 이 있으면 그게 이김.
+  osUseSetup?: string[]; // os-use env.setup(공유; 예: Xvfb 기동 + 앱). 데이터 주도(JSON 배열).
+  display?: string; // os-use display(기본 ":99")
+  screenshotPath?: string; // os-use 스냅샷 경로(VLM judge 가 읽음)
   imageField?: string; // 있으면 EvalCase.image(per-case 컴퓨트 이미지) — 예: SWE-bench 공식 prebuilt(deps+repo)
+  image?: string; // 모든 케이스 공통 컴퓨트 이미지(imageField 가 행별로 이김) — 예: OSWorld 데스크탑 이미지
+  placement?: string; // 모든 케이스 placement.target(예: "docker") — 컨트롤플레인 라우팅
   testCmdField?: string; // 있으면 tests-pass{cmd} (행별 테스트 명령)
   tagFields?: string[]; // 태그로 쓸 필드들
   extraGraders?: GraderSpec[]; // 항상 추가(예: steps, judge{rubric})
@@ -42,6 +48,13 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   } else if (git) {
     const ref = m.refField ? str(row[m.refField]) : "";
     env = { kind: "repo", source: { git, ref: ref || "HEAD" } };
+  } else if (m.osUseEnv) {
+    env = {
+      kind: "os-use", // 데스크탑 컴퓨터-유즈(OSWorld) — 에이전트가 GUI 를 실 OS 입력으로 조작, 스냅샷을 VLM 이 채점
+      ...(m.display ? { display: m.display } : {}),
+      ...(m.osUseSetup ? { setup: m.osUseSetup } : {}),
+      ...(m.screenshotPath ? { screenshotPath: m.screenshotPath } : {}),
+    };
   } else if (m.promptEnv) {
     env = { kind: "prompt" }; // 환경 없는 QA(gsm8k/GAIA)
   } else {
@@ -59,13 +72,14 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   }
   for (const g of m.extraGraders ?? []) graders.push(g);
   const tags = (m.tagFields ?? []).map((f) => str(row[f])).filter(Boolean);
-  const image = m.imageField ? str(row[m.imageField]) : "";
+  const image = m.imageField ? str(row[m.imageField]) || (m.image ?? "") : (m.image ?? ""); // 행별 imageField > 공통 image
   return {
     id: str(row[m.idField]) || `${meta.id}-${i}`,
     env,
     task: str(row[m.taskField]),
     graders,
     ...(image ? { image } : {}),
+    ...(m.placement ? { placement: { target: m.placement } } : {}),
     timeoutSec: 600,
     tags,
   };

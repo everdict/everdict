@@ -67,8 +67,36 @@ describe("BenchmarkAdapter 카탈로그", () => {
     const ids = listBenchmarks()
       .map((b) => b.id)
       .sort();
-    expect(ids).toEqual(["gaia", "gsm8k", "mind2web", "swe-bench-lite", "webvoyager"]);
+    expect(ids).toEqual(["gaia", "gsm8k", "mind2web", "osworld", "swe-bench-lite", "webvoyager"]);
     expect(listBenchmarks().find((b) => b.id === "gaia")?.gated).toBe(true); // GAIA gated 표기
+    expect(listBenchmarks().find((b) => b.id === "osworld")?.category).toBe("desktop"); // os-use 데스크탑
+  });
+
+  it("osworld: os-use env + 행별 instruction 을 박은 VLM judge(스크린샷) — 데스크탑 컴퓨터-유즈", async () => {
+    const rows = [
+      {
+        id: "chrome-001",
+        instruction: "Change the default search engine to Bing.",
+        snapshot: "chrome",
+        source: "test",
+      },
+      { id: "files-002", instruction: "Create a folder named reports on the Desktop.", snapshot: "os", source: "test" },
+    ];
+    const text = rows.map((r) => JSON.stringify(r)).join("\n");
+    const ds = await importBenchmark(BENCHMARK_CATALOG.osworld, { id: "osworld-mini", version: "1.0.0" }, { text });
+    expect(DatasetSchema.safeParse(ds).success).toBe(true);
+    const c = ds.cases[0];
+    expect(c?.id).toBe("chrome-001");
+    expect(c?.env).toMatchObject({ kind: "os-use", display: ":99", screenshotPath: "/tmp/osuse.png" }); // 데스크탑 env
+    expect(c?.placement?.target).toBe("docker"); // docker 런타임으로 라우팅
+    expect(c?.image).toBe("assay-osworld:demo"); // 공통 데스크탑 이미지
+    expect(c?.tags).toEqual(["chrome", "test"]);
+    const judge = c?.graders.find((g) => g.id === "judge");
+    expect(judge?.config?.useScreenshot).toBe(true);
+    expect(judge?.config?.rubric).toContain("Change the default search engine to Bing."); // 행별 instruction 박힘
+    expect(ds.cases[1]?.graders.find((g) => g.id === "judge")?.config?.rubric).toContain(
+      "Create a folder named reports",
+    );
   });
 
   it("벤치마크별 채점 프리셋: GAIA=answer-match exact / WebVoyager=judge / SWE-bench=tests-pass", () => {

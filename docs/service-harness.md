@@ -659,6 +659,28 @@ close, and the comparison axis `diffScorecards`/`GET /scorecards/:a/diff/:b` rep
 computer-use is now a first-class **benchmark** (multi-case dataset → batch scorecard → aggregate + diff), reached over the
 same HTTP control plane. (Seed-guard test asserts the multi-case dataset parses to `_shared`; image removed afterward.)
 
+### OSWorld imported as os-use cases — the desktop benchmark ecosystem ✅
+The hand-authored `hermes-desktop-ssh` dataset proves the runtime; this connects the *ecosystem* — **OSWorld**
+(xlang-ai/OSWorld, real OS/app computer-use tasks) imported into assay's os-use runtime via the same data-driven
+`BenchmarkAdapter` path that already carries GSM8K/GAIA/SWE-bench/WebVoyager. "New benchmark = one adapter, not code."
+- `CaseMapping` (+ `rowToCase`) gained an **os-use branch** plus constant `image`/`placement` (data-driven, so it's
+  JSON-serializable for tenant `BenchmarkAdapterSpec` too): `osUseEnv` → `{kind:"os-use", display, setup, screenshotPath}`,
+  `placement:"docker"` on every case, a shared desktop `image`.
+- The `osworld` catalog adapter maps `id`/`instruction` → an os-use case; grading is a **per-row VLM judge**
+  (`graderBuilder` interpolates each task's `instruction` into the rubric — "PASS only if the final desktop screenshot
+  shows this task completed: …"). OSWorld's upstream per-task Python evaluators don't port across runtimes, so the
+  screenshot judge is the harness-agnostic grader (same adaptation GSM8K/GAIA make: map to assay's env + grader, not the
+  upstream harness). Source is `jsonl` (OSWorld ships task JSON; a tenant uploads it); the desktop image with the apps is
+  the tenant's to build (the SWE-bench-prebuilt pattern). New `category: "desktop"`.
+
+**Verified live** over the HTTP API (jsonl import is pure — no container): `GET /benchmarks` lists
+`{ id:"osworld", category:"desktop" }`; `POST /benchmarks/import { benchmark:"osworld", text:<OSWorld jsonl> }` → `201`,
+and `GET /datasets/osworld-mini/versions/1.0.0` → os-use `EvalCase`s — `placement.target:"docker"`,
+`image:"assay-osworld:demo"`, snapshot/source tags, and a `judge useScreenshot` grader whose rubric carries that row's
+instruction. These are the *same os-use case shape* SLICES 76–78 proved runnable (`runAgentJob`/`POST /runs`/scorecards),
+so once a tenant supplies an OSWorld desktop image + a computer-use agent, OSWorld runs and scores through the existing
+control plane. (Deterministic adapter tests cover the mapping + per-row rubric; no docker this slice.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

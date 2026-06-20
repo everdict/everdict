@@ -13,7 +13,7 @@ export type BenchmarkSource =
 export interface BenchmarkAdapter {
   id: string;
   description: string;
-  category: "browser" | "qa" | "coding" | "tool"; // 정보용 분류(core env 종류와 별개)
+  category: "browser" | "qa" | "coding" | "tool" | "desktop"; // 정보용 분류(core env 종류와 별개)
   defaultVersion: string; // 카탈로그 기준 버전(벤치마크 config/release)
   source: BenchmarkSource;
   mapping: CaseMapping;
@@ -117,6 +117,13 @@ function jsonStrArray(v: unknown): string[] {
   }
 }
 
+// OSWorld 채점: 공식은 태스크별 파이썬 evaluator(파일/상태 검사)라 하니스/런타임-무관 이식이 어렵다. assay 는 최종
+// 데스크탑 스크린샷을 VLM judge 가 instruction 기준으로 채점(useScreenshot). 행별 instruction 을 루브릭에 박는다.
+function osworldRubric(row: Record<string, unknown>): string {
+  const instruction = String(row.instruction ?? row.task ?? "");
+  return `Judge the final DESKTOP screenshot. PASS only if it clearly shows this task completed: "${instruction}". Judge strictly from the visible end state; if the goal is not clearly achieved on screen, FAIL.`;
+}
+
 // first-party 벤치마크 카탈로그. 새 벤치마크는 여기에 어댑터 한 개를 추가하면 됨(소스+매핑+채점).
 // satisfies: 리터럴 키를 보존 → BENCHMARK_CATALOG.gsm8k 등이 non-undefined 로 타입됨.
 export const BENCHMARK_CATALOG = {
@@ -206,6 +213,28 @@ export const BENCHMARK_CATALOG = {
         },
       },
     ],
+  },
+  // 데스크탑(OS/앱) 컴퓨터-유즈 벤치마크 — OSWorld. os-use env + VLM judge(스크린샷). 공식은 VM + 태스크별 파이썬
+  // evaluator 지만, assay 는 os-use docker 로 어댑트(에이전트=command 하니스, 채점=judge). 소스=jsonl(OSWorld task
+  // JSON 을 jsonl 로 업로드). 데스크탑 이미지(앱 포함)는 유저가 빌드/등록 — SWE-bench prebuilt 와 동일 패턴.
+  osworld: {
+    id: "osworld",
+    description: "OSWorld — real desktop OS/app computer-use tasks (xlang-ai/OSWorld); os-use env, VLM-judged",
+    category: "desktop",
+    defaultVersion: "1.0.0",
+    source: { kind: "jsonl" },
+    mapping: {
+      idField: "id",
+      taskField: "instruction",
+      osUseEnv: true,
+      osUseSetup: ["Xvfb :99 -screen 0 1280x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & sleep 2"],
+      display: ":99",
+      screenshotPath: "/tmp/osuse.png",
+      placement: "docker",
+      image: "assay-osworld:demo", // OSWorld 데스크탑 이미지(앱 동봉) — 유저가 빌드/등록
+      tagFields: ["snapshot", "source"],
+    },
+    graderBuilder: (row) => [{ id: "judge", config: { useScreenshot: true, rubric: osworldRubric(row) } }],
   },
 } satisfies Record<string, BenchmarkAdapter>;
 
