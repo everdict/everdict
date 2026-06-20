@@ -531,6 +531,21 @@ first-run UI ("Welcome to Hermes One" — Get Started / Connect via SSH), a 44 K
 root). So os-use observes a real third-party desktop app end-to-end. (The multi-GB image was removed + build cache
 pruned afterward; disk returned to its prior level.)
 
+**hermes-desktop actually *driven* — the computer-use loop, not just boot+render** (`scripts/live/os-use-hermes-drive.mjs`):
+SLICE 72 proved hermes *boots, renders, and is observable*. This proves the missing piece — an agent **acts** on it and
+the app **responds**, observed by os-use. The os-use env launches hermes with `ENABLE_CDP=1` (its main process opens a
+remote-debugging port); the "agent" attaches over CDP (via hermes' own bundled `playwright`, attach-only — no browser
+download) **only to locate** the *Connect to Remote Hermes* button (`boundingBox()` + the X window's screen offset +
+`devicePixelRatio`), then injects a **real OS mouse click with `xdotool`** into Xvfb at those screen coordinates — a
+genuine computer-use action, not a synthetic DOM `.click()`. The app transitions Welcome → the Remote-connect form;
+this is verified two independent ways: **(a)** playwright DOM truth — before: `Server URL` not present, `0` inputs →
+after: `Server URL` visible, `2` inputs (URL + API key); **(b)** os-use `scrot` before/after screenshots that visibly
+differ (Welcome screen → connect form, with the cursor parked on the Server URL field where the click landed). Grader
+`gui-drive` asserts `ready && clicked && transitioned` → `pass=true` (`inputs 0->2`, `dpr=1`, click at `(640,635)`).
+So an agent can perceive → locate → inject real OS input → cause a real state change → observe it on a real
+third-party desktop app — the loop a desktop-task benchmark needs. (Full task completion, e.g. SSH-connect-and-run,
+needs a target SSH server + credentials and is the next rung; this rung proves the drive+observe mechanism.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
