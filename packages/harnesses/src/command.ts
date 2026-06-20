@@ -44,8 +44,13 @@ export class CommandHarness implements EvaluableHarness {
     this.version = spec.version;
   }
 
+  // 실행 디렉터리: 스펙 workDir(os-use 등은 "/tmp" 같은 절대경로) > opts.workDir > 기본 "work".
+  private get cwd(): string {
+    return this.spec.workDir ?? this.opts.workDir ?? "work";
+  }
+
   async install(compute: ComputeHandle): Promise<void> {
-    const cwd = this.opts.workDir ?? "work";
+    const cwd = this.cwd;
     for (const cmd of this.spec.setup) {
       const res = await compute.exec(cmd, { cwd });
       if (res.exitCode !== 0) throw new Error(`setup 실패(exit ${res.exitCode}): ${cmd}\n${res.stderr}`);
@@ -77,7 +82,7 @@ export class CommandHarness implements EvaluableHarness {
       .replaceAll("{{model}}", this.spec.model ?? "")
       .replaceAll("{{run_id}}", runId);
     try {
-      await compute.exec(cmd, { cwd: this.opts.workDir ?? "work", env, timeoutSec: ctx.timeoutSec });
+      await compute.exec(cmd, { cwd: this.cwd, env, timeoutSec: ctx.timeoutSec });
 
       // 계측된 토큰+비용을 합성 llm_call 로 — sumCost/cost 그레이더가 기존 경로로 집계.
       // usd 는 게이트웨이 비용 헤더에서 회수(계량 모델은 실 비용, 구독 모델은 0).

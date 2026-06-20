@@ -591,6 +591,31 @@ app (Chat / Discover / Office / Kanban sidebar, "Ask anything" composer) loaded 
 real OS input → the app does real work → observe → VLM judge. (Loopback SSH keeps it self-contained; a remote host is the
 same flow with a different `host`. The multi-GB image + build cache were removed afterward; disk returned to prior level.)
 
+### os-use full loop as one dispatch — `runAgentJob(AgentJob)`, not a hand-written script ✅
+SLICES 73/75 wired the driver + grading by hand in a live script. This makes the whole os-use desktop task a **single
+`AgentJob`** the control plane dispatches — `runAgentJob(job)` runs it end-to-end (provision → seed → agent drives →
+snapshot → VLM judge → `CaseResult`), no bespoke orchestration. The job is pure data:
+- `harnessSpec`: a **`command`** harness `node /agent.cjs {{task}}` with `env:{DISPLAY:":99"}` — the declarative-CLI-agent
+  abstraction now doubles as the **desktop agent**. The agent under test is just a program in the env; here a baked
+  reference agent (`examples/agents/desktop-ssh-agent.cjs`) drives via CDP-locate + `xdotool` real OS input (BYO agents
+  drop in their own program / image).
+- `evalCase.env`: `os-use` with `setup` = sshd + `/health` stub + Xvfb + hermes; `runAgentJob` already selects
+  `OsUseEnvironment` by `env.kind`.
+- `evalCase.graders`: `[{ id:"judge", config:{ useScreenshot:true, rubric } }]`; with `job.judge` (model/provider) +
+  secret env, `makeGradersFromEnv` builds the VLM `JudgeGrader` over the os-use snapshot (SLICE 74 path).
+
+**Enabling core change:** `CommandHarnessSpec` gained an optional **`workDir`** — the command harness ran in `"work"`
+(→ `/assay/work`), which os-use containers don't create, so a desktop command-agent couldn't even `chdir`. With
+`workDir:"/tmp"` (an existing dir) the agent runs. `CommandHarness` now uses `spec.workDir ?? opts.workDir ?? "work"` for
+both `setup` and the command (+2 tests; default stays `"work"`).
+
+**Verified live** (`scripts/live/os-use-dispatch.mjs`, real Docker + real VLM): one `runAgentJob(job)` →
+`snapshot.kind="os-use"`, `scores=[{ graderId:"judge", pass:true, value:0.98 }]` — the VLM read the final screen as
+"past the SSH connection form and into the main app UI, sidebar (Chat, Discover…) and the 'Ask anything' box visible, no
+SSH error." So the full computer-use loop — provision desktop → drive with real OS input → app does real work (opens a
+genuine SSH tunnel) → observe → VLM judge — is now a **one-call control-plane dispatch**, not a live script. (Image build
+is a documented pre-step in `scripts/live/Dockerfile.hermes-ssh-agent`; removed afterward, disk returned to prior level.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

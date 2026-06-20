@@ -4,10 +4,10 @@ import { describe, expect, it } from "vitest";
 import { CommandHarness } from "./command.js";
 
 function fakeCompute() {
-  const execs: Array<{ cmd: string; env?: Record<string, string> }> = [];
+  const execs: Array<{ cmd: string; env?: Record<string, string>; cwd?: string }> = [];
   const compute: ComputeHandle = {
     async exec(cmd, opts) {
-      execs.push({ cmd, env: opts?.env });
+      execs.push({ cmd, env: opts?.env, cwd: opts?.cwd });
       return { exitCode: 0, stdout: "", stderr: "" };
     },
     async writeFile() {},
@@ -43,6 +43,18 @@ describe("CommandHarness", () => {
     const { compute, execs } = fakeCompute();
     await new CommandHarness(spec({ setup: ["a", "b"] })).install(compute);
     expect(execs.map((e) => e.cmd)).toEqual(["a", "b"]);
+  });
+
+  it("기본 cwd 는 'work', spec.workDir 가 있으면 setup/command 둘 다 그 디렉터리에서 실행(os-use 는 절대경로)", async () => {
+    const def = fakeCompute();
+    await new CommandHarness(spec({ setup: ["s"] })).install(def.compute);
+    await collect(new CommandHarness(spec()).run(def.compute, "t", ctx));
+    expect(def.execs.every((e) => e.cwd === "work")).toBe(true);
+
+    const wd = fakeCompute();
+    await new CommandHarness(spec({ workDir: "/tmp", setup: ["s"] })).install(wd.compute);
+    await collect(new CommandHarness(spec({ workDir: "/tmp" })).run(wd.compute, "t", ctx));
+    expect(wd.execs.every((e) => e.cwd === "/tmp")).toBe(true); // setup(install) + command(run) 모두 /tmp
   });
 
   it("run 은 command 를 템플릿 치환(셸 안전)하고 env(ASSAY_RUN_ID + spec.env)를 주입; trace none → 이벤트 없음", async () => {

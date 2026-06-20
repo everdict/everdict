@@ -72,6 +72,7 @@ export const CommandHarnessSpecSchema = z.object({
   id: z.string(),
   version: z.string(),
   image: z.string().optional(), // 디스패치 이미지(없으면 기본 에이전트 이미지). setup 으로 도구 설치.
+  workDir: z.string().optional(), // setup/command 실행 디렉터리(기본 "work"). os-use 등 work 가 없는 환경은 절대경로(예: "/tmp").
   setup: z.array(z.string()).default([]), // 샌드박스에서 1회 실행(예: "pip install aider-chat==0.74.0")
   command: z.string(), // 예: "aider --yes --message {{task}} --model {{model}} ."
   env: z.record(z.string()).default({}),
