@@ -18,6 +18,7 @@ import {
   InMemoryRuntimeRegistry,
 } from "@assay/registry";
 import { describe, expect, it } from "vitest";
+import { BenchmarkService } from "./benchmark-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
@@ -121,9 +122,11 @@ function server(
   });
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
   const settingsStore = new InMemoryWorkspaceSettingsStore();
+  const benchmarkService = new BenchmarkService({ datasets: datasetRegistry });
   const app = buildServer({
     service: svc,
     scorecardService,
+    benchmarkService,
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
     judgeRegistry,
@@ -450,6 +453,63 @@ async function pollScorecard(
   }
   throw new Error("scorecard did not settle");
 }
+
+describe("API — benchmarks (카탈로그 → 테넌트 데이터셋 인입)", () => {
+  it("viewer: 카탈로그 조회(datasets:read), 알려진 first-party 벤치마크 포함", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({ method: "GET", url: "/benchmarks", headers: { authorization: "Bearer x" } });
+    expect(res.statusCode).toBe(200);
+    const ids = (res.json() as Array<{ id: string }>).map((b) => b.id);
+    expect(ids).toContain("gsm8k");
+    expect(ids).toContain("webvoyager");
+    await app.close();
+  });
+
+  it("member: jsonl 소스 벤치마크(webvoyager)를 text 로 인입 → 테넌트 데이터셋 등록", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const res = await app.inject({
+      method: "POST",
+      url: "/benchmarks/import",
+      headers: h,
+      payload: {
+        benchmark: "webvoyager",
+        version: "1.0.0",
+        text: '{"id":"ex--0","web":"https://example.com","ques":"h1?","answer":"Example Domain","web_name":"Example"}',
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json()).toMatchObject({ id: "webvoyager", version: "1.0.0", cases: 1 });
+    // 등록 확인: 테넌트 데이터셋으로 조회됨.
+    const got = await app.inject({ method: "GET", url: "/datasets/webvoyager/versions/1.0.0", headers: h });
+    expect(got.statusCode).toBe(200);
+    expect((got.json() as { cases: unknown[] }).cases).toHaveLength(1);
+    await app.close();
+  });
+
+  it("viewer 는 인입 불가(403), 미지원 벤치마크는 400", async () => {
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const r403 = await viewer.app.inject({
+      method: "POST",
+      url: "/benchmarks/import",
+      headers: { authorization: "Bearer x" },
+      payload: { benchmark: "gsm8k", version: "1.0.0" },
+    });
+    expect(r403.statusCode).toBe(403);
+    await viewer.app.close();
+
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const r400 = await app.inject({
+      method: "POST",
+      url: "/benchmarks/import",
+      headers: h,
+      payload: { benchmark: "does-not-exist", version: "1.0.0" },
+    });
+    expect(r400.statusCode).toBe(400);
+    await app.close();
+  });
+});
 
 describe("API — scorecards (dataset×harness 배치 평가)", () => {
   it("member: 데이터셋을 하니스로 돌려 스코어카드 집계(succeeded + summary)", async () => {

@@ -316,6 +316,20 @@ pulled by ID (3 real tasks) → tenant dataset; `gaia-benchmark/GAIA` (**gated**
 without `HF_TOKEN`). So a user picks a benchmark from the catalog (or names any HF dataset), and it becomes a
 tenant-owned `Dataset` ready to evaluate — the ingestion side of "bring any/new benchmark", end-to-end.
 
+#### Self-service over API + web ✅
+The catalog + import are exposed so users self-serve (no live script): the control plane has a `BenchmarkService`
+(catalog list + `importBenchmark` → `DatasetRegistry.register(tenant)`; gated benchmarks read `HF_TOKEN` from the
+tenant `SecretStore`) behind **`GET /benchmarks`** (gated `datasets:read`) and **`POST /benchmarks/import`** (gated
+`datasets:write`). The web dashboard adds a **벤치마크 추가** action (`/dashboard/datasets/import`): pick a catalog
+benchmark (with `source`/`gated`/category shown), set version + a row `limit` for HF benchmarks, paste jsonl for
+`source: jsonl` benchmarks (e.g. WebVoyager), import → it lands as a tenant-owned dataset. Versions are immutable
+(re-import of a differing `(id, version)` → 409).
+
+**Verified live** (real API process + real HF): `GET /benchmarks` returns the 5 first-party adapters with
+`source`/`gated`; `POST /benchmarks/import {benchmark: "gsm8k", limit: 3}` pulls real GSM8K rows over HTTP and
+`GET /datasets/gsm8k/versions/1.0.0` then shows the registered tenant dataset (3 cases, task "Janet's ducks…",
+`answer-match` expect `18`). HTTP-level authz/ownership/400-on-unknown is covered by `server.test.ts`.
+
 ### Grading diversity — per-benchmark grader presets ✅
 Ingestion isn't enough: each benchmark **scores differently**, so each adapter carries the right graders, and the
 case mapping is data-driven enough to express them (no per-benchmark code). Three real shapes:

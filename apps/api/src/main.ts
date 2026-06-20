@@ -48,6 +48,7 @@ import {
   loadRuntimeDir,
 } from "@assay/registry";
 import { buildTraceSource } from "@assay/trace";
+import { BenchmarkService } from "./benchmark-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { RunService } from "./run-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
@@ -142,9 +143,12 @@ async function main(): Promise<void> {
     buildTraceSource,
     secretsFor: runtimeSecretsFor,
   });
+  // 벤치마크 카탈로그 인입: first-party 벤치마크를 ID 만으로 당겨 테넌트 데이터셋으로 등록. gated 는 HF_TOKEN 시크릿.
+  const benchmarkService = new BenchmarkService({ datasets: datasetRegistry, secretsFor: runtimeSecretsFor });
   const app = buildServer({
     service,
     scorecardService,
+    benchmarkService,
     registry,
     datasetRegistry,
     judgeRegistry,

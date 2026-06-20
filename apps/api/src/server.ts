@@ -15,6 +15,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
+import type { BenchmarkService } from "./benchmark-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { RunService } from "./run-service.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
@@ -36,6 +37,15 @@ export const RunScorecardBodySchema = z.object({
   judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
 });
 
+// 벤치마크 인입 본문 — 카탈로그 벤치마크를 ID 만으로 당겨 테넌트 데이터셋으로 등록(HF 소스는 네트워크, jsonl 은 text).
+export const BenchmarkImportBodySchema = z.object({
+  benchmark: z.string(), // 카탈로그 id (예: "gsm8k")
+  id: z.string().optional(), // 대상 데이터셋 id (기본 = benchmark id)
+  version: z.string().default("1.0.0"),
+  limit: z.number().int().positive().max(1000).optional(),
+  text: z.string().optional(), // jsonl 소스 벤치마크 업로드 원문
+});
+
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
@@ -48,6 +58,7 @@ export const WorkspaceSettingsBodySchema = z.object({
 export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
+  benchmarkService?: BenchmarkService; // 벤치마크 카탈로그 + 인입 (없으면 해당 라우트 비활성)
   registry?: HarnessRegistry; // 하니스 CRUD (없으면 해당 라우트 비활성)
   datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (없으면 해당 라우트 비활성)
@@ -321,6 +332,39 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
       return sendError(reply, err); // 없으면 NotFoundError → 404
+    }
+  });
+
+  // --- benchmarks (first-party 카탈로그 → 테넌트-소유 데이터셋 인입; 유저 셀프서비스) ---
+  app.get("/benchmarks", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:read");
+      return reply.send(deps.benchmarkService.list());
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 카탈로그 벤치마크를 당겨 이 워크스페이스의 데이터셋으로 등록(HF 소스는 네트워크 인출, gated 면 HF_TOKEN 시크릿).
+  app.post("/benchmarks/import", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = BenchmarkImportBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const rec = await deps.benchmarkService.import({ tenant: principal.workspace, ...parsed.data });
+      return reply.code(201).send(rec);
+    } catch (err) {
+      return sendError(reply, err); // BadRequest(미지원 id)/불변성 409/HF 인출 실패
     }
   });
 

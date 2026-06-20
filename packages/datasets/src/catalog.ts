@@ -183,12 +183,21 @@ export function getBenchmark(id: string): BenchmarkAdapter {
   return a;
 }
 
-// 카탈로그 요약(목록 UI/CLI 용).
-export function listBenchmarks(): Array<{ id: string; category: string; gated: boolean; description: string }> {
+// 카탈로그 요약(목록 UI/CLI 용). source 종류(huggingface=ID 인출 / jsonl=파일 업로드 필요)와 gated 표기.
+export function listBenchmarks(): Array<{
+  id: string;
+  category: string;
+  source: BenchmarkSource["kind"];
+  gated: boolean;
+  defaultVersion: string;
+  description: string;
+}> {
   return Object.values(BENCHMARK_CATALOG).map((a) => ({
     id: a.id,
     category: a.category,
+    source: a.source.kind,
     gated: a.source.kind === "huggingface" && "gated" in a.source && a.source.gated === true,
+    defaultVersion: a.defaultVersion,
     description: a.description,
   }));
 }

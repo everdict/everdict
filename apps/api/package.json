@@ -16,6 +16,7 @@
     "@assay/auth": "workspace:*",
     "@assay/backends": "workspace:*",
     "@assay/core": "workspace:*",
+    "@assay/datasets": "workspace:*",
     "@assay/db": "workspace:*",
     "@assay/graders": "workspace:*",
     "@assay/registry": "workspace:*",

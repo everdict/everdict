@@ -29,9 +29,17 @@ export default async function DatasetsPage() {
         description="이 워크스페이스가 등록한 데이터셋 + 공유(벤치마크). 하니스 무관 — 어느 하니스든 같은 케이스로 평가."
         actions={
           can(principal?.roles, 'datasets:write') ? (
-            <Link href="/dashboard/datasets/new" className={buttonVariants({ size: 'sm' })}>
-              데이터셋 등록
-            </Link>
+            <div className="flex gap-2">
+              <Link
+                href="/dashboard/datasets/import"
+                className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+              >
+                벤치마크 추가
+              </Link>
+              <Link href="/dashboard/datasets/new" className={buttonVariants({ size: 'sm' })}>
+                데이터셋 등록
+              </Link>
+            </div>
           ) : null
         }
       />

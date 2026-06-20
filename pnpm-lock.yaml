@@ -38,6 +38,9 @@ importers:
       '@assay/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@assay/datasets':
+        specifier: workspace:*
+        version: link:../../packages/datasets
       '@assay/db':
         specifier: workspace:*
         version: link:../../packages/db
