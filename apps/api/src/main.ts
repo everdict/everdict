@@ -47,6 +47,7 @@ import {
   PgRuntimeRegistry,
   type RuntimeRegistry,
   loadDatasetDir,
+  loadHarnessDir,
   loadJudgeDir,
   loadRuntimeDir,
 } from "@assay/registry";
@@ -78,6 +79,7 @@ async function main(): Promise<void> {
     settingsStore,
     secretStore,
   } = await makePersistence();
+  await seedSharedHarnesses(registry);
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
   await seedSharedRuntimes(runtimeRegistry);
@@ -224,6 +226,18 @@ async function makePersistence(): Promise<Persistence> {
     settingsStore: new PgWorkspaceSettingsStore(client),
     ...(cipher ? { secretStore: new PgSecretStore(client, cipher) } : {}),
   };
+}
+
+// _shared(first-party) 하니스를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 등록된 에이전트(aider/bu 등)로 평가 가능.
+// ASSAY_HARNESSES_DIR(없으면 cwd/examples/harnesses) 에서 best-effort 로드(불변 → 재기동 시 멱등). 디렉터리 없으면 스킵.
+async function seedSharedHarnesses(registry: HarnessRegistry): Promise<void> {
+  const dir = process.env.ASSAY_HARNESSES_DIR ?? `${process.cwd()}/examples/harnesses`;
+  try {
+    await loadHarnessDir(dir, { into: registry });
+    console.error(`▶ shared harnesses seeded from ${dir}`);
+  } catch {
+    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+  }
 }
 
 // _shared(first-party 벤치마크) 데이터셋을 파일 SSOT 에서 시드 — 새 테넌트도 즉시 baseline 비교 가능.

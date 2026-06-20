@@ -511,6 +511,22 @@ browser-less stopgap.
 `repo` env would have thrown at seed); and `runCase(PromptEnvironment + a QA harness + answer-match)` grades the
 answer (`pass=true`) with no browser/repo stage. So non-browser QA is a first-class environment, not a workaround.
 
+### First-party harness catalog seeded into `_shared` ✅
+The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
+and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
+{{run_id}}` command + trace none/otel/mlflow) — no code adapter. But the first-party presets in `examples/harnesses`
+(aider, aider-litellm, the `bu` service topology) were **not seeded** at startup (unlike datasets/judges/runtimes),
+so they weren't available to tenants out of the box. `main.ts` now calls `seedSharedHarnesses` (`loadHarnessDir` from
+`ASSAY_HARNESSES_DIR`, default `examples/harnesses`) alongside the other seeders, so first-party harnesses load into
+`_shared` and every tenant can evaluate with them immediately (or register their own, which coexist).
+
+**Verified live** (real API): startup logs `▶ shared harnesses seeded from …/examples/harnesses`, and
+`GET /harnesses` for a fresh tenant returns `aider(_shared)`, `aider-litellm(_shared)`, `bu(_shared)`; after the
+tenant registers `my-agent`, the list is `[aider(_shared), aider-litellm(_shared), bu(_shared), my-agent(acme)]` —
+first-party + tenant harnesses side by side. A guard test (`harness-seed.test.ts`) parses every
+`examples/harnesses/*.json` against `HarnessSpecSchema` (both `command` and `service` kinds) so a malformed preset
+can't regress the catalog. (Adding a new first-party agent is now just dropping a `command` spec JSON in the dir.)
+
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner
 (which evaluates registered `JudgeSpec` entities post-hoc). So the per-case grader path now builds the `Judge` from
