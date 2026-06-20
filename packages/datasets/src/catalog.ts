@@ -1,8 +1,8 @@
-import type { Dataset } from "@assay/core";
+import { type Dataset, DatasetSchema, type GraderSpec } from "@assay/core";
 // 벤치마크 어댑터 + 카탈로그: "새 벤치마크 추가 = 코드가 아니라 어댑터(서술자) 한 개".
 // 어댑터 = {소스(어디서 당기나), 매핑(필드→EvalCase), 채점(graders), 선택적 행 정규화}. first-party 어댑터는
 // 카탈로그로 배포(_shared 시드용), 유저는 자기 어댑터를 추가해 사설/신규 벤치마크를 워크스페이스에 등록.
-import { type CaseMapping, type DatasetMeta, WEBVOYAGER_MAPPING, rowsToDataset } from "./mapping.js";
+import { type CaseMapping, type DatasetMeta, WEBVOYAGER_MAPPING, rowToCase, rowsToDataset } from "./mapping.js";
 import { type FetchLike, fetchHfRows } from "./sources.js";
 
 // 벤치마크가 사는 곳. huggingface = HF Hub(대부분의 신규 벤치마크), jsonl = 인라인/로컬 텍스트(호출자 제공).
@@ -19,16 +19,31 @@ export interface BenchmarkAdapter {
   mapping: CaseMapping;
   // 매핑 전 행 정규화(예: gsm8k 의 "…#### 18" 에서 최종답만 추출). 카탈로그는 코드 정의라 함수 사용 가능.
   rowTransform?: (row: Record<string, unknown>) => Record<string, unknown>;
+  // 행별 구조화 grader(매핑의 필드-기반으로 표현 못 하는 것 — 예: SWE-bench 의 swe-bench grader{test_patch,
+  // FAIL_TO_PASS, PASS_TO_PASS}). 반환값을 케이스 graders 에 덧붙인다.
+  graderBuilder?: (row: Record<string, unknown>) => GraderSpec[];
 }
 
-// 행 → Dataset (순수, 네트워크 없음). rowTransform 적용 후 매핑 → 검증된 Dataset. 테스트 가능 핵심.
+// 행 → Dataset (순수, 네트워크 없음). rowTransform 적용 후 매핑(+행별 graderBuilder) → 검증된 Dataset.
 export function adapterToDataset(
   adapter: BenchmarkAdapter,
   rows: Array<Record<string, unknown>>,
   meta: DatasetMeta,
 ): Dataset {
   const mapped = adapter.rowTransform ? rows.map(adapter.rowTransform) : rows;
-  return rowsToDataset(mapped, meta, adapter.mapping);
+  if (!adapter.graderBuilder) return rowsToDataset(mapped, meta, adapter.mapping);
+  const build = adapter.graderBuilder;
+  const cases = mapped.map((r, i) => {
+    const c = rowToCase(r, i, meta, adapter.mapping);
+    return { ...c, graders: [...c.graders, ...build(r)] };
+  });
+  return DatasetSchema.parse({
+    id: meta.id,
+    version: meta.version,
+    description: meta.description,
+    cases,
+    tags: meta.tags ?? [],
+  });
 }
 
 export interface ImportBenchmarkOpts {
@@ -78,21 +93,20 @@ const WEBVOYAGER_RUBRIC =
   "Judge whether the agent successfully completed the web browsing task and reported a correct, " +
   "well-supported final answer. Pass only if the task goal was actually achieved by the actions in the trace.";
 
-// SWE-bench 정규화: repo→git URL, FAIL_TO_PASS(JSON 배열) → 타깃 테스트만 도는 pytest 명령(tests-pass cmd).
+// SWE-bench 정규화: repo→git URL(repo env). test_patch/FAIL_TO_PASS/PASS_TO_PASS 는 graderBuilder 가 swe-bench grader 로.
 function sweBenchRow(row: Record<string, unknown>): Record<string, unknown> {
   const repo = String(row.repo ?? "");
-  let tests: unknown = [];
+  return { ...row, _git: repo ? `https://github.com/${repo}.git` : "" };
+}
+
+// FAIL_TO_PASS/PASS_TO_PASS 는 JSON 배열 문자열 → 문자열 배열.
+function jsonStrArray(v: unknown): string[] {
   try {
-    tests = JSON.parse(String(row.FAIL_TO_PASS ?? "[]"));
+    const a = JSON.parse(String(v ?? "[]"));
+    return Array.isArray(a) ? a.map(String) : [];
   } catch {
-    tests = [];
+    return [];
   }
-  const ids = Array.isArray(tests) ? tests.map((t) => JSON.stringify(String(t))) : [];
-  return {
-    ...row,
-    _git: repo ? `https://github.com/${repo}.git` : "",
-    _testcmd: ids.length ? `python -m pytest -q ${ids.join(" ")}` : "true",
-  };
 }
 
 // first-party 벤치마크 카탈로그. 새 벤치마크는 여기에 어댑터 한 개를 추가하면 됨(소스+매핑+채점).
@@ -169,10 +183,20 @@ export const BENCHMARK_CATALOG = {
       taskField: "problem_statement",
       gitField: "_git",
       refField: "base_commit",
-      testCmdField: "_testcmd",
       tagFields: ["repo", "version"],
     },
     rowTransform: sweBenchRow,
+    // 채점: gold test_patch 적용 후 FAIL_TO_PASS(통과)+PASS_TO_PASS(유지) → resolved (공식 SWE-bench resolution).
+    graderBuilder: (row) => [
+      {
+        id: "swe-bench",
+        config: {
+          testPatch: String(row.test_patch ?? ""),
+          failToPass: jsonStrArray(row.FAIL_TO_PASS),
+          passToPass: jsonStrArray(row.PASS_TO_PASS),
+        },
+      },
+    ],
   },
 } satisfies Record<string, BenchmarkAdapter>;
 

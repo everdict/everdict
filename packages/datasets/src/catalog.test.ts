@@ -80,7 +80,7 @@ describe("BenchmarkAdapter 카탈로그", () => {
     expect(wv.cases[0]?.graders.map((g) => g.id)).toEqual(["answer-match", "steps", "judge"]);
     expect(wv.cases[0]?.graders.find((g) => g.id === "judge")?.config?.rubric).toContain("task goal");
 
-    // SWE-bench: repo env(git+base_commit) + tests-pass(타깃 테스트만 도는 pytest).
+    // SWE-bench: repo env(git+base_commit) + swe-bench grader(test_patch + FAIL_TO_PASS/PASS_TO_PASS, graderBuilder).
     const swe = adapterToDataset(
       BENCHMARK_CATALOG["swe-bench-lite"],
       [
@@ -89,7 +89,9 @@ describe("BenchmarkAdapter 카탈로그", () => {
           repo: "astropy/astropy",
           base_commit: "d16bfe0",
           problem_statement: "separability_matrix bug",
+          test_patch: "diff --git a/t.py b/t.py\n",
           FAIL_TO_PASS: '["astropy/modeling/tests/test_separable.py::test_x"]',
+          PASS_TO_PASS: '["astropy/modeling/tests/test_separable.py::test_y"]',
           version: "4.3",
         },
       ],
@@ -98,9 +100,10 @@ describe("BenchmarkAdapter 카탈로그", () => {
     const c = swe.cases[0];
     expect(c?.id).toBe("astropy__astropy-12907");
     expect(c?.env).toEqual({ kind: "repo", source: { git: "https://github.com/astropy/astropy.git", ref: "d16bfe0" } });
-    const tp = c?.graders.find((g) => g.id === "tests-pass");
-    expect(tp?.config?.cmd).toContain("pytest");
-    expect(tp?.config?.cmd).toContain("test_separable.py::test_x");
+    const sb = c?.graders.find((g) => g.id === "swe-bench");
+    expect(sb?.config?.testPatch).toContain("diff --git");
+    expect(sb?.config?.failToPass).toEqual(["astropy/modeling/tests/test_separable.py::test_x"]);
+    expect(sb?.config?.passToPass).toEqual(["astropy/modeling/tests/test_separable.py::test_y"]);
     expect(c?.tags).toEqual(["astropy/astropy", "4.3"]);
   });
 

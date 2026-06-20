@@ -341,17 +341,30 @@ case mapping is data-driven enough to express them (no per-benchmark code). Thre
   `judge` spec into a `JudgeGrader` with an **injected `Judge`** (it stays out of the dependency-free default path —
   a `judge` spec with no injected judge throws a clear error). The judge reuses the existing
   `modelJudge` / `openaiComplete` transport (any OpenAI-compatible endpoint, e.g. LiteLLM).
-- **SWE-bench Lite → `tests-pass` + repo env**: a coding benchmark, so `rowToCase` builds a **`repo` env**
-  (`{git, ref}` from `repo` + `base_commit`) and a per-row **`tests-pass`** command (the `FAIL_TO_PASS` tests as a
-  targeted `pytest` invocation). `CaseMapping` gained `gitField`/`refField`/`testCmdField` to express this purely as
-  data.
+- **SWE-bench Lite → `swe-bench` grader + repo env**: a coding benchmark, so `rowToCase` builds a **`repo` env**
+  (`{git, ref}` from `repo` + `base_commit`), and the adapter's `graderBuilder` emits a **`swe-bench`** grader
+  carrying the per-instance `{testPatch, failToPass, passToPass}` (since these are structured per-row, not a field
+  mapping). `SweBenchGrader` implements the official **resolution** in the env: apply the gold `test_patch`
+  (`git apply`), run `FAIL_TO_PASS + PASS_TO_PASS` (pytest), and report `resolved` iff all pass. (`CaseMapping`
+  gained `gitField`/`refField`; `BenchmarkAdapter` gained `graderBuilder` for structured per-row graders.)
 
 **Verified live** (`scripts/live/judge-grading.mjs`, real LiteLLM `gpt-5.4-mini` + real HF): WebVoyager-mini graded
 by the **real model judge** — correct trajectories pass (score 1.00 / 0.99), an intentionally-wrong one is caught
 (`pass=false`, score 0.02, reason "did not provide the required phrase… said it was unable"); GAIA preset yields
 `answer-match{mode:exact}`; SWE-bench Lite pulled from HF (`astropy__astropy-12907`) yields `env: repo{git, ref}` +
-`tests-pass{cmd: pytest …FAIL_TO_PASS}`. So grading matches the benchmark, and a real LLM judge discriminates good
-vs bad runs — the scoring side of benchmark diversity.
+a `swe-bench` grader carrying the real `test_patch` (1415 B) + `FAIL_TO_PASS` (2) / `PASS_TO_PASS` (13). So grading
+matches the benchmark, and a real LLM judge discriminates good vs bad runs — the scoring side of benchmark diversity.
+
+#### SWE-bench resolution — real test execution ✅
+`SweBenchGrader` runs the official resolution **for real in the env** (it gets a `ComputeHandle` from `runCase`):
+`git apply` the gold `test_patch`, run `FAIL_TO_PASS + PASS_TO_PASS` with pytest, `resolved` iff all pass. **Verified
+live** (`scripts/live/swe-bench-grade.mjs`, real `git apply` + real pytest on a self-contained instance — a `calc.add`
+bug fixed by a gold patch, `test_add` as FAIL_TO_PASS, `test_mul` as PASS_TO_PASS): with no fix the grader applies the
+test patch and pytest reports `test_add` failing (`assert -1 == 5`) → `resolved=false`; after the gold patch is
+applied (the agent's prediction) the same grader yields `2 passed` → `resolved=true`. The same `swe-bench` grader spec
+is populated from a real SWE-bench_Lite row, so the grading mechanism is real and benchmark-faithful. (The remaining
+piece for arbitrary instances at scale is **per-repo dependency provisioning** — the official SWE-bench prebuilt
+per-instance Docker images plugged as the env / `env.setup` — not the grader, which is done.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner
@@ -398,9 +411,9 @@ and `POST /scorecards`.
 with a workspace default judge set, `RunService.submit` for that tenant auto-fills `job.judge` and the run is graded
 by the **real model judge** (`pass=true`, 1.00, "ran `echo hello > out.txt`…"); a tenant with no default gets a skip
 score and the run still succeeds. So a user only puts a `judge` grader on the case (no model), sets the model once on
-the workspace, and every run is model-judged. (Open follow-ups: SWE-bench harness setup [deps/conda env + patch
-apply] for real test execution; GitHub-sourced harness-coupled benchmarks; a `prompt` env kind for non-browser QA;
-API/web catalog + benchmark-import UX.)
+the workspace, and every run is model-judged. (Open follow-ups: per-repo dependency provisioning for SWE-bench at
+scale [official prebuilt per-instance Docker images as the env]; GitHub-sourced harness-coupled benchmarks; a
+`prompt` env kind for non-browser QA.)
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we
