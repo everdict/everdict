@@ -1,5 +1,5 @@
-import { type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@assay/backends";
-import type { AgentJob, CaseResult } from "@assay/core";
+import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@assay/backends";
+import type { AgentJob, CaseResult, RuntimeSpec } from "@assay/core";
 import type { RuntimeRegistry } from "@assay/registry";
 
 export interface RuntimeDispatcherDeps {
@@ -7,6 +7,9 @@ export interface RuntimeDispatcherDeps {
   backends: BackendRegistry; // Scheduler 의 레지스트리 — 빌드한 테넌트 백엔드를 여기 등록
   runtimes: RuntimeRegistry; // 테넌트 등록 Runtime 해석
   secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries → 백엔드 secretEnv
+  // RuntimeSpec → Backend 빌더(기본 buildRuntimeBackend = local/docker/nomad/k8s). topology 처럼 @assay/backends 가
+  // 의존할 수 없는 백엔드(순환)는 apps/api 가 이걸 주입해 처리한다(buildRuntimeBackend 로 폴백).
+  buildBackend?: (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) => Backend;
 }
 
 // placement.target 이 "테넌트가 등록한 Runtime" 이면: 그 spec + 테넌트 시크릿으로 Backend 를 빌드해 Scheduler
@@ -26,7 +29,8 @@ export class RuntimeDispatcher implements Dispatcher {
         const name = `rt:${tenant}:${spec.id}@${spec.version}`; // 테넌트·버전별 1 백엔드 인스턴스(재사용)
         if (!this.deps.backends.has(name)) {
           const secretEnv = await this.deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
-          this.deps.backends.register(name, buildRuntimeBackend(spec, { secretEnv }));
+          const build = this.deps.buildBackend ?? buildRuntimeBackend;
+          this.deps.backends.register(name, build(spec, { secretEnv }));
         }
         routed = { ...job, evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } } };
       }

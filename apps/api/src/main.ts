@@ -7,6 +7,7 @@ import {
   LocalBackend,
   NomadBackend,
   Scheduler,
+  buildRuntimeBackend,
   inMemoryBudget,
 } from "@assay/backends";
 import {
@@ -59,6 +60,7 @@ import { RunService } from "./run-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
+import { buildTopologyBackend } from "./topology-backend.js";
 
 // 멀티테넌트 컨트롤플레인 서버. tenant 는 Bearer API 키에서 파생(없으면 dev 헤더 폴백).
 // DATABASE_URL 이 있으면 Postgres(스토어/키/레지스트리), 아니면 in-memory. NOMAD_ADDR 면 Nomad 백엔드.
@@ -113,6 +115,9 @@ async function main(): Promise<void> {
     backends,
     runtimes: runtimeRegistry,
     secretsFor: runtimeSecretsFor,
+    // topology 런타임 → ServiceTopologyBackend(서비스 토폴로지 하니스). 나머지는 buildRuntimeBackend(local/docker/nomad/k8s).
+    buildBackend: (spec, opts) =>
+      spec.kind === "topology" ? buildTopologyBackend(spec, { harnesses: registry }) : buildRuntimeBackend(spec, opts),
   });
 
   // 아티팩트 스토어(env 설정 시): os-use 스크린샷을 S3/MinIO 로 오프로드 → 결과 레코드엔 presigned URL 만(base64 인라인 안 함).

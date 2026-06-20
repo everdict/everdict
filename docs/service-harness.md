@@ -761,6 +761,28 @@ So two real computer-use agents are scored on the same desktop benchmark and the
 which capability the better agent gained (Settings navigation) with no regressions — the fair-comparison payoff of the
 whole pipeline, end-to-end over the HTTP control plane. (Image with both agents removed afterward; disk to prior level.)
 
+### Service-topology backend wired into control-plane dispatch ✅
+Phase 1 of this design (contracts, Nomad **and** K8s topology builders, `EnvironmentManager`, trace mappers, and
+`ServiceTopologyBackend` over a mock `TopologyRuntime` → `CaseResult`) is built and unit-tested in `@assay/topology` /
+`@assay/trace` (57 + trace tests). The one deferred piece was the **wire-in**: making a `service` harness (e.g. `bu`,
+browser-use) reachable from `POST /runs` like the other backends. Done:
+- core: a `topology` **`RuntimeSpec`** kind (`orchestrator: nomad|k8s` + cluster connection + a `traceSource` for the
+  OTel/MLflow pull; cluster tokens stay `authSecret` names, not values).
+- `@assay/backends` can't construct `ServiceTopologyBackend` (it would cycle — `@assay/topology` depends on `backends`
+  for the `Backend` interface), so `buildRuntimeBackend` now explicitly throws for `topology`, and the wiring lives in
+  **apps/api `buildTopologyBackend`** (depends on both): it builds a `NomadTopologyRuntime`/`K8sTopologyRuntime` +
+  `buildTraceSource` + a `ServiceTopologyBackend` whose `specFor` resolves the service harness from the registry (rejects
+  non-`service` harnesses). `RuntimeDispatcher` gained an injectable `buildBackend` (default `buildRuntimeBackend`); the
+  app passes one that routes `topology` runtimes to `buildTopologyBackend` and everything else to `buildRuntimeBackend`.
+  So a tenant registers a `topology` runtime, points a `service` harness's case `placement.target` at it, and the same
+  Scheduler/fairness/budget path runs it — identical routing to nomad/k8s.
+
+**Verified deterministically** (+4 tests, no cluster — the live deploy/drive/trace-pull is Phase 2, needing the tenant's
+Nomad/K8s + the browser-use images, exactly as the nomad/k8s backends are also not run here): `RuntimeSpecSchema` accepts
+a `topology` runtime (so `POST /runtimes` validates it); `buildTopologyBackend` yields a backend `id` `service:nomad` /
+`service:k8s`; and dispatching a non-`service` harness through it fails fast with `BAD_REQUEST` from `specFor` *before* any
+cluster call. So the service-topology track is now dispatchable through the product API, not just a library.
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

@@ -56,6 +56,9 @@ importers:
       '@assay/suite':
         specifier: workspace:*
         version: link:../../packages/suite
+      '@assay/topology':
+        specifier: workspace:*
+        version: link:../../packages/topology
       '@assay/trace':
         specifier: workspace:*
         version: link:../../packages/trace

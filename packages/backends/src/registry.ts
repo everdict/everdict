@@ -131,7 +131,13 @@ export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Recor
   if (spec.kind === "local") return new LocalBackend();
   if (spec.kind === "docker") return new DockerBackend(spec.image ? { image: spec.image } : {});
   if (spec.kind === "k8s") return new K8sBackend(k8sRuntimeOptions(spec, opts.secretEnv));
-  return new NomadBackend(nomadRuntimeOptions(spec, opts.secretEnv));
+  if (spec.kind === "nomad") return new NomadBackend(nomadRuntimeOptions(spec, opts.secretEnv));
+  // topology 는 @assay/topology 의 ServiceTopologyBackend 가 필요(순환 의존 불가) → apps/api 의 buildBackend 가 처리한다.
+  throw new BadRequestError(
+    "BAD_REQUEST",
+    { kind: spec.kind },
+    `buildRuntimeBackend 는 '${spec.kind}' 를 직접 빌드하지 않습니다(topology 는 apps/api buildBackend 경유).`,
+  );
 }
 
 export function buildRegistry(

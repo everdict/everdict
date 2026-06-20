@@ -47,10 +47,27 @@ export const K8sRuntimeSpecSchema = z.object({
   authSecret: z.string().optional(),
 });
 
+// topology — 멀티서비스 토폴로지 하니스(kind:"service", 예: browser-use)를 위한 런타임. orchestrator(nomad|k8s) 위에
+// warm 서비스 풀 + per-case 브라우저로 구동하고 OTel/MLflow 에서 트레이스를 당겨 채점한다(@assay/topology
+// ServiceTopologyBackend). 토폴로지 모양(services/dependencies/target)은 하니스 spec 이, 여기선 "어느 클러스터 + 어느
+// trace source" 만 정의. 클러스터 토큰/kubeconfig 는 SecretStore(authSecret) — 여긴 비-비밀 연결정보만.
+export const TopologyRuntimeSpecSchema = z.object({
+  kind: z.literal("topology"),
+  ...base,
+  orchestrator: z.enum(["nomad", "k8s"]),
+  addr: z.string().url().optional(), // nomad HTTP endpoint
+  context: z.string().optional(), // k8s kubeconfig context
+  namespace: z.string().optional(),
+  browserImage: z.string().optional(), // per-case 브라우저 이미지(없으면 런타임 기본)
+  traceSource: z.object({ kind: z.enum(["otel", "mlflow"]), endpoint: z.string() }), // 트레이스 pull 소스
+  authSecret: z.string().optional(), // 클러스터 API 토큰의 SecretStore 키 이름(값 아님)
+});
+
 export const RuntimeSpecSchema = z.discriminatedUnion("kind", [
   LocalRuntimeSpecSchema,
   DockerRuntimeSpecSchema,
   NomadRuntimeSpecSchema,
   K8sRuntimeSpecSchema,
+  TopologyRuntimeSpecSchema,
 ]);
 export type RuntimeSpec = z.infer<typeof RuntimeSpecSchema>;
