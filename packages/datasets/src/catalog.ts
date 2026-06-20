@@ -238,7 +238,15 @@ export const BENCHMARK_CATALOG = {
       image: "assay-osworld:demo", // OSWorld 데스크탑 이미지(앱 동봉) — 유저가 빌드/등록
       tagFields: ["snapshot", "source"],
     },
-    graderBuilder: (row) => [{ id: "judge", config: { useScreenshot: true, rubric: osworldRubric(row) } }],
+    // 채점: VLM judge(스크린샷) + 선택적 상태검사. row.verify(셸 명령, OSWorld evaluator 의 이식형 대응)가 있으면
+    // command grader(종료코드=pass)로 실제 시스템 상태를 검증한다 — 픽셀이 아니라 파일/상태로(이중 채점). cwd 는 os-use
+    // 가 work 디렉터리를 안 만드므로 절대경로 /tmp.
+    graderBuilder: (row) => {
+      const graders: GraderSpec[] = [{ id: "judge", config: { useScreenshot: true, rubric: osworldRubric(row) } }];
+      const verify = String(row.verify ?? "").trim();
+      if (verify) graders.push({ id: "command", config: { cmd: verify, cwd: "/tmp", metric: "state" } });
+      return graders;
+    },
   },
 } satisfies Record<string, BenchmarkAdapter>;
 

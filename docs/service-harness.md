@@ -800,6 +800,27 @@ the exact text 'Hello from OSWorld'"). The decoded screenshot shows a real Mouse
 OSWorld-category task runs on a real GUI application and is auto-graded — import → dispatch → drive (real OS input) →
 observe → judge — entirely through the product API. (Image removed afterward; judge key from env, never committed.)
 
+### OSWorld multi-step task + state-based grading — the evaluator pattern ✅
+The first OSWorld run was single-step (open + type). This adds a **multi-step GUI task** and, more importantly,
+**state-based grading** — OSWorld's real evaluators check system state, not pixels. The `osworld` adapter's
+`graderBuilder` now maps a row's optional **`verify`** (a shell command — the portable stand-in for OSWorld's Python
+evaluator) to a **`command` grader** (exit code = pass, `cwd:/tmp`) *alongside* the VLM judge, so a task is graded by
+real file/system state **and** the screenshot. The reference agent gained a save flow: type the content, then if the
+instruction names a file it does **Ctrl+S → the GTK save dialog → types the absolute path → Enter** (real multi-step OS
+input).
+
+**Verified live, dual-graded** (real Docker + real VLM): task `Create a text file note.txt in the home directory
+containing 'OSWorld save test'` (with `verify: test -f /root/note.txt && grep -q 'OSWorld save test' /root/note.txt`) →
+imported → `POST /runs` → the agent typed the text and drove the Save-As dialog. Result:
+- **`command`/state grader → pass `1.0`** — the file genuinely exists on disk with the right content (the authoritative,
+  OSWorld-style check);
+- **VLM judge → `0.92` but `pass:false`** — it correctly *read* the screen ("Mousepad editing `/root/note.txt` with the
+  text `OSWorld save test`") but was strict that an on-disk save isn't fully confirmable from pixels.
+
+The decoded screenshot shows the title bar `/root/note.txt - Mousepad` (no unsaved-`*`) with the text — the multi-step
+save worked. This is exactly why OSWorld grades on **state**: the state grader is decisive (task done), the VLM is a
+complementary signal, and assay runs **both** over the same os-use result. (Image removed afterward; key from env.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
