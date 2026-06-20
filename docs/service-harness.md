@@ -743,6 +743,24 @@ bytes really live in object storage. The web `scorecards/:id` page server-render
 small pointer and the screenshot lives in object storage with a presigned URL: the production-correct shape, and a one-line
 config swap from the dev base64 path.
 
+### Harness A/B on os-use — a second desktop agent, scored by `diffScorecards` ✅
+A scorecard's reason for existing is **fair harness comparison** — and that needs *two* harnesses. This adds a second,
+more-capable reference desktop agent and shows the diff. `desktop-ssh-agent` (agent #1) only connects via SSH;
+`desktop-ssh-settings-agent` (agent #2, `examples/agents/desktop-ssh-settings-agent.cjs`) is **task-aware** — it connects,
+then if the task asks for Settings it dismisses the modal and navigates to the Settings page (real OS clicks). Both are
+baked into the desktop image (`/agent.cjs`, `/agent-settings.cjs`); each is a `command` `HarnessSpec`. No diff code was
+needed — `diffScorecards` / `GET /scorecards/diff` already existed; this is the second agent that makes it meaningful.
+
+**Verified live, full A/B** (real Docker + real VLM, both scorecards over `hermes-desktop-ssh` via `POST /scorecards`):
+- agent #1 → `judge` passRate **0.5**: `hermes-ssh-connect` pass `0.98`, `hermes-open-settings` **fail `0.03`** (never navigates);
+- agent #2 → `judge` passRate **1.0**: `hermes-ssh-connect` pass `0.98`, `hermes-open-settings` **pass `1.0`** (reaches Settings);
+- `GET /scorecards/diff?baseline=<#1>&candidate=<#2>` → `judge` mean `0.505 → 0.99` (**Δ +0.485**), **improvements
+  (fixed): `hermes-open-settings/judge 0.03→1`**, **regressions: none**.
+
+So two real computer-use agents are scored on the same desktop benchmark and the platform reports, per case, exactly
+which capability the better agent gained (Settings navigation) with no regressions — the fair-comparison payoff of the
+whole pipeline, end-to-end over the HTTP control plane. (Image with both agents removed afterward; disk to prior level.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
