@@ -59,10 +59,27 @@ try {
   });
   console.log("POST /runs (front-door submit) →", drive.status);
 
-  ok = health.status === 200 && drive.status === 200 && deploys.includes("topo-demo-agent") && ready.startsWith("1");
+  // === per-case 브라우저(실 headless Chromium) provision + CDP 연결 + 스냅샷 ===
+  console.log("\n=== provisionBrowserEnv (real chromedp/headless-shell on kind) ===");
+  const runId = "topo-demo-run1";
+  const browser = await rt.provisionBrowserEnv(spec, runId);
+  console.log("browser CDP url:", browser.cdpUrl); // 실 Chromium 의 webSocketDebuggerUrl
+  const browserDeploy = k(["get", "deploy", "-n", NS, "-o", "name"]).trim();
+  console.log("k8s deployments now:", browserDeploy.replace(/\n/g, " "));
+  const snap = await browser.snapshot(); // CDP /json/list → url/dom
+  console.log("snapshot.kind:", snap.kind, "url:", snap.url, "dom(targets):", String(snap.dom).slice(0, 80));
+  const cdpLive = browser.cdpUrl.startsWith("ws://") && snap.kind === "browser";
+  await browser.dispose(); // per-case 브라우저만 제거(warm 유지)
+
+  ok =
+    health.status === 200 &&
+    drive.status === 200 &&
+    deploys.includes("topo-demo-agent") &&
+    ready.startsWith("1") &&
+    cdpLive;
   console.log(
     ok
-      ? "\n✅ SLICE 88: service-topology 런타임이 실제 kind 클러스터에서 warm 토폴로지를 배포(Deployment+Service)·rollout 대기·port-forward 로 엔드포인트 발견하고 front-door 로 per-run 페이로드를 전송. 오케스트레이터-비종속 런타임(K8s)의 라이브 구동 검증."
+      ? "\n✅ SLICE 89: service-topology 풀 per-case 경로를 실 kind 에서 — warm 토폴로지(Deployment+Service) 배포·발견·front-door 구동 + per-case 브라우저(실 headless Chromium 파드)를 띄워 CDP(webSocketDebuggerUrl) 연결·스냅샷(/json/list)·정리. 오케스트레이터-비종속 런타임의 라이브 구동(에이전트-server/extension drive 만 제외 = 실 browser-use 이미지 필요)."
       : "\n⚠️ 기대와 불일치",
   );
 } catch (e) {

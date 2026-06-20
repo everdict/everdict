@@ -853,9 +853,18 @@ pod (`topo-demo-agent` ready **1/1**, confirmed by `kubectl get deploy`) → `ku
 (`http://127.0.0.1:<port>`). Then the per-run **front-door drive**: `GET /health` → `200`, `POST /runs` with the
 `{task, thread_id, stream_channel}` wiring → `200`. `teardown(spec)` stopped the forwards and deleted the namespace (clean,
 exit 0). So the orchestrator-agnostic runtime genuinely deploys a warm topology, discovers it, and drives it on a real
-cluster — not a mock. (The per-case browser CDP + the full browser-use agent-server/extension loop and trace pull are the
-remaining Phase-2 rungs — they need the real browser-use images, which the unit-tested `provisionBrowserEnv`/builders
-already target. Stub image removed from the host afterward; namespace deleted.)
+cluster — not a mock.
+
+**Per-case browser, also live** (same script, extended): after the warm topology + drive, `provisionBrowserEnv(spec, runId)`
+launched a **real headless Chromium** pod (`chromedp/headless-shell`, kind-loaded → `assay-browser-<runId>` Deployment
+alongside the warm `topo-demo-agent`), port-forwarded `:9222`, and `connectBrowser` got a real CDP **`webSocketDebuggerUrl`**
+(`ws://127.0.0.1:<port>/devtools/browser/…`). `browser.snapshot()` hit CDP `/json/list` → a real `browser` snapshot
+(`url:"about:blank"`, `dom` = the live target list); `browser.dispose()` removed the per-case browser (warm topology
+kept), then `teardown` cleaned the namespace. So the full per-case path — warm services → per-case real-browser CDP →
+snapshot → cleanup — runs on a real cluster. The only piece left is the **agent-server actually driving** the browser via
+the extension (the harness under test) + its OTel/MLflow trace pull, which need the real browser-use images (the
+unit-tested `provisionBrowserEnv`/builders already target them). (Stub + browser images stay in the kind node's
+containerd; host stub image removed; namespace deleted.)
 
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
