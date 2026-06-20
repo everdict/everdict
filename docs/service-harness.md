@@ -866,6 +866,21 @@ the extension (the harness under test) + its OTel/MLflow trace pull, which need 
 unit-tested `provisionBrowserEnv`/builders already target them). (Stub + browser images stay in the kind node's
 containerd; host stub image removed; namespace deleted.)
 
+### Trace pull verified against a real backend — OTel/Jaeger ✅
+The trace mappers (`OtelTraceSource`/`MlflowTraceSource` → `TraceEvent[]`, used by scorecard pull-ingest
+`POST /scorecards/ingest/pull` and the `command` harness's trace extraction) were only mock-fetch unit-tested. This runs
+`OtelTraceSource` against a **real Jaeger** (`assay-jaeger`: OTLP-in `:4318`, query `:16686`).
+
+**Verified live** (`scripts/live/trace-otel.mjs`): a real OTLP span (OTel GenAI conventions —
+`gen_ai.request.model=gpt-5.4-mini`, `gen_ai.usage.input_tokens=100`, `output_tokens=42`, `cost=0.0012`) was POSTed to
+Jaeger's OTLP endpoint; then `OtelTraceSource({endpoint: "http://…:16686"}).fetch(traceId)` pulled it via Jaeger's query
+API (`/api/traces/{id}`) and normalized it to
+`[{ kind:"llm_call", model:"gpt-5.4-mini", cost:{ inputTokens:100, outputTokens:42, usd:0.0012 }, latencyMs:1500 }]`. So
+the pull path (emit → ingest → fetch → normalize) works against a real tracing backend, not a mock — the same path that
+grades a black-box harness's trace, with cost/tokens flowing into the cost/budget graders. (`MlflowTraceSource` is the
+same `spansToTraceEvents` mapping over MLflow 3.x's trace REST — unit-tested; a live check needs a logged MLflow trace +
+that server's auth, the running `infra-mlflow` being the target.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
