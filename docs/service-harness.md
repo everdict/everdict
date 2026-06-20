@@ -337,10 +337,26 @@ by the **real model judge** — correct trajectories pass (score 1.00 / 0.99), a
 (`pass=false`, score 0.02, reason "did not provide the required phrase… said it was unable"); GAIA preset yields
 `answer-match{mode:exact}`; SWE-bench Lite pulled from HF (`astropy__astropy-12907`) yields `env: repo{git, ref}` +
 `tests-pass{cmd: pytest …FAIL_TO_PASS}`. So grading matches the benchmark, and a real LLM judge discriminates good
-vs bad runs — the scoring side of benchmark diversity. (Open follow-ups: thread the injected `Judge` through the full
-dispatch path [runner/service-backend] so judge presets run end-to-end in a normal eval; SWE-bench harness setup
-[deps/conda env + patch apply] for real test execution; GitHub-sourced harness-coupled benchmarks; a `prompt` env
-kind for non-browser QA.)
+vs bad runs — the scoring side of benchmark diversity.
+
+#### Judge threaded through the normal dispatch path ✅
+A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner
+(which evaluates registered `JudgeSpec` entities post-hoc). So the per-case grader path now builds the `Judge` from
+the agent's environment: `judgeFromEnv(env)` (`ASSAY_JUDGE_MODEL` + provider key — OpenAI/LiteLLM or Anthropic — the
+control plane injects these from tenant secrets into the alloc, same channel as harness model keys), and
+`makeGradersFromEnv(specs, env)` is used by **both** dispatch paths (`runAgentJob` and the topology
+`ServiceTopologyBackend`). When the judge model is configured, a `judge` spec becomes a real `JudgeGrader`; when it
+isn't, the judge spec degrades to a **skip score** (`pass: undefined`, `detail: "skipped…"`, same philosophy as the
+judge-runner) so an ordinary eval never crashes on an unconfigured judge. The low-level `makeGraders(specs, {judge})`
+stays strict (throws) for direct callers.
+
+**Verified live** (`scripts/live/judge-dispatch-e2e.mjs`, real LiteLLM): the same case (a `scripted` harness that
+runs `echo hello > out.txt`, plus a `judge` grader) through `runAgentJob` — with the judge env set, the **real model
+judges the actual trace** (`pass=true`, score 1.00, "ran a tool command `echo hello > out.txt`…"); with it unset, the
+judge grader yields a skip score and the eval still completes. So WebVoyager-style judge presets now score
+automatically in a normal eval. (Open follow-ups: control-plane injection of judge model env from tenant secrets into
+Nomad/K8s allocs; SWE-bench harness setup [deps/conda env + patch apply] for real test execution; GitHub-sourced
+harness-coupled benchmarks; a `prompt` env kind for non-browser QA.)
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we

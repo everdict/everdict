@@ -11,3 +11,4 @@ export {
   traceToText,
 } from "./model-judge.js";
 export { makeGraders } from "./make-graders.js";
+export { judgeFromEnv, makeGradersFromEnv, skipGrader } from "./judge-env.js";

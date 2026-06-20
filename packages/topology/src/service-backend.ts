@@ -10,7 +10,7 @@ import {
   type TrustZone,
   assertHardenedIsolation,
 } from "@assay/core";
-import { costGrader, latencyGrader, makeGraders, stepsGrader } from "@assay/graders";
+import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@assay/graders";
 import type { TraceSource } from "@assay/trace";
 import { keysFor, newRunId } from "./environment-manager.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
@@ -103,7 +103,7 @@ export class ServiceTopologyBackend implements Backend {
       const graders =
         this.opts.graders ??
         (job.evalCase.graders.length > 0
-          ? makeGraders(job.evalCase.graders)
+          ? makeGradersFromEnv(job.evalCase.graders) // judge grader 포함(env Judge; 미구성이면 judge 만 skip)
           : [stepsGrader, costGrader, latencyGrader]);
       const scores: Score[] = [];
       for (const grader of graders) {
