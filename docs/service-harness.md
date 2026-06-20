@@ -475,7 +475,18 @@ it, `RepoEnvironment` symlinks `work → /testbed` (no clone), a `scripted` agen
 `work` (`snapshot.changedFiles: ["calc.py"]` — it really touched the in-image repo), and `SweBenchGrader` applies the
 gold `test_patch` + runs pytest **in `/testbed`** → `resolved=true`; the no-fix run → `resolved=false`. So the coding
 agent operates on the prebuilt repo with its real deps, end-to-end — SWE-bench is fully autonomous, with deps + repo
-from the image and the agent never baked in. (Other follow-ups: a `prompt` env kind for non-browser QA.)
+from the image and the agent never baked in.
+
+#### Validated on a real SWE-bench_Lite instance with the official image ✅
+The whole pipeline was finally run on a **real instance** end-to-end (`scripts/live/swe-bench-real-instance.mjs`):
+`psf__requests-3362` pulled the **official multi-GB image** `swebench/sweb.eval.x86_64.psf_1776_requests-3362:latest`
+(the repo at `base_commit` + the real conda deps), `DockerDriver` provisioned it (auto-detecting the `testbed` conda
+env), and `SweBenchGrader` applied the dataset's gold `test_patch` and ran the real `FAIL_TO_PASS` test under real
+pytest: with the dataset's gold `patch` applied (standing in for the agent's prediction) → `resolved=true`; without it
+→ `resolved=false`. (`PASS_TO_PASS` was skipped here only because the offline sandbox can't reach the network some of
+requests' regression tests need; `FAIL_TO_PASS` is the bug-fix signal.) The image was removed + the build cache pruned
+afterward (disk returned to its prior level). So the SWE-bench evaluation path is verified against a real published
+image with real dependencies — not just stand-ins. (Other follow-ups: a `prompt` env kind for non-browser QA.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner
