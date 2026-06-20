@@ -8,7 +8,9 @@ import { env } from '@/shared/config/env'
 export type AuthContext = { bearer: string } | { devTenant: string }
 
 function authHeaders(auth: AuthContext): Record<string, string> {
-  return 'bearer' in auth ? { authorization: `Bearer ${auth.bearer}` } : { 'x-assay-tenant': auth.devTenant }
+  return 'bearer' in auth
+    ? { authorization: `Bearer ${auth.bearer}` }
+    : { 'x-assay-tenant': auth.devTenant }
 }
 
 async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Promise<T> {
@@ -45,8 +47,12 @@ export const controlPlane = {
   listBenchmarks: <T>(auth: AuthContext) => call<T>(auth, '/benchmarks'),
   importBenchmark: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/benchmarks/import', { method: 'POST', body: JSON.stringify(body) }),
+  listBenchmarkRecipes: <T>(auth: AuthContext) => call<T>(auth, '/benchmark-recipes'),
+  registerBenchmarkRecipe: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/benchmark-recipes', { method: 'POST', body: JSON.stringify(spec) }),
   listScorecards: <T>(auth: AuthContext) => call<T>(auth, '/scorecards'),
-  getScorecard: <T>(auth: AuthContext, id: string) => call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
+  getScorecard: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
   runScorecard: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/scorecards', { method: 'POST', body: JSON.stringify(body) }),
   ingestScorecard: <T>(auth: AuthContext, body: unknown) =>
@@ -56,7 +62,7 @@ export const controlPlane = {
   diffScorecards: <T>(auth: AuthContext, baseline: string, candidate: string) =>
     call<T>(
       auth,
-      `/scorecards/diff?baseline=${encodeURIComponent(baseline)}&candidate=${encodeURIComponent(candidate)}`,
+      `/scorecards/diff?baseline=${encodeURIComponent(baseline)}&candidate=${encodeURIComponent(candidate)}`
     ),
   listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>

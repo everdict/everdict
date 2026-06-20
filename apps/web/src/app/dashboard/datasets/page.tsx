@@ -31,6 +31,12 @@ export default async function DatasetsPage() {
           can(principal?.roles, 'datasets:write') ? (
             <div className="flex gap-2">
               <Link
+                href="/dashboard/datasets/recipes"
+                className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+              >
+                레시피
+              </Link>
+              <Link
                 href="/dashboard/datasets/import"
                 className={buttonVariants({ size: 'sm', variant: 'secondary' })}
               >

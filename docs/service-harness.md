@@ -399,8 +399,19 @@ private QA recipe, and a first-party `gsm8k` recipe sits in `_shared`. `globex` 
 both see `gsm8k` (`_shared` fallback); `acme` imports its recipe → a tenant `Dataset` whose `command` grader has the
 `{test_patch}` interpolated into a real patch; `globex` imports the shared `gsm8k` recipe over **real HF** → a 2-case
 tenant dataset. So benchmark definitions are now per-tenant data, end-to-end — the catalog is just the `_shared` seed.
-(Remaining: Pg-backed `BenchmarkRegistry` + API/web CRUD for recipes; official SWE-bench prebuilt images as a
-first-party `env.image` seed; a `prompt` env kind for non-browser QA.)
+
+#### Recipes persisted + managed over API/web ✅
+The recipe registry is now durable + first-class in the control plane: `PgBenchmarkRegistry` (migration
+`0011_create_benchmarks`, same `(tenant, id, version)` immutable shape as datasets) wired in `main.ts` (Pg when
+`DATABASE_URL`, else InMemory). `BenchmarkService` gained `registerRecipe` / `listRecipes` / `getRecipe`, and
+`import` now resolves a registered `recipe: {id, version}` (→ `importFromSpec`) in addition to a catalog `benchmark`.
+HTTP: `POST /benchmark-recipes` (`datasets:write`), `GET /benchmark-recipes` + `GET /benchmark-recipes/:id/versions/
+:version` (`datasets:read`), and `POST /benchmarks/import` accepts either source. Web: a **벤치마크 레시피** page
+(`/dashboard/datasets/recipes`) lists recipes + registers one from a JSON `BenchmarkAdapterSpec`, and the **벤치마크
+추가** page now offers catalog benchmarks *and* the workspace's own recipes in one picker. Verified at the HTTP layer
+by `server.test.ts` (register → list/get with tenant isolation [`globex` gets 404 on `acme`'s recipe] → import from
+recipe). So a user manages reusable benchmark recipes entirely from the browser, persisted per tenant. (Remaining:
+official SWE-bench prebuilt images as a first-party `env.image` seed; a `prompt` env kind for non-browser QA.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner

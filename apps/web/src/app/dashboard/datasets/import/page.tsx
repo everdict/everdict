@@ -1,6 +1,10 @@
 import Link from 'next/link'
 
-import { ImportBenchmarkForm, type BenchmarkCatalogItem } from '@/features/import-benchmark'
+import {
+  ImportBenchmarkForm,
+  type BenchmarkCatalogItem,
+  type RecipeItem,
+} from '@/features/import-benchmark'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -15,10 +19,12 @@ export default async function ImportBenchmarkPage() {
   const allowed = can(principal?.roles, 'datasets:write')
 
   let benchmarks: BenchmarkCatalogItem[] = []
+  let recipes: RecipeItem[] = []
   let error: string | undefined
   if (allowed) {
     try {
       benchmarks = await controlPlane.listBenchmarks<BenchmarkCatalogItem[]>(ctx)
+      recipes = await controlPlane.listBenchmarkRecipes<RecipeItem[]>(ctx)
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     }
@@ -34,7 +40,15 @@ export default async function ImportBenchmarkPage() {
       </Link>
       <PageHeader
         title="벤치마크 추가"
-        description="공개 벤치마크(WebVoyager · GAIA · SWE-bench · Mind2Web · GSM8K …)를 ID 만으로 당겨 이 워크스페이스 데이터셋으로 등록합니다."
+        description="공개 벤치마크(WebVoyager · GAIA · SWE-bench · Mind2Web · GSM8K …) 또는 내가 등록한 레시피를 당겨 이 워크스페이스 데이터셋으로 등록합니다."
+        actions={
+          <Link
+            href="/dashboard/datasets/recipes"
+            className="text-sm text-muted-foreground hover:text-foreground"
+          >
+            레시피 관리 →
+          </Link>
+        }
       />
       {!allowed ? (
         <EmptyState
@@ -47,7 +61,7 @@ export default async function ImportBenchmarkPage() {
         </Card>
       ) : (
         <Card className="p-6">
-          <ImportBenchmarkForm benchmarks={benchmarks} />
+          <ImportBenchmarkForm benchmarks={benchmarks} recipes={recipes} />
         </Card>
       )}
     </div>

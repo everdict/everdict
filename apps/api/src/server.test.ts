@@ -12,6 +12,7 @@ import {
   issueKey,
 } from "@assay/db";
 import {
+  InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
   InMemoryJudgeRegistry,
@@ -122,7 +123,10 @@ function server(
   });
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
   const settingsStore = new InMemoryWorkspaceSettingsStore();
-  const benchmarkService = new BenchmarkService({ datasets: datasetRegistry });
+  const benchmarkService = new BenchmarkService({
+    datasets: datasetRegistry,
+    benchmarks: new InMemoryBenchmarkRegistry(),
+  });
   const app = buildServer({
     service: svc,
     scorecardService,
@@ -507,6 +511,57 @@ describe("API — benchmarks (카탈로그 → 테넌트 데이터셋 인입)", 
       payload: { benchmark: "does-not-exist", version: "1.0.0" },
     });
     expect(r400.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("레시피 CRUD: member 등록 → 조회/목록(테넌트 격리), recipe 로 인입", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const recipe = {
+      id: "my-qa",
+      version: "1.0.0",
+      category: "qa",
+      source: { kind: "jsonl" },
+      mapping: { idField: "id", taskField: "q", answerField: "a" },
+    };
+    const reg = await app.inject({ method: "POST", url: "/benchmark-recipes", headers: acme, payload: recipe });
+    expect(reg.statusCode).toBe(201);
+    expect(reg.json()).toMatchObject({ id: "my-qa", version: "1.0.0" });
+
+    // 목록/조회.
+    const list = await app.inject({ method: "GET", url: "/benchmark-recipes", headers: acme });
+    expect((list.json() as Array<{ id: string }>).some((r) => r.id === "my-qa")).toBe(true);
+    const got = await app.inject({ method: "GET", url: "/benchmark-recipes/my-qa/versions/1.0.0", headers: acme });
+    expect(got.statusCode).toBe(200);
+    expect((got.json() as { mapping: { taskField: string } }).mapping.taskField).toBe("q");
+
+    // 테넌트 격리: globex 는 acme 의 레시피를 못 본다(404).
+    const globex = { authorization: `Bearer ${await issueKey(keyStore, "globex")}` };
+    const cross = await app.inject({ method: "GET", url: "/benchmark-recipes/my-qa/versions/1.0.0", headers: globex });
+    expect(cross.statusCode).toBe(404);
+
+    // recipe 로 인입 → 테넌트 데이터셋.
+    const imp = await app.inject({
+      method: "POST",
+      url: "/benchmarks/import",
+      headers: acme,
+      payload: { recipe: { id: "my-qa" }, id: "my-qa-ds", version: "1.0.0", text: '{"id":"r1","q":"hi","a":"yes"}' },
+    });
+    expect(imp.statusCode).toBe(201);
+    expect(imp.json()).toMatchObject({ id: "my-qa-ds", version: "1.0.0", cases: 1 });
+    await app.close();
+  });
+
+  it("import 은 benchmark 도 recipe 도 없으면 400", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const res = await app.inject({
+      method: "POST",
+      url: "/benchmarks/import",
+      headers: h,
+      payload: { version: "1.0.0" },
+    });
+    expect(res.statusCode).toBe(400);
     await app.close();
   });
 });

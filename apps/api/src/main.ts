@@ -31,13 +31,16 @@ import {
   sqlClient,
 } from "@assay/db";
 import {
+  type BenchmarkRegistry,
   type DatasetRegistry,
   type HarnessRegistry,
+  InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
   InMemoryJudgeRegistry,
   InMemoryRuntimeRegistry,
   type JudgeRegistry,
+  PgBenchmarkRegistry,
   PgDatasetRegistry,
   PgHarnessRegistry,
   PgJudgeRegistry,
@@ -69,6 +72,7 @@ async function main(): Promise<void> {
     keyStore,
     registry,
     datasetRegistry,
+    benchmarkRegistry,
     judgeRegistry,
     runtimeRegistry,
     settingsStore,
@@ -144,7 +148,11 @@ async function main(): Promise<void> {
     secretsFor: runtimeSecretsFor,
   });
   // 벤치마크 카탈로그 인입: first-party 벤치마크를 ID 만으로 당겨 테넌트 데이터셋으로 등록. gated 는 HF_TOKEN 시크릿.
-  const benchmarkService = new BenchmarkService({ datasets: datasetRegistry, secretsFor: runtimeSecretsFor });
+  const benchmarkService = new BenchmarkService({
+    datasets: datasetRegistry,
+    benchmarks: benchmarkRegistry,
+    secretsFor: runtimeSecretsFor,
+  });
   const app = buildServer({
     service,
     scorecardService,
@@ -175,6 +183,7 @@ interface Persistence {
   keyStore: TenantKeyStore;
   registry: HarnessRegistry;
   datasetRegistry: DatasetRegistry;
+  benchmarkRegistry: BenchmarkRegistry;
   judgeRegistry: JudgeRegistry;
   runtimeRegistry: RuntimeRegistry;
   settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
@@ -193,6 +202,7 @@ async function makePersistence(): Promise<Persistence> {
       keyStore: new InMemoryTenantKeyStore(),
       registry: new InMemoryHarnessRegistry(),
       datasetRegistry: new InMemoryDatasetRegistry(),
+      benchmarkRegistry: new InMemoryBenchmarkRegistry(),
       judgeRegistry: new InMemoryJudgeRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
@@ -208,6 +218,7 @@ async function makePersistence(): Promise<Persistence> {
     keyStore: new PgTenantKeyStore(client),
     registry: new PgHarnessRegistry(client),
     datasetRegistry: new PgDatasetRegistry(client),
+    benchmarkRegistry: new PgBenchmarkRegistry(client),
     judgeRegistry: new PgJudgeRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),

@@ -9,6 +9,7 @@ import {
   JudgeSpecSchema,
   RuntimeSpecSchema,
 } from "@assay/core";
+import { BenchmarkAdapterSpecSchema } from "@assay/datasets";
 import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
@@ -37,14 +38,19 @@ export const RunScorecardBodySchema = z.object({
   judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
 });
 
-// 벤치마크 인입 본문 — 카탈로그 벤치마크를 ID 만으로 당겨 테넌트 데이터셋으로 등록(HF 소스는 네트워크, jsonl 은 text).
-export const BenchmarkImportBodySchema = z.object({
-  benchmark: z.string(), // 카탈로그 id (예: "gsm8k")
-  id: z.string().optional(), // 대상 데이터셋 id (기본 = benchmark id)
-  version: z.string().default("1.0.0"),
-  limit: z.number().int().positive().max(1000).optional(),
-  text: z.string().optional(), // jsonl 소스 벤치마크 업로드 원문
-});
+// 벤치마크 인입 본문 — 카탈로그(benchmark) 또는 등록된 레시피(recipe) 중 하나로 테넌트 데이터셋 등록.
+export const BenchmarkImportBodySchema = z
+  .object({
+    benchmark: z.string().optional(), // 카탈로그 id (first-party)
+    recipe: z.object({ id: z.string(), version: z.string().optional() }).optional(), // 등록된 레시피
+    id: z.string().optional(), // 대상 데이터셋 id (기본 = 소스 id)
+    version: z.string().default("1.0.0"),
+    limit: z.number().int().positive().max(1000).optional(),
+    text: z.string().optional(), // jsonl 소스 업로드 원문
+  })
+  .refine((b) => Boolean(b.benchmark) || Boolean(b.recipe), {
+    message: "benchmark(카탈로그) 또는 recipe(레시피) 중 하나가 필요합니다.",
+  });
 
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
@@ -367,6 +373,57 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return sendError(reply, err); // BadRequest(미지원 id)/불변성 409/HF 인출 실패
     }
   });
+
+  // 테넌트 벤치마크 레시피(BenchmarkAdapterSpec, 데이터) 등록 — 재사용 가능한 자기 워크스페이스 정의.
+  app.post("/benchmark-recipes", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = BenchmarkAdapterSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      const rec = await deps.benchmarkService.registerRecipe(principal.workspace, parsed.data);
+      return reply.code(201).send(rec);
+    } catch (err) {
+      return sendError(reply, err); // 불변성 409
+    }
+  });
+
+  // 테넌트 + _shared 레시피 목록.
+  app.get("/benchmark-recipes", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:read");
+      return reply.send(await deps.benchmarkService.listRecipes(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string; version: string } }>(
+    "/benchmark-recipes/:id/versions/:version",
+    async (req, reply) => {
+      if (!deps.benchmarkService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      try {
+        gate(principal, "datasets:read");
+        return reply.send(
+          await deps.benchmarkService.getRecipe(principal.workspace, req.params.id, req.params.version),
+        );
+      } catch (err) {
+        return sendError(reply, err); // 없으면 404
+      }
+    },
+  );
 
   // --- judges (workspace-owned SSOT, Agent Judge: model | harness) ---
   app.post("/judges", async (req, reply) => {

@@ -18,9 +18,53 @@ export interface BenchmarkCatalogItem {
   description: string
 }
 
-export function ImportBenchmarkForm({ benchmarks }: { benchmarks: BenchmarkCatalogItem[] }) {
+// GET /benchmark-recipes 항목(테넌트/_shared 레시피, 데이터).
+export interface RecipeItem {
+  id: string
+  owner: string
+  versions: string[]
+}
+
+interface Entry {
+  value: string // "catalog:<id>" | "recipe:<id>"
+  kind: 'catalog' | 'recipe'
+  id: string
+  label: string
+  source?: 'huggingface' | 'jsonl'
+  gated?: boolean
+  description?: string
+}
+
+export function ImportBenchmarkForm({
+  benchmarks,
+  recipes = [],
+}: {
+  benchmarks: BenchmarkCatalogItem[]
+  recipes?: RecipeItem[]
+}) {
   const router = useRouter()
-  const [benchmark, setBenchmark] = useState(benchmarks[0]?.id ?? '')
+  const entries: Entry[] = useMemo(
+    () => [
+      ...benchmarks.map((b) => ({
+        value: `catalog:${b.id}`,
+        kind: 'catalog' as const,
+        id: b.id,
+        label: `${b.id} · ${b.category}${b.gated ? ' · gated' : ''}${b.source === 'jsonl' ? ' · 파일 업로드' : ''}`,
+        source: b.source,
+        gated: b.gated,
+        description: b.description,
+      })),
+      ...recipes.map((r) => ({
+        value: `recipe:${r.id}`,
+        kind: 'recipe' as const,
+        id: r.id,
+        label: `${r.id} · 레시피${r.owner === '_shared' ? '(shared)' : ''}`,
+      })),
+    ],
+    [benchmarks, recipes]
+  )
+
+  const [sel, setSel] = useState(entries[0]?.value ?? '')
   const [datasetId, setDatasetId] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [limit, setLimit] = useState('')
@@ -28,59 +72,70 @@ export function ImportBenchmarkForm({ benchmarks }: { benchmarks: BenchmarkCatal
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<ImportBenchmarkResult>()
 
-  const selected = useMemo(
-    () => benchmarks.find((b) => b.id === benchmark),
-    [benchmarks, benchmark]
-  )
-  const needsText = selected?.source === 'jsonl'
+  const selected = useMemo(() => entries.find((e) => e.value === sel), [entries, sel])
+  const catalogJsonl = selected?.kind === 'catalog' && selected.source === 'jsonl'
 
   async function onImport() {
+    if (!selected) return
     setBusy(true)
     setResult(undefined)
-    const body: Record<string, unknown> = { benchmark, version }
+    const body: Record<string, unknown> = { version }
+    if (selected.kind === 'recipe') body.recipe = { id: selected.id }
+    else body.benchmark = selected.id
     if (datasetId) body.id = datasetId
     if (limit && Number.isFinite(Number(limit))) body.limit = Number(limit)
-    if (needsText) {
-      if (!text.trim()) {
-        setBusy(false)
-        setResult({ ok: false, error: '이 벤치마크는 jsonl 파일 내용이 필요합니다.' })
-        return
-      }
-      body.text = text
+    if (catalogJsonl && !text.trim()) {
+      setBusy(false)
+      setResult({ ok: false, error: '이 벤치마크는 jsonl 파일 내용이 필요합니다.' })
+      return
     }
+    if (text.trim()) body.text = text
     const res = await importBenchmarkAction(body)
     setBusy(false)
     setResult(res)
     if (res.ok) router.push('/dashboard/datasets')
   }
 
-  if (benchmarks.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">
-        사용 가능한 벤치마크가 없습니다(카탈로그 미설정).
-      </p>
-    )
+  if (entries.length === 0) {
+    return <p className="text-sm text-muted-foreground">사용 가능한 벤치마크/레시피가 없습니다.</p>
   }
 
   return (
     <div className="max-w-2xl space-y-6">
       <div className="space-y-1.5">
-        <Label htmlFor="benchmark">벤치마크</Label>
+        <Label htmlFor="benchmark">벤치마크 / 레시피</Label>
         <select
           id="benchmark"
-          value={benchmark}
-          onChange={(e) => setBenchmark(e.target.value)}
+          value={sel}
+          onChange={(e) => setSel(e.target.value)}
           className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
         >
-          {benchmarks.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.id} · {b.category}
-              {b.gated ? ' · gated' : ''}
-              {b.source === 'jsonl' ? ' · 파일 업로드' : ''}
-            </option>
-          ))}
+          {benchmarks.length > 0 && (
+            <optgroup label="카탈로그(first-party)">
+              {entries
+                .filter((e) => e.kind === 'catalog')
+                .map((e) => (
+                  <option key={e.value} value={e.value}>
+                    {e.label}
+                  </option>
+                ))}
+            </optgroup>
+          )}
+          {recipes.length > 0 && (
+            <optgroup label="내 레시피(워크스페이스)">
+              {entries
+                .filter((e) => e.kind === 'recipe')
+                .map((e) => (
+                  <option key={e.value} value={e.value}>
+                    {e.label}
+                  </option>
+                ))}
+            </optgroup>
+          )}
         </select>
-        {selected && <p className="text-xs text-muted-foreground">{selected.description}</p>}
+        {selected?.description && (
+          <p className="text-xs text-muted-foreground">{selected.description}</p>
+        )}
       </div>
 
       {selected?.gated && (
@@ -96,7 +151,7 @@ export function ImportBenchmarkForm({ benchmarks }: { benchmarks: BenchmarkCatal
             id="datasetId"
             value={datasetId}
             onChange={(e) => setDatasetId(e.target.value)}
-            placeholder={benchmark || 'benchmark id'}
+            placeholder={selected?.id ?? 'id'}
           />
         </div>
         <div className="space-y-1.5">
@@ -110,38 +165,32 @@ export function ImportBenchmarkForm({ benchmarks }: { benchmarks: BenchmarkCatal
         </div>
       </div>
 
-      {!needsText && (
+      {!catalogJsonl && (
         <div className="space-y-1.5">
           <Label htmlFor="limit">최대 케이스 수 (선택)</Label>
           <Input
             id="limit"
             value={limit}
             onChange={(e) => setLimit(e.target.value)}
-            placeholder="예: 50 (비우면 기본 100)"
+            placeholder="예: 50 (HF 소스일 때만 의미)"
             inputMode="numeric"
           />
-          <p className="text-xs text-muted-foreground">
-            HuggingFace 에서 ID 만으로 인출합니다(대형 벤치마크는 수천 건 — limit 로 일부만).
-          </p>
         </div>
       )}
 
-      {needsText && (
-        <div className="space-y-1.5">
-          <Label htmlFor="text">jsonl 내용</Label>
-          <Textarea
-            id="text"
-            className="min-h-48 font-mono text-xs"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            spellCheck={false}
-            placeholder='{"id":"ex--0","web":"https://example.com","ques":"...","answer":"...","web_name":"..."}'
-          />
-          <p className="text-xs text-muted-foreground">
-            이 벤치마크는 jsonl 파일 내용을 붙여넣어야 합니다(한 줄 1케이스).
-          </p>
-        </div>
-      )}
+      <div className="space-y-1.5">
+        <Label htmlFor="text">
+          jsonl 내용 {catalogJsonl ? '(필수)' : '(jsonl 소스 레시피일 때만)'}
+        </Label>
+        <Textarea
+          id="text"
+          className="min-h-40 font-mono text-xs"
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          spellCheck={false}
+          placeholder='{"id":"ex--0","web":"https://example.com","ques":"...","answer":"...","web_name":"..."}'
+        />
+      </div>
 
       {result && !result.ok && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
@@ -158,7 +207,7 @@ export function ImportBenchmarkForm({ benchmarks }: { benchmarks: BenchmarkCatal
         버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 인입하면 409 로 거부됩니다.
       </p>
 
-      <Button type="button" onClick={onImport} disabled={busy || !benchmark}>
+      <Button type="button" onClick={onImport} disabled={busy || !selected}>
         {busy ? '인입 중…' : '워크스페이스에 추가'}
       </Button>
     </div>
