@@ -569,6 +569,28 @@ URL input is visible; the welcome landing screen is NOT the goal" — **after** 
 state"). So a tenant can score an arbitrary desktop/UI task by describing the goal in words — the loop SLICE 73 proved
 (perceive→act→observe) now closes with **observe→judge**, end-to-end auto-grading with no per-benchmark grader.
 
+### Full desktop task end-to-end — hermes connects over a real SSH tunnel, auto-graded ✅
+The prior rungs proved *drive* (SLICE 73) and *judge* (SLICE 74) on a UI panel transition. This proves a **real,
+multi-step desktop task completing for real**, not just a panel swap (`scripts/live/os-use-hermes-ssh-task.mjs`). Task:
+*"connect Hermes to a remote machine over SSH."* Topology (all real, inside one os-use env-container): an **`sshd`**
+(host keys + ed25519 **key auth**) and a **`/health` 200 stub** on the remote Hermes port (`:8642`); hermes connects to
+`127.0.0.1` — a genuine SSH tunnel over loopback. The agent fills the SSH form (Host/Username/Key path) with a **real OS
+keyboard (`xdotool type`)** and clicks *Connect via SSH*; hermes' `testSshConnection` spawns the system `ssh` client
+(`ssh -N -L <free>:127.0.0.1:8642 -i /root/.ssh/id_rsa root@127.0.0.1`), opens the port-forward, polls `/health` through
+it, and only on **200** advances (`setSshConfig → onRecheck → splash "Starting SSH tunnel…" → main`).
+
+**Double proof.** *(a) Deterministic ground truth:* hermes left the form (`afterHostVisible=false`, no `sshError`) **and**
+the real tunnel process is alive — captured verbatim: `ssh -N -L 18642:127.0.0.1:8642 -p 22 -i /root/.ssh/id_rsa …
+root@127.0.0.1`. hermes advances *only* if the tunnel + health truly succeeded, so reaching the main app is itself
+evidence real SSH bytes flowed. *(b) VLM judge* (the SLICE 74 production path, over the docker compute): the post-connect
+screenshot → `pass=true score=0.99` ("Hermes already past the SSH connection form and into the main app screen, with no
+connection-error message"); the filled-but-not-yet-connected SSH form → `pass=false score=0.02`. The captured screenshots
+confirm it visually: the SSH form (Host `127.0.0.1`, Username `root`, key `/root/.ssh/id_rsa`) → the full **Hermes One**
+app (Chat / Discover / Office / Kanban sidebar, "Ask anything" composer) loaded over the tunnel. So a real desktop task
+**executes end-to-end and is auto-graded** — the complete loop a computer-use benchmark runs: provision env → drive with
+real OS input → the app does real work → observe → VLM judge. (Loopback SSH keeps it self-contained; a remote host is the
+same flow with a different `host`. The multi-GB image + build cache were removed afterward; disk returned to prior level.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
