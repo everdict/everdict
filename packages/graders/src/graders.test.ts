@@ -1,6 +1,6 @@
 import type { GradeContext, TraceEvent } from "@assay/core";
 import { describe, expect, it } from "vitest";
-import { DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
+import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { type Judge, JudgeGrader } from "./judge.js";
 import { makeGraders } from "./make-graders.js";
 
@@ -29,6 +29,35 @@ describe("browser graders", () => {
       snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
     };
     await expect(new DomContainsGrader("x").grade(ctx)).rejects.toThrow();
+  });
+});
+
+describe("answer-match grader (QA 벤치마크 정답대조)", () => {
+  const ctxWithAnswer = (text: string): GradeContext => ({
+    case: { id: "c", env: { kind: "browser", startUrl: "https://x" }, task: "q", graders: [], timeoutSec: 1, tags: [] },
+    trace: [{ t: 0, kind: "message", role: "assistant", text }] as TraceEvent[],
+    snapshot: { kind: "browser", url: "https://x", dom: "", console: [] },
+  });
+  it("정규화 substring 으로 정답 포함 여부 채점", async () => {
+    expect(
+      (await new AnswerMatchGrader("Example Domain").grade(ctxWithAnswer("The heading is: Example Domain."))).pass,
+    ).toBe(true);
+    expect((await new AnswerMatchGrader("1991").grade(ctxWithAnswer("Python was first released in 1991."))).pass).toBe(
+      true,
+    );
+    expect((await new AnswerMatchGrader("404").grade(ctxWithAnswer("It means Not Found."))).pass).toBe(false);
+  });
+  it("exact 모드 + 마지막 assistant message 사용", async () => {
+    expect((await new AnswerMatchGrader("example domain", "exact").grade(ctxWithAnswer("Example Domain"))).pass).toBe(
+      true,
+    );
+    expect(
+      (await new AnswerMatchGrader("example domain", "exact").grade(ctxWithAnswer("Example Domain page"))).pass,
+    ).toBe(false);
+  });
+  it("makeGraders answer-match", () => {
+    const g = makeGraders([{ id: "answer-match", config: { expect: "x" } }]);
+    expect(g[0]?.id).toBe("answer-match");
   });
 });
 

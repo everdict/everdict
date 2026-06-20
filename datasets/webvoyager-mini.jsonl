@@ -1,0 +1,3 @@
+{"web_name":"Example","id":"example--0","web":"https://example.com","ques":"What is the exact text of the page's main heading (the h1)? Reply with only that text.","answer":"Example Domain"}
+{"web_name":"Wikipedia","id":"wikipedia--py","web":"https://en.wikipedia.org/wiki/Python_(programming_language)","ques":"In what year was the Python programming language first released? Reply with only the 4-digit year.","answer":"1991"}
+{"web_name":"Wikipedia","id":"wikipedia--http404","web":"https://en.wikipedia.org/wiki/HTTP_404","ques":"What two-word phrase does the HTTP status code 404 stand for? Reply with only that phrase.","answer":"Not Found"}

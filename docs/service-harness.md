@@ -261,6 +261,22 @@ to our per-case **CDP browser** (`chromedp/headless-shell`, `BrowserSession(cdp_
 > not a fundamental limit. browser-use's per-call `llm_timeout` aborts a step when a call exceeds it, and enough
 > aborted steps end the run — so a latency spike *can* fail a run, but the steady-state endpoint is fast.
 
+### Dataset-driven evaluation — WebVoyager benchmark e2e ✅ (`scripts/live/webvoyager-eval.mjs`)
+The full eval-runtime loop end-to-end on a **real browser benchmark**:
+[**WebVoyager**](https://github.com/MinorJerry/WebVoyager) (the standard autonomous-web-agent benchmark) JSONL →
+`Suite` (`EvalCase[]`: `env: browser{startUrl}`, `task: ques`, `graders: [answer-match{expect}, steps]`) →
+`runSuite(suite, version, dispatch)` where **`dispatch` runs the real browser-use agent per case** (our model +
+CDP browser) → `makeGraders` scores each (the new **`answer-match`** grader compares the agent's final answer to
+the benchmark reference; `steps` from the trajectory) → `CaseResult[]` → **`Scorecard`** → `summarizeScorecard`
+(per-metric passRate). Full WebVoyager is 15 commercial sites + VLM grading, so the runnable subset
+(`datasets/webvoyager-mini.jsonl`, same format) uses accessible factual tasks; the loader runs the full
+`WebVoyager_data.jsonl` unchanged (`DATASET=…`).
+
+**Verified live:** 3/3 cases — the agent autonomously browsed each site and answered (`example.com` → "Example
+Domain", Wikipedia → Python released "1991", HTTP "404" → "Not Found"); `answer_match` **passRate = 100%**. So
+Assay loads a real benchmark dataset, drives a real OSS agent harness per case, grades outcomes, and produces an
+aggregate Scorecard — the core eval promise, end-to-end.
+
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we
 ran **[aegra](https://github.com/aegra/aegra)** — an OSS, license-free self-hosted LangGraph server (FastAPI +

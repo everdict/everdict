@@ -1,5 +1,5 @@
 import { BadRequestError, type Grader, type GraderSpec } from "@assay/core";
-import { DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
+import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { TestsPassGrader } from "./tests-pass.js";
 import { costGrader, latencyGrader, stepsGrader } from "./trace-graders.js";
 
@@ -19,6 +19,8 @@ export function makeGraders(specs: GraderSpec[]): Grader[] {
         return new DomContainsGrader(String(s.config?.text ?? ""));
       case "url-matches":
         return new UrlMatchesGrader(String(s.config?.pattern ?? ".*"));
+      case "answer-match":
+        return new AnswerMatchGrader(String(s.config?.expect ?? ""), s.config?.mode === "exact" ? "exact" : "contains");
       default:
         throw new BadRequestError("BAD_REQUEST", { grader: s.id });
     }

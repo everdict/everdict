@@ -14,6 +14,26 @@ export class DomContainsGrader implements Grader {
   }
 }
 
+// QA 벤치마크 outcome: 에이전트 최종 답(trace 의 마지막 assistant message)이 기대 답을 포함/일치하는지.
+// WebVoyager/GAIA 류의 정답대조 채점. mode=contains(정규화 substring, 기본) | exact(정규화 완전일치).
+export class AnswerMatchGrader implements Grader {
+  readonly id = "answer-match";
+  constructor(
+    private readonly expect: string,
+    private readonly mode: "contains" | "exact" = "contains",
+  ) {}
+  async grade(ctx: GradeContext): Promise<Score> {
+    const msgs = ctx.trace.filter((e) => e.kind === "message" && e.role === "assistant");
+    const last = msgs.at(-1);
+    const answer = last && last.kind === "message" ? last.text : "";
+    const norm = (s: string) => s.toLowerCase().replace(/\s+/g, " ").trim();
+    const a = norm(answer);
+    const e = norm(this.expect);
+    const pass = e === "" ? false : this.mode === "exact" ? a === e : a.includes(e);
+    return { graderId: this.id, metric: "answer_match", value: pass ? 1 : 0, pass, detail: answer.slice(0, 120) };
+  }
+}
+
 // 최종 URL 이 패턴(정규식)과 일치하는지.
 export class UrlMatchesGrader implements Grader {
   readonly id = "url-matches";
