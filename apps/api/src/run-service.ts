@@ -2,6 +2,7 @@ import type { Dispatcher } from "@assay/backends";
 import { type BudgetTracker, costOf } from "@assay/backends";
 import { type AgentJob, AppError, type EvalCase, type HarnessSpec, type JudgeRunConfig } from "@assay/core";
 import type { RunRecord, RunStore } from "@assay/db";
+import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
 
 export interface SubmitInput {
   tenant: string;
@@ -23,6 +24,8 @@ export interface RunServiceDeps {
   meterUsageFor?: (tenant: string) => boolean | Promise<boolean>;
   // 워크스페이스 기본 judge 모델(inline judge grader 채점용). 요청별 override(SubmitInput.judge)가 우선.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
+  // 아티팩트 스토어(설정 시): os-use 스크린샷을 object storage 로 오프로드 → 레코드엔 URL 만(base64 인라인 안 함).
+  artifacts?: ArtifactStore;
   newId?: () => string;
   now?: () => string;
   fetch?: typeof fetch; // 웹훅용 (테스트 주입)
@@ -89,6 +92,12 @@ export class RunService {
     try {
       const result = await this.deps.dispatcher.dispatch(job);
       this.deps.budget?.settle(input.tenant, costOf(result));
+      // os-use 스크린샷(동봉 base64)을 object storage 로 오프로드 → 레코드엔 URL 만(슬림). 실패해도 run 은 성공(폴백: base64 유지).
+      if (this.deps.artifacts && result.snapshot) {
+        try {
+          result.snapshot = await offloadSnapshot(result.snapshot, this.deps.artifacts, `runs/${id}.png`);
+        } catch {}
+      }
       await this.deps.store.update(id, { status: "succeeded", result, updatedAt: this.now() });
     } catch (err) {
       const error =

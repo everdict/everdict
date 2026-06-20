@@ -11,6 +11,17 @@ import { StatusPill } from '@/shared/ui/status-pill'
 
 export const dynamic = 'force-dynamic'
 
+// os-use 스크린샷 src: base64 동봉(dev) → data URL, 아니면 object storage URL(오프로드). 둘 다 없으면 undefined.
+function osUseShotSrc(snapshot?: {
+  screenshot?: string
+  screenshotRef?: string
+}): string | undefined {
+  if (snapshot?.screenshot) return `data:image/png;base64,${snapshot.screenshot}`
+  if (snapshot?.screenshotRef && /^https?:\/\//.test(snapshot.screenshotRef))
+    return snapshot.screenshotRef
+  return undefined
+}
+
 function Meta({ label, value }: { label: string; value: string }) {
   return (
     <div>
@@ -125,11 +136,11 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
         <section className="space-y-3">
           <h2 className="text-lg font-semibold tracking-tight">스냅샷 ({String(snapshot.kind)})</h2>
           <Card className="space-y-3 p-5">
-            {/* os-use 데스크탑 스크린샷(base64 PNG)을 인라인 표시 — 에이전트가 본 최종 화면. */}
-            {typeof snapshot.screenshot === 'string' && snapshot.screenshot.length > 0 && (
+            {/* os-use 스크린샷 — base64 동봉(dev) 또는 object storage URL(오프로드). 에이전트가 본 최종 화면. */}
+            {osUseShotSrc(snapshot) && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
-                src={`data:image/png;base64,${snapshot.screenshot}`}
+                src={osUseShotSrc(snapshot)}
                 alt="os-use screenshot"
                 className="max-h-[480px] w-auto rounded-md border"
               />

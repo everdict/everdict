@@ -19,6 +19,7 @@ import {
 import type { ScorecardRecord, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
+import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
 import { type Dispatch, type ScorecardDiff, diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
 import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { z } from "zod";
@@ -81,6 +82,7 @@ export interface ScorecardServiceDeps {
   budget?: BudgetTracker; // 케이스마다 admission/settle
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@assay/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(서버 내부 주입)
+  artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)
   concurrency?: number;
   newId?: () => string;
   now?: () => string;
@@ -259,6 +261,7 @@ export class ScorecardService {
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
       const scorecard = await runSuite(suite, harnessVersion, dispatch, { concurrency: this.concurrency });
       await this.applyJudges(tenant, dataset, scorecard.results, judges); // 트레이스 → judge 점수(컨트롤플레인)
+      await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
       const summary = summarizeScorecard(scorecard);
       await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
     } catch (err) {
@@ -353,6 +356,7 @@ export class ScorecardService {
     }
     const scorecard: Scorecard = { suiteId: dataset.id, harness: harnessLabel, results };
     await this.applyJudges(tenant, dataset, results, judges); // 트레이스 → judge 점수(컨트롤플레인)
+    await this.offloadResults(id, results); // os-use 스크린샷 → object storage(레코드 슬림)
     const summary = summarizeScorecard(scorecard);
     await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
   }
@@ -363,6 +367,17 @@ export class ScorecardService {
         ? { code: err.code, message: err.message }
         : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
     await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
+  }
+
+  // os-use 스크린샷(동봉 base64)을 object storage 로 오프로드 → 각 결과 snapshot.screenshotRef=URL, screenshot 비움(레코드
+  // 슬림). best-effort: 실패하면 base64 유지(스코어카드 자체엔 영향 없음). applyJudges 후에 호출(registry judge 가 이미지 사용 후).
+  private async offloadResults(id: string, results: CaseResult[]): Promise<void> {
+    if (!this.deps.artifacts) return;
+    for (const r of results) {
+      try {
+        r.snapshot = await offloadSnapshot(r.snapshot, this.deps.artifacts, `scorecards/${id}/${r.caseId}.png`);
+      } catch {}
+    }
   }
 
   // 선택된 judge 들을 각 케이스 트레이스에 적용 → judge:<id> 점수를 결과 scores 에 덧붙인다(요약에 반영).

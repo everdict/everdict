@@ -51,6 +51,7 @@ import {
   loadJudgeDir,
   loadRuntimeDir,
 } from "@assay/registry";
+import { S3ArtifactStore } from "@assay/storage";
 import { buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
@@ -114,11 +115,17 @@ async function main(): Promise<void> {
     secretsFor: runtimeSecretsFor,
   });
 
+  // 아티팩트 스토어(env 설정 시): os-use 스크린샷을 S3/MinIO 로 오프로드 → 결과 레코드엔 presigned URL 만(base64 인라인 안 함).
+  // 미설정이면 undefined → 서비스가 base64 인라인 폴백(dev). 자격증명은 env 시크릿(커밋 금지).
+  const artifacts = await artifactStoreFromEnv();
+  if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
+
   const envMeterPolicy = meterUsagePolicyFromEnv(); // 워크스페이스 DB 설정이 없을 때의 기본 정책
   const service = new RunService({
     dispatcher,
     store,
     budget,
+    ...(artifacts ? { artifacts } : {}),
     // 선언형 command 하니스: 레지스트리에서 spec 을 풀어 잡에 임베드(없으면 빌트인 폴백).
     resolveHarness: (tenant, id, version) => registry.get(tenant, id, version),
     // 워크스페이스 단위 계측 정책(요청별 override 가 우선): DB 설정 스토어 우선, 미설정이면 env 정책 폴백.
@@ -143,6 +150,7 @@ async function main(): Promise<void> {
     judges: judgeRegistry,
     judgeRunner,
     budget,
+    ...(artifacts ? { artifacts } : {}),
     // 워크스페이스 기본 judge 모델(요청별 override 우선): 배치 eval 의 inline judge grader 가 이 모델로 채점.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // pull 인제스트: 테넌트 OTel/MLflow 에서 트레이스를 당겨 채점. 자격증명은 테넌트 SecretStore(authSecret 이름).
@@ -313,6 +321,26 @@ function budgetFromEnv(): (tenant: string) => BudgetLimit | undefined {
   if (runs === undefined && usd === undefined) return () => undefined;
   const limit: BudgetLimit = { ...(runs !== undefined ? { runs } : {}), ...(usd !== undefined ? { usd } : {}) };
   return () => limit;
+}
+
+// 아티팩트(스크린샷) object storage: env 4개(endpoint/bucket/access/secret)가 모두 있으면 S3/MinIO 스토어 구성 + 버킷 보장.
+// 미설정이면 undefined → os-use 스크린샷은 base64 인라인 폴백(dev). 비밀은 env(시크릿) — 스펙/커밋 금지.
+async function artifactStoreFromEnv(): Promise<S3ArtifactStore | undefined> {
+  const endpoint = process.env.ASSAY_S3_ENDPOINT;
+  const bucket = process.env.ASSAY_S3_BUCKET;
+  const accessKeyId = process.env.ASSAY_S3_ACCESS_KEY;
+  const secretAccessKey = process.env.ASSAY_S3_SECRET_KEY;
+  if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) return undefined;
+  const store = new S3ArtifactStore({
+    endpoint,
+    bucket,
+    accessKeyId,
+    secretAccessKey,
+    ...(process.env.ASSAY_S3_REGION ? { region: process.env.ASSAY_S3_REGION } : {}),
+    ...(process.env.ASSAY_S3_PUBLIC_URL ? { publicBaseUrl: process.env.ASSAY_S3_PUBLIC_URL } : {}),
+  });
+  await store.ensureBucket().catch(() => {});
+  return store;
 }
 
 main().catch((err) => {

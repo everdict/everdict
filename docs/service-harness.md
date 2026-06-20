@@ -721,6 +721,28 @@ judge verdict and `os-use` kind. So a tenant sees, per case, **the exact screen 
 (Dev posture: the base64 rides in the result record, matching the InMemory-store dev path; production offloads to object
 storage with a presigned URL in `screenshotRef` — same field, swappable. Image removed afterward; disk to prior level.)
 
+### Object-storage offload — screenshot to MinIO, presigned URL in a slim record ✅
+SLICE 81's base64-in-the-record is the dev posture; this is the production swap promised there. New **`@assay/storage`**:
+an `ArtifactStore` interface (`put(key, bytes, contentType) → ref`), an **`S3ArtifactStore`** (MinIO/S3 via the AWS SDK —
+`PutObject` + a presigned `GetObject` URL, path-style, optional `publicBaseUrl` host rewrite + `ensureBucket`), an
+`InMemoryArtifactStore` for tests, and `offloadSnapshot(snapshot, store, key)` — for an os-use snapshot it uploads the
+embedded base64, sets `screenshotRef` to the returned URL, and **clears `screenshot`** so the record stays small. The
+control plane wires it: `RunService`/`ScorecardService` take an optional `artifacts` store and offload each os-use
+snapshot after dispatch (best-effort — a storage failure keeps the base64 fallback, the run still succeeds);
+`main.ts` builds the store from env (`ASSAY_S3_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY`, optional region/public URL) or
+leaves it unset (→ base64 dev fallback). The web `osUseShotSrc` helper renders the URL when `screenshotRef` is `http(s)`,
+else the base64 data URL — same `<img>`, either source. +4 storage tests.
+
+**Verified live against the running `infra-minio`** (docker-free via ingest): with the API configured for MinIO,
+`POST /scorecards/ingest` of an os-use case carrying a base64 screenshot → the stored record's snapshot has **no base64**
+(`screenshot` empty) and `screenshotRef` is a MinIO **presigned URL**
+(`http://localhost:9100/assay-artifacts/scorecards/<id>/<case>.png?X-Amz-…`); the record is ~1.4 KB (was ~90 KB inline).
+`curl`-ing that URL returns the actual object — `HTTP 200`, `content-type: image/png`, `file` confirms a PNG — so the
+bytes really live in object storage. The web `scorecards/:id` page server-renders `<img src="http://…/assay-artifacts/…
+?X-Amz-…">` (page slim, no inline base64) — the browser fetches the image straight from MinIO. So the result record is a
+small pointer and the screenshot lives in object storage with a presigned URL: the production-correct shape, and a one-line
+config swap from the dev base64 path.
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

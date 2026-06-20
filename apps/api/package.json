@@ -20,6 +20,7 @@
     "@assay/db": "workspace:*",
     "@assay/graders": "workspace:*",
     "@assay/registry": "workspace:*",
+    "@assay/storage": "workspace:*",
     "@assay/suite": "workspace:*",
     "@assay/trace": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
