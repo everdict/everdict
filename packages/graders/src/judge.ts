@@ -1,9 +1,15 @@
-import type { GradeContext, Grader, Score, TraceEvent } from "@assay/core";
+import type { ComputeHandle, EnvSnapshot, GradeContext, Grader, Score, TraceEvent } from "@assay/core";
 
 export interface JudgeVerdict {
   pass: boolean;
   score: number;
   reason: string;
+}
+
+// VLM 판정에 넘기는 이미지(스크린샷) 바이트. ref(경로)는 grader 가 환경에서 읽어 base64 로 해석해 채운다.
+export interface JudgeImage {
+  base64: string;
+  mediaType: string; // 예: "image/png"
 }
 
 // 모델 기반 판정 추상화 (LLM/VLM). 구체 구현(실모델 호출)은 주입한다.
@@ -12,12 +18,28 @@ export interface Judge {
     task: string;
     trace?: TraceEvent[];
     dom?: string;
-    screenshotRef?: string;
+    screenshotRef?: string; // 브라우저 스냅샷 등 외부 ref(모델 전송은 screenshot 사용)
+    screenshot?: JudgeImage; // VLM 입력용으로 해석된 이미지 바이트
     rubric?: string;
   }): Promise<JudgeVerdict>;
 }
 
-// LLM/VLM judge 그레이더. dom/screenshot 을 함께 넘기면 브라우저 결과를 판정한다.
+function mediaTypeFor(path: string): string {
+  return /\.jpe?g$/i.test(path) ? "image/jpeg" : "image/png";
+}
+
+// os-use 스냅샷의 스크린샷(컴퓨트 내 파일 경로)을 환경에서 base64 로 읽어 VLM 입력으로 해석.
+// 브라우저 스냅샷의 screenshotRef 는 외부 스토리지 ref 일 수 있어 여기서 다루지 않는다(기존 동작 유지).
+async function resolveScreenshot(snap: EnvSnapshot, compute?: ComputeHandle): Promise<JudgeImage | undefined> {
+  if (snap.kind !== "os-use" || !snap.screenshotRef || !compute) return undefined;
+  const ref = snap.screenshotRef;
+  const r = await compute.exec(`base64 -w0 '${ref.replace(/'/g, "'\\''")}'`);
+  const base64 = r.stdout.trim();
+  if (r.exitCode !== 0 || !base64) return undefined;
+  return { base64, mediaType: mediaTypeFor(ref) };
+}
+
+// LLM/VLM judge 그레이더. useScreenshot 이면 스냅샷의 스크린샷을 비전 입력으로 넘긴다(브라우저=ref, os-use=환경에서 읽어 바이트).
 export class JudgeGrader implements Grader {
   readonly id: string;
   constructor(
@@ -29,11 +51,13 @@ export class JudgeGrader implements Grader {
 
   async grade(ctx: GradeContext): Promise<Score> {
     const snap = ctx.snapshot;
+    const screenshot = this.opts.useScreenshot ? await resolveScreenshot(snap, ctx.compute) : undefined;
     const verdict = await this.judge.judge({
       task: ctx.case.task,
       trace: ctx.trace,
       dom: snap.kind === "browser" ? snap.dom : undefined,
       screenshotRef: snap.kind === "browser" && this.opts.useScreenshot ? snap.screenshotRef : undefined,
+      ...(screenshot ? { screenshot } : {}),
       rubric: this.opts.rubric,
     });
     return { graderId: this.id, metric: "judge", value: verdict.score, pass: verdict.pass, detail: verdict.reason };

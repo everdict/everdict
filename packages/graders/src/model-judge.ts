@@ -1,8 +1,9 @@
 import { type TraceEvent, UpstreamError } from "@assay/core";
-import type { Judge, JudgeVerdict } from "./judge.js";
+import type { Judge, JudgeImage, JudgeVerdict } from "./judge.js";
 
-// 모델 호출 프리미티브 — 프롬프트 → 원문 텍스트. 전송(transport)을 판정 로직과 분리(테스트 시 주입).
-export type JudgeCompletion = (prompt: string) => Promise<string>;
+// 모델 호출 프리미티브 — (프롬프트[, 이미지]) → 원문 텍스트. 전송(transport)을 판정 로직과 분리(테스트 시 주입).
+// 이미지가 주어지면 비전 모델(VLM)로 멀티모달 전송한다(os-use 스크린샷 판정 등).
+export type JudgeCompletion = (prompt: string, image?: JudgeImage) => Promise<string>;
 
 const MAX_CHARS = 6000; // 트레이스/DOM 은 클 수 있으므로 컨텍스트 보호용으로 절단.
 
@@ -10,10 +11,11 @@ interface JudgeInput {
   task: string;
   trace?: unknown;
   dom?: string;
+  screenshot?: JudgeImage;
   rubric?: string;
 }
 
-// 판정 프롬프트 — task + rubric + (트레이스/DOM)로 LLM/VLM 에게 JSON 판정을 요구.
+// 판정 프롬프트 — task + rubric + (트레이스/DOM/스크린샷)로 LLM/VLM 에게 JSON 판정을 요구.
 function buildPrompt(input: JudgeInput): string {
   const trace = input.trace ? JSON.stringify(input.trace).slice(0, MAX_CHARS) : "(none)";
   return [
@@ -21,6 +23,9 @@ function buildPrompt(input: JudgeInput): string {
     `TASK:\n${input.task}`,
     input.rubric ? `RUBRIC:\n${input.rubric}` : "",
     input.dom ? `FINAL DOM (truncated):\n${input.dom.slice(0, MAX_CHARS)}` : "",
+    input.screenshot
+      ? "A SCREENSHOT of the final UI/desktop state is attached. Judge whether it shows the task's goal state."
+      : "",
     `EXECUTION TRACE (JSON, truncated):\n${trace}`,
     'Respond with ONLY a JSON object, no prose: {"pass": boolean, "score": number in [0,1], "reason": string}.',
   ]
@@ -55,7 +60,7 @@ function parseVerdict(text: string): JudgeVerdict {
 export function modelJudge(complete: JudgeCompletion): Judge {
   return {
     async judge(input) {
-      const text = await complete(buildPrompt(input));
+      const text = await complete(buildPrompt(input), input.screenshot);
       return parseVerdict(text);
     },
   };
@@ -71,7 +76,14 @@ export function anthropicComplete(cfg: {
 }): JudgeCompletion {
   const f = cfg.fetchImpl ?? fetch;
   const base = (cfg.baseUrl ?? "https://api.anthropic.com").replace(/\/$/, "");
-  return async (prompt) => {
+  return async (prompt, image) => {
+    // 이미지가 있으면 멀티모달 content(텍스트 + base64 이미지 블록) — Anthropic Messages 비전 포맷.
+    const content = image
+      ? [
+          { type: "text", text: prompt },
+          { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.base64 } },
+        ]
+      : prompt;
     let res: Response;
     try {
       res = await f(`${base}/v1/messages`, {
@@ -80,7 +92,7 @@ export function anthropicComplete(cfg: {
         body: JSON.stringify({
           model: cfg.model,
           max_tokens: cfg.maxTokens ?? 1024,
-          messages: [{ role: "user", content: prompt }],
+          messages: [{ role: "user", content }],
         }),
       });
     } catch (err) {
@@ -115,7 +127,14 @@ export function openaiComplete(cfg: {
 }): JudgeCompletion {
   const f = cfg.fetchImpl ?? fetch;
   const base = (cfg.baseUrl ?? "https://api.openai.com/v1").replace(/\/$/, "");
-  return async (prompt) => {
+  return async (prompt, image) => {
+    // 이미지가 있으면 멀티모달 content(텍스트 + data-URL image_url) — OpenAI-호환 비전 포맷(LiteLLM 프록시 포함).
+    const content = image
+      ? [
+          { type: "text", text: prompt },
+          { type: "image_url", image_url: { url: `data:${image.mediaType};base64,${image.base64}` } },
+        ]
+      : prompt;
     let res: Response;
     try {
       res = await f(`${base}/chat/completions`, {
@@ -124,7 +143,7 @@ export function openaiComplete(cfg: {
         body: JSON.stringify({
           model: cfg.model,
           ...(cfg.maxTokens ? { max_tokens: cfg.maxTokens } : {}),
-          messages: [{ role: "user", content: prompt }],
+          messages: [{ role: "user", content }],
         }),
       });
     } catch (err) {

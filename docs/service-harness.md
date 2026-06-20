@@ -546,6 +546,29 @@ So an agent can perceive → locate → inject real OS input → cause a real st
 third-party desktop app — the loop a desktop-task benchmark needs. (Full task completion, e.g. SSH-connect-and-run,
 needs a target SSH server + credentials and is the next rung; this rung proves the drive+observe mechanism.)
 
+### VLM judge over the os-use screenshot — auto-grading desktop tasks ✅
+A desktop/computer-use task has no `pass`/`fail` test command — the goal is a **visual state** ("the remote-connect form is
+open", "the file is saved", "the chart rendered"). So the natural grader is a **VLM that looks at the screenshot and judges
+the goal state** — with no benchmark-specific code (the tenant defines the goal as a `task` + `rubric`, data not code). The
+existing `Judge`/`JudgeGrader`/`modelJudge` abstraction already had a `screenshot` slot but only wired it for `browser`
+snapshots and a **text-only** transport. SLICE 74 makes it real for os-use:
+- `JudgeImage {base64, mediaType}` added to the `Judge` input; `JudgeGrader` (when `useScreenshot`) **resolves an os-use
+  snapshot's `screenshotRef` to bytes** by running `base64` in the case `compute` (the screenshot lives inside the desktop
+  env-container) and passes the image through.
+- `JudgeCompletion` gains an optional image arg; `openaiComplete` attaches an OpenAI-compatible `image_url` data-URL block
+  and `anthropicComplete` an Anthropic `image` block — so the same judge works over a LiteLLM proxy or Anthropic directly.
+  All backward-compatible (image optional; trace/DOM judging unchanged). +5 deterministic tests (transport image blocks,
+  modelJudge passthrough, grader os-use resolution, `useScreenshot:false` reads nothing). Repo typecheck 33/33, test 33/33.
+
+**Verified live** (`scripts/live/os-use-vlm-judge.mjs`, real VLM via the LiteLLM proxy, `gpt-5.4-mini`): the **real
+production path** (`judgeFromEnv → modelJudge → openaiComplete(image_url) → JudgeGrader.resolveScreenshot`) graded the two
+**real hermes os-use screenshots** from the drive run, judging purely from pixels against the rubric "PASS only if a Server
+URL input is visible; the welcome landing screen is NOT the goal" — **after** (Connect-to-Remote form) → `pass=true score=1`
+("the 'Connect to Remote Hermes' screen with a visible 'Server URL' input field… matches the goal state"); **before**
+(Welcome landing) → `pass=false score=0.11` ("the initial welcome screen… no visible Server URL field. This is not the goal
+state"). So a tenant can score an arbitrary desktop/UI task by describing the goal in words — the loop SLICE 73 proved
+(perceive→act→observe) now closes with **observe→judge**, end-to-end auto-grading with no per-benchmark grader.
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

@@ -31,6 +31,17 @@ describe("modelJudge", () => {
     expect(prompt).toContain("be correct");
     expect(prompt).toContain("llm_call");
   });
+
+  it("스크린샷(VLM)이 있으면 complete 에 이미지를 넘기고 프롬프트에 명시한다", async () => {
+    const complete = vi.fn((_prompt: string, _image?: { base64: string; mediaType: string }) =>
+      Promise.resolve('{"pass":true,"score":1,"reason":"goal state shown"}'),
+    );
+    const screenshot = { base64: "AAAA", mediaType: "image/png" };
+    const v = await modelJudge(complete).judge({ task: "show the remote form", screenshot });
+    expect(v.pass).toBe(true);
+    expect(complete.mock.calls[0]?.[1]).toEqual(screenshot); // 이미지가 전송으로 전달됨
+    expect(complete.mock.calls[0]?.[0]).toContain("SCREENSHOT"); // 프롬프트가 첨부 스크린샷을 명시
+  });
 });
 
 describe("anthropicComplete", () => {
@@ -51,6 +62,20 @@ describe("anthropicComplete", () => {
     const complete = anthropicComplete({ apiKey: "k", model: "m", fetchImpl: fetchImpl as typeof fetch });
     await expect(complete("p")).rejects.toBeInstanceOf(AppError);
   });
+
+  it("이미지가 있으면 멀티모달 content(base64 image 블록)로 전송", async () => {
+    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ content: [{ text: "hi" }] }), { status: 200 })),
+    );
+    const complete = anthropicComplete({ apiKey: "k", model: "claude-opus-4-8", fetchImpl: fetchImpl as typeof fetch });
+    await complete("p", { base64: "B64", mediaType: "image/png" });
+    const body = JSON.parse(String((fetchImpl.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.messages[0].content[0]).toEqual({ type: "text", text: "p" });
+    expect(body.messages[0].content[1]).toEqual({
+      type: "image",
+      source: { type: "base64", media_type: "image/png", data: "B64" },
+    });
+  });
 });
 
 describe("openaiComplete", () => {
@@ -69,6 +94,20 @@ describe("openaiComplete", () => {
     expect(await complete("p")).toBe("verdict");
     expect(fetchImpl.mock.calls[0]?.[0]).toBe("http://litellm/v1/chat/completions");
     expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer k");
+  });
+
+  it("이미지가 있으면 멀티모달 content(image_url data-URL)로 전송 — LiteLLM 비전 포함", async () => {
+    const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
+      Promise.resolve(new Response(JSON.stringify({ choices: [{ message: { content: "v" } }] }), { status: 200 })),
+    );
+    const complete = openaiComplete({ apiKey: "k", model: "gpt-5.4-mini", fetchImpl: fetchImpl as typeof fetch });
+    await complete("p", { base64: "B64", mediaType: "image/png" });
+    const body = JSON.parse(String((fetchImpl.mock.calls[0]?.[1] as RequestInit).body));
+    expect(body.messages[0].content[0]).toEqual({ type: "text", text: "p" });
+    expect(body.messages[0].content[1]).toEqual({
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,B64" },
+    });
   });
 });
 

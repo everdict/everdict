@@ -152,12 +152,12 @@ try {
   console.log("dpr              =", result.dpr);
   console.log("window           =", JSON.stringify(result.win));
   console.log("clicked at (px)  =", JSON.stringify(result.click));
-  console.log("beforeServerUrl  =", result.beforeServerUrl, " (inputs:", result.beforeInputs + ")");
-  console.log("serverUrlVisible =", result.serverUrlVisible, " (inputs:", result.afterInputs + ")");
+  console.log("beforeServerUrl  =", result.beforeServerUrl, ` (inputs: ${result.beforeInputs})`);
+  console.log("serverUrlVisible =", result.serverUrlVisible, ` (inputs: ${result.afterInputs})`);
   console.log("screenshot bytes =", result.beforeBytes, "->", result.afterBytes);
   console.log("snapshot.kind    =", snapshot.kind, " windows:", JSON.stringify(snapshot.windows));
   if (result.error) console.log("driver.error     =", result.error.slice(0, 500));
-  console.log("\ngrader[gui-drive]: pass=" + score.pass + "  " + String(score.detail).split("\n")[0]);
+  console.log(`\ngrader[gui-drive]: pass=${score.pass}  ${String(score.detail).split("\n")[0]}`);
 
   const ok = score.pass === true && result.transitioned === true;
   console.log(
@@ -174,7 +174,11 @@ try {
 } finally {
   // 무거운 이미지/캐시 정리(디스크) — 내 이미지만. system prune 금지. (KEEP_IMAGE=1 이면 디버그용 보존)
   if (!process.env.KEEP_IMAGE) {
-    try { execFileSync("docker", ["rmi", "-f", IMAGE], { stdio: "ignore" }); } catch {}
-    try { execFileSync("docker", ["builder", "prune", "-f"], { stdio: "ignore" }); } catch {}
+    try {
+      execFileSync("docker", ["rmi", "-f", IMAGE], { stdio: "ignore" });
+    } catch {}
+    try {
+      execFileSync("docker", ["builder", "prune", "-f"], { stdio: "ignore" });
+    } catch {}
   }
 }

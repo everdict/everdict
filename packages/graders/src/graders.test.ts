@@ -75,6 +75,70 @@ describe("JudgeGrader", () => {
     expect(score.pass).toBe(true);
     expect(score.value).toBe(0.9);
   });
+
+  it("os-use 스냅샷: 환경에서 스크린샷을 base64 로 읽어 VLM 입력(screenshot)으로 넘긴다", async () => {
+    let received: Parameters<Judge["judge"]>[0] | undefined;
+    const spy: Judge = {
+      async judge(input) {
+        received = input;
+        return { pass: true, score: 1, reason: "goal state shown" };
+      },
+    };
+    const calls: string[] = [];
+    const compute = {
+      async exec(cmd: string) {
+        calls.push(cmd);
+        return { exitCode: 0, stdout: "QkFTRTY0\n", stderr: "" }; // base64 stdout(개행 포함)
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    const ctx: GradeContext = {
+      case: { id: "c", env: { kind: "os-use" }, task: "open the remote form", graders: [], timeoutSec: 1, tags: [] },
+      trace: [] as TraceEvent[],
+      snapshot: { kind: "os-use", screenshotRef: "/tmp/assay-screen.png", windows: [] },
+      compute,
+    };
+    const score = await new JudgeGrader(spy, { id: "vlm", useScreenshot: true }).grade(ctx);
+    expect(score.pass).toBe(true);
+    expect(calls[0]).toContain("base64 -w0");
+    expect(calls[0]).toContain("/tmp/assay-screen.png");
+    expect(received?.screenshot).toEqual({ base64: "QkFTRTY0", mediaType: "image/png" }); // 개행 trim + png
+  });
+
+  it("useScreenshot 가 false 면 os-use 라도 스크린샷을 읽지 않는다", async () => {
+    let received: Parameters<Judge["judge"]>[0] | undefined;
+    const spy: Judge = {
+      async judge(input) {
+        received = input;
+        return { pass: false, score: 0, reason: "no" };
+      },
+    };
+    let execCalls = 0;
+    const compute = {
+      async exec() {
+        execCalls++;
+        return { exitCode: 0, stdout: "x", stderr: "" };
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    const ctx: GradeContext = {
+      case: { id: "c", env: { kind: "os-use" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
+      trace: [] as TraceEvent[],
+      snapshot: { kind: "os-use", screenshotRef: "/tmp/s.png", windows: [] },
+      compute,
+    };
+    await new JudgeGrader(spy, { useScreenshot: false }).grade(ctx);
+    expect(execCalls).toBe(0);
+    expect(received?.screenshot).toBeUndefined();
+  });
 });
 
 describe("makeGraders", () => {
