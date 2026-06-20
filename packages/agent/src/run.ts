@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult, Grader } from "@assay/core";
+import { type AgentJob, type CaseResult, type Grader, judgeEnv } from "@assay/core";
 import { LocalDriver } from "@assay/drivers";
 import { RepoEnvironment } from "@assay/environments";
 import { runCase } from "@assay/runner";
@@ -16,9 +16,11 @@ export async function runAgentJob(job: AgentJob): Promise<CaseResult> {
   // 켜지면 command 하니스가 모델 호출을 usage-proxy 로 통과시켜 토큰을 회수 → 합성 trace 이벤트로 결과에 실린다.
   const meterUsage = job.meterUsage ?? process.env.ASSAY_METER_USAGE === "1";
   const harness = makeHarness(job.harness.id, job.harness.version, job.harnessSpec, { meterUsage });
-  // judge grader 포함: env(ASSAY_JUDGE_MODEL + 키, 컨트롤플레인이 테넌트 시크릿을 alloc 에 주입)로 Judge 구성.
+  // judge grader 포함: env(키=secretEnv) + job.judge(모델/프로바이더, 컨트롤플레인이 잡에 실음)로 Judge 구성.
+  // 원격 alloc 은 백엔드가 judgeEnv 를 env 에 이미 주입하지만, 로컬(process.env)도 동일하게 동작하도록 여기서 병합.
   // 미구성이면 judge 스펙만 skip 점수(일반 eval 이 죽지 않게).
-  const graders: Grader[] = makeGradersFromEnv(job.evalCase.graders);
+  const env = { ...process.env, ...judgeEnv(job.judge) };
+  const graders: Grader[] = makeGradersFromEnv(job.evalCase.graders, env);
   return runCase(job.evalCase, {
     driver: new LocalDriver(),
     environment: new RepoEnvironment(),

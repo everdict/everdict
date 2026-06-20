@@ -75,6 +75,19 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(decoded.harness.id).toBe("aider");
   });
 
+  it("job.judge 가 있으면 judge 모델 env 를 파드에 주입한다(키는 secretEnv)", () => {
+    const m = buildK8sJob(
+      { ...JOB, judge: { model: "gpt-5.4-mini" } },
+      { image: "img", secretEnv: { OPENAI_API_KEY: "k" } },
+      "n",
+      "ns",
+    ) as unknown as JobManifest;
+    expect(envOf(m, "ASSAY_JUDGE_MODEL")).toBe("gpt-5.4-mini");
+    expect(envOf(m, "OPENAI_API_KEY")).toBe("k");
+    const off = buildK8sJob(JOB, { image: "img" }, "n", "ns") as unknown as JobManifest;
+    expect(envOf(off, "ASSAY_JUDGE_MODEL")).toBeUndefined();
+  });
+
   it("runtimeClassName 이 주어지면 파드 스펙에 실린다", () => {
     const m = buildK8sJob(JOB, { image: "img" }, "n", "ns", "gvisor") as unknown as JobManifest;
     expect(m.spec.template.spec.runtimeClassName).toBe("gvisor");

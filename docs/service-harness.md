@@ -354,9 +354,25 @@ stays strict (throws) for direct callers.
 runs `echo hello > out.txt`, plus a `judge` grader) through `runAgentJob` — with the judge env set, the **real model
 judges the actual trace** (`pass=true`, score 1.00, "ran a tool command `echo hello > out.txt`…"); with it unset, the
 judge grader yields a skip score and the eval still completes. So WebVoyager-style judge presets now score
-automatically in a normal eval. (Open follow-ups: control-plane injection of judge model env from tenant secrets into
-Nomad/K8s allocs; SWE-bench harness setup [deps/conda env + patch apply] for real test execution; GitHub-sourced
-harness-coupled benchmarks; a `prompt` env kind for non-browser QA.)
+automatically in a normal eval.
+
+#### Control-plane injection of the judge model into remote allocs ✅
+The judge needs a **model** (which model judges) and a **key** (provider credential) — different concerns, different
+channels. The model is per-run *config*, not a secret, so it travels on the job: `AgentJob.judge: {provider?, model}`
+(set by the control plane from workspace/suite policy, like the existing `meterUsage`). `core.judgeEnv(job.judge)`
+maps it to the env contract (`ASSAY_JUDGE_MODEL` / `ASSAY_JUDGE_PROVIDER`, the same names `judgeFromEnv` reads), and
+**both backends merge it into the alloc env** (`buildNomadJob` / `buildK8sJob`), alongside — but separate from — the
+tenant secret keys (`OPENAI_API_KEY` etc.) injected via the `SecretProvider` channel (which was already a no-whitelist
+passthrough). `runAgentJob` merges the same `judgeEnv(job.judge)` so local and remote behave identically.
+
+**Verified live** (`scripts/live/judge-config-injection.mjs`, real LiteLLM): with `process.env.ASSAY_JUDGE_MODEL`
+deliberately unset, `buildNomadJob` puts `ASSAY_JUDGE_MODEL`/`ASSAY_JUDGE_PROVIDER` in the alloc env (key arriving
+separately via `secretEnv`), and `runAgentJob` — taking the model **only from `job.judge`** — runs the real model
+judge (`pass=true`, 1.00, "A tool call executed `echo hello > out.txt`…"). So a per-run judge config reaches a remote
+alloc end-to-end, with the credential kept on the separate secret channel. (Open follow-ups: a workspace/suite-level
+default judge config so the control plane fills `job.judge` automatically; SWE-bench harness setup [deps/conda env +
+patch apply] for real test execution; GitHub-sourced harness-coupled benchmarks; a `prompt` env kind for non-browser
+QA.)
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we

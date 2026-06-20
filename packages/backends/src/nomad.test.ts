@@ -41,6 +41,26 @@ describe("buildNomadJob", () => {
     expect(decoded.evalCase.id).toBe("c1");
     expect(decoded.harness.id).toBe("claude-code");
   });
+
+  it("job.judge 가 있으면 judge 모델 env 를 alloc 에 주입한다(키는 secretEnv)", () => {
+    const spec = buildNomadJob(
+      { ...JOB, judge: { provider: "openai", model: "gpt-5.4-mini" } },
+      {
+        addr: "http://nomad:4646",
+        image: "reg/assay-agent:1",
+        secretEnv: { OPENAI_API_KEY: "k", OPENAI_BASE_URL: "http://litellm" },
+      },
+    );
+    const env = spec.Job.TaskGroups[0]?.Tasks[0]?.Env;
+    expect(env?.ASSAY_JUDGE_MODEL).toBe("gpt-5.4-mini"); // per-run 설정
+    expect(env?.ASSAY_JUDGE_PROVIDER).toBe("openai");
+    expect(env?.OPENAI_API_KEY).toBe("k"); // 프로바이더 키는 테넌트 시크릿
+    expect(env?.OPENAI_BASE_URL).toBe("http://litellm");
+  });
+  it("job.judge 가 없으면 judge env 를 넣지 않는다", () => {
+    const spec = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "i" });
+    expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Env.ASSAY_JUDGE_MODEL).toBeUndefined();
+  });
 });
 
 describe("fetchHttp (Nomad API 인증)", () => {

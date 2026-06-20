@@ -1,5 +1,12 @@
 import { RESULT_SENTINEL } from "@assay/agent";
-import { type AgentJob, type CaseResult, CaseResultSchema, UpstreamError, assertHardenedIsolation } from "@assay/core";
+import {
+  type AgentJob,
+  type CaseResult,
+  CaseResultSchema,
+  UpstreamError,
+  assertHardenedIsolation,
+  judgeEnv,
+} from "@assay/core";
 import type { Backend, BackendCapacity } from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
@@ -78,6 +85,7 @@ export function nomadJobId(job: AgentJob): string {
 export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJobSpec {
   const env: Record<string, string> = {
     ASSAY_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
+    ...judgeEnv(job.judge), // per-run judge 모델 설정(키는 secretEnv). inline judge grader 가 이 모델로 판정.
     ...opts.secretEnv,
   };
   return {

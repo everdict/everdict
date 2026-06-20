@@ -1,5 +1,5 @@
 import process from "node:process";
-import type { Grader, GraderSpec, Score } from "@assay/core";
+import { type Grader, type GraderSpec, JUDGE_MODEL_ENV, JUDGE_PROVIDER_ENV, type Score } from "@assay/core";
 import type { Judge } from "./judge.js";
 import { makeGraders } from "./make-graders.js";
 import { anthropicComplete, modelJudge, openaiComplete } from "./model-judge.js";
@@ -12,9 +12,9 @@ type Env = Record<string, string | undefined>;
 //   ASSAY_JUDGE_PROVIDER = openai(기본) | anthropic
 //   OPENAI_API_KEY / OPENAI_BASE_URL   또는   ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL
 export function judgeFromEnv(env: Env = process.env): Judge | undefined {
-  const model = env.ASSAY_JUDGE_MODEL;
+  const model = env[JUDGE_MODEL_ENV];
   if (!model) return undefined;
-  if ((env.ASSAY_JUDGE_PROVIDER ?? "openai") === "anthropic") {
+  if ((env[JUDGE_PROVIDER_ENV] ?? "openai") === "anthropic") {
     const apiKey = env.ANTHROPIC_API_KEY;
     if (!apiKey) return undefined;
     return modelJudge(
