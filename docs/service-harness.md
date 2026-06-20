@@ -486,7 +486,21 @@ pytest: with the dataset's gold `patch` applied (standing in for the agent's pre
 → `resolved=false`. (`PASS_TO_PASS` was skipped here only because the offline sandbox can't reach the network some of
 requests' regression tests need; `FAIL_TO_PASS` is the bug-fix signal.) The image was removed + the build cache pruned
 afterward (disk returned to its prior level). So the SWE-bench evaluation path is verified against a real published
-image with real dependencies — not just stand-ins. (Other follow-ups: a `prompt` env kind for non-browser QA.)
+image with real dependencies — not just stand-ins.
+
+### Prompt env kind — non-browser QA as a first-class environment ✅
+Pure-QA benchmarks (GSM8K, GAIA) have no *stage* — the agent just answers a prompt. They were mapped to a
+browser-less `browser` env as a stopgap; now there's a proper **`prompt`** env kind (`EnvSpec` + `EnvSnapshot`
+variants alongside `repo`/`browser`). `PromptEnvironment` is a no-stage environment (`seed` is a no-op, `snapshot`
+returns `{kind:"prompt"}`); grading reads the answer from the trace (`answer-match`/`judge`). `runAgentJob` now
+selects the environment by `evalCase.env.kind` (`prompt` → `PromptEnvironment`, else `RepoEnvironment`), and the
+`CaseMapping.promptEnv` flag makes the `gsm8k`/`gaia` adapters emit `env: {kind:"prompt"}` instead of the
+browser-less stopgap.
+
+**Verified live** (`scripts/live/prompt-env-qa.mjs`): the `gsm8k` adapter emits `case.env = {kind:"prompt"}`;
+`runAgentJob` on a prompt case yields `snapshot.kind === "prompt"` (proving `PromptEnvironment` is selected — a
+`repo` env would have thrown at seed); and `runCase(PromptEnvironment + a QA harness + answer-match)` grades the
+answer (`pass=true`) with no browser/repo stage. So non-browser QA is a first-class environment, not a workaround.
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner

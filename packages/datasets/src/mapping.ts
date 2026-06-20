@@ -11,6 +11,7 @@ export interface CaseMapping {
   idField: string;
   taskField: string;
   startUrlField?: string; // 있으면 browser env(startUrl); 없으면 startUrl 없는 browser env
+  promptEnv?: boolean; // true 면 환경 없는 prompt env(QA — gsm8k/GAIA). repo/browser 보다 우선순위 낮음(git/repoPath 가 이김).
   answerField?: string; // 있으면 answer-match{expect} grader 자동 추가
   answerMode?: "contains" | "exact"; // answer-match 모드(기본 contains). GAIA 류 정답대조는 exact.
   gitField?: string; // 있으면 repo env(source.git) — clone 기반 코딩 벤치마크
@@ -41,6 +42,8 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   } else if (git) {
     const ref = m.refField ? str(row[m.refField]) : "";
     env = { kind: "repo", source: { git, ref: ref || "HEAD" } };
+  } else if (m.promptEnv) {
+    env = { kind: "prompt" }; // 환경 없는 QA(gsm8k/GAIA)
   } else {
     const url = m.startUrlField ? str(row[m.startUrlField]) : "";
     env = url ? { kind: "browser", startUrl: url } : { kind: "browser" };

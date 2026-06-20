@@ -20,7 +20,18 @@ export const BrowserSnapshotSchema = z.object({
 });
 export type BrowserSnapshot = z.infer<typeof BrowserSnapshotSchema>;
 
-export const EnvSnapshotSchema = z.discriminatedUnion("kind", [RepoSnapshotSchema, BrowserSnapshotSchema]);
+// 환경 없는 QA(프롬프트→답). 결과 세계가 없으므로 스냅샷은 최소(채점은 trace 의 답을 본다 — answer-match/judge).
+export const PromptSnapshotSchema = z.object({
+  kind: z.literal("prompt"),
+  output: z.string().default(""), // 선택: 에이전트 최종 답(있으면). 1차 신호는 trace.
+});
+export type PromptSnapshot = z.infer<typeof PromptSnapshotSchema>;
+
+export const EnvSnapshotSchema = z.discriminatedUnion("kind", [
+  RepoSnapshotSchema,
+  BrowserSnapshotSchema,
+  PromptSnapshotSchema,
+]);
 export type EnvSnapshot = z.infer<typeof EnvSnapshotSchema>;
 
 // repo 시드 출처: 원격 git / 인라인 파일 맵(픽스처) / 이미지-내 경로(컨테이너에 이미 체크아웃된 repo, 예: SWE-bench /testbed).
@@ -42,6 +53,11 @@ export const EnvSpecSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("browser"),
     startUrl: z.string().optional(),
+  }),
+  // 환경 없는 QA(프롬프트→답). repo/browser 같은 무대가 없다 — gsm8k/GAIA 류. 선택적 context 를 task 에 더한다.
+  z.object({
+    kind: z.literal("prompt"),
+    context: z.string().optional(),
   }),
 ]);
 export type EnvSpec = z.infer<typeof EnvSpecSchema>;

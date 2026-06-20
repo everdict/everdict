@@ -125,6 +125,7 @@ describe("BenchmarkAdapter 카탈로그", () => {
     expect(DatasetSchema.safeParse(ds).success).toBe(true);
     expect(ds.cases[0]?.task).toBe("Janet's ducks…");
     expect(ds.cases[0]?.graders).toEqual([{ id: "answer-match", config: { expect: "18" } }]);
+    expect(ds.cases[0]?.env).toEqual({ kind: "prompt" }); // 환경 없는 QA — browser-less 우회 아님
   });
 
   it("mind2web: 최종답 없음 → steps 채점 + 사이트/도메인 태그(browser env)", () => {

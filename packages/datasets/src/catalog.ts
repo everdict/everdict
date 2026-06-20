@@ -141,7 +141,7 @@ export const BENCHMARK_CATALOG = {
     category: "qa",
     defaultVersion: "main",
     source: { kind: "huggingface", dataset: "openai/gsm8k", config: "main", split: "test" },
-    mapping: { idField: "id", taskField: "question", answerField: "_final" },
+    mapping: { idField: "id", taskField: "question", answerField: "_final", promptEnv: true },
     rowTransform: gsm8kFinal,
   },
   // 일반 어시스턴트 벤치마크(툴 사용 + 최종답). HF **gated** → 테넌트 HF 토큰 필요(opts.token / SecretStore).
@@ -158,12 +158,13 @@ export const BENCHMARK_CATALOG = {
       split: "validation",
       gated: true,
     },
-    // GAIA 채점은 quasi-exact-match → answer-match exact.
+    // GAIA 채점은 quasi-exact-match → answer-match exact. 환경 없는 QA → prompt env.
     mapping: {
       idField: "task_id",
       taskField: "Question",
       answerField: "Final answer",
       answerMode: "exact",
+      promptEnv: true,
       tagFields: ["Level"],
     },
   },

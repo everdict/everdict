@@ -1,6 +1,6 @@
-import { type AgentJob, type CaseResult, type Driver, type Grader, judgeEnv } from "@assay/core";
+import { type AgentJob, type CaseResult, type Driver, type Environment, type Grader, judgeEnv } from "@assay/core";
 import { LocalDriver } from "@assay/drivers";
-import { RepoEnvironment } from "@assay/environments";
+import { PromptEnvironment, RepoEnvironment } from "@assay/environments";
 import { runCase } from "@assay/runner";
 import { runContextFromEnv } from "./env.js";
 import { makeGradersFromEnv, makeHarness } from "./registry.js";
@@ -21,9 +21,12 @@ export async function runAgentJob(job: AgentJob, opts: { driver?: Driver } = {})
   // 미구성이면 judge 스펙만 skip 점수(일반 eval 이 죽지 않게).
   const env = { ...process.env, ...judgeEnv(job.judge) };
   const graders: Grader[] = makeGradersFromEnv(job.evalCase.graders, env);
+  // 환경은 케이스 env.kind 로 선택: prompt(환경 없는 QA) → PromptEnvironment, 그 외 → RepoEnvironment(코딩/시드).
+  // (browser 토폴로지는 ServiceTopologyBackend 가 담당 — 이 로컬 경로 밖.)
+  const environment: Environment = job.evalCase.env.kind === "prompt" ? new PromptEnvironment() : new RepoEnvironment();
   return runCase(job.evalCase, {
     driver: opts.driver ?? new LocalDriver(),
-    environment: new RepoEnvironment(),
+    environment,
     harness,
     graders,
     runCtx: runContextFromEnv(),
