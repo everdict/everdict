@@ -216,6 +216,9 @@ importers:
       '@assay/core':
         specifier: workspace:*
         version: link:../core
+      zod:
+        specifier: ^3.24.1
+        version: 3.25.76
 
   packages/db:
     dependencies:
@@ -289,6 +292,9 @@ importers:
       '@assay/core':
         specifier: workspace:*
         version: link:../core
+      '@assay/datasets':
+        specifier: workspace:*
+        version: link:../datasets
       '@assay/db':
         specifier: workspace:*
         version: link:../db

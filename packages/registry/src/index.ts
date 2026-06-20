@@ -18,3 +18,4 @@ export { loadJudgeDir } from "./load-judges.js";
 export { type RuntimeRegistry, InMemoryRuntimeRegistry } from "./runtime-registry.js";
 export { PgRuntimeRegistry } from "./pg-runtime-registry.js";
 export { loadRuntimeDir } from "./load-runtimes.js";
+export { type BenchmarkRegistry, InMemoryBenchmarkRegistry } from "./benchmark-registry.js";

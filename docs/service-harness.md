@@ -381,8 +381,26 @@ catalog adapter and no benchmark-specific grader** — runs through the full loo
 (`1 passed`); without the fix → `unresolved` (`1 failed`); with the fix but `env.setup` removed → `unresolved`
 (`ImportError` — deps not provisioned), proving `env.setup` is the load-bearing, user-configurable dependency hook. So
 "bring any/new benchmark" holds for test-execution benchmarks too — the user owns the dataset, the deps, and the
-grading, all as data. (Remaining: official SWE-bench prebuilt images as a first-party `env.image` seed for that family
-at scale; a `prompt` env kind for non-browser QA.)
+grading, all as data.
+
+#### Per-tenant benchmark definitions — generalizing the catalog from code to data ✅
+A one-off import is already tenant-scoped (the resulting `Dataset` is tenant-owned). The last code-coupling was the
+**catalog itself**: a *reusable* benchmark definition (source + mapping + grading) lived only as first-party code
+(`BENCHMARK_CATALOG`), so a tenant couldn't register/version their own. Closed by making the definition **pure data**:
+`BenchmarkAdapterSpec` (Zod, JSON-serializable — `source`, `mapping`, and `graderTemplates` with `{field}`
+interpolation, so even per-row SWE-bench-style patches become data, no `graderBuilder` code), `importFromSpec(spec)`
+(→ tenant-owned `Dataset`), and a tenant-scoped **`BenchmarkRegistry`** (`@assay/registry`, InMemory; tenant +
+`_shared` fallback, version-immutable — the exact `DatasetRegistry`/`JudgeRegistry` model). So each tenant registers
+their own benchmark recipes in their workspace, with first-party recipes seeded into `_shared`.
+
+**Verified live** (`scripts/live/tenant-benchmark-registry.mjs`, real HF for the shared one): tenant `acme` registers a
+private coding recipe (per-row `test_patch` → a `command` grader via `applyPatch: "{test_patch}"`), tenant `globex` a
+private QA recipe, and a first-party `gsm8k` recipe sits in `_shared`. `globex` cannot read `acme`'s recipe (isolation),
+both see `gsm8k` (`_shared` fallback); `acme` imports its recipe → a tenant `Dataset` whose `command` grader has the
+`{test_patch}` interpolated into a real patch; `globex` imports the shared `gsm8k` recipe over **real HF** → a 2-case
+tenant dataset. So benchmark definitions are now per-tenant data, end-to-end — the catalog is just the `_shared` seed.
+(Remaining: Pg-backed `BenchmarkRegistry` + API/web CRUD for recipes; official SWE-bench prebuilt images as a
+first-party `env.image` seed; a `prompt` env kind for non-browser QA.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner

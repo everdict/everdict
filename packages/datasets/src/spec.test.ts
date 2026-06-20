@@ -1,0 +1,84 @@
+import { describe, expect, it } from "vitest";
+import type { FetchLike } from "./sources.js";
+import { BenchmarkAdapterSpecSchema, importFromSpec, specToAdapter } from "./spec.js";
+
+const hfFetch =
+  (rows: Array<Record<string, unknown>>): FetchLike =>
+  async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ rows: rows.map((row) => ({ row })), num_rows_total: rows.length }),
+  });
+
+describe("BenchmarkAdapterSpec (데이터 정의)", () => {
+  it("JSON 직렬화 가능 스펙을 검증한다(category 기본 qa)", () => {
+    const parsed = BenchmarkAdapterSpecSchema.parse({
+      id: "my-bench",
+      version: "1.0.0",
+      source: { kind: "huggingface", dataset: "me/mine", split: "test" },
+      mapping: { idField: "id", taskField: "q", answerField: "a" },
+    });
+    expect(parsed.category).toBe("qa");
+    // 라운드트립(저장/복원) 가능 — 순수 데이터.
+    expect(BenchmarkAdapterSpecSchema.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
+  });
+
+  it("graderTemplates 의 {field} 가 행별로 보간되어 grader config 가 된다(코드 graderBuilder 대체)", async () => {
+    const spec = BenchmarkAdapterSpecSchema.parse({
+      id: "code-bench",
+      version: "1.0.0",
+      category: "coding",
+      source: { kind: "huggingface", dataset: "me/code", split: "test" },
+      mapping: { idField: "iid", taskField: "problem", gitField: "_git", refField: "base" },
+      // per-row SWE-bench 형태를 "데이터"로: applyPatch 는 행의 test_patch, cmd 는 리터럴.
+      graderTemplates: [
+        { id: "command", config: { applyPatch: "{test_patch}", cmd: "python -m pytest -q", metric: "resolved" } },
+      ],
+    });
+    const ds = await importFromSpec(
+      spec,
+      { id: "code-bench", version: "1.0.0" },
+      {
+        limit: 1,
+        fetchImpl: hfFetch([
+          {
+            iid: "x-1",
+            problem: "fix bug",
+            _git: "https://github.com/me/code.git",
+            base: "abc",
+            test_patch: "diff --git a b\n+T",
+          },
+        ]),
+      },
+    );
+    const c = ds.cases[0];
+    expect(c?.id).toBe("x-1");
+    expect(c?.env).toEqual({ kind: "repo", source: { git: "https://github.com/me/code.git", ref: "abc" } });
+    const g = c?.graders.find((x) => x.id === "command");
+    expect(g?.config).toEqual({ applyPatch: "diff --git a b\n+T", cmd: "python -m pytest -q", metric: "resolved" });
+  });
+
+  it("specToAdapter: graderTemplates 없으면 graderBuilder 없음(매핑 graders 만)", () => {
+    const a = specToAdapter(
+      BenchmarkAdapterSpecSchema.parse({
+        id: "qa",
+        version: "1",
+        source: { kind: "jsonl" },
+        mapping: { idField: "id", taskField: "q", answerField: "a" },
+      }),
+    );
+    expect(a.graderBuilder).toBeUndefined();
+    expect(a.source).toEqual({ kind: "jsonl" });
+  });
+
+  it("jsonl 소스 스펙: opts.text 로 인입", async () => {
+    const spec = BenchmarkAdapterSpecSchema.parse({
+      id: "j",
+      version: "1",
+      source: { kind: "jsonl" },
+      mapping: { idField: "id", taskField: "q", answerField: "a" },
+    });
+    const ds = await importFromSpec(spec, { id: "j", version: "1" }, { text: '{"id":"r1","q":"hi","a":"yes"}' });
+    expect(ds.cases[0]?.graders).toEqual([{ id: "answer-match", config: { expect: "yes" } }]);
+  });
+});
