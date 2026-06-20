@@ -1,7 +1,7 @@
 import Link from 'next/link'
 
-import { type Run, runSchema } from '@/entities/run'
 import { TraceTimeline } from '@/widgets/trace-timeline'
+import { runSchema, type Run } from '@/entities/run'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
@@ -53,7 +53,10 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
   return (
     <div className="space-y-8">
       <div className="space-y-3">
-        <Link href="/dashboard/runs" className="text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/dashboard/runs"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
           ← Runs
         </Link>
         <PageHeader
@@ -90,10 +93,20 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                 <CardContent className="pt-5">
                   <div className="flex items-center justify-between">
                     <span className="text-sm font-medium">{s.graderId}</span>
-                    {s.pass != null && <Badge tone={s.pass ? 'success' : 'danger'}>{s.pass ? 'pass' : 'fail'}</Badge>}
+                    {s.pass != null && (
+                      <Badge tone={s.pass ? 'success' : 'danger'}>{s.pass ? 'pass' : 'fail'}</Badge>
+                    )}
                   </div>
-                  <div className="mt-1 font-mono text-2xl font-semibold tabular-nums">{s.value}</div>
+                  <div className="mt-1 font-mono text-2xl font-semibold tabular-nums">
+                    {s.value}
+                  </div>
                   <div className="text-xs text-muted-foreground">{s.metric}</div>
+                  {/* 판정 사유(judge 루브릭 reasoning, command 출력 등) — os-use VLM 채점에서 "왜" 를 보여준다. */}
+                  {s.detail && (
+                    <p className="mt-2 border-t border-border/60 pt-2 text-xs leading-relaxed text-muted-foreground">
+                      {s.detail}
+                    </p>
+                  )}
                 </CardContent>
               </Card>
             ))}

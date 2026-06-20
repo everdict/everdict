@@ -681,6 +681,26 @@ instruction. These are the *same os-use case shape* SLICES 76–78 proved runnab
 so once a tenant supplies an OSWorld desktop image + a computer-use agent, OSWorld runs and scores through the existing
 control plane. (Deterministic adapter tests cover the mapping + per-row rubric; no docker this slice.)
 
+### Web UI — trigger os-use scorecards + read the VLM verdict per case ✅
+The dashboard could already trigger/list scorecards, but the result view only showed score *badges* (`metric value`) —
+the **judge verdict** (`score.detail`, the VLM's reasoning) and the os-use snapshot were dropped, which is most of the
+signal for a screenshot-judged desktop benchmark. SLICE 80 surfaces them and makes os-use self-serve from the browser
+(`apps/web`, prettier+eslint, FSD):
+- **Result view** (`scorecards/[id]`, `runs/[id]`): the scorecard entity schema now types `score.detail` + the case
+  `snapshot` (already arriving via `passthrough`); each case renders an **os-use** snapshot badge and the per-grader
+  **verdict text** (the VLM's pass/fail reasoning), alongside the existing aggregate StatCards (pass-rate).
+- **Trigger** (`run-scorecard` feature): an optional inline **judge-model** field (e.g. `gpt-5.4-mini`) → the scorecard
+  body's `judge` override, so a tenant runs a VLM-judged os-use scorecard from the form without first setting a
+  workspace-default judge. The dataset/harness datalists already list the registered `hermes-desktop-ssh` + `desktop-ssh-agent`.
+
+**Verified live** (Next.js dev server against the running API, Keycloak disabled for dev so the dashboard route is
+reachable; scorecard seeded via `POST /scorecards/ingest`, no docker): the server-rendered `scorecards/:id` HTML contains
+both case rows, the `os-use` badge, the VLM verdicts ("…the Hermes main app screen…", "…NOT the Settings page. Not the
+goal."), the per-case scores (`0.98`/`0.03`), and the aggregate `pass 50%`; the `scorecards/new` form renders the
+judge-model field and lists `hermes-desktop-ssh` + `desktop-ssh-agent`. Web typechecks (tsc) + eslint clean.
+(Screenshot *bytes* aren't persisted yet — the os-use snapshot carries a container path, so the view shows the VLM
+verdict text; persisting screenshots to object storage to show them inline is the next rung.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

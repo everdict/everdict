@@ -12,6 +12,7 @@ export interface RunScorecardInput {
   harnessVersion: string
   judgeIds: string[]
   runtime: string
+  judgeModel?: string // inline judge grader 채점 모델(예: gpt-5.4-mini) — os-use 스크린샷 judge 등. 미지정이면 워크스페이스 기본.
 }
 
 export interface RunScorecardResult {
@@ -29,6 +30,7 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     judges: input.judgeIds.map((id) => ({ id, version: 'latest' })),
     ...(input.runtime ? { runtime: input.runtime } : {}),
+    ...(input.judgeModel ? { judge: { provider: 'openai', model: input.judgeModel } } : {}),
   }
   try {
     const rec = await controlPlane.runScorecard<{ id: string }>(ctx, body)

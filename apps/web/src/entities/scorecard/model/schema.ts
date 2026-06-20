@@ -13,9 +13,15 @@ export const metricSummarySchema = z.object({
 })
 export type MetricSummary = z.infer<typeof metricSummarySchema>
 
-// 케이스별 점수(느슨 — 표시 필드만, 나머지 passthrough).
+// 케이스별 점수(느슨 — 표시 필드만, 나머지 passthrough). detail = grader/judge 의 판정 사유(VLM 루브릭 reasoning 등).
 export const caseScoreSchema = z
-  .object({ graderId: z.string(), metric: z.string(), value: z.number(), pass: z.boolean().optional() })
+  .object({
+    graderId: z.string(),
+    metric: z.string(),
+    value: z.number(),
+    pass: z.boolean().optional(),
+    detail: z.string().optional(),
+  })
   .passthrough()
 
 export const caseResultSchema = z
@@ -23,6 +29,8 @@ export const caseResultSchema = z
     caseId: z.string(),
     harness: z.string().optional(),
     scores: z.array(caseScoreSchema).default([]),
+    // os-use=데스크탑 스냅샷(kind/windows), browser=dom/url 등. UI 는 kind 만 본다.
+    snapshot: z.object({ kind: z.string() }).passthrough().optional(),
   })
   .passthrough()
 
@@ -65,7 +73,12 @@ export const scorecardDiffSchema = z.object({
   baseline: z.string(),
   candidate: z.string(),
   metrics: z.array(
-    z.object({ metric: z.string(), baselineMean: z.number(), candidateMean: z.number(), delta: z.number() }),
+    z.object({
+      metric: z.string(),
+      baselineMean: z.number(),
+      candidateMean: z.number(),
+      delta: z.number(),
+    })
   ),
   regressions: z.array(caseDeltaSchema),
   improvements: z.array(caseDeltaSchema),

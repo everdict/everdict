@@ -1,12 +1,12 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-
+import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 
 import { Button } from '@/shared/ui/button'
 import { FieldError, Input, Label, Select } from '@/shared/ui/input'
+
 import { runScorecardAction } from '../api/run-scorecard'
 
 interface Values {
@@ -15,6 +15,7 @@ interface Values {
   harnessId: string
   harnessVersion: string
   runtime: string
+  judgeModel: string
 }
 
 // 데이터셋×하니스를 골라 배치 평가를 실행 + 적용할 judge + 실행 런타임 선택. 실제 해석은 컨트롤플레인이 한다.
@@ -43,6 +44,7 @@ export function RunScorecardForm({
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
       runtime: '',
+      judgeModel: '',
     },
   })
 
@@ -108,7 +110,11 @@ export function RunScorecardForm({
                 <input
                   type="checkbox"
                   checked={judgeIds.includes(j.id)}
-                  onChange={(e) => setJudgeIds(e.target.checked ? [...judgeIds, j.id] : judgeIds.filter((x) => x !== j.id))}
+                  onChange={(e) =>
+                    setJudgeIds(
+                      e.target.checked ? [...judgeIds, j.id] : judgeIds.filter((x) => x !== j.id)
+                    )
+                  }
                 />
                 {j.id}
               </label>
@@ -129,6 +135,15 @@ export function RunScorecardForm({
         </Select>
       </div>
 
+      <div className="space-y-1.5">
+        <Label htmlFor="judgeModel">judge 모델 (선택 — inline judge grader)</Label>
+        <Input id="judgeModel" placeholder="gpt-5.4-mini" {...register('judgeModel')} />
+        <p className="text-xs text-muted-foreground">
+          케이스의 judge grader(예: os-use 스크린샷 VLM 채점) 모델. 미지정이면 워크스페이스 기본
+          judge 를 씁니다.
+        </p>
+      </div>
+
       {serverError && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           {serverError}
@@ -136,7 +151,8 @@ export function RunScorecardForm({
       )}
 
       <p className="text-xs text-muted-foreground">
-        데이터셋의 모든 케이스를 이 하니스@버전으로 돌려 스코어카드를 집계합니다. 실행은 비동기 — 완료되면 상세에서 결과를 확인하세요.
+        데이터셋의 모든 케이스를 이 하니스@버전으로 돌려 스코어카드를 집계합니다. 실행은 비동기 —
+        완료되면 상세에서 결과를 확인하세요.
       </p>
 
       <Button type="submit" disabled={isSubmitting}>

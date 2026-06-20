@@ -1,6 +1,6 @@
 import Link from 'next/link'
 
-import { type ScorecardRecord, scorecardRecordSchema } from '@/entities/scorecard'
+import { scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
@@ -52,7 +52,10 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
   return (
     <div className="space-y-8">
       <div className="space-y-3">
-        <Link href="/dashboard/scorecards" className="text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/dashboard/scorecards"
+          className="text-sm text-muted-foreground hover:text-foreground"
+        >
           ← 스코어카드
         </Link>
         <PageHeader
@@ -90,7 +93,15 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
                 label={m.metric}
                 value={m.mean.toFixed(2)}
                 hint={`n=${m.count}${m.passRate != null ? ` · pass ${Math.round(m.passRate * 100)}%` : ''}`}
-                tone={m.passRate != null ? (m.passRate >= 1 ? 'success' : m.passRate > 0 ? 'primary' : 'danger') : 'default'}
+                tone={
+                  m.passRate != null
+                    ? m.passRate >= 1
+                      ? 'success'
+                      : m.passRate > 0
+                        ? 'primary'
+                        : 'danger'
+                    : 'default'
+                }
               />
             ))}
           </div>
@@ -105,19 +116,36 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
           <div className="space-y-2">
             {results.map((r) => (
               <Card key={r.caseId}>
-                <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5">
-                  <span className="font-mono text-sm font-medium">{r.caseId}</span>
-                  <div className="flex flex-wrap gap-1.5">
-                    {r.scores.length === 0 ? (
-                      <span className="text-xs text-muted-foreground">점수 없음</span>
-                    ) : (
-                      r.scores.map((s) => (
-                        <Badge key={s.graderId} tone={s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'}>
-                          {s.metric} {s.value}
-                        </Badge>
-                      ))
-                    )}
+                <CardContent className="space-y-2 pt-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="font-mono text-sm font-medium">{r.caseId}</span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {r.snapshot?.kind && <Badge tone="neutral">{String(r.snapshot.kind)}</Badge>}
+                      {r.scores.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">점수 없음</span>
+                      ) : (
+                        r.scores.map((s) => (
+                          <Badge
+                            key={s.graderId}
+                            tone={s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'}
+                          >
+                            {s.metric} {s.value}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
                   </div>
+                  {/* judge/grader 판정 사유(VLM 루브릭 reasoning 등) — os-use 등에서 "왜 pass/fail" 을 보여준다. */}
+                  {r.scores
+                    .filter((s) => s.detail)
+                    .map((s) => (
+                      <p
+                        key={`${s.graderId}-detail`}
+                        className="rounded-md bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+                      >
+                        <span className="font-medium text-foreground">{s.metric}</span> · {s.detail}
+                      </p>
+                    ))}
                 </CardContent>
               </Card>
             ))}
