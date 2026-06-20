@@ -455,8 +455,23 @@ ones (SWE-bench's `/testbed`) both resolve.
 a `DockerBackend`, and `dispatch` of a case (`image` = a git-bearing env image, a `scripted` harness, a `command`
 grader) runs in a container — the harness writes `out.txt` (`snapshot.changedFiles: ["out.txt"]`) and the grader
 verifies it **inside the container** (`pass=true`). So a control-plane run routes to a per-case container image; the
-SWE-bench prebuilt images take the exact same path. (Other follow-ups: a `prompt` env kind for non-browser QA; an
-env-mode that uses the in-image repo at `/testbed` so a coding agent operates on the prebuilt repo directly.)
+SWE-bench prebuilt images take the exact same path.
+
+#### In-image repo env-mode — SWE-bench fully autonomous ✅
+The last piece: a coding agent must operate on the prebuilt image's repo (at `/testbed`, with deps installed), not a
+fresh clone. A new `RepoSource` variant `{ path }` expresses "the repo is already in the image at this path." Rather
+than thread a work-dir through every harness/grader, `RepoEnvironment.seed` for `{path}` simply **symlinks the work
+dir to that path** (`ln -sfn /testbed work`), so the existing `"work"`-relative defaults of every harness and grader
+transparently operate on the in-image repo — no churn. The SWE-bench adapter now emits `env.source = {path:"/testbed"}`
+(SWE-bench's convention) + `image` = the prebuilt (deps), dropping the redundant clone.
+
+**Verified live** (`scripts/live/swe-bench-in-image.mjs`, real Docker, full `runCase`): a prebuilt-stand-in image
+(`/testbed` = a git repo at baseline with a bug + pytest, **no agent**) runs the whole loop — `DockerDriver` provisions
+it, `RepoEnvironment` symlinks `work → /testbed` (no clone), a `scripted` agent fixes `/testbed/calc.py` *through*
+`work` (`snapshot.changedFiles: ["calc.py"]` — it really touched the in-image repo), and `SweBenchGrader` applies the
+gold `test_patch` + runs pytest **in `/testbed`** → `resolved=true`; the no-fix run → `resolved=false`. So the coding
+agent operates on the prebuilt repo with its real deps, end-to-end — SWE-bench is fully autonomous, with deps + repo
+from the image and the agent never baked in. (Other follow-ups: a `prompt` env kind for non-browser QA.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner

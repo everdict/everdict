@@ -17,7 +17,11 @@ export class RepoEnvironment implements Environment<RepoSnapshot> {
   async seed(compute: ComputeHandle, spec: EnvSpec): Promise<void> {
     if (spec.kind !== "repo") throw new BadRequestError("BAD_REQUEST", { kind: spec.kind });
     const src = spec.source;
-    if ("files" in src) {
+    if ("path" in src) {
+      // 이미지-내 repo(예: SWE-bench /testbed): clone 하지 않고 작업 디렉터리(work)를 그 repo 로 심볼릭링크 →
+      // 하니스/그레이더의 기본 cwd("work")가 그대로 그 repo 를 가리킨다(스레딩 불필요). 코딩 에이전트가 직접 작업.
+      await compute.exec(`rm -rf ${WORK} && ln -sfn ${shq(src.path)} ${WORK}`);
+    } else if ("files" in src) {
       // 빈 files({})여도 work 디렉터리는 있어야 한다(코딩 에이전트의 작업 디렉터리).
       await compute.exec(`mkdir -p ${WORK}`);
       for (const [path, content] of Object.entries(src.files)) {

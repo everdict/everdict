@@ -99,16 +99,12 @@ export function sweBenchImage(instanceId: string, arch = "x86_64"): string {
   return `swebench/sweb.eval.${arch}.${instanceId.replaceAll("__", "_1776_")}:latest`;
 }
 
-// SWE-bench 정규화: repo→git URL(repo env), instance_id→공식 prebuilt 이미지(_image, deps 동봉).
+// SWE-bench 정규화: instance_id→공식 prebuilt 이미지(_image, repo@base_commit + deps 동봉).
+// repo 는 이미지 안 /testbed 에 이미 체크아웃돼 있어 clone 불필요(env.source={path:/testbed}).
 // test_patch/FAIL_TO_PASS/PASS_TO_PASS 는 graderBuilder 가 swe-bench grader 로.
 function sweBenchRow(row: Record<string, unknown>): Record<string, unknown> {
-  const repo = String(row.repo ?? "");
   const instanceId = String(row.instance_id ?? "");
-  return {
-    ...row,
-    _git: repo ? `https://github.com/${repo}.git` : "",
-    _image: instanceId ? sweBenchImage(instanceId) : "",
-  };
+  return { ...row, _image: instanceId ? sweBenchImage(instanceId) : "" };
 }
 
 // FAIL_TO_PASS/PASS_TO_PASS 는 JSON 배열 문자열 → 문자열 배열.
@@ -193,8 +189,7 @@ export const BENCHMARK_CATALOG = {
     mapping: {
       idField: "instance_id",
       taskField: "problem_statement",
-      gitField: "_git",
-      refField: "base_commit",
+      repoPath: "/testbed", // 이미지-내 repo(SWE-bench 관례) — clone 안 함, 코딩 에이전트가 직접 작업
       imageField: "_image", // 공식 prebuilt 이미지(deps+repo) — per-case 컴퓨트 이미지로
       tagFields: ["repo", "version"],
     },

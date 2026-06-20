@@ -13,8 +13,9 @@ export interface CaseMapping {
   startUrlField?: string; // 있으면 browser env(startUrl); 없으면 startUrl 없는 browser env
   answerField?: string; // 있으면 answer-match{expect} grader 자동 추가
   answerMode?: "contains" | "exact"; // answer-match 모드(기본 contains). GAIA 류 정답대조는 exact.
-  gitField?: string; // 있으면 repo env(source.git) — SWE-bench 류 코딩 벤치마크
+  gitField?: string; // 있으면 repo env(source.git) — clone 기반 코딩 벤치마크
   refField?: string; // repo env ref(없으면 HEAD)
+  repoPath?: string; // 있으면 repo env(source.path = 이미지-내 repo, 예: SWE-bench "/testbed") — clone 안 함
   imageField?: string; // 있으면 EvalCase.image(per-case 컴퓨트 이미지) — 예: SWE-bench 공식 prebuilt(deps+repo)
   testCmdField?: string; // 있으면 tests-pass{cmd} (행별 테스트 명령)
   tagFields?: string[]; // 태그로 쓸 필드들
@@ -35,7 +36,9 @@ function str(v: unknown): string {
 export function rowToCase(row: Record<string, unknown>, i: number, meta: DatasetMeta, m: CaseMapping): EvalCase {
   const git = m.gitField ? str(row[m.gitField]) : "";
   let env: EnvSpec;
-  if (git) {
+  if (m.repoPath) {
+    env = { kind: "repo", source: { path: m.repoPath } }; // 이미지-내 repo(예: /testbed) — clone 안 함
+  } else if (git) {
     const ref = m.refField ? str(row[m.refField]) : "";
     env = { kind: "repo", source: { git, ref: ref || "HEAD" } };
   } else {

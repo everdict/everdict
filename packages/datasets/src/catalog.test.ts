@@ -108,7 +108,8 @@ describe("BenchmarkAdapter 카탈로그", () => {
     );
     const c = swe.cases[0];
     expect(c?.id).toBe("astropy__astropy-12907");
-    expect(c?.env).toEqual({ kind: "repo", source: { git: "https://github.com/astropy/astropy.git", ref: "d16bfe0" } });
+    // 이미지-내 repo(/testbed) — clone 안 함. deps 는 prebuilt 이미지(case.image).
+    expect(c?.env).toEqual({ kind: "repo", source: { path: "/testbed" } });
     const sb = c?.graders.find((g) => g.id === "swe-bench");
     expect(sb?.config?.testPatch).toContain("diff --git");
     expect(sb?.config?.failToPass).toEqual(["astropy/modeling/tests/test_separable.py::test_x"]);
