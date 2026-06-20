@@ -292,6 +292,32 @@ harness versions → two Scorecards (stored) → `diffScorecards` reports object
 diff demo uses deterministic harness stand-ins so the regression is reproducible — real LLM runs are
 non-deterministic; the real-harness eval is `webvoyager-eval.mjs`.)
 
+### Benchmark ecosystem — sourcing from where benchmarks live (HuggingFace Hub) ✅
+A SaaS user doesn't just want to upload *one* file — they want to keep up with the **diverse + continuously-released
+benchmark ecosystem** (WebVoyager, GAIA, SWE-bench, WebArena, Mind2Web, OSWorld, …, plus whatever ships next month).
+A single hard-coded importer can't scale to that, because benchmarks vary on four axes: **source** (HF Hub / GitHub /
+URL), **format** (HF rows/parquet, jsonl, csv), **task/env** (browser, QA, coding, tool), and **grading** (exact /
+VLM-judge / test-execution / state-checker). `@assay/datasets` now covers the first three with two pieces:
+
+- **Source connector — HuggingFace Hub** (`fetchHfRows`): pull a benchmark *by reference only* (`dataset + config +
+  split`) via the HF datasets-server REST `/rows` (paginated; no Python). gated benchmarks (e.g. GAIA) take an
+  `Authorization: Bearer <token>` — the **per-tenant HF token comes from the existing `SecretStore`**, so isolation
+  is reused, not reinvented.
+- **Benchmark adapter + catalog** (`BenchmarkAdapter`, `BENCHMARK_CATALOG`): a benchmark = a small descriptor
+  `{source, mapping (fields→EvalCase), graders, rowTransform?}`. **Adding a new benchmark = one adapter, not code.**
+  First-party adapters ship in the catalog (seeded into `_shared`); a user adds their own adapter for a private/new
+  benchmark. `importBenchmark(adapter, meta, {limit, token})` → fetch → map → validated `Dataset` →
+  `DatasetRegistry.register(tenant)`.
+
+**Verified live** (`scripts/live/hf-benchmark-eval.mjs`, real HF network): catalog lists 4 first-party benchmarks →
+`openai/gsm8k` (QA) pulled by ID (5 real rows, `…#### N` final-answer extracted via `rowTransform`) → tenant dataset
+→ eval → `answer_match` **passRate 100%**, Scorecard stored; `osunlp/Mind2Web` (web-agent, no final answer → `steps`)
+pulled by ID (3 real tasks) → tenant dataset; `gaia-benchmark/GAIA` (**gated**) → token path confirmed (skipped
+without `HF_TOKEN`). So a user picks a benchmark from the catalog (or names any HF dataset), and it becomes a
+tenant-owned `Dataset` ready to evaluate — the ingestion side of "bring any/new benchmark", end-to-end. (Open
+follow-ups: grading diversity — wire `JudgeGrader` + per-benchmark grader presets [GAIA exact / WebVoyager judge /
+SWE-bench tests-pass]; GitHub-sourced harness-coupled benchmarks; a `prompt` env kind for non-browser QA.)
+
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we
 ran **[aegra](https://github.com/aegra/aegra)** — an OSS, license-free self-hosted LangGraph server (FastAPI +
