@@ -89,4 +89,14 @@ describe("makeGraders", () => {
   it("알 수 없는 그레이더는 에러", () => {
     expect(() => makeGraders([{ id: "nope" }])).toThrow();
   });
+  it("judge 스펙은 Judge 주입이 있어야 만들어진다(없으면 명시 에러)", () => {
+    expect(() => makeGraders([{ id: "judge", config: { rubric: "r" } }])).toThrow(/Judge 주입/);
+    const judge: Judge = {
+      async judge() {
+        return { pass: true, score: 1, reason: "ok" };
+      },
+    };
+    const g = makeGraders([{ id: "judge", config: { id: "wv-judge", rubric: "r" } }], { judge });
+    expect(g[0]?.id).toBe("wv-judge"); // config.id 로 grader id 지정
+  });
 });

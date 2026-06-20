@@ -314,9 +314,33 @@ VLM-judge / test-execution / state-checker). `@assay/datasets` now covers the fi
 → eval → `answer_match` **passRate 100%**, Scorecard stored; `osunlp/Mind2Web` (web-agent, no final answer → `steps`)
 pulled by ID (3 real tasks) → tenant dataset; `gaia-benchmark/GAIA` (**gated**) → token path confirmed (skipped
 without `HF_TOKEN`). So a user picks a benchmark from the catalog (or names any HF dataset), and it becomes a
-tenant-owned `Dataset` ready to evaluate — the ingestion side of "bring any/new benchmark", end-to-end. (Open
-follow-ups: grading diversity — wire `JudgeGrader` + per-benchmark grader presets [GAIA exact / WebVoyager judge /
-SWE-bench tests-pass]; GitHub-sourced harness-coupled benchmarks; a `prompt` env kind for non-browser QA.)
+tenant-owned `Dataset` ready to evaluate — the ingestion side of "bring any/new benchmark", end-to-end.
+
+### Grading diversity — per-benchmark grader presets ✅
+Ingestion isn't enough: each benchmark **scores differently**, so each adapter carries the right graders, and the
+case mapping is data-driven enough to express them (no per-benchmark code). Three real shapes:
+
+- **GAIA → `answer-match` exact**: GAIA is quasi-exact-match, so the adapter sets `answerMode: "exact"`
+  (`{answer-match, mode: exact}`) instead of the default substring contains.
+- **WebVoyager → `judge` (model-judged)**: official WebVoyager grades with a GPT-4V judge over the trajectory, so
+  the adapter's preset is `answer-match + steps + judge{rubric}`. `makeGraders(specs, { judge })` now resolves a
+  `judge` spec into a `JudgeGrader` with an **injected `Judge`** (it stays out of the dependency-free default path —
+  a `judge` spec with no injected judge throws a clear error). The judge reuses the existing
+  `modelJudge` / `openaiComplete` transport (any OpenAI-compatible endpoint, e.g. LiteLLM).
+- **SWE-bench Lite → `tests-pass` + repo env**: a coding benchmark, so `rowToCase` builds a **`repo` env**
+  (`{git, ref}` from `repo` + `base_commit`) and a per-row **`tests-pass`** command (the `FAIL_TO_PASS` tests as a
+  targeted `pytest` invocation). `CaseMapping` gained `gitField`/`refField`/`testCmdField` to express this purely as
+  data.
+
+**Verified live** (`scripts/live/judge-grading.mjs`, real LiteLLM `gpt-5.4-mini` + real HF): WebVoyager-mini graded
+by the **real model judge** — correct trajectories pass (score 1.00 / 0.99), an intentionally-wrong one is caught
+(`pass=false`, score 0.02, reason "did not provide the required phrase… said it was unable"); GAIA preset yields
+`answer-match{mode:exact}`; SWE-bench Lite pulled from HF (`astropy__astropy-12907`) yields `env: repo{git, ref}` +
+`tests-pass{cmd: pytest …FAIL_TO_PASS}`. So grading matches the benchmark, and a real LLM judge discriminates good
+vs bad runs — the scoring side of benchmark diversity. (Open follow-ups: thread the injected `Judge` through the full
+dispatch path [runner/service-backend] so judge presets run end-to-end in a normal eval; SWE-bench harness setup
+[deps/conda env + patch apply] for real test execution; GitHub-sourced harness-coupled benchmarks; a `prompt` env
+kind for non-browser QA.)
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we

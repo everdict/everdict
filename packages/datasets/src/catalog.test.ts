@@ -58,8 +58,50 @@ describe("BenchmarkAdapter 카탈로그", () => {
     const ids = listBenchmarks()
       .map((b) => b.id)
       .sort();
-    expect(ids).toEqual(["gaia", "gsm8k", "mind2web", "webvoyager"]);
+    expect(ids).toEqual(["gaia", "gsm8k", "mind2web", "swe-bench-lite", "webvoyager"]);
     expect(listBenchmarks().find((b) => b.id === "gaia")?.gated).toBe(true); // GAIA gated 표기
+  });
+
+  it("벤치마크별 채점 프리셋: GAIA=answer-match exact / WebVoyager=judge / SWE-bench=tests-pass", () => {
+    // GAIA: quasi-exact-match → answer-match exact 모드.
+    const gaia = adapterToDataset(
+      BENCHMARK_CATALOG.gaia,
+      [{ task_id: "g1", Question: "How many?", "Final answer": "42", Level: "1" }],
+      { id: "gaia-mini", version: "2023_all" },
+    );
+    expect(gaia.cases[0]?.graders).toEqual([{ id: "answer-match", config: { expect: "42", mode: "exact" } }]);
+
+    // WebVoyager: 모델 판정(judge) + steps (+ answer-match from answerField).
+    const wv = adapterToDataset(
+      BENCHMARK_CATALOG.webvoyager,
+      [{ id: "wv0", web: "https://example.com", ques: "h1?", answer: "Example Domain", web_name: "Example" }],
+      { id: "wv", version: "1.0.0" },
+    );
+    expect(wv.cases[0]?.graders.map((g) => g.id)).toEqual(["answer-match", "steps", "judge"]);
+    expect(wv.cases[0]?.graders.find((g) => g.id === "judge")?.config?.rubric).toContain("task goal");
+
+    // SWE-bench: repo env(git+base_commit) + tests-pass(타깃 테스트만 도는 pytest).
+    const swe = adapterToDataset(
+      BENCHMARK_CATALOG["swe-bench-lite"],
+      [
+        {
+          instance_id: "astropy__astropy-12907",
+          repo: "astropy/astropy",
+          base_commit: "d16bfe0",
+          problem_statement: "separability_matrix bug",
+          FAIL_TO_PASS: '["astropy/modeling/tests/test_separable.py::test_x"]',
+          version: "4.3",
+        },
+      ],
+      { id: "swe-mini", version: "test" },
+    );
+    const c = swe.cases[0];
+    expect(c?.id).toBe("astropy__astropy-12907");
+    expect(c?.env).toEqual({ kind: "repo", source: { git: "https://github.com/astropy/astropy.git", ref: "d16bfe0" } });
+    const tp = c?.graders.find((g) => g.id === "tests-pass");
+    expect(tp?.config?.cmd).toContain("pytest");
+    expect(tp?.config?.cmd).toContain("test_separable.py::test_x");
+    expect(c?.tags).toEqual(["astropy/astropy", "4.3"]);
   });
 
   it("gsm8k: rowTransform 가 '…#### 18' 에서 최종답을 뽑아 answer-match 부여", () => {
@@ -112,9 +154,6 @@ describe("BenchmarkAdapter 카탈로그", () => {
       },
     );
     expect(ds.cases[0]?.env).toEqual({ kind: "browser", startUrl: "https://example.com" });
-    expect(ds.cases[0]?.graders).toEqual([
-      { id: "answer-match", config: { expect: "Example Domain" } },
-      { id: "steps" },
-    ]);
+    expect(ds.cases[0]?.graders.map((g) => g.id)).toEqual(["answer-match", "steps", "judge"]);
   });
 });

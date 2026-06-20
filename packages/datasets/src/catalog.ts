@@ -73,6 +73,28 @@ function gsm8kFinal(row: Record<string, unknown>): Record<string, unknown> {
   return { ...row, _final: g != null ? g.trim() : a };
 }
 
+// WebVoyager 채점 루브릭(judge). 공식 WebVoyager 는 GPT-4V 가 트라젝토리/스크린샷을 판정 — 여기선 trace/dom judge.
+const WEBVOYAGER_RUBRIC =
+  "Judge whether the agent successfully completed the web browsing task and reported a correct, " +
+  "well-supported final answer. Pass only if the task goal was actually achieved by the actions in the trace.";
+
+// SWE-bench 정규화: repo→git URL, FAIL_TO_PASS(JSON 배열) → 타깃 테스트만 도는 pytest 명령(tests-pass cmd).
+function sweBenchRow(row: Record<string, unknown>): Record<string, unknown> {
+  const repo = String(row.repo ?? "");
+  let tests: unknown = [];
+  try {
+    tests = JSON.parse(String(row.FAIL_TO_PASS ?? "[]"));
+  } catch {
+    tests = [];
+  }
+  const ids = Array.isArray(tests) ? tests.map((t) => JSON.stringify(String(t))) : [];
+  return {
+    ...row,
+    _git: repo ? `https://github.com/${repo}.git` : "",
+    _testcmd: ids.length ? `python -m pytest -q ${ids.join(" ")}` : "true",
+  };
+}
+
 // first-party 벤치마크 카탈로그. 새 벤치마크는 여기에 어댑터 한 개를 추가하면 됨(소스+매핑+채점).
 // satisfies: 리터럴 키를 보존 → BENCHMARK_CATALOG.gsm8k 등이 non-undefined 로 타입됨.
 export const BENCHMARK_CATALOG = {
@@ -114,16 +136,43 @@ export const BENCHMARK_CATALOG = {
       split: "validation",
       gated: true,
     },
-    mapping: { idField: "task_id", taskField: "Question", answerField: "Final answer", tagFields: ["Level"] },
+    // GAIA 채점은 quasi-exact-match → answer-match exact.
+    mapping: {
+      idField: "task_id",
+      taskField: "Question",
+      answerField: "Final answer",
+      answerMode: "exact",
+      tagFields: ["Level"],
+    },
   },
-  // 실제 웹사이트 브라우징 태스크(jsonl 소스, github). importBenchmark 에 opts.text 로 jsonl 전달.
+  // 실제 웹사이트 브라우징 태스크(jsonl 소스, github). 채점=judge(공식 WebVoyager 가 모델 판정) + answer-match + steps.
   webvoyager: {
     id: "webvoyager",
-    description: "WebVoyager — real-website browsing tasks (github.com/MinorJerry/WebVoyager)",
+    description: "WebVoyager — real-website browsing tasks, model-judged (github.com/MinorJerry/WebVoyager)",
     category: "browser",
     defaultVersion: "1.0.0",
     source: { kind: "jsonl" },
-    mapping: WEBVOYAGER_MAPPING,
+    mapping: {
+      ...WEBVOYAGER_MAPPING,
+      extraGraders: [{ id: "steps" }, { id: "judge", config: { rubric: WEBVOYAGER_RUBRIC } }],
+    },
+  },
+  // 코딩(repo) 벤치마크 — 패치 후 타깃 테스트 통과로 채점(tests-pass). HF open. repo env(git+base_commit).
+  "swe-bench-lite": {
+    id: "swe-bench-lite",
+    description: "SWE-bench Lite — resolve real GitHub issues, graded by tests (princeton-nlp/SWE-bench_Lite)",
+    category: "coding",
+    defaultVersion: "test",
+    source: { kind: "huggingface", dataset: "princeton-nlp/SWE-bench_Lite", config: "default", split: "test" },
+    mapping: {
+      idField: "instance_id",
+      taskField: "problem_statement",
+      gitField: "_git",
+      refField: "base_commit",
+      testCmdField: "_testcmd",
+      tagFields: ["repo", "version"],
+    },
+    rowTransform: sweBenchRow,
   },
 } satisfies Record<string, BenchmarkAdapter>;
 

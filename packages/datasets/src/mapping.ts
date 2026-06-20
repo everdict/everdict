@@ -4,14 +4,20 @@ import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSp
 // `Dataset`(EvalCase[]). 멀티테넌트 SaaS 에서 유저가 자기 데이터셋을 쉽게 워크스페이스에 추가하려면, 자기 포맷을
 // EvalCase 로 변환하는 매핑 레이어가 필요하다(레지스트리는 Assay Dataset 스키마만 받으므로). 결과는 register(tenant).
 
-// 외부 행(레코드) → EvalCase 매핑 규칙. answerField 가 있으면 answer-match 그레이더를 자동 부여.
+// 외부 행(레코드) → EvalCase 매핑 규칙. 데이터 주도(함수 없음 → JSON 직렬화 가능, "설정으로 새 벤치마크").
+// env: gitField 있으면 repo env(코딩 벤치마크 SWE-bench), 아니면 browser env(startUrl 유무).
+// 채점: answerField→answer-match(answerMode 로 contains|exact), testCmdField→tests-pass(행별 cmd), extraGraders 항상.
 export interface CaseMapping {
   idField: string;
   taskField: string;
   startUrlField?: string; // 있으면 browser env(startUrl); 없으면 startUrl 없는 browser env
   answerField?: string; // 있으면 answer-match{expect} grader 자동 추가
+  answerMode?: "contains" | "exact"; // answer-match 모드(기본 contains). GAIA 류 정답대조는 exact.
+  gitField?: string; // 있으면 repo env(source.git) — SWE-bench 류 코딩 벤치마크
+  refField?: string; // repo env ref(없으면 HEAD)
+  testCmdField?: string; // 있으면 tests-pass{cmd} (행별 테스트 명령)
   tagFields?: string[]; // 태그로 쓸 필드들
-  extraGraders?: GraderSpec[]; // 항상 추가(예: steps)
+  extraGraders?: GraderSpec[]; // 항상 추가(예: steps, judge{rubric})
 }
 export interface DatasetMeta {
   id: string;
@@ -26,11 +32,23 @@ function str(v: unknown): string {
 
 // 외부 행 → EvalCase (env/task/graders/tags). 매핑 규칙으로 변환.
 export function rowToCase(row: Record<string, unknown>, i: number, meta: DatasetMeta, m: CaseMapping): EvalCase {
-  const url = m.startUrlField ? str(row[m.startUrlField]) : "";
-  const env: EnvSpec = url ? { kind: "browser", startUrl: url } : { kind: "browser" };
+  const git = m.gitField ? str(row[m.gitField]) : "";
+  let env: EnvSpec;
+  if (git) {
+    const ref = m.refField ? str(row[m.refField]) : "";
+    env = { kind: "repo", source: { git, ref: ref || "HEAD" } };
+  } else {
+    const url = m.startUrlField ? str(row[m.startUrlField]) : "";
+    env = url ? { kind: "browser", startUrl: url } : { kind: "browser" };
+  }
   const graders: GraderSpec[] = [];
   if (m.answerField && str(row[m.answerField])) {
-    graders.push({ id: "answer-match", config: { expect: str(row[m.answerField]) } });
+    const config: Record<string, unknown> = { expect: str(row[m.answerField]) };
+    if (m.answerMode === "exact") config.mode = "exact";
+    graders.push({ id: "answer-match", config });
+  }
+  if (m.testCmdField && str(row[m.testCmdField])) {
+    graders.push({ id: "tests-pass", config: { cmd: str(row[m.testCmdField]) } });
   }
   for (const g of m.extraGraders ?? []) graders.push(g);
   const tags = (m.tagFields ?? []).map((f) => str(row[f])).filter(Boolean);
