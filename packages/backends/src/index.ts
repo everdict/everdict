@@ -1,5 +1,6 @@
 export type { Backend, BackendCapacity, Dispatcher } from "./backend.js";
 export { LocalBackend } from "./local.js";
+export { DockerBackend } from "./docker-backend.js";
 export {
   Scheduler,
   leastLoadedPolicy,

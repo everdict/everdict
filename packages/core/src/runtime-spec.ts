@@ -14,6 +14,14 @@ const base = {
 
 export const LocalRuntimeSpecSchema = z.object({ kind: z.literal("local"), ...base });
 
+// docker — 케이스를 자기 env 이미지(EvalCase.image; 예: SWE-bench 공식 prebuilt = repo+deps 동봉) 컨테이너에서 실행.
+// 단일 호스트의 docker 데몬 사용(클러스터 아님). image = 케이스가 image 를 안 실을 때의 기본 이미지(선택).
+export const DockerRuntimeSpecSchema = z.object({
+  kind: z.literal("docker"),
+  ...base,
+  image: z.string().optional(), // 케이스 image 없을 때 기본 컨테이너 이미지
+});
+
 export const NomadRuntimeSpecSchema = z.object({
   kind: z.literal("nomad"),
   ...base,
@@ -41,6 +49,7 @@ export const K8sRuntimeSpecSchema = z.object({
 
 export const RuntimeSpecSchema = z.discriminatedUnion("kind", [
   LocalRuntimeSpecSchema,
+  DockerRuntimeSpecSchema,
   NomadRuntimeSpecSchema,
   K8sRuntimeSpecSchema,
 ]);

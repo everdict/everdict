@@ -440,8 +440,23 @@ preinstalled, **no agent** — standing in for a SWE-bench prebuilt) is built, `
 from it, and `SweBenchGrader` runs inside via real `docker exec` + real pytest — with no fix → `resolved=false`
 (`UNRESOLVED · F2P=1 P2P=1`); after the gold patch (the agent's prediction) is applied → `resolved=true`
 (`RESOLVED`). The real `swebench/sweb.eval.*` prebuilt images run the same way (just larger). So SWE-bench is
-runnable end-to-end on real dependencies. (Other follow-ups: wiring `DockerDriver` as a selectable runtime backend so
-control-plane runs route to it; a `prompt` env kind for non-browser QA.)
+runnable end-to-end on real dependencies.
+
+#### Docker as a selectable runtime backend ✅
+`DockerDriver` is now a first-class **runtime**: a tenant registers a `RuntimeSpec` `{kind: "docker", image?}` (new
+variant alongside `local`/`nomad`/`k8s`), and `buildRuntimeBackend` turns it into a `DockerBackend` whose
+`dispatch(job)` runs the case via `runAgentJob(job, { driver: DockerDriver })` — so the harness *and* grading execute
+inside a container from the case's `EvalCase.image` (falling back to the runtime's default `image`). `runAgentJob`
+gained an optional `{ driver }` so the same agent loop (harness + `makeGradersFromEnv` + `RepoEnvironment`) runs over
+any compute; `DockerDriver` keeps a base workdir (`/assay`) so relative paths (`RepoEnvironment`'s `work`) and absolute
+ones (SWE-bench's `/testbed`) both resolve.
+
+**Verified live** (`scripts/live/docker-runtime-backend.mjs`, real Docker): `buildRuntimeBackend({kind:"docker"})` →
+a `DockerBackend`, and `dispatch` of a case (`image` = a git-bearing env image, a `scripted` harness, a `command`
+grader) runs in a container — the harness writes `out.txt` (`snapshot.changedFiles: ["out.txt"]`) and the grader
+verifies it **inside the container** (`pass=true`). So a control-plane run routes to a per-case container image; the
+SWE-bench prebuilt images take the exact same path. (Other follow-ups: a `prompt` env kind for non-browser QA; an
+env-mode that uses the in-image repo at `/testbed` so a coding agent operates on the prebuilt repo directly.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner

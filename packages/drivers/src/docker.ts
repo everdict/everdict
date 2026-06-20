@@ -15,12 +15,20 @@ const MAX_BUFFER = 64 * 1024 * 1024;
 
 // 이미지로 띄운 docker 컨테이너를 compute 로 — 케이스를 자기 env 이미지(예: SWE-bench 공식 prebuilt = repo+deps 동봉)
 // 안에서 실행한다. 에이전트를 이미지에 굽지 않고 "환경 컨테이너"에서 명령을 돌린다(공식 SWE-bench 평가 방식).
+// 상대 경로(cwd/path)는 base(기본 /assay) 하위로, 절대 경로는 그대로 — RepoEnvironment 의 "work" 와 SWE-bench 의
+// "/testbed" 둘 다 자연히 동작.
 class DockerComputeHandle implements ComputeHandle {
-  constructor(private readonly cid: string) {}
+  constructor(
+    private readonly cid: string,
+    private readonly base: string,
+  ) {}
+
+  private resolve(p: string): string {
+    return p.startsWith("/") ? p : `${this.base}/${p}`;
+  }
 
   async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult> {
-    const args = ["exec"];
-    if (opts?.cwd) args.push("-w", opts.cwd);
+    const args = ["exec", "-w", opts?.cwd ? this.resolve(opts.cwd) : this.base];
     for (const [k, v] of Object.entries(opts?.env ?? {})) args.push("-e", `${k}=${v}`);
     args.push(this.cid, "sh", "-c", cmd);
     try {
@@ -41,10 +49,11 @@ class DockerComputeHandle implements ComputeHandle {
 
   // 컨테이너 안 파일 쓰기 — stdin 으로 전달(임의 크기/이스케이프 안전). 부모 디렉터리 생성.
   async writeFile(path: string, data: string): Promise<void> {
+    const full = this.resolve(path);
     await new Promise<void>((resolve, reject) => {
       const p = spawn(
         "docker",
-        ["exec", "-i", this.cid, "sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", path],
+        ["exec", "-i", this.cid, "sh", "-c", 'mkdir -p "$(dirname "$1")" && cat > "$1"', "sh", full],
         { stdio: ["pipe", "ignore", "pipe"] },
       );
       let stderr = "";
@@ -60,7 +69,9 @@ class DockerComputeHandle implements ComputeHandle {
   }
 
   async readFile(path: string): Promise<string> {
-    const { stdout } = await pexecFile("docker", ["exec", this.cid, "cat", path], { maxBuffer: MAX_BUFFER });
+    const { stdout } = await pexecFile("docker", ["exec", this.cid, "cat", this.resolve(path)], {
+      maxBuffer: MAX_BUFFER,
+    });
     return stdout;
   }
 
@@ -72,18 +83,27 @@ class DockerComputeHandle implements ComputeHandle {
 // env 이미지로 컨테이너를 띄우는 Driver. 격리는 docker(컨테이너) — Backend(Nomad/K8s)의 강격리와 별개의 로컬/단순 실행용.
 export class DockerDriver implements Driver {
   readonly id = "docker";
-  // 컨테이너를 살려두는 keep-alive(이미지 ENTRYPOINT/CMD 무시). 그 안에서 docker exec 로 명령을 돌린다.
-  constructor(private readonly opts: { keepAlive?: string } = {}) {}
+  private readonly base: string;
+  // defaultImage: 케이스가 image 를 안 실으면 쓸 기본 이미지. keepAlive: 컨테이너 유지 sleep 인자. base: 상대경로 작업루트.
+  constructor(private readonly opts: { defaultImage?: string; keepAlive?: string; base?: string } = {}) {
+    this.base = opts.base ?? "/assay";
+  }
 
   async provision(spec: ComputeSpec): Promise<ComputeHandle> {
-    if (!spec.image) throw new BadRequestError("BAD_REQUEST", undefined, "DockerDriver 는 spec.image 가 필요합니다.");
+    const image = spec.image ?? this.opts.defaultImage;
+    if (!image) {
+      throw new BadRequestError("BAD_REQUEST", undefined, "DockerDriver 는 spec.image 또는 defaultImage 가 필요합니다.");
+    }
     const keep = this.opts.keepAlive ?? "infinity";
-    const { stdout } = await pexecFile("docker", ["run", "-d", "--entrypoint", "sleep", spec.image, keep], {
-      maxBuffer: MAX_BUFFER,
-    }).catch((err) => {
+    // 이미지 ENTRYPOINT/CMD 무시 + base 디렉터리 보장 + keep-alive. 그 안에서 docker exec 로 명령 실행.
+    const { stdout } = await pexecFile(
+      "docker",
+      ["run", "-d", "--entrypoint", "sh", image, "-c", `mkdir -p ${this.base} && exec sleep ${keep}`],
+      { maxBuffer: MAX_BUFFER },
+    ).catch((err) => {
       const e = err as { stderr?: string; message?: string };
-      throw new InternalError("DRIVER_PROVISION_FAILED", { image: spec.image }, e.stderr || e.message);
+      throw new InternalError("DRIVER_PROVISION_FAILED", { image }, e.stderr || e.message);
     });
-    return new DockerComputeHandle(stdout.trim());
+    return new DockerComputeHandle(stdout.trim(), this.base);
   }
 }
