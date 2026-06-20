@@ -424,10 +424,24 @@ capability, not SWE-bench-specific).
 **Verified live** (`scripts/live/swe-bench-image-seed.mjs`, real HF + real Docker Hub): a real SWE-bench_Lite row
 (`astropy__astropy-12907`) → `case.image = swebench/sweb.eval.x86_64.astropy_1776_astropy-12907:latest`, which is
 **actually published** on Docker Hub (`tags: latest, v2, v1`), and `buildNomadJob` puts that image on the container
-(not the default agent image). So dependency provisioning is now a data seed pointing at a real image. (The image is
-an *environment* image — repo + deps; the remaining infra for a fully autonomous run is the agent-in-image or a
-separate env-container; the common SWE-bench flow of "apply the predicted patch + run tests in this image" is already
-covered by `SweBenchGrader`. Other follow-ups: a `prompt` env kind for non-browser QA.)
+(not the default agent image). So dependency provisioning is now a data seed pointing at a real image.
+
+#### Env-container execution — running a case inside its image (`DockerDriver`) ✅
+The SWE-bench prebuilt image is an *environment* image (repo + deps, no Assay agent). Rather than bake the agent into
+every multi-GB image, the case runs inside the image as a **container compute** and the grading executes there — the
+official SWE-bench shape ("the agent produces a patch; apply prediction + test_patch + run tests in the prebuilt
+image"). `DockerDriver` (`@assay/drivers`) provides this: `provision({image})` starts the container
+(`docker run -d --entrypoint sleep <image> infinity`) and returns a `ComputeHandle` whose `exec`/`writeFile`/`readFile`
+go through `docker exec`/stdin — so `SweBenchGrader` (or any grader needing `compute`) runs *in the image*, with its
+deps, no agent baked in.
+
+**Verified live** (`scripts/live/swe-bench-env-container.mjs`, real Docker): a small env image (a buggy repo + pytest
+preinstalled, **no agent** — standing in for a SWE-bench prebuilt) is built, `DockerDriver` provisions a container
+from it, and `SweBenchGrader` runs inside via real `docker exec` + real pytest — with no fix → `resolved=false`
+(`UNRESOLVED · F2P=1 P2P=1`); after the gold patch (the agent's prediction) is applied → `resolved=true`
+(`RESOLVED`). The real `swebench/sweb.eval.*` prebuilt images run the same way (just larger). So SWE-bench is
+runnable end-to-end on real dependencies. (Other follow-ups: wiring `DockerDriver` as a selectable runtime backend so
+control-plane runs route to it; a `prompt` env kind for non-browser QA.)
 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner
