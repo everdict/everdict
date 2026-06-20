@@ -783,6 +783,23 @@ a `topology` runtime (so `POST /runtimes` validates it); `buildTopologyBackend` 
 `service:k8s`; and dispatching a non-`service` harness through it fails fast with `BAD_REQUEST` from `specFor` *before* any
 cluster call. So the service-topology track is now dispatchable through the product API, not just a library.
 
+### OSWorld actually run — a real GUI app task, end-to-end ✅
+SLICE 79 *imported* OSWorld tasks; this *runs* one for real on a real desktop app. A lightweight OSWorld desktop image
+(`scripts/live/Dockerfile.osworld` → `assay-osworld:demo`, 565 MB: Debian + Xvfb + **openbox** WM + xdotool/scrot +
+**mousepad** text editor + nodejs + the agent) — the image name matches the `osworld` adapter's default `image`, so an
+imported task lands on it. The `osworld` adapter's `osUseSetup` now brings up Xvfb **+ openbox** so launched apps get
+focus. A reference agent (`examples/agents/desktop-osworld-agent.cjs`, a `command` harness) opens the editor and types
+the instruction's quoted text via **real OS keyboard** (`xdotool`); the VLM judge grades the screenshot against the
+per-row rubric.
+
+**Verified live, full chain** (real Docker + real VLM): `POST /benchmarks/import { benchmark:"osworld", text:<task jsonl> }`
+(task `Type 'Hello from OSWorld' into the text editor.`) → registered os-use dataset; `POST /runs` with the
+`desktop-osworld-agent` harness → `RuntimeDispatcher` → `DockerBackend` → os-use env (Xvfb+openbox) → the agent launches
+**Mousepad** and types the text → `OsUseEnvironment` snapshot → VLM judge **pass `1.0`** ("the text editor visibly contains
+the exact text 'Hello from OSWorld'"). The decoded screenshot shows a real Mousepad window with the typed text. So an
+OSWorld-category task runs on a real GUI application and is auto-graded — import → dispatch → drive (real OS input) →
+observe → judge — entirely through the product API. (Image removed afterward; judge key from env, never committed.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

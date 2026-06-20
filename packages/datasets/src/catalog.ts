@@ -227,7 +227,11 @@ export const BENCHMARK_CATALOG = {
       idField: "id",
       taskField: "instruction",
       osUseEnv: true,
-      osUseSetup: ["Xvfb :99 -screen 0 1280x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & sleep 2"],
+      // Xvfb(가상 디스플레이) + 경량 WM(openbox: 앱이 입력 포커스/창관리를 받도록). 에이전트가 앱을 띄워 조작한다.
+      osUseSetup: [
+        "Xvfb :99 -screen 0 1280x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & sleep 2",
+        "openbox >/tmp/wm.log 2>&1 & sleep 1",
+      ],
       display: ":99",
       screenshotPath: "/tmp/osuse.png",
       placement: "docker",
