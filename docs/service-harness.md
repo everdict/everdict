@@ -416,6 +416,15 @@ import from recipe; validate ok/conflict/schema-error without registering) and l
 spec → `{ok:true, source:"huggingface", versionExists:false}`, a bad one → `{ok:false, errors:["source: Required",
 "mapping: Required"]}`). So a user manages reusable benchmark recipes entirely from the browser, persisted per tenant.
 
+##### Verified in a real browser (chrome-devtools) ✅
+The recipe/import UX was driven end-to-end in a **real headless Chrome** against the running web (`next dev`) + API
+(in-memory, dev fallback): the **벤치마크 레시피** page rendered the dev-fallback principal (`workspace default / admin`)
+and a seeded recipe; **검증 (dry-run)** posted to the API and rendered the banner (`✓ 스키마 정상 · …@1.0.0 · source=
+huggingface · 새 버전`); **레시피 등록** registered it and `router.refresh` re-fetched so the new recipe appeared in the
+list; and the **벤치마크 추가** page showed the unified picker with the first-party catalog (mind2web/gsm8k/gaia/
+webvoyager/swe-bench-lite) *and* the workspace's own recipes (the just-registered one + the seed) in one dropdown. So
+the browser → server-action(BFF) → control-plane round-trip works against a real browser, not just at the HTTP layer.
+
 #### SWE-bench dependency provisioning — official prebuilt images as a per-case `env.image` seed ✅
 The remaining piece for running SWE-bench at scale is **per-repo dependencies** — solved as **data**, not code, by
 pointing the case at the official prebuilt image (which bundles the repo at `base_commit` + the conda/pip env). The
