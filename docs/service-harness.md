@@ -242,20 +242,24 @@ The cluster persists across runs (`kind get clusters`); `kind delete cluster --n
 - **Phase 2 — live `NomadTopologyRuntime` AND `K8sTopologyRuntime`: DONE** (real apply + endpoint discovery +
   per-case CDP browser + drive + MLflow pull + grade + teardown on **both** Nomad and K8s/kind; see above —
   Nomad↔K8s parity through the same `ServiceTopologyBackend`). **Real MLflow AND OTel/Jaeger span ingestion: DONE**
-  (live vs MLflow 3.11 + Jaeger 1.62 — see Trace section). **Real browser-use library: integrated** (see below).
-  **Still pending:** the real browser+extension (headful + xvfb + `--load-extension`), the harness images +
-  extension registry, and a fast-enough LLM endpoint to let browser-use complete its reasoning loop.
+  (live vs MLflow 3.11 + Jaeger 1.62 — see Trace section). **Real browser-use library: live ✅** (completes a real
+  task end-to-end, 4/4 runs — see below). **Still pending:** the real browser+extension (headful + xvfb +
+  `--load-extension`), the harness images + extension registry, and wiring browser-use's own OTel trace through the
+  (now-live) ingestion pipeline.
 
-### Real browser-use library — integrated (`scripts/live/browser-use-agent.py`)
-The actual OSS **browser-use 0.13.1** (autonomous multi-step browser agent) is wired to Assay's infra: it connects
+### Real browser-use library — live ✅ (`scripts/live/browser-use-agent.py` + `browser-use-grade.mjs`)
+The actual OSS **browser-use 0.13.1** (autonomous multi-step browser agent) runs against Assay's infra: it connects
 to our per-case **CDP browser** (`chromedp/headless-shell`, `BrowserSession(cdp_url=…)`) and uses our model
 (`gpt-5.4-mini` via LiteLLM, OpenAI-compatible, `ChatOpenAI(base_url, api_key)`), DOM-only (`use_vision=False`).
-**Verified live:** the agent parses the task, drives the real browser, and **autonomously navigates to
-`https://example.com`** via CDP (browser-driving path works). **Not completed:** the reasoning loop — each LLM call
-times out (>200s) because the dev LiteLLM/`gpt-5.4-mini` endpoint (a ChatGPT-subscription model) is too slow for
-browser-use's prompts (even on a trivial page). This is an LLM-endpoint throughput limit, **not** an integration
-flaw; a faster model endpoint completes the loop, after which the run's trace (OTel → Jaeger / MLflow) is ingested
-+ graded by the now-live trace pipeline.
+**Verified live (4/4 runs, ~15s each):** the agent autonomously navigates to `https://example.com`, extracts the
+`h1` (`"Example Domain"`), and finishes (`done=true`, 2 steps); `browser-use-grade.mjs` grades the outcome
+(`agent-done` / `browser-navigated` / `answer-contains` all pass).
+
+> Note: an earlier run-batch hit per-call timeouts and was mis-reported as "LLM too slow." Re-measuring proved that
+> wrong — direct completions are ~2 s with `reasoning_tokens=0`, and browser-use completes reliably (4/4). The
+> earlier failures were a **transient LiteLLM latency spike** (occasional calls hung >200 s during that window),
+> not a fundamental limit. browser-use's per-call `llm_timeout` aborts a step when a call exceeds it, and enough
+> aborted steps end the run — so a latency spike *can* fail a run, but the steady-state endpoint is fast.
 
 ## Real OSS harness e2e — aegra (self-hosted LangGraph) ✅
 To validate the service-topology model against a **real OSS multi-service agent harness** (not the stand-in), we
