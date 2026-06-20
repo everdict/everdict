@@ -25,6 +25,9 @@ export class OsUseEnvironment implements Environment<OsUseSnapshot> {
 
   async snapshot(compute: ComputeHandle): Promise<OsUseSnapshot> {
     await compute.exec(this.shotCmd, { env: { DISPLAY: this.display }, timeoutSec: 60 });
+    // 스크린샷 PNG 를 base64 로 동봉(컴퓨트는 dispose → 결과 밖으로 운반). best-effort: 실패하면 빈 문자열.
+    const shot = await compute.exec(`base64 -w0 '${this.shotPath.replace(/'/g, "'\\''")}'`, { timeoutSec: 60 });
+    const screenshot = shot.exitCode === 0 ? shot.stdout.trim() : "";
     // 보이는 창 제목(best-effort: wmctrl 있으면). 없으면 빈 목록 — 1차 신호는 스크린샷.
     const w = await compute.exec("wmctrl -l 2>/dev/null | sed 's/^[^ ]* *[^ ]* *[^ ]* //' || true", {
       env: { DISPLAY: this.display },
@@ -33,6 +36,6 @@ export class OsUseEnvironment implements Environment<OsUseSnapshot> {
       .split("\n")
       .map((s) => s.trim())
       .filter(Boolean);
-    return { kind: "os-use", screenshotRef: this.shotPath, windows };
+    return { kind: "os-use", screenshotRef: this.shotPath, screenshot, windows };
   }
 }

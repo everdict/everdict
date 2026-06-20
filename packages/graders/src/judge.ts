@@ -28,10 +28,13 @@ function mediaTypeFor(path: string): string {
   return /\.jpe?g$/i.test(path) ? "image/jpeg" : "image/png";
 }
 
-// os-use 스냅샷의 스크린샷(컴퓨트 내 파일 경로)을 환경에서 base64 로 읽어 VLM 입력으로 해석.
+// os-use 스냅샷의 스크린샷을 VLM 입력(base64)으로 해석. 스냅샷에 동봉된 base64 가 있으면 그대로 쓴다(컴퓨트 불필요 +
+// dispose 후에도 동작 — 결과 채점 경로). 없으면 폴백으로 컴퓨트 파일에서 직접 읽는다(라이브 run 경로).
 // 브라우저 스냅샷의 screenshotRef 는 외부 스토리지 ref 일 수 있어 여기서 다루지 않는다(기존 동작 유지).
 async function resolveScreenshot(snap: EnvSnapshot, compute?: ComputeHandle): Promise<JudgeImage | undefined> {
-  if (snap.kind !== "os-use" || !snap.screenshotRef || !compute) return undefined;
+  if (snap.kind !== "os-use") return undefined;
+  if (snap.screenshot) return { base64: snap.screenshot, mediaType: mediaTypeFor(snap.screenshotRef || ".png") };
+  if (!snap.screenshotRef || !compute) return undefined;
   const ref = snap.screenshotRef;
   const r = await compute.exec(`base64 -w0 '${ref.replace(/'/g, "'\\''")}'`);
   const base64 = r.stdout.trim();

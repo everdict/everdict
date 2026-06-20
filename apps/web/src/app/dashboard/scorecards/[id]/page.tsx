@@ -135,6 +135,16 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
                       )}
                     </div>
                   </div>
+                  {/* os-use 데스크탑 스크린샷(base64 PNG) — 에이전트가 본 최종 화면(VLM 이 채점한 그 이미지). */}
+                  {typeof r.snapshot?.screenshot === 'string' &&
+                    r.snapshot.screenshot.length > 0 && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={`data:image/png;base64,${r.snapshot.screenshot}`}
+                        alt={`${r.caseId} screenshot`}
+                        className="max-h-72 w-auto rounded-md border"
+                      />
+                    )}
                   {/* judge/grader 판정 사유(VLM 루브릭 reasoning 등) — os-use 등에서 "왜 pass/fail" 을 보여준다. */}
                   {r.scores
                     .filter((s) => s.detail)

@@ -31,6 +31,9 @@ export type PromptSnapshot = z.infer<typeof PromptSnapshotSchema>;
 export const OsUseSnapshotSchema = z.object({
   kind: z.literal("os-use"),
   screenshotRef: z.string().default(""), // 캡처한 스크린샷 경로/ref (이미지 컴퓨트 안)
+  // 스크린샷 PNG 를 base64 로 동봉(컴퓨트는 dispose 되므로 결과 밖으로 들고 나오는 운반체). 표시(웹 <img>)+VLM judge 입력.
+  // dev 경로: 결과 레코드에 인라인. 스케일 시 object storage(MinIO)로 오프로드 + presigned URL 로 치환(screenshotRef).
+  screenshot: z.string().default(""), // base64 PNG (없으면 빈 문자열)
   windows: z.array(z.string()).default([]), // 보이는 창 제목들(있으면)
 });
 export type OsUseSnapshot = z.infer<typeof OsUseSnapshotSchema>;

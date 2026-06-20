@@ -18,7 +18,11 @@ export const resultSchema = z
   .object({
     scores: z.array(scoreSchema).default([]),
     trace: z.array(traceEventSchema).default([]),
-    snapshot: z.object({ kind: z.string() }).passthrough().optional(),
+    // os-use=데스크탑 스냅샷(screenshot=base64 PNG), browser=dom/url 등. screenshot 은 <img> 로 인라인 표시.
+    snapshot: z
+      .object({ kind: z.string(), screenshot: z.string().optional() })
+      .passthrough()
+      .optional(),
     harness: z.string().optional(),
   })
   .partial()

@@ -99,7 +99,7 @@ describe("JudgeGrader", () => {
     const ctx: GradeContext = {
       case: { id: "c", env: { kind: "os-use" }, task: "open the remote form", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
-      snapshot: { kind: "os-use", screenshotRef: "/tmp/assay-screen.png", windows: [] },
+      snapshot: { kind: "os-use", screenshotRef: "/tmp/assay-screen.png", screenshot: "", windows: [] }, // 동봉 없음 → 컴퓨트 폴백
       compute,
     };
     const score = await new JudgeGrader(spy, { id: "vlm", useScreenshot: true }).grade(ctx);
@@ -107,6 +107,37 @@ describe("JudgeGrader", () => {
     expect(calls[0]).toContain("base64 -w0");
     expect(calls[0]).toContain("/tmp/assay-screen.png");
     expect(received?.screenshot).toEqual({ base64: "QkFTRTY0", mediaType: "image/png" }); // 개행 trim + png
+  });
+
+  it("os-use 스냅샷에 base64 가 동봉돼 있으면 컴퓨트 없이 그대로 쓴다(결과 채점/dispose 후)", async () => {
+    let received: Parameters<Judge["judge"]>[0] | undefined;
+    const spy: Judge = {
+      async judge(input) {
+        received = input;
+        return { pass: true, score: 1, reason: "ok" };
+      },
+    };
+    let execCalls = 0;
+    const compute = {
+      async exec() {
+        execCalls++;
+        return { exitCode: 0, stdout: "SHOULD_NOT_BE_USED", stderr: "" };
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    const ctx: GradeContext = {
+      case: { id: "c", env: { kind: "os-use" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
+      trace: [] as TraceEvent[],
+      snapshot: { kind: "os-use", screenshotRef: "/tmp/s.png", screenshot: "RU1CRURERUQ=", windows: [] },
+      compute,
+    };
+    await new JudgeGrader(spy, { useScreenshot: true }).grade(ctx);
+    expect(execCalls).toBe(0); // 동봉 base64 사용 → 컴퓨트 exec 없음
+    expect(received?.screenshot).toEqual({ base64: "RU1CRURERUQ=", mediaType: "image/png" });
   });
 
   it("useScreenshot 가 false 면 os-use 라도 스크린샷을 읽지 않는다", async () => {
@@ -132,7 +163,7 @@ describe("JudgeGrader", () => {
     const ctx: GradeContext = {
       case: { id: "c", env: { kind: "os-use" }, task: "t", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
-      snapshot: { kind: "os-use", screenshotRef: "/tmp/s.png", windows: [] },
+      snapshot: { kind: "os-use", screenshotRef: "/tmp/s.png", screenshot: "", windows: [] },
       compute,
     };
     await new JudgeGrader(spy, { useScreenshot: false }).grade(ctx);

@@ -29,8 +29,11 @@ export const caseResultSchema = z
     caseId: z.string(),
     harness: z.string().optional(),
     scores: z.array(caseScoreSchema).default([]),
-    // os-use=데스크탑 스냅샷(kind/windows), browser=dom/url 등. UI 는 kind 만 본다.
-    snapshot: z.object({ kind: z.string() }).passthrough().optional(),
+    // os-use=데스크탑 스냅샷(kind/windows/screenshot=base64 PNG), browser=dom/url 등. screenshot 은 <img> 로 인라인.
+    snapshot: z
+      .object({ kind: z.string(), screenshot: z.string().optional() })
+      .passthrough()
+      .optional(),
   })
   .passthrough()
 

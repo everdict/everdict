@@ -701,6 +701,26 @@ judge-model field and lists `hermes-desktop-ssh` + `desktop-ssh-agent`. Web type
 (Screenshot *bytes* aren't persisted yet — the os-use snapshot carries a container path, so the view shows the VLM
 verdict text; persisting screenshots to object storage to show them inline is the next rung.)
 
+### os-use screenshot persisted + shown inline — the actual screen, end-to-end ✅
+The previous rung showed the VLM *verdict text* because the os-use snapshot only carried a container path (gone after
+dispose). This carries the **screenshot bytes out** so the result view shows the real image. The snapshot is the only
+thing that survives the disposed compute, so it becomes the transport: `OsUseSnapshot` gains a `screenshot` field, and
+`OsUseEnvironment.snapshot` reads the captured PNG via `base64` (best-effort) into it — alongside the existing
+`screenshotRef`/`windows`. Two payoffs:
+- the **VLM judge** now prefers the embedded base64 (`JudgeGrader.resolveScreenshot`) — no extra `compute.exec`, and it
+  works for *result-time* grading after the container is gone (the live-run path still falls back to reading the file);
+- the **web** result views render it: the run + scorecard entity snapshot schemas type `screenshot`, and
+  `runs/[id]` / `scorecards/[id]` show an inline `<img src="data:image/png;base64,…">` (the run page's JSON dump
+  substitutes `<base64>` so it isn't duplicated). +2 grader tests (embedded path used without compute; capture asserted).
+
+**Verified live, full loop** (real Docker + real VLM + real web): `POST /runs` of the `hermes-ssh-connect` os-use case →
+`succeeded` with `snapshot.screenshot` a **90 KB base64** (a 67 KB PNG); decoded, it's the real Hermes main-app screen
+(sidebar Chat/Discover, "Ask anything"), and the judge scored `0.98` *using that embedded image*. The web `runs/:id`
+page (server-rendered against the API) emits `data:image/png;base64,iVBOR…` — the actual screenshot inline — next to the
+judge verdict and `os-use` kind. So a tenant sees, per case, **the exact screen the agent left and the model judged**.
+(Dev posture: the base64 rides in the result record, matching the InMemory-store dev path; production offloads to object
+storage with a presigned URL in `screenshotRef` — same field, swappable. Image removed afterward; disk to prior level.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/

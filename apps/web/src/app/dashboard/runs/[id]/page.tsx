@@ -124,9 +124,22 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       {snapshot && (
         <section className="space-y-3">
           <h2 className="text-lg font-semibold tracking-tight">스냅샷 ({String(snapshot.kind)})</h2>
-          <Card className="p-5">
+          <Card className="space-y-3 p-5">
+            {/* os-use 데스크탑 스크린샷(base64 PNG)을 인라인 표시 — 에이전트가 본 최종 화면. */}
+            {typeof snapshot.screenshot === 'string' && snapshot.screenshot.length > 0 && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={`data:image/png;base64,${snapshot.screenshot}`}
+                alt="os-use screenshot"
+                className="max-h-[480px] w-auto rounded-md border"
+              />
+            )}
             <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs text-muted-foreground">
-              {JSON.stringify(snapshot, null, 2)}
+              {JSON.stringify(
+                { ...snapshot, screenshot: snapshot.screenshot ? '<base64>' : undefined },
+                null,
+                2
+              )}
             </pre>
           </Card>
         </section>
