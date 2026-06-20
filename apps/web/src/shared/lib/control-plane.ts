@@ -50,6 +50,8 @@ export const controlPlane = {
   listBenchmarkRecipes: <T>(auth: AuthContext) => call<T>(auth, '/benchmark-recipes'),
   registerBenchmarkRecipe: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/benchmark-recipes', { method: 'POST', body: JSON.stringify(spec) }),
+  validateBenchmarkRecipe: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/benchmark-recipes/validate', { method: 'POST', body: JSON.stringify(spec) }),
   listScorecards: <T>(auth: AuthContext) => call<T>(auth, '/scorecards'),
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),

@@ -406,11 +406,15 @@ The recipe registry is now durable + first-class in the control plane: `PgBenchm
 `DATABASE_URL`, else InMemory). `BenchmarkService` gained `registerRecipe` / `listRecipes` / `getRecipe`, and
 `import` now resolves a registered `recipe: {id, version}` (→ `importFromSpec`) in addition to a catalog `benchmark`.
 HTTP: `POST /benchmark-recipes` (`datasets:write`), `GET /benchmark-recipes` + `GET /benchmark-recipes/:id/versions/
-:version` (`datasets:read`), and `POST /benchmarks/import` accepts either source. Web: a **벤치마크 레시피** page
-(`/dashboard/datasets/recipes`) lists recipes + registers one from a JSON `BenchmarkAdapterSpec`, and the **벤치마크
-추가** page now offers catalog benchmarks *and* the workspace's own recipes in one picker. Verified at the HTTP layer
-by `server.test.ts` (register → list/get with tenant isolation [`globex` gets 404 on `acme`'s recipe] → import from
-recipe). So a user manages reusable benchmark recipes entirely from the browser, persisted per tenant.
+:version` (`datasets:read`), `POST /benchmark-recipes/validate` (dry-run — schema + this workspace's existing
+versions/conflict, no registration, mirroring `/datasets/validate`), and `POST /benchmarks/import` accepts either
+source. Web: a **벤치마크 레시피** page (`/dashboard/datasets/recipes`) lists recipes + registers one from a JSON
+`BenchmarkAdapterSpec` (with a **검증 (dry-run)** button surfacing schema errors / existing versions before commit), and
+the **벤치마크 추가** page now offers catalog benchmarks *and* the workspace's own recipes in one picker. Verified at
+the HTTP layer by `server.test.ts` (register → list/get with tenant isolation [`globex` gets 404 on `acme`'s recipe] →
+import from recipe; validate ok/conflict/schema-error without registering) and live (real API: `validate` of a good
+spec → `{ok:true, source:"huggingface", versionExists:false}`, a bad one → `{ok:false, errors:["source: Required",
+"mapping: Required"]}`). So a user manages reusable benchmark recipes entirely from the browser, persisted per tenant.
 
 #### SWE-bench dependency provisioning — official prebuilt images as a per-case `env.image` seed ✅
 The remaining piece for running SWE-bench at scale is **per-repo dependencies** — solved as **data**, not code, by

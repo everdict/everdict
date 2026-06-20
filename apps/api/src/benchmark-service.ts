@@ -62,6 +62,11 @@ export class BenchmarkService {
     return this.registry().get(tenant, id, ref);
   }
 
+  // 이 테넌트가 직접 등록한 버전만(폴백 없음) — validate dry-run 의 충돌 판정용.
+  recipeOwnVersions(tenant: string, id: string): Promise<string[]> {
+    return this.registry().ownVersions(tenant, id);
+  }
+
   // 인입 → 테넌트-소유 Dataset. recipe(등록된 데이터) 또는 benchmark(카탈로그 코드) 중 하나.
   async import(
     input: BenchmarkImportInput,

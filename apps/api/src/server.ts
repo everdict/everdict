@@ -394,6 +394,31 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). 레시피 등록 전 사전 점검.
+  app.post("/benchmark-recipes/validate", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = BenchmarkAdapterSpecSchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
+    const existingVersions = await deps.benchmarkService.recipeOwnVersions(principal.workspace, parsed.data.id);
+    return reply.send({
+      ok: true,
+      id: parsed.data.id,
+      version: parsed.data.version,
+      source: parsed.data.source.kind,
+      graderTemplates: parsed.data.graderTemplates?.length ?? 0,
+      existingVersions,
+      versionExists: existingVersions.includes(parsed.data.version),
+    });
+  });
+
   // 테넌트 + _shared 레시피 목록.
   app.get("/benchmark-recipes", async (req, reply) => {
     if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });

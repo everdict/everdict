@@ -564,6 +564,43 @@ describe("API — benchmarks (카탈로그 → 테넌트 데이터셋 인입)", 
     expect(res.statusCode).toBe(400);
     await app.close();
   });
+
+  it("레시피 validate(dry-run): 스키마 OK + 기존버전/충돌 표기, 스키마 오류 표기(등록 안 함)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const recipe = {
+      id: "v-bench",
+      version: "1.0.0",
+      source: { kind: "huggingface", dataset: "me/x", split: "test" },
+      mapping: { idField: "id", taskField: "q", answerField: "a" },
+    };
+    // 새 레시피 → ok, 아직 기존버전 없음.
+    const v1 = await app.inject({ method: "POST", url: "/benchmark-recipes/validate", headers: h, payload: recipe });
+    expect(v1.json()).toMatchObject({
+      ok: true,
+      id: "v-bench",
+      version: "1.0.0",
+      source: "huggingface",
+      versionExists: false,
+    });
+    // 등록 후 같은 버전 validate → versionExists true (검증만, 등록 안 함).
+    await app.inject({ method: "POST", url: "/benchmark-recipes", headers: h, payload: recipe });
+    const v2 = await app.inject({ method: "POST", url: "/benchmark-recipes/validate", headers: h, payload: recipe });
+    expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    // 스키마 오류 → ok:false + errors.
+    const bad = await app.inject({
+      method: "POST",
+      url: "/benchmark-recipes/validate",
+      headers: h,
+      payload: { id: "x", version: "1.0.0" }, // source/mapping 누락
+    });
+    expect(bad.json()).toMatchObject({ ok: false });
+    expect((bad.json() as { errors: string[] }).errors.length).toBeGreaterThan(0);
+    // validate 는 등록하지 않음 — 목록엔 v-bench 만(스키마 오류 x 미등록).
+    const list = await app.inject({ method: "GET", url: "/benchmark-recipes", headers: h });
+    expect((list.json() as Array<{ id: string }>).map((r) => r.id)).toEqual(["v-bench"]);
+    await app.close();
+  });
 });
 
 describe("API — scorecards (dataset×harness 배치 평가)", () => {

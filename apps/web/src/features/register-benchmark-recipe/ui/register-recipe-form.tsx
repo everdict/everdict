@@ -6,7 +6,12 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/shared/ui/button'
 import { Label, Textarea } from '@/shared/ui/input'
 
-import { registerRecipeAction, type RegisterRecipeResult } from '../api/register-recipe'
+import {
+  registerRecipeAction,
+  validateRecipeAction,
+  type RegisterRecipeResult,
+  type ValidateRecipeResult,
+} from '../api/register-recipe'
 
 // 레시피 = BenchmarkAdapterSpec(데이터): source(HF/jsonl) + mapping(필드→EvalCase) + graderTemplates({field} 보간).
 const SAMPLE = `{
@@ -23,14 +28,34 @@ export function RegisterRecipeForm() {
   const [text, setText] = useState(SAMPLE)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState<RegisterRecipeResult>()
+  const [validation, setValidation] = useState<ValidateRecipeResult>()
+
+  function parse(): unknown | undefined {
+    try {
+      return JSON.parse(text)
+    } catch {
+      return undefined
+    }
+  }
+
+  async function onValidate() {
+    setBusy(true)
+    setResult(undefined)
+    const spec = parse()
+    if (spec === undefined) {
+      setBusy(false)
+      setValidation({ ok: false, error: 'JSON 파싱 실패' })
+      return
+    }
+    setValidation(await validateRecipeAction(spec))
+    setBusy(false)
+  }
 
   async function onRegister() {
     setBusy(true)
     setResult(undefined)
-    let spec: unknown
-    try {
-      spec = JSON.parse(text)
-    } catch {
+    const spec = parse()
+    if (spec === undefined) {
       setBusy(false)
       setResult({ ok: false, error: 'JSON 파싱 실패' })
       return
@@ -59,6 +84,7 @@ export function RegisterRecipeForm() {
         </p>
       </div>
 
+      {validation && <ValidateBanner v={validation} />}
       {result && !result.ok && (
         <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
           등록 실패: {result.error}
@@ -70,9 +96,49 @@ export function RegisterRecipeForm() {
         </div>
       )}
 
-      <Button type="button" onClick={onRegister} disabled={busy}>
-        {busy ? '등록 중…' : '레시피 등록'}
-      </Button>
+      <div className="flex gap-2">
+        <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
+          {busy ? '…' : '검증 (dry-run)'}
+        </Button>
+        <Button type="button" onClick={onRegister} disabled={busy}>
+          {busy ? '등록 중…' : '레시피 등록'}
+        </Button>
+      </div>
+    </div>
+  )
+}
+
+function ValidateBanner({ v }: { v: ValidateRecipeResult }) {
+  if (v.error)
+    return (
+      <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        검증 호출 실패: {v.error}
+      </div>
+    )
+  if (!v.ok)
+    return (
+      <div className="space-y-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+        <div className="font-medium">스키마 오류</div>
+        <ul className="list-disc pl-5">
+          {v.errors?.map((e) => (
+            <li key={e}>{e}</li>
+          ))}
+        </ul>
+      </div>
+    )
+  return (
+    <div className="space-y-1 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
+      <div className="font-medium text-emerald-700">
+        ✓ 스키마 정상 · {v.id}@{v.version} · source={v.source} · graderTemplates{' '}
+        {v.graderTemplates ?? 0} {v.versionExists ? '(이미 존재)' : '(새 버전)'}
+      </div>
+      <div className="text-muted-foreground">
+        기존 버전:{' '}
+        {v.existingVersions && v.existingVersions.length > 0
+          ? v.existingVersions.join(', ')
+          : '없음'}
+        {v.versionExists && ' — 동일 내용이면 no-op, 다르면 409 로 거부됩니다.'}
+      </div>
     </div>
   )
 }
