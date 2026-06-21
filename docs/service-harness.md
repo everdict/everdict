@@ -889,6 +889,21 @@ confirmed the MLflow-specific decode against the real server: attributes arrive 
 `spansToTraceEvents` handle. So **both** trace backends (OTel/Jaeger and MLflow 3.x) pull live into the same normalized
 `TraceEvent[]`. (Credentials read from `infra/.env` at runtime, never committed.)
 
+### Service-topology Phase 2 on Nomad too — `NomadTopologyRuntime` live, orchestrator-agnostic confirmed ✅
+The K8s runtime was proven live (SLICE 88/89); this proves the **same orchestrator-agnostic `ServiceTopologyBackend`
+runtime on Nomad** — the whole point of the `TopologyRuntime` interface. A local `nomad agent -dev` (docker driver,
+Healthy) ran the same minimal topology.
+
+**Verified live** (`scripts/live/topology-nomad.mjs`, `addr=http://localhost:4646`): `ensureTopology(spec)` registered the
+generated Nomad job, `waitForGroupRunning` waited for the alloc, and `resolvePort` discovered the dynamic host port
+(`http://127.0.0.1:20985`); the per-run **front-door drive** hit `GET /health` → `200`, `POST /runs` → `200`. Then
+`provisionBrowserEnv(spec, runId)` ran a per-case **real headless Chromium** (Nomad dispatch alloc) and `connectBrowser`
+got a real CDP `webSocketDebuggerUrl` (`ws://127.0.0.1:21481/devtools/browser/…`); `browser.snapshot()` → a `browser`
+snapshot (`about:blank`); `teardown(spec)` deregistered the jobs (clean, exit 0). So the identical deploy → discover →
+drive → per-case-browser → teardown path runs on **both Nomad and K8s** — the orchestrator-agnostic claim, live on both.
+(Only the agent-server actually driving the browser via the extension remains, needing the real browser-use images. Nomad
+dev agent stopped + stub image removed afterward.)
+
 ### First-party harness catalog seeded into `_shared` ✅
 The harness registry mirrors the dataset/judge/runtime model (`tenant` + `_shared` fallback, version-immutable),
 and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (setup + a `{{task}}/{{model}}/
