@@ -1041,3 +1041,22 @@ needs runtime discovery).
 PG+Redis) — needs the aegra image loaded into the node + the aegra pod reaching the host LiteLLM (the
 `hostNetwork`+default-bridge trick from the aider-on-kind recipe) — and fold the Agent-Protocol multi-step drive
 into a reusable `ServiceHarness`.
+
+### Real `browser-use` front-door ✅
+Beyond the LangGraph (aegra) harness, the **`browser-use`** agent library (v0.13.1) now runs as a
+service-topology front-door — a second, independent harness shape proving the backend is harness-agnostic.
+`scripts/live/Dockerfile.browseruse` bakes `browser-use` + `aiohttp` onto the Playwright Python base; 0.13
+drives the base image's `/ms-playwright` chromium via `cdp_use` (the `playwright` module isn't even installed),
+so `browseruse_server.py` passes `executable_path` = that chromium to avoid any runtime download.
+`browseruse_server.py` exposes the front-door contract: `GET /health`, `POST /runs {task, browser_cdp_url}`
+(blocks until the agent finishes), `GET /observe` (last visited URL + extracted text). The agent uses
+`browser_use.ChatOpenAI` pointed at the LiteLLM proxy, `use_vision=False`, headless + `--no-sandbox`.
+
+Verified live (`scripts/live/browseruse-topology-drive.mjs`): the **real** `ServiceTopologyBackend.dispatch`
+drove this front-door end-to-end — `ensureTopology` → `provisionBrowserEnv` → `POST /runs` (per-run wiring) →
+trace fetch → `snapshot` (mapped from `/observe` to a `BrowserSnapshot`) → grade. A real headless Chromium,
+driven by a real LLM (`gpt-5.4-mini` via LiteLLM), navigated to `https://example.com` and read its heading:
+`snapshot.url = https://example.com/` and the extracted DOM contained `Example Domain`, so **url-matches +
+dom-contains both PASS** deterministically (no VLM needed). Orchestrator deploy is already proven (kind + Nomad
+above), so this run pins the runtime to a local-docker inline `TopologyRuntime` and closes the *backend* path
+with a genuine `browser-use` image — the last "is it a real agent driving a real browser?" rung, not a stub.
