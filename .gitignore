@@ -14,3 +14,6 @@ coverage/
 # editor / os
 .DS_Store
 *.log
+
+# live e2e artifacts (scripts/live/*.mjs 가 리포 루트에 쓰는 스크린샷 등 — 커밋 대상 아님)
+/e2e-*.png
