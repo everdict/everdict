@@ -10,6 +10,7 @@ import {
   FileText,
   FlaskConical,
   Gavel,
+  KeyRound,
   LayoutDashboard,
   Server,
   Settings,
@@ -28,6 +29,7 @@ const NAV = [
   { href: '/dashboard/judges', label: 'Judge', icon: Gavel, exact: false },
   { href: '/dashboard/harnesses', label: '하니스', icon: Boxes, exact: false },
   { href: '/dashboard/runtimes', label: '런타임', icon: Server, exact: false },
+  { href: '/dashboard/secrets', label: '시크릿', icon: KeyRound, exact: false },
   { href: '/dashboard/settings', label: '설정', icon: Settings, exact: false },
 ] as const
 

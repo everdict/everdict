@@ -68,6 +68,12 @@ Import order enforces downward layer deps (app → widgets → features → enti
 - **런타임 `/dashboard/runtimes`** — tenant execution infra (local | nomad | k8s), owned vs `_shared`. **등록
   `/dashboard/runtimes/new`** — kind-toggle form → `POST /runtimes` (admin-gated; credentials via secrets, not
   the spec). The scorecard 실행 form gains a 런타임 selector. See `docs/runtimes.md`.
+- **시크릿 `/dashboard/secrets`** — workspace secrets (model/provider keys + cluster API tokens). List shows
+  **names + updatedAt only** (values are write-only, never read back). Add/overwrite (`PUT /secrets/:name`) +
+  delete (`DELETE /secrets/:name`), `secretsSchema`-parsed `GET /secrets`. **admin-gated** off `/me`
+  (`secrets:read`/`secrets:write`); `ASSAY_SECRETS_KEY` unset on the control plane → store disabled (fail-closed)
+  shown as a callout. The runtime form's `authSecret` references a secret name registered here. Parity:
+  `list/set/delete_secret` MCP tools.
 - **새 run `/dashboard/runs/new`** — submit-run form (react-hook-form) → `submitRunAction` (server action) →
   control plane `POST /runs` → redirect to the run detail.
 - **하니스 등록 `/dashboard/harnesses/new`** — a **structured wizard** (`features/register-harness`): pick
