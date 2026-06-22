@@ -11,7 +11,10 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "build": "turbo run build",
-    "assay": "node --env-file-if-exists=.env apps/cli/dist/main.js"
+    "assay": "node --env-file-if-exists=.env apps/cli/dist/main.js",
+    "api": "node --env-file-if-exists=apps/api/.env apps/api/dist/main.js",
+    "api:dev": "node --watch --env-file-if-exists=apps/api/.env apps/api/dist/main.js",
+    "api:start": "pnpm build && pnpm api"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

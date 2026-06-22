@@ -100,6 +100,14 @@ ASSAY_REQUIRE_AUTH=1 ASSAY_INTERNAL_TOKEN=… DATABASE_URL=… \
   node apps/api/dist/main.js
 ```
 
+Plain `node` does **not** auto-load any `.env` (only Next.js does, for the web) — so the control plane sees env
+only from the shell. For local dev, put the vars in `apps/api/.env` and run from the repo root with
+`pnpm api` (or `pnpm api:dev` for `--watch`, `pnpm api:start` to build first). These use
+`node --env-file-if-exists=apps/api/.env`, so the file fills in **unset** vars only — a real env var (k8s secret)
+always wins, and a missing file is a no-op (prod-safe). At boot the server logs whether the OIDC verifier was
+wired (`▶ auth: OIDC(JWT) 검증기 활성 issuer=…`) — if you see `KEYCLOAK_ISSUER 미설정` instead, the env didn't reach
+the process.
+
 ### Diagnosing 401s (control-plane logging)
 The control plane runs a structured (pino) request logger at `ASSAY_LOG_LEVEL` (default `info`; set `silent` to
 disable). It is built to make a Keycloak-token 401 self-explanatory — the common failure when the **web** is wired

@@ -87,7 +87,7 @@ The dev server runs on **port 3001** (`pnpm --filter @assay/web dev`).
 ## Run
 ```bash
 pnpm install
-# control plane (separate terminal): node apps/api/dist/main.js   (or with DATABASE_URL for Postgres)
+# control plane (separate terminal): pnpm build && pnpm api   (loads apps/api/.env; or DATABASE_URL for Postgres)
 # Keycloak (optional; without it the web runs in dev mode as tenant "default"):
 docker compose -f deploy/keycloak/docker-compose.yaml up -d        # then configure realm/client (see file)
 cp apps/web/.env.example apps/web/.env                              # set CONTROL_PLANE_URL + Keycloak vars
