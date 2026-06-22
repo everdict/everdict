@@ -1,21 +1,26 @@
-// 라이브 e2e (service-topology 마지막 rung): *실제 browser-use* 를 assay 의 ServiceTopologyBackend front-door 로.
-// 지금까지 토폴로지 런타임은 stub front-door 로만 deploy/drive/observe 를 검증했다(SLICE 88/89/92). 여기선 그 stub 을
-// 진짜 browser-use 에이전트로 교체 — 실제 LLM(LiteLLM 프록시)이 실제 headless Chromium 을 구동해 웹 태스크를 수행하고,
-// assay 의 **실 ServiceTopologyBackend.dispatch** 가 front-door 로 POST /runs(per-run wiring) → trace fetch → 브라우저
-// 관측(snapshot: 방문 URL/추출 텍스트) → url-matches/dom-contains 로 결정론적 채점한다. 오케스트레이터 deploy 는 이미
-// 검증됐으므로(88/89/92) 여기선 런타임을 로컬 docker 로 두고 *백엔드 경로 전체*를 실 browser-use 로 닫는다.
+// 라이브 e2e (service-topology): *실제 browser-use* 를 assay 의 ServiceTopologyBackend front-door 로 — 로컬 docker 런타임.
+// (오케스트레이터 deploy 는 kind+Nomad 로 이미 검증됐고, K8s deploy 버전은 browseruse-topology-k8s.mjs 참고.)
+// 여기서 닫는 것:
+//  ② 인터랙티브 멀티스텝 태스크 — 정적 example.com 이 아니라 컨테이너가 직접 서빙하는 /form 에서 navigate→input→click→
+//     결과확인. url-matches(q=assay) + dom-contains(Results for assay) 로 결정론적 채점.
+//  ③ 실 트레이스 — front-door 가 run 마다 *실제* 토큰사용량(TokenCost)+액션열(action_names)을 Jaeger(:4318)로 OTLP 배출,
+//     백엔드의 traceSource(OtelTraceSource, Jaeger query :16686)가 같은 trace_id 로 끌어와 steps/cost 채점.
+//     trace_id 매칭: newRunId 를 32-hex 로 오버라이드 → thread_id="run-<32hex>" → front-door 가 그 hex 를 trace_id 로 사용.
 //
-// 사전: docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live
+// 사전: docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686) 기동.
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync, spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
+import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
 const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
 const MODEL = process.env.BROWSERUSE_MODEL ?? "gpt-5.4-mini";
-const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "4";
+const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "6";
+const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 const NAME = "assay-bu-live";
 const FRONT = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -39,7 +44,6 @@ function cleanup() {
   spawnSync("docker", ["rm", "-f", NAME], { stdio: "ignore" });
 }
 
-// front-door = 실 browser-use 컨테이너 기동(--network=host 로 LiteLLM:4000 에 바로 닿게).
 cleanup();
 console.log("=== 실 browser-use front-door 기동 (docker, --network=host) ===");
 execFileSync(
@@ -57,6 +61,8 @@ execFileSync(
     "-e",
     "OPENAI_BASE_URL=http://localhost:4000/v1",
     "-e",
+    "OTLP_URL=http://localhost:4318/v1/traces",
+    "-e",
     `BROWSERUSE_MODEL=${MODEL}`,
     "-e",
     `BROWSERUSE_MAX_STEPS=${MAX_STEPS}`,
@@ -67,7 +73,6 @@ execFileSync(
 
 let ok = false;
 try {
-  // health 대기(browser-use import + 서버 기동까지 수십 초 걸릴 수 있음).
   process.stdout.write("health 대기");
   let healthy = false;
   for (let i = 0; i < 60 && !healthy; i++) {
@@ -81,27 +86,33 @@ try {
   console.log(healthy ? " up" : " (health 응답 없음)");
   if (!healthy) throw new Error("front-door health timeout");
 
-  // 실 ServiceTopologyBackend — 런타임/트레이스는 로컬 docker front-door 를 가리키는 인라인 구현.
+  // 실 ServiceTopologyBackend — 런타임은 로컬 docker front-door, traceSource 는 실 Jaeger(OtelTraceSource, 인제스트 랙 retry).
   const runtime = {
     id: "local-docker",
-    async ensureTopology(_spec, _zone) {
+    async ensureTopology() {
       return { endpoints: { agent: FRONT } };
     },
-    async provisionBrowserEnv(_spec, _runId, _zone) {
-      // browser-use 가 자기 브라우저를 띄우므로 cdpUrl 은 비움. snapshot 은 front-door /observe 에서 관측.
+    async provisionBrowserEnv() {
       return {
         cdpUrl: "",
         async snapshot() {
-          const r = await fetch(`${FRONT}/observe`);
-          const j = await r.json();
+          const j = await (await fetch(`${FRONT}/observe`)).json();
           return { kind: "browser", url: j.url || "", dom: j.dom || "", console: [] };
         },
         async dispose() {},
       };
     },
   };
+  const otel = new OtelTraceSource({ endpoint: JAEGER_QUERY });
   const traceSource = {
-    async fetch(_runId) {
+    async fetch(runId) {
+      for (let i = 0; i < 20; i++) {
+        try {
+          const ev = await otel.fetch(runId);
+          if (ev.length > 0) return ev;
+        } catch {}
+        await sleep(1000);
+      }
       return [];
     },
   };
@@ -112,65 +123,78 @@ try {
     services: [{ name: "agent", image: IMAGE, port: Number(PORT), needs: [], perRun: [], replicas: 1 }],
     dependencies: [],
     frontDoor: { service: "agent", submit: "POST /runs" },
-    traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+    traceSource: { kind: "otel", endpoint: JAEGER_QUERY },
   };
   const backend = new ServiceTopologyBackend({
     runtime,
     traceSource,
     specFor: () => spec,
+    newRunId: () => randomUUID().replace(/-/g, ""), // 32-hex → Jaeger trace_id 로 매칭
   });
 
   const job = {
     tenant: "default",
     harness: { id: "browseruse", version: "1.0.0" },
     evalCase: {
-      id: "goto-example",
-      env: { kind: "browser", url: "https://example.com" },
-      task: "Open https://example.com in the browser and confirm the page has loaded by reading its main heading.",
+      id: "search-form",
+      env: { kind: "browser", url: `${FRONT}/form` },
+      task: `Go to ${FRONT}/form , type "assay eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
       graders: [
-        { id: "url-matches", config: { pattern: "example\\.com" } },
-        { id: "dom-contains", config: { text: "Example Domain" } },
+        { id: "url-matches", config: { pattern: "[?&]q=assay" } }, // 제출 결과 URL
+        { id: "dom-contains", config: { text: "Results for assay" } }, // 결과 페이지 텍스트
+        { id: "steps", config: {} }, // trace 기반: 실 browser-use 액션 수
+        { id: "cost", config: {} }, // trace 기반: 실 토큰사용량(usd 는 프록시 모델 가격 미상→0)
       ],
       timeoutSec: 300,
-      tags: ["browser-use", "service-topology"],
+      tags: ["browser-use", "service-topology", "interactive", "trace"],
     },
   };
 
-  console.log("\n=== ServiceTopologyBackend.dispatch — 실 browser-use 구동(LLM→실 Chromium) + 채점 ===");
-  console.log("model:", MODEL, "| max_steps:", MAX_STEPS, "| task:", job.evalCase.task);
+  console.log("\n=== ServiceTopologyBackend.dispatch — 실 browser-use 인터랙티브 구동 + 실 트레이스 채점 ===");
+  console.log("model:", MODEL, "| task:", job.evalCase.task);
   const result = await backend.dispatch(job);
 
-  // front-door 의 원시 관측(투명성: 에이전트 최종 답 / 에러).
   let observed = {};
   try {
     observed = await (await fetch(`${FRONT}/observe`)).json();
   } catch {}
 
+  const llmCalls = result.trace.filter((e) => e.kind === "llm_call");
+  const toolCalls = result.trace.filter((e) => e.kind === "tool_call");
   console.log("\n--- CaseResult ---");
   console.log("snapshot.kind =", result.snapshot.kind, "| url =", result.snapshot.url);
-  console.log("snapshot.dom(앞 120):", String(result.snapshot.dom).slice(0, 120).replace(/\s+/g, " "));
+  console.log("snapshot.dom(앞 100):", String(result.snapshot.dom).slice(0, 100).replace(/\s+/g, " "));
+  console.log("browser-use actions:", JSON.stringify(observed.actions));
+  console.log("browser-use tokens :", JSON.stringify(observed.tokens), "| trace_id:", observed.trace_id);
+  console.log(
+    "trace(pulled from Jaeger):",
+    `llm_call=${llmCalls.length}`,
+    `tool_call=${toolCalls.length}`,
+    llmCalls[0]
+      ? `model=${llmCalls[0].model} in=${llmCalls[0].cost?.inputTokens} out=${llmCalls[0].cost?.outputTokens}`
+      : "",
+  );
   console.log("scores =", JSON.stringify(result.scores.map((s) => ({ id: s.graderId, pass: s.pass, value: s.value }))));
-  console.log("browser-use result:", String(observed.result || "").slice(0, 200));
-  if (observed.error) console.log("browser-use error:", String(observed.error).slice(0, 400));
+  if (observed.error) console.log("front-door note:", String(observed.error).slice(0, 300));
 
-  const urlOk = result.scores.find((s) => s.graderId === "url-matches")?.pass === true;
-  const domOk = result.scores.find((s) => s.graderId === "dom-contains")?.pass === true;
-  ok = result.snapshot.kind === "browser" && urlOk && domOk;
+  const score = (id) => result.scores.find((s) => s.graderId === id);
+  const urlOk = score("url-matches")?.pass === true;
+  const domOk = score("dom-contains")?.pass === true;
+  const stepsOk = (score("steps")?.value ?? 0) > 0; // 실 액션이 trace 로 들어왔는가
+  const tracePulled = llmCalls.length > 0 && toolCalls.length > 0; // Jaeger 에서 끌어온 실 trace
+  ok = result.snapshot.kind === "browser" && urlOk && domOk && stepsOk && tracePulled;
   console.log(
     ok
-      ? "\n✅ service-topology 마지막 rung: 실제 browser-use 에이전트가 assay 의 ServiceTopologyBackend front-door 로서 " +
-          "실 LLM(LiteLLM)으로 실 headless Chromium 을 구동해 https://example.com 을 방문, 백엔드가 front-door 로 POST /runs " +
-          "(per-run wiring) → 브라우저 관측(snapshot: 방문 URL/추출 텍스트) → url-matches+dom-contains 로 결정론적 PASS. " +
-          "stub 이 아닌 진짜 browser-use 이미지로 토폴로지 경로 전체를 닫음."
-      : "\n⚠️ 기대와 불일치(아래 browser-use result/error 참고 — 모델이 태스크를 못 끝냈을 수 있음)",
+      ? "\n✅ ②+③: 실 browser-use 가 ServiceTopologyBackend front-door 로서 인터랙티브 폼을 멀티스텝(navigate→input→click)으로 " +
+          "구동해 결과 페이지 도달(url-matches q=assay + dom-contains 'Results for assay' PASS), 동시에 run 의 실제 토큰사용량/" +
+          "액션열을 Jaeger 로 OTLP 배출 → 백엔드가 OtelTraceSource 로 같은 trace_id 를 끌어와 steps(실 액션수)/cost 로 채점. " +
+          "정적 데모를 넘어 인터랙티브 driving + 실 trace pull 까지 백엔드 경로로 닫음."
+      : "\n⚠️ 기대와 불일치(위 actions/tokens/trace/scores 참고)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);
 } finally {
   cleanup();
-  if (!process.env.KEEP_IMAGE) {
-    spawnSync("docker", ["builder", "prune", "-f"], { stdio: "ignore" });
-  }
   console.log("cleanup done (front-door 컨테이너 제거)");
 }
 process.exit(ok ? 0 : 1);

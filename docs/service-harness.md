@@ -1060,3 +1060,27 @@ driven by a real LLM (`gpt-5.4-mini` via LiteLLM), navigated to `https://example
 dom-contains both PASS** deterministically (no VLM needed). Orchestrator deploy is already proven (kind + Nomad
 above), so this run pins the runtime to a local-docker inline `TopologyRuntime` and closes the *backend* path
 with a genuine `browser-use` image — the last "is it a real agent driving a real browser?" rung, not a stub.
+
+Three follow-ups then hardened it (`browseruse-topology-drive.mjs` local-docker, `browseruse-topology-k8s.mjs`
+on kind):
+- **Interactive multi-step.** The front-door also serves `GET /form` (a search input + Submit button) and
+  `GET /result?q=…`. The task — "go to /form, type 'assay eval', click Search, report the heading" — forces a
+  real `navigate → input_text → click` sequence. Verified: `action_names() = [navigate, input, click, done]`,
+  final `snapshot.url = …/result?q=assay+eval`, so url-matches (`[?&]q=assay`) + dom-contains (`Results for
+  assay`) PASS. Real DOM interaction, not just a navigation.
+- **Real trace pull + steps/cost.** `browseruse_server.py` wraps the LLM in browser-use's `TokenCost`
+  (`register_llm` → `get_usage_summary`) and, after each run, emits OTLP spans to Jaeger keyed by the run's
+  trace id: one `llm_call` span carrying the **real** token counts and one `tool_call` span per **real**
+  action. The trace id is derived from the wiring — the backend's `newRunId` is overridden to a 32-hex string,
+  so `thread_id = run-<32hex>` reaches the front-door, which uses `<32hex>` as the OTLP trace id; the backend's
+  `OtelTraceSource.fetch(runId=<32hex>)` then pulls that exact trace from Jaeger (with ingest-lag retry). Live:
+  `llm_call=1` (`model=gpt-5.4-mini`, `in≈17.5k / out≈0.6k` tokens — real), `tool_call=4`, so the `steps` grader
+  scores the real action count and `cost` runs on the real trace (USD = 0: the proxy model isn't in
+  browser-use's public pricing DB, so tokens are real but cost isn't computed — reported honestly, not faked).
+- **On a real orchestrator (kind).** `K8sTopologyRuntime.ensureTopology` deploys the same `browser-use` image
+  as a `Deployment`+`Service` (image `kind load`-ed; per-pod env injected via the runtime's `storeEnv`),
+  waits for rollout (`ready 1/1`), and port-forwards to discover the front-door. The pod reaches the host
+  LiteLLM at `172.17.0.1:4000` (kind node joined to the default bridge, the aider-on-kind recipe) and emits
+  OTLP to Jaeger's bridge IP `:4318`; the host pulls the trace from `:16686`. Same interactive task, same
+  deterministic + trace grades PASS — closing the orchestrator-deploy path for a real `browser-use` harness,
+  not only the local-docker backend path.
