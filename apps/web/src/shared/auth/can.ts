@@ -21,6 +21,8 @@ export type WebAction =
   | 'secrets:write'
   | 'keys:read'
   | 'keys:write'
+  | 'members:read'
+  | 'members:write'
   | 'settings:read'
   | 'settings:write'
 
@@ -34,6 +36,7 @@ const PERMS: Record<string, WebAction[]> = {
     'models:read',
     'metrics:read',
     'runtimes:read',
+    'members:read', // 팀 조회는 viewer+
   ],
   member: [
     'runs:read',
@@ -50,6 +53,7 @@ const PERMS: Record<string, WebAction[]> = {
     'metrics:read',
     'metrics:write',
     'runtimes:read',
+    'members:read',
   ],
   admin: [
     'runs:read',
@@ -72,6 +76,8 @@ const PERMS: Record<string, WebAction[]> = {
     'secrets:write',
     'keys:read', // API 키 발급/취소 = admin(키는 워크스페이스 admin 권한을 가짐)
     'keys:write',
+    'members:read',
+    'members:write', // 멤버 역할변경/제거/초대 = admin
     'settings:read', // 워크스페이스 정책(계측 등) = admin
     'settings:write',
   ],

@@ -161,4 +161,20 @@ export const controlPlane = {
     call<T>(auth, '/keys', { method: 'POST', body: JSON.stringify(body) }),
   revokeKey: (auth: AuthContext, id: string) =>
     callVoid(auth, `/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 워크스페이스 멤버 관리(조회=viewer+, 역할변경/제거=admin) + 초대(발급/목록/취소=admin, 수락=인증만).
+  listMembers: <T>(auth: AuthContext) => call<T>(auth, '/members'),
+  setMemberRole: (auth: AuthContext, subject: string, role: string) =>
+    callVoid(auth, `/members/${encodeURIComponent(subject)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ role }),
+    }),
+  removeMember: (auth: AuthContext, subject: string) =>
+    callVoid(auth, `/members/${encodeURIComponent(subject)}`, { method: 'DELETE' }),
+  listInvites: <T>(auth: AuthContext) => call<T>(auth, '/invites'),
+  createInvite: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/invites', { method: 'POST', body: JSON.stringify(body) }),
+  revokeInvite: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/invites/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  acceptInvite: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/invites/accept', { method: 'POST', body: JSON.stringify(body) }),
 }

@@ -2,27 +2,35 @@
 
 import { useState } from 'react'
 
+import { InvitesManager } from '@/features/manage-invites'
+import { MembersManager } from '@/features/manage-members'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { SettingsForm, type WorkspaceSettings } from '@/features/workspace-settings'
+import type { Invite, Member } from '@/entities/member'
 import type { SecretMeta } from '@/entities/secret'
 import { cn } from '@/shared/lib/utils'
 import { Card } from '@/shared/ui/card'
 
-type TabKey = 'general' | 'model' | 'cluster'
+type TabKey = 'general' | 'model' | 'cluster' | 'members'
 
-// 워크스페이스 설정 탭: 일반(정책) · 모델 키 · 클러스터 자격증명. 권한 없는 탭은 숨긴다(최종 강제는 컨트롤플레인).
+// 워크스페이스 설정 탭: 일반(정책) · 모델 키 · 클러스터 자격증명 · 멤버. 권한 없는 탭은 숨긴다(최종 강제는 컨트롤플레인).
 export function SettingsTabs(props: {
   settings: WorkspaceSettings
   secrets: SecretMeta[]
+  members: Member[]
+  invites: Invite[]
   canReadSettings: boolean
   canWriteSettings: boolean
   canReadSecrets: boolean
   canWriteSecrets: boolean
+  canReadMembers: boolean
+  canWriteMembers: boolean
 }) {
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'general', label: '일반', show: props.canReadSettings },
     { key: 'model', label: '모델 키', show: props.canReadSecrets },
     { key: 'cluster', label: '클러스터 자격증명', show: props.canReadSecrets },
+    { key: 'members', label: '멤버', show: props.canReadMembers },
   ]
   const visible = tabs.filter((t) => t.show)
   const [active, setActive] = useState<TabKey>(visible[0]?.key ?? 'general')
@@ -63,6 +71,12 @@ export function SettingsTabs(props: {
             secrets={props.secrets}
             canWrite={props.canWriteSecrets}
           />
+        )}
+        {active === 'members' && (
+          <div className="space-y-8">
+            <MembersManager members={props.members} canWrite={props.canWriteMembers} />
+            {props.canWriteMembers && <InvitesManager invites={props.invites} canWrite />}
+          </div>
         )}
       </Card>
     </div>
