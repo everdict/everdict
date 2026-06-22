@@ -3,9 +3,11 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import {
+  Activity,
   BarChart3,
   Boxes,
   Database,
+  FileText,
   FlaskConical,
   Gavel,
   LayoutDashboard,
@@ -17,9 +19,10 @@ import { cn } from '@/shared/lib/utils'
 
 const NAV = [
   { href: '/dashboard', label: '개요', icon: LayoutDashboard, exact: true },
-  { href: '/dashboard/runs', label: 'Runs', icon: LayoutDashboard, exact: false },
+  { href: '/dashboard/runs', label: 'Runs', icon: Activity, exact: false },
   { href: '/dashboard/datasets', label: '데이터셋', icon: Database, exact: false },
   { href: '/dashboard/scorecards', label: '스코어카드', icon: BarChart3, exact: false },
+  { href: '/dashboard/report', label: '리포트', icon: FileText, exact: false },
   { href: '/dashboard/judges', label: 'Judge', icon: Gavel, exact: false },
   { href: '/dashboard/harnesses', label: '하니스', icon: Boxes, exact: false },
   { href: '/dashboard/runtimes', label: '런타임', icon: Server, exact: false },

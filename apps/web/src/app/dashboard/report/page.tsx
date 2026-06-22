@@ -10,8 +10,10 @@ import {
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
+import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
 
 export const dynamic = 'force-dynamic'
@@ -68,11 +70,7 @@ export default async function ReportPage() {
         description="데스크탑(os-use/OSWorld) + 웹(browser-use/WebVoyager) — 권위-기준(state > 객관 > judge) 케이스 통과율."
       />
 
-      {error && (
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          스코어카드를 불러올 수 없습니다: {error}
-        </Card>
-      )}
+      {error && <Callout tone="danger">스코어카드를 불러올 수 없습니다: {error}</Callout>}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         <StatCard
@@ -103,7 +101,7 @@ export default async function ReportPage() {
 
       {TRACK_ORDER.filter((t) => byTrack[t].length > 0).map((t) => (
         <section key={t} className="space-y-3">
-          <h2 className="text-lg font-semibold tracking-tight">{TRACK_LABEL[t]}</h2>
+          <SectionHeader title={TRACK_LABEL[t]} />
           <div className="space-y-2">
             {byTrack[t].map((r) => {
               const cp = casePass(r)
@@ -113,7 +111,7 @@ export default async function ReportPage() {
                   <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5">
                     <Link
                       href={`/dashboard/scorecards/${r.id}`}
-                      className="font-mono text-sm hover:text-primary"
+                      className="font-mono text-sm transition-colors hover:text-primary"
                     >
                       {r.dataset.id}@{r.dataset.version} → {r.harness.id}@{r.harness.version}
                     </Link>
