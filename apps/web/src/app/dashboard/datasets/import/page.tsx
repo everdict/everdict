@@ -1,7 +1,7 @@
 import Link from 'next/link'
 
 import {
-  ImportBenchmarkForm,
+  AddBenchmark,
   type BenchmarkCatalogItem,
   type RecipeItem,
 } from '@/features/import-benchmark'
@@ -41,7 +41,7 @@ export default async function ImportBenchmarkPage() {
       </Link>
       <PageHeader
         title="벤치마크 추가"
-        description="공개 벤치마크(WebVoyager · GAIA · SWE-bench · Mind2Web · GSM8K …) 또는 내가 등록한 레시피를 당겨 이 워크스페이스 데이터셋으로 등록합니다."
+        description="HF 데이터셋·JSONL 소스를 미리보기로 필드를 감지해 매핑하면 바로 데이터셋이 됩니다(소스에서 만들기). 또는 공개 카탈로그(WebVoyager·GAIA·SWE-bench…)·내 레시피에서 가져옵니다."
         actions={
           <Link
             href="/dashboard/datasets/recipes"
@@ -60,7 +60,7 @@ export default async function ImportBenchmarkPage() {
         <Callout tone="danger">카탈로그 조회 실패: {error}</Callout>
       ) : (
         <Card className="p-6">
-          <ImportBenchmarkForm benchmarks={benchmarks} recipes={recipes} />
+          <AddBenchmark benchmarks={benchmarks} recipes={recipes} />
         </Card>
       )}
     </div>

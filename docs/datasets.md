@@ -24,6 +24,22 @@ Datasets reuse the **`HarnessRegistry` ownership model** (`packages/registry`):
 - **Role-gating** — `datasets:read` = viewer+, `datasets:write` = **member+** (datasets are collaborative
   eval *content*; harness specs stay admin-only because they define execution/placement).
 
+## Adding benchmarks (source → dataset)
+A benchmark = a `BenchmarkAdapterSpec` (`@assay/datasets`): `source` (HuggingFace dataset or jsonl) + `mapping`
+(which fields become a case's id/task/answer/…) + optional `graderTemplates`. `BenchmarkService` turns one into a
+tenant **Dataset**. Three ways to add, all member+ (`datasets:write`), all immutable-on-register:
+- **Source wizard (primary)** — `POST /benchmarks/preview` fetches a few raw rows (no mapping) and returns the
+  detected **fields** + samples; the web `/dashboard/datasets/import` "소스에서 만들기" wizard auto-guesses the
+  mapping (id/task/answer dropdowns from the real fields), then `POST /benchmarks/import` with an **inline
+  `spec`** registers the dataset in **one action** — no separate recipe step, no hand-written JSON.
+- **Catalog** — `GET /benchmarks` lists the first-party code catalog (webvoyager/gaia/swe-bench/mind2web/gsm8k/
+  osworld); `POST /benchmarks/import {benchmark}` pulls it.
+- **Recipe** — `POST /benchmark-recipes` saves a reusable `BenchmarkAdapterSpec` (`BenchmarkRegistry`, owner +
+  `_shared`); `POST /benchmarks/import {recipe}` imports from it.
+
+gated HF sources authenticate with the tenant SecretStore `HF_TOKEN`. **BFF↔MCP parity**: MCP tools
+`preview_benchmark_source` + `import_benchmark` mirror the routes. See `docs/mcp.md`.
+
 ## Contract (`@assay/core`)
 `Dataset = { id, version, description?, cases: EvalCase[], tags: string[] }` (`DatasetSchema`).
 

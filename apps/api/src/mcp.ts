@@ -12,6 +12,7 @@ import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry }
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import type { RunService } from "./run-service.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
@@ -27,6 +28,7 @@ export interface McpDeps {
   runtimeRegistry?: RuntimeRegistry;
   secretStore?: SecretStore;
   settingsStore?: WorkspaceSettingsStore;
+  benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
   keyStore?: TenantKeyStore; // API 키 self-serve 발급/목록/취소(admin)
 }
@@ -491,6 +493,50 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const result = PullIngestBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           return ok(await scorecards.ingestPull({ tenant: ws, ...result.data }));
+        }),
+    );
+  }
+
+  if (deps.benchmarkService) {
+    const benchmarks = deps.benchmarkService;
+    server.registerTool(
+      "preview_benchmark_source",
+      {
+        description:
+          "벤치마크 소스 미리보기 — 매핑 전 원본 행 N개 + 감지된 필드(필드명을 모를 때 매핑 전 확인). body=preview JSON {source:{kind:'huggingface',dataset,config?,split?}|{kind:'jsonl'}, text?, limit?}",
+        inputSchema: { body: z.string().describe("preview body JSON") },
+      },
+      ({ body }) =>
+        run(principal, "datasets:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 preview JSON 이 아닙니다.");
+          }
+          const result = BenchmarkPreviewBodySchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          return ok(await benchmarks.previewSource({ tenant: ws, ...result.data }));
+        }),
+    );
+    server.registerTool(
+      "import_benchmark",
+      {
+        description:
+          "벤치마크를 이 워크스페이스 데이터셋으로 인입(불변; 충돌 409) — spec(인라인 정의) · benchmark(카탈로그 id) · recipe 중 하나. body=import JSON {spec?|benchmark?|recipe?, id?, version?, limit?, text?}",
+        inputSchema: { body: z.string().describe("import body JSON") },
+      },
+      ({ body }) =>
+        run(principal, "datasets:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(body);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 import JSON 이 아닙니다.");
+          }
+          const result = BenchmarkImportBodySchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          return ok(await benchmarks.import({ tenant: ws, ...result.data }));
         }),
     );
   }

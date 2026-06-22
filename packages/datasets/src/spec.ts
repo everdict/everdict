@@ -2,6 +2,7 @@ import { type Dataset, GraderSpecSchema } from "@assay/core";
 import { z } from "zod";
 import { type BenchmarkAdapter, type ImportBenchmarkOpts, importBenchmark } from "./catalog.js";
 import type { DatasetMeta } from "./mapping.js";
+import { type FetchLike, fetchHfRows } from "./sources.js";
 
 // 벤치마크 정의를 JSON 직렬화 가능한 "데이터"로 — 테넌트가 자기 워크스페이스에 등록/버전관리하는 레시피.
 // first-party 카탈로그 어댑터(코드: rowTransform/graderBuilder)와 달리, 이 spec 은 순수 데이터라 레지스트리에 저장 가능.
@@ -88,4 +89,34 @@ export function importFromSpec(
   opts: ImportBenchmarkOpts = {},
 ): Promise<Dataset> {
   return importBenchmark(specToAdapter(spec), meta, opts);
+}
+
+export type BenchmarkSourceSpec = z.infer<typeof BenchmarkSourceSchema>;
+
+// 소스에서 원본 행 N개를 매핑 전 그대로 인출 — "벤치마크 추가" 위저드의 미리보기/필드 자동감지용.
+// HF 는 fetchHfRows(소량), jsonl 은 opts.text 의 앞 N줄을 파싱. mapping 을 모르고도 실제 필드/샘플을 보여준다.
+export async function fetchSourceRows(
+  source: BenchmarkSourceSpec,
+  opts: { limit?: number; token?: string; text?: string; fetchImpl?: FetchLike } = {},
+): Promise<Array<Record<string, unknown>>> {
+  const limit = Math.max(1, opts.limit ?? 5);
+  if (source.kind === "huggingface") {
+    return fetchHfRows(
+      {
+        dataset: source.dataset,
+        ...(source.config ? { config: source.config } : {}),
+        ...(source.split ? { split: source.split } : {}),
+        limit,
+        ...(opts.token ? { token: opts.token } : {}),
+      },
+      opts.fetchImpl,
+    );
+  }
+  if (!opts.text) throw new Error("jsonl 소스는 text(원문)가 필요합니다.");
+  return opts.text
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .slice(0, limit)
+    .map((l) => JSON.parse(l) as Record<string, unknown>);
 }

@@ -31,7 +31,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
-import type { BenchmarkService } from "./benchmark-service.js";
+import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { RunService } from "./run-service.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
@@ -54,20 +54,6 @@ export const RunScorecardBodySchema = z.object({
   runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
   judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
 });
-
-// 벤치마크 인입 본문 — 카탈로그(benchmark) 또는 등록된 레시피(recipe) 중 하나로 테넌트 데이터셋 등록.
-export const BenchmarkImportBodySchema = z
-  .object({
-    benchmark: z.string().optional(), // 카탈로그 id (first-party)
-    recipe: z.object({ id: z.string(), version: z.string().optional() }).optional(), // 등록된 레시피
-    id: z.string().optional(), // 대상 데이터셋 id (기본 = 소스 id)
-    version: z.string().default("1.0.0"),
-    limit: z.number().int().positive().max(1000).optional(),
-    text: z.string().optional(), // jsonl 소스 업로드 원문
-  })
-  .refine((b) => Boolean(b.benchmark) || Boolean(b.recipe), {
-    message: "benchmark(카탈로그) 또는 recipe(레시피) 중 하나가 필요합니다.",
-  });
 
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
@@ -463,7 +449,26 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 카탈로그 벤치마크를 당겨 이 워크스페이스의 데이터셋으로 등록(HF 소스는 네트워크 인출, gated 면 HF_TOKEN 시크릿).
+  // 소스 미리보기 — 매핑 전 원본 행 N개 + 감지된 필드("벤치마크 추가" 위저드: 필드 자동감지 → 매핑). 등록 없음.
+  app.post("/benchmarks/preview", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "datasets:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = BenchmarkPreviewBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(await deps.benchmarkService.previewSource({ tenant: principal.workspace, ...parsed.data }));
+    } catch (err) {
+      return sendError(reply, err); // HF 인출 실패/잘못된 jsonl 등
+    }
+  });
+
+  // 카탈로그/레시피/인라인 spec 을 당겨 이 워크스페이스의 데이터셋으로 등록(HF 소스는 네트워크 인출, gated 면 HF_TOKEN 시크릿).
   app.post("/benchmarks/import", async (req, reply) => {
     if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -1144,6 +1149,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           runtimeRegistry: deps.runtimeRegistry,
           secretStore: deps.secretStore,
           settingsStore: deps.settingsStore,
+          benchmarkService: deps.benchmarkService,
           workspaceService: deps.workspaceService,
           keyStore: deps.keyStore,
         },

@@ -1,24 +1,60 @@
 import { BadRequestError } from "@assay/core";
 import {
   type BenchmarkAdapterSpec,
+  BenchmarkAdapterSpecSchema,
+  BenchmarkSourceSchema,
+  type BenchmarkSourceSpec,
   type FetchLike,
+  fetchSourceRows,
   getBenchmark,
   importBenchmark,
   importFromSpec,
   listBenchmarks,
 } from "@assay/datasets";
 import type { BenchmarkRegistry, DatasetRegistry } from "@assay/registry";
+import { z } from "zod";
+
+// 벤치마크 인입 본문 — spec(인라인 정의/위저드) · benchmark(카탈로그) · recipe(등록된 레시피) 중 하나로 데이터셋 등록.
+// HTTP 라우트와 MCP 툴이 공유(BFF↔MCP 패리티: 검증 스키마는 서비스 옆에 둔다).
+export const BenchmarkImportBodySchema = z
+  .object({
+    spec: BenchmarkAdapterSpecSchema.optional(), // 인라인 정의(위저드) — 레시피 등록 없이 한 번에 인입
+    benchmark: z.string().optional(), // 카탈로그 id (first-party)
+    recipe: z.object({ id: z.string(), version: z.string().optional() }).optional(), // 등록된 레시피
+    id: z.string().optional(), // 대상 데이터셋 id (기본 = 소스 id)
+    version: z.string().default("1.0.0"),
+    limit: z.number().int().positive().max(1000).optional(),
+    text: z.string().optional(), // jsonl 소스 업로드 원문
+  })
+  .refine((b) => Boolean(b.spec) || Boolean(b.benchmark) || Boolean(b.recipe), {
+    message: "spec(인라인 정의) · benchmark(카탈로그) · recipe(레시피) 중 하나가 필요합니다.",
+  });
+
+// 소스 미리보기 본문 — 매핑 전 원본 행 N개 + 감지된 필드(위저드용). 등록 없음.
+export const BenchmarkPreviewBodySchema = z.object({
+  source: BenchmarkSourceSchema,
+  text: z.string().optional(), // jsonl 소스 원문
+  limit: z.number().int().positive().max(20).optional(),
+});
 
 // 벤치마크 카탈로그(first-party 코드) + 테넌트 레시피(데이터, BenchmarkRegistry) → 테넌트-소유 Dataset 인입.
 // 유저 셀프서비스: 카탈로그에서 고르거나, 자기 워크스페이스에 레시피(BenchmarkAdapterSpec)를 등록해 재사용. authZ 는 라우트.
 export interface BenchmarkImportInput {
   tenant: string;
+  spec?: BenchmarkAdapterSpec; // 인라인 정의(위저드) — 레시피 등록 없이 한 번에 인입
   benchmark?: string; // 카탈로그 id (first-party)
   recipe?: { id: string; version?: string }; // 등록된 테넌트/공유 레시피
   id?: string; // 대상 데이터셋 id (기본 = 소스 id)
   version: string;
   limit?: number;
   text?: string; // jsonl 소스 업로드 원문
+}
+
+export interface PreviewSourceInput {
+  tenant: string;
+  source: BenchmarkSourceSpec;
+  text?: string; // jsonl 소스 원문(앞 N줄만 파싱)
+  limit?: number;
 }
 
 export interface BenchmarkServiceDeps {
@@ -67,6 +103,22 @@ export class BenchmarkService {
     return this.registry().ownVersions(tenant, id);
   }
 
+  // 소스 미리보기 — 매핑 전 원본 행 N개 + 감지된 필드 목록. 위저드가 이걸로 필드를 드롭다운에 채우고 매핑한다.
+  // gated HF 는 테넌트 SecretStore 의 HF_TOKEN 으로 인증. 등록/쓰기는 없다(순수 인출).
+  async previewSource(input: PreviewSourceInput): Promise<{ fields: string[]; rows: Array<Record<string, unknown>> }> {
+    const secrets: Record<string, string> = this.deps.secretsFor
+      ? await this.deps.secretsFor(input.tenant).catch(() => ({}))
+      : {};
+    const rows = await fetchSourceRows(input.source, {
+      limit: input.limit ?? 5,
+      ...(secrets.HF_TOKEN ? { token: secrets.HF_TOKEN } : {}),
+      ...(input.text ? { text: input.text } : {}),
+      ...(this.deps.fetchImpl ? { fetchImpl: this.deps.fetchImpl } : {}),
+    });
+    const fields = [...new Set(rows.flatMap((r) => Object.keys(r)))];
+    return { fields, rows };
+  }
+
   // 인입 → 테넌트-소유 Dataset. recipe(등록된 데이터) 또는 benchmark(카탈로그 코드) 중 하나.
   async import(
     input: BenchmarkImportInput,
@@ -83,7 +135,18 @@ export class BenchmarkService {
     };
 
     let dataset: Awaited<ReturnType<typeof importBenchmark>>;
-    if (input.recipe) {
+    if (input.spec) {
+      // 인라인 정의(위저드) — 레지스트리에 레시피를 먼저 등록할 필요 없이 바로 인입.
+      dataset = await importFromSpec(
+        input.spec,
+        {
+          id: input.id ?? input.spec.id,
+          version: input.version,
+          ...(input.spec.description ? { description: input.spec.description } : {}),
+        },
+        opts,
+      );
+    } else if (input.recipe) {
       const spec = await this.registry().get(input.tenant, input.recipe.id, input.recipe.version ?? "latest");
       dataset = await importFromSpec(
         spec,
@@ -114,7 +177,7 @@ export class BenchmarkService {
       throw new BadRequestError(
         "BAD_REQUEST",
         undefined,
-        "benchmark(카탈로그) 또는 recipe(레시피) 중 하나가 필요합니다.",
+        "spec(인라인 정의) · benchmark(카탈로그) · recipe(레시피) 중 하나가 필요합니다.",
       );
     }
     await this.deps.datasets.register(input.tenant, dataset); // 버전 불변(충돌 409)
