@@ -71,6 +71,15 @@ function extractRoles(payload: Record<string, unknown>): string[] {
   return known.length > 0 ? known : ["viewer"];
 }
 
+// 사람이 읽을 식별자(멤버 목록 표시용) — email 우선, 없으면 preferred_username. 표시 전용(identity/authz 무관).
+function extractEmail(payload: Record<string, unknown>): string | undefined {
+  const email = payload.email;
+  if (typeof email === "string" && email.length > 0) return email;
+  const username = payload.preferred_username;
+  if (typeof username === "string" && username.length > 0) return username;
+  return undefined;
+}
+
 // Keycloak(OIDC) JWT 검증 인증기 — JWKS 로 서명 검증, issuer/audience 확인, 워크스페이스/역할 추출.
 export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
   const jwks =
@@ -92,11 +101,13 @@ export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
         // apps/api 의 멤버십 해석(부트스트랩) + 웹 온보딩(첫 워크스페이스 생성)이 채운다.
         // fail-closed 는 *검증 불가* 토큰(서명/issuer/audience/만료 실패)에만 적용 — 그건 아래 catch 가 undefined 로.
         const workspace = extractWorkspace(payload as Record<string, unknown>, workspaceClaim, groupPrefix) ?? "";
+        const email = extractEmail(payload as Record<string, unknown>);
         return {
           subject: String(payload.sub ?? ""),
           workspace,
           roles: extractRoles(payload as Record<string, unknown>),
           via: "oidc",
+          ...(email ? { email } : {}),
         };
       } catch (err) {
         // 검증 실패 사유를 상위가 로깅할 수 있게 알린다(로깅 실패가 인증 흐름을 깨지 않도록 격리).

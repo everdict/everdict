@@ -6,9 +6,11 @@ paths: "packages/auth/**,apps/api/src/server.ts,apps/api/src/main.ts,deploy/keyc
 The **control plane owns all auth** — `@assay/auth` resolves identity, `apps/api` enforces it. The web is a
 token courier, never an auth authority. See `docs/auth.md`.
 
-- **One identity type:** every credential resolves to a `Principal{ subject, workspace, roles, via }`.
+- **One identity type:** every credential resolves to a `Principal{ subject, workspace, roles, via, email? }`.
   `workspace === tenant === trust-zone key` — never introduce a second tenancy axis; scope every read/write to
-  `principal.workspace`.
+  `principal.workspace`. `email` is the OIDC `email`/`preferred_username` claim (optional; absent for API keys) —
+  **display metadata only** (captured into the membership row for a human-readable member list), never an
+  authz/identity input; the opaque `sub` remains the identity key.
 - **Multi-workspace membership.** A subject may belong to several workspaces (SSOT = `@assay/db`
   `WorkspaceStore`: `assay_workspaces` + `assay_workspace_members`). The **active** one is resolved per request in
   `apps/api` (`applyActiveWorkspace`): the `x-assay-workspace` header selects a membership (`roles` come from it);

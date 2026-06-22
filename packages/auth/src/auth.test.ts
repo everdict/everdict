@@ -32,6 +32,12 @@ describe("authz", () => {
     expect(can(p(["member"]), "runtimes:read")).toBe(true);
     expect(can(p(["member"]), "runtimes:write")).toBe(false);
     expect(can(p(["admin"]), "runtimes:write")).toBe(true);
+
+    // 멤버 조회는 viewer+, 멤버 관리(역할변경/제거/초대)는 admin 전용.
+    expect(can(p(["viewer"]), "members:read")).toBe(true);
+    expect(can(p(["viewer"]), "members:write")).toBe(false);
+    expect(can(p(["member"]), "members:write")).toBe(false);
+    expect(can(p(["admin"]), "members:write")).toBe(true);
   });
   it("authorize 는 권한 없으면 403", () => {
     expect(() => authorize(p(["member"]), "harnesses:register")).toThrow(ForbiddenError);
@@ -89,6 +95,17 @@ describe("oidcAuthenticator (Keycloak JWT)", () => {
     const principal = await auth.authenticate(token);
     expect(principal?.workspace).toBe("globex");
     expect(principal?.roles).toEqual(["viewer"]); // 역할 없으면 viewer
+  });
+
+  it("email 클레임을 캡처(멤버 목록 표시용); 없으면 preferred_username 폴백, 둘 다 없으면 미설정", async () => {
+    const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
+    expect((await auth.authenticate(await mint({ workspace: "acme", email: "alice@corp.com" })))?.email).toBe(
+      "alice@corp.com",
+    );
+    expect((await auth.authenticate(await mint({ workspace: "acme", preferred_username: "alice" })))?.email).toBe(
+      "alice",
+    );
+    expect((await auth.authenticate(await mint({ workspace: "acme" })))?.email).toBeUndefined();
   });
 
   it("issuer 불일치/위조 토큰은 거절(undefined)", async () => {

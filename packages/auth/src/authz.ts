@@ -24,6 +24,8 @@ export type Action =
   | "secrets:write"
   | "keys:read"
   | "keys:write"
+  | "members:read"
+  | "members:write"
   | "settings:read"
   | "settings:write";
 
@@ -40,6 +42,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:read",
     "metrics:read",
     "runtimes:read",
+    "members:read", // 팀(워크스페이스 멤버) 조회는 양성 → viewer+
   ]),
   member: new Set<Action>([
     "runs:read",
@@ -56,6 +59,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "metrics:read",
     "metrics:write", // 메트릭 정의 = eval 콘텐츠(무엇으로 합격 판정하나) → member 가능
     "runtimes:read",
+    "members:read",
   ]),
   admin: new Set<Action>([
     "runs:read",
@@ -78,6 +82,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "secrets:write",
     "keys:read", // API 키는 발급 시 워크스페이스 admin 권한을 가짐 → 발급/취소는 admin 전용(secrets 와 동일 근거)
     "keys:write",
+    "members:read",
+    "members:write", // 멤버 역할변경/제거/초대 발급 = 거버넌스(admin 초대 발급 포함) → admin 전용
     "settings:read", // 워크스페이스 정책(계측 등) = admin 전용 설정
     "settings:write",
   ]),

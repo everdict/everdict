@@ -17,10 +17,11 @@ Both resolve to a `Principal`:
 
 ```ts
 interface Principal {
-  subject: string;        // user id (oidc) or "key" owner
+  subject: string;        // user id (oidc) or "key" owner — identity key
   workspace: string;      // = tenant = trust-zone key
   roles: string[];        // assay roles: viewer | member | admin
   via: "oidc" | "api-key";
+  email?: string;         // oidc email/preferred_username — display only (member list), never authz/identity; absent for api keys
 }
 ```
 
