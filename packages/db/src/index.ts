@@ -28,6 +28,7 @@ export {
 } from "./migrate.js";
 export {
   type TenantKeyStore,
+  type TenantKeyMeta,
   InMemoryTenantKeyStore,
   PgTenantKeyStore,
   hashKey,
