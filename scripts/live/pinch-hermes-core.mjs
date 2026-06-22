@@ -89,22 +89,46 @@ async function fetchTask([id, category]) {
   const rubric =
     `${section("Grading Criteria")}\n\n${section("LLM Judge Rubric")}`.trim() ||
     "Grade if the task is fully and correctly completed.";
+  // workspace_files: source/dest(repo의 assets/<source> 참조, 바이너리 포함) 또는 path/content(인라인) 둘 다 지원.
   const inputs = [];
-  for (const m of front.matchAll(/-\s*path:\s*"([^"]+)"\n\s*content:\s*\|\n([\s\S]*?)(?=\n\s*-\s*path:|\n\w+:|$)/g)) {
-    inputs.push({ path: m[1], content: m[2].replace(/^ {6}/gm, "") });
+  const wfm = front.match(/workspace_files:\s*\n([\s\S]*?)(?=\n[a-z_]+:\s|$)/i);
+  if (wfm?.[1].includes("-")) {
+    const items = wfm[1]
+      .split(/\n(?=\s*-\s)/)
+      .map((s) => s.replace(/^\s*-\s+/, ""))
+      .filter(Boolean);
+    for (const it of items) {
+      const src = (it.match(/source:\s*"?([^"\n]+?)"?\s*$/m) || [])[1]?.trim();
+      const dest = (it.match(/dest:\s*"?([^"\n]+?)"?\s*$/m) || [])[1]?.trim();
+      const path = (it.match(/path:\s*"?([^"\n]+?)"?\s*$/m) || [])[1]?.trim();
+      if (src && dest) {
+        try {
+          const ab = await (
+            await fetch(`https://raw.githubusercontent.com/pinchbench/skill/main/assets/${src}`)
+          ).arrayBuffer();
+          inputs.push({ dest, buf: Buffer.from(ab) });
+        } catch {}
+      } else if (path) {
+        const cm = it.match(/content:\s*\|\s*\n([\s\S]*)$/);
+        inputs.push({ dest: path, buf: Buffer.from(cm ? cm[1].replace(/^ {6}/gm, "") : "") });
+      }
+    }
   }
-  return { id, category, grading, prompt, rubric, inputs, md, timeout };
+  // hybrid 결합 가중치(태스크 명시 grading_weights, 기본 0.5/0.5)
+  const wm = front.match(/grading_weights:\s*\n\s*automated:\s*([\d.]+)\s*\n\s*llm_judge:\s*([\d.]+)/);
+  const weights = wm ? { auto: Number(wm[1]), judge: Number(wm[2]) } : { auto: 0.5, judge: 0.5 };
+  return { id, category, grading, prompt, rubric, inputs, md, timeout, weights };
 }
 
 // hermes 를 워크스페이스(/work)에서 실행 → 산출 파일 회수(입력/숨김 제외).
 function runHermes(t) {
   const ws = mkdtempSync(join(tmpdir(), "pinch-ws-"));
   for (const f of t.inputs) {
-    const p = join(ws, f.path);
+    const p = join(ws, f.dest);
     mkdirSync(dirname(p), { recursive: true });
-    writeFileSync(p, f.content);
+    writeFileSync(p, f.buf);
   }
-  const inputNames = new Set(t.inputs.map((f) => f.path));
+  const inputNames = new Set(t.inputs.map((f) => f.dest));
   let chat = "";
   try {
     chat = execFileSync(
@@ -275,7 +299,8 @@ try {
   }
   const byType = {};
   for (const t of tasks) byType[t.grading] = (byType[t.grading] || 0) + 1;
-  console.log(`  로드됨 ${tasks.length} — 채점타입: ${JSON.stringify(byType)}`);
+  const seeded = tasks.filter((t) => t.inputs.length).length;
+  console.log(`  로드됨 ${tasks.length} — 채점타입: ${JSON.stringify(byType)} — 입력파일 seed된 태스크: ${seeded}`);
 
   console.log("\n=== pinch core 벤치마크 + hermes-desktop 하니스 등록 ===");
   await post("/datasets", {
@@ -318,12 +343,17 @@ try {
     let score = 0;
     if (t.grading === "automated") score = autoMean ?? 0;
     else if (t.grading === "llm_judge") score = judge?.score ?? 0;
-    else score = autoMean != null && judge ? (autoMean + judge.score) / 2 : (autoMean ?? judge?.score ?? 0); // hybrid
+    // hybrid: 태스크 명시 가중치(grading_weights)로 결합
+    else
+      score =
+        autoMean != null && judge
+          ? t.weights.auto * autoMean + t.weights.judge * judge.score
+          : (autoMean ?? judge?.score ?? 0);
     const pass = score >= 0.6;
     const detail =
       `[${t.grading}] ${auto ? (auto.error ? `auto:ERR(${auto.error})` : `auto:${autoMean?.toFixed(2)}`) : ""}${judge ? ` judge:${judge.score}(${judge.reason.slice(0, 60)})` : ""}`.trim();
     console.log(
-      `  [${n}/${tasks.length}] ${t.id} (${t.category}/${t.grading}): score=${score.toFixed(2)} ${pass ? "PASS" : "FAIL"} files=[${files.map((f) => f.name).join(",")}] ${detail.slice(0, 110)}`,
+      `  [${n}/${tasks.length}] ${t.id} (${t.category}/${t.grading}): score=${score.toFixed(2)} ${pass ? "PASS" : "FAIL"} in=${t.inputs.length} files=[${files.map((f) => f.name).join(",")}] ${detail.slice(0, 100)}`,
     );
     traces.push({
       caseId: t.id,
