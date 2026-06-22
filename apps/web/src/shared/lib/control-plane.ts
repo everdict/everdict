@@ -30,6 +30,19 @@ async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Pro
   return res.json() as Promise<T>
 }
 
+// 204(No Content) 응답 전용 — 본문이 없어 res.json() 을 호출하면 안 되는 변경(예: 시크릿 set/delete).
+async function callVoid(auth: AuthContext, path: string, init?: RequestInit): Promise<void> {
+  const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
+    ...init,
+    headers: { 'content-type': 'application/json', ...authHeaders(auth), ...(init?.headers ?? {}) },
+    cache: 'no-store',
+  })
+  if (!res.ok) {
+    const body = await res.text()
+    throw new Error(`control-plane ${path} → ${res.status}: ${body.slice(0, 300)}`)
+  }
+}
+
 export const controlPlane = {
   me: <T>(auth: AuthContext) => call<T>(auth, '/me'),
   // 워크스페이스 멤버십(self-serve): 내 워크스페이스 목록 + 생성(생성자는 admin).
@@ -102,4 +115,14 @@ export const controlPlane = {
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
   setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  // 워크스페이스 시크릿(모델/프로바이더 키 + 클러스터 자격증명) — 값은 절대 반환되지 않음(목록=이름+updatedAt).
+  // at-rest 암호화는 컨트롤플레인 SecretStore. set/delete 는 204(본문 없음) → callVoid.
+  listSecrets: <T>(auth: AuthContext) => call<T>(auth, '/secrets'),
+  setSecret: (auth: AuthContext, name: string, value: string) =>
+    callVoid(auth, `/secrets/${encodeURIComponent(name)}`, {
+      method: 'PUT',
+      body: JSON.stringify({ value }),
+    }),
+  deleteSecret: (auth: AuthContext, name: string) =>
+    callVoid(auth, `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
 }
