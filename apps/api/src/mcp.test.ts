@@ -135,7 +135,7 @@ describe("MCP tools", () => {
     ]);
   });
 
-  it("validate_harness: 스키마+기존버전 검증(등록하지 않음); viewer 는 권한오류", async () => {
+  it("validate_harness: 스키마+기존버전 검증(등록하지 않음); 누구나(viewer+) 가능", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const v1 = JSON.parse(text(await admin.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })));
@@ -146,18 +146,19 @@ describe("MCP tools", () => {
     const bad = JSON.parse(text(await admin.callTool({ name: "validate_harness", arguments: { spec: "{not json" } })));
     expect(bad.ok).toBe(false);
 
+    // 하니스 등록/검증은 역할 게이트 없음 → viewer 도 가능.
     const viewer = await connect(deps, ["viewer"]);
-    expect((await viewer.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })).isError).toBe(true);
+    expect((await viewer.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })).isError).toBeFalsy();
   });
 
-  it("member: submit_run 가능, register_harness 는 권한오류(isError)", async () => {
+  it("member: submit_run + register_harness 가능", async () => {
     const client = await connect(harness(), ["member"]);
     const sub = await client.callTool({ name: "submit_run", arguments: { harness_id: "scripted", task: "t" } });
     expect(sub.isError).toBeFalsy();
     expect(text(sub)).toContain("run-");
     const reg = await client.callTool({ name: "register_harness", arguments: { spec: HARNESS } });
-    expect(reg.isError).toBe(true);
-    expect(text(reg)).toContain("FORBIDDEN");
+    expect(reg.isError).toBeFalsy();
+    expect(text(reg)).toContain("bu");
   });
 
   it("viewer: 읽기만 — submit_run 은 권한오류", async () => {
@@ -393,8 +394,7 @@ describe("MCP tools", () => {
     expect(captured?.headers?.authorization).toBe("Bearer secret-xyz");
   });
 
-  it("runtimes: admin 이 등록·조회; member 는 write 권한오류(실행 인프라=admin)", async () => {
-    const deps = harness();
+  it("runtimes: 등록·조회는 role 무관 — viewer 도 create_runtime 가능", async () => {
     const runtime = JSON.stringify({
       kind: "nomad",
       id: "seoul",
@@ -402,30 +402,21 @@ describe("MCP tools", () => {
       addr: "http://nomad:4646",
       image: "ghcr.io/acme/agent:1",
     });
-    const admin = await connect(deps, ["admin"], "acme");
-    const created = await admin.callTool({ name: "create_runtime", arguments: { runtime } });
+    const viewer = await connect(harness(), ["viewer"], "acme");
+    const created = await viewer.callTool({ name: "create_runtime", arguments: { runtime } });
     expect(created.isError).toBeFalsy();
     expect(text(created)).toContain("seoul");
-    const got = JSON.parse(text(await admin.callTool({ name: "get_runtime", arguments: { id: "seoul" } })));
-    expect(got).toMatchObject({ kind: "nomad", addr: "http://nomad:4646" });
+    expect((await viewer.callTool({ name: "list_runtimes", arguments: {} })).isError).toBeFalsy();
 
-    const member = await connect(deps, ["member"], "acme");
-    const denied = await member.callTool({ name: "create_runtime", arguments: { runtime } });
-    expect(denied.isError).toBe(true);
-    expect(text(denied)).toContain("FORBIDDEN");
-    // member 는 읽기는 됨
-    expect((await member.callTool({ name: "list_runtimes", arguments: {} })).isError).toBeFalsy();
+    const member = await connect(harness(), ["member"], "acme");
+    expect((await member.callTool({ name: "create_runtime", arguments: { runtime } })).isError).toBeFalsy();
   });
 
-  it("probe_runtime: admin 이 연결 테스트(잡 없이 도달성/인증); viewer 는 권한오류", async () => {
-    const deps = harness();
+  it("probe_runtime: 연결 테스트는 role 무관 — viewer 도 가능", async () => {
     const runtime = JSON.stringify({ kind: "local", id: "rt", version: "1.0.0", tags: [] });
-    const admin = await connect(deps, ["admin"], "acme");
-    const res = JSON.parse(text(await admin.callTool({ name: "probe_runtime", arguments: { runtime } })));
-    expect(res).toMatchObject({ kind: "local", reachable: true });
-
     const viewer = await connect(harness(), ["viewer"], "acme");
-    expect((await viewer.callTool({ name: "probe_runtime", arguments: { runtime } })).isError).toBe(true);
+    const res = JSON.parse(text(await viewer.callTool({ name: "probe_runtime", arguments: { runtime } })));
+    expect(res).toMatchObject({ kind: "local", reachable: true });
   });
 
   it("workspace settings: admin get(빈)→{} / set 병합 반영; member 는 권한오류", async () => {
