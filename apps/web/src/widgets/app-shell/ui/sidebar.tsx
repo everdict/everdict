@@ -14,6 +14,7 @@ import {
   LayoutDashboard,
   Server,
   Settings,
+  UserCog,
 } from 'lucide-react'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
@@ -31,6 +32,7 @@ const NAV = [
   { href: '/dashboard/runtimes', label: '런타임', icon: Server, exact: false },
   { href: '/dashboard/secrets', label: '시크릿', icon: KeyRound, exact: false },
   { href: '/dashboard/settings', label: '설정', icon: Settings, exact: false },
+  { href: '/dashboard/account', label: '계정', icon: UserCog, exact: false },
 ] as const
 
 export function Sidebar({ workspace, workspaces }: { workspace: string; workspaces: Workspace[] }) {

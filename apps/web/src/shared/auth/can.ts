@@ -15,6 +15,8 @@ export type WebAction =
   | 'runtimes:write'
   | 'secrets:read'
   | 'secrets:write'
+  | 'keys:read'
+  | 'keys:write'
   | 'settings:read'
   | 'settings:write'
 
@@ -54,6 +56,8 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:write', // 실행 인프라 정의 = admin
     'secrets:read', // 시크릿 관리 = admin
     'secrets:write',
+    'keys:read', // API 키 발급/취소 = admin(키는 워크스페이스 admin 권한을 가짐)
+    'keys:write',
     'settings:read', // 워크스페이스 정책(계측 등) = admin
     'settings:write',
   ],

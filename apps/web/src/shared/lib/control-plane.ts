@@ -125,4 +125,10 @@ export const controlPlane = {
     }),
   deleteSecret: (auth: AuthContext, name: string) =>
     callVoid(auth, `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  // API 키(에이전트/MCP 용 ak_…). 발급 시 평문은 1회만 반환, 목록은 prefix 만(평문/해시 미반환), 취소(204).
+  listKeys: <T>(auth: AuthContext) => call<T>(auth, '/keys'),
+  createKey: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/keys', { method: 'POST', body: JSON.stringify(body) }),
+  revokeKey: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/keys/${encodeURIComponent(id)}`, { method: 'DELETE' }),
 }
