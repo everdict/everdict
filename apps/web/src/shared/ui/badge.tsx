@@ -3,8 +3,9 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/shared/lib/utils'
 
+// Linear st. 라벨 — 작은 11px chip, tint 배경 + inset ring, weight 510.
 const badgeVariants = cva(
-  'inline-flex items-center rounded-md px-2 py-0.5 text-xs font-medium ring-1 ring-inset',
+  'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-[510] leading-none ring-1 ring-inset',
   {
     variants: {
       tone: {
@@ -15,6 +16,7 @@ const badgeVariants = cva(
         warning:
           'bg-[var(--color-warning)]/12 text-[var(--color-warning)] ring-[var(--color-warning)]/25',
         info: 'bg-primary/12 text-[var(--color-accent-foreground)] ring-primary/25',
+        outline: 'bg-transparent text-muted-foreground ring-border',
       },
     },
     defaultVariants: { tone: 'neutral' },

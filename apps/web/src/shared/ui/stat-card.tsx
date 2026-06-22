@@ -2,38 +2,36 @@ import type { ReactNode } from 'react'
 
 import { cn } from '@/shared/lib/utils'
 
-// Toss풍 지표 카드: 큰 숫자 + 라벨 + 선택적 보조 텍스트/톤.
+// 지표 카드 — Linear st. 작은 라벨 + 큰 타뉴머 숫자. 밀도 높은 패딩.
 export function StatCard({
   label,
   value,
   hint,
   tone = 'default',
 }: {
-  label: string
+  label: ReactNode
   value: ReactNode
-  hint?: string
+  hint?: ReactNode
   tone?: 'default' | 'primary' | 'success' | 'danger'
 }) {
   const toneClass = {
     default: 'text-foreground',
-    primary: 'text-primary',
+    primary: 'text-[var(--color-link)]',
     success: 'text-[var(--color-success)]',
     danger: 'text-destructive',
   }[tone]
   return (
-    <div className="group rounded-xl border bg-card p-5 transition-colors hover:border-[var(--color-muted-foreground)]/30">
-      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        {label}
-      </div>
+    <div className="group rounded-lg border bg-card p-4 shadow-raise transition-colors hover:border-border-strong">
+      <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">{label}</div>
       <div
         className={cn(
-          'mt-2 font-mono text-[28px] font-semibold leading-none tabular-nums',
+          'mt-2 font-mono text-2xl font-[560] leading-none tabular-nums tracking-tight',
           toneClass
         )}
       >
         {value}
       </div>
-      {hint && <div className="mt-1.5 text-xs text-muted-foreground/70">{hint}</div>}
+      {hint && <div className="mt-1.5 text-[12px] text-muted-foreground">{hint}</div>}
     </div>
   )
 }

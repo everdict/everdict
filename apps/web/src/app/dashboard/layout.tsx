@@ -49,6 +49,7 @@ export default async function DashboardLayout({ children }: { children: React.Re
     <AppShell
       workspace={principal.workspace}
       workspaces={principal.workspaces ?? []}
+      subject={principal.subject}
       roles={principal.roles}
       authed={principal.via === 'oidc'}
       showLogin={keycloakConfigured}
