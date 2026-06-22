@@ -79,7 +79,16 @@ Then each route gates with `authorize(principal, action)` and scopes data to `pr
 | `GET` | `/runs`, `/runs/:id` | `runs:read` | other workspaces' runs → **404** (not 403 — no existence leak) |
 | `POST` | `/harnesses` | `harnesses:register` | registered under `principal.workspace` (immutable → 409) |
 | `GET` | `/harnesses`, `/harnesses/:id` | `harnesses:read` | workspace-owned + `_shared` |
+| `GET`/`POST` | `/workspaces` | — | self-serve membership: list my workspaces / create one (creator = admin) |
 | `POST` | `/internal/tenant-keys` | — | operator-only; `x-internal-token` (constant-time, fail-closed); body `{workspace}`; returns the plaintext key **once** |
+
+**Active workspace (multi-workspace).** A subject can be a member of several workspaces. After identity is
+resolved, `applyActiveWorkspace` (`server.ts`) picks the active one: the `x-assay-workspace` header (the web
+forwards it from a httpOnly cookie / sidebar switcher) selects a membership and `Principal.workspace`+`roles`
+come from it; the token's `workspace` claim is the **bootstrap default** (lazily promoted to a membership on
+first use, so existing Keycloak users are seamless). A non-member selection **falls back** to the default —
+never a 403 from a stale cookie. Workspace is still the **single tenancy axis**; this only chooses *which* one is
+active. Membership SSOT = `@assay/db` `WorkspaceStore`. See `docs/tenancy.md`.
 
 Wire-up (`apps/api/src/main.ts` → `buildAuthenticator`): `oidcAuthenticator` is added **iff** `KEYCLOAK_ISSUER`
 is set (+ optional `OIDC_AUDIENCE`, `WORKSPACE_CLAIM`); `apiKeyAuthenticator` is always present; the two are

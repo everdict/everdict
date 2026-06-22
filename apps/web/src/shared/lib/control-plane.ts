@@ -5,12 +5,14 @@ import { env } from '@/shared/config/env'
 // 컨트롤플레인(@assay/api) HTTP 클라이언트 — 서버에서만 호출.
 // 인증 컨텍스트: 로그인 사용자는 Keycloak 액세스 토큰을 Authorization: Bearer 로 그대로 전달하고
 // (인증/인가 판단은 컨트롤플레인이 한다), Keycloak 미설정(dev)에선 x-assay-tenant 로 폴백한다.
-export type AuthContext = { bearer: string } | { devTenant: string }
+// workspace 가 있으면(=사이드바에서 전환한 활성 워크스페이스 쿠키) x-assay-workspace 로 전달해 그 워크스페이스로 스코프한다.
+export type AuthContext = ({ bearer: string } | { devTenant: string }) & { workspace?: string }
 
 function authHeaders(auth: AuthContext): Record<string, string> {
-  return 'bearer' in auth
-    ? { authorization: `Bearer ${auth.bearer}` }
-    : { 'x-assay-tenant': auth.devTenant }
+  const headers: Record<string, string> =
+    'bearer' in auth ? { authorization: `Bearer ${auth.bearer}` } : { 'x-assay-tenant': auth.devTenant }
+  if (auth.workspace) headers['x-assay-workspace'] = auth.workspace
+  return headers
 }
 
 async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Promise<T> {
@@ -28,6 +30,10 @@ async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Pro
 
 export const controlPlane = {
   me: <T>(auth: AuthContext) => call<T>(auth, '/me'),
+  // 워크스페이스 멤버십(self-serve): 내 워크스페이스 목록 + 생성(생성자는 admin).
+  listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
+  createWorkspace: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspaces', { method: 'POST', body: JSON.stringify(body) }),
   listRuns: <T>(auth: AuthContext) => call<T>(auth, '/runs'),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   submitRun: <T>(auth: AuthContext, body: unknown) =>

@@ -10,7 +10,13 @@ import {
   RuntimeSpecSchema,
 } from "@assay/core";
 import { BenchmarkAdapterSpecSchema } from "@assay/datasets";
-import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@assay/db";
+import {
+  type SecretStore,
+  type TenantKeyStore,
+  type WorkspaceSettingsStore,
+  type WorkspaceStore,
+  issueKey,
+} from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
@@ -20,6 +26,7 @@ import type { BenchmarkService } from "./benchmark-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { RunService } from "./run-service.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
+import type { WorkspaceService } from "./workspace-service.js";
 
 export const SubmitBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
@@ -71,6 +78,8 @@ export interface ServerDeps {
   runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 (없으면=ASSAY_SECRETS_KEY 미설정 → 해당 라우트 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
+  workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
+  workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성 (없으면 /workspaces 라우트 비활성)
   authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
   keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
   internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
@@ -79,8 +88,8 @@ export interface ServerDeps {
   authorizationServers?: string[]; // MCP OAuth: protected-resource 메타데이터의 인가서버(Keycloak issuer)
 }
 
-// 인증된 Principal 해석: Bearer(JWT 또는 ak_) → Authenticator. 미인증 dev 는 헤더 워크스페이스 + admin.
-async function resolvePrincipal(
+// 신원(subject + 기본 workspace + roles) 해석: Bearer(JWT 또는 ak_) → Authenticator. 미인증 dev 는 헤더 워크스페이스 + admin.
+async function resolveIdentity(
   req: FastifyRequest,
   reply: FastifyReply,
   deps: ServerDeps,
@@ -104,6 +113,39 @@ async function resolvePrincipal(
   return { subject: "dev", workspace, roles: ["admin"], via: "api-key" };
 }
 
+// 활성 워크스페이스 해석: 멤버십 스토어가 있으면 토큰/dev 기본 워크스페이스를 멤버십으로 부트스트랩하고,
+// x-assay-workspace 헤더가 가리키는 워크스페이스의 멤버이면 그곳으로 전환(roles 도 멤버십 역할로 재해석).
+// 비멤버 워크스페이스 요청은 403 이 아니라 기본 워크스페이스로 폴백한다(스테일 선택에도 격리 안전 + UX 견고).
+// 스토어가 없으면 기존 단일-워크스페이스 동작 그대로(하위호환).
+async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: ServerDeps): Promise<Principal> {
+  const store = deps.workspaceStore;
+  if (!store || !base.workspace) return base;
+  let baseRole = await store.roleFor(base.workspace, base.subject);
+  if (!baseRole) {
+    const seed = base.roles[0] ?? "member";
+    await store.ensureMembership(base.workspace, base.subject, seed);
+    baseRole = seed;
+  }
+  const header = (req.headers as Record<string, unknown>)["x-assay-workspace"];
+  const requested = typeof header === "string" && header.length > 0 ? header : base.workspace;
+  if (requested !== base.workspace) {
+    const role = await store.roleFor(requested, base.subject);
+    if (role) return { ...base, workspace: requested, roles: [role] };
+  }
+  return { ...base, roles: [baseRole] };
+}
+
+// 인증 + 활성 워크스페이스까지 해석한 최종 Principal(모든 휴먼/HTTP 라우트가 사용).
+async function resolvePrincipal(
+  req: FastifyRequest,
+  reply: FastifyReply,
+  deps: ServerDeps,
+): Promise<Principal | undefined> {
+  const base = await resolveIdentity(req, reply, deps);
+  if (!base) return undefined;
+  return applyActiveWorkspace(base, req, deps);
+}
+
 function constantTimeEq(a: string, b: string): boolean {
   const ab = Buffer.from(a);
   const bb = Buffer.from(b);
@@ -116,10 +158,14 @@ function zodIssues(err: z.ZodError): string[] {
 }
 
 // MCP 전용 Principal 해석: 반드시 Bearer(JWT/ak_)만 — dev 헤더 폴백 없음(미인증이면 401+로그인 챌린지).
+// 활성 워크스페이스/멤버십 부트스트랩은 동일하게 적용(list_workspaces 등이 일관되게 동작).
 async function resolveBearerPrincipal(req: FastifyRequest, deps: ServerDeps): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
-  if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer "))
-    return deps.authenticator.authenticate(authz.slice(7).trim());
+  if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
+    const base = await deps.authenticator.authenticate(authz.slice(7).trim());
+    if (!base) return undefined;
+    return applyActiveWorkspace(base, req, deps);
+  }
   return undefined;
 }
 
@@ -156,10 +202,35 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.get("/healthz", async () => ({ ok: true }));
 
   // 현재 Principal — 웹/에이전트가 워크스페이스·역할을 확인(UI 게이팅 등).
+  // 멤버십 스토어가 있으면 내가 속한 워크스페이스 목록(workspaces)을 동봉(사이드바 스위처용).
   app.get("/me", async (req, reply) => {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    return reply.send(principal);
+    if (!deps.workspaceService) return reply.send(principal);
+    const workspaces = await deps.workspaceService.listForSubject(principal.subject);
+    return reply.send({ ...principal, workspaces });
+  });
+
+  // --- workspaces (self-serve 멤버십: 내 워크스페이스 목록 + 생성) ---
+  // 생성은 누구나 가능한 self-serve(워크스페이스 내부 역할 게이트 없음) — 생성자는 그 워크스페이스의 admin.
+  app.get("/workspaces", async (req, reply) => {
+    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    return reply.send(await deps.workspaceService.listForSubject(principal.subject));
+  });
+
+  app.post("/workspaces", async (req, reply) => {
+    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ name: z.string().min(1), id: z.string().optional() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      return reply.code(201).send(await deps.workspaceService.create(principal.subject, body.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
   });
 
   // --- runs ---
@@ -818,6 +889,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           runtimeRegistry: deps.runtimeRegistry,
           secretStore: deps.secretStore,
           settingsStore: deps.settingsStore,
+          workspaceService: deps.workspaceService,
         },
         principal,
       ).connect(transport);

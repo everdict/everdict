@@ -15,6 +15,8 @@ import {
   Settings,
 } from 'lucide-react'
 
+import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
+import type { Workspace } from '@/entities/workspace'
 import { cn } from '@/shared/lib/utils'
 
 const NAV = [
@@ -29,16 +31,17 @@ const NAV = [
   { href: '/dashboard/settings', label: '설정', icon: Settings, exact: false },
 ] as const
 
-export function Sidebar() {
+export function Sidebar({ workspace, workspaces }: { workspace: string; workspaces: Workspace[] }) {
   const pathname = usePathname()
   return (
     <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-0.5 border-r border-border/70 px-3 py-4 md:flex">
-      <Link href="/dashboard" className="mb-5 flex items-center gap-2.5 px-2 py-1">
+      <Link href="/dashboard" className="mb-3 flex items-center gap-2.5 px-2 py-1">
         <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
           <FlaskConical className="size-[18px]" />
         </span>
         <span className="text-[15px] font-semibold tracking-tight">Assay</span>
       </Link>
+      <WorkspaceSwitcher current={workspace} workspaces={workspaces} />
       {NAV.map((item) => {
         const active = item.exact ? pathname === item.href : pathname.startsWith(item.href)
         const Icon = item.icon

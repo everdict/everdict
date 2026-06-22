@@ -53,3 +53,10 @@ export {
   InMemoryWorkspaceSettingsStore,
   PgWorkspaceSettingsStore,
 } from "./workspace-settings.js";
+export {
+  type WorkspaceRecord,
+  type WorkspaceWithRole,
+  type WorkspaceStore,
+  InMemoryWorkspaceStore,
+  PgWorkspaceStore,
+} from "./workspace-store.js";

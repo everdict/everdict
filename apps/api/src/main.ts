@@ -16,16 +16,19 @@ import {
   InMemorySecretStore,
   InMemoryTenantKeyStore,
   InMemoryWorkspaceSettingsStore,
+  InMemoryWorkspaceStore,
   PgRunStore,
   PgScorecardStore,
   PgSecretStore,
   PgTenantKeyStore,
   PgWorkspaceSettingsStore,
+  PgWorkspaceStore,
   type RunStore,
   type ScorecardStore,
   type SecretStore,
   type TenantKeyStore,
   type WorkspaceSettingsStore,
+  type WorkspaceStore,
   cipherFromEnv,
   makePool,
   migrate,
@@ -61,6 +64,7 @@ import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
 import { buildTopologyBackend } from "./topology-backend.js";
+import { WorkspaceService } from "./workspace-service.js";
 
 // 멀티테넌트 컨트롤플레인 서버. tenant 는 Bearer API 키에서 파생(없으면 dev 헤더 폴백).
 // DATABASE_URL 이 있으면 Postgres(스토어/키/레지스트리), 아니면 in-memory. NOMAD_ADDR 면 Nomad 백엔드.
@@ -80,8 +84,10 @@ async function main(): Promise<void> {
     judgeRegistry,
     runtimeRegistry,
     settingsStore,
+    workspaceStore,
     secretStore,
   } = await makePersistence();
+  const workspaceService = new WorkspaceService(workspaceStore);
   await seedSharedHarnesses(registry);
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
@@ -177,6 +183,8 @@ async function main(): Promise<void> {
     judgeRegistry,
     runtimeRegistry,
     settingsStore,
+    workspaceStore,
+    workspaceService,
     ...(secretStore ? { secretStore } : {}),
     authenticator: buildAuthenticator(keyStore),
     keyStore,
@@ -202,6 +210,7 @@ interface Persistence {
   judgeRegistry: JudgeRegistry;
   runtimeRegistry: RuntimeRegistry;
   settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
+  workspaceStore: WorkspaceStore; // 워크스페이스 멤버십(생성/전환) — 항상 사용 가능
   secretStore?: SecretStore; // ASSAY_SECRETS_KEY 있을 때만(fail-closed: 키 없으면 시크릿 기능 비활성)
 }
 
@@ -221,6 +230,7 @@ async function makePersistence(): Promise<Persistence> {
       judgeRegistry: new InMemoryJudgeRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
+      workspaceStore: new InMemoryWorkspaceStore(),
       ...(cipher ? { secretStore: new InMemorySecretStore(cipher) } : {}),
     };
   }
@@ -237,6 +247,7 @@ async function makePersistence(): Promise<Persistence> {
     judgeRegistry: new PgJudgeRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
+    workspaceStore: new PgWorkspaceStore(client),
     ...(cipher ? { secretStore: new PgSecretStore(client, cipher) } : {}),
   };
 }

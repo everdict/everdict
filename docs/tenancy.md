@@ -19,6 +19,24 @@ Only the **SHA-256 hash** of a key is stored (`assay_tenant_keys`), never the pl
 curl -XPOST $API/internal/tenant-keys -H 'x-internal-token: <T>' -d '{"workspace":"acme"}'   # → { workspace, apiKey }
 ```
 
+## Workspaces (self-serve membership + 전환)
+A user (subject) can belong to **multiple workspaces**, each with a role. Membership is the control plane's
+SSOT (`@assay/db` `WorkspaceStore`: `assay_workspaces` + `assay_workspace_members(workspace, subject, role)`) —
+Keycloak supplies the **identity** (subject); the token's `workspace` claim is only a **bootstrap default**.
+
+- `POST /workspaces` `{name, id?}` — self-serve create (any authenticated principal); the creator becomes the
+  workspace's **admin** member. `id` is the tenant key (slug); derived from `name` if omitted, **409** on an
+  explicit-id conflict.
+- `GET /workspaces` — list the caller's memberships (`{id, name, role}`); also embedded in `GET /me.workspaces`.
+- **Active workspace** is resolved per request in `apps/api` (`applyActiveWorkspace`): the `x-assay-workspace`
+  header (set by the web from a httpOnly cookie / the sidebar switcher) selects which membership scopes this
+  request; `Principal.workspace`+`roles` come from that membership. The token/dev default workspace is
+  **bootstrapped** into a membership on first use (existing Keycloak users stay seamless). A non-member
+  `x-assay-workspace` **falls back** to the default (isolation-safe; never a 403 from a stale selection).
+- One service core (`WorkspaceService`), two transports — HTTP routes **and** MCP tools (`list_workspaces` /
+  `create_workspace`). The web surfaces it as a Linear-style sidebar **workspace switcher** + create flow
+  (`docs/web.md`). Member invites / role management are the next slice.
+
 ## Tenant-owned harnesses (`@assay/registry`)
 The harness registry is keyed by **`(tenant, id, version)`**. A tenant registers and lists only its own
 harnesses; resolution falls back to the **`_shared`** owner for first-party harnesses (e.g. the file-loaded
@@ -83,6 +101,5 @@ owner-first/`_shared` rule. See `docs/scorecards.md`.
 (isolation) → mutated re-register is `409` → the row is `acme | bu | 1.0.0` in `assay_harnesses`.
 
 ## Not yet (next)
-Self-service tenant signup/plans; per-key scopes/expiry; rotating keys; **per-tenant scored dashboard** over
-these scoped reads (the original motivation — now unblocked; `apps/web` already forwards the Keycloak token and
-gates UI off `GET /me` — see `docs/auth.md` + `docs/web.md`).
+Workspace **member invites + role management** (the membership store + create/switch/list shipped; inviting other
+subjects and changing their role is the next slice); per-key scopes/expiry; rotating keys.

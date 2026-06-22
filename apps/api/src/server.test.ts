@@ -8,6 +8,7 @@ import {
   InMemorySecretStore,
   InMemoryTenantKeyStore,
   InMemoryWorkspaceSettingsStore,
+  InMemoryWorkspaceStore,
   aesGcmCipher,
   issueKey,
 } from "@assay/db";
@@ -24,6 +25,7 @@ import { defaultJudgeRunner } from "./judge-runner.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
+import { WorkspaceService } from "./workspace-service.js";
 
 const result: CaseResult = {
   caseId: "c1",
@@ -123,6 +125,8 @@ function server(
   });
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
   const settingsStore = new InMemoryWorkspaceSettingsStore();
+  const workspaceStore = new InMemoryWorkspaceStore();
+  const workspaceService = new WorkspaceService(workspaceStore);
   const benchmarkService = new BenchmarkService({
     datasets: datasetRegistry,
     benchmarks: new InMemoryBenchmarkRegistry(),
@@ -137,13 +141,15 @@ function server(
     runtimeRegistry: new InMemoryRuntimeRegistry(),
     secretStore,
     settingsStore,
+    workspaceStore,
+    workspaceService,
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
     internalToken: opts.internalToken,
     requireAuth: opts.requireAuth,
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
   });
-  return { app, keyStore, datasetRegistry, secretStore, settingsStore };
+  return { app, keyStore, datasetRegistry, secretStore, settingsStore, workspaceStore };
 }
 
 describe("API — dev fallback (no auth required)", () => {
@@ -167,6 +173,69 @@ describe("API — dev fallback (no auth required)", () => {
     const h = { "x-assay-tenant": "free" };
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(202);
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(402);
+    await app.close();
+  });
+});
+
+describe("API — workspaces (멤버십: 생성/전환/목록)", () => {
+  it("워크스페이스를 생성하면 생성자가 admin 멤버가 되고 /workspaces·/me 에 나타난다", async () => {
+    const { app } = server();
+    const h = { "x-assay-tenant": "acme" }; // dev subject + 기본 워크스페이스 acme
+    const post = await app.inject({ method: "POST", url: "/workspaces", headers: h, payload: { name: "My Team" } });
+    expect(post.statusCode).toBe(201);
+    const created = post.json();
+    expect(created).toMatchObject({ name: "My Team", role: "admin" });
+
+    // 기본 워크스페이스(acme)는 부트스트랩되어, 생성한 워크스페이스와 함께 목록에 보인다.
+    const list = (await app.inject({ method: "GET", url: "/workspaces", headers: h })).json();
+    const ids = list.map((w: { id: string }) => w.id);
+    expect(ids).toContain("acme");
+    expect(ids).toContain(created.id);
+
+    const me = (await app.inject({ method: "GET", url: "/me", headers: h })).json();
+    expect(me.workspaces.map((w: { id: string }) => w.id)).toContain(created.id);
+    await app.close();
+  });
+
+  it("x-assay-workspace 헤더로 전환하면 데이터가 그 워크스페이스로 스코프된다(기존 워크스페이스에선 안 보임)", async () => {
+    const { app } = server();
+    const base = { "x-assay-tenant": "acme" };
+    const created = (
+      await app.inject({ method: "POST", url: "/workspaces", headers: base, payload: { name: "Team B" } })
+    ).json();
+
+    // 전환해서 제출한 run 은 전환 워크스페이스 소속.
+    const switched = { "x-assay-tenant": "acme", "x-assay-workspace": created.id };
+    const run = (await app.inject({ method: "POST", url: "/runs", headers: switched, payload: BODY })).json();
+    expect((await app.inject({ method: "GET", url: `/runs/${run.id}`, headers: switched })).statusCode).toBe(200);
+    // 기본 워크스페이스(acme)에선 그 run 이 보이지 않는다(격리).
+    expect((await app.inject({ method: "GET", url: `/runs/${run.id}`, headers: base })).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("멤버가 아닌 워크스페이스를 헤더로 요청하면 403 이 아니라 기본 워크스페이스로 폴백한다(스테일 선택 안전)", async () => {
+    const { app } = server();
+    const stale = { "x-assay-tenant": "acme", "x-assay-workspace": "someoneelse" };
+    const me = await app.inject({ method: "GET", url: "/me", headers: stale });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().workspace).toBe("acme"); // 비멤버 → base 로 폴백
+    await app.close();
+  });
+
+  it("명시한 id 가 이미 있으면 409", async () => {
+    const { app } = server();
+    const h = { "x-assay-tenant": "acme" };
+    expect(
+      (await app.inject({ method: "POST", url: "/workspaces", headers: h, payload: { name: "X", id: "team-x" } }))
+        .statusCode,
+    ).toBe(201);
+    const dup = await app.inject({
+      method: "POST",
+      url: "/workspaces",
+      headers: h,
+      payload: { name: "Y", id: "team-x" },
+    });
+    expect(dup.statusCode).toBe(409);
     await app.close();
   });
 });

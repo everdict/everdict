@@ -14,6 +14,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { RunService } from "./run-service.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
+import type { WorkspaceService } from "./workspace-service.js";
 
 // MCP 도구 표면 — HTTP 라우트와 같은 서비스 코어를 공유하는 "에이전트용 트랜스포트".
 // 각 도구는 Principal 의 역할로 authorize 되고 workspace 로 스코프된다(컨트롤플레인이 인증/인가 권위).
@@ -26,6 +27,7 @@ export interface McpDeps {
   runtimeRegistry?: RuntimeRegistry;
   secretStore?: SecretStore;
   settingsStore?: WorkspaceSettingsStore;
+  workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
 }
 
 function ok(data: unknown): CallToolResult {
@@ -39,6 +41,16 @@ function fail(message: string): CallToolResult {
 async function run(principal: Principal, action: Action, fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
     authorize(principal, action);
+    return await fn();
+  } catch (err) {
+    if (err instanceof AppError) return fail(`${err.code}: ${err.message}`);
+    return fail(err instanceof Error ? err.message : String(err));
+  }
+}
+
+// 역할 게이트 없는 도구(워크스페이스 self-serve 목록/생성). AppError → isError 변환만.
+async function plain(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
+  try {
     return await fn();
   } catch (err) {
     if (err instanceof AppError) return fail(`${err.code}: ${err.message}`);
@@ -511,6 +523,28 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           await secrets.remove(ws, name);
           return ok({ workspace: ws, name, deleted: true });
         }),
+    );
+  }
+
+  if (deps.workspaceService) {
+    const workspaces = deps.workspaceService;
+    server.registerTool(
+      "list_workspaces",
+      { description: "내가 속한 워크스페이스 목록(역할 포함)", inputSchema: {} },
+      () => plain(async () => ok(await workspaces.listForSubject(principal.subject))),
+    );
+    server.registerTool(
+      "create_workspace",
+      {
+        description:
+          "새 워크스페이스 생성(나는 admin 멤버). name 필수, id(slug) 선택 — 생성 후 그 워크스페이스로 스코프된다.",
+        inputSchema: {
+          name: z.string().describe("표시 이름"),
+          id: z.string().optional().describe("워크스페이스 id(slug, ^[a-z0-9][a-z0-9-]*$). 생략 시 name 에서 파생"),
+        },
+      },
+      ({ name, id }) =>
+        plain(async () => ok(await workspaces.create(principal.subject, { name, ...(id ? { id } : {}) }))),
     );
   }
 

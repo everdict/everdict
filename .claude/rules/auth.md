@@ -9,6 +9,13 @@ token courier, never an auth authority. See `docs/auth.md`.
 - **One identity type:** every credential resolves to a `Principal{ subject, workspace, roles, via }`.
   `workspace === tenant === trust-zone key` — never introduce a second tenancy axis; scope every read/write to
   `principal.workspace`.
+- **Multi-workspace membership.** A subject may belong to several workspaces (SSOT = `@assay/db`
+  `WorkspaceStore`: `assay_workspaces` + `assay_workspace_members`). The **active** one is resolved per request in
+  `apps/api` (`applyActiveWorkspace`): the `x-assay-workspace` header selects a membership (`roles` come from it);
+  the token `workspace` claim / dev tenant is the **bootstrap default** (lazily promoted to a membership). A
+  non-member selection **falls back** to the default — never a 403 from a stale selection. `POST/GET /workspaces`
+  are self-serve (no role gate; creator = admin) with MCP parity (`create_workspace`/`list_workspaces`). Keep
+  active-workspace logic in the one `applyActiveWorkspace`, not in routes. See `docs/tenancy.md`.
 - **Two authenticators, composed.** `oidcAuthenticator` (Keycloak JWT) + `apiKeyAuthenticator` (`ak_…`) behind
   the one `Authenticator` interface via `compositeAuthenticator`. Add a new credential kind as another
   `Authenticator`, not as a special case inside a route.
