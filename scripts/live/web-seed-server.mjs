@@ -149,6 +149,50 @@ await scorecardStore.create(
   ),
 );
 
+// 데스크탑(OSWorld) 스코어카드 — 통합 리포트의 데스크탑 트랙. state(파일생성 검증)=PASS / judge(스크린샷)=FAIL →
+// 권위-기준 caseVerdict 가 state 를 따라 케이스 PASS(VLM 이 디스크저장을 확신 못 해도 ground-truth 가 우선).
+await scorecardStore.create({
+  id: "bu-sc-osworld",
+  tenant: "default",
+  dataset: { id: "osworld-sample", version: "v1" },
+  harness: { id: "desktop-osworld", version: "1.0.0" },
+  status: "succeeded",
+  summary: [
+    { metric: "state", count: 1, mean: 1, passRate: 1 },
+    { metric: "judge", count: 1, mean: 0.78, passRate: 0 },
+  ],
+  scorecard: {
+    suiteId: "osworld-sample",
+    harness: "desktop-osworld@1.0.0",
+    results: [
+      {
+        caseId: "writer-note",
+        harness: "desktop-osworld@1.0.0",
+        trace: [],
+        snapshot: { kind: "os-use", screenshotRef: "", screenshot: "", windows: [] },
+        scores: [
+          {
+            graderId: "judge",
+            metric: "judge",
+            value: 0.78,
+            pass: false,
+            detail: "스크린샷만으론 디스크 저장 확신 불가.",
+          },
+          {
+            graderId: "command",
+            metric: "state",
+            value: 1,
+            pass: true,
+            detail: "test -f /root/note.txt && grep → 파일 존재 확인",
+          },
+        ],
+      },
+    ],
+  },
+  createdAt: now,
+  updatedAt: now,
+});
+
 const runService = new RunService({ dispatcher: dummyDispatcher, store: runStore, newId: () => "bu-demo" });
 const scorecardService = new ScorecardService({ store: scorecardStore, dispatch: async () => ({}), runner: {} });
 const app = buildServer({ service: runService, scorecardService }); // ServerDeps.service = RunService

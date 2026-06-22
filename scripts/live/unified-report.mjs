@@ -12,7 +12,7 @@ import process from "node:process";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { importWebVoyager } from "../../packages/datasets/dist/index.js";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
-import { summarizeScorecard } from "../../packages/suite/dist/index.js";
+import { scorecardPassRate, summarizeScorecard } from "../../packages/suite/dist/index.js";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
@@ -243,18 +243,8 @@ async function webTrack() {
   return { suiteId: "webvoyager-sample", harness: "browseruse@webvoyager", results };
 }
 
-function passRate(sc) {
-  let pass = 0;
-  let total = 0;
-  for (const r of sc.results) {
-    const ds = r.scores.filter((s) => s.pass !== undefined);
-    if (!ds.length) continue;
-    total++;
-    if (ds.every((s) => s.pass)) pass++; // 케이스의 결정적 그레이더가 모두 pass 면 케이스 pass
-  }
-  return { pass, total };
-}
-
+// 케이스 통과율은 권위 기준(scorecardPassRate/caseVerdict) — ground-truth(state) > 객관 > judge. OSWorld 파일저장처럼
+// state grader 가 PASS 면 VLM judge 가 FAIL 해도 케이스 PASS.
 let ok = false;
 try {
   console.log("=== 통합 리포트: 데스크탑(OSWorld/os-use) + 웹(WebVoyager/browser-use) ===\n--- 데스크탑 트랙 ---");
@@ -267,15 +257,15 @@ try {
     ["DESKTOP (os-use/OSWorld)", desktop],
     ["WEB (browser-use/WebVoyager)", web],
   ]) {
-    const pr = passRate(sc);
+    const pr = scorecardPassRate(sc);
     console.log(`\n[${label}] harness=${sc.harness} — 케이스 ${sc.results.length}, pass ${pr.pass}/${pr.total}`);
     for (const m of summarizeScorecard(sc)) {
       const p = m.passRate !== undefined ? ` passRate=${(m.passRate * 100).toFixed(0)}%` : "";
       console.log(`   ${m.metric}: n=${m.count} mean=${m.mean.toFixed(4)}${p}`);
     }
   }
-  const dpr = passRate(desktop);
-  const wpr = passRate(web);
+  const dpr = scorecardPassRate(desktop);
+  const wpr = scorecardPassRate(web);
   const totPass = dpr.pass + wpr.pass;
   const totN = dpr.total + wpr.total;
   console.log(

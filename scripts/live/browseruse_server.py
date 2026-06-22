@@ -25,6 +25,19 @@ BASE_URL = os.environ.get("OPENAI_BASE_URL", "http://host.docker.internal:4000/v
 API_KEY = os.environ.get("OPENAI_API_KEY", "x")
 OTLP_URL = os.environ.get("OTLP_URL", "http://localhost:4318/v1/traces")
 VISION = os.environ.get("BROWSERUSE_VISION", "") in ("1", "true", "True")  # 켜면 최종 스크린샷 base64 동봉(VLM judge 용)
+RESTRICT_DOMAIN = os.environ.get("BROWSERUSE_RESTRICT_DOMAIN", "") in ("1", "true", "True")  # 켜면 태스크 사이트로 제한
+
+
+def domains_from_task(task):
+    # 태스크의 첫 http(s) URL 도메인 → allowed_domains(사이트 이탈 방지 — WebVoyager 에서 에이전트가 Bing 등으로
+    # 새지 않게). 루트 도메인 + 서브도메인 glob 까지 허용.
+    m = re.search(r"https?://([^/\s]+)", task or "")
+    if not m:
+        return None
+    host = m.group(1).split(":")[0]
+    parts = host.split(".")
+    root = ".".join(parts[-2:]) if len(parts) >= 2 else host
+    return [host, root, f"*.{root}"]
 
 _last = {"url": "", "dom": "", "result": "", "error": "", "steps": 0, "actions": [], "tokens": {}, "trace_id": "", "screenshot": ""}
 _lock = asyncio.Lock()
@@ -61,9 +74,10 @@ def chromium_path():
     return None
 
 
-def make_browser_kwargs(cdp_url):
+def make_browser_kwargs(cdp_url, allowed_domains=None):
     # browser-use 0.13: Agent(browser_profile=...). docker(root)에서 headless + no-sandbox 강제,
     # executable_path 로 베이스 이미지의 chromium 사용(런타임 다운로드 회피). cdp_url 오면 외부 브라우저 attach.
+    # allowed_domains 가 오면 에이전트를 그 도메인들로 제한(사이트 이탈 방지).
     args = ["--no-sandbox", "--disable-dev-shm-usage"]
     try:
         from browser_use import BrowserProfile  # type: ignore
@@ -74,6 +88,11 @@ def make_browser_kwargs(cdp_url):
             kw["executable_path"] = exe
         if cdp_url:
             kw["cdp_url"] = cdp_url
+        if allowed_domains:
+            try:
+                return {"browser_profile": BrowserProfile(**kw, allowed_domains=allowed_domains)}
+            except Exception:
+                pass  # 이 browser-use 버전이 allowed_domains 미지원 → 제한 없이 폴백
         return {"browser_profile": BrowserProfile(**kw)}
     except Exception:
         return {}
@@ -220,7 +239,8 @@ async def run_handler(request):
 
             tc = TokenCost(include_cost=False)  # 실 토큰 카운트 추적(프록시 모델 가격 미상 → cost 계산은 생략).
             llm = tc.register_llm(make_llm())
-            agent = Agent(task=task, llm=llm, use_vision=VISION, **make_browser_kwargs(cdp_url))
+            allowed = domains_from_task(task) if RESTRICT_DOMAIN else None
+            agent = Agent(task=task, llm=llm, use_vision=VISION, **make_browser_kwargs(cdp_url, allowed))
             history = await agent.run(max_steps=MAX_STEPS)
 
             result = ""

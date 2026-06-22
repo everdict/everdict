@@ -1,7 +1,7 @@
 import type { AgentJob, CaseResult, Scorecard, Suite } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import { runSuite } from "./run-suite.js";
-import { diffScorecards, summarizeScorecard } from "./scorecard.js";
+import { caseVerdict, diffScorecards, scorecardPassRate, summarizeScorecard } from "./scorecard.js";
 
 function caseResult(caseId: string, harness: string, pass: boolean, steps: number): CaseResult {
   return {
@@ -72,5 +72,66 @@ describe("diffScorecards", () => {
     const steps = diff.metrics.find((m) => m.metric === "tool_calls");
     expect(steps?.baselineMean).toBe(3.5);
     expect(steps?.candidateMean).toBe(3.5);
+  });
+});
+
+describe("caseVerdict (권위 기준)", () => {
+  const sc = (scores: { metric: string; pass?: boolean; value?: number }[]): { scores: never } =>
+    ({
+      scores: scores.map((s) => ({ graderId: s.metric, metric: s.metric, value: s.value ?? 0, pass: s.pass })),
+    }) as never;
+
+  it("ground-truth(state)가 judge 를 이긴다 — OSWorld 파일저장: state PASS + judge FAIL → PASS", () => {
+    expect(
+      caseVerdict(
+        sc([
+          { metric: "state", pass: true },
+          { metric: "judge", pass: false },
+        ]),
+      ),
+    ).toBe(true);
+  });
+  it("객관(answer_match)이 judge 보다 우선", () => {
+    expect(
+      caseVerdict(
+        sc([
+          { metric: "answer_match", pass: false },
+          { metric: "judge", pass: true },
+        ]),
+      ),
+    ).toBe(false);
+  });
+  it("객관 그레이더가 여럿이면 모두 pass 여야", () => {
+    expect(
+      caseVerdict(
+        sc([
+          { metric: "url_matches", pass: true },
+          { metric: "dom_contains", pass: false },
+        ]),
+      ),
+    ).toBe(false);
+  });
+  it("객관/ground-truth 없으면 judge 가 결정", () => {
+    expect(caseVerdict(sc([{ metric: "judge", pass: true }, { metric: "tool_calls" }]))).toBe(true);
+  });
+  it("pass 판정 그레이더가 없으면 undefined", () => {
+    expect(caseVerdict(sc([{ metric: "tool_calls", value: 5 }]))).toBeUndefined();
+  });
+  it("scorecardPassRate: 권위 기준 케이스 통과율", () => {
+    const card: Scorecard = {
+      suiteId: "s",
+      harness: "h",
+      results: [
+        caseResult("a", "h", true, 3), // tests_pass PASS → PASS
+        {
+          ...caseResult("b", "h", true, 3),
+          scores: [
+            { graderId: "state", metric: "state", value: 1, pass: true },
+            { graderId: "judge", metric: "judge", value: 0, pass: false },
+          ],
+        }, // state PASS / judge FAIL → PASS
+      ],
+    };
+    expect(scorecardPassRate(card)).toEqual({ pass: 2, total: 2, rate: 1 });
   });
 });

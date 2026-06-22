@@ -24,6 +24,7 @@ const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 const WV_SOURCE = process.env.WV_SOURCE ?? "sample";
 const WV_N = Number(process.env.WV_N ?? "6");
 const JUDGE_VISION = process.env.JUDGE_VISION === "1"; // 켜면 use_vision + 최종 스크린샷 base64 → VLM judge(공식 GPT-4V 방식)
+const RESTRICT = process.env.RESTRICT_DOMAIN === "1"; // 켜면 에이전트를 태스크 사이트 도메인으로 제한(Bing 등 우회 방지)
 // 라이브에서 browser-use 가 다룰 만한 benign(로그인/CAPTCHA 적은) 정보탐색 사이트 위주.
 const BENIGN = (process.env.WV_SITES ?? "ArXiv,Cambridge Dictionary,GitHub,Wolfram Alpha,BBC News,Huggingface").split(
   ",",
@@ -113,6 +114,8 @@ execFileSync(
     "BROWSERUSE_PRICE_OUT=0.0000006",
     "-e",
     `BROWSERUSE_VISION=${JUDGE_VISION ? "1" : ""}`,
+    "-e",
+    `BROWSERUSE_RESTRICT_DOMAIN=${RESTRICT ? "1" : ""}`,
     IMAGE,
   ],
   { stdio: "ignore" },

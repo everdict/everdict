@@ -1198,3 +1198,22 @@ Three more, all live:
   written) while the VLM judge is cautious (a pixel screenshot can't confirm an on-disk save — the documented
   reason os-use grades on state); the web track is 2/2. The point isn't the numbers — it's that one
   harness/infra-agnostic runtime emits a single report over desktop *and* web benchmarks.
+
+Three more, all live:
+- **Authoritative case-pass (`caseVerdict`/`scorecardPassRate`, `@assay/suite`).** A case's pass shouldn't let
+  an advisory VLM judge override a ground-truth grader. `caseVerdict` decides by priority — `state`/`tests_pass`
+  (ground-truth) > `answer_match`/`url_matches`/`dom_contains` (objective) > `judge` (only when no objective
+  grader). `scorecardPassRate` aggregates it. The unified report re-ran with this: the OSWorld case (state PASS
+  / judge FAIL) now counts **PASS**, so combined desktop+web went **2/3 → 3/3**. Unit-tested; `unified-report.mjs`
+  uses it.
+- **Unified report in the dashboard (`/dashboard/report`).** A web page (FSD) groups all succeeded scorecards
+  by track (`desktop`/`web`, inferred from dataset/harness id), fetches each full record, and shows per-track +
+  combined case-pass using a web-side mirror of `caseVerdict`. Screenshot: COMBINED **86%** (6/7), desktop
+  `os-use/OSWorld` **1/1** (the OSWorld scorecard's state-PASS/judge-FAIL case shows **all pass** — the
+  authoritative rule made visible in the UI), web **5/6**.
+- **`allowed_domains` keeps the agent on-site.** `browseruse_server.py` with `BROWSERUSE_RESTRICT_DOMAIN=1`
+  derives the task's domain from its start URL and sets `BrowserProfile(allowed_domains=…)`. Live on the
+  Huggingface task that previously detoured to a Bing search: the agent now **stays on `huggingface.co`**
+  (final URL `huggingface.co/api/models?…`, no off-site hop). Honest caveat — the task still fails, but for a
+  *different* reason (Hugging Face's human-verification wall blocks the headless agent), not an off-site detour.
+  The fix does exactly what it's for; the remaining failure is anti-bot, surfaced by the judge.

@@ -1,4 +1,36 @@
-import type { Score, Scorecard } from "@assay/core";
+import type { CaseResult, Score, Scorecard } from "@assay/core";
+
+// 케이스 합격 판정 — 권위 기준 우선. ground-truth(실제 상태 검증) > 객관 대조 > 모델 의견 순으로 결정한다.
+// VLM/LLM judge 는 *보조* 다: 객관/ground-truth 그레이더가 있으면 judge 가 그것을 뒤집지 못한다(예: OSWorld 파일저장 —
+// state grader 가 파일을 확인했으면 judge 가 스크린샷만 보고 FAIL 해도 케이스는 PASS). 통합/스코어카드 통과율의 기준.
+const AUTHORITATIVE_METRICS = ["state", "tests_pass"]; // 실제 상태/테스트 검증(ground-truth)
+const OBJECTIVE_METRICS = ["answer_match", "url_matches", "dom_contains"]; // 결정적 대조
+export function caseVerdict(result: Pick<CaseResult, "scores">): boolean | undefined {
+  const byMetric = new Map(result.scores.map((s) => [s.metric, s] as const));
+  for (const m of AUTHORITATIVE_METRICS) {
+    const s = byMetric.get(m);
+    if (s?.pass !== undefined) return s.pass; // ground-truth 가 있으면 그것이 권위
+  }
+  const objs = OBJECTIVE_METRICS.map((m) => byMetric.get(m)).filter((s): s is Score => s?.pass !== undefined);
+  if (objs.length > 0) return objs.every((s) => s.pass); // 객관 그레이더(들)가 모두 pass
+  const judge = byMetric.get("judge");
+  if (judge?.pass !== undefined) return judge.pass; // 객관 그레이더가 없을 때만 judge 가 결정
+  const withPass = result.scores.filter((s) => s.pass !== undefined);
+  return withPass.length > 0 ? withPass.every((s) => s.pass) : undefined;
+}
+
+// 스코어카드의 케이스 단위 통과율(권위 기준 caseVerdict 로 집계). pass 판정 그레이더가 하나도 없는 케이스는 제외.
+export function scorecardPassRate(sc: Scorecard): { pass: number; total: number; rate: number } {
+  let pass = 0;
+  let total = 0;
+  for (const r of sc.results) {
+    const v = caseVerdict(r);
+    if (v === undefined) continue;
+    total++;
+    if (v) pass++;
+  }
+  return { pass, total, rate: total > 0 ? pass / total : 0 };
+}
 
 export interface MetricSummary {
   metric: string;
