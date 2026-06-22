@@ -100,6 +100,24 @@ ASSAY_REQUIRE_AUTH=1 ASSAY_INTERNAL_TOKEN=… DATABASE_URL=… \
   node apps/api/dist/main.js
 ```
 
+### Diagnosing 401s (control-plane logging)
+The control plane runs a structured (pino) request logger at `ASSAY_LOG_LEVEL` (default `info`; set `silent` to
+disable). It is built to make a Keycloak-token 401 self-explanatory — the common failure when the **web** is wired
+to an SSO but the **control plane** isn't:
+- **Boot:** logs `▶ auth: OIDC(JWT) 검증기 활성 issuer=<X>` when `KEYCLOAK_ISSUER` is set, or a loud
+  `▶ auth: KEYCLOAK_ISSUER 미설정 — … 사내 SSO 액세스 토큰은 401 됩니다.` when it isn't (root cause #1: the JWT
+  verifier was never wired, so every SSO token is rejected).
+- **Per rejected token:** `oidcAuthenticator`'s `onError` hook logs `▶ auth: OIDC 토큰 검증 실패 [<code>] …` with the
+  jose error code (`ERR_JWT_EXPIRED`, claim-validation, signature, **`JWKS_FETCH_FAILED`** = control plane can't
+  reach the SSO's JWKS), the **expected issuer vs the token's actual `iss`** (issuer-mismatch is the #2 cause), the
+  token `aud`, and the token's top-level claim names (so you can see whether the `WORKSPACE_CLAIM` is even present).
+  The token is decoded **unverified**, for diagnostics only.
+- **Per request:** `auth: Bearer 자격증명 거부 → 401` / `auth: 자격증명 없음(requireAuth) → 401` / `auth: dev
+  폴백(x-assay-tenant)` — distinguishes "token rejected" from "no token forwarded" from "dev fallback".
+
+`@assay/auth` itself stays logger-free: the reason is surfaced via the `onError(OidcVerifyErrorInfo)` callback and
+`apps/api` decides how to log it (layering: auth is a low-level package, logging is an app concern).
+
 ## Keycloak (humans)
 `deploy/keycloak/` runs Keycloak and **imports** `realm-assay.json` (`start-dev --import-realm`):
 

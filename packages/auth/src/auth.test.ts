@@ -98,6 +98,29 @@ describe("oidcAuthenticator (Keycloak JWT)", () => {
     expect(await auth.authenticate("ak_key")).toBeUndefined(); // 키는 무시
   });
 
+  it("검증 실패 시 onError 로 사유(코드/기대 issuer/토큰 iss/claim 키)를 알린다 — 401 원인 진단용", async () => {
+    const calls: Array<{ code: string; expectedIssuer: string; tokenIssuer?: string; claimKeys?: string[] }> = [];
+    const auth = oidcAuthenticator({ issuer: ISSUER, keySet, onError: (info) => calls.push(info) });
+    // issuer 불일치 토큰: 거절되며, onError 에 기대 issuer 와 토큰의 실제 iss(검증 전 디코드)·claim 키가 담긴다.
+    const wrong = await mint({ workspace: "acme", realm_access: { roles: ["member"] } }, "https://evil/realms/x");
+    expect(await auth.authenticate(wrong)).toBeUndefined();
+    expect(calls).toHaveLength(1);
+    const info = calls[0];
+    expect(info).toBeDefined();
+    if (!info) return; // 타입 가드(non-null ! 금지)
+    expect(info.expectedIssuer).toBe(ISSUER);
+    expect(info.tokenIssuer).toBe("https://evil/realms/x");
+    expect(info.claimKeys).toEqual(expect.arrayContaining(["workspace", "iss", "sub"]));
+    expect(typeof info.code).toBe("string");
+  });
+
+  it("비-JWT(API 키 등)는 검증을 시도하지 않으므로 onError 를 호출하지 않는다", async () => {
+    const calls: unknown[] = [];
+    const auth = oidcAuthenticator({ issuer: ISSUER, keySet, onError: () => calls.push(1) });
+    expect(await auth.authenticate("ak_some_key")).toBeUndefined();
+    expect(calls).toHaveLength(0); // "내 자격증명 아님"은 정상 — 잡음 로그 금지
+  });
+
   it("workspace 클레임/그룹이 없어도 유효한 토큰은 인증한다(workspace=''; 멤버십이 SSOT)", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
     const token = await mint({ realm_access: { roles: ["member"] } }); // workspace 클레임 없음

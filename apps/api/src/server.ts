@@ -86,6 +86,7 @@ export interface ServerDeps {
   requireAuth?: boolean; // true 면 인증 필수(dev 폴백 금지)
   devTenantHeader?: string; // 미인증 dev 폴백 헤더 (기본 x-assay-tenant)
   authorizationServers?: string[]; // MCP OAuth: protected-resource 메타데이터의 인가서버(Keycloak issuer)
+  logLevel?: string; // pino 로그 레벨(info/debug/warn/…). 없으면 로깅 비활성(테스트 무소음). main 은 ASSAY_LOG_LEVEL 로 주입.
 }
 
 // 신원(subject + 기본 workspace + roles) 해석: Bearer(JWT 또는 ak_) → Authenticator. 미인증 dev 는 헤더 워크스페이스 + admin.
@@ -98,18 +99,26 @@ async function resolveIdentity(
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
     const principal = await deps.authenticator.authenticate(authz.slice(7).trim());
     if (!principal) {
+      // 검증 실패 — 구체 사유(issuer 불일치/JWKS 미도달/만료/서명/비-JWT)는 'auth: OIDC 토큰 검증 실패' 로그 참고.
+      req.log.warn({ path: req.url }, "auth: Bearer 자격증명 거부 → 401");
       reply.code(401).send({ code: "UNAUTHENTICATED", message: "유효하지 않은 자격증명입니다." });
       return undefined;
     }
+    req.log.debug(
+      { subject: principal.subject, workspace: principal.workspace, via: principal.via },
+      "auth: 인증 성공",
+    );
     return principal;
   }
   if (deps.requireAuth) {
+    req.log.warn({ path: req.url, hasAuthHeader: typeof authz === "string" }, "auth: 자격증명 없음(requireAuth) → 401");
     reply.code(401).send({ code: "UNAUTHENTICATED", message: "Authorization: Bearer <token|api-key> 가 필요합니다." });
     return undefined;
   }
   // dev 폴백: 헤더 워크스페이스, 풀 권한.
   const header = (req.headers as Record<string, unknown>)[deps.devTenantHeader ?? "x-assay-tenant"];
   const workspace = typeof header === "string" && header.length > 0 ? header : "default";
+  req.log.debug({ workspace }, "auth: dev 폴백(x-assay-tenant) — requireAuth 미설정");
   return { subject: "dev", workspace, roles: ["admin"], via: "api-key" };
 }
 
@@ -174,9 +183,13 @@ async function resolveBearerPrincipal(req: FastifyRequest, deps: ServerDeps): Pr
   const authz = req.headers.authorization;
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
     const base = await deps.authenticator.authenticate(authz.slice(7).trim());
-    if (!base) return undefined;
+    if (!base) {
+      req.log.warn({ path: req.url }, "auth(mcp): Bearer 자격증명 거부 → 401 챌린지");
+      return undefined;
+    }
     return applyActiveWorkspace(base, req, deps);
   }
+  req.log.warn({ path: req.url, hasAuthHeader: typeof authz === "string" }, "auth(mcp): Bearer 없음 → 401 챌린지");
   return undefined;
 }
 
@@ -208,7 +221,9 @@ function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyReply {
 
 // 컨트롤플레인 HTTP 표면. 인증은 컨트롤플레인이 소유(OIDC/JWT + API 키), workspace=tenant, authZ 강제.
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  const app = Fastify({ logger: false });
+  // logLevel 이 있으면 요청 단위 구조화 로그(pino) 활성 — 인증 거부/요청을 컨트롤플레인 로그로 진단.
+  // 없으면(테스트) 비활성 — req.log 는 no-op 이라 아래 로깅 호출은 안전하다.
+  const app = Fastify({ logger: deps.logLevel ? { level: deps.logLevel } : false });
 
   app.get("/healthz", async () => ({ ok: true }));
 

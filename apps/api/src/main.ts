@@ -190,6 +190,8 @@ async function main(): Promise<void> {
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
     requireAuth: process.env.ASSAY_REQUIRE_AUTH === "1",
+    // 요청/인증 구조화 로그(pino). 기본 info — 인증 거부(401)와 그 사유를 컨트롤플레인 로그로 진단. silent 로 끌 수 있음.
+    logLevel: process.env.ASSAY_LOG_LEVEL ?? "info",
     // MCP OAuth: Keycloak 을 인가서버로 광고(클라이언트가 로그인 시작). 미설정이면 API 키만.
     ...(process.env.KEYCLOAK_ISSUER ? { authorizationServers: [process.env.KEYCLOAK_ISSUER] } : {}),
   });
@@ -302,12 +304,25 @@ async function seedSharedRuntimes(registry: RuntimeRegistry): Promise<void> {
 function buildAuthenticator(keyStore: TenantKeyStore): Authenticator {
   const authers: Authenticator[] = [];
   if (process.env.KEYCLOAK_ISSUER) {
+    console.error(`▶ auth: OIDC(JWT) 검증기 활성 issuer=${process.env.KEYCLOAK_ISSUER}`);
     authers.push(
       oidcAuthenticator({
         issuer: process.env.KEYCLOAK_ISSUER,
         ...(process.env.OIDC_AUDIENCE ? { audience: process.env.OIDC_AUDIENCE } : {}),
         ...(process.env.WORKSPACE_CLAIM ? { workspaceClaim: process.env.WORKSPACE_CLAIM } : {}),
+        // JWT 검증 실패 사유를 컨트롤플레인 로그로 남긴다(401 원인: issuer 불일치 / JWKS 미도달 / 만료 / 서명 / aud).
+        onError: (info) =>
+          console.warn(
+            `▶ auth: OIDC 토큰 검증 실패 [${info.code}] ${info.message} ` +
+              `| expectedIssuer=${info.expectedIssuer} tokenIssuer=${info.tokenIssuer ?? "(none)"} ` +
+              `tokenAud=${JSON.stringify(info.tokenAudience ?? null)} claims=[${(info.claimKeys ?? []).join(",")}]`,
+          ),
       }),
+    );
+  } else {
+    // 사내 SSO 토큰을 401 시키는 가장 흔한 원인 — 부팅 시 크게 경고(웹만 SSO 연결하고 컨트롤플레인엔 미설정한 경우).
+    console.warn(
+      "▶ auth: KEYCLOAK_ISSUER 미설정 — OIDC(JWT) 검증기 비활성(API 키만). 사내 SSO 액세스 토큰은 401 됩니다.",
     );
   }
   authers.push(apiKeyAuthenticator({ keyStore }));
