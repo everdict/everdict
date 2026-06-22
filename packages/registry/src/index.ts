@@ -9,6 +9,8 @@ export {
 } from "./registry.js";
 export { PgHarnessRegistry } from "./pg-registry.js";
 export { loadHarnessDir } from "./load.js";
+export { type HarnessTemplateRegistry, InMemoryHarnessTemplateRegistry } from "./harness-template-registry.js";
+export { type HarnessInstanceRegistry, InMemoryHarnessInstanceRegistry } from "./harness-instance-registry.js";
 export { type DatasetRegistry, InMemoryDatasetRegistry } from "./dataset-registry.js";
 export { PgDatasetRegistry } from "./pg-dataset-registry.js";
 export { loadDatasetDir } from "./load-datasets.js";
