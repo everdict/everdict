@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation'
 import { FlaskConical } from 'lucide-react'
 
 import { AppShell } from '@/widgets/app-shell'
@@ -11,10 +12,15 @@ export const dynamic = 'force-dynamic'
 export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { principal } = await currentPrincipal()
 
+  // 로그인은 됐어도 컨트롤플레인과 인증 교환이 실패하면(GET /me 실패: 토큰 거부 401 / 컨트롤플레인 미가동)
+  // 권위 있는 워크스페이스·역할이 없으므로 대시보드에 진입시키지 않고 홈으로 돌려보낸다.
+  // (홈은 via!=='oidc'/principal=null 이면 랜딩을 보여줘 루프가 생기지 않는다.)
+  if (!principal) redirect('/')
+
   // 로그인은 됐지만 아직 워크스페이스가 없으면(예: 외부 Keycloak — 토큰에 workspace 클레임/매퍼 없음) 온보딩:
   // 첫 워크스페이스를 만들면 그곳으로 전환되어 대시보드로 들어간다(Linear 식 첫 로그인 흐름).
-  // dev 폴백/클레임 보유 사용자는 항상 ≥1 → 여기 안 걸림. principal=null(컨트롤플레인 미가동)은 일반 셸로(에러 표시).
-  if (principal && (principal.workspaces?.length ?? 0) === 0) {
+  // dev 폴백/클레임 보유 사용자는 항상 ≥1 → 여기 안 걸림.
+  if ((principal.workspaces?.length ?? 0) === 0) {
     return (
       <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 px-6 py-16">
         <div className="flex items-center gap-2.5">
@@ -41,10 +47,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
 
   return (
     <AppShell
-      workspace={principal?.workspace ?? '—'}
-      workspaces={principal?.workspaces ?? []}
-      roles={principal?.roles ?? []}
-      authed={principal?.via === 'oidc'}
+      workspace={principal.workspace}
+      workspaces={principal.workspaces ?? []}
+      roles={principal.roles}
+      authed={principal.via === 'oidc'}
       showLogin={keycloakConfigured}
     >
       {children}

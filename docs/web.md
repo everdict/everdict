@@ -95,8 +95,18 @@ pnpm --filter @assay/web dev                                       # http://loca
 ```
 Without Keycloak configured, `/dashboard` renders for the dev `default` workspace (no login required) — handy for
 local dev. With Keycloak configured, `/dashboard` is protected (middleware redirects to login) and the
-workspace/roles come from the control plane's `GET /me` over the forwarded token. The dashboard degrades
-gracefully if the control plane is unreachable.
+workspace/roles come from the control plane's `GET /me` over the forwarded token.
+
+**Auth-exchange gating (entry routing).** The control plane is the auth authority, so the web routes on what
+`GET /me` returns, not just on the Keycloak session:
+- **Home `/`** — if `GET /me` confirms a real login (`principal.via === 'oidc'`), the landing is skipped and the
+  user is redirected to `/dashboard` (which the active-workspace cookie scopes to their **most recent**
+  workspace). A `null` principal (control plane unreachable / token rejected) or the dev `x-assay-tenant` fallback
+  (`via !== 'oidc'`) keeps the landing visible — no loop.
+- **`/dashboard/*`** — if the auth exchange fails (`GET /me` throws → `principal === null`: token rejected by the
+  control plane with 401, or control plane unreachable) the user has **no authoritative workspace/role**, so the
+  layout does **not** render the shell — it redirects back to `/`. The dashboard only renders for a confirmed
+  principal (then: 0 workspaces → onboarding, else the app shell).
 
 **Production (`next start`) gotchas** — the config bakes `trustHost: true` (self-hosted; otherwise Auth.js
 throws **`UntrustedHost`** 500 on every `/api/auth/*`). For real Keycloak login you still must set **`AUTH_SECRET`**

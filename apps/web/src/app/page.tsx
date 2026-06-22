@@ -1,8 +1,13 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { ArrowRight, FlaskConical, GitCompareArrows, Layers, ShieldCheck } from 'lucide-react'
 
+import { currentPrincipal } from '@/shared/auth/principal'
 import { Button } from '@/shared/ui/button'
 import { ThemeToggle } from '@/shared/ui/theme-toggle'
+
+// 컨트롤플레인 GET /me 로 현재 인증을 확인해야 하므로 정적 렌더가 아니다.
+export const dynamic = 'force-dynamic'
 
 const FEATURES = [
   {
@@ -22,7 +27,13 @@ const FEATURES = [
   },
 ] as const
 
-export default function Home() {
+export default async function Home() {
+  // 컨트롤플레인에 접속되고 실제 로그인(OIDC)이 확인되면 랜딩이 아니라 가장 최근 워크스페이스 대시보드로.
+  // (활성 워크스페이스 쿠키 → /dashboard 가 GET /me 로 그 워크스페이스로 스코프한다.)
+  // via!=='oidc'(dev x-assay-tenant 폴백)이거나 인증 교환 실패(principal=null)면 랜딩을 그대로 보여준다.
+  const { principal } = await currentPrincipal()
+  if (principal?.via === 'oidc') redirect('/dashboard')
+
   return (
     <main className="relative flex min-h-screen flex-col">
       {/* 상단 바 */}
