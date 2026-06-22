@@ -7,6 +7,7 @@ import {
   HarnessSpecSchema,
   JudgeRunConfigSchema,
   JudgeSpecSchema,
+  ModelSpecSchema,
   RuntimeSpecSchema,
 } from "@assay/core";
 import { BenchmarkAdapterSpecSchema } from "@assay/datasets";
@@ -17,7 +18,7 @@ import {
   type WorkspaceStore,
   issueKey,
 } from "@assay/db";
-import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
+import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, ModelRegistry, RuntimeRegistry } from "@assay/registry";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -75,6 +76,7 @@ export interface ServerDeps {
   registry?: HarnessRegistry; // 하니스 CRUD (없으면 해당 라우트 비활성)
   datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (없으면 해당 라우트 비활성)
+  modelRegistry?: ModelRegistry; // Model(추론/판정 모델) CRUD (없으면 해당 라우트 비활성)
   runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 (없으면=ASSAY_SECRETS_KEY 미설정 → 해당 라우트 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
@@ -611,6 +613,75 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "judges:read");
       return reply.send(await deps.judgeRegistry.get(principal.workspace, req.params.id, req.params.version));
+    } catch (err) {
+      return sendError(reply, err); // 없으면 NotFoundError → 404
+    }
+  });
+
+  // --- models (workspace-owned SSOT, 추론/판정 모델: provider + 하부 모델 + baseUrl) ---
+  app.post("/models", async (req, reply) => {
+    if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "models:write");
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 (검증 전에 게이트)
+    }
+    const parsed = ModelSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      await deps.modelRegistry.register(principal.workspace, parsed.data);
+      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+    } catch (err) {
+      return sendError(reply, err); // 불변성 409
+    }
+  });
+
+  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음).
+  app.post("/models/validate", async (req, reply) => {
+    if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "models:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = ModelSpecSchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
+    const existingVersions = await deps.modelRegistry.ownVersions(principal.workspace, parsed.data.id);
+    return reply.send({
+      ok: true,
+      provider: parsed.data.provider,
+      id: parsed.data.id,
+      version: parsed.data.version,
+      existingVersions,
+      versionExists: existingVersions.includes(parsed.data.version),
+    });
+  });
+
+  app.get("/models", async (req, reply) => {
+    if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "models:read");
+      return reply.send(await deps.modelRegistry.list(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 특정 버전의 전체 ModelSpec. version 은 "latest" 가능. 다른 워크스페이스 → NOT_FOUND.
+  app.get<{ Params: { id: string; version: string } }>("/models/:id/versions/:version", async (req, reply) => {
+    if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "models:read");
+      return reply.send(await deps.modelRegistry.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
       return sendError(reply, err); // 없으면 NotFoundError → 404
     }

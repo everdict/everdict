@@ -13,5 +13,6 @@ export * from "./harness-spec.js";
 export * from "./suite.js";
 export * from "./dataset.js";
 export * from "./judge-spec.js";
+export * from "./model-spec.js";
 export * from "./runtime-spec.js";
 export * from "./shell.js";

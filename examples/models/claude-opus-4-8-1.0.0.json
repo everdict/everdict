@@ -1,0 +1,8 @@
+{
+  "id": "claude-opus-4-8",
+  "version": "1.0.0",
+  "description": "first-party 공용 모델 — Anthropic Claude Opus 4.8. judge/harness 가 id 로 참조. API 키는 테넌트 SecretStore(ANTHROPIC_API_KEY).",
+  "provider": "anthropic",
+  "model": "claude-opus-4-8",
+  "tags": ["shared", "anthropic"]
+}

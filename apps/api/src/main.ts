@@ -42,17 +42,21 @@ import {
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
   InMemoryJudgeRegistry,
+  InMemoryModelRegistry,
   InMemoryRuntimeRegistry,
   type JudgeRegistry,
+  type ModelRegistry,
   PgBenchmarkRegistry,
   PgDatasetRegistry,
   PgHarnessRegistry,
   PgJudgeRegistry,
+  PgModelRegistry,
   PgRuntimeRegistry,
   type RuntimeRegistry,
   loadDatasetDir,
   loadHarnessDir,
   loadJudgeDir,
+  loadModelDir,
   loadRuntimeDir,
 } from "@assay/registry";
 import { S3ArtifactStore } from "@assay/storage";
@@ -82,6 +86,7 @@ async function main(): Promise<void> {
     datasetRegistry,
     benchmarkRegistry,
     judgeRegistry,
+    modelRegistry,
     runtimeRegistry,
     settingsStore,
     workspaceStore,
@@ -91,6 +96,7 @@ async function main(): Promise<void> {
   await seedSharedHarnesses(registry);
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
+  await seedSharedModels(modelRegistry);
   await seedSharedRuntimes(runtimeRegistry);
 
   // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소 있을 때만.
@@ -150,6 +156,7 @@ async function main(): Promise<void> {
     secretsFor: runtimeSecretsFor,
     dispatch: (job) => dispatcher.dispatch(job), // harness judge 도 테넌트 런타임 라우팅 경유
     harnesses: registry,
+    models: modelRegistry, // judge.model 이 등록된 model id 면 provider/baseUrl/하부모델을 해석(아니면 raw 문자열)
     ...(process.env.ASSAY_JUDGE_OPENAI_BASE_URL ? { openaiBaseUrl: process.env.ASSAY_JUDGE_OPENAI_BASE_URL } : {}),
   });
   // 배치 평가: 데이터셋(케이스 묶음)을 하니스@버전으로 돌려 스코어카드 집계 + 선택한 judge 를 트레이스에 적용.
@@ -181,6 +188,7 @@ async function main(): Promise<void> {
     registry,
     datasetRegistry,
     judgeRegistry,
+    modelRegistry,
     runtimeRegistry,
     settingsStore,
     workspaceStore,
@@ -210,6 +218,7 @@ interface Persistence {
   datasetRegistry: DatasetRegistry;
   benchmarkRegistry: BenchmarkRegistry;
   judgeRegistry: JudgeRegistry;
+  modelRegistry: ModelRegistry;
   runtimeRegistry: RuntimeRegistry;
   settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
   workspaceStore: WorkspaceStore; // 워크스페이스 멤버십(생성/전환) — 항상 사용 가능
@@ -230,6 +239,7 @@ async function makePersistence(): Promise<Persistence> {
       datasetRegistry: new InMemoryDatasetRegistry(),
       benchmarkRegistry: new InMemoryBenchmarkRegistry(),
       judgeRegistry: new InMemoryJudgeRegistry(),
+      modelRegistry: new InMemoryModelRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
       workspaceStore: new InMemoryWorkspaceStore(),
@@ -247,6 +257,7 @@ async function makePersistence(): Promise<Persistence> {
     datasetRegistry: new PgDatasetRegistry(client),
     benchmarkRegistry: new PgBenchmarkRegistry(client),
     judgeRegistry: new PgJudgeRegistry(client),
+    modelRegistry: new PgModelRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
     workspaceStore: new PgWorkspaceStore(client),
@@ -284,6 +295,17 @@ async function seedSharedJudges(registry: JudgeRegistry): Promise<void> {
   try {
     await loadJudgeDir(dir, { into: registry });
     console.error(`▶ shared judges seeded from ${dir}`);
+  } catch {
+    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+  }
+}
+
+// _shared(first-party 기본 모델)를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 등록된 모델을 judge/harness 에서 참조 가능. best-effort/멱등.
+async function seedSharedModels(registry: ModelRegistry): Promise<void> {
+  const dir = process.env.ASSAY_MODELS_DIR ?? `${process.cwd()}/examples/models`;
+  try {
+    await loadModelDir(dir, { into: registry });
+    console.error(`▶ shared models seeded from ${dir}`);
   } catch {
     // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
   }

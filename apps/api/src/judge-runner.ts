@@ -7,7 +7,7 @@ import {
   modelJudge,
   openaiComplete,
 } from "@assay/graders";
-import type { HarnessRegistry } from "@assay/registry";
+import type { HarnessRegistry, ModelRegistry } from "@assay/registry";
 
 // judge 실행기 — JudgeSpec + tenant + GradeContext(트레이스) → Score. 컨트롤플레인이 트레이스 기반으로 판정.
 // model(anthropic/openai)·harness 모두 modelJudge(전송)로 통일 — 전송만 다르다(API 호출 / 에이전트 디스패치).
@@ -31,6 +31,7 @@ export interface DefaultJudgeRunnerDeps {
   secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries (복호화, 서버 내부 전용)
   dispatch?: (job: AgentJob) => Promise<CaseResult>; // harness judge 용 에이전트 디스패치(단일 run 과 동일 경로)
   harnesses?: HarnessRegistry; // judge 가 참조하는 하니스 버전 해석(latest→구체) + 선언형 spec 임베드
+  models?: ModelRegistry; // judge.model 이 등록된 model id 면 provider/baseUrl/하부모델을 해석(없으면 raw 문자열)
   fetchImpl?: typeof fetch;
   anthropicBaseUrl?: string;
   openaiBaseUrl?: string;
@@ -83,22 +84,37 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         });
       } else {
         const secrets = await deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
-        if (spec.provider === "anthropic") {
+        // judge.model 이 등록된 model id 면 그 spec(provider/하부모델/baseUrl)으로 해석 — 아니면 raw 모델 문자열 그대로.
+        let provider: "anthropic" | "openai" = spec.provider;
+        let model = spec.model;
+        let modelBaseUrl: string | undefined;
+        if (deps.models) {
+          try {
+            const m = await deps.models.get(tenant, spec.model, "latest");
+            provider = m.provider;
+            model = m.model;
+            modelBaseUrl = m.baseUrl;
+          } catch {
+            // 등록된 model id 가 아님 → spec.model 을 raw 모델 문자열로 사용.
+          }
+        }
+        if (provider === "anthropic") {
           const apiKey = secrets[ANTHROPIC_KEY];
           if (!apiKey) return skip(spec, `${ANTHROPIC_KEY} 시크릿 미설정`);
+          const baseUrl = modelBaseUrl ?? deps.anthropicBaseUrl;
           complete = anthropicComplete({
             apiKey,
-            model: spec.model,
-            ...(deps.anthropicBaseUrl ? { baseUrl: deps.anthropicBaseUrl } : {}),
+            model,
+            ...(baseUrl ? { baseUrl } : {}),
             ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
           });
         } else {
           const apiKey = secrets[OPENAI_KEY];
           if (!apiKey) return skip(spec, `${OPENAI_KEY} 시크릿 미설정`);
-          const baseUrl = secrets[OPENAI_BASE_URL] ?? deps.openaiBaseUrl;
+          const baseUrl = secrets[OPENAI_BASE_URL] ?? modelBaseUrl ?? deps.openaiBaseUrl;
           complete = openaiComplete({
             apiKey,
-            model: spec.model,
+            model,
             ...(baseUrl ? { baseUrl } : {}),
             ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
           });
