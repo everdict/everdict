@@ -42,7 +42,7 @@ export default async function RuntimesPage() {
         <EmptyState
           icon={<Server />}
           title="등록된 런타임이 없습니다."
-          hint="admin 이 '런타임 등록'으로 Nomad/K8s/local 을 정의하거나, API/MCP(create_runtime)로 등록하세요. 자격증명은 시크릿으로."
+          hint="'런타임 등록'으로 Nomad/K8s/local 을 정의하거나(워크스페이스 멤버 누구나), API/MCP(create_runtime)로 등록하세요. 자격증명 값은 시크릿으로(admin)."
         />
       ) : (
         <div className="space-y-2">

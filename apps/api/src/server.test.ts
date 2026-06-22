@@ -282,22 +282,23 @@ describe("API — authentication (control-plane owned)", () => {
 });
 
 describe("API — authorization (roles)", () => {
-  it("viewer 는 읽기만 (submit/register 403)", async () => {
+  it("viewer 는 run 제출 불가(403)하지만 하니스 등록은 가능(누구나)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
     const h = { authorization: "Bearer x" };
     expect((await app.inject({ method: "GET", url: "/runs", headers: h })).statusCode).toBe(200);
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(403);
+    // 하니스 등록은 역할 게이트 없음 → viewer 도 201.
     expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS })).statusCode).toBe(
-      403,
+      201,
     );
     await app.close();
   });
-  it("member 는 submit 가능하나 harness 등록은 403", async () => {
+  it("member 는 submit + 하니스 등록 가능", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(202);
     expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS })).statusCode).toBe(
-      403,
+      201,
     );
     await app.close();
   });
@@ -311,7 +312,7 @@ describe("API — authorization (roles)", () => {
   });
 });
 
-describe("API — runtimes probe (연결 테스트, admin)", () => {
+describe("API — runtimes probe (연결 테스트, role 무관)", () => {
   const SPEC = { kind: "local", id: "rt-probe", version: "1.0.0", tags: [] };
   it("admin: POST /runtimes/probe → 200 + {kind,reachable,detail}", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
@@ -325,7 +326,7 @@ describe("API — runtimes probe (연결 테스트, admin)", () => {
     expect(res.json()).toMatchObject({ kind: "local", reachable: true });
     await app.close();
   });
-  it("viewer 는 probe 불가 (runtimes:write=admin → 403)", async () => {
+  it("viewer 도 probe 가능 (runtimes:write 는 role 무관 → 200)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
     const res = await app.inject({
       method: "POST",
@@ -333,7 +334,8 @@ describe("API — runtimes probe (연결 테스트, admin)", () => {
       headers: { authorization: "Bearer x" },
       payload: SPEC,
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ kind: "local", reachable: true });
     await app.close();
   });
   it("스키마 위반 body → 400", async () => {
@@ -491,7 +493,7 @@ describe("API — harness validate (dry-run)", () => {
     await app.close();
   });
 
-  it("member 는 검증 불가 (403)", async () => {
+  it("member 도 검증 가능 (하니스 등록은 역할 게이트 없음)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const res = await app.inject({
       method: "POST",
@@ -499,7 +501,8 @@ describe("API — harness validate (dry-run)", () => {
       headers: { authorization: "Bearer x" },
       payload: HARNESS,
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ ok: true });
     await app.close();
   });
 });
@@ -568,6 +571,54 @@ describe("API — datasets (workspace-owned, member+ write)", () => {
     await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET }); // 실제 등록
     const v2 = await app.inject({ method: "POST", url: "/datasets/validate", headers: h, payload: DATASET });
     expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    await app.close();
+  });
+
+  it("diff: 두 버전의 케이스 추가/삭제/변경 + 메타 변경을 보고; base/candidate 누락 400, 타 워크스페이스 404", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const beta = { authorization: `Bearer ${await issueKey(keyStore, "beta")}` };
+    // v1.0.0: c1(task "t"). v1.1.0: c1(task "t2", 변경) + c2(추가), description 변경.
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    await app.inject({
+      method: "POST",
+      url: "/datasets",
+      headers: h,
+      payload: {
+        id: "smoke",
+        version: "1.1.0",
+        description: "v1.1",
+        cases: [
+          { id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t2", graders: [{ id: "steps" }] },
+          { id: "c2", env: { kind: "repo", source: { files: {} } }, task: "new", graders: [{ id: "cost" }] },
+        ],
+      },
+    });
+
+    const diff = await app.inject({
+      method: "GET",
+      url: "/datasets/smoke/diff?base=1.0.0&candidate=1.1.0",
+      headers: h,
+    });
+    expect(diff.statusCode).toBe(200);
+    const body = diff.json();
+    expect(body).toMatchObject({ id: "smoke", base: "1.0.0", candidate: "1.1.0" });
+    expect(body.added.map((x: { id: string }) => x.id)).toEqual(["c2"]);
+    expect(body.removed).toEqual([]);
+    expect(body.changed.map((x: { id: string }) => x.id)).toEqual(["c1"]);
+    expect(body.changed[0].changes.map((c: { field: string }) => c.field)).toContain("task");
+    expect(body.meta.map((m: { field: string }) => m.field)).toContain("description");
+    expect(body.summary).toEqual({ added: 1, removed: 0, changed: 1, unchanged: 0 });
+
+    // base/candidate 누락 → 400
+    expect((await app.inject({ method: "GET", url: "/datasets/smoke/diff?base=1.0.0", headers: h })).statusCode).toBe(
+      400,
+    );
+    // 타 워크스페이스 → 버전 못 찾음 404 (존재 누설 없음)
+    expect(
+      (await app.inject({ method: "GET", url: "/datasets/smoke/diff?base=1.0.0&candidate=1.1.0", headers: beta }))
+        .statusCode,
+    ).toBe(404);
     await app.close();
   });
 });
@@ -1305,21 +1356,18 @@ describe("API — judges (Agent Judge, workspace-owned, member+ write)", () => {
   });
 });
 
-describe("API — runtimes (실행 인프라, workspace-owned, admin write)", () => {
-  it("member 는 읽기만(write 403); admin 은 등록 가능", async () => {
-    const member = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
-    const mh = { authorization: "Bearer x" };
-    expect((await member.app.inject({ method: "GET", url: "/runtimes", headers: mh })).statusCode).toBe(200);
-    expect(
-      (await member.app.inject({ method: "POST", url: "/runtimes", headers: mh, payload: RUNTIME })).statusCode,
-    ).toBe(403);
-    await member.app.close();
-
-    const admin = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
-    expect(
-      (await admin.app.inject({ method: "POST", url: "/runtimes", headers: mh, payload: RUNTIME })).statusCode,
-    ).toBe(201);
-    await admin.app.close();
+describe("API — runtimes (실행 인프라, workspace-owned, role 무관 write)", () => {
+  it("등록은 role 무관 — viewer/member/admin 모두 201", async () => {
+    const h = { authorization: "Bearer x" };
+    for (const role of ["viewer", "member", "admin"] as const) {
+      const s = server({ requireAuth: true, authenticator: roleAuth([role]) });
+      expect((await s.app.inject({ method: "GET", url: "/runtimes", headers: h })).statusCode).toBe(200);
+      expect(
+        (await s.app.inject({ method: "POST", url: "/runtimes", headers: h, payload: RUNTIME })).statusCode,
+        `${role} 는 런타임 등록 가능해야 한다`,
+      ).toBe(201);
+      await s.app.close();
+    }
   });
 
   it("등록 → 조회(전체 spec); 타 워크스페이스 404; 불변성 409", async () => {

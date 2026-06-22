@@ -35,7 +35,7 @@ export default async function NewRuntimePage() {
         <EmptyState
           icon={<Lock />}
           title="런타임 등록 권한이 없습니다."
-          hint="admin 역할이 필요합니다(runtimes:write). 실행 인프라 정의는 admin 전용입니다."
+          hint="이 워크스페이스의 멤버십이 필요합니다(runtimes:write). 등록은 role 무관이지만, 먼저 워크스페이스에 속해야 합니다."
         />
       )}
     </div>

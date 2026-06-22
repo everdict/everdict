@@ -27,8 +27,10 @@ kubeconfigs are self-contained.
 ## Ownership & lifecycle
 `RuntimeRegistry` (`@assay/registry`, `InMemory`/`Pg`, migration `0009_create_runtimes.sql`) — workspace-owned +
 `_shared` fallback, immutable versions, mirroring the other registries. `examples/runtimes/*.json` seeds a
-`_shared` `local` runtime. **Role-gating**: `runtimes:read` = viewer+, `runtimes:write` = **admin** (defining
-execution infra is a placement/security decision — same rationale as `harnesses:register`).
+`_shared` `local` runtime. **Role-gating**: `runtimes:read` = viewer+, `runtimes:write` = **viewer+ (role 무관)** —
+registering a runtime spec (+validate/probe) is open to every member, same as `harnesses:register`. The runtime spec
+holds **no secrets**; the credential *values* it references are still admin-only (`secrets:write`), so opening
+registration doesn't expose cluster tokens.
 
 ## Dispatch routing (`apps/api` `RuntimeDispatcher`)
 The `RuntimeDispatcher` wraps the global `Scheduler` (a `Dispatcher`):
@@ -46,9 +48,9 @@ A scorecard run selects a runtime: `POST /scorecards` `{…, runtime }` sets `pl
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|
-| `POST /runtimes` | `create_runtime` | `runtimes:write` (admin) |
-| `POST /runtimes/validate` (dry-run) | `validate_runtime` | `runtimes:write` |
-| `POST /runtimes/probe` (live connection test) | `probe_runtime` | `runtimes:write` |
+| `POST /runtimes` | `create_runtime` | `runtimes:write` (viewer+) |
+| `POST /runtimes/validate` (dry-run) | `validate_runtime` | `runtimes:write` (viewer+) |
+| `POST /runtimes/probe` (live connection test) | `probe_runtime` | `runtimes:write` (viewer+) |
 | `GET /runtimes` | `list_runtimes` | `runtimes:read` (viewer+) |
 | `GET /runtimes/:id/versions/:version` | `get_runtime` | `runtimes:read` |
 
@@ -63,8 +65,8 @@ unreachable address. The credential is used only for the probe's auth header (ne
 ## Web (`apps/web`)
 - **런타임 `/dashboard/runtimes`** — owned vs `_shared` runtimes (kind + version chips).
 - **상세 `/dashboard/runtimes/[id]`** — kind + connection fields. **등록 `/dashboard/runtimes/new`** — a
-  **kind-toggle form** (local | nomad | k8s) with a validate (dry-run) step → `POST /runtimes` (admin-gated). The
-  form takes secret **names** (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets`
+  **kind-toggle form** (local | nomad | k8s) with a validate (dry-run) step → `POST /runtimes` (role 무관 — any member
+  can register). The form takes secret **names** (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets`
   (names referenced but not yet in the SecretStore) as a non-blocking warning. Store the values in 워크스페이스 설정
   → 클러스터 자격증명. A **연결 테스트** button (nomad/k8s) runs the live probe (`POST /runtimes/probe`) and shows
   reachable/detail before you commit.

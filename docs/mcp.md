@@ -27,9 +27,9 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `create_judge` | `judges:write` (member+) | register a `JudgeSpec` (immutable → `CONFLICT`) |
 | `list_runtimes` | `runtimes:read` (viewer+) | workspace-owned + `_shared` execution runtimes (local \| nomad \| k8s) |
 | `get_runtime` | `runtimes:read` | one `RuntimeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
-| `validate_runtime` | `runtimes:write` (admin) | dry-run: schema + existing versions/conflict (no write) |
-| `probe_runtime` | `runtimes:write` (admin) | live connection test: build the backend + `probe()` the cluster (no job) → `{kind,reachable,detail}` |
-| `create_runtime` | `runtimes:write` (admin) | register a `RuntimeSpec` (immutable → `CONFLICT`) |
+| `validate_runtime` | `runtimes:write` (viewer+) | dry-run: schema + existing versions/conflict (no write) |
+| `probe_runtime` | `runtimes:write` (viewer+) | live connection test: build the backend + `probe()` the cluster (no job) → `{kind,reachable,detail}` |
+| `create_runtime` | `runtimes:write` (viewer+) | register a `RuntimeSpec` (immutable → `CONFLICT`) |
 | `run_scorecard` | `scorecards:run` (member+) | batch-eval a dataset × `harness@version` → queued `ScorecardRecord` (poll with `get_scorecard`) |
 | `list_scorecards` | `scorecards:read` (viewer+) | the workspace's scorecards (summary only) |
 | `get_scorecard` | `scorecards:read` | one scorecard incl. per-case results (other workspace → `NOT_FOUND`) |

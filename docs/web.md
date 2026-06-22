@@ -66,8 +66,8 @@ Import order enforces downward layer deps (app → widgets → features → enti
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
   (`judges:write` = member+). See `docs/judges.md`.
 - **런타임 `/dashboard/runtimes`** — tenant execution infra (local | nomad | k8s), owned vs `_shared`. **등록
-  `/dashboard/runtimes/new`** — kind-toggle form → `POST /runtimes` (admin-gated; credentials via secrets, not
-  the spec) with `authSecret`/`server`/`kubeconfigSecret` fields + a **연결 테스트** button (nomad/k8s) that runs
+  `/dashboard/runtimes/new`** — kind-toggle form → `POST /runtimes` (role 무관 — any member registers; credentials
+  via secrets, not the spec) with `authSecret`/`server`/`kubeconfigSecret` fields + a **연결 테스트** button (nomad/k8s) that runs
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
   실행 form gains a 런타임 selector. See `docs/runtimes.md`.
 - **새 run `/dashboard/runs/new`** — submit-run form (react-hook-form) → `submitRunAction` (server action) →
