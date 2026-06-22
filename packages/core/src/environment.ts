@@ -16,6 +16,9 @@ export const BrowserSnapshotSchema = z.object({
   url: z.string(),
   dom: z.string(),
   screenshotRef: z.string().optional(),
+  // 최종 페이지 스크린샷 PNG 를 base64 로 동봉(os-use 와 동형) — VLM judge(useScreenshot) 입력 + 웹 인라인 표시.
+  // 공식 WebVoyager 가 GPT-4V 로 스크린샷을 판정하는 방식을 재현. 없으면(미동봉) 텍스트 judge 로 폴백.
+  screenshot: z.string().optional(),
   console: z.array(z.string()).default([]),
 });
 export type BrowserSnapshot = z.infer<typeof BrowserSnapshotSchema>;

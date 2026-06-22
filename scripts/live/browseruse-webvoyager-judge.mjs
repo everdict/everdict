@@ -23,6 +23,7 @@ const JUDGE_MODEL = process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini";
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 const WV_SOURCE = process.env.WV_SOURCE ?? "sample";
 const WV_N = Number(process.env.WV_N ?? "6");
+const JUDGE_VISION = process.env.JUDGE_VISION === "1"; // 켜면 use_vision + 최종 스크린샷 base64 → VLM judge(공식 GPT-4V 방식)
 // 라이브에서 browser-use 가 다룰 만한 benign(로그인/CAPTCHA 적은) 정보탐색 사이트 위주.
 const BENIGN = (process.env.WV_SITES ?? "ArXiv,Cambridge Dictionary,GitHub,Wolfram Alpha,BBC News,Huggingface").split(
   ",",
@@ -110,6 +111,8 @@ execFileSync(
     "BROWSERUSE_PRICE_IN=0.00000015",
     "-e",
     "BROWSERUSE_PRICE_OUT=0.0000006",
+    "-e",
+    `BROWSERUSE_VISION=${JUDGE_VISION ? "1" : ""}`,
     IMAGE,
   ],
   { stdio: "ignore" },
@@ -139,7 +142,7 @@ try {
         cdpUrl: "",
         async snapshot() {
           const j = await (await fetch(`${FRONT}/observe`)).json();
-          return { kind: "browser", url: j.url || "", dom: j.dom || "", console: [] };
+          return { kind: "browser", url: j.url || "", dom: j.dom || "", screenshot: j.screenshot || "", console: [] };
         },
         async dispose() {},
       };
@@ -185,7 +188,10 @@ try {
   const failures = [];
   for (const c of dataset.cases) {
     const task = c.env.startUrl ? `Go to ${c.env.startUrl} . ${c.task}` : c.task;
-    const graders = [...c.graders.filter((g) => g.id !== "judge"), { id: "judge", config: { rubric: WV_RUBRIC } }];
+    const graders = [
+      ...c.graders.filter((g) => g.id !== "judge"),
+      { id: "judge", config: { rubric: WV_RUBRIC, useScreenshot: JUDGE_VISION } },
+    ];
     let r;
     try {
       // judge env 가 켜져 makeGradersFromEnv 가 JudgeGrader(LiteLLM) 빌드 → trace+dom 을 루브릭으로 판정.
@@ -203,8 +209,9 @@ try {
     const am = r.scores.find((s) => s.metric === "answer_match");
     const steps = r.scores.find((s) => s.metric === "tool_calls")?.value ?? 0;
     const pass = judge?.pass === true;
+    const shot = r.snapshot.screenshot ? `${Math.round(r.snapshot.screenshot.length / 1000)}KB` : "none";
     console.log(
-      `  ${c.id}: judge=${pass ? "PASS" : "FAIL"}${am ? ` answer_match=${am.pass ? "P" : "F"}` : ""} steps=${steps} url=${r.snapshot.url}`,
+      `  ${c.id}: judge=${pass ? "PASS" : "FAIL"}${am ? ` answer_match=${am.pass ? "P" : "F"}` : ""} steps=${steps} shot=${shot} url=${r.snapshot.url}`,
     );
     if (judge?.detail) console.log(`     judge: ${String(judge.detail).replace(/\s+/g, " ").slice(0, 160)}`);
     if (!pass)

@@ -24,8 +24,9 @@ MAX_STEPS = int(os.environ.get("BROWSERUSE_MAX_STEPS", "6"))
 BASE_URL = os.environ.get("OPENAI_BASE_URL", "http://host.docker.internal:4000/v1")
 API_KEY = os.environ.get("OPENAI_API_KEY", "x")
 OTLP_URL = os.environ.get("OTLP_URL", "http://localhost:4318/v1/traces")
+VISION = os.environ.get("BROWSERUSE_VISION", "") in ("1", "true", "True")  # 켜면 최종 스크린샷 base64 동봉(VLM judge 용)
 
-_last = {"url": "", "dom": "", "result": "", "error": "", "steps": 0, "actions": [], "tokens": {}, "trace_id": ""}
+_last = {"url": "", "dom": "", "result": "", "error": "", "steps": 0, "actions": [], "tokens": {}, "trace_id": "", "screenshot": ""}
 _lock = asyncio.Lock()
 
 
@@ -76,6 +77,30 @@ def make_browser_kwargs(cdp_url):
         return {"browser_profile": BrowserProfile(**kw)}
     except Exception:
         return {}
+
+
+def last_screenshot(history):
+    # browser-use 0.13: use_vision 이면 스텝마다 스크린샷 저장 → history.screenshots()(base64) 또는 screenshot_paths()(파일).
+    import base64 as _b64
+
+    try:
+        shots = [s for s in (history.screenshots() or []) if s]
+        if shots:
+            s = shots[-1]
+            if isinstance(s, str) and s.startswith("/") and os.path.exists(s):
+                with open(s, "rb") as f:
+                    return _b64.b64encode(f.read()).decode()
+            return s
+    except Exception:
+        pass
+    try:
+        paths = [p for p in (history.screenshot_paths() or []) if p and os.path.exists(p)]
+        if paths:
+            with open(paths[-1], "rb") as f:
+                return _b64.b64encode(f.read()).decode()
+    except Exception:
+        pass
+    return ""
 
 
 def summarize(history):
@@ -195,7 +220,7 @@ async def run_handler(request):
 
             tc = TokenCost(include_cost=False)  # 실 토큰 카운트 추적(프록시 모델 가격 미상 → cost 계산은 생략).
             llm = tc.register_llm(make_llm())
-            agent = Agent(task=task, llm=llm, use_vision=False, **make_browser_kwargs(cdp_url))
+            agent = Agent(task=task, llm=llm, use_vision=VISION, **make_browser_kwargs(cdp_url))
             history = await agent.run(max_steps=MAX_STEPS)
 
             result = ""
@@ -225,6 +250,7 @@ async def run_handler(request):
             _last.update(
                 url=url, dom=dom, result=result, steps=len(actions), actions=actions,
                 tokens={"input": int(ptok), "output": int(ctok), "cost": float(cost)},
+                screenshot=(last_screenshot(history) if VISION else ""),
             )
             try:
                 await agent.close()

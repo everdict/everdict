@@ -1172,3 +1172,13 @@ Three more, all live:
   Cambridge Dictionary / Wolfram Alpha (derivative = 11.2, correct) PASS; GitHub + Huggingface FAIL, and the
   judge's reasons are honest (Huggingface: the agent fell back to a Bing search and never verified the model's
   update date). Real benchmark, real sites, judge-graded — pass rate reflects task difficulty, not a fixture.
+
+- **VLM judge (official WebVoyager GPT-4V style).** The text judge above scores `trace + dom`; the official
+  WebVoyager judges a *screenshot*. `BrowserSnapshot` gained an optional `screenshot` (base64, mirroring
+  os-use) and `resolveScreenshot` now resolves it for `browser` snapshots, so a `JudgeGrader` with
+  `useScreenshot: true` passes the image to the VLM. `browseruse_server.py` with `BROWSERUSE_VISION=1` runs the
+  agent with `use_vision` and returns the final-page screenshot (base64) on `/observe`; the snapshot carries it
+  (and the web dashboard renders it inline via the existing `osUseShotSrc`). Live (`JUDGE_VISION=1`, sample):
+  the judge received a real screenshot per case (376KB / 27KB / 328KB) and its reasoning explicitly cites it
+  ("the screenshot matches example.com"; "the final DOM and screenshot show … 'Vector database'"), 3/3 pass.
+  So a browser-use trajectory is now gradable the official way — a VLM over the end-state screenshot.
