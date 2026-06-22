@@ -1063,6 +1063,48 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.code(201).send({ workspace: body.data.workspace, apiKey }); // 평문은 여기서 한 번만
   });
 
+  // --- API 키 self-serve (admin 전용; 발급된 키는 이 워크스페이스 admin 권한을 가진다) ---
+  app.get("/keys", async (req, reply) => {
+    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "keys:read");
+      return reply.send(await deps.keyStore.list(principal.workspace)); // 메타만(평문/해시 없음)
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.post("/keys", async (req, reply) => {
+    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ label: z.string().max(80).optional() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      gate(principal, "keys:write");
+      const apiKey = await issueKey(deps.keyStore, principal.workspace, body.data.label);
+      return reply.code(201).send({ apiKey }); // 평문은 여기서 한 번만(이 워크스페이스 admin 권한)
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/keys/:id", async (req, reply) => {
+    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "keys:write");
+      // tenant 스코프 취소 — 다른 워크스페이스의 id 는 no-op(존재 누출 없음). 항상 204.
+      await deps.keyStore.revoke(principal.workspace, req.params.id);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- MCP (에이전트용 표면, OAuth 보호) ---
   // OAuth Protected Resource Metadata (RFC 9728) — 인증 불필요(디스커버리). path-suffix 변형도 동일.
   const metaHandler = async (req: FastifyRequest, reply: FastifyReply) =>
@@ -1103,6 +1145,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           secretStore: deps.secretStore,
           settingsStore: deps.settingsStore,
           workspaceService: deps.workspaceService,
+          keyStore: deps.keyStore,
         },
         principal,
       ).connect(transport);

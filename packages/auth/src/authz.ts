@@ -22,6 +22,8 @@ export type Action =
   | "runtimes:write"
   | "secrets:read"
   | "secrets:write"
+  | "keys:read"
+  | "keys:write"
   | "settings:read"
   | "settings:write";
 
@@ -74,6 +76,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:write", // 실행 인프라 정의 = 실행/배치 결정 → admin 전용(harnesses:register 와 동일 이유)
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
     "secrets:write",
+    "keys:read", // API 키는 발급 시 워크스페이스 admin 권한을 가짐 → 발급/취소는 admin 전용(secrets 와 동일 근거)
+    "keys:write",
     "settings:read", // 워크스페이스 정책(계측 등) = admin 전용 설정
     "settings:write",
   ]),

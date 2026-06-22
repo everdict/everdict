@@ -24,6 +24,9 @@ token courier, never an auth authority. See `docs/auth.md`.
   **JWKS** (`jwtVerify` with `issuer` + optional `audience`) — never decode-without-verify.
 - **Secrets:** store only the **SHA-256 hash** of an API key (`@assay/db`); plaintext is returned **once** at
   issuance. `/internal/**` is guarded by `x-internal-token` (constant-time compare, fail-closed if unset).
+  Self-serve key management (`POST/GET/DELETE /keys` + MCP `create/list/revoke_api_key`) is **admin-only**
+  (`keys:read`/`keys:write`) because an `ak_…` key resolves to workspace **admin** — `list` exposes only
+  non-secret metadata (`id`/`prefix`/`label`/`createdAt`), never the hash/plaintext; `revoke` is tenant-scoped.
 - **AuthZ is a flat matrix** (`authz.ts`): `can`/`authorize(principal, action)`; `authorize` throws
   `ForbiddenError` → **403**. Roles are cumulative (`admin ⊃ member ⊃ viewer`). Gate every mutating route;
   reads of another workspace's resource return **404** (no existence leak), not 403.

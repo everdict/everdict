@@ -1,7 +1,12 @@
 import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
-import { InMemoryRunStore, InMemoryScorecardStore, InMemoryWorkspaceSettingsStore } from "@assay/db";
+import {
+  InMemoryRunStore,
+  InMemoryScorecardStore,
+  InMemoryTenantKeyStore,
+  InMemoryWorkspaceSettingsStore,
+} from "@assay/db";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
@@ -53,6 +58,7 @@ function harness() {
     datasetRegistry,
     judgeRegistry: new InMemoryJudgeRegistry(),
     runtimeRegistry: new InMemoryRuntimeRegistry(),
+    keyStore: new InMemoryTenantKeyStore(),
     scorecardService: new ScorecardService({
       dispatcher: okDispatcher,
       store: new InMemoryScorecardStore(),
@@ -79,6 +85,7 @@ describe("MCP tools", () => {
     const client = await connect(harness(), ["admin"]);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "create_api_key",
       "create_dataset",
       "create_judge",
       "create_runtime",
@@ -89,6 +96,7 @@ describe("MCP tools", () => {
       "get_runtime",
       "get_scorecard",
       "ingest_scorecard",
+      "list_api_keys",
       "list_datasets",
       "list_harnesses",
       "list_judges",
@@ -97,6 +105,7 @@ describe("MCP tools", () => {
       "list_scorecards",
       "pull_scorecard",
       "register_harness",
+      "revoke_api_key",
       "run_scorecard",
       "submit_run",
       "validate_dataset",
@@ -366,5 +375,30 @@ describe("MCP tools", () => {
     expect((await member.callTool({ name: "set_workspace_settings", arguments: { meterUsage: false } })).isError).toBe(
       true,
     );
+  });
+
+  it("api keys: admin 발급(평문 1회)/목록(prefix 만)/취소; member 는 권한오류", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"], "acme");
+    const created = await admin.callTool({ name: "create_api_key", arguments: { label: "ci" } });
+    const apiKey = JSON.parse(text(created)).apiKey as string;
+    expect(apiKey.startsWith("ak_")).toBe(true);
+
+    const list = JSON.parse(text(await admin.callTool({ name: "list_api_keys", arguments: {} }))) as Array<{
+      id: string;
+      prefix: string;
+      label?: string;
+    }>;
+    const row = list.find((r) => r.label === "ci");
+    expect(row?.prefix).toBe(apiKey.slice(0, 12)); // prefix 만(평문/해시 아님)
+    const id = row?.id;
+    if (!id) throw new Error("발급된 키 메타를 찾지 못함");
+
+    await admin.callTool({ name: "revoke_api_key", arguments: { id } });
+    expect(JSON.parse(text(await admin.callTool({ name: "list_api_keys", arguments: {} })))).toEqual([]); // 취소됨
+
+    const member = await connect(deps, ["member"], "acme");
+    expect((await member.callTool({ name: "create_api_key", arguments: {} })).isError).toBe(true);
+    expect((await member.callTool({ name: "list_api_keys", arguments: {} })).isError).toBe(true);
   });
 });

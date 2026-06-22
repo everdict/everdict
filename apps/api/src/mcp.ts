@@ -7,7 +7,7 @@ import {
   JudgeSpecSchema,
   RuntimeSpecSchema,
 } from "@assay/core";
-import type { SecretStore, WorkspaceSettingsStore } from "@assay/db";
+import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
@@ -28,6 +28,7 @@ export interface McpDeps {
   secretStore?: SecretStore;
   settingsStore?: WorkspaceSettingsStore;
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
+  keyStore?: TenantKeyStore; // API 키 self-serve 발급/목록/취소(admin)
 }
 
 function ok(data: unknown): CallToolResult {
@@ -522,6 +523,33 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         run(principal, "secrets:write", async () => {
           await secrets.remove(ws, name);
           return ok({ workspace: ws, name, deleted: true });
+        }),
+    );
+  }
+
+  if (deps.keyStore) {
+    const keys = deps.keyStore;
+    server.registerTool(
+      "list_api_keys",
+      { description: "이 워크스페이스의 API 키 목록(메타만 — 평문/해시 없음, prefix 로 식별)", inputSchema: {} },
+      () => run(principal, "keys:read", async () => ok(await keys.list(ws))),
+    );
+    server.registerTool(
+      "create_api_key",
+      {
+        description:
+          "새 API 키 발급. 발급된 키는 이 워크스페이스의 ADMIN 권한을 가진다. 평문(ak_…)은 응답에 한 번만 노출되고 다시 못 본다.",
+        inputSchema: { label: z.string().max(80).optional().describe("식별용 레이블(선택)") },
+      },
+      ({ label }) => run(principal, "keys:write", async () => ok({ apiKey: await issueKey(keys, ws, label) })),
+    );
+    server.registerTool(
+      "revoke_api_key",
+      { description: "API 키 취소(즉시 무효). id 는 list_api_keys 의 id.", inputSchema: { id: z.string() } },
+      ({ id }) =>
+        run(principal, "keys:write", async () => {
+          await keys.revoke(ws, id); // tenant 스코프 — 다른 워크스페이스 id 는 no-op
+          return ok({ workspace: ws, id, revoked: true });
         }),
     );
   }

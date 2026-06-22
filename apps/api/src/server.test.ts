@@ -1046,6 +1046,38 @@ describe("API — secrets (workspace model/provider keys)", () => {
   });
 });
 
+describe("API — keys (self-serve API 키, admin)", () => {
+  it("admin: 발급(평문 1회)/목록(prefix 만)/취소(204) 후 키 인증 무효", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const created = await app.inject({ method: "POST", url: "/keys", headers: h, payload: { label: "ci" } });
+    expect(created.statusCode).toBe(201);
+    const apiKey = created.json().apiKey as string;
+    expect(apiKey.startsWith("ak_")).toBe(true);
+
+    const list = await app.inject({ method: "GET", url: "/keys", headers: h });
+    const rows = list.json() as Array<{ id: string; prefix: string; label?: string }>;
+    const issued = rows.find((r) => r.label === "ci");
+    expect(issued?.prefix).toBe(apiKey.slice(0, 12)); // prefix 만 노출
+    expect(list.payload).not.toContain(apiKey); // 평문 미노출
+
+    // 발급된 키로 인증 성공 → 취소 → 더 이상 인증 안 됨(401)
+    const keyHdr = { authorization: `Bearer ${apiKey}` };
+    expect((await app.inject({ method: "GET", url: "/me", headers: keyHdr })).statusCode).toBe(200);
+    expect((await app.inject({ method: "DELETE", url: `/keys/${issued?.id}`, headers: h })).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: "/me", headers: keyHdr })).statusCode).toBe(401);
+    await app.close();
+  });
+
+  it("member 는 키 발급/조회 불가 (403)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await app.inject({ method: "GET", url: "/keys", headers: h })).statusCode).toBe(403);
+    expect((await app.inject({ method: "POST", url: "/keys", headers: h, payload: {} })).statusCode).toBe(403);
+    await app.close();
+  });
+});
+
 describe("API — workspace settings (계측 정책 등)", () => {
   it("admin: 빈 설정 조회 → {}, set 후 병합 반환 + 워크스페이스 격리", async () => {
     const { app, keyStore } = server({ requireAuth: true });

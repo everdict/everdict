@@ -30,6 +30,9 @@ arrives by polling or webhook.
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |
 | `GET`  | `/scorecards/:id` | full `ScorecardRecord` (incl. per-case `scorecard`) or 404 (`scorecards:read`) |
 | `GET`  | `/scorecards/diff?baseline=&candidate=` | `ScorecardDiff` (metric Δ + regressions/improvements) (`scorecards:read`) |
+| `POST` | `/keys` | self-serve issue an API key `{ label? }` → **201** `{ apiKey }` (plaintext **once**; key carries workspace **admin**) (`keys:write`, admin) |
+| `GET`  | `/keys` | API key metadata `{ id, prefix, label?, createdAt }[]` — never the plaintext/hash (`keys:read`, admin) |
+| `DELETE` | `/keys/:id` | revoke a key → **204** (tenant-scoped; foreign id is a no-op) (`keys:write`, admin) |
 | `GET`  | `/healthz` | `{ ok: true }` |
 
 Scorecards are **batch evals** (a dataset × a `harness@version` → aggregated `Scorecard` + per-metric summary),
@@ -41,7 +44,8 @@ missing/invalid credential is **401**, otherwise dev falls back to the `x-assay-
 resolved `workspace` (= tenant = trust-zone) keys fairness, quotas, isolation, secret scoping, budgets — and
 scopes every read; roles gate every route (`viewer/member/admin`). See [auth.md](auth.md). Harness registration
 (`POST/GET /harnesses`, workspace-owned), datasets (`POST/GET /datasets`, workspace-owned + `_shared`, see
-[datasets.md](datasets.md)) and key issuance (`POST /internal/tenant-keys`) are covered in
+[datasets.md](datasets.md)) and key issuance (admin self-serve `POST/GET/DELETE /keys` — issued keys carry
+workspace admin, plaintext shown once, hash-only at rest; bootstrap `POST /internal/tenant-keys`) are covered in
 [tenancy.md](tenancy.md).
 
 `RunRecord` = `{ id, tenant, harness, caseId, status: queued|running|succeeded|failed, result?, error?,
