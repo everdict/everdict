@@ -139,11 +139,15 @@ async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: 
 
   // 토큰/dev 기본 워크스페이스가 있으면 멤버십으로 (없을 때만) 부트스트랩.
   // email 클레임(있으면)은 로그인마다 멤버 행에 캡처/백필 — role 은 유지(ensureMembership 가 COALESCE/role 불변).
+  // ⚠️ 역할은 워크스페이스 기준: 새 워크스페이스(사실상 생성자) 또는 머신 키(발급이 admin-gated)는 토큰 역할을 쓰지만,
+  // 기존 워크스페이스에 사람(OIDC)이 부트스트랩으로 합류하면 member 로 캡 — Keycloak realm 역할로 남의 워크스페이스
+  // admin 을 얻을 수 없다(admin 은 생성[POST /workspaces]·초대·승격으로만). 이미 멤버면 그 멤버십 역할이 우선.
   let baseRole: string | undefined;
   if (base.workspace) {
     baseRole = await store.roleFor(base.workspace, subject);
     if (!baseRole) {
-      baseRole = base.roles[0] ?? "member";
+      const fresh = !(await store.get(base.workspace));
+      baseRole = fresh || base.via === "api-key" ? (base.roles[0] ?? "member") : "member";
       await store.ensureMembership(base.workspace, subject, baseRole, base.email);
     } else if (base.email !== undefined) {
       await store.ensureMembership(base.workspace, subject, baseRole, base.email); // 기존 멤버 — email 만 갱신

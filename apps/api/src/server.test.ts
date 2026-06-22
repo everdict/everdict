@@ -1168,6 +1168,21 @@ describe("API — members (멤버 관리)", () => {
     expect((await app.inject({ method: "DELETE", url: "/members/u", headers: h })).statusCode).toBe(403);
     await app.close();
   });
+
+  it("역할은 워크스페이스 기준: Keycloak realm admin 도 기존 워크스페이스엔 member 로만 합류(admin 누출 없음)", async () => {
+    const { app, workspaceStore } = server({ requireAuth: true, authenticator: roleAuth(["admin"], "shared") });
+    await workspaceStore.create({ id: "shared", name: "Shared", owner: "alice" }); // alice = admin(기존 워크스페이스)
+    const h = { authorization: "Bearer x" }; // realm 'admin' 토큰, workspace=shared
+    // 부트스트랩으로 합류하지만 member 로 캡 → 조회(viewer+)는 되나 멤버 관리(members:write)는 403.
+    expect((await app.inject({ method: "GET", url: "/members", headers: h })).statusCode).toBe(200);
+    expect(
+      (await app.inject({ method: "PATCH", url: "/members/alice", headers: h, payload: { role: "viewer" } }))
+        .statusCode,
+    ).toBe(403);
+    // 본인 멤버십 역할도 member 로 기록됐는지 확인(realm 의 admin 이 아님).
+    expect(await workspaceStore.roleFor("shared", "u")).toBe("member");
+    await app.close();
+  });
 });
 
 describe("API — workspace settings (계측 정책 등)", () => {

@@ -35,6 +35,11 @@ row on each login (display only — for a human-readable member list, never an a
   request; `Principal.workspace`+`roles` come from that membership. The token/dev default workspace is
   **bootstrapped** into a membership on first use (existing Keycloak users stay seamless). A non-member
   `x-assay-workspace` **falls back** to the default (isolation-safe; never a 403 from a stale selection).
+- **Roles are workspace-governed, not derived from the Keycloak realm role.** A workspace role is admin only via
+  (a) creating it (`POST /workspaces` → creator is admin), (b) an invite that grants it, or (c) an admin
+  promotion. The bootstrap caps the role: a **fresh** workspace (de-facto creator) or a **machine key** (issuance
+  is admin-gated) keeps the token's role, but a **human (OIDC)** bootstrapping into an **existing** workspace
+  joins as **member** — so a global Keycloak `admin` realm role can never grant admin in someone else's workspace.
 - One service core (`WorkspaceService`), two transports — HTTP routes **and** MCP tools (`list_workspaces` /
   `create_workspace`). The web surfaces it as a Linear-style sidebar **workspace switcher** + create flow
   (`docs/web.md`).
