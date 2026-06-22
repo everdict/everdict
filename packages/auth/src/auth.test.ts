@@ -78,23 +78,23 @@ describe("oidcAuthenticator (Keycloak JWT)", () => {
       .setExpirationTime("5m")
       .sign(priv);
 
-  it("workspace claim + realm 역할을 추출한다", async () => {
+  it("Keycloak 은 인증 전용 — realm_access.roles 는 무시한다(roles=[]; 인가는 멤버십 SSOT)", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
-    const token = await mint({ workspace: "acme", realm_access: { roles: ["member", "uma_authorization"] } });
+    const token = await mint({ workspace: "acme", realm_access: { roles: ["admin", "uma_authorization"] } });
     expect(await auth.authenticate(token)).toMatchObject({
       subject: "user-1",
       workspace: "acme",
-      roles: ["member"], // assay 역할만
+      roles: [], // 토큰 역할은 인가에 쓰지 않는다 — realm 'admin' 도 무시
       via: "oidc",
     });
   });
 
-  it("workspace 가 그룹(/workspaces/<ws>)에서 폴백된다", async () => {
+  it("workspace 가 그룹(/workspaces/<ws>)에서 폴백된다 (역할은 토큰과 무관)", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
-    const token = await mint({ groups: ["/workspaces/globex/eng"], realm_access: { roles: [] } });
+    const token = await mint({ groups: ["/workspaces/globex/eng"], realm_access: { roles: ["admin"] } });
     const principal = await auth.authenticate(token);
     expect(principal?.workspace).toBe("globex");
-    expect(principal?.roles).toEqual(["viewer"]); // 역할 없으면 viewer
+    expect(principal?.roles).toEqual([]); // Keycloak 역할 무시 — 멤버십이 SSOT
   });
 
   it("email 클레임을 캡처(멤버 목록 표시용); 없으면 preferred_username 폴백, 둘 다 없으면 미설정", async () => {
@@ -143,8 +143,8 @@ describe("oidcAuthenticator (Keycloak JWT)", () => {
     const token = await mint({ realm_access: { roles: ["member"] } }); // workspace 클레임 없음
     expect(await auth.authenticate(token)).toMatchObject({
       subject: "user-1",
-      workspace: "", // 아직 워크스페이스 없음 → 부트스트랩/온보딩 대상(401 아님)
-      roles: ["member"],
+      workspace: "", // 아직 워크스페이스 없음 → 온보딩(워크스페이스 생성) 대상(401 아님)
+      roles: [], // Keycloak 역할 무시 — 생성 후 멤버십(생성자=admin)이 역할을 부여
       via: "oidc",
     });
   });

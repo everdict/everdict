@@ -1,5 +1,4 @@
 import { type JWTVerifyGetKey, createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
-import { ASSAY_ROLES } from "./authz.js";
 import type { Authenticator } from "./principal.js";
 
 // 검증 실패 진단 정보(상위 앱이 로그로 남긴다). 토큰을 신뢰하지 않고 사유 파악용으로만 디코드한 값.
@@ -63,14 +62,6 @@ function extractWorkspace(payload: Record<string, unknown>, claim: string, prefi
   return undefined;
 }
 
-// 역할 = Keycloak realm_access.roles 중 Assay 역할만. 없으면 viewer.
-function extractRoles(payload: Record<string, unknown>): string[] {
-  const realm = (payload.realm_access as { roles?: unknown } | undefined)?.roles;
-  const all = Array.isArray(realm) ? realm.filter((r): r is string => typeof r === "string") : [];
-  const known = all.filter((r) => (ASSAY_ROLES as readonly string[]).includes(r));
-  return known.length > 0 ? known : ["viewer"];
-}
-
 // 사람이 읽을 식별자(멤버 목록 표시용) — email 우선, 없으면 preferred_username. 표시 전용(identity/authz 무관).
 function extractEmail(payload: Record<string, unknown>): string | undefined {
   const email = payload.email;
@@ -105,7 +96,9 @@ export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
         return {
           subject: String(payload.sub ?? ""),
           workspace,
-          roles: extractRoles(payload as Record<string, unknown>),
+          // Keycloak 은 *인증 전용* — 인가(역할)에 절대 쓰지 않는다. 역할은 워크스페이스 멤버십이 SSOT
+          // (생성자=admin, 초대=지정 역할, 승격). realm_access.roles 같은 토큰 역할은 의도적으로 무시한다.
+          roles: [],
           via: "oidc",
           ...(email ? { email } : {}),
         };
