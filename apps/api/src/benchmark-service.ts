@@ -5,11 +5,15 @@ import {
   BenchmarkSourceSchema,
   type BenchmarkSourceSpec,
   type FetchLike,
+  type HfDatasetHit,
+  type HfSplit,
+  fetchHfSplits,
   fetchSourceRows,
   getBenchmark,
   importBenchmark,
   importFromSpec,
   listBenchmarks,
+  searchHfDatasets,
 } from "@assay/datasets";
 import type { BenchmarkRegistry, DatasetRegistry } from "@assay/registry";
 import { z } from "zod";
@@ -101,6 +105,29 @@ export class BenchmarkService {
   // 이 테넌트가 직접 등록한 버전만(폴백 없음) — validate dry-run 의 충돌 판정용.
   recipeOwnVersions(tenant: string, id: string): Promise<string[]> {
     return this.registry().ownVersions(tenant, id);
+  }
+
+  // HF Hub 데이터셋 검색 — 위저드가 정확한 id 대신 검색어로 후보를 고른다(raw 입력 회피). gated 인출은 HF_TOKEN.
+  async searchHf(tenant: string, query: string, limit?: number): Promise<HfDatasetHit[]> {
+    const secrets: Record<string, string> = this.deps.secretsFor
+      ? await this.deps.secretsFor(tenant).catch(() => ({}))
+      : {};
+    return searchHfDatasets(query, {
+      ...(limit ? { limit } : {}),
+      ...(secrets.HF_TOKEN ? { token: secrets.HF_TOKEN } : {}),
+      ...(this.deps.fetchImpl ? { fetchImpl: this.deps.fetchImpl } : {}),
+    });
+  }
+
+  // 선택한 HF 데이터셋의 config/split 조합 — 위저드 드롭다운용(split 직접 타이핑 회피).
+  async hfSplits(tenant: string, dataset: string): Promise<HfSplit[]> {
+    const secrets: Record<string, string> = this.deps.secretsFor
+      ? await this.deps.secretsFor(tenant).catch(() => ({}))
+      : {};
+    return fetchHfSplits(dataset, {
+      ...(secrets.HF_TOKEN ? { token: secrets.HF_TOKEN } : {}),
+      ...(this.deps.fetchImpl ? { fetchImpl: this.deps.fetchImpl } : {}),
+    });
   }
 
   // 소스 미리보기 — 매핑 전 원본 행 N개 + 감지된 필드 목록. 위저드가 이걸로 필드를 드롭다운에 채우고 매핑한다.

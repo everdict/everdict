@@ -52,3 +52,61 @@ export async function fetchHfRows(p: HfRowsParams, fetchImpl?: FetchLike): Promi
   }
   return rows.slice(0, limit);
 }
+
+const HF_HUB = "https://huggingface.co/api/datasets";
+const HF_SPLITS = "https://datasets-server.huggingface.co/splits";
+
+// HF Hub 데이터셋 검색 결과 1건(선택용 최소 메타). gated 면 인출에 HF_TOKEN 필요.
+export interface HfDatasetHit {
+  id: string;
+  likes: number;
+  gated: boolean;
+}
+
+// HF Hub 데이터셋 검색 — 사용자가 정확한 id 를 몰라도 검색어로 후보를 고른다(raw 입력 회피). 공개 검색은 토큰 불필요.
+export async function searchHfDatasets(
+  query: string,
+  opts: { limit?: number; token?: string; fetchImpl?: FetchLike } = {},
+): Promise<HfDatasetHit[]> {
+  const f = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  if (!f) throw new Error("searchHfDatasets: no fetch implementation (pass fetchImpl or run on Node 18+)");
+  const limit = Math.min(50, Math.max(1, opts.limit ?? 20));
+  const url = `${HF_HUB}?search=${encodeURIComponent(query)}&limit=${limit}&sort=downloads&direction=-1&full=false`;
+  const headers: Record<string, string> = {};
+  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  const res = await f(url, { headers });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`HF Hub search ${res.status}: ${body.slice(0, 200)}`);
+  const arr = JSON.parse(body) as Array<{ id?: unknown; likes?: unknown; gated?: unknown; private?: unknown }>;
+  return arr
+    .filter((d) => d.private !== true && typeof d.id === "string")
+    .map((d) => ({
+      id: String(d.id),
+      likes: typeof d.likes === "number" ? d.likes : 0,
+      // HF 의 gated 는 false | "auto" | "manual".
+      gated: Boolean(d.gated) && d.gated !== "false",
+    }));
+}
+
+// HF datasets-server 의 config/split 조합 — 사용자가 split 을 직접 타이핑하지 않고 드롭다운에서 고른다.
+export interface HfSplit {
+  config: string;
+  split: string;
+}
+
+export async function fetchHfSplits(
+  dataset: string,
+  opts: { token?: string; fetchImpl?: FetchLike } = {},
+): Promise<HfSplit[]> {
+  const f = opts.fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
+  if (!f) throw new Error("fetchHfSplits: no fetch implementation (pass fetchImpl or run on Node 18+)");
+  const headers: Record<string, string> = {};
+  if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
+  const res = await f(`${HF_SPLITS}?dataset=${encodeURIComponent(dataset)}`, { headers });
+  const body = await res.text();
+  if (!res.ok) throw new Error(`HF splits ${res.status} for ${dataset}: ${body.slice(0, 200)}`);
+  const json = JSON.parse(body) as { splits?: Array<{ config?: unknown; split?: unknown }> };
+  return (json.splits ?? [])
+    .filter((s) => typeof s.config === "string" && typeof s.split === "string")
+    .map((s) => ({ config: String(s.config), split: String(s.split) }));
+}

@@ -5,6 +5,7 @@ import {
   EvalCaseSchema,
   HarnessSpecSchema,
   JudgeSpecSchema,
+  type RuntimeSpec,
   RuntimeSpecSchema,
 } from "@assay/core";
 import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@assay/db";
@@ -499,6 +500,23 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   if (deps.benchmarkService) {
     const benchmarks = deps.benchmarkService;
+    server.registerTool(
+      "search_hf_datasets",
+      {
+        description: "HuggingFace Hub 데이터셋 검색 — 정확한 id 를 모를 때 검색어로 후보({id,likes,gated})를 찾는다.",
+        inputSchema: { query: z.string(), limit: z.number().int().positive().max(50).optional() },
+      },
+      ({ query, limit }) =>
+        run(principal, "datasets:read", async () => ok(await benchmarks.searchHf(ws, query, limit))),
+    );
+    server.registerTool(
+      "hf_dataset_splits",
+      {
+        description: "선택한 HF 데이터셋의 config/split 조합 목록(split 직접 타이핑 대신 고르기 위해).",
+        inputSchema: { dataset: z.string() },
+      },
+      ({ dataset }) => run(principal, "datasets:read", async () => ok(await benchmarks.hfSplits(ws, dataset))),
+    );
     server.registerTool(
       "preview_benchmark_source",
       {

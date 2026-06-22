@@ -9,6 +9,7 @@ import {
   JudgeSpecSchema,
   MetricSpecSchema,
   ModelSpecSchema,
+  type RuntimeSpec,
   RuntimeSpecSchema,
 } from "@assay/core";
 import { BenchmarkAdapterSpecSchema } from "@assay/datasets";
@@ -444,6 +445,40 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "datasets:read");
       return reply.send(deps.benchmarkService.list());
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // HF Hub 데이터셋 검색 — 위저드가 검색어로 후보를 고른다(정확한 id 직접 입력 회피). discovery → viewer+.
+  app.get("/benchmarks/hf/datasets", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const q = (req.query as Record<string, unknown>).q;
+    if (typeof q !== "string" || !q.trim())
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "검색어 q 가 필요합니다." });
+    const limitRaw = (req.query as Record<string, unknown>).limit;
+    const limit = typeof limitRaw === "string" && Number.isFinite(Number(limitRaw)) ? Number(limitRaw) : undefined;
+    try {
+      gate(principal, "datasets:read");
+      return reply.send(await deps.benchmarkService.searchHf(principal.workspace, q.trim(), limit));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 선택한 HF 데이터셋의 config/split 조합 — 위저드 드롭다운(split 직접 타이핑 회피).
+  app.get("/benchmarks/hf/splits", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const dataset = (req.query as Record<string, unknown>).dataset;
+    if (typeof dataset !== "string" || !dataset.trim())
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset 이 필요합니다." });
+    try {
+      gate(principal, "datasets:read");
+      return reply.send(await deps.benchmarkService.hfSplits(principal.workspace, dataset.trim()));
     } catch (err) {
       return sendError(reply, err);
     }

@@ -66,6 +66,14 @@ export const controlPlane = {
   validateDataset: <T>(auth: AuthContext, dataset: unknown) =>
     call<T>(auth, '/datasets/validate', { method: 'POST', body: JSON.stringify(dataset) }),
   listBenchmarks: <T>(auth: AuthContext) => call<T>(auth, '/benchmarks'),
+  // HF Hub 데이터셋 검색 + config/split — 위저드가 raw id 직접 입력 대신 검색/선택.
+  searchHfDatasets: <T>(auth: AuthContext, query: string, limit?: number) =>
+    call<T>(
+      auth,
+      `/benchmarks/hf/datasets?q=${encodeURIComponent(query)}${limit ? `&limit=${limit}` : ''}`
+    ),
+  hfDatasetSplits: <T>(auth: AuthContext, dataset: string) =>
+    call<T>(auth, `/benchmarks/hf/splits?dataset=${encodeURIComponent(dataset)}`),
   // 소스 미리보기(매핑 전 원본 행 + 감지된 필드) — "벤치마크 추가" 위저드.
   previewBenchmarkSource: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/benchmarks/preview', { method: 'POST', body: JSON.stringify(body) }),

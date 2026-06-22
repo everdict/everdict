@@ -49,3 +49,41 @@ export async function previewSourceAction(body: unknown): Promise<PreviewSourceR
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+export interface HfDatasetHit {
+  id: string
+  likes: number
+  gated: boolean
+}
+export interface HfSplit {
+  config: string
+  split: string
+}
+
+// HF Hub 검색 — 검색어로 데이터셋 후보를 찾는다(정확한 id 직접 입력 회피).
+export async function searchHfDatasetsAction(
+  query: string,
+  limit?: number
+): Promise<{ ok: boolean; hits?: HfDatasetHit[]; error?: string }> {
+  const ctx = await authContext()
+  try {
+    return {
+      ok: true,
+      hits: await controlPlane.searchHfDatasets<HfDatasetHit[]>(ctx, query, limit),
+    }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 선택한 HF 데이터셋의 config/split 조합 — 드롭다운용.
+export async function hfSplitsAction(
+  dataset: string
+): Promise<{ ok: boolean; splits?: HfSplit[]; error?: string }> {
+  const ctx = await authContext()
+  try {
+    return { ok: true, splits: await controlPlane.hfDatasetSplits<HfSplit[]>(ctx, dataset) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
