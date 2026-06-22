@@ -16,10 +16,11 @@ const themeScript = `(function(){try{var s=localStorage.getItem('theme');var d=s
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
-      </head>
+      {/* App Router 에서 수동 <head> 는 Next 가 주입하는 head 와 충돌해 hydration 미스매치를
+          유발 → 앱 전체 인터랙션이 죽을 수 있다. body 최상단 인라인 스크립트로 두면 콘텐츠
+          페인트 전에 실행돼 FOUC 도 막고 hydration 도 안전하다(script↔script 매칭). */}
       <body className="min-h-screen bg-background text-foreground antialiased">
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <QueryProvider>{children}</QueryProvider>
       </body>
     </html>
