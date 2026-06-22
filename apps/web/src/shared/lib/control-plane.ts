@@ -66,6 +66,9 @@ export const controlPlane = {
   validateDataset: <T>(auth: AuthContext, dataset: unknown) =>
     call<T>(auth, '/datasets/validate', { method: 'POST', body: JSON.stringify(dataset) }),
   listBenchmarks: <T>(auth: AuthContext) => call<T>(auth, '/benchmarks'),
+  // 소스 미리보기(매핑 전 원본 행 + 감지된 필드) — "벤치마크 추가" 위저드.
+  previewBenchmarkSource: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/benchmarks/preview', { method: 'POST', body: JSON.stringify(body) }),
   importBenchmark: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/benchmarks/import', { method: 'POST', body: JSON.stringify(body) }),
   listBenchmarkRecipes: <T>(auth: AuthContext) => call<T>(auth, '/benchmark-recipes'),
@@ -128,6 +131,9 @@ export const controlPlane = {
     call<T>(auth, '/runtimes', { method: 'POST', body: JSON.stringify(spec) }),
   validateRuntime: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/runtimes/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  // 연결 테스트(라이브) — 잡 없이 클러스터 도달성/인증만 확인. 자격증명은 컨트롤플레인이 시크릿에서 resolve.
+  probeRuntime: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/runtimes/probe', { method: 'POST', body: JSON.stringify(spec) }),
   getWorkspaceSettings: <T>(auth: AuthContext) => call<T>(auth, '/workspace/settings'),
   setWorkspaceSettings: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace/settings', { method: 'PUT', body: JSON.stringify(patch) }),

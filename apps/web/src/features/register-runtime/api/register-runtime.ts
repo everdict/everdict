@@ -25,6 +25,13 @@ export interface CreateRuntimeResult {
   error?: string
 }
 
+export interface ProbeRuntimeResult {
+  kind?: string
+  reachable?: boolean
+  detail?: string
+  error?: string // 프로브 호출 자체(인증/네트워크) 실패
+}
+
 // dry-run 검증: 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). authZ/검증은 컨트롤플레인이 강제.
 export async function validateRuntimeAction(spec: unknown): Promise<ValidateRuntimeResult> {
   const ctx = await authContext()
@@ -32,6 +39,16 @@ export async function validateRuntimeAction(spec: unknown): Promise<ValidateRunt
     return await controlPlane.validateRuntime<ValidateRuntimeResult>(ctx, spec)
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 연결 테스트(라이브): 잡 없이 실제 클러스터에 붙어 도달성/인증을 확인. authZ(admin)는 컨트롤플레인이 강제.
+export async function probeRuntimeAction(spec: unknown): Promise<ProbeRuntimeResult> {
+  const ctx = await authContext()
+  try {
+    return await controlPlane.probeRuntime<ProbeRuntimeResult>(ctx, spec)
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : String(e) }
   }
 }
 

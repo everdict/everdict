@@ -10,8 +10,10 @@ import { Input, Label } from '@/shared/ui/input'
 
 import {
   createRuntimeAction,
+  probeRuntimeAction,
   validateRuntimeAction,
   type CreateRuntimeResult,
+  type ProbeRuntimeResult,
   type ValidateRuntimeResult,
 } from '../api/register-runtime'
 
@@ -37,6 +39,7 @@ export function RegisterRuntimeForm() {
   const [kubeconfigSecret, setKubeconfigSecret] = useState('')
 
   const [result, setResult] = useState<ValidateRuntimeResult>()
+  const [probe, setProbe] = useState<ProbeRuntimeResult>()
   const [createError, setCreateError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -79,6 +82,14 @@ export function RegisterRuntimeForm() {
     setBusy(true)
     setCreateError(undefined)
     setResult(await validateRuntimeAction(buildSpec()))
+    setBusy(false)
+  }
+
+  async function onProbe() {
+    setBusy(true)
+    setCreateError(undefined)
+    setProbe(undefined)
+    setProbe(await probeRuntimeAction(buildSpec()))
     setBusy(false)
   }
 
@@ -301,17 +312,41 @@ export function RegisterRuntimeForm() {
       </p>
 
       {result && <ValidateBanner result={result} />}
+      {probe && <ProbeBanner probe={probe} />}
       {createError && <Callout tone="danger">{createError}</Callout>}
 
       <div className="flex gap-2">
         <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
           {busy ? '…' : '검증 (dry-run)'}
         </Button>
+        {kind !== 'local' && (
+          <Button type="button" variant="outline" onClick={onProbe} disabled={busy}>
+            {busy ? '…' : '연결 테스트'}
+          </Button>
+        )}
         <Button type="button" onClick={onCreate} disabled={busy}>
           {busy ? '처리 중…' : 'Runtime 등록'}
         </Button>
       </div>
     </div>
+  )
+}
+
+// 연결 테스트 결과 — 잡 없이 실제 클러스터에 붙어본 결과(도달성/인증).
+function ProbeBanner({ probe }: { probe: ProbeRuntimeResult }) {
+  if (probe.error) return <Callout tone="danger">연결 테스트 호출 실패: {probe.error}</Callout>
+  if (probe.reachable)
+    return (
+      <Callout tone="info">
+        <span className="font-medium">✓ 연결 성공{probe.kind ? ` · ${probe.kind}` : ''}</span>
+        {probe.detail ? <span className="ml-1 text-muted-foreground">— {probe.detail}</span> : null}
+      </Callout>
+    )
+  return (
+    <Callout tone="danger">
+      <div className="font-medium">✗ 연결 실패{probe.kind ? ` · ${probe.kind}` : ''}</div>
+      {probe.detail ? <div className="mt-1 font-mono text-xs">{probe.detail}</div> : null}
+    </Callout>
   )
 }
 
