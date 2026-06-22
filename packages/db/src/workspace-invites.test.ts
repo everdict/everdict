@@ -55,7 +55,12 @@ describe("WorkspaceInviteStore — 초대 토큰(redemption)", () => {
   it("만료된 토큰은 'expired', 알 수 없는/취소된 토큰은 'unknown'", async () => {
     const { invites } = setup();
     const past = new Date(Date.now() - 1000).toISOString();
-    const { token: expired } = await issue(invites, { workspace: "acme", role: "member", createdBy: "a", expiresAt: past });
+    const { token: expired } = await issue(invites, {
+      workspace: "acme",
+      role: "member",
+      createdBy: "a",
+      expiresAt: past,
+    });
     expect(await invites.consumeInvite(hashKey(expired), "bob")).toEqual({ ok: false, reason: "expired" });
 
     expect(await invites.consumeInvite(hashKey("inv_nope"), "bob")).toEqual({ ok: false, reason: "unknown" });

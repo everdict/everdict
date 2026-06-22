@@ -199,7 +199,12 @@ export class PgWorkspaceStore implements WorkspaceStore {
   }
 
   async listMembers(workspace: string): Promise<MemberRecord[]> {
-    const res = await this.client.query<{ subject: string; role: string; email: string | null; created_at: string | Date }>(
+    const res = await this.client.query<{
+      subject: string;
+      role: string;
+      email: string | null;
+      created_at: string | Date;
+    }>(
       "SELECT subject, role, email, created_at FROM assay_workspace_members WHERE workspace = $1 ORDER BY created_at ASC, subject ASC",
       [workspace],
     );
