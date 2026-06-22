@@ -19,6 +19,7 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `register_harness` | `harnesses:register` (admin) | register a `HarnessSpec` (immutable → `CONFLICT`) |
 | `list_datasets` | `datasets:read` (viewer+) | workspace-owned + `_shared` benchmark datasets |
 | `get_dataset` | `datasets:read` | one dataset incl. cases (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
+| `diff_datasets` | `datasets:read` | version diff (`id`, `base`, `candidate`; `latest` ok): added/removed/changed cases + meta |
 | `validate_dataset` | `datasets:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
 | `create_dataset` | `datasets:write` (member+) | register a `Dataset` (immutable → `CONFLICT`) |
 | `list_judges` | `judges:read` (viewer+) | workspace-owned + `_shared` Agent Judges (model \| harness) |

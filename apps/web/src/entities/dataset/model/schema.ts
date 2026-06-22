@@ -31,3 +31,29 @@ export const datasetSchema = z.object({
   tags: z.array(z.string()).default([]),
 })
 export type Dataset = z.infer<typeof datasetSchema>
+
+// GET /datasets/:id/diff?base&candidate 응답: 버전 간 구조적 diff(컨트롤플레인 DatasetDiff 미러).
+const fieldChangeSchema = z.object({
+  field: z.string(),
+  before: z.string(),
+  after: z.string(),
+})
+export type DatasetFieldChange = z.infer<typeof fieldChangeSchema>
+const caseRefSchema = z.object({ id: z.string(), task: z.string() })
+export const datasetDiffSchema = z.object({
+  id: z.string(),
+  base: z.string(),
+  candidate: z.string(),
+  meta: z.array(fieldChangeSchema),
+  added: z.array(caseRefSchema),
+  removed: z.array(caseRefSchema),
+  changed: z.array(z.object({ id: z.string(), changes: z.array(fieldChangeSchema) })),
+  unchanged: z.number(),
+  summary: z.object({
+    added: z.number(),
+    removed: z.number(),
+    changed: z.number(),
+    unchanged: z.number(),
+  }),
+})
+export type DatasetDiff = z.infer<typeof datasetDiffSchema>

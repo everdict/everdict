@@ -59,14 +59,30 @@ workspace-scoped reads, `datasets:write` gating, `409`/`CONFLICT` on the immutab
 | `POST /datasets/validate` (dry-run) | `validate_dataset` | `datasets:write` |
 | `GET /datasets` | `list_datasets` | `datasets:read` |
 | `GET /datasets/:id/versions/:version` | `get_dataset` | `datasets:read` |
+| `GET /datasets/:id/diff?base=&candidate=` | `diff_datasets` | `datasets:read` |
 
 `validate` is a dry-run: schema + this workspace's existing versions/conflict, no write. `version` may be
 `latest`. Other-workspace reads → `404`/`NOT_FOUND` (no existence leak). See `docs/api.md`, `docs/mcp.md`,
 `docs/web.md`, `docs/tenancy.md`.
+
+## Version diff (`diffDatasets`, `@assay/datasets`)
+Because versions are immutable, two versions of the same dataset are a reproducible pair to compare.
+`diffDatasets(base, candidate)` (pure, `@assay/core` `DatasetDiff` shape) matches cases **by case id** and reports:
+- **added** / **removed** — cases present only in candidate / only in base (`{ id, task }`).
+- **changed** — same case id, different content; each lists *which* fields differ (`task` / `env` / `graders` /
+  `image` / `timeoutSec` / `tags` / `placement`) with a `before`/`after` string (key-order-stable comparison, so
+  re-serialization isn't a false change).
+- **unchanged** — count of identical cases.
+- **meta** — dataset-level `description` / `tags` changes.
+`base`/`candidate` may be `latest`; both resolve via the `DatasetRegistry`, so a missing version or other-workspace
+read is `404`/`NOT_FOUND`. Same core, two transports (`GET /datasets/:id/diff` + `diff_datasets`).
 
 ## Web (`apps/web`)
 - **데이터셋 `/dashboard/datasets`** — owned vs shared cards with version chips (row links to detail). CTA
   role-gated off `/me` (`datasets:write`).
 - **데이터셋 등록 `/dashboard/datasets/new`** — id/version/description + cases-JSON with a **validate (dry-run)**
   step, then register (`createDatasetAction` → `POST /datasets`). viewer sees a "권한이 없습니다" notice.
-- **상세 `/dashboard/datasets/[id]`** — the latest version's cases (id · env · task · graders).
+- **상세 `/dashboard/datasets/[id]`** — a **version switcher** (`?version=`, defaults latest) shows that version's
+  cases (id · env · task · graders); a **버전 비교** link opens the diff when ≥2 versions exist.
+- **버전 diff `/dashboard/datasets/[id]/diff`** — pick base/candidate (defaults: latest ↔ previous) → added/removed
+  cases, per-case field changes (`before`/`after`), and dataset meta changes (`GET /datasets/:id/diff`).

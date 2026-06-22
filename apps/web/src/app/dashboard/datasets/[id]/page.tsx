@@ -1,9 +1,11 @@
 import Link from 'next/link'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, GitCompare } from 'lucide-react'
 
-import { datasetSchema, type Dataset } from '@/entities/dataset'
+import { VersionSwitcher } from '@/features/dataset-versions'
+import { datasetSchema, datasetsSchema, type Dataset } from '@/entities/dataset'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { sortSemverDesc } from '@/shared/lib/semver'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
@@ -35,14 +37,32 @@ function BackLink() {
   )
 }
 
-export default async function DatasetDetailPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function DatasetDetailPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>
+  searchParams: Promise<{ version?: string }>
+}) {
   const { id } = await params
+  const { version } = await searchParams
   const ctx = await authContext()
+
+  // 이 데이터셋이 가진 모든 버전(최신순) — 버전 선택기/diff 진입 노출에 사용.
+  let versions: string[] = []
+  try {
+    const summary = datasetsSchema
+      .parse(await controlPlane.listDatasets(ctx))
+      .find((d) => d.id === id)
+    if (summary) versions = sortSemverDesc(summary.versions)
+  } catch {
+    versions = []
+  }
 
   let dataset: Dataset | undefined
   let error: string | undefined
   try {
-    dataset = datasetSchema.parse(await controlPlane.getDataset(ctx, id, 'latest'))
+    dataset = datasetSchema.parse(await controlPlane.getDataset(ctx, id, version ?? 'latest'))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -64,7 +84,29 @@ export default async function DatasetDetailPage({ params }: { params: Promise<{ 
         <PageHeader
           title={dataset.id}
           description={dataset.description ?? '하니스 무관 eval 케이스 묶음'}
-          actions={<Badge tone="neutral">v{dataset.version} (latest)</Badge>}
+          actions={
+            <div className="flex items-end gap-3">
+              {versions.length > 1 ? (
+                <VersionSwitcher
+                  id={dataset.id}
+                  versions={versions}
+                  current={dataset.version}
+                  latest={versions[0]}
+                />
+              ) : (
+                <Badge tone="neutral">v{dataset.version} (latest)</Badge>
+              )}
+              {versions.length > 1 && (
+                <Link
+                  href={`/dashboard/datasets/${encodeURIComponent(dataset.id)}/diff`}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border bg-secondary/40 px-3 text-[13px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  <GitCompare className="size-3.5" />
+                  버전 비교
+                </Link>
+              )}
+            </div>
+          }
         />
       </div>
 

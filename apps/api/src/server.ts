@@ -12,7 +12,7 @@ import {
   type RuntimeSpec,
   RuntimeSpecSchema,
 } from "@assay/core";
-import { BenchmarkAdapterSpecSchema } from "@assay/datasets";
+import { BenchmarkAdapterSpecSchema, diffDatasets } from "@assay/datasets";
 import {
   type SecretStore,
   type TenantKeyStore,
@@ -551,6 +551,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return sendError(reply, err); // 없으면 NotFoundError → 404
     }
   });
+
+  // 버전 간 diff — base↔candidate 의 케이스 추가/삭제/변경 + 메타 변경. 둘 다 "latest" 가능.
+  // 불변 버전 전제(레지스트리 강제) → 같은 (id, version) 은 항상 같은 내용이라 비교가 재현 가능.
+  app.get<{ Params: { id: string }; Querystring: { base?: string; candidate?: string } }>(
+    "/datasets/:id/diff",
+    async (req, reply) => {
+      if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+      const principal = await resolvePrincipal(req, reply, deps);
+      if (!principal) return reply;
+      const { base, candidate } = req.query;
+      if (!base || !candidate)
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "base 와 candidate 쿼리 파라미터가 필요합니다." });
+      try {
+        gate(principal, "datasets:read");
+        const [baseDs, candidateDs] = await Promise.all([
+          deps.datasetRegistry.get(principal.workspace, req.params.id, base),
+          deps.datasetRegistry.get(principal.workspace, req.params.id, candidate),
+        ]);
+        return reply.send(diffDatasets(baseDs, candidateDs));
+      } catch (err) {
+        return sendError(reply, err); // 버전 없으면 404
+      }
+    },
+  );
 
   // --- benchmarks (first-party 카탈로그 → 테넌트-소유 데이터셋 인입; 유저 셀프서비스) ---
   app.get("/benchmarks", async (req, reply) => {

@@ -67,6 +67,12 @@ export const controlPlane = {
   listDatasets: <T>(auth: AuthContext) => call<T>(auth, '/datasets'),
   getDataset: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
+  // 버전 간 diff — base↔candidate 의 케이스 추가/삭제/변경 + 메타 변경. version 은 "latest" 가능.
+  diffDataset: <T>(auth: AuthContext, id: string, base: string, candidate: string) =>
+    call<T>(
+      auth,
+      `/datasets/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(base)}&candidate=${encodeURIComponent(candidate)}`
+    ),
   createDataset: <T>(auth: AuthContext, dataset: unknown) =>
     call<T>(auth, '/datasets', { method: 'POST', body: JSON.stringify(dataset) }),
   validateDataset: <T>(auth: AuthContext, dataset: unknown) =>

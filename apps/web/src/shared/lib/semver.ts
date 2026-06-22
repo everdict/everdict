@@ -37,6 +37,18 @@ export function bumpSemver(version: string, kind: BumpKind): string {
   return `${maj}.${min}.${pat + 1}`
 }
 
+// semver 내림차순 정렬(최신 먼저) — 버전 선택기/diff 피커의 표시 순서. 파싱 불가 버전은 뒤로(상대순서 유지).
+export function sortSemverDesc(versions: readonly string[]): string[] {
+  return [...versions].sort((a, b) => {
+    const pa = parse(a)
+    const pb = parse(b)
+    if (pa && pb) return cmp(pb, pa)
+    if (pa) return -1
+    if (pb) return 1
+    return 0
+  })
+}
+
 // 데이터셋 목록에서 한 id 의 기존 버전(소유 + 공유 병합, 중복 제거).
 export function versionsForId(
   list: ReadonlyArray<{ id: string; versions: string[] }>,

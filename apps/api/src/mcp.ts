@@ -8,6 +8,7 @@ import {
   type RuntimeSpec,
   RuntimeSpecSchema,
 } from "@assay/core";
+import { diffDatasets } from "@assay/datasets";
 import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@assay/db";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -197,6 +198,27 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ id, version }) =>
         run(principal, "datasets:read", async () => ok(await datasets.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "diff_datasets",
+      {
+        description:
+          "두 데이터셋 버전의 diff — 케이스 추가/삭제/변경(달라진 필드 포함) + 메타 변경. base/candidate 는 'latest' 가능. 다른 워크스페이스는 NOT_FOUND",
+        inputSchema: {
+          id: z.string(),
+          base: z.string().describe("기준 버전(예: 1.0.0 또는 latest)"),
+          candidate: z.string().describe("비교 버전(예: 1.1.0 또는 latest)"),
+        },
+      },
+      ({ id, base, candidate }) =>
+        run(principal, "datasets:read", async () => {
+          const [baseDs, candidateDs] = await Promise.all([
+            datasets.get(ws, id, base),
+            datasets.get(ws, id, candidate),
+          ]);
+          return ok(diffDatasets(baseDs, candidateDs));
+        }),
     );
 
     server.registerTool(

@@ -16,6 +16,7 @@ arrives by polling or webhook.
 | `POST` | `/datasets/validate` | dry-run: schema + existing versions/conflict, no write (`datasets:write`) |
 | `GET`  | `/datasets` | workspace-owned + `_shared` datasets (`datasets:read`) |
 | `GET`  | `/datasets/:id/versions/:version` | full `Dataset` incl. cases; `version` may be `latest` (`datasets:read`) |
+| `GET`  | `/datasets/:id/diff?base=&candidate=` | version diff: added/removed/changed cases + meta; `base`/`candidate` may be `latest` (`datasets:read`) |
 | `POST` | `/judges` | register a `JudgeSpec` (model \| harness; immutable → `409`) (`judges:write`, member+) |
 | `POST` | `/judges/validate` | dry-run: schema + existing versions/conflict, no write (`judges:write`) |
 | `GET`  | `/judges` | workspace-owned + `_shared` Agent Judges (`judges:read`) |

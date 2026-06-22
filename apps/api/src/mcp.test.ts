@@ -102,6 +102,7 @@ describe("MCP tools", () => {
       "create_invite",
       "create_judge",
       "create_runtime",
+      "diff_datasets",
       "diff_scorecards",
       "get_dataset",
       "get_judge",
@@ -212,6 +213,43 @@ describe("MCP tools", () => {
 
     const beta = await connect(deps, ["member"], "beta");
     const denied = await beta.callTool({ name: "get_dataset", arguments: { id: "smoke" } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("NOT_FOUND");
+  });
+
+  it("datasets: diff_datasets 가 두 버전의 추가/변경을 보고(BFF parity); 타 워크스페이스는 NOT_FOUND", async () => {
+    const deps = harness();
+    const acme = await connect(deps, ["member"], "acme");
+    await acme.callTool({ name: "create_dataset", arguments: { dataset: DATASET } }); // smoke 1.0.0 (c1)
+    await acme.callTool({
+      name: "create_dataset",
+      arguments: {
+        dataset: JSON.stringify({
+          id: "smoke",
+          version: "1.1.0",
+          cases: [
+            { id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t2", graders: [{ id: "steps" }] },
+            { id: "c2", env: { kind: "repo", source: { files: {} } }, task: "new", graders: [{ id: "cost" }] },
+          ],
+        }),
+      },
+    });
+
+    const diff = JSON.parse(
+      text(
+        await acme.callTool({ name: "diff_datasets", arguments: { id: "smoke", base: "1.0.0", candidate: "1.1.0" } }),
+      ),
+    );
+    expect(diff).toMatchObject({ id: "smoke", base: "1.0.0", candidate: "1.1.0" });
+    expect(diff.added.map((x: { id: string }) => x.id)).toEqual(["c2"]);
+    expect(diff.changed.map((x: { id: string }) => x.id)).toEqual(["c1"]);
+    expect(diff.summary).toEqual({ added: 1, removed: 0, changed: 1, unchanged: 0 });
+
+    const beta = await connect(deps, ["member"], "beta");
+    const denied = await beta.callTool({
+      name: "diff_datasets",
+      arguments: { id: "smoke", base: "1.0.0", candidate: "1.1.0" },
+    });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("NOT_FOUND");
   });
