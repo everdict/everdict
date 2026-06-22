@@ -14,9 +14,14 @@ describe("authz", () => {
     expect(can(p(["viewer"]), "runs:read")).toBe(true);
     expect(can(p(["viewer"]), "runs:submit")).toBe(false);
     expect(can(p(["member"]), "runs:submit")).toBe(true);
-    expect(can(p(["member"]), "harnesses:register")).toBe(false);
+    // 하니스 등록(인스턴스)·템플릿(대분류) 정의는 누구나(viewer+) — 협업 eval 콘텐츠, 역할 게이트 없음.
+    expect(can(p(["viewer"]), "harnesses:register")).toBe(true);
+    expect(can(p(["member"]), "harnesses:register")).toBe(true);
     expect(can(p(["admin"]), "harnesses:register")).toBe(true);
-    // datasets: 읽기는 viewer+, 쓰기는 member+(harnesses:register 가 admin 인 것과 구분)
+    expect(can(p(["viewer"]), "templates:write")).toBe(true);
+    expect(can(p(["member"]), "templates:write")).toBe(true);
+    expect(can(p(["admin"]), "templates:write")).toBe(true);
+    // datasets: 읽기는 viewer+, 쓰기는 member+
     expect(can(p(["viewer"]), "datasets:read")).toBe(true);
     expect(can(p(["viewer"]), "datasets:write")).toBe(false);
     expect(can(p(["member"]), "datasets:write")).toBe(true);
@@ -28,9 +33,10 @@ describe("authz", () => {
     expect(can(p(["viewer"]), "judges:read")).toBe(true);
     expect(can(p(["viewer"]), "judges:write")).toBe(false);
     expect(can(p(["member"]), "judges:write")).toBe(true);
-    // runtimes: 읽기는 viewer+, 쓰기는 admin(실행 인프라 = 실행/배치 결정)
-    expect(can(p(["member"]), "runtimes:read")).toBe(true);
-    expect(can(p(["member"]), "runtimes:write")).toBe(false);
+    // runtimes: 읽기·쓰기 모두 role 무관(등록은 누구나 — 자격증명 '값'은 secrets:write 로 분리 보호)
+    expect(can(p(["viewer"]), "runtimes:read")).toBe(true);
+    expect(can(p(["viewer"]), "runtimes:write")).toBe(true);
+    expect(can(p(["member"]), "runtimes:write")).toBe(true);
     expect(can(p(["admin"]), "runtimes:write")).toBe(true);
 
     // 멤버 조회는 viewer+, 멤버 관리(역할변경/제거/초대)는 admin 전용.
@@ -40,8 +46,9 @@ describe("authz", () => {
     expect(can(p(["admin"]), "members:write")).toBe(true);
   });
   it("authorize 는 권한 없으면 403", () => {
-    expect(() => authorize(p(["member"]), "harnesses:register")).toThrow(ForbiddenError);
-    expect(() => authorize(p(["admin"]), "harnesses:register")).not.toThrow();
+    expect(() => authorize(p(["viewer"]), "secrets:write")).toThrow(ForbiddenError); // 시크릿 값 = admin 전용
+    expect(() => authorize(p(["member"]), "runtimes:write")).not.toThrow(); // 런타임 등록 = role 무관
+    expect(() => authorize(p(["admin"]), "runtimes:write")).not.toThrow();
   });
 });
 

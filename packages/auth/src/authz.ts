@@ -2,12 +2,14 @@ import { ForbiddenError } from "@assay/core";
 import type { Principal } from "./principal.js";
 
 // 워크스페이스 내 역할 → 액션 권한. 컨트롤플레인이 엔드포인트마다 강제(authZ).
-// datasets:write 는 member+(eval 데이터는 협업 콘텐츠) — harnesses:register 가 admin 인 것과 의도적으로 구분.
+// harnesses:register(인스턴스)·templates:write(템플릿 대분류)는 누구나(viewer+) — 하니스는 협업 eval
+// 콘텐츠라 역할 게이트 없음(권한 상관없이 동등 사용).
 export type Action =
   | "runs:read"
   | "runs:submit"
   | "harnesses:read"
   | "harnesses:register"
+  | "templates:write"
   | "datasets:read"
   | "datasets:write"
   | "scorecards:read"
@@ -36,18 +38,23 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
   viewer: new Set<Action>([
     "runs:read",
     "harnesses:read",
+    "harnesses:register", // 누구나 등록 가능(역할 게이트 없음 — 협업 eval 콘텐츠)
+    "templates:write", // 템플릿(대분류) 정의도 동일 — 누구나(권한 상관없이 동등)
     "datasets:read",
     "scorecards:read",
     "judges:read",
     "models:read",
     "metrics:read",
     "runtimes:read",
+    "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관 — 모든 멤버가 자기 워크스페이스 실행 인프라를 등록(harnesses:register 와 동일)
     "members:read", // 팀(워크스페이스 멤버) 조회는 양성 → viewer+
   ]),
   member: new Set<Action>([
     "runs:read",
     "runs:submit",
     "harnesses:read",
+    "harnesses:register",
+    "templates:write",
     "datasets:read",
     "datasets:write",
     "scorecards:read",
@@ -59,6 +66,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "metrics:read",
     "metrics:write", // 메트릭 정의 = eval 콘텐츠(무엇으로 합격 판정하나) → member 가능
     "runtimes:read",
+    "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관
     "members:read",
   ]),
   admin: new Set<Action>([
@@ -66,6 +74,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runs:submit",
     "harnesses:read",
     "harnesses:register",
+    "templates:write",
     "datasets:read",
     "datasets:write",
     "scorecards:read",
@@ -77,7 +86,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "metrics:read",
     "metrics:write",
     "runtimes:read",
-    "runtimes:write", // 실행 인프라 정의 = 실행/배치 결정 → admin 전용(harnesses:register 와 동일 이유)
+    "runtimes:write", // 런타임 등록은 role 무관(viewer/member 도 보유) — 자격증명 '값'은 secrets:write(admin)로 분리 보호
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
     "secrets:write",
     "keys:read", // API 키는 발급 시 워크스페이스 admin 권한을 가짐 → 발급/취소는 admin 전용(secrets 와 동일 근거)

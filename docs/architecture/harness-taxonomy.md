@@ -93,12 +93,15 @@ the same template+pins → resolved `CommandHarnessSpec`/`ProcessHarnessSpec`. T
 
 | Action | Role | What |
 |---|---|---|
-| `templates:write` | **admin** | define/version a template **structure** (services/deps shape) — infra-shaping |
-| `harnesses:register` (instances) | **member** | register an **instance** (pins) under an existing template — CI/users |
-| `templates:read` / `harnesses:read` | viewer | read |
+| `templates:write` | **viewer+ (no gate)** | define/version a template **structure** (services/deps shape) |
+| `harnesses:register` (instances) | **viewer+ (no gate)** | register an **instance** (pins) under a template — CI/users |
+| `harnesses:read` | viewer | read |
 
-This is the concrete answer to "members should be able to register harnesses, but in exchange we need the 대분류":
-members freely register **instances** within an admin-approved template; they can't invent new topologies.
+**No role gate (권한 상관없이 동등 사용).** Harnesses — both templates (대분류) and instances — are collaborative
+eval content (like datasets/judges), not admin-gated infra. Every workspace member uses them equally: anyone can
+define a template and register instances; reads are open. (This matches `harnesses:register` already being
+viewer+ in `authz.ts`; `templates:write` joins it.) Isolation is still per-workspace — `templates:write` only
+shapes harness *structure*, never credentials (those stay `secrets:write` = admin).
 
 ## Surface — BFF↔MCP parity
 
