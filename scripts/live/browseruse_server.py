@@ -98,6 +98,29 @@ def summarize(history):
     return url, dom
 
 
+def model_price(model):
+    # USD cost 산정용 단가($/token). 1순위 LiteLLM /model/info(운영자가 프록시에 설정한 실가격),
+    # 폴백은 운영자 지정 env(BROWSERUSE_PRICE_IN/OUT — 프록시에 가격 미설정일 때 참조가격). 둘 다 없으면 0.
+    pin = float(os.environ.get("BROWSERUSE_PRICE_IN", "0") or 0)
+    pout = float(os.environ.get("BROWSERUSE_PRICE_OUT", "0") or 0)
+    try:
+        import json as _json
+
+        root = BASE_URL.rsplit("/v1", 1)[0]
+        req = urllib.request.Request(f"{root}/model/info", headers={"Authorization": f"Bearer {API_KEY}"})
+        data = _json.loads(urllib.request.urlopen(req, timeout=6).read())
+        for m in data.get("data", []):
+            if m.get("model_name") == model:
+                mi = m.get("model_info") or {}
+                ic = float(mi.get("input_cost_per_token") or 0)
+                oc = float(mi.get("output_cost_per_token") or 0)
+                if ic or oc:
+                    return ic, oc
+    except Exception:
+        pass
+    return pin, pout
+
+
 def _attr(k, v):
     if isinstance(v, bool):
         return {"key": k, "value": {"boolValue": v}}
@@ -182,12 +205,13 @@ async def run_handler(request):
             except Exception:
                 actions = []
             ptok = ctok = 0
-            cost = 0.0
             try:
                 s = await tc.get_usage_summary()
-                ptok, ctok, cost = s.total_prompt_tokens, s.total_completion_tokens, s.total_cost
+                ptok, ctok = s.total_prompt_tokens, s.total_completion_tokens
             except Exception:
                 pass
+            pin, pout = model_price(MODEL)  # 실토큰 × 설정단가 = 실 USD(단가는 LiteLLM 또는 운영자 env)
+            cost = ptok * pin + ctok * pout
 
             try:
                 emit_otlp(trace_hex, MODEL, actions, ptok, ctok, cost)

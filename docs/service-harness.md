@@ -1084,3 +1084,26 @@ on kind):
   OTLP to Jaeger's bridge IP `:4318`; the host pulls the trace from `:16686`. Same interactive task, same
   deterministic + trace grades PASS — closing the orchestrator-deploy path for a real `browser-use` harness,
   not only the local-docker backend path.
+
+Three more axes then closed it out:
+- **Both orchestrators (Nomad too).** `browseruse-topology-nomad.mjs` is the K8s script with the runtime
+  swapped for `NomadTopologyRuntime` — same backend, harness, task, env. `ensureTopology` registers the
+  front-door job, waits for the alloc to run, and discovers the dynamic `host:port`; per-pod env rides the
+  runtime's `storeEnv` (same field as K8s). The Nomad docker task reaches the host LiteLLM at `172.17.0.1:4000`
+  and emits OTLP to Jaeger at `172.17.0.5:4318` (default-bridge IPs — no `kind load` needed; Nomad's docker
+  driver uses the local image). Live: interactive form PASS, trace pulled (`llm_call=1` `gpt-5.4-mini`
+  `in=17527/out=656`, `tool_call=4`), `cost` USD computed. So the orchestrator-agnostic backend deploys +
+  drives + grades a real `browser-use` harness on **kind and Nomad** by swapping only the runtime.
+- **External real site + success rate.** `browseruse-realsite.mjs` drops the container's own form for a live
+  external site: the task navigates to `en.wikipedia.org`, searches "Web scraping", and opens the article.
+  Run N times with a stronger model (`chatgpt/gpt-5.4`) it reports a pass rate — measured **3/3 (100%)**, each
+  run a real `navigate → search → article` (5 actions), final `url = …/wiki/Web_scraping`, url-matches +
+  dom-contains PASS. Real internet, not a local stub.
+- **Real USD cost (③).** `browseruse_server.py` now computes `cost = real_tokens × price/token`, where the
+  price comes from LiteLLM `/model/info` (the operator's configured price) and falls back to an operator-set
+  env (`BROWSERUSE_PRICE_IN/OUT`). It emits that USD on the `llm_call` span's `gen_ai.usage.cost`, so the
+  `cost` grader sums **real USD** off the pulled trace. Honest caveat: these proxy models have **no price
+  configured in LiteLLM** (`/model/info` returns 0), so the runs use an operator-supplied *reference* price
+  (`$0.15/$0.60` per 1M tokens) — the **tokens are real**, the price is an operator input (exactly how cost
+  works in production), the USD is real arithmetic (e.g. Nomad run `usd=0.00302265`; Wikipedia runs
+  `$0.0060–0.0079`). Not faked: when the operator configures real LiteLLM pricing, that value is used instead.
