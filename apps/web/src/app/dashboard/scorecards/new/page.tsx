@@ -4,6 +4,7 @@ import { RunScorecardForm } from '@/features/run-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema } from '@/entities/judge'
+import { metricsSchema } from '@/entities/metric'
 import { runtimesSchema } from '@/entities/runtime'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -21,12 +22,14 @@ export default async function NewScorecardPage() {
   let datasets: { id: string }[] = []
   let harnesses: { id: string }[] = []
   let judges: { id: string }[] = []
+  let metrics: { id: string }[] = []
   let runtimes: { id: string }[] = []
   if (allowed) {
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
       judges = judgesSchema.parse(await controlPlane.listJudges(ctx))
+      metrics = metricsSchema.parse(await controlPlane.listMetrics(ctx))
       runtimes = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
     } catch {
       // 목록 실패해도 폼은 텍스트 입력으로 동작
@@ -51,6 +54,7 @@ export default async function NewScorecardPage() {
             datasets={datasets}
             harnesses={harnesses}
             judges={judges}
+            metrics={metrics}
             runtimes={runtimes}
           />
         </Card>

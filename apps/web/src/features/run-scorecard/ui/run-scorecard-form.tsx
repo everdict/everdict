@@ -24,16 +24,19 @@ export function RunScorecardForm({
   datasets,
   harnesses,
   judges,
+  metrics,
   runtimes,
 }: {
   datasets: { id: string }[]
   harnesses: { id: string }[]
   judges: { id: string }[]
+  metrics: { id: string }[]
   runtimes: { id: string }[]
 }) {
   const router = useRouter()
   const [serverError, setServerError] = useState<string>()
   const [judgeIds, setJudgeIds] = useState<string[]>([])
+  const [metricIds, setMetricIds] = useState<string[]>([])
   const {
     register,
     handleSubmit,
@@ -51,7 +54,7 @@ export function RunScorecardForm({
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const res = await runScorecardAction({ ...values, judgeIds })
+    const res = await runScorecardAction({ ...values, judgeIds, metricIds })
     if (res.ok && res.id) router.push(`/dashboard/scorecards/${res.id}`)
     else setServerError(res.error ?? '실행 실패')
   }
@@ -118,6 +121,28 @@ export function RunScorecardForm({
                   }
                 />
                 {j.id}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {metrics.length > 0 && (
+        <div className="space-y-1.5">
+          <Label>메트릭 (선택 — 결과 점수 위 합격규칙 적용)</Label>
+          <div className="flex flex-wrap gap-3 rounded-lg border border-border p-3 text-sm">
+            {metrics.map((m) => (
+              <label key={m.id} className="flex items-center gap-1.5">
+                <input
+                  type="checkbox"
+                  checked={metricIds.includes(m.id)}
+                  onChange={(e) =>
+                    setMetricIds(
+                      e.target.checked ? [...metricIds, m.id] : metricIds.filter((x) => x !== m.id)
+                    )
+                  }
+                />
+                {m.id}
               </label>
             ))}
           </div>

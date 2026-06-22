@@ -11,6 +11,10 @@ export type WebAction =
   | 'scorecards:run'
   | 'judges:read'
   | 'judges:write'
+  | 'models:read'
+  | 'models:write'
+  | 'metrics:read'
+  | 'metrics:write'
   | 'runtimes:read'
   | 'runtimes:write'
   | 'secrets:read'
@@ -27,6 +31,8 @@ const PERMS: Record<string, WebAction[]> = {
     'datasets:read',
     'scorecards:read',
     'judges:read',
+    'models:read',
+    'metrics:read',
     'runtimes:read',
   ],
   member: [
@@ -39,6 +45,10 @@ const PERMS: Record<string, WebAction[]> = {
     'scorecards:run',
     'judges:read',
     'judges:write',
+    'models:read',
+    'models:write',
+    'metrics:read',
+    'metrics:write',
     'runtimes:read',
   ],
   admin: [
@@ -52,6 +62,10 @@ const PERMS: Record<string, WebAction[]> = {
     'scorecards:run',
     'judges:read',
     'judges:write',
+    'models:read',
+    'models:write',
+    'metrics:read',
+    'metrics:write',
     'runtimes:read',
     'runtimes:write', // 실행 인프라 정의 = admin
     'secrets:read', // 시크릿 관리 = admin

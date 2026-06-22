@@ -11,6 +11,7 @@ export interface RunScorecardInput {
   harnessId: string
   harnessVersion: string
   judgeIds: string[]
+  metricIds: string[]
   runtime: string
   judgeModel?: string // inline judge grader 채점 모델(예: gpt-5.4-mini) — os-use 스크린샷 judge 등. 미지정이면 워크스페이스 기본.
 }
@@ -29,6 +30,7 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     judges: input.judgeIds.map((id) => ({ id, version: 'latest' })),
+    metrics: input.metricIds.map((id) => ({ id, version: 'latest' })),
     ...(input.runtime ? { runtime: input.runtime } : {}),
     ...(input.judgeModel ? { judge: { provider: 'openai', model: input.judgeModel } } : {}),
   }
