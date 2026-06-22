@@ -204,6 +204,15 @@ body {
   border-color: var(--color-border);
 }
 
+/* 클릭 가능한 컨트롤은 포인터 커서 — 브라우저/Tailwind preflight 기본은 화살표라 버튼이
+   '안 눌리는 것처럼' 보인다. Linear 처럼 버튼/role=button 에 명시적으로 pointer 를 준다. */
+button:not(:disabled),
+[role='button']:not([aria-disabled='true']),
+label[for],
+summary {
+  cursor: pointer;
+}
+
 html {
   scroll-behavior: smooth;
 }
