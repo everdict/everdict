@@ -39,4 +39,36 @@ describe("InMemoryWorkspaceStore — 멤버십", () => {
     expect(await store.roleFor("a", "stranger")).toBeUndefined();
     expect(await store.roleFor("nope", "alice")).toBeUndefined();
   });
+
+  it("listMembers 는 멤버를 역할·email 과 함께 가입순으로 돌려준다", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.create({ id: "acme", name: "Acme", owner: "alice" });
+    await store.ensureMembership("acme", "bob", "member", "bob@corp.com");
+    const members = await store.listMembers("acme");
+    expect(members.map((m) => m.subject)).toEqual(["alice", "bob"]); // 가입순
+    expect(members.find((m) => m.subject === "bob")).toMatchObject({ role: "member", email: "bob@corp.com" });
+    expect(members.find((m) => m.subject === "alice")?.email).toBeUndefined();
+  });
+
+  it("ensureMembership 의 email 은 COALESCE — null 로 기존값을 덮어쓰지 않고 role 도 안 건드린다", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.ensureMembership("acme", "bob", "member", "bob@corp.com");
+    await store.ensureMembership("acme", "bob", "admin"); // email 없음 + role 변경 시도
+    const [bob] = await store.listMembers("acme");
+    expect(bob?.email).toBe("bob@corp.com"); // 기존 email 보존
+    expect(bob?.role).toBe("member"); // role 은 부트스트랩으로 안 바뀜
+  });
+
+  it("setRole 은 기존 멤버만 변경(없으면 false), removeMember 는 멱등", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.create({ id: "acme", name: "Acme", owner: "alice" });
+    await store.ensureMembership("acme", "bob", "viewer");
+    expect(await store.setRole("acme", "bob", "member")).toBe(true);
+    expect(await store.roleFor("acme", "bob")).toBe("member");
+    expect(await store.setRole("acme", "stranger", "admin")).toBe(false); // 비멤버 → 생성 안 함
+    expect(await store.roleFor("acme", "stranger")).toBeUndefined();
+    await store.removeMember("acme", "bob");
+    expect(await store.roleFor("acme", "bob")).toBeUndefined();
+    await store.removeMember("acme", "bob"); // 멱등 — 다시 호출해도 무탈
+  });
 });

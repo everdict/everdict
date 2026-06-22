@@ -57,6 +57,7 @@ export {
 export {
   type WorkspaceRecord,
   type WorkspaceWithRole,
+  type MemberRecord,
   type WorkspaceStore,
   InMemoryWorkspaceStore,
   PgWorkspaceStore,
