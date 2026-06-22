@@ -64,7 +64,7 @@ export default async function Home() {
           Agent harness evaluation runtime
         </span>
 
-        <h1 className="font-display text-5xl font-[560] leading-[1.06] tracking-[-0.025em] text-balance sm:text-6xl">
+        <h1 className="font-display text-5xl font-[560] leading-[1.06] tracking-[-0.025em] text-balance break-keep sm:text-6xl">
           하니스를 등록하고, 평가를 돌리고,
           <br className="hidden sm:block" />{' '}
           <span className="text-primary">테넌트별 스코어</span>를 본다.
