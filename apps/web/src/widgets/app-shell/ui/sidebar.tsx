@@ -2,32 +2,12 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import {
-  ChevronsUpDown,
-  FlaskConical,
-  LogIn,
-  LogOut,
-  Menu,
-  Moon,
-  Search,
-  Settings,
-  Sun,
-  UserCog,
-  X,
-} from 'lucide-react'
+import { usePathname } from 'next/navigation'
+import { FlaskConical, Menu, Search, X } from 'lucide-react'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
 import type { Workspace } from '@/entities/workspace'
-import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
-import { Avatar } from '@/shared/ui/avatar'
-import {
-  DropdownItem,
-  DropdownLabel,
-  DropdownMenu,
-  DropdownSeparator,
-} from '@/shared/ui/dropdown-menu'
 import { Kbd } from '@/shared/ui/kbd'
 
 import { NAV_SECTIONS } from './nav-config'
@@ -48,16 +28,6 @@ function openCommandPalette() {
 
 function isMac() {
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
-}
-
-function setTheme(dark: boolean) {
-  document.documentElement.classList.toggle('dark', dark)
-  document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
-  try {
-    localStorage.setItem('theme', dark ? 'dark' : 'light')
-  } catch {
-    /* localStorage 차단 환경 */
-  }
 }
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
@@ -112,98 +82,29 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
-function UserMenu({
-  subject,
-  roles,
-  authed,
-  showLogin,
-}: {
-  subject: string
-  roles: string[]
-  authed: boolean
-  showLogin: boolean
-}) {
-  const router = useRouter()
-  const isDark =
-    typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
-  return (
-    <DropdownMenu
-      align="start"
-      side="top"
-      contentClassName="left-0 right-0"
-      trigger={({ toggle }) => (
-        <button
-          type="button"
-          onClick={toggle}
-          className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
-        >
-          <Avatar name={subject} size="lg" />
-          <span className="min-w-0 flex-1">
-            <span className="block truncate text-[13px] font-[510] text-foreground">{subject}</span>
-            <span className="block truncate text-[11px] text-muted-foreground">
-              {roles.length > 0 ? roles.join(' · ') : authed ? '인증됨' : 'dev'}
-            </span>
-          </span>
-          <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
-        </button>
-      )}
-    >
-      <DropdownLabel>내 계정</DropdownLabel>
-      <DropdownItem icon={<UserCog />} onSelect={() => router.push('/dashboard/account')}>
-        계정 설정
-      </DropdownItem>
-      {can(roles, 'settings:read') && (
-        <DropdownItem icon={<Settings />} onSelect={() => router.push('/dashboard/settings')}>
-          워크스페이스 설정
-        </DropdownItem>
-      )}
-      <DropdownItem
-        icon={isDark ? <Sun /> : <Moon />}
-        onSelect={() => setTheme(!document.documentElement.classList.contains('dark'))}
-      >
-        테마 전환
-      </DropdownItem>
-      {showLogin && (
-        <>
-          <DropdownSeparator />
-          {authed ? (
-            <DropdownItem
-              tone="danger"
-              icon={<LogOut />}
-              onSelect={() => {
-                window.location.href = '/api/auth/signout'
-              }}
-            >
-              로그아웃
-            </DropdownItem>
-          ) : (
-            <DropdownItem
-              icon={<LogIn />}
-              onSelect={() => {
-                window.location.href = '/api/auth/signin'
-              }}
-            >
-              로그인
-            </DropdownItem>
-          )}
-        </>
-      )}
-    </DropdownMenu>
-  )
-}
-
 function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () => void }) {
   const mac = isMac()
   return (
     <div className="flex h-full flex-col gap-3 px-3 py-3.5">
-      <div className="flex items-center gap-2 px-1">
+      <Link
+        href="/dashboard"
+        onClick={onNavigate}
+        className="flex items-center gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-accent/50"
+      >
         <span className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_4px_12px_-4px_var(--primary)]">
           <FlaskConical className="size-[16px]" />
         </span>
         <span className="text-[15px] font-[600] tracking-[-0.01em]">Assay</span>
-      </div>
+      </Link>
 
-      <WorkspaceSwitcher current={props.workspace} workspaces={props.workspaces} />
+      <WorkspaceSwitcher
+        current={props.workspace}
+        workspaces={props.workspaces}
+        subject={props.subject}
+        roles={props.roles}
+        authed={props.authed}
+        showLogin={props.showLogin}
+      />
 
       <button
         type="button"
@@ -217,15 +118,6 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
 
       <div className="-mr-1 flex-1 overflow-y-auto pr-1">
         <NavLinks onNavigate={onNavigate} />
-      </div>
-
-      <div className="border-t border-border pt-2">
-        <UserMenu
-          subject={props.subject}
-          roles={props.roles}
-          authed={props.authed}
-          showLogin={props.showLogin}
-        />
       </div>
     </div>
   )
@@ -245,9 +137,9 @@ export function Sidebar(props: SidebarProps) {
         >
           <Menu className="size-[18px]" />
         </button>
-        <span className="flex items-center gap-1.5 text-[14px] font-[600] tracking-tight">
+        <Link href="/dashboard" className="flex items-center gap-1.5 text-[14px] font-[600] tracking-tight">
           <FlaskConical className="size-4 text-primary" /> Assay
-        </span>
+        </Link>
         <button
           type="button"
           aria-label="검색"
