@@ -1,0 +1,11 @@
+{
+  "kind": "command",
+  "category": "desktop",
+  "id": "desktop-osworld-agent",
+  "version": "1",
+  "workDir": "/tmp",
+  "env": { "DISPLAY": ":99" },
+  "setup": [],
+  "command": "node /agent-osworld.cjs {{task}}",
+  "trace": { "kind": "none" }
+}

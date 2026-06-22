@@ -1,0 +1,6 @@
+{
+  "template": { "id": "desktop-ssh-settings-agent", "version": "1" },
+  "id": "desktop-ssh-settings-agent",
+  "version": "1.0.0",
+  "pins": {}
+}

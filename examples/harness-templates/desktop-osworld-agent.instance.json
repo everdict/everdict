@@ -1,0 +1,6 @@
+{
+  "template": { "id": "desktop-osworld-agent", "version": "1" },
+  "id": "desktop-osworld-agent",
+  "version": "1.0.0",
+  "pins": {}
+}
