@@ -93,3 +93,24 @@ export const scorecardDiffSchema = z.object({
   improvements: z.array(caseDeltaSchema),
 })
 export type ScorecardDiff = z.infer<typeof scorecardDiffSchema>
+
+// GET /scorecards/trend 응답: 한 (dataset, metric) 의 시간순 스코어카드 + baseline 대비 회귀.
+export const trendPointSchema = z.object({
+  scorecardId: z.string(),
+  harness: z.string(),
+  createdAt: z.string(),
+  mean: z.number().nullable(),
+  passRate: z.number().nullable(),
+  score: z.number().nullable(),
+  deltaVsBaseline: z.number().nullable(),
+  regressed: z.boolean(),
+})
+export type TrendPoint = z.infer<typeof trendPointSchema>
+
+export const scorecardTrendSchema = z.object({
+  dataset: z.string(),
+  metric: z.string(),
+  baseline: z.string(),
+  points: z.array(trendPointSchema),
+})
+export type ScorecardTrend = z.infer<typeof scorecardTrendSchema>

@@ -35,6 +35,12 @@ export default async function ScorecardsPage() {
         actions={
           <div className="flex gap-2">
             <Link
+              href="/dashboard/scorecards/trend"
+              className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+            >
+              추이
+            </Link>
+            <Link
               href="/dashboard/scorecards/compare"
               className={buttonVariants({ size: 'sm', variant: 'secondary' })}
             >

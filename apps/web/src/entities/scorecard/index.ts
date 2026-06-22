@@ -7,10 +7,14 @@ export {
   scorecardsSchema,
   caseDeltaSchema,
   scorecardDiffSchema,
+  trendPointSchema,
+  scorecardTrendSchema,
   type ScorecardStatus,
   type MetricSummary,
   type ScorecardRecord,
   type CaseDelta,
   type ScorecardDiff,
+  type TrendPoint,
+  type ScorecardTrend,
 } from './model/schema'
 export { caseVerdict, trackOf, casePass } from './model/verdict'

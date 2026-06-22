@@ -74,6 +74,17 @@ export const controlPlane = {
       auth,
       `/scorecards/diff?baseline=${encodeURIComponent(baseline)}&candidate=${encodeURIComponent(candidate)}`
     ),
+  // 기간 트렌드 / 회귀-오버-타임: 한 (dataset, metric) 의 스코어카드 시계열 + baseline 대비 회귀.
+  trendScorecards: <T>(
+    auth: AuthContext,
+    params: { dataset: string; metric?: string; harness?: string; baseline?: string }
+  ) => {
+    const q = new URLSearchParams({ dataset: params.dataset })
+    if (params.metric) q.set('metric', params.metric)
+    if (params.harness) q.set('harness', params.harness)
+    if (params.baseline) q.set('baseline', params.baseline)
+    return call<T>(auth, `/scorecards/trend?${q.toString()}`)
+  },
   listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
