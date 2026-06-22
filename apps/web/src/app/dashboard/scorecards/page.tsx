@@ -6,7 +6,6 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { StatusPill } from '@/shared/ui/status-pill'
@@ -70,34 +69,34 @@ export default async function ScorecardsPage() {
           hint="member 이상이면 '스코어카드 실행'으로 데이터셋을 하니스에 돌리거나, API/MCP(run_scorecard)로 실행하세요."
         />
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-2">
           {scorecards.map((s) => (
-            <Link key={s.id} href={`/dashboard/scorecards/${encodeURIComponent(s.id)}`}>
-              <Card className="transition-colors hover:border-primary/40">
-                <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5">
-                  <div className="space-y-1">
-                    <div className="font-mono text-sm font-medium">
-                      {s.dataset.id}
-                      <span className="text-muted-foreground">@{s.dataset.version}</span>
-                      <span className="px-2 text-muted-foreground">→</span>
-                      {s.harness.id}
-                      <span className="text-muted-foreground">@{s.harness.version}</span>
-                    </div>
-                    <div className="flex flex-wrap gap-1">
-                      {(s.summary ?? []).map((m) => (
-                        <code
-                          key={m.metric}
-                          className="rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
-                        >
-                          {m.metric} {m.mean.toFixed(2)}
-                          {m.passRate != null ? ` · ${pct(m.passRate)}` : ''}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
-                  <StatusPill status={s.status} />
-                </CardContent>
-              </Card>
+            <Link
+              key={s.id}
+              href={`/dashboard/scorecards/${encodeURIComponent(s.id)}`}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+            >
+              <div className="min-w-0 space-y-1.5">
+                <div className="flex flex-wrap items-center gap-x-1 font-mono text-[13px] font-[510]">
+                  {s.dataset.id}
+                  <span className="text-faint">@{s.dataset.version}</span>
+                  <span className="px-1 text-muted-foreground">→</span>
+                  {s.harness.id}
+                  <span className="text-faint">@{s.harness.version}</span>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                  {(s.summary ?? []).map((m) => (
+                    <code
+                      key={m.metric}
+                      className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground"
+                    >
+                      <span className="text-faint">{m.metric}</span> {m.mean.toFixed(2)}
+                      {m.passRate != null ? ` · ${pct(m.passRate)}` : ''}
+                    </code>
+                  ))}
+                </div>
+              </div>
+              <StatusPill status={s.status} />
             </Link>
           ))}
         </div>

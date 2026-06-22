@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Plus } from 'lucide-react'
 
 import { RunsTable } from '@/widgets/runs-table'
 import { runsSchema } from '@/entities/run'
@@ -29,7 +30,7 @@ export default async function RunsPage() {
         actions={
           can(principal?.roles, 'runs:submit') ? (
             <Link href="/dashboard/runs/new" className={buttonVariants({ size: 'sm' })}>
-              새 run
+              <Plus className="size-4" />새 Run
             </Link>
           ) : null
         }
