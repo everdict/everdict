@@ -97,6 +97,17 @@ describe("oidcAuthenticator (Keycloak JWT)", () => {
     expect(await auth.authenticate(wrong)).toBeUndefined();
     expect(await auth.authenticate("ak_key")).toBeUndefined(); // 키는 무시
   });
+
+  it("workspace 클레임/그룹이 없어도 유효한 토큰은 인증한다(workspace=''; 멤버십이 SSOT)", async () => {
+    const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
+    const token = await mint({ realm_access: { roles: ["member"] } }); // workspace 클레임 없음
+    expect(await auth.authenticate(token)).toMatchObject({
+      subject: "user-1",
+      workspace: "", // 아직 워크스페이스 없음 → 부트스트랩/온보딩 대상(401 아님)
+      roles: ["member"],
+      via: "oidc",
+    });
+  });
 });
 
 describe("compositeAuthenticator", () => {

@@ -222,6 +222,24 @@ describe("API — workspaces (멤버십: 생성/전환/목록)", () => {
     await app.close();
   });
 
+  it("workspace 클레임이 없는 토큰(외부 Keycloak)도 401 이 아니라 워크스페이스 없이 인증되고, 생성하면 채워진다", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"], "") });
+    const h = { authorization: "Bearer x" };
+    // 인증 통과(401 아님), 아직 워크스페이스 없음 → 온보딩 대상.
+    const me = await app.inject({ method: "GET", url: "/me", headers: h });
+    expect(me.statusCode).toBe(200);
+    expect(me.json().workspace).toBe("");
+    expect(me.json().workspaces).toEqual([]);
+    // 첫 워크스페이스 생성 → admin 멤버십 생기고 목록에 보인다.
+    const created = (
+      await app.inject({ method: "POST", url: "/workspaces", headers: h, payload: { name: "First" } })
+    ).json();
+    expect(created.role).toBe("admin");
+    const list = (await app.inject({ method: "GET", url: "/workspaces", headers: h })).json();
+    expect(list.map((w: { id: string }) => w.id)).toContain(created.id);
+    await app.close();
+  });
+
   it("명시한 id 가 이미 있으면 409", async () => {
     const { app } = server();
     const h = { "x-assay-tenant": "acme" };

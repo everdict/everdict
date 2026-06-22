@@ -10,7 +10,9 @@ export type AuthContext = ({ bearer: string } | { devTenant: string }) & { works
 
 function authHeaders(auth: AuthContext): Record<string, string> {
   const headers: Record<string, string> =
-    'bearer' in auth ? { authorization: `Bearer ${auth.bearer}` } : { 'x-assay-tenant': auth.devTenant }
+    'bearer' in auth
+      ? { authorization: `Bearer ${auth.bearer}` }
+      : { 'x-assay-tenant': auth.devTenant }
   if (auth.workspace) headers['x-assay-workspace'] = auth.workspace
   return headers
 }

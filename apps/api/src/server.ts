@@ -116,23 +116,34 @@ async function resolveIdentity(
 // 활성 워크스페이스 해석: 멤버십 스토어가 있으면 토큰/dev 기본 워크스페이스를 멤버십으로 부트스트랩하고,
 // x-assay-workspace 헤더가 가리키는 워크스페이스의 멤버이면 그곳으로 전환(roles 도 멤버십 역할로 재해석).
 // 비멤버 워크스페이스 요청은 403 이 아니라 기본 워크스페이스로 폴백한다(스테일 선택에도 격리 안전 + UX 견고).
+// base.workspace 가 빈 문자열(외부 Keycloak: workspace 클레임 없음)이면 — 쿠키가 가리키는 멤버 워크스페이스로
+// 전환하고, 없으면 workspace="" 그대로 둔다(아직 멤버십 없음 → /me.workspaces=[] → 웹 온보딩). 401 아님.
 // 스토어가 없으면 기존 단일-워크스페이스 동작 그대로(하위호환).
 async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: ServerDeps): Promise<Principal> {
   const store = deps.workspaceStore;
-  if (!store || !base.workspace) return base;
-  let baseRole = await store.roleFor(base.workspace, base.subject);
-  if (!baseRole) {
-    const seed = base.roles[0] ?? "member";
-    await store.ensureMembership(base.workspace, base.subject, seed);
-    baseRole = seed;
+  if (!store) return base;
+  const subject = base.subject;
+
+  // 토큰/dev 기본 워크스페이스가 있으면 멤버십으로 (없을 때만) 부트스트랩.
+  let baseRole: string | undefined;
+  if (base.workspace) {
+    baseRole = await store.roleFor(base.workspace, subject);
+    if (!baseRole) {
+      baseRole = base.roles[0] ?? "member";
+      await store.ensureMembership(base.workspace, subject, baseRole);
+    }
   }
+
+  // x-assay-workspace 헤더(웹의 활성 워크스페이스 쿠키)가 다른 워크스페이스를 가리키고 그 멤버면 전환.
   const header = (req.headers as Record<string, unknown>)["x-assay-workspace"];
   const requested = typeof header === "string" && header.length > 0 ? header : base.workspace;
-  if (requested !== base.workspace) {
-    const role = await store.roleFor(requested, base.subject);
+  if (requested && requested !== base.workspace) {
+    const role = await store.roleFor(requested, subject);
     if (role) return { ...base, workspace: requested, roles: [role] };
   }
-  return { ...base, roles: [baseRole] };
+
+  // 기본 워크스페이스로(있으면 멤버십 역할). 없으면 workspace="" 그대로(온보딩 대상).
+  return base.workspace ? { ...base, roles: [baseRole as string] } : base;
 }
 
 // 인증 + 활성 워크스페이스까지 해석한 최종 Principal(모든 휴먼/HTTP 라우트가 사용).

@@ -54,8 +54,11 @@ export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
           issuer: opts.issuer,
           ...(opts.audience ? { audience: opts.audience } : {}),
         });
-        const workspace = extractWorkspace(payload as Record<string, unknown>, workspaceClaim, groupPrefix);
-        if (!workspace) return undefined;
+        // workspace 클레임/그룹이 없어도(예: 외부 Keycloak 에 workspace 매퍼가 없는 경우) 토큰이 유효하면 인증한다.
+        // 워크스페이스는 self-serve 멤버십이 SSOT 이므로, 클레임 없는 사용자는 workspace="" (아직 없음)로 두고
+        // apps/api 의 멤버십 해석(부트스트랩) + 웹 온보딩(첫 워크스페이스 생성)이 채운다.
+        // fail-closed 는 *검증 불가* 토큰(서명/issuer/audience/만료 실패)에만 적용 — 그건 아래 catch 가 undefined 로.
+        const workspace = extractWorkspace(payload as Record<string, unknown>, workspaceClaim, groupPrefix) ?? "";
         return {
           subject: String(payload.sub ?? ""),
           workspace,
