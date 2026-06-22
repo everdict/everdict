@@ -1130,3 +1130,26 @@ Then product-shaped it across three more axes (all live):
   include `steps`/`cost` — and the trace timeline of `llm_call`/`tool_call` events), and the scorecard
   per-case card shows the final URL. The run/scorecard entity schemas gained optional `url`/`dom` on the
   snapshot; `apps/web` stays on prettier+eslint (tsc + eslint green).
+
+Then closed the loop on three fronts (all live):
+- **Web rendering, full-stack screenshot.** `web-seed-server.mjs` boots the **real** control-plane HTTP
+  surface (`buildServer` + `InMemoryRunStore`/`InMemoryScorecardStore`) seeded with a representative
+  `browser-use` run + scorecard (values from this session's live runs), and the real `apps/web` dashboard (dev
+  auth: `KEYCLOAK_CLIENT_ID=` empty → `keycloakConfigured=false`) renders it. Captured screenshots of
+  `/dashboard/runs/:id` (scores answer-match/steps/cost, the `llm_call → navigate/input/click/done → message`
+  trace timeline, and the **browser snapshot: final URL + DOM excerpt**) and `/dashboard/scorecards/:id`
+  (per-metric aggregate + per-case `browser` badge + final URL). The render consumes exactly the shape the
+  live `CaseResult`s produce.
+- **NetworkPolicy *enforcement* (Calico).** `browseruse-isolation-np.mjs` runs the two-tenant deploy on the
+  Calico cluster `kind-assay-np` (vs `kindnet` which only *applies* policy). Live: `acme`/`globex` each in
+  their own namespace and driving PASS, then a curl pod proves enforcement — `acme → acme` (same-ns) =
+  **REACHABLE**, `acme → globex` `browseruse-agent` service (cross-tenant) = **BLOCKED**. The tenant boundary
+  is real at the network layer, not just declared.
+- **WebVoyager benchmark adapter, live.** `importWebVoyager` (already in `@assay/datasets`) maps a
+  WebVoyager-format sample (`examples/benchmarks/webvoyager-sample.jsonl`: `web_name/ques/web/answer`) into
+  `browser` cases (`task=ques`, `env.startUrl=web`, graders `answer-match`/`steps`/`judge`).
+  `browseruse-webvoyager.mjs` runs them through the real `browser-use` harness → `Scorecard`. To grade the
+  answer, `browseruse_server.py` now also emits a **message span** (`output.value` = the agent's final answer)
+  so `spansToTraceEvents` produces an assistant message and `answer-match` reads it off the pulled trace. Live:
+  3/3 answer-match pass (Web scraping / Example Domain / Vector database), `summarizeScorecard` reporting the
+  pass rate + mean steps. OSWorld (desktop) and now WebVoyager (web), both live through `browser-use`.

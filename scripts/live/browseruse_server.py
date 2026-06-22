@@ -143,9 +143,10 @@ def _span(trace_hex, name, start_ns, end_ns, attrs):
     }
 
 
-def emit_otlp(trace_hex, model, actions, ptok, ctok, cost):
-    # 실 토큰사용량 → llm_call 스팬 1개(gen_ai.*), 실 액션열 → 액션당 tool_call 스팬(gen_ai.tool.name).
-    # spansToTraceEvents 가 전자→llm_call(costGrader), 후자→tool_call(stepsGrader) 로 매핑.
+def emit_otlp(trace_hex, model, actions, ptok, ctok, cost, result=""):
+    # 실 토큰사용량 → llm_call 스팬 1개(gen_ai.*), 실 액션열 → 액션당 tool_call 스팬(gen_ai.tool.name),
+    # 최종 답 → message 스팬(output.value). spansToTraceEvents 가 각각 llm_call(costGrader)/tool_call(stepsGrader)/
+    # message(answer-match grader) 로 매핑 — WebVoyager 류 정답대조 채점이 trace 의 최종 답을 본다.
     now = time.time_ns()
     spans = [
         _span(
@@ -161,6 +162,9 @@ def emit_otlp(trace_hex, model, actions, ptok, ctok, cost):
     for i, name in enumerate(actions):
         s = now + (i + 1) * 1_000_000
         spans.append(_span(trace_hex, name, s, s + 500_000, [_attr("gen_ai.tool.name", name)]))
+    if result:
+        e = now + (len(actions) + 1) * 1_000_000
+        spans.append(_span(trace_hex, "browser-use answer", e, e + 500_000, [_attr("output.value", str(result))]))
     payload = {
         "resourceSpans": [
             {
@@ -214,7 +218,7 @@ async def run_handler(request):
             cost = ptok * pin + ctok * pout
 
             try:
-                emit_otlp(trace_hex, MODEL, actions, ptok, ctok, cost)
+                emit_otlp(trace_hex, MODEL, actions, ptok, ctok, cost, result)
             except Exception as e:  # noqa: BLE001
                 _last["error"] = f"otlp emit 실패(채점은 진행): {e}"
 

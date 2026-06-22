@@ -1,0 +1,3 @@
+{"web_name":"Wikipedia","id":"wiki--0","ques":"Search Wikipedia for 'Web scraping' and open the article. Report the exact article title.","web":"https://en.wikipedia.org","answer":"Web scraping"}
+{"web_name":"Example","id":"example--0","ques":"Report the main heading shown on the page.","web":"https://example.com","answer":"Example Domain"}
+{"web_name":"Wikipedia","id":"wiki--1","ques":"Search Wikipedia for 'Vector database' and open the article. Report the exact article title.","web":"https://en.wikipedia.org","answer":"Vector database"}
