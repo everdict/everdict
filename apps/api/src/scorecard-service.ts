@@ -20,7 +20,15 @@ import type { ScorecardRecord, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
 import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
-import { type Dispatch, type ScorecardDiff, diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
+import {
+  type Dispatch,
+  type ScorecardDiff,
+  type ScorecardTrend,
+  diffScorecards,
+  runSuite,
+  summarizeScorecard,
+  trendSeries,
+} from "@assay/suite";
 import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { z } from "zod";
 import type { JudgeRunner } from "./judge-runner.js";
@@ -212,6 +220,16 @@ export class ScorecardService {
     const baseline = await this.requireSucceeded(tenant, baselineId);
     const candidate = await this.requireSucceeded(tenant, candidateId);
     return diffScorecards(baseline, candidate);
+  }
+
+  // 기간 트렌드 / 회귀-오버-타임 — 한 (dataset, metric) 의 스코어카드들을 시간순으로 늘어놓고 baseline 대비 회귀를 표시.
+  // 목록(경량 summary)만으로 계산 — 무거운 트레이스 불필요. ScorecardRecord 가 TrendCard 를 구조적으로 만족.
+  async trend(
+    tenant: string,
+    opts: { datasetId: string; metric: string; harnessId?: string; from?: string; to?: string; baseline?: string },
+  ): Promise<ScorecardTrend> {
+    const records = await this.deps.store.list(tenant);
+    return trendSeries(records, opts);
   }
 
   // 워크스페이스 스코프 + 완료(scorecard 존재) 보장. 없으면 404(존재 누출 금지), 미완료면 400.

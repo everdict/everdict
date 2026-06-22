@@ -865,6 +865,35 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
     await app.close();
   });
 
+  it("trend: 한 dataset 의 스코어카드 시계열(시간순 + baseline 대비 회귀); dataset 누락 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const runOne = async () => {
+      const post = await app.inject({
+        method: "POST",
+        url: "/scorecards",
+        headers: h,
+        payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+      });
+      await pollScorecard(app, post.json().id, h);
+    };
+    await runOne();
+    await runOne();
+
+    expect(
+      (await app.inject({ method: "GET", url: "/scorecards/trend?metric=steps", headers: h })).statusCode, // dataset 누락
+    ).toBe(400);
+
+    const res = await app.inject({ method: "GET", url: "/scorecards/trend?dataset=smoke&metric=steps", headers: h });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.dataset).toBe("smoke");
+    expect(body.points).toHaveLength(2); // 시간순 2개
+    expect(body.points.every((p: { regressed: boolean }) => p.regressed === false)).toBe(true); // 동일 → 회귀 없음
+    await app.close();
+  });
+
   it("ingest: 업로드 트레이스로 scorecard(트레이스 그레이더 재도출 + judge), 하니스 미실행", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };

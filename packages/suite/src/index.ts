@@ -8,3 +8,4 @@ export {
   type CaseDelta,
   type ScorecardDiff,
 } from "./scorecard.js";
+export { trendSeries, type TrendCard, type TrendPoint, type ScorecardTrend } from "./trend.js";

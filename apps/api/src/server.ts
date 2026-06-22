@@ -848,6 +848,32 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 기간 트렌드 / 회귀-오버-타임 — 한 (dataset, metric) 의 스코어카드를 시간순 + baseline 대비 회귀. 정적 경로 → :id 보다 먼저.
+  app.get<{
+    Querystring: { dataset?: string; metric?: string; harness?: string; from?: string; to?: string; baseline?: string };
+  }>("/scorecards/trend", async (req, reply) => {
+    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const { dataset, metric, harness, from, to, baseline } = req.query;
+    if (!dataset) return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset 쿼리 파라미터가 필요합니다." });
+    try {
+      gate(principal, "scorecards:read");
+      return reply.send(
+        await deps.scorecardService.trend(principal.workspace, {
+          datasetId: dataset,
+          metric: metric ?? "judge",
+          ...(harness ? { harnessId: harness } : {}),
+          ...(from ? { from } : {}),
+          ...(to ? { to } : {}),
+          ...(baseline ? { baseline } : {}),
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/scorecards/:id", async (req, reply) => {
     if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
