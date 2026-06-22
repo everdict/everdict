@@ -45,6 +45,10 @@ export const K8sRuntimeSpecSchema = z.object({
   server: z.string().url().optional(), // 외부 API 서버 URL(context 대신 bearer 토큰으로 인증할 때)
   // K8s API bearer 토큰의 SecretStore 키 이름(server 와 함께 — kubectl --token). 값이 아니라 이름만; alloc env 로 새지 않는다.
   authSecret: z.string().optional(),
+  // 전체 kubeconfig(YAML)를 담은 SecretStore 키 이름(값 아님). exec-plugin/client-cert 인증처럼 토큰만으로
+  // 안 되는 클러스터(EKS/GKE 등)용. 디스패치 시 임시파일(0600)로 materialize → kubectl --kubeconfig, 그 뒤 제거.
+  // 인증 우선순위: kubeconfigSecret > (server + authSecret) > context. 이 값도 alloc env 로 새지 않는다.
+  kubeconfigSecret: z.string().optional(),
 });
 
 // topology — 멀티서비스 토폴로지 하니스(kind:"service", 예: browser-use)를 위한 런타임. orchestrator(nomad|k8s) 위에

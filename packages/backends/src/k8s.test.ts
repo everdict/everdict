@@ -1,7 +1,8 @@
+import { stat } from "node:fs/promises";
 import { RESULT_SENTINEL } from "@assay/agent";
 import { type AgentJob, BadRequestError, type CaseResult, UpstreamError } from "@assay/core";
 import { describe, expect, it } from "vitest";
-import { type K8sApi, K8sBackend, buildK8sJob, k8sJobName } from "./k8s.js";
+import { type K8sApi, K8sBackend, buildK8sJob, k8sJobName, kubectlArgs, materializeKubeconfig } from "./k8s.js";
 import { staticSecrets } from "./secrets.js";
 import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
@@ -171,5 +172,42 @@ describe("K8sBackend.dispatch", () => {
     const { api } = mockApi({ active: 5 });
     const backend = new K8sBackend({ image: "img", api, maxConcurrent: 10 });
     expect(await backend.capacity()).toEqual({ total: 10, used: 5 });
+  });
+});
+
+describe("kubectlArgs (인증 선택자)", () => {
+  it("kubeconfig(파일 경로)가 있으면 --kubeconfig 를 맨 앞에 둔다", () => {
+    expect(kubectlArgs({ kubeconfig: "/tmp/kc", context: "kind-assay" })).toEqual([
+      "--kubeconfig",
+      "/tmp/kc",
+      "--context",
+      "kind-assay",
+    ]);
+  });
+
+  it("server + token 은 외부 클러스터 bearer 인증으로 실린다", () => {
+    expect(kubectlArgs({ server: "https://k8s:6443", token: "t" })).toEqual([
+      "--server",
+      "https://k8s:6443",
+      "--token",
+      "t",
+    ]);
+  });
+
+  it("아무 것도 없으면 빈 배열(앰비언트 kubeconfig)", () => {
+    expect(kubectlArgs({})).toEqual([]);
+  });
+});
+
+describe("materializeKubeconfig", () => {
+  it("kubeconfig YAML 을 0600 임시파일로 쓰고 cleanup 으로 제거한다", async () => {
+    const yaml = "apiVersion: v1\nkind: Config\n";
+    const { path, cleanup } = await materializeKubeconfig(yaml);
+    const st = await stat(path);
+    expect(st.mode & 0o777).toBe(0o600); // 복호화된 클러스터 자격증명 — 소유자만 읽기/쓰기
+    const { readFile } = await import("node:fs/promises");
+    expect(await readFile(path, "utf8")).toBe(yaml);
+    await cleanup();
+    await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" }); // 제거됨
   });
 });

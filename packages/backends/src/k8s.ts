@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { RESULT_SENTINEL } from "@assay/agent";
 import {
   type AgentJob,
@@ -47,15 +50,28 @@ function run(bin: string, args: string[], stdin?: string): Promise<RunResult> {
   });
 }
 
-// kind/kubeconfig 컨텍스트로 동작하는 실 kubectl 구현.
-// 외부 클러스터를 bearer 토큰으로 인증하려면 context 대신 server+token 을 준다(kubectl --server/--token).
-export function kubectlApi(opts: { context?: string; bin?: string; server?: string; token?: string } = {}): K8sApi {
-  const bin = opts.bin ?? "kubectl";
-  const ctx = [
+// kubectl 전역 인증 인자(선택자) — 테스트 가능하게 분리. 우선순위: kubeconfig(파일 경로) > context > server/token.
+export function kubectlArgs(opts: {
+  context?: string;
+  server?: string;
+  token?: string;
+  kubeconfig?: string;
+}): string[] {
+  return [
+    ...(opts.kubeconfig ? ["--kubeconfig", opts.kubeconfig] : []),
     ...(opts.context ? ["--context", opts.context] : []),
     ...(opts.server ? ["--server", opts.server] : []),
     ...(opts.token ? ["--token", opts.token] : []),
   ];
+}
+
+// kind/kubeconfig 컨텍스트로 동작하는 실 kubectl 구현.
+// 외부 클러스터: bearer 토큰(context 대신 server+token) 또는 전체 kubeconfig 파일(--kubeconfig)로 인증.
+export function kubectlApi(
+  opts: { context?: string; bin?: string; server?: string; token?: string; kubeconfig?: string } = {},
+): K8sApi {
+  const bin = opts.bin ?? "kubectl";
+  const ctx = kubectlArgs(opts);
   return {
     async ensureNamespace(ns) {
       const res = await run(
@@ -124,6 +140,9 @@ export interface K8sBackendOptions {
   context?: string; // kubeconfig 컨텍스트(예: kind-assay)
   server?: string; // 외부 API 서버 URL(context 대신 bearer 인증할 때)
   apiToken?: string; // K8s API bearer 토큰(kubectl --token) — 컨트롤플레인↔K8s API 인증. alloc env 와 무관.
+  // 전체 kubeconfig YAML(값). 설정되면 디스패치마다 임시파일(0600)에 써서 --kubeconfig 로 인증하고 끝나면 제거.
+  // context/server/apiToken 보다 우선. 클러스터 자격증명이라 잡(에이전트) env 로는 절대 들어가지 않는다.
+  kubeconfig?: string;
   secretEnv?: Record<string, string>; // 잡에 주입할 인증(secrets 없을 때 기본)
   secrets?: SecretProvider; // 테넌트별 시크릿 스코핑
   namespace?: string; // 기본 네임스페이스(테넌트 존이 없을 때)
@@ -200,26 +219,56 @@ function parseResult(stdout: string): CaseResult {
   return CaseResultSchema.parse(JSON.parse(line));
 }
 
+// kubeconfig(YAML 값)를 임시파일로 써서 kubectl --kubeconfig 로 쓸 경로를 돌려준다. 복호화된 클러스터 자격증명이므로
+// mode 0600 으로 쓰고, 디스패치가 끝나면 cleanup() 으로 파일+디렉터리를 제거한다(디스크에 오래 남기지 않는다).
+export async function materializeKubeconfig(yaml: string): Promise<{ path: string; cleanup: () => Promise<void> }> {
+  const dir = await mkdtemp(join(tmpdir(), "assay-kcfg-"));
+  const path = join(dir, "kubeconfig");
+  await writeFile(path, yaml, { mode: 0o600 });
+  return { path, cleanup: () => rm(dir, { recursive: true, force: true }) };
+}
+
 // 모델 B: 러너 에이전트를 K8s Job 으로 띄우고 완료를 폴링한 뒤 파드 로그의 sentinel 에서 CaseResult 파싱.
 // 격리는 네임스페이스(테넌트별) + runtimeClassName(gVisor/kata). NomadBackend 의 K8s 짝.
 export class K8sBackend implements Backend {
   readonly id = "k8s";
-  private readonly api: K8sApi;
+  // 주입 api(테스트) 또는 비-kubeconfig 인증(context/server/token)으로 만든 장수명 api.
+  // kubeconfig 인증이면 자격증명을 디스크에 오래 두지 않도록 디스패치마다 임시 kubeconfig 로 api 를 새로 만든다(withApi).
+  private readonly staticApi?: K8sApi;
 
   constructor(private readonly opts: K8sBackendOptions) {
-    this.api =
-      opts.api ??
-      kubectlApi({
+    if (opts.api) this.staticApi = opts.api;
+    else if (!opts.kubeconfig)
+      this.staticApi = kubectlApi({
         ...(opts.context ? { context: opts.context } : {}),
         ...(opts.server ? { server: opts.server } : {}),
         ...(opts.apiToken ? { token: opts.apiToken } : {}),
       });
   }
 
+  // kubeconfig 인증이면 임시파일(0600)에 써서 그 경로의 kubectl 로 fn 을 실행하고 finally 에서 제거.
+  // 그 외에는 장수명 staticApi 사용. 클러스터 자격증명을 untrusted 코드에 노출하지 않고 디스크에도 오래 남기지 않는다.
+  private async withApi<T>(fn: (api: K8sApi) => Promise<T>): Promise<T> {
+    if (this.staticApi) return fn(this.staticApi);
+    const yaml = this.opts.kubeconfig;
+    if (!yaml)
+      throw new UpstreamError(
+        "UPSTREAM_ERROR",
+        undefined,
+        "K8s 백엔드 인증 정보가 없습니다(context/server/token/kubeconfig).",
+      );
+    const { path, cleanup } = await materializeKubeconfig(yaml);
+    try {
+      return await fn(kubectlApi({ kubeconfig: path }));
+    } finally {
+      await cleanup();
+    }
+  }
+
   async capacity(): Promise<BackendCapacity> {
     const mc = this.opts.maxConcurrent;
     const total = (typeof mc === "function" ? mc() : mc) ?? 20;
-    const used = await this.api.countActiveJobs();
+    const used = await this.withApi((api) => api.countActiveJobs());
     return { total, used: used ?? 0 };
   }
 
@@ -240,21 +289,24 @@ export class K8sBackend implements Backend {
   async dispatch(job: AgentJob): Promise<CaseResult> {
     const { ns, runtimeClassName, secretEnv } = await this.resolve(job);
     const name = k8sJobName(job);
-    await this.api.ensureNamespace(ns);
-    await this.api.applyJob(buildK8sJob(job, { ...this.opts, secretEnv }, name, ns, runtimeClassName), ns);
-    try {
-      await this.waitForJob(name, ns);
-      return parseResult(await this.api.podLogs(name, ns));
-    } finally {
-      await this.api.deleteJob(name, ns);
-    }
+    // kubeconfig 인증이면 잡 1건 동안만 임시 kubeconfig 가 살아 있다(완료/실패 후 제거). deleteJob 이후 cleanup.
+    return this.withApi(async (api) => {
+      await api.ensureNamespace(ns);
+      await api.applyJob(buildK8sJob(job, { ...this.opts, secretEnv }, name, ns, runtimeClassName), ns);
+      try {
+        await this.waitForJob(api, name, ns);
+        return parseResult(await api.podLogs(name, ns));
+      } finally {
+        await api.deleteJob(name, ns);
+      }
+    });
   }
 
-  private async waitForJob(name: string, ns: string): Promise<void> {
+  private async waitForJob(api: K8sApi, name: string, ns: string): Promise<void> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 900;
     for (let i = 0; i < maxPolls; i++) {
-      const { succeeded, failed } = await this.api.jobStatus(name, ns);
+      const { succeeded, failed } = await api.jobStatus(name, ns);
       if (succeeded > 0) return;
       if (failed > 0) throw new UpstreamError("UPSTREAM_ERROR", { name, ns }, "K8s Job 실패");
       await new Promise((r) => setTimeout(r, interval));

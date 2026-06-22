@@ -13,6 +13,8 @@ export interface ValidateRuntimeResult {
   id?: string
   version?: string
   kind?: string
+  // spec 이 참조하는 시크릿 이름(authSecret/kubeconfigSecret) 중 SecretStore 에 아직 없는 것들(경고; 하드 실패 아님).
+  missingSecrets?: string[]
   error?: string
 }
 

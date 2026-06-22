@@ -111,4 +111,25 @@ describe("k8sRuntimeOptions (외부 클러스터 API 인증)", () => {
     expect(opts.server).toBe("https://k8s.acme.internal:6443");
     expect(opts.secretEnv).toEqual({ OPENAI_API_KEY: "sk-model" });
   });
+
+  it("kubeconfigSecret→전체 kubeconfig YAML 로 풀고, authSecret 과 함께 둘 다 alloc env 에서 제외", () => {
+    const spec: Extract<RuntimeSpec, { kind: "k8s" }> = {
+      kind: "k8s",
+      id: "rt",
+      version: "1.0.0",
+      tags: [],
+      image: "img",
+      authSecret: "K8S_TOKEN",
+      kubeconfigSecret: "KUBECONFIG_PROD",
+    };
+    const opts = k8sRuntimeOptions(spec, {
+      K8S_TOKEN: "bearer-xyz",
+      KUBECONFIG_PROD: "apiVersion: v1\nkind: Config\n",
+      OPENAI_API_KEY: "sk-model",
+    });
+    expect(opts.kubeconfig).toBe("apiVersion: v1\nkind: Config\n");
+    expect(opts.apiToken).toBe("bearer-xyz");
+    // 클러스터 자격증명(토큰 + kubeconfig) 둘 다 제거 — 모델 키만 남는다(untrusted 에이전트에 클러스터 자격증명 노출 금지).
+    expect(opts.secretEnv).toEqual({ OPENAI_API_KEY: "sk-model" });
+  });
 });

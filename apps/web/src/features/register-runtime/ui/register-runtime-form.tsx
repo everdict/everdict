@@ -31,6 +31,10 @@ export function RegisterRuntimeForm() {
   // k8s
   const [context, setContext] = useState('')
   const [runtimeClass, setRuntimeClass] = useState('')
+  const [server, setServer] = useState('')
+  // 클러스터 API 인증 자격증명의 SecretStore '키 이름'(값 아님). 값은 워크스페이스 시크릿에 따로 저장.
+  const [authSecret, setAuthSecret] = useState('')
+  const [kubeconfigSecret, setKubeconfigSecret] = useState('')
 
   const [result, setResult] = useState<ValidateRuntimeResult>()
   const [createError, setCreateError] = useState<string>()
@@ -47,6 +51,7 @@ export function RegisterRuntimeForm() {
         image,
         ...(runtime ? { runtime } : {}),
         ...(namespace ? { namespace } : {}),
+        ...(authSecret ? { authSecret } : {}),
         ...(datacenters
           ? {
               datacenters: datacenters
@@ -64,6 +69,9 @@ export function RegisterRuntimeForm() {
       ...(context ? { context } : {}),
       ...(namespace ? { namespace } : {}),
       ...(runtimeClass ? { runtimeClass } : {}),
+      ...(server ? { server } : {}),
+      ...(authSecret ? { authSecret } : {}),
+      ...(kubeconfigSecret ? { kubeconfigSecret } : {}),
     }
   }
 
@@ -186,6 +194,15 @@ export function RegisterRuntimeForm() {
               />
             </div>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="nomad-authsecret">authSecret (ACL 토큰 시크릿 이름, 선택)</Label>
+            <Input
+              id="nomad-authsecret"
+              value={authSecret}
+              onChange={(e) => setAuthSecret(e.target.value.toUpperCase())}
+              placeholder="NOMAD_TOKEN"
+            />
+          </div>
         </div>
       )}
 
@@ -231,6 +248,43 @@ export function RegisterRuntimeForm() {
               />
             </div>
           </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="k8s-server">server (외부 API 서버 URL, 선택)</Label>
+            <Input
+              id="k8s-server"
+              value={server}
+              onChange={(e) => setServer(e.target.value)}
+              placeholder="https://k8s.acme.internal:6443"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="k8s-authsecret">authSecret (bearer 토큰 시크릿 이름, 선택)</Label>
+              <Input
+                id="k8s-authsecret"
+                value={authSecret}
+                onChange={(e) => setAuthSecret(e.target.value.toUpperCase())}
+                placeholder="KUBE_TOKEN"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="k8s-kubeconfig">
+                kubeconfigSecret (kubeconfig 시크릿 이름, 선택)
+              </Label>
+              <Input
+                id="k8s-kubeconfig"
+                value={kubeconfigSecret}
+                onChange={(e) => setKubeconfigSecret(e.target.value.toUpperCase())}
+                placeholder="KUBECONFIG_PROD"
+              />
+            </div>
+          </div>
+          <Callout tone="muted" className="text-xs">
+            인증 우선순위: kubeconfigSecret &gt; (server + authSecret) &gt; context.
+            exec-plugin/client-cert 클러스터(EKS/GKE)는 전체 kubeconfig 를 시크릿으로 저장해
+            kubeconfigSecret 로 참조하세요. 토큰·kubeconfig '값'은 클러스터 자격증명 탭(워크스페이스
+            설정)에서 저장하고, 여기엔 그 '이름'만 적습니다.
+          </Callout>
         </div>
       )}
 
@@ -274,12 +328,23 @@ function ValidateBanner({ result }: { result: ValidateRuntimeResult }) {
         </ul>
       </Callout>
     )
+  const missing = result.missingSecrets ?? []
   return (
-    <Callout tone="info">
-      <span className="font-medium">
-        ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version}{' '}
-        {result.versionExists ? '(이미 존재)' : '(새 버전)'}
-      </span>
-    </Callout>
+    <div className="space-y-2">
+      <Callout tone="info">
+        <span className="font-medium">
+          ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version}{' '}
+          {result.versionExists ? '(이미 존재)' : '(새 버전)'}
+        </span>
+      </Callout>
+      {missing.length > 0 && (
+        <Callout
+          tone="warning"
+          hint="등록은 가능하지만, 실행 전에 이 시크릿들을 워크스페이스 설정 → 클러스터 자격증명에서 저장해야 합니다."
+        >
+          참조한 시크릿이 아직 없습니다: <span className="font-mono">{missing.join(', ')}</span>
+        </Callout>
+      )}
+    </div>
   )
 }

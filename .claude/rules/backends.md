@@ -11,9 +11,12 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
   `rt:<tenant>:<id>@<version>`, and routes via the `Scheduler` (fairness/budget/capacity preserved). Credentials
   come from the tenant `SecretStore` (`secretEnv`) — never from the spec. **Two distinct credential roles, keep
   them separate**: (a) the agent's model keys → injected into the job/alloc env; (b) the **control-plane→cluster-API**
-  token (`spec.authSecret` names the SecretStore entry) → sent as the API auth header (`X-Nomad-Token` /
-  `kubectl --token`+`server`) and **stripped from the alloc/pod env** (`nomadRuntimeOptions`/`k8sRuntimeOptions`)
-  so the cluster admin token is never exposed to untrusted eval code. See `docs/runtimes.md`.
+  credential (`spec.authSecret` = ACL/bearer token; k8s `spec.kubeconfigSecret` = full kubeconfig YAML) → used
+  **only** for cluster-API auth (`X-Nomad-Token` / `kubectl --token`+`server` / `kubectl --kubeconfig <temp 0600>`,
+  removed in `finally`) and **stripped from the alloc/pod env** (`nomadRuntimeOptions`/`k8sRuntimeOptions` via
+  `withoutKeys` — strip BOTH `authSecret` and `kubeconfigSecret`) so the cluster credential is never exposed to
+  untrusted eval code. k8s auth precedence: `kubeconfigSecret` > (`server`+`authSecret`) > `context`. The decrypted
+  kubeconfig is materialized **per-dispatch** (never in the long-lived backend ctor). See `docs/runtimes.md`.
 
 - Implement `Backend.dispatch(job: AgentJob): Promise<CaseResult>` AND `capacity(): Promise<{total, used}>`
   (`./backend`, `@assay/core`). `capacity()` is what the `Scheduler` gates on — report a configured

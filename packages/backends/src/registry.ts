@@ -87,6 +87,16 @@ function withoutKey(
   return rest;
 }
 
+// 여러 키를 한 번에 제외. 클러스터 API 토큰 + kubeconfig 를 동시에 alloc env 에서 분리할 때.
+function withoutKeys(
+  env: Record<string, string> | undefined,
+  ...keys: (string | undefined)[]
+): Record<string, string> | undefined {
+  let out = env;
+  for (const key of keys) out = withoutKey(out, key);
+  return out;
+}
+
 // RuntimeSpec(nomad) + 테넌트 시크릿맵 → NomadBackendOptions.
 // authSecret(이름)은 Nomad API(ACL) 토큰으로 풀려 X-Nomad-Token 으로 쓰이고, alloc env 에서는 제외(에이전트에 노출 금지).
 export function nomadRuntimeOptions(
@@ -106,13 +116,15 @@ export function nomadRuntimeOptions(
   };
 }
 
-// RuntimeSpec(k8s) + 테넌트 시크릿맵 → K8sBackendOptions. authSecret 은 K8s API bearer 토큰으로 풀려(server 와 함께) alloc env 에서 제외.
+// RuntimeSpec(k8s) + 테넌트 시크릿맵 → K8sBackendOptions. authSecret(bearer 토큰)/kubeconfigSecret(전체 kubeconfig)은
+// 클러스터 API 인증으로 풀려 쓰이고 둘 다 alloc env 에서 제외(untrusted eval 코드에 클러스터 자격증명 노출 금지).
 export function k8sRuntimeOptions(
   spec: Extract<RuntimeSpec, { kind: "k8s" }>,
   secretEnv?: Record<string, string>,
 ): K8sBackendOptions {
   const apiToken = spec.authSecret ? secretEnv?.[spec.authSecret] : undefined;
-  const allocEnv = withoutKey(secretEnv, spec.authSecret);
+  const kubeconfig = spec.kubeconfigSecret ? secretEnv?.[spec.kubeconfigSecret] : undefined;
+  const allocEnv = withoutKeys(secretEnv, spec.authSecret, spec.kubeconfigSecret);
   return {
     image: spec.image,
     ...(spec.context ? { context: spec.context } : {}),
@@ -120,6 +132,7 @@ export function k8sRuntimeOptions(
     ...(spec.runtimeClass ? { runtimeClass: spec.runtimeClass } : {}),
     ...(spec.server ? { server: spec.server } : {}),
     ...(apiToken ? { apiToken } : {}),
+    ...(kubeconfig ? { kubeconfig } : {}),
     ...(allocEnv && Object.keys(allocEnv).length > 0 ? { secretEnv: allocEnv } : {}),
   };
 }
