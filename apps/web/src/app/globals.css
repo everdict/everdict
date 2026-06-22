@@ -1,11 +1,24 @@
-/* 폰트(런타임 로드 — 빌드 오프라인 안전):
-   · 본문 Pretendard — 이전엔 font-family 만 선언돼 실제 미로드(system-ui 폴백)였다. 실제 로드해 의도대로 렌더.
-   · 디스플레이 Bricolage Grotesque — 헤딩/워드마크용 개성 그로테스크(generic Inter/Space Grotesk 회피, frontend-design).
-   Latin 은 Bricolage, 한글은 per-glyph 폴백으로 Pretendard 가 받는다(--font-display 스택). */
-@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
-@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&display=swap');
 @import 'tailwindcss';
 @plugin 'tailwindcss-animate';
+
+/* 폰트 self-host(public/fonts) — 외부 CDN 무의존(오프라인·무FOUC·프라이버시·속도). variable woff2 1개씩.
+   · 본문 Pretendard(한글+Latin, weight 45–920) — 이전엔 font-family 선언만 하고 미로드(system-ui 폴백)였다.
+   · 디스플레이 Bricolage Grotesque(Latin, weight 200–800) — 개성 그로테스크(generic Inter/Space Grotesk 회피).
+   Latin 은 Bricolage, 한글은 per-glyph 폴백으로 Pretendard 가 받는다(--font-display 스택). */
+@font-face {
+  font-family: 'Pretendard';
+  font-style: normal;
+  font-weight: 45 920;
+  font-display: swap;
+  src: url('/fonts/PretendardVariable.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  font-style: normal;
+  font-weight: 200 800;
+  font-display: swap;
+  src: url('/fonts/BricolageGrotesque.woff2') format('woff2');
+}
 
 @custom-variant dark (&:is(.dark *));
 
