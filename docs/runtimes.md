@@ -48,8 +48,17 @@ A scorecard run selects a runtime: `POST /scorecards` `{…, runtime }` sets `pl
 |---|---|---|
 | `POST /runtimes` | `create_runtime` | `runtimes:write` (admin) |
 | `POST /runtimes/validate` (dry-run) | `validate_runtime` | `runtimes:write` |
+| `POST /runtimes/probe` (live connection test) | `probe_runtime` | `runtimes:write` |
 | `GET /runtimes` | `list_runtimes` | `runtimes:read` (viewer+) |
 | `GET /runtimes/:id/versions/:version` | `get_runtime` | `runtimes:read` |
+
+**Connection probe** (`POST /runtimes/probe`). `validate` only checks the schema; **probe** answers "does this cluster
+actually respond?" — it builds the live `Backend` from the spec (resolving `authSecret`/`kubeconfigSecret` from the
+tenant SecretStore exactly as dispatch does) and calls `Backend.probe()` **without running a job**: nomad → `GET
+/v1/agent/self` (reports 401/403 as an ACL-token hint), k8s → API server `/version` (via context/token/kubeconfig),
+local → in-process, docker → daemon version. Returns `{ kind, reachable, detail }`; a 10s cap avoids hanging on an
+unreachable address. The credential is used only for the probe's auth header (never reaches the agent). `apps/api`
+`makeRuntimeProber` is the single service core behind both transports.
 
 ## Web (`apps/web`)
 - **런타임 `/dashboard/runtimes`** — owned vs `_shared` runtimes (kind + version chips).
@@ -57,7 +66,8 @@ A scorecard run selects a runtime: `POST /scorecards` `{…, runtime }` sets `pl
   **kind-toggle form** (local | nomad | k8s) with a validate (dry-run) step → `POST /runtimes` (admin-gated). The
   form takes secret **names** (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets`
   (names referenced but not yet in the SecretStore) as a non-blocking warning. Store the values in 워크스페이스 설정
-  → 클러스터 자격증명.
+  → 클러스터 자격증명. A **연결 테스트** button (nomad/k8s) runs the live probe (`POST /runtimes/probe`) and shows
+  reachable/detail before you commit.
 - The scorecard **실행** form gains a **런타임** selector (defaults to the global backend).
 
 See `docs/backends.md` (skill `backends`), `docs/tenancy.md`, `docs/scorecards.md`.
