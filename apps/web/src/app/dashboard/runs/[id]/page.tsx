@@ -145,6 +145,29 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                 className="max-h-[480px] w-auto rounded-md border"
               />
             )}
+            {/* browser(서비스-토폴로지: browser-use 등) — 에이전트가 도달한 최종 URL + 추출 DOM 발췌. */}
+            {snapshot.kind === 'browser' && (
+              <div className="space-y-2">
+                {snapshot.url && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                      final url
+                    </dt>
+                    <dd className="mt-0.5 break-all font-mono text-sm">{snapshot.url}</dd>
+                  </div>
+                )}
+                {snapshot.dom && (
+                  <div>
+                    <dt className="text-xs uppercase tracking-wide text-muted-foreground">
+                      dom / extracted
+                    </dt>
+                    <dd className="mt-0.5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
+                      {snapshot.dom}
+                    </dd>
+                  </div>
+                )}
+              </div>
+            )}
             <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs text-muted-foreground">
               {JSON.stringify(
                 { ...snapshot, screenshot: snapshot.screenshot ? '<base64>' : undefined },

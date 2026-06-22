@@ -155,6 +155,13 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
                       className="max-h-72 w-auto rounded-md border"
                     />
                   )}
+                  {/* browser(서비스-토폴로지: browser-use 등) — 에이전트가 도달한 최종 URL(+ DOM 발췌). */}
+                  {r.snapshot?.kind === 'browser' && r.snapshot.url && (
+                    <p className="break-all font-mono text-xs text-muted-foreground">
+                      <span className="font-medium text-foreground">final url</span> ·{' '}
+                      {r.snapshot.url}
+                    </p>
+                  )}
                   {/* judge/grader 판정 사유(VLM 루브릭 reasoning 등) — os-use 등에서 "왜 pass/fail" 을 보여준다. */}
                   {r.scores
                     .filter((s) => s.detail)

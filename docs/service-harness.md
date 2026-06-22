@@ -1107,3 +1107,26 @@ Three more axes then closed it out:
   (`$0.15/$0.60` per 1M tokens) — the **tokens are real**, the price is an operator input (exactly how cost
   works in production), the USD is real arithmetic (e.g. Nomad run `usd=0.00302265`; Wikipedia runs
   `$0.0060–0.0079`). Not faked: when the operator configures real LiteLLM pricing, that value is used instead.
+
+Then product-shaped it across three more axes (all live):
+- **Multi-case scorecard + A/B (`browseruse-scorecard.mjs`).** A 3-case dataset (two container-form searches +
+  one Wikipedia article) runs through two harness versions — `browseruse@mini` (`gpt-5.4-mini`) and
+  `browseruse@gpt5.4` (`chatgpt/gpt-5.4`) — collecting `CaseResult[]` into a `Scorecard` per version.
+  `summarizeScorecard` aggregates per-metric pass-rate + mean cost/steps; `diffScorecards` does the A/B by
+  objective `pass` transitions plus metric deltas. Live: both 100% url/dom pass, `tool_calls` mean 4.33, and
+  the diff surfaces the cost gap — mean `usd` `0.003976 → 0.004751` (gpt-5.4 ~20% pricier for the same
+  outcome), no regressions/improvements. The exact control-plane `runSuite → summarize → diff` shape, on real
+  `browser-use`.
+- **Per-tenant isolation (`browseruse-isolation-k8s.mjs`).** The backend resolves `tenant → TrustZone`
+  (`staticTrustZones`), asserts hardened isolation, and `K8sTopologyRuntime.ensureTopology(spec, zone)` deploys
+  each tenant's warm topology into a **dedicated namespace** with a per-zone `NetworkPolicy`. Live with two
+  tenants: `acme` → `assay-acme`, `globex` → `assay-globex`, each with its **own** `browseruse-agent`
+  Deployment and a **distinct** front-door endpoint (warm pools are never shared across tenants), each with
+  `networkpolicy/assay-zone-ingress` applied; both drove the interactive form under their own zone and PASS.
+  (On kind the default `kindnet` *applies* but doesn't *enforce* NetworkPolicy — enforcement needs
+  Calico/Cilium; the namespace boundary is real either way.)
+- **Web dashboard rendering.** The run + scorecard case views now render `browser` snapshots: the run page
+  shows the agent's **final URL** + a **DOM/extracted excerpt** (alongside the existing scores — which already
+  include `steps`/`cost` — and the trace timeline of `llm_call`/`tool_call` events), and the scorecard
+  per-case card shows the final URL. The run/scorecard entity schemas gained optional `url`/`dom` on the
+  snapshot; `apps/web` stays on prettier+eslint (tsc + eslint green).
