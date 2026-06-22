@@ -3,10 +3,22 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { FlaskConical, Menu, Search, X } from 'lucide-react'
+import {
+  FlaskConical,
+  LogIn,
+  LogOut,
+  Menu,
+  Moon,
+  Search,
+  Settings,
+  Sun,
+  UserCog,
+  X,
+} from 'lucide-react'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
 import type { Workspace } from '@/entities/workspace'
+import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
 import { Kbd } from '@/shared/ui/kbd'
 
@@ -29,6 +41,20 @@ function openCommandPalette() {
 function isMac() {
   return typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform)
 }
+
+function setTheme(dark: boolean) {
+  document.documentElement.classList.toggle('dark', dark)
+  document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+  try {
+    localStorage.setItem('theme', dark ? 'dark' : 'light')
+  } catch {
+    /* localStorage 차단 환경 */
+  }
+}
+
+const rowClass =
+  'group flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[13px] font-[510] text-secondary-foreground transition-colors duration-100 hover:bg-accent/60 hover:text-foreground'
+const iconClass = 'size-[17px] shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'
 
 function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
@@ -82,6 +108,84 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
   )
 }
 
+// 하단 푸터 — 계정/설정/테마/로그아웃 직접 링크. 워크스페이스 칩과 생김새를 분리(중복 제거),
+// 드롭다운에 의존하지 않아 항상 보이고 항상 눌린다.
+function SidebarFooter({
+  roles,
+  authed,
+  showLogin,
+  onNavigate,
+}: {
+  roles: string[]
+  authed: boolean
+  showLogin: boolean
+  onNavigate?: () => void
+}) {
+  const pathname = usePathname()
+  const accountActive = pathname === '/dashboard/account'
+  const settingsActive = pathname.startsWith('/dashboard/settings')
+  return (
+    <div className="flex flex-col gap-0.5 border-t border-border pt-2">
+      <Link
+        href="/dashboard/account"
+        onClick={onNavigate}
+        aria-current={accountActive ? 'page' : undefined}
+        className={cn(rowClass, accountActive && 'bg-accent text-foreground')}
+      >
+        <UserCog className={cn(iconClass, accountActive && 'text-foreground')} strokeWidth={1.75} />
+        계정
+      </Link>
+      {can(roles, 'settings:read') && (
+        <Link
+          href="/dashboard/settings"
+          onClick={onNavigate}
+          aria-current={settingsActive ? 'page' : undefined}
+          className={cn(rowClass, settingsActive && 'bg-accent text-foreground')}
+        >
+          <Settings
+            className={cn(iconClass, settingsActive && 'text-foreground')}
+            strokeWidth={1.75}
+          />
+          워크스페이스 설정
+        </Link>
+      )}
+      <button
+        type="button"
+        onClick={() => setTheme(!document.documentElement.classList.contains('dark'))}
+        className={cn(rowClass, 'w-full text-left')}
+      >
+        <Sun className={cn(iconClass, 'hidden dark:block')} strokeWidth={1.75} />
+        <Moon className={cn(iconClass, 'block dark:hidden')} strokeWidth={1.75} />
+        테마 전환
+      </button>
+      {showLogin &&
+        (authed ? (
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = '/api/auth/signout'
+            }}
+            className="group flex w-full items-center gap-2.5 rounded-md px-2 py-[7px] text-left text-[13px] font-[510] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+          >
+            <LogOut className="size-[17px] shrink-0" strokeWidth={1.75} />
+            로그아웃
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => {
+              window.location.href = '/api/auth/signin'
+            }}
+            className={cn(rowClass, 'w-full text-left')}
+          >
+            <LogIn className={iconClass} strokeWidth={1.75} />
+            로그인
+          </button>
+        ))}
+    </div>
+  )
+}
+
 function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () => void }) {
   const mac = isMac()
   return (
@@ -97,14 +201,7 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
         <span className="text-[15px] font-[600] tracking-[-0.01em]">Assay</span>
       </Link>
 
-      <WorkspaceSwitcher
-        current={props.workspace}
-        workspaces={props.workspaces}
-        subject={props.subject}
-        roles={props.roles}
-        authed={props.authed}
-        showLogin={props.showLogin}
-      />
+      <WorkspaceSwitcher current={props.workspace} workspaces={props.workspaces} />
 
       <button
         type="button"
@@ -119,6 +216,13 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
       <div className="-mr-1 flex-1 overflow-y-auto pr-1">
         <NavLinks onNavigate={onNavigate} />
       </div>
+
+      <SidebarFooter
+        roles={props.roles}
+        authed={props.authed}
+        showLogin={props.showLogin}
+        onNavigate={onNavigate}
+      />
     </div>
   )
 }
@@ -137,7 +241,10 @@ export function Sidebar(props: SidebarProps) {
         >
           <Menu className="size-[18px]" />
         </button>
-        <Link href="/dashboard" className="flex items-center gap-1.5 text-[14px] font-[600] tracking-tight">
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-1.5 text-[14px] font-[600] tracking-tight"
+        >
           <FlaskConical className="size-4 text-primary" /> Assay
         </Link>
         <button
