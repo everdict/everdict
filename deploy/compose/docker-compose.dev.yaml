@@ -1,0 +1,58 @@
+# Assay 풀스택 개발 compose — 웹 + API 를 한 번에, 핫리로드.
+#
+#   docker compose -f deploy/compose/docker-compose.dev.yaml up --build
+#     웹  : http://localhost:3001   (인증 없이 tenant=default 로 동작)
+#     API : http://localhost:8787   (dev-fallback: x-assay-tenant 헤더)
+#
+# 특징(개발용 기본값):
+#  - 인증 OFF: Keycloak 없이 웹은 dev 모드, API 는 dev-fallback → 바로 클릭해볼 수 있다.
+#  - 저장소 in-memory(ASSAY_REQUIRE_AUTH 미설정, DATABASE_URL 미설정) → 재시작하면 초기화.
+#  - 백엔드 local(이 머신 in-process). claude-code 하니스 실제 run 은 .env 에 토큰 필요(scripted 는 불필요).
+#  - 소스를 컨테이너에 바인드마운트(리눅스 호스트 → node_modules 호환). 웹=next dev, API=tsc -w + node --watch.
+#
+# 참고: 네이티브 핫리로드(컨테이너 없이 Keycloak+API+web) 는 `bash scripts/dev/up.sh` 도 있다.
+name: assay-dev
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: apps/api/Dockerfile
+      target: dev
+    working_dir: /app
+    command:
+      - sh
+      - -lc
+      - pnpm install --frozen-lockfile && pnpm --filter @assay/api... build && (node_modules/.bin/tsc -p apps/api/tsconfig.json --watch --preserveWatchOutput & exec node --watch apps/api/dist/main.js)
+    environment:
+      PORT: "8787"
+      ASSAY_TIMEOUT_SEC: "300"
+      # 로컬 백엔드가 claude-code 하니스를 in-process 로 돌릴 때만 필요(scripted 하니스는 불필요).
+      # 호스트 셸/.env 에 있으면 그대로 전달, 없으면 빈 값.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
+    volumes:
+      - ../..:/app
+    ports:
+      - "8787:8787"
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      target: dev
+    working_dir: /app
+    command:
+      - sh
+      - -lc
+      - pnpm install --frozen-lockfile && pnpm --filter @assay/web dev
+    environment:
+      # 웹(서버)→API 는 compose 네트워크의 서비스명으로 호출.
+      CONTROL_PLANE_URL: http://api:8787
+      # KEYCLOAK_* 미설정 → 웹은 dev 모드(인증 없이 x-assay-tenant=default), API 는 dev-fallback 수락.
+    volumes:
+      - ../..:/app
+    ports:
+      - "3001:3001"
+    depends_on:
+      - api

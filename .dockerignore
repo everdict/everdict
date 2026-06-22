@@ -7,5 +7,9 @@ dist
 **/.turbo
 coverage
 *.log
+# env 파일(루트 + 중첩)은 절대 이미지에 넣지 않는다 — 시크릿 누출 + Next 가 런타임에 dev .env.local 을
+# 로드해 동작이 바뀌는 것(예: keycloakConfigured) 방지. 런타임 env 는 compose `environment:` 로만 주입.
 .env
 .env.*
+**/.env
+**/.env.*
