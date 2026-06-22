@@ -1182,3 +1182,19 @@ Three more, all live:
   the judge received a real screenshot per case (376KB / 27KB / 328KB) and its reasoning explicitly cites it
   ("the screenshot matches example.com"; "the final DOM and screenshot show … 'Vector database'"), 3/3 pass.
   So a browser-use trajectory is now gradable the official way — a VLM over the end-state screenshot.
+
+- **Benchmark-scale WebVoyager A/B (`browseruse-webvoyager-ab.mjs`).** Pulls the real
+  `WebVoyager_data.jsonl`, round-robins `WV_N` tasks across diverse sites, and runs the *same* task set
+  through two models (`browseruse@mini` / `browseruse@gpt5.4`) → a `Scorecard` each, with a **per-site
+  pass-rate breakdown** (the `web_name` tag) and `diffScorecards` for the model A/B. Live (6 sites): both
+  models judge-pass **5/6** (ArXiv / BBC News / Cambridge Dictionary / GitHub / Wolfram Alpha pass; Huggingface
+  fails on both — the agent consistently detours to a Bing search); the diff shows `tool_calls 5.83 → 6.67`
+  (gpt-5.4 takes more steps) and judge mean `0.778 → 0.800`, with no `pass` transitions. Honest, benchmark-shaped.
+- **Unified desktop + web report (`unified-report.mjs`).** One report spanning two *different harness shapes*
+  through the same `CaseResult → Scorecard → summarize` flow: a **desktop** track (OSWorld via `runAgentJob` +
+  the os-use command harness — mousepad creates a file, graded by a VLM judge **and** a `command`/state grader)
+  and a **web** track (WebVoyager via `ServiceTopologyBackend` + the browser-use service harness). Live: the
+  desktop case's authoritative `state` grader **PASSes** (`test -f note.txt && grep` confirms the file was
+  written) while the VLM judge is cautious (a pixel screenshot can't confirm an on-disk save — the documented
+  reason os-use grades on state); the web track is 2/2. The point isn't the numbers — it's that one
+  harness/infra-agnostic runtime emits a single report over desktop *and* web benchmarks.
