@@ -1153,3 +1153,22 @@ Then closed the loop on three fronts (all live):
   so `spansToTraceEvents` produces an assistant message and `answer-match` reads it off the pulled trace. Live:
   3/3 answer-match pass (Web scraping / Example Domain / Vector database), `summarizeScorecard` reporting the
   pass rate + mean steps. OSWorld (desktop) and now WebVoyager (web), both live through `browser-use`.
+
+Three more, all live:
+- **Scorecard A/B in the dashboard.** The existing `/dashboard/scorecards/compare` page renders the API's
+  `GET /scorecards/diff` (`diffScorecards`). `web-seed-server.mjs` seeds two comparable `browser-use`
+  scorecards (`browseruse@mini` vs `browseruse@gpt5.4`, same case ids, gpt5.4 fixing a hard case) and the
+  real dashboard renders the comparison — captured a screenshot showing the metric table
+  (`answer_match 0.50 → 1.00 ▲+0.50`, `usd ▲`), **0 regressions**, and **1 improvement** (`hard-task ·
+  answer_match 0 → 1`). The objective-`pass`-transition diff, on real browser-use scorecards.
+- **WebVoyager *judge* grading (official method).** Real WebVoyager has no answer field — the official
+  benchmark judges the *trajectory* (GPT-4V). `browseruse-webvoyager-judge.mjs` turns on the LiteLLM judge
+  (`ASSAY_JUDGE_MODEL` → `makeGradersFromEnv`/`judgeFromEnv` builds a `JudgeGrader` that scores `trace + dom`
+  against a WebVoyager rubric) — `browseruse_server.py`'s message span (the agent's final answer) feeds the
+  judge. On the sample (`WV_SOURCE=sample`): 3/3 judge pass *with reasoning*, agreeing with answer-match.
+- **Real WebVoyager at scale + failure analysis.** `WV_SOURCE=real` downloads the actual
+  `WebVoyager_data.jsonl` (643 tasks / 15 sites) and round-robins `WV_N` tasks across benign info-lookup sites.
+  Live (6 tasks, judge=`gpt-5.4-mini`, agent=`chatgpt/gpt-5.4`): **judge pass 67%** — ArXiv / BBC News /
+  Cambridge Dictionary / Wolfram Alpha (derivative = 11.2, correct) PASS; GitHub + Huggingface FAIL, and the
+  judge's reasons are honest (Huggingface: the agent fell back to a Bing search and never verified the model's
+  update date). Real benchmark, real sites, judge-graded — pass rate reflects task difficulty, not a fixture.
