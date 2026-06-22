@@ -85,16 +85,16 @@ export function RegisterHarnessWizard() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-5">
       {/* 모드 토글 */}
-      <div className="inline-flex rounded-lg border border-border p-1 text-sm">
+      <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
         <button
           type="button"
           onClick={() => setMode('form')}
           className={cn(
-            'flex-1 rounded-md px-3 py-1.5 transition-colors',
+            'rounded px-3 py-1 font-[510] transition-colors',
             mode === 'form'
-              ? 'bg-secondary text-foreground font-medium'
+              ? 'bg-card text-foreground shadow-raise'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
@@ -104,9 +104,9 @@ export function RegisterHarnessWizard() {
           type="button"
           onClick={toJsonMode}
           className={cn(
-            'flex-1 rounded-md px-3 py-1.5 transition-colors',
+            'rounded px-3 py-1 font-[510] transition-colors',
             mode === 'json'
-              ? 'bg-secondary text-foreground font-medium'
+              ? 'bg-card text-foreground shadow-raise'
               : 'text-muted-foreground hover:text-foreground'
           )}
         >
@@ -118,7 +118,7 @@ export function RegisterHarnessWizard() {
       <div className="space-y-4">
         <div className="space-y-1.5">
           <Label>종류 (kind)</Label>
-          <div className="flex gap-4 text-sm">
+          <div className="flex gap-4 text-[13px]">
             {(['service', 'process'] as const).map((k) => (
               <label key={k} className="flex items-center gap-1.5">
                 <input
@@ -169,7 +169,7 @@ export function RegisterHarnessWizard() {
             }
           >
             {s.services.map((sv, i) => (
-              <div key={i} className="space-y-2 rounded-xl border p-3">
+              <div key={i} className="space-y-2 rounded-lg border bg-card p-3">
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     value={sv.name}
@@ -217,9 +217,9 @@ export function RegisterHarnessWizard() {
               set({ deps: [...s.deps, { store: 'postgres', role: '', isolateBy: 'thread_id' }] })
             }
           >
-            {s.deps.length === 0 && <p className="text-xs text-muted-foreground">없음</p>}
+            {s.deps.length === 0 && <p className="text-[12px] text-muted-foreground">없음</p>}
             {s.deps.map((d, i) => (
-              <div key={i} className="flex items-center gap-2 rounded-xl border p-3">
+              <div key={i} className="flex items-center gap-2 rounded-lg border bg-card p-3">
                 <Select value={d.store} onChange={(e) => setDep(i, { store: e.target.value })}>
                   {STORES.map((x) => (
                     <option key={x}>{x}</option>
@@ -244,7 +244,7 @@ export function RegisterHarnessWizard() {
           </Section>
 
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Front door</h3>
+            <h3 className="text-[13px] font-[560] text-foreground">Front door</h3>
             <div className="grid grid-cols-3 gap-2">
               <Input
                 value={s.frontDoorService}
@@ -265,7 +265,7 @@ export function RegisterHarnessWizard() {
           </div>
 
           <div className="space-y-3">
-            <h3 className="text-sm font-semibold">Trace source</h3>
+            <h3 className="text-[13px] font-[560] text-foreground">Trace source</h3>
             <div className="grid grid-cols-3 gap-2">
               <Select value={s.traceKind} onChange={(e) => set({ traceKind: e.target.value })}>
                 <option value="mlflow">mlflow</option>
@@ -281,7 +281,7 @@ export function RegisterHarnessWizard() {
           </div>
 
           <div className="space-y-3">
-            <label className="flex items-center gap-2 text-sm font-semibold">
+            <label className="flex items-center gap-2 text-[13px] font-[560] text-foreground">
               <input
                 type="checkbox"
                 checked={s.targetEnabled}
@@ -290,7 +290,7 @@ export function RegisterHarnessWizard() {
               Target (browser+extension)
             </label>
             {s.targetEnabled && (
-              <div className="space-y-2 rounded-xl border p-3">
+              <div className="space-y-2 rounded-lg border bg-card p-3">
                 <div className="grid grid-cols-2 gap-2">
                   <Select
                     value={s.targetLifecycle}
@@ -305,7 +305,7 @@ export function RegisterHarnessWizard() {
                     placeholder="extension ref (optional)"
                   />
                 </div>
-                <div className="flex gap-4 text-sm">
+                <div className="flex gap-4 text-[13px]">
                   {OBSERVE.map((o) => (
                     <label key={o} className="flex items-center gap-1.5">
                       <input
@@ -335,12 +335,12 @@ export function RegisterHarnessWizard() {
           <Label htmlFor="json">HarnessSpec (JSON)</Label>
           <Textarea
             id="json"
-            className="min-h-72 font-mono text-xs"
+            className="min-h-72 text-[12px]"
             value={jsonText}
             onChange={(e) => setJsonText(e.target.value)}
             spellCheck={false}
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[12px] text-muted-foreground">
             JSON 모드 편집은 구조화 폼과 동기화되지 않습니다.
           </p>
         </div>
@@ -348,9 +348,9 @@ export function RegisterHarnessWizard() {
 
       {/* JSON 미리보기 (form 모드) */}
       {mode === 'form' && (
-        <details className="rounded-xl border bg-muted/40 p-3 text-sm">
-          <summary className="cursor-pointer font-medium">JSON 미리보기</summary>
-          <pre className="mt-2 max-h-72 overflow-auto rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground font-mono whitespace-pre-wrap break-all">
+        <details className="rounded-lg border bg-muted/40 p-3 text-[13px]">
+          <summary className="cursor-pointer font-[510] text-foreground">JSON 미리보기</summary>
+          <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-card p-2 font-mono text-[12px] text-muted-foreground">
             {JSON.stringify(buildSpec(s), null, 2)}
           </pre>
         </details>
@@ -360,7 +360,7 @@ export function RegisterHarnessWizard() {
       {result && <ValidateBanner result={result} />}
       {regError && <Callout tone="danger">{regError}</Callout>}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] text-muted-foreground">
         버전은 불변입니다 — 같은 (id, version)을 다른 스펙으로 다시 등록하면 409 로 거부됩니다.
       </p>
 
@@ -388,11 +388,11 @@ function Section({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold">{title}</h3>
+        <h3 className="text-[13px] font-[560] text-foreground">{title}</h3>
         <button
           type="button"
           onClick={onAdd}
-          className="flex items-center gap-1 text-sm text-primary hover:opacity-80"
+          className="flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
         >
           <Plus className="size-3.5" /> 추가
         </button>
@@ -407,7 +407,7 @@ function RemoveBtn({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="flex items-center gap-1 text-xs text-muted-foreground hover:text-destructive"
+      className="flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-destructive"
     >
       <Trash2 className="size-3.5" /> 삭제
     </button>
@@ -419,7 +419,7 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-medium">스키마 오류</div>
+        <div className="font-[560]">스키마 오류</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -429,11 +429,11 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
     )
   return (
     <Callout tone="info">
-      <div className="font-medium">
+      <div className="font-[560]">
         ✓ 스키마 정상 · {result.id}@{result.version}{' '}
         {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>
-      <div className="mt-1 text-muted-foreground">
+      <div className="mt-1 text-[12px] text-muted-foreground">
         기존 버전:{' '}
         {result.existingVersions && result.existingVersions.length > 0
           ? result.existingVersions.join(', ')

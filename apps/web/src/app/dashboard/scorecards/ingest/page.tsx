@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ChevronLeft } from 'lucide-react'
 
 import { IngestScorecardForm } from '@/features/ingest-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
@@ -31,16 +32,17 @@ export default async function IngestScorecardPage() {
     <div className="space-y-6">
       <Link
         href="/dashboard/scorecards"
-        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
-        ← 스코어카드
+        <ChevronLeft className="size-3.5" />
+        스코어카드
       </Link>
       <PageHeader
         title="트레이스 인제스트"
         description="외부에서 이미 수행한 트레이스를 올려 scorecard 로 만듭니다(하니스 미실행). judge·비교에 그대로 쓰입니다."
       />
       {allowed ? (
-        <Card className="p-6">
+        <Card className="p-5">
           <IngestScorecardForm datasets={datasets} judges={judges} />
         </Card>
       ) : (

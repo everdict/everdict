@@ -73,24 +73,24 @@ export function SecretsManager({
 
   return (
     <div className="space-y-6">
-      <div>
-        <h3 className="text-sm font-semibold">{copy.title}</h3>
-        <p className="mt-1 text-sm text-muted-foreground">{copy.help}</p>
-        <p className="mt-1 text-xs text-muted-foreground/80">
+      <div className="space-y-1">
+        <h3 className="text-[13px] font-[560] text-foreground">{copy.title}</h3>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{copy.help}</p>
+        <p className="text-[12px] leading-relaxed text-faint">
           시크릿은 at-rest 암호화되며 값은 다시 표시되지 않습니다(목록은 이름만). 시크릿은
           워크스페이스 단위 단일 네임스페이스이며, 두 탭은 입력 안내만 다릅니다.
         </p>
       </div>
 
       {secrets.length === 0 ? (
-        <p className="text-sm text-muted-foreground">아직 등록된 시크릿이 없습니다.</p>
+        <p className="text-[13px] text-muted-foreground">아직 등록된 시크릿이 없습니다.</p>
       ) : (
-        <ul className="divide-y rounded-lg border">
+        <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {secrets.map((s) => (
-            <li key={s.name} className="flex items-center justify-between gap-3 px-3 py-2">
+            <li key={s.name} className="flex items-center justify-between gap-3 px-3 py-2.5">
               <div className="min-w-0">
-                <span className="font-mono text-sm">{s.name}</span>
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span className="font-mono text-[13px]">{s.name}</span>
+                <span className="ml-2 text-[12px] text-faint">
                   {new Date(s.updatedAt).toLocaleString('ko-KR')}
                 </span>
               </div>
@@ -98,9 +98,8 @@ export function SecretsManager({
                 (confirmName === s.name ? (
                   <span className="flex items-center gap-2">
                     <Button
-                      variant="outline"
+                      variant="destructive"
                       size="sm"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/5"
                       disabled={pending}
                       onClick={() => onDelete(s.name)}
                     >
@@ -108,7 +107,7 @@ export function SecretsManager({
                     </Button>
                     <button
                       type="button"
-                      className="text-xs text-muted-foreground hover:text-foreground"
+                      className="text-[12px] text-muted-foreground hover:text-foreground"
                       onClick={() => setConfirmName(undefined)}
                     >
                       취소
@@ -117,7 +116,7 @@ export function SecretsManager({
                 ) : (
                   <button
                     type="button"
-                    className="text-xs text-destructive hover:underline"
+                    className="text-[12px] font-[510] text-destructive hover:underline"
                     onClick={() => setConfirmName(s.name)}
                   >
                     삭제
@@ -130,7 +129,7 @@ export function SecretsManager({
 
       {canWrite ? (
         <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <Label htmlFor={`secret-name-${variant}`}>이름 (env 형식)</Label>
             <Input
               id={`secret-name-${variant}`}
@@ -145,7 +144,7 @@ export function SecretsManager({
             />
             {nameInvalid && <FieldError message="^[A-Z_][A-Z0-9_]*$ 형식이어야 합니다." />}
           </div>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <Label htmlFor={`secret-value-${variant}`}>값</Label>
             {copy.multiline ? (
               <Textarea
@@ -166,7 +165,7 @@ export function SecretsManager({
                 autoComplete="off"
               />
             )}
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[12px] text-faint">
               기존 이름으로 저장하면 값이 교체됩니다. 저장 후에는 값을 다시 볼 수 없습니다.
             </p>
           </div>
@@ -177,7 +176,9 @@ export function SecretsManager({
             >
               {pending ? '저장 중…' : '저장'}
             </Button>
-            {saved && <span className="text-sm text-[var(--color-success)]">저장됨: {saved}</span>}
+            {saved && (
+              <span className="text-[13px] text-[var(--color-success)]">저장됨: {saved}</span>
+            )}
           </div>
           {error && (
             <Callout tone="danger" className="py-1.5">
@@ -186,7 +187,7 @@ export function SecretsManager({
           )}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           변경하려면 admin 역할(secrets:write)이 필요합니다.
         </p>
       )}

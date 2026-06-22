@@ -78,7 +78,7 @@ export function RegisterDatasetForm() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-5">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="id">id</Label>
@@ -114,12 +114,12 @@ export function RegisterDatasetForm() {
         <Label htmlFor="cases">케이스 (EvalCase[] JSON)</Label>
         <Textarea
           id="cases"
-          className="min-h-72 font-mono text-xs"
+          className="min-h-72 text-[12px]"
           value={casesText}
           onChange={(e) => setCasesText(e.target.value)}
           spellCheck={false}
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[12px] leading-relaxed text-muted-foreground">
           각 케이스는 id · env · task · graders 를 가집니다. 데이터셋은 하니스 무관 — 어느 하니스든
           같은 케이스로 평가합니다.
         </p>
@@ -128,7 +128,7 @@ export function RegisterDatasetForm() {
       {result && <ValidateBanner result={result} />}
       {createError && <Callout tone="danger">{createError}</Callout>}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
         버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 등록하면 409 로 거부됩니다.
       </p>
 
@@ -149,7 +149,7 @@ function ValidateBanner({ result }: { result: ValidateDatasetResult }) {
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-medium">스키마 오류</div>
+        <div className="font-[510]">스키마 오류</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -159,7 +159,7 @@ function ValidateBanner({ result }: { result: ValidateDatasetResult }) {
     )
   return (
     <Callout tone="info">
-      <div className="font-medium">
+      <div className="font-[510]">
         ✓ 스키마 정상 · {result.id}@{result.version} · 케이스 {result.cases ?? 0}건{' '}
         {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>

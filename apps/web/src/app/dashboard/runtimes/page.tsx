@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Server } from 'lucide-react'
 
 import { runtimesSchema } from '@/entities/runtime'
 import { can } from '@/shared/auth/can'
@@ -7,7 +8,6 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -27,7 +27,7 @@ export default async function RuntimesPage() {
     <div className="space-y-6">
       <PageHeader
         title="런타임"
-        description="이 워크스페이스가 실행에 쓸 인프라(local / nomad / k8s) + 공용. 스코어카드 실행 시 선택."
+        description={`${runtimes.length}건 · 실행 인프라(local / nomad / k8s) + 공용. 스코어카드 실행 시 선택.`}
         actions={
           can(principal?.roles, 'runtimes:write') ? (
             <Link href="/dashboard/runtimes/new" className={buttonVariants({ size: 'sm' })}>
@@ -40,35 +40,42 @@ export default async function RuntimesPage() {
         <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : runtimes.length === 0 ? (
         <EmptyState
+          icon={<Server />}
           title="등록된 런타임이 없습니다."
           hint="admin 이 '런타임 등록'으로 Nomad/K8s/local 을 정의하거나, API/MCP(create_runtime)로 등록하세요. 자격증명은 시크릿으로."
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {runtimes.map((r) => (
-            <Link key={r.id} href={`/dashboard/runtimes/${encodeURIComponent(r.id)}`}>
-              <Card className="transition-colors hover:border-primary/40">
-                <CardContent className="space-y-2 pt-5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold">{r.id}</span>
-                    <Badge tone={r.owner === principal?.workspace ? 'success' : 'neutral'}>
-                      {r.owner === principal?.workspace ? 'owned' : 'shared'}
-                    </Badge>
+        <div className="space-y-2">
+          {runtimes.map((r) => {
+            const owned = r.owner === principal?.workspace
+            return (
+              <Link
+                key={r.id}
+                href={`/dashboard/runtimes/${encodeURIComponent(r.id)}`}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border">
+                    <Server className="size-[18px]" strokeWidth={1.75} />
+                  </span>
+                  <div className="min-w-0 space-y-1.5">
+                    <div className="truncate text-[13px] font-[560] text-foreground">{r.id}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {r.versions.map((v) => (
+                        <code
+                          key={v}
+                          className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-border"
+                        >
+                          {v}
+                        </code>
+                      ))}
+                    </div>
                   </div>
-                  <div className="flex flex-wrap gap-1">
-                    {r.versions.map((v) => (
-                      <code
-                        key={v}
-                        className="rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
-                      >
-                        {v}
-                      </code>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-            </Link>
-          ))}
+                </div>
+                <Badge tone={owned ? 'success' : 'neutral'}>{owned ? 'owned' : 'shared'}</Badge>
+              </Link>
+            )
+          })}
         </div>
       )}
     </div>

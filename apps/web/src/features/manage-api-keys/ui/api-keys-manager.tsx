@@ -43,11 +43,11 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
 
   return (
     <div className="space-y-5">
-      <div>
-        <h3 className="text-sm font-semibold">API 키</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
+      <div className="space-y-1">
+        <h3 className="text-[13px] font-[560] text-foreground">API 키</h3>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
           에이전트·MCP 가 컨트롤플레인에 접근할 때 쓰는 키(<span className="font-mono">ak_…</span>).{' '}
-          <span className="font-medium text-foreground">
+          <span className="font-[510] text-foreground">
             발급된 키는 현재 워크스페이스의 admin 권한을 가집니다.
           </span>{' '}
           발급 시 평문은 한 번만 표시되며 이후에는 prefix 로만 식별됩니다.
@@ -79,15 +79,17 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
 
       {/* 목록 */}
       {keys.length === 0 ? (
-        <p className="text-sm text-muted-foreground">아직 발급된 키가 없습니다.</p>
+        <p className="text-[13px] text-muted-foreground">아직 발급된 키가 없습니다.</p>
       ) : (
-        <ul className="divide-y rounded-lg border">
+        <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {keys.map((k) => (
-            <li key={k.id} className="flex items-center justify-between gap-3 px-3 py-2">
+            <li key={k.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
               <div className="min-w-0">
-                <span className="font-mono text-sm">{k.prefix}…</span>
-                {k.label && <span className="ml-2 text-sm text-foreground">{k.label}</span>}
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span className="font-mono text-[13px]">{k.prefix}…</span>
+                {k.label && (
+                  <span className="ml-2 text-[13px] font-[510] text-foreground">{k.label}</span>
+                )}
+                <span className="ml-2 text-[12px] text-faint">
                   {new Date(k.createdAt).toLocaleString('ko-KR')}
                 </span>
               </div>
@@ -95,9 +97,8 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
                 (confirmId === k.id ? (
                   <span className="flex items-center gap-2">
                     <Button
-                      variant="outline"
+                      variant="destructive"
                       size="sm"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/5"
                       disabled={pending}
                       onClick={() => onRevoke(k.id)}
                     >
@@ -105,7 +106,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
                     </Button>
                     <button
                       type="button"
-                      className="text-xs text-muted-foreground hover:text-foreground"
+                      className="text-[12px] text-muted-foreground hover:text-foreground"
                       onClick={() => setConfirmId(undefined)}
                     >
                       닫기
@@ -114,7 +115,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
                 ) : (
                   <button
                     type="button"
-                    className="text-xs text-destructive hover:underline"
+                    className="text-[12px] font-[510] text-destructive hover:underline"
                     onClick={() => setConfirmId(k.id)}
                   >
                     취소
@@ -127,8 +128,8 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
 
       {/* 발급 */}
       {canWrite ? (
-        <div className="flex items-end gap-3">
-          <div className="flex-1 space-y-1">
+        <div className="flex items-end gap-2.5">
+          <div className="flex-1 space-y-1.5">
             <Label htmlFor="key-label">레이블 (선택)</Label>
             <Input
               id="key-label"
@@ -143,7 +144,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
           </Button>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           키를 발급/취소하려면 admin 역할(keys:write)이 필요합니다.
         </p>
       )}

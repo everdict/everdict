@@ -1,13 +1,13 @@
 import Link from 'next/link'
+import { Gavel, Plus } from 'lucide-react'
 
 import { judgesSchema } from '@/entities/judge'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
-import { buttonVariants } from '@/shared/ui/button'
+import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -27,11 +27,14 @@ export default async function JudgesPage() {
     <div className="space-y-6">
       <PageHeader
         title="Judge"
-        description="이 워크스페이스가 등록한 Agent Judge + 공유(기본). model(LLM/VLM 호출) 또는 harness(에이전트 위임)."
+        description={`${judges.length}건 · model(LLM/VLM 호출) 또는 harness(에이전트 위임). 워크스페이스 소유 + 공유(기본).`}
         actions={
           can(principal?.roles, 'judges:write') ? (
-            <Link href="/dashboard/judges/new" className={buttonVariants({ size: 'sm' })}>
-              Judge 등록
+            <Link href="/dashboard/judges/new">
+              <Button size="sm">
+                <Plus className="size-4" />
+                Judge 등록
+              </Button>
             </Link>
           ) : null
         }
@@ -40,33 +43,39 @@ export default async function JudgesPage() {
         <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : judges.length === 0 ? (
         <EmptyState
+          icon={<Gavel />}
           title="등록된 Judge 가 없습니다."
           hint="member 이상이면 'Judge 등록'으로 model/harness judge 를 올리거나, API/MCP(create_judge)로 등록하세요."
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-2">
           {judges.map((j) => (
-            <Link key={j.id} href={`/dashboard/judges/${encodeURIComponent(j.id)}`}>
-              <Card className="transition-colors hover:border-primary/40">
-                <CardContent className="space-y-2 pt-5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold">{j.id}</span>
-                    <Badge tone={j.owner === principal?.workspace ? 'success' : 'neutral'}>
-                      {j.owner === principal?.workspace ? 'owned' : 'shared'}
-                    </Badge>
-                  </div>
+            <Link
+              key={j.id}
+              href={`/dashboard/judges/${encodeURIComponent(j.id)}`}
+              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border">
+                  <Gavel className="size-[18px]" strokeWidth={1.75} />
+                </span>
+                <div className="min-w-0 space-y-1">
+                  <div className="truncate text-[13px] font-[560] text-foreground">{j.id}</div>
                   <div className="flex flex-wrap gap-1">
                     {j.versions.map((v) => (
                       <code
                         key={v}
-                        className="rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
+                        className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border"
                       >
                         {v}
                       </code>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
+              <Badge tone={j.owner === principal?.workspace ? 'success' : 'neutral'}>
+                {j.owner === principal?.workspace ? 'owned' : 'shared'}
+              </Badge>
             </Link>
           ))}
         </div>

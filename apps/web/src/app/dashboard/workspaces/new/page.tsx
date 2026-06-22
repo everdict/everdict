@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ChevronLeft } from 'lucide-react'
 
 import { CreateWorkspaceForm } from '@/features/create-workspace'
 import { Card } from '@/shared/ui/card'
@@ -12,15 +13,16 @@ export default function NewWorkspacePage() {
     <div className="mx-auto max-w-lg space-y-6">
       <Link
         href="/dashboard"
-        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
-        ← 대시보드
+        <ChevronLeft className="size-3.5" />
+        대시보드
       </Link>
       <PageHeader
         title="새 워크스페이스"
         description="평가를 격리해 담을 새 워크스페이스를 만듭니다. 만든 사람은 admin 이 됩니다."
       />
-      <Card className="p-6">
+      <Card className="p-4">
         <CreateWorkspaceForm />
       </Card>
     </div>

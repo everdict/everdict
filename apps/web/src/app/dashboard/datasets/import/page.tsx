@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ChevronLeft, ChevronRight } from 'lucide-react'
 
 import {
   AddBenchmark,
@@ -35,9 +36,10 @@ export default async function ImportBenchmarkPage() {
     <div className="space-y-6">
       <Link
         href="/dashboard/datasets"
-        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
-        ← 데이터셋
+        <ChevronLeft className="size-3.5" />
+        데이터셋
       </Link>
       <PageHeader
         title="벤치마크 추가"
@@ -45,9 +47,10 @@ export default async function ImportBenchmarkPage() {
         actions={
           <Link
             href="/dashboard/datasets/recipes"
-            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
           >
-            레시피 관리 →
+            레시피 관리
+            <ChevronRight className="size-3.5" />
           </Link>
         }
       />
@@ -59,7 +62,7 @@ export default async function ImportBenchmarkPage() {
       ) : error ? (
         <Callout tone="danger">카탈로그 조회 실패: {error}</Callout>
       ) : (
-        <Card className="p-6">
+        <Card className="p-5">
           <AddBenchmark benchmarks={benchmarks} recipes={recipes} />
         </Card>
       )}

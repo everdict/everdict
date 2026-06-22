@@ -1,21 +1,34 @@
 import Link from 'next/link'
+import { ChevronLeft } from 'lucide-react'
 
 import { modelSpecSchema, type ModelSpec } from '@/entities/model'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
-import { Card, CardContent } from '@/shared/ui/card'
+import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-function Meta({ label, value }: { label: string; value: string }) {
+function Prop({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <dt className="text-xs uppercase tracking-wide text-muted-foreground">{label}</dt>
-      <dd className="mt-0.5 font-mono text-sm">{value}</dd>
+    <div className="min-w-0">
+      <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">{label}</dt>
+      <dd className="mt-1 truncate font-mono text-[13px] text-foreground">{value}</dd>
     </div>
+  )
+}
+
+function BackLink() {
+  return (
+    <Link
+      href="/dashboard/models"
+      className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <ChevronLeft className="size-3.5" />
+      모델
+    </Link>
   )
 }
 
@@ -33,60 +46,51 @@ export default async function ModelDetailPage({ params }: { params: Promise<{ id
 
   if (!model) {
     return (
-      <div className="space-y-6">
+      <div className="space-y-5">
+        <BackLink />
         <PageHeader title="모델" />
         <Callout tone="danger">모델을 불러올 수 없습니다: {error}</Callout>
-        <Link
-          href="/dashboard/models"
-          className="text-sm text-muted-foreground hover:text-foreground"
-        >
-          ← 모델
-        </Link>
       </div>
     )
   }
 
   return (
-    <div className="space-y-6">
-      <Link
-        href="/dashboard/models"
-        className="text-sm text-muted-foreground hover:text-foreground"
-      >
-        ← 모델
-      </Link>
-      <PageHeader
-        title={model.id}
-        description={model.description ?? '추론/판정 모델'}
-        actions={<Badge tone="info">{`${model.id}@${model.version}`}</Badge>}
-      />
-      <Card>
-        <CardContent className="pt-5">
-          <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-3">
-            <Meta label="provider" value={model.provider} />
-            <Meta label="model" value={model.model} />
-            <Meta label="version" value={model.version} />
-            {model.baseUrl ? <Meta label="baseUrl" value={model.baseUrl} /> : null}
-            {model.params?.temperature !== undefined ? (
-              <Meta label="temperature" value={String(model.params.temperature)} />
-            ) : null}
-            {model.params?.maxTokens !== undefined ? (
-              <Meta label="maxTokens" value={String(model.params.maxTokens)} />
-            ) : null}
-          </dl>
-          {model.tags && model.tags.length > 0 ? (
-            <div className="mt-4 flex flex-wrap gap-1">
-              {model.tags.map((t) => (
-                <Badge key={t} tone="neutral">
-                  {t}
-                </Badge>
-              ))}
-            </div>
-          ) : null}
-        </CardContent>
+    <div className="space-y-7">
+      <div className="space-y-3">
+        <BackLink />
+        <PageHeader
+          title={model.id}
+          description={model.description ?? '추론/판정 모델'}
+          actions={<Badge tone="info">{`${model.id}@${model.version}`}</Badge>}
+        />
+      </div>
+
+      <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
+        <Prop label="provider" value={model.provider} />
+        <Prop label="model" value={model.model} />
+        <Prop label="version" value={model.version} />
+        {model.baseUrl ? <Prop label="baseUrl" value={model.baseUrl} /> : null}
+        {model.params?.temperature !== undefined ? (
+          <Prop label="temperature" value={String(model.params.temperature)} />
+        ) : null}
+        {model.params?.maxTokens !== undefined ? (
+          <Prop label="maxTokens" value={String(model.params.maxTokens)} />
+        ) : null}
       </Card>
-      <p className="text-xs text-muted-foreground">
-        API 키는 여기 없습니다 — provider 별 시크릿(설정 → 시크릿)을 사용합니다. judge 의 model 을
-        이 id 로 두면 이 provider/baseUrl 로 해석됩니다.
+
+      {model.tags && model.tags.length > 0 ? (
+        <div className="flex flex-wrap gap-1">
+          {model.tags.map((t) => (
+            <Badge key={t} tone="neutral">
+              {t}
+            </Badge>
+          ))}
+        </div>
+      ) : null}
+
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
+        API 키는 여기 없습니다 — provider 별 시크릿(설정 → 시크릿)을 사용합니다. judge 의 model 을 이
+        id 로 두면 이 provider/baseUrl 로 해석됩니다.
       </p>
     </div>
   )

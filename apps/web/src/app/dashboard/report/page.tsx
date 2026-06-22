@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { BarChart3 } from 'lucide-react'
 
 import {
   casePass,
@@ -11,7 +12,7 @@ import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
-import { Card, CardContent } from '@/shared/ui/card'
+import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
@@ -64,7 +65,7 @@ export default async function ReportPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-7">
       <PageHeader
         title="통합 리포트"
         description="데스크탑(os-use/OSWorld) + 웹(browser-use/WebVoyager) — 권위-기준(state > 객관 > judge) 케이스 통과율."
@@ -72,7 +73,7 @@ export default async function ReportPage() {
 
       {error && <Callout tone="danger">스코어카드를 불러올 수 없습니다: {error}</Callout>}
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
         <StatCard
           label="combined case pass"
           value={pct(combPass, combTotal)}
@@ -100,31 +101,35 @@ export default async function ReportPage() {
       </div>
 
       {TRACK_ORDER.filter((t) => byTrack[t].length > 0).map((t) => (
-        <section key={t} className="space-y-3">
+        <section key={t} className="space-y-2.5">
           <SectionHeader title={TRACK_LABEL[t]} />
           <div className="space-y-2">
             {byTrack[t].map((r) => {
               const cp = casePass(r)
               const allPass = cp.total > 0 && cp.pass === cp.total
               return (
-                <Card key={r.id}>
-                  <CardContent className="flex flex-wrap items-center justify-between gap-3 pt-5">
-                    <Link
-                      href={`/dashboard/scorecards/${r.id}`}
-                      className="font-mono text-sm transition-colors hover:text-primary"
-                    >
-                      {r.dataset.id}@{r.dataset.version} → {r.harness.id}@{r.harness.version}
-                    </Link>
-                    <div className="flex items-center gap-2">
-                      <span className="font-mono text-sm tabular-nums">
-                        case pass {cp.pass}/{cp.total} ({pct(cp.pass, cp.total)})
-                      </span>
-                      <Badge tone={allPass ? 'success' : cp.pass > 0 ? 'info' : 'danger'}>
-                        {allPass ? 'all pass' : `${cp.total - cp.pass} fail`}
-                      </Badge>
-                    </div>
-                  </CardContent>
-                </Card>
+                <Link
+                  key={r.id}
+                  href={`/dashboard/scorecards/${r.id}`}
+                  className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+                >
+                  <span className="min-w-0 truncate font-mono text-[13px] font-[510] text-foreground">
+                    {r.dataset.id}
+                    <span className="text-faint">@{r.dataset.version}</span>
+                    <span className="px-1 text-muted-foreground">→</span>
+                    {r.harness.id}
+                    <span className="text-faint">@{r.harness.version}</span>
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
+                      <span className="text-faint">case pass</span> {cp.pass}/{cp.total} (
+                      {pct(cp.pass, cp.total)})
+                    </span>
+                    <Badge tone={allPass ? 'success' : cp.pass > 0 ? 'info' : 'danger'}>
+                      {allPass ? 'all pass' : `${cp.total - cp.pass} fail`}
+                    </Badge>
+                  </div>
+                </Link>
               )
             })}
           </div>
@@ -132,7 +137,11 @@ export default async function ReportPage() {
       ))}
 
       {succeeded.length === 0 && !error && (
-        <p className="text-sm text-muted-foreground">완료된 스코어카드가 없습니다.</p>
+        <EmptyState
+          icon={<BarChart3 />}
+          title="완료된 스코어카드가 없습니다."
+          hint="데이터셋을 하니스에 돌려 스코어카드를 완료하면 트랙별 통합 리포트가 여기에 표시됩니다."
+        />
       )}
     </div>
   )

@@ -58,11 +58,11 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
 
   return (
     <div className="space-y-5">
-      <div>
-        <h3 className="text-sm font-semibold">초대</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
+      <div className="space-y-1">
+        <h3 className="text-[13px] font-[560] text-foreground">초대</h3>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
           초대 링크를 만들어 공유하면, 받은 사람이 로그인 후 수락해 이 워크스페이스에 그 역할로
-          가입합니다. 링크의 토큰은 <span className="font-medium text-foreground">한 번만</span>{' '}
+          가입합니다. 링크의 토큰은 <span className="font-[510] text-foreground">한 번만</span>{' '}
           사용되며 만료를 둘 수 있습니다.
         </p>
       </div>
@@ -92,15 +92,15 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
 
       {/* 대기중 초대 목록 */}
       {pending2.length === 0 ? (
-        <p className="text-sm text-muted-foreground">대기중인 초대가 없습니다.</p>
+        <p className="text-[13px] text-muted-foreground">대기중인 초대가 없습니다.</p>
       ) : (
-        <ul className="divide-y rounded-lg border">
+        <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {pending2.map((i) => (
-            <li key={i.id} className="flex items-center justify-between gap-3 px-3 py-2">
+            <li key={i.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
               <div className="min-w-0">
-                <span className="font-mono text-sm">{i.prefix}…</span>
-                <span className="ml-2 text-xs text-muted-foreground">{i.role}</span>
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span className="font-mono text-[13px]">{i.prefix}…</span>
+                <span className="ml-2 text-[12px] text-faint">{i.role}</span>
+                <span className="ml-2 text-[12px] text-faint">
                   {i.expiresAt ? `만료 ${new Date(i.expiresAt).toLocaleString('ko-KR')}` : '무기한'}
                 </span>
               </div>
@@ -108,9 +108,8 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
                 (confirmId === i.id ? (
                   <span className="flex items-center gap-2">
                     <Button
-                      variant="outline"
+                      variant="destructive"
                       size="sm"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/5"
                       disabled={pending}
                       onClick={() => onRevoke(i.id)}
                     >
@@ -118,7 +117,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
                     </Button>
                     <button
                       type="button"
-                      className="text-xs text-muted-foreground hover:text-foreground"
+                      className="text-[12px] text-muted-foreground hover:text-foreground"
                       onClick={() => setConfirmId(undefined)}
                     >
                       닫기
@@ -127,7 +126,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
                 ) : (
                   <button
                     type="button"
-                    className="text-xs text-destructive hover:underline"
+                    className="text-[12px] font-[510] text-destructive hover:underline"
                     onClick={() => setConfirmId(i.id)}
                   >
                     취소
@@ -140,8 +139,8 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
 
       {/* 발급 */}
       {canWrite ? (
-        <div className="flex items-end gap-3">
-          <div className="space-y-1">
+        <div className="flex items-end gap-2.5">
+          <div className="space-y-1.5">
             <Label htmlFor="invite-role">역할</Label>
             <Select
               id="invite-role"
@@ -156,7 +155,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
               ))}
             </Select>
           </div>
-          <div className="space-y-1">
+          <div className="space-y-1.5">
             <Label htmlFor="invite-expiry">만료(시간, 선택)</Label>
             <Input
               id="invite-expiry"
@@ -172,7 +171,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
           </Button>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           초대를 발급/취소하려면 admin 역할(members:write)이 필요합니다.
         </p>
       )}

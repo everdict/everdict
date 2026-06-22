@@ -24,7 +24,7 @@ export function AddBenchmark({
   const [mode, setMode] = useState<'build' | 'import'>('build')
   return (
     <div className="space-y-5">
-      <div className="inline-flex rounded-lg border border-border p-1">
+      <div className="inline-flex rounded-lg border bg-secondary/40 p-0.5">
         {(
           [
             ['build', '소스에서 만들기'],
@@ -36,9 +36,9 @@ export function AddBenchmark({
             type="button"
             onClick={() => setMode(m)}
             className={cn(
-              'rounded-md px-3 py-1 text-sm transition-colors',
+              'rounded-md px-3 py-1 text-[13px] transition-colors',
               mode === m
-                ? 'bg-secondary font-medium text-foreground'
+                ? 'bg-card font-[510] text-foreground shadow-raise'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >

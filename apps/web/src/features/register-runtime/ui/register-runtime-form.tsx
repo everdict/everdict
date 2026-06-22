@@ -103,18 +103,18 @@ export function RegisterRuntimeForm() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-5">
       {/* kind 토글 */}
-      <div className="inline-flex rounded-lg border border-border p-1 text-sm">
+      <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
         {(['local', 'nomad', 'k8s'] as const).map((k) => (
           <button
             key={k}
             type="button"
             onClick={() => setKind(k)}
             className={cn(
-              'flex-1 rounded-md px-3 py-1.5 transition-colors',
+              'rounded px-3 py-1 font-[510] transition-colors',
               kind === k
-                ? 'bg-secondary text-foreground font-medium'
+                ? 'bg-card text-foreground shadow-raise'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -290,7 +290,7 @@ export function RegisterRuntimeForm() {
               />
             </div>
           </div>
-          <Callout tone="muted" className="text-xs">
+          <Callout tone="muted" className="text-[12px]">
             인증 우선순위: kubeconfigSecret &gt; (server + authSecret) &gt; context.
             exec-plugin/client-cert 클러스터(EKS/GKE)는 전체 kubeconfig 를 시크릿으로 저장해
             kubeconfigSecret 로 참조하세요. 토큰·kubeconfig '값'은 클러스터 자격증명 탭(워크스페이스
@@ -306,7 +306,7 @@ export function RegisterRuntimeForm() {
         </Callout>
       )}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] text-muted-foreground">
         토큰·kubeconfig 같은 자격증명은 여기 넣지 않습니다 — 워크스페이스 시크릿(예:
         NOMAD_TOKEN)으로 관리되고 실행 시 주입됩니다.
       </p>
@@ -338,14 +338,14 @@ function ProbeBanner({ probe }: { probe: ProbeRuntimeResult }) {
   if (probe.reachable)
     return (
       <Callout tone="info">
-        <span className="font-medium">✓ 연결 성공{probe.kind ? ` · ${probe.kind}` : ''}</span>
+        <span className="font-[560]">✓ 연결 성공{probe.kind ? ` · ${probe.kind}` : ''}</span>
         {probe.detail ? <span className="ml-1 text-muted-foreground">— {probe.detail}</span> : null}
       </Callout>
     )
   return (
     <Callout tone="danger">
-      <div className="font-medium">✗ 연결 실패{probe.kind ? ` · ${probe.kind}` : ''}</div>
-      {probe.detail ? <div className="mt-1 font-mono text-xs">{probe.detail}</div> : null}
+      <div className="font-[560]">✗ 연결 실패{probe.kind ? ` · ${probe.kind}` : ''}</div>
+      {probe.detail ? <div className="mt-1 font-mono text-[12px]">{probe.detail}</div> : null}
     </Callout>
   )
 }
@@ -355,7 +355,7 @@ function ValidateBanner({ result }: { result: ValidateRuntimeResult }) {
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-medium">스키마 오류</div>
+        <div className="font-[560]">스키마 오류</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -367,7 +367,7 @@ function ValidateBanner({ result }: { result: ValidateRuntimeResult }) {
   return (
     <div className="space-y-2">
       <Callout tone="info">
-        <span className="font-medium">
+        <span className="font-[560]">
           ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version}{' '}
           {result.versionExists ? '(이미 존재)' : '(새 버전)'}
         </span>

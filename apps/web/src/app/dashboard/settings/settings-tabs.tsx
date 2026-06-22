@@ -1,15 +1,12 @@
 'use client'
 
-import { useState } from 'react'
-
 import { InvitesManager } from '@/features/manage-invites'
 import { MembersManager } from '@/features/manage-members'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { SettingsForm, type WorkspaceSettings } from '@/features/workspace-settings'
 import type { Invite, Member } from '@/entities/member'
 import type { SecretMeta } from '@/entities/secret'
-import { cn } from '@/shared/lib/utils'
-import { Card } from '@/shared/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
 type TabKey = 'general' | 'model' | 'cluster' | 'members'
 
@@ -33,52 +30,36 @@ export function SettingsTabs(props: {
     { key: 'members', label: '멤버', show: props.canReadMembers },
   ]
   const visible = tabs.filter((t) => t.show)
-  const [active, setActive] = useState<TabKey>(visible[0]?.key ?? 'general')
 
   return (
-    <div className="space-y-4">
-      <div className="flex gap-1 border-b">
+    <Tabs defaultValue={visible[0]?.key ?? 'general'} className="space-y-5">
+      <TabsList>
         {visible.map((t) => (
-          <button
-            key={t.key}
-            type="button"
-            onClick={() => setActive(t.key)}
-            className={cn(
-              '-mb-px border-b-2 px-3 py-2 text-sm transition-colors',
-              active === t.key
-                ? 'border-primary text-foreground'
-                : 'border-transparent text-muted-foreground hover:text-foreground'
-            )}
-          >
+          <TabsTrigger key={t.key} value={t.key}>
             {t.label}
-          </button>
+          </TabsTrigger>
         ))}
-      </div>
-      <Card className="p-6">
-        {active === 'general' && (
-          <SettingsForm initial={props.settings} canWrite={props.canWriteSettings} />
-        )}
-        {active === 'model' && (
-          <SecretsManager
-            variant="model"
-            secrets={props.secrets}
-            canWrite={props.canWriteSecrets}
-          />
-        )}
-        {active === 'cluster' && (
-          <SecretsManager
-            variant="cluster"
-            secrets={props.secrets}
-            canWrite={props.canWriteSecrets}
-          />
-        )}
-        {active === 'members' && (
-          <div className="space-y-8">
-            <MembersManager members={props.members} canWrite={props.canWriteMembers} />
-            {props.canWriteMembers && <InvitesManager invites={props.invites} canWrite />}
-          </div>
-        )}
-      </Card>
-    </div>
+      </TabsList>
+
+      <TabsContent value="general">
+        <SettingsForm initial={props.settings} canWrite={props.canWriteSettings} />
+      </TabsContent>
+      <TabsContent value="model">
+        <SecretsManager variant="model" secrets={props.secrets} canWrite={props.canWriteSecrets} />
+      </TabsContent>
+      <TabsContent value="cluster">
+        <SecretsManager
+          variant="cluster"
+          secrets={props.secrets}
+          canWrite={props.canWriteSecrets}
+        />
+      </TabsContent>
+      <TabsContent value="members">
+        <div className="space-y-8">
+          <MembersManager members={props.members} canWrite={props.canWriteMembers} />
+          {props.canWriteMembers && <InvitesManager invites={props.invites} canWrite />}
+        </div>
+      </TabsContent>
+    </Tabs>
   )
 }

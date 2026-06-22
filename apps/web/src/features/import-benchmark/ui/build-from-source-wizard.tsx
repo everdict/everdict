@@ -193,19 +193,17 @@ export function BuildFromSourceWizard() {
     <div className="max-w-2xl space-y-6">
       {/* 1. 소스 */}
       <section className="space-y-3">
-        <div className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">
-          1 · 소스
-        </div>
-        <div className="inline-flex rounded-lg border border-border p-1">
+        <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">1 · 소스</div>
+        <div className="inline-flex rounded-lg border bg-secondary/40 p-0.5">
           {(['huggingface', 'jsonl'] as const).map((k) => (
             <button
               key={k}
               type="button"
               onClick={() => setSourceKind(k)}
               className={cn(
-                'rounded-md px-3 py-1 text-sm transition-colors',
+                'rounded-md px-3 py-1 text-[13px] transition-colors',
                 sourceKind === k
-                  ? 'bg-secondary font-medium text-foreground'
+                  ? 'bg-card font-[510] text-foreground shadow-raise'
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
@@ -255,16 +253,16 @@ export function BuildFromSourceWizard() {
 
             {/* 검색 결과 */}
             {hits.length > 0 && (
-              <div className="max-h-64 divide-y divide-border/60 overflow-auto rounded-lg border border-border">
+              <div className="max-h-64 divide-y divide-border/60 overflow-auto rounded-lg border bg-card shadow-raise">
                 {hits.map((h) => (
                   <button
                     key={h.id}
                     type="button"
                     onClick={() => selectHit(h)}
-                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-accent"
+                    className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left transition-colors hover:bg-elevated"
                   >
-                    <span className="truncate font-mono text-sm">{h.id}</span>
-                    <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
+                    <span className="truncate font-mono text-[12px]">{h.id}</span>
+                    <span className="flex shrink-0 items-center gap-2 text-[12px] text-muted-foreground">
                       {h.gated && (
                         <span className="inline-flex items-center gap-1 text-[var(--color-warning)]">
                           <Lock className="size-3" /> gated
@@ -281,12 +279,12 @@ export function BuildFromSourceWizard() {
 
             {/* 선택됨 + split */}
             {hfDataset && (
-              <div className="space-y-2 rounded-lg border border-border bg-card/60 p-3">
-                <div className="flex items-center gap-2 text-sm">
+              <div className="space-y-2 rounded-lg border bg-card p-3 shadow-raise">
+                <div className="flex items-center gap-2 text-[13px]">
                   <span className="text-muted-foreground">선택됨:</span>
                   <code className="font-mono text-foreground">{hfDataset}</code>
                   {hfGated && (
-                    <span className="inline-flex items-center gap-1 text-xs text-[var(--color-warning)]">
+                    <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
                       <Lock className="size-3" /> gated · HF_TOKEN 시크릿 필요
                     </span>
                   )}
@@ -317,7 +315,7 @@ export function BuildFromSourceWizard() {
             <Label htmlFor="jsonl">JSONL (한 줄 = 한 JSON 객체)</Label>
             <Textarea
               id="jsonl"
-              className="min-h-40 font-mono text-xs"
+              className="min-h-40 text-[12px]"
               value={jsonlText}
               onChange={(e) => setJsonlText(e.target.value)}
               spellCheck={false}
@@ -355,14 +353,14 @@ export function BuildFromSourceWizard() {
               {fields.map((f) => (
                 <code
                   key={f}
-                  className="rounded-md border border-border bg-card px-1.5 py-0.5 text-xs"
+                  className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border"
                 >
                   {f}
                 </code>
               ))}
             </div>
             {rows[0] && (
-              <pre className="mt-2 max-h-32 overflow-auto rounded-lg border border-border bg-card p-2 text-[11px] leading-relaxed">
+              <pre className="mt-2 max-h-32 overflow-auto rounded-lg border bg-card p-2 font-mono text-[11px] leading-relaxed">
                 {JSON.stringify(rows[0], null, 2)}
               </pre>
             )}
@@ -373,9 +371,9 @@ export function BuildFromSourceWizard() {
       {/* 2. 매핑 (미리보기 후) */}
       {previewed && (
         <section className="space-y-3">
-          <div className="flex items-center gap-1.5 text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
             2 · 매핑 <Sparkles className="size-3.5 text-primary" />
-            <span className="font-normal normal-case tracking-normal text-muted-foreground/70">
+            <span className="normal-case tracking-normal text-muted-foreground/70">
               자동 추측됨 — 필요하면 바꾸세요
             </span>
           </div>
@@ -413,7 +411,7 @@ export function BuildFromSourceWizard() {
       {/* 3. 데이터셋 메타 + 생성 (미리보기 후) */}
       {previewed && (
         <section className="space-y-3">
-          <div className="text-[13px] font-semibold uppercase tracking-wide text-muted-foreground">
+          <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">
             3 · 데이터셋
           </div>
           <div className="grid grid-cols-3 gap-3">
@@ -475,7 +473,7 @@ export function BuildFromSourceWizard() {
             {createBusy ? <Loader2 className="size-4 animate-spin" /> : null}
             벤치마크 만들기 → 데이터셋
           </Button>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[12px] leading-relaxed text-muted-foreground">
             버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 만들면 409.
           </p>
         </section>

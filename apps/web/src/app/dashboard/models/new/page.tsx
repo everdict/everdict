@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ChevronLeft } from 'lucide-react'
 
 import { RegisterModelForm } from '@/features/register-model'
 import { can } from '@/shared/auth/can'
@@ -15,18 +16,21 @@ export default async function NewModelPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/dashboard/models"
-        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        ← 모델
-      </Link>
-      <PageHeader
-        title="모델 등록"
-        description="추론/판정 모델(provider + 하부 모델 + baseUrl)을 이 워크스페이스 소유로 등록합니다."
-      />
+      <div className="space-y-3">
+        <Link
+          href="/dashboard/models"
+          className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="size-3.5" />
+          모델
+        </Link>
+        <PageHeader
+          title="모델 등록"
+          description="추론/판정 모델(provider + 하부 모델 + baseUrl)을 이 워크스페이스 소유로 등록합니다."
+        />
+      </div>
       {allowed ? (
-        <Card className="p-6">
+        <Card className="p-5">
           <RegisterModelForm />
         </Card>
       ) : (

@@ -3,7 +3,7 @@ import { redirect } from 'next/navigation'
 import { ArrowRight, FlaskConical, GitCompareArrows, Layers, ShieldCheck } from 'lucide-react'
 
 import { currentPrincipal } from '@/shared/auth/principal'
-import { Button } from '@/shared/ui/button'
+import { buttonVariants } from '@/shared/ui/button'
 import { ThemeToggle } from '@/shared/ui/theme-toggle'
 
 // 컨트롤플레인 GET /me 로 현재 인증을 확인해야 하므로 정적 렌더가 아니다.
@@ -36,73 +36,74 @@ export default async function Home() {
 
   return (
     <main className="relative flex min-h-screen flex-col">
-      {/* 상단 바 */}
-      <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-5">
-        <div className="flex items-center gap-2.5">
-          <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
-            <FlaskConical className="size-[18px]" />
-          </span>
-          <span className="font-display text-[16px] font-bold tracking-tight">Assay</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <ThemeToggle />
-          <Link href="/api/auth/signin">
-            <Button variant="ghost" size="sm">
+      {/* 상단 바 — 절제된 워드마크 + 테마/로그인 */}
+      <header className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur-md">
+        <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-3.5">
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
+              <FlaskConical className="size-4" />
+            </span>
+            <span className="font-display text-[15px] font-[560] tracking-tight">Assay</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <ThemeToggle />
+            <Link
+              href="/api/auth/signin"
+              className={buttonVariants({ variant: 'ghost', size: 'sm' })}
+            >
               로그인
-            </Button>
-          </Link>
+            </Link>
+          </div>
         </div>
       </header>
 
-      {/* 히어로 */}
-      <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-7 px-6 py-20 text-center">
-        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card/60 px-3 py-1 text-xs font-medium text-muted-foreground backdrop-blur">
+      {/* 히어로 — 랜딩만 넉넉한 여백이 정답 */}
+      <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-8 px-6 py-24 text-center sm:py-32">
+        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-[12px] font-[510] text-muted-foreground shadow-raise">
           <span className="size-1.5 rounded-full bg-[var(--color-success)]" />
           Agent harness evaluation runtime
         </span>
 
-        <h1 className="font-display text-balance text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
+        <h1 className="font-display text-5xl font-[560] leading-[1.06] tracking-[-0.025em] text-balance sm:text-6xl">
           하니스를 등록하고, 평가를 돌리고,
           <br className="hidden sm:block" />{' '}
-          <span className="bg-gradient-to-r from-primary to-[var(--color-accent-foreground)] bg-clip-text text-transparent">
-            테넌트별 스코어
-          </span>
-          를 본다.
+          <span className="text-primary">테넌트별 스코어</span>를 본다.
         </h1>
 
-        <p className="max-w-xl text-balance text-base leading-relaxed text-muted-foreground">
+        <p className="max-w-xl text-[15px] leading-relaxed text-balance text-muted-foreground">
           Assay 는 어떤 에이전트 하니스든 환경·오케스트레이터에 무관하게 공정·격리·예산 하에
           평가하는 멀티테넌트 런타임입니다. 사람은 이 웹으로, 에이전트는 MCP 로 같은 플랫폼을
           씁니다.
         </p>
 
-        <div className="flex flex-wrap items-center justify-center gap-3">
-          <Link href="/dashboard">
-            <Button className="gap-1.5">
-              대시보드 열기
-              <ArrowRight className="size-4" />
-            </Button>
+        <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
+          <Link href="/dashboard" className={buttonVariants({ size: 'lg' })}>
+            대시보드 열기
+            <ArrowRight className="size-4" />
           </Link>
-          <Link href="/api/auth/signin">
-            <Button variant="outline">로그인</Button>
+          <Link
+            href="/api/auth/signin"
+            className={buttonVariants({ variant: 'secondary', size: 'lg' })}
+          >
+            로그인
           </Link>
         </div>
       </section>
 
       {/* 피처 스트립 */}
-      <section className="mx-auto grid w-full max-w-6xl gap-4 px-6 pb-24 sm:grid-cols-3">
+      <section className="mx-auto grid w-full max-w-5xl gap-4 px-6 pb-28 sm:grid-cols-3">
         {FEATURES.map((f) => {
           const Icon = f.icon
           return (
             <div
               key={f.title}
-              className="rounded-xl border bg-card/60 p-5 backdrop-blur transition-colors hover:border-[var(--color-muted-foreground)]/30"
+              className="rounded-xl border bg-card p-5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
             >
-              <span className="mb-3 inline-grid size-9 place-items-center rounded-lg bg-primary/10 text-primary ring-1 ring-inset ring-primary/20">
-                <Icon className="size-[18px]" />
+              <span className="mb-4 inline-grid size-9 place-items-center rounded-lg bg-elevated text-muted-foreground ring-1 ring-inset ring-border">
+                <Icon className="size-[18px]" strokeWidth={1.75} />
               </span>
-              <h3 className="text-sm font-semibold tracking-tight">{f.title}</h3>
-              <p className="mt-1.5 text-sm leading-relaxed text-muted-foreground">{f.body}</p>
+              <h3 className="text-[14px] font-[560] tracking-tight text-foreground">{f.title}</h3>
+              <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{f.body}</p>
             </div>
           )
         })}

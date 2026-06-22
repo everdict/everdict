@@ -64,7 +64,7 @@ export function RegisterModelForm() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-5">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="id">id</Label>
@@ -149,7 +149,7 @@ export function RegisterModelForm() {
       {result && <ValidateBanner result={result} />}
       {createError && <Callout tone="danger">{createError}</Callout>}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] text-muted-foreground">
         API 키는 등록하지 않습니다 — provider 별 시크릿(ANTHROPIC_API_KEY / OPENAI_API_KEY)을
         사용합니다. 버전은 불변입니다(같은 id@version 다른 내용 → 409).
       </p>
@@ -171,7 +171,7 @@ function ValidateBanner({ result }: { result: ValidateModelResult }) {
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-medium">스키마 오류</div>
+        <div className="font-[510]">스키마 오류</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -181,7 +181,7 @@ function ValidateBanner({ result }: { result: ValidateModelResult }) {
     )
   return (
     <Callout tone="info">
-      <div className="font-medium">
+      <div className="font-[510]">
         ✓ 스키마 정상 · {result.provider} · {result.id}@{result.version}{' '}
         {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>

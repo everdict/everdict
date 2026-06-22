@@ -36,7 +36,7 @@ export function SettingsForm({
 
   return (
     <div className="space-y-5">
-      <label className="flex items-start gap-3">
+      <label className="flex items-start gap-3 rounded-lg border bg-card p-4 shadow-raise">
         <input
           type="checkbox"
           checked={meterUsage}
@@ -45,11 +45,11 @@ export function SettingsForm({
             setMeterUsage(e.target.checked)
             setSaved(false)
           }}
-          className="mt-1 h-4 w-4 accent-primary"
+          className="mt-0.5 h-4 w-4 accent-primary"
         />
-        <span className="text-sm">
-          <span className="font-medium">사용량 계측 (usage metering)</span>
-          <span className="block text-muted-foreground">
+        <span className="text-[13px]">
+          <span className="font-[510] text-foreground">사용량 계측 (usage metering)</span>
+          <span className="mt-0.5 block leading-relaxed text-muted-foreground">
             이 워크스페이스의 run 에서 모델 호출 토큰/비용을 회수해 버짓에 반영합니다. 요청별
             override(POST /runs meterUsage)가 이 기본값보다 우선합니다.
           </span>
@@ -60,7 +60,7 @@ export function SettingsForm({
           <Button onClick={onSave} disabled={busy}>
             {busy ? '저장 중…' : '저장'}
           </Button>
-          {saved && <span className="text-sm text-[var(--color-success)]">저장됨</span>}
+          {saved && <span className="text-[13px] text-[var(--color-success)]">저장됨</span>}
           {error && (
             <Callout tone="danger" className="py-1.5">
               {error}
@@ -68,7 +68,7 @@ export function SettingsForm({
           )}
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">
+        <p className="text-[13px] text-muted-foreground">
           변경하려면 admin 역할(settings:write)이 필요합니다.
         </p>
       )}

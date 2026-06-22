@@ -60,7 +60,7 @@ export function RunScorecardForm({
   }
 
   return (
-    <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-5">
+    <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-4">
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label htmlFor="datasetId">데이터셋</Label>
@@ -108,11 +108,12 @@ export function RunScorecardForm({
       {judges.length > 0 && (
         <div className="space-y-1.5">
           <Label>Agent Judge (선택 — 트레이스에 적용)</Label>
-          <div className="flex flex-wrap gap-3 rounded-lg border border-border p-3 text-sm">
+          <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-lg border border-border bg-card p-3 text-[13px]">
             {judges.map((j) => (
               <label key={j.id} className="flex items-center gap-1.5">
                 <input
                   type="checkbox"
+                  className="accent-primary"
                   checked={judgeIds.includes(j.id)}
                   onChange={(e) =>
                     setJudgeIds(
@@ -130,11 +131,12 @@ export function RunScorecardForm({
       {metrics.length > 0 && (
         <div className="space-y-1.5">
           <Label>메트릭 (선택 — 결과 점수 위 합격규칙 적용)</Label>
-          <div className="flex flex-wrap gap-3 rounded-lg border border-border p-3 text-sm">
+          <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-lg border border-border bg-card p-3 text-[13px]">
             {metrics.map((m) => (
               <label key={m.id} className="flex items-center gap-1.5">
                 <input
                   type="checkbox"
+                  className="accent-primary"
                   checked={metricIds.includes(m.id)}
                   onChange={(e) =>
                     setMetricIds(
@@ -164,7 +166,7 @@ export function RunScorecardForm({
       <div className="space-y-1.5">
         <Label htmlFor="judgeModel">judge 모델 (선택 — inline judge grader)</Label>
         <Input id="judgeModel" placeholder="gpt-5.4-mini" {...register('judgeModel')} />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[12px] text-muted-foreground">
           케이스의 judge grader(예: os-use 스크린샷 VLM 채점) 모델. 미지정이면 워크스페이스 기본
           judge 를 씁니다.
         </p>
@@ -172,7 +174,7 @@ export function RunScorecardForm({
 
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] text-muted-foreground">
         데이터셋의 모든 케이스를 이 하니스@버전으로 돌려 스코어카드를 집계합니다. 실행은 비동기 —
         완료되면 상세에서 결과를 확인하세요.
       </p>

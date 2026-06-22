@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Database } from 'lucide-react'
 
 import { datasetsSchema } from '@/entities/dataset'
 import { can } from '@/shared/auth/can'
@@ -7,7 +8,6 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -27,7 +27,7 @@ export default async function DatasetsPage() {
     <div className="space-y-6">
       <PageHeader
         title="데이터셋"
-        description="이 워크스페이스가 등록한 데이터셋 + 공유(벤치마크). 하니스 무관 — 어느 하니스든 같은 케이스로 평가."
+        description={`${datasets.length}건 · 워크스페이스 + 공유(벤치마크) · 하니스 무관, 어느 하니스든 같은 케이스로 평가`}
         actions={
           can(principal?.roles, 'datasets:write') ? (
             <div className="flex gap-2">
@@ -54,30 +54,39 @@ export default async function DatasetsPage() {
         <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : datasets.length === 0 ? (
         <EmptyState
+          icon={<Database />}
           title="등록된 데이터셋이 없습니다."
           hint="member 이상이면 '데이터셋 등록'으로 eval 케이스 묶음을 올리거나, API/MCP(create_dataset)로 등록하세요."
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="space-y-2">
           {datasets.map((d) => (
-            <Link key={d.id} href={`/dashboard/datasets/${encodeURIComponent(d.id)}`}>
-              <Card className="transition-colors hover:border-primary/40">
-                <CardContent className="space-y-2 pt-5">
-                  <div className="flex items-center justify-between">
-                    <span className="font-semibold">{d.id}</span>
-                    <Badge tone={d.owner === principal?.workspace ? 'success' : 'neutral'}>
-                      {d.owner === principal?.workspace ? 'owned' : 'shared'}
-                    </Badge>
-                  </div>
+            <Link
+              key={d.id}
+              href={`/dashboard/datasets/${encodeURIComponent(d.id)}`}
+              className="group flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+            >
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border group-hover:text-foreground">
+                  <Database className="size-[18px]" strokeWidth={1.75} />
+                </span>
+                <div className="min-w-0 space-y-1.5">
+                  <div className="truncate text-[13px] font-[560] text-foreground">{d.id}</div>
                   <div className="flex flex-wrap gap-1">
                     {d.versions.map((v) => (
-                      <code key={v} className="rounded-md bg-secondary px-1.5 py-0.5 text-xs">
+                      <code
+                        key={v}
+                        className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border"
+                      >
                         {v}
                       </code>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
+              <Badge tone={d.owner === principal?.workspace ? 'success' : 'neutral'}>
+                {d.owner === principal?.workspace ? 'owned' : 'shared'}
+              </Badge>
             </Link>
           ))}
         </div>

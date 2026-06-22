@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ChevronLeft } from 'lucide-react'
 
 import { RunScorecardForm } from '@/features/run-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
@@ -40,16 +41,17 @@ export default async function NewScorecardPage() {
     <div className="space-y-6">
       <Link
         href="/dashboard/scorecards"
-        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
-        ← 스코어카드
+        <ChevronLeft className="size-3.5" />
+        스코어카드
       </Link>
       <PageHeader
         title="스코어카드 실행"
         description="데이터셋을 하니스@버전으로 돌려 결과를 집계합니다."
       />
       {allowed ? (
-        <Card className="p-6">
+        <Card className="p-5">
           <RunScorecardForm
             datasets={datasets}
             harnesses={harnesses}

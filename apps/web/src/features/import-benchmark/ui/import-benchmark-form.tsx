@@ -98,7 +98,7 @@ export function ImportBenchmarkForm({
   }
 
   if (entries.length === 0) {
-    return <p className="text-sm text-muted-foreground">사용 가능한 벤치마크/레시피가 없습니다.</p>
+    return <p className="text-[13px] text-muted-foreground">사용 가능한 벤치마크/레시피가 없습니다.</p>
   }
 
   return (
@@ -130,7 +130,7 @@ export function ImportBenchmarkForm({
           )}
         </Select>
         {selected?.description && (
-          <p className="text-xs text-muted-foreground">{selected.description}</p>
+          <p className="text-[12px] leading-relaxed text-muted-foreground">{selected.description}</p>
         )}
       </div>
 
@@ -180,7 +180,7 @@ export function ImportBenchmarkForm({
         </Label>
         <Textarea
           id="text"
-          className="min-h-40 font-mono text-xs"
+          className="min-h-40 text-[12px]"
           value={text}
           onChange={(e) => setText(e.target.value)}
           spellCheck={false}
@@ -195,7 +195,7 @@ export function ImportBenchmarkForm({
         </Callout>
       )}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] leading-relaxed text-muted-foreground">
         버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 인입하면 409 로 거부됩니다.
       </p>
 

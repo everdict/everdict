@@ -60,7 +60,7 @@ export function CreateWorkspaceForm({ redirectTo = '/dashboard' }: { redirectTo?
             if (e.key === 'Enter') onSubmit()
           }}
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[12px] text-faint">
           팀·조직 이름. 모든 평가 데이터가 이 워크스페이스로 격리됩니다.
         </p>
       </div>
@@ -76,7 +76,7 @@ export function CreateWorkspaceForm({ redirectTo = '/dashboard' }: { redirectTo?
           onChange={(e) => setId(e.target.value)}
           className="font-mono"
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[12px] text-faint">
           비우면 이름에서 자동 생성:{' '}
           <span className="font-mono text-foreground">{slug || '—'}</span>
         </p>

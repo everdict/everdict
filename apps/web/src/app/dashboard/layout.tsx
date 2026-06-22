@@ -22,23 +22,23 @@ export default async function DashboardLayout({ children }: { children: React.Re
   // dev 폴백/클레임 보유 사용자는 항상 ≥1 → 여기 안 걸림.
   if ((principal.workspaces?.length ?? 0) === 0) {
     return (
-      <main className="mx-auto flex min-h-screen max-w-lg flex-col justify-center gap-6 px-6 py-16">
+      <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center gap-6 px-6 py-16">
         <div className="flex items-center gap-2.5">
-          <span className="grid size-9 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
-            <FlaskConical className="size-5" />
+          <span className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
+            <FlaskConical className="size-[18px]" />
           </span>
-          <span className="font-display text-lg font-bold tracking-tight">Assay</span>
+          <span className="font-display text-[16px] font-[560] tracking-tight">Assay</span>
         </div>
-        <div className="space-y-1.5">
-          <h1 className="font-display text-[26px] font-bold tracking-tight">
+        <div className="space-y-2">
+          <h1 className="font-display text-[22px] font-[560] tracking-[-0.02em]">
             워크스페이스를 만들어 시작하세요
           </h1>
-          <p className="text-sm leading-relaxed text-muted-foreground">
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
             환영합니다. 평가를 담을 워크스페이스가 아직 없습니다. 하나 만들면 바로 대시보드로
             들어갑니다.
           </p>
         </div>
-        <Card className="p-6">
+        <Card className="p-5">
           <CreateWorkspaceForm />
         </Card>
       </main>

@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ChevronLeft } from 'lucide-react'
 
 import { RegisterMetricForm } from '@/features/register-metric'
 import { can } from '@/shared/auth/can'
@@ -15,18 +16,21 @@ export default async function NewMetricPage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/dashboard/metrics"
-        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        ← 메트릭
-      </Link>
-      <PageHeader
-        title="메트릭 정의"
-        description="이미 산출된 메트릭(cost·latency·judge 등) 위에 합격 임계 규칙을 정의합니다."
-      />
+      <div className="space-y-3">
+        <Link
+          href="/dashboard/metrics"
+          className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="size-3.5" />
+          메트릭
+        </Link>
+        <PageHeader
+          title="메트릭 정의"
+          description="이미 산출된 메트릭(cost·latency·judge 등) 위에 합격 임계 규칙을 정의합니다."
+        />
+      </div>
       {allowed ? (
-        <Card className="p-6">
+        <Card className="p-5">
           <RegisterMetricForm />
         </Card>
       ) : (

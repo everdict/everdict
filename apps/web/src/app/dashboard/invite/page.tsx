@@ -24,7 +24,7 @@ export default async function InvitePage({
           hint="토큰이 없습니다. 초대한 사람에게 새 링크를 요청하세요."
         />
       ) : (
-        <Card className="p-6">
+        <Card className="p-4">
           <AcceptInviteCard token={token} />
         </Card>
       )}

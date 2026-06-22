@@ -32,7 +32,7 @@ export function AcceptInviteCard({ token }: { token: string }) {
     return (
       <div className="space-y-4">
         <Callout tone="info">
-          <span className="font-medium">
+          <span className="font-[510]">
             워크스페이스 <span className="font-mono">{done.workspace}</span> 에 {done.role} 로
             가입했습니다.
           </span>
@@ -44,15 +44,15 @@ export function AcceptInviteCard({ token }: { token: string }) {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-muted-foreground">
+      <p className="text-[13px] leading-relaxed text-muted-foreground">
         이 초대를 수락하면 해당 워크스페이스의 멤버가 되고, 현재 활성 워크스페이스가 그곳으로
         전환됩니다.
       </p>
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2.5">
         <Button onClick={onAccept} disabled={pending}>
           {pending ? '수락 중…' : '초대 수락'}
         </Button>
-        <Button variant="outline" onClick={() => router.push('/dashboard')} disabled={pending}>
+        <Button variant="secondary" onClick={() => router.push('/dashboard')} disabled={pending}>
           취소
         </Button>
       </div>

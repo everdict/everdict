@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { ChevronLeft } from 'lucide-react'
 
 import { RegisterJudgeForm } from '@/features/register-judge'
 import { can } from '@/shared/auth/can'
@@ -15,18 +16,21 @@ export default async function NewJudgePage() {
 
   return (
     <div className="space-y-6">
-      <Link
-        href="/dashboard/judges"
-        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
-      >
-        ← Judge
-      </Link>
-      <PageHeader
-        title="Judge 등록"
-        description="Agent Judge(model | harness)를 이 워크스페이스 소유로 등록합니다."
-      />
+      <div className="space-y-3">
+        <Link
+          href="/dashboard/judges"
+          className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+        >
+          <ChevronLeft className="size-3.5" />
+          Judge
+        </Link>
+        <PageHeader
+          title="Judge 등록"
+          description="Agent Judge(model | harness)를 이 워크스페이스 소유로 등록합니다."
+        />
+      </div>
       {allowed ? (
-        <Card className="p-6">
+        <Card className="p-5">
           <RegisterJudgeForm />
         </Card>
       ) : (

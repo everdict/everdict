@@ -76,18 +76,18 @@ export function RegisterJudgeForm() {
   }
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-5">
       {/* kind 토글 */}
-      <div className="inline-flex rounded-lg border border-border p-1 text-sm">
+      <div className="inline-flex rounded-lg border border-border bg-secondary/40 p-1 text-[13px]">
         {(['model', 'harness'] as const).map((k) => (
           <button
             key={k}
             type="button"
             onClick={() => setKind(k)}
             className={cn(
-              'flex-1 rounded-md px-3 py-1.5 transition-colors',
+              'flex-1 whitespace-nowrap rounded-md px-3 py-1.5 transition-colors',
               kind === k
-                ? 'bg-secondary text-foreground font-medium'
+                ? 'bg-card font-[510] text-foreground shadow-raise'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -159,7 +159,7 @@ export function RegisterJudgeForm() {
           </div>
           <div className="space-y-1.5">
             <Label>입력 모달리티</Label>
-            <div className="flex gap-4 text-sm">
+            <div className="flex gap-4 text-[13px]">
               {INPUTS.map((o) => (
                 <label key={o} className="flex items-center gap-1.5">
                   <input
@@ -168,6 +168,7 @@ export function RegisterJudgeForm() {
                     onChange={(e) =>
                       setInputs(e.target.checked ? [...inputs, o] : inputs.filter((x) => x !== o))
                     }
+                    className="accent-primary"
                   />
                   {o}
                 </label>
@@ -222,7 +223,7 @@ export function RegisterJudgeForm() {
       {result && <ValidateBanner result={result} />}
       {createError && <Callout tone="danger">{createError}</Callout>}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] text-muted-foreground">
         버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 등록하면 409 로 거부됩니다.
       </p>
 
@@ -243,7 +244,7 @@ function ValidateBanner({ result }: { result: ValidateJudgeResult }) {
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-medium">스키마 오류</div>
+        <div className="font-[510]">스키마 오류</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -253,7 +254,7 @@ function ValidateBanner({ result }: { result: ValidateJudgeResult }) {
     )
   return (
     <Callout tone="info">
-      <div className="font-medium">
+      <div className="font-[510]">
         ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version}{' '}
         {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>

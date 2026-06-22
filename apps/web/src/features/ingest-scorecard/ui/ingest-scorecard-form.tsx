@@ -87,18 +87,18 @@ export function IngestScorecardForm({
   }
 
   return (
-    <div className="max-w-2xl space-y-5">
+    <div className="max-w-2xl space-y-4">
       {/* 모드 토글 */}
-      <div className="inline-flex rounded-lg border border-border p-1 text-sm">
+      <div className="inline-flex rounded-lg border border-border bg-secondary/40 p-1 text-[13px]">
         {(['push', 'pull'] as const).map((m) => (
           <button
             key={m}
             type="button"
             onClick={() => setMode(m)}
             className={cn(
-              'rounded-md px-4 py-1.5 transition-colors',
+              'rounded-md px-3.5 py-1.5 font-[510] transition-colors',
               mode === m
-                ? 'bg-secondary text-foreground'
+                ? 'bg-card text-foreground shadow-raise'
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
@@ -106,7 +106,7 @@ export function IngestScorecardForm({
           </button>
         ))}
       </div>
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] text-muted-foreground">
         {mode === 'push'
           ? '이미 가진 TraceEvent[] 를 직접 올립니다.'
           : '테넌트 OTel/MLflow 에서 runId 별로 트레이스를 당겨옵니다. 자격증명은 워크스페이스 시크릿 이름으로 지정합니다(평문 금지).'}
@@ -167,12 +167,12 @@ export function IngestScorecardForm({
           </Label>
           <Textarea
             id="traces"
-            className="min-h-72 font-mono text-xs"
+            className="min-h-72 font-mono text-[12px]"
             value={tracesJson}
             onChange={(e) => setTracesJson(e.target.value)}
             spellCheck={false}
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[12px] text-muted-foreground">
             caseId 는 데이터셋의 케이스와 맞춰주세요(없는 caseId 는 스킵). 트레이스에서
             tool_calls/usd/span 이 자동 재도출됩니다.
           </p>
@@ -210,7 +210,7 @@ export function IngestScorecardForm({
               onChange={(e) => setAuthSecret(e.target.value)}
               placeholder="OTEL_TOKEN"
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[12px] text-muted-foreground">
               시크릿 값이 `Authorization` 헤더로 그대로 주입됩니다(스킴 포함 — OTel: `Bearer
               &lt;token&gt;`, MLflow: `Basic &lt;base64&gt;`). 여기엔 토큰 평문이 아니라
               워크스페이스 시크릿 이름만 입력하세요.
@@ -223,12 +223,12 @@ export function IngestScorecardForm({
             </Label>
             <Textarea
               id="runs"
-              className="min-h-48 font-mono text-xs"
+              className="min-h-48 font-mono text-[12px]"
               value={runsJson}
               onChange={(e) => setRunsJson(e.target.value)}
               spellCheck={false}
             />
-            <p className="text-xs text-muted-foreground">
+            <p className="text-[12px] text-muted-foreground">
               각 runId 의 트레이스를 소스에서 당겨와 caseId 에 맞춥니다. tool_calls/usd/span 이 자동
               재도출됩니다.
             </p>
@@ -239,11 +239,12 @@ export function IngestScorecardForm({
       {judges.length > 0 && (
         <div className="space-y-1.5">
           <Label>Agent Judge (선택 — 인제스트된 트레이스에 적용)</Label>
-          <div className="flex flex-wrap gap-3 rounded-lg border border-border p-3 text-sm">
+          <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-lg border border-border bg-card p-3 text-[13px]">
             {judges.map((j) => (
               <label key={j.id} className="flex items-center gap-1.5">
                 <input
                   type="checkbox"
+                  className="accent-primary"
                   checked={judgeIds.includes(j.id)}
                   onChange={(e) =>
                     setJudgeIds(

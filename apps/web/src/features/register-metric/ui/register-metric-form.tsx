@@ -77,7 +77,7 @@ export function RegisterMetricForm() {
   const opLabel = OPS.find((o) => o.v === op)?.d.split(' ')[0] ?? op
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="max-w-2xl space-y-5">
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="id">id</Label>
@@ -147,7 +147,7 @@ export function RegisterMetricForm() {
         </div>
       </div>
 
-      <p className="rounded-lg border border-border bg-muted/30 px-3 py-2 font-mono text-xs text-muted-foreground">
+      <p className="rounded-lg border border-border bg-muted/30 px-3.5 py-2.5 font-mono text-[12px] text-muted-foreground">
         규칙: {source || '<source>'} {opLabel} {threshold || '<threshold>'} → pass
       </p>
 
@@ -164,7 +164,7 @@ export function RegisterMetricForm() {
       {result && <ValidateBanner result={result} />}
       {createError && <Callout tone="danger">{createError}</Callout>}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-[12px] text-muted-foreground">
         스코어카드 실행/인제스트 시 이 메트릭을 선택하면 run 후 결과 점수 위에 적용됩니다. 버전은
         불변(같은 id@version 다른 내용 → 409).
       </p>
@@ -186,7 +186,7 @@ function ValidateBanner({ result }: { result: ValidateMetricResult }) {
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-medium">스키마 오류</div>
+        <div className="font-[510]">스키마 오류</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -196,7 +196,7 @@ function ValidateBanner({ result }: { result: ValidateMetricResult }) {
     )
   return (
     <Callout tone="info">
-      <div className="font-medium">
+      <div className="font-[510]">
         ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version}{' '}
         {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>

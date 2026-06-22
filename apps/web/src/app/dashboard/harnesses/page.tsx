@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Boxes } from 'lucide-react'
 
 import { harnessesSchema } from '@/entities/harness'
 import { can } from '@/shared/auth/can'
@@ -7,7 +8,6 @@ import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -27,7 +27,7 @@ export default async function HarnessesPage() {
     <div className="space-y-6">
       <PageHeader
         title="하니스"
-        description="이 워크스페이스가 등록한 하니스 + 공유(first-party)"
+        description={`${harnesses.length}건 · 이 워크스페이스가 등록한 하니스 + 공유(first-party)`}
         actions={
           can(principal?.roles, 'harnesses:register') ? (
             <Link href="/dashboard/harnesses/new" className={buttonVariants({ size: 'sm' })}>
@@ -40,30 +40,41 @@ export default async function HarnessesPage() {
         <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : harnesses.length === 0 ? (
         <EmptyState
+          icon={<Boxes />}
           title="등록된 하니스가 없습니다."
           hint="API 키로 POST /harnesses 하거나, 파일 SSOT(examples/harnesses)를 _shared 로 로드하세요."
         />
       ) : (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {harnesses.map((h) => (
-            <Card key={h.id}>
-              <CardContent className="space-y-2 pt-5">
-                <div className="flex items-center justify-between">
-                  <span className="font-semibold">{h.id}</span>
-                  <Badge tone={h.owner === principal?.workspace ? 'success' : 'neutral'}>
-                    {h.owner === principal?.workspace ? 'owned' : 'shared'}
-                  </Badge>
+        <div className="space-y-2">
+          {harnesses.map((h) => {
+            const owned = h.owner === principal?.workspace
+            return (
+              <div
+                key={h.id}
+                className="flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+              >
+                <div className="flex min-w-0 items-center gap-3">
+                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border">
+                    <Boxes className="size-[18px]" strokeWidth={1.75} />
+                  </span>
+                  <div className="min-w-0 space-y-1.5">
+                    <div className="truncate text-[13px] font-[560] text-foreground">{h.id}</div>
+                    <div className="flex flex-wrap gap-1">
+                      {h.versions.map((v) => (
+                        <code
+                          key={v}
+                          className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-border"
+                        >
+                          {v}
+                        </code>
+                      ))}
+                    </div>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-1">
-                  {h.versions.map((v) => (
-                    <code key={v} className="rounded-md bg-secondary px-1.5 py-0.5 text-xs">
-                      {v}
-                    </code>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                <Badge tone={owned ? 'success' : 'neutral'}>{owned ? 'owned' : 'shared'}</Badge>
+              </div>
+            )
+          })}
         </div>
       )}
     </div>

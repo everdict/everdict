@@ -35,28 +35,28 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
 
   return (
     <div className="space-y-5">
-      <div>
-        <h3 className="text-sm font-semibold">멤버</h3>
-        <p className="mt-1 text-sm text-muted-foreground">
+      <div className="space-y-1">
+        <h3 className="text-[13px] font-[560] text-foreground">멤버</h3>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
           이 워크스페이스의 멤버와 역할. 역할 변경·제거는 admin 전용이며, 마지막 admin 은
           강등/제거할 수 없습니다. 새 멤버는 아래 초대 링크로 추가합니다.
         </p>
       </div>
 
       {members.length === 0 ? (
-        <p className="text-sm text-muted-foreground">멤버가 없습니다.</p>
+        <p className="text-[13px] text-muted-foreground">멤버가 없습니다.</p>
       ) : (
-        <ul className="divide-y rounded-lg border">
+        <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {members.map((m) => (
-            <li key={m.subject} className="flex items-center justify-between gap-3 px-3 py-2">
+            <li key={m.subject} className="flex items-center justify-between gap-3 px-3 py-2.5">
               <div className="min-w-0">
-                <span className="text-sm font-medium">{m.email ?? m.subject}</span>
+                <span className="text-[13px] font-[510] text-foreground">{m.email ?? m.subject}</span>
                 {m.email && (
-                  <span className="ml-2 truncate font-mono text-xs text-muted-foreground">
+                  <span className="ml-2 truncate font-mono text-[12px] text-faint">
                     {m.subject}
                   </span>
                 )}
-                <span className="ml-2 text-xs text-muted-foreground">
+                <span className="ml-2 text-[12px] text-faint">
                   {new Date(m.addedAt).toLocaleDateString('ko-KR')}
                 </span>
               </div>
@@ -66,7 +66,7 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
                     value={m.role}
                     disabled={pending}
                     onChange={(e) => onRole(m.subject, e.target.value)}
-                    className="h-8 w-28 py-0 text-xs"
+                    className="w-28"
                   >
                     {ROLES.map((r) => (
                       <option key={r} value={r}>
@@ -77,9 +77,8 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
                   {confirmSubject === m.subject ? (
                     <>
                       <Button
-                        variant="outline"
+                        variant="destructive"
                         size="sm"
-                        className="border-destructive/40 text-destructive hover:bg-destructive/5"
                         disabled={pending}
                         onClick={() => onRemove(m.subject)}
                       >
@@ -87,7 +86,7 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
                       </Button>
                       <button
                         type="button"
-                        className="text-xs text-muted-foreground hover:text-foreground"
+                        className="text-[12px] text-muted-foreground hover:text-foreground"
                         onClick={() => setConfirmSubject(undefined)}
                       >
                         닫기
@@ -96,7 +95,7 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
                   ) : (
                     <button
                       type="button"
-                      className="text-xs text-destructive hover:underline"
+                      className="text-[12px] font-[510] text-destructive hover:underline"
                       onClick={() => setConfirmSubject(m.subject)}
                     >
                       제거
@@ -104,7 +103,7 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
                   )}
                 </span>
               ) : (
-                <span className="text-xs text-muted-foreground">{m.role}</span>
+                <span className="text-[12px] text-muted-foreground">{m.role}</span>
               )}
             </li>
           ))}

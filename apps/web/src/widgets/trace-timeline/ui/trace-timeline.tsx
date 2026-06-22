@@ -32,10 +32,10 @@ function summarize(e: TraceEvent): string {
 
 export function TraceTimeline({ trace }: { trace: TraceEvent[] }) {
   if (trace.length === 0) {
-    return <p className="text-sm text-muted-foreground">트레이스 이벤트가 없습니다.</p>
+    return <p className="text-[13px] text-muted-foreground">트레이스 이벤트가 없습니다.</p>
   }
   return (
-    <ol className="relative space-y-4 border-l border-border/70 pl-6">
+    <ol className="relative space-y-3.5 border-l border-border/70 pl-6">
       {trace.map((e, i) => (
         <li key={i} className="relative">
           <span
@@ -45,12 +45,12 @@ export function TraceTimeline({ trace }: { trace: TraceEvent[] }) {
             )}
           />
           <div className="flex items-center gap-2">
-            <code className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-xs font-medium">
+            <code className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[11px] font-[510]">
               {e.kind}
             </code>
-            <span className="font-mono text-xs text-muted-foreground">t={e.t}</span>
+            <span className="font-mono text-[11px] text-faint">t={e.t}</span>
           </div>
-          <p className="mt-1 break-all text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-1 break-all text-[12px] leading-relaxed text-muted-foreground">
             {summarize(e)}
           </p>
         </li>

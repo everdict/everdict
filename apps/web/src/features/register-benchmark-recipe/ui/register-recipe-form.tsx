@@ -73,12 +73,12 @@ export function RegisterRecipeForm() {
         <Label htmlFor="spec">레시피 (BenchmarkAdapterSpec JSON)</Label>
         <Textarea
           id="spec"
-          className="min-h-72 font-mono text-xs"
+          className="min-h-72 text-[12px]"
           value={text}
           onChange={(e) => setText(e.target.value)}
           spellCheck={false}
         />
-        <p className="text-xs text-muted-foreground">
+        <p className="text-[12px] leading-relaxed text-muted-foreground">
           source(huggingface/jsonl) + mapping(필드→EvalCase) + 선택적 graderTemplates(
           <code>{'{field}'}</code> 보간). 버전은 불변입니다 — 같은 (id, version)을 다른 내용으로
           다시 등록하면 409.
@@ -110,7 +110,7 @@ function ValidateBanner({ v }: { v: ValidateRecipeResult }) {
   if (!v.ok)
     return (
       <Callout tone="danger">
-        <div className="font-medium">스키마 오류</div>
+        <div className="font-[510]">스키마 오류</div>
         <ul className="mt-1 list-disc pl-5">
           {v.errors?.map((e) => (
             <li key={e}>{e}</li>
