@@ -5,6 +5,7 @@ import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -33,7 +34,7 @@ export default async function RecipesPage() {
     <div className="space-y-6">
       <Link
         href="/dashboard/datasets"
-        className="text-sm text-muted-foreground hover:text-foreground"
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         ← 데이터셋
       </Link>
@@ -43,9 +44,7 @@ export default async function RecipesPage() {
       />
 
       {error ? (
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          컨트롤플레인 연결 실패: {error}
-        </Card>
+        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : recipes.length === 0 ? (
         <EmptyState title="등록된 레시피가 없습니다." hint="아래에서 레시피(JSON)를 등록하세요." />
       ) : (

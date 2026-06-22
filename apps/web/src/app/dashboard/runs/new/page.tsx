@@ -1,7 +1,7 @@
 import Link from 'next/link'
 
-import { type Harness, harnessesSchema } from '@/entities/harness'
 import { SubmitRunForm } from '@/features/submit-run'
+import { harnessesSchema, type Harness } from '@/entities/harness'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -26,7 +26,10 @@ export default async function NewRunPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/dashboard/runs" className="text-sm text-muted-foreground hover:text-foreground">
+      <Link
+        href="/dashboard/runs"
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
         ← Runs
       </Link>
       <PageHeader title="새 run" description="하니스를 골라 평가를 제출합니다." />

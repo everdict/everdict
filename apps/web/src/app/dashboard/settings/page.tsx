@@ -2,6 +2,7 @@ import { SettingsForm, type WorkspaceSettings } from '@/features/workspace-setti
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -35,9 +36,7 @@ export default async function SettingsPage() {
           hint="admin 역할이 필요합니다(settings:read)."
         />
       ) : error ? (
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          컨트롤플레인 연결 실패: {error}
-        </Card>
+        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : (
         <Card className="p-6">
           <SettingsForm initial={settings} canWrite={canWrite} />

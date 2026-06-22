@@ -1,15 +1,18 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { Input, Label } from '@/shared/ui/input'
+
 import {
-  type CreateRuntimeResult,
   createRuntimeAction,
-  type ValidateRuntimeResult,
   validateRuntimeAction,
+  type CreateRuntimeResult,
+  type ValidateRuntimeResult,
 } from '../api/register-runtime'
 
 // Runtime(실행 인프라) 등록 폼 — kind(local | nomad | k8s) 토글 + 조건부 필드. 자격증명(토큰/kubeconfig)은 여기 아님 → SecretStore.
@@ -44,7 +47,14 @@ export function RegisterRuntimeForm() {
         image,
         ...(runtime ? { runtime } : {}),
         ...(namespace ? { namespace } : {}),
-        ...(datacenters ? { datacenters: datacenters.split(',').map((s) => s.trim()).filter(Boolean) } : {}),
+        ...(datacenters
+          ? {
+              datacenters: datacenters
+                .split(',')
+                .map((s) => s.trim())
+                .filter(Boolean),
+            }
+          : {}),
       }
     }
     return {
@@ -75,13 +85,19 @@ export function RegisterRuntimeForm() {
 
   return (
     <div className="max-w-2xl space-y-6">
-      <div className="flex gap-1 rounded-xl bg-secondary p-1 text-sm">
+      {/* kind 토글 */}
+      <div className="inline-flex rounded-lg border border-border p-1 text-sm">
         {(['local', 'nomad', 'k8s'] as const).map((k) => (
           <button
             key={k}
             type="button"
             onClick={() => setKind(k)}
-            className={`flex-1 rounded-lg px-3 py-1.5 ${kind === k ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'}`}
+            className={cn(
+              'flex-1 rounded-md px-3 py-1.5 transition-colors',
+              kind === k
+                ? 'bg-secondary text-foreground font-medium'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
           >
             {k}
           </button>
@@ -91,17 +107,32 @@ export function RegisterRuntimeForm() {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="id">id</Label>
-          <Input id="id" value={id} onChange={(e) => setId(e.target.value)} placeholder="seoul-nomad" />
+          <Input
+            id="id"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            placeholder="seoul-nomad"
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="version">version</Label>
-          <Input id="version" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0.0" />
+          <Input
+            id="version"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            placeholder="1.0.0"
+          />
         </div>
       </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="description">설명 (선택)</Label>
-        <Input id="description" value={description} onChange={(e) => setDescription(e.target.value)} placeholder="서울 Nomad 클러스터" />
+        <Input
+          id="description"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          placeholder="서울 Nomad 클러스터"
+        />
       </div>
 
       {kind === 'nomad' && (
@@ -109,25 +140,50 @@ export function RegisterRuntimeForm() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="addr">addr</Label>
-              <Input id="addr" value={addr} onChange={(e) => setAddr(e.target.value)} placeholder="http://nomad:4646" />
+              <Input
+                id="addr"
+                value={addr}
+                onChange={(e) => setAddr(e.target.value)}
+                placeholder="http://nomad:4646"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="image">image</Label>
-              <Input id="image" value={image} onChange={(e) => setImage(e.target.value)} placeholder="ghcr.io/acme/agent:1" />
+              <Input
+                id="image"
+                value={image}
+                onChange={(e) => setImage(e.target.value)}
+                placeholder="ghcr.io/acme/agent:1"
+              />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="runtime">runtime</Label>
-              <Input id="runtime" value={runtime} onChange={(e) => setRuntime(e.target.value)} placeholder="runsc" />
+              <Input
+                id="runtime"
+                value={runtime}
+                onChange={(e) => setRuntime(e.target.value)}
+                placeholder="runsc"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="namespace">namespace</Label>
-              <Input id="namespace" value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="default" />
+              <Input
+                id="namespace"
+                value={namespace}
+                onChange={(e) => setNamespace(e.target.value)}
+                placeholder="default"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="dcs">datacenters</Label>
-              <Input id="dcs" value={datacenters} onChange={(e) => setDatacenters(e.target.value)} placeholder="dc1, dc2" />
+              <Input
+                id="dcs"
+                value={datacenters}
+                onChange={(e) => setDatacenters(e.target.value)}
+                placeholder="dc1, dc2"
+              />
             </div>
           </div>
         </div>
@@ -138,42 +194,60 @@ export function RegisterRuntimeForm() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="image">image</Label>
-              <Input id="image" value={image} onChange={(e) => setImage(e.target.value)} placeholder="ghcr.io/acme/agent:1" />
+              <Input
+                id="image"
+                value={image}
+                onChange={(e) => setImage(e.target.value)}
+                placeholder="ghcr.io/acme/agent:1"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="context">context</Label>
-              <Input id="context" value={context} onChange={(e) => setContext(e.target.value)} placeholder="kind-assay" />
+              <Input
+                id="context"
+                value={context}
+                onChange={(e) => setContext(e.target.value)}
+                placeholder="kind-assay"
+              />
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="namespace">namespace</Label>
-              <Input id="namespace" value={namespace} onChange={(e) => setNamespace(e.target.value)} placeholder="default" />
+              <Input
+                id="namespace"
+                value={namespace}
+                onChange={(e) => setNamespace(e.target.value)}
+                placeholder="default"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="rc">runtimeClass</Label>
-              <Input id="rc" value={runtimeClass} onChange={(e) => setRuntimeClass(e.target.value)} placeholder="gvisor" />
+              <Input
+                id="rc"
+                value={runtimeClass}
+                onChange={(e) => setRuntimeClass(e.target.value)}
+                placeholder="gvisor"
+              />
             </div>
           </div>
         </div>
       )}
 
       {kind === 'local' && (
-        <p className="rounded-xl border bg-secondary/30 p-3 text-sm text-muted-foreground">
-          local 런타임은 컨트롤플레인 호스트에서 in-process 로 실행합니다(dev/단일 머신). 추가 설정이 없습니다.
-        </p>
+        <Callout tone="muted">
+          local 런타임은 컨트롤플레인 호스트에서 in-process 로 실행합니다(dev/단일 머신). 추가
+          설정이 없습니다.
+        </Callout>
       )}
 
       <p className="text-xs text-muted-foreground">
-        토큰·kubeconfig 같은 자격증명은 여기 넣지 않습니다 — 워크스페이스 시크릿(예: NOMAD_TOKEN)으로 관리되고 실행 시 주입됩니다.
+        토큰·kubeconfig 같은 자격증명은 여기 넣지 않습니다 — 워크스페이스 시크릿(예:
+        NOMAD_TOKEN)으로 관리되고 실행 시 주입됩니다.
       </p>
 
       {result && <ValidateBanner result={result} />}
-      {createError && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {createError}
-        </div>
-      )}
+      {createError && <Callout tone="danger">{createError}</Callout>}
 
       <div className="flex gap-2">
         <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
@@ -188,28 +262,24 @@ export function RegisterRuntimeForm() {
 }
 
 function ValidateBanner({ result }: { result: ValidateRuntimeResult }) {
-  if (result.error)
-    return (
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-        검증 호출 실패: {result.error}
-      </div>
-    )
+  if (result.error) return <Callout tone="danger">검증 호출 실패: {result.error}</Callout>
   if (!result.ok)
     return (
-      <div className="space-y-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+      <Callout tone="danger">
         <div className="font-medium">스키마 오류</div>
-        <ul className="list-disc pl-5">
+        <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
           ))}
         </ul>
-      </div>
+      </Callout>
     )
   return (
-    <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
-      <span className="font-medium text-emerald-700">
-        ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version} {result.versionExists ? '(이미 존재)' : '(새 버전)'}
+    <Callout tone="info">
+      <span className="font-medium">
+        ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version}{' '}
+        {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </span>
-    </div>
+    </Callout>
   )
 }

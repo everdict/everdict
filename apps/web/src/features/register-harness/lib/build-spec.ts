@@ -76,7 +76,9 @@ export const INITIAL: WizardState = {
   kind: 'service',
   id: '',
   version: '',
-  services: [{ name: 'agent-server', image: '', port: '8080', needs: '', perRun: '', replicas: '1' }],
+  services: [
+    { name: 'agent-server', image: '', port: '8080', needs: '', perRun: '', replicas: '1' },
+  ],
   deps: [],
   frontDoorService: 'agent-server',
   frontDoorSubmit: 'POST /runs',

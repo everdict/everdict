@@ -5,8 +5,10 @@ import { runSchema, type Run } from '@/entities/run'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
+import { SectionHeader } from '@/shared/ui/section-header'
 import { StatusPill } from '@/shared/ui/status-pill'
 
 export const dynamic = 'force-dynamic'
@@ -47,10 +49,11 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
     return (
       <div className="space-y-6">
         <PageHeader title="Run" />
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          run 을 불러올 수 없습니다: {error}
-        </Card>
-        <Link href="/dashboard/runs" className="text-sm text-primary hover:opacity-80">
+        <Callout tone="danger">run 을 불러올 수 없습니다: {error}</Callout>
+        <Link
+          href="/dashboard/runs"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
           ← Runs 로
         </Link>
       </div>
@@ -66,7 +69,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       <div className="space-y-3">
         <Link
           href="/dashboard/runs"
-          className="text-sm text-muted-foreground hover:text-foreground"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           ← Runs
         </Link>
@@ -87,14 +90,13 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       </Card>
 
       {run.error && (
-        <Card className="border-destructive/30 bg-destructive/5 p-5">
-          <div className="text-sm font-semibold text-destructive">{run.error.code}</div>
-          <div className="mt-1 text-sm text-muted-foreground">{run.error.message}</div>
-        </Card>
+        <Callout tone="danger" hint={run.error.message}>
+          {run.error.code}
+        </Callout>
       )}
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">스코어</h2>
+        <SectionHeader title="스코어" />
         {scores.length === 0 ? (
           <p className="text-sm text-muted-foreground">점수가 없습니다.</p>
         ) : (
@@ -126,7 +128,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">트레이스</h2>
+        <SectionHeader title="트레이스" />
         <Card className="p-5">
           <TraceTimeline trace={trace} />
         </Card>
@@ -134,7 +136,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
 
       {snapshot && (
         <section className="space-y-3">
-          <h2 className="text-lg font-semibold tracking-tight">스냅샷 ({String(snapshot.kind)})</h2>
+          <SectionHeader title={`스냅샷 (${String(snapshot.kind)})`} />
           <Card className="space-y-3 p-5">
             {/* os-use 스크린샷 — base64 동봉(dev) 또는 object storage URL(오프로드). 에이전트가 본 최종 화면. */}
             {osUseShotSrc(snapshot) && (
@@ -142,7 +144,7 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
               <img
                 src={osUseShotSrc(snapshot)}
                 alt="os-use screenshot"
-                className="max-h-[480px] w-auto rounded-md border"
+                className="max-h-[480px] w-auto rounded-lg border"
               />
             )}
             {/* browser(서비스-토폴로지: browser-use 등) — 에이전트가 도달한 최종 URL + 추출 DOM 발췌. */}
@@ -161,14 +163,14 @@ export default async function RunDetailPage({ params }: { params: Promise<{ id: 
                     <dt className="text-xs uppercase tracking-wide text-muted-foreground">
                       dom / extracted
                     </dt>
-                    <dd className="mt-0.5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
+                    <dd className="mt-0.5 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
                       {snapshot.dom}
                     </dd>
                   </div>
                 )}
               </div>
             )}
-            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all text-xs text-muted-foreground">
+            <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
               {JSON.stringify(
                 { ...snapshot, screenshot: snapshot.screenshot ? '<base64>' : undefined },
                 null,

@@ -2,8 +2,16 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-
-import { BarChart3, Boxes, Database, FlaskConical, Gavel, LayoutDashboard, Server, Settings } from 'lucide-react'
+import {
+  BarChart3,
+  Boxes,
+  Database,
+  FlaskConical,
+  Gavel,
+  LayoutDashboard,
+  Server,
+  Settings,
+} from 'lucide-react'
 
 import { cn } from '@/shared/lib/utils'
 
@@ -21,12 +29,12 @@ const NAV = [
 export function Sidebar() {
   const pathname = usePathname()
   return (
-    <aside className="hidden w-60 shrink-0 flex-col gap-1 border-r bg-card/40 p-4 md:flex">
-      <Link href="/dashboard" className="mb-4 flex items-center gap-2 px-2">
-        <span className="grid size-8 place-items-center rounded-xl bg-primary text-primary-foreground">
-          <FlaskConical className="size-4" />
+    <aside className="sticky top-0 hidden h-screen w-60 shrink-0 flex-col gap-0.5 border-r border-border/70 px-3 py-4 md:flex">
+      <Link href="/dashboard" className="mb-5 flex items-center gap-2.5 px-2 py-1">
+        <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
+          <FlaskConical className="size-[18px]" />
         </span>
-        <span className="text-lg font-bold tracking-tight">Assay</span>
+        <span className="text-[15px] font-semibold tracking-tight">Assay</span>
       </Link>
       {NAV.map((item) => {
         const active = item.exact ? pathname === item.href : pathname.startsWith(item.href)
@@ -35,14 +43,26 @@ export function Sidebar() {
           <Link
             key={item.href}
             href={item.href}
+            aria-current={active ? 'page' : undefined}
             className={cn(
-              'flex items-center gap-3 rounded-xl px-3 py-2 text-sm font-medium transition-colors',
+              'group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
               active
-                ? 'bg-primary/10 text-primary'
-                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                ? 'bg-accent text-foreground'
+                : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
             )}
           >
-            <Icon className="size-4" />
+            <span
+              className={cn(
+                'absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-full bg-primary transition-opacity',
+                active ? 'opacity-100' : 'opacity-0'
+              )}
+            />
+            <Icon
+              className={cn(
+                'size-[18px] transition-colors',
+                active ? 'text-primary' : 'text-muted-foreground group-hover:text-foreground'
+              )}
+            />
             {item.label}
           </Link>
         )

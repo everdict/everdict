@@ -1,12 +1,12 @@
 import Link from 'next/link'
 
-import { runsSchema } from '@/entities/run'
 import { RunsTable } from '@/widgets/runs-table'
+import { runsSchema } from '@/entities/run'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { buttonVariants } from '@/shared/ui/button'
-import { Card } from '@/shared/ui/card'
+import { Callout } from '@/shared/ui/callout'
 import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
@@ -35,9 +35,7 @@ export default async function RunsPage() {
         }
       />
       {error ? (
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          컨트롤플레인 연결 실패: {error}
-        </Card>
+        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : (
         <RunsTable runs={runs} />
       )}

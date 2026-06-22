@@ -1,8 +1,8 @@
 import Link from 'next/link'
 
+import { IngestScorecardForm } from '@/features/ingest-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
 import { judgesSchema } from '@/entities/judge'
-import { IngestScorecardForm } from '@/features/ingest-scorecard'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -29,7 +29,10 @@ export default async function IngestScorecardPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/dashboard/scorecards" className="text-sm text-muted-foreground hover:text-foreground">
+      <Link
+        href="/dashboard/scorecards"
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
         ← 스코어카드
       </Link>
       <PageHeader

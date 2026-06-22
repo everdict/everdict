@@ -3,6 +3,7 @@
 import { useState } from 'react'
 
 import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 
 import { updateWorkspaceSettingsAction, type WorkspaceSettings } from '../api/workspace-settings'
 
@@ -59,8 +60,12 @@ export function SettingsForm({
           <Button onClick={onSave} disabled={busy}>
             {busy ? '저장 중…' : '저장'}
           </Button>
-          {saved && <span className="text-sm text-emerald-600">저장됨</span>}
-          {error && <span className="text-sm text-destructive">{error}</span>}
+          {saved && <span className="text-sm text-[var(--color-success)]">저장됨</span>}
+          {error && (
+            <Callout tone="danger" className="py-1.5">
+              {error}
+            </Callout>
+          )}
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">

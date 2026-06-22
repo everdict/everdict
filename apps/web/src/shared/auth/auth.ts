@@ -62,7 +62,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   trustHost: true,
   // Keycloak 미설정(dev)에선 실제 로그인이 없으므로 더미 시크릿으로 /api/auth MissingSecret(500) 방지.
   // 설정됐는데 AUTH_SECRET 이 없으면 secret 미지정 → 일부러 실패(안전한 시크릿을 강제).
-  ...(keycloakConfigured ? {} : { secret: env.AUTH_SECRET ?? "assay-dev-insecure-secret" }),
+  ...(keycloakConfigured ? {} : { secret: env.AUTH_SECRET ?? 'assay-dev-insecure-secret' }),
   providers: keycloakConfigured
     ? [
         Keycloak({

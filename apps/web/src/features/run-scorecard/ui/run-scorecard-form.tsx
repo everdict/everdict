@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 
 import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { FieldError, Input, Label, Select } from '@/shared/ui/input'
 
 import { runScorecardAction } from '../api/run-scorecard'
@@ -104,7 +105,7 @@ export function RunScorecardForm({
       {judges.length > 0 && (
         <div className="space-y-1.5">
           <Label>Agent Judge (선택 — 트레이스에 적용)</Label>
-          <div className="flex flex-wrap gap-3 rounded-xl border p-3 text-sm">
+          <div className="flex flex-wrap gap-3 rounded-lg border border-border p-3 text-sm">
             {judges.map((j) => (
               <label key={j.id} className="flex items-center gap-1.5">
                 <input
@@ -144,11 +145,7 @@ export function RunScorecardForm({
         </p>
       </div>
 
-      {serverError && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {serverError}
-        </div>
-      )}
+      {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <p className="text-xs text-muted-foreground">
         데이터셋의 모든 케이스를 이 하니스@버전으로 돌려 스코어카드를 집계합니다. 실행은 비동기 —

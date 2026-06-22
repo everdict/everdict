@@ -1,15 +1,17 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
-import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Callout } from '@/shared/ui/callout'
+import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+
 import {
-  type IngestScorecardResult,
   ingestScorecardAction,
   pullScorecardAction,
+  type IngestScorecardResult,
 } from '../api/ingest-scorecard'
 
 const SAMPLE_TRACES = `[
@@ -32,7 +34,13 @@ type Mode = 'push' | 'pull'
 
 // 트레이스 인제스트 — push(업로드한 TraceEvent[]) | pull(테넌트 OTel/MLflow 에서 runId 로 당겨오기) 두 모드.
 // dataset/judge/harness 라벨은 공통. push 는 traces JSON, pull 은 source + runs JSON.
-export function IngestScorecardForm({ datasets, judges }: { datasets: { id: string }[]; judges: { id: string }[] }) {
+export function IngestScorecardForm({
+  datasets,
+  judges,
+}: {
+  datasets: { id: string }[]
+  judges: { id: string }[]
+}) {
   const router = useRouter()
   const [mode, setMode] = useState<Mode>('push')
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '')
@@ -54,7 +62,14 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
     setServerError(undefined)
     const res: IngestScorecardResult =
       mode === 'push'
-        ? await ingestScorecardAction({ datasetId, datasetVersion, harnessId, harnessVersion, judgeIds, tracesJson })
+        ? await ingestScorecardAction({
+            datasetId,
+            datasetVersion,
+            harnessId,
+            harnessVersion,
+            judgeIds,
+            tracesJson,
+          })
         : await pullScorecardAction({
             datasetId,
             datasetVersion,
@@ -74,15 +89,17 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
   return (
     <div className="max-w-2xl space-y-5">
       {/* 모드 토글 */}
-      <div className="inline-flex rounded-xl border p-1 text-sm">
+      <div className="inline-flex rounded-lg border border-border p-1 text-sm">
         {(['push', 'pull'] as const).map((m) => (
           <button
             key={m}
             type="button"
             onClick={() => setMode(m)}
             className={cn(
-              'rounded-lg px-4 py-1.5 transition-colors',
-              mode === m ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:text-foreground',
+              'rounded-md px-4 py-1.5 transition-colors',
+              mode === m
+                ? 'bg-secondary text-foreground'
+                : 'text-muted-foreground hover:text-foreground'
             )}
           >
             {m === 'push' ? '업로드 (push)' : '소스에서 당겨오기 (pull)'}
@@ -98,7 +115,13 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label htmlFor="datasetId">데이터셋 (caseId 정렬용)</Label>
-          <Input id="datasetId" list="ds-ids" value={datasetId} onChange={(e) => setDatasetId(e.target.value)} placeholder="repo-smoke" />
+          <Input
+            id="datasetId"
+            list="ds-ids"
+            value={datasetId}
+            onChange={(e) => setDatasetId(e.target.value)}
+            placeholder="repo-smoke"
+          />
           <datalist id="ds-ids">
             {datasets.map((d) => (
               <option key={d.id} value={d.id} />
@@ -107,24 +130,41 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="datasetVersion">버전</Label>
-          <Input id="datasetVersion" value={datasetVersion} onChange={(e) => setDatasetVersion(e.target.value)} placeholder="latest" />
+          <Input
+            id="datasetVersion"
+            value={datasetVersion}
+            onChange={(e) => setDatasetVersion(e.target.value)}
+            placeholder="latest"
+          />
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label htmlFor="harnessId">하니스 (트레이스를 만든 주체, 라벨)</Label>
-          <Input id="harnessId" value={harnessId} onChange={(e) => setHarnessId(e.target.value)} placeholder="my-external-agent" />
+          <Input
+            id="harnessId"
+            value={harnessId}
+            onChange={(e) => setHarnessId(e.target.value)}
+            placeholder="my-external-agent"
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="harnessVersion">버전</Label>
-          <Input id="harnessVersion" value={harnessVersion} onChange={(e) => setHarnessVersion(e.target.value)} placeholder="external" />
+          <Input
+            id="harnessVersion"
+            value={harnessVersion}
+            onChange={(e) => setHarnessVersion(e.target.value)}
+            placeholder="external"
+          />
         </div>
       </div>
 
       {mode === 'push' ? (
         <div className="space-y-1.5">
-          <Label htmlFor="traces">트레이스 (`[{'{'} caseId, trace: TraceEvent[] {'}'}]` JSON)</Label>
+          <Label htmlFor="traces">
+            트레이스 (`[{'{'} caseId, trace: TraceEvent[] {'}'}]` JSON)
+          </Label>
           <Textarea
             id="traces"
             className="min-h-72 font-mono text-xs"
@@ -133,7 +173,8 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
             spellCheck={false}
           />
           <p className="text-xs text-muted-foreground">
-            caseId 는 데이터셋의 케이스와 맞춰주세요(없는 caseId 는 스킵). 트레이스에서 tool_calls/usd/span 이 자동 재도출됩니다.
+            caseId 는 데이터셋의 케이스와 맞춰주세요(없는 caseId 는 스킵). 트레이스에서
+            tool_calls/usd/span 이 자동 재도출됩니다.
           </p>
         </div>
       ) : (
@@ -141,15 +182,14 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="sourceKind">소스 종류</Label>
-              <select
+              <Select
                 id="sourceKind"
                 value={sourceKind}
                 onChange={(e) => setSourceKind(e.target.value === 'mlflow' ? 'mlflow' : 'otel')}
-                className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm"
               >
                 <option value="otel">OTel</option>
                 <option value="mlflow">MLflow</option>
-              </select>
+              </Select>
             </div>
             <div className="col-span-2 space-y-1.5">
               <Label htmlFor="endpoint">엔드포인트</Label>
@@ -171,13 +211,16 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
               placeholder="OTEL_TOKEN"
             />
             <p className="text-xs text-muted-foreground">
-              시크릿 값이 `Authorization` 헤더로 그대로 주입됩니다(스킴 포함 — OTel: `Bearer &lt;token&gt;`, MLflow: `Basic
-              &lt;base64&gt;`). 여기엔 토큰 평문이 아니라 워크스페이스 시크릿 이름만 입력하세요.
+              시크릿 값이 `Authorization` 헤더로 그대로 주입됩니다(스킴 포함 — OTel: `Bearer
+              &lt;token&gt;`, MLflow: `Basic &lt;base64&gt;`). 여기엔 토큰 평문이 아니라
+              워크스페이스 시크릿 이름만 입력하세요.
             </p>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="runs">실행 매핑 (`[{'{'} caseId, runId {'}'}]` JSON)</Label>
+            <Label htmlFor="runs">
+              실행 매핑 (`[{'{'} caseId, runId {'}'}]` JSON)
+            </Label>
             <Textarea
               id="runs"
               className="min-h-48 font-mono text-xs"
@@ -186,7 +229,8 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
               spellCheck={false}
             />
             <p className="text-xs text-muted-foreground">
-              각 runId 의 트레이스를 소스에서 당겨와 caseId 에 맞춥니다. tool_calls/usd/span 이 자동 재도출됩니다.
+              각 runId 의 트레이스를 소스에서 당겨와 caseId 에 맞춥니다. tool_calls/usd/span 이 자동
+              재도출됩니다.
             </p>
           </div>
         </>
@@ -195,13 +239,17 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
       {judges.length > 0 && (
         <div className="space-y-1.5">
           <Label>Agent Judge (선택 — 인제스트된 트레이스에 적용)</Label>
-          <div className="flex flex-wrap gap-3 rounded-xl border p-3 text-sm">
+          <div className="flex flex-wrap gap-3 rounded-lg border border-border p-3 text-sm">
             {judges.map((j) => (
               <label key={j.id} className="flex items-center gap-1.5">
                 <input
                   type="checkbox"
                   checked={judgeIds.includes(j.id)}
-                  onChange={(e) => setJudgeIds(e.target.checked ? [...judgeIds, j.id] : judgeIds.filter((x) => x !== j.id))}
+                  onChange={(e) =>
+                    setJudgeIds(
+                      e.target.checked ? [...judgeIds, j.id] : judgeIds.filter((x) => x !== j.id)
+                    )
+                  }
                 />
                 {j.id}
               </label>
@@ -210,11 +258,7 @@ export function IngestScorecardForm({ datasets, judges }: { datasets: { id: stri
         </div>
       )}
 
-      {serverError && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {serverError}
-        </div>
-      )}
+      {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <Button type="button" onClick={onSubmit} disabled={busy}>
         {busy ? '인제스트 중…' : mode === 'push' ? '트레이스 인제스트' : '소스에서 인제스트'}

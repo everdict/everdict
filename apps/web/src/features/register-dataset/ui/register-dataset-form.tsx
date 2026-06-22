@@ -1,15 +1,17 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+
 import {
-  type CreateDatasetResult,
   createDatasetAction,
-  type ValidateDatasetResult,
   validateDatasetAction,
+  type CreateDatasetResult,
+  type ValidateDatasetResult,
 } from '../api/register-dataset'
 
 // cases 입력 도움용 샘플(repo 빈 시드 케이스 1건).
@@ -34,7 +36,13 @@ export function RegisterDatasetForm() {
 
   // 폼 → 컨트롤플레인 Dataset 본문. cases 는 JSON 텍스트를 파싱(실패 시 호출부가 처리).
   function buildDataset(): unknown {
-    return { id, version, ...(description ? { description } : {}), cases: JSON.parse(casesText), tags: [] }
+    return {
+      id,
+      version,
+      ...(description ? { description } : {}),
+      cases: JSON.parse(casesText),
+      tags: [],
+    }
   }
 
   async function onValidate() {
@@ -74,11 +82,21 @@ export function RegisterDatasetForm() {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="id">id</Label>
-          <Input id="id" value={id} onChange={(e) => setId(e.target.value)} placeholder="repo-smoke" />
+          <Input
+            id="id"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            placeholder="repo-smoke"
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="version">version</Label>
-          <Input id="version" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0.0" />
+          <Input
+            id="version"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            placeholder="1.0.0"
+          />
         </div>
       </div>
 
@@ -102,16 +120,13 @@ export function RegisterDatasetForm() {
           spellCheck={false}
         />
         <p className="text-xs text-muted-foreground">
-          각 케이스는 id · env · task · graders 를 가집니다. 데이터셋은 하니스 무관 — 어느 하니스든 같은 케이스로 평가합니다.
+          각 케이스는 id · env · task · graders 를 가집니다. 데이터셋은 하니스 무관 — 어느 하니스든
+          같은 케이스로 평가합니다.
         </p>
       </div>
 
       {result && <ValidateBanner result={result} />}
-      {createError && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {createError}
-        </div>
-      )}
+      {createError && <Callout tone="danger">{createError}</Callout>}
 
       <p className="text-xs text-muted-foreground">
         버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 등록하면 409 로 거부됩니다.
@@ -130,33 +145,31 @@ export function RegisterDatasetForm() {
 }
 
 function ValidateBanner({ result }: { result: ValidateDatasetResult }) {
-  if (result.error)
-    return (
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-        검증 호출 실패: {result.error}
-      </div>
-    )
+  if (result.error) return <Callout tone="danger">검증 호출 실패: {result.error}</Callout>
   if (!result.ok)
     return (
-      <div className="space-y-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+      <Callout tone="danger">
         <div className="font-medium">스키마 오류</div>
-        <ul className="list-disc pl-5">
+        <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
           ))}
         </ul>
-      </div>
+      </Callout>
     )
   return (
-    <div className="space-y-1 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
-      <div className="font-medium text-emerald-700">
+    <Callout tone="info">
+      <div className="font-medium">
         ✓ 스키마 정상 · {result.id}@{result.version} · 케이스 {result.cases ?? 0}건{' '}
         {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>
-      <div className="text-muted-foreground">
-        기존 버전: {result.existingVersions && result.existingVersions.length > 0 ? result.existingVersions.join(', ') : '없음'}
+      <div className="mt-1 text-muted-foreground">
+        기존 버전:{' '}
+        {result.existingVersions && result.existingVersions.length > 0
+          ? result.existingVersions.join(', ')
+          : '없음'}
         {result.versionExists && ' — 동일 내용이면 no-op, 다르면 409 로 거부됩니다.'}
       </div>
-    </div>
+    </Callout>
   )
 }

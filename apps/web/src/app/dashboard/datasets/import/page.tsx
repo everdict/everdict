@@ -8,6 +8,7 @@ import {
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -34,7 +35,7 @@ export default async function ImportBenchmarkPage() {
     <div className="space-y-6">
       <Link
         href="/dashboard/datasets"
-        className="text-sm text-muted-foreground hover:text-foreground"
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
         ← 데이터셋
       </Link>
@@ -44,7 +45,7 @@ export default async function ImportBenchmarkPage() {
         actions={
           <Link
             href="/dashboard/datasets/recipes"
-            className="text-sm text-muted-foreground hover:text-foreground"
+            className="text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             레시피 관리 →
           </Link>
@@ -56,9 +57,7 @@ export default async function ImportBenchmarkPage() {
           hint="member 이상 역할이 필요합니다(datasets:write). 워크스페이스 관리자에게 문의하세요."
         />
       ) : error ? (
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          카탈로그 조회 실패: {error}
-        </Card>
+        <Callout tone="danger">카탈로그 조회 실패: {error}</Callout>
       ) : (
         <Card className="p-6">
           <ImportBenchmarkForm benchmarks={benchmarks} recipes={recipes} />

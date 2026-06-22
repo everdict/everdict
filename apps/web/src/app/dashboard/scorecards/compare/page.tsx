@@ -1,10 +1,11 @@
 import Link from 'next/link'
 
-import { type ScorecardDiff, scorecardDiffSchema, scorecardsSchema } from '@/entities/scorecard'
 import { ComparePicker, type CompareOption } from '@/features/compare-scorecards'
+import { scorecardDiffSchema, scorecardsSchema, type ScorecardDiff } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -30,7 +31,10 @@ export default async function CompareScorecardsPage({
     const all = scorecardsSchema.parse(await controlPlane.listScorecards(ctx))
     options = all
       .filter((s) => s.status === 'succeeded')
-      .map((s) => ({ id: s.id, label: `${s.dataset.id}@${s.dataset.version} → ${s.harness.id}@${s.harness.version}` }))
+      .map((s) => ({
+        id: s.id,
+        label: `${s.dataset.id}@${s.dataset.version} → ${s.harness.id}@${s.harness.version}`,
+      }))
   } catch {
     // 목록 실패해도 페이지는 안내를 보여준다
   }
@@ -48,10 +52,16 @@ export default async function CompareScorecardsPage({
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <Link href="/dashboard/scorecards" className="text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/dashboard/scorecards"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
           ← 스코어카드
         </Link>
-        <PageHeader title="스코어카드 비교" description="baseline vs candidate — 메트릭 변화 + 케이스 회귀/개선." />
+        <PageHeader
+          title="스코어카드 비교"
+          description="baseline vs candidate — 메트릭 변화 + 케이스 회귀/개선."
+        />
       </div>
 
       {options.length < 2 ? (
@@ -65,42 +75,57 @@ export default async function CompareScorecardsPage({
         </Card>
       )}
 
-      {error && (
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">비교 실패: {error}</Card>
-      )}
+      {error && <Callout tone="danger">비교 실패: {error}</Callout>}
 
       {diff && (
         <div className="space-y-6">
           <Card>
             <CardContent className="pt-5">
               <div className="mb-3 text-sm text-muted-foreground">
-                baseline <code className="rounded bg-secondary px-1">{diff.baseline}</code> vs candidate{' '}
-                <code className="rounded bg-secondary px-1">{diff.candidate}</code>
+                baseline{' '}
+                <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-xs">
+                  {diff.baseline}
+                </code>{' '}
+                vs candidate{' '}
+                <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-xs">
+                  {diff.candidate}
+                </code>
               </div>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="text-left text-xs uppercase tracking-wide text-muted-foreground">
-                    <th className="pb-2">metric</th>
-                    <th className="pb-2 text-right">baseline</th>
-                    <th className="pb-2 text-right">candidate</th>
-                    <th className="pb-2 text-right">Δ</th>
-                  </tr>
-                </thead>
-                <tbody className="font-mono tabular-nums">
-                  {diff.metrics.map((m) => (
-                    <tr key={m.metric} className="border-t">
-                      <td className="py-1.5 font-sans">{m.metric}</td>
-                      <td className="py-1.5 text-right">{m.baselineMean.toFixed(2)}</td>
-                      <td className="py-1.5 text-right">{m.candidateMean.toFixed(2)}</td>
-                      <td
-                        className={`py-1.5 text-right ${m.delta === 0 ? 'text-muted-foreground' : 'font-semibold'}`}
-                      >
-                        {delta(m.delta)}
-                      </td>
+              <div className="overflow-hidden rounded-xl border bg-card">
+                <table className="w-full text-sm">
+                  <thead className="border-b border-border/70 text-left text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <tr>
+                      <th className="px-4 py-2.5 font-medium">metric</th>
+                      <th className="px-4 py-2.5 text-right font-medium">baseline</th>
+                      <th className="px-4 py-2.5 text-right font-medium">candidate</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Δ</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody className="font-mono tabular-nums">
+                    {diff.metrics.map((m) => (
+                      <tr
+                        key={m.metric}
+                        className="border-b border-border/50 transition-colors last:border-0 hover:bg-muted/50"
+                      >
+                        <td className="px-4 py-2.5 font-sans">{m.metric}</td>
+                        <td className="px-4 py-2.5 text-right">{m.baselineMean.toFixed(2)}</td>
+                        <td className="px-4 py-2.5 text-right">{m.candidateMean.toFixed(2)}</td>
+                        <td
+                          className={`px-4 py-2.5 text-right ${
+                            m.delta === 0
+                              ? 'text-muted-foreground'
+                              : m.delta > 0
+                                ? 'font-semibold text-[var(--color-success)]'
+                                : 'font-semibold text-destructive'
+                          }`}
+                        >
+                          {delta(m.delta)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </CardContent>
           </Card>
 
@@ -147,7 +172,10 @@ function DeltaList({
         ) : (
           <ul className="space-y-1 text-sm">
             {items.map((d) => (
-              <li key={`${d.caseId}:${d.metric}`} className="flex items-center justify-between gap-2">
+              <li
+                key={`${d.caseId}:${d.metric}`}
+                className="flex items-center justify-between gap-2"
+              >
                 <span className="font-mono">
                   {d.caseId} · {d.metric}
                 </span>

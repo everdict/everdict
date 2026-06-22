@@ -3,7 +3,7 @@ import type { InputHTMLAttributes, TextareaHTMLAttributes } from 'react'
 import { cn } from '@/shared/lib/utils'
 
 const base =
-  'w-full rounded-xl border bg-background px-3.5 py-2.5 text-sm shadow-sm transition-colors placeholder:text-muted-foreground/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50'
+  'w-full rounded-lg border bg-card px-3 py-2 text-sm shadow-[0_1px_2px_rgba(8,9,10,0.04)] transition-[border-color,box-shadow] placeholder:text-muted-foreground/60 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/30 disabled:opacity-50'
 
 export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElement>) {
   return <input className={cn(base, className)} {...props} />

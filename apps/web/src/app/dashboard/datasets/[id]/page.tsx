@@ -1,11 +1,13 @@
 import Link from 'next/link'
 
-import { type Dataset, datasetSchema } from '@/entities/dataset'
+import { datasetSchema, type Dataset } from '@/entities/dataset'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
+import { SectionHeader } from '@/shared/ui/section-header'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,10 +27,11 @@ export default async function DatasetDetailPage({ params }: { params: Promise<{ 
     return (
       <div className="space-y-6">
         <PageHeader title="데이터셋" />
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          데이터셋을 불러올 수 없습니다: {error}
-        </Card>
-        <Link href="/dashboard/datasets" className="text-sm text-primary hover:opacity-80">
+        <Callout tone="danger">데이터셋을 불러올 수 없습니다: {error}</Callout>
+        <Link
+          href="/dashboard/datasets"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
           ← 데이터셋으로
         </Link>
       </div>
@@ -38,7 +41,10 @@ export default async function DatasetDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="space-y-8">
       <div className="space-y-3">
-        <Link href="/dashboard/datasets" className="text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/dashboard/datasets"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
           ← 데이터셋
         </Link>
         <PageHeader
@@ -49,7 +55,7 @@ export default async function DatasetDetailPage({ params }: { params: Promise<{ 
       </div>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">케이스 ({dataset.cases.length})</h2>
+        <SectionHeader title={`케이스 (${dataset.cases.length})`} />
         {dataset.cases.length === 0 ? (
           <p className="text-sm text-muted-foreground">케이스가 없습니다.</p>
         ) : (
@@ -61,7 +67,9 @@ export default async function DatasetDetailPage({ params }: { params: Promise<{ 
                     <span className="font-mono text-sm font-medium">{c.id}</span>
                     <div className="flex flex-wrap gap-1">
                       {c.env?.kind && (
-                        <code className="rounded-md bg-secondary px-1.5 py-0.5 text-xs">{c.env.kind}</code>
+                        <code className="rounded-md bg-secondary px-1.5 py-0.5 text-xs">
+                          {c.env.kind}
+                        </code>
                       )}
                       {c.graders.map((g) => (
                         <code key={g.id} className="rounded-md bg-secondary px-1.5 py-0.5 text-xs">

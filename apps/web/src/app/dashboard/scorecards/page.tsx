@@ -5,6 +5,7 @@ import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { buttonVariants } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -33,7 +34,10 @@ export default async function ScorecardsPage() {
         description={`${scorecards.length}건 · 데이터셋×하니스 배치 평가 결과`}
         actions={
           <div className="flex gap-2">
-            <Link href="/dashboard/scorecards/compare" className={buttonVariants({ size: 'sm', variant: 'secondary' })}>
+            <Link
+              href="/dashboard/scorecards/compare"
+              className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+            >
               비교
             </Link>
             {can(principal?.roles, 'scorecards:run') ? (
@@ -53,9 +57,7 @@ export default async function ScorecardsPage() {
         }
       />
       {error ? (
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          컨트롤플레인 연결 실패: {error}
-        </Card>
+        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : scorecards.length === 0 ? (
         <EmptyState
           title="스코어카드가 없습니다."
@@ -77,7 +79,10 @@ export default async function ScorecardsPage() {
                     </div>
                     <div className="flex flex-wrap gap-1">
                       {(s.summary ?? []).map((m) => (
-                        <code key={m.metric} className="rounded-md bg-secondary px-1.5 py-0.5 text-xs">
+                        <code
+                          key={m.metric}
+                          className="rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
+                        >
                           {m.metric} {m.mean.toFixed(2)}
                           {m.passRate != null ? ` · ${pct(m.passRate)}` : ''}
                         </code>

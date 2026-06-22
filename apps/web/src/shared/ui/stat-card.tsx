@@ -21,10 +21,19 @@ export function StatCard({
     danger: 'text-destructive',
   }[tone]
   return (
-    <div className="rounded-2xl border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
-      <div className={cn('font-mono text-3xl font-semibold tabular-nums', toneClass)}>{value}</div>
-      <div className="mt-1 text-sm font-medium text-muted-foreground">{label}</div>
-      {hint && <div className="mt-0.5 text-xs text-muted-foreground/70">{hint}</div>}
+    <div className="group rounded-xl border bg-card p-5 transition-colors hover:border-[var(--color-muted-foreground)]/30">
+      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </div>
+      <div
+        className={cn(
+          'mt-2 font-mono text-[28px] font-semibold leading-none tabular-nums',
+          toneClass
+        )}
+      >
+        {value}
+      </div>
+      {hint && <div className="mt-1.5 text-xs text-muted-foreground/70">{hint}</div>}
     </div>
   )
 }

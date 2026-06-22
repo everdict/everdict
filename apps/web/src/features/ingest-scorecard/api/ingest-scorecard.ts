@@ -22,7 +22,9 @@ export interface IngestScorecardResult {
 
 // 서버 액션: 외부에서 이미 수행한 트레이스(TraceEvent[])를 올려 scorecard 로. 검증/정규화 계약은 컨트롤플레인이 강제.
 // tracesJson 은 [{caseId, trace, snapshot?, scores?}] 형태. 파싱 실패/스키마 오류는 컨트롤플레인이 400.
-export async function ingestScorecardAction(input: IngestScorecardInput): Promise<IngestScorecardResult> {
+export async function ingestScorecardAction(
+  input: IngestScorecardInput
+): Promise<IngestScorecardResult> {
   const ctx = await authContext()
   let traces: unknown
   try {
@@ -59,7 +61,9 @@ export interface PullScorecardInput {
 
 // 서버 액션: pull 모드 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 scorecard 로. 자격증명은 authSecret 이름(SecretStore).
 // runsJson 은 [{caseId, runId}] 형태. 파싱 실패는 여기서 400, 스키마/네트워크 오류는 컨트롤플레인이 처리.
-export async function pullScorecardAction(input: PullScorecardInput): Promise<IngestScorecardResult> {
+export async function pullScorecardAction(
+  input: PullScorecardInput
+): Promise<IngestScorecardResult> {
   const ctx = await authContext()
   let runs: unknown
   try {

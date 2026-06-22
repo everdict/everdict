@@ -1,15 +1,18 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+
 import {
-  type CreateJudgeResult,
   createJudgeAction,
-  type ValidateJudgeResult,
   validateJudgeAction,
+  type CreateJudgeResult,
+  type ValidateJudgeResult,
 } from '../api/register-judge'
 
 const INPUTS = ['trace', 'dom', 'screenshot'] as const
@@ -75,13 +78,18 @@ export function RegisterJudgeForm() {
   return (
     <div className="max-w-2xl space-y-6">
       {/* kind 토글 */}
-      <div className="flex gap-1 rounded-xl bg-secondary p-1 text-sm">
+      <div className="inline-flex rounded-lg border border-border p-1 text-sm">
         {(['model', 'harness'] as const).map((k) => (
           <button
             key={k}
             type="button"
             onClick={() => setKind(k)}
-            className={`flex-1 rounded-lg px-3 py-1.5 ${kind === k ? 'bg-background font-medium shadow-sm' : 'text-muted-foreground'}`}
+            className={cn(
+              'flex-1 rounded-md px-3 py-1.5 transition-colors',
+              kind === k
+                ? 'bg-secondary text-foreground font-medium'
+                : 'text-muted-foreground hover:text-foreground'
+            )}
           >
             {k === 'model' ? 'model (LLM/VLM 호출)' : 'harness (에이전트 위임)'}
           </button>
@@ -91,11 +99,21 @@ export function RegisterJudgeForm() {
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="id">id</Label>
-          <Input id="id" value={id} onChange={(e) => setId(e.target.value)} placeholder="correctness" />
+          <Input
+            id="id"
+            value={id}
+            onChange={(e) => setId(e.target.value)}
+            placeholder="correctness"
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="version">version</Label>
-          <Input id="version" value={version} onChange={(e) => setVersion(e.target.value)} placeholder="1.0.0" />
+          <Input
+            id="version"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            placeholder="1.0.0"
+          />
         </div>
       </div>
 
@@ -121,7 +139,12 @@ export function RegisterJudgeForm() {
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="model">model</Label>
-              <Input id="model" value={model} onChange={(e) => setModel(e.target.value)} placeholder="claude-opus-4-8" />
+              <Input
+                id="model"
+                value={model}
+                onChange={(e) => setModel(e.target.value)}
+                placeholder="claude-opus-4-8"
+              />
             </div>
           </div>
           <div className="space-y-1.5">
@@ -142,7 +165,9 @@ export function RegisterJudgeForm() {
                   <input
                     type="checkbox"
                     checked={inputs.includes(o)}
-                    onChange={(e) => setInputs(e.target.checked ? [...inputs, o] : inputs.filter((x) => x !== o))}
+                    onChange={(e) =>
+                      setInputs(e.target.checked ? [...inputs, o] : inputs.filter((x) => x !== o))
+                    }
                   />
                   {o}
                 </label>
@@ -195,11 +220,7 @@ export function RegisterJudgeForm() {
       )}
 
       {result && <ValidateBanner result={result} />}
-      {createError && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {createError}
-        </div>
-      )}
+      {createError && <Callout tone="danger">{createError}</Callout>}
 
       <p className="text-xs text-muted-foreground">
         버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 등록하면 409 로 거부됩니다.
@@ -218,32 +239,31 @@ export function RegisterJudgeForm() {
 }
 
 function ValidateBanner({ result }: { result: ValidateJudgeResult }) {
-  if (result.error)
-    return (
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-        검증 호출 실패: {result.error}
-      </div>
-    )
+  if (result.error) return <Callout tone="danger">검증 호출 실패: {result.error}</Callout>
   if (!result.ok)
     return (
-      <div className="space-y-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+      <Callout tone="danger">
         <div className="font-medium">스키마 오류</div>
-        <ul className="list-disc pl-5">
+        <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
           ))}
         </ul>
-      </div>
+      </Callout>
     )
   return (
-    <div className="space-y-1 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
-      <div className="font-medium text-emerald-700">
-        ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version} {result.versionExists ? '(이미 존재)' : '(새 버전)'}
+    <Callout tone="info">
+      <div className="font-medium">
+        ✓ 스키마 정상 · {result.kind} · {result.id}@{result.version}{' '}
+        {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>
-      <div className="text-muted-foreground">
-        기존 버전: {result.existingVersions && result.existingVersions.length > 0 ? result.existingVersions.join(', ') : '없음'}
+      <div className="mt-1 text-muted-foreground">
+        기존 버전:{' '}
+        {result.existingVersions && result.existingVersions.length > 0
+          ? result.existingVersions.join(', ')
+          : '없음'}
         {result.versionExists && ' — 동일 내용이면 no-op, 다르면 409 로 거부됩니다.'}
       </div>
-    </div>
+    </Callout>
   )
 }

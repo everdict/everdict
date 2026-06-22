@@ -15,10 +15,16 @@ export default async function NewDatasetPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/dashboard/datasets" className="text-sm text-muted-foreground hover:text-foreground">
+      <Link
+        href="/dashboard/datasets"
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
         ← 데이터셋
       </Link>
-      <PageHeader title="데이터셋 등록" description="eval 케이스 묶음을 이 워크스페이스 소유로 등록합니다." />
+      <PageHeader
+        title="데이터셋 등록"
+        description="eval 케이스 묶음을 이 워크스페이스 소유로 등록합니다."
+      />
       {allowed ? (
         <Card className="p-6">
           <RegisterDatasetForm />

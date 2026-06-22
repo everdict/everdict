@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { Label, Textarea } from '@/shared/ui/input'
 
 import {
@@ -85,15 +86,11 @@ export function RegisterRecipeForm() {
       </div>
 
       {validation && <ValidateBanner v={validation} />}
-      {result && !result.ok && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          등록 실패: {result.error}
-        </div>
-      )}
+      {result && !result.ok && <Callout tone="danger">등록 실패: {result.error}</Callout>}
       {result?.ok && (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700">
+        <Callout tone="info">
           ✓ 레시피 등록됨 · {result.id}@{result.version}
-        </div>
+        </Callout>
       )}
 
       <div className="flex gap-2">
@@ -109,36 +106,31 @@ export function RegisterRecipeForm() {
 }
 
 function ValidateBanner({ v }: { v: ValidateRecipeResult }) {
-  if (v.error)
-    return (
-      <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-        검증 호출 실패: {v.error}
-      </div>
-    )
+  if (v.error) return <Callout tone="danger">검증 호출 실패: {v.error}</Callout>
   if (!v.ok)
     return (
-      <div className="space-y-1 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+      <Callout tone="danger">
         <div className="font-medium">스키마 오류</div>
-        <ul className="list-disc pl-5">
+        <ul className="mt-1 list-disc pl-5">
           {v.errors?.map((e) => (
             <li key={e}>{e}</li>
           ))}
         </ul>
-      </div>
+      </Callout>
     )
   return (
-    <div className="space-y-1 rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm">
-      <div className="font-medium text-emerald-700">
+    <Callout tone="info">
+      <div className="font-medium">
         ✓ 스키마 정상 · {v.id}@{v.version} · source={v.source} · graderTemplates{' '}
         {v.graderTemplates ?? 0} {v.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>
-      <div className="text-muted-foreground">
+      <div className="mt-1 text-muted-foreground">
         기존 버전:{' '}
         {v.existingVersions && v.existingVersions.length > 0
           ? v.existingVersions.join(', ')
           : '없음'}
         {v.versionExists && ' — 동일 내용이면 no-op, 다르면 409 로 거부됩니다.'}
       </div>
-    </div>
+    </Callout>
   )
 }

@@ -1,7 +1,7 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
+import { useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
 import { Label, Select } from '@/shared/ui/input'
@@ -27,7 +27,9 @@ export function ComparePicker({
 
   function compare() {
     if (b && c) {
-      router.push(`/dashboard/scorecards/compare?baseline=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`)
+      router.push(
+        `/dashboard/scorecards/compare?baseline=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
+      )
     }
   }
 

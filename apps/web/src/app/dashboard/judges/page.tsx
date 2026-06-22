@@ -6,6 +6,7 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -36,9 +37,7 @@ export default async function JudgesPage() {
         }
       />
       {error ? (
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          컨트롤플레인 연결 실패: {error}
-        </Card>
+        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : judges.length === 0 ? (
         <EmptyState
           title="등록된 Judge 가 없습니다."
@@ -58,7 +57,10 @@ export default async function JudgesPage() {
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {j.versions.map((v) => (
-                      <code key={v} className="rounded-md bg-secondary px-1.5 py-0.5 text-xs">
+                      <code
+                        key={v}
+                        className="rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-xs"
+                      >
                         {v}
                       </code>
                     ))}

@@ -15,10 +15,16 @@ export default async function NewJudgePage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/dashboard/judges" className="text-sm text-muted-foreground hover:text-foreground">
+      <Link
+        href="/dashboard/judges"
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
         ← Judge
       </Link>
-      <PageHeader title="Judge 등록" description="Agent Judge(model | harness)를 이 워크스페이스 소유로 등록합니다." />
+      <PageHeader
+        title="Judge 등록"
+        description="Agent Judge(model | harness)를 이 워크스페이스 소유로 등록합니다."
+      />
       {allowed ? (
         <Card className="p-6">
           <RegisterJudgeForm />

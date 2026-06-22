@@ -1,13 +1,14 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
 import { useState } from 'react'
-
+import { useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 
 import type { Harness } from '@/entities/harness'
 import { Button } from '@/shared/ui/button'
+import { Callout } from '@/shared/ui/callout'
 import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
+
 import { submitRunAction } from '../api/submit-run'
 
 interface Values {
@@ -67,11 +68,7 @@ export function SubmitRunForm({ harnesses }: { harnesses: Harness[] }) {
         <FieldError message={errors.task?.message} />
       </div>
 
-      {serverError && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          {serverError}
-        </div>
-      )}
+      {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <Button type="submit" disabled={isSubmitting}>
         {isSubmitting ? '제출 중…' : 'run 제출'}

@@ -15,10 +15,16 @@ export default async function NewHarnessPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/dashboard/harnesses" className="text-sm text-muted-foreground hover:text-foreground">
+      <Link
+        href="/dashboard/harnesses"
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
         ← 하니스
       </Link>
-      <PageHeader title="하니스 등록" description="HarnessSpec 을 이 워크스페이스 소유로 등록합니다." />
+      <PageHeader
+        title="하니스 등록"
+        description="HarnessSpec 을 이 워크스페이스 소유로 등록합니다."
+      />
       {allowed ? (
         <Card className="p-6">
           <RegisterHarnessWizard />

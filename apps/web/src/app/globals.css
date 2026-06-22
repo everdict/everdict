@@ -3,15 +3,25 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Toss 스타일: 깔끔한 화이트 배경 + 파란 primary + 넉넉한 라운드 + Pretendard.
-   토큰 구조는 digo-admin 의 shadcn(neutral) @theme inline 을 따르되 primary 를 블루로. */
+/* Linear st.: 정제된 미니멀리즘 + 다크 퍼스트 + 인디고(#5e6ad2) 액센트 + 타이트한 보더/라운드.
+   토큰 구조는 shadcn(@theme inline) 을 따르되 팔레트·반경·분위기를 Linear 로 재해석.
+   타이포는 Pretendard(본문) — generic Inter/Arial 회피(frontend-design 스킬 원칙). */
 body {
-  font-family: 'Pretendard', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-family:
+    'Pretendard',
+    system-ui,
+    -apple-system,
+    'Segoe UI',
+    sans-serif;
+  font-feature-settings: 'cv01', 'cv02', 'ss01';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 @theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 3px);
+  --radius-md: calc(var(--radius) - 1px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
   --radius-2xl: calc(var(--radius) + 8px);
@@ -31,58 +41,121 @@ body {
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
+  --color-warning: var(--warning);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', 'Menlo', monospace;
 }
 
+/* ── Light (Linear light: 깨끗한 오프화이트 + 인디고) ───────────────────────── */
 :root {
-  /* Toss 느낌: 라운드를 크게(0.875rem) */
-  --radius: 0.875rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.18 0.01 260);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.18 0.01 260);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.18 0.01 260);
-  /* Toss blue */
-  --primary: oklch(0.58 0.18 256);
-  --primary-foreground: oklch(0.99 0 0);
-  --secondary: oklch(0.97 0.005 260);
-  --secondary-foreground: oklch(0.28 0.01 260);
-  --muted: oklch(0.97 0.005 260);
-  --muted-foreground: oklch(0.55 0.01 260);
-  --accent: oklch(0.96 0.02 256);
-  --accent-foreground: oklch(0.4 0.12 256);
-  --destructive: oklch(0.58 0.22 27);
-  --success: oklch(0.7 0.16 155);
-  --border: oklch(0.92 0.004 260);
-  --input: oklch(0.92 0.004 260);
-  --ring: oklch(0.58 0.18 256);
+  --radius: 0.5rem;
+  --background: #fbfbfc;
+  --foreground: #0b0c0e;
+  --card: #ffffff;
+  --card-foreground: #0b0c0e;
+  --popover: #ffffff;
+  --popover-foreground: #0b0c0e;
+  --primary: #5e6ad2;
+  --primary-foreground: #ffffff;
+  --secondary: #f1f1f3;
+  --secondary-foreground: #1f2023;
+  --muted: #f4f4f6;
+  --muted-foreground: #6b7280;
+  --accent: #ebecf2;
+  --accent-foreground: #3b4ab8;
+  --destructive: #e5484d;
+  --success: #2f9e6e;
+  --warning: #d99514;
+  --border: rgba(11, 12, 14, 0.09);
+  --input: rgba(11, 12, 14, 0.12);
+  --ring: #5e6ad2;
+  /* Linear 분위기: 상단 인디고 글로우 + 미세 노이즈 */
+  --glow: radial-gradient(60rem 36rem at 50% -8rem, rgba(94, 106, 210, 0.1), transparent 70%);
+  --grain-opacity: 0.018;
 }
 
+/* ── Dark (Linear signature: near-black #08090a + 인디고) ──────────────────── */
 .dark {
-  --background: oklch(0.16 0.01 260);
-  --foreground: oklch(0.97 0 0);
-  --card: oklch(0.21 0.01 260);
-  --card-foreground: oklch(0.97 0 0);
-  --popover: oklch(0.21 0.01 260);
-  --popover-foreground: oklch(0.97 0 0);
-  --primary: oklch(0.65 0.17 256);
-  --primary-foreground: oklch(0.16 0.01 260);
-  --secondary: oklch(0.27 0.01 260);
-  --secondary-foreground: oklch(0.97 0 0);
-  --muted: oklch(0.27 0.01 260);
-  --muted-foreground: oklch(0.7 0.01 260);
-  --accent: oklch(0.3 0.04 256);
-  --accent-foreground: oklch(0.92 0 0);
-  --destructive: oklch(0.7 0.19 22);
-  --success: oklch(0.72 0.16 155);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.65 0.17 256);
+  --background: #08090a;
+  --foreground: #f7f8f8;
+  --card: #0f1011;
+  --card-foreground: #f7f8f8;
+  --popover: #161719;
+  --popover-foreground: #f7f8f8;
+  --primary: #6e79e0;
+  --primary-foreground: #ffffff;
+  --secondary: #1a1b1e;
+  --secondary-foreground: #e6e7e9;
+  --muted: #161719;
+  --muted-foreground: #8a8f98;
+  --accent: #20222e;
+  --accent-foreground: #c4c9f5;
+  --destructive: #eb5757;
+  --success: #4cb782;
+  --warning: #f2c94c;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.11);
+  --ring: #6e79e0;
+  --glow: radial-gradient(64rem 38rem at 50% -10rem, rgba(94, 106, 210, 0.16), transparent 70%);
+  --grain-opacity: 0.03;
 }
 
 * {
   border-color: var(--color-border);
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+/* 상단 글로우 — 콘텐츠 뒤에 고정 */
+body {
+  position: relative;
+  background-image: var(--glow);
+  background-repeat: no-repeat;
+  background-attachment: fixed;
+}
+
+/* 미세 그레인 오버레이 — 분위기/깊이 (frontend-design: backgrounds & texture) */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 본문 콘텐츠는 오버레이 위로 */
+body > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Linear st. 얇은 커스텀 스크롤바 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-border) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 9999px;
+  border: 3px solid transparent;
+  background-clip: padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted-foreground);
+  background-clip: padding-box;
+}
+
+::selection {
+  background: color-mix(in oklab, var(--primary) 30%, transparent);
+  color: var(--foreground);
 }

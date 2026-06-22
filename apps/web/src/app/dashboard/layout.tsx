@@ -1,6 +1,6 @@
+import { AppShell } from '@/widgets/app-shell'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { keycloakConfigured } from '@/shared/config/env'
-import { AppShell } from '@/widgets/app-shell'
 
 export const dynamic = 'force-dynamic'
 

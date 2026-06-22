@@ -17,6 +17,9 @@ See `docs/web.md`. This app is SELF-CONTAINED (own eslint+prettier; excluded fro
   the control plane's (403). Dev (no Keycloak) falls back to `authContext()` → `x-assay-tenant=default`. Never
   call the control plane from the browser (all calls are `server-only`); guard `auth()` behind `keycloakConfigured`
   so dev works without `AUTH_SECRET`.
-- **Styling**: Tailwind v4 tokens in `globals.css` `@theme inline` (Toss-style: blue primary, generous radius);
-  `cn()` from `shared/lib/utils`. shadcn new-york conventions.
+- **Styling**: Tailwind v4 tokens in `globals.css` `@theme inline` (**Linear-style**: indigo `#5e6ad2` primary,
+  tight radius `0.5rem`, near-black `#08090a` dark surface, thin low-alpha borders, top indigo glow + subtle
+  grain overlay); `cn()` from `shared/lib/utils`. shadcn new-york conventions. Light **and** dark themes via the
+  `.dark` class — toggled by `shared/ui/theme-toggle` (no `next-themes`: `html.dark` + `localStorage`), with a
+  no-flash inline script in `app/layout.tsx` (stored choice → else `prefers-color-scheme`).
 - **Tooling**: `pnpm --filter @assay/web {dev,build,lint}`. Don't add it to the root Biome ignore-list removal.

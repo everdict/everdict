@@ -19,7 +19,14 @@ export type WebAction =
   | 'settings:write'
 
 const PERMS: Record<string, WebAction[]> = {
-  viewer: ['runs:read', 'harnesses:read', 'datasets:read', 'scorecards:read', 'judges:read', 'runtimes:read'],
+  viewer: [
+    'runs:read',
+    'harnesses:read',
+    'datasets:read',
+    'scorecards:read',
+    'judges:read',
+    'runtimes:read',
+  ],
   member: [
     'runs:read',
     'harnesses:read',

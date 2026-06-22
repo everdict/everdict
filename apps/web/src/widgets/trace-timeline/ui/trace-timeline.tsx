@@ -35,20 +35,24 @@ export function TraceTimeline({ trace }: { trace: TraceEvent[] }) {
     return <p className="text-sm text-muted-foreground">트레이스 이벤트가 없습니다.</p>
   }
   return (
-    <ol className="relative space-y-4 border-l pl-6">
+    <ol className="relative space-y-4 border-l border-border/70 pl-6">
       {trace.map((e, i) => (
         <li key={i} className="relative">
           <span
             className={cn(
-              'absolute -left-[1.6rem] top-1 size-3 rounded-full ring-4 ring-background',
+              'absolute -left-[1.625rem] top-1 size-2.5 rounded-full ring-4 ring-card',
               KIND_COLOR[e.kind] ?? 'bg-muted-foreground'
             )}
           />
           <div className="flex items-center gap-2">
-            <code className="rounded-md bg-secondary px-1.5 py-0.5 text-xs font-medium">{e.kind}</code>
+            <code className="rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-xs font-medium">
+              {e.kind}
+            </code>
             <span className="font-mono text-xs text-muted-foreground">t={e.t}</span>
           </div>
-          <p className="mt-1 break-all text-sm text-muted-foreground">{summarize(e)}</p>
+          <p className="mt-1 break-all text-sm leading-relaxed text-muted-foreground">
+            {summarize(e)}
+          </p>
         </li>
       ))}
     </ol>

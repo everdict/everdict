@@ -1,7 +1,8 @@
 # SaaS web (`apps/web`)
 
-The multi-tenant SaaS frontend — a Next.js app (FSD architecture, Toss-style design) where tenant **users**
-log in (Keycloak), see their **per-tenant scores**, runs, and harnesses. Reference architecture: digo-admin.
+The multi-tenant SaaS frontend — a Next.js app (FSD architecture, **Linear-style** design — refined dark-first
+minimalism with a light/dark toggle) where tenant **users** log in (Keycloak), see their **per-tenant scores**,
+runs, and harnesses. Reference architecture: digo-admin.
 
 ## Two complementary auth paths
 - **Humans → Keycloak (OIDC)** via Auth.js in `apps/web`. The web is a **BFF token courier, not an auth
@@ -21,8 +22,9 @@ control-plane `Principal{workspace, roles}`.
 
 ## Stack (mirrors digo-admin)
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 (`@theme inline` tokens) · shadcn-style UI
-(new-york, neutral base, **Toss-style** blue primary + generous radius) · TanStack Query · zod · Auth.js +
-Keycloak. Self-contained tooling: **eslint + prettier** (import-order plugin) — NOT the repo Biome (apps/web is
+(new-york, neutral base, **Linear-style** indigo `#5e6ad2` primary + tight `0.5rem` radius + near-black dark
+surface; light/dark toggle via `shared/ui/theme-toggle`, no-flash inline script in `layout.tsx`) · TanStack
+Query · zod · Auth.js + Keycloak. Self-contained tooling: **eslint + prettier** (import-order plugin) — NOT the repo Biome (apps/web is
 excluded from root Biome). The web is a pure HTTP client of the control plane — **no `@assay/*` package deps**.
 
 ## FSD layout (`src/`)

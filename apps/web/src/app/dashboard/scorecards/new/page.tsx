@@ -1,10 +1,10 @@
 import Link from 'next/link'
 
+import { RunScorecardForm } from '@/features/run-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema } from '@/entities/judge'
 import { runtimesSchema } from '@/entities/runtime'
-import { RunScorecardForm } from '@/features/run-scorecard'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -35,13 +35,24 @@ export default async function NewScorecardPage() {
 
   return (
     <div className="space-y-6">
-      <Link href="/dashboard/scorecards" className="text-sm text-muted-foreground hover:text-foreground">
+      <Link
+        href="/dashboard/scorecards"
+        className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+      >
         ← 스코어카드
       </Link>
-      <PageHeader title="스코어카드 실행" description="데이터셋을 하니스@버전으로 돌려 결과를 집계합니다." />
+      <PageHeader
+        title="스코어카드 실행"
+        description="데이터셋을 하니스@버전으로 돌려 결과를 집계합니다."
+      />
       {allowed ? (
         <Card className="p-6">
-          <RunScorecardForm datasets={datasets} harnesses={harnesses} judges={judges} runtimes={runtimes} />
+          <RunScorecardForm
+            datasets={datasets}
+            harnesses={harnesses}
+            judges={judges}
+            runtimes={runtimes}
+          />
         </Card>
       ) : (
         <EmptyState

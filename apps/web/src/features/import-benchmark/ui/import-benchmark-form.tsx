@@ -4,7 +4,8 @@ import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
-import { Input, Label, Textarea } from '@/shared/ui/input'
+import { Callout } from '@/shared/ui/callout'
+import { Input, Label, Select, Textarea } from '@/shared/ui/input'
 
 import { importBenchmarkAction, type ImportBenchmarkResult } from '../api/import-benchmark'
 
@@ -104,12 +105,7 @@ export function ImportBenchmarkForm({
     <div className="max-w-2xl space-y-6">
       <div className="space-y-1.5">
         <Label htmlFor="benchmark">벤치마크 / 레시피</Label>
-        <select
-          id="benchmark"
-          value={sel}
-          onChange={(e) => setSel(e.target.value)}
-          className="h-10 w-full rounded-lg border border-input bg-background px-3 text-sm"
-        >
+        <Select id="benchmark" value={sel} onChange={(e) => setSel(e.target.value)}>
           {benchmarks.length > 0 && (
             <optgroup label="카탈로그(first-party)">
               {entries
@@ -132,16 +128,16 @@ export function ImportBenchmarkForm({
                 ))}
             </optgroup>
           )}
-        </select>
+        </Select>
         {selected?.description && (
           <p className="text-xs text-muted-foreground">{selected.description}</p>
         )}
       </div>
 
       {selected?.gated && (
-        <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 px-4 py-3 text-sm text-amber-700">
+        <Callout tone="warning">
           gated 벤치마크입니다 — 워크스페이스 시크릿 <code>HF_TOKEN</code> 이 있어야 인출됩니다.
-        </div>
+        </Callout>
       )}
 
       <div className="grid grid-cols-2 gap-3">
@@ -192,15 +188,11 @@ export function ImportBenchmarkForm({
         />
       </div>
 
-      {result && !result.ok && (
-        <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
-          인입 실패: {result.error}
-        </div>
-      )}
+      {result && !result.ok && <Callout tone="danger">인입 실패: {result.error}</Callout>}
       {result?.ok && (
-        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/5 px-4 py-3 text-sm text-emerald-700">
+        <Callout tone="info">
           ✓ {result.id}@{result.version} · 케이스 {result.cases}건 등록됨
-        </div>
+        </Callout>
       )}
 
       <p className="text-xs text-muted-foreground">

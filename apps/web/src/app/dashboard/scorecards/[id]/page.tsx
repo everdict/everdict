@@ -4,8 +4,10 @@ import { scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecar
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
+import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusPill } from '@/shared/ui/status-pill'
 
@@ -47,10 +49,11 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
     return (
       <div className="space-y-6">
         <PageHeader title="스코어카드" />
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          스코어카드를 불러올 수 없습니다: {error}
-        </Card>
-        <Link href="/dashboard/scorecards" className="text-sm text-primary hover:opacity-80">
+        <Callout tone="danger">스코어카드를 불러올 수 없습니다: {error}</Callout>
+        <Link
+          href="/dashboard/scorecards"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
           ← 스코어카드로
         </Link>
       </div>
@@ -65,7 +68,7 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
       <div className="space-y-3">
         <Link
           href="/dashboard/scorecards"
-          className="text-sm text-muted-foreground hover:text-foreground"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
         >
           ← 스코어카드
         </Link>
@@ -86,14 +89,13 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
       </Card>
 
       {record.error && (
-        <Card className="border-destructive/30 bg-destructive/5 p-5">
-          <div className="text-sm font-semibold text-destructive">{record.error.code}</div>
-          <div className="mt-1 text-sm text-muted-foreground">{record.error.message}</div>
-        </Card>
+        <Callout tone="danger" hint={record.error.message}>
+          {record.error.code}
+        </Callout>
       )}
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">집계 (메트릭별)</h2>
+        <SectionHeader title="집계 (메트릭별)" />
         {summary.length === 0 ? (
           <p className="text-sm text-muted-foreground">집계가 없습니다.</p>
         ) : (
@@ -120,7 +122,7 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
       </section>
 
       <section className="space-y-3">
-        <h2 className="text-lg font-semibold tracking-tight">케이스별 ({results.length})</h2>
+        <SectionHeader title={`케이스별 (${results.length})`} />
         {results.length === 0 ? (
           <p className="text-sm text-muted-foreground">케이스 결과가 없습니다.</p>
         ) : (
@@ -168,7 +170,7 @@ export default async function ScorecardDetailPage({ params }: { params: Promise<
                     .map((s) => (
                       <p
                         key={`${s.graderId}-detail`}
-                        className="rounded-md bg-muted/50 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
+                        className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs leading-relaxed text-muted-foreground"
                       >
                         <span className="font-medium text-foreground">{s.metric}</span> · {s.detail}
                       </p>

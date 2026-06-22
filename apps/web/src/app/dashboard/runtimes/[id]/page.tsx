@@ -1,9 +1,10 @@
 import Link from 'next/link'
 
-import { type RuntimeSpec, runtimeSpecSchema } from '@/entities/runtime'
+import { runtimeSpecSchema, type RuntimeSpec } from '@/entities/runtime'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
+import { Callout } from '@/shared/ui/callout'
 import { Card, CardContent } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -34,10 +35,11 @@ export default async function RuntimeDetailPage({ params }: { params: Promise<{ 
     return (
       <div className="space-y-6">
         <PageHeader title="런타임" />
-        <Card className="border-destructive/30 bg-destructive/5 p-5 text-sm text-destructive">
-          런타임을 불러올 수 없습니다: {error}
-        </Card>
-        <Link href="/dashboard/runtimes" className="text-sm text-primary hover:opacity-80">
+        <Callout tone="danger">런타임을 불러올 수 없습니다: {error}</Callout>
+        <Link
+          href="/dashboard/runtimes"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
           ← 런타임으로
         </Link>
       </div>
@@ -47,7 +49,10 @@ export default async function RuntimeDetailPage({ params }: { params: Promise<{ 
   return (
     <div className="space-y-8">
       <div className="space-y-3">
-        <Link href="/dashboard/runtimes" className="text-sm text-muted-foreground hover:text-foreground">
+        <Link
+          href="/dashboard/runtimes"
+          className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+        >
           ← 런타임
         </Link>
         <PageHeader
@@ -77,7 +82,8 @@ export default async function RuntimeDetailPage({ params }: { params: Promise<{ 
       </Card>
 
       <p className="text-xs text-muted-foreground">
-        자격증명(토큰/kubeconfig)은 이 정의에 포함되지 않습니다 — 워크스페이스 시크릿으로 관리되고 실행 시 주입됩니다.
+        자격증명(토큰/kubeconfig)은 이 정의에 포함되지 않습니다 — 워크스페이스 시크릿으로 관리되고
+        실행 시 주입됩니다.
       </p>
     </div>
   )
