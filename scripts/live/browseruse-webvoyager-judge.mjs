@@ -25,8 +25,12 @@ const WV_SOURCE = process.env.WV_SOURCE ?? "sample";
 const WV_N = Number(process.env.WV_N ?? "6");
 const JUDGE_VISION = process.env.JUDGE_VISION === "1"; // 켜면 use_vision + 최종 스크린샷 base64 → VLM judge(공식 GPT-4V 방식)
 const RESTRICT = process.env.RESTRICT_DOMAIN === "1"; // 켜면 에이전트를 태스크 사이트 도메인으로 제한(Bing 등 우회 방지)
-// 라이브에서 browser-use 가 다룰 만한 benign(로그인/CAPTCHA 적은) 정보탐색 사이트 위주.
-const BENIGN = (process.env.WV_SITES ?? "ArXiv,Cambridge Dictionary,GitHub,Wolfram Alpha,BBC News,Huggingface").split(
+// CAPTCHA/human-verification/로그인 벽이 적은 *정보탐색형* 사이트로 큐레이션 — 통과율을 anti-bot 이 아니라 에이전트
+// 능력에 귀속시키기 위해. 라이브 관측으로 보정한 집합:
+//   포함(도달 가능, 실패해도 에이전트 능력 문제): ArXiv·BBC News·Cambridge Dictionary·Coursera·ESPN·GitHub·Wolfram Alpha.
+//   제외(anti-bot/verification 확인): Huggingface(human-verification), Allrecipes(access/verification — 8사이트 런에서
+//     확인), Amazon/Booking(CAPTCHA·로그인), Google Flights/Map/Search(동의·CAPTCHA), Apple. WV_SITES 로 오버라이드 가능.
+const BENIGN = (process.env.WV_SITES ?? "ArXiv,BBC News,Cambridge Dictionary,Coursera,ESPN,GitHub,Wolfram Alpha").split(
   ",",
 );
 const NAME = "assay-bu-wvjudge";

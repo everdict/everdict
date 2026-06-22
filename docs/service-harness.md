@@ -1217,3 +1217,15 @@ Three more, all live:
   (final URL `huggingface.co/api/models?…`, no off-site hop). Honest caveat — the task still fails, but for a
   *different* reason (Hugging Face's human-verification wall blocks the headless agent), not an off-site detour.
   The fix does exactly what it's for; the remaining failure is anti-bot, surfaced by the judge.
+
+- **CAPTCHA-free curation — attributing pass rate to the agent, not anti-bot.** A benchmark pass rate is only
+  meaningful if failures reflect the agent, not a verification wall. `browseruse-webvoyager-judge.mjs`'s default
+  site set is now curated to CAPTCHA/login-free informational sites and **empirically corrected** by a live
+  8-site run: it scored 5/8, and the 3 failures split into (a) `Allrecipes` — actually anti-bot (the agent was
+  blocked by an access/verification page and detoured to a search engine), so it's **dropped** from the curated
+  set, vs (b) `BBC News` + `GitHub` — genuine *agent-capability* misses (it reached the site but didn't fully
+  satisfy the task: the specific article / the most-starred repo). The curated set is now
+  `ArXiv, BBC News, Cambridge Dictionary, Coursera, ESPN, GitHub, Wolfram Alpha` (excluded for anti-bot:
+  Huggingface, Allrecipes, Amazon, Booking, Google Flights/Map/Search, Apple). On that set the failures are the
+  agent's to own — exactly what a benchmark should measure. (`ArXiv / Cambridge / Coursera / ESPN / Wolfram`
+  passed; `Wolfram` even returned the correct derivative `11.2`.)
