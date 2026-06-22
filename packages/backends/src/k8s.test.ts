@@ -38,7 +38,9 @@ interface JobManifest {
 }
 const envOf = (m: JobManifest, k: string) => m.spec.template.spec.containers[0]?.env.find((e) => e.name === k)?.value;
 
-function mockApi(opts: { logs?: string; failed?: boolean; active?: number } = {}) {
+function mockApi(
+  opts: { logs?: string; failed?: boolean; active?: number; version?: string; unreachable?: boolean } = {},
+) {
   const applied: JobManifest[] = [];
   const deleted: string[] = [];
   let polls = 0;
@@ -60,6 +62,10 @@ function mockApi(opts: { logs?: string; failed?: boolean; active?: number } = {}
     },
     async countActiveJobs() {
       return opts.active ?? 3;
+    },
+    async serverVersion() {
+      if (opts.unreachable) throw new Error("dial tcp: connection refused");
+      return opts.version ?? "v1.30.0";
     },
   };
   return { api, applied, deleted };
@@ -209,5 +215,21 @@ describe("materializeKubeconfig", () => {
     expect(await readFile(path, "utf8")).toBe(yaml);
     await cleanup();
     await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" }); // 제거됨
+  });
+});
+
+describe("K8sBackend.probe", () => {
+  it("서버 버전을 받으면 reachable", async () => {
+    const { api } = mockApi({ version: "v1.30.2" });
+    const backend = new K8sBackend({ image: "img", api });
+    expect(await backend.probe()).toEqual({ reachable: true, detail: "K8s server v1.30.2" });
+  });
+
+  it("API 서버 미도달/인증실패면 unreachable + 사유", async () => {
+    const { api } = mockApi({ unreachable: true });
+    const backend = new K8sBackend({ image: "img", api });
+    const r = await backend.probe();
+    expect(r.reachable).toBe(false);
+    expect(r.detail).toContain("connection refused");
   });
 });

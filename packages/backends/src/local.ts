@@ -1,6 +1,6 @@
 import { runAgentJob } from "@assay/agent";
 import type { AgentJob, CaseResult } from "@assay/core";
-import type { Backend, BackendCapacity } from "./backend.js";
+import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 
 // 개발/단일 호스트용 — 잡을 같은 프로세스에서 실행한다(격리 없음).
 // claude 는 이 머신의 구독 로그인을 사용.
@@ -17,5 +17,10 @@ export class LocalBackend implements Backend {
 
   dispatch(job: AgentJob): Promise<CaseResult> {
     return runAgentJob(job);
+  }
+
+  // in-process — 클러스터가 없으니 항상 도달 가능(컨트롤플레인 호스트 자신).
+  async probe(): Promise<ProbeResult> {
+    return { reachable: true, detail: "in-process (control-plane host)" };
   }
 }

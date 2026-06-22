@@ -190,3 +190,40 @@ describe("NomadBackend.dispatch", () => {
     expect(posted[1]?.ANTHROPIC_API_KEY).toBe("sk-globex"); // globex 의 잡에 acme 키가 새지 않음
   });
 });
+
+describe("NomadBackend.probe", () => {
+  it("/v1/agent/self 200 이면 reachable + member 이름", async () => {
+    const http: NomadHttp = {
+      async request(_m, path) {
+        if (path === "/v1/agent/self") return { status: 200, text: JSON.stringify({ member: { Name: "nomad-1" } }) };
+        return { status: 404, text: "" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
+    expect(await backend.probe()).toEqual({ reachable: true, detail: "Nomad agent: nomad-1" });
+  });
+
+  it("401/403(ACL)이면 unreachable + 인증 안내", async () => {
+    const http: NomadHttp = {
+      async request() {
+        return { status: 403, text: "Permission denied" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
+    const r = await backend.probe();
+    expect(r.reachable).toBe(false);
+    expect(r.detail).toContain("인증 실패(403)");
+  });
+
+  it("네트워크 에러면 unreachable + 메시지", async () => {
+    const http: NomadHttp = {
+      async request() {
+        throw new Error("ECONNREFUSED");
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
+    const r = await backend.probe();
+    expect(r.reachable).toBe(false);
+    expect(r.detail).toContain("ECONNREFUSED");
+  });
+});

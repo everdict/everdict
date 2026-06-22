@@ -11,7 +11,7 @@ import {
   assertHardenedIsolation,
   judgeEnv,
 } from "@assay/core";
-import type { Backend, BackendCapacity } from "./backend.js";
+import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
 
@@ -23,6 +23,7 @@ export interface K8sApi {
   podLogs(name: string, ns: string): Promise<string>; // job/<name> 의 stdout
   deleteJob(name: string, ns: string): Promise<void>;
   countActiveJobs(): Promise<number | undefined>; // 용량 프로브(전 네임스페이스의 app=assay 진행중 잡)
+  serverVersion(): Promise<string>; // 연결 테스트 — API 서버 /version(gitVersion). 도달/인증 실패 시 throw.
 }
 
 interface RunResult {
@@ -129,6 +130,18 @@ export function kubectlApi(
         return items.filter((j) => !j.status?.succeeded && !j.status?.failed).length;
       } catch {
         return undefined;
+      }
+    },
+    async serverVersion() {
+      // get --raw=/version 은 API 서버에 직접 도달 — 미도달/인증실패면 비-제로 종료(throw).
+      const res = await run(bin, [...ctx, "get", "--raw=/version"]);
+      if (res.code !== 0)
+        throw new UpstreamError("UPSTREAM_ERROR", undefined, (res.stderr || res.stdout).trim().slice(0, 300));
+      try {
+        const v = JSON.parse(res.stdout) as { gitVersion?: string };
+        return v.gitVersion ?? res.stdout.trim().slice(0, 200);
+      } catch {
+        return res.stdout.trim().slice(0, 200);
       }
     },
   };
@@ -270,6 +283,16 @@ export class K8sBackend implements Backend {
     const total = (typeof mc === "function" ? mc() : mc) ?? 20;
     const used = await this.withApi((api) => api.countActiveJobs());
     return { total, used: used ?? 0 };
+  }
+
+  // 연결 테스트 — 잡 없이 API 서버 /version 으로 도달성 + 인증(context/token/kubeconfig)을 확인.
+  async probe(): Promise<ProbeResult> {
+    try {
+      const version = await this.withApi((api) => api.serverVersion());
+      return { reachable: true, detail: `K8s server ${version}` };
+    } catch (e) {
+      return { reachable: false, detail: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   // 테넌트 존/시크릿을 잡마다 적용·강제: untrusted 는 강격리 필수, 전용 네임스페이스, 그 테넌트 키만 주입.

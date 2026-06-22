@@ -7,7 +7,7 @@ import {
   assertHardenedIsolation,
   judgeEnv,
 } from "@assay/core";
-import type { Backend, BackendCapacity } from "./backend.js";
+import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
 
@@ -149,6 +149,27 @@ export class NomadBackend implements Backend {
       // 프로브 실패 → used 0
     }
     return { total, used: 0 };
+  }
+
+  // 연결 테스트 — 잡 없이 /v1/agent/self 로 도달성 + ACL 인증을 확인(ACL 클러스터는 X-Nomad-Token 필요).
+  async probe(): Promise<ProbeResult> {
+    try {
+      const res = await this.http.request("GET", "/v1/agent/self");
+      if (res.status < 300) {
+        let name: string | undefined;
+        try {
+          name = (JSON.parse(res.text) as { member?: { Name?: string } }).member?.Name;
+        } catch {
+          // 본문 파싱 실패는 무시 — 도달은 된 것.
+        }
+        return { reachable: true, detail: name ? `Nomad agent: ${name}` : "Nomad agent 응답" };
+      }
+      if (res.status === 401 || res.status === 403)
+        return { reachable: false, detail: `인증 실패(${res.status}) — ACL 토큰(authSecret)을 확인하세요.` };
+      return { reachable: false, detail: `Nomad ${res.status}: ${res.text.slice(0, 200)}` };
+    } catch (e) {
+      return { reachable: false, detail: e instanceof Error ? e.message : String(e) };
+    }
   }
 
   // 테넌트 존/시크릿을 잡마다 적용·강제: untrusted 는 강격리 필수, 전용 네임스페이스, 그 테넌트의 키만 주입.
