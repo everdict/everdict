@@ -4,10 +4,12 @@ import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Eye, Heart, Loader2, Lock, Search, Sparkles } from 'lucide-react'
 
+import { versionsForId } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+import { VersionField } from '@/shared/ui/version-field'
 
 import {
   hfSplitsAction,
@@ -47,7 +49,11 @@ const splitKey = (s: HfSplit) => `${s.config} / ${s.split}`
 
 // "소스에서 만들기" 위저드: HF 는 검색→선택→config/split 드롭다운(raw id 입력 회피), jsonl 은 붙여넣기.
 // 그 뒤 미리보기로 필드를 감지하고 드롭다운 매핑 → 한 번에 데이터셋 생성(인라인 spec, 레시피 등록 생략).
-export function BuildFromSourceWizard() {
+export function BuildFromSourceWizard({
+  existingDatasets = [],
+}: {
+  existingDatasets?: { id: string; versions: string[] }[]
+}) {
   const router = useRouter()
   const [sourceKind, setSourceKind] = useState<SourceKind>('huggingface')
 
@@ -414,7 +420,7 @@ export function BuildFromSourceWizard() {
           <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">
             3 · 데이터셋
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="dsid">id</Label>
               <Input
@@ -422,15 +428,6 @@ export function BuildFromSourceWizard() {
                 value={datasetId}
                 onChange={(e) => setDatasetId(e.target.value)}
                 placeholder="my-bench"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="ver">version</Label>
-              <Input
-                id="ver"
-                value={version}
-                onChange={(e) => setVersion(e.target.value)}
-                placeholder="1.0.0"
               />
             </div>
             <div className="space-y-1.5">
@@ -447,6 +444,11 @@ export function BuildFromSourceWizard() {
               </Select>
             </div>
           </div>
+          <VersionField
+            existing={versionsForId(existingDatasets, datasetId)}
+            value={version}
+            onChange={setVersion}
+          />
           {sourceKind === 'huggingface' && (
             <div className="space-y-1.5">
               <Label htmlFor="lim">최대 케이스 수 (선택)</Label>

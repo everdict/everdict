@@ -3,9 +3,11 @@
 import { useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { versionsForId } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+import { VersionField } from '@/shared/ui/version-field'
 
 import { importBenchmarkAction, type ImportBenchmarkResult } from '../api/import-benchmark'
 
@@ -39,9 +41,11 @@ interface Entry {
 export function ImportBenchmarkForm({
   benchmarks,
   recipes = [],
+  existingDatasets = [],
 }: {
   benchmarks: BenchmarkCatalogItem[]
   recipes?: RecipeItem[]
+  existingDatasets?: { id: string; versions: string[] }[]
 }) {
   const router = useRouter()
   const entries: Entry[] = useMemo(
@@ -140,26 +144,20 @@ export function ImportBenchmarkForm({
         </Callout>
       )}
 
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="datasetId">데이터셋 id (선택)</Label>
-          <Input
-            id="datasetId"
-            value={datasetId}
-            onChange={(e) => setDatasetId(e.target.value)}
-            placeholder={selected?.id ?? 'id'}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="version">version</Label>
-          <Input
-            id="version"
-            value={version}
-            onChange={(e) => setVersion(e.target.value)}
-            placeholder="1.0.0"
-          />
-        </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="datasetId">데이터셋 id (선택)</Label>
+        <Input
+          id="datasetId"
+          value={datasetId}
+          onChange={(e) => setDatasetId(e.target.value)}
+          placeholder={selected?.id ?? 'id'}
+        />
       </div>
+      <VersionField
+        existing={versionsForId(existingDatasets, datasetId.trim() || selected?.id || '')}
+        value={version}
+        onChange={setVersion}
+      />
 
       {!catalogJsonl && (
         <div className="space-y-1.5">

@@ -17,9 +17,11 @@ import {
 export function AddBenchmark({
   benchmarks,
   recipes,
+  existingDatasets = [],
 }: {
   benchmarks: BenchmarkCatalogItem[]
   recipes: RecipeItem[]
+  existingDatasets?: { id: string; versions: string[] }[]
 }) {
   const [mode, setMode] = useState<'build' | 'import'>('build')
   return (
@@ -48,9 +50,13 @@ export function AddBenchmark({
       </div>
 
       {mode === 'build' ? (
-        <BuildFromSourceWizard />
+        <BuildFromSourceWizard existingDatasets={existingDatasets} />
       ) : (
-        <ImportBenchmarkForm benchmarks={benchmarks} recipes={recipes} />
+        <ImportBenchmarkForm
+          benchmarks={benchmarks}
+          recipes={recipes}
+          existingDatasets={existingDatasets}
+        />
       )}
     </div>
   )

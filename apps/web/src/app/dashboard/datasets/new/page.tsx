@@ -2,8 +2,10 @@ import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 
 import { RegisterDatasetForm } from '@/features/register-dataset'
+import { datasetsSchema } from '@/entities/dataset'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
+import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -11,8 +13,18 @@ import { PageHeader } from '@/shared/ui/page-header'
 export const dynamic = 'force-dynamic'
 
 export default async function NewDatasetPage() {
-  const { principal } = await currentPrincipal()
+  const { principal, ctx } = await currentPrincipal()
   const allowed = can(principal?.roles, 'datasets:write')
+
+  // 시스템 관리 버저닝: 기존 데이터셋 id→versions 를 폼에 넘겨 다음 semver 를 제안한다.
+  let existingDatasets: { id: string; versions: string[] }[] = []
+  if (allowed) {
+    try {
+      existingDatasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
+    } catch {
+      existingDatasets = []
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -29,7 +41,7 @@ export default async function NewDatasetPage() {
       />
       {allowed ? (
         <Card className="p-5">
-          <RegisterDatasetForm />
+          <RegisterDatasetForm existingDatasets={existingDatasets} />
         </Card>
       ) : (
         <EmptyState

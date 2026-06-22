@@ -6,6 +6,7 @@ import {
   type BenchmarkCatalogItem,
   type RecipeItem,
 } from '@/features/import-benchmark'
+import { datasetsSchema } from '@/entities/dataset'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -22,6 +23,8 @@ export default async function ImportBenchmarkPage() {
 
   let benchmarks: BenchmarkCatalogItem[] = []
   let recipes: RecipeItem[] = []
+  // 시스템 관리 버저닝: 기존 데이터셋 id→versions 를 위저드/가져오기 폼에 넘겨 다음 semver 를 제안.
+  let existingDatasets: { id: string; versions: string[] }[] = []
   let error: string | undefined
   if (allowed) {
     try {
@@ -29,6 +32,11 @@ export default async function ImportBenchmarkPage() {
       recipes = await controlPlane.listBenchmarkRecipes<RecipeItem[]>(ctx)
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
+    }
+    try {
+      existingDatasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
+    } catch {
+      existingDatasets = []
     }
   }
 
@@ -63,7 +71,11 @@ export default async function ImportBenchmarkPage() {
         <Callout tone="danger">카탈로그 조회 실패: {error}</Callout>
       ) : (
         <Card className="p-5">
-          <AddBenchmark benchmarks={benchmarks} recipes={recipes} />
+          <AddBenchmark
+            benchmarks={benchmarks}
+            recipes={recipes}
+            existingDatasets={existingDatasets}
+          />
         </Card>
       )}
     </div>

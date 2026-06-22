@@ -3,9 +3,11 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+import { versionsForId } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { VersionField } from '@/shared/ui/version-field'
 
 import {
   createDatasetAction,
@@ -24,10 +26,15 @@ const SAMPLE_CASES = `[
   }
 ]`
 
-export function RegisterDatasetForm() {
+export function RegisterDatasetForm({
+  existingDatasets = [],
+}: {
+  existingDatasets?: { id: string; versions: string[] }[]
+}) {
   const router = useRouter()
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
+  const existing = versionsForId(existingDatasets, id)
   const [description, setDescription] = useState('')
   const [casesText, setCasesText] = useState(SAMPLE_CASES)
   const [result, setResult] = useState<ValidateDatasetResult>()
@@ -79,26 +86,11 @@ export function RegisterDatasetForm() {
 
   return (
     <div className="max-w-2xl space-y-5">
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="id">id</Label>
-          <Input
-            id="id"
-            value={id}
-            onChange={(e) => setId(e.target.value)}
-            placeholder="repo-smoke"
-          />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="version">version</Label>
-          <Input
-            id="version"
-            value={version}
-            onChange={(e) => setVersion(e.target.value)}
-            placeholder="1.0.0"
-          />
-        </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="id">id</Label>
+        <Input id="id" value={id} onChange={(e) => setId(e.target.value)} placeholder="repo-smoke" />
       </div>
+      <VersionField existing={existing} value={version} onChange={setVersion} />
 
       <div className="space-y-1.5">
         <Label htmlFor="description">설명 (선택)</Label>
