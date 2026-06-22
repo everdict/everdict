@@ -1,3 +1,4 @@
+import { UpstreamError } from "@assay/core";
 import type { FetchLike } from "@assay/datasets";
 import { InMemoryDatasetRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
@@ -54,5 +55,38 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
     const ds = await datasets.get("acme", "my-bench", "1.0.0");
     expect(ds.cases).toHaveLength(1);
     expect(ds.cases[0]?.task).toBe("2+2?");
+  });
+});
+
+describe("BenchmarkService — HF 접속 실패는 자연스럽게(UpstreamError, raw 에러 노출 금지)", () => {
+  it("네트워크 실패(fetch 가 throw) → UpstreamError + 사람 친화 메시지", async () => {
+    const svc = new BenchmarkService({
+      datasets: new InMemoryDatasetRegistry(),
+      fetchImpl: (async () => {
+        throw new Error("ECONNREFUSED");
+      }) as FetchLike,
+    });
+    await expect(svc.searchHf("acme", "gsm8k")).rejects.toBeInstanceOf(UpstreamError);
+    await expect(svc.searchHf("acme", "gsm8k")).rejects.toThrow(/접속할 수 없습니다/);
+  });
+
+  it("non-2xx(503 등) → UpstreamError(응답 오류)", async () => {
+    const svc = new BenchmarkService({
+      datasets: new InMemoryDatasetRegistry(),
+      fetchImpl: (async () => ({ ok: false, status: 503, text: async () => "down" })) as FetchLike,
+    });
+    await expect(svc.hfSplits("acme", "openai/gsm8k")).rejects.toBeInstanceOf(UpstreamError);
+  });
+
+  it("미리보기/인입의 HF 인출도 UpstreamError 로(레시피/도메인 에러는 그대로)", async () => {
+    const svc = new BenchmarkService({
+      datasets: new InMemoryDatasetRegistry(),
+      fetchImpl: (async () => {
+        throw new Error("network down");
+      }) as FetchLike,
+    });
+    await expect(
+      svc.previewSource({ tenant: "acme", source: { kind: "huggingface", dataset: "openai/gsm8k" } }),
+    ).rejects.toBeInstanceOf(UpstreamError);
   });
 });

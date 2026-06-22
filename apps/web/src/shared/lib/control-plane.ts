@@ -17,16 +17,25 @@ function authHeaders(auth: AuthContext): Record<string, string> {
   return headers
 }
 
+// 컨트롤플레인 에러 응답 → 사람이 읽을 메시지. 플랫 envelope {code,message} 면 message 를 그대로 노출(예: HF 접속
+// 불가 같은 친화 메시지가 화면에 "자연스럽게" 보이도록). envelope 가 아니면 경로/상태로 폴백(디버깅용).
+function controlPlaneError(path: string, status: number, raw: string): Error {
+  try {
+    const j = JSON.parse(raw) as { message?: unknown }
+    if (typeof j.message === 'string' && j.message.trim()) return new Error(j.message)
+  } catch {
+    // non-JSON 본문 — 아래 폴백
+  }
+  return new Error(`control-plane ${path} → ${status}: ${raw.slice(0, 300)}`)
+}
+
 async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', ...authHeaders(auth), ...(init?.headers ?? {}) },
     cache: 'no-store',
   })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`control-plane ${path} → ${res.status}: ${body.slice(0, 300)}`)
-  }
+  if (!res.ok) throw controlPlaneError(path, res.status, await res.text())
   return res.json() as Promise<T>
 }
 
@@ -37,10 +46,7 @@ async function callVoid(auth: AuthContext, path: string, init?: RequestInit): Pr
     headers: { 'content-type': 'application/json', ...authHeaders(auth), ...(init?.headers ?? {}) },
     cache: 'no-store',
   })
-  if (!res.ok) {
-    const body = await res.text()
-    throw new Error(`control-plane ${path} → ${res.status}: ${body.slice(0, 300)}`)
-  }
+  if (!res.ok) throw controlPlaneError(path, res.status, await res.text())
 }
 
 export const controlPlane = {

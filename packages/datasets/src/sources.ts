@@ -1,3 +1,5 @@
+import { UpstreamError } from "@assay/core";
+
 // 벤치마크 소스 커넥터: 벤치마크가 "사는 곳"에서 참조만으로 행을 인출한다(로컬 파일에 의존하지 않음).
 // 신규 벤치마크는 대부분 HuggingFace Hub 에 올라오므로 HF datasets-server REST(/rows)를 1차 소스로 지원.
 // 네트워크 호출은 주입 가능한 FetchLike 로 추상화 → 매핑/페이징 로직은 결정적으로 테스트, 실인출은 글로벌 fetch.
@@ -13,11 +15,48 @@ export interface HfRowsParams {
 // 테스트 주입용 최소 fetch 시그니처(글로벌 fetch 호환). 본문은 text()로 받아 JSON.parse(견고/단순).
 export type FetchLike = (
   url: string,
-  init?: { headers?: Record<string, string> },
+  init?: { headers?: Record<string, string>; signal?: AbortSignal },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
 const HF_ROWS = "https://datasets-server.huggingface.co/rows";
 const HF_PAGE = 100; // datasets-server 의 한 번 호출 최대 length.
+const HF_TIMEOUT_MS = 8000; // HF 응답 대기 상한 — 접속 불가 시 무한 대기 대신 깔끔히 실패.
+
+// HF 호출 공통: 타임아웃 + 실패를 우리 UpstreamError(502)로 remap. 원시 fetch 에러("fetch failed"/AbortError)나
+// non-2xx 를 그대로 노출하지 않고, 위저드가 "자연스럽게" 보여줄 사람 친화 메시지로 바꾼다(접속 불가 케이스 대응).
+async function hfGet(f: FetchLike, url: string, headers: Record<string, string>, label: string): Promise<string> {
+  let res: Awaited<ReturnType<FetchLike>>;
+  try {
+    res = await f(url, { headers, signal: AbortSignal.timeout(HF_TIMEOUT_MS) });
+  } catch {
+    // 네트워크 실패/타임아웃/abort — HF 에 도달 불가.
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { source: "huggingface", reason: "unreachable" },
+      "HuggingFace 에 접속할 수 없습니다. 네트워크를 확인하거나 잠시 후 다시 시도하세요.",
+    );
+  }
+  const body = await res.text().catch(() => "");
+  if (!res.ok)
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { source: "huggingface", status: res.status },
+      `HuggingFace 응답 오류 (${res.status}).`,
+    );
+  return body;
+}
+
+function hfParse<T>(body: string, label: string): T {
+  try {
+    return JSON.parse(body) as T;
+  } catch {
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { source: "huggingface" },
+      `HuggingFace 응답을 해석할 수 없습니다 (${label}).`,
+    );
+  }
+}
 
 interface HfRowsResponse {
   rows?: Array<{ row: Record<string, unknown> }>;
@@ -41,10 +80,8 @@ export async function fetchHfRows(p: HfRowsParams, fetchImpl?: FetchLike): Promi
       `${HF_ROWS}?dataset=${encodeURIComponent(p.dataset)}` +
       `&config=${encodeURIComponent(config)}&split=${encodeURIComponent(split)}` +
       `&offset=${offset}&length=${length}`;
-    const res = await f(url, { headers });
-    const body = await res.text();
-    if (!res.ok) throw new Error(`HF datasets-server ${res.status} for ${p.dataset}: ${body.slice(0, 200)}`);
-    const json = JSON.parse(body) as HfRowsResponse;
+    const body = await hfGet(f, url, headers, "rows");
+    const json = hfParse<HfRowsResponse>(body, "rows");
     const page = (json.rows ?? []).map((r) => r.row);
     rows.push(...page);
     const total = json.num_rows_total ?? rows.length;
@@ -74,10 +111,8 @@ export async function searchHfDatasets(
   const url = `${HF_HUB}?search=${encodeURIComponent(query)}&limit=${limit}&sort=downloads&direction=-1&full=false`;
   const headers: Record<string, string> = {};
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
-  const res = await f(url, { headers });
-  const body = await res.text();
-  if (!res.ok) throw new Error(`HF Hub search ${res.status}: ${body.slice(0, 200)}`);
-  const arr = JSON.parse(body) as Array<{ id?: unknown; likes?: unknown; gated?: unknown; private?: unknown }>;
+  const body = await hfGet(f, url, headers, "search");
+  const arr = hfParse<Array<{ id?: unknown; likes?: unknown; gated?: unknown; private?: unknown }>>(body, "search");
   return arr
     .filter((d) => d.private !== true && typeof d.id === "string")
     .map((d) => ({
@@ -102,10 +137,8 @@ export async function fetchHfSplits(
   if (!f) throw new Error("fetchHfSplits: no fetch implementation (pass fetchImpl or run on Node 18+)");
   const headers: Record<string, string> = {};
   if (opts.token) headers.Authorization = `Bearer ${opts.token}`;
-  const res = await f(`${HF_SPLITS}?dataset=${encodeURIComponent(dataset)}`, { headers });
-  const body = await res.text();
-  if (!res.ok) throw new Error(`HF splits ${res.status} for ${dataset}: ${body.slice(0, 200)}`);
-  const json = JSON.parse(body) as { splits?: Array<{ config?: unknown; split?: unknown }> };
+  const body = await hfGet(f, `${HF_SPLITS}?dataset=${encodeURIComponent(dataset)}`, headers, "splits");
+  const json = hfParse<{ splits?: Array<{ config?: unknown; split?: unknown }> }>(body, "splits");
   return (json.splits ?? [])
     .filter((s) => typeof s.config === "string" && typeof s.split === "string")
     .map((s) => ({ config: String(s.config), split: String(s.split) }));
