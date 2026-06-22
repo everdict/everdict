@@ -1,4 +1,4 @@
-import { type Action, type Principal, authorize } from "@assay/auth";
+import { ASSAY_ROLES, type Action, type Principal, authorize } from "@assay/auth";
 import {
   AppError,
   DatasetSchema,
@@ -14,7 +14,9 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
+import type { MembershipService } from "./membership-service.js";
 import type { RunService } from "./run-service.js";
+import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
@@ -27,10 +29,12 @@ export interface McpDeps {
   datasetRegistry?: DatasetRegistry;
   judgeRegistry?: JudgeRegistry;
   runtimeRegistry?: RuntimeRegistry;
+  probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // 런타임 연결 테스트
   secretStore?: SecretStore;
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
+  membershipService?: MembershipService; // 멤버 관리(목록/역할/제거) + 초대(발급/수락)
   keyStore?: TenantKeyStore; // API 키 self-serve 발급/목록/취소(admin)
 }
 
@@ -393,6 +397,30 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
+  if (deps.probeRuntime) {
+    const probeRuntime = deps.probeRuntime;
+    server.registerTool(
+      "probe_runtime",
+      {
+        description:
+          "RuntimeSpec(JSON) 연결 테스트 — 잡 없이 실제 클러스터에 붙어 도달성/인증 확인(local 제외). {kind,reachable,detail}",
+        inputSchema: { runtime: z.string().describe("RuntimeSpec JSON (kind: local | nomad | k8s)") },
+      },
+      ({ runtime }) =>
+        run(principal, "runtimes:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(runtime);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 RuntimeSpec JSON 이 아닙니다.");
+          }
+          const result = RuntimeSpecSchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          return ok(await probeRuntime(ws, result.data));
+        }),
+    );
+  }
+
   if (deps.scorecardService) {
     const scorecards = deps.scorecardService;
     server.registerTool(
@@ -615,6 +643,75 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           await keys.revoke(ws, id); // tenant 스코프 — 다른 워크스페이스 id 는 no-op
           return ok({ workspace: ws, id, revoked: true });
         }),
+    );
+  }
+
+  if (deps.membershipService) {
+    const membership = deps.membershipService;
+    server.registerTool(
+      "list_members",
+      { description: "이 워크스페이스의 멤버 목록(subject·role·email·가입시각)", inputSchema: {} },
+      () => run(principal, "members:read", async () => ok(await membership.listMembers(ws))),
+    );
+    server.registerTool(
+      "set_member_role",
+      {
+        description: "멤버 역할 변경(viewer|member|admin). 멤버 아니면 NOT_FOUND, 마지막 admin 강등은 CONFLICT.",
+        inputSchema: { subject: z.string(), role: z.enum(ASSAY_ROLES) },
+      },
+      ({ subject, role }) =>
+        run(principal, "members:write", async () => {
+          await membership.setRole(ws, subject, role);
+          return ok({ workspace: ws, subject, role });
+        }),
+    );
+    server.registerTool(
+      "remove_member",
+      { description: "멤버 제거(멱등). 마지막 admin 제거는 CONFLICT.", inputSchema: { subject: z.string() } },
+      ({ subject }) =>
+        run(principal, "members:write", async () => {
+          await membership.removeMember(ws, subject);
+          return ok({ workspace: ws, subject, removed: true });
+        }),
+    );
+    server.registerTool(
+      "list_invites",
+      { description: "이 워크스페이스의 대기중 초대 목록(메타만 — 토큰/해시 없음)", inputSchema: {} },
+      () => run(principal, "members:write", async () => ok(await membership.listInvites(ws))),
+    );
+    server.registerTool(
+      "create_invite",
+      {
+        description: "초대 토큰 발급. 응답의 token(inv_…)은 한 번만 노출 — 링크로 공유하면 수락 시 그 role 로 가입.",
+        inputSchema: { role: z.enum(ASSAY_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() },
+      },
+      ({ role, expiresInHours }) =>
+        run(principal, "members:write", async () => {
+          const { token, meta } = await membership.createInvite({
+            workspace: ws,
+            role,
+            createdBy: principal.subject,
+            ...(expiresInHours !== undefined ? { expiresInHours } : {}),
+          });
+          return ok({ ...meta, token });
+        }),
+    );
+    server.registerTool(
+      "revoke_invite",
+      { description: "대기중 초대 취소(id 는 list_invites 의 id)", inputSchema: { id: z.string() } },
+      ({ id }) =>
+        run(principal, "members:write", async () => {
+          await membership.revokeInvite(ws, id);
+          return ok({ workspace: ws, id, revoked: true });
+        }),
+    );
+    server.registerTool(
+      "accept_invite",
+      {
+        description: "초대 토큰 수락 → 그 워크스페이스에 가입(역할 게이트 없음; 사람 계정만). 만료/사용/무효는 에러.",
+        inputSchema: { token: z.string() },
+      },
+      ({ token }) => plain(async () => ok(await membership.acceptInvite(principal, token))),
     );
   }
 

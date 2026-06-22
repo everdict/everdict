@@ -21,8 +21,10 @@ curl -XPOST $API/internal/tenant-keys -H 'x-internal-token: <T>' -d '{"workspace
 
 ## Workspaces (self-serve membership + 전환)
 A user (subject) can belong to **multiple workspaces**, each with a role. Membership is the control plane's
-SSOT (`@assay/db` `WorkspaceStore`: `assay_workspaces` + `assay_workspace_members(workspace, subject, role)`) —
-Keycloak supplies the **identity** (subject); the token's `workspace` claim is only a **bootstrap default**.
+SSOT (`@assay/db` `WorkspaceStore`: `assay_workspaces` + `assay_workspace_members(workspace, subject, role, email)`) —
+Keycloak supplies the **identity** (subject); the token's `workspace` claim is only a **bootstrap default**. The
+opaque `sub` is the identity key; the token's `email`/`preferred_username` claim is captured into the membership
+row on each login (display only — for a human-readable member list, never an authz input).
 
 - `POST /workspaces` `{name, id?}` — self-serve create (any authenticated principal); the creator becomes the
   workspace's **admin** member. `id` is the tenant key (slug); derived from `name` if omitted, **409** on an
@@ -35,7 +37,22 @@ Keycloak supplies the **identity** (subject); the token's `workspace` claim is o
   `x-assay-workspace` **falls back** to the default (isolation-safe; never a 403 from a stale selection).
 - One service core (`WorkspaceService`), two transports — HTTP routes **and** MCP tools (`list_workspaces` /
   `create_workspace`). The web surfaces it as a Linear-style sidebar **workspace switcher** + create flow
-  (`docs/web.md`). Member invites / role management are the next slice.
+  (`docs/web.md`).
+
+### Member management + invites (`MembershipService`)
+Managing **who** is in a workspace and **how they join** — one service core, HTTP + MCP parity.
+- **Members** — `GET /members` (`members:read`, viewer+ — seeing the team is benign) lists `{subject, role, email?,
+  addedAt}`; `PATCH /members/:subject {role}` and `DELETE /members/:subject` (`members:write`, **admin**) change a
+  role / remove. The **last admin can't be demoted or removed** (409) — no workspace is left admin-less. MCP:
+  `list_members` / `set_member_role` / `remove_member`.
+- **Invites (token/link redemption)** — `POST /invites {role, expiresInHours?}` (`members:write`, admin) mints a
+  one-time token `inv_…` (returned **once**, hash-only at rest like API keys); share the link. `GET /invites`
+  (admin) lists pending invites (meta only); `DELETE /invites/:id` revokes. **`POST /invites/accept {token}`** is
+  authenticated-only (NOT workspace-role-gated, like `POST /workspaces`) — a logged-in **human** (api-key principals
+  rejected) redeems it to join with the invite's role and is returned `{workspace, role}`. Invites are **single-use**
+  (atomic CTE consume — concurrent double-redeem → 409), **expirable**, and an existing member who redeems keeps their
+  current role (a shared link can't change privileges). Revoked == unknown (404, no existence leak). MCP:
+  `create_invite` / `list_invites` / `revoke_invite` / `accept_invite`.
 
 ## Tenant-owned harnesses (`@assay/registry`)
 The harness registry is keyed by **`(tenant, id, version)`**. A tenant registers and lists only its own
@@ -101,5 +118,5 @@ owner-first/`_shared` rule. See `docs/scorecards.md`.
 (isolation) → mutated re-register is `409` → the row is `acme | bu | 1.0.0` in `assay_harnesses`.
 
 ## Not yet (next)
-Workspace **member invites + role management** (the membership store + create/switch/list shipped; inviting other
-subjects and changing their role is the next slice); per-key scopes/expiry; rotating keys.
+Per-key scopes/expiry; rotating keys. (Workspace **member invites + role management** shipped — see
+`MembershipService` above: token/link invites + member role/remove with last-admin protection.)

@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
+import { ASSAY_ROLES, type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
 import {
   AppError,
   DatasetSchema,
@@ -34,7 +34,9 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import { buildMcpServer } from "./mcp.js";
+import type { MembershipService } from "./membership-service.js";
 import type { RunService } from "./run-service.js";
+import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
@@ -75,10 +77,13 @@ export interface ServerDeps {
   modelRegistry?: ModelRegistry; // Model(추론/판정 모델) CRUD (없으면 해당 라우트 비활성)
   metricRegistry?: MetricRegistry; // Metric(런타임 정의 합격규칙) CRUD (없으면 해당 라우트 비활성)
   runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
+  // 런타임 연결 테스트 — RuntimeSpec → 라이브 백엔드 빌드 후 probe()(잡 없이 도달성/인증). main 이 시크릿+빌더로 주입.
+  probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 (없으면=ASSAY_SECRETS_KEY 미설정 → 해당 라우트 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성 (없으면 /workspaces 라우트 비활성)
+  membershipService?: MembershipService; // 멤버 관리(목록/역할/제거) + 초대(발급/수락) (없으면 해당 라우트 비활성)
   authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
   keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
   internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
@@ -133,12 +138,15 @@ async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: 
   const subject = base.subject;
 
   // 토큰/dev 기본 워크스페이스가 있으면 멤버십으로 (없을 때만) 부트스트랩.
+  // email 클레임(있으면)은 로그인마다 멤버 행에 캡처/백필 — role 은 유지(ensureMembership 가 COALESCE/role 불변).
   let baseRole: string | undefined;
   if (base.workspace) {
     baseRole = await store.roleFor(base.workspace, subject);
     if (!baseRole) {
       baseRole = base.roles[0] ?? "member";
-      await store.ensureMembership(base.workspace, subject, baseRole);
+      await store.ensureMembership(base.workspace, subject, baseRole, base.email);
+    } else if (base.email !== undefined) {
+      await store.ensureMembership(base.workspace, subject, baseRole, base.email); // 기존 멤버 — email 만 갱신
     }
   }
 
@@ -253,6 +261,109 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       return reply.code(201).send(await deps.workspaceService.create(principal.subject, body.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- 워크스페이스 멤버 (조회=viewer+, 역할변경/제거=admin) ---
+  app.get("/members", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "members:read");
+      return reply.send(await deps.membershipService.listMembers(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.patch<{ Params: { subject: string } }>("/members/:subject", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ role: z.enum(ASSAY_ROLES) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      gate(principal, "members:write");
+      await deps.membershipService.setRole(principal.workspace, req.params.subject, body.data.role);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { subject: string } }>("/members/:subject", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "members:write");
+      await deps.membershipService.removeMember(principal.workspace, req.params.subject);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- 초대 (토큰/링크 redemption; 발급/목록/취소=admin, 수락=인증만) ---
+  app.get("/invites", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "members:write"); // 초대는 가입 비밀 → 목록도 admin
+      return reply.send(await deps.membershipService.listInvites(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.post("/invites", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({ role: z.enum(ASSAY_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() })
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      gate(principal, "members:write");
+      const { token, meta } = await deps.membershipService.createInvite({
+        workspace: principal.workspace,
+        role: body.data.role,
+        createdBy: principal.subject,
+        ...(body.data.expiresInHours !== undefined ? { expiresInHours: body.data.expiresInHours } : {}),
+      });
+      return reply.code(201).send({ ...meta, token }); // 평문 토큰은 여기서 한 번만(링크에 담는다)
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/invites/:id", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "members:write");
+      await deps.membershipService.revokeInvite(principal.workspace, req.params.id);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 수락 — 워크스페이스-역할 게이트 없음(가입 전). 인증된 subject 만(POST /workspaces 와 동일 self-serve). 활성 워크스페이스 무관.
+  app.post("/invites/accept", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ token: z.string().min(1) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      return reply.send(await deps.membershipService.acceptInvite(principal, body.data.token));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -860,6 +971,26 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
   });
 
+  // 연결 테스트(라이브) — validate(스키마)와 달리 실제 클러스터에 붙어 도달성/인증을 확인(잡은 안 돌린다).
+  // 자격증명(authSecret/kubeconfigSecret)은 컨트롤플레인이 시크릿에서 resolve해 인증 헤더로만 쓰고 에이전트엔 노출 안 함.
+  app.post("/runtimes/probe", async (req, reply) => {
+    if (!deps.probeRuntime) return reply.code(404).send({ code: "NOT_FOUND", message: "probe 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runtimes:write");
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 (라이브 I/O 전에 게이트)
+    }
+    const parsed = RuntimeSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(await deps.probeRuntime(principal.workspace, parsed.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.get("/runtimes", async (req, reply) => {
     if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -1182,10 +1313,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           datasetRegistry: deps.datasetRegistry,
           judgeRegistry: deps.judgeRegistry,
           runtimeRegistry: deps.runtimeRegistry,
+          probeRuntime: deps.probeRuntime,
           secretStore: deps.secretStore,
           settingsStore: deps.settingsStore,
           benchmarkService: deps.benchmarkService,
           workspaceService: deps.workspaceService,
+          membershipService: deps.membershipService,
           keyStore: deps.keyStore,
         },
         principal,

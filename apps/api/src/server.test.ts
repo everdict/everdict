@@ -7,6 +7,7 @@ import {
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
+  InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
   aesGcmCipher,
@@ -23,6 +24,7 @@ import {
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
+import { MembershipService } from "./membership-service.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
@@ -130,6 +132,7 @@ function server(
   const settingsStore = new InMemoryWorkspaceSettingsStore();
   const workspaceStore = new InMemoryWorkspaceStore();
   const workspaceService = new WorkspaceService(workspaceStore);
+  const membershipService = new MembershipService(workspaceStore, new InMemoryWorkspaceInviteStore(workspaceStore));
   const benchmarkService = new BenchmarkService({
     datasets: datasetRegistry,
     benchmarks: new InMemoryBenchmarkRegistry(),
@@ -143,10 +146,13 @@ function server(
     judgeRegistry,
     metricRegistry,
     runtimeRegistry: new InMemoryRuntimeRegistry(),
+    // 연결 테스트 stub — 실제 클러스터 I/O 없이 라우트 와이어링/역할 게이트만 검증.
+    probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
     secretStore,
     settingsStore,
     workspaceStore,
     workspaceService,
+    membershipService,
     authenticator: opts.authenticator ?? compositeAuthenticator([apiKeyAuthenticator({ keyStore })]),
     keyStore,
     internalToken: opts.internalToken,
@@ -301,6 +307,44 @@ describe("API — authorization (roles)", () => {
     expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS })).statusCode).toBe(
       201,
     );
+    await app.close();
+  });
+});
+
+describe("API — runtimes probe (연결 테스트, admin)", () => {
+  const SPEC = { kind: "local", id: "rt-probe", version: "1.0.0", tags: [] };
+  it("admin: POST /runtimes/probe → 200 + {kind,reachable,detail}", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runtimes/probe",
+      headers: { authorization: "Bearer x" },
+      payload: SPEC,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toMatchObject({ kind: "local", reachable: true });
+    await app.close();
+  });
+  it("viewer 는 probe 불가 (runtimes:write=admin → 403)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runtimes/probe",
+      headers: { authorization: "Bearer x" },
+      payload: SPEC,
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+  it("스키마 위반 body → 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runtimes/probe",
+      headers: { authorization: "Bearer x" },
+      payload: { kind: "nomad" }, // addr/image 누락
+    });
+    expect(res.statusCode).toBe(400);
     await app.close();
   });
 });
@@ -1074,6 +1118,54 @@ describe("API — keys (self-serve API 키, admin)", () => {
     const h = { authorization: "Bearer x" };
     expect((await app.inject({ method: "GET", url: "/keys", headers: h })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/keys", headers: h, payload: {} })).statusCode).toBe(403);
+    await app.close();
+  });
+});
+
+describe("API — members (멤버 관리)", () => {
+  it("admin: 목록(역할·email)/역할변경/제거", async () => {
+    const { app, keyStore, workspaceStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await workspaceStore.ensureMembership("acme", "bob", "member", "bob@corp.com");
+    const list = (await app.inject({ method: "GET", url: "/members", headers: h })).json() as Array<{
+      subject: string;
+      role: string;
+      email?: string;
+    }>;
+    expect(list.find((m) => m.subject === "bob")).toMatchObject({ role: "member", email: "bob@corp.com" });
+
+    expect(
+      (await app.inject({ method: "PATCH", url: "/members/bob", headers: h, payload: { role: "admin" } })).statusCode,
+    ).toBe(204);
+    expect((await app.inject({ method: "DELETE", url: "/members/bob", headers: h })).statusCode).toBe(204);
+    const after = (await app.inject({ method: "GET", url: "/members", headers: h })).json() as Array<{
+      subject: string;
+    }>;
+    expect(after.some((m) => m.subject === "bob")).toBe(false);
+    await app.close();
+  });
+
+  it("마지막 admin 은 강등/제거 불가 (409)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "GET", url: "/members", headers: h }); // 호출자(key:acme)를 유일 admin 으로 부트스트랩
+    const self = encodeURIComponent("key:acme");
+    expect(
+      (await app.inject({ method: "PATCH", url: `/members/${self}`, headers: h, payload: { role: "member" } }))
+        .statusCode,
+    ).toBe(409);
+    expect((await app.inject({ method: "DELETE", url: `/members/${self}`, headers: h })).statusCode).toBe(409);
+    await app.close();
+  });
+
+  it("member 는 조회만(viewer+) 가능, 관리는 불가 (403)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await app.inject({ method: "GET", url: "/members", headers: h })).statusCode).toBe(200);
+    expect(
+      (await app.inject({ method: "PATCH", url: "/members/u", headers: h, payload: { role: "admin" } })).statusCode,
+    ).toBe(403);
+    expect((await app.inject({ method: "DELETE", url: "/members/u", headers: h })).statusCode).toBe(403);
     await app.close();
   });
 });

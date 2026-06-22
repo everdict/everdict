@@ -10,23 +10,27 @@ import {
   buildRuntimeBackend,
   inMemoryBudget,
 } from "@assay/backends";
+import type { RuntimeSpec } from "@assay/core";
 import {
   InMemoryRunStore,
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
+  InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
   PgRunStore,
   PgScorecardStore,
   PgSecretStore,
   PgTenantKeyStore,
+  PgWorkspaceInviteStore,
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
   type RunStore,
   type ScorecardStore,
   type SecretStore,
   type TenantKeyStore,
+  type WorkspaceInviteStore,
   type WorkspaceSettingsStore,
   type WorkspaceStore,
   cipherFromEnv,
@@ -67,8 +71,10 @@ import { S3ArtifactStore } from "@assay/storage";
 import { buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
+import { MembershipService } from "./membership-service.js";
 import { RunService } from "./run-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
+import { makeRuntimeProber } from "./runtime-probe.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
 import { buildTopologyBackend } from "./topology-backend.js";
@@ -95,9 +101,11 @@ async function main(): Promise<void> {
     runtimeRegistry,
     settingsStore,
     workspaceStore,
+    inviteStore,
     secretStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
+  const membershipService = new MembershipService(workspaceStore, inviteStore);
   await seedSharedHarnesses(registry);
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
@@ -128,15 +136,19 @@ async function main(): Promise<void> {
 
   // 테넌트 런타임 라우팅: placement.target 이 테넌트 등록 Runtime 이면 그 백엔드를 빌드/등록해 라우팅(아니면 글로벌 백엔드 그대로).
   const runtimeSecretsFor = (tenant: string) => (secretStore ? secretStore.entries(tenant) : Promise.resolve({}));
+  // RuntimeSpec → 라이브 백엔드. topology 런타임 → ServiceTopologyBackend, 나머지는 buildRuntimeBackend(local/docker/nomad/k8s).
+  // 디스패치와 연결 테스트(probe)가 같은 빌더/인증 경로를 쓰도록 한 곳에서 정의.
+  const runtimeBuildBackend = (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) =>
+    spec.kind === "topology" ? buildTopologyBackend(spec, { harnesses: registry }) : buildRuntimeBackend(spec, opts);
   const dispatcher = new RuntimeDispatcher({
     inner: scheduler,
     backends,
     runtimes: runtimeRegistry,
     secretsFor: runtimeSecretsFor,
-    // topology 런타임 → ServiceTopologyBackend(서비스 토폴로지 하니스). 나머지는 buildRuntimeBackend(local/docker/nomad/k8s).
-    buildBackend: (spec, opts) =>
-      spec.kind === "topology" ? buildTopologyBackend(spec, { harnesses: registry }) : buildRuntimeBackend(spec, opts),
+    buildBackend: runtimeBuildBackend,
   });
+  // 연결 테스트: 같은 빌더+테넌트 시크릿으로 백엔드를 만들어 probe()(잡 없이 도달성/인증). server/MCP 가 공유.
+  const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
 
   // 아티팩트 스토어(env 설정 시): os-use 스크린샷을 S3/MinIO 로 오프로드 → 결과 레코드엔 presigned URL 만(base64 인라인 안 함).
   // 미설정이면 undefined → 서비스가 base64 인라인 폴백(dev). 자격증명은 env 시크릿(커밋 금지).
@@ -198,9 +210,11 @@ async function main(): Promise<void> {
     modelRegistry,
     metricRegistry,
     runtimeRegistry,
+    probeRuntime,
     settingsStore,
     workspaceStore,
     workspaceService,
+    membershipService,
     ...(secretStore ? { secretStore } : {}),
     authenticator: buildAuthenticator(keyStore),
     keyStore,
@@ -231,6 +245,7 @@ interface Persistence {
   runtimeRegistry: RuntimeRegistry;
   settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
   workspaceStore: WorkspaceStore; // 워크스페이스 멤버십(생성/전환) — 항상 사용 가능
+  inviteStore: WorkspaceInviteStore; // 멤버 초대(토큰/링크 redemption) — 항상 사용 가능
   secretStore?: SecretStore; // ASSAY_SECRETS_KEY 있을 때만(fail-closed: 키 없으면 시크릿 기능 비활성)
 }
 
@@ -240,6 +255,7 @@ async function makePersistence(): Promise<Persistence> {
   const cipher = cipherFromEnv();
   const url = process.env.DATABASE_URL;
   if (!url) {
+    const workspaceStore = new InMemoryWorkspaceStore();
     return {
       store: new InMemoryRunStore(),
       scorecardStore: new InMemoryScorecardStore(),
@@ -252,7 +268,8 @@ async function makePersistence(): Promise<Persistence> {
       metricRegistry: new InMemoryMetricRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
-      workspaceStore: new InMemoryWorkspaceStore(),
+      workspaceStore,
+      inviteStore: new InMemoryWorkspaceInviteStore(workspaceStore),
       ...(cipher ? { secretStore: new InMemorySecretStore(cipher) } : {}),
     };
   }
@@ -272,6 +289,7 @@ async function makePersistence(): Promise<Persistence> {
     runtimeRegistry: new PgRuntimeRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
     workspaceStore: new PgWorkspaceStore(client),
+    inviteStore: new PgWorkspaceInviteStore(client),
     ...(cipher ? { secretStore: new PgSecretStore(client, cipher) } : {}),
   };
 }

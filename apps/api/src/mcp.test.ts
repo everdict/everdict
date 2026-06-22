@@ -1,11 +1,13 @@
 import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
-import type { CaseResult } from "@assay/core";
+import type { CaseResult, RuntimeSpec } from "@assay/core";
 import {
   InMemoryRunStore,
   InMemoryScorecardStore,
   InMemoryTenantKeyStore,
+  InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
+  InMemoryWorkspaceStore,
 } from "@assay/db";
 import {
   InMemoryDatasetRegistry,
@@ -17,6 +19,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { buildMcpServer } from "./mcp.js";
+import { MembershipService } from "./membership-service.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 
@@ -52,13 +55,21 @@ const DATASET = JSON.stringify({
 let n = 0;
 function harness() {
   const datasetRegistry = new InMemoryDatasetRegistry();
+  const workspaceStore = new InMemoryWorkspaceStore();
   return {
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
     judgeRegistry: new InMemoryJudgeRegistry(),
     runtimeRegistry: new InMemoryRuntimeRegistry(),
+    probeRuntime: async (_ws: string, spec: RuntimeSpec) => ({
+      kind: spec.kind,
+      reachable: true,
+      detail: "stub-reachable",
+    }),
     keyStore: new InMemoryTenantKeyStore(),
+    workspaceStore,
+    membershipService: new MembershipService(workspaceStore, new InMemoryWorkspaceInviteStore(workspaceStore)),
     scorecardService: new ScorecardService({
       dispatcher: okDispatcher,
       store: new InMemoryScorecardStore(),
@@ -85,8 +96,10 @@ describe("MCP tools", () => {
     const client = await connect(harness(), ["admin"]);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      "accept_invite",
       "create_api_key",
       "create_dataset",
+      "create_invite",
       "create_judge",
       "create_runtime",
       "diff_scorecards",
@@ -99,14 +112,20 @@ describe("MCP tools", () => {
       "list_api_keys",
       "list_datasets",
       "list_harnesses",
+      "list_invites",
       "list_judges",
+      "list_members",
       "list_runs",
       "list_runtimes",
       "list_scorecards",
+      "probe_runtime",
       "pull_scorecard",
       "register_harness",
+      "remove_member",
       "revoke_api_key",
+      "revoke_invite",
       "run_scorecard",
+      "set_member_role",
       "submit_run",
       "validate_dataset",
       "validate_harness",
@@ -360,6 +379,17 @@ describe("MCP tools", () => {
     expect((await member.callTool({ name: "list_runtimes", arguments: {} })).isError).toBeFalsy();
   });
 
+  it("probe_runtime: admin 이 연결 테스트(잡 없이 도달성/인증); viewer 는 권한오류", async () => {
+    const deps = harness();
+    const runtime = JSON.stringify({ kind: "local", id: "rt", version: "1.0.0", tags: [] });
+    const admin = await connect(deps, ["admin"], "acme");
+    const res = JSON.parse(text(await admin.callTool({ name: "probe_runtime", arguments: { runtime } })));
+    expect(res).toMatchObject({ kind: "local", reachable: true });
+
+    const viewer = await connect(harness(), ["viewer"], "acme");
+    expect((await viewer.callTool({ name: "probe_runtime", arguments: { runtime } })).isError).toBe(true);
+  });
+
   it("workspace settings: admin get(빈)→{} / set 병합 반영; member 는 권한오류", async () => {
     const deps = { ...harness(), settingsStore: new InMemoryWorkspaceSettingsStore() };
     const admin = await connect(deps, ["admin"], "acme");
@@ -400,5 +430,50 @@ describe("MCP tools", () => {
     const member = await connect(deps, ["member"], "acme");
     expect((await member.callTool({ name: "create_api_key", arguments: {} })).isError).toBe(true);
     expect((await member.callTool({ name: "list_api_keys", arguments: {} })).isError).toBe(true);
+  });
+
+  it("members: admin 목록/역할변경/제거; member 는 관리 권한오류, 조회는 가능", async () => {
+    const deps = harness();
+    await deps.workspaceStore.ensureMembership("acme", "bob", "member", "bob@corp.com");
+    const admin = await connect(deps, ["admin"], "acme");
+    const list = JSON.parse(text(await admin.callTool({ name: "list_members", arguments: {} }))) as Array<{
+      subject: string;
+      role: string;
+      email?: string;
+    }>;
+    expect(list.find((m) => m.subject === "bob")).toMatchObject({ role: "member", email: "bob@corp.com" });
+    expect(
+      (await admin.callTool({ name: "set_member_role", arguments: { subject: "bob", role: "viewer" } })).isError,
+    ).toBeFalsy();
+    expect((await admin.callTool({ name: "remove_member", arguments: { subject: "bob" } })).isError).toBeFalsy();
+
+    const member = await connect(deps, ["member"], "acme");
+    expect((await member.callTool({ name: "list_members", arguments: {} })).isError).toBeFalsy(); // 조회는 viewer+
+    expect(
+      (await member.callTool({ name: "set_member_role", arguments: { subject: "bob", role: "admin" } })).isError,
+    ).toBe(true);
+  });
+
+  it("invites: admin 발급(토큰 1회) → 다른 사람이 accept → list_members 에 등장; member 는 발급 불가", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"], "acme");
+    const created = JSON.parse(text(await admin.callTool({ name: "create_invite", arguments: { role: "member" } })));
+    const token = created.token as string;
+    expect(token.startsWith("inv_")).toBe(true);
+
+    // 다른 principal(피초대자)이 수락 — 워크스페이스 게이트 없음.
+    const invitee = await connect(deps, ["viewer"], "other-ws");
+    const accepted = await invitee.callTool({ name: "accept_invite", arguments: { token } });
+    expect(JSON.parse(text(accepted))).toEqual({ workspace: "acme", role: "member" });
+    // 재수락은 에러(단일 사용)
+    expect((await invitee.callTool({ name: "accept_invite", arguments: { token } })).isError).toBe(true);
+    // admin 의 멤버 목록에 피초대자(subject "u")가 보인다
+    const members = JSON.parse(text(await admin.callTool({ name: "list_members", arguments: {} }))) as Array<{
+      subject: string;
+    }>;
+    expect(members.some((m) => m.subject === "u")).toBe(true);
+
+    const member = await connect(deps, ["member"], "acme");
+    expect((await member.callTool({ name: "create_invite", arguments: { role: "member" } })).isError).toBe(true);
   });
 });

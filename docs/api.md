@@ -33,6 +33,13 @@ arrives by polling or webhook.
 | `POST` | `/keys` | self-serve issue an API key `{ label? }` → **201** `{ apiKey }` (plaintext **once**; key carries workspace **admin**) (`keys:write`, admin) |
 | `GET`  | `/keys` | API key metadata `{ id, prefix, label?, createdAt }[]` — never the plaintext/hash (`keys:read`, admin) |
 | `DELETE` | `/keys/:id` | revoke a key → **204** (tenant-scoped; foreign id is a no-op) (`keys:write`, admin) |
+| `GET`  | `/members` | workspace members `{ subject, role, email?, addedAt }[]` (`members:read`, viewer+) |
+| `PATCH` | `/members/:subject` | change a member's `{ role }` → **204** (404 if not a member; **409** last-admin) (`members:write`, admin) |
+| `DELETE` | `/members/:subject` | remove a member → **204** (idempotent; **409** last-admin) (`members:write`, admin) |
+| `POST` | `/invites` | mint a join token `{ role, expiresInHours? }` → **201** `{ …, token }` (plaintext `inv_…` **once**) (`members:write`, admin) |
+| `GET`  | `/invites` | pending invites (meta only, no token/hash) (`members:write`, admin) |
+| `DELETE` | `/invites/:id` | revoke an invite → **204** (tenant-scoped) (`members:write`, admin) |
+| `POST` | `/invites/accept` | redeem `{ token }` → `{ workspace, role }` (authenticated **human** only, not workspace-gated; single-use/expirable) |
 | `GET`  | `/healthz` | `{ ok: true }` |
 
 Scorecards are **batch evals** (a dataset × a `harness@version` → aggregated `Scorecard` + per-metric summary),
