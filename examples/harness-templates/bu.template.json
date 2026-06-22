@@ -1,0 +1,23 @@
+{
+  "kind": "service",
+  "category": "topology",
+  "id": "bu",
+  "version": "1",
+  "services": [
+    {
+      "name": "agent-server",
+      "slot": "agent-server",
+      "port": 8080,
+      "needs": [],
+      "perRun": ["thread_id", "stream_channel"],
+      "replicas": 1
+    }
+  ],
+  "dependencies": [
+    { "store": "postgres", "role": "checkpoints", "isolateBy": "thread_id" },
+    { "store": "redis", "role": "action-stream", "isolateBy": "key-prefix" }
+  ],
+  "target": { "kind": "browser", "engine": "chromium", "lifecycle": "per-case-instance", "observe": ["dom", "url"] },
+  "frontDoor": { "service": "agent-server", "submit": "POST /runs" },
+  "traceSource": { "kind": "mlflow", "endpoint": "http://127.0.0.1:5501" }
+}

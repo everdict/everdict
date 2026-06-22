@@ -4,7 +4,9 @@ import {
   AppError,
   DatasetSchema,
   EvalCaseSchema,
+  HarnessInstanceSpecSchema,
   HarnessSpecSchema,
+  HarnessTemplateSpecSchema,
   JudgeRunConfigSchema,
   JudgeSpecSchema,
   MetricSpecSchema,
@@ -22,7 +24,9 @@ import {
 } from "@assay/db";
 import type {
   DatasetRegistry,
+  HarnessInstanceRegistry,
   HarnessRegistry,
+  HarnessTemplateRegistry,
   JudgeRegistry,
   MetricRegistry,
   ModelRegistry,
@@ -72,6 +76,9 @@ export interface ServerDeps {
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
   benchmarkService?: BenchmarkService; // 벤치마크 카탈로그 + 인입 (없으면 해당 라우트 비활성)
   registry?: HarnessRegistry; // 하니스 CRUD (없으면 해당 라우트 비활성)
+  harnessTemplates?: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조) CRUD
+  harnessInstances?: HarnessInstanceRegistry; // 개별 하네스(template+pins) CRUD + resolve
+
   datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (없으면 해당 라우트 비활성)
   modelRegistry?: ModelRegistry; // Model(추론/판정 모델) CRUD (없으면 해당 라우트 비활성)
@@ -478,6 +485,121 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       if (versions.length === 0)
         return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
       return reply.send({ id: req.params.id, versions });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- harness templates (대분류: 구조/슬롯, 버전 미고정) + instances (template+pins → resolved) ---
+  // 하네스는 협업 콘텐츠 → 정의/등록 모두 무게이트(viewer+, 권한 상관없이 동등). 읽기도 viewer+.
+  app.post("/harness-templates", async (req, reply) => {
+    if (!deps.harnessTemplates)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = HarnessTemplateSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      gate(principal, "templates:write");
+      await deps.harnessTemplates.register(principal.workspace, parsed.data);
+      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.post("/harness-templates/validate", async (req, reply) => {
+    if (!deps.harnessTemplates)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "templates:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = HarnessTemplateSpecSchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
+    const existingVersions = await deps.harnessTemplates.ownVersions(principal.workspace, parsed.data.id);
+    return reply.send({
+      ok: true,
+      kind: parsed.data.kind,
+      id: parsed.data.id,
+      version: parsed.data.version,
+      existingVersions,
+      versionExists: existingVersions.includes(parsed.data.version),
+    });
+  });
+
+  app.get("/harness-templates", async (req, reply) => {
+    if (!deps.harnessTemplates)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      return reply.send(await deps.harnessTemplates.list(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string } }>("/harness-templates/:id", async (req, reply) => {
+    if (!deps.harnessTemplates)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      const versions = await deps.harnessTemplates.versions(principal.workspace, req.params.id);
+      if (versions.length === 0)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "템플릿을 찾을 수 없습니다." });
+      return reply.send({ id: req.params.id, versions });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 개별 하네스(인스턴스) — template 참조 + pins. 등록 시 resolve 로 검증(템플릿 없음 404 / 핀 누락 400 거부).
+  app.post("/harness-instances", async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = HarnessInstanceSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      gate(principal, "harnesses:register");
+      await deps.harnessInstances.register(principal.workspace, parsed.data);
+      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get("/harness-instances", async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      return reply.send(await deps.harnessInstances.list(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string; version: string } }>("/harness-instances/:id/:version", async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      // resolved HarnessSpec (template + pins) — 웹 pin diff/미리보기용.
+      return reply.send(await deps.harnessInstances.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
       return sendError(reply, err);
     }

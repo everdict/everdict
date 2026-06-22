@@ -16,7 +16,9 @@ import {
 import {
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
+  InMemoryHarnessInstanceRegistry,
   InMemoryHarnessRegistry,
+  InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
   InMemoryMetricRegistry,
   InMemoryRuntimeRegistry,
@@ -137,11 +139,15 @@ function server(
     datasets: datasetRegistry,
     benchmarks: new InMemoryBenchmarkRegistry(),
   });
+  const harnessTemplates = new InMemoryHarnessTemplateRegistry();
+  const harnessInstances = new InMemoryHarnessInstanceRegistry(harnessTemplates);
   const app = buildServer({
     service: svc,
     scorecardService,
     benchmarkService,
     registry: new InMemoryHarnessRegistry(),
+    harnessTemplates,
+    harnessInstances,
     datasetRegistry,
     judgeRegistry,
     metricRegistry,
@@ -159,7 +165,16 @@ function server(
     requireAuth: opts.requireAuth,
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
   });
-  return { app, keyStore, datasetRegistry, secretStore, settingsStore, workspaceStore };
+  return {
+    app,
+    keyStore,
+    datasetRegistry,
+    secretStore,
+    settingsStore,
+    workspaceStore,
+    harnessTemplates,
+    harnessInstances,
+  };
 }
 
 describe("API — dev fallback (no auth required)", () => {
@@ -372,6 +387,54 @@ describe("API — harness ownership (workspace-scoped)", () => {
       payload: mutated,
     });
     expect(dup.statusCode).toBe(409);
+    await app.close();
+  });
+});
+
+describe("API — harness taxonomy (template 대분류 + instance)", () => {
+  const TEMPLATE = {
+    kind: "service",
+    category: "topology",
+    id: "bu",
+    version: "1",
+    services: [{ name: "agent", slot: "agent" }],
+    dependencies: [],
+    frontDoor: { service: "agent", submit: "POST /runs" },
+    traceSource: { kind: "otel", endpoint: "http://otel:4318" },
+  };
+  const INSTANCE = {
+    template: { id: "bu", version: "1" },
+    id: "bu",
+    version: "pr-1",
+    pins: { agent: "ghcr.io/x/agent:abc" },
+  };
+
+  it("템플릿 등록 → 인스턴스 등록 → resolved get; viewer 도 등록 가능(무게이트)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const viewer = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    expect(
+      (await app.inject({ method: "POST", url: "/harness-templates", headers: viewer, payload: TEMPLATE })).statusCode,
+    ).toBe(201);
+    expect(
+      (await app.inject({ method: "POST", url: "/harness-instances", headers: viewer, payload: INSTANCE })).statusCode,
+    ).toBe(201);
+    const resolved = await app.inject({ method: "GET", url: "/harness-instances/bu/pr-1", headers: viewer });
+    expect(resolved.statusCode).toBe(200);
+    expect(resolved.json().services[0].image).toBe("ghcr.io/x/agent:abc"); // slot → pin 으로 resolve
+    await app.close();
+  });
+
+  it("템플릿 없이 인스턴스 등록 → 404; 핀 누락 → 400 (등록 거부)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    expect(
+      (await app.inject({ method: "POST", url: "/harness-instances", headers: h, payload: INSTANCE })).statusCode,
+    ).toBe(404);
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: TEMPLATE });
+    const bad = { ...INSTANCE, version: "pr-2", pins: {} };
+    expect((await app.inject({ method: "POST", url: "/harness-instances", headers: h, payload: bad })).statusCode).toBe(
+      400,
+    );
     await app.close();
   });
 });

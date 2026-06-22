@@ -41,10 +41,14 @@ import {
 import {
   type BenchmarkRegistry,
   type DatasetRegistry,
+  type HarnessInstanceRegistry,
   type HarnessRegistry,
+  type HarnessTemplateRegistry,
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
+  InMemoryHarnessInstanceRegistry,
   InMemoryHarnessRegistry,
+  InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
   InMemoryMetricRegistry,
   InMemoryModelRegistry,
@@ -54,7 +58,9 @@ import {
   type ModelRegistry,
   PgBenchmarkRegistry,
   PgDatasetRegistry,
+  PgHarnessInstanceRegistry,
   PgHarnessRegistry,
+  PgHarnessTemplateRegistry,
   PgJudgeRegistry,
   PgMetricRegistry,
   PgModelRegistry,
@@ -62,6 +68,7 @@ import {
   type RuntimeRegistry,
   loadDatasetDir,
   loadHarnessDir,
+  loadHarnessTaxonomyDir,
   loadJudgeDir,
   loadMetricDir,
   loadModelDir,
@@ -93,6 +100,8 @@ async function main(): Promise<void> {
     scorecardStore,
     keyStore,
     registry,
+    harnessTemplateRegistry,
+    harnessInstanceRegistry,
     datasetRegistry,
     benchmarkRegistry,
     judgeRegistry,
@@ -107,6 +116,7 @@ async function main(): Promise<void> {
   const workspaceService = new WorkspaceService(workspaceStore);
   const membershipService = new MembershipService(workspaceStore, inviteStore);
   await seedSharedHarnesses(registry);
+  await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
   await seedSharedModels(modelRegistry);
@@ -205,6 +215,8 @@ async function main(): Promise<void> {
     scorecardService,
     benchmarkService,
     registry,
+    harnessTemplates: harnessTemplateRegistry,
+    harnessInstances: harnessInstanceRegistry,
     datasetRegistry,
     judgeRegistry,
     modelRegistry,
@@ -237,6 +249,8 @@ interface Persistence {
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
   registry: HarnessRegistry;
+  harnessTemplateRegistry: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조)
+  harnessInstanceRegistry: HarnessInstanceRegistry; // 개별 하네스(template+pins → resolved)
   datasetRegistry: DatasetRegistry;
   benchmarkRegistry: BenchmarkRegistry;
   judgeRegistry: JudgeRegistry;
@@ -256,11 +270,14 @@ async function makePersistence(): Promise<Persistence> {
   const url = process.env.DATABASE_URL;
   if (!url) {
     const workspaceStore = new InMemoryWorkspaceStore();
+    const harnessTemplateRegistry = new InMemoryHarnessTemplateRegistry();
     return {
       store: new InMemoryRunStore(),
       scorecardStore: new InMemoryScorecardStore(),
       keyStore: new InMemoryTenantKeyStore(),
       registry: new InMemoryHarnessRegistry(),
+      harnessTemplateRegistry,
+      harnessInstanceRegistry: new InMemoryHarnessInstanceRegistry(harnessTemplateRegistry),
       datasetRegistry: new InMemoryDatasetRegistry(),
       benchmarkRegistry: new InMemoryBenchmarkRegistry(),
       judgeRegistry: new InMemoryJudgeRegistry(),
@@ -276,11 +293,14 @@ async function makePersistence(): Promise<Persistence> {
   const client = sqlClient(makePool(url));
   const { applied } = await migrate(client);
   if (applied.length > 0) console.error(`▶ db migrations applied: ${applied.join(", ")}`);
+  const harnessTemplateRegistry = new PgHarnessTemplateRegistry(client);
   return {
     store: new PgRunStore(client),
     scorecardStore: new PgScorecardStore(client),
     keyStore: new PgTenantKeyStore(client),
     registry: new PgHarnessRegistry(client),
+    harnessTemplateRegistry,
+    harnessInstanceRegistry: new PgHarnessInstanceRegistry(client, harnessTemplateRegistry),
     datasetRegistry: new PgDatasetRegistry(client),
     benchmarkRegistry: new PgBenchmarkRegistry(client),
     judgeRegistry: new PgJudgeRegistry(client),
@@ -303,6 +323,21 @@ async function seedSharedHarnesses(registry: HarnessRegistry): Promise<void> {
     console.error(`▶ shared harnesses seeded from ${dir}`);
   } catch {
     // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+  }
+}
+
+// _shared 하네스 taxonomy(템플릿 대분류 + 인스턴스)를 파일 SSOT 에서 시드. ASSAY_HARNESS_TEMPLATES_DIR
+// (없으면 cwd/examples/harness-templates). *.template.json → 템플릿, *.instance.json → 인스턴스. best-effort/멱등.
+async function seedSharedHarnessTaxonomy(
+  templates: HarnessTemplateRegistry,
+  instances: HarnessInstanceRegistry,
+): Promise<void> {
+  const dir = process.env.ASSAY_HARNESS_TEMPLATES_DIR ?? `${process.cwd()}/examples/harness-templates`;
+  try {
+    await loadHarnessTaxonomyDir(dir, { templates, instances });
+    console.error(`▶ shared harness taxonomy seeded from ${dir}`);
+  } catch {
+    // 디렉터리 없음/비어있음은 정상.
   }
 }
 
