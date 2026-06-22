@@ -1,3 +1,9 @@
+/* 폰트(런타임 로드 — 빌드 오프라인 안전):
+   · 본문 Pretendard — 이전엔 font-family 만 선언돼 실제 미로드(system-ui 폴백)였다. 실제 로드해 의도대로 렌더.
+   · 디스플레이 Bricolage Grotesque — 헤딩/워드마크용 개성 그로테스크(generic Inter/Space Grotesk 회피, frontend-design).
+   Latin 은 Bricolage, 한글은 per-glyph 폴백으로 Pretendard 가 받는다(--font-display 스택). */
+@import url('https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css');
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700;12..96,800&display=swap');
 @import 'tailwindcss';
 @plugin 'tailwindcss-animate';
 
@@ -17,6 +23,34 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+/* 디스플레이 폰트 — 헤딩/워드마크. Latin=Bricolage, 한글=Pretendard 폴백. .font-display 로 적용. */
+:root {
+  --font-display: 'Bricolage Grotesque', 'Pretendard', system-ui, sans-serif;
+}
+.font-display {
+  font-family: var(--font-display);
+  letter-spacing: -0.02em;
+  font-feature-settings: 'ss01';
+}
+
+/* page-load staggered reveal (frontend-design: 한 번의 잘 조율된 로드). 정제 미학 → 절제된 8px rise.
+   접근성: prefers-reduced-motion 이면 비활성(애니메이션 없이 즉시 표시). */
+@keyframes assay-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .rise {
+    animation: assay-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
 }
 
 @theme inline {

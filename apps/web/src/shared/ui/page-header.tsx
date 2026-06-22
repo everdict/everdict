@@ -12,7 +12,7 @@ export function PageHeader({
   return (
     <div className="flex flex-wrap items-end justify-between gap-3">
       <div className="space-y-1.5">
-        <h1 className="text-[22px] font-semibold tracking-tight">{title}</h1>
+        <h1 className="font-display text-[23px] font-bold tracking-tight">{title}</h1>
         {description && (
           <p className="text-sm leading-relaxed text-muted-foreground">{description}</p>
         )}

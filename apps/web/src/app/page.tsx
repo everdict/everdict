@@ -42,7 +42,7 @@ export default async function Home() {
           <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
             <FlaskConical className="size-[18px]" />
           </span>
-          <span className="text-[15px] font-semibold tracking-tight">Assay</span>
+          <span className="font-display text-[16px] font-bold tracking-tight">Assay</span>
         </div>
         <div className="flex items-center gap-2">
           <ThemeToggle />
@@ -61,7 +61,7 @@ export default async function Home() {
           Agent harness evaluation runtime
         </span>
 
-        <h1 className="text-balance text-4xl font-semibold leading-[1.08] tracking-tight sm:text-6xl">
+        <h1 className="font-display text-balance text-4xl font-bold leading-[1.08] tracking-tight sm:text-6xl">
           하니스를 등록하고, 평가를 돌리고,
           <br className="hidden sm:block" />{' '}
           <span className="bg-gradient-to-r from-primary to-[var(--color-accent-foreground)] bg-clip-text text-transparent">

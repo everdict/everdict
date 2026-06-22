@@ -5,6 +5,7 @@ import type { Workspace } from '@/entities/workspace'
 import { Badge } from '@/shared/ui/badge'
 import { ThemeToggle } from '@/shared/ui/theme-toggle'
 
+import { PageTransition } from './page-transition'
 import { Sidebar } from './sidebar'
 
 // 대시보드 공통 셸: 좌측 사이드바(워크스페이스 스위처 + 내비) + 상단 바(역할/인증) + 본문.
@@ -52,7 +53,9 @@ export function AppShell({
               ))}
           </div>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 space-y-8 px-6 py-9">{children}</main>
+        <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-9">
+          <PageTransition>{children}</PageTransition>
+        </main>
       </div>
     </div>
   )

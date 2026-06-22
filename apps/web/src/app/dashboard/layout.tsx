@@ -27,10 +27,10 @@ export default async function DashboardLayout({ children }: { children: React.Re
           <span className="grid size-9 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
             <FlaskConical className="size-5" />
           </span>
-          <span className="text-lg font-semibold tracking-tight">Assay</span>
+          <span className="font-display text-lg font-bold tracking-tight">Assay</span>
         </div>
         <div className="space-y-1.5">
-          <h1 className="text-2xl font-semibold tracking-tight">
+          <h1 className="font-display text-[26px] font-bold tracking-tight">
             워크스페이스를 만들어 시작하세요
           </h1>
           <p className="text-sm leading-relaxed text-muted-foreground">

@@ -45,10 +45,10 @@ export function Sidebar({ workspace, workspaces }: { workspace: string; workspac
         <span className="grid size-8 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
           <FlaskConical className="size-[18px]" />
         </span>
-        <span className="text-[15px] font-semibold tracking-tight">Assay</span>
+        <span className="font-display text-[16px] font-bold tracking-tight">Assay</span>
       </Link>
       <WorkspaceSwitcher current={workspace} workspaces={workspaces} />
-      {NAV.map((item) => {
+      {NAV.map((item, i) => {
         const active = item.exact ? pathname === item.href : pathname.startsWith(item.href)
         const Icon = item.icon
         return (
@@ -56,8 +56,9 @@ export function Sidebar({ workspace, workspaces }: { workspace: string; workspac
             key={item.href}
             href={item.href}
             aria-current={active ? 'page' : undefined}
+            style={{ animationDelay: `${i * 28}ms` }}
             className={cn(
-              'group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              'rise group relative flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
               active
                 ? 'bg-accent text-foreground'
                 : 'text-muted-foreground hover:bg-accent/60 hover:text-foreground'
