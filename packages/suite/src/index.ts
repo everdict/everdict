@@ -9,3 +9,4 @@ export {
   type ScorecardDiff,
 } from "./scorecard.js";
 export { trendSeries, type TrendCard, type TrendPoint, type ScorecardTrend } from "./trend.js";
+export { evalMetric } from "./metric.js";

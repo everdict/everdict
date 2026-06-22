@@ -16,6 +16,8 @@ export type Action =
   | "judges:write"
   | "models:read"
   | "models:write"
+  | "metrics:read"
+  | "metrics:write"
   | "runtimes:read"
   | "runtimes:write"
   | "secrets:read"
@@ -34,6 +36,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "scorecards:read",
     "judges:read",
     "models:read",
+    "metrics:read",
     "runtimes:read",
   ]),
   member: new Set<Action>([
@@ -48,6 +51,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:write",
     "models:read",
     "models:write", // 모델 정의 = eval 콘텐츠(누구로 돌렸나) → judges/datasets 와 동일하게 member 가능
+    "metrics:read",
+    "metrics:write", // 메트릭 정의 = eval 콘텐츠(무엇으로 합격 판정하나) → member 가능
     "runtimes:read",
   ]),
   admin: new Set<Action>([
@@ -63,6 +68,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:write",
     "models:read",
     "models:write",
+    "metrics:read",
+    "metrics:write",
     "runtimes:read",
     "runtimes:write", // 실행 인프라 정의 = 실행/배치 결정 → admin 전용(harnesses:register 와 동일 이유)
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용

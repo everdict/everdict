@@ -17,6 +17,7 @@ import {
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
   InMemoryJudgeRegistry,
+  InMemoryMetricRegistry,
   InMemoryRuntimeRegistry,
 } from "@assay/registry";
 import { describe, expect, it } from "vitest";
@@ -105,6 +106,7 @@ function server(
   const keyStore = new InMemoryTenantKeyStore();
   const datasetRegistry = new InMemoryDatasetRegistry();
   const judgeRegistry = new InMemoryJudgeRegistry();
+  const metricRegistry = new InMemoryMetricRegistry();
   const svc = new RunService({
     dispatcher: okDispatcher,
     store: new InMemoryRunStore(),
@@ -116,6 +118,7 @@ function server(
     store: new InMemoryScorecardStore(),
     datasets: datasetRegistry,
     judges: judgeRegistry,
+    metrics: metricRegistry,
     // 시크릿 없음 → model judge 는 skip 점수(실제 모델 호출 없이 와이어링 검증).
     judgeRunner: defaultJudgeRunner({ secretsFor: async () => ({}) }),
     // pull 인제스트용 fake trace source + 시크릿(authSecret→헤더 주입 검증).
@@ -138,6 +141,7 @@ function server(
     registry: new InMemoryHarnessRegistry(),
     datasetRegistry,
     judgeRegistry,
+    metricRegistry,
     runtimeRegistry: new InMemoryRuntimeRegistry(),
     secretStore,
     settingsStore,
@@ -894,6 +898,49 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
     await app.close();
   });
 
+  it("metrics: 등록한 threshold metric 이 run 후 scores 에 post-hoc 적용된다(steps<=5 → pass)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const reg = await app.inject({
+      method: "POST",
+      url: "/metrics",
+      headers: h,
+      payload: { kind: "threshold", id: "step-budget", version: "1.0.0", source: "steps", op: "lte", threshold: 5 },
+    });
+    expect(reg.statusCode).toBe(201);
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: { dataset: { id: "smoke" }, harness: { id: "scripted" }, metrics: [{ id: "step-budget" }] },
+    });
+    expect(post.statusCode).toBe(202);
+    const settled = await pollScorecard(app, post.json().id, h);
+    expect(settled.status).toBe("succeeded");
+    const score = (settled.scorecard?.results?.[0]?.scores ?? []).find((s) => s.metric === "step-budget");
+    expect(score).toBeDefined();
+    expect(score?.value).toBe(2); // steps 값을 그대로 실어 나른다
+    // 합격 여부는 요약 passRate 로 검증(steps 2 <= 5 → pass=1). step-budget 이 요약/트렌드에 1급 메트릭으로 반영.
+    const m = (settled.summary ?? []).find((x) => x.metric === "step-budget");
+    expect(m?.passRate).toBe(1);
+    await app.close();
+  });
+
+  it("viewer 는 metric 등록 불가(403)이나 목록 읽기는 가능(200)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const h = { authorization: "Bearer x" };
+    expect((await app.inject({ method: "GET", url: "/metrics", headers: h })).statusCode).toBe(200);
+    const res = await app.inject({
+      method: "POST",
+      url: "/metrics",
+      headers: h,
+      payload: { kind: "threshold", id: "m", version: "1.0.0", source: "steps", op: "lte", threshold: 5 },
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
   it("ingest: 업로드 트레이스로 scorecard(트레이스 그레이더 재도출 + judge), 하니스 미실행", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };
@@ -1176,6 +1223,30 @@ describe("API — runtimes (실행 인프라, workspace-owned, admin write)", ()
     await app.inject({ method: "POST", url: "/runtimes", headers: h, payload: local });
     const v2 = await app.inject({ method: "POST", url: "/runtimes/validate", headers: h, payload: local });
     expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    await app.close();
+  });
+
+  it("validate: 참조한 시크릿(authSecret/kubeconfigSecret)이 없으면 missingSecrets 경고(하드 실패 아님)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const k8sSpec = {
+      kind: "k8s",
+      id: "eks",
+      version: "1.0.0",
+      image: "img",
+      server: "https://k8s.acme.internal:6443",
+      authSecret: "KUBE_TOKEN",
+      kubeconfigSecret: "KUBECONFIG_PROD",
+    };
+    const v1 = await app.inject({ method: "POST", url: "/runtimes/validate", headers: h, payload: k8sSpec });
+    expect(v1.json()).toMatchObject({
+      ok: true,
+      missingSecrets: expect.arrayContaining(["KUBE_TOKEN", "KUBECONFIG_PROD"]),
+    });
+    // 하나를 저장하면 나머지만 남는다(부분 충족).
+    await app.inject({ method: "PUT", url: "/secrets/KUBE_TOKEN", headers: h, payload: { value: "t" } });
+    const v2 = await app.inject({ method: "POST", url: "/runtimes/validate", headers: h, payload: k8sSpec });
+    expect(v2.json().missingSecrets).toEqual(["KUBECONFIG_PROD"]);
     await app.close();
   });
 });

@@ -136,6 +136,7 @@ describe("ScorecardService.ingestPull", () => {
       source: { kind: "otel", endpoint: "http://jaeger:16686", authSecret: "OTEL_TOKEN" },
       runs: [{ caseId: "c1", runId: "trace-1" }],
       judges: [],
+      metrics: [],
     });
     expect(created.status).toBe("queued");
 
@@ -163,6 +164,7 @@ describe("ScorecardService.ingestPull", () => {
         source: { kind: "otel", endpoint: "http://j" },
         runs: [{ caseId: "c1", runId: "r1" }],
         judges: [],
+        metrics: [],
       }),
     ).rejects.toBeInstanceOf(NotFoundError);
   });
@@ -179,6 +181,7 @@ describe("ScorecardService.ingestPull", () => {
       source: { kind: "otel", endpoint: "http://j" },
       runs: [{ caseId: "c1", runId: "r1" }],
       judges: [],
+      metrics: [],
     });
     const done = await waitTerminal(store, created.id);
     expect(done.status).toBe("failed");

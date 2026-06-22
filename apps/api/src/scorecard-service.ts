@@ -10,6 +10,7 @@ import {
   type HarnessSpec,
   type JudgeRunConfig,
   type JudgeSpec,
+  type MetricSpec,
   NotFoundError,
   ScoreSchema,
   type Scorecard,
@@ -18,13 +19,14 @@ import {
 } from "@assay/core";
 import type { ScorecardRecord, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
-import type { DatasetRegistry, HarnessRegistry, JudgeRegistry } from "@assay/registry";
+import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, MetricRegistry } from "@assay/registry";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
 import {
   type Dispatch,
   type ScorecardDiff,
   type ScorecardTrend,
   diffScorecards,
+  evalMetric,
   runSuite,
   summarizeScorecard,
   trendSeries,
@@ -49,6 +51,7 @@ export const IngestScorecardBodySchema = z.object({
     )
     .min(1),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+  metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
 });
 export type IngestScorecardBody = z.infer<typeof IngestScorecardBodySchema>;
 export type IngestScorecardInput = IngestScorecardBody & { tenant: string };
@@ -65,6 +68,7 @@ export const PullIngestBodySchema = z.object({
   }),
   runs: z.array(z.object({ caseId: z.string(), runId: z.string() })).min(1),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+  metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
 });
 export type PullIngestBody = z.infer<typeof PullIngestBodySchema>;
 export type PullIngestInput = PullIngestBody & { tenant: string };
@@ -74,6 +78,7 @@ export interface RunScorecardInput {
   dataset: { id: string; version: string };
   harness: { id: string; version: string };
   judges?: Array<{ id: string; version: string }>; // 선택한 Agent Judge 들 — 트레이스에 적용
+  metrics?: Array<{ id: string; version: string }>; // 선택한 등록 Metric 들 — 결과 scores 위에 post-hoc 적용
   runtime?: string; // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
   judge?: JudgeRunConfig; // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
 }
@@ -84,6 +89,7 @@ export interface ScorecardServiceDeps {
   datasets: DatasetRegistry; // 데이터셋 해석(소유/_shared 폴백) + 케이스 로드
   harnesses?: HarnessRegistry; // 하니스 버전 해석(latest→구체) + spec 임베드(선언형). 빌트인은 폴백.
   judges?: JudgeRegistry; // judge 해석(소유/_shared 폴백)
+  metrics?: MetricRegistry; // 등록 metric 해석(소유/_shared 폴백) — post-hoc 합격규칙 적용
   judgeRunner?: JudgeRunner; // 트레이스 기반 judge 실행(model 호출 / skip)
   // 워크스페이스 기본 judge 모델(inline judge grader 채점용). 요청별 override(RunScorecardInput.judge)가 우선.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
@@ -150,6 +156,7 @@ export class ScorecardService {
       input.judges ?? [],
       input.runtime,
       judge,
+      input.metrics ?? [],
     );
     return record;
   }
@@ -184,6 +191,7 @@ export class ScorecardService {
       `${input.harness.id}@${harnessVersion}`,
       input.traces,
       input.judges ?? [],
+      input.metrics ?? [],
     );
     return record;
   }
@@ -211,6 +219,7 @@ export class ScorecardService {
       input.source,
       input.runs,
       input.judges ?? [],
+      input.metrics ?? [],
     );
     return record;
   }
@@ -256,6 +265,7 @@ export class ScorecardService {
     judges: Array<{ id: string; version: string }>,
     runtime: string | undefined,
     judge: JudgeRunConfig | undefined,
+    metrics: Array<{ id: string; version: string }>,
   ): Promise<void> {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
     // 각 케이스 디스패치에 tenant/spec/judge 모델을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
@@ -279,6 +289,7 @@ export class ScorecardService {
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
       const scorecard = await runSuite(suite, harnessVersion, dispatch, { concurrency: this.concurrency });
       await this.applyJudges(tenant, dataset, scorecard.results, judges); // 트레이스 → judge 점수(컨트롤플레인)
+      await this.applyMetrics(tenant, scorecard.results, metrics); // 등록 metric → 합격규칙 점수(judge 뒤: judge 점수에도 임계 가능)
       await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
       const summary = summarizeScorecard(scorecard);
       await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
@@ -299,10 +310,11 @@ export class ScorecardService {
     harnessLabel: string,
     traces: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
+    metrics: Array<{ id: string; version: string }>,
   ): Promise<void> {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
     try {
-      await this.finishIngest(id, tenant, dataset, harnessLabel, traces, judges);
+      await this.finishIngest(id, tenant, dataset, harnessLabel, traces, judges, metrics);
     } catch (err) {
       await this.failIngest(id, err);
     }
@@ -317,6 +329,7 @@ export class ScorecardService {
     source: PullIngestBody["source"],
     runs: PullIngestBody["runs"],
     judges: Array<{ id: string; version: string }>,
+    metrics: Array<{ id: string; version: string }>,
   ): Promise<void> {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
     try {
@@ -340,7 +353,7 @@ export class ScorecardService {
         const trace = await src.fetch(r.runId); // 외부 실패는 UpstreamError → catch → failed
         perCase.push({ caseId: r.caseId, trace });
       }
-      await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges);
+      await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges, metrics);
     } catch (err) {
       await this.failIngest(id, err);
     }
@@ -354,6 +367,7 @@ export class ScorecardService {
     harnessLabel: string,
     perCase: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
+    metrics: Array<{ id: string; version: string }>,
   ): Promise<void> {
     const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
     const results: CaseResult[] = [];
@@ -374,6 +388,7 @@ export class ScorecardService {
     }
     const scorecard: Scorecard = { suiteId: dataset.id, harness: harnessLabel, results };
     await this.applyJudges(tenant, dataset, results, judges); // 트레이스 → judge 점수(컨트롤플레인)
+    await this.applyMetrics(tenant, results, metrics); // 등록 metric → 합격규칙 점수(judge 뒤)
     await this.offloadResults(id, results); // os-use 스크린샷 → object storage(레코드 슬림)
     const summary = summarizeScorecard(scorecard);
     await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
@@ -422,6 +437,29 @@ export class ScorecardService {
         if (!evalCase) continue;
         const ctx: GradeContext = { case: evalCase, trace: result.trace, snapshot: result.snapshot };
         result.scores.push(await runner.run(spec, tenant, ctx));
+      }
+    }
+  }
+
+  // 선택된 등록 Metric 들을 각 케이스의 *이미 산출된 scores* 위에 적용 → 새 합격규칙 점수를 덧붙인다(요약/트렌드에 반영).
+  // judge 적용 뒤에 호출 → judge:<id> 점수에도 임계를 걸 수 있다. 없는 metric/누락 source 는 조용히 스킵.
+  private async applyMetrics(
+    tenant: string,
+    results: CaseResult[],
+    metrics: Array<{ id: string; version: string }>,
+  ): Promise<void> {
+    if (metrics.length === 0 || !this.deps.metrics) return;
+    const registry = this.deps.metrics;
+    for (const sel of metrics) {
+      let spec: MetricSpec;
+      try {
+        spec = await registry.get(tenant, sel.id, sel.version || "latest");
+      } catch {
+        continue; // 없는 metric 은 조용히 스킵
+      }
+      for (const result of results) {
+        const score = evalMetric(spec, result.scores);
+        if (score) result.scores.push(score);
       }
     }
   }

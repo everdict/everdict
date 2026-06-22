@@ -7,6 +7,7 @@ import {
   HarnessSpecSchema,
   JudgeRunConfigSchema,
   JudgeSpecSchema,
+  MetricSpecSchema,
   ModelSpecSchema,
   RuntimeSpecSchema,
 } from "@assay/core";
@@ -18,7 +19,14 @@ import {
   type WorkspaceStore,
   issueKey,
 } from "@assay/db";
-import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, ModelRegistry, RuntimeRegistry } from "@assay/registry";
+import type {
+  DatasetRegistry,
+  HarnessRegistry,
+  JudgeRegistry,
+  MetricRegistry,
+  ModelRegistry,
+  RuntimeRegistry,
+} from "@assay/registry";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -42,6 +50,7 @@ export const RunScorecardBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+  metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
   judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
 });
@@ -77,6 +86,7 @@ export interface ServerDeps {
   datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (없으면 해당 라우트 비활성)
   modelRegistry?: ModelRegistry; // Model(추론/판정 모델) CRUD (없으면 해당 라우트 비활성)
+  metricRegistry?: MetricRegistry; // Metric(런타임 정의 합격규칙) CRUD (없으면 해당 라우트 비활성)
   runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 (없으면=ASSAY_SECRETS_KEY 미설정 → 해당 라우트 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
@@ -687,6 +697,75 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- metrics (workspace-owned SSOT, 런타임 정의 합격규칙: threshold 등 — run 후 scores 위에 post-hoc 적용) ---
+  app.post("/metrics", async (req, reply) => {
+    if (!deps.metricRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "metric registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "metrics:write");
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 (검증 전에 게이트)
+    }
+    const parsed = MetricSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      await deps.metricRegistry.register(principal.workspace, parsed.data);
+      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+    } catch (err) {
+      return sendError(reply, err); // 불변성 409
+    }
+  });
+
+  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음).
+  app.post("/metrics/validate", async (req, reply) => {
+    if (!deps.metricRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "metric registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "metrics:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = MetricSpecSchema.safeParse(req.body);
+    if (!parsed.success)
+      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
+    const existingVersions = await deps.metricRegistry.ownVersions(principal.workspace, parsed.data.id);
+    return reply.send({
+      ok: true,
+      kind: parsed.data.kind,
+      id: parsed.data.id,
+      version: parsed.data.version,
+      existingVersions,
+      versionExists: existingVersions.includes(parsed.data.version),
+    });
+  });
+
+  app.get("/metrics", async (req, reply) => {
+    if (!deps.metricRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "metric registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "metrics:read");
+      return reply.send(await deps.metricRegistry.list(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 특정 버전의 전체 MetricSpec. version 은 "latest" 가능. 다른 워크스페이스 → NOT_FOUND.
+  app.get<{ Params: { id: string; version: string } }>("/metrics/:id/versions/:version", async (req, reply) => {
+    if (!deps.metricRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "metric registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "metrics:read");
+      return reply.send(await deps.metricRegistry.get(principal.workspace, req.params.id, req.params.version));
+    } catch (err) {
+      return sendError(reply, err); // 없으면 NotFoundError → 404
+    }
+  });
+
   // --- runtimes (workspace-owned SSOT, 실행 인프라: local | nomad | k8s) ---
   app.post("/runtimes", async (req, reply) => {
     if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
@@ -720,6 +799,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!parsed.success)
       return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
     const existingVersions = await deps.runtimeRegistry.ownVersions(principal.workspace, parsed.data.id);
+    // 참조 시크릿 존재 확인(경고): spec 의 authSecret/kubeconfigSecret(이름)이 이 워크스페이스 SecretStore 에 있는지.
+    // 디스패치 시점에야 조용히 실패하던 것을 등록 전에 드러낸다(하드 실패 아님 — 시크릿은 나중에 추가 가능).
+    const referenced: string[] = [];
+    if ("authSecret" in parsed.data && parsed.data.authSecret) referenced.push(parsed.data.authSecret);
+    if (parsed.data.kind === "k8s" && parsed.data.kubeconfigSecret) referenced.push(parsed.data.kubeconfigSecret);
+    let missingSecrets: string[] | undefined;
+    if (deps.secretStore && referenced.length > 0) {
+      const have = new Set((await deps.secretStore.list(principal.workspace)).map((s) => s.name));
+      missingSecrets = referenced.filter((name) => !have.has(name));
+    }
     return reply.send({
       ok: true,
       kind: parsed.data.kind,
@@ -727,6 +816,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       version: parsed.data.version,
       existingVersions,
       versionExists: existingVersions.includes(parsed.data.version),
+      ...(missingSecrets ? { missingSecrets } : {}),
     });
   });
 

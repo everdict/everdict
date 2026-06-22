@@ -42,20 +42,24 @@ import {
   InMemoryDatasetRegistry,
   InMemoryHarnessRegistry,
   InMemoryJudgeRegistry,
+  InMemoryMetricRegistry,
   InMemoryModelRegistry,
   InMemoryRuntimeRegistry,
   type JudgeRegistry,
+  type MetricRegistry,
   type ModelRegistry,
   PgBenchmarkRegistry,
   PgDatasetRegistry,
   PgHarnessRegistry,
   PgJudgeRegistry,
+  PgMetricRegistry,
   PgModelRegistry,
   PgRuntimeRegistry,
   type RuntimeRegistry,
   loadDatasetDir,
   loadHarnessDir,
   loadJudgeDir,
+  loadMetricDir,
   loadModelDir,
   loadRuntimeDir,
 } from "@assay/registry";
@@ -87,6 +91,7 @@ async function main(): Promise<void> {
     benchmarkRegistry,
     judgeRegistry,
     modelRegistry,
+    metricRegistry,
     runtimeRegistry,
     settingsStore,
     workspaceStore,
@@ -97,6 +102,7 @@ async function main(): Promise<void> {
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
   await seedSharedModels(modelRegistry);
+  await seedSharedMetrics(metricRegistry);
   await seedSharedRuntimes(runtimeRegistry);
 
   // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소 있을 때만.
@@ -166,6 +172,7 @@ async function main(): Promise<void> {
     datasets: datasetRegistry,
     harnesses: registry,
     judges: judgeRegistry,
+    metrics: metricRegistry,
     judgeRunner,
     budget,
     ...(artifacts ? { artifacts } : {}),
@@ -189,6 +196,7 @@ async function main(): Promise<void> {
     datasetRegistry,
     judgeRegistry,
     modelRegistry,
+    metricRegistry,
     runtimeRegistry,
     settingsStore,
     workspaceStore,
@@ -219,6 +227,7 @@ interface Persistence {
   benchmarkRegistry: BenchmarkRegistry;
   judgeRegistry: JudgeRegistry;
   modelRegistry: ModelRegistry;
+  metricRegistry: MetricRegistry;
   runtimeRegistry: RuntimeRegistry;
   settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
   workspaceStore: WorkspaceStore; // 워크스페이스 멤버십(생성/전환) — 항상 사용 가능
@@ -240,6 +249,7 @@ async function makePersistence(): Promise<Persistence> {
       benchmarkRegistry: new InMemoryBenchmarkRegistry(),
       judgeRegistry: new InMemoryJudgeRegistry(),
       modelRegistry: new InMemoryModelRegistry(),
+      metricRegistry: new InMemoryMetricRegistry(),
       runtimeRegistry: new InMemoryRuntimeRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
       workspaceStore: new InMemoryWorkspaceStore(),
@@ -258,6 +268,7 @@ async function makePersistence(): Promise<Persistence> {
     benchmarkRegistry: new PgBenchmarkRegistry(client),
     judgeRegistry: new PgJudgeRegistry(client),
     modelRegistry: new PgModelRegistry(client),
+    metricRegistry: new PgMetricRegistry(client),
     runtimeRegistry: new PgRuntimeRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
     workspaceStore: new PgWorkspaceStore(client),
@@ -306,6 +317,17 @@ async function seedSharedModels(registry: ModelRegistry): Promise<void> {
   try {
     await loadModelDir(dir, { into: registry });
     console.error(`▶ shared models seeded from ${dir}`);
+  } catch {
+    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+  }
+}
+
+// _shared(first-party 기본 메트릭)를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 cost-budget/quality-gate 등 사용 가능. best-effort/멱등.
+async function seedSharedMetrics(registry: MetricRegistry): Promise<void> {
+  const dir = process.env.ASSAY_METRICS_DIR ?? `${process.cwd()}/examples/metrics`;
+  try {
+    await loadMetricDir(dir, { into: registry });
+    console.error(`▶ shared metrics seeded from ${dir}`);
   } catch {
     // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
   }
