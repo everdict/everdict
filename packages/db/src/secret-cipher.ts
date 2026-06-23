@@ -30,10 +30,17 @@ export function aesGcmCipher(key: Buffer): SecretCipher {
   };
 }
 
-// ASSAY_SECRETS_KEY(base64 32B) 가 있으면 cipher, 없으면 undefined → 시크릿 기능 비활성(fail-closed).
+// ASSAY_SECRETS_KEY(base64 32B) 가 있으면 cipher, 없으면 undefined → 호출부가 폴백(generatedCipher)을 선택.
 // 키 생성: `openssl rand -base64 32`.
 export function cipherFromEnv(envVar = "ASSAY_SECRETS_KEY"): SecretCipher | undefined {
   const raw = process.env[envVar];
   if (!raw) return undefined;
   return aesGcmCipher(Buffer.from(raw, "base64"));
+}
+
+// 명시 키 없이도 시크릿 기능을 "기본 ON" 으로 유지하기 위한 임시 KEK(랜덤 32B) cipher.
+// in-memory 에선 시크릿이 어차피 휘발이라 안전하다. Pg 영속 운영은 ASSAY_SECRETS_KEY 로 키를 고정해야
+// 재기동 후에도 기존 시크릿을 복호화할 수 있다(임시 키는 매 부팅마다 달라짐).
+export function generatedCipher(): SecretCipher {
+  return aesGcmCipher(randomBytes(32));
 }

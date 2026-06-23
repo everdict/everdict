@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { aesGcmCipher } from "./secret-cipher.js";
+import { aesGcmCipher, generatedCipher } from "./secret-cipher.js";
 import { InMemorySecretStore } from "./secret-store.js";
 
 const cipher = aesGcmCipher(Buffer.alloc(32, 7)); // 테스트용 고정 32바이트 키
@@ -12,6 +12,19 @@ describe("SecretCipher (AES-256-GCM)", () => {
   });
   it("32바이트가 아니면 거부", () => {
     expect(() => aesGcmCipher(Buffer.alloc(16))).toThrow();
+  });
+});
+
+// 기본 ON 보장: ASSAY_SECRETS_KEY 없이도 동작하는 임시 KEK cipher.
+describe("generatedCipher (기본 ON 폴백 KEK)", () => {
+  it("키 설정 없이도 동작하는 cipher 를 만든다(왕복)", () => {
+    const c = generatedCipher();
+    expect(c.decrypt(c.encrypt("sk-no-env-key"))).toBe("sk-no-env-key");
+  });
+  it("호출마다 다른 키 — 한 cipher 의 암호문을 다른 cipher 가 복호화하지 못한다", () => {
+    const a = generatedCipher();
+    const b = generatedCipher();
+    expect(() => b.decrypt(a.encrypt("secret"))).toThrow(); // GCM auth tag 불일치
   });
 });
 

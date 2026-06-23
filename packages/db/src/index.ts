@@ -40,6 +40,7 @@ export {
   type EncryptedSecret,
   aesGcmCipher,
   cipherFromEnv,
+  generatedCipher,
 } from "./secret-cipher.js";
 export {
   type SecretStore,
