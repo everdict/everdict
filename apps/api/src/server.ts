@@ -40,6 +40,7 @@ import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
+import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
@@ -91,7 +92,8 @@ export interface ServerDeps {
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성 (없으면 /workspaces 라우트 비활성)
-  membershipService?: MembershipService; // 멤버 관리(목록/역할/제거) + 초대(발급/수락) (없으면 해당 라우트 비활성)
+  membershipService?: MembershipService; // 멤버 관리(목록/역할/제거/나가기) + 초대(발급/수락) (없으면 해당 라우트 비활성)
+  profileService?: ProfileService; // 유저 프로필(이름/유저네임/아바타) 조회·수정 (없으면 /me.profile + PATCH /me/profile 비활성)
   authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
   keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
   internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
@@ -251,9 +253,33 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.get("/me", async (req, reply) => {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    if (!deps.workspaceService) return reply.send(principal);
-    const workspaces = await deps.workspaceService.listForSubject(principal.subject);
-    return reply.send({ ...principal, workspaces });
+    const workspaces = deps.workspaceService
+      ? await deps.workspaceService.listForSubject(principal.subject)
+      : undefined;
+    // 프로필(이름/유저네임/아바타)은 컨트롤플레인 소유 가변 정보 — Principal(email 등 SSO 클레임) 위에 덧입힌다.
+    const profile = deps.profileService ? await deps.profileService.get(principal.subject) : undefined;
+    return reply.send({
+      ...principal,
+      ...(workspaces ? { workspaces } : {}),
+      ...(profile ? { profile } : {}),
+    });
+  });
+
+  // 내 프로필 수정(self-serve — 역할 게이트 없음, subject = 본인). email 은 SSO 라 불변(여기서 안 받음).
+  app.patch("/me/profile", async (req, reply) => {
+    if (!deps.profileService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "프로필 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({ name: z.string().optional(), username: z.string().optional(), avatarUrl: z.string().optional() })
+      .safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      return reply.send(await deps.profileService.update(principal.subject, body.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
   });
 
   // --- workspaces (self-serve 멤버십: 내 워크스페이스 목록 + 생성) ---
@@ -300,6 +326,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "members:write");
       await deps.membershipService.setRole(principal.workspace, req.params.subject, body.data.role);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 내가 이 워크스페이스에서 나간다(self-serve — 역할 게이트 없음, 자기 멤버십만). 정적 라우트라 /members/:subject 보다 우선.
+  // 마지막 admin 은 나갈 수 없다(409). 클라이언트는 성공 후 다른 워크스페이스(또는 온보딩)로 이동.
+  app.delete("/members/me", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      await deps.membershipService.leaveWorkspace(principal.workspace, principal.subject);
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
@@ -1531,6 +1571,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           benchmarkService: deps.benchmarkService,
           workspaceService: deps.workspaceService,
           membershipService: deps.membershipService,
+          profileService: deps.profileService,
           keyStore: deps.keyStore,
         },
         principal,

@@ -25,6 +25,7 @@ import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkSe
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
 import type { MembershipService } from "./membership-service.js";
+import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
@@ -46,7 +47,8 @@ export interface McpDeps {
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
-  membershipService?: MembershipService; // 멤버 관리(목록/역할/제거) + 초대(발급/수락)
+  membershipService?: MembershipService; // 멤버 관리(목록/역할/제거/나가기) + 초대(발급/수락)
+  profileService?: ProfileService; // 내 프로필(이름/유저네임/아바타) 조회·수정(self-serve)
   keyStore?: TenantKeyStore; // API 키 self-serve 발급/목록/취소(admin)
 }
 
@@ -834,6 +836,57 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ name, id }) =>
         plain(async () => ok(await workspaces.create(principal.subject, { name, ...(id ? { id } : {}) }))),
+    );
+  }
+
+  if (deps.profileService) {
+    const profiles = deps.profileService;
+    server.registerTool(
+      "get_profile",
+      {
+        description: "내 프로필(이름/유저네임/아바타) 조회. 없으면 빈 객체. email 은 SSO(읽기전용)라 whoami/me 에서 본다.",
+        inputSchema: {},
+      },
+      () => plain(async () => ok((await profiles.get(principal.subject)) ?? {})),
+    );
+    server.registerTool(
+      "update_profile",
+      {
+        description:
+          "내 프로필 수정(self-serve, 역할 무관). 제공한 필드만 갱신, 빈 문자열은 그 필드 삭제. email 은 SSO 라 수정 불가.",
+        inputSchema: {
+          name: z.string().optional().describe("표시 이름(80자 이하)"),
+          username: z.string().optional().describe("유저네임(영숫자/_/- 2~39자)"),
+          avatarUrl: z.string().optional().describe("아바타 이미지 URL(http/https)"),
+        },
+      },
+      ({ name, username, avatarUrl }) =>
+        plain(async () =>
+          ok(
+            await profiles.update(principal.subject, {
+              ...(name !== undefined ? { name } : {}),
+              ...(username !== undefined ? { username } : {}),
+              ...(avatarUrl !== undefined ? { avatarUrl } : {}),
+            }),
+          ),
+        ),
+    );
+  }
+
+  if (deps.membershipService) {
+    const membership = deps.membershipService;
+    server.registerTool(
+      "leave_workspace",
+      {
+        description:
+          "이 워크스페이스에서 나간다(self-serve, 자기 멤버십만). 마지막 admin 은 나갈 수 없다(에러). 나간 뒤엔 다른 워크스페이스로 스코프하라.",
+        inputSchema: {},
+      },
+      () =>
+        plain(async () => {
+          await membership.leaveWorkspace(ws, principal.subject);
+          return ok({ workspace: ws, left: true });
+        }),
     );
   }
 

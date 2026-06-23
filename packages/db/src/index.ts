@@ -73,3 +73,10 @@ export {
   PgWorkspaceInviteStore,
   generateInviteToken,
 } from "./workspace-invites.js";
+export {
+  type UserProfile,
+  type UserProfilePatch,
+  type UserProfileStore,
+  InMemoryUserProfileStore,
+  PgUserProfileStore,
+} from "./user-profile-store.js";

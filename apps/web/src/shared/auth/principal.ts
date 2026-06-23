@@ -16,13 +16,22 @@ export interface WebWorkspace {
   role: string
 }
 
+// 내 프로필(이름/유저네임/아바타) — 컨트롤플레인 소유 가변 정보(GET /me.profile). email 은 여기 없다(SSO 클레임).
+export interface WebProfile {
+  name?: string
+  username?: string
+  avatarUrl?: string
+}
+
 // 컨트롤플레인이 돌려주는 Principal (= GET /me). 웹은 이 값을 해석하지 않고 그대로 신뢰한다.
 export interface WebPrincipal {
   subject: string
   workspace: string // 현재 활성 워크스페이스 id
   roles: string[]
   via: 'oidc' | 'api-key'
+  email?: string // OIDC email/preferred_username 클레임(표시 전용·읽기전용)
   workspaces?: WebWorkspace[] // 내가 속한 워크스페이스 목록(멤버십 스토어 있을 때)
+  profile?: WebProfile // 가변 표시 정보(이름/유저네임/아바타)
 }
 
 // 현재 요청의 컨트롤플레인 인증 컨텍스트. 로그인 사용자 → Keycloak Bearer, dev(미설정) → x-assay-tenant=default.

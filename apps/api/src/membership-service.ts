@@ -37,6 +37,21 @@ export class MembershipService {
     await this.members.removeMember(workspace, subject);
   }
 
+  // 내가 이 워크스페이스에서 나간다(self-serve — 역할 게이트 없음, 자기 멤버십만 제거). 멱등.
+  // 마지막 admin 은 나갈 수 없다(409) — 먼저 다른 멤버에게 admin 을 위임하거나 워크스페이스를 삭제해야 한다.
+  async leaveWorkspace(workspace: string, subject: string): Promise<void> {
+    const all = await this.members.listMembers(workspace);
+    const me = all.find((m) => m.subject === subject);
+    if (!me) return; // 멤버 아님 — 멱등
+    if (me.role === "admin" && adminCount(all) === 1)
+      throw new ConflictError(
+        "CONFLICT",
+        { workspace },
+        "마지막 admin 은 나갈 수 없습니다. 다른 멤버에게 admin 을 위임하거나 워크스페이스를 삭제하세요.",
+      );
+    await this.members.removeMember(workspace, subject);
+  }
+
   // --- 초대 ---
   // 초대 생성 — 평문 토큰을 1회만 반환(링크에 담음). 저장은 해시만(스토어).
   async createInvite(input: {

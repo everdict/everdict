@@ -195,4 +195,9 @@ export const controlPlane = {
     callVoid(auth, `/invites/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   acceptInvite: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/invites/accept', { method: 'POST', body: JSON.stringify(body) }),
+  // 내 프로필(이름/유저네임/아바타) 수정 — email 은 SSO(읽기전용)라 안 받는다. PATCH /me/profile → 갱신된 프로필.
+  updateProfile: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/me/profile', { method: 'PATCH', body: JSON.stringify(body) }),
+  // 이 워크스페이스에서 나가기(self-serve). 마지막 admin 이면 409. 204(본문 없음) → callVoid.
+  leaveWorkspace: (auth: AuthContext) => callVoid(auth, '/members/me', { method: 'DELETE' }),
 }

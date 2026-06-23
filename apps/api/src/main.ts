@@ -16,6 +16,7 @@ import {
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
+  InMemoryUserProfileStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
@@ -23,6 +24,7 @@ import {
   PgScorecardStore,
   PgSecretStore,
   PgTenantKeyStore,
+  PgUserProfileStore,
   PgWorkspaceInviteStore,
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
@@ -31,6 +33,7 @@ import {
   type SecretCipher,
   type SecretStore,
   type TenantKeyStore,
+  type UserProfileStore,
   type WorkspaceInviteStore,
   type WorkspaceSettingsStore,
   type WorkspaceStore,
@@ -77,6 +80,7 @@ import { buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
+import { ProfileService } from "./profile-service.js";
 import { RunService } from "./run-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
@@ -107,11 +111,13 @@ async function main(): Promise<void> {
     runtimeRegistry,
     settingsStore,
     workspaceStore,
+    userProfileStore,
     inviteStore,
     secretStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   const membershipService = new MembershipService(workspaceStore, inviteStore);
+  const profileService = new ProfileService(userProfileStore);
   await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
@@ -217,6 +223,7 @@ async function main(): Promise<void> {
     workspaceStore,
     workspaceService,
     membershipService,
+    profileService,
     secretStore,
     authenticator: buildAuthenticator(keyStore),
     keyStore,
@@ -248,6 +255,7 @@ interface Persistence {
   runtimeRegistry: RuntimeRegistry;
   settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
   workspaceStore: WorkspaceStore; // 워크스페이스 멤버십(생성/전환) — 항상 사용 가능
+  userProfileStore: UserProfileStore; // 유저 프로필(이름/유저네임/아바타) — 항상 사용 가능
   inviteStore: WorkspaceInviteStore; // 멤버 초대(토큰/링크 redemption) — 항상 사용 가능
   secretStore: SecretStore; // 항상 사용 가능(기본 ON) — KEK 는 ASSAY_SECRETS_KEY, 없으면 임시 키 자동생성
 }
@@ -287,6 +295,7 @@ async function makePersistence(): Promise<Persistence> {
       runtimeRegistry: new InMemoryRuntimeRegistry(),
       settingsStore: new InMemoryWorkspaceSettingsStore(),
       workspaceStore,
+      userProfileStore: new InMemoryUserProfileStore(),
       inviteStore: new InMemoryWorkspaceInviteStore(workspaceStore),
       secretStore: new InMemorySecretStore(cipher),
     };
@@ -309,6 +318,7 @@ async function makePersistence(): Promise<Persistence> {
     runtimeRegistry: new PgRuntimeRegistry(client),
     settingsStore: new PgWorkspaceSettingsStore(client),
     workspaceStore: new PgWorkspaceStore(client),
+    userProfileStore: new PgUserProfileStore(client),
     inviteStore: new PgWorkspaceInviteStore(client),
     secretStore: new PgSecretStore(client, cipher),
   };

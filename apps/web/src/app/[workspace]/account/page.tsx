@@ -9,7 +9,7 @@ import { AccountTabs } from './account-tabs'
 
 export const dynamic = 'force-dynamic'
 
-// 유저 설정 페이지 — 프로필(읽기전용, GET /me) · 테마 · API 키(활성 워크스페이스, admin).
+// 유저 설정 페이지 — 프로필(이름/유저네임/아바타 수정 + email 읽기전용) · 워크스페이스 나가기 · API 키(활성 워크스페이스, admin).
 export default async function AccountPage() {
   const { principal, ctx } = await currentPrincipal()
   if (!principal) {
@@ -37,11 +37,15 @@ export default async function AccountPage() {
     }
   }
 
+  const workspaceName =
+    principal.workspaces?.find((w) => w.id === principal.workspace)?.name ?? principal.workspace
+
   return (
     <div className="space-y-6">
-      <PageHeader title="계정" description="내 프로필 · 테마 · API 키." />
+      <PageHeader title="계정" description="내 프로필 · 워크스페이스 · API 키." />
       <AccountTabs
         principal={principal}
+        workspaceName={workspaceName}
         keys={keys}
         keysError={keysError}
         canReadKeys={canReadKeys}
