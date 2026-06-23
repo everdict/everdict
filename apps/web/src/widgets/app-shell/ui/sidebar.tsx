@@ -3,18 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import {
-  FlaskConical,
-  LogIn,
-  LogOut,
-  Menu,
-  Moon,
-  Search,
-  Settings,
-  Sun,
-  UserCog,
-  X,
-} from 'lucide-react'
+import { LogIn, LogOut, Menu, Moon, Search, Settings, Sun, UserCog, X } from 'lucide-react'
 
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
 import type { Workspace } from '@/entities/workspace'
@@ -194,17 +183,6 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
   const mac = isMac()
   return (
     <div className="flex h-full flex-col gap-3 px-3 py-3.5">
-      <Link
-        href={`/${props.workspace}`}
-        onClick={onNavigate}
-        className="flex items-center gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-accent/50"
-      >
-        <span className="grid size-7 place-items-center rounded-lg bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_4px_12px_-4px_var(--primary)]">
-          <FlaskConical className="size-[16px]" />
-        </span>
-        <span className="text-[15px] font-[600] tracking-[-0.01em]">Assay</span>
-      </Link>
-
       <WorkspaceSwitcher current={props.workspace} workspaces={props.workspaces} />
 
       <button
@@ -234,6 +212,8 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
 
 export function Sidebar(props: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const activeWorkspace = props.workspaces.find((w) => w.id === props.workspace)
+  const workspaceLabel = activeWorkspace?.name ?? props.workspace
   return (
     <>
       {/* 모바일 상단 바 */}
@@ -248,9 +228,12 @@ export function Sidebar(props: SidebarProps) {
         </button>
         <Link
           href={`/${props.workspace}`}
-          className="flex items-center gap-1.5 text-[14px] font-[600] tracking-tight"
+          className="flex min-w-0 items-center gap-2 text-[14px] font-[600] tracking-tight"
         >
-          <FlaskConical className="size-4 text-primary" /> Assay
+          <span className="grid size-6 shrink-0 place-items-center rounded-md bg-primary/15 text-[12px] font-[560] text-primary ring-1 ring-inset ring-primary/25">
+            {(workspaceLabel.trim()[0] ?? '?').toUpperCase()}
+          </span>
+          <span className="truncate">{workspaceLabel}</span>
         </Link>
         <button
           type="button"

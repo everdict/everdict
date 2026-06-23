@@ -46,13 +46,13 @@ export function WorkspaceSwitcher({
         onClick={() => setOpen((v) => !v)}
         aria-haspopup="menu"
         aria-expanded={open}
-        className="flex w-full items-center gap-2.5 rounded-md border border-border bg-card/60 px-2 py-1.5 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
+        className="flex w-full items-center gap-2.5 rounded-md border border-border bg-card/60 px-2 py-2 text-left transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
       >
-        <span className="grid size-7 shrink-0 place-items-center rounded-md bg-primary/15 text-[13px] font-[560] text-primary ring-1 ring-inset ring-primary/25">
-          {pending ? <Loader2 className="size-3.5 animate-spin" /> : monogram(label)}
+        <span className="grid size-8 shrink-0 place-items-center rounded-md bg-primary/15 text-[15px] font-[560] text-primary ring-1 ring-inset ring-primary/25">
+          {pending ? <Loader2 className="size-4 animate-spin" /> : monogram(label)}
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[13px] font-[560] tracking-tight">{label}</span>
+          <span className="block truncate text-[14px] font-[600] tracking-tight">{label}</span>
           <span className="block truncate text-[11px] text-muted-foreground">
             {active?.role ?? '워크스페이스'}
           </span>
