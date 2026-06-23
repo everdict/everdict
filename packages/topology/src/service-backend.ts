@@ -2,6 +2,7 @@ import type { Backend, BackendCapacity, TrustZonePolicy } from "@assay/backends"
 import {
   type AgentJob,
   type CaseResult,
+  type EnvSnapshot,
   type Grader,
   InternalError,
   type Score,
@@ -65,7 +66,9 @@ export class ServiceTopologyBackend implements Backend {
     }
 
     const topo = await this.opts.runtime.ensureTopology(spec, zone);
-    const browser = await this.opts.runtime.provisionBrowserEnv(spec, runId, zone);
+    // 타깃 관측(#4): spec.target 이 선언됐을 때만 per-case 브라우저를 프로비저닝(스키마상 이미 optional).
+    // 없으면 관측 무대 없이 trace-only — 자체 브라우저/무대 없는 서비스 하니스를 지원.
+    const target = spec.target ? await this.opts.runtime.provisionBrowserEnv(spec, runId, zone) : undefined;
     try {
       const base = topo.endpoints[spec.frontDoor.service];
       if (!base) {
@@ -78,12 +81,13 @@ export class ServiceTopologyBackend implements Backend {
       // 구동(HOW): submit + per-run wiring 주입 → 완료 모델(sync/poll)대로 대기. 인프라(WHERE)와 분리된 관심사.
       const driver =
         this.opts.frontDoorDriver ?? new HttpFrontDoorDriver({ submit: this.opts.submit, getJson: this.opts.getJson });
-      // per-run 와이어링 — isolateBy 에서 파생한 격리 변수(+ task + target_cdp_url). 본문 템플릿 + statusPath 보간 공용.
+      // per-run 와이어링 — isolateBy 파생 격리 변수(+ task + 타깃이 있으면 target_cdp_url). 본문 템플릿 + statusPath 공용.
       const wiring = wiringVars(runId, spec.dependencies, {
         task: job.evalCase.task,
-        target_cdp_url: browser.cdpUrl,
+        ...(target ? { target_cdp_url: target.cdpUrl } : {}),
       });
       // 본문(#1): request.bodyTemplate 이 있으면 wiring 으로 보간, 없으면 현행 browser-use 5-field 본문(무회귀).
+      // 타깃이 없으면 browser_cdp_url 은 뺀다(브라우저가 없으므로).
       const payload = spec.frontDoor.request?.bodyTemplate
         ? interpolateTemplate(spec.frontDoor.request.bodyTemplate, wiring)
         : {
@@ -91,7 +95,7 @@ export class ServiceTopologyBackend implements Backend {
             thread_id: keys.threadId,
             stream_channel: keys.streamChannel,
             minio_prefix: keys.minioPrefix,
-            browser_cdp_url: browser.cdpUrl,
+            ...(target ? { browser_cdp_url: target.cdpUrl } : {}),
           };
       const outcome = await driver.drive({
         base,
@@ -121,7 +125,8 @@ export class ServiceTopologyBackend implements Backend {
           { t: 0, kind: "error", message: `trace fetch 실패: ${err instanceof Error ? err.message : String(err)}` },
         ];
       }
-      const snapshot = await browser.snapshot();
+      // 관측(#4): 타깃이 있으면 브라우저 스냅샷, 없으면 무대 없음 → prompt 스냅샷(1차 신호는 trace, prompt-env 와 동일).
+      const snapshot: EnvSnapshot = target ? await target.snapshot() : { kind: "prompt", output: "" };
 
       // 케이스가 그레이더를 지정하면 그것으로(dom-contains/url-matches 등), 아니면 trace 기반 기본값.
       const graders =
@@ -136,7 +141,7 @@ export class ServiceTopologyBackend implements Backend {
 
       return { caseId: job.evalCase.id, harness: `${spec.id}@${spec.version}`, trace, snapshot, scores };
     } finally {
-      await browser.dispose();
+      if (target) await target.dispose();
     }
   }
 }

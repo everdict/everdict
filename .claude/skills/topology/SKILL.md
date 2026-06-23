@@ -54,7 +54,11 @@ touching `service-backend.ts`'s driving logic.
 - **#1 payload template — DONE.** `frontDoor.request.bodyTemplate` (`interpolateTemplate` — recursive `{{var}}`
   over the JSON body); per-run wiring variable NAMES derive from `dependencies[].isolateBy` via `wiringVars`
   (`thread_id`/`key_prefix`/`object_prefix`/`schema`), not hardcoded LangGraph names. Absent `request` = today's body.
-- Next: #4 target strategy (`target.acquire` none/assay/harness) · #5 per-service image pin (thread through `AgentJob`).
+- **#4 target observation — DONE (none/assay).** Browser provisioning is gated on `spec.target` (already optional,
+  was ignored): absent → no browser, trace-only run with a `{kind:"prompt"}` snapshot (no core-contract change).
+  `harness`-provided target (observe a declared service's CDP) needs a `TopologyRuntime.observe` method — follow-up.
+- Next: #5 per-service image pin (thread an optional pin through `AgentJob`; `HarnessTemplate` slots already resolve
+  images at registration).
 
 ## Reference impls
 `packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,

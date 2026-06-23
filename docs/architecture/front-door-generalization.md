@@ -14,7 +14,12 @@
 >   are interpolated over the per-run wiring (CommandHarness convention). The wiring variable **names** now derive
 >   from `dependencies[].isolateBy` (`thread_id`/`key_prefix`/`object_prefix`/`schema`) via `wiringVars`, not the
 >   hardcoded LangGraph names. Absent `request` = today's 5-field body (no regression).
-> - #4 target strategy · #5 image pin — not yet.
+> - **#4 target observation — DONE (none/assay).** Browser provisioning is now gated on `spec.target` (already
+>   optional in the schema, previously ignored): present → provision + observe (today); **absent → no browser, a
+>   trace-only run with a `{kind:"prompt"}` (no-stage) snapshot** — no core-contract change (reuses the prompt-env
+>   snapshot; `CaseResult.snapshot` stays required). The `harness`-provided target (observe a declared service's own
+>   CDP endpoint) needs a `TopologyRuntime.observe`-style method and is the remaining follow-up.
+> - #5 image pin — not yet.
 >
 > **Strict generalization, not a clean break.** Unlike the harness-taxonomy rework, this one keeps full
 > backward behavior: every new knob is optional and its default reproduces today's browser-use-langgraph
@@ -95,7 +100,7 @@ Every knob is optional; its default reproduces today's behavior.
 | 1b ✅ | per-run wiring variables derived from `spec.dependencies[].isolateBy` (not hardcoded `keysFor`) | pg→`thread_id`, redis→`key_prefix`, minio→`object_prefix`, +`schema` | the existing `isolateBy` enum (`harness-spec.ts:25`) — `wiringVars` |
 | 2 ✅ | `frontDoor.completion.mode`: `sync` \| `poll` (+ `statusPath`, `done`/`failed` `StatusMatch`, `intervalMs`, `timeoutMs`) — `stream`/`callback` deferred | `sync` (current echo behavior) | — (the genuinely missing piece) |
 | 3 ✅ | `frontDoor.correlate.mode`: `injected` (Assay's `run_id`) \| `returned` (extract agent id from the submit response via `correlate.path` dot-path) | `injected` | `getField` dot-path reader; `SubmitFn` widened to return the response (the dormant `frontDoor.trace` *endpoint* stays a separate future capability) |
-| 4 | `frontDoor.target.acquire`: `none` \| `assay` \| `harness` (observe a declared service endpoint) | `assay` when `spec.target` is set | the already-optional `target` + the `os-use`/`prompt` env taxonomy |
+| 4 ✅ | gate browser provisioning on `spec.target` (present→provision/observe; absent→trace-only `{kind:"prompt"}` snapshot). `harness`-provided target observation = follow-up | provision when `spec.target` set | the already-optional `target` + the `prompt` (no-stage) snapshot — no contract change |
 | 5 | per-service image pin threaded through dispatch (`AgentJob`), not only at registration | `spec.image` | `HarnessTemplate` slot/pins already resolve images (`harness-template.ts:97-115`) |
 
 Knob 5 is ~80% built: `resolveHarnessInstance` already maps `pins[slot] → image` per service
@@ -125,7 +130,9 @@ frontDoor: {
   // wiring NAMES derive from dependencies[].isolateBy via wiringVars (no hardcoded LangGraph names). headers/method
   // are still derived from `submit` (a request.headers knob is a later add).
   request?:    { bodyTemplate?: Record<string, unknown> };                                   // #1
-  target?:     { acquire: "none" | "assay" | "harness"; service?: string };                 // #4 (later)
+  // #4 DONE — no new field: provisioning is gated on the EXISTING optional `spec.target`. Absent target = a
+  // trace-only run graded over a {kind:"prompt"} snapshot. A `target.acquire: "harness"` (observe a declared
+  // service's own CDP) is the follow-up (needs a TopologyRuntime.observe method).
 };
 
 // @assay/topology — front-door-driver.ts: the HOW abstraction (sibling of TopologyRuntime) — LANDED in #2
@@ -158,7 +165,8 @@ Each step merges independently; defaults keep current behavior, so no regression
    trace-id from the submit response (dot-path) for both trace fetch and poll `statusPath`. `injected` = today.
 3. **#1 payload template** ✅ — `frontDoor.request.bodyTemplate` (`interpolateTemplate`) + `wiringVars` deriving the
    per-run variable names from `dependencies[].isolateBy`. Absent `request` = today's 5-field body.
-4. **#4 target strategy** — add `none` / `harness`; supports a self-provided playwright-server or trace-only harness.
+4. **#4 target observation** ✅ — gate provisioning on `spec.target`; absent → trace-only `{kind:"prompt"}` snapshot
+   (no contract change). `harness`-provided target observation deferred (needs a `TopologyRuntime.observe` method).
 5. **#5 image pin** — thread an optional per-service pin through `AgentJob` (mechanism already exists).
 
 ## Touch points (for the eventual PR)

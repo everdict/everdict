@@ -627,4 +627,49 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       browser_cdp_url: "ws://b",
     });
   });
+
+  // --- #4 타깃 관측(spec.target optional) ---
+  it("spec.target 이 없으면 브라우저를 프로비저닝하지 않고 trace-only(prompt 스냅샷)로 채점한다", async () => {
+    let provisioned = false;
+    let sent: Record<string, unknown> = {};
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        provisioned = true;
+        throw new Error("target 이 없으면 호출돼선 안 된다");
+      },
+    };
+    const SPEC_NO_TARGET: ServiceHarnessSpec = {
+      kind: "service",
+      id: SPEC.id,
+      version: SPEC.version,
+      services: SPEC.services,
+      dependencies: SPEC.dependencies,
+      frontDoor: SPEC.frontDoor,
+      traceSource: SPEC.traceSource,
+    }; // target 생략
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } }];
+        },
+      },
+      specFor: () => SPEC_NO_TARGET,
+      submit: async (_url, payload) => {
+        sent = payload;
+      },
+      newRunId: () => "fixed",
+    });
+
+    const result = await backend.dispatch(job);
+
+    expect(provisioned).toBe(false); // 브라우저 미프로비저닝
+    expect(result.snapshot.kind).toBe("prompt"); // 무대 없음 → prompt 스냅샷
+    expect(sent).not.toHaveProperty("browser_cdp_url"); // 타깃 없으니 본문에서 cdp 제외
+    expect(result.scores.map((s) => s.graderId).sort()).toEqual(["cost", "latency", "steps"]); // trace-only 채점
+  });
 });
