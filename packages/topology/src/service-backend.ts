@@ -13,29 +13,20 @@ import {
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@assay/graders";
 import type { TraceSource } from "@assay/trace";
 import { keysFor, newRunId } from "./environment-manager.js";
+import { type FrontDoorDriver, type GetJsonFn, HttpFrontDoorDriver, type SubmitFn } from "./front-door-driver.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
 
-// front-door 로 task+wiring 을 보내는 함수 (테스트에서 주입 가능).
-export type SubmitFn = (frontDoorUrl: string, payload: Record<string, unknown>) => Promise<void>;
-
-const fetchSubmit: SubmitFn = async (url, payload) => {
-  await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
-};
-
-function submitPath(spec: string): string {
-  const parts = spec.split(" ");
-  return parts.length > 1 ? (parts[1] ?? spec) : spec;
-}
-function joinUrl(base: string, path: string): string {
-  return `${base.replace(/\/$/, "")}/${path.replace(/^\//, "")}`;
-}
+// 하위호환 re-export — 기존 import { type SubmitFn } from "./service-backend.js" 유지.
+export type { SubmitFn } from "./front-door-driver.js";
 
 export interface ServiceTopologyBackendOptions {
   runtime: TopologyRuntime;
   traceSource: TraceSource;
   specFor: (tenant: string, id: string, version: string) => ServiceHarnessSpec | Promise<ServiceHarnessSpec>;
   graders?: Grader[]; // 기본: trace 기반(steps/cost/latency). 브라우저 그레이더(dom/vlm)는 Phase 2.
-  submit?: SubmitFn;
+  submit?: SubmitFn; // 기본 HttpFrontDoorDriver 의 POST 프리미티브(없으면 fetch)
+  getJson?: GetJsonFn; // poll 완료 모델의 상태 GET 프리미티브(없으면 fetch)
+  frontDoorDriver?: FrontDoorDriver; // 구동(HOW) 추상화 전체를 주입(없으면 HttpFrontDoorDriver)
   newRunId?: () => string;
   maxConcurrent?: number | (() => number); // 동시 per-case 브라우저 상한(함수면 오토스케일러가 동적 조정)
   trustZones?: TrustZonePolicy; // 테넌트별 격리 — warm 풀을 존별로 분리(공유 금지)
@@ -78,20 +69,44 @@ export class ServiceTopologyBackend implements Backend {
           "front-door 엔드포인트가 없습니다.",
         );
       }
-      const submit = this.opts.submit ?? fetchSubmit;
-      await submit(joinUrl(base, submitPath(spec.frontDoor.submit)), {
-        task: job.evalCase.task,
+      // 구동(HOW): submit + per-run wiring 주입 → 완료 모델(sync/poll)대로 대기. 인프라(WHERE)와 분리된 관심사.
+      const driver =
+        this.opts.frontDoorDriver ?? new HttpFrontDoorDriver({ submit: this.opts.submit, getJson: this.opts.getJson });
+      // statusPath 보간용 wiring 변수 — 의존 스토어의 isolateBy 키(+ run_id). #3 에서 상관키로도 일반화 예정.
+      const wiring: Record<string, string> = {
+        run_id: runId,
         thread_id: keys.threadId,
         stream_channel: keys.streamChannel,
         minio_prefix: keys.minioPrefix,
-        browser_cdp_url: browser.cdpUrl,
+      };
+      const outcome = await driver.drive({
+        base,
+        submit: spec.frontDoor.submit,
+        payload: {
+          task: job.evalCase.task,
+          thread_id: keys.threadId,
+          stream_channel: keys.streamChannel,
+          minio_prefix: keys.minioPrefix,
+          browser_cdp_url: browser.cdpUrl,
+        },
+        completion: spec.frontDoor.completion,
+        wiring,
+        traceRef: runId,
       });
+      // 완료 시한 초과 = 평가 결과를 확정할 수 없음(반쪽 상태 채점은 오인 유발) → run 실패로 명시.
+      if (outcome.status === "timeout") {
+        throw new InternalError(
+          "HARNESS_RUN_FAILED",
+          { runId, reason: "completion-timeout" },
+          "에이전트가 완료 시한 내에 끝나지 않았습니다.",
+        );
+      }
 
       // 트레이스 소스 장애(인증/일시 down/미배출)는 run 을 죽이지 않는다 — error 이벤트로 기록하고 스냅샷+채점은 진행.
       // (서비스 토폴로지의 1차 신호는 브라우저 스냅샷; 트레이스는 보조. 침묵 손실 대신 가시화.)
       let trace: TraceEvent[];
       try {
-        trace = await this.opts.traceSource.fetch(runId);
+        trace = await this.opts.traceSource.fetch(outcome.traceRef);
       } catch (err) {
         trace = [
           { t: 0, kind: "error", message: `trace fetch 실패: ${err instanceof Error ? err.message : String(err)}` },

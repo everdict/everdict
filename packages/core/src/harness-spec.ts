@@ -36,6 +36,43 @@ export const TopologyTargetSchema = z.object({
 });
 export type TopologyTarget = z.infer<typeof TopologyTargetSchema>;
 
+// 상태 응답 매칭(완료/실패 판정) — 임의 코드/eval 금지, dot-path 필드 + 값 비교의 선언형 데이터.
+export const StatusMatchSchema = z
+  .object({
+    field: z.string(), // 상태 응답 JSON 의 dot-path (예: "status", "data.state")
+    equals: z.union([z.string(), z.number(), z.boolean()]).optional(),
+    oneOf: z.array(z.union([z.string(), z.number(), z.boolean()])).optional(),
+  })
+  .refine((m) => m.equals !== undefined || m.oneOf !== undefined, {
+    message: "equals 또는 oneOf 중 하나는 지정해야 합니다.",
+  });
+export type StatusMatch = z.infer<typeof StatusMatchSchema>;
+
+// front-door 완료 모델(#2): submit 후 에이전트가 N-step 을 끝낼 때까지 어떻게 기다리는가.
+// sync = submit 응답이 곧 완료(미지정 시 기본, 현행 동작). poll = 상태 엔드포인트를 종료조건까지 폴링
+// (비동기 다단계 에이전트). stream/callback 모드는 후속 — docs/architecture/front-door-generalization.md.
+export const FrontDoorCompletionSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("sync") }),
+  z.object({
+    mode: z.literal("poll"),
+    statusPath: z.string(), // 예: "GET /runs/{run_id}/status" — wiring 변수({run_id} 등) 보간
+    done: StatusMatchSchema,
+    failed: StatusMatchSchema.optional(),
+    intervalMs: z.number().int().positive().default(1000),
+    timeoutMs: z.number().int().positive().default(120000),
+  }),
+]);
+export type FrontDoorCompletion = z.infer<typeof FrontDoorCompletionSchema>;
+
+// front-door 계약 — task 제출 진입점(service/submit) + (선택)완료 대기 모델 + 트레이스 path.
+export const FrontDoorSpecSchema = z.object({
+  service: z.string(),
+  submit: z.string(),
+  trace: z.string().optional(),
+  completion: FrontDoorCompletionSchema.optional(), // 미지정 = sync(현행)
+});
+export type FrontDoorSpec = z.infer<typeof FrontDoorSpecSchema>;
+
 // process 하니스: 단일 프로세스(샌드박스 1개). Claude Code/Codex.
 export const ProcessHarnessSpecSchema = z.object({
   kind: z.literal("process"),
@@ -51,7 +88,7 @@ export const ServiceHarnessSpecSchema = z.object({
   services: z.array(TopologyServiceSchema),
   dependencies: z.array(TopologyDependencySchema).default([]),
   target: TopologyTargetSchema.optional(),
-  frontDoor: z.object({ service: z.string(), submit: z.string(), trace: z.string().optional() }),
+  frontDoor: FrontDoorSpecSchema,
   traceSource: TraceSourceSpecSchema,
 });
 export type ServiceHarnessSpec = z.infer<typeof ServiceHarnessSpecSchema>;

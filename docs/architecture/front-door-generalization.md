@@ -1,0 +1,153 @@
+# Service-topology front-door generalization — absorbing the control-plane (design)
+
+> **Status: in progress.** Sequenced so the live e2e (`scripts/live/service-topology-{nomad,k8s}.mjs`) stays
+> green at every step.
+> - **#2 completion model — DONE.** `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`) +
+>   `HttpFrontDoorDriver` landed in `@assay/topology`; `frontDoor.completion` (`sync` | `poll`) in `@assay/core`;
+>   `ServiceTopologyBackend.dispatch` now delegates driving to the driver and fails a run on completion timeout.
+>   Default (no `completion`) = `sync` = today. (`stream`/`callback` modes deferred — see #2 below.)
+> - #3 correlate · #1 payload template · #4 target strategy · #5 image pin — not yet.
+>
+> **Strict generalization, not a clean break.** Unlike the harness-taxonomy rework, this one keeps full
+> backward behavior: every new knob is optional and its default reproduces today's browser-use-langgraph
+> dispatch exactly. A spec that sets nothing new dispatches identically to today.
+
+## Problem
+
+A `kind:"service"` topology harness is supposed to be **harness-agnostic** (any agent topology) and
+**infra-agnostic** (Nomad / K8s alike). The infra axis is clean — `TopologyRuntime` abstracts placement and is
+live-verified at Nomad↔K8s parity. The harness axis is **not**: `ServiceTopologyBackend.dispatch`
+(`packages/topology/src/service-backend.ts`) is written for exactly one protocol — browser-use-langgraph — in
+five hardcoded places. A different agent (different request shape, async multi-step completion, its own trace id,
+its own browser, a per-dispatch image) does not fit.
+
+The goal is to **absorb what an external orchestrator does** (build the request, hold the connection until the
+agent finishes, correlate the trace, manage the target env, pick the per-service image) into Assay as declarative
+spec data — not to attach Assay to an external control-plane.
+
+### The five hardcodes (current code)
+
+1. **Front-door payload is fixed.** `service-backend.ts:82-88` POSTs
+   `{ task, thread_id, stream_channel, minio_prefix, browser_cdp_url }` verbatim. These are LangGraph/browser-use
+   field names; another agent needs a completely different body. The per-run keys themselves are LangGraph-named
+   in `environment-manager.ts:12` (`keysFor` → `threadId`/`streamChannel`/`minioPrefix`).
+2. **Submit is fire-and-forget.** `SubmitFn = (url, payload) => Promise<void>` (`service-backend.ts:19`); dispatch
+   submits then immediately fetches the trace. An async N-step agent needs **holding until completion**; there is
+   no abstraction for it.
+3. **Trace is fetched by Assay's runId.** `traceSource.fetch(runId)` (`service-backend.ts:94`). An external agent
+   records under **its own** id in MLflow/OTel, so Assay's runId does not match. The `frontDoor.trace` field exists
+   in the schema (`harness-spec.ts:54`) but is **never read** (grep: 0 usages).
+4. **The per-case browser is unconditionally provisioned.** `provisionBrowserEnv` is always called
+   (`service-backend.ts:71`), even though `spec.target` is already optional (`harness-spec.ts:53`). A harness that
+   runs its own playwright-server, or needs no browser at all, does not fit.
+5. **The service image is fixed in the spec.** `TopologyService.image` is a required string (`harness-spec.ts:12`);
+   there is no per-dispatch image selection. External orchestrators sometimes choose a per-service image at
+   dispatch time (e.g. evaluate the same topology with service X at v1 vs v2).
+
+## Root cause — one abstraction is missing
+
+`dispatch` conflates two concerns that the rest of the codebase keeps separate (the "model B" doctrine:
+Backend = *placement*, Driver = *compute*):
+
+| Concern | Axis | Status |
+| --- | --- | --- |
+| **Placement** — where to deploy | infra-agnostic | ✅ `TopologyRuntime` (Nomad / K8s parity, live) |
+| **Driving** — how to drive the agent + collect signal | harness-agnostic | ❌ hardcoded to browser-use-langgraph |
+
+The front-door is **the last adapter that stayed as code** while every sibling became declarative data:
+`CommandHarness` (any CLI agent from `HarnessSpec(command)`, no code — `command.ts:81-83` `{{task}}/{{run_id}}`
+interpolation), `BenchmarkAdapterSpec` (benchmark = data with `{field}` interpolation), `RuntimeSpec` (execution
+infra = user-registered data). The service equivalent of "any CLI agent, no code" is **"any agent topology, no
+code"** — which is exactly the stated goal.
+
+## Direction — a declarative `FrontDoorProtocol` + a thin `FrontDoorDriver`
+
+Introduce a **`FrontDoorDriver`** (the harness-agnostic sibling of the infra-agnostic `TopologyRuntime`) that
+interprets a declarative **`FrontDoorProtocol`** carried by the spec. `dispatch` shrinks to a fixed skeleton:
+
+```
+ensureTopology(spec, zone)                        // WHERE — infra (unchanged)
+target   = acquireTarget(spec, runId, zone)       // strategy: none | assay-browser | harness-service
+outcome  = frontDoorDriver.drive(spec, wiring)    // HOW  — build → submit → await-done → return agent trace-ref
+trace    = traceSource.fetch(correlate(outcome))  // correlate: injected vs returned id  (wakes frontDoor.trace)
+snapshot = target?.observe()                      // optional
+grade(trace, snapshot)
+```
+
+`ServiceTopologyBackend` becomes the assembler of `{ TopologyRuntime (WHERE), FrontDoorDriver (HOW) }`. This is the
+model-B split extended to the service tier.
+
+## The five hardcodes → five declarative knobs
+
+Every knob is optional; its default reproduces today's behavior.
+
+| # | Knob (proposed) | Default (= today) | Reuses |
+| --- | --- | --- | --- |
+| 1 | `frontDoor.request.bodyTemplate` — `{{task}}/{{run_id}}/{{thread_id}}/{{target_cdp_url}}…` interpolation | the current 5-field body | CommandHarness substitution (`command.ts:81`) |
+| 1b | per-run wiring variables derived from `spec.dependencies[].isolateBy` (not hardcoded `keysFor`) | pg→`thread_id`, redis→`key_prefix`, minio→`object_prefix` | the existing `isolateBy` enum (`harness-spec.ts:25`) |
+| 2 ✅ | `frontDoor.completion.mode`: `sync` \| `poll` (+ `statusPath`, `done`/`failed` `StatusMatch`, `intervalMs`, `timeoutMs`) — `stream`/`callback` deferred | `sync` (current echo behavior) | — (the genuinely missing piece) |
+| 3 | `frontDoor.correlate.mode`: `injected` (Assay injects `run_id`) \| `returned` (extract via `frontDoor.trace` JSON-path) | `injected` | the dormant `frontDoor.trace` field (`harness-spec.ts:54`) |
+| 4 | `frontDoor.target.acquire`: `none` \| `assay` \| `harness` (observe a declared service endpoint) | `assay` when `spec.target` is set | the already-optional `target` + the `os-use`/`prompt` env taxonomy |
+| 5 | per-service image pin threaded through dispatch (`AgentJob`), not only at registration | `spec.image` | `HarnessTemplate` slot/pins already resolve images (`harness-template.ts:97-115`) |
+
+Knob 5 is ~80% built: `resolveHarnessInstance` already maps `pins[slot] → image` per service
+(`harness-template.ts:99`); it only resolves at *registration*. Threading an optional pin through `AgentJob`
+(`agent-job.ts:28`) lets a tenant/case select a per-service image at *dispatch*.
+
+## Proposed contract (sketch)
+
+```ts
+// @assay/core — harness-spec.ts: frontDoor extension (all optional; absence = today)
+frontDoor: {
+  service: string; submit: string; trace?: string;
+  // #2 DONE — completion is a discriminated union; poll uses a *data* matcher (StatusMatch), not a string
+  // predicate (no eval; same "data not code" discipline as BenchmarkAdapterSpec).
+  completion?:
+    | { mode: "sync" }
+    | { mode: "poll"; statusPath: string;                 // "GET /runs/{run_id}/status" ({var} ← wiring)
+        done: StatusMatch; failed?: StatusMatch;          // StatusMatch = { field: dot-path; equals? | oneOf? }
+        intervalMs?: number; timeoutMs?: number };
+  request?:    { method?: "POST"; headers?: Record<string, string>; bodyTemplate?: Json };  // #1 (later)
+  correlate?:  { mode: "injected" | "returned"; traceRef?: string /* JSON-path */ };        // #3 (later, absorbs `trace`)
+  target?:     { acquire: "none" | "assay" | "harness"; service?: string };                 // #4 (later)
+};
+
+// @assay/topology — front-door-driver.ts: the HOW abstraction (sibling of TopologyRuntime) — LANDED in #2
+interface FrontDoorDriver {
+  drive(req: FrontDoorDriveRequest): Promise<DriveOutcome>;   // submit → await-completion (build/correlate grow in #1/#3)
+}
+type DriveOutcome = { traceRef: string; status: "done" | "failed" | "timeout" };
+// HttpFrontDoorDriver is the default impl (injectable submit/getJson/sleep/now for deterministic tests).
+```
+
+The wiring vocabulary generalizes `keysFor`: each declared dependency contributes a per-run isolation variable
+named by its `isolateBy`, plus `{{run_id}}`, the target handle (`{{target_cdp_url}}`), and (for `completion.mode:
+callback`) a `{{callback_url}}` Assay holds a per-run promise on. browser-use happens to want all three store keys
++ the CDP url; another harness wants a subset or none.
+
+## "Absorbing the control-plane" — concretely
+
+browser-use's own LangGraph loop did: (a) build the request, (b) hold the connection until the run finishes,
+(c) correlate the trace, (d) manage the browser, (e) pick the image. Knobs 1–5 take each of those into Assay as
+spec data. That is absorption, not attachment.
+
+## Sequencing (keep the live e2e green)
+
+Each step merges independently; defaults keep current behavior, so no regression.
+
+1. **#2 completion model** ✅ — the most essential gap; `sync` default = no regression; unlocks async N-step agents.
+   Landed: `FrontDoorDriver`/`HttpFrontDoorDriver` + `frontDoor.completion` (`sync`/`poll`) + timeout→fail.
+2. **#3 correlation** — wake the dormant `frontDoor.trace`; extract the agent's own trace-ref from the response.
+3. **#1 payload template** — generalize the body + derive wiring variables from `isolateBy`.
+4. **#4 target strategy** — add `none` / `harness`; supports a self-provided playwright-server or trace-only harness.
+5. **#5 image pin** — thread an optional per-service pin through `AgentJob` (mechanism already exists).
+
+## Touch points (for the eventual PR)
+
+- `packages/core/src/harness-spec.ts` — extend the `frontDoor` schema (knobs 1–4); `agent-job.ts` (knob 5 pin).
+- `packages/core/src/harness-template.ts` — mirror the `frontDoor` extension in `ServiceTemplateSpecSchema`.
+- `packages/topology/src/front-door-driver.ts` — **new**: the `FrontDoorDriver` interface + a default driver that
+  resolves the protocol (request template, completion strategy, correlation, target acquisition).
+- `packages/topology/src/service-backend.ts` — shrink `dispatch` to the skeleton; delegate to `FrontDoorDriver`.
+- `packages/topology/src/environment-manager.ts` — derive wiring variables from `isolateBy` instead of fixed keys.
+- Docs/skill: `docs/service-harness.md` (spec section) + the `topology` skill reference travel with the change.

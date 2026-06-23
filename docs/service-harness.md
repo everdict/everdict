@@ -9,6 +9,13 @@ Chromium loading a client browser extension (the extension drives the browser).
 `services[]` (per-version warm) · `dependencies[]` (shared store + `isolateBy`) · `target`
 (browser+extension, per-case) · `frontDoor` ({service, submit, trace}) · `traceSource` ({kind: otel|mlflow, endpoint}).
 
+> **Planned — front-door generalization (design).** Today `ServiceTopologyBackend.dispatch` is hardcoded to one
+> protocol (browser-use-langgraph) in five places (fixed payload, fire-and-forget submit, trace-by-Assay-runId,
+> always-provisioned browser, fixed image). The direction to make the front-door **harness-agnostic** — a
+> declarative `FrontDoorProtocol` + a thin `FrontDoorDriver` (the sibling of the infra-agnostic `TopologyRuntime`),
+> with each hardcode becoming an optional knob defaulting to today's behavior — is captured in
+> `docs/architecture/front-door-generalization.md`.
+
 ## Efficiency (orchestrator-agnostic)
 - stateless services → **per-version warm pool**
 - Postgres/Redis/MinIO → **shared**, isolated per case by `thread_id` / key-prefix / object-prefix

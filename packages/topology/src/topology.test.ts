@@ -4,6 +4,7 @@ import type { TraceSource } from "@assay/trace";
 import { describe, expect, it } from "vitest";
 import { buildSharedStoreManifests } from "./dependencies.js";
 import { keysFor } from "./environment-manager.js";
+import type { FrontDoorDriver } from "./front-door-driver.js";
 import { buildK8sManifests } from "./k8s-topology.js";
 import {
   type AllocLike,
@@ -402,5 +403,128 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(zonesSeen.map((z) => z?.id)).toEqual(["alpha", "beta"]);
     expect(zonesSeen.map((z) => z?.namespace)).toEqual(["assay-alpha", "assay-beta"]); // 존별 분리
     expect(zonesSeen.every((z) => z?.isolationRuntime === "runsc")).toBe(true); // 강격리 강제
+  });
+
+  // --- #2 완료 모델(completion) ---
+  const mockBrowser = (): { handle: BrowserEnvHandle; disposed: () => boolean } => {
+    let disposed = false;
+    return {
+      handle: {
+        cdpUrl: "ws://b",
+        async snapshot() {
+          return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
+        },
+        async dispose() {
+          disposed = true;
+        },
+      },
+      disposed: () => disposed,
+    };
+  };
+  const mockRuntime = (browser: BrowserEnvHandle): TopologyRuntime => ({
+    id: "mock",
+    async ensureTopology() {
+      return { endpoints: { "agent-server": "http://agent-server:8000" } };
+    },
+    async provisionBrowserEnv() {
+      return browser;
+    },
+  });
+  const job: AgentJob = {
+    harness: { id: "browser-use-langgraph", version: "1.0.0" },
+    evalCase: { id: "c1", env: { kind: "browser" }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+  };
+
+  it("완료 모델이 timeout 을 돌려주면 dispatch 가 HARNESS_RUN_FAILED 로 실패하고 브라우저를 정리한다", async () => {
+    const b = mockBrowser();
+    const driver: FrontDoorDriver = {
+      async drive() {
+        return { traceRef: "fixed", status: "timeout" };
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(b.handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+      frontDoorDriver: driver,
+      newRunId: () => "fixed",
+    });
+
+    const err = await backend.dispatch(job).catch((e: unknown) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { code?: string }).code).toBe("HARNESS_RUN_FAILED");
+    expect(b.disposed()).toBe(true); // finally 로 per-case 브라우저 정리
+  });
+
+  it("완료 모델이 failed 를 돌려줘도 스냅샷+트레이스로 채점은 진행한다", async () => {
+    const b = mockBrowser();
+    const driver: FrontDoorDriver = {
+      async drive() {
+        return { traceRef: "fixed", status: "failed" };
+      },
+    };
+    const trace: TraceEvent[] = [
+      { t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } },
+    ];
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(b.handle),
+      traceSource: {
+        async fetch() {
+          return trace;
+        },
+      },
+      specFor: () => SPEC,
+      frontDoorDriver: driver,
+      newRunId: () => "fixed",
+    });
+
+    const result = await backend.dispatch(job);
+
+    expect(result.scores.map((s) => s.graderId).sort()).toEqual(["cost", "latency", "steps"]);
+    expect(b.disposed()).toBe(true);
+  });
+
+  it("poll 완료 모델: 상태 엔드포인트를 run_id 로 보간해 폴링하고 done 이면 채점한다", async () => {
+    const polled: string[] = [];
+    const b = mockBrowser();
+    const SPEC_POLL: ServiceHarnessSpec = {
+      ...SPEC,
+      frontDoor: {
+        ...SPEC.frontDoor,
+        completion: {
+          mode: "poll",
+          statusPath: "GET /runs/{run_id}/status",
+          done: { field: "status", equals: "done" },
+          intervalMs: 1,
+          timeoutMs: 100_000,
+        },
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(b.handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_POLL,
+      submit: async () => {},
+      getJson: async (url) => {
+        polled.push(url);
+        return { status: "done" };
+      },
+      newRunId: () => "fixed",
+    });
+
+    const result = await backend.dispatch(job);
+
+    expect(polled).toHaveLength(1);
+    expect(polled[0]).toBe("http://agent-server:8000/runs/fixed/status"); // {run_id}→fixed 보간
+    expect(result.scores.length).toBeGreaterThan(0);
   });
 });

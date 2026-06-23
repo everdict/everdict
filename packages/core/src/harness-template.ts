@@ -3,6 +3,7 @@ import { BadRequestError } from "./errors.js";
 import {
   CommandHarnessSpecSchema,
   CommandTraceSpecSchema,
+  FrontDoorSpecSchema,
   type HarnessSpec,
   ProcessHarnessSpecSchema,
   ServiceHarnessSpecSchema,
@@ -39,7 +40,7 @@ export const ServiceTemplateSpecSchema = z.object({
   services: z.array(TemplateServiceSchema),
   dependencies: z.array(TopologyDependencySchema).default([]),
   target: TopologyTargetSchema.optional(),
-  frontDoor: z.object({ service: z.string(), submit: z.string(), trace: z.string().optional() }),
+  frontDoor: FrontDoorSpecSchema,
   traceSource: TraceSourceSpecSchema,
 });
 

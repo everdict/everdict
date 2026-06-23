@@ -39,6 +39,17 @@ headless-Chromium Deployment+Service; `dispose()` deletes only the browser (warm
 deletes the namespace. `imagePullPolicy`/`runtimeClass` are options (kind: pre-`kind load` images + IfNotPresent).
 Verified live on kind — Nomad↔K8s parity.
 
+## Front-door generalization — making driving harness-agnostic (in progress)
+`ServiceTopologyBackend.dispatch` was hardcoded to one protocol (browser-use-langgraph): fixed payload,
+fire-and-forget submit, trace-by-Assay-runId, always-provisioned browser, fixed image. The direction — a declarative
+`FrontDoorProtocol` + a thin `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`), each hardcode →
+an optional knob defaulting to today — is in `docs/architecture/front-door-generalization.md`. Read it before
+touching `service-backend.ts`'s driving logic.
+- **#2 completion — DONE.** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit + await;
+  `frontDoor.completion` (`sync` default | `poll` with a `StatusMatch` done/failed matcher) in `@assay/core`;
+  dispatch fails a run on completion timeout. `poll` = "hold until an async N-step agent finishes."
+- Next: #3 correlate (wake `frontDoor.trace`) · #1 payload template · #4 target strategy · #5 per-service image pin.
+
 ## Reference impls
 `packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,
 `packages/trace/src/{otel,mlflow,trace-source}.ts`. Live now: both NomadTopologyRuntime + K8sTopologyRuntime apply
