@@ -50,8 +50,8 @@ async function connect(deps: McpDeps, subject: string, workspace: string): Promi
   return client;
 }
 
-function jsonOf(r: { content?: Array<{ type: string; text?: string }> }): Record<string, unknown> {
-  const c = r.content?.[0];
+function jsonOf(r: unknown): Record<string, unknown> {
+  const c = (r as { content?: Array<{ type: string; text?: string }> }).content?.[0];
   return c && c.type === "text" && c.text ? JSON.parse(c.text) : {};
 }
 
