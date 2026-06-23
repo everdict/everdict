@@ -1,9 +1,10 @@
-// 마법사 폼 상태 → HarnessSpec 객체 조립(순수). 컨트롤플레인이 스키마/충돌을 최종 검증한다.
-export type Kind = 'process' | 'service'
+// 마법사 폼 상태 → HarnessTemplateSpec / HarnessInstanceSpec 조립(순수). 컨트롤플레인이 스키마/충돌을 최종 검증한다.
+// 대분류(Template) = 구조/슬롯(버전 미고정), Instance = template 참조 + pins(슬롯→이미지/값).
+export type Kind = 'process' | 'service' | 'command'
 
 export interface ServiceRow {
   name: string
-  image: string
+  slot: string // 인스턴스가 핀하는 슬롯 이름(비우면 name)
   port: string
   needs: string // 콤마 구분
   perRun: string // 콤마 구분
@@ -14,10 +15,14 @@ export interface DepRow {
   role: string
   isolateBy: string
 }
-export interface WizardState {
+
+// 템플릿(대분류) 폼 상태.
+export interface TemplateState {
   kind: Kind
+  category: string
   id: string
-  version: string
+  version: string // 구조(shape) 버전
+  // service(토폴로지)
   services: ServiceRow[]
   deps: DepRow[]
   frontDoorService: string
@@ -29,6 +34,15 @@ export interface WizardState {
   targetLifecycle: string
   targetObserve: string[]
   targetExtensionRef: string
+  // command(선언형 CLI)
+  image: string
+  workDir: string
+  setup: string // 줄바꿈 구분
+  command: string
+  model: string
+  envText: string // KEY=VALUE 줄바꿈 구분
+  cmdTraceKind: string // none | otel | mlflow
+  cmdTraceEndpoint: string
 }
 
 const csv = (s: string): string[] =>
@@ -36,17 +50,46 @@ const csv = (s: string): string[] =>
     .split(',')
     .map((x) => x.trim())
     .filter(Boolean)
+const lines = (s: string): string[] =>
+  s
+    .split('\n')
+    .map((x) => x.trim())
+    .filter(Boolean)
+const kvLines = (s: string): Record<string, string> => {
+  const out: Record<string, string> = {}
+  for (const ln of lines(s)) {
+    const i = ln.indexOf('=')
+    if (i > 0) out[ln.slice(0, i).trim()] = ln.slice(i + 1).trim()
+  }
+  return out
+}
 
-export function buildSpec(s: WizardState): Record<string, unknown> {
-  if (s.kind === 'process') return { kind: 'process', id: s.id, version: s.version }
-
+// 템플릿(대분류) 스펙 조립.
+export function buildTemplate(s: TemplateState): Record<string, unknown> {
+  const base = { category: s.category || 'custom', id: s.id, version: s.version }
+  if (s.kind === 'process') return { kind: 'process', ...base }
+  if (s.kind === 'command') {
+    return {
+      kind: 'command',
+      ...base,
+      ...(s.image.trim() ? { image: s.image } : {}),
+      ...(s.workDir.trim() ? { workDir: s.workDir } : {}),
+      setup: lines(s.setup),
+      command: s.command,
+      env: kvLines(s.envText),
+      ...(s.model.trim() ? { model: s.model } : {}),
+      trace:
+        s.cmdTraceKind === 'none' || !s.cmdTraceKind
+          ? { kind: 'none' }
+          : { kind: s.cmdTraceKind, endpoint: s.cmdTraceEndpoint },
+    }
+  }
   const spec: Record<string, unknown> = {
     kind: 'service',
-    id: s.id,
-    version: s.version,
+    ...base,
     services: s.services.map((sv) => ({
       name: sv.name,
-      image: sv.image,
+      ...(sv.slot.trim() ? { slot: sv.slot } : {}), // 비우면 컨트롤플레인이 name 을 슬롯으로
       ...(sv.port.trim() ? { port: Number(sv.port) } : {}),
       needs: csv(sv.needs),
       perRun: csv(sv.perRun),
@@ -72,13 +115,42 @@ export function buildSpec(s: WizardState): Record<string, unknown> {
   return spec
 }
 
-export const INITIAL: WizardState = {
+// 슬롯 이름들(인스턴스 폼이 pins 입력을 그려줄 때 참조). service=서비스 슬롯, command=image/model.
+export function templateSlots(s: TemplateState): string[] {
+  if (s.kind === 'service') return s.services.map((sv) => sv.slot.trim() || sv.name).filter(Boolean)
+  if (s.kind === 'command') return ['image', 'model']
+  return []
+}
+
+export interface PinRow {
+  slot: string
+  value: string
+}
+export interface InstanceState {
+  templateId: string
+  templateVersion: string
+  version: string // 인스턴스 태그(예: pr-123-sha-abc)
+  pins: PinRow[]
+}
+
+// 인스턴스 스펙 조립(template 참조 + pins).
+export function buildInstance(s: InstanceState): Record<string, unknown> {
+  const pins: Record<string, string> = {}
+  for (const p of s.pins) if (p.slot.trim() && p.value.trim()) pins[p.slot.trim()] = p.value.trim()
+  return {
+    template: { id: s.templateId, version: s.templateVersion },
+    id: s.templateId, // 인스턴스 id = 템플릿 id(관례)
+    version: s.version,
+    pins,
+  }
+}
+
+export const INITIAL_TEMPLATE: TemplateState = {
   kind: 'service',
+  category: 'topology',
   id: '',
-  version: '',
-  services: [
-    { name: 'agent-server', image: '', port: '8080', needs: '', perRun: '', replicas: '1' },
-  ],
+  version: '1',
+  services: [{ name: 'agent-server', slot: 'agent-server', port: '8080', needs: '', perRun: '', replicas: '1' }],
   deps: [],
   frontDoorService: 'agent-server',
   frontDoorSubmit: 'POST /runs',
@@ -89,4 +161,19 @@ export const INITIAL: WizardState = {
   targetLifecycle: 'per-case-instance',
   targetObserve: ['dom', 'screenshot', 'url'],
   targetExtensionRef: '',
+  image: '',
+  workDir: '',
+  setup: '',
+  command: '',
+  model: '',
+  envText: '',
+  cmdTraceKind: 'none',
+  cmdTraceEndpoint: '',
+}
+
+export const INITIAL_INSTANCE: InstanceState = {
+  templateId: '',
+  templateVersion: '1',
+  version: '',
+  pins: [{ slot: 'agent-server', value: '' }],
 }

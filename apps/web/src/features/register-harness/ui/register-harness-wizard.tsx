@@ -11,213 +11,152 @@ import { Input, Label, Select, Textarea } from '@/shared/ui/input'
 
 import {
   registerHarnessAction,
+  registerHarnessTemplateAction,
   validateHarnessAction,
+  validateHarnessTemplateAction,
   type RegisterHarnessResult,
   type ValidateHarnessResult,
 } from '../api/register-harness'
 import {
-  buildSpec,
-  INITIAL,
+  buildInstance,
+  buildTemplate,
+  INITIAL_INSTANCE,
+  INITIAL_TEMPLATE,
   type DepRow,
+  type InstanceState,
+  type Kind,
+  type PinRow,
   type ServiceRow,
-  type WizardState,
+  type TemplateState,
 } from '../lib/build-spec'
 
 const STORES = ['postgres', 'redis', 'minio']
 const ISOLATE = ['thread_id', 'key-prefix', 'object-prefix', 'schema']
-const OBSERVE = ['dom', 'screenshot', 'url']
+const CATEGORIES = ['topology', 'claude-code', 'codex', 'cli-agent', 'desktop', 'custom']
+
+type Tab = 'template' | 'instance'
 
 export function RegisterHarnessWizard() {
-  const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
-  const [s, setS] = useState<WizardState>(INITIAL)
+  const [tab, setTab] = useState<Tab>('template')
+
+  return (
+    <div className="max-w-2xl space-y-5">
+      <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
+        <TabBtn active={tab === 'template'} onClick={() => setTab('template')}>
+          템플릿 (대분류)
+        </TabBtn>
+        <TabBtn active={tab === 'instance'} onClick={() => setTab('instance')}>
+          인스턴스 (template + pins)
+        </TabBtn>
+      </div>
+      <p className="text-[12px] text-muted-foreground">
+        {tab === 'template'
+          ? '대분류 = 구조/슬롯(버전 미고정). 같은 토폴로지의 변형(인스턴스)은 이 위에서 서비스 버전만 핀해 만듭니다.'
+          : '인스턴스 = 등록된 템플릿을 참조해 슬롯마다 이미지/버전을 핀한 하나의 하니스(보통 PR/SHA 마다 하나).'}
+      </p>
+      {tab === 'template' ? (
+        <TemplateForm workspace={workspace} />
+      ) : (
+        <InstanceForm workspace={workspace} />
+      )}
+    </div>
+  )
+}
+
+// --- 템플릿(대분류) 등록 ---
+function TemplateForm({ workspace }: { workspace: string }) {
+  const router = useRouter()
+  const [s, setS] = useState<TemplateState>(INITIAL_TEMPLATE)
   const [mode, setMode] = useState<'form' | 'json'>('form')
   const [jsonText, setJsonText] = useState('')
   const [result, setResult] = useState<ValidateHarnessResult>()
   const [regError, setRegError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
-  const set = (patch: Partial<WizardState>) => setS((prev) => ({ ...prev, ...patch }))
+  const set = (patch: Partial<TemplateState>) => setS((prev) => ({ ...prev, ...patch }))
   const setService = (i: number, patch: Partial<ServiceRow>) =>
     set({ services: s.services.map((row, j) => (j === i ? { ...row, ...patch } : row)) })
   const setDep = (i: number, patch: Partial<DepRow>) =>
     set({ deps: s.deps.map((row, j) => (j === i ? { ...row, ...patch } : row)) })
 
-  function currentSpec(): unknown {
-    if (mode === 'json') return JSON.parse(jsonText)
-    return buildSpec(s)
-  }
-  function toJsonMode() {
-    setJsonText(JSON.stringify(buildSpec(s), null, 2))
-    setMode('json')
-  }
+  const spec = (): unknown => (mode === 'json' ? JSON.parse(jsonText) : buildTemplate(s))
 
   async function onValidate() {
     setBusy(true)
     setRegError(undefined)
-    let spec: unknown
     try {
-      spec = currentSpec()
+      setResult(await validateHarnessTemplateAction(spec()))
     } catch {
-      setBusy(false)
       setResult({ ok: false, error: 'JSON 파싱 실패' })
-      return
     }
-    const res = await validateHarnessAction(spec)
     setBusy(false)
-    setResult(res)
   }
-
   async function onRegister() {
     setBusy(true)
     setRegError(undefined)
-    let spec: unknown
+    let res: RegisterHarnessResult
     try {
-      spec = currentSpec()
+      res = await registerHarnessTemplateAction(spec())
     } catch {
       setBusy(false)
       setRegError('JSON 파싱 실패')
       return
     }
-    const res: RegisterHarnessResult = await registerHarnessAction(spec)
     setBusy(false)
     if (res.ok) router.push(`/${workspace}/harnesses`)
     else setRegError(res.error ?? '등록 실패')
   }
 
   return (
-    <div className="max-w-2xl space-y-5">
-      {/* 모드 토글 */}
-      <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
-        <button
-          type="button"
-          onClick={() => setMode('form')}
-          className={cn(
-            'rounded px-3 py-1 font-[510] transition-colors',
-            mode === 'form'
-              ? 'bg-card text-foreground shadow-raise'
-              : 'text-muted-foreground hover:text-foreground'
-          )}
-        >
-          구조화
-        </button>
-        <button
-          type="button"
-          onClick={toJsonMode}
-          className={cn(
-            'rounded px-3 py-1 font-[510] transition-colors',
-            mode === 'json'
-              ? 'bg-card text-foreground shadow-raise'
-              : 'text-muted-foreground hover:text-foreground'
-          )}
-        >
-          JSON
-        </button>
-      </div>
+    <div className="space-y-5">
+      <ModeToggle mode={mode} setForm={() => setMode('form')} setJson={() => { setJsonText(JSON.stringify(buildTemplate(s), null, 2)); setMode('json') }} />
 
-      {/* 공통: kind / id / version */}
-      <div className="space-y-4">
+      <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
-          <Label>종류 (kind)</Label>
-          <div className="flex gap-4 text-[13px]">
-            {(['service', 'process'] as const).map((k) => (
-              <label key={k} className="flex items-center gap-1.5">
-                <input
-                  type="radio"
-                  name="kind"
-                  checked={s.kind === k}
-                  onChange={() => set({ kind: k })}
-                />
-                {k}
-              </label>
-            ))}
-          </div>
+          <Label>kind</Label>
+          <Select value={s.kind} onChange={(e) => set({ kind: e.target.value as Kind })}>
+            <option value="service">service</option>
+            <option value="command">command</option>
+            <option value="process">process</option>
+          </Select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="id">id</Label>
-            <Input
-              id="id"
-              value={s.id}
-              onChange={(e) => set({ id: e.target.value })}
-              placeholder="bu"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="version">version</Label>
-            <Input
-              id="version"
-              value={s.version}
-              onChange={(e) => set({ version: e.target.value })}
-              placeholder="1.2.0"
-            />
-          </div>
+        <div className="space-y-1.5">
+          <Label>category (대분류)</Label>
+          <Select value={s.category} onChange={(e) => set({ category: e.target.value })}>
+            {CATEGORIES.map((c) => (
+              <option key={c}>{c}</option>
+            ))}
+          </Select>
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="tid">id</Label>
+          <Input id="tid" value={s.id} onChange={(e) => set({ id: e.target.value })} placeholder="bu" />
         </div>
       </div>
+      <div className="space-y-1.5">
+        <Label htmlFor="tver">version (구조 버전 — 모양이 바뀔 때만 올림)</Label>
+        <Input id="tver" value={s.version} onChange={(e) => set({ version: e.target.value })} placeholder="1" />
+      </div>
 
-      {/* service 토폴로지 (form 모드) */}
       {mode === 'form' && s.kind === 'service' && (
         <div className="space-y-6">
-          <Section
-            title="Services"
-            onAdd={() =>
-              set({
-                services: [
-                  ...s.services,
-                  { name: '', image: '', port: '', needs: '', perRun: '', replicas: '1' },
-                ],
-              })
-            }
-          >
+          <Section title="Services (슬롯 — 인스턴스가 이미지를 핀)" onAdd={() => set({ services: [...s.services, { name: '', slot: '', port: '', needs: '', perRun: '', replicas: '1' }] })}>
             {s.services.map((sv, i) => (
               <div key={i} className="space-y-2 rounded-lg border bg-card p-3">
                 <div className="grid grid-cols-2 gap-2">
-                  <Input
-                    value={sv.name}
-                    onChange={(e) => setService(i, { name: e.target.value })}
-                    placeholder="name (agent-server)"
-                  />
-                  <Input
-                    value={sv.image}
-                    onChange={(e) => setService(i, { image: e.target.value })}
-                    placeholder="image"
-                  />
-                  <Input
-                    value={sv.port}
-                    onChange={(e) => setService(i, { port: e.target.value })}
-                    placeholder="port (8080)"
-                  />
-                  <Input
-                    value={sv.replicas}
-                    onChange={(e) => setService(i, { replicas: e.target.value })}
-                    placeholder="replicas (1)"
-                  />
-                  <Input
-                    value={sv.needs}
-                    onChange={(e) => setService(i, { needs: e.target.value })}
-                    placeholder="needs (콤마구분)"
-                  />
-                  <Input
-                    value={sv.perRun}
-                    onChange={(e) => setService(i, { perRun: e.target.value })}
-                    placeholder="perRun (thread_id,…)"
-                  />
+                  <Input value={sv.name} onChange={(e) => setService(i, { name: e.target.value })} placeholder="name (agent-server)" />
+                  <Input value={sv.slot} onChange={(e) => setService(i, { slot: e.target.value })} placeholder="slot (비우면 name)" />
+                  <Input value={sv.port} onChange={(e) => setService(i, { port: e.target.value })} placeholder="port (8080)" />
+                  <Input value={sv.replicas} onChange={(e) => setService(i, { replicas: e.target.value })} placeholder="replicas (1)" />
+                  <Input value={sv.needs} onChange={(e) => setService(i, { needs: e.target.value })} placeholder="needs (콤마구분)" />
+                  <Input value={sv.perRun} onChange={(e) => setService(i, { perRun: e.target.value })} placeholder="perRun (thread_id,…)" />
                 </div>
-                {s.services.length > 1 && (
-                  <RemoveBtn
-                    onClick={() => set({ services: s.services.filter((_, j) => j !== i) })}
-                  />
-                )}
+                {s.services.length > 1 && <RemoveBtn onClick={() => set({ services: s.services.filter((_, j) => j !== i) })} />}
               </div>
             ))}
           </Section>
-
-          <Section
-            title="Dependencies"
-            onAdd={() =>
-              set({ deps: [...s.deps, { store: 'postgres', role: '', isolateBy: 'thread_id' }] })
-            }
-          >
+          <Section title="Dependencies" onAdd={() => set({ deps: [...s.deps, { store: 'postgres', role: '', isolateBy: 'thread_id' }] })}>
             {s.deps.length === 0 && <p className="text-[12px] text-muted-foreground">없음</p>}
             {s.deps.map((d, i) => (
               <div key={i} className="flex items-center gap-2 rounded-lg border bg-card p-3">
@@ -226,15 +165,8 @@ export function RegisterHarnessWizard() {
                     <option key={x}>{x}</option>
                   ))}
                 </Select>
-                <Input
-                  value={d.role}
-                  onChange={(e) => setDep(i, { role: e.target.value })}
-                  placeholder="role (checkpoints)"
-                />
-                <Select
-                  value={d.isolateBy}
-                  onChange={(e) => setDep(i, { isolateBy: e.target.value })}
-                >
+                <Input value={d.role} onChange={(e) => setDep(i, { role: e.target.value })} placeholder="role" />
+                <Select value={d.isolateBy} onChange={(e) => setDep(i, { isolateBy: e.target.value })}>
                   {ISOLATE.map((x) => (
                     <option key={x}>{x}</option>
                   ))}
@@ -243,158 +175,182 @@ export function RegisterHarnessWizard() {
               </div>
             ))}
           </Section>
-
           <div className="space-y-3">
-            <h3 className="text-[13px] font-[560] text-foreground">Front door</h3>
+            <h3 className="text-[13px] font-[560]">Front door</h3>
             <div className="grid grid-cols-3 gap-2">
-              <Input
-                value={s.frontDoorService}
-                onChange={(e) => set({ frontDoorService: e.target.value })}
-                placeholder="service"
-              />
-              <Input
-                value={s.frontDoorSubmit}
-                onChange={(e) => set({ frontDoorSubmit: e.target.value })}
-                placeholder="submit (POST /runs)"
-              />
-              <Input
-                value={s.frontDoorTrace}
-                onChange={(e) => set({ frontDoorTrace: e.target.value })}
-                placeholder="trace (optional)"
-              />
+              <Input value={s.frontDoorService} onChange={(e) => set({ frontDoorService: e.target.value })} placeholder="service" />
+              <Input value={s.frontDoorSubmit} onChange={(e) => set({ frontDoorSubmit: e.target.value })} placeholder="submit (POST /runs)" />
+              <Input value={s.frontDoorTrace} onChange={(e) => set({ frontDoorTrace: e.target.value })} placeholder="trace (optional)" />
             </div>
           </div>
-
           <div className="space-y-3">
-            <h3 className="text-[13px] font-[560] text-foreground">Trace source</h3>
+            <h3 className="text-[13px] font-[560]">Trace source</h3>
             <div className="grid grid-cols-3 gap-2">
               <Select value={s.traceKind} onChange={(e) => set({ traceKind: e.target.value })}>
                 <option value="mlflow">mlflow</option>
                 <option value="otel">otel</option>
               </Select>
-              <Input
-                className="col-span-2"
-                value={s.traceEndpoint}
-                onChange={(e) => set({ traceEndpoint: e.target.value })}
-                placeholder="endpoint (http://…:5501)"
-              />
+              <Input className="col-span-2" value={s.traceEndpoint} onChange={(e) => set({ traceEndpoint: e.target.value })} placeholder="endpoint (http://…:5501)" />
             </div>
           </div>
+        </div>
+      )}
 
-          <div className="space-y-3">
-            <label className="flex items-center gap-2 text-[13px] font-[560] text-foreground">
-              <input
-                type="checkbox"
-                checked={s.targetEnabled}
-                onChange={(e) => set({ targetEnabled: e.target.checked })}
-              />
-              Target (browser+extension)
-            </label>
-            {s.targetEnabled && (
-              <div className="space-y-2 rounded-lg border bg-card p-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <Select
-                    value={s.targetLifecycle}
-                    onChange={(e) => set({ targetLifecycle: e.target.value })}
-                  >
-                    <option value="per-case-instance">per-case-instance</option>
-                    <option value="per-case-context">per-case-context</option>
-                  </Select>
-                  <Input
-                    value={s.targetExtensionRef}
-                    onChange={(e) => set({ targetExtensionRef: e.target.value })}
-                    placeholder="extension ref (optional)"
-                  />
-                </div>
-                <div className="flex gap-4 text-[13px]">
-                  {OBSERVE.map((o) => (
-                    <label key={o} className="flex items-center gap-1.5">
-                      <input
-                        type="checkbox"
-                        checked={s.targetObserve.includes(o)}
-                        onChange={(e) =>
-                          set({
-                            targetObserve: e.target.checked
-                              ? [...s.targetObserve, o]
-                              : s.targetObserve.filter((x) => x !== o),
-                          })
-                        }
-                      />
-                      {o}
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
+      {mode === 'form' && s.kind === 'command' && (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            <Input value={s.image} onChange={(e) => set({ image: e.target.value })} placeholder="image (기본; 인스턴스가 override)" />
+            <Input value={s.model} onChange={(e) => set({ model: e.target.value })} placeholder="model (기본)" />
+            <Input value={s.workDir} onChange={(e) => set({ workDir: e.target.value })} placeholder="workDir (예: /tmp)" />
           </div>
+          <Input value={s.command} onChange={(e) => set({ command: e.target.value })} placeholder="command (예: aider --message {{task}} --model {{model}} .)" />
+          <Textarea className="min-h-20 text-[12px]" value={s.setup} onChange={(e) => set({ setup: e.target.value })} placeholder="setup (줄바꿈 구분: pip install …)" />
+          <Textarea className="min-h-16 text-[12px]" value={s.envText} onChange={(e) => set({ envText: e.target.value })} placeholder="env (KEY=VALUE 줄바꿈 구분)" />
         </div>
       )}
 
-      {/* JSON 모드 */}
       {mode === 'json' && (
-        <div className="space-y-1.5">
-          <Label htmlFor="json">HarnessSpec (JSON)</Label>
-          <Textarea
-            id="json"
-            className="min-h-72 text-[12px]"
-            value={jsonText}
-            onChange={(e) => setJsonText(e.target.value)}
-            spellCheck={false}
-          />
-          <p className="text-[12px] text-muted-foreground">
-            JSON 모드 편집은 구조화 폼과 동기화되지 않습니다.
-          </p>
-        </div>
+        <JsonArea label="HarnessTemplateSpec (JSON)" value={jsonText} onChange={setJsonText} />
       )}
+      {mode === 'form' && <JsonPreview value={buildTemplate(s)} />}
 
-      {/* JSON 미리보기 (form 모드) */}
-      {mode === 'form' && (
-        <details className="rounded-lg border bg-muted/40 p-3 text-[13px]">
-          <summary className="cursor-pointer font-[510] text-foreground">JSON 미리보기</summary>
-          <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-card p-2 font-mono text-[12px] text-muted-foreground">
-            {JSON.stringify(buildSpec(s), null, 2)}
-          </pre>
-        </details>
-      )}
-
-      {/* 검증 결과 */}
       {result && <ValidateBanner result={result} />}
       {regError && <Callout tone="danger">{regError}</Callout>}
-
-      <p className="text-[12px] text-muted-foreground">
-        버전은 불변입니다 — 같은 (id, version)을 다른 스펙으로 다시 등록하면 409 로 거부됩니다.
-      </p>
-
-      <div className="flex gap-2">
-        <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
-          {busy ? '…' : '검증 (dry-run)'}
-        </Button>
-        <Button type="button" onClick={onRegister} disabled={busy}>
-          {busy ? '처리 중…' : '하니스 등록'}
-        </Button>
-      </div>
+      <Actions busy={busy} onValidate={onValidate} onRegister={onRegister} registerLabel="템플릿 등록" />
     </div>
   )
 }
 
-function Section({
-  title,
-  onAdd,
-  children,
-}: {
-  title: string
-  onAdd: () => void
-  children: React.ReactNode
-}) {
+// --- 인스턴스(template + pins) 등록 ---
+function InstanceForm({ workspace }: { workspace: string }) {
+  const router = useRouter()
+  const [s, setS] = useState<InstanceState>(INITIAL_INSTANCE)
+  const [result, setResult] = useState<ValidateHarnessResult>()
+  const [regError, setRegError] = useState<string>()
+  const [busy, setBusy] = useState(false)
+
+  const set = (patch: Partial<InstanceState>) => setS((prev) => ({ ...prev, ...patch }))
+  const setPin = (i: number, patch: Partial<PinRow>) =>
+    set({ pins: s.pins.map((row, j) => (j === i ? { ...row, ...patch } : row)) })
+
+  async function onValidate() {
+    setBusy(true)
+    setRegError(undefined)
+    setResult(await validateHarnessAction(buildInstance(s)))
+    setBusy(false)
+  }
+  async function onRegister() {
+    setBusy(true)
+    setRegError(undefined)
+    const res = await registerHarnessAction(buildInstance(s))
+    setBusy(false)
+    if (res.ok) router.push(`/${workspace}/harnesses`)
+    else setRegError(res.error ?? '등록 실패')
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="space-y-1.5">
+          <Label htmlFor="itid">template id</Label>
+          <Input id="itid" value={s.templateId} onChange={(e) => set({ templateId: e.target.value })} placeholder="bu" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="itver">template version</Label>
+          <Input id="itver" value={s.templateVersion} onChange={(e) => set({ templateVersion: e.target.value })} placeholder="1" />
+        </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="iver">instance version</Label>
+          <Input id="iver" value={s.version} onChange={(e) => set({ version: e.target.value })} placeholder="pr-123-sha-abc" />
+        </div>
+      </div>
+
+      <Section title="Pins (슬롯 → 이미지/값)" onAdd={() => set({ pins: [...s.pins, { slot: '', value: '' }] })}>
+        {s.pins.map((p, i) => (
+          <div key={i} className="flex items-center gap-2 rounded-lg border bg-card p-3">
+            <Input value={p.slot} onChange={(e) => setPin(i, { slot: e.target.value })} placeholder="slot (agent-server / image / model)" />
+            <Input value={p.value} onChange={(e) => setPin(i, { value: e.target.value })} placeholder="value (ghcr.io/…/agent:abc)" />
+            {s.pins.length > 1 && <RemoveBtn onClick={() => set({ pins: s.pins.filter((_, j) => j !== i) })} />}
+          </div>
+        ))}
+      </Section>
+
+      <JsonPreview value={buildInstance(s)} />
+      {result && <ValidateBanner result={result} />}
+      {regError && <Callout tone="danger">{regError}</Callout>}
+      <p className="text-[12px] text-muted-foreground">
+        템플릿이 먼저 등록돼 있어야 합니다 — 없거나 슬롯 pin 이 빠지면 검증/등록이 거부됩니다(버전 불변).
+      </p>
+      <Actions busy={busy} onValidate={onValidate} onRegister={onRegister} registerLabel="인스턴스 등록" />
+    </div>
+  )
+}
+
+function TabBtn({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn('rounded px-3 py-1 font-[510] transition-colors', active ? 'bg-card text-foreground shadow-raise' : 'text-muted-foreground hover:text-foreground')}
+    >
+      {children}
+    </button>
+  )
+}
+
+function ModeToggle({ mode, setForm, setJson }: { mode: 'form' | 'json'; setForm: () => void; setJson: () => void }) {
+  return (
+    <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
+      <TabBtn active={mode === 'form'} onClick={setForm}>
+        구조화
+      </TabBtn>
+      <TabBtn active={mode === 'json'} onClick={setJson}>
+        JSON
+      </TabBtn>
+    </div>
+  )
+}
+
+function JsonArea({ label, value, onChange }: { label: string; value: string; onChange: (v: string) => void }) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor="json">{label}</Label>
+      <Textarea id="json" className="min-h-72 text-[12px]" value={value} onChange={(e) => onChange(e.target.value)} spellCheck={false} />
+      <p className="text-[12px] text-muted-foreground">JSON 모드 편집은 구조화 폼과 동기화되지 않습니다.</p>
+    </div>
+  )
+}
+
+function JsonPreview({ value }: { value: unknown }) {
+  return (
+    <details className="rounded-lg border bg-muted/40 p-3 text-[13px]">
+      <summary className="cursor-pointer font-[510] text-foreground">JSON 미리보기</summary>
+      <pre className="mt-2 max-h-72 overflow-auto whitespace-pre-wrap break-all rounded-md border border-border bg-card p-2 font-mono text-[12px] text-muted-foreground">
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </details>
+  )
+}
+
+function Actions({ busy, onValidate, onRegister, registerLabel }: { busy: boolean; onValidate: () => void; onRegister: () => void; registerLabel: string }) {
+  return (
+    <div className="flex gap-2">
+      <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
+        {busy ? '…' : '검증 (dry-run)'}
+      </Button>
+      <Button type="button" onClick={onRegister} disabled={busy}>
+        {busy ? '처리 중…' : registerLabel}
+      </Button>
+    </div>
+  )
+}
+
+function Section({ title, onAdd, children }: { title: string; onAdd: () => void; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
         <h3 className="text-[13px] font-[560] text-foreground">{title}</h3>
-        <button
-          type="button"
-          onClick={onAdd}
-          className="flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
-        >
+        <button type="button" onClick={onAdd} className="flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground">
           <Plus className="size-3.5" /> 추가
         </button>
       </div>
@@ -405,11 +361,7 @@ function Section({
 
 function RemoveBtn({ onClick }: { onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-destructive"
-    >
+    <button type="button" onClick={onClick} className="flex items-center gap-1 text-[12px] text-muted-foreground transition-colors hover:text-destructive">
       <Trash2 className="size-3.5" /> 삭제
     </button>
   )
@@ -420,7 +372,7 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-[560]">스키마 오류</div>
+        <div className="font-[560]">검증 실패</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -431,16 +383,15 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
   return (
     <Callout tone="info">
       <div className="font-[560]">
-        ✓ 스키마 정상 · {result.id}@{result.version}{' '}
-        {result.versionExists ? '(이미 존재)' : '(새 버전)'}
+        ✓ 검증 통과 · {result.kind ? `${result.kind} ` : ''}
+        {result.id}@{result.version}
       </div>
-      <div className="mt-1 text-[12px] text-muted-foreground">
-        기존 버전:{' '}
-        {result.existingVersions && result.existingVersions.length > 0
-          ? result.existingVersions.join(', ')
-          : '없음'}
-        {result.versionExists && ' — 동일 스펙이면 no-op, 다르면 409 로 거부됩니다.'}
-      </div>
+      {result.existingVersions !== undefined && (
+        <div className="mt-1 text-[12px] text-muted-foreground">
+          기존 버전: {result.existingVersions.length > 0 ? result.existingVersions.join(', ') : '없음'}
+          {result.versionExists && ' — 동일하면 no-op, 다르면 409.'}
+        </div>
+      )}
     </Callout>
   )
 }

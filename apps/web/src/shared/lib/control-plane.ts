@@ -66,10 +66,19 @@ export const controlPlane = {
   // GET /harnesses/:id/:version — resolved HarnessSpec(template + pins). 상세/도식화용.
   getHarnessSpec: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}`),
-  registerHarness: <T>(auth: AuthContext, spec: unknown) =>
-    call<T>(auth, '/harnesses', { method: 'POST', body: JSON.stringify(spec) }),
-  validateHarness: <T>(auth: AuthContext, spec: unknown) =>
-    call<T>(auth, '/harnesses/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  // 인스턴스(template + pins) 등록/검증 — /harnesses 가 인스턴스 표면.
+  registerHarness: <T>(auth: AuthContext, instance: unknown) =>
+    call<T>(auth, '/harnesses', { method: 'POST', body: JSON.stringify(instance) }),
+  validateHarness: <T>(auth: AuthContext, instance: unknown) =>
+    call<T>(auth, '/harnesses/validate', { method: 'POST', body: JSON.stringify(instance) }),
+  // 템플릿(대분류: 구조/슬롯) 목록/조회/등록/검증 — /harness-templates.
+  listHarnessTemplates: <T>(auth: AuthContext) => call<T>(auth, '/harness-templates'),
+  getHarnessTemplate: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/harness-templates/${encodeURIComponent(id)}`),
+  registerHarnessTemplate: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/harness-templates', { method: 'POST', body: JSON.stringify(spec) }),
+  validateHarnessTemplate: <T>(auth: AuthContext, spec: unknown) =>
+    call<T>(auth, '/harness-templates/validate', { method: 'POST', body: JSON.stringify(spec) }),
   listDatasets: <T>(auth: AuthContext) => call<T>(auth, '/datasets'),
   getDataset: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
