@@ -23,7 +23,15 @@ function ago(iso: string): string {
   return new Date(iso).toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' })
 }
 
-export function RunsTable({ runs, limit }: { runs: Run[]; limit?: number }) {
+export function RunsTable({
+  runs,
+  workspace,
+  limit,
+}: {
+  runs: Run[]
+  workspace: string
+  limit?: number
+}) {
   const rows = limit ? runs.slice(0, limit) : runs
   if (rows.length === 0) {
     return (
@@ -49,7 +57,7 @@ export function RunsTable({ runs, limit }: { runs: Run[]; limit?: number }) {
           <TR key={run.id} className="group">
             <TD>
               <Link
-                href={`/dashboard/runs/${run.id}`}
+                href={`/${workspace}/runs/${run.id}`}
                 className="font-mono text-[12px] text-link transition-colors hover:text-foreground"
               >
                 {run.id.slice(0, 8)}

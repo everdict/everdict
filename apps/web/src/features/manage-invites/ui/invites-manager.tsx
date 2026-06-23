@@ -13,7 +13,8 @@ const ROLES = ['viewer', 'member', 'admin'] as const
 
 function inviteLink(token: string): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  return `${origin}/dashboard/invite?token=${encodeURIComponent(token)}`
+  // 워크스페이스 가입 전 진입점이라 워크스페이스 슬러그가 없는 최상위 라우트.
+  return `${origin}/invite?token=${encodeURIComponent(token)}`
 }
 
 export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWrite: boolean }) {

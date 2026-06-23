@@ -38,8 +38,8 @@ export async function createJudgeAction(spec: unknown): Promise<CreateJudgeResul
   const ctx = await authContext()
   try {
     const rec = await controlPlane.createJudge<{ id: string; version: string }>(ctx, spec)
-    revalidatePath('/dashboard/judges')
-    revalidatePath('/dashboard')
+    revalidatePath('/[workspace]/judges')
+    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -38,8 +38,8 @@ export async function registerHarnessAction(spec: unknown): Promise<RegisterHarn
   const ctx = await authContext()
   try {
     const rec = await controlPlane.registerHarness<{ id: string; version: string }>(ctx, spec)
-    revalidatePath('/dashboard/harnesses')
-    revalidatePath('/dashboard')
+    revalidatePath('/[workspace]/harnesses')
+    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

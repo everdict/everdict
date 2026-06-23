@@ -21,7 +21,7 @@ export async function acceptInviteAction(token: string): Promise<AcceptInviteRes
   try {
     const res = acceptedInviteSchema.parse(await controlPlane.acceptInvite(ctx, { token }))
     await setActiveWorkspace(res.workspace)
-    revalidatePath('/dashboard', 'layout')
+    revalidatePath('/[workspace]', 'layout')
     return { ok: true, workspace: res.workspace, role: res.role }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

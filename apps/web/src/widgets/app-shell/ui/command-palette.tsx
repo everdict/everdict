@@ -39,66 +39,71 @@ function toggleTheme() {
   }
 }
 
-const ACTIONS: Command[] = [
-  {
-    id: 'new-run',
-    label: '새 Run 제출',
-    icon: Plus,
-    group: '액션',
-    keywords: 'run 실행 평가 submit',
-    perform: (r) => r.push('/dashboard/runs/new'),
-  },
-  {
-    id: 'new-scorecard',
-    label: '새 스코어카드 실행',
-    icon: Plus,
-    group: '액션',
-    keywords: 'scorecard 배치',
-    perform: (r) => r.push('/dashboard/scorecards/new'),
-  },
-  {
-    id: 'compare-scorecards',
-    label: '스코어카드 비교',
-    icon: GitCompareArrows,
-    group: '액션',
-    keywords: 'compare diff 회귀',
-    perform: (r) => r.push('/dashboard/scorecards/compare'),
-  },
-  {
-    id: 'ingest-trace',
-    label: '트레이스 인제스트',
-    icon: Upload,
-    group: '액션',
-    keywords: 'ingest otel mlflow trace',
-    perform: (r) => r.push('/dashboard/scorecards/ingest'),
-  },
-  {
-    id: 'new-dataset',
-    label: '데이터셋 등록',
-    icon: Plus,
-    group: '액션',
-    keywords: 'dataset 벤치마크',
-    perform: (r) => r.push('/dashboard/datasets/new'),
-  },
-  {
-    id: 'new-judge',
-    label: 'Judge 등록',
-    icon: Plus,
-    group: '액션',
-    keywords: 'judge 심사',
-    perform: (r) => r.push('/dashboard/judges/new'),
-  },
-  {
-    id: 'toggle-theme',
-    label: '테마 전환 (라이트/다크)',
-    icon: SunMoon,
-    group: '액션',
-    keywords: 'theme dark light 다크 라이트',
-    perform: () => toggleTheme(),
-  },
-]
+// 액션 경로는 활성 워크스페이스로 prefix(Linear 식 /{workspace}/...).
+function actionsFor(workspace: string): Command[] {
+  const push = (suffix: string) => (r: ReturnType<typeof useRouter>) =>
+    r.push(`/${workspace}${suffix}`)
+  return [
+    {
+      id: 'new-run',
+      label: '새 Run 제출',
+      icon: Plus,
+      group: '액션',
+      keywords: 'run 실행 평가 submit',
+      perform: push('/runs/new'),
+    },
+    {
+      id: 'new-scorecard',
+      label: '새 스코어카드 실행',
+      icon: Plus,
+      group: '액션',
+      keywords: 'scorecard 배치',
+      perform: push('/scorecards/new'),
+    },
+    {
+      id: 'compare-scorecards',
+      label: '스코어카드 비교',
+      icon: GitCompareArrows,
+      group: '액션',
+      keywords: 'compare diff 회귀',
+      perform: push('/scorecards/compare'),
+    },
+    {
+      id: 'ingest-trace',
+      label: '트레이스 인제스트',
+      icon: Upload,
+      group: '액션',
+      keywords: 'ingest otel mlflow trace',
+      perform: push('/scorecards/ingest'),
+    },
+    {
+      id: 'new-dataset',
+      label: '데이터셋 등록',
+      icon: Plus,
+      group: '액션',
+      keywords: 'dataset 벤치마크',
+      perform: push('/datasets/new'),
+    },
+    {
+      id: 'new-judge',
+      label: 'Judge 등록',
+      icon: Plus,
+      group: '액션',
+      keywords: 'judge 심사',
+      perform: push('/judges/new'),
+    },
+    {
+      id: 'toggle-theme',
+      label: '테마 전환 (라이트/다크)',
+      icon: SunMoon,
+      group: '액션',
+      keywords: 'theme dark light 다크 라이트',
+      perform: () => toggleTheme(),
+    },
+  ]
+}
 
-export function CommandPalette() {
+export function CommandPalette({ workspace }: { workspace: string }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -114,19 +119,17 @@ export function CommandPalette() {
         icon: item.icon,
         group: '이동',
         keywords: item.keywords,
-        perform: (r) => r.push(item.href),
+        perform: (r) => r.push(`/${workspace}${item.href}`),
       })),
-      ...ACTIONS,
+      ...actionsFor(workspace),
     ],
-    []
+    [workspace]
   )
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return commands
-    return commands.filter((c) =>
-      `${c.label} ${c.keywords ?? ''}`.toLowerCase().includes(q)
-    )
+    return commands.filter((c) => `${c.label} ${c.keywords ?? ''}`.toLowerCase().includes(q))
   }, [commands, query])
 
   // 그룹 순서 유지하며 묶기

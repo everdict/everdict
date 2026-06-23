@@ -57,7 +57,7 @@ export async function createRuntimeAction(spec: unknown): Promise<CreateRuntimeR
   const ctx = await authContext()
   try {
     const rec = await controlPlane.createRuntime<{ id: string; version: string }>(ctx, spec)
-    revalidatePath('/dashboard/runtimes')
+    revalidatePath('/[workspace]/runtimes')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

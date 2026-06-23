@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { versionsForId } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
@@ -32,6 +32,7 @@ export function RegisterDatasetForm({
   existingDatasets?: { id: string; versions: string[] }[]
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const existing = versionsForId(existingDatasets, id)
@@ -80,7 +81,7 @@ export function RegisterDatasetForm({
     }
     const res: CreateDatasetResult = await createDatasetAction(body)
     setBusy(false)
-    if (res.ok) router.push('/dashboard/datasets')
+    if (res.ok) router.push(`/${workspace}/datasets`)
     else setCreateError(res.error ?? '등록 실패')
   }
 
@@ -88,7 +89,12 @@ export function RegisterDatasetForm({
     <div className="max-w-2xl space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="id">id</Label>
-        <Input id="id" value={id} onChange={(e) => setId(e.target.value)} placeholder="repo-smoke" />
+        <Input
+          id="id"
+          value={id}
+          onChange={(e) => setId(e.target.value)}
+          placeholder="repo-smoke"
+        />
       </div>
       <VersionField existing={existing} value={version} onChange={setVersion} />
 

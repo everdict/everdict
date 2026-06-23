@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -42,6 +42,7 @@ export function IngestScorecardForm({
   judges: { id: string }[]
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [mode, setMode] = useState<Mode>('push')
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '')
   const [datasetVersion, setDatasetVersion] = useState('latest')
@@ -82,7 +83,7 @@ export function IngestScorecardForm({
             runsJson,
           })
     setBusy(false)
-    if (res.ok && res.id) router.push(`/dashboard/scorecards/${res.id}`)
+    if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
     else setServerError(res.error ?? '인제스트 실패')
   }
 

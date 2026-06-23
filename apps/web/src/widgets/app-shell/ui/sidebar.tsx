@@ -54,9 +54,10 @@ function setTheme(dark: boolean) {
 
 const rowClass =
   'group flex items-center gap-2.5 rounded-md px-2 py-[7px] text-[13px] font-[510] text-secondary-foreground transition-colors duration-100 hover:bg-accent/60 hover:text-foreground'
-const iconClass = 'size-[17px] shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'
+const iconClass =
+  'size-[17px] shrink-0 text-muted-foreground transition-colors group-hover:text-foreground'
 
-function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
+function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: () => void }) {
   const pathname = usePathname()
   return (
     <nav className="flex flex-col gap-4">
@@ -68,14 +69,15 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
             </p>
           )}
           {section.items.map((item) => {
+            const href = `/${workspace}${item.href}` // suffix → 활성 워크스페이스로 prefix
             const active = item.exact
-              ? pathname === item.href
-              : pathname === item.href || pathname.startsWith(`${item.href}/`)
+              ? pathname === href
+              : pathname === href || pathname.startsWith(`${href}/`)
             const Icon = item.icon
             return (
               <Link
                 key={item.href}
-                href={item.href}
+                href={href}
                 onClick={onNavigate}
                 aria-current={active ? 'page' : undefined}
                 className={cn(
@@ -111,23 +113,25 @@ function NavLinks({ onNavigate }: { onNavigate?: () => void }) {
 // 하단 푸터 — 계정/설정/테마/로그아웃 직접 링크. 워크스페이스 칩과 생김새를 분리(중복 제거),
 // 드롭다운에 의존하지 않아 항상 보이고 항상 눌린다.
 function SidebarFooter({
+  workspace,
   roles,
   authed,
   showLogin,
   onNavigate,
 }: {
+  workspace: string
   roles: string[]
   authed: boolean
   showLogin: boolean
   onNavigate?: () => void
 }) {
   const pathname = usePathname()
-  const accountActive = pathname === '/dashboard/account'
-  const settingsActive = pathname.startsWith('/dashboard/settings')
+  const accountActive = pathname === `/${workspace}/account`
+  const settingsActive = pathname.startsWith(`/${workspace}/settings`)
   return (
     <div className="flex flex-col gap-0.5 border-t border-border pt-2">
       <Link
-        href="/dashboard/account"
+        href={`/${workspace}/account`}
         onClick={onNavigate}
         aria-current={accountActive ? 'page' : undefined}
         className={cn(rowClass, accountActive && 'bg-accent text-foreground')}
@@ -137,7 +141,7 @@ function SidebarFooter({
       </Link>
       {can(roles, 'settings:read') && (
         <Link
-          href="/dashboard/settings"
+          href={`/${workspace}/settings`}
           onClick={onNavigate}
           aria-current={settingsActive ? 'page' : undefined}
           className={cn(rowClass, settingsActive && 'bg-accent text-foreground')}
@@ -191,7 +195,7 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
   return (
     <div className="flex h-full flex-col gap-3 px-3 py-3.5">
       <Link
-        href="/dashboard"
+        href={`/${props.workspace}`}
         onClick={onNavigate}
         className="flex items-center gap-2 rounded-md px-1 py-0.5 transition-colors hover:bg-accent/50"
       >
@@ -214,10 +218,11 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
       </button>
 
       <div className="-mr-1 flex-1 overflow-y-auto pr-1">
-        <NavLinks onNavigate={onNavigate} />
+        <NavLinks workspace={props.workspace} onNavigate={onNavigate} />
       </div>
 
       <SidebarFooter
+        workspace={props.workspace}
         roles={props.roles}
         authed={props.authed}
         showLogin={props.showLogin}
@@ -242,7 +247,7 @@ export function Sidebar(props: SidebarProps) {
           <Menu className="size-[18px]" />
         </button>
         <Link
-          href="/dashboard"
+          href={`/${props.workspace}`}
           className="flex items-center gap-1.5 text-[14px] font-[600] tracking-tight"
         >
           <FlaskConical className="size-4 text-primary" /> Assay

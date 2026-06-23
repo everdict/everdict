@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
 import { Input, Label, Select } from '@/shared/ui/input'
@@ -24,6 +24,7 @@ export function TrendPicker({
   baseline?: string
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [d, setD] = useState(dataset ?? datasets[0]?.id ?? '')
   const [m, setM] = useState(metric ?? 'judge')
   const [b, setB] = useState(baseline ?? 'first')
@@ -31,7 +32,7 @@ export function TrendPicker({
   function go() {
     if (!d) return
     const q = new URLSearchParams({ dataset: d, metric: m || 'judge', baseline: b || 'first' })
-    router.push(`/dashboard/scorecards/trend?${q.toString()}`)
+    router.push(`/${workspace}/scorecards/trend?${q.toString()}`)
   }
 
   if (datasets.length === 0) return null

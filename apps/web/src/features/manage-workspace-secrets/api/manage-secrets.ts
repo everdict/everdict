@@ -21,7 +21,7 @@ export async function setSecretAction(name: string, value: string): Promise<Secr
   const ctx = await authContext()
   try {
     await controlPlane.setSecret(ctx, name, value)
-    revalidatePath('/dashboard/settings')
+    revalidatePath('/[workspace]/settings')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -33,7 +33,7 @@ export async function deleteSecretAction(name: string): Promise<SecretMutationRe
   const ctx = await authContext()
   try {
     await controlPlane.deleteSecret(ctx, name)
-    revalidatePath('/dashboard/settings')
+    revalidatePath('/[workspace]/settings')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

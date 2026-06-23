@@ -38,8 +38,8 @@ export async function createDatasetAction(dataset: unknown): Promise<CreateDatas
   const ctx = await authContext()
   try {
     const rec = await controlPlane.createDataset<{ id: string; version: string }>(ctx, dataset)
-    revalidatePath('/dashboard/datasets')
-    revalidatePath('/dashboard')
+    revalidatePath('/[workspace]/datasets')
+    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

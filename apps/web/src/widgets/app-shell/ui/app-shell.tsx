@@ -41,7 +41,7 @@ export function AppShell({
           <PageTransition>{children}</PageTransition>
         </div>
       </main>
-      <CommandPalette />
+      <CommandPalette workspace={workspace} />
     </div>
   )
 }

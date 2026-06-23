@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { Plus, Trash2 } from 'lucide-react'
 
 import { cn } from '@/shared/lib/utils'
@@ -29,6 +29,7 @@ const OBSERVE = ['dom', 'screenshot', 'url']
 
 export function RegisterHarnessWizard() {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [s, setS] = useState<WizardState>(INITIAL)
   const [mode, setMode] = useState<'form' | 'json'>('form')
   const [jsonText, setJsonText] = useState('')
@@ -80,7 +81,7 @@ export function RegisterHarnessWizard() {
     }
     const res: RegisterHarnessResult = await registerHarnessAction(spec)
     setBusy(false)
-    if (res.ok) router.push('/dashboard/harnesses')
+    if (res.ok) router.push(`/${workspace}/harnesses`)
     else setRegError(res.error ?? '등록 실패')
   }
 

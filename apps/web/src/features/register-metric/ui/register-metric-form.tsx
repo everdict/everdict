@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -32,6 +32,7 @@ const OPS: { v: string; d: string }[] = [
 // Metric(threshold) 등록 폼 — 이미 산출된 메트릭(source) 위에 op·threshold 합격규칙. dry-run 검증 후 등록.
 export function RegisterMetricForm() {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [description, setDescription] = useState('')
@@ -70,7 +71,7 @@ export function RegisterMetricForm() {
     setCreateError(undefined)
     const res: CreateMetricResult = await createMetricAction(buildSpec())
     setBusy(false)
-    if (res.ok) router.push('/dashboard/metrics')
+    if (res.ok) router.push(`/${workspace}/metrics`)
     else setCreateError(res.error ?? '등록 실패')
   }
 

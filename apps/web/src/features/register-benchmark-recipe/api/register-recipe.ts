@@ -42,8 +42,8 @@ export async function registerRecipeAction(spec: unknown): Promise<RegisterRecip
       ctx,
       spec
     )
-    revalidatePath('/dashboard/datasets/recipes')
-    revalidatePath('/dashboard/datasets/import')
+    revalidatePath('/[workspace]/datasets/recipes')
+    revalidatePath('/[workspace]/datasets/import')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

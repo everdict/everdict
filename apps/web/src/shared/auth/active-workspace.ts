@@ -2,11 +2,11 @@ import 'server-only'
 
 import { cookies } from 'next/headers'
 
-// 활성 워크스페이스 선택은 서버 전용 httpOnly 쿠키에 둔다(BFF: 클라이언트가 직접 컨트롤플레인을 부르지 않음).
-// authContext 가 이 값을 읽어 x-assay-workspace 로 전달하고, switch/create 액션이 이 값을 쓴다.
-export const ACTIVE_WORKSPACE_COOKIE = 'assay-workspace'
+import { ACTIVE_WORKSPACE_COOKIE, ACTIVE_WORKSPACE_MAX_AGE } from './workspace-scope'
 
-const ONE_YEAR = 60 * 60 * 24 * 365
+// 활성 워크스페이스의 권위는 URL 첫 세그먼트(미들웨어가 헤더로 주입)다. 이 쿠키는 most-recent 워크스페이스를
+// 지속해 루트(/) 리다이렉트와 컨트롤플레인 기본 폴백에 쓰인다(미들웨어가 매 /{workspace}/* 방문마다 동기화).
+// create/accept 액션은 리다이렉트 직전에 이 쿠키를 미리 심어 깜빡임을 막는다.
 
 export async function getActiveWorkspace(): Promise<string | undefined> {
   return (await cookies()).get(ACTIVE_WORKSPACE_COOKIE)?.value
@@ -18,6 +18,6 @@ export async function setActiveWorkspace(id: string): Promise<void> {
     httpOnly: true,
     sameSite: 'lax',
     path: '/',
-    maxAge: ONE_YEAR,
+    maxAge: ACTIVE_WORKSPACE_MAX_AGE,
   })
 }

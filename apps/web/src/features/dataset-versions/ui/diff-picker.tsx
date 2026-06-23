@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
 import { Label, Select } from '@/shared/ui/input'
@@ -19,6 +19,7 @@ export function DiffPicker({
   candidate?: string
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   // 기본값: candidate=최신, base=직전(versions 는 최신순 정렬되어 전달됨).
   const [b, setB] = useState(base ?? versions[1] ?? versions[0] ?? '')
   const [c, setC] = useState(candidate ?? versions[0] ?? '')
@@ -28,7 +29,7 @@ export function DiffPicker({
   function compare() {
     if (b && c)
       router.push(
-        `/dashboard/datasets/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
+        `/${workspace}/datasets/${encodeURIComponent(id)}/diff?base=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
       )
   }
 

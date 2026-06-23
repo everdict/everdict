@@ -40,7 +40,7 @@ export async function ingestScorecardAction(
   }
   try {
     const rec = await controlPlane.ingestScorecard<{ id: string }>(ctx, body)
-    revalidatePath('/dashboard/scorecards')
+    revalidatePath('/[workspace]/scorecards')
     return { ok: true, id: rec.id }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -84,7 +84,7 @@ export async function pullScorecardAction(
   }
   try {
     const rec = await controlPlane.ingestScorecardPull<{ id: string }>(ctx, body)
-    revalidatePath('/dashboard/scorecards')
+    revalidatePath('/[workspace]/scorecards')
     return { ok: true, id: rec.id }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

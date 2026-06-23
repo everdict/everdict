@@ -25,7 +25,7 @@ export async function createWorkspaceAction(input: {
       ...(input.id ? { id: input.id } : {}),
     })
     await setActiveWorkspace(ws.id)
-    revalidatePath('/dashboard', 'layout')
+    revalidatePath('/[workspace]', 'layout')
     return { ok: true, id: ws.id, name: ws.name }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

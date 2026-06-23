@@ -37,7 +37,7 @@ export function AcceptInviteCard({ token }: { token: string }) {
             가입했습니다.
           </span>
         </Callout>
-        <Button onClick={() => router.push('/dashboard')}>대시보드로 이동</Button>
+        <Button onClick={() => router.push(`/${done.workspace}`)}>워크스페이스로 이동</Button>
       </div>
     )
   }
@@ -52,7 +52,7 @@ export function AcceptInviteCard({ token }: { token: string }) {
         <Button onClick={onAccept} disabled={pending}>
           {pending ? '수락 중…' : '초대 수락'}
         </Button>
-        <Button variant="secondary" onClick={() => router.push('/dashboard')} disabled={pending}>
+        <Button variant="secondary" onClick={() => router.push('/')} disabled={pending}>
           취소
         </Button>
       </div>

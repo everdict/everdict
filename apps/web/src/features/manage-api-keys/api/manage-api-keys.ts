@@ -23,7 +23,7 @@ export async function createKeyAction(label?: string): Promise<CreateKeyResult> 
   try {
     const body = label && label.length > 0 ? { label } : {}
     const res = createdApiKeySchema.parse(await controlPlane.createKey(ctx, body))
-    revalidatePath('/dashboard/account')
+    revalidatePath('/[workspace]/account')
     return { ok: true, apiKey: res.apiKey }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -35,7 +35,7 @@ export async function revokeKeyAction(id: string): Promise<RevokeKeyResult> {
   const ctx = await authContext()
   try {
     await controlPlane.revokeKey(ctx, id)
-    revalidatePath('/dashboard/account')
+    revalidatePath('/[workspace]/account')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -36,8 +36,8 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
   }
   try {
     const rec = await controlPlane.runScorecard<{ id: string }>(ctx, body)
-    revalidatePath('/dashboard/scorecards')
-    revalidatePath('/dashboard')
+    revalidatePath('/[workspace]/scorecards')
+    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

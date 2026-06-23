@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 
 import type { Harness } from '@/entities/harness'
@@ -19,6 +19,7 @@ interface Values {
 
 export function SubmitRunForm({ harnesses }: { harnesses: Harness[] }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [serverError, setServerError] = useState<string>()
   const {
     register,
@@ -31,7 +32,7 @@ export function SubmitRunForm({ harnesses }: { harnesses: Harness[] }) {
   async function onSubmit(values: Values) {
     setServerError(undefined)
     const res = await submitRunAction(values)
-    if (res.ok && res.id) router.push(`/dashboard/runs/${res.id}`)
+    if (res.ok && res.id) router.push(`/${workspace}/runs/${res.id}`)
     else setServerError(res.error ?? '제출 실패')
   }
 

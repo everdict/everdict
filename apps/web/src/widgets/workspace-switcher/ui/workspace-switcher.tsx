@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Check, ChevronsUpDown, Loader2, Plus } from 'lucide-react'
 
-import { switchWorkspaceAction } from '@/features/switch-workspace'
 import type { Workspace } from '@/entities/workspace'
 import { cn } from '@/shared/lib/utils'
 
@@ -30,12 +29,13 @@ export function WorkspaceSwitcher({
   const active = workspaces.find((w) => w.id === current)
   const label = active?.name ?? current
 
+  // 워크스페이스 전환 = 그 워크스페이스 홈으로 이동(URL 이 활성 워크스페이스의 권위; 미들웨어가 쿠키 동기화).
+  // 리소스 상세(/runs/[id] 등)는 대상 워크스페이스에 없을 수 있어 개요로 이동한다.
   function select(id: string) {
     setOpen(false)
     if (id === current) return
-    startTransition(async () => {
-      await switchWorkspaceAction(id)
-      router.refresh()
+    startTransition(() => {
+      router.push(`/${id}`)
     })
   }
 
@@ -114,7 +114,7 @@ export function WorkspaceSwitcher({
             </div>
             <div className="my-1 h-px bg-border" />
             <Link
-              href="/dashboard/workspaces/new"
+              href="/new-workspace"
               onClick={() => setOpen(false)}
               className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-[13px] text-secondary-foreground transition-colors hover:bg-accent hover:text-foreground"
             >

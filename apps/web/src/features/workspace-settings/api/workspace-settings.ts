@@ -23,7 +23,7 @@ export async function updateWorkspaceSettingsAction(
   const ctx = await authContext()
   try {
     const settings = await controlPlane.setWorkspaceSettings<WorkspaceSettings>(ctx, patch)
-    revalidatePath('/dashboard/settings')
+    revalidatePath('/[workspace]/settings')
     return { ok: true, settings }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

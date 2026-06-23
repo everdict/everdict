@@ -21,8 +21,8 @@ export async function importBenchmarkAction(body: unknown): Promise<ImportBenchm
       ctx,
       body
     )
-    revalidatePath('/dashboard/datasets')
-    revalidatePath('/dashboard')
+    revalidatePath('/[workspace]/datasets')
+    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id, version: rec.version, cases: rec.cases }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

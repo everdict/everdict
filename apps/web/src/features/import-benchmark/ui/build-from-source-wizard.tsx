@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { Eye, Heart, Loader2, Lock, Search, Sparkles } from 'lucide-react'
 
 import { versionsForId } from '@/shared/lib/semver'
@@ -55,6 +55,7 @@ export function BuildFromSourceWizard({
   existingDatasets?: { id: string; versions: string[] }[]
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [sourceKind, setSourceKind] = useState<SourceKind>('huggingface')
 
   // HF 검색/선택
@@ -186,7 +187,7 @@ export function BuildFromSourceWizard({
     setCreateBusy(false)
     setCreateResult(r)
     if (r.ok) {
-      router.push('/dashboard/datasets')
+      router.push(`/${workspace}/datasets`)
       router.refresh()
     }
   }

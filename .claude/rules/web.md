@@ -17,6 +17,16 @@ See `docs/web.md`. This app is SELF-CONTAINED (own eslint+prettier; excluded fro
   the control plane's (403). Dev (no Keycloak) falls back to `authContext()` → `x-assay-tenant=default`. Never
   call the control plane from the browser (all calls are `server-only`); guard `auth()` behind `keycloakConfigured`
   so dev works without `AUTH_SECRET`.
+- **Workspace URLs (Linear-style)**: routes live under `app/[workspace]/*`; the URL's first path segment **is**
+  the active workspace. `middleware` injects it as the `x-assay-active-workspace` request header (and syncs the
+  most-recent `assay-workspace` cookie); `authContext` reads that header (cookie fallback) → forwards
+  `x-assay-workspace`. So pages/actions scope to the URL workspace with NO per-page param threading — don't
+  reintroduce a cookie-only or per-page-`params` scoping path. `[workspace]/layout` is the authoritative validator
+  (redirect on non-member / 0-workspace / null principal). Nav hrefs are workspace-relative **suffixes**
+  (`nav-config`) prefixed with the active workspace at render; switching workspace = `router.push('/'+id)` (no
+  action). Slug-less entry points (`onboarding`/`new-workspace`/`invite`) stay top-level, never under `[workspace]`;
+  keep their slugs reserved. Shared URL↔cookie↔header constants live in `shared/auth/workspace-scope.ts`
+  (non-`server-only`, importable from middleware).
 - **Styling**: Tailwind v4 tokens in `globals.css` `@theme inline` (**Linear-style**: indigo `#5e6ad2` primary,
   tight radius `0.5rem`, near-black `#08090a` dark surface, thin low-alpha borders, top indigo glow + subtle
   grain overlay); `cn()` from `shared/lib/utils`. shadcn new-york conventions. Light **and** dark themes via the

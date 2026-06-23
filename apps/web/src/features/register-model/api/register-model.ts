@@ -38,8 +38,8 @@ export async function createModelAction(spec: unknown): Promise<CreateModelResul
   const ctx = await authContext()
   try {
     const rec = await controlPlane.createModel<{ id: string; version: string }>(ctx, spec)
-    revalidatePath('/dashboard/models')
-    revalidatePath('/dashboard')
+    revalidatePath('/[workspace]/models')
+    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

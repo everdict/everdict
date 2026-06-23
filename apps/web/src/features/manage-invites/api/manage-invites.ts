@@ -26,7 +26,7 @@ export async function createInviteAction(
   try {
     const body = expiresInHours !== undefined ? { role, expiresInHours } : { role }
     const res = createdInviteSchema.parse(await controlPlane.createInvite(ctx, body))
-    revalidatePath('/dashboard/settings')
+    revalidatePath('/[workspace]/settings')
     return { ok: true, token: res.token }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -38,7 +38,7 @@ export async function revokeInviteAction(id: string): Promise<InviteMutationResu
   const ctx = await authContext()
   try {
     await controlPlane.revokeInvite(ctx, id)
-    revalidatePath('/dashboard/settings')
+    revalidatePath('/[workspace]/settings')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -18,6 +18,7 @@ import {
 // 키는 등록하지 않는다(SecretStore 의 ANTHROPIC_API_KEY/OPENAI_API_KEY 를 provider 별로 사용).
 export function RegisterModelForm() {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [description, setDescription] = useState('')
@@ -59,7 +60,7 @@ export function RegisterModelForm() {
     setCreateError(undefined)
     const res: CreateModelResult = await createModelAction(buildSpec())
     setBusy(false)
-    if (res.ok) router.push('/dashboard/models')
+    if (res.ok) router.push(`/${workspace}/models`)
     else setCreateError(res.error ?? '등록 실패')
   }
 

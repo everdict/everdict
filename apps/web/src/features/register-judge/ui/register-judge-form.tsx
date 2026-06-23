@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -20,6 +20,7 @@ const INPUTS = ['trace', 'dom', 'screenshot'] as const
 // Agent Judge 등록 폼 — kind(model | harness) 토글 + 조건부 필드. dry-run 검증 후 등록.
 export function RegisterJudgeForm() {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [kind, setKind] = useState<'model' | 'harness'>('model')
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
@@ -71,7 +72,7 @@ export function RegisterJudgeForm() {
     setCreateError(undefined)
     const res: CreateJudgeResult = await createJudgeAction(buildSpec())
     setBusy(false)
-    if (res.ok) router.push('/dashboard/judges')
+    if (res.ok) router.push(`/${workspace}/judges`)
     else setCreateError(res.error ?? '등록 실패')
   }
 

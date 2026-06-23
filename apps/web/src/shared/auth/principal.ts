@@ -1,10 +1,13 @@
 import 'server-only'
 
+import { headers } from 'next/headers'
+
 import { keycloakConfigured } from '@/shared/config/env'
 import { controlPlane, type AuthContext } from '@/shared/lib/control-plane'
 
 import { getAccessToken } from './access-token'
 import { getActiveWorkspace } from './active-workspace'
+import { ACTIVE_WORKSPACE_HEADER } from './workspace-scope'
 
 // 내가 속한 워크스페이스(=GET /me 의 workspaces, 사이드바 스위처용).
 export interface WebWorkspace {
@@ -23,9 +26,11 @@ export interface WebPrincipal {
 }
 
 // 현재 요청의 컨트롤플레인 인증 컨텍스트. 로그인 사용자 → Keycloak Bearer, dev(미설정) → x-assay-tenant=default.
-// 활성 워크스페이스 쿠키가 있으면 동봉해(x-assay-workspace) 그 워크스페이스로 스코프한다(없거나 비멤버면 컨트롤플레인이 기본으로 폴백).
+// 활성 워크스페이스의 권위는 URL 첫 세그먼트 — 미들웨어가 x-assay-active-workspace 헤더로 주입한다(Linear 식 /{workspace}/...).
+// 미들웨어가 못 탄 경로(루트 등)에선 most-recent 쿠키로 폴백. 동봉(x-assay-workspace)된 워크스페이스가 비멤버면 컨트롤플레인이 기본으로 폴백.
 export async function authContext(): Promise<AuthContext> {
-  const workspace = await getActiveWorkspace()
+  const fromHeader = (await headers()).get(ACTIVE_WORKSPACE_HEADER) ?? undefined
+  const workspace = fromHeader ?? (await getActiveWorkspace())
   const ws = workspace ? { workspace } : {}
   if (!keycloakConfigured) return { devTenant: 'default', ...ws }
   const token = await getAccessToken() // 서버 전용 — 클라이언트 세션에 토큰을 노출하지 않는다(BFF)

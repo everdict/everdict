@@ -28,11 +28,15 @@ const FEATURES = [
 ] as const
 
 export default async function Home() {
-  // 컨트롤플레인에 접속되고 실제 로그인(OIDC)이 확인되면 랜딩이 아니라 가장 최근 워크스페이스 대시보드로.
-  // (활성 워크스페이스 쿠키 → /dashboard 가 GET /me 로 그 워크스페이스로 스코프한다.)
-  // via!=='oidc'(dev x-assay-tenant 폴백)이거나 인증 교환 실패(principal=null)면 랜딩을 그대로 보여준다.
+  // 컨트롤플레인에 접속되고 실제 로그인(OIDC)이 확인되면 랜딩이 아니라 내 워크스페이스(/{slug})로.
+  // 워크스페이스가 0개면 온보딩으로. via!=='oidc'(dev x-assay-tenant 폴백)/principal=null 이면 랜딩을 보여준다.
   const { principal } = await currentPrincipal()
-  if (principal?.via === 'oidc') redirect('/dashboard')
+  const workspaceHome =
+    principal && (principal.workspaces?.length ?? 0) > 0 ? `/${principal.workspace}` : '/onboarding'
+  if (principal?.via === 'oidc') redirect(workspaceHome)
+
+  // 랜딩의 진입 CTA: dev 폴백 등으로 principal 이 있으면 워크스페이스로, 없으면 로그인으로.
+  const enterHref = principal ? workspaceHome : '/api/auth/signin'
 
   return (
     <main className="relative flex min-h-screen flex-col">
@@ -66,8 +70,8 @@ export default async function Home() {
 
         <h1 className="font-display text-5xl font-[560] leading-[1.06] tracking-[-0.025em] text-balance break-keep sm:text-6xl">
           하니스를 등록하고, 평가를 돌리고,
-          <br className="hidden sm:block" />{' '}
-          <span className="text-primary">테넌트별 스코어</span>를 본다.
+          <br className="hidden sm:block" /> <span className="text-primary">테넌트별 스코어</span>를
+          본다.
         </h1>
 
         <p className="max-w-xl text-[15px] leading-relaxed text-balance text-muted-foreground">
@@ -77,7 +81,7 @@ export default async function Home() {
         </p>
 
         <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
-          <Link href="/dashboard" className={buttonVariants({ size: 'lg' })}>
+          <Link href={enterHref} className={buttonVariants({ size: 'lg' })}>
             대시보드 열기
             <ArrowRight className="size-4" />
           </Link>

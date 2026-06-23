@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { versionsForId } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
@@ -48,6 +48,7 @@ export function ImportBenchmarkForm({
   existingDatasets?: { id: string; versions: string[] }[]
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const entries: Entry[] = useMemo(
     () => [
       ...benchmarks.map((b) => ({
@@ -98,11 +99,13 @@ export function ImportBenchmarkForm({
     const res = await importBenchmarkAction(body)
     setBusy(false)
     setResult(res)
-    if (res.ok) router.push('/dashboard/datasets')
+    if (res.ok) router.push(`/${workspace}/datasets`)
   }
 
   if (entries.length === 0) {
-    return <p className="text-[13px] text-muted-foreground">사용 가능한 벤치마크/레시피가 없습니다.</p>
+    return (
+      <p className="text-[13px] text-muted-foreground">사용 가능한 벤치마크/레시피가 없습니다.</p>
+    )
   }
 
   return (
@@ -134,7 +137,9 @@ export function ImportBenchmarkForm({
           )}
         </Select>
         {selected?.description && (
-          <p className="text-[12px] leading-relaxed text-muted-foreground">{selected.description}</p>
+          <p className="text-[12px] leading-relaxed text-muted-foreground">
+            {selected.description}
+          </p>
         )}
       </div>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { Label, Select } from '@/shared/ui/input'
 
@@ -17,6 +17,7 @@ export function VersionSwitcher({
   latest?: string
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   if (versions.length === 0) return null
   return (
     <div className="min-w-44 space-y-1.5">
@@ -26,7 +27,7 @@ export function VersionSwitcher({
         value={current}
         onChange={(e) =>
           router.push(
-            `/dashboard/datasets/${encodeURIComponent(id)}?version=${encodeURIComponent(e.target.value)}`
+            `/${workspace}/datasets/${encodeURIComponent(id)}?version=${encodeURIComponent(e.target.value)}`
           )
         }
       >

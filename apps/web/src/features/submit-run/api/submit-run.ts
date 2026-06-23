@@ -33,8 +33,8 @@ export async function submitRunAction(input: SubmitRunInput): Promise<SubmitRunR
   }
   try {
     const rec = await controlPlane.submitRun<{ id: string }>(ctx, body)
-    revalidatePath('/dashboard/runs')
-    revalidatePath('/dashboard')
+    revalidatePath('/[workspace]/runs')
+    revalidatePath('/[workspace]')
     return { ok: true, id: rec.id }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -18,7 +18,7 @@ function previewSlug(name: string): string {
     .slice(0, 40)
 }
 
-export function CreateWorkspaceForm({ redirectTo = '/dashboard' }: { redirectTo?: string }) {
+export function CreateWorkspaceForm() {
   const router = useRouter()
   const [name, setName] = useState('')
   const [id, setId] = useState('')
@@ -37,8 +37,9 @@ export function CreateWorkspaceForm({ redirectTo = '/dashboard' }: { redirectTo?
       name: name.trim(),
       ...(id.trim() ? { id: id.trim() } : {}),
     })
-    if (result.ok) {
-      router.push(redirectTo)
+    if (result.ok && result.id) {
+      // 새로 만든 워크스페이스(/{id})로 진입(Linear 식). 미들웨어가 활성 워크스페이스를 동기화한다.
+      router.push(`/${result.id}`)
       router.refresh()
       return
     }

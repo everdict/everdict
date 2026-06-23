@@ -2,7 +2,8 @@
 """Headless OAuth through apps/web → proves the web forwards a real Keycloak token to the control plane.
 
 Drives the Auth.js + Keycloak authorization-code flow with a cookie jar (no browser), then fetches
-dashboard pages and asserts workspace + role-gated UI come from the control-plane GET /me.
+the workspace-scoped pages (Linear-style /{workspace}/...) and asserts workspace + role-gated UI
+come from the control-plane GET /me.
 """
 import os
 import re
@@ -11,6 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 
 WEB = os.environ.get("WEB", "http://localhost:3001")
+WS = os.environ.get("WS", "acme")  # 테스트 픽스처의 워크스페이스(slug = URL 첫 세그먼트)
 USERS = {"alice": ("alice", "member"), "carol": ("carol", "admin")}
 
 
@@ -21,7 +23,7 @@ def login(username, password):
     # 2) POST signin/keycloak → follow redirect chain to the Keycloak login form
     r = s.post(
         f"{WEB}/api/auth/signin/keycloak",
-        data={"csrfToken": csrf, "callbackUrl": f"{WEB}/dashboard"},
+        data={"csrfToken": csrf, "callbackUrl": f"{WEB}/{WS}"},
         timeout=15,
     )
     # Keycloak 26 sets auth-session cookies SameSite=None; Secure — requests won't send Secure cookies
@@ -42,7 +44,7 @@ def login(username, password):
             f"login did not redirect to callback (status {r.status_code}, loc {cb})\n"
             f"action={form['action']}\nbody={BeautifulSoup(r.text, 'html.parser').get_text(' ', strip=True)[:400]}"
         )
-    # 4) follow the callback → Auth.js exchanges the code, sets the session cookie, lands on /dashboard
+    # 4) follow the callback → Auth.js exchanges the code, sets the session cookie, lands on /{workspace}
     s.get(cb, timeout=15)
     return s
 
@@ -56,11 +58,11 @@ def main():
     failures = []
     for username, (password, role) in USERS.items():
         s = login(username, password)
-        code, body = get(s, "/dashboard")
-        ok_ws = code == 200 and "acme" in body  # workspace from GET /me (server-side token read works)
-        print(f"[{username}/{role}] GET /dashboard → {code}  workspace=acme:{ok_ws}")
+        code, body = get(s, f"/{WS}")
+        ok_ws = code == 200 and WS in body  # workspace from GET /me (server-side token read works)
+        print(f"[{username}/{role}] GET /{WS} → {code}  workspace={WS}:{ok_ws}")
         if not ok_ws:
-            failures.append(f"{username}: dashboard missing workspace (code {code})")
+            failures.append(f"{username}: workspace page missing workspace (code {code})")
 
         # BFF hardening: the client-visible session must NOT carry the access token (no JWT leak).
         _, sess = get(s, "/api/auth/session")
@@ -70,9 +72,9 @@ def main():
             failures.append(f"{username}: access token leaked to client session")
 
         # role-gated UI (mirrors the control-plane authz matrix, driven by /me roles)
-        rc, rbody = get(s, "/dashboard/runs/new")
+        rc, rbody = get(s, f"/{WS}/runs/new")
         run_form = "권한이 없습니다" not in rbody  # member+ may submit
-        hc, hbody = get(s, "/dashboard/harnesses/new")
+        hc, hbody = get(s, f"/{WS}/harnesses/new")
         harness_form = "권한이 없습니다" not in hbody  # admin only
 
         want_harness = role == "admin"

@@ -18,7 +18,7 @@ export async function setMemberRoleAction(
   const ctx = await authContext()
   try {
     await controlPlane.setMemberRole(ctx, subject, role)
-    revalidatePath('/dashboard/settings')
+    revalidatePath('/[workspace]/settings')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -30,7 +30,7 @@ export async function removeMemberAction(subject: string): Promise<MemberMutatio
   const ctx = await authContext()
   try {
     await controlPlane.removeMember(ctx, subject)
-    revalidatePath('/dashboard/settings')
+    revalidatePath('/[workspace]/settings')
     return { ok: true }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 
 import { Button } from '@/shared/ui/button'
@@ -34,6 +34,7 @@ export function RunScorecardForm({
   runtimes: { id: string }[]
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [serverError, setServerError] = useState<string>()
   const [judgeIds, setJudgeIds] = useState<string[]>([])
   const [metricIds, setMetricIds] = useState<string[]>([])
@@ -55,7 +56,7 @@ export function RunScorecardForm({
   async function onSubmit(values: Values) {
     setServerError(undefined)
     const res = await runScorecardAction({ ...values, judgeIds, metricIds })
-    if (res.ok && res.id) router.push(`/dashboard/scorecards/${res.id}`)
+    if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
     else setServerError(res.error ?? '실행 실패')
   }
 

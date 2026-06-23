@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { useRouter } from 'next/navigation'
+import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
 import { Label, Select } from '@/shared/ui/input'
@@ -22,13 +22,14 @@ export function ComparePicker({
   candidate?: string
 }) {
   const router = useRouter()
+  const { workspace } = useParams<{ workspace: string }>()
   const [b, setB] = useState(baseline ?? options[0]?.id ?? '')
   const [c, setC] = useState(candidate ?? options[1]?.id ?? options[0]?.id ?? '')
 
   function compare() {
     if (b && c) {
       router.push(
-        `/dashboard/scorecards/compare?baseline=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
+        `/${workspace}/scorecards/compare?baseline=${encodeURIComponent(b)}&candidate=${encodeURIComponent(c)}`
       )
     }
   }
