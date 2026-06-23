@@ -13,7 +13,10 @@ const b64url = (b) => Buffer.from(b).toString("base64url");
 const log = (...a) => console.log(...a);
 let step = 0;
 const ok = (m) => log(`  ✓ [${++step}] ${m}`);
-const die = (m) => { log(`  ✗ ${m}`); process.exit(1); };
+const die = (m) => {
+  log(`  ✗ ${m}`);
+  process.exit(1);
+};
 
 // cookie jar
 const jar = new Map();
@@ -26,7 +29,10 @@ const absorb = (res) => {
 };
 const cookieHeader = () => [...jar].map(([k, v]) => `${k}=${v}`).join("; ");
 const abs = (u) => new URL(u, AS).href; // resolve relative Keycloak form actions / redirects
-const formAction = (html) => { const m = html.match(/<form[^>]*\saction="([^"]+)"/i)?.[1]?.replace(/&amp;/g, "&"); return m ? abs(m) : undefined; };
+const formAction = (html) => {
+  const m = html.match(/<form[^>]*\saction="([^"]+)"/i)?.[1]?.replace(/&amp;/g, "&");
+  return m ? abs(m) : undefined;
+};
 
 // 1) protected-resource → authorization server
 const prm = await (await fetch(`${API}/.well-known/oauth-protected-resource`)).json();
@@ -42,9 +48,15 @@ ok("AS metadata: authorization/token/registration endpoints present");
 
 // 3) Dynamic Client Registration (anonymous, loopback redirect, public PKCE)
 const reg = await fetch(registration_endpoint, {
-  method: "POST", headers: { "content-type": "application/json" },
-  body: JSON.stringify({ client_name: "mcp-oauth-verify", redirect_uris: [REDIRECT],
-    token_endpoint_auth_method: "none", grant_types: ["authorization_code", "refresh_token"], response_types: ["code"] }),
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify({
+    client_name: "mcp-oauth-verify",
+    redirect_uris: [REDIRECT],
+    token_endpoint_auth_method: "none",
+    grant_types: ["authorization_code", "refresh_token"],
+    response_types: ["code"],
+  }),
 });
 if (reg.status !== 201) die(`DCR failed: HTTP ${reg.status} ${await reg.text()}`);
 const client = await reg.json();
@@ -58,8 +70,14 @@ const state = b64url(crypto.randomBytes(8));
 
 // 5) Authorization request → Keycloak login page
 const authUrl = `${authorization_endpoint}?${new URLSearchParams({
-  client_id: clientId, response_type: "code", redirect_uri: REDIRECT,
-  scope: "openid profile", state, code_challenge: challenge, code_challenge_method: "S256" })}`;
+  client_id: clientId,
+  response_type: "code",
+  redirect_uri: REDIRECT,
+  scope: "openid profile",
+  state,
+  code_challenge: challenge,
+  code_challenge_method: "S256",
+})}`;
 let res = await fetch(authUrl, { redirect: "manual" });
 absorb(res);
 let html = await res.text();
@@ -68,17 +86,24 @@ if (!action) die(`no login form in authorization response (HTTP ${res.status})`)
 ok(`authorization_endpoint → login page (HTTP ${res.status})`);
 
 // 6) Submit login form, then follow Keycloak steps (consent / required-action) until the loopback ?code
-res = await fetch(action, { method: "POST", redirect: "manual",
+res = await fetch(action, {
+  method: "POST",
+  redirect: "manual",
   headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookieHeader() },
-  body: new URLSearchParams({ username: USER, password: PASS, credentialId: "" }) });
+  body: new URLSearchParams({ username: USER, password: PASS, credentialId: "" }),
+});
 absorb(res);
 ok(`login (${USER}) submitted`);
 
-let code, hops = 0;
+let code;
+let hops = 0;
 while (hops++ < 6) {
   const loc = res.headers.get("location");
   if (loc) {
-    if (loc.startsWith(REDIRECT)) { code = new URL(loc).searchParams.get("code"); break; }
+    if (loc.startsWith(REDIRECT)) {
+      code = new URL(loc).searchParams.get("code");
+      break;
+    }
     res = await fetch(abs(loc), { redirect: "manual", headers: { cookie: cookieHeader() } }); // GET next KC page
     absorb(res);
     continue;
@@ -88,9 +113,12 @@ while (hops++ < 6) {
   action = formAction(html);
   if (!action) die(`stuck: no redirect and no form (HTTP ${res.status})`);
   const consent = /OAUTH_GRANT|consent|동의|grant/i.test(html);
-  res = await fetch(action, { method: "POST", redirect: "manual",
+  res = await fetch(action, {
+    method: "POST",
+    redirect: "manual",
     headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookieHeader() },
-    body: new URLSearchParams({ accept: "Yes" }) });
+    body: new URLSearchParams({ accept: "Yes" }),
+  });
   absorb(res);
   if (consent) ok("consent screen → granted (Yes)");
 }
@@ -98,27 +126,67 @@ if (!code) die("did not reach loopback redirect with ?code");
 ok("→ loopback redirect with ?code (browser steps complete)");
 
 // 7) Token exchange (code + PKCE verifier)
-const tok = await fetch(token_endpoint, { method: "POST",
+const tok = await fetch(token_endpoint, {
+  method: "POST",
   headers: { "content-type": "application/x-www-form-urlencoded" },
-  body: new URLSearchParams({ grant_type: "authorization_code", code, redirect_uri: REDIRECT, client_id: clientId, code_verifier: verifier }) });
+  body: new URLSearchParams({
+    grant_type: "authorization_code",
+    code,
+    redirect_uri: REDIRECT,
+    client_id: clientId,
+    code_verifier: verifier,
+  }),
+});
 const tokJson = await tok.json();
 if (!tokJson.access_token) die(`token exchange failed: ${JSON.stringify(tokJson)}`);
 ok("token exchange → access_token (OAuth complete)");
 
 // 8) Use the OAuth token on /mcp
 const accept = "application/json, text/event-stream";
-const H = (sid) => ({ authorization: `Bearer ${tokJson.access_token}`, "content-type": "application/json", accept, ...(sid ? { "mcp-session-id": sid } : {}) });
-const init = await fetch(`${API}/mcp`, { method: "POST", headers: H(),
-  body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "verify", version: "0" } } }) });
+const H = (sid) => ({
+  authorization: `Bearer ${tokJson.access_token}`,
+  "content-type": "application/json",
+  accept,
+  ...(sid ? { "mcp-session-id": sid } : {}),
+});
+const init = await fetch(`${API}/mcp`, {
+  method: "POST",
+  headers: H(),
+  body: JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "verify", version: "0" } },
+  }),
+});
 if (init.status !== 200) die(`/mcp initialize → HTTP ${init.status}`);
 const sid = init.headers.get("mcp-session-id");
-await fetch(`${API}/mcp`, { method: "POST", headers: H(sid), body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }) });
-const listRaw = await (await fetch(`${API}/mcp`, { method: "POST", headers: H(sid),
-  body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }) })).text();
-const data = JSON.parse(listRaw.split("\n").find((l) => l.startsWith("data: "))?.slice(6) ?? "{}");
+await fetch(`${API}/mcp`, {
+  method: "POST",
+  headers: H(sid),
+  body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+});
+const listRaw = await (
+  await fetch(`${API}/mcp`, {
+    method: "POST",
+    headers: H(sid),
+    body: JSON.stringify({ jsonrpc: "2.0", id: 2, method: "tools/list", params: {} }),
+  })
+).text();
+const data = JSON.parse(
+  listRaw
+    .split("\n")
+    .find((l) => l.startsWith("data: "))
+    ?.slice(6) ?? "{}",
+);
 const tools = (data.result?.tools ?? []).map((t) => t.name);
-ok(`/mcp initialize 200 (session ${sid?.slice(0, 8)}…) · tools/list → ${tools.length} tools · diff_datasets=${tools.includes("diff_datasets")}`);
+ok(
+  `/mcp initialize 200 (session ${sid?.slice(0, 8)}…) · tools/list → ${tools.length} tools · diff_datasets=${tools.includes("diff_datasets")}`,
+);
 
 if (client.registration_access_token && client.registration_client_uri)
-  await fetch(client.registration_client_uri, { method: "DELETE", headers: { authorization: `Bearer ${client.registration_access_token}` } });
+  await fetch(client.registration_client_uri, {
+    method: "DELETE",
+    headers: { authorization: `Bearer ${client.registration_access_token}` },
+  });
 log("\n✅ OAuth 'login like Linear' verified end-to-end (DCR → PKCE auth-code → login → consent → token → /mcp).");
