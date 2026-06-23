@@ -106,8 +106,54 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
   ]),
 };
 
+// --- API 키별 권한 범위(scope) — Linear 식 "Full Access vs 선택 권한" ---
+// 키는 발급 시 워크스페이스 admin role 을 갖지만, scope 로 그 키의 권한을 더 좁힐 수 있다.
+// scope 는 role 권한과 "교집합"으로 적용된다(can 참고) — scope 있는 키는 자기 role 을 절대 초과하지 못한다.
+// 누적(cumulative): admin ⊃ write ⊃ read. admin scope = Full Access. authz 매트릭스가 scope→action 의 SSOT.
+export const API_KEY_SCOPES = ["read", "write", "admin"] as const;
+export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
+
+// read scope = "워크스페이스 데이터 조회" — 민감 조회(secrets/keys/settings)는 제외(admin scope 필요).
+const SCOPE_READ_ACTIONS: readonly Action[] = [
+  "runs:read",
+  "harnesses:read",
+  "datasets:read",
+  "scorecards:read",
+  "judges:read",
+  "models:read",
+  "metrics:read",
+  "runtimes:read",
+  "members:read",
+  "connections:read",
+];
+// write scope = read ∪ 콘텐츠 mutation(run 제출·등록·버전 생성·실행). 거버넌스(secrets/members/settings/keys/connections write, datasets:delete)는 admin scope 전용.
+const SCOPE_WRITE_ACTIONS: readonly Action[] = [
+  ...SCOPE_READ_ACTIONS,
+  "runs:submit",
+  "harnesses:register",
+  "templates:write",
+  "datasets:write",
+  "scorecards:run",
+  "judges:write",
+  "models:write",
+  "metrics:write",
+  "runtimes:write",
+];
+// admin scope(=Full Access) = 모든 action. role 매트릭스의 합집합(admin role 이 전체를 보유)에서 도출.
+const ALL_ACTIONS = new Set<Action>(Object.values(ROLE_PERMISSIONS).flatMap((s) => [...s]));
+
+const SCOPE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
+  read: new Set<Action>(SCOPE_READ_ACTIONS),
+  write: new Set<Action>(SCOPE_WRITE_ACTIONS),
+  admin: ALL_ACTIONS,
+};
+
 export function can(principal: Principal, action: Action): boolean {
-  return principal.roles.some((r) => ROLE_PERMISSIONS[r]?.has(action) ?? false);
+  const roleOk = principal.roles.some((r) => ROLE_PERMISSIONS[r]?.has(action) ?? false);
+  if (!roleOk) return false;
+  // scope 없는 주체(OIDC 사용자 / 레거시 키)는 role 권한 그대로(무제한). scope 있으면 교집합으로 좁힌다.
+  if (!principal.scopes || principal.scopes.length === 0) return true;
+  return principal.scopes.some((s) => SCOPE_PERMISSIONS[s]?.has(action) ?? false);
 }
 
 // 권한 없으면 403. 호출부(API 라우트)가 핸들러 진입에서 호출한다.

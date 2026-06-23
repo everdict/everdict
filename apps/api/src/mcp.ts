@@ -1,4 +1,4 @@
-import { ASSAY_ROLES, type Action, type Principal, authorize } from "@assay/auth";
+import { API_KEY_SCOPES, ASSAY_ROLES, type Action, type Principal, authorize } from "@assay/auth";
 import {
   AppError,
   DatasetSchema,
@@ -742,10 +742,18 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "create_api_key",
       {
         description:
-          "새 API 키 발급. 발급된 키는 이 워크스페이스의 ADMIN 권한을 가진다. 평문(ak_…)은 응답에 한 번만 노출되고 다시 못 본다.",
-        inputSchema: { label: z.string().max(80).optional().describe("식별용 레이블(선택)") },
+          "새 API 키 발급. scopes 로 권한을 좁힐 수 있다(read|write|admin, 누적). 미지정이면 Full Access(admin). 평문(ak_…)은 응답에 한 번만 노출되고 다시 못 본다.",
+        inputSchema: {
+          label: z.string().max(80).optional().describe("식별용 레이블(선택)"),
+          scopes: z
+            .array(z.enum(API_KEY_SCOPES))
+            .nonempty()
+            .optional()
+            .describe("권한 범위(read|write|admin). 미지정=Full Access(admin)"),
+        },
       },
-      ({ label }) => run(principal, "keys:write", async () => ok({ apiKey: await issueKey(keys, ws, label) })),
+      ({ label, scopes }) =>
+        run(principal, "keys:write", async () => ok({ apiKey: await issueKey(keys, ws, label, scopes ?? ["admin"]) })),
     );
     server.registerTool(
       "revoke_api_key",

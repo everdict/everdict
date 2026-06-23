@@ -44,8 +44,13 @@ compositeAuthenticator([oidc, apiKey])   // tries each; first success wins; unde
   - **workspace** ← the `workspace` claim, else falls back to a group under `groupPrefix`
     (`/workspaces/<ws>/…` → `<ws>`).
   - **roles** ← `realm_access.roles` **intersected with assay roles** (`viewer|member|admin`); empty ⇒ `viewer`.
-- **`apiKeyAuthenticator({ keyStore, roles? })`** — only attempts `ak_…` bearers; `keyStore.tenantForHash(hashKey(bearer))`
-  → `workspace`. Keys carry `roles` (default `["admin"]`, i.e. full programmatic access for the owning workspace).
+- **`apiKeyAuthenticator({ keyStore, roles? })`** — only attempts `ak_…` bearers; `keyStore.resolveByHash(hashKey(bearer))`
+  → `{ workspace, scopes? }`. Keys carry `roles` (default `["admin"]`) **and** optional per-key `scopes`
+  (`read|write|admin`, cumulative; `admin` = Full Access). `scopes` flow onto the `Principal`; `can()` applies them as
+  an **intersection** with the role matrix (a scoped key can never exceed its role). A key with no stored scopes
+  (legacy / Full Access via `["admin"]`) is unrestricted — same as before. Scope→action mapping (`SCOPE_PERMISSIONS`)
+  lives in `authz.ts` next to `ROLE_PERMISSIONS`: `read` = data reads (not `secrets`/`keys`/`settings`); `write` =
+  read ∪ content mutations (run/register/version-create/run); `admin` = all actions.
 
 Verification is **fail-closed**: an unknown key, a bad signature, a wrong issuer, or an expired token all return
 `undefined` → the API answers **401**. Only the SHA-256 **hash** of an API key is ever stored (`@assay/db`); the

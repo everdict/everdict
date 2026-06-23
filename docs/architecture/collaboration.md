@@ -776,8 +776,8 @@ classDiagram
   }
   class TenantKeyStore {
     <<interface>>
-    +add(tenant, keyHash)
-    +tenantForHash(keyHash) tenant
+    +add(tenant, keyHash, meta?)
+    +resolveByHash(keyHash) {tenant, scopes?}
   }
   class SecretStore {
     <<interface>>
@@ -896,8 +896,8 @@ classDiagram
 ```
 
 - **`oidcAuthenticator`** — verifies Keycloak JWT via `jose` JWKS, extracts `workspace` + roles (fail-closed → `undefined`).
-- **`apiKeyAuthenticator`** — `ak_…` → `TenantKeyStore.tenantForHash(hashKey(...))` (`@assay/db`).
-- **`authz`** — `ASSAY_ROLES = viewer ⊂ member ⊂ admin`; `authorize` throws `ForbiddenError` (403). See `docs/auth.md`.
+- **`apiKeyAuthenticator`** — `ak_…` → `TenantKeyStore.resolveByHash(hashKey(...))` (`@assay/db`) → `{ workspace, scopes? }`.
+- **`authz`** — `ASSAY_ROLES = viewer ⊂ member ⊂ admin`; `authorize` throws `ForbiddenError` (403); per-key `scopes` (`read|write|admin`) intersect the role matrix. See `docs/auth.md`.
 - **Consumed by:** `apps/api` (every route guard + `/me` + MCP). See `docs/tenancy.md`.
 
 ---

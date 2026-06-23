@@ -6,6 +6,7 @@ export interface Principal {
   roles: string[]; // ["admin"|"member"|"viewer"...]
   via: "oidc" | "api-key";
   email?: string; // OIDC email/preferred_username 클레임 — 멤버 목록 표시용(표시 전용, authz/identity 무관). api-key 는 없음.
+  scopes?: string[]; // api-key 별 권한 범위(read|write|admin). 있으면 role 권한과 교집합으로 좁힌다. 없으면(OIDC/레거시 키) 무제한. authz.ts can() 참고.
 }
 
 // Bearer 자격증명 → Principal. JWT(사람/Keycloak)와 API 키(에이전트/MCP/CI) 양쪽을 처리.

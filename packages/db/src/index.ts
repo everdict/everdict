@@ -29,6 +29,7 @@ export {
 export {
   type TenantKeyStore,
   type TenantKeyMeta,
+  type ResolvedKey,
   InMemoryTenantKeyStore,
   PgTenantKeyStore,
   hashKey,

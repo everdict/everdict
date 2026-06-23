@@ -1,5 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { ASSAY_ROLES, type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
+import { API_KEY_SCOPES, ASSAY_ROLES, type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
 import {
   AppError,
   DatasetSchema,
@@ -1515,12 +1515,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    const body = z.object({ label: z.string().max(80).optional() }).safeParse(req.body ?? {});
+    const body = z
+      .object({ label: z.string().max(80).optional(), scopes: z.array(z.enum(API_KEY_SCOPES)).nonempty().optional() })
+      .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       gate(principal, "keys:write");
-      const apiKey = await issueKey(deps.keyStore, principal.workspace, body.data.label);
-      return reply.code(201).send({ apiKey }); // 평문은 여기서 한 번만(이 워크스페이스 admin 권한)
+      // scope 미지정이면 Full Access(admin) — 기존 동작과 동일. 지정하면 그 범위로 키를 좁힌다.
+      const scopes = body.data.scopes ?? ["admin"];
+      const apiKey = await issueKey(deps.keyStore, principal.workspace, body.data.label, scopes);
+      return reply.code(201).send({ apiKey }); // 평문은 여기서 한 번만
     } catch (err) {
       return sendError(reply, err);
     }

@@ -32,8 +32,8 @@ arrives by polling or webhook.
 | `GET`  | `/scorecards` | `ScorecardRecord[]` (summary only, no heavy per-case results) (`scorecards:read`) |
 | `GET`  | `/scorecards/:id` | full `ScorecardRecord` (incl. per-case `scorecard`) or 404 (`scorecards:read`) |
 | `GET`  | `/scorecards/diff?baseline=&candidate=` | `ScorecardDiff` (metric Δ + regressions/improvements) (`scorecards:read`) |
-| `POST` | `/keys` | self-serve issue an API key `{ label? }` → **201** `{ apiKey }` (plaintext **once**; key carries workspace **admin**) (`keys:write`, admin) |
-| `GET`  | `/keys` | API key metadata `{ id, prefix, label?, createdAt }[]` — never the plaintext/hash (`keys:read`, admin) |
+| `POST` | `/keys` | self-serve issue an API key `{ label?, scopes? }` → **201** `{ apiKey }` (plaintext **once**; `scopes` = `read\|write\|admin`, omitted = Full Access/`admin`) (`keys:write`, admin) |
+| `GET`  | `/keys` | API key metadata `{ id, prefix, label?, scopes?, createdAt }[]` — never the plaintext/hash; `scopes` absent = Full Access (`keys:read`, admin) |
 | `DELETE` | `/keys/:id` | revoke a key → **204** (tenant-scoped; foreign id is a no-op) (`keys:write`, admin) |
 | `GET`  | `/members` | workspace members `{ subject, role, email?, addedAt }[]` (`members:read`, viewer+) |
 | `PATCH` | `/members/:subject` | change a member's `{ role }` → **204** (404 if not a member; **409** last-admin) (`members:write`, admin) |
@@ -54,8 +54,8 @@ resolved `workspace` (= tenant = trust-zone) keys fairness, quotas, isolation, s
 scopes every read; roles gate every route (`viewer/member/admin`). See [auth.md](auth.md). Harness registration
 (`POST/GET /harnesses`, workspace-owned), datasets (`POST/GET /datasets`, workspace-owned + `_shared`, see
 [datasets.md](datasets.md)) and key issuance (admin self-serve `POST/GET/DELETE /keys` — issued keys carry
-workspace admin, plaintext shown once, hash-only at rest; bootstrap `POST /internal/tenant-keys`) are covered in
-[tenancy.md](tenancy.md).
+workspace admin role, narrowable by per-key `scopes` (`read|write|admin`, omitted = Full Access), plaintext shown
+once, hash-only at rest; bootstrap `POST /internal/tenant-keys`) are covered in [tenancy.md](tenancy.md).
 
 `RunRecord` = `{ id, tenant, harness, caseId, status: queued|running|succeeded|failed, result?, error?,
 createdAt, updatedAt }`. Errors map by `AppError.status`: budget → **402** `BUDGET_EXCEEDED`, queue full →

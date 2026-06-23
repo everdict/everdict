@@ -577,6 +577,21 @@ describe("MCP tools", () => {
     expect((await member.callTool({ name: "list_api_keys", arguments: {} })).isError).toBe(true);
   });
 
+  it("api keys: scopes 로 발급하면 목록에 scopes 가 노출된다(미지정=Full Access); 빈 배열은 오류", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"], "acme");
+    await admin.callTool({ name: "create_api_key", arguments: { label: "read-only", scopes: ["read"] } });
+
+    const list = JSON.parse(text(await admin.callTool({ name: "list_api_keys", arguments: {} }))) as Array<{
+      label?: string;
+      scopes?: string[];
+    }>;
+    expect(list.find((r) => r.label === "read-only")?.scopes).toEqual(["read"]);
+
+    // 빈 scopes 배열은 nonempty 위반 → 도구 오류
+    expect((await admin.callTool({ name: "create_api_key", arguments: { scopes: [] } })).isError).toBe(true);
+  });
+
   it("members: admin 목록/역할변경/제거; member 는 관리 권한오류, 조회는 가능", async () => {
     const deps = harness();
     await deps.workspaceStore.ensureMembership("acme", "bob", "member", "bob@corp.com");

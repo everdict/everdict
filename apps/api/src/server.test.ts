@@ -1411,6 +1411,45 @@ describe("API — keys (self-serve API 키, admin)", () => {
     expect((await app.inject({ method: "POST", url: "/keys", headers: h, payload: {} })).statusCode).toBe(403);
     await app.close();
   });
+
+  it("scopes 로 발급한 키는 그 범위로 좁혀진다 (read 키: 조회 가능, 민감/쓰기 불가); 미지정=Full Access", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const admin = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` }; // scope 없는 풀(full) 키
+
+    // read scope 키 발급 → 평문 1회
+    const created = await app.inject({
+      method: "POST",
+      url: "/keys",
+      headers: admin,
+      payload: { label: "read-only", scopes: ["read"] },
+    });
+    expect(created.statusCode).toBe(201);
+    const readKey = { authorization: `Bearer ${created.json().apiKey as string}` };
+
+    // 목록은 scopes 를 메타로 노출
+    const rows = (await app.inject({ method: "GET", url: "/keys", headers: admin })).json() as Array<{
+      label?: string;
+      scopes?: string[];
+    }>;
+    expect(rows.find((r) => r.label === "read-only")?.scopes).toEqual(["read"]);
+
+    // read 키: 인증 OK + runs:read 허용
+    expect((await app.inject({ method: "GET", url: "/me", headers: readKey })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/runs", headers: readKey })).statusCode).toBe(200);
+    // read 키: keys:read 는 admin scope 전용 → 403(키가 admin role 아래로 좁혀졌음)
+    expect((await app.inject({ method: "GET", url: "/keys", headers: readKey })).statusCode).toBe(403);
+
+    // scopes 미지정 발급 = Full Access → keys:read 가능
+    const full = await app.inject({ method: "POST", url: "/keys", headers: admin, payload: { label: "full" } });
+    const fullKey = { authorization: `Bearer ${full.json().apiKey as string}` };
+    expect((await app.inject({ method: "GET", url: "/keys", headers: fullKey })).statusCode).toBe(200);
+
+    // 빈 scopes 배열은 400(nonempty)
+    expect(
+      (await app.inject({ method: "POST", url: "/keys", headers: admin, payload: { scopes: [] } })).statusCode,
+    ).toBe(400);
+    await app.close();
+  });
 });
 
 describe("API — members (멤버 관리)", () => {

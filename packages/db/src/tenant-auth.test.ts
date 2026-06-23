@@ -6,20 +6,20 @@ describe("tenant key store", () => {
     const store = new InMemoryTenantKeyStore();
     const key = await issueKey(store, "acme");
     expect(key.startsWith("ak_")).toBe(true);
-    expect(await store.tenantForHash(hashKey(key))).toBe("acme");
+    expect((await store.resolveByHash(hashKey(key)))?.tenant).toBe("acme");
   });
 
   it("잘못된 키 해시는 undefined", async () => {
     const store = new InMemoryTenantKeyStore();
     await issueKey(store, "acme");
-    expect(await store.tenantForHash(hashKey("ak_wrong"))).toBeUndefined();
+    expect(await store.resolveByHash(hashKey("ak_wrong"))).toBeUndefined();
   });
 
   it("평문이 아니라 해시만 저장된다", async () => {
     const store = new InMemoryTenantKeyStore();
     const key = await issueKey(store, "acme");
-    expect(await store.tenantForHash(hashKey(key))).toBe("acme"); // 해시로 조회됨
-    expect(await store.tenantForHash(key)).toBeUndefined(); // 평문으로는 안 됨
+    expect((await store.resolveByHash(hashKey(key)))?.tenant).toBe("acme"); // 해시로 조회됨
+    expect(await store.resolveByHash(key)).toBeUndefined(); // 평문으로는 안 됨
   });
 
   it("키마다 다르다", () => {
@@ -39,12 +39,12 @@ describe("tenant key store", () => {
     expect(values).not.toContain(hashKey(key));
   });
 
-  it("revoke 후에는 tenantForHash 로 더 이상 해석되지 않는다", async () => {
+  it("revoke 후에는 resolveByHash 로 더 이상 해석되지 않는다", async () => {
     const store = new InMemoryTenantKeyStore();
     const key = await issueKey(store, "acme");
     const [meta] = await store.list("acme");
     await store.revoke("acme", meta?.id ?? "");
-    expect(await store.tenantForHash(hashKey(key))).toBeUndefined();
+    expect(await store.resolveByHash(hashKey(key))).toBeUndefined();
     expect(await store.list("acme")).toEqual([]);
   });
 
@@ -56,6 +56,22 @@ describe("tenant key store", () => {
     expect((await store.list("acme")).every((m) => m.id !== globexMeta?.id)).toBe(true);
     // acme 가 globex 의 id 를 취소 시도해도 무효(존재 누출 없음)
     await store.revoke("acme", globexMeta?.id ?? "");
-    expect(await store.tenantForHash(hashKey(globexKey))).toBe("globex");
+    expect((await store.resolveByHash(hashKey(globexKey)))?.tenant).toBe("globex");
+  });
+
+  it("scopes 를 저장하고 resolveByHash·list 로 그대로 돌려준다", async () => {
+    const store = new InMemoryTenantKeyStore();
+    const key = await issueKey(store, "acme", "read-only", ["read"]);
+    expect((await store.resolveByHash(hashKey(key)))?.scopes).toEqual(["read"]);
+    const [meta] = await store.list("acme");
+    expect(meta?.scopes).toEqual(["read"]);
+  });
+
+  it("scopes 미지정(레거시/full access)이면 undefined = 무제한", async () => {
+    const store = new InMemoryTenantKeyStore();
+    const key = await issueKey(store, "acme");
+    expect((await store.resolveByHash(hashKey(key)))?.scopes).toBeUndefined();
+    const [meta] = await store.list("acme");
+    expect(meta?.scopes).toBeUndefined();
   });
 });

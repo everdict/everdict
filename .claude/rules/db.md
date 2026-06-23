@@ -14,6 +14,9 @@ Result store (`RunStore`) + Postgres impl + migrations. See `docs/migration/`, s
 - `result`/`error` are `jsonb`; map rows → `RunRecord` through `RunRecordSchema.parse` (validate at the boundary).
 - Keep `RunStore` impls interchangeable — `apps/api` swaps in-memory ↔ Postgres by `DATABASE_URL` alone.
 - Tenant API keys (`assay_tenant_keys`): store ONLY the SHA-256 hash (`hashKey`), never the plaintext; the
-  plaintext from `generateKey`/`issueKey` is shown once. `@assay/db` provides the store primitives only
-  (`TenantKeyStore.tenantForHash`); resolving a `Bearer` key → `Principal` lives in the auth core
-  (`@assay/auth` `apiKeyAuthenticator`) — don't add a second key→tenant resolver here.
+  plaintext from `generateKey`/`issueKey` is shown once. Per-key `scopes` (`read|write|admin`) are stored as a
+  space-delimited text column (NULL = legacy/Full Access); `@assay/db` is a **dumb** store — it persists scope
+  strings and returns them via the single `TenantKeyStore.resolveByHash` resolver (`{ tenant, scopes? }`) +
+  `list`, but the scope→action vocabulary/matrix lives in `@assay/auth` (no `auth`→`db` cycle). Resolving a
+  `Bearer` key → `Principal` lives in the auth core (`@assay/auth` `apiKeyAuthenticator`) — don't add a second
+  key→tenant resolver here.

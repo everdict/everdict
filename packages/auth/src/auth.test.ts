@@ -57,6 +57,45 @@ describe("authz", () => {
     expect(() => authorize(p(["member"]), "runtimes:write")).not.toThrow(); // 런타임 등록 = role 무관
     expect(() => authorize(p(["admin"]), "runtimes:write")).not.toThrow();
   });
+
+  it("api-key scope 는 role 권한과 교집합으로 키를 좁힌다(read⊂write⊂admin, admin=Full Access)", () => {
+    const key = (scopes: string[]): Principal => ({
+      subject: "key:acme",
+      workspace: "acme",
+      roles: ["admin"], // 키는 admin role 로 발급되지만 scope 가 더 좁힌다
+      via: "api-key",
+      scopes,
+    });
+    // read scope: 데이터 조회만, 쓰기·민감 조회 불가
+    expect(can(key(["read"]), "datasets:read")).toBe(true);
+    expect(can(key(["read"]), "datasets:write")).toBe(false);
+    expect(can(key(["read"]), "secrets:read")).toBe(false); // 민감 조회는 admin scope 필요
+    expect(can(key(["read"]), "keys:read")).toBe(false);
+    // write scope: read ∪ 콘텐츠 mutation, 거버넌스(secrets/members/keys)는 불가
+    expect(can(key(["write"]), "datasets:read")).toBe(true);
+    expect(can(key(["write"]), "datasets:write")).toBe(true);
+    expect(can(key(["write"]), "runs:submit")).toBe(true);
+    expect(can(key(["write"]), "secrets:write")).toBe(false);
+    expect(can(key(["write"]), "members:write")).toBe(false);
+    expect(can(key(["write"]), "keys:write")).toBe(false);
+    // admin scope(=Full Access): 전부
+    expect(can(key(["admin"]), "datasets:write")).toBe(true);
+    expect(can(key(["admin"]), "secrets:write")).toBe(true);
+    expect(can(key(["admin"]), "keys:write")).toBe(true);
+    // 교집합: scope 가 admin 이어도 role 이 viewer 면 viewer 권한을 넘지 못한다
+    const viewerKey: Principal = {
+      subject: "key:acme",
+      workspace: "acme",
+      roles: ["viewer"],
+      via: "api-key",
+      scopes: ["admin"],
+    };
+    expect(can(viewerKey, "datasets:read")).toBe(true);
+    expect(can(viewerKey, "datasets:write")).toBe(false);
+    // scope 없는(레거시/full) 키는 무제한(role 그대로)
+    const legacy: Principal = { subject: "key:acme", workspace: "acme", roles: ["admin"], via: "api-key" };
+    expect(can(legacy, "secrets:write")).toBe(true);
+  });
 });
 
 describe("apiKeyAuthenticator", () => {
@@ -67,6 +106,15 @@ describe("apiKeyAuthenticator", () => {
     expect(await auth.authenticate("ak_secret")).toMatchObject({ workspace: "acme", roles: ["admin"], via: "api-key" });
     expect(await auth.authenticate("ak_wrong")).toBeUndefined();
     expect(await auth.authenticate("eyJ.a.b")).toBeUndefined(); // JWT 는 무시
+  });
+
+  it("scope 있는 키는 Principal.scopes 로 흐른다(없으면 무제한)", async () => {
+    const store = new InMemoryTenantKeyStore();
+    await store.add("acme", hashKey("ak_scoped"), { scopes: ["read"] });
+    await store.add("acme", hashKey("ak_full"));
+    const auth = apiKeyAuthenticator({ keyStore: store });
+    expect((await auth.authenticate("ak_scoped"))?.scopes).toEqual(["read"]);
+    expect((await auth.authenticate("ak_full"))?.scopes).toBeUndefined();
   });
 });
 
