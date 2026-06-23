@@ -45,4 +45,22 @@ describe("ProfileService", () => {
     await expect(s.update("u1", { avatarUrl: "ftp://x/a.png" })).rejects.toBeInstanceOf(AppError);
     await expect(s.update("u1", { avatarUrl: "not a url" })).rejects.toBeInstanceOf(AppError);
   });
+
+  it("업로드한 data:image base64 아바타는 그대로 저장한다", async () => {
+    const s = svc();
+    const dataUrl = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ=="; // 짧은 JPEG 헤더 샘플
+    const p = await s.update("u1", { avatarUrl: dataUrl });
+    expect(p.avatarUrl).toBe(dataUrl);
+  });
+
+  it("이미지가 아닌 data URL 은 거부", async () => {
+    const s = svc();
+    await expect(s.update("u1", { avatarUrl: "data:text/plain;base64,aGVsbG8=" })).rejects.toBeInstanceOf(AppError);
+  });
+
+  it("너무 큰 data URL 아바타는 거부", async () => {
+    const s = svc();
+    const huge = `data:image/png;base64,${"A".repeat(1_400_001)}`;
+    await expect(s.update("u1", { avatarUrl: huge })).rejects.toBeInstanceOf(AppError);
+  });
 });

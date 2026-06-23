@@ -10,11 +10,10 @@ export interface UpdateProfileResult {
   error?: string
 }
 
-// 내 프로필(이름/유저네임/아바타) 수정 → PATCH /me/profile. email 은 SSO 라 보내지 않는다(읽기전용).
+// 내 프로필(이름/아바타) 수정 → PATCH /me/profile. email 은 SSO 라 보내지 않는다(읽기전용).
 // 빈 문자열은 해당 필드 삭제로 컨트롤플레인이 해석한다. authZ 없음(자기 프로필).
 export async function updateProfileAction(input: {
   name: string
-  username: string
   avatarUrl: string
 }): Promise<UpdateProfileResult> {
   const ctx = await authContext()

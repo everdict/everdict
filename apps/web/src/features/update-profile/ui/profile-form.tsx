@@ -1,16 +1,47 @@
 'use client'
 
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Loader2 } from 'lucide-react'
+import { Check, Loader2, Trash2, Upload } from 'lucide-react'
 
-import { Button } from '@/shared/ui/button'
+import { cn } from '@/shared/lib/utils'
+import { Button, buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label } from '@/shared/ui/input'
 
 import { updateProfileAction } from '../api/update-profile'
 
-// 프로필 사진 미리보기 — URL 이 있으면 이미지, 없거나 로드 실패면 이름/이메일 첫 글자 모노그램으로 폴백.
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 // 원본 8MB 초과는 거부(디코딩 부담). 처리 후엔 256px 로 줄여 작아진다.
+const AVATAR_PX = 256 // 캔버스로 리사이즈할 한 변 최대 픽셀.
+
+// 업로드 이미지를 256px JPEG data URL 로 리사이즈·압축한다. 투명 배경은 흰색으로 깔아 검게 뜨는 것을 막는다.
+async function fileToAvatarDataUrl(file: File): Promise<string> {
+  const objectUrl = URL.createObjectURL(file)
+  try {
+    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const el = new Image()
+      el.onload = () => resolve(el)
+      el.onerror = () => reject(new Error('이미지를 불러올 수 없습니다.'))
+      el.src = objectUrl
+    })
+    const scale = Math.min(1, AVATAR_PX / Math.max(img.naturalWidth, img.naturalHeight))
+    const w = Math.max(1, Math.round(img.naturalWidth * scale))
+    const h = Math.max(1, Math.round(img.naturalHeight * scale))
+    const canvas = document.createElement('canvas')
+    canvas.width = w
+    canvas.height = h
+    const cx = canvas.getContext('2d')
+    if (!cx) throw new Error('이미지 처리에 실패했습니다.')
+    cx.fillStyle = '#ffffff'
+    cx.fillRect(0, 0, w, h)
+    cx.drawImage(img, 0, 0, w, h)
+    return canvas.toDataURL('image/jpeg', 0.85)
+  } finally {
+    URL.revokeObjectURL(objectUrl)
+  }
+}
+
+// 프로필 사진 미리보기 — 이미지(http/https 또는 data URL)가 있으면 표시, 없거나 로드 실패면 이름 첫 글자 모노그램.
 function AvatarPreview({ url, seed }: { url: string; seed: string }) {
   const [broken, setBroken] = useState(false)
   const initial = (seed.trim()[0] ?? '?').toUpperCase()
@@ -22,7 +53,7 @@ function AvatarPreview({ url, seed }: { url: string; seed: string }) {
     )
   }
   return (
-    // 임의의 외부 아바타 URL이라 next/image(원격 도메인 화이트리스트)가 아닌 일반 img 를 쓴다.
+    // 임의의 외부 아바타 URL/업로드 data URL 이라 next/image(원격 도메인 화이트리스트)가 아닌 일반 img 를 쓴다.
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
@@ -33,31 +64,50 @@ function AvatarPreview({ url, seed }: { url: string; seed: string }) {
   )
 }
 
-// 내 프로필 수정 폼 — 사진(URL)·이름·유저네임은 수정 가능, email 은 SSO(읽기전용).
+// 내 프로필 수정 폼 — 사진(파일 업로드)·이름은 수정 가능, email 은 SSO(읽기전용).
 export function ProfileForm({
   email,
   name,
-  username,
   avatarUrl,
 }: {
   email?: string
   name?: string
-  username?: string
   avatarUrl?: string
 }) {
   const router = useRouter()
+  const fileRef = useRef<HTMLInputElement>(null)
   const [n, setN] = useState(name ?? '')
-  const [u, setU] = useState(username ?? '')
   const [a, setA] = useState(avatarUrl ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
 
+  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // 같은 파일 재선택도 change 이벤트가 발생하도록 초기화.
+    if (!file) return
+    setError(undefined)
+    setSaved(false)
+    if (!file.type.startsWith('image/')) {
+      setError('이미지 파일만 업로드할 수 있습니다.')
+      return
+    }
+    if (file.size > MAX_UPLOAD_BYTES) {
+      setError('이미지가 너무 큽니다(최대 8MB).')
+      return
+    }
+    try {
+      setA(await fileToAvatarDataUrl(file))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '이미지 처리에 실패했습니다.')
+    }
+  }
+
   async function onSave() {
     setBusy(true)
     setError(undefined)
     setSaved(false)
-    const r = await updateProfileAction({ name: n, username: u, avatarUrl: a })
+    const r = await updateProfileAction({ name: n, avatarUrl: a })
     setBusy(false)
     if (r.ok) {
       setSaved(true)
@@ -71,52 +121,74 @@ export function ProfileForm({
     <div className="space-y-5 rounded-lg border bg-card p-5 shadow-raise">
       <div className="flex items-center gap-4">
         <AvatarPreview url={a} seed={n || email || '?'} />
-        <div className="min-w-0 space-y-1">
-          <p className="text-[13px] font-[560] text-foreground">{n || '이름 없음'}</p>
-          <p className="truncate text-[12px] text-muted-foreground">{email ?? '—'}</p>
+        <div className="flex items-center gap-2">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={onPickFile}
+            aria-label="프로필 사진 파일 선택"
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'gap-1.5')}
+          >
+            <Upload className="size-4" />
+            {a.trim() ? '사진 변경' : '사진 업로드'}
+          </button>
+          {a.trim() && (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setA('')}
+              className="gap-1.5"
+            >
+              <Trash2 className="size-4" />
+              제거
+            </Button>
+          )}
         </div>
       </div>
+      <p className="text-[12px] text-faint">
+        PNG·JPG 등 이미지 파일을 올리면 256px로 줄여 저장합니다. 비우면 이름 이니셜이 표시됩니다.
+      </p>
 
       <div className="space-y-1.5">
         <Label htmlFor="pf-email">이메일</Label>
-        <Input id="pf-email" value={email ?? ''} readOnly disabled className="text-muted-foreground" />
-        <p className="text-[12px] text-faint">이메일은 로그인(SSO) 계정에서 옵니다 — 여기서는 수정할 수 없습니다.</p>
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-1.5">
-          <Label htmlFor="pf-name">이름</Label>
-          <Input id="pf-name" value={n} onChange={(e) => setN(e.target.value)} placeholder="예: 김앨리스" />
-        </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="pf-username">유저네임</Label>
-          <Input
-            id="pf-username"
-            value={u}
-            onChange={(e) => setU(e.target.value)}
-            placeholder="alice"
-            className="font-mono"
-          />
-        </div>
+        <Input
+          id="pf-email"
+          value={email ?? ''}
+          readOnly
+          disabled
+          className="text-muted-foreground"
+        />
+        <p className="text-[12px] text-faint">
+          이메일은 로그인(SSO) 계정에서 옵니다 — 여기서는 수정할 수 없습니다.
+        </p>
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="pf-avatar">프로필 사진 URL</Label>
+        <Label htmlFor="pf-name">이름</Label>
         <Input
-          id="pf-avatar"
-          value={a}
-          onChange={(e) => setA(e.target.value)}
-          placeholder="https://…/avatar.png"
-          className="font-mono"
+          id="pf-name"
+          value={n}
+          onChange={(e) => setN(e.target.value)}
+          placeholder="예: 김앨리스"
         />
-        <p className="text-[12px] text-faint">이미지 주소를 붙여넣으세요. 비우면 이름 이니셜이 표시됩니다.</p>
       </div>
 
       {error && <Callout tone="danger">{error}</Callout>}
 
       <div className="flex items-center gap-3">
         <Button onClick={onSave} disabled={busy} className="gap-1.5">
-          {busy ? <Loader2 className="size-4 animate-spin" /> : saved ? <Check className="size-4" /> : null}
+          {busy ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : saved ? (
+            <Check className="size-4" />
+          ) : null}
           {saved ? '저장됨' : '프로필 저장'}
         </Button>
       </div>

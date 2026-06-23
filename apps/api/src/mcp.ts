@@ -868,7 +868,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         inputSchema: {
           name: z.string().optional().describe("표시 이름(80자 이하)"),
           username: z.string().optional().describe("유저네임(영숫자/_/- 2~39자)"),
-          avatarUrl: z.string().optional().describe("아바타 이미지 URL(http/https)"),
+          avatarUrl: z.string().optional().describe("아바타 이미지 — http(s) URL 또는 data:image base64"),
         },
       },
       ({ name, username, avatarUrl }) =>
