@@ -1,8 +1,8 @@
 import type { ConnectionMeta } from '@/entities/connection'
 import { Avatar } from '@/shared/ui/avatar'
 
-// 멤버 탭의 "애플리케이션" 그룹 — 워크스페이스가 outbound 로 연결한 외부 계정(OAuth)을 표시만 한다.
-// 연결/해제 관리는 설정 > "연결된 계정" 탭에서 한다(여기는 사람/애플리케이션을 한눈에 보는 읽기 전용 뷰).
+// 멤버 탭의 "애플리케이션" 그룹 — 이 워크스페이스에서 만들어진 외부 계정 연결(OAuth)을 표시만 한다(읽기 전용 로스터).
+// 연결은 개인 소유라 연결/해제 관리는 각자 계정(account)의 "연결된 계정" 탭에서 한다(여기는 워크스페이스가 자기 앱을 한눈에 보는 뷰).
 const PROVIDER_LABEL: Record<string, string> = {
   github: 'GitHub',
   'github-enterprise': 'GitHub Enterprise',
@@ -19,8 +19,9 @@ export function WorkspaceApplications({ connections }: { connections: Connection
           <span className="text-[12px] font-normal text-faint">{connections.length}</span>
         </h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          이 워크스페이스에 연결된 외부 계정(GitHub·Mattermost 등). 연결·해제는 설정의{' '}
-          <span className="font-[510] text-foreground">연결된 계정</span> 탭에서 관리합니다.
+          이 워크스페이스에서 만들어진 외부 계정 연결(GitHub·Mattermost 등). 연결은 개인 소유라
+          연결·해제는 각자 <span className="font-[510] text-foreground">계정</span>의 연결된 계정
+          탭에서 관리합니다.
         </p>
       </div>
 

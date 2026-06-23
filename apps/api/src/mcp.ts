@@ -733,6 +733,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           return ok({ id, disconnected: true });
         }),
     );
+    // 워크스페이스 애플리케이션 로스터 — 이 워크스페이스에서 만들어진 연결(메타만). 읽기 전용(members:read). 관리는 개인(list_connections).
+    server.registerTool(
+      "list_workspace_applications",
+      { description: "이 워크스페이스에 연결된 외부 계정(애플리케이션) 로스터 — 메타만(토큰 없음)", inputSchema: {} },
+      () => run(principal, "members:read", async () => ok({ connections: await connections.listForWorkspace(ws) })),
+    );
   }
 
   if (deps.keyStore) {

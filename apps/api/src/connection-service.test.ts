@@ -62,8 +62,9 @@ describe("ConnectionService", () => {
     const { authorizeUrl } = await s.start({ workspace: "acme", createdBy: "u", provider: "github" });
     const state = new URL(authorizeUrl).searchParams.get("state") as string;
     const { redirectTo } = await s.callback({ code: "c", state });
-    expect(redirectTo).toBe("http://web.test/acme/settings?tab=connections&connected=github");
-    expect(await s.list("acme")).toHaveLength(1);
+    expect(redirectTo).toBe("http://web.test/acme/account?tab=connections&connected=github");
+    expect(await s.list("u")).toHaveLength(1); // 개인 소유: owner=createdBy("u")
+    expect(await s.listForWorkspace("acme")).toHaveLength(1); // 만들어진 워크스페이스 로스터에도 노출
   });
 
   it("state 없는 콜백 → missing_state (워크스페이스 모름 → 루트 에러)", async () => {
@@ -77,9 +78,9 @@ describe("ConnectionService", () => {
     const { authorizeUrl } = await s.start({ workspace: "acme", createdBy: "u", provider: "github" });
     const state = new URL(authorizeUrl).searchParams.get("state") as string;
     expect((await s.callback({ state, error: "access_denied" })).redirectTo).toBe(
-      "http://web.test/acme/settings?tab=connections&error=access_denied",
+      "http://web.test/acme/account?tab=connections&error=access_denied",
     );
-    expect(await s.list("acme")).toHaveLength(0);
+    expect(await s.list("u")).toHaveLength(0);
   });
 
   it("토큰 교환 실패는 5xx 없이 exchange_failed 로 리다이렉트", async () => {
@@ -89,9 +90,9 @@ describe("ConnectionService", () => {
     const { authorizeUrl } = await s.start({ workspace: "acme", createdBy: "u", provider: "github" });
     const state = new URL(authorizeUrl).searchParams.get("state") as string;
     expect((await s.callback({ code: "c", state })).redirectTo).toBe(
-      "http://web.test/acme/settings?tab=connections&error=exchange_failed",
+      "http://web.test/acme/account?tab=connections&error=exchange_failed",
     );
-    expect(await s.list("acme")).toHaveLength(0);
+    expect(await s.list("u")).toHaveLength(0);
   });
 
   it("apiPublicUrl 없고 requestBaseUrl 없으면 start BadRequest (redirect_uri 결정 불가)", async () => {
@@ -144,8 +145,8 @@ describe("ConnectionService", () => {
     expect(u.searchParams.get("cid")).toBe("Iv1.cafe");
     const state = u.searchParams.get("state") as string;
     const { redirectTo } = await s.callback({ code: "c", state });
-    expect(redirectTo).toBe("http://web.test/acme/settings?tab=connections&connected=github-enterprise");
-    const list = await s.list("acme");
+    expect(redirectTo).toBe("http://web.test/acme/account?tab=connections&connected=github-enterprise");
+    const list = await s.list("u");
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ provider: "github-enterprise", host: "https://ghe.acme.io" });
   });

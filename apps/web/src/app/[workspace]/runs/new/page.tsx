@@ -25,15 +25,13 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
     } catch {
       // 하니스 목록 실패해도 폼은 텍스트 입력으로 동작
     }
-    // 비공개 repo 시드용 연결 picker(메타만; connections:read=viewer+). 실패/없음이면 public 만.
-    if (can(principal?.roles, 'connections:read')) {
-      try {
-        connections = connectionsResponseSchema.parse(
-          await controlPlane.listConnections(ctx)
-        ).connections
-      } catch {
-        // 연결 목록 실패해도 폼은 public repo 로 동작
-      }
+    // 비공개 repo 시드용 연결 picker — 연결은 개인 소유라 내(subject) 연결 메타만(역할 게이트 없음). 실패/없음이면 public 만.
+    try {
+      connections = connectionsResponseSchema.parse(
+        await controlPlane.listConnections(ctx)
+      ).connections
+    } catch {
+      // 연결 목록 실패해도 폼은 public repo 로 동작
     }
   }
 

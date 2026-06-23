@@ -1466,6 +1466,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 워크스페이스 애플리케이션 로스터 — 이 워크스페이스에서 만들어진 외부 계정 연결(메타만, 토큰 없음). 읽기 전용(members:read).
+  // 연결의 연결/해제 관리는 개인 소유라 account 페이지(GET /connections)에서; 여기는 워크스페이스가 자기 앱을 한눈에 보는 뷰.
+  app.get("/workspace/applications", async (req, reply) => {
+    if (!deps.connectionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "members:read");
+      return reply.send({ connections: await deps.connectionService.listForWorkspace(principal.workspace) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- workspace settings (계측 정책 등; admin 전용) ---
   app.get("/workspace/settings", async (req, reply) => {
     if (!deps.settingsStore) return reply.code(404).send({ code: "NOT_FOUND", message: "설정 저장소 미설정" });

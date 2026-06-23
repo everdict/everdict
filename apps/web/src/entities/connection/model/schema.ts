@@ -20,12 +20,18 @@ export const providerInfoSchema = z.object({
 })
 export type ProviderInfo = z.infer<typeof providerInfoSchema>
 
-// GET /connections — 연결 목록 + 연결 가능한 provider 디스크립터.
+// GET /connections — 내 연결 목록 + 연결 가능한 provider 디스크립터(개인 소유; account 페이지).
 export const connectionsResponseSchema = z.object({
   connections: z.array(connectionMetaSchema),
   providers: z.array(providerInfoSchema),
 })
 export type ConnectionsResponse = z.infer<typeof connectionsResponseSchema>
+
+// GET /workspace/applications — 이 워크스페이스에서 만들어진 연결 로스터(메타만, provider 없음; 읽기 전용).
+export const workspaceApplicationsSchema = z.object({
+  connections: z.array(connectionMetaSchema),
+})
+export type WorkspaceApplications = z.infer<typeof workspaceApplicationsSchema>
 
 // POST /connections/:provider/start — 브라우저를 보낼 authorize URL.
 export const connectionStartSchema = z.object({ authorizeUrl: z.string() })

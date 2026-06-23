@@ -1,9 +1,13 @@
-# Connected accounts (workspace OAuth connections)
+# Connected accounts (personal OAuth connections + workspace roster)
 
-Like Linear's "Connected accounts", a **workspace** connects external providers (**GitHub.com, GitHub
-Enterprise, Mattermost**) so Assay can act on its behalf. Unlike Assay's *inbound* OAuth (Keycloak protecting
+Like Linear's "Connected accounts", a **person** connects external providers (**GitHub.com, GitHub
+Enterprise, Mattermost**) so Assay can act on their behalf. Unlike Assay's *inbound* OAuth (Keycloak protecting
 our own API/MCP), these are **outbound** connections: Assay is the OAuth **client**. Connections are
-**workspace-scoped** (shared by all of the workspace's runs/harnesses), mirroring the `SecretStore` model.
+**personally owned** (`owner = principal.subject`) — managed on the user's **account** page, visible to that
+subject in any workspace (a connection is *not* a workspace asset). Each connection also records the **workspace
+it was created in**, so a workspace can show a read-only **applications roster** of the accounts its members have
+connected (settings → 멤버 탭). Think Slack: you authorize an app personally; the workspace sees which apps are
+connected. (This deliberately diverges from the `SecretStore` model, which stays workspace-scoped.)
 
 Shipped: the **connection lifecycle** (connect → list → disconnect) for all three providers — github.com
 (env OAuth App, one-click), GitHub Enterprise + Mattermost (self-hosted: per-connection host + OAuth-app
@@ -12,16 +16,21 @@ container image pulls (GHCR/registry), posting results back (PR/status), and cha
 (Mattermost) — are later *consumption* slices (Phase 3).
 
 ## Model
-- Keyed by **`(workspace, id)`**. Metadata: `provider`, `host?` (self-hosted GHE/Mattermost), `accountLabel`
-  (e.g. github login), `scopes[]`, `connectedAt`.
+- Keyed by **`(owner, id)`** where `owner = principal.subject` (OIDC `sub`, `key:<ws>` for an API key, or `"dev"`
+  in the dev fallback). A non-key column **`workspace`** records where the connection was created (for the roster).
+  Metadata: `provider`, `host?` (self-hosted GHE/Mattermost), `accountLabel` (e.g. github login), `scopes[]`,
+  `connectedAt`.
 - **Tokens encrypted at rest** (`@assay/db` `ConnectionStore`): reuses the same AES-256-GCM `SecretCipher` as
   secrets (KEK from `ASSAY_SECRETS_KEY`, else an auto-generated dev key). DB holds only ciphertext/iv/tag for the
   access (and optional refresh) token.
-- **Write-only**: `list` returns metadata only — tokens are **never** returned by the API; `tokenFor` decrypts
-  server-side solely for the consumption slices.
-- **Role-gating**: `connections:write` (connect/disconnect — handles tokens) is **admin**; `connections:read`
-  (list **metadata only**, never tokens) is **viewer+** so members can reference a connection when authoring a
-  private-repo run (mirrors `runtimes:read`/`datasets:read`).
+- **Write-only**: `list`/`listByWorkspace` return metadata only — tokens are **never** returned by the API;
+  `tokenFor(owner, id)` decrypts server-side solely for the consumption slices.
+- **No role-gating** for personal management. Connections are self-scoped by `subject` (like the profile —
+  `PATCH /me/profile`), so **any** authenticated user lists/connects/disconnects **their own** with no role gate;
+  the routes scope to `principal.subject`. The `connections:*` actions are **removed** from the authz matrix.
+- **Workspace roster is `members:read`.** `GET /workspace/applications` (and MCP `list_workspace_applications`)
+  returns the **metadata** roster of connections created in this workspace, gated by `members:read` (viewer+) — it
+  surfaces in the settings 멤버 탭, read-only. It never returns tokens and never manages connections.
 - A provider is **connectable** only if the control plane has its OAuth-app credentials configured (env). With
   none set, the feature degrades to listing/disconnecting existing connections.
 
@@ -32,15 +41,20 @@ container image pulls (GHCR/registry), posting results back (PR/status), and cha
 3. Provider → **public** `GET /connections/callback?code&state` on the control plane (no Bearer; authenticated by
    consuming the one-time `state`).
 4. Control plane exchanges `code`→token (server-to-server with `client_secret`), calls the provider's "whoami"
-   for an `accountLabel`, and stores the encrypted token.
-5. Control plane 302s the browser back to `${WEB_BASE_URL}/<workspace>/settings?tab=connections&connected=<provider>`
-   (or `…&error=<reason>`). The callback never returns 5xx to the browser — failures become an `error` redirect.
+   for an `accountLabel`, and stores the encrypted token under **`owner = pending.createdBy`** (the connecting
+   subject) + the **`workspace`** carried in the pending state.
+5. Control plane 302s the browser back to `${WEB_BASE_URL}/<workspace>/account?tab=connections&connected=<provider>`
+   (or `…&error=<reason>`) — the personal **account** page, not workspace settings. The callback never returns 5xx
+   to the browser — failures become an `error` redirect. (`workspace` from the pending state still drives the
+   redirect URL + self-hosted `client_secret` resolution; only **ownership** is personal.)
 
 ## Manage (API + MCP, same `ConnectionService` core)
-| Surface | List | Connect | Disconnect |
-|---|---|---|---|
-| HTTP | `GET /connections` → `{connections, providers:[{id,selfHosted}]}` | `POST /connections/:provider/start` → `{authorizeUrl}` · `GET /connections/callback` (public, 302) | `DELETE /connections/:id` → 204 |
-| MCP | `list_connections` | `get_connect_url {provider, host?, clientId?, clientSecretName?}` → `{authorizeUrl}` (a human opens it; agents can't complete an interactive browser OAuth) | `disconnect_connection {id}` |
+| Surface | List (personal) | Connect | Disconnect | Workspace roster |
+|---|---|---|---|---|
+| HTTP | `GET /connections` → `{connections, providers:[{id,selfHosted}]}` (my connections) | `POST /connections/:provider/start` → `{authorizeUrl}` · `GET /connections/callback` (public, 302) | `DELETE /connections/:id` → 204 | `GET /workspace/applications` → `{connections}` (`members:read`) |
+| MCP | `list_connections` | `get_connect_url {provider, host?, clientId?, clientSecretName?}` → `{authorizeUrl}` (a human opens it; agents can't complete an interactive browser OAuth) | `disconnect_connection {id}` | `list_workspace_applications` (`members:read`) |
+
+All personal columns scope to `principal.subject` (no role gate); the roster scopes to `principal.workspace` (`members:read`). Tokens are never returned by any column.
 
 The `start` body for **self-hosted** providers carries `{host, clientId, clientSecretName}` (`clientId` is the
 public OAuth-app id; `clientSecretName` is a `SecretStore` key — the secret **value** never crosses the wire and
@@ -66,46 +80,60 @@ host+credentials form (GHE/Mattermost).
 
 ## Phase 3 — consumption (the stored token does real work)
 - **Repo clone ✅ (Phase 3a)**: an eval case's repo source can name a connection — `env.source =
-  { git, ref, connectionId? }`. At dispatch `RunService` resolves `connectionId` → the connection's token
-  (`repoTokenFor` → `connectionStore.tokenFor`) and carries it as a **transient `AgentJob.repoToken`** (never
-  persisted to the RunRecord/dataset — the case keeps only the `connectionId` reference). The agent hands it to
-  `RepoEnvironment`, which clones the private repo with the token injected as `http.extraheader` via git's
-  env-based config (`GIT_CONFIG_*`) — **never in argv** (`ps`/log/`.git/config`-safe). Reachable today via
-  `POST /runs` (the body carries a full `EvalCase`) and dataset scorecards.
+  { git, ref, connectionId? }`. At dispatch `RunService` resolves `connectionId` against the **submitter's
+  subject** (`submittedBy`, threaded from `principal.subject`) → the connection's token (`repoTokenFor(owner,
+  connectionId)` → `connectionStore.tokenFor`) — i.e. **"clone with *my* connection"** — and carries it as a
+  **transient `AgentJob.repoToken`** (never persisted to the RunRecord/dataset — the case keeps only the
+  `connectionId` reference). The agent hands it to `RepoEnvironment`, which clones the private repo with the token
+  injected as `http.extraheader` via git's env-based config (`GIT_CONFIG_*`) — **never in argv**
+  (`ps`/log/`.git/config`-safe). Reachable today via `POST /runs` (the body carries a full `EvalCase`) and dataset
+  scorecards. **Consequence of personal ownership:** a `connectionId` only resolves for the user who owns it — so a
+  private-repo **dataset** is effectively single-owner (it clones only when its connection's owner submits the
+  batch; for anyone else it falls back to a public clone). API-key callers resolve against their own
+  `key:<workspace>` subject, a distinct connection set from any human's.
 - **Web picker ✅ (Phase 3b)**: the run-submit form (`features/submit-run`) gains a repo-source toggle —
   "빈 작업트리" (default) vs "Git repo (URL)". For git it shows URL + ref + a **connection picker** populated from
   `GET /connections` (filtered to git providers: github/github-enterprise) so a member selects which connected
   account authenticates a private clone (or "none" for public). Enabled by relaxing `connections:read` to viewer+.
 - **Batch scorecards ✅ (Phase 3c)**: `ScorecardService` resolves each dataset case's `env.source.connectionId`
-  per-case in the dispatch wrapper (same `repoTokenFor` → `connectionStore.tokenFor`), so a dataset of
-  private-repo cases batch-evals with each case authenticated. Mirrors the single-run path exactly.
-- **Mattermost notifications ✅ (Phase 3d)**: a workspace setting `notify = { connectionId, channelId }`
-  (settable via `PUT /workspace/settings`) names a **Mattermost** connection + channel. `NotificationService`
-  posts run **and** scorecard completion (`✅/❌`) to `${host}/api/v4/posts` with the connection's token, wired
-  as `RunService`/`ScorecardService` `onComplete` hooks. Fire-and-forget — a notify failure never affects the
-  run/scorecard result; non-Mattermost connection or missing token is silently skipped. (Web config form for the
-  notify target is a small follow-up; reachable now via the settings API/MCP.)
+  per-case in the dispatch wrapper against the **batch submitter's subject** (same `repoTokenFor(owner,
+  connectionId)` → `connectionStore.tokenFor`), so a dataset of private-repo cases batch-evals authenticated **as
+  the submitter** — see the single-owner consequence above. Mirrors the single-run path exactly.
+- **Mattermost notifications ✅ (Phase 3d)**: a workspace setting `notify = { connectionId, channelId,
+  ownerSubject }` (settable via `PUT /workspace/settings`) names a **Mattermost** connection + channel. Because
+  connections are now personal, the setter's `subject` is captured **server-side** as `ownerSubject` (the client
+  cannot supply it — anti-spoof); the completion notify resolves the token against that owner
+  (`tokenFor(ownerSubject, connectionId)`). `NotificationService` posts run **and** scorecard completion
+  (`✅/❌`) to `${host}/api/v4/posts`, wired as `RunService`/`ScorecardService` `onComplete` hooks.
+  Fire-and-forget — a notify failure never affects the run/scorecard result; **missing `ownerSubject` (legacy
+  config)**, non-Mattermost connection, or missing token is silently skipped. (Web config form for the notify
+  target is a small follow-up; reachable now via the settings API/MCP.)
 - **Still open**: image pulls feeding `imagePullSecret` at dispatch (Track B); results posted to GitHub
   PR/status; web notify-config form.
 
 ## Verified
-- Deterministic (`packages/db/src/connection-store.test.ts`): token encryption round-trip + `list` exposes no
-  token + cross-workspace isolation; `OAuthStateStore` one-time `take` + expiry + self-hosted config carry.
+- Deterministic (`packages/db/src/connection-store.test.ts`): token encryption round-trip + `list`/`listByWorkspace`
+  expose no token + **owner isolation** + the **workspace roster** (same owner across two workspaces → personal
+  `list` sees both, each `listByWorkspace` sees one); `OAuthStateStore` one-time `take` + expiry + self-hosted carry.
 - Providers (`apps/api/src/oauth/github.test.ts`, `mattermost.test.ts`): authorize-URL builders, github.com vs
   GHE host branching (`/api/v3`), GitHub's 200-`{error}` → `UpstreamError`, Mattermost form-encoded exchange +
   refresh/expiry, whoami, non-2xx → `UpstreamError`, missing-host → `BadRequestError`.
 - Service (`apps/api/src/connection-service.test.ts`): github.com + self-hosted start→callback round-trips,
   `providerInfos` visibility, SecretStore name-ref resolution (+ missing-secret → `BadRequestError`), one-time/
   invalid state, provider `error`, exchange failure → `error` redirect (no 5xx).
-- API (`apps/api/src/server.test.ts`): admin list/start/callback(302)/disconnect end-to-end, self-hosted
+- API (`apps/api/src/server.test.ts`): list/start/callback(302 → `/account`)/disconnect end-to-end, self-hosted
   start (missing fields → 400; host reflected in authorizeUrl), **token never returned**, replayed state →
-  invalid, unknown provider → 400, viewer → 403.
-- MCP (`apps/api/src/mcp.test.ts`): `list_connections`/`get_connect_url`/`disconnect_connection` parity, admin-gated.
+  invalid, unknown provider → 400, **viewer can list *and* start (no role gate)**, `GET /workspace/applications`
+  roster (`members:read`) shows the connected account.
+- MCP (`apps/api/src/mcp.test.ts`): `list_connections`/`get_connect_url`/`disconnect_connection` parity
+  (**no role gate** — personal) + `list_workspace_applications` roster (`members:read`).
 - Repo-clone consumption (Phase 3a): `packages/environments/src/repo.test.ts` (private clone injects
   `http.extraheader` via `GIT_CONFIG_*` env, token **not** in argv; public clone has no auth env) +
-  `apps/api/src/run-service.test.ts` (`connectionId` → `repoTokenFor` resolved → `job.repoToken`; public/non-git
-  cases never call the resolver). Batch (Phase 3c): `apps/api/src/scorecard-service.test.ts` (per-case
-  `connectionId` → `job.repoToken`; public/non-git cases skip the resolver).
-- Notifications (Phase 3d): `apps/api/src/notification-service.test.ts` (posts to Mattermost when configured;
-  skips when no config / non-Mattermost connection / no token; swallows post failure) + `run-service.test.ts` /
+  `apps/api/src/run-service.test.ts` (`connectionId` → `repoTokenFor(owner=submittedBy, …)` resolved →
+  `job.repoToken`; public/non-git cases never call the resolver). Batch (Phase 3c):
+  `apps/api/src/scorecard-service.test.ts` (per-case `connectionId` → `repoTokenFor(owner, …)` → `job.repoToken`;
+  public/non-git cases skip the resolver).
+- Notifications (Phase 3d): `apps/api/src/notification-service.test.ts` (posts to Mattermost with
+  `tokenFor(ownerSubject, …)` when configured; skips when **no `ownerSubject` (legacy config)** / no config /
+  non-Mattermost connection / no token; swallows post failure) + `run-service.test.ts` /
   `scorecard-service.test.ts` (`onComplete` fires with the final record on succeeded **and** failed).

@@ -187,9 +187,11 @@ export const controlPlane = {
     }),
   deleteSecret: (auth: AuthContext, name: string) =>
     callVoid(auth, `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
-  // 외부 계정 연결(Connected accounts, 아웃바운드 OAuth). 목록=메타만(토큰 없음) + 연결 가능한 provider.
+  // 외부 계정 연결(Connected accounts, 아웃바운드 OAuth). 개인 소유 — 목록=내(subject) 연결 메타만(토큰 없음) + 연결 가능한 provider.
   // start 는 authorizeUrl 을 돌려주고(브라우저를 그 URL 로 보낸다), disconnect 는 204(callVoid).
   listConnections: <T>(auth: AuthContext) => call<T>(auth, '/connections'),
+  // 워크스페이스 애플리케이션 로스터(읽기 전용) — 이 워크스페이스에서 만들어진 연결 메타만(members:read).
+  listWorkspaceApplications: <T>(auth: AuthContext) => call<T>(auth, '/workspace/applications'),
   startConnection: <T>(auth: AuthContext, provider: string, body: unknown) =>
     call<T>(auth, `/connections/${encodeURIComponent(provider)}/start`, {
       method: 'POST',

@@ -58,7 +58,10 @@ function build(opts: {
 
 describe("NotificationService.notifyRun (Mattermost)", () => {
   it("notify 설정 + Mattermost 연결 + 토큰 → 채널에 게시", async () => {
-    const { svc, calls } = build({ notify: { connectionId: "c-mm", channelId: "chan-1" }, conns: [mmConn] });
+    const { svc, calls } = build({
+      notify: { connectionId: "c-mm", channelId: "chan-1", ownerSubject: "u-alice" },
+      conns: [mmConn],
+    });
     await svc.notifyRun("acme", runRec("succeeded"));
     expect(calls).toHaveLength(1);
     expect(calls[0]?.url).toBe("https://mm.acme.io/api/v4/posts");
@@ -75,20 +78,37 @@ describe("NotificationService.notifyRun (Mattermost)", () => {
   });
 
   it("연결이 Mattermost 가 아니면(예: github) 게시 안 함", async () => {
-    const { svc, calls } = build({ notify: { connectionId: "c-gh", channelId: "x" }, conns: [ghConn] });
+    const { svc, calls } = build({
+      notify: { connectionId: "c-gh", channelId: "x", ownerSubject: "u-alice" },
+      conns: [ghConn],
+    });
     await svc.notifyRun("acme", runRec("failed"));
     expect(calls).toHaveLength(0);
   });
 
   it("토큰이 없으면 게시 안 함", async () => {
-    const { svc, calls } = build({ notify: { connectionId: "c-mm", channelId: "x" }, conns: [mmConn], token: null });
+    const { svc, calls } = build({
+      notify: { connectionId: "c-mm", channelId: "x", ownerSubject: "u-alice" },
+      conns: [mmConn],
+      token: null,
+    });
+    await svc.notifyRun("acme", runRec("succeeded"));
+    expect(calls).toHaveLength(0);
+  });
+
+  it("ownerSubject 없는 구 설정 → 누구 토큰인지 모르므로 게시 안 함(graceful skip)", async () => {
+    const { svc, calls } = build({ notify: { connectionId: "c-mm", channelId: "x" }, conns: [mmConn] });
     await svc.notifyRun("acme", runRec("succeeded"));
     expect(calls).toHaveLength(0);
   });
 
   it("게시 실패는 swallow (throw 안 함 — run 결과 무관)", async () => {
     const failing = (() => Promise.reject(new Error("network"))) as unknown as typeof fetch;
-    const { svc } = build({ notify: { connectionId: "c-mm", channelId: "x" }, conns: [mmConn], fetchImpl: failing });
+    const { svc } = build({
+      notify: { connectionId: "c-mm", channelId: "x", ownerSubject: "u-alice" },
+      conns: [mmConn],
+      fetchImpl: failing,
+    });
     await expect(svc.notifyRun("acme", runRec("succeeded"))).resolves.toBeUndefined();
   });
 });

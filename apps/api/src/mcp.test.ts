@@ -166,6 +166,7 @@ describe("MCP tools", () => {
       "list_runs",
       "list_runtimes",
       "list_scorecards",
+      "list_workspace_applications",
       "probe_runtime",
       "pull_scorecard",
       "register_harness",
@@ -197,28 +198,30 @@ describe("MCP tools", () => {
     expect(bad.isError).toBe(true);
   });
 
-  it("connections: list 는 viewer+(메타), get_connect_url/disconnect 는 admin(write)", async () => {
+  it("connections: 개인 소유 — list/get_connect_url/disconnect 는 역할 게이트 없이 본인 연결, 로스터는 members:read", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const viewer = await connect(deps, ["viewer"]);
 
-    // viewer 는 connections:read(메타) 가능 → list 성공.
+    // 연결은 개인 소유 — viewer 도 본인 연결 list 가능(빈 목록).
     const viewerList = JSON.parse(text(await viewer.callTool({ name: "list_connections", arguments: {} })));
     expect(viewerList).toEqual({ connections: [], providers: [{ id: "github", selfHosted: false }] });
-    // 단 write(연결 시작)는 거부.
-    expect((await viewer.callTool({ name: "get_connect_url", arguments: { provider: "github" } })).isError).toBe(true);
+    // viewer 도 본인 연결 start 가능(역할 게이트 없음) → authorizeUrl.
+    const vUrl = await viewer.callTool({ name: "get_connect_url", arguments: { provider: "github" } });
+    expect(vUrl.isError).toBeFalsy();
+    expect(JSON.parse(text(vUrl)).authorizeUrl).toContain("https://github.test/auth?state=");
 
     // admin list → connections:[] + providers:['github'].
     const listed = JSON.parse(text(await admin.callTool({ name: "list_connections", arguments: {} })));
     expect(listed).toEqual({ connections: [], providers: [{ id: "github", selfHosted: false }] });
 
-    // get_connect_url → authorizeUrl(사람이 열 URL). 에이전트는 OAuth 를 직접 완료하지 못하지만 시작은 가능.
-    const url = JSON.parse(text(await admin.callTool({ name: "get_connect_url", arguments: { provider: "github" } })));
-    expect(url.authorizeUrl).toContain("https://github.test/auth?state=");
-
     // disconnect (없는 id 라도 멱등) → disconnected:true.
     const dis = JSON.parse(text(await admin.callTool({ name: "disconnect_connection", arguments: { id: "x" } })));
     expect(dis).toMatchObject({ disconnected: true });
+
+    // 워크스페이스 애플리케이션 로스터 — members:read(viewer+) → 빈 목록(토큰 없음).
+    const roster = JSON.parse(text(await viewer.callTool({ name: "list_workspace_applications", arguments: {} })));
+    expect(roster).toEqual({ connections: [] });
   });
 
   it("member: submit_run + register_harness(instance) 가능", async () => {

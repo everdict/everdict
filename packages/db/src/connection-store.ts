@@ -191,6 +191,15 @@ export class PgConnectionStore implements ConnectionStore {
     );
     return res.rows.map(rowToMeta);
   }
+  async listByWorkspace(workspace: string): Promise<ConnectionMeta[]> {
+    // 워크스페이스 로스터(읽기 전용) — 만들어진 워크스페이스 기준. 토큰 컬럼은 절대 select 안 함.
+    const res = await this.client.query<ConnectionRow>(
+      `SELECT id, provider, host, account_label, scopes, connected_at
+       FROM assay_connections WHERE workspace = $1 ORDER BY connected_at DESC`,
+      [workspace],
+    );
+    return res.rows.map(rowToMeta);
+  }
   async remove(owner: string, id: string): Promise<void> {
     await this.client.query("DELETE FROM assay_connections WHERE owner = $1 AND id = $2", [owner, id]);
   }

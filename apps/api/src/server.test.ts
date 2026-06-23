@@ -373,13 +373,13 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     });
     await app.close();
   });
-  it("viewer: connections:read 는 viewer+ → 200 (메타만; run 에서 repo 연결 참조)", async () => {
+  it("연결은 개인 소유 — 역할 게이트 없이 viewer 도 본인 연결 GET /connections → 200", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
     const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
     expect(res.statusCode).toBe(200);
     await app.close();
   });
-  it("viewer: connections:write(start) 는 admin 전용 → 403", async () => {
+  it("연결은 개인 소유 — viewer 도 본인 연결 start 가능(역할 게이트 없음) → 200 authorizeUrl", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
     const res = await app.inject({
       method: "POST",
@@ -387,7 +387,8 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
       headers: { authorization: "Bearer x" },
       payload: {},
     });
-    expect(res.statusCode).toBe(403);
+    expect(res.statusCode).toBe(200);
+    expect(res.json().authorizeUrl).toBeTruthy();
     await app.close();
   });
   it("미설정 provider start → 400", async () => {
@@ -416,7 +417,7 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     // provider 가 호출하는 콜백(Bearer 없음) — state 1회 소비 → 토큰 교환 → 저장 → 웹으로 302.
     const cb = await app.inject({ method: "GET", url: `/connections/callback?code=abc&state=${state}` });
     expect(cb.statusCode).toBe(302);
-    expect(cb.headers.location).toBe("http://web.test/acme/settings?tab=connections&connected=github");
+    expect(cb.headers.location).toBe("http://web.test/acme/account?tab=connections&connected=github");
 
     // 연결이 잡혔고, list 는 토큰을 절대 노출하지 않는다.
     const list = await app.inject({ method: "GET", url: "/connections", headers: h });
@@ -428,6 +429,11 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
       scopes: ["repo", "read:packages"],
     });
     expect(JSON.stringify(body)).not.toContain("gho_");
+
+    // 워크스페이스 애플리케이션 로스터(members:read) — 만들어진 워크스페이스 기준으로도 1건 노출.
+    const roster = await app.inject({ method: "GET", url: "/workspace/applications", headers: h });
+    expect(roster.statusCode).toBe(200);
+    expect(roster.json().connections).toHaveLength(1);
 
     // 재사용된 state 는 invalid → 에러 리다이렉트.
     const replay = await app.inject({ method: "GET", url: `/connections/callback?code=abc&state=${state}` });

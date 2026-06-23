@@ -118,7 +118,8 @@ export class ConnectionService {
       const tok = await entry.impl.exchange({ config, code: input.code, redirectUri });
       const account = await entry.impl.whoami({ config, accessToken: tok.accessToken });
       const create: CreateConnectionInput = {
-        owner: pending.createdBy, // 개인 소유: 연결을 시작한 사람(subject)이 소유. workspace 는 secret/redirect 용으로만 운반.
+        owner: pending.createdBy, // 개인 소유: 연결을 시작한 사람(subject)이 소유.
+        workspace: pending.workspace, // 만들어진 워크스페이스 — 로스터(listForWorkspace) + redirect/secret 용.
         provider: pending.provider,
         accountLabel: account.label,
         scopes: tok.scopes,
@@ -141,6 +142,10 @@ export class ConnectionService {
   }
   async disconnect(owner: string, id: string): Promise<void> {
     await this.store.remove(owner, id);
+  }
+  // 워크스페이스 애플리케이션 로스터(읽기 전용) — 이 워크스페이스에서 만들어진 연결들의 메타(토큰 없음). settings>멤버 탭용.
+  async listForWorkspace(workspace: string): Promise<ConnectionMeta[]> {
+    return this.store.listByWorkspace(workspace);
   }
 
   // start: self-hosted 는 host+clientId+clientSecretName 요구 + SecretStore 에서 secret 값 resolve.
