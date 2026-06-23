@@ -7,20 +7,20 @@
 // 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/registry-k8s.mjs
 
 import { perTenantTrustZones } from "../../packages/backends/dist/index.js";
-import { LATEST, loadHarnessDir } from "../../packages/registry/dist/index.js";
+import { LATEST, loadHarnessTaxonomyDir } from "../../packages/registry/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { MlflowTraceSource } from "../../packages/trace/dist/index.js";
 
 const CONTEXT = process.env.KUBE_CONTEXT ?? "kind-assay";
 const MLFLOW = process.env.MLFLOW_ENDPOINT ?? "http://127.0.0.1:5501";
-const DIR = new URL("../../examples/harnesses", import.meta.url).pathname;
+const DIR = new URL("../../examples/harness-templates", import.meta.url).pathname;
 
 const banner = (s) => console.log(`\n=== ${s} ===`);
 
 async function main() {
-  banner("harness version SSOT (file-backed)");
-  const registry = await loadHarnessDir(DIR);
-  for (const { id, versions } of await registry.list()) console.log(`  ${id}: ${versions.join(", ")}`);
+  banner("harness taxonomy SSOT (file-backed: templates + instances)");
+  const { instances: registry } = await loadHarnessTaxonomyDir(DIR);
+  for (const { id, versions } of await registry.list("_shared")) console.log(`  ${id}: ${versions.join(", ")}`);
   const latest = await registry.getService("acme", "bu", LATEST);
   console.log(
     `  resolve bu@latest → ${latest.id}@${latest.version}  (deps: ${latest.dependencies.map((d) => d.store).join("+")})`,
