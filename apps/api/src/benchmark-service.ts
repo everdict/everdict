@@ -45,6 +45,7 @@ export const BenchmarkPreviewBodySchema = z.object({
 // 유저 셀프서비스: 카탈로그에서 고르거나, 자기 워크스페이스에 레시피(BenchmarkAdapterSpec)를 등록해 재사용. authZ 는 라우트.
 export interface BenchmarkImportInput {
   tenant: string;
+  createdBy?: string; // 인입한 subject — 생성된 데이터셋의 생성자(소프트 삭제 권한)
   spec?: BenchmarkAdapterSpec; // 인라인 정의(위저드) — 레시피 등록 없이 한 번에 인입
   benchmark?: string; // 카탈로그 id (first-party)
   recipe?: { id: string; version?: string }; // 등록된 테넌트/공유 레시피
@@ -207,7 +208,7 @@ export class BenchmarkService {
         "spec(인라인 정의) · benchmark(카탈로그) · recipe(레시피) 중 하나가 필요합니다.",
       );
     }
-    await this.deps.datasets.register(input.tenant, dataset); // 버전 불변(충돌 409)
+    await this.deps.datasets.register(input.tenant, dataset, input.createdBy); // 버전 불변(충돌 409); 생성자 = 인입한 subject
     return { workspace: input.tenant, id: dataset.id, version: dataset.version, cases: dataset.cases.length };
   }
 }

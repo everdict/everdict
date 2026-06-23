@@ -89,8 +89,13 @@ function harness() {
   };
 }
 
-async function connect(deps: ReturnType<typeof harness>, roles: string[], workspace = "acme"): Promise<Client> {
-  const principal: Principal = { subject: "u", workspace, roles, via: "oidc" };
+async function connect(
+  deps: ReturnType<typeof harness>,
+  roles: string[],
+  workspace = "acme",
+  subject = "u",
+): Promise<Client> {
+  const principal: Principal = { subject, workspace, roles, via: "oidc" };
   const server = buildMcpServer(deps, principal);
   const [clientT, serverT] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test", version: "0" });
@@ -112,6 +117,7 @@ describe("MCP tools", () => {
       "create_invite",
       "create_judge",
       "create_runtime",
+      "delete_dataset",
       "diff_datasets",
       "diff_scorecards",
       "get_dataset",
@@ -265,6 +271,55 @@ describe("MCP tools", () => {
     });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("NOT_FOUND");
+  });
+
+  it("delete_dataset: 생성자 본인은 자기 버전을 소프트 삭제(이후 get/list 에서 사라짐)", async () => {
+    const deps = harness();
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    await creator.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+
+    const del = await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
+    expect(del.isError).toBeFalsy();
+    expect(text(del)).toContain("deleted");
+    // tombstone — get 은 NOT_FOUND, list 에서 사라진다(데이터는 보존되지만 read 제외).
+    const got = await creator.callTool({ name: "get_dataset", arguments: { id: "smoke" } });
+    expect(got.isError).toBe(true);
+    expect(text(got)).toContain("NOT_FOUND");
+    expect(JSON.parse(text(await creator.callTool({ name: "list_datasets", arguments: {} })))).toEqual([]);
+  });
+
+  it("delete_dataset: 생성자도 admin 도 아니면 FORBIDDEN; admin 은 남의 버전도 삭제", async () => {
+    const deps = harness();
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    await creator.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+
+    // 같은 워크스페이스의 다른 member(생성자 아님) → FORBIDDEN
+    const other = await connect(deps, ["member"], "acme", "bob");
+    const denied = await other.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+    // 아직 살아있음
+    expect((await creator.callTool({ name: "get_dataset", arguments: { id: "smoke" } })).isError).toBeFalsy();
+
+    // admin(생성자 아님) → 남의 버전도 삭제 가능
+    const admin = await connect(deps, ["admin"], "acme", "carol");
+    const del = await admin.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
+    expect(del.isError).toBeFalsy();
+  });
+
+  it("delete_dataset: 없는/이미 삭제된 버전은 NOT_FOUND", async () => {
+    const deps = harness();
+    const creator = await connect(deps, ["member"], "acme", "alice");
+    await creator.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+    await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
+    // 두 번째 삭제 → 이미 tombstone → NOT_FOUND
+    const again = await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
+    expect(again.isError).toBe(true);
+    expect(text(again)).toContain("NOT_FOUND");
+    // 없는 버전
+    const missing = await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "9.9.9" } });
+    expect(missing.isError).toBe(true);
+    expect(text(missing)).toContain("NOT_FOUND");
   });
 
   it("scorecards: member 가 데이터셋을 돌려 집계(run→poll succeeded); viewer 는 실행 권한오류; 타 ws 는 NOT_FOUND", async () => {

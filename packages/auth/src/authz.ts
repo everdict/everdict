@@ -12,6 +12,7 @@ export type Action =
   | "templates:write"
   | "datasets:read"
   | "datasets:write"
+  | "datasets:delete"
   | "scorecards:read"
   | "scorecards:run"
   | "judges:read"
@@ -24,6 +25,8 @@ export type Action =
   | "runtimes:write"
   | "secrets:read"
   | "secrets:write"
+  | "connections:read"
+  | "connections:write"
   | "keys:read"
   | "keys:write"
   | "members:read"
@@ -77,6 +80,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "templates:write",
     "datasets:read",
     "datasets:write",
+    "datasets:delete", // 데이터셋 버전 소프트 삭제 — admin 전용(생성자 본인은 서비스에서 별도 override). member/viewer 는 미보유
     "scorecards:read",
     "scorecards:run",
     "judges:read",
@@ -89,6 +93,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:write", // 런타임 등록은 role 무관(viewer/member 도 보유) — 자격증명 '값'은 secrets:write(admin)로 분리 보호
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
     "secrets:write",
+    "connections:read", // 외부 계정 연결(OAuth 토큰)은 강력 → admin 전용(secrets 와 동일 근거)
+    "connections:write",
     "keys:read", // API 키는 발급 시 워크스페이스 admin 권한을 가짐 → 발급/취소는 admin 전용(secrets 와 동일 근거)
     "keys:write",
     "members:read",

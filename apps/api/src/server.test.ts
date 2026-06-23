@@ -3,6 +3,8 @@ import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
 import type { CaseResult } from "@assay/core";
 import {
+  InMemoryConnectionStore,
+  InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
   InMemorySecretStore,
@@ -24,7 +26,9 @@ import {
 } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
+import { ConnectionService } from "./connection-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
+import type { OAuthProvider } from "./oauth/provider.js";
 import { MembershipService } from "./membership-service.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
@@ -103,6 +107,16 @@ const roleAuth = (roles: string[], workspace = "acme"): Authenticator => ({
   },
 });
 
+// 외부 호출 없는 fake OAuth provider — 라우트/서비스 dance 만 결정적으로 검증(실제 GitHub HTTP 없음).
+const fakeGithub: OAuthProvider = {
+  id: "github",
+  scopes: ["repo"],
+  authorizeUrl: ({ state, redirectUri }) =>
+    `https://github.test/login/oauth/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`,
+  exchange: async () => ({ accessToken: "gho_test", scopes: ["repo", "read:packages"] }),
+  whoami: async () => ({ label: "octocat" }),
+};
+
 let n = 0;
 function server(
   opts: {
@@ -147,6 +161,12 @@ function server(
   });
   const harnessTemplates = new InMemoryHarnessTemplateRegistry();
   const harnessInstances = new InMemoryHarnessInstanceRegistry(harnessTemplates);
+  const connectionService = new ConnectionService({
+    store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 9))),
+    states: new InMemoryOAuthStateStore(),
+    providers: new Map<string, OAuthProvider>([["github", fakeGithub]]),
+    config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
+  });
   const app = buildServer({
     service: svc,
     scorecardService,
@@ -160,6 +180,7 @@ function server(
     // 연결 테스트 stub — 실제 클러스터 I/O 없이 라우트 와이어링/역할 게이트만 검증.
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
     secretStore,
+    connectionService,
     settingsStore,
     workspaceStore,
     workspaceService,
@@ -326,6 +347,68 @@ describe("API — authorization (roles)", () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     const h = { authorization: "Bearer x" };
     expect((await registerHarness(app, h)).statusCode).toBe(201);
+    await app.close();
+  });
+});
+
+describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", () => {
+  it("admin: GET /connections → 200 {connections:[], providers:['github']}", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ connections: [], providers: ["github"] });
+    await app.close();
+  });
+  it("viewer: connections:read 는 admin 전용 → 403", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+  it("미설정 provider start → 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/connections/gitlab/start",
+      headers: { authorization: "Bearer x" },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+  it("end-to-end: start → authorizeUrl(state 운반) → callback 302 → 연결 1건 + 토큰 미노출", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const h = { authorization: "Bearer x" };
+    const start = await app.inject({ method: "POST", url: "/connections/github/start", headers: h, payload: {} });
+    expect(start.statusCode).toBe(200);
+    const authorizeUrl = new URL(start.json().authorizeUrl as string);
+    expect(authorizeUrl.origin).toBe("https://github.test");
+    // redirect_uri 는 apiPublicUrl 베이스.
+    expect(authorizeUrl.searchParams.get("redirect_uri")).toBe("http://api.test/connections/callback");
+    const state = authorizeUrl.searchParams.get("state");
+    expect(state).toBeTruthy();
+
+    // provider 가 호출하는 콜백(Bearer 없음) — state 1회 소비 → 토큰 교환 → 저장 → 웹으로 302.
+    const cb = await app.inject({ method: "GET", url: `/connections/callback?code=abc&state=${state}` });
+    expect(cb.statusCode).toBe(302);
+    expect(cb.headers.location).toBe("http://web.test/acme/settings?tab=connections&connected=github");
+
+    // 연결이 잡혔고, list 는 토큰을 절대 노출하지 않는다.
+    const list = await app.inject({ method: "GET", url: "/connections", headers: h });
+    const body = list.json();
+    expect(body.connections).toHaveLength(1);
+    expect(body.connections[0]).toMatchObject({ provider: "github", accountLabel: "octocat", scopes: ["repo", "read:packages"] });
+    expect(JSON.stringify(body)).not.toContain("gho_");
+
+    // 재사용된 state 는 invalid → 에러 리다이렉트.
+    const replay = await app.inject({ method: "GET", url: `/connections/callback?code=abc&state=${state}` });
+    expect(replay.statusCode).toBe(302);
+    expect(replay.headers.location).toBe("http://web.test/?connection_error=invalid_state");
+
+    // disconnect → 204 → 목록 비어짐.
+    const id = body.connections[0].id as string;
+    expect((await app.inject({ method: "DELETE", url: `/connections/${id}`, headers: h })).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: "/connections", headers: h })).json().connections).toHaveLength(0);
     await app.close();
   });
 });
@@ -596,6 +679,43 @@ describe("API — datasets (workspace-owned, member+ write)", () => {
       (await member.app.inject({ method: "POST", url: "/datasets", headers: vh, payload: DATASET })).statusCode,
     ).toBe(201);
     await member.app.close();
+  });
+
+  it("DELETE 버전 — 등록자는 소프트 삭제(200, 이후 get 404); 타 워크스페이스는 못 지움(404)", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
+    const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    await app.inject({ method: "POST", url: "/datasets", headers: { authorization: acme }, payload: DATASET });
+
+    // 소유 아님(타 워크스페이스) → 404(존재 노출 안 함)
+    expect(
+      (
+        await app.inject({
+          method: "DELETE",
+          url: "/datasets/smoke/versions/1.0.0",
+          headers: { authorization: beta },
+        })
+      ).statusCode,
+    ).toBe(404);
+
+    // 등록자 삭제 → 200 + tombstone, 이후 get 404(데이터는 보존되지만 read 제외)
+    const del = await app.inject({
+      method: "DELETE",
+      url: "/datasets/smoke/versions/1.0.0",
+      headers: { authorization: acme },
+    });
+    expect(del.statusCode).toBe(200);
+    expect(del.json()).toMatchObject({ id: "smoke", version: "1.0.0", deleted: true });
+    expect(
+      (
+        await app.inject({
+          method: "GET",
+          url: "/datasets/smoke/versions/1.0.0",
+          headers: { authorization: acme },
+        })
+      ).statusCode,
+    ).toBe(404);
+    await app.close();
   });
 
   it("등록 → 본인은 보이고 타 워크스페이스는 못 봄(get 404); 불변성 409", async () => {

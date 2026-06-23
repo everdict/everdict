@@ -22,6 +22,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
+import type { ConnectionService } from "./connection-service.js";
+import { deleteDatasetVersion } from "./dataset-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { RunService } from "./run-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
@@ -40,6 +42,7 @@ export interface McpDeps {
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // 런타임 연결 테스트
   secretStore?: SecretStore;
+  connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — list/connect-url/disconnect
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
@@ -197,15 +200,23 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const datasets = deps.datasetRegistry;
     server.registerTool(
       "list_datasets",
-      { description: "이 워크스페이스가 보는 데이터셋(소유 + _shared 벤치마크)", inputSchema: {} },
+      {
+        description:
+          "이 워크스페이스가 보는 데이터셋 목록(소유 + _shared 벤치마크). 워크스페이스는 자격증명으로 고정된 '활성 워크스페이스'다 — 어느 워크스페이스를 다루는지 먼저 사용자에게 확인하라(파라미터로 못 바꾼다; 다른 워크스페이스면 그 워크스페이스 자격증명/세션으로 다시 붙어야 함). 각 항목은 하나의 id 아래 여러 불변 버전을 묶는다(id → versions[]). 새 데이터셋을 만들기 전에 먼저 이 목록으로 같은 id 가 이미 있는지 확인하라.",
+        inputSchema: {},
+      },
       () => run(principal, "datasets:read", async () => ok(await datasets.list(ws))),
     );
 
     server.registerTool(
       "get_dataset",
       {
-        description: "데이터셋 1건 전체(케이스 포함). version 기본 latest. 다른 워크스페이스는 NOT_FOUND",
-        inputSchema: { id: z.string(), version: z.string().optional() },
+        description:
+          "데이터셋 1건 전체(케이스 포함). 하나의 id 는 여러 불변 버전을 가지므로 version(기본 latest)으로 특정 버전을 고른다. 활성 워크스페이스 스코프 — 어느 워크스페이스인지 사용자와 확인(다른 워크스페이스 id 는 NOT_FOUND).",
+        inputSchema: {
+          id: z.string().describe("데이터셋 id(이 워크스페이스에서 고유; 같은 id 가 여러 버전을 묶는다)"),
+          version: z.string().optional().describe("semver 버전 또는 latest(기본). 생략 시 latest"),
+        },
       },
       ({ id, version }) =>
         run(principal, "datasets:read", async () => ok(await datasets.get(ws, id, version ?? "latest"))),
@@ -235,8 +246,9 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "validate_dataset",
       {
-        description: "Dataset(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
-        inputSchema: { dataset: z.string().describe("Dataset JSON") },
+        description:
+          "Dataset(JSON) dry-run 검증(등록하지 않음) — 스키마 + 활성 워크스페이스의 같은 id 기존 버전/충돌(existingVersions, versionExists)을 보여준다. create_dataset 전에 이걸로 'id 가 이미 있는지 → 새 버전으로 올릴지'를 판단하라(새 id 로 같은 데이터셋을 중복 생성하지 말 것).",
+        inputSchema: { dataset: z.string().describe("Dataset JSON (id·version·cases)") },
       },
       ({ dataset }) =>
         run(principal, "datasets:write", async () => {
@@ -267,8 +279,9 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "create_dataset",
       {
-        description: "Dataset(JSON 문자열)을 이 워크스페이스 소유로 등록(불변; 충돌 시 CONFLICT)",
-        inputSchema: { dataset: z.string().describe("Dataset JSON") },
+        description:
+          "Dataset(JSON 문자열)을 활성 워크스페이스 소유로 등록(버전 불변; 같은 id@version 을 다른 내용으로 재등록하면 CONFLICT). 등록 전 반드시 순서대로 확인하라: (1) 워크스페이스 — 어느 워크스페이스인지 사용자와 확인(자격증명으로 고정, 파라미터로 못 바꿈). (2) id — 하나의 id 가 여러 버전을 묶는다. 같은 데이터셋에 케이스를 추가/수정하는 것이라면 기존 id 를 재사용해 새 '버전'으로 올려라(예: 1.0.0 → 1.1.0). 매번 새 id 로 flatten 하게 쪼개지 말 것. (3) version — 기존과 충돌하지 않는 새 semver. 먼저 list_datasets/validate_dataset 로 기존 id·버전을 확인하라.",
+        inputSchema: { dataset: z.string().describe("Dataset JSON (id·version·cases)") },
       },
       ({ dataset }) =>
         run(principal, "datasets:write", async () => {
@@ -280,9 +293,22 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           }
           const result = DatasetSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await datasets.register(ws, result.data);
+          await datasets.register(ws, result.data, principal.subject); // 생성자 = subject(삭제 권한)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
+    );
+
+    server.registerTool(
+      "delete_dataset",
+      {
+        description:
+          "데이터셋 1건(버전)을 소프트 삭제(tombstone — list/get 에서 사라지지만 데이터는 보존, 과거 스코어카드 재현성 유지). version 필수 — 한 버전만 지운다('latest' 로 뭉뚱그리지 말 것). 순서대로 확인하라: 어느 워크스페이스(자격증명 고정) → 어떤 id → 어떤 version. 권한: 그 버전의 '생성자 본인' 또는 '워크스페이스 admin' 만(아니면 FORBIDDEN). 없는·이미 삭제된·_shared·타 워크스페이스 버전은 NOT_FOUND.",
+        inputSchema: {
+          id: z.string().describe("데이터셋 id"),
+          version: z.string().describe("삭제할 정확한 버전(필수; latest 불가 — 정확히 한 버전만 삭제)"),
+        },
+      },
+      ({ id, version }) => plain(async () => ok(await deleteDatasetVersion(datasets, principal, id, version))),
     );
   }
 
@@ -615,7 +641,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           }
           const result = BenchmarkImportBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          return ok(await benchmarks.import({ tenant: ws, ...result.data }));
+          return ok(await benchmarks.import({ tenant: ws, createdBy: principal.subject, ...result.data }));
         }),
     );
   }
@@ -648,6 +674,47 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         run(principal, "secrets:write", async () => {
           await secrets.remove(ws, name);
           return ok({ workspace: ws, name, deleted: true });
+        }),
+    );
+  }
+
+  if (deps.connectionService) {
+    const connections = deps.connectionService;
+    server.registerTool(
+      "list_connections",
+      { description: "이 워크스페이스의 외부 계정 연결 목록(토큰 없음) + 연결 가능한 provider", inputSchema: {} },
+      () =>
+        run(principal, "connections:read", async () =>
+          ok({ connections: await connections.list(ws), providers: connections.providerIds() }),
+        ),
+    );
+    server.registerTool(
+      "get_connect_url",
+      {
+        description:
+          "외부 계정 연결 시작 — 사람이 브라우저로 열 authorize URL 을 반환(에이전트가 OAuth 를 직접 완료할 수는 없음). " +
+          "self-hosted(GHE/Mattermost)는 host 지정.",
+        inputSchema: { provider: z.string().describe("github 등"), host: z.string().url().optional() },
+      },
+      ({ provider, host }) =>
+        run(principal, "connections:write", async () =>
+          ok(
+            await connections.start({
+              workspace: ws,
+              createdBy: principal.subject,
+              provider,
+              ...(host !== undefined ? { host } : {}),
+            }),
+          ),
+        ),
+    );
+    server.registerTool(
+      "disconnect_connection",
+      { description: "외부 계정 연결 해제(삭제)", inputSchema: { id: z.string() } },
+      ({ id }) =>
+        run(principal, "connections:write", async () => {
+          await connections.disconnect(ws, id);
+          return ok({ workspace: ws, id, disconnected: true });
         }),
     );
   }

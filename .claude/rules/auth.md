@@ -32,6 +32,11 @@ token courier, never an auth authority. See `docs/auth.md`.
 - **AuthZ is a flat matrix** (`authz.ts`): `can`/`authorize(principal, action)`; `authorize` throws
   `ForbiddenError` → **403**. Roles are cumulative (`admin ⊃ member ⊃ viewer`). Gate every mutating route;
   reads of another workspace's resource return **404** (no existence leak), not 403.
+- **Resource-ownership override (use sparingly).** A few actions are "admin **or** the resource's creator". Keep
+  the **admin** half in the flat matrix (e.g. `datasets:delete` = admin-only) and put the **creator** half in the
+  service layer that knows who created the row (`dataset-service.ts` `deleteDatasetVersion`: `creatorOf` vs
+  `principal.subject`). Don't smuggle per-resource ownership into the role matrix, and don't fork it across
+  transports — both the HTTP route and the MCP tool call the one shared service helper.
 - **Role mapping:** OIDC roles = `realm_access.roles ∩ assay roles`, empty ⇒ `viewer`; workspace = `workspace`
   claim, else group fallback under `groupPrefix`. Keep these pure and unit-tested with locally-minted JWTs
   (`SignJWT` + `createLocalJWKSet`) — no live Keycloak in tests.

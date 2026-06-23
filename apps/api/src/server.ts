@@ -36,6 +36,8 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
+import type { ConnectionService } from "./connection-service.js";
+import { deleteDatasetVersion } from "./dataset-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
 import type { RunService } from "./run-service.js";
@@ -85,6 +87,7 @@ export interface ServerDeps {
   // 런타임 연결 테스트 — RuntimeSpec → 라이브 백엔드 빌드 후 probe()(잡 없이 도달성/인증). main 이 시크릿+빌더로 주입.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
+  connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — 아웃바운드 OAuth (없으면 해당 라우트 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성 (없으면 /workspaces 라우트 비활성)
@@ -592,7 +595,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const parsed = DatasetSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      await deps.datasetRegistry.register(principal.workspace, parsed.data);
+      await deps.datasetRegistry.register(principal.workspace, parsed.data, principal.subject); // 생성자 = subject(삭제 권한)
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // 불변성 409
@@ -645,6 +648,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
       return sendError(reply, err); // 없으면 NotFoundError → 404
+    }
+  });
+
+  // 데이터셋 버전 소프트 삭제 — 그 버전의 생성자 본인 또는 워크스페이스 admin 만(deleteDatasetVersion 가 게이트).
+  // 삭제는 tombstone(데이터 보존, read 제외) → 과거 스코어카드 재현성 유지. 없는/이미 삭제/비소유 버전은 404.
+  app.delete<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version", async (req, reply) => {
+    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      return reply.send(await deleteDatasetVersion(deps.datasetRegistry, principal, req.params.id, req.params.version));
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 / 없음 404
     }
   });
 
@@ -751,7 +767,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const parsed = BenchmarkImportBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      const rec = await deps.benchmarkService.import({ tenant: principal.workspace, ...parsed.data });
+      const rec = await deps.benchmarkService.import({
+        tenant: principal.workspace,
+        createdBy: principal.subject,
+        ...parsed.data,
+      });
       return reply.code(201).send(rec);
     } catch (err) {
       return sendError(reply, err); // BadRequest(미지원 id)/불변성 409/HF 인출 실패
@@ -1318,6 +1338,72 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- connections (외부 계정 연결; 아웃바운드 OAuth — 토큰은 at-rest 암호화, client_secret/토큰은 브라우저로 안 나감) ---
+  app.get("/connections", async (req, reply) => {
+    if (!deps.connectionService) return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "connections:read");
+      return reply.send({
+        connections: await deps.connectionService.list(principal.workspace),
+        providers: deps.connectionService.providerIds(), // 연결 가능한 provider(설정된 것만)
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // OAuth 시작 — authorizeUrl 을 만들어 반환(웹이 브라우저를 그 URL 로 보낸다). authed.
+  app.post<{ Params: { provider: string } }>("/connections/:provider/start", async (req, reply) => {
+    if (!deps.connectionService) return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ host: z.string().url().optional() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      gate(principal, "connections:write");
+      const { authorizeUrl } = await deps.connectionService.start({
+        workspace: principal.workspace,
+        createdBy: principal.subject,
+        provider: req.params.provider,
+        requestBaseUrl: baseUrl(req),
+        ...(body.data.host !== undefined ? { host: body.data.host } : {}),
+      });
+      return reply.send({ authorizeUrl });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // OAuth 콜백 — provider 가 직접 호출(Bearer 없음). state 1회 소비로 인증. 항상 웹으로 302(브라우저는 5xx 안 봄).
+  app.get("/connections/callback", async (req, reply) => {
+    if (!deps.connectionService) return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    const q = z
+      .object({ code: z.string().optional(), state: z.string().optional(), error: z.string().optional() })
+      .parse(req.query ?? {});
+    const { redirectTo } = await deps.connectionService.callback({
+      requestBaseUrl: baseUrl(req),
+      ...(q.code !== undefined ? { code: q.code } : {}),
+      ...(q.state !== undefined ? { state: q.state } : {}),
+      ...(q.error !== undefined ? { error: q.error } : {}),
+    });
+    return reply.redirect(redirectTo);
+  });
+
+  app.delete<{ Params: { id: string } }>("/connections/:id", async (req, reply) => {
+    if (!deps.connectionService) return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "connections:write");
+      await deps.connectionService.disconnect(principal.workspace, req.params.id);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- workspace settings (계측 정책 등; admin 전용) ---
   app.get("/workspace/settings", async (req, reply) => {
     if (!deps.settingsStore) return reply.code(404).send({ code: "NOT_FOUND", message: "설정 저장소 미설정" });
@@ -1440,6 +1526,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           runtimeRegistry: deps.runtimeRegistry,
           probeRuntime: deps.probeRuntime,
           secretStore: deps.secretStore,
+          connectionService: deps.connectionService,
           settingsStore: deps.settingsStore,
           benchmarkService: deps.benchmarkService,
           workspaceService: deps.workspaceService,

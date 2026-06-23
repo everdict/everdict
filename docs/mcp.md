@@ -21,7 +21,8 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `get_dataset` | `datasets:read` | one dataset incl. cases (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `diff_datasets` | `datasets:read` | version diff (`id`, `base`, `candidate`; `latest` ok): added/removed/changed cases + meta |
 | `validate_dataset` | `datasets:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
-| `create_dataset` | `datasets:write` (member+) | register a `Dataset` (immutable → `CONFLICT`) |
+| `create_dataset` | `datasets:write` (member+) | register a `Dataset` (immutable → `CONFLICT`); stamps `createdBy` = subject |
+| `delete_dataset` | creator **or** `datasets:delete` (admin) | soft-delete one version (tombstone, data preserved); exact `version` required; not creator/admin → `FORBIDDEN`, absent → `NOT_FOUND` |
 | `list_judges` | `judges:read` (viewer+) | workspace-owned + `_shared` Agent Judges (model \| harness) |
 | `get_judge` | `judges:read` | one `JudgeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_judge` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |

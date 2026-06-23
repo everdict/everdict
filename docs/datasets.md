@@ -20,9 +20,19 @@ Datasets reuse the **`HarnessRegistry` ownership model** (`packages/registry`):
 - **Immutable versions** — re-registering `(id, version)` with different content → `CONFLICT` (identical =
   idempotent no-op). This is *why* it's a registry, not mutable CRUD: baseline↔candidate comparison is only
   meaningful if the dataset is frozen. A dataset evolves by publishing a new version (`1.0.0 → 1.1.0`), leaving
-  past scorecards reproducible.
+  past scorecards reproducible. (So agent tools should add cases as a **new version of the existing id**, never a
+  brand-new flattened id — the MCP `create_dataset` description spells this out.)
+- **Soft delete (tombstone), not mutate** — a version can be retired (`DELETE /datasets/:id/versions/:version`),
+  but it's a **tombstone**: the row is hidden from every read (`get`/`list`/`versions`/`latest` exclude it) while
+  the data is **preserved** so past scorecards stay reproducible (no hard delete). Re-registering the identical
+  content revives it. The version's *content* is still immutable — delete hides, it never edits.
+- **Who can delete** — each version records its **`createdBy`** (the registering subject; `_shared`/file seeds
+  have none). Deletion is gated to that **creator** *or* a **workspace admin** (`datasets:delete`, admin-only in
+  the role matrix + a service-layer creator override in `dataset-service.ts`). Only **tenant-owned** versions are
+  deletable — a `_shared` dataset seen via fallback reads `404`, never deletable by a tenant.
 - **Role-gating** — `datasets:read` = viewer+, `datasets:write` = **member+** (datasets are collaborative
-  eval *content*; harness specs stay admin-only because they define execution/placement).
+  eval *content*; harness specs stay admin-only because they define execution/placement). `datasets:delete` =
+  admin (the creator override lets the original author delete their own without being admin).
 
 ## Adding benchmarks (source → dataset)
 A benchmark = a `BenchmarkAdapterSpec` (`@assay/datasets`): `source` (HuggingFace dataset or jsonl) + `mapping`
@@ -41,13 +51,17 @@ gated HF sources authenticate with the tenant SecretStore `HF_TOKEN`. **BFF↔MC
 `preview_benchmark_source` + `import_benchmark` mirror the routes. See `docs/mcp.md`.
 
 ## Contract (`@assay/core`)
-`Dataset = { id, version, description?, cases: EvalCase[], tags: string[] }` (`DatasetSchema`).
+`Dataset = { id, version, description?, cases: EvalCase[], tags: string[] }` (`DatasetSchema`). `createdBy` and
+the tombstone are **registry metadata** (not on the Dataset content) — so `specsEqual`/immutability stay
+content-only and a delete never touches a version's bytes.
 
 ## Registry (`@assay/registry`)
-`DatasetRegistry` — `register / get / has / versions / ownVersions / list`, mirroring `HarnessRegistry`.
-Impls: `InMemoryDatasetRegistry` (dev/test) and `PgDatasetRegistry` (Postgres, `dataset` jsonb, PK
-`(tenant,id,version)`, `specsEqual` conflict check). `apps/api` swaps them by `DATABASE_URL`. Migration:
-`packages/db/migrations/0005_create_datasets.sql`.
+`DatasetRegistry` — `register(…, createdBy?) / get / has / versions / ownVersions / list / creatorOf / softDelete`,
+mirroring `HarnessRegistry` plus the soft-delete pair. All reads exclude tombstoned versions; `creatorOf` /
+`softDelete` act on **tenant-owned, live** versions only (no `_shared` fallback) and `404` otherwise. Impls:
+`InMemoryDatasetRegistry` (dev/test) and `PgDatasetRegistry` (Postgres, `dataset` jsonb + `created_by` /
+`deleted_at`, PK `(tenant,id,version)`, `specsEqual` conflict check, reads filtered `WHERE deleted_at IS NULL`).
+`apps/api` swaps them by `DATABASE_URL`. Migrations: `0005_create_datasets.sql` + `0018_dataset_created_by_deleted_at.sql`.
 
 ## BFF ↔ MCP parity
 Every dataset capability is one feature over two transports — the same `DatasetRegistry` core, one auth core,
@@ -55,14 +69,18 @@ workspace-scoped reads, `datasets:write` gating, `409`/`CONFLICT` on the immutab
 
 | HTTP route | MCP tool | Action |
 |---|---|---|
-| `POST /datasets` | `create_dataset` | `datasets:write` |
+| `POST /datasets` | `create_dataset` | `datasets:write` (stamps `createdBy`) |
 | `POST /datasets/validate` (dry-run) | `validate_dataset` | `datasets:write` |
 | `GET /datasets` | `list_datasets` | `datasets:read` |
 | `GET /datasets/:id/versions/:version` | `get_dataset` | `datasets:read` |
+| `DELETE /datasets/:id/versions/:version` | `delete_dataset` | creator **or** `datasets:delete` (admin) |
 | `GET /datasets/:id/diff?base=&candidate=` | `diff_datasets` | `datasets:read` |
 
 `validate` is a dry-run: schema + this workspace's existing versions/conflict, no write. `version` may be
-`latest`. Other-workspace reads → `404`/`NOT_FOUND` (no existence leak). See `docs/api.md`, `docs/mcp.md`,
+`latest` (except `delete`, which **requires an exact version** — it removes exactly one). The shared
+`deleteDatasetVersion` (`apps/api/src/dataset-service.ts`) is the single authz core both transports call (no
+fork): `creatorOf` → `404` if not owned/live, then creator-or-admin gate → `403`/`FORBIDDEN`, then `softDelete`.
+Other-workspace reads → `404`/`NOT_FOUND` (no existence leak). See `docs/api.md`, `docs/mcp.md`,
 `docs/web.md`, `docs/tenancy.md`.
 
 ## Version diff (`diffDatasets`, `@assay/datasets`)
