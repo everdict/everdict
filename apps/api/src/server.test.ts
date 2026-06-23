@@ -26,10 +26,10 @@ import {
 } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
-import { ConnectionService } from "./connection-service.js";
+import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
-import type { OAuthProvider } from "./oauth/provider.js";
 import { MembershipService } from "./membership-service.js";
+import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
@@ -108,11 +108,10 @@ const roleAuth = (roles: string[], workspace = "acme"): Authenticator => ({
 });
 
 // 외부 호출 없는 fake OAuth provider — 라우트/서비스 dance 만 결정적으로 검증(실제 GitHub HTTP 없음).
-const fakeGithub: OAuthProvider = {
-  id: "github",
-  scopes: ["repo"],
-  authorizeUrl: ({ state, redirectUri }) =>
-    `https://github.test/login/oauth/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}`,
+const fakeOAuth: OAuthProvider = {
+  defaultScopes: ["repo"],
+  authorizeUrl: ({ config, state, redirectUri }) =>
+    `https://gh.test/login/oauth/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}&host=${config.host ?? ""}`,
   exchange: async () => ({ accessToken: "gho_test", scopes: ["repo", "read:packages"] }),
   whoami: async () => ({ label: "octocat" }),
 };
@@ -164,7 +163,11 @@ function server(
   const connectionService = new ConnectionService({
     store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 9))),
     states: new InMemoryOAuthStateStore(),
-    providers: new Map<string, OAuthProvider>([["github", fakeGithub]]),
+    providers: new Map<string, ProviderEntry>([
+      ["github", { impl: fakeOAuth, selfHosted: false, default: { clientId: "cid", clientSecret: "csec" } }],
+      ["github-enterprise", { impl: fakeOAuth, selfHosted: true }],
+    ]),
+    secretsFor: async () => ({ GHE_SECRET: "ghs_real" }), // self-hosted client_secret name-ref
     config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
   });
   const app = buildServer({
@@ -352,11 +355,17 @@ describe("API — authorization (roles)", () => {
 });
 
 describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", () => {
-  it("admin: GET /connections → 200 {connections:[], providers:['github']}", async () => {
+  it("admin: GET /connections → 200 {connections:[], providers:[{id,selfHosted}]}", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
     expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({ connections: [], providers: ["github"] });
+    expect(res.json()).toEqual({
+      connections: [],
+      providers: [
+        { id: "github", selfHosted: false },
+        { id: "github-enterprise", selfHosted: true },
+      ],
+    });
     await app.close();
   });
   it("viewer: connections:read 는 admin 전용 → 403", async () => {
@@ -382,7 +391,7 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     const start = await app.inject({ method: "POST", url: "/connections/github/start", headers: h, payload: {} });
     expect(start.statusCode).toBe(200);
     const authorizeUrl = new URL(start.json().authorizeUrl as string);
-    expect(authorizeUrl.origin).toBe("https://github.test");
+    expect(authorizeUrl.origin).toBe("https://gh.test");
     // redirect_uri 는 apiPublicUrl 베이스.
     expect(authorizeUrl.searchParams.get("redirect_uri")).toBe("http://api.test/connections/callback");
     const state = authorizeUrl.searchParams.get("state");
@@ -397,7 +406,11 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     const list = await app.inject({ method: "GET", url: "/connections", headers: h });
     const body = list.json();
     expect(body.connections).toHaveLength(1);
-    expect(body.connections[0]).toMatchObject({ provider: "github", accountLabel: "octocat", scopes: ["repo", "read:packages"] });
+    expect(body.connections[0]).toMatchObject({
+      provider: "github",
+      accountLabel: "octocat",
+      scopes: ["repo", "read:packages"],
+    });
     expect(JSON.stringify(body)).not.toContain("gho_");
 
     // 재사용된 state 는 invalid → 에러 리다이렉트.
@@ -409,6 +422,28 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     const id = body.connections[0].id as string;
     expect((await app.inject({ method: "DELETE", url: `/connections/${id}`, headers: h })).statusCode).toBe(204);
     expect((await app.inject({ method: "GET", url: "/connections", headers: h })).json().connections).toHaveLength(0);
+    await app.close();
+  });
+  it("self-hosted(GHE): host+clientId+clientSecretName 누락→400, 갖추면 authorizeUrl(host 반영)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const h = { authorization: "Bearer x" };
+    // 누락 → 400.
+    const bad = await app.inject({
+      method: "POST",
+      url: "/connections/github-enterprise/start",
+      headers: h,
+      payload: { host: "https://ghe.acme.io" },
+    });
+    expect(bad.statusCode).toBe(400);
+    // 갖추면 → authorizeUrl 에 GHE host 반영(SecretStore 의 GHE_SECRET 로 client_secret resolve).
+    const ok = await app.inject({
+      method: "POST",
+      url: "/connections/github-enterprise/start",
+      headers: h,
+      payload: { host: "https://ghe.acme.io", clientId: "Iv1.cafe", clientSecretName: "GHE_SECRET" },
+    });
+    expect(ok.statusCode).toBe(200);
+    expect(new URL(ok.json().authorizeUrl as string).searchParams.get("host")).toBe("https://ghe.acme.io");
     await app.close();
   });
 });

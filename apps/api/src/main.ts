@@ -12,6 +12,9 @@ import {
 } from "@assay/backends";
 import type { RuntimeSpec } from "@assay/core";
 import {
+  type ConnectionStore,
+  InMemoryConnectionStore,
+  InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
   InMemorySecretStore,
@@ -20,6 +23,9 @@ import {
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
+  type OAuthStateStore,
+  PgConnectionStore,
+  PgOAuthStateStore,
   PgRunStore,
   PgScorecardStore,
   PgSecretStore,
@@ -78,8 +84,11 @@ import {
 import { S3ArtifactStore } from "@assay/storage";
 import { buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
+import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
+import { githubProvider } from "./oauth/github.js";
+import { mattermostProvider } from "./oauth/mattermost.js";
 import { ProfileService } from "./profile-service.js";
 import { RunService } from "./run-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
@@ -114,6 +123,8 @@ async function main(): Promise<void> {
     userProfileStore,
     inviteStore,
     secretStore,
+    connectionStore,
+    oauthStateStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   const membershipService = new MembershipService(workspaceStore, inviteStore);
@@ -207,6 +218,19 @@ async function main(): Promise<void> {
     benchmarks: benchmarkRegistry,
     secretsFor: runtimeSecretsFor,
   });
+  // 외부 계정 연결(Connected accounts): github.com 은 env 기본 OAuth App(원클릭), GHE/Mattermost 는 host+SecretStore
+  // name-ref 자격증명으로 연결. 토큰은 secretStore 와 같은 cipher 로 암호화. self-hosted client_secret 은 runtimeSecretsFor 로 resolve.
+  const connectionService = new ConnectionService({
+    store: connectionStore,
+    states: oauthStateStore,
+    providers: buildOAuthProviders(),
+    secretsFor: runtimeSecretsFor,
+    config: {
+      webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001", // 콜백 후 브라우저 복귀 베이스(dev 기본 웹 포트)
+      ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // OAuth redirect_uri 베이스
+    },
+  });
+
   const app = buildServer({
     service,
     scorecardService,
@@ -225,6 +249,7 @@ async function main(): Promise<void> {
     membershipService,
     profileService,
     secretStore,
+    connectionService,
     authenticator: buildAuthenticator(keyStore),
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
@@ -258,6 +283,8 @@ interface Persistence {
   userProfileStore: UserProfileStore; // 유저 프로필(이름/유저네임/아바타) — 항상 사용 가능
   inviteStore: WorkspaceInviteStore; // 멤버 초대(토큰/링크 redemption) — 항상 사용 가능
   secretStore: SecretStore; // 항상 사용 가능(기본 ON) — KEK 는 ASSAY_SECRETS_KEY, 없으면 임시 키 자동생성
+  connectionStore: ConnectionStore; // 외부 계정 연결(OAuth 토큰) — secretStore 와 같은 cipher 로 at-rest 암호화
+  oauthStateStore: OAuthStateStore; // OAuth authorize→callback 1회용 pending state
 }
 
 // at-rest 암호화 KEK: ASSAY_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
@@ -298,6 +325,8 @@ async function makePersistence(): Promise<Persistence> {
       userProfileStore: new InMemoryUserProfileStore(),
       inviteStore: new InMemoryWorkspaceInviteStore(workspaceStore),
       secretStore: new InMemorySecretStore(cipher),
+      connectionStore: new InMemoryConnectionStore(cipher),
+      oauthStateStore: new InMemoryOAuthStateStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -321,6 +350,8 @@ async function makePersistence(): Promise<Persistence> {
     userProfileStore: new PgUserProfileStore(client),
     inviteStore: new PgWorkspaceInviteStore(client),
     secretStore: new PgSecretStore(client, cipher),
+    connectionStore: new PgConnectionStore(client, cipher),
+    oauthStateStore: new PgOAuthStateStore(client),
   };
 }
 
@@ -393,6 +424,32 @@ async function seedSharedRuntimes(registry: RuntimeRegistry): Promise<void> {
   } catch {
     // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
   }
+}
+
+// 외부 계정 연결 provider 레지스트리.
+//  - github (github.com): env 기본 OAuth App 이 있으면 원클릭(default). 없으면 등록은 되나 connectable 목록엔 안 뜸.
+//  - github-enterprise: 같은 github impl + self-hosted(연결 시 host + clientId + clientSecretName 입력).
+//  - mattermost: self-hosted 전용.
+// self-hosted 의 client_secret 값은 워크스페이스 SecretStore 에서 NAME 으로 resolve(값은 spec/state 에 저장 안 함).
+function buildOAuthProviders(): Map<string, ProviderEntry> {
+  const github = githubProvider();
+  const ghId = process.env.GITHUB_OAUTH_CLIENT_ID;
+  const ghSecret = process.env.GITHUB_OAUTH_CLIENT_SECRET;
+  const providers = new Map<string, ProviderEntry>();
+  providers.set("github", {
+    impl: github,
+    selfHosted: false,
+    ...(ghId && ghSecret ? { default: { clientId: ghId, clientSecret: ghSecret } } : {}),
+  });
+  providers.set("github-enterprise", { impl: github, selfHosted: true });
+  providers.set("mattermost", { impl: mattermostProvider(), selfHosted: true });
+  if (ghId && ghSecret)
+    console.error("▶ connections: GitHub OAuth(github.com) 원클릭 활성 + GHE/Mattermost self-hosted");
+  else
+    console.warn(
+      "▶ connections: GITHUB_OAUTH_CLIENT_ID/SECRET 미설정 — github.com 원클릭 비활성(GHE/Mattermost 는 host+SecretStore 자격증명으로 연결 가능).",
+    );
+  return providers;
 }
 
 // 컨트롤플레인이 소유하는 인증: KEYCLOAK_ISSUER 면 OIDC(JWT) + 항상 API 키. 둘 다 workspace 로 해석.

@@ -2,12 +2,15 @@ import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import type { CaseResult, RuntimeSpec } from "@assay/core";
 import {
+  InMemoryConnectionStore,
+  InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryScorecardStore,
   InMemoryTenantKeyStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
+  aesGcmCipher,
 } from "@assay/db";
 import {
   InMemoryDatasetRegistry,
@@ -19,8 +22,10 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
+import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { buildMcpServer } from "./mcp.js";
 import { MembershipService } from "./membership-service.js";
+import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 
@@ -61,11 +66,27 @@ const DATASET = JSON.stringify({
 });
 
 let n = 0;
+const fakeOAuth: OAuthProvider = {
+  defaultScopes: ["repo"],
+  authorizeUrl: ({ state, redirectUri }) => `https://github.test/auth?state=${state}&redirect_uri=${redirectUri}`,
+  exchange: async () => ({ accessToken: "gho_test", scopes: ["repo"] }),
+  whoami: async () => ({ label: "octocat" }),
+};
+
 function harness() {
   const datasetRegistry = new InMemoryDatasetRegistry();
   const workspaceStore = new InMemoryWorkspaceStore();
   const harnessTemplates = new InMemoryHarnessTemplateRegistry();
   return {
+    connectionService: new ConnectionService({
+      store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 5))),
+      states: new InMemoryOAuthStateStore(),
+      providers: new Map<string, ProviderEntry>([
+        ["github", { impl: fakeOAuth, selfHosted: false, default: { clientId: "cid", clientSecret: "csec" } }],
+      ]),
+      secretsFor: async () => ({}),
+      config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
+    }),
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     harnessTemplates,
     harnessInstances: new InMemoryHarnessInstanceRegistry(harnessTemplates),
@@ -120,13 +141,17 @@ describe("MCP tools", () => {
       "delete_dataset",
       "diff_datasets",
       "diff_scorecards",
+      "disconnect_connection",
+      "get_connect_url",
       "get_dataset",
       "get_judge",
       "get_run",
       "get_runtime",
       "get_scorecard",
       "ingest_scorecard",
+      "leave_workspace",
       "list_api_keys",
+      "list_connections",
       "list_datasets",
       "list_harness_templates",
       "list_harnesses",
@@ -165,6 +190,27 @@ describe("MCP tools", () => {
     // 잘못된 JSON → 오류.
     const bad = await viewer.callTool({ name: "register_harness", arguments: { spec: "{not json" } });
     expect(bad.isError).toBe(true);
+  });
+
+  it("connections: admin 은 list/get_connect_url/disconnect, viewer 는 거부(connections:* = admin)", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"]);
+    const viewer = await connect(deps, ["viewer"]);
+
+    // viewer 는 connections:read 없음 → isError.
+    expect((await viewer.callTool({ name: "list_connections", arguments: {} })).isError).toBe(true);
+
+    // admin list → connections:[] + providers:['github'].
+    const listed = JSON.parse(text(await admin.callTool({ name: "list_connections", arguments: {} })));
+    expect(listed).toEqual({ connections: [], providers: [{ id: "github", selfHosted: false }] });
+
+    // get_connect_url → authorizeUrl(사람이 열 URL). 에이전트는 OAuth 를 직접 완료하지 못하지만 시작은 가능.
+    const url = JSON.parse(text(await admin.callTool({ name: "get_connect_url", arguments: { provider: "github" } })));
+    expect(url.authorizeUrl).toContain("https://github.test/auth?state=");
+
+    // disconnect (없는 id 라도 멱등) → disconnected:true.
+    const dis = JSON.parse(text(await admin.callTool({ name: "disconnect_connection", arguments: { id: "x" } })));
+    expect(dis).toMatchObject({ disconnected: true });
   });
 
   it("member: submit_run + register_harness(instance) 가능", async () => {

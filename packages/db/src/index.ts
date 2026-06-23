@@ -49,6 +49,21 @@ export {
   PgSecretStore,
 } from "./secret-store.js";
 export {
+  type ConnectionMeta,
+  type ConnectionStore,
+  type ConnectionToken,
+  type CreateConnectionInput,
+  InMemoryConnectionStore,
+  PgConnectionStore,
+} from "./connection-store.js";
+export {
+  type OAuthStatePending,
+  type OAuthStateStore,
+  InMemoryOAuthStateStore,
+  PgOAuthStateStore,
+  generateOAuthState,
+} from "./oauth-state-store.js";
+export {
   type WorkspaceSettings,
   type WorkspaceSettingsStore,
   WorkspaceSettingsSchema,

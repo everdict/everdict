@@ -19,6 +19,8 @@ export type WebAction =
   | 'runtimes:write'
   | 'secrets:read'
   | 'secrets:write'
+  | 'connections:read'
+  | 'connections:write'
   | 'keys:read'
   | 'keys:write'
   | 'members:read'
@@ -78,6 +80,8 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:write', // 런타임 등록은 role 무관(자격증명 값은 secrets:write=admin 로 분리)
     'secrets:read', // 시크릿 관리 = admin
     'secrets:write',
+    'connections:read', // 외부 계정 연결(OAuth 토큰) = admin(secrets 와 동일 근거)
+    'connections:write',
     'keys:read', // API 키 발급/취소 = admin(키는 워크스페이스 admin 권한을 가짐)
     'keys:write',
     'members:read',

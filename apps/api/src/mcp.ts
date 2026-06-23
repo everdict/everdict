@@ -684,10 +684,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const connections = deps.connectionService;
     server.registerTool(
       "list_connections",
-      { description: "이 워크스페이스의 외부 계정 연결 목록(토큰 없음) + 연결 가능한 provider", inputSchema: {} },
+      {
+        description: "이 워크스페이스의 외부 계정 연결 목록(토큰 없음) + 연결 가능한 provider({id, selfHosted})",
+        inputSchema: {},
+      },
       () =>
         run(principal, "connections:read", async () =>
-          ok({ connections: await connections.list(ws), providers: connections.providerIds() }),
+          ok({ connections: await connections.list(ws), providers: connections.providerInfos() }),
         ),
     );
     server.registerTool(
@@ -695,10 +698,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       {
         description:
           "외부 계정 연결 시작 — 사람이 브라우저로 열 authorize URL 을 반환(에이전트가 OAuth 를 직접 완료할 수는 없음). " +
-          "self-hosted(GHE/Mattermost)는 host 지정.",
-        inputSchema: { provider: z.string().describe("github 등"), host: z.string().url().optional() },
+          "self-hosted(github-enterprise/mattermost)는 host + clientId + clientSecretName(SecretStore 키 이름) 지정.",
+        inputSchema: {
+          provider: z.string().describe("github | github-enterprise | mattermost"),
+          host: z.string().url().optional(),
+          clientId: z.string().optional(),
+          clientSecretName: z.string().optional().describe("client_secret 이 저장된 SecretStore 키 이름"),
+        },
       },
-      ({ provider, host }) =>
+      ({ provider, host, clientId, clientSecretName }) =>
         run(principal, "connections:write", async () =>
           ok(
             await connections.start({
@@ -706,6 +714,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               createdBy: principal.subject,
               provider,
               ...(host !== undefined ? { host } : {}),
+              ...(clientId !== undefined ? { clientId } : {}),
+              ...(clientSecretName !== undefined ? { clientSecretName } : {}),
             }),
           ),
         ),
@@ -844,7 +854,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "get_profile",
       {
-        description: "내 프로필(이름/유저네임/아바타) 조회. 없으면 빈 객체. email 은 SSO(읽기전용)라 whoami/me 에서 본다.",
+        description:
+          "내 프로필(이름/유저네임/아바타) 조회. 없으면 빈 객체. email 은 SSO(읽기전용)라 whoami/me 에서 본다.",
         inputSchema: {},
       },
       () => plain(async () => ok((await profiles.get(principal.subject)) ?? {})),

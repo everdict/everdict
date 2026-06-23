@@ -2,37 +2,51 @@
 
 import { InvitesManager } from '@/features/manage-invites'
 import { MembersManager } from '@/features/manage-members'
+import { ConnectionsManager } from '@/features/manage-workspace-connections'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { SettingsForm, type WorkspaceSettings } from '@/features/workspace-settings'
+import type { ConnectionMeta, ProviderInfo } from '@/entities/connection'
 import type { Invite, Member } from '@/entities/member'
 import type { SecretMeta } from '@/entities/secret'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
-type TabKey = 'general' | 'model' | 'cluster' | 'members'
+type TabKey = 'general' | 'model' | 'cluster' | 'connections' | 'members'
 
-// 워크스페이스 설정 탭: 일반(정책) · 모델 키 · 클러스터 자격증명 · 멤버. 권한 없는 탭은 숨긴다(최종 강제는 컨트롤플레인).
+// 워크스페이스 설정 탭: 일반(정책) · 모델 키 · 클러스터 자격증명 · 연결된 계정 · 멤버. 권한 없는 탭은 숨긴다(최종 강제는 컨트롤플레인).
 export function SettingsTabs(props: {
   settings: WorkspaceSettings
   secrets: SecretMeta[]
+  connections: ConnectionMeta[]
+  providers: ProviderInfo[]
   members: Member[]
   invites: Invite[]
   canReadSettings: boolean
   canWriteSettings: boolean
   canReadSecrets: boolean
   canWriteSecrets: boolean
+  canReadConnections: boolean
+  canWriteConnections: boolean
   canReadMembers: boolean
   canWriteMembers: boolean
+  initialTab?: string // ?tab=… (OAuth 콜백 복귀 시 연결 탭으로)
+  connected?: string // ?connected=<provider>
+  connectError?: string // ?error=<reason>
 }) {
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'general', label: '일반', show: props.canReadSettings },
     { key: 'model', label: '모델 키', show: props.canReadSecrets },
     { key: 'cluster', label: '클러스터 자격증명', show: props.canReadSecrets },
+    { key: 'connections', label: '연결된 계정', show: props.canReadConnections },
     { key: 'members', label: '멤버', show: props.canReadMembers },
   ]
   const visible = tabs.filter((t) => t.show)
+  const defaultTab =
+    props.initialTab && visible.some((t) => t.key === props.initialTab)
+      ? props.initialTab
+      : (visible[0]?.key ?? 'general')
 
   return (
-    <Tabs defaultValue={visible[0]?.key ?? 'general'} className="space-y-5">
+    <Tabs defaultValue={defaultTab} className="space-y-5">
       <TabsList>
         {visible.map((t) => (
           <TabsTrigger key={t.key} value={t.key}>
@@ -52,6 +66,15 @@ export function SettingsTabs(props: {
           variant="cluster"
           secrets={props.secrets}
           canWrite={props.canWriteSecrets}
+        />
+      </TabsContent>
+      <TabsContent value="connections">
+        <ConnectionsManager
+          connections={props.connections}
+          providers={props.providers}
+          canWrite={props.canWriteConnections}
+          {...(props.connected !== undefined ? { connected: props.connected } : {})}
+          {...(props.connectError !== undefined ? { error: props.connectError } : {})}
         />
       </TabsContent>
       <TabsContent value="members">

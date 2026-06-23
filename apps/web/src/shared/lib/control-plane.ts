@@ -173,6 +173,16 @@ export const controlPlane = {
     }),
   deleteSecret: (auth: AuthContext, name: string) =>
     callVoid(auth, `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  // 외부 계정 연결(Connected accounts, 아웃바운드 OAuth). 목록=메타만(토큰 없음) + 연결 가능한 provider.
+  // start 는 authorizeUrl 을 돌려주고(브라우저를 그 URL 로 보낸다), disconnect 는 204(callVoid).
+  listConnections: <T>(auth: AuthContext) => call<T>(auth, '/connections'),
+  startConnection: <T>(auth: AuthContext, provider: string, body: unknown) =>
+    call<T>(auth, `/connections/${encodeURIComponent(provider)}/start`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  disconnectConnection: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // API 키(에이전트/MCP 용 ak_…). 발급 시 평문은 1회만 반환, 목록은 prefix 만(평문/해시 미반환), 취소(204).
   listKeys: <T>(auth: AuthContext) => call<T>(auth, '/keys'),
   createKey: <T>(auth: AuthContext, body: unknown) =>

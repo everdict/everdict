@@ -267,8 +267,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // 내 프로필 수정(self-serve — 역할 게이트 없음, subject = 본인). email 은 SSO 라 불변(여기서 안 받음).
   app.patch("/me/profile", async (req, reply) => {
-    if (!deps.profileService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "프로필 서비스 미설정" });
+    if (!deps.profileService) return reply.code(404).send({ code: "NOT_FOUND", message: "프로필 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
@@ -1380,14 +1379,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // --- connections (외부 계정 연결; 아웃바운드 OAuth — 토큰은 at-rest 암호화, client_secret/토큰은 브라우저로 안 나감) ---
   app.get("/connections", async (req, reply) => {
-    if (!deps.connectionService) return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    if (!deps.connectionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "connections:read");
       return reply.send({
         connections: await deps.connectionService.list(principal.workspace),
-        providers: deps.connectionService.providerIds(), // 연결 가능한 provider(설정된 것만)
+        providers: deps.connectionService.providerInfos(), // 연결 가능한 provider({id, selfHosted})
       });
     } catch (err) {
       return sendError(reply, err);
@@ -1396,10 +1396,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // OAuth 시작 — authorizeUrl 을 만들어 반환(웹이 브라우저를 그 URL 로 보낸다). authed.
   app.post<{ Params: { provider: string } }>("/connections/:provider/start", async (req, reply) => {
-    if (!deps.connectionService) return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    if (!deps.connectionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    const body = z.object({ host: z.string().url().optional() }).safeParse(req.body ?? {});
+    // self-hosted(GHE/Mattermost): host + clientId(공개) + clientSecretName(SecretStore 키). github.com 은 모두 생략.
+    const body = z
+      .object({
+        host: z.string().url().optional(),
+        clientId: z.string().min(1).optional(),
+        clientSecretName: z.string().min(1).optional(),
+      })
+      .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       gate(principal, "connections:write");
@@ -1409,6 +1417,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         provider: req.params.provider,
         requestBaseUrl: baseUrl(req),
         ...(body.data.host !== undefined ? { host: body.data.host } : {}),
+        ...(body.data.clientId !== undefined ? { clientId: body.data.clientId } : {}),
+        ...(body.data.clientSecretName !== undefined ? { clientSecretName: body.data.clientSecretName } : {}),
       });
       return reply.send({ authorizeUrl });
     } catch (err) {
@@ -1418,7 +1428,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // OAuth 콜백 — provider 가 직접 호출(Bearer 없음). state 1회 소비로 인증. 항상 웹으로 302(브라우저는 5xx 안 봄).
   app.get("/connections/callback", async (req, reply) => {
-    if (!deps.connectionService) return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    if (!deps.connectionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
     const q = z
       .object({ code: z.string().optional(), state: z.string().optional(), error: z.string().optional() })
       .parse(req.query ?? {});
@@ -1432,7 +1443,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.delete<{ Params: { id: string } }>("/connections/:id", async (req, reply) => {
-    if (!deps.connectionService) return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    if (!deps.connectionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {

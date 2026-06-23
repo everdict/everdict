@@ -39,6 +39,12 @@ describe("authz", () => {
     expect(can(p(["member"]), "runtimes:write")).toBe(true);
     expect(can(p(["admin"]), "runtimes:write")).toBe(true);
 
+    // 외부 계정 연결(OAuth 토큰)은 강력 → 읽기·쓰기 모두 admin 전용(secrets 와 동일).
+    expect(can(p(["viewer"]), "connections:read")).toBe(false);
+    expect(can(p(["member"]), "connections:write")).toBe(false);
+    expect(can(p(["admin"]), "connections:read")).toBe(true);
+    expect(can(p(["admin"]), "connections:write")).toBe(true);
+
     // 멤버 조회는 viewer+, 멤버 관리(역할변경/제거/초대)는 admin 전용.
     expect(can(p(["viewer"]), "members:read")).toBe(true);
     expect(can(p(["viewer"]), "members:write")).toBe(false);

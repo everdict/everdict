@@ -35,8 +35,8 @@ app/        Next App Router — landing(/), [workspace]/{layout(shell+멤버십 
             onboarding·new-workspace·invite ; api/auth/[...nextauth] ; middleware(URL 첫 세그먼트 → x-assay-active-workspace 헤더 주입)
 widgets/    page-level composition: app-shell (sidebar+topbar), workspace-switcher (Linear-style sidebar dropdown:
             현재 워크스페이스 + 전환(= /{workspace} 로 이동) + "새 워크스페이스"), scorecard-summary, runs-table, trace-timeline
-features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace (client form/액션 → control plane; 워크스페이스 전환은 URL 이동이라 별도 액션 없음)
-entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace)
+features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace, manage-workspace-secrets, manage-workspace-connections (연결된 계정/OAuth: Connect 버튼→start 액션→authorizeUrl 로 브라우저 이동; 목록/해제) (client form/액션 → control plane; 워크스페이스 전환은 URL 이동이라 별도 액션 없음)
+entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace, secret, connection)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state/callout/section-header/theme-toggle), lib (utils, control-plane),
             config (env), providers (query), auth (Keycloak token store/refresh, server-only access-token (getToken),
             authContext + currentPrincipal + can, workspace-scope(URL↔쿠키↔헤더 상수) + active-workspace cookie → x-assay-workspace)
@@ -72,6 +72,13 @@ Import order enforces downward layer deps (app → widgets → features → enti
   via secrets, not the spec) with `authSecret`/`server`/`kubeconfigSecret` fields + a **연결 테스트** button (nomad/k8s) that runs
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
   실행 form gains a 런타임 selector. See `docs/runtimes.md`.
+- **워크스페이스 설정 `/{workspace}/settings`** — admin-gated 탭: 일반(정책) · 모델 키 · 클러스터 자격증명 ·
+  **연결된 계정**(Connected accounts) · 멤버. 연결된 계정 탭(`features/manage-workspace-connections`)은 외부
+  계정(GitHub 등)을 OAuth 로 연결: **Connect** 버튼 → `startConnectionAction` → 컨트롤플레인 `POST
+  /connections/:provider/start` 의 `authorizeUrl` 로 브라우저 이동 → provider 콜백 → 컨트롤플레인이
+  `/{workspace}/settings?tab=connections&connected=…`(또는 `&error=…`)로 복귀 → 페이지가 `searchParams` 로
+  성공/실패 콜아웃을 표시. 목록은 메타만(토큰 없음), 해제는 `DELETE /connections/:id`. `connections:*`=admin.
+  See `docs/connections.md`.
 - **새 run `/{workspace}/runs/new`** — submit-run form (react-hook-form) → `submitRunAction` (server action) →
   control plane `POST /runs` → redirect to the run detail.
 - **하니스 등록 `/{workspace}/harnesses/new`** — a **structured wizard** (`features/register-harness`): pick
