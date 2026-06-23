@@ -19,8 +19,9 @@ container image pulls (GHCR/registry), posting results back (PR/status), and cha
   access (and optional refresh) token.
 - **Write-only**: `list` returns metadata only — tokens are **never** returned by the API; `tokenFor` decrypts
   server-side solely for the consumption slices.
-- **admin-only** (`connections:read`/`connections:write`) — a connection grants a powerful token (same stance as
-  `secrets:*`).
+- **Role-gating**: `connections:write` (connect/disconnect — handles tokens) is **admin**; `connections:read`
+  (list **metadata only**, never tokens) is **viewer+** so members can reference a connection when authoring a
+  private-repo run (mirrors `runtimes:read`/`datasets:read`).
 - A provider is **connectable** only if the control plane has its OAuth-app credentials configured (env). With
   none set, the feature degrades to listing/disconnecting existing connections.
 
@@ -70,11 +71,13 @@ host+credentials form (GHE/Mattermost).
   persisted to the RunRecord/dataset — the case keeps only the `connectionId` reference). The agent hands it to
   `RepoEnvironment`, which clones the private repo with the token injected as `http.extraheader` via git's
   env-based config (`GIT_CONFIG_*`) — **never in argv** (`ps`/log/`.git/config`-safe). Reachable today via
-  `POST /runs` (the body carries a full `EvalCase`) and dataset scorecards; the web run-submit form's
-  private-repo picker is a later UX slice (3b).
-- **Still open**: image pulls feeding `imagePullSecret` at dispatch (ties into Track B image-source
-  integrations); results posted to GitHub PR/status; Mattermost run/scorecard notifications; scorecard-path
-  token injection (datasets of private-repo cases) + web submit-form picker.
+  `POST /runs` (the body carries a full `EvalCase`) and dataset scorecards.
+- **Web picker ✅ (Phase 3b)**: the run-submit form (`features/submit-run`) gains a repo-source toggle —
+  "빈 작업트리" (default) vs "Git repo (URL)". For git it shows URL + ref + a **connection picker** populated from
+  `GET /connections` (filtered to git providers: github/github-enterprise) so a member selects which connected
+  account authenticates a private clone (or "none" for public). Enabled by relaxing `connections:read` to viewer+.
+- **Still open**: scorecard-path token injection (datasets of private-repo cases); image pulls feeding
+  `imagePullSecret` at dispatch (Track B); results posted to GitHub PR/status; Mattermost notifications.
 
 ## Verified
 - Deterministic (`packages/db/src/connection-store.test.ts`): token encryption round-trip + `list` exposes no

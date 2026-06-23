@@ -9,6 +9,11 @@ export interface SubmitRunInput {
   harnessId: string
   version: string
   task: string
+  // repo 시드: 'files'(빈 작업트리, 기본) | 'git'(원격 repo). git 이면 gitUrl 필수, connectionId 면 비공개 인증 clone.
+  sourceKind?: 'files' | 'git'
+  gitUrl?: string
+  gitRef?: string
+  connectionId?: string
 }
 export interface SubmitRunResult {
   ok: boolean
@@ -16,15 +21,29 @@ export interface SubmitRunResult {
   error?: string
 }
 
+// repo 시드 출처를 입력에서 구성. git 이면 connectionId 로 비공개 repo 인증(컨트롤플레인이 토큰 resolve).
+function repoSource(
+  input: SubmitRunInput
+): { files: Record<string, string> } | { git: string; ref: string; connectionId?: string } {
+  if (input.sourceKind === 'git' && input.gitUrl?.trim()) {
+    return {
+      git: input.gitUrl.trim(),
+      ref: input.gitRef?.trim() || 'main',
+      ...(input.connectionId ? { connectionId: input.connectionId } : {}),
+    }
+  }
+  return { files: {} }
+}
+
 // 서버 액션: 인증된 사용자 토큰으로 컨트롤플레인에 run 제출(authZ 는 컨트롤플레인이 강제 — 403 가능).
-// caseId 는 자동 생성, repo 빈 시드 + 기본 그레이더.
+// caseId 는 자동 생성, 기본 그레이더. repo 시드는 빈 작업트리 또는 (비공개) git repo.
 export async function submitRunAction(input: SubmitRunInput): Promise<SubmitRunResult> {
   const ctx = await authContext()
   const body = {
     harness: { id: input.harnessId, version: input.version || 'latest' },
     case: {
       id: `web-${Date.now().toString(36)}`,
-      env: { kind: 'repo', source: { files: {} } },
+      env: { kind: 'repo', source: repoSource(input) },
       task: input.task,
       graders: [{ id: 'steps' }, { id: 'cost' }, { id: 'latency' }],
       timeoutSec: 300,

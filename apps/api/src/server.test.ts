@@ -368,9 +368,20 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     });
     await app.close();
   });
-  it("viewer: connections:read 는 admin 전용 → 403", async () => {
+  it("viewer: connections:read 는 viewer+ → 200 (메타만; run 에서 repo 연결 참조)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
     const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
+    expect(res.statusCode).toBe(200);
+    await app.close();
+  });
+  it("viewer: connections:write(start) 는 admin 전용 → 403", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/connections/github/start",
+      headers: { authorization: "Bearer x" },
+      payload: {},
+    });
     expect(res.statusCode).toBe(403);
     await app.close();
   });

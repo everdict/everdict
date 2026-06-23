@@ -1,6 +1,7 @@
 import Link from 'next/link'
 
 import { SubmitRunForm } from '@/features/submit-run'
+import { connectionsResponseSchema, type ConnectionMeta } from '@/entities/connection'
 import { harnessesSchema, type Harness } from '@/entities/harness'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -17,11 +18,22 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
   const allowed = can(principal?.roles, 'runs:submit')
 
   let harnesses: Harness[] = []
+  let connections: ConnectionMeta[] = []
   if (allowed) {
     try {
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
     } catch {
       // 하니스 목록 실패해도 폼은 텍스트 입력으로 동작
+    }
+    // 비공개 repo 시드용 연결 picker(메타만; connections:read=viewer+). 실패/없음이면 public 만.
+    if (can(principal?.roles, 'connections:read')) {
+      try {
+        connections = connectionsResponseSchema.parse(
+          await controlPlane.listConnections(ctx)
+        ).connections
+      } catch {
+        // 연결 목록 실패해도 폼은 public repo 로 동작
+      }
     }
   }
 
@@ -36,7 +48,7 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
       <PageHeader title="새 run" description="하니스를 골라 평가를 제출합니다." />
       {allowed ? (
         <Card className="p-6">
-          <SubmitRunForm harnesses={harnesses} />
+          <SubmitRunForm harnesses={harnesses} connections={connections} />
         </Card>
       ) : (
         <EmptyState

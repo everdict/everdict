@@ -51,6 +51,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:read",
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관 — 모든 멤버가 자기 워크스페이스 실행 인프라를 등록(harnesses:register 와 동일)
     "members:read", // 팀(워크스페이스 멤버) 조회는 양성 → viewer+
+    "connections:read", // 연결된 외부 계정 '메타'(토큰 아님) 조회는 양성 → viewer+ (run 에서 repo 연결 참조). 연결/해제(write)는 admin.
   ]),
   member: new Set<Action>([
     "runs:read",
@@ -71,6 +72,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:read",
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관
     "members:read",
+    "connections:read", // 연결된 외부 계정 메타 조회 — run 에서 repo 연결 참조(viewer+). 연결/해제는 admin.
   ]),
   admin: new Set<Action>([
     "runs:read",
@@ -93,7 +95,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:write", // 런타임 등록은 role 무관(viewer/member 도 보유) — 자격증명 '값'은 secrets:write(admin)로 분리 보호
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
     "secrets:write",
-    "connections:read", // 외부 계정 연결(OAuth 토큰)은 강력 → admin 전용(secrets 와 동일 근거)
+    "connections:read", // (viewer+ 도 보유 — 메타만) 연결/해제(write)는 토큰을 다루므로 admin 전용
     "connections:write",
     "keys:read", // API 키는 발급 시 워크스페이스 admin 권한을 가짐 → 발급/취소는 admin 전용(secrets 와 동일 근거)
     "keys:write",

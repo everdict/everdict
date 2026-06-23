@@ -41,6 +41,7 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:read',
     'runtimes:write', // 런타임 등록(+연결 테스트)은 role 무관 — harnesses:register 와 동일
     'members:read', // 팀 조회는 viewer+
+    'connections:read', // 연결된 외부 계정 메타 조회는 viewer+ (run 에서 repo 연결 참조). 연결/해제는 admin.
   ],
   member: [
     'runs:read',
@@ -60,6 +61,7 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:read',
     'runtimes:write', // 런타임 등록(+연결 테스트)은 role 무관
     'members:read',
+    'connections:read', // 연결된 외부 계정 메타 조회 — run 에서 repo 연결 참조(viewer+)
   ],
   admin: [
     'runs:read',
@@ -80,8 +82,8 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:write', // 런타임 등록은 role 무관(자격증명 값은 secrets:write=admin 로 분리)
     'secrets:read', // 시크릿 관리 = admin
     'secrets:write',
-    'connections:read', // 외부 계정 연결(OAuth 토큰) = admin(secrets 와 동일 근거)
-    'connections:write',
+    'connections:read', // (viewer+ 도 보유 — 메타만)
+    'connections:write', // 연결/해제는 토큰을 다루므로 admin
     'keys:read', // API 키 발급/취소 = admin(키는 워크스페이스 admin 권한을 가짐)
     'keys:write',
     'members:read',

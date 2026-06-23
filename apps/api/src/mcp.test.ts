@@ -192,13 +192,16 @@ describe("MCP tools", () => {
     expect(bad.isError).toBe(true);
   });
 
-  it("connections: admin 은 list/get_connect_url/disconnect, viewer 는 거부(connections:* = admin)", async () => {
+  it("connections: list 는 viewer+(메타), get_connect_url/disconnect 는 admin(write)", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const viewer = await connect(deps, ["viewer"]);
 
-    // viewer 는 connections:read 없음 → isError.
-    expect((await viewer.callTool({ name: "list_connections", arguments: {} })).isError).toBe(true);
+    // viewer 는 connections:read(메타) 가능 → list 성공.
+    const viewerList = JSON.parse(text(await viewer.callTool({ name: "list_connections", arguments: {} })));
+    expect(viewerList).toEqual({ connections: [], providers: [{ id: "github", selfHosted: false }] });
+    // 단 write(연결 시작)는 거부.
+    expect((await viewer.callTool({ name: "get_connect_url", arguments: { provider: "github" } })).isError).toBe(true);
 
     // admin list → connections:[] + providers:['github'].
     const listed = JSON.parse(text(await admin.callTool({ name: "list_connections", arguments: {} })));
