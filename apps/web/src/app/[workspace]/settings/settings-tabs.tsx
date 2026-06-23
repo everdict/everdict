@@ -1,13 +1,19 @@
 'use client'
 
+import { DeleteWorkspaceCard } from '@/features/delete-workspace'
+import { ConnectionsManager } from '@/features/manage-connections'
 import { InvitesManager } from '@/features/manage-invites'
-import { MembersManager } from '@/features/manage-members'
-import { ConnectionsManager } from '@/features/manage-workspace-connections'
+import { MembersManager, WorkspaceApplications } from '@/features/manage-members'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
-import { SettingsForm, type WorkspaceSettings } from '@/features/workspace-settings'
+import {
+  SettingsForm,
+  WorkspaceInfoCard,
+  type WorkspaceSettings,
+} from '@/features/workspace-settings'
 import type { ConnectionMeta, ProviderInfo } from '@/entities/connection'
 import type { Invite, Member } from '@/entities/member'
 import type { SecretMeta } from '@/entities/secret'
+import type { WorkspaceRecord } from '@/entities/workspace'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
 type TabKey = 'general' | 'model' | 'cluster' | 'connections' | 'members'
@@ -15,6 +21,8 @@ type TabKey = 'general' | 'model' | 'cluster' | 'connections' | 'members'
 // 워크스페이스 설정 탭: 일반(정책) · 모델 키 · 클러스터 자격증명 · 연결된 계정 · 멤버. 권한 없는 탭은 숨긴다(최종 강제는 컨트롤플레인).
 export function SettingsTabs(props: {
   settings: WorkspaceSettings
+  workspace?: WorkspaceRecord // 활성 워크스페이스 레코드(이름/로고/소유자) — settings:read 일 때만
+  isOwner: boolean // owner 면 위험 구역(삭제) 노출
   secrets: SecretMeta[]
   connections: ConnectionMeta[]
   providers: ProviderInfo[]
@@ -56,7 +64,22 @@ export function SettingsTabs(props: {
       </TabsList>
 
       <TabsContent value="general">
-        <SettingsForm initial={props.settings} canWrite={props.canWriteSettings} />
+        <div className="space-y-6">
+          {props.workspace && (
+            <WorkspaceInfoCard
+              id={props.workspace.id}
+              name={props.workspace.name}
+              canWrite={props.canWriteSettings}
+              {...(props.workspace.logoUrl !== undefined
+                ? { logoUrl: props.workspace.logoUrl }
+                : {})}
+            />
+          )}
+          <SettingsForm initial={props.settings} canWrite={props.canWriteSettings} />
+          {props.isOwner && props.workspace && (
+            <DeleteWorkspaceCard workspaceName={props.workspace.name} />
+          )}
+        </div>
       </TabsContent>
       <TabsContent value="model">
         <SecretsManager variant="model" secrets={props.secrets} canWrite={props.canWriteSecrets} />
@@ -80,6 +103,7 @@ export function SettingsTabs(props: {
       <TabsContent value="members">
         <div className="space-y-8">
           <MembersManager members={props.members} canWrite={props.canWriteMembers} />
+          {props.canReadConnections && <WorkspaceApplications connections={props.connections} />}
           {props.canWriteMembers && <InvitesManager invites={props.invites} canWrite />}
         </div>
       </TabsContent>

@@ -33,10 +33,11 @@ async function makeDeps(): Promise<McpDeps> {
   await store.create({ id: "acme", name: "Acme", owner: "alice" }); // alice admin
   await store.ensureMembership("acme", "bob", "admin"); // acme = 2 admins
   await store.create({ id: "solo", name: "Solo", owner: "carol" }); // carol = 단독 admin
+  const profileStore = new InMemoryUserProfileStore(); // 프로필 ↔ 멤버 목록 보강이 같은 스토어를 보도록 공유
   return {
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore() }),
-    profileService: new ProfileService(new InMemoryUserProfileStore()),
-    membershipService: new MembershipService(store, new InMemoryWorkspaceInviteStore(store)),
+    profileService: new ProfileService(profileStore),
+    membershipService: new MembershipService(store, new InMemoryWorkspaceInviteStore(store), profileStore),
   };
 }
 

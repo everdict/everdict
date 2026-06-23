@@ -126,6 +126,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         });
         const rec = await deps.service.submit({
           tenant: ws,
+          submittedBy: principal.subject, // 비공개 repo 시드를 내 개인 연결로 clone
           harness: { id: harness_id, version: version ?? "latest" },
           case: evalCase,
         });
@@ -505,6 +506,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           ok(
             await scorecards.submit({
               tenant: ws,
+              submittedBy: principal.subject, // 비공개 repo 케이스를 내 개인 연결로 clone
               dataset: { id: dataset_id, version: dataset_version ?? "latest" },
               harness: { id: harness_id, version: harness_version ?? "latest" },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
@@ -682,15 +684,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   if (deps.connectionService) {
     const connections = deps.connectionService;
+    // 연결은 개인 소유(owner=principal.subject) — 역할 게이트 없이 본인 연결만 다룬다(프로필과 동일 self-scoped, plain).
     server.registerTool(
       "list_connections",
       {
-        description: "이 워크스페이스의 외부 계정 연결 목록(토큰 없음) + 연결 가능한 provider({id, selfHosted})",
+        description: "내 외부 계정 연결 목록(토큰 없음) + 연결 가능한 provider({id, selfHosted})",
         inputSchema: {},
       },
       () =>
-        run(principal, "connections:read", async () =>
-          ok({ connections: await connections.list(ws), providers: connections.providerInfos() }),
+        plain(async () =>
+          ok({ connections: await connections.list(principal.subject), providers: connections.providerInfos() }),
         ),
     );
     server.registerTool(
@@ -707,7 +710,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         },
       },
       ({ provider, host, clientId, clientSecretName }) =>
-        run(principal, "connections:write", async () =>
+        // workspace(ws)는 self-hosted client_secret(SecretStore) resolve + 콜백 redirect 용으로만 운반; 소유자는 createdBy(subject).
+        plain(async () =>
           ok(
             await connections.start({
               workspace: ws,
@@ -722,11 +726,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
     server.registerTool(
       "disconnect_connection",
-      { description: "외부 계정 연결 해제(삭제)", inputSchema: { id: z.string() } },
+      { description: "내 외부 계정 연결 해제(삭제)", inputSchema: { id: z.string() } },
       ({ id }) =>
-        run(principal, "connections:write", async () => {
-          await connections.disconnect(ws, id);
-          return ok({ workspace: ws, id, disconnected: true });
+        plain(async () => {
+          await connections.disconnect(principal.subject, id);
+          return ok({ id, disconnected: true });
         }),
     );
   }
@@ -854,6 +858,47 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ name, id }) =>
         plain(async () => ok(await workspaces.create(principal.subject, { name, ...(id ? { id } : {}) }))),
+    );
+    server.registerTool(
+      "get_workspace",
+      {
+        description: "활성 워크스페이스 레코드(id/name/logoUrl/owner/createdAt). admin(settings:read).",
+        inputSchema: {},
+      },
+      () => run(principal, "settings:read", async () => ok(await workspaces.get(ws))),
+    );
+    server.registerTool(
+      "update_workspace",
+      {
+        description:
+          "워크스페이스 이름/로고 수정(admin, settings:write). slug(URL)은 불변. 로고는 http(s) URL 또는 data:image base64. 빈 문자열은 로고 제거.",
+        inputSchema: {
+          name: z.string().optional().describe("표시 이름(80자 이하)"),
+          logoUrl: z.string().optional().describe("로고 이미지 — http(s) URL 또는 data:image base64"),
+        },
+      },
+      ({ name, logoUrl }) =>
+        run(principal, "settings:write", async () =>
+          ok(
+            await workspaces.update(ws, {
+              ...(name !== undefined ? { name } : {}),
+              ...(logoUrl !== undefined ? { logoUrl } : {}),
+            }),
+          ),
+        ),
+    );
+    server.registerTool(
+      "delete_workspace",
+      {
+        description:
+          "활성 워크스페이스 삭제(생성자[owner]만; 취소 불가). 멤버·런·설정 등 모든 워크스페이스 데이터가 함께 삭제된다.",
+        inputSchema: {},
+      },
+      () =>
+        plain(async () => {
+          await workspaces.delete(ws, principal.subject); // 서비스가 owner 검증(아니면 FORBIDDEN)
+          return ok({ workspace: ws, deleted: true });
+        }),
     );
   }
 

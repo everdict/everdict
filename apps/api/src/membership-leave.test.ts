@@ -1,12 +1,12 @@
 import { AppError } from "@assay/core";
-import { InMemoryWorkspaceInviteStore, InMemoryWorkspaceStore } from "@assay/db";
+import { InMemoryUserProfileStore, InMemoryWorkspaceInviteStore, InMemoryWorkspaceStore } from "@assay/db";
 import { describe, expect, it } from "vitest";
 import { MembershipService } from "./membership-service.js";
 
 async function seed() {
   const store = new InMemoryWorkspaceStore();
   await store.create({ id: "acme", name: "Acme", owner: "alice" }); // alice = admin
-  const svc = new MembershipService(store, new InMemoryWorkspaceInviteStore(store));
+  const svc = new MembershipService(store, new InMemoryWorkspaceInviteStore(store), new InMemoryUserProfileStore());
   return { store, svc };
 }
 

@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
-import { BadRequestError, ConflictError } from "@assay/core";
-import type { WorkspaceStore, WorkspaceWithRole } from "@assay/db";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "@assay/core";
+import type { WorkspaceRecord, WorkspaceStore, WorkspaceWithRole } from "@assay/db";
+import { validateImageRef } from "./image-ref.js";
 
 // 워크스페이스 self-serve 멤버십의 서비스 코어 — HTTP 라우트와 MCP 툴이 공유한다(패리티: 로직 1개, 트랜스포트 2개).
 // 인증된 subject 기준으로 동작(워크스페이스 내부 역할 게이트 없음 — 새 워크스페이스 생성은 누구나 가능한 self-serve).
@@ -22,6 +23,44 @@ export class WorkspaceService {
   // 내가 멤버인 워크스페이스 목록(역할 포함).
   async listForSubject(subject: string): Promise<WorkspaceWithRole[]> {
     return this.store.listForSubject(subject);
+  }
+
+  // 활성 워크스페이스의 레코드(id/name/owner/logoUrl/createdAt). 없으면 404.
+  async get(workspace: string): Promise<WorkspaceRecord> {
+    const rec = await this.store.get(workspace);
+    if (!rec) throw new NotFoundError("NOT_FOUND", { workspace }, "워크스페이스를 찾을 수 없습니다.");
+    return rec;
+  }
+
+  // 표시 정보(이름/로고) 갱신. slug(id)는 불변. 빈 문자열 logoUrl 은 로고 제거로 해석.
+  async update(workspace: string, input: { name?: string; logoUrl?: string }): Promise<WorkspaceRecord> {
+    const patch: { name?: string; logoUrl?: string | null } = {};
+    if (input.name !== undefined) {
+      const name = input.name.trim();
+      if (!name) throw new BadRequestError("BAD_REQUEST", { field: "name" }, "워크스페이스 이름이 필요합니다.");
+      if (name.length > 80) throw new BadRequestError("BAD_REQUEST", { field: "name" }, "이름은 80자 이하여야 합니다.");
+      patch.name = name;
+    }
+    if (input.logoUrl !== undefined) {
+      const clean = input.logoUrl.trim();
+      patch.logoUrl = clean === "" ? null : validateImageRef(clean, "logoUrl"); // 빈 문자열 → 제거
+    }
+    const updated = await this.store.update(workspace, patch);
+    if (!updated) throw new NotFoundError("NOT_FOUND", { workspace }, "워크스페이스를 찾을 수 없습니다.");
+    return updated;
+  }
+
+  // 워크스페이스 + 모든 스코프 데이터를 하드 삭제. owner(생성자)만 가능 — 역할 매트릭스가 아니라 소유권 게이트.
+  async delete(workspace: string, subject: string): Promise<void> {
+    const rec = await this.store.get(workspace);
+    if (!rec) throw new NotFoundError("NOT_FOUND", { workspace }, "워크스페이스를 찾을 수 없습니다.");
+    if (rec.owner !== subject)
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { workspace, action: "workspace:delete" },
+        "워크스페이스는 생성자(owner)만 삭제할 수 있습니다.",
+      );
+    await this.store.delete(workspace);
   }
 
   // self-serve 생성: name(필수) + 선택 id(slug). 생성자는 그 워크스페이스의 admin.

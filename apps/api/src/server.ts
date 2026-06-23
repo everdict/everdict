@@ -434,7 +434,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
     try {
       gate(principal, "runs:submit");
-      return reply.code(202).send(await deps.service.submit({ tenant: principal.workspace, ...body }));
+      // submittedBy=subject → 비공개 repo 시드를 제출자의 개인 연결로 clone("내 연결로 clone").
+      return reply
+        .code(202)
+        .send(await deps.service.submit({ tenant: principal.workspace, submittedBy: principal.subject, ...body }));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -1218,7 +1221,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
     try {
       // 데이터셋 없으면 NotFoundError → 404. 통과하면 202 + queued 레코드(배치는 백그라운드).
-      return reply.code(202).send(await deps.scorecardService.submit({ tenant: principal.workspace, ...body }));
+      // submittedBy=subject → 비공개 repo 케이스를 제출자의 개인 연결로 clone.
+      return reply
+        .code(202)
+        .send(
+          await deps.scorecardService.submit({ tenant: principal.workspace, submittedBy: principal.subject, ...body }),
+        );
     } catch (err) {
       return sendError(reply, err);
     }
@@ -1386,9 +1394,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "connections:read");
+      // 연결은 개인 소유 — 역할 게이트 없이 본인(subject)의 연결만 조회(프로필과 동일하게 self-scoped).
       return reply.send({
-        connections: await deps.connectionService.list(principal.workspace),
+        connections: await deps.connectionService.list(principal.subject),
         providers: deps.connectionService.providerInfos(), // 연결 가능한 provider({id, selfHosted})
       });
     } catch (err) {
@@ -1412,7 +1420,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
-      gate(principal, "connections:write");
+      // 연결은 개인 소유 — 역할 게이트 없음. workspace 는 self-hosted client_secret(SecretStore) resolve + 콜백 redirect 용으로만 운반.
       const { authorizeUrl } = await deps.connectionService.start({
         workspace: principal.workspace,
         createdBy: principal.subject,
@@ -1450,8 +1458,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "connections:write");
-      await deps.connectionService.disconnect(principal.workspace, req.params.id);
+      // 연결은 개인 소유 — 역할 게이트 없이 본인(subject)의 연결만 해제.
+      await deps.connectionService.disconnect(principal.subject, req.params.id);
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
@@ -1479,7 +1487,51 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       gate(principal, "settings:write");
-      return reply.send(await deps.settingsStore.set(principal.workspace, body.data)); // 병합된 설정 반환
+      // notify 대상은 개인 소유 연결을 가리키므로, 설정한 사람(subject)을 ownerSubject 로 서버에서 박는다(클라이언트가 못 보냄 → 스푸핑 방지).
+      const patch = body.data.notify
+        ? { ...body.data, notify: { ...body.data.notify, ownerSubject: principal.subject } }
+        : body.data;
+      return reply.send(await deps.settingsStore.set(principal.workspace, patch)); // 병합된 설정 반환
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- workspace 메타(이름/로고/소유자) — 단수 /workspace = 활성 워크스페이스 레코드(복수 /workspaces 와 구분) ---
+  app.get("/workspace", async (req, reply) => {
+    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:read");
+      return reply.send(await deps.workspaceService.get(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.patch("/workspace", async (req, reply) => {
+    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ name: z.string().optional(), logoUrl: z.string().optional() }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(await deps.workspaceService.update(principal.workspace, body.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 삭제는 owner(생성자)만 — 역할 게이트 없음. 서비스가 principal.subject 와 레코드 owner 를 비교해 ForbiddenError(403).
+  app.delete("/workspace", async (req, reply) => {
+    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      await deps.workspaceService.delete(principal.workspace, principal.subject);
+      return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
     }

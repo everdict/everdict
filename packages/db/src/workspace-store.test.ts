@@ -71,4 +71,38 @@ describe("InMemoryWorkspaceStore — 멤버십", () => {
     expect(await store.roleFor("acme", "bob")).toBeUndefined();
     await store.removeMember("acme", "bob"); // 멱등 — 다시 호출해도 무탈
   });
+
+  it("update 는 이름/로고를 갱신하고 listForSubject 에도 로고가 실린다", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.create({ id: "acme", name: "Acme", owner: "alice" });
+    const updated = await store.update("acme", { name: "Acme Inc", logoUrl: "https://x/logo.png" });
+    expect(updated).toMatchObject({ id: "acme", name: "Acme Inc", logoUrl: "https://x/logo.png" });
+    const [ws] = await store.listForSubject("alice");
+    expect(ws).toMatchObject({ id: "acme", name: "Acme Inc", logoUrl: "https://x/logo.png" });
+  });
+
+  it("update 의 logoUrl=null 은 로고를 제거하고, name 미지정은 유지한다", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.create({ id: "acme", name: "Acme", owner: "alice" });
+    await store.update("acme", { logoUrl: "https://x/logo.png" });
+    const cleared = await store.update("acme", { logoUrl: null });
+    expect(cleared?.logoUrl).toBeUndefined();
+    expect(cleared?.name).toBe("Acme"); // name 미지정 → 유지
+  });
+
+  it("update 는 없는 워크스페이스에 undefined 를 돌려준다", async () => {
+    const store = new InMemoryWorkspaceStore();
+    expect(await store.update("ghost", { name: "X" })).toBeUndefined();
+  });
+
+  it("delete 는 워크스페이스와 멤버십을 지운다(멱등)", async () => {
+    const store = new InMemoryWorkspaceStore();
+    await store.create({ id: "acme", name: "Acme", owner: "alice" });
+    await store.ensureMembership("acme", "bob", "member");
+    await store.delete("acme");
+    expect(await store.get("acme")).toBeUndefined();
+    expect(await store.listForSubject("alice")).toEqual([]);
+    expect(await store.roleFor("acme", "bob")).toBeUndefined();
+    await store.delete("acme"); // 멱등 — 다시 호출해도 무탈
+  });
 });

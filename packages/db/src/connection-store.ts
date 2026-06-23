@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 import type { SqlClient } from "./client.js";
 import type { EncryptedSecret, SecretCipher } from "./secret-cipher.js";
 
-// 워크스페이스 외부 계정 연결(Connected accounts) 저장소 — GitHub/GHE/Mattermost OAuth 토큰을 워크스페이스별로 보관.
+// 외부 계정 연결(Connected accounts) 저장소 — GitHub/GHE/Mattermost OAuth 토큰을 개인(owner=principal.subject)별로 보관.
+// 개인 소유 + 워크스페이스 가시성: 연결은 owner 가 소유하고(account 페이지에서 list/connect/disconnect),
+// 만들어진 workspace 도 기록해 워크스페이스 애플리케이션 로스터(설정>멤버 탭, listByWorkspace)에 읽기 전용으로 노출한다.
 // SecretStore 와 동일 사상: 토큰(access/refresh)은 AES-GCM at-rest 암호화하고 list 는 메타만(토큰 절대 미반환).
 // tokenFor() 만 복호화 — 서버 내부(harness clone / image pull / notify)에서만 사용한다.
 export interface ConnectionMeta {
@@ -16,7 +18,8 @@ export interface ConnectionMeta {
 
 // 토큰 교환 후 서비스가 저장을 요청할 때 넘기는 입력(평문 토큰 포함 — 저장 직전 암호화).
 export interface CreateConnectionInput {
-  workspace: string;
+  owner: string; // 연결 소유자 = principal.subject(OIDC sub / api-key 의 key:<ws> / dev 폴백 "dev")
+  workspace: string; // 연결이 만들어진 워크스페이스 — 워크스페이스 애플리케이션 로스터(listByWorkspace)용. 소유는 owner.
   provider: string;
   host?: string;
   accountLabel: string;
@@ -35,13 +38,15 @@ export interface ConnectionToken {
 
 export interface ConnectionStore {
   create(input: CreateConnectionInput): Promise<ConnectionMeta>;
-  list(workspace: string): Promise<ConnectionMeta[]>; // 메타만(토큰 없음)
-  remove(workspace: string, id: string): Promise<void>; // tenant 스코프, 멱등
-  tokenFor(workspace: string, id: string): Promise<ConnectionToken | null>; // 복호화 — 내부 전용
+  list(owner: string): Promise<ConnectionMeta[]>; // 개인(owner) 메타만(토큰 없음)
+  listByWorkspace(workspace: string): Promise<ConnectionMeta[]>; // 워크스페이스 로스터(메타만) — 만들어진 워크스페이스 기준
+  remove(owner: string, id: string): Promise<void>; // owner 스코프, 멱등
+  tokenFor(owner: string, id: string): Promise<ConnectionToken | null>; // 복호화 — 내부 전용
 }
 
 interface Stored {
   meta: ConnectionMeta;
+  workspace: string; // 로스터(listByWorkspace) 필터용
   access: EncryptedSecret;
   refresh?: EncryptedSecret;
   expiresAt?: string;
@@ -59,40 +64,49 @@ function meta(input: CreateConnectionInput, id: string, connectedAt: string): Co
 }
 
 export class InMemoryConnectionStore implements ConnectionStore {
-  private readonly byWs = new Map<string, Map<string, Stored>>();
+  private readonly byOwner = new Map<string, Map<string, Stored>>();
   constructor(
     private readonly cipher: SecretCipher,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
-  private ws(workspace: string) {
-    let m = this.byWs.get(workspace);
+  private forOwner(owner: string) {
+    let m = this.byOwner.get(owner);
     if (!m) {
       m = new Map();
-      this.byWs.set(workspace, m);
+      this.byOwner.set(owner, m);
     }
     return m;
   }
   async create(input: CreateConnectionInput): Promise<ConnectionMeta> {
     const id = randomUUID();
     const m = meta(input, id, this.now());
-    this.ws(input.workspace).set(id, {
+    this.forOwner(input.owner).set(id, {
       meta: m,
+      workspace: input.workspace,
       access: this.cipher.encrypt(input.accessToken),
       ...(input.refreshToken !== undefined ? { refresh: this.cipher.encrypt(input.refreshToken) } : {}),
       ...(input.expiresAt !== undefined ? { expiresAt: input.expiresAt } : {}),
     });
     return m;
   }
-  async list(workspace: string): Promise<ConnectionMeta[]> {
-    return [...(this.byWs.get(workspace)?.values() ?? [])]
+  async list(owner: string): Promise<ConnectionMeta[]> {
+    return [...(this.byOwner.get(owner)?.values() ?? [])]
       .map((s) => s.meta)
       .sort((a, b) => (a.connectedAt < b.connectedAt ? 1 : -1)); // 최신순
   }
-  async remove(workspace: string, id: string): Promise<void> {
-    this.byWs.get(workspace)?.delete(id);
+  async listByWorkspace(workspace: string): Promise<ConnectionMeta[]> {
+    // 모든 owner 의 연결을 훑어 만들어진 워크스페이스가 일치하는 것만(읽기 전용 로스터).
+    return [...this.byOwner.values()]
+      .flatMap((m) => [...m.values()])
+      .filter((s) => s.workspace === workspace)
+      .map((s) => s.meta)
+      .sort((a, b) => (a.connectedAt < b.connectedAt ? 1 : -1)); // 최신순
   }
-  async tokenFor(workspace: string, id: string): Promise<ConnectionToken | null> {
-    const s = this.byWs.get(workspace)?.get(id);
+  async remove(owner: string, id: string): Promise<void> {
+    this.byOwner.get(owner)?.delete(id);
+  }
+  async tokenFor(owner: string, id: string): Promise<ConnectionToken | null> {
+    const s = this.byOwner.get(owner)?.get(id);
     if (!s) return null;
     return {
       accessToken: this.cipher.decrypt(s.access),
@@ -143,11 +157,12 @@ export class PgConnectionStore implements ConnectionStore {
     const refresh = input.refreshToken !== undefined ? this.cipher.encrypt(input.refreshToken) : null;
     const res = await this.client.query<{ connected_at: string | Date }>(
       `INSERT INTO assay_connections
-         (workspace, id, provider, host, account_label, scopes,
+         (owner, workspace, id, provider, host, account_label, scopes,
           ciphertext, iv, tag, refresh_ciphertext, refresh_iv, refresh_tag, expires_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
        RETURNING connected_at`,
       [
+        input.owner,
         input.workspace,
         id,
         input.provider,
@@ -167,23 +182,23 @@ export class PgConnectionStore implements ConnectionStore {
     if (!r) throw new Error("connection insert 가 행을 돌려주지 않았습니다.");
     return meta(input, id, new Date(r.connected_at).toISOString());
   }
-  async list(workspace: string): Promise<ConnectionMeta[]> {
+  async list(owner: string): Promise<ConnectionMeta[]> {
     // 토큰 컬럼은 select 하지 않는다(절대 노출 금지).
     const res = await this.client.query<ConnectionRow>(
       `SELECT id, provider, host, account_label, scopes, connected_at
-       FROM assay_connections WHERE workspace = $1 ORDER BY connected_at DESC`,
-      [workspace],
+       FROM assay_connections WHERE owner = $1 ORDER BY connected_at DESC`,
+      [owner],
     );
     return res.rows.map(rowToMeta);
   }
-  async remove(workspace: string, id: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_connections WHERE workspace = $1 AND id = $2", [workspace, id]);
+  async remove(owner: string, id: string): Promise<void> {
+    await this.client.query("DELETE FROM assay_connections WHERE owner = $1 AND id = $2", [owner, id]);
   }
-  async tokenFor(workspace: string, id: string): Promise<ConnectionToken | null> {
+  async tokenFor(owner: string, id: string): Promise<ConnectionToken | null> {
     const res = await this.client.query<TokenRow>(
       `SELECT ciphertext, iv, tag, refresh_ciphertext, refresh_iv, refresh_tag, expires_at
-       FROM assay_connections WHERE workspace = $1 AND id = $2`,
-      [workspace, id],
+       FROM assay_connections WHERE owner = $1 AND id = $2`,
+      [owner, id],
     );
     const r = res.rows[0];
     if (!r) return null;

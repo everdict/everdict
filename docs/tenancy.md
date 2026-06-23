@@ -29,7 +29,17 @@ row on each login (display only — for a human-readable member list, never an a
 - `POST /workspaces` `{name, id?}` — self-serve create (any authenticated principal); the creator becomes the
   workspace's **admin** member. `id` is the tenant key (slug); derived from `name` if omitted, **409** on an
   explicit-id conflict.
-- `GET /workspaces` — list the caller's memberships (`{id, name, role}`); also embedded in `GET /me.workspaces`.
+- `GET /workspaces` — list the caller's memberships (`{id, name, role, logoUrl?}`); also embedded in `GET /me.workspaces`.
+- **Workspace metadata** (singular `/workspace`, distinct from plural `/workspaces`): `GET /workspace`
+  (`settings:read`) returns the active workspace record `{id, name, owner, logoUrl?, createdAt}`; `PATCH /workspace`
+  `{name?, logoUrl?}` (`settings:write`, admin) edits the **display name** and **logo** (logo is an image ref —
+  http(s) URL or `data:image` base64, like a user avatar; empty string clears it). The **`id`/slug is immutable** —
+  it is the tenant scope key for every table, so the web shows the URL read-only.
+- `DELETE /workspace` — **owner-only** hard delete (the creator stored as `WorkspaceRecord.owner`; not a role —
+  a non-owner admin gets 403). It **cascades**: `WorkspaceStore.delete(id)` removes every workspace/tenant-scoped
+  row (members, settings, secrets, connections, invites, runs, scorecards, all registry tables, tenant keys) then
+  the workspace row last (sequential + idempotent — `SqlClient` has no transaction). The web gates the danger zone
+  on `owner === subject` and requires typing the workspace name to confirm.
 - **Active workspace** is resolved per request in `apps/api` (`applyActiveWorkspace`): the `x-assay-workspace`
   header (set by the web from a httpOnly cookie / the sidebar switcher) selects which membership scopes this
   request; `Principal.workspace`+`roles` come from that membership. The token/dev default workspace is
@@ -41,8 +51,9 @@ row on each login (display only — for a human-readable member list, never an a
   is admin-gated) keeps the token's role, but a **human (OIDC)** bootstrapping into an **existing** workspace
   joins as **member** — so a global Keycloak `admin` realm role can never grant admin in someone else's workspace.
 - One service core (`WorkspaceService`), two transports — HTTP routes **and** MCP tools (`list_workspaces` /
-  `create_workspace`). The web surfaces it as a Linear-style sidebar **workspace switcher** + create flow
-  (`docs/web.md`).
+  `create_workspace` / `get_workspace` / `update_workspace` / `delete_workspace`). The web surfaces it as a
+  Linear-style sidebar **workspace switcher** + create flow, plus a Settings **일반(General)** card (logo/name +
+  read-only URL) and an owner-only **danger zone** (`docs/web.md`).
 
 ### Member management + invites (`MembershipService`)
 Managing **who** is in a workspace and **how they join** — one service core, HTTP + MCP parity.

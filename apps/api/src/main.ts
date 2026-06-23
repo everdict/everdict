@@ -128,7 +128,7 @@ async function main(): Promise<void> {
     oauthStateStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
-  const membershipService = new MembershipService(workspaceStore, inviteStore);
+  const membershipService = new MembershipService(workspaceStore, inviteStore, userProfileStore);
   const profileService = new ProfileService(userProfileStore);
   await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
   await seedSharedDatasets(datasetRegistry);
@@ -191,8 +191,8 @@ async function main(): Promise<void> {
     meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
     // 워크스페이스 기본 judge 모델(요청별 override 가 우선): inline judge grader 가 이 모델로 채점되도록 잡에 주입.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
-    // 비공개 repo 시드: 케이스 env.source.connectionId → 외부 계정 연결 토큰 resolve(잡에 transient 주입, 인증 clone).
-    repoTokenFor: async (tenant, connectionId) => (await connectionStore.tokenFor(tenant, connectionId))?.accessToken,
+    // 비공개 repo 시드: 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve(잡에 transient 주입, 인증 clone).
+    repoTokenFor: async (owner, connectionId) => (await connectionStore.tokenFor(owner, connectionId))?.accessToken,
     // 완료 알림(Mattermost) — 워크스페이스 notify 설정이 있으면 채널 게시. 실패는 run 결과 무관.
     onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
   });
@@ -221,8 +221,8 @@ async function main(): Promise<void> {
     // pull 인제스트: 테넌트 OTel/MLflow 에서 트레이스를 당겨 채점. 자격증명은 테넌트 SecretStore(authSecret 이름).
     buildTraceSource,
     secretsFor: runtimeSecretsFor,
-    // 비공개-repo 데이터셋: 케이스 env.source.connectionId → 외부 계정 연결 토큰 resolve(단일 run 과 동일 경로).
-    repoTokenFor: async (tenant, connectionId) => (await connectionStore.tokenFor(tenant, connectionId))?.accessToken,
+    // 비공개-repo 데이터셋: 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve(단일 run 과 동일 경로).
+    repoTokenFor: async (owner, connectionId) => (await connectionStore.tokenFor(owner, connectionId))?.accessToken,
     // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
   });

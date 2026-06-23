@@ -6,6 +6,7 @@ import {
 } from '@/entities/connection'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
+import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -34,6 +35,7 @@ export default async function SettingsPage({
   const canWriteMembers = can(principal?.roles, 'members:write')
 
   let settings: WorkspaceSettings = {}
+  let workspace: WorkspaceRecord | undefined
   let secrets: SecretMeta[] = []
   let connections: ConnectionMeta[] = []
   let providers: ProviderInfo[] = []
@@ -41,7 +43,10 @@ export default async function SettingsPage({
   let invites: Invite[] = []
   let error: string | undefined
   try {
-    if (canReadSettings) settings = await controlPlane.getWorkspaceSettings<WorkspaceSettings>(ctx)
+    if (canReadSettings) {
+      settings = await controlPlane.getWorkspaceSettings<WorkspaceSettings>(ctx)
+      workspace = workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
+    }
     if (canReadSecrets) secrets = secretsSchema.parse(await controlPlane.listSecrets(ctx))
     if (canReadConnections) {
       const r = connectionsResponseSchema.parse(await controlPlane.listConnections(ctx))
@@ -55,6 +60,8 @@ export default async function SettingsPage({
   }
 
   const canReadAny = canReadSettings || canReadSecrets || canReadConnections || canReadMembers
+  // 삭제는 owner(생성자)만 — 컨트롤플레인이 최종 강제하고, UI 는 owner 일 때만 위험 구역을 노출한다.
+  const isOwner = workspace !== undefined && workspace.owner === principal?.subject
 
   return (
     <div className="space-y-6">
@@ -72,6 +79,8 @@ export default async function SettingsPage({
       ) : (
         <SettingsTabs
           settings={settings}
+          isOwner={isOwner}
+          {...(workspace !== undefined ? { workspace } : {})}
           secrets={secrets}
           connections={connections}
           providers={providers}

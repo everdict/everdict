@@ -41,7 +41,10 @@ token courier, never an auth authority. See `docs/auth.md`.
   the **admin** half in the flat matrix (e.g. `datasets:delete` = admin-only) and put the **creator** half in the
   service layer that knows who created the row (`dataset-service.ts` `deleteDatasetVersion`: `creatorOf` vs
   `principal.subject`). Don't smuggle per-resource ownership into the role matrix, and don't fork it across
-  transports — both the HTTP route and the MCP tool call the one shared service helper.
+  transports — both the HTTP route and the MCP tool call the one shared service helper. A **purely** owner-gated
+  action has **no** matrix action at all: `DELETE /workspace` (`workspace-service.ts` `delete`) compares
+  `WorkspaceRecord.owner` to `principal.subject` and the route/MCP tool skip `gate()` entirely (a non-owner admin
+  is 403) — the slug is the tenant key, so deleting a workspace is the owner's call, not any admin's.
 - **Role mapping:** OIDC roles = `realm_access.roles ∩ assay roles`, empty ⇒ `viewer`; workspace = `workspace`
   claim, else group fallback under `groupPrefix`. Keep these pure and unit-tested with locally-minted JWTs
   (`SignJWT` + `createLocalJWKSet`) — no live Keycloak in tests.

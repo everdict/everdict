@@ -4,6 +4,8 @@ import type { Principal } from "./principal.js";
 // 워크스페이스 내 역할 → 액션 권한. 컨트롤플레인이 엔드포인트마다 강제(authZ).
 // harnesses:register(인스턴스)·templates:write(템플릿 대분류)는 누구나(viewer+) — 하니스는 협업 eval
 // 콘텐츠라 역할 게이트 없음(권한 상관없이 동등 사용).
+// 외부 계정 연결(Connected accounts)은 이 매트릭스에 없다 — 프로필처럼 개인 소유(owner=subject)라 역할이 아니라
+// subject 로 self-scoped(라우트가 principal.subject 로 직접 스코프; connections:* 액션 없음).
 export type Action =
   | "runs:read"
   | "runs:submit"
@@ -25,8 +27,6 @@ export type Action =
   | "runtimes:write"
   | "secrets:read"
   | "secrets:write"
-  | "connections:read"
-  | "connections:write"
   | "keys:read"
   | "keys:write"
   | "members:read"
@@ -51,7 +51,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:read",
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관 — 모든 멤버가 자기 워크스페이스 실행 인프라를 등록(harnesses:register 와 동일)
     "members:read", // 팀(워크스페이스 멤버) 조회는 양성 → viewer+
-    "connections:read", // 연결된 외부 계정 '메타'(토큰 아님) 조회는 양성 → viewer+ (run 에서 repo 연결 참조). 연결/해제(write)는 admin.
   ]),
   member: new Set<Action>([
     "runs:read",
@@ -72,7 +71,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:read",
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관
     "members:read",
-    "connections:read", // 연결된 외부 계정 메타 조회 — run 에서 repo 연결 참조(viewer+). 연결/해제는 admin.
   ]),
   admin: new Set<Action>([
     "runs:read",
@@ -95,8 +93,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:write", // 런타임 등록은 role 무관(viewer/member 도 보유) — 자격증명 '값'은 secrets:write(admin)로 분리 보호
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
     "secrets:write",
-    "connections:read", // (viewer+ 도 보유 — 메타만) 연결/해제(write)는 토큰을 다루므로 admin 전용
-    "connections:write",
     "keys:read", // API 키는 발급 시 워크스페이스 admin 권한을 가짐 → 발급/취소는 admin 전용(secrets 와 동일 근거)
     "keys:write",
     "members:read",
@@ -124,9 +120,8 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "metrics:read",
   "runtimes:read",
   "members:read",
-  "connections:read",
 ];
-// write scope = read ∪ 콘텐츠 mutation(run 제출·등록·버전 생성·실행). 거버넌스(secrets/members/settings/keys/connections write, datasets:delete)는 admin scope 전용.
+// write scope = read ∪ 콘텐츠 mutation(run 제출·등록·버전 생성·실행). 거버넌스(secrets/members/settings/keys write, datasets:delete)는 admin scope 전용.
 const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   ...SCOPE_READ_ACTIONS,
   "runs:submit",

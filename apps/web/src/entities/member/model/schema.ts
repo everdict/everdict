@@ -1,10 +1,13 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 GET /members 응답 미러. subject 는 opaque Keycloak sub; email 은 표시용(있을 때).
+// 컨트롤플레인 GET /members 응답 미러. subject 는 opaque Keycloak sub(표시하지 않음);
+// name/email/avatarUrl 은 프로필 보강(사람이 읽는 신원) — 있을 때만.
 export const memberSchema = z.object({
   subject: z.string(),
   role: z.string(),
   email: z.string().optional(),
+  name: z.string().optional(),
+  avatarUrl: z.string().optional(),
   addedAt: z.string(),
 })
 export type Member = z.infer<typeof memberSchema>

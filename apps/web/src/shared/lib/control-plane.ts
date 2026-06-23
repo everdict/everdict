@@ -55,6 +55,11 @@ export const controlPlane = {
   listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
   createWorkspace: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspaces', { method: 'POST', body: JSON.stringify(body) }),
+  // 활성 워크스페이스 레코드(이름/로고/소유자) 조회·수정·삭제. 단수 /workspace.
+  getWorkspace: <T>(auth: AuthContext) => call<T>(auth, '/workspace'),
+  updateWorkspace: <T>(auth: AuthContext, patch: unknown) =>
+    call<T>(auth, '/workspace', { method: 'PATCH', body: JSON.stringify(patch) }),
+  deleteWorkspace: (auth: AuthContext) => callVoid(auth, '/workspace', { method: 'DELETE' }),
   listRuns: <T>(auth: AuthContext) => call<T>(auth, '/runs'),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   submitRun: <T>(auth: AuthContext, body: unknown) =>

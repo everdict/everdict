@@ -32,4 +32,13 @@ describe("InMemoryUserProfileStore", () => {
     await s.upsert("u1", { username: "alice" });
     expect((await s.get("u1"))?.username).toBe("alice");
   });
+
+  it("getMany 는 존재하는 프로필만 돌려준다(없는 subject 는 누락, 멤버 목록 보강용)", async () => {
+    const s = new InMemoryUserProfileStore();
+    await s.upsert("u1", { name: "Alice" });
+    await s.upsert("u2", { name: "Bob" });
+    const got = await s.getMany(["u1", "ghost", "u2"]);
+    expect(got.map((p) => p.subject).sort()).toEqual(["u1", "u2"]);
+    expect(await s.getMany([])).toEqual([]);
+  });
 });

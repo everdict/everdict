@@ -29,13 +29,26 @@ const SIZES = {
 
 export function Avatar({
   name,
+  url,
   size = 'md',
   className,
 }: {
   name: string
+  url?: string // 업로드/외부 아바타 이미지(있으면 모노그램 대신 표시)
   size?: keyof typeof SIZES
   className?: string
 }) {
+  if (url) {
+    return (
+      // 업로드 data URL/외부 URL 혼용이라 next/image(원격 도메인 화이트리스트)가 아닌 일반 img 를 쓴다.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={url}
+        alt={name}
+        className={cn('shrink-0 object-cover ring-1 ring-inset ring-border', SIZES[size], className)}
+      />
+    )
+  }
   return (
     <span
       className={cn(

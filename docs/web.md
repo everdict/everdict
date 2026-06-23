@@ -72,8 +72,14 @@ Import order enforces downward layer deps (app → widgets → features → enti
   via secrets, not the spec) with `authSecret`/`server`/`kubeconfigSecret` fields + a **연결 테스트** button (nomad/k8s) that runs
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
   실행 form gains a 런타임 selector. See `docs/runtimes.md`.
-- **워크스페이스 설정 `/{workspace}/settings`** — admin-gated 탭: 일반(정책) · 모델 키 · 클러스터 자격증명 ·
-  **연결된 계정**(Connected accounts) · 멤버. 연결된 계정 탭(`features/manage-workspace-connections`)은 외부
+- **워크스페이스 설정 `/{workspace}/settings`** — admin-gated 탭: 일반 · 모델 키 · 클러스터 자격증명 ·
+  **연결된 계정**(Connected accounts) · 멤버. **일반 탭**: 워크스페이스 카드(`features/workspace-settings`
+  `WorkspaceInfoCard`) — 로고 **파일 업로드**(`shared/lib/image-resize` 로 256px data URL, 유저 아바타와 동일
+  방식)·이름 수정 + **URL(slug) 읽기 전용**(복사; slug=tenant 키라 불변) → `PATCH /workspace`. 그 아래 사용량
+  계측 정책(`SettingsForm`), 그리고 **owner 에게만** 위험 구역(`features/delete-workspace` `DeleteWorkspaceCard`):
+  워크스페이스 이름을 타이핑 확인해야 활성화되는 hard delete → `DELETE /workspace` 후 홈(`/`)으로 이동(서버는
+  `getWorkspace.owner === principal.subject` 로 노출 여부 판단, 최종 강제는 컨트롤플레인). 연결된 계정
+  탭(`features/manage-workspace-connections`)은 외부
   계정(GitHub 등)을 OAuth 로 연결: **Connect** 버튼 → `startConnectionAction` → 컨트롤플레인 `POST
   /connections/:provider/start` 의 `authorizeUrl` 로 브라우저 이동 → provider 콜백 → 컨트롤플레인이
   `/{workspace}/settings?tab=connections&connected=…`(또는 `&error=…`)로 복귀 → 페이지가 `searchParams` 로

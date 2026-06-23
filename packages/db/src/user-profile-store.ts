@@ -20,6 +20,8 @@ export interface UserProfilePatch {
 
 export interface UserProfileStore {
   get(subject: string): Promise<UserProfile | undefined>;
+  // 여러 subject 의 프로필을 한 번에(멤버 목록을 이름/아바타로 보강하는 용도). 프로필이 없는 subject 는 결과에서 누락.
+  getMany(subjects: string[]): Promise<UserProfile[]>;
   upsert(subject: string, patch: UserProfilePatch): Promise<UserProfile>;
 }
 
@@ -49,6 +51,15 @@ export class InMemoryUserProfileStore implements UserProfileStore {
 
   async get(subject: string): Promise<UserProfile | undefined> {
     return this.rows.get(subject);
+  }
+
+  async getMany(subjects: string[]): Promise<UserProfile[]> {
+    const out: UserProfile[] = [];
+    for (const s of subjects) {
+      const row = this.rows.get(s);
+      if (row) out.push(row);
+    }
+    return out;
   }
 
   async upsert(subject: string, patch: UserProfilePatch): Promise<UserProfile> {
@@ -86,6 +97,15 @@ export class PgUserProfileStore implements UserProfileStore {
     );
     const row = res.rows[0];
     return row ? toProfile(row) : undefined;
+  }
+
+  async getMany(subjects: string[]): Promise<UserProfile[]> {
+    if (subjects.length === 0) return [];
+    const res = await this.client.query<ProfileRow>(
+      "SELECT subject, name, username, avatar_url, updated_at FROM assay_user_profiles WHERE subject = ANY($1)",
+      [subjects],
+    );
+    return res.rows.map(toProfile);
   }
 
   async upsert(subject: string, patch: UserProfilePatch): Promise<UserProfile> {

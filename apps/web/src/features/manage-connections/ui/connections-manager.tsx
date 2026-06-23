@@ -28,16 +28,15 @@ const ERROR_COPY: Record<string, string> = {
   access_denied: '연결이 취소되었습니다(권한 거부).',
 }
 
+// 연결은 개인 소유(self-scoped by subject) — 역할 게이트 없음. 모든 유저가 자기 연결을 연결/해제한다(canWrite 개념 없음).
 export function ConnectionsManager({
   connections,
   providers,
-  canWrite,
   connected,
   error,
 }: {
   connections: ConnectionMeta[]
   providers: ProviderInfo[]
-  canWrite: boolean
   connected?: string // ?connected=<provider> — 방금 연결 성공
   error?: string // ?error=<reason> — 콜백 실패
 }) {
@@ -91,9 +90,9 @@ export function ConnectionsManager({
       <div className="space-y-1">
         <h3 className="text-[13px] font-[560] text-foreground">연결된 계정</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          GitHub 등 외부 계정을 OAuth 로 연결합니다. 토큰은 이 워크스페이스에서 비공개 repo
-          클론·이미지 풀·결과 게시·알림에 사용되며 at-rest 암호화됩니다(값은 다시 표시되지
-          않습니다).
+          GitHub 등 외부 계정을 OAuth 로 연결합니다. 이 연결은 워크스페이스가 아닌 내 계정 소유로,
+          내가 속한 어느 워크스페이스에서든 보입니다. 토큰은 내 run 의 비공개 repo 클론·이미지
+          풀·결과 게시·알림에 사용되며 at-rest 암호화됩니다(값은 다시 표시되지 않습니다).
         </p>
       </div>
 
@@ -127,46 +126,44 @@ export function ConnectionsManager({
                   {new Date(c.connectedAt).toLocaleString('ko-KR')}
                 </div>
               </div>
-              {canWrite &&
-                (confirmId === c.id ? (
-                  <span className="flex items-center gap-2">
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      disabled={pending}
-                      onClick={() => onDisconnect(c.id)}
-                    >
-                      해제 확인
-                    </Button>
-                    <button
-                      type="button"
-                      className="text-[12px] text-muted-foreground hover:text-foreground"
-                      onClick={() => setConfirmId(undefined)}
-                    >
-                      취소
-                    </button>
-                  </span>
-                ) : (
+              {confirmId === c.id ? (
+                <span className="flex items-center gap-2">
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={pending}
+                    onClick={() => onDisconnect(c.id)}
+                  >
+                    해제 확인
+                  </Button>
                   <button
                     type="button"
-                    className="text-[12px] font-[510] text-destructive hover:underline"
-                    onClick={() => setConfirmId(c.id)}
+                    className="text-[12px] text-muted-foreground hover:text-foreground"
+                    onClick={() => setConfirmId(undefined)}
                   >
-                    연결 해제
+                    취소
                   </button>
-                ))}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  className="text-[12px] font-[510] text-destructive hover:underline"
+                  onClick={() => setConfirmId(c.id)}
+                >
+                  연결 해제
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
-      {canWrite ? (
-        providers.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">
-            연결 가능한 provider 가 없습니다 — github.com 원클릭은 관리자가 컨트롤플레인에 OAuth
-            앱(GITHUB_OAUTH_CLIENT_ID/SECRET)을 설정해야 합니다.
-          </p>
-        ) : (
+      {providers.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">
+          연결 가능한 provider 가 없습니다 — github.com 원클릭은 관리자가 컨트롤플레인에 OAuth
+          앱(GITHUB_OAUTH_CLIENT_ID/SECRET)을 설정해야 합니다.
+        </p>
+      ) : (
           <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
             <p className="text-[13px] font-[510] text-foreground">새 계정 연결</p>
             <div className="flex flex-wrap items-center gap-2">
@@ -254,12 +251,7 @@ export function ConnectionsManager({
               </Callout>
             )}
           </div>
-        )
-      ) : (
-        <p className="text-[13px] text-muted-foreground">
-          변경하려면 admin 역할(connections:write)이 필요합니다.
-        </p>
-      )}
+        )}
     </div>
   )
 }

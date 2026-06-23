@@ -1,6 +1,12 @@
 import type { AssayRole } from "@assay/auth";
 import { BadRequestError, ConflictError, NotFoundError } from "@assay/core";
-import type { MemberRecord, WorkspaceInviteMeta, WorkspaceInviteStore, WorkspaceStore } from "@assay/db";
+import type {
+  MemberRecord,
+  UserProfileStore,
+  WorkspaceInviteMeta,
+  WorkspaceInviteStore,
+  WorkspaceStore,
+} from "@assay/db";
 import { generateInviteToken, hashKey } from "@assay/db";
 
 // 멤버십 관리 서비스 — HTTP 라우트와 MCP 도구가 공유하는 단일 코어(패리티). 도메인 규칙(마지막 admin 보호 등)을 여기서 강제.
@@ -9,11 +15,26 @@ export class MembershipService {
   constructor(
     private readonly members: WorkspaceStore,
     private readonly invites: WorkspaceInviteStore,
+    private readonly profiles: UserProfileStore,
   ) {}
 
   // --- 멤버 ---
-  listMembers(workspace: string): Promise<MemberRecord[]> {
-    return this.members.listMembers(workspace);
+  // opaque subject 를 사람이 읽는 프로필(이름/아바타)로 보강한다 — 멤버십과 프로필은 별도 스토어라 여기서 합친다.
+  // BFF·MCP 공통 코어이므로 HTTP(GET /members)·MCP(list_members) 양쪽에 동일하게 이름/아바타가 실린다.
+  async listMembers(workspace: string): Promise<MemberRecord[]> {
+    const members = await this.members.listMembers(workspace);
+    if (members.length === 0) return members;
+    const profiles = await this.profiles.getMany(members.map((m) => m.subject));
+    const bySubject = new Map(profiles.map((p) => [p.subject, p]));
+    return members.map((m) => {
+      const p = bySubject.get(m.subject);
+      if (!p) return m;
+      return {
+        ...m,
+        ...(p.name !== undefined ? { name: p.name } : {}),
+        ...(p.avatarUrl !== undefined ? { avatarUrl: p.avatarUrl } : {}),
+      };
+    });
   }
 
   // 기존 멤버의 역할 변경. 멤버가 아니면 404. 마지막 admin 강등 금지(409).

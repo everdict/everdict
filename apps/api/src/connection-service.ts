@@ -118,7 +118,7 @@ export class ConnectionService {
       const tok = await entry.impl.exchange({ config, code: input.code, redirectUri });
       const account = await entry.impl.whoami({ config, accessToken: tok.accessToken });
       const create: CreateConnectionInput = {
-        workspace: pending.workspace,
+        owner: pending.createdBy, // 개인 소유: 연결을 시작한 사람(subject)이 소유. workspace 는 secret/redirect 용으로만 운반.
         provider: pending.provider,
         accountLabel: account.label,
         scopes: tok.scopes,
@@ -135,11 +135,12 @@ export class ConnectionService {
     }
   }
 
-  async list(workspace: string): Promise<ConnectionMeta[]> {
-    return this.store.list(workspace);
+  // 개인 소유: owner=principal.subject 로 조회/해제(워크스페이스 무관 — 어느 워크스페이스에서도 내 연결을 본다).
+  async list(owner: string): Promise<ConnectionMeta[]> {
+    return this.store.list(owner);
   }
-  async disconnect(workspace: string, id: string): Promise<void> {
-    await this.store.remove(workspace, id);
+  async disconnect(owner: string, id: string): Promise<void> {
+    await this.store.remove(owner, id);
   }
 
   // start: self-hosted 는 host+clientId+clientSecretName 요구 + SecretStore 에서 secret 값 resolve.
@@ -204,16 +205,18 @@ export class ConnectionService {
       );
     return `${trimSlash(base)}/connections/callback`;
   }
-  private settingsUrl(workspace: string): string {
-    return `${trimSlash(this.config.webBaseUrl)}/${encodeURIComponent(workspace)}/settings?tab=connections`;
+  // 연결은 개인 소유 → 콜백 복귀 위치는 워크스페이스 설정이 아닌 개인 계정 페이지(/<workspace>/account).
+  // URL 은 여전히 워크스페이스-스코프(pending.workspace) — 활성 워크스페이스 컨텍스트를 유지하기 위함.
+  private accountUrl(workspace: string): string {
+    return `${trimSlash(this.config.webBaseUrl)}/${encodeURIComponent(workspace)}/account?tab=connections`;
   }
   private successRedirect(workspace: string, provider: string): string {
-    return `${this.settingsUrl(workspace)}&connected=${encodeURIComponent(provider)}`;
+    return `${this.accountUrl(workspace)}&connected=${encodeURIComponent(provider)}`;
   }
   private errorRedirect(workspace: string | undefined, reason: string): string {
     if (workspace === undefined)
       return `${trimSlash(this.config.webBaseUrl)}/?connection_error=${encodeURIComponent(reason)}`;
-    return `${this.settingsUrl(workspace)}&error=${encodeURIComponent(reason)}`;
+    return `${this.accountUrl(workspace)}&error=${encodeURIComponent(reason)}`;
   }
 }
 

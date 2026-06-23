@@ -75,6 +75,9 @@ export type PullIngestInput = PullIngestBody & { tenant: string };
 
 export interface RunScorecardInput {
   tenant: string;
+  // 제출자(principal.subject) — 비공개 repo 케이스의 개인 소유 연결을 resolve 할 owner("내 연결로 clone").
+  // 결과적으로 비공개-repo 데이터셋은 사실상 단일 소유(케이스의 connectionId 는 그 소유자가 제출할 때만 resolve).
+  submittedBy?: string;
   dataset: { id: string; version: string };
   harness: { id: string; version: string };
   judges?: Array<{ id: string; version: string }>; // 선택한 Agent Judge 들 — 트레이스에 적용
@@ -97,8 +100,8 @@ export interface ScorecardServiceDeps {
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@assay/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(서버 내부 주입)
   // 비공개 repo 시드용 토큰 resolve — 케이스 env.source.connectionId → 외부 계정 연결 토큰. 단일 run 과 동일(RunService.repoTokenFor).
-  // 데이터셋의 케이스마다 적용 → 비공개-repo 데이터셋을 배치 eval. 토큰은 잡(repoToken)에만 transient.
-  repoTokenFor?: (tenant: string, connectionId: string) => Promise<string | undefined>;
+  // 연결은 개인 소유라 owner(=제출자 subject)로 resolve. 데이터셋의 케이스마다 적용 → 비공개-repo 데이터셋 배치 eval. 토큰은 잡(repoToken)에만 transient.
+  repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
   // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 스코어카드 결과 무관(서비스가 swallow).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
   artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)
@@ -154,6 +157,7 @@ export class ScorecardService {
     void this.track(
       record.id,
       input.tenant,
+      input.submittedBy ?? input.tenant, // owner — 비공개 repo 케이스를 제출자의 개인 연결로 clone
       dataset,
       input.harness.id,
       harnessVersion,
@@ -260,19 +264,20 @@ export class ScorecardService {
     return record.scorecard;
   }
 
-  // 케이스 repo 시드가 비공개(git + connectionId)면 외부 계정 연결 토큰을 resolve. public/비-repo/미설정이면 undefined.
-  private async resolveRepoToken(tenant: string, evalCase: AgentJob["evalCase"]): Promise<string | undefined> {
+  // 케이스 repo 시드가 비공개(git + connectionId)면 owner(제출자 subject)의 개인 연결 토큰을 resolve. public/비-repo/미설정이면 undefined.
+  private async resolveRepoToken(owner: string, evalCase: AgentJob["evalCase"]): Promise<string | undefined> {
     if (!this.deps.repoTokenFor) return undefined;
     const env = evalCase.env;
     if (env.kind !== "repo") return undefined;
     const src = env.source;
     if (!("git" in src) || !src.connectionId) return undefined;
-    return this.deps.repoTokenFor(tenant, src.connectionId).catch(() => undefined);
+    return this.deps.repoTokenFor(owner, src.connectionId).catch(() => undefined);
   }
 
   private async track(
     id: string,
     tenant: string,
+    owner: string, // 제출자 subject — 비공개 repo 케이스 토큰 resolve 용(개인 소유 연결)
     dataset: Dataset,
     harnessId: string,
     harnessVersion: string,
@@ -286,8 +291,8 @@ export class ScorecardService {
     // 각 케이스 디스패치에 tenant/spec/judge 모델을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // 초과 시 throw → 배치 실패
-      // 케이스가 비공개 repo(git + connectionId)면 외부 계정 연결 토큰을 resolve 해 잡에 transient 로 싣는다(단일 run 과 동일).
-      const repoToken = await this.resolveRepoToken(tenant, job.evalCase);
+      // 케이스가 비공개 repo(git + connectionId)면 제출자의 개인 연결 토큰을 resolve 해 잡에 transient 로 싣는다(단일 run 과 동일).
+      const repoToken = await this.resolveRepoToken(owner, job.evalCase);
       const enriched: AgentJob = {
         ...job,
         tenant,

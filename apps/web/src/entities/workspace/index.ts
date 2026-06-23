@@ -1,1 +1,8 @@
-export { type Workspace, workspaceSchema, workspacesSchema } from './model/schema'
+export {
+  type Workspace,
+  type WorkspaceRecord,
+  workspaceRecordSchema,
+  workspaceSchema,
+  workspacesSchema,
+  workspaceUrlBase,
+} from './model/schema'

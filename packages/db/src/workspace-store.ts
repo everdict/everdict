@@ -8,6 +8,7 @@ export interface WorkspaceRecord {
   id: string; // = tenant 키(모든 데이터 스코프)
   name: string; // 표시 이름
   owner: string; // 생성한 subject
+  logoUrl?: string; // 로고(아바타와 동일: http(s) URL 또는 data:image base64)
   createdAt: string;
 }
 
@@ -16,13 +17,18 @@ export interface WorkspaceWithRole {
   id: string;
   name: string;
   role: string;
+  logoUrl?: string; // 사이드바/스위처 표시용
 }
 
 // 워크스페이스 멤버(역할 + 표시용 email + 가입시각). 멤버 관리 UI 표시용.
+// name/avatarUrl 은 멤버십 스토어가 아니라 프로필(assay_user_profiles)을 합쳐 보강하는 필드 —
+// WorkspaceStore 는 비워 두고 MembershipService 가 채운다(opaque subject 대신 사람이 읽는 신원 표시용).
 export interface MemberRecord {
   subject: string;
   role: string;
   email?: string;
+  name?: string;
+  avatarUrl?: string;
   addedAt: string;
 }
 
@@ -32,6 +38,10 @@ export interface WorkspaceStore {
   get(id: string): Promise<WorkspaceRecord | undefined>;
   // subject 가 멤버인 워크스페이스 목록(역할 포함), 생성 시각 오름차순.
   listForSubject(subject: string): Promise<WorkspaceWithRole[]>;
+  // 표시 정보 갱신(이름/로고). slug(id)는 불변. 없으면 undefined. logoUrl=null 은 로고 제거.
+  update(id: string, patch: { name?: string; logoUrl?: string | null }): Promise<WorkspaceRecord | undefined>;
+  // 워크스페이스 + 그 모든 workspace/tenant 스코프 데이터를 하드 삭제(cascade). 멱등(없으면 no-op).
+  delete(id: string): Promise<void>;
   // (workspace, subject) 멤버십 역할 — 멤버가 아니면 undefined.
   roleFor(workspace: string, subject: string): Promise<string | undefined>;
   // 멱등 부트스트랩: 워크스페이스 + 멤버십을 없을 때만 만든다(기존 토큰/dev workspace 를 멤버십으로 승격).
@@ -77,10 +87,44 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
       const cell = m.get(subject);
       if (!cell) continue;
       const rec = this.workspaces.get(wsId);
-      if (rec) out.push({ id: rec.id, name: rec.name, role: cell.role, createdAt: rec.createdAt });
+      if (rec)
+        out.push({
+          id: rec.id,
+          name: rec.name,
+          role: cell.role,
+          createdAt: rec.createdAt,
+          ...(rec.logoUrl !== undefined ? { logoUrl: rec.logoUrl } : {}),
+        });
     }
     out.sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
-    return out.map(({ id, name, role }) => ({ id, name, role }));
+    return out.map(({ id, name, role, logoUrl }) => ({
+      id,
+      name,
+      role,
+      ...(logoUrl !== undefined ? { logoUrl } : {}),
+    }));
+  }
+
+  async update(id: string, patch: { name?: string; logoUrl?: string | null }): Promise<WorkspaceRecord | undefined> {
+    const rec = this.workspaces.get(id);
+    if (!rec) return undefined;
+    // logoUrl: null=제거(undefined), 문자열=설정, undefined=유지. 키를 지우지 않고 spread-conditional 로 깔끔히 재구성.
+    const logoUrl = patch.logoUrl === null ? undefined : (patch.logoUrl ?? rec.logoUrl);
+    const next: WorkspaceRecord = {
+      id: rec.id,
+      name: patch.name !== undefined ? patch.name : rec.name,
+      owner: rec.owner,
+      createdAt: rec.createdAt,
+      ...(logoUrl !== undefined ? { logoUrl } : {}),
+    };
+    this.workspaces.set(id, next);
+    return next;
+  }
+
+  // in-memory 는 멤버십 그래프만 보유 — 다른 in-memory 스토어(secrets/runs 등)는 프로세스 로컬·도달 불가라 무해.
+  async delete(id: string): Promise<void> {
+    this.workspaces.delete(id);
+    this.members.delete(id);
   }
 
   async roleFor(workspace: string, subject: string): Promise<string | undefined> {
@@ -137,19 +181,49 @@ interface WorkspaceRow {
   id: string;
   name: string;
   owner: string;
+  logo_url: string | null;
   created_at: string | Date;
 }
 
 function toRecord(row: WorkspaceRow): WorkspaceRecord {
-  return { id: row.id, name: row.name, owner: row.owner, createdAt: new Date(row.created_at).toISOString() };
+  return {
+    id: row.id,
+    name: row.name,
+    owner: row.owner,
+    createdAt: new Date(row.created_at).toISOString(),
+    ...(row.logo_url !== null ? { logoUrl: row.logo_url } : {}),
+  };
 }
+
+// 워크스페이스 + 그 모든 스코프 데이터를 지우기 위한 (테이블, 스코프컬럼) 목록. assay_workspaces 는 별도로 마지막에.
+// 모든 마이그레이션이 @assay/db 소유라 테이블명 인지는 레이어 위반이 아니다. _shared 는 실제 id 와 절대 같지 않다.
+const WORKSPACE_SCOPED_TABLES: ReadonlyArray<readonly [table: string, column: string]> = [
+  ["assay_oauth_states", "workspace"],
+  ["assay_workspace_invites", "workspace"],
+  ["assay_connections", "workspace"],
+  ["assay_secrets", "workspace"],
+  ["assay_runs", "tenant"],
+  ["assay_scorecards", "tenant"],
+  ["assay_harnesses", "tenant"],
+  ["assay_datasets", "tenant"],
+  ["assay_judges", "tenant"],
+  ["assay_runtimes", "tenant"],
+  ["assay_benchmarks", "tenant"],
+  ["assay_models", "tenant"],
+  ["assay_metrics", "tenant"],
+  ["assay_harness_templates", "tenant"],
+  ["assay_harness_instances", "tenant"],
+  ["assay_tenant_keys", "tenant"],
+  ["assay_workspace_settings", "workspace"],
+  ["assay_workspace_members", "workspace"],
+];
 
 export class PgWorkspaceStore implements WorkspaceStore {
   constructor(private readonly client: SqlClient) {}
 
   async create(rec: { id: string; name: string; owner: string }): Promise<WorkspaceRecord | undefined> {
     const res = await this.client.query<WorkspaceRow>(
-      "INSERT INTO assay_workspaces (id, name, owner) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING RETURNING id, name, owner, created_at",
+      "INSERT INTO assay_workspaces (id, name, owner) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING RETURNING id, name, owner, logo_url, created_at",
       [rec.id, rec.name, rec.owner],
     );
     const row = res.rows[0];
@@ -163,18 +237,45 @@ export class PgWorkspaceStore implements WorkspaceStore {
 
   async get(id: string): Promise<WorkspaceRecord | undefined> {
     const res = await this.client.query<WorkspaceRow>(
-      "SELECT id, name, owner, created_at FROM assay_workspaces WHERE id = $1",
+      "SELECT id, name, owner, logo_url, created_at FROM assay_workspaces WHERE id = $1",
       [id],
     );
     return res.rows[0] ? toRecord(res.rows[0]) : undefined;
   }
 
   async listForSubject(subject: string): Promise<WorkspaceWithRole[]> {
-    const res = await this.client.query<{ id: string; name: string; role: string }>(
-      "SELECT w.id, w.name, m.role FROM assay_workspace_members m JOIN assay_workspaces w ON w.id = m.workspace WHERE m.subject = $1 ORDER BY w.created_at ASC, w.id ASC",
+    const res = await this.client.query<{ id: string; name: string; role: string; logo_url: string | null }>(
+      "SELECT w.id, w.name, m.role, w.logo_url FROM assay_workspace_members m JOIN assay_workspaces w ON w.id = m.workspace WHERE m.subject = $1 ORDER BY w.created_at ASC, w.id ASC",
       [subject],
     );
-    return res.rows.map((r) => ({ id: r.id, name: r.name, role: r.role }));
+    return res.rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      role: r.role,
+      ...(r.logo_url !== null ? { logoUrl: r.logo_url } : {}),
+    }));
+  }
+
+  async update(id: string, patch: { name?: string; logoUrl?: string | null }): Promise<WorkspaceRecord | undefined> {
+    // name=COALESCE(유지), logo_url 은 명시 패치만 반영($3 sentinel 없이 3-상태): undefined=유지, null=지움, 값=설정.
+    const setLogo = patch.logoUrl !== undefined; // undefined 면 logo_url 컬럼을 건드리지 않는다.
+    const res = await this.client.query<WorkspaceRow>(
+      `UPDATE assay_workspaces
+         SET name = COALESCE($2, name)${setLogo ? ", logo_url = $3" : ""}
+       WHERE id = $1
+       RETURNING id, name, owner, logo_url, created_at`,
+      setLogo ? [id, patch.name ?? null, patch.logoUrl] : [id, patch.name ?? null],
+    );
+    return res.rows[0] ? toRecord(res.rows[0]) : undefined;
+  }
+
+  // 순차·멱등 cascade. assay_workspaces 를 마지막에 지워(그 전까진 재시도 가능) 부분 실패에도 안전.
+  // SqlClient 는 트랜잭션 추상화가 없어 단일 BEGIN/COMMIT 을 보장할 수 없으므로 멱등 DELETE 로 처리한다.
+  async delete(id: string): Promise<void> {
+    for (const [table, column] of WORKSPACE_SCOPED_TABLES) {
+      await this.client.query(`DELETE FROM ${table} WHERE ${column} = $1`, [id]);
+    }
+    await this.client.query("DELETE FROM assay_workspaces WHERE id = $1", [id]);
   }
 
   async roleFor(workspace: string, subject: string): Promise<string | undefined> {

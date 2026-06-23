@@ -39,12 +39,7 @@ describe("authz", () => {
     expect(can(p(["member"]), "runtimes:write")).toBe(true);
     expect(can(p(["admin"]), "runtimes:write")).toBe(true);
 
-    // 외부 계정 연결: 메타 조회(read)는 viewer+ (run 에서 repo 연결 참조), 연결/해제(write)는 토큰을 다루므로 admin 전용.
-    expect(can(p(["viewer"]), "connections:read")).toBe(true);
-    expect(can(p(["member"]), "connections:read")).toBe(true);
-    expect(can(p(["viewer"]), "connections:write")).toBe(false);
-    expect(can(p(["member"]), "connections:write")).toBe(false);
-    expect(can(p(["admin"]), "connections:write")).toBe(true);
+    // 외부 계정 연결(Connected accounts)은 개인 소유 — authz 매트릭스에 없다(subject 로 self-scoped, 라우트가 직접 스코프).
 
     // 멤버 조회는 viewer+, 멤버 관리(역할변경/제거/초대)는 admin 전용.
     expect(can(p(["viewer"]), "members:read")).toBe(true);

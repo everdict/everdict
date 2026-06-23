@@ -7,6 +7,7 @@ import {
   InMemoryRunStore,
   InMemoryScorecardStore,
   InMemoryTenantKeyStore,
+  InMemoryUserProfileStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
@@ -100,7 +101,11 @@ function harness() {
     }),
     keyStore: new InMemoryTenantKeyStore(),
     workspaceStore,
-    membershipService: new MembershipService(workspaceStore, new InMemoryWorkspaceInviteStore(workspaceStore)),
+    membershipService: new MembershipService(
+      workspaceStore,
+      new InMemoryWorkspaceInviteStore(workspaceStore),
+      new InMemoryUserProfileStore(),
+    ),
     scorecardService: new ScorecardService({
       dispatcher: okDispatcher,
       store: new InMemoryScorecardStore(),

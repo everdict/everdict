@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 
 import type { Member } from '@/entities/member'
+import { Avatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Select } from '@/shared/ui/input'
@@ -10,6 +11,11 @@ import { Select } from '@/shared/ui/input'
 import { removeMemberAction, setMemberRoleAction } from '../api/manage-members'
 
 const ROLES = ['viewer', 'member', 'admin'] as const
+
+// 표시용 신원 — opaque subject 는 마지막 폴백일 뿐, 가능하면 이름>이메일 순으로 보여준다.
+function memberLabel(m: Member): string {
+  return m.name ?? m.email ?? m.subject
+}
 
 export function MembersManager({ members, canWrite }: { members: Member[]; canWrite: boolean }) {
   const [error, setError] = useState<string>()
@@ -36,9 +42,12 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
   return (
     <div className="space-y-5">
       <div className="space-y-1">
-        <h3 className="text-[13px] font-[560] text-foreground">멤버</h3>
+        <h3 className="flex items-center gap-2 text-[13px] font-[560] text-foreground">
+          사람
+          <span className="text-[12px] font-normal text-faint">{members.length}</span>
+        </h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          이 워크스페이스의 멤버와 역할. 역할 변경·제거는 admin 전용이며, 마지막 admin 은
+          이 워크스페이스에 로그인하는 사람. 역할 변경·제거는 admin 전용이며, 마지막 admin 은
           강등/제거할 수 없습니다. 새 멤버는 아래 초대 링크로 추가합니다.
         </p>
       </div>
@@ -49,16 +58,16 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
         <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {members.map((m) => (
             <li key={m.subject} className="flex items-center justify-between gap-3 px-3 py-2.5">
-              <div className="min-w-0">
-                <span className="text-[13px] font-[510] text-foreground">{m.email ?? m.subject}</span>
-                {m.email && (
-                  <span className="ml-2 truncate font-mono text-[12px] text-faint">
-                    {m.subject}
-                  </span>
-                )}
-                <span className="ml-2 text-[12px] text-faint">
-                  {new Date(m.addedAt).toLocaleDateString('ko-KR')}
-                </span>
+              <div className="flex min-w-0 items-center gap-2.5">
+                <Avatar name={memberLabel(m)} size="lg" {...(m.avatarUrl ? { url: m.avatarUrl } : {})} />
+                <div className="min-w-0">
+                  <div className="truncate text-[13px] font-[510] text-foreground">
+                    {memberLabel(m)}
+                  </div>
+                  {m.name && m.email && (
+                    <div className="truncate text-[12px] text-muted-foreground">{m.email}</div>
+                  )}
+                </div>
               </div>
               {canWrite ? (
                 <span className="flex items-center gap-2">

@@ -9,6 +9,7 @@ import {
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
+  InMemoryUserProfileStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
@@ -153,7 +154,11 @@ function server(
   const settingsStore = new InMemoryWorkspaceSettingsStore();
   const workspaceStore = new InMemoryWorkspaceStore();
   const workspaceService = new WorkspaceService(workspaceStore);
-  const membershipService = new MembershipService(workspaceStore, new InMemoryWorkspaceInviteStore(workspaceStore));
+  const membershipService = new MembershipService(
+    workspaceStore,
+    new InMemoryWorkspaceInviteStore(workspaceStore),
+    new InMemoryUserProfileStore(),
+  );
   const benchmarkService = new BenchmarkService({
     datasets: datasetRegistry,
     benchmarks: new InMemoryBenchmarkRegistry(),

@@ -4,42 +4,13 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Loader2, Trash2, Upload } from 'lucide-react'
 
+import { fileToImageDataUrl, MAX_IMAGE_UPLOAD_BYTES } from '@/shared/lib/image-resize'
 import { cn } from '@/shared/lib/utils'
 import { Button, buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label } from '@/shared/ui/input'
 
 import { updateProfileAction } from '../api/update-profile'
-
-const MAX_UPLOAD_BYTES = 8 * 1024 * 1024 // 원본 8MB 초과는 거부(디코딩 부담). 처리 후엔 256px 로 줄여 작아진다.
-const AVATAR_PX = 256 // 캔버스로 리사이즈할 한 변 최대 픽셀.
-
-// 업로드 이미지를 256px JPEG data URL 로 리사이즈·압축한다. 투명 배경은 흰색으로 깔아 검게 뜨는 것을 막는다.
-async function fileToAvatarDataUrl(file: File): Promise<string> {
-  const objectUrl = URL.createObjectURL(file)
-  try {
-    const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-      const el = new Image()
-      el.onload = () => resolve(el)
-      el.onerror = () => reject(new Error('이미지를 불러올 수 없습니다.'))
-      el.src = objectUrl
-    })
-    const scale = Math.min(1, AVATAR_PX / Math.max(img.naturalWidth, img.naturalHeight))
-    const w = Math.max(1, Math.round(img.naturalWidth * scale))
-    const h = Math.max(1, Math.round(img.naturalHeight * scale))
-    const canvas = document.createElement('canvas')
-    canvas.width = w
-    canvas.height = h
-    const cx = canvas.getContext('2d')
-    if (!cx) throw new Error('이미지 처리에 실패했습니다.')
-    cx.fillStyle = '#ffffff'
-    cx.fillRect(0, 0, w, h)
-    cx.drawImage(img, 0, 0, w, h)
-    return canvas.toDataURL('image/jpeg', 0.85)
-  } finally {
-    URL.revokeObjectURL(objectUrl)
-  }
-}
 
 // 프로필 사진 미리보기 — 이미지(http/https 또는 data URL)가 있으면 표시, 없거나 로드 실패면 이름 첫 글자 모노그램.
 function AvatarPreview({ url, seed }: { url: string; seed: string }) {
@@ -92,12 +63,12 @@ export function ProfileForm({
       setError('이미지 파일만 업로드할 수 있습니다.')
       return
     }
-    if (file.size > MAX_UPLOAD_BYTES) {
+    if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
       setError('이미지가 너무 큽니다(최대 8MB).')
       return
     }
     try {
-      setA(await fileToAvatarDataUrl(file))
+      setA(await fileToImageDataUrl(file))
     } catch (err) {
       setError(err instanceof Error ? err.message : '이미지 처리에 실패했습니다.')
     }
