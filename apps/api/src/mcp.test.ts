@@ -11,7 +11,8 @@ import {
 } from "@assay/db";
 import {
   InMemoryDatasetRegistry,
-  InMemoryHarnessRegistry,
+  InMemoryHarnessInstanceRegistry,
+  InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
   InMemoryRuntimeRegistry,
 } from "@assay/registry";
@@ -36,14 +37,21 @@ const okDispatcher: Dispatcher = {
   },
 };
 
-const HARNESS = JSON.stringify({
+const HARNESS_TEMPLATE = JSON.stringify({
   kind: "service",
+  category: "topology",
   id: "bu",
-  version: "1.0.0",
-  services: [{ name: "agent-server", image: "img", port: 8080, needs: [], perRun: [], replicas: 1 }],
+  version: "1",
+  services: [{ name: "agent-server", slot: "agent-server", port: 8080, needs: [], perRun: [], replicas: 1 }],
   dependencies: [],
   frontDoor: { service: "agent-server", submit: "POST /runs" },
   traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
+});
+const HARNESS_INSTANCE = JSON.stringify({
+  template: { id: "bu", version: "1" },
+  id: "bu",
+  version: "1.0.0",
+  pins: { "agent-server": "img" },
 });
 
 const DATASET = JSON.stringify({
@@ -56,9 +64,11 @@ let n = 0;
 function harness() {
   const datasetRegistry = new InMemoryDatasetRegistry();
   const workspaceStore = new InMemoryWorkspaceStore();
+  const harnessTemplates = new InMemoryHarnessTemplateRegistry();
   return {
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
-    registry: new InMemoryHarnessRegistry(),
+    harnessTemplates,
+    harnessInstances: new InMemoryHarnessInstanceRegistry(harnessTemplates),
     datasetRegistry,
     judgeRegistry: new InMemoryJudgeRegistry(),
     runtimeRegistry: new InMemoryRuntimeRegistry(),
@@ -112,6 +122,7 @@ describe("MCP tools", () => {
       "ingest_scorecard",
       "list_api_keys",
       "list_datasets",
+      "list_harness_templates",
       "list_harnesses",
       "list_invites",
       "list_judges",
@@ -122,6 +133,7 @@ describe("MCP tools", () => {
       "probe_runtime",
       "pull_scorecard",
       "register_harness",
+      "register_harness_template",
       "remove_member",
       "revoke_api_key",
       "revoke_invite",
@@ -129,34 +141,33 @@ describe("MCP tools", () => {
       "set_member_role",
       "submit_run",
       "validate_dataset",
-      "validate_harness",
       "validate_judge",
       "validate_runtime",
     ]);
   });
 
-  it("validate_harness: 스키마+기존버전 검증(등록하지 않음); 누구나(viewer+) 가능", async () => {
+  it("register_harness_template → register_harness(instance); viewer 도 가능(무게이트)", async () => {
     const deps = harness();
-    const admin = await connect(deps, ["admin"]);
-    const v1 = JSON.parse(text(await admin.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })));
-    expect(v1).toMatchObject({ ok: true, id: "bu", existingVersions: [], versionExists: false });
-    await admin.callTool({ name: "register_harness", arguments: { spec: HARNESS } });
-    const v2 = JSON.parse(text(await admin.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })));
-    expect(v2).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
-    const bad = JSON.parse(text(await admin.callTool({ name: "validate_harness", arguments: { spec: "{not json" } })));
-    expect(bad.ok).toBe(false);
-
-    // 하니스 등록/검증은 역할 게이트 없음 → viewer 도 가능.
     const viewer = await connect(deps, ["viewer"]);
-    expect((await viewer.callTool({ name: "validate_harness", arguments: { spec: HARNESS } })).isError).toBeFalsy();
+    // 템플릿(대분류) 등록 — 무게이트.
+    const tpl = await viewer.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
+    expect(tpl.isError).toBeFalsy();
+    // 인스턴스 등록(template+pins) — 무게이트.
+    const inst = await viewer.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
+    expect(inst.isError).toBeFalsy();
+    expect(text(inst)).toContain("bu");
+    // 잘못된 JSON → 오류.
+    const bad = await viewer.callTool({ name: "register_harness", arguments: { spec: "{not json" } });
+    expect(bad.isError).toBe(true);
   });
 
-  it("member: submit_run + register_harness 가능", async () => {
+  it("member: submit_run + register_harness(instance) 가능", async () => {
     const client = await connect(harness(), ["member"]);
     const sub = await client.callTool({ name: "submit_run", arguments: { harness_id: "scripted", task: "t" } });
     expect(sub.isError).toBeFalsy();
     expect(text(sub)).toContain("run-");
-    const reg = await client.callTool({ name: "register_harness", arguments: { spec: HARNESS } });
+    await client.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
+    const reg = await client.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
     expect(reg.isError).toBeFalsy();
     expect(text(reg)).toContain("bu");
   });
@@ -169,9 +180,10 @@ describe("MCP tools", () => {
     expect(text(sub)).toContain("FORBIDDEN");
   });
 
-  it("admin: register_harness 가능", async () => {
+  it("admin: register_harness(instance) 가능", async () => {
     const client = await connect(harness(), ["admin"]);
-    const reg = await client.callTool({ name: "register_harness", arguments: { spec: HARNESS } });
+    await client.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
+    const reg = await client.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
     expect(reg.isError).toBeFalsy();
     expect(text(reg)).toContain("bu");
   });

@@ -1,5 +1,5 @@
 import { type AgentJob, AppError, type RuntimeSpec, RuntimeSpecSchema } from "@assay/core";
-import type { HarnessRegistry } from "@assay/registry";
+import type { HarnessInstanceRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { buildTopologyBackend } from "./topology-backend.js";
 
@@ -22,12 +22,12 @@ const k8sSpec: Extract<RuntimeSpec, { kind: "topology" }> = {
   tags: [],
 };
 
-function harnessesReturning(kind: string): HarnessRegistry {
+function harnessesReturning(kind: string): HarnessInstanceRegistry {
   return {
     async get() {
       return { kind, id: "h", version: "1.0.0", setup: [], command: "x", env: {}, trace: { kind: "none" } };
     },
-  } as unknown as HarnessRegistry;
+  } as unknown as HarnessInstanceRegistry;
 }
 
 const job: AgentJob = {

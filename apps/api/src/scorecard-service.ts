@@ -19,7 +19,7 @@ import {
 } from "@assay/core";
 import type { ScorecardRecord, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
-import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, MetricRegistry } from "@assay/registry";
+import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry, MetricRegistry } from "@assay/registry";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
 import {
   type Dispatch,
@@ -87,7 +87,7 @@ export interface ScorecardServiceDeps {
   dispatcher: Dispatcher; // 케이스를 잡으로 디스패치(단일 run 과 동일 경로)
   store: ScorecardStore;
   datasets: DatasetRegistry; // 데이터셋 해석(소유/_shared 폴백) + 케이스 로드
-  harnesses?: HarnessRegistry; // 하니스 버전 해석(latest→구체) + spec 임베드(선언형). 빌트인은 폴백.
+  harnesses?: HarnessInstanceRegistry; // 인스턴스 해석(template+pins→resolved HarnessSpec). 빌트인은 폴백.
   judges?: JudgeRegistry; // judge 해석(소유/_shared 폴백)
   metrics?: MetricRegistry; // 등록 metric 해석(소유/_shared 폴백) — post-hoc 합격규칙 적용
   judgeRunner?: JudgeRunner; // 트레이스 기반 judge 실행(model 호출 / skip)

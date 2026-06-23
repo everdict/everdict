@@ -3,14 +3,21 @@ import {
   AppError,
   DatasetSchema,
   EvalCaseSchema,
-  HarnessSpecSchema,
+  HarnessInstanceSpecSchema,
+  HarnessTemplateSpecSchema,
   JudgeSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
 } from "@assay/core";
 import { diffDatasets } from "@assay/datasets";
 import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@assay/db";
-import type { DatasetRegistry, HarnessRegistry, JudgeRegistry, RuntimeRegistry } from "@assay/registry";
+import type {
+  DatasetRegistry,
+  HarnessInstanceRegistry,
+  HarnessTemplateRegistry,
+  JudgeRegistry,
+  RuntimeRegistry,
+} from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -26,7 +33,8 @@ import type { WorkspaceService } from "./workspace-service.js";
 export interface McpDeps {
   service: RunService;
   scorecardService?: ScorecardService;
-  registry?: HarnessRegistry;
+  harnessTemplates?: HarnessTemplateRegistry;
+  harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
   judgeRegistry?: JudgeRegistry;
   runtimeRegistry?: RuntimeRegistry;
@@ -120,51 +128,54 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       }),
   );
 
-  if (deps.registry) {
-    const registry = deps.registry;
+  // 하네스 대분류(템플릿: 구조/슬롯). 무게이트(viewer+) — 협업 콘텐츠.
+  if (deps.harnessTemplates) {
+    const templates = deps.harnessTemplates;
     server.registerTool(
-      "list_harnesses",
-      { description: "이 워크스페이스가 보는 하니스(소유 + _shared)", inputSchema: {} },
-      () => run(principal, "harnesses:read", async () => ok(await registry.list(ws))),
+      "list_harness_templates",
+      { description: "이 워크스페이스가 보는 하네스 템플릿(대분류; 소유 + _shared)", inputSchema: {} },
+      () => run(principal, "harnesses:read", async () => ok(await templates.list(ws))),
     );
 
     server.registerTool(
-      "validate_harness",
+      "register_harness_template",
       {
-        description: "HarnessSpec(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
-        inputSchema: { spec: z.string().describe("HarnessSpec JSON") },
+        description: "하네스 템플릿(대분류 구조, JSON 문자열) 등록(불변; 충돌 시 CONFLICT). 무게이트(viewer+)",
+        inputSchema: { spec: z.string().describe("HarnessTemplateSpec JSON") },
       },
       ({ spec }) =>
-        run(principal, "harnesses:register", async () => {
+        run(principal, "templates:write", async () => {
           let parsed: unknown;
           try {
             parsed = JSON.parse(spec);
           } catch {
-            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+            return fail("BAD_REQUEST: 유효한 HarnessTemplateSpec JSON 이 아닙니다.");
           }
-          const result = HarnessSpecSchema.safeParse(parsed);
-          if (!result.success)
-            return ok({
-              ok: false,
-              errors: result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
-            });
-          const existingVersions = await registry.ownVersions(ws, result.data.id);
-          return ok({
-            ok: true,
-            kind: result.data.kind,
-            id: result.data.id,
-            version: result.data.version,
-            existingVersions,
-            versionExists: existingVersions.includes(result.data.version),
-          });
+          const result = HarnessTemplateSpecSchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          await templates.register(ws, result.data);
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
+    );
+  }
+
+  // 개별 하네스(인스턴스: template 참조 + pins). 무게이트(viewer+).
+  if (deps.harnessInstances) {
+    const instances = deps.harnessInstances;
+    server.registerTool(
+      "list_harnesses",
+      { description: "이 워크스페이스가 보는 하네스 인스턴스(템플릿별로 묶임; 소유 + _shared)", inputSchema: {} },
+      () => run(principal, "harnesses:read", async () => ok(await instances.list(ws))),
     );
 
     server.registerTool(
       "register_harness",
       {
-        description: "HarnessSpec(JSON 문자열)을 이 워크스페이스 소유로 등록(불변; 충돌 시 CONFLICT)",
-        inputSchema: { spec: z.string().describe("HarnessSpec JSON") },
+        description:
+          "하네스 인스턴스(template 참조 + pins, JSON 문자열) 등록(불변; 템플릿 없음/핀 누락 시 오류). 무게이트(viewer+)",
+        inputSchema: {
+          spec: z.string().describe("HarnessInstanceSpec JSON: { template:{id,version}, id, version, pins }"),
+        },
       },
       ({ spec }) =>
         run(principal, "harnesses:register", async () => {
@@ -172,11 +183,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(spec);
           } catch {
-            return fail("BAD_REQUEST: 유효한 HarnessSpec JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: 유효한 HarnessInstanceSpec JSON 이 아닙니다.");
           }
-          const result = HarnessSpecSchema.safeParse(parsed);
+          const result = HarnessInstanceSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await registry.register(ws, result.data);
+          await instances.register(ws, result.data); // resolve 검증(템플릿 없음/핀 누락 → 오류)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );

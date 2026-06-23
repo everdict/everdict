@@ -7,7 +7,7 @@ import {
   modelJudge,
   openaiComplete,
 } from "@assay/graders";
-import type { HarnessRegistry, ModelRegistry } from "@assay/registry";
+import type { HarnessInstanceRegistry, ModelRegistry } from "@assay/registry";
 
 // judge 실행기 — JudgeSpec + tenant + GradeContext(트레이스) → Score. 컨트롤플레인이 트레이스 기반으로 판정.
 // model(anthropic/openai)·harness 모두 modelJudge(전송)로 통일 — 전송만 다르다(API 호출 / 에이전트 디스패치).
@@ -30,7 +30,7 @@ const OPENAI_BASE_URL = "OPENAI_BASE_URL"; // LiteLLM 등 OpenAI-호환 프록�
 export interface DefaultJudgeRunnerDeps {
   secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries (복호화, 서버 내부 전용)
   dispatch?: (job: AgentJob) => Promise<CaseResult>; // harness judge 용 에이전트 디스패치(단일 run 과 동일 경로)
-  harnesses?: HarnessRegistry; // judge 가 참조하는 하니스 버전 해석(latest→구체) + 선언형 spec 임베드
+  harnesses?: HarnessInstanceRegistry; // judge 가 참조하는 하니스 인스턴스 해석(template+pins→resolved)
   models?: ModelRegistry; // judge.model 이 등록된 model id 면 provider/baseUrl/하부모델을 해석(없으면 raw 문자열)
   fetchImpl?: typeof fetch;
   anthropicBaseUrl?: string;
@@ -39,7 +39,7 @@ export interface DefaultJudgeRunnerDeps {
 
 // 참조 하니스 해석: 구체 버전 + (선언형) spec. 빌트인/미등록은 as-given.
 async function resolveJudgeHarness(
-  harnesses: HarnessRegistry | undefined,
+  harnesses: HarnessInstanceRegistry | undefined,
   tenant: string,
   ref: { id: string; version: string },
 ): Promise<{ version: string; spec?: HarnessSpec }> {

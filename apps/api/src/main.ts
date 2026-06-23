@@ -28,12 +28,14 @@ import {
   PgWorkspaceStore,
   type RunStore,
   type ScorecardStore,
+  type SecretCipher,
   type SecretStore,
   type TenantKeyStore,
   type WorkspaceInviteStore,
   type WorkspaceSettingsStore,
   type WorkspaceStore,
   cipherFromEnv,
+  generatedCipher,
   makePool,
   migrate,
   sqlClient,
@@ -42,12 +44,10 @@ import {
   type BenchmarkRegistry,
   type DatasetRegistry,
   type HarnessInstanceRegistry,
-  type HarnessRegistry,
   type HarnessTemplateRegistry,
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
-  InMemoryHarnessRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
   InMemoryMetricRegistry,
@@ -59,7 +59,6 @@ import {
   PgBenchmarkRegistry,
   PgDatasetRegistry,
   PgHarnessInstanceRegistry,
-  PgHarnessRegistry,
   PgHarnessTemplateRegistry,
   PgJudgeRegistry,
   PgMetricRegistry,
@@ -67,7 +66,6 @@ import {
   PgRuntimeRegistry,
   type RuntimeRegistry,
   loadDatasetDir,
-  loadHarnessDir,
   loadHarnessTaxonomyDir,
   loadJudgeDir,
   loadMetricDir,
@@ -99,7 +97,6 @@ async function main(): Promise<void> {
     store,
     scorecardStore,
     keyStore,
-    registry,
     harnessTemplateRegistry,
     harnessInstanceRegistry,
     datasetRegistry,
@@ -115,7 +112,6 @@ async function main(): Promise<void> {
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   const membershipService = new MembershipService(workspaceStore, inviteStore);
-  await seedSharedHarnesses(registry);
   await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
@@ -123,21 +119,14 @@ async function main(): Promise<void> {
   await seedSharedMetrics(metricRegistry);
   await seedSharedRuntimes(runtimeRegistry);
 
-  // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소 있을 때만.
-  const ss = secretStore;
-  const secrets = ss ? { secretsFor: (tenant: string) => ss.entries(tenant) } : undefined;
+  // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소는 항상 활성.
+  const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
 
   const backends = new BackendRegistry();
   if (nomadAddr && image) {
-    backends.register(
-      "nomad",
-      new NomadBackend({ addr: nomadAddr, image, secretEnv: collectAuthEnv(), ...(secrets ? { secrets } : {}) }),
-    );
+    backends.register("nomad", new NomadBackend({ addr: nomadAddr, image, secretEnv: collectAuthEnv(), secrets }));
   } else if (k8sContext && image) {
-    backends.register(
-      "k8s",
-      new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv(), ...(secrets ? { secrets } : {}) }),
-    );
+    backends.register("k8s", new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv(), secrets }));
   } else {
     backends.register("local", new LocalBackend());
   }
@@ -145,11 +134,13 @@ async function main(): Promise<void> {
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
   // 테넌트 런타임 라우팅: placement.target 이 테넌트 등록 Runtime 이면 그 백엔드를 빌드/등록해 라우팅(아니면 글로벌 백엔드 그대로).
-  const runtimeSecretsFor = (tenant: string) => (secretStore ? secretStore.entries(tenant) : Promise.resolve({}));
+  const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
   // RuntimeSpec → 라이브 백엔드. topology 런타임 → ServiceTopologyBackend, 나머지는 buildRuntimeBackend(local/docker/nomad/k8s).
   // 디스패치와 연결 테스트(probe)가 같은 빌더/인증 경로를 쓰도록 한 곳에서 정의.
   const runtimeBuildBackend = (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) =>
-    spec.kind === "topology" ? buildTopologyBackend(spec, { harnesses: registry }) : buildRuntimeBackend(spec, opts);
+    spec.kind === "topology"
+      ? buildTopologyBackend(spec, { harnesses: harnessInstanceRegistry })
+      : buildRuntimeBackend(spec, opts);
   const dispatcher = new RuntimeDispatcher({
     inner: scheduler,
     backends,
@@ -171,8 +162,8 @@ async function main(): Promise<void> {
     store,
     budget,
     ...(artifacts ? { artifacts } : {}),
-    // 선언형 command 하니스: 레지스트리에서 spec 을 풀어 잡에 임베드(없으면 빌트인 폴백).
-    resolveHarness: (tenant, id, version) => registry.get(tenant, id, version),
+    // 선언형 하니스: 인스턴스 레지스트리에서 template+pins 를 resolve 해 spec 을 잡에 임베드(없으면 빌트인 폴백).
+    resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),
     // 워크스페이스 단위 계측 정책(요청별 override 가 우선): DB 설정 스토어 우선, 미설정이면 env 정책 폴백.
     meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
     // 워크스페이스 기본 judge 모델(요청별 override 가 우선): inline judge grader 가 이 모델로 채점되도록 잡에 주입.
@@ -183,7 +174,7 @@ async function main(): Promise<void> {
   const judgeRunner = defaultJudgeRunner({
     secretsFor: runtimeSecretsFor,
     dispatch: (job) => dispatcher.dispatch(job), // harness judge 도 테넌트 런타임 라우팅 경유
-    harnesses: registry,
+    harnesses: harnessInstanceRegistry,
     models: modelRegistry, // judge.model 이 등록된 model id 면 provider/baseUrl/하부모델을 해석(아니면 raw 문자열)
     ...(process.env.ASSAY_JUDGE_OPENAI_BASE_URL ? { openaiBaseUrl: process.env.ASSAY_JUDGE_OPENAI_BASE_URL } : {}),
   });
@@ -192,7 +183,7 @@ async function main(): Promise<void> {
     dispatcher,
     store: scorecardStore,
     datasets: datasetRegistry,
-    harnesses: registry,
+    harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,
     metrics: metricRegistry,
     judgeRunner,
@@ -214,7 +205,6 @@ async function main(): Promise<void> {
     service,
     scorecardService,
     benchmarkService,
-    registry,
     harnessTemplates: harnessTemplateRegistry,
     harnessInstances: harnessInstanceRegistry,
     datasetRegistry,
@@ -227,7 +217,7 @@ async function main(): Promise<void> {
     workspaceStore,
     workspaceService,
     membershipService,
-    ...(secretStore ? { secretStore } : {}),
+    secretStore,
     authenticator: buildAuthenticator(keyStore),
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
@@ -248,7 +238,6 @@ interface Persistence {
   store: RunStore;
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
-  registry: HarnessRegistry;
   harnessTemplateRegistry: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조)
   harnessInstanceRegistry: HarnessInstanceRegistry; // 개별 하네스(template+pins → resolved)
   datasetRegistry: DatasetRegistry;
@@ -260,13 +249,26 @@ interface Persistence {
   settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
   workspaceStore: WorkspaceStore; // 워크스페이스 멤버십(생성/전환) — 항상 사용 가능
   inviteStore: WorkspaceInviteStore; // 멤버 초대(토큰/링크 redemption) — 항상 사용 가능
-  secretStore?: SecretStore; // ASSAY_SECRETS_KEY 있을 때만(fail-closed: 키 없으면 시크릿 기능 비활성)
+  secretStore: SecretStore; // 항상 사용 가능(기본 ON) — KEK 는 ASSAY_SECRETS_KEY, 없으면 임시 키 자동생성
+}
+
+// at-rest 암호화 KEK: ASSAY_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
+// 시크릿 기능을 "기본 ON" 으로 유지한다(분기/fail-closed 제거). 자동생성 시 Pg 영속 주의를 한 번 경고한다.
+function resolveSecretCipher(): SecretCipher {
+  const fromEnv = cipherFromEnv();
+  if (fromEnv) return fromEnv;
+  console.error(
+    "▶ ASSAY_SECRETS_KEY 미설정 — 임시 KEK 를 자동생성해 시크릿 기능을 활성화합니다(기본 ON). " +
+      "영속(Postgres) 운영은 ASSAY_SECRETS_KEY(base64 32B)를 고정하세요 — 임시 키는 재기동마다 달라져 기존 시크릿을 복호화할 수 없습니다.",
+  );
+  return generatedCipher();
 }
 
 // DATABASE_URL 이 있으면 Postgres(기동 시 마이그레이션 적용), 없으면 in-memory.
-// 시크릿 저장소는 ASSAY_SECRETS_KEY(base64 32B) 가 있을 때만(at-rest 암호화 KEK). 없으면 secretStore=undefined.
+// 시크릿 저장소는 항상 활성(기본 ON). at-rest 암호화 KEK 는 ASSAY_SECRETS_KEY(base64 32B), 미설정이면 임시 키를
+// 자동생성한다 — in-memory 에선 휘발이라 안전하고, Pg 영속 운영은 ASSAY_SECRETS_KEY 로 키를 고정해야 한다(재기동 복호).
 async function makePersistence(): Promise<Persistence> {
-  const cipher = cipherFromEnv();
+  const cipher = resolveSecretCipher();
   const url = process.env.DATABASE_URL;
   if (!url) {
     const workspaceStore = new InMemoryWorkspaceStore();
@@ -275,7 +277,6 @@ async function makePersistence(): Promise<Persistence> {
       store: new InMemoryRunStore(),
       scorecardStore: new InMemoryScorecardStore(),
       keyStore: new InMemoryTenantKeyStore(),
-      registry: new InMemoryHarnessRegistry(),
       harnessTemplateRegistry,
       harnessInstanceRegistry: new InMemoryHarnessInstanceRegistry(harnessTemplateRegistry),
       datasetRegistry: new InMemoryDatasetRegistry(),
@@ -287,7 +288,7 @@ async function makePersistence(): Promise<Persistence> {
       settingsStore: new InMemoryWorkspaceSettingsStore(),
       workspaceStore,
       inviteStore: new InMemoryWorkspaceInviteStore(workspaceStore),
-      ...(cipher ? { secretStore: new InMemorySecretStore(cipher) } : {}),
+      secretStore: new InMemorySecretStore(cipher),
     };
   }
   const client = sqlClient(makePool(url));
@@ -298,7 +299,6 @@ async function makePersistence(): Promise<Persistence> {
     store: new PgRunStore(client),
     scorecardStore: new PgScorecardStore(client),
     keyStore: new PgTenantKeyStore(client),
-    registry: new PgHarnessRegistry(client),
     harnessTemplateRegistry,
     harnessInstanceRegistry: new PgHarnessInstanceRegistry(client, harnessTemplateRegistry),
     datasetRegistry: new PgDatasetRegistry(client),
@@ -310,20 +310,8 @@ async function makePersistence(): Promise<Persistence> {
     settingsStore: new PgWorkspaceSettingsStore(client),
     workspaceStore: new PgWorkspaceStore(client),
     inviteStore: new PgWorkspaceInviteStore(client),
-    ...(cipher ? { secretStore: new PgSecretStore(client, cipher) } : {}),
+    secretStore: new PgSecretStore(client, cipher),
   };
-}
-
-// _shared(first-party) 하니스를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 등록된 에이전트(aider/bu 등)로 평가 가능.
-// ASSAY_HARNESSES_DIR(없으면 cwd/examples/harnesses) 에서 best-effort 로드(불변 → 재기동 시 멱등). 디렉터리 없으면 스킵.
-async function seedSharedHarnesses(registry: HarnessRegistry): Promise<void> {
-  const dir = process.env.ASSAY_HARNESSES_DIR ?? `${process.cwd()}/examples/harnesses`;
-  try {
-    await loadHarnessDir(dir, { into: registry });
-    console.error(`▶ shared harnesses seeded from ${dir}`);
-  } catch {
-    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
-  }
 }
 
 // _shared 하네스 taxonomy(템플릿 대분류 + 인스턴스)를 파일 SSOT 에서 시드. ASSAY_HARNESS_TEMPLATES_DIR

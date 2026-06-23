@@ -17,7 +17,6 @@ import {
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
-  InMemoryHarnessRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
   InMemoryMetricRegistry,
@@ -61,14 +60,21 @@ const BODY = {
   harness: { id: "scripted", version: "0" },
   case: { id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 60, tags: [] },
 };
-const HARNESS = {
+const HARNESS_TEMPLATE = {
   kind: "service",
+  category: "topology",
   id: "bu",
-  version: "1.0.0",
-  services: [{ name: "agent-server", image: "img", port: 8080, needs: [], perRun: [], replicas: 1 }],
+  version: "1",
+  services: [{ name: "agent-server", slot: "agent-server", port: 8080, needs: [], perRun: [], replicas: 1 }],
   dependencies: [],
   frontDoor: { service: "agent-server", submit: "POST /runs" },
   traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
+};
+const HARNESS_INSTANCE = {
+  template: { id: "bu", version: "1" },
+  id: "bu",
+  version: "1.0.0",
+  pins: { "agent-server": "img" },
 };
 const DATASET = {
   id: "smoke",
@@ -145,7 +151,6 @@ function server(
     service: svc,
     scorecardService,
     benchmarkService,
-    registry: new InMemoryHarnessRegistry(),
     harnessTemplates,
     harnessInstances,
     datasetRegistry,
@@ -297,32 +302,30 @@ describe("API — authentication (control-plane owned)", () => {
 });
 
 describe("API — authorization (roles)", () => {
-  it("viewer 는 run 제출 불가(403)하지만 하니스 등록은 가능(누구나)", async () => {
+  // 하니스는 무게이트(viewer+) → 템플릿(대분류) + 인스턴스 등록 모두 누구나. 201 이면 통과.
+  const registerHarness = async (app: Awaited<ReturnType<typeof server>>["app"], h: Record<string, string>) => {
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: HARNESS_TEMPLATE });
+    return app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS_INSTANCE });
+  };
+  it("viewer 는 run 제출 불가(403)하지만 하니스 템플릿+인스턴스 등록은 가능(누구나)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
     const h = { authorization: "Bearer x" };
     expect((await app.inject({ method: "GET", url: "/runs", headers: h })).statusCode).toBe(200);
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(403);
-    // 하니스 등록은 역할 게이트 없음 → viewer 도 201.
-    expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS })).statusCode).toBe(
-      201,
-    );
+    expect((await registerHarness(app, h)).statusCode).toBe(201); // 무게이트
     await app.close();
   });
   it("member 는 submit + 하니스 등록 가능", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(202);
-    expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS })).statusCode).toBe(
-      201,
-    );
+    expect((await registerHarness(app, h)).statusCode).toBe(201);
     await app.close();
   });
-  it("admin 은 harness 등록 가능", async () => {
+  it("admin 도 하니스 등록 가능", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     const h = { authorization: "Bearer x" };
-    expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS })).statusCode).toBe(
-      201,
-    );
+    expect((await registerHarness(app, h)).statusCode).toBe(201);
     await app.close();
   });
 });
@@ -367,19 +370,31 @@ describe("API — runtimes probe (연결 테스트, role 무관)", () => {
 });
 
 describe("API — harness ownership (workspace-scoped)", () => {
-  it("등록 → 본인은 보이고 타 워크스페이스는 못 봄; 불변성 409", async () => {
+  it("템플릿+인스턴스 등록 → 본인은 보이고 타 워크스페이스는 못 봄; 인스턴스 불변성 409", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const acme = `Bearer ${await issueKey(keyStore, "acme")}`;
     const beta = `Bearer ${await issueKey(keyStore, "beta")}`;
+    await app.inject({
+      method: "POST",
+      url: "/harness-templates",
+      headers: { authorization: acme },
+      payload: HARNESS_TEMPLATE,
+    });
     expect(
-      (await app.inject({ method: "POST", url: "/harnesses", headers: { authorization: acme }, payload: HARNESS }))
-        .statusCode,
+      (
+        await app.inject({
+          method: "POST",
+          url: "/harnesses",
+          headers: { authorization: acme },
+          payload: HARNESS_INSTANCE,
+        })
+      ).statusCode,
     ).toBe(201);
     const aList = await app.inject({ method: "GET", url: "/harnesses", headers: { authorization: acme } });
     expect(aList.json().map((x: { id: string }) => x.id)).toContain("bu");
     const bList = await app.inject({ method: "GET", url: "/harnesses", headers: { authorization: beta } });
     expect(bList.json()).toEqual([]);
-    const mutated = { ...HARNESS, dependencies: [{ store: "redis", role: "x", isolateBy: "key-prefix" }] };
+    const mutated = { ...HARNESS_INSTANCE, pins: { "agent-server": "different:tag" } };
     const dup = await app.inject({
       method: "POST",
       url: "/harnesses",
@@ -416,9 +431,9 @@ describe("API — harness taxonomy (template 대분류 + instance)", () => {
       (await app.inject({ method: "POST", url: "/harness-templates", headers: viewer, payload: TEMPLATE })).statusCode,
     ).toBe(201);
     expect(
-      (await app.inject({ method: "POST", url: "/harness-instances", headers: viewer, payload: INSTANCE })).statusCode,
+      (await app.inject({ method: "POST", url: "/harnesses", headers: viewer, payload: INSTANCE })).statusCode,
     ).toBe(201);
-    const resolved = await app.inject({ method: "GET", url: "/harness-instances/bu/pr-1", headers: viewer });
+    const resolved = await app.inject({ method: "GET", url: "/harnesses/bu/pr-1", headers: viewer });
     expect(resolved.statusCode).toBe(200);
     expect(resolved.json().services[0].image).toBe("ghcr.io/x/agent:abc"); // slot → pin 으로 resolve
     await app.close();
@@ -427,14 +442,12 @@ describe("API — harness taxonomy (template 대분류 + instance)", () => {
   it("템플릿 없이 인스턴스 등록 → 404; 핀 누락 → 400 (등록 거부)", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
-    expect(
-      (await app.inject({ method: "POST", url: "/harness-instances", headers: h, payload: INSTANCE })).statusCode,
-    ).toBe(404);
+    expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: INSTANCE })).statusCode).toBe(
+      404,
+    );
     await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: TEMPLATE });
     const bad = { ...INSTANCE, version: "pr-2", pins: {} };
-    expect((await app.inject({ method: "POST", url: "/harness-instances", headers: h, payload: bad })).statusCode).toBe(
-      400,
-    );
+    expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: bad })).statusCode).toBe(400);
     await app.close();
   });
 });
@@ -520,50 +533,48 @@ describe("API — MCP OAuth (login like Linear)", () => {
   });
 });
 
-describe("API — harness validate (dry-run)", () => {
-  it("admin: 유효 스펙 → ok + 기존버전/충돌 표시 (등록하지 않음)", async () => {
+describe("API — harness validate (instance dry-run)", () => {
+  it("유효 인스턴스(템플릿 존재 + pins resolve) → ok; 등록하지 않음", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
-    const v1 = await app.inject({ method: "POST", url: "/harnesses/validate", headers: h, payload: HARNESS });
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: HARNESS_TEMPLATE });
+    const v1 = await app.inject({ method: "POST", url: "/harnesses/validate", headers: h, payload: HARNESS_INSTANCE });
     expect(v1.statusCode).toBe(200);
-    expect(v1.json()).toMatchObject({
-      ok: true,
-      id: "bu",
-      version: "1.0.0",
-      existingVersions: [],
-      versionExists: false,
-    });
-    await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: HARNESS }); // 실제 등록
-    const v2 = await app.inject({ method: "POST", url: "/harnesses/validate", headers: h, payload: HARNESS });
-    expect(v2.json()).toMatchObject({ ok: true, versionExists: true, existingVersions: ["1.0.0"] });
+    expect(v1.json()).toMatchObject({ ok: true, kind: "service", id: "bu", version: "1.0.0" });
     const list = await app.inject({ method: "GET", url: "/harnesses", headers: h });
-    expect(list.json().find((x: { id: string }) => x.id === "bu").versions).toEqual(["1.0.0"]); // validate 가 중복등록 안 함
+    expect(list.json()).toEqual([]); // validate 는 인스턴스를 등록하지 않음
     await app.close();
   });
 
-  it("스키마 오류 → ok:false + errors (200)", async () => {
+  it("템플릿 없음/스키마 오류 → ok:false + errors (200)", async () => {
     const { app, keyStore } = server({ requireAuth: true });
     const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
-    const res = await app.inject({
+    // 템플릿 미등록 → resolve 불가 → ok:false
+    const noTpl = await app.inject({
       method: "POST",
       url: "/harnesses/validate",
       headers: h,
-      payload: { kind: "service", id: "x" },
+      payload: HARNESS_INSTANCE,
     });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().ok).toBe(false);
-    expect(res.json().errors.length).toBeGreaterThan(0);
+    expect(noTpl.statusCode).toBe(200);
+    expect(noTpl.json().ok).toBe(false);
+    expect(noTpl.json().errors.length).toBeGreaterThan(0);
+    // 스키마 위반도 ok:false
+    const badSchema = await app.inject({
+      method: "POST",
+      url: "/harnesses/validate",
+      headers: h,
+      payload: { id: "x" },
+    });
+    expect(badSchema.json().ok).toBe(false);
     await app.close();
   });
 
-  it("member 도 검증 가능 (하니스 등록은 역할 게이트 없음)", async () => {
+  it("member 도 검증 가능 (무게이트)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
-    const res = await app.inject({
-      method: "POST",
-      url: "/harnesses/validate",
-      headers: { authorization: "Bearer x" },
-      payload: HARNESS,
-    });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: HARNESS_TEMPLATE });
+    const res = await app.inject({ method: "POST", url: "/harnesses/validate", headers: h, payload: HARNESS_INSTANCE });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toMatchObject({ ok: true });
     await app.close();

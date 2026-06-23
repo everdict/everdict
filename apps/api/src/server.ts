@@ -5,7 +5,6 @@ import {
   DatasetSchema,
   EvalCaseSchema,
   HarnessInstanceSpecSchema,
-  HarnessSpecSchema,
   HarnessTemplateSpecSchema,
   JudgeRunConfigSchema,
   JudgeSpecSchema,
@@ -13,6 +12,7 @@ import {
   ModelSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
+  resolveHarnessInstance,
 } from "@assay/core";
 import { BenchmarkAdapterSpecSchema, diffDatasets } from "@assay/datasets";
 import {
@@ -25,7 +25,6 @@ import {
 import type {
   DatasetRegistry,
   HarnessInstanceRegistry,
-  HarnessRegistry,
   HarnessTemplateRegistry,
   JudgeRegistry,
   MetricRegistry,
@@ -75,7 +74,6 @@ export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
   benchmarkService?: BenchmarkService; // 벤치마크 카탈로그 + 인입 (없으면 해당 라우트 비활성)
-  registry?: HarnessRegistry; // 하니스 CRUD (없으면 해당 라우트 비활성)
   harnessTemplates?: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조) CRUD
   harnessInstances?: HarnessInstanceRegistry; // 개별 하네스(template+pins) CRUD + resolve
 
@@ -86,7 +84,7 @@ export interface ServerDeps {
   runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
   // 런타임 연결 테스트 — RuntimeSpec → 라이브 백엔드 빌드 후 probe()(잡 없이 도달성/인증). main 이 시크릿+빌더로 주입.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
-  secretStore?: SecretStore; // 워크스페이스 시크릿 관리 (없으면=ASSAY_SECRETS_KEY 미설정 → 해당 라우트 비활성)
+  secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성 (없으면 /workspaces 라우트 비활성)
@@ -423,73 +421,6 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- harnesses (workspace-owned SSOT) ---
-  app.post("/harnesses", async (req, reply) => {
-    if (!deps.registry) return reply.code(404).send({ code: "NOT_FOUND", message: "registry 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    const parsed = HarnessSpecSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    try {
-      gate(principal, "harnesses:register");
-      await deps.registry.register(principal.workspace, parsed.data);
-      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
-    } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 / 불변성 409
-    }
-  });
-
-  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). 등록 플로우의 사전 점검.
-  app.post("/harnesses/validate", async (req, reply) => {
-    if (!deps.registry) return reply.code(404).send({ code: "NOT_FOUND", message: "registry 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "harnesses:register");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    const parsed = HarnessSpecSchema.safeParse(req.body);
-    if (!parsed.success)
-      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
-    const existingVersions = await deps.registry.ownVersions(principal.workspace, parsed.data.id);
-    return reply.send({
-      ok: true,
-      kind: parsed.data.kind,
-      id: parsed.data.id,
-      version: parsed.data.version,
-      existingVersions,
-      versionExists: existingVersions.includes(parsed.data.version),
-    });
-  });
-
-  app.get("/harnesses", async (req, reply) => {
-    if (!deps.registry) return reply.code(404).send({ code: "NOT_FOUND", message: "registry 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "harnesses:read");
-      return reply.send(await deps.registry.list(principal.workspace));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  app.get<{ Params: { id: string } }>("/harnesses/:id", async (req, reply) => {
-    if (!deps.registry) return reply.code(404).send({ code: "NOT_FOUND", message: "registry 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "harnesses:read");
-      const versions = await deps.registry.versions(principal.workspace, req.params.id);
-      if (versions.length === 0)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
-      return reply.send({ id: req.params.id, versions });
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
   // --- harness templates (대분류: 구조/슬롯, 버전 미고정) + instances (template+pins → resolved) ---
   // 하네스는 협업 콘텐츠 → 정의/등록 모두 무게이트(viewer+, 권한 상관없이 동등). 읽기도 viewer+.
   app.post("/harness-templates", async (req, reply) => {
@@ -561,8 +492,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 개별 하네스(인스턴스) — template 참조 + pins. 등록 시 resolve 로 검증(템플릿 없음 404 / 핀 누락 400 거부).
-  app.post("/harness-instances", async (req, reply) => {
+  // 개별 하네스(인스턴스) — /harnesses 가 인스턴스 표면(대분류 = /harness-templates). template 참조 + pins.
+  // 무게이트(viewer+). 등록/검증은 resolve 로 확인(템플릿 없음 404 / 핀 누락 400 거부).
+  app.post("/harnesses", async (req, reply) => {
     if (!deps.harnessInstances)
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -574,24 +506,66 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await deps.harnessInstances.register(principal.workspace, parsed.data);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
-      return sendError(reply, err);
+      return sendError(reply, err); // 템플릿 없음 404 / 핀 누락 400 / 불변 409
     }
   });
 
-  app.get("/harness-instances", async (req, reply) => {
+  // dry-run 검증 — 스키마 + 템플릿 존재 + pins resolve(등록하지 않음). 등록 플로우 사전 점검.
+  app.post("/harnesses/validate", async (req, reply) => {
+    if (!deps.harnessTemplates)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:register");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    const parsed = HarnessInstanceSpecSchema.safeParse(req.body);
+    if (!parsed.success) return reply.send({ ok: false, errors: zodIssues(parsed.error) });
+    try {
+      const template = await deps.harnessTemplates.get(
+        principal.workspace,
+        parsed.data.template.id,
+        parsed.data.template.version,
+      );
+      const resolved = resolveHarnessInstance(template, parsed.data); // 핀 누락/불일치/템플릿 없음이면 throw
+      return reply.send({ ok: true, kind: resolved.kind, id: parsed.data.id, version: parsed.data.version });
+    } catch (err) {
+      return reply.send({ ok: false, errors: [err instanceof AppError ? err.message : String(err)] });
+    }
+  });
+
+  app.get("/harnesses", async (req, reply) => {
     if (!deps.harnessInstances)
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
-      return reply.send(await deps.harnessInstances.list(principal.workspace));
+      return reply.send(await deps.harnessInstances.list(principal.workspace)); // 템플릿 id 별로 묶인 인스턴스
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  app.get<{ Params: { id: string; version: string } }>("/harness-instances/:id/:version", async (req, reply) => {
+  app.get<{ Params: { id: string } }>("/harnesses/:id", async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      const versions = await deps.harnessInstances.versions(principal.workspace, req.params.id);
+      if (versions.length === 0)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
+      return reply.send({ id: req.params.id, versions });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{ Params: { id: string; version: string } }>("/harnesses/:id/:version", async (req, reply) => {
     if (!deps.harnessInstances)
       return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -1459,7 +1433,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         {
           service: deps.service,
           scorecardService: deps.scorecardService,
-          registry: deps.registry,
+          harnessTemplates: deps.harnessTemplates,
+          harnessInstances: deps.harnessInstances,
           datasetRegistry: deps.datasetRegistry,
           judgeRegistry: deps.judgeRegistry,
           runtimeRegistry: deps.runtimeRegistry,
