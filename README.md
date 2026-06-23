@@ -78,10 +78,33 @@ args = ["-y", "mcp-remote", "http://100.69.164.81:8787/mcp"]
 # args = ["-y", "mcp-remote", "http://100.69.164.81:8787/mcp", "--header", "Authorization: Bearer ak_..."]
 ```
 
+On first OAuth connect you log in to Keycloak and **approve a one-time consent** ("allow"), then the
+loopback callback completes automatically — the whole DCR → PKCE auth-code → consent → token → `/mcp` flow is
+verified end-to-end by `scripts/live/mcp-oauth.mjs`.
+
 OAuth needs anonymous Dynamic Client Registration enabled once on Keycloak
 (`deploy/keycloak/enable-mcp-dcr.sh` — loopback redirect URIs only). Get an API key from the web
 (**Settings → API keys**) or `POST /keys`. Both credentials resolve to the same `Principal{workspace, roles}`.
 See `docs/mcp.md`.
+
+### When the browser doesn't open
+"A browser window will open for authentication" means discovery + client registration already succeeded
+(server side is fine) — only the local browser launch failed. Fixes:
+```bash
+claude mcp remove assay 2>/dev/null    # clear a half-finished add
+rm -rf ~/.mcp-auth                      # clear stale mcp-remote OAuth cache
+
+# A) open the printed URL yourself, or force the browser:
+BROWSER=google-chrome claude mcp add --transport http assay http://100.69.164.81:8787/mcp
+
+# B) mcp-remote prints the auth URL explicitly (same client Codex uses):
+claude mcp add assay -- npx -y mcp-remote http://100.69.164.81:8787/mcp
+
+# C) skip the browser entirely with an API key:
+claude mcp add --transport http assay http://100.69.164.81:8787/mcp \
+  --header "Authorization: Bearer ak_..."
+```
+A remote/SSH shell can't open a browser **and** receive the loopback callback — use the API key (C) there.
 
 ## Develop
 ```bash

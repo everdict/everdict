@@ -92,3 +92,7 @@ minimal (no default policy components), so run the script after the realm exists
 - **Live** (`scripts/live/mcp-auth.mjs`, real Keycloak): discovery + `401` challenge; a real Keycloak OIDC token
   drives a stateful MCP session — `alice`(member) lists/submits but `register_harness` → `FORBIDDEN`;
   `carol`(admin) registers; an `ak_…` API key also authenticates `/mcp`.
+- **Live OAuth, full browser flow** (`scripts/live/mcp-oauth.mjs`, real Keycloak): the exact "login like Linear"
+  path Claude Code / mcp-remote run — anonymous **DCR** (public PKCE client, loopback redirect) → Authorization
+  Code + PKCE → Keycloak **login** → one-time **consent** → loopback `?code` → token exchange → `/mcp`
+  `initialize` + `tools/list`. End-to-end green (the browser steps scripted headlessly).
