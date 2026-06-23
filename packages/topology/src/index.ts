@@ -88,3 +88,4 @@ export {
   interpolatePath,
   interpolateTemplate,
 } from "./front-door-driver.js";
+export { applyImagePins } from "./image-pins.js";

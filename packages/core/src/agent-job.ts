@@ -40,5 +40,9 @@ export const AgentJobSchema = z.object({
   // (Connected accounts)의 토큰으로 resolve 해 실어 보낸다. RepoEnvironment 가 인증 clone(http.extraheader)에만 쓰고,
   // RunRecord/데이터셋엔 저장되지 않는다(케이스엔 connectionId 참조만 남는다).
   repoToken: z.string().optional(),
+  // per-dispatch 이미지 핀(서비스명 → 이미지) — 등록된 service 토폴로지 spec 의 서비스 이미지를 런 시점에 override
+  // (등록 시점 HarnessTemplate slot/pins 를 dispatch 시점으로 확장). service 하니스에서만 의미.
+  // 핀이 있으면 warm 풀이 섞이지 않도록 effective version 에 결정적 접미사가 붙는다(별개 토폴로지 정체성).
+  imagePins: z.record(z.string()).optional(),
 });
 export type AgentJob = z.infer<typeof AgentJobSchema>;

@@ -1,7 +1,9 @@
 # Service-topology front-door generalization — absorbing the control-plane (design)
 
-> **Status: in progress.** Sequenced so the live e2e (`scripts/live/service-topology-{nomad,k8s}.mjs`) stays
-> green at every step.
+> **Status: all 5 core knobs DONE.** Sequenced so the live e2e (`scripts/live/service-topology-{nomad,k8s}.mjs`)
+> stays green at every step. Each knob is optional and defaults to today's behavior. Remaining follow-ups (extensions,
+> not core to the generalization): completion `stream`/`callback` modes, `harness`-provided target observation
+> (`TopologyRuntime.observe`), a `request.headers`/`method` knob.
 > - **#2 completion model — DONE.** `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`) +
 >   `HttpFrontDoorDriver` landed in `@assay/topology`; `frontDoor.completion` (`sync` | `poll`) in `@assay/core`;
 >   `ServiceTopologyBackend.dispatch` now delegates driving to the driver and fails a run on completion timeout.
@@ -19,7 +21,10 @@
 >   trace-only run with a `{kind:"prompt"}` (no-stage) snapshot** — no core-contract change (reuses the prompt-env
 >   snapshot; `CaseResult.snapshot` stays required). The `harness`-provided target (observe a declared service's own
 >   CDP endpoint) needs a `TopologyRuntime.observe`-style method and is the remaining follow-up.
-> - #5 image pin — not yet.
+> - **#5 per-service image pin — DONE.** `AgentJob.imagePins` (service name → image) overrides registered service
+>   images at dispatch. `applyImagePins` folds the pins into a deterministic effective version (`-pin-<hash>`), so
+>   `topologyJobId` (id@version-keyed) separates pinned variants with **no runtime change**; an unknown service name
+>   is rejected (`BadRequestError`). Absent `imagePins` = unchanged.
 >
 > **Strict generalization, not a clean break.** Unlike the harness-taxonomy rework, this one keeps full
 > backward behavior: every new knob is optional and its default reproduces today's browser-use-langgraph
@@ -101,7 +106,7 @@ Every knob is optional; its default reproduces today's behavior.
 | 2 ✅ | `frontDoor.completion.mode`: `sync` \| `poll` (+ `statusPath`, `done`/`failed` `StatusMatch`, `intervalMs`, `timeoutMs`) — `stream`/`callback` deferred | `sync` (current echo behavior) | — (the genuinely missing piece) |
 | 3 ✅ | `frontDoor.correlate.mode`: `injected` (Assay's `run_id`) \| `returned` (extract agent id from the submit response via `correlate.path` dot-path) | `injected` | `getField` dot-path reader; `SubmitFn` widened to return the response (the dormant `frontDoor.trace` *endpoint* stays a separate future capability) |
 | 4 ✅ | gate browser provisioning on `spec.target` (present→provision/observe; absent→trace-only `{kind:"prompt"}` snapshot). `harness`-provided target observation = follow-up | provision when `spec.target` set | the already-optional `target` + the `prompt` (no-stage) snapshot — no contract change |
-| 5 | per-service image pin threaded through dispatch (`AgentJob`), not only at registration | `spec.image` | `HarnessTemplate` slot/pins already resolve images (`harness-template.ts:97-115`) |
+| 5 ✅ | `AgentJob.imagePins` (service name → image) overrides registered images at dispatch; `applyImagePins` folds pins into a deterministic `-pin-<hash>` effective version so warm pools separate variants (no runtime change) | `spec.image` (no pins) | `HarnessTemplate` slot/pins (`harness-template.ts:97-115`); `node:crypto` hash for the version suffix |
 
 Knob 5 is ~80% built: `resolveHarnessInstance` already maps `pins[slot] → image` per service
 (`harness-template.ts:99`); it only resolves at *registration*. Threading an optional pin through `AgentJob`
@@ -141,6 +146,11 @@ interface FrontDoorDriver {
 }
 type DriveOutcome = { traceRef: string; status: "done" | "failed" | "timeout" };
 // HttpFrontDoorDriver is the default impl (injectable submit/getJson/sleep/now for deterministic tests).
+
+// @assay/core — agent-job.ts (#5): per-dispatch image override (NOT on the spec — it's a run input)
+AgentJob.imagePins?: Record<string /* service name */, string /* image */>;
+// @assay/topology — image-pins.ts: applyImagePins(spec, pins) overrides images + appends a deterministic
+// `-pin-<hash>` to the effective version, so the warm pool (keyed by id@version) separates pinned variants.
 ```
 
 The wiring vocabulary generalizes `keysFor` (DONE in #1 via `wiringVars`): each declared dependency contributes a
@@ -167,7 +177,8 @@ Each step merges independently; defaults keep current behavior, so no regression
    per-run variable names from `dependencies[].isolateBy`. Absent `request` = today's 5-field body.
 4. **#4 target observation** ✅ — gate provisioning on `spec.target`; absent → trace-only `{kind:"prompt"}` snapshot
    (no contract change). `harness`-provided target observation deferred (needs a `TopologyRuntime.observe` method).
-5. **#5 image pin** — thread an optional per-service pin through `AgentJob` (mechanism already exists).
+5. **#5 image pin** ✅ — `AgentJob.imagePins` + `applyImagePins` (override images + deterministic `-pin-<hash>`
+   effective version so warm pools separate variants, no runtime change). Absent `imagePins` = unchanged.
 
 ## Touch points (for the eventual PR)
 

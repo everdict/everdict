@@ -57,8 +57,11 @@ touching `service-backend.ts`'s driving logic.
 - **#4 target observation — DONE (none/assay).** Browser provisioning is gated on `spec.target` (already optional,
   was ignored): absent → no browser, trace-only run with a `{kind:"prompt"}` snapshot (no core-contract change).
   `harness`-provided target (observe a declared service's CDP) needs a `TopologyRuntime.observe` method — follow-up.
-- Next: #5 per-service image pin (thread an optional pin through `AgentJob`; `HarnessTemplate` slots already resolve
-  images at registration).
+- **#5 per-service image pin — DONE.** `AgentJob.imagePins` (service name → image) overrides registered images at
+  dispatch; `applyImagePins` (`image-pins.ts`) folds pins into a deterministic `-pin-<hash>` effective version so
+  warm pools (id@version-keyed) separate variants with no runtime change; unknown service → `BadRequestError`.
+- **All 5 core knobs landed.** Follow-ups: completion `stream`/`callback`, `harness`-provided target observation,
+  a `request.headers` knob — see `docs/architecture/front-door-generalization.md`.
 
 ## Reference impls
 `packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,

@@ -21,6 +21,7 @@ import {
   type SubmitFn,
   interpolateTemplate,
 } from "./front-door-driver.js";
+import { applyImagePins } from "./image-pins.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
 
 // 하위호환 re-export — 기존 import { type SubmitFn } from "./service-backend.js" 유지.
@@ -54,7 +55,10 @@ export class ServiceTopologyBackend implements Backend {
   }
 
   async dispatch(job: AgentJob): Promise<CaseResult> {
-    const spec = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);
+    const registered = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);
+    // per-dispatch 이미지 핀(#5) — 서비스 이미지를 런 시점에 override. 핀이 있으면 effective version 에 접미사가 붙어
+    // warm 풀이 별개 정체성으로 분리된다(같은 토폴로지를 service X v1↔v2 로 평가 가능).
+    const spec = applyImagePins(registered, job.imagePins);
     const runId = (this.opts.newRunId ?? newRunId)();
     const keys = keysFor(runId);
 

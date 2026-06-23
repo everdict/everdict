@@ -672,4 +672,39 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(sent).not.toHaveProperty("browser_cdp_url"); // 타깃 없으니 본문에서 cdp 제외
     expect(result.scores.map((s) => s.graderId).sort()).toEqual(["cost", "latency", "steps"]); // trace-only 채점
   });
+
+  // --- #5 per-service 이미지 핀(imagePins) ---
+  it("imagePins: 등록 spec 의 서비스 이미지를 override 하고 결과 harness 라벨에 핀 버전을 반영한다", async () => {
+    const b = mockBrowser();
+    let ensuredSpec: ServiceHarnessSpec | undefined;
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology(spec) {
+        ensuredSpec = spec;
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return b.handle;
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+      submit: async () => {},
+      newRunId: () => "fixed",
+    });
+    const pinnedJob: AgentJob = { ...job, imagePins: { "agent-server": "reg/bu-agent:2" } };
+
+    const result = await backend.dispatch(pinnedJob);
+
+    // ensureTopology 가 override 된 이미지로 호출됐다.
+    expect(ensuredSpec?.services.find((s) => s.name === "agent-server")?.image).toBe("reg/bu-agent:2");
+    // 결과 harness 라벨에 핀 버전이 반영(스코어카드가 변종을 구분) — warm 풀도 이 version 으로 분리된다.
+    expect(result.harness).toMatch(/^browser-use-langgraph@1\.0\.0-pin-[0-9a-f]{8}$/);
+  });
 });
