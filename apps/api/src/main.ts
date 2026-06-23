@@ -185,6 +185,8 @@ async function main(): Promise<void> {
     meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
     // 워크스페이스 기본 judge 모델(요청별 override 가 우선): inline judge grader 가 이 모델로 채점되도록 잡에 주입.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
+    // 비공개 repo 시드: 케이스 env.source.connectionId → 외부 계정 연결 토큰 resolve(잡에 transient 주입, 인증 clone).
+    repoTokenFor: async (tenant, connectionId) => (await connectionStore.tokenFor(tenant, connectionId))?.accessToken,
   });
   // judge 실행기: model(anthropic/openai)은 테넌트 시크릿 키로 실제 호출, harness 는 참조 에이전트를 디스패치해 판정.
   // 키/시크릿 없으면 skip(사유 명시). openai 베이스(LiteLLM 등)는 OPENAI_BASE_URL 시크릿 또는 env.

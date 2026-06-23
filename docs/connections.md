@@ -63,10 +63,18 @@ host+credentials form (GHE/Mattermost).
   route falls back to the request host (dev); the MCP `get_connect_url` requires it.
 - `WEB_BASE_URL` — where the callback redirects the browser back (default `http://localhost:3001`).
 
-## Phase 3 (not yet built) — consumption
-Make the stored token do real work: repo clone in `RepoEnvironment` seed; image pulls feeding `imagePullSecret`
-at dispatch (ties into Track B image-source integrations); results posted to GitHub PR/status; Mattermost
-run/scorecard notifications.
+## Phase 3 — consumption (the stored token does real work)
+- **Repo clone ✅ (Phase 3a)**: an eval case's repo source can name a connection — `env.source =
+  { git, ref, connectionId? }`. At dispatch `RunService` resolves `connectionId` → the connection's token
+  (`repoTokenFor` → `connectionStore.tokenFor`) and carries it as a **transient `AgentJob.repoToken`** (never
+  persisted to the RunRecord/dataset — the case keeps only the `connectionId` reference). The agent hands it to
+  `RepoEnvironment`, which clones the private repo with the token injected as `http.extraheader` via git's
+  env-based config (`GIT_CONFIG_*`) — **never in argv** (`ps`/log/`.git/config`-safe). Reachable today via
+  `POST /runs` (the body carries a full `EvalCase`) and dataset scorecards; the web run-submit form's
+  private-repo picker is a later UX slice (3b).
+- **Still open**: image pulls feeding `imagePullSecret` at dispatch (ties into Track B image-source
+  integrations); results posted to GitHub PR/status; Mattermost run/scorecard notifications; scorecard-path
+  token injection (datasets of private-repo cases) + web submit-form picker.
 
 ## Verified
 - Deterministic (`packages/db/src/connection-store.test.ts`): token encryption round-trip + `list` exposes no
@@ -81,3 +89,7 @@ run/scorecard notifications.
   start (missing fields → 400; host reflected in authorizeUrl), **token never returned**, replayed state →
   invalid, unknown provider → 400, viewer → 403.
 - MCP (`apps/api/src/mcp.test.ts`): `list_connections`/`get_connect_url`/`disconnect_connection` parity, admin-gated.
+- Repo-clone consumption (Phase 3a): `packages/environments/src/repo.test.ts` (private clone injects
+  `http.extraheader` via `GIT_CONFIG_*` env, token **not** in argv; public clone has no auth env) +
+  `apps/api/src/run-service.test.ts` (`connectionId` → `repoTokenFor` resolved → `job.repoToken`; public/non-git
+  cases never call the resolver).

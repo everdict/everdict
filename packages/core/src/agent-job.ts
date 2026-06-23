@@ -36,5 +36,9 @@ export const AgentJobSchema = z.object({
   // per-run judge 모델 설정 — evalCase 에 inline judge grader 가 있을 때 어떤 모델로 판정할지(시크릿 아님).
   // 백엔드가 alloc env(ASSAY_JUDGE_MODEL/PROVIDER)로 주입, 프로바이더 키는 secretEnv. 미설정이면 judge 는 skip.
   judge: JudgeRunConfigSchema.optional(),
+  // 비공개 repo clone 용 transient 자격증명 — 컨트롤플레인이 evalCase.env.source.connectionId 를 외부 계정 연결
+  // (Connected accounts)의 토큰으로 resolve 해 실어 보낸다. RepoEnvironment 가 인증 clone(http.extraheader)에만 쓰고,
+  // RunRecord/데이터셋엔 저장되지 않는다(케이스엔 connectionId 참조만 남는다).
+  repoToken: z.string().optional(),
 });
 export type AgentJob = z.infer<typeof AgentJobSchema>;

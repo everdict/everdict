@@ -52,7 +52,9 @@ export type EnvSnapshot = z.infer<typeof EnvSnapshotSchema>;
 // repo 시드 출처: 원격 git / 인라인 파일 맵(픽스처) / 이미지-내 경로(컨테이너에 이미 체크아웃된 repo, 예: SWE-bench /testbed).
 // path: clone 하지 않고 이미지에 있는 repo 를 작업 디렉터리로 쓴다(deps 도 이미지에 동봉) — 코딩 에이전트가 그 repo 에 직접 작업.
 export const RepoSourceSchema = z.union([
-  z.object({ git: z.string().url(), ref: z.string() }),
+  // 원격 git: public 이면 그대로, 비공개면 connectionId 로 워크스페이스 외부 계정 연결(Connected accounts)을 참조 —
+  // 컨트롤플레인이 dispatch 시 그 토큰을 resolve 해 잡(AgentJob.repoToken)에 transient 로 실어 인증 clone(토큰은 케이스에 저장 안 됨).
+  z.object({ git: z.string().url(), ref: z.string(), connectionId: z.string().optional() }),
   z.object({ files: z.record(z.string()) }),
   z.object({ path: z.string() }),
 ]);

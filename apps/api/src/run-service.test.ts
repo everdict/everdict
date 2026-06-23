@@ -158,6 +158,44 @@ describe("RunService", () => {
     expect(seen).toBe(false);
   });
 
+  it("비공개 repo: env.source.connectionId → repoTokenFor 로 resolve 해 job.repoToken 으로 실어 보낸다", async () => {
+    const seen: Array<AgentJob["repoToken"]> = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        seen.push(job.repoToken);
+        return resultFor(job);
+      },
+    };
+    const calls: Array<{ tenant: string; connectionId: string }> = [];
+    const svc = new RunService({
+      dispatcher,
+      store: new InMemoryRunStore(),
+      newId: ids,
+      repoTokenFor: async (tenant, connectionId) => {
+        calls.push({ tenant, connectionId });
+        return connectionId === "conn-acme" ? "gho_resolved" : undefined;
+      },
+    });
+    const gitCase = (connectionId?: string): EvalCase => ({
+      ...CASE,
+      env: {
+        kind: "repo",
+        source: { git: "https://github.com/acme/p.git", ref: "main", ...(connectionId ? { connectionId } : {}) },
+      },
+    });
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: gitCase("conn-acme") }); // 해석됨
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: gitCase("conn-missing") }); // 미해석
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: gitCase() }); // connectionId 없음(public)
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE }); // files 시드(비-git)
+    await flush();
+    expect(seen).toEqual(["gho_resolved", undefined, undefined, undefined]);
+    // connectionId 없는 케이스/비-repo 는 repoTokenFor 를 아예 호출하지 않는다.
+    expect(calls).toEqual([
+      { tenant: "acme", connectionId: "conn-acme" },
+      { tenant: "acme", connectionId: "conn-missing" },
+    ]);
+  });
+
   it("완료 시 cost 가 settle 된다", async () => {
     const store = new InMemoryRunStore();
     const budget = inMemoryBudget({ limitFor: () => ({ usd: 1 }) });

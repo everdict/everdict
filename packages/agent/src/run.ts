@@ -24,8 +24,13 @@ export async function runAgentJob(job: AgentJob, opts: { driver?: Driver } = {})
   // 환경은 케이스 env.kind 로 선택: prompt(QA) → Prompt, os-use(데스크탑) → OsUse, 그 외 → Repo(코딩/시드).
   // (browser 토폴로지는 ServiceTopologyBackend 가 담당 — 이 로컬 경로 밖.)
   const k = job.evalCase.env.kind;
+  // repo: 비공개 시드면 컨트롤플레인이 외부 계정 연결에서 resolve 한 job.repoToken 으로 인증 clone(http.extraheader).
   const environment: Environment =
-    k === "prompt" ? new PromptEnvironment() : k === "os-use" ? new OsUseEnvironment() : new RepoEnvironment();
+    k === "prompt"
+      ? new PromptEnvironment()
+      : k === "os-use"
+        ? new OsUseEnvironment()
+        : new RepoEnvironment(job.repoToken !== undefined ? { gitToken: job.repoToken } : {});
   return runCase(job.evalCase, {
     driver: opts.driver ?? new LocalDriver(),
     environment,

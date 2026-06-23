@@ -24,6 +24,9 @@ export interface RunServiceDeps {
   meterUsageFor?: (tenant: string) => boolean | Promise<boolean>;
   // 워크스페이스 기본 judge 모델(inline judge grader 채점용). 요청별 override(SubmitInput.judge)가 우선.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
+  // 비공개 repo 시드용 토큰 resolve — evalCase.env.source.connectionId → 외부 계정 연결(Connected accounts) 토큰.
+  // 미설정/미해석이면 public clone. 토큰은 잡(AgentJob.repoToken)에만 transient 로 실리고 레코드/케이스엔 저장 안 됨.
+  repoTokenFor?: (tenant: string, connectionId: string) => Promise<string | undefined>;
   // 아티팩트 스토어(설정 시): os-use 스크린샷을 object storage 로 오프로드 → 레코드엔 URL 만(base64 인라인 안 함).
   artifacts?: ArtifactStore;
   newId?: () => string;
@@ -81,6 +84,8 @@ export class RunService {
       input.meterUsage ?? (this.deps.meterUsageFor ? await this.deps.meterUsageFor(input.tenant) : false);
     // judge 모델: 요청 override → 워크스페이스 기본(DB) → 없음(judge grader 는 skip). 키는 백엔드가 secretEnv 로 주입.
     const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
+    // 비공개 repo 시드: env.source.connectionId 가 있으면 외부 계정 연결 토큰을 resolve 해 잡에 transient 로 싣는다.
+    const repoToken = await this.resolveRepoToken(input.tenant, input.case);
     const job: AgentJob = {
       evalCase: input.case,
       harness: input.harness,
@@ -88,6 +93,7 @@ export class RunService {
       meterUsage,
       ...(harnessSpec ? { harnessSpec } : {}),
       ...(judge ? { judge } : {}),
+      ...(repoToken ? { repoToken } : {}),
     };
     try {
       const result = await this.deps.dispatcher.dispatch(job);
@@ -107,6 +113,16 @@ export class RunService {
       await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
     }
     if (input.webhookUrl) await this.fireWebhook(input.webhookUrl, id);
+  }
+
+  // repo 시드가 비공개(git + connectionId)면 외부 계정 연결 토큰을 resolve. public/비-repo/미설정이면 undefined.
+  private async resolveRepoToken(tenant: string, evalCase: EvalCase): Promise<string | undefined> {
+    if (!this.deps.repoTokenFor) return undefined;
+    const env = evalCase.env;
+    if (env.kind !== "repo") return undefined;
+    const src = env.source;
+    if (!("git" in src) || !src.connectionId) return undefined;
+    return this.deps.repoTokenFor(tenant, src.connectionId).catch(() => undefined);
   }
 
   private async fireWebhook(url: string, id: string): Promise<void> {
