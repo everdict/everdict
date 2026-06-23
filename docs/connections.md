@@ -79,8 +79,14 @@ host+credentials form (GHE/Mattermost).
 - **Batch scorecards ✅ (Phase 3c)**: `ScorecardService` resolves each dataset case's `env.source.connectionId`
   per-case in the dispatch wrapper (same `repoTokenFor` → `connectionStore.tokenFor`), so a dataset of
   private-repo cases batch-evals with each case authenticated. Mirrors the single-run path exactly.
+- **Mattermost notifications ✅ (Phase 3d)**: a workspace setting `notify = { connectionId, channelId }`
+  (settable via `PUT /workspace/settings`) names a **Mattermost** connection + channel. `NotificationService`
+  posts run **and** scorecard completion (`✅/❌`) to `${host}/api/v4/posts` with the connection's token, wired
+  as `RunService`/`ScorecardService` `onComplete` hooks. Fire-and-forget — a notify failure never affects the
+  run/scorecard result; non-Mattermost connection or missing token is silently skipped. (Web config form for the
+  notify target is a small follow-up; reachable now via the settings API/MCP.)
 - **Still open**: image pulls feeding `imagePullSecret` at dispatch (Track B); results posted to GitHub
-  PR/status; Mattermost notifications.
+  PR/status; web notify-config form.
 
 ## Verified
 - Deterministic (`packages/db/src/connection-store.test.ts`): token encryption round-trip + `list` exposes no
@@ -100,3 +106,6 @@ host+credentials form (GHE/Mattermost).
   `apps/api/src/run-service.test.ts` (`connectionId` → `repoTokenFor` resolved → `job.repoToken`; public/non-git
   cases never call the resolver). Batch (Phase 3c): `apps/api/src/scorecard-service.test.ts` (per-case
   `connectionId` → `job.repoToken`; public/non-git cases skip the resolver).
+- Notifications (Phase 3d): `apps/api/src/notification-service.test.ts` (posts to Mattermost when configured;
+  skips when no config / non-Mattermost connection / no token; swallows post failure) + `run-service.test.ts` /
+  `scorecard-service.test.ts` (`onComplete` fires with the final record on succeeded **and** failed).

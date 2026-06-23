@@ -99,6 +99,8 @@ export interface ScorecardServiceDeps {
   // 비공개 repo 시드용 토큰 resolve — 케이스 env.source.connectionId → 외부 계정 연결 토큰. 단일 run 과 동일(RunService.repoTokenFor).
   // 데이터셋의 케이스마다 적용 → 비공개-repo 데이터셋을 배치 eval. 토큰은 잡(repoToken)에만 transient.
   repoTokenFor?: (tenant: string, connectionId: string) => Promise<string | undefined>;
+  // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 스코어카드 결과 무관(서비스가 swallow).
+  onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
   artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)
   concurrency?: number;
   newId?: () => string;
@@ -315,6 +317,11 @@ export class ScorecardService {
           ? { code: err.code, message: err.message }
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
       await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
+    }
+    // 완료 알림(Mattermost 등) — 최신 레코드로. 실패는 스코어카드 결과 무관(swallow).
+    if (this.deps.onComplete) {
+      const rec = await this.deps.store.get(id);
+      if (rec) await this.deps.onComplete(tenant, rec).catch(() => {});
     }
   }
 

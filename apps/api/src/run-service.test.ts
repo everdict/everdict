@@ -196,6 +196,37 @@ describe("RunService", () => {
     ]);
   });
 
+  it("완료 시 onComplete 콜백을 최신 레코드로 호출(알림 훅)", async () => {
+    const seen: Array<{ tenant: string; status: string; id: string }> = [];
+    const store = new InMemoryRunStore();
+    const svc = new RunService({
+      dispatcher: okDispatcher,
+      store,
+      newId: ids,
+      onComplete: async (tenant, rec) => {
+        seen.push({ tenant, status: rec.status, id: rec.id });
+      },
+    });
+    const rec = await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(seen).toEqual([{ tenant: "acme", status: "succeeded", id: rec.id }]);
+  });
+
+  it("디스패치 실패해도 onComplete 는 failed 레코드로 호출된다", async () => {
+    const seen: string[] = [];
+    const svc = new RunService({
+      dispatcher: failDispatcher,
+      store: new InMemoryRunStore(),
+      newId: ids,
+      onComplete: async (_t, rec) => {
+        seen.push(rec.status);
+      },
+    });
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(seen).toEqual(["failed"]);
+  });
+
   it("완료 시 cost 가 settle 된다", async () => {
     const store = new InMemoryRunStore();
     const budget = inMemoryBudget({ limitFor: () => ({ usd: 1 }) });

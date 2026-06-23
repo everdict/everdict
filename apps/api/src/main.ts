@@ -87,6 +87,7 @@ import { BenchmarkService } from "./benchmark-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
+import { NotificationService } from "./notification-service.js";
 import { githubProvider } from "./oauth/github.js";
 import { mattermostProvider } from "./oauth/mattermost.js";
 import { ProfileService } from "./profile-service.js";
@@ -174,6 +175,11 @@ async function main(): Promise<void> {
   if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
 
   const envMeterPolicy = meterUsagePolicyFromEnv(); // 워크스페이스 DB 설정이 없을 때의 기본 정책
+  // 완료 알림: 워크스페이스 설정 notify(Mattermost 연결+채널)가 있으면 run/scorecard 완료를 채널에 게시(소비 슬라이스).
+  const notificationService = new NotificationService({
+    settingsFor: (tenant) => settingsStore.get(tenant),
+    connections: connectionStore,
+  });
   const service = new RunService({
     dispatcher,
     store,
@@ -187,6 +193,8 @@ async function main(): Promise<void> {
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // 비공개 repo 시드: 케이스 env.source.connectionId → 외부 계정 연결 토큰 resolve(잡에 transient 주입, 인증 clone).
     repoTokenFor: async (tenant, connectionId) => (await connectionStore.tokenFor(tenant, connectionId))?.accessToken,
+    // 완료 알림(Mattermost) — 워크스페이스 notify 설정이 있으면 채널 게시. 실패는 run 결과 무관.
+    onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
   });
   // judge 실행기: model(anthropic/openai)은 테넌트 시크릿 키로 실제 호출, harness 는 참조 에이전트를 디스패치해 판정.
   // 키/시크릿 없으면 skip(사유 명시). openai 베이스(LiteLLM 등)는 OPENAI_BASE_URL 시크릿 또는 env.
@@ -215,6 +223,8 @@ async function main(): Promise<void> {
     secretsFor: runtimeSecretsFor,
     // 비공개-repo 데이터셋: 케이스 env.source.connectionId → 외부 계정 연결 토큰 resolve(단일 run 과 동일 경로).
     repoTokenFor: async (tenant, connectionId) => (await connectionStore.tokenFor(tenant, connectionId))?.accessToken,
+    // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
+    onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
   });
   // 벤치마크 카탈로그 인입: first-party 벤치마크를 ID 만으로 당겨 테넌트 데이터셋으로 등록. gated 는 HF_TOKEN 시크릿.
   const benchmarkService = new BenchmarkService({

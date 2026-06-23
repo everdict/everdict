@@ -27,6 +27,8 @@ export interface RunServiceDeps {
   // 비공개 repo 시드용 토큰 resolve — evalCase.env.source.connectionId → 외부 계정 연결(Connected accounts) 토큰.
   // 미설정/미해석이면 public clone. 토큰은 잡(AgentJob.repoToken)에만 transient 로 실리고 레코드/케이스엔 저장 안 됨.
   repoTokenFor?: (tenant: string, connectionId: string) => Promise<string | undefined>;
+  // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 run 결과 무관(서비스가 swallow). webhook 과 별개.
+  onComplete?: (tenant: string, record: RunRecord) => Promise<void>;
   // 아티팩트 스토어(설정 시): os-use 스크린샷을 object storage 로 오프로드 → 레코드엔 URL 만(base64 인라인 안 함).
   artifacts?: ArtifactStore;
   newId?: () => string;
@@ -111,6 +113,11 @@ export class RunService {
           ? { code: err.code, message: err.message }
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
       await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
+    }
+    // 완료 알림(Mattermost 등) — 최신 레코드로. 실패는 run 결과 무관(swallow). webhook 과 독립.
+    if (this.deps.onComplete) {
+      const rec = await this.deps.store.get(id);
+      if (rec) await this.deps.onComplete(input.tenant, rec).catch(() => {});
     }
     if (input.webhookUrl) await this.fireWebhook(input.webhookUrl, id);
   }

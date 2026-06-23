@@ -251,4 +251,38 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
     expect(byCase["files-pub"]).toBeUndefined();
     expect(calls).toEqual(["conn-1"]); // files 케이스는 resolver 미호출
   });
+
+  it("완료 시 onComplete 콜백을 최신 레코드로 호출(알림 훅)", async () => {
+    const okDispatch: Dispatcher = {
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [],
+        };
+      },
+    };
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const seen: Array<{ tenant: string; status: string; id: string }> = [];
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      newId: () => "sc-done",
+      onComplete: async (tenant, rec) => {
+        seen.push({ tenant, status: rec.status, id: rec.id });
+      },
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    await waitTerminal(store, "sc-done");
+    expect(seen).toEqual([{ tenant: "acme", status: "succeeded", id: "sc-done" }]);
+  });
 });

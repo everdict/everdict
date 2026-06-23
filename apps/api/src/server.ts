@@ -67,10 +67,12 @@ export const RunScorecardBodySchema = z.object({
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
-// 워크스페이스 설정 패치(부분). 계측 on/off + 기본 judge 모델.
+// 워크스페이스 설정 패치(부분). 계측 on/off + 기본 judge 모델 + 완료 알림 대상.
 export const WorkspaceSettingsBodySchema = z.object({
   meterUsage: z.boolean().optional(),
   judge: JudgeRunConfigSchema.optional(), // 워크스페이스 기본 judge 모델(컨트롤플레인이 잡에 자동 주입)
+  // run/scorecard 완료 알림 대상(Mattermost 연결 + 채널). 토큰/채널 값이 아니라 연결 id 참조 + channel id.
+  notify: z.object({ connectionId: z.string().min(1), channelId: z.string().min(1) }).optional(),
 });
 
 export interface ServerDeps {
