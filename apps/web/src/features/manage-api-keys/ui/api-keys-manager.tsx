@@ -1,11 +1,15 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useState, useTransition } from 'react'
+import { Check, Copy, KeyRound, Plus, Trash2 } from 'lucide-react'
 
 import type { ApiKeyMeta, ApiKeyScope } from '@/entities/api-key'
+import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { Dialog } from '@/shared/ui/dialog'
+import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label } from '@/shared/ui/input'
 
 import { createKeyAction, revokeKeyAction } from '../api/manage-api-keys'
@@ -17,41 +21,10 @@ function scopeLabel(scopes?: ApiKeyScope[]): string {
 }
 
 export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrite: boolean }) {
-  const [label, setLabel] = useState('')
-  const [mode, setMode] = useState<'full' | 'custom'>('full') // 전체 액세스 vs 범위 지정
-  const [scopeRead, setScopeRead] = useState(true)
-  const [scopeWrite, setScopeWrite] = useState(false)
-  const [issued, setIssued] = useState<string>() // 방금 발급된 평문(1회 노출)
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string>()
+  const [createOpen, setCreateOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
+  const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
-
-  function onCreate() {
-    setError(undefined)
-    setIssued(undefined)
-    setCopied(false)
-    // 범위 지정이면 선택한 scope 만, 전체 액세스면 미지정(=서버에서 Full Access).
-    let scopes: ApiKeyScope[] | undefined
-    if (mode === 'custom') {
-      scopes = []
-      if (scopeRead) scopes.push('read')
-      if (scopeWrite) scopes.push('write')
-      if (scopes.length === 0) {
-        setError('권한을 하나 이상 선택하세요.')
-        return
-      }
-    }
-    startTransition(async () => {
-      const r = await createKeyAction(label, scopes)
-      if (r.ok) {
-        setIssued(r.apiKey)
-        setLabel('')
-      } else {
-        setError(r.error)
-      }
-    })
-  }
 
   function onRevoke(id: string) {
     setError(undefined)
@@ -64,65 +37,73 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
 
   return (
     <div className="space-y-5">
-      <div className="space-y-1">
-        <h3 className="text-[13px] font-[560] text-foreground">API 키</h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          에이전트·MCP 가 컨트롤플레인에 접근할 때 쓰는 키(<span className="font-mono">ak_…</span>).{' '}
-          <span className="font-[510] text-foreground">
-            발급 시 권한(Full Access 또는 선택 범위)을 정할 수 있습니다.
-          </span>{' '}
-          평문은 한 번만 표시되며 이후에는 prefix 로만 식별됩니다.
-        </p>
+      {/* 헤더 — 설명 + 발급 액션(목록과 같은 화면, 발급은 모달로) */}
+      <div className="flex items-start justify-between gap-4">
+        <div className="space-y-1">
+          <h3 className="text-[13px] font-[560] text-foreground">API 키</h3>
+          <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
+            에이전트·MCP 가 컨트롤플레인에 접근할 때 쓰는 키(
+            <span className="font-mono">ak_…</span>). 발급 시 권한(Full Access 또는 선택 범위)을
+            정할 수 있고, 평문은 한 번만 표시됩니다.
+          </p>
+        </div>
+        {canWrite && (
+          <Button size="sm" className="shrink-0" onClick={() => setCreateOpen(true)}>
+            <Plus />새 키 발급
+          </Button>
+        )}
       </div>
 
-      {/* 방금 발급된 키 — 1회 노출 */}
-      {issued && (
-        <Callout
-          tone="warning"
-          hint="이 값은 다시 표시되지 않습니다. 지금 복사해 안전한 곳에 보관하세요."
-        >
-          <div className="flex items-center gap-2">
-            <code className="min-w-0 flex-1 truncate font-mono text-xs">{issued}</code>
-            <Button
-              type="button"
-              variant="secondary"
-              size="sm"
-              onClick={() => {
-                void navigator.clipboard?.writeText(issued)
-                setCopied(true)
-              }}
-            >
-              {copied ? '복사됨' : '복사'}
-            </Button>
-          </div>
+      {error && (
+        <Callout tone="danger" className="py-1.5">
+          {error}
         </Callout>
       )}
 
       {/* 목록 */}
       {keys.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">아직 발급된 키가 없습니다.</p>
+        <EmptyState
+          icon={<KeyRound strokeWidth={1.75} />}
+          title="아직 발급된 키가 없습니다."
+          hint={
+            canWrite
+              ? '새 키를 발급해 에이전트·CI·MCP 에 컨트롤플레인 접근 권한을 부여하세요.'
+              : '키를 발급하려면 admin 역할(keys:write)이 필요합니다.'
+          }
+          action={
+            canWrite ? (
+              <Button size="sm" variant="secondary" onClick={() => setCreateOpen(true)}>
+                <Plus />새 키 발급
+              </Button>
+            ) : undefined
+          }
+        />
       ) : (
-        <ul className="divide-y rounded-lg border bg-card shadow-raise">
+        <ul className="divide-y divide-border rounded-lg border bg-card shadow-raise">
           {keys.map((k) => (
-            <li key={k.id} className="flex items-center justify-between gap-3 px-3 py-2.5">
-              <div className="min-w-0">
-                <span className="font-mono text-[13px]">{k.prefix}…</span>
-                {k.label && (
-                  <span className="ml-2 text-[13px] font-[510] text-foreground">{k.label}</span>
-                )}
-                <Badge tone="outline" className="ml-2 align-middle">
-                  {scopeLabel(k.scopes)}
-                </Badge>
-                <span className="ml-2 text-[12px] text-faint">
-                  {new Date(k.createdAt).toLocaleString('ko-KR')}
-                </span>
+            <li key={k.id} className="flex items-center gap-3 px-3.5 py-3">
+              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground">
+                <KeyRound className="size-4" strokeWidth={1.75} />
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="truncate text-[13px] font-[510] text-foreground">
+                    {k.label || '이름 없는 키'}
+                  </span>
+                  <Badge tone="outline">{scopeLabel(k.scopes)}</Badge>
+                </div>
+                <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
+                  <code className="font-mono text-muted-foreground">{k.prefix}…</code>
+                  <span>·</span>
+                  <span>{new Date(k.createdAt).toLocaleString('ko-KR')}</span>
+                </div>
               </div>
               {canWrite &&
                 (confirmId === k.id ? (
-                  <span className="flex items-center gap-2">
+                  <span className="flex shrink-0 items-center gap-2">
                     <Button
                       variant="destructive"
-                      size="sm"
+                      size="xs"
                       disabled={pending}
                       onClick={() => onRevoke(k.id)}
                     >
@@ -137,114 +118,272 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
                     </button>
                   </span>
                 ) : (
-                  <button
-                    type="button"
-                    className="text-[12px] font-[510] text-destructive hover:underline"
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`${k.label || k.prefix} 키 취소`}
                     onClick={() => setConfirmId(k.id)}
                   >
-                    취소
-                  </button>
+                    <Trash2 />
+                  </Button>
                 ))}
             </li>
           ))}
         </ul>
       )}
 
-      {/* 발급 */}
-      {canWrite ? (
-        <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="key-label">레이블 (선택)</Label>
-            <Input
-              id="key-label"
-              value={label}
-              placeholder="ci-bot, local-dev …"
-              onChange={(e) => setLabel(e.target.value)}
-              maxLength={80}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>권한 (Permissions)</Label>
-            <div className="space-y-2 rounded-lg border bg-card p-3">
-              <label className="flex items-start gap-2.5 text-[13px]">
-                <input
-                  type="radio"
-                  name="key-access"
-                  className="mt-0.5 accent-primary"
-                  checked={mode === 'full'}
-                  onChange={() => setMode('full')}
-                />
-                <span>
-                  <span className="font-[510] text-foreground">전체 액세스 (Full Access)</span>
-                  <span className="block text-[12px] text-muted-foreground">
-                    워크스페이스 admin 권한 — 모든 작업 가능.
-                  </span>
-                </span>
-              </label>
-              <label className="flex items-start gap-2.5 text-[13px]">
-                <input
-                  type="radio"
-                  name="key-access"
-                  className="mt-0.5 accent-primary"
-                  checked={mode === 'custom'}
-                  onChange={() => setMode('custom')}
-                />
-                <span>
-                  <span className="font-[510] text-foreground">범위 지정 (Custom)</span>
-                  <span className="block text-[12px] text-muted-foreground">선택한 권한만 부여.</span>
-                </span>
-              </label>
-              {mode === 'custom' && (
-                <div className="ml-6 space-y-1.5 border-l pl-3">
-                  <label className="flex items-start gap-2 text-[13px]">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 accent-primary"
-                      checked={scopeRead}
-                      onChange={(e) => setScopeRead(e.target.checked)}
-                    />
-                    <span>
-                      <span className="font-[510] text-foreground">읽기 (Read)</span>
-                      <span className="block text-[12px] text-muted-foreground">
-                        워크스페이스 데이터 조회.
-                      </span>
-                    </span>
-                  </label>
-                  <label className="flex items-start gap-2 text-[13px]">
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 accent-primary"
-                      checked={scopeWrite}
-                      onChange={(e) => setScopeWrite(e.target.checked)}
-                    />
-                    <span>
-                      <span className="font-[510] text-foreground">쓰기 (Write)</span>
-                      <span className="block text-[12px] text-muted-foreground">
-                        run 제출·등록·버전 생성·실행 (읽기 포함). secrets·멤버 등 거버넌스는 제외.
-                      </span>
-                    </span>
-                  </label>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <Button onClick={onCreate} disabled={pending}>
-            {pending ? '발급 중…' : '새 키 발급'}
-          </Button>
-        </div>
-      ) : (
-        <p className="text-[13px] text-muted-foreground">
+      {!canWrite && keys.length > 0 && (
+        <p className="text-[12px] text-muted-foreground">
           키를 발급/취소하려면 admin 역할(keys:write)이 필요합니다.
         </p>
       )}
 
-      {error && (
-        <Callout tone="danger" className="py-1.5">
-          {error}
-        </Callout>
-      )}
+      {canWrite && <CreateKeyDialog open={createOpen} onClose={() => setCreateOpen(false)} />}
     </div>
+  )
+}
+
+// 발급 모달 — 레이블 + 권한 선택 후 발급. 발급되면 같은 모달이 평문 1회 노출 단계로 전환된다.
+function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const [label, setLabel] = useState('')
+  const [mode, setMode] = useState<'full' | 'custom'>('full') // 전체 액세스 vs 범위 지정
+  const [scopeRead, setScopeRead] = useState(true)
+  const [scopeWrite, setScopeWrite] = useState(false)
+  const [issued, setIssued] = useState<string>() // 방금 발급된 평문(1회 노출)
+  const [copied, setCopied] = useState(false)
+  const [error, setError] = useState<string>()
+  const [pending, startTransition] = useTransition()
+
+  // 열릴 때마다 폼 초기화(이전 발급/입력 잔상 제거).
+  useEffect(() => {
+    if (!open) return
+    setLabel('')
+    setMode('full')
+    setScopeRead(true)
+    setScopeWrite(false)
+    setIssued(undefined)
+    setCopied(false)
+    setError(undefined)
+  }, [open])
+
+  function onCreate() {
+    setError(undefined)
+    // 범위 지정이면 선택한 scope 만, 전체 액세스면 미지정(=서버에서 Full Access).
+    let scopes: ApiKeyScope[] | undefined
+    if (mode === 'custom') {
+      scopes = []
+      if (scopeRead) scopes.push('read')
+      if (scopeWrite) scopes.push('write')
+      if (scopes.length === 0) {
+        setError('권한을 하나 이상 선택하세요.')
+        return
+      }
+    }
+    startTransition(async () => {
+      const r = await createKeyAction(label, scopes)
+      if (r.ok) setIssued(r.apiKey)
+      else setError(r.error)
+    })
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} className="max-w-[460px]" labelledBy="create-key-title">
+      {issued ? (
+        // 2단계 — 발급 완료(평문 1회 노출)
+        <>
+          <header className="border-b border-border px-5 py-4">
+            <h2 id="create-key-title" className="text-[15px] font-[560] text-foreground">
+              키가 발급되었습니다
+            </h2>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              아래 키를 지금 복사해 안전한 곳에 보관하세요.
+            </p>
+          </header>
+          <div className="px-5 py-4">
+            <Callout
+              tone="warning"
+              hint="이 값은 다시 표시되지 않습니다. 이후에는 prefix 로만 식별됩니다."
+            >
+              <div className="flex items-center gap-2">
+                <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
+                  {issued}
+                </code>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    void navigator.clipboard?.writeText(issued)
+                    setCopied(true)
+                  }}
+                >
+                  {copied ? <Check /> : <Copy />}
+                  {copied ? '복사됨' : '복사'}
+                </Button>
+              </div>
+            </Callout>
+          </div>
+          <footer className="flex justify-end border-t border-border px-5 py-3.5">
+            <Button size="sm" onClick={onClose}>
+              완료
+            </Button>
+          </footer>
+        </>
+      ) : (
+        // 1단계 — 레이블 + 권한
+        <>
+          <header className="border-b border-border px-5 py-4">
+            <h2 id="create-key-title" className="text-[15px] font-[560] text-foreground">
+              새 API 키 발급
+            </h2>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              레이블로 용도를 구분하고, 이 키가 가질 권한 범위를 정하세요.
+            </p>
+          </header>
+
+          <div className="space-y-4 px-5 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="key-label">레이블 (선택)</Label>
+              <Input
+                id="key-label"
+                value={label}
+                placeholder="ci-bot, local-dev …"
+                autoFocus
+                onChange={(e) => setLabel(e.target.value)}
+                maxLength={80}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>권한 (Permissions)</Label>
+              <div className="space-y-2">
+                <ScopeOption
+                  selected={mode === 'full'}
+                  onSelect={() => setMode('full')}
+                  name="key-access"
+                  title="전체 액세스 (Full Access)"
+                  description="워크스페이스 admin 권한 — 모든 작업 가능."
+                />
+                <ScopeOption
+                  selected={mode === 'custom'}
+                  onSelect={() => setMode('custom')}
+                  name="key-access"
+                  title="범위 지정 (Custom)"
+                  description="선택한 권한만 부여."
+                >
+                  <div className="mt-3 space-y-2 border-t border-border/70 pt-3">
+                    <ScopeCheck
+                      checked={scopeRead}
+                      onChange={setScopeRead}
+                      title="읽기 (Read)"
+                      description="워크스페이스 데이터 조회."
+                    />
+                    <ScopeCheck
+                      checked={scopeWrite}
+                      onChange={setScopeWrite}
+                      title="쓰기 (Write)"
+                      description="run 제출·등록·버전 생성·실행 (읽기 포함). secrets·멤버 등 거버넌스는 제외."
+                    />
+                  </div>
+                </ScopeOption>
+              </div>
+            </div>
+
+            {error && (
+              <Callout tone="danger" className="py-1.5">
+                {error}
+              </Callout>
+            )}
+          </div>
+
+          <footer className="flex justify-end gap-2 border-t border-border px-5 py-3.5">
+            <Button variant="ghost" size="sm" onClick={onClose}>
+              취소
+            </Button>
+            <Button size="sm" onClick={onCreate} disabled={pending}>
+              {pending ? '발급 중…' : '키 발급'}
+            </Button>
+          </footer>
+        </>
+      )}
+    </Dialog>
+  )
+}
+
+// 라디오 형태의 선택 카드 — 선택 시 인디고 보더 + 옅은 tint. custom 일 때 children(체크박스)을 펼친다.
+function ScopeOption({
+  selected,
+  onSelect,
+  name,
+  title,
+  description,
+  children,
+}: {
+  selected: boolean
+  onSelect: () => void
+  name: string
+  title: string
+  description: string
+  children?: React.ReactNode
+}) {
+  // children(체크박스)은 label 밖에 둔다 — 중첩 label 은 무효 HTML + 클릭 충돌.
+  return (
+    <div
+      className={cn(
+        'rounded-lg border p-3 transition-[background,border-color]',
+        selected
+          ? 'border-primary/60 bg-primary/[0.06]'
+          : 'border-border bg-card hover:border-border-strong hover:bg-accent/40'
+      )}
+    >
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input
+          type="radio"
+          name={name}
+          className="mt-0.5 accent-primary"
+          checked={selected}
+          onChange={onSelect}
+        />
+        <span className="min-w-0">
+          <span className="block text-[13px] font-[510] text-foreground">{title}</span>
+          <span className="mt-0.5 block text-[12px] leading-relaxed text-muted-foreground">
+            {description}
+          </span>
+        </span>
+      </label>
+      {selected && children}
+    </div>
+  )
+}
+
+// 체크박스 행 — custom 범위의 개별 권한.
+function ScopeCheck({
+  checked,
+  onChange,
+  title,
+  description,
+}: {
+  checked: boolean
+  onChange: (v: boolean) => void
+  title: string
+  description: string
+}) {
+  return (
+    <label className="flex items-start gap-2.5 text-[13px]">
+      <input
+        type="checkbox"
+        className="mt-0.5 accent-primary"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+      />
+      <span className="min-w-0">
+        <span className="block font-[510] text-foreground">{title}</span>
+        <span className="mt-0.5 block text-[12px] leading-relaxed text-muted-foreground">
+          {description}
+        </span>
+      </span>
+    </label>
   )
 }

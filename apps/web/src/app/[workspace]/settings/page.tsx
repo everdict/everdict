@@ -1,4 +1,3 @@
-import type { WorkspaceSettings } from '@/features/workspace-settings'
 import { workspaceApplicationsSchema, type ConnectionMeta } from '@/entities/connection'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
@@ -25,7 +24,6 @@ export default async function SettingsPage() {
   const canReadMembers = can(principal?.roles, 'members:read')
   const canWriteMembers = can(principal?.roles, 'members:write')
 
-  let settings: WorkspaceSettings = {}
   let workspace: WorkspaceRecord | undefined
   let secrets: SecretMeta[] = []
   let applications: ConnectionMeta[] = []
@@ -34,7 +32,6 @@ export default async function SettingsPage() {
   let error: string | undefined
   try {
     if (canReadSettings) {
-      settings = await controlPlane.getWorkspaceSettings<WorkspaceSettings>(ctx)
       workspace = workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
     }
     if (canReadSecrets) secrets = secretsSchema.parse(await controlPlane.listSecrets(ctx))
@@ -69,7 +66,6 @@ export default async function SettingsPage() {
         <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : (
         <SettingsTabs
-          settings={settings}
           isOwner={isOwner}
           {...(workspace !== undefined ? { workspace } : {})}
           secrets={secrets}

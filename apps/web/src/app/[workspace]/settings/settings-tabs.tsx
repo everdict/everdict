@@ -4,11 +4,7 @@ import { DeleteWorkspaceCard } from '@/features/delete-workspace'
 import { InvitesManager } from '@/features/manage-invites'
 import { MembersManager, WorkspaceApplications } from '@/features/manage-members'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
-import {
-  SettingsForm,
-  WorkspaceInfoCard,
-  type WorkspaceSettings,
-} from '@/features/workspace-settings'
+import { WorkspaceInfoCard } from '@/features/workspace-settings'
 import type { ConnectionMeta } from '@/entities/connection'
 import type { Invite, Member } from '@/entities/member'
 import type { SecretMeta } from '@/entities/secret'
@@ -21,7 +17,6 @@ type TabKey = 'general' | 'model' | 'cluster' | 'members'
 // 외부 계정 연결의 연결/해제(관리)는 개인 소유라 계정(account) 페이지에 있다 — 여기 멤버 탭의 "애플리케이션"은 이 워크스페이스
 // 에서 만들어진 연결의 읽기 전용 로스터(applications)다.
 export function SettingsTabs(props: {
-  settings: WorkspaceSettings
   workspace?: WorkspaceRecord // 활성 워크스페이스 레코드(이름/로고/소유자) — settings:read 일 때만
   isOwner: boolean // owner 면 위험 구역(삭제) 노출
   secrets: SecretMeta[]
@@ -66,7 +61,6 @@ export function SettingsTabs(props: {
                 : {})}
             />
           )}
-          <SettingsForm initial={props.settings} canWrite={props.canWriteSettings} />
           {props.isOwner && props.workspace && (
             <DeleteWorkspaceCard workspaceName={props.workspace.name} />
           )}
