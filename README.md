@@ -53,6 +53,36 @@ pnpm assay run --task "Create ok.txt with the text done" --test "grep -q done ok
 # distributed (Nomad) and/or durable (Temporal): see docs/execution-backends.md + docs/orchestration.md
 ```
 
+## Connect an agent (MCP)
+The agent-facing surface is an OAuth-protected MCP server at `POST /mcp` — same tools as the HTTP API,
+role-gated + workspace-scoped. Connect with **OAuth browser login (like Linear)** or a headless **API key**.
+Endpoint: `http://<host>:8787/mcp` (set `<host>` to where `apps/api` runs; examples use the tailnet IP).
+
+### Claude Code
+```bash
+# OAuth — "login like Linear": opens the browser, log in via Keycloak, done.
+claude mcp add --transport http assay http://100.69.164.81:8787/mcp
+
+# headless with an API key (CI / no browser):
+claude mcp add --transport http assay http://100.69.164.81:8787/mcp \
+  --header "Authorization: Bearer ak_..."
+```
+
+### Codex
+Codex reaches a remote MCP via `mcp-remote` (runs the OAuth + PKCE flow). Add to `~/.codex/config.toml`:
+```toml
+[mcp_servers.assay]
+command = "npx"
+args = ["-y", "mcp-remote", "http://100.69.164.81:8787/mcp"]
+# headless instead — drop the browser, use an API key:
+# args = ["-y", "mcp-remote", "http://100.69.164.81:8787/mcp", "--header", "Authorization: Bearer ak_..."]
+```
+
+OAuth needs anonymous Dynamic Client Registration enabled once on Keycloak
+(`deploy/keycloak/enable-mcp-dcr.sh` — loopback redirect URIs only). Get an API key from the web
+(**Settings → API keys**) or `POST /keys`. Both credentials resolve to the same `Principal{workspace, roles}`.
+See `docs/mcp.md`.
+
 ## Develop
 ```bash
 pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm build

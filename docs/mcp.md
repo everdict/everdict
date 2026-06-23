@@ -72,6 +72,18 @@ KEYCLOAK_ISSUER=http://localhost:8081/realms/assay ASSAY_REQUIRE_AUTH=1 node app
 # MCP endpoint: http://localhost:8787/mcp  (an MCP client discovers Keycloak and prompts login)
 ```
 
+Client install (see `README.md`):
+- **Claude Code** — `claude mcp add --transport http assay http://<host>:8787/mcp` (OAuth browser login),
+  or append `--header "Authorization: Bearer ak_…"` for a headless API key.
+- **Codex** — `~/.codex/config.toml` → `[mcp_servers.assay]` running `npx -y mcp-remote http://<host>:8787/mcp`
+  (mcp-remote runs the OAuth/PKCE flow; add `--header "Authorization: Bearer ak_…"` to go headless).
+
+The OAuth "login like Linear" path needs **anonymous Dynamic Client Registration** (RFC 7591): an MCP client
+self-registers a loopback-redirect client, then does Authorization Code + PKCE. Keycloak's default
+**Trusted Hosts** anonymous policy blocks this (`403`); `deploy/keycloak/enable-mcp-dcr.sh` relaxes it once to
+trust loopback redirect URIs only (`localhost`/`127.0.0.1`, client-URI validation kept on). The realm export is
+minimal (no default policy components), so run the script after the realm exists. API keys never need DCR.
+
 ## Verified
 - **Deterministic** (`apps/api/src/mcp.test.ts`, in-memory MCP client↔server): `tools/list`; role gating
   (viewer read-only, member submits, admin registers); workspace scoping (another workspace's run → `NOT_FOUND`).
