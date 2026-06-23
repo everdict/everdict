@@ -51,7 +51,10 @@ touching `service-backend.ts`'s driving logic.
 - **#3 correlate — DONE.** `frontDoor.correlate` (`injected` default = Assay runId | `returned` = extract the
   agent's own id from the submit response via `correlate.path` dot-path, used for both trace fetch and the poll
   `statusPath`). `SubmitFn` now returns the response body. Distinct from the still-dormant `frontDoor.trace` endpoint.
-- Next: #1 payload template · #4 target strategy · #5 per-service image pin.
+- **#1 payload template — DONE.** `frontDoor.request.bodyTemplate` (`interpolateTemplate` — recursive `{{var}}`
+  over the JSON body); per-run wiring variable NAMES derive from `dependencies[].isolateBy` via `wiringVars`
+  (`thread_id`/`key_prefix`/`object_prefix`/`schema`), not hardcoded LangGraph names. Absent `request` = today's body.
+- Next: #4 target strategy (`target.acquire` none/assay/harness) · #5 per-service image pin (thread through `AgentJob`).
 
 ## Reference impls
 `packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,

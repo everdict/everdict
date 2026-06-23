@@ -12,8 +12,14 @@ import {
 } from "@assay/core";
 import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@assay/graders";
 import type { TraceSource } from "@assay/trace";
-import { keysFor, newRunId } from "./environment-manager.js";
-import { type FrontDoorDriver, type GetJsonFn, HttpFrontDoorDriver, type SubmitFn } from "./front-door-driver.js";
+import { keysFor, newRunId, wiringVars } from "./environment-manager.js";
+import {
+  type FrontDoorDriver,
+  type GetJsonFn,
+  HttpFrontDoorDriver,
+  type SubmitFn,
+  interpolateTemplate,
+} from "./front-door-driver.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
 
 // 하위호환 re-export — 기존 import { type SubmitFn } from "./service-backend.js" 유지.
@@ -72,23 +78,25 @@ export class ServiceTopologyBackend implements Backend {
       // 구동(HOW): submit + per-run wiring 주입 → 완료 모델(sync/poll)대로 대기. 인프라(WHERE)와 분리된 관심사.
       const driver =
         this.opts.frontDoorDriver ?? new HttpFrontDoorDriver({ submit: this.opts.submit, getJson: this.opts.getJson });
-      // statusPath 보간용 wiring 변수 — 의존 스토어의 isolateBy 키(+ run_id). #3 에서 상관키로도 일반화 예정.
-      const wiring: Record<string, string> = {
-        run_id: runId,
-        thread_id: keys.threadId,
-        stream_channel: keys.streamChannel,
-        minio_prefix: keys.minioPrefix,
-      };
+      // per-run 와이어링 — isolateBy 에서 파생한 격리 변수(+ task + target_cdp_url). 본문 템플릿 + statusPath 보간 공용.
+      const wiring = wiringVars(runId, spec.dependencies, {
+        task: job.evalCase.task,
+        target_cdp_url: browser.cdpUrl,
+      });
+      // 본문(#1): request.bodyTemplate 이 있으면 wiring 으로 보간, 없으면 현행 browser-use 5-field 본문(무회귀).
+      const payload = spec.frontDoor.request?.bodyTemplate
+        ? interpolateTemplate(spec.frontDoor.request.bodyTemplate, wiring)
+        : {
+            task: job.evalCase.task,
+            thread_id: keys.threadId,
+            stream_channel: keys.streamChannel,
+            minio_prefix: keys.minioPrefix,
+            browser_cdp_url: browser.cdpUrl,
+          };
       const outcome = await driver.drive({
         base,
         submit: spec.frontDoor.submit,
-        payload: {
-          task: job.evalCase.task,
-          thread_id: keys.threadId,
-          stream_channel: keys.streamChannel,
-          minio_prefix: keys.minioPrefix,
-          browser_cdp_url: browser.cdpUrl,
-        },
+        payload,
         completion: spec.frontDoor.completion,
         correlate: spec.frontDoor.correlate,
         wiring,

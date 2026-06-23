@@ -10,7 +10,11 @@
 >   own trace-id from the submit response via a dot-path (`correlate.path`) and uses it for **both** the trace
 >   fetch **and** the poll `statusPath` (`{run_id}` is overridden with the agent id). `injected` (default) =
 >   correlate by the Assay runId = today. `SubmitFn` now returns the response body for this.
-> - #1 payload template · #4 target strategy · #5 image pin — not yet.
+> - **#1 payload template — DONE.** `frontDoor.request.bodyTemplate` — a JSON body whose string `{{var}}` tokens
+>   are interpolated over the per-run wiring (CommandHarness convention). The wiring variable **names** now derive
+>   from `dependencies[].isolateBy` (`thread_id`/`key_prefix`/`object_prefix`/`schema`) via `wiringVars`, not the
+>   hardcoded LangGraph names. Absent `request` = today's 5-field body (no regression).
+> - #4 target strategy · #5 image pin — not yet.
 >
 > **Strict generalization, not a clean break.** Unlike the harness-taxonomy rework, this one keeps full
 > backward behavior: every new knob is optional and its default reproduces today's browser-use-langgraph
@@ -87,8 +91,8 @@ Every knob is optional; its default reproduces today's behavior.
 
 | # | Knob (proposed) | Default (= today) | Reuses |
 | --- | --- | --- | --- |
-| 1 | `frontDoor.request.bodyTemplate` — `{{task}}/{{run_id}}/{{thread_id}}/{{target_cdp_url}}…` interpolation | the current 5-field body | CommandHarness substitution (`command.ts:81`) |
-| 1b | per-run wiring variables derived from `spec.dependencies[].isolateBy` (not hardcoded `keysFor`) | pg→`thread_id`, redis→`key_prefix`, minio→`object_prefix` | the existing `isolateBy` enum (`harness-spec.ts:25`) |
+| 1 ✅ | `frontDoor.request.bodyTemplate` — `{{task}}/{{run_id}}/{{thread_id}}/{{target_cdp_url}}…` interpolation (recursive over the JSON body) | the current 5-field body | CommandHarness substitution (`command.ts:81`) — `interpolateTemplate` |
+| 1b ✅ | per-run wiring variables derived from `spec.dependencies[].isolateBy` (not hardcoded `keysFor`) | pg→`thread_id`, redis→`key_prefix`, minio→`object_prefix`, +`schema` | the existing `isolateBy` enum (`harness-spec.ts:25`) — `wiringVars` |
 | 2 ✅ | `frontDoor.completion.mode`: `sync` \| `poll` (+ `statusPath`, `done`/`failed` `StatusMatch`, `intervalMs`, `timeoutMs`) — `stream`/`callback` deferred | `sync` (current echo behavior) | — (the genuinely missing piece) |
 | 3 ✅ | `frontDoor.correlate.mode`: `injected` (Assay's `run_id`) \| `returned` (extract agent id from the submit response via `correlate.path` dot-path) | `injected` | `getField` dot-path reader; `SubmitFn` widened to return the response (the dormant `frontDoor.trace` *endpoint* stays a separate future capability) |
 | 4 | `frontDoor.target.acquire`: `none` \| `assay` \| `harness` (observe a declared service endpoint) | `assay` when `spec.target` is set | the already-optional `target` + the `os-use`/`prompt` env taxonomy |
@@ -117,7 +121,10 @@ frontDoor: {
   correlate?:
     | { mode: "injected" }
     | { mode: "returned"; path: string };                                                   // "run_id" | "data.id"
-  request?:    { method?: "POST"; headers?: Record<string, string>; bodyTemplate?: Json };  // #1 (later)
+  // #1 DONE — declarative request body; string {{var}} tokens interpolated over the per-run wiring (recursively).
+  // wiring NAMES derive from dependencies[].isolateBy via wiringVars (no hardcoded LangGraph names). headers/method
+  // are still derived from `submit` (a request.headers knob is a later add).
+  request?:    { bodyTemplate?: Record<string, unknown> };                                   // #1
   target?:     { acquire: "none" | "assay" | "harness"; service?: string };                 // #4 (later)
 };
 
@@ -129,10 +136,11 @@ type DriveOutcome = { traceRef: string; status: "done" | "failed" | "timeout" };
 // HttpFrontDoorDriver is the default impl (injectable submit/getJson/sleep/now for deterministic tests).
 ```
 
-The wiring vocabulary generalizes `keysFor`: each declared dependency contributes a per-run isolation variable
-named by its `isolateBy`, plus `{{run_id}}`, the target handle (`{{target_cdp_url}}`), and (for `completion.mode:
-callback`) a `{{callback_url}}` Assay holds a per-run promise on. browser-use happens to want all three store keys
-+ the CDP url; another harness wants a subset or none.
+The wiring vocabulary generalizes `keysFor` (DONE in #1 via `wiringVars`): each declared dependency contributes a
+per-run isolation variable named by its `isolateBy` (`thread_id`/`key_prefix`/`object_prefix`/`schema`), plus
+`{{run_id}}`, the case `{{task}}`, and the target handle (`{{target_cdp_url}}`). browser-use happens to want all
+three store keys + the CDP url; another harness wants a subset or none. (A `callback`-mode `{{callback_url}}` comes
+with the deferred completion modes.)
 
 ## "Absorbing the control-plane" — concretely
 
@@ -148,7 +156,8 @@ Each step merges independently; defaults keep current behavior, so no regression
    Landed: `FrontDoorDriver`/`HttpFrontDoorDriver` + `frontDoor.completion` (`sync`/`poll`) + timeout→fail.
 2. **#3 correlation** ✅ — `frontDoor.correlate` (`injected`/`returned`); `returned` extracts the agent's own
    trace-id from the submit response (dot-path) for both trace fetch and poll `statusPath`. `injected` = today.
-3. **#1 payload template** — generalize the body + derive wiring variables from `isolateBy`.
+3. **#1 payload template** ✅ — `frontDoor.request.bodyTemplate` (`interpolateTemplate`) + `wiringVars` deriving the
+   per-run variable names from `dependencies[].isolateBy`. Absent `request` = today's 5-field body.
 4. **#4 target strategy** — add `none` / `harness`; supports a self-provided playwright-server or trace-only harness.
 5. **#5 image pin** — thread an optional per-service pin through `AgentJob` (mechanism already exists).
 

@@ -38,6 +38,27 @@ export function interpolatePath(path: string, vars: Record<string, string>): str
   return path.replace(/\{(\w+)\}/g, (whole, key: string) => vars[key] ?? whole);
 }
 
+// 본문 템플릿 보간(#1) — JSON 을 재귀적으로 훑어 문자열 값의 {{var}} 토큰을 wiring 으로 치환(이중 중괄호 —
+// CommandHarness {{task}} 관례). 미매칭 토큰은 원문 유지. 비문자열(숫자/불리언/null)은 그대로.
+function interpolateValue(value: unknown, vars: Record<string, string>): unknown {
+  if (typeof value === "string") return value.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => vars[key] ?? whole);
+  if (Array.isArray(value)) return value.map((v) => interpolateValue(v, vars));
+  if (value !== null && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = interpolateValue(v, vars);
+    return out;
+  }
+  return value;
+}
+export function interpolateTemplate(
+  template: Record<string, unknown>,
+  vars: Record<string, string>,
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(template)) out[k] = interpolateValue(v, vars);
+  return out;
+}
+
 // 상태 응답 JSON 에서 dot-path 필드를 안전하게 읽는다(eval 금지).
 function getField(obj: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {

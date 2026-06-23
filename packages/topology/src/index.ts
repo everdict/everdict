@@ -1,5 +1,5 @@
 export type { TopologyRuntime, TopologyHandle, BrowserEnvHandle } from "./topology-runtime.js";
-export { type RunKeys, keysFor, newRunId, EnvironmentManager } from "./environment-manager.js";
+export { type RunKeys, keysFor, newRunId, wiringVars, EnvironmentManager } from "./environment-manager.js";
 export {
   type StoreDef,
   STORE_DEFS,
@@ -86,4 +86,5 @@ export {
   methodPath,
   joinUrl,
   interpolatePath,
+  interpolateTemplate,
 } from "./front-door-driver.js";

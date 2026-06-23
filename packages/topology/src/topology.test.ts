@@ -554,4 +554,77 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(result.caseId).toBe("c1");
     expect(fetchedWith).toBe("agent-xyz"); // assay runId(fixed)가 아니라 에이전트가 돌려준 id 로 상관
   });
+
+  // --- #1 본문 템플릿(request.bodyTemplate) ---
+  it("request.bodyTemplate 가 있으면 isolateBy 파생 wiring 으로 보간한 본문을 보낸다", async () => {
+    const b = mockBrowser();
+    let sent: Record<string, unknown> = {};
+    const SPEC_TMPL: ServiceHarnessSpec = {
+      ...SPEC,
+      frontDoor: {
+        ...SPEC.frontDoor,
+        request: {
+          bodyTemplate: {
+            prompt: "{{task}}",
+            run: "{{run_id}}",
+            thread: "{{thread_id}}",
+            obj: "{{object_prefix}}",
+            cdp: "{{target_cdp_url}}",
+          },
+        },
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(b.handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_TMPL,
+      submit: async (_url, payload) => {
+        sent = payload;
+      },
+      newRunId: () => "fixed",
+    });
+
+    await backend.dispatch(job);
+
+    // 현행 LangGraph 고정 이름(stream_channel/minio_prefix)이 아니라 isolateBy 파생 변수로 보간된다.
+    expect(sent).toEqual({
+      prompt: "t", // job.task
+      run: "fixed",
+      thread: "run-fixed", // postgres isolateBy: thread_id
+      obj: "runs/fixed/", // minio isolateBy: object-prefix → object_prefix
+      cdp: "ws://b", // target_cdp_url
+    });
+  });
+
+  it("request 미지정이면 현행 browser-use 5-field 본문 그대로(무회귀)", async () => {
+    const b = mockBrowser();
+    let sent: Record<string, unknown> = {};
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(b.handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC, // request 없음
+      submit: async (_url, payload) => {
+        sent = payload;
+      },
+      newRunId: () => "fixed",
+    });
+
+    await backend.dispatch(job);
+
+    expect(sent).toEqual({
+      task: "t",
+      thread_id: "run-fixed",
+      stream_channel: "run-fixed",
+      minio_prefix: "runs/fixed/",
+      browser_cdp_url: "ws://b",
+    });
+  });
 });

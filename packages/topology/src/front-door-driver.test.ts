@@ -1,6 +1,12 @@
 import type { FrontDoorCompletion } from "@assay/core";
 import { describe, expect, it } from "vitest";
-import { type FrontDoorDriveRequest, HttpFrontDoorDriver, interpolatePath, methodPath } from "./front-door-driver.js";
+import {
+  type FrontDoorDriveRequest,
+  HttpFrontDoorDriver,
+  interpolatePath,
+  interpolateTemplate,
+  methodPath,
+} from "./front-door-driver.js";
 
 // 호출마다 step 만큼 증가하는 가짜 시계 — 타임아웃을 결정적으로 검증.
 function steppingClock(step: number): () => number {
@@ -32,6 +38,20 @@ describe("methodPath / interpolatePath", () => {
   it("{var} 토큰을 wiring 으로 치환하고 미매칭은 원문을 유지한다", () => {
     expect(interpolatePath("/runs/{run_id}/status", { run_id: "abc" })).toBe("/runs/abc/status");
     expect(interpolatePath("/runs/{unknown}", {})).toBe("/runs/{unknown}");
+  });
+});
+
+describe("interpolateTemplate", () => {
+  it("문자열 값의 {{var}} 를 wiring 으로 치환하고 중첩 객체/배열도 재귀 처리, 비문자열은 그대로 둔다", () => {
+    const out = interpolateTemplate(
+      { task: "{{task}}", nested: { thread: "{{thread_id}}" }, list: ["{{run_id}}", "lit"], n: 7, b: true },
+      { task: "do it", thread_id: "run-1", run_id: "1" },
+    );
+    expect(out).toEqual({ task: "do it", nested: { thread: "run-1" }, list: ["1", "lit"], n: 7, b: true });
+  });
+
+  it("미매칭 토큰은 원문을 유지한다", () => {
+    expect(interpolateTemplate({ x: "{{unknown}}" }, {})).toEqual({ x: "{{unknown}}" });
   });
 });
 
