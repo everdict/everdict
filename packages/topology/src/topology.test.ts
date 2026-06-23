@@ -527,4 +527,31 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(polled[0]).toBe("http://agent-server:8000/runs/fixed/status"); // {run_id}→fixed 보간
     expect(result.scores.length).toBeGreaterThan(0);
   });
+
+  // --- #3 상관(correlate) ---
+  it("correlate returned: 에이전트가 submit 응답으로 돌려준 id 로 트레이스를 가져온다", async () => {
+    const b = mockBrowser();
+    let fetchedWith = "";
+    const SPEC_RETURNED: ServiceHarnessSpec = {
+      ...SPEC,
+      frontDoor: { ...SPEC.frontDoor, correlate: { mode: "returned", path: "run_id" } },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(b.handle),
+      traceSource: {
+        async fetch(id) {
+          fetchedWith = id;
+          return [];
+        },
+      },
+      specFor: () => SPEC_RETURNED,
+      submit: async () => ({ run_id: "agent-xyz" }),
+      newRunId: () => "fixed",
+    });
+
+    const result = await backend.dispatch(job);
+
+    expect(result.caseId).toBe("c1");
+    expect(fetchedWith).toBe("agent-xyz"); // assay runId(fixed)가 아니라 에이전트가 돌려준 id 로 상관
+  });
 });

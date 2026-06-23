@@ -6,7 +6,11 @@
 >   `HttpFrontDoorDriver` landed in `@assay/topology`; `frontDoor.completion` (`sync` | `poll`) in `@assay/core`;
 >   `ServiceTopologyBackend.dispatch` now delegates driving to the driver and fails a run on completion timeout.
 >   Default (no `completion`) = `sync` = today. (`stream`/`callback` modes deferred — see #2 below.)
-> - #3 correlate · #1 payload template · #4 target strategy · #5 image pin — not yet.
+> - **#3 correlation — DONE.** `frontDoor.correlate` (`injected` | `returned`). `returned` extracts the agent's
+>   own trace-id from the submit response via a dot-path (`correlate.path`) and uses it for **both** the trace
+>   fetch **and** the poll `statusPath` (`{run_id}` is overridden with the agent id). `injected` (default) =
+>   correlate by the Assay runId = today. `SubmitFn` now returns the response body for this.
+> - #1 payload template · #4 target strategy · #5 image pin — not yet.
 >
 > **Strict generalization, not a clean break.** Unlike the harness-taxonomy rework, this one keeps full
 > backward behavior: every new knob is optional and its default reproduces today's browser-use-langgraph
@@ -86,7 +90,7 @@ Every knob is optional; its default reproduces today's behavior.
 | 1 | `frontDoor.request.bodyTemplate` — `{{task}}/{{run_id}}/{{thread_id}}/{{target_cdp_url}}…` interpolation | the current 5-field body | CommandHarness substitution (`command.ts:81`) |
 | 1b | per-run wiring variables derived from `spec.dependencies[].isolateBy` (not hardcoded `keysFor`) | pg→`thread_id`, redis→`key_prefix`, minio→`object_prefix` | the existing `isolateBy` enum (`harness-spec.ts:25`) |
 | 2 ✅ | `frontDoor.completion.mode`: `sync` \| `poll` (+ `statusPath`, `done`/`failed` `StatusMatch`, `intervalMs`, `timeoutMs`) — `stream`/`callback` deferred | `sync` (current echo behavior) | — (the genuinely missing piece) |
-| 3 | `frontDoor.correlate.mode`: `injected` (Assay injects `run_id`) \| `returned` (extract via `frontDoor.trace` JSON-path) | `injected` | the dormant `frontDoor.trace` field (`harness-spec.ts:54`) |
+| 3 ✅ | `frontDoor.correlate.mode`: `injected` (Assay's `run_id`) \| `returned` (extract agent id from the submit response via `correlate.path` dot-path) | `injected` | `getField` dot-path reader; `SubmitFn` widened to return the response (the dormant `frontDoor.trace` *endpoint* stays a separate future capability) |
 | 4 | `frontDoor.target.acquire`: `none` \| `assay` \| `harness` (observe a declared service endpoint) | `assay` when `spec.target` is set | the already-optional `target` + the `os-use`/`prompt` env taxonomy |
 | 5 | per-service image pin threaded through dispatch (`AgentJob`), not only at registration | `spec.image` | `HarnessTemplate` slot/pins already resolve images (`harness-template.ts:97-115`) |
 
@@ -107,8 +111,13 @@ frontDoor: {
     | { mode: "poll"; statusPath: string;                 // "GET /runs/{run_id}/status" ({var} ← wiring)
         done: StatusMatch; failed?: StatusMatch;          // StatusMatch = { field: dot-path; equals? | oneOf? }
         intervalMs?: number; timeoutMs?: number };
+  // #3 DONE — correlate the trace id. returned extracts from the submit response (dot-path) and also drives the
+  // poll statusPath; injected (default) = the Assay runId. (Distinct from frontDoor.trace, an unused agent-side
+  // trace *endpoint*.)
+  correlate?:
+    | { mode: "injected" }
+    | { mode: "returned"; path: string };                                                   // "run_id" | "data.id"
   request?:    { method?: "POST"; headers?: Record<string, string>; bodyTemplate?: Json };  // #1 (later)
-  correlate?:  { mode: "injected" | "returned"; traceRef?: string /* JSON-path */ };        // #3 (later, absorbs `trace`)
   target?:     { acquire: "none" | "assay" | "harness"; service?: string };                 // #4 (later)
 };
 
@@ -137,7 +146,8 @@ Each step merges independently; defaults keep current behavior, so no regression
 
 1. **#2 completion model** ✅ — the most essential gap; `sync` default = no regression; unlocks async N-step agents.
    Landed: `FrontDoorDriver`/`HttpFrontDoorDriver` + `frontDoor.completion` (`sync`/`poll`) + timeout→fail.
-2. **#3 correlation** — wake the dormant `frontDoor.trace`; extract the agent's own trace-ref from the response.
+2. **#3 correlation** ✅ — `frontDoor.correlate` (`injected`/`returned`); `returned` extracts the agent's own
+   trace-id from the submit response (dot-path) for both trace fetch and poll `statusPath`. `injected` = today.
 3. **#1 payload template** — generalize the body + derive wiring variables from `isolateBy`.
 4. **#4 target strategy** — add `none` / `harness`; supports a self-provided playwright-server or trace-only harness.
 5. **#5 image pin** — thread an optional per-service pin through `AgentJob` (mechanism already exists).

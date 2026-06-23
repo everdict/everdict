@@ -64,12 +64,22 @@ export const FrontDoorCompletionSchema = z.discriminatedUnion("mode", [
 ]);
 export type FrontDoorCompletion = z.infer<typeof FrontDoorCompletionSchema>;
 
-// front-door 계약 — task 제출 진입점(service/submit) + (선택)완료 대기 모델 + 트레이스 path.
+// 트레이스 상관(#3): 어떤 id 로 traceSource 에서 이 run 의 트레이스를 끌어오는가.
+// injected = assay 가 주입한 run_id 로 상관(미지정 시 기본, 현행 — CommandHarness {{run_id}} 와 같은 가정).
+// returned = 에이전트가 자기 id 를 mint 해 submit 응답으로 돌려줌 → 그 id 로 상관(+ poll statusPath 도 그 id 로 보간).
+export const FrontDoorCorrelateSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("injected") }),
+  z.object({ mode: z.literal("returned"), path: z.string() }), // submit 응답 JSON 의 dot-path (예: "run_id", "data.id")
+]);
+export type FrontDoorCorrelate = z.infer<typeof FrontDoorCorrelateSchema>;
+
+// front-door 계약 — task 제출 진입점(service/submit) + (선택)완료 대기 모델 + 트레이스 상관 + 트레이스 path.
 export const FrontDoorSpecSchema = z.object({
   service: z.string(),
   submit: z.string(),
   trace: z.string().optional(),
   completion: FrontDoorCompletionSchema.optional(), // 미지정 = sync(현행)
+  correlate: FrontDoorCorrelateSchema.optional(), // 미지정 = injected(현행)
 });
 export type FrontDoorSpec = z.infer<typeof FrontDoorSpecSchema>;
 

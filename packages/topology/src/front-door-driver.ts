@@ -1,12 +1,23 @@
-import type { FrontDoorCompletion, StatusMatch } from "@assay/core";
+import { type FrontDoorCompletion, type FrontDoorCorrelate, type StatusMatch, UpstreamError } from "@assay/core";
 
-// front-door 로 task+wiring 을 POST 하는 함수(테스트에서 주입 가능).
-export type SubmitFn = (frontDoorUrl: string, payload: Record<string, unknown>) => Promise<void>;
+// front-door 로 task+wiring 을 POST 하는 함수 — 응답 본문(JSON)을 돌려준다(returned 상관에서 trace-id 추출용).
+// 테스트에서 주입 가능. (injected 상관은 본문이 불필요하므로 void 반환도 허용.)
+export type SubmitFn = (frontDoorUrl: string, payload: Record<string, unknown>) => Promise<unknown>;
 // 상태 폴링용 GET — JSON 응답을 그대로 돌려준다.
 export type GetJsonFn = (url: string) => Promise<unknown>;
 
 const fetchSubmit: SubmitFn = async (url, payload) => {
-  await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(payload) });
+  const res = await fetch(url, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  // 응답이 JSON 이 아니거나 비어도 injected 모드는 본문이 불필요 → 관용적으로 파싱.
+  try {
+    return await res.json();
+  } catch {
+    return undefined;
+  }
 };
 const fetchJson: GetJsonFn = async (url) => {
   const res = await fetch(url, { headers: { accept: "application/json" } });
@@ -41,6 +52,21 @@ function statusMatches(match: StatusMatch, body: unknown): boolean {
   return false;
 }
 
+// 상관키(traceRef) 결정 — injected(주입 runId, 현행) vs returned(submit 응답에서 dot-path 추출).
+function resolveTraceRef(correlate: FrontDoorCorrelate | undefined, injected: string, response: unknown): string {
+  if (!correlate || correlate.mode === "injected") return injected;
+  const value = getField(response, correlate.path);
+  if (typeof value !== "string" || value === "") {
+    // 에이전트 응답이 선언된 상관 계약과 불일치 — 침묵 대신 명확히 실패(외부 계약 오류).
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { path: correlate.path, got: value },
+      `front-door submit 응답에서 trace-id(${correlate.path})를 찾지 못했습니다.`,
+    );
+  }
+  return value;
+}
+
 export type DriveStatus = "done" | "failed" | "timeout";
 export interface DriveOutcome {
   // 트레이스를 끌어올 상관키. 이 슬라이스에선 injected(= assay runId); #3 에서 returned(에이전트 자체 id)로 일반화.
@@ -53,8 +79,9 @@ export interface FrontDoorDriveRequest {
   submit: string; // spec.frontDoor.submit (예: "POST /runs")
   payload: Record<string, unknown>;
   completion: FrontDoorCompletion | undefined; // 미지정 = sync
+  correlate: FrontDoorCorrelate | undefined; // 미지정 = injected
   wiring: Record<string, string>; // statusPath 보간 변수({run_id} 등)
-  traceRef: string;
+  traceRef: string; // injected 상관의 기본 상관키(= assay runId)
 }
 
 // front-door 구동(HOW)의 추상화 — submit 후 완료 모델대로 대기. 인프라-비종속 TopologyRuntime(WHERE)의 형제.
@@ -85,17 +112,24 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
   }
 
   async drive(req: FrontDoorDriveRequest): Promise<DriveOutcome> {
-    await this.submit(joinUrl(req.base, methodPath(req.submit).path), req.payload);
-    const status = await this.awaitCompletion(req);
-    return { traceRef: req.traceRef, status };
+    const response = await this.submit(joinUrl(req.base, methodPath(req.submit).path), req.payload);
+    // 상관(#3): injected = 주입한 runId(현행), returned = 에이전트가 응답으로 돌려준 자기 id.
+    const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
+    // returned 면 poll statusPath 도 에이전트 id 로 보간되도록 run_id 를 그 id 로 덮는다(injected 는 동일값 → no-op).
+    const wiring = { ...req.wiring, run_id: traceRef };
+    const status = await this.awaitCompletion(req.completion, req.base, wiring);
+    return { traceRef, status };
   }
 
-  private async awaitCompletion(req: FrontDoorDriveRequest): Promise<DriveStatus> {
-    const completion = req.completion;
+  private async awaitCompletion(
+    completion: FrontDoorCompletion | undefined,
+    base: string,
+    wiring: Record<string, string>,
+  ): Promise<DriveStatus> {
     // sync(또는 미지정): submit 응답이 곧 완료 — 현행 동작.
     if (!completion || completion.mode === "sync") return "done";
     // poll: 상태 엔드포인트를 종료조건(done/failed) 또는 타임아웃까지 폴링.
-    const statusUrl = joinUrl(req.base, interpolatePath(methodPath(completion.statusPath).path, req.wiring));
+    const statusUrl = joinUrl(base, interpolatePath(methodPath(completion.statusPath).path, wiring));
     const start = this.now();
     while (this.now() - start < completion.timeoutMs) {
       const body = await this.getJson(statusUrl);

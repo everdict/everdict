@@ -90,6 +90,7 @@ export class ServiceTopologyBackend implements Backend {
           browser_cdp_url: browser.cdpUrl,
         },
         completion: spec.frontDoor.completion,
+        correlate: spec.frontDoor.correlate,
         wiring,
         traceRef: runId,
       });

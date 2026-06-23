@@ -17,6 +17,7 @@ const baseReq = (over: Partial<FrontDoorDriveRequest>): FrontDoorDriveRequest =>
   submit: "POST /runs",
   payload: { task: "do it" },
   completion: undefined,
+  correlate: undefined,
   wiring: { run_id: "fixed", thread_id: "run-fixed" },
   traceRef: "fixed",
   ...over,
@@ -123,5 +124,58 @@ describe("HttpFrontDoorDriver.drive", () => {
     const outcome = await driver.drive(baseReq({ completion }));
 
     expect(outcome.status).toBe("timeout");
+  });
+});
+
+describe("HttpFrontDoorDriver.drive — 상관(correlate)", () => {
+  it("correlate 미지정이면 injected: traceRef = 주어진 runId(현행)", async () => {
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({ run_id: "agent-xyz" }) });
+    const outcome = await driver.drive(baseReq({ correlate: undefined, traceRef: "fixed" }));
+    expect(outcome.traceRef).toBe("fixed"); // 응답의 agent-xyz 가 아니라 주입한 runId
+  });
+
+  it("correlate returned: submit 응답에서 dot-path 로 에이전트 id 를 추출해 traceRef 로 쓴다", async () => {
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({ data: { id: "agent-9" } }) });
+    const outcome = await driver.drive(baseReq({ correlate: { mode: "returned", path: "data.id" } }));
+    expect(outcome).toEqual({ traceRef: "agent-9", status: "done" });
+  });
+
+  it("correlate returned + poll: 추출한 에이전트 id 로 statusPath 를 보간해 폴링한다", async () => {
+    const polledUrls: string[] = [];
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => ({ run_id: "agent-9" }),
+      getJson: async (url) => {
+        polledUrls.push(url);
+        return { status: "done" };
+      },
+      sleep: async () => {},
+      now: steppingClock(10),
+    });
+
+    const outcome = await driver.drive(
+      baseReq({
+        correlate: { mode: "returned", path: "run_id" },
+        completion: {
+          mode: "poll",
+          statusPath: "GET /runs/{run_id}/status",
+          done: { field: "status", equals: "done" },
+          intervalMs: 5,
+          timeoutMs: 1_000_000,
+        },
+      }),
+    );
+
+    expect(outcome.traceRef).toBe("agent-9");
+    // 주입 runId(fixed)가 아니라 에이전트가 돌려준 agent-9 로 폴링한다.
+    expect(polledUrls[0]).toBe("http://agent:8000/runs/agent-9/status");
+  });
+
+  it("correlate returned: 응답에 상관 필드가 없으면 UpstreamError 로 명확히 실패한다", async () => {
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({}) });
+    const err = await driver
+      .drive(baseReq({ correlate: { mode: "returned", path: "run_id" } }))
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    expect((err as { code?: string }).code).toBe("UPSTREAM_ERROR");
   });
 });

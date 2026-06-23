@@ -48,7 +48,10 @@ touching `service-backend.ts`'s driving logic.
 - **#2 completion — DONE.** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit + await;
   `frontDoor.completion` (`sync` default | `poll` with a `StatusMatch` done/failed matcher) in `@assay/core`;
   dispatch fails a run on completion timeout. `poll` = "hold until an async N-step agent finishes."
-- Next: #3 correlate (wake `frontDoor.trace`) · #1 payload template · #4 target strategy · #5 per-service image pin.
+- **#3 correlate — DONE.** `frontDoor.correlate` (`injected` default = Assay runId | `returned` = extract the
+  agent's own id from the submit response via `correlate.path` dot-path, used for both trace fetch and the poll
+  `statusPath`). `SubmitFn` now returns the response body. Distinct from the still-dormant `frontDoor.trace` endpoint.
+- Next: #1 payload template · #4 target strategy · #5 per-service image pin.
 
 ## Reference impls
 `packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,
