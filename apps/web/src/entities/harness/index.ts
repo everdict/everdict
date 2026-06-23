@@ -1,1 +1,22 @@
-export { harnessSchema, harnessesSchema, type Harness } from './model/schema'
+export {
+  harnessSchema,
+  harnessesSchema,
+  harnessVersionsSchema,
+  harnessSpecSchema,
+  traceSourceSchema,
+  topologyServiceSchema,
+  topologyDependencySchema,
+  topologyTargetSchema,
+  frontDoorSchema,
+  commandTraceSchema,
+  type Harness,
+  type HarnessVersions,
+  type HarnessSpec,
+  type HarnessKind,
+  type TraceSource,
+  type TopologyService,
+  type TopologyDependency,
+  type TopologyTarget,
+  type FrontDoor,
+  type CommandTrace,
+} from './model/schema'

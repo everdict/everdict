@@ -60,6 +60,12 @@ export const controlPlane = {
   submitRun: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/runs', { method: 'POST', body: JSON.stringify(body) }),
   listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),
+  // GET /harnesses/:id — 한 하니스의 인스턴스 버전 태그 목록.
+  getHarness: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(id)}`),
+  // GET /harnesses/:id/:version — resolved HarnessSpec(template + pins). 상세/도식화용.
+  getHarnessSpec: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}`),
   registerHarness: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/harnesses', { method: 'POST', body: JSON.stringify(spec) }),
   validateHarness: <T>(auth: AuthContext, spec: unknown) =>
