@@ -213,6 +213,8 @@ async function main(): Promise<void> {
     // pull 인제스트: 테넌트 OTel/MLflow 에서 트레이스를 당겨 채점. 자격증명은 테넌트 SecretStore(authSecret 이름).
     buildTraceSource,
     secretsFor: runtimeSecretsFor,
+    // 비공개-repo 데이터셋: 케이스 env.source.connectionId → 외부 계정 연결 토큰 resolve(단일 run 과 동일 경로).
+    repoTokenFor: async (tenant, connectionId) => (await connectionStore.tokenFor(tenant, connectionId))?.accessToken,
   });
   // 벤치마크 카탈로그 인입: first-party 벤치마크를 ID 만으로 당겨 테넌트 데이터셋으로 등록. gated 는 HF_TOKEN 시크릿.
   const benchmarkService = new BenchmarkService({

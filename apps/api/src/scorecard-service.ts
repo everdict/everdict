@@ -96,6 +96,9 @@ export interface ScorecardServiceDeps {
   budget?: BudgetTracker; // 케이스마다 admission/settle
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@assay/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(서버 내부 주입)
+  // 비공개 repo 시드용 토큰 resolve — 케이스 env.source.connectionId → 외부 계정 연결 토큰. 단일 run 과 동일(RunService.repoTokenFor).
+  // 데이터셋의 케이스마다 적용 → 비공개-repo 데이터셋을 배치 eval. 토큰은 잡(repoToken)에만 transient.
+  repoTokenFor?: (tenant: string, connectionId: string) => Promise<string | undefined>;
   artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)
   concurrency?: number;
   newId?: () => string;
@@ -255,6 +258,16 @@ export class ScorecardService {
     return record.scorecard;
   }
 
+  // 케이스 repo 시드가 비공개(git + connectionId)면 외부 계정 연결 토큰을 resolve. public/비-repo/미설정이면 undefined.
+  private async resolveRepoToken(tenant: string, evalCase: AgentJob["evalCase"]): Promise<string | undefined> {
+    if (!this.deps.repoTokenFor) return undefined;
+    const env = evalCase.env;
+    if (env.kind !== "repo") return undefined;
+    const src = env.source;
+    if (!("git" in src) || !src.connectionId) return undefined;
+    return this.deps.repoTokenFor(tenant, src.connectionId).catch(() => undefined);
+  }
+
   private async track(
     id: string,
     tenant: string,
@@ -271,11 +284,14 @@ export class ScorecardService {
     // 각 케이스 디스패치에 tenant/spec/judge 모델을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // 초과 시 throw → 배치 실패
+      // 케이스가 비공개 repo(git + connectionId)면 외부 계정 연결 토큰을 resolve 해 잡에 transient 로 싣는다(단일 run 과 동일).
+      const repoToken = await this.resolveRepoToken(tenant, job.evalCase);
       const enriched: AgentJob = {
         ...job,
         tenant,
         ...(harnessSpec ? { harnessSpec } : {}),
         ...(judge ? { judge } : {}),
+        ...(repoToken ? { repoToken } : {}),
       };
       const result = await this.deps.dispatcher.dispatch(enriched);
       this.deps.budget?.settle(tenant, costOf(result));

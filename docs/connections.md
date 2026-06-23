@@ -76,8 +76,11 @@ host+credentials form (GHE/Mattermost).
   "빈 작업트리" (default) vs "Git repo (URL)". For git it shows URL + ref + a **connection picker** populated from
   `GET /connections` (filtered to git providers: github/github-enterprise) so a member selects which connected
   account authenticates a private clone (or "none" for public). Enabled by relaxing `connections:read` to viewer+.
-- **Still open**: scorecard-path token injection (datasets of private-repo cases); image pulls feeding
-  `imagePullSecret` at dispatch (Track B); results posted to GitHub PR/status; Mattermost notifications.
+- **Batch scorecards ✅ (Phase 3c)**: `ScorecardService` resolves each dataset case's `env.source.connectionId`
+  per-case in the dispatch wrapper (same `repoTokenFor` → `connectionStore.tokenFor`), so a dataset of
+  private-repo cases batch-evals with each case authenticated. Mirrors the single-run path exactly.
+- **Still open**: image pulls feeding `imagePullSecret` at dispatch (Track B); results posted to GitHub
+  PR/status; Mattermost notifications.
 
 ## Verified
 - Deterministic (`packages/db/src/connection-store.test.ts`): token encryption round-trip + `list` exposes no
@@ -95,4 +98,5 @@ host+credentials form (GHE/Mattermost).
 - Repo-clone consumption (Phase 3a): `packages/environments/src/repo.test.ts` (private clone injects
   `http.extraheader` via `GIT_CONFIG_*` env, token **not** in argv; public clone has no auth env) +
   `apps/api/src/run-service.test.ts` (`connectionId` → `repoTokenFor` resolved → `job.repoToken`; public/non-git
-  cases never call the resolver).
+  cases never call the resolver). Batch (Phase 3c): `apps/api/src/scorecard-service.test.ts` (per-case
+  `connectionId` → `job.repoToken`; public/non-git cases skip the resolver).

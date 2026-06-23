@@ -188,3 +188,67 @@ describe("ScorecardService.ingestPull", () => {
     expect(done.error?.code).toBe("BAD_REQUEST");
   });
 });
+
+describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스별)", () => {
+  it("케이스 env.source.connectionId → repoTokenFor resolve → 케이스별 job.repoToken; public/비-git 은 미주입", async () => {
+    const seen: Array<{ caseId: string; repoToken?: string }> = [];
+    const cap: Dispatcher = {
+      async dispatch(job) {
+        seen.push({ caseId: job.evalCase.id, ...(job.repoToken !== undefined ? { repoToken: job.repoToken } : {}) });
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [],
+        };
+      },
+    };
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", {
+      id: "priv",
+      version: "1.0.0",
+      tags: [],
+      cases: [
+        {
+          id: "git-priv",
+          env: { kind: "repo", source: { git: "https://github.com/acme/p.git", ref: "main", connectionId: "conn-1" } },
+          task: "t",
+          graders: [],
+          timeoutSec: 60,
+          tags: [],
+        },
+        {
+          id: "files-pub",
+          env: { kind: "repo", source: { files: {} } },
+          task: "t",
+          graders: [],
+          timeoutSec: 60,
+          tags: [],
+        },
+      ],
+    });
+    const store = new InMemoryScorecardStore();
+    const calls: string[] = [];
+    const service = new ScorecardService({
+      dispatcher: cap,
+      store,
+      datasets,
+      newId: () => "sc-priv",
+      repoTokenFor: async (_t, connectionId) => {
+        calls.push(connectionId);
+        return connectionId === "conn-1" ? "gho_sc" : undefined;
+      },
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "priv", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    await waitTerminal(store, "sc-priv");
+    const byCase = Object.fromEntries(seen.map((s) => [s.caseId, s.repoToken]));
+    expect(byCase["git-priv"]).toBe("gho_sc");
+    expect(byCase["files-pub"]).toBeUndefined();
+    expect(calls).toEqual(["conn-1"]); // files 케이스는 resolver 미호출
+  });
+});
