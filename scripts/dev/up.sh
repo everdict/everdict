@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 로컬/외부 풀스택 개발 환경: Keycloak(영속) + 컨트롤플레인 API. 그다음 웹은 핫리로드로 직접 실행.
+# 로컬/외부 풀스택 개발 환경: Postgres(영속) + Keycloak(영속) + 컨트롤플레인 API. 그다음 웹은 핫리로드로 직접 실행.
 #   bash scripts/dev/up.sh   →   pnpm -C apps/web dev   →   http://<host>:3001
 #
 # 외부 접속: scripts/dev/.env (git-ignored)에 ASSAY_PUBLIC_HOST=<Tailscale/LAN IP 또는 도메인> 설정.
@@ -18,6 +18,10 @@ export KC_HOSTNAME="http://${PUBLIC_HOST}:${KC_PORT}"   # Keycloak 정규 호스
 export KEYCLOAK_PORT="$KC_PORT"
 KC_ISSUER="${KC_HOSTNAME}/realms/assay"
 
+echo "▶ Postgres (persistent) — 영속 스토어. healthcheck 통과까지 대기"
+export POSTGRES_PORT="${POSTGRES_PORT:-5433}"   # 5432 는 흔히 점유됨 → 기본 5433
+docker compose -f deploy/postgres/docker-compose.yaml up -d --wait
+
 echo "▶ Keycloak (persistent) — KC_HOSTNAME=${KC_HOSTNAME}"
 docker compose -f deploy/keycloak/docker-compose.yaml up -d
 printf "  realm 대기"
@@ -31,6 +35,9 @@ pnpm --filter "@assay/api..." build >/dev/null
 
 echo "▶ control-plane API on :8787"
 [ -f apps/api/.env ] || { echo "  ✗ apps/api/.env 가 없습니다"; exit 1; }
+grep -qE '^DATABASE_URL=.+' apps/api/.env \
+  || echo "  ⚠ apps/api/.env 에 DATABASE_URL 이 없습니다 → API 가 in-memory 로 떠 데이터가 휘발됩니다." \
+          "(예: DATABASE_URL=postgresql://assay:assay@localhost:${POSTGRES_PORT}/assay)"
 fuser -k 8787/tcp >/dev/null 2>&1 || true; sleep 1
 nohup node --env-file=apps/api/.env apps/api/dist/main.js >/tmp/assay-api.log 2>&1 & disown
 for _ in $(seq 1 30); do curl -sf -m2 http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break; sleep 0.5; done
@@ -38,6 +45,7 @@ for _ in $(seq 1 30); do curl -sf -m2 http://127.0.0.1:8787/healthz >/dev/null 2
 cat <<EOF
 
 ✔ 준비 완료 (public host: ${PUBLIC_HOST})
+  Postgres       : localhost:${POSTGRES_PORT}                (assay/assay/assay · 영속)
   Keycloak admin : ${KC_HOSTNAME}            (admin / admin)
   Control plane  : http://127.0.0.1:8787     (log: /tmp/assay-api.log)
 

@@ -1,0 +1,32 @@
+# 로컬 Postgres (컨트롤플레인 영속 스토어) — apps/api 가 DATABASE_URL 로 붙어 마이그레이션을 자동 적용한다.
+# 이게 없으면(=DATABASE_URL 미설정) API 는 in-memory 로 동작하고 워크스페이스/데이터셋이 재기동 시 휘발된다.
+#
+# 기동: docker compose -f deploy/postgres/docker-compose.yaml up -d --wait   (healthcheck 통과까지 대기)
+#   (scripts/dev/up.sh 가 Keycloak 과 함께 자동으로 띄운다)
+#
+# apps/api 측: DATABASE_URL=postgresql://assay:assay@localhost:${POSTGRES_PORT:-5433}/assay
+#
+# 기본 호스트 포트는 5433(흔한 5432 점유 회피 — Keycloak 8080→8081 과 같은 관례).
+# 5433 도 점유돼 있으면 POSTGRES_PORT 로 바꾸고 DATABASE_URL 의 포트도 맞춘다.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-assay}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-assay}
+      POSTGRES_DB: ${POSTGRES_DB:-assay}
+    ports:
+      # 네이티브 API(node --env-file)가 localhost 로 붙으므로 호스트에 게시한다.
+      - "${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-assay} -d ${POSTGRES_DB:-assay}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      # 영속화: 워크스페이스/데이터셋/스코어카드가 재기동해도 유지된다.
+      # 완전 초기화는: docker compose -f deploy/postgres/docker-compose.yaml down -v
+      - postgres-data:/var/lib/postgresql/data
+
+volumes:
+  postgres-data:
