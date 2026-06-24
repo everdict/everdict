@@ -13,9 +13,12 @@
 > - **D2 — results flow back to the workspace, tagged.** A self-hosted run is a normal workspace run in
 >   `RunStore`/`ScorecardStore`, carrying a **provenance tag** (`ranOn: self-hosted`, `runner=<device>`,
 >   `by=<subject>`) so the team's compare/regression sees it *and* sees it ran on an unmanaged personal host.
-> - **D3 — only the owner dispatches to their runner.** The lease queue is keyed by `(workspace, subject,
->   runnerId)`. A run pinned to my self-hosted runtime leases **only to my runner**; no one else's job ever
->   lands on my machine (my login, my files), and a run there executes **as me**.
+> - **D3 — only the owner dispatches to their runner.** Owner-only is enforced by the dispatcher's owner-check
+>   (`runnerStore.get(submitterSubject, runnerId)`); a non-owner — **including a workspace admin** — targeting
+>   `self:<id>` gets 404. A run pinned to my self-hosted runtime leases **only to my runner**; no one else's job
+>   ever lands on my machine (my login, my files), and a run there executes **as me**. The lease queue is keyed by
+>   `(owner, runnerId)` — workspace-independent, so one runner serves **all** of its owner's workspaces
+>   (cross-workspace); each job keeps its own `tenant` for result/budget attribution.
 > - **D4 — packaging is a CLI subcommand.** `assay runner` (in `apps/cli`) reuses `@assay/agent`'s
 >   `runAgentJob` verbatim. No new app; no GUI (a desktop client is a later, optional slice).
 > - **D5 — transport is MCP.** The runner is an automated client → it rides the existing OAuth/API-key
@@ -103,9 +106,9 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
 ```
 
 - **`SelfHostedBackend`** (`@assay/backends`) — `dispatch(job)` does **not** push to a cluster. It enqueues the
-  job into a **lease queue keyed by `(workspace, subject, runnerId)`** and returns a promise that the matching
-  `submit_result` resolves. `capacity()` = the owner's currently-connected runners' free slots → **0 connected
-  runners ⇒ jobs queue until a runner connects** (natural scale-to-zero), bounded by a lease/queue timeout.
+  job into a **lease queue keyed by `(owner, runnerId)`** (workspace-independent → cross-workspace) and returns a
+  promise that the matching `submit_result` resolves. `capacity()` = `maxConcurrent`; jobs park until a runner
+  leases them, bounded by a lease/queue timeout (no connected runner ⇒ jobs wait then reject — natural scale-to-zero).
 - **`RuntimeDispatcher` branch** — when `placement.target` matches `self:<runnerId>`, resolve it against the
   **submitter's** `RunnerStore` (owner = `principal.subject`), exactly as Phase 3a resolves a `connectionId`
   against the submitter's subject. **Reject** if the runner isn't owned by the submitter (you cannot target
@@ -171,20 +174,19 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
   `enqueue` or `wait_ms` timeout; MCP `lease_job{wait_ms?}` (omit = immediate, back-compat); CLI `--wait-ms` (25s).
 - ✅ **Runner presence in the web** (`e9821cc`) — online/offline dot + label on the account roster, derived from
   `lastSeenAt` freshness (long-poll lease touches it ~every 25s). Page-load-time state (not live-updating).
-- **Deliberately deferred (non-goals — need a product/security decision before building):**
-  - **Desktop GUI client** — a separate Tauri/Electron app; the CLI (`assay runner`) covers the headless case.
-  - **Admin-targeting a member's runner** — sending workspace jobs to someone's *personal* machine needs explicit
-    **opt-in consent** (e.g. a per-runner `shared` flag the owner sets) before an admin may target it. Today: owner-only.
-  - **Cross-workspace leasing** — one physical runner serving multiple of the owner's workspaces; needs the lease key
-    to drop its workspace pin, with the isolation implications that follow. Today: a runner serves the workspace it was
-    selected in.
+- ✅ **Cross-workspace leasing** (`7db1271`) — a runner serves **all** of its owner's workspaces. The lease key
+  dropped its workspace pin → `(owner, runnerId)` (`self:<owner>:<runnerId>`); jobs from any workspace the owner
+  belongs to land in one queue and the runner leases them all. Each job keeps its own `tenant`, so results/budget/
+  notify record to the correct workspace. Owner-check unchanged (owner-only). Live-verified: one runner served
+  `default` + `team-b`, each tagged with its own tenant.
 
-## Non-goals (this pass)
+## Decisions / non-goals
 
-- **Desktop GUI client** — CLI (`assay runner`) first; a Tauri/Electron app is a later slice.
-- **Admin targeting a member's runner** — only the owner dispatches to their own runner (D3). Opt-in sharing is
-  a future consideration with explicit consent.
-- **Cross-user runner sharing / a workspace runner pool** — self-hosted is personal by construction.
+- **Admin targeting a member's runner — NO (settled, owner-only, no override).** A runner is the member's *personal*
+  machine; an admin must **not** be able to send jobs to it. Enforced structurally: `RuntimeDispatcher` owner-checks
+  `runnerStore.get(submitterSubject, runnerId)`, so any non-owner (incl. a workspace admin) targeting `self:<id>`
+  gets 404. No `shared` flag, no admin override.
+- **Desktop GUI client** — CLI (`assay runner`) covers the headless case; a Tauri/Electron app is a separate later effort.
 - **Replacing push backends** — `docker|nomad|k8s|topology` are unchanged; self-hosted is additive.
 
 ## See also
