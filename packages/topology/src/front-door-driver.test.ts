@@ -157,7 +157,37 @@ describe("HttpFrontDoorDriver.drive — 상관(correlate)", () => {
   it("correlate returned: submit 응답에서 dot-path 로 에이전트 id 를 추출해 traceRef 로 쓴다", async () => {
     const driver = new HttpFrontDoorDriver({ submit: async () => ({ data: { id: "agent-9" } }) });
     const outcome = await driver.drive(baseReq({ correlate: { mode: "returned", path: "data.id" } }));
-    expect(outcome).toEqual({ traceRef: "agent-9", status: "done" });
+    // sync → 결과 채널 본문 = submit 응답(sentinel 회수가 읽는다).
+    expect(outcome).toEqual({ traceRef: "agent-9", status: "done", response: { data: { id: "agent-9" } } });
+  });
+
+  it("결과 채널 본문(response): sync 면 submit 응답, poll 이면 완료 상태 본문", async () => {
+    // sync: submit 응답이 곧 결과 채널.
+    const syncDriver = new HttpFrontDoorDriver({ submit: async () => ({ observation: { kind: "browser" } }) });
+    const sync = await syncDriver.drive(baseReq({ completion: undefined }));
+    expect(sync.response).toEqual({ observation: { kind: "browser" } });
+
+    // poll: 완료(done) 상태 본문이 결과 채널(submit 응답이 아니라).
+    const bodies = [{ status: "running" }, { status: "done", observation: { kind: "prompt" } }];
+    let i = 0;
+    const pollDriver = new HttpFrontDoorDriver({
+      submit: async () => ({ ignored: true }),
+      getJson: async () => bodies[i++] ?? { status: "done" },
+      sleep: async () => {},
+      now: steppingClock(10),
+    });
+    const poll = await pollDriver.drive(
+      baseReq({
+        completion: {
+          mode: "poll",
+          statusPath: "GET /runs/{run_id}/status",
+          done: { field: "status", equals: "done" },
+          intervalMs: 5,
+          timeoutMs: 1_000_000,
+        },
+      }),
+    );
+    expect(poll.response).toEqual({ status: "done", observation: { kind: "prompt" } });
   });
 
   it("correlate returned + poll: 추출한 에이전트 id 로 statusPath 를 보간해 폴링한다", async () => {

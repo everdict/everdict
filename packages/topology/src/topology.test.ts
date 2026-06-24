@@ -306,6 +306,71 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(recorded[0]?.minio_prefix).toBe("runs/fixed/");
   });
 
+  it("delivery sentinel: 관측물을 front-door 응답(결과 채널)에서 인라인 회수한다(브라우저 pull 아님)", async () => {
+    // 응답으로 돌아오는 관측물 — 프로비저닝된 브라우저 스냅샷과 다르게 둬서 sentinel 이 응답에서 읽음을 확증.
+    const fromResponse: BrowserSnapshot = {
+      kind: "browser",
+      url: "https://sentinel",
+      dom: "<from-response/>",
+      screenshotRef: "r",
+      console: [],
+    };
+    const fromBrowser: BrowserSnapshot = { kind: "browser", url: "https://pulled", dom: "<pulled/>", console: [] };
+    const submit: SubmitFn = async () => ({ observation: fromResponse });
+    const browser: BrowserEnvHandle = {
+      cdpUrl: "ws://browser/ctx",
+      async snapshot() {
+        return fromBrowser; // sentinel 이면 이 pull 값은 무시돼야 한다
+      },
+      async dispose() {},
+    };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return browser;
+      },
+    };
+    const traceSource: TraceSource = {
+      async fetch() {
+        return [];
+      },
+    };
+    const sentinelSpec: ServiceHarnessSpec = {
+      ...SPEC,
+      target: {
+        kind: "browser",
+        engine: "chromium",
+        lifecycle: "per-case-instance",
+        observe: ["dom"],
+        delivery: { mode: "sentinel", path: "observation" },
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource,
+      specFor: () => sentinelSpec,
+      submit,
+      newRunId: () => "fixed",
+    });
+    const job: AgentJob = {
+      harness: { id: "bu", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "do it",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+
+    const result = await backend.dispatch(job);
+    expect(result.snapshot).toEqual(fromResponse); // 브라우저 pull(fromBrowser)이 아니라 응답에서 회수
+  });
+
   it("트레이스 소스 장애는 run 을 죽이지 않는다 — error 이벤트로 기록하고 스냅샷+채점은 진행", async () => {
     const browserSnap: BrowserSnapshot = { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
     const runtime: TopologyRuntime = {

@@ -141,9 +141,15 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
    **no behavior change** (topology 86/86, incl. the unchanged dispatch tests). Web harness-detail shows the
    delivery mode. `delivery` is `.optional()` (not `.default`) so the resolved-spec output type stays
    backward-compatible (no fixture churn).
-3. **Sentinel delivery on topology (the named gap).** Capture the observation inline and return it via the result
-   channel instead of a post-hoc CDP pull; grade off the returned snapshot. Pure + deterministic-tested; live e2e
-   stays green because `reference` remains the default.
+3. ✅ **Sentinel delivery on topology (the named gap) — DONE.** The observation rides the **result channel** (the
+   front-door HTTP response — the topology analog of the `__ASSAY_RESULT__` stdout sentinel). `DriveOutcome.response`
+   carries the completion body (`sync` = submit response, `poll` = the `done` status body); `delivery.sentinel.path?`
+   is a dot-path into it (absent = the whole body) extracted via the existing eval-free `getField`, then validated
+   with `EnvSnapshotSchema` (malformed → explicit run failure, no silent fallback). `service-backend` passes
+   `outcome.response` to `observe()`. Grades off the returned snapshot — no CDP pull. `reference` stays default, so
+   live e2e is unaffected. Tests: observation-source sentinel (path / whole-body / malformed-throws), front-door
+   `response` (sync=submit, poll=done body), topology integration (browser provisioned but observation read from the
+   response, not the pull).
 4. **Egress delivery + cross-runtime locality (optional).** `egress` push to a named sink; revisit affinity tags
    only if co-location proves insufficient for cross-cluster cases (explicit follow-up, not this pass).
 

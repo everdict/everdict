@@ -218,8 +218,10 @@ end-to-end even when the stand-in front-door emits no GenAI spans and MLflow rej
 **`reference`** (today). `dispatch` calls `observationSourceFor(spec.target?.delivery?.mode ?? "reference")`:
 - **`reference`** (store-fetch) — pull the provisioned target's `snapshot()` (or a `{kind:"prompt"}` snapshot when
   there's no target). The locality-sensitive mode — pairs with judge **co-location** (run the judge near the store).
-- **`sentinel`** — the run returns the observation inline via the result channel (no store hop). *Not yet wired —
-  throws explicitly.*
+- **`sentinel`** — the run returns the observation inline via the **result channel** (the front-door HTTP response;
+  topology analog of the `__ASSAY_RESULT__` sentinel) — no store hop. `DriveOutcome.response` carries the completion
+  body (`sync` = submit response, `poll` = the `done` status body); `delivery.path?` is a dot-path into it (absent =
+  whole body), validated as an `EnvSnapshot` (malformed → explicit run failure). Best for small observations.
 - **`egress`** — the run pushes the observation to a named `sink`. *Not yet wired — throws explicitly.*
 
 Pairs with judge placement/store-locality — see `docs/architecture/judge-placement-locality.md` (this is its slice 2).

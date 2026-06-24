@@ -32,7 +32,9 @@ export type TopologyDependency = z.infer<typeof TopologyDependencySchema>;
 // 짝을 이루는 축 — docs/architecture/judge-placement-locality.md.
 export const ObservationDeliverySchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("reference") }),
-  z.object({ mode: z.literal("sentinel") }),
+  // sentinel — 관측물이 front-door 응답(결과 채널)으로 인라인 반환된다. path = 응답 본문에서 EnvSnapshot 을 꺼낼
+  // dot-path(미지정이면 본문 전체가 곧 EnvSnapshot). correlate.path 와 같은 무-eval 추출.
+  z.object({ mode: z.literal("sentinel"), path: z.string().optional() }),
   z.object({ mode: z.literal("egress"), sink: z.string() }), // 관측물을 밀어 넣을 sink(object store 등)
 ]);
 export type ObservationDelivery = z.infer<typeof ObservationDeliverySchema>;

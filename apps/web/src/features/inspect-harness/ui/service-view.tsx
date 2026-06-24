@@ -93,6 +93,7 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
                 value={
                   target.delivery
                     ? target.delivery.mode +
+                      (target.delivery.path ? ` (${target.delivery.path})` : '') +
                       (target.delivery.sink ? ` → ${target.delivery.sink}` : '')
                     : 'reference (store-fetch)'
                 }

@@ -68,9 +68,11 @@ touching `service-backend.ts`'s driving logic.
 `FrontDoorDriver`=HOW-drive): `ObservationSource` (`observation-source.ts`). `TopologyTarget.delivery`
 (`@assay/core`, `.optional()`) selects `reference` (store-fetch, default = today's `snapshot()`/prompt) |
 `sentinel` (inline via result channel) | `egress` (push to a `sink`). `dispatch` delegates to
-`observationSourceFor(spec.target?.delivery?.mode ?? "reference")`; **unimplemented modes throw explicitly** (no
-silent fallback). Only `reference` is wired — `sentinel`/`egress` are later slices. Pairs with judge
-store-locality (co-locate the judge near the store) — `docs/architecture/judge-placement-locality.md`.
+`observationSourceFor(spec.target?.delivery)`; **unimplemented modes throw explicitly** (no silent fallback).
+`reference` + `sentinel` are wired; `egress` is a later slice. **`sentinel`** reads the observation from the
+**result channel** (`DriveOutcome.response` — `sync` = submit response, `poll` = the `done` status body) via
+`delivery.path?` (dot-path, `getField`) and validates it as an `EnvSnapshot`. Pairs with judge store-locality
+(co-locate the judge near the store) — `docs/architecture/judge-placement-locality.md`.
 
 ## Reference impls
 `packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,

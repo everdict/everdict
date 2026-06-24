@@ -131,9 +131,10 @@ export class ServiceTopologyBackend implements Backend {
         ];
       }
       // 관측(#4 + delivery): delivery.mode 별 ObservationSource 로 관측물 회수. 미설정=reference(store-fetch, 무회귀)
-      // — 타깃 있으면 스냅샷 pull, 없으면 prompt. sentinel/egress 는 후속 슬라이스(미구현 모드는 명시적 throw).
-      const snapshot: EnvSnapshot = await observationSourceFor(spec.target?.delivery?.mode ?? "reference").observe({
+      // — 타깃 있으면 스냅샷 pull, 없으면 prompt. sentinel = outcome.response(결과 채널)에서 인라인 추출. egress=후속.
+      const snapshot: EnvSnapshot = await observationSourceFor(spec.target?.delivery).observe({
         target,
+        response: outcome.response,
       });
 
       // 케이스가 그레이더를 지정하면 그것으로(dom-contains/url-matches 등), 아니면 trace 기반 기본값.

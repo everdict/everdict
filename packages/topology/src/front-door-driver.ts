@@ -59,8 +59,8 @@ export function interpolateTemplate(
   return out;
 }
 
-// 상태 응답 JSON 에서 dot-path 필드를 안전하게 읽는다(eval 금지).
-function getField(obj: unknown, path: string): unknown {
+// 상태 응답 JSON 에서 dot-path 필드를 안전하게 읽는다(eval 금지). sentinel 관측물 추출도 이걸 재사용.
+export function getField(obj: unknown, path: string): unknown {
   return path.split(".").reduce<unknown>((acc, key) => {
     if (acc !== null && typeof acc === "object") return (acc as Record<string, unknown>)[key];
     return undefined;
@@ -93,6 +93,9 @@ export interface DriveOutcome {
   // 트레이스를 끌어올 상관키. 이 슬라이스에선 injected(= assay runId); #3 에서 returned(에이전트 자체 id)로 일반화.
   traceRef: string;
   status: DriveStatus;
+  // 결과 채널 본문 — sync 면 submit 응답, poll 면 완료(done) 상태 본문. sentinel 관측물 회수가 여기서 추출한다.
+  // optional: fire-and-forget 등 응답이 없는 커스텀 driver 도 허용(그 경우 sentinel 회수는 형식 불일치로 명확히 실패).
+  response?: unknown;
 }
 
 export interface FrontDoorDriveRequest {
@@ -138,26 +141,27 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
     // returned 면 poll statusPath 도 에이전트 id 로 보간되도록 run_id 를 그 id 로 덮는다(injected 는 동일값 → no-op).
     const wiring = { ...req.wiring, run_id: traceRef };
-    const status = await this.awaitCompletion(req.completion, req.base, wiring);
-    return { traceRef, status };
+    const completion = await this.awaitCompletion(req.completion, req.base, wiring);
+    // 결과 채널 본문: poll 이면 완료 상태 본문, sync 면 submit 응답. sentinel 회수가 이걸 읽는다.
+    return { traceRef, status: completion.status, response: completion.body ?? response };
   }
 
   private async awaitCompletion(
     completion: FrontDoorCompletion | undefined,
     base: string,
     wiring: Record<string, string>,
-  ): Promise<DriveStatus> {
-    // sync(또는 미지정): submit 응답이 곧 완료 — 현행 동작.
-    if (!completion || completion.mode === "sync") return "done";
-    // poll: 상태 엔드포인트를 종료조건(done/failed) 또는 타임아웃까지 폴링.
+  ): Promise<{ status: DriveStatus; body: unknown }> {
+    // sync(또는 미지정): submit 응답이 곧 완료 — 현행 동작. 결과 본문은 호출부의 submit 응답을 쓴다(body=undefined).
+    if (!completion || completion.mode === "sync") return { status: "done", body: undefined };
+    // poll: 상태 엔드포인트를 종료조건(done/failed) 또는 타임아웃까지 폴링. 완료 본문을 결과 채널로 돌려준다.
     const statusUrl = joinUrl(base, interpolatePath(methodPath(completion.statusPath).path, wiring));
     const start = this.now();
     while (this.now() - start < completion.timeoutMs) {
       const body = await this.getJson(statusUrl);
-      if (statusMatches(completion.done, body)) return "done";
-      if (completion.failed && statusMatches(completion.failed, body)) return "failed";
+      if (statusMatches(completion.done, body)) return { status: "done", body };
+      if (completion.failed && statusMatches(completion.failed, body)) return { status: "failed", body };
       await this.sleep(completion.intervalMs);
     }
-    return "timeout";
+    return { status: "timeout", body: undefined };
   }
 }
