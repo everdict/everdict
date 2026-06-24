@@ -25,6 +25,7 @@ export const judgeSpecSchema = z
     passThreshold: z.number().optional(),
     // harness 종류
     harness: z.object({ id: z.string(), version: z.string() }).optional(),
+    runtime: z.string().optional(), // harness judge 실행 런타임(없으면 산출 run 과 co-locate)
     tags: z.array(z.string()).optional(),
   })
   .passthrough()

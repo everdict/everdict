@@ -2,8 +2,10 @@ import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 
 import { RegisterJudgeForm } from '@/features/register-judge'
+import { runtimesSchema } from '@/entities/runtime'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
+import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -12,8 +14,16 @@ export const dynamic = 'force-dynamic'
 
 export default async function NewJudgePage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
-  const { principal } = await currentPrincipal()
+  const { principal, ctx } = await currentPrincipal()
   const allowed = can(principal?.roles, 'judges:write')
+
+  // harness judge 의 런타임 셀렉터용 — 실패해도 폼은 뜬다(빈 목록 = co-locate/기본만).
+  let runtimes: { id: string }[] = []
+  try {
+    runtimes = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
+  } catch {
+    runtimes = []
+  }
 
   return (
     <div className="space-y-6">
@@ -32,7 +42,7 @@ export default async function NewJudgePage({ params }: { params: Promise<{ works
       </div>
       {allowed ? (
         <Card className="p-5">
-          <RegisterJudgeForm />
+          <RegisterJudgeForm runtimes={runtimes} />
         </Card>
       ) : (
         <EmptyState

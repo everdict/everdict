@@ -5,7 +5,7 @@ same ownership/lifecycle as harnesses and datasets. A judge is one of two kinds:
 
 - **`model`** — a function that calls an **LLM/VLM** directly: `{ model, rubric, inputs, provider, passThreshold }`.
   Judges from the trace (and optionally DOM/screenshot → VLM) against a rubric → `{pass, score, reason}`.
-- **`harness`** — delegates judging to a **registered harness** (an agent judge): `{ harness: {id, version}, rubric? }`.
+- **`harness`** — delegates judging to a **registered harness** (an agent judge): `{ harness: {id, version}, rubric?, runtime? }`.
 
 This is the **agent-judge** step of the pipeline:
 ```
@@ -65,6 +65,20 @@ selected judge never silently vanishes, and `UpstreamError`s become skip scores 
 - **`harness`** → `harnessComplete`: dispatches the referenced harness (same path as a run) with the judge prompt
   as its task, then extracts the verdict from that agent's own trace (`traceToText` → tolerant JSON parse). The
   judge-agent must emit a JSON verdict as its output; otherwise it's a skip. (One agent run per case × judge.)
+
+### Harness-judge placement (`runtime`) — store-locality (co-locate)
+A `harness` judge dispatches a judging agent, so **where** it runs matters when the observation it inspects lives in
+a store. `HarnessJudgeSpec.runtime?` (a tenant RuntimeSpec id) threads into the judge job's `placement.target` —
+the **same** `runtime → placement.target → RuntimeDispatcher` path the scorecard run uses. Resolution:
+- **`runtime` set** → route the judge to that runtime (overrides co-location).
+- **`runtime` absent** → **co-locate with the producing run**: the judge inherits the placement that produced the
+  observation (the scorecard's `runtime`/per-case placement, threaded into `applyJudges`), so judging happens where
+  the artifacts already are. Trace **ingest** has no producing run → falls back to the default backend.
+- An unregistered `runtime` is **not** rejected at registration (matching the scorecard selector); the dispatch
+  fails and degrades to a **visible skip** score. `model` judges run in-process and ignore `runtime`.
+
+This is slice 1 of `docs/architecture/judge-placement-locality.md` (pluggable observation delivery —
+`reference`/`sentinel`/`egress` — is the later topology work).
 
 `passThreshold` maps `score → pass` (model). The transport is injected at the service boundary (`JudgeRunner`),
 so the wiring is deterministically testable with a fake; real provider/agent calls run only when keys/dispatch

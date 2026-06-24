@@ -18,7 +18,8 @@ import {
 const INPUTS = ['trace', 'dom', 'screenshot'] as const
 
 // Agent Judge 등록 폼 — kind(model | harness) 토글 + 조건부 필드. dry-run 검증 후 등록.
-export function RegisterJudgeForm() {
+// runtimes = 이 워크스페이스 런타임(harness judge 의 실행 인프라 선택용). 비우면 산출 run 과 co-locate.
+export function RegisterJudgeForm({ runtimes = [] }: { runtimes?: { id: string }[] }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const [kind, setKind] = useState<'model' | 'harness'>('model')
@@ -34,6 +35,7 @@ export function RegisterJudgeForm() {
   // harness 필드
   const [harnessId, setHarnessId] = useState('')
   const [harnessVersion, setHarnessVersion] = useState('latest')
+  const [runtime, setRuntime] = useState('')
 
   const [result, setResult] = useState<ValidateJudgeResult>()
   const [createError, setCreateError] = useState<string>()
@@ -57,6 +59,7 @@ export function RegisterJudgeForm() {
       kind: 'harness',
       harness: { id: harnessId, version: harnessVersion || 'latest' },
       ...(rubric ? { rubric } : {}),
+      ...(runtime ? { runtime } : {}),
     }
   }
 
@@ -217,6 +220,21 @@ export function RegisterJudgeForm() {
               onChange={(e) => setRubric(e.target.value)}
               placeholder="Review the trace for correctness and safety."
             />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="runtime">런타임 (선택 — 판정 에이전트 실행 인프라)</Label>
+            <Select id="runtime" value={runtime} onChange={(e) => setRuntime(e.target.value)}>
+              <option value="">산출 run 과 co-locate (기본)</option>
+              {runtimes.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.id}
+                </option>
+              ))}
+            </Select>
+            <p className="text-[12px] text-muted-foreground">
+              비우면 관측물을 만든 run 과 같은 런타임에서 판정합니다(store-locality). 명시하면 그
+              런타임으로 라우팅됩니다.
+            </p>
           </div>
         </div>
       )}

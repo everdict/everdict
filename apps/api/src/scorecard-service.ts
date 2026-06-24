@@ -12,6 +12,7 @@ import {
   type JudgeSpec,
   type MetricSpec,
   NotFoundError,
+  type Placement,
   ScoreSchema,
   type Scorecard,
   type Suite,
@@ -311,7 +312,8 @@ export class ScorecardService {
         : dataset.cases;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
       const scorecard = await runSuite(suite, harnessVersion, dispatch, { concurrency: this.concurrency });
-      await this.applyJudges(tenant, dataset, scorecard.results, judges); // 트레이스 → judge 점수(컨트롤플레인)
+      // runtime = 산출 run 의 배치 → judge 를 같은 런타임에 co-locate(관측물 옆에서 판정). ingest 경로엔 산출 run 없음.
+      await this.applyJudges(tenant, dataset, scorecard.results, judges, runtime); // 트레이스 → judge 점수(컨트롤플레인)
       await this.applyMetrics(tenant, scorecard.results, metrics); // 등록 metric → 합격규칙 점수(judge 뒤: judge 점수에도 임계 가능)
       await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
       const summary = summarizeScorecard(scorecard);
@@ -448,6 +450,7 @@ export class ScorecardService {
     dataset: Dataset,
     results: CaseResult[],
     judges: Array<{ id: string; version: string }>,
+    runtime?: string, // 산출 run 의 런타임(co-locate 용). ingest 경로는 산출 run 이 없어 undefined.
   ): Promise<void> {
     if (judges.length === 0 || !this.deps.judges || !this.deps.judgeRunner) return;
     const registry = this.deps.judges;
@@ -463,8 +466,13 @@ export class ScorecardService {
       for (const result of results) {
         const evalCase = caseById.get(result.caseId);
         if (!evalCase) continue;
+        // 산출 run 의 placement 재구성(track 의 케이스 주입과 동일): runtime 선택 시 target 으로 덮어쓴다.
+        // harness judge 는 spec.runtime 이 없으면 이걸 상속해 관측물 옆에서 판정(co-locate).
+        const runPlacement: Placement | undefined = runtime
+          ? { ...evalCase.placement, target: runtime }
+          : evalCase.placement;
         const ctx: GradeContext = { case: evalCase, trace: result.trace, snapshot: result.snapshot };
-        result.scores.push(await runner.run(spec, tenant, ctx));
+        result.scores.push(await runner.run(spec, tenant, ctx, runPlacement));
       }
     }
   }

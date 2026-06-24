@@ -1,4 +1,14 @@
-import type { AgentJob, CaseResult, EvalCase, GradeContext, Grader, HarnessSpec, JudgeSpec, Score } from "@assay/core";
+import type {
+  AgentJob,
+  CaseResult,
+  EvalCase,
+  GradeContext,
+  Grader,
+  HarnessSpec,
+  JudgeSpec,
+  Placement,
+  Score,
+} from "@assay/core";
 import {
   type JudgeCompletion,
   JudgeGrader,
@@ -12,7 +22,8 @@ import type { HarnessInstanceRegistry, ModelRegistry } from "@assay/registry";
 // judge 실행기 — JudgeSpec + tenant + GradeContext(트레이스) → Score. 컨트롤플레인이 트레이스 기반으로 판정.
 // model(anthropic/openai)·harness 모두 modelJudge(전송)로 통일 — 전송만 다르다(API 호출 / 에이전트 디스패치).
 export interface JudgeRunner {
-  run(spec: JudgeSpec, tenant: string, ctx: GradeContext): Promise<Score>;
+  // placement = 산출 run 의 배치(관측물이 있는 곳). harness judge 는 spec.runtime 우선, 없으면 이걸 상속(co-locate).
+  run(spec: JudgeSpec, tenant: string, ctx: GradeContext, placement?: Placement): Promise<Score>;
 }
 
 // 여러 judge 를 요약에서 구분하기 위한 메트릭 키.
@@ -55,7 +66,7 @@ async function resolveJudgeHarness(
 // 기본 구현: model 은 테넌트 시크릿 키로 프로바이더 호출(anthropic/openai), harness 는 참조 에이전트를 띄워 판정.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
-    async run(spec, tenant, ctx) {
+    async run(spec, tenant, ctx, placement) {
       // 1) 전송 선택. 키/디스패처 없으면 skip(사유 명시).
       let complete: JudgeCompletion;
       if (spec.kind === "harness") {
@@ -63,6 +74,9 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         const dispatch = deps.dispatch;
         const ref = spec.harness;
         const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref);
+        // 배치 결정: spec.runtime(명시) 우선 → 없으면 산출 run 의 placement 상속(co-locate, 관측물 옆에서 판정).
+        // 둘 다 없으면 placement 없음(기본 백엔드). 미등록 런타임이면 디스패처가 throw → 아래 try/catch 가 skip 처리.
+        const judgePlacement: Placement | undefined = spec.runtime ? { target: spec.runtime } : placement;
         complete = harnessComplete({
           dispatch: async (task) => {
             const evalCase: EvalCase = {
@@ -72,6 +86,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
               graders: [],
               timeoutSec: 300,
               tags: ["judge"],
+              ...(judgePlacement ? { placement: judgePlacement } : {}),
             };
             const job: AgentJob = {
               evalCase,

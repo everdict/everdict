@@ -31,6 +31,9 @@ export const HarnessJudgeSpecSchema = z.object({
   description: z.string().optional(),
   harness: z.object({ id: z.string(), version: z.string() }),
   rubric: z.string().optional(),
+  // 판정 에이전트를 띄울 테넌트 Runtime id(placement.target 으로 라우팅). 없으면 산출 run 과 co-locate
+  // (관측물을 만든 run 의 placement 를 상속). 미등록 런타임이면 디스패치가 visible skip 으로 떨어진다.
+  runtime: z.string().optional(),
   tags: z.array(z.string()).default([]),
 });
 export type HarnessJudgeSpec = z.infer<typeof HarnessJudgeSpecSchema>;

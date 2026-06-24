@@ -115,4 +115,35 @@ describe("defaultJudgeRunner", () => {
     const score = await runner.run(harnessSpec, "acme", ctx);
     expect(score.detail).toContain("skipped");
   });
+
+  // --- 런타임 선택 + co-locate (slice 1) ---
+  const harnessResult: CaseResult = {
+    caseId: "judge",
+    harness: "claude-code@1",
+    trace: [{ t: 0, kind: "message", role: "assistant", text: '{"pass":true,"score":0.5,"reason":"ok"}' }],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores: [],
+  };
+
+  it("harness judge: spec.runtime 이 placement.target 으로 디스패치된다(명시 선택)", async () => {
+    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(harnessResult));
+    const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
+    // 산출 placement(rt-run)가 있어도 spec.runtime(rt-judge)이 우선한다.
+    await runner.run({ ...harnessSpec, runtime: "rt-judge" }, "acme", ctx, { target: "rt-run" });
+    expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toEqual({ target: "rt-judge" });
+  });
+
+  it("harness judge: spec.runtime 없으면 산출 run 의 placement 를 상속한다(co-locate)", async () => {
+    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(harnessResult));
+    const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
+    await runner.run(harnessSpec, "acme", ctx, { target: "rt-near-store", os: "linux" });
+    expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toEqual({ target: "rt-near-store", os: "linux" });
+  });
+
+  it("harness judge: spec.runtime 도 산출 placement 도 없으면 placement 없음(기본 백엔드)", async () => {
+    const dispatch = vi.fn((_job: AgentJob) => Promise.resolve(harnessResult));
+    const runner = defaultJudgeRunner({ secretsFor: async () => ({}), dispatch });
+    await runner.run(harnessSpec, "acme", ctx);
+    expect(dispatch.mock.calls[0]?.[0]?.evalCase.placement).toBeUndefined();
+  });
 });

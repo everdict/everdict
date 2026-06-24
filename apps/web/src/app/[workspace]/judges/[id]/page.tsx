@@ -86,10 +86,13 @@ export default async function JudgeDetailPage({
             )}
           </>
         ) : (
-          <Prop
-            label="harness"
-            value={judge.harness ? `${judge.harness.id}@${judge.harness.version}` : '—'}
-          />
+          <>
+            <Prop
+              label="harness"
+              value={judge.harness ? `${judge.harness.id}@${judge.harness.version}` : '—'}
+            />
+            <Prop label="런타임" value={judge.runtime ?? 'co-locate (산출 run)'} />
+          </>
         )}
       </Card>
 
