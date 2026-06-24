@@ -800,9 +800,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   // 잡을 가져가(lease) 로컬 실행 후 결과를 회신(submit/fail)한다. 러너 토큰만 — 일반 자격증명은 거부.
   if (deps.runnerHub) {
     const hub = deps.runnerHub;
-    // (workspace, owner=subject, runnerId) — 디스패처가 self: 잡을 파킹한 키와 동일. runnerId 는 토큰에서.
+    // (owner=subject, runnerId) — 디스패처가 self: 잡을 파킹한 키와 동일. runnerId 는 토큰에서.
+    // 워크스페이스 무관: 한 러너가 소유자가 속한 여러 워크스페이스의 잡을 받는다(크로스 워크스페이스).
     const runnerKey = (): SelfHostedKey | undefined =>
-      principal.runnerId ? { tenant: ws, owner: principal.subject, runnerId: principal.runnerId } : undefined;
+      principal.runnerId ? { owner: principal.subject, runnerId: principal.runnerId } : undefined;
     const NEED_RUNNER = "FORBIDDEN: 러너 자격증명(rnr_ 페어링 토큰)이 필요합니다.";
 
     server.registerTool(

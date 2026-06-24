@@ -124,8 +124,8 @@ describe("RuntimeDispatcher", () => {
     const { d, seen, backends, resolveSelfRunner } = selfDeps(true);
     await d.dispatch(selfJob("self:dev-laptop", "u-alice"));
     expect(resolveSelfRunner).toHaveBeenCalledWith("u-alice", "dev-laptop");
-    expect(backends.has("self:acme:u-alice:dev-laptop")).toBe(true);
-    expect(seen[0]?.evalCase.placement?.target).toBe("self:acme:u-alice:dev-laptop");
+    expect(backends.has("self:u-alice:dev-laptop")).toBe(true);
+    expect(seen[0]?.evalCase.placement?.target).toBe("self:u-alice:dev-laptop");
   });
 
   it("self: 러너가 미소유면 NOT_FOUND(남의 러너 타깃 거부 — 존재 누설 없음)", async () => {

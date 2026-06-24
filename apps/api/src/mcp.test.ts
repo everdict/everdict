@@ -281,7 +281,7 @@ describe("MCP tools", () => {
 
   it("runner 프로토콜: 파킹된 잡을 lease → submit_job_result 로 회신 → 디스패치 promise resolve", async () => {
     const deps = harness();
-    const key = { tenant: "acme", owner: "u-alice", runnerId: "laptop" };
+    const key = { owner: "u-alice", runnerId: "laptop" };
     const parkedJob: AgentJob = {
       evalCase: {
         id: "c1",

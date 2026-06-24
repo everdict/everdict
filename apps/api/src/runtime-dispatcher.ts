@@ -38,7 +38,8 @@ export class RuntimeDispatcher implements Dispatcher {
           { runnerId, resource: "runner" },
           "셀프호스티드 러너를 찾을 수 없습니다 — 내가 소유한 러너만 타깃할 수 있습니다.",
         );
-      const key: SelfHostedKey = { tenant, owner, runnerId };
+      // 키에 tenant 없음 — 러너는 소유자의 여러 워크스페이스 잡을 한 큐에서 받는다(크로스 워크스페이스). 잡이 tenant 를 보유.
+      const key: SelfHostedKey = { owner, runnerId };
       const name = selfHostedBackendName(key);
       if (!this.deps.backends.has(name)) this.deps.backends.register(name, this.deps.buildSelfHostedBackend(key));
       return this.deps.inner.dispatch({

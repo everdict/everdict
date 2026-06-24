@@ -43,39 +43,50 @@ process.on("exit", cleanup);
 try {
   await sleep(2500); // 러너 MCP 연결 대기
 
-  // 3) runtime=self:<id> 로 run 제출. scripted 하니스 — 로컬, 외부 의존 없음(이 머신에서 실행).
-  const submitted = await api("/runs", {
-    method: "POST",
-    body: JSON.stringify({
-      harness: { id: "scripted", version: "0" },
-      case: {
-        id: "e2e-1",
-        env: { kind: "repo", source: { files: {} } },
-        task: "say hi",
-        graders: [{ id: "steps" }],
-        timeoutSec: 120,
-        tags: ["e2e"],
-        placement: { target: `self:${runner.id}` }, // ← "런타임만 바꿔" — 내 로컬 호스트
-      },
-    }),
-  });
-  console.log(`▶ submitted run ${submitted.id} → self:${runner.id}`);
+  // 한 워크스페이스(x-assay-tenant 헤더)에서 runtime=self:<id> 로 run 을 돌리고 결과를 검증한다.
+  // scripted 하니스 — 로컬, 외부 의존 없음(이 머신에서 실행). dev 폴백 subject="dev" 라 워크스페이스가 달라도 owner 동일.
+  const runOnSelf = async (workspace) => {
+    const wsHeaders = { "x-assay-tenant": workspace };
+    const submitted = await api("/runs", {
+      method: "POST",
+      headers: wsHeaders,
+      body: JSON.stringify({
+        harness: { id: "scripted", version: "0" },
+        case: {
+          id: `e2e-${workspace}`,
+          env: { kind: "repo", source: { files: {} } },
+          task: "say hi",
+          graders: [{ id: "steps" }],
+          timeoutSec: 120,
+          tags: ["e2e"],
+          placement: { target: `self:${runner.id}` }, // ← "런타임만 바꿔" — 내 로컬 호스트
+        },
+      }),
+    });
+    console.log(`▶ [${workspace}] submitted run ${submitted.id} → self:${runner.id}`);
+    let rec;
+    for (let i = 0; i < 60; i++) {
+      await sleep(1000);
+      rec = await api(`/runs/${submitted.id}`, { headers: wsHeaders });
+      if (rec.status === "succeeded" || rec.status === "failed") break;
+    }
+    if (rec.status !== "succeeded") throw new Error(`[${workspace}] run ${rec.status}: ${JSON.stringify(rec.error)}`);
+    const prov = rec.result?.provenance;
+    if (prov?.ranOn !== "self-hosted" || prov.runner !== runner.id || prov.by !== "dev")
+      throw new Error(`[${workspace}] ✗ 프로비넌스 불일치: ${JSON.stringify(prov)}`);
+    console.log(`✓ [${workspace}] run ${rec.id} (tenant=${rec.tenant}) ← 같은 러너(${prov.runner})에서 실행, 태그됨`);
+    return rec;
+  };
 
-  // 4) 폴링 → succeeded + 프로비넌스 태그.
-  let rec;
-  for (let i = 0; i < 60; i++) {
-    await sleep(1000);
-    rec = await api(`/runs/${submitted.id}`);
-    if (rec.status === "succeeded" || rec.status === "failed") break;
-  }
-  if (rec.status !== "succeeded") throw new Error(`run ${rec.status}: ${JSON.stringify(rec.error)}`);
+  // 3) 기본 워크스페이스에서 1건.
+  await runOnSelf("default");
 
-  const prov = rec.result?.provenance;
-  console.log("▶ provenance:", JSON.stringify(prov));
-  if (prov?.ranOn !== "self-hosted") throw new Error("✗ 프로비넌스 태그 누락(ranOn !== self-hosted)");
-  if (prov.runner !== runner.id || prov.by !== "dev") throw new Error("✗ 프로비넌스 runner/by 불일치");
+  // 4) 크로스 워크스페이스: 같은 러너가 다른 워크스페이스(team-b)의 잡도 받는다(러너는 소유자의 여러 워크스페이스를 한 큐로).
+  const other = await runOnSelf("team-b");
+  if (other.tenant !== "team-b") throw new Error("✗ 두 번째 run 의 워크스페이스가 team-b 가 아님");
+
   console.log(
-    `✓ PASS — run ${rec.id} 가 셀프호스티드 러너(${prov.runner}, by ${prov.by})에서 실행되고 워크스페이스에 태그됨`,
+    `✓ PASS — 한 러너(${runner.id})가 default + team-b 두 워크스페이스의 잡을 수행하고 각 워크스페이스에 태그됨`,
   );
 } finally {
   cleanup();

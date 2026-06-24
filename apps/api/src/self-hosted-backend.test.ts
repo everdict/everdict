@@ -22,7 +22,7 @@ const job: AgentJob = {
   harness: { id: "scripted", version: "0" },
   tenant: "acme",
 };
-const key: SelfHostedKey = { tenant: "acme", owner: "u-alice", runnerId: "laptop" };
+const key: SelfHostedKey = { owner: "u-alice", runnerId: "laptop" };
 
 describe("SelfHostedBackend", () => {
   it("dispatch 는 hub 에 파킹하고, 러너 complete 시 프로비넌스(ranOn:self-hosted)를 스탬프해 resolve", async () => {

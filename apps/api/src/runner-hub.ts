@@ -1,15 +1,16 @@
 import { randomUUID } from "node:crypto";
 import { type AgentJob, type CaseResult, UpstreamError } from "@assay/core";
 
-// 셀프호스티드 러너 디스패치 키 — 잡이 흘러갈 러너의 정체성. lease 큐는 (tenant, owner, runnerId)로 키된다(D3).
+// 셀프호스티드 러너 디스패치 키 — 잡이 흘러갈 러너의 정체성. lease 큐는 (owner, runnerId)로 키된다(D3).
+// ⚠️ 워크스페이스(tenant)는 키에 넣지 않는다 — 러너는 소유자가 속한 여러 워크스페이스의 잡을 한 큐에서 받는다
+// (크로스 워크스페이스). 잡 자신이 tenant 를 들고 다니므로 결과는 올바른 워크스페이스에 기록된다.
 export interface SelfHostedKey {
-  tenant: string;
   owner: string; // 러너 소유자 = principal.subject
   runnerId: string;
 }
 
 export function selfHostedBackendName(key: SelfHostedKey): string {
-  return `self:${key.tenant}:${key.owner}:${key.runnerId}`;
+  return `self:${key.owner}:${key.runnerId}`;
 }
 
 // 러너가 lease 로 가져가는 잡 한 건(MCP lease_job 응답의 코어).

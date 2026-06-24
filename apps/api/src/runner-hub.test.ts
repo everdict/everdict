@@ -14,8 +14,8 @@ const job = (id: string): AgentJob => ({
   harness: { id: "scripted", version: "0" },
   tenant: "acme",
 });
-const keyA: SelfHostedKey = { tenant: "acme", owner: "u-alice", runnerId: "laptop" };
-const keyB: SelfHostedKey = { tenant: "acme", owner: "u-bob", runnerId: "laptop" };
+const keyA: SelfHostedKey = { owner: "u-alice", runnerId: "laptop" };
+const keyB: SelfHostedKey = { owner: "u-bob", runnerId: "laptop" };
 
 describe("RunnerHub", () => {
   it("enqueue 파킹 → lease 가져가기 → complete 가 dispatch promise 를 결과로 resolve", async () => {
