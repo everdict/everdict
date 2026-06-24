@@ -88,6 +88,15 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
               {target.engine && <Field label="엔진" value={target.engine} />}
               {target.lifecycle && <Field label="수명주기" value={target.lifecycle} />}
               {target.extension && <Field label="익스텐션" value={target.extension.ref} />}
+              <Field
+                label="관측물 전달"
+                value={
+                  target.delivery
+                    ? target.delivery.mode +
+                      (target.delivery.sink ? ` → ${target.delivery.sink}` : '')
+                    : 'reference (store-fetch)'
+                }
+              />
             </dl>
             {target.observe.length > 0 && (
               <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-4 py-3">

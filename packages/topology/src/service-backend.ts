@@ -22,6 +22,7 @@ import {
   interpolateTemplate,
 } from "./front-door-driver.js";
 import { applyImagePins } from "./image-pins.js";
+import { observationSourceFor } from "./observation-source.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
 
 // 하위호환 re-export — 기존 import { type SubmitFn } from "./service-backend.js" 유지.
@@ -129,8 +130,11 @@ export class ServiceTopologyBackend implements Backend {
           { t: 0, kind: "error", message: `trace fetch 실패: ${err instanceof Error ? err.message : String(err)}` },
         ];
       }
-      // 관측(#4): 타깃이 있으면 브라우저 스냅샷, 없으면 무대 없음 → prompt 스냅샷(1차 신호는 trace, prompt-env 와 동일).
-      const snapshot: EnvSnapshot = target ? await target.snapshot() : { kind: "prompt", output: "" };
+      // 관측(#4 + delivery): delivery.mode 별 ObservationSource 로 관측물 회수. 미설정=reference(store-fetch, 무회귀)
+      // — 타깃 있으면 스냅샷 pull, 없으면 prompt. sentinel/egress 는 후속 슬라이스(미구현 모드는 명시적 throw).
+      const snapshot: EnvSnapshot = await observationSourceFor(spec.target?.delivery?.mode ?? "reference").observe({
+        target,
+      });
 
       // 케이스가 그레이더를 지정하면 그것으로(dom-contains/url-matches 등), 아니면 trace 기반 기본값.
       const graders =

@@ -212,6 +212,18 @@ fetch failure (auth, transient down, harness emitted no spans) is recorded as a 
 (visible, not silently lost) and grading proceeds over the snapshot. This is why the K8s/kind live e2e completes
 end-to-end even when the stand-in front-door emits no GenAI spans and MLflow rejects the pull.
 
+### Observation delivery (`target.delivery`) — pluggable
+*How* the observation reaches the grader/judge is a seam (`ObservationSource`, the `HOW-observe` sibling of
+`TopologyRuntime`/`FrontDoorDriver`). `TopologyTarget.delivery` (`@assay/core`) selects the mode; absent =
+**`reference`** (today). `dispatch` calls `observationSourceFor(spec.target?.delivery?.mode ?? "reference")`:
+- **`reference`** (store-fetch) — pull the provisioned target's `snapshot()` (or a `{kind:"prompt"}` snapshot when
+  there's no target). The locality-sensitive mode — pairs with judge **co-location** (run the judge near the store).
+- **`sentinel`** — the run returns the observation inline via the result channel (no store hop). *Not yet wired —
+  throws explicitly.*
+- **`egress`** — the run pushes the observation to a named `sink`. *Not yet wired — throws explicitly.*
+
+Pairs with judge placement/store-locality — see `docs/architecture/judge-placement-locality.md` (this is its slice 2).
+
 ## Live validation (Nomad)
 `scripts/live/service-topology-nomad.mjs` runs a full service-topology case on a real Nomad cluster:
 warm front-door deployed as a Nomad service job → endpoint discovered from the alloc → per-case headless

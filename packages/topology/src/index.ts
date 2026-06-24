@@ -89,3 +89,10 @@ export {
   interpolateTemplate,
 } from "./front-door-driver.js";
 export { applyImagePins } from "./image-pins.js";
+export {
+  type ObservationSource,
+  type ObservationTarget,
+  type ObserveRequest,
+  observationSourceFor,
+  referenceObservationSource,
+} from "./observation-source.js";

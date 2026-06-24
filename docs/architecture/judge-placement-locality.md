@@ -132,9 +132,15 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
    parity**: judge create form + `create_judge`/`validate_judge` already take a spec — add the `runtime` selector
    (web) and field (MCP), validated against the tenant's runtimes. No topology change. Concrete, precedented,
    immediate value. Tests: runner co-locates vs overrides; ingest path falls back; viewer/member gates unchanged.
-2. **Delivery-mode contract + `ObservationSource` seam (D3 scaffolding).** Add `TopologyTarget.delivery`
-   (+ template mirror); refactor `service-backend.ts`'s inline `snapshot()` into the `reference` impl behind
-   `ObservationSource`. Default `reference` = **no behavior change** (regression-tested).
+2. ✅ **Delivery-mode contract + `ObservationSource` seam (D3 scaffolding) — DONE.** `core` `ObservationDelivery`
+   (`reference`|`sentinel`|`egress`) + `TopologyTarget.delivery?` (template mirrors via the shared
+   `TopologyTargetSchema`). `@assay/topology` `observation-source.ts`: `ObservationSource` seam +
+   `referenceObservationSource` (= today's `target.snapshot()`/prompt) + `observationSourceFor(mode)` (reference
+   wired; `sentinel`/`egress` **throw explicitly** — no silent fallback). `service-backend.ts:133` now delegates to
+   `observationSourceFor(spec.target?.delivery?.mode ?? "reference").observe({target})` — default `reference` =
+   **no behavior change** (topology 86/86, incl. the unchanged dispatch tests). Web harness-detail shows the
+   delivery mode. `delivery` is `.optional()` (not `.default`) so the resolved-spec output type stays
+   backward-compatible (no fixture churn).
 3. **Sentinel delivery on topology (the named gap).** Capture the observation inline and return it via the result
    channel instead of a post-hoc CDP pull; grade off the returned snapshot. Pure + deterministic-tested; live e2e
    stays green because `reference` remains the default.

@@ -26,6 +26,17 @@ export const TopologyDependencySchema = z.object({
 });
 export type TopologyDependency = z.infer<typeof TopologyDependencySchema>;
 
+// 관측물(observation) 전달 방식 — judge/grader 가 관측물을 어떻게 받는가.
+// reference(store-fetch, 평가가 pull) | sentinel(결과 채널로 인라인 회수) | egress(sink 로 push).
+// 미설정=reference(현행). topology 경로는 reference 만 구현(sentinel=슬라이스 3, egress=4). placement-locality 와
+// 짝을 이루는 축 — docs/architecture/judge-placement-locality.md.
+export const ObservationDeliverySchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("reference") }),
+  z.object({ mode: z.literal("sentinel") }),
+  z.object({ mode: z.literal("egress"), sink: z.string() }), // 관측물을 밀어 넣을 sink(object store 등)
+]);
+export type ObservationDelivery = z.infer<typeof ObservationDeliverySchema>;
+
 // 타깃 환경(II): 브라우저(+클라이언트 익스텐션). per-case 신선 인스턴스 + grader 관측 대상.
 export const TopologyTargetSchema = z.object({
   kind: z.literal("browser"),
@@ -33,6 +44,7 @@ export const TopologyTargetSchema = z.object({
   extension: z.object({ ref: z.string() }).optional(),
   lifecycle: z.enum(["per-case-instance", "per-case-context"]).default("per-case-instance"),
   observe: z.array(z.enum(["dom", "screenshot", "url"])).default(["dom", "screenshot", "url"]),
+  delivery: ObservationDeliverySchema.optional(), // 미설정 = reference(현행 무회귀)
 });
 export type TopologyTarget = z.infer<typeof TopologyTargetSchema>;
 

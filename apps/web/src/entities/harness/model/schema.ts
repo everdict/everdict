@@ -53,6 +53,8 @@ export const topologyTargetSchema = z.object({
   extension: z.object({ ref: z.string() }).optional(),
   lifecycle: z.string().optional(),
   observe: z.array(z.string()).default([]),
+  // 관측물 전달 방식 — reference(store-fetch, 기본) | sentinel(인라인 회수) | egress(sink push).
+  delivery: z.object({ mode: z.string(), sink: z.string().optional() }).optional(),
 })
 export type TopologyTarget = z.infer<typeof topologyTargetSchema>
 

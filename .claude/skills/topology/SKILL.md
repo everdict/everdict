@@ -63,6 +63,15 @@ touching `service-backend.ts`'s driving logic.
 - **All 5 core knobs landed.** Follow-ups: completion `stream`/`callback`, `harness`-provided target observation,
   a `request.headers` knob — see `docs/architecture/front-door-generalization.md`.
 
+## Observation delivery (`HOW-observe`) — pluggable seam
+*How* the observation reaches the grader/judge is now a third axis (sibling of `TopologyRuntime`=WHERE,
+`FrontDoorDriver`=HOW-drive): `ObservationSource` (`observation-source.ts`). `TopologyTarget.delivery`
+(`@assay/core`, `.optional()`) selects `reference` (store-fetch, default = today's `snapshot()`/prompt) |
+`sentinel` (inline via result channel) | `egress` (push to a `sink`). `dispatch` delegates to
+`observationSourceFor(spec.target?.delivery?.mode ?? "reference")`; **unimplemented modes throw explicitly** (no
+silent fallback). Only `reference` is wired — `sentinel`/`egress` are later slices. Pairs with judge
+store-locality (co-locate the judge near the store) — `docs/architecture/judge-placement-locality.md`.
+
 ## Reference impls
 `packages/topology/src/{nomad-topology,nomad-runtime,k8s-topology,k8s-runtime,kubectl,service-backend,environment-manager}.ts`,
 `packages/trace/src/{otel,mlflow,trace-source}.ts`. Live now: both NomadTopologyRuntime + K8sTopologyRuntime apply
