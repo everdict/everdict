@@ -2,40 +2,76 @@
 
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Check, Loader2, Trash2, Upload } from 'lucide-react'
+import { Check, Loader2, Lock, Pencil, Trash2 } from 'lucide-react'
 
 import { fileToImageDataUrl, MAX_IMAGE_UPLOAD_BYTES } from '@/shared/lib/image-resize'
-import { cn } from '@/shared/lib/utils'
-import { Button, buttonVariants } from '@/shared/ui/button'
+import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label } from '@/shared/ui/input'
+import { Input } from '@/shared/ui/input'
+import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 
 import { updateProfileAction } from '../api/update-profile'
 
-// 프로필 사진 미리보기 — 이미지(http/https 또는 data URL)가 있으면 표시, 없거나 로드 실패면 이름 첫 글자 모노그램.
-function AvatarPreview({ url, seed }: { url: string; seed: string }) {
+// 프로필 사진 편집기 — Linear st. 작은 아바타가 곧 업로드 트리거(hover 시 연필 오버레이).
+// 이미지(http/https 또는 data URL)가 있으면 표시, 없거나 로드 실패면 이름 첫 글자 모노그램.
+function AvatarEditor({
+  url,
+  seed,
+  onPick,
+}: {
+  url: string
+  seed: string
+  onPick: (file: File) => void
+}) {
+  const fileRef = useRef<HTMLInputElement>(null)
   const [broken, setBroken] = useState(false)
   const initial = (seed.trim()[0] ?? '?').toUpperCase()
-  if (!url.trim() || broken) {
-    return (
-      <span className="grid size-14 shrink-0 place-items-center rounded-full bg-primary/15 text-[20px] font-[560] text-primary ring-1 ring-inset ring-primary/25">
-        {initial}
-      </span>
-    )
-  }
+  const hasImage = url.trim().length > 0 && !broken
+
   return (
-    // 임의의 외부 아바타 URL/업로드 data URL 이라 next/image(원격 도메인 화이트리스트)가 아닌 일반 img 를 쓴다.
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={url}
-      alt="프로필 사진 미리보기"
-      className="size-14 shrink-0 rounded-full object-cover ring-1 ring-inset ring-border"
-      onError={() => setBroken(true)}
-    />
+    <>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        aria-label="프로필 사진 파일 선택"
+        onChange={(e) => {
+          const f = e.target.files?.[0]
+          e.target.value = '' // 같은 파일 재선택도 change 가 발생하도록 초기화.
+          if (f) onPick(f)
+        }}
+      />
+      <button
+        type="button"
+        onClick={() => fileRef.current?.click()}
+        aria-label="프로필 사진 변경"
+        className="group relative size-9 shrink-0 overflow-hidden rounded-full outline-none ring-1 ring-inset ring-border transition focus-visible:ring-2 focus-visible:ring-ring/60"
+      >
+        {hasImage ? (
+          // 임의의 외부 아바타 URL/업로드 data URL 이라 next/image(원격 도메인 화이트리스트)가 아닌 일반 img.
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={url}
+            alt="프로필 사진"
+            className="size-full object-cover"
+            onError={() => setBroken(true)}
+          />
+        ) : (
+          <span className="grid size-full place-items-center bg-primary/15 text-[14px] font-[560] text-primary">
+            {initial}
+          </span>
+        )}
+        <span className="absolute inset-0 grid place-items-center bg-black/55 text-white opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <Pencil className="size-3.5" />
+        </span>
+      </button>
+    </>
   )
 }
 
-// 내 프로필 수정 폼 — 사진(파일 업로드)·이름은 수정 가능, email 은 SSO(읽기전용).
+// 내 프로필 수정 폼 — Linear settings-list 패턴(label 좌 · 컨트롤 우).
+// 사진(아바타 클릭 업로드)·이름은 수정 가능, email 은 SSO(읽기 전용·자물쇠).
 export function ProfileForm({
   email,
   name,
@@ -46,17 +82,15 @@ export function ProfileForm({
   avatarUrl?: string
 }) {
   const router = useRouter()
-  const fileRef = useRef<HTMLInputElement>(null)
   const [n, setN] = useState(name ?? '')
   const [a, setA] = useState(avatarUrl ?? '')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | undefined>(undefined)
   const [saved, setSaved] = useState(false)
 
-  async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = '' // 같은 파일 재선택도 change 이벤트가 발생하도록 초기화.
-    if (!file) return
+  const dirty = n !== (name ?? '') || a !== (avatarUrl ?? '')
+
+  async function onPick(file: File) {
     setError(undefined)
     setSaved(false)
     if (!file.type.startsWith('image/')) {
@@ -89,72 +123,50 @@ export function ProfileForm({
   }
 
   return (
-    <div className="space-y-5 rounded-lg border bg-card p-5 shadow-raise">
-      <div className="flex items-center gap-4">
-        <AvatarPreview url={a} seed={n || email || '?'} />
-        <div className="flex items-center gap-2">
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={onPickFile}
-            aria-label="프로필 사진 파일 선택"
-          />
-          <button
-            type="button"
-            onClick={() => fileRef.current?.click()}
-            className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'gap-1.5')}
-          >
-            <Upload className="size-4" />
-            {a.trim() ? '사진 변경' : '사진 업로드'}
-          </button>
+    <div className="space-y-4">
+      <SettingsList>
+        <SettingsRow label="프로필 사진">
           {a.trim() && (
             <Button
               type="button"
               variant="ghost"
-              size="sm"
-              onClick={() => setA('')}
-              className="gap-1.5"
+              size="icon-sm"
+              aria-label="사진 제거"
+              onClick={() => {
+                setA('')
+                setSaved(false)
+              }}
+              className="text-muted-foreground hover:text-destructive"
             >
               <Trash2 className="size-4" />
-              제거
             </Button>
           )}
-        </div>
-      </div>
-      <p className="text-[12px] text-faint">
-        PNG·JPG 등 이미지 파일을 올리면 256px로 줄여 저장합니다. 비우면 이름 이니셜이 표시됩니다.
-      </p>
+          <AvatarEditor url={a} seed={n || email || '?'} onPick={onPick} />
+        </SettingsRow>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="pf-email">이메일</Label>
-        <Input
-          id="pf-email"
-          value={email ?? ''}
-          readOnly
-          disabled
-          className="text-muted-foreground"
-        />
-        <p className="text-[12px] text-faint">
-          이메일은 로그인(SSO) 계정에서 옵니다 — 여기서는 수정할 수 없습니다.
-        </p>
-      </div>
+        <SettingsRow label="이메일">
+          <span className="truncate text-[13px] text-muted-foreground">{email ?? '—'}</span>
+          <Lock className="size-3.5 shrink-0 text-faint" aria-label="SSO 계정에서 관리됨" />
+        </SettingsRow>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="pf-name">이름</Label>
-        <Input
-          id="pf-name"
-          value={n}
-          onChange={(e) => setN(e.target.value)}
-          placeholder="예: 김앨리스"
-        />
-      </div>
+        <SettingsRow label="이름" htmlFor="pf-name">
+          <Input
+            id="pf-name"
+            value={n}
+            onChange={(e) => {
+              setN(e.target.value)
+              setSaved(false)
+            }}
+            placeholder="예: 김앨리스"
+            className="w-full sm:w-60"
+          />
+        </SettingsRow>
+      </SettingsList>
 
       {error && <Callout tone="danger">{error}</Callout>}
 
       <div className="flex items-center gap-3">
-        <Button onClick={onSave} disabled={busy} className="gap-1.5">
+        <Button onClick={onSave} disabled={busy || !dirty} className="gap-1.5">
           {busy ? (
             <Loader2 className="size-4 animate-spin" />
           ) : saved ? (

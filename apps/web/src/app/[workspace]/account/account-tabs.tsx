@@ -33,7 +33,6 @@ interface AccountPrincipal {
 // 연결은 워크스페이스가 아닌 개인 소유라 워크스페이스 설정이 아니라 여기(계정)에 둔다. (데이터/권한은 서버에서 내려받음)
 export function AccountTabs({
   principal,
-  workspaceName,
   connections,
   providers,
   keys,
@@ -45,7 +44,6 @@ export function AccountTabs({
   connectError,
 }: {
   principal: AccountPrincipal
-  workspaceName: string
   connections: ConnectionMeta[]
   providers: ProviderInfo[]
   keys: ApiKeyMeta[]
@@ -67,7 +65,7 @@ export function AccountTabs({
       </TabsList>
 
       <TabsContent value="profile">
-        <div className="space-y-5">
+        <div className="max-w-2xl space-y-5">
           <ProfileForm
             email={principal.email}
             name={principal.profile?.name}
@@ -75,9 +73,7 @@ export function AccountTabs({
           />
 
           {/* 워크스페이스 나가기 — 활성 워크스페이스 기준(api-key 세션은 숨김) */}
-          {principal.via === 'oidc' && principal.workspace && (
-            <LeaveWorkspaceButton workspaceName={workspaceName} />
-          )}
+          {principal.via === 'oidc' && principal.workspace && <LeaveWorkspaceButton />}
         </div>
       </TabsContent>
 

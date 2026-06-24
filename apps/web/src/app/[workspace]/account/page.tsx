@@ -59,15 +59,11 @@ export default async function AccountPage({
     // 컨트롤플레인 연결 서비스 미설정/실패 — 빈 목록으로 폴백(프로필·키 탭은 그대로 동작).
   }
 
-  const workspaceName =
-    principal.workspaces?.find((w) => w.id === principal.workspace)?.name ?? principal.workspace
-
   return (
     <div className="space-y-6">
       <PageHeader title="계정" description="내 프로필 · 워크스페이스 · API 키." />
       <AccountTabs
         principal={principal}
-        workspaceName={workspaceName}
         connections={connections}
         providers={providers}
         keys={keys}
