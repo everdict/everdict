@@ -166,11 +166,18 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
    during long jobs); `scripts/live/self-hosted-runner.mjs` proves pair → run on `self:<id>` → succeeded + provenance
    tag (live-verified on the in-memory API + scripted harness, no keys/external deps).
 
-## Follow-ups (not in scope of the 6 slices)
-- **Long-poll `lease_job`** (currently immediate-return + client poll loop).
-- **Runner presence in the web** (`lastSeenAt` is tracked via `touch`; surface "online/offline" + last-seen in the
-  account roster + the runtime selector).
-- **Desktop GUI client**, **admin-targeting a member runner**, **cross-workspace leasing** — see Non-goals.
+## Follow-ups
+- ✅ **Long-poll `lease_job`** (`aaf2b81`) — `RunnerHub.leaseWait(key, waitMs)` parks the runner until the next
+  `enqueue` or `wait_ms` timeout; MCP `lease_job{wait_ms?}` (omit = immediate, back-compat); CLI `--wait-ms` (25s).
+- ✅ **Runner presence in the web** (`e9821cc`) — online/offline dot + label on the account roster, derived from
+  `lastSeenAt` freshness (long-poll lease touches it ~every 25s). Page-load-time state (not live-updating).
+- **Deliberately deferred (non-goals — need a product/security decision before building):**
+  - **Desktop GUI client** — a separate Tauri/Electron app; the CLI (`assay runner`) covers the headless case.
+  - **Admin-targeting a member's runner** — sending workspace jobs to someone's *personal* machine needs explicit
+    **opt-in consent** (e.g. a per-runner `shared` flag the owner sets) before an admin may target it. Today: owner-only.
+  - **Cross-workspace leasing** — one physical runner serving multiple of the owner's workspaces; needs the lease key
+    to drop its workspace pin, with the isolation implications that follow. Today: a runner serves the workspace it was
+    selected in.
 
 ## Non-goals (this pass)
 
