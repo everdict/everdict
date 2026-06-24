@@ -849,13 +849,18 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
     server.registerTool(
       "heartbeat_job",
-      { description: "러너 생존 신호 — 접속 시각(lastSeenAt)을 갱신한다.", inputSchema: {} },
-      () =>
+      {
+        description:
+          "러너 생존 신호 — 접속 시각(lastSeenAt) 갱신. jobId 를 주면 그 잡의 lease 도 갱신해 장기 실행 중 재큐를 막는다.",
+        inputSchema: { jobId: z.string().optional() },
+      },
+      ({ jobId }) =>
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
           if (deps.runnerService) await deps.runnerService.touch(key.owner, key.runnerId);
-          return ok({ ok: true });
+          const extended = jobId ? hub.heartbeat(key, jobId) : false;
+          return ok({ ok: true, ...(jobId ? { extended } : {}) });
         }),
     );
   }

@@ -213,6 +213,7 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const apiUrl = flags.get("api-url") ?? process.env.ASSAY_API_URL ?? "http://localhost:8787";
   const mcpUrl = new URL("/mcp", apiUrl);
   const pollMs = Number(flags.get("poll-interval-ms") ?? "2000");
+  const hbMs = Number(flags.get("heartbeat-ms") ?? "30000"); // 실행 중 lease 갱신 주기
   if (!hasClaudeAuth()) {
     console.error(
       "ℹ 이 머신 env 에 claude 인증이 없습니다 — claude-code 잡은 이 머신의 로그인을 씁니다(없으면 실패할 수 있음).",
@@ -262,6 +263,10 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
       continue;
     }
     console.error(`▶ 잡 ${jobId} (case ${parsed.data.evalCase.id}) 실행 …`);
+    // 장기 실행 잡이 서버에서 재큐되지 않게 주기적 heartbeat 로 lease 갱신(기본 30s).
+    const hb = setInterval(() => {
+      void callJson("heartbeat_job", { jobId }).catch(() => {});
+    }, hbMs);
     try {
       const result = await runAgentJob(parsed.data); // LocalDriver — 이 머신에서 실행
       await callJson("submit_job_result", { jobId, result });
@@ -269,6 +274,8 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
     } catch (e) {
       console.error(`✗ 잡 ${jobId} 실패: ${errMsg(e)} → fail 회신`);
       await callJson("fail_job", { jobId, message: errMsg(e) }).catch(() => {});
+    } finally {
+      clearInterval(hb);
     }
   }
   await client.close();

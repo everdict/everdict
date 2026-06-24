@@ -69,4 +69,28 @@ describe("RunnerHub", () => {
       extra: { reason: "no_runner" },
     });
   });
+
+  it("lease 만료 → 재큐: 러너 사망 시 다음 lease 가 같은 잡을 다시 가져간다", async () => {
+    let t = 0;
+    const hub = new RunnerHub({ newJobId: () => "j1", now: () => t, leaseTtlMs: 100 });
+    hub.enqueue(keyA, job("c1"));
+    expect(hub.lease(keyA)?.jobId).toBe("j1"); // 러너 A 가 가져감(t=0)
+    expect(hub.lease(keyA)).toBeNull(); // 아직 leased — 더 없음
+    t = 50; // TTL 내 — 아직 재큐 안 됨
+    expect(hub.lease(keyA)).toBeNull();
+    t = 201; // TTL(100) 초과 — 재큐되어 다시 가져갈 수 있다
+    expect(hub.lease(keyA)?.jobId).toBe("j1");
+  });
+
+  it("heartbeat 는 lease 를 갱신해 재큐를 막는다", async () => {
+    let t = 0;
+    const hub = new RunnerHub({ newJobId: () => "j1", now: () => t, leaseTtlMs: 100 });
+    hub.enqueue(keyA, job("c1"));
+    hub.lease(keyA); // t=0
+    t = 80;
+    expect(hub.heartbeat(keyA, "j1")).toBe(true); // lease 갱신(leasedAt=80)
+    t = 150; // 첫 lease 기준이면 만료지만 heartbeat(80) 기준이면 아직 → 재큐 안 됨
+    expect(hub.lease(keyA)).toBeNull();
+    expect(hub.heartbeat(keyA, "nope")).toBe(false); // 미상 jobId
+  });
 });

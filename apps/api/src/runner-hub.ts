@@ -28,9 +28,10 @@ interface PendingEntry {
 }
 
 export interface RunnerHubDeps {
-  // 잡이 lease+완료될 때까지의 상한 — 미연결/유휴 러너에 파킹된 잡이 영원히 매달리지 않게 거부한다.
-  // (정교한 만료/재큐 + 하트비트 기반 lease 갱신은 Slice 6.)
+  // 잡이 lease+완료될 때까지의 전체 상한 — 미연결/유휴 러너에 파킹된 잡이 영원히 매달리지 않게 거부한다.
   queueTimeoutMs?: number;
+  // 러너가 lease 한 뒤 complete/heartbeat 없이 이 시간이 지나면 재큐(러너 사망/네트워크 단절 → 다른/재접속 러너가 가져감).
+  leaseTtlMs?: number;
   newJobId?: () => string;
   now?: () => number;
 }
@@ -42,10 +43,12 @@ export interface RunnerHubDeps {
 export class RunnerHub {
   private readonly queues = new Map<string, PendingEntry[]>();
   private readonly queueTimeoutMs: number;
+  private readonly leaseTtlMs: number;
   private readonly newJobId: () => string;
   private readonly now: () => number;
   constructor(deps: RunnerHubDeps = {}) {
     this.queueTimeoutMs = deps.queueTimeoutMs ?? 300_000; // 기본 5분
+    this.leaseTtlMs = deps.leaseTtlMs ?? 120_000; // 기본 2분(heartbeat 로 갱신)
     this.newJobId = deps.newJobId ?? randomUUID;
     this.now = deps.now ?? Date.now;
   }
@@ -83,11 +86,25 @@ export class RunnerHub {
   }
 
   // 다음 미-lease 잡을 가져간다(러너 pull). 없으면 null(러너는 재폴링). leasedAt 기록.
+  // 먼저 lease 가 만료된 잡(러너 사망/단절)을 재큐한다 — 다른/재접속 러너가 다시 가져갈 수 있게.
   lease(key: SelfHostedKey): LeasedJob | null {
-    const entry = this.q(key).find((e) => e.leasedAt === undefined);
+    const arr = this.q(key);
+    const now = this.now();
+    for (const e of arr) {
+      if (e.leasedAt !== undefined && now - e.leasedAt > this.leaseTtlMs) e.leasedAt = undefined; // 재큐
+    }
+    const entry = arr.find((e) => e.leasedAt === undefined);
     if (!entry) return null;
-    entry.leasedAt = this.now();
+    entry.leasedAt = now;
     return { jobId: entry.jobId, job: entry.job };
+  }
+
+  // 러너 생존 신호 — lease 를 갱신(leasedAt 갱신)해 장기 실행 잡이 재큐되지 않게 한다. 큐에 없으면 false.
+  heartbeat(key: SelfHostedKey, jobId: string): boolean {
+    const entry = this.q(key).find((e) => e.jobId === jobId);
+    if (!entry) return false;
+    entry.leasedAt = this.now();
+    return true;
   }
 
   // 러너가 결과를 회신 → 파킹된 promise resolve. 큐에 없으면 false(이미 완료/만료/미상).
