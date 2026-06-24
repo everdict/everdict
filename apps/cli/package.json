@@ -14,6 +14,7 @@
     "@assay/backends": "workspace:*",
     "@assay/core": "workspace:*",
     "@assay/orchestrator": "workspace:*",
-    "@assay/suite": "workspace:*"
+    "@assay/suite": "workspace:*",
+    "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

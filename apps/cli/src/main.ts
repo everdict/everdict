@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { collectAuthEnv, hasClaudeAuth } from "@assay/agent";
+import { collectAuthEnv, hasClaudeAuth, runAgentJob } from "@assay/agent";
 import {
   BackendRegistry,
   BackendsConfigSchema,
@@ -8,9 +8,11 @@ import {
   Router,
   buildRegistry,
 } from "@assay/backends";
-import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@assay/core";
+import { type AgentJob, AgentJobSchema, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@assay/core";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@assay/orchestrator";
 import { diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -46,6 +48,9 @@ function usage(): void {
       "",
       "assay suite --suite <file.json> [--harness-version <v>] [--baseline <scorecard.json>] [--concurrency N]",
       "  run a suite (cases × a version) → Scorecard + summary; --baseline diffs two versions (regression)",
+      "",
+      "assay runner --pair <rnr_…> [--api-url <url>] [--poll-interval-ms N]",
+      "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
     ].join("\n"),
   );
 }
@@ -193,6 +198,82 @@ async function suiteCommand(flags: Map<string, string>): Promise<void> {
   console.log(JSON.stringify(out, null, 2));
 }
 
+// 셀프호스티드 러너 — 이 머신에서 워크스페이스의 잡을 가져가(pull) 돌리고 결과를 회신한다(push→pull).
+// 페어링 토큰(rnr_)으로 /mcp 에 인증하고 lease_job → runAgentJob(LocalDriver, 이 머신의 로그인) → submit_job_result.
+// 설계: docs/architecture/self-hosted-runner.md.
+async function runnerCommand(flags: Map<string, string>): Promise<void> {
+  const token = flags.get("pair") ?? process.env.ASSAY_RUNNER_TOKEN;
+  if (!token || !token.startsWith("rnr_")) {
+    console.error(
+      "✗ --pair <rnr_…> (또는 ASSAY_RUNNER_TOKEN) 가 필요합니다 — 계정 페이지에서 디바이스를 페어링하세요.",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const apiUrl = flags.get("api-url") ?? process.env.ASSAY_API_URL ?? "http://localhost:8787";
+  const mcpUrl = new URL("/mcp", apiUrl);
+  const pollMs = Number(flags.get("poll-interval-ms") ?? "2000");
+  if (!hasClaudeAuth()) {
+    console.error(
+      "ℹ 이 머신 env 에 claude 인증이 없습니다 — claude-code 잡은 이 머신의 로그인을 씁니다(없으면 실패할 수 있음).",
+    );
+  }
+
+  const client = new Client({ name: "assay-runner", version: "0.1.0" });
+  const transport = new StreamableHTTPClientTransport(mcpUrl, {
+    requestInit: { headers: { Authorization: `Bearer ${token}` } },
+  });
+  await client.connect(transport);
+  console.error(`▶ assay runner — ${mcpUrl} 연결됨. 잡 폴링 중(${pollMs}ms, Ctrl-C 종료) …`);
+
+  const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
+    const r = await client.callTool({ name, arguments: args });
+    const t = (r.content as Array<{ text?: string }> | undefined)?.[0]?.text ?? "";
+    if (r.isError) throw new Error(t || `${name} 실패`);
+    return JSON.parse(t) as Record<string, unknown>;
+  };
+  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+  const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+
+  let stop = false;
+  process.on("SIGINT", () => {
+    stop = true;
+    console.error("\n▶ 종료 신호 — 현재 잡 후 정지합니다 …");
+  });
+
+  while (!stop) {
+    let leased: Record<string, unknown>;
+    try {
+      leased = await callJson("lease_job", {});
+    } catch (e) {
+      console.error(`✗ lease 실패: ${errMsg(e)}`);
+      await sleep(pollMs);
+      continue;
+    }
+    if (!leased.job) {
+      await sleep(pollMs);
+      continue;
+    }
+    const jobId = String(leased.jobId);
+    const parsed = AgentJobSchema.safeParse(leased.job); // 경계 검증
+    if (!parsed.success) {
+      console.error(`✗ 잡 ${jobId} 형식 오류 → fail 회신`);
+      await callJson("fail_job", { jobId, message: `잡 형식 오류: ${parsed.error.message}` }).catch(() => {});
+      continue;
+    }
+    console.error(`▶ 잡 ${jobId} (case ${parsed.data.evalCase.id}) 실행 …`);
+    try {
+      const result = await runAgentJob(parsed.data); // LocalDriver — 이 머신에서 실행
+      await callJson("submit_job_result", { jobId, result });
+      console.error(`✓ 잡 ${jobId} 완료 → 회신`);
+    } catch (e) {
+      console.error(`✗ 잡 ${jobId} 실패: ${errMsg(e)} → fail 회신`);
+      await callJson("fail_job", { jobId, message: errMsg(e) }).catch(() => {});
+    }
+  }
+  await client.close();
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const cmd = argv[0];
@@ -207,6 +288,10 @@ async function main(): Promise<void> {
     }
     if (cmd === "suite") {
       await suiteCommand(parseFlags(argv.slice(1)));
+      return;
+    }
+    if (cmd === "runner") {
+      await runnerCommand(parseFlags(argv.slice(1)));
       return;
     }
     usage();
