@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from 'react'
 import { Check, Copy, Laptop, Plus, Trash2 } from 'lucide-react'
 
 import { runnerCapabilities, type RunnerCapability, type RunnerMeta } from '@/entities/runner'
+import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -19,6 +20,13 @@ const CAP_LABEL: Record<string, string> = {
   browser: 'Browser',
   'os-use': 'OS-use',
   docker: 'Docker',
+}
+
+// 온라인 판정 — 러너는 long-poll lease(~25s)마다 lastSeenAt 을 갱신하므로 90s 안이면 접속 중으로 본다.
+// (페이지 로드 시점 기준 — 실시간 갱신은 아님.)
+const ONLINE_WINDOW_MS = 90_000
+function isOnline(lastSeenAt?: string): boolean {
+  return lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
 }
 
 // 러너는 개인 소유(self-scoped by subject) — 역할 게이트 없음. 모든 유저가 자기 머신을 페어링/해제한다.
@@ -75,62 +83,83 @@ export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
         />
       ) : (
         <ul className="divide-y divide-border rounded-lg border bg-card shadow-raise">
-          {runners.map((r) => (
-            <li key={r.id} className="flex items-center gap-3 px-3.5 py-3">
-              <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground">
-                <Laptop className="size-4" strokeWidth={1.75} />
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="truncate text-[13px] font-[510] text-foreground">{r.label}</span>
-                  {r.os && <Badge tone="outline">{r.os}</Badge>}
-                  {r.capabilities.map((c) => (
-                    <Badge key={c} tone="outline">
-                      {CAP_LABEL[c] ?? c}
-                    </Badge>
-                  ))}
-                </div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
-                  <span>페어링 {new Date(r.pairedAt).toLocaleString('ko-KR')}</span>
-                  {r.lastSeenAt && (
-                    <>
-                      <span>·</span>
-                      <span>최근 접속 {new Date(r.lastSeenAt).toLocaleString('ko-KR')}</span>
-                    </>
-                  )}
-                </div>
-              </div>
-              {confirmId === r.id ? (
-                <span className="flex shrink-0 items-center gap-2">
-                  <Button
-                    variant="destructive"
-                    size="xs"
-                    disabled={pending}
-                    onClick={() => onRevoke(r.id)}
-                  >
-                    해제 확인
-                  </Button>
-                  <button
-                    type="button"
-                    className="text-[12px] text-muted-foreground hover:text-foreground"
-                    onClick={() => setConfirmId(undefined)}
-                  >
-                    닫기
-                  </button>
+          {runners.map((r) => {
+            const online = isOnline(r.lastSeenAt)
+            return (
+              <li key={r.id} className="flex items-center gap-3 px-3.5 py-3">
+                <span className="relative grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground">
+                  <Laptop className="size-4" strokeWidth={1.75} />
+                  {/* 접속 상태 점 — 우하단 */}
+                  <span
+                    className={cn(
+                      'absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card',
+                      online ? 'bg-[var(--color-success)]' : 'bg-muted-foreground/40'
+                    )}
+                    title={online ? '온라인' : '오프라인'}
+                  />
                 </span>
-              ) : (
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  className="shrink-0 text-muted-foreground hover:text-destructive"
-                  aria-label={`${r.label} 러너 해제`}
-                  onClick={() => setConfirmId(r.id)}
-                >
-                  <Trash2 />
-                </Button>
-              )}
-            </li>
-          ))}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate text-[13px] font-[510] text-foreground">
+                      {r.label}
+                    </span>
+                    <span
+                      className={cn(
+                        'text-[12px]',
+                        online ? 'text-[var(--color-success)]' : 'text-faint'
+                      )}
+                    >
+                      {online ? '온라인' : '오프라인'}
+                    </span>
+                    {r.os && <Badge tone="outline">{r.os}</Badge>}
+                    {r.capabilities.map((c) => (
+                      <Badge key={c} tone="outline">
+                        {CAP_LABEL[c] ?? c}
+                      </Badge>
+                    ))}
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
+                    <span>페어링 {new Date(r.pairedAt).toLocaleString('ko-KR')}</span>
+                    {r.lastSeenAt && (
+                      <>
+                        <span>·</span>
+                        <span>최근 접속 {new Date(r.lastSeenAt).toLocaleString('ko-KR')}</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                {confirmId === r.id ? (
+                  <span className="flex shrink-0 items-center gap-2">
+                    <Button
+                      variant="destructive"
+                      size="xs"
+                      disabled={pending}
+                      onClick={() => onRevoke(r.id)}
+                    >
+                      해제 확인
+                    </Button>
+                    <button
+                      type="button"
+                      className="text-[12px] text-muted-foreground hover:text-foreground"
+                      onClick={() => setConfirmId(undefined)}
+                    >
+                      닫기
+                    </button>
+                  </span>
+                ) : (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    className="shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label={`${r.label} 러너 해제`}
+                    onClick={() => setConfirmId(r.id)}
+                  >
+                    <Trash2 />
+                  </Button>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
 
