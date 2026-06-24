@@ -4,6 +4,7 @@ import {
   type ConnectionMeta,
   type ProviderInfo,
 } from '@/entities/connection'
+import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -59,6 +60,14 @@ export default async function AccountPage({
     // 컨트롤플레인 연결 서비스 미설정/실패 — 빈 목록으로 폴백(프로필·키 탭은 그대로 동작).
   }
 
+  // 셀프호스티드 러너 — 개인 소유라 역할 게이트 없이 본인(subject)의 러너만 조회. 실패해도 페이지는 렌더(빈 목록).
+  let runners: RunnerMeta[] = []
+  try {
+    runners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
+  } catch {
+    // 컨트롤플레인 러너 서비스 미설정/실패 — 빈 목록으로 폴백.
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader title="계정" description="내 프로필 · 워크스페이스 · API 키." />
@@ -66,6 +75,7 @@ export default async function AccountPage({
         principal={principal}
         connections={connections}
         providers={providers}
+        runners={runners}
         keys={keys}
         keysError={keysError}
         canReadKeys={canReadKeys}

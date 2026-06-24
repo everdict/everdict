@@ -3,9 +3,11 @@
 import { LeaveWorkspaceButton } from '@/features/leave-workspace'
 import { ApiKeysManager } from '@/features/manage-api-keys'
 import { ConnectionsManager } from '@/features/manage-connections'
+import { RunnersManager } from '@/features/manage-runners'
 import { ProfileForm } from '@/features/update-profile'
 import type { ApiKeyMeta } from '@/entities/api-key'
 import type { ConnectionMeta, ProviderInfo } from '@/entities/connection'
+import type { RunnerMeta } from '@/entities/runner'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
@@ -35,6 +37,7 @@ export function AccountTabs({
   principal,
   connections,
   providers,
+  runners,
   keys,
   keysError,
   canReadKeys,
@@ -46,6 +49,7 @@ export function AccountTabs({
   principal: AccountPrincipal
   connections: ConnectionMeta[]
   providers: ProviderInfo[]
+  runners: RunnerMeta[]
   keys: ApiKeyMeta[]
   keysError?: string
   canReadKeys: boolean
@@ -54,13 +58,14 @@ export function AccountTabs({
   connected?: string // ?connected=<provider>
   connectError?: string // ?error=<reason>
 }) {
-  const tabKeys = ['profile', 'connections', 'keys']
+  const tabKeys = ['profile', 'connections', 'runners', 'keys']
   const defaultTab = initialTab && tabKeys.includes(initialTab) ? initialTab : 'profile'
   return (
     <Tabs defaultValue={defaultTab} className="space-y-5">
       <TabsList>
         <TabsTrigger value="profile">프로필</TabsTrigger>
         <TabsTrigger value="connections">연결된 계정</TabsTrigger>
+        <TabsTrigger value="runners">연결된 러너</TabsTrigger>
         <TabsTrigger value="keys">API 키</TabsTrigger>
       </TabsList>
 
@@ -84,6 +89,10 @@ export function AccountTabs({
           {...(connected !== undefined ? { connected } : {})}
           {...(connectError !== undefined ? { error: connectError } : {})}
         />
+      </TabsContent>
+
+      <TabsContent value="runners">
+        <RunnersManager runners={runners} />
       </TabsContent>
 
       <TabsContent value="keys">
