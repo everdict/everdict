@@ -107,7 +107,7 @@ export class MembershipService {
 
   // 초대 수락 — 워크스페이스-역할 게이트 없음(가입 전이므로). 인증된 사람(OIDC) subject 만. 머신 키(via!=='oidc')는 거부.
   async acceptInvite(
-    principal: { subject: string; via: "oidc" | "api-key"; email?: string },
+    principal: { subject: string; via: "oidc" | "api-key" | "runner"; email?: string },
     token: string,
   ): Promise<{ workspace: string; role: string }> {
     if (principal.via !== "oidc")

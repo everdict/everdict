@@ -1,11 +1,12 @@
 import { ForbiddenError } from "@assay/core";
-import { InMemoryTenantKeyStore, hashKey } from "@assay/db";
+import { InMemoryRunnerStore, InMemoryTenantKeyStore, hashKey } from "@assay/db";
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
 import { apiKeyAuthenticator } from "./api-key.js";
 import { authorize, can } from "./authz.js";
 import { oidcAuthenticator } from "./oidc.js";
 import { type Principal, compositeAuthenticator } from "./principal.js";
+import { runnerAuthenticator } from "./runner.js";
 
 const p = (roles: string[]): Principal => ({ subject: "u", workspace: "acme", roles, via: "oidc" });
 
@@ -110,6 +111,23 @@ describe("apiKeyAuthenticator", () => {
     const auth = apiKeyAuthenticator({ keyStore: store });
     expect((await auth.authenticate("ak_scoped"))?.scopes).toEqual(["read"]);
     expect((await auth.authenticate("ak_full"))?.scopes).toBeUndefined();
+  });
+});
+
+describe("runnerAuthenticator (셀프호스티드 러너 페어링 토큰)", () => {
+  it("rnr_ 토큰 → {owner, workspace, runnerId} + roles=['runner'], via='runner'", async () => {
+    const store = new InMemoryRunnerStore();
+    const paired = await store.pair({ owner: "u-alice", workspace: "acme", label: "laptop" });
+    const auth = runnerAuthenticator({ runnerStore: store });
+    expect(await auth.authenticate(paired.token)).toMatchObject({
+      subject: "u-alice",
+      workspace: "acme",
+      roles: ["runner"],
+      via: "runner",
+      runnerId: paired.meta.id,
+    });
+    expect(await auth.authenticate("rnr_wrong")).toBeUndefined();
+    expect(await auth.authenticate("ak_x")).toBeUndefined(); // 비-rnr 은 무시(다음 인증기로)
   });
 });
 

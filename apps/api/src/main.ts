@@ -1,5 +1,11 @@
 import { collectAuthEnv } from "@assay/agent";
-import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator, oidcAuthenticator } from "@assay/auth";
+import {
+  type Authenticator,
+  apiKeyAuthenticator,
+  compositeAuthenticator,
+  oidcAuthenticator,
+  runnerAuthenticator,
+} from "@assay/auth";
 import {
   BackendRegistry,
   type BudgetLimit,
@@ -284,7 +290,8 @@ async function main(): Promise<void> {
     secretStore,
     connectionService,
     runnerService,
-    authenticator: buildAuthenticator(keyStore),
+    runnerHub,
+    authenticator: buildAuthenticator(keyStore, runnerStore),
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
     requireAuth: process.env.ASSAY_REQUIRE_AUTH === "1",
@@ -490,7 +497,7 @@ function buildOAuthProviders(): Map<string, ProviderEntry> {
 }
 
 // 컨트롤플레인이 소유하는 인증: KEYCLOAK_ISSUER 면 OIDC(JWT) + 항상 API 키. 둘 다 workspace 로 해석.
-function buildAuthenticator(keyStore: TenantKeyStore): Authenticator {
+function buildAuthenticator(keyStore: TenantKeyStore, runnerStore: RunnerStore): Authenticator {
   const authers: Authenticator[] = [];
   if (process.env.KEYCLOAK_ISSUER) {
     console.error(`▶ auth: OIDC(JWT) 검증기 활성 issuer=${process.env.KEYCLOAK_ISSUER}`);
@@ -515,6 +522,8 @@ function buildAuthenticator(keyStore: TenantKeyStore): Authenticator {
     );
   }
   authers.push(apiKeyAuthenticator({ keyStore }));
+  // 셀프호스티드 러너 페어링 토큰(rnr_) — `assay runner` 가 MCP 에 인증. owner/workspace/runnerId 로 해석, 최소권한.
+  authers.push(runnerAuthenticator({ runnerStore }));
   return compositeAuthenticator(authers);
 }
 

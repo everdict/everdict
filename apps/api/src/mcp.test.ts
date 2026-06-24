@@ -1,6 +1,6 @@
 import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
-import type { CaseResult, RuntimeSpec } from "@assay/core";
+import type { AgentJob, CaseResult, RuntimeSpec } from "@assay/core";
 import {
   InMemoryConnectionStore,
   InMemoryOAuthStateStore,
@@ -29,6 +29,7 @@ import { buildMcpServer } from "./mcp.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
+import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 
@@ -103,6 +104,7 @@ function harness() {
     }),
     keyStore: new InMemoryTenantKeyStore(),
     runnerService: new RunnerService(new InMemoryRunnerStore()),
+    runnerHub: new RunnerHub(),
     workspaceStore,
     membershipService: new MembershipService(
       workspaceStore,
@@ -133,6 +135,22 @@ async function connect(
   return client;
 }
 
+// 러너 토큰 principal(via=runner, runnerId) 로 연결 — 러너 프로토콜 도구(lease/submit/…)용.
+async function connectRunner(
+  deps: ReturnType<typeof harness>,
+  runnerId: string,
+  workspace = "acme",
+  subject = "u-alice",
+): Promise<Client> {
+  const principal: Principal = { subject, workspace, roles: ["runner"], via: "runner", runnerId };
+  const server = buildMcpServer(deps, principal);
+  const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+  const client = new Client({ name: "test", version: "0" });
+  await server.connect(serverT);
+  await client.connect(clientT);
+  return client;
+}
+
 const text = (r: unknown): string => (r as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? "";
 
 describe("MCP tools", () => {
@@ -150,13 +168,16 @@ describe("MCP tools", () => {
       "diff_datasets",
       "diff_scorecards",
       "disconnect_connection",
+      "fail_job",
       "get_connect_url",
       "get_dataset",
       "get_judge",
       "get_run",
       "get_runtime",
       "get_scorecard",
+      "heartbeat_job",
       "ingest_scorecard",
+      "lease_job",
       "leave_workspace",
       "list_api_keys",
       "list_connections",
@@ -183,6 +204,7 @@ describe("MCP tools", () => {
       "revoke_runner",
       "run_scorecard",
       "set_member_role",
+      "submit_job_result",
       "submit_run",
       "validate_dataset",
       "validate_judge",
@@ -255,6 +277,47 @@ describe("MCP tools", () => {
     const rev = JSON.parse(text(await viewer.callTool({ name: "revoke_runner", arguments: { id: paired.runner.id } })));
     expect(rev).toMatchObject({ revoked: true });
     expect(JSON.parse(text(await viewer.callTool({ name: "list_runners", arguments: {} }))).runners).toHaveLength(0);
+  });
+
+  it("runner 프로토콜: 파킹된 잡을 lease → submit_job_result 로 회신 → 디스패치 promise resolve", async () => {
+    const deps = harness();
+    const key = { tenant: "acme", owner: "u-alice", runnerId: "laptop" };
+    const parkedJob: AgentJob = {
+      evalCase: {
+        id: "c1",
+        env: { kind: "repo", source: { files: {} } },
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+      harness: { id: "scripted", version: "0" },
+      tenant: "acme",
+    };
+    // 디스패처가 self: 잡을 파킹한 상황을 재현(SelfHostedBackend.dispatch → hub.enqueue).
+    const dispatched = deps.runnerHub.enqueue(key, parkedJob);
+
+    const runner = await connectRunner(deps, "laptop");
+    // 잡을 가져온다(pull).
+    const leased = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: {} })));
+    expect(leased.jobId).toBeTruthy();
+    expect(leased.job.evalCase.id).toBe("c1");
+    // 더 없으면 {job:null}.
+    expect(JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: {} }))).job).toBeNull();
+
+    // 결과 회신 → 파킹된 dispatch promise 가 resolve.
+    const submit = JSON.parse(
+      text(await runner.callTool({ name: "submit_job_result", arguments: { jobId: leased.jobId, result } })),
+    );
+    expect(submit.accepted).toBe(true);
+    await expect(dispatched).resolves.toMatchObject({ caseId: "c1" });
+  });
+
+  it("runner 도구는 러너 토큰(via=runner)만 — 일반 자격증명은 FORBIDDEN", async () => {
+    const admin = await connect(harness(), ["admin"]); // via=oidc, runnerId 없음
+    const r = await admin.callTool({ name: "lease_job", arguments: {} });
+    expect(r.isError).toBe(true);
+    expect(text(r)).toContain("FORBIDDEN");
   });
 
   it("member: submit_run + register_harness(instance) 가능", async () => {

@@ -29,6 +29,10 @@ export class RunnerService {
   async revoke(owner: string, id: string): Promise<void> {
     await this.store.remove(owner, id);
   }
+  // 러너 접속 표시(lease/heartbeat 시 lastSeenAt 갱신). 없는 러너면 no-op.
+  async touch(owner: string, id: string): Promise<void> {
+    await this.store.touch(owner, id);
+  }
   // 워크스페이스 로스터(읽기 전용) — 이 워크스페이스에서 페어링된 러너 메타(토큰 없음). settings>멤버 탭용.
   async listForWorkspace(workspace: string): Promise<RunnerMeta[]> {
     return this.store.listByWorkspace(workspace);

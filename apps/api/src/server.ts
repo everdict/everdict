@@ -42,6 +42,7 @@ import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
+import type { RunnerHub } from "./runner-hub.js";
 import { PairRunnerBodySchema, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
@@ -93,6 +94,7 @@ export interface ServerDeps {
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — 아웃바운드 OAuth (없으면 해당 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
+  runnerHub?: RunnerHub; // 셀프호스티드 러너 lease 허브 — MCP lease/result/heartbeat 도구가 쓴다 (없으면 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성 (없으면 /workspaces 라우트 비활성)
@@ -147,6 +149,9 @@ async function resolveIdentity(
 // 전환하고, 없으면 workspace="" 그대로 둔다(아직 멤버십 없음 → /me.workspaces=[] → 웹 온보딩). 401 아님.
 // 스토어가 없으면 기존 단일-워크스페이스 동작 그대로(하위호환).
 async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: ServerDeps): Promise<Principal> {
+  // 러너 토큰(via=runner)은 고정 워크스페이스 + 최소권한(roles:["runner"]) — 멤버십 부트스트랩/역할 승격에서 제외한다.
+  // (제외하지 않으면 owner 의 멤버십 역할로 승격돼 디바이스 자격이 admin 을 얻는다.)
+  if (base.via === "runner") return base;
   const store = deps.workspaceStore;
   if (!store) return base;
   const subject = base.subject;
@@ -1717,6 +1722,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           secretStore: deps.secretStore,
           connectionService: deps.connectionService,
           runnerService: deps.runnerService,
+          runnerHub: deps.runnerHub,
           settingsStore: deps.settingsStore,
           benchmarkService: deps.benchmarkService,
           workspaceService: deps.workspaceService,

@@ -1,6 +1,7 @@
 import { API_KEY_SCOPES, ASSAY_ROLES, type Action, type Principal, authorize } from "@assay/auth";
 import {
   AppError,
+  CaseResultSchema,
   DatasetSchema,
   EvalCaseSchema,
   HarnessInstanceSpecSchema,
@@ -27,6 +28,7 @@ import { deleteDatasetVersion } from "./dataset-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
+import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
 import { RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
@@ -46,6 +48,7 @@ export interface McpDeps {
   secretStore?: SecretStore;
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — list/connect-url/disconnect
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
+  runnerHub?: RunnerHub; // 러너 lease 허브 — lease_job/submit_job_result/fail_job/heartbeat_job(러너 토큰 전용)
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
@@ -790,6 +793,70 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_workspace_runners",
       { description: "이 워크스페이스에 페어링된 셀프호스티드 러너 로스터 — 메타만(토큰 없음)", inputSchema: {} },
       () => run(principal, "members:read", async () => ok({ runners: await runners.listForWorkspace(ws) })),
+    );
+  }
+
+  // 러너 프로토콜 — `assay runner` 가 자기 머신에서 호출(러너 토큰 rnr_ → via=runner, principal.runnerId).
+  // 잡을 가져가(lease) 로컬 실행 후 결과를 회신(submit/fail)한다. 러너 토큰만 — 일반 자격증명은 거부.
+  if (deps.runnerHub) {
+    const hub = deps.runnerHub;
+    // (workspace, owner=subject, runnerId) — 디스패처가 self: 잡을 파킹한 키와 동일. runnerId 는 토큰에서.
+    const runnerKey = (): SelfHostedKey | undefined =>
+      principal.runnerId ? { tenant: ws, owner: principal.subject, runnerId: principal.runnerId } : undefined;
+    const NEED_RUNNER = "FORBIDDEN: 러너 자격증명(rnr_ 페어링 토큰)이 필요합니다.";
+
+    server.registerTool(
+      "lease_job",
+      {
+        description:
+          "다음 평가 잡 1건을 가져온다(러너 pull). 없으면 {job:null} — 잠시 후 재호출. 결과는 submit_job_result 로 회신.",
+        inputSchema: {},
+      },
+      () =>
+        plain(async () => {
+          const key = runnerKey();
+          if (!key) return fail(NEED_RUNNER);
+          if (deps.runnerService) await deps.runnerService.touch(key.owner, key.runnerId); // 접속 표시
+          const leased = hub.lease(key);
+          return ok(leased ?? { job: null });
+        }),
+    );
+    server.registerTool(
+      "submit_job_result",
+      {
+        description: "lease 한 잡의 실행 결과(CaseResult)를 회신 → 컨트롤플레인의 대기 중 디스패치를 완료한다.",
+        inputSchema: { jobId: z.string(), result: CaseResultSchema },
+      },
+      ({ jobId, result }) =>
+        plain(async () => {
+          const key = runnerKey();
+          if (!key) return fail(NEED_RUNNER);
+          return ok({ jobId, accepted: hub.complete(key, jobId, result) });
+        }),
+    );
+    server.registerTool(
+      "fail_job",
+      {
+        description: "lease 한 잡의 실행 실패를 회신 → 대기 중 디스패치를 에러로 종료.",
+        inputSchema: { jobId: z.string(), message: z.string() },
+      },
+      ({ jobId, message }) =>
+        plain(async () => {
+          const key = runnerKey();
+          if (!key) return fail(NEED_RUNNER);
+          return ok({ jobId, accepted: hub.fail(key, jobId, message) });
+        }),
+    );
+    server.registerTool(
+      "heartbeat_job",
+      { description: "러너 생존 신호 — 접속 시각(lastSeenAt)을 갱신한다.", inputSchema: {} },
+      () =>
+        plain(async () => {
+          const key = runnerKey();
+          if (!key) return fail(NEED_RUNNER);
+          if (deps.runnerService) await deps.runnerService.touch(key.owner, key.runnerId);
+          return ok({ ok: true });
+        }),
     );
   }
 
