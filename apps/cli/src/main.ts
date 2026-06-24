@@ -49,7 +49,7 @@ function usage(): void {
       "assay suite --suite <file.json> [--harness-version <v>] [--baseline <scorecard.json>] [--concurrency N]",
       "  run a suite (cases × a version) → Scorecard + summary; --baseline diffs two versions (regression)",
       "",
-      "assay runner --pair <rnr_…> [--api-url <url>] [--poll-interval-ms N]",
+      "assay runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N]",
       "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
     ].join("\n"),
   );
@@ -212,7 +212,8 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   }
   const apiUrl = flags.get("api-url") ?? process.env.ASSAY_API_URL ?? "http://localhost:8787";
   const mcpUrl = new URL("/mcp", apiUrl);
-  const pollMs = Number(flags.get("poll-interval-ms") ?? "2000");
+  const pollMs = Number(flags.get("poll-interval-ms") ?? "2000"); // 에러 재시도 backoff
+  const waitMs = Number(flags.get("wait-ms") ?? "25000"); // lease long-poll 대기(서버가 잡 생길 때까지 잡아둠)
   const hbMs = Number(flags.get("heartbeat-ms") ?? "30000"); // 실행 중 lease 갱신 주기
   if (!hasClaudeAuth()) {
     console.error(
@@ -245,14 +246,14 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   while (!stop) {
     let leased: Record<string, unknown>;
     try {
-      leased = await callJson("lease_job", {});
+      leased = await callJson("lease_job", { wait_ms: waitMs }); // long-poll — 서버가 잡 생길 때까지 대기
     } catch (e) {
       console.error(`✗ lease 실패: ${errMsg(e)}`);
       await sleep(pollMs);
       continue;
     }
     if (!leased.job) {
-      await sleep(pollMs);
+      await sleep(250); // long-poll 타임아웃(잡 없음) — 즉시 재폴링(서버가 이미 대기)
       continue;
     }
     const jobId = String(leased.jobId);

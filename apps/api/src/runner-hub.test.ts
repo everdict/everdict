@@ -82,6 +82,23 @@ describe("RunnerHub", () => {
     expect(hub.lease(keyA)?.jobId).toBe("j1");
   });
 
+  it("leaseWait: 잡 있으면 즉시; 없으면 다음 enqueue 가 깨운다(long-poll)", async () => {
+    let m = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${m++}` });
+    // 즉시 가용: 파킹 후 leaseWait 는 바로 반환.
+    hub.enqueue(keyA, job("a1"));
+    expect((await hub.leaseWait(keyA, 1000))?.job.evalCase.id).toBe("a1");
+    // 비었을 때: leaseWait 가 대기하다가 enqueue 로 깨어나 그 잡을 가져간다.
+    const waiting = hub.leaseWait(keyA, 1000);
+    hub.enqueue(keyA, job("a2"));
+    expect((await waiting)?.job.evalCase.id).toBe("a2");
+  });
+
+  it("leaseWait: 잡이 안 오면 waitMs 후 null", async () => {
+    const hub = new RunnerHub();
+    expect(await hub.leaseWait(keyA, 5)).toBeNull();
+  });
+
   it("heartbeat 는 lease 를 갱신해 재큐를 막는다", async () => {
     let t = 0;
     const hub = new RunnerHub({ newJobId: () => "j1", now: () => t, leaseTtlMs: 100 });

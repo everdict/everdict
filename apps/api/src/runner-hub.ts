@@ -42,6 +42,7 @@ export interface RunnerHubDeps {
 // 설계: docs/architecture/self-hosted-runner.md.
 export class RunnerHub {
   private readonly queues = new Map<string, PendingEntry[]>();
+  private readonly waiters = new Map<string, Array<() => void>>(); // long-poll lease 대기자(키별 wake 콜백)
   private readonly queueTimeoutMs: number;
   private readonly leaseTtlMs: number;
   private readonly newJobId: () => string;
@@ -68,7 +69,7 @@ export class RunnerHub {
   enqueue(key: SelfHostedKey, job: AgentJob): Promise<CaseResult> {
     const jobId = this.newJobId();
     const arr = this.q(key);
-    return new Promise<CaseResult>((resolve, reject) => {
+    const promise = new Promise<CaseResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.remove(key, jobId);
         reject(
@@ -83,6 +84,9 @@ export class RunnerHub {
       (timer as { unref?: () => void }).unref?.();
       arr.push({ jobId, job, resolve, reject, timer });
     });
+    // long-poll 대기 중인 러너가 있으면 깨운다(단일 스레드 → wake 안에서 lease 가 곧장 이 잡을 가져간다).
+    this.waiters.get(selfHostedBackendName(key))?.shift()?.();
+    return promise;
   }
 
   // 다음 미-lease 잡을 가져간다(러너 pull). 없으면 null(러너는 재폴링). leasedAt 기록.
@@ -97,6 +101,32 @@ export class RunnerHub {
     if (!entry) return null;
     entry.leasedAt = now;
     return { jobId: entry.jobId, job: entry.job };
+  }
+
+  // long-poll lease — 즉시 가져갈 잡이 없으면 다음 enqueue(또는 waitMs 타임아웃)까지 대기 후 1건 반환(없으면 null).
+  // 러너가 타이트 루프로 재폴링하지 않게 한다(서버가 잡이 생길 때까지 잡아둔다).
+  leaseWait(key: SelfHostedKey, waitMs: number): Promise<LeasedJob | null> {
+    const immediate = this.lease(key);
+    if (immediate || waitMs <= 0) return Promise.resolve(immediate);
+    const k = selfHostedBackendName(key);
+    return new Promise<LeasedJob | null>((resolve) => {
+      let done = false;
+      const finish = (v: LeasedJob | null) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        const a = this.waiters.get(k);
+        const i = a?.indexOf(wake) ?? -1;
+        if (a && i >= 0) a.splice(i, 1);
+        resolve(v);
+      };
+      const wake = () => finish(this.lease(key)); // enqueue 가 깨움 → 곧장 그 잡을 lease
+      const timer = setTimeout(() => finish(null), waitMs);
+      (timer as { unref?: () => void }).unref?.();
+      const arr = this.waiters.get(k) ?? [];
+      arr.push(wake);
+      this.waiters.set(k, arr);
+    });
   }
 
   // 러너 생존 신호 — lease 를 갱신(leasedAt 갱신)해 장기 실행 잡이 재큐되지 않게 한다. 큐에 없으면 false.

@@ -809,15 +809,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "lease_job",
       {
         description:
-          "다음 평가 잡 1건을 가져온다(러너 pull). 없으면 {job:null} — 잠시 후 재호출. 결과는 submit_job_result 로 회신.",
-        inputSchema: {},
+          "다음 평가 잡 1건을 가져온다(러너 pull, long-poll). 잡이 없으면 wait_ms 까지 대기 후 {job:null} — 즉시 재호출 가능. 결과는 submit_job_result 로 회신.",
+        inputSchema: { wait_ms: z.number().int().min(0).max(60_000).optional() },
       },
-      () =>
+      ({ wait_ms }) =>
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
           if (deps.runnerService) await deps.runnerService.touch(key.owner, key.runnerId); // 접속 표시
-          const leased = hub.lease(key);
+          const leased = await hub.leaseWait(key, wait_ms ?? 0); // 미지정=즉시반환(하위호환)
           return ok(leased ?? { job: null });
         }),
     );
