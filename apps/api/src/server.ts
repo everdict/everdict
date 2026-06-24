@@ -42,6 +42,7 @@ import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
+import { PairRunnerBodySchema, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
@@ -91,6 +92,7 @@ export interface ServerDeps {
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — 아웃바운드 OAuth (없으면 해당 라우트 비활성)
+  runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성 (없으면 /workspaces 라우트 비활성)
@@ -1481,6 +1483,68 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- runners (셀프호스티드 러너; 개인 소유 디바이스 페어링 — 프로필/연결과 동일 self-scoped, 역할 게이트 없음) ---
+  app.get("/runners", async (req, reply) => {
+    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      // 개인 소유 — 역할 게이트 없이 본인(subject)의 러너만 조회.
+      return reply.send({ runners: await deps.runnerService.list(principal.subject) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 디바이스 페어링 — 평문 토큰(rnr_…)은 응답에 한 번만 노출되고 다시 못 본다(저장은 해시). assay runner 가 이 토큰으로 인증.
+  app.post("/runners", async (req, reply) => {
+    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = PairRunnerBodySchema.safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      // 개인 소유: owner=subject. workspace 는 페어링된 워크스페이스(로스터/가시성) 기록용.
+      const paired = await deps.runnerService.pair({
+        owner: principal.subject,
+        workspace: principal.workspace,
+        label: body.data.label,
+        ...(body.data.os !== undefined ? { os: body.data.os } : {}),
+        ...(body.data.capabilities !== undefined ? { capabilities: body.data.capabilities } : {}),
+      });
+      return reply.send({ runner: paired.meta, token: paired.token });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/runners/:id", async (req, reply) => {
+    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      // 개인 소유 — 역할 게이트 없이 본인(subject)의 러너만 해제.
+      await deps.runnerService.revoke(principal.subject, req.params.id);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 워크스페이스 러너 로스터 — 이 워크스페이스에서 페어링된 러너(메타만, 토큰 없음). 읽기 전용(members:read).
+  // 페어/해제 관리는 개인 소유라 account 페이지(GET /runners)에서; 여기는 워크스페이스가 멤버 러너를 한눈에 보는 뷰.
+  app.get("/workspace/runners", async (req, reply) => {
+    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "members:read");
+      return reply.send({ runners: await deps.runnerService.listForWorkspace(principal.workspace) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- workspace settings (계측 정책 등; admin 전용) ---
   app.get("/workspace/settings", async (req, reply) => {
     if (!deps.settingsStore) return reply.code(404).send({ code: "NOT_FOUND", message: "설정 저장소 미설정" });
@@ -1652,6 +1716,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           probeRuntime: deps.probeRuntime,
           secretStore: deps.secretStore,
           connectionService: deps.connectionService,
+          runnerService: deps.runnerService,
           settingsStore: deps.settingsStore,
           benchmarkService: deps.benchmarkService,
           workspaceService: deps.workspaceService,

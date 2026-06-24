@@ -27,6 +27,7 @@ import { deleteDatasetVersion } from "./dataset-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
+import { RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
@@ -44,6 +45,7 @@ export interface McpDeps {
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // 런타임 연결 테스트
   secretStore?: SecretStore;
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — list/connect-url/disconnect
+  runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
@@ -738,6 +740,56 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_workspace_applications",
       { description: "이 워크스페이스에 연결된 외부 계정(애플리케이션) 로스터 — 메타만(토큰 없음)", inputSchema: {} },
       () => run(principal, "members:read", async () => ok({ connections: await connections.listForWorkspace(ws) })),
+    );
+  }
+
+  if (deps.runnerService) {
+    const runners = deps.runnerService;
+    // 셀프호스티드 러너는 개인 소유(owner=principal.subject) — 역할 게이트 없이 본인 러너만 다룬다(연결과 동일 self-scoped, plain).
+    server.registerTool("list_runners", { description: "내 셀프호스티드 러너 목록(토큰 없음)", inputSchema: {} }, () =>
+      plain(async () => ok({ runners: await runners.list(principal.subject) })),
+    );
+    server.registerTool(
+      "pair_runner",
+      {
+        description:
+          "새 디바이스를 셀프호스티드 러너로 페어링. 평문 토큰(rnr_…)이 응답에 한 번만 노출되며 다시 못 본다 — assay runner 가 이 토큰으로 인증한다.",
+        inputSchema: {
+          label: z.string().min(1).max(80).describe("표시용 디바이스 이름(예: ho-macbook)"),
+          os: z.string().min(1).max(40).optional().describe("linux | darwin | win32 등"),
+          capabilities: z
+            .array(z.enum(RUNNER_CAPABILITIES))
+            .optional()
+            .describe("이 머신이 돌릴 수 있는 환경(repo|browser|os-use|docker)"),
+        },
+      },
+      ({ label, os, capabilities }) =>
+        // 개인 소유: owner=subject. ws 는 페어링된 워크스페이스(로스터/가시성) 기록용.
+        plain(async () => {
+          const paired = await runners.pair({
+            owner: principal.subject,
+            workspace: ws,
+            label,
+            ...(os !== undefined ? { os } : {}),
+            ...(capabilities !== undefined ? { capabilities } : {}),
+          });
+          return ok({ runner: paired.meta, token: paired.token });
+        }),
+    );
+    server.registerTool(
+      "revoke_runner",
+      { description: "내 셀프호스티드 러너 해제(삭제). id 는 list_runners 의 id.", inputSchema: { id: z.string() } },
+      ({ id }) =>
+        plain(async () => {
+          await runners.revoke(principal.subject, id);
+          return ok({ id, revoked: true });
+        }),
+    );
+    // 워크스페이스 러너 로스터 — 이 워크스페이스에서 페어링된 러너(메타만). 읽기 전용(members:read). 관리는 개인(list_runners).
+    server.registerTool(
+      "list_workspace_runners",
+      { description: "이 워크스페이스에 페어링된 셀프호스티드 러너 로스터 — 메타만(토큰 없음)", inputSchema: {} },
+      () => run(principal, "members:read", async () => ok({ runners: await runners.listForWorkspace(ws) })),
     );
   }
 

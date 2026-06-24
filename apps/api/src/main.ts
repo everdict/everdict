@@ -16,6 +16,7 @@ import {
   InMemoryConnectionStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
+  InMemoryRunnerStore,
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
@@ -27,6 +28,7 @@ import {
   PgConnectionStore,
   PgOAuthStateStore,
   PgRunStore,
+  PgRunnerStore,
   PgScorecardStore,
   PgSecretStore,
   PgTenantKeyStore,
@@ -35,6 +37,7 @@ import {
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
   type RunStore,
+  type RunnerStore,
   type ScorecardStore,
   type SecretCipher,
   type SecretStore,
@@ -92,6 +95,7 @@ import { githubProvider } from "./oauth/github.js";
 import { mattermostProvider } from "./oauth/mattermost.js";
 import { ProfileService } from "./profile-service.js";
 import { RunService } from "./run-service.js";
+import { RunnerService } from "./runner-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
 import { ScorecardService } from "./scorecard-service.js";
@@ -126,10 +130,12 @@ async function main(): Promise<void> {
     secretStore,
     connectionStore,
     oauthStateStore,
+    runnerStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   const membershipService = new MembershipService(workspaceStore, inviteStore, userProfileStore);
   const profileService = new ProfileService(userProfileStore);
+  const runnerService = new RunnerService(runnerStore);
   await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
   await seedSharedDatasets(datasetRegistry);
   await seedSharedJudges(judgeRegistry);
@@ -264,6 +270,7 @@ async function main(): Promise<void> {
     profileService,
     secretStore,
     connectionService,
+    runnerService,
     authenticator: buildAuthenticator(keyStore),
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
@@ -299,6 +306,7 @@ interface Persistence {
   secretStore: SecretStore; // 항상 사용 가능(기본 ON) — KEK 는 ASSAY_SECRETS_KEY, 없으면 임시 키 자동생성
   connectionStore: ConnectionStore; // 외부 계정 연결(OAuth 토큰) — secretStore 와 같은 cipher 로 at-rest 암호화
   oauthStateStore: OAuthStateStore; // OAuth authorize→callback 1회용 pending state
+  runnerStore: RunnerStore; // 셀프호스티드 러너(개인 디바이스 페어링) — 페어링 토큰은 SHA-256 해시만 보관
 }
 
 // at-rest 암호화 KEK: ASSAY_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
@@ -341,6 +349,7 @@ async function makePersistence(): Promise<Persistence> {
       secretStore: new InMemorySecretStore(cipher),
       connectionStore: new InMemoryConnectionStore(cipher),
       oauthStateStore: new InMemoryOAuthStateStore(),
+      runnerStore: new InMemoryRunnerStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -366,6 +375,7 @@ async function makePersistence(): Promise<Persistence> {
     secretStore: new PgSecretStore(client, cipher),
     connectionStore: new PgConnectionStore(client, cipher),
     oauthStateStore: new PgOAuthStateStore(client),
+    runnerStore: new PgRunnerStore(client),
   };
 }
 

@@ -6,6 +6,7 @@ import {
   InMemoryConnectionStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
+  InMemoryRunnerStore,
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
@@ -32,6 +33,7 @@ import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
+import { RunnerService } from "./runner-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
 import { WorkspaceService } from "./workspace-service.js";
@@ -189,6 +191,7 @@ function server(
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
     secretStore,
     connectionService,
+    runnerService: new RunnerService(new InMemoryRunnerStore()),
     settingsStore,
     workspaceStore,
     workspaceService,
@@ -466,6 +469,67 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     });
     expect(ok.statusCode).toBe(200);
     expect(new URL(ok.json().authorizeUrl as string).searchParams.get("host")).toBe("https://ghe.acme.io");
+    await app.close();
+  });
+});
+
+describe("API — runners (셀프호스티드 러너, 개인 소유 디바이스 페어링)", () => {
+  it("러너는 개인 소유 — viewer 도 본인 러너 pair/list/revoke 가능(역할 게이트 없음), 토큰은 한 번만 노출", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const h = { authorization: "Bearer x" };
+
+    // pair → 평문 토큰(rnr_…)은 응답에만, 메타에는 없다.
+    const paired = await app.inject({
+      method: "POST",
+      url: "/runners",
+      headers: h,
+      payload: { label: "ho-macbook", os: "darwin", capabilities: ["repo", "browser"] },
+    });
+    expect(paired.statusCode).toBe(200);
+    const body = paired.json();
+    expect(body.token).toMatch(/^rnr_/);
+    expect(body.runner).toMatchObject({ label: "ho-macbook", os: "darwin", capabilities: ["repo", "browser"] });
+    expect(JSON.stringify(body.runner)).not.toContain("rnr_");
+
+    // list → 본인 러너 1건, 토큰 미노출.
+    const list = await app.inject({ method: "GET", url: "/runners", headers: h });
+    expect(list.statusCode).toBe(200);
+    expect(list.json().runners).toHaveLength(1);
+    expect(JSON.stringify(list.json())).not.toContain("rnr_");
+
+    // 워크스페이스 로스터(members:read) — 페어링된 워크스페이스 기준으로 1건.
+    const roster = await app.inject({ method: "GET", url: "/workspace/runners", headers: h });
+    expect(roster.statusCode).toBe(200);
+    expect(roster.json().runners).toHaveLength(1);
+
+    // revoke → 204 → 목록 비어짐.
+    const id = body.runner.id as string;
+    expect((await app.inject({ method: "DELETE", url: `/runners/${id}`, headers: h })).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: "/runners", headers: h })).json().runners).toHaveLength(0);
+    await app.close();
+  });
+
+  it("label 누락 → 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runners",
+      headers: { authorization: "Bearer x" },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("미지원 capability → 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/runners",
+      headers: { authorization: "Bearer x" },
+      payload: { label: "x", capabilities: ["gpu"] },
+    });
+    expect(res.statusCode).toBe(400);
     await app.close();
   });
 });

@@ -5,6 +5,7 @@ import {
   InMemoryConnectionStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
+  InMemoryRunnerStore,
   InMemoryScorecardStore,
   InMemoryTenantKeyStore,
   InMemoryUserProfileStore,
@@ -28,6 +29,7 @@ import { buildMcpServer } from "./mcp.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
+import { RunnerService } from "./runner-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 
 const result: CaseResult = {
@@ -100,6 +102,7 @@ function harness() {
       detail: "stub-reachable",
     }),
     keyStore: new InMemoryTenantKeyStore(),
+    runnerService: new RunnerService(new InMemoryRunnerStore()),
     workspaceStore,
     membershipService: new MembershipService(
       workspaceStore,
@@ -163,10 +166,13 @@ describe("MCP tools", () => {
       "list_invites",
       "list_judges",
       "list_members",
+      "list_runners",
       "list_runs",
       "list_runtimes",
       "list_scorecards",
       "list_workspace_applications",
+      "list_workspace_runners",
+      "pair_runner",
       "probe_runtime",
       "pull_scorecard",
       "register_harness",
@@ -174,6 +180,7 @@ describe("MCP tools", () => {
       "remove_member",
       "revoke_api_key",
       "revoke_invite",
+      "revoke_runner",
       "run_scorecard",
       "set_member_role",
       "submit_run",
@@ -222,6 +229,32 @@ describe("MCP tools", () => {
     // 워크스페이스 애플리케이션 로스터 — members:read(viewer+) → 빈 목록(토큰 없음).
     const roster = JSON.parse(text(await viewer.callTool({ name: "list_workspace_applications", arguments: {} })));
     expect(roster).toEqual({ connections: [] });
+  });
+
+  it("runners: 개인 소유 — pair/list/revoke 는 역할 게이트 없이 본인 러너, 로스터는 members:read, 토큰 한 번만", async () => {
+    const deps = harness();
+    const viewer = await connect(deps, ["viewer"]);
+
+    // 러너는 개인 소유 — viewer 도 pair 가능(역할 게이트 없음). 평문 토큰은 응답에만, 메타엔 없다.
+    const paired = JSON.parse(
+      text(await viewer.callTool({ name: "pair_runner", arguments: { label: "ho-macbook", capabilities: ["repo"] } })),
+    );
+    expect(paired.token).toMatch(/^rnr_/);
+    expect(paired.runner).toMatchObject({ label: "ho-macbook", capabilities: ["repo"] });
+
+    // list → 본인 러너 1건, 토큰 미노출.
+    const listed = JSON.parse(text(await viewer.callTool({ name: "list_runners", arguments: {} })));
+    expect(listed.runners).toHaveLength(1);
+    expect(JSON.stringify(listed)).not.toContain("rnr_");
+
+    // 워크스페이스 러너 로스터 — members:read(viewer+) → 1건(토큰 없음).
+    const roster = JSON.parse(text(await viewer.callTool({ name: "list_workspace_runners", arguments: {} })));
+    expect(roster.runners).toHaveLength(1);
+
+    // revoke → revoked:true → 목록 비어짐.
+    const rev = JSON.parse(text(await viewer.callTool({ name: "revoke_runner", arguments: { id: paired.runner.id } })));
+    expect(rev).toMatchObject({ revoked: true });
+    expect(JSON.parse(text(await viewer.callTool({ name: "list_runners", arguments: {} }))).runners).toHaveLength(0);
   });
 
   it("member: submit_run + register_harness(instance) 가능", async () => {
