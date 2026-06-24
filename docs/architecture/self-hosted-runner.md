@@ -1,6 +1,10 @@
-# Self-hosted runner — run a workspace's harness/dataset on *your own* machine (design)
+# Self-hosted runner — run a workspace's harness/dataset on *your own* machine
 
-> **Status: design (doc-first). Five decisions locked with the user; implementation in slices.**
+> **Status: SHIPPED — all 6 slices landed; live e2e green (`scripts/live/self-hosted-runner.mjs`).**
+> Commits: pairing CRUD (`f0ae3e4` api · `a79e42d` web) · `self:` routing + owner-check (`a2e6d11` · `78178ef` web
+> selector) · `SelfHostedBackend`+`RunnerHub` lease queue (`4036215`) · MCP runner protocol + pairing-token auth
+> (`104bc34`) · `assay runner` CLI (`f0dfeca`) · provenance tag + budget split (`7c751bb`) · lease expiry/requeue +
+> heartbeat + live e2e (`a8e74c1`). Five decisions locked with the user (below) all honored.
 > - **D1 — ownership is personal.** A self-hosted runner is owned by `principal.subject` (like
 >   [Connected accounts](../connections.md)), **not** the workspace. The workspace's harnesses/datasets stay
 >   shared SSOT; only the *runtime* becomes personal. It lives on the **account** page (next to 연결된 계정 /
@@ -143,22 +147,30 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
 | MCP tools `lease_job`/`submit_result`/`heartbeat_job` + pairing tools (BFF parity) | **new** (`apps/api`) |
 | `assay runner` CLI (MCP client driving `runAgentJob`) | **new** (`apps/cli`) |
 
-## Slices (keep `pnpm` gates + live e2e green at each step)
+## Slices (all shipped; `pnpm` gates + live e2e green at each step)
 
-1. **`RunnerStore` + pairing** — personal entity (mirror `ConnectionStore`): pair (one-time token on the
-   account page → runner credential), list, revoke; BFF + MCP parity; `Pg*` migration. Account page section
-   "연결된 러너". *No dispatch yet.*
-2. **Runtime selector merge** — the scorecard 실행 form lists the caller's own runners as `self:<runnerId>`
-   options; `RuntimeDispatcher` recognizes the `self:` target shape (resolve + owner check), but with a stub
-   backend. *Selection only.*
-3. **`SelfHostedBackend` + lease queue** — in-memory owner-scoped queue; `dispatch` parks + awaits;
-   `capacity()` from connected runners. Unit-tested with a fake runner.
-4. **MCP runner tools + `assay runner`** — `lease_job`/`submit_result`/`heartbeat_job`; the CLI authenticates to
-   `/mcp`, leases in a loop, runs `runAgentJob`, posts the result, heartbeats.
-5. **Trust/budget/provenance** — isolation bypass for the kind, skip token/usd budget (count `runs`), write the
-   provenance tag; surface the tag in run/scorecard reads + web.
-6. **Robustness + live e2e** — lease expiry → requeue, heartbeat, reconnect; a `scripts/live/self-hosted-runner.mjs`
-   proving a member runs a workspace dataset on a paired local runner with the result tagged in the workspace.
+1. ✅ **`RunnerStore` + pairing** — personal entity (mirrors `ConnectionStore`): pair (token shown once,
+   SHA-256-hashed at rest), list, revoke; BFF + MCP parity; mig `0025_create_runners`. Account page "연결된 러너".
+2. ✅ **Runtime selector merge + `self:` routing** — scorecard 실행 form lists the caller's own runners as
+   `self:<runnerId>`; `RuntimeDispatcher` recognizes `self:` (resolve + owner-check → 404 if unowned). `AgentJob.submittedBy`
+   threads the subject. (Shipped with a stub backend, replaced in slice 3.)
+3. ✅ **`SelfHostedBackend` + `RunnerHub` lease queue** — in-memory owner-scoped FIFO park queue; `dispatch` parks +
+   awaits the post-back; `capacity()` = `maxConcurrent`. `queueTimeoutMs` rejects unleased jobs.
+4. ✅ **MCP runner protocol + `assay runner`** — `runnerAuthenticator` (pairing token `rnr_` → `Principal{via:"runner",
+   runnerId}`, least-privilege); MCP `lease_job`/`submit_job_result`/`fail_job`/`heartbeat_job` (runner-token only);
+   CLI authenticates to `/mcp` (StreamableHTTP), leases in a loop, runs `runAgentJob` (this machine's login), posts back.
+5. ✅ **Provenance + budget** — `CaseResult.provenance{ranOn,runner,by}` stamped control-plane-side by `SelfHostedBackend`;
+   self-hosted runs skip the workspace usd/tokens budget (own login pays; `runs` still counted). Isolation-bypass is by
+   construction (never routes through `TrustZone`).
+6. ✅ **Robustness + live e2e** — lease expiry → requeue (`leaseTtlMs`), `heartbeat` lease-extension (CLI heartbeats
+   during long jobs); `scripts/live/self-hosted-runner.mjs` proves pair → run on `self:<id>` → succeeded + provenance
+   tag (live-verified on the in-memory API + scripted harness, no keys/external deps).
+
+## Follow-ups (not in scope of the 6 slices)
+- **Long-poll `lease_job`** (currently immediate-return + client poll loop).
+- **Runner presence in the web** (`lastSeenAt` is tracked via `touch`; surface "online/offline" + last-seen in the
+  account roster + the runtime selector).
+- **Desktop GUI client**, **admin-targeting a member runner**, **cross-workspace leasing** — see Non-goals.
 
 ## Non-goals (this pass)
 
