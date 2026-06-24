@@ -222,7 +222,10 @@ end-to-end even when the stand-in front-door emits no GenAI spans and MLflow rej
   topology analog of the `__ASSAY_RESULT__` sentinel) — no store hop. `DriveOutcome.response` carries the completion
   body (`sync` = submit response, `poll` = the `done` status body); `delivery.path?` is a dot-path into it (absent =
   whole body), validated as an `EnvSnapshot` (malformed → explicit run failure). Best for small observations.
-- **`egress`** — the run pushes the observation to a named `sink`. *Not yet wired — throws explicitly.*
+- **`egress`** — the agent pushes the observation to a named `sink` (out of band) and Assay **retrieves** it from
+  there (vs `reference` pulling Assay's own provisioned target). The `sink` is a `{run_id}`-interpolated URL GET'd via
+  the backend's `getJson` (keyed by `outcome.traceRef`, matching the trace correlation), validated as an
+  `EnvSnapshot`. For a harness that produces+ships its own result and exposes no CDP.
 
 Pairs with judge placement/store-locality — see `docs/architecture/judge-placement-locality.md` (this is its slice 2).
 

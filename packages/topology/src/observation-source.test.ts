@@ -1,6 +1,11 @@
 import type { EnvSnapshot } from "@assay/core";
 import { describe, expect, it } from "vitest";
-import { observationSourceFor, referenceObservationSource, sentinelObservationSource } from "./observation-source.js";
+import {
+  egressObservationSource,
+  observationSourceFor,
+  referenceObservationSource,
+  sentinelObservationSource,
+} from "./observation-source.js";
 
 const browserSnap: EnvSnapshot = { kind: "browser", url: "http://x", dom: "<html>", screenshotRef: "s", console: [] };
 
@@ -34,10 +39,38 @@ describe("observation-source (delivery seam)", () => {
     );
   });
 
-  it("observationSourceFor: 미설정/reference → reference, sentinel → sentinel, egress → throw", () => {
+  it("egress: sink({run_id} 보간)에서 GET 으로 관측물을 회수한다(에이전트가 push 한 위치)", async () => {
+    let fetched = "";
+    const getJson = async (url: string) => {
+      fetched = url;
+      return browserSnap;
+    };
+    const snap = await egressObservationSource("http://sink/runs/{run_id}/obs.json").observe({
+      target: undefined,
+      getJson,
+      wiring: { run_id: "r1" },
+    });
+    expect(fetched).toBe("http://sink/runs/r1/obs.json");
+    expect(snap).toEqual(browserSnap);
+  });
+
+  it("egress: fetch 프리미티브(getJson)가 없으면 명시적 throw", async () => {
+    await expect(egressObservationSource("http://sink/x").observe({ target: undefined })).rejects.toThrow(
+      /fetch 프리미티브/,
+    );
+  });
+
+  it("egress: 회수 본문이 EnvSnapshot 형식이 아니면 throw", async () => {
+    const getJson = async () => ({ kind: "nope" });
+    await expect(
+      egressObservationSource("http://sink/x").observe({ target: undefined, getJson, wiring: {} }),
+    ).rejects.toThrow(/EnvSnapshot/);
+  });
+
+  it("observationSourceFor: 미설정/reference → reference, sentinel/egress → 각 소스(throw 없음)", () => {
     expect(observationSourceFor(undefined)).toBe(referenceObservationSource);
     expect(observationSourceFor({ mode: "reference" })).toBe(referenceObservationSource);
-    expect(observationSourceFor({ mode: "sentinel" })).not.toBe(referenceObservationSource); // sentinel 구현됨
-    expect(() => observationSourceFor({ mode: "egress", sink: "s3://x" })).toThrow(/egress/);
+    expect(observationSourceFor({ mode: "sentinel" })).not.toBe(referenceObservationSource);
+    expect(observationSourceFor({ mode: "egress", sink: "http://s/x" })).not.toBe(referenceObservationSource);
   });
 });

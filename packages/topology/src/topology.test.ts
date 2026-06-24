@@ -371,6 +371,74 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(result.snapshot).toEqual(fromResponse); // 브라우저 pull(fromBrowser)이 아니라 응답에서 회수
   });
 
+  it("delivery egress: 관측물을 sink({run_id} 보간)에서 GET 으로 회수한다(에이전트가 push 한 위치)", async () => {
+    const fromSink: BrowserSnapshot = {
+      kind: "browser",
+      url: "https://egress",
+      dom: "<from-sink/>",
+      screenshotRef: "r",
+      console: [],
+    };
+    let fetchedUrl = "";
+    const browser: BrowserEnvHandle = {
+      cdpUrl: "ws://browser/ctx",
+      async snapshot() {
+        return { kind: "browser", url: "https://pulled", dom: "<pulled/>", console: [] };
+      },
+      async dispose() {},
+    };
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        return browser;
+      },
+    };
+    const traceSource: TraceSource = {
+      async fetch() {
+        return [];
+      },
+    };
+    const egressSpec: ServiceHarnessSpec = {
+      ...SPEC,
+      target: {
+        kind: "browser",
+        engine: "chromium",
+        lifecycle: "per-case-instance",
+        observe: ["dom"],
+        delivery: { mode: "egress", sink: "http://sink/runs/{run_id}/obs.json" },
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource,
+      specFor: () => egressSpec,
+      submit: async () => ({}),
+      getJson: async (url) => {
+        fetchedUrl = url;
+        return fromSink;
+      },
+      newRunId: () => "fixed",
+    });
+    const job: AgentJob = {
+      harness: { id: "bu", version: "1.0.0" },
+      evalCase: {
+        id: "c1",
+        env: { kind: "browser", startUrl: "https://x" },
+        task: "do it",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+    };
+
+    const result = await backend.dispatch(job);
+    expect(fetchedUrl).toBe("http://sink/runs/fixed/obs.json"); // {run_id} = runId 로 보간
+    expect(result.snapshot).toEqual(fromSink); // 브라우저 pull 아니라 sink 에서 회수
+  });
+
   it("트레이스 소스 장애는 run 을 죽이지 않는다 — error 이벤트로 기록하고 스냅샷+채점은 진행", async () => {
     const browserSnap: BrowserSnapshot = { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
     const runtime: TopologyRuntime = {

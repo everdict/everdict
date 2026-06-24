@@ -150,8 +150,14 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
    live e2e is unaffected. Tests: observation-source sentinel (path / whole-body / malformed-throws), front-door
    `response` (sync=submit, poll=done body), topology integration (browser provisioned but observation read from the
    response, not the pull).
-4. **Egress delivery + cross-runtime locality (optional).** `egress` push to a named sink; revisit affinity tags
-   only if co-location proves insufficient for cross-cluster cases (explicit follow-up, not this pass).
+4. ✅ **Egress delivery — DONE** (cross-runtime locality tags deliberately deferred). `egress` = the agent pushes
+   the observation to a named `sink` (out of band) and Assay **retrieves** it from there — distinct from `reference`
+   (Assay pulls its *own* provisioned target) and `sentinel` (inline). `egressObservationSource(sink)` GETs the
+   `{run_id}`-interpolated sink URL (via the backend's `getJson`, defaulted to `fetchJson`; keyed by
+   `outcome.traceRef` so it matches the trace correlation) and validates as `EnvSnapshot`. Tests: observation-source
+   egress (interpolated fetch / missing-getJson throws / malformed throws), topology integration (browser
+   provisioned but observation retrieved from the sink). **Cross-runtime locality tags stay a non-goal** — co-location
+   covers the real cases; affinity-scoring is speculative (see Non-goals).
 
 ## Non-goals (this pass)
 

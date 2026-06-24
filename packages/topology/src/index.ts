@@ -93,6 +93,8 @@ export {
   type ObservationSource,
   type ObservationTarget,
   type ObserveRequest,
+  egressObservationSource,
   observationSourceFor,
   referenceObservationSource,
+  sentinelObservationSource,
 } from "./observation-source.js";

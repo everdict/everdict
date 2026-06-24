@@ -19,7 +19,8 @@ const fetchSubmit: SubmitFn = async (url, payload) => {
     return undefined;
   }
 };
-const fetchJson: GetJsonFn = async (url) => {
+// 기본 JSON GET — poll 완료 + egress sink 회수의 기본 프리미티브(주입 안 하면 이걸 쓴다).
+export const fetchJson: GetJsonFn = async (url) => {
   const res = await fetch(url, { headers: { accept: "application/json" } });
   return res.json();
 };
