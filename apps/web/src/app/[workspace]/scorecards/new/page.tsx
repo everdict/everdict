@@ -6,6 +6,7 @@ import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
 import { judgesSchema } from '@/entities/judge'
 import { metricsSchema } from '@/entities/metric'
+import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -30,6 +31,7 @@ export default async function NewScorecardPage({
   let judges: { id: string }[] = []
   let metrics: { id: string }[] = []
   let runtimes: { id: string }[] = []
+  let runners: { id: string; label: string }[] = []
   if (allowed) {
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
@@ -40,6 +42,10 @@ export default async function NewScorecardPage({
     } catch {
       // 목록 실패해도 폼은 텍스트 입력으로 동작
     }
+    // 내 셀프호스티드 러너(개인 소유) — 실패해도 폼은 동작(런타임 옵션만 빠짐).
+    try {
+      runners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
+    } catch {}
   }
 
   return (
@@ -63,6 +69,7 @@ export default async function NewScorecardPage({
             judges={judges}
             metrics={metrics}
             runtimes={runtimes}
+            runners={runners}
           />
         </Card>
       ) : (

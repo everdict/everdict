@@ -26,12 +26,14 @@ export function RunScorecardForm({
   judges,
   metrics,
   runtimes,
+  runners,
 }: {
   datasets: { id: string }[]
   harnesses: { id: string }[]
   judges: { id: string }[]
   metrics: { id: string }[]
   runtimes: { id: string }[]
+  runners: { id: string; label: string }[] // 내 셀프호스티드 러너 — self:<id> 로 선택(개인 소유)
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -161,7 +163,23 @@ export function RunScorecardForm({
               {r.id}
             </option>
           ))}
+          {runners.length > 0 && (
+            <optgroup label="내 로컬 호스트">
+              {runners.map((r) => (
+                <option key={r.id} value={`self:${r.id}`}>
+                  {r.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
         </Select>
+        {runners.length > 0 && (
+          <p className="text-[12px] text-muted-foreground">
+            내 로컬 호스트를 고르면 워크스페이스의 공유 하니스·데이터셋을 내 머신에서(내 로그인·repo
+            로) 돌리고 결과를 회신합니다. 내가 페어링한 러너만 보이며, 결과는 워크스페이스에
+            기록됩니다.
+          </p>
+        )}
       </div>
 
       <div className="space-y-1.5">
