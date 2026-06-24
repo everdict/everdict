@@ -99,6 +99,7 @@ import { RunnerService } from "./runner-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
 import { ScorecardService } from "./scorecard-service.js";
+import { SelfHostedStubBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
 import { buildTopologyBackend } from "./topology-backend.js";
 import { WorkspaceService } from "./workspace-service.js";
@@ -171,6 +172,9 @@ async function main(): Promise<void> {
     runtimes: runtimeRegistry,
     secretsFor: runtimeSecretsFor,
     buildBackend: runtimeBuildBackend,
+    // self:<runnerId> — 개인 소유 러너. 제출자(submittedBy) 소유 확인. Slice 2 는 스텁 백엔드(선택/라우팅 경로만; 실제 lease 는 slice 3).
+    resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId)) !== null,
+    buildSelfHostedBackend: (key) => new SelfHostedStubBackend(key),
   });
   // 연결 테스트: 같은 빌더+테넌트 시크릿으로 백엔드를 만들어 probe()(잡 없이 도달성/인증). server/MCP 가 공유.
   const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });

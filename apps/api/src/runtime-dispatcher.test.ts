@@ -97,4 +97,48 @@ describe("RuntimeDispatcher", () => {
     await d.dispatch(job("mylocal"));
     expect(secretsFor).toHaveBeenCalledWith("acme");
   });
+
+  // self:<runnerId> — 개인 소유 셀프호스티드 러너 라우팅(Slice 2: 소유 확인 + 백엔드 빌드/라우팅).
+  const selfJob = (target: string, submittedBy?: string): AgentJob => ({
+    ...job(target),
+    ...(submittedBy ? { submittedBy } : {}),
+  });
+  const selfDeps = (owned: boolean) => {
+    const { inner, seen } = innerSpy();
+    const backends = new BackendRegistry();
+    const stub = { id: "stub", capacity: async () => ({ total: 1, used: 0 }), dispatch: async () => result };
+    const resolveSelfRunner = vi.fn(async () => owned);
+    const buildSelfHostedBackend = vi.fn(() => stub);
+    const d = new RuntimeDispatcher({
+      inner,
+      backends,
+      runtimes: new InMemoryRuntimeRegistry(),
+      secretsFor: async () => ({}),
+      resolveSelfRunner,
+      buildSelfHostedBackend,
+    });
+    return { d, seen, backends, resolveSelfRunner, buildSelfHostedBackend };
+  };
+
+  it("self:<runnerId> 가 제출자 소유면: self:tenant:owner:runnerId 백엔드를 빌드/등록하고 그리로 라우팅", async () => {
+    const { d, seen, backends, resolveSelfRunner } = selfDeps(true);
+    await d.dispatch(selfJob("self:dev-laptop", "u-alice"));
+    expect(resolveSelfRunner).toHaveBeenCalledWith("u-alice", "dev-laptop");
+    expect(backends.has("self:acme:u-alice:dev-laptop")).toBe(true);
+    expect(seen[0]?.evalCase.placement?.target).toBe("self:acme:u-alice:dev-laptop");
+  });
+
+  it("self: 러너가 미소유면 NOT_FOUND(남의 러너 타깃 거부 — 존재 누설 없음)", async () => {
+    const { d, seen } = selfDeps(false);
+    await expect(d.dispatch(selfJob("self:someone-else", "u-alice"))).rejects.toMatchObject({
+      code: "NOT_FOUND",
+      status: 404,
+    });
+    expect(seen).toHaveLength(0); // inner 로 안 감
+  });
+
+  it("self: 인데 submittedBy(소유자) 미상이면 NOT_FOUND", async () => {
+    const { d } = selfDeps(true);
+    await expect(d.dispatch(selfJob("self:dev-laptop"))).rejects.toMatchObject({ status: 404 });
+  });
 });

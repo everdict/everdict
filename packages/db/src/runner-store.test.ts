@@ -35,6 +35,10 @@ describe("InMemoryRunnerStore", () => {
     });
     expect(await s.resolveByToken("rnr_unknown")).toBeNull();
 
+    // get: owner 스코프 단건(소유자 확인용). 다른 owner 로는 null(격리).
+    expect(await s.get("u-alice", alice.meta.id)).toMatchObject({ label: "ho-macbook" });
+    expect(await s.get("u-bob", alice.meta.id)).toBeNull();
+
     // owner 격리: alice 가 bob 러너를 못 본다.
     expect(await s.list("u-bob")).toHaveLength(1);
 

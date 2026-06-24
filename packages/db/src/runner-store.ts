@@ -41,6 +41,7 @@ export interface ResolvedRunner {
 export interface RunnerStore {
   pair(input: PairRunnerInput): Promise<PairedRunner>;
   list(owner: string): Promise<RunnerMeta[]>; // 개인(owner) 메타만
+  get(owner: string, id: string): Promise<RunnerMeta | null>; // owner 스코프 단건(소유자 확인 — 디스패치 self: 라우팅)
   listByWorkspace(workspace: string): Promise<RunnerMeta[]>; // 워크스페이스 로스터(메타만)
   remove(owner: string, id: string): Promise<void>; // owner 스코프, 멱등
   touch(owner: string, id: string): Promise<void>; // lastSeenAt 갱신(멱등; 없는 러너면 no-op)
@@ -93,6 +94,9 @@ export class InMemoryRunnerStore implements RunnerStore {
     return [...(this.byOwner.get(owner)?.values() ?? [])]
       .map((s) => s.meta)
       .sort((a, b) => (a.pairedAt < b.pairedAt ? 1 : -1)); // 최신순
+  }
+  async get(owner: string, id: string): Promise<RunnerMeta | null> {
+    return this.byOwner.get(owner)?.get(id)?.meta ?? null;
   }
   async listByWorkspace(workspace: string): Promise<RunnerMeta[]> {
     return [...this.byOwner.values()]
@@ -170,6 +174,15 @@ export class PgRunnerStore implements RunnerStore {
       [owner],
     );
     return res.rows.map(rowToMeta);
+  }
+  async get(owner: string, id: string): Promise<RunnerMeta | null> {
+    const res = await this.client.query<RunnerRow>(
+      `SELECT id, label, os, capabilities, paired_at, last_seen_at
+       FROM assay_runners WHERE owner = $1 AND id = $2`,
+      [owner, id],
+    );
+    const r = res.rows[0];
+    return r ? rowToMeta(r) : null;
   }
   async listByWorkspace(workspace: string): Promise<RunnerMeta[]> {
     const res = await this.client.query<RunnerRow>(

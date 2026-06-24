@@ -97,6 +97,7 @@ export class RunService {
       harness: input.harness,
       tenant: input.tenant,
       meterUsage,
+      ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
       ...(harnessSpec ? { harnessSpec } : {}),
       ...(judge ? { judge } : {}),
       ...(repoToken ? { repoToken } : {}),

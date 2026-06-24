@@ -1,6 +1,7 @@
 import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@assay/backends";
-import type { AgentJob, CaseResult, RuntimeSpec } from "@assay/core";
+import { type AgentJob, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
 import type { RuntimeRegistry } from "@assay/registry";
+import { type SelfHostedKey, selfHostedBackendName } from "./self-hosted-backend.js";
 
 export interface RuntimeDispatcherDeps {
   inner: Dispatcher; // 글로벌 Scheduler — 공정성/예산/용량은 그대로 위임
@@ -10,6 +11,10 @@ export interface RuntimeDispatcherDeps {
   // RuntimeSpec → Backend 빌더(기본 buildRuntimeBackend = local/docker/nomad/k8s). topology 처럼 @assay/backends 가
   // 의존할 수 없는 백엔드(순환)는 apps/api 가 이걸 주입해 처리한다(buildRuntimeBackend 로 폴백).
   buildBackend?: (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) => Backend;
+  // self:<runnerId> 타깃 — 개인 소유 셀프호스티드 러너. owner(=submittedBy) 가 runnerId 를 소유하는지 확인(미소유=404).
+  resolveSelfRunner?: (owner: string, runnerId: string) => Promise<boolean>;
+  // SelfHostedKey → Backend(Slice 2 스텁 → Slice 3 lease 큐). 주입 없으면 self: 는 일반 경로로 폴백(미설정).
+  buildSelfHostedBackend?: (key: SelfHostedKey) => Backend;
 }
 
 // placement.target 이 "테넌트가 등록한 Runtime" 이면: 그 spec + 테넌트 시크릿으로 Backend 를 빌드해 Scheduler
@@ -21,6 +26,27 @@ export class RuntimeDispatcher implements Dispatcher {
   async dispatch(job: AgentJob): Promise<CaseResult> {
     const tenant = job.tenant ?? "default";
     const target = job.evalCase.placement?.target;
+
+    // self:<runnerId> — 개인 소유 셀프호스티드 러너. 제출자(submittedBy)가 그 러너를 소유하는지 확인 후
+    // (tenant,owner,runnerId) 백엔드로 라우팅. 남의 러너/미상 소유자 타깃은 404(존재 누설 없음 + D3 격리).
+    if (target?.startsWith("self:") && this.deps.resolveSelfRunner && this.deps.buildSelfHostedBackend) {
+      const runnerId = target.slice("self:".length);
+      const owner = job.submittedBy;
+      if (!owner || !runnerId || !(await this.deps.resolveSelfRunner(owner, runnerId)))
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { runnerId, resource: "runner" },
+          "셀프호스티드 러너를 찾을 수 없습니다 — 내가 소유한 러너만 타깃할 수 있습니다.",
+        );
+      const key: SelfHostedKey = { tenant, owner, runnerId };
+      const name = selfHostedBackendName(key);
+      if (!this.deps.backends.has(name)) this.deps.backends.register(name, this.deps.buildSelfHostedBackend(key));
+      return this.deps.inner.dispatch({
+        ...job,
+        evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
+      });
+    }
+
     let routed = job;
     // target 이 글로벌 백엔드 이름이면 그대로(기존 정적 백엔드). 아니면 테넌트 Runtime 으로 해석 시도.
     if (target && !this.deps.backends.has(target)) {

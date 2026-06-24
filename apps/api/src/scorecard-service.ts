@@ -297,6 +297,8 @@ export class ScorecardService {
       const enriched: AgentJob = {
         ...job,
         tenant,
+        // owner(제출자 subject) — self-hosted 러너 디스패치 소유자 확인 + lease 큐 키(단일 run 과 동일).
+        ...(owner ? { submittedBy: owner } : {}),
         ...(harnessSpec ? { harnessSpec } : {}),
         ...(judge ? { judge } : {}),
         ...(repoToken ? { repoToken } : {}),

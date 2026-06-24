@@ -30,6 +30,10 @@ export const AgentJobSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   harnessSpec: HarnessSpecSchema.optional(),
   tenant: z.string().optional(),
+  // 제출자 식별자(principal.subject) — self-hosted 러너 디스패치용. placement.target 이 self:<runnerId> 면
+  // RuntimeDispatcher 가 이 값으로 러너 소유자를 확인하고 lease 큐 키(tenant,submittedBy,runnerId)에 쓴다.
+  // 컨트롤플레인이 채우고(없으면 미설정) 에이전트는 무시한다(tenant 와 동일 — 비공개 repo clone owner 와도 일치).
+  submittedBy: z.string().optional(),
   // 사용량 계측 여부 — 컨트롤플레인이 워크스페이스/요청 정책으로 결정해 잡에 실어 보낸다(글로벌 플래그 대체).
   // 에이전트는 이 값을 우선한다(미지정이면 dev 폴백으로 ASSAY_METER_USAGE env). command 하니스에서만 의미.
   meterUsage: z.boolean().optional(),
