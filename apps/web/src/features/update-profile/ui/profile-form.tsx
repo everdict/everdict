@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Loader2, Lock, Pencil, Trash2 } from 'lucide-react'
 
@@ -90,6 +90,13 @@ export function ProfileForm({
 
   const dirty = n !== (name ?? '') || a !== (avatarUrl ?? '')
 
+  // 저장 직후 확인 표시는 잠깐만 — 변경이 없을 땐 푸터가 자연스럽게 비워지도록 자동 소멸.
+  useEffect(() => {
+    if (!saved) return
+    const t = setTimeout(() => setSaved(false), 2500)
+    return () => clearTimeout(t)
+  }, [saved])
+
   async function onPick(file: File) {
     setError(undefined)
     setSaved(false)
@@ -165,16 +172,22 @@ export function ProfileForm({
 
       {error && <Callout tone="danger">{error}</Callout>}
 
-      <div className="flex items-center gap-3">
-        <Button onClick={onSave} disabled={busy || !dirty} className="gap-1.5">
-          {busy ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : saved ? (
-            <Check className="size-4" />
-          ) : null}
-          {saved ? '저장됨' : '프로필 저장'}
-        </Button>
-      </div>
+      {/* 변경이 있을 때만 저장 버튼이 자연스럽게 나타난다(미수정 시 숨김). 저장 직후엔 잠깐 '저장됨' 확인. */}
+      {busy || dirty || saved ? (
+        <div className="flex items-center animate-in fade-in-0 slide-in-from-top-1 duration-150">
+          {saved && !busy ? (
+            <span className="inline-flex items-center gap-1.5 text-[13px] font-[510] text-muted-foreground">
+              <Check className="size-4 text-primary" />
+              저장됨
+            </span>
+          ) : (
+            <Button onClick={onSave} disabled={busy} className="gap-1.5">
+              {busy ? <Loader2 className="size-4 animate-spin" /> : null}
+              프로필 저장
+            </Button>
+          )}
+        </div>
+      ) : null}
     </div>
   )
 }
