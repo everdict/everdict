@@ -14,7 +14,11 @@
     "assay": "node --env-file-if-exists=.env apps/cli/dist/main.js",
     "api": "node --env-file-if-exists=apps/api/.env apps/api/dist/main.js",
     "api:dev": "node --watch --env-file-if-exists=apps/api/.env apps/api/dist/main.js",
-    "api:start": "pnpm build && pnpm api"
+    "api:start": "pnpm build && pnpm api",
+    "keycloak": "KEYCLOAK_PORT=${KEYCLOAK_PORT:-8081} docker compose -f deploy/keycloak/docker-compose.yaml up -d",
+    "keycloak:down": "docker compose -f deploy/keycloak/docker-compose.yaml down",
+    "keycloak:reset": "docker compose -f deploy/keycloak/docker-compose.yaml down -v",
+    "keycloak:logs": "docker compose -f deploy/keycloak/docker-compose.yaml logs -f keycloak"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
