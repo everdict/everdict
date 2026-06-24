@@ -2,7 +2,7 @@ import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
 import type { AgentJob, CaseResult, EvalCase } from "@assay/core";
 import { InMemoryRunStore } from "@assay/db";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RunService } from "./run-service.js";
 
 const CASE: EvalCase = {
@@ -49,6 +49,31 @@ describe("RunService", () => {
     const done = await svc.get(rec.id);
     expect(done?.status).toBe("succeeded");
     expect(done?.result?.caseId).toBe("c1");
+  });
+
+  it("셀프호스티드 실행(provenance.ranOn=self-hosted)은 워크스페이스 usd/tokens 버짓을 차감하지 않는다", async () => {
+    const store = new InMemoryRunStore();
+    const selfHosted: Dispatcher = {
+      async dispatch(job) {
+        return { ...resultFor(job, 5), provenance: { ranOn: "self-hosted", runner: "laptop", by: "u" } };
+      },
+    };
+    const budget = inMemoryBudget({ limitFor: () => ({}) });
+    const settle = vi.spyOn(budget, "settle");
+    const svc = new RunService({ dispatcher: selfHosted, store, budget, newId: ids });
+    await svc.submit({ tenant: "acme", submittedBy: "u", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(settle).not.toHaveBeenCalled(); // 유저 자기 로그인이 결제 — 워크스페이스 버짓 미차감
+
+    // 대조: 관리형 백엔드 결과(프로비넌스 없음)는 settle 된다.
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(settle).not.toHaveBeenCalled(); // selfHosted 디스패처라 여전히 호출 안 됨
+
+    const managed = new RunService({ dispatcher: okDispatcher, store, budget, newId: ids });
+    await managed.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(settle).toHaveBeenCalledTimes(1); // 관리형은 settle
   });
 
   it("디스패치 실패 시 failed + error 봉투", async () => {

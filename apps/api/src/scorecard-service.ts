@@ -304,7 +304,8 @@ export class ScorecardService {
         ...(repoToken ? { repoToken } : {}),
       };
       const result = await this.deps.dispatcher.dispatch(enriched);
-      this.deps.budget?.settle(tenant, costOf(result));
+      // 셀프호스티드 실행은 유저 로그인이 결제 — 워크스페이스 usd/tokens 버짓 미차감(단일 run 과 동일).
+      if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(tenant, costOf(result));
       return result;
     };
     try {

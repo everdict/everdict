@@ -32,12 +32,22 @@ export const EvalCaseSchema = z.object({
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 
+// 실행 출처(프로비넌스) — 컨트롤플레인이 스탬프(러너 자기보고 아님). 셀프호스티드 러너처럼 "비관리 호스트"에서
+// 돈 결과를 워크스페이스가 식별/신뢰가중하도록. 기본(관리형 백엔드)은 미설정.
+export const CaseProvenanceSchema = z.object({
+  ranOn: z.string(), // 예: "self-hosted"
+  runner: z.string().optional(), // 러너 id(디바이스)
+  by: z.string().optional(), // 실행한 주체(principal.subject)
+});
+export type CaseProvenance = z.infer<typeof CaseProvenanceSchema>;
+
 export const CaseResultSchema = z.object({
   caseId: z.string(),
   harness: z.string(), // "claude-code@1.2.3"
   trace: z.array(TraceEventSchema),
   snapshot: EnvSnapshotSchema,
   scores: z.array(ScoreSchema),
+  provenance: CaseProvenanceSchema.optional(), // 셀프호스티드 등 비관리 실행의 출처(컨트롤플레인 스탬프)
 });
 export type CaseResult = z.infer<typeof CaseResultSchema>;
 

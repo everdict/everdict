@@ -104,7 +104,8 @@ export class RunService {
     };
     try {
       const result = await this.deps.dispatcher.dispatch(job);
-      this.deps.budget?.settle(input.tenant, costOf(result));
+      // 셀프호스티드 실행은 유저 자기 구독 로그인이 결제 주체 — 워크스페이스 usd/tokens 버짓을 끌어쓰지 않는다(runs 는 admit 에서 이미 카운트).
+      if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(input.tenant, costOf(result));
       // os-use 스크린샷(동봉 base64)을 object storage 로 오프로드 → 레코드엔 URL 만(슬림). 실패해도 run 은 성공(폴백: base64 유지).
       if (this.deps.artifacts && result.snapshot) {
         try {

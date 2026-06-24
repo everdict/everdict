@@ -20,8 +20,10 @@ export class SelfHostedBackend implements Backend {
     // used 는 스케줄러가 자기 in-flight 로 반영하므로 0(여기선 파킹 큐가 실 대기를 흡수).
     return { total: this.maxConcurrent, used: 0 };
   }
-  dispatch(job: AgentJob): Promise<CaseResult> {
-    return this.hub.enqueue(this.key, job);
+  async dispatch(job: AgentJob): Promise<CaseResult> {
+    const result = await this.hub.enqueue(this.key, job);
+    // 프로비넌스는 컨트롤플레인이 스탬프(러너 자기보고 아님) — 비관리 개인 호스트 실행임을 결과에 남긴다(D2).
+    return { ...result, provenance: { ranOn: "self-hosted", runner: this.key.runnerId, by: this.key.owner } };
   }
   // 잡 없이 "러너가 붙어 있나"를 단정할 수단이 (Slice 3 엔) 없다 — pull 모델이라 연결 상태는 lease 폴링으로만 드러난다.
   // 대기 중 잡 수만 보고한다(붙어 있으면 곧 빠진다). 정밀 presence/heartbeat 는 Slice 6.
