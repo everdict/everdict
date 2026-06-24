@@ -1,38 +1,32 @@
 import type { Backend, BackendCapacity, ProbeResult } from "@assay/backends";
-import { type AgentJob, type CaseResult, UpstreamError } from "@assay/core";
+import type { AgentJob, CaseResult } from "@assay/core";
+import { type RunnerHub, type SelfHostedKey, selfHostedBackendName } from "./runner-hub.js";
 
-// 셀프호스티드 러너 디스패치 키 — 잡이 흘러갈 러너의 정체성. lease 큐는 (tenant, owner, runnerId)로 키된다(D3).
-export interface SelfHostedKey {
-  tenant: string;
-  owner: string; // 러너 소유자 = principal.subject
-  runnerId: string;
-}
-
-export function selfHostedBackendName(key: SelfHostedKey): string {
-  return `self:${key.tenant}:${key.owner}:${key.runnerId}`;
-}
-
-// Slice 2 스텁 — placement.target=self:<runnerId> 선택/라우팅 경로만 깐다("selection only").
-// 실제 lease 큐(러너가 잡을 가져가고 결과를 회신)는 Slice 3 의 SelfHostedBackend 로 교체된다.
-// 지금은 디스패치가 명시적 UpstreamError 로 끝나 "선택은 되지만 아직 연결 안 됨"을 분명히 한다(무한 큐잉/행 방지).
+// 개인 소유 셀프호스티드 러너 백엔드 — push 가 아니라 pull. dispatch(job)는 RunnerHub 에 잡을 파킹하고
+// promise 를 돌려준다. 러너 클라이언트(assay runner)가 MCP lease 로 가져가 자기 머신에서 돌리고 결과를
+// 회신하면 그 promise 가 resolve 된다. 백엔드 인스턴스는 러너별(=key)로 RuntimeDispatcher 가 등록한다.
 // 설계: docs/architecture/self-hosted-runner.md.
-export class SelfHostedStubBackend implements Backend {
+export class SelfHostedBackend implements Backend {
   readonly id: string;
-  constructor(private readonly key: SelfHostedKey) {
+  constructor(
+    private readonly key: SelfHostedKey,
+    private readonly hub: RunnerHub,
+    // 러너당 동시 파킹 상한 — 스케줄러 게이팅용(파킹은 실자원을 안 쓰니 넉넉히; 실제 직렬화는 lease 가용성이 한다).
+    private readonly maxConcurrent = 8,
+  ) {
     this.id = selfHostedBackendName(key);
   }
-  // total:1 — 스케줄러가 큐잉하지 않고 즉시 dispatch 를 시도하게 한다(스텁이 곧장 명시적 에러를 던지도록).
   async capacity(): Promise<BackendCapacity> {
-    return { total: 1, used: 0 };
+    // used 는 스케줄러가 자기 in-flight 로 반영하므로 0(여기선 파킹 큐가 실 대기를 흡수).
+    return { total: this.maxConcurrent, used: 0 };
   }
-  async dispatch(_job: AgentJob): Promise<CaseResult> {
-    throw new UpstreamError(
-      "UPSTREAM_ERROR",
-      { runnerId: this.key.runnerId, reason: "self_hosted_not_connected" },
-      "셀프호스티드 러너 디스패치는 아직 구현되지 않았습니다(slice 3). 러너 클라이언트가 연결되면 이 잡을 가져갑니다.",
-    );
+  dispatch(job: AgentJob): Promise<CaseResult> {
+    return this.hub.enqueue(this.key, job);
   }
+  // 잡 없이 "러너가 붙어 있나"를 단정할 수단이 (Slice 3 엔) 없다 — pull 모델이라 연결 상태는 lease 폴링으로만 드러난다.
+  // 대기 중 잡 수만 보고한다(붙어 있으면 곧 빠진다). 정밀 presence/heartbeat 는 Slice 6.
   async probe(): Promise<ProbeResult> {
-    return { reachable: false, detail: "self-hosted runner lease 미구현(slice 3)" };
+    const pending = this.hub.pending(this.key);
+    return { reachable: true, detail: `self-hosted runner (pull); pending jobs: ${pending}` };
   }
 }

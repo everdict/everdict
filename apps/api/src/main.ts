@@ -95,11 +95,12 @@ import { githubProvider } from "./oauth/github.js";
 import { mattermostProvider } from "./oauth/mattermost.js";
 import { ProfileService } from "./profile-service.js";
 import { RunService } from "./run-service.js";
+import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
 import { ScorecardService } from "./scorecard-service.js";
-import { SelfHostedStubBackend } from "./self-hosted-backend.js";
+import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
 import { buildTopologyBackend } from "./topology-backend.js";
 import { WorkspaceService } from "./workspace-service.js";
@@ -158,6 +159,14 @@ async function main(): Promise<void> {
   const scheduler = new Scheduler(backends);
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
+  // 셀프호스티드 러너 lease 허브 — self:<runnerId> 잡을 파킹하고, 러너 프로토콜(MCP, slice 4)이 가져가/회신한다.
+  // 디스패처(파킹)와 MCP lease/result 도구(가져가기/완료)가 공유하는 단일 인스턴스.
+  const runnerHub = new RunnerHub(
+    process.env.ASSAY_SELF_HOSTED_QUEUE_TIMEOUT_MS
+      ? { queueTimeoutMs: Number(process.env.ASSAY_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
+      : {},
+  );
+
   // 테넌트 런타임 라우팅: placement.target 이 테넌트 등록 Runtime 이면 그 백엔드를 빌드/등록해 라우팅(아니면 글로벌 백엔드 그대로).
   const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
   // RuntimeSpec → 라이브 백엔드. topology 런타임 → ServiceTopologyBackend, 나머지는 buildRuntimeBackend(local/docker/nomad/k8s).
@@ -172,9 +181,9 @@ async function main(): Promise<void> {
     runtimes: runtimeRegistry,
     secretsFor: runtimeSecretsFor,
     buildBackend: runtimeBuildBackend,
-    // self:<runnerId> — 개인 소유 러너. 제출자(submittedBy) 소유 확인. Slice 2 는 스텁 백엔드(선택/라우팅 경로만; 실제 lease 는 slice 3).
+    // self:<runnerId> — 개인 소유 러너. 제출자(submittedBy) 소유 확인 후 lease 허브를 쓰는 백엔드로 라우팅(파킹→pull).
     resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId)) !== null,
-    buildSelfHostedBackend: (key) => new SelfHostedStubBackend(key),
+    buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
   });
   // 연결 테스트: 같은 빌더+테넌트 시크릿으로 백엔드를 만들어 probe()(잡 없이 도달성/인증). server/MCP 가 공유.
   const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });

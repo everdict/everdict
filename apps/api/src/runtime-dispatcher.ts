@@ -1,7 +1,7 @@
 import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@assay/backends";
 import { type AgentJob, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
 import type { RuntimeRegistry } from "@assay/registry";
-import { type SelfHostedKey, selfHostedBackendName } from "./self-hosted-backend.js";
+import { type SelfHostedKey, selfHostedBackendName } from "./runner-hub.js";
 
 export interface RuntimeDispatcherDeps {
   inner: Dispatcher; // 글로벌 Scheduler — 공정성/예산/용량은 그대로 위임

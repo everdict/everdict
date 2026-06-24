@@ -1,0 +1,122 @@
+import { randomUUID } from "node:crypto";
+import { type AgentJob, type CaseResult, UpstreamError } from "@assay/core";
+
+// 셀프호스티드 러너 디스패치 키 — 잡이 흘러갈 러너의 정체성. lease 큐는 (tenant, owner, runnerId)로 키된다(D3).
+export interface SelfHostedKey {
+  tenant: string;
+  owner: string; // 러너 소유자 = principal.subject
+  runnerId: string;
+}
+
+export function selfHostedBackendName(key: SelfHostedKey): string {
+  return `self:${key.tenant}:${key.owner}:${key.runnerId}`;
+}
+
+// 러너가 lease 로 가져가는 잡 한 건(MCP lease_job 응답의 코어).
+export interface LeasedJob {
+  jobId: string;
+  job: AgentJob;
+}
+
+interface PendingEntry {
+  jobId: string;
+  job: AgentJob;
+  resolve: (r: CaseResult) => void;
+  reject: (e: Error) => void;
+  leasedAt?: number; // 러너가 가져간 시각(undefined=대기 중). Slice 6 의 만료/재큐가 이걸 본다.
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export interface RunnerHubDeps {
+  // 잡이 lease+완료될 때까지의 상한 — 미연결/유휴 러너에 파킹된 잡이 영원히 매달리지 않게 거부한다.
+  // (정교한 만료/재큐 + 하트비트 기반 lease 갱신은 Slice 6.)
+  queueTimeoutMs?: number;
+  newJobId?: () => string;
+  now?: () => number;
+}
+
+// 개인 소유 셀프호스티드 러너의 인메모리 lease 허브 — push→pull 의 핵심.
+// SelfHostedBackend.dispatch 가 잡을 여기 파킹(promise 반환)하고, 러너 프로토콜(MCP, Slice 4)이
+// lease(가져가기)/complete(결과 회신)로 그 promise 를 resolve 한다. 키별(=러너별) FIFO 큐.
+// 설계: docs/architecture/self-hosted-runner.md.
+export class RunnerHub {
+  private readonly queues = new Map<string, PendingEntry[]>();
+  private readonly queueTimeoutMs: number;
+  private readonly newJobId: () => string;
+  private readonly now: () => number;
+  constructor(deps: RunnerHubDeps = {}) {
+    this.queueTimeoutMs = deps.queueTimeoutMs ?? 300_000; // 기본 5분
+    this.newJobId = deps.newJobId ?? randomUUID;
+    this.now = deps.now ?? Date.now;
+  }
+
+  private q(key: SelfHostedKey): PendingEntry[] {
+    const k = selfHostedBackendName(key);
+    let arr = this.queues.get(k);
+    if (!arr) {
+      arr = [];
+      this.queues.set(k, arr);
+    }
+    return arr;
+  }
+
+  // 잡을 파킹하고 결과 promise 를 돌려준다(SelfHostedBackend.dispatch). 러너가 complete 하면 resolve,
+  // 타임아웃이면 reject(미연결/유휴). 키별 FIFO.
+  enqueue(key: SelfHostedKey, job: AgentJob): Promise<CaseResult> {
+    const jobId = this.newJobId();
+    const arr = this.q(key);
+    return new Promise<CaseResult>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.remove(key, jobId);
+        reject(
+          new UpstreamError(
+            "UPSTREAM_ERROR",
+            { runnerId: key.runnerId, reason: "no_runner" },
+            "셀프호스티드 러너가 잡을 가져가지 않았습니다 — 연결된 러너가 없거나 유휴 상태입니다.",
+          ),
+        );
+      }, this.queueTimeoutMs);
+      // 타이머가 프로세스를 붙잡지 않게(테스트/종료 친화). Node 외 런타임엔 unref 없음 → 옵셔널 체이닝.
+      (timer as { unref?: () => void }).unref?.();
+      arr.push({ jobId, job, resolve, reject, timer });
+    });
+  }
+
+  // 다음 미-lease 잡을 가져간다(러너 pull). 없으면 null(러너는 재폴링). leasedAt 기록.
+  lease(key: SelfHostedKey): LeasedJob | null {
+    const entry = this.q(key).find((e) => e.leasedAt === undefined);
+    if (!entry) return null;
+    entry.leasedAt = this.now();
+    return { jobId: entry.jobId, job: entry.job };
+  }
+
+  // 러너가 결과를 회신 → 파킹된 promise resolve. 큐에 없으면 false(이미 완료/만료/미상).
+  complete(key: SelfHostedKey, jobId: string, result: CaseResult): boolean {
+    const entry = this.remove(key, jobId);
+    if (!entry) return false;
+    clearTimeout(entry.timer);
+    entry.resolve(result);
+    return true;
+  }
+
+  // 러너가 잡 실행 실패를 회신 → promise reject(우리 에러로 remap). 큐에 없으면 false.
+  fail(key: SelfHostedKey, jobId: string, message: string): boolean {
+    const entry = this.remove(key, jobId);
+    if (!entry) return false;
+    clearTimeout(entry.timer);
+    entry.reject(new UpstreamError("UPSTREAM_ERROR", { runnerId: key.runnerId, jobId }, message));
+    return true;
+  }
+
+  // 대기/lease 중 잡 수(capacity/관측용).
+  pending(key: SelfHostedKey): number {
+    return this.q(key).length;
+  }
+
+  private remove(key: SelfHostedKey, jobId: string): PendingEntry | undefined {
+    const arr = this.q(key);
+    const i = arr.findIndex((e) => e.jobId === jobId);
+    if (i < 0) return undefined;
+    return arr.splice(i, 1)[0];
+  }
+}
