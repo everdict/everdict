@@ -45,6 +45,7 @@ export interface RunnerStore {
   listByWorkspace(workspace: string): Promise<RunnerMeta[]>; // 워크스페이스 로스터(메타만)
   remove(owner: string, id: string): Promise<void>; // owner 스코프, 멱등
   touch(owner: string, id: string): Promise<void>; // lastSeenAt 갱신(멱등; 없는 러너면 no-op)
+  setCapabilities(owner: string, id: string, capabilities: string[]): Promise<void>; // 러너 자가-광고(docker 등). 멱등; 없는 러너 no-op
   resolveByToken(token: string): Promise<ResolvedRunner | null>; // 토큰 해시로 러너 해석(내부 전용)
 }
 
@@ -113,6 +114,10 @@ export class InMemoryRunnerStore implements RunnerStore {
   async touch(owner: string, id: string): Promise<void> {
     const s = this.byOwner.get(owner)?.get(id);
     if (s) s.meta = { ...s.meta, lastSeenAt: this.now() };
+  }
+  async setCapabilities(owner: string, id: string, capabilities: string[]): Promise<void> {
+    const s = this.byOwner.get(owner)?.get(id);
+    if (s) s.meta = { ...s.meta, capabilities };
   }
   async resolveByToken(token: string): Promise<ResolvedRunner | null> {
     const hit = this.byTokenHash.get(hashKey(token));
@@ -197,6 +202,13 @@ export class PgRunnerStore implements RunnerStore {
   }
   async touch(owner: string, id: string): Promise<void> {
     await this.client.query("UPDATE assay_runners SET last_seen_at = now() WHERE owner = $1 AND id = $2", [owner, id]);
+  }
+  async setCapabilities(owner: string, id: string, capabilities: string[]): Promise<void> {
+    await this.client.query("UPDATE assay_runners SET capabilities = $3 WHERE owner = $1 AND id = $2", [
+      owner,
+      id,
+      capabilities.join(" "),
+    ]);
   }
   async resolveByToken(token: string): Promise<ResolvedRunner | null> {
     const res = await this.client.query<{ owner: string; workspace: string; id: string }>(

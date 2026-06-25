@@ -72,6 +72,14 @@ describe("InMemoryRunnerStore", () => {
     await s.touch("u-alice", "nope"); // 없는 러너 — 던지지 않는다
   });
 
+  it("setCapabilities 는 capabilities 를 덮어쓰고, 없는 러너면 no-op", async () => {
+    const s = new InMemoryRunnerStore(() => "2026-01-01T00:00:00Z");
+    const r = await s.pair({ owner: "u-alice", workspace: "acme", label: "laptop", capabilities: ["repo"] });
+    await s.setCapabilities("u-alice", r.meta.id, ["repo", "docker", "browser"]); // 러너 자가-광고(docker 감지)
+    expect((await s.get("u-alice", r.meta.id))?.capabilities).toEqual(["repo", "docker", "browser"]);
+    await s.setCapabilities("u-alice", "nope", ["docker"]); // 없는 러너 — 던지지 않는다
+  });
+
   it("capabilities/os 미지정이면 빈 배열 + os 생략", async () => {
     const s = new InMemoryRunnerStore(() => "2026-01-01T00:00:00Z");
     const r = await s.pair({ owner: "u-alice", workspace: "acme", label: "minimal" });

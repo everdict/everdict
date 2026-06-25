@@ -1,5 +1,5 @@
 import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@assay/backends";
-import { type AgentJob, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
+import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
 import type { RuntimeRegistry } from "@assay/registry";
 import { type SelfHostedKey, selfHostedBackendName } from "./runner-hub.js";
 
@@ -11,8 +11,9 @@ export interface RuntimeDispatcherDeps {
   // RuntimeSpec → Backend 빌더(기본 buildRuntimeBackend = local/docker/nomad/k8s). topology 처럼 @assay/backends 가
   // 의존할 수 없는 백엔드(순환)는 apps/api 가 이걸 주입해 처리한다(buildRuntimeBackend 로 폴백).
   buildBackend?: (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) => Backend;
-  // self:<runnerId> 타깃 — 개인 소유 셀프호스티드 러너. owner(=submittedBy) 가 runnerId 를 소유하는지 확인(미소유=404).
-  resolveSelfRunner?: (owner: string, runnerId: string) => Promise<boolean>;
+  // self:<runnerId> 타깃 — 개인 소유 셀프호스티드 러너. 미소유=undefined(404), 소유=그 러너의 capabilities[]
+  // (소유 확인 + capability 게이트를 한 번에). service 하니스는 docker capability 가 필요(아래 게이트).
+  resolveSelfRunner?: (owner: string, runnerId: string) => Promise<string[] | undefined>;
   // SelfHostedKey → Backend(Slice 2 스텁 → Slice 3 lease 큐). 주입 없으면 self: 는 일반 경로로 폴백(미설정).
   buildSelfHostedBackend?: (key: SelfHostedKey) => Backend;
 }
@@ -32,11 +33,19 @@ export class RuntimeDispatcher implements Dispatcher {
     if (target?.startsWith("self:") && this.deps.resolveSelfRunner && this.deps.buildSelfHostedBackend) {
       const runnerId = target.slice("self:".length);
       const owner = job.submittedBy;
-      if (!owner || !runnerId || !(await this.deps.resolveSelfRunner(owner, runnerId)))
+      const caps = owner && runnerId ? await this.deps.resolveSelfRunner(owner, runnerId) : undefined;
+      if (!owner || !runnerId || caps === undefined)
         throw new NotFoundError(
           "NOT_FOUND",
           { runnerId, resource: "runner" },
           "셀프호스티드 러너를 찾을 수 없습니다 — 내가 소유한 러너만 타깃할 수 있습니다.",
+        );
+      // service(토폴로지) 하니스는 로컬 Docker 토폴로지를 띄우므로 러너에 docker capability 필요 — 없으면 실행 전 명시적 거부.
+      if (job.harnessSpec?.kind === "service" && !caps.includes("docker"))
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { runnerId, need: "docker", have: caps },
+          "이 셀프호스티드 러너는 service(토폴로지) 하니스를 돌릴 수 없습니다 — docker capability 가 없습니다(Docker 설치 후 러너 재시작).",
         );
       // 키에 tenant 없음 — 러너는 소유자의 여러 워크스페이스 잡을 한 큐에서 받는다(크로스 워크스페이스). 잡이 tenant 를 보유.
       const key: SelfHostedKey = { owner, runnerId };

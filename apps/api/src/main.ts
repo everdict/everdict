@@ -187,8 +187,8 @@ async function main(): Promise<void> {
     runtimes: runtimeRegistry,
     secretsFor: runtimeSecretsFor,
     buildBackend: runtimeBuildBackend,
-    // self:<runnerId> — 개인 소유 러너. 제출자(submittedBy) 소유 확인 후 lease 허브를 쓰는 백엔드로 라우팅(파킹→pull).
-    resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId)) !== null,
+    // self:<runnerId> — 개인 소유 러너. 소유 확인(미소유=undefined) + 그 러너의 capabilities 반환(service 게이트용).
+    resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
     buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
   });
   // 연결 테스트: 같은 빌더+테넌트 시크릿으로 백엔드를 만들어 probe()(잡 없이 도달성/인증). server/MCP 가 공유.

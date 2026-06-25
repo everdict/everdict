@@ -33,6 +33,11 @@ export class RunnerService {
   async touch(owner: string, id: string): Promise<void> {
     await this.store.touch(owner, id);
   }
+  // 러너 자가-광고 — 실제 capability(예: docker 데몬 감지)를 lease 때 보고. 알 수 없는 값은 버린다. 없는 러너 no-op.
+  async setCapabilities(owner: string, id: string, capabilities: string[]): Promise<void> {
+    const known = new Set<string>(RUNNER_CAPABILITIES);
+    await this.store.setCapabilities(owner, id, [...new Set(capabilities.filter((c) => known.has(c)))]);
+  }
   // 워크스페이스 로스터(읽기 전용) — 이 워크스페이스에서 페어링된 러너 메타(토큰 없음). settings>멤버 탭용.
   async listForWorkspace(workspace: string): Promise<RunnerMeta[]> {
     return this.store.listByWorkspace(workspace);

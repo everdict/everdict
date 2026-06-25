@@ -1,4 +1,6 @@
+import { execFile } from "node:child_process";
 import { readFileSync } from "node:fs";
+import { promisify } from "node:util";
 import { collectAuthEnv, hasClaudeAuth } from "@assay/agent";
 import {
   BackendRegistry,
@@ -201,7 +203,17 @@ async function suiteCommand(flags: Map<string, string>): Promise<void> {
 
 // 셀프호스티드 러너 — 이 머신에서 워크스페이스의 잡을 가져가(pull) 돌리고 결과를 회신한다(push→pull).
 // 페어링 토큰(rnr_)으로 /mcp 에 인증하고 lease_job → runLeasedJob(service→Docker 토폴로지/그외→LocalDriver) → submit_job_result.
-// 설계: docs/architecture/self-hosted-runner.md.
+// docker 데몬 도달성 — 있으면 러너가 docker/browser capability 를 광고(service 하니스를 로컬 Docker 토폴로지로 구동).
+async function probeDocker(): Promise<boolean> {
+  try {
+    await promisify(execFile)("docker", ["version", "--format", "{{.Server.Version}}"]);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// 설계: docs/architecture/self-hosted-runner.md (+ self-hosted-service-runner.md).
 async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const token = flags.get("pair") ?? process.env.ASSAY_RUNNER_TOKEN;
   if (!token || !token.startsWith("rnr_")) {
@@ -227,7 +239,12 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
   });
   await client.connect(transport);
-  console.error(`▶ assay runner — ${mcpUrl} 연결됨. 잡 폴링 중(${pollMs}ms, Ctrl-C 종료) …`);
+  // 실제 capability 자가-광고: docker 데몬이 있으면 docker/browser(service 하니스 가능). 매 lease 마다 보고.
+  const dockerOk = await probeDocker();
+  const capabilities = ["repo", ...(dockerOk ? ["docker", "browser"] : [])];
+  console.error(
+    `▶ assay runner — ${mcpUrl} 연결됨. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (docker 없음 → service 하니스 불가)"}. 잡 폴링 중(${pollMs}ms, Ctrl-C 종료) …`,
+  );
 
   const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
     const r = await client.callTool({ name, arguments: args });
@@ -247,7 +264,7 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   while (!stop) {
     let leased: Record<string, unknown>;
     try {
-      leased = await callJson("lease_job", { wait_ms: waitMs }); // long-poll — 서버가 잡 생길 때까지 대기
+      leased = await callJson("lease_job", { wait_ms: waitMs, capabilities }); // long-poll + capability 자가-광고
     } catch (e) {
       console.error(`✗ lease 실패: ${errMsg(e)}`);
       await sleep(pollMs);

@@ -844,14 +844,21 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "lease_job",
       {
         description:
-          "다음 평가 잡 1건을 가져온다(러너 pull, long-poll). 잡이 없으면 wait_ms 까지 대기 후 {job:null} — 즉시 재호출 가능. 결과는 submit_job_result 로 회신.",
-        inputSchema: { wait_ms: z.number().int().min(0).max(60_000).optional() },
+          "다음 평가 잡 1건을 가져온다(러너 pull, long-poll). 잡이 없으면 wait_ms 까지 대기 후 {job:null} — 즉시 재호출 가능. capabilities 를 주면 러너 자가-광고(docker 감지 등 → service 하니스 게이트). 결과는 submit_job_result 로 회신.",
+        inputSchema: {
+          wait_ms: z.number().int().min(0).max(60_000).optional(),
+          capabilities: z.array(z.string()).optional(),
+        },
       },
-      ({ wait_ms }) =>
+      ({ wait_ms, capabilities }) =>
         plain(async () => {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
-          if (deps.runnerService) await deps.runnerService.touch(key.owner, key.runnerId); // 접속 표시
+          if (deps.runnerService) {
+            await deps.runnerService.touch(key.owner, key.runnerId); // 접속 표시
+            // 러너가 실제 capability 를 보고하면 갱신(docker 감지 → service 하니스 디스패치 게이트가 정확해진다).
+            if (capabilities) await deps.runnerService.setCapabilities(key.owner, key.runnerId, capabilities);
+          }
           const leased = await hub.leaseWait(key, wait_ms ?? 0); // 미지정=즉시반환(하위호환)
           return ok(leased ?? { job: null });
         }),
