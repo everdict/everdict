@@ -1,4 +1,9 @@
-import { workspaceApplicationsSchema, type ConnectionMeta } from '@/entities/connection'
+import {
+  workspaceApplicationsSchema,
+  workspaceIntegrationsResponseSchema,
+  type ConnectionMeta,
+  type WorkspaceIntegration,
+} from '@/entities/connection'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
 import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
@@ -27,12 +32,20 @@ export default async function SettingsPage() {
   let workspace: WorkspaceRecord | undefined
   let secrets: SecretMeta[] = []
   let applications: ConnectionMeta[] = []
+  let integrations: WorkspaceIntegration[] = []
+  let integrationsCallbackUrl: string | undefined
   let members: Member[] = []
   let invites: Invite[] = []
   let error: string | undefined
   try {
     if (canReadSettings) {
       workspace = workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
+      // self-hosted provider OAuth 앱 통합(관리자 1회 등록 → 멤버 원클릭). settings:read(admin).
+      const ints = workspaceIntegrationsResponseSchema.parse(
+        await controlPlane.getWorkspaceIntegrations(ctx)
+      )
+      integrations = ints.providers
+      integrationsCallbackUrl = ints.callbackUrl
     }
     if (canReadSecrets) secrets = secretsSchema.parse(await controlPlane.listSecrets(ctx))
     if (canReadMembers) {
@@ -70,6 +83,10 @@ export default async function SettingsPage() {
           {...(workspace !== undefined ? { workspace } : {})}
           secrets={secrets}
           applications={applications}
+          integrations={integrations}
+          {...(integrationsCallbackUrl !== undefined
+            ? { integrationsCallbackUrl }
+            : {})}
           members={members}
           invites={invites}
           canReadSettings={canReadSettings}

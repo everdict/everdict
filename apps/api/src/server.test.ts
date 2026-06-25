@@ -175,6 +175,7 @@ function server(
       ["github-enterprise", { impl: fakeOAuth, selfHosted: true }],
     ]),
     secretsFor: async () => ({ GHE_SECRET: "ghs_real" }), // self-hosted client_secret name-ref
+    settings: settingsStore, // self-hosted 통합(관리자 등록) 자격증명의 SSOT
     config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
   });
   const app = buildServer({
@@ -363,16 +364,13 @@ describe("API — authorization (roles)", () => {
 });
 
 describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", () => {
-  it("admin: GET /connections → 200 {connections:[], providers:[{id,selfHosted}]}", async () => {
+  it("GET /connections → 200 — 통합 미설정이면 self-hosted(GHE)는 미노출(github.com env 만)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
       connections: [],
-      providers: [
-        { id: "github", selfHosted: false },
-        { id: "github-enterprise", selfHosted: true },
-      ],
+      providers: [{ id: "github", selfHosted: false }], // GHE 는 관리자 통합 등록 전엔 멤버에게 안 보임
     });
     await app.close();
   });
@@ -449,26 +447,68 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     expect((await app.inject({ method: "GET", url: "/connections", headers: h })).json().connections).toHaveLength(0);
     await app.close();
   });
-  it("self-hosted(GHE): host+clientId+clientSecretName 누락→400, 갖추면 authorizeUrl(host 반영)", async () => {
+  it("self-hosted(GHE): 통합 미설정이면 멤버 start→400(자격증명 안 받음)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const res = await app.inject({
+      method: "POST",
+      url: "/connections/github-enterprise/start",
+      headers: { authorization: "Bearer x" },
+      payload: {},
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("통합: viewer 는 등록 불가(403), admin 1회 등록 → 멤버 원클릭 start(host 반영) + GET /connections 노출", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     const h = { authorization: "Bearer x" };
-    // 누락 → 400.
-    const bad = await app.inject({
+    const cfg = { host: "https://ghe.acme.io", clientId: "Iv1.cafe", clientSecretName: "GHE_SECRET" };
+
+    // viewer 는 통합 쓰기 불가(settings:write 게이트).
+    const { app: viewerApp } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const denied = await viewerApp.inject({
+      method: "PUT",
+      url: "/workspace/integrations/github-enterprise",
+      headers: { authorization: "Bearer x" },
+      payload: cfg,
+    });
+    expect(denied.statusCode).toBe(403);
+    await viewerApp.close();
+
+    // admin 등록 → 200, listIntegrations 에 configured.
+    const put = await app.inject({
+      method: "PUT",
+      url: "/workspace/integrations/github-enterprise",
+      headers: h,
+      payload: cfg,
+    });
+    expect(put.statusCode).toBe(200);
+    const ghe = (put.json().providers as Array<{ id: string; configured: boolean; host?: string }>).find(
+      (p) => p.id === "github-enterprise",
+    );
+    expect(ghe).toMatchObject({ configured: true, host: "https://ghe.acme.io", clientSecretName: "GHE_SECRET" });
+    expect(JSON.stringify(put.json())).not.toContain("ghs_real"); // 시크릿 값은 절대 미반환
+
+    // 멤버는 자격증명 없이 원클릭 start → authorizeUrl 에 통합의 host 반영.
+    const start = await app.inject({
       method: "POST",
       url: "/connections/github-enterprise/start",
       headers: h,
-      payload: { host: "https://ghe.acme.io" },
+      payload: {},
     });
-    expect(bad.statusCode).toBe(400);
-    // 갖추면 → authorizeUrl 에 GHE host 반영(SecretStore 의 GHE_SECRET 로 client_secret resolve).
-    const ok = await app.inject({
-      method: "POST",
-      url: "/connections/github-enterprise/start",
-      headers: h,
-      payload: { host: "https://ghe.acme.io", clientId: "Iv1.cafe", clientSecretName: "GHE_SECRET" },
-    });
-    expect(ok.statusCode).toBe(200);
-    expect(new URL(ok.json().authorizeUrl as string).searchParams.get("host")).toBe("https://ghe.acme.io");
+    expect(start.statusCode).toBe(200);
+    expect(new URL(start.json().authorizeUrl as string).searchParams.get("host")).toBe("https://ghe.acme.io");
+
+    // 이제 GET /connections 가 GHE 를 원클릭 가능 provider 로 노출.
+    const conns = await app.inject({ method: "GET", url: "/connections", headers: h });
+    expect(conns.json().providers).toContainEqual({ id: "github-enterprise", selfHosted: true });
+
+    // DELETE 통합 → 204 → 다시 미노출.
+    expect(
+      (await app.inject({ method: "DELETE", url: "/workspace/integrations/github-enterprise", headers: h })).statusCode,
+    ).toBe(204);
+    const after = await app.inject({ method: "GET", url: "/connections", headers: h });
+    expect(after.json().providers).not.toContainEqual({ id: "github-enterprise", selfHosted: true });
     await app.close();
   });
 });

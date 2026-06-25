@@ -10,10 +10,13 @@ connected (settings → 멤버 탭). Think Slack: you authorize an app personall
 connected. (This deliberately diverges from the `SecretStore` model, which stays workspace-scoped.)
 
 Shipped: the **connection lifecycle** (connect → list → disconnect) for all three providers — github.com
-(env OAuth App, one-click), GitHub Enterprise + Mattermost (self-hosted: per-connection host + OAuth-app
-credentials via the workspace `SecretStore`). The eventual uses — private repo clones (harness seeds),
-container image pulls (GHCR/registry), posting results back (PR/status), and channel notifications
-(Mattermost) — are later *consumption* slices (Phase 3).
+(env OAuth App, one-click). For **self-hosted** GitHub Enterprise + Mattermost, a **workspace admin registers
+the OAuth app once** (Settings → 통합/Integrations: host + clientId + a `SecretStore` name-ref for the
+client_secret), and then **members connect one-click — no client-ID entry** (the genuine Linear experience).
+The OAuth-app credentials live in `WorkspaceSettings.integrations` (admin-gated, `settings:write`); the
+per-member connect surface (`GET /connections` / `POST …/start` / `get_connect_url`) carries **no** credentials.
+The eventual uses — private repo clones (harness seeds), container image pulls (GHCR/registry), posting results
+back (PR/status), and channel notifications (Mattermost) — are later *consumption* slices (Phase 3).
 
 ## Model
 - Keyed by **`(owner, id)`** where `owner = principal.subject` (OIDC `sub`, `key:<ws>` for an API key, or `"dev"`
@@ -31,8 +34,16 @@ container image pulls (GHCR/registry), posting results back (PR/status), and cha
 - **Workspace roster is `members:read`.** `GET /workspace/applications` (and MCP `list_workspace_applications`)
   returns the **metadata** roster of connections created in this workspace, gated by `members:read` (viewer+) — it
   surfaces in the settings 멤버 탭, read-only. It never returns tokens and never manages connections.
-- A provider is **connectable** only if the control plane has its OAuth-app credentials configured (env). With
-  none set, the feature degrades to listing/disconnecting existing connections.
+- A provider is **connectable** (shown to members as a one-click button) only if its OAuth app is configured:
+  github.com needs the control-plane **env** credentials; self-hosted GHE/Mattermost need a **workspace
+  integration** registered by an admin. With none configured, the feature degrades to listing/disconnecting
+  existing connections.
+- **Self-hosted OAuth app = workspace asset (admin), not per-connection.** `WorkspaceSettings.integrations`
+  (`{ [provider]: { host, clientId, clientSecretName } }`, in the existing `assay_workspace_settings` JSONB) holds
+  the admin-registered OAuth app per self-hosted provider. None of these three values is a secret (the
+  client_secret **value** lives only in the `SecretStore`, referenced by name), so they are safe to return. This
+  is the **one** part of connections that is workspace-scoped + admin-gated; the connection *tokens* stay
+  personally owned.
 
 ## The OAuth dance (control-plane-owned; `client_secret`/tokens never touch the browser)
 1. Web "Connect GitHub" → server action → authed `POST /connections/:provider/start` → control plane stores a
@@ -40,42 +51,53 @@ container image pulls (GHCR/registry), posting results back (PR/status), and cha
 2. The web client navigates the browser to `authorizeUrl`.
 3. Provider → **public** `GET /connections/callback?code&state` on the control plane (no Bearer; authenticated by
    consuming the one-time `state`).
-4. Control plane exchanges `code`→token (server-to-server with `client_secret`), calls the provider's "whoami"
-   for an `accountLabel`, and stores the encrypted token under **`owner = pending.createdBy`** (the connecting
-   subject) + the **`workspace`** carried in the pending state.
+4. Control plane resolves the provider config — github.com from **env**, self-hosted from the **workspace
+   integration** (`pending.workspace` + `provider` → `WorkspaceSettings.integrations[provider]`, client_secret
+   re-resolved from the `SecretStore` by name) — exchanges `code`→token (server-to-server with `client_secret`),
+   calls the provider's "whoami" for an `accountLabel`, and stores the encrypted token under
+   **`owner = pending.createdBy`** (the connecting subject) + the **`workspace`** carried in the pending state.
+   The pending state carries **no** credentials (just `{workspace, provider, createdBy}`) — the callback
+   re-reads the current workspace integration.
 5. Control plane 302s the browser back to `${WEB_BASE_URL}/<workspace>/account?tab=connections&connected=<provider>`
    (or `…&error=<reason>`) — the personal **account** page, not workspace settings. The callback never returns 5xx
    to the browser — failures become an `error` redirect. (`workspace` from the pending state still drives the
-   redirect URL + self-hosted `client_secret` resolution; only **ownership** is personal.)
+   redirect URL + self-hosted credential resolution; only **ownership** is personal.)
 
 ## Manage (API + MCP, same `ConnectionService` core)
-| Surface | List (personal) | Connect | Disconnect | Workspace roster |
+**Personal connect/disconnect** (self-scoped by `subject`, no role gate) + **workspace roster** (`members:read`):
+| Surface | List (personal) | Connect (one-click) | Disconnect | Workspace roster |
 |---|---|---|---|---|
-| HTTP | `GET /connections` → `{connections, providers:[{id,selfHosted}]}` (my connections) | `POST /connections/:provider/start` → `{authorizeUrl}` · `GET /connections/callback` (public, 302) | `DELETE /connections/:id` → 204 | `GET /workspace/applications` → `{connections}` (`members:read`) |
-| MCP | `list_connections` | `get_connect_url {provider, host?, clientId?, clientSecretName?}` → `{authorizeUrl}` (a human opens it; agents can't complete an interactive browser OAuth) | `disconnect_connection {id}` | `list_workspace_applications` (`members:read`) |
+| HTTP | `GET /connections` → `{connections, providers:[{id,selfHosted}]}` (my connections + connectable providers) | `POST /connections/:provider/start` → `{authorizeUrl}` (**no body credentials**) · `GET /connections/callback` (public, 302) | `DELETE /connections/:id` → 204 | `GET /workspace/applications` → `{connections}` (`members:read`) |
+| MCP | `list_connections` | `get_connect_url {provider}` → `{authorizeUrl}` (a human opens it; agents can't complete an interactive browser OAuth) | `disconnect_connection {id}` | `list_workspace_applications` (`members:read`) |
 
-All personal columns scope to `principal.subject` (no role gate); the roster scopes to `principal.workspace` (`members:read`). Tokens are never returned by any column.
+**Workspace integration management** (admin, `settings:read`/`settings:write`) — registers the self-hosted OAuth app:
+| Surface | List | Set | Remove |
+|---|---|---|---|
+| HTTP | `GET /workspace/integrations` → `{providers:[{id,selfHosted,configured,host?,clientId?,clientSecretName?}], callbackUrl?}` (`settings:read`) | `PUT /workspace/integrations/:provider` `{host,clientId,clientSecretName}` → `{providers}` (`settings:write`) | `DELETE /workspace/integrations/:provider` → 204 (`settings:write`) |
+| MCP | `list_workspace_integrations` | `set_workspace_integration {provider,host,clientId,clientSecretName}` | `remove_workspace_integration {provider}` |
 
-The `start` body for **self-hosted** providers carries `{host, clientId, clientSecretName}` (`clientId` is the
-public OAuth-app id; `clientSecretName` is a `SecretStore` key — the secret **value** never crosses the wire and
-is re-resolved server-side at the callback). github.com needs none of these (env default). `GET /connections`
-lists each connectable provider as `{id, selfHosted}` so the web shows a one-click button (github.com) vs a
-host+credentials form (GHE/Mattermost).
+`GET /connections` lists each connectable provider as `{id, selfHosted}` so the web shows a **one-click button**
+for every provider (no more host+credentials form on the account page). For self-hosted providers, that button
+appears only once an admin has registered the workspace integration. `callbackUrl` (the
+`${API_PUBLIC_URL}/connections/callback` value the admin must register on the provider's OAuth app) is returned
+from the integrations read so the admin UI can display it. Tokens / client_secret **values** are never returned
+by any surface.
 
 ## Providers
 - **github** (github.com): env **OAuth App** (`GITHUB_OAUTH_CLIENT_ID/_SECRET`), one-click. Scopes `repo read:packages`.
-- **github-enterprise**: same GitHub impl, host-aware (`https://<host>/login/oauth/…`, API `…/api/v3`). Per-connection
-  `host` + `clientId` + `clientSecretName` (SecretStore). No env.
+- **github-enterprise**: same GitHub impl, host-aware (`https://<host>/login/oauth/…`, API `…/api/v3`).
+  Workspace integration: admin registers `host` + `clientId` + `clientSecretName` (SecretStore name-ref) once. No env.
 - **mattermost**: OAuth2 (`/oauth/authorize`, form-encoded `/oauth/access_token` → access+refresh+expiry,
-  `/api/v4/users/me`). Self-hosted: per-connection `host` + `clientId` + `clientSecretName`. No env. Refresh
-  token + expiry persisted in `ConnectionStore`.
+  `/api/v4/users/me`). Workspace integration: admin registers `host` + `clientId` + `clientSecretName` once. No
+  env. Refresh token + expiry persisted in `ConnectionStore`.
 
 ## Config (env, control plane)
 - `GITHUB_OAUTH_CLIENT_ID` / `GITHUB_OAUTH_CLIENT_SECRET` — the github.com **OAuth App**. Callback URL must be
   `${API_PUBLIC_URL}/connections/callback`. (GHE/Mattermost need **no env** — their credentials are per-workspace
-  `SecretStore` name-refs supplied at connect time.)
+  integrations an admin registers in Settings → 통합, with the client_secret as a `SecretStore` name-ref.)
 - `API_PUBLIC_URL` — externally reachable API base (the provider must reach the callback). If unset, the start
-  route falls back to the request host (dev); the MCP `get_connect_url` requires it.
+  route falls back to the request host (dev); the MCP `get_connect_url`/`list_workspace_integrations` `callbackUrl`
+  require it.
 - `WEB_BASE_URL` — where the callback redirects the browser back (default `http://localhost:3001`).
 
 ## Phase 3 — consumption (the stored token does real work)
@@ -118,15 +140,23 @@ host+credentials form (GHE/Mattermost).
 - Providers (`apps/api/src/oauth/github.test.ts`, `mattermost.test.ts`): authorize-URL builders, github.com vs
   GHE host branching (`/api/v3`), GitHub's 200-`{error}` → `UpstreamError`, Mattermost form-encoded exchange +
   refresh/expiry, whoami, non-2xx → `UpstreamError`, missing-host → `BadRequestError`.
+- Settings store (`packages/db/src/workspace-settings.test.ts`): `integrations` round-trip, setting integrations
+  doesn't clobber `notify`/`meterUsage` (top-level merge), host-not-URL rejected, Pg `||` jsonb merge upsert.
 - Service (`apps/api/src/connection-service.test.ts`): github.com + self-hosted start→callback round-trips,
-  `providerInfos` visibility, SecretStore name-ref resolution (+ missing-secret → `BadRequestError`), one-time/
-  invalid state, provider `error`, exchange failure → `error` redirect (no 5xx).
-- API (`apps/api/src/server.test.ts`): list/start/callback(302 → `/account`)/disconnect end-to-end, self-hosted
-  start (missing fields → 400; host reflected in authorizeUrl), **token never returned**, replayed state →
-  invalid, unknown provider → 400, **viewer can list *and* start (no role gate)**, `GET /workspace/applications`
-  roster (`members:read`) shows the connected account.
-- MCP (`apps/api/src/mcp.test.ts`): `list_connections`/`get_connect_url`/`disconnect_connection` parity
-  (**no role gate** — personal) + `list_workspace_applications` roster (`members:read`).
+  `connectableProviders` visibility (self-hosted hidden until the workspace integration is set), self-hosted
+  start **resolves from the workspace integration** (missing integration → `BadRequestError`; missing
+  `SecretStore` secret → `BadRequestError`), `setIntegration` rejects non-self-hosted providers,
+  `listIntegrations`/`removeIntegration` per-provider read-merge-write (other integrations preserved),
+  one-time/invalid state, provider `error`, exchange failure → `error` redirect (no 5xx).
+- API (`apps/api/src/server.test.ts`): list/start/callback(302 → `/account`)/disconnect end-to-end, **token never
+  returned**, replayed state → invalid, unknown provider → 400, **viewer can list *and* start (no role gate)**;
+  self-hosted start with no integration → 400, `GET /connections` hides GHE until configured; integration routes
+  `PUT/DELETE /workspace/integrations/:provider` admin-gated (**viewer → 403**), admin set → member one-click
+  start (host reflected) + GHE appears in `GET /connections`, **client_secret value never returned**;
+  `GET /workspace/applications` roster (`members:read`) shows the connected account.
+- MCP (`apps/api/src/mcp.test.ts`): `list_connections`/`get_connect_url {provider}`/`disconnect_connection` parity
+  (**no role gate** — personal) + `list_workspace_applications` roster (`members:read`) + integration tools
+  `list/set/remove_workspace_integration` (`settings:*`, member → error, secret value never returned).
 - Repo-clone consumption (Phase 3a): `packages/environments/src/repo.test.ts` (private clone injects
   `http.extraheader` via `GIT_CONFIG_*` env, token **not** in argv; public clone has no auth env) +
   `apps/api/src/run-service.test.ts` (`connectionId` → `repoTokenFor(owner=submittedBy, …)` resolved →

@@ -87,8 +87,10 @@ function harness() {
       states: new InMemoryOAuthStateStore(),
       providers: new Map<string, ProviderEntry>([
         ["github", { impl: fakeOAuth, selfHosted: false, default: { clientId: "cid", clientSecret: "csec" } }],
+        ["github-enterprise", { impl: fakeOAuth, selfHosted: true }],
       ]),
-      secretsFor: async () => ({}),
+      secretsFor: async () => ({ GHE_SECRET: "ghs_real" }),
+      settings: new InMemoryWorkspaceSettingsStore(),
       config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
     }),
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
@@ -192,6 +194,7 @@ describe("MCP tools", () => {
       "list_runtimes",
       "list_scorecards",
       "list_workspace_applications",
+      "list_workspace_integrations",
       "list_workspace_runners",
       "pair_runner",
       "probe_runtime",
@@ -199,11 +202,13 @@ describe("MCP tools", () => {
       "register_harness",
       "register_harness_template",
       "remove_member",
+      "remove_workspace_integration",
       "revoke_api_key",
       "revoke_invite",
       "revoke_runner",
       "run_scorecard",
       "set_member_role",
+      "set_workspace_integration",
       "submit_job_result",
       "submit_run",
       "validate_dataset",
@@ -251,6 +256,44 @@ describe("MCP tools", () => {
     // 워크스페이스 애플리케이션 로스터 — members:read(viewer+) → 빈 목록(토큰 없음).
     const roster = JSON.parse(text(await viewer.callTool({ name: "list_workspace_applications", arguments: {} })));
     expect(roster).toEqual({ connections: [] });
+  });
+
+  it("workspace integrations: admin 1회 등록 → 멤버 원클릭(list_connections 노출), 시크릿 미반환, member 는 쓰기 불가", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"]);
+    const member = await connect(deps, ["member"]);
+    const cfg = {
+      provider: "github-enterprise",
+      host: "https://ghe.acme.io",
+      clientId: "Iv1.cafe",
+      clientSecretName: "GHE_SECRET",
+    };
+
+    // member 는 settings:write 없음 → 등록 불가.
+    expect((await member.callTool({ name: "set_workspace_integration", arguments: cfg })).isError).toBe(true);
+
+    // admin 등록 → configured + 시크릿 값 미반환.
+    const set = await admin.callTool({ name: "set_workspace_integration", arguments: cfg });
+    expect(set.isError).toBeFalsy();
+    expect(text(set)).not.toContain("ghs_real");
+    const integrations = JSON.parse(text(await admin.callTool({ name: "list_workspace_integrations", arguments: {} })));
+    expect(integrations.providers).toContainEqual({
+      id: "github-enterprise",
+      selfHosted: true,
+      configured: true,
+      host: "https://ghe.acme.io",
+      clientId: "Iv1.cafe",
+      clientSecretName: "GHE_SECRET",
+    });
+
+    // 멤버는 이제 GHE 를 원클릭 연결 가능(list_connections 의 connectable providers).
+    const conns = JSON.parse(text(await member.callTool({ name: "list_connections", arguments: {} })));
+    expect(conns.providers).toContainEqual({ id: "github-enterprise", selfHosted: true });
+
+    // remove → configured false.
+    await admin.callTool({ name: "remove_workspace_integration", arguments: { provider: "github-enterprise" } });
+    const after = JSON.parse(text(await admin.callTool({ name: "list_workspace_integrations", arguments: {} })));
+    expect(after.providers.find((p: { id: string }) => p.id === "github-enterprise").configured).toBe(false);
   });
 
   it("runners: 개인 소유 — pair/list/revoke 는 역할 게이트 없이 본인 러너, 로스터는 members:read, 토큰 한 번만", async () => {

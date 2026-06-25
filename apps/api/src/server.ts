@@ -1404,38 +1404,28 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // 연결은 개인 소유 — 역할 게이트 없이 본인(subject)의 연결만 조회(프로필과 동일하게 self-scoped).
       return reply.send({
         connections: await deps.connectionService.list(principal.subject),
-        providers: deps.connectionService.providerInfos(), // 연결 가능한 provider({id, selfHosted})
+        // 멤버가 원클릭 연결 가능한 provider({id, selfHosted}) — self-hosted 는 관리자가 통합을 등록한 경우에만 노출.
+        providers: await deps.connectionService.connectableProviders(principal.workspace),
       });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // OAuth 시작 — authorizeUrl 을 만들어 반환(웹이 브라우저를 그 URL 로 보낸다). authed.
+  // OAuth 시작 — authorizeUrl 을 만들어 반환(웹이 브라우저를 그 URL 로 보낸다). authed. 멤버는 자격증명 입력 없음:
+  // github.com 은 env 기본, self-hosted(GHE/Mattermost)는 관리자가 등록한 워크스페이스 통합에서 자격증명을 resolve.
   app.post<{ Params: { provider: string } }>("/connections/:provider/start", async (req, reply) => {
     if (!deps.connectionService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    // self-hosted(GHE/Mattermost): host + clientId(공개) + clientSecretName(SecretStore 키). github.com 은 모두 생략.
-    const body = z
-      .object({
-        host: z.string().url().optional(),
-        clientId: z.string().min(1).optional(),
-        clientSecretName: z.string().min(1).optional(),
-      })
-      .safeParse(req.body ?? {});
-    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
-      // 연결은 개인 소유 — 역할 게이트 없음. workspace 는 self-hosted client_secret(SecretStore) resolve + 콜백 redirect 용으로만 운반.
+      // 연결은 개인 소유 — 역할 게이트 없음. workspace 는 self-hosted 통합 resolve + 콜백 redirect 용으로 운반.
       const { authorizeUrl } = await deps.connectionService.start({
         workspace: principal.workspace,
         createdBy: principal.subject,
         provider: req.params.provider,
         requestBaseUrl: baseUrl(req),
-        ...(body.data.host !== undefined ? { host: body.data.host } : {}),
-        ...(body.data.clientId !== undefined ? { clientId: body.data.clientId } : {}),
-        ...(body.data.clientSecretName !== undefined ? { clientSecretName: body.data.clientSecretName } : {}),
       });
       return reply.send({ authorizeUrl });
     } catch (err) {
@@ -1576,6 +1566,65 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ? { ...body.data, notify: { ...body.data.notify, ownerSubject: principal.subject } }
         : body.data;
       return reply.send(await deps.settingsStore.set(principal.workspace, patch)); // 병합된 설정 반환
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- workspace integrations (self-hosted 외부계정 OAuth 앱; 관리자 1회 등록 → 멤버 원클릭 연결. admin 전용) ---
+  // GET 는 settings:read(자격증명 값 아님 — host/clientId/시크릿 이름만), PUT/DELETE 는 settings:write.
+  app.get("/workspace/integrations", async (req, reply) => {
+    if (!deps.connectionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:read");
+      const callbackUrl = deps.connectionService.callbackUrl(baseUrl(req)); // admin 이 OAuth 앱에 등록할 콜백 URL
+      return reply.send({
+        providers: await deps.connectionService.listIntegrations(principal.workspace),
+        ...(callbackUrl !== undefined ? { callbackUrl } : {}),
+      });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.put<{ Params: { provider: string } }>("/workspace/integrations/:provider", async (req, reply) => {
+    if (!deps.connectionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        host: z.string().url(),
+        clientId: z.string().min(1),
+        clientSecretName: z.string().min(1), // client_secret 의 SecretStore 키 이름(값 아님)
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      const providers = await deps.connectionService.setIntegration(
+        principal.workspace,
+        req.params.provider,
+        body.data,
+      );
+      return reply.send({ providers });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { provider: string } }>("/workspace/integrations/:provider", async (req, reply) => {
+    if (!deps.connectionService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:write");
+      await deps.connectionService.removeIntegration(principal.workspace, req.params.provider);
+      return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
     }

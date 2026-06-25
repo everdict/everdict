@@ -16,24 +16,13 @@ export interface StartConnectionResult {
   error?: string
 }
 
-// self-hosted(GHE/Mattermost) 연결 시 폼 입력. github.com 은 생략(원클릭).
-export interface SelfHostedConnectInput {
-  host: string
-  clientId: string
-  clientSecretName: string // client_secret 이 저장된 SecretStore 키 이름(값 아님)
-}
-
 // OAuth 시작 — 컨트롤플레인이 authorizeUrl 을 만들어 돌려준다. 클라이언트가 그 URL 로 브라우저를 보낸다.
-// 연결은 개인 소유(self-scoped by subject) — 역할 게이트 없음. self-hosted 면 host+clientId+clientSecretName 전달.
-export async function startConnectionAction(
-  provider: string,
-  selfHosted?: SelfHostedConnectInput
-): Promise<StartConnectionResult> {
+// 연결은 개인 소유(self-scoped by subject) — 역할 게이트 없음. 멤버는 자격증명 입력 없이 원클릭: github.com 은 env 기본,
+// self-hosted(GHE/Mattermost)는 관리자가 등록한 워크스페이스 통합에서 컨트롤플레인이 자격증명을 resolve.
+export async function startConnectionAction(provider: string): Promise<StartConnectionResult> {
   const ctx = await authContext()
   try {
-    const res = connectionStartSchema.parse(
-      await controlPlane.startConnection(ctx, provider, selfHosted ?? {})
-    )
+    const res = connectionStartSchema.parse(await controlPlane.startConnection(ctx, provider))
     return { ok: true, authorizeUrl: res.authorizeUrl }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }

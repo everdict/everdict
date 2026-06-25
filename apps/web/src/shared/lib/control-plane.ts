@@ -189,16 +189,26 @@ export const controlPlane = {
     callVoid(auth, `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   // 외부 계정 연결(Connected accounts, 아웃바운드 OAuth). 개인 소유 — 목록=내(subject) 연결 메타만(토큰 없음) + 연결 가능한 provider.
   // start 는 authorizeUrl 을 돌려주고(브라우저를 그 URL 로 보낸다), disconnect 는 204(callVoid).
+  // 멤버는 자격증명 입력 없음: github.com 은 env 기본, self-hosted 는 관리자가 등록한 워크스페이스 통합에서 resolve.
   listConnections: <T>(auth: AuthContext) => call<T>(auth, '/connections'),
   // 워크스페이스 애플리케이션 로스터(읽기 전용) — 이 워크스페이스에서 만들어진 연결 메타만(members:read).
   listWorkspaceApplications: <T>(auth: AuthContext) => call<T>(auth, '/workspace/applications'),
-  startConnection: <T>(auth: AuthContext, provider: string, body: unknown) =>
+  startConnection: <T>(auth: AuthContext, provider: string) =>
     call<T>(auth, `/connections/${encodeURIComponent(provider)}/start`, {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify({}),
     }),
   disconnectConnection: (auth: AuthContext, id: string) =>
     callVoid(auth, `/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // self-hosted 외부계정 OAuth 앱 통합(관리자 1회 등록 → 멤버 원클릭). settings:read/write. 시크릿 값은 절대 안 내려옴.
+  getWorkspaceIntegrations: <T>(auth: AuthContext) => call<T>(auth, '/workspace/integrations'),
+  setWorkspaceIntegration: <T>(auth: AuthContext, provider: string, body: unknown) =>
+    call<T>(auth, `/workspace/integrations/${encodeURIComponent(provider)}`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  removeWorkspaceIntegration: (auth: AuthContext, provider: string) =>
+    callVoid(auth, `/workspace/integrations/${encodeURIComponent(provider)}`, { method: 'DELETE' }),
   // 셀프호스티드 러너(개인 소유 디바이스 페어링). 목록=내(subject) 러너 메타만(토큰 없음).
   // pair 는 평문 토큰(rnr_…)을 1회만 돌려주고(저장은 해시), revoke 는 204(callVoid).
   listRunners: <T>(auth: AuthContext) => call<T>(auth, '/runners'),

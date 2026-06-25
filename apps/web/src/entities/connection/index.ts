@@ -4,8 +4,12 @@ export {
   connectionStartSchema,
   providerInfoSchema,
   workspaceApplicationsSchema,
+  workspaceIntegrationSchema,
+  workspaceIntegrationsResponseSchema,
   type ConnectionMeta,
   type ConnectionsResponse,
   type ProviderInfo,
   type WorkspaceApplications,
+  type WorkspaceIntegration,
+  type WorkspaceIntegrations,
 } from './model/schema'

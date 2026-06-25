@@ -1,5 +1,10 @@
 import { BadRequestError } from "@assay/core";
-import { InMemoryConnectionStore, InMemoryOAuthStateStore, aesGcmCipher } from "@assay/db";
+import {
+  InMemoryConnectionStore,
+  InMemoryOAuthStateStore,
+  InMemoryWorkspaceSettingsStore,
+  aesGcmCipher,
+} from "@assay/db";
 import { describe, expect, it } from "vitest";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
@@ -24,31 +29,46 @@ const githubEntry: ProviderEntry = {
   selfHosted: false,
   default: { clientId: "cid", clientSecret: "csec" },
 };
+const gheEntry: ProviderEntry = { impl: okImpl, selfHosted: true };
+const GHE = { host: "https://ghe.acme.io", clientId: "Iv1.cafe", clientSecretName: "GHE_SECRET" };
 
-function build(providers: Map<string, ProviderEntry>, secrets: Record<string, string> = {}) {
+function build(
+  providers: Map<string, ProviderEntry>,
+  opts: { secrets?: Record<string, string>; settings?: InMemoryWorkspaceSettingsStore } = {},
+) {
   return new ConnectionService({
     store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 1))),
     states: new InMemoryOAuthStateStore(),
     providers,
-    secretsFor: async () => secrets,
+    secretsFor: async () => opts.secrets ?? {},
+    settings: opts.settings ?? new InMemoryWorkspaceSettingsStore(),
     config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test", stateTtlSec: 600 },
   });
 }
 
 describe("ConnectionService", () => {
-  it("providerInfos: github.com 은 default 있을 때만, self-hosted 는 항상", () => {
-    const both = build(
+  it("connectableProviders: github.com 은 default 있을 때만, self-hosted 는 워크스페이스 통합이 설정된 경우만", async () => {
+    const s = build(
       new Map([
         ["github", githubEntry],
-        ["github-enterprise", { impl: okImpl, selfHosted: true }],
+        ["github-enterprise", gheEntry],
       ]),
+      {
+        secrets: { GHE_SECRET: "x" },
+      },
     );
-    expect(both.providerInfos()).toEqual([
+    // 통합 미설정 → github.com 만 원클릭 가능
+    expect(await s.connectableProviders("acme")).toEqual([{ id: "github", selfHosted: false }]);
+    // 관리자가 통합 등록 → self-hosted 도 멤버에게 노출
+    await s.setIntegration("acme", "github-enterprise", { ...GHE, clientId: "c" });
+    expect(await s.connectableProviders("acme")).toEqual([
       { id: "github", selfHosted: false },
       { id: "github-enterprise", selfHosted: true },
     ]);
-    // github.com default 없으면 미노출.
-    expect(build(new Map([["github", { impl: okImpl, selfHosted: false }]])).providerInfos()).toEqual([]);
+    // github.com default 없으면 미노출
+    expect(
+      await build(new Map([["github", { impl: okImpl, selfHosted: false }]])).connectableProviders("acme"),
+    ).toEqual([]);
   });
 
   it("미설정 provider start 는 BadRequestError", async () => {
@@ -101,6 +121,7 @@ describe("ConnectionService", () => {
       states: new InMemoryOAuthStateStore(),
       providers: new Map([["github", githubEntry]]),
       secretsFor: async () => ({}),
+      settings: new InMemoryWorkspaceSettingsStore(),
       config: { webBaseUrl: "http://web.test" },
     });
     await expect(s.start({ workspace: "acme", createdBy: "u", provider: "github" })).rejects.toBeInstanceOf(
@@ -108,40 +129,29 @@ describe("ConnectionService", () => {
     );
   });
 
-  // ── self-hosted (GHE/Mattermost) ──────────────────────────────────────
-  it("self-hosted start: host/clientId/clientSecretName 누락이면 BadRequest", async () => {
-    const s = build(new Map([["github-enterprise", { impl: okImpl, selfHosted: true }]]));
-    await expect(
-      s.start({ workspace: "acme", createdBy: "u", provider: "github-enterprise", host: "https://ghe.acme.io" }),
-    ).rejects.toBeInstanceOf(BadRequestError); // clientId/clientSecretName 없음
+  // ── self-hosted (GHE/Mattermost): 관리자 통합 1회 등록 → 멤버 원클릭 ──────────────────
+  it("self-hosted start: 워크스페이스 통합 미설정이면 BadRequest(자격증명을 받지 않는다)", async () => {
+    const s = build(new Map([["github-enterprise", gheEntry]]));
+    await expect(s.start({ workspace: "acme", createdBy: "u", provider: "github-enterprise" })).rejects.toBeInstanceOf(
+      BadRequestError,
+    );
   });
 
-  it("self-hosted: SecretStore 에 client_secret 없으면 start BadRequest", async () => {
-    const s = build(new Map([["github-enterprise", { impl: okImpl, selfHosted: true }]]), {}); // secrets 비어있음
-    await expect(
-      s.start({
-        workspace: "acme",
-        createdBy: "u",
-        provider: "github-enterprise",
-        host: "https://ghe.acme.io",
-        clientId: "Iv1.cafe",
-        clientSecretName: "GHE_SECRET",
-      }),
-    ).rejects.toBeInstanceOf(BadRequestError);
+  it("self-hosted: 통합은 있으나 SecretStore 에 client_secret 없으면 start BadRequest", async () => {
+    const s = build(new Map([["github-enterprise", gheEntry]]), {}); // secrets 비어있음
+    await s.setIntegration("acme", "github-enterprise", GHE);
+    await expect(s.start({ workspace: "acme", createdBy: "u", provider: "github-enterprise" })).rejects.toBeInstanceOf(
+      BadRequestError,
+    );
   });
 
-  it("self-hosted 왕복: SecretStore name-ref 로 client_secret resolve → host 포함 저장", async () => {
-    const s = build(new Map([["github-enterprise", { impl: okImpl, selfHosted: true }]]), { GHE_SECRET: "ghs_real" });
-    const { authorizeUrl } = await s.start({
-      workspace: "acme",
-      createdBy: "u",
-      provider: "github-enterprise",
-      host: "https://ghe.acme.io",
-      clientId: "Iv1.cafe",
-      clientSecretName: "GHE_SECRET",
-    });
+  it("self-hosted 왕복: 관리자 통합 등록 → 멤버 원클릭 start → SecretStore name-ref resolve → host 포함 저장", async () => {
+    const s = build(new Map([["github-enterprise", gheEntry]]), { secrets: { GHE_SECRET: "ghs_real" } });
+    await s.setIntegration("acme", "github-enterprise", GHE);
+    // 멤버는 자격증명 없이 provider 만으로 start
+    const { authorizeUrl } = await s.start({ workspace: "acme", createdBy: "u", provider: "github-enterprise" });
     const u = new URL(authorizeUrl);
-    expect(u.searchParams.get("host")).toBe("https://ghe.acme.io"); // impl 이 config.host 를 받았다
+    expect(u.searchParams.get("host")).toBe("https://ghe.acme.io"); // impl 이 통합의 config.host 를 받았다
     expect(u.searchParams.get("cid")).toBe("Iv1.cafe");
     const state = u.searchParams.get("state") as string;
     const { redirectTo } = await s.callback({ code: "c", state });
@@ -149,5 +159,50 @@ describe("ConnectionService", () => {
     const list = await s.list("u");
     expect(list).toHaveLength(1);
     expect(list[0]).toMatchObject({ provider: "github-enterprise", host: "https://ghe.acme.io" });
+  });
+
+  // ── 통합 관리(관리자) ─────────────────────────────────────────────────
+  it("setIntegration: self-hosted 가 아닌 provider 면 BadRequest", async () => {
+    const s = build(new Map([["github", githubEntry]]));
+    await expect(
+      s.setIntegration("acme", "github", { host: "https://x.io", clientId: "c", clientSecretName: "n" }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("listIntegrations/remove: provider별 read-merge-write(다른 통합 보존) + 해제 + 시크릿값 미반환", async () => {
+    const s = build(
+      new Map([
+        ["github-enterprise", gheEntry],
+        ["mattermost", { impl: okImpl, selfHosted: true }],
+      ]),
+    );
+    await s.setIntegration("acme", "github-enterprise", {
+      host: "https://ghe.acme.io",
+      clientId: "g",
+      clientSecretName: "GHE",
+    });
+    await s.setIntegration("acme", "mattermost", { host: "https://mm.acme.io", clientId: "m", clientSecretName: "MM" });
+    expect(await s.listIntegrations("acme")).toEqual([
+      {
+        id: "github-enterprise",
+        selfHosted: true,
+        configured: true,
+        host: "https://ghe.acme.io",
+        clientId: "g",
+        clientSecretName: "GHE",
+      },
+      {
+        id: "mattermost",
+        selfHosted: true,
+        configured: true,
+        host: "https://mm.acme.io",
+        clientId: "m",
+        clientSecretName: "MM",
+      },
+    ]);
+    await s.removeIntegration("acme", "github-enterprise");
+    const after = await s.listIntegrations("acme");
+    expect(after.find((p) => p.id === "github-enterprise")?.configured).toBe(false);
+    expect(after.find((p) => p.id === "mattermost")?.configured).toBe(true); // 다른 통합 보존
   });
 });

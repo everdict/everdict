@@ -77,6 +77,7 @@ export {
 export {
   type WorkspaceSettings,
   type WorkspaceSettingsStore,
+  type WorkspaceIntegrationConfig,
   WorkspaceSettingsSchema,
   InMemoryWorkspaceSettingsStore,
   PgWorkspaceSettingsStore,

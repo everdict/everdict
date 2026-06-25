@@ -257,13 +257,15 @@ async function main(): Promise<void> {
     benchmarks: benchmarkRegistry,
     secretsFor: runtimeSecretsFor,
   });
-  // 외부 계정 연결(Connected accounts): github.com 은 env 기본 OAuth App(원클릭), GHE/Mattermost 는 host+SecretStore
-  // name-ref 자격증명으로 연결. 토큰은 secretStore 와 같은 cipher 로 암호화. self-hosted client_secret 은 runtimeSecretsFor 로 resolve.
+  // 외부 계정 연결(Connected accounts): github.com 은 env 기본 OAuth App(원클릭), GHE/Mattermost 는 관리자가 워크스페이스
+  // 통합(Settings → 통합)에 1회 등록한 host+clientId+SecretStore name-ref 로 연결(멤버는 client ID 입력 없이 원클릭).
+  // 토큰은 secretStore 와 같은 cipher 로 암호화. self-hosted client_secret 은 runtimeSecretsFor 로 resolve.
   const connectionService = new ConnectionService({
     store: connectionStore,
     states: oauthStateStore,
     providers: buildOAuthProviders(),
     secretsFor: runtimeSecretsFor,
+    settings: settingsStore, // self-hosted 통합 자격증명(워크스페이스-레벨, 관리자 설정)의 SSOT
     config: {
       webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001", // 콜백 후 브라우저 복귀 베이스(dev 기본 웹 포트)
       ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // OAuth redirect_uri 베이스
@@ -491,7 +493,7 @@ function buildOAuthProviders(): Map<string, ProviderEntry> {
     console.error("▶ connections: GitHub OAuth(github.com) 원클릭 활성 + GHE/Mattermost self-hosted");
   else
     console.warn(
-      "▶ connections: GITHUB_OAUTH_CLIENT_ID/SECRET 미설정 — github.com 원클릭 비활성(GHE/Mattermost 는 host+SecretStore 자격증명으로 연결 가능).",
+      "▶ connections: GITHUB_OAUTH_CLIENT_ID/SECRET 미설정 — github.com 원클릭 비활성(GHE/Mattermost 는 관리자가 워크스페이스 통합 등록 시 연결 가능).",
     );
   return providers;
 }

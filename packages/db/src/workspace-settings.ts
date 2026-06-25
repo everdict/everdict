@@ -14,8 +14,19 @@ export const WorkspaceSettingsSchema = z.object({
   // 서버에서 ownerSubject 로 박아둔다(클라이언트가 못 보냄). 완료 시 그 owner 의 토큰으로 채널에 게시. ownerSubject 없으면 skip.
   // (토큰/채널 값은 저장 안 함 — id 참조만.)
   notify: z.object({ connectionId: z.string(), channelId: z.string(), ownerSubject: z.string().optional() }).optional(),
+  // self-hosted 외부 계정 연결(GitHub Enterprise/Mattermost)의 워크스페이스-레벨 OAuth 앱 설정 — provider id → 자격증명.
+  // 관리자가 1회 등록하면(Settings → 통합) 멤버는 client ID 입력 없이 원클릭으로 연결한다(Linear 방식). 값은 비밀 아님:
+  // host(서버 URL) + clientId(공개 OAuth app id) + clientSecretName(SecretStore 키 이름 — client_secret 값 자체는 저장 안 함).
+  integrations: z
+    .record(
+      z.string(), // provider id: github-enterprise | mattermost
+      z.object({ host: z.string().url(), clientId: z.string().min(1), clientSecretName: z.string().min(1) }),
+    )
+    .optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;
+// 워크스페이스 통합 1건의 자격증명(provider별). 전부 비밀 아님(반환 안전) — clientSecret 값은 SecretStore 에만.
+export type WorkspaceIntegrationConfig = NonNullable<WorkspaceSettings["integrations"]>[string];
 
 export interface WorkspaceSettingsStore {
   get(workspace: string): Promise<WorkspaceSettings | undefined>;

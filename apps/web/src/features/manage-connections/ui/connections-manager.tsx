@@ -5,7 +5,6 @@ import { useState, useTransition } from 'react'
 import type { ConnectionMeta, ProviderInfo } from '@/entities/connection'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label } from '@/shared/ui/input'
 
 import { disconnectConnectionAction, startConnectionAction } from '../api/manage-connections'
 
@@ -28,7 +27,8 @@ const ERROR_COPY: Record<string, string> = {
   access_denied: '연결이 취소되었습니다(권한 거부).',
 }
 
-// 연결은 개인 소유(self-scoped by subject) — 역할 게이트 없음. 모든 유저가 자기 연결을 연결/해제한다(canWrite 개념 없음).
+// 연결은 개인 소유(self-scoped by subject) — 역할 게이트 없음. 멤버는 자격증명 입력 없이 원클릭으로 연결한다(Linear 방식):
+// github.com 은 컨트롤플레인 env OAuth 앱, self-hosted(GHE/Mattermost)는 관리자가 워크스페이스 통합을 등록한 경우에만 노출.
 export function ConnectionsManager({
   connections,
   providers,
@@ -42,35 +42,13 @@ export function ConnectionsManager({
 }) {
   const [actionError, setActionError] = useState<string>()
   const [confirmId, setConfirmId] = useState<string>()
-  const [openForm, setOpenForm] = useState<string>() // 폼이 열린 self-hosted provider id
-  const [host, setHost] = useState('')
-  const [clientId, setClientId] = useState('')
-  const [clientSecretName, setClientSecretName] = useState('')
   const [pending, startTransition] = useTransition()
 
-  // github.com(원클릭) 연결 시작 → authorizeUrl 로 이동.
-  function onConnectOneClick(provider: string) {
+  // 연결 시작 → authorizeUrl 로 이동(멤버는 자격증명 입력 없음).
+  function onConnect(provider: string) {
     setActionError(undefined)
     startTransition(async () => {
       const r = await startConnectionAction(provider)
-      if (r.ok && r.authorizeUrl) window.location.href = r.authorizeUrl
-      else setActionError(r.error ?? '연결을 시작하지 못했습니다.')
-    })
-  }
-
-  // self-hosted(GHE/Mattermost) 폼 제출 → host+clientId+clientSecretName 으로 시작.
-  function onConnectSelfHosted(provider: string) {
-    setActionError(undefined)
-    if (!host.trim() || !clientId.trim() || !clientSecretName.trim()) {
-      setActionError('host · client ID · client secret 시크릿 이름을 모두 입력하세요.')
-      return
-    }
-    startTransition(async () => {
-      const r = await startConnectionAction(provider, {
-        host: host.trim(),
-        clientId: clientId.trim(),
-        clientSecretName: clientSecretName.trim(),
-      })
       if (r.ok && r.authorizeUrl) window.location.href = r.authorizeUrl
       else setActionError(r.error ?? '연결을 시작하지 못했습니다.')
     })
@@ -161,97 +139,29 @@ export function ConnectionsManager({
       {providers.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">
           연결 가능한 provider 가 없습니다 — github.com 원클릭은 관리자가 컨트롤플레인에 OAuth
-          앱(GITHUB_OAUTH_CLIENT_ID/SECRET)을 설정해야 합니다.
+          앱(GITHUB_OAUTH_CLIENT_ID/SECRET)을, GitHub Enterprise·Mattermost 는 관리자가 워크스페이스
+          설정의 <span className="font-[510]">통합</span> 탭에서 OAuth 앱을 등록해야 합니다.
         </p>
       ) : (
-          <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-            <p className="text-[13px] font-[510] text-foreground">새 계정 연결</p>
-            <div className="flex flex-wrap items-center gap-2">
-              {providers.map((p) =>
-                p.selfHosted ? (
-                  <Button
-                    key={p.id}
-                    variant="secondary"
-                    disabled={pending}
-                    onClick={() => setOpenForm(openForm === p.id ? undefined : p.id)}
-                  >
-                    {label(p.id)} 연결…
-                  </Button>
-                ) : (
-                  <Button
-                    key={p.id}
-                    variant="secondary"
-                    disabled={pending}
-                    onClick={() => onConnectOneClick(p.id)}
-                  >
-                    {label(p.id)} 연결
-                  </Button>
-                )
-              )}
-            </div>
-
-            {/* self-hosted(GHE/Mattermost) 인라인 폼: host + client ID + client secret 시크릿 이름 */}
-            {openForm && (
-              <div className="space-y-3 rounded-lg border bg-card p-4">
-                <p className="text-[12px] leading-relaxed text-muted-foreground">
-                  {label(openForm)} 서버에 OAuth 앱을 만들고(콜백 URL 은 컨트롤플레인의{' '}
-                  <span className="font-mono">/connections/callback</span>), client secret 은 먼저
-                  이 워크스페이스의 <span className="font-[510]">시크릿</span>에 저장한 뒤 그 이름을
-                  아래에 입력하세요. client secret 값 자체는 입력하지 않습니다.
-                </p>
-                <div className="space-y-1.5">
-                  <Label htmlFor="conn-host">서버 URL (host)</Label>
-                  <Input
-                    id="conn-host"
-                    value={host}
-                    placeholder={
-                      openForm === 'mattermost'
-                        ? 'https://mm.example.com'
-                        : 'https://ghe.example.com'
-                    }
-                    onChange={(e) => setHost(e.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="conn-client-id">Client ID</Label>
-                  <Input
-                    id="conn-client-id"
-                    value={clientId}
-                    placeholder="OAuth 앱의 client id (공개값)"
-                    onChange={(e) => setClientId(e.target.value)}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor="conn-secret-name">Client secret — 시크릿 이름</Label>
-                  <Input
-                    id="conn-secret-name"
-                    value={clientSecretName}
-                    placeholder="예: GHE_OAUTH_CLIENT_SECRET"
-                    onChange={(e) => setClientSecretName(e.target.value.toUpperCase())}
-                    autoComplete="off"
-                    spellCheck={false}
-                  />
-                </div>
-                <Button disabled={pending} onClick={() => onConnectSelfHosted(openForm)}>
-                  {pending ? '연결 중…' : `${label(openForm)} 연결`}
-                </Button>
-              </div>
-            )}
-
-            <p className="text-[12px] text-faint">
-              연결 버튼을 누르면 provider 로그인 화면으로 이동한 뒤 이 페이지로 돌아옵니다.
-            </p>
-            {actionError && (
-              <Callout tone="danger" className="py-1.5">
-                {actionError}
-              </Callout>
-            )}
+        <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+          <p className="text-[13px] font-[510] text-foreground">새 계정 연결</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {providers.map((p) => (
+              <Button key={p.id} variant="secondary" disabled={pending} onClick={() => onConnect(p.id)}>
+                {label(p.id)} 연결
+              </Button>
+            ))}
           </div>
-        )}
+          <p className="text-[12px] text-faint">
+            연결 버튼을 누르면 provider 로그인 화면으로 이동한 뒤 이 페이지로 돌아옵니다.
+          </p>
+          {actionError && (
+            <Callout tone="danger" className="py-1.5">
+              {actionError}
+            </Callout>
+          )}
+        </div>
+      )}
     </div>
   )
 }

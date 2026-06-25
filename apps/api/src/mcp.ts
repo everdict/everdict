@@ -693,12 +693,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "list_connections",
       {
-        description: "내 외부 계정 연결 목록(토큰 없음) + 연결 가능한 provider({id, selfHosted})",
+        description: "내 외부 계정 연결 목록(토큰 없음) + 원클릭 연결 가능한 provider({id, selfHosted})",
         inputSchema: {},
       },
       () =>
         plain(async () =>
-          ok({ connections: await connections.list(principal.subject), providers: connections.providerInfos() }),
+          ok({
+            connections: await connections.list(principal.subject),
+            providers: await connections.connectableProviders(ws),
+          }),
         ),
     );
     server.registerTool(
@@ -706,28 +709,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       {
         description:
           "외부 계정 연결 시작 — 사람이 브라우저로 열 authorize URL 을 반환(에이전트가 OAuth 를 직접 완료할 수는 없음). " +
-          "self-hosted(github-enterprise/mattermost)는 host + clientId + clientSecretName(SecretStore 키 이름) 지정.",
+          "멤버는 자격증명 입력 없음: github.com 은 env 기본, self-hosted(github-enterprise/mattermost)는 관리자가 등록한 워크스페이스 통합에서 resolve.",
         inputSchema: {
           provider: z.string().describe("github | github-enterprise | mattermost"),
-          host: z.string().url().optional(),
-          clientId: z.string().optional(),
-          clientSecretName: z.string().optional().describe("client_secret 이 저장된 SecretStore 키 이름"),
         },
       },
-      ({ provider, host, clientId, clientSecretName }) =>
-        // workspace(ws)는 self-hosted client_secret(SecretStore) resolve + 콜백 redirect 용으로만 운반; 소유자는 createdBy(subject).
-        plain(async () =>
-          ok(
-            await connections.start({
-              workspace: ws,
-              createdBy: principal.subject,
-              provider,
-              ...(host !== undefined ? { host } : {}),
-              ...(clientId !== undefined ? { clientId } : {}),
-              ...(clientSecretName !== undefined ? { clientSecretName } : {}),
-            }),
-          ),
-        ),
+      ({ provider }) =>
+        // workspace(ws)는 self-hosted 통합 resolve + 콜백 redirect 용으로 운반; 소유자는 createdBy(subject).
+        plain(async () => ok(await connections.start({ workspace: ws, createdBy: principal.subject, provider }))),
     );
     server.registerTool(
       "disconnect_connection",
@@ -743,6 +732,51 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_workspace_applications",
       { description: "이 워크스페이스에 연결된 외부 계정(애플리케이션) 로스터 — 메타만(토큰 없음)", inputSchema: {} },
       () => run(principal, "members:read", async () => ok({ connections: await connections.listForWorkspace(ws) })),
+    );
+    // self-hosted 외부계정 OAuth 앱 통합(관리자 1회 등록 → 멤버 원클릭). settings:read/write. 시크릿 값은 절대 미반환.
+    server.registerTool(
+      "list_workspace_integrations",
+      {
+        description:
+          "이 워크스페이스의 self-hosted 통합(GHE/Mattermost) 설정 — provider별 configured + host/clientId/clientSecretName(시크릿 값 아님)",
+        inputSchema: {},
+      },
+      () =>
+        run(principal, "settings:read", async () => {
+          const callbackUrl = connections.callbackUrl(); // MCP 는 requestBaseUrl 없음 → apiPublicUrl 필요
+          return ok({
+            providers: await connections.listIntegrations(ws),
+            ...(callbackUrl !== undefined ? { callbackUrl } : {}),
+          });
+        }),
+    );
+    server.registerTool(
+      "set_workspace_integration",
+      {
+        description:
+          "self-hosted 통합 OAuth 앱 등록/갱신(관리자). 멤버는 이후 client ID 입력 없이 원클릭으로 연결한다. client_secret 값은 SecretStore 에 먼저 등록하고 그 이름을 지정.",
+        inputSchema: {
+          provider: z.string().describe("github-enterprise | mattermost"),
+          host: z.string().url().describe("서버 URL(예: https://ghe.example.com)"),
+          clientId: z.string().min(1).describe("OAuth 앱 client id(공개값)"),
+          clientSecretName: z.string().min(1).describe("client_secret 이 저장된 SecretStore 키 이름"),
+        },
+      },
+      ({ provider, host, clientId, clientSecretName }) =>
+        run(principal, "settings:write", async () =>
+          ok({ providers: await connections.setIntegration(ws, provider, { host, clientId, clientSecretName }) }),
+        ),
+    );
+    server.registerTool(
+      "remove_workspace_integration",
+      {
+        description: "self-hosted 통합 해제(관리자). 기존 연결 토큰은 영향 없음 — 신규 연결만 막힌다.",
+        inputSchema: { provider: z.string().describe("github-enterprise | mattermost") },
+      },
+      ({ provider }) =>
+        run(principal, "settings:write", async () =>
+          ok({ providers: await connections.removeIntegration(ws, provider) }),
+        ),
     );
   }
 
