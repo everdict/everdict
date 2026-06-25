@@ -104,8 +104,12 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
    `TrustZone`/pool-silo (single-user host). Deterministic tests with a fake Docker (100/100 topology, +6). No
    runner/CLI change yet — backend-constructible in isolation. Host↔container CDP address nuance is a live-e2e
    (slice 3) concern.
-2. **Runner kind-branch** — `runLeasedJob(job)` in `apps/cli`; service → `ServiceTopologyBackend(DockerTopologyRuntime)`,
-   else `runAgentJob`. `apps/cli` deps + a guard when `harnessSpec` is absent for a service id.
+2. ✅ **Runner kind-branch** — DONE. `apps/cli/src/run-leased-job.ts` `runLeasedJob(job)`: `harnessSpec.kind ===
+   "service"` → `ServiceTopologyBackend({ runtime: new DockerTopologyRuntime(), traceSource:
+   buildTraceSource(spec.traceSource), specFor: () => spec })` (no trustZones; submit/getJson default fetch); else
+   `runAgentJob` (absent `harnessSpec` ⇒ process path = today). The runner loop (`main.ts:273`) calls it instead of
+   `runAgentJob`. `apps/cli` gains `@assay/topology` + `@assay/trace` deps. Injectable `runService`/`runProcess` →
+   daemon-free unit test of the branch (3 cases). cli build + 3/3 test + full turbo build 20/20 green.
 3. **Capabilities + routing** — Docker-probe → advertise `docker`/`browser`; `lease_job` gates service jobs to
    capable runners; live e2e (`scripts/live/self-hosted-service-runner.mjs`): a real local Docker topology leased to
    `assay runner`, driven, snapshot-graded (trace degraded), result back to the workspace scorecard.

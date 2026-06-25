@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { collectAuthEnv, hasClaudeAuth, runAgentJob } from "@assay/agent";
+import { collectAuthEnv, hasClaudeAuth } from "@assay/agent";
 import {
   BackendRegistry,
   BackendsConfigSchema,
@@ -13,6 +13,7 @@ import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker 
 import { diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { runLeasedJob } from "./run-leased-job.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -199,7 +200,7 @@ async function suiteCommand(flags: Map<string, string>): Promise<void> {
 }
 
 // 셀프호스티드 러너 — 이 머신에서 워크스페이스의 잡을 가져가(pull) 돌리고 결과를 회신한다(push→pull).
-// 페어링 토큰(rnr_)으로 /mcp 에 인증하고 lease_job → runAgentJob(LocalDriver, 이 머신의 로그인) → submit_job_result.
+// 페어링 토큰(rnr_)으로 /mcp 에 인증하고 lease_job → runLeasedJob(service→Docker 토폴로지/그외→LocalDriver) → submit_job_result.
 // 설계: docs/architecture/self-hosted-runner.md.
 async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const token = flags.get("pair") ?? process.env.ASSAY_RUNNER_TOKEN;
@@ -269,7 +270,7 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
       void callJson("heartbeat_job", { jobId }).catch(() => {});
     }, hbMs);
     try {
-      const result = await runAgentJob(parsed.data); // LocalDriver — 이 머신에서 실행
+      const result = await runLeasedJob(parsed.data); // service→로컬 Docker 토폴로지, 그 외→LocalDriver(이 머신)
       await callJson("submit_job_result", { jobId, result });
       console.error(`✓ 잡 ${jobId} 완료 → 회신`);
     } catch (e) {
