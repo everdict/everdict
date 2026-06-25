@@ -5,7 +5,8 @@ paths: "packages/backends/**"
 
 A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill `backends`.
 
-- **Tenant-registered runtimes** (BYO compute): a `RuntimeSpec` (`@assay/core`, local|nomad|k8s, no secrets) →
+- **Tenant-registered runtimes** (BYO compute): a `RuntimeSpec` (`@assay/core`, local|docker|nomad|k8s|topology,
+  no secrets; `local` = dev/control-plane-host, superseded for "my machine" by the self-hosted runner) →
   live `Backend` via `buildRuntimeBackend(spec, {secretEnv})`. The control plane's `RuntimeDispatcher` resolves a
   job's `placement.target` to the tenant's `RuntimeSpec`, builds + registers the backend under
   `rt:<tenant>:<id>@<version>`, and routes via the `Scheduler` (fairness/budget/capacity preserved). Credentials

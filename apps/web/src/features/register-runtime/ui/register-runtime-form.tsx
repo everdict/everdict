@@ -302,8 +302,9 @@ export function RegisterRuntimeForm() {
 
       {kind === 'local' && (
         <Callout tone="muted">
-          local 런타임은 컨트롤플레인 호스트에서 in-process 로 실행합니다(dev/단일 머신). 추가
-          설정이 없습니다.
+          local 런타임은 <strong>컨트롤플레인 호스트</strong>에서 in-process 로 실행합니다(dev 전용,
+          추가 설정 없음). 워크스페이스 하니스/데이터셋을 <strong>내 머신</strong>에서 돌리려면 계정
+          페이지의 <strong>self-hosted runner</strong>를 사용하세요 — local 을 대체합니다.
         </Callout>
       )}
 

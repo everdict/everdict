@@ -1,15 +1,26 @@
 # Runtimes (tenant-defined execution infrastructure)
 
 A **Runtime** is a tenant's **execution infrastructure** — *where* their evals run. It's a user-registerable
-first-class entity (same ownership/lifecycle as harnesses/datasets/judges), one of three kinds matching the
-backends we built: **`local`** | **`nomad`** | **`k8s`**. Tenants register their own runtimes ("bring your own
-compute") and select one per scorecard run; the control plane routes dispatch there.
+first-class entity (same ownership/lifecycle as harnesses/datasets/judges), one of five kinds matching the
+backends we built: **`local`** | **`docker`** | **`nomad`** | **`k8s`** | **`topology`**. Tenants register their
+own runtimes ("bring your own compute") and select one per scorecard run; the control plane routes dispatch there.
+
+> **Run on *your own* machine → use a [self-hosted runner](architecture/self-hosted-runner.md), not `local`.**
+> `local` is in-process on the **control-plane** host (dev only). A self-hosted runner (personal, on the account
+> page; lease/pull transport) **supersedes** `local` for the "single machine" use case — the machine becomes the
+> *user's*, with the user's login and isolation. Cluster runtimes below stay workspace-shared as today.
 
 ## Contract (`@assay/core`)
 `RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`) with `id, version, description?, tags`:
-- **local** — in-process on the control-plane host (dev / single machine).
+- **local** — in-process on the **control-plane host** (**dev only**; *not* the user's machine — see the
+  self-hosted runner callout above).
+- **docker** — the control-plane host's docker daemon; runs each case in its own env image (`EvalCase.image`,
+  e.g. a SWE-bench prebuilt). `{ image? }` (default image when a case carries none).
 - **nomad** — `{ addr, image, runtime?, datacenters?, namespace?, authSecret? }`.
 - **k8s** — `{ image, context?, namespace?, runtimeClass?, server?, authSecret?, kubeconfigSecret? }`.
+- **topology** — for a `kind:"service"` topology harness (e.g. browser-use): a warm service pool + per-case
+  browser on `orchestrator` (nomad|k8s), trace pulled from `traceSource`.
+  `{ orchestrator, addr?|context?, namespace?, browserImage?, traceSource, authSecret? }`.
 
 ⚠️ **No secrets in the spec** (it's an immutable, readable SSOT). Credentials and the agent's model keys come from
 the tenant's **SecretStore**, injected at dispatch time. `authSecret` is the *name* of the SecretStore entry that
@@ -26,8 +37,9 @@ kubeconfigs are self-contained.
 
 ## Ownership & lifecycle
 `RuntimeRegistry` (`@assay/registry`, `InMemory`/`Pg`, migration `0009_create_runtimes.sql`) — workspace-owned +
-`_shared` fallback, immutable versions, mirroring the other registries. `examples/runtimes/*.json` seeds a
-`_shared` `local` runtime. **Role-gating**: `runtimes:read` = viewer+, `runtimes:write` = **viewer+ (role 무관)** —
+`_shared` fallback, immutable versions, mirroring the other registries. `examples/runtimes/*.json` seeds
+`_shared` `local`/`docker` runtimes (**dev** — for "run on my own machine" register a self-hosted runner instead).
+**Role-gating**: `runtimes:read` = viewer+, `runtimes:write` = **viewer+ (role 무관)** —
 registering a runtime spec (+validate/probe) is open to every member, same as `harnesses:register`. The runtime spec
 holds **no secrets**; the credential *values* it references are still admin-only (`secrets:write`), so opening
 registration doesn't expose cluster tokens.
@@ -65,7 +77,7 @@ unreachable address. The credential is used only for the probe's auth header (ne
 ## Web (`apps/web`)
 - **런타임 `/dashboard/runtimes`** — owned vs `_shared` runtimes (kind + version chips).
 - **상세 `/dashboard/runtimes/[id]`** — kind + connection fields. **등록 `/dashboard/runtimes/new`** — a
-  **kind-toggle form** (local | nomad | k8s) with a validate (dry-run) step → `POST /runtimes` (role 무관 — any member
+  **kind-toggle form** (local | nomad | k8s; docker/topology are registerable via API/MCP) with a validate (dry-run) step → `POST /runtimes` (role 무관 — any member
   can register). The form takes secret **names** (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets`
   (names referenced but not yet in the SecretStore) as a non-blocking warning. Store the values in 워크스페이스 설정
   → 클러스터 자격증명. A **연결 테스트** button (nomad/k8s) runs the live probe (`POST /runtimes/probe`) and shows
