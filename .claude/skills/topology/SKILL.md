@@ -39,6 +39,16 @@ headless-Chromium Deployment+Service; `dispose()` deletes only the browser (warm
 deletes the namespace. `imagePullPolicy`/`runtimeClass` are options (kind: pre-`kind load` images + IfNotPresent).
 Verified live on kind — Nomad↔K8s parity.
 
+## Local Docker runtime (self-hosted runner)
+`DockerTopologyRuntime` (`docker-runtime.ts`) is the **third** `TopologyRuntime` — same shape as Nomad/K8s but on
+the **user's Docker daemon** (injectable `Docker` adapter `docker.ts`, faked in tests). `ensureTopology` runs the
+dependency stores + services on a per-topology network (`--network-alias` = the conventional name so
+`dependencyConnEnv`/`needs` resolve internally; services publish their port → host port for the out-of-network
+driver); `provisionBrowserEnv` runs headless-shell (`cdpUrl` = the **internal** alias for the agent, `snapshot()`
+hits the **host** published port). It exists so the **self-hosted runner** can drive `kind:"service"` harnesses on
+a laptop — a single-user host, so **no `TrustZone`/gVisor/pool-silo** (those stay for cluster runtimes). See
+`docs/architecture/self-hosted-service-runner.md`.
+
 ## Front-door generalization — making driving harness-agnostic (in progress)
 `ServiceTopologyBackend.dispatch` was hardcoded to one protocol (browser-use-langgraph): fixed payload,
 fire-and-forget submit, trace-by-Assay-runId, always-provisioned browser, fixed image. The direction — a declarative

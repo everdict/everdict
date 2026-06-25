@@ -1,0 +1,193 @@
+import { type BrowserSnapshot, type ServiceHarnessSpec, UpstreamError } from "@assay/core";
+import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
+import { type Docker, dockerCli } from "./docker.js";
+import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
+
+export interface DockerTopologyRuntimeOptions {
+  docker?: Docker; // 주입형(테스트는 가짜 Docker). 기본 execFile("docker", …)
+  browserImage?: string; // per-case 브라우저 이미지(기본 chromedp/headless-shell:latest)
+  storeEnv?: Record<string, string>; // 명시 접속 env(자동 connEnv 를 덮어쓴다 — harness 별 변수명)
+  readyTimeoutMs?: number;
+  pollIntervalMs?: number;
+  fetchImpl?: typeof fetch; // 엔드포인트 readiness/CDP 조회용(테스트 주입)
+}
+
+interface WarmEntry {
+  handle: TopologyHandle;
+  network: string;
+  containers: string[]; // 이 토폴로지가 띄운 컨테이너(teardown 대상)
+}
+
+// docker 이름 규칙([a-zA-Z0-9][a-zA-Z0-9_.-])에 맞게 정리.
+function sanitize(s: string): string {
+  return s.replace(/[^a-zA-Z0-9_.-]/g, "-");
+}
+function netName(spec: ServiceHarnessSpec): string {
+  return `assay-${sanitize(spec.id)}-${sanitize(spec.version)}`;
+}
+
+// 라이브 DockerTopologyRuntime: 사용자 Docker 데몬에 토폴로지(스토어+서비스) + per-case 브라우저를 띄운다.
+// NomadTopologyRuntime / K8sTopologyRuntime 의 형제 — ServiceTopologyBackend 는 셋을 교체만 한다(오케스트레이터-비종속).
+// self-hosted runner 가 service 하니스를 노트북에서 구동하기 위한 로컬 토폴로지. 설계: docs/architecture/self-hosted-service-runner.md.
+// 개인 호스트 = 단일 trust 도메인 → TrustZone/강격리/pool·silo 없음(설계 비목표). 케이스별 논리격리는 front-door wiring 이 담당.
+export class DockerTopologyRuntime implements TopologyRuntime {
+  readonly id = "docker";
+  private readonly docker: Docker;
+  private readonly fetchImpl: typeof fetch;
+  private readonly warm = new Map<string, WarmEntry>(); // key: id@version (per-version warm)
+
+  constructor(private readonly opts: DockerTopologyRuntimeOptions = {}) {
+    this.docker = opts.docker ?? dockerCli();
+    this.fetchImpl = opts.fetchImpl ?? fetch;
+  }
+
+  async ensureTopology(spec: ServiceHarnessSpec): Promise<TopologyHandle> {
+    const key = `${spec.id}@${spec.version}`;
+    const cached = this.warm.get(key);
+    if (cached) return cached.handle; // warm: 버전당 한 번만 배포
+
+    const network = netName(spec);
+    await this.docker.ensureNetwork(network);
+    const containers: string[] = [];
+
+    // 1) 의존 스토어(타입별 1개) — 네트워크 alias = `<id>-<store>`(dependencyConnEnv 의 호스트와 일치 → 서비스가 그 이름으로 접속).
+    for (const { store, name, def } of dependencyStores(spec)) {
+      const cname = `${network}-${name}`;
+      await this.docker.run({ name: cname, image: def.image, network, alias: name, env: def.env, args: def.args });
+      containers.push(cname);
+      await this.waitStoreAccepting(store, cname); // pg_isready/redis ping — 서비스가 부팅 시 접속하므로 먼저 준비.
+    }
+    // 서비스 접속 env: 자동 connEnv(<id>-<store>:<port>) + 명시 storeEnv(명시가 이긴다).
+    const svcEnv = { ...dependencyConnEnv(spec), ...this.opts.storeEnv };
+
+    // 2) 서비스 — alias = svc.name(needs/front-door 내부 주소). port 있으면 임의 호스트 포트로 게시 → 러너(도커 밖)가 도달.
+    const endpoints: Record<string, string> = {};
+    for (const svc of spec.services) {
+      const cname = `${network}-${sanitize(svc.name)}`;
+      await this.docker.run({
+        name: cname,
+        image: svc.image,
+        network,
+        alias: svc.name,
+        env: svcEnv,
+        ...(svc.port !== undefined ? { publish: svc.port } : {}),
+      });
+      containers.push(cname);
+      if (svc.port !== undefined) {
+        const hostPort = await this.docker.hostPort(cname, svc.port);
+        const url = `http://127.0.0.1:${hostPort}`;
+        await this.waitForHttp(url);
+        endpoints[svc.name] = url;
+      }
+    }
+
+    const handle: TopologyHandle = { endpoints };
+    this.warm.set(key, { handle, network, containers });
+    return handle;
+  }
+
+  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string): Promise<BrowserEnvHandle> {
+    const key = `${spec.id}@${spec.version}`;
+    const network = this.warm.get(key)?.network ?? netName(spec);
+    const alias = `browser-${sanitize(runId)}`;
+    const cname = `${network}-${alias}`;
+    await this.docker.run({
+      name: cname,
+      image: this.opts.browserImage ?? "chromedp/headless-shell:latest",
+      network,
+      alias,
+      publish: 9222,
+      args: ["--remote-allow-origins=*"], // headless-shell 은 CDP 를 스스로 9222 로 노출
+    });
+    try {
+      const hostPort = await this.docker.hostPort(cname, 9222);
+      return await this.connectBrowser(runId, cname, alias, hostPort);
+    } catch (err) {
+      await this.docker.rm([cname]).catch(() => {});
+      throw err;
+    }
+  }
+
+  // 브라우저 핸들: 에이전트(네트워크 내부)는 cdpUrl=alias:9222 로, snapshot(러너=도커 밖)은 호스트 게시 포트로 도달.
+  private async connectBrowser(
+    runId: string,
+    cname: string,
+    alias: string,
+    hostPort: number,
+  ): Promise<BrowserEnvHandle> {
+    const fetchImpl = this.fetchImpl; // 반환 closure 에서 this 가 바뀌므로 로컬 캡처
+    const docker = this.docker;
+    const hostCdp = `http://127.0.0.1:${hostPort}`;
+    await this.waitForHttp(`${hostCdp}/json/version`);
+    try {
+      await fetchImpl(`${hostCdp}/json/new?about:blank`, { method: "PUT" });
+    } catch {
+      // 빈 탭 생성 실패는 치명적 아님
+    }
+    return {
+      cdpUrl: `http://${alias}:9222`, // front-door 페이로드의 browser_cdp_url — 에이전트(같은 네트워크)가 도달
+      async snapshot(): Promise<BrowserSnapshot> {
+        let targets: Array<{ url?: string }> = [];
+        try {
+          targets = (await (await fetchImpl(`${hostCdp}/json/list`)).json()) as typeof targets;
+        } catch {
+          targets = [];
+        }
+        return {
+          kind: "browser",
+          url: targets[0]?.url ?? "about:blank",
+          dom: JSON.stringify(targets),
+          screenshotRef: `runs/${runId}/screenshot.png`,
+          console: [],
+        };
+      },
+      dispose: async () => {
+        await docker.rm([cname]).catch(() => {}); // per-case 브라우저만 제거 — warm 토폴로지는 유지
+      },
+    };
+  }
+
+  // 명시 teardown — warm 토폴로지의 컨테이너 + 네트워크 제거(인터페이스 외 — ServiceTopologyBackend 는 dispose 만 호출).
+  async teardown(spec: ServiceHarnessSpec): Promise<void> {
+    const key = `${spec.id}@${spec.version}`;
+    const entry = this.warm.get(key);
+    this.warm.delete(key);
+    if (!entry) return;
+    await this.docker.rm(entry.containers).catch(() => {});
+    await this.docker.removeNetwork(entry.network).catch(() => {});
+  }
+
+  // 스토어가 실제 연결을 받을 때까지 폴링(docker exec pg_isready / redis-cli ping). minio 는 스킵.
+  private async waitStoreAccepting(store: string, container: string): Promise<void> {
+    const probe =
+      store === "postgres" ? ["pg_isready", "-U", "assay"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
+    if (!probe) return;
+    const interval = this.opts.pollIntervalMs ?? 1000;
+    const steps = Math.max(1, Math.floor((this.opts.readyTimeoutMs ?? 60_000) / interval));
+    for (let i = 0; i < steps; i++) {
+      try {
+        await this.docker.exec(container, probe);
+        return;
+      } catch {
+        // 아직 안 받음 → 재시도
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+    throw new UpstreamError("UPSTREAM_ERROR", { store }, "스토어 준비 대기 시간초과");
+  }
+
+  private async waitForHttp(url: string): Promise<void> {
+    const interval = this.opts.pollIntervalMs ?? 1000;
+    const steps = Math.max(1, Math.floor((this.opts.readyTimeoutMs ?? 60_000) / interval));
+    for (let i = 0; i < steps; i++) {
+      try {
+        const res = await this.fetchImpl(url);
+        if (res.status < 500) return;
+      } catch {
+        // 아직 안 뜸 → 재시도
+      }
+      await new Promise((r) => setTimeout(r, interval));
+    }
+    throw new UpstreamError("UPSTREAM_ERROR", { url }, "엔드포인트 준비 대기 시간초과");
+  }
+}

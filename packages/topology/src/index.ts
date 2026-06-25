@@ -74,6 +74,8 @@ export {
 } from "./consul-intentions.js";
 export { K8sTopologyRuntime, type K8sTopologyRuntimeOptions } from "./k8s-runtime.js";
 export { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
+export { DockerTopologyRuntime, type DockerTopologyRuntimeOptions } from "./docker-runtime.js";
+export { type Docker, type DockerRunSpec, dockerCli, dockerRunArgs, parseHostPort } from "./docker.js";
 export { ServiceTopologyBackend, type ServiceTopologyBackendOptions, type SubmitFn } from "./service-backend.js";
 export {
   type FrontDoorDriver,

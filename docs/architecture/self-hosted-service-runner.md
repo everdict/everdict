@@ -95,9 +95,15 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
 
 ## Slices (sequencing — each merges independently)
 
-1. **`DockerTopologyRuntime`** (`@assay/topology`) — the enabler. Pure docker-arg builders + the injectable `Docker`
-   adapter; `ensureTopology`/`provisionBrowserEnv`/`dispose`/`teardown`; deterministic unit tests with a fake Docker
-   (no daemon). No runner/CLI change yet — backend-constructible in isolation.
+1. ✅ **`DockerTopologyRuntime`** (`@assay/topology`) — DONE. `docker.ts` (injectable `Docker` adapter +
+   `dockerCli()` default + pure `dockerRunArgs`/`parseHostPort`) + `docker-runtime.ts` (`DockerTopologyRuntime`):
+   `ensureTopology` (network → dependency stores [`--network-alias <id>-<store>` matching `dependencyConnEnv`, store
+   readiness via `docker exec` pg_isready/redis-ping] → services [`--network-alias <name>`, publish port, discover
+   host port → endpoint], warm-pool keyed by `id@version`), `provisionBrowserEnv` (headless-shell, `cdpUrl` = the
+   **internal** alias for the agent, `snapshot()` via the **host** published port), `dispose`/`teardown`. No
+   `TrustZone`/pool-silo (single-user host). Deterministic tests with a fake Docker (100/100 topology, +6). No
+   runner/CLI change yet — backend-constructible in isolation. Host↔container CDP address nuance is a live-e2e
+   (slice 3) concern.
 2. **Runner kind-branch** — `runLeasedJob(job)` in `apps/cli`; service → `ServiceTopologyBackend(DockerTopologyRuntime)`,
    else `runAgentJob`. `apps/cli` deps + a guard when `harnessSpec` is absent for a service id.
 3. **Capabilities + routing** — Docker-probe → advertise `docker`/`browser`; `lease_job` gates service jobs to
