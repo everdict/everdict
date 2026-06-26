@@ -22,6 +22,7 @@ import {
   type OpenStreamFn,
   type SubmitFn,
   fetchJson,
+  interpolateHeaders,
   interpolateTemplate,
 } from "./front-door-driver.js";
 import { applyImagePins } from "./image-pins.js";
@@ -130,6 +131,10 @@ export class ServiceTopologyBackend implements Backend {
             minio_prefix: keys.minioPrefix,
             ...(target ? { browser_cdp_url: target.wiring.target_cdp_url } : {}),
           };
+      // 요청 헤더(선택): 선언 headers 의 {{var}} 를 wiring 으로 보간(Authorization 등). 미지정 = 없음.
+      const headers = spec.frontDoor.request?.headers
+        ? interpolateHeaders(spec.frontDoor.request.headers, wiring)
+        : undefined;
       const outcome = await driver.drive({
         base,
         submit: spec.frontDoor.submit,
@@ -138,6 +143,7 @@ export class ServiceTopologyBackend implements Backend {
         correlate: spec.frontDoor.correlate,
         wiring,
         traceRef: runId,
+        ...(headers ? { headers } : {}),
       });
       // 완료 시한 초과 = 평가 결과를 확정할 수 없음(반쪽 상태 채점은 오인 유발) → run 실패로 명시.
       if (outcome.status === "timeout") {

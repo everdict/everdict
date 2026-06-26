@@ -84,6 +84,7 @@ export {
   type DriveStatus,
   type GetJsonFn,
   type OpenStreamFn,
+  type FrontDoorRequestOpts,
   type CallbackRendezvous,
   type HttpFrontDoorDriverIo,
   HttpFrontDoorDriver,
@@ -91,6 +92,7 @@ export {
   methodPath,
   joinUrl,
   interpolatePath,
+  interpolateHeaders,
   interpolateTemplate,
 } from "./front-door-driver.js";
 export { applyImagePins } from "./image-pins.js";

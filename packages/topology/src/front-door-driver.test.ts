@@ -3,7 +3,9 @@ import { describe, expect, it } from "vitest";
 import {
   type CallbackRendezvous,
   type FrontDoorDriveRequest,
+  type FrontDoorRequestOpts,
   HttpFrontDoorDriver,
+  interpolateHeaders,
   interpolatePath,
   interpolateTemplate,
   methodPath,
@@ -56,6 +58,17 @@ describe("interpolateTemplate", () => {
   });
 });
 
+describe("interpolateHeaders", () => {
+  it("헤더 값의 {{var}} 를 wiring 으로 보간하고 키는 그대로 둔다(미매칭은 원문)", () => {
+    expect(
+      interpolateHeaders(
+        { Authorization: "Bearer {{run_id}}", "X-Lit": "static", "X-Miss": "{{nope}}" },
+        { run_id: "r1" },
+      ),
+    ).toEqual({ Authorization: "Bearer r1", "X-Lit": "static", "X-Miss": "{{nope}}" });
+  });
+});
+
 describe("HttpFrontDoorDriver.drive", () => {
   it("completion 미지정이면 submit 한 번만 하고 done — 상태 폴링은 하지 않는다(현행 sync 동작)", async () => {
     const submitted: Array<{ url: string; payload: Record<string, unknown> }> = [];
@@ -75,6 +88,19 @@ describe("HttpFrontDoorDriver.drive", () => {
     expect(outcome).toEqual({ traceRef: "fixed", status: "done" });
     expect(submitted).toEqual([{ url: "http://agent:8000/runs", payload: { task: "do it" } }]);
     expect(polls).toBe(0);
+  });
+
+  it("submit 에 method(submit 동사) + headers 를 전달한다(request.headers/method knob)", async () => {
+    let opts: FrontDoorRequestOpts | undefined;
+    const driver = new HttpFrontDoorDriver({
+      submit: async (_url, _payload, o) => {
+        opts = o;
+        return {};
+      },
+    });
+    await driver.drive(baseReq({ submit: "PUT /things", headers: { Authorization: "Bearer x" } }));
+    expect(opts?.method).toBe("PUT");
+    expect(opts?.headers).toEqual({ Authorization: "Bearer x" });
   });
 
   it("poll: 상태가 종료조건(done)이 될 때까지 폴링하고 done 을 돌려준다", async () => {

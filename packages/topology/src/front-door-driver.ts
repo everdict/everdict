@@ -6,9 +6,18 @@ import {
   UpstreamError,
 } from "@assay/core";
 
+// front-door 요청 옵션 — method(submit 동사에서; 미지정 POST) + headers(값 보간 완료). submit/stream 공용.
+export interface FrontDoorRequestOpts {
+  method?: string;
+  headers?: Record<string, string>;
+}
 // front-door 로 task+wiring 을 POST 하는 함수 — 응답 본문(JSON)을 돌려준다(returned 상관에서 trace-id 추출용).
 // 테스트에서 주입 가능. (injected 상관은 본문이 불필요하므로 void 반환도 허용.)
-export type SubmitFn = (frontDoorUrl: string, payload: Record<string, unknown>) => Promise<unknown>;
+export type SubmitFn = (
+  frontDoorUrl: string,
+  payload: Record<string, unknown>,
+  opts?: FrontDoorRequestOpts,
+) => Promise<unknown>;
 // 상태 폴링용 GET — JSON 응답을 그대로 돌려준다.
 export type GetJsonFn = (url: string) => Promise<unknown>;
 // 스트리밍 submit(stream 완료 모델) — POST 응답(SSE/JSON-lines)을 파싱된 이벤트 비동기 시퀀스로 돌려준다.
@@ -16,13 +25,13 @@ export type GetJsonFn = (url: string) => Promise<unknown>;
 export type OpenStreamFn = (
   url: string,
   payload: Record<string, unknown>,
-  timeoutMs?: number,
+  opts?: FrontDoorRequestOpts & { timeoutMs?: number },
 ) => AsyncIterable<unknown>;
 
-const fetchSubmit: SubmitFn = async (url, payload) => {
+const fetchSubmit: SubmitFn = async (url, payload, opts) => {
   const res = await fetch(url, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
+    method: opts?.method ?? "POST", // submit 동사("POST /runs")에서 — 미지정 POST
+    headers: { "content-type": "application/json", ...opts?.headers }, // 선언 헤더(Authorization 등)가 content-type 위에
     body: JSON.stringify(payload),
   });
   // 응답이 JSON 이 아니거나 비어도 injected 모드는 본문이 불필요 → 관용적으로 파싱.
@@ -40,13 +49,13 @@ export const fetchJson: GetJsonFn = async (url) => {
 
 // 기본 SSE 스트리밍 submit — POST 후 text/event-stream 본문을 이벤트(\n\n 구분, data: 라인)별로 JSON 파싱해 yield.
 // 비-JSON data 는 건너뛴다. timeoutMs 면 AbortController 로 소켓을 끊는다(스톨 방지). 주입 안 하면 stream 모델이 이걸 쓴다.
-export const fetchStream: OpenStreamFn = async function* (url, payload, timeoutMs) {
+export const fetchStream: OpenStreamFn = async function* (url, payload, opts) {
   const ctrl = new AbortController();
-  const timer = timeoutMs !== undefined ? setTimeout(() => ctrl.abort(), timeoutMs) : undefined;
+  const timer = opts?.timeoutMs !== undefined ? setTimeout(() => ctrl.abort(), opts.timeoutMs) : undefined;
   try {
     const res = await fetch(url, {
-      method: "POST",
-      headers: { "content-type": "application/json", accept: "text/event-stream" },
+      method: opts?.method ?? "POST",
+      headers: { "content-type": "application/json", accept: "text/event-stream", ...opts?.headers },
       body: JSON.stringify(payload),
       signal: ctrl.signal,
     });
@@ -94,6 +103,17 @@ export function joinUrl(base: string, path: string): string {
 // {var} 토큰을 wiring 값으로 치환(단일 중괄호 — 기존 front-door path 관례 {id} 와 동일). 미매칭은 원문 유지.
 export function interpolatePath(path: string, vars: Record<string, string>): string {
   return path.replace(/\{(\w+)\}/g, (whole, key: string) => vars[key] ?? whole);
+}
+// 헤더 값의 {{var}} 보간(본문 템플릿과 같은 이중 중괄호 관례). 키는 그대로, 미매칭 토큰은 원문 유지.
+export function interpolateHeaders(
+  headers: Record<string, string>,
+  vars: Record<string, string>,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    out[k] = v.replace(/\{\{(\w+)\}\}/g, (whole, key: string) => vars[key] ?? whole);
+  }
+  return out;
 }
 
 // 본문 템플릿 보간(#1) — JSON 을 재귀적으로 훑어 문자열 값의 {{var}} 토큰을 wiring 으로 치환(이중 중괄호 —
@@ -164,6 +184,7 @@ export interface FrontDoorDriveRequest {
   correlate: FrontDoorCorrelate | undefined; // 미지정 = injected
   wiring: Record<string, string>; // statusPath 보간 변수({run_id} 등)
   traceRef: string; // injected 상관의 기본 상관키(= assay runId)
+  headers?: Record<string, string>; // submit/stream/callback 요청 헤더(보간 완료; 미지정 = 없음)
 }
 
 // front-door 구동(HOW)의 추상화 — submit 후 완료 모델대로 대기. 인프라-비종속 TopologyRuntime(WHERE)의 형제.
@@ -211,7 +232,11 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     if (req.completion?.mode === "stream") return this.driveStream(req, req.completion);
     // callback: fire-and-forget submit 후 에이전트의 inbound POST 를 랑데부에서 기다린다.
     if (req.completion?.mode === "callback") return this.driveCallback(req, req.completion);
-    const response = await this.submit(joinUrl(req.base, methodPath(req.submit).path), req.payload);
+    const mp = methodPath(req.submit); // 동사 + path — method 는 submit("POST /runs")에서, headers 는 req 에서
+    const response = await this.submit(joinUrl(req.base, mp.path), req.payload, {
+      method: mp.method,
+      headers: req.headers,
+    });
     // 상관(#3): injected = 주입한 runId(현행), returned = 에이전트가 응답으로 돌려준 자기 id.
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
     // returned 면 poll statusPath 도 에이전트 id 로 보간되도록 run_id 를 그 id 로 덮는다(injected 는 동일값 → no-op).
@@ -227,12 +252,17 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     req: FrontDoorDriveRequest,
     completion: Extract<FrontDoorCompletion, { mode: "stream" }>,
   ): Promise<DriveOutcome> {
-    const url = joinUrl(req.base, methodPath(req.submit).path);
+    const mp = methodPath(req.submit);
+    const url = joinUrl(req.base, mp.path);
     const start = this.now();
     let traceRef = req.traceRef;
     let correlated = false;
     let last: unknown;
-    for await (const event of this.openStream(url, req.payload, completion.timeoutMs)) {
+    for await (const event of this.openStream(url, req.payload, {
+      timeoutMs: completion.timeoutMs,
+      method: mp.method,
+      headers: req.headers,
+    })) {
       if (!correlated) {
         // 첫 이벤트로 상관 — A2A 는 Task.id 를 선발행하므로 첫 이벤트에 자기 id 가 있다(returned). injected 는 no-op.
         traceRef = resolveTraceRef(req.correlate, req.traceRef, event);
@@ -263,7 +293,11 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
       );
     }
     const runKey = req.traceRef; // callback_url 에 박힌 키(= 주입 runId)
-    const response = await this.submit(joinUrl(req.base, methodPath(req.submit).path), req.payload);
+    const mp = methodPath(req.submit);
+    const response = await this.submit(joinUrl(req.base, mp.path), req.payload, {
+      method: mp.method,
+      headers: req.headers,
+    });
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
     const start = this.now();
     while (this.now() - start < completion.timeoutMs) {

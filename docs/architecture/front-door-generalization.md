@@ -3,8 +3,9 @@
 > **Status: all 5 core knobs DONE.** Sequenced so the live e2e (`scripts/live/service-topology-{nomad,k8s}.mjs`)
 > stays green at every step. Each knob is optional and defaults to today's behavior. Follow-ups landed in later
 > rounds: completion `stream`/`callback` modes (round 3 — `completion-stream-callback.md`), the target axis
-> (round 2 — `target-acquisition-generalization.md`, superseding the `TopologyRuntime.observe` guess). Remaining:
-> a `request.headers`/`method` knob.
+> (round 2 — `target-acquisition-generalization.md`, superseding the `TopologyRuntime.observe` guess) and the
+> `request.headers`/`method` knob (`frontDoor.request.headers` + the method honored from `submit`'s verb — landed).
+> No core front-door follow-ups remain.
 > - **#2 completion model — DONE.** `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`) +
 >   `HttpFrontDoorDriver` landed in `@assay/topology`; `frontDoor.completion` (`sync` | `poll`) in `@assay/core`;
 >   `ServiceTopologyBackend.dispatch` now delegates driving to the driver and fails a run on completion timeout.
@@ -133,9 +134,9 @@ frontDoor: {
     | { mode: "injected" }
     | { mode: "returned"; path: string };                                                   // "run_id" | "data.id"
   // #1 DONE — declarative request body; string {{var}} tokens interpolated over the per-run wiring (recursively).
-  // wiring NAMES derive from dependencies[].isolateBy via wiringVars (no hardcoded LangGraph names). headers/method
-  // are still derived from `submit` (a request.headers knob is a later add).
-  request?:    { bodyTemplate?: Record<string, unknown> };                                   // #1
+  // wiring NAMES derive from dependencies[].isolateBy via wiringVars (no hardcoded LangGraph names). method is honored
+  // from `submit`'s verb; `request.headers` (values {{var}}-interpolated) attach to submit/stream/callback requests.
+  request?:    { bodyTemplate?: Record<string, unknown>; headers?: Record<string, string> }; // #1 (+ headers)
   // #4 DONE — no new field: provisioning is gated on the EXISTING optional `spec.target`. Absent target = a
   // trace-only run graded over a {kind:"prompt"} snapshot. A `target.acquire: "harness"` (observe a declared
   // service's own CDP) is the follow-up (needs a TopologyRuntime.observe method).

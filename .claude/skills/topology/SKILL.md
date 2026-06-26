@@ -75,8 +75,9 @@ touching `service-backend.ts`'s driving logic.
 - **#5 per-service image pin — DONE.** `AgentJob.imagePins` (service name → image) overrides registered images at
   dispatch; `applyImagePins` (`image-pins.ts`) folds pins into a deterministic `-pin-<hash>` effective version so
   warm pools (id@version-keyed) separate variants with no runtime change; unknown service → `BadRequestError`.
-- **All 5 core knobs landed** + completion `stream`/`callback` (round 3). Follow-ups: a `request.headers` knob,
-  store-backed callback rendezvous (multi-process) — see `docs/architecture/front-door-generalization.md`.
+- **All 5 core knobs landed** + completion `stream`/`callback` (round 3) + `request.headers`/`method`
+  (`frontDoor.request.headers`, `{{var}}`-interpolated; method from `submit`'s verb). Follow-ups: store-backed
+  callback rendezvous (multi-process), live A2A stream/callback e2e — see `docs/architecture/front-door-generalization.md`.
 
 ## Target axis (round 2) — `TargetAcquirer` (B1+B2 DONE)
 Round 1 left the **target** assumed to be "a CDP browser Assay provisions." Round 2 generalizes it — the WHAT-target

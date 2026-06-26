@@ -122,8 +122,10 @@ export type FrontDoorCorrelate = z.infer<typeof FrontDoorCorrelateSchema>;
 // front-door 요청(#1): 본문을 선언형 템플릿으로. 미지정 = 현행 browser-use 5-field 본문(무회귀).
 // bodyTemplate 의 문자열 값 안 {{var}} 토큰을 per-run wiring(task/run_id/thread_id/object_prefix/target_cdp_url…)
 // 으로 치환 — CommandHarness {{task}} 와 같은 관례. wiring 이름은 dependencies[].isolateBy 에서 파생된다.
+// headers: submit/stream/callback 요청에 붙일 헤더(값도 {{var}} 보간 — 예: Authorization). method 는 submit 의 동사("POST /runs")에서.
 export const FrontDoorRequestSchema = z.object({
   bodyTemplate: z.record(z.unknown()).optional(),
+  headers: z.record(z.string()).optional(),
 });
 export type FrontDoorRequest = z.infer<typeof FrontDoorRequestSchema>;
 

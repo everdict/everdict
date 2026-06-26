@@ -935,6 +935,31 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(result.caseId).toBe(job.evalCase.id); // callback 결과로 done → dispatch 가 throw 없이 완료
   });
 
+  it("request.headers 의 {{var}} 를 wiring 으로 보간해 submit 헤더로 전달한다", async () => {
+    let headers: Record<string, string> | undefined;
+    const SPEC_H: ServiceHarnessSpec = {
+      ...SPEC,
+      frontDoor: { ...SPEC.frontDoor, request: { headers: { Authorization: "Bearer {{run_id}}" } } },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(mockBrowser().handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_H,
+      submit: async (_url, _payload, opts) => {
+        headers = opts?.headers;
+      },
+      newRunId: () => "fixed",
+    });
+
+    await backend.dispatch(job);
+
+    expect(headers).toEqual({ Authorization: "Bearer fixed" });
+  });
+
   it("request 미지정이면 현행 browser-use 5-field 본문 그대로(무회귀)", async () => {
     const b = mockBrowser();
     let sent: Record<string, unknown> = {};
