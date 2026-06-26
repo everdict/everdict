@@ -82,8 +82,9 @@ export const StatusMatchSchema = z
 export type StatusMatch = z.infer<typeof StatusMatchSchema>;
 
 // front-door 완료 모델(#2): submit 후 에이전트가 N-step 을 끝낼 때까지 어떻게 기다리는가.
-// sync = submit 응답이 곧 완료(미지정 시 기본, 현행 동작). poll = 상태 엔드포인트를 종료조건까지 폴링
-// (비동기 다단계 에이전트). stream/callback 모드는 후속 — docs/architecture/front-door-generalization.md.
+// sync = submit 응답이 곧 완료(미지정 시 기본, 현행 동작). poll = 상태 엔드포인트를 종료조건까지 폴링.
+// stream = submit 응답이 SSE 이벤트 스트림, 종단 이벤트로 판정(A2A message/stream). callback = fire-and-forget 후
+// 에이전트가 종단 결과를 {{callback_url}} 로 POST → inbound await. 설계: docs/architecture/completion-stream-callback.md.
 export const FrontDoorCompletionSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("sync") }),
   z.object({
@@ -94,6 +95,13 @@ export const FrontDoorCompletionSchema = z.discriminatedUnion("mode", [
     intervalMs: z.number().int().positive().default(1000),
     timeoutMs: z.number().int().positive().default(120000),
   }),
+  z.object({
+    mode: z.literal("stream"),
+    done: StatusMatchSchema, // 파싱된 각 스트림 이벤트에 dot-path 매칭(poll 과 같은 데이터 매처)
+    failed: StatusMatchSchema.optional(),
+    timeoutMs: z.number().int().positive().default(120000), // 스트림 전체 wall-clock 상한
+  }),
+  // callback 모드는 C2(랑데부 인프라) — docs/architecture/completion-stream-callback.md.
 ]);
 export type FrontDoorCompletion = z.infer<typeof FrontDoorCompletionSchema>;
 

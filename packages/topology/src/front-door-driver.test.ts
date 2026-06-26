@@ -147,6 +147,94 @@ describe("HttpFrontDoorDriver.drive", () => {
   });
 });
 
+describe("HttpFrontDoorDriver.drive — stream", () => {
+  // 이벤트를 순서대로 yield 하는 가짜 SSE 스트림(소켓 없이 결정적).
+  const streamOf = (events: unknown[]) =>
+    async function* () {
+      for (const e of events) yield e;
+    };
+
+  it("stream: 종단 이벤트(done 매칭)까지 소비하고 done + 그 이벤트를 결과 채널로 돌려준다", async () => {
+    const completion: FrontDoorCompletion = {
+      mode: "stream",
+      done: { field: "status.state", equals: "completed" },
+      timeoutMs: 10000,
+    };
+    const driver = new HttpFrontDoorDriver({
+      openStream: streamOf([
+        { id: "task-1", status: { state: "working" } },
+        { id: "task-1", status: { state: "completed" }, final: true },
+      ]),
+      now: () => 0, // 타임아웃 없음
+    });
+    const outcome = await driver.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("done");
+    expect(outcome.response).toEqual({ id: "task-1", status: { state: "completed" }, final: true });
+  });
+
+  it("stream: failed 종료조건에 매칭되면 failed 를 돌려준다", async () => {
+    const completion: FrontDoorCompletion = {
+      mode: "stream",
+      done: { field: "status.state", equals: "completed" },
+      failed: { field: "status.state", oneOf: ["failed", "canceled"] },
+      timeoutMs: 10000,
+    };
+    const driver = new HttpFrontDoorDriver({
+      openStream: streamOf([{ status: { state: "working" } }, { status: { state: "canceled" } }]),
+      now: () => 0,
+    });
+    const outcome = await driver.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("failed");
+    expect(outcome.response).toEqual({ status: { state: "canceled" } });
+  });
+
+  it("stream: 종단 매치 없이 스트림이 끝나면 timeout(완료 미확정)", async () => {
+    const completion: FrontDoorCompletion = {
+      mode: "stream",
+      done: { field: "status.state", equals: "completed" },
+      timeoutMs: 10000,
+    };
+    const driver = new HttpFrontDoorDriver({
+      openStream: streamOf([{ status: { state: "working" } }]),
+      now: () => 0,
+    });
+    const outcome = await driver.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("timeout");
+  });
+
+  it("stream: wall-clock 타임아웃을 넘기면 종단 전에 timeout", async () => {
+    const completion: FrontDoorCompletion = {
+      mode: "stream",
+      done: { field: "status.state", equals: "completed" },
+      timeoutMs: 5,
+    };
+    const driver = new HttpFrontDoorDriver({
+      openStream: streamOf([{ status: { state: "working" } }, { status: { state: "completed" } }]),
+      now: steppingClock(10), // start=0, 첫 이벤트 후 now()=10 ≥ 5 → 완료 이벤트 도달 전 timeout
+    });
+    const outcome = await driver.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("timeout");
+  });
+
+  it("stream + correlate returned: 첫 이벤트에서 에이전트 id 를 추출해 traceRef 로 쓴다", async () => {
+    const completion: FrontDoorCompletion = {
+      mode: "stream",
+      done: { field: "status.state", equals: "completed" },
+      timeoutMs: 10000,
+    };
+    const driver = new HttpFrontDoorDriver({
+      openStream: streamOf([
+        { id: "agent-7", status: { state: "working" } },
+        { id: "agent-7", status: { state: "completed" } },
+      ]),
+      now: () => 0,
+    });
+    const outcome = await driver.drive(baseReq({ completion, correlate: { mode: "returned", path: "id" } }));
+    expect(outcome.traceRef).toBe("agent-7");
+    expect(outcome.status).toBe("done");
+  });
+});
+
 describe("HttpFrontDoorDriver.drive — 상관(correlate)", () => {
   it("correlate 미지정이면 injected: traceRef = 주어진 runId(현행)", async () => {
     const driver = new HttpFrontDoorDriver({ submit: async () => ({ run_id: "agent-xyz" }) });
