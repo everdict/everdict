@@ -1,4 +1,10 @@
-import { type FrontDoorCompletion, type FrontDoorCorrelate, type StatusMatch, UpstreamError } from "@assay/core";
+import {
+  type FrontDoorCompletion,
+  type FrontDoorCorrelate,
+  InternalError,
+  type StatusMatch,
+  UpstreamError,
+} from "@assay/core";
 
 // front-door 로 task+wiring 을 POST 하는 함수 — 응답 본문(JSON)을 돌려준다(returned 상관에서 trace-id 추출용).
 // 테스트에서 주입 가능. (injected 상관은 본문이 불필요하므로 void 반환도 허용.)
@@ -165,10 +171,18 @@ export interface FrontDoorDriver {
   drive(req: FrontDoorDriveRequest): Promise<DriveOutcome>;
 }
 
+// callback 완료 모델의 랑데부 — Assay 가 run 별 콜백 URL 을 노출({{callback_url}})하고, 에이전트의 inbound POST 를 기다린다.
+// 드라이버에서 분리한 seam(주입형): in-process(셀프호스트/dev) | control-plane 엔드포인트(SaaS). egress 관측의 inbound 짝.
+export interface CallbackRendezvous {
+  url(runId: string): string; // {{callback_url}} 값(run 별 — 수신기가 runId 로 상관)
+  wait(runId: string, timeoutMs: number): Promise<{ body: unknown } | undefined>; // 다음 inbound POST 본문(없으면 undefined=timeout)
+}
+
 export interface HttpFrontDoorDriverIo {
   submit?: SubmitFn;
   getJson?: GetJsonFn;
   openStream?: OpenStreamFn; // stream 완료 모델의 SSE 소비 프리미티브(주입 안 하면 fetchStream)
+  callbackRendezvous?: CallbackRendezvous; // callback 완료 모델의 inbound 대기 seam(callback 모델인데 없으면 명확히 실패)
   sleep?: (ms: number) => Promise<void>; // 테스트에서 no-op 주입(폴링 간격을 실제로 기다리지 않게)
   now?: () => number; // 테스트에서 가짜 시계 주입(타임아웃 결정성)
 }
@@ -180,12 +194,14 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
   private readonly submit: SubmitFn;
   private readonly getJson: GetJsonFn;
   private readonly openStream: OpenStreamFn;
+  private readonly callbackRendezvous: CallbackRendezvous | undefined;
   private readonly sleep: (ms: number) => Promise<void>;
   private readonly now: () => number;
   constructor(io: HttpFrontDoorDriverIo = {}) {
     this.submit = io.submit ?? fetchSubmit;
     this.getJson = io.getJson ?? fetchJson;
     this.openStream = io.openStream ?? fetchStream;
+    this.callbackRendezvous = io.callbackRendezvous;
     this.sleep = io.sleep ?? realSleep;
     this.now = io.now ?? Date.now;
   }
@@ -193,6 +209,8 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
   async drive(req: FrontDoorDriveRequest): Promise<DriveOutcome> {
     // stream: submit 응답이 곧 이벤트 스트림 — request/response 가 아니므로 별도 경로(첫 이벤트로 상관, 종단 이벤트로 판정).
     if (req.completion?.mode === "stream") return this.driveStream(req, req.completion);
+    // callback: fire-and-forget submit 후 에이전트의 inbound POST 를 랑데부에서 기다린다.
+    if (req.completion?.mode === "callback") return this.driveCallback(req, req.completion);
     const response = await this.submit(joinUrl(req.base, methodPath(req.submit).path), req.payload);
     // 상관(#3): injected = 주입한 runId(현행), returned = 에이전트가 응답으로 돌려준 자기 id.
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
@@ -228,6 +246,36 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     }
     // 스트림이 종단 매치 없이 끝남 → 완료를 확정할 수 없음(timeout 과 동일 취급 → dispatch 가 run 실패).
     return { traceRef, status: "timeout", response: last };
+  }
+
+  // callback: fire-and-forget submit → 에이전트가 {{callback_url}} 로 보내는 inbound POST 를 랑데부에서 대기.
+  // 랑데부는 run 별로 다음 POST 를 돌려준다 — done/failed 매칭까지 반복(interim 업데이트는 흘려보냄), 시한 초과면 timeout.
+  // 랑데부 키 = req.traceRef(= 주입 runId; callback_url 에 박힌 값). DriveOutcome.traceRef 는 상관 결과(트레이스 fetch 용).
+  private async driveCallback(
+    req: FrontDoorDriveRequest,
+    completion: Extract<FrontDoorCompletion, { mode: "callback" }>,
+  ): Promise<DriveOutcome> {
+    if (!this.callbackRendezvous) {
+      throw new InternalError(
+        "HARNESS_RUN_FAILED",
+        { mode: "callback" },
+        "callback 완료 모델에 필요한 랑데부가 없습니다.",
+      );
+    }
+    const runKey = req.traceRef; // callback_url 에 박힌 키(= 주입 runId)
+    const response = await this.submit(joinUrl(req.base, methodPath(req.submit).path), req.payload);
+    const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
+    const start = this.now();
+    while (this.now() - start < completion.timeoutMs) {
+      const result = await this.callbackRendezvous.wait(runKey, completion.timeoutMs - (this.now() - start));
+      if (!result) return { traceRef, status: "timeout", response: undefined };
+      const body = result.body;
+      if (completion.failed && statusMatches(completion.failed, body))
+        return { traceRef, status: "failed", response: body };
+      if (!completion.done || statusMatches(completion.done, body)) return { traceRef, status: "done", response: body };
+      // done 지정인데 매칭 안 됨 → interim 콜백(working 등). 다음 POST 를 기다린다.
+    }
+    return { traceRef, status: "timeout", response: undefined };
   }
 
   private async awaitCompletion(

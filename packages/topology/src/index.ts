@@ -84,6 +84,7 @@ export {
   type DriveStatus,
   type GetJsonFn,
   type OpenStreamFn,
+  type CallbackRendezvous,
   type HttpFrontDoorDriverIo,
   HttpFrontDoorDriver,
   fetchStream,
@@ -93,6 +94,7 @@ export {
   interpolateTemplate,
 } from "./front-door-driver.js";
 export { applyImagePins } from "./image-pins.js";
+export { InProcessCallbackRendezvous } from "./callback-rendezvous.js";
 export {
   type TargetAcquirer,
   type AcquireRequest,

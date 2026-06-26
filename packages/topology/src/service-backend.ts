@@ -15,9 +15,11 @@ import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@ass
 import type { TraceSource } from "@assay/trace";
 import { keysFor, newRunId, wiringVars } from "./environment-manager.js";
 import {
+  type CallbackRendezvous,
   type FrontDoorDriver,
   type GetJsonFn,
   HttpFrontDoorDriver,
+  type OpenStreamFn,
   type SubmitFn,
   fetchJson,
   interpolateTemplate,
@@ -37,6 +39,8 @@ export interface ServiceTopologyBackendOptions {
   graders?: Grader[]; // 기본: trace 기반(steps/cost/latency). 브라우저 그레이더(dom/vlm)는 Phase 2.
   submit?: SubmitFn; // 기본 HttpFrontDoorDriver 의 POST 프리미티브(없으면 fetch)
   getJson?: GetJsonFn; // poll 완료 모델의 상태 GET 프리미티브(없으면 fetch)
+  openStream?: OpenStreamFn; // stream 완료 모델의 SSE 소비 프리미티브(없으면 fetch)
+  callbackRendezvous?: CallbackRendezvous; // callback 완료 모델의 inbound 대기 + {{callback_url}} 발급(callback 모델인데 없으면 실패)
   acquireRequest?: AcquireRequestFn; // target.acquire=service 의 세션 open/close HTTP 프리미티브(없으면 fetch)
   frontDoorDriver?: FrontDoorDriver; // 구동(HOW) 추상화 전체를 주입(없으면 HttpFrontDoorDriver)
   newRunId?: () => string;
@@ -95,14 +99,25 @@ export class ServiceTopologyBackend implements Backend {
           "front-door 엔드포인트가 없습니다.",
         );
       }
-      // 구동(HOW): submit + per-run wiring 주입 → 완료 모델(sync/poll)대로 대기. 인프라(WHERE)와 분리된 관심사.
+      // 구동(HOW): submit + per-run wiring 주입 → 완료 모델(sync/poll/stream/callback)대로 대기. 인프라(WHERE)와 분리된 관심사.
       const driver =
-        this.opts.frontDoorDriver ?? new HttpFrontDoorDriver({ submit: this.opts.submit, getJson: this.opts.getJson });
-      // per-run 와이어링 — isolateBy 파생 격리 변수(+ task + 타깃이 기여한 이름있는 좌표 bag). 본문 템플릿 + statusPath 공용.
+        this.opts.frontDoorDriver ??
+        new HttpFrontDoorDriver({
+          submit: this.opts.submit,
+          getJson: this.opts.getJson,
+          openStream: this.opts.openStream,
+          callbackRendezvous: this.opts.callbackRendezvous,
+        });
+      // per-run 와이어링 — isolateBy 파생 격리 변수(+ task + 타깃 좌표 bag + callback 모델이면 callback_url). 본문 템플릿/statusPath 공용.
       // 타깃 wiring 은 provision=`{ target_cdp_url }`, service=선언된 좌표들(playwright_server_url/session_id…) — 어휘 개방.
+      const callbackWiring: Record<string, string> =
+        spec.frontDoor.completion?.mode === "callback" && this.opts.callbackRendezvous
+          ? { callback_url: this.opts.callbackRendezvous.url(runId) } // 에이전트가 종단 결과를 POST 할 곳(runId 로 상관)
+          : {};
       const wiring = wiringVars(runId, spec.dependencies, {
         task: job.evalCase.task,
         ...(target ? target.wiring : {}),
+        ...callbackWiring,
       });
       // 본문(#1): request.bodyTemplate 이 있으면 wiring 으로 보간, 없으면 현행 browser-use 5-field 본문(무회귀).
       // 타깃이 없으면 browser_cdp_url 은 뺀다(브라우저가 없으므로). 현행 본문은 provision 타깃의 target_cdp_url 을 쓴다.

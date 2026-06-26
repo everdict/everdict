@@ -1,6 +1,7 @@
 import type { FrontDoorCompletion } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import {
+  type CallbackRendezvous,
   type FrontDoorDriveRequest,
   HttpFrontDoorDriver,
   interpolatePath,
@@ -232,6 +233,99 @@ describe("HttpFrontDoorDriver.drive — stream", () => {
     const outcome = await driver.drive(baseReq({ completion, correlate: { mode: "returned", path: "id" } }));
     expect(outcome.traceRef).toBe("agent-7");
     expect(outcome.status).toBe("done");
+  });
+});
+
+describe("HttpFrontDoorDriver.drive — callback", () => {
+  // 스크립트된 결과를 순서대로 돌려주는 가짜 랑데부(이후엔 undefined=timeout). wait 호출 키를 기록.
+  const scriptedRendezvous = (
+    results: Array<{ body: unknown } | undefined>,
+  ): CallbackRendezvous & { keys: string[] } => {
+    let i = 0;
+    const keys: string[] = [];
+    return {
+      keys,
+      url: (runId) => `http://cb/${runId}`,
+      async wait(runId) {
+        keys.push(runId);
+        return i < results.length ? results[i++] : undefined;
+      },
+    };
+  };
+
+  it("callback: fire-and-forget 후 inbound POST 본문으로 done(done 미지정=어떤 POST 든 완료)", async () => {
+    const completion: FrontDoorCompletion = { mode: "callback", timeoutMs: 10000 };
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => ({}),
+      callbackRendezvous: scriptedRendezvous([{ body: { observation: 1 } }]),
+      now: () => 0,
+    });
+    const outcome = await driver.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("done");
+    expect(outcome.response).toEqual({ observation: 1 });
+  });
+
+  it("callback: done 지정 시 interim 콜백은 흘려보내고 매칭되는 POST 까지 기다린다", async () => {
+    const completion: FrontDoorCompletion = {
+      mode: "callback",
+      done: { field: "state", equals: "completed" },
+      timeoutMs: 10000,
+    };
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => ({}),
+      callbackRendezvous: scriptedRendezvous([{ body: { state: "working" } }, { body: { state: "completed" } }]),
+      now: () => 0,
+    });
+    const outcome = await driver.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("done");
+    expect(outcome.response).toEqual({ state: "completed" });
+  });
+
+  it("callback: failed 종료조건에 매칭되면 failed", async () => {
+    const completion: FrontDoorCompletion = {
+      mode: "callback",
+      done: { field: "state", equals: "ok" },
+      failed: { field: "state", equals: "error" },
+      timeoutMs: 10000,
+    };
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => ({}),
+      callbackRendezvous: scriptedRendezvous([{ body: { state: "error" } }]),
+      now: () => 0,
+    });
+    const outcome = await driver.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("failed");
+  });
+
+  it("callback: inbound 이 안 오면(랑데부 undefined) timeout", async () => {
+    const completion: FrontDoorCompletion = { mode: "callback", timeoutMs: 10000 };
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => ({}),
+      callbackRendezvous: scriptedRendezvous([]), // 첫 wait 부터 undefined
+      now: () => 0,
+    });
+    const outcome = await driver.drive(baseReq({ completion }));
+    expect(outcome.status).toBe("timeout");
+  });
+
+  it("callback: 랑데부 키는 runId(callback_url 에 박힌 값), traceRef 는 correlate 결과(에이전트 id)", async () => {
+    const completion: FrontDoorCompletion = { mode: "callback", timeoutMs: 10000 };
+    const r = scriptedRendezvous([{ body: {} }]);
+    const driver = new HttpFrontDoorDriver({
+      submit: async () => ({ id: "agent-9" }),
+      callbackRendezvous: r,
+      now: () => 0,
+    });
+    const outcome = await driver.drive(
+      baseReq({ completion, correlate: { mode: "returned", path: "id" }, traceRef: "run-1" }),
+    );
+    expect(outcome.traceRef).toBe("agent-9"); // 트레이스 fetch 키
+    expect(r.keys).toEqual(["run-1"]); // 랑데부 키 = runId
+  });
+
+  it("callback: 랑데부가 없으면 명확히 실패한다", async () => {
+    const driver = new HttpFrontDoorDriver({ submit: async () => ({}) });
+    await expect(driver.drive(baseReq({ completion: { mode: "callback", timeoutMs: 1000 } }))).rejects.toThrow();
   });
 });
 

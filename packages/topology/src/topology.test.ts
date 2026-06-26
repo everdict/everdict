@@ -2,6 +2,7 @@ import { perTenantTrustZones } from "@assay/backends";
 import type { AgentJob, BrowserSnapshot, Grader, ServiceHarnessSpec, TraceEvent, TrustZone } from "@assay/core";
 import type { TraceSource } from "@assay/trace";
 import { describe, expect, it } from "vitest";
+import { InProcessCallbackRendezvous } from "./callback-rendezvous.js";
 import { buildSharedStoreManifests } from "./dependencies.js";
 import { keysFor } from "./environment-manager.js";
 import type { FrontDoorDriver } from "./front-door-driver.js";
@@ -897,6 +898,41 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(sent).toEqual({ sid: "sess-9", cdp: "ws://sess/9" }); // 세션 좌표가 본문 어휘로
     expect(acqCalls).toContainEqual({ method: "POST", url: "http://agent-server:8000/sessions" }); // open
     expect(acqCalls).toContainEqual({ method: "DELETE", url: "http://agent-server:8000/sessions/sess-9" }); // close
+  });
+
+  it("completion=callback: callback_url 을 본문 어휘로 주입하고 inbound 결과로 done (C2)", async () => {
+    const rendezvous = new InProcessCallbackRendezvous("http://cb");
+    let sent: Record<string, unknown> = {};
+    const SPEC_CB: ServiceHarnessSpec = {
+      ...SPEC,
+      frontDoor: {
+        ...SPEC.frontDoor,
+        completion: { mode: "callback", timeoutMs: 10000 },
+        request: { bodyTemplate: { task: "{{task}}", cb: "{{callback_url}}" } },
+      },
+    };
+    // 에이전트가 비동기로 종단 결과를 callback_url 로 POST 하는 걸 모사 — submit 직후 deliver(runId=fixed).
+    const submit: SubmitFn = async (_url, payload) => {
+      sent = payload;
+      rendezvous.deliver("fixed", { observation: { kind: "browser" }, done: true });
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(mockBrowser().handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_CB,
+      submit,
+      callbackRendezvous: rendezvous,
+      newRunId: () => "fixed",
+    });
+
+    const result = await backend.dispatch(job);
+
+    expect(sent.cb).toBe("http://cb/fixed"); // callback_url 이 본문 어휘로 흐른다
+    expect(result.caseId).toBe(job.evalCase.id); // callback 결과로 done → dispatch 가 throw 없이 완료
   });
 
   it("request 미지정이면 현행 browser-use 5-field 본문 그대로(무회귀)", async () => {

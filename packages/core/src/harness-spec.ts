@@ -101,7 +101,12 @@ export const FrontDoorCompletionSchema = z.discriminatedUnion("mode", [
     failed: StatusMatchSchema.optional(),
     timeoutMs: z.number().int().positive().default(120000), // 스트림 전체 wall-clock 상한
   }),
-  // callback 모드는 C2(랑데부 인프라) — docs/architecture/completion-stream-callback.md.
+  z.object({
+    mode: z.literal("callback"),
+    done: StatusMatchSchema.optional(), // inbound POST 본문 매칭(미지정 = 어떤 POST 든 완료). 매칭 안 되면 interim 으로 보고 다음 POST 대기.
+    failed: StatusMatchSchema.optional(),
+    timeoutMs: z.number().int().positive().default(120000),
+  }),
 ]);
 export type FrontDoorCompletion = z.infer<typeof FrontDoorCompletionSchema>;
 
