@@ -31,6 +31,7 @@ import type {
   ModelRegistry,
   RuntimeRegistry,
 } from "@assay/registry";
+import type { CallbackSink } from "@assay/topology";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -107,6 +108,7 @@ export interface ServerDeps {
   devTenantHeader?: string; // 미인증 dev 폴백 헤더 (기본 x-assay-tenant)
   authorizationServers?: string[]; // MCP OAuth: protected-resource 메타데이터의 인가서버(Keycloak issuer)
   logLevel?: string; // pino 로그 레벨(info/debug/warn/…). 없으면 로깅 비활성(테스트 무소음). main 은 ASSAY_LOG_LEVEL 로 주입.
+  callbackSink?: CallbackSink; // front-door callback 완료 모델의 inbound 수신(없으면 /frontdoor-callback 비활성)
 }
 
 // 신원(subject + 기본 workspace + roles) 해석: Bearer(JWT 또는 ak_) → Authenticator. 미인증 dev 는 헤더 워크스페이스 + admin.
@@ -256,6 +258,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   const app = Fastify({ logger: deps.logLevel ? { level: deps.logLevel } : false });
 
   app.get("/healthz", async () => ({ ok: true }));
+
+  // front-door callback 완료 모델의 inbound 수신(C2b) — 에이전트가 종단 결과를 {{callback_url}}=/frontdoor-callback/:runId 로 POST.
+  // 공개 라우트: runId(UUID)가 추측 불가한 capability — 별도 인증 없이 소유=권한(웹훅 관례). 랑데부에 전달하면 대기 중 dispatch 가 깨어난다.
+  app.post("/frontdoor-callback/:runId", async (req, reply) => {
+    if (!deps.callbackSink) return reply.code(404).send({ code: "NOT_FOUND", message: "callback 수신 비활성" });
+    const params = z.object({ runId: z.string().min(1) }).safeParse(req.params);
+    if (!params.success) return reply.code(400).send({ code: "BAD_REQUEST", message: params.error.message });
+    deps.callbackSink.deliver(params.data.runId, req.body);
+    return reply.send({ ok: true });
+  });
 
   // 현재 Principal — 웹/에이전트가 워크스페이스·역할을 확인(UI 게이팅 등).
   // 멤버십 스토어가 있으면 내가 속한 워크스페이스 목록(workspaces)을 동봉(사이드바 스위처용).

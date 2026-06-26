@@ -1,6 +1,6 @@
 # Front-door completion — stream & callback modes (design)
 
-> **Status: design only (no code yet).** Round 3 of front-door generalization. Round 1
+> **Status: C1 + C2 DONE.** Round 3 of front-door generalization. Round 1
 > (`front-door-generalization.md`) landed the completion model with `sync` + `poll` and explicitly deferred
 > `stream`/`callback` as "extensions, not core to the generalization." This doc designs those two modes. Round 2
 > (`target-acquisition-generalization.md`) generalized the target axis. Every mode here is additive; absent
@@ -86,13 +86,20 @@ no new variable.
 ## Sequencing (keep the live e2e green)
 Each step is additive; absent `completion` stays `sync`. Live e2e (`scripts/live/service-topology-{nomad,k8s}.mjs`)
 uses `sync`/provisioned-browser → untouched.
-1. **C1 — `stream`.** Schema variant + `openStream` primitive + driver branch (consume events, match terminal,
-   first-event correlate). Self-contained (reads the submit response; no external receiver). Unit tests: fake async
-   iterable of A2A-shaped events → done on `status.state==completed`, failed on `canceled`, timeout on stream-end.
-   A live check against a real A2A `message/stream` agent is the validation step.
-2. **C2 — `callback`.** Schema variant + `CallbackRendezvous` seam + `{{callback_url}}` wiring + driver branch
-   (submit, then `await`). Land the **in-process** rendezvous first (unit-testable, serves the self-hosted runner);
-   the **control-plane endpoint** (`apps/api` route + store + auth) is a follow-up slice with its own BFF↔MCP parity.
+1. **C1 — `stream`. ✅ DONE.** Schema variant + `OpenStreamFn`/`fetchStream` primitive + `driveStream` branch
+   (consume events, match terminal, first-event correlate, wall-clock + AbortController timeout). Self-contained
+   (reads the submit response; no external receiver). Unit-tested with a fake async iterable (done/failed/stream-end
+   timeout/wall-clock timeout/returned-correlate). A live check vs a real A2A `message/stream` agent is the
+   validation step.
+2. **C2 — `callback`. ✅ DONE.** Schema variant + `CallbackRendezvous` seam (`url`/`wait`) + `{{callback_url}}`
+   wiring + `driveCallback` branch (fire-and-forget submit → `wait` loop, interim-skip, done/failed match, timeout).
+   - **C2a** — `InProcessCallbackRendezvous` (run-keyed queue + waiter, `deliver` for the receiver; `CallbackSink`
+     for the inbound side); `service-backend` injects it + adds `callback_url` to the wiring. Unit-tested.
+   - **C2b** — control-plane endpoint: public `POST /frontdoor-callback/:runId` (capability-URL auth via the
+     unguessable UUID runId — **not** `/internal/**`), wired in `main.ts` to **one shared** `InProcessCallbackRendezvous`
+     (outbound `url`/`wait` → topology backend; inbound `deliver` → the route) gated on `ASSAY_CALLBACK_BASE_URL`.
+     No MCP parity — a webhook receiver has no tenant-facing BFF analog. (A store-backed rendezvous for multi-process
+     dispatch is the remaining follow-up.)
 
 ## Touch points (for the eventual PR)
 - `packages/core/src/harness-spec.ts` — add `stream` + `callback` variants to `FrontDoorCompletionSchema`

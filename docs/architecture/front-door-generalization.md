@@ -1,9 +1,10 @@
 # Service-topology front-door generalization — absorbing the control-plane (design)
 
 > **Status: all 5 core knobs DONE.** Sequenced so the live e2e (`scripts/live/service-topology-{nomad,k8s}.mjs`)
-> stays green at every step. Each knob is optional and defaults to today's behavior. Remaining follow-ups (extensions,
-> not core to the generalization): completion `stream`/`callback` modes, `harness`-provided target observation
-> (`TopologyRuntime.observe`), a `request.headers`/`method` knob.
+> stays green at every step. Each knob is optional and defaults to today's behavior. Follow-ups landed in later
+> rounds: completion `stream`/`callback` modes (round 3 — `completion-stream-callback.md`), the target axis
+> (round 2 — `target-acquisition-generalization.md`, superseding the `TopologyRuntime.observe` guess). Remaining:
+> a `request.headers`/`method` knob.
 > - **#2 completion model — DONE.** `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`) +
 >   `HttpFrontDoorDriver` landed in `@assay/topology`; `frontDoor.completion` (`sync` | `poll`) in `@assay/core`;
 >   `ServiceTopologyBackend.dispatch` now delegates driving to the driver and fails a run on completion timeout.

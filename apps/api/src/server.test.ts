@@ -127,6 +127,7 @@ function server(
     internalToken?: string;
     authenticator?: Authenticator;
     authorizationServers?: string[];
+    callbackSink?: { deliver(runId: string, body: unknown): void };
   } = {},
 ) {
   const keyStore = new InMemoryTenantKeyStore();
@@ -202,6 +203,7 @@ function server(
     internalToken: opts.internalToken,
     requireAuth: opts.requireAuth,
     ...(opts.authorizationServers ? { authorizationServers: opts.authorizationServers } : {}),
+    ...(opts.callbackSink ? { callbackSink: opts.callbackSink } : {}),
   });
   return {
     app,
@@ -236,6 +238,28 @@ describe("API — dev fallback (no auth required)", () => {
     const h = { "x-assay-tenant": "free" };
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(202);
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(402);
+    await app.close();
+  });
+});
+
+describe("API — front-door callback 수신 (/frontdoor-callback/:runId, C2b)", () => {
+  it("callbackSink 가 있으면 inbound POST 를 runId 로 deliver 하고 200(인증 없는 공개 capability)", async () => {
+    const delivered: Array<{ runId: string; body: unknown }> = [];
+    const { app } = server({ callbackSink: { deliver: (runId, body) => delivered.push({ runId, body }) } });
+    const res = await app.inject({
+      method: "POST",
+      url: "/frontdoor-callback/run-abc",
+      payload: { status: "completed", observation: { kind: "browser" } },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(delivered).toEqual([{ runId: "run-abc", body: { status: "completed", observation: { kind: "browser" } } }]);
+    await app.close();
+  });
+
+  it("callbackSink 미설정이면 404(비활성)", async () => {
+    const { app } = server();
+    const res = await app.inject({ method: "POST", url: "/frontdoor-callback/run-x", payload: {} });
+    expect(res.statusCode).toBe(404);
     await app.close();
   });
 });

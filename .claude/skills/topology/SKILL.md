@@ -56,9 +56,12 @@ fire-and-forget submit, trace-by-Assay-runId, always-provisioned browser, fixed 
 `FrontDoorProtocol` + a thin `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`), each hardcode →
 an optional knob defaulting to today — is in `docs/architecture/front-door-generalization.md`. Read it before
 touching `service-backend.ts`'s driving logic.
-- **#2 completion — DONE.** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit + await;
-  `frontDoor.completion` (`sync` default | `poll` with a `StatusMatch` done/failed matcher) in `@assay/core`;
-  dispatch fails a run on completion timeout. `poll` = "hold until an async N-step agent finishes."
+- **#2 completion — DONE (4 modes).** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit +
+  await; `frontDoor.completion` in `@assay/core`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
+  (SSE submit; `OpenStreamFn`/`fetchStream`; terminal event via `StatusMatch`; first-event correlate) | `callback`
+  (fire-and-forget → `CallbackRendezvous` awaits the agent's POST to `{{callback_url}}`; in-process rendezvous +
+  control-plane `POST /frontdoor-callback/:runId`). dispatch fails a run on completion timeout. See
+  `docs/architecture/completion-stream-callback.md`.
 - **#3 correlate — DONE.** `frontDoor.correlate` (`injected` default = Assay runId | `returned` = extract the
   agent's own id from the submit response via `correlate.path` dot-path, used for both trace fetch and the poll
   `statusPath`). `SubmitFn` now returns the response body. Distinct from the still-dormant `frontDoor.trace` endpoint.
@@ -72,8 +75,8 @@ touching `service-backend.ts`'s driving logic.
 - **#5 per-service image pin — DONE.** `AgentJob.imagePins` (service name → image) overrides registered images at
   dispatch; `applyImagePins` (`image-pins.ts`) folds pins into a deterministic `-pin-<hash>` effective version so
   warm pools (id@version-keyed) separate variants with no runtime change; unknown service → `BadRequestError`.
-- **All 5 core knobs landed.** Follow-ups: completion `stream`/`callback`, a `request.headers` knob — see
-  `docs/architecture/front-door-generalization.md`.
+- **All 5 core knobs landed** + completion `stream`/`callback` (round 3). Follow-ups: a `request.headers` knob,
+  store-backed callback rendezvous (multi-process) — see `docs/architecture/front-door-generalization.md`.
 
 ## Target axis (round 2) — `TargetAcquirer` (B1+B2 DONE)
 Round 1 left the **target** assumed to be "a CDP browser Assay provisions." Round 2 generalizes it — the WHAT-target

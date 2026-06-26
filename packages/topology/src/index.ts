@@ -94,7 +94,7 @@ export {
   interpolateTemplate,
 } from "./front-door-driver.js";
 export { applyImagePins } from "./image-pins.js";
-export { InProcessCallbackRendezvous } from "./callback-rendezvous.js";
+export { InProcessCallbackRendezvous, type CallbackSink } from "./callback-rendezvous.js";
 export {
   type TargetAcquirer,
   type AcquireRequest,

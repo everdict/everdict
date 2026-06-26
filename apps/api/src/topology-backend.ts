@@ -2,6 +2,7 @@ import type { Backend } from "@assay/backends";
 import { BadRequestError, type RuntimeSpec } from "@assay/core";
 import type { HarnessInstanceRegistry } from "@assay/registry";
 import {
+  type CallbackRendezvous,
   K8sTopologyRuntime,
   NomadTopologyRuntime,
   ServiceTopologyBackend,
@@ -15,7 +16,7 @@ import { buildTraceSource } from "@assay/trace";
 // 클러스터 구동(deploy/drive/trace pull)은 라이브 — 테넌트 Nomad/K8s + browser-use 이미지가 필요(Phase 2). 여기선 구성만.
 export function buildTopologyBackend(
   spec: Extract<RuntimeSpec, { kind: "topology" }>,
-  deps: { harnesses: HarnessInstanceRegistry },
+  deps: { harnesses: HarnessInstanceRegistry; callbackRendezvous?: CallbackRendezvous },
 ): Backend {
   const runtime: TopologyRuntime =
     spec.orchestrator === "nomad"
@@ -33,6 +34,8 @@ export function buildTopologyBackend(
   return new ServiceTopologyBackend({
     runtime,
     traceSource,
+    // callback 완료 모델의 랑데부(있으면) — {{callback_url}} 발급 + inbound 대기. 같은 인스턴스를 control-plane 라우트가 deliver.
+    ...(deps.callbackRendezvous ? { callbackRendezvous: deps.callbackRendezvous } : {}),
     // 토폴로지 모양(services/dependencies/target)은 하니스(kind:"service")에서. 서비스 하니스가 아니면 거부.
     specFor: async (tenant, id, version) => {
       const h = await deps.harnesses.get(tenant, id, version);

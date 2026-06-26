@@ -1,10 +1,16 @@
 import type { CallbackRendezvous } from "./front-door-driver.js";
 
+// callback 의 inbound(수신) 측 — HTTP 수신기(control-plane 라우트/셀프호스트 runner)가 매칭 POST 를 받아 호출.
+// outbound(드라이버) 측 CallbackRendezvous(url/wait)와 역할 분리: 같은 인스턴스가 둘 다 구현해 한 프로세스에서 짝을 이룬다.
+export interface CallbackSink {
+  deliver(runId: string, body: unknown): void;
+}
+
 // in-process 콜백 랑데부 — callback 완료 모델용. run 별 inbound POST 본문을 큐잉하고, 대기자(드라이버)에게 전달한다.
 // 전송(HTTP 수신)은 분리: 수신기(셀프호스트 runner / control-plane)가 매칭 POST 를 받아 deliver(runId, body) 를 호출.
 // 단일 호스트/프로세스(셀프호스트·dev)용. SaaS 는 control-plane 엔드포인트 + 스토어로 같은 인터페이스를 구현한다.
 // 설계: docs/architecture/completion-stream-callback.md.
-export class InProcessCallbackRendezvous implements CallbackRendezvous {
+export class InProcessCallbackRendezvous implements CallbackRendezvous, CallbackSink {
   // runId → 아직 소비 안 된 inbound 본문 큐(대기자보다 POST 가 먼저 온 경우).
   private readonly pending = new Map<string, unknown[]>();
   // runId → 대기 중 resolver(POST 가 대기자보다 먼저 없을 때). run 당 대기자는 하나(드라이버 1).

@@ -91,6 +91,7 @@ import {
   loadRuntimeDir,
 } from "@assay/registry";
 import { S3ArtifactStore } from "@assay/storage";
+import { InProcessCallbackRendezvous } from "@assay/topology";
 import { buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
@@ -173,13 +174,24 @@ async function main(): Promise<void> {
       : {},
   );
 
+  // front-door callback 완료 모델: 공개 베이스 URL 이 설정되면 in-process 랑데부를 하나 만들어 토폴로지 백엔드(outbound:
+  // {{callback_url}}/wait)와 /frontdoor-callback 라우트(inbound: deliver)가 공유한다. 미설정이면 callback 모델은 드라이버에서
+  // 명확히 실패(랑데부 없음). 단일 control-plane 프로세스(in-process dispatch) 전제 — 분산은 store-backed 랑데부가 후속.
+  const callbackRendezvous = process.env.ASSAY_CALLBACK_BASE_URL
+    ? new InProcessCallbackRendezvous(process.env.ASSAY_CALLBACK_BASE_URL)
+    : undefined;
+  if (callbackRendezvous) console.log("▶ front-door callback rendezvous:", process.env.ASSAY_CALLBACK_BASE_URL);
+
   // 테넌트 런타임 라우팅: placement.target 이 테넌트 등록 Runtime 이면 그 백엔드를 빌드/등록해 라우팅(아니면 글로벌 백엔드 그대로).
   const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
   // RuntimeSpec → 라이브 백엔드. topology 런타임 → ServiceTopologyBackend, 나머지는 buildRuntimeBackend(local/docker/nomad/k8s).
   // 디스패치와 연결 테스트(probe)가 같은 빌더/인증 경로를 쓰도록 한 곳에서 정의.
   const runtimeBuildBackend = (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) =>
     spec.kind === "topology"
-      ? buildTopologyBackend(spec, { harnesses: harnessInstanceRegistry })
+      ? buildTopologyBackend(spec, {
+          harnesses: harnessInstanceRegistry,
+          ...(callbackRendezvous ? { callbackRendezvous } : {}),
+        })
       : buildRuntimeBackend(spec, opts);
   const dispatcher = new RuntimeDispatcher({
     inner: scheduler,
@@ -297,6 +309,7 @@ async function main(): Promise<void> {
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
     requireAuth: process.env.ASSAY_REQUIRE_AUTH === "1",
+    ...(callbackRendezvous ? { callbackSink: callbackRendezvous } : {}), // /frontdoor-callback inbound 수신(같은 랑데부 인스턴스)
     // 요청/인증 구조화 로그(pino). 기본 info — 인증 거부(401)와 그 사유를 컨트롤플레인 로그로 진단. silent 로 끌 수 있음.
     logLevel: process.env.ASSAY_LOG_LEVEL ?? "info",
     // MCP OAuth: Keycloak 을 인가서버로 광고(클라이언트가 로그인 시작). 미설정이면 API 키만.
