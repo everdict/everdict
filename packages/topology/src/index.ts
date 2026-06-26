@@ -1,4 +1,4 @@
-export type { TopologyRuntime, TopologyHandle, BrowserEnvHandle } from "./topology-runtime.js";
+export type { TopologyRuntime, TopologyHandle, TargetEnvHandle } from "./topology-runtime.js";
 export { type RunKeys, keysFor, newRunId, wiringVars, EnvironmentManager } from "./environment-manager.js";
 export {
   type StoreDef,

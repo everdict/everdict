@@ -1,14 +1,17 @@
-import type { BrowserSnapshot, ServiceHarnessSpec, TrustZone } from "@assay/core";
+import type { EnvSnapshot, ServiceHarnessSpec, TrustZone } from "@assay/core";
 
 // warm 토폴로지 핸들: 서비스 이름 → 베이스 URL (front-door 등).
 export interface TopologyHandle {
   endpoints: Record<string, string>;
 }
 
-// per-case 타깃 환경(브라우저+익스텐션) 핸들.
-export interface BrowserEnvHandle {
-  cdpUrl: string;
-  snapshot(): Promise<BrowserSnapshot>;
+// per-case 타깃 환경 핸들 — 에이전트가 도달할 "이름있는 좌표"(wiring) + 관측 표면.
+// wiring 은 per-run 와이어링 어휘에 머지된다 → bodyTemplate 이 타깃이 선언한 임의 좌표를 {{...}} 로 참조.
+// CDP 브라우저는 1-원소 bag({ target_cdp_url })인 특수 케이스. 세션형 타깃은 여러 좌표를 동시에 기여
+// (playwright_server_url/action_stream_url/session_id…). 설계: docs/architecture/target-acquisition-generalization.md.
+export interface TargetEnvHandle {
+  wiring: Record<string, string>;
+  snapshot(): Promise<EnvSnapshot>;
   dispose(): Promise<void>;
 }
 
@@ -18,5 +21,5 @@ export interface BrowserEnvHandle {
 export interface TopologyRuntime {
   readonly id: string;
   ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle>; // warm(존별)
-  provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<BrowserEnvHandle>; // per-case
+  provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle>; // per-case
 }

@@ -1,7 +1,7 @@
 import { type BrowserSnapshot, type ServiceHarnessSpec, UpstreamError } from "@assay/core";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
-import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
+import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface DockerTopologyRuntimeOptions {
   docker?: Docker; // 주입형(테스트는 가짜 Docker). 기본 execFile("docker", …)
@@ -95,7 +95,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     }
   }
 
-  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string): Promise<BrowserEnvHandle> {
+  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string): Promise<TargetEnvHandle> {
     const key = `${spec.id}@${spec.version}`;
     const network = this.warm.get(key)?.network ?? netName(spec);
     const alias = `browser-${sanitize(runId)}`;
@@ -123,7 +123,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     cname: string,
     alias: string,
     hostPort: number,
-  ): Promise<BrowserEnvHandle> {
+  ): Promise<TargetEnvHandle> {
     const fetchImpl = this.fetchImpl; // 반환 closure 에서 this 가 바뀌므로 로컬 캡처
     const docker = this.docker;
     const hostCdp = `http://127.0.0.1:${hostPort}`;
@@ -134,7 +134,8 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       // 빈 탭 생성 실패는 치명적 아님
     }
     return {
-      cdpUrl: `http://${alias}:9222`, // front-door 페이로드의 browser_cdp_url — 에이전트(같은 네트워크)가 도달
+      // 에이전트(같은 네트워크)가 도달할 CDP — wiring 의 target_cdp_url 로 front-door 페이로드에 주입된다.
+      wiring: { target_cdp_url: `http://${alias}:9222` },
       async snapshot(): Promise<BrowserSnapshot> {
         let targets: Array<{ url?: string }> = [];
         try {

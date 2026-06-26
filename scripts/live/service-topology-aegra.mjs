@@ -42,7 +42,7 @@ const runtime = {
   },
   async provisionBrowserEnv() {
     return {
-      cdpUrl: "",
+      wiring: { target_cdp_url: "" },
       async snapshot() {
         return { kind: "browser", url: "", dom: "" };
       },

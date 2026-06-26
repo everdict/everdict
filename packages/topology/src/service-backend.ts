@@ -87,13 +87,14 @@ export class ServiceTopologyBackend implements Backend {
       // 구동(HOW): submit + per-run wiring 주입 → 완료 모델(sync/poll)대로 대기. 인프라(WHERE)와 분리된 관심사.
       const driver =
         this.opts.frontDoorDriver ?? new HttpFrontDoorDriver({ submit: this.opts.submit, getJson: this.opts.getJson });
-      // per-run 와이어링 — isolateBy 파생 격리 변수(+ task + 타깃이 있으면 target_cdp_url). 본문 템플릿 + statusPath 공용.
+      // per-run 와이어링 — isolateBy 파생 격리 변수(+ task + 타깃이 기여한 이름있는 좌표 bag). 본문 템플릿 + statusPath 공용.
+      // 타깃 wiring 은 provision=`{ target_cdp_url }`, service=선언된 좌표들(playwright_server_url/session_id…) — 어휘 개방.
       const wiring = wiringVars(runId, spec.dependencies, {
         task: job.evalCase.task,
-        ...(target ? { target_cdp_url: target.cdpUrl } : {}),
+        ...(target ? target.wiring : {}),
       });
       // 본문(#1): request.bodyTemplate 이 있으면 wiring 으로 보간, 없으면 현행 browser-use 5-field 본문(무회귀).
-      // 타깃이 없으면 browser_cdp_url 은 뺀다(브라우저가 없으므로).
+      // 타깃이 없으면 browser_cdp_url 은 뺀다(브라우저가 없으므로). 현행 본문은 provision 타깃의 target_cdp_url 을 쓴다.
       const payload = spec.frontDoor.request?.bodyTemplate
         ? interpolateTemplate(spec.frontDoor.request.bodyTemplate, wiring)
         : {
@@ -101,7 +102,7 @@ export class ServiceTopologyBackend implements Backend {
             thread_id: keys.threadId,
             stream_channel: keys.streamChannel,
             minio_prefix: keys.minioPrefix,
-            ...(target ? { browser_cdp_url: target.cdpUrl } : {}),
+            ...(target ? { browser_cdp_url: target.wiring.target_cdp_url } : {}),
           };
       const outcome = await driver.drive({
         base,

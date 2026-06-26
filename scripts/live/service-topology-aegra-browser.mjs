@@ -65,7 +65,7 @@ const runtime = {
       await fetch(`${CDP_HOST}/json/new?about:blank`, { method: "PUT" });
     } catch {}
     return {
-      cdpUrl: CDP_AGENT, // 에이전트가 조작할 브라우저 주소(backend 가 submit payload 로 전달)
+      wiring: { target_cdp_url: CDP_AGENT }, // 에이전트가 조작할 브라우저 주소(backend 가 submit payload 로 전달)
       async snapshot() {
         try {
           const tgs = await cdp("/json/list");

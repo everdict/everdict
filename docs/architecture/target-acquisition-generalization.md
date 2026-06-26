@@ -1,6 +1,6 @@
 # Service-topology target generalization — the target axis (design)
 
-> **Status: design only (no code yet).** Round 2 of front-door generalization. Round 1
+> **Status: B1 DONE; B2 next.** Round 2 of front-door generalization. Round 1
 > (`front-door-generalization.md`) made *driving* harness-agnostic (request / completion / correlation / image)
 > and explicitly deferred the **target axis** as a follow-up ("`harness`-provided target observation needs a
 > `TopologyRuntime.observe`-style method"). This doc supersedes that guess: the clean decomposition is a
@@ -173,10 +173,11 @@ assumed to be *Assay's own browser*. B1+B2 absorb (d): a harness that brings its
 Each step merges independently; defaults keep current behavior, so no regression. Live e2e
 (`scripts/live/service-topology-{nomad,k8s}.mjs`) provisions a CDP browser → stays on the `provision` default.
 
-1. **B1 — handle + vocabulary.** `BrowserEnvHandle` → `TargetEnvHandle` (`wiring` bag); the 3 runtimes return
-   `wiring:{ target_cdp_url }`; `dispatch` merges `...target.wiring`. Pure refactor — wiring still contains
-   `target_cdp_url`, so the default body is byte-identical. Unblocks open-ended `bodyTemplate` vocabulary (#3).
-   Unit tests: handle shape + dispatch wiring merge; the existing CDP tests assert `wiring.target_cdp_url`.
+1. **B1 — handle + vocabulary. ✅ DONE.** `BrowserEnvHandle` → `TargetEnvHandle` (`wiring` bag, `snapshot` widened
+   to `EnvSnapshot`); the 3 runtimes return `wiring:{ target_cdp_url }`; `dispatch` merges `...target.wiring` (and the
+   legacy body reads `target.wiring.target_cdp_url`). Pure refactor — wiring still contains `target_cdp_url`, so the
+   default body is byte-identical. Unblocked open-ended `bodyTemplate` vocabulary (#3/#4): a test feeds a target
+   contributing `playwright_server_url`/`session_id` and asserts they interpolate. Live `.mjs` scripts migrated.
 2. **B2 — `acquire: service`.** Add `target.acquire` to the schema (+ template mirror); add `target-acquirer.ts`
    with `provisionAcquirer` (default) + `serviceAcquirer`; `dispatch` selects via `targetAcquirerFor`. Default
    (absent `acquire`) routes to `provisionAcquirer` = today. Unit tests: serviceAcquirer opens/maps coordinates →

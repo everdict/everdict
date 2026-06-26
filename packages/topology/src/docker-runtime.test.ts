@@ -134,9 +134,9 @@ describe("DockerTopologyRuntime", () => {
     await rt.ensureTopology(SPEC);
     const browser = await rt.provisionBrowserEnv(SPEC, "run-1");
     // 에이전트(네트워크 내부)가 도달하는 주소 — 내부 alias.
-    expect(browser.cdpUrl).toBe("http://browser-run-1:9222");
+    expect(browser.wiring.target_cdp_url).toBe("http://browser-run-1:9222");
     const snap = await browser.snapshot();
-    expect(snap.kind).toBe("browser");
+    if (snap.kind !== "browser") throw new Error("브라우저 스냅샷이어야 한다");
     expect(snap.url).toBe("https://x");
     // dispose 는 브라우저 컨테이너만 제거(warm 토폴로지 유지).
     await browser.dispose();

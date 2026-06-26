@@ -21,7 +21,7 @@ import {
   topologyJobId,
 } from "./nomad-topology.js";
 import { type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
-import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
+import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 // Nomad HTTP 추상화 (테스트에서 모킹 가능; @assay/backends 의 NomadHttp 와 동일 형태).
 export interface NomadHttp {
@@ -271,7 +271,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     throw new UpstreamError("UPSTREAM_ERROR", { store }, "공유 스토어 준비 대기 시간초과");
   }
 
-  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<BrowserEnvHandle> {
+  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {
     const ns = zone?.namespace ?? this.opts.namespace;
     const job = buildBrowserJob(spec, runId, {
       datacenters: this.opts.datacenters,
@@ -289,7 +289,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     }
   }
 
-  private async connectBrowser(runId: string, ns?: string): Promise<BrowserEnvHandle> {
+  private async connectBrowser(runId: string, ns?: string): Promise<TargetEnvHandle> {
     const alloc = await this.waitForGroupRunning(browserJobId(runId), "browser", ns);
     const p = resolvePort(alloc, "cdp");
     if (!p) {
@@ -314,7 +314,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
 
     const deregister = () => this.deregister(browserJobId(runId), ns);
     return {
-      cdpUrl,
+      wiring: { target_cdp_url: cdpUrl },
       async snapshot(): Promise<BrowserSnapshot> {
         // 실 브라우저 관측: 열린 타깃 목록(현재 URL). 익스텐션 주도 네비게이션은 Phase 2.
         let targets: Array<{ url?: string; title?: string }> = [];

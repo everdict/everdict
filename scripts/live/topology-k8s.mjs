@@ -63,12 +63,12 @@ try {
   console.log("\n=== provisionBrowserEnv (real chromedp/headless-shell on kind) ===");
   const runId = "topo-demo-run1";
   const browser = await rt.provisionBrowserEnv(spec, runId);
-  console.log("browser CDP url:", browser.cdpUrl); // 실 Chromium 의 webSocketDebuggerUrl
+  console.log("browser CDP url:", browser.wiring.target_cdp_url); // 실 Chromium 의 webSocketDebuggerUrl
   const browserDeploy = k(["get", "deploy", "-n", NS, "-o", "name"]).trim();
   console.log("k8s deployments now:", browserDeploy.replace(/\n/g, " "));
   const snap = await browser.snapshot(); // CDP /json/list → url/dom
   console.log("snapshot.kind:", snap.kind, "url:", snap.url, "dom(targets):", String(snap.dom).slice(0, 80));
-  const cdpLive = browser.cdpUrl.startsWith("ws://") && snap.kind === "browser";
+  const cdpLive = browser.wiring.target_cdp_url.startsWith("ws://") && snap.kind === "browser";
   await browser.dispose(); // per-case 브라우저만 제거(warm 유지)
 
   ok =

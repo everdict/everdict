@@ -18,7 +18,7 @@ import {
   topologyJobId,
 } from "./nomad-topology.js";
 import { ServiceTopologyBackend, type SubmitFn } from "./service-backend.js";
-import type { BrowserEnvHandle, TopologyRuntime } from "./topology-runtime.js";
+import type { TargetEnvHandle, TopologyRuntime } from "./topology-runtime.js";
 
 const SPEC: ServiceHarnessSpec = {
   kind: "service",
@@ -249,8 +249,8 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       screenshotRef: "runs/fixed/shot.png",
       console: [],
     };
-    const browser: BrowserEnvHandle = {
-      cdpUrl: "ws://browser/ctx",
+    const browser: TargetEnvHandle = {
+      wiring: { target_cdp_url: "ws://browser/ctx" },
       async snapshot() {
         return browserSnap;
       },
@@ -317,8 +317,8 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     };
     const fromBrowser: BrowserSnapshot = { kind: "browser", url: "https://pulled", dom: "<pulled/>", console: [] };
     const submit: SubmitFn = async () => ({ observation: fromResponse });
-    const browser: BrowserEnvHandle = {
-      cdpUrl: "ws://browser/ctx",
+    const browser: TargetEnvHandle = {
+      wiring: { target_cdp_url: "ws://browser/ctx" },
       async snapshot() {
         return fromBrowser; // sentinel 이면 이 pull 값은 무시돼야 한다
       },
@@ -380,8 +380,8 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       console: [],
     };
     let fetchedUrl = "";
-    const browser: BrowserEnvHandle = {
-      cdpUrl: "ws://browser/ctx",
+    const browser: TargetEnvHandle = {
+      wiring: { target_cdp_url: "ws://browser/ctx" },
       async snapshot() {
         return { kind: "browser", url: "https://pulled", dom: "<pulled/>", console: [] };
       },
@@ -448,7 +448,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       },
       async provisionBrowserEnv() {
         return {
-          cdpUrl: "ws://b",
+          wiring: { target_cdp_url: "ws://b" },
           async snapshot() {
             return browserSnap;
           },
@@ -495,8 +495,8 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
 
   it("멀티테넌트: 테넌트마다 다른 trust-zone 으로 warm 토폴로지를 분리한다(공유 금지)", async () => {
     const zonesSeen: Array<TrustZone | undefined> = [];
-    const browser: BrowserEnvHandle = {
-      cdpUrl: "ws://b",
+    const browser: TargetEnvHandle = {
+      wiring: { target_cdp_url: "ws://b" },
       async snapshot() {
         return { kind: "browser", url: "about:blank", dom: "", console: [] };
       },
@@ -539,11 +539,11 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
   });
 
   // --- #2 완료 모델(completion) ---
-  const mockBrowser = (): { handle: BrowserEnvHandle; disposed: () => boolean } => {
+  const mockBrowser = (): { handle: TargetEnvHandle; disposed: () => boolean } => {
     let disposed = false;
     return {
       handle: {
-        cdpUrl: "ws://b",
+        wiring: { target_cdp_url: "ws://b" },
         async snapshot() {
           return { kind: "browser", url: "https://x", dom: "<html/>", console: [] };
         },
@@ -554,7 +554,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       disposed: () => disposed,
     };
   };
-  const mockRuntime = (browser: BrowserEnvHandle): TopologyRuntime => ({
+  const mockRuntime = (browser: TargetEnvHandle): TopologyRuntime => ({
     id: "mock",
     async ensureTopology() {
       return { endpoints: { "agent-server": "http://agent-server:8000" } };
@@ -731,6 +731,45 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
       obj: "runs/fixed/", // minio isolateBy: object-prefix → object_prefix
       cdp: "ws://b", // target_cdp_url
     });
+  });
+
+  it("타깃 wiring 의 임의 좌표(target_cdp_url 외)가 본문 템플릿 어휘로 흐른다 (B1 — 어휘 개방)", async () => {
+    let sent: Record<string, unknown> = {};
+    // 타깃이 CDP 한 좌표를 넘어 세션형 좌표(playwright_server_url/session_id)를 함께 기여 — 핸들이 bag.
+    const handle: TargetEnvHandle = {
+      wiring: { target_cdp_url: "ws://b", playwright_server_url: "ws://pw/session-9", session_id: "sess-9" },
+      async snapshot() {
+        return { kind: "browser", url: "https://x", dom: "", console: [] };
+      },
+      async dispose() {},
+    };
+    const SPEC_TMPL: ServiceHarnessSpec = {
+      ...SPEC,
+      frontDoor: {
+        ...SPEC.frontDoor,
+        request: {
+          bodyTemplate: { pw: "{{playwright_server_url}}", sid: "{{session_id}}", cdp: "{{target_cdp_url}}" },
+        },
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_TMPL,
+      submit: async (_url, payload) => {
+        sent = payload;
+      },
+      newRunId: () => "fixed",
+    });
+
+    await backend.dispatch(job);
+
+    // 고정 어휘(task/target_cdp_url)가 아니라 타깃이 선언한 임의 좌표가 그대로 보간된다.
+    expect(sent).toEqual({ pw: "ws://pw/session-9", sid: "sess-9", cdp: "ws://b" });
   });
 
   it("request 미지정이면 현행 browser-use 5-field 본문 그대로(무회귀)", async () => {

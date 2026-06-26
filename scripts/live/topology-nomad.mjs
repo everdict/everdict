@@ -44,10 +44,10 @@ try {
 
   console.log("\n=== provisionBrowserEnv (real chromedp/headless-shell on Nomad) ===");
   const browser = await rt.provisionBrowserEnv(spec, "topo-demo-run1");
-  console.log("browser CDP url:", browser.cdpUrl);
+  console.log("browser CDP url:", browser.wiring.target_cdp_url);
   const snap = await browser.snapshot();
   console.log("snapshot.kind:", snap.kind, "url:", snap.url);
-  const cdpLive = browser.cdpUrl.startsWith("ws://") && snap.kind === "browser";
+  const cdpLive = browser.wiring.target_cdp_url.startsWith("ws://") && snap.kind === "browser";
   await browser.dispose();
 
   ok = health.status === 200 && drive.status === 200 && cdpLive;

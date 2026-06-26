@@ -10,7 +10,7 @@ import {
   resolveEgressCidrs,
 } from "./network-policy.js";
 import { DEFAULT_POOL_NS, type StorePlan, planTenantStores } from "./store-binding.js";
-import type { BrowserEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
+import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface K8sTopologyRuntimeOptions {
   kubectl?: Kubectl;
@@ -199,7 +199,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     throw new UpstreamError("UPSTREAM_ERROR", { store }, "공유 스토어 준비 대기 시간초과");
   }
 
-  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<BrowserEnvHandle> {
+  async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {
     const ns = this.nsFor(zone);
     const name = browserDeployName(runId);
     const manifests = buildBrowserManifests(runId, {
@@ -226,7 +226,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     ns: string,
     browserTargets: string[],
     pf: PortForward,
-  ): Promise<BrowserEnvHandle> {
+  ): Promise<TargetEnvHandle> {
     const fetchImpl = this.fetchImpl; // 반환 closure 에서 this 가 바뀌므로 로컬로 캡처
     const cdpHttp = `http://127.0.0.1:${pf.localPort}`;
     await this.waitForHttp(`${cdpHttp}/json/version`);
@@ -243,7 +243,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       // 빈 탭 생성 실패는 치명적 아님
     }
     return {
-      cdpUrl,
+      wiring: { target_cdp_url: cdpUrl },
       async snapshot(): Promise<BrowserSnapshot> {
         let targets: Array<{ url?: string }> = [];
         try {

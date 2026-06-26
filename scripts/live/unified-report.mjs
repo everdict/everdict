@@ -188,7 +188,7 @@ async function webTrack() {
         },
         async provisionBrowserEnv() {
           return {
-            cdpUrl: "",
+            wiring: { target_cdp_url: "" },
             async snapshot() {
               const j = await (await fetch(`${FRONT}/observe`)).json();
               return { kind: "browser", url: j.url || "", dom: j.dom || "", console: [] };
