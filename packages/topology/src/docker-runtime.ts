@@ -47,43 +47,52 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     if (cached) return cached.handle; // warm: 버전당 한 번만 배포
 
     const network = netName(spec);
-    await this.docker.ensureNetwork(network);
+    // 기동한(또는 기동 시도한) 컨테이너 이름 — 부분실패 시 정리 대상. run 전에 push 하므로 run 자체가 throw 한 이름도 잡힌다.
     const containers: string[] = [];
+    try {
+      await this.docker.ensureNetwork(network);
 
-    // 1) 의존 스토어(타입별 1개) — 네트워크 alias = `<id>-<store>`(dependencyConnEnv 의 호스트와 일치 → 서비스가 그 이름으로 접속).
-    for (const { store, name, def } of dependencyStores(spec)) {
-      const cname = `${network}-${name}`;
-      await this.docker.run({ name: cname, image: def.image, network, alias: name, env: def.env, args: def.args });
-      containers.push(cname);
-      await this.waitStoreAccepting(store, cname); // pg_isready/redis ping — 서비스가 부팅 시 접속하므로 먼저 준비.
-    }
-    // 서비스 접속 env: 자동 connEnv(<id>-<store>:<port>) + 명시 storeEnv(명시가 이긴다).
-    const svcEnv = { ...dependencyConnEnv(spec), ...this.opts.storeEnv };
-
-    // 2) 서비스 — alias = svc.name(needs/front-door 내부 주소). port 있으면 임의 호스트 포트로 게시 → 러너(도커 밖)가 도달.
-    const endpoints: Record<string, string> = {};
-    for (const svc of spec.services) {
-      const cname = `${network}-${sanitize(svc.name)}`;
-      await this.docker.run({
-        name: cname,
-        image: svc.image,
-        network,
-        alias: svc.name,
-        env: svcEnv,
-        ...(svc.port !== undefined ? { publish: svc.port } : {}),
-      });
-      containers.push(cname);
-      if (svc.port !== undefined) {
-        const hostPort = await this.docker.hostPort(cname, svc.port);
-        const url = `http://127.0.0.1:${hostPort}`;
-        await this.waitForHttp(url);
-        endpoints[svc.name] = url;
+      // 1) 의존 스토어(타입별 1개) — 네트워크 alias = `<id>-<store>`(dependencyConnEnv 의 호스트와 일치 → 서비스가 그 이름으로 접속).
+      for (const { store, name, def } of dependencyStores(spec)) {
+        const cname = `${network}-${name}`;
+        containers.push(cname);
+        await this.docker.run({ name: cname, image: def.image, network, alias: name, env: def.env, args: def.args });
+        await this.waitStoreAccepting(store, cname); // pg_isready/redis ping — 서비스가 부팅 시 접속하므로 먼저 준비.
       }
-    }
+      // 서비스 접속 env: 자동 connEnv(<id>-<store>:<port>) + 명시 storeEnv(명시가 이긴다).
+      const svcEnv = { ...dependencyConnEnv(spec), ...this.opts.storeEnv };
 
-    const handle: TopologyHandle = { endpoints };
-    this.warm.set(key, { handle, network, containers });
-    return handle;
+      // 2) 서비스 — alias = svc.name(needs/front-door 내부 주소). port 있으면 임의 호스트 포트로 게시 → 러너(도커 밖)가 도달.
+      const endpoints: Record<string, string> = {};
+      for (const svc of spec.services) {
+        const cname = `${network}-${sanitize(svc.name)}`;
+        containers.push(cname);
+        await this.docker.run({
+          name: cname,
+          image: svc.image,
+          network,
+          alias: svc.name,
+          env: svcEnv,
+          ...(svc.port !== undefined ? { publish: svc.port } : {}),
+        });
+        if (svc.port !== undefined) {
+          const hostPort = await this.docker.hostPort(cname, svc.port);
+          const url = `http://127.0.0.1:${hostPort}`;
+          await this.waitForHttp(url);
+          endpoints[svc.name] = url;
+        }
+      }
+
+      const handle: TopologyHandle = { endpoints };
+      this.warm.set(key, { handle, network, containers });
+      return handle;
+    } catch (err) {
+      // 부분 기동 정리 — 고정 이름 컨테이너가 남으면 다음 케이스의 docker run(--name 비멱등)이 이름 충돌로 cascade 실패한다.
+      // 실패 토폴로지는 warm 캐시에 넣지 않으므로(깨진 핸들 캐싱 금지) teardown 으로도 못 잡는다 → 여기서 즉시 제거.
+      await this.docker.rm(containers).catch(() => {});
+      await this.docker.removeNetwork(network).catch(() => {});
+      throw err;
+    }
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string): Promise<BrowserEnvHandle> {

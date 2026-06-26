@@ -143,6 +143,44 @@ describe("DockerTopologyRuntime", () => {
     expect(f.removed).toContain("assay-bu-1.0.0-browser-run-1");
   });
 
+  it("ensureTopology: 부분 실패 후 재시도가 컨테이너 이름 충돌 없이 성공한다(cascade 방지)", async () => {
+    // 실 데몬처럼 동작하는 fake — docker run(--name)은 비멱등이라 같은 이름이 살아 있으면 충돌(throw).
+    // 스토어는 첫 토폴로지 시도에서 readiness 실패(exec throw) → ensureTopology 가 중도 throw.
+    const live = new Set<string>();
+    const removed: string[] = [];
+    let storeReady = false; // 첫 시도엔 준비 안 됨 → 두 번째 시도 직전에 켠다.
+    const docker: Docker = {
+      async ensureNetwork() {},
+      async run(spec) {
+        if (live.has(spec.name)) throw new Error(`container name already in use: ${spec.name}`);
+        live.add(spec.name);
+        return `cid-${spec.name}`;
+      },
+      async hostPort() {
+        return 49152;
+      },
+      async exec() {
+        if (!storeReady) throw new Error("store not accepting yet");
+      },
+      async rm(c) {
+        for (const name of c) live.delete(name);
+        removed.push(...c);
+      },
+      async removeNetwork() {},
+    };
+    // readyTimeoutMs/pollIntervalMs 를 1ms 로 — 실패 경로의 폴링이 즉시 끝나게.
+    const rt = new DockerTopologyRuntime({ docker, fetchImpl: okFetch, readyTimeoutMs: 1, pollIntervalMs: 1 });
+
+    // 1차 시도: 스토어 readiness 실패 → throw. 정리되면 postgres 컨테이너가 live 에서 빠진다.
+    await expect(rt.ensureTopology(SPEC)).rejects.toThrow();
+    expect(removed).toContain("assay-bu-1.0.0-bu-postgres"); // 부분 기동분 정리됨(픽스 전엔 비어 cascade)
+
+    // 2차 시도: 이제 스토어 준비됨. 픽스 전이면 1차가 남긴 postgres 이름과 충돌(throw)했을 자리.
+    storeReady = true;
+    const handle = await rt.ensureTopology(SPEC);
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
   it("teardown: 토폴로지 컨테이너 + 네트워크 제거", async () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
