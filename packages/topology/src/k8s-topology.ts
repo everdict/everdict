@@ -61,13 +61,16 @@ export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopo
 
 export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
   const ns = opts.namespace ?? "assay-platform";
-  // 스토어를 함께 띄우면 접속 env 를 자동 주입 — 단, 명시 storeEnv 가 이긴다(harness 별 변수명 오버라이드).
+  // 스토어를 함께 띄우면 접속 env 를 자동 주입 — 우선순위: connEnv(관례) < svc.env(서비스 정적) < storeEnv(운영 오버라이드).
   const depEnv = opts.provisionDependencies ? dependencyConnEnv(spec) : {};
-  const env = Object.entries({ ...depEnv, ...(opts.storeEnv ?? {}) }).map(([name, value]) => ({ name, value }));
   const out: K8sManifest[] = [];
   if (opts.provisionDependencies) out.push(...buildDependencyManifests(spec, opts));
   for (const svc of spec.services) {
     const labels = { app: svc.name, "assay/harness": spec.id, "assay/version": spec.version };
+    const env = Object.entries({ ...depEnv, ...svc.env, ...(opts.storeEnv ?? {}) }).map(([name, value]) => ({
+      name,
+      value,
+    }));
     out.push({
       apiVersion: "apps/v1",
       kind: "Deployment",

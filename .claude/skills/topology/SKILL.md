@@ -9,8 +9,9 @@ A harness can be a process (Claude Code) or a **deployed multi-service topology 
 (browser/OS). See `docs/service-harness.md`.
 
 ## The model
-- `HarnessSpec(kind:"service")`: `services[]` + `dependencies[]` (shared stores) + `target` (browser+ext) +
-  `frontDoor` + `traceSource`.
+- `HarnessSpec(kind:"service")`: `services[]` (each `{image, port?, needs, env?}`; `env` = per-service static
+  config — precedence store `connEnv` < `service.env` < runtime `storeEnv`) + `dependencies[]` (shared stores) +
+  `target` (browser+ext) + `frontDoor` + `traceSource`.
 - A run = ensure warm topology → per-case browser → drive (front-door `POST /runs` with per-run wiring) →
   collect trace (OTel/MLflow) → observe (browser snapshot) → grade.
 

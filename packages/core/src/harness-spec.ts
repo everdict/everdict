@@ -8,6 +8,7 @@ export const TraceSourceSpecSchema = z.object({
 export type TraceSourceSpec = z.infer<typeof TraceSourceSpecSchema>;
 
 // 토폴로지 서비스 (무상태 → per-version warm). perRun = 런타임에 주입되는 키 이름들.
+// env = 서비스 정적 env(MODEL/LOG_LEVEL/feature flag 등 비-스토어 설정). 주입 우선순위: 스토어 connEnv(관례) < env < 운영 storeEnv.
 export const TopologyServiceSchema = z.object({
   name: z.string(),
   image: z.string(),
@@ -15,6 +16,7 @@ export const TopologyServiceSchema = z.object({
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
   replicas: z.number().int().default(1),
+  env: z.record(z.string()).default({}),
 });
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
 

@@ -45,6 +45,28 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.frontDoor.service).toBe("planner");
   });
 
+  it("서비스 env 가 resolved spec 까지 보존된다(default {} 로 덮어쓰지 않음)", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "e",
+      version: "1",
+      services: [{ name: "planner", needs: [], env: { LOG_LEVEL: "debug", MODEL: "x" } }],
+      dependencies: [],
+      frontDoor: { service: "planner", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "e", version: "1" },
+      id: "e",
+      version: "v1",
+      pins: { planner: "p:1" },
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services[0]?.env).toEqual({ LOG_LEVEL: "debug", MODEL: "x" });
+  });
+
   it("슬롯 pin 누락 → BadRequestError", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "bu", version: "1" },

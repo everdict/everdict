@@ -15,6 +15,7 @@ const SPEC: ServiceHarnessSpec = {
       needs: ["postgres", "redis"],
       perRun: [],
       replicas: 1,
+      env: {},
     },
   ],
   dependencies: [
@@ -117,6 +118,33 @@ describe("DockerTopologyRuntime", () => {
     expect(agent?.publish).toBe(8000);
     // 엔드포인트 = http://127.0.0.1:<게시 호스트 포트>.
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
+  it("ensureTopology: 서비스 정적 env(svc.env) 주입 + 우선순위(connEnv < svc.env < storeEnv)", async () => {
+    const f = fakeDocker();
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "agent-server",
+          image: "reg/bu-agent:1",
+          port: 8000,
+          needs: ["postgres"],
+          perRun: [],
+          replicas: 1,
+          env: { LOG_LEVEL: "info", DATABASE_URL: "postgresql://svc" },
+        },
+      ],
+    };
+    const rt = new DockerTopologyRuntime({
+      docker: f.docker,
+      fetchImpl: okFetch,
+      storeEnv: { DATABASE_URL: "postgresql://store" },
+    });
+    await rt.ensureTopology(spec);
+    const agent = f.runs.find((r) => r.alias === "agent-server");
+    expect(agent?.env?.LOG_LEVEL).toBe("info"); // svc.env 단독
+    expect(agent?.env?.DATABASE_URL).toBe("postgresql://store"); // storeEnv 가 svc.env(및 connEnv)를 이긴다
   });
 
   it("ensureTopology: 같은 버전 재호출은 warm 캐시 — 재배포 없음", async () => {

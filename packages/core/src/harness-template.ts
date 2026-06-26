@@ -111,6 +111,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
           needs: s.needs,
           perRun: s.perRun,
           replicas: s.replicas,
+          env: s.env,
           ...(s.port !== undefined ? { port: s.port } : {}),
         };
       });

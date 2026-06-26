@@ -10,8 +10,8 @@ const buTemplate: HarnessTemplateSpec = {
   id: "bu",
   version: "1",
   services: [
-    { name: "planner", needs: [], perRun: [], replicas: 1 },
-    { name: "browser", needs: [], perRun: [], replicas: 1 },
+    { name: "planner", needs: [], perRun: [], replicas: 1, env: {} },
+    { name: "browser", needs: [], perRun: [], replicas: 1, env: {} },
   ],
   dependencies: [],
   frontDoor: { service: "planner", submit: "POST /runs" },

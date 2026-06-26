@@ -7,8 +7,8 @@ const SPEC: ServiceHarnessSpec = {
   id: "bu",
   version: "1.0.0",
   services: [
-    { name: "agent-server", image: "a:1", port: 8080, needs: [], perRun: [], replicas: 1 },
-    { name: "browser-mcp", image: "b:1", port: 9000, needs: [], perRun: [], replicas: 1 },
+    { name: "agent-server", image: "a:1", port: 8080, needs: [], perRun: [], replicas: 1, env: {} },
+    { name: "browser-mcp", image: "b:1", port: 9000, needs: [], perRun: [], replicas: 1, env: {} },
   ],
   dependencies: [],
   frontDoor: { service: "agent-server", submit: "POST /runs" },

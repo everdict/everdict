@@ -7,7 +7,7 @@ const SPEC: ServiceHarnessSpec = {
   kind: "service",
   id: "t",
   version: "1",
-  services: [{ name: "browsers", image: "img", port: 7000, needs: [], perRun: [], replicas: 1 }],
+  services: [{ name: "browsers", image: "img", port: 7000, needs: [], perRun: [], replicas: 1, env: {} }],
   dependencies: [],
   frontDoor: { service: "browsers", submit: "POST /runs" },
   traceSource: { kind: "mlflow", endpoint: "http://m" },

@@ -7,8 +7,8 @@ const SPEC: ServiceHarnessSpec = {
   id: "topo",
   version: "1.0.0",
   services: [
-    { name: "agent", image: "reg/agent:1", port: 8000, needs: [], perRun: [], replicas: 1 },
-    { name: "mcp", image: "reg/mcp:1", port: 9000, needs: [], perRun: [], replicas: 1 },
+    { name: "agent", image: "reg/agent:1", port: 8000, needs: [], perRun: [], replicas: 1, env: {} },
+    { name: "mcp", image: "reg/mcp:1", port: 9000, needs: [], perRun: [], replicas: 1, env: {} },
   ],
   dependencies: [],
   frontDoor: { service: "agent", submit: "POST /runs" },

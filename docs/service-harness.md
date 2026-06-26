@@ -6,8 +6,10 @@ browser-mcp, action-stream} + {Postgres checkpoints, Redis stream, MinIO snapsho
 Chromium loading a client browser extension (the extension drives the browser).
 
 ## Spec (`HarnessSpec`, kind: "service")
-`services[]` (per-version warm) · `dependencies[]` (shared store + `isolateBy`) · `target`
+`services[]` (per-version warm; each `{image, port?, needs, env?}` — `env` = per-service static config, e.g.
+`MODEL`/`LOG_LEVEL`/flags) · `dependencies[]` (shared store + `isolateBy`) · `target`
 (browser+extension, per-case) · `frontDoor` ({service, submit, trace}) · `traceSource` ({kind: otel|mlflow, endpoint}).
+Service env precedence: store `connEnv` (conventional) < `service.env` (author) < runtime `storeEnv` (operator override).
 
 > **Planned — front-door generalization (design).** Today `ServiceTopologyBackend.dispatch` is hardcoded to one
 > protocol (browser-use-langgraph) in five places (fixed payload, fire-and-forget submit, trace-by-Assay-runId,

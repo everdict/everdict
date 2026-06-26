@@ -163,7 +163,8 @@ export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopol
           Name: svc.name,
           Driver: "docker",
           Config: config,
-          Env: { ...opts.storeEnv },
+          // 서비스 정적 env(svc.env) 위에 운영 storeEnv 가 이긴다(스토어 cred 권위). storeEnv 엔 런타임이 발견한 스토어 URL 포함.
+          Env: { ...svc.env, ...opts.storeEnv },
           Resources: { CPU: 1000, MemoryMB: 1024 },
         },
       ],

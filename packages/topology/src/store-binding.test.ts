@@ -6,7 +6,9 @@ const SPEC: ServiceHarnessSpec = {
   kind: "service",
   id: "aegra",
   version: "1.0.0",
-  services: [{ name: "agent-server", image: "aegra:1", port: 2026, needs: [], perRun: ["thread_id"], replicas: 1 }],
+  services: [
+    { name: "agent-server", image: "aegra:1", port: 2026, needs: [], perRun: ["thread_id"], replicas: 1, env: {} },
+  ],
   dependencies: [
     { store: "postgres", role: "checkpoints", isolateBy: "thread_id" },
     { store: "redis", role: "broker", isolateBy: "key-prefix" },

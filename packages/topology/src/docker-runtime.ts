@@ -59,8 +59,8 @@ export class DockerTopologyRuntime implements TopologyRuntime {
         await this.docker.run({ name: cname, image: def.image, network, alias: name, env: def.env, args: def.args });
         await this.waitStoreAccepting(store, cname); // pg_isready/redis ping — 서비스가 부팅 시 접속하므로 먼저 준비.
       }
-      // 서비스 접속 env: 자동 connEnv(<id>-<store>:<port>) + 명시 storeEnv(명시가 이긴다).
-      const svcEnv = { ...dependencyConnEnv(spec), ...this.opts.storeEnv };
+      // 서비스 접속 env: 자동 connEnv(<id>-<store>:<port>). 우선순위: connEnv < svc.env(서비스 정적) < storeEnv(명시가 이긴다).
+      const connEnv = dependencyConnEnv(spec);
 
       // 2) 서비스 — alias = svc.name(needs/front-door 내부 주소). port 있으면 임의 호스트 포트로 게시 → 러너(도커 밖)가 도달.
       const endpoints: Record<string, string> = {};
@@ -72,7 +72,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
           image: svc.image,
           network,
           alias: svc.name,
-          env: svcEnv,
+          env: { ...connEnv, ...svc.env, ...this.opts.storeEnv },
           ...(svc.port !== undefined ? { publish: svc.port } : {}),
         });
         if (svc.port !== undefined) {

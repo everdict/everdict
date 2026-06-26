@@ -8,7 +8,7 @@ const SPEC: ServiceHarnessSpec = {
   kind: "service",
   id: "bu",
   version: "1.0.0",
-  services: [{ name: "agent-server", image: "reg/echo:1", port: 8080, needs: [], perRun: [], replicas: 1 }],
+  services: [{ name: "agent-server", image: "reg/echo:1", port: 8080, needs: [], perRun: [], replicas: 1, env: {} }],
   dependencies: [],
   target: { kind: "browser", engine: "chromium", lifecycle: "per-case-instance", observe: ["url"] },
   frontDoor: { service: "agent-server", submit: "POST /runs" },

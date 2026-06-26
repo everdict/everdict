@@ -33,9 +33,18 @@ const SPEC: ServiceHarnessSpec = {
       needs: ["postgres", "redis", "browser-mcp"],
       perRun: ["thread_id"],
       replicas: 1,
+      env: {},
     },
-    { name: "browser-mcp", image: "reg/bu-mcp:1", port: 9000, needs: [], perRun: [], replicas: 1 },
-    { name: "action-stream", image: "reg/bu-actionstream:1", port: 8080, needs: ["redis"], perRun: [], replicas: 1 },
+    { name: "browser-mcp", image: "reg/bu-mcp:1", port: 9000, needs: [], perRun: [], replicas: 1, env: {} },
+    {
+      name: "action-stream",
+      image: "reg/bu-actionstream:1",
+      port: 8080,
+      needs: ["redis"],
+      perRun: [],
+      replicas: 1,
+      env: {},
+    },
   ],
   dependencies: [
     { store: "postgres", role: "checkpoints", isolateBy: "thread_id" },
@@ -62,6 +71,27 @@ describe("buildNomadTopologyJob", () => {
     expect(agent?.Config.image).toBe("reg/bu-agent:1");
     expect(agent?.Config.runtime).toBe("runsc");
     expect(agent?.Env.PG_URL).toBe("x");
+  });
+
+  it("서비스 정적 env(svc.env)를 task Env 에 주입하고 storeEnv 가 충돌 시 이긴다", () => {
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "agent-server",
+          image: "reg/bu-agent:1",
+          port: 8000,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: { FOO: "bar", PG_URL: "svc" },
+        },
+      ],
+    };
+    const job = buildNomadTopologyJob(spec, { storeEnv: { PG_URL: "store" } });
+    const env = job.Job.TaskGroups[0]?.Tasks[0]?.Env;
+    expect(env?.FOO).toBe("bar"); // svc.env 단독
+    expect(env?.PG_URL).toBe("store"); // storeEnv 가 svc.env 를 이긴다
   });
 
   it("port 가 있는 서비스에 dynamic port + docker 매핑을 단다 (호스트 발견용)", () => {
@@ -151,6 +181,43 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
       (m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-postgres",
     ) as { spec: { template: { spec: { containers: Array<{ image: string }> } } } };
     expect(pg.spec.template.spec.containers[0]?.image).toBe("postgres:16-alpine");
+  });
+
+  it("K8s: 서비스 정적 env 주입 + 우선순위(connEnv < svc.env < storeEnv)", () => {
+    const spec: ServiceHarnessSpec = {
+      kind: "service",
+      id: "e",
+      version: "1",
+      services: [
+        {
+          name: "agent",
+          image: "reg/agent:1",
+          port: 8080,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: { LOG_LEVEL: "info", REDIS_URL: "redis://svc", DATABASE_URL: "postgresql://svc" },
+        },
+      ],
+      dependencies: [
+        { store: "postgres", role: "db", isolateBy: "thread_id" },
+        { store: "redis", role: "bus", isolateBy: "key-prefix" },
+      ],
+      frontDoor: { service: "agent", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    };
+    const manifests = buildK8sManifests(spec, {
+      namespace: "assay-e",
+      provisionDependencies: true,
+      storeEnv: { DATABASE_URL: "postgresql://store" },
+    });
+    const agent = manifests.find((m) => m.kind === "Deployment" && m.metadata.name === "e-agent") as {
+      spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } };
+    };
+    const env = Object.fromEntries(agent.spec.template.spec.containers[0]?.env.map((e) => [e.name, e.value]) ?? []);
+    expect(env.LOG_LEVEL).toBe("info"); // svc.env 단독
+    expect(env.REDIS_URL).toBe("redis://svc"); // svc.env 가 connEnv(redis://e-redis:6379) 를 이긴다
+    expect(env.DATABASE_URL).toBe("postgresql://store"); // storeEnv 가 svc.env 를 이긴다(스토어 cred 권위)
   });
 
   it("K8s: 서비스 env 에 DATABASE_URL/REDIS_URL 을 스토어 DNS 로 자동 주입한다", () => {
