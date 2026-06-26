@@ -39,6 +39,22 @@ export const ObservationDeliverySchema = z.discriminatedUnion("mode", [
 ]);
 export type ObservationDelivery = z.infer<typeof ObservationDeliverySchema>;
 
+// 타깃 획득 전략(B2) — 타깃 환경을 어떻게 손에 넣는가. 미설정 = provision(현행: 런타임이 per-case 브라우저 컨테이너를 띄움).
+// service = 선언된 토폴로지 서비스의 세션 API 를 열고(open) 응답 필드를 wiring 좌표로 매핑(coordinates), dispose 시 close.
+// → 자체 세션 브라우저(playwright-server/Browserbase 류)를 가진 하니스를 Assay 컨테이너 없이 표현.
+// open 요청 본문/헤더 템플릿은 후속(front-door request.headers 와 함께). 설계: docs/architecture/target-acquisition-generalization.md.
+export const TargetAcquireSchema = z.discriminatedUnion("mode", [
+  z.object({ mode: z.literal("provision") }),
+  z.object({
+    mode: z.literal("service"),
+    service: z.string(), // spec.services 중 세션 API 를 제공하는 서비스(엔드포인트 발견 대상)
+    open: z.string(), // 세션 개시 — "POST /sessions" (method+path; wiring {var} 보간)
+    coordinates: z.record(z.string()), // wiring 변수명 → open 응답 JSON 의 dot-path (예: { target_cdp_url: "cdp_url" })
+    close: z.string().optional(), // 세션 정리 — "DELETE /sessions/{session_id}" (dispose 시; {var} ← wiring+좌표)
+  }),
+]);
+export type TargetAcquire = z.infer<typeof TargetAcquireSchema>;
+
 // 타깃 환경(II): 브라우저(+클라이언트 익스텐션). per-case 신선 인스턴스 + grader 관측 대상.
 export const TopologyTargetSchema = z.object({
   kind: z.literal("browser"),
@@ -47,6 +63,7 @@ export const TopologyTargetSchema = z.object({
   lifecycle: z.enum(["per-case-instance", "per-case-context"]).default("per-case-instance"),
   observe: z.array(z.enum(["dom", "screenshot", "url"])).default(["dom", "screenshot", "url"]),
   delivery: ObservationDeliverySchema.optional(), // 미설정 = reference(현행 무회귀)
+  acquire: TargetAcquireSchema.optional(), // 미설정 = provision(현행). service = 세션 API 획득(B2)
 });
 export type TopologyTarget = z.infer<typeof TopologyTargetSchema>;
 

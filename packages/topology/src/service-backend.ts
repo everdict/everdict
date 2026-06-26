@@ -24,6 +24,7 @@ import {
 } from "./front-door-driver.js";
 import { applyImagePins } from "./image-pins.js";
 import { observationSourceFor } from "./observation-source.js";
+import { type AcquireRequestFn, targetAcquirerFor } from "./target-acquirer.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
 
 // 하위호환 re-export — 기존 import { type SubmitFn } from "./service-backend.js" 유지.
@@ -36,6 +37,7 @@ export interface ServiceTopologyBackendOptions {
   graders?: Grader[]; // 기본: trace 기반(steps/cost/latency). 브라우저 그레이더(dom/vlm)는 Phase 2.
   submit?: SubmitFn; // 기본 HttpFrontDoorDriver 의 POST 프리미티브(없으면 fetch)
   getJson?: GetJsonFn; // poll 완료 모델의 상태 GET 프리미티브(없으면 fetch)
+  acquireRequest?: AcquireRequestFn; // target.acquire=service 의 세션 open/close HTTP 프리미티브(없으면 fetch)
   frontDoorDriver?: FrontDoorDriver; // 구동(HOW) 추상화 전체를 주입(없으면 HttpFrontDoorDriver)
   newRunId?: () => string;
   maxConcurrent?: number | (() => number); // 동시 per-case 브라우저 상한(함수면 오토스케일러가 동적 조정)
@@ -72,9 +74,18 @@ export class ServiceTopologyBackend implements Backend {
     }
 
     const topo = await this.opts.runtime.ensureTopology(spec, zone);
-    // 타깃 관측(#4): spec.target 이 선언됐을 때만 per-case 브라우저를 프로비저닝(스키마상 이미 optional).
-    // 없으면 관측 무대 없이 trace-only — 자체 브라우저/무대 없는 서비스 하니스를 지원.
-    const target = spec.target ? await this.opts.runtime.provisionBrowserEnv(spec, runId, zone) : undefined;
+    // 타깃 획득(#2/#4): spec.target 이 선언됐을 때만. acquire 전략으로 분기 — provision(기본, 런타임 브라우저) |
+    // service(선언된 서비스의 세션 API). 없으면 관측 무대 없이 trace-only. open/close path 보간용 베이스 wiring 을 넘긴다
+    // (target.wiring 은 여기서 나오므로 베이스에는 제외 — run_id + isolateBy 파생 + task 만).
+    const target = spec.target
+      ? await targetAcquirerFor(spec.target, this.opts.runtime, this.opts.acquireRequest).acquire({
+          spec,
+          runId,
+          endpoints: topo.endpoints,
+          wiring: wiringVars(runId, spec.dependencies, { task: job.evalCase.task }),
+          zone,
+        })
+      : undefined;
     try {
       const base = topo.endpoints[spec.frontDoor.service];
       if (!base) {

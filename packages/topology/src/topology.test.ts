@@ -18,6 +18,7 @@ import {
   topologyJobId,
 } from "./nomad-topology.js";
 import { ServiceTopologyBackend, type SubmitFn } from "./service-backend.js";
+import type { AcquireRequestFn } from "./target-acquirer.js";
 import type { TargetEnvHandle, TopologyRuntime } from "./topology-runtime.js";
 
 const SPEC: ServiceHarnessSpec = {
@@ -770,6 +771,65 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
 
     // 고정 어휘(task/target_cdp_url)가 아니라 타깃이 선언한 임의 좌표가 그대로 보간된다.
     expect(sent).toEqual({ pw: "ws://pw/session-9", sid: "sess-9", cdp: "ws://b" });
+  });
+
+  it("target.acquire=service: 세션 좌표가 본문 어휘로 흐르고 런타임 브라우저는 안 띄운다 + dispose 시 close (B2)", async () => {
+    let sent: Record<string, unknown> = {};
+    const acqCalls: Array<{ method: string; url: string }> = [];
+    // 세션 서비스: POST /sessions → 좌표, DELETE /sessions/{id} → 정리.
+    const acquireRequest: AcquireRequestFn = async (method, url) => {
+      acqCalls.push({ method, url });
+      return method === "POST" ? { id: "sess-9", cdp: "ws://sess/9" } : {};
+    };
+    const SPEC_ACQ: ServiceHarnessSpec = {
+      ...SPEC,
+      target: {
+        kind: "browser",
+        engine: "chromium",
+        lifecycle: "per-case-instance",
+        observe: ["dom"],
+        acquire: {
+          mode: "service",
+          service: "agent-server",
+          open: "POST /sessions",
+          coordinates: { session_id: "id", target_cdp_url: "cdp" },
+          close: "DELETE /sessions/{session_id}",
+        },
+      },
+      frontDoor: { ...SPEC.frontDoor, request: { bodyTemplate: { sid: "{{session_id}}", cdp: "{{target_cdp_url}}" } } },
+    };
+    let provisioned = false;
+    const runtime: TopologyRuntime = {
+      id: "mock",
+      async ensureTopology() {
+        return { endpoints: { "agent-server": "http://agent-server:8000" } };
+      },
+      async provisionBrowserEnv() {
+        provisioned = true; // service 획득이면 호출되면 안 된다.
+        return mockBrowser().handle;
+      },
+    };
+    const backend = new ServiceTopologyBackend({
+      runtime,
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC_ACQ,
+      submit: async (_url, payload) => {
+        sent = payload;
+      },
+      acquireRequest,
+      newRunId: () => "fixed",
+    });
+
+    await backend.dispatch(job);
+
+    expect(provisioned).toBe(false); // 런타임 브라우저 미프로비전 — 서비스 세션 사용
+    expect(sent).toEqual({ sid: "sess-9", cdp: "ws://sess/9" }); // 세션 좌표가 본문 어휘로
+    expect(acqCalls).toContainEqual({ method: "POST", url: "http://agent-server:8000/sessions" }); // open
+    expect(acqCalls).toContainEqual({ method: "DELETE", url: "http://agent-server:8000/sessions/sess-9" }); // close
   });
 
   it("request 미지정이면 현행 browser-use 5-field 본문 그대로(무회귀)", async () => {

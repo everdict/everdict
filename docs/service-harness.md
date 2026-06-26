@@ -35,8 +35,9 @@ The live Nomad runtime (`@assay/topology`) implements `TopologyRuntime` against 
   **discover endpoints** from the alloc (`resolvePort` reads `AllocatedResources.Shared.Ports`, falling back
   to `Resources.Networks`); cache per `id@version` so a version deploys once.
 - `provisionBrowserEnv(spec, runId)` → register a per-case browser **service** job (headless Chromium), discover
-  its CDP port, return a `BrowserEnvHandle` whose `cdpUrl` comes from `/json/version` and whose `snapshot()`
-  reads `/json/list`. Registration failures are cleaned up (no leaked allocs); `dispose()`/`teardown()` purge.
+  its CDP port, return a `TargetEnvHandle` whose `wiring.target_cdp_url` comes from `/json/version` and whose
+  `snapshot()` reads `/json/list`. Registration failures are cleaned up (no leaked allocs); `dispose()`/`teardown()`
+  purge. (The handle is a **bag of named coordinates** now, not a single `cdpUrl` — see `target.acquire` below.)
 - Services declare a `port` → the builder attaches a group `network` dynamic port (label `http`, browser `cdp`)
   and maps it into the container, so endpoints are reachable from the control plane without Consul.
 
@@ -56,7 +57,7 @@ to `kubectl`):
   auto-wired vars (for harness-specific variable names). This is what lets a real stateful harness (aegra needs
   PG+Redis) deploy **via** the runtime, not just point at an external endpoint.
 - `provisionBrowserEnv(spec, runId, zone)` → `buildBrowserManifests` (headless-Chromium Deployment + Service) →
-  rollout → port-forward CDP → `BrowserEnvHandle`. `dispose()` deletes **only** the browser Deployment/Service
+  rollout → port-forward CDP → `TargetEnvHandle`. `dispose()` deletes **only** the browser Deployment/Service
   (the warm topology in the same namespace survives); `teardown()` deletes the namespace.
 - Tenant isolation is K8s-native: each zone is its own namespace, so two tenants on the same harness version get
   separate Deployments. `runtimeClass` (gVisor) and `imagePullPolicy` are runtime options.
@@ -211,6 +212,23 @@ topology; the trace is secondary. So `ServiceTopologyBackend.dispatch` wraps `tr
 fetch failure (auth, transient down, harness emitted no spans) is recorded as a single `error` `TraceEvent`
 (visible, not silently lost) and grading proceeds over the snapshot. This is why the K8s/kind live e2e completes
 end-to-end even when the stand-in front-door emits no GenAI spans and MLflow rejects the pull.
+
+### Target acquisition (`target.acquire`) — pluggable (round 2)
+*How* the per-case target env is acquired is the `WHAT-target` seam (`TargetAcquirer`, the fourth sibling of
+`TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`). `TopologyTarget.acquire` (`@assay/core`) selects it; absent
+= **`provision`** (today). The per-case handle is a `TargetEnvHandle { wiring: Record<string,string>; snapshot; dispose }`
+— a **bag of named coordinates** (not one `cdpUrl`), merged into the per-run wiring so a `bodyTemplate` can reference
+any of them (`{{playwright_server_url}}`, `{{session_id}}`, …).
+- **`provision`** (default) — the runtime spins a per-case browser container and returns `wiring:{ target_cdp_url }`
+  (today's behavior, byte-identical).
+- **`service`** — the target is provided by a **declared topology service**'s session API; no Assay-owned container.
+  `targetAcquirerFor` routes to `serviceAcquirer`: `open` (e.g. `POST /sessions`) opens a session, `coordinates`
+  (wiring-name → response dot-path) maps fields into the wiring bag, and `close` (e.g. `DELETE /sessions/{session_id}`)
+  tears it down on `dispose()` ({var}-interpolated with the coordinates). Observation comes via `delivery`
+  (`sentinel`/`egress`) or a `{kind:"prompt"}` trace-only snapshot. A coordinate-mapping failure best-effort-closes
+  the half-open session (no leak — same discipline as the topology cleanup-on-failure).
+
+See `docs/architecture/target-acquisition-generalization.md`.
 
 ### Observation delivery (`target.delivery`) — pluggable
 *How* the observation reaches the grader/judge is a seam (`ObservationSource`, the `HOW-observe` sibling of

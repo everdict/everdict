@@ -1,6 +1,6 @@
 # Service-topology target generalization — the target axis (design)
 
-> **Status: B1 DONE; B2 next.** Round 2 of front-door generalization. Round 1
+> **Status: B1 + B2 DONE.** Round 2 of front-door generalization. Round 1
 > (`front-door-generalization.md`) made *driving* harness-agnostic (request / completion / correlation / image)
 > and explicitly deferred the **target axis** as a follow-up ("`harness`-provided target observation needs a
 > `TopologyRuntime.observe`-style method"). This doc supersedes that guess: the clean decomposition is a
@@ -178,11 +178,14 @@ Each step merges independently; defaults keep current behavior, so no regression
    legacy body reads `target.wiring.target_cdp_url`). Pure refactor — wiring still contains `target_cdp_url`, so the
    default body is byte-identical. Unblocked open-ended `bodyTemplate` vocabulary (#3/#4): a test feeds a target
    contributing `playwright_server_url`/`session_id` and asserts they interpolate. Live `.mjs` scripts migrated.
-2. **B2 — `acquire: service`.** Add `target.acquire` to the schema (+ template mirror); add `target-acquirer.ts`
-   with `provisionAcquirer` (default) + `serviceAcquirer`; `dispatch` selects via `targetAcquirerFor`. Default
-   (absent `acquire`) routes to `provisionAcquirer` = today. Unit tests: serviceAcquirer opens/maps coordinates →
-   wiring / closes on dispose, with a fake `{submit,getJson}`; observation comes via `delivery` (sentinel/egress)
-   for the no-browser case.
+2. **B2 — `acquire: service`. ✅ DONE.** `target.acquire` (`provision` | `service`) on `TopologyTargetSchema` —
+   auto-mirrors to `ServiceTemplateSpecSchema` (it reuses the same schema; `resolveHarnessInstance` passes `target`
+   through). New `target-acquirer.ts`: `provisionAcquirer` (default, delegates to `runtime.provisionBrowserEnv`) +
+   `serviceAcquirer` (open → `coordinates` dot-path map → wiring bag, `close` on dispose; method-aware `AcquireRequestFn`
+   so DELETE works) + `targetAcquirerFor`. `dispatch` selects the acquirer and passes base wiring for open/close
+   interpolation; `acquireRequest` is an injectable backend option. Coordinate-mapping failure best-effort-closes the
+   half-open session. Unit tests (`target-acquirer.test.ts`) + a dispatch test (coordinates → bodyTemplate, no runtime
+   browser, close on dispose). Absent `acquire` = `provision` = today.
 
 ## Touch points (for the eventual PR)
 

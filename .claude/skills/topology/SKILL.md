@@ -66,12 +66,27 @@ touching `service-backend.ts`'s driving logic.
   (`thread_id`/`key_prefix`/`object_prefix`/`schema`), not hardcoded LangGraph names. Absent `request` = today's body.
 - **#4 target observation — DONE (none/assay).** Browser provisioning is gated on `spec.target` (already optional,
   was ignored): absent → no browser, trace-only run with a `{kind:"prompt"}` snapshot (no core-contract change).
-  `harness`-provided target (observe a declared service's CDP) needs a `TopologyRuntime.observe` method — follow-up.
+  A `harness`-provided target (a service's own session) is now the **target axis** (round 2) below — not a
+  `TopologyRuntime.observe` method.
 - **#5 per-service image pin — DONE.** `AgentJob.imagePins` (service name → image) overrides registered images at
   dispatch; `applyImagePins` (`image-pins.ts`) folds pins into a deterministic `-pin-<hash>` effective version so
   warm pools (id@version-keyed) separate variants with no runtime change; unknown service → `BadRequestError`.
-- **All 5 core knobs landed.** Follow-ups: completion `stream`/`callback`, `harness`-provided target observation,
-  a `request.headers` knob — see `docs/architecture/front-door-generalization.md`.
+- **All 5 core knobs landed.** Follow-ups: completion `stream`/`callback`, a `request.headers` knob — see
+  `docs/architecture/front-door-generalization.md`.
+
+## Target axis (round 2) — `TargetAcquirer` (B1+B2 DONE)
+Round 1 left the **target** assumed to be "a CDP browser Assay provisions." Round 2 generalizes it — the WHAT-target
+seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`. Read
+`docs/architecture/target-acquisition-generalization.md` before touching `target-acquirer.ts`/the dispatch target step.
+- **B1 — handle is a coordinate bag.** `BrowserEnvHandle{cdpUrl}` → `TargetEnvHandle{ wiring: Record<string,string> }`
+  (`snapshot` widened to `EnvSnapshot`); the 3 runtimes return `wiring:{ target_cdp_url }`; `dispatch` merges
+  `...target.wiring`. So a `bodyTemplate` references **any** coordinate the target declares (`{{playwright_server_url}}`,
+  `{{session_id}}`) — the wiring vocabulary is open, not the fixed `target_cdp_url`. Default body byte-identical.
+- **B2 — `target.acquire` (`provision` | `service`).** `targetAcquirerFor(target, runtime, request)`: `provision`
+  (default) delegates to `runtime.provisionBrowserEnv` (today); `service` = `serviceAcquirer` opens a declared
+  service's session (`open` → `coordinates` dot-path map → wiring bag, `close` on dispose; HTTP only, lives by the
+  `FrontDoorDriver`). No Assay container → observation via `delivery` (`sentinel`/`egress`) or a `prompt` snapshot.
+  Coordinate-mapping failure best-effort-closes the half-open session (no leak). Absent `acquire` = `provision`.
 
 ## Observation delivery (`HOW-observe`) — pluggable seam
 *How* the observation reaches the grader/judge is now a third axis (sibling of `TopologyRuntime`=WHERE,

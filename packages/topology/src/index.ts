@@ -92,6 +92,15 @@ export {
 } from "./front-door-driver.js";
 export { applyImagePins } from "./image-pins.js";
 export {
+  type TargetAcquirer,
+  type AcquireRequest,
+  type AcquireRequestFn,
+  fetchAcquire,
+  provisionAcquirer,
+  serviceAcquirer,
+  targetAcquirerFor,
+} from "./target-acquirer.js";
+export {
   type ObservationSource,
   type ObservationTarget,
   type ObserveRequest,
