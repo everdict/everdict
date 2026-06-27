@@ -97,6 +97,36 @@ describe("dockerRunArgs / parseHostPort (pure)", () => {
     ]);
   });
 
+  it("volumes 를 -v 인자로 펼친다(env 뒤, publish 앞)", () => {
+    expect(
+      dockerRunArgs({
+        name: "c",
+        image: "img:1",
+        network: "net",
+        volumes: ["data:/var/lib/x", "/host:/c:ro"],
+        publish: 8000,
+      }),
+    ).toEqual([
+      "run",
+      "-d",
+      "--name",
+      "c",
+      "--network",
+      "net",
+      "-v",
+      "data:/var/lib/x",
+      "-v",
+      "/host:/c:ro",
+      "-p",
+      "8000",
+      "img:1",
+    ]);
+  });
+
+  it("volumes 미지정이면 -v 가 붙지 않는다", () => {
+    expect(dockerRunArgs({ name: "c", image: "img:1", network: "net" })).not.toContain("-v");
+  });
+
   it("docker port 출력에서 호스트 포트를 뽑는다", () => {
     expect(parseHostPort("0.0.0.0:49153\n[::]:49153")).toBe(49153);
   });
@@ -207,6 +237,53 @@ describe("DockerTopologyRuntime", () => {
     storeReady = true;
     const handle = await rt.ensureTopology(SPEC);
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
+  it("ensureTopology: 서비스 volumes 를 docker run 에 -v 로 전달한다", async () => {
+    const f = fakeDocker();
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "agent-server",
+          image: "reg/bu-agent:1",
+          port: 8000,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          volumes: ["bu-cache:/cache", "/data:/data:ro"],
+        },
+      ],
+    };
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    await rt.ensureTopology(spec);
+    const agent = f.runs.find((r) => r.alias === "agent-server");
+    expect(agent?.volumes).toEqual(["bu-cache:/cache", "/data:/data:ro"]);
+  });
+
+  it("ensureTopology: 서비스가 선언한 readiness 상한을 적용한다(런타임 60s 기본이 아니라 빠르게 타임아웃)", async () => {
+    // 엔드포인트가 영원히 500 — 준비되지 않는다. per-service readiness(30/10ms)면 ~30ms 안에 타임아웃,
+    // 런타임 기본(60s)이 적용됐다면 vitest 5s 타임아웃에 걸려 실패했을 것 → per-service 적용을 증명.
+    const never: typeof fetch = (async () => new Response("", { status: 503 })) as unknown as typeof fetch;
+    const f = fakeDocker();
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "agent-server",
+          image: "reg/bu-agent:1",
+          port: 8000,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          readiness: { timeoutMs: 30, intervalMs: 10 },
+        },
+      ],
+    };
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: never });
+    await expect(rt.ensureTopology(spec)).rejects.toThrow(/준비 대기 시간초과/);
   });
 
   it("teardown: 토폴로지 컨테이너 + 네트워크 제거", async () => {

@@ -1,4 +1,4 @@
-import { type BrowserSnapshot, type ServiceHarnessSpec, UpstreamError } from "@assay/core";
+import { type BrowserSnapshot, type ServiceHarnessSpec, type ServiceReadiness, UpstreamError } from "@assay/core";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
@@ -73,12 +73,13 @@ export class DockerTopologyRuntime implements TopologyRuntime {
           network,
           alias: svc.name,
           env: { ...connEnv, ...svc.env, ...this.opts.storeEnv },
+          ...(svc.volumes && svc.volumes.length > 0 ? { volumes: svc.volumes } : {}),
           ...(svc.port !== undefined ? { publish: svc.port } : {}),
         });
         if (svc.port !== undefined) {
           const hostPort = await this.docker.hostPort(cname, svc.port);
           const url = `http://127.0.0.1:${hostPort}`;
-          await this.waitForHttp(url);
+          await this.waitForHttp(url, svc.readiness); // 서비스가 자체 readiness 상한을 선언하면 그걸, 아니면 런타임 기본
           endpoints[svc.name] = url;
         }
       }
@@ -167,37 +168,61 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     await this.docker.removeNetwork(entry.network).catch(() => {});
   }
 
+  // 런타임 기본 readiness(서비스가 자체 readiness 를 선언하지 않을 때 + 스토어/브라우저 폴링에 쓰임).
+  private get defaultReadyTimeoutMs(): number {
+    return this.opts.readyTimeoutMs ?? 60_000;
+  }
+  private get defaultIntervalMs(): number {
+    return this.opts.pollIntervalMs ?? 1000;
+  }
+
+  // 준비성 폴링(공유) — timeoutMs/intervalMs 동안 probe 가 true 를 돌려줄 때까지 재시도. 초과하면 onTimeout 으로 throw.
+  // probe 가 throw 하는 것도 "아직 안 준비"로 보고 재시도(연결거부/명령실패 등).
+  private async pollReady(
+    timeoutMs: number,
+    intervalMs: number,
+    probe: () => Promise<boolean>,
+    onTimeout: () => never,
+  ): Promise<void> {
+    const steps = Math.max(1, Math.floor(timeoutMs / intervalMs));
+    for (let i = 0; i < steps; i++) {
+      try {
+        if (await probe()) return;
+      } catch {
+        // 아직 안 준비 → 재시도
+      }
+      await new Promise((r) => setTimeout(r, intervalMs));
+    }
+    onTimeout();
+  }
+
   // 스토어가 실제 연결을 받을 때까지 폴링(docker exec pg_isready / redis-cli ping). minio 는 스킵.
   private async waitStoreAccepting(store: string, container: string): Promise<void> {
     const probe =
       store === "postgres" ? ["pg_isready", "-U", "assay"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
     if (!probe) return;
-    const interval = this.opts.pollIntervalMs ?? 1000;
-    const steps = Math.max(1, Math.floor((this.opts.readyTimeoutMs ?? 60_000) / interval));
-    for (let i = 0; i < steps; i++) {
-      try {
+    await this.pollReady(
+      this.defaultReadyTimeoutMs,
+      this.defaultIntervalMs,
+      async () => {
         await this.docker.exec(container, probe);
-        return;
-      } catch {
-        // 아직 안 받음 → 재시도
-      }
-      await new Promise((r) => setTimeout(r, interval));
-    }
-    throw new UpstreamError("UPSTREAM_ERROR", { store }, "스토어 준비 대기 시간초과");
+        return true;
+      },
+      () => {
+        throw new UpstreamError("UPSTREAM_ERROR", { store }, "스토어 준비 대기 시간초과");
+      },
+    );
   }
 
-  private async waitForHttp(url: string): Promise<void> {
-    const interval = this.opts.pollIntervalMs ?? 1000;
-    const steps = Math.max(1, Math.floor((this.opts.readyTimeoutMs ?? 60_000) / interval));
-    for (let i = 0; i < steps; i++) {
-      try {
-        const res = await this.fetchImpl(url);
-        if (res.status < 500) return;
-      } catch {
-        // 아직 안 뜸 → 재시도
-      }
-      await new Promise((r) => setTimeout(r, interval));
-    }
-    throw new UpstreamError("UPSTREAM_ERROR", { url }, "엔드포인트 준비 대기 시간초과");
+  // HTTP 엔드포인트 준비 대기. readiness 가 주어지면 서비스가 선언한 timeout/interval 을, 아니면 런타임 기본을 쓴다.
+  private async waitForHttp(url: string, readiness?: ServiceReadiness): Promise<void> {
+    await this.pollReady(
+      readiness?.timeoutMs ?? this.defaultReadyTimeoutMs,
+      readiness?.intervalMs ?? this.defaultIntervalMs,
+      async () => (await this.fetchImpl(url)).status < 500,
+      () => {
+        throw new UpstreamError("UPSTREAM_ERROR", { url }, "엔드포인트 준비 대기 시간초과");
+      },
+    );
   }
 }

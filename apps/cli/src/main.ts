@@ -13,9 +13,9 @@ import {
 import { type AgentJob, AgentJobSchema, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@assay/core";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@assay/orchestrator";
 import { diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import type { DockerTopologyRuntimeOptions } from "@assay/topology";
 import { runLeasedJob } from "./run-leased-job.js";
+import { ResilientMcpSession, mcpConnect } from "./runner-session.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -54,6 +54,7 @@ function usage(): void {
       "",
       "assay runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N]",
       "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
+      "  service harness readiness: [--ready-timeout-ms N] [--ready-interval-ms N] (topology endpoint polling)",
     ].join("\n"),
   );
 }
@@ -228,32 +229,38 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const pollMs = Number(flags.get("poll-interval-ms") ?? "2000"); // 에러 재시도 backoff
   const waitMs = Number(flags.get("wait-ms") ?? "25000"); // lease long-poll 대기(서버가 잡 생길 때까지 잡아둠)
   const hbMs = Number(flags.get("heartbeat-ms") ?? "30000"); // 실행 중 lease 갱신 주기
+  // service(topology) 하니스 readiness 폴링 상한 — 서비스 스펙이 자체 readiness 를 선언하지 않을 때의 런타임 기본.
+  const runtimeOptions: DockerTopologyRuntimeOptions = {};
+  if (flags.has("ready-timeout-ms")) runtimeOptions.readyTimeoutMs = Number(flags.get("ready-timeout-ms"));
+  if (flags.has("ready-interval-ms")) runtimeOptions.pollIntervalMs = Number(flags.get("ready-interval-ms"));
   if (!hasClaudeAuth()) {
     console.error(
       "ℹ 이 머신 env 에 claude 인증이 없습니다 — claude-code 잡은 이 머신의 로그인을 씁니다(없으면 실패할 수 있음).",
     );
   }
 
-  const client = new Client({ name: "assay-runner", version: "0.1.0" });
-  const transport = new StreamableHTTPClientTransport(mcpUrl, {
-    requestInit: { headers: { Authorization: `Bearer ${token}` } },
-  });
-  await client.connect(transport);
+  const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
+  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
   // 실제 capability 자가-광고: docker 데몬이 있으면 docker/browser(service 하니스 가능). 매 lease 마다 보고.
   const dockerOk = await probeDocker();
   const capabilities = ["repo", ...(dockerOk ? ["docker", "browser"] : [])];
-  console.error(
-    `▶ assay runner — ${mcpUrl} 연결됨. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (docker 없음 → service 하니스 불가)"}. 잡 폴링 중(${pollMs}ms, Ctrl-C 종료) …`,
-  );
+
+  // wedge 방지: API 재시작/단절 시 세션을 자동 재초기화하는 회복형 MCP 세션(runner-session.ts). 지연 연결.
+  const session = new ResilientMcpSession(mcpConnect(mcpUrl, token));
+  try {
+    await session.ensureConnected();
+    console.error(
+      `▶ assay runner — ${mcpUrl} 연결됨. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (docker 없음 → service 하니스 불가)"}. 잡 폴링 중(${pollMs}ms, Ctrl-C 종료) …`,
+    );
+  } catch (e) {
+    console.error(`⚠ 초기 연결 실패(${errMsg(e)}) — 폴링하며 재시도합니다 …`);
+  }
 
   const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    const r = await client.callTool({ name, arguments: args });
-    const t = (r.content as Array<{ text?: string }> | undefined)?.[0]?.text ?? "";
-    if (r.isError) throw new Error(t || `${name} 실패`);
-    return JSON.parse(t) as Record<string, unknown>;
+    const r = await session.call(name, args); // 세션이 죽었으면 내부에서 재초기화 후 재시도
+    if (r.isError) throw new Error(r.text || `${name} 실패`);
+    return JSON.parse(r.text) as Record<string, unknown>;
   };
-  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
-  const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
 
   let stop = false;
   process.on("SIGINT", () => {
@@ -287,7 +294,8 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
       void callJson("heartbeat_job", { jobId }).catch(() => {});
     }, hbMs);
     try {
-      const result = await runLeasedJob(parsed.data); // service→로컬 Docker 토폴로지, 그 외→LocalDriver(이 머신)
+      // service→로컬 Docker 토폴로지(readiness 옵션 적용), 그 외→LocalDriver(이 머신)
+      const result = await runLeasedJob(parsed.data, { runtimeOptions });
       await callJson("submit_job_result", { jobId, result });
       console.error(`✓ 잡 ${jobId} 완료 → 회신`);
     } catch (e) {
@@ -297,7 +305,7 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
       clearInterval(hb);
     }
   }
-  await client.close();
+  await session.close();
 }
 
 async function main(): Promise<void> {

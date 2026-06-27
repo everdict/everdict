@@ -7,8 +7,18 @@ export const TraceSourceSpecSchema = z.object({
 });
 export type TraceSourceSpec = z.infer<typeof TraceSourceSpecSchema>;
 
+// 서비스 준비성(readiness) 폴링 — HTTP 엔드포인트가 응답할 때까지 얼마나/얼마 간격으로 기다리는가.
+// 부팅이 느린 서비스(첫 이미지 pull·DB 마이그레이션 등)는 더 길게. 미설정 = 런타임 기본(60s/1s).
+export const ServiceReadinessSchema = z.object({
+  timeoutMs: z.number().int().positive().default(60000),
+  intervalMs: z.number().int().positive().default(1000),
+});
+export type ServiceReadiness = z.infer<typeof ServiceReadinessSchema>;
+
 // 토폴로지 서비스 (무상태 → per-version warm). perRun = 런타임에 주입되는 키 이름들.
 // env = 서비스 정적 env(MODEL/LOG_LEVEL/feature flag 등 비-스토어 설정). 주입 우선순위: 스토어 connEnv(관례) < env < 운영 storeEnv.
+// volumes = docker `-v` 스타일 마운트 스펙("named-vol:/data" · "/host:/container:ro"); readiness = 위 폴링 상한.
+// 둘 다 선언형 — 현재 DockerTopologyRuntime(self-hosted runner)이 해석한다(Nomad/K8s 는 무시).
 export const TopologyServiceSchema = z.object({
   name: z.string(),
   image: z.string(),
@@ -17,6 +27,8 @@ export const TopologyServiceSchema = z.object({
   perRun: z.array(z.string()).default([]),
   replicas: z.number().int().default(1),
   env: z.record(z.string()).default({}),
+  volumes: z.array(z.string()).optional(),
+  readiness: ServiceReadinessSchema.optional(),
 });
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
 
