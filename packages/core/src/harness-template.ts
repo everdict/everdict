@@ -113,6 +113,8 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
           replicas: s.replicas,
           env: s.env,
           ...(s.port !== undefined ? { port: s.port } : {}),
+          ...(s.volumes !== undefined ? { volumes: s.volumes } : {}),
+          ...(s.readiness !== undefined ? { readiness: s.readiness } : {}),
         };
       });
       return ServiceHarnessSpecSchema.parse({

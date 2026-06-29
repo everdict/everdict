@@ -67,6 +67,36 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.services[0]?.env).toEqual({ LOG_LEVEL: "debug", MODEL: "x" });
   });
 
+  it("서비스 volumes/readiness 가 resolved spec 까지 보존된다(런타임이 해석할 수 있도록)", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "v",
+      version: "1",
+      services: [
+        {
+          name: "db",
+          needs: [],
+          volumes: ["pgdata:/var/lib/postgresql/data", "/host/seed:/seed:ro"],
+          readiness: { timeoutMs: 120000, intervalMs: 2000 },
+        },
+      ],
+      dependencies: [],
+      frontDoor: { service: "db", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "v", version: "1" },
+      id: "v",
+      version: "v1",
+      pins: { db: "postgres:16" },
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services[0]?.volumes).toEqual(["pgdata:/var/lib/postgresql/data", "/host/seed:/seed:ro"]);
+    expect(resolved.services[0]?.readiness).toEqual({ timeoutMs: 120000, intervalMs: 2000 });
+  });
+
   it("슬롯 pin 누락 → BadRequestError", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "bu", version: "1" },
