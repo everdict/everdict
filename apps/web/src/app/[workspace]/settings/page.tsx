@@ -20,7 +20,13 @@ export const dynamic = 'force-dynamic'
 
 // 워크스페이스 설정 — 정책·모델 키·클러스터 자격증명·멤버(+ 이 워크스페이스에 연결된 애플리케이션 로스터, 읽기 전용).
 // 외부 계정 연결의 연결/해제(관리)는 개인 소유라 계정(account) 페이지에 있다. 여기 로스터는 만들어진 워크스페이스 기준(members:read).
-export default async function SettingsPage() {
+// searchParams.tab — 계정→연결 탭의 "통합 설정 →" 딥링크가 통합 탭으로 바로 안착하도록 받는다.
+export default async function SettingsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ tab?: string }>
+}) {
+  const sp = await searchParams
   const { principal, ctx } = await currentPrincipal()
   const canReadSettings = can(principal?.roles, 'settings:read')
   const canWriteSettings = can(principal?.roles, 'settings:write')
@@ -84,9 +90,7 @@ export default async function SettingsPage() {
           secrets={secrets}
           applications={applications}
           integrations={integrations}
-          {...(integrationsCallbackUrl !== undefined
-            ? { integrationsCallbackUrl }
-            : {})}
+          {...(integrationsCallbackUrl !== undefined ? { integrationsCallbackUrl } : {})}
           members={members}
           invites={invites}
           canReadSettings={canReadSettings}
@@ -95,6 +99,7 @@ export default async function SettingsPage() {
           canWriteSecrets={canWriteSecrets}
           canReadMembers={canReadMembers}
           canWriteMembers={canWriteMembers}
+          {...(sp.tab !== undefined ? { initialTab: sp.tab } : {})}
         />
       )}
     </div>

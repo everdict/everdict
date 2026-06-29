@@ -12,11 +12,13 @@ export const connectionMetaSchema = z.object({
 })
 export type ConnectionMeta = z.infer<typeof connectionMetaSchema>
 
-// 멤버가 원클릭으로 연결 가능한 provider 디스크립터. self-hosted(GHE/Mattermost)는 관리자가 워크스페이스 통합을
-// 등록한 경우에만 여기에 나타난다 — 멤버는 항상 원클릭(자격증명 입력 없음).
+// 공식 지원 provider 카탈로그 항목 — 3종(github/github-enterprise/mattermost) 전부 노출. connectable=true 면 멤버가
+// 바로 원클릭 연결 가능(github.com=컨트롤플레인 env OAuth 앱, self-hosted=관리자가 워크스페이스 통합 등록). false 면
+// UI 가 Connect 대신 설정 안내(self-hosted=관리자 통합 딥링크 / github.com=env 안내)를 보여준다.
 export const providerInfoSchema = z.object({
   id: z.string(),
   selfHosted: z.boolean(),
+  connectable: z.boolean(),
 })
 export type ProviderInfo = z.infer<typeof providerInfoSchema>
 

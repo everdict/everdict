@@ -38,6 +38,8 @@ export default async function AccountPage({
 
   const canReadKeys = can(principal.roles, 'keys:read')
   const canWriteKeys = can(principal.roles, 'keys:write')
+  // 미설정 self-hosted provider 행에 통합 설정 딥링크를 보일지 — 실제 통합 등록 권한(settings:write)이 있을 때만.
+  const canManageIntegrations = can(principal.roles, 'settings:write')
 
   let keys: ApiKeyMeta[] = []
   let keysError: string | undefined
@@ -75,6 +77,7 @@ export default async function AccountPage({
         principal={principal}
         connections={connections}
         providers={providers}
+        canManageIntegrations={canManageIntegrations}
         runners={runners}
         keys={keys}
         keysError={keysError}

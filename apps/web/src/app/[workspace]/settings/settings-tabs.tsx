@@ -33,6 +33,7 @@ export function SettingsTabs(props: {
   canWriteSecrets: boolean
   canReadMembers: boolean
   canWriteMembers: boolean
+  initialTab?: string // ?tab=… (예: 계정→연결 탭의 "통합 설정 →" 딥링크가 integrations 탭으로 바로 안착)
 }) {
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'general', label: '일반', show: props.canReadSettings },
@@ -42,7 +43,9 @@ export function SettingsTabs(props: {
     { key: 'members', label: '멤버', show: props.canReadMembers },
   ]
   const visible = tabs.filter((t) => t.show)
-  const defaultTab = visible[0]?.key ?? 'general'
+  // ?tab= 가 보이는 탭 중 하나면 그 탭으로, 아니면 첫 표시 탭.
+  const requestedTab = visible.find((t) => t.key === props.initialTab)?.key
+  const defaultTab = requestedTab ?? visible[0]?.key ?? 'general'
 
   return (
     <Tabs defaultValue={defaultTab} className="space-y-5">

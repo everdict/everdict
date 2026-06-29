@@ -1,18 +1,25 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 
 import type { ConnectionMeta, ProviderInfo } from '@/entities/connection'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 
 import { disconnectConnectionAction, startConnectionAction } from '../api/manage-connections'
 
-// provider id → 표시 이름.
+// provider id → 표시 이름 + 한 줄 설명(카탈로그 행 hint).
 const PROVIDER_LABEL: Record<string, string> = {
   github: 'GitHub',
   'github-enterprise': 'GitHub Enterprise',
   mattermost: 'Mattermost',
+}
+const PROVIDER_DESC: Record<string, string> = {
+  github: 'github.com 계정 — 비공개 repo 클론 · 결과 게시',
+  'github-enterprise': 'self-hosted GitHub Enterprise',
+  mattermost: 'self-hosted Mattermost — run/스코어카드 완료 알림',
 }
 const label = (id: string): string => PROVIDER_LABEL[id] ?? id
 
@@ -27,16 +34,21 @@ const ERROR_COPY: Record<string, string> = {
   access_denied: '연결이 취소되었습니다(권한 거부).',
 }
 
-// 연결은 개인 소유(self-scoped by subject) — 역할 게이트 없음. 멤버는 자격증명 입력 없이 원클릭으로 연결한다(Linear 방식):
-// github.com 은 컨트롤플레인 env OAuth 앱, self-hosted(GHE/Mattermost)는 관리자가 워크스페이스 통합을 등록한 경우에만 노출.
+// 연결은 개인 소유(self-scoped by subject) — 역할 게이트 없음. 공식 지원 3종을 항상 카탈로그로 노출하고 각각 Connect 버튼을
+// 둔다(Linear 방식). connectable 이면 바로 원클릭(github.com=env OAuth 앱, self-hosted=관리자 통합 등록). 설정 안 된 provider 는
+// Connect 대신 설정 안내: self-hosted 는 관리자에게 통합 설정 딥링크 / 멤버에게 "관리자 설정 필요", github.com 은 env 안내.
 export function ConnectionsManager({
   connections,
   providers,
+  workspace,
+  canManageIntegrations,
   connected,
   error,
 }: {
   connections: ConnectionMeta[]
   providers: ProviderInfo[]
+  workspace: string // 활성 워크스페이스 슬러그 — self-hosted 통합 설정 딥링크용(/{workspace}/settings?tab=integrations)
+  canManageIntegrations: boolean // settings:write — true 면 미설정 self-hosted 에 통합 설정 딥링크, 아니면 안내 문구
   connected?: string // ?connected=<provider> — 방금 연결 성공
   error?: string // ?error=<reason> — 콜백 실패
 }) {
@@ -136,32 +148,59 @@ export function ConnectionsManager({
         </ul>
       )}
 
-      {providers.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">
-          연결 가능한 provider 가 없습니다 — github.com 원클릭은 관리자가 컨트롤플레인에 OAuth
-          앱(GITHUB_OAUTH_CLIENT_ID/SECRET)을, GitHub Enterprise·Mattermost 는 관리자가 워크스페이스
-          설정의 <span className="font-[510]">통합</span> 탭에서 OAuth 앱을 등록해야 합니다.
-        </p>
-      ) : (
-        <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
-          <p className="text-[13px] font-[510] text-foreground">새 계정 연결</p>
-          <div className="flex flex-wrap items-center gap-2">
-            {providers.map((p) => (
-              <Button key={p.id} variant="secondary" disabled={pending} onClick={() => onConnect(p.id)}>
-                {label(p.id)} 연결
-              </Button>
-            ))}
-          </div>
-          <p className="text-[12px] text-faint">
-            연결 버튼을 누르면 provider 로그인 화면으로 이동한 뒤 이 페이지로 돌아옵니다.
+      {/* 공식 지원 provider 카탈로그 — 항상 3종 전부 노출. 각 행은 좌(이름/설명)·우(상태별 컨트롤). */}
+      <div className="space-y-2">
+        <p className="text-[13px] font-[510] text-foreground">서비스 연결</p>
+        {providers.length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">
+            연결 서비스가 설정되지 않았습니다(컨트롤플레인 connection 서비스 미설정).
           </p>
-          {actionError && (
-            <Callout tone="danger" className="py-1.5">
-              {actionError}
-            </Callout>
-          )}
-        </div>
-      )}
+        ) : (
+          <>
+            <SettingsList>
+              {providers.map((p) => (
+                <SettingsRow key={p.id} label={label(p.id)} hint={PROVIDER_DESC[p.id]}>
+                  {p.connectable ? (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={pending}
+                      onClick={() => onConnect(p.id)}
+                    >
+                      연결
+                    </Button>
+                  ) : p.selfHosted ? (
+                    canManageIntegrations ? (
+                      <Link
+                        href={`/${encodeURIComponent(workspace)}/settings?tab=integrations`}
+                        className="text-[12px] font-[510] text-primary hover:underline"
+                      >
+                        통합 설정 →
+                      </Link>
+                    ) : (
+                      <span className="text-[12px] text-muted-foreground">관리자 설정 필요</span>
+                    )
+                  ) : (
+                    <span className="text-[12px] text-muted-foreground">
+                      컨트롤플레인 OAuth 앱 설정 필요
+                    </span>
+                  )}
+                </SettingsRow>
+              ))}
+            </SettingsList>
+            <p className="text-[12px] text-faint">
+              연결 버튼을 누르면 provider 로그인 화면으로 이동한 뒤 이 페이지로 돌아옵니다. 설정 안
+              된 self-hosted(GitHub Enterprise·Mattermost)는 관리자가 워크스페이스 설정의 통합
+              탭에서 OAuth 앱을 등록하면 연결할 수 있습니다.
+            </p>
+          </>
+        )}
+        {actionError && (
+          <Callout tone="danger" className="py-1.5">
+            {actionError}
+          </Callout>
+        )}
+      </div>
     </div>
   )
 }

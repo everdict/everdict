@@ -37,6 +37,7 @@ export function AccountTabs({
   principal,
   connections,
   providers,
+  canManageIntegrations,
   runners,
   keys,
   keysError,
@@ -49,6 +50,7 @@ export function AccountTabs({
   principal: AccountPrincipal
   connections: ConnectionMeta[]
   providers: ProviderInfo[]
+  canManageIntegrations: boolean // settings:write — 미설정 self-hosted 통합 설정 딥링크 노출 여부
   runners: RunnerMeta[]
   keys: ApiKeyMeta[]
   keysError?: string
@@ -86,6 +88,8 @@ export function AccountTabs({
         <ConnectionsManager
           connections={connections}
           providers={providers}
+          workspace={principal.workspace}
+          canManageIntegrations={canManageIntegrations}
           {...(connected !== undefined ? { connected } : {})}
           {...(connectError !== undefined ? { error: connectError } : {})}
         />
