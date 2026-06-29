@@ -7,6 +7,7 @@ import {
   HarnessInstanceSpecSchema,
   HarnessTemplateSpecSchema,
   JudgeSpecSchema,
+  ModelSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
 } from "@assay/core";
@@ -17,6 +18,7 @@ import type {
   HarnessInstanceRegistry,
   HarnessTemplateRegistry,
   JudgeRegistry,
+  ModelRegistry,
   RuntimeRegistry,
 } from "@assay/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
@@ -43,6 +45,7 @@ export interface McpDeps {
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
   judgeRegistry?: JudgeRegistry;
+  modelRegistry?: ModelRegistry; // Model(추론/판정 모델) 등록/조회 — judge·command 하니스가 id 로 참조
   runtimeRegistry?: RuntimeRegistry;
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // 런타임 연결 테스트
   secretStore?: SecretStore;
@@ -405,6 +408,79 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const result = JudgeSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           await judges.register(ws, result.data);
+          return ok({ workspace: ws, id: result.data.id, version: result.data.version });
+        }),
+    );
+  }
+
+  if (deps.modelRegistry) {
+    const models = deps.modelRegistry;
+    server.registerTool(
+      "list_models",
+      { description: "이 워크스페이스가 보는 Model(추론/판정 모델: 소유 + _shared)", inputSchema: {} },
+      () => run(principal, "models:read", async () => ok(await models.list(ws))),
+    );
+
+    server.registerTool(
+      "get_model",
+      {
+        description:
+          "ModelSpec 1건 전체(provider + 하부 모델 + baseUrl). version 기본 latest. 다른 워크스페이스는 NOT_FOUND",
+        inputSchema: { id: z.string(), version: z.string().optional() },
+      },
+      ({ id, version }) => run(principal, "models:read", async () => ok(await models.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "validate_model",
+      {
+        description: "ModelSpec(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
+        inputSchema: { model: z.string().describe("ModelSpec JSON") },
+      },
+      ({ model }) =>
+        run(principal, "models:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(model);
+          } catch {
+            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+          }
+          const result = ModelSpecSchema.safeParse(parsed);
+          if (!result.success)
+            return ok({
+              ok: false,
+              errors: result.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`),
+            });
+          const existingVersions = await models.ownVersions(ws, result.data.id);
+          return ok({
+            ok: true,
+            provider: result.data.provider,
+            id: result.data.id,
+            version: result.data.version,
+            existingVersions,
+            versionExists: existingVersions.includes(result.data.version),
+          });
+        }),
+    );
+
+    server.registerTool(
+      "create_model",
+      {
+        description:
+          "ModelSpec(JSON 문자열)을 이 워크스페이스 소유로 등록(provider + 하부 모델 + baseUrl; 불변; 충돌 시 CONFLICT)",
+        inputSchema: { model: z.string().describe("ModelSpec JSON") },
+      },
+      ({ model }) =>
+        run(principal, "models:write", async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(model);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 ModelSpec JSON 이 아닙니다.");
+          }
+          const result = ModelSpecSchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          await models.register(ws, result.data);
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );

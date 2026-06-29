@@ -1819,6 +1819,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           harnessInstances: deps.harnessInstances,
           datasetRegistry: deps.datasetRegistry,
           judgeRegistry: deps.judgeRegistry,
+          modelRegistry: deps.modelRegistry,
           runtimeRegistry: deps.runtimeRegistry,
           probeRuntime: deps.probeRuntime,
           secretStore: deps.secretStore,

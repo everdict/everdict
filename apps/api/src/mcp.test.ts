@@ -19,6 +19,7 @@ import {
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
+  InMemoryModelRegistry,
   InMemoryRuntimeRegistry,
 } from "@assay/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -98,6 +99,7 @@ function harness() {
     harnessInstances: new InMemoryHarnessInstanceRegistry(harnessTemplates),
     datasetRegistry,
     judgeRegistry: new InMemoryJudgeRegistry(),
+    modelRegistry: new InMemoryModelRegistry(),
     runtimeRegistry: new InMemoryRuntimeRegistry(),
     probeRuntime: async (_ws: string, spec: RuntimeSpec) => ({
       kind: spec.kind,
@@ -165,6 +167,7 @@ describe("MCP tools", () => {
       "create_dataset",
       "create_invite",
       "create_judge",
+      "create_model",
       "create_runtime",
       "delete_dataset",
       "diff_datasets",
@@ -176,6 +179,7 @@ describe("MCP tools", () => {
       "get_harness_instance",
       "get_harness_template",
       "get_judge",
+      "get_model",
       "get_run",
       "get_runtime",
       "get_scorecard",
@@ -191,6 +195,7 @@ describe("MCP tools", () => {
       "list_invites",
       "list_judges",
       "list_members",
+      "list_models",
       "list_runners",
       "list_runs",
       "list_runtimes",
@@ -215,6 +220,7 @@ describe("MCP tools", () => {
       "submit_run",
       "validate_dataset",
       "validate_judge",
+      "validate_model",
       "validate_runtime",
     ]);
   });
@@ -614,6 +620,41 @@ describe("MCP tools", () => {
 
     const beta = await connect(deps, ["member"], "beta");
     const notFound = await beta.callTool({ name: "get_judge", arguments: { id: "correctness" } });
+    expect(notFound.isError).toBe(true);
+    expect(text(notFound)).toContain("NOT_FOUND");
+  });
+
+  it("models: member 가 Model 등록·검증·조회; viewer 는 write 권한오류; 타 워크스페이스는 NOT_FOUND", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"], "acme");
+    const modelSpec = JSON.stringify({
+      id: "opus",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+    });
+
+    // dry-run 검증: 스키마 통과 + 아직 등록 전이라 versionExists=false
+    const validated = JSON.parse(
+      text(await member.callTool({ name: "validate_model", arguments: { model: modelSpec } })),
+    );
+    expect(validated).toMatchObject({ ok: true, provider: "anthropic", id: "opus", versionExists: false });
+
+    const created = await member.callTool({ name: "create_model", arguments: { model: modelSpec } });
+    expect(created.isError).toBeFalsy();
+    expect(text(created)).toContain("opus");
+
+    const got = JSON.parse(text(await member.callTool({ name: "get_model", arguments: { id: "opus" } })));
+    expect(got).toMatchObject({ id: "opus", model: "claude-opus-4-8", provider: "anthropic" });
+    expect(text(await member.callTool({ name: "list_models", arguments: {} }))).toContain("opus");
+
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const denied = await viewer.callTool({ name: "create_model", arguments: { model: modelSpec } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+
+    const beta = await connect(deps, ["member"], "beta");
+    const notFound = await beta.callTool({ name: "get_model", arguments: { id: "opus" } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
   });

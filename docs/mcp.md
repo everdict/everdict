@@ -30,6 +30,10 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `get_judge` | `judges:read` | one `JudgeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_judge` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
 | `create_judge` | `judges:write` (member+) | register a `JudgeSpec` (immutable → `CONFLICT`) |
+| `list_models` | `models:read` (viewer+) | workspace-owned + `_shared` Models (provider + 하부 모델 + baseUrl) |
+| `get_model` | `models:read` | one `ModelSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
+| `validate_model` | `models:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
+| `create_model` | `models:write` (member+) | register a `ModelSpec` (immutable → `CONFLICT`); judge·command 하니스가 id 로 참조 |
 | `list_runtimes` | `runtimes:read` (viewer+) | workspace-owned + `_shared` execution runtimes (local \| nomad \| k8s) |
 | `get_runtime` | `runtimes:read` | one `RuntimeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_runtime` | `runtimes:write` (viewer+) | dry-run: schema + existing versions/conflict (no write) |
