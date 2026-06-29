@@ -21,13 +21,18 @@ export async function runWorker(opts: WorkerOptions = {}): Promise<void> {
     : { registry: new BackendRegistry().register("local", new LocalBackend()) };
   const scheduler = new Scheduler(registry, { maxQueueDepth: opts.maxQueueDepth });
 
+  // 예약 발사 액티비티 — 컨트롤플레인 internal 라우트로 브리지(둘 다 설정됐을 때만 활성; scheduledScorecardWorkflow 전용).
+  const apiUrl = process.env.ASSAY_API_URL;
+  const internalToken = process.env.ASSAY_INTERNAL_TOKEN;
+  const scheduleApi = apiUrl && internalToken ? { apiUrl, internalToken } : undefined;
+
   const connection = await NativeConnection.connect({ address: opts.address ?? "localhost:7233" });
   try {
     const worker = await Worker.create({
       connection,
       taskQueue: opts.taskQueue ?? TASK_QUEUE,
       workflowsPath: fileURLToPath(new URL("./workflows.js", import.meta.url)),
-      activities: createActivities(scheduler),
+      activities: createActivities(scheduler, scheduleApi),
     });
     await worker.run();
   } finally {

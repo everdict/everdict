@@ -114,6 +114,7 @@ import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
+import { TemporalScheduleDriver } from "./temporal-schedule-driver.js";
 import { buildTopologyBackend } from "./topology-backend.js";
 import { WorkspaceService } from "./workspace-service.js";
 
@@ -295,8 +296,15 @@ async function main(): Promise<void> {
     },
   });
 
-  // 예약(cron) 스코어카드 CRUD — SSOT 레코드 관리. 발사(Temporal Schedule 동기화)는 slice 2.
-  const scheduleService = new ScheduleService({ store: scheduleStore });
+  // 예약(cron) 스코어카드. SSOT = scheduleStore; Temporal 주소가 설정되면 TemporalScheduleDriver 로 Schedule 동기화
+  // (발사 활성화). 발사는 워크플로→internal 라우트→여기 submitScorecard. 미설정이면 CRUD 만(발사 비활성, dev).
+  const temporalAddress = process.env.ASSAY_TEMPORAL_ADDRESS;
+  const scheduleService = new ScheduleService({
+    store: scheduleStore,
+    ...(temporalAddress ? { driver: new TemporalScheduleDriver({ address: temporalAddress }) } : {}),
+    submitScorecard: (sc) => scorecardService.submit(sc),
+    scorecardStatus: async (id) => (await scorecardService.get(id))?.status,
+  });
 
   const app = buildServer({
     service,

@@ -1863,6 +1863,38 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     return reply.code(201).send({ workspace: body.data.workspace, apiKey }); // 평문은 여기서 한 번만
   });
 
+  // --- internal: 예약 발사(Temporal 워크플로가 호출, x-internal-token 가드) ---
+  // 워커는 ScorecardService 를 들고 있지 않으므로, 스케줄 발사는 워크플로→액티비티→이 라우트→ScheduleService.fire.
+  // tenant 는 스케줄 생성 시 워크플로 인자로 박혀 신뢰된 본문으로 들어온다(internal 토큰으로 이미 신뢰).
+  app.post<{ Params: { id: string } }>("/internal/schedules/:id/fire", async (req, reply) => {
+    if (!deps.internalToken || !deps.scheduleService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal 비활성" });
+    const provided = req.headers["x-internal-token"];
+    if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token 불일치" });
+    const body = z.object({ tenant: z.string().min(1) }).safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
+    try {
+      return reply.send(await deps.scheduleService.fire(body.data.tenant, req.params.id)); // { scorecardId }
+    } catch (err) {
+      return sendError(reply, err); // 없는 스케줄 404, 발사기 미설정 400
+    }
+  });
+
+  // 발사한 스코어카드 status(워크플로 poll-to-terminal). 내부 전용.
+  app.get<{ Params: { scorecardId: string } }>(
+    "/internal/schedules/scorecard-status/:scorecardId",
+    async (req, reply) => {
+      if (!deps.internalToken || !deps.scheduleService)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal 비활성" });
+      const provided = req.headers["x-internal-token"];
+      if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token 불일치" });
+      const status = await deps.scheduleService.scorecardStatus(req.params.scorecardId);
+      return reply.send({ status: status ?? null });
+    },
+  );
+
   // --- API 키 self-serve (admin 전용; 발급된 키는 이 워크스페이스 admin 권한을 가진다) ---
   app.get("/keys", async (req, reply) => {
     if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });

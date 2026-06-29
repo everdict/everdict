@@ -1,6 +1,6 @@
 export { TASK_QUEUE } from "./constants.js";
 export type { Activities } from "./types.js";
-export { createActivities } from "./activities.js";
+export { createActivities, type ScheduleActivityConfig } from "./activities.js";
 export { runWorker, type WorkerOptions } from "./worker.js";
 export {
   type Orchestrator,

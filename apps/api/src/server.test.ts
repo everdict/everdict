@@ -158,6 +158,8 @@ function server(
   const scheduleService = new ScheduleService({
     store: new InMemoryScheduleStore(),
     newId: () => `sch-${n++}`,
+    submitScorecard: (sc) => scorecardService.submit(sc), // 발사 → 스코어카드 submit(internal 라우트 검증)
+    scorecardStatus: async (id) => (await scorecardService.get(id))?.status,
   });
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
   const settingsStore = new InMemoryWorkspaceSettingsStore();
@@ -1968,6 +1970,41 @@ describe("API — schedules (예약 cron 스코어카드)", () => {
     expect(patched.json()).toMatchObject({ enabled: false, cron: "0 6 * * 1" });
     expect((await app.inject({ method: "DELETE", url: `/schedules/${rec.id}`, headers: h })).statusCode).toBe(204);
     expect((await app.inject({ method: "GET", url: `/schedules/${rec.id}`, headers: h })).statusCode).toBe(404);
+    await app.close();
+  });
+
+  it("internal 발사 라우트: 토큰 가드(미설정 404 / 불일치 403) + 위임(없는 스케줄 404)", async () => {
+    // internalToken 미설정 → internal 비활성(404)
+    const open = server();
+    expect(
+      (await open.app.inject({ method: "POST", url: "/internal/schedules/x/fire", payload: { tenant: "acme" } }))
+        .statusCode,
+    ).toBe(404);
+    await open.app.close();
+
+    const { app } = server({ internalToken: "itok" });
+    // 토큰 불일치 → 403
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/internal/schedules/x/fire",
+          headers: { "x-internal-token": "wrong" },
+          payload: { tenant: "acme" },
+        })
+      ).statusCode,
+    ).toBe(403);
+    // 올바른 토큰 + 없는 스케줄 → fire 의 get 이 404
+    expect(
+      (
+        await app.inject({
+          method: "POST",
+          url: "/internal/schedules/nope/fire",
+          headers: { "x-internal-token": "itok" },
+          payload: { tenant: "acme" },
+        })
+      ).statusCode,
+    ).toBe(404);
     await app.close();
   });
 });

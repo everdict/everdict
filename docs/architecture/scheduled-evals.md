@@ -1,7 +1,17 @@
 # Scheduled evals — run a scorecard on a cron schedule (regression monitoring)
 
-> **Status: PROPOSED (design — not yet implemented).** Driver decision **locked with the user: Temporal
-> Schedules (native)**.
+> **Status: slices 1 + 2 SHIPPED.** Driver decision **locked with the user: Temporal Schedules (native)**.
+> Slice 1 (`f57a55b` backend + `5960009` web) = Schedule SSOT + CRUD API/MCP/web. Slice 2 (this change) =
+> firing — `ScheduleService` driver-sync seam + `fire()` + internal routes + `scheduledScorecardWorkflow`
+> (poll-to-terminal) + schedule activities (HTTP bridge) + `TemporalScheduleDriver`. **Open: slice 3** (regression
+> alert + cron picker + creator-left auto-disable).
+>
+> **Driver location (deviation from the table below):** `TemporalScheduleDriver` lives in **`apps/api`**
+> (`temporal-schedule-driver.ts`), not `@assay/orchestrator` — it needs only `@temporalio/client`, and importing
+> the orchestrator index into the API would pull in `@temporalio/worker`'s native bindings. The
+> **workflow + activities** stay in `@assay/orchestrator` (they run in the worker). Driver is **env-gated**:
+> `ASSAY_TEMPORAL_ADDRESS` set on the API ⇒ schedules sync to Temporal and fire; unset ⇒ CRUD-only (dev). The
+> worker bridges back to the API via `ASSAY_API_URL` + `ASSAY_INTERNAL_TOKEN`.
 >
 > Like [self-hosted-runner](./self-hosted-runner.md) and [judge-placement-locality](./judge-placement-locality.md):
 > **strict generalization, additive.** The unit of work — `ScorecardService.submit(RunScorecardInput)` — is
@@ -125,12 +135,15 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
 
 ## Slices (pnpm gates green at each)
 
-1. **Schedule SSOT** — `ScheduleStore` (`InMemory` + `Pg` + mig), Zod schema + cron validation; `ScheduleService`
-   CRUD (DB only, no firing yet); `/schedules` routes + MCP parity + `schedules:*` roles; web list/create.
-   *(Fully testable with no Temporal.)*
-2. **Temporal driver** — `TemporalScheduleDriver` (`ScheduleClient` create/update/pause/delete), `ScheduleService`
-   syncs DB↔Temporal; `scheduledScorecardWorkflow` + submit/status activities + `/internal` fire/status routes.
-   Fires a real scorecard on cron.
+1. ✅ **Schedule SSOT** — `ScheduleStore` (`InMemory` + `Pg` + mig 0027), Zod schema + 5-field cron validation;
+   `ScheduleService` CRUD; `/schedules` routes + MCP parity + `schedules:*` roles; web list/create. *(Testable
+   with no Temporal.)*
+2. ✅ **Temporal driver** — `ScheduleDriver` seam + `TemporalScheduleDriver` (`apps/api`; `ScheduleClient`
+   create-or-recreate + delete, env-gated), `ScheduleService` syncs DB↔Temporal on create/update/remove (+ DB
+   rollback if `ensure` fails) + `fire()` (submit as creator, record `last*`); `scheduledScorecardWorkflow`
+   (poll-to-terminal) + `fireScheduledScorecard`/`scheduledScorecardStatus` activities (HTTP bridge) + worker
+   wiring; `POST /internal/schedules/:id/fire` + `GET /internal/schedules/scorecard-status/:id` (`x-internal-token`).
+   Fires a real scorecard on cron. *(fire + driver-sync unit-tested with fakes; Temporal glue is live-verified.)*
 3. **Regression alert + UX** — `notifyRegression` activity (diff vs the previous scheduled run → Mattermost),
    `lastStatus`/verdict on the record; web cron picker + next/last-fire + pause toggle; creator-left /
    connection-revoked auto-disable policy.
