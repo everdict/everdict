@@ -1,5 +1,7 @@
 'use client'
 
+import { useState } from 'react'
+
 import { LeaveWorkspaceButton } from '@/features/leave-workspace'
 import { ApiKeysManager } from '@/features/manage-api-keys'
 import { ConnectionsManager } from '@/features/manage-connections'
@@ -62,8 +64,22 @@ export function AccountTabs({
 }) {
   const tabKeys = ['profile', 'connections', 'runners', 'keys']
   const defaultTab = initialTab && tabKeys.includes(initialTab) ? initialTab : 'profile'
+
+  // 보고 있던 탭이 새로고침에도 유지되도록 ?tab= 에 동기화한다. 서버 컴포넌트가 이 값을
+  // 다시 initialTab 으로 읽어 같은 탭으로 초기화한다(서버 재요청 없이 history.replaceState 로만 URL 갱신).
+  const [tab, setTab] = useState(defaultTab)
+  const onTabChange = (v: string) => {
+    setTab(v)
+    const url = new URL(window.location.href)
+    url.searchParams.set('tab', v)
+    // OAuth 콜백 1회성 파라미터는 수동 탭 전환 시 정리(새로고침에 성공/오류 콜아웃이 되살아나지 않게).
+    url.searchParams.delete('connected')
+    url.searchParams.delete('error')
+    window.history.replaceState(null, '', url)
+  }
+
   return (
-    <Tabs defaultValue={defaultTab} className="space-y-5">
+    <Tabs value={tab} onValueChange={onTabChange} className="space-y-5">
       <TabsList>
         <TabsTrigger value="profile">프로필</TabsTrigger>
         <TabsTrigger value="connections">연결된 계정</TabsTrigger>
