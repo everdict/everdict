@@ -5,7 +5,12 @@ import { z } from "zod";
 export const ScorecardStatusSchema = z.enum(["queued", "running", "succeeded", "failed"]);
 export type ScorecardStatus = z.infer<typeof ScorecardStatusSchema>;
 
-export const ScorecardRunErrorSchema = z.object({ code: z.string(), message: z.string() });
+// phase = 실패한 파이프라인 구간(dispatch|judges|metrics|offload|persist) — "어떤 구간에서" 진단용(jsonb 라 마이그레이션 불요).
+export const ScorecardRunErrorSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  phase: z.string().optional(),
+});
 
 // 메트릭별 집계(@assay/suite summarizeScorecard 결과와 동형). db 는 core 만 의존 → 여기서 형태만 미러.
 export const MetricSummarySchema = z.object({

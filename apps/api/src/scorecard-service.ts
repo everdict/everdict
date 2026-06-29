@@ -308,25 +308,38 @@ export class ScorecardService {
       if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(tenant, costOf(result));
       return result;
     };
+    // 실패 시 "어떤 구간에서" 진단 — 파이프라인 구간을 따라가며 catch 가 그 구간을 error.phase 로 기록한다.
+    let phase = "dispatch";
+    let scorecard: Scorecard | undefined;
     try {
       // runtime 선택 시 각 케이스 placement.target 으로 주입 → RuntimeDispatcher 가 테넌트 런타임으로 라우팅.
       const cases = runtime
         ? dataset.cases.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
         : dataset.cases;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
-      const scorecard = await runSuite(suite, harnessVersion, dispatch, { concurrency: this.concurrency });
+      scorecard = await runSuite(suite, harnessVersion, dispatch, { concurrency: this.concurrency });
       // runtime = 산출 run 의 배치 → judge 를 같은 런타임에 co-locate(관측물 옆에서 판정). ingest 경로엔 산출 run 없음.
+      phase = "judges";
       await this.applyJudges(tenant, dataset, scorecard.results, judges, runtime); // 트레이스 → judge 점수(컨트롤플레인)
+      phase = "metrics";
       await this.applyMetrics(tenant, scorecard.results, metrics); // 등록 metric → 합격규칙 점수(judge 뒤: judge 점수에도 임계 가능)
+      phase = "offload";
       await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
+      phase = "persist";
       const summary = summarizeScorecard(scorecard);
       await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
     } catch (err) {
-      const error =
+      const base =
         err instanceof AppError
           ? { code: err.code, message: err.message }
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-      await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
+      // 부분 결과 보존 — dispatch 이후(judge/metric/offload) 실패면 이미 모인 케이스 결과를 같이 저장해 가시성을 남긴다.
+      await this.deps.store.update(id, {
+        status: "failed",
+        error: { ...base, phase },
+        ...(scorecard ? { scorecard, summary: summarizeScorecard(scorecard) } : {}),
+        updatedAt: this.now(),
+      });
     }
     // 완료 알림(Mattermost 등) — 최신 레코드로. 실패는 스코어카드 결과 무관(swallow).
     if (this.deps.onComplete) {

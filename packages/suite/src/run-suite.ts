@@ -12,7 +12,8 @@ function failedCaseResult(job: AgentJob, error: unknown): CaseResult {
     harness: `${job.harness.id}@${job.harness.version}`,
     trace: [{ t: 0, kind: "error", message }],
     snapshot: { kind: "prompt", output: "" },
-    scores: [{ graderId: "dispatch", metric: "error", value: 0, pass: false }],
+    // detail 에 사유를 실어 둔다 — 웹/CLI 가 score.detail 을 그대로 노출하므로 "왜 실패했는지"가 케이스 단위로 보인다.
+    scores: [{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: message }],
   };
 }
 

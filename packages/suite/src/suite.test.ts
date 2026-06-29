@@ -51,7 +51,7 @@ describe("runSuite", () => {
     const failed = sc.results.find((r) => r.caseId === "a");
     expect(failed?.harness).toBe("claude-code@1.0.0");
     expect(failed?.trace).toEqual([{ t: 0, kind: "error", message: "boom" }]);
-    expect(failed?.scores).toEqual([{ graderId: "dispatch", metric: "error", value: 0, pass: false }]);
+    expect(failed?.scores).toEqual([{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: "boom" }]);
     expect(caseVerdict(failed ?? { scores: [] })).toBe(false);
     // 성공 케이스는 정상 집계
     expect(caseVerdict(sc.results.find((r) => r.caseId === "b") ?? { scores: [] })).toBe(true);

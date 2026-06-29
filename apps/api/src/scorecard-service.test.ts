@@ -8,7 +8,7 @@ import {
   type TraceEvent,
 } from "@assay/core";
 import { InMemoryScorecardStore, type ScorecardRecord } from "@assay/db";
-import { InMemoryDatasetRegistry } from "@assay/registry";
+import { InMemoryDatasetRegistry, InMemoryJudgeRegistry } from "@assay/registry";
 import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { describe, expect, it } from "vitest";
 import { ScorecardService } from "./scorecard-service.js";
@@ -252,6 +252,58 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
     expect(byCase["git-priv"]).toBe("gho_sc");
     expect(byCase["files-pub"]).toBeUndefined();
     expect(calls).toEqual([{ owner: "u-alice", connectionId: "conn-1" }]); // files 케이스는 resolver 미호출
+  });
+
+  it("디스패치 이후 구간(judges) 실패 → status=failed + error.phase=judges + 부분 결과 보존(가시성)", async () => {
+    const okDispatch: Dispatcher = {
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
+        };
+      },
+    };
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const judges = new InMemoryJudgeRegistry();
+    await judges.register("acme", {
+      kind: "model",
+      id: "j1",
+      version: "1.0.0",
+      provider: "anthropic",
+      model: "claude-opus-4-8",
+      rubric: "ok?",
+      inputs: ["trace"],
+      tags: [],
+    });
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      judges,
+      judgeRunner: {
+        async run() {
+          throw new Error("judge boom");
+        },
+      },
+      newId: () => "sc-phase",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      judges: [{ id: "j1", version: "1.0.0" }],
+    });
+    const rec = await waitTerminal(store, "sc-phase");
+    expect(rec.status).toBe("failed");
+    expect(rec.error?.phase).toBe("judges"); // "어떤 구간에서" — judges 단계 실패
+    expect(rec.error?.message).toContain("judge boom"); // "어떻게" — 사유
+    // 부분 결과 보존: 디스패치까지 모인 케이스 결과가 실패 레코드에도 남아 가시성을 준다.
+    expect(rec.scorecard?.results.map((r) => r.caseId)).toEqual(["c1"]);
   });
 
   it("완료 시 onComplete 콜백을 최신 레코드로 호출(알림 훅)", async () => {

@@ -20,6 +20,12 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
 Runs are **async**: submit returns a `queued` record; poll until terminal. Normal eval failures produce
 `CaseResult`s (the batch still succeeds); only infra/budget errors fail the whole run.
 
+**Failure visibility** (diagnose "어떤 구간에서 어떻게"): a per-case dispatch failure is isolated to a failed
+`CaseResult` carrying `trace:[{kind:"error",message}]` + a `pass:false` score whose **`detail` = the reason**
+(so the web/CLI shows *why* per case). A pipeline-level failure tags the record's `error.phase`
+(`dispatch | judges | metrics | offload | persist`) so you see *which stage* broke, and the **partial
+`scorecard`** (case results gathered before the failing stage) is persisted on the failed record too.
+
 ## Storage (`@assay/db`)
 `ScorecardStore` (`InMemoryScorecardStore` / `PgScorecardStore`), mirror of `RunStore`. `ScorecardRecord` =
 `{ id, tenant, dataset:{id,version}, harness:{id,version}, status, summary?, scorecard?, error?, …}`. **`list`
