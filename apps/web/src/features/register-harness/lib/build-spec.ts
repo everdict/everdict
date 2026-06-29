@@ -19,7 +19,8 @@ export interface ServiceRow {
 export interface DepRow {
   store: string
   role: string
-  isolateBy: string
+  isolateBy: string // …/schema | external(BYO 외부 스토어 — Assay 미배포, 연결은 배포 시 env)
+  service: string // 이 스토어를 쓰는 서비스(선택; 비우면 토폴로지 공용)
 }
 
 // 템플릿(대분류) 폼 상태.
@@ -116,7 +117,12 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
           : {}),
       }
     }),
-    dependencies: s.deps.map((d) => ({ store: d.store, role: d.role, isolateBy: d.isolateBy })),
+    dependencies: s.deps.map((d) => ({
+      store: d.store,
+      role: d.role,
+      isolateBy: d.isolateBy,
+      ...(d.service.trim() ? { service: d.service.trim() } : {}),
+    })),
     frontDoor: {
       service: s.frontDoorService,
       submit: s.frontDoorSubmit,
@@ -157,9 +163,15 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
         .join('\n'),
       volumes: (s.volumes ?? []).join('\n'),
       readinessTimeout: s.readiness?.timeoutMs !== undefined ? String(s.readiness.timeoutMs) : '',
-      readinessInterval: s.readiness?.intervalMs !== undefined ? String(s.readiness.intervalMs) : '',
+      readinessInterval:
+        s.readiness?.intervalMs !== undefined ? String(s.readiness.intervalMs) : '',
     })),
-    deps: (t.dependencies ?? []).map((d) => ({ store: d.store, role: d.role, isolateBy: d.isolateBy })),
+    deps: (t.dependencies ?? []).map((d) => ({
+      store: d.store,
+      role: d.role,
+      isolateBy: d.isolateBy,
+      service: d.service ?? '',
+    })),
     frontDoorService: t.frontDoor?.service ?? '',
     frontDoorSubmit: t.frontDoor?.submit ?? '',
     frontDoorTrace: t.frontDoor?.trace ?? '',
@@ -261,8 +273,13 @@ export const INITIAL_INSTANCE: InstanceState = {
 // raw 인스턴스 스펙 → 인스턴스 폼 상태(새 버전 편집 프리필). version 은 빈 값으로 둬 새 태그를 강제한다
 // (같은 태그 재등록은 불변성 위반 409). slots 가 주어지면 그 슬롯 전부를 행으로 펼쳐(누락 없이) 기존 값을 병합한다.
 export function instanceStateFromSpec(
-  inst: { template: { id: string; version: string }; id: string; version: string; pins: Record<string, string> },
-  slots?: string[],
+  inst: {
+    template: { id: string; version: string }
+    id: string
+    version: string
+    pins: Record<string, string>
+  },
+  slots?: string[]
 ): InstanceState {
   const rows: PinRow[] =
     slots && slots.length > 0
