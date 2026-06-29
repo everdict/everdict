@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { type ApiKeyScope, createApiKeyInputSchema, createdApiKeySchema } from '@/entities/api-key'
+import { createApiKeyInputSchema, createdApiKeySchema, type ApiKeyScope } from '@/entities/api-key'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -18,7 +18,10 @@ export interface RevokeKeyResult {
 }
 
 // API 키 발급. scopes 로 권한을 좁힐 수 있다(미지정=Full Access). authZ(admin=keys:write)는 컨트롤플레인이 강제.
-export async function createKeyAction(label?: string, scopes?: ApiKeyScope[]): Promise<CreateKeyResult> {
+export async function createKeyAction(
+  label?: string,
+  scopes?: ApiKeyScope[]
+): Promise<CreateKeyResult> {
   const ctx = await authContext()
   try {
     // 경계 검증(컨트롤플레인이 다시 강제하지만 잘못된 입력은 여기서 거른다). 빈 배열/미지정 scopes 는 보내지 않음(=Full Access).

@@ -60,7 +60,10 @@ export async function validateHarnessTemplateAction(spec: unknown): Promise<Vali
 export async function registerHarnessTemplateAction(spec: unknown): Promise<RegisterHarnessResult> {
   const ctx = await authContext()
   try {
-    const rec = await controlPlane.registerHarnessTemplate<{ id: string; version: string }>(ctx, spec)
+    const rec = await controlPlane.registerHarnessTemplate<{ id: string; version: string }>(
+      ctx,
+      spec
+    )
     revalidatePath('/[workspace]/harnesses')
     revalidatePath('/[workspace]')
     return { ok: true, id: rec.id, version: rec.version }

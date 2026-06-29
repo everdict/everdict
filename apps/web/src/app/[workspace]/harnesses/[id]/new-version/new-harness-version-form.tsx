@@ -54,7 +54,12 @@ export function NewHarnessVersionForm({
       </p>
 
       {tab === 'instance' ? (
-        <InstanceForm workspace={workspace} initial={initialInstance} lockId redirectDetailId={id} />
+        <InstanceForm
+          workspace={workspace}
+          initial={initialInstance}
+          lockId
+          redirectDetailId={id}
+        />
       ) : (
         <TemplateForm
           workspace={workspace}
@@ -86,7 +91,9 @@ function TabBtn({
       onClick={onClick}
       className={cn(
         'rounded px-3 py-1 font-[510] transition-colors',
-        active ? 'bg-card text-foreground shadow-raise' : 'text-muted-foreground hover:text-foreground'
+        active
+          ? 'bg-card text-foreground shadow-raise'
+          : 'text-muted-foreground hover:text-foreground'
       )}
     >
       {children}

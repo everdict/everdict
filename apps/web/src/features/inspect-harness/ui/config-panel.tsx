@@ -53,7 +53,9 @@ export function ConfigPanel({
 
       <SubSection title="Pins (슬롯 → 값)" icon={<Pin className="size-4" />} count={slots.length}>
         {slots.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">핀할 슬롯이 없습니다 (process 템플릿).</p>
+          <p className="text-[13px] text-muted-foreground">
+            핀할 슬롯이 없습니다 (process 템플릿).
+          </p>
         ) : (
           <Card className="divide-y divide-border">
             {slots.map((slot) => {

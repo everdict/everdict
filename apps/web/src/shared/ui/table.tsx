@@ -10,10 +10,7 @@ export function Table({
 }: HTMLAttributes<HTMLTableElement> & { containerClassName?: string }) {
   return (
     <div
-      className={cn(
-        'overflow-x-auto rounded-lg border bg-card shadow-raise',
-        containerClassName
-      )}
+      className={cn('overflow-x-auto rounded-lg border bg-card shadow-raise', containerClassName)}
     >
       <table className={cn('w-full border-collapse text-[13px]', className)} {...props} />
     </div>
@@ -39,10 +36,7 @@ export function TBody({ className, ...props }: HTMLAttributes<HTMLTableSectionEl
 export function TR({ className, ...props }: HTMLAttributes<HTMLTableRowElement>) {
   return (
     <tr
-      className={cn(
-        'border-b border-border/60 transition-colors hover:bg-elevated/60',
-        className
-      )}
+      className={cn('border-b border-border/60 transition-colors hover:bg-elevated/60', className)}
       {...props}
     />
   )

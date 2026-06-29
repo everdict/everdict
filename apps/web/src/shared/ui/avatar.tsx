@@ -45,7 +45,11 @@ export function Avatar({
       <img
         src={url}
         alt={name}
-        className={cn('shrink-0 object-cover ring-1 ring-inset ring-border', SIZES[size], className)}
+        className={cn(
+          'shrink-0 object-cover ring-1 ring-inset ring-border',
+          SIZES[size],
+          className
+        )}
       />
     )
   }

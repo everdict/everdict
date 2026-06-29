@@ -1,6 +1,6 @@
 import type { RunStatus } from '@/entities/run'
-import { Badge } from '@/shared/ui/badge'
 import { cn } from '@/shared/lib/utils'
+import { Badge } from '@/shared/ui/badge'
 
 const MAP: Record<
   RunStatus,

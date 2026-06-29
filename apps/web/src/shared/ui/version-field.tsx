@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 
-import { type BumpKind, bumpSemver, maxSemver } from '@/shared/lib/semver'
+import { bumpSemver, maxSemver, type BumpKind } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
 import { Label } from '@/shared/ui/input'
 
@@ -50,14 +50,18 @@ export function VersionField({
                     : 'text-muted-foreground hover:text-foreground'
                 )}
               >
-                {k} <span className="font-mono text-[11px] opacity-60">{bumpSemver(latest, k)}</span>
+                {k}{' '}
+                <span className="font-mono text-[11px] opacity-60">{bumpSemver(latest, k)}</span>
               </button>
             ))}
           </div>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
             기존 {existing.join(', ')} · 최신{' '}
-            <code className="rounded bg-secondary px-1 font-mono text-[11px]">{latest}</code> → 새 버전{' '}
-            <code className="rounded bg-secondary px-1 font-mono text-[11px] text-foreground">{value}</code>
+            <code className="rounded bg-secondary px-1 font-mono text-[11px]">{latest}</code> → 새
+            버전{' '}
+            <code className="rounded bg-secondary px-1 font-mono text-[11px] text-foreground">
+              {value}
+            </code>
           </p>
         </div>
       ) : (

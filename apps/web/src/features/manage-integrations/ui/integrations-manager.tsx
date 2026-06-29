@@ -35,8 +35,8 @@ export function IntegrationsManager({
         <p className="text-[13px] leading-relaxed text-muted-foreground">
           GitHub Enterprise·Mattermost 같은 self-hosted 서버의 OAuth 앱을 워크스페이스에 한 번
           등록하면, 멤버는 계정 설정의 <span className="font-[510]">연결된 계정</span>에서 client ID
-          입력 없이 원클릭으로 연결합니다. github.com 은 컨트롤플레인 env(GITHUB_OAUTH_CLIENT_ID/SECRET)
-          로 설정되며 여기서 다루지 않습니다.
+          입력 없이 원클릭으로 연결합니다. github.com 은 컨트롤플레인
+          env(GITHUB_OAUTH_CLIENT_ID/SECRET) 로 설정되며 여기서 다루지 않습니다.
         </p>
         {callbackUrl && (
           <p className="text-[12px] leading-relaxed text-faint">
@@ -51,7 +51,9 @@ export function IntegrationsManager({
           통합을 등록/변경하려면 admin 역할(settings:write)이 필요합니다.
         </p>
       ) : providers.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">설정 가능한 self-hosted provider 가 없습니다.</p>
+        <p className="text-[13px] text-muted-foreground">
+          설정 가능한 self-hosted provider 가 없습니다.
+        </p>
       ) : (
         <div className="space-y-4">
           {providers.map((p) => (
@@ -115,8 +117,8 @@ function IntegrationCard({ integration }: { integration: WorkspaceIntegration })
       </div>
       <p className="text-[12px] leading-relaxed text-muted-foreground">
         {label(integration.id)} 서버에 OAuth 앱을 만들고, client secret 은 먼저 이 워크스페이스의{' '}
-        <span className="font-[510]">시크릿</span>(모델 키/클러스터 자격증명 탭)에 저장한 뒤 그 이름을
-        아래에 입력하세요. client secret 값 자체는 입력하지 않습니다.
+        <span className="font-[510]">시크릿</span>(모델 키/클러스터 자격증명 탭)에 저장한 뒤 그
+        이름을 아래에 입력하세요. client secret 값 자체는 입력하지 않습니다.
       </p>
       <div className="space-y-1.5">
         <Label htmlFor={`int-host-${integration.id}`}>서버 URL (host)</Label>

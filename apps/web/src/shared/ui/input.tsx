@@ -11,7 +11,12 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
 }
 
 export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
-  return <textarea className={cn(base, 'min-h-24 py-2 font-mono leading-relaxed', className)} {...props} />
+  return (
+    <textarea
+      className={cn(base, 'min-h-24 py-2 font-mono leading-relaxed', className)}
+      {...props}
+    />
+  )
 }
 
 export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
@@ -19,9 +24,7 @@ export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLS
 }
 
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {
-  return (
-    <label className={cn('text-[13px] font-[510] text-foreground', className)} {...props} />
-  )
+  return <label className={cn('text-[13px] font-[510] text-foreground', className)} {...props} />
 }
 
 export function FieldError({ message }: { message?: string }) {

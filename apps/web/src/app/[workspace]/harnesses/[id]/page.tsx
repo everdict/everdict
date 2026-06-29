@@ -85,9 +85,15 @@ export default async function HarnessDetailPage({
   let config: { instance: HarnessInstanceSpec; template: HarnessTemplateSpec } | undefined
   if (active && spec) {
     try {
-      const instance = harnessInstanceSpecSchema.parse(await controlPlane.getHarnessInstance(ctx, id, active))
+      const instance = harnessInstanceSpecSchema.parse(
+        await controlPlane.getHarnessInstance(ctx, id, active)
+      )
       const template = harnessTemplateSpecSchema.parse(
-        await controlPlane.getHarnessTemplateSpec(ctx, instance.template.id, instance.template.version)
+        await controlPlane.getHarnessTemplateSpec(
+          ctx,
+          instance.template.id,
+          instance.template.version
+        )
       )
       config = { instance, template }
     } catch {

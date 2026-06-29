@@ -27,7 +27,9 @@ export async function setIntegrationAction(
 }
 
 // self-hosted 통합 해제(관리자). 기존 연결 토큰은 영향 없음 — 신규 연결만 막힌다.
-export async function removeIntegrationAction(provider: string): Promise<IntegrationMutationResult> {
+export async function removeIntegrationAction(
+  provider: string
+): Promise<IntegrationMutationResult> {
   const ctx = await authContext()
   try {
     await controlPlane.removeWorkspaceIntegration(ctx, provider)

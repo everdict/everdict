@@ -47,13 +47,19 @@ export default async function NewHarnessVersionPage({
   let loadError: string | undefined
   try {
     const versions = harnessVersionsSchema.parse(await controlPlane.getHarness(ctx, id)).versions
-    const active = (typeof v === 'string' && versions.includes(v) ? v : undefined) ?? versions[versions.length - 1]
+    const active =
+      (typeof v === 'string' && versions.includes(v) ? v : undefined) ??
+      versions[versions.length - 1]
     if (!active) throw new Error('등록된 버전이 없습니다.')
-    const instance = harnessInstanceSpecSchema.parse(await controlPlane.getHarnessInstance(ctx, id, active))
+    const instance = harnessInstanceSpecSchema.parse(
+      await controlPlane.getHarnessInstance(ctx, id, active)
+    )
 
     if (typeof tplVersion === 'string' && tplVersion) {
       // 템플릿 새 버전 등록 직후 — 그 버전을 참조하는 인스턴스를 만들도록 인스턴스 탭으로 복귀.
-      const newTemplate = harnessTemplateSpecSchema.parse(await controlPlane.getHarnessTemplateSpec(ctx, id, tplVersion))
+      const newTemplate = harnessTemplateSpecSchema.parse(
+        await controlPlane.getHarnessTemplateSpec(ctx, id, tplVersion)
+      )
       initialInstance = instanceStateFromSpec(
         { ...instance, template: { id, version: tplVersion } },
         templateSlotNames(newTemplate)
@@ -63,7 +69,11 @@ export default async function NewHarnessVersionPage({
       notice = `템플릿 ${id}@${tplVersion} 가 등록됐습니다. 이 버전을 참조하는 새 인스턴스를 등록하세요.`
     } else {
       const template = harnessTemplateSpecSchema.parse(
-        await controlPlane.getHarnessTemplateSpec(ctx, instance.template.id, instance.template.version)
+        await controlPlane.getHarnessTemplateSpec(
+          ctx,
+          instance.template.id,
+          instance.template.version
+        )
       )
       initialInstance = instanceStateFromSpec(instance, templateSlotNames(template))
       initialTemplate = templateStateFromSpec(template)
@@ -92,7 +102,9 @@ export default async function NewHarnessVersionPage({
           hint="harnesses:register 권한이 필요합니다."
         />
       ) : loadError || !initialInstance || !initialTemplate ? (
-        <Callout tone="danger">기존 구성을 불러올 수 없습니다: {loadError ?? '알 수 없는 오류'}</Callout>
+        <Callout tone="danger">
+          기존 구성을 불러올 수 없습니다: {loadError ?? '알 수 없는 오류'}
+        </Callout>
       ) : (
         <Card className="p-5">
           <NewHarnessVersionForm

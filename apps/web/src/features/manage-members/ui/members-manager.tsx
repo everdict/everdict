@@ -59,7 +59,11 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
           {members.map((m) => (
             <li key={m.subject} className="flex items-center justify-between gap-3 px-3 py-2.5">
               <div className="flex min-w-0 items-center gap-2.5">
-                <Avatar name={memberLabel(m)} size="lg" {...(m.avatarUrl ? { url: m.avatarUrl } : {})} />
+                <Avatar
+                  name={memberLabel(m)}
+                  size="lg"
+                  {...(m.avatarUrl ? { url: m.avatarUrl } : {})}
+                />
                 <div className="min-w-0">
                   <div className="truncate text-[13px] font-[510] text-foreground">
                     {memberLabel(m)}
