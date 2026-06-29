@@ -388,13 +388,17 @@ describe("API — authorization (roles)", () => {
 });
 
 describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", () => {
-  it("GET /connections → 200 — 통합 미설정이면 self-hosted(GHE)는 미노출(github.com env 만)", async () => {
+  it("GET /connections → 200 — 카탈로그는 3종 전부 노출, 통합 미설정 self-hosted(GHE)는 connectable=false", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
     expect(res.statusCode).toBe(200);
     expect(res.json()).toEqual({
       connections: [],
-      providers: [{ id: "github", selfHosted: false }], // GHE 는 관리자 통합 등록 전엔 멤버에게 안 보임
+      // 항상 카탈로그로 노출 — github 은 env 기본 있어 connectable, GHE 는 통합 미설정이라 connectable=false(설정 안내 대상).
+      providers: [
+        { id: "github", selfHosted: false, connectable: true },
+        { id: "github-enterprise", selfHosted: true, connectable: false },
+      ],
     });
     await app.close();
   });
@@ -523,16 +527,16 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     expect(start.statusCode).toBe(200);
     expect(new URL(start.json().authorizeUrl as string).searchParams.get("host")).toBe("https://ghe.acme.io");
 
-    // 이제 GET /connections 가 GHE 를 원클릭 가능 provider 로 노출.
+    // 이제 GET /connections 카탈로그가 GHE 를 connectable=true 로 노출(원클릭 가능).
     const conns = await app.inject({ method: "GET", url: "/connections", headers: h });
-    expect(conns.json().providers).toContainEqual({ id: "github-enterprise", selfHosted: true });
+    expect(conns.json().providers).toContainEqual({ id: "github-enterprise", selfHosted: true, connectable: true });
 
-    // DELETE 통합 → 204 → 다시 미노출.
+    // DELETE 통합 → 204 → 카탈로그엔 남되 connectable=false(다시 설정 안내 대상).
     expect(
       (await app.inject({ method: "DELETE", url: "/workspace/integrations/github-enterprise", headers: h })).statusCode,
     ).toBe(204);
     const after = await app.inject({ method: "GET", url: "/connections", headers: h });
-    expect(after.json().providers).not.toContainEqual({ id: "github-enterprise", selfHosted: true });
+    expect(after.json().providers).toContainEqual({ id: "github-enterprise", selfHosted: true, connectable: false });
     await app.close();
   });
 });

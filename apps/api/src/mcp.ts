@@ -693,14 +693,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "list_connections",
       {
-        description: "내 외부 계정 연결 목록(토큰 없음) + 원클릭 연결 가능한 provider({id, selfHosted})",
+        description: "내 외부 계정 연결 목록(토큰 없음) + 공식 지원 provider 카탈로그({id, selfHosted, connectable})",
         inputSchema: {},
       },
       () =>
         plain(async () =>
           ok({
             connections: await connections.list(principal.subject),
-            providers: await connections.connectableProviders(ws),
+            providers: await connections.providerCatalog(ws),
           }),
         ),
     );

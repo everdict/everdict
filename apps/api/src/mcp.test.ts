@@ -237,17 +237,30 @@ describe("MCP tools", () => {
     const admin = await connect(deps, ["admin"]);
     const viewer = await connect(deps, ["viewer"]);
 
-    // 연결은 개인 소유 — viewer 도 본인 연결 list 가능(빈 목록).
+    // 연결은 개인 소유 — viewer 도 본인 연결 list 가능(빈 목록). 카탈로그는 3종 전부 노출: github 은 default 있어 connectable,
+    // GHE 는 통합 미설정이라 connectable=false(숨기지 않고 설정 안내 대상으로 노출).
     const viewerList = JSON.parse(text(await viewer.callTool({ name: "list_connections", arguments: {} })));
-    expect(viewerList).toEqual({ connections: [], providers: [{ id: "github", selfHosted: false }] });
+    expect(viewerList).toEqual({
+      connections: [],
+      providers: [
+        { id: "github", selfHosted: false, connectable: true },
+        { id: "github-enterprise", selfHosted: true, connectable: false },
+      ],
+    });
     // viewer 도 본인 연결 start 가능(역할 게이트 없음) → authorizeUrl.
     const vUrl = await viewer.callTool({ name: "get_connect_url", arguments: { provider: "github" } });
     expect(vUrl.isError).toBeFalsy();
     expect(JSON.parse(text(vUrl)).authorizeUrl).toContain("https://github.test/auth?state=");
 
-    // admin list → connections:[] + providers:['github'].
+    // admin list → connections:[] + 카탈로그(github connectable / GHE 미설정).
     const listed = JSON.parse(text(await admin.callTool({ name: "list_connections", arguments: {} })));
-    expect(listed).toEqual({ connections: [], providers: [{ id: "github", selfHosted: false }] });
+    expect(listed).toEqual({
+      connections: [],
+      providers: [
+        { id: "github", selfHosted: false, connectable: true },
+        { id: "github-enterprise", selfHosted: true, connectable: false },
+      ],
+    });
 
     // disconnect (없는 id 라도 멱등) → disconnected:true.
     const dis = JSON.parse(text(await admin.callTool({ name: "disconnect_connection", arguments: { id: "x" } })));
@@ -286,9 +299,9 @@ describe("MCP tools", () => {
       clientSecretName: "GHE_SECRET",
     });
 
-    // 멤버는 이제 GHE 를 원클릭 연결 가능(list_connections 의 connectable providers).
+    // 멤버는 이제 GHE 를 원클릭 연결 가능(list_connections 카탈로그에서 connectable=true).
     const conns = JSON.parse(text(await member.callTool({ name: "list_connections", arguments: {} })));
-    expect(conns.providers).toContainEqual({ id: "github-enterprise", selfHosted: true });
+    expect(conns.providers).toContainEqual({ id: "github-enterprise", selfHosted: true, connectable: true });
 
     // remove → configured false.
     await admin.callTool({ name: "remove_workspace_integration", arguments: { provider: "github-enterprise" } });

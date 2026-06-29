@@ -47,7 +47,7 @@ function build(
 }
 
 describe("ConnectionService", () => {
-  it("connectableProviders: github.com 은 default 있을 때만, self-hosted 는 워크스페이스 통합이 설정된 경우만", async () => {
+  it("providerCatalog: 3종 전부 항상 노출 — github.com 은 default 있을 때, self-hosted 는 통합 설정 시 connectable=true", async () => {
     const s = build(
       new Map([
         ["github", githubEntry],
@@ -57,18 +57,21 @@ describe("ConnectionService", () => {
         secrets: { GHE_SECRET: "x" },
       },
     );
-    // 통합 미설정 → github.com 만 원클릭 가능
-    expect(await s.connectableProviders("acme")).toEqual([{ id: "github", selfHosted: false }]);
-    // 관리자가 통합 등록 → self-hosted 도 멤버에게 노출
-    await s.setIntegration("acme", "github-enterprise", { ...GHE, clientId: "c" });
-    expect(await s.connectableProviders("acme")).toEqual([
-      { id: "github", selfHosted: false },
-      { id: "github-enterprise", selfHosted: true },
+    // 통합 미설정 — 둘 다 노출되지만(숨기지 않음) github.com 만 connectable. self-hosted 는 설정 안내 대상.
+    expect(await s.providerCatalog("acme")).toEqual([
+      { id: "github", selfHosted: false, connectable: true },
+      { id: "github-enterprise", selfHosted: true, connectable: false },
     ]);
-    // github.com default 없으면 미노출
-    expect(
-      await build(new Map([["github", { impl: okImpl, selfHosted: false }]])).connectableProviders("acme"),
-    ).toEqual([]);
+    // 관리자가 통합 등록 → self-hosted 도 connectable=true
+    await s.setIntegration("acme", "github-enterprise", { ...GHE, clientId: "c" });
+    expect(await s.providerCatalog("acme")).toEqual([
+      { id: "github", selfHosted: false, connectable: true },
+      { id: "github-enterprise", selfHosted: true, connectable: true },
+    ]);
+    // github.com default(env OAuth 앱) 없으면 노출은 되되 connectable=false
+    expect(await build(new Map([["github", { impl: okImpl, selfHosted: false }]])).providerCatalog("acme")).toEqual([
+      { id: "github", selfHosted: false, connectable: false },
+    ]);
   });
 
   it("미설정 provider start 는 BadRequestError", async () => {

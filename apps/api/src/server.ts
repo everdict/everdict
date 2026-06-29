@@ -1427,8 +1427,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // 연결은 개인 소유 — 역할 게이트 없이 본인(subject)의 연결만 조회(프로필과 동일하게 self-scoped).
       return reply.send({
         connections: await deps.connectionService.list(principal.subject),
-        // 멤버가 원클릭 연결 가능한 provider({id, selfHosted}) — self-hosted 는 관리자가 통합을 등록한 경우에만 노출.
-        providers: await deps.connectionService.connectableProviders(principal.workspace),
+        // 공식 지원 provider 카탈로그({id, selfHosted, connectable}) — 3종 전부 노출. connectable=false 면 UI 가 설정 안내를 보여준다.
+        providers: await deps.connectionService.providerCatalog(principal.workspace),
       });
     } catch (err) {
       return sendError(reply, err);

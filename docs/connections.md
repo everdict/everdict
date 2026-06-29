@@ -34,10 +34,15 @@ back (PR/status), and channel notifications (Mattermost) — are later *consumpt
 - **Workspace roster is `members:read`.** `GET /workspace/applications` (and MCP `list_workspace_applications`)
   returns the **metadata** roster of connections created in this workspace, gated by `members:read` (viewer+) — it
   surfaces in the settings 멤버 탭, read-only. It never returns tokens and never manages connections.
-- A provider is **connectable** (shown to members as a one-click button) only if its OAuth app is configured:
-  github.com needs the control-plane **env** credentials; self-hosted GHE/Mattermost need a **workspace
-  integration** registered by an admin. With none configured, the feature degrades to listing/disconnecting
-  existing connections.
+- **The provider catalog always lists all officially-supported providers** (github / github-enterprise /
+  mattermost), each with a `connectable` flag — the web Connected-accounts tab shows every supported service with
+  its own Connect button (Linear-style discovery), never hiding the ones that aren't set up yet. A provider is
+  `connectable: true` only if its OAuth app is configured: github.com needs the control-plane **env** credentials;
+  self-hosted GHE/Mattermost need a **workspace integration** registered by an admin. When `connectable: false` the
+  UI shows setup guidance instead of a Connect button — for self-hosted, a deep-link to the workspace 통합 settings
+  tab (`/<workspace>/settings?tab=integrations`) if the viewer has `settings:write`, else "관리자 설정 필요"; for
+  github.com, an env-app hint. `providerCatalog(workspace)` (one core, both transports — `GET /connections` +
+  MCP `list_connections`) computes the flags.
 - **Self-hosted OAuth app = workspace asset (admin), not per-connection.** `WorkspaceSettings.integrations`
   (`{ [provider]: { host, clientId, clientSecretName } }`, in the existing `assay_workspace_settings` JSONB) holds
   the admin-registered OAuth app per self-hosted provider. None of these three values is a secret (the
@@ -67,7 +72,7 @@ back (PR/status), and channel notifications (Mattermost) — are later *consumpt
 **Personal connect/disconnect** (self-scoped by `subject`, no role gate) + **workspace roster** (`members:read`):
 | Surface | List (personal) | Connect (one-click) | Disconnect | Workspace roster |
 |---|---|---|---|---|
-| HTTP | `GET /connections` → `{connections, providers:[{id,selfHosted}]}` (my connections + connectable providers) | `POST /connections/:provider/start` → `{authorizeUrl}` (**no body credentials**) · `GET /connections/callback` (public, 302) | `DELETE /connections/:id` → 204 | `GET /workspace/applications` → `{connections}` (`members:read`) |
+| HTTP | `GET /connections` → `{connections, providers:[{id,selfHosted,connectable}]}` (my connections + full provider catalog) | `POST /connections/:provider/start` → `{authorizeUrl}` (**no body credentials**) · `GET /connections/callback` (public, 302) | `DELETE /connections/:id` → 204 | `GET /workspace/applications` → `{connections}` (`members:read`) |
 | MCP | `list_connections` | `get_connect_url {provider}` → `{authorizeUrl}` (a human opens it; agents can't complete an interactive browser OAuth) | `disconnect_connection {id}` | `list_workspace_applications` (`members:read`) |
 
 **Workspace integration management** (admin, `settings:read`/`settings:write`) — registers the self-hosted OAuth app:
@@ -76,9 +81,11 @@ back (PR/status), and channel notifications (Mattermost) — are later *consumpt
 | HTTP | `GET /workspace/integrations` → `{providers:[{id,selfHosted,configured,host?,clientId?,clientSecretName?}], callbackUrl?}` (`settings:read`) | `PUT /workspace/integrations/:provider` `{host,clientId,clientSecretName}` → `{providers}` (`settings:write`) | `DELETE /workspace/integrations/:provider` → 204 (`settings:write`) |
 | MCP | `list_workspace_integrations` | `set_workspace_integration {provider,host,clientId,clientSecretName}` | `remove_workspace_integration {provider}` |
 
-`GET /connections` lists each connectable provider as `{id, selfHosted}` so the web shows a **one-click button**
-for every provider (no more host+credentials form on the account page). For self-hosted providers, that button
-appears only once an admin has registered the workspace integration. `callbackUrl` (the
+`GET /connections` lists the **full catalog** as `{id, selfHosted, connectable}` so the web shows every supported
+service with its own row (no more host+credentials form on the account page). `connectable: true` → a one-click
+Connect button; `connectable: false` → setup guidance (self-hosted: a deep-link to the workspace 통합 tab for
+admins, "관리자 설정 필요" for members; github.com: an env-app hint). For self-hosted providers, the Connect button
+becomes active only once an admin has registered the workspace integration. `callbackUrl` (the
 `${API_PUBLIC_URL}/connections/callback` value the admin must register on the provider's OAuth app) is returned
 from the integrations read so the admin UI can display it. Tokens / client_secret **values** are never returned
 by any surface.
@@ -143,7 +150,8 @@ by any surface.
 - Settings store (`packages/db/src/workspace-settings.test.ts`): `integrations` round-trip, setting integrations
   doesn't clobber `notify`/`meterUsage` (top-level merge), host-not-URL rejected, Pg `||` jsonb merge upsert.
 - Service (`apps/api/src/connection-service.test.ts`): github.com + self-hosted start→callback round-trips,
-  `connectableProviders` visibility (self-hosted hidden until the workspace integration is set), self-hosted
+  `providerCatalog` flags (all providers always listed; `connectable` flips with env credentials / workspace
+  integration), self-hosted
   start **resolves from the workspace integration** (missing integration → `BadRequestError`; missing
   `SecretStore` secret → `BadRequestError`), `setIntegration` rejects non-self-hosted providers,
   `listIntegrations`/`removeIntegration` per-provider read-merge-write (other integrations preserved),

@@ -25,10 +25,13 @@ export interface ProviderEntry {
   default?: { clientId: string; clientSecret: string }; // github.com env 기본(원클릭). self-hosted 는 없음.
 }
 
-// 멤버가 원클릭으로 연결 가능한 provider 디스크립터(GET /connections / list_connections).
+// 공식 지원 provider 카탈로그 항목(GET /connections / list_connections). 항상 3종 전부 노출.
+// connectable=true 면 멤버가 바로 원클릭 연결 가능(github.com=env 기본 OAuth 앱, self-hosted=관리자 통합 등록).
+// false 면 UI 가 Connect 대신 설정 안내(self-hosted=관리자 통합 딥링크 / github.com=컨트롤플레인 env)를 보여준다.
 export interface ProviderInfo {
   id: string;
   selfHosted: boolean;
+  connectable: boolean;
 }
 
 // 관리자용 self-hosted 통합 디스크립터(GET /workspace/integrations / list_workspace_integrations).
@@ -81,17 +84,16 @@ export class ConnectionService {
     this.now = deps.now ?? (() => new Date());
   }
 
-  // 멤버가 원클릭으로 연결 가능한 provider — github.com 은 env 기본이 있을 때, self-hosted 는 **워크스페이스 통합이 설정된 경우에만**.
-  // (관리자가 통합을 등록하지 않은 self-hosted provider 는 멤버에게 노출하지 않는다 — 연결할 수단이 없으므로.)
-  async connectableProviders(workspace: string): Promise<ProviderInfo[]> {
+  // 공식 지원 provider 카탈로그 — 등록된 provider 전부를 connectable 플래그와 함께 노출(설정 안 된 것도 숨기지 않음).
+  // 멤버가 카탈로그에서 무엇이 지원되는지 보고, 설정 안 된 self-hosted 는 관리자에게 통합 등록을 요청할 수 있게 한다(Linear 방식).
+  //  - github.com(selfHosted=false): env 기본 OAuth 앱이 있으면 connectable.
+  //  - self-hosted(GHE/Mattermost): 관리자가 워크스페이스 통합을 등록한 경우에만 connectable.
+  async providerCatalog(workspace: string): Promise<ProviderInfo[]> {
     const integrations = (await this.settings.get(workspace))?.integrations ?? {};
     const out: ProviderInfo[] = [];
     for (const [id, entry] of this.providers) {
-      if (entry.selfHosted) {
-        if (integrations[id]) out.push({ id, selfHosted: true });
-      } else if (entry.default) {
-        out.push({ id, selfHosted: false });
-      }
+      const connectable = entry.selfHosted ? integrations[id] !== undefined : entry.default !== undefined;
+      out.push({ id, selfHosted: entry.selfHosted, connectable });
     }
     return out;
   }
