@@ -177,3 +177,21 @@ export const INITIAL_INSTANCE: InstanceState = {
   version: '',
   pins: [{ slot: 'agent-server', value: '' }],
 }
+
+// raw 인스턴스 스펙 → 인스턴스 폼 상태(새 버전 편집 프리필). version 은 빈 값으로 둬 새 태그를 강제한다
+// (같은 태그 재등록은 불변성 위반 409). slots 가 주어지면 그 슬롯 전부를 행으로 펼쳐(누락 없이) 기존 값을 병합한다.
+export function instanceStateFromSpec(
+  inst: { template: { id: string; version: string }; id: string; version: string; pins: Record<string, string> },
+  slots?: string[],
+): InstanceState {
+  const rows: PinRow[] =
+    slots && slots.length > 0
+      ? slots.map((slot) => ({ slot, value: inst.pins[slot] ?? '' }))
+      : Object.entries(inst.pins).map(([slot, value]) => ({ slot, value }))
+  return {
+    templateId: inst.template.id,
+    templateVersion: inst.template.version,
+    version: '',
+    pins: rows.length > 0 ? rows : [{ slot: '', value: '' }],
+  }
+}

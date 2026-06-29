@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ChevronLeft } from 'lucide-react'
+import { ChevronLeft, GitBranchPlus } from 'lucide-react'
 
 import { ConfigPanel, HarnessDetail } from '@/features/inspect-harness'
 import {
@@ -16,6 +16,7 @@ import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
+import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -118,6 +119,12 @@ export default async function HarnessDetailPage({
                 v{active}
                 {active === versions[versions.length - 1] ? ' · latest' : ''}
               </Badge>
+              <Link
+                href={`/${workspace}/harnesses/${encodeURIComponent(id)}/new-version?v=${encodeURIComponent(active ?? '')}`}
+                className={buttonVariants({ variant: 'secondary', size: 'sm' })}
+              >
+                <GitBranchPlus className="size-3.5" />새 버전 만들기
+              </Link>
             </div>
           }
         />

@@ -222,9 +222,20 @@ function TemplateForm({ workspace }: { workspace: string }) {
 }
 
 // --- 인스턴스(template + pins) 등록 ---
-function InstanceForm({ workspace }: { workspace: string }) {
+// initial 프리필 + lockId(같은 하니스의 새 버전 — id 고정) + redirectDetailId(성공 시 상세로 복귀).
+export function InstanceForm({
+  workspace,
+  initial,
+  lockId = false,
+  redirectDetailId,
+}: {
+  workspace: string
+  initial?: InstanceState
+  lockId?: boolean
+  redirectDetailId?: string
+}) {
   const router = useRouter()
-  const [s, setS] = useState<InstanceState>(INITIAL_INSTANCE)
+  const [s, setS] = useState<InstanceState>(initial ?? INITIAL_INSTANCE)
   const [result, setResult] = useState<ValidateHarnessResult>()
   const [regError, setRegError] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -244,8 +255,14 @@ function InstanceForm({ workspace }: { workspace: string }) {
     setRegError(undefined)
     const res = await registerHarnessAction(buildInstance(s))
     setBusy(false)
-    if (res.ok) router.push(`/${workspace}/harnesses`)
-    else setRegError(res.error ?? '등록 실패')
+    if (res.ok) {
+      // 새 버전(redirectDetailId) 이면 해당 버전 상세로, 아니면 목록으로.
+      router.push(
+        redirectDetailId
+          ? `/${workspace}/harnesses/${encodeURIComponent(redirectDetailId)}?v=${encodeURIComponent(res.version ?? s.version)}`
+          : `/${workspace}/harnesses`
+      )
+    } else setRegError(res.error ?? '등록 실패')
   }
 
   return (
@@ -253,7 +270,14 @@ function InstanceForm({ workspace }: { workspace: string }) {
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="itid">template id</Label>
-          <Input id="itid" value={s.templateId} onChange={(e) => set({ templateId: e.target.value })} placeholder="bu" />
+          <Input
+            id="itid"
+            value={s.templateId}
+            onChange={(e) => set({ templateId: e.target.value })}
+            placeholder="bu"
+            readOnly={lockId}
+            className={cn(lockId && 'opacity-60')}
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="itver">template version</Label>
