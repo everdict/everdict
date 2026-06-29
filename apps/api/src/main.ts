@@ -97,6 +97,7 @@ import { BenchmarkService } from "./benchmark-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
+import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 import { NotificationService } from "./notification-service.js";
 import { githubProvider } from "./oauth/github.js";
 import { mattermostProvider } from "./oauth/mattermost.js";
@@ -193,16 +194,21 @@ async function main(): Promise<void> {
           ...(callbackRendezvous ? { callbackRendezvous } : {}),
         })
       : buildRuntimeBackend(spec, opts);
-  const dispatcher = new RuntimeDispatcher({
-    inner: scheduler,
-    backends,
-    runtimes: runtimeRegistry,
-    secretsFor: runtimeSecretsFor,
-    buildBackend: runtimeBuildBackend,
-    // self:<runnerId> — 개인 소유 러너. 소유 확인(미소유=undefined) + 그 러너의 capabilities 반환(service 게이트용).
-    resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
-    buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
-  });
+  // command 하니스의 {{model}} 을 등록 Model id 로 해석(아니면 raw)한 뒤 RuntimeDispatcher(placement)로 위임.
+  // run/judge/scorecard 가 이 한 디스패처를 공유하므로 모든 경로가 동일하게 해석된 모델로 실행된다.
+  const dispatcher = new ModelResolvingDispatcher(
+    modelRegistry,
+    new RuntimeDispatcher({
+      inner: scheduler,
+      backends,
+      runtimes: runtimeRegistry,
+      secretsFor: runtimeSecretsFor,
+      buildBackend: runtimeBuildBackend,
+      // self:<runnerId> — 개인 소유 러너. 소유 확인(미소유=undefined) + 그 러너의 capabilities 반환(service 게이트용).
+      resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
+      buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
+    }),
+  );
   // 연결 테스트: 같은 빌더+테넌트 시크릿으로 백엔드를 만들어 probe()(잡 없이 도달성/인증). server/MCP 가 공유.
   const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
 
