@@ -78,6 +78,11 @@ touching `service-backend.ts`'s driving logic.
 - **#1 payload template — DONE.** `frontDoor.request.bodyTemplate` (`interpolateTemplate` — recursive `{{var}}`
   over the JSON body); per-run wiring variable NAMES derive from `dependencies[].isolateBy` via `wiringVars`
   (`thread_id`/`key_prefix`/`object_prefix`/`schema`), not hardcoded LangGraph names. Absent `request` = today's body.
+- **external (BYO) deps.** `dependencies[].isolateBy: "external"` declares a store the harness only **connects to**
+  (other-cluster shared redis/minio/postgres). Assay deploys/isolates nothing — `dependencyStores` skips it (no
+  container, no `connEnv`) and `wiringVars` makes no isolation var; the connection comes from `storeEnv`/`service.env`.
+  It exists for **visibility** (first-class node in the diagram/spec instead of a hidden env URL); optional `service`
+  names the using service (diagram service→store edge). See docs/service-harness.md.
 - **#4 target observation — DONE (none/assay).** Browser provisioning is gated on `spec.target` (already optional,
   was ignored): absent → no browser, trace-only run with a `{kind:"prompt"}` snapshot (no core-contract change).
   A `harness`-provided target (a service's own session) is now the **target axis** (round 2) below — not a

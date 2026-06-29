@@ -85,6 +85,17 @@ So there are three isolation layers, nested: **physical store fleet** → **per-
   higher cost. Use when logical isolation isn't enough.
 - **`external`** — BYO endpoint via `storeEnv`; Assay deploys no store.
 
+### Per-dependency `isolateBy: "external"` (spec-level BYO declaration)
+The deploy-time `storeIsolation: "external"` above is **zone-wide**. A single dependency can ALSO be declared
+external in the **HarnessSpec** itself: `{ store, role, isolateBy: "external", service? }`. This declares a store
+the harness just **connects to** (a different cluster's shared redis/minio/postgres) — Assay does **not** deploy
+or per-case-isolate it, and the connection comes from deploy-time `env`/`storeEnv`, not the spec
+(provisioning-agnostic). The runtime **excludes** external deps from provisioning + wiring (`dependencyStores`
+skips them → no container, no `connEnv`; `wiringVars` makes no isolation variable). The point is **visibility**:
+declaring it (instead of burying the connection in `services[].env`) surfaces the store as a first-class node in
+the topology diagram + structure spec. The optional **`service`** names which service uses the store (drives the
+diagram's service→store edge; unset = topology-wide).
+
 Default when a zone doesn't set it: `trusted → pool`, `untrusted → silo`; an explicit `storeIsolation` overrides.
 Password minting is HMAC(secret, `zone:store`) — deterministic (idempotent re-provision); production sources the
 secret from a KEK/Vault and would store minted creds. The pure planner is `planTenantStores(spec, zone)`
