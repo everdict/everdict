@@ -201,3 +201,115 @@ anymore. Keep shared helpers (`asService`, `compareVersions`, `resolveRef`, `SHA
 `main.ts` + `apps/web` harness pages + `packages/auth/authz.ts` — all in the **active concurrent-edit zone**
 (member-management + metrics/models, which currently leaves the tree RED). Cutover is one atomic change set; run
 it when that work has landed and the tree is green. Bucket A swaps are mechanical once the wiring flips.
+
+---
+
+# Instance variation — richer overrides (beyond image)
+
+> **Status: design + Phase 1 implemented.** Track A landed templates/instances, but an instance can pin only the
+> **image** per slot (and `image`/`model` for command). That is too thin to express a *variation* of the same
+> template — same shape, different behavior (model, sampling temperature, feature flags, CLI flags, submit-payload
+> knobs, replicas, resources). Today every such variation forces a **new template version**, even though the shape
+> is unchanged → template proliferation, or everyone is stuck on identical non-image config.
+
+## Problem
+
+`HarnessInstanceSpec.pins` is a **`Record<string, string>`** — slot → image (service), or `image`/`model`
+(command). The value is a bare string, so even conceptually a pin cannot carry a structured delta (an env map, a
+number, a nested body field). `resolveHarnessInstance` therefore copies *everything else* (`env`, `replicas`,
+`volumes`, `readiness`, `dependencies`, `frontDoor`, `target`, `traceSource`; command `setup`/`command`/`env`/
+`trace`) verbatim from the template. The only instance axis is "swap the image."
+
+## Principle — what is an instance delta vs a template change
+
+Template = **shape**; instance = a delta that **does not change the shape**. A change is instance-appropriate
+when it yields a *behaviorally different but structurally identical* harness — same services, same wiring, same
+endpoints; different knobs. It is template-appropriate when it adds/removes a service or rewires (`needs`,
+`dependencies`, `frontDoor.service`/`submit`, `traceSource.kind`, `target.kind`/`acquire`, `port` topology).
+
+## Runtime support is the gating fact (nomad · k8s · docker self-hosted)
+
+What an instance can *meaningfully* vary depends on what the three runtimes honor. Surveyed from the runtime
+builders:
+
+| Knob | nomad | k8s | docker (self-hosted) | notes |
+|---|---|---|---|---|
+| `image` | ✅ | ✅ | ✅ | the only pin today |
+| service `env` | ✅ | ✅ | ✅ | all three inject; precedence `connEnv < svc.env < storeEnv` |
+| `replicas` | ✅ `Count` | ✅ `replicas` | ⚠️ single-host = 1 | |
+| `resources` (cpu/mem) | ❌ hardcoded `1000/1024` | ❌ none | ❌ | **no knob anywhere — a gap** |
+| `readiness` | ❌ | ❌ | ✅ | docker-only today |
+| `volumes` | ❌ | ❌ (PVC later) | ✅ | docker-only today |
+| front-door `request`/`completion`/`correlate` | ✅ | ✅ | ✅ | **runtime-agnostic** — the FrontDoorDriver/control plane interpret it, not the orchestrator |
+| model (registry id) | ✅ | ✅ | ✅ | flows via env/body or command `{{model}}` → resolved by `ModelResolvingDispatcher` |
+
+**Key insight:** the highest-leverage, most uniform knobs — service `env`, the front-door submit payload, model —
+are **runtime-agnostic**, resolved purely at `resolve()` time (or by the driver), so they work identically on all
+three runtimes with **zero runtime change**. `resources`/`replicas`/`volumes`/`readiness` are orchestrator-specific
+and only partially supported, so they are later phases.
+
+## Model — `pins` (images) + structured `overrides`
+
+Keep `pins` (slot → image string) for the common case and back-compat. Add an optional, kind-aware
+**`overrides`** object carrying structured deltas, deep-merged onto the template by `resolveHarnessInstance`.
+
+```jsonc
+// service instance — same template "bu@2", three behavioral variations differ only by overrides
+{
+  "template": { "id": "bu", "version": "2" },
+  "id": "bu", "version": "main-opus-temp02",
+  "pins": { "planner": "ghcr.io/acme/bu-planner:abc", "browser": "chromedp/headless-shell:119" },
+  "overrides": {
+    "services": { "planner": { "env": { "MODEL": "claude-opus-4-8", "TEMPERATURE": "0.2" } } },
+    "frontDoor": { "request": { "bodyTemplate": { "max_steps": 30 } } }
+  }
+}
+```
+```jsonc
+// command instance — same template, different CLI flags via {{var}} params + env
+{
+  "template": { "id": "aider", "version": "1" },
+  "id": "aider", "version": "weak-model",
+  "pins": { "model": "gpt-4o-mini" },
+  "overrides": { "env": { "AIDER_TEMPERATURE": "0" }, "params": { "edit_format": "diff" } }
+}
+```
+
+### Merge semantics (must be exact — env precedence matters across the 3 runtimes)
+
+- **service env**: resolved `service.env = { ...template.service.env, ...overrides.services[name].env }` (instance
+  wins). The runtime then applies its existing `connEnv < service.env < storeEnv` — i.e. instance env sits **above
+  template defaults, below operational `storeEnv`** (cluster wiring stays authoritative for connection correctness).
+- **front-door body**: shallow-merge `bodyTemplate` values over the template's (`{ ...template.bodyTemplate,
+  ...overrides.bodyTemplate }`); the `FrontDoorDriver` already `{{var}}`-interpolates the result.
+- **command env / params**: `env`/`params` each merge over the template's; `params` feed generic `{{key}}`
+  substitution in `CommandHarness` (generalizing the reserved `{{task}}`/`{{model}}`/`{{run_id}}`). `params` values
+  are **not** shell-escaped (author-trusted, like `{{model}}`); only `{{task}}` (the untrusted eval input) is.
+- scalars added later (`replicas`/`resources`/`readiness`/`volumes`) = **replace**, not merge.
+- **Unknown target** (a service name in `overrides.services` that the template lacks) → `BadRequestError`, the same
+  discipline as image pins / `applyImagePins`.
+
+### Warm-pool identity
+
+Overrides are baked into the resolved `id@version` (the instance version tag), so warm pools key correctly and
+never mix variants — the same mechanism `applyImagePins` uses (`-pin-<hash>`). No runtime change needed for
+isolation.
+
+## Phasing
+
+- **Phase 1 — runtime-agnostic, `resolve()`-time only (implemented now):** per-service `env` overlay (service) +
+  front-door `request.bodyTemplate` value override (service) + command `env` overlay + command `params` (`{{var}}`).
+  Pure `@assay/core` schema + `resolveHarnessInstance` merge + `CommandHarness` `{{var}}` substitution. Flows
+  end-to-end through API/MCP immediately (they validate `HarnessInstanceSpecSchema`, which now accepts `overrides`).
+- **Phase 2 — orchestrator knobs:** add `resources { cpu, memoryMb }` to `TopologyService`, honor it in
+  nomad (`Resources`) / k8s (`resources.requests/limits`) / docker (`--cpus`/`--memory`), replacing the hardcoded
+  values; make `resources` + the already-honored `replicas` instance-overridable.
+- **Phase 3 — docker-first, extend later:** `volumes` + `readiness` instance overrides; `target.extension.ref`
+  as a slot; `completion.timeoutMs` / `poll.intervalMs` tuning.
+- **Web/MCP UI** (follow-up to each phase): the instance form gains env/body/params editors; the harness 구성
+  panel + instance diff render overrides; BFF↔MCP parity is automatic for the JSON surface (schema-driven), the
+  UI is the additive work.
+
+> Phase 1 blast radius: `@assay/core` (`harness-spec` command `params`, `harness-template` `overrides` + resolve),
+> `@assay/harnesses` (`CommandHarness` `{{var}}`), + tests. No runtime, registry, auth, or API route changes
+> (the instance JSON already round-trips through the validated schema).
