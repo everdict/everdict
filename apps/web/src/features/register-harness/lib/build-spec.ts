@@ -205,17 +205,47 @@ export interface PinRow {
   slot: string
   value: string
 }
+
+// 서비스별 변주 행(overrides.services[name]) — 구조(템플릿)는 그대로, 동작 노브만 델타.
+export interface ServiceOverrideRow {
+  service: string // 대상 서비스명(템플릿에 존재해야 함)
+  env: string // KEY=VALUE 줄바꿈
+  replicas: string // 숫자 또는 빈값
+  cpu: string // resources.cpu (millicores, 1000=1코어)
+  memoryMb: string // resources.memoryMb
+  volumes: string // 줄바꿈("vol:/data" · "/host:/c:ro")
+  readinessTimeout: string // ms
+  readinessInterval: string // ms
+}
+
 export interface InstanceState {
   templateId: string
   templateVersion: string
   version: string // 인스턴스 태그(예: pr-123-sha-abc)
   pins: PinRow[]
-  // 변주(overrides) — 구조 불변 동작 델타의 raw JSON(비우면 미설정). 컨트롤플레인이 스키마를 최종 검증.
-  overridesText: string
+  // 변주(overrides) — 구조 불변 동작 델타(구조적 편집). 컨트롤플레인이 스키마를 최종 검증.
+  serviceOverrides: ServiceOverrideRow[] // service 템플릿: 서비스별 env/replicas/resources/volumes/readiness
+  bodyTemplate: string // service: front-door submit 본문 값(JSON 객체; 자유 형식)
+  completionTimeout: string // service: front-door 완료 timeoutMs
+  completionInterval: string // service: front-door 완료(poll) intervalMs
+  targetExtensionRef: string // service: 브라우저 타깃 익스텐션 ref 핀
+  cmdEnv: string // command: env 오버레이(KEY=VALUE 줄바꿈)
+  cmdParams: string // command: {{var}} 값(KEY=VALUE 줄바꿈)
 }
 
-// overrides JSON 텍스트 파싱 — 빈 값은 미설정(ok). 객체가 아니거나 JSON 오류면 error(폼이 등록을 막는다).
-export function parseOverridesText(
+const EMPTY_SERVICE_OVERRIDE: ServiceOverrideRow = {
+  service: '',
+  env: '',
+  replicas: '',
+  cpu: '',
+  memoryMb: '',
+  volumes: '',
+  readinessTimeout: '',
+  readinessInterval: '',
+}
+
+// JSON 객체 텍스트 파싱(front-door 본문용) — 빈값=미설정(ok). 객체 아님/JSON 오류면 error(폼이 등록 차단).
+export function parseJsonObject(
   text: string
 ): { ok: true; value?: Record<string, unknown> } | { ok: false; error: string } {
   const t = text.trim()
@@ -227,22 +257,69 @@ export function parseOverridesText(
     return { ok: false, error: e instanceof Error ? e.message : '유효한 JSON 이 아닙니다.' }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { ok: false, error: 'overrides 는 JSON 객체여야 합니다.' }
+    return { ok: false, error: 'JSON 객체여야 합니다.' }
   }
   return { ok: true, value: parsed as Record<string, unknown> }
 }
 
-// 인스턴스 스펙 조립(template 참조 + pins + overrides). overrides 가 유효 객체일 때만 포함(파싱 실패는 폼이 차단).
+// 구조적 변주 폼 상태 → overrides 객체(빈 노브는 생략). bodyTemplate 파싱 오류는 폼이 차단(여기선 무시).
+export function buildOverrides(s: InstanceState): Record<string, unknown> | undefined {
+  const overrides: Record<string, unknown> = {}
+  // 서비스별 변주
+  const services: Record<string, unknown> = {}
+  for (const r of s.serviceOverrides) {
+    const name = r.service.trim()
+    if (!name) continue
+    const o: Record<string, unknown> = {}
+    const env = kvLines(r.env)
+    if (Object.keys(env).length) o.env = env
+    if (r.replicas.trim()) o.replicas = Number(r.replicas)
+    const resources: Record<string, number> = {}
+    if (r.cpu.trim()) resources.cpu = Number(r.cpu)
+    if (r.memoryMb.trim()) resources.memoryMb = Number(r.memoryMb)
+    if (Object.keys(resources).length) o.resources = resources
+    const vols = lines(r.volumes)
+    if (vols.length) o.volumes = vols
+    if (r.readinessTimeout.trim() || r.readinessInterval.trim()) {
+      o.readiness = {
+        timeoutMs: Number(r.readinessTimeout.trim() || 60000),
+        intervalMs: Number(r.readinessInterval.trim() || 1000),
+      }
+    }
+    if (Object.keys(o).length) services[name] = o
+  }
+  if (Object.keys(services).length) overrides.services = services
+  // front-door: 본문 값 + 완료 타이밍
+  const frontDoor: Record<string, unknown> = {}
+  const body = parseJsonObject(s.bodyTemplate)
+  if (body.ok && body.value) frontDoor.request = { bodyTemplate: body.value }
+  const completion: Record<string, number> = {}
+  if (s.completionTimeout.trim()) completion.timeoutMs = Number(s.completionTimeout)
+  if (s.completionInterval.trim()) completion.intervalMs = Number(s.completionInterval)
+  if (Object.keys(completion).length) frontDoor.completion = completion
+  if (Object.keys(frontDoor).length) overrides.frontDoor = frontDoor
+  // target 익스텐션 ref
+  if (s.targetExtensionRef.trim())
+    overrides.target = { extension: { ref: s.targetExtensionRef.trim() } }
+  // command env/params
+  const cmdEnv = kvLines(s.cmdEnv)
+  if (Object.keys(cmdEnv).length) overrides.env = cmdEnv
+  const cmdParams = kvLines(s.cmdParams)
+  if (Object.keys(cmdParams).length) overrides.params = cmdParams
+  return Object.keys(overrides).length ? overrides : undefined
+}
+
+// 인스턴스 스펙 조립(template 참조 + pins + overrides). overrides 는 비어있지 않을 때만 포함.
 export function buildInstance(s: InstanceState): Record<string, unknown> {
   const pins: Record<string, string> = {}
   for (const p of s.pins) if (p.slot.trim() && p.value.trim()) pins[p.slot.trim()] = p.value.trim()
-  const ov = parseOverridesText(s.overridesText)
+  const overrides = buildOverrides(s)
   return {
     template: { id: s.templateId, version: s.templateVersion },
     id: s.templateId, // 인스턴스 id = 템플릿 id(관례)
     version: s.version,
     pins,
-    ...(ov.ok && ov.value ? { overrides: ov.value } : {}),
+    ...(overrides ? { overrides } : {}),
   }
 }
 
@@ -290,11 +367,55 @@ export const INITIAL_INSTANCE: InstanceState = {
   templateVersion: '1',
   version: '',
   pins: [{ slot: 'agent-server', value: '' }],
-  overridesText: '',
+  serviceOverrides: [],
+  bodyTemplate: '',
+  completionTimeout: '',
+  completionInterval: '',
+  targetExtensionRef: '',
+  cmdEnv: '',
+  cmdParams: '',
 }
 
 // raw 인스턴스 스펙 → 인스턴스 폼 상태(새 버전 편집 프리필). version 은 빈 값으로 둬 새 태그를 강제한다
 // (같은 태그 재등록은 불변성 위반 409). slots 가 주어지면 그 슬롯 전부를 행으로 펼쳐(누락 없이) 기존 값을 병합한다.
+// overrides(느슨 JSON) 안전 추출 헬퍼 — 폼은 문자열 기반이라 숫자/맵을 문자열/줄바꿈으로 환원한다.
+const asObj = (v: unknown): Record<string, unknown> | undefined =>
+  typeof v === 'object' && v !== null && !Array.isArray(v)
+    ? (v as Record<string, unknown>)
+    : undefined
+const asStr = (v: unknown): string =>
+  typeof v === 'string' ? v : typeof v === 'number' ? String(v) : ''
+const numStr = (v: unknown): string => (typeof v === 'number' ? String(v) : '')
+const kvToLines = (v: unknown): string => {
+  const o = asObj(v)
+  return o
+    ? Object.entries(o)
+        .map(([k, val]) => `${k}=${asStr(val)}`)
+        .join('\n')
+    : ''
+}
+
+// 기존 overrides → 구조적 폼 상태(새 버전 편집 프리필의 출발점). buildOverrides 의 역변환.
+function serviceOverridesFromSpec(ov: Record<string, unknown>): ServiceOverrideRow[] {
+  const services = asObj(ov.services)
+  if (!services) return []
+  return Object.entries(services).map(([service, raw]) => {
+    const o = asObj(raw) ?? {}
+    const res = asObj(o.resources) ?? {}
+    const rd = asObj(o.readiness) ?? {}
+    return {
+      service,
+      env: kvToLines(o.env),
+      replicas: numStr(o.replicas),
+      cpu: numStr(res.cpu),
+      memoryMb: numStr(res.memoryMb),
+      volumes: Array.isArray(o.volumes) ? o.volumes.map(asStr).filter(Boolean).join('\n') : '',
+      readinessTimeout: numStr(rd.timeoutMs),
+      readinessInterval: numStr(rd.intervalMs),
+    }
+  })
+}
+
 export function instanceStateFromSpec(
   inst: {
     template: { id: string; version: string }
@@ -309,12 +430,24 @@ export function instanceStateFromSpec(
     slots && slots.length > 0
       ? slots.map((slot) => ({ slot, value: inst.pins[slot] ?? '' }))
       : Object.entries(inst.pins).map(([slot, value]) => ({ slot, value }))
+  const ov = inst.overrides ?? {}
+  const fd = asObj(ov.frontDoor)
+  const body = asObj(asObj(fd?.request)?.bodyTemplate)
+  const completion = asObj(fd?.completion)
+  const ext = asObj(asObj(ov.target)?.extension)
   return {
     templateId: inst.template.id,
     templateVersion: inst.template.version,
     version: '',
     pins: rows.length > 0 ? rows : [{ slot: '', value: '' }],
-    // 기존 변주를 그대로 프리필(새 버전 편집의 출발점). 미설정이면 빈 텍스트.
-    overridesText: inst.overrides ? JSON.stringify(inst.overrides, null, 2) : '',
+    serviceOverrides: serviceOverridesFromSpec(ov),
+    bodyTemplate: body ? JSON.stringify(body, null, 2) : '',
+    completionTimeout: numStr(completion?.timeoutMs),
+    completionInterval: numStr(completion?.intervalMs),
+    targetExtensionRef: asStr(ext?.ref),
+    cmdEnv: kvToLines(ov.env),
+    cmdParams: kvToLines(ov.params),
   }
 }
+
+export { EMPTY_SERVICE_OVERRIDE }

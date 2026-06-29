@@ -307,16 +307,22 @@ isolation.
   container `resources.requests=limits` (`${cpu}m` / `${memoryMb}Mi`), docker `--cpus` (`cpu/1000`) / `--memory`
   (`${memoryMb}m`). `cpu` is `1000 = 1 vCPU` (k8s millicores convention). `resources` + the already-honored
   `replicas` are instance-overridable (`overrides.services[name].{resources,replicas}`, scalar replace).
-- **Phase 3 — instance overrides (implemented; docker honors volumes/readiness, nomad/k8s later):**
+- **Phase 3 — instance overrides + all-runtime volumes/readiness (implemented):**
   `overrides.services[name].{volumes,readiness}` (scalar replace) + `overrides.target.extension.ref` (browser
   extension pin; `BadRequest` if the template has no `target`) + `overrides.frontDoor.completion.{timeoutMs,
   intervalMs}` (spread onto the template's completion; mode-mismatched keys are stripped by the schema re-parse,
-  so e.g. `intervalMs` is dropped on a non-`poll` completion).
-- **Web/MCP UI** (the remaining follow-up): the instance form gains env/body/params/resources/replicas editors;
-  the harness 구성 panel + instance diff render overrides; BFF↔MCP parity is automatic for the JSON surface
-  (schema-driven), the UI is the additive work.
+  so e.g. `intervalMs` is dropped on a non-`poll` completion). **All three runtimes now honor `volumes`/`readiness`
+  (no longer docker-only):** k8s renders `volumes`+`volumeMounts` (named→`emptyDir`, bind→`hostPath`) and a
+  `readinessProbe` (httpGet `/`, `periodSeconds`=interval, `failureThreshold`=⌈timeout/interval⌉); nomad sets the
+  docker driver `Config.volumes` and threads `svc.readiness` into the runtime's per-endpoint HTTP wait; docker as
+  before.
+- **Web UI — structured override editors (implemented):** the instance register/new-version form has a collapsible
+  "변주(overrides)" disclosure with per-service rows (env/replicas/resources/volumes/readiness), a front-door block
+  (submit-body JSON + completion timeouts), a target-extension field, and command env/params — `buildOverrides`
+  assembles the spec, `instanceStateFromSpec` round-trips existing overrides back into the fields for
+  edit→new-version; the 구성 panel renders the resolved overrides. MCP/HTTP parity is automatic (schema-driven JSON).
 
 > Blast radius: `@assay/core` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
 > `harness-template` `overrides` + resolve), `@assay/harnesses` (`CommandHarness` `{{var}}`), `@assay/topology`
-> (nomad/k8s/docker resource honoring), + tests. No registry, auth, or API route changes (the instance JSON
-> round-trips through the validated schema).
+> (nomad/k8s/docker resources + volumes + readiness honoring), `apps/web` (structured override editor), + tests.
+> No registry, auth, or API route changes (the instance JSON round-trips through the validated schema).

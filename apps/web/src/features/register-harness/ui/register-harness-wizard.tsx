@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Plus, Trash2 } from 'lucide-react'
+import { ChevronDown, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -20,22 +20,21 @@ import {
 import {
   buildInstance,
   buildTemplate,
+  EMPTY_SERVICE_OVERRIDE,
   INITIAL_INSTANCE,
   INITIAL_TEMPLATE,
-  parseOverridesText,
+  parseJsonObject,
   type DepRow,
   type InstanceState,
   type Kind,
   type PinRow,
+  type ServiceOverrideRow,
   type ServiceRow,
   type TemplateState,
 } from '../lib/build-spec'
 
-// 인스턴스 변주(overrides) JSON 편집기의 안내 예시 — 같은 템플릿 안에서 동작만 바꾸는 델타.
-const OVERRIDES_PLACEHOLDER = `{
-  "services": { "agent-server": { "env": { "MODEL": "claude-opus-4-8", "TEMPERATURE": "0.2" }, "replicas": 2, "resources": { "cpu": 2000, "memoryMb": 4096 } } },
-  "frontDoor": { "request": { "bodyTemplate": { "max_steps": 30 } } }
-}`
+// front-door submit 본문 값 오버라이드 편집기의 안내 예시(자유 형식 JSON 객체).
+const BODY_PLACEHOLDER = `{ "max_steps": 30, "system_prompt": "..." }`
 
 const STORES = ['postgres', 'redis', 'minio']
 const ISOLATE = ['thread_id', 'key-prefix', 'object-prefix', 'schema', 'external']
@@ -439,20 +438,24 @@ export function InstanceForm({
   const set = (patch: Partial<InstanceState>) => setS((prev) => ({ ...prev, ...patch }))
   const setPin = (i: number, patch: Partial<PinRow>) =>
     set({ pins: s.pins.map((row, j) => (j === i ? { ...row, ...patch } : row)) })
+  const setSvcOv = (i: number, patch: Partial<ServiceOverrideRow>) =>
+    set({
+      serviceOverrides: s.serviceOverrides.map((row, j) => (j === i ? { ...row, ...patch } : row)),
+    })
 
-  // 변주 JSON 파싱 상태 — 오류면 검증/등록을 막고 사유를 보여준다(잘못된 JSON 을 컨트롤플레인에 보내지 않음).
-  const ov = parseOverridesText(s.overridesText)
-  const ovError = ov.ok ? undefined : ov.error
+  // front-door 본문 JSON 파싱 상태 — 오류면 검증/등록을 막는다(잘못된 JSON 을 컨트롤플레인에 보내지 않음).
+  const bodyParse = parseJsonObject(s.bodyTemplate)
+  const bodyError = bodyParse.ok ? undefined : bodyParse.error
 
   async function onValidate() {
-    if (ovError) return setRegError(`overrides JSON 오류: ${ovError}`)
+    if (bodyError) return setRegError(`front-door 본문 JSON 오류: ${bodyError}`)
     setBusy(true)
     setRegError(undefined)
     setResult(await validateHarnessAction(buildInstance(s)))
     setBusy(false)
   }
   async function onRegister() {
-    if (ovError) return setRegError(`overrides JSON 오류: ${ovError}`)
+    if (bodyError) return setRegError(`front-door 본문 JSON 오류: ${bodyError}`)
     setBusy(true)
     setRegError(undefined)
     const res = await registerHarnessAction(buildInstance(s))
@@ -524,23 +527,7 @@ export function InstanceForm({
         ))}
       </Section>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="ioverrides">변주 (overrides · 선택)</Label>
-        <Textarea
-          id="ioverrides"
-          value={s.overridesText}
-          onChange={(e) => set({ overridesText: e.target.value })}
-          placeholder={OVERRIDES_PLACEHOLDER}
-          rows={8}
-          className="font-mono text-[12px]"
-        />
-        <p className="text-[12px] text-muted-foreground">
-          같은 템플릿 구조 위에서 동작만 바꾸는 JSON 델타(서비스
-          env/replicas/resources/volumes/readiness · front-door 본문/완료 타이밍 · target 익스텐션 ·
-          command env/params). 이미지 교체는 위 Pins 로.
-        </p>
-        {ovError && <Callout tone="danger">overrides JSON 오류: {ovError}</Callout>}
-      </div>
+      <OverridesEditor s={s} set={set} setSvcOv={setSvcOv} bodyError={bodyError} />
 
       <JsonPreview value={buildInstance(s)} />
       {result && <ValidateBanner result={result} />}
@@ -555,6 +542,239 @@ export function InstanceForm({
         onRegister={onRegister}
         registerLabel="인스턴스 등록"
       />
+    </div>
+  )
+}
+
+// 변주(overrides) 구조적 편집기 — 같은 템플릿 위에서 동작만 바꾸는 델타. 선택이라 접이식(disclosure)으로 숨겨
+// 기본 폼(이미지 핀)은 깔끔하게 두고, 필요한 사람만 펼친다. 기존 변주가 있으면(새 버전 편집) 자동 펼침.
+function hasOverrides(s: InstanceState): boolean {
+  return (
+    s.serviceOverrides.length > 0 ||
+    s.bodyTemplate.trim() !== '' ||
+    s.completionTimeout.trim() !== '' ||
+    s.completionInterval.trim() !== '' ||
+    s.targetExtensionRef.trim() !== '' ||
+    s.cmdEnv.trim() !== '' ||
+    s.cmdParams.trim() !== ''
+  )
+}
+
+function OverridesEditor({
+  s,
+  set,
+  setSvcOv,
+  bodyError,
+}: {
+  s: InstanceState
+  set: (patch: Partial<InstanceState>) => void
+  setSvcOv: (i: number, patch: Partial<ServiceOverrideRow>) => void
+  bodyError?: string
+}) {
+  const [open, setOpen] = useState(hasOverrides(s))
+  return (
+    <div className="overflow-hidden rounded-xl border border-border bg-secondary/30">
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-secondary/50"
+      >
+        <span className="flex items-center gap-2 text-[13px] font-[560] text-foreground">
+          <SlidersHorizontal className="size-3.5 text-muted-foreground" />
+          변주 (overrides)
+          <span className="font-normal text-[12px] text-muted-foreground">
+            같은 템플릿, 다른 동작 · 선택
+          </span>
+        </span>
+        <ChevronDown
+          className={cn('size-4 text-muted-foreground transition-transform', open && 'rotate-180')}
+        />
+      </button>
+
+      {open && (
+        <div className="space-y-6 border-t border-border px-4 py-4">
+          <Section
+            title="서비스 변주 (service 하니스)"
+            onAdd={() =>
+              set({ serviceOverrides: [...s.serviceOverrides, { ...EMPTY_SERVICE_OVERRIDE }] })
+            }
+          >
+            {s.serviceOverrides.length === 0 ? (
+              <p className="text-[12px] text-muted-foreground">
+                서비스별 env·replicas·resources·volumes·readiness 를 덮어씁니다 (서비스명은 템플릿에
+                존재해야 함). 이미지 교체는 위 Pins 로.
+              </p>
+            ) : (
+              s.serviceOverrides.map((r, i) => (
+                <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={r.service}
+                      onChange={(e) => setSvcOv(i, { service: e.target.value })}
+                      placeholder="서비스명 (agent-server)"
+                    />
+                    <RemoveBtn
+                      onClick={() =>
+                        set({ serviceOverrides: s.serviceOverrides.filter((_, j) => j !== i) })
+                      }
+                    />
+                  </div>
+                  <div className="grid grid-cols-3 gap-2">
+                    <NumField
+                      label="replicas"
+                      value={r.replicas}
+                      onChange={(v) => setSvcOv(i, { replicas: v })}
+                      placeholder="2"
+                    />
+                    <NumField
+                      label="cpu (m · 1000=1코어)"
+                      value={r.cpu}
+                      onChange={(v) => setSvcOv(i, { cpu: v })}
+                      placeholder="2000"
+                    />
+                    <NumField
+                      label="memory (MB)"
+                      value={r.memoryMb}
+                      onChange={(v) => setSvcOv(i, { memoryMb: v })}
+                      placeholder="4096"
+                    />
+                  </div>
+                  <Textarea
+                    value={r.env}
+                    onChange={(e) => setSvcOv(i, { env: e.target.value })}
+                    placeholder="env (KEY=VALUE 줄바꿈 — MODEL=claude-opus-4-8)"
+                    rows={2}
+                    className="font-mono text-[12px]"
+                  />
+                  <Textarea
+                    value={r.volumes}
+                    onChange={(e) => setSvcOv(i, { volumes: e.target.value })}
+                    placeholder="volumes (줄바꿈 — cache:/cache · /host:/c:ro)"
+                    rows={2}
+                    className="font-mono text-[12px]"
+                  />
+                  <div className="grid grid-cols-2 gap-2">
+                    <NumField
+                      label="readiness timeout (ms)"
+                      value={r.readinessTimeout}
+                      onChange={(v) => setSvcOv(i, { readinessTimeout: v })}
+                      placeholder="60000"
+                    />
+                    <NumField
+                      label="readiness interval (ms)"
+                      value={r.readinessInterval}
+                      onChange={(v) => setSvcOv(i, { readinessInterval: v })}
+                      placeholder="1000"
+                    />
+                  </div>
+                </div>
+              ))
+            )}
+          </Section>
+
+          <OvBlock title="Front-door (service 하니스)">
+            <div className="space-y-1.5">
+              <Label htmlFor="ovbody">submit 본문 값 (JSON 객체)</Label>
+              <Textarea
+                id="ovbody"
+                value={s.bodyTemplate}
+                onChange={(e) => set({ bodyTemplate: e.target.value })}
+                placeholder={BODY_PLACEHOLDER}
+                rows={3}
+                className="font-mono text-[12px]"
+              />
+              {bodyError && <Callout tone="danger">본문 JSON 오류: {bodyError}</Callout>}
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <NumField
+                label="완료 timeout (ms)"
+                value={s.completionTimeout}
+                onChange={(v) => set({ completionTimeout: v })}
+                placeholder="120000"
+              />
+              <NumField
+                label="완료 interval (ms · poll)"
+                value={s.completionInterval}
+                onChange={(v) => set({ completionInterval: v })}
+                placeholder="1000"
+              />
+            </div>
+          </OvBlock>
+
+          <OvBlock title="Target (service · browser 하니스)">
+            <div className="space-y-1.5">
+              <Label htmlFor="ovext">익스텐션 ref</Label>
+              <Input
+                id="ovext"
+                value={s.targetExtensionRef}
+                onChange={(e) => set({ targetExtensionRef: e.target.value })}
+                placeholder="ghcr.io/acme/ext:2"
+              />
+            </div>
+          </OvBlock>
+
+          <OvBlock title="Command 하니스">
+            <div className="space-y-1.5">
+              <Label htmlFor="ovcmdenv">env (KEY=VALUE 줄바꿈)</Label>
+              <Textarea
+                id="ovcmdenv"
+                value={s.cmdEnv}
+                onChange={(e) => set({ cmdEnv: e.target.value })}
+                placeholder="AIDER_TEMPERATURE=0"
+                rows={2}
+                className="font-mono text-[12px]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="ovcmdparams">{'params — command {{var}} 값 (KEY=VALUE)'}</Label>
+              <Textarea
+                id="ovcmdparams"
+                value={s.cmdParams}
+                onChange={(e) => set({ cmdParams: e.target.value })}
+                placeholder="edit_format=diff"
+                rows={2}
+                className="font-mono text-[12px]"
+              />
+            </div>
+          </OvBlock>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 작은 라벨 + 숫자 입력(폼은 문자열 보관 — Number() 환원). 행마다 반복되므로 id 충돌 없이 aria-label 로.
+function NumField({
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  return (
+    <div className="space-y-1">
+      <span className="block text-[11px] text-muted-foreground">{label}</span>
+      <Input
+        inputMode="numeric"
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  )
+}
+
+// 변주 하위 묶음 카드 — 옅은 제목 + 내용.
+function OvBlock({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="space-y-3 rounded-lg border bg-card p-3">
+      <h4 className="text-[12px] font-[560] text-muted-foreground">{title}</h4>
+      {children}
     </div>
   )
 }
