@@ -28,6 +28,7 @@ interface Values {
   harnessVersion: string
   runtime: string
   judgeModel: string
+  concurrency: string // 병렬도(빈칸=컨트롤플레인 기본). 제출 시 숫자로 파싱.
 }
 
 // 데이터셋×하니스를 골라 배치 평가를 실행 + 적용할 judge + 실행 런타임 선택. 실제 해석은 컨트롤플레인이 한다.
@@ -66,6 +67,7 @@ export function RunScorecardForm({
       harnessVersion: 'latest',
       runtime: '',
       judgeModel: '',
+      concurrency: '',
     },
   })
 
@@ -89,7 +91,14 @@ export function RunScorecardForm({
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const res = await runScorecardAction({ ...values, judgeIds, metricIds })
+    const { concurrency, ...rest } = values
+    const n = Number.parseInt(concurrency, 10) // 빈칸/비정상 → 생략(컨트롤플레인 기본 사용)
+    const res = await runScorecardAction({
+      ...rest,
+      judgeIds,
+      metricIds,
+      ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
+    })
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
     else setServerError(res.error ?? '실행 실패')
   }
@@ -250,6 +259,23 @@ export function RunScorecardForm({
             기록됩니다.
           </p>
         )}
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="concurrency">병렬도 (선택 — 동시 실행 케이스 수)</Label>
+        <Input
+          id="concurrency"
+          type="number"
+          min={1}
+          max={64}
+          placeholder="기본 4"
+          {...register('concurrency')}
+        />
+        <p className="text-[12px] text-muted-foreground">
+          한 배치 안에서 동시에 돌릴 케이스 수. 셀프호스티드 러너로 돌릴 땐 러너도 그만큼 동시 lease
+          해야 실제 병렬이 됩니다(<code className="font-mono">assay runner --max-concurrent</code>
+          ). 미지정이면 기본값을 씁니다.
+        </p>
       </div>
 
       <div className="space-y-1.5">

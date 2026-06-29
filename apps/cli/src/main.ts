@@ -10,11 +10,12 @@ import {
   Router,
   buildRegistry,
 } from "@assay/backends";
-import { type AgentJob, AgentJobSchema, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@assay/core";
+import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@assay/core";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@assay/orchestrator";
 import { diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
 import type { DockerTopologyRuntimeOptions } from "@assay/topology";
 import { runLeasedJob } from "./run-leased-job.js";
+import { runLeaseWorkers } from "./runner-loop.js";
 import { ResilientMcpSession, mcpConnect } from "./runner-session.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
@@ -52,8 +53,9 @@ function usage(): void {
       "assay suite --suite <file.json> [--harness-version <v>] [--baseline <scorecard.json>] [--concurrency N]",
       "  run a suite (cases × a version) → Scorecard + summary; --baseline diffs two versions (regression)",
       "",
-      "assay runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N]",
+      "assay runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N] [--max-concurrent N]",
       "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
+      "  --max-concurrent N: run N lease workers at once (case-level parallelism; default 1)",
       "  service harness readiness: [--ready-timeout-ms N] [--ready-interval-ms N] (topology endpoint polling)",
     ].join("\n"),
   );
@@ -229,6 +231,9 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const pollMs = Number(flags.get("poll-interval-ms") ?? "2000"); // 에러 재시도 backoff
   const waitMs = Number(flags.get("wait-ms") ?? "25000"); // lease long-poll 대기(서버가 잡 생길 때까지 잡아둠)
   const hbMs = Number(flags.get("heartbeat-ms") ?? "30000"); // 실행 중 lease 갱신 주기
+  // 동시에 돌릴 lease 워커 수 — 한 러너가 case-level 병렬을 실현하는 손잡이. 기본 1(현행 직렬 보존).
+  // 스코어카드를 concurrency=N 으로 제출하면 N 개 잡이 파킹되고, 이 값만큼만 동시 실행된다(실병렬 = min(N, 이값)).
+  const maxConcurrent = Math.max(1, Number(flags.get("max-concurrent") ?? "1"));
   // service(topology) 하니스 readiness 폴링 상한 — 서비스 스펙이 자체 readiness 를 선언하지 않을 때의 런타임 기본.
   const runtimeOptions: DockerTopologyRuntimeOptions = {};
   if (flags.has("ready-timeout-ms")) runtimeOptions.readyTimeoutMs = Number(flags.get("ready-timeout-ms"));
@@ -240,7 +245,7 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   }
 
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
-  const sleep = (ms: number) => new Promise((res) => setTimeout(res, ms));
+  const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
   // 실제 capability 자가-광고: docker 데몬이 있으면 docker/browser(service 하니스 가능). 매 lease 마다 보고.
   const dockerOk = await probeDocker();
   const capabilities = ["repo", ...(dockerOk ? ["docker", "browser"] : [])];
@@ -250,7 +255,7 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   try {
     await session.ensureConnected();
     console.error(
-      `▶ assay runner — ${mcpUrl} 연결됨. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (docker 없음 → service 하니스 불가)"}. 잡 폴링 중(${pollMs}ms, Ctrl-C 종료) …`,
+      `▶ assay runner — ${mcpUrl} 연결됨. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (docker 없음 → service 하니스 불가)"}. 동시 ${maxConcurrent} 워커로 잡 폴링 중(Ctrl-C 종료) …`,
     );
   } catch (e) {
     console.error(`⚠ 초기 연결 실패(${errMsg(e)}) — 폴링하며 재시도합니다 …`);
@@ -268,43 +273,16 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
     console.error("\n▶ 종료 신호 — 현재 잡 후 정지합니다 …");
   });
 
-  while (!stop) {
-    let leased: Record<string, unknown>;
-    try {
-      leased = await callJson("lease_job", { wait_ms: waitMs, capabilities }); // long-poll + capability 자가-광고
-    } catch (e) {
-      console.error(`✗ lease 실패: ${errMsg(e)}`);
-      await sleep(pollMs);
-      continue;
-    }
-    if (!leased.job) {
-      await sleep(250); // long-poll 타임아웃(잡 없음) — 즉시 재폴링(서버가 이미 대기)
-      continue;
-    }
-    const jobId = String(leased.jobId);
-    const parsed = AgentJobSchema.safeParse(leased.job); // 경계 검증
-    if (!parsed.success) {
-      console.error(`✗ 잡 ${jobId} 형식 오류 → fail 회신`);
-      await callJson("fail_job", { jobId, message: `잡 형식 오류: ${parsed.error.message}` }).catch(() => {});
-      continue;
-    }
-    console.error(`▶ 잡 ${jobId} (case ${parsed.data.evalCase.id}) 실행 …`);
-    // 장기 실행 잡이 서버에서 재큐되지 않게 주기적 heartbeat 로 lease 갱신(기본 30s).
-    const hb = setInterval(() => {
-      void callJson("heartbeat_job", { jobId }).catch(() => {});
-    }, hbMs);
-    try {
-      // service→로컬 Docker 토폴로지(readiness 옵션 적용), 그 외→LocalDriver(이 머신)
-      const result = await runLeasedJob(parsed.data, { runtimeOptions });
-      await callJson("submit_job_result", { jobId, result });
-      console.error(`✓ 잡 ${jobId} 완료 → 회신`);
-    } catch (e) {
-      console.error(`✗ 잡 ${jobId} 실패: ${errMsg(e)} → fail 회신`);
-      await callJson("fail_job", { jobId, message: errMsg(e) }).catch(() => {});
-    } finally {
-      clearInterval(hb);
-    }
-  }
+  // maxConcurrent 워커가 같은 세션을 공유하며 동시에 lease/실행/회신 — 한 러너가 case-level 병렬을 실현.
+  await runLeaseWorkers(
+    {
+      callJson,
+      runJob: (job) => runLeasedJob(job, { runtimeOptions }), // service→Docker 토폴로지(readiness 옵션) / 그 외→LocalDriver
+      log: (m) => console.error(m),
+      sleep,
+    },
+    { maxConcurrent, waitMs, heartbeatMs: hbMs, pollMs, capabilities, shouldStop: () => stop },
+  );
   await session.close();
 }
 

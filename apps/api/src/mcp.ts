@@ -599,9 +599,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .array(z.object({ id: z.string(), version: z.string().optional() }))
             .optional()
             .describe("트레이스에 적용할 Agent Judge 들(version 기본 latest)"),
+          concurrency: z
+            .number()
+            .int()
+            .min(1)
+            .max(64)
+            .optional()
+            .describe("배치 내 동시 디스패치 케이스 수(병렬도). 미지정이면 서비스 기본(=4)"),
         },
       },
-      ({ dataset_id, dataset_version, harness_id, harness_version, judges }) =>
+      ({ dataset_id, dataset_version, harness_id, harness_version, judges, concurrency }) =>
         run(principal, "scorecards:run", async () =>
           ok(
             await scorecards.submit({
@@ -610,6 +617,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               dataset: { id: dataset_id, version: dataset_version ?? "latest" },
               harness: { id: harness_id, version: harness_version ?? "latest" },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
+              ...(concurrency !== undefined ? { concurrency } : {}),
             }),
           ),
         ),

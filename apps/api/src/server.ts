@@ -65,6 +65,8 @@ export const RunScorecardBodySchema = z.object({
   metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
   judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
+  // 배치 내 동시 디스패치 케이스 수(runSuite 병렬도). 미지정이면 서비스 기본(=4). 상한으로 과도한 fan-out 차단.
+  concurrency: z.number().int().min(1).max(64).optional(),
 });
 
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).

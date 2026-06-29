@@ -14,6 +14,7 @@ export interface RunScorecardInput {
   metricIds: string[]
   runtime: string
   judgeModel?: string // inline judge grader 채점 모델(예: gpt-5.4-mini) — os-use 스크린샷 judge 등. 미지정이면 워크스페이스 기본.
+  concurrency?: number // 배치 내 동시 디스패치 케이스 수(병렬도). 미지정이면 컨트롤플레인 기본.
 }
 
 export interface RunScorecardResult {
@@ -33,6 +34,7 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
     metrics: input.metricIds.map((id) => ({ id, version: 'latest' })),
     ...(input.runtime ? { runtime: input.runtime } : {}),
     ...(input.judgeModel ? { judge: { provider: 'openai', model: input.judgeModel } } : {}),
+    ...(input.concurrency ? { concurrency: input.concurrency } : {}),
   }
   try {
     const rec = await controlPlane.runScorecard<{ id: string }>(ctx, body)

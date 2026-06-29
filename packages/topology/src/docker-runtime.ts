@@ -35,6 +35,10 @@ export class DockerTopologyRuntime implements TopologyRuntime {
   private readonly docker: Docker;
   private readonly fetchImpl: typeof fetch;
   private readonly warm = new Map<string, WarmEntry>(); // key: id@version (per-version warm)
+  // 진행 중인 배포(key: id@version) — 같은 토폴로지를 동시에 ensure 하면 합류시킨다(single-flight).
+  // case-level 병렬(러너 maxConcurrent)에서 warm 이 아직 비었을 때 둘이 동시에 배포하면 고정 이름 컨테이너가
+  // docker run --name 충돌로 cascade 실패한다 → 첫 배포 promise 를 공유해 토폴로지는 버전당 한 번만 띄운다.
+  private readonly inFlight = new Map<string, Promise<TopologyHandle>>();
 
   constructor(private readonly opts: DockerTopologyRuntimeOptions = {}) {
     this.docker = opts.docker ?? dockerCli();
@@ -45,7 +49,18 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     const key = `${spec.id}@${spec.version}`;
     const cached = this.warm.get(key);
     if (cached) return cached.handle; // warm: 버전당 한 번만 배포
+    const inflight = this.inFlight.get(key);
+    if (inflight) return inflight; // 동시 ensure 합류 — 중복 배포(이름 충돌) 방지
 
+    // 배포 promise 를 inFlight 에 등록해 동시 호출이 공유하게 하고, 완료(성공/실패) 시 제거.
+    // 실패는 deploy 안에서 부분기동을 정리하고 throw → warm 미캐싱(다음 ensure 가 새로 시도).
+    const p = this.deploy(spec, key).finally(() => this.inFlight.delete(key));
+    this.inFlight.set(key, p);
+    return p;
+  }
+
+  // 실제 토폴로지 배포(네트워크→스토어→서비스). single-flight 래퍼(ensureTopology)만 호출한다.
+  private async deploy(spec: ServiceHarnessSpec, key: string): Promise<TopologyHandle> {
     const network = netName(spec);
     // 기동한(또는 기동 시도한) 컨테이너 이름 — 부분실패 시 정리 대상. run 전에 push 하므로 run 자체가 throw 한 이름도 잡힌다.
     const containers: string[] = [];

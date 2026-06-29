@@ -14,7 +14,10 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
    declarative harnesses (builtins fall back to id). The record stores the **resolved** `harness@version`.
 3. Build a `Suite` on the fly (`{ id: dataset.id, harness: { id }, cases }`) and run it with `@assay/suite`'s
    `runSuite` over the **same dispatcher** single runs use — each case becomes one job (tenant + budget
-   admit/settle per case, concurrency-limited).
+   admit/settle per case, concurrency-limited). The request's optional **`concurrency`** (1–64) sets how many
+   cases dispatch at once (`runSuite` fan-out); omitted ⇒ service default (4). For a **self-hosted** runtime
+   the parked jobs only run as fast as the runner leases them — match it with `assay runner --max-concurrent N`
+   (effective case-level parallel = `min(concurrency, runner workers)`).
 4. Aggregate with `summarizeScorecard` → store `{ status, summary, scorecard }`.
 
 Runs are **async**: submit returns a `queued` record; poll until terminal. Normal eval failures produce
@@ -42,7 +45,7 @@ Migration: `packages/db/migrations/0006_create_scorecards.sql`.
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|
-| `POST /scorecards` `{dataset, harness, judges?, runtime?}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards` `{dataset, harness, judges?, runtime?, concurrency?}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest` `{dataset, harness, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest/pull` `{dataset, harness, source{kind,endpoint,authSecret?}, runs[], judges?}` → 202 | `pull_scorecard` | `scorecards:run` (member+) |
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |

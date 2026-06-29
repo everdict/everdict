@@ -174,6 +174,13 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
   `enqueue` or `wait_ms` timeout; MCP `lease_job{wait_ms?}` (omit = immediate, back-compat); CLI `--wait-ms` (25s).
 - ✅ **Runner presence in the web** (`e9821cc`) — online/offline dot + label on the account roster, derived from
   `lastSeenAt` freshness (long-poll lease touches it ~every 25s). Page-load-time state (not live-updating).
+- ✅ **Case-level parallelism (`--max-concurrent`)** — the runner runs N lease workers concurrently
+  (`runLeaseWorkers`, `apps/cli/src/runner-loop.ts`), all sharing one MCP session. `RunnerHub.lease` is
+  single-thread-atomic, so concurrent `lease_job` calls never hand the same job out twice → the workers safely
+  split a batch. A scorecard submitted with `concurrency=N` parks N jobs; effective parallel = `min(N, workers)`.
+  Default 1 (serial, back-compat). For `service` harnesses the shared `DockerTopologyRuntime` makes
+  `ensureTopology` **single-flight** (concurrent ensures of the same `id@version` join one deploy — no
+  `docker run --name` collision); the topology stays per-version warm and only the per-case browser is per-job.
 - ✅ **Cross-workspace leasing** (`7db1271`) — a runner serves **all** of its owner's workspaces. The lease key
   dropped its workspace pin → `(owner, runnerId)` (`self:<owner>:<runnerId>`); jobs from any workspace the owner
   belongs to land in one queue and the runner leases them all. Each job keeps its own `tenant`, so results/budget/

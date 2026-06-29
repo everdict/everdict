@@ -197,6 +197,34 @@ describe("DockerTopologyRuntime", () => {
     expect(f.runs.length).toBe(runsAfterFirst); // 두 번째는 캐시
   });
 
+  it("ensureTopology: 동시 호출은 single-flight — 같은 토폴로지를 한 번만 배포(중복 docker run 없음)", async () => {
+    const f = fakeDocker();
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    // case-level 병렬에서 warm 이 아직 비었을 때 동시에 ensure → 둘이 배포하면 고정 이름 컨테이너가 충돌한다.
+    const [a, b, c] = await Promise.all([rt.ensureTopology(SPEC), rt.ensureTopology(SPEC), rt.ensureTopology(SPEC)]);
+    expect(f.networks).toEqual(["assay-bu-1.0.0"]); // 네트워크 1회
+    expect(f.runs.map((r) => r.alias)).toEqual(["bu-postgres", "bu-redis", "agent-server"]); // 배포 1회분만
+    expect(a).toEqual(b); // 셋 다 같은 핸들을 공유
+    expect(b).toEqual(c);
+  });
+
+  it("ensureTopology: 배포 실패 후 재호출은 새로 시도한다(실패 토폴로지는 single-flight 에 캐싱 안 함)", async () => {
+    const f = fakeDocker();
+    let firstNetwork = true;
+    f.docker.ensureNetwork = async (name: string) => {
+      if (firstNetwork) {
+        firstNetwork = false;
+        throw new Error("docker down");
+      }
+      f.networks.push(name);
+    };
+    const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
+    await expect(rt.ensureTopology(SPEC)).rejects.toThrow("docker down");
+    // inFlight 가 비워졌어야 재시도가 동작한다(실패를 캐싱하면 영영 실패).
+    const handle = await rt.ensureTopology(SPEC);
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
   it("provisionBrowserEnv: 브라우저 컨테이너 + cdpUrl(내부 alias) + snapshot(호스트 포트 fetch)", async () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
