@@ -24,11 +24,18 @@ export const caseScoreSchema = z
   })
   .passthrough()
 
+// 트레이스 이벤트(느슨) — 표시는 error 이벤트(케이스 실패 사유)만 본다. 나머지는 passthrough.
+export const traceEventSchema = z
+  .object({ kind: z.string(), message: z.string().optional() })
+  .passthrough()
+
 export const caseResultSchema = z
   .object({
     caseId: z.string(),
     harness: z.string().optional(),
     scores: z.array(caseScoreSchema).default([]),
+    trace: z.array(traceEventSchema).default([]), // 케이스 실행 트레이스 — error 이벤트로 실패 구간 노출
+
     // os-use=데스크탑 스냅샷(screenshot/screenshotRef → <img>). browser=서비스-토폴로지 스냅샷(url=최종 URL, dom=발췌).
     snapshot: z
       .object({
@@ -60,7 +67,9 @@ export const scorecardRecordSchema = z.object({
   status: scorecardStatusSchema,
   summary: z.array(metricSummarySchema).optional(),
   scorecard: fullScorecardSchema.optional(),
-  error: z.object({ code: z.string(), message: z.string() }).optional(),
+  error: z
+    .object({ code: z.string(), message: z.string(), phase: z.string().optional() })
+    .optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

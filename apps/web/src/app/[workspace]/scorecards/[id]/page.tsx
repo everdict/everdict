@@ -1,7 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 
-import { scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
+import { caseVerdict, scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Badge } from '@/shared/ui/badge'
@@ -74,6 +74,7 @@ export default async function ScorecardDetailPage({
 
   const summary = record.summary ?? []
   const results = record.scorecard?.results ?? []
+  const failedCount = results.filter((r) => caseVerdict(r.scores) === false).length
 
   return (
     <div className="space-y-7">
@@ -95,7 +96,9 @@ export default async function ScorecardDetailPage({
 
       {record.error && (
         <Callout tone="danger" hint={record.error.message}>
-          {record.error.code}
+          {record.error.phase
+            ? `${record.error.code} · ${record.error.phase} 구간에서 실패`
+            : record.error.code}
         </Callout>
       )}
 
@@ -148,59 +151,94 @@ export default async function ScorecardDetailPage({
       </section>
 
       <section className="space-y-2.5">
-        <SectionHeader title={`케이스별 (${results.length})`} />
+        <SectionHeader
+          title={`케이스별 (${results.length})`}
+          action={
+            failedCount > 0 ? (
+              <Badge tone="danger">실패 {failedCount}</Badge>
+            ) : results.length > 0 ? (
+              <Badge tone="success">전부 통과</Badge>
+            ) : undefined
+          }
+        />
         {results.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">케이스 결과가 없습니다.</p>
+          <p className="text-[13px] text-muted-foreground">
+            {record.status === 'failed'
+              ? '케이스 결과가 없습니다 — 위 오류 구간을 확인하세요(디스패치 이전 단계 실패).'
+              : record.status === 'running' || record.status === 'queued'
+                ? '아직 실행 중입니다 — 완료되면 케이스별 결과가 표시됩니다.'
+                : '케이스 결과가 없습니다.'}
+          </p>
         ) : (
           <div className="space-y-2">
-            {results.map((r) => (
-              <Card key={r.caseId} className="space-y-2 p-3.5">
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <span className="font-mono text-[13px] font-[510]">{r.caseId}</span>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {r.snapshot?.kind && <Badge tone="neutral">{String(r.snapshot.kind)}</Badge>}
-                    {r.scores.length === 0 ? (
-                      <span className="text-[12px] text-muted-foreground">점수 없음</span>
-                    ) : (
-                      r.scores.map((s) => (
-                        <Badge
-                          key={s.graderId}
-                          tone={s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'}
-                        >
-                          {s.metric} {s.value}
-                        </Badge>
-                      ))
-                    )}
+            {results.map((r) => {
+              const verdict = caseVerdict(r.scores)
+              return (
+                <Card key={r.caseId} className="space-y-2 p-3.5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <span className="flex items-center gap-2">
+                      <Badge tone={verdict == null ? 'neutral' : verdict ? 'success' : 'danger'}>
+                        {verdict == null ? 'SKIP' : verdict ? 'PASS' : 'FAIL'}
+                      </Badge>
+                      <span className="font-mono text-[13px] font-[510]">{r.caseId}</span>
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {r.snapshot?.kind && <Badge tone="neutral">{String(r.snapshot.kind)}</Badge>}
+                      {r.scores.length === 0 ? (
+                        <span className="text-[12px] text-muted-foreground">점수 없음</span>
+                      ) : (
+                        r.scores.map((s) => (
+                          <Badge
+                            key={s.graderId}
+                            tone={s.pass == null ? 'neutral' : s.pass ? 'success' : 'danger'}
+                          >
+                            {s.metric} {s.value}
+                          </Badge>
+                        ))
+                      )}
+                    </div>
                   </div>
-                </div>
-                {/* os-use 스크린샷 — base64 동봉(dev) 또는 object storage URL(오프로드). VLM 이 채점한 그 이미지. */}
-                {osUseShotSrc(r.snapshot) && (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={osUseShotSrc(r.snapshot)}
-                    alt={`${r.caseId} screenshot`}
-                    className="max-h-72 w-auto rounded-lg border"
-                  />
-                )}
-                {/* browser(서비스-토폴로지: browser-use 등) — 에이전트가 도달한 최종 URL(+ DOM 발췌). */}
-                {r.snapshot?.kind === 'browser' && r.snapshot.url && (
-                  <p className="break-all font-mono text-[12px] text-muted-foreground">
-                    <span className="font-[510] text-foreground">final url</span> · {r.snapshot.url}
-                  </p>
-                )}
-                {/* judge/grader 판정 사유(VLM 루브릭 reasoning 등) — os-use 등에서 "왜 pass/fail" 을 보여준다. */}
-                {r.scores
-                  .filter((s) => s.detail)
-                  .map((s) => (
-                    <p
-                      key={`${s.graderId}-detail`}
-                      className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground"
-                    >
-                      <span className="font-[510] text-foreground">{s.metric}</span> · {s.detail}
+                  {/* os-use 스크린샷 — base64 동봉(dev) 또는 object storage URL(오프로드). VLM 이 채점한 그 이미지. */}
+                  {osUseShotSrc(r.snapshot) && (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={osUseShotSrc(r.snapshot)}
+                      alt={`${r.caseId} screenshot`}
+                      className="max-h-72 w-auto rounded-lg border"
+                    />
+                  )}
+                  {/* browser(서비스-토폴로지: browser-use 등) — 에이전트가 도달한 최종 URL(+ DOM 발췌). */}
+                  {r.snapshot?.kind === 'browser' && r.snapshot.url && (
+                    <p className="break-all font-mono text-[12px] text-muted-foreground">
+                      <span className="font-[510] text-foreground">final url</span> ·{' '}
+                      {r.snapshot.url}
                     </p>
-                  ))}
-              </Card>
-            ))}
+                  )}
+                  {/* judge/grader 판정 사유(VLM 루브릭 reasoning 등) — os-use 등에서 "왜 pass/fail" 을 보여준다. */}
+                  {r.scores
+                    .filter((s) => s.detail)
+                    .map((s) => (
+                      <p
+                        key={`${s.graderId}-detail`}
+                        className="rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground"
+                      >
+                        <span className="font-[510] text-foreground">{s.metric}</span> · {s.detail}
+                      </p>
+                    ))}
+                  {/* 실행 트레이스의 error 이벤트 — 케이스가 어떻게 실패했는지(하니스 크래시/디스패치 오류). */}
+                  {(r.trace ?? [])
+                    .filter((e) => e.kind === 'error' && typeof e.message === 'string')
+                    .map((e, i) => (
+                      <p
+                        key={`trace-error-${i}`}
+                        className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 font-mono text-[12px] leading-relaxed text-destructive"
+                      >
+                        <span className="font-[560]">error</span> · {e.message}
+                      </p>
+                    ))}
+                </Card>
+              )
+            })}
           </div>
         )}
       </section>
