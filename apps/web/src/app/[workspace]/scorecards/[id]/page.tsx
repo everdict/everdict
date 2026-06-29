@@ -4,6 +4,8 @@ import { ChevronLeft } from 'lucide-react'
 import { caseVerdict, scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { cn } from '@/shared/lib/utils'
+import { AutoRefresh } from '@/shared/ui/auto-refresh'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
@@ -75,9 +77,13 @@ export default async function ScorecardDetailPage({
   const summary = record.summary ?? []
   const results = record.scorecard?.results ?? []
   const failedCount = results.filter((r) => caseVerdict(r.scores) === false).length
+  const steps = record.steps ?? []
+  const live = record.status === 'queued' || record.status === 'running'
 
   return (
     <div className="space-y-7">
+      {/* 진행 중이면 서버 컴포넌트를 주기 재실행해 스텝을 라이브 갱신(종단되면 멈춤). */}
+      <AutoRefresh enabled={live} />
       <div className="space-y-3">
         <BackLink workspace={workspace} />
         <PageHeader
@@ -100,6 +106,53 @@ export default async function ScorecardDetailPage({
             ? `${record.error.code} · ${record.error.phase} 구간에서 실패`
             : record.error.code}
         </Callout>
+      )}
+
+      {(steps.length > 0 || live) && (
+        <section className="space-y-2.5">
+          <SectionHeader
+            title="진행 과정"
+            action={live ? <Badge tone="neutral">진행 중 · 자동 갱신</Badge> : undefined}
+          />
+          {steps.length === 0 ? (
+            <p className="text-[13px] text-muted-foreground">실행을 시작하는 중입니다…</p>
+          ) : (
+            <Card className="divide-y divide-border">
+              {steps.map((s, i) => (
+                <div key={i} className="flex items-start gap-3 px-4 py-2.5">
+                  <span
+                    className={cn(
+                      'mt-[7px] size-1.5 shrink-0 rounded-full',
+                      s.status === 'failed'
+                        ? 'bg-destructive'
+                        : s.status === 'ok'
+                          ? 'bg-[var(--color-success)]'
+                          : s.status === 'started'
+                            ? 'animate-pulse bg-link'
+                            : 'bg-muted-foreground'
+                    )}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
+                      {s.phase}
+                    </span>
+                    <p
+                      className={cn(
+                        'break-words text-[13px] leading-relaxed',
+                        s.status === 'failed' ? 'text-destructive' : 'text-foreground'
+                      )}
+                    >
+                      {s.message}
+                    </p>
+                  </div>
+                  <time className="shrink-0 pt-0.5 font-mono text-[11px] tabular-nums text-faint">
+                    {new Date(s.ts).toLocaleTimeString()}
+                  </time>
+                </div>
+              ))}
+            </Card>
+          )}
+        </section>
       )}
 
       <section className="space-y-2.5">
