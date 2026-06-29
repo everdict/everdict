@@ -17,11 +17,12 @@ import {
   type ValidateRuntimeResult,
 } from '../api/register-runtime'
 
-// Runtime(실행 인프라) 등록 폼 — kind(local | nomad | k8s) 토글 + 조건부 필드. 자격증명(토큰/kubeconfig)은 여기 아님 → SecretStore.
+// Runtime(실행 인프라) 등록 폼 — kind(nomad | k8s) 토글 + 조건부 필드. 자격증명(토큰/kubeconfig)은 여기 아님 → SecretStore.
+// local 은 dev 전용(컨트롤플레인 호스트 in-process, 격리 없음) → 여기서 만들 수 없다. "내 머신 실행"은 self-hosted runner(계정 페이지).
 export function RegisterRuntimeForm() {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
-  const [kind, setKind] = useState<'local' | 'nomad' | 'k8s'>('local')
+  const [kind, setKind] = useState<'nomad' | 'k8s'>('nomad')
   const [id, setId] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [description, setDescription] = useState('')
@@ -46,7 +47,6 @@ export function RegisterRuntimeForm() {
 
   function buildSpec(): unknown {
     const common = { id, version, ...(description ? { description } : {}), tags: [] as string[] }
-    if (kind === 'local') return { ...common, kind: 'local' }
     if (kind === 'nomad') {
       return {
         ...common,
@@ -107,7 +107,7 @@ export function RegisterRuntimeForm() {
     <div className="max-w-2xl space-y-5">
       {/* kind 토글 */}
       <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
-        {(['local', 'nomad', 'k8s'] as const).map((k) => (
+        {(['nomad', 'k8s'] as const).map((k) => (
           <button
             key={k}
             type="button"
@@ -300,13 +300,10 @@ export function RegisterRuntimeForm() {
         </div>
       )}
 
-      {kind === 'local' && (
-        <Callout tone="muted">
-          local 런타임은 <strong>컨트롤플레인 호스트</strong>에서 in-process 로 실행합니다(dev 전용,
-          추가 설정 없음). 워크스페이스 하니스/데이터셋을 <strong>내 머신</strong>에서 돌리려면 계정
-          페이지의 <strong>self-hosted runner</strong>를 사용하세요 — local 을 대체합니다.
-        </Callout>
-      )}
+      <Callout tone="muted" className="text-[12px]">
+        워크스페이스 하니스/데이터셋을 <strong>내 머신</strong>에서 돌리려면 런타임 대신 계정
+        페이지의 <strong>self-hosted runner</strong>를 사용하세요(개인 소유 디바이스 페어링).
+      </Callout>
 
       <p className="text-[12px] text-muted-foreground">
         토큰·kubeconfig 같은 자격증명은 여기 넣지 않습니다 — 워크스페이스 시크릿(예:
@@ -321,11 +318,9 @@ export function RegisterRuntimeForm() {
         <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
           {busy ? '…' : '검증 (dry-run)'}
         </Button>
-        {kind !== 'local' && (
-          <Button type="button" variant="outline" onClick={onProbe} disabled={busy}>
-            {busy ? '…' : '연결 테스트'}
-          </Button>
-        )}
+        <Button type="button" variant="outline" onClick={onProbe} disabled={busy}>
+          {busy ? '…' : '연결 테스트'}
+        </Button>
         <Button type="button" onClick={onCreate} disabled={busy}>
           {busy ? '처리 중…' : 'Runtime 등록'}
         </Button>

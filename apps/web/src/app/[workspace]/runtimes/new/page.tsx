@@ -30,7 +30,7 @@ export default async function NewRuntimePage({
       </Link>
       <PageHeader
         title="런타임 등록"
-        description="실행 인프라(local | nomad | k8s)를 이 워크스페이스 소유로 등록합니다."
+        description="실행 인프라(nomad | k8s)를 이 워크스페이스 소유로 등록합니다."
       />
       {allowed ? (
         <Card className="p-5">

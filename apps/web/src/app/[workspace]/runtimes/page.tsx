@@ -28,7 +28,7 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
     <div className="space-y-6">
       <PageHeader
         title="런타임"
-        description={`${runtimes.length}건 · 실행 인프라(local / nomad / k8s) + 공용. 스코어카드 실행 시 선택.`}
+        description={`${runtimes.length}건 · 실행 인프라(nomad / k8s) + 공용. 스코어카드 실행 시 선택.`}
         actions={
           can(principal?.roles, 'runtimes:write') ? (
             <Link href={`/${workspace}/runtimes/new`} className={buttonVariants({ size: 'sm' })}>
@@ -43,7 +43,7 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
         <EmptyState
           icon={<Server />}
           title="등록된 런타임이 없습니다."
-          hint="'런타임 등록'으로 Nomad/K8s/local 을 정의하거나(워크스페이스 멤버 누구나), API/MCP(create_runtime)로 등록하세요. 자격증명 값은 시크릿으로(admin)."
+          hint="'런타임 등록'으로 Nomad/K8s 를 정의하거나(워크스페이스 멤버 누구나), API/MCP(create_runtime)로 등록하세요. 내 머신 실행은 계정 페이지의 self-hosted runner. 자격증명 값은 시크릿으로(admin)."
         />
       ) : (
         <div className="space-y-2">
