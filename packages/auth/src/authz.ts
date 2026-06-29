@@ -17,6 +17,8 @@ export type Action =
   | "datasets:delete"
   | "scorecards:read"
   | "scorecards:run"
+  | "schedules:read"
+  | "schedules:write"
   | "judges:read"
   | "judges:write"
   | "models:read"
@@ -45,6 +47,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "templates:write", // 템플릿(대분류) 정의도 동일 — 누구나(권한 상관없이 동등)
     "datasets:read",
     "scorecards:read",
+    "schedules:read", // 예약 조회는 양성(스코어카드 조회와 동일) → viewer+
     "judges:read",
     "models:read",
     "metrics:read",
@@ -62,6 +65,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "datasets:write",
     "scorecards:read",
     "scorecards:run",
+    "schedules:read",
+    "schedules:write", // 예약 생성 = 반복 실행 약속(예산 소비) → scorecards:run 과 동일하게 member+
     "judges:read",
     "judges:write",
     "models:read",
@@ -83,6 +88,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "datasets:delete", // 데이터셋 버전 소프트 삭제 — admin 전용(생성자 본인은 서비스에서 별도 override). member/viewer 는 미보유
     "scorecards:read",
     "scorecards:run",
+    "schedules:read",
+    "schedules:write",
     "judges:read",
     "judges:write",
     "models:read",
@@ -115,6 +122,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "harnesses:read",
   "datasets:read",
   "scorecards:read",
+  "schedules:read",
   "judges:read",
   "models:read",
   "metrics:read",
@@ -129,6 +137,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "templates:write",
   "datasets:write",
   "scorecards:run",
+  "schedules:write",
   "judges:write",
   "models:write",
   "metrics:write",

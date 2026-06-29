@@ -46,6 +46,7 @@ import type { RunService } from "./run-service.js";
 import type { RunnerHub } from "./runner-hub.js";
 import { PairRunnerBodySchema, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
+import { type ScheduleService, isValidCron } from "./schedule-service.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
@@ -69,6 +70,34 @@ export const RunScorecardBodySchema = z.object({
   concurrency: z.number().int().min(1).max(64).optional(),
 });
 
+// 예약(cron) 스코어카드 요청 — 발사 시 ScorecardService.submit 으로 흐를 정의(= RunScorecardBody 에서 judge override 제외).
+const ScheduleRunTemplateBodySchema = z.object({
+  dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
+  harness: z.object({ id: z.string(), version: z.string().default("latest") }),
+  judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+  metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
+  runtime: z.string().optional(),
+  concurrency: z.number().int().min(1).max(64).optional(),
+});
+const cronExpr = z.string().refine(isValidCron, "cron 식이 올바르지 않습니다(5필드: 분 시 일 월 요일).");
+const overlapPolicy = z.enum(["skip", "bufferOne", "allowAll"]);
+export const CreateScheduleBodySchema = z.object({
+  name: z.string().min(1),
+  cron: cronExpr,
+  timezone: z.string().default("UTC"), // IANA tz(예: "Asia/Seoul")
+  overlapPolicy: overlapPolicy.default("skip"),
+  enabled: z.boolean().default(true),
+  runTemplate: ScheduleRunTemplateBodySchema,
+});
+export const UpdateScheduleBodySchema = z.object({
+  name: z.string().min(1).optional(),
+  cron: cronExpr.optional(),
+  timezone: z.string().optional(),
+  overlapPolicy: overlapPolicy.optional(),
+  enabled: z.boolean().optional(), // pause/resume
+  runTemplate: ScheduleRunTemplateBodySchema.optional(),
+});
+
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
@@ -83,6 +112,7 @@ export const WorkspaceSettingsBodySchema = z.object({
 export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
+  scheduleService?: ScheduleService; // 예약(cron) 스코어카드 CRUD (없으면 해당 라우트 비활성)
   benchmarkService?: BenchmarkService; // 벤치마크 카탈로그 + 인입 (없으면 해당 라우트 비활성)
   harnessTemplates?: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조) CRUD
   harnessInstances?: HarnessInstanceRegistry; // 개별 하네스(template+pins) CRUD + resolve
@@ -1294,6 +1324,101 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식 + 정책. 발사(Temporal Schedule)는 slice 2. ---
+  // 발사 run 의 submittedBy = 생성자(principal.subject): 예산 → tenant, 비공개-repo 연결 resolve.
+  app.post("/schedules", async (req, reply) => {
+    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "schedules:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof CreateScheduleBodySchema>;
+    try {
+      body = CreateScheduleBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      return reply
+        .code(201)
+        .send(
+          await deps.scheduleService.create({ tenant: principal.workspace, createdBy: principal.subject, ...body }),
+        );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get("/schedules", async (req, reply) => {
+    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "schedules:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    return reply.send(await deps.scheduleService.list(principal.workspace));
+  });
+
+  app.get<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
+    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "schedules:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    try {
+      return reply.send(await deps.scheduleService.get(principal.workspace, req.params.id)); // 없으면 404
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
+    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "schedules:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof UpdateScheduleBodySchema>;
+    try {
+      body = UpdateScheduleBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      return reply.send(await deps.scheduleService.update(principal.workspace, req.params.id, body)); // 없으면 404
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
+    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "schedules:write");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    try {
+      await deps.scheduleService.remove(principal.workspace, req.params.id); // 없으면 404
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // 트레이스 인제스트 — 외부에서 이미 수행한 트레이스(TraceEvent[])를 올려 scorecard 로(하니스 미실행). 경계에서 검증.
   app.post("/scorecards/ingest", async (req, reply) => {
     if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
@@ -1817,6 +1942,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         {
           service: deps.service,
           scorecardService: deps.scorecardService,
+          scheduleService: deps.scheduleService,
           harnessTemplates: deps.harnessTemplates,
           harnessInstances: deps.harnessInstances,
           datasetRegistry: deps.datasetRegistry,

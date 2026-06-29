@@ -1,0 +1,48 @@
+import { describe, expect, it } from "vitest";
+import { InMemoryScheduleStore, type ScheduleRecord } from "./schedule-store.js";
+
+const rec = (id: string, tenant: string, createdAt: string): ScheduleRecord => ({
+  id,
+  tenant,
+  name: id,
+  cron: "0 3 * * *",
+  timezone: "UTC",
+  overlapPolicy: "skip",
+  enabled: true,
+  createdBy: "u-1",
+  runTemplate: {
+    dataset: { id: "d", version: "latest" },
+    harness: { id: "h", version: "latest" },
+    judges: [],
+    metrics: [],
+  },
+  createdAt,
+  updatedAt: createdAt,
+});
+
+describe("InMemoryScheduleStore", () => {
+  it("list 는 워크스페이스 스코프 + 최신순(createdAt DESC)", async () => {
+    const store = new InMemoryScheduleStore();
+    await store.create(rec("a", "acme", "2026-06-01T00:00:00.000Z"));
+    await store.create(rec("b", "acme", "2026-06-02T00:00:00.000Z"));
+    await store.create(rec("c", "beta", "2026-06-03T00:00:00.000Z"));
+    expect((await store.list("acme")).map((r) => r.id)).toEqual(["b", "a"]); // 최신 먼저, beta 제외
+    expect((await store.list("beta")).map((r) => r.id)).toEqual(["c"]);
+  });
+
+  it("get/update/remove 는 타 워크스페이스를 건드리지 못한다(존재 누출 금지)", async () => {
+    const store = new InMemoryScheduleStore();
+    await store.create(rec("a", "acme", "2026-06-01T00:00:00.000Z"));
+    expect(await store.get("beta", "a")).toBeUndefined();
+    expect(await store.update("beta", "a", { enabled: false })).toBeUndefined();
+    await store.remove("beta", "a"); // no-op
+    expect(await store.get("acme", "a")).toBeDefined(); // 그대로
+  });
+
+  it("update 는 patch 를 병합하되 id/tenant 는 불변", async () => {
+    const store = new InMemoryScheduleStore();
+    await store.create(rec("a", "acme", "2026-06-01T00:00:00.000Z"));
+    const updated = await store.update("acme", "a", { enabled: false, cron: "0 6 * * 1", tenant: "evil", id: "evil" });
+    expect(updated).toMatchObject({ id: "a", tenant: "acme", enabled: false, cron: "0 6 * * 1" });
+  });
+});

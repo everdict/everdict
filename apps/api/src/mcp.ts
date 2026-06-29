@@ -33,6 +33,7 @@ import type { RunService } from "./run-service.js";
 import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
 import { RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
+import type { ScheduleService, UpdateScheduleInput } from "./schedule-service.js";
 import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
@@ -41,6 +42,7 @@ import type { WorkspaceService } from "./workspace-service.js";
 export interface McpDeps {
   service: RunService;
   scorecardService?: ScorecardService;
+  scheduleService?: ScheduleService;
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
@@ -693,6 +695,102 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const result = PullIngestBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           return ok(await scorecards.ingestPull({ tenant: ws, ...result.data }));
+        }),
+    );
+  }
+
+  if (deps.scheduleService) {
+    const schedules = deps.scheduleService;
+    server.registerTool(
+      "create_schedule",
+      {
+        description:
+          "예약(cron) 스코어카드 생성 — 데이터셋×하니스를 크론으로 주기 실행(회귀 추적). 발사 run 은 내 신원으로 실행(예산→워크스페이스). cron 은 5필드(분 시 일 월 요일).",
+        inputSchema: {
+          name: z.string(),
+          cron: z.string().describe("5-field cron (예: '0 3 * * *' = 매일 03:00)"),
+          timezone: z.string().optional().describe("IANA tz (기본 UTC)"),
+          overlap_policy: z.enum(["skip", "bufferOne", "allowAll"]).optional().describe("겹침 정책 (기본 skip)"),
+          enabled: z.boolean().optional(),
+          dataset_id: z.string(),
+          dataset_version: z.string().optional(),
+          harness_id: z.string(),
+          harness_version: z.string().optional(),
+          judges: z.array(z.object({ id: z.string(), version: z.string().optional() })).optional(),
+          metrics: z.array(z.object({ id: z.string(), version: z.string().optional() })).optional(),
+          runtime: z.string().optional(),
+          concurrency: z.number().int().min(1).max(64).optional(),
+        },
+      },
+      (a) =>
+        run(principal, "schedules:write", async () =>
+          ok(
+            await schedules.create({
+              tenant: ws,
+              createdBy: principal.subject,
+              name: a.name,
+              cron: a.cron,
+              ...(a.timezone !== undefined ? { timezone: a.timezone } : {}),
+              ...(a.overlap_policy !== undefined ? { overlapPolicy: a.overlap_policy } : {}),
+              ...(a.enabled !== undefined ? { enabled: a.enabled } : {}),
+              runTemplate: {
+                dataset: { id: a.dataset_id, version: a.dataset_version ?? "latest" },
+                harness: { id: a.harness_id, version: a.harness_version ?? "latest" },
+                judges: (a.judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
+                metrics: (a.metrics ?? []).map((m) => ({ id: m.id, version: m.version ?? "latest" })),
+                ...(a.runtime !== undefined ? { runtime: a.runtime } : {}),
+                ...(a.concurrency !== undefined ? { concurrency: a.concurrency } : {}),
+              },
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
+      "list_schedules",
+      { description: "이 워크스페이스의 예약 스코어카드 목록", inputSchema: {} },
+      () => run(principal, "schedules:read", async () => ok(await schedules.list(ws))),
+    );
+
+    server.registerTool(
+      "get_schedule",
+      { description: "예약 1건 조회(다른 워크스페이스는 NOT_FOUND)", inputSchema: { id: z.string() } },
+      ({ id }) => run(principal, "schedules:read", async () => ok(await schedules.get(ws, id))),
+    );
+
+    server.registerTool(
+      "update_schedule",
+      {
+        description:
+          "예약 수정 — pause/resume(enabled), 재예약(cron/timezone), 이름/겹침정책 변경. runTemplate(데이터셋·하니스) 교체는 BFF 또는 재생성으로.",
+        inputSchema: {
+          id: z.string(),
+          name: z.string().optional(),
+          cron: z.string().optional(),
+          timezone: z.string().optional(),
+          overlap_policy: z.enum(["skip", "bufferOne", "allowAll"]).optional(),
+          enabled: z.boolean().optional(),
+        },
+      },
+      (a) =>
+        run(principal, "schedules:write", async () => {
+          const patch: UpdateScheduleInput = {};
+          if (a.name !== undefined) patch.name = a.name;
+          if (a.cron !== undefined) patch.cron = a.cron;
+          if (a.timezone !== undefined) patch.timezone = a.timezone;
+          if (a.overlap_policy !== undefined) patch.overlapPolicy = a.overlap_policy;
+          if (a.enabled !== undefined) patch.enabled = a.enabled;
+          return ok(await schedules.update(ws, a.id, patch));
+        }),
+    );
+
+    server.registerTool(
+      "delete_schedule",
+      { description: "예약 삭제(다른 워크스페이스는 NOT_FOUND)", inputSchema: { id: z.string() } },
+      ({ id }) =>
+        run(principal, "schedules:write", async () => {
+          await schedules.remove(ws, id);
+          return ok({ id, deleted: true });
         }),
     );
   }

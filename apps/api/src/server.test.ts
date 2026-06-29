@@ -7,6 +7,7 @@ import {
   InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
+  InMemoryScheduleStore,
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
@@ -34,6 +35,7 @@ import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
 import { RunnerService } from "./runner-service.js";
+import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
 import { WorkspaceService } from "./workspace-service.js";
@@ -153,6 +155,10 @@ function server(
     secretsFor: async () => ({ OTEL_TOKEN: "secret-xyz" }),
     newId: () => `sc-${n++}`,
   });
+  const scheduleService = new ScheduleService({
+    store: new InMemoryScheduleStore(),
+    newId: () => `sch-${n++}`,
+  });
   const secretStore = new InMemorySecretStore(aesGcmCipher(Buffer.alloc(32, 9)));
   const settingsStore = new InMemoryWorkspaceSettingsStore();
   const workspaceStore = new InMemoryWorkspaceStore();
@@ -182,6 +188,7 @@ function server(
   const app = buildServer({
     service: svc,
     scorecardService,
+    scheduleService,
     benchmarkService,
     harnessTemplates,
     harnessInstances,
@@ -1905,6 +1912,62 @@ describe("API — runtimes (실행 인프라, workspace-owned, role 무관 write
     await app.inject({ method: "PUT", url: "/secrets/KUBE_TOKEN", headers: h, payload: { value: "t" } });
     const v2 = await app.inject({ method: "POST", url: "/runtimes/validate", headers: h, payload: k8sSpec });
     expect(v2.json().missingSecrets).toEqual(["KUBECONFIG_PROD"]);
+    await app.close();
+  });
+});
+
+describe("API — schedules (예약 cron 스코어카드)", () => {
+  const h = { "x-assay-tenant": "acme" };
+  const body = {
+    name: "nightly",
+    cron: "0 3 * * *",
+    runTemplate: { dataset: { id: "repo-smoke" }, harness: { id: "scripted" } },
+  };
+
+  it("생성(201, 기본값 채움) → 조회 → 목록은 워크스페이스 스코프(타 워크스페이스 404)", async () => {
+    const { app } = server();
+    const created = await app.inject({ method: "POST", url: "/schedules", headers: h, payload: body });
+    expect(created.statusCode).toBe(201);
+    const rec = created.json();
+    expect(rec).toMatchObject({
+      name: "nightly",
+      cron: "0 3 * * *",
+      timezone: "UTC",
+      overlapPolicy: "skip",
+      enabled: true,
+    });
+    expect(rec.runTemplate.dataset.version).toBe("latest"); // 버전 기본 latest 채움
+
+    expect((await app.inject({ method: "GET", url: `/schedules/${rec.id}`, headers: h })).statusCode).toBe(200);
+    const list = await app.inject({ method: "GET", url: "/schedules", headers: h });
+    expect(list.json().map((s: { id: string }) => s.id)).toContain(rec.id);
+
+    const betaH = { "x-assay-tenant": "beta" };
+    expect((await app.inject({ method: "GET", url: `/schedules/${rec.id}`, headers: betaH })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/schedules", headers: betaH })).json()).toEqual([]);
+    await app.close();
+  });
+
+  it("잘못된 cron 은 400", async () => {
+    const { app } = server();
+    const res = await app.inject({ method: "POST", url: "/schedules", headers: h, payload: { ...body, cron: "nope" } });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it("PATCH 로 pause(enabled=false)+재예약, DELETE 204 후 404", async () => {
+    const { app } = server();
+    const rec = (await app.inject({ method: "POST", url: "/schedules", headers: h, payload: body })).json();
+    const patched = await app.inject({
+      method: "PATCH",
+      url: `/schedules/${rec.id}`,
+      headers: h,
+      payload: { enabled: false, cron: "0 6 * * 1" },
+    });
+    expect(patched.statusCode).toBe(200);
+    expect(patched.json()).toMatchObject({ enabled: false, cron: "0 6 * * 1" });
+    expect((await app.inject({ method: "DELETE", url: `/schedules/${rec.id}`, headers: h })).statusCode).toBe(204);
+    expect((await app.inject({ method: "GET", url: `/schedules/${rec.id}`, headers: h })).statusCode).toBe(404);
     await app.close();
   });
 });

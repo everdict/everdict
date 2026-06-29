@@ -6,6 +6,7 @@ import {
   InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
+  InMemoryScheduleStore,
   InMemoryScorecardStore,
   InMemoryTenantKeyStore,
   InMemoryUserProfileStore,
@@ -32,6 +33,7 @@ import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
 import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
+import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 
 const result: CaseResult = {
@@ -121,6 +123,7 @@ function harness() {
       datasets: datasetRegistry,
       newId: () => `sc-${n++}`,
     }),
+    scheduleService: new ScheduleService({ store: new InMemoryScheduleStore(), newId: () => `sch-${n++}` }),
   };
 }
 
@@ -169,7 +172,9 @@ describe("MCP tools", () => {
       "create_judge",
       "create_model",
       "create_runtime",
+      "create_schedule",
       "delete_dataset",
+      "delete_schedule",
       "diff_datasets",
       "diff_scorecards",
       "disconnect_connection",
@@ -182,6 +187,7 @@ describe("MCP tools", () => {
       "get_model",
       "get_run",
       "get_runtime",
+      "get_schedule",
       "get_scorecard",
       "heartbeat_job",
       "ingest_scorecard",
@@ -199,6 +205,7 @@ describe("MCP tools", () => {
       "list_runners",
       "list_runs",
       "list_runtimes",
+      "list_schedules",
       "list_scorecards",
       "list_workspace_applications",
       "list_workspace_integrations",
@@ -218,6 +225,7 @@ describe("MCP tools", () => {
       "set_workspace_integration",
       "submit_job_result",
       "submit_run",
+      "update_schedule",
       "validate_dataset",
       "validate_judge",
       "validate_model",
@@ -595,6 +603,49 @@ describe("MCP tools", () => {
     const notFound = await beta.callTool({ name: "get_scorecard", arguments: { id } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
+  });
+
+  it("schedules: member 가 예약 생성·조회·pause·삭제; viewer 는 생성 권한오류; 타 ws 는 NOT_FOUND", async () => {
+    const deps = harness();
+    const member = await connect(deps, ["member"], "acme");
+    const created = await member.callTool({
+      name: "create_schedule",
+      arguments: { name: "nightly", cron: "0 3 * * *", dataset_id: "smoke", harness_id: "scripted" },
+    });
+    expect(created.isError).toBeFalsy();
+    const rec = JSON.parse(text(created));
+    expect(rec).toMatchObject({
+      name: "nightly",
+      cron: "0 3 * * *",
+      timezone: "UTC",
+      overlapPolicy: "skip",
+      enabled: true,
+    });
+    expect(rec.runTemplate.dataset.version).toBe("latest");
+
+    const list = JSON.parse(text(await member.callTool({ name: "list_schedules", arguments: {} })));
+    expect(list.map((s: { id: string }) => s.id)).toContain(rec.id);
+
+    const paused = await member.callTool({ name: "update_schedule", arguments: { id: rec.id, enabled: false } });
+    expect(JSON.parse(text(paused)).enabled).toBe(false);
+
+    // viewer 는 schedules:read 만 → 생성/수정 불가(FORBIDDEN), 조회는 가능
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const denied = await viewer.callTool({
+      name: "create_schedule",
+      arguments: { name: "x", cron: "0 3 * * *", dataset_id: "smoke", harness_id: "scripted" },
+    });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
+    expect((await viewer.callTool({ name: "get_schedule", arguments: { id: rec.id } })).isError).toBeFalsy();
+
+    // 타 워크스페이스는 NOT_FOUND(존재 누출 금지)
+    const beta = await connect(deps, ["member"], "beta");
+    expect(text(await beta.callTool({ name: "get_schedule", arguments: { id: rec.id } }))).toContain("NOT_FOUND");
+
+    const del = await member.callTool({ name: "delete_schedule", arguments: { id: rec.id } });
+    expect(del.isError).toBeFalsy();
+    expect((await member.callTool({ name: "get_schedule", arguments: { id: rec.id } })).isError).toBe(true);
   });
 
   it("judges: member 가 model/harness judge 등록·조회; viewer 는 write 권한오류", async () => {

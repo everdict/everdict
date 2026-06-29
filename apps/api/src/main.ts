@@ -23,6 +23,7 @@ import {
   InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
+  InMemoryScheduleStore,
   InMemoryScorecardStore,
   InMemorySecretStore,
   InMemoryTenantKeyStore,
@@ -35,6 +36,7 @@ import {
   PgOAuthStateStore,
   PgRunStore,
   PgRunnerStore,
+  PgScheduleStore,
   PgScorecardStore,
   PgSecretStore,
   PgTenantKeyStore,
@@ -44,6 +46,7 @@ import {
   PgWorkspaceStore,
   type RunStore,
   type RunnerStore,
+  type ScheduleStore,
   type ScorecardStore,
   type SecretCipher,
   type SecretStore,
@@ -107,6 +110,7 @@ import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
+import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
@@ -141,6 +145,7 @@ async function main(): Promise<void> {
     connectionStore,
     oauthStateStore,
     runnerStore,
+    scheduleStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   const membershipService = new MembershipService(workspaceStore, inviteStore, userProfileStore);
@@ -290,9 +295,13 @@ async function main(): Promise<void> {
     },
   });
 
+  // 예약(cron) 스코어카드 CRUD — SSOT 레코드 관리. 발사(Temporal Schedule 동기화)는 slice 2.
+  const scheduleService = new ScheduleService({ store: scheduleStore });
+
   const app = buildServer({
     service,
     scorecardService,
+    scheduleService,
     benchmarkService,
     harnessTemplates: harnessTemplateRegistry,
     harnessInstances: harnessInstanceRegistry,
@@ -348,6 +357,7 @@ interface Persistence {
   connectionStore: ConnectionStore; // 외부 계정 연결(OAuth 토큰) — secretStore 와 같은 cipher 로 at-rest 암호화
   oauthStateStore: OAuthStateStore; // OAuth authorize→callback 1회용 pending state
   runnerStore: RunnerStore; // 셀프호스티드 러너(개인 디바이스 페어링) — 페어링 토큰은 SHA-256 해시만 보관
+  scheduleStore: ScheduleStore; // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식(SSOT, mutable)
 }
 
 // at-rest 암호화 KEK: ASSAY_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
@@ -391,6 +401,7 @@ async function makePersistence(): Promise<Persistence> {
       connectionStore: new InMemoryConnectionStore(cipher),
       oauthStateStore: new InMemoryOAuthStateStore(),
       runnerStore: new InMemoryRunnerStore(),
+      scheduleStore: new InMemoryScheduleStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -417,6 +428,7 @@ async function makePersistence(): Promise<Persistence> {
     connectionStore: new PgConnectionStore(client, cipher),
     oauthStateStore: new PgOAuthStateStore(client),
     runnerStore: new PgRunnerStore(client),
+    scheduleStore: new PgScheduleStore(client),
   };
 }
 
