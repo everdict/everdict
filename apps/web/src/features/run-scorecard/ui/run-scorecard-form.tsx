@@ -2,13 +2,24 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 
+import { sortSemverDesc } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
+import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { FieldError, Input, Label, Select } from '@/shared/ui/input'
 
 import { runScorecardAction } from '../api/run-scorecard'
+
+// 버전 선택지 — 'latest' 별칭(가장 위, 해석 결과를 hint 로) + 등록된 버전들(semver 최신 먼저).
+function versionOptions(versions: string[]): ComboboxOption[] {
+  const sorted = sortSemverDesc(versions)
+  return [
+    { value: 'latest', label: 'latest', hint: sorted[0] ? `→ ${sorted[0]}` : undefined },
+    ...sorted.map((v) => ({ value: v })),
+  ]
+}
 
 interface Values {
   datasetId: string
@@ -28,8 +39,8 @@ export function RunScorecardForm({
   runtimes,
   runners,
 }: {
-  datasets: { id: string }[]
-  harnesses: { id: string }[]
+  datasets: { id: string; versions: string[] }[]
+  harnesses: { id: string; versions: string[] }[]
   judges: { id: string }[]
   metrics: { id: string }[]
   runtimes: { id: string }[]
@@ -41,8 +52,11 @@ export function RunScorecardForm({
   const [judgeIds, setJudgeIds] = useState<string[]>([])
   const [metricIds, setMetricIds] = useState<string[]>([])
   const {
+    control,
     register,
     handleSubmit,
+    watch,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<Values>({
     defaultValues: {
@@ -54,6 +68,24 @@ export function RunScorecardForm({
       judgeModel: '',
     },
   })
+
+  // id 선택에 따라 버전 선택지를 좁힌다(목록에 이미 버전이 실려옴 — 추가 요청 X).
+  const datasetId = watch('datasetId')
+  const harnessId = watch('harnessId')
+  const datasetIdOptions: ComboboxOption[] = datasets.map((d) => ({
+    value: d.id,
+    hint: `${d.versions.length}개 버전`,
+  }))
+  const harnessIdOptions: ComboboxOption[] = harnesses.map((h) => ({
+    value: h.id,
+    hint: `${h.versions.length}개 버전`,
+  }))
+  const datasetVersionOptions = versionOptions(
+    datasets.find((d) => d.id === datasetId)?.versions ?? []
+  )
+  const harnessVersionOptions = versionOptions(
+    harnesses.find((h) => h.id === harnessId)?.versions ?? []
+  )
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
@@ -67,44 +99,82 @@ export function RunScorecardForm({
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label htmlFor="datasetId">데이터셋</Label>
-          <Input
-            id="datasetId"
-            list="dataset-ids"
-            placeholder="repo-smoke"
-            {...register('datasetId', { required: '데이터셋 id 를 입력하세요' })}
+          <Controller
+            control={control}
+            name="datasetId"
+            rules={{ required: '데이터셋을 선택하세요' }}
+            render={({ field }) => (
+              <Combobox
+                id="datasetId"
+                options={datasetIdOptions}
+                value={field.value}
+                onChange={(v) => {
+                  field.onChange(v)
+                  setValue('datasetVersion', 'latest') // id 바뀌면 버전은 latest 로 리셋(이전 버전이 새 id 엔 없을 수 있음).
+                }}
+                placeholder="데이터셋 선택"
+                emptyText="데이터셋이 없습니다"
+              />
+            )}
           />
-          <datalist id="dataset-ids">
-            {datasets.map((d) => (
-              <option key={d.id} value={d.id} />
-            ))}
-          </datalist>
           <FieldError message={errors.datasetId?.message} />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="datasetVersion">버전</Label>
-          <Input id="datasetVersion" placeholder="latest" {...register('datasetVersion')} />
+          <Controller
+            control={control}
+            name="datasetVersion"
+            render={({ field }) => (
+              <Combobox
+                id="datasetVersion"
+                options={datasetVersionOptions}
+                value={field.value}
+                onChange={field.onChange}
+                searchable={false}
+              />
+            )}
+          />
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label htmlFor="harnessId">하니스</Label>
-          <Input
-            id="harnessId"
-            list="harness-ids"
-            placeholder="scripted"
-            {...register('harnessId', { required: '하니스 id 를 입력하세요' })}
+          <Controller
+            control={control}
+            name="harnessId"
+            rules={{ required: '하니스를 선택하세요' }}
+            render={({ field }) => (
+              <Combobox
+                id="harnessId"
+                options={harnessIdOptions}
+                value={field.value}
+                onChange={(v) => {
+                  field.onChange(v)
+                  setValue('harnessVersion', 'latest')
+                }}
+                placeholder="하니스 선택"
+                emptyText="하니스가 없습니다"
+              />
+            )}
           />
-          <datalist id="harness-ids">
-            {harnesses.map((h) => (
-              <option key={h.id} value={h.id} />
-            ))}
-          </datalist>
           <FieldError message={errors.harnessId?.message} />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="harnessVersion">버전</Label>
-          <Input id="harnessVersion" placeholder="latest" {...register('harnessVersion')} />
+          <Controller
+            control={control}
+            name="harnessVersion"
+            render={({ field }) => (
+              <Combobox
+                id="harnessVersion"
+                options={harnessVersionOptions}
+                value={field.value}
+                onChange={field.onChange}
+                searchable={false}
+              />
+            )}
+          />
         </div>
       </div>
 

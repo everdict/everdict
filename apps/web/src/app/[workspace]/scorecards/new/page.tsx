@@ -26,8 +26,8 @@ export default async function NewScorecardPage({
   const { principal, ctx } = await currentPrincipal()
   const allowed = can(principal?.roles, 'scorecards:run')
 
-  let datasets: { id: string }[] = []
-  let harnesses: { id: string }[] = []
+  let datasets: { id: string; versions: string[] }[] = []
+  let harnesses: { id: string; versions: string[] }[] = []
   let judges: { id: string }[] = []
   let metrics: { id: string }[] = []
   let runtimes: { id: string }[] = []
