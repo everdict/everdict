@@ -1,5 +1,10 @@
-export { RegisterHarnessWizard, InstanceForm } from './ui/register-harness-wizard'
-export { instanceStateFromSpec, type InstanceState } from './lib/build-spec'
+export { RegisterHarnessWizard, InstanceForm, TemplateForm } from './ui/register-harness-wizard'
+export {
+  instanceStateFromSpec,
+  templateStateFromSpec,
+  type InstanceState,
+  type TemplateState,
+} from './lib/build-spec'
 export {
   registerHarnessAction,
   validateHarnessAction,

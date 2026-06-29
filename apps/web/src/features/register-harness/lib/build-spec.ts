@@ -1,5 +1,7 @@
 // 마법사 폼 상태 → HarnessTemplateSpec / HarnessInstanceSpec 조립(순수). 컨트롤플레인이 스키마/충돌을 최종 검증한다.
 // 대분류(Template) = 구조/슬롯(버전 미고정), Instance = template 참조 + pins(슬롯→이미지/값).
+import type { HarnessTemplateSpec } from '@/entities/harness'
+
 export type Kind = 'process' | 'service' | 'command'
 
 export interface ServiceRow {
@@ -113,6 +115,46 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
     }
   }
   return spec
+}
+
+// 템플릿 스펙 → 템플릿 폼 상태(구조 새 버전 편집 프리필). buildTemplate 의 역변환.
+// 폼 필드는 문자열/배열 기반이라 미설정은 빈 문자열로 둔다(도메인 값이 아닌 UI 상태).
+export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
+  const env = t.env ?? {}
+  return {
+    kind: t.kind,
+    category: t.category,
+    id: t.id,
+    version: t.version,
+    services: (t.services ?? []).map((s) => ({
+      name: s.name,
+      slot: s.slot ?? '',
+      port: s.port !== undefined ? String(s.port) : '',
+      needs: (s.needs ?? []).join(', '),
+      perRun: (s.perRun ?? []).join(', '),
+      replicas: s.replicas !== undefined ? String(s.replicas) : '1',
+    })),
+    deps: (t.dependencies ?? []).map((d) => ({ store: d.store, role: d.role, isolateBy: d.isolateBy })),
+    frontDoorService: t.frontDoor?.service ?? '',
+    frontDoorSubmit: t.frontDoor?.submit ?? '',
+    frontDoorTrace: t.frontDoor?.trace ?? '',
+    traceKind: t.traceSource?.kind ?? 'mlflow',
+    traceEndpoint: t.traceSource?.endpoint ?? '',
+    targetEnabled: t.target !== undefined,
+    targetLifecycle: t.target?.lifecycle ?? 'per-case-instance',
+    targetObserve: t.target?.observe ?? ['dom', 'screenshot', 'url'],
+    targetExtensionRef: t.target?.extension?.ref ?? '',
+    image: t.image ?? '',
+    workDir: t.workDir ?? '',
+    setup: (t.setup ?? []).join('\n'),
+    command: t.command ?? '',
+    model: t.model ?? '',
+    envText: Object.entries(env)
+      .map(([k, v]) => `${k}=${v}`)
+      .join('\n'),
+    cmdTraceKind: t.trace?.kind ?? 'none',
+    cmdTraceEndpoint: t.trace?.endpoint ?? '',
+  }
 }
 
 // 슬롯 이름들(인스턴스 폼이 pins 입력을 그려줄 때 참조). service=서비스 슬롯, command=image/model.

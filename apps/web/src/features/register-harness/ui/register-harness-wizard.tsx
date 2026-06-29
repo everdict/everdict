@@ -65,9 +65,21 @@ export function RegisterHarnessWizard() {
 }
 
 // --- 템플릿(대분류) 등록 ---
-function TemplateForm({ workspace }: { workspace: string }) {
+// initial 프리필 + lockId(같은 대분류의 새 구조 버전 — id/kind 고정) + onRegistered(성공 시 호출자가 후처리,
+// 예: 새 버전을 참조하는 인스턴스 탭으로 이동). onRegistered 없으면 기본은 하니스 목록으로 이동.
+export function TemplateForm({
+  workspace,
+  initial,
+  lockId = false,
+  onRegistered,
+}: {
+  workspace: string
+  initial?: TemplateState
+  lockId?: boolean
+  onRegistered?: (version: string) => void
+}) {
   const router = useRouter()
-  const [s, setS] = useState<TemplateState>(INITIAL_TEMPLATE)
+  const [s, setS] = useState<TemplateState>(initial ?? INITIAL_TEMPLATE)
   const [mode, setMode] = useState<'form' | 'json'>('form')
   const [jsonText, setJsonText] = useState('')
   const [result, setResult] = useState<ValidateHarnessResult>()
@@ -104,8 +116,10 @@ function TemplateForm({ workspace }: { workspace: string }) {
       return
     }
     setBusy(false)
-    if (res.ok) router.push(`/${workspace}/harnesses`)
-    else setRegError(res.error ?? '등록 실패')
+    if (res.ok) {
+      if (onRegistered) onRegistered(res.version ?? s.version)
+      else router.push(`/${workspace}/harnesses`)
+    } else setRegError(res.error ?? '등록 실패')
   }
 
   return (
@@ -115,7 +129,12 @@ function TemplateForm({ workspace }: { workspace: string }) {
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <Label>kind</Label>
-          <Select value={s.kind} onChange={(e) => set({ kind: e.target.value as Kind })}>
+          <Select
+            value={s.kind}
+            onChange={(e) => set({ kind: e.target.value as Kind })}
+            disabled={lockId}
+            className={cn(lockId && 'opacity-60')}
+          >
             <option value="service">service</option>
             <option value="command">command</option>
             <option value="process">process</option>
@@ -131,7 +150,14 @@ function TemplateForm({ workspace }: { workspace: string }) {
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="tid">id</Label>
-          <Input id="tid" value={s.id} onChange={(e) => set({ id: e.target.value })} placeholder="bu" />
+          <Input
+            id="tid"
+            value={s.id}
+            onChange={(e) => set({ id: e.target.value })}
+            placeholder="bu"
+            readOnly={lockId}
+            className={cn(lockId && 'opacity-60')}
+          />
         </div>
       </div>
       <div className="space-y-1.5">
