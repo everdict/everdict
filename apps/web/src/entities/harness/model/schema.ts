@@ -115,12 +115,19 @@ export type HarnessKind = HarnessSpec['kind']
 
 // --- raw config (resolve 전 원본) — 상세 구성 보기 + 새 버전 편집 프리필용 ---
 
-// raw 인스턴스(GET /harnesses/:id/:version/instance): template 참조 + pins(슬롯→값).
+// 인스턴스 변주(overrides) — 구조 불변 동작 델타(서비스 env/resources/replicas/volumes/readiness · front-door
+// body/completion · target ext · command env/params). 웹은 raw JSON 으로 라운드트립(편집기=JSON 텍스트영역) +
+// 구성 패널 표시. 컨트롤플레인이 스키마를 최종 검증하므로 여긴 느슨 미러.
+export const harnessOverridesSchema = z.record(z.string(), z.unknown())
+export type HarnessOverrides = z.infer<typeof harnessOverridesSchema>
+
+// raw 인스턴스(GET /harnesses/:id/:version/instance): template 참조 + pins(슬롯→값) + overrides(변주).
 export const harnessInstanceSpecSchema = z.object({
   template: z.object({ id: z.string(), version: z.string() }),
   id: z.string(),
   version: z.string(),
   pins: z.record(z.string(), z.string()).default({}),
+  overrides: harnessOverridesSchema.optional(),
 })
 export type HarnessInstanceSpec = z.infer<typeof harnessInstanceSpecSchema>
 

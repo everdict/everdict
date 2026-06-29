@@ -1,4 +1,4 @@
-import { Layers, Pin } from 'lucide-react'
+import { Layers, Pin, SlidersHorizontal } from 'lucide-react'
 
 import {
   templateSlotNames,
@@ -87,6 +87,19 @@ export function ConfigPanel({
           </Card>
         )}
       </SubSection>
+
+      {instance.overrides && Object.keys(instance.overrides).length > 0 && (
+        <SubSection title="변주 (overrides)" icon={<SlidersHorizontal className="size-4" />}>
+          <Card>
+            <pre className="overflow-x-auto p-4 font-mono text-[12px] leading-relaxed text-muted-foreground">
+              {JSON.stringify(instance.overrides, null, 2)}
+            </pre>
+          </Card>
+          <p className="mt-2 text-[12px] text-muted-foreground">
+            구조(템플릿)는 그대로 두고 동작만 바꾸는 델타 — resolve 시 템플릿 위에 병합됩니다.
+          </p>
+        </SubSection>
+      )}
     </div>
   )
 }

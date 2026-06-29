@@ -22,6 +22,7 @@ import {
   buildTemplate,
   INITIAL_INSTANCE,
   INITIAL_TEMPLATE,
+  parseOverridesText,
   type DepRow,
   type InstanceState,
   type Kind,
@@ -29,6 +30,12 @@ import {
   type ServiceRow,
   type TemplateState,
 } from '../lib/build-spec'
+
+// 인스턴스 변주(overrides) JSON 편집기의 안내 예시 — 같은 템플릿 안에서 동작만 바꾸는 델타.
+const OVERRIDES_PLACEHOLDER = `{
+  "services": { "agent-server": { "env": { "MODEL": "claude-opus-4-8", "TEMPERATURE": "0.2" }, "replicas": 2, "resources": { "cpu": 2000, "memoryMb": 4096 } } },
+  "frontDoor": { "request": { "bodyTemplate": { "max_steps": 30 } } }
+}`
 
 const STORES = ['postgres', 'redis', 'minio']
 const ISOLATE = ['thread_id', 'key-prefix', 'object-prefix', 'schema', 'external']
@@ -433,13 +440,19 @@ export function InstanceForm({
   const setPin = (i: number, patch: Partial<PinRow>) =>
     set({ pins: s.pins.map((row, j) => (j === i ? { ...row, ...patch } : row)) })
 
+  // 변주 JSON 파싱 상태 — 오류면 검증/등록을 막고 사유를 보여준다(잘못된 JSON 을 컨트롤플레인에 보내지 않음).
+  const ov = parseOverridesText(s.overridesText)
+  const ovError = ov.ok ? undefined : ov.error
+
   async function onValidate() {
+    if (ovError) return setRegError(`overrides JSON 오류: ${ovError}`)
     setBusy(true)
     setRegError(undefined)
     setResult(await validateHarnessAction(buildInstance(s)))
     setBusy(false)
   }
   async function onRegister() {
+    if (ovError) return setRegError(`overrides JSON 오류: ${ovError}`)
     setBusy(true)
     setRegError(undefined)
     const res = await registerHarnessAction(buildInstance(s))
@@ -510,6 +523,24 @@ export function InstanceForm({
           </div>
         ))}
       </Section>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="ioverrides">변주 (overrides · 선택)</Label>
+        <Textarea
+          id="ioverrides"
+          value={s.overridesText}
+          onChange={(e) => set({ overridesText: e.target.value })}
+          placeholder={OVERRIDES_PLACEHOLDER}
+          rows={8}
+          className="font-mono text-[12px]"
+        />
+        <p className="text-[12px] text-muted-foreground">
+          같은 템플릿 구조 위에서 동작만 바꾸는 JSON 델타(서비스
+          env/replicas/resources/volumes/readiness · front-door 본문/완료 타이밍 · target 익스텐션 ·
+          command env/params). 이미지 교체는 위 Pins 로.
+        </p>
+        {ovError && <Callout tone="danger">overrides JSON 오류: {ovError}</Callout>}
+      </div>
 
       <JsonPreview value={buildInstance(s)} />
       {result && <ValidateBanner result={result} />}

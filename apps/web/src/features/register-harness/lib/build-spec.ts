@@ -210,17 +210,39 @@ export interface InstanceState {
   templateVersion: string
   version: string // 인스턴스 태그(예: pr-123-sha-abc)
   pins: PinRow[]
+  // 변주(overrides) — 구조 불변 동작 델타의 raw JSON(비우면 미설정). 컨트롤플레인이 스키마를 최종 검증.
+  overridesText: string
 }
 
-// 인스턴스 스펙 조립(template 참조 + pins).
+// overrides JSON 텍스트 파싱 — 빈 값은 미설정(ok). 객체가 아니거나 JSON 오류면 error(폼이 등록을 막는다).
+export function parseOverridesText(
+  text: string
+): { ok: true; value?: Record<string, unknown> } | { ok: false; error: string } {
+  const t = text.trim()
+  if (!t) return { ok: true }
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(t)
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : '유효한 JSON 이 아닙니다.' }
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, error: 'overrides 는 JSON 객체여야 합니다.' }
+  }
+  return { ok: true, value: parsed as Record<string, unknown> }
+}
+
+// 인스턴스 스펙 조립(template 참조 + pins + overrides). overrides 가 유효 객체일 때만 포함(파싱 실패는 폼이 차단).
 export function buildInstance(s: InstanceState): Record<string, unknown> {
   const pins: Record<string, string> = {}
   for (const p of s.pins) if (p.slot.trim() && p.value.trim()) pins[p.slot.trim()] = p.value.trim()
+  const ov = parseOverridesText(s.overridesText)
   return {
     template: { id: s.templateId, version: s.templateVersion },
     id: s.templateId, // 인스턴스 id = 템플릿 id(관례)
     version: s.version,
     pins,
+    ...(ov.ok && ov.value ? { overrides: ov.value } : {}),
   }
 }
 
@@ -268,6 +290,7 @@ export const INITIAL_INSTANCE: InstanceState = {
   templateVersion: '1',
   version: '',
   pins: [{ slot: 'agent-server', value: '' }],
+  overridesText: '',
 }
 
 // raw 인스턴스 스펙 → 인스턴스 폼 상태(새 버전 편집 프리필). version 은 빈 값으로 둬 새 태그를 강제한다
@@ -278,6 +301,7 @@ export function instanceStateFromSpec(
     id: string
     version: string
     pins: Record<string, string>
+    overrides?: Record<string, unknown>
   },
   slots?: string[]
 ): InstanceState {
@@ -290,5 +314,7 @@ export function instanceStateFromSpec(
     templateVersion: inst.template.version,
     version: '',
     pins: rows.length > 0 ? rows : [{ slot: '', value: '' }],
+    // 기존 변주를 그대로 프리필(새 버전 편집의 출발점). 미설정이면 빈 텍스트.
+    overridesText: inst.overrides ? JSON.stringify(inst.overrides, null, 2) : '',
   }
 }
