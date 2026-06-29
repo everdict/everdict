@@ -26,6 +26,13 @@ Runs are **async**: submit returns a `queued` record; poll until terminal. Norma
 (`dispatch | judges | metrics | offload | persist`) so you see *which stage* broke, and the **partial
 `scorecard`** (case results gathered before the failing stage) is persisted on the failed record too.
 
+**Progress (steps timeline)** — not a percentage; the *process*. The run appends `ScorecardRecord.steps[]`
+(`{ts, phase, status, message, caseId?}`) and **persists incrementally**: dispatch-started, one step **per case
+as it completes** (`onResult` from `runSuite` → `caseId → PASS/FAIL · reason`), judges/metrics start+done, then
+persist. The detail page renders this as a timeline and **auto-refreshes** (`router.refresh()`) while the run is
+`queued`/`running`. `steps` is heavy detail → returned by `get`, **omitted from `list`** (like `scorecard`);
+Pg column `steps jsonb` (migration `0026`).
+
 ## Storage (`@assay/db`)
 `ScorecardStore` (`InMemoryScorecardStore` / `PgScorecardStore`), mirror of `RunStore`. `ScorecardRecord` =
 `{ id, tenant, dataset:{id,version}, harness:{id,version}, status, summary?, scorecard?, error?, …}`. **`list`

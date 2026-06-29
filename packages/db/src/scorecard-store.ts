@@ -21,6 +21,18 @@ export const MetricSummarySchema = z.object({
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
+// 실행 과정 스텝(타임라인) — "진행 과정"을 보이기 위해 run 이 진행되며 append 된다(증분 저장).
+// phase = dispatch|judges|metrics|offload|persist|case, status = started|ok|failed|info.
+// Pg 는 steps jsonb 컬럼(mig 0026, additive). 무거운 detail 이라 목록(list)에선 생략하고 get 에서만 돌려준다.
+export const ScorecardStepSchema = z.object({
+  ts: z.string(),
+  phase: z.string(),
+  status: z.enum(["started", "ok", "failed", "info"]),
+  message: z.string(),
+  caseId: z.string().optional(),
+});
+export type ScorecardStep = z.infer<typeof ScorecardStepSchema>;
+
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -30,6 +42,7 @@ export const ScorecardRecordSchema = z.object({
   summary: z.array(MetricSummarySchema).optional(), // 경량 집계(목록용)
   scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
   error: ScorecardRunErrorSchema.optional(),
+  steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -65,7 +78,7 @@ export class InMemoryScorecardStore implements ScorecardStore {
 
   async list(tenant?: string): Promise<ScorecardRecord[]> {
     const all = [...this.cards.values()].filter((c) => !tenant || c.tenant === tenant);
-    // 목록은 무거운 scorecard 생략(summary 만) — 상세는 get 으로.
-    return all.map(({ scorecard, ...rest }) => rest);
+    // 목록은 무거운 scorecard/steps 생략(summary 만) — 상세는 get 으로.
+    return all.map(({ scorecard, steps, ...rest }) => rest);
   }
 }

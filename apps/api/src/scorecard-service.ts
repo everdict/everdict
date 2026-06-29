@@ -18,7 +18,7 @@ import {
   type Suite,
   TraceEventSchema,
 } from "@assay/core";
-import type { ScorecardRecord, ScorecardStore } from "@assay/db";
+import type { ScorecardRecord, ScorecardStep, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
 import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry, MetricRegistry } from "@assay/registry";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
@@ -26,6 +26,7 @@ import {
   type Dispatch,
   type ScorecardDiff,
   type ScorecardTrend,
+  caseVerdict,
   diffScorecards,
   evalMetric,
   runSuite,
@@ -35,6 +36,17 @@ import {
 import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { z } from "zod";
 import type { JudgeRunner } from "./judge-runner.js";
+
+// 케이스 실패/판정 사유 한 줄 — 진행 스텝 메시지용. trace 의 error 이벤트 > pass:false 인 score.detail 순. 길면 자른다.
+function caseReason(r: CaseResult): string | undefined {
+  const errEvent = r.trace.find((e) => e.kind === "error");
+  const raw =
+    errEvent && "message" in errEvent
+      ? errEvent.message
+      : r.scores.find((s) => s.pass === false && typeof s.detail === "string")?.detail;
+  if (typeof raw !== "string" || raw === "") return undefined;
+  return raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
+}
 
 // 트레이스 인제스트 본문 — 하니스를 안 돌리고 외부에서 이미 수행한 트레이스를 올린다(엣지 정규화: TraceEvent[] 업로드).
 // dataset/harness 는 라벨 겸 ref(caseId↔task 정렬, diff 정렬). 경계에서 TraceEventSchema 로 검증.
@@ -85,6 +97,9 @@ export interface RunScorecardInput {
   metrics?: Array<{ id: string; version: string }>; // 선택한 등록 Metric 들 — 결과 scores 위에 post-hoc 적용
   runtime?: string; // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
   judge?: JudgeRunConfig; // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
+  // 한 배치 안에서 동시에 디스패치할 케이스 수(runSuite 병렬도). 미지정이면 서비스 기본.
+  // 셀프호스티드 런타임은 이만큼 잡이 lease 큐에 파킹되고, 러너가 그만큼 동시에 lease 해야 실제 case-level 병렬이 된다.
+  concurrency?: number;
 }
 
 export interface ScorecardServiceDeps {
@@ -167,6 +182,8 @@ export class ScorecardService {
       input.runtime,
       judge,
       input.metrics ?? [],
+      // 요청 병렬도가 우선, 없으면 서비스 기본. 양수 정수만(경계는 라우트/MCP 가 Zod 로 강제).
+      input.concurrency ?? this.concurrency,
     );
     return record;
   }
@@ -287,8 +304,15 @@ export class ScorecardService {
     runtime: string | undefined,
     judge: JudgeRunConfig | undefined,
     metrics: Array<{ id: string; version: string }>,
+    concurrency: number, // 동시 디스패치할 케이스 수(요청 override→서비스 기본은 submit 에서 resolve).
   ): Promise<void> {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
+    // 진행 과정(스텝) 타임라인 — run 이 진행되며 append + 증분 저장해 웹에서 "어디까지/무엇을" 하는지 보인다.
+    const steps: ScorecardStep[] = [];
+    const pushStep = (p: string, status: ScorecardStep["status"], message: string, caseId?: string): void => {
+      steps.push({ ts: this.now(), phase: p, status, message, ...(caseId ? { caseId } : {}) });
+    };
+    const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
     // 각 케이스 디스패치에 tenant/spec/judge 모델을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // 초과 시 throw → 배치 실패
@@ -317,26 +341,66 @@ export class ScorecardService {
         ? dataset.cases.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
         : dataset.cases;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
-      scorecard = await runSuite(suite, harnessVersion, dispatch, { concurrency: this.concurrency });
+      pushStep("dispatch", "started", `${cases.length}개 케이스 실행 시작`);
+      await flushSteps();
+      // onResult: 케이스가 끝날 때마다(완료 순서) PASS/FAIL + 사유를 스텝으로 — "진행 과정"의 핵심.
+      scorecard = await runSuite(suite, harnessVersion, dispatch, {
+        concurrency,
+        onResult: (r) => {
+          const v = caseVerdict(r);
+          const reason = caseReason(r);
+          const verdict = v == null ? "결과없음" : v ? "PASS" : "FAIL";
+          pushStep(
+            "case",
+            v === false ? "failed" : "ok",
+            `${r.caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+            r.caseId,
+          );
+          void flushSteps();
+        },
+      });
+      pushStep("dispatch", "ok", `디스패치 완료 — ${scorecard.results.length}개 케이스`);
+      await flushSteps();
       // runtime = 산출 run 의 배치 → judge 를 같은 런타임에 co-locate(관측물 옆에서 판정). ingest 경로엔 산출 run 없음.
       phase = "judges";
+      if (judges.length > 0) {
+        pushStep("judges", "started", `judge ${judges.length}종 적용`);
+        await flushSteps();
+      }
       await this.applyJudges(tenant, dataset, scorecard.results, judges, runtime); // 트레이스 → judge 점수(컨트롤플레인)
+      if (judges.length > 0) {
+        pushStep("judges", "ok", "judge 적용 완료");
+        await flushSteps();
+      }
       phase = "metrics";
+      if (metrics.length > 0) {
+        pushStep("metrics", "started", `metric ${metrics.length}종 적용`);
+        await flushSteps();
+      }
       await this.applyMetrics(tenant, scorecard.results, metrics); // 등록 metric → 합격규칙 점수(judge 뒤: judge 점수에도 임계 가능)
       phase = "offload";
       await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
       phase = "persist";
       const summary = summarizeScorecard(scorecard);
-      await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
+      pushStep("persist", "ok", "집계·저장 완료");
+      await this.deps.store.update(id, {
+        status: "succeeded",
+        scorecard,
+        summary,
+        steps: [...steps],
+        updatedAt: this.now(),
+      });
     } catch (err) {
       const base =
         err instanceof AppError
           ? { code: err.code, message: err.message }
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
+      pushStep(phase, "failed", base.message);
       // 부분 결과 보존 — dispatch 이후(judge/metric/offload) 실패면 이미 모인 케이스 결과를 같이 저장해 가시성을 남긴다.
       await this.deps.store.update(id, {
         status: "failed",
         error: { ...base, phase },
+        steps: [...steps],
         ...(scorecard ? { scorecard, summary: summarizeScorecard(scorecard) } : {}),
         updatedAt: this.now(),
       });

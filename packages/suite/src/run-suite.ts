@@ -38,16 +38,20 @@ export async function runSuite(
   suite: Suite,
   version: string,
   dispatch: Dispatch,
-  opts: { concurrency?: number } = {},
+  // onResult: 각 케이스가 완료될 때(완료 순서; 성공/격리실패 모두) 호출 — 진행 과정(스텝) 보고용.
+  opts: { concurrency?: number; onResult?: (result: CaseResult) => void } = {},
 ): Promise<Scorecard> {
   const jobs: AgentJob[] = suite.cases.map((evalCase) => ({ evalCase, harness: { id: suite.harness.id, version } }));
   // 케이스별로 dispatch 실패를 격리 — 한 케이스가 던져도 나머지는 계속 돌고, 실패는 결과로 박제된다.
   const results = await mapLimit(jobs, opts.concurrency ?? 4, async (job) => {
+    let result: CaseResult;
     try {
-      return await dispatch(job);
+      result = await dispatch(job);
     } catch (error) {
-      return failedCaseResult(job, error);
+      result = failedCaseResult(job, error);
     }
+    opts.onResult?.(result);
+    return result;
   });
   return { suiteId: suite.id, harness: `${suite.harness.id}@${version}`, results };
 }

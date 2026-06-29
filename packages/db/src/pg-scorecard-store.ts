@@ -12,6 +12,7 @@ interface ScorecardRow {
   summary: unknown;
   scorecard: unknown;
   error: unknown;
+  steps: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -19,8 +20,8 @@ interface ScorecardRow {
 const iso = (v: string | Date): string => (typeof v === "string" ? v : v.toISOString());
 
 // row → ScorecardRecord. jsonb 는 pg 가 이미 파싱; timestamptz 는 Date → ISO. 계약은 Zod 로 한 번 검증.
-// hasScorecard=false(목록)면 무거운 scorecard 는 생략한다.
-function rowToRecord(row: ScorecardRow, hasScorecard: boolean): ScorecardRecord {
+// hasDetail=false(목록)면 무거운 scorecard/steps 는 생략한다.
+function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
   return ScorecardRecordSchema.parse({
     id: row.id,
     tenant: row.tenant,
@@ -28,8 +29,9 @@ function rowToRecord(row: ScorecardRow, hasScorecard: boolean): ScorecardRecord 
     harness: { id: row.harness_id, version: row.harness_version },
     status: row.status,
     summary: row.summary ?? undefined,
-    scorecard: hasScorecard ? (row.scorecard ?? undefined) : undefined,
+    scorecard: hasDetail ? (row.scorecard ?? undefined) : undefined,
     error: row.error ?? undefined,
+    steps: hasDetail ? (row.steps ?? undefined) : undefined,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -42,8 +44,8 @@ export class PgScorecardStore implements ScorecardStore {
   async create(r: ScorecardRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO assay_scorecards
-        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, scorecard, error, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, scorecard, error, steps, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         r.id,
         r.tenant,
@@ -55,6 +57,7 @@ export class PgScorecardStore implements ScorecardStore {
         r.summary ? JSON.stringify(r.summary) : null,
         r.scorecard ? JSON.stringify(r.scorecard) : null,
         r.error ? JSON.stringify(r.error) : null,
+        r.steps ? JSON.stringify(r.steps) : null,
         r.createdAt,
         r.updatedAt,
       ],
@@ -62,7 +65,7 @@ export class PgScorecardStore implements ScorecardStore {
   }
 
   async update(id: string, patch: Partial<ScorecardRecord>): Promise<ScorecardRecord | undefined> {
-    // 수명 필드만 갱신 허용(status/summary/scorecard/error/updatedAt).
+    // 수명 필드만 갱신 허용(status/summary/scorecard/error/steps/updatedAt).
     const sets: string[] = [];
     const vals: unknown[] = [];
     let i = 1;
@@ -81,6 +84,10 @@ export class PgScorecardStore implements ScorecardStore {
     if (patch.error !== undefined) {
       sets.push(`error = $${i++}`);
       vals.push(JSON.stringify(patch.error));
+    }
+    if (patch.steps !== undefined) {
+      sets.push(`steps = $${i++}`);
+      vals.push(JSON.stringify(patch.steps));
     }
     if (patch.updatedAt !== undefined) {
       sets.push(`updated_at = $${i++}`);
