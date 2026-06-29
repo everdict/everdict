@@ -37,6 +37,25 @@ describe("runSuite", () => {
     expect(sc.results.map((r) => r.caseId).sort()).toEqual(["a", "b"]);
     expect(seen.every((j) => j.harness.version === "1.0.0")).toBe(true);
   });
+
+  it("한 케이스 dispatch 가 던져도 배치를 멈추지 않고 실패 CaseResult 로 기록한다", async () => {
+    // Given: 케이스 a 는 던지고 b 는 성공하는 dispatch
+    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+      if (job.evalCase.id === "a") throw new Error("boom");
+      return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 3);
+    };
+    // When: 스위트를 돌리면
+    const sc = await runSuite(SUITE, "1.0.0", dispatch, { concurrency: 2 });
+    // Then: 두 케이스 모두 결과가 있고, a 는 error trace + pass:false 로 박제된다
+    expect(sc.results.map((r) => r.caseId).sort()).toEqual(["a", "b"]);
+    const failed = sc.results.find((r) => r.caseId === "a");
+    expect(failed?.harness).toBe("claude-code@1.0.0");
+    expect(failed?.trace).toEqual([{ t: 0, kind: "error", message: "boom" }]);
+    expect(failed?.scores).toEqual([{ graderId: "dispatch", metric: "error", value: 0, pass: false }]);
+    expect(caseVerdict(failed ?? { scores: [] })).toBe(false);
+    // 성공 케이스는 정상 집계
+    expect(caseVerdict(sc.results.find((r) => r.caseId === "b") ?? { scores: [] })).toBe(true);
+  });
 });
 
 describe("summarizeScorecard", () => {
