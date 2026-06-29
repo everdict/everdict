@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, ServiceResources } from "@assay/core";
+import type { ServiceHarnessSpec, ServiceReadiness, ServiceResources } from "@assay/core";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 
 // ServiceResources → k8s container resources(requests=limits). cpu 1000=1코어(millicores), memoryMb→Mi. 정의된 것만 포함.
@@ -7,6 +7,39 @@ function k8sResources(r: ServiceResources): { requests: Record<string, string>; 
   if (r.cpu !== undefined) q.cpu = `${r.cpu}m`;
   if (r.memoryMb !== undefined) q.memory = `${r.memoryMb}Mi`;
   return { requests: q, limits: q };
+}
+
+// docker -v 스타일 마운트 스펙 → k8s volumes(pod) + volumeMounts(container).
+// "/host:/c[:ro]" → hostPath, "named:/c[:ro]" → emptyDir(파드별 임시; 영속 PVC 는 후속). name 은 k8s 규격으로 새니타이즈.
+function k8sVolumes(volumes: string[]): {
+  volumes: Array<Record<string, unknown>>;
+  mounts: Array<Record<string, unknown>>;
+} {
+  const vols: Array<Record<string, unknown>> = [];
+  const mounts: Array<Record<string, unknown>> = [];
+  volumes.forEach((v, i) => {
+    const [source, mountPath, mode] = v.split(":");
+    if (!source || !mountPath) return;
+    const slug = source
+      .replace(/[^a-z0-9]+/gi, "-")
+      .replace(/^-+|-+$/g, "")
+      .toLowerCase();
+    const name = `vol-${i}-${slug || "m"}`.slice(0, 63);
+    vols.push(source.startsWith("/") ? { name, hostPath: { path: source } } : { name, emptyDir: {} });
+    mounts.push({ name, mountPath, ...(mode === "ro" ? { readOnly: true } : {}) });
+  });
+  return { volumes: vols, mounts };
+}
+
+// ServiceReadiness + port → k8s readinessProbe(httpGet "/"). interval→periodSeconds, timeout/interval→failureThreshold.
+function k8sReadinessProbe(r: ServiceReadiness, port: number): Record<string, unknown> {
+  const periodSeconds = Math.max(1, Math.round(r.intervalMs / 1000));
+  return {
+    httpGet: { path: "/", port },
+    periodSeconds,
+    timeoutSeconds: periodSeconds,
+    failureThreshold: Math.max(1, Math.ceil(r.timeoutMs / r.intervalMs)),
+  };
 }
 
 // warm 토폴로지를 K8s Deployment/Service 로 렌더 (서비스당; runtimeClass 로 격리).
@@ -79,6 +112,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
       name,
       value,
     }));
+    const vm = svc.volumes && svc.volumes.length > 0 ? k8sVolumes(svc.volumes) : { volumes: [], mounts: [] };
     out.push({
       apiVersion: "apps/v1",
       kind: "Deployment",
@@ -99,8 +133,14 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
                 env,
                 // 서비스 리소스 요청(svc.resources) → requests=limits. cpu 1000=1코어(millicores), memoryMb→Mi. 미설정=무제한(생략).
                 ...(svc.resources ? { resources: k8sResources(svc.resources) } : {}),
+                // 서비스 볼륨 마운트(svc.volumes). readinessProbe 는 svc.readiness + port 가 있을 때 httpGet "/".
+                ...(vm.mounts.length > 0 ? { volumeMounts: vm.mounts } : {}),
+                ...(svc.readiness && svc.port !== undefined
+                  ? { readinessProbe: k8sReadinessProbe(svc.readiness, svc.port) }
+                  : {}),
               },
             ],
+            ...(vm.volumes.length > 0 ? { volumes: vm.volumes } : {}),
           },
         },
       },

@@ -116,6 +116,27 @@ describe("buildNomadTopologyJob", () => {
     expect(job.Job.TaskGroups[1]?.Tasks[0]?.Resources).toEqual({ CPU: 1000, MemoryMB: 1024 });
   });
 
+  it("svc.volumes 가 docker 드라이버 Config.volumes 로 매핑된다(미설정은 생략)", () => {
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "v",
+          image: "i:1",
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          volumes: ["data:/var/lib/x", "/h:/c:ro"],
+        },
+        { name: "n", image: "i:1", needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+    };
+    const job = buildNomadTopologyJob(spec);
+    expect(job.Job.TaskGroups[0]?.Tasks[0]?.Config.volumes).toEqual(["data:/var/lib/x", "/h:/c:ro"]);
+    expect(job.Job.TaskGroups[1]?.Tasks[0]?.Config.volumes).toBeUndefined();
+  });
+
   it("port 가 있는 서비스에 dynamic port + docker 매핑을 단다 (호스트 발견용)", () => {
     const job = buildNomadTopologyJob(SPEC);
     const agentGroup = job.Job.TaskGroups[0];
@@ -272,6 +293,53 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
       limits: { cpu: "2000m", memory: "4096Mi" },
     });
     expect(def.spec.template.spec.containers[0]?.resources).toBeUndefined();
+  });
+
+  it("K8s: svc.volumes → volumes(emptyDir/hostPath)+volumeMounts, svc.readiness → readinessProbe", () => {
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "app",
+          image: "i:1",
+          port: 8080,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          volumes: ["cache:/cache", "/host/seed:/seed:ro"],
+          readiness: { timeoutMs: 30000, intervalMs: 3000 },
+        },
+      ],
+      dependencies: [],
+    };
+    const m = buildK8sManifests(spec, { namespace: "assay-v" });
+    const dep = m.find((x) => x.kind === "Deployment" && x.metadata.name === "browser-use-langgraph-app") as {
+      spec: {
+        template: {
+          spec: {
+            volumes?: Array<Record<string, unknown>>;
+            containers: Array<{
+              volumeMounts?: Array<Record<string, unknown>>;
+              readinessProbe?: Record<string, unknown>;
+            }>;
+          };
+        };
+      };
+    };
+    const podSpec = dep.spec.template.spec;
+    // named → emptyDir, bind(/host) → hostPath
+    expect(podSpec.volumes?.[0]).toMatchObject({ emptyDir: {} });
+    expect(podSpec.volumes?.[1]).toMatchObject({ hostPath: { path: "/host/seed" } });
+    const c = podSpec.containers[0];
+    expect(c?.volumeMounts?.[0]).toMatchObject({ mountPath: "/cache" });
+    expect(c?.volumeMounts?.[1]).toMatchObject({ mountPath: "/seed", readOnly: true });
+    // readinessProbe: interval 3s → periodSeconds 3, failureThreshold ceil(30000/3000)=10
+    expect(c?.readinessProbe).toMatchObject({
+      httpGet: { path: "/", port: 8080 },
+      periodSeconds: 3,
+      failureThreshold: 10,
+    });
   });
 
   it("K8s: 서비스 env 에 DATABASE_URL/REDIS_URL 을 스토어 DNS 로 자동 주입한다", () => {

@@ -9,7 +9,7 @@ import { sanitizeIdent } from "./store-binding.js";
 interface NomadTopoTask {
   Name: string;
   Driver: string;
-  Config: { image: string; runtime?: string; ports?: string[]; args?: string[] };
+  Config: { image: string; runtime?: string; ports?: string[]; args?: string[]; volumes?: string[] };
   Env: Record<string, string>;
   Resources: { CPU: number; MemoryMB: number };
 }
@@ -170,6 +170,8 @@ export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopol
         },
       ],
     };
+    // 서비스 볼륨(svc.volumes) — docker 드라이버 마운트. 클라이언트에 docker.volumes.enabled 필요(운영 설정).
+    if (svc.volumes && svc.volumes.length > 0) config.volumes = svc.volumes;
     // port 가 있으면 dynamic port + docker 매핑 → 호스트에서 엔드포인트 발견 가능.
     if (svc.port !== undefined) {
       group.Networks = [{ DynamicPorts: [{ Label: "http", To: svc.port }] }];

@@ -1,5 +1,11 @@
 import { spawn } from "node:child_process";
-import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, UpstreamError } from "@assay/core";
+import {
+  type BrowserSnapshot,
+  type ServiceHarnessSpec,
+  type ServiceReadiness,
+  type TrustZone,
+  UpstreamError,
+} from "@assay/core";
 import {
   type ConsulClient,
   buildSharedStoreIntention,
@@ -160,7 +166,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         throw new UpstreamError("UPSTREAM_ERROR", { service: svc.name }, "서비스 포트를 alloc 에서 찾지 못했습니다.");
       }
       const url = `http://${p.hostIp}:${p.port}`;
-      await this.waitForHttp(url);
+      await this.waitForHttp(url, svc.readiness); // 서비스가 readiness 상한을 선언하면 그걸, 아니면 런타임 기본
       endpoints[svc.name] = url;
     }
 
@@ -391,9 +397,10 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   }
 
   // 엔드포인트가 HTTP 응답을 줄 때까지 폴링 (5xx/연결거부는 재시도).
-  private async waitForHttp(url: string): Promise<void> {
-    const deadline = this.opts.readyTimeoutMs ?? 60_000;
-    const interval = this.opts.pollIntervalMs ?? 2000;
+  private async waitForHttp(url: string, readiness?: ServiceReadiness): Promise<void> {
+    // 서비스가 readiness 상한을 선언하면 그 timeout/interval 을, 아니면 런타임 기본을 쓴다(docker 런타임과 동형).
+    const deadline = readiness?.timeoutMs ?? this.opts.readyTimeoutMs ?? 60_000;
+    const interval = readiness?.intervalMs ?? this.opts.pollIntervalMs ?? 2000;
     const steps = Math.max(1, Math.floor(deadline / interval));
     for (let i = 0; i < steps; i++) {
       try {

@@ -27,7 +27,8 @@ export type ServiceResources = z.infer<typeof ServiceResourcesSchema>;
 // 토폴로지 서비스 (무상태 → per-version warm). perRun = 런타임에 주입되는 키 이름들.
 // env = 서비스 정적 env(MODEL/LOG_LEVEL/feature flag 등 비-스토어 설정). 주입 우선순위: 스토어 connEnv(관례) < env < 운영 storeEnv.
 // volumes = docker `-v` 스타일 마운트 스펙("named-vol:/data" · "/host:/container:ro"); readiness = 위 폴링 상한.
-// 둘 다 선언형 — 현재 DockerTopologyRuntime(self-hosted runner)이 해석한다(Nomad/K8s 는 무시).
+// 셋 다(+ resources) 선언형 — Docker/Nomad/K8s 런타임이 모두 해석한다(k8s: volumes→emptyDir/hostPath +
+// readinessProbe; nomad: docker volumes + 런타임 HTTP 대기; docker: -v + 폴링).
 export const TopologyServiceSchema = z.object({
   name: z.string(),
   image: z.string(),
