@@ -149,6 +149,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
 
     server.registerTool(
+      "get_harness_template",
+      {
+        description: "하네스 템플릿(대분류) 구조 스펙 1건 조회 — 구성 보기/새 버전 편집 프리필용",
+        inputSchema: { id: z.string(), version: z.string().describe('템플릿 버전 또는 "latest"') },
+      },
+      ({ id, version }) => run(principal, "harnesses:read", async () => ok(await templates.get(ws, id, version))),
+    );
+
+    server.registerTool(
       "register_harness_template",
       {
         description: "하네스 템플릿(대분류 구조, JSON 문자열) 등록(불변; 충돌 시 CONFLICT). 무게이트(viewer+)",
@@ -177,6 +186,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_harnesses",
       { description: "이 워크스페이스가 보는 하네스 인스턴스(템플릿별로 묶임; 소유 + _shared)", inputSchema: {} },
       () => run(principal, "harnesses:read", async () => ok(await instances.list(ws))),
+    );
+
+    server.registerTool(
+      "get_harness_instance",
+      {
+        description: "하네스 인스턴스 raw 스펙(template 참조 + pins) 1건 조회 — 구성 보기/새 버전 re-pin 프리필용",
+        inputSchema: { id: z.string(), version: z.string().describe('인스턴스 버전 태그 또는 "latest"') },
+      },
+      ({ id, version }) =>
+        run(principal, "harnesses:read", async () => ok(await instances.getInstance(ws, id, version))),
     );
 
     server.registerTool(

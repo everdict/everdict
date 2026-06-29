@@ -569,6 +569,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 템플릿(대분류) 구조 스펙 1건 — 상세 화면의 구성 보기 + 새 버전 편집 프리필용.
+  app.get<{ Params: { id: string; version: string } }>("/harness-templates/:id/:version", async (req, reply) => {
+    if (!deps.harnessTemplates)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      return reply.send(await deps.harnessTemplates.get(principal.workspace, req.params.id, req.params.version));
+    } catch (err) {
+      return sendError(reply, err); // 없는 id/version → 404
+    }
+  });
+
   // 개별 하네스(인스턴스) — /harnesses 가 인스턴스 표면(대분류 = /harness-templates). template 참조 + pins.
   // 무게이트(viewer+). 등록/검증은 resolve 로 확인(템플릿 없음 404 / 핀 누락 400 거부).
   app.post("/harnesses", async (req, reply) => {
@@ -653,6 +667,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.send(await deps.harnessInstances.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // raw 인스턴스(template 참조 + pins) — resolve 전 원본. 상세 화면 구성 보기 + 새 버전 re-pin 프리필용.
+  app.get<{ Params: { id: string; version: string } }>("/harnesses/:id/:version/instance", async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      return reply.send(
+        await deps.harnessInstances.getInstance(principal.workspace, req.params.id, req.params.version),
+      );
+    } catch (err) {
+      return sendError(reply, err); // 없는 id/version → 404
     }
   });
 

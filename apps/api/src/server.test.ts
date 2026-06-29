@@ -722,6 +722,38 @@ describe("API — harness taxonomy (template 대분류 + instance)", () => {
     expect((await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: bad })).statusCode).toBe(400);
     await app.close();
   });
+
+  it("raw 조회: 템플릿 구조 1건 + raw 인스턴스(pins) — 상세 구성/프리필용", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: TEMPLATE });
+    await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: INSTANCE });
+
+    // 템플릿 구조 스펙(슬롯/프론트도어) — resolve 전 원본.
+    const tpl = await app.inject({ method: "GET", url: "/harness-templates/bu/1", headers: h });
+    expect(tpl.statusCode).toBe(200);
+    expect(tpl.json()).toMatchObject({ kind: "service", id: "bu", version: "1", services: [{ name: "agent" }] });
+
+    // raw 인스턴스(template 참조 + pins) — resolved 와 달리 슬롯→값 그대로.
+    const inst = await app.inject({ method: "GET", url: "/harnesses/bu/pr-1/instance", headers: h });
+    expect(inst.statusCode).toBe(200);
+    expect(inst.json()).toMatchObject({
+      template: { id: "bu", version: "1" },
+      id: "bu",
+      version: "pr-1",
+      pins: { agent: "ghcr.io/x/agent:abc" },
+    });
+    await app.close();
+  });
+
+  it("raw 조회: 없는 버전 → 404", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: TEMPLATE });
+    expect((await app.inject({ method: "GET", url: "/harness-templates/bu/9", headers: h })).statusCode).toBe(404);
+    expect((await app.inject({ method: "GET", url: "/harnesses/bu/nope/instance", headers: h })).statusCode).toBe(404);
+    await app.close();
+  });
 });
 
 describe("API — internal key issuance", () => {

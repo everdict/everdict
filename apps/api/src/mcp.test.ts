@@ -173,6 +173,8 @@ describe("MCP tools", () => {
       "fail_job",
       "get_connect_url",
       "get_dataset",
+      "get_harness_instance",
+      "get_harness_template",
       "get_judge",
       "get_run",
       "get_runtime",
@@ -230,6 +232,30 @@ describe("MCP tools", () => {
     // 잘못된 JSON → 오류.
     const bad = await viewer.callTool({ name: "register_harness", arguments: { spec: "{not json" } });
     expect(bad.isError).toBe(true);
+  });
+
+  it("get_harness_template / get_harness_instance: raw 스펙 조회(구성 보기·프리필) — viewer 가능", async () => {
+    const deps = harness();
+    const viewer = await connect(deps, ["viewer"]);
+    await viewer.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
+    await viewer.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
+
+    const tpl = await viewer.callTool({ name: "get_harness_template", arguments: { id: "bu", version: "1" } });
+    expect(tpl.isError).toBeFalsy();
+    expect(JSON.parse(text(tpl))).toMatchObject({ kind: "service", id: "bu", version: "1" });
+
+    const inst = await viewer.callTool({ name: "get_harness_instance", arguments: { id: "bu", version: "1.0.0" } });
+    expect(inst.isError).toBeFalsy();
+    expect(JSON.parse(text(inst))).toMatchObject({
+      template: { id: "bu", version: "1" },
+      id: "bu",
+      version: "1.0.0",
+      pins: { "agent-server": "img" },
+    });
+
+    // 없는 버전 → 오류.
+    const miss = await viewer.callTool({ name: "get_harness_instance", arguments: { id: "bu", version: "nope" } });
+    expect(miss.isError).toBe(true);
   });
 
   it("connections: 개인 소유 — list/get_connect_url/disconnect 는 역할 게이트 없이 본인 연결, 로스터는 members:read", async () => {
