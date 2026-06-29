@@ -1,5 +1,13 @@
-import type { ServiceHarnessSpec } from "@assay/core";
+import type { ServiceHarnessSpec, ServiceResources } from "@assay/core";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
+
+// ServiceResources → k8s container resources(requests=limits). cpu 1000=1코어(millicores), memoryMb→Mi. 정의된 것만 포함.
+function k8sResources(r: ServiceResources): { requests: Record<string, string>; limits: Record<string, string> } {
+  const q: Record<string, string> = {};
+  if (r.cpu !== undefined) q.cpu = `${r.cpu}m`;
+  if (r.memoryMb !== undefined) q.memory = `${r.memoryMb}Mi`;
+  return { requests: q, limits: q };
+}
 
 // warm 토폴로지를 K8s Deployment/Service 로 렌더 (서비스당; runtimeClass 로 격리).
 export interface K8sManifest {
@@ -89,6 +97,8 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
                 imagePullPolicy: opts.imagePullPolicy,
                 ports: svc.port ? [{ containerPort: svc.port }] : [],
                 env,
+                // 서비스 리소스 요청(svc.resources) → requests=limits. cpu 1000=1코어(millicores), memoryMb→Mi. 미설정=무제한(생략).
+                ...(svc.resources ? { resources: k8sResources(svc.resources) } : {}),
               },
             ],
           },

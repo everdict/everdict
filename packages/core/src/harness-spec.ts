@@ -15,6 +15,15 @@ export const ServiceReadinessSchema = z.object({
 });
 export type ServiceReadiness = z.infer<typeof ServiceReadinessSchema>;
 
+// 서비스 리소스 요청 — cpu(1000 = 1 vCPU; k8s millicores 관례) + memoryMb. 미설정 = 런타임 기본.
+// 3종 런타임 매핑: nomad Resources.CPU(MHz)/MemoryMB · k8s requests/limits(${cpu}m / ${memoryMb}Mi) ·
+// docker --cpus(=cpu/1000 코어)/--memory(${memoryMb}m). 같은 토폴로지의 "더 큰 박스" 변주 + 공정성/비용.
+export const ServiceResourcesSchema = z.object({
+  cpu: z.number().int().positive().optional(),
+  memoryMb: z.number().int().positive().optional(),
+});
+export type ServiceResources = z.infer<typeof ServiceResourcesSchema>;
+
 // 토폴로지 서비스 (무상태 → per-version warm). perRun = 런타임에 주입되는 키 이름들.
 // env = 서비스 정적 env(MODEL/LOG_LEVEL/feature flag 등 비-스토어 설정). 주입 우선순위: 스토어 connEnv(관례) < env < 운영 storeEnv.
 // volumes = docker `-v` 스타일 마운트 스펙("named-vol:/data" · "/host:/container:ro"); readiness = 위 폴링 상한.
@@ -29,6 +38,7 @@ export const TopologyServiceSchema = z.object({
   env: z.record(z.string()).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: ServiceReadinessSchema.optional(),
+  resources: ServiceResourcesSchema.optional(), // cpu/memory 요청 — nomad/k8s/docker 가 해석(미설정=런타임 기본)
 });
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
 

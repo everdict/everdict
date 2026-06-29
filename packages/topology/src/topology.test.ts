@@ -95,6 +95,27 @@ describe("buildNomadTopologyJob", () => {
     expect(env?.PG_URL).toBe("store"); // storeEnv 가 svc.env 를 이긴다
   });
 
+  it("svc.resources 가 task Resources 로 매핑된다(미설정은 기본 1000/1024)", () => {
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "big",
+          image: "i:1",
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          resources: { cpu: 2000, memoryMb: 4096 },
+        },
+        { name: "default", image: "i:1", needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+    };
+    const job = buildNomadTopologyJob(spec);
+    expect(job.Job.TaskGroups[0]?.Tasks[0]?.Resources).toEqual({ CPU: 2000, MemoryMB: 4096 });
+    expect(job.Job.TaskGroups[1]?.Tasks[0]?.Resources).toEqual({ CPU: 1000, MemoryMB: 1024 });
+  });
+
   it("port 가 있는 서비스에 dynamic port + docker 매핑을 단다 (호스트 발견용)", () => {
     const job = buildNomadTopologyJob(SPEC);
     const agentGroup = job.Job.TaskGroups[0];
@@ -219,6 +240,38 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
     expect(env.LOG_LEVEL).toBe("info"); // svc.env 단독
     expect(env.REDIS_URL).toBe("redis://svc"); // svc.env 가 connEnv(redis://e-redis:6379) 를 이긴다
     expect(env.DATABASE_URL).toBe("postgresql://store"); // storeEnv 가 svc.env 를 이긴다(스토어 cred 권위)
+  });
+
+  it("K8s: svc.resources 가 container resources(requests=limits)로 매핑되고, 미설정이면 생략", () => {
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        {
+          name: "big",
+          image: "i:1",
+          port: 8080,
+          needs: [],
+          perRun: [],
+          replicas: 1,
+          env: {},
+          resources: { cpu: 2000, memoryMb: 4096 },
+        },
+        { name: "default", image: "i:1", port: 8081, needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+      dependencies: [],
+    };
+    const manifests = buildK8sManifests(spec, { namespace: "assay-r" });
+    const big = manifests.find((m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-big") as {
+      spec: { template: { spec: { containers: Array<{ resources?: unknown }> } } };
+    };
+    const def = manifests.find(
+      (m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-default",
+    ) as { spec: { template: { spec: { containers: Array<{ resources?: unknown }> } } } };
+    expect(big.spec.template.spec.containers[0]?.resources).toEqual({
+      requests: { cpu: "2000m", memory: "4096Mi" },
+      limits: { cpu: "2000m", memory: "4096Mi" },
+    });
+    expect(def.spec.template.spec.containers[0]?.resources).toBeUndefined();
   });
 
   it("K8s: 서비스 env 에 DATABASE_URL/REDIS_URL 을 스토어 DNS 로 자동 주입한다", () => {

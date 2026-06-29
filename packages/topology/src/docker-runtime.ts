@@ -75,6 +75,9 @@ export class DockerTopologyRuntime implements TopologyRuntime {
           env: { ...connEnv, ...svc.env, ...this.opts.storeEnv },
           ...(svc.volumes && svc.volumes.length > 0 ? { volumes: svc.volumes } : {}),
           ...(svc.port !== undefined ? { publish: svc.port } : {}),
+          // 리소스 요청: cpu 1000=1코어 → --cpus 코어(=cpu/1000), memoryMb → --memory. 정의된 것만.
+          ...(svc.resources?.cpu !== undefined ? { cpus: svc.resources.cpu / 1000 } : {}),
+          ...(svc.resources?.memoryMb !== undefined ? { memoryMb: svc.resources.memoryMb } : {}),
         });
         if (svc.port !== undefined) {
           const hostPort = await this.docker.hostPort(cname, svc.port);

@@ -7,6 +7,8 @@ import {
   type HarnessSpec,
   ProcessHarnessSpecSchema,
   ServiceHarnessSpecSchema,
+  ServiceReadinessSchema,
+  ServiceResourcesSchema,
   TopologyDependencySchema,
   TopologyServiceSchema,
   TopologyTargetSchema,
@@ -76,15 +78,31 @@ export type HarnessTemplateSpec = z.infer<typeof HarnessTemplateSpecSchema>;
 // 이미지 교체는 기존 pins 로(흔한 경우). overrides 는 같은 템플릿 안에서 모델/온도/플래그/페이로드 변주를 표현하는 통로.
 // 설계: docs/architecture/harness-taxonomy.md "Instance variation".
 export const InstanceServiceOverrideSchema = z.object({
-  env: z.record(z.string()).optional(), // 서비스 정적 env 오버레이(템플릿 env 위에 병합; storeEnv 아래)
+  env: z.record(z.string()).optional(), // 서비스 정적 env 오버레이(템플릿 env 위에 병합; storeEnv 아래) — Phase 1
+  replicas: z.number().int().positive().optional(), // Phase 2 — nomad/k8s 존중(docker 단일호스트=1)
+  resources: ServiceResourcesSchema.optional(), // Phase 2 — cpu/memory (scalar 치환)
+  volumes: z.array(z.string()).optional(), // Phase 3 — docker 존중(nomad/k8s 후속) (scalar 치환)
+  readiness: ServiceReadinessSchema.optional(), // Phase 3 — readiness 폴링 상한 (scalar 치환)
 });
 export type InstanceServiceOverride = z.infer<typeof InstanceServiceOverrideSchema>;
 
 export const InstanceOverridesSchema = z.object({
   // service 템플릿: 서비스명 → 오버라이드. 템플릿에 없는 서비스명이면 resolve 가 BadRequest.
   services: z.record(InstanceServiceOverrideSchema).optional(),
-  // service 템플릿: front-door submit 본문 값 오버라이드(템플릿 bodyTemplate 위에 shallow-merge).
-  frontDoor: z.object({ request: z.object({ bodyTemplate: z.record(z.unknown()).optional() }).optional() }).optional(),
+  // service 템플릿: front-door submit 본문 값(shallow-merge) + 완료 타이밍 튜닝(completion 위에 spread; 무효 키는 재파싱이 제거).
+  frontDoor: z
+    .object({
+      request: z.object({ bodyTemplate: z.record(z.unknown()).optional() }).optional(),
+      completion: z
+        .object({
+          timeoutMs: z.number().int().positive().optional(),
+          intervalMs: z.number().int().positive().optional(),
+        })
+        .optional(),
+    })
+    .optional(),
+  // service 템플릿: 브라우저 타깃 익스텐션 ref 핀(Phase 3). 템플릿에 target 이 없으면 resolve 가 BadRequest.
+  target: z.object({ extension: z.object({ ref: z.string() }) }).optional(),
   // command 템플릿: env 오버레이 + {{var}} 값. 각각 템플릿 위에 병합.
   env: z.record(z.string()).optional(),
   params: z.record(z.string()).optional(),
@@ -139,31 +157,60 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
             `서비스 '${s.name}' 의 slot '${slot}' 에 대한 pin(이미지)이 없습니다.`,
           );
         }
-        const envOverride = overrides?.services?.[s.name]?.env;
+        const ov = overrides?.services?.[s.name];
+        // env 는 병합(인스턴스가 이김; 런타임은 connEnv < 이 env < storeEnv). 나머지 노브는 scalar 치환(있으면 인스턴스, 없으면 템플릿).
+        const env = ov?.env ? { ...s.env, ...ov.env } : s.env;
+        const volumes = ov?.volumes ?? s.volumes;
+        const readiness = ov?.readiness ?? s.readiness;
+        const resources = ov?.resources ?? s.resources;
         return {
           name: s.name,
           image,
           needs: s.needs,
           perRun: s.perRun,
-          replicas: s.replicas,
-          // 인스턴스 env 오버레이: 템플릿 env 위에 병합(인스턴스가 이김). 런타임은 connEnv < 이 env < storeEnv 로 주입.
-          env: envOverride ? { ...s.env, ...envOverride } : s.env,
+          replicas: ov?.replicas ?? s.replicas,
+          env,
           ...(s.port !== undefined ? { port: s.port } : {}),
-          ...(s.volumes !== undefined ? { volumes: s.volumes } : {}),
-          ...(s.readiness !== undefined ? { readiness: s.readiness } : {}),
+          ...(volumes !== undefined ? { volumes } : {}),
+          ...(readiness !== undefined ? { readiness } : {}),
+          ...(resources !== undefined ? { resources } : {}),
         };
       });
-      // front-door submit 본문 값 오버라이드: 템플릿 bodyTemplate 위에 shallow-merge(드라이버가 {{var}} 보간).
+      // front-door: submit 본문 값(shallow-merge) + 완료 타이밍(completion 위에 spread; 모드 불일치 키는 재파싱이 제거).
       const bodyOverride = overrides?.frontDoor?.request?.bodyTemplate;
-      const frontDoor = bodyOverride
-        ? {
-            ...template.frontDoor,
-            request: {
-              ...(template.frontDoor.request ?? {}),
-              bodyTemplate: { ...(template.frontDoor.request?.bodyTemplate ?? {}), ...bodyOverride },
-            },
-          }
-        : template.frontDoor;
+      const completionOverride = overrides?.frontDoor?.completion;
+      let frontDoor = template.frontDoor;
+      if (bodyOverride) {
+        frontDoor = {
+          ...frontDoor,
+          request: {
+            ...(frontDoor.request ?? {}),
+            bodyTemplate: { ...(frontDoor.request?.bodyTemplate ?? {}), ...bodyOverride },
+          },
+        };
+      }
+      if (completionOverride && frontDoor.completion) {
+        frontDoor = {
+          ...frontDoor,
+          completion: {
+            ...frontDoor.completion,
+            ...(completionOverride.timeoutMs !== undefined ? { timeoutMs: completionOverride.timeoutMs } : {}),
+            ...(completionOverride.intervalMs !== undefined ? { intervalMs: completionOverride.intervalMs } : {}),
+          },
+        };
+      }
+      // 타깃 익스텐션 ref 핀(Phase 3) — 템플릿에 target 이 있어야 한다(없으면 명확히 실패).
+      let target = template.target;
+      if (overrides?.target) {
+        if (!target) {
+          throw new BadRequestError(
+            "BAD_REQUEST",
+            {},
+            "overrides.target 가 있으나 템플릿에 target(browser)이 없습니다.",
+          );
+        }
+        target = { ...target, extension: { ...(target.extension ?? {}), ref: overrides.target.extension.ref } };
+      }
       return ServiceHarnessSpecSchema.parse({
         kind: "service",
         id: instance.id,
@@ -172,7 +219,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         dependencies: template.dependencies,
         frontDoor,
         traceSource: template.traceSource,
-        ...(template.target ? { target: template.target } : {}),
+        ...(target ? { target } : {}),
       });
     }
     case "command": {

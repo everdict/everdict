@@ -127,6 +127,17 @@ describe("dockerRunArgs / parseHostPort (pure)", () => {
     expect(dockerRunArgs({ name: "c", image: "img:1", network: "net" })).not.toContain("-v");
   });
 
+  it("cpus/memoryMb 를 --cpus/--memory 로 펼치고, 미지정이면 붙지 않는다", () => {
+    const args = dockerRunArgs({ name: "c", image: "img:1", network: "net", cpus: 2, memoryMb: 4096 });
+    expect(args).toContain("--cpus");
+    expect(args[args.indexOf("--cpus") + 1]).toBe("2");
+    expect(args).toContain("--memory");
+    expect(args[args.indexOf("--memory") + 1]).toBe("4096m");
+    const none = dockerRunArgs({ name: "c", image: "img:1", network: "net" });
+    expect(none).not.toContain("--cpus");
+    expect(none).not.toContain("--memory");
+  });
+
   it("docker port 출력에서 호스트 포트를 뽑는다", () => {
     expect(parseHostPort("0.0.0.0:49153\n[::]:49153")).toBe(49153);
   });

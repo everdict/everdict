@@ -206,7 +206,8 @@ it when that work has landed and the tree is green. Bucket A swaps are mechanica
 
 # Instance variation — richer overrides (beyond image)
 
-> **Status: design + Phase 1 implemented.** Track A landed templates/instances, but an instance can pin only the
+> **Status: design + Phases 1–3 implemented (web/MCP UI is the remaining follow-up).** Track A landed
+> templates/instances, but an instance can pin only the
 > **image** per slot (and `image`/`model` for command). That is too thin to express a *variation* of the same
 > template — same shape, different behavior (model, sampling temperature, feature flags, CLI flags, submit-payload
 > knobs, replicas, resources). Today every such variation forces a **new template version**, even though the shape
@@ -301,15 +302,21 @@ isolation.
   front-door `request.bodyTemplate` value override (service) + command `env` overlay + command `params` (`{{var}}`).
   Pure `@assay/core` schema + `resolveHarnessInstance` merge + `CommandHarness` `{{var}}` substitution. Flows
   end-to-end through API/MCP immediately (they validate `HarnessInstanceSpecSchema`, which now accepts `overrides`).
-- **Phase 2 — orchestrator knobs:** add `resources { cpu, memoryMb }` to `TopologyService`, honor it in
-  nomad (`Resources`) / k8s (`resources.requests/limits`) / docker (`--cpus`/`--memory`), replacing the hardcoded
-  values; make `resources` + the already-honored `replicas` instance-overridable.
-- **Phase 3 — docker-first, extend later:** `volumes` + `readiness` instance overrides; `target.extension.ref`
-  as a slot; `completion.timeoutMs` / `poll.intervalMs` tuning.
-- **Web/MCP UI** (follow-up to each phase): the instance form gains env/body/params editors; the harness 구성
-  panel + instance diff render overrides; BFF↔MCP parity is automatic for the JSON surface (schema-driven), the
-  UI is the additive work.
+- **Phase 2 — orchestrator knobs (implemented):** `resources { cpu, memoryMb }` added to `TopologyService` and
+  honored by all three runtimes — nomad `Resources.CPU/MemoryMB` (replacing the hardcoded `1000/1024`), k8s
+  container `resources.requests=limits` (`${cpu}m` / `${memoryMb}Mi`), docker `--cpus` (`cpu/1000`) / `--memory`
+  (`${memoryMb}m`). `cpu` is `1000 = 1 vCPU` (k8s millicores convention). `resources` + the already-honored
+  `replicas` are instance-overridable (`overrides.services[name].{resources,replicas}`, scalar replace).
+- **Phase 3 — instance overrides (implemented; docker honors volumes/readiness, nomad/k8s later):**
+  `overrides.services[name].{volumes,readiness}` (scalar replace) + `overrides.target.extension.ref` (browser
+  extension pin; `BadRequest` if the template has no `target`) + `overrides.frontDoor.completion.{timeoutMs,
+  intervalMs}` (spread onto the template's completion; mode-mismatched keys are stripped by the schema re-parse,
+  so e.g. `intervalMs` is dropped on a non-`poll` completion).
+- **Web/MCP UI** (the remaining follow-up): the instance form gains env/body/params/resources/replicas editors;
+  the harness 구성 panel + instance diff render overrides; BFF↔MCP parity is automatic for the JSON surface
+  (schema-driven), the UI is the additive work.
 
-> Phase 1 blast radius: `@assay/core` (`harness-spec` command `params`, `harness-template` `overrides` + resolve),
-> `@assay/harnesses` (`CommandHarness` `{{var}}`), + tests. No runtime, registry, auth, or API route changes
-> (the instance JSON already round-trips through the validated schema).
+> Blast radius: `@assay/core` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
+> `harness-template` `overrides` + resolve), `@assay/harnesses` (`CommandHarness` `{{var}}`), `@assay/topology`
+> (nomad/k8s/docker resource honoring), + tests. No registry, auth, or API route changes (the instance JSON
+> round-trips through the validated schema).

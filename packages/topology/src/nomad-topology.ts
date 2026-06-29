@@ -165,7 +165,8 @@ export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopol
           Config: config,
           // 서비스 정적 env(svc.env) 위에 운영 storeEnv 가 이긴다(스토어 cred 권위). storeEnv 엔 런타임이 발견한 스토어 URL 포함.
           Env: { ...svc.env, ...opts.storeEnv },
-          Resources: { CPU: 1000, MemoryMB: 1024 },
+          // 서비스 리소스 요청(svc.resources) — 미설정 시 기본 1코어/1GB. cpu 는 1000=1코어(=MHz 매핑).
+          Resources: { CPU: svc.resources?.cpu ?? 1000, MemoryMB: svc.resources?.memoryMb ?? 1024 },
         },
       ],
     };

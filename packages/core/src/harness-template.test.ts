@@ -175,6 +175,101 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.frontDoor.request?.bodyTemplate).toEqual({ task: "{{task}}", max_steps: 30 });
   });
 
+  it("overrides.services[] 의 replicas/resources/volumes/readiness 가 scalar 치환된다(Phase 2/3)", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "r",
+      version: "1",
+      services: [{ name: "planner", needs: [], replicas: 1, readiness: { timeoutMs: 60000, intervalMs: 1000 } }],
+      dependencies: [],
+      frontDoor: { service: "planner", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "r", version: "1" },
+      id: "r",
+      version: "big",
+      pins: { planner: "p:1" },
+      overrides: {
+        services: {
+          planner: {
+            replicas: 3,
+            resources: { cpu: 2000, memoryMb: 4096 },
+            volumes: ["cache:/cache"],
+            readiness: { timeoutMs: 120000, intervalMs: 2000 },
+          },
+        },
+      },
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    const s = resolved.services[0];
+    expect(s?.replicas).toBe(3);
+    expect(s?.resources).toEqual({ cpu: 2000, memoryMb: 4096 });
+    expect(s?.volumes).toEqual(["cache:/cache"]);
+    expect(s?.readiness).toEqual({ timeoutMs: 120000, intervalMs: 2000 });
+  });
+
+  it("overrides.target.extension.ref 가 템플릿 target 의 익스텐션을 핀하고, target 없으면 BadRequest(Phase 3)", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "t",
+      version: "1",
+      services: [{ name: "planner", needs: [] }],
+      dependencies: [],
+      target: { kind: "browser", engine: "chromium" },
+      frontDoor: { service: "planner", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "t", version: "1" },
+      id: "t",
+      version: "ext2",
+      pins: { planner: "p:1" },
+      overrides: { target: { extension: { ref: "ghcr.io/acme/ext:2" } } },
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.target?.extension?.ref).toBe("ghcr.io/acme/ext:2");
+
+    // target 없는 템플릿에 target override → BadRequest
+    const noTarget = HarnessTemplateSpecSchema.parse({ ...tpl, target: undefined });
+    expect(() => resolveHarnessInstance(noTarget, instance)).toThrow(BadRequestError);
+  });
+
+  it("overrides.frontDoor.completion 타이밍이 템플릿 completion 위에 병합되고 모드 불일치 키는 제거된다(Phase 3)", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "c",
+      version: "1",
+      services: [{ name: "planner", needs: [] }],
+      dependencies: [],
+      frontDoor: {
+        service: "planner",
+        submit: "POST /runs",
+        completion: { mode: "poll", statusPath: "GET /runs/{run_id}", done: { field: "status", equals: "done" } },
+      },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "c", version: "1" },
+      id: "c",
+      version: "slow",
+      pins: { planner: "p:1" },
+      overrides: { frontDoor: { completion: { timeoutMs: 300000, intervalMs: 5000 } } },
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    const c = resolved.frontDoor.completion;
+    if (c?.mode !== "poll") throw new Error("expected poll");
+    expect(c.timeoutMs).toBe(300000);
+    expect(c.intervalMs).toBe(5000);
+    expect(c.statusPath).toBe("GET /runs/{run_id}"); // 모드/구조는 보존
+  });
+
   it("overrides 대상 서비스가 템플릿에 없으면 BadRequestError", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "bu", version: "1" },

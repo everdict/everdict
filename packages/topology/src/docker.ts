@@ -14,6 +14,8 @@ export interface DockerRunSpec {
   env?: Record<string, string>;
   volumes?: string[]; // -v 마운트 스펙(named volume / bind mount). 예: "vol:/data", "/host:/container:ro"
   publish?: number; // 이 컨테이너 포트를 임의 호스트 포트로 게시(-p <port>) → hostPort 로 발견
+  cpus?: number; // --cpus (코어, 소수 가능). ServiceResources.cpu/1000.
+  memoryMb?: number; // --memory (MB). ServiceResources.memoryMb.
   args?: string[]; // 이미지 뒤 커맨드/인자(예: minio "server /data", chrome 플래그)
 }
 
@@ -24,6 +26,8 @@ export function dockerRunArgs(s: DockerRunSpec): string[] {
   for (const [k, v] of Object.entries(s.env ?? {})) args.push("-e", `${k}=${v}`);
   for (const v of s.volumes ?? []) args.push("-v", v); // named volume / bind mount
   if (s.publish !== undefined) args.push("-p", String(s.publish)); // 호스트 포트 미지정 → 임의 포트 게시
+  if (s.cpus !== undefined) args.push("--cpus", String(s.cpus)); // 리소스 요청(코어)
+  if (s.memoryMb !== undefined) args.push("--memory", `${s.memoryMb}m`); // 리소스 요청(MB)
   args.push(s.image);
   if (s.args) args.push(...s.args);
   return args;
