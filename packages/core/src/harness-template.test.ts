@@ -97,6 +97,33 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.services[0]?.readiness).toEqual({ timeoutMs: 120000, intervalMs: 2000 });
   });
 
+  it("external(BYO) dependency + service 가 resolved spec 까지 보존된다", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "service",
+      category: "topology",
+      id: "x",
+      version: "1",
+      services: [{ name: "planner", needs: [] }],
+      dependencies: [{ store: "redis", role: "cache", isolateBy: "external", service: "planner" }],
+      frontDoor: { service: "planner", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://o:4318" },
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "x", version: "1" },
+      id: "x",
+      version: "v1",
+      pins: { planner: "p:1" },
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.dependencies[0]).toEqual({
+      store: "redis",
+      role: "cache",
+      isolateBy: "external",
+      service: "planner",
+    });
+  });
+
   it("슬롯 pin 누락 → BadRequestError", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "bu", version: "1" },

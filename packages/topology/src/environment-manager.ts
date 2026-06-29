@@ -15,7 +15,11 @@ export function keysFor(runId: string): RunKeys {
 }
 
 // isolateBy 종류 → (템플릿 변수 이름, per-run 값). LangGraph 고정 이름 대신 isolateBy 분류에서 파생.
-function isolationVar(isolateBy: TopologyDependency["isolateBy"], runId: string): [string, string] {
+// "external"(BYO 외부 스토어)은 케이스별 격리가 없으므로 호출 전에 걸러진다(wiringVars).
+function isolationVar(
+  isolateBy: Exclude<TopologyDependency["isolateBy"], "external">,
+  runId: string,
+): [string, string] {
   switch (isolateBy) {
     case "thread_id":
       return ["thread_id", `run-${runId}`];
@@ -37,6 +41,7 @@ export function wiringVars(
 ): Record<string, string> {
   const vars: Record<string, string> = { run_id: runId, ...extra };
   for (const dep of dependencies) {
+    if (dep.isolateBy === "external") continue; // 외부 스토어는 케이스별 격리 변수 없음
     const [name, value] = isolationVar(dep.isolateBy, runId);
     vars[name] = value;
   }

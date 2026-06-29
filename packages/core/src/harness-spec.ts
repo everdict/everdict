@@ -33,10 +33,15 @@ export const TopologyServiceSchema = z.object({
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
 
 // 의존 스토어 (공유 + 케이스별 논리격리). isolateBy = 격리 키 종류.
+// isolateBy="external" = BYO 외부/공유 스토어(다른 클러스터 등) — Assay 가 배포/격리하지 않고 서비스가 그냥 붙는다.
+//   연결은 스펙 밖, 배포 시 env(storeEnv)/service.env 로 주입(StoreIsolation 의 external 모델과 일관).
+//   런타임은 external dep 를 프로비저닝/와이어링에서 제외하고, 다이어그램/구조는 first-class 로 노출만 한다.
+// service = 이 스토어를 쓰는 서비스(미지정 = 토폴로지 공용) — 다이어그램의 서비스→스토어 엣지용.
 export const TopologyDependencySchema = z.object({
   store: z.enum(["postgres", "redis", "minio"]),
   role: z.string(),
-  isolateBy: z.enum(["thread_id", "key-prefix", "object-prefix", "schema"]),
+  isolateBy: z.enum(["thread_id", "key-prefix", "object-prefix", "schema", "external"]),
+  service: z.string().optional(),
 });
 export type TopologyDependency = z.infer<typeof TopologyDependencySchema>;
 

@@ -47,6 +47,7 @@ export function dependencyStores(spec: ServiceHarnessSpec): Array<{ store: strin
   const seen = new Set<string>();
   const out: Array<{ store: string; name: string; def: StoreDef }> = [];
   for (const dep of spec.dependencies ?? []) {
+    if (dep.isolateBy === "external") continue; // BYO 외부 스토어 — Assay 가 배포/connEnv 주입하지 않음(연결=storeEnv)
     if (seen.has(dep.store)) continue;
     const def = STORE_DEFS[dep.store];
     if (!def) continue;
