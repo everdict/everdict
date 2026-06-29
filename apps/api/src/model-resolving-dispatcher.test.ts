@@ -11,6 +11,7 @@ function commandSpec(model?: string): CommandHarnessSpec {
     setup: [],
     command: "aider --model {{model}} --message {{task}}",
     env: {},
+    params: {},
     trace: { kind: "none" },
     ...(model !== undefined ? { model } : {}),
   };

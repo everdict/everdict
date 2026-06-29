@@ -77,10 +77,14 @@ export class CommandHarness implements EvaluableHarness {
     }
 
     // {{task}} 는 셸 인젝션 방지로 따옴표 처리(따옴표로 감싸지 말 것). {{model}}/{{run_id}} 는 토큰 치환.
-    const cmd = this.spec.command
+    // 그 외 {{var}} 는 params[var] 로 치환(인스턴스 변주의 CLI 플래그 통로) — 예약어를 먼저 치환해 params 가 덮지 못하게.
+    let cmd = this.spec.command
       .replaceAll("{{task}}", shq(task))
       .replaceAll("{{model}}", this.spec.model ?? "")
       .replaceAll("{{run_id}}", runId);
+    for (const [key, value] of Object.entries(this.spec.params ?? {})) {
+      cmd = cmd.replaceAll(`{{${key}}}`, value);
+    }
     try {
       await compute.exec(cmd, { cwd: this.cwd, env, timeoutSec: ctx.timeoutSec });
 

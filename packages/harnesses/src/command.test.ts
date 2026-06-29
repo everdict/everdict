@@ -28,6 +28,7 @@ const spec = (over: Partial<CommandHarnessSpec> = {}): CommandHarnessSpec => ({
   command: "aider --message {{task}} --model {{model}} .",
   env: { FOO: "bar" },
   model: "sonnet",
+  params: {},
   trace: { kind: "none" },
   ...over,
 });
@@ -66,6 +67,22 @@ describe("CommandHarness", () => {
     expect(e?.cmd).toContain("--message 'fix the bug'"); // {{task}} 는 shq 처리
     expect(e?.env?.ASSAY_RUN_ID).toBe("rid1");
     expect(e?.env?.FOO).toBe("bar");
+  });
+
+  it("일반 {{var}} 는 spec.params 로 치환되고 예약어({{model}})는 params 가 덮지 못한다", async () => {
+    const { compute, execs } = fakeCompute();
+    const h = new CommandHarness(
+      spec({
+        command: "aider --model {{model}} --edit-format {{edit_format}} --map-tokens {{map_tokens}} .",
+        params: { edit_format: "diff", map_tokens: "2048", model: "ignored" },
+      }),
+      { runId: () => "rid1" },
+    );
+    await collect(h.run(compute, "t", ctx));
+    const cmd = execs[0]?.cmd ?? "";
+    expect(cmd).toContain("--edit-format diff");
+    expect(cmd).toContain("--map-tokens 2048");
+    expect(cmd).toContain("--model sonnet"); // 예약어가 먼저 치환됨 → params.model 무시
   });
 
   it("trace otel → 주입된 소스에서 runId 로 이벤트를 가져온다", async () => {

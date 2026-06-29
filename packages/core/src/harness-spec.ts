@@ -195,9 +195,12 @@ export const CommandHarnessSpecSchema = z.object({
   image: z.string().optional(), // 디스패치 이미지(없으면 기본 에이전트 이미지). setup 으로 도구 설치.
   workDir: z.string().optional(), // setup/command 실행 디렉터리(기본 "work"). os-use 등 work 가 없는 환경은 절대경로(예: "/tmp").
   setup: z.array(z.string()).default([]), // 샌드박스에서 1회 실행(예: "pip install aider-chat==0.74.0")
-  command: z.string(), // 예: "aider --yes --message {{task}} --model {{model}} ."
+  command: z.string(), // 예: "aider --yes --message {{task}} --model {{model}} --edit-format {{edit_format}} ."
   env: z.record(z.string()).default({}),
   model: z.string().optional(),
+  // 일반 {{var}} 치환 값 — command 의 {{key}} 를 params[key] 로 채운다(예약어 {{task}}/{{model}}/{{run_id}} 제외).
+  // 같은 템플릿의 변주(인스턴스 overrides.params)가 CLI 플래그를 바꾸는 통로. 값은 셸 이스케이프 안 함(작성자 신뢰, {{model}} 과 동일).
+  params: z.record(z.string()).default({}),
   trace: CommandTraceSpecSchema.default({ kind: "none" }),
 });
 export type CommandHarnessSpec = z.infer<typeof CommandHarnessSpecSchema>;
