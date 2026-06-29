@@ -111,6 +111,11 @@ One service core, three transports (HTTP route + MCP tool + web), per the parity
   (member write, body = `{template, pins}`); validate (dry-run) mirrors. `GET /harnesses` returns instances
   **grouped by template** with the resolved diff. MCP: `register_template`/`list_templates` +
   `register_harness`(instance)/`list_harnesses`.
+  - **Raw config reads** (resolve 전 원본): `GET /harness-templates/:id/:version` → `HarnessTemplateSpec`
+    (structure/slots) and `GET /harnesses/:id/:version/instance` → `HarnessInstanceSpec` (template ref + pins).
+    Distinct from `GET /harnesses/:id/:version` (the **resolved** spec). MCP parity:
+    `get_harness_template` / `get_harness_instance` (`harnesses:read`). These power the web 구성 패널 + the
+    edit-and-new-version prefill below.
 - **Web** (fixes the flat-explosion pain directly):
   - `/dashboard/harnesses` — top level lists **templates (대분류)** as cards: category, name, # instances,
     latest instance. The per-PR/SHA entries are **collapsed under their template**, not flat.
@@ -118,6 +123,12 @@ One service core, three transports (HTTP route + MCP tool + web), per the parity
     (version, **pin diff**, created at, who).
   - **인스턴스 등록** form (member): pick a template → fill the image/version per slot → register.
   - **템플릿 등록** form (admin): define structure + slots.
+  - **하니스 상세 → 구성(Config) 패널 + 새 버전 만들기**: the detail page shows the active version's raw config
+    (template ref + slot→value pins) and a "새 버전 만들기" entry. Because versions are **immutable**, editing =
+    registering a new version: the register-wizard forms (`InstanceForm`/`TemplateForm`) are reused **prefilled**
+    from the current config (`instanceStateFromSpec` / `templateStateFromSpec`), with `id`/`kind` locked. Two axes:
+    인스턴스 pins 재핀 → new instance tag (→ detail of the new version); 템플릿 구조 변경 → new template semver,
+    then the page returns to the 인스턴스 탭 (`?tplVersion=`) to re-pin an instance on the new structure.
 
 ## Scorecards / regression
 

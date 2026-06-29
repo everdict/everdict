@@ -52,7 +52,9 @@ Identity is resolved by the **auth core** (`@assay/auth`): `Authorization: Beare
 missing/invalid credential is **401**, otherwise dev falls back to the `x-assay-tenant` header (admin). The
 resolved `workspace` (= tenant = trust-zone) keys fairness, quotas, isolation, secret scoping, budgets — and
 scopes every read; roles gate every route (`viewer/member/admin`). See [auth.md](auth.md). Harness registration
-(`POST/GET /harnesses`, workspace-owned), datasets (`POST/GET /datasets`, workspace-owned + `_shared`, see
+(`POST/GET /harnesses` instances + `POST/GET /harness-templates` 대분류; raw config reads
+`GET /harnesses/:id/:version/instance` [template ref + pins] and `GET /harness-templates/:id/:version` [structure]
+power the web 구성 패널 + new-version prefill — `harnesses:read`), datasets (`POST/GET /datasets`, workspace-owned + `_shared`, see
 [datasets.md](datasets.md)) and key issuance (admin self-serve `POST/GET/DELETE /keys` — issued keys carry
 workspace admin role, narrowable by per-key `scopes` (`read|write|admin`, omitted = Full Access), plaintext shown
 once, hash-only at rest; bootstrap `POST /internal/tenant-keys`) are covered in [tenancy.md](tenancy.md).

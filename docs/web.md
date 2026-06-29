@@ -50,7 +50,13 @@ Import order enforces downward layer deps (app → widgets → features → enti
 - **개요 `/{workspace}`** — scorecard stat cards (total / success / fail / pass-rate) + recent runs + harness summary.
 - **Runs `/{workspace}/runs`** — full runs table (rows link to detail).
 - **Run detail `/{workspace}/runs/[id]`** — status, meta, scores, **trace timeline**, snapshot, error.
-- **하니스 `/{workspace}/harnesses`** — owned vs `_shared` harnesses with versions.
+- **하니스 `/{workspace}/harnesses`** — owned vs `_shared` harnesses with versions. **상세
+  `/{workspace}/harnesses/[id]`** shows the active version's **구성(Config) 패널** — the raw, editable config
+  (template 대분류 ref `id@version` + slot→value pins, via `GET /harnesses/:id/:version/instance` +
+  `GET /harness-templates/:id/:version`) above the resolved spec views (diagram / structure / JSON). A **"새 버전
+  만들기"** action (`/{workspace}/harnesses/[id]/new-version`) prefills the current config into the register
+  wizard — versions are immutable, so editing = registering a new version (인스턴스 pins 재핀 → new instance tag,
+  or 템플릿 구조 → new template semver, then re-pin an instance on it).
 - **데이터셋 `/{workspace}/datasets`** — owned vs `_shared` benchmark datasets with version chips (rows link to
   detail). **상세 `/{workspace}/datasets/[id]`** shows the latest version's eval cases. **데이터셋 등록
   `/{workspace}/datasets/new`** — id/version/description + cases-JSON with a **validate (dry-run)** step then

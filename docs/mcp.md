@@ -14,9 +14,12 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `list_runs` | `runs:read` (viewer+) | the caller's workspace runs |
 | `get_run` | `runs:read` | one run (other workspace → `NOT_FOUND`) |
 | `submit_run` | `runs:submit` (member+) | submit an eval run (repo empty seed + default graders) |
-| `list_harnesses` | `harnesses:read` (viewer+) | workspace-owned + `_shared` |
-| `validate_harness` | `harnesses:register` (admin) | dry-run: schema + this workspace's existing versions/conflict (no write) |
-| `register_harness` | `harnesses:register` (admin) | register a `HarnessSpec` (immutable → `CONFLICT`) |
+| `list_harness_templates` | `harnesses:read` (viewer+) | workspace-owned + `_shared` harness templates (대분류 structure) |
+| `get_harness_template` | `harnesses:read` | one `HarnessTemplateSpec` (structure/slots; `version` or `latest`) — config view / new-version prefill |
+| `register_harness_template` | `templates:write` (viewer+) | register a `HarnessTemplateSpec` (immutable → `CONFLICT`) |
+| `list_harnesses` | `harnesses:read` (viewer+) | workspace-owned + `_shared` instances (grouped by template id) |
+| `get_harness_instance` | `harnesses:read` | one raw `HarnessInstanceSpec` (template ref + pins; `version` or `latest`) — config view / re-pin prefill |
+| `register_harness` | `harnesses:register` (viewer+) | register a `HarnessInstanceSpec` (template ref + pins; resolve-validated, immutable → `CONFLICT`) |
 | `list_datasets` | `datasets:read` (viewer+) | workspace-owned + `_shared` benchmark datasets |
 | `get_dataset` | `datasets:read` | one dataset incl. cases (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `diff_datasets` | `datasets:read` | version diff (`id`, `base`, `candidate`; `latest` ok): added/removed/changed cases + meta |
@@ -87,7 +90,9 @@ minimal (no default policy components), so run the script after the realm exists
 
 ## Verified
 - **Deterministic** (`apps/api/src/mcp.test.ts`, in-memory MCP client↔server): `tools/list`; role gating
-  (viewer read-only, member submits, admin registers); workspace scoping (another workspace's run → `NOT_FOUND`).
+  (viewer reads + registers harnesses/templates [no gate, collaborative content], member submits runs, admin
+  manages members/keys); raw config reads (`get_harness_template`/`get_harness_instance`); workspace scoping
+  (another workspace's run → `NOT_FOUND`).
 - **HTTP auth** (`server.test.ts`): unauthenticated `/mcp` → `401` + `WWW-Authenticate`; protected-resource
   metadata points at Keycloak.
 - **Live** (`scripts/live/mcp-auth.mjs`, real Keycloak): discovery + `401` challenge; a real Keycloak OIDC token
