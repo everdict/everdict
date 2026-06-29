@@ -133,6 +133,19 @@ export const controlPlane = {
     call<T>(auth, '/benchmark-recipes', { method: 'POST', body: JSON.stringify(spec) }),
   validateBenchmarkRecipe: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/benchmark-recipes/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식. 발사(Temporal)는 컨트롤플레인 slice 2.
+  listSchedules: <T>(auth: AuthContext) => call<T>(auth, '/schedules'),
+  getSchedule: <T>(auth: AuthContext, id: string) =>
+    call<T>(auth, `/schedules/${encodeURIComponent(id)}`),
+  createSchedule: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/schedules', { method: 'POST', body: JSON.stringify(body) }),
+  updateSchedule: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/schedules/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteSchedule: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listScorecards: <T>(auth: AuthContext) => call<T>(auth, '/scorecards'),
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),

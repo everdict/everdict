@@ -9,6 +9,8 @@ export type WebAction =
   | 'datasets:write'
   | 'scorecards:read'
   | 'scorecards:run'
+  | 'schedules:read'
+  | 'schedules:write'
   | 'judges:read'
   | 'judges:write'
   | 'models:read'
@@ -33,6 +35,7 @@ const PERMS: Record<string, WebAction[]> = {
     'harnesses:register', // 누구나 하니스 등록 가능(역할 게이트 없음)
     'datasets:read',
     'scorecards:read',
+    'schedules:read',
     'judges:read',
     'models:read',
     'metrics:read',
@@ -49,6 +52,8 @@ const PERMS: Record<string, WebAction[]> = {
     'datasets:write',
     'scorecards:read',
     'scorecards:run',
+    'schedules:read',
+    'schedules:write',
     'judges:read',
     'judges:write',
     'models:read',
@@ -68,6 +73,8 @@ const PERMS: Record<string, WebAction[]> = {
     'datasets:write',
     'scorecards:read',
     'scorecards:run',
+    'schedules:read',
+    'schedules:write',
     'judges:read',
     'judges:write',
     'models:read',
