@@ -257,6 +257,17 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   // 없으면(테스트) 비활성 — req.log 는 no-op 이라 아래 로깅 호출은 안전하다.
   const app = Fastify({ logger: deps.logLevel ? { level: deps.logLevel } : false });
 
+  // 본문 없는 변경 요청(주로 DELETE)에 클라이언트가 content-type: application/json 만 붙여 보내면
+  // (브라우저 fetch·undici 의 흔한 동작) Fastify 기본 JSON 파서가 FST_ERR_CTP_EMPTY_JSON_BODY 로 400 을
+  // 던진다("body cannot be empty when content-type is set to application/json"). 빈 본문은 undefined 로
+  // 관대하게 통과시키고(라우트는 req.body ?? {} 로 받음), 비어 있지 않으면 기본 secure 파서(getDefaultJsonParser)
+  // 로 위임해 프로토타입 오염 방어를 보존한다. 기본 파서를 덮어쓰는 것이라 ALREADY_PRESENT 는 나지 않는다.
+  const defaultJsonParser = app.getDefaultJsonParser("error", "error");
+  app.addContentTypeParser<string>("application/json", { parseAs: "string" }, (req, body, done) => {
+    if (body.length === 0) return done(null, undefined);
+    return defaultJsonParser(req, body, done);
+  });
+
   app.get("/healthz", async () => ({ ok: true }));
 
   // front-door callback 완료 모델의 inbound 수신(C2b) — 에이전트가 종단 결과를 {{callback_url}}=/frontdoor-callback/:runId 로 POST.

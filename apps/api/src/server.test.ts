@@ -1543,6 +1543,23 @@ describe("API — keys (self-serve API 키, admin)", () => {
     await app.close();
   });
 
+  it("본문 없는 DELETE 에 content-type: application/json 만 와도 204 (빈 JSON 본문 400 회귀 방지)", async () => {
+    // 회귀: 웹 클라이언트가 본문 없는 DELETE 에도 content-type:application/json 을 붙여 보내면 Fastify 기본
+    // JSON 파서가 FST_ERR_CTP_EMPTY_JSON_BODY 로 400 을 던졌다("body cannot be empty…"). 빈 본문을 관대하게
+    // 통과시키는 커스텀 파서로 고쳤으니, content-type 헤더가 있어도 취소(204)가 성공해야 한다.
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}`, "content-type": "application/json" };
+    const created = await app.inject({ method: "POST", url: "/keys", headers: h, payload: { label: "ci" } });
+    const id = (
+      (await app.inject({ method: "GET", url: "/keys", headers: h })).json() as Array<{ id: string; label?: string }>
+    ).find((r) => r.label === "ci")?.id;
+    expect(created.statusCode).toBe(201);
+    // 본문(payload) 없이, content-type: application/json 헤더만 — pre-fix 코드에선 400.
+    const del = await app.inject({ method: "DELETE", url: `/keys/${id}`, headers: h });
+    expect(del.statusCode).toBe(204);
+    await app.close();
+  });
+
   it("member 는 키 발급/조회 불가 (403)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };

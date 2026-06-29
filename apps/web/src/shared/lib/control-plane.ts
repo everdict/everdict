@@ -17,6 +17,17 @@ function authHeaders(auth: AuthContext): Record<string, string> {
   return headers
 }
 
+// content-type: application/json 은 본문이 있을 때만 붙인다. 본문 없는 DELETE 에 이 헤더를 붙이면
+// Fastify 가 빈 JSON 본문으로 보고 FST_ERR_CTP_EMPTY_JSON_BODY(400, "body cannot be empty…") 를 던진다.
+function requestHeaders(auth: AuthContext, init?: RequestInit): Record<string, string> {
+  const headers = authHeaders(auth)
+  // 호출자 지정 헤더(HeadersInit)를 정규화해 합친다 — 호출자 값이 우선.
+  if (init?.headers) for (const [k, v] of new Headers(init.headers)) headers[k] = v
+  if (init?.body != null && headers['content-type'] === undefined)
+    headers['content-type'] = 'application/json'
+  return headers
+}
+
 // 컨트롤플레인 에러 응답 → 사람이 읽을 메시지. 플랫 envelope {code,message} 면 message 를 그대로 노출(예: HF 접속
 // 불가 같은 친화 메시지가 화면에 "자연스럽게" 보이도록). envelope 가 아니면 경로/상태로 폴백(디버깅용).
 function controlPlaneError(path: string, status: number, raw: string): Error {
@@ -32,7 +43,7 @@ function controlPlaneError(path: string, status: number, raw: string): Error {
 async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...authHeaders(auth), ...(init?.headers ?? {}) },
+    headers: requestHeaders(auth, init),
     cache: 'no-store',
   })
   if (!res.ok) throw controlPlaneError(path, res.status, await res.text())
@@ -43,7 +54,7 @@ async function call<T>(auth: AuthContext, path: string, init?: RequestInit): Pro
 async function callVoid(auth: AuthContext, path: string, init?: RequestInit): Promise<void> {
   const res = await fetch(`${env.CONTROL_PLANE_URL.replace(/\/$/, '')}${path}`, {
     ...init,
-    headers: { 'content-type': 'application/json', ...authHeaders(auth), ...(init?.headers ?? {}) },
+    headers: requestHeaders(auth, init),
     cache: 'no-store',
   })
   if (!res.ok) throw controlPlaneError(path, res.status, await res.text())
