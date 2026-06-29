@@ -32,13 +32,16 @@ export interface TargetAcquirer {
 export type AcquireRequestFn = (method: string, url: string, body?: unknown) => Promise<unknown>;
 
 export const fetchAcquire: AcquireRequestFn = async (method, url, body) => {
+  // 본문 없는 POST(예: 파라미터 없는 세션 open)는 빈 {} 를 실어 보낸다 — JSON 본문을 요구하는 서버가 본문 없는
+  // POST 를 422 로 거부하는 걸 막는다. GET/DELETE 는 그대로 본문 없이(누가 명시 본문을 주면 그건 존중).
+  const sendBody = body === undefined && method.toUpperCase() === "POST" ? {} : body;
   const res = await fetch(url, {
     method,
     headers:
-      body !== undefined
+      sendBody !== undefined
         ? { "content-type": "application/json", accept: "application/json" }
         : { accept: "application/json" },
-    ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
+    ...(sendBody !== undefined ? { body: JSON.stringify(sendBody) } : {}),
   });
   try {
     return await res.json();

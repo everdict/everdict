@@ -1,6 +1,6 @@
 import type { ServiceHarnessSpec, TargetAcquire, TopologyTarget } from "@assay/core";
-import { describe, expect, it } from "vitest";
-import { type AcquireRequestFn, serviceAcquirer, targetAcquirerFor } from "./target-acquirer.js";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { type AcquireRequestFn, fetchAcquire, serviceAcquirer, targetAcquirerFor } from "./target-acquirer.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
 
 const SPEC: ServiceHarnessSpec = {
@@ -79,6 +79,50 @@ describe("serviceAcquirer", () => {
   it("타깃 서비스 엔드포인트가 없으면 실패한다", async () => {
     const acq = serviceAcquirer(SERVICE_ACQUIRE, async () => ({}));
     await expect(acq.acquire({ spec: SPEC, runId: "r1", endpoints: {}, wiring: {} })).rejects.toThrow(/엔드포인트/);
+  });
+});
+
+describe("fetchAcquire", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  // method+init 을 기록하고 빈 JSON 을 돌려주는 fetch 스텁.
+  function stubFetch(): { calls: Array<{ url: string; init: RequestInit }> } {
+    const calls: Array<{ url: string; init: RequestInit }> = [];
+    vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
+      calls.push({ url, init });
+      return { json: async () => ({}) } as Response;
+    });
+    return { calls };
+  }
+
+  it("본문 없는 POST 는 빈 {} JSON 본문 + content-type 으로 보낸다(JSON 요구 서버의 422 방지)", async () => {
+    const { calls } = stubFetch();
+    await fetchAcquire("POST", "http://s/sessions");
+    expect(calls[0]?.init.body).toBe("{}");
+    expect((calls[0]?.init.headers as Record<string, string>)["content-type"]).toBe("application/json");
+  });
+
+  it("소문자 post 도 동일하게 빈 {} 를 보낸다(메서드 대소문자 무관)", async () => {
+    const { calls } = stubFetch();
+    await fetchAcquire("post", "http://s/sessions");
+    expect(calls[0]?.init.body).toBe("{}");
+  });
+
+  it("GET/DELETE 는 본문을 주입하지 않는다(content-type 없이)", async () => {
+    const { calls } = stubFetch();
+    await fetchAcquire("GET", "http://s/x");
+    await fetchAcquire("DELETE", "http://s/sessions/1");
+    expect(calls[0]?.init.body).toBeUndefined();
+    expect((calls[0]?.init.headers as Record<string, string>)["content-type"]).toBeUndefined();
+    expect(calls[1]?.init.body).toBeUndefined();
+  });
+
+  it("명시 본문이 있으면 POST 든 무엇이든 그대로 직렬화해 보낸다", async () => {
+    const { calls } = stubFetch();
+    await fetchAcquire("POST", "http://s/sessions", { task: "t" });
+    expect(calls[0]?.init.body).toBe(JSON.stringify({ task: "t" }));
   });
 });
 
