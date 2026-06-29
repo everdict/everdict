@@ -82,6 +82,12 @@ export const controlPlane = {
   // GET /harnesses/:id/:version — resolved HarnessSpec(template + pins). 상세/도식화용.
   getHarnessSpec: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}`),
+  // GET /harnesses/:id/:version/instance — raw 인스턴스(template 참조 + pins). 구성 보기/새 버전 프리필용.
+  getHarnessInstance: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}/instance`),
+  // GET /harness-templates/:id/:version — 템플릿(대분류) 구조 스펙 1건.
+  getHarnessTemplateSpec: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(auth, `/harness-templates/${encodeURIComponent(id)}/${encodeURIComponent(version)}`),
   // 인스턴스(template + pins) 등록/검증 — /harnesses 가 인스턴스 표면.
   registerHarness: <T>(auth: AuthContext, instance: unknown) =>
     call<T>(auth, '/harnesses', { method: 'POST', body: JSON.stringify(instance) }),

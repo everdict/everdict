@@ -1,12 +1,16 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 
-import { HarnessDetail } from '@/features/inspect-harness'
+import { ConfigPanel, HarnessDetail } from '@/features/inspect-harness'
 import {
+  harnessInstanceSpecSchema,
   harnessSpecSchema,
+  harnessTemplateSpecSchema,
   harnessVersionsSchema,
+  type HarnessInstanceSpec,
   type HarnessKind,
   type HarnessSpec,
+  type HarnessTemplateSpec,
 } from '@/entities/harness'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -76,6 +80,20 @@ export default async function HarnessDetailPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
+  // 원본 구성(템플릿 참조 + pins) — 새 버전 편집의 출발점. resolve 와 별개라 실패해도 상세는 계속 표시.
+  let config: { instance: HarnessInstanceSpec; template: HarnessTemplateSpec } | undefined
+  if (active && spec) {
+    try {
+      const instance = harnessInstanceSpecSchema.parse(await controlPlane.getHarnessInstance(ctx, id, active))
+      const template = harnessTemplateSpecSchema.parse(
+        await controlPlane.getHarnessTemplateSpec(ctx, instance.template.id, instance.template.version)
+      )
+      config = { instance, template }
+    } catch {
+      config = undefined
+    }
+  }
+
   if (!spec) {
     return (
       <div className="space-y-5">
@@ -130,7 +148,22 @@ export default async function HarnessDetailPage({
         </div>
       )}
 
-      <HarnessDetail spec={spec} />
+      {config && (
+        <section className="space-y-4">
+          <div className="space-y-1">
+            <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">구성</h2>
+            <p className="text-[12px] text-muted-foreground">
+              이 버전이 어떤 템플릿(대분류) 위에서 슬롯마다 핀한 값 — 새 버전 만들기의 출발점입니다.
+            </p>
+          </div>
+          <ConfigPanel instance={config.instance} template={config.template} />
+        </section>
+      )}
+
+      <section className="space-y-4">
+        <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">Resolved 스펙</h2>
+        <HarnessDetail spec={spec} />
+      </section>
     </div>
   )
 }

@@ -99,3 +99,57 @@ export const harnessSpecSchema = z
   .passthrough()
 export type HarnessSpec = z.infer<typeof harnessSpecSchema>
 export type HarnessKind = HarnessSpec['kind']
+
+// --- raw config (resolve 전 원본) — 상세 구성 보기 + 새 버전 편집 프리필용 ---
+
+// raw 인스턴스(GET /harnesses/:id/:version/instance): template 참조 + pins(슬롯→값).
+export const harnessInstanceSpecSchema = z.object({
+  template: z.object({ id: z.string(), version: z.string() }),
+  id: z.string(),
+  version: z.string(),
+  pins: z.record(z.string(), z.string()).default({}),
+})
+export type HarnessInstanceSpec = z.infer<typeof harnessInstanceSpecSchema>
+
+// 템플릿 서비스 — 이미지 없는 슬롯(slot 미지정이면 name 이 슬롯).
+export const templateServiceSchema = z.object({
+  name: z.string(),
+  slot: z.string().optional(),
+  port: z.number().optional(),
+  needs: z.array(z.string()).default([]),
+  perRun: z.array(z.string()).default([]),
+  replicas: z.number().default(1),
+})
+export type TemplateService = z.infer<typeof templateServiceSchema>
+
+// 템플릿(대분류) 구조(GET /harness-templates/:id/:version) — 느슨 passthrough 미러.
+export const harnessTemplateSpecSchema = z
+  .object({
+    kind: z.enum(['process', 'service', 'command']),
+    category: z.string(),
+    id: z.string(),
+    version: z.string(),
+    // service(토폴로지)
+    services: z.array(templateServiceSchema).optional(),
+    dependencies: z.array(topologyDependencySchema).optional(),
+    target: topologyTargetSchema.optional(),
+    frontDoor: frontDoorSchema.optional(),
+    traceSource: traceSourceSchema.optional(),
+    // command(선언형 CLI) — image/model 은 인스턴스가 핀할 수 있는 기본값.
+    image: z.string().optional(),
+    workDir: z.string().optional(),
+    setup: z.array(z.string()).optional(),
+    command: z.string().optional(),
+    env: z.record(z.string(), z.string()).optional(),
+    model: z.string().optional(),
+    trace: commandTraceSchema.optional(),
+  })
+  .passthrough()
+export type HarnessTemplateSpec = z.infer<typeof harnessTemplateSpecSchema>
+
+// 템플릿의 핀 가능한 슬롯 이름들 — service=서비스 슬롯, command=image/model, process=없음.
+export function templateSlotNames(tpl: HarnessTemplateSpec): string[] {
+  if (tpl.kind === 'service') return (tpl.services ?? []).map((s) => s.slot ?? s.name)
+  if (tpl.kind === 'command') return ['image', 'model']
+  return []
+}
