@@ -167,7 +167,7 @@ export function TemplateForm({
 
       {mode === 'form' && s.kind === 'service' && (
         <div className="space-y-6">
-          <Section title="Services (슬롯 — 인스턴스가 이미지를 핀)" onAdd={() => set({ services: [...s.services, { name: '', slot: '', port: '', needs: '', perRun: '', replicas: '1' }] })}>
+          <Section title="Services (슬롯 — 인스턴스가 이미지를 핀)" onAdd={() => set({ services: [...s.services, { name: '', slot: '', port: '', needs: '', perRun: '', replicas: '1', env: '', volumes: '', readinessTimeout: '', readinessInterval: '' }] })}>
             {s.services.map((sv, i) => (
               <div key={i} className="space-y-2 rounded-lg border bg-card p-3">
                 <div className="grid grid-cols-2 gap-2">
@@ -177,6 +177,12 @@ export function TemplateForm({
                   <Input value={sv.replicas} onChange={(e) => setService(i, { replicas: e.target.value })} placeholder="replicas (1)" />
                   <Input value={sv.needs} onChange={(e) => setService(i, { needs: e.target.value })} placeholder="needs (콤마구분)" />
                   <Input value={sv.perRun} onChange={(e) => setService(i, { perRun: e.target.value })} placeholder="perRun (thread_id,…)" />
+                </div>
+                <Textarea className="min-h-14 text-[12px]" value={sv.env} onChange={(e) => setService(i, { env: e.target.value })} placeholder="env (KEY=VALUE 줄바꿈 구분: LOG_LEVEL=debug)" />
+                <Textarea className="min-h-14 text-[12px]" value={sv.volumes} onChange={(e) => setService(i, { volumes: e.target.value })} placeholder="volumes (줄바꿈 구분: pgdata:/var/lib/postgresql/data)" />
+                <div className="grid grid-cols-2 gap-2">
+                  <Input value={sv.readinessTimeout} onChange={(e) => setService(i, { readinessTimeout: e.target.value })} placeholder="readiness timeout ms (60000)" />
+                  <Input value={sv.readinessInterval} onChange={(e) => setService(i, { readinessInterval: e.target.value })} placeholder="readiness interval ms (1000)" />
                 </div>
                 {s.services.length > 1 && <RemoveBtn onClick={() => set({ services: s.services.filter((_, j) => j !== i) })} />}
               </div>

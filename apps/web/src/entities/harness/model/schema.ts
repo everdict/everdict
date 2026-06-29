@@ -27,7 +27,15 @@ export const traceSourceSchema = z.object({
 })
 export type TraceSource = z.infer<typeof traceSourceSchema>
 
-// 토폴로지 서비스 — perRun = 런타임에 주입되는 케이스별 키 이름들.
+// 서비스 readiness 폴링 — HTTP 가 응답할 때까지의 상한/간격(미설정=런타임 기본).
+export const serviceReadinessSchema = z.object({
+  timeoutMs: z.number(),
+  intervalMs: z.number(),
+})
+export type ServiceReadiness = z.infer<typeof serviceReadinessSchema>
+
+// 토폴로지 서비스 — perRun = 런타임에 주입되는 케이스별 키 이름들. env = 정적 env(비-스토어 설정),
+// volumes = docker -v 마운트, readiness = 폴링 상한. 셋 다 하니스가 실제로 쓰는 정보라 상세에 노출.
 export const topologyServiceSchema = z.object({
   name: z.string(),
   image: z.string(),
@@ -35,6 +43,9 @@ export const topologyServiceSchema = z.object({
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
   replicas: z.number().default(1),
+  env: z.record(z.string(), z.string()).default({}),
+  volumes: z.array(z.string()).optional(),
+  readiness: serviceReadinessSchema.optional(),
 })
 export type TopologyService = z.infer<typeof topologyServiceSchema>
 
@@ -111,7 +122,7 @@ export const harnessInstanceSpecSchema = z.object({
 })
 export type HarnessInstanceSpec = z.infer<typeof harnessInstanceSpecSchema>
 
-// 템플릿 서비스 — 이미지 없는 슬롯(slot 미지정이면 name 이 슬롯).
+// 템플릿 서비스 — 이미지 없는 슬롯(slot 미지정이면 name 이 슬롯). env/volumes/readiness 는 구조의 일부(핀 대상 아님).
 export const templateServiceSchema = z.object({
   name: z.string(),
   slot: z.string().optional(),
@@ -119,6 +130,9 @@ export const templateServiceSchema = z.object({
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
   replicas: z.number().default(1),
+  env: z.record(z.string(), z.string()).default({}),
+  volumes: z.array(z.string()).optional(),
+  readiness: serviceReadinessSchema.optional(),
 })
 export type TemplateService = z.infer<typeof templateServiceSchema>
 

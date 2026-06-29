@@ -54,6 +54,35 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
                 <ChipList label="needs" items={s.needs} empty="—" />
                 <ChipList label="per-run keys" items={s.perRun} empty="—" />
               </div>
+              {Object.keys(s.env ?? {}).length > 0 && (
+                <div className="mt-3">
+                  <div className="text-[10.5px] font-[510] uppercase tracking-wide text-faint">env</div>
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {Object.entries(s.env).map(([k, val]) => (
+                      <code
+                        key={k}
+                        title={`${k}=${val}`}
+                        className="max-w-full truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-border"
+                      >
+                        {k}=<span className="text-foreground/80">{val}</span>
+                      </code>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {s.volumes && s.volumes.length > 0 && (
+                <div className="mt-3">
+                  <ChipList label="volumes" items={s.volumes} empty="—" />
+                </div>
+              )}
+              {s.readiness && (
+                <div className="mt-3">
+                  <div className="text-[10.5px] font-[510] uppercase tracking-wide text-faint">readiness</div>
+                  <div className="mt-1 font-mono text-[12px] text-muted-foreground">
+                    timeout {s.readiness.timeoutMs}ms · interval {s.readiness.intervalMs}ms
+                  </div>
+                </div>
+              )}
             </Card>
           ))}
           {services.length === 0 && (

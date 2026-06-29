@@ -11,6 +11,10 @@ export interface ServiceRow {
   needs: string // 콤마 구분
   perRun: string // 콤마 구분
   replicas: string
+  env: string // KEY=VALUE 줄바꿈 구분 — 정적 env(비-스토어 설정)
+  volumes: string // docker -v 마운트, 줄바꿈 구분("vol:/data" · "/host:/c:ro")
+  readinessTimeout: string // readiness 폴링 상한(ms) — 비우면 미설정
+  readinessInterval: string // readiness 폴링 간격(ms)
 }
 export interface DepRow {
   store: string
@@ -89,14 +93,29 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
   const spec: Record<string, unknown> = {
     kind: 'service',
     ...base,
-    services: s.services.map((sv) => ({
-      name: sv.name,
-      ...(sv.slot.trim() ? { slot: sv.slot } : {}), // 비우면 컨트롤플레인이 name 을 슬롯으로
-      ...(sv.port.trim() ? { port: Number(sv.port) } : {}),
-      needs: csv(sv.needs),
-      perRun: csv(sv.perRun),
-      replicas: sv.replicas.trim() ? Number(sv.replicas) : 1,
-    })),
+    services: s.services.map((sv) => {
+      const env = kvLines(sv.env)
+      const volumes = lines(sv.volumes)
+      const hasReadiness = sv.readinessTimeout.trim() !== '' || sv.readinessInterval.trim() !== ''
+      return {
+        name: sv.name,
+        ...(sv.slot.trim() ? { slot: sv.slot } : {}), // 비우면 컨트롤플레인이 name 을 슬롯으로
+        ...(sv.port.trim() ? { port: Number(sv.port) } : {}),
+        needs: csv(sv.needs),
+        perRun: csv(sv.perRun),
+        replicas: sv.replicas.trim() ? Number(sv.replicas) : 1,
+        ...(Object.keys(env).length ? { env } : {}),
+        ...(volumes.length ? { volumes } : {}),
+        ...(hasReadiness
+          ? {
+              readiness: {
+                timeoutMs: Number(sv.readinessTimeout.trim() || 60000),
+                intervalMs: Number(sv.readinessInterval.trim() || 1000),
+              },
+            }
+          : {}),
+      }
+    }),
     dependencies: s.deps.map((d) => ({ store: d.store, role: d.role, isolateBy: d.isolateBy })),
     frontDoor: {
       service: s.frontDoorService,
@@ -133,6 +152,12 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
       needs: (s.needs ?? []).join(', '),
       perRun: (s.perRun ?? []).join(', '),
       replicas: s.replicas !== undefined ? String(s.replicas) : '1',
+      env: Object.entries(s.env ?? {})
+        .map(([k, val]) => `${k}=${val}`)
+        .join('\n'),
+      volumes: (s.volumes ?? []).join('\n'),
+      readinessTimeout: s.readiness?.timeoutMs !== undefined ? String(s.readiness.timeoutMs) : '',
+      readinessInterval: s.readiness?.intervalMs !== undefined ? String(s.readiness.intervalMs) : '',
     })),
     deps: (t.dependencies ?? []).map((d) => ({ store: d.store, role: d.role, isolateBy: d.isolateBy })),
     frontDoorService: t.frontDoor?.service ?? '',
@@ -192,7 +217,20 @@ export const INITIAL_TEMPLATE: TemplateState = {
   category: 'topology',
   id: '',
   version: '1',
-  services: [{ name: 'agent-server', slot: 'agent-server', port: '8080', needs: '', perRun: '', replicas: '1' }],
+  services: [
+    {
+      name: 'agent-server',
+      slot: 'agent-server',
+      port: '8080',
+      needs: '',
+      perRun: '',
+      replicas: '1',
+      env: '',
+      volumes: '',
+      readinessTimeout: '',
+      readinessInterval: '',
+    },
+  ],
   deps: [],
   frontDoorService: 'agent-server',
   frontDoorSubmit: 'POST /runs',
