@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { Boxes, Database, DoorOpen, Globe, Layers, Radio } from 'lucide-react'
+import { Boxes, Cloud, Database, DoorOpen, Globe, Layers, Radio } from 'lucide-react'
 
 import type { HarnessSpec, TopologyDependency, TopologyService } from '@/entities/harness'
 import { cn } from '@/shared/lib/utils'
@@ -11,7 +11,7 @@ import { cn } from '@/shared/lib/utils'
 // 트레이스 출처는 out-of-band(에이전트가 내보내고 평가가 끌어옴). 좌표는 실제 노드 위치를 측정해 반응형으로 재계산.
 
 type Side = 'left' | 'right'
-type EdgeKind = 'submit' | 'needs' | 'store' | 'target' | 'trace'
+type EdgeKind = 'submit' | 'needs' | 'store' | 'external' | 'target' | 'trace'
 
 interface RawEdge {
   id: string
@@ -30,11 +30,13 @@ const EDGE_STROKE: Record<EdgeKind, string> = {
   submit: 'var(--color-primary)',
   needs: 'var(--color-muted-foreground)',
   store: 'var(--color-link)',
+  external: 'var(--color-warning)',
   target: 'var(--color-accent-foreground)',
   trace: 'var(--color-faint)',
 }
 const EDGE_DASH: Partial<Record<EdgeKind, string>> = {
   needs: '5 4',
+  external: '6 3',
   trace: '2 5',
 }
 
@@ -112,15 +114,18 @@ function buildEdges(
           kind: 'needs',
           label: 'needs',
         })
-  deps.forEach((d, i) =>
+  deps.forEach((d, i) => {
+    // 어느 서비스가 쓰는지(d.service) 알면 그 서비스→스토어로, 모르면 front-door anchor 에서.
+    const from = d.service && names.has(d.service) ? `svc:${d.service}` : anchorId
+    const external = d.isolateBy === 'external'
     edges.push({
       id: `store:${i}`,
-      from: anchorId,
+      from,
       to: `store:${i}`,
-      kind: 'store',
-      label: d.isolateBy,
+      kind: external ? 'external' : 'store',
+      label: external ? 'external' : d.isolateBy,
     })
-  )
+  })
   if (hasTarget)
     edges.push({ id: 'target', from: anchorId, to: 'target', kind: 'target', label: 'acts on' })
   if (traceLabel)
@@ -315,24 +320,41 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
           </Lane>
 
           <Lane label="State & world">
-            {deps.map((d, i) => (
-              <Node
-                key={`store:${i}`}
-                ref={setNodeRef(`store:${i}`)}
-                role="store"
-                dim={nodeDim(`store:${i}`)}
-                onHover={() => setHover(`store:${i}`)}
-                onLeave={() => setHover(null)}
-                icon={<Database className="size-3.5" />}
-                dot={storeColor(d.store)}
-                title={d.store}
-                badges={<NodeBadge>{d.isolateBy}</NodeBadge>}
-              >
-                <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
-                  {d.role}
-                </div>
-              </Node>
-            ))}
+            {deps.map((d, i) => {
+              const external = d.isolateBy === 'external'
+              return (
+                <Node
+                  key={`store:${i}`}
+                  ref={setNodeRef(`store:${i}`)}
+                  role={external ? 'external' : 'store'}
+                  dim={nodeDim(`store:${i}`)}
+                  onHover={() => setHover(`store:${i}`)}
+                  onLeave={() => setHover(null)}
+                  icon={
+                    external ? <Cloud className="size-3.5" /> : <Database className="size-3.5" />
+                  }
+                  dot={storeColor(d.store)}
+                  title={d.store}
+                  badges={
+                    external ? (
+                      <span className="rounded bg-[var(--color-warning)]/15 px-1 py-0.5 font-mono text-[9.5px] leading-none text-[var(--color-warning)] ring-1 ring-inset ring-[var(--color-warning)]/30">
+                        external
+                      </span>
+                    ) : (
+                      <NodeBadge>{d.isolateBy}</NodeBadge>
+                    )
+                  }
+                >
+                  <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">
+                    {d.role}
+                    {d.service ? ` · ${d.service}` : ''}
+                  </div>
+                  {external && (
+                    <div className="mt-0.5 text-[9.5px] text-faint">BYO · 연결은 배포 시 env</div>
+                  )}
+                </Node>
+              )
+            })}
             {target && (
               <Node
                 ref={setNodeRef('target')}
@@ -408,7 +430,8 @@ function Lane({ label, children }: { label: string; children: React.ReactNode })
 const ROLE_RAIL: Record<string, string> = {
   ingress: 'before:bg-[var(--color-primary)]',
   service: 'before:bg-[var(--color-link)]',
-  store: 'before:bg-[var(--color-warning)]',
+  store: 'before:bg-[var(--color-link)]',
+  external: 'before:bg-[var(--color-warning)]',
   target: 'before:bg-[var(--color-accent-foreground)]',
   trace: 'before:bg-faint',
 }
@@ -427,7 +450,7 @@ const Node = function Node({
   onLeave,
 }: {
   ref: (el: HTMLElement | null) => void
-  role: 'ingress' | 'service' | 'store' | 'target' | 'trace'
+  role: 'ingress' | 'service' | 'store' | 'external' | 'target' | 'trace'
   title: string
   icon: React.ReactNode
   badges?: React.ReactNode
@@ -478,6 +501,7 @@ function Legend() {
     { kind: 'submit', label: '제출' },
     { kind: 'needs', label: 'needs' },
     { kind: 'store', label: '스토어' },
+    { kind: 'external', label: 'external(BYO)' },
     { kind: 'target', label: '타깃' },
     { kind: 'trace', label: '트레이스(pull)' },
   ]

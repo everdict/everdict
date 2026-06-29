@@ -56,7 +56,9 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
               </div>
               {Object.keys(s.env ?? {}).length > 0 && (
                 <div className="mt-3">
-                  <div className="text-[10.5px] font-[510] uppercase tracking-wide text-faint">env</div>
+                  <div className="text-[10.5px] font-[510] uppercase tracking-wide text-faint">
+                    env
+                  </div>
                   <div className="mt-1.5 flex flex-wrap gap-1">
                     {Object.entries(s.env).map(([k, val]) => (
                       <code
@@ -77,7 +79,9 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
               )}
               {s.readiness && (
                 <div className="mt-3">
-                  <div className="text-[10.5px] font-[510] uppercase tracking-wide text-faint">readiness</div>
+                  <div className="text-[10.5px] font-[510] uppercase tracking-wide text-faint">
+                    readiness
+                  </div>
                   <div className="mt-1 font-mono text-[12px] text-muted-foreground">
                     timeout {s.readiness.timeoutMs}ms · interval {s.readiness.intervalMs}ms
                   </div>
@@ -96,15 +100,31 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
           <p className="text-[13px] text-muted-foreground">공유 스토어 없음.</p>
         ) : (
           <Card className="divide-y divide-border">
-            {deps.map((d, i) => (
-              <div key={i} className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
-                <div className="flex items-center gap-2.5">
-                  <span className="text-[13px] font-[560] text-foreground">{d.store}</span>
-                  <span className="font-mono text-[12px] text-muted-foreground">{d.role}</span>
+            {deps.map((d, i) => {
+              const external = d.isolateBy === 'external'
+              return (
+                <div
+                  key={i}
+                  className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+                >
+                  <div className="flex min-w-0 items-center gap-2.5">
+                    <span className="text-[13px] font-[560] text-foreground">{d.store}</span>
+                    <span className="font-mono text-[12px] text-muted-foreground">{d.role}</span>
+                    {d.service && (
+                      <span className="text-[12px] text-faint">used by {d.service}</span>
+                    )}
+                  </div>
+                  {external ? (
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-faint">연결은 배포 시 env</span>
+                      <Badge tone="warning">external (BYO)</Badge>
+                    </div>
+                  ) : (
+                    <Badge tone="outline">isolate · {d.isolateBy}</Badge>
+                  )}
                 </div>
-                <Badge tone="outline">isolate · {d.isolateBy}</Badge>
-              </div>
-            ))}
+              )
+            })}
           </Card>
         )}
       </SubSection>
