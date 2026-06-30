@@ -55,7 +55,12 @@ export function ScheduleList({
               <span className="px-1">→</span>
               {s.runTemplate.harness.id}
               <span className="text-faint">@{s.runTemplate.harness.version}</span>
-              {s.lastStatus ? <span className="ml-2 text-faint">· 최근 {s.lastStatus}</span> : null}
+              {s.lastStatus ? (
+                <span className="ml-2 text-faint">
+                  · 최근 {s.lastStatus}
+                  {s.lastFiredAt ? ` (${new Date(s.lastFiredAt).toLocaleString()})` : ''}
+                </span>
+              ) : null}
             </div>
           </div>
           {canWrite ? (

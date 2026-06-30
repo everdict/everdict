@@ -16,7 +16,10 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
     dispatchCase(job: AgentJob): Promise<CaseResult> {
       return dispatcher.dispatch(job);
     },
-    async fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId: string }> {
+    async fireScheduledScorecard(input: {
+      scheduleId: string;
+      tenant: string;
+    }): Promise<{ scorecardId: string; previousScorecardId?: string }> {
       if (!schedule) throw new Error("schedule 액티비티가 설정되지 않았습니다(ASSAY_API_URL/ASSAY_INTERNAL_TOKEN).");
       const res = await fetch(
         `${schedule.apiUrl.replace(/\/$/, "")}/internal/schedules/${encodeURIComponent(input.scheduleId)}/fire`,
@@ -27,9 +30,12 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
         },
       );
       if (!res.ok) throw new Error(`예약 발사 실패: ${res.status} ${await res.text()}`);
-      const json = (await res.json()) as { scorecardId?: unknown };
+      const json = (await res.json()) as { scorecardId?: unknown; previousScorecardId?: unknown };
       if (typeof json.scorecardId !== "string") throw new Error("fire 응답에 scorecardId 가 없습니다.");
-      return { scorecardId: json.scorecardId };
+      return {
+        scorecardId: json.scorecardId,
+        ...(typeof json.previousScorecardId === "string" ? { previousScorecardId: json.previousScorecardId } : {}),
+      };
     },
     async scheduledScorecardStatus(scorecardId: string): Promise<string | null> {
       if (!schedule) throw new Error("schedule 액티비티가 설정되지 않았습니다(ASSAY_API_URL/ASSAY_INTERNAL_TOKEN).");
@@ -40,6 +46,27 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       if (!res.ok) throw new Error(`예약 스코어카드 status 실패: ${res.status}`);
       const json = (await res.json()) as { status?: unknown };
       return typeof json.status === "string" ? json.status : null;
+    },
+    async finalizeScheduledScorecard(input: {
+      scheduleId: string;
+      tenant: string;
+      scorecardId: string;
+      previousScorecardId?: string;
+    }): Promise<void> {
+      if (!schedule) throw new Error("schedule 액티비티가 설정되지 않았습니다(ASSAY_API_URL/ASSAY_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/schedules/${encodeURIComponent(input.scheduleId)}/finalize`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+          body: JSON.stringify({
+            tenant: input.tenant,
+            scorecardId: input.scorecardId,
+            ...(input.previousScorecardId !== undefined ? { previousScorecardId: input.previousScorecardId } : {}),
+          }),
+        },
+      );
+      if (!res.ok) throw new Error(`예약 종료 처리 실패: ${res.status} ${await res.text()}`);
     },
   };
 }

@@ -4,7 +4,18 @@ import type { AgentJob, CaseResult } from "@assay/core";
 export interface Activities {
   dispatchCase(job: AgentJob): Promise<CaseResult>;
   // 예약 발사 — 컨트롤플레인 internal 라우트로 스코어카드 submit(워커엔 ScorecardService 가 없어 HTTP 브리지).
-  fireScheduledScorecard(input: { scheduleId: string; tenant: string }): Promise<{ scorecardId: string }>;
+  // 직전 스케줄 run id(회귀 baseline)도 같이 받아 finalize 로 넘긴다.
+  fireScheduledScorecard(input: {
+    scheduleId: string;
+    tenant: string;
+  }): Promise<{ scorecardId: string; previousScorecardId?: string }>;
   // 발사한 스코어카드 status 폴링(워크플로 poll-to-terminal — overlap 정책이 의미를 갖게).
   scheduledScorecardStatus(scorecardId: string): Promise<string | null>;
+  // 종료 처리 — 최종 status 기록 + 직전 run 대비 회귀 알림(internal 라우트 → ScheduleService.finalize).
+  finalizeScheduledScorecard(input: {
+    scheduleId: string;
+    tenant: string;
+    scorecardId: string;
+    previousScorecardId?: string;
+  }): Promise<void>;
 }

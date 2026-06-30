@@ -9,8 +9,8 @@ const { dispatchCase } = proxyActivities<Activities>({
   retry: { maximumAttempts: 3 },
 });
 
-// 예약 발사/폴링 액티비티 — internal HTTP 라우트라 짧은 타임아웃.
-const { fireScheduledScorecard, scheduledScorecardStatus } = proxyActivities<Activities>({
+// 예약 발사/폴링/종료 액티비티 — internal HTTP 라우트라 짧은 타임아웃.
+const { fireScheduledScorecard, scheduledScorecardStatus, finalizeScheduledScorecard } = proxyActivities<Activities>({
   startToCloseTimeout: "2 minutes",
   retry: { maximumAttempts: 3 },
 });
@@ -50,10 +50,19 @@ const POLL_INTERVAL_MS = 30_000;
 const MAX_POLLS = 480; // ~4시간 상한(30s × 480) — 무한 대기 방지
 
 export async function scheduledScorecardWorkflow(input: { scheduleId: string; tenant: string }): Promise<void> {
-  const { scorecardId } = await fireScheduledScorecard(input);
+  const { scorecardId, previousScorecardId } = await fireScheduledScorecard(input);
   for (let i = 0; i < MAX_POLLS; i++) {
     const status = await scheduledScorecardStatus(scorecardId);
-    if (status === "succeeded" || status === "failed") return; // 종료 → 워크플로 종료
+    if (status === "succeeded" || status === "failed") {
+      // 종료 → 최종 status 기록 + 직전 run 대비 회귀 알림(finalize). 그 후 워크플로 종료.
+      await finalizeScheduledScorecard({
+        scheduleId: input.scheduleId,
+        tenant: input.tenant,
+        scorecardId,
+        ...(previousScorecardId !== undefined ? { previousScorecardId } : {}),
+      });
+      return;
+    }
     await sleep(POLL_INTERVAL_MS);
   }
 }

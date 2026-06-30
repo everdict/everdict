@@ -1,10 +1,13 @@
 # Scheduled evals — run a scorecard on a cron schedule (regression monitoring)
 
-> **Status: slices 1 + 2 SHIPPED.** Driver decision **locked with the user: Temporal Schedules (native)**.
-> Slice 1 (`f57a55b` backend + `5960009` web) = Schedule SSOT + CRUD API/MCP/web. Slice 2 (this change) =
-> firing — `ScheduleService` driver-sync seam + `fire()` + internal routes + `scheduledScorecardWorkflow`
-> (poll-to-terminal) + schedule activities (HTTP bridge) + `TemporalScheduleDriver`. **Open: slice 3** (regression
-> alert + cron picker + creator-left auto-disable).
+> **Status: slices 1 + 2 + 3 SHIPPED.** Driver decision **locked with the user: Temporal Schedules (native)**.
+> Slice 1 (`f57a55b` backend + `5960009` web) = Schedule SSOT + CRUD API/MCP/web. Slice 2 (`a0ed30d`) = firing —
+> `ScheduleService` driver-sync seam + `fire()` + internal routes + `scheduledScorecardWorkflow` (poll-to-terminal)
+> + schedule activities (HTTP bridge) + `TemporalScheduleDriver`. Slice 3 (this change) = regression alert —
+> `fire()` returns the previous run id, `finalize()` (workflow calls it post-terminal) diffs vs the previous
+> scheduled run and fires `notifyRegression` (Mattermost) on a regression + records final `lastStatus`; web cron
+> preset picker + last-fire display. **Remaining follow-ups: creator-left / connection-revoked auto-disable; live
+> Temporal e2e.**
 >
 > **Driver location (deviation from the table below):** `TemporalScheduleDriver` lives in **`apps/api`**
 > (`temporal-schedule-driver.ts`), not `@assay/orchestrator` — it needs only `@temporalio/client`, and importing
@@ -144,9 +147,12 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
    (poll-to-terminal) + `fireScheduledScorecard`/`scheduledScorecardStatus` activities (HTTP bridge) + worker
    wiring; `POST /internal/schedules/:id/fire` + `GET /internal/schedules/scorecard-status/:id` (`x-internal-token`).
    Fires a real scorecard on cron. *(fire + driver-sync unit-tested with fakes; Temporal glue is live-verified.)*
-3. **Regression alert + UX** — `notifyRegression` activity (diff vs the previous scheduled run → Mattermost),
-   `lastStatus`/verdict on the record; web cron picker + next/last-fire + pause toggle; creator-left /
-   connection-revoked auto-disable policy.
+3. ✅ **Regression alert + UX** — `fire()` returns previous run id; `finalize()` (workflow calls it after
+   poll-to-terminal, via `POST /internal/schedules/:id/finalize`) diffs vs the previous scheduled run and fires
+   `NotificationService.notifyRegression` (Mattermost) on a regression + records final `lastStatus`; web cron
+   **preset picker** (매시간/매일/평일/매주 chips → cron string) + last-fire time on the list. *(diff-vs-previous +
+   notify decision unit-tested; completion notify already free via scorecard `onComplete`.)* Follow-up: creator-left /
+   connection-revoked **auto-disable** policy (not yet wired into membership-leave / connection-revoke).
 
 ## Decisions / non-goals
 

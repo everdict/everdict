@@ -177,4 +177,95 @@ describe("ScheduleService.fire — 발사(internal 라우트가 호출)", () => 
     });
     await expect(s.fire("acme", "nope")).rejects.toBeInstanceOf(NotFoundError);
   });
+
+  it("연속 발사: 두 번째 fire 는 첫 번째 run id 를 previousScorecardId 로 돌려준다(회귀 baseline)", async () => {
+    let i = 0;
+    const s = new ScheduleService({
+      store: new InMemoryScheduleStore(),
+      newId: () => "sch-1",
+      now: () => "t",
+      submitScorecard: async () => ({ id: `sc-${++i}`, status: "queued" }),
+    });
+    await s.create(base);
+    const first = await s.fire("acme", "sch-1");
+    expect(first).toEqual({ scorecardId: "sc-1" }); // 첫 발사 — 직전 없음
+    const second = await s.fire("acme", "sch-1");
+    expect(second).toEqual({ scorecardId: "sc-2", previousScorecardId: "sc-1" });
+  });
+});
+
+describe("ScheduleService.finalize — 회귀 알림", () => {
+  function svcWith(over: {
+    diff?: (
+      t: string,
+      a: string,
+      b: string,
+    ) => Promise<{ regressions: { caseId: string; metric: string; baseline: number; candidate: number }[] }>;
+    status?: string;
+  }) {
+    const notified: Array<{
+      tenant: string;
+      payload: { scheduleName: string; scorecardId: string; previousScorecardId: string };
+    }> = [];
+    const store = new InMemoryScheduleStore();
+    const s = new ScheduleService({
+      store,
+      newId: () => "sch-1",
+      now: () => "t",
+      scorecardStatus: async () => over.status ?? "succeeded",
+      ...(over.diff ? { diffScorecards: over.diff } : {}),
+      notifyRegression: async (tenant, payload) => {
+        notified.push({ tenant, payload });
+      },
+    });
+    return { s, store, notified };
+  }
+
+  it("직전 run 대비 회귀가 있으면 알림 + lastStatus 갱신", async () => {
+    const { s, notified } = svcWith({
+      diff: async () => ({ regressions: [{ caseId: "c1", metric: "tests-pass", baseline: 1, candidate: 0 }] }),
+    });
+    await s.create(base);
+    await s.finalize("acme", "sch-1", "sc-new", "sc-prev");
+    expect(notified).toHaveLength(1);
+    expect(notified[0]).toMatchObject({
+      tenant: "acme",
+      payload: { scheduleName: "nightly", scorecardId: "sc-new", previousScorecardId: "sc-prev" },
+    });
+    expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
+  });
+
+  it("회귀가 없으면 알림 안 함(lastStatus 는 갱신)", async () => {
+    const { s, notified } = svcWith({ diff: async () => ({ regressions: [] }) });
+    await s.create(base);
+    await s.finalize("acme", "sch-1", "sc-new", "sc-prev");
+    expect(notified).toEqual([]);
+    expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
+  });
+
+  it("직전 run 이 없으면(첫 발사) diff/알림을 건너뛴다", async () => {
+    let diffCalls = 0;
+    const { s, notified } = svcWith({
+      diff: async () => {
+        diffCalls++;
+        return { regressions: [] };
+      },
+    });
+    await s.create(base);
+    await s.finalize("acme", "sch-1", "sc-new"); // previousScorecardId 없음
+    expect(diffCalls).toBe(0);
+    expect(notified).toEqual([]);
+  });
+
+  it("diff 가 throw(한쪽 미완료)하면 swallow — 회귀 알림만 건너뛴다", async () => {
+    const { s, notified } = svcWith({
+      diff: async () => {
+        throw new Error("not completed");
+      },
+    });
+    await s.create(base);
+    await expect(s.finalize("acme", "sch-1", "sc-new", "sc-prev")).resolves.toBeUndefined();
+    expect(notified).toEqual([]);
+    expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
+  });
 });

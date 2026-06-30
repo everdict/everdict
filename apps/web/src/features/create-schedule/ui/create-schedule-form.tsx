@@ -20,6 +20,15 @@ function versionOptions(versions: string[]): ComboboxOption[] {
   ]
 }
 
+// cron 프리셋 — raw 입력 대신 흔한 주기를 원클릭으로. 직접 편집도 가능(아래 입력).
+const CRON_PRESETS: { label: string; value: string }[] = [
+  { label: '매시간', value: '0 * * * *' },
+  { label: '매일 자정', value: '0 0 * * *' },
+  { label: '매일 새벽 3시', value: '0 3 * * *' },
+  { label: '평일 오전 9시', value: '0 9 * * 1-5' },
+  { label: '매주 월요일 9시', value: '0 9 * * 1' },
+]
+
 interface Values {
   name: string
   cron: string
@@ -70,6 +79,7 @@ export function CreateScheduleForm({
 
   const datasetId = watch('datasetId')
   const harnessId = watch('harnessId')
+  const cron = watch('cron')
   const datasetIdOptions: ComboboxOption[] = datasets.map((d) => ({
     value: d.id,
     hint: `${d.versions.length}개 버전`,
@@ -107,6 +117,23 @@ export function CreateScheduleForm({
           {...register('name', { required: '이름을 입력하세요' })}
         />
         <FieldError message={errors.name?.message} />
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {CRON_PRESETS.map((p) => (
+          <button
+            key={p.value}
+            type="button"
+            onClick={() => setValue('cron', p.value, { shouldValidate: true })}
+            className={`rounded-md border px-2.5 py-1 text-[12px] font-[510] transition-colors ${
+              cron === p.value
+                ? 'border-primary bg-primary/10 text-foreground'
+                : 'border-border bg-card text-muted-foreground hover:border-border-strong hover:text-foreground'
+            }`}
+          >
+            {p.label}
+          </button>
+        ))}
       </div>
 
       <div className="grid grid-cols-2 gap-3">

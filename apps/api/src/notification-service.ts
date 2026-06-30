@@ -43,6 +43,28 @@ export class NotificationService {
     );
   }
 
+  // 예약(cron) 회귀 알림 — 직전 스케줄 run 대비 회귀가 잡히면 채널에 고신호 경고를 게시(완료 알림과 별개).
+  async notifyRegression(
+    tenant: string,
+    payload: {
+      scheduleName: string;
+      scorecardId: string;
+      previousScorecardId: string;
+      regressions: Array<{ caseId: string; metric: string; baseline: number; candidate: number }>;
+    },
+  ): Promise<void> {
+    const lines = payload.regressions
+      .slice(0, 10)
+      .map((r) => `• \`${r.caseId}\` ${r.metric}: ${r.baseline} → ${r.candidate}`)
+      .join("\n");
+    const more = payload.regressions.length > 10 ? `\n…외 ${payload.regressions.length - 10}건` : "";
+    await this.post(
+      tenant,
+      `⚠️ **예약 회귀 \`${payload.scheduleName}\`** — ${payload.regressions.length}건 회귀 ` +
+        `(scorecard \`${payload.scorecardId}\` vs 직전 \`${payload.previousScorecardId}\`)\n${lines}${more}`,
+    );
+  }
+
   // notify 대상(Mattermost 연결)이 설정돼 있으면 채널에 게시. 미설정/owner없음/비-Mattermost/토큰없음/실패는 조용히 무시.
   private async post(tenant: string, message: string): Promise<void> {
     try {

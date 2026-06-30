@@ -304,6 +304,9 @@ async function main(): Promise<void> {
     ...(temporalAddress ? { driver: new TemporalScheduleDriver({ address: temporalAddress }) } : {}),
     submitScorecard: (sc) => scorecardService.submit(sc),
     scorecardStatus: async (id) => (await scorecardService.get(id))?.status,
+    // 회귀 알림: 직전↔이번 스케줄 run diff(완료여야 가능) → 회귀 시 Mattermost(완료 알림은 스코어카드 onComplete 가 별도).
+    diffScorecards: (tenant, baselineId, candidateId) => scorecardService.diff(tenant, baselineId, candidateId),
+    notifyRegression: (tenant, payload) => notificationService.notifyRegression(tenant, payload),
   });
 
   const app = buildServer({

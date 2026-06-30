@@ -54,8 +54,30 @@ export interface ScheduleServiceDeps {
   submitScorecard?: (input: RunScorecardInput) => Promise<{ id: string; status: string }>;
   // 발사한 스코어카드 status 폴링(워크플로 poll-to-terminal). 미주입이면 status 라우트 비활성.
   scorecardStatus?: (scorecardId: string) => Promise<string | undefined>;
+  // 회귀 알림용: 직전↔이번 스코어카드 diff(= ScorecardService.diff). 미완료/오류면 throw → finalize 가 swallow.
+  diffScorecards?: (
+    tenant: string,
+    baselineId: string,
+    candidateId: string,
+  ) => Promise<{ regressions: RegressionDelta[] }>;
+  // 회귀가 잡히면 알림(= NotificationService.notifyRegression). 미주입이면 회귀 알림 비활성(완료 알림은 스코어카드 onComplete).
+  notifyRegression?: (tenant: string, payload: RegressionAlert) => Promise<void>;
   newId?: () => string;
   now?: () => string;
+}
+
+// diff 의 회귀 1건(케이스×메트릭) — 알림 메시지에 필요한 필드만.
+export interface RegressionDelta {
+  caseId: string;
+  metric: string;
+  baseline: number;
+  candidate: number;
+}
+export interface RegressionAlert {
+  scheduleName: string;
+  scorecardId: string;
+  previousScorecardId: string;
+  regressions: RegressionDelta[];
 }
 
 // 예약(cron) 스코어카드 CRUD. 발사(Temporal Schedule 동기화 + 워크플로)는 slice 2 — 여기선 SSOT 레코드만 관리.
@@ -147,11 +169,13 @@ export class ScheduleService {
   }
 
   // 발사(Temporal 워크플로가 internal 라우트로 호출) — 스케줄의 runTemplate 을 생성자 신원으로 submit.
-  // lastFired/last* 를 기록. 발사기 미설정이면 BadRequest(Temporal 미배포 dev).
-  async fire(tenant: string, id: string): Promise<{ scorecardId: string }> {
+  // lastFired/last* 를 기록하고, 직전 스케줄 run id(이번 발사 직전의 lastScorecardId)를 같이 돌려준다(회귀 비교용).
+  // 발사기 미설정이면 BadRequest(Temporal 미배포 dev).
+  async fire(tenant: string, id: string): Promise<{ scorecardId: string; previousScorecardId?: string }> {
     const schedule = await this.get(tenant, id); // 404
     if (!this.deps.submitScorecard)
       throw new BadRequestError("BAD_REQUEST", { id }, "스코어카드 발사기가 설정되지 않았습니다(발사 비활성).");
+    const previousScorecardId = schedule.lastScorecardId; // 이번 발사 전의 직전 run(finalize 의 회귀 baseline)
     const t = schedule.runTemplate;
     const rec = await this.deps.submitScorecard({
       tenant,
@@ -169,11 +193,33 @@ export class ScheduleService {
       lastStatus: rec.status,
       updatedAt: this.now(),
     });
-    return { scorecardId: rec.id };
+    return { scorecardId: rec.id, ...(previousScorecardId !== undefined ? { previousScorecardId } : {}) };
   }
 
   // 발사한 스코어카드 status(워크플로 poll-to-terminal). 미설정이면 undefined.
   scorecardStatus(scorecardId: string): Promise<string | undefined> {
     return this.deps.scorecardStatus?.(scorecardId) ?? Promise.resolve(undefined);
+  }
+
+  // 종료 처리(워크플로가 poll-to-terminal 후 호출) — 최종 status 를 기록하고, 직전 run 대비 회귀가 있으면 알림.
+  // diff 는 둘 다 완료여야 가능(미완료/오류면 throw) → swallow 하고 회귀 알림만 건너뛴다(완료 알림은 스코어카드 onComplete).
+  async finalize(tenant: string, id: string, scorecardId: string, previousScorecardId?: string): Promise<void> {
+    const schedule = await this.get(tenant, id); // 404(스케줄이 지워졌으면 더 할 일 없음)
+    const status = await this.scorecardStatus(scorecardId);
+    if (status !== undefined) await this.deps.store.update(tenant, id, { lastStatus: status, updatedAt: this.now() });
+    if (!previousScorecardId || !this.deps.diffScorecards || !this.deps.notifyRegression) return;
+    let regressions: RegressionDelta[];
+    try {
+      ({ regressions } = await this.deps.diffScorecards(tenant, previousScorecardId, scorecardId));
+    } catch {
+      return; // 한쪽이 미완료/실패 → 비교 불가, 회귀 알림 스킵
+    }
+    if (regressions.length === 0) return;
+    await this.deps.notifyRegression(tenant, {
+      scheduleName: schedule.name,
+      scorecardId,
+      previousScorecardId,
+      regressions,
+    });
   }
 }
