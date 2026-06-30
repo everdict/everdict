@@ -168,6 +168,22 @@ export class ScheduleService {
     await this.deps.store.remove(tenant, id);
   }
 
+  // 생성자(createdBy)가 워크스페이스를 떠나면 그 사람이 만든 활성 예약을 일괄 비활성한다 — 발사 run 은 생성자 신원으로
+  // 돌아가므로(예산·비공개-repo 연결) 더는 신뢰할 수 없다. Temporal 도 pause(driver.ensure). 멤버 제거 훅에서 호출.
+  // 반환 = 비활성된 예약 수.
+  async disableByCreator(tenant: string, createdBy: string): Promise<number> {
+    const targets = (await this.deps.store.list(tenant)).filter((s) => s.createdBy === createdBy && s.enabled);
+    for (const s of targets) {
+      const updated = await this.deps.store.update(tenant, s.id, {
+        enabled: false,
+        lastStatus: "생성자가 워크스페이스를 떠나 자동 비활성",
+        updatedAt: this.now(),
+      });
+      if (updated) await this.deps.driver?.ensure(this.specOf(updated)); // Temporal pause
+    }
+    return targets.length;
+  }
+
   // 발사(Temporal 워크플로가 internal 라우트로 호출) — 스케줄의 runTemplate 을 생성자 신원으로 submit.
   // lastFired/last* 를 기록하고, 직전 스케줄 run id(이번 발사 직전의 lastScorecardId)를 같이 돌려준다(회귀 비교용).
   // 발사기 미설정이면 BadRequest(Temporal 미배포 dev).

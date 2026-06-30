@@ -6,8 +6,9 @@
 > + schedule activities (HTTP bridge) + `TemporalScheduleDriver`. Slice 3 (this change) = regression alert —
 > `fire()` returns the previous run id, `finalize()` (workflow calls it post-terminal) diffs vs the previous
 > scheduled run and fires `notifyRegression` (Mattermost) on a regression + records final `lastStatus`; web cron
-> preset picker + last-fire display. **Remaining follow-ups: creator-left / connection-revoked auto-disable; live
-> Temporal e2e.**
+> preset picker + last-fire display. **creator-left auto-disable** also shipped (member leave/remove → disable that
+> creator's schedules + Temporal pause). **Remaining: connection-revoked auto-disable (indirect: schedule→dataset
+> →case.connectionId); live Temporal e2e.**
 >
 > **Driver location (deviation from the table below):** `TemporalScheduleDriver` lives in **`apps/api`**
 > (`temporal-schedule-driver.ts`), not `@assay/orchestrator` — it needs only `@temporalio/client`, and importing
@@ -151,8 +152,11 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
    poll-to-terminal, via `POST /internal/schedules/:id/finalize`) diffs vs the previous scheduled run and fires
    `NotificationService.notifyRegression` (Mattermost) on a regression + records final `lastStatus`; web cron
    **preset picker** (매시간/매일/평일/매주 chips → cron string) + last-fire time on the list. *(diff-vs-previous +
-   notify decision unit-tested; completion notify already free via scorecard `onComplete`.)* Follow-up: creator-left /
-   connection-revoked **auto-disable** policy (not yet wired into membership-leave / connection-revoke).
+   notify decision unit-tested; completion notify already free via scorecard `onComplete`.)* **Creator-left
+   auto-disable** shipped: `ScheduleService.disableByCreator(tenant, createdBy)` (disable + Temporal pause + reason
+   in `lastStatus`), wired via `MembershipService.onMemberRemoved` (single core → HTTP + MCP leave/remove both
+   covered). Follow-up: **connection-revoked** auto-disable (indirect dependency schedule→dataset→case.connectionId
+   — needs dataset resolution; deferred).
 
 ## Decisions / non-goals
 

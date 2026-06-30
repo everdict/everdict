@@ -149,7 +149,13 @@ async function main(): Promise<void> {
     scheduleStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
-  const membershipService = new MembershipService(workspaceStore, inviteStore, userProfileStore);
+  // scheduleService 는 아래에서 생성되지만(scorecardService 의존), 멤버 제거 훅은 클로저로 늦바인딩한다
+  // — 훅은 런타임(멤버 이탈 시)에만 호출되고 그때는 이미 할당돼 있다.
+  // biome-ignore lint/style/useConst: 선언↔할당 분리가 필요(순환 생성 순서) — 멤버 제거 훅 클로저가 이 바인딩을 캡처한다.
+  let scheduleService: ScheduleService;
+  const membershipService = new MembershipService(workspaceStore, inviteStore, userProfileStore, (ws, sub) =>
+    scheduleService.disableByCreator(ws, sub),
+  );
   const profileService = new ProfileService(userProfileStore);
   const runnerService = new RunnerService(runnerStore);
   await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
@@ -299,7 +305,7 @@ async function main(): Promise<void> {
   // 예약(cron) 스코어카드. SSOT = scheduleStore; Temporal 주소가 설정되면 TemporalScheduleDriver 로 Schedule 동기화
   // (발사 활성화). 발사는 워크플로→internal 라우트→여기 submitScorecard. 미설정이면 CRUD 만(발사 비활성, dev).
   const temporalAddress = process.env.ASSAY_TEMPORAL_ADDRESS;
-  const scheduleService = new ScheduleService({
+  scheduleService = new ScheduleService({
     store: scheduleStore,
     ...(temporalAddress ? { driver: new TemporalScheduleDriver({ address: temporalAddress }) } : {}),
     submitScorecard: (sc) => scorecardService.submit(sc),

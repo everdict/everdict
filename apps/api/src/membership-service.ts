@@ -16,6 +16,9 @@ export class MembershipService {
     private readonly members: WorkspaceStore,
     private readonly invites: WorkspaceInviteStore,
     private readonly profiles: UserProfileStore,
+    // 멤버가 워크스페이스에서 제거/이탈된 직후 호출(best-effort) — 예약(cron) 자동 비활성 등 정리 훅.
+    // 실패는 멤버 제거 결과에 영향 없음(스토어가 진실원천). HTTP·MCP 공통 코어라 양쪽에 동일 적용.
+    private readonly onMemberRemoved?: (workspace: string, subject: string) => Promise<unknown>,
   ) {}
 
   // --- 멤버 ---
@@ -56,6 +59,7 @@ export class MembershipService {
     if (target.role === "admin" && adminCount(all) === 1)
       throw new ConflictError("CONFLICT", { workspace }, "마지막 admin 은 제거할 수 없습니다.");
     await this.members.removeMember(workspace, subject);
+    await this.onMemberRemoved?.(workspace, subject).catch(() => {}); // 정리 훅(예약 자동 비활성) — best-effort
   }
 
   // 내가 이 워크스페이스에서 나간다(self-serve — 역할 게이트 없음, 자기 멤버십만 제거). 멱등.
@@ -71,6 +75,7 @@ export class MembershipService {
         "마지막 admin 은 나갈 수 없습니다. 다른 멤버에게 admin 을 위임하거나 워크스페이스를 삭제하세요.",
       );
     await this.members.removeMember(workspace, subject);
+    await this.onMemberRemoved?.(workspace, subject).catch(() => {}); // 정리 훅(예약 자동 비활성) — best-effort
   }
 
   // --- 초대 ---

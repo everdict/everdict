@@ -269,3 +269,34 @@ describe("ScheduleService.finalize — 회귀 알림", () => {
     expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
   });
 });
+
+describe("ScheduleService.disableByCreator — 생성자 이탈 자동 비활성", () => {
+  it("해당 생성자의 활성 예약만 비활성(이유 기록 + Temporal pause); 다른 생성자/이미 비활성은 그대로", async () => {
+    const ensured: ScheduleSpec[] = [];
+    const driver: ScheduleDriver = {
+      async ensure(s) {
+        ensured.push(s);
+      },
+      async remove() {},
+    };
+    let n = 0;
+    const s = new ScheduleService({
+      store: new InMemoryScheduleStore(),
+      driver,
+      newId: () => `sch-${++n}`,
+      now: () => "t",
+    });
+    await s.create({ ...base, createdBy: "u-1" }); // sch-1 enabled
+    await s.create({ ...base, createdBy: "u-1", enabled: false }); // sch-2 already disabled
+    await s.create({ ...base, createdBy: "u-2" }); // sch-3 다른 생성자
+    ensured.length = 0; // create 시점의 ensure 는 무시
+
+    const count = await s.disableByCreator("acme", "u-1");
+    expect(count).toBe(1); // 활성인 sch-1 만 대상
+    expect((await s.get("acme", "sch-1")).enabled).toBe(false);
+    expect((await s.get("acme", "sch-1")).lastStatus).toContain("자동 비활성");
+    expect((await s.get("acme", "sch-3")).enabled).toBe(true); // 다른 생성자는 그대로
+    expect(ensured.map((e) => e.id)).toEqual(["sch-1"]); // Temporal pause 1건
+    expect(ensured[0]?.paused).toBe(true);
+  });
+});
