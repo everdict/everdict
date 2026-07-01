@@ -98,7 +98,15 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           },
         });
       } else {
-        const secrets = await deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
+        // 시크릿 복호화 실패(예: ASSAY_SECRETS_KEY / 암호화 키 불일치)를 빈 맵으로 삼키면, 시크릿이
+        // 실제로 있는데도 아래 `secrets[KEY]` 가 undefined 라 "미설정"으로 오판돼 judge 가 조용히 skip 된다.
+        // throw 를 잡되 빈 맵 폴백 없이 실제 복호화 사유를 그대로 노출해 skip.
+        let secrets: Record<string, string>;
+        try {
+          secrets = await deps.secretsFor(tenant);
+        } catch (err) {
+          return skip(spec, `시크릿 복호화 실패: ${err instanceof Error ? err.message : String(err)}`);
+        }
         // judge.model 이 등록된 model id 면 그 spec(provider/하부모델/baseUrl)으로 해석 — 아니면 raw 모델 문자열 그대로.
         let provider: "anthropic" | "openai" = spec.provider;
         let model = spec.model;

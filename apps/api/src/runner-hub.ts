@@ -73,6 +73,11 @@ export class RunnerHub {
     const promise = new Promise<CaseResult>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.remove(key, jobId);
+        // 큐 타임아웃 reject 가 어딘가에서 삼켜지면 "이유없이 조용히 실패"로 보인다 — 원인(미연결/유휴)과
+        // 대기 시간을 서버 로그로 남겨 가시화한다.
+        console.warn(
+          `[runner-hub] 큐 타임아웃: 러너 ${selfHostedBackendName(key)} 가 ${this.queueTimeoutMs}ms 안에 잡 ${jobId} 를 가져가지 않았습니다 — 연결된 러너가 없거나 유휴 상태입니다.`,
+        );
         reject(
           new UpstreamError(
             "UPSTREAM_ERROR",

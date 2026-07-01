@@ -1,5 +1,5 @@
 import type { AgentJob, CaseResult } from "@assay/core";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { RunnerHub, type SelfHostedKey } from "./runner-hub.js";
 
 const result: CaseResult = {
@@ -68,6 +68,21 @@ describe("RunnerHub", () => {
       code: "UPSTREAM_ERROR",
       extra: { reason: "no_runner" },
     });
+  });
+
+  it("타임아웃: reject 가 삼켜져도 원인·대기시간이 console.warn 으로 가시화된다", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const hub = new RunnerHub({ queueTimeoutMs: 5, newJobId: () => "j-timeout" });
+      await hub.enqueue(keyA, job("c1")).catch(() => {}); // reject 를 삼켜도(조용한 실패 재현)
+      expect(warn).toHaveBeenCalledOnce();
+      const msg = String(warn.mock.calls[0]?.[0]);
+      expect(msg).toContain("self:u-alice:laptop"); // 어느 러너인지
+      expect(msg).toContain("5ms"); // 얼마나 기다렸는지
+      expect(msg).toContain("j-timeout"); // 어느 잡인지
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it("lease 만료 → 재큐: 러너 사망 시 다음 lease 가 같은 잡을 다시 가져간다", async () => {
