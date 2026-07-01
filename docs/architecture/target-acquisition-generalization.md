@@ -186,6 +186,13 @@ Each step merges independently; defaults keep current behavior, so no regression
    interpolation; `acquireRequest` is an injectable backend option. Coordinate-mapping failure best-effort-closes the
    half-open session. Unit tests (`target-acquirer.test.ts`) + a dispatch test (coordinates → bodyTemplate, no runtime
    browser, close on dispose). Absent `acquire` = `provision` = today.
+3. **`acquire.ready` — session readiness gate. ✅ DONE.** A `service`-mode session can be opened before its client
+   (the browser that back-connects to the session server) has self-registered; a front-door command issued in that
+   window 404s. Optional `acquire.ready` (`{ service?, poll: "GET /path", intervalMs, timeoutMs }`) makes
+   `serviceAcquirer` poll a status URL (injectable `ProbeFn`, default `fetchProbe` = 2xx?; path `{var}`-interpolated
+   with wiring **+ coordinates**, so `{session_id}` resolves) until 2xx **before** returning the handle. Timeout ⇒
+   best-effort `close` of the half-open session (same no-leak discipline as coordinate-mapping failure) then
+   `UpstreamError`. Absent `ready` = no gate = today. (`open` request body/headers templating remains open — below.)
 
 ## Touch points (for the eventual PR)
 

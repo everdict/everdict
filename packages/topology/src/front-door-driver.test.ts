@@ -1,3 +1,4 @@
+import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
 import type { FrontDoorCompletion } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import {
@@ -435,5 +436,79 @@ describe("HttpFrontDoorDriver.drive — 상관(correlate)", () => {
       .catch((e: unknown) => e);
     expect(err).toBeInstanceOf(Error);
     expect((err as { code?: string }).code).toBe("UPSTREAM_ERROR");
+  });
+});
+
+// 기본 submit 은 node:http 직접 요청 — undici(전역 fetch)의 headersTimeout(기본 300s) 회피가 목적.
+// 실 http 서버로 왕복 + 소켓 idle 타임아웃(무흐름 끊기)을 검증한다(submit io 미주입 = 기본 경로).
+describe("HttpFrontDoorDriver 기본 submit (node http)", () => {
+  async function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{
+    port: number;
+    close: () => Promise<void>;
+    held: ServerResponse[];
+  }> {
+    const held: ServerResponse[] = [];
+    const server = createServer(handler);
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const addr = server.address();
+    const port = addr !== null && typeof addr === "object" ? addr.port : 0;
+    return {
+      port,
+      held,
+      close: () =>
+        new Promise<void>((resolve) => {
+          for (const r of held) r.destroy();
+          server.close(() => resolve());
+        }),
+    };
+  }
+
+  it("응답 JSON 본문을 받아 상관(returned)에 쓴다 — node http 왕복", async () => {
+    const srv = await listen((req, res) => {
+      let body = "";
+      req.on("data", (c) => {
+        body += c;
+      });
+      req.on("end", () => {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify({ run_id: "srv-1", echo: JSON.parse(body || "{}") }));
+      });
+    });
+    try {
+      const outcome = await new HttpFrontDoorDriver().drive(
+        baseReq({ base: `http://127.0.0.1:${srv.port}`, correlate: { mode: "returned", path: "run_id" } }),
+      );
+      expect(outcome.status).toBe("done");
+      expect(outcome.traceRef).toBe("srv-1"); // 서버 응답 본문에서 상관 id 추출 → 왕복 성공
+    } finally {
+      await srv.close();
+    }
+  });
+
+  it("서버가 응답을 무흐름으로 붙잡으면 timeoutMs(소켓 idle)로 끊고 UpstreamError", async () => {
+    const srv = await listen((_req, res) => {
+      srv.held.push(res); // 절대 응답하지 않음 — 소켓 무흐름
+    });
+    try {
+      // poll 완료 모델 → drive 가 submit 에 completion.timeoutMs 를 소켓 idle 타임아웃으로 전달한다.
+      const err = await new HttpFrontDoorDriver({ getJson: async () => ({ status: "done" }) })
+        .drive(
+          baseReq({
+            base: `http://127.0.0.1:${srv.port}`,
+            completion: {
+              mode: "poll",
+              statusPath: "GET /s",
+              done: { field: "status", equals: "done" },
+              intervalMs: 10,
+              timeoutMs: 80,
+            },
+          }),
+        )
+        .catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(Error);
+      expect((err as { code?: string }).code).toBe("UPSTREAM_ERROR");
+    } finally {
+      await srv.close();
+    }
   });
 });

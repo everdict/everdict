@@ -71,6 +71,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       for (const { store, name, def } of dependencyStores(spec)) {
         const cname = `${network}-${name}`;
         containers.push(cname);
+        await this.docker.rm([cname]).catch(() => {}); // 멱등 재배포 — 러너 재시작으로 남은 동명 컨테이너를 먼저 제거(--name 충돌 cascade 방지)
         await this.docker.run({ name: cname, image: def.image, network, alias: name, env: def.env, args: def.args });
         await this.waitStoreAccepting(store, cname); // pg_isready/redis ping — 서비스가 부팅 시 접속하므로 먼저 준비.
       }
@@ -82,6 +83,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       for (const svc of spec.services) {
         const cname = `${network}-${sanitize(svc.name)}`;
         containers.push(cname);
+        await this.docker.rm([cname]).catch(() => {}); // 멱등 재배포 — 남은 동명 컨테이너 제거(--name 비멱등 충돌 cascade 방지)
         await this.docker.run({
           name: cname,
           image: svc.image,

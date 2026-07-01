@@ -1,6 +1,12 @@
 import type { ServiceHarnessSpec, TargetAcquire, TopologyTarget } from "@assay/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { type AcquireRequestFn, fetchAcquire, serviceAcquirer, targetAcquirerFor } from "./target-acquirer.js";
+import {
+  type AcquireRequestFn,
+  type ProbeFn,
+  fetchAcquire,
+  serviceAcquirer,
+  targetAcquirerFor,
+} from "./target-acquirer.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
 
 const SPEC: ServiceHarnessSpec = {
@@ -79,6 +85,64 @@ describe("serviceAcquirer", () => {
   it("타깃 서비스 엔드포인트가 없으면 실패한다", async () => {
     const acq = serviceAcquirer(SERVICE_ACQUIRE, async () => ({}));
     await expect(acq.acquire({ spec: SPEC, runId: "r1", endpoints: {}, wiring: {} })).rejects.toThrow(/엔드포인트/);
+  });
+
+  // --- 준비 게이트(ready): 세션 클라이언트가 자기등록하기 전엔 명령이 404 로 튕기므로 200 될 때까지 대기 ---
+  const WITH_READY: Extract<TargetAcquire, { mode: "service" }> = {
+    ...SERVICE_ACQUIRE,
+    ready: { service: "browsers", poll: "GET /sessions/{session_id}/ready", intervalMs: 10, timeoutMs: 1000 },
+  };
+
+  it("ready: 상태 URL 이 200 될 때까지 폴링한 뒤에야 좌표를 넘긴다(좌표로 보간된 경로)", async () => {
+    const { fn } = fakeRequest({ "POST http://browsers:7000/sessions": { id: "sess-7", cdp_url: "ws://x/7" } });
+    let probes = 0;
+    const probedUrls: string[] = [];
+    const probe: ProbeFn = async (_method, url) => {
+      probes += 1;
+      probedUrls.push(url);
+      return probes >= 3; // 처음 2회는 아직 안 준비(404), 3회째 200
+    };
+    const acq = serviceAcquirer(WITH_READY, fn, { probe, now: () => 0, sleep: async () => {} });
+
+    const handle = await acq.acquire({
+      spec: SPEC,
+      runId: "r1",
+      endpoints: { browsers: "http://browsers:7000" },
+      wiring: { run_id: "r1" },
+    });
+
+    expect(probes).toBe(3);
+    // poll 경로가 좌표(session_id)로 보간됐다.
+    expect(probedUrls[0]).toBe("http://browsers:7000/sessions/sess-7/ready");
+    expect(handle.wiring).toEqual({ session_id: "sess-7", target_cdp_url: "ws://x/7" });
+  });
+
+  it("ready: 시한 초과면 열린 세션을 close 하고 실패한다(누수 방지)", async () => {
+    const { fn, calls } = fakeRequest({ "POST http://browsers:7000/sessions": { id: "sess-7", cdp_url: "ws://x/7" } });
+    const probe: ProbeFn = async () => false; // 영영 준비 안 됨
+    let t = 0;
+    const acq = serviceAcquirer(
+      { ...SERVICE_ACQUIRE, ready: { service: "browsers", poll: "GET /ready", intervalMs: 10, timeoutMs: 30 } },
+      fn,
+      {
+        probe,
+        now: () => t,
+        sleep: async (ms) => {
+          t += ms;
+        },
+      },
+    );
+
+    await expect(
+      acq.acquire({
+        spec: SPEC,
+        runId: "r1",
+        endpoints: { browsers: "http://browsers:7000" },
+        wiring: { run_id: "r1" },
+      }),
+    ).rejects.toThrow(/준비 대기 시간초과/);
+    // 열린 세션을 흘리지 않는다 — 좌표(session_id)로 close.
+    expect(calls.some((c) => c.method === "DELETE" && c.url === "http://browsers:7000/sessions/sess-7")).toBe(true);
   });
 });
 

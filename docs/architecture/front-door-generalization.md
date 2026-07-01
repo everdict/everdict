@@ -181,6 +181,11 @@ Each step merges independently; defaults keep current behavior, so no regression
    (no contract change). `harness`-provided target observation deferred (needs a `TopologyRuntime.observe` method).
 5. **#5 image pin** ✅ — `AgentJob.imagePins` + `applyImagePins` (override images + deterministic `-pin-<hash>`
    effective version so warm pools separate variants, no runtime change). Absent `imagePins` = unchanged.
+6. **Default submit on `node:http` (not global `fetch`)** ✅ — undici's `headersTimeout` (default 300s) aborts a
+   `sync`-completion harness that holds the response for minutes while the agent runs its N steps; the raw node
+   request has no such ceiling. `FrontDoorRequestOpts.timeoutMs` (fed from `completion.timeoutMs`; `sync` has none →
+   unbounded) is applied as a **socket idle timeout** — while the server holds the response no bytes flow, so the
+   idle window *is* the completion deadline. Socket errors (`ECONNREFUSED`/idle-abort) remap to `UpstreamError`.
 
 ## Touch points (for the eventual PR)
 

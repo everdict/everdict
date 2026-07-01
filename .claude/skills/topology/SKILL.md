@@ -66,6 +66,11 @@ fire-and-forget submit, trace-by-Assay-runId, always-provisioned browser, fixed 
 `FrontDoorProtocol` + a thin `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`), each hardcode →
 an optional knob defaulting to today — is in `docs/architecture/front-door-generalization.md`. Read it before
 touching `service-backend.ts`'s driving logic.
+- **Default submit is `node:http`/`node:https`, not global `fetch`.** undici's `headersTimeout` (default 300s) aborts
+  `sync`-completion harnesses that hold the response for minutes while the agent runs; the raw node request has no such
+  cap. `FrontDoorRequestOpts.timeoutMs` (from `completion.timeoutMs` — `sync` has none, so unbounded) is applied as a
+  **socket idle timeout**: while the server holds the response no data flows, so idle-time *is* the completion deadline.
+  Socket errors remap to `UpstreamError`.
 - **#2 completion — DONE (4 modes).** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit +
   await; `frontDoor.completion` in `@assay/core`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
   (SSE submit; `OpenStreamFn`/`fetchStream`; terminal event via `StatusMatch`; first-event correlate) | `callback`
@@ -107,6 +112,11 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
   service's session (`open` → `coordinates` dot-path map → wiring bag, `close` on dispose; HTTP only, lives by the
   `FrontDoorDriver`). No Assay container → observation via `delivery` (`sentinel`/`egress`) or a `prompt` snapshot.
   Coordinate-mapping failure best-effort-closes the half-open session (no leak). Absent `acquire` = `provision`.
+- **`acquire.ready` — session readiness gate.** A `service` session can exist before its client (the browser that
+  back-connects) has self-registered — front-door commands then 404. Optional `acquire.ready`
+  (`{service?, poll:"GET /path", intervalMs, timeoutMs}`) polls the status URL (injectable `ProbeFn`, default
+  `fetchProbe` = 2xx?; path `{var}`-interpolated with wiring+coordinates, e.g. `{session_id}`) until 2xx **before**
+  handing back coordinates. Timeout ⇒ best-effort `close` (no leak) then `UpstreamError`. Absent = no gate (today).
 
 ## Observation delivery (`HOW-observe`) — pluggable seam
 *How* the observation reaches the grader/judge is now a third axis (sibling of `TopologyRuntime`=WHERE,

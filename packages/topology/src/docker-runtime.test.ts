@@ -188,6 +188,31 @@ describe("DockerTopologyRuntime", () => {
     expect(agent?.env?.DATABASE_URL).toBe("postgresql://store"); // storeEnv 가 svc.env(및 connEnv)를 이긴다
   });
 
+  it("ensureTopology: 러너 재배포 — 남은 고정 이름 컨테이너가 있어도 rm 선제 제거로 충돌 없이 성공한다", async () => {
+    // 실 데몬처럼 docker run(--name)은 비멱등: 같은 이름이 살아 있으면 충돌(throw). 이전 배포의 잔존 컨테이너 재현.
+    const live = new Set<string>(["assay-bu-1.0.0-bu-postgres", "assay-bu-1.0.0-agent-server"]);
+    const docker: Docker = {
+      async ensureNetwork() {},
+      async run(spec) {
+        if (live.has(spec.name)) throw new Error(`container name already in use: ${spec.name}`);
+        live.add(spec.name);
+        return `cid-${spec.name}`;
+      },
+      async hostPort() {
+        return 49152;
+      },
+      async exec() {},
+      async rm(c) {
+        for (const name of c) live.delete(name);
+      },
+      async removeNetwork() {},
+    };
+    const rt = new DockerTopologyRuntime({ docker, fetchImpl: okFetch });
+    // 잔존 컨테이너를 run 전에 rm 하지 않으면 여기서 이름 충돌 cascade 로 throw 한다(회귀 가드).
+    const handle = await rt.ensureTopology(SPEC);
+    expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+  });
+
   it("ensureTopology: 같은 버전 재호출은 warm 캐시 — 재배포 없음", async () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
@@ -329,8 +354,13 @@ describe("DockerTopologyRuntime", () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     await rt.ensureTopology(SPEC);
+    const beforeTeardown = f.removed.length; // ensure 중 멱등 rm(각 컨테이너 run 전) 이후부터 teardown 제거분만 확인
     await rt.teardown(SPEC);
-    expect(f.removed).toEqual(["assay-bu-1.0.0-bu-postgres", "assay-bu-1.0.0-bu-redis", "assay-bu-1.0.0-agent-server"]);
+    expect(f.removed.slice(beforeTeardown)).toEqual([
+      "assay-bu-1.0.0-bu-postgres",
+      "assay-bu-1.0.0-bu-redis",
+      "assay-bu-1.0.0-agent-server",
+    ]);
     expect(f.rmNets).toEqual(["assay-bu-1.0.0"]);
   });
 });

@@ -1,3 +1,5 @@
+import { type IncomingMessage, type RequestOptions, request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
 import {
   type FrontDoorCompletion,
   type FrontDoorCorrelate,
@@ -6,10 +8,12 @@ import {
   UpstreamError,
 } from "@assay/core";
 
-// front-door 요청 옵션 — method(submit 동사에서; 미지정 POST) + headers(값 보간 완료). submit/stream 공용.
+// front-door 요청 옵션 — method(submit 동사에서; 미지정 POST) + headers(값 보간 완료) + timeoutMs(소켓 idle 타임아웃).
+// timeoutMs: sync 완료형은 서버가 응답을 붙잡는 동안 데이터가 흐르지 않으므로 소켓 무흐름 상한이 사실상 완료 시한이 된다.
 export interface FrontDoorRequestOpts {
   method?: string;
   headers?: Record<string, string>;
+  timeoutMs?: number;
 }
 // front-door 로 task+wiring 을 POST 하는 함수 — 응답 본문(JSON)을 돌려준다(returned 상관에서 trace-id 추출용).
 // 테스트에서 주입 가능. (injected 상관은 본문이 불필요하므로 void 반환도 허용.)
@@ -28,19 +32,58 @@ export type OpenStreamFn = (
   opts?: FrontDoorRequestOpts & { timeoutMs?: number },
 ) => AsyncIterable<unknown>;
 
-const fetchSubmit: SubmitFn = async (url, payload, opts) => {
-  const res = await fetch(url, {
-    method: opts?.method ?? "POST", // submit 동사("POST /runs")에서 — 미지정 POST
-    headers: { "content-type": "application/json", ...opts?.headers }, // 선언 헤더(Authorization 등)가 content-type 위에
-    body: JSON.stringify(payload),
+// 기본 submit — node:http/https 직접 요청(전역 fetch=undici 우회).
+// 왜: undici 의 headersTimeout(기본 300s)이 sync 완료형 하니스를 끊어버린다 — 서버가 에이전트의 N-step 이
+// 끝날 때까지 분 단위로 응답을 붙잡는데 undici 는 그걸 헤더 타임아웃으로 abort 한다. node http 는 그 상한이 없다.
+// 대신 opts.timeoutMs 를 소켓 idle 타임아웃으로 건다 — 응답을 붙잡는 동안엔 데이터가 흐르지 않으므로 이 값이
+// 사실상 완료 시한이 된다(무흐름만 끊고, 정상 대기는 얼마든 허용). 미지정이면 idle 타임아웃 없음(상위 run 타임아웃이 상한).
+const fetchSubmit: SubmitFn = (url, payload, opts) =>
+  new Promise<unknown>((resolve, reject) => {
+    const target = new URL(url);
+    const body = JSON.stringify(payload);
+    const options: RequestOptions = {
+      method: opts?.method ?? "POST", // submit 동사("POST /runs")에서 — 미지정 POST
+      // 선언 헤더(Authorization 등)가 content-type 위에; content-length 는 실제 본문 기준으로 항상 정확하게.
+      headers: { "content-type": "application/json", ...opts?.headers, "content-length": Buffer.byteLength(body) },
+    };
+    const onResponse = (res: IncomingMessage): void => {
+      const chunks: Buffer[] = [];
+      res.on("data", (chunk: Buffer) => chunks.push(chunk));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        // 응답이 JSON 이 아니거나 비어도 injected 모드는 본문이 불필요 → 관용적으로 파싱.
+        try {
+          resolve(text ? JSON.parse(text) : undefined);
+        } catch {
+          resolve(undefined);
+        }
+      });
+    };
+    const req =
+      target.protocol === "https:"
+        ? httpsRequest(target, options, onResponse)
+        : httpRequest(target, options, onResponse);
+    if (opts?.timeoutMs !== undefined) {
+      req.setTimeout(opts.timeoutMs, () => {
+        req.destroy(
+          new UpstreamError(
+            "UPSTREAM_ERROR",
+            { url, timeoutMs: opts.timeoutMs },
+            "front-door submit 응답 대기 시간초과(소켓 무흐름).",
+          ),
+        );
+      });
+    }
+    // node 소켓 에러(ECONNREFUSED/소켓 타임아웃 등)를 우리 AppError 로 remap — 원시 에러를 경계 밖으로 흘리지 않는다.
+    req.on("error", (err: Error) => {
+      reject(
+        err instanceof UpstreamError
+          ? err
+          : new UpstreamError("UPSTREAM_ERROR", { url }, `front-door submit 실패: ${err.message}`),
+      );
+    });
+    req.end(body);
   });
-  // 응답이 JSON 이 아니거나 비어도 injected 모드는 본문이 불필요 → 관용적으로 파싱.
-  try {
-    return await res.json();
-  } catch {
-    return undefined;
-  }
-};
 // 기본 JSON GET — poll 완료 + egress sink 회수의 기본 프리미티브(주입 안 하면 이걸 쓴다).
 export const fetchJson: GetJsonFn = async (url) => {
   const res = await fetch(url, { headers: { accept: "application/json" } });
@@ -166,6 +209,11 @@ function resolveTraceRef(correlate: FrontDoorCorrelate | undefined, injected: st
   return value;
 }
 
+// 완료 모델의 timeoutMs 를 안전하게 읽는다 — sync 만 이 필드가 없다(→ undefined). submit 의 소켓 idle 타임아웃으로 전달.
+function completionTimeoutMs(completion: FrontDoorCompletion | undefined): number | undefined {
+  return completion && completion.mode !== "sync" ? completion.timeoutMs : undefined;
+}
+
 export type DriveStatus = "done" | "failed" | "timeout";
 export interface DriveOutcome {
   // 트레이스를 끌어올 상관키. 이 슬라이스에선 injected(= assay runId); #3 에서 returned(에이전트 자체 id)로 일반화.
@@ -233,9 +281,12 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     // callback: fire-and-forget submit 후 에이전트의 inbound POST 를 랑데부에서 기다린다.
     if (req.completion?.mode === "callback") return this.driveCallback(req, req.completion);
     const mp = methodPath(req.submit); // 동사 + path — method 는 submit("POST /runs")에서, headers 는 req 에서
+    // 완료 모델의 timeoutMs 를 submit 소켓 idle 타임아웃으로 — sync(미지정)면 없음(응답을 붙잡는 게 정상).
+    const timeoutMs = completionTimeoutMs(req.completion);
     const response = await this.submit(joinUrl(req.base, mp.path), req.payload, {
       method: mp.method,
       headers: req.headers,
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
     // 상관(#3): injected = 주입한 runId(현행), returned = 에이전트가 응답으로 돌려준 자기 id.
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
@@ -297,6 +348,7 @@ export class HttpFrontDoorDriver implements FrontDoorDriver {
     const response = await this.submit(joinUrl(req.base, mp.path), req.payload, {
       method: mp.method,
       headers: req.headers,
+      timeoutMs: completion.timeoutMs, // fire-and-forget submit — 무응답 방지 소켓 상한(응답은 곧장 온다)
     });
     const traceRef = resolveTraceRef(req.correlate, req.traceRef, response);
     const start = this.now();

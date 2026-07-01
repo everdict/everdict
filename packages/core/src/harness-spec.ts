@@ -81,6 +81,17 @@ export const TargetAcquireSchema = z.discriminatedUnion("mode", [
     open: z.string(), // 세션 개시 — "POST /sessions" (method+path; wiring {var} 보간)
     coordinates: z.record(z.string()), // wiring 변수명 → open 응답 JSON 의 dot-path (예: { target_cdp_url: "cdp_url" })
     close: z.string().optional(), // 세션 정리 — "DELETE /sessions/{session_id}" (dispose 시; {var} ← wiring+좌표)
+    // 준비 게이트 — open 직후 세션은 존재해도 그 클라이언트(브라우저 등)가 back-connect 로 자기등록하기 전엔
+    // front-door 명령이 404 로 튕긴다. ready 가 있으면 상태 URL 이 200(2xx)이 될 때까지 폴링한 뒤 좌표를 넘긴다.
+    // service = 준비성을 확인할 서비스(미지정 = acquire.service). poll = "GET /ready" (method+path; wiring+좌표 {var} 보간).
+    ready: z
+      .object({
+        service: z.string().optional(),
+        poll: z.string(),
+        intervalMs: z.number().int().positive().default(1000),
+        timeoutMs: z.number().int().positive().default(60000),
+      })
+      .optional(),
   }),
 ]);
 export type TargetAcquire = z.infer<typeof TargetAcquireSchema>;
