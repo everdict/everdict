@@ -32,6 +32,43 @@ describe("modelJudge", () => {
     expect(prompt).toContain("llm_call");
   });
 
+  it("최종 답변이 트레이스 끝에 있고 트레이스 JSON 이 절단돼도, 전용 섹션으로 온전히 포함된다", async () => {
+    // 앞쪽을 6000자(MAX_CHARS) 넘게 채워 JSON.stringify(trace).slice(0, MAX) 가 맨 끝 최종 답변을 잘라내게 만든다.
+    const filler: TraceEvent[] = Array.from({ length: 200 }, (_, i) => ({
+      t: i,
+      kind: "message",
+      role: "user",
+      text: `step-${i}-${"x".repeat(40)}`,
+    }));
+    const FINAL = "FINAL_ANSWER_SENTINEL_9f3a: the task is complete and here is the produced result";
+    const trace: TraceEvent[] = [...filler, { t: 999, kind: "message", role: "assistant", text: FINAL }];
+
+    const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
+    await modelJudge(complete).judge({ task: "do X", trace });
+    const prompt = complete.mock.calls[0]?.[0] ?? "";
+
+    // 전용 AGENT FINAL ANSWER 섹션 덕에 프롬프트엔 최종 답변이 온전히 존재한다(절단 전이라면 유실됐다 — 회귀).
+    expect(prompt).toContain("AGENT FINAL ANSWER");
+    expect(prompt).toContain(FINAL);
+    // 회귀 가드: 트레이스 JSON 자체는 여전히 절단돼 최종 답변을 담지 못한다(전용 섹션이 없었다면 유실됐음을 증명).
+    const traceSection = prompt.slice(prompt.indexOf("EXECUTION TRACE"));
+    expect(traceSection).not.toContain("FINAL_ANSWER_SENTINEL_9f3a");
+  });
+
+  it("최종 답변은 마지막 assistant message 다(중간 assistant 아님)", async () => {
+    const trace: TraceEvent[] = [
+      { t: 0, kind: "message", role: "assistant", text: "interim-thought" },
+      { t: 1, kind: "message", role: "user", text: "more" },
+      { t: 2, kind: "message", role: "assistant", text: "the-real-final-answer" },
+    ];
+    const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
+    await modelJudge(complete).judge({ task: "t", trace });
+    const prompt = complete.mock.calls[0]?.[0] ?? "";
+    const section = prompt.slice(prompt.indexOf("AGENT FINAL ANSWER"), prompt.indexOf("EXECUTION TRACE"));
+    expect(section).toContain("the-real-final-answer");
+    expect(section).not.toContain("interim-thought");
+  });
+
   it("스크린샷(VLM)이 있으면 complete 에 이미지를 넘기고 프롬프트에 명시한다", async () => {
     const complete = vi.fn((_prompt: string, _image?: { base64: string; mediaType: string }) =>
       Promise.resolve('{"pass":true,"score":1,"reason":"goal state shown"}'),
