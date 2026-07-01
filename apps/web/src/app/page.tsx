@@ -31,8 +31,12 @@ export default async function Home() {
   // 컨트롤플레인에 접속되고 실제 로그인(OIDC)이 확인되면 랜딩이 아니라 내 워크스페이스(/{slug})로.
   // 워크스페이스가 0개면 온보딩으로. via!=='oidc'(dev x-assay-tenant 폴백)/principal=null 이면 랜딩을 보여준다.
   const { principal } = await currentPrincipal()
-  const workspaceHome =
-    principal && (principal.workspaces?.length ?? 0) > 0 ? `/${principal.workspace}` : '/onboarding'
+  // 활성 워크스페이스가 비어 있으면(예: keycloak 토큰에 workspace 클레임 없음) 내 첫 워크스페이스로 폴백.
+  // principal.workspace 가 "" 면 `/${""}` = "/" 가 되어 이 페이지로 다시 튕기는 무한 루프가 나므로 그대로 쓰지 않는다.
+  const activeWorkspace = principal
+    ? principal.workspace || principal.workspaces?.[0]?.id
+    : undefined
+  const workspaceHome = activeWorkspace ? `/${activeWorkspace}` : '/onboarding'
   if (principal?.via === 'oidc') redirect(workspaceHome)
 
   // 랜딩의 진입 CTA: dev 폴백 등으로 principal 이 있으면 워크스페이스로, 없으면 로그인으로.

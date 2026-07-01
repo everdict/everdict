@@ -18,9 +18,9 @@ export default async function WorkspaceLayout({
   const { workspace: slug } = await params
   const { principal } = await currentPrincipal()
 
-  // 인증 교환 실패(토큰 거부 401 / 컨트롤플레인 미가동) → 권위 있는 워크스페이스·역할 없음 → 홈으로.
-  // (홈은 via!=='oidc'/principal=null 이면 랜딩을 보여줘 루프가 생기지 않는다.)
-  if (!principal) redirect('/')
+  // 인증 교환 실패(토큰 거부 401 / 컨트롤플레인 미가동) → 권위 있는 워크스페이스·역할 없음 → 재로그인.
+  // callbackUrl 을 이 워크스페이스로 명시해, 쿠키의 오래된 callbackUrl=`/` 로 되돌아가는 루프를 차단한다.
+  if (!principal) redirect(`/api/auth/signin?callbackUrl=${encodeURIComponent(`/${slug}`)}`)
 
   // 워크스페이스가 하나도 없으면 온보딩(첫 워크스페이스 생성). 앱은 항상 ≥1 워크스페이스 안에서 동작한다.
   if ((principal.workspaces?.length ?? 0) === 0) redirect('/onboarding')

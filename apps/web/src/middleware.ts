@@ -28,11 +28,20 @@ function injectWorkspace(req: NextRequest): NextResponse {
   return res
 }
 
-// Keycloak 설정 시: 미인증 + 워크스페이스 경로 → 로그인. 그 외엔 워크스페이스 헤더 주입.
+// 로그인으로 리다이렉트하되, 원래 있던 경로를 callbackUrl 로 실어 로그인 후 그 자리로 복귀시킨다.
+// (쿠키에 남은 오래된 callbackUrl=`/` 로 되돌아가 다시 튕기는 루프를 명시 callbackUrl 로 차단.)
+function signinRedirect(req: NextRequest): NextResponse {
+  const url = new URL('/api/auth/signin', req.nextUrl.origin)
+  url.searchParams.set('callbackUrl', req.nextUrl.pathname)
+  return NextResponse.redirect(url)
+}
+
+// Keycloak 설정 시: 리프레시 실패 세션·미인증 워크스페이스 경로 → 로그인. 그 외엔 워크스페이스 헤더 주입.
 const protect = auth((req) => {
-  if (!req.auth && workspaceSlugFromPath(req.nextUrl.pathname)) {
-    return NextResponse.redirect(new URL('/api/auth/signin', req.nextUrl.origin))
-  }
+  // 토큰 리프레시 실패: 세션은 남았지만 죽은 토큰 → 컨트롤플레인이 401 을 돌려 principal=null 이 되고
+  // 레이아웃이 다시 튕겨 무한 루프가 된다. 모든 경로에서 곧장 재로그인으로 보내 끊는다.
+  if (req.auth?.error === 'RefreshFailed') return signinRedirect(req)
+  if (!req.auth && workspaceSlugFromPath(req.nextUrl.pathname)) return signinRedirect(req)
   return injectWorkspace(req)
 })
 

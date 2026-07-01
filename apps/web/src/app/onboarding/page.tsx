@@ -11,7 +11,8 @@ export const dynamic = 'force-dynamic'
 // [workspace] 밑이 아니라 최상위 라우트로 둔다. 만들면 그 워크스페이스(/{id})로 들어간다.
 export default async function OnboardingPage() {
   const { principal } = await currentPrincipal()
-  if (!principal) redirect('/')
+  // 미인증/인증 교환 실패 → 랜딩(/)이 아니라 곧장 로그인으로. `/` 로 보내면 미들웨어·페이지가 다시 튕겨 루프.
+  if (!principal) redirect('/api/auth/signin')
   // 이미 워크스페이스가 있으면 온보딩이 필요 없다 → 기본 워크스페이스로.
   if ((principal.workspaces?.length ?? 0) > 0) redirect(`/${principal.workspace}`)
 
