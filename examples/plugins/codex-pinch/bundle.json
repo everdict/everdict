@@ -42,20 +42,27 @@
   ],
   "datasets": [
     {
-      "id": "pinch-sample",
+      "id": "pinch-building-dashboards",
       "version": "1.0.0",
-      "description": "pinch 샘플 데이터셋 — 설치 직후 바로 돌려볼 수 있는 최소 케이스(스캐폴딩 데모). 실제 pinch 는 recipe 로 인입.",
+      "description": "PinchBench(github.com/pinchbench/skill) building-dashboards — 코딩 에이전트가 Axiom 대시보드를 설계/구축. judge 루브릭으로 채점(실행 시 judge 모델 필요).",
       "cases": [
         {
-          "id": "sample-1",
-          "env": { "kind": "repo", "source": { "files": {} } },
-          "task": "작업 디렉터리에 out.txt 파일을 생성하라.",
-          "graders": [{ "id": "tests-pass", "config": { "cmd": "test -f out.txt" } }],
-          "timeoutSec": 120,
-          "tags": ["pinch", "sample"]
+          "id": "api-health-dashboard",
+          "env": { "kind": "prompt" },
+          "task": "Using the building-dashboards skill, design an Axiom dashboard for API health: panels for p95/p99 latency, error rate, and request volume. Output the dashboard JSON.",
+          "graders": [
+            {
+              "id": "judge",
+              "config": {
+                "rubric": "PASS if the output is a valid Axiom dashboard covering p95/p99 latency, error rate, and request volume panels."
+              }
+            }
+          ],
+          "timeoutSec": 300,
+          "tags": ["pinchbench", "coding-agent"]
         }
       ],
-      "tags": ["pinch"]
+      "tags": ["pinchbench", "coding-agent", "external"]
     }
   ]
 }

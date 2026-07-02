@@ -9,6 +9,7 @@ import {
   Gauge,
   Gavel,
   LayoutDashboard,
+  Puzzle,
   Server,
   type LucideIcon,
 } from 'lucide-react'
@@ -58,6 +59,12 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: '/runtimes', label: '런타임', icon: Server, keywords: 'runtime 인프라 k8s nomad' },
       { href: '/metrics', label: '메트릭', icon: Gauge, keywords: 'metric 지표' },
       { href: '/models', label: '모델', icon: Cpu, keywords: 'model provider llm' },
+      {
+        href: '/plugins',
+        label: '플러그인',
+        icon: Puzzle,
+        keywords: 'plugin bundle 번들 설치 codex pinch 벤치마크 하니스',
+      },
     ],
   },
 ]

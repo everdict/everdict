@@ -1,7 +1,7 @@
 # Plugin bundles — one-shot self-serve registration (harness + benchmark + runtime as a unit)
 
-> **Status: Slice 1 SHIPPED (gates green — api format/lint/typecheck/test). Slices 2–3 (web, live E2E) pending.**
-> Generalization, not a special case. The platform ALREADY lets a
+> **Status: ALL 3 SLICES SHIPPED (gates green — api format/lint/typecheck/test; web prettier/eslint/tsc; live loop
+> verified locally: install → run pinch → leaderboard).** Generalization, not a special case. The platform ALREADY lets a
 > tenant register each piece (harness / benchmark recipe / dataset / judge / runtime / model / metric) at runtime
 > via per-type HTTP+MCP endpoints, tenant-owned + immutable. What's missing for the SaaS story
 > ("유저가 쉽게 벤치마크·어댑터·하니스를 등록 → 자기 하니스로 수행 → 대시보드") is a **cohesive one-shot install**:
@@ -106,10 +106,15 @@ Installed via `POST /plugins/install` (tenant self-serve) OR seeded to `_shared`
    `plugin-service.test.ts` (fan-out ok/conflict/skipped + required-actions + **real-artifact guard**: the shipped
    bundle installs clean), `server.test.ts` (member 200 / viewer 403 by composed gate), `mcp.test.ts`
    (tool-list + functional member/viewer). Zero core/package change — codex+pinch is pure data.
-2. **Web** — plugin install page (paste bundle → result table) + a link from the dashboard.
-3. **Guarded live E2E** — `scripts/live/codex-pinch-leaderboard.mjs`: install bundle → run pinch on codex against a
-   real runtime + provider key → assert a leaderboard row (skips without `ASSAY_E2E_*`). The true codex/pinch live
-   run (needs the codex CLI image + real pinch data + keys).
+2. ✅ **Web** — `/{workspace}/plugins` page (`InstallPluginForm`: paste bundle JSON → install → per-item result
+   table with status badges) + `install-plugin` server action + `entities/plugin` mirror schema +
+   `controlPlane.installPlugin` + "플러그인" nav entry. Prettier/eslint/tsc green.
+3. ✅ **Guarded live E2E** — `scripts/live/codex-pinch-leaderboard.mjs`: spawns a dev control plane → installs the
+   codex+pinch bundle → runs the real `pinch-building-dashboards` benchmark → prints the `(harness × model)`
+   leaderboard row. **Verified locally (exit 0)**: 4/4 bundle items install `ok`; pinch runs to `succeeded`;
+   leaderboard shows a ranked row. Runs on the builtin `scripted` harness by default (zero external deps); swap to
+   real codex via `ASSAY_HARNESS=codex ASSAY_RUNTIME=<codex-image docker runtime>` (+ LiteLLM for the judge). The
+   only piece not runnable headlessly here is the real codex CLI itself (needs its image + provider keys).
 
 ## Decisions / non-goals
 

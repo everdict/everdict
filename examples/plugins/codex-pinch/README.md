@@ -9,8 +9,8 @@ core" principle (see `docs/architecture/plugin-bundles.md`).
 | Section | What | Note |
 |---|---|---|
 | `harnessTemplates` + `harnesses` | **codex** as a declarative `command` harness (`codex exec … {{task}} {{model}}`) | tailor the `command`/`setup`/`model` to your installed codex CLI |
-| `benchmarkRecipes` | **pinch** adapter — jsonl source → repo+tests cases | swap `source` (jsonl/huggingface) + `mapping` field names to real pinch |
-| `datasets` | **pinch-sample** — one runnable case | install-and-run demo; passes even on the builtin scripted harness |
+| `benchmarkRecipes` | **pinch** adapter — jsonl source → repo+tests cases (template for importing pinch variants) | swap `source` (jsonl/huggingface) + `mapping` field names |
+| `datasets` | **pinch-building-dashboards** — the real PinchBench building-dashboards case (`env: prompt`, `judge` rubric) | the same benchmark the hermes scripts use; scored by an LLM judge |
 
 ## Install (tenant self-serve)
 
@@ -30,15 +30,16 @@ bundle's contents (this bundle needs `harnesses:register` + `datasets:write` →
 ## Run it → dashboard
 
 1. Register your execution runtime if needed (`POST /runtimes`) or use the shared `docker` runtime.
-2. Run pinch on codex:
+2. Run pinch on codex (the `judge` grader needs a judge model — pass one or set a workspace default):
    ```bash
    curl -sX POST "$ASSAY_API/scorecards" -H "authorization: Bearer $ASSAY_KEY" \
      -H 'content-type: application/json' \
-     -d '{"dataset":{"id":"pinch-sample"},"harness":{"id":"codex"},"runtime":"docker"}'
+     -d '{"dataset":{"id":"pinch-building-dashboards"},"harness":{"id":"codex"},"runtime":"docker",
+          "judge":{"provider":"openai","model":"gpt-5.4-mini"}}'
    ```
-3. See it on the **leaderboard**: `GET /scorecards/leaderboard?dataset=pinch-sample&metric=tests_pass` →
+3. See it on the **leaderboard**: `GET /scorecards/leaderboard?dataset=pinch-building-dashboards&metric=judge` →
    a `codex × <model>` row. The model axis is captured from the run (declared `spec.model`, or observed from the
-   trace if codex emits one). Compare against other harnesses on the same benchmark, or track over time.
+   trace if codex emits one). Compare against other harnesses (e.g. hermes) on the same benchmark, or track over time.
 
 ## Adapting to real pinch
 
