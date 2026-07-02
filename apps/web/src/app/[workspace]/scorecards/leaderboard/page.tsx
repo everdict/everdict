@@ -6,33 +6,35 @@ import { datasetsSchema } from '@/entities/dataset'
 import { leaderboardSchema, type Leaderboard } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { Badge } from '@/shared/ui/badge'
+import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { ModelChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
+import { Score } from '@/shared/ui/score'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 export const dynamic = 'force-dynamic'
 
-function fmtScore(r: Leaderboard['rows'][number]): string {
-  if (r.passRate !== null) return `${Math.round(r.passRate * 100)}%`
-  if (r.mean !== null) return r.mean.toFixed(2)
-  return '–'
-}
-function fmtTime(iso: string): string {
-  return iso
-    .replace('T', ' ')
-    .replace(/\.\d+Z$/, 'Z')
-    .slice(0, 16)
-}
-
-// rank 1 은 성공 톤, 2~3 은 info, 그 외 muted(neutral).
-function rankTone(rank: number): 'success' | 'info' | 'neutral' {
-  if (rank === 1) return 'success'
-  if (rank <= 3) return 'info'
-  return 'neutral'
+// 순위 메달 — 1위 금(앰버)·2위 은(중립)·3위 동(브론즈)·그 외 평문. 상위권을 한눈에.
+function RankBadge({ rank }: { rank: number }) {
+  const base =
+    'inline-flex size-5 items-center justify-center rounded-full text-[11px] font-[560] tabular-nums ring-1 ring-inset'
+  if (rank === 1)
+    return (
+      <span
+        className={`${base} bg-[var(--color-warning)]/15 text-[var(--color-warning)] ring-[var(--color-warning)]/30`}
+      >
+        1
+      </span>
+    )
+  if (rank === 2)
+    return <span className={`${base} bg-secondary text-secondary-foreground ring-border`}>2</span>
+  if (rank === 3)
+    return <span className={`${base} bg-[#cd7f32]/15 text-[#cd7f32] ring-[#cd7f32]/30`}>3</span>
+  return <span className="pr-1 font-mono text-[12px] tabular-nums text-faint">{rank}</span>
 }
 
 export default async function LeaderboardPage({
@@ -140,14 +142,14 @@ export default async function LeaderboardPage({
                     <TH>judge</TH>
                     <TH className="text-right">{board.metric}</TH>
                     <TH className="text-right">runs</TH>
-                    <TH className="text-right">최근</TH>
+                    <TH className="text-right">생성</TH>
                   </tr>
                 </THead>
                 <TBody>
                   {board.rows.map((r) => (
                     <TR key={`${r.harness.id}@${r.harness.version}-${r.model ?? 'unknown'}`}>
-                      <TD className="text-right">
-                        <Badge tone={rankTone(r.rank)}>{r.rank}</Badge>
+                      <TD className="text-center">
+                        <RankBadge rank={r.rank} />
                       </TD>
                       <TD>
                         <Link
@@ -160,37 +162,35 @@ export default async function LeaderboardPage({
                       </TD>
                       <TD>
                         {r.model ? (
-                          <code className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
-                            {r.model}
-                          </code>
+                          <ModelChip>{r.model}</ModelChip>
                         ) : (
-                          <span className="text-faint text-[12px]">unknown</span>
+                          <span className="text-[12px] text-faint">unknown</span>
                         )}
                       </TD>
                       <TD>
                         {r.judgeModels && r.judgeModels.length > 0 ? (
                           <span className="flex flex-wrap gap-1">
                             {r.judgeModels.map((jm) => (
-                              <code
-                                key={jm}
-                                className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-                              >
+                              <ModelChip key={jm} muted>
                                 {jm}
-                              </code>
+                              </ModelChip>
                             ))}
                           </span>
                         ) : (
-                          <span className="text-faint text-[12px]">–</span>
+                          <span className="text-[12px] text-faint">–</span>
                         )}
                       </TD>
-                      <TD className="text-right font-mono text-[12px] font-[510] tabular-nums">
-                        {fmtScore(r)}
+                      <TD className="text-right">
+                        <Score passRate={r.passRate} mean={r.mean} />
                       </TD>
                       <TD className="text-right font-mono text-[12px] tabular-nums text-muted-foreground">
                         {r.runs}
                       </TD>
-                      <TD className="whitespace-nowrap text-right font-mono text-[11px] text-muted-foreground">
-                        {fmtTime(r.createdAt)}
+                      <TD
+                        className="whitespace-nowrap text-right font-mono text-[11px] text-muted-foreground"
+                        title={fmtDateTimeFull(r.createdAt)}
+                      >
+                        {fmtDateTime(r.createdAt)}
                       </TD>
                     </TR>
                   ))}
