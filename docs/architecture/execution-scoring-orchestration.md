@@ -1,10 +1,23 @@
 # Execution · Orchestration · Scoring — the three concerns
 
-> **Status: DESIGN (implementation in slices).** Doc-first SSOT for a **fundamental** separation of concerns in the
-> control plane. Successor to [run-as-primitive](./run-as-primitive.md): that made `run` the execution primitive and
-> `scorecard = run × N`; this goes further and untangles the three concerns that are currently smeared across two
-> services (`RunService`, `ScorecardService`). Goal is architectural cleanliness — concern isolation + a clean
-> collaboration model — not incremental ROI.
+> **Status: SHIPPED (S1 `ad7cdc2` + S2 `91f7c55`).** Doc-first SSOT for a **fundamental** separation of concerns in
+> the control plane. Successor to [run-as-primitive](./run-as-primitive.md): that made `run` the execution primitive
+> and `scorecard = run × N`; this untangles the three concerns that were smeared across two services (`RunService`,
+> `ScorecardService`). Goal is architectural cleanliness — concern isolation + a clean collaboration model.
+>
+> **The three concerns are now separated:**
+> - **Execution** = `execute-case.ts` `executeCase(deps, owner, job) → CaseResult` — pure: repo-token + dispatch.
+>   No settle/offload/notify (S2 stripped `settle` out). `run` no longer cares about "after".
+> - **Scoring** = `scoring-service.ts` `ScoringService` — judge/metric application over results, independent of how
+>   they were produced (S1). Live batch **and** ingest share it. Aggregation stays pure in `@assay/suite`.
+> - **Orchestration** = `RunService` (single: admit → executeCase → settle → offload → webhook → notify) and
+>   `ScorecardService` (batch: fan-out executeCase + per-case settle/child-run → `ScoringService` → suite aggregate
+>   → store). These *drive* execution and *own* delivery/accounting.
+>
+> **Deliberately NOT done** (evaluated, deemed unnecessary — separation is already achieved, these would be DRY
+> gold-plating): `materializeRun` (the RunRecord create/update lives in each orchestrator managing *its own* record
+> lifecycle — not duplication of a concern); a separate `BatchDriver` class (`ScorecardService.track` already *is*
+> the batch orchestrator, now delegating execution→`executeCase` and scoring→`ScoringService`).
 
 ## Problem — 3 concerns tangled into 2 services (feels "artificial")
 
@@ -75,15 +88,17 @@ Ingest is the existence proof for Concern 3.
 
 ### Module layout (`apps/api/src`)
 
-| Module | Concern | Responsibility |
+| Module | Concern | Responsibility (as shipped) |
 |---|---|---|
-| `execute-case.ts` | Execution | `executeCase(job) → CaseResult` — repo-token + dispatch **only** (settle removed). |
-| `materialize-run.ts` *(new)* | Execution | `materializeRun({record, job}, deps) → RunRecord` — executeCase + create/update the RunRecord. Both single + batch call it. |
-| `scoring-service.ts` *(new)* | Scoring | `ScoringService.score(tenant, dataset, results, {judges, metrics, runtime})` — applyJudges + applyMetrics (moved out of ScorecardService). Used by batch **and** ingest. Aggregation stays in `@assay/suite`. |
-| `run-service.ts` | Orchestration (single) | admit → create → `materializeRun` (async) → settle → offload → webhook → notify. 202. |
-| `batch-driver.ts` *(new, or a slim ScorecardService.track)* | Orchestration (batch) | fan-out `materializeRun` per case, admit/settle per case, progress steps, collect results. |
-| `scorecard-service.ts` | Composition | `submit` = BatchDriver.run(dataset, harness, runtime) → results → `ScoringService.score` → suite.summarize/models → store. `ingest` = fetch traces → `ScoringService.score` → store. Now clearly *scoring-focused*. |
-| `notification-service.ts` | Orchestration (delivery) | already separate; stays a completion hook (run + scorecard). |
+| `execute-case.ts` | Execution | `executeCase(deps, owner, job) → CaseResult` — repo-token resolve+attach + dispatch **only**. No settle/offload/notify. |
+| `scoring-service.ts` | Scoring | `ScoringService` — `applyJudges` + `applyMetrics` + `collectJudgeModels` over results. Used by batch **and** ingest. Aggregation stays pure in `@assay/suite`. |
+| `run-service.ts` | Orchestration (single) | admit → create → `executeCase` (async) → **settle** → offload → webhook → notify. 202. |
+| `scorecard-service.ts` | Orchestration (batch) + composition | `submit` = fan-out `executeCase` per case (+ per-case settle + child-run lifecycle) → `ScoringService` (judges/metrics) → `@assay/suite` (summarize/models) → store. `ingest` = fetch traces → `ScoringService` → store. Now clearly *scoring/aggregation-focused*, delegating execution + scoring out. |
+| `notification-service.ts` | Orchestration (delivery) | already separate; a completion hook (run + scorecard). |
+
+> No `materialize-run.ts` / `batch-driver.ts` were created — see the status block. The RunRecord create/update in
+> each orchestrator is that orchestrator managing its own record lifecycle, and `ScorecardService.track` already
+> *is* the batch orchestrator. Extracting them would be DRY gold-plating, not concern separation.
 
 ## What moves where
 
@@ -97,28 +112,27 @@ Ingest is the existence proof for Concern 3.
 - **unchanged**: `@assay/graders`, `@assay/suite` (already pure), `@assay/runner` (in-sandbox), API response shapes,
   `runIds`/child-run behavior, ingest's embed-only, MCP/HTTP surface.
 
-## Migration slices (each shippable + green; pathspec commits — shared tree is hot)
+## Migration slices
 
-- **S1 — extract `ScoringService`** *(highest value: the "execution vs scoring" split the user asked for)*.
-  Move `applyJudges`/`applyMetrics` into `ScoringService`; `ScorecardService.track` and `finishIngest` both call it.
-  Additive move — existing scorecard + ingest tests are the regression guard.
-- **S2 — `run` = pure execution.** Strip `settle` from `executeCase`; add `materializeRun`; `RunService` settles in
-  the orchestration wrapper; batch fan-out uses `materializeRun`. Existing run/scorecard tests guard behavior.
-- **S3 — thin orchestration + `scorecard` composes.** `ScorecardService.submit` reads as
-  `drive batch → score → aggregate → store`. Optional `BatchDriver` extraction if it clarifies. Docs + skill refs.
+- **S1 — extract `ScoringService`** ✅ `ad7cdc2`. `applyJudges`/`applyMetrics`/`collectJudgeModels` → `ScoringService`;
+  `ScorecardService` builds one from its deps and delegates; live batch + ingest share it. 146 existing + 4 new tests.
+- **S2 — `run` = pure execution** ✅ `91f7c55`. Stripped `settle` (+ `costOf`/`budget`/`tenant`) from `executeCase`;
+  `RunService.track` and the scorecard batch closure settle after execution. 310 api tests green.
+- **S3 — docs + skill** ✅ (this change). `materializeRun`/`BatchDriver` evaluated and deferred as DRY gold-plating
+  (see status block) — the three concerns are already separated by S1+S2.
 
 ## Invariants / non-goals
 
 - **Do NOT route the batch through `RunService.submit`.** That bundles single-run *delivery* (202/webhook/per-run
-  notify/submit-admit) which must not fire per case. The shared unit is `materializeRun` (execution), not the
+  notify/submit-admit) which must not fire per case. The shared unit is `executeCase` (pure execution), not the
   single-run orchestrator. (See [run-as-primitive](./run-as-primitive.md) §"왜 RunService 를 안 거치나".)
 - **In-sandbox `@assay/runner` untouched.** This is a control-plane decomposition only.
 - **No API/MCP/web shape changes.** `GET /scorecards/:id` still returns a hydrated scorecard; `POST /runs` etc.
   unchanged. This is an internal seam refactor.
 - **Ingest stays embed-only** (no dispatched runs) — it scores fetched traces via the same `ScoringService`.
 
-## Skills/docs to update (in the slice that changes the invariant)
+## Skills/docs updated
 
-- `.claude/skills/api-layer` — the execution/orchestration/scoring seam; `ScoringService` + `materializeRun`.
-- `docs/scorecards.md` — scorecard = scored view over runs (scoring extracted).
-- `docs/api.md` — unchanged surface (note internal seam only if relevant).
+- `.claude/skills/api-layer` — the execution/orchestration/scoring seam (`executeCase` pure · `ScoringService` ·
+  services orchestrate).
+- `docs/api.md` / `docs/scorecards.md` — surface unchanged (internal seam refactor); no client-visible change.
