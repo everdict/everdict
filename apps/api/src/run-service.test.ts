@@ -51,6 +51,26 @@ describe("RunService", () => {
     expect(done?.result?.caseId).toBe("c1");
   });
 
+  it("runtime 지정 시 케이스 placement.target 으로 주입해 디스패치한다(scorecard 와 동일 대칭)", async () => {
+    const store = new InMemoryRunStore();
+    const jobs: AgentJob[] = [];
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        jobs.push(job);
+        return resultFor(job);
+      },
+    };
+    const svc = new RunService({ dispatcher: capture, store, newId: ids });
+    await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE, runtime: "nomad-seoul" });
+    await flush();
+    expect(jobs[0]?.evalCase.placement?.target).toBe("nomad-seoul");
+
+    // 대조: runtime 미지정이면 placement 를 건드리지 않는다(기존 동작 불변).
+    await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    await flush();
+    expect(jobs[1]?.evalCase.placement).toBeUndefined();
+  });
+
   it("셀프호스티드 실행(provenance.ranOn=self-hosted)은 워크스페이스 usd/tokens 버짓을 차감하지 않는다", async () => {
     const store = new InMemoryRunStore();
     const selfHosted: Dispatcher = {

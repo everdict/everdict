@@ -171,6 +171,24 @@ export const controlPlane = {
     if (params.baseline) q.set('baseline', params.baseline)
     return call<T>(auth, `/scorecards/trend?${q.toString()}`)
   },
+  // 벤치마크별 리더보드: 한 데이터셋의 (harness × model) 랭킹(metric 내림차순). window=latest(기본)|best.
+  leaderboardScorecards: <T>(
+    auth: AuthContext,
+    params: {
+      dataset: string
+      metric?: string
+      harness?: string
+      model?: string
+      window?: 'latest' | 'best'
+    }
+  ) => {
+    const q = new URLSearchParams({ dataset: params.dataset })
+    if (params.metric) q.set('metric', params.metric)
+    if (params.harness) q.set('harness', params.harness)
+    if (params.model) q.set('model', params.model)
+    if (params.window) q.set('window', params.window)
+    return call<T>(auth, `/scorecards/leaderboard?${q.toString()}`)
+  },
   listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),

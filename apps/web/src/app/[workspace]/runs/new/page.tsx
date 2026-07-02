@@ -3,6 +3,8 @@ import Link from 'next/link'
 import { SubmitRunForm } from '@/features/submit-run'
 import { connectionsResponseSchema, type ConnectionMeta } from '@/entities/connection'
 import { harnessesSchema, type Harness } from '@/entities/harness'
+import { runnersResponseSchema } from '@/entities/runner'
+import { runtimesSchema } from '@/entities/runtime'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -19,6 +21,8 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
 
   let harnesses: Harness[] = []
   let connections: ConnectionMeta[] = []
+  let runtimes: { id: string }[] = []
+  let runners: { id: string; label: string }[] = []
   if (allowed) {
     try {
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
@@ -33,6 +37,18 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
     } catch {
       // 연결 목록 실패해도 폼은 public repo 로 동작
     }
+    // 런타임 picker — 등록 런타임(테넌트 소유+_shared). 실패/없음이면 기본 백엔드만.
+    try {
+      runtimes = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
+    } catch {
+      // 런타임 목록 실패해도 폼은 기본 백엔드로 동작
+    }
+    // 내 로컬 러너 picker — 개인 소유 디바이스. 실패/없음이면 노출 안 함.
+    try {
+      runners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
+    } catch {
+      // 러너 목록 실패해도 폼은 동작
+    }
   }
 
   return (
@@ -46,7 +62,12 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
       <PageHeader title="새 run" description="하니스를 골라 평가를 제출합니다." />
       {allowed ? (
         <Card className="p-6">
-          <SubmitRunForm harnesses={harnesses} connections={connections} />
+          <SubmitRunForm
+            harnesses={harnesses}
+            connections={connections}
+            runtimes={runtimes}
+            runners={runners}
+          />
         </Card>
       ) : (
         <EmptyState

@@ -1,6 +1,6 @@
 # Leaderboard — model as a first-class dimension (harness × model × benchmark)
 
-> **Status: Slices 1–2 SHIPPED (code + gates green: format/lint/typecheck/test on suite·db·api). Slice 3 (web) pending.**
+> **Status: ALL 3 SLICES SHIPPED (gates green — suite·db·api: format/lint/typecheck/test; web: prettier/eslint/tsc).**
 > Decisions locked with the user:
 > **(1) model source = observed-first (trace `llm_call.model`) + declared fallback (spec `model`), store both;
 > (2) first view = per-benchmark leaderboard ranking (harness × model).**
@@ -140,8 +140,11 @@ leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, mod
    `leaderboard_scorecards` MCP + `scorecards:read` gate. Tests: `leaderboard.test.ts` (7), service scoping,
    `server.test.ts` route (dataset-missing 400 + run-collapse), `mcp.test.ts` (tool-list + functional).
    *(No `trend` MCP tool exists today — pre-existing parity gap, out of scope; leaderboard ships full parity.)*
-3. **Web** — leaderboard page (dataset+metric picker → ranked table + model/drift badges) + model column on
-   list/detail/compare.
+3. ✅ **Web** — `scorecards/leaderboard` page (dataset+metric+window picker → ranked table, rank badge, model
+   chip, `unknown` fallback) + `LeaderboardPicker` feature + `controlPlane.leaderboardScorecards` client +
+   `models`/leaderboard mirror schemas. Model surfaced on **list** (row chip), **detail** (model card: primary +
+   observed chips + `선언≠실제` drift badge), **compare** (model per side, from the already-loaded records).
+   "리더보드" button added to the scorecards list header (next to 추이/비교).
 
 ## Decisions / non-goals
 

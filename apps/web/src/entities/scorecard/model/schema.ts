@@ -69,6 +69,14 @@ export const scorecardStepSchema = z.object({
 })
 export type ScorecardStep = z.infer<typeof scorecardStepSchema>
 
+// 이 run 이 실제로 쓴 모델(리더보드 model 축). observed=트레이스 관측, declared=spec 선언, primary=대표(관측 우선).
+export const scorecardModelsSchema = z.object({
+  observed: z.array(z.string()).default([]),
+  declared: z.string().optional(),
+  primary: z.string().optional(),
+})
+export type ScorecardModels = z.infer<typeof scorecardModelsSchema>
+
 export const scorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -76,6 +84,8 @@ export const scorecardRecordSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   status: scorecardStatusSchema,
   summary: z.array(metricSummarySchema).optional(),
+  models: scorecardModelsSchema.optional(), // 과거 레코드는 미설정(unknown)
+
   scorecard: fullScorecardSchema.optional(),
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })
@@ -134,3 +144,25 @@ export const scorecardTrendSchema = z.object({
   points: z.array(trendPointSchema),
 })
 export type ScorecardTrend = z.infer<typeof scorecardTrendSchema>
+
+// GET /scorecards/leaderboard 응답: 한 데이터셋(벤치마크)의 (harness × model) 랭킹(metric 내림차순).
+export const leaderboardRowSchema = z.object({
+  rank: z.number(),
+  harness: z.object({ id: z.string(), version: z.string() }),
+  model: z.string().optional(),
+  scorecardId: z.string(),
+  createdAt: z.string(),
+  score: z.number().nullable(),
+  passRate: z.number().nullable(),
+  mean: z.number().nullable(),
+  runs: z.number(),
+})
+export type LeaderboardRow = z.infer<typeof leaderboardRowSchema>
+
+export const leaderboardSchema = z.object({
+  dataset: z.string(),
+  metric: z.string(),
+  window: z.enum(['latest', 'best']),
+  rows: z.array(leaderboardRowSchema),
+})
+export type Leaderboard = z.infer<typeof leaderboardSchema>

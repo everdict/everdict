@@ -11,6 +11,7 @@ export interface SubmitInput {
   submittedBy?: string;
   harness: { id: string; version: string };
   case: EvalCase;
+  runtime?: string; // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드(scorecard 와 동일 대칭).
   webhookUrl?: string;
   meterUsage?: boolean; // 이 요청만의 계측 override(미지정이면 워크스페이스 정책)
   judge?: JudgeRunConfig; // 이 요청만의 judge 모델 override(미지정이면 워크스페이스 기본)
@@ -56,18 +57,22 @@ export class RunService {
   // 동기 admission(예산 초과면 throw → 402). 통과하면 레코드 생성 후 비동기 디스패치(기다리지 않음).
   async submit(input: SubmitInput): Promise<RunRecord> {
     this.deps.budget?.admit(input.tenant); // 초과 시 PaymentRequiredError(402) — run 생성 안 함
+    // runtime 선택 시 케이스 placement.target 으로 주입 → RuntimeDispatcher 가 테넌트 런타임으로 라우팅(scorecard 와 동일 대칭).
+    const effective: SubmitInput = input.runtime
+      ? { ...input, case: { ...input.case, placement: { ...input.case.placement, target: input.runtime } } }
+      : input;
     const ts = this.now();
     const record: RunRecord = {
       id: this.newId(),
-      tenant: input.tenant,
-      harness: input.harness,
-      caseId: input.case.id,
+      tenant: effective.tenant,
+      harness: effective.harness,
+      caseId: effective.case.id,
       status: "queued",
       createdAt: ts,
       updatedAt: ts,
     };
     await this.deps.store.create(record);
-    void this.track(record.id, input); // fire-and-track
+    void this.track(record.id, effective); // fire-and-track
     return record;
   }
 

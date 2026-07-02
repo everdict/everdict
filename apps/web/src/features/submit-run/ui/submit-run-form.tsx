@@ -8,7 +8,7 @@ import type { ConnectionMeta } from '@/entities/connection'
 import type { Harness } from '@/entities/harness'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
+import { FieldError, Input, Label, Select, Textarea } from '@/shared/ui/input'
 
 import { submitRunAction } from '../api/submit-run'
 
@@ -16,6 +16,7 @@ interface Values {
   harnessId: string
   version: string
   task: string
+  runtime: string
   sourceKind: 'files' | 'git'
   gitUrl: string
   gitRef: string
@@ -29,9 +30,13 @@ const providerLabel = (c: ConnectionMeta): string =>
 export function SubmitRunForm({
   harnesses,
   connections = [],
+  runtimes = [],
+  runners = [],
 }: {
   harnesses: Harness[]
   connections?: ConnectionMeta[]
+  runtimes?: { id: string }[]
+  runners?: { id: string; label: string }[]
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -49,6 +54,7 @@ export function SubmitRunForm({
       harnessId: harnesses[0]?.id ?? 'scripted',
       version: 'latest',
       task: '',
+      runtime: '',
       sourceKind: 'files',
       gitUrl: '',
       gitRef: 'main',
@@ -95,6 +101,31 @@ export function SubmitRunForm({
           {...register('task', { required: 'task 를 입력하세요' })}
         />
         <FieldError message={errors.task?.message} />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="runtime">런타임 (실행 인프라)</Label>
+        <Select id="runtime" {...register('runtime')}>
+          <option value="">기본 백엔드</option>
+          {runtimes.map((r) => (
+            <option key={r.id} value={r.id}>
+              {r.id}
+            </option>
+          ))}
+          {runners.length > 0 && (
+            <optgroup label="내 로컬 호스트">
+              {runners.map((r) => (
+                <option key={r.id} value={`self:${r.id}`}>
+                  {r.label}
+                </option>
+              ))}
+            </optgroup>
+          )}
+        </Select>
+        <p className="text-[12px] text-faint">
+          비워두면 기본 백엔드에서 실행됩니다. 등록한 런타임이나 내 로컬 러너를 고르면 그곳에서
+          실행됩니다.
+        </p>
       </div>
 
       <div className="space-y-1.5">

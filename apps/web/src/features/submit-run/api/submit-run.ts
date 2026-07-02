@@ -9,6 +9,8 @@ export interface SubmitRunInput {
   harnessId: string
   version: string
   task: string
+  // 실행할 테넌트 Runtime id(placement.target). 빈 문자열이면 기본 백엔드. self:<id> = 내 로컬 러너.
+  runtime?: string
   // repo 시드: 'files'(빈 작업트리, 기본) | 'git'(원격 repo). git 이면 gitUrl 필수, connectionId 면 비공개 인증 clone.
   sourceKind?: 'files' | 'git'
   gitUrl?: string
@@ -49,6 +51,8 @@ export async function submitRunAction(input: SubmitRunInput): Promise<SubmitRunR
       timeoutSec: 300,
       tags: ['web'],
     },
+    // runtime 선택 시 컨트롤플레인이 case.placement.target 으로 주입(scorecard 와 동일). 빈 값이면 기본 백엔드.
+    ...(input.runtime ? { runtime: input.runtime } : {}),
   }
   try {
     const rec = await controlPlane.submitRun<{ id: string }>(ctx, body)

@@ -39,6 +39,12 @@ export default async function ScorecardsPage({
         actions={
           <div className="flex gap-2">
             <Link
+              href={`/${workspace}/scorecards/leaderboard`}
+              className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+            >
+              리더보드
+            </Link>
+            <Link
               href={`/${workspace}/scorecards/trend`}
               className={buttonVariants({ size: 'sm', variant: 'secondary' })}
             >
@@ -91,6 +97,11 @@ export default async function ScorecardsPage({
                   <span className="px-1 text-muted-foreground">→</span>
                   {s.harness.id}
                   <span className="text-faint">@{s.harness.version}</span>
+                  {s.models?.primary ? (
+                    <span className="ml-1 rounded border border-border bg-secondary px-1.5 py-0.5 text-[11px] text-secondary-foreground">
+                      {s.models.primary}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {(s.summary ?? []).map((m) => (

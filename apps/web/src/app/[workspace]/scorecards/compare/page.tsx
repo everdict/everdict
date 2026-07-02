@@ -33,6 +33,8 @@ export default async function CompareScorecardsPage({
 
   // 비교는 완료된 스코어카드만(미완료는 diff 불가).
   let options: CompareOption[] = []
+  let baselineModel: string | undefined
+  let candidateModel: string | undefined
   try {
     const all = scorecardsSchema.parse(await controlPlane.listScorecards(ctx))
     options = all
@@ -41,6 +43,10 @@ export default async function CompareScorecardsPage({
         id: s.id,
         label: `${s.dataset.id}@${s.dataset.version} → ${s.harness.id}@${s.harness.version}`,
       }))
+    // 각 side 의 model(선택된 스코어카드 레코드에서) — 헤더에 곁들여 표시.
+    const byId = new Map(all.map((s) => [s.id, s]))
+    baselineModel = baseline ? byId.get(baseline)?.models?.primary : undefined
+    candidateModel = candidate ? byId.get(candidate)?.models?.primary : undefined
   } catch {
     // 목록 실패해도 페이지는 안내를 보여준다
   }
@@ -93,10 +99,20 @@ export default async function CompareScorecardsPage({
               <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
                 {diff.baseline}
               </code>
+              {baselineModel && (
+                <code className="rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
+                  {baselineModel}
+                </code>
+              )}
               vs candidate
               <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
                 {diff.candidate}
               </code>
+              {candidateModel && (
+                <code className="rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
+                  {candidateModel}
+                </code>
+              )}
             </p>
             <Table>
               <THead>

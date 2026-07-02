@@ -100,6 +100,43 @@ export default async function ScorecardDetailPage({
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
       </Card>
 
+      {record.models && (record.models.primary || record.models.observed.length > 0) && (
+        <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
+              model
+            </span>
+            <code className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[12px] font-[510] text-secondary-foreground">
+              {record.models.primary ?? 'unknown'}
+            </code>
+          </div>
+          {record.models.observed.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">관측</span>
+              {record.models.observed.map((m) => (
+                <code
+                  key={m}
+                  className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                >
+                  {m}
+                </code>
+              ))}
+            </div>
+          )}
+          {record.models.declared && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">선언</span>
+              <code className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+                {record.models.declared}
+              </code>
+              {record.models.primary && record.models.declared !== record.models.primary && (
+                <Badge tone="danger">선언≠실제</Badge>
+              )}
+            </div>
+          )}
+        </Card>
+      )}
+
       {record.error && (
         <Callout tone="danger" hint={record.error.message}>
           {record.error.phase

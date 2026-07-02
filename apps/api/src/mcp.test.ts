@@ -428,6 +428,32 @@ describe("MCP tools", () => {
     expect(text(reg)).toContain("bu");
   });
 
+  it("submit_run: runtime 지정 시 케이스 placement.target 으로 디스패치된다(BFF↔MCP parity)", async () => {
+    let seen: AgentJob | undefined;
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        seen = job;
+        return result;
+      },
+    };
+    const deps = {
+      service: new RunService({ dispatcher: capture, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
+    };
+    const principal: Principal = { subject: "u", workspace: "acme", roles: ["member"], via: "oidc" };
+    const server = buildMcpServer(deps, principal);
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await server.connect(serverT);
+    await client.connect(clientT);
+    const sub = await client.callTool({
+      name: "submit_run",
+      arguments: { harness_id: "scripted", task: "t", runtime: "nomad-seoul" },
+    });
+    expect(sub.isError).toBeFalsy();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(seen?.evalCase.placement?.target).toBe("nomad-seoul");
+  });
+
   it("viewer: 읽기만 — submit_run 은 권한오류", async () => {
     const client = await connect(harness(), ["viewer"]);
     expect((await client.callTool({ name: "list_runs", arguments: {} })).isError).toBeFalsy();
