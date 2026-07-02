@@ -50,6 +50,16 @@ describe("InMemoryScorecardStore", () => {
     expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]); // judge 축도 경량 → 목록 포함
     expect(list[0]?.scorecard).toBeUndefined(); // 목록엔 무거운 scorecard 없음
   });
+
+  it("list(filter) 로 dataset/harness/status 를 좁힌다(리더보드/트렌드가 전 워크스페이스 스캔 회피)", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(rec({ id: "a", dataset: { id: "d1", version: "1" }, status: "succeeded" }));
+    await store.create(rec({ id: "b", dataset: { id: "d2", version: "1" }, status: "succeeded" }));
+    await store.create(rec({ id: "c", dataset: { id: "d1", version: "1" }, status: "failed" }));
+    expect((await store.list("acme", { dataset: "d1" })).map((r) => r.id).sort()).toEqual(["a", "c"]);
+    expect((await store.list("acme", { dataset: "d1", status: "succeeded" })).map((r) => r.id)).toEqual(["a"]);
+    expect(await store.list("acme")).toHaveLength(3); // 필터 없으면 전체(현행)
+  });
 });
 
 function fakeClient(handler: (text: string, params?: unknown[]) => { rows: unknown[] }): {
@@ -115,5 +125,13 @@ describe("PgScorecardStore", () => {
     expect(list[0]?.summary).toHaveLength(1);
     expect(list[0]?.models?.primary).toBe("m");
     expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]);
+  });
+
+  it("list(filter) → SQL WHERE 에 dataset_id/status 절 + 파라미터화(전 스캔 회피)", async () => {
+    const { client, calls } = fakeClient(() => ({ rows: [] }));
+    await new PgScorecardStore(client).list("acme", { dataset: "d1", status: "succeeded" });
+    expect(calls[0]?.text).toMatch(/dataset_id = \$2/);
+    expect(calls[0]?.text).toMatch(/status = \$3/);
+    expect(calls[0]?.params).toEqual(["acme", "d1", "succeeded"]);
   });
 });

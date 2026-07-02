@@ -64,13 +64,21 @@ export const ScorecardRecordSchema = z.object({
 });
 export type ScorecardRecord = z.infer<typeof ScorecardRecordSchema>;
 
+// list 필터 — dataset/harness/status 를 스토어(SQL)에서 좁힌다(리더보드/트렌드가 전 워크스페이스를 훑지 않게).
+// 미지정이면 전체(현행). model/judgeModel 등 요약-파생 축은 서비스/suite 에서 계속 필터(SQL 로 못 좁힘).
+export interface ScorecardListFilter {
+  dataset?: string; // dataset.id
+  harness?: string; // harness.id
+  status?: ScorecardStatus;
+}
+
 // 스코어카드 스토어 계약. in-memory(개발/테스트) 또는 Postgres(운영) — 같은 인터페이스 뒤로 교체.
 // 주의: list 는 무거운 `scorecard`(트레이스 포함) 필드를 의도적으로 생략한다(summary 만). 전체는 get 으로.
 export interface ScorecardStore {
   create(record: ScorecardRecord): Promise<void>;
   update(id: string, patch: Partial<ScorecardRecord>): Promise<ScorecardRecord | undefined>;
   get(id: string): Promise<ScorecardRecord | undefined>;
-  list(tenant?: string): Promise<ScorecardRecord[]>;
+  list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]>;
 }
 
 export class InMemoryScorecardStore implements ScorecardStore {
@@ -92,8 +100,12 @@ export class InMemoryScorecardStore implements ScorecardStore {
     return this.cards.get(id);
   }
 
-  async list(tenant?: string): Promise<ScorecardRecord[]> {
-    const all = [...this.cards.values()].filter((c) => !tenant || c.tenant === tenant);
+  async list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
+    const all = [...this.cards.values()]
+      .filter((c) => !tenant || c.tenant === tenant)
+      .filter((c) => !filter?.dataset || c.dataset.id === filter.dataset)
+      .filter((c) => !filter?.harness || c.harness.id === filter.harness)
+      .filter((c) => !filter?.status || c.status === filter.status);
     // 목록은 무거운 scorecard/steps + 상세용 runIds 생략(summary/models 만) — 상세는 get 으로.
     return all.map(({ scorecard, steps, runIds, ...rest }) => rest);
   }

@@ -13,6 +13,7 @@ export {
   type ScorecardStep,
   type MetricSummary,
   type ScorecardModels,
+  type ScorecardListFilter,
   ScorecardRecordSchema,
   ScorecardStatusSchema,
   ScorecardStepSchema,

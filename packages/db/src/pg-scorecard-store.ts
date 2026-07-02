@@ -1,5 +1,10 @@
 import type { SqlClient } from "./client.js";
-import { type ScorecardRecord, ScorecardRecordSchema, type ScorecardStore } from "./scorecard-store.js";
+import {
+  type ScorecardListFilter,
+  type ScorecardRecord,
+  ScorecardRecordSchema,
+  type ScorecardStore,
+} from "./scorecard-store.js";
 
 interface ScorecardRow {
   id: string;
@@ -128,14 +133,29 @@ export class PgScorecardStore implements ScorecardStore {
     return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
   }
 
-  async list(tenant?: string): Promise<ScorecardRecord[]> {
-    // 무거운 scorecard 컬럼은 SELECT 하지 않는다(목록 경량화).
+  async list(tenant?: string, filter?: ScorecardListFilter): Promise<ScorecardRecord[]> {
+    // 무거운 scorecard 컬럼은 SELECT 하지 않는다(목록 경량화). 필터는 SQL WHERE 로 좁힌다(리더보드/트렌드).
+    const conds = ["($1::text IS NULL OR tenant = $1)"];
+    const vals: unknown[] = [tenant ?? null];
+    let i = 2;
+    if (filter?.dataset) {
+      conds.push(`dataset_id = $${i++}`);
+      vals.push(filter.dataset);
+    }
+    if (filter?.harness) {
+      conds.push(`harness_id = $${i++}`);
+      vals.push(filter.harness);
+    }
+    if (filter?.status) {
+      conds.push(`status = $${i++}`);
+      vals.push(filter.status);
+    }
     const res = await this.client.query<ScorecardRow>(
       `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, error, created_at, updated_at
        FROM assay_scorecards
-       WHERE ($1::text IS NULL OR tenant = $1)
+       WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,
-      [tenant ?? null],
+      vals,
     );
     return res.rows.map((row) => rowToRecord(row, false));
   }
