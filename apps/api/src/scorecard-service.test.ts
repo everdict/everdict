@@ -101,6 +101,39 @@ describe("ScorecardService.leaderboard", () => {
   });
 });
 
+describe("ScorecardService.backfillModels", () => {
+  // 트레이스에 관측 모델을 가진 완료 스코어카드(구 레코드처럼 models 필드는 없음).
+  const scWithModel = (model: string): Scorecard => ({
+    suiteId: "d",
+    harness: "h@1",
+    results: [
+      {
+        caseId: "c1",
+        harness: "h@1",
+        trace: [{ t: 0, kind: "llm_call", model }],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [],
+      },
+    ],
+  });
+
+  it("models 없는 succeeded 레코드를 저장 트레이스 관측으로 채운다(멱등; 미완료/기존 models 는 스킵)", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("old", { scorecard: scWithModel("gpt-4o") })); // models 없음
+    await store.create(record("queued", { status: "queued" })); // 산출물 없음 → 스킵
+    await store.create(
+      record("already", { scorecard: scWithModel("o3"), models: { observed: ["o3"], primary: "o3" } }),
+    );
+
+    const res = await svc(store).backfillModels("acme");
+    expect(res.updated).toBe(1); // old 만
+    expect((await store.get("old"))?.models?.primary).toBe("gpt-4o");
+
+    // 멱등: 두 번째 실행은 채울 게 없다.
+    expect((await svc(store).backfillModels("acme")).updated).toBe(0);
+  });
+});
+
 // 한 케이스(c1)만 가진 데이터셋. pull 인제스트 정렬 대상.
 const datasetWithCase = (): Dataset => ({
   id: "d",

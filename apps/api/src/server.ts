@@ -1541,6 +1541,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // model 축 백필 — models 가 없는 과거 succeeded 스코어카드를 저장 트레이스로 채운다(멱등). 정적 경로 → :id 보다 먼저.
+  app.post("/scorecards/backfill-models", async (req, reply) => {
+    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+      return reply.send(await deps.scorecardService.backfillModels(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.get<{ Params: { id: string } }>("/scorecards/:id", async (req, reply) => {
     if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);

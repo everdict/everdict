@@ -1,4 +1,4 @@
-import { type BudgetTracker, type Dispatcher, costOf } from "@assay/backends";
+import type { BudgetTracker, Dispatcher } from "@assay/backends";
 import {
   type AgentJob,
   AppError,
@@ -38,6 +38,7 @@ import {
 } from "@assay/suite";
 import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { z } from "zod";
+import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
 
 // 케이스 실패/판정 사유 한 줄 — 진행 스텝 메시지용. trace 의 error 이벤트 > pass:false 인 score.detail 순. 길면 자른다.
@@ -281,6 +282,21 @@ export class ScorecardService {
     return leaderboard(records, opts);
   }
 
+  // model 축 백필 — models 가 아직 없는(구) succeeded 스코어카드의 저장 트레이스에서 관측 모델을 도출해 채운다.
+  // 멱등: 이미 models 가 있으면 스킵. 트레이스가 진실이라 관측만(선언 폴백 없음). 대량이므로 get 은 필요한 것만.
+  async backfillModels(tenant: string): Promise<{ scanned: number; updated: number }> {
+    const records = await this.deps.store.list(tenant); // list 는 models 를 포함(경량) → 이미 있는지 판별 가능
+    let updated = 0;
+    for (const r of records) {
+      if (r.models || r.status !== "succeeded") continue; // 이미 채워졌거나 산출물 없음
+      const full = await this.deps.store.get(r.id); // 트레이스는 무거운 scorecard 안에만
+      if (!full?.scorecard) continue;
+      await this.deps.store.update(r.id, { models: scorecardModels(full.scorecard), updatedAt: this.now() });
+      updated += 1;
+    }
+    return { scanned: records.length, updated };
+  }
+
   // 워크스페이스 스코프 + 완료(scorecard 존재) 보장. 없으면 404(존재 누출 금지), 미완료면 400.
   private async requireSucceeded(tenant: string, id: string): Promise<Scorecard> {
     const record = await this.deps.store.get(id);
@@ -293,16 +309,6 @@ export class ScorecardService {
         `scorecard '${id}' 가 아직 완료되지 않았습니다(status=${record.status}).`,
       );
     return record.scorecard;
-  }
-
-  // 케이스 repo 시드가 비공개(git + connectionId)면 owner(제출자 subject)의 개인 연결 토큰을 resolve. public/비-repo/미설정이면 undefined.
-  private async resolveRepoToken(owner: string, evalCase: AgentJob["evalCase"]): Promise<string | undefined> {
-    if (!this.deps.repoTokenFor) return undefined;
-    const env = evalCase.env;
-    if (env.kind !== "repo") return undefined;
-    const src = env.source;
-    if (!("git" in src) || !src.connectionId) return undefined;
-    return this.deps.repoTokenFor(owner, src.connectionId).catch(() => undefined);
   }
 
   private async track(
@@ -326,11 +332,10 @@ export class ScorecardService {
       steps.push({ ts: this.now(), phase: p, status, message, ...(caseId ? { caseId } : {}) });
     };
     const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
-    // 각 케이스 디스패치에 tenant/spec/judge 모델을 주입하고 케이스별로 budget admit/settle(단일 run 과 동일 회계).
+    // 각 케이스 디스패치: budget admit(배치라 per-case) 후 tenant/spec/judge 를 잡에 enrich.
+    // 비공개 repo 토큰 resolve+attach → dispatch → settle 은 단일 run 과 공유하는 executeCase 가 담당(중복 회계 없음).
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // 초과 시 throw → 배치 실패
-      // 케이스가 비공개 repo(git + connectionId)면 제출자의 개인 연결 토큰을 resolve 해 잡에 transient 로 싣는다(단일 run 과 동일).
-      const repoToken = await this.resolveRepoToken(owner, job.evalCase);
       const enriched: AgentJob = {
         ...job,
         tenant,
@@ -338,12 +343,8 @@ export class ScorecardService {
         ...(owner ? { submittedBy: owner } : {}),
         ...(harnessSpec ? { harnessSpec } : {}),
         ...(judge ? { judge } : {}),
-        ...(repoToken ? { repoToken } : {}),
       };
-      const result = await this.deps.dispatcher.dispatch(enriched);
-      // 셀프호스티드 실행은 유저 로그인이 결제 — 워크스페이스 usd/tokens 버짓 미차감(단일 run 과 동일).
-      if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(tenant, costOf(result));
-      return result;
+      return executeCase(this.deps, tenant, owner, enriched);
     };
     // 실패 시 "어떤 구간에서" 진단 — 파이프라인 구간을 따라가며 catch 가 그 구간을 error.phase 로 기록한다.
     let phase = "dispatch";

@@ -1451,6 +1451,59 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
     await app.close();
   });
 
+  it("leaderboard: ingest 트레이스의 관측 model 이 리더보드 행에 실린다(model→리더보드 E2E)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET }); // caseId c1
+    const ingest = await app.inject({
+      method: "POST",
+      url: "/scorecards/ingest",
+      headers: h,
+      payload: {
+        dataset: { id: "smoke" },
+        harness: { id: "codex" },
+        traces: [
+          {
+            caseId: "c1",
+            trace: [
+              { t: 0, kind: "tool_call", id: "x", name: "bash", args: {} },
+              { t: 1, kind: "llm_call", model: "gpt-4o" },
+            ],
+          },
+        ],
+      },
+    });
+    expect(ingest.statusCode).toBe(202);
+    await pollScorecard(app, ingest.json().id, h);
+
+    // ingest 는 tool_calls 메트릭을 재도출 → 리더보드가 그 위에서 codex×gpt-4o 를 랭킹.
+    const res = await app.inject({
+      method: "GET",
+      url: "/scorecards/leaderboard?dataset=smoke&metric=tool_calls",
+      headers: h,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.rows).toHaveLength(1);
+    expect(body.rows[0].harness.id).toBe("codex");
+    expect(body.rows[0].model).toBe("gpt-4o"); // 트레이스 관측 모델이 리더보드 행에
+    await app.close();
+  });
+
+  it("backfill-models: member 는 200 {scanned,updated}, viewer 는 403", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const res = await app.inject({ method: "POST", url: "/scorecards/backfill-models", headers: h });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toHaveProperty("updated");
+
+    const { app: vApp } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const vRes = await vApp.inject({ method: "POST", url: "/scorecards/backfill-models", headers: h });
+    expect(vRes.statusCode).toBe(403);
+    await app.close();
+    await vApp.close();
+  });
+
   it("metrics: 등록한 threshold metric 이 run 후 scores 에 post-hoc 적용된다(steps<=5 → pass)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };

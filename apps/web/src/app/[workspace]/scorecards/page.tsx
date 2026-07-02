@@ -45,6 +45,12 @@ export default async function ScorecardsPage({
               리더보드
             </Link>
             <Link
+              href={`/${workspace}/scorecards/by-harness`}
+              className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+            >
+              하니스별
+            </Link>
+            <Link
               href={`/${workspace}/scorecards/trend`}
               className={buttonVariants({ size: 'sm', variant: 'secondary' })}
             >

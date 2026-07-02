@@ -687,6 +687,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
 
     server.registerTool(
+      "backfill_scorecard_models",
+      {
+        description:
+          "models 가 없는 과거 succeeded 스코어카드를 저장 트레이스에서 관측 모델로 채운다(멱등). 리더보드에 과거 실행을 포함시킬 때.",
+        inputSchema: {},
+      },
+      () => run(principal, "scorecards:run", async () => ok(await scorecards.backfillModels(ws))),
+    );
+
+    server.registerTool(
       "ingest_scorecard",
       {
         description:

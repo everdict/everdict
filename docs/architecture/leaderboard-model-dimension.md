@@ -1,6 +1,10 @@
 # Leaderboard — model as a first-class dimension (harness × model × benchmark)
 
-> **Status: ALL 3 SLICES SHIPPED (gates green — suite·db·api: format/lint/typecheck/test; web: prettier/eslint/tsc).**
+> **Status: ALL 3 SLICES + follow-ups SHIPPED (gates green — suite·db·api: format/lint/typecheck/test; web:
+> prettier/eslint/tsc).** Follow-ups: historical `models` backfill, harness-centric view, and a model→leaderboard
+> HTTP-level E2E (ingest a trace with a known `llm_call.model` → `GET /scorecards/leaderboard` row carries it).
+> Live codex/pinch E2E is the only open item (needs the codex CommandHarness image + pinch dataset + provider keys —
+> not runnable headlessly here).
 > Decisions locked with the user:
 > **(1) model source = observed-first (trace `llm_call.model`) + declared fallback (spec `model`), store both;
 > (2) first view = per-benchmark leaderboard ranking (harness × model).**
@@ -101,8 +105,9 @@ leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, mod
 
 - **Per-benchmark leaderboard** *(first)* — pick dataset + metric → ranked `harness × model` table. The
   SWE-bench-style board. "pinch run on codex" lands here as one row.
-- **Harness-centric history** — pick harness A → its scorecards across all datasets + the model each version
-  used (reuses `list` filtered by `harness.id`; model column from `models`).
+- **Harness-centric history** — ✅ SHIPPED (`scorecards/by-harness`, web-only): pick harness A → its scorecards
+  grouped by dataset, with model + version + per-metric summary each (reuses `list` filtered by `harness.id`;
+  no new API — the list already carries `models`).
 - **Cross-harness compare** — existing `compare` (diff A↔B) + model shown per side; the leaderboard filtered to
   chosen harnesses covers the across-benchmarks case.
 
@@ -155,8 +160,10 @@ leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, mod
 - **Metric is an explicit ranking axis** (parity with `trendSeries`) — no assumed universal headline metric.
 - **Judge model is a separate axis** — `models` is the harness-under-test's LLM, not the scorer's. (A judge-model
   breakdown, if wanted, is a later, separate cut.)
-- **Backfill of historical `models`** is a follow-up (derivable from the stored `scorecard.results[].trace`); v1
-  populates on new runs and shows `unknown` for old ones.
+- **Backfill of historical `models`** — ✅ SHIPPED. `ScorecardService.backfillModels(tenant)` recomputes from the
+  stored `scorecard.results[].trace` for succeeded records lacking `models` (idempotent, observed-only —
+  the trace is ground truth); `POST /scorecards/backfill-models` (`scorecards:run`) + MCP
+  `backfill_scorecard_models`. New runs still populate at finalize; this backfills pre-existing rows.
 - **Store-level model/dataset filters** deferred — the leaderboard filters+groups in the service over the
   lightweight `list`, exactly as trend/diff already do; add SQL filters only if `list` volume demands it.
 - **Single-run (`RunStore`) model tagging** out of scope — this is the scorecard/benchmark surface.

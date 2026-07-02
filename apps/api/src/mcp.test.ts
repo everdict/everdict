@@ -166,6 +166,7 @@ describe("MCP tools", () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "accept_invite",
+      "backfill_scorecard_models",
       "create_api_key",
       "create_dataset",
       "create_invite",
@@ -641,6 +642,11 @@ describe("MCP tools", () => {
     expect(board.dataset).toBe("smoke");
     expect(board.rows[0]?.rank).toBe(1);
     expect(board.rows[0]?.harness.id).toBe("scripted");
+
+    // 백필: 멱등 recompute — 이미 models 가 채워진 run 뿐이라 updated=0.
+    const bf = await member.callTool({ name: "backfill_scorecard_models", arguments: {} });
+    expect(bf.isError).toBeFalsy();
+    expect(JSON.parse(text(bf))).toHaveProperty("updated");
   });
 
   it("schedules: member 가 예약 생성·조회·pause·삭제; viewer 는 생성 권한오류; 타 ws 는 NOT_FOUND", async () => {
