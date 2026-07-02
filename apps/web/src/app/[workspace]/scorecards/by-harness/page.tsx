@@ -5,8 +5,10 @@ import { HarnessPicker, type HarnessOption } from '@/features/by-harness-scoreca
 import { scorecardsSchema, type ScorecardRecord } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { MetricChip, ModelChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
@@ -14,16 +16,6 @@ import { StatusPill } from '@/shared/ui/status-pill'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 export const dynamic = 'force-dynamic'
-
-function pct(n: number): string {
-  return `${Math.round(n * 100)}%`
-}
-function fmtTime(iso: string): string {
-  return iso
-    .replace('T', ' ')
-    .replace(/\.\d+Z$/, 'Z')
-    .slice(0, 16)
-}
 
 export default async function ByHarnessPage({
   params,
@@ -98,11 +90,14 @@ export default async function ByHarnessPage({
           ) : (
             groups.map(([datasetId, cards]) => (
               <section key={datasetId} className="space-y-2.5">
-                <SectionHeader title={datasetId} />
+                <SectionHeader
+                  title={datasetId}
+                  action={<span className="text-[11px] text-faint">{cards.length}건</span>}
+                />
                 <Table>
                   <THead>
                     <tr>
-                      <TH>버전</TH>
+                      <TH>하니스 버전</TH>
                       <TH>model</TH>
                       <TH>metrics</TH>
                       <TH className="text-right">상태</TH>
@@ -117,38 +112,41 @@ export default async function ByHarnessPage({
                             href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
                             className="font-mono text-[12px] font-[510] text-link transition-colors hover:text-foreground"
                           >
-                            {s.harness.id}
-                            <span className="text-faint">@{s.harness.version}</span>
-                            <span className="text-faint"> · {s.dataset.version}</span>
+                            @{s.harness.version}
+                            <span className="text-faint"> · ds {s.dataset.version}</span>
                           </Link>
                         </TD>
                         <TD>
                           {s.models?.primary ? (
-                            <code className="rounded border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
-                              {s.models.primary}
-                            </code>
+                            <ModelChip>{s.models.primary}</ModelChip>
                           ) : (
-                            <span className="text-faint text-[12px]">unknown</span>
+                            <span className="text-[12px] text-faint">unknown</span>
                           )}
                         </TD>
                         <TD>
                           <div className="flex flex-wrap gap-1">
-                            {(s.summary ?? []).map((m) => (
-                              <code
-                                key={m.metric}
-                                className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
-                              >
-                                <span className="text-faint">{m.metric}</span> {m.mean.toFixed(2)}
-                                {m.passRate != null ? ` · ${pct(m.passRate)}` : ''}
-                              </code>
-                            ))}
+                            {(s.summary ?? []).length > 0 ? (
+                              (s.summary ?? []).map((m) => (
+                                <MetricChip
+                                  key={m.metric}
+                                  metric={m.metric}
+                                  mean={m.mean}
+                                  passRate={m.passRate}
+                                />
+                              ))
+                            ) : (
+                              <span className="text-[11px] text-faint">–</span>
+                            )}
                           </div>
                         </TD>
                         <TD className="text-right">
                           <StatusPill status={s.status} />
                         </TD>
-                        <TD className="whitespace-nowrap text-right font-mono text-[11px] text-muted-foreground">
-                          {fmtTime(s.createdAt)}
+                        <TD
+                          className="whitespace-nowrap text-right font-mono text-[11px] text-muted-foreground"
+                          title={fmtDateTimeFull(s.createdAt)}
+                        >
+                          {fmtDateTime(s.createdAt)}
                         </TD>
                       </TR>
                     ))}

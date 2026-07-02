@@ -6,64 +6,107 @@ import { datasetsSchema } from '@/entities/dataset'
 import { scorecardTrendSchema, type ScorecardTrend } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { fmtDateTime, fmtDateTimeFull, fmtScore } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { EntityRef } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
+import { Score } from '@/shared/ui/score'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 export const dynamic = 'force-dynamic'
 
-function fmtScore(p: ScorecardTrend['points'][number]): string {
-  if (p.passRate !== null) return `${Math.round(p.passRate * 100)}%`
-  if (p.mean !== null) return p.mean.toFixed(2)
-  return '–'
-}
 function fmtDelta(n: number | null): string {
   if (n === null) return '–'
   const arrow = n > 0 ? '▲' : n < 0 ? '▼' : '–'
   return `${arrow} ${n > 0 ? '+' : ''}${n.toFixed(2)}`
 }
-function fmtTime(iso: string): string {
-  return iso
-    .replace('T', ' ')
-    .replace(/\.\d+Z$/, 'Z')
-    .slice(0, 16)
-}
 
-// 의존성 없는 인라인 SVG 스파크라인 — score 시계열(회귀 포인트는 빨강).
+// 의존성 없는 인라인 SVG 스파크라인 — score 시계열 + baseline 기준선 + 포인트 hover 툴팁(회귀는 빨강).
 function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
-  const vals = points.map((p) => p.score).filter((v): v is number => v !== null)
-  if (vals.length < 2) return null
+  const pts = points
+    .map((p, i) => ({ ...p, i }))
+    .filter((p): p is (typeof points)[number] & { score: number; i: number } => p.score !== null)
+  if (pts.length < 2) return null
+
+  // baseline score = score − deltaVsBaseline (delta 있는 첫 포인트에서 역산). 기준선으로 그린다.
+  const ref = points.find((p) => p.score !== null && p.deltaVsBaseline !== null)
+  const baseScore =
+    ref && ref.score !== null && ref.deltaVsBaseline !== null
+      ? ref.score - ref.deltaVsBaseline
+      : null
+
+  const vals = pts.map((p) => p.score)
+  if (baseScore !== null) vals.push(baseScore)
   const min = Math.min(...vals)
   const max = Math.max(...vals)
   const range = max - min || 1
   const W = 720
-  const H = 120
-  const pad = 10
+  const H = 140
+  const padX = 12
+  const padY = 18
   const n = points.length
-  const x = (i: number) => pad + (i * (W - 2 * pad)) / Math.max(1, n - 1)
-  const y = (v: number) => H - pad - ((v - min) / range) * (H - 2 * pad)
-  const line = points
-    .map((p, i) => (p.score === null ? null : `${x(i).toFixed(1)},${y(p.score).toFixed(1)}`))
-    .filter((s): s is string => s !== null)
-    .join(' ')
+  const x = (i: number) => padX + (i * (W - 2 * padX)) / Math.max(1, n - 1)
+  const y = (v: number) => H - padY - ((v - min) / range) * (H - 2 * padY)
+
+  const line = pts.map((p) => `${x(p.i).toFixed(1)},${y(p.score).toFixed(1)}`).join(' ')
+  const area = `${x(pts[0].i).toFixed(1)},${(H - padY).toFixed(1)} ${line} ${x(pts[pts.length - 1].i).toFixed(1)},${(H - padY).toFixed(1)}`
+  const last = pts[pts.length - 1]
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-32 w-full" role="img" aria-label="score 추이">
-      <polyline points={line} fill="none" stroke="var(--color-primary)" strokeWidth={2} />
-      {points.map((p, i) =>
-        p.score === null ? null : (
-          <circle
-            key={p.scorecardId}
-            cx={x(i)}
-            cy={y(p.score)}
-            r={4}
-            fill={p.regressed ? 'var(--color-destructive)' : 'var(--color-success)'}
+    <svg viewBox={`0 0 ${W} ${H}`} className="h-36 w-full" role="img" aria-label="score 추이">
+      <defs>
+        <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="var(--color-primary)" stopOpacity="0.18" />
+          <stop offset="100%" stopColor="var(--color-primary)" stopOpacity="0" />
+        </linearGradient>
+      </defs>
+      {baseScore !== null && (
+        <>
+          <line
+            x1={padX}
+            x2={W - padX}
+            y1={y(baseScore)}
+            y2={y(baseScore)}
+            stroke="var(--color-muted-foreground)"
+            strokeWidth={1}
+            strokeDasharray="3 3"
+            opacity={0.5}
           />
-        )
+          <text
+            x={W - padX}
+            y={y(baseScore) - 4}
+            textAnchor="end"
+            className="fill-[var(--color-muted-foreground)] text-[10px]"
+          >
+            baseline {baseScore.toFixed(2)}
+          </text>
+        </>
       )}
+      <polygon points={area} fill="url(#trend-fill)" />
+      <polyline points={line} fill="none" stroke="var(--color-primary)" strokeWidth={2} />
+      {pts.map((p) => (
+        <circle
+          key={p.scorecardId}
+          cx={x(p.i)}
+          cy={y(p.score)}
+          r={4}
+          fill={p.regressed ? 'var(--color-destructive)' : 'var(--color-success)'}
+        >
+          <title>{`${fmtDateTime(p.createdAt)} · ${fmtScore(p.passRate, p.mean)}${p.regressed ? ' · 회귀' : ''}`}</title>
+        </circle>
+      ))}
+      <text
+        x={Math.min(x(last.i) + 8, W - 4)}
+        y={y(last.score) - 6}
+        textAnchor={last.i === n - 1 ? 'end' : 'start'}
+        className="fill-foreground text-[11px] font-[560]"
+      >
+        {fmtScore(last.passRate, last.mean)}
+      </text>
     </svg>
   )
 }
@@ -182,19 +225,22 @@ export default async function TrendPage({
                 <TBody>
                   {trend.points.map((p) => (
                     <TR key={p.scorecardId}>
-                      <TD className="whitespace-nowrap font-mono text-[12px] text-muted-foreground">
-                        {fmtTime(p.createdAt)}
+                      <TD
+                        className="whitespace-nowrap font-mono text-[11px] text-muted-foreground"
+                        title={fmtDateTimeFull(p.createdAt)}
+                      >
+                        {fmtDateTime(p.createdAt)}
                       </TD>
                       <TD>
                         <Link
                           href={`/${workspace}/scorecards/${p.scorecardId}`}
                           className="font-[510] text-link transition-colors hover:text-foreground"
                         >
-                          {p.harness}
+                          <EntityRef id={p.harness} />
                         </Link>
                       </TD>
-                      <TD className="text-right font-mono text-[12px] tabular-nums">
-                        {fmtScore(p)}
+                      <TD className="text-right">
+                        <Score passRate={p.passRate} mean={p.mean} />
                       </TD>
                       <TD
                         className={`text-right font-mono text-[12px] tabular-nums ${

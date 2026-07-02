@@ -5,9 +5,11 @@ import { ComparePicker, type CompareOption } from '@/features/compare-scorecards
 import { scorecardDiffSchema, scorecardsSchema, type ScorecardDiff } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { ModelChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
@@ -18,6 +20,33 @@ export const dynamic = 'force-dynamic'
 function delta(n: number): string {
   const arrow = n > 0 ? '▲' : n < 0 ? '▼' : '–'
   return `${arrow} ${n > 0 ? '+' : ''}${n.toFixed(2)}`
+}
+
+// 한 side(baseline/candidate) 헤더 — 스코어카드 상세로 링크 + 사용 모델 칩.
+function SideRef({
+  workspace,
+  label,
+  id,
+  model,
+}: {
+  workspace: string
+  label: string
+  id: string
+  model?: string
+}) {
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className="text-[11px] uppercase tracking-wide text-faint">{label}</span>
+      <Link
+        href={`/${workspace}/scorecards/${encodeURIComponent(id)}`}
+        className="font-mono text-[12px] font-[510] text-link transition-colors hover:text-foreground"
+        title={id}
+      >
+        {id.slice(0, 8)}
+      </Link>
+      {model && <ModelChip>{model}</ModelChip>}
+    </span>
+  )
 }
 
 export default async function CompareScorecardsPage({
@@ -94,26 +123,21 @@ export default async function CompareScorecardsPage({
         <div className="space-y-7">
           <section className="space-y-2.5">
             <SectionHeader title="메트릭 변화" />
-            <p className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
-              baseline
-              <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
-                {diff.baseline}
-              </code>
-              {baselineModel && (
-                <code className="rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
-                  {baselineModel}
-                </code>
-              )}
-              vs candidate
-              <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
-                {diff.candidate}
-              </code>
-              {candidateModel && (
-                <code className="rounded-md border border-border bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
-                  {candidateModel}
-                </code>
-              )}
-            </p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+              <SideRef
+                workspace={workspace}
+                label="baseline"
+                id={diff.baseline}
+                model={baselineModel}
+              />
+              <span className="text-faint">→</span>
+              <SideRef
+                workspace={workspace}
+                label="candidate"
+                id={diff.candidate}
+                model={candidateModel}
+              />
+            </div>
             <Table>
               <THead>
                 <tr>
@@ -134,13 +158,14 @@ export default async function CompareScorecardsPage({
                       {m.candidateMean.toFixed(2)}
                     </TD>
                     <TD
-                      className={`text-right font-mono text-[12px] tabular-nums ${
+                      className={cn(
+                        'text-right font-mono text-[12px] tabular-nums',
                         m.delta === 0
                           ? 'text-muted-foreground'
                           : m.delta > 0
                             ? 'font-[510] text-[var(--color-success)]'
                             : 'font-[510] text-destructive'
-                      }`}
+                      )}
                     >
                       {delta(m.delta)}
                     </TD>
@@ -181,23 +206,39 @@ function DeltaList({
   items: ScorecardDiff['regressions']
   empty: string
 }) {
+  // 변화 폭이 큰 케이스부터 — 눈에 띄는 회귀/개선을 위로.
+  const sorted = [...items].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
   return (
     <Card className="space-y-2.5 p-4">
       <div className="flex items-center justify-between">
         <h2 className="text-[13px] font-[560]">{title}</h2>
         <Badge tone={tone}>{items.length}</Badge>
       </div>
-      {items.length === 0 ? (
+      {sorted.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">{empty}</p>
       ) : (
-        <ul className="space-y-1 text-[13px]">
-          {items.map((d) => (
-            <li key={`${d.caseId}:${d.metric}`} className="flex items-center justify-between gap-2">
-              <span className="font-mono text-[12px]">
-                {d.caseId} · {d.metric}
+        <ul className="divide-y divide-border/70">
+          {sorted.map((d) => (
+            <li
+              key={`${d.caseId}:${d.metric}`}
+              className="flex items-center justify-between gap-2 py-1.5 first:pt-0 last:pb-0"
+            >
+              <span className="min-w-0 truncate font-mono text-[12px]">
+                {d.caseId}
+                <span className="text-faint"> · {d.metric}</span>
               </span>
-              <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
-                {d.baseline} → {d.candidate}
+              <span className="flex shrink-0 items-center gap-2 font-mono text-[12px] tabular-nums">
+                <span className="text-muted-foreground">
+                  {d.baseline} → {d.candidate}
+                </span>
+                <span
+                  className={cn(
+                    'font-[510]',
+                    tone === 'danger' ? 'text-destructive' : 'text-[var(--color-success)]'
+                  )}
+                >
+                  {delta(d.delta)}
+                </span>
               </span>
             </li>
           ))}
