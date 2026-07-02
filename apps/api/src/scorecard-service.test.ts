@@ -7,7 +7,7 @@ import {
   type Scorecard,
   type TraceEvent,
 } from "@assay/core";
-import { InMemoryScorecardStore, type ScorecardRecord } from "@assay/db";
+import { InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@assay/db";
 import { InMemoryDatasetRegistry, InMemoryJudgeRegistry } from "@assay/registry";
 import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { describe, expect, it } from "vitest";
@@ -432,6 +432,69 @@ describe("ScorecardService.submit — 리더보드 model 축 캡처", () => {
     expect(rec.status).toBe("succeeded");
     expect(rec.models?.observed).toEqual(["claude-opus-4-8"]);
     expect(rec.models?.primary).toBe("claude-opus-4-8");
+  });
+});
+
+describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
+  const okDispatch: Dispatcher = {
+    async dispatch(job) {
+      return {
+        caseId: job.evalCase.id,
+        harness: `${job.harness.id}@${job.harness.version}`,
+        trace: [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd: 0.01 } }],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
+      };
+    },
+  };
+
+  it("runStore 설정 시 케이스마다 자식 run 을 만들고, 활동 리스트엔 숨기며, scorecard.runIds 로 참조한다", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      runStore,
+      datasets,
+      newId: () => `sc-${n++}`, // sc-0 = 스코어카드, sc-1 = 케이스 c1 의 자식 run
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    const rec = await waitTerminal(store, "sc-0");
+    expect(rec.status).toBe("succeeded");
+    expect(rec.runIds).toEqual(["sc-1"]); // 팬아웃한 자식 run 참조
+
+    const child = await runStore.get("sc-1");
+    expect(child?.status).toBe("succeeded");
+    expect(child?.parentScorecardId).toBe("sc-0");
+    expect(child?.trigger).toBe("scorecard");
+    expect(child?.caseId).toBe("c1");
+
+    // 활동 리스트(기본)는 자식을 숨기고, scorecardId 로는 그 배치 자식이 보인다.
+    expect(await runStore.list("acme")).toEqual([]);
+    expect((await runStore.list("acme", { scorecardId: "sc-0" })).map((r) => r.id)).toEqual(["sc-1"]);
+  });
+
+  it("runStore 미설정이면 자식 run 없이 임베드 scorecard 만(현행 유지)", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({ dispatcher: okDispatch, store, datasets, newId: () => "sc-x" });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    const rec = await waitTerminal(store, "sc-x");
+    expect(rec.status).toBe("succeeded");
+    expect(rec.runIds).toBeUndefined();
+    expect(rec.scorecard?.results).toHaveLength(1); // 임베드 결과는 그대로
   });
 });
 

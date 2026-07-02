@@ -18,7 +18,7 @@ import {
   type Suite,
   TraceEventSchema,
 } from "@assay/core";
-import type { ScorecardRecord, ScorecardStep, ScorecardStore } from "@assay/db";
+import type { RunStore, ScorecardRecord, ScorecardStep, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
 import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry, MetricRegistry } from "@assay/registry";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
@@ -125,6 +125,9 @@ export interface ScorecardServiceDeps {
   // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 스코어카드 결과 무관(서비스가 swallow).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
   artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)
+  // 설정 시 케이스마다 자식 run(RunRecord)을 팬아웃 생성해 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
+  // 미설정이면 현행대로 자식 run 없이 임베드 scorecard 만(단일 run 과 같은 RunStore 를 공유). 자식은 활동 리스트에서 기본 숨김.
+  runStore?: RunStore;
   concurrency?: number;
   newId?: () => string;
   now?: () => string;
@@ -332,8 +335,11 @@ export class ScorecardService {
       steps.push({ ts: this.now(), phase: p, status, message, ...(caseId ? { caseId } : {}) });
     };
     const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
+    // 이 배치가 팬아웃한 자식 run id 들(runStore 설정 시). 완료 후 스코어카드 레코드에 참조로 저장한다.
+    const childRunIds: string[] = [];
     // 각 케이스 디스패치: budget admit(배치라 per-case) 후 tenant/spec/judge 를 잡에 enrich.
     // 비공개 repo 토큰 resolve+attach → dispatch → settle 은 단일 run 과 공유하는 executeCase 가 담당(중복 회계 없음).
+    // runStore 설정 시 케이스마다 자식 run(RunRecord)을 만들어 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // 초과 시 throw → 배치 실패
       const enriched: AgentJob = {
@@ -344,7 +350,35 @@ export class ScorecardService {
         ...(harnessSpec ? { harnessSpec } : {}),
         ...(judge ? { judge } : {}),
       };
-      return executeCase(this.deps, tenant, owner, enriched);
+      const runStore = this.deps.runStore;
+      if (!runStore) return executeCase(this.deps, tenant, owner, enriched);
+      // 자식 run: queued/running 으로 만들고 결과로 갱신. parentScorecardId 태그로 활동 리스트에선 기본 숨김.
+      const childId = this.newId();
+      const ts = this.now();
+      await runStore.create({
+        id: childId,
+        tenant,
+        harness: { id: harnessId, version: harnessVersion },
+        caseId: job.evalCase.id,
+        status: "running",
+        parentScorecardId: id,
+        trigger: "scorecard",
+        createdAt: ts,
+        updatedAt: ts,
+      });
+      childRunIds.push(childId);
+      try {
+        const result = await executeCase(this.deps, tenant, owner, enriched);
+        await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
+        return result;
+      } catch (err) {
+        const error =
+          err instanceof AppError
+            ? { code: err.code, message: err.message }
+            : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
+        await runStore.update(childId, { status: "failed", error, updatedAt: this.now() });
+        throw err; // runSuite 가 케이스 격리(실패 CaseResult 로 박제)하도록 다시 던진다
+      }
     };
     // 실패 시 "어떤 구간에서" 진단 — 파이프라인 구간을 따라가며 catch 가 그 구간을 error.phase 로 기록한다.
     let phase = "dispatch";
@@ -406,6 +440,7 @@ export class ScorecardService {
         summary,
         models,
         steps: [...steps],
+        ...(childRunIds.length ? { runIds: childRunIds } : {}), // 팬아웃한 자식 run 참조(있으면)
         updatedAt: this.now(),
       });
     } catch (err) {
@@ -419,6 +454,7 @@ export class ScorecardService {
         status: "failed",
         error: { ...base, phase },
         steps: [...steps],
+        ...(childRunIds.length ? { runIds: childRunIds } : {}), // 부분 팬아웃한 자식 run 참조(있으면)
         ...(scorecard
           ? {
               scorecard,

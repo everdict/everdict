@@ -264,6 +264,8 @@ async function main(): Promise<void> {
   const scorecardService = new ScorecardService({
     dispatcher,
     store: scorecardStore,
+    // 케이스마다 자식 run 을 팬아웃(단일 run 과 같은 RunStore 공유) — 각 케이스가 addressable run 이 되고 활동 리스트엔 기본 숨김.
+    runStore: store,
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
     judges: judgeRegistry,
