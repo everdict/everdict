@@ -20,6 +20,15 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
    (effective case-level parallel = `min(concurrency, runner workers)`).
 4. Aggregate with `summarizeScorecard` → store `{ status, summary, scorecard }`.
 
+**Child runs (run = the primitive; scorecard = run × N).** Each case is dispatched through the **same
+`executeCase` lifecycle** a single `POST /runs` uses (repo-token → dispatch → self-hosted-aware settle), and
+— when a `runStore` is wired — each case also becomes an addressable child `RunRecord`
+(`parentScorecardId` = this scorecard, `trigger: "scorecard"`, full trace/usage/provenance). The scorecard
+records their ids in `runIds`. Child runs are **hidden from the default run/activity list**
+(`RunStore.list` filters `parentScorecardId IS NULL`); fetch a batch's children with `list(tenant, {scorecardId})`.
+The heavy per-case `scorecard` results are still embedded too (dual: embed + reference). See
+`docs/architecture/run-as-primitive.md`.
+
 Runs are **async**: submit returns a `queued` record; poll until terminal. Normal eval failures produce
 `CaseResult`s (the batch still succeeds); only infra/budget errors fail the whole run.
 

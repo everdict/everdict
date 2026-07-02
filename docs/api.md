@@ -9,7 +9,7 @@ arrives by polling or webhook.
 | Method | Path | Body / result |
 |---|---|---|
 | `GET`  | `/me` | the caller's `Principal{subject,workspace,roles,via}` |
-| `POST` | `/runs` | `{ harness:{id,version}, case:EvalCase, webhookUrl? }` → **202** `RunRecord` (`runs:submit`) |
+| `POST` | `/runs` | `{ harness:{id,version}, case:EvalCase, runtime?, webhookUrl? }` → **202** `RunRecord` (`runs:submit`). `runtime` → `case.placement.target` (same runtime targeting as `/scorecards`). |
 | `GET`  | `/runs/:id` | `RunRecord` (200) or 404 (`runs:read`) |
 | `GET`  | `/runs` | `RunRecord[]` for the caller's workspace (`runs:read`) |
 | `POST` | `/datasets` | register a `Dataset` (immutable → `409`) (`datasets:write`, member+) |
