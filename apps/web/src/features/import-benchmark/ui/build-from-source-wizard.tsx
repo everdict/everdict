@@ -24,6 +24,8 @@ import {
 
 type SourceKind = 'huggingface' | 'jsonl'
 type Category = 'qa' | 'browser' | 'coding' | 'tool'
+// 케이스가 실행될 환경 — 매핑이 정하는 env 종류. browser(startUrl) | prompt(QA, 무환경) | repo(git clone) | os-use(데스크탑).
+type EnvKind = 'browser' | 'prompt' | 'repo' | 'os-use'
 
 // 감지된 필드명에서 매핑을 추측 — 사용자가 스키마를 몰라도 합리적 기본값을 채워준다.
 function guess(fields: string[], patterns: RegExp[]): string {
@@ -82,6 +84,12 @@ export function BuildFromSourceWizard({
   const [taskField, setTaskField] = useState('')
   const [answerField, setAnswerField] = useState('')
   const [startUrlField, setStartUrlField] = useState('')
+  // env 종류 + repo/이미지/placement 매핑(first-party 카탈로그와 동등한 표현력).
+  const [envKind, setEnvKind] = useState<EnvKind>('browser')
+  const [gitField, setGitField] = useState('')
+  const [refField, setRefField] = useState('')
+  const [image, setImage] = useState('')
+  const [placement, setPlacement] = useState('')
 
   const [previewBusy, setPreviewBusy] = useState(false)
   const [previewError, setPreviewError] = useState<string | undefined>(undefined)
@@ -156,10 +164,17 @@ export function BuildFromSourceWizard({
     }
     setFields(r.fields)
     setRows(r.rows ?? [])
+    const ans = guess(r.fields, [/answer|label|solution|target|gold|output|^a$/i])
+    const url = guess(r.fields, [/start.?url|^url$|web$|site/i])
+    const git = guess(r.fields, [/repo|clone.?url|git.?url|^git$/i])
     setIdField(guess(r.fields, [/^id$/i, /(_|^)id$/i]) || r.fields[0] || '')
     setTaskField(guess(r.fields, [/task|question|ques|query|prompt|instruction|goal|intent|^q$/i]))
-    setAnswerField(guess(r.fields, [/answer|label|solution|target|gold|output|^a$/i]))
-    setStartUrlField(guess(r.fields, [/start.?url|^url$|web$|site/i]))
+    setAnswerField(ans)
+    setStartUrlField(url)
+    setGitField(git)
+    setRefField(guess(r.fields, [/^ref$|base.?commit|commit|revision|sha/i]))
+    // env 기본값 추측: git 필드 있으면 repo, URL 있으면 browser, 정답 있으면 prompt(QA), 아니면 browser.
+    setEnvKind(git ? 'repo' : url ? 'browser' : ans ? 'prompt' : 'browser')
   }
 
   async function onCreate() {
@@ -176,7 +191,13 @@ export function BuildFromSourceWizard({
         idField,
         taskField,
         ...(answerField ? { answerField } : {}),
-        ...(startUrlField ? { startUrlField } : {}),
+        // env 종류별 매핑 — first-party 카탈로그와 동등한 표현력(prompt/repo/os-use/browser).
+        ...(envKind === 'browser' && startUrlField ? { startUrlField } : {}),
+        ...(envKind === 'prompt' ? { promptEnv: true } : {}),
+        ...(envKind === 'os-use' ? { osUseEnv: true } : {}),
+        ...(envKind === 'repo' && gitField ? { gitField, ...(refField ? { refField } : {}) } : {}),
+        ...(image.trim() ? { image: image.trim() } : {}),
+        ...(placement.trim() ? { placement: placement.trim() } : {}),
       },
     }
     const body: Record<string, unknown> = { spec, id, version }
@@ -404,6 +425,22 @@ export function BuildFromSourceWizard({
               fields={fields}
               optional
             />
+            <div className="space-y-1.5">
+              <Label htmlFor="envKind">실행 환경</Label>
+              <Select
+                id="envKind"
+                value={envKind}
+                onChange={(e) => setEnvKind(e.target.value as EnvKind)}
+              >
+                <option value="browser">browser (웹, startUrl)</option>
+                <option value="prompt">prompt (QA, 무환경)</option>
+                <option value="repo">repo (git clone · 코딩)</option>
+                <option value="os-use">os-use (데스크탑)</option>
+              </Select>
+            </div>
+          </div>
+          {/* env 종류별 추가 필드 */}
+          {envKind === 'browser' && (
             <MapField
               label="start URL 필드 (선택 · browser)"
               value={startUrlField}
@@ -411,7 +448,30 @@ export function BuildFromSourceWizard({
               fields={fields}
               optional
             />
-          </div>
+          )}
+          {envKind === 'repo' && (
+            <div className="grid grid-cols-2 gap-3">
+              <MapField
+                label="git repo 필드 (필수 · repo)"
+                value={gitField}
+                onChange={setGitField}
+                fields={fields}
+              />
+              <MapField
+                label="ref/commit 필드 (선택)"
+                value={refField}
+                onChange={setRefField}
+                fields={fields}
+                optional
+              />
+            </div>
+          )}
+          {envKind === 'os-use' && (
+            <p className="text-[12px] text-muted-foreground">
+              os-use 는 데스크탑 이미지에서 실행됩니다 — 아래 3단계에서 케이스 이미지를
+              지정하세요(Xvfb 등 상세 setup 은 레시피/번들 JSON 으로).
+            </p>
+          )}
         </section>
       )}
 
@@ -462,6 +522,27 @@ export function BuildFromSourceWizard({
               />
             </div>
           )}
+          {/* 케이스 컴퓨트 이미지 / placement(런타임 라우팅) — 모든 케이스 공통(선택). os-use/prebuilt 벤치마크용. */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="img">케이스 이미지 (선택)</Label>
+              <Input
+                id="img"
+                value={image}
+                onChange={(e) => setImage(e.target.value)}
+                placeholder="예: my-osworld:latest"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="place">placement target (선택)</Label>
+              <Input
+                id="place"
+                value={placement}
+                onChange={(e) => setPlacement(e.target.value)}
+                placeholder="예: docker"
+              />
+            </div>
+          </div>
 
           {createResult && !createResult.ok && (
             <Callout tone="danger">생성 실패: {createResult.error}</Callout>

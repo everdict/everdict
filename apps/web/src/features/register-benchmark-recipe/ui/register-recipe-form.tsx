@@ -80,8 +80,10 @@ export function RegisterRecipeForm() {
         />
         <p className="text-[12px] leading-relaxed text-muted-foreground">
           source(huggingface/jsonl) + mapping(필드→EvalCase) + 선택적 graderTemplates(
-          <code>{'{field}'}</code> 보간). 버전은 불변입니다 — 같은 (id, version)을 다른 내용으로
-          다시 등록하면 409.
+          <code>{'{field}'}</code> 보간). mapping 은 env 종류도 정합니다 — <code>promptEnv</code>
+          (QA) · <code>gitField</code>/<code>refField</code>(repo) · <code>osUseEnv</code>(데스크탑)
+          · <code>image</code>/<code>placement</code>(케이스 이미지· 런타임). 버전은 불변입니다 —
+          같은 (id, version)을 다른 내용으로 다시 등록하면 409.
         </p>
       </div>
 

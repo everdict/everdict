@@ -44,8 +44,10 @@ tenant **Dataset**. Three ways to add, all member+ (`datasets:write`), all immut
 > as expressive as the first-party code catalog (no field is silently dropped at `.parse()`).
 - **Source wizard (primary)** — `POST /benchmarks/preview` fetches a few raw rows (no mapping) and returns the
   detected **fields** + samples; the web `/dashboard/datasets/import` "소스에서 만들기" wizard auto-guesses the
-  mapping (id/task/answer dropdowns from the real fields), then `POST /benchmarks/import` with an **inline
-  `spec`** registers the dataset in **one action** — no separate recipe step, no hand-written JSON.
+  mapping (id/task/answer dropdowns from the real fields) **plus an env-kind selector** (browser/prompt/repo/
+  os-use → `startUrlField`/`promptEnv`/`gitField`+`refField`/`osUseEnv`) and optional per-case `image`/`placement`,
+  then `POST /benchmarks/import` with an **inline `spec`** registers the dataset in **one action** — no separate
+  recipe step, no hand-written JSON. (The recipe form accepts the same full mapping as raw JSON.)
 - **Catalog** — `GET /benchmarks` lists the first-party code catalog (webvoyager/gaia/swe-bench/mind2web/gsm8k/
   osworld); `POST /benchmarks/import {benchmark}` pulls it.
 - **Recipe** — `POST /benchmark-recipes` saves a reusable `BenchmarkAdapterSpec` (`BenchmarkRegistry`, owner +
