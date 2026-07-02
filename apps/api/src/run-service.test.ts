@@ -71,6 +71,15 @@ describe("RunService", () => {
     expect(jobs[1]?.evalCase.placement).toBeUndefined();
   });
 
+  it("trigger 를 레코드에 기록한다(활동 뷰 source 축) — 미지정이면 미설정", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
+    const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE, trigger: "web" });
+    expect(rec.trigger).toBe("web");
+    const bare = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
+    expect(bare.trigger).toBeUndefined();
+  });
+
   it("셀프호스티드 실행(provenance.ranOn=self-hosted)은 워크스페이스 usd/tokens 버짓을 차감하지 않는다", async () => {
     const store = new InMemoryRunStore();
     const selfHosted: Dispatcher = {

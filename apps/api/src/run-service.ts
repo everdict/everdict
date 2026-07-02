@@ -12,6 +12,8 @@ export interface SubmitInput {
   harness: { id: string; version: string };
   case: EvalCase;
   runtime?: string; // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드(scorecard 와 동일 대칭).
+  // 이 run 의 출처(활동 뷰 source 축): web|mcp|api|… 미지정이면 미설정(직접 API). scorecard 자식은 서비스가 "scorecard" 로 표시.
+  trigger?: string;
   webhookUrl?: string;
   meterUsage?: boolean; // 이 요청만의 계측 override(미지정이면 워크스페이스 정책)
   judge?: JudgeRunConfig; // 이 요청만의 judge 모델 override(미지정이면 워크스페이스 기본)
@@ -68,6 +70,7 @@ export class RunService {
       harness: effective.harness,
       caseId: effective.case.id,
       status: "queued",
+      ...(effective.trigger ? { trigger: effective.trigger } : {}), // 활동 뷰 source 축(web|mcp|api…)
       createdAt: ts,
       updatedAt: ts,
     };

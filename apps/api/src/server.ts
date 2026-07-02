@@ -54,6 +54,7 @@ export const SubmitBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   case: EvalCaseSchema,
   runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드(scorecard 와 동일 대칭).
+  trigger: z.string().optional(), // 이 run 의 출처(활동 뷰 source 축): web|api… (미지정=직접 API). 클라이언트 메타.
   webhookUrl: z.string().url().optional(),
   meterUsage: z.boolean().optional(), // 이 요청만 사용량 계측 override(미지정이면 워크스페이스 정책)
   judge: JudgeRunConfigSchema.optional(), // 이 요청만 judge 모델 override(미지정이면 워크스페이스 기본)

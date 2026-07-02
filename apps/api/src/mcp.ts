@@ -141,6 +141,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           submittedBy: principal.subject, // 비공개 repo 시드를 내 개인 연결로 clone
           harness: { id: harness_id, version: version ?? "latest" },
           case: evalCase,
+          trigger: "mcp", // 활동 뷰 source 축 — 에이전트가 MCP 로 제출
           ...(runtime ? { runtime } : {}),
         });
         return ok(rec);
