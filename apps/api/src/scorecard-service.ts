@@ -26,7 +26,6 @@ import {
   type ScorecardTrend,
   caseVerdict,
   diffScorecards,
-  evalMetric,
   leaderboard,
   runSuite,
   scorecardModels,
@@ -645,5 +644,4 @@ export class ScorecardService {
       } catch {}
     }
   }
-
 }
