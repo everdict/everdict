@@ -1,4 +1,4 @@
-import type { BudgetTracker, Dispatcher } from "@assay/backends";
+import { type BudgetTracker, type Dispatcher, costOf } from "@assay/backends";
 import {
   type AgentJob,
   AppError,
@@ -392,32 +392,38 @@ export class ScorecardService {
         ...(judge ? { judge } : {}),
       };
       const runStore = this.deps.runStore;
-      if (!runStore) return executeCase(this.deps, tenant, owner, enriched);
-      // 자식 run: queued/running 으로 만들고 결과로 갱신. parentScorecardId 태그로 활동 리스트에선 기본 숨김.
-      const childId = this.newId();
-      const ts = this.now();
-      await runStore.create({
-        id: childId,
-        tenant,
-        harness: { id: harnessId, version: harnessVersion },
-        caseId: job.evalCase.id,
-        status: "running",
-        parentScorecardId: id,
-        trigger: "scorecard",
-        createdAt: ts,
-        updatedAt: ts,
-      });
-      caseToChild.set(job.evalCase.id, childId);
+      // 자식 run(있으면): running 으로 생성. parentScorecardId 태그로 활동 리스트에선 기본 숨김.
+      let childId: string | undefined;
+      if (runStore) {
+        childId = this.newId();
+        const ts = this.now();
+        await runStore.create({
+          id: childId,
+          tenant,
+          harness: { id: harnessId, version: harnessVersion },
+          caseId: job.evalCase.id,
+          status: "running",
+          parentScorecardId: id,
+          trigger: "scorecard",
+          createdAt: ts,
+          updatedAt: ts,
+        });
+        caseToChild.set(job.evalCase.id, childId);
+      }
       try {
-        const result = await executeCase(this.deps, tenant, owner, enriched);
-        await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
+        const result = await executeCase(this.deps, owner, enriched);
+        // 셀프호스티드 실행은 유저 자기 로그인이 결제 주체 — 워크스페이스 버짓 미차감(그 외는 비용만큼 settle). 단일 run 과 동일.
+        if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(tenant, costOf(result));
+        if (runStore && childId) await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
         return result;
       } catch (err) {
-        const error =
-          err instanceof AppError
-            ? { code: err.code, message: err.message }
-            : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
-        await runStore.update(childId, { status: "failed", error, updatedAt: this.now() });
+        if (runStore && childId) {
+          const error =
+            err instanceof AppError
+              ? { code: err.code, message: err.message }
+              : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
+          await runStore.update(childId, { status: "failed", error, updatedAt: this.now() });
+        }
         throw err; // runSuite 가 케이스 격리(실패 CaseResult 로 박제)하도록 다시 던진다
       }
     };

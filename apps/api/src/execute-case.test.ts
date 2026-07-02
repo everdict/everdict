@@ -1,6 +1,6 @@
-import { type Dispatcher, inMemoryBudget } from "@assay/backends";
+import type { Dispatcher } from "@assay/backends";
 import type { AgentJob, CaseResult } from "@assay/core";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import { executeCase } from "./execute-case.js";
 
 const JOB: AgentJob = {
@@ -16,15 +16,13 @@ const JOB: AgentJob = {
   tenant: "acme",
 };
 
-function resultFor(job: AgentJob, opts: { usd?: number; selfHosted?: boolean } = {}): CaseResult {
-  const usd = opts.usd ?? 0;
+function resultFor(job: AgentJob): CaseResult {
   return {
     caseId: job.evalCase.id,
     harness: "s@0",
-    trace: usd ? [{ t: 0, kind: "llm_call", model: "m", cost: { inputTokens: 1, outputTokens: 1, usd } }] : [],
+    trace: [],
     snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
     scores: [],
-    ...(opts.selfHosted ? { provenance: { ranOn: "self-hosted", runner: "laptop", by: "u" } } : {}),
   };
 }
 
@@ -41,7 +39,7 @@ const capture = (): { dispatcher: Dispatcher; seen: () => AgentJob | undefined }
   };
 };
 
-describe("executeCase (run/scorecard 공유 per-case 실행 수명)", () => {
+describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", () => {
   it("비공개 repo(git+connectionId) 케이스면 owner 의 토큰을 resolve 해 잡에 attach 한 뒤 dispatch 한다", async () => {
     const cap = capture();
     const gitJob: AgentJob = {
@@ -56,7 +54,6 @@ describe("executeCase (run/scorecard 공유 per-case 실행 수명)", () => {
         dispatcher: cap.dispatcher,
         repoTokenFor: async (owner, cid) => (owner === "alice" && cid === "conn1" ? "tok" : undefined),
       },
-      "acme",
       "alice",
       gitJob,
     );
@@ -65,34 +62,14 @@ describe("executeCase (run/scorecard 공유 per-case 실행 수명)", () => {
 
   it("public/비-repo 케이스는 토큰을 붙이지 않는다(repoTokenFor 있어도)", async () => {
     const cap = capture();
-    await executeCase({ dispatcher: cap.dispatcher, repoTokenFor: async () => "tok" }, "acme", "alice", JOB);
+    await executeCase({ dispatcher: cap.dispatcher, repoTokenFor: async () => "tok" }, "alice", JOB);
     expect(cap.seen()?.repoToken).toBeUndefined();
   });
 
-  it("셀프호스티드 결과는 워크스페이스 버짓을 settle 하지 않고, 관리형 결과는 settle 한다", async () => {
-    const budget = inMemoryBudget({ limitFor: () => ({}) });
-    const settle = vi.spyOn(budget, "settle");
-    const selfHosted: Dispatcher = {
-      async dispatch(job) {
-        return resultFor(job, { usd: 5, selfHosted: true });
-      },
-    };
-    await executeCase({ dispatcher: selfHosted, budget }, "acme", "u", JOB);
-    expect(settle).not.toHaveBeenCalled();
-
-    const managed: Dispatcher = {
-      async dispatch(job) {
-        return resultFor(job, { usd: 5 });
-      },
-    };
-    await executeCase({ dispatcher: managed, budget }, "acme", "u", JOB);
-    expect(settle).toHaveBeenCalledTimes(1);
-  });
-
-  it("admit 은 호출하지 않는다 — 호출부(run submit / scorecard 배치)의 책임", async () => {
-    const budget = inMemoryBudget({ limitFor: () => ({}) });
-    const admit = vi.spyOn(budget, "admit");
-    await executeCase({ dispatcher: capture().dispatcher, budget }, "acme", "u", JOB);
-    expect(admit).not.toHaveBeenCalled();
+  it("결과를 그대로 돌려준다 — 정산/알림/오프로드는 하지 않는다(오케의 몫)", async () => {
+    const cap = capture();
+    const result = await executeCase({ dispatcher: cap.dispatcher }, "u", JOB);
+    expect(result.caseId).toBe("c1");
+    expect(cap.seen()?.evalCase.id).toBe("c1");
   });
 });
