@@ -10,4 +10,5 @@ export {
 } from "./scorecard.js";
 export { trendSeries, type TrendCard, type TrendPoint, type ScorecardTrend } from "./trend.js";
 export { scorecardModels, type ScorecardModels } from "./models.js";
+export { leaderboard, type Leaderboard, type LeaderboardRow, type LeaderboardCard } from "./leaderboard.js";
 export { evalMetric } from "./metric.js";

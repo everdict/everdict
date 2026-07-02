@@ -191,6 +191,7 @@ describe("MCP tools", () => {
       "get_scorecard",
       "heartbeat_job",
       "ingest_scorecard",
+      "leaderboard_scorecards",
       "lease_job",
       "leave_workspace",
       "list_api_keys",
@@ -603,6 +604,17 @@ describe("MCP tools", () => {
     const notFound = await beta.callTool({ name: "get_scorecard", arguments: { id } });
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
+
+    // 리더보드: 방금 완료한 스코어카드가 (harness×model) 한 행으로 랭킹된다(워크스페이스 스코프).
+    const lb = await member.callTool({
+      name: "leaderboard_scorecards",
+      arguments: { dataset: "smoke", metric: "steps" },
+    });
+    expect(lb.isError).toBeFalsy();
+    const board = JSON.parse(text(lb)) as { dataset: string; rows: Array<{ rank: number; harness: { id: string } }> };
+    expect(board.dataset).toBe("smoke");
+    expect(board.rows[0]?.rank).toBe(1);
+    expect(board.rows[0]?.harness.id).toBe("scripted");
   });
 
   it("schedules: member 가 예약 생성·조회·pause·삭제; viewer 는 생성 권한오류; 타 ws 는 NOT_FOUND", async () => {

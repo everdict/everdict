@@ -79,6 +79,28 @@ describe("ScorecardService.diff", () => {
   });
 });
 
+describe("ScorecardService.leaderboard", () => {
+  // judge passRate + primary model 을 가진 완료 스코어카드.
+  const scored = (id: string, harnessVersion: string, model: string, passRate: number): Partial<ScorecardRecord> => ({
+    harness: { id: "h", version: harnessVersion },
+    summary: [{ metric: "judge", count: 10, mean: passRate, passRate }],
+    models: { observed: [model], primary: model },
+  });
+
+  it("한 데이터셋의 (harness × model) 을 metric 내림차순으로 랭킹하고 워크스페이스로 스코프한다", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(record("a", scored("a", "1", "gpt-5", 0.6)));
+    await store.create(record("b", scored("b", "2", "claude-opus-4-8", 0.9)));
+    await store.create(record("other", { ...scored("other", "2", "x", 1.0), tenant: "beta" })); // 타 워크스페이스
+    const lb = await svc(store).leaderboard("acme", { datasetId: "d", metric: "judge" });
+    expect(lb.rows.map((r) => [r.rank, r.harness.version, r.model, r.score])).toEqual([
+      [1, "2", "claude-opus-4-8", 0.9],
+      [2, "1", "gpt-5", 0.6],
+    ]);
+    expect(lb.rows.some((r) => r.model === "x")).toBe(false); // beta 워크스페이스 제외
+  });
+});
+
 // 한 케이스(c1)만 가진 데이터셋. pull 인제스트 정렬 대상.
 const datasetWithCase = (): Dataset => ({
   id: "d",

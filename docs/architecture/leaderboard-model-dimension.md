@@ -1,6 +1,6 @@
 # Leaderboard — model as a first-class dimension (harness × model × benchmark)
 
-> **Status: Slice 1 SHIPPED (code + gates green: format/lint/typecheck/test on suite·db·api). Slices 2–3 pending.**
+> **Status: Slices 1–2 SHIPPED (code + gates green: format/lint/typecheck/test on suite·db·api). Slice 3 (web) pending.**
 > Decisions locked with the user:
 > **(1) model source = observed-first (trace `llm_call.model`) + declared fallback (spec `model`), store both;
 > (2) first view = per-benchmark leaderboard ranking (harness × model).**
@@ -134,9 +134,12 @@ leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, mod
    (db) + mig 0028 (additive `models jsonb`) + Pg read/write/**list** + wire into `track`/`finishIngest`. New
    runs record observed+declared+primary; `list`/`get` expose it. Tests: `models.test.ts` (6), extended
    `scorecard-store.test.ts` (models round-trip + list), `scorecard-service.test.ts` (observed capture on submit).
-2. **Leaderboard core + surface** — `leaderboard` (suite) + `ScorecardService.leaderboard` +
-   `GET /scorecards/leaderboard` + `leaderboard_scorecards` MCP + `scorecards:read` gate. Rank harness×model on a
-   dataset. *(Service unit-tested with fake store; BFF↔MCP parity.)*
+2. ✅ **Leaderboard core + surface** — `leaderboard` (suite; groups (harness@version × models.primary), window
+   latest/best, ranks by `summary[metric].passRate ?? mean`) + `ScorecardService.leaderboard` +
+   `GET /scorecards/leaderboard?dataset=&metric=&harness?=&model?=&window?=` (static, before `:id`) +
+   `leaderboard_scorecards` MCP + `scorecards:read` gate. Tests: `leaderboard.test.ts` (7), service scoping,
+   `server.test.ts` route (dataset-missing 400 + run-collapse), `mcp.test.ts` (tool-list + functional).
+   *(No `trend` MCP tool exists today — pre-existing parity gap, out of scope; leaderboard ships full parity.)*
 3. **Web** — leaderboard page (dataset+metric picker → ranked table + model/drift badges) + model column on
    list/detail/compare.
 

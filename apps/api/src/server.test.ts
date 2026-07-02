@@ -1417,6 +1417,40 @@ describe("API — scorecards (dataset×harness 배치 평가)", () => {
     await app.close();
   });
 
+  it("leaderboard: 한 dataset 의 (harness×model) 랭킹; 같은 harness 의 두 run 은 한 행으로 접힘; dataset 누락 400", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    await app.inject({ method: "POST", url: "/datasets", headers: h, payload: DATASET });
+    const runOne = async () => {
+      const post = await app.inject({
+        method: "POST",
+        url: "/scorecards",
+        headers: h,
+        payload: { dataset: { id: "smoke" }, harness: { id: "scripted" } },
+      });
+      await pollScorecard(app, post.json().id, h);
+    };
+    await runOne();
+    await runOne();
+
+    expect(
+      (await app.inject({ method: "GET", url: "/scorecards/leaderboard?metric=steps", headers: h })).statusCode, // dataset 누락
+    ).toBe(400);
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/scorecards/leaderboard?dataset=smoke&metric=steps",
+      headers: h,
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.dataset).toBe("smoke");
+    expect(body.rows).toHaveLength(1); // 같은 harness×model → 한 행
+    expect(body.rows[0].rank).toBe(1);
+    expect(body.rows[0].runs).toBe(2); // 두 run 이 접힘
+    await app.close();
+  });
+
   it("metrics: 등록한 threshold metric 이 run 후 scores 에 post-hoc 적용된다(steps<=5 → pass)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };

@@ -116,15 +116,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   server.registerTool(
     "submit_run",
     {
-      description: "평가 run 제출(repo 빈 시드 + 기본 그레이더). harness 는 id@version(기본 latest).",
+      description:
+        "평가 run 제출(repo 빈 시드 + 기본 그레이더). harness 는 id@version(기본 latest). runtime 지정 시 그 런타임에서 실행.",
       inputSchema: {
         harness_id: z.string(),
         version: z.string().optional(),
         task: z.string(),
+        runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
         timeout_sec: z.number().int().positive().optional(),
       },
     },
-    ({ harness_id, version, task, timeout_sec }) =>
+    ({ harness_id, version, task, runtime, timeout_sec }) =>
       run(principal, "runs:submit", async () => {
         const evalCase = EvalCaseSchema.parse({
           id: `mcp-${Date.now().toString(36)}`,
@@ -139,6 +141,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           submittedBy: principal.subject, // 비공개 repo 시드를 내 개인 연결로 clone
           harness: { id: harness_id, version: version ?? "latest" },
           case: evalCase,
+          ...(runtime ? { runtime } : {}),
         });
         return ok(rec);
       }),
@@ -654,6 +657,33 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ baseline, candidate }) =>
         run(principal, "scorecards:read", async () => ok(await scorecards.diff(ws, baseline, candidate))),
+    );
+
+    server.registerTool(
+      "leaderboard_scorecards",
+      {
+        description:
+          "한 데이터셋(벤치마크)의 (harness × model) 랭킹 — metric 기준 내림차순. window=latest(기본)|best. harness/model 필터 선택.",
+        inputSchema: {
+          dataset: z.string(),
+          metric: z.string().optional(),
+          harness: z.string().optional(),
+          model: z.string().optional(),
+          window: z.enum(["latest", "best"]).optional(),
+        },
+      },
+      ({ dataset, metric, harness, model, window }) =>
+        run(principal, "scorecards:read", async () =>
+          ok(
+            await scorecards.leaderboard(ws, {
+              datasetId: dataset,
+              metric: metric ?? "judge",
+              ...(harness ? { harnessId: harness } : {}),
+              ...(model ? { model } : {}),
+              window: window ?? "latest",
+            }),
+          ),
+        ),
     );
 
     server.registerTool(

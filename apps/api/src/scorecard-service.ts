@@ -24,11 +24,13 @@ import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry, MetricReg
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
 import {
   type Dispatch,
+  type Leaderboard,
   type ScorecardDiff,
   type ScorecardTrend,
   caseVerdict,
   diffScorecards,
   evalMetric,
+  leaderboard,
   runSuite,
   scorecardModels,
   summarizeScorecard,
@@ -267,6 +269,16 @@ export class ScorecardService {
   ): Promise<ScorecardTrend> {
     const records = await this.deps.store.list(tenant);
     return trendSeries(records, opts);
+  }
+
+  // 벤치마크(dataset)별 리더보드 — 한 데이터셋의 스코어카드들을 (harness × model) 로 그룹핑해 metric 기준 랭킹.
+  // 목록(경량 summary+models)만으로 계산 — 무거운 트레이스 불필요. ScorecardRecord 가 LeaderboardCard 를 구조적으로 만족.
+  async leaderboard(
+    tenant: string,
+    opts: { datasetId: string; metric: string; harnessId?: string; model?: string; window?: "latest" | "best" },
+  ): Promise<Leaderboard> {
+    const records = await this.deps.store.list(tenant);
+    return leaderboard(records, opts);
   }
 
   // 워크스페이스 스코프 + 완료(scorecard 존재) 보장. 없으면 404(존재 누출 금지), 미완료면 400.
