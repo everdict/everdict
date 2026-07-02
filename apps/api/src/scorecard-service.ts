@@ -195,8 +195,17 @@ export class ScorecardService {
     return record;
   }
 
-  get(id: string): Promise<ScorecardRecord | undefined> {
-    return this.deps.store.get(id);
+  // dispatched 스코어카드는 무거운 scorecard(케이스 결과)를 embed 하지 않고 runIds 만 저장(저장 dedup) →
+  // get 에서 자식 run 의 최종 결과로 scorecard 를 hydrate 한다(응답 형태·웹·diff 는 embed 시절과 동일).
+  // embed 가 이미 있으면(no-runStore / ingest / 구 레코드) 그대로 반환. runStore 미설정이면 hydrate 불가 → 그대로.
+  async get(id: string): Promise<ScorecardRecord | undefined> {
+    const record = await this.deps.store.get(id);
+    if (!record || record.scorecard || !record.runIds?.length || !this.deps.runStore) return record;
+    const children = await this.deps.runStore.list(record.tenant, { scorecardId: id });
+    const results = children.map((c) => c.result).filter((r): r is CaseResult => r !== undefined);
+    if (results.length === 0) return record;
+    const harness = `${record.harness.id}@${record.harness.version}`;
+    return { ...record, scorecard: { suiteId: record.dataset.id, harness, results } };
   }
 
   list(tenant?: string): Promise<ScorecardRecord[]> {
@@ -302,7 +311,7 @@ export class ScorecardService {
 
   // 워크스페이스 스코프 + 완료(scorecard 존재) 보장. 없으면 404(존재 누출 금지), 미완료면 400.
   private async requireSucceeded(tenant: string, id: string): Promise<Scorecard> {
-    const record = await this.deps.store.get(id);
+    const record = await this.get(id); // get 이 dedup 저장을 자식 run 으로 hydrate — diff 는 embed/reference 무관하게 동작
     if (!record || record.tenant !== tenant)
       throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' 를 찾을 수 없습니다.`);
     if (!record.scorecard)
@@ -312,6 +321,17 @@ export class ScorecardService {
         `scorecard '${id}' 가 아직 완료되지 않았습니다(status=${record.status}).`,
       );
     return record.scorecard;
+  }
+
+  // 배치 judge/metric/offload 로 최종화된 케이스 결과를 각 자식 run 에 반영한다(embed 를 저장하지 않으므로 get 이
+  // hydrate 할 원천이 최신이어야 한다). caseId → childId 매핑으로 결과를 해당 run 에 update.
+  private async writeBackResults(caseToChild: Map<string, string>, results: CaseResult[]): Promise<void> {
+    const store = this.deps.runStore;
+    if (!store) return;
+    for (const r of results) {
+      const childId = caseToChild.get(r.caseId);
+      if (childId) await store.update(childId, { result: r, updatedAt: this.now() });
+    }
   }
 
   private async track(
@@ -335,8 +355,8 @@ export class ScorecardService {
       steps.push({ ts: this.now(), phase: p, status, message, ...(caseId ? { caseId } : {}) });
     };
     const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
-    // 이 배치가 팬아웃한 자식 run id 들(runStore 설정 시). 완료 후 스코어카드 레코드에 참조로 저장한다.
-    const childRunIds: string[] = [];
+    // 이 배치가 팬아웃한 자식 run: caseId → childId(runStore 설정 시). 완료 후 최종 결과 write-back + runIds 참조 저장에 쓴다.
+    const caseToChild = new Map<string, string>();
     // 각 케이스 디스패치: budget admit(배치라 per-case) 후 tenant/spec/judge 를 잡에 enrich.
     // 비공개 repo 토큰 resolve+attach → dispatch → settle 은 단일 run 과 공유하는 executeCase 가 담당(중복 회계 없음).
     // runStore 설정 시 케이스마다 자식 run(RunRecord)을 만들어 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
@@ -366,7 +386,7 @@ export class ScorecardService {
         createdAt: ts,
         updatedAt: ts,
       });
-      childRunIds.push(childId);
+      caseToChild.set(job.evalCase.id, childId);
       try {
         const result = await executeCase(this.deps, tenant, owner, enriched);
         await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
@@ -434,13 +454,16 @@ export class ScorecardService {
       const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
       const models = scorecardModels(scorecard, declared);
       pushStep("persist", "ok", "집계·저장 완료");
+      // 자식 run 이 있으면: judge/metric/offload 로 최종화된 결과를 자식에 write-back 후 무거운 embed 대신 runIds 만 저장
+      //  → get 이 자식에서 hydrate(저장 dedup, 응답 형태 불변). 자식이 없으면(no runStore) 현행대로 embed 저장.
+      const hasChildren = caseToChild.size > 0;
+      if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
       await this.deps.store.update(id, {
         status: "succeeded",
-        scorecard,
         summary,
         models,
         steps: [...steps],
-        ...(childRunIds.length ? { runIds: childRunIds } : {}), // 팬아웃한 자식 run 참조(있으면)
+        ...(hasChildren ? { runIds: [...caseToChild.values()] } : { scorecard }),
         updatedAt: this.now(),
       });
     } catch (err) {
@@ -450,16 +473,20 @@ export class ScorecardService {
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
       pushStep(phase, "failed", base.message);
       // 부분 결과 보존 — dispatch 이후(judge/metric/offload) 실패면 이미 모인 케이스 결과를 같이 저장해 가시성을 남긴다.
+      // 자식 run 이 있으면 success 경로와 동일하게 embed 대신 runIds 참조(부분) + 자식에 결과 write-back.
+      const hasChildren = caseToChild.size > 0;
+      if (scorecard && hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
+      const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
       await this.deps.store.update(id, {
         status: "failed",
         error: { ...base, phase },
         steps: [...steps],
-        ...(childRunIds.length ? { runIds: childRunIds } : {}), // 부분 팬아웃한 자식 run 참조(있으면)
+        ...(hasChildren ? { runIds: [...caseToChild.values()] } : {}),
         ...(scorecard
           ? {
-              scorecard,
               summary: summarizeScorecard(scorecard),
-              models: scorecardModels(scorecard, harnessSpec?.kind === "command" ? harnessSpec.model : undefined),
+              models: scorecardModels(scorecard, declared),
+              ...(hasChildren ? {} : { scorecard }), // 자식 있으면 embed 생략(get 이 hydrate)
             }
           : {}),
         updatedAt: this.now(),

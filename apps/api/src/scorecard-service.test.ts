@@ -469,6 +469,7 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
     const rec = await waitTerminal(store, "sc-0");
     expect(rec.status).toBe("succeeded");
     expect(rec.runIds).toEqual(["sc-1"]); // 팬아웃한 자식 run 참조
+    expect(rec.scorecard).toBeUndefined(); // 저장 dedup — 무거운 embed 는 저장하지 않는다(runIds 만)
 
     const child = await runStore.get("sc-1");
     expect(child?.status).toBe("succeeded");
@@ -476,9 +477,67 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
     expect(child?.trigger).toBe("scorecard");
     expect(child?.caseId).toBe("c1");
 
+    // get 은 자식 run 으로 scorecard 를 hydrate — 응답 형태는 embed 시절과 동일(웹/diff 불변).
+    const hydrated = await service.get("sc-0");
+    expect(hydrated?.scorecard?.results).toHaveLength(1);
+    expect(hydrated?.scorecard?.results[0]?.caseId).toBe("c1");
+    // write-back 으로 케이스 점수(grader/judge/metric)가 자식에 보존 → hydrate 시 그대로 돌아온다.
+    expect(hydrated?.scorecard?.results[0]?.scores[0]?.metric).toBe("tests_pass");
+
     // 활동 리스트(기본)는 자식을 숨기고, scorecardId 로는 그 배치 자식이 보인다.
     expect(await runStore.list("acme")).toEqual([]);
     expect((await runStore.list("acme", { scorecardId: "sc-0" })).map((r) => r.id)).toEqual(["sc-1"]);
+  });
+
+  it("diff 는 dedup(runIds) 스코어카드도 hydrate 해서 회귀/개선을 계산한다", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    // pass 를 바꾸는 dispatcher — base 는 pass, cand 는 fail(회귀).
+    const dispatchPass = (pass: boolean): Dispatcher => ({
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tests-pass", metric: "tests-pass", value: pass ? 1 : 0, pass }],
+        };
+      },
+    });
+    // 서비스별 독립 카운터 — base 스코어카드=b-0(+자식 b-1), cand 스코어카드=c-0(+자식 c-1).
+    let bn = 0;
+    let cn = 0;
+    const base = new ScorecardService({
+      dispatcher: dispatchPass(true),
+      store,
+      runStore,
+      datasets,
+      newId: () => `b-${bn++}`,
+    });
+    await base.submit({ tenant: "acme", dataset: { id: "d", version: "1.0.0" }, harness: { id: "s", version: "0" } });
+    await waitTerminal(store, "b-0");
+    const cand = new ScorecardService({
+      dispatcher: dispatchPass(false),
+      store,
+      runStore,
+      datasets,
+      newId: () => `c-${cn++}`,
+    });
+    await cand.submit({ tenant: "acme", dataset: { id: "d", version: "1.0.0" }, harness: { id: "s", version: "0" } });
+    await waitTerminal(store, "c-0");
+
+    // 두 스코어카드 모두 embed 없이 runIds 만 저장됐지만, diff 는 hydrate 해서 pass→fail 회귀를 잡는다.
+    const diff = await base.diff("acme", "b-0", "c-0");
+    expect(diff.regressions).toContainEqual({
+      caseId: "c1",
+      metric: "tests-pass",
+      baseline: 1,
+      candidate: 0,
+      delta: -1,
+      passChange: "broke",
+    });
   });
 
   it("runStore 미설정이면 자식 run 없이 임베드 scorecard 만(현행 유지)", async () => {
