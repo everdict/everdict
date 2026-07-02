@@ -25,9 +25,12 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
 — when a `runStore` is wired — each case also becomes an addressable child `RunRecord`
 (`parentScorecardId` = this scorecard, `trigger: "scorecard"`, full trace/usage/provenance). The scorecard
 records their ids in `runIds`. Child runs are **hidden from the default run/activity list**
-(`RunStore.list` filters `parentScorecardId IS NULL`); fetch a batch's children with `list(tenant, {scorecardId})`.
-The heavy per-case `scorecard` results are still embedded too (dual: embed + reference). See
-`docs/architecture/run-as-primitive.md`.
+(`RunStore.list` filters `parentScorecardId IS NULL`); fetch a batch's children with `list(tenant, {scorecardId})`
+(`GET /runs?scorecardId=` / MCP `list_runs scorecard_id`), which powers the scorecard detail's case→run drill-down.
+**Storage is deduped**: a dispatched scorecard stores `runIds` only (not the heavy `scorecard` embed) — `track`
+writes the final (post-judge/metric/offload) results back to the child runs, and `ScorecardService.get` **hydrates**
+the `scorecard` from them, so the response shape, web, and diff are unchanged. `no-runStore` runs, ingest paths, and
+old records keep the embed. See `docs/architecture/run-as-primitive.md`.
 
 Runs are **async**: submit returns a `queued` record; poll until terminal. Normal eval failures produce
 `CaseResult`s (the batch still succeeds); only infra/budget errors fail the whole run.

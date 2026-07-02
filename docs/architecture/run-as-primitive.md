@@ -18,11 +18,17 @@
 > eval-results table into an **activity console** — dropped the noise-y per-run score column, added **출처(trigger)**
 > + **비용(usage)** columns, live `AutoRefresh` while any run is active, children hidden (server-side default).
 >
-> **Open follow-ups** (not done): scorecard detail **case→child-run drill-down** UI (uses `runIds` +
-> `list(tenant,{scorecardId})`); optional **unified activity feed** (merge scorecard runs in as groups — option B);
-> optionally cutting `ScorecardRecord.scorecard` embed over to pure `runIds` reference (currently dual: still embeds
-> results AND records `runIds`). Ingest paths (`/scorecards/ingest{,/pull}`) keep embed-only (no dispatched run) —
-> `runIds` stays null there, as designed.
+> **Follow-ups SHIPPED:**
+> - **#1 case→child-run drill-down** (`2f7aac2`): `RunService.list(tenant,{scorecardId})` + `GET /runs?scorecardId=`
+>   + MCP `list_runs scorecard_id`; scorecard detail links each case → its child run (best-effort; old/ingest = no link).
+> - **#2 unified activity feed** (`1a47bfc`): the activity page merges standalone runs + scorecard batches into one
+>   `updatedAt`-sorted timeline (`ActivityFeed` widget, type badge, each → its detail). `/scorecards` list unchanged.
+> - **#3 embed→runIds dedup + hydrate** (`ba98a8c`): dispatched scorecards store `runIds` only (not the heavy
+>   `scorecard` embed); `track` writes final (post-judge/metric/offload) results back to child runs, and
+>   `ScorecardService.get` hydrates `scorecard` from them → response shape, web, and diff are all unchanged.
+>   `no-runStore` / ingest / old records keep the embed (get returns it as-is).
+>
+> **Fully done.** Ingest paths (`/scorecards/ingest{,/pull}`) keep embed-only (no dispatched run) by design.
 
 ## Problem — the primitive is weaker than the composite (inverted)
 
