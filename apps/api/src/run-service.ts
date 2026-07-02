@@ -1,8 +1,8 @@
-import type { Dispatcher } from "@assay/backends";
-import { type BudgetTracker, costOf } from "@assay/backends";
+import type { BudgetTracker, Dispatcher } from "@assay/backends";
 import { type AgentJob, AppError, type EvalCase, type HarnessSpec, type JudgeRunConfig } from "@assay/core";
 import type { RunRecord, RunStore } from "@assay/db";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
+import { executeCase } from "./execute-case.js";
 
 export interface SubmitInput {
   tenant: string;
@@ -95,8 +95,6 @@ export class RunService {
       input.meterUsage ?? (this.deps.meterUsageFor ? await this.deps.meterUsageFor(input.tenant) : false);
     // judge 모델: 요청 override → 워크스페이스 기본(DB) → 없음(judge grader 는 skip). 키는 백엔드가 secretEnv 로 주입.
     const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
-    // 비공개 repo 시드: env.source.connectionId 가 있으면 제출자의 개인 연결 토큰을 resolve 해 잡에 transient 로 싣는다.
-    const repoToken = await this.resolveRepoToken(input.submittedBy ?? input.tenant, input.case);
     const job: AgentJob = {
       evalCase: input.case,
       harness: input.harness,
@@ -105,12 +103,11 @@ export class RunService {
       ...(input.submittedBy ? { submittedBy: input.submittedBy } : {}),
       ...(harnessSpec ? { harnessSpec } : {}),
       ...(judge ? { judge } : {}),
-      ...(repoToken ? { repoToken } : {}),
     };
     try {
-      const result = await this.deps.dispatcher.dispatch(job);
-      // 셀프호스티드 실행은 유저 자기 구독 로그인이 결제 주체 — 워크스페이스 usd/tokens 버짓을 끌어쓰지 않는다(runs 는 admit 에서 이미 카운트).
-      if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(input.tenant, costOf(result));
+      // per-case 실행 수명(비공개 repo 토큰 resolve+attach → dispatch → settle)은 scorecard 와 공유하는 executeCase 가 담당.
+      // admit 은 submit 에서 이미 동기로 카운트했으므로 여기선 중복 admit 하지 않는다(executeCase 도 admit 안 함).
+      const result = await executeCase(this.deps, input.tenant, input.submittedBy ?? input.tenant, job);
       // os-use 스크린샷(동봉 base64)을 object storage 로 오프로드 → 레코드엔 URL 만(슬림). 실패해도 run 은 성공(폴백: base64 유지).
       if (this.deps.artifacts && result.snapshot) {
         try {
@@ -131,16 +128,6 @@ export class RunService {
       if (rec) await this.deps.onComplete(input.tenant, rec).catch(() => {});
     }
     if (input.webhookUrl) await this.fireWebhook(input.webhookUrl, id);
-  }
-
-  // repo 시드가 비공개(git + connectionId)면 owner(제출자 subject)의 개인 연결 토큰을 resolve. public/비-repo/미설정이면 undefined.
-  private async resolveRepoToken(owner: string, evalCase: EvalCase): Promise<string | undefined> {
-    if (!this.deps.repoTokenFor) return undefined;
-    const env = evalCase.env;
-    if (env.kind !== "repo") return undefined;
-    const src = env.source;
-    if (!("git" in src) || !src.connectionId) return undefined;
-    return this.deps.repoTokenFor(owner, src.connectionId).catch(() => undefined);
   }
 
   private async fireWebhook(url: string, id: string): Promise<void> {
