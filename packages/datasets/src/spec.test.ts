@@ -71,6 +71,62 @@ describe("BenchmarkAdapterSpec (데이터 정의)", () => {
     expect(a.source).toEqual({ kind: "jsonl" });
   });
 
+  it("prompt/image/placement 매핑이 레시피에 보존되어 first-party 없이도 그 케이스를 만든다(self-serve 완전성)", async () => {
+    const spec = BenchmarkAdapterSpecSchema.parse({
+      id: "qa-full",
+      version: "1.0.0",
+      source: { kind: "jsonl" },
+      mapping: {
+        idField: "id",
+        taskField: "q",
+        answerField: "a",
+        answerMode: "exact",
+        promptEnv: true,
+        image: "my-img:1",
+        placement: "docker",
+      },
+    });
+    expect(spec.mapping.promptEnv).toBe(true); // Zod 가 strip 하지 않는다
+    expect(spec.mapping.placement).toBe("docker");
+    const ds = await importFromSpec(
+      spec,
+      { id: "qa-full", version: "1.0.0" },
+      { text: '{"id":"r1","q":"2+2?","a":"4"}' },
+    );
+    const c = ds.cases[0];
+    expect(c?.env).toEqual({ kind: "prompt" }); // 브라우저 기본값이 아니라 prompt env
+    expect(c?.image).toBe("my-img:1");
+    expect(c?.placement).toEqual({ target: "docker" });
+    expect(c?.graders).toContainEqual({ id: "answer-match", config: { expect: "4", mode: "exact" } });
+  });
+
+  it("osUseEnv 매핑이 os-use env 를 만든다(레시피로 OSWorld 류도 self-serve)", async () => {
+    const spec = BenchmarkAdapterSpecSchema.parse({
+      id: "osworld-ish",
+      version: "1.0.0",
+      source: { kind: "jsonl" },
+      mapping: {
+        idField: "id",
+        taskField: "q",
+        osUseEnv: true,
+        osUseSetup: ["Xvfb :99 & sleep 2"],
+        display: ":99",
+        screenshotPath: "/tmp/s.png",
+      },
+    });
+    const ds = await importFromSpec(
+      spec,
+      { id: "osworld-ish", version: "1.0.0" },
+      { text: '{"id":"o1","q":"open settings"}' },
+    );
+    expect(ds.cases[0]?.env).toEqual({
+      kind: "os-use",
+      display: ":99",
+      setup: ["Xvfb :99 & sleep 2"],
+      screenshotPath: "/tmp/s.png",
+    });
+  });
+
   it("jsonl 소스 스펙: opts.text 로 인입", async () => {
     const spec = BenchmarkAdapterSpecSchema.parse({
       id: "j",

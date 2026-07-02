@@ -38,6 +38,10 @@ Datasets reuse the **`HarnessRegistry` ownership model** (`packages/registry`):
 A benchmark = a `BenchmarkAdapterSpec` (`@assay/datasets`): `source` (HuggingFace dataset or jsonl) + `mapping`
 (which fields become a case's id/task/answer/…) + optional `graderTemplates`. `BenchmarkService` turns one into a
 tenant **Dataset**. Three ways to add, all member+ (`datasets:write`), all immutable-on-register:
+> `CaseMappingSchema` is **isomorphic to the internal `CaseMapping`** — a tenant recipe can pick the env kind
+> (`promptEnv` QA / `gitField`+`refField` or `repoPath` repo / `osUseEnv`+`osUseSetup`+`display`+`screenshotPath`
+> os-use / else browser) plus per-case `imageField`/`image` and `placement`, so recipe-registered benchmarks are
+> as expressive as the first-party code catalog (no field is silently dropped at `.parse()`).
 - **Source wizard (primary)** — `POST /benchmarks/preview` fetches a few raw rows (no mapping) and returns the
   detected **fields** + samples; the web `/dashboard/datasets/import` "소스에서 만들기" wizard auto-guesses the
   mapping (id/task/answer dropdowns from the real fields), then `POST /benchmarks/import` with an **inline

@@ -7,15 +7,26 @@ import { type FetchLike, fetchHfRows } from "./sources.js";
 // 벤치마크 정의를 JSON 직렬화 가능한 "데이터"로 — 테넌트가 자기 워크스페이스에 등록/버전관리하는 레시피.
 // first-party 카탈로그 어댑터(코드: rowTransform/graderBuilder)와 달리, 이 spec 은 순수 데이터라 레지스트리에 저장 가능.
 
-// 매핑 규칙(데이터). mapping.ts 의 CaseMapping 인터페이스와 동형(여기선 Zod 로 검증/저장 가능하게).
+// 매핑 규칙(데이터). mapping.ts 의 CaseMapping 인터페이스와 **동형** — 이 스키마가 좁으면 유저 레시피는
+// first-party 카탈로그 코드가 쓰는 env 종류(prompt/os-use)·image·placement 를 못 쓰고 조용히 브라우저 env 로
+// 떨어진다(Zod 가 미지정 키를 strip). 그래서 CaseMapping 의 모든 필드를 여기 노출한다(self-serve 완전성).
 export const CaseMappingSchema = z.object({
   idField: z.string(),
   taskField: z.string(),
   startUrlField: z.string().optional(),
+  promptEnv: z.boolean().optional(), // true → prompt env(QA — gsm8k/GAIA). git/repoPath 가 우선.
   answerField: z.string().optional(),
   answerMode: z.enum(["contains", "exact"]).optional(),
   gitField: z.string().optional(),
   refField: z.string().optional(),
+  repoPath: z.string().optional(), // 이미지-내 repo(예: SWE-bench "/testbed") — clone 안 함
+  osUseEnv: z.boolean().optional(), // true → os-use(데스크탑) env — OSWorld 류
+  osUseSetup: z.array(z.string()).optional(), // os-use env.setup(Xvfb 기동 등)
+  display: z.string().optional(), // os-use display(기본 ":99")
+  screenshotPath: z.string().optional(), // os-use 스냅샷 경로(VLM judge)
+  imageField: z.string().optional(), // 행별 컴퓨트 이미지 필드
+  image: z.string().optional(), // 공통 컴퓨트 이미지(imageField 가 행별로 우선)
+  placement: z.string().optional(), // 모든 케이스 placement.target(예: "docker")
   testCmdField: z.string().optional(),
   tagFields: z.array(z.string()).optional(),
   extraGraders: z.array(GraderSpecSchema).optional(),
