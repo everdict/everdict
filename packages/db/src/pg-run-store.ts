@@ -1,5 +1,5 @@
 import type { SqlClient } from "./client.js";
-import { type RunRecord, RunRecordSchema, type RunStore, withRunUsage } from "./run-store.js";
+import { type RunListOptions, type RunRecord, RunRecordSchema, type RunStore, withRunUsage } from "./run-store.js";
 
 interface RunRow {
   id: string;
@@ -10,6 +10,8 @@ interface RunRow {
   status: string;
   result: unknown;
   error: unknown;
+  parent_scorecard_id: string | null;
+  trigger: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -26,6 +28,8 @@ function rowToRecord(row: RunRow): RunRecord {
     status: row.status,
     result: row.result ?? undefined,
     error: row.error ?? undefined,
+    parentScorecardId: row.parent_scorecard_id ?? undefined,
+    trigger: row.trigger ?? undefined,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -39,8 +43,8 @@ export class PgRunStore implements RunStore {
   async create(r: RunRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO assay_runs
-        (id, tenant, harness_id, harness_version, case_id, status, result, error, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+        (id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
       [
         r.id,
         r.tenant,
@@ -50,6 +54,8 @@ export class PgRunStore implements RunStore {
         r.status,
         r.result ? JSON.stringify(r.result) : null,
         r.error ? JSON.stringify(r.error) : null,
+        r.parentScorecardId ?? null,
+        r.trigger ?? null,
         r.createdAt,
         r.updatedAt,
       ],
@@ -91,12 +97,14 @@ export class PgRunStore implements RunStore {
     return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
   }
 
-  async list(tenant?: string): Promise<RunRecord[]> {
+  async list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]> {
+    // scorecardId 지정 → 그 배치 자식만; 아니면 standalone(부모 없는) run 만(자식 숨김 → 활동 리스트 범람 방지).
     const res = await this.client.query<RunRow>(
       `SELECT * FROM assay_runs
        WHERE ($1::text IS NULL OR tenant = $1)
+         AND (($2::text IS NULL AND parent_scorecard_id IS NULL) OR parent_scorecard_id = $2)
        ORDER BY created_at DESC, id DESC`,
-      [tenant ?? null],
+      [tenant ?? null, opts?.scorecardId ?? null],
     );
     return res.rows.map(rowToRecord);
   }

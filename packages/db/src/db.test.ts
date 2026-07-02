@@ -133,6 +133,39 @@ describe("InMemoryRunStore — usage 파생", () => {
   });
 });
 
+describe("InMemoryRunStore — scorecard 자식 run 필터", () => {
+  const mk = (id: string, extra: Partial<RunRecord>): RunRecord => ({
+    id,
+    tenant: "acme",
+    harness: { id: "s", version: "0" },
+    caseId: "c1",
+    status: "succeeded",
+    createdAt: "t",
+    updatedAt: "t",
+    ...extra,
+  });
+
+  it("기본 list 는 standalone 만(자식 숨김); scorecardId 옵션은 그 배치 자식만", async () => {
+    const store = new InMemoryRunStore();
+    await store.create(mk("run-solo", {}));
+    await store.create(mk("run-child-a", { parentScorecardId: "sc1", trigger: "scorecard" }));
+    await store.create(mk("run-child-b", { parentScorecardId: "sc1", trigger: "scorecard" }));
+    await store.create(mk("run-child-c", { parentScorecardId: "sc2", trigger: "scorecard" }));
+
+    // 활동 리스트(기본)는 자식 3개를 숨기고 standalone 만 보인다(범람 방지).
+    expect((await store.list("acme")).map((r) => r.id)).toEqual(["run-solo"]);
+
+    // 스코어카드 상세의 케이스 드릴다운: 그 배치의 자식만.
+    const sc1 = await store.list("acme", { scorecardId: "sc1" });
+    expect(sc1.map((r) => r.id).sort()).toEqual(["run-child-a", "run-child-b"]);
+
+    // 자식 레코드는 parentScorecardId/trigger 를 라운드트립한다.
+    const child = await store.get("run-child-a");
+    expect(child?.parentScorecardId).toBe("sc1");
+    expect(child?.trigger).toBe("scorecard");
+  });
+});
+
 describe("migrate", () => {
   it("미적용만 적용하고 트래킹에 기록, 이미 적용된 건 건너뛴다", async () => {
     const appliedNames = new Set<string>();

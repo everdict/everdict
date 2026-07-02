@@ -14,6 +14,7 @@ interface ScorecardRow {
   scorecard: unknown;
   error: unknown;
   steps: unknown;
+  run_ids: unknown;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -34,6 +35,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     scorecard: hasDetail ? (row.scorecard ?? undefined) : undefined,
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
+    runIds: hasDetail ? (row.run_ids ?? undefined) : undefined, // 상세용 경량 참조(steps 처럼 get 에서만)
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -46,8 +48,8 @@ export class PgScorecardStore implements ScorecardStore {
   async create(r: ScorecardRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO assay_scorecards
-        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, scorecard, error, steps, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, scorecard, error, steps, run_ids, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
       [
         r.id,
         r.tenant,
@@ -61,6 +63,7 @@ export class PgScorecardStore implements ScorecardStore {
         r.scorecard ? JSON.stringify(r.scorecard) : null,
         r.error ? JSON.stringify(r.error) : null,
         r.steps ? JSON.stringify(r.steps) : null,
+        r.runIds ? JSON.stringify(r.runIds) : null,
         r.createdAt,
         r.updatedAt,
       ],
@@ -95,6 +98,10 @@ export class PgScorecardStore implements ScorecardStore {
     if (patch.steps !== undefined) {
       sets.push(`steps = $${i++}`);
       vals.push(JSON.stringify(patch.steps));
+    }
+    if (patch.runIds !== undefined) {
+      sets.push(`run_ids = $${i++}`);
+      vals.push(JSON.stringify(patch.runIds));
     }
     if (patch.updatedAt !== undefined) {
       sets.push(`updated_at = $${i++}`);

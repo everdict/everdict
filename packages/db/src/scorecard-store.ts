@@ -53,6 +53,9 @@ export const ScorecardRecordSchema = z.object({
   scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)
+  // 이 배치가 팬아웃한 자식 run 들의 id(있으면). scorecard = run × N 을 참조로 표현 — 케이스별 addressable run 드릴다운.
+  // 무거운 scorecard(임베드 결과)와 별개의 경량 참조. get 에서만(steps 처럼) — 상세용. 과거 레코드/ingest 경로는 미설정.
+  runIds: z.array(z.string()).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -88,7 +91,7 @@ export class InMemoryScorecardStore implements ScorecardStore {
 
   async list(tenant?: string): Promise<ScorecardRecord[]> {
     const all = [...this.cards.values()].filter((c) => !tenant || c.tenant === tenant);
-    // 목록은 무거운 scorecard/steps 생략(summary 만) — 상세는 get 으로.
-    return all.map(({ scorecard, steps, ...rest }) => rest);
+    // 목록은 무거운 scorecard/steps + 상세용 runIds 생략(summary/models 만) — 상세는 get 으로.
+    return all.map(({ scorecard, steps, runIds, ...rest }) => rest);
   }
 }
