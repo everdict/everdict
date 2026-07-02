@@ -45,3 +45,9 @@ export function fmtDateTimeFull(iso: string): string {
     return iso
   }
 }
+
+// opaque subject(예: Keycloak sub)는 사람이 못 읽으니 축약 표기. 가능하면 members 조인 이름으로 대체하고,
+// 이름이 없을 때의 폴백으로만 쓴다(만든이/생성자 표기 공통).
+export function fmtSubject(s: string): string {
+  return s.length > 14 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s
+}

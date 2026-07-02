@@ -86,7 +86,6 @@ import {
   PgModelRegistry,
   PgRuntimeRegistry,
   type RuntimeRegistry,
-  loadDatasetDir,
   loadHarnessTaxonomyDir,
   loadJudgeDir,
   loadMetricDir,
@@ -160,7 +159,8 @@ async function main(): Promise<void> {
   const profileService = new ProfileService(userProfileStore);
   const runnerService = new RunnerService(runnerStore);
   await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
-  await seedSharedDatasets(datasetRegistry);
+  // 데이터셋은 자동 시드하지 않는다 — first-party 예제(examples/datasets/*.json)는 워크스페이스 목록을 채우는
+  // 노이즈였다. _shared 폴백 메커니즘 자체는 유지(향후 진짜 공유 벤치마크를 등록하면 그대로 보인다).
   await seedSharedJudges(judgeRegistry);
   await seedSharedModels(modelRegistry);
   await seedSharedMetrics(metricRegistry);
@@ -476,18 +476,6 @@ async function seedSharedHarnessTaxonomy(
     console.error(`▶ shared harness taxonomy seeded from ${dir}`);
   } catch {
     // 디렉터리 없음/비어있음은 정상.
-  }
-}
-
-// _shared(first-party 벤치마크) 데이터셋을 파일 SSOT 에서 시드 — 새 테넌트도 즉시 baseline 비교 가능.
-// ASSAY_DATASETS_DIR(없으면 cwd/examples/datasets) 에서 best-effort 로드(불변 → 재기동 시 멱등). 디렉터리 없으면 조용히 스킵.
-async function seedSharedDatasets(registry: DatasetRegistry): Promise<void> {
-  const dir = process.env.ASSAY_DATASETS_DIR ?? `${process.cwd()}/examples/datasets`;
-  try {
-    await loadDatasetDir(dir, { into: registry });
-    console.error(`▶ shared datasets seeded from ${dir}`);
-  } catch {
-    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
   }
 }
 

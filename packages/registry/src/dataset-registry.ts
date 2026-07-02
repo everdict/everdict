@@ -1,5 +1,22 @@
-import { ConflictError, type Dataset, NotFoundError } from "@assay/core";
+import { ConflictError, type Dataset, type DatasetProvenance, NotFoundError } from "@assay/core";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
+
+// list() 한 항목 — 하나의 id(여러 불변 버전)를 목록 화면용 메타로 요약한다. 내용(케이스수/설명/태그/출처)은
+// 최신 semver 버전에서, 생성자·시각은 등록 이력에서 뽑는다(createdAt=최초 등록, updatedAt=최근 등록).
+// _shared·파일 시드 버전은 createdBy 가 없다(undefined). GET /datasets 와 MCP list_datasets 가 이 모양을 그대로 낸다.
+export interface DatasetListEntry {
+  id: string;
+  owner: string;
+  versions: string[]; // 살아있는 버전(semver 오름차순)
+  latestVersion: string; // 최신 semver 버전(아래 내용 필드의 출처)
+  caseCount: number; // 최신 버전의 케이스 수
+  tags: string[]; // 최신 버전의 태그
+  description?: string; // 최신 버전의 설명(있으면)
+  producedBy?: DatasetProvenance; // 최신 버전의 인입 출처(레시피/카탈로그/spec; 있으면)
+  createdBy?: string; // 최초 등록 버전의 생성자 subject(시드/_shared 는 없음)
+  createdAt?: string; // 최초 버전이 등록된 시각(ISO)
+  updatedAt?: string; // 가장 최근 버전이 등록된 시각(ISO)
+}
 
 // 데이터셋 버전 SSOT — (tenant, id, version) → Dataset. 버전 불변. "latest" 는 semver/등록순 최신.
 // 하니스 레지스트리와 동일한 소유 모델: 테넌트 소유 우선, 없으면 SHARED_TENANT(first-party 벤치마크) 폴백.
@@ -11,7 +28,7 @@ export interface DatasetRegistry {
   get(tenant: string, id: string, ref?: string): Promise<Dataset>;
   versions(tenant: string, id: string): Promise<string[]>; // 정렬됨(semver 우선) — 소유 우선/_shared 폴백, 삭제된 버전 제외
   ownVersions(tenant: string, id: string): Promise<string[]>; // 이 테넌트가 직접 등록한 버전만(폴백 없음 — 충돌 판정용), 삭제된 버전 제외
-  list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>>;
+  list(tenant: string): Promise<DatasetListEntry[]>;
   // 이 테넌트가 직접 소유한 살아있는 버전의 생성자 subject(없으면 undefined). 없는/삭제된/비소유 버전은 NotFound — 폴백 없음.
   creatorOf(tenant: string, id: string, version: string): Promise<string | undefined>;
   // 소프트 삭제(tombstone) — 데이터는 보존하되 read 에서 제외(재현성 유지). 이 테넌트 직접 소유만; 없는/이미 삭제된 버전은 NotFound.
@@ -20,7 +37,8 @@ export interface DatasetRegistry {
 
 interface Entry {
   dataset: Dataset;
-  seq: number;
+  seq: number; // 등록 순서(최초/최근 판정용)
+  createdAt: number; // 등록 시각(ms) — list 의 createdAt/updatedAt 메타
   createdBy?: string;
   deletedAt?: number; // tombstone — set 되면 모든 read 에서 제외(데이터는 보존)
 }
@@ -69,7 +87,12 @@ export class InMemoryDatasetRegistry implements DatasetRegistry {
       if (existing.deletedAt !== undefined) existing.deletedAt = undefined; // 같은 내용 재등록 → 되살림(revive)
       return;
     }
-    versions.set(dataset.version, { dataset, seq: this.seq++, ...(createdBy !== undefined ? { createdBy } : {}) });
+    versions.set(dataset.version, {
+      dataset,
+      seq: this.seq++,
+      createdAt: Date.now(),
+      ...(createdBy !== undefined ? { createdBy } : {}),
+    });
   }
 
   async has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -93,15 +116,45 @@ export class InMemoryDatasetRegistry implements DatasetRegistry {
     return (this.byOwner.get(owner)?.get(id)?.get(version) as Entry).dataset;
   }
 
-  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
+  async list(tenant: string): Promise<DatasetListEntry[]> {
     const ids = new Map<string, string>(); // id → owner (테넌트 우선); 살아있는 버전이 하나라도 있는 id 만.
     for (const id of this.byOwner.get(SHARED_TENANT)?.keys() ?? [])
       if (this.ownerVersions(SHARED_TENANT, id).length > 0) ids.set(id, SHARED_TENANT);
     for (const id of this.byOwner.get(tenant)?.keys() ?? [])
       if (this.ownerVersions(tenant, id).length > 0) ids.set(id, tenant);
-    return [...ids.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([id, owner]) => ({ id, owner, versions: this.ownerVersions(owner, id) }));
+    return [...ids.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([id, owner]) => this.summarize(owner, id));
+  }
+
+  // 한 id 를 목록 메타(DatasetListEntry)로 요약. 최신 버전에서 내용을, 등록 이력에서 생성자·시각을 뽑는다.
+  private summarize(owner: string, id: string): DatasetListEntry {
+    const slot = this.byOwner.get(owner)?.get(id);
+    const live = [...(slot?.values() ?? [])].filter((e) => e.deletedAt === undefined);
+    const versions = this.ownerVersions(owner, id);
+    const latestVersion = versions.at(-1);
+    if (latestVersion === undefined)
+      throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `데이터셋 '${id}' 가 없습니다.`);
+    const latest = live.find((e) => e.dataset.version === latestVersion);
+    if (!latest)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { tenant: owner, id, version: latestVersion },
+        `데이터셋 ${id}@${latestVersion} 가 없습니다.`,
+      );
+    const earliest = live.reduce((a, b) => (a.seq <= b.seq ? a : b)); // 최초 등록 버전(생성자·생성시각)
+    const newest = live.reduce((a, b) => (a.seq >= b.seq ? a : b)); // 최근 등록 버전(수정시각)
+    return {
+      id,
+      owner,
+      versions,
+      latestVersion,
+      caseCount: latest.dataset.cases.length,
+      tags: latest.dataset.tags,
+      createdAt: new Date(earliest.createdAt).toISOString(),
+      updatedAt: new Date(newest.createdAt).toISOString(),
+      ...(latest.dataset.description !== undefined ? { description: latest.dataset.description } : {}),
+      ...(latest.dataset.producedBy !== undefined ? { producedBy: latest.dataset.producedBy } : {}),
+      ...(earliest.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
+    };
   }
 
   // 이 테넌트가 직접 소유한 살아있는 버전만(폴백 없음 — _shared 는 못 지운다). 없으면 NotFound.

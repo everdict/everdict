@@ -72,10 +72,53 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
     const r = new InMemoryDatasetRegistry();
     await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
     await r.register("acme", ds("mine", "1.0.0"));
-    expect(await r.list("acme")).toEqual([
-      { id: "bench", owner: SHARED_TENANT, versions: ["1.0.0"] },
-      { id: "mine", owner: "acme", versions: ["1.0.0"] },
+    expect(await r.list("acme")).toMatchObject([
+      { id: "bench", owner: SHARED_TENANT, versions: ["1.0.0"], latestVersion: "1.0.0", caseCount: 1 },
+      { id: "mine", owner: "acme", versions: ["1.0.0"], latestVersion: "1.0.0", caseCount: 1 },
     ]);
+  });
+
+  it("list 는 각 데이터셋의 메타(케이스수·태그·설명·생성자·생성/수정 시각)를 최신 버전 기준으로 요약", async () => {
+    const r = new InMemoryDatasetRegistry();
+    await r.register("acme", ds("d", "1.0.0", { description: "첫 버전", tags: ["repo"] }), "alice");
+    await r.register(
+      "acme",
+      ds("d", "1.1.0", {
+        description: "둘째 버전",
+        tags: ["repo", "smoke"],
+        cases: [
+          {
+            id: "c1",
+            env: { kind: "repo", source: { files: {} } },
+            task: "t",
+            graders: [{ id: "steps" }],
+            timeoutSec: 300,
+            tags: [],
+          },
+          {
+            id: "c2",
+            env: { kind: "repo", source: { files: {} } },
+            task: "t2",
+            graders: [{ id: "cost" }],
+            timeoutSec: 300,
+            tags: [],
+          },
+        ],
+      }),
+      "bob",
+    );
+    const [entry] = await r.list("acme");
+    expect(entry).toMatchObject({
+      id: "d",
+      latestVersion: "1.1.0",
+      versions: ["1.0.0", "1.1.0"],
+      caseCount: 2, // 최신 버전 기준
+      tags: ["repo", "smoke"], // 최신 버전 기준
+      description: "둘째 버전",
+      createdBy: "alice", // 최초 등록 버전의 생성자
+    });
+    expect(entry?.createdAt).toBeDefined();
+    expect(new Date(entry?.updatedAt ?? 0).getTime()).toBeGreaterThanOrEqual(new Date(entry?.createdAt ?? 0).getTime());
   });
 
   it("createdBy 를 기록하고 creatorOf 로 돌려준다(시드는 undefined)", async () => {
@@ -137,6 +180,7 @@ interface FakeRow {
   id: string;
   version: string;
   dataset: unknown;
+  created_at: string;
   created_by: string | null;
   deleted_at: number | null;
 }
@@ -144,6 +188,9 @@ function fakePg(): SqlClient {
   const rows: FakeRow[] = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
   const live = (x: FakeRow) => x.deleted_at === null;
+  // 결정적 created_at — INSERT 마다 1초씩 증가(생성/수정 시각 순서 검증용).
+  const base = 1_700_000_000_000;
+  let clock = 0;
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
@@ -186,6 +233,23 @@ function fakePg(): SqlClient {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1] && live(x));
         return { rows: (r ? [{}] : []) as R[] };
       }
+      // summarize — 살아있는 버전의 version/dataset/created_at/created_by(list 메타 요약용).
+      if (
+        t.startsWith(
+          "SELECT version, dataset, created_at, created_by FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+        )
+      ) {
+        return {
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1] && live(x))
+            .map((x) => ({
+              version: x.version,
+              dataset: x.dataset,
+              created_at: x.created_at,
+              created_by: x.created_by,
+            })) as R[],
+        };
+      }
       // ownerVersions — 살아있는 버전만.
       if (t.startsWith("SELECT version FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL")) {
         return {
@@ -226,6 +290,7 @@ function fakePg(): SqlClient {
           id: p[1] as string,
           version: p[2] as string,
           dataset: JSON.parse(p[3] as string),
+          created_at: new Date(base + clock++ * 1000).toISOString(),
           created_by: (p[4] as string | null) ?? null,
           deleted_at: null,
         });
@@ -267,5 +332,24 @@ describe("PgDatasetRegistry (tenant-owned)", () => {
 
     await r.register("acme", ds("d", "1.0.0")); // 같은 내용 재등록 → revive
     expect((await r.get("acme", "d")).version).toBe("1.0.0");
+  });
+
+  it("list 는 각 데이터셋의 메타(케이스수·최신버전·태그·설명·생성자·생성/수정 시각)를 요약", async () => {
+    const r = new PgDatasetRegistry(fakePg());
+    await r.register("acme", ds("d", "1.0.0", { description: "첫 버전", tags: ["repo"] }), "alice");
+    await r.register("acme", ds("d", "1.2.0", { description: "최신", tags: ["repo", "x"] }), "bob");
+    const [entry] = await r.list("acme");
+    expect(entry).toMatchObject({
+      id: "d",
+      owner: "acme",
+      latestVersion: "1.2.0", // semver 최신
+      versions: ["1.0.0", "1.2.0"],
+      caseCount: 1,
+      tags: ["repo", "x"], // 최신 버전 기준
+      description: "최신",
+      createdBy: "alice", // 최초 등록 버전의 생성자
+    });
+    // fake 는 INSERT 마다 created_at 을 1초씩 올린다 → 수정 시각 > 생성 시각.
+    expect(new Date(entry?.updatedAt ?? 0).getTime()).toBeGreaterThan(new Date(entry?.createdAt ?? 0).getTime());
   });
 });

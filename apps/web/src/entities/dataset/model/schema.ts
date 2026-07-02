@@ -1,11 +1,30 @@
 import { z } from 'zod'
 
 // 컨트롤플레인 데이터셋의 클라이언트 미러. 웹은 HTTP 로만 결합 — 백엔드 패키지 비의존.
-// GET /datasets 응답: 테넌트가 보는 데이터셋 목록(자기 소유 + _shared 벤치마크).
+
+// 데이터셋 출처 — 어떻게 만들어졌나(레시피/카탈로그/인라인 spec). 데이터셋 → 만든 레시피 역링크용.
+export const datasetProvenanceSchema = z.object({
+  via: z.enum(['recipe', 'catalog', 'spec']),
+  id: z.string(),
+  version: z.string().optional(),
+})
+export type DatasetProvenance = z.infer<typeof datasetProvenanceSchema>
+
+// GET /datasets 응답 한 항목(DatasetListEntry 미러): 하나의 id(여러 불변 버전)를 목록 화면용 메타로 요약.
+// 내용(caseCount/description/tags/producedBy)은 최신 버전에서, 생성자·시각은 등록 이력에서.
+// 과거/시드 레코드는 메타가 없을 수 있어 대부분 optional.
 export const datasetSummarySchema = z.object({
   id: z.string(),
   owner: z.string(),
   versions: z.array(z.string()),
+  latestVersion: z.string().optional(),
+  caseCount: z.number().optional(),
+  description: z.string().optional(),
+  tags: z.array(z.string()).default([]),
+  producedBy: datasetProvenanceSchema.optional(),
+  createdBy: z.string().optional(), // 최초 등록 버전의 생성자 subject(시드/_shared 는 없음)
+  createdAt: z.string().optional(), // 최초 버전 등록 시각(ISO)
+  updatedAt: z.string().optional(), // 최근 버전 등록 시각(ISO)
 })
 export type DatasetSummary = z.infer<typeof datasetSummarySchema>
 export const datasetsSchema = z.array(datasetSummarySchema)
@@ -21,14 +40,6 @@ export const datasetCaseSchema = z
   })
   .passthrough()
 export type DatasetCase = z.infer<typeof datasetCaseSchema>
-
-// 데이터셋 출처 — 어떻게 만들어졌나(레시피/카탈로그/인라인 spec). 데이터셋 → 만든 레시피 역링크용.
-export const datasetProvenanceSchema = z.object({
-  via: z.enum(['recipe', 'catalog', 'spec']),
-  id: z.string(),
-  version: z.string().optional(),
-})
-export type DatasetProvenance = z.infer<typeof datasetProvenanceSchema>
 
 // GET /datasets/:id/versions/:version 응답: 전체 데이터셋(케이스 포함).
 export const datasetSchema = z.object({

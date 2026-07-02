@@ -1,10 +1,19 @@
 import Link from 'next/link'
-import { ChevronLeft, GitCompare, ScrollText } from 'lucide-react'
+import { ChevronLeft, GitCompare, ScrollText, Waypoints } from 'lucide-react'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
-import { datasetSchema, datasetsSchema, type Dataset } from '@/entities/dataset'
-import { authContext } from '@/shared/auth/principal'
+import {
+  datasetSchema,
+  datasetsSchema,
+  type Dataset,
+  type DatasetSummary,
+} from '@/entities/dataset'
+import { membersSchema } from '@/entities/member'
+import { scorecardsSchema } from '@/entities/scorecard'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { buildDatasetRelations } from '@/shared/lib/dataset-relations'
+import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { sortSemverDesc } from '@/shared/lib/semver'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
@@ -46,18 +55,35 @@ export default async function DatasetDetailPage({
 }) {
   const { workspace, id } = await params
   const { version } = await searchParams
-  const ctx = await authContext()
+  const { principal, ctx } = await currentPrincipal()
 
-  // 이 데이터셋이 가진 모든 버전(최신순) — 버전 선택기/diff 진입 노출에 사용.
+  // 이 데이터셋이 가진 모든 버전(최신순) + 목록 메타(만든이·생성/수정 시각) — 버전 선택기/diff/헤더에 사용.
   let versions: string[] = []
+  let summary: DatasetSummary | undefined
   try {
-    const summary = datasetsSchema
-      .parse(await controlPlane.listDatasets(ctx))
-      .find((d) => d.id === id)
+    summary = datasetsSchema.parse(await controlPlane.listDatasets(ctx)).find((d) => d.id === id)
     if (summary) versions = sortSemverDesc(summary.versions)
   } catch {
     versions = []
   }
+
+  // 관계 하니스(스코어카드 도출) + 만든이 이름(members 조인) — 부가 정보, 실패해도 상세는 보인다.
+  const scorecards = await controlPlane
+    .listScorecards(ctx)
+    .then((r) => scorecardsSchema.parse(r))
+    .catch(() => [])
+  const members = await controlPlane
+    .listMembers(ctx)
+    .then((r) => membersSchema.parse(r))
+    .catch(() => [])
+  const relation = buildDatasetRelations(scorecards)[id]
+  const currentWorkspace = principal?.workspace ?? workspace
+  const authorName = (() => {
+    if (!summary?.createdBy)
+      return summary && summary.owner !== currentWorkspace ? 'first-party' : '—'
+    const m = members.find((x) => x.subject === summary?.createdBy)
+    return m?.name ?? m?.email ?? fmtSubject(summary.createdBy)
+  })()
 
   let dataset: Dataset | undefined
   let error: string | undefined
@@ -111,10 +137,14 @@ export default async function DatasetDetailPage({
       </div>
 
       <Card className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-        <Prop label="id" value={dataset.id} />
         <Prop label="version" value={dataset.version} />
         <Prop label="cases" value={String(dataset.cases.length)} />
         <Prop label="tags" value={dataset.tags.length ? dataset.tags.join(', ') : '—'} />
+        <Prop label="만든이" value={authorName} />
+        <Prop label="생성" value={summary?.createdAt ? fmtDateTime(summary.createdAt) : '—'} />
+        <Prop label="수정" value={summary?.updatedAt ? fmtDateTime(summary.updatedAt) : '—'} />
+        <Prop label="버전 수" value={String(versions.length || 1)} />
+        <Prop label="실행" value={relation ? `스코어카드 ${relation.scorecards}` : '없음'} />
       </Card>
 
       {/* 출처(있으면) — 이 데이터셋이 어떤 레시피/카탈로그/spec 으로 만들어졌는지. 레시피면 상세로 역링크. */}
@@ -141,6 +171,29 @@ export default async function DatasetDetailPage({
             <span className="font-mono">
               {dataset.producedBy.via === 'catalog' ? '카탈로그' : '인라인 정의'} ·{' '}
               {dataset.producedBy.id}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* 관계된 하니스 — 이 데이터셋으로 평가된 하니스(스코어카드에서 도출). 데이터셋은 하니스 무관. */}
+      {relation && relation.harnesses.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 text-faint">
+            <Waypoints className="size-3.5" />이 데이터셋으로 평가된 하니스
+          </span>
+          {relation.harnesses.map((h) => (
+            <Link
+              key={h}
+              href={`/${workspace}/harnesses/${encodeURIComponent(h)}`}
+              className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground ring-1 ring-inset ring-border transition-colors hover:text-foreground"
+            >
+              {h}
+            </Link>
+          ))}
+          {relation.lastRunAt && (
+            <span className="text-faint" title={fmtDateTimeFull(relation.lastRunAt)}>
+              · 최근 실행 {fmtDateTime(relation.lastRunAt)}
             </span>
           )}
         </div>

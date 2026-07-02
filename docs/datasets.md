@@ -15,8 +15,11 @@ binds to one `harness.id` and is unversioned).
 Datasets reuse the **`HarnessRegistry` ownership model** (`packages/registry`):
 - **Workspace-owned** — each tenant curates its own private datasets (`tenant = workspace = trust-zone`).
 - **`_shared` benchmark tier** — first-party datasets readable/runnable by *every* tenant (owner-first,
-  `_shared`-fallback resolution). A new tenant gets out-of-the-box baselines; private data stays private.
-  Seeded from the file SSOT `examples/datasets/*.json` (`loadDatasetDir`, default owner `_shared`).
+  `_shared`-fallback resolution). The **mechanism is intact** (register a dataset under `_shared` and every
+  tenant sees it via fallback), but the first-party **example** datasets (`examples/datasets/*.json`) are **no
+  longer auto-seeded** — they were list-cluttering noise, so `apps/api` boots with an empty `_shared` dataset
+  tier. The loader (`loadDatasetDir`, default owner `_shared`) remains for opt-in/first-party seeding; it is just
+  not wired into boot.
 - **Immutable versions** — re-registering `(id, version)` with different content → `CONFLICT` (identical =
   idempotent no-op). This is *why* it's a registry, not mutable CRUD: baseline↔candidate comparison is only
   meaningful if the dataset is frozen. A dataset evolves by publishing a new version (`1.0.0 → 1.1.0`), leaving
@@ -106,8 +109,14 @@ Because versions are immutable, two versions of the same dataset are a reproduci
 read is `404`/`NOT_FOUND`. Same core, two transports (`GET /datasets/:id/diff` + `diff_datasets`).
 
 ## Web (`apps/web`)
-- **데이터셋 `/dashboard/datasets`** — owned vs shared cards with version chips (row links to detail). CTA
-  role-gated off `/me` (`datasets:write`).
+- **데이터셋 `/dashboard/datasets`** — a searchable, metadata-rich list (not bare id + version chips). `GET
+  /datasets` returns per-dataset **`DatasetListEntry`** metadata (`latestVersion` · `caseCount` · `tags` ·
+  `description` · `producedBy` · `createdBy` original author · `createdAt`/`updatedAt`), and the page joins
+  `GET /scorecards` to derive each dataset's **related harnesses** (+ scorecard count / last-run time) and
+  `GET /members` to resolve `createdBy` → a human name. A client widget provides **search** (id/description/tags),
+  an **owner segment** filter (전체/소유/공유 — the 공유 segment shows only when shared datasets exist), and
+  **sort** (name / recently-updated / case-count), over a compact stat strip. CTA role-gated off `/me`
+  (`datasets:write`).
 - **데이터셋 등록 `/dashboard/datasets/new`** — id/version/description + cases-JSON with a **validate (dry-run)**
   step, then register (`createDatasetAction` → `POST /datasets`). viewer sees a "권한이 없습니다" notice.
 - **상세 `/dashboard/datasets/[id]`** — a **version switcher** (`?version=`, defaults latest) shows that version's

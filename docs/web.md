@@ -57,8 +57,12 @@ Import order enforces downward layer deps (app → widgets → features → enti
   만들기"** action (`/{workspace}/harnesses/[id]/new-version`) prefills the current config into the register
   wizard — versions are immutable, so editing = registering a new version (인스턴스 pins 재핀 → new instance tag,
   or 템플릿 구조 → new template semver, then re-pin an instance on it).
-- **데이터셋 `/{workspace}/datasets`** — owned vs `_shared` benchmark datasets with version chips (rows link to
-  detail). **상세 `/{workspace}/datasets/[id]`** shows the latest version's eval cases. **데이터셋 등록
+- **데이터셋 `/{workspace}/datasets`** — a **searchable, metadata-rich** list: each row shows description, all
+  versions, latest-version case count, tags, **related harnesses** (joined from scorecards), the **author**
+  (`createdBy` resolved to a member name) and created/updated times, plus an owned/shared badge. A client widget
+  adds **search** (id/description/tags), an **owner filter** (전체/소유/공유), and **sort** over a stat strip
+  (first-party example datasets are no longer auto-seeded, so the list is the workspace's own datasets). **상세
+  `/{workspace}/datasets/[id]`** shows the latest version's eval cases + author/related-harnesses. **데이터셋 등록
   `/{workspace}/datasets/new`** — id/version/description + cases-JSON with a **validate (dry-run)** step then
   register (`POST /datasets`). Role-gated off `/me` (`datasets:write` = member+). See `docs/datasets.md`.
 - **스코어카드 `/{workspace}/scorecards`** — batch-eval runs (dataset@v → harness@v, status, per-metric summary

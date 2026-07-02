@@ -1,6 +1,6 @@
 import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@assay/core";
 import type { SqlClient } from "@assay/db";
-import type { DatasetRegistry } from "./dataset-registry.js";
+import type { DatasetListEntry, DatasetRegistry } from "./dataset-registry.js";
 import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
 interface DatasetRow {
@@ -91,17 +91,62 @@ export class PgDatasetRegistry implements DatasetRegistry {
     return DatasetSchema.parse((res.rows[0] as DatasetRow).dataset);
   }
 
-  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
+  async list(tenant: string): Promise<DatasetListEntry[]> {
     const r = await this.client.query<{ id: string }>(
       "SELECT DISTINCT id FROM assay_datasets WHERE (tenant = $1 OR tenant = $2) AND deleted_at IS NULL ORDER BY id",
       [tenant, SHARED_TENANT],
     );
-    const out: Array<{ id: string; versions: string[]; owner: string }> = [];
+    const out: DatasetListEntry[] = [];
     for (const { id } of r.rows) {
-      const owner = (await this.ownerOf(tenant, id)) as string;
-      out.push({ id, owner, versions: await this.ownerVersions(owner, id) });
+      const owner = await this.ownerOf(tenant, id);
+      if (owner) out.push(await this.summarize(owner, id)); // owner 는 라이브 DISTINCT id 라 사실상 항상 있음
     }
     return out;
+  }
+
+  // 한 id 의 살아있는 버전들을 목록 메타(DatasetListEntry)로 요약. 최신 버전만 파싱해 내용을, created_at 로 생성/수정 시각을 뽑는다.
+  private async summarize(owner: string, id: string): Promise<DatasetListEntry> {
+    const r = await this.client.query<{
+      version: string;
+      dataset: unknown;
+      created_at: string | Date;
+      created_by: string | null;
+    }>(
+      "SELECT version, dataset, created_at, created_by FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+      [owner, id],
+    );
+    const rows = r.rows;
+    if (rows.length === 0) throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `데이터셋 '${id}' 가 없습니다.`);
+    const versions = sortVersions(rows.map((x) => x.version));
+    const latestVersion = versions.at(-1);
+    if (latestVersion === undefined)
+      throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `데이터셋 '${id}' 가 없습니다.`);
+    const latestRow = rows.find((x) => x.version === latestVersion);
+    if (!latestRow)
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { tenant: owner, id, version: latestVersion },
+        `데이터셋 ${id}@${latestVersion} 가 없습니다.`,
+      );
+    const latest = DatasetSchema.parse(latestRow.dataset);
+    const byTime = [...rows].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+    const earliest = byTime[0]; // 최초 등록 버전(생성자·생성시각)
+    const newest = byTime[byTime.length - 1]; // 최근 등록 버전(수정시각)
+    if (!earliest || !newest)
+      throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `데이터셋 '${id}' 가 없습니다.`);
+    return {
+      id,
+      owner,
+      versions,
+      latestVersion,
+      caseCount: latest.cases.length,
+      tags: latest.tags,
+      createdAt: new Date(earliest.created_at).toISOString(),
+      updatedAt: new Date(newest.created_at).toISOString(),
+      ...(latest.description !== undefined ? { description: latest.description } : {}),
+      ...(latest.producedBy !== undefined ? { producedBy: latest.producedBy } : {}),
+      ...(earliest.created_by !== null ? { createdBy: earliest.created_by } : {}),
+    };
   }
 
   async creatorOf(tenant: string, id: string, version: string): Promise<string | undefined> {
