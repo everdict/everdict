@@ -1,4 +1,4 @@
-# Plugin bundles — one-shot self-serve registration (harness + benchmark + runtime as a unit)
+# Bundles — one-shot self-serve registration (harness + benchmark + runtime as a unit)
 
 > **Status: ALL 3 SLICES SHIPPED (gates green — api format/lint/typecheck/test; web prettier/eslint/tsc; live loop
 > verified locally: install → run pinch → leaderboard).** Generalization, not a special case. The platform ALREADY lets a
@@ -6,14 +6,14 @@
 > via per-type HTTP+MCP endpoints, tenant-owned + immutable. What's missing for the SaaS story
 > ("유저가 쉽게 벤치마크·어댑터·하니스를 등록 → 자기 하니스로 수행 → 대시보드") is a **cohesive one-shot install**:
 > a single manifest that registers a whole bundle. This doc adds that — **harness-agnostic** — and ships
-> **codex + pinch as the first bundle, as pure data (zero core change)**, proving the "specifics live in a plugin,
+> **codex + pinch as the first bundle, as pure data (zero core change)**, proving the "specifics live in a bundle,
 > not core" principle.
 
 ## Principle (from the user)
 
-Build **generalized** capabilities in core/api; anything **harness- or benchmark-specific** lives in a **plugin
+Build **generalized** capabilities in core/api; anything **harness- or benchmark-specific** lives in a **bundle
 bundle** (a directory/JSON of declarative specs), never hardcoded in a core package. This bundle mechanism is the
-generalization; `codex`+`pinch` is the plugin that plugs into it.
+generalization; `codex`+`pinch` is the bundle that plugs into it.
 
 ## Current state — verified (audit)
 
@@ -31,15 +31,15 @@ generalization; `codex`+`pinch` is the plugin that plugs into it.
 - **No core violations** — the only harness-name special-casing is `packages/agent/src/registry.ts` `makeHarness`
   (builtin claude-code/scripted have no spec file); everything else is spec-driven.
 - **Gap** — registration is **piecemeal** (register harness → register recipe → import → register runtime). No
-  single "install this bundle" action, and no first-party example proving a full codex+pinch flow as a plugin.
+  single "install this bundle" action, and no first-party example proving a full codex+pinch flow as a bundle.
 
 ## Design
 
-### A `PluginBundle` is a manifest of existing specs — the installer just fans out
+### A `Bundle` is a manifest of existing specs — the installer just fans out
 
 ```ts
 // apps/api (composition layer — it already depends on every registry + @assay/datasets)
-PluginBundle = {
+Bundle = {
   id: string, version: string, description?: string,          // manifest metadata
   harnessTemplates?: HarnessTemplateSpec[],
   harnesses?:        HarnessInstanceSpec[],                    // template + pins
@@ -50,7 +50,7 @@ PluginBundle = {
   metrics?:          MetricSpec[],
   runtimes?:         RuntimeSpec[],
 }
-PluginService.install(tenant, createdBy, bundle) → { id, version, results: InstallResult[] }
+BundleService.install(tenant, createdBy, bundle) → { id, version, results: InstallResult[] }
 // InstallResult = { kind, id, version, status: "ok"|"conflict"|"error"|"skipped", message? }
 ```
 
@@ -65,7 +65,7 @@ PluginService.install(tenant, createdBy, bundle) → { id, version, results: Ins
 
 ### AuthZ: compose existing gates, no new action
 
-The install touches multiple registries with different gates. Instead of a new `plugins:install` action, both
+The install touches multiple registries with different gates. Instead of a new `bundles:install` action, both
 transports **compute the required actions from the bundle's contents and enforce each** via the existing matrix:
 
 ```
@@ -79,14 +79,14 @@ dataset-bearing bundle → 403 (exactly as the per-type routes already behave). 
 
 ### Surface (BFF↔MCP parity)
 
-- **HTTP** — `POST /plugins/install` `{ ...PluginBundle }` → `{ id, version, results }`. Per-piece gate.
-- **MCP** — `install_plugin { bundle: <JSON string> }` (same `PluginService.install`; per-piece authorize).
-- **Web** (Slice 2) — a "플러그인 설치" page: paste/upload a bundle JSON → install → per-piece result table.
+- **HTTP** — `POST /bundles/install` `{ ...Bundle }` → `{ id, version, results }`. Per-piece gate.
+- **MCP** — `install_bundle { bundle: <JSON string> }` (same `BundleService.install`; per-piece authorize).
+- **Web** (Slice 2) — a "번들 설치" page: paste/upload a bundle JSON → install → per-piece result table.
 
-### The first plugin: `examples/plugins/codex-pinch/` (pure data)
+### The first bundle: `examples/bundles/codex-pinch/` (pure data)
 
 - `codex.template.json` + `codex.instance.json` — codex as a `command` harness (declarative; `{{task}}`/`{{model}}`,
-  trace via OTel or usage-proxy). **The specific bit, as a plugin — not core.**
+  trace via OTel or usage-proxy). **The specific bit, as a bundle — not core.**
 - `pinch.recipe.json` — a `BenchmarkAdapterSpec` mapping pinch's source (jsonl/HF) → cases (task + grader). A
   template the user tailors to real pinch (swap `source` + grader).
 - `pinch-sample.dataset.json` — a few inline cases so the flow is runnable end-to-end immediately (prompt env +
@@ -94,21 +94,21 @@ dataset-bearing bundle → 403 (exactly as the per-type routes already behave). 
 - `docker.runtime.json` — a docker runtime for isolated CLI execution.
 - `bundle.json` — the manifest referencing all of the above; `README.md` documents the self-serve flow.
 
-Installed via `POST /plugins/install` (tenant self-serve) OR seeded to `_shared` via the existing file loaders.
+Installed via `POST /bundles/install` (tenant self-serve) OR seeded to `_shared` via the existing file loaders.
 **Zero core/package changes** — codex+pinch is entirely data behind the generalized surfaces.
 
 ## Slices
 
-1. ✅ **Bundle install core + surface** — `PluginBundleSchema` + `PluginService.install` (idempotent fan-out,
-   per-item `ok|conflict|error|skipped`) + `requiredActionsForBundle` (`apps/api/plugin-service.ts`) +
-   `POST /plugins/install` + MCP `install_plugin` (per-piece gates composed from bundle contents, no new authz
-   action) + wired in `main.ts` (all registries) + `examples/plugins/codex-pinch/{bundle.json,README.md}`. Tests:
-   `plugin-service.test.ts` (fan-out ok/conflict/skipped + required-actions + **real-artifact guard**: the shipped
+1. ✅ **Bundle install core + surface** — `BundleSchema` + `BundleService.install` (idempotent fan-out,
+   per-item `ok|conflict|error|skipped`) + `requiredActionsForBundle` (`apps/api/bundle-service.ts`) +
+   `POST /bundles/install` + MCP `install_bundle` (per-piece gates composed from bundle contents, no new authz
+   action) + wired in `main.ts` (all registries) + `examples/bundles/codex-pinch/{bundle.json,README.md}`. Tests:
+   `bundle-service.test.ts` (fan-out ok/conflict/skipped + required-actions + **real-artifact guard**: the shipped
    bundle installs clean), `server.test.ts` (member 200 / viewer 403 by composed gate), `mcp.test.ts`
    (tool-list + functional member/viewer). Zero core/package change — codex+pinch is pure data.
-2. ✅ **Web** — `/{workspace}/plugins` page (`InstallPluginForm`: paste bundle JSON → install → per-item result
-   table with status badges) + `install-plugin` server action + `entities/plugin` mirror schema +
-   `controlPlane.installPlugin` + "플러그인" nav entry. Prettier/eslint/tsc green.
+2. ✅ **Web** — `/{workspace}/bundles` page (`InstallBundleForm`: paste bundle JSON → install → per-item result
+   table with status badges) + `install-bundle` server action + `entities/bundle` mirror schema +
+   `controlPlane.installBundle` + "번들" nav entry. Prettier/eslint/tsc green.
 3. ✅ **Guarded live E2E** — `scripts/live/codex-pinch-leaderboard.mjs`: spawns a dev control plane → installs the
    codex+pinch bundle → runs the real `pinch-building-dashboards` benchmark → prints the `(harness × model)`
    leaderboard row. **Verified locally (exit 0)**: 4/4 bundle items install `ok`; pinch runs to `succeeded`;
@@ -118,14 +118,14 @@ Installed via `POST /plugins/install` (tenant self-serve) OR seeded to `_shared`
 
 ## Decisions / non-goals
 
-- **No new abstraction in core.** `PluginBundle` is an `apps/api` composition of existing spec schemas; the
+- **No new abstraction in core.** `Bundle` is an `apps/api` composition of existing spec schemas; the
   installer reuses existing registries. Nothing harness-specific enters core.
 - **No new authz action** — compose existing per-type gates from the bundle's contents.
 - **Idempotent, partial-success install** — conflicts/errors are per-item results, never a batch abort; re-install
   of identical content is a no-op (registry immutability).
 - **Installer does not fetch/import** — recipes register the adapter; `datasets[]` ships runnable cases; row-fetch
   stays in the existing import path.
-- **codex/pinch specifics stay in `examples/plugins/`** (a plugin), never a core package — the guiding principle.
+- **codex/pinch specifics stay in `examples/bundles/`** (a bundle), never a core package — the guiding principle.
 
 ## See also
 

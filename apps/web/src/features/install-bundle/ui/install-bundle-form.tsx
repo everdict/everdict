@@ -2,14 +2,14 @@
 
 import { useState } from 'react'
 
-import { type InstallItemResult, type PluginInstallResult } from '@/entities/plugin'
+import { type BundleInstallResult, type InstallItemResult } from '@/entities/bundle'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Label, Textarea } from '@/shared/ui/input'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
-import { installPluginAction } from '../api/install-plugin'
+import { installBundleAction } from '../api/install-bundle'
 
 // 붙여넣기용 최소 예시(codex + pinch 샘플). 실제 pinch 는 recipe/소스를 교체.
 const SAMPLE = `{
@@ -43,10 +43,10 @@ const STATUS_TONE: Record<
   skipped: 'neutral',
 }
 
-// 플러그인 번들(JSON) 붙여넣기 → 설치 → 항목별 결과 테이블. 멱등(같은 내용 재설치=ok, 충돌 내용=conflict).
-export function InstallPluginForm() {
+// 번들(JSON) 붙여넣기 → 설치 → 항목별 결과 테이블. 멱등(같은 내용 재설치=ok, 충돌 내용=conflict).
+export function InstallBundleForm() {
   const [bundleJson, setBundleJson] = useState(SAMPLE)
-  const [result, setResult] = useState<PluginInstallResult>()
+  const [result, setResult] = useState<BundleInstallResult>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -54,7 +54,7 @@ export function InstallPluginForm() {
     setBusy(true)
     setError(undefined)
     setResult(undefined)
-    const res = await installPluginAction(bundleJson)
+    const res = await installBundleAction(bundleJson)
     setBusy(false)
     if (res.ok && res.result) setResult(res.result)
     else setError(res.error ?? '설치 실패')
@@ -63,7 +63,7 @@ export function InstallPluginForm() {
   return (
     <div className="max-w-2xl space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="bundle">번들 (PluginBundle JSON)</Label>
+        <Label htmlFor="bundle">번들 (BundleBundle JSON)</Label>
         <Textarea
           id="bundle"
           className="min-h-80 font-mono text-[12px]"
@@ -81,7 +81,7 @@ export function InstallPluginForm() {
       {error && <Callout tone="danger">{error}</Callout>}
 
       <Button type="button" onClick={onSubmit} disabled={busy}>
-        {busy ? '설치 중…' : '플러그인 설치'}
+        {busy ? '설치 중…' : '번들 설치'}
       </Button>
 
       {result && (

@@ -1,6 +1,6 @@
 export {
   installItemResultSchema,
-  pluginInstallResultSchema,
+  bundleInstallResultSchema,
   type InstallItemResult,
-  type PluginInstallResult,
+  type BundleInstallResult,
 } from './model/schema'

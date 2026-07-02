@@ -37,11 +37,11 @@ import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
+import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
-import { PluginBundleSchema, type PluginService, requiredActionsForBundle } from "./plugin-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
 import type { RunnerHub } from "./runner-hub.js";
@@ -117,7 +117,7 @@ export interface ServerDeps {
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
   scheduleService?: ScheduleService; // 예약(cron) 스코어카드 CRUD (없으면 해당 라우트 비활성)
   benchmarkService?: BenchmarkService; // 벤치마크 카탈로그 + 인입 (없으면 해당 라우트 비활성)
-  pluginService?: PluginService; // 플러그인 번들 설치(하니스+벤치마크+런타임 원샷 등록; 없으면 라우트 비활성)
+  bundleService?: BundleService; // 번들 설치(하니스+벤치마크+런타임 원샷 등록; 없으면 라우트 비활성)
   harnessTemplates?: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조) CRUD
   harnessInstances?: HarnessInstanceRegistry; // 개별 하네스(template+pins) CRUD + resolve
 
@@ -996,17 +996,17 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     },
   );
 
-  // --- plugins (번들 원샷 설치: 하니스+벤치마크+데이터셋+런타임+judge/model/metric 를 한 매니페스트로 등록) ---
+  // --- bundles (번들 원샷 설치: 하니스+벤치마크+데이터셋+런타임+judge/model/metric 를 한 매니페스트로 등록) ---
   // authZ = 새 액션 없이 번들 내용으로부터 필요한 per-type 게이트를 조합해 각각 강제(requiredActionsForBundle).
-  app.post("/plugins/install", async (req, reply) => {
-    if (!deps.pluginService) return reply.code(404).send({ code: "NOT_FOUND", message: "plugin 서비스 미설정" });
+  app.post("/bundles/install", async (req, reply) => {
+    if (!deps.bundleService) return reply.code(404).send({ code: "NOT_FOUND", message: "번들 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    const parsed = PluginBundleSchema.safeParse(req.body);
+    const parsed = BundleSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       for (const action of requiredActionsForBundle(parsed.data)) gate(principal, action); // 섹션별 게이트
-      return reply.send(await deps.pluginService.install(principal.workspace, principal.subject, parsed.data));
+      return reply.send(await deps.bundleService.install(principal.workspace, principal.subject, parsed.data));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -2072,7 +2072,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           runnerHub: deps.runnerHub,
           settingsStore: deps.settingsStore,
           benchmarkService: deps.benchmarkService,
-          pluginService: deps.pluginService,
+          bundleService: deps.bundleService,
           workspaceService: deps.workspaceService,
           membershipService: deps.membershipService,
           profileService: deps.profileService,

@@ -26,11 +26,11 @@ import {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
+import { BundleService } from "./bundle-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { buildMcpServer } from "./mcp.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
-import { PluginService } from "./plugin-service.js";
 import { RunService } from "./run-service.js";
 import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
@@ -89,7 +89,7 @@ function harness() {
   const judgeRegistry = new InMemoryJudgeRegistry();
   const modelRegistry = new InMemoryModelRegistry();
   const runtimeRegistry = new InMemoryRuntimeRegistry();
-  const pluginService = new PluginService({
+  const bundleService = new BundleService({
     harnessTemplates,
     harnessInstances,
     datasets: datasetRegistry,
@@ -98,7 +98,7 @@ function harness() {
     runtimes: runtimeRegistry,
   });
   return {
-    pluginService,
+    bundleService,
     connectionService: new ConnectionService({
       store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 5))),
       states: new InMemoryOAuthStateStore(),
@@ -206,7 +206,7 @@ describe("MCP tools", () => {
       "get_scorecard",
       "heartbeat_job",
       "ingest_scorecard",
-      "install_plugin",
+      "install_bundle",
       "leaderboard_scorecards",
       "lease_job",
       "leave_workspace",
@@ -664,7 +664,7 @@ describe("MCP tools", () => {
     expect(JSON.parse(text(bf))).toHaveProperty("updated");
   });
 
-  it("install_plugin: member 가 번들(dataset) 설치 ok; viewer 는 datasets:write 없어 FORBIDDEN", async () => {
+  it("install_bundle: member 가 번들(dataset) 설치 ok; viewer 는 datasets:write 없어 FORBIDDEN", async () => {
     const deps = harness();
     const bundle = JSON.stringify({
       id: "codex-pinch",
@@ -688,13 +688,13 @@ describe("MCP tools", () => {
       ],
     });
     const member = await connect(deps, ["member"], "acme");
-    const res = await member.callTool({ name: "install_plugin", arguments: { bundle } });
+    const res = await member.callTool({ name: "install_bundle", arguments: { bundle } });
     expect(res.isError).toBeFalsy();
     const body = JSON.parse(text(res)) as { results: Array<{ kind: string; status: string }> };
     expect(body.results.find((r) => r.kind === "dataset")?.status).toBe("ok");
 
     const viewer = await connect(deps, ["viewer"], "acme");
-    const denied = await viewer.callTool({ name: "install_plugin", arguments: { bundle } });
+    const denied = await viewer.callTool({ name: "install_bundle", arguments: { bundle } });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("FORBIDDEN");
   });

@@ -22,10 +22,10 @@ import type {
 import { z } from "zod";
 import type { BenchmarkService } from "./benchmark-service.js";
 
-// 플러그인 번들 — 여러 레지스트리에 흩어진 기존 스펙들의 매니페스트(하니스+벤치마크+데이터셋+런타임+judge/model/metric).
-// "특화물은 플러그인" 원칙: codex+pinch 같은 특정 하니스/벤치마크는 이 번들(순수 데이터)로 등록 — 코어 무변경.
+// 번들 — 여러 레지스트리에 흩어진 기존 스펙들의 매니페스트(하니스+벤치마크+데이터셋+런타임+judge/model/metric).
+// "특화물은 번들" 원칙: codex+pinch 같은 특정 하니스/벤치마크는 이 번들(순수 데이터)로 등록 — 코어 무변경.
 // 설치기는 각 섹션을 기존 per-type register() 로 팬아웃하는 얇은 오케스트레이션일 뿐(새 추상화/스토어 없음).
-export const PluginBundleSchema = z.object({
+export const BundleSchema = z.object({
   id: z.string(),
   version: z.string(),
   description: z.string().optional(),
@@ -38,7 +38,7 @@ export const PluginBundleSchema = z.object({
   metrics: z.array(MetricSpecSchema).default([]),
   runtimes: z.array(RuntimeSpecSchema).default([]),
 });
-export type PluginBundle = z.infer<typeof PluginBundleSchema>;
+export type Bundle = z.infer<typeof BundleSchema>;
 
 // 설치 결과(항목별) — 배치는 절대 중단하지 않는다. 같은 내용 재설치=ok(레지스트리 멱등), 충돌 내용=conflict, 레지스트리 미설정=skipped.
 export const InstallStatusSchema = z.enum(["ok", "conflict", "error", "skipped"]);
@@ -50,14 +50,14 @@ export interface InstallItemResult {
   status: InstallStatus;
   message?: string;
 }
-export interface PluginInstallResult {
+export interface BundleInstallResult {
   id: string;
   version: string;
   results: InstallItemResult[];
 }
 
 // 번들 내용으로부터 필요한 authZ 액션을 도출 — 새 액션 없이 기존 per-type 게이트를 조합(라우트/MCP 가 각각 강제).
-export function requiredActionsForBundle(bundle: PluginBundle): Action[] {
+export function requiredActionsForBundle(bundle: Bundle): Action[] {
   const need = new Set<Action>();
   if (bundle.harnessTemplates.length > 0) need.add("templates:write");
   if (bundle.harnesses.length > 0) need.add("harnesses:register");
@@ -70,7 +70,7 @@ export function requiredActionsForBundle(bundle: PluginBundle): Action[] {
   return [...need];
 }
 
-export interface PluginServiceDeps {
+export interface BundleServiceDeps {
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
   benchmarks?: BenchmarkService; // 레시피 등록(BenchmarkService.registerRecipe)
@@ -110,11 +110,11 @@ async function installSection<T extends Registrable>(
   }
 }
 
-// 플러그인 번들 설치 — 각 섹션을 기존 레지스트리로 팬아웃(멱등, 부분성공). authZ 는 라우트/MCP 가 requiredActionsForBundle 로 강제.
-export class PluginService {
-  constructor(private readonly deps: PluginServiceDeps) {}
+// 번들 설치 — 각 섹션을 기존 레지스트리로 팬아웃(멱등, 부분성공). authZ 는 라우트/MCP 가 requiredActionsForBundle 로 강제.
+export class BundleService {
+  constructor(private readonly deps: BundleServiceDeps) {}
 
-  async install(tenant: string, createdBy: string | undefined, bundle: PluginBundle): Promise<PluginInstallResult> {
+  async install(tenant: string, createdBy: string | undefined, bundle: Bundle): Promise<BundleInstallResult> {
     const results: InstallItemResult[] = [];
     const { harnessTemplates, harnessInstances, benchmarks, datasets, judges, models, metrics, runtimes } = this.deps;
 

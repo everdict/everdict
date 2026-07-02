@@ -97,6 +97,7 @@ import { S3ArtifactStore } from "@assay/storage";
 import { InProcessCallbackRendezvous } from "@assay/topology";
 import { buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
+import { BundleService } from "./bundle-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
@@ -104,7 +105,6 @@ import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 import { NotificationService } from "./notification-service.js";
 import { githubProvider } from "./oauth/github.js";
 import { mattermostProvider } from "./oauth/mattermost.js";
-import { PluginService } from "./plugin-service.js";
 import { ProfileService } from "./profile-service.js";
 import { RunService } from "./run-service.js";
 import { RunnerHub } from "./runner-hub.js";
@@ -290,8 +290,8 @@ async function main(): Promise<void> {
     benchmarks: benchmarkRegistry,
     secretsFor: runtimeSecretsFor,
   });
-  // 플러그인 번들 원샷 설치 — 기존 레지스트리들로 팬아웃(하니스+벤치마크+데이터셋+런타임+judge/model/metric). 새 스토어 없음.
-  const pluginService = new PluginService({
+  // 번들 원샷 설치 — 기존 레지스트리들로 팬아웃(하니스+벤치마크+데이터셋+런타임+judge/model/metric). 새 스토어 없음.
+  const bundleService = new BundleService({
     harnessTemplates: harnessTemplateRegistry,
     harnessInstances: harnessInstanceRegistry,
     benchmarks: benchmarkService,
@@ -334,7 +334,7 @@ async function main(): Promise<void> {
     scorecardService,
     scheduleService,
     benchmarkService,
-    pluginService,
+    bundleService,
     harnessTemplates: harnessTemplateRegistry,
     harnessInstances: harnessInstanceRegistry,
     datasetRegistry,

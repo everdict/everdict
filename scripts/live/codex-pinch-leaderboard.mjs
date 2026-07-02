@@ -1,6 +1,6 @@
-// 라이브 e2e: *플러그인 번들 원샷 설치* → pinch 벤치마크 실행 → **리더보드(harness × model)**.
+// 라이브 e2e: *번들 원샷 설치* → pinch 벤치마크 실행 → **리더보드(harness × model)**.
 // 유저 시나리오(멀티테넌트 SaaS, HTTP API 만):
-//   ① POST /plugins/install : codex(하니스) + pinch(벤치마크) 번들을 한 번에 등록 — 일반화된 self-serve 등록.
+//   ① POST /bundles/install : codex(하니스) + pinch(벤치마크) 번들을 한 번에 등록 — 일반화된 self-serve 등록.
 //   ② POST /scorecards      : pinch 를 하니스로 실행(judge 채점). codex 는 그 CLI+런타임이 필요하므로,
 //      기본은 builtin 'scripted' 로 실행해 install→run→leaderboard 루프 전체를 무-외부의존으로 실증한다.
 //      실제 codex 실행은 ASSAY_HARNESS=codex + docker 런타임(코덱스 설치 이미지)로 스왑(아래 주석).
@@ -36,7 +36,7 @@ const post = async (path, body) => {
 };
 const get = async (path) => (await fetch(`${BASE}${path}`, { headers: H })).json();
 
-const bundle = JSON.parse(readFileSync(new URL("../../examples/plugins/codex-pinch/bundle.json", import.meta.url)));
+const bundle = JSON.parse(readFileSync(new URL("../../examples/bundles/codex-pinch/bundle.json", import.meta.url)));
 
 console.log(`=== 컨트롤플레인 기동 (apps/api dist, dev, :${PORT}) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], {
@@ -65,8 +65,8 @@ try {
   if (!up) throw new Error("control plane 기동 실패");
 
   // ① 번들 원샷 설치
-  console.log("\n=== ① POST /plugins/install (codex + pinch 번들) ===");
-  const inst = await post("/plugins/install", bundle);
+  console.log("\n=== ① POST /bundles/install (codex + pinch 번들) ===");
+  const inst = await post("/bundles/install", bundle);
   console.log(`  → ${inst.status}`);
   for (const r of inst.json.results ?? []) console.log(`     ${r.status.padEnd(8)} ${r.kind} ${r.id}@${r.version}`);
   const installOk = inst.status === 200 && (inst.json.results ?? []).every((r) => r.status === "ok" || r.status === "conflict");

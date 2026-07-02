@@ -60,10 +60,10 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: '/metrics', label: '메트릭', icon: Gauge, keywords: 'metric 지표' },
       { href: '/models', label: '모델', icon: Cpu, keywords: 'model provider llm' },
       {
-        href: '/plugins',
-        label: '플러그인',
+        href: '/bundles',
+        label: '번들',
         icon: Puzzle,
-        keywords: 'plugin bundle 번들 설치 codex pinch 벤치마크 하니스',
+        keywords: 'bundle 번들 설치 codex pinch 벤치마크 하니스',
       },
     ],
   },

@@ -1,8 +1,8 @@
-# codex + pinch — a plugin bundle
+# codex + pinch — a bundle
 
-A **plugin bundle**: harness- and benchmark-specific definitions as pure data, installed through the generalized
-`POST /plugins/install` surface. **Zero core/package changes** — this is the "specifics live in a plugin, not
-core" principle (see `docs/architecture/plugin-bundles.md`).
+A **bundle**: harness- and benchmark-specific definitions as pure data, installed through the generalized
+`POST /bundles/install` surface. **Zero core/package changes** — this is the "specifics live in a bundle, not
+core" principle (see `docs/architecture/bundle-bundles.md`).
 
 ## What's inside `bundle.json`
 
@@ -15,13 +15,13 @@ core" principle (see `docs/architecture/plugin-bundles.md`).
 ## Install (tenant self-serve)
 
 ```bash
-curl -sX POST "$ASSAY_API/plugins/install" \
+curl -sX POST "$ASSAY_API/bundles/install" \
   -H "authorization: Bearer $ASSAY_KEY" -H 'content-type: application/json' \
-  --data @examples/plugins/codex-pinch/bundle.json
+  --data @examples/bundles/codex-pinch/bundle.json
 # → { "id": "codex-pinch", "version": "1.0.0", "results": [ { "kind": "harness", "status": "ok" }, ... ] }
 ```
 
-Or via MCP: `install_plugin { bundle: "<contents of bundle.json>" }`.
+Or via MCP: `install_bundle { bundle: "<contents of bundle.json>" }`.
 
 Install is **idempotent** (re-installing identical content is a no-op; conflicting content on an existing
 `(id,version)` returns `status:"conflict"` for that item without aborting the batch). AuthZ is composed from the
