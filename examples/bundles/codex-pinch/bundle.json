@@ -1,16 +1,16 @@
 {
   "id": "codex-pinch",
-  "version": "1.0.0",
-  "description": "codex(CLI 코딩 에이전트) 하니스 + pinch 벤치마크를 한 번에 등록하는 번들. 순수 데이터 — 코어 무변경. codex/pinch 세부는 이 번들에만 산다.",
+  "version": "1.1.0",
+  "description": "codex(CLI 코딩 에이전트) 하니스 + pinch 벤치마크 번들. self-hosted 러너에서 codex 를 머신 로그인으로 실행. 순수 데이터 — 코어 무변경.",
   "harnessTemplates": [
     {
       "kind": "command",
       "category": "cli-agent",
       "id": "codex",
       "version": "1",
-      "setup": ["npm install -g @openai/codex"],
-      "command": "codex exec --full-auto --model {{model}} {{task}}",
-      "model": "gpt-5.4-mini",
+      "setup": [],
+      "command": "codex exec --sandbox workspace-write --skip-git-repo-check {{task}} < /dev/null",
+      "model": "gpt-5-codex",
       "env": {},
       "trace": { "kind": "none" }
     }
@@ -42,9 +42,32 @@
   ],
   "datasets": [
     {
+      "id": "pinch-dashboards",
+      "version": "1.0.0",
+      "description": "PinchBench building-dashboards — 코딩 에이전트 변형(repo env): 에이전트가 dashboard.json 을 작성하고, 산출물을 결정적 체크(valid JSON + 4개 패널 키)로 채점. judge 모델 불필요 — codex 머신 로그인만으로 self-hosted 실행/채점.",
+      "cases": [
+        {
+          "id": "api-health-dashboard",
+          "env": { "kind": "repo", "source": { "files": {} } },
+          "task": "Create a file named dashboard.json in the working directory: a valid JSON Axiom-style dashboard for API health, with panels/keys covering p95 latency, p99 latency, error rate, and request volume. Write only that one file.",
+          "graders": [
+            {
+              "id": "tests-pass",
+              "config": {
+                "cmd": "test -f dashboard.json && python3 -m json.tool dashboard.json >/dev/null && grep -qi p95 dashboard.json && grep -qi p99 dashboard.json && grep -qi error dashboard.json && grep -qi volume dashboard.json"
+              }
+            }
+          ],
+          "timeoutSec": 600,
+          "tags": ["pinchbench", "coding-agent"]
+        }
+      ],
+      "tags": ["pinchbench", "coding-agent"]
+    },
+    {
       "id": "pinch-building-dashboards",
       "version": "1.0.0",
-      "description": "PinchBench(github.com/pinchbench/skill) building-dashboards — 코딩 에이전트가 Axiom 대시보드를 설계/구축. judge 루브릭으로 채점(실행 시 judge 모델 필요).",
+      "description": "PinchBench(github.com/pinchbench/skill) building-dashboards — 원본(prompt env + judge 루브릭). judge 모델 필요. hermes 스크립트가 쓰는 그 벤치마크와 동일 — codex 와 나란히 비교용.",
       "cases": [
         {
           "id": "api-health-dashboard",

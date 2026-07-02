@@ -29,7 +29,8 @@ interface PendingEntry {
 }
 
 export interface RunnerHubDeps {
-  // 잡이 lease+완료될 때까지의 전체 상한 — 미연결/유휴 러너에 파킹된 잡이 영원히 매달리지 않게 거부한다.
+  // 잡에 '활동(lease/heartbeat)'이 없는 채로 매달릴 수 있는 최대 시간 — lease/heartbeat 가 리셋한다.
+  // 활발히 heartbeat 하는 러너의 장기 실행 잡은 무기한 살아있고, 미연결/유휴/사망 러너의 잡만 이 시간 뒤 거부된다.
   queueTimeoutMs?: number;
   // 러너가 lease 한 뒤 complete/heartbeat 없이 이 시간이 지나면 재큐(러너 사망/네트워크 단절 → 다른/재접속 러너가 가져감).
   leaseTtlMs?: number;
@@ -66,33 +67,52 @@ export class RunnerHub {
   }
 
   // 잡을 파킹하고 결과 promise 를 돌려준다(SelfHostedBackend.dispatch). 러너가 complete 하면 resolve,
-  // 타임아웃이면 reject(미연결/유휴). 키별 FIFO.
+  // '활동(lease/heartbeat)' 없이 queueTimeoutMs 가 지나면 reject(미연결/유휴). 키별 FIFO.
   enqueue(key: SelfHostedKey, job: AgentJob): Promise<CaseResult> {
     const jobId = this.newJobId();
     const arr = this.q(key);
-    const promise = new Promise<CaseResult>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.remove(key, jobId);
-        // 큐 타임아웃 reject 가 어딘가에서 삼켜지면 "이유없이 조용히 실패"로 보인다 — 원인(미연결/유휴)과
-        // 대기 시간을 서버 로그로 남겨 가시화한다.
-        console.warn(
-          `[runner-hub] 큐 타임아웃: 러너 ${selfHostedBackendName(key)} 가 ${this.queueTimeoutMs}ms 안에 잡 ${jobId} 를 가져가지 않았습니다 — 연결된 러너가 없거나 유휴 상태입니다.`,
-        );
-        reject(
-          new UpstreamError(
-            "UPSTREAM_ERROR",
-            { runnerId: key.runnerId, reason: "no_runner" },
-            "셀프호스티드 러너가 잡을 가져가지 않았습니다 — 연결된 러너가 없거나 유휴 상태입니다.",
-          ),
-        );
-      }, this.queueTimeoutMs);
-      // 타이머가 프로세스를 붙잡지 않게(테스트/종료 친화). Node 외 런타임엔 unref 없음 → 옵셔널 체이닝.
-      (timer as { unref?: () => void }).unref?.();
-      arr.push({ jobId, job, resolve, reject, timer });
+    // 실행자는 동기 실행이라 resolve/reject 가 곧바로 재할당된다(no-op 초기값은 no-`!` 규율 준수용).
+    let resolve: (r: CaseResult) => void = () => {};
+    let reject: (e: Error) => void = () => {};
+    const promise = new Promise<CaseResult>((res, rej) => {
+      resolve = res;
+      reject = rej;
     });
+    const entry: PendingEntry = { jobId, job, resolve, reject, timer: this.armTimeout(key, jobId, reject) };
+    arr.push(entry);
     // long-poll 대기 중인 러너가 있으면 깨운다(단일 스레드 → wake 안에서 lease 가 곧장 이 잡을 가져간다).
     this.waiters.get(selfHostedBackendName(key))?.shift()?.();
     return promise;
+  }
+
+  // '유휴 타임아웃' 타이머 — queueTimeoutMs 동안 활동(lease/heartbeat)이 없으면 잡을 거부한다.
+  // lease/heartbeat 가 이 타이머를 리셋하므로, 활발히 heartbeat 하는 러너의 장기 실행 잡(codex/claude-code 등
+  // 수 분~수십 분)은 절대 잘못 거부되지 않는다. 아무 러너도 안 가져가거나(미연결/유휴), 가져간 뒤 러너가 죽어
+  // heartbeat 가 끊기면 이 시간 뒤 no_runner 로 거부.
+  private armTimeout(key: SelfHostedKey, jobId: string, reject: (e: Error) => void): ReturnType<typeof setTimeout> {
+    const timer = setTimeout(() => {
+      this.remove(key, jobId);
+      // reject 가 어딘가에서 삼켜지면 "이유없이 조용히 실패"로 보인다 — 원인(미연결/유휴)과 시간을 서버 로그로 가시화.
+      console.warn(
+        `[runner-hub] 유휴 타임아웃: 러너 ${selfHostedBackendName(key)} 가 ${this.queueTimeoutMs}ms 동안 잡 ${jobId} 에 활동(lease/heartbeat)이 없습니다 — 미연결/유휴로 판단.`,
+      );
+      reject(
+        new UpstreamError(
+          "UPSTREAM_ERROR",
+          { runnerId: key.runnerId, reason: "no_runner" },
+          "셀프호스티드 러너 활동이 없습니다 — 연결된 러너가 없거나 유휴/사망 상태입니다.",
+        ),
+      );
+    }, this.queueTimeoutMs);
+    // 타이머가 프로세스를 붙잡지 않게(테스트/종료 친화). Node 외 런타임엔 unref 없음 → 옵셔널 체이닝.
+    (timer as { unref?: () => void }).unref?.();
+    return timer;
+  }
+
+  // 활동 시 유휴 타임아웃을 리셋(lease 로 가져가거나 heartbeat 할 때). 기존 타이머를 갈아끼운다.
+  private rearm(key: SelfHostedKey, entry: PendingEntry): void {
+    clearTimeout(entry.timer);
+    entry.timer = this.armTimeout(key, entry.jobId, entry.reject);
   }
 
   // 다음 미-lease 잡을 가져간다(러너 pull). 없으면 null(러너는 재폴링). leasedAt 기록.
@@ -106,6 +126,7 @@ export class RunnerHub {
     const entry = arr.find((e) => e.leasedAt === undefined);
     if (!entry) return null;
     entry.leasedAt = now;
+    this.rearm(key, entry); // 러너가 가져감 → 유휴 타임아웃 리셋(이제 heartbeat 가 살아있게 유지)
     return { jobId: entry.jobId, job: entry.job };
   }
 
@@ -140,6 +161,7 @@ export class RunnerHub {
     const entry = this.q(key).find((e) => e.jobId === jobId);
     if (!entry) return false;
     entry.leasedAt = this.now();
+    this.rearm(key, entry); // 생존 신호 → 유휴 타임아웃 리셋(장기 실행 잡이 잘못 거부되지 않게)
     return true;
   }
 

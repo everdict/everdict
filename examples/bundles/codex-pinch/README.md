@@ -1,52 +1,51 @@
-# codex + pinch — a bundle
+# codex + pinch — a bundle (self-hosted)
 
 A **bundle**: harness- and benchmark-specific definitions as pure data, installed through the generalized
-`POST /bundles/install` surface. **Zero core/package changes** — this is the "specifics live in a bundle, not
-core" principle (see `docs/architecture/bundle-bundles.md`).
+`POST /bundles/install` surface. **Zero core/package changes** — the "specifics live in a bundle, not core"
+principle (see `docs/architecture/bundles.md`). Verified end-to-end: **codex runs pinch on a self-hosted runner
+(the machine's ChatGPT login pays; workspace budget untouched) → objective grade → leaderboard.**
 
 ## What's inside `bundle.json`
 
 | Section | What | Note |
 |---|---|---|
-| `harnessTemplates` + `harnesses` | **codex** as a declarative `command` harness (`codex exec … {{task}} {{model}}`) | tailor the `command`/`setup`/`model` to your installed codex CLI |
-| `benchmarkRecipes` | **pinch** adapter — jsonl source → repo+tests cases (template for importing pinch variants) | swap `source` (jsonl/huggingface) + `mapping` field names |
-| `datasets` | **pinch-building-dashboards** — the real PinchBench building-dashboards case (`env: prompt`, `judge` rubric) | the same benchmark the hermes scripts use; scored by an LLM judge |
+| `harnessTemplates` + `harnesses` | **codex** as a declarative `command` harness: `codex exec --sandbox workspace-write --skip-git-repo-check {{task}} < /dev/null` | `setup: []` (codex is pre-installed on the self-hosted runner); `< /dev/null` gives codex an immediate stdin EOF so it doesn't wait for input when run non-interactively (the harness runs it via a pipe, not a TTY); `model: gpt-5-codex` is the declared leaderboard model axis; `trace: none` → outcome-graded |
+| `datasets` → **pinch-dashboards** | PinchBench building-dashboards, **coding-agent variant** (`env: repo`): codex writes `dashboard.json`, graded **deterministically** (`tests-pass`: valid JSON + p95/p99/error/volume panels) | no judge model / provider key needed — runs entirely on the runner's codex login |
+| `datasets` → **pinch-building-dashboards** | the original (`env: prompt`, `judge` rubric) — the same benchmark the hermes scripts use | needs a judge model; for comparing codex vs hermes on the LLM-judged form |
+| `benchmarkRecipes` → **pinch** | jsonl→repo+tests adapter (template for importing pinch variants) | swap `source`/`mapping` for real pinch data |
 
-## Install (tenant self-serve)
+## Run codex on a self-hosted runner (verified)
+
+One command drives the whole flow (dev control plane + pair + install + run + leaderboard):
 
 ```bash
-curl -sX POST "$ASSAY_API/bundles/install" \
-  -H "authorization: Bearer $ASSAY_KEY" -H 'content-type: application/json' \
-  --data @examples/bundles/codex-pinch/bundle.json
-# → { "id": "codex-pinch", "version": "1.0.0", "results": [ { "kind": "harness", "status": "ok" }, ... ] }
+node scripts/live/codex-pinch-selfhosted.mjs
+# ① dev control plane  ② POST /runners (pair this machine)  ③ assay runner --pair (codex on PATH)
+# ④ POST /bundles/install  ⑤ POST /scorecards {dataset: pinch-dashboards, harness: codex, runtime: self:<id>}
+# ⑥ → provenance.ranOn=self-hosted · tests_pass PASS · leaderboard: #1 codex@1.0.0 × gpt-5-codex (score=1)
 ```
 
-Or via MCP: `install_bundle { bundle: "<contents of bundle.json>" }`.
+Manually, the self-hosted pieces:
 
-Install is **idempotent** (re-installing identical content is a no-op; conflicting content on an existing
-`(id,version)` returns `status:"conflict"` for that item without aborting the batch). AuthZ is composed from the
-bundle's contents (this bundle needs `harnesses:register` + `datasets:write` → **member+**).
+1. **Pair the machine** → `POST /runners {label, capabilities:["repo"]}` → `{runner:{id}, token: rnr_…}`.
+2. **Start the runner** (codex must be on `PATH`; it uses the machine's `codex login`):
+   `node apps/cli/dist/main.js runner --pair <rnr_…> --api-url <cp>`.
+3. **Install the bundle**: `POST /bundles/install --data @bundle.json` (or MCP `install_bundle`).
+4. **Run**: `POST /scorecards {dataset:{id:"pinch-dashboards"}, harness:{id:"codex"}, runtime:"self:<runnerId>"}`.
+   The job parks in the runner's lease queue; the runner runs `codex exec` locally (LocalDriver), writes
+   `dashboard.json`, the `tests-pass` grader validates it, and the result comes back tagged
+   `provenance.ranOn="self-hosted"` — **workspace budget is not drawn** (own login pays).
+5. **Leaderboard**: `GET /scorecards/leaderboard?dataset=pinch-dashboards&metric=tests_pass` →
+   `codex × gpt-5-codex`. Compare against other harnesses/models, or track over time.
 
-## Run it → dashboard
-
-1. Register your execution runtime if needed (`POST /runtimes`) or use the shared `docker` runtime.
-2. Run pinch on codex (the `judge` grader needs a judge model — pass one or set a workspace default):
-   ```bash
-   curl -sX POST "$ASSAY_API/scorecards" -H "authorization: Bearer $ASSAY_KEY" \
-     -H 'content-type: application/json' \
-     -d '{"dataset":{"id":"pinch-building-dashboards"},"harness":{"id":"codex"},"runtime":"docker",
-          "judge":{"provider":"openai","model":"gpt-5.4-mini"}}'
-   ```
-3. See it on the **leaderboard**: `GET /scorecards/leaderboard?dataset=pinch-building-dashboards&metric=judge` →
-   a `codex × <model>` row. The model axis is captured from the run (declared `spec.model`, or observed from the
-   trace if codex emits one). Compare against other harnesses (e.g. hermes) on the same benchmark, or track over time.
+> Long codex runs (minutes) stay alive: the runner heartbeats every 30s and the control-plane lease hub treats
+> `queueTimeoutMs` as an **inactivity** timeout (reset by lease/heartbeat), so only an idle/dead runner times out.
 
 ## Adapting to real pinch
 
-- **Real source**: change `benchmarkRecipes[0].source` to `{ "kind": "huggingface", "dataset": "<org>/pinch" }`
-  or keep `jsonl` and upload rows via `POST /benchmarks/import` (`text` = your jsonl).
-- **Field mapping**: set `mapping` field names to pinch's columns (task prompt, repo/ref, test command, …).
-- **Custom scoring**: beyond `tests-pass`/`answer-match`, use the `command` grader (run any scorer → regex pass)
-  or a registered **judge** (LLM/VLM) — all declarative, no code.
-- **codex CLI**: adjust `command`/`setup`/`model` to match the codex version you install; if codex emits OTel,
-  set `trace: { "kind": "otel", "endpoint": "…" }` to capture per-call model/cost.
+- **Judged form**: run `pinch-building-dashboards` on codex with a judge (`judge:{provider,model}`) and compare
+  vs hermes on the same dataset (`GET /scorecards/leaderboard?dataset=pinch-building-dashboards&metric=judge`).
+- **Real source/scoring**: change `benchmarkRecipes[0].source`/`mapping` for real pinch columns; beyond
+  `tests-pass`, use the `command` grader (any scorer → exit code) or a registered judge — all declarative.
+- **Trace/model**: if codex emits OTel, set `trace:{kind:"otel",endpoint:"…"}` to capture per-call model/cost
+  (then the leaderboard model axis is *observed*, not just declared).

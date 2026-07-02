@@ -85,6 +85,49 @@ describe("RunnerHub", () => {
     }
   });
 
+  it("유휴 타임아웃은 lease/heartbeat 로 리셋 — 장기 실행 잡(codex 등)이 heartbeat 중이면 거부되지 않는다", async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = new RunnerHub({ queueTimeoutMs: 100, newJobId: () => "j-long" });
+      const d = hub.enqueue(keyA, job("c1"));
+      let rejected = false;
+      d.catch(() => {
+        rejected = true; // reject 되면 표시(unhandled 방지 겸)
+      });
+      expect(hub.lease(keyA)?.jobId).toBe("j-long"); // 러너가 가져감 → 타임아웃 리셋
+      // queueTimeoutMs(100)를 훌쩍 넘겨도 30ms 마다 heartbeat 로 리셋 → 거부되지 않는다(총 300ms 경과).
+      for (let i = 0; i < 10; i++) {
+        await vi.advanceTimersByTimeAsync(30);
+        expect(hub.heartbeat(keyA, "j-long")).toBe(true);
+      }
+      expect(rejected).toBe(false);
+      expect(hub.complete(keyA, "j-long", result)).toBe(true);
+      await expect(d).resolves.toEqual(result);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("leased 후 heartbeat 가 끊기면(러너 사망) 유휴 타임아웃 뒤 no_runner 로 거부", async () => {
+    vi.useFakeTimers();
+    try {
+      const hub = new RunnerHub({ queueTimeoutMs: 50, newJobId: () => "j-dead" });
+      const d = hub.enqueue(keyA, job("c1"));
+      // 핸들러를 타이머 진행 전에 붙인다(타이머 reject 가 unhandled 로 새지 않게).
+      const settled = d.then(
+        () => ({ ok: true as const }),
+        (e: unknown) => ({ ok: false as const, e }),
+      );
+      hub.lease(keyA); // 가져갔지만 이후 heartbeat 없음(러너 사망)
+      await vi.advanceTimersByTimeAsync(60); // 유휴 50ms 초과
+      const r = await settled;
+      expect(r.ok).toBe(false);
+      expect(r).toMatchObject({ e: { code: "UPSTREAM_ERROR", extra: { reason: "no_runner" } } });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("lease 만료 → 재큐: 러너 사망 시 다음 lease 가 같은 잡을 다시 가져간다", async () => {
     let t = 0;
     const hub = new RunnerHub({ newJobId: () => "j1", now: () => t, leaseTtlMs: 100 });
