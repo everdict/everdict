@@ -71,6 +71,23 @@ describe("RunService", () => {
     expect(jobs[1]?.evalCase.placement).toBeUndefined();
   });
 
+  it("list(scorecardId) 는 그 배치 자식만, 기본 list 는 standalone 만(케이스 드릴다운)", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
+    const base = {
+      tenant: "t",
+      harness: { id: "s", version: "0" },
+      status: "succeeded" as const,
+      createdAt: "t",
+      updatedAt: "t",
+    };
+    await store.create({ ...base, id: "solo", caseId: "c" });
+    await store.create({ ...base, id: "ch1", caseId: "c1", parentScorecardId: "sc1", trigger: "scorecard" });
+    await store.create({ ...base, id: "ch2", caseId: "c2", parentScorecardId: "sc2", trigger: "scorecard" });
+    expect((await svc.list("t")).map((r) => r.id)).toEqual(["solo"]); // 기본: 자식 숨김
+    expect((await svc.list("t", { scorecardId: "sc1" })).map((r) => r.id)).toEqual(["ch1"]); // 배치 드릴다운
+  });
+
   it("trigger 를 레코드에 기록한다(활동 뷰 source 축) — 미지정이면 미설정", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });

@@ -83,8 +83,9 @@ export class RunService {
     return this.deps.store.get(id);
   }
 
-  list(tenant?: string): Promise<RunRecord[]> {
-    return this.deps.store.list(tenant);
+  // 기본은 standalone run(활동 리스트) — scorecardId 지정 시 그 배치의 자식 run 만(스코어카드 상세 케이스 드릴다운).
+  list(tenant?: string, opts?: { scorecardId?: string }): Promise<RunRecord[]> {
+    return this.deps.store.list(tenant, opts);
   }
 
   private async track(id: string, input: SubmitInput): Promise<void> {

@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 
+import { runsSchema } from '@/entities/run'
 import { caseVerdict, scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -79,6 +80,17 @@ export default async function ScorecardDetailPage({
   const failedCount = results.filter((r) => caseVerdict(r.scores) === false).length
   const steps = record.steps ?? []
   const live = record.status === 'queued' || record.status === 'running'
+
+  // 케이스 드릴다운: 이 스코어카드가 팬아웃한 자식 run(있으면) → caseId→runId. 구(舊)/ingest 스코어카드는 자식이 없어 빈 맵.
+  const childRunByCase = new Map<string, string>()
+  if (results.length > 0) {
+    try {
+      const children = runsSchema.parse(await controlPlane.listRuns(ctx, { scorecardId: id }))
+      for (const c of children) childRunByCase.set(c.caseId, c.id)
+    } catch {
+      // 자식 run 조회 실패/없음 → 드릴다운 링크 없이 렌더(현행 유지)
+    }
+  }
 
   return (
     <div className="space-y-7">
@@ -271,6 +283,15 @@ export default async function ScorecardDetailPage({
                         {verdict == null ? 'SKIP' : verdict ? 'PASS' : 'FAIL'}
                       </Badge>
                       <span className="font-mono text-[13px] font-[510]">{r.caseId}</span>
+                      {/* 이 케이스의 자식 run(있으면) — 전체 트레이스/usage/provenance 드릴다운. */}
+                      {childRunByCase.get(r.caseId) && (
+                        <Link
+                          href={`/${workspace}/runs/${childRunByCase.get(r.caseId)}`}
+                          className="font-mono text-[11px] text-link transition-colors hover:text-foreground"
+                        >
+                          → run
+                        </Link>
+                      )}
                     </span>
                     <div className="flex flex-wrap items-center gap-1.5">
                       {r.snapshot?.kind && <Badge tone="neutral">{String(r.snapshot.kind)}</Badge>}

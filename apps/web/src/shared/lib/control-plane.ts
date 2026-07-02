@@ -71,7 +71,12 @@ export const controlPlane = {
   updateWorkspace: <T>(auth: AuthContext, patch: unknown) =>
     call<T>(auth, '/workspace', { method: 'PATCH', body: JSON.stringify(patch) }),
   deleteWorkspace: (auth: AuthContext) => callVoid(auth, '/workspace', { method: 'DELETE' }),
-  listRuns: <T>(auth: AuthContext) => call<T>(auth, '/runs'),
+  // scorecardId 지정 시 그 스코어카드의 케이스 자식 run(드릴다운); 아니면 standalone 활동 리스트(자식 숨김).
+  listRuns: <T>(auth: AuthContext, opts?: { scorecardId?: string }) =>
+    call<T>(
+      auth,
+      opts?.scorecardId ? `/runs?scorecardId=${encodeURIComponent(opts.scorecardId)}` : '/runs'
+    ),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
   submitRun: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/runs', { method: 'POST', body: JSON.stringify(body) }),
