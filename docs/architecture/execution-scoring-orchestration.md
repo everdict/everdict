@@ -136,3 +136,12 @@ Ingest is the existence proof for Concern 3.
 - `.claude/skills/api-layer` — the execution/orchestration/scoring seam (`executeCase` pure · `ScoringService` ·
   services orchestrate).
 - `docs/api.md` / `docs/scorecards.md` — surface unchanged (internal seam refactor); no client-visible change.
+
+## Verification (CLOSED)
+
+- **api 310 unit/integration tests green** (in-memory + fake `SqlClient`). `ScoringService` has its own 4 unit
+  tests; `executeCase` reduced to pure-execution tests; self-hosted settle-skip guarded at the service level.
+- **Live-verified against real Postgres 16 (docker):** migrations apply cleanly and the child-run store path
+  (`PgRunStore` filter, `PgScorecardStore.runIds` jsonb) round-trips on real PG.
+- **web `next build` green.** Legacy swept: stale post-S2 comment fixed, `resolveRepoToken` made module-internal.
+- **Nothing open.** `materializeRun`/`BatchDriver` are documented non-goals (DRY gold-plating), not TODOs.

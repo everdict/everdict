@@ -28,7 +28,10 @@
 >   `ScorecardService.get` hydrates `scorecard` from them → response shape, web, and diff are all unchanged.
 >   `no-runStore` / ingest / old records keep the embed (get returns it as-is).
 >
-> **Fully done.** Ingest paths (`/scorecards/ingest{,/pull}`) keep embed-only (no dispatched run) by design.
+> **Fully done + verified (CLOSED).** Ingest paths (`/scorecards/ingest{,/pull}`) keep embed-only (no dispatched
+> run) by design. **Verification:** api 310 unit/integration tests green; **live-verified against real Postgres 16
+> (docker)** — migration `0029` applies cleanly and `PgRunStore` child-run filter (`parent_scorecard_id IS NULL`
+> vs `= $scorecardId`) + `PgScorecardStore.runIds` jsonb round-trip work on real PG; `next build` (web) green.
 
 ## Problem — the primitive is weaker than the composite (inverted)
 
