@@ -13,11 +13,16 @@
 >   `ScorecardRecord.runIds` (mig `0029`); `RunStore.list` hides children by default (`scorecardId` opt fetches
 >   them); `ScorecardService.runStore?` fans out one child `RunRecord` per case (absent ⇒ unchanged embed-only).
 >
-> **Open follow-ups** (not done): the web **activity-console reframe** (run list columns → source/submitter/usage,
-> children hidden — the `trigger` field is stored but has no web consumer yet); scorecard detail **case→child-run
-> drill-down** UI; optionally cutting `ScorecardRecord.scorecard` embed over to pure `runIds` reference (currently
-> dual: still embeds results AND records `runIds`). Ingest paths (`/scorecards/ingest{,/pull}`) keep embed-only
-> (no dispatched run) — `runIds` stays null there, as designed.
+> **Follow-up SHIPPED — web activity-console reframe** (`f4dcbae` API trigger + `bff4992` web): standalone runs now
+> carry `trigger` (web/mcp/api; scorecard children = `"scorecard"`), and the run list is reframed from an
+> eval-results table into an **activity console** — dropped the noise-y per-run score column, added **출처(trigger)**
+> + **비용(usage)** columns, live `AutoRefresh` while any run is active, children hidden (server-side default).
+>
+> **Open follow-ups** (not done): scorecard detail **case→child-run drill-down** UI (uses `runIds` +
+> `list(tenant,{scorecardId})`); optional **unified activity feed** (merge scorecard runs in as groups — option B);
+> optionally cutting `ScorecardRecord.scorecard` embed over to pure `runIds` reference (currently dual: still embeds
+> results AND records `runIds`). Ingest paths (`/scorecards/ingest{,/pull}`) keep embed-only (no dispatched run) —
+> `runIds` stays null there, as designed.
 
 ## Problem — the primitive is weaker than the composite (inverted)
 
