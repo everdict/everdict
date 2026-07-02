@@ -34,6 +34,16 @@ export const resultSchema = z
   })
   .partial()
 
+// 사용량 요약 — 컨트롤플레인이 result.trace 에서 파생(usageFromTrace). 활동 리스트가 트레이스 파싱 없이 비용/토큰 표시.
+export const usageSchema = z.object({
+  promptTokens: z.number(),
+  completionTokens: z.number(),
+  totalTokens: z.number(),
+  usd: z.number(),
+  calls: z.number(),
+})
+export type Usage = z.infer<typeof usageSchema>
+
 export const runSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -41,7 +51,12 @@ export const runSchema = z.object({
   caseId: z.string(),
   status: z.enum(['queued', 'running', 'succeeded', 'failed']),
   result: resultSchema.optional(),
+  usage: usageSchema.optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
+  // 출처(활동 뷰 source 축): web|mcp|api|scorecard|schedule|front-door… 미설정=직접 API.
+  trigger: z.string().optional(),
+  // 이 run 이 속한 스코어카드 배치(있으면). 활동 리스트는 자식(값 있음)을 컨트롤플레인이 기본 제외.
+  parentScorecardId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

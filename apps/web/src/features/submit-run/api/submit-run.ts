@@ -53,6 +53,7 @@ export async function submitRunAction(input: SubmitRunInput): Promise<SubmitRunR
     },
     // runtime 선택 시 컨트롤플레인이 case.placement.target 으로 주입(scorecard 와 동일). 빈 값이면 기본 백엔드.
     ...(input.runtime ? { runtime: input.runtime } : {}),
+    trigger: 'web', // 활동 뷰 source 축 — 웹에서 제출
   }
   try {
     const rec = await controlPlane.submitRun<{ id: string }>(ctx, body)
