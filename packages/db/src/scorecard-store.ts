@@ -21,6 +21,15 @@ export const MetricSummarySchema = z.object({
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
+// 이 run 이 실제로 쓴 모델(리더보드 model 축, @assay/suite scorecardModels 결과와 동형 — 형태만 미러).
+// observed = 트레이스 관측 · declared = spec 선언 · primary = 그룹 키(관측 우선, 없으면 선언). 경량이라 list 에도 포함.
+export const ScorecardModelsSchema = z.object({
+  observed: z.array(z.string()).default([]),
+  declared: z.string().optional(),
+  primary: z.string().optional(),
+});
+export type ScorecardModels = z.infer<typeof ScorecardModelsSchema>;
+
 // 실행 과정 스텝(타임라인) — "진행 과정"을 보이기 위해 run 이 진행되며 append 된다(증분 저장).
 // phase = dispatch|judges|metrics|offload|persist|case, status = started|ok|failed|info.
 // Pg 는 steps jsonb 컬럼(mig 0026, additive). 무거운 detail 이라 목록(list)에선 생략하고 get 에서만 돌려준다.
@@ -40,6 +49,7 @@ export const ScorecardRecordSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }), // 해석된 구체 버전(never "latest")
   status: ScorecardStatusSchema,
   summary: z.array(MetricSummarySchema).optional(), // 경량 집계(목록용)
+  models: ScorecardModelsSchema.optional(), // 이 run 이 쓴 모델(리더보드 축, 경량 → 목록에도 포함). 과거 레코드는 미설정.
   scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)

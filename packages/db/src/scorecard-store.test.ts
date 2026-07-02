@@ -30,12 +30,13 @@ const rec = (over: Partial<ScorecardRecord> = {}): ScorecardRecord => ({
 });
 
 describe("InMemoryScorecardStore", () => {
-  it("create/get 는 전체(scorecard 포함), list 는 무거운 scorecard 를 생략하고 summary 만", async () => {
+  it("create/get 는 전체(scorecard 포함), list 는 무거운 scorecard 를 생략하고 summary·models 만", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec());
     await store.update("sc1", {
       status: "succeeded",
       summary: [{ metric: "steps", count: 1, mean: 3, passRate: 1 }],
+      models: { observed: ["m"], primary: "m" },
       scorecard: SCORECARD,
     });
     const got = await store.get("sc1");
@@ -44,6 +45,7 @@ describe("InMemoryScorecardStore", () => {
     const list = await store.list("acme");
     expect(list).toHaveLength(1);
     expect(list[0]?.summary).toHaveLength(1); // 목록엔 summary
+    expect(list[0]?.models?.primary).toBe("m"); // model 축은 경량 → 목록에도 포함(리더보드용)
     expect(list[0]?.scorecard).toBeUndefined(); // 목록엔 무거운 scorecard 없음
   });
 });
@@ -71,6 +73,7 @@ const ROW = {
   harness_version: "0",
   status: "succeeded",
   summary: [{ metric: "steps", count: 1, mean: 3, passRate: 1 }],
+  models: { observed: ["m"], primary: "m" },
   scorecard: SCORECARD,
   error: null,
   created_at: new Date("2026-06-19T00:00:00.000Z"),
@@ -83,23 +86,27 @@ describe("PgScorecardStore", () => {
     await new PgScorecardStore(client).create(rec());
     expect(calls[0]?.text).toMatch(/INSERT INTO assay_scorecards/);
     expect(calls[0]?.params?.[0]).toBe("sc1");
-    expect(calls[0]?.params?.[8]).toBeNull(); // scorecard 없음
+    expect(calls[0]?.params?.[8]).toBeNull(); // models 없음(rec 기본)
+    expect(calls[0]?.params?.[9]).toBeNull(); // scorecard 없음
   });
 
-  it("get → row 를 ScorecardRecord 로 매핑(전체 scorecard 포함)", async () => {
+  it("get → row 를 ScorecardRecord 로 매핑(전체 scorecard + models 포함)", async () => {
     const { client } = fakeClient(() => ({ rows: [ROW] }));
     const got = await new PgScorecardStore(client).get("sc1");
     expect(got?.dataset).toEqual({ id: "repo-smoke", version: "1.0.0" });
     expect(got?.scorecard?.suiteId).toBe("repo-smoke");
+    expect(got?.models?.primary).toBe("m");
   });
 
-  it("list → scorecard 컬럼 미선택(경량) + 테넌트 필터 + 정렬", async () => {
+  it("list → scorecard 컬럼 미선택(경량)하되 models 는 SELECT + 테넌트 필터 + 정렬", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
     const list = await new PgScorecardStore(client).list("acme");
     const selectClause = (calls[0]?.text ?? "").split("FROM")[0]; // FROM assay_scorecards 의 테이블명은 제외
     expect(selectClause).not.toMatch(/scorecard/); // 무거운 컬럼은 SELECT 안 함
+    expect(selectClause).toMatch(/models/); // model 축은 경량 → 목록에 포함(리더보드용)
     expect(calls[0]?.text).toMatch(/ORDER BY created_at DESC, id DESC/);
     expect(list[0]?.scorecard).toBeUndefined();
     expect(list[0]?.summary).toHaveLength(1);
+    expect(list[0]?.models?.primary).toBe("m");
   });
 });

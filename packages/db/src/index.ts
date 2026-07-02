@@ -12,10 +12,12 @@ export {
   type ScorecardStore,
   type ScorecardStep,
   type MetricSummary,
+  type ScorecardModels,
   ScorecardRecordSchema,
   ScorecardStatusSchema,
   ScorecardStepSchema,
   MetricSummarySchema,
+  ScorecardModelsSchema,
   InMemoryScorecardStore,
 } from "./scorecard-store.js";
 export {

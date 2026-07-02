@@ -30,6 +30,7 @@ import {
   diffScorecards,
   evalMetric,
   runSuite,
+  scorecardModels,
   summarizeScorecard,
   trendSeries,
 } from "@assay/suite";
@@ -382,11 +383,15 @@ export class ScorecardService {
       await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
       phase = "persist";
       const summary = summarizeScorecard(scorecard);
+      // 리더보드 model 축: 트레이스 관측 우선 + spec 선언(command 하니스만) 폴백.
+      const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
+      const models = scorecardModels(scorecard, declared);
       pushStep("persist", "ok", "집계·저장 완료");
       await this.deps.store.update(id, {
         status: "succeeded",
         scorecard,
         summary,
+        models,
         steps: [...steps],
         updatedAt: this.now(),
       });
@@ -401,7 +406,13 @@ export class ScorecardService {
         status: "failed",
         error: { ...base, phase },
         steps: [...steps],
-        ...(scorecard ? { scorecard, summary: summarizeScorecard(scorecard) } : {}),
+        ...(scorecard
+          ? {
+              scorecard,
+              summary: summarizeScorecard(scorecard),
+              models: scorecardModels(scorecard, harnessSpec?.kind === "command" ? harnessSpec.model : undefined),
+            }
+          : {}),
         updatedAt: this.now(),
       });
     }
@@ -501,7 +512,9 @@ export class ScorecardService {
     await this.applyMetrics(tenant, results, metrics); // 등록 metric → 합격규칙 점수(judge 뒤)
     await this.offloadResults(id, results); // os-use 스크린샷 → object storage(레코드 슬림)
     const summary = summarizeScorecard(scorecard);
-    await this.deps.store.update(id, { status: "succeeded", scorecard, summary, updatedAt: this.now() });
+    // 인제스트는 하니스 spec 을 해석하지 않음 → 관측(트레이스)만으로 model 축.
+    const models = scorecardModels(scorecard);
+    await this.deps.store.update(id, { status: "succeeded", scorecard, summary, models, updatedAt: this.now() });
   }
 
   private async failIngest(id: string, err: unknown): Promise<void> {
