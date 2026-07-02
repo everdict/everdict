@@ -288,10 +288,39 @@ export class ScorecardService {
   // 목록(경량 summary+models)만으로 계산 — 무거운 트레이스 불필요. ScorecardRecord 가 LeaderboardCard 를 구조적으로 만족.
   async leaderboard(
     tenant: string,
-    opts: { datasetId: string; metric: string; harnessId?: string; model?: string; window?: "latest" | "best" },
+    opts: {
+      datasetId: string;
+      metric: string;
+      harnessId?: string;
+      model?: string;
+      judgeModel?: string;
+      window?: "latest" | "best";
+    },
   ): Promise<Leaderboard> {
     const records = await this.deps.store.list(tenant);
     return leaderboard(records, opts);
+  }
+
+  // 이 run 을 채점한 judge 모델(들) — inline judge config.model + 등록 model-judge spec.model 의 distinct(정렬).
+  // 리더보드 model 축이 '하니스가 쓴 LLM'이라면 이건 '채점자'. 공정 비교(같은 judge) 필터/표시용.
+  private async collectJudgeModels(
+    tenant: string,
+    judges: Array<{ id: string; version: string }>,
+    inlineJudge: JudgeRunConfig | undefined,
+  ): Promise<string[]> {
+    const models = new Set<string>();
+    if (inlineJudge?.model) models.add(inlineJudge.model);
+    if (this.deps.judges) {
+      for (const sel of judges) {
+        try {
+          const spec = await this.deps.judges.get(tenant, sel.id, sel.version || "latest");
+          if (spec.kind === "model") models.add(spec.model);
+        } catch {
+          // 없는 judge 는 스킵(applyJudges 와 동일)
+        }
+      }
+    }
+    return [...models].sort();
   }
 
   // model 축 백필 — models 가 아직 없는(구) succeeded 스코어카드의 저장 트레이스에서 관측 모델을 도출해 채운다.
@@ -453,6 +482,8 @@ export class ScorecardService {
       // 리더보드 model 축: 트레이스 관측 우선 + spec 선언(command 하니스만) 폴백.
       const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
       const models = scorecardModels(scorecard, declared);
+      // 리더보드 judge 축: 이 run 을 채점한 judge 모델(들) — inline config + 등록 model-judge spec.
+      const judgeModels = await this.collectJudgeModels(tenant, judges, judge);
       pushStep("persist", "ok", "집계·저장 완료");
       // 자식 run 이 있으면: judge/metric/offload 로 최종화된 결과를 자식에 write-back 후 무거운 embed 대신 runIds 만 저장
       //  → get 이 자식에서 hydrate(저장 dedup, 응답 형태 불변). 자식이 없으면(no runStore) 현행대로 embed 저장.
@@ -462,6 +493,7 @@ export class ScorecardService {
         status: "succeeded",
         summary,
         models,
+        ...(judgeModels.length > 0 ? { judgeModels } : {}),
         steps: [...steps],
         ...(hasChildren ? { runIds: [...caseToChild.values()] } : { scorecard }),
         updatedAt: this.now(),
@@ -590,7 +622,16 @@ export class ScorecardService {
     const summary = summarizeScorecard(scorecard);
     // 인제스트는 하니스 spec 을 해석하지 않음 → 관측(트레이스)만으로 model 축.
     const models = scorecardModels(scorecard);
-    await this.deps.store.update(id, { status: "succeeded", scorecard, summary, models, updatedAt: this.now() });
+    // judge 축: 인제스트엔 inline judge 가 없으므로 적용된 등록 judge 들의 model 만.
+    const judgeModels = await this.collectJudgeModels(tenant, judges, undefined);
+    await this.deps.store.update(id, {
+      status: "succeeded",
+      scorecard,
+      summary,
+      models,
+      ...(judgeModels.length > 0 ? { judgeModels } : {}),
+      updatedAt: this.now(),
+    });
   }
 
   private async failIngest(id: string, err: unknown): Promise<void> {

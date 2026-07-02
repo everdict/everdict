@@ -40,10 +40,10 @@ export default async function LeaderboardPage({
   searchParams,
 }: {
   params: Promise<{ workspace: string }>
-  searchParams: Promise<{ dataset?: string; metric?: string; window?: string }>
+  searchParams: Promise<{ dataset?: string; metric?: string; window?: string; judgeModel?: string }>
 }) {
   const { workspace } = await params
-  const { dataset, metric, window } = await searchParams
+  const { dataset, metric, window, judgeModel } = await searchParams
   const ctx = await authContext()
 
   let options: DatasetOption[] = []
@@ -64,6 +64,7 @@ export default async function LeaderboardPage({
           dataset,
           metric: metric ?? 'judge',
           window: window === 'best' ? 'best' : 'latest',
+          ...(judgeModel ? { judgeModel } : {}),
         })
       )
     } catch (e) {
@@ -94,7 +95,13 @@ export default async function LeaderboardPage({
         />
       ) : (
         <Card className="p-4">
-          <LeaderboardPicker datasets={options} dataset={dataset} metric={metric} window={window} />
+          <LeaderboardPicker
+            datasets={options}
+            dataset={dataset}
+            metric={metric}
+            window={window}
+            judgeModel={judgeModel}
+          />
         </Card>
       )}
 
@@ -130,6 +137,7 @@ export default async function LeaderboardPage({
                     <TH className="w-12 text-right">#</TH>
                     <TH>harness</TH>
                     <TH>model</TH>
+                    <TH>judge</TH>
                     <TH className="text-right">{board.metric}</TH>
                     <TH className="text-right">runs</TH>
                     <TH className="text-right">최근</TH>
@@ -157,6 +165,22 @@ export default async function LeaderboardPage({
                           </code>
                         ) : (
                           <span className="text-faint text-[12px]">unknown</span>
+                        )}
+                      </TD>
+                      <TD>
+                        {r.judgeModels && r.judgeModels.length > 0 ? (
+                          <span className="flex flex-wrap gap-1">
+                            {r.judgeModels.map((jm) => (
+                              <code
+                                key={jm}
+                                className="rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground"
+                              >
+                                {jm}
+                              </code>
+                            ))}
+                          </span>
+                        ) : (
+                          <span className="text-faint text-[12px]">–</span>
                         )}
                       </TD>
                       <TD className="text-right font-mono text-[12px] font-[510] tabular-nums">

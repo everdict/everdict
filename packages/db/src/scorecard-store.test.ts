@@ -37,6 +37,7 @@ describe("InMemoryScorecardStore", () => {
       status: "succeeded",
       summary: [{ metric: "steps", count: 1, mean: 3, passRate: 1 }],
       models: { observed: ["m"], primary: "m" },
+      judgeModels: ["gpt-5.4-mini"],
       scorecard: SCORECARD,
     });
     const got = await store.get("sc1");
@@ -46,6 +47,7 @@ describe("InMemoryScorecardStore", () => {
     expect(list).toHaveLength(1);
     expect(list[0]?.summary).toHaveLength(1); // 목록엔 summary
     expect(list[0]?.models?.primary).toBe("m"); // model 축은 경량 → 목록에도 포함(리더보드용)
+    expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]); // judge 축도 경량 → 목록 포함
     expect(list[0]?.scorecard).toBeUndefined(); // 목록엔 무거운 scorecard 없음
   });
 });
@@ -74,6 +76,7 @@ const ROW = {
   status: "succeeded",
   summary: [{ metric: "steps", count: 1, mean: 3, passRate: 1 }],
   models: { observed: ["m"], primary: "m" },
+  judge_models: ["gpt-5.4-mini"],
   scorecard: SCORECARD,
   error: null,
   created_at: new Date("2026-06-19T00:00:00.000Z"),
@@ -87,26 +90,30 @@ describe("PgScorecardStore", () => {
     expect(calls[0]?.text).toMatch(/INSERT INTO assay_scorecards/);
     expect(calls[0]?.params?.[0]).toBe("sc1");
     expect(calls[0]?.params?.[8]).toBeNull(); // models 없음(rec 기본)
-    expect(calls[0]?.params?.[9]).toBeNull(); // scorecard 없음
+    expect(calls[0]?.params?.[9]).toBeNull(); // judge_models 없음
+    expect(calls[0]?.params?.[10]).toBeNull(); // scorecard 없음
   });
 
-  it("get → row 를 ScorecardRecord 로 매핑(전체 scorecard + models 포함)", async () => {
+  it("get → row 를 ScorecardRecord 로 매핑(전체 scorecard + models + judgeModels 포함)", async () => {
     const { client } = fakeClient(() => ({ rows: [ROW] }));
     const got = await new PgScorecardStore(client).get("sc1");
     expect(got?.dataset).toEqual({ id: "repo-smoke", version: "1.0.0" });
     expect(got?.scorecard?.suiteId).toBe("repo-smoke");
     expect(got?.models?.primary).toBe("m");
+    expect(got?.judgeModels).toEqual(["gpt-5.4-mini"]);
   });
 
-  it("list → scorecard 컬럼 미선택(경량)하되 models 는 SELECT + 테넌트 필터 + 정렬", async () => {
+  it("list → scorecard 컬럼 미선택(경량)하되 models·judge_models 는 SELECT + 테넌트 필터 + 정렬", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
     const list = await new PgScorecardStore(client).list("acme");
     const selectClause = (calls[0]?.text ?? "").split("FROM")[0]; // FROM assay_scorecards 의 테이블명은 제외
-    expect(selectClause).not.toMatch(/scorecard/); // 무거운 컬럼은 SELECT 안 함
+    expect(selectClause).not.toMatch(/ scorecard/); // 무거운 컬럼은 SELECT 안 함(judge_models 의 _models 오탐 방지 위해 공백 앵커)
     expect(selectClause).toMatch(/models/); // model 축은 경량 → 목록에 포함(리더보드용)
+    expect(selectClause).toMatch(/judge_models/); // judge 축도 경량 → 목록 포함
     expect(calls[0]?.text).toMatch(/ORDER BY created_at DESC, id DESC/);
     expect(list[0]?.scorecard).toBeUndefined();
     expect(list[0]?.summary).toHaveLength(1);
     expect(list[0]?.models?.primary).toBe("m");
+    expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]);
   });
 });

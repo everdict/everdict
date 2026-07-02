@@ -98,4 +98,17 @@ describe("leaderboard", () => {
     expect(lb.rows).toHaveLength(1);
     expect(lb.rows[0]?.model).toBeUndefined();
   });
+
+  it("judgeModel 필터: 그 judge 모델로 채점된 run 만(같은 채점자끼리 공정 비교) + 행에 judgeModels 노출", () => {
+    const lb = leaderboard(
+      [
+        card("a", H_A, "gpt-5", 0.6, { judgeModels: ["gpt-5.4-mini"] }),
+        card("bb", H_B, "o3", 0.9, { judgeModels: ["claude-opus-4-8"] }), // 다른 judge → 필터에서 제외
+      ],
+      { datasetId: "pinch-core", metric: "judge", judgeModel: "gpt-5.4-mini" },
+    );
+    expect(lb.rows).toHaveLength(1);
+    expect(lb.rows[0]?.harness.id).toBe("codex");
+    expect(lb.rows[0]?.judgeModels).toEqual(["gpt-5.4-mini"]);
+  });
 });

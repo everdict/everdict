@@ -11,27 +11,31 @@ export interface DatasetOption {
   label: string
 }
 
-// dataset/metric/window 를 골라 리더보드 URL 로 이동. 실제 랭킹은 서버가 계산.
+// dataset/metric/window/judgeModel 을 골라 리더보드 URL 로 이동. 실제 랭킹은 서버가 계산.
 export function LeaderboardPicker({
   datasets,
   dataset,
   metric,
   window,
+  judgeModel,
 }: {
   datasets: DatasetOption[]
   dataset?: string
   metric?: string
   window?: string
+  judgeModel?: string
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const [d, setD] = useState(dataset ?? datasets[0]?.id ?? '')
   const [m, setM] = useState(metric ?? 'judge')
   const [w, setW] = useState(window === 'best' ? 'best' : 'latest')
+  const [jm, setJm] = useState(judgeModel ?? '')
 
   function go() {
     if (!d) return
     const q = new URLSearchParams({ dataset: d, metric: m || 'judge', window: w })
+    if (jm) q.set('judgeModel', jm)
     router.push(`/${workspace}/scorecards/leaderboard?${q.toString()}`)
   }
 
@@ -59,6 +63,15 @@ export function LeaderboardPicker({
           <option value="latest">latest (최신 실행)</option>
           <option value="best">best (최고 점수)</option>
         </Select>
+      </div>
+      <div className="min-w-40 space-y-1.5">
+        <Label htmlFor="judgeModel">Judge 모델 (선택)</Label>
+        <Input
+          id="judgeModel"
+          value={jm}
+          onChange={(e) => setJm(e.target.value)}
+          placeholder="같은 채점자만"
+        />
       </div>
       <Button type="button" onClick={go} disabled={!d}>
         리더보드 보기

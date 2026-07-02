@@ -11,6 +11,7 @@ interface ScorecardRow {
   status: string;
   summary: unknown;
   models: unknown;
+  judge_models: unknown;
   scorecard: unknown;
   error: unknown;
   steps: unknown;
@@ -32,6 +33,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     status: row.status,
     summary: row.summary ?? undefined,
     models: row.models ?? undefined, // 경량 → 목록에도 포함
+    judgeModels: row.judge_models ?? undefined, // 경량 → 목록에도 포함(judge 축 필터/표시)
     scorecard: hasDetail ? (row.scorecard ?? undefined) : undefined,
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
@@ -48,8 +50,8 @@ export class PgScorecardStore implements ScorecardStore {
   async create(r: ScorecardRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO assay_scorecards
-        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, scorecard, error, steps, run_ids, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, scorecard, error, steps, run_ids, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
       [
         r.id,
         r.tenant,
@@ -60,6 +62,7 @@ export class PgScorecardStore implements ScorecardStore {
         r.status,
         r.summary ? JSON.stringify(r.summary) : null,
         r.models ? JSON.stringify(r.models) : null,
+        r.judgeModels ? JSON.stringify(r.judgeModels) : null,
         r.scorecard ? JSON.stringify(r.scorecard) : null,
         r.error ? JSON.stringify(r.error) : null,
         r.steps ? JSON.stringify(r.steps) : null,
@@ -86,6 +89,10 @@ export class PgScorecardStore implements ScorecardStore {
     if (patch.models !== undefined) {
       sets.push(`models = $${i++}`);
       vals.push(JSON.stringify(patch.models));
+    }
+    if (patch.judgeModels !== undefined) {
+      sets.push(`judge_models = $${i++}`);
+      vals.push(JSON.stringify(patch.judgeModels));
     }
     if (patch.scorecard !== undefined) {
       sets.push(`scorecard = $${i++}`);
@@ -124,7 +131,7 @@ export class PgScorecardStore implements ScorecardStore {
   async list(tenant?: string): Promise<ScorecardRecord[]> {
     // 무거운 scorecard 컬럼은 SELECT 하지 않는다(목록 경량화).
     const res = await this.client.query<ScorecardRow>(
-      `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, error, created_at, updated_at
+      `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, error, created_at, updated_at
        FROM assay_scorecards
        WHERE ($1::text IS NULL OR tenant = $1)
        ORDER BY created_at DESC, id DESC`,

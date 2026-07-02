@@ -50,6 +50,9 @@ export const ScorecardRecordSchema = z.object({
   status: ScorecardStatusSchema,
   summary: z.array(MetricSummarySchema).optional(), // 경량 집계(목록용)
   models: ScorecardModelsSchema.optional(), // 이 run 이 쓴 모델(리더보드 축, 경량 → 목록에도 포함). 과거 레코드는 미설정.
+  // 이 run 을 채점한 judge 모델(들) — model 축이 '하니스가 쓴 LLM'이라면 이건 '채점자'. 공정 비교(같은 judge)용
+  // 필터/표시. inline judge config.model + 등록 model-judge spec.model 의 distinct. 경량 → 목록에도 포함.
+  judgeModels: z.array(z.string()).optional(),
   scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)

@@ -674,16 +674,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "leaderboard_scorecards",
       {
         description:
-          "한 데이터셋(벤치마크)의 (harness × model) 랭킹 — metric 기준 내림차순. window=latest(기본)|best. harness/model 필터 선택.",
+          "한 데이터셋(벤치마크)의 (harness × model) 랭킹 — metric 기준 내림차순. window=latest(기본)|best. harness/model/judge_model 필터 선택(judge_model=같은 채점자끼리 공정 비교).",
         inputSchema: {
           dataset: z.string(),
           metric: z.string().optional(),
           harness: z.string().optional(),
           model: z.string().optional(),
+          judge_model: z.string().optional(),
           window: z.enum(["latest", "best"]).optional(),
         },
       },
-      ({ dataset, metric, harness, model, window }) =>
+      ({ dataset, metric, harness, model, judge_model, window }) =>
         run(principal, "scorecards:read", async () =>
           ok(
             await scorecards.leaderboard(ws, {
@@ -691,6 +692,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               metric: metric ?? "judge",
               ...(harness ? { harnessId: harness } : {}),
               ...(model ? { model } : {}),
+              ...(judge_model ? { judgeModel: judge_model } : {}),
               window: window ?? "latest",
             }),
           ),

@@ -433,6 +433,28 @@ describe("ScorecardService.submit — 리더보드 model 축 캡처", () => {
     expect(rec.models?.observed).toEqual(["claude-opus-4-8"]);
     expect(rec.models?.primary).toBe("claude-opus-4-8");
   });
+
+  it("inline judge config 모델을 succeeded 레코드의 judgeModels 로 저장한다(judge 축)", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: llmDispatch("gpt-4o"),
+      store,
+      datasets,
+      newId: () => "sc-judge",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      judge: { provider: "openai", model: "gpt-5.4-mini" }, // 채점자
+    });
+    const rec = await waitTerminal(store, "sc-judge");
+    expect(rec.status).toBe("succeeded");
+    expect(rec.models?.primary).toBe("gpt-4o"); // 하니스가 쓴 LLM
+    expect(rec.judgeModels).toEqual(["gpt-5.4-mini"]); // 채점자 — 별개 축
+  });
 });
 
 describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {

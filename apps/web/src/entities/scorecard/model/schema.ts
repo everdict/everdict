@@ -85,7 +85,7 @@ export const scorecardRecordSchema = z.object({
   status: scorecardStatusSchema,
   summary: z.array(metricSummarySchema).optional(),
   models: scorecardModelsSchema.optional(), // 과거 레코드는 미설정(unknown)
-
+  judgeModels: z.array(z.string()).optional(), // 이 run 을 채점한 judge 모델(들) — model 축과 별개(채점자)
   scorecard: fullScorecardSchema.optional(),
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })
@@ -150,6 +150,7 @@ export const leaderboardRowSchema = z.object({
   rank: z.number(),
   harness: z.object({ id: z.string(), version: z.string() }),
   model: z.string().optional(),
+  judgeModels: z.array(z.string()).optional(), // 대표 run 을 채점한 judge 모델(들)
   scorecardId: z.string(),
   createdAt: z.string(),
   score: z.number().nullable(),

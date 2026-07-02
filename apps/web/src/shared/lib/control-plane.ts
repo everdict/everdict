@@ -184,6 +184,7 @@ export const controlPlane = {
       metric?: string
       harness?: string
       model?: string
+      judgeModel?: string
       window?: 'latest' | 'best'
     }
   ) => {
@@ -191,6 +192,7 @@ export const controlPlane = {
     if (params.metric) q.set('metric', params.metric)
     if (params.harness) q.set('harness', params.harness)
     if (params.model) q.set('model', params.model)
+    if (params.judgeModel) q.set('judgeModel', params.judgeModel)
     if (params.window) q.set('window', params.window)
     return call<T>(auth, `/scorecards/leaderboard?${q.toString()}`)
   },
