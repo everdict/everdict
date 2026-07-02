@@ -18,12 +18,15 @@ export function AddBenchmark({
   benchmarks,
   recipes,
   existingDatasets = [],
+  preselectRecipe,
 }: {
   benchmarks: BenchmarkCatalogItem[]
   recipes: RecipeItem[]
   existingDatasets?: { id: string; versions: string[] }[]
+  preselectRecipe?: string
 }) {
-  const [mode, setMode] = useState<'build' | 'import'>('build')
+  // 레시피 상세에서 "데이터셋으로 만들기"로 진입하면(?recipe=) 가져오기 모드로 시작 + 해당 레시피 프리셀렉트.
+  const [mode, setMode] = useState<'build' | 'import'>(preselectRecipe ? 'import' : 'build')
   return (
     <div className="space-y-5">
       <div className="inline-flex rounded-lg border bg-secondary/40 p-0.5">
@@ -56,6 +59,7 @@ export function AddBenchmark({
           benchmarks={benchmarks}
           recipes={recipes}
           existingDatasets={existingDatasets}
+          preselect={preselectRecipe ? `recipe:${preselectRecipe}` : undefined}
         />
       )}
     </div>

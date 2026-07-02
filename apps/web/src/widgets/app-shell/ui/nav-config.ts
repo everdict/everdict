@@ -10,6 +10,7 @@ import {
   Gavel,
   LayoutDashboard,
   Puzzle,
+  ScrollText,
   Server,
   type LucideIcon,
 } from 'lucide-react'
@@ -54,6 +55,12 @@ export const NAV_SECTIONS: NavSection[] = [
     heading: '리소스',
     items: [
       { href: '/datasets', label: '데이터셋', icon: Database, keywords: 'dataset 벤치마크' },
+      {
+        href: '/recipes',
+        label: '레시피',
+        icon: ScrollText,
+        keywords: 'recipe 레시피 벤치마크 어댑터 source mapping 데이터셋',
+      },
       { href: '/harnesses', label: '하니스', icon: Boxes, keywords: 'harness 에이전트' },
       { href: '/judges', label: 'Judge', icon: Gavel, keywords: '심사 judge llm' },
       { href: '/runtimes', label: '런타임', icon: Server, keywords: 'runtime 인프라 k8s nomad' },

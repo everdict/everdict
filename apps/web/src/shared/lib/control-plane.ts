@@ -138,6 +138,11 @@ export const controlPlane = {
     call<T>(auth, '/benchmark-recipes', { method: 'POST', body: JSON.stringify(spec) }),
   validateBenchmarkRecipe: <T>(auth: AuthContext, spec: unknown) =>
     call<T>(auth, '/benchmark-recipes/validate', { method: 'POST', body: JSON.stringify(spec) }),
+  getBenchmarkRecipe: <T>(auth: AuthContext, id: string, version: string) =>
+    call<T>(
+      auth,
+      `/benchmark-recipes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`
+    ),
   // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식. 발사(Temporal)는 컨트롤플레인 slice 2.
   listSchedules: <T>(auth: AuthContext) => call<T>(auth, '/schedules'),
   getSchedule: <T>(auth: AuthContext, id: string) =>

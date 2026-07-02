@@ -33,7 +33,7 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
           can(principal?.roles, 'datasets:write') ? (
             <div className="flex gap-2">
               <Link
-                href={`/${workspace}/datasets/recipes`}
+                href={`/${workspace}/recipes`}
                 className={buttonVariants({ size: 'sm', variant: 'secondary' })}
               >
                 레시피

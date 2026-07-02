@@ -56,7 +56,7 @@ function hrefFor(ws: string, kind: string, id: string): string | undefined {
     case 'dataset':
       return `/${ws}/datasets/${enc}`
     case 'benchmark-recipe':
-      return `/${ws}/datasets/recipes`
+      return `/${ws}/recipes/${enc}`
     case 'judge':
       return `/${ws}/judges`
     case 'model':

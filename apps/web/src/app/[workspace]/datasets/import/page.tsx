@@ -19,10 +19,13 @@ export const dynamic = 'force-dynamic'
 
 export default async function ImportBenchmarkPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspace: string }>
+  searchParams: Promise<{ recipe?: string }>
 }) {
   const { workspace } = await params
+  const { recipe: preselectRecipe } = await searchParams
   const { principal, ctx } = await currentPrincipal()
   const allowed = can(principal?.roles, 'datasets:write')
 
@@ -59,7 +62,7 @@ export default async function ImportBenchmarkPage({
         description="HF 데이터셋·JSONL 소스를 미리보기로 필드를 감지해 매핑하면 바로 데이터셋이 됩니다(소스에서 만들기). 또는 공개 카탈로그(WebVoyager·GAIA·SWE-bench…)·내 레시피에서 가져옵니다."
         actions={
           <Link
-            href={`/${workspace}/datasets/recipes`}
+            href={`/${workspace}/recipes`}
             className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
           >
             레시피 관리
@@ -80,6 +83,7 @@ export default async function ImportBenchmarkPage({
             benchmarks={benchmarks}
             recipes={recipes}
             existingDatasets={existingDatasets}
+            preselectRecipe={preselectRecipe}
           />
         </Card>
       )}

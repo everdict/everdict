@@ -42,7 +42,7 @@ export async function registerRecipeAction(spec: unknown): Promise<RegisterRecip
       ctx,
       spec
     )
-    revalidatePath('/[workspace]/datasets/recipes')
+    revalidatePath('/[workspace]/recipes')
     revalidatePath('/[workspace]/datasets/import')
     return { ok: true, id: rec.id, version: rec.version }
   } catch (e) {

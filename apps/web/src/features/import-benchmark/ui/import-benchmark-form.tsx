@@ -42,10 +42,12 @@ export function ImportBenchmarkForm({
   benchmarks,
   recipes = [],
   existingDatasets = [],
+  preselect,
 }: {
   benchmarks: BenchmarkCatalogItem[]
   recipes?: RecipeItem[]
   existingDatasets?: { id: string; versions: string[] }[]
+  preselect?: string // "recipe:<id>" — 레시피 상세에서 진입 시 초기 선택.
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -70,7 +72,9 @@ export function ImportBenchmarkForm({
     [benchmarks, recipes]
   )
 
-  const [sel, setSel] = useState(entries[0]?.value ?? '')
+  const [sel, setSel] = useState(
+    preselect && entries.some((e) => e.value === preselect) ? preselect : (entries[0]?.value ?? '')
+  )
   const [datasetId, setDatasetId] = useState('')
   const [version, setVersion] = useState('1.0.0')
   const [limit, setLimit] = useState('')
