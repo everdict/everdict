@@ -7,8 +7,20 @@
 > `fire()` returns the previous run id, `finalize()` (workflow calls it post-terminal) diffs vs the previous
 > scheduled run and fires `notifyRegression` (Mattermost) on a regression + records final `lastStatus`; web cron
 > preset picker + last-fire display. **creator-left auto-disable** also shipped (member leave/remove → disable that
-> creator's schedules + Temporal pause). **Remaining: connection-revoked auto-disable (indirect: schedule→dataset
-> →case.connectionId); live Temporal e2e.**
+> creator's schedules + Temporal pause).
+>
+> **Live Temporal e2e — VERIFIED (2026-07-03).** The full cron→fire→run→grade loop was run against a real
+> Temporal dev server (`docker run temporalio/temporal server start-dev`) with the **codex+pinch** harness (the
+> bundle harness that runs PinchBench). Two live scripts:
+> `scripts/live/scheduled-pinch-temporal.mjs` (in-memory / no-auth) and `scripts/live/scheduled-pinch-acme-temporal.mjs`
+> (**multi-tenant**: real Postgres + Keycloak OIDC, schedule created *as user `alice`* in workspace `acme`).
+> Observed: `POST /schedules` → `TemporalScheduleDriver.ensure` created `assay-sched-<id>`
+> (`temporal schedule describe`: workflow=`scheduledScorecardWorkflow`, tq=`assay-eval`, cron `* * * * *`,
+> overlap=Skip, args carry `{scheduleId, tenant}`); Temporal fired **exactly at the top-of-minute**
+> (`lastFiredAt=…:00Z`) → workflow → internal `fire` → `ScorecardService.submit` → self-hosted runner ran
+> `codex exec` → `tests_pass` PASS → leaderboard row; schedule record stamped `lastFiredAt`/`lastScorecardId`, and
+> the workflow's poll-to-terminal `finalize` recorded the terminal `lastStatus`. **Remaining: connection-revoked
+> auto-disable (indirect: schedule→dataset→case.connectionId).**
 >
 > **Driver location (deviation from the table below):** `TemporalScheduleDriver` lives in **`apps/api`**
 > (`temporal-schedule-driver.ts`), not `@assay/orchestrator` — it needs only `@temporalio/client`, and importing
