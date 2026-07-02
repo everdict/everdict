@@ -12,7 +12,8 @@ export interface ExecuteCaseDeps {
 }
 
 // 케이스 repo 시드가 비공개(git + connectionId)면 owner(제출자 subject)의 개인 연결 토큰을 resolve. public/비-repo/미설정이면 undefined.
-export async function resolveRepoToken(
+// 모듈 내부 헬퍼(executeCase 전용) — 외부 노출 안 함.
+async function resolveRepoToken(
   repoTokenFor: ExecuteCaseDeps["repoTokenFor"],
   owner: string,
   evalCase: EvalCase,

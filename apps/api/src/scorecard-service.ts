@@ -378,8 +378,8 @@ export class ScorecardService {
     const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
     // 이 배치가 팬아웃한 자식 run: caseId → childId(runStore 설정 시). 완료 후 최종 결과 write-back + runIds 참조 저장에 쓴다.
     const caseToChild = new Map<string, string>();
-    // 각 케이스 디스패치: budget admit(배치라 per-case) 후 tenant/spec/judge 를 잡에 enrich.
-    // 비공개 repo 토큰 resolve+attach → dispatch → settle 은 단일 run 과 공유하는 executeCase 가 담당(중복 회계 없음).
+    // 각 케이스 디스패치(오케 per-case): admit(배치라 per-case) → 잡 enrich → 순수 executeCase → settle.
+    // 순수 실행(토큰 resolve+attach → dispatch)은 단일 run 과 공유하는 executeCase 가, 정산/자식-run 수명은 오케인 여기가 담당.
     // runStore 설정 시 케이스마다 자식 run(RunRecord)을 만들어 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
     const dispatch: Dispatch = async (job) => {
       this.deps.budget?.admit(tenant); // 초과 시 throw → 배치 실패
