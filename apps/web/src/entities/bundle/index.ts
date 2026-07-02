@@ -1,6 +1,6 @@
 export {
-  installItemResultSchema,
-  bundleInstallResultSchema,
-  type InstallItemResult,
-  type BundleInstallResult,
+  bundleItemResultSchema,
+  bundleApplyResultSchema,
+  type BundleItemResult,
+  type BundleApplyResult,
 } from './model/schema'

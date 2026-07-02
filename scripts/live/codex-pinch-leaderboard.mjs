@@ -1,9 +1,9 @@
-// 라이브 e2e: *번들 원샷 설치* → pinch 벤치마크 실행 → **리더보드(harness × model)**.
+// 라이브 e2e: *번들 원샷 적용* → pinch 벤치마크 실행 → **리더보드(harness × model)**.
 // 유저 시나리오(멀티테넌트 SaaS, HTTP API 만):
-//   ① POST /bundles/install : codex(하니스) + pinch(벤치마크) 번들을 한 번에 등록 — 일반화된 self-serve 등록.
+//   ① POST /bundles/apply : codex(하니스) + pinch(벤치마크) 번들을 한 번에 등록 — 일반화된 self-serve 등록.
 //   ② POST /scorecards      : pinch 를 하니스로 실행(judge 채점). codex 는 그 CLI+런타임이 필요하므로,
-//      기본은 builtin 'scripted' 로 실행해 install→run→leaderboard 루프 전체를 무-외부의존으로 실증한다.
-//      실제 codex 실행은 ASSAY_HARNESS=codex + docker 런타임(코덱스 설치 이미지)로 스왑(아래 주석).
+//      기본은 builtin 'scripted' 로 실행해 apply→run→leaderboard 루프 전체를 무-외부의존으로 실증한다.
+//      실제 codex 실행은 ASSAY_HARNESS=codex + docker 런타임(코덱스 적용 이미지)로 스왑(아래 주석).
 //   ③ GET /scorecards/leaderboard : 한 벤치마크의 (harness × model) 랭킹 행을 출력.
 // judge 채점에는 모델이 필요 → LiteLLM(:4000) 키를 CP judge env 로 주입(pinch-hermes-e2e 와 동일).
 //
@@ -64,9 +64,9 @@ try {
   }
   if (!up) throw new Error("control plane 기동 실패");
 
-  // ① 번들 원샷 설치
-  console.log("\n=== ① POST /bundles/install (codex + pinch 번들) ===");
-  const inst = await post("/bundles/install", bundle);
+  // ① 번들 원샷 적용
+  console.log("\n=== ① POST /bundles/apply (codex + pinch 번들) ===");
+  const inst = await post("/bundles/apply", bundle);
   console.log(`  → ${inst.status}`);
   for (const r of inst.json.results ?? []) console.log(`     ${r.status.padEnd(8)} ${r.kind} ${r.id}@${r.version}`);
   const installOk = inst.status === 200 && (inst.json.results ?? []).every((r) => r.status === "ok" || r.status === "conflict");
@@ -102,8 +102,8 @@ try {
   ok = installOk && (lb.rows ?? []).length > 0;
   console.log(
     ok
-      ? "\n✅ install(번들 원샷) → run(pinch) → leaderboard(harness×model) 루프 실증. codex 는 ASSAY_HARNESS=codex + ASSAY_RUNTIME=<codex docker 런타임> 로 스왑."
-      : "\n⚠️ 일부 단계 불일치(위 로그 참고). judge 실채점엔 LiteLLM(:4000) 필요; codex 실행엔 codex 설치 런타임 필요.",
+      ? "\n✅ apply(번들 원샷) → run(pinch) → leaderboard(harness×model) 루프 실증. codex 는 ASSAY_HARNESS=codex + ASSAY_RUNTIME=<codex docker 런타임> 로 스왑."
+      : "\n⚠️ 일부 단계 불일치(위 로그 참고). judge 실채점엔 LiteLLM(:4000) 필요; codex 실행엔 codex 적용 런타임 필요.",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

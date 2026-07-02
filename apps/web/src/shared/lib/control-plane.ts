@@ -196,9 +196,9 @@ export const controlPlane = {
     if (params.window) q.set('window', params.window)
     return call<T>(auth, `/scorecards/leaderboard?${q.toString()}`)
   },
-  // 번들 원샷 설치 — 하니스+벤치마크+데이터셋+런타임 등을 한 매니페스트로 등록(멱등, 부분성공).
-  installBundle: <T>(auth: AuthContext, bundle: unknown) =>
-    call<T>(auth, '/bundles/install', { method: 'POST', body: JSON.stringify(bundle) }),
+  // 번들 원샷 적용 — 하니스+벤치마크+데이터셋+런타임 등을 한 매니페스트로 등록(멱등, 부분성공).
+  applyBundle: <T>(auth: AuthContext, bundle: unknown) =>
+    call<T>(auth, '/bundles/apply', { method: 'POST', body: JSON.stringify(bundle) }),
   listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
   getJudge: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),

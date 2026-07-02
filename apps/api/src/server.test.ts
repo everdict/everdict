@@ -278,7 +278,7 @@ describe("API — bundles (번들 원샷 설치)", () => {
   it("member 가 번들을 설치하면 각 항목이 등록되고, 설치된 데이터셋이 목록에 뜬다", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };
-    const res = await app.inject({ method: "POST", url: "/bundles/install", headers: h, payload: BUNDLE });
+    const res = await app.inject({ method: "POST", url: "/bundles/apply", headers: h, payload: BUNDLE });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.id).toBe("codex-pinch");
@@ -294,7 +294,7 @@ describe("API — bundles (번들 원샷 설치)", () => {
   it("viewer 가 dataset 포함 번들 설치 → 403(번들 내용에서 datasets:write 요구를 도출해 게이트)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
     const h = { authorization: "Bearer x" };
-    const res = await app.inject({ method: "POST", url: "/bundles/install", headers: h, payload: BUNDLE });
+    const res = await app.inject({ method: "POST", url: "/bundles/apply", headers: h, payload: BUNDLE });
     expect(res.statusCode).toBe(403);
     await app.close();
   });

@@ -57,7 +57,7 @@ export interface McpDeps {
   runnerHub?: RunnerHub; // 러너 lease 허브 — lease_job/submit_job_result/fail_job/heartbeat_job(러너 토큰 전용)
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
-  bundleService?: BundleService; // 번들 원샷 설치(하니스+벤치마크+런타임 등)
+  bundleService?: BundleService; // 번들 원샷 적용(하니스+벤치마크+런타임 등)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
   membershipService?: MembershipService; // 멤버 관리(목록/역할/제거/나가기) + 초대(발급/수락)
   profileService?: ProfileService; // 내 프로필(이름/유저네임/아바타) 조회·수정(self-serve)
@@ -755,10 +755,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   if (deps.bundleService) {
     const bundles = deps.bundleService;
     server.registerTool(
-      "install_bundle",
+      "apply_bundle",
       {
         description:
-          "번들(JSON) 설치 — 하니스+벤치마크+데이터셋+런타임+judge/model/metric 를 한 번에 등록(멱등, 부분성공). 번들 내용에 따라 per-type 권한 필요.",
+          "번들(JSON) 적용 — 하니스+벤치마크+데이터셋+런타임+judge/model/metric 를 한 번에 등록(멱등, 부분성공). 번들 내용에 따라 per-type 권한 필요.",
         inputSchema: { bundle: z.string().describe("Bundle JSON") },
       },
       ({ bundle }) =>
@@ -773,7 +773,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           // 섹션별 인가(throw→plain catch→fail) — 새 액션 없이 기존 per-type 게이트 조합.
           for (const action of requiredActionsForBundle(result.data)) authorize(principal, action);
-          return ok(await bundles.install(ws, principal.subject, result.data));
+          return ok(await bundles.apply(ws, principal.subject, result.data));
         }),
     );
   }

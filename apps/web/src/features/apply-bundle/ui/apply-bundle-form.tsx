@@ -4,14 +4,14 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 
-import { type BundleInstallResult, type InstallItemResult } from '@/entities/bundle'
+import { type BundleApplyResult, type BundleItemResult } from '@/entities/bundle'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Label, Textarea } from '@/shared/ui/input'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
-import { installBundleAction } from '../api/install-bundle'
+import { applyBundleAction } from '../api/apply-bundle'
 
 // 붙여넣기용 예시 = 검증된 codex + pinch 번들(examples/bundles/codex-pinch). self-hosted 러너에서 머신 codex 로그인으로 실행.
 const SAMPLE = `{
@@ -36,7 +36,7 @@ const SAMPLE = `{
 }`
 
 const STATUS_TONE: Record<
-  InstallItemResult['status'],
+  BundleItemResult['status'],
   'success' | 'warning' | 'danger' | 'neutral'
 > = {
   ok: 'success',
@@ -45,7 +45,7 @@ const STATUS_TONE: Record<
   skipped: 'neutral',
 }
 
-// 설치된 항목 → 그 리소스 페이지(발견성). 상세 페이지가 있는 종류는 상세로, 없으면 목록으로.
+// 적용된 항목 → 그 리소스 페이지(발견성). 상세 페이지가 있는 종류는 상세로, 없으면 목록으로.
 function hrefFor(ws: string, kind: string, id: string): string | undefined {
   const enc = encodeURIComponent(id)
   switch (kind) {
@@ -70,12 +70,12 @@ function hrefFor(ws: string, kind: string, id: string): string | undefined {
   }
 }
 
-// 번들(JSON) 붙여넣기 → 설치 → 항목별 결과 테이블. 멱등(같은 내용 재설치=ok, 충돌 내용=conflict).
-// 결과 각 행은 등록된 리소스 페이지로 링크(설치 후 어디서 보는지 바로 이동).
-export function InstallBundleForm() {
+// 번들(JSON) 붙여넣기 → 적용 → 항목별 결과 테이블. 멱등(같은 내용 재적용=ok, 충돌 내용=conflict).
+// 결과 각 행은 등록된 리소스 페이지로 링크(적용 후 어디서 보는지 바로 이동).
+export function ApplyBundleForm() {
   const { workspace } = useParams<{ workspace: string }>()
   const [bundleJson, setBundleJson] = useState(SAMPLE)
-  const [result, setResult] = useState<BundleInstallResult>()
+  const [result, setResult] = useState<BundleApplyResult>()
   const [error, setError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
@@ -83,10 +83,10 @@ export function InstallBundleForm() {
     setBusy(true)
     setError(undefined)
     setResult(undefined)
-    const res = await installBundleAction(bundleJson)
+    const res = await applyBundleAction(bundleJson)
     setBusy(false)
     if (res.ok && res.result) setResult(res.result)
-    else setError(res.error ?? '설치 실패')
+    else setError(res.error ?? '적용 실패')
   }
 
   // 워크스페이스에 실제로 존재하게 된 항목(ok=신규 등록 / conflict=이미 동일 id·version 존재).
@@ -114,7 +114,7 @@ export function InstallBundleForm() {
       {error && <Callout tone="danger">{error}</Callout>}
 
       <Button type="button" onClick={onSubmit} disabled={busy}>
-        {busy ? '설치 중…' : '번들 설치'}
+        {busy ? '적용 중…' : '번들 적용'}
       </Button>
 
       {result && (

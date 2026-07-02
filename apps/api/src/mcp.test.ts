@@ -180,6 +180,7 @@ describe("MCP tools", () => {
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "accept_invite",
+      "apply_bundle",
       "backfill_scorecard_models",
       "create_api_key",
       "create_dataset",
@@ -206,7 +207,6 @@ describe("MCP tools", () => {
       "get_scorecard",
       "heartbeat_job",
       "ingest_scorecard",
-      "install_bundle",
       "leaderboard_scorecards",
       "lease_job",
       "leave_workspace",
@@ -664,7 +664,7 @@ describe("MCP tools", () => {
     expect(JSON.parse(text(bf))).toHaveProperty("updated");
   });
 
-  it("install_bundle: member 가 번들(dataset) 설치 ok; viewer 는 datasets:write 없어 FORBIDDEN", async () => {
+  it("apply_bundle: member 가 번들(dataset) 설치 ok; viewer 는 datasets:write 없어 FORBIDDEN", async () => {
     const deps = harness();
     const bundle = JSON.stringify({
       id: "codex-pinch",
@@ -688,13 +688,13 @@ describe("MCP tools", () => {
       ],
     });
     const member = await connect(deps, ["member"], "acme");
-    const res = await member.callTool({ name: "install_bundle", arguments: { bundle } });
+    const res = await member.callTool({ name: "apply_bundle", arguments: { bundle } });
     expect(res.isError).toBeFalsy();
     const body = JSON.parse(text(res)) as { results: Array<{ kind: string; status: string }> };
     expect(body.results.find((r) => r.kind === "dataset")?.status).toBe("ok");
 
     const viewer = await connect(deps, ["viewer"], "acme");
-    const denied = await viewer.callTool({ name: "install_bundle", arguments: { bundle } });
+    const denied = await viewer.callTool({ name: "apply_bundle", arguments: { bundle } });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("FORBIDDEN");
   });

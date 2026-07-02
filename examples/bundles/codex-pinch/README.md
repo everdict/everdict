@@ -1,7 +1,7 @@
 # codex + pinch — a bundle (self-hosted)
 
-A **bundle**: harness- and benchmark-specific definitions as pure data, installed through the generalized
-`POST /bundles/install` surface. **Zero core/package changes** — the "specifics live in a bundle, not core"
+A **bundle**: harness- and benchmark-specific definitions as pure data, applied through the generalized
+`POST /bundles/apply` surface. **Zero core/package changes** — the "specifics live in a bundle, not core"
 principle (see `docs/architecture/bundles.md`). Verified end-to-end: **codex runs pinch on a self-hosted runner
 (the machine's ChatGPT login pays; workspace budget untouched) → objective grade → leaderboard.**
 
@@ -16,12 +16,12 @@ principle (see `docs/architecture/bundles.md`). Verified end-to-end: **codex run
 
 ## Run codex on a self-hosted runner (verified)
 
-One command drives the whole flow (dev control plane + pair + install + run + leaderboard):
+One command drives the whole flow (dev control plane + pair + apply + run + leaderboard):
 
 ```bash
 node scripts/live/codex-pinch-selfhosted.mjs
 # ① dev control plane  ② POST /runners (pair this machine)  ③ assay runner --pair (codex on PATH)
-# ④ POST /bundles/install  ⑤ POST /scorecards {dataset: pinch-dashboards, harness: codex, runtime: self:<id>}
+# ④ POST /bundles/apply  ⑤ POST /scorecards {dataset: pinch-dashboards, harness: codex, runtime: self:<id>}
 # ⑥ → provenance.ranOn=self-hosted · tests_pass PASS · leaderboard: #1 codex@1.0.0 × gpt-5-codex (score=1)
 ```
 
@@ -30,7 +30,7 @@ Manually, the self-hosted pieces:
 1. **Pair the machine** → `POST /runners {label, capabilities:["repo"]}` → `{runner:{id}, token: rnr_…}`.
 2. **Start the runner** (codex must be on `PATH`; it uses the machine's `codex login`):
    `node apps/cli/dist/main.js runner --pair <rnr_…> --api-url <cp>`.
-3. **Install the bundle**: `POST /bundles/install --data @bundle.json` (or MCP `install_bundle`).
+3. **Apply the bundle**: `POST /bundles/apply --data @bundle.json` (or MCP `apply_bundle`).
 4. **Run**: `POST /scorecards {dataset:{id:"pinch-dashboards"}, harness:{id:"codex"}, runtime:"self:<runnerId>"}`.
    The job parks in the runner's lease queue; the runner runs `codex exec` locally (LocalDriver), writes
    `dashboard.json`, the `tests-pass` grader validates it, and the result comes back tagged

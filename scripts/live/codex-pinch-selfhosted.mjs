@@ -3,7 +3,7 @@
 //   ① dev 컨트롤플레인 기동(in-memory, auth 미요구).
 //   ② POST /runners : 이 머신을 러너로 페어링 → rnr_ 토큰.
 //   ③ assay runner --pair : 러너 프로세스 기동(codex 가 PATH 에 있어야 함 — LocalDriver 인프로세스 실행).
-//   ④ POST /bundles/install : codex 하니스 + pinch 벤치마크 번들 원샷 설치.
+//   ④ POST /bundles/apply : codex 하니스 + pinch 벤치마크 번들 원샷 적용.
 //   ⑤ POST /scorecards {dataset: pinch-dashboards, harness: codex, runtime: self:<id>} : self-hosted 로 실행.
 //   ⑥ 폴링 → provenance(ranOn=self-hosted) + 케이스 판정 + GET /scorecards/leaderboard 행 출력.
 // codex 는 워크스페이스 예산을 차감하지 않는다(머신 로그인이 결제).
@@ -64,9 +64,9 @@ try {
   runner.stdout.on("data", (d) => process.stdout.write(`  [runner] ${d}`));
   await sleep(3000); // 러너 MCP 세션 연결 대기
 
-  // ④ 번들 설치(codex + pinch)
-  console.log("\n=== ④ POST /bundles/install (codex + pinch) ===");
-  const inst = await post("/bundles/install", bundle);
+  // ④ 번들 적용(codex + pinch)
+  console.log("\n=== ④ POST /bundles/apply (codex + pinch) ===");
+  const inst = await post("/bundles/apply", bundle);
   for (const r of inst.json.results ?? []) console.log(`  ${r.status.padEnd(8)} ${r.kind} ${r.id}@${r.version}`);
 
   // ⑤ pinch-dashboards 를 codex × self-hosted 로 실행
