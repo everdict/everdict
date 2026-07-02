@@ -51,15 +51,19 @@ tenant **Dataset**. Three ways to add, all member+ (`datasets:write`), all immut
 - **Catalog** — `GET /benchmarks` lists the first-party code catalog (webvoyager/gaia/swe-bench/mind2web/gsm8k/
   osworld); `POST /benchmarks/import {benchmark}` pulls it.
 - **Recipe** — `POST /benchmark-recipes` saves a reusable `BenchmarkAdapterSpec` (`BenchmarkRegistry`, owner +
-  `_shared`); `POST /benchmarks/import {recipe}` imports from it.
+  `_shared`); `POST /benchmarks/import {recipe}` imports from it. A recipe is a **first-class entity** in the web
+  (`/{ws}/recipes` list + detail, its own nav item); the produced dataset records `producedBy` so the dataset
+  detail back-links to the recipe (and version) that made it.
 
 gated HF sources authenticate with the tenant SecretStore `HF_TOKEN`. **BFF↔MCP parity**: MCP tools
 `preview_benchmark_source` + `import_benchmark` mirror the routes. See `docs/mcp.md`.
 
 ## Contract (`@assay/core`)
-`Dataset = { id, version, description?, cases: EvalCase[], tags: string[] }` (`DatasetSchema`). `createdBy` and
-the tombstone are **registry metadata** (not on the Dataset content) — so `specsEqual`/immutability stay
-content-only and a delete never touches a version's bytes.
+`Dataset = { id, version, description?, cases: EvalCase[], tags: string[], producedBy? }` (`DatasetSchema`).
+`producedBy` (`{ via: recipe|catalog|spec, id, version? }`) is **content** stamped at import (it *is* part of
+`specsEqual`) — the intrinsic "how it was made", powering the dataset→recipe reverse link. `createdBy` and the
+tombstone are **registry metadata** (not on the Dataset content) — so immutability stays content-only and a
+delete never touches a version's bytes.
 
 ## Registry (`@assay/registry`)
 `DatasetRegistry` — `register(…, createdBy?) / get / has / versions / ownVersions / list / creatorOf / softDelete`,

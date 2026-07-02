@@ -1,4 +1,4 @@
-import { BadRequestError } from "@assay/core";
+import { BadRequestError, type DatasetProvenance } from "@assay/core";
 import {
   type BenchmarkAdapterSpec,
   BenchmarkAdapterSpecSchema,
@@ -163,6 +163,7 @@ export class BenchmarkService {
     };
 
     let dataset: Awaited<ReturnType<typeof importBenchmark>>;
+    let producedBy: DatasetProvenance | undefined; // 인입 출처 — 데이터셋→레시피 역링크의 근거로 스탬프.
     if (input.spec) {
       // 인라인 정의(위저드) — 레지스트리에 레시피를 먼저 등록할 필요 없이 바로 인입.
       dataset = await importFromSpec(
@@ -174,6 +175,7 @@ export class BenchmarkService {
         },
         opts,
       );
+      producedBy = { via: "spec", id: input.spec.id };
     } else if (input.recipe) {
       const spec = await this.registry().get(input.tenant, input.recipe.id, input.recipe.version ?? "latest");
       dataset = await importFromSpec(
@@ -185,6 +187,8 @@ export class BenchmarkService {
         },
         opts,
       );
+      // 등록된 레시피에서 인입 — 해석된 구체 버전(spec.version)으로 역링크가 정확한 버전을 가리킨다.
+      producedBy = { via: "recipe", id: spec.id, version: spec.version };
     } else if (input.benchmark) {
       let adapter: ReturnType<typeof getBenchmark>;
       try {
@@ -201,6 +205,7 @@ export class BenchmarkService {
         { id: input.id ?? adapter.id, version: input.version, description: adapter.description },
         opts,
       );
+      producedBy = { via: "catalog", id: input.benchmark };
     } else {
       throw new BadRequestError(
         "BAD_REQUEST",
@@ -208,7 +213,8 @@ export class BenchmarkService {
         "spec(인라인 정의) · benchmark(카탈로그) · recipe(레시피) 중 하나가 필요합니다.",
       );
     }
-    await this.deps.datasets.register(input.tenant, dataset, input.createdBy); // 버전 불변(충돌 409); 생성자 = 인입한 subject
-    return { workspace: input.tenant, id: dataset.id, version: dataset.version, cases: dataset.cases.length };
+    const stamped = producedBy ? { ...dataset, producedBy } : dataset; // 출처를 데이터셋에 각인(역참조용)
+    await this.deps.datasets.register(input.tenant, stamped, input.createdBy); // 버전 불변(충돌 409); 생성자 = 인입한 subject
+    return { workspace: input.tenant, id: stamped.id, version: stamped.version, cases: stamped.cases.length };
   }
 }

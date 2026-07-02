@@ -4,12 +4,21 @@ import { EvalCaseSchema } from "./eval-case.js";
 // 데이터셋: eval 케이스 묶음 — 하니스 무관(어느 하니스@버전이든 같은 케이스로 돌려 공정 비교).
 // 버전 불변(레지스트리가 강제) — baseline↔candidate 비교가 재현 가능하려면 케이스가 고정돼야 한다.
 // core 의 Suite 와 구분: Suite 는 harness.id 에 묶이고 비버전, Dataset 은 하니스 무관 + 버전 관리.
+// 데이터셋 출처 — 어떻게 만들어졌나(등록된 레시피 / 카탈로그 / 인라인 spec). 역참조(데이터셋 → 만든 레시피)용.
+export const DatasetProvenanceSchema = z.object({
+  via: z.enum(["recipe", "catalog", "spec"]),
+  id: z.string(), // recipe id | catalog id | 인라인 spec id
+  version: z.string().optional(), // recipe 버전(있으면) — 상세 역링크의 정확한 버전
+});
+export type DatasetProvenance = z.infer<typeof DatasetProvenanceSchema>;
+
 export const DatasetSchema = z.object({
   id: z.string(),
   version: z.string(),
   description: z.string().optional(),
   cases: z.array(EvalCaseSchema),
   tags: z.array(z.string()).default([]),
+  producedBy: DatasetProvenanceSchema.optional(), // 인입 출처(있으면). 과거 데이터셋은 미설정.
 });
 export type Dataset = z.infer<typeof DatasetSchema>;
 

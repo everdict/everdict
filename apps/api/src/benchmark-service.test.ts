@@ -1,6 +1,6 @@
 import { UpstreamError } from "@assay/core";
 import type { FetchLike } from "@assay/datasets";
-import { InMemoryDatasetRegistry } from "@assay/registry";
+import { InMemoryBenchmarkRegistry, InMemoryDatasetRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 
@@ -55,6 +55,25 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
     const ds = await datasets.get("acme", "my-bench", "1.0.0");
     expect(ds.cases).toHaveLength(1);
     expect(ds.cases[0]?.task).toBe("2+2?");
+    // 인라인 spec 인입도 출처를 남긴다(via:spec) — 데이터셋 상세가 "어떻게 만들어졌는지" 안다.
+    expect(ds.producedBy).toEqual({ via: "spec", id: "my-bench" });
+  });
+
+  it("등록된 레시피로 인입하면 데이터셋에 producedBy(via:recipe, 해석된 버전)가 스탬프된다", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    const benchmarks = new InMemoryBenchmarkRegistry();
+    const service = new BenchmarkService({ datasets, benchmarks, fetchImpl: fakeFetch });
+    await service.registerRecipe("acme", {
+      id: "gsm",
+      version: "1.2.0",
+      category: "qa",
+      source: { kind: "huggingface", dataset: "openai/gsm8k" },
+      mapping: { idField: "id", taskField: "question", answerField: "answer" },
+    });
+    await service.import({ tenant: "acme", version: "1.0.0", recipe: { id: "gsm" } });
+    const ds = await datasets.get("acme", "gsm", "1.0.0");
+    // latest 로 해석된 구체 버전(1.2.0)을 역링크가 가리킨다 — "gsm@1.2.0 레시피가 이 데이터셋을 만들었다".
+    expect(ds.producedBy).toEqual({ via: "recipe", id: "gsm", version: "1.2.0" });
   });
 });
 

@@ -22,6 +22,14 @@ export const datasetCaseSchema = z
   .passthrough()
 export type DatasetCase = z.infer<typeof datasetCaseSchema>
 
+// 데이터셋 출처 — 어떻게 만들어졌나(레시피/카탈로그/인라인 spec). 데이터셋 → 만든 레시피 역링크용.
+export const datasetProvenanceSchema = z.object({
+  via: z.enum(['recipe', 'catalog', 'spec']),
+  id: z.string(),
+  version: z.string().optional(),
+})
+export type DatasetProvenance = z.infer<typeof datasetProvenanceSchema>
+
 // GET /datasets/:id/versions/:version 응답: 전체 데이터셋(케이스 포함).
 export const datasetSchema = z.object({
   id: z.string(),
@@ -29,6 +37,7 @@ export const datasetSchema = z.object({
   description: z.string().optional(),
   cases: z.array(datasetCaseSchema),
   tags: z.array(z.string()).default([]),
+  producedBy: datasetProvenanceSchema.optional(), // 인입 출처(있으면). 과거 데이터셋은 미설정.
 })
 export type Dataset = z.infer<typeof datasetSchema>
 

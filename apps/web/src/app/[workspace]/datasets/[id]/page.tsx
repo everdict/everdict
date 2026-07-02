@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ChevronLeft, GitCompare } from 'lucide-react'
+import { ChevronLeft, GitCompare, ScrollText } from 'lucide-react'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
 import { datasetSchema, datasetsSchema, type Dataset } from '@/entities/dataset'
@@ -116,6 +116,35 @@ export default async function DatasetDetailPage({
         <Prop label="cases" value={String(dataset.cases.length)} />
         <Prop label="tags" value={dataset.tags.length ? dataset.tags.join(', ') : '—'} />
       </Card>
+
+      {/* 출처(있으면) — 이 데이터셋이 어떤 레시피/카탈로그/spec 으로 만들어졌는지. 레시피면 상세로 역링크. */}
+      {dataset.producedBy && (
+        <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
+          <span className="text-faint">출처</span>
+          {dataset.producedBy.via === 'recipe' ? (
+            <Link
+              href={`/${workspace}/recipes/${encodeURIComponent(dataset.producedBy.id)}${
+                dataset.producedBy.version
+                  ? `?v=${encodeURIComponent(dataset.producedBy.version)}`
+                  : ''
+              }`}
+              className="inline-flex items-center gap-1 font-mono text-link transition-colors hover:text-foreground"
+            >
+              <ScrollText className="size-3.5" />
+              {dataset.producedBy.id}
+              {dataset.producedBy.version ? (
+                <span className="text-faint">@{dataset.producedBy.version}</span>
+              ) : null}
+              <span className="text-faint">레시피</span>
+            </Link>
+          ) : (
+            <span className="font-mono">
+              {dataset.producedBy.via === 'catalog' ? '카탈로그' : '인라인 정의'} ·{' '}
+              {dataset.producedBy.id}
+            </span>
+          )}
+        </div>
+      )}
 
       <section className="space-y-2.5">
         <SectionHeader title={`케이스 (${dataset.cases.length})`} />
