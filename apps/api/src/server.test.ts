@@ -33,6 +33,7 @@ import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
+import { PluginService } from "./plugin-service.js";
 import { RunService } from "./run-service.js";
 import { RunnerService } from "./runner-service.js";
 import { ScheduleService } from "./schedule-service.js";
@@ -176,6 +177,16 @@ function server(
   });
   const harnessTemplates = new InMemoryHarnessTemplateRegistry();
   const harnessInstances = new InMemoryHarnessInstanceRegistry(harnessTemplates);
+  const runtimeRegistry = new InMemoryRuntimeRegistry();
+  const pluginService = new PluginService({
+    harnessTemplates,
+    harnessInstances,
+    benchmarks: benchmarkService,
+    datasets: datasetRegistry,
+    judges: judgeRegistry,
+    metrics: metricRegistry,
+    runtimes: runtimeRegistry,
+  });
   const connectionService = new ConnectionService({
     store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 9))),
     states: new InMemoryOAuthStateStore(),
@@ -192,12 +203,13 @@ function server(
     scorecardService,
     scheduleService,
     benchmarkService,
+    pluginService,
     harnessTemplates,
     harnessInstances,
     datasetRegistry,
     judgeRegistry,
     metricRegistry,
-    runtimeRegistry: new InMemoryRuntimeRegistry(),
+    runtimeRegistry,
     // 연결 테스트 stub — 실제 클러스터 I/O 없이 라우트 와이어링/역할 게이트만 검증.
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
     secretStore,
@@ -225,6 +237,68 @@ function server(
     harnessInstances,
   };
 }
+
+describe("API — plugins (번들 원샷 설치)", () => {
+  const BUNDLE = {
+    id: "codex-pinch",
+    version: "1.0.0",
+    harnessTemplates: [
+      {
+        kind: "command",
+        category: "cli-agent",
+        id: "codex",
+        version: "1",
+        setup: [],
+        command: "codex {{task}}",
+        model: "m",
+        env: {},
+        trace: { kind: "none" },
+      },
+    ],
+    harnesses: [{ template: { id: "codex", version: "1" }, id: "codex", version: "1.0.0", pins: {} }],
+    datasets: [
+      {
+        id: "pinch-sample",
+        version: "1.0.0",
+        cases: [
+          {
+            id: "s1",
+            env: { kind: "repo", source: { files: {} } },
+            task: "t",
+            graders: [{ id: "tests-pass", config: { cmd: "test -f out.txt" } }],
+            timeoutSec: 60,
+            tags: [],
+          },
+        ],
+        tags: [],
+      },
+    ],
+  };
+
+  it("member 가 번들을 설치하면 각 항목이 등록되고, 설치된 데이터셋이 목록에 뜬다", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
+    const h = { authorization: "Bearer x" };
+    const res = await app.inject({ method: "POST", url: "/plugins/install", headers: h, payload: BUNDLE });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.id).toBe("codex-pinch");
+    const byKind = Object.fromEntries(body.results.map((r: { kind: string; status: string }) => [r.kind, r.status]));
+    expect(byKind["harness-template"]).toBe("ok");
+    expect(byKind.harness).toBe("ok");
+    expect(byKind.dataset).toBe("ok");
+    const list = await app.inject({ method: "GET", url: "/datasets", headers: h });
+    expect(list.json().some((d: { id: string }) => d.id === "pinch-sample")).toBe(true);
+    await app.close();
+  });
+
+  it("viewer 가 dataset 포함 번들 설치 → 403(번들 내용에서 datasets:write 요구를 도출해 게이트)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const h = { authorization: "Bearer x" };
+    const res = await app.inject({ method: "POST", url: "/plugins/install", headers: h, payload: BUNDLE });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});
 
 describe("API — dev fallback (no auth required)", () => {
   it("x-assay-tenant 헤더로 동작; 다른 tenant 는 남의 run 못 봄", async () => {

@@ -1,0 +1,61 @@
+{
+  "id": "codex-pinch",
+  "version": "1.0.0",
+  "description": "codex(CLI 코딩 에이전트) 하니스 + pinch 벤치마크를 한 번에 등록하는 플러그인 번들. 순수 데이터 — 코어 무변경. codex/pinch 세부는 이 플러그인에만 산다.",
+  "harnessTemplates": [
+    {
+      "kind": "command",
+      "category": "cli-agent",
+      "id": "codex",
+      "version": "1",
+      "setup": ["npm install -g @openai/codex"],
+      "command": "codex exec --full-auto --model {{model}} {{task}}",
+      "model": "gpt-5.4-mini",
+      "env": {},
+      "trace": { "kind": "none" }
+    }
+  ],
+  "harnesses": [
+    {
+      "template": { "id": "codex", "version": "1" },
+      "id": "codex",
+      "version": "1.0.0",
+      "pins": {}
+    }
+  ],
+  "benchmarkRecipes": [
+    {
+      "id": "pinch",
+      "version": "1.0.0",
+      "description": "pinch 코딩 벤치마크 어댑터(템플릿) — jsonl 소스의 repo/ref/테스트커맨드를 케이스로. 실제 pinch 의 소스 종류·필드명은 사용자가 교체.",
+      "category": "coding",
+      "source": { "kind": "jsonl" },
+      "mapping": {
+        "idField": "id",
+        "taskField": "prompt",
+        "gitField": "repo",
+        "refField": "ref",
+        "testCmdField": "test_cmd",
+        "tagFields": ["difficulty"]
+      }
+    }
+  ],
+  "datasets": [
+    {
+      "id": "pinch-sample",
+      "version": "1.0.0",
+      "description": "pinch 샘플 데이터셋 — 설치 직후 바로 돌려볼 수 있는 최소 케이스(스캐폴딩 데모). 실제 pinch 는 recipe 로 인입.",
+      "cases": [
+        {
+          "id": "sample-1",
+          "env": { "kind": "repo", "source": { "files": {} } },
+          "task": "작업 디렉터리에 out.txt 파일을 생성하라.",
+          "graders": [{ "id": "tests-pass", "config": { "cmd": "test -f out.txt" } }],
+          "timeoutSec": 120,
+          "tags": ["pinch", "sample"]
+        }
+      ],
+      "tags": ["pinch"]
+    }
+  ]
+}

@@ -30,6 +30,7 @@ import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { buildMcpServer } from "./mcp.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
+import { PluginService } from "./plugin-service.js";
 import { RunService } from "./run-service.js";
 import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
@@ -84,7 +85,20 @@ function harness() {
   const datasetRegistry = new InMemoryDatasetRegistry();
   const workspaceStore = new InMemoryWorkspaceStore();
   const harnessTemplates = new InMemoryHarnessTemplateRegistry();
+  const harnessInstances = new InMemoryHarnessInstanceRegistry(harnessTemplates);
+  const judgeRegistry = new InMemoryJudgeRegistry();
+  const modelRegistry = new InMemoryModelRegistry();
+  const runtimeRegistry = new InMemoryRuntimeRegistry();
+  const pluginService = new PluginService({
+    harnessTemplates,
+    harnessInstances,
+    datasets: datasetRegistry,
+    judges: judgeRegistry,
+    models: modelRegistry,
+    runtimes: runtimeRegistry,
+  });
   return {
+    pluginService,
     connectionService: new ConnectionService({
       store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 5))),
       states: new InMemoryOAuthStateStore(),
@@ -98,11 +112,11 @@ function harness() {
     }),
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     harnessTemplates,
-    harnessInstances: new InMemoryHarnessInstanceRegistry(harnessTemplates),
+    harnessInstances,
     datasetRegistry,
-    judgeRegistry: new InMemoryJudgeRegistry(),
-    modelRegistry: new InMemoryModelRegistry(),
-    runtimeRegistry: new InMemoryRuntimeRegistry(),
+    judgeRegistry,
+    modelRegistry,
+    runtimeRegistry,
     probeRuntime: async (_ws: string, spec: RuntimeSpec) => ({
       kind: spec.kind,
       reachable: true,
@@ -192,6 +206,7 @@ describe("MCP tools", () => {
       "get_scorecard",
       "heartbeat_job",
       "ingest_scorecard",
+      "install_plugin",
       "leaderboard_scorecards",
       "lease_job",
       "leave_workspace",
@@ -647,6 +662,41 @@ describe("MCP tools", () => {
     const bf = await member.callTool({ name: "backfill_scorecard_models", arguments: {} });
     expect(bf.isError).toBeFalsy();
     expect(JSON.parse(text(bf))).toHaveProperty("updated");
+  });
+
+  it("install_plugin: member 가 번들(dataset) 설치 ok; viewer 는 datasets:write 없어 FORBIDDEN", async () => {
+    const deps = harness();
+    const bundle = JSON.stringify({
+      id: "codex-pinch",
+      version: "1.0.0",
+      datasets: [
+        {
+          id: "pinch-sample",
+          version: "1.0.0",
+          cases: [
+            {
+              id: "s1",
+              env: { kind: "repo", source: { files: {} } },
+              task: "t",
+              graders: [],
+              timeoutSec: 60,
+              tags: [],
+            },
+          ],
+          tags: [],
+        },
+      ],
+    });
+    const member = await connect(deps, ["member"], "acme");
+    const res = await member.callTool({ name: "install_plugin", arguments: { bundle } });
+    expect(res.isError).toBeFalsy();
+    const body = JSON.parse(text(res)) as { results: Array<{ kind: string; status: string }> };
+    expect(body.results.find((r) => r.kind === "dataset")?.status).toBe("ok");
+
+    const viewer = await connect(deps, ["viewer"], "acme");
+    const denied = await viewer.callTool({ name: "install_plugin", arguments: { bundle } });
+    expect(denied.isError).toBe(true);
+    expect(text(denied)).toContain("FORBIDDEN");
   });
 
   it("schedules: member 가 예약 생성·조회·pause·삭제; viewer 는 생성 권한오류; 타 ws 는 NOT_FOUND", async () => {

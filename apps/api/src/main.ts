@@ -104,6 +104,7 @@ import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 import { NotificationService } from "./notification-service.js";
 import { githubProvider } from "./oauth/github.js";
 import { mattermostProvider } from "./oauth/mattermost.js";
+import { PluginService } from "./plugin-service.js";
 import { ProfileService } from "./profile-service.js";
 import { RunService } from "./run-service.js";
 import { RunnerHub } from "./runner-hub.js";
@@ -289,6 +290,17 @@ async function main(): Promise<void> {
     benchmarks: benchmarkRegistry,
     secretsFor: runtimeSecretsFor,
   });
+  // 플러그인 번들 원샷 설치 — 기존 레지스트리들로 팬아웃(하니스+벤치마크+데이터셋+런타임+judge/model/metric). 새 스토어 없음.
+  const pluginService = new PluginService({
+    harnessTemplates: harnessTemplateRegistry,
+    harnessInstances: harnessInstanceRegistry,
+    benchmarks: benchmarkService,
+    datasets: datasetRegistry,
+    judges: judgeRegistry,
+    models: modelRegistry,
+    metrics: metricRegistry,
+    runtimes: runtimeRegistry,
+  });
   // 외부 계정 연결(Connected accounts): github.com 은 env 기본 OAuth App(원클릭), GHE/Mattermost 는 관리자가 워크스페이스
   // 통합(Settings → 통합)에 1회 등록한 host+clientId+SecretStore name-ref 로 연결(멤버는 client ID 입력 없이 원클릭).
   // 토큰은 secretStore 와 같은 cipher 로 암호화. self-hosted client_secret 은 runtimeSecretsFor 로 resolve.
@@ -322,6 +334,7 @@ async function main(): Promise<void> {
     scorecardService,
     scheduleService,
     benchmarkService,
+    pluginService,
     harnessTemplates: harnessTemplateRegistry,
     harnessInstances: harnessInstanceRegistry,
     datasetRegistry,

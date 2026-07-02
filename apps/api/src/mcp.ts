@@ -28,6 +28,7 @@ import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkSe
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
 import type { MembershipService } from "./membership-service.js";
+import { PluginBundleSchema, type PluginService, requiredActionsForBundle } from "./plugin-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
 import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
@@ -56,6 +57,7 @@ export interface McpDeps {
   runnerHub?: RunnerHub; // 러너 lease 허브 — lease_job/submit_job_result/fail_job/heartbeat_job(러너 토큰 전용)
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
+  pluginService?: PluginService; // 플러그인 번들 원샷 설치(하니스+벤치마크+런타임 등)
   workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
   membershipService?: MembershipService; // 멤버 관리(목록/역할/제거/나가기) + 초대(발급/수락)
   profileService?: ProfileService; // 내 프로필(이름/유저네임/아바타) 조회·수정(self-serve)
@@ -98,8 +100,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   );
   const ws = principal.workspace;
 
-  server.registerTool("list_runs", { description: "이 워크스페이스의 run 목록", inputSchema: {} }, () =>
-    run(principal, "runs:read", async () => ok(await deps.service.list(ws))),
+  server.registerTool(
+    "list_runs",
+    {
+      description: "이 워크스페이스의 run 목록(standalone 활동). scorecard_id 지정 시 그 스코어카드의 케이스 자식 run.",
+      inputSchema: { scorecard_id: z.string().optional() },
+    },
+    ({ scorecard_id }) =>
+      run(principal, "runs:read", async () =>
+        ok(await deps.service.list(ws, scorecard_id ? { scorecardId: scorecard_id } : undefined)),
+      ),
   );
 
   server.registerTool(
@@ -736,6 +746,32 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const result = PullIngestBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
           return ok(await scorecards.ingestPull({ tenant: ws, ...result.data }));
+        }),
+    );
+  }
+
+  if (deps.pluginService) {
+    const plugins = deps.pluginService;
+    server.registerTool(
+      "install_plugin",
+      {
+        description:
+          "플러그인 번들(JSON) 설치 — 하니스+벤치마크+데이터셋+런타임+judge/model/metric 를 한 번에 등록(멱등, 부분성공). 번들 내용에 따라 per-type 권한 필요.",
+        inputSchema: { bundle: z.string().describe("PluginBundle JSON") },
+      },
+      ({ bundle }) =>
+        plain(async () => {
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(bundle);
+          } catch {
+            return fail("BAD_REQUEST: 유효한 PluginBundle JSON 이 아닙니다.");
+          }
+          const result = PluginBundleSchema.safeParse(parsed);
+          if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
+          // 섹션별 인가(throw→plain catch→fail) — 새 액션 없이 기존 per-type 게이트 조합.
+          for (const action of requiredActionsForBundle(result.data)) authorize(principal, action);
+          return ok(await plugins.install(ws, principal.subject, result.data));
         }),
     );
   }
