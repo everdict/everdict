@@ -1,2 +1,3 @@
 export { ScorecardAnalyzer, type QuestionId } from './ui/scorecard-analyzer'
-export { type AnalysisConfig } from './model/analysis'
+export { CustomAnalyzer } from './ui/custom-analyzer'
+export { paramsToConfig, type AnalysisConfig } from './model/analysis'
