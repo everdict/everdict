@@ -1,0 +1,95 @@
+# 데스크톱 앱 3-OS 릴리즈 — tag `desktop-vX.Y.Z` 푸시(또는 수동 dispatch=draft) 시
+# ubuntu/macos/windows 러너에서 electron-builder 로 설치파일을 빌드해 GitHub Release 하나로 발행한다.
+# 산출물: linux AppImage+deb · mac dmg+zip(x64/arm64) · win nsis. 전부 unsigned(인증서 확보 후 서명 추가).
+# 설계: docs/architecture/desktop-app.md (슬라이스 5 CI).
+name: desktop-release
+
+on:
+  push:
+    tags: ["desktop-v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "버전 (예: 0.1.0) — 파일명/릴리즈 이름에 사용, draft 로 발행"
+        required: true
+
+permissions:
+  contents: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            args: --linux
+          - os: macos-latest
+            args: --mac
+          - os: windows-latest
+            args: --win
+    runs-on: ${{ matrix.os }}
+    env:
+      # 서명 인증서 미보유 — 자동 서명 탐색 비활성(특히 macOS keychain 탐색이 빌드를 깨지 않게).
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4 # 버전은 루트 package.json 의 packageManager 필드에서
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: 버전 주입 (tag desktop-vX.Y.Z → X.Y.Z, dispatch 는 입력값)
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            VERSION="${GITHUB_REF_NAME#desktop-v}"
+          else
+            VERSION="${{ inputs.version }}"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          (cd apps/desktop && npm pkg set version="${VERSION}")
+
+      - name: 디펜던시 빌드 (turbo — desktop 의존 체인만)
+        run: pnpm turbo run build --filter=@assay/desktop
+
+      - name: 패키징 (esbuild 단일 번들 → electron-builder, unsigned)
+        working-directory: apps/desktop
+        run: |
+          node esbuild.mjs
+          pnpm exec electron-builder ${{ matrix.args }} --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.os }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.deb
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: GitHub Release 발행 (tag 트리거=정식, dispatch=draft)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v{0}', inputs.version) }}
+          name: Assay Desktop ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v{0}', inputs.version) }}
+          draft: ${{ github.event_name == 'workflow_dispatch' }}
+          generate_release_notes: true
+          files: dist/**

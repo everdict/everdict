@@ -179,8 +179,17 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    one-click "이 기기를 러너로 연결" → runner online with live "이 기기" row → run pinned to
    `self:<id>` executes on the desktop → `provenance{ranOn:self-hosted, runner, by}` verified.
    Keyring-less Linux needed one product fix: opt in to safeStorage `basic_text` with a logged warning
-   (VSCode-style), else `isEncryptionAvailable()=false` blocks pairing. **Remaining (CI infra, not
-   code)**: signing certs; mac build (needs a macOS runner); win NSIS (needs wine or a Windows runner).
+   (VSCode-style), else `isEncryptionAvailable()=false` blocks pairing.
+6. ✅ **Release CI** (`.github/workflows/desktop-release.yml`) — tag `desktop-vX.Y.Z` (or manual
+   dispatch → draft) fans out a 3-OS matrix (ubuntu/macos/windows runners): version injected from the
+   tag, `turbo build --filter=@assay/desktop` (dep chain only), esbuild bundle → electron-builder
+   per-OS (`--linux` AppImage+deb · `--mac` dmg+zip×[x64,arm64] · `--win` nsis), then one job collects
+   artifacts into a single **GitHub Release** (`softprops/action-gh-release`, auto release notes).
+   Deterministic artifact names (`Assay-<ver>-<os>-<arch>.<ext>`). All targets **unsigned** until certs
+   exist (`CSC_IDENTITY_AUTO_DISCOVERY=false`); `latest*.yml` uploaded for a future electron-updater.
+   Point the web's `DESKTOP_DOWNLOAD_URL` at `https://github.com/Ho2eny/assay/releases/latest`.
+   **Remaining**: signing certs (mac notarize / win Authenticode) — config hooks noted in
+   `electron-builder.yml`.
 
 ## Decisions / non-goals
 

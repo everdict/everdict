@@ -1,6 +1,10 @@
-# 패키징(슬라이스 5) — 번들만 담는다(node_modules 미포함; esbuild.mjs 참고). 서명은 후속(현재 unsigned).
+# 패키징 — 번들만 담는다(node_modules 미포함; esbuild.mjs 참고). 빌드/릴리즈는 CI 3-OS 매트릭스
+# (.github/workflows/desktop-release.yml, tag desktop-v* → GitHub Releases). 현재 unsigned —
+# 서명은 인증서 확보 후(mac: CSC_LINK/CSC_KEY_PASSWORD + notarize, win: sign 설정) 추가.
 appId: dev.assay.desktop
 productName: Assay
+# 다운로드 링크에서 안전한 결정적 파일명 — 공백 없음, os/arch 명시.
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 directories:
   output: release
   buildResources: build
@@ -15,17 +19,20 @@ npmRebuild: false
 linux:
   target:
     - AppImage
+    - deb
   executableName: assay-desktop
   category: Development
   icon: build/icon.png
-# mac 은 macOS 에서만 빌드 가능(dmg/서명/노터라이즈) — CI(macos runner) 후속. 아래는 타깃 선언만.
+  synopsis: Assay desktop — web parity shell + resident self-hosted runner
 mac:
   category: public.app-category.developer-tools
+  # macos-latest 러너는 arm64 — Intel 맥 배포를 위해 두 arch 모두 산출(크로스 arch 빌드 가능).
   target:
-    - dmg
-    - zip
-# win NSIS 크로스빌드는 wine 필요(rcedit) — wine 없는 리눅스에선 실패(spawn wine ENOENT).
-# 실빌드는 Windows/CI(windows runner) 에서. 서명은 인증서 확보 후 sign 설정 추가.
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+# win NSIS 크로스빌드는 wine 필요(rcedit) — CI 는 windows 러너에서 네이티브 빌드.
 win:
   target:
     - nsis

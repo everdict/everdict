@@ -56,6 +56,10 @@ logged-in web session over a minimal preload bridge.
   the packaged entry is swapped via `extraMetadata.main` (dev keeps `dist/main.js`). Keep
   `linux.executableName` path-safe (the package name `@assay/desktop` is not). Local dev:
   `pnpm -F @assay/desktop dev` (`ASSAY_WEB_URL=http://localhost:3000` against a dev web).
+- Releases ship from CI only: push tag `desktop-vX.Y.Z` → `.github/workflows/desktop-release.yml`
+  builds the 3-OS matrix and publishes one GitHub Release (manual dispatch → draft). The version in
+  `apps/desktop/package.json` stays `0.0.0` — CI injects the tag version at build time; do NOT bump
+  it in commits. deb metadata requires `author` (with email) + `homepage` in package.json — keep them.
 
 ## Checklist
 1. Read `docs/architecture/desktop-app.md` first; slice order is binding.

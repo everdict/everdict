@@ -3,7 +3,8 @@
   "version": "0.0.0",
   "private": true,
   "description": "Assay desktop — web parity shell + resident self-hosted runner",
-  "author": "Assay",
+  "author": "Ho2eny <heoin122@gmail.com>",
+  "homepage": "https://github.com/Ho2eny/assay",
   "type": "module",
   "main": "./dist/main.js",
   "scripts": {
