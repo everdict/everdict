@@ -225,6 +225,13 @@ if (!app.requestSingleInstanceLock()) {
   app.on("second-instance", () => createOrFocusWindow());
 
   void app.whenReady().then(() => {
+    // Linux 키링 부재(headless 등): safeStorage 가 basic_text 백엔드로 떨어지면 명시 옵트인 없이는
+    // isEncryptionAvailable()=false → 원클릭 페어링이 불가능해진다. VSCode 와 같은 폴백을 택한다 —
+    // 난독화 수준임을 경고하고 옵트인. GNOME/KDE 키링이 있으면 실제 암호화 백엔드라 이 경로를 타지 않는다.
+    if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") {
+      safeStorage.setUsePlainTextEncryption(true);
+      console.error("⚠ OS 키링이 없어 러너 토큰을 safeStorage basic_text(난독화)로 저장합니다 — 키링 설치를 권장.");
+    }
     config = loadConfig(configIo());
     registerBridge(ipcMain, {
       webOrigin,

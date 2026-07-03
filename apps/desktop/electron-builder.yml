@@ -18,8 +18,17 @@ linux:
   executableName: assay-desktop
   category: Development
   icon: build/icon.png
+# mac 은 macOS 에서만 빌드 가능(dmg/서명/노터라이즈) — CI(macos runner) 후속. 아래는 타깃 선언만.
 mac:
   category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+# win NSIS 크로스빌드는 wine 필요(rcedit) — wine 없는 리눅스에선 실패(spawn wine ENOENT).
+# 실빌드는 Windows/CI(windows runner) 에서. 서명은 인증서 확보 후 sign 설정 추가.
 win:
   target:
     - nsis
+nsis:
+  oneClick: true
+  deleteAppDataOnUninstall: false

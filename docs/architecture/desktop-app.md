@@ -169,12 +169,18 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    spam batches; click → focus window); web "이 기기" row prefers **live** capabilities from the
    bridge (+ "docker 없음 → service 하니스 불가" hint), so a docker daemon stopped after pairing
    shows immediately.
-5. ◐ **Packaging + live e2e** — linux DONE: esbuild single-file bundle (main ESM + preload CJS,
+5. ✅ **Packaging + live e2e** — linux: esbuild single-file bundle (main ESM + preload CJS,
    `electron` external — avoids packing pnpm-symlinked `node_modules` into asar; `extraMetadata.main`
    swaps the entry only in the package) + electron-builder AppImage (`pnpm -F @assay/desktop package`,
-   NOT in turbo gates), packaged binary smoke-verified. **Open**: signing, mac/win builds,
-   account-page download links, and the fresh-machine live e2e (install → login → one-click pair →
-   scorecard on `self:<id>` → result + provenance).
+   NOT in turbo gates), packaged binary smoke-verified. **Download link**: `DESKTOP_DOWNLOAD_URL`
+   (web env, optional) → 계정 > 연결된 러너 shows a "데스크톱 앱을 설치" link to browser users only
+   (hidden inside the desktop). **Live e2e PASS** (`scripts/live/desktop-runner.mjs`, 2026-07-03):
+   Playwright drives the real Electron shell (clean `XDG_CONFIG_HOME` = fresh machine) → account page
+   one-click "이 기기를 러너로 연결" → runner online with live "이 기기" row → run pinned to
+   `self:<id>` executes on the desktop → `provenance{ranOn:self-hosted, runner, by}` verified.
+   Keyring-less Linux needed one product fix: opt in to safeStorage `basic_text` with a logged warning
+   (VSCode-style), else `isEncryptionAvailable()=false` blocks pairing. **Remaining (CI infra, not
+   code)**: signing certs; mac build (needs a macOS runner); win NSIS (needs wine or a Windows runner).
 
 ## Decisions / non-goals
 

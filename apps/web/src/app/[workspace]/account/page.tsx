@@ -7,6 +7,7 @@ import {
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
+import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
@@ -79,6 +80,9 @@ export default async function AccountPage({
         providers={providers}
         canManageIntegrations={canManageIntegrations}
         runners={runners}
+        {...(env.DESKTOP_DOWNLOAD_URL !== undefined
+          ? { desktopDownloadUrl: env.DESKTOP_DOWNLOAD_URL }
+          : {})}
         keys={keys}
         keysError={keysError}
         canReadKeys={canReadKeys}

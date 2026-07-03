@@ -44,7 +44,13 @@ function isRunnerCapability(value: string): value is RunnerCapability {
 }
 
 // 러너는 개인 소유(self-scoped by subject) — 역할 게이트 없음. 모든 유저가 자기 머신을 페어링/해제한다.
-export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
+export function RunnersManager({
+  runners,
+  desktopDownloadUrl,
+}: {
+  runners: RunnerMeta[]
+  desktopDownloadUrl?: string // 설정 시(DESKTOP_DOWNLOAD_URL) 브라우저 사용자에게 데스크톱 앱 다운로드 안내
+}) {
   const [pairOpen, setPairOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
@@ -118,6 +124,21 @@ export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
             <span className="font-[510]"> 런타임만 바꿔</span> 내 호스트에서(내 로그인·repo 로)
             돌리고 결과를 워크스페이스로 회신할 수 있습니다. 러너는 워크스페이스가 아닌 내 계정
             소유입니다. 페어링 토큰은 한 번만 표시됩니다.
+            {/* 브라우저 사용자에게만 — 데스크톱 앱 안에서는 이미 원클릭이 있으니 다운로드 안내가 무의미. */}
+            {!bridge && desktopDownloadUrl && (
+              <>
+                {' '}
+                <a
+                  href={desktopDownloadUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="font-[510] text-primary hover:underline"
+                >
+                  데스크톱 앱을 설치
+                </a>
+                하면 버튼 한 번으로 이 기기를 연결할 수 있습니다.
+              </>
+            )}
           </p>
         </div>
         <span className="flex shrink-0 items-center gap-2">

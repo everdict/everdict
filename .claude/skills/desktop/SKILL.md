@@ -32,7 +32,9 @@ logged-in web session over a minimal preload bridge.
 4. Preload is attached only when loading the configured web origin; IPC handlers verify
    `senderFrame` origin before acting.
 5. The `rnr_` pairing token is persisted **only** `safeStorage`-encrypted under `app.getPath("userData")`;
-   never logged, never returned to the renderer (`pairRunner` is write-down-only).
+   never logged, never returned to the renderer (`pairRunner` is write-down-only). Linux without a
+   keyring: opt in to safeStorage's `basic_text` backend with a logged warning (VSCode-style fallback) —
+   never write the token outside safeStorage.
 6. The desktop holds no Keycloak access token — auth lives in the webview's cookie session (web BFF).
 
 ## Layering
