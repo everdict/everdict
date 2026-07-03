@@ -113,7 +113,17 @@ export function ScheduleCard({
           >
             <EntityRef id={s.runTemplate.harness.id} version={s.runTemplate.harness.version} />
           </Link>
-          <RuntimeChip label={runtimeLabelOf(s)} />
+          {s.runTemplate.runtime && !s.runTemplate.runtime.startsWith('self:') ? (
+            <Link
+              href={`/${workspace}/runtimes/${encodeURIComponent(s.runTemplate.runtime)}`}
+              className="rounded-sm hover:underline"
+              title="런타임 상세"
+            >
+              <RuntimeChip label={runtimeLabelOf(s)} />
+            </Link>
+          ) : (
+            <RuntimeChip label={runtimeLabelOf(s)} />
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-x-1 text-[12px] text-muted-foreground">
           {s.enabled ? (
