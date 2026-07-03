@@ -1,10 +1,11 @@
 import Link from 'next/link'
 import { Boxes, ChevronRight } from 'lucide-react'
 
+import { EvalDashboard } from '@/widgets/eval-dashboard'
 import { RunsTable } from '@/widgets/runs-table'
-import { ScorecardSummary } from '@/widgets/scorecard-summary'
 import { harnessesSchema } from '@/entities/harness'
 import { runsSchema } from '@/entities/run'
+import { scorecardsSchema } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Callout } from '@/shared/ui/callout'
@@ -32,10 +33,16 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
   let error: string | undefined
   let runs = runsSchema.parse([])
   let harnesses = harnessesSchema.parse([])
+  let scorecards = scorecardsSchema.parse([])
   try {
-    const [r, h] = await Promise.all([controlPlane.listRuns(ctx), controlPlane.listHarnesses(ctx)])
+    const [r, h, sc] = await Promise.all([
+      controlPlane.listRuns(ctx),
+      controlPlane.listHarnesses(ctx),
+      controlPlane.listScorecards(ctx),
+    ])
     runs = runsSchema.parse(r)
     harnesses = harnessesSchema.parse(h)
+    scorecards = scorecardsSchema.parse(sc)
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
@@ -49,7 +56,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
           컨트롤플레인에 연결할 수 없습니다: {error}
         </Callout>
       ) : (
-        <ScorecardSummary runs={runs} />
+        <EvalDashboard scorecards={scorecards} workspace={workspace} />
       )}
 
       <section className="space-y-2.5">

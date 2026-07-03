@@ -34,13 +34,7 @@ type Mode = 'push' | 'pull'
 
 // 트레이스 인제스트 — push(업로드한 TraceEvent[]) | pull(테넌트 OTel/MLflow 에서 runId 로 당겨오기) 두 모드.
 // dataset/judge/harness 라벨은 공통. push 는 traces JSON, pull 은 source + runs JSON.
-export function IngestScorecardForm({
-  datasets,
-  judges,
-}: {
-  datasets: { id: string }[]
-  judges: { id: string }[]
-}) {
+export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const [mode, setMode] = useState<Mode>('push')
@@ -48,7 +42,6 @@ export function IngestScorecardForm({
   const [datasetVersion, setDatasetVersion] = useState('latest')
   const [harnessId, setHarnessId] = useState('')
   const [harnessVersion, setHarnessVersion] = useState('external')
-  const [judgeIds, setJudgeIds] = useState<string[]>([])
   const [tracesJson, setTracesJson] = useState(SAMPLE_TRACES)
   // pull 모드 전용
   const [sourceKind, setSourceKind] = useState<'otel' | 'mlflow'>('otel')
@@ -68,7 +61,6 @@ export function IngestScorecardForm({
             datasetVersion,
             harnessId,
             harnessVersion,
-            judgeIds,
             tracesJson,
           })
         : await pullScorecardAction({
@@ -76,7 +68,6 @@ export function IngestScorecardForm({
             datasetVersion,
             harnessId,
             harnessVersion,
-            judgeIds,
             sourceKind,
             endpoint,
             authSecret,
@@ -235,29 +226,6 @@ export function IngestScorecardForm({
             </p>
           </div>
         </>
-      )}
-
-      {judges.length > 0 && (
-        <div className="space-y-1.5">
-          <Label>Agent Judge (선택 — 인제스트된 트레이스에 적용)</Label>
-          <div className="flex flex-wrap gap-x-4 gap-y-2 rounded-lg border border-border bg-card p-3 text-[13px]">
-            {judges.map((j) => (
-              <label key={j.id} className="flex items-center gap-1.5">
-                <input
-                  type="checkbox"
-                  className="accent-primary"
-                  checked={judgeIds.includes(j.id)}
-                  onChange={(e) =>
-                    setJudgeIds(
-                      e.target.checked ? [...judgeIds, j.id] : judgeIds.filter((x) => x !== j.id)
-                    )
-                  }
-                />
-                {j.id}
-              </label>
-            ))}
-          </div>
-        </div>
       )}
 
       {serverError && <Callout tone="danger">{serverError}</Callout>}

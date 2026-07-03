@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { ChevronLeft } from 'lucide-react'
 
 import {
   AddBenchmark,
@@ -58,17 +58,8 @@ export default async function ImportBenchmarkPage({
         데이터셋
       </Link>
       <PageHeader
-        title="벤치마크 추가"
-        description="HF 데이터셋·JSONL 소스를 미리보기로 필드를 감지해 매핑하면 바로 데이터셋이 됩니다(소스에서 만들기). 또는 공개 카탈로그(WebVoyager·GAIA·SWE-bench…)·내 레시피에서 가져옵니다."
-        actions={
-          <Link
-            href={`/${workspace}/recipes`}
-            className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
-          >
-            레시피 관리
-            <ChevronRight className="size-3.5" />
-          </Link>
-        }
+        title="벤치마크 가져오기"
+        description="HF 데이터셋·JSONL 소스를 미리보기로 필드를 감지해 매핑하면 바로 벤치마크가 됩니다(소스에서 만들기). 또는 공개 카탈로그(WebVoyager·GAIA·SWE-bench…)에서 가져옵니다."
       />
       {!allowed ? (
         <EmptyState

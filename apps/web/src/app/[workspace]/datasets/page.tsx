@@ -39,33 +39,34 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
     .catch(() => [])
 
   const relations = buildDatasetRelations(scorecards)
-  const authors: Record<string, string> = {}
-  for (const m of members) authors[m.subject] = m.name ?? m.email ?? m.subject
+  // 만든이 표기용 — subject → 이름 + 아바타(있으면). 이름은 프로필 name > email 로컬파트 > subject 폴백.
+  const authors: Record<string, { name: string; avatarUrl?: string }> = {}
+  for (const m of members)
+    authors[m.subject] = {
+      name: m.name ?? m.email?.split('@')[0] ?? m.subject,
+      ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+    }
 
   const currentWorkspace = principal?.workspace ?? workspace
+  // 이 워크스페이스가 소유한 데이터셋만 노출 — 공유(first-party) 벤치마크는 '벤치마크 추가'/레시피 흐름에서 다룬다.
+  const ownDatasets = datasets.filter((d) => d.owner === currentWorkspace)
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="데이터셋"
-        description="하니스 무관 eval 케이스 묶음 — 어느 하니스든 같은 케이스로 평가하고 버전으로 비교"
+        title="벤치마크"
+        description="채점이 포함된 평가 케이스 묶음 — 하니스 무관, 어느 하니스든 같은 케이스로 돌려 공정 비교"
         actions={
           can(principal?.roles, 'datasets:write') ? (
             <div className="flex gap-2">
               <Link
-                href={`/${workspace}/recipes`}
-                className={buttonVariants({ size: 'sm', variant: 'secondary' })}
-              >
-                레시피
-              </Link>
-              <Link
                 href={`/${workspace}/datasets/import`}
                 className={buttonVariants({ size: 'sm', variant: 'secondary' })}
               >
-                벤치마크 추가
+                소스에서 가져오기
               </Link>
               <Link href={`/${workspace}/datasets/new`} className={buttonVariants({ size: 'sm' })}>
-                데이터셋 등록
+                벤치마크 등록
               </Link>
             </div>
           ) : null
@@ -73,7 +74,7 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
       />
       {error ? (
         <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
-      ) : datasets.length === 0 ? (
+      ) : ownDatasets.length === 0 ? (
         <EmptyState
           icon={<Database />}
           title="등록된 데이터셋이 없습니다."
@@ -82,8 +83,7 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
       ) : (
         <DatasetList
           workspace={workspace}
-          currentWorkspace={currentWorkspace}
-          datasets={datasets}
+          datasets={ownDatasets}
           relations={relations}
           authors={authors}
         />

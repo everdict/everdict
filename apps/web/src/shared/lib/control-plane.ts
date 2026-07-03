@@ -201,32 +201,6 @@ export const controlPlane = {
     if (params.window) q.set('window', params.window)
     return call<T>(auth, `/scorecards/leaderboard?${q.toString()}`)
   },
-  // 번들 원샷 적용 — 하니스+벤치마크+데이터셋+런타임 등을 한 매니페스트로 등록(멱등, 부분성공).
-  applyBundle: <T>(auth: AuthContext, bundle: unknown) =>
-    call<T>(auth, '/bundles/apply', { method: 'POST', body: JSON.stringify(bundle) }),
-  listJudges: <T>(auth: AuthContext) => call<T>(auth, '/judges'),
-  getJudge: <T>(auth: AuthContext, id: string, version: string) =>
-    call<T>(auth, `/judges/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
-  createJudge: <T>(auth: AuthContext, spec: unknown) =>
-    call<T>(auth, '/judges', { method: 'POST', body: JSON.stringify(spec) }),
-  validateJudge: <T>(auth: AuthContext, spec: unknown) =>
-    call<T>(auth, '/judges/validate', { method: 'POST', body: JSON.stringify(spec) }),
-  // models — 추론/판정 모델(provider + 하부 모델 + baseUrl). judge/harness 가 id 로 참조.
-  listModels: <T>(auth: AuthContext) => call<T>(auth, '/models'),
-  getModel: <T>(auth: AuthContext, id: string, version: string) =>
-    call<T>(auth, `/models/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
-  createModel: <T>(auth: AuthContext, spec: unknown) =>
-    call<T>(auth, '/models', { method: 'POST', body: JSON.stringify(spec) }),
-  validateModel: <T>(auth: AuthContext, spec: unknown) =>
-    call<T>(auth, '/models/validate', { method: 'POST', body: JSON.stringify(spec) }),
-  // metrics — 런타임 정의 합격규칙(threshold). 스코어카드 실행/인제스트 시 선택해 post-hoc 적용.
-  listMetrics: <T>(auth: AuthContext) => call<T>(auth, '/metrics'),
-  getMetric: <T>(auth: AuthContext, id: string, version: string) =>
-    call<T>(auth, `/metrics/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),
-  createMetric: <T>(auth: AuthContext, spec: unknown) =>
-    call<T>(auth, '/metrics', { method: 'POST', body: JSON.stringify(spec) }),
-  validateMetric: <T>(auth: AuthContext, spec: unknown) =>
-    call<T>(auth, '/metrics/validate', { method: 'POST', body: JSON.stringify(spec) }),
   listRuntimes: <T>(auth: AuthContext) => call<T>(auth, '/runtimes'),
   getRuntime: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}`),

@@ -152,21 +152,14 @@ export default async function DatasetDetailPage({
         <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
           <span className="text-faint">출처</span>
           {dataset.producedBy.via === 'recipe' ? (
-            <Link
-              href={`/${workspace}/recipes/${encodeURIComponent(dataset.producedBy.id)}${
-                dataset.producedBy.version
-                  ? `?v=${encodeURIComponent(dataset.producedBy.version)}`
-                  : ''
-              }`}
-              className="inline-flex items-center gap-1 font-mono text-link transition-colors hover:text-foreground"
-            >
+            <span className="inline-flex items-center gap-1 font-mono text-muted-foreground">
               <ScrollText className="size-3.5" />
               {dataset.producedBy.id}
               {dataset.producedBy.version ? (
                 <span className="text-faint">@{dataset.producedBy.version}</span>
               ) : null}
               <span className="text-faint">레시피</span>
-            </Link>
+            </span>
           ) : (
             <span className="font-mono">
               {dataset.producedBy.via === 'catalog' ? '카탈로그' : '인라인 정의'} ·{' '}

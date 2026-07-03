@@ -3,7 +3,6 @@ import { ChevronLeft } from 'lucide-react'
 
 import { IngestScorecardForm } from '@/features/ingest-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
-import { judgesSchema } from '@/entities/judge'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -23,11 +22,9 @@ export default async function IngestScorecardPage({
   const allowed = can(principal?.roles, 'scorecards:run')
 
   let datasets: { id: string }[] = []
-  let judges: { id: string }[] = []
   if (allowed) {
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
-      judges = judgesSchema.parse(await controlPlane.listJudges(ctx))
     } catch {
       // 목록 실패해도 폼은 텍스트 입력으로 동작
     }
@@ -44,11 +41,11 @@ export default async function IngestScorecardPage({
       </Link>
       <PageHeader
         title="트레이스 인제스트"
-        description="외부에서 이미 수행한 트레이스를 올려 scorecard 로 만듭니다(하니스 미실행). judge·비교에 그대로 쓰입니다."
+        description="외부에서 이미 수행한 트레이스를 올려 scorecard 로 만듭니다(하니스 미실행). 비교·리더보드에 그대로 쓰입니다."
       />
       {allowed ? (
         <Card className="p-5">
-          <IngestScorecardForm datasets={datasets} judges={judges} />
+          <IngestScorecardForm datasets={datasets} />
         </Card>
       ) : (
         <EmptyState

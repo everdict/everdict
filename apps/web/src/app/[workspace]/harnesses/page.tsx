@@ -1,11 +1,14 @@
 import Link from 'next/link'
-import { Boxes, ChevronRight } from 'lucide-react'
+import { Boxes } from 'lucide-react'
 
+import { HarnessList } from '@/widgets/harness-list'
 import { harnessesSchema } from '@/entities/harness'
+import { membersSchema } from '@/entities/member'
+import { scorecardsSchema } from '@/entities/scorecard'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { Badge } from '@/shared/ui/badge'
+import { buildHarnessRelations } from '@/shared/lib/harness-relations'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -20,6 +23,7 @@ export default async function HarnessesPage({
 }) {
   const { workspace } = await params
   const { principal, ctx } = await currentPrincipal()
+
   let error: string | undefined
   let harnesses = harnessesSchema.parse([])
   try {
@@ -28,11 +32,33 @@ export default async function HarnessesPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
+  // 실행 벤치마크(스코어카드에서 도출) + 등록자(members 조인)는 부가 정보 — 실패해도 목록은 뜬다.
+  const scorecards = await controlPlane
+    .listScorecards(ctx)
+    .then((r) => scorecardsSchema.parse(r))
+    .catch(() => [])
+  const members = await controlPlane
+    .listMembers(ctx)
+    .then((r) => membersSchema.parse(r))
+    .catch(() => [])
+
+  const relations = buildHarnessRelations(scorecards)
+  const authors: Record<string, { name: string; avatarUrl?: string }> = {}
+  for (const m of members)
+    authors[m.subject] = {
+      name: m.name ?? m.email?.split('@')[0] ?? m.subject,
+      ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+    }
+
+  const currentWorkspace = principal?.workspace ?? workspace
+  // 이 워크스페이스가 등록한 하니스만 노출 — 공유(first-party) 하니스는 목록에서 제외.
+  const ownHarnesses = harnesses.filter((h) => h.owner === currentWorkspace)
+
   return (
     <div className="space-y-6">
       <PageHeader
         title="하니스"
-        description={`${harnesses.length}건 · 이 워크스페이스가 등록한 하니스 + 공유(first-party)`}
+        description="평가 대상 에이전트 — 대분류(템플릿)별로 묶인 인스턴스 버전, 어느 벤치마크로든 평가"
         actions={
           can(principal?.roles, 'harnesses:register') ? (
             <Link href={`/${workspace}/harnesses/new`} className={buttonVariants({ size: 'sm' })}>
@@ -43,48 +69,19 @@ export default async function HarnessesPage({
       />
       {error ? (
         <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
-      ) : harnesses.length === 0 ? (
+      ) : ownHarnesses.length === 0 ? (
         <EmptyState
           icon={<Boxes />}
           title="등록된 하니스가 없습니다."
-          hint="API 키로 POST /harnesses 하거나, 파일 SSOT(examples/harnesses)를 _shared 로 로드하세요."
+          hint="'하니스 등록'으로 올리거나 API 키로 POST /harnesses 하세요."
         />
       ) : (
-        <div className="space-y-2">
-          {harnesses.map((h) => {
-            const owned = h.owner === principal?.workspace
-            return (
-              <Link
-                key={h.id}
-                href={`/${workspace}/harnesses/${encodeURIComponent(h.id)}`}
-                className="group flex flex-wrap items-center justify-between gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <span className="grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground ring-1 ring-inset ring-border transition-colors group-hover:text-foreground">
-                    <Boxes className="size-[18px]" strokeWidth={1.75} />
-                  </span>
-                  <div className="min-w-0 space-y-1.5">
-                    <div className="truncate text-[13px] font-[560] text-foreground">{h.id}</div>
-                    <div className="flex flex-wrap gap-1">
-                      {h.versions.map((v) => (
-                        <code
-                          key={v}
-                          className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-border"
-                        >
-                          {v}
-                        </code>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Badge tone={owned ? 'success' : 'neutral'}>{owned ? 'owned' : 'shared'}</Badge>
-                  <ChevronRight className="size-4 text-faint transition-all group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
-                </div>
-              </Link>
-            )
-          })}
-        </div>
+        <HarnessList
+          workspace={workspace}
+          harnesses={ownHarnesses}
+          relations={relations}
+          authors={authors}
+        />
       )}
     </div>
   )

@@ -10,7 +10,6 @@ export interface IngestScorecardInput {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
-  judgeIds: string[]
   tracesJson: string
 }
 
@@ -36,7 +35,6 @@ export async function ingestScorecardAction(
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     traces,
-    judges: input.judgeIds.map((id) => ({ id, version: 'latest' })),
   }
   try {
     const rec = await controlPlane.ingestScorecard<{ id: string }>(ctx, body)
@@ -52,7 +50,6 @@ export interface PullScorecardInput {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
-  judgeIds: string[]
   sourceKind: 'otel' | 'mlflow'
   endpoint: string
   authSecret: string
@@ -80,7 +77,6 @@ export async function pullScorecardAction(
       ...(input.authSecret ? { authSecret: input.authSecret } : {}),
     },
     runs,
-    judges: input.judgeIds.map((id) => ({ id, version: 'latest' })),
   }
   try {
     const rec = await controlPlane.ingestScorecardPull<{ id: string }>(ctx, body)

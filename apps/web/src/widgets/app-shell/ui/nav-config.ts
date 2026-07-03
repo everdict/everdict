@@ -1,22 +1,7 @@
-import {
-  Activity,
-  BarChart3,
-  Boxes,
-  CalendarClock,
-  Cpu,
-  Database,
-  FileText,
-  Gauge,
-  Gavel,
-  LayoutDashboard,
-  Puzzle,
-  ScrollText,
-  Server,
-  type LucideIcon,
-} from 'lucide-react'
+import { BarChart3, Boxes, Database, LayoutDashboard, type LucideIcon } from 'lucide-react'
 
 export interface NavItem {
-  // 워크스페이스-상대 경로 suffix(예: '' = 개요, '/runs'). 렌더 시 활성 워크스페이스로 prefix → /{workspace}{suffix}.
+  // 워크스페이스-상대 경로 suffix(예: '' = 개요, '/scorecards'). 렌더 시 활성 워크스페이스로 prefix → /{workspace}{suffix}.
   // nav-config 는 요청 컨텍스트가 없으므로(모듈 로드 시 워크스페이스 미상) suffix 만 보관한다.
   href: string
   label: string
@@ -30,47 +15,30 @@ export interface NavSection {
   items: NavItem[]
 }
 
-// 사이드바 + Cmd+K 공용 IA. Linear 식 섹션 그룹화: 평가 운영 / 리소스 구성. href 는 워크스페이스-상대 suffix.
+// SaaS 표면은 3개 핵심 개념으로 좁힌다: 하니스(무엇을) · 벤치마크(무엇으로) · 스코어카드(결과) + 홈(개요).
+// judge/runtime/metric/model/recipe/bundle 은 엔진 부품/고급 옵션 — 벤치마크 실행에 필수가 아니라 내비에서 제외한다
+// (라우트는 남아 URL 로 접근 가능; 벤치마크가 채점을 내장해 원클릭 실행이 기본).
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
-      { href: '', label: '개요', icon: LayoutDashboard, exact: true, keywords: 'overview home' },
-      { href: '/runs', label: 'Runs', icon: Activity, keywords: '런 실행 평가' },
+      { href: '', label: '개요', icon: LayoutDashboard, exact: true, keywords: 'overview home 홈' },
+      {
+        href: '/harnesses',
+        label: '하니스',
+        icon: Boxes,
+        keywords: 'harness 에이전트 codex claude',
+      },
+      {
+        href: '/datasets',
+        label: '벤치마크',
+        icon: Database,
+        keywords: 'benchmark 벤치마크 dataset 데이터셋 케이스 pinch',
+      },
       {
         href: '/scorecards',
         label: '스코어카드',
         icon: BarChart3,
-        keywords: 'scorecard 배치 평가 비교',
-      },
-      {
-        href: '/schedules',
-        label: '예약',
-        icon: CalendarClock,
-        keywords: 'schedule cron 예약 주기 회귀',
-      },
-      { href: '/report', label: '리포트', icon: FileText, keywords: 'report 회귀 추세' },
-    ],
-  },
-  {
-    heading: '리소스',
-    items: [
-      { href: '/datasets', label: '데이터셋', icon: Database, keywords: 'dataset 벤치마크' },
-      {
-        href: '/recipes',
-        label: '레시피',
-        icon: ScrollText,
-        keywords: 'recipe 레시피 벤치마크 어댑터 source mapping 데이터셋',
-      },
-      { href: '/harnesses', label: '하니스', icon: Boxes, keywords: 'harness 에이전트' },
-      { href: '/judges', label: 'Judge', icon: Gavel, keywords: '심사 judge llm' },
-      { href: '/runtimes', label: '런타임', icon: Server, keywords: 'runtime 인프라 k8s nomad' },
-      { href: '/metrics', label: '메트릭', icon: Gauge, keywords: 'metric 지표' },
-      { href: '/models', label: '모델', icon: Cpu, keywords: 'model provider llm' },
-      {
-        href: '/bundles',
-        label: '번들',
-        icon: Puzzle,
-        keywords: 'bundle 번들 설치 codex pinch 벤치마크 하니스',
+        keywords: 'scorecard 배치 평가 비교 리더보드 leaderboard 추이',
       },
     ],
   },

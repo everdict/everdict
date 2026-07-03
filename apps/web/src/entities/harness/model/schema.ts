@@ -1,10 +1,19 @@
 import { z } from 'zod'
 
-// GET /harnesses 응답: 인스턴스 표면 — 템플릿 id 별로 묶인 버전 목록(자기 소유 + _shared).
+// GET /harnesses 응답: 인스턴스 표면 — 템플릿 id 별로 묶인 버전 목록 + 목록 메타(등록자/시각/파생).
+// 내용(category/kind/subtitle)은 최신 인스턴스에서, 생성자·시각은 등록 이력에서(컨트롤플레인 HarnessListEntry 미러).
 export const harnessSchema = z.object({
   id: z.string(),
   owner: z.string(),
   versions: z.array(z.string()),
+  latestVersion: z.string().optional(),
+  versionCount: z.number().optional(),
+  category: z.string().optional(), // 최신 인스턴스의 템플릿 대분류(cli-agent 등)
+  kind: z.string().optional(), // command | service | process
+  subtitle: z.string().optional(), // 모델/커맨드/서비스 요약(하니스는 free-text 설명이 없어 부제로 사용)
+  createdBy: z.string().optional(), // 최초 등록 인스턴스의 subject(시드/_shared 는 없음)
+  createdAt: z.string().optional(),
+  updatedAt: z.string().optional(),
 })
 export type Harness = z.infer<typeof harnessSchema>
 
