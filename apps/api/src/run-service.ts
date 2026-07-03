@@ -1,5 +1,13 @@
 import { type BudgetTracker, type Dispatcher, costOf } from "@assay/backends";
-import { type AgentJob, AppError, type EvalCase, type HarnessSpec, type JudgeRunConfig } from "@assay/core";
+import {
+  type AgentJob,
+  AppError,
+  type EvalCase,
+  type HarnessSecretMaps,
+  type HarnessSpec,
+  type JudgeRunConfig,
+  resolveHarnessSecrets,
+} from "@assay/core";
 import type { RunRecord, RunStore } from "@assay/db";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
 import { executeCase } from "./execute-case.js";
@@ -25,6 +33,8 @@ export interface RunServiceDeps {
   budget?: BudgetTracker; // API 가 admission 게이트(초과 시 402)와 cost settle 을 담당
   // 선언형 하니스 spec 을 레지스트리에서 풀어 잡에 임베드(없으면 빌트인 id 분기). 없는 하니스는 reject → undefined 폴백.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
+  // harness env 의 {secretRef} 해석용 — 공유(워크스페이스) + 제출자 개인 시크릿 두 티어. scope 로 골라 주입. scorecard 와 동일.
+  scopedSecretsFor?: (tenant: string, subject?: string) => Promise<HarnessSecretMaps>;
   // 워크스페이스 단위 계측 정책(기본 off). 요청별 override(SubmitInput.meterUsage)가 이보다 우선.
   // async 허용 — DB 기반 워크스페이스 설정 스토어를 그대로 끼울 수 있다.
   meterUsageFor?: (tenant: string) => boolean | Promise<boolean>;
@@ -114,9 +124,16 @@ export class RunService {
       ...(judge ? { judge } : {}),
     };
     try {
+      // env 시크릿 참조({secretRef}) 해석(디스패치 직전) — 공유 + 제출자 개인 시크릿. 없으면 throw → run 실패로 격리.
+      const secrets =
+        job.harnessSpec && this.deps.scopedSecretsFor
+          ? await this.deps.scopedSecretsFor(input.tenant, input.submittedBy)
+          : undefined;
+      const jobToRun =
+        secrets && job.harnessSpec ? { ...job, harnessSpec: resolveHarnessSecrets(job.harnessSpec, secrets) } : job;
       // 순수 실행은 scorecard 와 공유하는 executeCase(토큰 resolve+attach → dispatch)가 담당. "뒤"(settle/offload/알림)는
       // 여기(오케)의 몫이다. admit 은 submit 에서 이미 동기로 카운트했으므로 중복하지 않는다.
-      const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, job);
+      const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun);
       // 셀프호스티드 실행은 유저 자기 로그인이 결제 주체 — 워크스페이스 usd/tokens 버짓 미차감(그 외는 비용만큼 settle).
       if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(input.tenant, costOf(result));
       // os-use 스크린샷(동봉 base64)을 object storage 로 오프로드 → 레코드엔 URL 만(슬림). 실패해도 run 은 성공(폴백: base64 유지).

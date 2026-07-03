@@ -7,6 +7,7 @@ import {
   type Dataset,
   EnvSnapshotSchema,
   type GradeContext,
+  type HarnessSecretMaps,
   type HarnessSpec,
   type JudgeRunConfig,
   NotFoundError,
@@ -14,6 +15,7 @@ import {
   type Scorecard,
   type Suite,
   TraceEventSchema,
+  resolveHarnessSecrets,
 } from "@assay/core";
 import type { RunStore, ScorecardOrigin, ScorecardRecord, ScorecardStep, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
@@ -130,7 +132,9 @@ export interface ScorecardServiceDeps {
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
   budget?: BudgetTracker; // 케이스마다 admission/settle
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@assay/trace)
-  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(서버 내부 주입)
+  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(judge 모델 키 주입)
+  // harness env 의 {secretRef} 해석용 — 공유 + 제출자(owner) 개인 시크릿 두 티어. scope 로 골라 주입.
+  scopedSecretsFor?: (tenant: string, subject?: string) => Promise<HarnessSecretMaps>;
   // 비공개 repo 시드용 토큰 resolve — 케이스 env.source.connectionId → 외부 계정 연결 토큰. 단일 run 과 동일(RunService.repoTokenFor).
   // 연결은 개인 소유라 owner(=제출자 subject)로 resolve. 데이터셋의 케이스마다 적용 → 비공개-repo 데이터셋 배치 eval. 토큰은 잡(repoToken)에만 transient.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
@@ -454,6 +458,10 @@ export class ScorecardService {
     const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
     // 이 배치가 팬아웃한 자식 run: caseId → childId(runStore 설정 시). 완료 후 최종 결과 write-back + runIds 참조 저장에 쓴다.
     const caseToChild = new Map<string, string>();
+    // 배치 1회: 공유 + 제출자(owner) 개인 시크릿 맵(있으면). 케이스 디스패치 직전 harness env 의 {secretRef} 를 scope 로 해석한다
+    // — 레지스트리 스펙엔 평문이 남지 않고 실행 시에만 주입된다. 참조한 시크릿이 없으면 그 케이스가 명확한 사유로 실패한다.
+    const secretMap =
+      harnessSpec && this.deps.scopedSecretsFor ? await this.deps.scopedSecretsFor(tenant, owner) : undefined;
     // 각 케이스 디스패치(오케 per-case): admit(배치라 per-case) → 잡 enrich → 순수 executeCase → settle.
     // 순수 실행(토큰 resolve+attach → dispatch)은 단일 run 과 공유하는 executeCase 가, 정산/자식-run 수명은 오케인 여기가 담당.
     // runStore 설정 시 케이스마다 자식 run(RunRecord)을 만들어 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
@@ -488,7 +496,12 @@ export class ScorecardService {
         caseToChild.set(job.evalCase.id, childId);
       }
       try {
-        const result = await executeCase(this.deps, owner, enriched);
+        // env 시크릿 참조 해석(디스패치 직전). 참조한 시크릿이 없으면 resolveHarnessSecrets 가 throw → 이 케이스가 실패로 격리된다.
+        const jobToRun =
+          secretMap && enriched.harnessSpec
+            ? { ...enriched, harnessSpec: resolveHarnessSecrets(enriched.harnessSpec, secretMap) }
+            : enriched;
+        const result = await executeCase(this.deps, owner, jobToRun);
         // 셀프호스티드 실행은 유저 자기 로그인이 결제 주체 — 워크스페이스 버짓 미차감(그 외는 비용만큼 settle). 단일 run 과 동일.
         if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(tenant, costOf(result));
         if (runStore && childId) await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
