@@ -8,7 +8,7 @@
 > **The three concerns are now separated:**
 > - **Execution** = `execute-case.ts` `executeCase(deps, owner, job) → CaseResult` — pure: repo-token + dispatch.
 >   No settle/offload/notify (S2 stripped `settle` out). `run` no longer cares about "after".
-> - **Scoring** = `scoring-service.ts` `ScoringService` — judge/metric application over results, independent of how
+> - **Scoring** = `scoring-service.ts` `ScoringService` — judge application over results, independent of how
 >   they were produced (S1). Live batch **and** ingest share it. Aggregation stays pure in `@assay/suite`.
 > - **Orchestration** = `RunService` (single: admit → executeCase → settle → offload → webhook → notify) and
 >   `ScorecardService` (batch: fan-out executeCase + per-case settle/child-run → `ScoringService` → suite aggregate
@@ -27,7 +27,7 @@ There are three genuinely distinct concerns:
 |---|---|---|
 | **Execution** | run one case → a result (trace/snapshot). Nothing after. | `run` |
 | **Orchestration** | decide what to run · fan-out · collect · admit/settle · deliver (202/poll/webhook) · notify · progress | the orchestrator |
-| **Scoring** | over results/traces: grade · judge · metric · aggregate (summary) · compare (diff) · rank (leaderboard) | the evaluator |
+| **Scoring** | over results/traces: grade · judge · aggregate (summary) · compare (diff) · rank (leaderboard) | the evaluator |
 
 Today they are collapsed into **two** services, both of which *drive execution* — which is exactly why "there are
 two objects for the same execution" feels wrong:
@@ -36,7 +36,7 @@ two objects for the same execution" feels wrong:
   `store.update` → `onComplete` (Mattermost) → `fireWebhook`. A "run" should not care about the *after* — settle,
   offload, notify, webhook are delivery/accounting = orchestration. Even `executeCase` does `budget.settle`.
 - **`ScorecardService` does all three at once.** `track()` interleaves execution driving (`runSuite`), **scoring**
-  (`applyJudges` / `applyMetrics`), aggregation (`summarizeScorecard` / `scorecardModels`), progress steps,
+  (`applyJudges`), aggregation (`summarizeScorecard` / `scorecardModels`), progress steps,
   persistence, and notify — one ~600-line service.
 - Consequence: **scoring can't be used without the batch execution path**, and execution can't be driven without an
   orchestrator dragging delivery concerns. Separable things are forced to cohabit → the "artificial" feeling.
@@ -44,7 +44,7 @@ two objects for the same execution" feels wrong:
 ### The proof that scoring is separable: ingest
 
 `POST /scorecards/ingest{,/pull}` produces a full scorecard **without executing anything** — it takes external
-traces and runs `applyJudges` / `applyMetrics` / `summarize`. So **scoring is already an independent function over
+traces and runs `applyJudges` / `summarize`. So **scoring is already an independent function over
 traces**; it only *looks* coupled because it lives as methods on `ScorecardService` next to the execution path.
 Ingest is the existence proof for Concern 3.
 
@@ -71,9 +71,9 @@ Ingest is the existence proof for Concern 3.
    Execution (run)                Orchestration                     Scoring (evaluator)
    ───────────────                ─────────────                     ───────────────────
    executeCase(job) → CaseResult  RunService (single):              ScoringService.score(
-     · repoToken · dispatch         admit → materializeRun            results, {judges,metrics}, ctx)
+     · repoToken · dispatch         admit → materializeRun            results, {judges}, ctx)
      · (NO settle/notify)           → settle → offload                 · applyJudges (JudgeRunner)
-                                    → webhook → notify (202)            · applyMetrics (MetricRegistry)
+                                    → webhook → notify (202)
    materializeRun(record, job)                                         → scored results
      = executeCase + record       BatchDriver (scorecard):          @assay/suite (pure):
        (create→exec→update)         admit/settle per case              summarize · diff · leaderboard
@@ -91,9 +91,9 @@ Ingest is the existence proof for Concern 3.
 | Module | Concern | Responsibility (as shipped) |
 |---|---|---|
 | `execute-case.ts` | Execution | `executeCase(deps, owner, job) → CaseResult` — repo-token resolve+attach + dispatch **only**. No settle/offload/notify. |
-| `scoring-service.ts` | Scoring | `ScoringService` — `applyJudges` + `applyMetrics` + `collectJudgeModels` over results. Used by batch **and** ingest. Aggregation stays pure in `@assay/suite`. |
+| `scoring-service.ts` | Scoring | `ScoringService` — `applyJudges` + `collectJudgeModels` over results. Used by batch **and** ingest. Aggregation stays pure in `@assay/suite`. |
 | `run-service.ts` | Orchestration (single) | admit → create → `executeCase` (async) → **settle** → offload → webhook → notify. 202. |
-| `scorecard-service.ts` | Orchestration (batch) + composition | `submit` = fan-out `executeCase` per case (+ per-case settle + child-run lifecycle) → `ScoringService` (judges/metrics) → `@assay/suite` (summarize/models) → store. `ingest` = fetch traces → `ScoringService` → store. Now clearly *scoring/aggregation-focused*, delegating execution + scoring out. |
+| `scorecard-service.ts` | Orchestration (batch) + composition | `submit` = fan-out `executeCase` per case (+ per-case settle + child-run lifecycle) → `ScoringService` (judges) → `@assay/suite` (summarize/models) → store. `ingest` = fetch traces → `ScoringService` → store. Now clearly *scoring/aggregation-focused*, delegating execution + scoring out. |
 | `notification-service.ts` | Orchestration (delivery) | already separate; a completion hook (run + scorecard). |
 
 > No `materialize-run.ts` / `batch-driver.ts` were created — see the status block. The RunRecord create/update in
@@ -107,14 +107,14 @@ Ingest is the existence proof for Concern 3.
 - **out of `RunService.track`**: nothing leaves the service, but it is re-expressed as `admit → materializeRun →
   settle → offload → webhook → notify` so the *execution* part is the shared `materializeRun` and the rest is
   visibly orchestration.
-- **out of `ScorecardService`**: `applyJudges` + `applyMetrics` → `ScoringService`. `ScorecardService.track` keeps
+- **out of `ScorecardService`**: `applyJudges` → `ScoringService`. `ScorecardService.track` keeps
   only: fan-out (via BatchDriver/`materializeRun`), progress steps, calling the scorer, aggregating (suite), storing.
 - **unchanged**: `@assay/graders`, `@assay/suite` (already pure), `@assay/runner` (in-sandbox), API response shapes,
   `runIds`/child-run behavior, ingest's embed-only, MCP/HTTP surface.
 
 ## Migration slices
 
-- **S1 — extract `ScoringService`** ✅ `ad7cdc2`. `applyJudges`/`applyMetrics`/`collectJudgeModels` → `ScoringService`;
+- **S1 — extract `ScoringService`** ✅ `ad7cdc2`. `applyJudges`/`collectJudgeModels` → `ScoringService`;
   `ScorecardService` builds one from its deps and delegates; live batch + ingest share it. 146 existing + 4 new tests.
 - **S2 — `run` = pure execution** ✅ `91f7c55`. Stripped `settle` (+ `costOf`/`budget`/`tenant`) from `executeCase`;
   `RunService.track` and the scorecard batch closure settle after execution. 310 api tests green.

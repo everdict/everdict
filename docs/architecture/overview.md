@@ -30,7 +30,7 @@ See `docs/execution-backends.md` (Backend vs Driver) and `docs/sandbox-auth.md` 
 - harness Codex/LangGraph → new `EvaluableHarness` (+ registry entry in `@assay/agent`).
 - **service-topology harness** (multi-service + browser/OS target env) → `HarnessSpec(service)` +
   orchestrator-agnostic `ServiceTopologyBackend` (Nomad/K8s) + `@assay/trace` (OTel/MLflow). See `docs/service-harness.md`.
-- metric → new `Grader` (+ registry entry).
+- new scoring signal → new `Grader` (+ registry entry). A model-backed `Grader` is an Agent Judge.
 
 ## Operational layer (multi-tenant SaaS)
 Above placement, the control plane turns "run one case" into "serve many tenants on finite/elastic infra":

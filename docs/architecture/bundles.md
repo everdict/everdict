@@ -2,7 +2,7 @@
 
 > **Status: ALL 3 SLICES SHIPPED (gates green — api format/lint/typecheck/test; web prettier/eslint/tsc; live loop
 > verified locally: apply → run pinch → leaderboard).** Generalization, not a special case. The platform ALREADY lets a
-> tenant register each piece (harness / benchmark recipe / dataset / judge / runtime / model / metric) at runtime
+> tenant register each piece (harness / benchmark recipe / dataset / judge / runtime / model) at runtime
 > via per-type HTTP+MCP endpoints, tenant-owned + immutable. What's missing for the SaaS story
 > ("유저가 쉽게 벤치마크·어댑터·하니스를 등록 → 자기 하니스로 수행 → 대시보드") is a **cohesive one-shot apply**:
 > a single manifest that registers a whole bundle. This doc adds that — **harness-agnostic** — and ships
@@ -25,7 +25,7 @@ generalization; `codex`+`pinch` is the bundle that plugs into it.
   jsonl) + field `mapping` (task/id/answer/git/os-use/image/tags) + `graderTemplates` with `{field}`
   interpolation. Custom scoring is already expressible via the `command` grader (run any scorer script → regex
   pass) and `judge` (LLM/VLM). Registered as a tenant recipe (`BenchmarkRegistry`) or imported → `Dataset`.
-- **Per-type registries** — harness templates/instances, datasets, benchmark recipes, judges, models, metrics,
+- **Per-type registries** — harness templates/instances, datasets, benchmark recipes, judges, models,
   runtimes: all `(tenant,id,version)` immutable, tenant-owned + `_shared` fallback, in-memory/Pg + file-GitOps
   loaders + HTTP+MCP register/list/get. `examples/*` are seeded to `_shared` at boot (env-configurable dirs).
 - **No core violations** — the only harness-name special-casing is `packages/agent/src/registry.ts` `makeHarness`
@@ -47,7 +47,6 @@ Bundle = {
   datasets?:         Dataset[],                                // ready-made case bundles (runnable now)
   judges?:           JudgeSpec[],
   models?:           ModelSpec[],
-  metrics?:          MetricSpec[],
   runtimes?:         RuntimeSpec[],
 }
 BundleService.apply(tenant, createdBy, bundle) → { id, version, results: BundleItemResult[] }
@@ -70,7 +69,7 @@ transports **compute the required actions from the bundle's contents and enforce
 
 ```
 requiredActionsForBundle(bundle): Action[]   // templates:write | harnesses:register | datasets:write
-                                             // | judges:write | models:write | metrics:write | runtimes:write
+                                             // | judges:write | models:write | runtimes:write
 ```
 
 `datasets` **and** `benchmarkRecipes` both require `datasets:write`. The route calls `gate()` for each; MCP calls

@@ -24,7 +24,7 @@
 > - **#2 unified activity feed** (`1a47bfc`): the activity page merges standalone runs + scorecard batches into one
 >   `updatedAt`-sorted timeline (`ActivityFeed` widget, type badge, each → its detail). `/scorecards` list unchanged.
 > - **#3 embed→runIds dedup + hydrate** (`ba98a8c`): dispatched scorecards store `runIds` only (not the heavy
->   `scorecard` embed); `track` writes final (post-judge/metric/offload) results back to child runs, and
+>   `scorecard` embed); `track` writes final (post-judge/offload) results back to child runs, and
 >   `ScorecardService.get` hydrates `scorecard` from them → response shape, web, and diff are all unchanged.
 >   `no-runStore` / ingest / old records keep the embed (get returns it as-is).
 >
@@ -83,7 +83,7 @@ This makes Step 0 tiny.
 run(case, harness, runtime) ─────────────▶ RunRecord
   owns (per-case execution lifecycle):
     dispatch · budget admit/settle · repo-token resolve · artifact offload
-    · per-trace judge · per-trace metric re-derive · notify · provenance · usage
+    · per-trace judge · notify · provenance · usage
 
 scorecard(dataset, harness, runtime, judges) = run × N  +  aggregation
   owns (ONLY batch-level concerns):
@@ -96,7 +96,7 @@ decompose into `run`; the **aggregation and comparison** (`summarizeScorecard`, 
 are inherently batch-level and stay in scorecard, now composed over run records rather than a private executor.
 
 - **Moves INTO the run core** (today duplicated in scorecard): budget admit/settle, repo-token, artifact offload,
-  per-trace judge, per-trace metric, notify, provenance, usage derivation.
+  per-trace judge, notify, provenance, usage derivation.
 - **Stays in scorecard**: dataset resolution, fan-out, cross-case `summary`, `models`, `diff`, `steps` timeline.
 
 ## Step 0 — expose `runtime` on the run surface (additive, reversible, unblocks the MCP use case)
@@ -129,7 +129,7 @@ executeCase(job, ctx): Promise<CaseResult>
   3. enrich job: tenant, submittedBy, harnessSpec, judge model
   4. dispatcher.dispatch(job) → CaseResult
   5. budget.settle (skip when provenance.ranOn === "self-hosted")
-  6. (optional, per-case) judge + metric re-derive + artifact offload
+  6. (optional, per-case) judge + artifact offload
   7. return CaseResult
 ```
 
@@ -159,7 +159,7 @@ can hydrate the full `Scorecard` by joining the referenced runs; `list` stays ch
 
 - `ScorecardService.track` fan-out creates a `RunRecord{parentScorecardId=<id>, trigger:"scorecard", notify:"silent"}`
   per case via the shared core, collects their ids, then aggregates (`summarizeScorecard` over the hydrated
-  results, `scorecardModels`, judges/metrics as today). The `steps` timeline is unchanged (per-case progress).
+  results, `scorecardModels`, judges as today). The `steps` timeline is unchanged (per-case progress).
 - **Drill-down for free:** scorecard detail → click a case → the same run detail page (full trace/snapshot/usage/
   provenance). Today per-case has no addressable entity.
 

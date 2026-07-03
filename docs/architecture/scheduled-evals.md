@@ -125,7 +125,7 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
 
 ### Surface (BFF↔MCP parity + roles)
 
-- **HTTP** — `POST /schedules` `{name, cron, timezone?, dataset, harness, judges?, metrics?, runtime?,
+- **HTTP** — `POST /schedules` `{name, cron, timezone?, dataset, harness, judges?, runtime?,
   concurrency?, overlapPolicy?, enabled?}` → record; `GET /schedules`, `GET /schedules/:id`,
   `PATCH /schedules/:id` (edit / pause / resume), `DELETE /schedules/:id`, `GET /schedules/:id/runs` (scorecards
   this schedule produced, tagged `{scheduleId, firedAt}`).

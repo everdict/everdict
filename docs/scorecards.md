@@ -28,7 +28,7 @@ records their ids in `runIds`. Child runs are **hidden from the default run/acti
 (`RunStore.list` filters `parentScorecardId IS NULL`); fetch a batch's children with `list(tenant, {scorecardId})`
 (`GET /runs?scorecardId=` / MCP `list_runs scorecard_id`), which powers the scorecard detail's case→run drill-down.
 **Storage is deduped**: a dispatched scorecard stores `runIds` only (not the heavy `scorecard` embed) — `track`
-writes the final (post-judge/metric/offload) results back to the child runs, and `ScorecardService.get` **hydrates**
+writes the final (post-judge/offload) results back to the child runs, and `ScorecardService.get` **hydrates**
 the `scorecard` from them, so the response shape, web, and diff are unchanged. `no-runStore` runs, ingest paths, and
 old records keep the embed. See `docs/architecture/run-as-primitive.md`.
 
@@ -38,12 +38,12 @@ Runs are **async**: submit returns a `queued` record; poll until terminal. Norma
 **Failure visibility** (diagnose "어떤 구간에서 어떻게"): a per-case dispatch failure is isolated to a failed
 `CaseResult` carrying `trace:[{kind:"error",message}]` + a `pass:false` score whose **`detail` = the reason**
 (so the web/CLI shows *why* per case). A pipeline-level failure tags the record's `error.phase`
-(`dispatch | judges | metrics | offload | persist`) so you see *which stage* broke, and the **partial
+(`dispatch | judges | offload | persist`) so you see *which stage* broke, and the **partial
 `scorecard`** (case results gathered before the failing stage) is persisted on the failed record too.
 
 **Progress (steps timeline)** — not a percentage; the *process*. The run appends `ScorecardRecord.steps[]`
 (`{ts, phase, status, message, caseId?}`) and **persists incrementally**: dispatch-started, one step **per case
-as it completes** (`onResult` from `runSuite` → `caseId → PASS/FAIL · reason`), judges/metrics start+done, then
+as it completes** (`onResult` from `runSuite` → `caseId → PASS/FAIL · reason`), judges start+done, then
 persist. The detail page renders this as a timeline and **auto-refreshes** (`router.refresh()`) while the run is
 `queued`/`running`. `steps` is heavy detail → returned by `get`, **omitted from `list`** (like `scorecard`);
 Pg column `steps jsonb` (migration `0026`).

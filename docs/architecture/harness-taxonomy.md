@@ -199,7 +199,7 @@ anymore. Keep shared helpers (`asService`, `compareVersions`, `resolveRef`, `SHA
 
 **Collision note:** Bucket B + wiring + examples touch `apps/api/server.ts`/`mcp.ts`/`scorecard-service.ts`/
 `main.ts` + `apps/web` harness pages + `packages/auth/authz.ts` — all in the **active concurrent-edit zone**
-(member-management + metrics/models, which currently leaves the tree RED). Cutover is one atomic change set; run
+(member-management + models, which currently leaves the tree RED). Cutover is one atomic change set; run
 it when that work has landed and the tree is green. Bucket A swaps are mechanical once the wiring flips.
 
 ---
