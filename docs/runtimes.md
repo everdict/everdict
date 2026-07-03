@@ -39,8 +39,10 @@ kubeconfigs are self-contained.
 
 ## Ownership & lifecycle
 `RuntimeRegistry` (`@assay/registry`, `InMemory`/`Pg`, migration `0009_create_runtimes.sql`) — workspace-owned +
-`_shared` fallback, immutable versions, mirroring the other registries. `examples/runtimes/*.json` seeds
-`_shared` `local`/`docker` runtimes (**dev** — for "run on my own machine" register a self-hosted runner instead).
+`_shared` fallback, immutable versions, mirroring the other registries. Runtimes are **not auto-seeded** —
+a workspace registers its own execution infra (`examples/runtimes/*.json` are reference specs only; the old
+default `_shared` `local`/`docker` seeds were removed — for "run on my own machine" register a self-hosted
+runner instead).
 **Role-gating**: `runtimes:read` = viewer+, `runtimes:write` = **viewer+ (role 무관)** —
 registering a runtime spec (+validate/probe) is open to every member, same as `harnesses:register`. The runtime spec
 holds **no secrets**; the credential *values* it references are still admin-only (`secrets:write`), so opening

@@ -90,7 +90,6 @@ import {
   loadHarnessTaxonomyDir,
   loadJudgeDir,
   loadModelDir,
-  loadRuntimeDir,
 } from "@assay/registry";
 import { S3ArtifactStore } from "@assay/storage";
 import { InProcessCallbackRendezvous } from "@assay/topology";
@@ -165,7 +164,8 @@ async function main(): Promise<void> {
   // 노이즈였다. _shared 폴백 메커니즘 자체는 유지(향후 진짜 공유 벤치마크를 등록하면 그대로 보인다).
   await seedSharedJudges(judgeRegistry);
   await seedSharedModels(modelRegistry);
-  await seedSharedRuntimes(runtimeRegistry);
+  // 런타임도 자동 시드하지 않는다 — 기본 _shared docker/local 은 "누구의 인프라인지" 모호한 노이즈였다.
+  // 런타임은 워크스페이스가 자기 인프라를 직접 등록하는 개념(examples/runtimes/*.json 은 참고용으로만 유지).
 
   // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소는 항상 활성.
   const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
@@ -516,17 +516,6 @@ async function seedSharedModels(registry: ModelRegistry): Promise<void> {
   try {
     await loadModelDir(dir, { into: registry });
     console.error(`▶ shared models seeded from ${dir}`);
-  } catch {
-    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
-  }
-}
-
-// _shared(공용) Runtime 정의를 파일 SSOT 에서 시드 — 새 테넌트도 기본 런타임 선택 가능. best-effort/멱등.
-async function seedSharedRuntimes(registry: RuntimeRegistry): Promise<void> {
-  const dir = process.env.ASSAY_RUNTIMES_DIR ?? `${process.cwd()}/examples/runtimes`;
-  try {
-    await loadRuntimeDir(dir, { into: registry });
-    console.error(`▶ shared runtimes seeded from ${dir}`);
   } catch {
     // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
   }
