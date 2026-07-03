@@ -434,6 +434,37 @@ describe("MCP tools", () => {
     expect(text(r)).toContain("FORBIDDEN");
   });
 
+  it("placement 게이트: image 잡을 docker 없는 러너가 lease → {job:null} + 그 잡은 capability_mismatch 로 거부", async () => {
+    const deps = harness();
+    const key = { owner: "u-alice", runnerId: "laptop" };
+    const imageJob: AgentJob = {
+      evalCase: {
+        id: "c-img",
+        env: { kind: "repo", source: { files: {} } },
+        image: "spreadsheetbench:v1", // 컨테이너 실행 요구 → docker 필요
+        task: "t",
+        graders: [],
+        timeoutSec: 60,
+        tags: [],
+      },
+      harness: { id: "scripted", version: "0" },
+      tenant: "acme",
+    };
+    const dispatched = deps.runnerHub.enqueue(key, imageJob);
+    const settled = dispatched.then(
+      () => ({ ok: true as const }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    const runner = await connectRunner(deps, "laptop");
+    // 러너가 docker 없이(repo 만) lease → 가져갈 잡 없음(게이트) + 그 잡은 명확히 거부된다.
+    const leased = JSON.parse(
+      text(await runner.callTool({ name: "lease_job", arguments: { capabilities: ["repo"] } })),
+    );
+    expect(leased.job).toBeNull();
+    const r = await settled;
+    expect(r).toMatchObject({ ok: false, e: { code: "UPSTREAM_ERROR", extra: { reason: "capability_mismatch" } } });
+  });
+
   it("member: submit_run + register_harness(instance) 가능", async () => {
     const client = await connect(harness(), ["member"]);
     const sub = await client.callTool({ name: "submit_run", arguments: { harness_id: "scripted", task: "t" } });

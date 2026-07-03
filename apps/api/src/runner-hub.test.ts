@@ -14,6 +14,11 @@ const job = (id: string): AgentJob => ({
   harness: { id: "scripted", version: "0" },
   tenant: "acme",
 });
+// case.image 를 요구하는 잡 — 컨테이너 실행이라 러너에 docker capability 가 필요.
+const imageJob = (id: string): AgentJob => ({
+  ...job(id),
+  evalCase: { ...job(id).evalCase, image: "spreadsheetbench:v1" },
+});
 const keyA: SelfHostedKey = { owner: "u-alice", runnerId: "laptop" };
 const keyB: SelfHostedKey = { owner: "u-bob", runnerId: "laptop" };
 
@@ -60,6 +65,46 @@ describe("RunnerHub", () => {
     const hub = new RunnerHub();
     expect(hub.complete(keyA, "nope", result)).toBe(false);
     expect(hub.fail(keyA, "nope", "x")).toBe(false);
+  });
+
+  // placement 게이트: case.image(컨테이너) 잡을 docker 없는 러너에 leasing 하면 잘못된 환경(호스트 폴백)에서 돈다 → 거부.
+  it("게이트: image 잡 + docker 없는 러너 → lease 안 하고 그 잡을 capability_mismatch 로 거부", async () => {
+    const hub = new RunnerHub({ newJobId: () => "j-img" });
+    const d = hub.enqueue(keyA, imageJob("c-img"));
+    const settled = d.then(
+      () => ({ ok: true as const }),
+      (e: unknown) => ({ ok: false as const, e }),
+    );
+    // 러너가 repo 만 광고(docker 없음) → 이 잡은 못 돌린다 → null(가져갈 것 없음) + 잡은 거부됨.
+    expect(hub.lease(keyA, ["repo"])).toBeNull();
+    const r = await settled;
+    expect(r).toMatchObject({
+      ok: false,
+      e: { code: "UPSTREAM_ERROR", extra: { reason: "capability_mismatch", missing: ["docker"] } },
+    });
+  });
+
+  it("게이트: image 잡 + docker 러너 → 정상 lease", () => {
+    const hub = new RunnerHub({ newJobId: () => "j-img" });
+    hub.enqueue(keyA, imageJob("c-img"));
+    expect(hub.lease(keyA, ["repo", "docker"])?.job.evalCase.id).toBe("c-img");
+  });
+
+  it("게이트: capabilities 미전달이면 게이트 없음(하위호환) — image 잡도 lease", () => {
+    const hub = new RunnerHub({ newJobId: () => "j-img" });
+    hub.enqueue(keyA, imageJob("c-img"));
+    expect(hub.lease(keyA)?.job.evalCase.id).toBe("c-img"); // capabilities undefined → 게이트 스킵
+  });
+
+  it("게이트: image 잡은 거부하되 뒤따르는 비-image 잡은 같은 러너가 정상 lease", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    const dImg = hub.enqueue(keyA, imageJob("c-img")); // j-0 (docker 필요)
+    dImg.catch(() => {}); // 거부될 것 — unhandled 방지
+    hub.enqueue(keyA, job("c-plain")); // j-1 (image 없음)
+    // docker 없는 러너: image 잡은 건너뛰며 거부, 그 다음 비-image 잡을 가져간다.
+    expect(hub.lease(keyA, ["repo"])?.job.evalCase.id).toBe("c-plain");
+    await expect(dImg).rejects.toMatchObject({ extra: { reason: "capability_mismatch" } });
   });
 
   it("타임아웃: 러너가 안 가져가면 no_runner 로 reject", async () => {

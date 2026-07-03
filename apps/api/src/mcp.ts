@@ -1256,7 +1256,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             // 러너가 실제 capability 를 보고하면 갱신(docker 감지 → service 하니스 디스패치 게이트가 정확해진다).
             if (capabilities) await deps.runnerService.setCapabilities(key.owner, key.runnerId, capabilities);
           }
-          const leased = await hub.leaseWait(key, wait_ms ?? 0); // 미지정=즉시반환(하위호환)
+          // capabilities 를 허브에 전달 → placement 게이트(case.image→docker 필요한데 러너에 없으면 그 잡을 명확히 거부).
+          const leased = await hub.leaseWait(key, wait_ms ?? 0, capabilities); // 미지정=즉시반환(하위호환)
           return ok(leased ?? { job: null });
         }),
     );

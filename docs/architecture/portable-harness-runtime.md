@@ -5,8 +5,10 @@
 > host). Slice 2 = `examples/bundles/spreadsheetbench/Dockerfile` (`spreadsheetbench:v1` = python + libreoffice +
 > openpyxl + grader + `recalc.sh`) + recalc wired into the recipe grader — proven: an agent wrote `=SUM(...)`, the
 > in-image LibreOffice recalculated it to `950`, and the official grader scored PASS (no "write values" hack). One
-> definition now runs whole on managed docker/k8s **and** a user's laptop (local Docker). Slice 3 (placement gate)
-> is the remaining follow-up.
+> definition now runs whole on managed docker/k8s **and** a user's laptop (local Docker). Slice 3 SHIPPED = the
+> lease **placement gate** (`RunnerHub.lease` uses the runner's advertised capabilities; an `image`-required case
+> leased to a non-`docker` runner is failed fast with `capability_mismatch`, not run host-native) — so "image
+> required" is enforced, not just warned.
 > Motivated by SpreadsheetBench: its cases need a real toolchain (LibreOffice for formula recalculation +
 > openpyxl for grading). Baking that into a container image is the right, declarative answer — but today an
 > image-declared case runs correctly on **managed** docker/k8s runtimes yet silently runs on the **bare host**
@@ -131,9 +133,11 @@ not formulas" hack. (Recalc-on-load may need LibreOffice's `RecalcOptOnLoad` reg
    (`python + libreoffice-calc + openpyxl + sbench_grade.py + open_spreadsheet.py`), point the recipes' `image`
    at it, move recalc into the grader template; verify the same dataset runs on managed docker **and** a local
    self-hosted runner (with Docker) — identical result, no host toolchain.
-3. **Placement gate (follow-up)** — the scheduler/lease matcher refuses to lease an image-required case to a
-   non-`docker` runner (uses the already-advertised `docker` capability), so "image required" is enforced, not
-   just warned.
+3. ✅ **Placement gate** — `RunnerHub.lease(key, capabilities)` gets the runner's advertised capabilities (threaded
+   from the `lease_job` MCP tool); a job whose `case.image` needs `docker` the runner lacks is **failed fast** with
+   `UpstreamError{reason:"capability_mismatch", missing:["docker"]}` (and a `console.warn`) instead of leased and
+   run host-native, while a following non-image job still leases. Tests: hub gate (image+no-docker→reject /
+   image+docker→lease / no-caps→lease [back-compat] / skip-image-lease-next) + MCP wiring (lease_job passes caps).
 
 ## Decisions / non-goals
 

@@ -13,6 +13,13 @@ export function selfHostedBackendName(key: SelfHostedKey): string {
   return `self:${key.owner}:${key.runnerId}`;
 }
 
+// 잡 실행에 러너가 반드시 광고해야 하는 capability — case.image 는 컨테이너 실행이라 Docker 가 필요하다.
+// image-필수 케이스를 Docker 없는 러너에 leasing 하면 호스트-네이티브 폴백으로 잘못된 환경에서 돌아버린다(경고만 남던 것).
+// 설계: docs/architecture/portable-harness-runtime.md (slice 3, placement 게이트).
+export function requiredRunnerCapabilities(job: AgentJob): string[] {
+  return job.evalCase.image ? ["docker"] : [];
+}
+
 // 러너가 lease 로 가져가는 잡 한 건(MCP lease_job 응답의 코어).
 export interface LeasedJob {
   jobId: string;
@@ -117,23 +124,46 @@ export class RunnerHub {
 
   // 다음 미-lease 잡을 가져간다(러너 pull). 없으면 null(러너는 재폴링). leasedAt 기록.
   // 먼저 lease 가 만료된 잡(러너 사망/단절)을 재큐한다 — 다른/재접속 러너가 다시 가져갈 수 있게.
-  lease(key: SelfHostedKey): LeasedJob | null {
+  // capabilities 를 주면(러너 자가-광고) placement 게이트: 잡이 요구하는 capability(case.image→docker)를 러너가 못
+  // 갖췄으면 그 잡을 즉시 실패시킨다 — 잘못된 환경(호스트 폴백)에서 돌리는 대신 명확한 사유로 거부(조용한 유휴 타임아웃 방지).
+  lease(key: SelfHostedKey, capabilities?: string[]): LeasedJob | null {
     const arr = this.q(key);
     const now = this.now();
     for (const e of arr) {
       if (e.leasedAt !== undefined && now - e.leasedAt > this.leaseTtlMs) e.leasedAt = undefined; // 재큐
     }
-    const entry = arr.find((e) => e.leasedAt === undefined);
-    if (!entry) return null;
-    entry.leasedAt = now;
-    this.rearm(key, entry); // 러너가 가져감 → 유휴 타임아웃 리셋(이제 heartbeat 가 살아있게 유지)
-    return { jobId: entry.jobId, job: entry.job };
+    // 미-lease 잡을 순회: capability 불일치면 빠르게 실패시키고 다음 잡으로(매 반복이 return 하거나 1건을 제거하므로 종료).
+    for (;;) {
+      const entry = arr.find((e) => e.leasedAt === undefined);
+      if (!entry) return null;
+      const missing = capabilities
+        ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
+        : [];
+      if (missing.length > 0) {
+        this.remove(key, entry.jobId);
+        clearTimeout(entry.timer);
+        console.warn(
+          `[runner-hub] capability 불일치: 러너 ${selfHostedBackendName(key)} 에 [${missing.join(",")}] 없음 — case.image=${entry.job.evalCase.image} 잡 ${entry.jobId} 거부.`,
+        );
+        entry.reject(
+          new UpstreamError(
+            "UPSTREAM_ERROR",
+            { runnerId: key.runnerId, reason: "capability_mismatch", missing },
+            `러너에 필요한 capability [${missing.join(", ")}] 가 없습니다 — case.image(${entry.job.evalCase.image}) 는 Docker 가 필요합니다.`,
+          ),
+        );
+        continue; // 다음 잡 시도
+      }
+      entry.leasedAt = now;
+      this.rearm(key, entry); // 러너가 가져감 → 유휴 타임아웃 리셋(이제 heartbeat 가 살아있게 유지)
+      return { jobId: entry.jobId, job: entry.job };
+    }
   }
 
   // long-poll lease — 즉시 가져갈 잡이 없으면 다음 enqueue(또는 waitMs 타임아웃)까지 대기 후 1건 반환(없으면 null).
   // 러너가 타이트 루프로 재폴링하지 않게 한다(서버가 잡이 생길 때까지 잡아둔다).
-  leaseWait(key: SelfHostedKey, waitMs: number): Promise<LeasedJob | null> {
-    const immediate = this.lease(key);
+  leaseWait(key: SelfHostedKey, waitMs: number, capabilities?: string[]): Promise<LeasedJob | null> {
+    const immediate = this.lease(key, capabilities);
     if (immediate || waitMs <= 0) return Promise.resolve(immediate);
     const k = selfHostedBackendName(key);
     return new Promise<LeasedJob | null>((resolve) => {
@@ -147,7 +177,7 @@ export class RunnerHub {
         if (a && i >= 0) a.splice(i, 1);
         resolve(v);
       };
-      const wake = () => finish(this.lease(key)); // enqueue 가 깨움 → 곧장 그 잡을 lease
+      const wake = () => finish(this.lease(key, capabilities)); // enqueue 가 깨움 → 곧장 그 잡을 lease(게이트 포함)
       const timer = setTimeout(() => finish(null), waitMs);
       (timer as { unref?: () => void }).unref?.();
       const arr = this.waiters.get(k) ?? [];
