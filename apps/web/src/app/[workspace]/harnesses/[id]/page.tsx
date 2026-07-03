@@ -151,7 +151,7 @@ export default async function HarnessDetailPage({
           title={spec.id}
           description={summarize(spec)}
           actions={
-            <div className="flex items-end gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <Badge tone={KIND_TONE[spec.kind]}>{spec.kind}</Badge>
               {versions.length > 1 ? (
                 <HarnessVersionSwitcher
