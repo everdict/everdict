@@ -86,7 +86,9 @@ bundle = {
                 {
                     "id": "tests-pass",
                     "config": {
+                        # recalc.sh 로 산출 xlsx 재계산(수식→캐시값) 후 공식식 채점 — 이미지에 LibreOffice 동봉이라 어디서든 동작.
                         "cmd": (
+                            "/opt/recalc.sh /data/outputs/{id}_output.xlsx && "
                             "python3 /opt/sbench_grade.py --version v1 "
                             "--output /data/outputs/{id}_output.xlsx "
                             "--golden /data/spreadsheet/{id}/1_{id}_answer.xlsx "
@@ -119,6 +121,7 @@ bundle = {
                     "id": "tests-pass",
                     "config": {
                         "cmd": (
+                            "/opt/recalc.sh /data/outputs/{id}_output.xlsx && "
                             "python3 /opt/sbench_grade.py --version v2 "
                             "--output /data/outputs/{id}_output.xlsx "
                             "--golden /data/{golden_response_path} "

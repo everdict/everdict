@@ -55,19 +55,34 @@ node scripts/live/spreadsheetbench-selfhosted.mjs
 - **v2 sample** (`add-profit-column`) — add a `Profit` column (`Revenue - Cost`) + a total, **preserving** the
   original columns — exercising V2's regression + modification split.
 
+## The runtime carries the toolchain (LibreOffice) — via the image
+
+SpreadsheetBench needs a real toolchain: **openpyxl** (grading) and **LibreOffice** — the official eval reads
+*cached* cell values (`data_only`), so a formula-producing output must be **recalculated** first. That is a
+**runtime** concern, not the agent's: bake it into the image. The `Dockerfile` here builds `spreadsheetbench:v1`
+= `python + libreoffice-calc + openpyxl + sbench_grade.py + recalc.sh` (with LibreOffice forced to recalc on
+load). Reference it as `case.image` / recipe `mapping.image`; **every runtime honors that image** — managed
+docker/nomad/k8s **and** a user's local self-hosted runner with Docker (see
+`docs/architecture/portable-harness-runtime.md`). So one definition runs whole anywhere; no host setup, no
+"write values not formulas" hack. Verified: agent writes `=SUM(...)` → `recalc.sh` → `sbench_grade.py` → PASS.
+
+```bash
+docker build -t spreadsheetbench:v1 examples/bundles/spreadsheetbench   # push to your registry for managed runtimes
+```
+
 ## Run the real benchmark (bring the data)
 
 SpreadsheetBench cases carry **binary `.xlsx` file trees**, which can't be inlined as dataset text. So the recipes
-run real data from an **image** (SWE-bench `/testbed` style), not from HF text rows:
+run real data from the **image** (SWE-bench `/testbed` style), not from HF text rows:
 
-1. Build an image that stages the extracted dataset at `/data` (`dataset.json` + `spreadsheet/<id>/…`) and copies
-   `scripts/sbench_grade.py` to `/opt/sbench_grade.py`. Tag it `spreadsheetbench:v1` / `spreadsheetbench:v2`
-   (the `image` in each recipe's `mapping`; override to your registry).
+1. Extend the `Dockerfile` to also stage the extracted dataset at `/data` (`dataset.json` + `spreadsheet/<id>/…`)
+   and tag it `spreadsheetbench:v1` / `:v2` (the `image` in each recipe's `mapping`; override to your registry).
 2. Import the recipe → dataset: `POST /benchmarks/import { recipe: { id: "spreadsheetbench-v1", version: "1.0.0" } }`.
    Each case becomes a `repo` case at `repoPath:/data`; the `tests-pass` grader interpolates the row's `{id}` /
-   `{answer_position}` / `{spreadsheet_path}` / `{golden_response_path}` into a `sbench_grade.py` call.
-3. Run `dataset × <your harness> × <docker runtime>` → `tests_pass` = official-style pass/fail; compare harnesses
-   on the leaderboard (`GET /scorecards/leaderboard?dataset=…&metric=tests_pass`).
+   `{answer_position}` / `{spreadsheet_path}` / `{golden_response_path}` and runs `recalc.sh` then `sbench_grade.py`.
+3. Run `dataset × <your harness> × <docker runtime>` (or a **local self-hosted runner with Docker** — same image,
+   same result) → `tests_pass` = official-style pass/fail; compare harnesses on the leaderboard
+   (`GET /scorecards/leaderboard?dataset=…&metric=tests_pass`).
 
 `sbench_grade.py` implements both metrics: `--version v1` (value-only, 2-dp, exact-type at `answer_position`) and
 `--version v2 --input …` (regression+modification split, 1% tolerance, formula/error-aware). For V1's 3-test-case
@@ -81,7 +96,9 @@ deterministic samples).
 |---|---|
 | `bundle.json` | the manifest (generated) — apply this |
 | `build-bundle.py` | regenerates `bundle.json`, embedding `scripts/*.py` into the sample datasets |
+| `Dockerfile` | builds `spreadsheetbench:v1` (python + libreoffice-calc + openpyxl + grader + recalc) — the portable runtime image |
 | `scripts/sbench_grade.py` | faithful V1/V2 scorer (golden-based) — for real data |
+| `scripts/recalc.sh` | LibreOffice-headless recalc of a formula xlsx → cached values (run in the grader, pre-scoring) |
 | `scripts/gen_v1.py` · `grade_v1.py` | v1 sample input generator + recompute grader |
 | `scripts/gen_v2.py` · `grade_v2.py` | v2 sample input generator + regression/modification grader |
 

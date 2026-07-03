@@ -52,7 +52,7 @@
         {
           "id": "tests-pass",
           "config": {
-            "cmd": "python3 /opt/sbench_grade.py --version v1 --output /data/outputs/{id}_output.xlsx --golden /data/spreadsheet/{id}/1_{id}_answer.xlsx --answer-position \"{answer_position}\""
+            "cmd": "/opt/recalc.sh /data/outputs/{id}_output.xlsx && python3 /opt/sbench_grade.py --version v1 --output /data/outputs/{id}_output.xlsx --golden /data/spreadsheet/{id}/1_{id}_answer.xlsx --answer-position \"{answer_position}\""
           }
         }
       ]
@@ -77,7 +77,7 @@
         {
           "id": "tests-pass",
           "config": {
-            "cmd": "python3 /opt/sbench_grade.py --version v2 --output /data/outputs/{id}_output.xlsx --golden /data/{golden_response_path} --input /data/{spreadsheet_path} --answer-position \"{answer_position}\""
+            "cmd": "/opt/recalc.sh /data/outputs/{id}_output.xlsx && python3 /opt/sbench_grade.py --version v2 --output /data/outputs/{id}_output.xlsx --golden /data/{golden_response_path} --input /data/{spreadsheet_path} --answer-position \"{answer_position}\""
           }
         }
       ]

@@ -1,6 +1,12 @@
 # Portable harness/runtime — one definition, runs whole anywhere (managed **or** the user's laptop)
 
-> **Status: DESIGN (doc-first). Slice 1 = self-hosted runner honors `case.image` via local Docker.**
+> **Status: Slices 1 + 2 SHIPPED + live-verified.** Slice 1 (`bb1df4d`) = self-hosted runner honors `case.image`
+> via local Docker (`DockerDriver`) — proven with an image-only marker file the grader found (impossible on the
+> host). Slice 2 = `examples/bundles/spreadsheetbench/Dockerfile` (`spreadsheetbench:v1` = python + libreoffice +
+> openpyxl + grader + `recalc.sh`) + recalc wired into the recipe grader — proven: an agent wrote `=SUM(...)`, the
+> in-image LibreOffice recalculated it to `950`, and the official grader scored PASS (no "write values" hack). One
+> definition now runs whole on managed docker/k8s **and** a user's laptop (local Docker). Slice 3 (placement gate)
+> is the remaining follow-up.
 > Motivated by SpreadsheetBench: its cases need a real toolchain (LibreOffice for formula recalculation +
 > openpyxl for grading). Baking that into a container image is the right, declarative answer — but today an
 > image-declared case runs correctly on **managed** docker/k8s runtimes yet silently runs on the **bare host**
