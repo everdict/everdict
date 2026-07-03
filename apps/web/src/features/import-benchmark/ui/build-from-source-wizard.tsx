@@ -28,6 +28,17 @@ type Category = 'qa' | 'browser' | 'coding' | 'tool'
 // 케이스가 실행될 환경 — 매핑이 정하는 env 종류. browser(startUrl) | prompt(QA, 무환경) | repo(git clone) | os-use(데스크탑).
 type EnvKind = 'browser' | 'prompt' | 'repo' | 'os-use'
 
+// 필드→역할 시각화. task/id/answer 는 표 머리글 클릭으로 지정(주요 색), 나머지(git/ref/url)는 env 섹션에서 지정(연한 배지).
+const ROLE_META: Record<string, { label: string; color: string }> = {
+  task: { label: 'task', color: '#5e6ad2' },
+  id: { label: 'id', color: '#3fb6c9' },
+  answer: { label: 'answer', color: '#46b96a' },
+  git: { label: 'git', color: '#8b93e8' },
+  ref: { label: 'ref', color: '#8b93e8' },
+  url: { label: 'url', color: '#8b93e8' },
+}
+const cellText = (v: unknown) => (v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v))
+
 // 감지된 필드명에서 매핑을 추측 — 사용자가 스키마를 몰라도 합리적 기본값을 채워준다.
 function guess(fields: string[], patterns: RegExp[]): string {
   for (const p of patterns) {
@@ -218,6 +229,40 @@ export function BuildFromSourceWizard({
   const canPreview =
     sourceKind === 'huggingface' ? hfDataset.length > 0 : jsonlText.trim().length > 0
 
+  // 현재 매핑 상태에서 필드의 역할을 역산(표 머리글/셀 강조에 사용).
+  const roleOf = (f: string): string =>
+    f === taskField
+      ? 'task'
+      : f === idField
+        ? 'id'
+        : f === answerField
+          ? 'answer'
+          : f === gitField
+            ? 'git'
+            : f === refField
+              ? 'ref'
+              : f === startUrlField
+                ? 'url'
+                : ''
+  // 표 머리글 클릭 → task→id→answer→없음 순환. 단일 상태값이라 역할은 자동으로 유일해진다(같은 역할은 한 열만).
+  function cycleRole(f: string) {
+    const order = ['task', 'id', 'answer', ''] as const
+    const cur = (['task', 'id', 'answer'] as string[]).includes(roleOf(f)) ? roleOf(f) : ''
+    const next = order[(order.indexOf(cur as (typeof order)[number]) + 1) % order.length]
+    // 이 필드를 기존 모든 역할에서 해제한 뒤 새 역할 지정.
+    if (idField === f) setIdField('')
+    if (taskField === f) setTaskField('')
+    if (answerField === f) setAnswerField('')
+    if (gitField === f) setGitField('')
+    if (refField === f) setRefField('')
+    if (startUrlField === f) setStartUrlField('')
+    if (next === 'task') setTaskField(f)
+    else if (next === 'id') setIdField(f)
+    else if (next === 'answer') setAnswerField(f)
+  }
+  // 매핑 컨트롤 아래에 보여줄 샘플 값(첫 행).
+  const sampleOf = (f: string): string => (f && rows[0] ? cellText(rows[0][f]) : '')
+
   return (
     <div className="max-w-2xl space-y-6">
       {/* 1. 소스 */}
@@ -375,24 +420,77 @@ export function BuildFromSourceWizard({
           </Callout>
         )}
         {previewed && (
-          <Callout tone="muted">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-foreground">감지된 필드:</span>
-              {fields.map((f) => (
-                <code
-                  key={f}
-                  className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border"
-                >
-                  {f}
-                </code>
-              ))}
+          <div className="space-y-2">
+            <p className="text-[12.5px] text-muted-foreground">
+              감지된 필드 <b className="text-foreground">{fields.length}</b>개 · 표의{' '}
+              <b className="text-foreground">열 머리글을 클릭</b>해 역할(task·id·answer)을 정하세요.
+            </p>
+            <div className="overflow-x-auto rounded-lg border bg-card shadow-raise">
+              <table className="w-full border-collapse text-[12px]">
+                <thead>
+                  <tr>
+                    {fields.map((f) => {
+                      const meta = ROLE_META[roleOf(f)]
+                      return (
+                        <th
+                          key={f}
+                          className="border-b border-border bg-elevated p-0 text-left align-top"
+                        >
+                          <button
+                            type="button"
+                            onClick={() => cycleRole(f)}
+                            title="클릭해서 역할 지정 (task → id → answer → 없음)"
+                            className="w-full cursor-pointer border-t-2 px-3 py-2 text-left transition-colors hover:bg-foreground/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
+                            style={{ borderTopColor: meta ? meta.color : 'transparent' }}
+                          >
+                            <span className="mb-1.5 block font-mono text-[11px] text-muted-foreground">
+                              {f}
+                            </span>
+                            {meta ? (
+                              <span
+                                className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-[590]"
+                                style={{
+                                  color: meta.color,
+                                  background: `${meta.color}1f`,
+                                  boxShadow: `inset 0 0 0 1px ${meta.color}55`,
+                                }}
+                              >
+                                <span
+                                  className="size-[7px] rounded-[2px]"
+                                  style={{ background: meta.color }}
+                                />
+                                {meta.label}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-faint">역할 없음</span>
+                            )}
+                          </button>
+                        </th>
+                      )
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.slice(0, 4).map((row, i) => (
+                    <tr key={i}>
+                      {fields.map((f) => (
+                        <td
+                          key={f}
+                          className={cn(
+                            'max-w-[280px] truncate border-b border-border/60 px-3 py-2 align-top font-mono text-[11px]',
+                            roleOf(f) ? 'text-foreground' : 'text-muted-foreground'
+                          )}
+                          title={cellText(row[f])}
+                        >
+                          {cellText(row[f])}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-            {rows[0] && (
-              <pre className="mt-2 max-h-32 overflow-auto rounded-lg border bg-card p-2 font-mono text-[11px] leading-relaxed">
-                {JSON.stringify(rows[0], null, 2)}
-              </pre>
-            )}
-          </Callout>
+          </div>
         )}
       </section>
 
@@ -407,23 +505,26 @@ export function BuildFromSourceWizard({
           </div>
           <div className="grid grid-cols-2 gap-3">
             <MapField
-              label="task 필드 (필수)"
+              label="task 필드 (필수) — 에이전트가 받을 지시"
               value={taskField}
               onChange={setTaskField}
               fields={fields}
+              sample={sampleOf(taskField)}
             />
             <MapField
-              label="id 필드 (필수)"
+              label="id 필드 (필수) — 케이스 식별자"
               value={idField}
               onChange={setIdField}
               fields={fields}
+              sample={sampleOf(idField)}
             />
             <MapField
-              label="answer 필드 (선택)"
+              label="answer 필드 (선택) — 채점 기준"
               value={answerField}
               onChange={setAnswerField}
               fields={fields}
               optional
+              sample={sampleOf(answerField)}
             />
             <div className="space-y-1.5">
               <Label htmlFor="envKind">실행 환경</Label>
@@ -449,6 +550,7 @@ export function BuildFromSourceWizard({
               onChange={setStartUrlField}
               fields={fields}
               optional
+              sample={sampleOf(startUrlField)}
             />
           )}
           {envKind === 'repo' && (
@@ -458,6 +560,7 @@ export function BuildFromSourceWizard({
                 value={gitField}
                 onChange={setGitField}
                 fields={fields}
+                sample={sampleOf(gitField)}
               />
               <MapField
                 label="ref/commit 필드 (선택)"
@@ -465,6 +568,7 @@ export function BuildFromSourceWizard({
                 onChange={setRefField}
                 fields={fields}
                 optional
+                sample={sampleOf(refField)}
               />
             </div>
           )}
@@ -576,12 +680,14 @@ function MapField({
   onChange,
   fields,
   optional,
+  sample,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
   fields: string[]
   optional?: boolean
+  sample?: string
 }) {
   return (
     <div className="space-y-1.5">
@@ -598,6 +704,12 @@ function MapField({
         className="w-full"
         aria-label={label}
       />
+      {/* 선택한 필드의 실제 값(첫 행) — "무엇을 매핑하는지" 확인용. */}
+      {sample ? (
+        <p className="truncate font-mono text-[11px] text-muted-foreground/80" title={sample}>
+          예: {sample}
+        </p>
+      ) : null}
     </div>
   )
 }

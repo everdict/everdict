@@ -51,8 +51,10 @@ add, all member+ (`datasets:write`), all immutable-on-register:
 > os-use / else browser) plus per-case `imageField`/`image` and `placement`, so recipe-registered benchmarks are
 > as expressive as the first-party code catalog (no field is silently dropped at `.parse()`).
 - **Source wizard (primary)** — `POST /benchmarks/preview` fetches a few raw rows (no mapping) and returns the
-  detected **fields** + samples; the web `/dashboard/datasets/import` "소스에서 만들기" wizard auto-guesses the
-  mapping (id/task/answer dropdowns from the real fields) **plus an env-kind selector** (browser/prompt/repo/
+  detected **fields** + samples; the web `/dashboard/datasets/import` "소스에서 만들기" wizard shows those rows as a
+  **preview table you map by clicking a column header** (cycles task→id→answer→none; mapped columns are role-color
+  coded and each mapping control shows a **sample value**, so you map by seeing the data, not guessing field names)
+  — auto-guessed to start (id/task/answer) **plus an env-kind selector** (browser/prompt/repo/
   os-use → `startUrlField`/`promptEnv`/`gitField`+`refField`/`osUseEnv`) and optional per-case `image`/`placement`,
   then `POST /benchmarks/import` with an **inline `spec`** registers the dataset in **one action** — no separate
   recipe step, no hand-written JSON. (The recipe form accepts the same full mapping as raw JSON.)
