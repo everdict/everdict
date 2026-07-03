@@ -47,15 +47,18 @@ export default async function SchedulesPage({
       ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     }
 
-  // 다음 발사 시각은 서버에서 한 번 계산(now 고정 → 상대 날짜 라벨이 서버/클라 동일, hydration 안전).
-  // 일시중지 예약은 발사하지 않으므로 빈 배열. 컨트롤플레인/Temporal 이 실제 발사의 SSOT.
+  // 다음 발사 시각: 컨트롤플레인이 Temporal 로 계산한 nextFireTimes 가 있으면 그걸(authoritative) 쓰고,
+  // 없으면(Temporal 미배포) cron 으로 근사한다. now 고정 → 상대 날짜 라벨이 서버/클라 동일(hydration 안전).
+  // 일시중지 예약은 발사하지 않으므로 빈 배열.
   const now = new Date()
   const nowIso = now.toISOString()
   const fires: Record<string, string[]> = {}
   for (const s of schedules)
-    fires[s.id] = s.enabled
-      ? nextFires(s.cron, s.timezone, now, { count: 8, horizonDays: 45 }).map((d) => d.toISOString())
-      : []
+    fires[s.id] = !s.enabled
+      ? []
+      : s.nextFireTimes && s.nextFireTimes.length > 0
+        ? s.nextFireTimes
+        : nextFires(s.cron, s.timezone, now, { count: 8, horizonDays: 45 }).map((d) => d.toISOString())
 
   return (
     <div className="space-y-6">

@@ -26,6 +26,9 @@ export const scheduleSchema = z.object({
   lastFiredAt: z.string().optional(),
   lastStatus: z.string().optional(),
   lastScorecardId: z.string().optional(),
+  // Temporal 이 계산한 authoritative 다음 발사 시각(ISO). 컨트롤플레인이 드라이버로 부착 —
+  // 없으면(Temporal 미배포) 웹이 cron 으로 근사한다. 비저장·읽기 전용.
+  nextFireTimes: z.array(z.string()).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })

@@ -59,6 +59,7 @@ export function ScheduleCard({
   schedule: s,
   authors,
   next,
+  approx,
   nowIso,
   me,
   canWrite,
@@ -69,6 +70,7 @@ export function ScheduleCard({
   schedule: Schedule
   authors: Record<string, Author>
   next: string | undefined // 다음 발사 시각(ISO) — 없거나 일시중지면 undefined
+  approx: boolean // 다음 발사가 cron 근사(Temporal authoritative 아님)면 '(예상)' 표기
   nowIso: string
   me: string
   canWrite: boolean
@@ -102,6 +104,7 @@ export function ScheduleCard({
             next ? (
               <span title={fmtDateTimeFull(next)}>
                 다음 실행 {fireDayLabel(next, nowIso, s.timezone)} {fireTimeLabel(next, s.timezone)}
+                {approx ? <span className="text-faint"> (예상)</span> : null}
               </span>
             ) : (
               <span className="text-faint">다음 실행 시각 계산 불가</span>

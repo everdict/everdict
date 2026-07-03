@@ -130,12 +130,23 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
   `PATCH /schedules/:id` (edit / pause / resume), `DELETE /schedules/:id`, `GET /schedules/:id/runs` (scorecards
   this schedule produced, tagged `{scheduleId, firedAt}`).
 - **MCP** — `create/list/get/update/delete_schedule` (same `ScheduleService` core).
+- **Next-fire (authoritative + fallback)** — `list`/`get` enrich each **enabled** schedule with
+  `nextFireTimes` (ISO[]) via the driver's optional `describeMany(ids)` (`TemporalScheduleDriver` →
+  `handle.describe().info.nextActionTimes`, one connection for the whole list; best-effort — failure/absence just
+  omits the field). Non-persisted, attached at read time; internal reads (`update`/`remove`/`fire`/`finalize`)
+  use a private `getRecord` that skips the Temporal round-trip. When Temporal is not deployed (no driver) the web
+  falls back to a dependency-free cron computation (`apps/web/.../shared/lib/cron.ts`, Intl-based, IANA-tz/DST
+  safe) and marks those rows **(예상)**.
 - **Internal** — `POST /internal/schedules/:id/fire`, `GET /internal/schedules/:id/last-status` (`x-internal-token`).
 - **Roles** — new `schedules:read` (viewer+) / `schedules:write` (member+) in the authz matrix; gate mutating
   routes + workspace-scope; another workspace's schedule reads **404**.
-- **Web** — a Schedules page (list + enable toggle + next/last fire + last verdict) and a **"이 설정으로 예약"**
-  button on the scorecard run form (reuse the form values → `POST /schedules`). Cron picker (presets 매일/매주/매시
-  + raw expression).
+- **Web** — a Schedules page with a **view switcher (리스트 / 소유자별 / 캘린더, `?view=` deep-link)** over shared
+  owner·status·runtime filters: each row shows the **owner** (members-joined avatar), **runtime** chip,
+  **benchmark→harness**, a human-readable **cadence** (`describeCron`), and the **next fire** (authoritative or
+  (예상)); a **다가오는 실행** timeline (next 7 days) merges upcoming fires across the visible schedules; the
+  calendar marks each day's active schedules (`firesOnDate`, one chip per schedule/day so dense crons don't
+  smear). Plus enable/pause toggle, and a **"이 설정으로 예약"** button on the scorecard run form (reuse the form
+  values → `POST /schedules`). Cron picker (presets 매일/매주/매시 + raw expression).
 
 ### Reuse vs new
 

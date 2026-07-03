@@ -68,4 +68,22 @@ export class TemporalScheduleDriver implements ScheduleDriver {
       }
     });
   }
+
+  // Temporal 이 계산한 다음 발사 시각(authoritative) — 한 커넥션으로 여러 id 를 describe.
+  // 스케줄이 Temporal 에 없으면(아직 미동기화/삭제) 생략 → 서비스가 그대로 반환하고 웹이 cron 근사로 폴백.
+  async describeMany(ids: string[]): Promise<Record<string, string[]>> {
+    if (ids.length === 0) return {};
+    return this.withClient(async (client) => {
+      const out: Record<string, string[]> = {};
+      for (const id of ids) {
+        try {
+          const desc = await client.schedule.getHandle(scheduleIdOf(id)).describe();
+          out[id] = desc.info.nextActionTimes.map((d) => d.toISOString());
+        } catch {
+          // 없음 — 생략
+        }
+      }
+      return out;
+    });
+  }
 }

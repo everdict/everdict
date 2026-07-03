@@ -150,6 +150,7 @@ export function ScheduleList({
       schedule={s}
       authors={authors}
       next={(fires[s.id] ?? [])[0]}
+      approx={s.enabled && !(s.nextFireTimes && s.nextFireTimes.length > 0)}
       nowIso={nowIso}
       me={me}
       canWrite={canWrite}

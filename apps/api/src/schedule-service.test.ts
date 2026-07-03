@@ -299,3 +299,68 @@ describe("ScheduleService.disableByCreator — 생성자 이탈 자동 비활성
     expect(ensured[0]?.paused).toBe(true);
   });
 });
+
+describe("ScheduleService — Temporal authoritative 다음 발사(nextFireTimes) 부착", () => {
+  function svcWithDescribe(next: Record<string, string[]>, seen: string[][]): ScheduleService {
+    let n = 0;
+    const driver: ScheduleDriver = {
+      async ensure() {},
+      async remove() {},
+      async describeMany(ids) {
+        seen.push(ids);
+        return next;
+      },
+    };
+    return new ScheduleService({ store: new InMemoryScheduleStore(), driver, newId: () => `sch-${++n}`, now: () => "t" });
+  }
+
+  it("드라이버가 있으면 list/get 에 nextFireTimes 를 부착한다(활성만 조회)", async () => {
+    const seen: string[][] = [];
+    const s = svcWithDescribe({ "sch-1": ["2026-07-04T03:00:00.000Z", "2026-07-05T03:00:00.000Z"] }, seen);
+    await s.create({ ...base }); // sch-1 enabled
+    await s.create({ ...base, enabled: false }); // sch-2 paused → describe 제외
+
+    const list = await s.list("acme");
+    expect(list.find((r) => r.id === "sch-1")?.nextFireTimes).toEqual([
+      "2026-07-04T03:00:00.000Z",
+      "2026-07-05T03:00:00.000Z",
+    ]);
+    expect(list.find((r) => r.id === "sch-2")?.nextFireTimes).toBeUndefined(); // 일시중지는 미부착
+    expect(seen.at(-1)).toEqual(["sch-1"]); // 활성 id 만 describe
+
+    expect((await s.get("acme", "sch-1")).nextFireTimes).toHaveLength(2);
+  });
+
+  it("드라이버가 describeMany 를 안 하면(dev/Direct) nextFireTimes 없이 그대로 — 웹이 cron 근사로 폴백", async () => {
+    let n = 0;
+    const s = new ScheduleService({
+      store: new InMemoryScheduleStore(),
+      driver: { async ensure() {}, async remove() {} }, // describeMany 미구현
+      newId: () => `sch-${++n}`,
+      now: () => "t",
+    });
+    await s.create({ ...base });
+    expect((await s.list("acme"))[0]?.nextFireTimes).toBeUndefined();
+    expect((await s.get("acme", "sch-1")).nextFireTimes).toBeUndefined();
+  });
+
+  it("describeMany 가 실패해도 목록은 그대로 반환한다(부착만 생략)", async () => {
+    let n = 0;
+    const s = new ScheduleService({
+      store: new InMemoryScheduleStore(),
+      driver: {
+        async ensure() {},
+        async remove() {},
+        async describeMany() {
+          throw new Error("temporal down");
+        },
+      },
+      newId: () => `sch-${++n}`,
+      now: () => "t",
+    });
+    await s.create({ ...base });
+    const list = await s.list("acme");
+    expect(list).toHaveLength(1);
+    expect(list[0]?.nextFireTimes).toBeUndefined();
+  });
+});
