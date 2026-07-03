@@ -39,8 +39,13 @@ Datasets reuse the **`HarnessRegistry` ownership model** (`packages/registry`):
 
 ## Adding benchmarks (source → dataset)
 A benchmark = a `BenchmarkAdapterSpec` (`@assay/datasets`): `source` (HuggingFace dataset or jsonl) + `mapping`
-(which fields become a case's id/task/answer/…) + optional `graderTemplates`. `BenchmarkService` turns one into a
-tenant **Dataset**. Three ways to add, all member+ (`datasets:write`), all immutable-on-register:
+(which fields become a case's id/task/answer/…) + optional `graderTemplates` + optional **`origin`** (provenance
+of a published benchmark — `homepage` / `paper` / `code` / `data` / `leaderboard` / `authors` / `license` /
+`citation` / `taskType`; URL fields are validated). `origin` is **content** (part of the immutable spec, returned
+by `GET /benchmark-recipes/:id/versions/:version`), so a registered benchmark keeps its source links and "what
+kind of benchmark" info — e.g. `examples/bundles/spreadsheetbench` recipes carry the SpreadsheetBench homepage/
+paper/GitHub/HF/official-leaderboard. `BenchmarkService` turns a recipe into a tenant **Dataset**. Three ways to
+add, all member+ (`datasets:write`), all immutable-on-register:
 > `CaseMappingSchema` is **isomorphic to the internal `CaseMapping`** — a tenant recipe can pick the env kind
 > (`promptEnv` QA / `gitField`+`refField` or `repoPath` repo / `osUseEnv`+`osUseSetup`+`display`+`screenshotPath`
 > os-use / else browser) plus per-case `imageField`/`image` and `placement`, so recipe-registered benchmarks are

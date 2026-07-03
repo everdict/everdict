@@ -50,11 +50,29 @@ export const GraderTemplateSchema = z.object({
   config: z.record(z.string()).optional(),
 });
 
+// 벤치마크 원본 출처(provenance) — SpreadsheetBench 처럼 공식 발표 벤치마크의 홈페이지/논문/코드/데이터/공식 리더보드
+// 등을 레시피에 남긴다("어떤 벤치마크의 무엇인지"가 등록 후에도 보존). 표시·인용용 메타데이터라 실행/채점엔 무관.
+export const BenchmarkOriginSchema = z
+  .object({
+    homepage: z.string().url().optional(), // 공식 홈페이지 (예: https://spreadsheetbench.github.io/)
+    paper: z.string().url().optional(), // 논문 (arXiv/OpenReview 등)
+    code: z.string().url().optional(), // 코드 저장소 (GitHub 등)
+    data: z.string().url().optional(), // 원본 데이터셋 페이지 (HuggingFace 등)
+    leaderboard: z.string().url().optional(), // 공식 리더보드
+    authors: z.string().optional(), // 저자/소속
+    license: z.string().optional(), // 라이선스 (예: CC-BY-4.0)
+    citation: z.string().optional(), // 인용(bibtex 또는 텍스트)
+    taskType: z.string().optional(), // 과제 유형 서술 (예: "실세계 스프레드시트 조작 (셀/시트 레벨)")
+  })
+  .optional();
+export type BenchmarkOrigin = z.infer<typeof BenchmarkOriginSchema>;
+
 export const BenchmarkAdapterSpecSchema = z.object({
   id: z.string(),
   version: z.string(),
   description: z.string().optional(),
   category: z.enum(["browser", "qa", "coding", "tool"]).default("qa"),
+  origin: BenchmarkOriginSchema, // 원본 출처 메타데이터(홈페이지/논문/코드/데이터/공식 리더보드 등)
   source: BenchmarkSourceSchema,
   mapping: CaseMappingSchema,
   graderTemplates: z.array(GraderTemplateSchema).optional(),

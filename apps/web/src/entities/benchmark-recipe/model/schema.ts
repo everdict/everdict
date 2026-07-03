@@ -32,6 +32,22 @@ export const recipeGraderTemplateSchema = z
   .object({ id: z.string(), config: z.record(z.string(), z.unknown()).optional() })
   .passthrough()
 
+// origin — 원본 벤치마크 출처(홈페이지/논문/코드/데이터/공식 리더보드 등). 표시용 메타데이터.
+export const recipeOriginSchema = z
+  .object({
+    homepage: z.string().optional(),
+    paper: z.string().optional(),
+    code: z.string().optional(),
+    data: z.string().optional(),
+    leaderboard: z.string().optional(),
+    authors: z.string().optional(),
+    license: z.string().optional(),
+    citation: z.string().optional(),
+    taskType: z.string().optional(),
+  })
+  .partial()
+export type RecipeOrigin = z.infer<typeof recipeOriginSchema>
+
 // GET /benchmark-recipes/:id/versions/:version — 전체 스펙(상세 표시용).
 export const recipeSpecSchema = z
   .object({
@@ -39,6 +55,7 @@ export const recipeSpecSchema = z
     version: z.string(),
     description: z.string().optional(),
     category: z.string().default('qa'),
+    origin: recipeOriginSchema.optional(),
     source: recipeSourceSchema,
     mapping: recipeMappingSchema.default({}),
     graderTemplates: z.array(recipeGraderTemplateSchema).optional(),

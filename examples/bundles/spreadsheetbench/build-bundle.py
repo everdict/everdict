@@ -100,13 +100,23 @@ bundle = {
     "benchmarkRecipes": [
         {
             "id": "spreadsheetbench-v1",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "description": (
                 "SpreadsheetBench v1(RUCKBReasoning/SpreadsheetBench, HF KAKA22/SpreadsheetBench) 어댑터. "
                 "912 instructions · 케이스별 3 test-case(‹N›_‹id›_input/answer.xlsx) · answer_position 셀 값 비교(전부 일치). "
                 "실행엔 dataset 을 이미지 /data 에 스테이징 + sbench_grade.py 동봉 필요(README 참고)."
             ),
             "category": "coding",
+            # 원본 출처 — 공식 발표 벤치마크(홈페이지·논문·코드·데이터·공식 리더보드)를 등록 후에도 보존.
+            "origin": {
+                "homepage": "https://spreadsheetbench.github.io/",
+                "paper": "https://arxiv.org/abs/2406.14991",
+                "code": "https://github.com/RUCKBReasoning/SpreadsheetBench",
+                "data": "https://huggingface.co/datasets/KAKA22/SpreadsheetBench",
+                "leaderboard": "https://spreadsheetbench.github.io/",
+                "authors": "RUC KBReasoning (Renmin University of China)",
+                "taskType": "실세계 스프레드시트 조작 — 912 instructions × 3 test-case, answer_position 셀 값 비교(online-judge, Pass@1). Cell/Sheet 레벨.",
+            },
             "source": {"kind": "huggingface", "dataset": "KAKA22/SpreadsheetBench"},
             "mapping": {
                 "idField": "id",
@@ -134,7 +144,7 @@ bundle = {
         },
         {
             "id": "spreadsheetbench-v2",
-            "version": "1.0.0",
+            "version": "1.1.0",
             "description": (
                 "SpreadsheetBench v2(RUCKBReasoning/SpreadsheetBench-2, HF KAKA22/SpreadsheetBench-v2) 어댑터. "
                 "4 카테고리(Debugging/Financial_Model/Template=셀정확도, Visualization=VLM 체크리스트). "
@@ -142,6 +152,15 @@ bundle = {
                 "Visualization 은 judge(VLM) 로 criteria 채점(별도)."
             ),
             "category": "coding",
+            "origin": {
+                "homepage": "https://spreadsheetbench.github.io/",
+                "paper": "https://arxiv.org/abs/2606.29955",
+                "code": "https://github.com/RUCKBReasoning/SpreadsheetBench-2",
+                "data": "https://huggingface.co/datasets/KAKA22/SpreadsheetBench-v2",
+                "leaderboard": "https://spreadsheetbench.github.io/",
+                "authors": "RUC KBReasoning (Renmin University of China)",
+                "taskType": "엔드투엔드 비즈니스 스프레드시트 워크플로 — 321 tasks, 4 카테고리(Debugging/Financial_Model/Template=셀정확도 regression+modification, Visualization=VLM 체크리스트).",
+            },
             "source": {"kind": "huggingface", "dataset": "KAKA22/SpreadsheetBench-v2"},
             "mapping": {
                 "idField": "id",
