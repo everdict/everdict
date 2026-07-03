@@ -49,6 +49,11 @@ fields, react-hook-form via `Controller`) opens the same Linear-style popover (s
 `<optgroup>` has no popover equivalent — encode the group as each option's `hint` (e.g. runtime picker's
 "내 로컬 호스트", benchmark import's "카탈로그/내 레시피").
 
+**Guide/help copy is never inline** — explanatory guidance (e.g. "수정은 새 버전으로 배포됩니다") must not sit
+as visible caption text in panels; render a small info icon via `shared/ui/tooltip` (`InfoTip`, or `Tooltip`
+around any trigger) and reveal the copy on hover/focus. Field-level `<p>` hints under form inputs are fine;
+panel/list guidance is not.
+
 ## Screens
 - **워크스페이스 스위처** (사이드바 최상단, 모든 화면) — 현재 워크스페이스(이름+역할) 드롭다운으로 내가 속한
   워크스페이스 간 전환(= `/{id}` 로 이동; URL 첫 세그먼트가 활성 워크스페이스의 권위, 미들웨어가 쿠키 동기화) + **새 워크스페이스**

@@ -36,6 +36,7 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 export const dynamic = 'force-dynamic'
 
@@ -221,10 +222,13 @@ export default async function DatasetDetailPage({
           ) : (
             <span className="text-[12px] text-faint">태그 없음</span>
           )}
+          {/* 안내 문구는 인라인 노출 금지 — info 아이콘 호버 툴팁으로만. */}
           {canPublish && (
-            <span className="ml-auto text-[11.5px] text-faint">
-              설명·태그·케이스 수정은 &lsquo;새 버전 만들기&rsquo;로 배포됩니다(버전 불변).
-            </span>
+            <InfoTip
+              className="ml-auto"
+              align="end"
+              content="버전은 불변입니다 — 설명·태그·케이스 수정은 '새 버전 만들기'로 새 버전을 배포합니다."
+            />
           )}
         </div>
       </Card>
