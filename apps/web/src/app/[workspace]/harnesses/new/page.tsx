@@ -30,7 +30,7 @@ export default async function NewHarnessPage({
       </Link>
       <PageHeader
         title="하니스 등록"
-        description="HarnessSpec 을 이 워크스페이스 소유로 등록합니다."
+        description="이 워크스페이스에 새 하니스를 등록해요."
       />
       {allowed ? (
         <Card className="p-5">
@@ -39,8 +39,8 @@ export default async function NewHarnessPage({
       ) : (
         <EmptyState
           icon={<Lock />}
-          title="하니스 등록 권한이 없습니다."
-          hint="admin 역할이 필요합니다(harnesses:register). 워크스페이스 관리자에게 문의하세요."
+          title="하니스를 등록할 권한이 없어요."
+          hint="관리자만 하니스를 등록할 수 있어요. 워크스페이스 관리자에게 문의해보세요."
         />
       )}
     </div>

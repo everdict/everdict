@@ -84,7 +84,7 @@ export function RunScorecardForm({
       ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
     })
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
-    else setServerError(res.error ?? '실행 실패')
+    else setServerError(res.error ?? '실행하지 못했어요')
   }
 
   return (
@@ -106,7 +106,7 @@ export function RunScorecardForm({
                   setValue('datasetVersion', 'latest') // id 바뀌면 버전은 latest 로 리셋(이전 버전이 새 id 엔 없을 수 있음).
                 }}
                 placeholder="벤치마크 선택"
-                emptyText="벤치마크가 없습니다"
+                emptyText="벤치마크가 없어요"
               />
             )}
           />
@@ -147,7 +147,7 @@ export function RunScorecardForm({
                   setValue('harnessVersion', 'latest')
                 }}
                 placeholder="하니스 선택"
-                emptyText="하니스가 없습니다"
+                emptyText="하니스가 없어요"
               />
             )}
           />
@@ -172,7 +172,7 @@ export function RunScorecardForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="concurrency">병렬도 (선택 — 동시 실행 케이스 수)</Label>
+        <Label htmlFor="concurrency">한 번에 실행할 케이스 수 (선택)</Label>
         <Input
           id="concurrency"
           type="number"
@@ -182,15 +182,15 @@ export function RunScorecardForm({
           {...register('concurrency')}
         />
         <p className="text-[12px] text-muted-foreground">
-          한 배치 안에서 동시에 돌릴 케이스 수. 미지정이면 기본값을 씁니다.
+          한 번에 몇 개를 돌릴지 정해요. 비워두면 기본값으로 실행해요.
         </p>
       </div>
 
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <p className="text-[12px] text-muted-foreground">
-        벤치마크의 모든 케이스를 이 하니스@버전으로 돌려 스코어카드를 집계합니다. 채점은 벤치마크에
-        내장돼 있고, 실행은 비동기 — 완료되면 상세에서 결과를 확인하세요.
+        벤치마크의 모든 케이스를 이 하니스로 평가해 점수를 모아요. 실행이 끝나면 상세 화면에서 결과를
+        확인해요.
       </p>
 
       <Button type="submit" disabled={isSubmitting}>

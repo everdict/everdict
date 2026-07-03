@@ -72,8 +72,8 @@ export function ActivityFeed({
   if (items.length === 0) {
     return (
       <EmptyState
-        title="아직 활동이 없습니다."
-        hint="run 을 제출하거나 스코어카드를 실행하면 여기에 타임라인으로 표시됩니다."
+        title="아직 활동이 없어요."
+        hint="run 이나 스코어카드를 실행하면 여기에 표시돼요."
       />
     )
   }

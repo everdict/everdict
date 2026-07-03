@@ -72,8 +72,8 @@ export function CiLinkPanel({
         <div className="space-y-1">
           <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">CI 연동</h2>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
-            GitHub 레포를 이 하니스에 연결하면 PR·머지마다 CI 가 이미지를 빌드해 평가합니다. 링크 =
-            그 레포의 keyless CI(OIDC) 신뢰.
+            GitHub 레포를 이 하니스에 연결하면, PR·머지마다 CI가 이미지를 만들어 자동으로 평가해요.
+            따로 키를 넣지 않아도 돼요.
           </p>
         </div>
         <Button
@@ -95,11 +95,11 @@ export function CiLinkPanel({
 
       {links.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-card/40 px-4 py-6 text-center">
-          <p className="text-[13px] text-muted-foreground">아직 연결된 레포가 없습니다.</p>
+          <p className="text-[13px] text-muted-foreground">아직 연결된 레포가 없어요.</p>
           <p className="mt-1 text-[12px] text-faint">
             {canWrite
-              ? '"GitHub 레포 연결"로 레포를 골라 CI 평가를 붙이세요.'
-              : '레포 연결은 admin 이 설정합니다.'}
+              ? '‘GitHub 레포 연결’을 눌러 레포를 붙여보세요.'
+              : '레포 연결은 관리자가 설정해요.'}
           </p>
         </div>
       ) : (

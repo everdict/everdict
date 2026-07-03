@@ -18,11 +18,11 @@ export default async function InvitePage({
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center gap-6 px-6 py-16">
-      <PageHeader title="워크스페이스 초대" description="초대 링크로 워크스페이스에 참여합니다." />
+      <PageHeader title="워크스페이스 초대" description="초대 링크로 워크스페이스에 참여해요." />
       {!token ? (
         <EmptyState
-          title="유효하지 않은 초대 링크입니다."
-          hint="토큰이 없습니다. 초대한 사람에게 새 링크를 요청하세요."
+          title="초대 링크가 올바르지 않아요."
+          hint="초대한 분에게 새 링크를 받아보세요."
         />
       ) : (
         <Card className="p-4">

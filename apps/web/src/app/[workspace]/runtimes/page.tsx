@@ -30,14 +30,14 @@ export default async function RuntimesPage({
     <div className="space-y-6">
       <PageHeader
         title="런타임"
-        description={`${runtimes.length}개 · 평가가 도는 실행 인프라 (local · docker · nomad · k8s · topology)`}
+        description={`${runtimes.length}개 · 평가를 실행하는 인프라`}
       />
       {error ? (
-        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
+        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : runtimes.length === 0 ? (
         <EmptyState
-          title="런타임이 없습니다."
-          hint="이 워크스페이스가 볼 수 있는 런타임(소유 + 공용 _shared)이 없습니다."
+          title="아직 런타임이 없어요."
+          hint="런타임이 등록되면 여기에 표시돼요."
         />
       ) : (
         <div className="space-y-2">

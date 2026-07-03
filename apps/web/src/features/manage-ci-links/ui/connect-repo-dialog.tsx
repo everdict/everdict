@@ -140,9 +140,8 @@ export function ConnectRepoDialog({
           GitHub 레포 연결
         </h2>
         <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-          레포를 <span className="font-mono">{harnessId}</span> 하니스에 연결하면, PR·머지마다 CI 가
-          이미지를 빌드해 이 하니스로 평가합니다. 링크의 존재 자체가 그 레포의 keyless CI(OIDC)
-          신뢰가 됩니다 — 워크플로 YAML 은 셋업 PR 로 자동 생성됩니다.
+          레포를 <span className="font-mono">{harnessId}</span> 하니스에 연결하면, PR·머지마다 CI가
+          이미지를 만들어 자동으로 평가해요. 워크플로 파일은 셋업 PR로 자동 만들어져요.
         </p>
       </header>
 
@@ -150,13 +149,13 @@ export function ConnectRepoDialog({
         // 연결 없음 — 계정 페이지로 안내(개인 소유 OAuth).
         <div className="space-y-3 px-5 py-5">
           <Callout tone="info">
-            먼저 GitHub 계정을 연결해야 레포를 고를 수 있습니다.
+            먼저 GitHub 계정을 연결해야 레포를 고를 수 있어요.
             <div className="mt-2">
               <Link
                 href={`/${encodeURIComponent(workspace)}/account?tab=connections`}
                 className="text-[12px] font-[510] text-primary hover:underline"
               >
-                계정 → 연결된 계정에서 GitHub 연결 →
+                계정 → 연결된 계정에서 GitHub 연결하기 →
               </Link>
             </div>
           </Callout>
@@ -171,8 +170,8 @@ export function ConnectRepoDialog({
         <div className="space-y-4 px-5 py-5">
           <Callout tone="info">
             <span className="font-mono text-foreground">{savedRepo}</span> 를{' '}
-            <span className="font-mono text-foreground">{harnessId}</span> 에 연결했습니다. 이제
-            셋업 PR 을 열면 워크플로 파일이 레포에 추가됩니다 — 머지하면 CI 평가가 시작됩니다.
+            <span className="font-mono text-foreground">{harnessId}</span> 에 연결했어요. 셋업 PR을
+            열면 워크플로 파일이 레포에 추가돼요. 머지하면 CI 평가가 시작돼요.
           </Callout>
           <div className="flex items-center justify-between gap-3">
             <SetupPrButton
@@ -244,8 +243,8 @@ export function ConnectRepoDialog({
                     {filteredRepos.length === 0 ? (
                       <p className="px-3 py-4 text-center text-[12px] text-muted-foreground">
                         {(repos ?? []).length === 0
-                          ? '연결된 계정에 접근 가능한 레포가 없습니다.'
-                          : '검색 결과가 없습니다.'}
+                          ? '연결된 계정에서 접근할 수 있는 레포가 없어요.'
+                          : '검색 결과가 없어요.'}
                       </p>
                     ) : (
                       filteredRepos.map((r) => {
@@ -295,8 +294,7 @@ export function ConnectRepoDialog({
                 <Label>3. 빌드 슬롯</Label>
                 {slotChoices.length === 0 ? (
                   <p className="text-[12px] text-muted-foreground">
-                    이 하니스는 CI 가 갈아끼울 이미지 슬롯이 없습니다(process). 링크는 트리거만
-                    담당합니다.
+                    이 하니스는 CI가 바꿔 끼울 이미지 슬롯이 없어요(process). 링크는 트리거만 해요.
                   </p>
                 ) : (
                   <div className="space-y-1.5">
@@ -348,15 +346,14 @@ export function ConnectRepoDialog({
                   placeholder="데이터셋 선택"
                 />
                 <p className="text-[12px] text-faint">
-                  미지정 시 셋업 PR 워크플로에 TODO 로 남습니다 — 나중에 채워도 됩니다.
+                  지금 안 정하면 셋업 PR에 TODO로 남아요. 나중에 채워도 돼요.
                 </p>
               </div>
             )}
 
             {!canWrite && (
               <Callout tone="warning" className="py-1.5">
-                링크 저장은 admin 권한(settings:write)이 필요합니다. 관리자에게 요청하세요 — 링크는
-                그 레포의 keyless CI 신뢰를 부여합니다.
+                링크 저장은 관리자 권한이 필요해요. 워크스페이스 관리자에게 요청해보세요.
               </Callout>
             )}
             {saveError && (

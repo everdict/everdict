@@ -44,11 +44,10 @@ export function CiLinksSettings({
       <div className="space-y-1">
         <h3 className="text-[13px] font-[560] text-foreground">CI 연동</h3>
         <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-          GitHub 레포와 하니스를 잇는 링크입니다. 링크의{' '}
-          <span className="font-[510]">존재 자체</span>가 그 레포의 GitHub Actions 토큰을 이
-          워크스페이스로 신뢰하는 keyless CI(OIDC) trust 가 됩니다 — 별도 시크릿·키 없이 CI 가
-          평가를 발사합니다. 레포 연결·셋업 PR 은 각 하니스 상세의{' '}
-          <span className="font-[510]">CI 연동</span> 패널에서 진행합니다.
+          GitHub 레포와 하니스를 잇는 링크예요. 링크가{' '}
+          <span className="font-[510]">있으면</span> 그 레포의 CI를 이
+          워크스페이스가 신뢰한다는 뜻이라, 따로 키 없이 CI가 평가를 보내요. 레포 연결과 셋업 PR은
+          각 하니스 상세의 <span className="font-[510]">CI 연동</span> 패널에서 해요.
         </p>
       </div>
 
@@ -60,7 +59,7 @@ export function CiLinksSettings({
 
       {links.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">
-          아직 연결된 레포가 없습니다. 하니스 상세의 CI 연동 패널에서 GitHub 레포를 연결하세요.
+          아직 연결된 레포가 없어요. 하니스 상세의 CI 연동 패널에서 레포를 연결해보세요.
         </p>
       ) : (
         <SettingsList>
@@ -133,7 +132,7 @@ export function CiLinksSettings({
 
       {!canWrite && links.length > 0 && (
         <p className="text-[12px] text-muted-foreground">
-          링크를 해제하려면 admin 역할(settings:write)이 필요합니다.
+          링크를 해제하려면 관리자 권한이 필요해요.
         </p>
       )}
     </div>

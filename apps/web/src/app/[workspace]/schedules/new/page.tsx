@@ -45,15 +45,15 @@ export default async function NewSchedulePage({
         <ChevronLeft className="size-3.5" />
         예약
       </Link>
-      <PageHeader title="예약 생성" description="데이터셋×하니스를 cron 으로 주기 실행합니다." />
+      <PageHeader title="예약 만들기" description="정해둔 주기마다 자동으로 실행해요." />
       {allowed ? (
         <Card className="p-5">
           <CreateScheduleForm datasets={datasets} harnesses={harnesses} runtimes={runtimes} />
         </Card>
       ) : (
         <EmptyState
-          title="예약 생성 권한이 없습니다."
-          hint="member 이상 역할이 필요합니다(schedules:write). 워크스페이스 관리자에게 문의하세요."
+          title="예약을 만들 권한이 없어요."
+          hint="워크스페이스 관리자에게 권한을 요청해보세요."
         />
       )}
     </div>

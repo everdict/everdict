@@ -42,7 +42,7 @@ export default async function NewDatasetPage({
       </Link>
       <PageHeader
         title="데이터셋 등록"
-        description="eval 케이스 묶음을 이 워크스페이스 소유로 등록합니다."
+        description="평가 케이스를 워크스페이스에 등록해요."
       />
       {allowed ? (
         <Card className="p-5">
@@ -50,8 +50,8 @@ export default async function NewDatasetPage({
         </Card>
       ) : (
         <EmptyState
-          title="데이터셋 등록 권한이 없습니다."
-          hint="member 이상 역할이 필요합니다(datasets:write). 워크스페이스 관리자에게 문의하세요."
+          title="등록 권한이 없어요."
+          hint="워크스페이스 관리자에게 권한을 요청해보세요."
         />
       )}
     </div>

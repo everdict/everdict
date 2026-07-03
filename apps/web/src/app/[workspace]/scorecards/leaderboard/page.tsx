@@ -86,14 +86,14 @@ export default async function LeaderboardPage({
         </Link>
         <PageHeader
           title="리더보드"
-          description="한 벤치마크(데이터셋)에서 harness × model 을 점수로 랭킹 — 리더보드처럼."
+          description="한 벤치마크에서 하니스와 모델을 점수로 순위 매겨요."
         />
       </div>
 
       {options.length === 0 ? (
         <EmptyState
-          title="데이터셋이 없습니다."
-          hint="벤치마크/데이터셋을 등록하고 여러 harness·model 로 평가하면 리더보드가 채워집니다."
+          title="아직 데이터셋이 없어요."
+          hint="벤치마크를 등록하고 여러 하니스로 평가하면 순위가 채워져요."
         />
       ) : (
         <Card className="p-4">
@@ -107,7 +107,7 @@ export default async function LeaderboardPage({
         </Card>
       )}
 
-      {error && <Callout tone="danger">리더보드 조회 실패: {error}</Callout>}
+      {error && <Callout tone="danger">리더보드를 불러오지 못했어요: {error}</Callout>}
 
       {board && (
         <div className="space-y-4">
@@ -127,8 +127,8 @@ export default async function LeaderboardPage({
 
           {board.rows.length === 0 ? (
             <EmptyState
-              title="이 조건의 완료 스코어카드가 없습니다."
-              hint="선택한 데이터셋을 harness 에 돌리면(metric 이 산출되면) 여기 랭킹됩니다."
+              title="이 조건에 맞는 스코어카드가 없어요."
+              hint="선택한 벤치마크를 하니스로 평가하면 순위에 올라와요."
             />
           ) : (
             <section className="space-y-2.5">

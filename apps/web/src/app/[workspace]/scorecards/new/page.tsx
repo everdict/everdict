@@ -44,7 +44,7 @@ export default async function NewScorecardPage({
       </Link>
       <PageHeader
         title="스코어카드 실행"
-        description="벤치마크를 하니스@버전으로 돌려 결과를 집계합니다."
+        description="벤치마크로 하니스를 평가하고 점수를 모아요."
       />
       {allowed ? (
         <Card className="p-5">
@@ -52,8 +52,8 @@ export default async function NewScorecardPage({
         </Card>
       ) : (
         <EmptyState
-          title="스코어카드 실행 권한이 없습니다."
-          hint="member 이상 역할이 필요합니다(scorecards:run). 워크스페이스 관리자에게 문의하세요."
+          title="실행 권한이 없어요."
+          hint="워크스페이스 관리자에게 권한을 요청해보세요."
         />
       )}
     </div>

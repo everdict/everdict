@@ -95,7 +95,7 @@ export function RunnersManager({
           ...(caps.length > 0 ? { capabilities: caps } : {}),
         })
         if (!r.ok || !r.token) {
-          setError(r.error ?? '페어링에 실패했습니다.')
+          setError(r.error ?? '연결에 실패했어요.')
           return
         }
         await b.pairRunner({
@@ -116,13 +116,12 @@ export function RunnersManager({
         <div className="space-y-1">
           <h3 className="text-[13px] font-[560] text-foreground">연결된 러너</h3>
           <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-            내 머신을 셀프호스티드 러너로 연결하면, 워크스페이스의 공유 하니스·데이터셋을
-            <span className="font-[510]"> 런타임만 바꿔</span> 내 호스트에서(내 로그인·repo 로)
-            돌리고 결과를 워크스페이스로 회신할 수 있습니다. 러너는 워크스페이스가 아닌 내 계정
-            소유입니다.{' '}
+            내 컴퓨터를 러너로 연결하면, 워크스페이스의 공유 하니스·벤치마크를
+            <span className="font-[510]"> 런타임만 바꿔</span> 내 컴퓨터에서 돌리고 결과를
+            워크스페이스로 보낼 수 있어요. 러너는 워크스페이스가 아닌 내 계정 소유예요.{' '}
             {bridge
-              ? '연결은 버튼 한 번이면 됩니다.'
-              : '연결은 데스크톱 앱에서 버튼 한 번으로 이루어집니다 — 브라우저에서는 러너를 관리(상태 확인·해제)만 합니다.'}
+              ? '버튼 한 번이면 연결돼요.'
+              : '데스크톱 앱에서 버튼 한 번으로 연결할 수 있어요. 브라우저에서는 상태 확인과 해제만 할 수 있어요.'}
           </p>
         </div>
         <span className="flex shrink-0 items-center gap-2">
@@ -157,8 +156,7 @@ export function RunnersManager({
           <Callout tone="warning">
             <span className="flex flex-wrap items-center justify-between gap-2">
               <span>
-                이 기기는 다른 계정(또는 이미 해제된 페어링)으로 연결되어 있습니다. 다시 연결하면 이
-                계정의 러너로 대체됩니다.
+                이 기기는 다른 계정에 연결되어 있어요. 다시 연결하면 이 계정의 러너로 바뀌어요.
               </span>
               <Button
                 size="xs"
@@ -176,11 +174,11 @@ export function RunnersManager({
       {runners.length === 0 ? (
         <EmptyState
           icon={<Laptop strokeWidth={1.75} />}
-          title="아직 연결된 러너가 없습니다."
+          title="아직 연결한 러너가 없어요."
           hint={
             bridge
-              ? '버튼 한 번으로 이 기기를 러너로 연결할 수 있습니다.'
-              : '데스크톱 앱을 설치하면 버튼 한 번으로 이 기기를 러너로 연결할 수 있습니다.'
+              ? '버튼 한 번으로 이 기기를 러너로 연결할 수 있어요.'
+              : '데스크톱 앱을 설치하면 버튼 한 번으로 연결할 수 있어요.'
           }
           action={
             bridge ? (
@@ -252,12 +250,12 @@ export function RunnersManager({
                     ))}
                     {thisDevice && online && !caps.includes('docker') && (
                       <span className="text-[12px] text-faint">
-                        docker 없음 → service 하니스 불가
+                        Docker 가 없어 service 하니스는 못 돌려요
                       </span>
                     )}
                   </div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
-                    <span>페어링 {new Date(r.pairedAt).toLocaleString('ko-KR')}</span>
+                    <span>연결 {new Date(r.pairedAt).toLocaleString('ko-KR')}</span>
                     {r.lastSeenAt && (
                       <>
                         <span>·</span>

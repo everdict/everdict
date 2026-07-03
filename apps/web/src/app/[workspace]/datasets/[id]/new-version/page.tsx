@@ -55,15 +55,15 @@ export default async function NewDatasetVersionPage({
       </Link>
       <PageHeader
         title="새 버전 만들기"
-        description={`${id} 의 ${dataset ? `v${dataset.version} 내용을 프리필했습니다` : '내용을 프리필합니다'} — 설명·태그·케이스를 바꾸고 새 버전으로 배포하세요(버전 불변).`}
+        description={`${id} 의 ${dataset ? `v${dataset.version} 내용을 불러왔어요` : '내용을 불러왔어요'}. 바꿔서 새 버전으로 올려보세요.`}
       />
       {!allowed ? (
         <EmptyState
-          title="데이터셋 등록 권한이 없습니다."
-          hint="member 이상 역할이 필요합니다(datasets:write). 워크스페이스 관리자에게 문의하세요."
+          title="등록 권한이 없어요."
+          hint="워크스페이스 관리자에게 권한을 요청해보세요."
         />
       ) : !dataset ? (
-        <Callout tone="danger">데이터셋을 불러올 수 없습니다: {error}</Callout>
+        <Callout tone="danger">데이터셋을 불러오지 못했어요: {error}</Callout>
       ) : (
         <Card className="p-5">
           <RegisterDatasetForm

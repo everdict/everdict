@@ -64,21 +64,21 @@ export default async function SchedulesPage({
     <div className="space-y-6">
       <PageHeader
         title="예약"
-        description={`${schedules.length}건 · 데이터셋×하니스를 cron 으로 주기 실행(회귀 추적)`}
+        description={`${schedules.length}건 · 정해둔 주기마다 자동으로 실행해요`}
         actions={
           canWrite ? (
             <Link href={`/${workspace}/schedules/new`} className={buttonVariants({ size: 'sm' })}>
-              예약 생성
+              예약 만들기
             </Link>
           ) : null
         }
       />
       {error ? (
-        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
+        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : schedules.length === 0 ? (
         <EmptyState
-          title="예약이 없습니다."
-          hint="member 이상이면 '예약 생성'으로 데이터셋×하니스를 cron 으로 주기 실행하세요. 결과는 스코어카드 추이/회귀에 그대로 반영됩니다."
+          title="아직 예약이 없어요."
+          hint="예약을 만들면 정해둔 주기마다 자동으로 실행돼요."
         />
       ) : (
         <ScheduleList

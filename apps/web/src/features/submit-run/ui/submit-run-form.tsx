@@ -69,7 +69,7 @@ export function SubmitRunForm({
     setServerError(undefined)
     const res = await submitRunAction(values)
     if (res.ok && res.id) router.push(`/${workspace}/runs/${res.id}`)
-    else setServerError(res.error ?? '제출 실패')
+    else setServerError(res.error ?? '실행하지 못했어요')
   }
 
   return (
@@ -79,7 +79,7 @@ export function SubmitRunForm({
         <Controller
           control={control}
           name="harnessId"
-          rules={{ required: '하니스를 선택하세요' }}
+          rules={{ required: '하니스를 골라주세요' }}
           render={({ field }) => (
             <Combobox
               id="harnessId"
@@ -87,7 +87,7 @@ export function SubmitRunForm({
               value={field.value}
               onChange={field.onChange}
               placeholder="하니스 선택"
-              emptyText="하니스가 없습니다"
+              emptyText="하니스가 없어요"
             />
           )}
         />
@@ -100,17 +100,17 @@ export function SubmitRunForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="task">Task</Label>
+        <Label htmlFor="task">작업</Label>
         <Textarea
           id="task"
           placeholder="예: create ok.txt with the text done"
-          {...register('task', { required: 'task 를 입력하세요' })}
+          {...register('task', { required: '작업을 입력해주세요' })}
         />
         <FieldError message={errors.task?.message} />
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="runtime">런타임 (실행 인프라)</Label>
+        <Label htmlFor="runtime">런타임</Label>
         {/* optgroup 대응 — 내 로컬 러너는 우측 hint 로 구분(flat 리스트) */}
         <Controller
           control={control}
@@ -119,12 +119,12 @@ export function SubmitRunForm({
             <Combobox
               id="runtime"
               options={[
-                { value: '', label: '기본 백엔드' },
+                { value: '', label: '기본 실행 환경' },
                 ...runtimes.map((r) => ({ value: r.id })),
                 ...runners.map((r) => ({
                   value: `self:${r.id}`,
                   label: r.label,
-                  hint: '내 로컬 호스트',
+                  hint: '내 컴퓨터',
                 })),
               ]}
               value={field.value}
@@ -133,13 +133,12 @@ export function SubmitRunForm({
           )}
         />
         <p className="text-[12px] text-faint">
-          비워두면 기본 백엔드에서 실행됩니다. 등록한 런타임이나 내 로컬 러너를 고르면 그곳에서
-          실행됩니다.
+          비워두면 기본 환경에서 실행돼요. 등록한 런타임이나 내 컴퓨터를 고르면 그곳에서 실행돼요.
         </p>
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="sourceKind">작업트리(repo 시드)</Label>
+        <Label htmlFor="sourceKind">작업 폴더</Label>
         <Controller
           control={control}
           name="sourceKind"
@@ -147,8 +146,8 @@ export function SubmitRunForm({
             <Combobox
               id="sourceKind"
               options={[
-                { value: 'files', label: '빈 작업트리' },
-                { value: 'git', label: 'Git repo (URL)' },
+                { value: 'files', label: '빈 폴더' },
+                { value: 'git', label: 'Git 저장소' },
               ]}
               value={field.value}
               onChange={field.onChange}
@@ -166,17 +165,17 @@ export function SubmitRunForm({
               placeholder="https://github.com/acme/repo.git"
               {...register('gitUrl', {
                 validate: (v) =>
-                  sourceKind !== 'git' || v.trim().length > 0 || 'Git URL 을 입력하세요',
+                  sourceKind !== 'git' || v.trim().length > 0 || 'Git 주소를 입력해주세요',
               })}
             />
             <FieldError message={errors.gitUrl?.message} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="gitRef">Ref</Label>
+            <Label htmlFor="gitRef">브랜치</Label>
             <Input id="gitRef" placeholder="main" {...register('gitRef')} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="connectionId">연결된 계정 (비공개 repo 인증)</Label>
+            <Label htmlFor="connectionId">연결된 계정</Label>
             <Controller
               control={control}
               name="connectionId"
@@ -184,7 +183,7 @@ export function SubmitRunForm({
                 <Combobox
                   id="connectionId"
                   options={[
-                    { value: '', label: '없음 (public repo)' },
+                    { value: '', label: '없음 (공개 저장소)' },
                     ...gitConnections.map((c) => ({ value: c.id, label: providerLabel(c) })),
                   ]}
                   value={field.value}
@@ -194,8 +193,8 @@ export function SubmitRunForm({
             />
             <p className="text-[12px] text-faint">
               {gitConnections.length === 0
-                ? '연결된 GitHub 계정이 없습니다 — 비공개 repo 는 설정 → 연결된 계정에서 먼저 연결하세요(public 은 그대로 가능).'
-                : '비공개 repo 면 연결을 고르세요. 토큰은 컨트롤플레인이 clone 시점에만 주입하며 화면/케이스에 저장되지 않습니다.'}
+                ? '연결된 GitHub 계정이 없어요. 비공개 저장소는 설정 → 연결된 계정에서 먼저 연결해주세요. 공개 저장소는 지금 바로 실행할 수 있어요.'
+                : '비공개 저장소면 연결을 골라주세요. 토큰은 내려받을 때만 쓰이고 어디에도 저장되지 않아요.'}
             </p>
           </div>
         </div>
@@ -204,7 +203,7 @@ export function SubmitRunForm({
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <Button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? '제출 중…' : 'run 제출'}
+        {isSubmitting ? '실행하는 중…' : '실행하기'}
       </Button>
     </form>
   )

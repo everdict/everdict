@@ -171,7 +171,7 @@ export function DatasetList({
       {visible.length === 0 ? (
         <EmptyState
           icon={<Search />}
-          title="조건에 맞는 데이터셋이 없습니다."
+          title="조건에 맞는 데이터셋이 없어요."
           hint="검색어나 필터를 바꿔보세요."
         />
       ) : (

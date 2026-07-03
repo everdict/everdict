@@ -37,7 +37,7 @@ export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }
         router.push('/')
         router.refresh()
       } else {
-        setError(r.error ?? '삭제에 실패했습니다.')
+        setError(r.error ?? '삭제하지 못했어요.')
       }
     })
   }
@@ -47,7 +47,7 @@ export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }
       <div className="space-y-1">
         <h3 className="text-[13px] font-[560] text-foreground">워크스페이스 삭제</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          이 워크스페이스와 그 모든 데이터를 영구히 삭제합니다. 되돌릴 수 없습니다.
+          워크스페이스와 모든 데이터가 사라져요. 되돌릴 수 없어요.
         </p>
       </div>
       <Button variant="destructive" onClick={() => setOpen(true)} className="shrink-0 gap-1.5">
@@ -62,15 +62,14 @@ export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }
               워크스페이스 삭제
             </h2>
             <p className="text-[13px] leading-relaxed text-muted-foreground">
-              <span className="font-[510] text-foreground">{workspaceName}</span> 와(과) 그 모든
-              데이터(런·데이터셋·하네스·멤버·시크릿 등)를 영구히 삭제합니다. 이 작업은 되돌릴 수
-              없습니다.
+              <span className="font-[510] text-foreground">{workspaceName}</span> 와(과) 모든
+              런·데이터셋·하네스·멤버·시크릿이 영구히 삭제돼요. 되돌릴 수 없어요.
             </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="ws-delete-confirm">
               계속하려면 <span className="font-mono text-foreground">{workspaceName}</span> 을(를)
-              입력하세요.
+              입력해주세요.
             </Label>
             <Input
               id="ws-delete-confirm"

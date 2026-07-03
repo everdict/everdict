@@ -118,11 +118,11 @@ export function AccountTabs({
       <TabsContent value="keys">
         {!canReadKeys ? (
           <EmptyState
-            title="API 키 조회 권한이 없습니다."
-            hint="admin 역할이 필요합니다(keys:read)."
+            title="API 키를 볼 권한이 없어요."
+            hint="워크스페이스 관리자에게 문의해보세요."
           />
         ) : keysError ? (
-          <Callout tone="danger">키 조회 실패: {keysError}</Callout>
+          <Callout tone="danger">키를 불러오지 못했어요: {keysError}</Callout>
         ) : (
           <ApiKeysManager keys={keys} canWrite={canWriteKeys} />
         )}

@@ -40,17 +40,17 @@ export default async function RunsPage({ params }: { params: Promise<{ workspace
       <AutoRefresh enabled={active} />
       <PageHeader
         title="활동"
-        description={`run ${runs.length}건 · 스코어카드 ${scorecards.length}건 · 실행 중/실행된 것들 (스코어카드 케이스 run 은 제외)`}
+        description={`실행 ${runs.length}건 · 스코어카드 ${scorecards.length}건`}
         actions={
           can(principal?.roles, 'runs:submit') ? (
             <Link href={`/${workspace}/runs/new`} className={buttonVariants({ size: 'sm' })}>
-              <Plus className="size-4" />새 Run
+              <Plus className="size-4" />새 실행
             </Link>
           ) : null
         }
       />
       {error ? (
-        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
+        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : (
         <ActivityFeed runs={runs} scorecards={scorecards} workspace={workspace} />
       )}

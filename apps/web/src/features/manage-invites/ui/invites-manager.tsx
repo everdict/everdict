@@ -33,7 +33,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
     setCopied(false)
     const hours = expiry.trim() === '' ? undefined : Number(expiry)
     if (hours !== undefined && (!Number.isFinite(hours) || hours <= 0)) {
-      setError('만료 시간은 양수(시간)여야 합니다.')
+      setError('만료 시간은 0 보다 큰 숫자여야 해요.')
       return
     }
     startTransition(async () => {
@@ -42,7 +42,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         setLink(inviteLink(r.token))
         setExpiry('')
       } else {
-        setError(r.error ?? '발급 실패')
+        setError(r.error ?? '발급하지 못했어요')
       }
     })
   }
@@ -63,9 +63,9 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
       <div className="space-y-1">
         <h3 className="text-[13px] font-[560] text-foreground">초대</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          초대 링크를 만들어 공유하면, 받은 사람이 로그인 후 수락해 이 워크스페이스에 그 역할로
-          가입합니다. 링크의 토큰은 <span className="font-[510] text-foreground">한 번만</span>{' '}
-          사용되며 만료를 둘 수 있습니다.
+          초대 링크를 만들어 보내면, 받은 사람이 로그인하고 수락해 이 워크스페이스에 참여해요. 링크는{' '}
+          <span className="font-[510] text-foreground">한 번만</span> 쓸 수 있고, 만료 시간을 정할 수
+          있어요.
         </p>
       </div>
 
@@ -73,7 +73,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
       {link && (
         <Callout
           tone="warning"
-          hint="이 링크는 한 번만 표시됩니다. 지금 복사해 받는 사람에게 전달하세요."
+          hint="이 링크는 한 번만 보여요. 지금 복사해서 전달하세요."
         >
           <div className="flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate font-mono text-xs">{link}</code>
@@ -94,7 +94,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
 
       {/* 대기중 초대 목록 */}
       {pending2.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">대기중인 초대가 없습니다.</p>
+        <p className="text-[13px] text-muted-foreground">대기 중인 초대가 없어요.</p>
       ) : (
         <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {pending2.map((i) => (
@@ -164,12 +164,12 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
             />
           </div>
           <Button onClick={onCreate} disabled={pending}>
-            {pending ? '발급 중…' : '초대 링크 생성'}
+            {pending ? '발급 중…' : '초대 링크 만들기'}
           </Button>
         </div>
       ) : (
         <p className="text-[13px] text-muted-foreground">
-          초대를 발급/취소하려면 admin 역할(members:write)이 필요합니다.
+          초대를 만들거나 취소하려면 관리자 권한이 필요해요.
         </p>
       )}
 

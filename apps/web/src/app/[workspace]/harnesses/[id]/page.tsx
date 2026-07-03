@@ -39,14 +39,14 @@ function summarize(spec: HarnessSpec): string {
     const svc = spec.services?.length ?? 0
     const dep = spec.dependencies?.length ?? 0
     const target = spec.target ? ' · 타깃 환경' : ''
-    return `service 토폴로지 · 서비스 ${svc} · 스토어 ${dep}${target}`
+    return `여러 서비스로 구성 · 서비스 ${svc} · 스토어 ${dep}${target}`
   }
   if (spec.kind === 'command') {
     const tool = spec.command?.split(' ')[0] ?? 'cli'
     const setup = spec.setup?.length ?? 0
-    return `command(선언형 CLI) · ${tool} · 설치 ${setup}`
+    return `CLI 에이전트 · ${tool} · 설치 ${setup}`
   }
-  return '단일 샌드박스 프로세스 (Claude Code · Codex)'
+  return '단일 프로세스로 실행 (Claude Code · Codex)'
 }
 
 function BackLink({ workspace }: { workspace: string }) {
@@ -138,7 +138,7 @@ export default async function HarnessDetailPage({
       <div className="space-y-5">
         <BackLink workspace={workspace} />
         <PageHeader title={id} />
-        <Callout tone="danger">하니스를 불러올 수 없습니다: {error ?? '알 수 없는 오류'}</Callout>
+        <Callout tone="danger">하니스를 불러오지 못했어요: {error ?? '알 수 없는 오류'}</Callout>
       </div>
     )
   }
@@ -179,7 +179,7 @@ export default async function HarnessDetailPage({
           <div className="space-y-1">
             <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">구성</h2>
             <p className="text-[12px] text-muted-foreground">
-              이 버전이 어떤 템플릿(대분류) 위에서 슬롯마다 핀한 값 — 새 버전 만들기의 출발점입니다.
+              이 버전이 템플릿 위에 채운 값이에요. 새 버전은 여기서 시작해요.
             </p>
           </div>
           <ConfigPanel instance={config.instance} template={config.template} />
@@ -187,7 +187,7 @@ export default async function HarnessDetailPage({
       )}
 
       <section className="space-y-4">
-        <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">Resolved 스펙</h2>
+        <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">최종 스펙</h2>
         <HarnessDetail spec={spec} />
       </section>
 

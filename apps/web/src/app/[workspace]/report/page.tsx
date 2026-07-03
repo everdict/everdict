@@ -22,8 +22,8 @@ export const dynamic = 'force-dynamic'
 // 데스크탑 + 웹 통합 리포트: 같은 CaseResult→Scorecard 흐름으로 평가한 서로 다른 하니스/벤치마크를 트랙별로 묶어
 // 권위-기준(state > 객관 > judge) 케이스 통과율을 한 화면에. 하니스/인프라-비종속 평가 런타임의 단일 리포트.
 const TRACK_LABEL: Record<string, string> = {
-  desktop: '데스크탑 · os-use / OSWorld',
-  web: '웹 · browser-use / WebVoyager',
+  desktop: '데스크탑 · OSWorld',
+  web: '웹 · WebVoyager',
   other: '기타',
 }
 const TRACK_ORDER = ['desktop', 'web', 'other'] as const
@@ -69,14 +69,14 @@ export default async function ReportPage({ params }: { params: Promise<{ workspa
     <div className="space-y-7">
       <PageHeader
         title="통합 리포트"
-        description="데스크탑(os-use/OSWorld) + 웹(browser-use/WebVoyager) — 권위-기준(state > 객관 > judge) 케이스 통과율."
+        description="데스크탑과 웹에서 실행한 평가를 한눈에 봐요."
       />
 
-      {error && <Callout tone="danger">스코어카드를 불러올 수 없습니다: {error}</Callout>}
+      {error && <Callout tone="danger">스코어카드를 불러오지 못했어요: {error}</Callout>}
 
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
         <StatCard
-          label="combined case pass"
+          label="전체 통과율"
           value={pct(combPass, combTotal)}
           hint={`${combPass}/${combTotal} 케이스`}
           tone={combTotal > 0 && combPass === combTotal ? 'success' : 'primary'}
@@ -123,11 +123,11 @@ export default async function ReportPage({ params }: { params: Promise<{ workspa
                   </span>
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-[12px] tabular-nums text-muted-foreground">
-                      <span className="text-faint">case pass</span> {cp.pass}/{cp.total} (
+                      <span className="text-faint">통과</span> {cp.pass}/{cp.total} (
                       {pct(cp.pass, cp.total)})
                     </span>
                     <Badge tone={allPass ? 'success' : cp.pass > 0 ? 'info' : 'danger'}>
-                      {allPass ? 'all pass' : `${cp.total - cp.pass} fail`}
+                      {allPass ? '전체 통과' : `${cp.total - cp.pass}건 실패`}
                     </Badge>
                   </div>
                 </Link>
@@ -140,8 +140,8 @@ export default async function ReportPage({ params }: { params: Promise<{ workspa
       {succeeded.length === 0 && !error && (
         <EmptyState
           icon={<BarChart3 />}
-          title="완료된 스코어카드가 없습니다."
-          hint="데이터셋을 하니스에 돌려 스코어카드를 완료하면 트랙별 통합 리포트가 여기에 표시됩니다."
+          title="아직 완료된 스코어카드가 없어요."
+          hint="스코어카드를 실행하면 결과가 여기에 모여요."
         />
       )}
     </div>

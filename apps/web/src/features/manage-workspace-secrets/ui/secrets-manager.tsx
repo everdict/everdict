@@ -15,13 +15,13 @@ const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 const COPY = {
   model: {
     title: '모델·프로바이더 키',
-    help: 'OPENAI_API_KEY, ANTHROPIC_API_KEY, LiteLLM 키 등. 런 디스패치 시 해당 워크스페이스 잡 env 로만 주입됩니다.',
+    help: 'OPENAI_API_KEY, ANTHROPIC_API_KEY 같은 키예요. 실행할 때 이 워크스페이스의 작업에만 쓰여요.',
     namePlaceholder: 'OPENAI_API_KEY',
     multiline: false,
   },
   cluster: {
     title: '클러스터 자격증명',
-    help: '런타임 연결용 — NOMAD_TOKEN, K8s bearer 토큰, 또는 전체 kubeconfig(YAML). 컨트롤플레인↔클러스터 API 인증에만 쓰이고 잡(에이전트) env 에는 노출되지 않습니다.',
+    help: '런타임 연결용이에요 — NOMAD_TOKEN, K8s 토큰, kubeconfig 등. 클러스터 인증에만 쓰이고 실행 작업에는 노출되지 않아요.',
     namePlaceholder: 'NOMAD_TOKEN',
     multiline: true,
   },
@@ -77,13 +77,13 @@ export function SecretsManager({
         <h3 className="text-[13px] font-[560] text-foreground">{copy.title}</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">{copy.help}</p>
         <p className="text-[12px] leading-relaxed text-faint">
-          시크릿은 at-rest 암호화되며 값은 다시 표시되지 않습니다(목록은 이름만). 시크릿은
-          워크스페이스 단위 단일 네임스페이스이며, 두 탭은 입력 안내만 다릅니다.
+          시크릿은 암호화되고, 값은 다시 볼 수 없어요(목록에는 이름만 보여요). 두 탭은 같은 시크릿을
+          쓰고 안내만 달라요.
         </p>
       </div>
 
       {secrets.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">아직 등록된 시크릿이 없습니다.</p>
+        <p className="text-[13px] text-muted-foreground">아직 등록한 시크릿이 없어요.</p>
       ) : (
         <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {secrets.map((s) => (
@@ -142,7 +142,9 @@ export function SecretsManager({
               autoComplete="off"
               spellCheck={false}
             />
-            {nameInvalid && <FieldError message="^[A-Z_][A-Z0-9_]*$ 형식이어야 합니다." />}
+            {nameInvalid && (
+              <FieldError message="대문자로 시작하고 대문자·숫자·밑줄만 쓸 수 있어요." />
+            )}
           </div>
           <div className="space-y-1.5">
             <Label htmlFor={`secret-value-${variant}`}>값</Label>
@@ -150,7 +152,7 @@ export function SecretsManager({
               <Textarea
                 id={`secret-value-${variant}`}
                 value={value}
-                placeholder="토큰 또는 kubeconfig YAML 붙여넣기"
+                placeholder="토큰이나 kubeconfig 붙여넣기"
                 onChange={(e) => setValue(e.target.value)}
                 rows={6}
                 spellCheck={false}
@@ -166,7 +168,7 @@ export function SecretsManager({
               />
             )}
             <p className="text-[12px] text-faint">
-              기존 이름으로 저장하면 값이 교체됩니다. 저장 후에는 값을 다시 볼 수 없습니다.
+              같은 이름으로 저장하면 값이 바뀌어요. 저장한 뒤에는 값을 다시 볼 수 없어요.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -188,7 +190,7 @@ export function SecretsManager({
         </div>
       ) : (
         <p className="text-[13px] text-muted-foreground">
-          변경하려면 admin 역할(secrets:write)이 필요합니다.
+          변경하려면 관리자 권한이 필요해요.
         </p>
       )}
     </div>

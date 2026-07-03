@@ -66,15 +66,15 @@ export default async function DatasetDiffPage({
           {id}
         </Link>
         <PageHeader
-          title="버전 diff"
-          description="base ↔ candidate — 케이스 추가/삭제/변경 + 메타 변경."
+          title="버전 비교"
+          description="두 버전의 케이스와 메타가 어떻게 달라졌는지 봐요."
         />
       </div>
 
       {versions.length < 2 ? (
         <EmptyState
-          title="비교하려면 버전이 2개 이상 필요합니다."
-          hint="같은 데이터셋 id 로 새 버전(patch/minor/major)을 등록하면 버전 간 diff 를 볼 수 있습니다."
+          title="버전이 2개 이상 있어야 비교할 수 있어요."
+          hint="새 버전을 만들면 버전끼리 비교할 수 있어요."
         />
       ) : (
         <Card className="p-4">
@@ -82,7 +82,7 @@ export default async function DatasetDiffPage({
         </Card>
       )}
 
-      {error && <Callout tone="danger">diff 실패: {error}</Callout>}
+      {error && <Callout tone="danger">비교하지 못했어요: {error}</Callout>}
 
       {diff && <DiffBody diff={diff} />}
     </div>
@@ -132,7 +132,7 @@ function DiffBody({ diff }: { diff: DatasetDiff }) {
           <Badge tone="warning">{diff.changed.length}</Badge>
         </div>
         {diff.changed.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">변경된 케이스가 없습니다.</p>
+          <p className="text-[13px] text-muted-foreground">변경된 케이스가 없어요.</p>
         ) : (
           <div className="space-y-3">
             {diff.changed.map((c) => (

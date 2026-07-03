@@ -68,17 +68,17 @@ export function WorkspaceInfoCard({
     setError(undefined)
     setSaved(false)
     if (!file.type.startsWith('image/')) {
-      setError('이미지 파일만 업로드할 수 있습니다.')
+      setError('이미지 파일만 올릴 수 있어요.')
       return
     }
     if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
-      setError('이미지가 너무 큽니다(최대 8MB).')
+      setError('이미지가 너무 커요. 최대 8MB까지 올릴 수 있어요.')
       return
     }
     try {
       setLogo(await fileToImageDataUrl(file))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '이미지 처리에 실패했습니다.')
+      setError(err instanceof Error ? err.message : '이미지를 처리하지 못했어요.')
     }
   }
 
@@ -102,7 +102,7 @@ export function WorkspaceInfoCard({
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      setError('클립보드 복사에 실패했습니다.')
+      setError('복사하지 못했어요.')
     }
   }
 
@@ -171,8 +171,7 @@ export function WorkspaceInfoCard({
           </Button>
         </div>
         <p className="text-[12px] text-faint">
-          URL(slug)은 워크스페이스 생성 시 고정되며 변경할 수 없습니다 — 모든 데이터의 스코프
-          키입니다.
+          URL은 워크스페이스를 만들 때 정해지고, 나중에 바꿀 수 없어요.
         </p>
       </div>
 

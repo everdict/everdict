@@ -113,7 +113,7 @@ export function CreateScheduleForm({
       ? await updateScheduleAction(scheduleId, input, initialJudges)
       : await createScheduleAction(input)
     if (res.ok) router.push(`/${workspace}/schedules`)
-    else setServerError(res.error ?? (scheduleId ? '예약 수정 실패' : '예약 생성 실패'))
+    else setServerError(res.error ?? (scheduleId ? '예약을 수정하지 못했어요' : '예약을 만들지 못했어요'))
   }
 
   return (
@@ -190,7 +190,7 @@ export function CreateScheduleForm({
                   setValue('datasetVersion', 'latest')
                 }}
                 placeholder="데이터셋 선택"
-                emptyText="데이터셋이 없습니다"
+                emptyText="데이터셋이 없어요"
               />
             )}
           />
@@ -231,7 +231,7 @@ export function CreateScheduleForm({
                   setValue('harnessVersion', 'latest')
                 }}
                 placeholder="하니스 선택"
-                emptyText="하니스가 없습니다"
+                emptyText="하니스가 없어요"
               />
             )}
           />
@@ -297,7 +297,7 @@ export function CreateScheduleForm({
             <Combobox
               id="runtime"
               options={[
-                { value: '', label: '기본 백엔드' },
+                { value: '', label: '기본 런타임' },
                 ...runtimes.map((r) => ({ value: r.id })),
               ]}
               value={field.value}
@@ -306,25 +306,25 @@ export function CreateScheduleForm({
           )}
         />
         <p className="text-[12px] text-muted-foreground">
-          셀프호스티드(self:) 런타임은 발사 시점에 러너가 온라인이어야 실행됩니다.
+          셀프호스티드(self:) 런타임은 실행 시점에 러너가 켜져 있어야 해요.
         </p>
       </div>
 
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <p className="text-[12px] text-muted-foreground">
-        지정한 cron 마다 이 데이터셋×하니스로 스코어카드를 실행합니다. 발사 run 은 생성자(나)
-        신원으로 돌아가고 결과는 워크스페이스에 기록됩니다(추이/회귀에 그대로 반영).
+        정해둔 주기마다 이 데이터셋과 하니스로 스코어카드를 실행해요. 내 계정으로 실행되고, 결과는
+        워크스페이스에 기록돼요.
       </p>
 
       <Button type="submit" disabled={isSubmitting}>
         {isSubmitting
           ? scheduleId
             ? '저장 중…'
-            : '생성 중…'
+            : '만드는 중…'
           : scheduleId
             ? '변경 저장'
-            : '예약 생성'}
+            : '예약 만들기'}
       </Button>
     </form>
   )

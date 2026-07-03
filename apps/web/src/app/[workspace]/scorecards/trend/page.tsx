@@ -96,7 +96,7 @@ function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
           r={4}
           fill={p.regressed ? 'var(--color-destructive)' : 'var(--color-success)'}
         >
-          <title>{`${fmtDateTime(p.createdAt)} · ${fmtScore(p.passRate, p.mean)}${p.regressed ? ' · 회귀' : ''}`}</title>
+          <title>{`${fmtDateTime(p.createdAt)} · ${fmtScore(p.passRate, p.mean)}${p.regressed ? ' · 나빠짐' : ''}`}</title>
         </circle>
       ))}
       <text
@@ -160,15 +160,15 @@ export default async function TrendPage({
           스코어카드
         </Link>
         <PageHeader
-          title="추이 (기간 트렌드)"
-          description="한 데이터셋의 스코어카드를 시간순으로 — baseline 대비 회귀를 추적."
+          title="추이"
+          description="같은 벤치마크의 점수가 시간에 따라 어떻게 변했는지 봐요."
         />
       </div>
 
       {options.length === 0 ? (
         <EmptyState
-          title="데이터셋이 없습니다."
-          hint="벤치마크/데이터셋을 등록하고 같은 데이터셋을 여러 번 평가하면 추이가 쌓입니다."
+          title="아직 데이터셋이 없어요."
+          hint="같은 벤치마크를 여러 번 평가하면 추이가 쌓여요."
         />
       ) : (
         <Card className="p-4">
@@ -176,7 +176,7 @@ export default async function TrendPage({
         </Card>
       )}
 
-      {error && <Callout tone="danger">추이 조회 실패: {error}</Callout>}
+      {error && <Callout tone="danger">추이를 불러오지 못했어요: {error}</Callout>}
 
       {trend && (
         <div className="space-y-7">
@@ -196,12 +196,12 @@ export default async function TrendPage({
                 </code>
               </p>
               <Badge tone={regressions.length > 0 ? 'danger' : 'success'}>
-                {regressions.length > 0 ? `회귀 ${regressions.length}건` : '회귀 없음'}
+                {regressions.length > 0 ? `나빠짐 ${regressions.length}건` : '이상 없음'}
               </Badge>
             </div>
             {trend.points.length < 2 ? (
               <p className="text-[13px] text-muted-foreground">
-                추이를 그리려면 같은 데이터셋의 완료 스코어카드가 2건 이상 필요합니다(현재{' '}
+                추이를 그리려면 완료된 스코어카드가 2건 이상 필요해요 (지금{' '}
                 {trend.points.length}건).
               </p>
             ) : (
@@ -255,7 +255,7 @@ export default async function TrendPage({
                       </TD>
                       <TD className="text-right">
                         {p.regressed ? (
-                          <Badge tone="danger">회귀</Badge>
+                          <Badge tone="danger">나빠짐</Badge>
                         ) : (
                           <span className="text-faint">–</span>
                         )}

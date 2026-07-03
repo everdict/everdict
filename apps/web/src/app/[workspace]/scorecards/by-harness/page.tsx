@@ -68,7 +68,7 @@ export default async function ByHarnessPage({
         </Link>
         <PageHeader
           title="하니스별"
-          description="한 하니스가 수행한 벤치마크들의 스코어 + 버전별 사용 모델을 추적."
+          description="하니스가 벤치마크마다 낸 점수와 사용한 모델을 봐요."
         />
       </div>
 
@@ -76,8 +76,8 @@ export default async function ByHarnessPage({
 
       {options.length === 0 ? (
         <EmptyState
-          title="스코어카드가 없습니다."
-          hint="데이터셋을 하니스에 돌리면 하니스별 이력이 쌓입니다."
+          title="아직 스코어카드가 없어요."
+          hint="하니스로 벤치마크를 평가하면 여기에 쌓여요."
         />
       ) : (
         <>
@@ -86,7 +86,7 @@ export default async function ByHarnessPage({
           </Card>
 
           {groups.length === 0 ? (
-            <EmptyState title="이 하니스의 스코어카드가 없습니다." />
+            <EmptyState title="이 하니스로 만든 스코어카드가 없어요." />
           ) : (
             groups.map(([datasetId, cards]) => (
               <section key={datasetId} className="space-y-2.5">

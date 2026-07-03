@@ -73,9 +73,9 @@ export default async function RuntimeDetailPage({
         <ChevronLeft className="size-3.5" />
         런타임
       </Link>
-      <PageHeader title={id} description="평가가 도는 실행 인프라." />
+      <PageHeader title={id} description="평가를 실행하는 인프라예요." />
       {error || !spec ? (
-        <Callout tone="danger">런타임 상세를 불러오지 못했습니다{error ? `: ${error}` : ''}.</Callout>
+        <Callout tone="danger">런타임을 불러오지 못했어요{error ? `: ${error}` : ''}.</Callout>
       ) : (
         <Card className="space-y-4 p-5">
           <div className="flex flex-wrap items-center gap-2">
@@ -98,7 +98,7 @@ export default async function RuntimeDetailPage({
               ))}
             </div>
           ) : (
-            <p className="border-t border-border pt-4 text-[12px] text-faint">추가 설정 없음.</p>
+            <p className="border-t border-border pt-4 text-[12px] text-faint">추가 설정이 없어요.</p>
           )}
           <div className="border-t border-border pt-4">
             <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">버전</p>

@@ -42,9 +42,9 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
         <div className="space-y-1">
           <h3 className="text-[13px] font-[560] text-foreground">API 키</h3>
           <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-            에이전트·MCP 가 컨트롤플레인에 접근할 때 쓰는 키(
-            <span className="font-mono">ak_…</span>). 발급 시 권한(Full Access 또는 선택 범위)을
-            정할 수 있고, 평문은 한 번만 표시됩니다.
+            에이전트가 Assay 에 접근할 때 쓰는 키예요(
+            <span className="font-mono">ak_…</span>). 발급할 때 권한을 정할 수 있고, 키는 한 번만
+            보여요.
           </p>
         </div>
         {canWrite && (
@@ -64,11 +64,11 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
       {keys.length === 0 ? (
         <EmptyState
           icon={<KeyRound strokeWidth={1.75} />}
-          title="아직 발급된 키가 없습니다."
+          title="아직 발급한 키가 없어요."
           hint={
             canWrite
-              ? '새 키를 발급해 에이전트·CI·MCP 에 컨트롤플레인 접근 권한을 부여하세요.'
-              : '키를 발급하려면 admin 역할(keys:write)이 필요합니다.'
+              ? '새 키를 발급해 에이전트나 CI 에 접근 권한을 줄 수 있어요.'
+              : '키를 발급하려면 관리자 권한이 필요해요.'
           }
           action={
             canWrite ? (
@@ -135,7 +135,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
 
       {!canWrite && keys.length > 0 && (
         <p className="text-[12px] text-muted-foreground">
-          키를 발급/취소하려면 admin 역할(keys:write)이 필요합니다.
+          키를 발급하거나 취소하려면 관리자 권한이 필요해요.
         </p>
       )}
 
@@ -176,7 +176,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
       if (scopeRead) scopes.push('read')
       if (scopeWrite) scopes.push('write')
       if (scopes.length === 0) {
-        setError('권한을 하나 이상 선택하세요.')
+        setError('권한을 하나 이상 선택해주세요.')
         return
       }
     }
@@ -194,7 +194,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="create-key-title" className="text-[15px] font-[560] text-foreground">
-              키가 발급되었습니다
+              키가 발급됐어요
             </h2>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
               아래 키를 지금 복사해 안전한 곳에 보관하세요.
@@ -203,7 +203,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
           <div className="px-5 py-4">
             <Callout
               tone="warning"
-              hint="이 값은 다시 표시되지 않습니다. 이후에는 prefix 로만 식별됩니다."
+              hint="이 키는 다시 볼 수 없어요. 이후에는 앞부분으로만 표시돼요."
             >
               <div className="flex items-center gap-2">
                 <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
@@ -239,7 +239,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
               새 API 키 발급
             </h2>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              레이블로 용도를 구분하고, 이 키가 가질 권한 범위를 정하세요.
+              레이블로 용도를 구분하고, 이 키의 권한을 정해보세요.
             </p>
           </header>
 
@@ -257,34 +257,34 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
             </div>
 
             <div className="space-y-2">
-              <Label>권한 (Permissions)</Label>
+              <Label>권한</Label>
               <div className="space-y-2">
                 <ScopeOption
                   selected={mode === 'full'}
                   onSelect={() => setMode('full')}
                   name="key-access"
-                  title="전체 액세스 (Full Access)"
-                  description="워크스페이스 admin 권한 — 모든 작업 가능."
+                  title="전체 권한"
+                  description="모든 작업을 할 수 있어요."
                 />
                 <ScopeOption
                   selected={mode === 'custom'}
                   onSelect={() => setMode('custom')}
                   name="key-access"
-                  title="범위 지정 (Custom)"
-                  description="선택한 권한만 부여."
+                  title="직접 지정"
+                  description="선택한 권한만 줘요."
                 >
                   <div className="mt-3 space-y-2 border-t border-border/70 pt-3">
                     <ScopeCheck
                       checked={scopeRead}
                       onChange={setScopeRead}
-                      title="읽기 (Read)"
-                      description="워크스페이스 데이터 조회."
+                      title="읽기"
+                      description="데이터를 조회할 수 있어요."
                     />
                     <ScopeCheck
                       checked={scopeWrite}
                       onChange={setScopeWrite}
-                      title="쓰기 (Write)"
-                      description="run 제출·등록·버전 생성·실행 (읽기 포함). secrets·멤버 등 거버넌스는 제외."
+                      title="쓰기"
+                      description="실행하고 등록할 수 있어요. 시크릿·멤버 관리는 빼고요."
                     />
                   </div>
                 </ScopeOption>

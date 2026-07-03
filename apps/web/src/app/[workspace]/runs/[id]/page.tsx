@@ -41,7 +41,7 @@ function BackLink({ workspace }: { workspace: string }) {
       className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
     >
       <ChevronLeft className="size-3.5" />
-      Runs
+      활동
     </Link>
   )
 }
@@ -66,8 +66,8 @@ export default async function RunDetailPage({
     return (
       <div className="space-y-5">
         <BackLink workspace={workspace} />
-        <PageHeader title="Run" />
-        <Callout tone="danger">run 을 불러올 수 없습니다: {error}</Callout>
+        <PageHeader title="실행" />
+        <Callout tone="danger">실행을 불러오지 못했어요: {error}</Callout>
       </div>
     )
   }
@@ -82,7 +82,7 @@ export default async function RunDetailPage({
         <BackLink workspace={workspace} />
         <PageHeader
           title={<span className="font-mono">run {run.id.slice(0, 8)}</span>}
-          description={`${run.harness.id}@${run.harness.version} · case ${run.caseId}`}
+          description={`${run.harness.id}@${run.harness.version} · 케이스 ${run.caseId}`}
           actions={<StatusPill status={run.status} />}
         />
       </div>
@@ -101,9 +101,9 @@ export default async function RunDetailPage({
       )}
 
       <section className="space-y-2.5">
-        <SectionHeader title="스코어" />
+        <SectionHeader title="점수" />
         {scores.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">점수가 없습니다.</p>
+          <p className="text-[13px] text-muted-foreground">아직 점수가 없어요.</p>
         ) : (
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
             {scores.map((s) => (

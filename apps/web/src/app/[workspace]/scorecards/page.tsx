@@ -57,7 +57,7 @@ export default async function ScorecardsPage({
     <div className="space-y-6">
       <PageHeader
         title="스코어카드"
-        description="데이터셋 × 하니스 배치 평가 — 케이스별 채점을 메트릭으로 집계."
+        description="벤치마크로 하니스를 한 번에 평가하고 점수를 모아 봐요."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             {/* 분석 렌즈 묶음 — 개별 실행과 시각적으로 구분(세그먼트) */}
@@ -81,7 +81,7 @@ export default async function ScorecardsPage({
                   href={`/${workspace}/scorecards/ingest`}
                   className={buttonVariants({ size: 'sm', variant: 'secondary' })}
                 >
-                  인제스트
+                  트레이스 올리기
                 </Link>
                 <Link
                   href={`/${workspace}/scorecards/new`}
@@ -99,8 +99,8 @@ export default async function ScorecardsPage({
         <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
       ) : scorecards.length === 0 ? (
         <EmptyState
-          title="스코어카드가 없습니다."
-          hint="member 이상이면 '스코어카드 실행'으로 데이터셋을 하니스에 돌리거나, API/MCP(run_scorecard)로 실행하세요."
+          title="아직 스코어카드가 없어요."
+          hint="'스코어카드 실행'으로 하니스를 평가해보세요."
         />
       ) : (
         <ScorecardList workspace={workspace} scorecards={scorecards} authors={authors} />

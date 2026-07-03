@@ -48,10 +48,9 @@ export function SettingsForm({
           className="mt-0.5 h-4 w-4 accent-primary"
         />
         <span className="text-[13px]">
-          <span className="font-[510] text-foreground">사용량 계측 (usage metering)</span>
+          <span className="font-[510] text-foreground">사용량 계측</span>
           <span className="mt-0.5 block leading-relaxed text-muted-foreground">
-            이 워크스페이스의 run 에서 모델 호출 토큰/비용을 회수해 버짓에 반영합니다. 요청별
-            override(POST /runs meterUsage)가 이 기본값보다 우선합니다.
+            이 워크스페이스의 실행에서 쓴 토큰과 비용을 예산에 반영해요.
           </span>
         </span>
       </label>
@@ -68,9 +67,7 @@ export function SettingsForm({
           )}
         </div>
       ) : (
-        <p className="text-[13px] text-muted-foreground">
-          변경하려면 admin 역할(settings:write)이 필요합니다.
-        </p>
+        <p className="text-[13px] text-muted-foreground">변경하려면 관리자 권한이 필요해요.</p>
       )}
     </div>
   )

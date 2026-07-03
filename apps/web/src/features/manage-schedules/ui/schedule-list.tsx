@@ -201,7 +201,7 @@ export function ScheduleList({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="이름 · 주기 · 벤치마크 · 하니스 · 소유자로 검색"
+            placeholder="이름·하니스로 검색"
             className="pl-8"
             aria-label="예약 검색"
           />
@@ -237,7 +237,7 @@ export function ScheduleList({
       {visible.length === 0 ? (
         <EmptyState
           icon={<Search />}
-          title="조건에 맞는 예약이 없습니다."
+          title="조건에 맞는 예약이 없어요."
           hint="검색어나 필터를 바꿔보세요."
         />
       ) : view === 'calendar' ? (
@@ -274,7 +274,7 @@ export function ScheduleList({
           </div>
           {upcoming.length === 0 ? (
             <p className="text-[12px] text-muted-foreground">
-              예정된 실행이 없습니다(활성 예약이 없거나 이 기간에 발사가 없음).
+              예정된 실행이 없어요.
             </p>
           ) : (
             <div className="space-y-0.5">

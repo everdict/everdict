@@ -57,8 +57,8 @@ export function RunsTable({
   if (rows.length === 0) {
     return (
       <EmptyState
-        title="아직 실행한 run 이 없습니다."
-        hint="하니스를 골라 평가를 제출하면 여기에 표시됩니다. (스코어카드 케이스 run 은 해당 스코어카드에서 확인)"
+        title="아직 실행한 내역이 없어요."
+        hint="하니스를 골라 실행하면 여기에 표시돼요."
       />
     )
   }
@@ -66,7 +66,7 @@ export function RunsTable({
     <Table>
       <THead>
         <tr>
-          <TH className="w-[120px]">Run</TH>
+          <TH className="w-[120px]">실행</TH>
           <TH>하니스</TH>
           <TH>출처</TH>
           <TH>상태</TH>

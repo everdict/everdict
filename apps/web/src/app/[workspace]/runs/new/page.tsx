@@ -57,9 +57,9 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
         href={`/${workspace}/runs`}
         className="text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
-        ← Runs
+        ← 활동
       </Link>
-      <PageHeader title="새 run" description="하니스를 골라 평가를 제출합니다." />
+      <PageHeader title="새 실행" description="하니스를 골라 한 번 실행해보세요." />
       {allowed ? (
         <Card className="p-6">
           <SubmitRunForm
@@ -71,8 +71,8 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
         </Card>
       ) : (
         <EmptyState
-          title="run 제출 권한이 없습니다."
-          hint="member 이상 역할이 필요합니다(runs:submit). 워크스페이스 관리자에게 문의하세요."
+          title="실행을 시작할 권한이 없어요."
+          hint="워크스페이스 관리자에게 권한을 요청해보세요."
         />
       )}
     </div>

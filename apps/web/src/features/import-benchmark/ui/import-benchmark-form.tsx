@@ -109,7 +109,7 @@ export function ImportBenchmarkForm({
 
   if (entries.length === 0) {
     return (
-      <p className="text-[13px] text-muted-foreground">사용 가능한 벤치마크/레시피가 없습니다.</p>
+      <p className="text-[13px] text-muted-foreground">가져올 수 있는 벤치마크나 레시피가 없어요.</p>
     )
   }
 
@@ -139,7 +139,7 @@ export function ImportBenchmarkForm({
 
       {selected?.gated && (
         <Callout tone="warning">
-          gated 벤치마크입니다 — 워크스페이스 시크릿 <code>HF_TOKEN</code> 이 있어야 인출됩니다.
+          gated 벤치마크예요. 워크스페이스 시크릿 <code>HF_TOKEN</code> 이 있어야 가져올 수 있어요.
         </Callout>
       )}
 
@@ -185,19 +185,19 @@ export function ImportBenchmarkForm({
         />
       </div>
 
-      {result && !result.ok && <Callout tone="danger">인입 실패: {result.error}</Callout>}
+      {result && !result.ok && <Callout tone="danger">가져오지 못했어요: {result.error}</Callout>}
       {result?.ok && (
         <Callout tone="info">
-          ✓ {result.id}@{result.version} · 케이스 {result.cases}건 등록됨
+          ✓ {result.id}@{result.version} · 케이스 {result.cases}건 등록했어요
         </Callout>
       )}
 
       <p className="text-[12px] leading-relaxed text-muted-foreground">
-        버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 인입하면 409 로 거부됩니다.
+        버전은 바꿀 수 없어요. 같은 버전을 다른 내용으로 다시 가져오면 등록되지 않아요.
       </p>
 
       <Button type="button" onClick={onImport} disabled={busy || !selected}>
-        {busy ? '인입 중…' : '워크스페이스에 추가'}
+        {busy ? '가져오는 중…' : '워크스페이스에 추가'}
       </Button>
     </div>
   )

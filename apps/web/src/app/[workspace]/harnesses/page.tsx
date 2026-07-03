@@ -58,7 +58,7 @@ export default async function HarnessesPage({
     <div className="space-y-6">
       <PageHeader
         title="하니스"
-        description="평가 대상 에이전트 — 대분류(템플릿)별로 묶인 인스턴스 버전, 어느 벤치마크로든 평가"
+        description="평가할 에이전트예요. 어떤 벤치마크로든 돌려봐요."
         actions={
           can(principal?.roles, 'harnesses:register') ? (
             <Link href={`/${workspace}/harnesses/new`} className={buttonVariants({ size: 'sm' })}>
@@ -68,12 +68,12 @@ export default async function HarnessesPage({
         }
       />
       {error ? (
-        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
+        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : ownHarnesses.length === 0 ? (
         <EmptyState
           icon={<Boxes />}
-          title="등록된 하니스가 없습니다."
-          hint="'하니스 등록'으로 올리거나 API 키로 POST /harnesses 하세요."
+          title="아직 하니스가 없어요."
+          hint="첫 하니스를 등록해보세요."
         />
       ) : (
         <HarnessList

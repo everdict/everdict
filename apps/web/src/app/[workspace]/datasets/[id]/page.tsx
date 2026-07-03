@@ -116,7 +116,7 @@ export default async function DatasetDetailPage({
       <div className="space-y-5">
         <BackLink workspace={workspace} />
         <PageHeader title="데이터셋" />
-        <Callout tone="danger">데이터셋을 불러올 수 없습니다: {error}</Callout>
+        <Callout tone="danger">데이터셋을 불러오지 못했어요: {error}</Callout>
       </div>
     )
   }
@@ -142,7 +142,7 @@ export default async function DatasetDetailPage({
         <BackLink workspace={workspace} />
         <PageHeader
           title={dataset.id}
-          description={dataset.description ?? '하니스 무관 eval 케이스 묶음'}
+          description={dataset.description ?? '어떤 하니스든 같은 문제로 평가해요.'}
           actions={
             <div className="flex items-center gap-2">
               {versions.length > 1 ? (
@@ -243,7 +243,7 @@ export default async function DatasetDetailPage({
             <InfoTip
               className="ml-auto"
               align="end"
-              content="버전은 불변입니다 — 설명·태그·케이스 수정은 '새 버전 만들기'로 새 버전을 배포합니다."
+              content="버전은 바꿀 수 없어요. 수정하려면 새 버전을 만들어요."
             />
           )}
         </div>
@@ -275,7 +275,7 @@ export default async function DatasetDetailPage({
       {relation && relation.harnesses.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
           <span className="inline-flex items-center gap-1 text-faint">
-            <Waypoints className="size-3.5" />이 데이터셋으로 평가된 하니스
+            <Waypoints className="size-3.5" />이 데이터셋으로 평가한 하니스
           </span>
           {relation.harnesses.map((h) => (
             <Link
@@ -297,7 +297,7 @@ export default async function DatasetDetailPage({
       <section className="space-y-3">
         <SectionHeader title={`케이스 (${dataset.cases.length})`} />
         {dataset.cases.length === 0 ? (
-          <EmptyState title="케이스가 없습니다." />
+          <EmptyState title="케이스가 없어요." />
         ) : (
           <>
             {/* 구성 요약 — 이 벤치마크가 어떤 환경에서 무엇으로 채점되는지 한눈에 */}

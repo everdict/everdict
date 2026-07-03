@@ -149,7 +149,7 @@ export function RegisterDatasetForm({
           placeholder="coding, smoke"
         />
         <p className="text-[12px] text-muted-foreground">
-          목록의 카테고리 필터로 쓰입니다 (예: coding, browser, qa).
+          목록에서 카테고리 필터로 써요 (예: coding, browser, qa).
         </p>
       </div>
 
@@ -163,8 +163,7 @@ export function RegisterDatasetForm({
           spellCheck={false}
         />
         <p className="text-[12px] leading-relaxed text-muted-foreground">
-          각 케이스는 id · env · task · graders 를 가집니다. 데이터셋은 하니스 무관 — 어느 하니스든
-          같은 케이스로 평가합니다.
+          각 케이스는 id · env · task · graders 로 이뤄져요. 어떤 하니스든 같은 케이스로 평가해요.
         </p>
       </div>
 
@@ -172,15 +171,15 @@ export function RegisterDatasetForm({
       {createError && <Callout tone="danger">{createError}</Callout>}
 
       <p className="text-[12px] leading-relaxed text-muted-foreground">
-        버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 등록하면 409 로 거부됩니다.
+        버전은 바꿀 수 없어요. 같은 버전을 다른 내용으로 다시 올리면 등록되지 않아요.
       </p>
 
       <div className="flex gap-2">
         <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
-          {busy ? '…' : '검증 (dry-run)'}
+          {busy ? '…' : '검증하기'}
         </Button>
         <Button type="button" onClick={onCreate} disabled={busy}>
-          {busy ? '처리 중…' : lockId ? '새 버전 배포' : '데이터셋 등록'}
+          {busy ? '처리 중…' : lockId ? '새 버전 올리기' : '데이터셋 등록'}
         </Button>
       </div>
     </div>
@@ -188,11 +187,11 @@ export function RegisterDatasetForm({
 }
 
 function ValidateBanner({ result }: { result: ValidateDatasetResult }) {
-  if (result.error) return <Callout tone="danger">검증 호출 실패: {result.error}</Callout>
+  if (result.error) return <Callout tone="danger">검증하지 못했어요: {result.error}</Callout>
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-[510]">스키마 오류</div>
+        <div className="font-[510]">형식 오류</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -203,7 +202,7 @@ function ValidateBanner({ result }: { result: ValidateDatasetResult }) {
   return (
     <Callout tone="info">
       <div className="font-[510]">
-        ✓ 스키마 정상 · {result.id}@{result.version} · 케이스 {result.cases ?? 0}건{' '}
+        ✓ 형식 정상 · {result.id}@{result.version} · 케이스 {result.cases ?? 0}건{' '}
         {result.versionExists ? '(이미 존재)' : '(새 버전)'}
       </div>
       <div className="mt-1 text-muted-foreground">
@@ -211,7 +210,7 @@ function ValidateBanner({ result }: { result: ValidateDatasetResult }) {
         {result.existingVersions && result.existingVersions.length > 0
           ? result.existingVersions.join(', ')
           : '없음'}
-        {result.versionExists && ' — 동일 내용이면 no-op, 다르면 409 로 거부됩니다.'}
+        {result.versionExists && ' — 내용이 같으면 그대로 두고, 다르면 등록되지 않아요.'}
       </div>
     </Callout>
   )

@@ -40,7 +40,7 @@ export function NewHarnessVersionForm({
 
       <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
         <TabBtn active={tab === 'instance'} onClick={() => setTab('instance')}>
-          인스턴스 (pins 재핀)
+          인스턴스 (핀 교체)
         </TabBtn>
         <TabBtn active={tab === 'template'} onClick={() => setTab('template')}>
           템플릿 (구조)
@@ -49,8 +49,8 @@ export function NewHarnessVersionForm({
 
       <p className="text-[12px] text-muted-foreground">
         {tab === 'instance'
-          ? '슬롯 값(이미지/모델)만 바꿔 새 인스턴스 버전 태그로 등록합니다. 템플릿 구조는 그대로.'
-          : '서비스/의존성/프론트도어 등 구조를 바꿔 새 템플릿 버전(semver)을 찍습니다. 등록 후 그 버전을 참조하는 인스턴스를 만드세요.'}
+          ? '슬롯 값(이미지·모델)만 바꿔 새 인스턴스 버전으로 등록해요. 템플릿 구조는 그대로예요.'
+          : '구조를 바꿔 새 템플릿 버전을 만들어요. 그다음 이 버전으로 인스턴스를 만들면 돼요.'}
       </p>
 
       {tab === 'instance' ? (

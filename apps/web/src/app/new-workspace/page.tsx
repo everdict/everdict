@@ -30,7 +30,7 @@ export default async function NewWorkspacePage() {
       </Link>
       <PageHeader
         title="새 워크스페이스"
-        description="평가를 격리해 담을 새 워크스페이스를 만듭니다. 만든 사람은 admin 이 됩니다."
+        description="평가 데이터를 따로 담을 새 워크스페이스를 만들어요. 만든 사람이 관리자가 돼요."
       />
       <Card className="p-4">
         <CreateWorkspaceForm />

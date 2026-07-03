@@ -101,17 +101,17 @@ export function ProfileForm({
     setError(undefined)
     setSaved(false)
     if (!file.type.startsWith('image/')) {
-      setError('이미지 파일만 업로드할 수 있습니다.')
+      setError('이미지 파일만 올릴 수 있어요.')
       return
     }
     if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
-      setError('이미지가 너무 큽니다(최대 8MB).')
+      setError('이미지가 너무 커요. 최대 8MB까지 올릴 수 있어요.')
       return
     }
     try {
       setA(await fileToImageDataUrl(file))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '이미지 처리에 실패했습니다.')
+      setError(err instanceof Error ? err.message : '이미지를 처리하지 못했어요.')
     }
   }
 

@@ -50,7 +50,7 @@ export default async function NewHarnessVersionPage({
     const active =
       (typeof v === 'string' && versions.includes(v) ? v : undefined) ??
       versions[versions.length - 1]
-    if (!active) throw new Error('등록된 버전이 없습니다.')
+    if (!active) throw new Error('등록된 버전이 없어요.')
     const instance = harnessInstanceSpecSchema.parse(
       await controlPlane.getHarnessInstance(ctx, id, active)
     )
@@ -66,7 +66,7 @@ export default async function NewHarnessVersionPage({
       )
       initialTemplate = templateStateFromSpec(newTemplate)
       startTab = 'instance'
-      notice = `템플릿 ${id}@${tplVersion} 가 등록됐습니다. 이 버전을 참조하는 새 인스턴스를 등록하세요.`
+      notice = `템플릿 ${id}@${tplVersion} 을 등록했어요. 이제 이 버전으로 새 인스턴스를 만들어보세요.`
     } else {
       const template = harnessTemplateSpecSchema.parse(
         await controlPlane.getHarnessTemplateSpec(
@@ -93,17 +93,17 @@ export default async function NewHarnessVersionPage({
       </Link>
       <PageHeader
         title="새 버전 만들기"
-        description={`${id} 의 구성을 프리필했습니다. 값을 바꾸고 새 버전으로 등록하세요(버전 불변).`}
+        description={`${id} 의 구성을 그대로 채워뒀어요. 값을 바꿔 새 버전으로 등록해요.`}
       />
       {!allowed ? (
         <EmptyState
           icon={<Lock />}
-          title="하니스 등록 권한이 없습니다."
-          hint="harnesses:register 권한이 필요합니다."
+          title="하니스를 등록할 권한이 없어요."
+          hint="관리자 권한이 필요해요."
         />
       ) : loadError || !initialInstance || !initialTemplate ? (
         <Callout tone="danger">
-          기존 구성을 불러올 수 없습니다: {loadError ?? '알 수 없는 오류'}
+          기존 구성을 불러오지 못했어요: {loadError ?? '알 수 없는 오류'}
         </Callout>
       ) : (
         <Card className="p-5">

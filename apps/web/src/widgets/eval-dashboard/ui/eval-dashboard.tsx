@@ -72,8 +72,8 @@ export function EvalDashboard({
         <SectionHeader title="평가 대시보드" />
         <EmptyState
           icon={<FlaskConical />}
-          title="아직 평가를 실행하지 않았습니다."
-          hint="데이터셋 × 하니스로 스코어카드를 실행하면 여기에 벤치마크 결과가 모입니다."
+          title="아직 평가를 실행하지 않았어요."
+          hint="스코어카드를 실행하면 벤치마크 결과가 모여요."
         />
       </section>
     )
@@ -121,7 +121,7 @@ export function EvalDashboard({
                 <EntityRef id={b.id} />
               </span>
               <span className="shrink-0 text-[11px] tabular-nums text-faint">
-                {b.cases} 케이스 · {b.runs.length} run
+                {b.cases} 케이스 · {b.runs.length}회 실행
               </span>
             </div>
             <ul className="divide-y divide-border/60">

@@ -23,7 +23,7 @@ export function AcceptInviteCard({ token }: { token: string }) {
         setDone({ workspace: r.workspace, role: r.role })
         router.refresh()
       } else {
-        setError(r.error ?? '수락 실패')
+        setError(r.error ?? '수락하지 못했어요')
       }
     })
   }
@@ -34,7 +34,7 @@ export function AcceptInviteCard({ token }: { token: string }) {
         <Callout tone="info">
           <span className="font-[510]">
             워크스페이스 <span className="font-mono">{done.workspace}</span> 에 {done.role} 로
-            가입했습니다.
+            참여했어요.
           </span>
         </Callout>
         <Button onClick={() => router.push(`/${done.workspace}`)}>워크스페이스로 이동</Button>
@@ -45,8 +45,7 @@ export function AcceptInviteCard({ token }: { token: string }) {
   return (
     <div className="space-y-4">
       <p className="text-[13px] leading-relaxed text-muted-foreground">
-        이 초대를 수락하면 해당 워크스페이스의 멤버가 되고, 현재 활성 워크스페이스가 그곳으로
-        전환됩니다.
+        초대를 수락하면 이 워크스페이스의 멤버가 돼요.
       </p>
       <div className="flex items-center gap-2.5">
         <Button onClick={onAccept} disabled={pending}>

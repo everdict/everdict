@@ -102,14 +102,14 @@ export default async function CompareScorecardsPage({
         </Link>
         <PageHeader
           title="스코어카드 비교"
-          description="baseline vs candidate — 메트릭 변화 + 케이스 회귀/개선."
+          description="두 스코어카드를 비교해 점수가 어떻게 달라졌는지 봐요."
         />
       </div>
 
       {options.length < 2 ? (
         <EmptyState
-          title="비교하려면 완료된 스코어카드가 2개 이상 필요합니다."
-          hint="같은 데이터셋을 두 하니스@버전(또는 두 번)으로 돌린 뒤 비교하세요."
+          title="비교하려면 완료된 스코어카드가 2개 이상 필요해요."
+          hint="같은 벤치마크를 두 번 평가하면 비교할 수 있어요."
         />
       ) : (
         <Card className="p-4">
@@ -117,7 +117,7 @@ export default async function CompareScorecardsPage({
         </Card>
       )}
 
-      {error && <Callout tone="danger">비교 실패: {error}</Callout>}
+      {error && <Callout tone="danger">비교하지 못했어요: {error}</Callout>}
 
       {diff && (
         <div className="space-y-7">
@@ -177,16 +177,16 @@ export default async function CompareScorecardsPage({
 
           <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <DeltaList
-              title="회귀 (pass → fail)"
+              title="나빠진 케이스 (통과→실패)"
               tone="danger"
               items={diff.regressions}
-              empty="회귀 없음"
+              empty="나빠진 케이스가 없어요."
             />
             <DeltaList
-              title="개선 (fail → pass)"
+              title="좋아진 케이스 (실패→통과)"
               tone="success"
               items={diff.improvements}
-              empty="개선 없음"
+              empty="좋아진 케이스가 없어요."
             />
           </section>
         </div>

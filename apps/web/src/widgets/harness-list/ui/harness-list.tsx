@@ -168,7 +168,7 @@ export function HarnessList({
       {visible.length === 0 ? (
         <EmptyState
           icon={<Boxes />}
-          title="조건에 맞는 하니스가 없습니다."
+          title="조건에 맞는 하니스가 없어요."
           hint="검색어나 필터를 바꿔보세요."
         />
       ) : (

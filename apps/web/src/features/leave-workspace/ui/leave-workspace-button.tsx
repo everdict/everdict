@@ -27,7 +27,7 @@ export function LeaveWorkspaceButton() {
         router.refresh()
       } else {
         setConfirming(false)
-        setError(r.error ?? '나가기에 실패했습니다.')
+        setError(r.error ?? '나가지 못했어요.')
       }
     })
   }

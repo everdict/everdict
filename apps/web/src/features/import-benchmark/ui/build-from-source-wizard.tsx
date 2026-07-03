@@ -319,7 +319,7 @@ export function BuildFromSourceWizard({
             {searchError && (
               <Callout
                 tone="warning"
-                hint="HuggingFace 에 접속할 수 없으면 위 'JSONL 붙여넣기'로 전환해 데이터를 직접 넣어 추가할 수 있습니다."
+                hint="HuggingFace에 연결되지 않으면 'JSONL 붙여넣기'로 직접 넣어보세요."
               >
                 {searchError}
               </Callout>
@@ -405,14 +405,14 @@ export function BuildFromSourceWizard({
           className="gap-1.5"
         >
           {previewBusy ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-          미리보기 (필드 감지)
+          미리보기
         </Button>
         {previewError && (
           <Callout
             tone="warning"
             {...(sourceKind === 'huggingface'
               ? {
-                  hint: 'HuggingFace 에 접속할 수 없으면 JSONL 붙여넣기로 데이터를 직접 넣어 추가할 수 있습니다.',
+                  hint: "HuggingFace에 연결되지 않으면 'JSONL 붙여넣기'로 직접 넣어보세요.",
                 }
               : {})}
           >
@@ -422,8 +422,8 @@ export function BuildFromSourceWizard({
         {previewed && (
           <div className="space-y-2">
             <p className="text-[12.5px] text-muted-foreground">
-              감지된 필드 <b className="text-foreground">{fields.length}</b>개 · 표의{' '}
-              <b className="text-foreground">열 머리글을 클릭</b>해 역할(task·id·answer)을 정하세요.
+              필드 <b className="text-foreground">{fields.length}</b>개를 찾았어요.{' '}
+              <b className="text-foreground">열 머리글을 눌러</b> 역할(task·id·answer)을 정해요.
             </p>
             <div className="overflow-x-auto rounded-lg border bg-card shadow-raise">
               <table className="w-full border-collapse text-[12px]">
@@ -439,7 +439,7 @@ export function BuildFromSourceWizard({
                           <button
                             type="button"
                             onClick={() => cycleRole(f)}
-                            title="클릭해서 역할 지정 (task → id → answer → 없음)"
+                            title="눌러서 역할 지정 (task → id → answer → 없음)"
                             className="w-full cursor-pointer border-t-2 px-3 py-2 text-left transition-colors hover:bg-foreground/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
                             style={{ borderTopColor: meta ? meta.color : 'transparent' }}
                           >
@@ -500,7 +500,7 @@ export function BuildFromSourceWizard({
           <div className="flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
             2 · 매핑 <Sparkles className="size-3.5 text-primary" />
             <span className="normal-case tracking-normal text-muted-foreground/70">
-              자동 추측됨 — 필요하면 바꾸세요
+              자동으로 채웠어요 — 필요하면 바꿔요
             </span>
           </div>
           <div className="grid grid-cols-2 gap-3">
@@ -574,8 +574,7 @@ export function BuildFromSourceWizard({
           )}
           {envKind === 'os-use' && (
             <p className="text-[12px] text-muted-foreground">
-              os-use 는 데스크탑 이미지에서 실행됩니다 — 아래 3단계에서 케이스 이미지를
-              지정하세요(Xvfb 등 상세 setup 은 레시피/번들 JSON 으로).
+              os-use는 데스크탑 이미지에서 실행돼요. 아래 3단계에서 케이스 이미지를 지정해 주세요.
             </p>
           )}
         </section>
@@ -653,7 +652,7 @@ export function BuildFromSourceWizard({
           </div>
 
           {createResult && !createResult.ok && (
-            <Callout tone="danger">생성 실패: {createResult.error}</Callout>
+            <Callout tone="danger">만들지 못했어요: {createResult.error}</Callout>
           )}
 
           <Button
@@ -663,10 +662,10 @@ export function BuildFromSourceWizard({
             className="gap-1.5"
           >
             {createBusy ? <Loader2 className="size-4 animate-spin" /> : null}
-            벤치마크 만들기 → 데이터셋
+            벤치마크 만들기
           </Button>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
-            버전은 불변입니다 — 같은 (id, version)을 다른 내용으로 다시 만들면 409.
+            버전은 바꿀 수 없어요. 같은 버전을 다른 내용으로 다시 만들 수 없어요.
           </p>
         </section>
       )}

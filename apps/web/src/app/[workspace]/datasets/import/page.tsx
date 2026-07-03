@@ -59,15 +59,15 @@ export default async function ImportBenchmarkPage({
       </Link>
       <PageHeader
         title="벤치마크 가져오기"
-        description="HF 데이터셋·JSONL 소스를 미리보기로 필드를 감지해 매핑하면 바로 벤치마크가 됩니다(소스에서 만들기). 또는 공개 카탈로그(WebVoyager·GAIA·SWE-bench…)에서 가져옵니다."
+        description="HuggingFace나 JSONL에서 바로 벤치마크를 만들어요. 공개 카탈로그에서 가져올 수도 있어요."
       />
       {!allowed ? (
         <EmptyState
-          title="벤치마크 추가 권한이 없습니다."
-          hint="member 이상 역할이 필요합니다(datasets:write). 워크스페이스 관리자에게 문의하세요."
+          title="추가 권한이 없어요."
+          hint="워크스페이스 관리자에게 권한을 요청해보세요."
         />
       ) : error ? (
-        <Callout tone="danger">카탈로그 조회 실패: {error}</Callout>
+        <Callout tone="danger">카탈로그를 불러오지 못했어요: {error}</Callout>
       ) : (
         <Card className="p-5">
           <AddBenchmark

@@ -188,7 +188,7 @@ export function ScorecardList({
       {visible.length === 0 ? (
         <EmptyState
           icon={<Search />}
-          title="조건에 맞는 스코어카드가 없습니다."
+          title="조건에 맞는 스코어카드가 없어요."
           hint="검색어나 필터를 바꿔보세요."
         />
       ) : (

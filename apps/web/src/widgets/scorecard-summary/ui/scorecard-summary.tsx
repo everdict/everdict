@@ -11,7 +11,7 @@ export function ScorecardSummary({ runs }: { runs: Run[] }) {
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <StatCard label="전체 run" value={total} />
+      <StatCard label="전체 실행" value={total} />
       <StatCard label="성공" value={succeeded} tone="success" />
       <StatCard label="실패" value={failed} tone={failed > 0 ? 'danger' : 'default'} />
       <StatCard label="성공률" value={`${passRate}%`} tone="primary" hint={`진행중 ${inflight}`} />

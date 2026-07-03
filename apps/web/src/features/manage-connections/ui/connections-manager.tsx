@@ -17,21 +17,20 @@ const PROVIDER_LABEL: Record<string, string> = {
   mattermost: 'Mattermost',
 }
 const PROVIDER_DESC: Record<string, string> = {
-  github: 'github.com 계정 — 비공개 repo 클론 · 결과 게시',
-  'github-enterprise': 'self-hosted GitHub Enterprise',
-  mattermost: 'self-hosted Mattermost — run/스코어카드 완료 알림',
+  github: 'github.com 계정 — 비공개 저장소 가져오기·결과 게시',
+  'github-enterprise': '직접 운영하는 GitHub Enterprise',
+  mattermost: '실행·스코어카드가 끝나면 Mattermost 로 알려요',
 }
 const label = (id: string): string => PROVIDER_LABEL[id] ?? id
 
 // 콜백 리다이렉트로 돌아온 결과(?connected=… / ?error=…) → 사람이 읽는 메시지.
 const ERROR_COPY: Record<string, string> = {
-  invalid_state: '연결 세션이 만료되었거나 유효하지 않습니다. 다시 시도해 주세요.',
-  missing_state: '연결 세션 정보가 없습니다. 다시 시도해 주세요.',
-  missing_code: 'provider 가 인증 코드를 돌려주지 않았습니다.',
-  unknown_provider: '알 수 없는 provider 입니다.',
-  exchange_failed:
-    '토큰 교환에 실패했습니다. provider 설정(콜백 URL/scope/시크릿)을 확인해 주세요.',
-  access_denied: '연결이 취소되었습니다(권한 거부).',
+  invalid_state: '연결 시간이 지났어요. 다시 시도해주세요.',
+  missing_state: '연결 정보가 없어요. 다시 시도해주세요.',
+  missing_code: '인증 코드를 받지 못했어요.',
+  unknown_provider: '알 수 없는 서비스예요.',
+  exchange_failed: '연결에 실패했어요. 서비스 설정을 확인해주세요.',
+  access_denied: '연결을 취소했어요.',
 }
 
 // 연결은 개인 소유(self-scoped by subject) — 역할 게이트 없음. 공식 지원 3종을 항상 카탈로그로 노출하고 각각 Connect 버튼을
@@ -62,7 +61,7 @@ export function ConnectionsManager({
     startTransition(async () => {
       const r = await startConnectionAction(provider)
       if (r.ok && r.authorizeUrl) window.location.href = r.authorizeUrl
-      else setActionError(r.error ?? '연결을 시작하지 못했습니다.')
+      else setActionError(r.error ?? '연결을 시작하지 못했어요.')
     })
   }
 
@@ -80,25 +79,25 @@ export function ConnectionsManager({
       <div className="space-y-1">
         <h3 className="text-[13px] font-[560] text-foreground">연결된 계정</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          GitHub 등 외부 계정을 OAuth 로 연결합니다. 이 연결은 워크스페이스가 아닌 내 계정 소유로,
-          내가 속한 어느 워크스페이스에서든 보입니다. 토큰은 내 run 의 비공개 repo 클론·이미지
-          풀·결과 게시·알림에 사용되며 at-rest 암호화됩니다(값은 다시 표시되지 않습니다).
+          GitHub 같은 외부 계정을 연결해요. 이 연결은 워크스페이스가 아닌 내 계정 소유라, 내가 속한
+          어느 워크스페이스에서든 보여요. 연결 정보는 비공개 저장소 가져오기·결과 게시·알림에 쓰이고
+          안전하게 암호화돼요(값은 다시 표시되지 않아요).
         </p>
       </div>
 
       {connected && (
         <div className="rounded-lg border border-[var(--color-success)]/30 bg-[var(--color-success)]/8 px-3.5 py-1.5 text-[13px] text-[var(--color-success)]">
-          {label(connected)} 계정을 연결했습니다.
+          {label(connected)} 계정을 연결했어요.
         </div>
       )}
       {error && (
         <Callout tone="danger" className="py-1.5">
-          {ERROR_COPY[error] ?? `연결 실패: ${error}`}
+          {ERROR_COPY[error] ?? `연결하지 못했어요: ${error}`}
         </Callout>
       )}
 
       {connections.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">아직 연결된 계정이 없습니다.</p>
+        <p className="text-[13px] text-muted-foreground">아직 연결한 계정이 없어요.</p>
       ) : (
         <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {connections.map((c) => (
@@ -153,7 +152,7 @@ export function ConnectionsManager({
         <p className="text-[13px] font-[510] text-foreground">서비스 연결</p>
         {providers.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
-            연결 서비스가 설정되지 않았습니다(컨트롤플레인 connection 서비스 미설정).
+            연결할 수 있는 서비스가 없어요.
           </p>
         ) : (
           <>
@@ -181,17 +180,14 @@ export function ConnectionsManager({
                       <span className="text-[12px] text-muted-foreground">관리자 설정 필요</span>
                     )
                   ) : (
-                    <span className="text-[12px] text-muted-foreground">
-                      컨트롤플레인 OAuth 앱 설정 필요
-                    </span>
+                    <span className="text-[12px] text-muted-foreground">관리자 설정 필요</span>
                   )}
                 </SettingsRow>
               ))}
             </SettingsList>
             <p className="text-[12px] text-faint">
-              연결 버튼을 누르면 provider 로그인 화면으로 이동한 뒤 이 페이지로 돌아옵니다. 설정 안
-              된 self-hosted(GitHub Enterprise·Mattermost)는 관리자가 워크스페이스 설정의 통합
-              탭에서 OAuth 앱을 등록하면 연결할 수 있습니다.
+              연결을 누르면 로그인 화면으로 갔다가 이 페이지로 돌아와요. GitHub Enterprise·Mattermost
+              는 관리자가 워크스페이스 설정의 통합 탭에서 등록하면 연결할 수 있어요.
             </p>
           </>
         )}

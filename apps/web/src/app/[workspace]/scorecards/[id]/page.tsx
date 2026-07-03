@@ -107,7 +107,7 @@ export default async function ScorecardDetailPage({
       <div className="space-y-5">
         <BackLink workspace={workspace} />
         <PageHeader title="스코어카드" />
-        <Callout tone="danger">스코어카드를 불러올 수 없습니다: {error}</Callout>
+        <Callout tone="danger">스코어카드를 불러오지 못했어요: {error}</Callout>
       </div>
     )
   }
@@ -267,7 +267,7 @@ export default async function ScorecardDetailPage({
             action={live ? <Badge tone="neutral">진행 중 · 자동 갱신</Badge> : undefined}
           />
           {steps.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">실행을 시작하는 중입니다…</p>
+            <p className="text-[13px] text-muted-foreground">실행을 준비하고 있어요…</p>
           ) : (
             <Card className="divide-y divide-border">
               {steps.map((s, i) => (
@@ -308,9 +308,9 @@ export default async function ScorecardDetailPage({
       )}
 
       <section className="space-y-2.5">
-        <SectionHeader title="집계 (메트릭별)" />
+        <SectionHeader title="메트릭별 집계" />
         {summary.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">집계가 없습니다.</p>
+          <p className="text-[13px] text-muted-foreground">집계가 없어요.</p>
         ) : (
           <Table>
             <THead>
@@ -372,10 +372,10 @@ export default async function ScorecardDetailPage({
         {results.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
             {record.status === 'failed'
-              ? '케이스 결과가 없습니다 — 위 오류 구간을 확인하세요(디스패치 이전 단계 실패).'
+              ? '케이스 결과가 없어요. 위 오류를 확인해보세요.'
               : record.status === 'running' || record.status === 'queued'
-                ? '아직 실행 중입니다 — 완료되면 케이스별 결과가 표시됩니다.'
-                : '케이스 결과가 없습니다.'}
+                ? '아직 실행 중이에요. 끝나면 케이스별 결과가 보여요.'
+                : '케이스 결과가 없어요.'}
           </p>
         ) : (
           <div className="space-y-2">

@@ -76,7 +76,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
           })
     setBusy(false)
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
-    else setServerError(res.error ?? '인제스트 실패')
+    else setServerError(res.error ?? '가져오지 못했어요')
   }
 
   return (
@@ -95,26 +95,26 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            {m === 'push' ? '업로드 (push)' : '소스에서 당겨오기 (pull)'}
+            {m === 'push' ? '업로드' : '소스에서 가져오기'}
           </button>
         ))}
       </div>
       <p className="text-[12px] text-muted-foreground">
         {mode === 'push'
-          ? '이미 가진 TraceEvent[] 를 직접 올립니다.'
-          : '테넌트 OTel/MLflow 에서 runId 별로 트레이스를 당겨옵니다. 자격증명은 워크스페이스 시크릿 이름으로 지정합니다(평문 금지).'}
+          ? '이미 가진 트레이스를 직접 올려요.'
+          : 'OTel/MLflow에서 트레이스를 가져와요. 인증 정보는 값을 직접 적지 말고 워크스페이스 시크릿 이름으로 넣어주세요.'}
       </p>
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="datasetId">데이터셋 (caseId 정렬용)</Label>
+          <Label htmlFor="datasetId">데이터셋</Label>
           <Combobox
             id="datasetId"
             value={datasetId}
             onChange={setDatasetId}
             options={datasets.map((d) => ({ value: d.id }))}
             placeholder="데이터셋 선택"
-            emptyText="데이터셋이 없습니다"
+            emptyText="데이터셋이 없어요"
             className="w-full"
           />
         </div>
@@ -131,7 +131,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="harnessId">하니스 (트레이스를 만든 주체, 라벨)</Label>
+          <Label htmlFor="harnessId">하니스 (트레이스를 만든 곳)</Label>
           <Input
             id="harnessId"
             value={harnessId}
@@ -163,8 +163,8 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
             spellCheck={false}
           />
           <p className="text-[12px] text-muted-foreground">
-            caseId 는 데이터셋의 케이스와 맞춰주세요(없는 caseId 는 스킵). 트레이스에서
-            tool_calls/usd/span 이 자동 재도출됩니다.
+            caseId는 데이터셋의 케이스와 맞춰주세요. 없는 caseId는 건너뛰어요. 도구 호출·비용 같은
+            정보는 트레이스에서 자동으로 계산돼요.
           </p>
         </div>
       ) : (
@@ -184,7 +184,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
               />
             </div>
             <div className="col-span-2 space-y-1.5">
-              <Label htmlFor="endpoint">엔드포인트</Label>
+              <Label htmlFor="endpoint">주소</Label>
               <Input
                 id="endpoint"
                 value={endpoint}
@@ -195,7 +195,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="authSecret">자격증명 시크릿 이름 (선택 — 워크스페이스 시크릿)</Label>
+            <Label htmlFor="authSecret">인증 시크릿 이름 (선택)</Label>
             <Input
               id="authSecret"
               value={authSecret}
@@ -203,9 +203,8 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
               placeholder="OTEL_TOKEN"
             />
             <p className="text-[12px] text-muted-foreground">
-              시크릿 값이 `Authorization` 헤더로 그대로 주입됩니다(스킴 포함 — OTel: `Bearer
-              &lt;token&gt;`, MLflow: `Basic &lt;base64&gt;`). 여기엔 토큰 평문이 아니라
-              워크스페이스 시크릿 이름만 입력하세요.
+              시크릿 값이 인증 헤더에 그대로 쓰여요. 토큰을 직접 적지 말고, 워크스페이스 시크릿
+              이름만 입력해주세요.
             </p>
           </div>
 
@@ -221,8 +220,8 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
               spellCheck={false}
             />
             <p className="text-[12px] text-muted-foreground">
-              각 runId 의 트레이스를 소스에서 당겨와 caseId 에 맞춥니다. tool_calls/usd/span 이 자동
-              재도출됩니다.
+              각 runId의 트레이스를 가져와 caseId에 맞춰요. 도구 호출·비용 같은 정보는 자동으로
+              계산돼요.
             </p>
           </div>
         </>
@@ -231,7 +230,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <Button type="button" onClick={onSubmit} disabled={busy}>
-        {busy ? '인제스트 중…' : mode === 'push' ? '트레이스 인제스트' : '소스에서 인제스트'}
+        {busy ? '가져오는 중…' : mode === 'push' ? '트레이스 가져오기' : '소스에서 가져오기'}
       </Button>
     </div>
   )

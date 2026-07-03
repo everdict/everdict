@@ -29,8 +29,8 @@ export default async function AccountPage({
       <div className="space-y-6">
         <PageHeader title="계정" description="내 프로필과 API 키." />
         <EmptyState
-          title="로그인이 필요합니다."
-          hint="컨트롤플레인에서 신원을 확인할 수 없습니다."
+          title="로그인이 필요해요."
+          hint="로그인 정보를 확인할 수 없어요. 다시 로그인해주세요."
         />
       </div>
     )

@@ -78,15 +78,15 @@ export default async function SettingsPage({
     <div className="space-y-6">
       <PageHeader
         title="워크스페이스 설정"
-        description="이 워크스페이스의 정책·모델 키·클러스터 자격증명·멤버."
+        description="정책, 키, 멤버를 관리해요."
       />
       {!canReadAny ? (
         <EmptyState
-          title="설정 조회 권한이 없습니다."
-          hint="admin 역할이 필요합니다(settings/secrets/members:read)."
+          title="설정을 볼 권한이 없어요."
+          hint="워크스페이스 관리자에게 문의해보세요."
         />
       ) : error ? (
-        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
+        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : (
         <SettingsTabs
           isOwner={isOwner}

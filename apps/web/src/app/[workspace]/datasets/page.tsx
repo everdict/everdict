@@ -55,7 +55,7 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
     <div className="space-y-6">
       <PageHeader
         title="벤치마크"
-        description="채점이 포함된 평가 케이스 묶음 — 하니스 무관, 어느 하니스든 같은 케이스로 돌려 공정 비교"
+        description="어떤 하니스든 같은 문제로 공정하게 비교해요."
         actions={
           can(principal?.roles, 'datasets:write') ? (
             <div className="flex gap-2">
@@ -73,12 +73,12 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
         }
       />
       {error ? (
-        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
+        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : ownDatasets.length === 0 ? (
         <EmptyState
           icon={<Database />}
-          title="등록된 데이터셋이 없습니다."
-          hint="member 이상이면 '데이터셋 등록'으로 eval 케이스 묶음을 올리거나, '벤치마크 추가'로 소스에서 만들거나, API/MCP(create_dataset)로 등록하세요."
+          title="아직 벤치마크가 없어요."
+          hint="첫 벤치마크를 만들어보세요. 직접 올리거나 소스에서 가져올 수 있어요."
         />
       ) : (
         <DatasetList

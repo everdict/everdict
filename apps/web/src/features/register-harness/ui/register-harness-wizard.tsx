@@ -54,13 +54,13 @@ export function RegisterHarnessWizard() {
           템플릿 (대분류)
         </TabBtn>
         <TabBtn active={tab === 'instance'} onClick={() => setTab('instance')}>
-          인스턴스 (template + pins)
+          인스턴스 (템플릿 + 핀)
         </TabBtn>
       </div>
       <p className="text-[12px] text-muted-foreground">
         {tab === 'template'
-          ? '대분류 = 구조/슬롯(버전 미고정). 같은 토폴로지의 변형(인스턴스)은 이 위에서 서비스 버전만 핀해 만듭니다.'
-          : '인스턴스 = 등록된 템플릿을 참조해 슬롯마다 이미지/버전을 핀한 하나의 하니스(보통 PR/SHA 마다 하나).'}
+          ? '템플릿은 구조와 슬롯을 정해요. 여기에 버전을 핀하면 인스턴스가 돼요.'
+          : '인스턴스는 템플릿의 슬롯마다 이미지·버전을 핀한 하나의 하니스예요. 보통 PR마다 하나씩 만들어요.'}
       </p>
       {tab === 'template' ? (
         <TemplateForm workspace={workspace} />
@@ -175,7 +175,7 @@ export function TemplateForm({
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label htmlFor="tver">version (구조 버전 — 모양이 바뀔 때만 올림)</Label>
+        <Label htmlFor="tver">version (구조가 바뀔 때만 올려요)</Label>
         <Input
           id="tver"
           value={s.version}
@@ -187,7 +187,7 @@ export function TemplateForm({
       {mode === 'form' && s.kind === 'service' && (
         <div className="space-y-6">
           <Section
-            title="Services (슬롯 — 인스턴스가 이미지를 핀)"
+            title="Services (슬롯 — 인스턴스가 이미지를 핀해요)"
             onAdd={() =>
               set({
                 services: [
@@ -275,7 +275,7 @@ export function TemplateForm({
             ))}
           </Section>
           <Section
-            title="Dependencies (공유 스토어 · external=BYO 외부)"
+            title="Dependencies (공유 스토어 · external=외부 스토어)"
             onAdd={() =>
               set({
                 deps: [
@@ -317,8 +317,8 @@ export function TemplateForm({
                 />
                 {d.isolateBy === 'external' && (
                   <p className="text-[11px] text-muted-foreground">
-                    external = BYO 외부/공유 스토어(다른 클러스터 등). Assay 가 배포·격리하지 않고,
-                    연결은 배포 시 env(storeEnv)로 주입됩니다.
+                    external은 Assay 밖에 있는 외부·공유 스토어예요. Assay가 직접 만들지 않고,
+                    연결 정보만 env로 넘겨줘요.
                   </p>
                 )}
               </div>
@@ -371,12 +371,12 @@ export function TemplateForm({
             <Input
               value={s.image}
               onChange={(e) => set({ image: e.target.value })}
-              placeholder="image (기본; 인스턴스가 override)"
+              placeholder="image (기본값 · 인스턴스가 덮어써요)"
             />
             <Input
               value={s.model}
               onChange={(e) => set({ model: e.target.value })}
-              placeholder="model (기본)"
+              placeholder="model (기본값)"
             />
             <Input
               value={s.workDir}
@@ -538,8 +538,7 @@ export function InstanceForm({
       {result && <ValidateBanner result={result} />}
       {regError && <Callout tone="danger">{regError}</Callout>}
       <p className="text-[12px] text-muted-foreground">
-        템플릿이 먼저 등록돼 있어야 합니다 — 없거나 슬롯 pin 이 빠지면 검증/등록이 거부됩니다(버전
-        불변).
+        먼저 템플릿이 등록돼 있어야 해요. 슬롯 핀이 빠지면 등록되지 않아요.
       </p>
       <Actions
         busy={busy}
@@ -606,8 +605,8 @@ function OverridesEditor({
           >
             {s.serviceOverrides.length === 0 ? (
               <p className="text-[12px] text-muted-foreground">
-                서비스별 env·replicas·resources·volumes·readiness 를 덮어씁니다 (서비스명은 템플릿에
-                존재해야 함). 이미지 교체는 위 Pins 로.
+                서비스마다 env·replicas 같은 설정을 덮어써요. 이미지 교체는 위 Pins에서 하고,
+                서비스명은 템플릿에 있어야 해요.
               </p>
             ) : (
               s.serviceOverrides.map((r, i) => (
@@ -850,7 +849,7 @@ function JsonArea({
         spellCheck={false}
       />
       <p className="text-[12px] text-muted-foreground">
-        JSON 모드 편집은 구조화 폼과 동기화되지 않습니다.
+        JSON 모드에서 고친 값은 구조화 폼에 반영되지 않아요.
       </p>
     </div>
   )
@@ -881,7 +880,7 @@ function Actions({
   return (
     <div className="flex gap-2">
       <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
-        {busy ? '…' : '검증 (dry-run)'}
+        {busy ? '…' : '검증하기'}
       </Button>
       <Button type="button" onClick={onRegister} disabled={busy}>
         {busy ? '처리 중…' : registerLabel}
@@ -929,7 +928,7 @@ function RemoveBtn({ onClick }: { onClick: () => void }) {
 }
 
 function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
-  if (result.error) return <Callout tone="danger">검증 호출 실패: {result.error}</Callout>
+  if (result.error) return <Callout tone="danger">검증을 실행하지 못했어요: {result.error}</Callout>
   if (!result.ok)
     return (
       <Callout tone="danger">
@@ -951,7 +950,7 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
         <div className="mt-1 text-[12px] text-muted-foreground">
           기존 버전:{' '}
           {result.existingVersions.length > 0 ? result.existingVersions.join(', ') : '없음'}
-          {result.versionExists && ' — 동일하면 no-op, 다르면 409.'}
+          {result.versionExists && ' — 같은 내용이면 그대로 두고, 다르면 등록이 막혀요.'}
         </div>
       )}
     </Callout>

@@ -53,7 +53,7 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
 
       {error ? (
         <Callout tone="danger" hint="`CONTROL_PLANE_URL` 과 `assay-api` 가동 여부를 확인하세요.">
-          컨트롤플레인에 연결할 수 없습니다: {error}
+          서버에 연결하지 못했어요: {error}
         </Callout>
       ) : (
         <EvalDashboard scorecards={scorecards} workspace={workspace} />
@@ -69,8 +69,8 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
         {harnesses.length === 0 ? (
           <EmptyState
             icon={<Boxes />}
-            title="등록된 하니스가 없습니다."
-            hint="API(POST /harnesses) 또는 파일 SSOT 로 등록하세요."
+            title="아직 하니스가 없어요."
+            hint="하니스를 등록하면 여기에 표시돼요."
           />
         ) : (
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">

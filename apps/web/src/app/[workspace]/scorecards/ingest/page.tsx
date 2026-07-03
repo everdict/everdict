@@ -40,8 +40,8 @@ export default async function IngestScorecardPage({
         스코어카드
       </Link>
       <PageHeader
-        title="트레이스 인제스트"
-        description="외부에서 이미 수행한 트레이스를 올려 scorecard 로 만듭니다(하니스 미실행). 비교·리더보드에 그대로 쓰입니다."
+        title="트레이스 올리기"
+        description="다른 곳에서 실행한 결과를 올려 스코어카드로 만들어요. 비교와 리더보드에 바로 쓸 수 있어요."
       />
       {allowed ? (
         <Card className="p-5">
@@ -49,8 +49,8 @@ export default async function IngestScorecardPage({
         </Card>
       ) : (
         <EmptyState
-          title="인제스트 권한이 없습니다."
-          hint="member 이상 역할이 필요합니다(scorecards:run)."
+          title="올릴 권한이 없어요."
+          hint="워크스페이스 관리자에게 권한을 요청해보세요."
         />
       )}
     </div>

@@ -26,7 +26,7 @@ export function CreateWorkspaceForm() {
   const [error, setError] = useState<string | undefined>(undefined)
 
   const slug = id.trim() || previewSlug(name)
-  const nameError = name.trim().length === 0 ? '이름을 입력하세요.' : undefined
+  const nameError = name.trim().length === 0 ? '이름을 입력해주세요.' : undefined
 
   async function onSubmit() {
     if (nameError) return
@@ -62,7 +62,7 @@ export function CreateWorkspaceForm() {
           }}
         />
         <p className="text-[12px] text-faint">
-          팀·조직 이름. 모든 평가 데이터가 이 워크스페이스로 격리됩니다.
+          팀이나 조직 이름을 적어주세요. 평가 데이터가 여기에 따로 담겨요.
         </p>
       </div>
 
@@ -78,7 +78,7 @@ export function CreateWorkspaceForm() {
           className="font-mono"
         />
         <p className="text-[12px] text-faint">
-          비우면 이름에서 자동 생성:{' '}
+          비워두면 이름에서 자동으로 만들어져요:{' '}
           <span className="font-mono text-foreground">{slug || '—'}</span>
         </p>
       </div>

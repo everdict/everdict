@@ -71,7 +71,7 @@ export default async function EditSchedulePage({
       </Link>
       <PageHeader
         title="예약 수정"
-        description={`${schedule.name} — 주기·데이터셋×하니스·런타임을 변경합니다.`}
+        description={`${schedule.name} — 주기와 실행 설정을 바꿔요`}
       />
       <Card className="p-5">
         <CreateScheduleForm
