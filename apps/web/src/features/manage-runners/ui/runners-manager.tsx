@@ -112,18 +112,8 @@ export function RunnersManager({
 
   return (
     <div className="space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-1">
-          <h3 className="text-[13px] font-[560] text-foreground">연결된 러너</h3>
-          <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-            내 컴퓨터를 러너로 연결하면, 워크스페이스의 공유 하니스·벤치마크를
-            <span className="font-[510]"> 런타임만 바꿔</span> 내 컴퓨터에서 돌리고 결과를
-            워크스페이스로 보낼 수 있어요. 러너는 워크스페이스가 아닌 내 계정 소유예요.{' '}
-            {bridge
-              ? '버튼 한 번이면 연결돼요.'
-              : '데스크톱 앱에서 버튼 한 번으로 연결할 수 있어요. 브라우저에서는 상태 확인과 해제만 할 수 있어요.'}
-          </p>
-        </div>
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-[13px] text-muted-foreground">러너는 내 계정 소유예요.</p>
         <span className="flex shrink-0 items-center gap-2">
           {/* 페어링 표면은 데스크톱 전담(D7) — 브라우저에는 다운로드 CTA 만 노출. */}
           {bridge && !desktop?.paired && (

@@ -107,7 +107,7 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
 
       <Section
         title="내 머신 연결 (셀프호스티드 러너)"
-        description="내 컴퓨터가 잡을 당겨가 실행해요(방화벽 뒤도 OK) — 개인 소유·개인 결제라 워크스페이스 예산을 쓰지 않아요."
+        description="내 컴퓨터가 서버로 먼저 접속해 잡을 받아가요."
       >
         <RunnersManager runners={runners} downloadHref={`/${workspace}/download`} />
       </Section>
