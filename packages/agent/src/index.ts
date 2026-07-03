@@ -1,3 +1,4 @@
 export { runAgentJob, RESULT_SENTINEL } from "./run.js";
 export { makeHarness, makeGraders, makeGradersFromEnv } from "./registry.js";
 export { runContextFromEnv, collectAuthEnv, hasClaudeAuth } from "./env.js";
+export type { DriverMount } from "@assay/drivers"; // 러너가 containerize 시 넘길 호스트 마운트 타입(재노출 — runner-core 가 새 dep 없이 사용)

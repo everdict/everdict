@@ -1,4 +1,4 @@
-import { runAgentJob } from "@assay/agent";
+import { type DriverMount, runAgentJob } from "@assay/agent";
 import type { AgentJob, CaseResult, ServiceHarnessSpec } from "@assay/core";
 import {
   DockerTopologyRuntime,
@@ -37,9 +37,10 @@ export async function runLeasedJob(
   job: AgentJob,
   opts: {
     runService?: (job: AgentJob) => Promise<CaseResult>; // 테스트 주입
-    runProcess?: (job: AgentJob, runOpts: { containerize?: boolean }) => Promise<CaseResult>;
+    runProcess?: (job: AgentJob, runOpts: { containerize?: boolean; mounts?: DriverMount[] }) => Promise<CaseResult>;
     runtimeOptions?: DockerTopologyRuntimeOptions; // service 토폴로지 런타임 튜닝(readiness 타임아웃 등)
     dockerAvailable?: boolean; // 이 러너의 Docker 데몬 유무(capability) — image-케이스 컨테이너 실행 게이트
+    mounts?: DriverMount[]; // containerize 시 컨테이너에 바인드할 호스트 자원(예: codex 로그인) — 러너 opt-in
     log?: (msg: string) => void; // image 요구인데 Docker 없음 등 사유 통지(조용한 실패 금지)
   } = {},
 ): Promise<CaseResult> {
@@ -55,7 +56,11 @@ export async function runLeasedJob(
     opts.log?.(
       `case ${job.evalCase.id} 가 image '${image}' 를 요구하지만 이 러너엔 Docker 가 없습니다 → 호스트-네이티브 실행(툴체인은 호스트가 제공해야 함).`,
     );
-  return (opts.runProcess ?? runAgentJob)(job, { containerize });
+  // 컨테이너 실행일 때만 호스트 마운트를 넘긴다(호스트-네이티브 LocalDriver 엔 마운트 개념 없음).
+  return (opts.runProcess ?? runAgentJob)(job, {
+    containerize,
+    ...(containerize && opts.mounts?.length ? { mounts: opts.mounts } : {}),
+  });
 }
 
 // service 하니스: 사용자 Docker 데몬에 토폴로지를 띄워 구동. 개인 호스트라 trustZones 없음; trace 미도달 시

@@ -92,6 +92,20 @@ describe("runLeasedJob — case.image 컨테이너 실행(이식성)", () => {
     expect(runProcess).toHaveBeenCalledWith(processJob, { containerize: false });
     expect(log).not.toHaveBeenCalled(); // image 미선언이면 알릴 것도 없음
   });
+
+  it("containerize 시 러너 mounts(codex 로그인 등)를 컨테이너로 넘긴다", async () => {
+    const runProcess = vi.fn(async () => RESULT);
+    const mounts = [{ source: "/home/u/.codex", target: "/codex" }];
+    await runLeasedJob(imageJob, { runProcess, dockerAvailable: true, mounts });
+    expect(runProcess).toHaveBeenCalledWith(imageJob, { containerize: true, mounts });
+  });
+
+  it("호스트-네이티브(containerize 아님)면 mounts 를 넘기지 않는다(마운트 개념 없음)", async () => {
+    const runProcess = vi.fn(async () => RESULT);
+    const mounts = [{ source: "/home/u/.codex", target: "/codex" }];
+    await runLeasedJob(processJob, { runProcess, dockerAvailable: true, mounts }); // image 없음 → containerize false
+    expect(runProcess).toHaveBeenCalledWith(processJob, { containerize: false });
+  });
 });
 
 // 회귀: 케이스마다 새 런타임을 만들면 warm-pool 이 매번 비어 토폴로지를 재배포 → 고정 이름 컨테이너 충돌.

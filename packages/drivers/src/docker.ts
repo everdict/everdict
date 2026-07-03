@@ -80,13 +80,26 @@ class DockerComputeHandle implements ComputeHandle {
   }
 }
 
+// 호스트 자원을 컨테이너에 마운트(예: self-hosted 러너의 codex 로그인 디렉터리 → 컨테이너 안 codex 가 머신 로그인 사용).
+// source=호스트 경로(러너가 결정, 임의 데이터가 아니라 러너 opt-in), target=컨테이너 경로. readOnly 기본 false.
+export interface DriverMount {
+  source: string;
+  target: string;
+  readOnly?: boolean;
+}
+
 // env 이미지로 컨테이너를 띄우는 Driver. 격리는 docker(컨테이너) — Backend(Nomad/K8s)의 강격리와 별개의 로컬/단순 실행용.
 export class DockerDriver implements Driver {
   readonly id = "docker";
   private readonly base: string;
+  private readonly mounts: DriverMount[];
   // defaultImage: 케이스가 image 를 안 실으면 쓸 기본 이미지. keepAlive: 컨테이너 유지 sleep 인자. base: 상대경로 작업루트.
-  constructor(private readonly opts: { defaultImage?: string; keepAlive?: string; base?: string } = {}) {
+  // mounts: 호스트→컨테이너 바인드 마운트(러너가 주입 — 예: codex 로그인). 설계: docs/architecture/portable-harness-runtime.md.
+  constructor(
+    private readonly opts: { defaultImage?: string; keepAlive?: string; base?: string; mounts?: DriverMount[] } = {},
+  ) {
     this.base = opts.base ?? "/assay";
+    this.mounts = opts.mounts ?? [];
   }
 
   async provision(spec: ComputeSpec): Promise<ComputeHandle> {
@@ -99,10 +112,12 @@ export class DockerDriver implements Driver {
       );
     }
     const keep = this.opts.keepAlive ?? "infinity";
+    // 바인드 마운트 인자(-v source:target[:ro]) — 이미지 앞에 온다.
+    const mountArgs = this.mounts.flatMap((m) => ["-v", `${m.source}:${m.target}${m.readOnly ? ":ro" : ""}`]);
     // 이미지 ENTRYPOINT/CMD 무시 + base 디렉터리 보장 + keep-alive. 그 안에서 docker exec 로 명령 실행.
     const { stdout } = await pexecFile(
       "docker",
-      ["run", "-d", "--entrypoint", "sh", image, "-c", `mkdir -p ${this.base} && exec sleep ${keep}`],
+      ["run", "-d", ...mountArgs, "--entrypoint", "sh", image, "-c", `mkdir -p ${this.base} && exec sleep ${keep}`],
       { maxBuffer: MAX_BUFFER },
     ).catch((err) => {
       const e = err as { stderr?: string; message?: string };

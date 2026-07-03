@@ -8,7 +8,12 @@
 > definition now runs whole on managed docker/k8s **and** a user's laptop (local Docker). Slice 3 SHIPPED = the
 > lease **placement gate** (`RunnerHub.lease` uses the runner's advertised capabilities; an `image`-required case
 > leased to a non-`docker` runner is failed fast with `capability_mismatch`, not run host-native) — so "image
-> required" is enforced, not just warned.
+> required" is enforced, not just warned. Slice 4 SHIPPED = **host-resource mounts** — `DockerDriver` bind-mounts
+> runner-provided host resources into the case container; the self-hosted runner's `--mount-codex-login` binds
+> `~/.codex` → `/codex` so **codex runs *in the image* with the machine's ChatGPT login (own-pays, no API key)**.
+> Proven: a `codex`-in-image harness (`spreadsheetbench-codex:v1` = grader toolchain + node + codex; command
+> `codex exec --dangerously-bypass-approvals-and-sandbox …` since codex's nested linux-sandbox fails in Docker)
+> ran SpreadsheetBench → `tests_pass PASS`.
 > Motivated by SpreadsheetBench: its cases need a real toolchain (LibreOffice for formula recalculation +
 > openpyxl for grading). Baking that into a container image is the right, declarative answer — but today an
 > image-declared case runs correctly on **managed** docker/k8s runtimes yet silently runs on the **bare host**
@@ -138,6 +143,16 @@ not formulas" hack. (Recalc-on-load may need LibreOffice's `RecalcOptOnLoad` reg
    `UpstreamError{reason:"capability_mismatch", missing:["docker"]}` (and a `console.warn`) instead of leased and
    run host-native, while a following non-image job still leases. Tests: hub gate (image+no-docker→reject /
    image+docker→lease / no-caps→lease [back-compat] / skip-image-lease-next) + MCP wiring (lease_job passes caps).
+4. ✅ **Host-resource mounts (codex login in the image)** — `DockerDriver({ mounts })` adds `-v source:target[:ro]`;
+   `runAgentJob({ containerize, mounts })` and `runLeasedJob({ mounts })` thread them; the CLI runner's opt-in
+   `--mount-codex-login` binds `${CODEX_HOME:-~/.codex}` → `/codex` for containerized jobs (mounts flow only when
+   containerizing — LocalDriver has no mount concept). This lets **codex run *in* the case image using the machine's
+   login** (own-pays, no API key), while the same image also carries the grader toolchain (LibreOffice recalc). The
+   `sbench-codex` command harness (`env.CODEX_HOME=/codex`, `--dangerously-bypass-approvals-and-sandbox` because
+   codex's nested sandbox fails in Docker) + the `spreadsheetbench-codex:v1` image ship in the bundle.
+   Security: the mount is an **operator opt-in** (the runner owner shares their own login with their own jobs), not
+   a shared-spec field (a dataset can't request arbitrary host paths). Tests: runLeasedJob passes mounts on
+   containerize, omits on host-native. Live-verified: codex-in-image → PASS.
 
 ## Decisions / non-goals
 

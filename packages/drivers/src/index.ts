@@ -1,2 +1,2 @@
 export { LocalDriver } from "./local.js";
-export { DockerDriver } from "./docker.js";
+export { DockerDriver, type DriverMount } from "./docker.js";

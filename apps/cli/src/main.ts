@@ -1,5 +1,7 @@
-import { readFileSync } from "node:fs";
-import { collectAuthEnv, hasClaudeAuth } from "@assay/agent";
+import { existsSync, readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { type DriverMount, collectAuthEnv, hasClaudeAuth } from "@assay/agent";
 import {
   BackendRegistry,
   BackendsConfigSchema,
@@ -52,6 +54,7 @@ function usage(): void {
       "assay runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N] [--max-concurrent N]",
       "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
       "  --max-concurrent N: run N lease workers at once (case-level parallelism; default 1)",
+      "  --mount-codex-login: bind ~/.codex into containerized (case.image) jobs → codex runs in-image with your login",
       "  service harness readiness: [--ready-timeout-ms N] [--ready-interval-ms N] (topology endpoint polling)",
     ].join("\n"),
   );
@@ -237,6 +240,22 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const capabilities = await detectCapabilities();
   const dockerOk = capabilities.includes("docker");
 
+  // codex 로그인 마운트(opt-in): --mount-codex-login 이면 이 러너의 codex 로그인 디렉터리를 containerize 되는 잡의 컨테이너에
+  // /codex 로 마운트 → 이미지 안 codex 가 머신 로그인으로 인증(own-pays, API 키 불필요). 하니스는 CODEX_HOME=/codex 로 참조.
+  // 보안: 명시적 opt-in(러너 소유자 결정) — 로그인 자격이 그 러너가 도는 잡 컨테이너에 노출되므로.
+  const mounts: DriverMount[] = [];
+  if (flags.has("mount-codex-login")) {
+    const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
+    if (dockerOk && existsSync(codexHome)) {
+      mounts.push({ source: codexHome, target: "/codex" }); // rw — codex 가 토큰 리프레시/락 파일에 쓰기 필요
+      console.error(
+        `▶ codex 로그인 마운트: ${codexHome} → /codex (containerize 잡). 하니스에서 CODEX_HOME=/codex 로 참조하세요.`,
+      );
+    } else {
+      console.error(`⚠ --mount-codex-login: ${dockerOk ? `${codexHome} 없음` : "docker 없음"} → 마운트 생략.`);
+    }
+  }
+
   // wedge 방지: API 재시작/단절 시 세션을 자동 재초기화하는 회복형 MCP 세션(@assay/runner-core). 지연 연결.
   const session = new ResilientMcpSession(mcpConnect(mcpUrl, token));
   try {
@@ -264,8 +283,9 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   await runLeaseWorkers(
     {
       callJson,
-      // service→Docker 토폴로지 / image-케이스→로컬 Docker(DockerDriver, dockerOk 게이트) / 그 외→호스트 LocalDriver
-      runJob: (job) => runLeasedJob(job, { runtimeOptions, dockerAvailable: dockerOk, log: (m) => console.error(m) }),
+      // service→Docker 토폴로지 / image-케이스→로컬 Docker(DockerDriver, dockerOk 게이트, 호스트 마운트) / 그 외→호스트 LocalDriver
+      runJob: (job) =>
+        runLeasedJob(job, { runtimeOptions, dockerAvailable: dockerOk, mounts, log: (m) => console.error(m) }),
       log: (m) => console.error(m),
       sleep,
     },
