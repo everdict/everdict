@@ -5,12 +5,10 @@ import { useState } from 'react'
 import { LeaveWorkspaceButton } from '@/features/leave-workspace'
 import { ApiKeysManager } from '@/features/manage-api-keys'
 import { ConnectionsManager } from '@/features/manage-connections'
-import { RunnersManager } from '@/features/manage-runners'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { ProfileForm } from '@/features/update-profile'
 import type { ApiKeyMeta } from '@/entities/api-key'
 import type { ConnectionMeta, ProviderInfo } from '@/entities/connection'
-import type { RunnerMeta } from '@/entities/runner'
 import type { SecretMeta } from '@/entities/secret'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -42,7 +40,6 @@ export function AccountTabs({
   connections,
   providers,
   canManageIntegrations,
-  runners,
   personalSecrets,
   keys,
   keysError,
@@ -56,7 +53,6 @@ export function AccountTabs({
   connections: ConnectionMeta[]
   providers: ProviderInfo[]
   canManageIntegrations: boolean // settings:write — 미설정 self-hosted 통합 설정 딥링크 노출 여부
-  runners: RunnerMeta[]
   personalSecrets: SecretMeta[]
   keys: ApiKeyMeta[]
   keysError?: string
@@ -66,7 +62,8 @@ export function AccountTabs({
   connected?: string // ?connected=<provider>
   connectError?: string // ?error=<reason>
 }) {
-  const tabKeys = ['profile', 'connections', 'runners', 'secrets', 'keys']
+  // 러너는 계정이 아니라 런타임 페이지(실행 대상 표면)로 이동 — 실행 인프라와 한 화면에서 관리.
+  const tabKeys = ['profile', 'connections', 'secrets', 'keys']
   const defaultTab = initialTab && tabKeys.includes(initialTab) ? initialTab : 'profile'
 
   // 보고 있던 탭이 새로고침에도 유지되도록 ?tab= 에 동기화한다. 서버 컴포넌트가 이 값을
@@ -87,7 +84,6 @@ export function AccountTabs({
       <TabsList>
         <TabsTrigger value="profile">프로필</TabsTrigger>
         <TabsTrigger value="connections">연결된 계정</TabsTrigger>
-        <TabsTrigger value="runners">연결된 러너</TabsTrigger>
         <TabsTrigger value="secrets">시크릿</TabsTrigger>
         <TabsTrigger value="keys">API 키</TabsTrigger>
       </TabsList>
@@ -114,10 +110,6 @@ export function AccountTabs({
           {...(connected !== undefined ? { connected } : {})}
           {...(connectError !== undefined ? { error: connectError } : {})}
         />
-      </TabsContent>
-
-      <TabsContent value="runners">
-        <RunnersManager runners={runners} downloadHref={`/${principal.workspace}/download`} />
       </TabsContent>
 
       <TabsContent value="secrets">
