@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { hostname } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { RunnerHost, detectCapabilities } from "@assay/runner-core";
+import { ResilientMcpSession, RunnerHost, detectCapabilities, mcpConnect } from "@assay/runner-core";
 import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
@@ -13,6 +13,7 @@ import {
   senderAllowed,
 } from "./bridge.js";
 import { type ConfigIo, type DesktopConfig, loadConfig, saveConfig } from "./config-store.js";
+import { NotificationWatcher, type WatcherNotification } from "./notification-watcher.js";
 import { RunnerController } from "./runner-controller.js";
 import { normalizeWebUrl, resolveWebUrl } from "./server-url.js";
 import { type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
@@ -114,6 +115,68 @@ function notifyDrainIfNeeded(prev: DesktopRunnerStatus, next: DesktopRunnerStatu
   }
 }
 
+// 독립 알림 워처(N6) — 러너 페어링 토큰으로 컨트롤플레인 피드를 직접 폴링해 OS 알림을 쏜다.
+// 웹 세션/창과 무관: 웹을 안 쓰는(러너 전용) 유저도 "내가 시킨 작업 완료"를 받는다. 페어링 수명주기에 연동.
+let notifyWatcher: NotificationWatcher | null = null;
+let notifySession: ResilientMcpSession | null = null;
+
+function notifyPathOf(row: WatcherNotification): string | null {
+  if (row.link?.runId) return `/${row.workspace}/runs/${row.link.runId}`;
+  if (row.link?.scorecardId) return `/${row.workspace}/scorecards/${row.link.scorecardId}`;
+  return null;
+}
+
+function fireOsNotification(row: WatcherNotification): void {
+  // 앱 창이 보이는 중이면 스킵 — 웹 벨 배지가 이미 보이고 있다(웹 쪽 발화도 document.hidden 게이트로 대칭).
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) return;
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: row.title, ...(row.body ? { body: row.body } : {}) });
+    n.on("click", () => {
+      createOrFocusWindow();
+      const path = notifyPathOf(row);
+      if (path && webUrl !== null && mainWindow && !mainWindow.isDestroyed())
+        void mainWindow.loadURL(`${webUrl}${path}`);
+    });
+    n.show();
+  } catch {
+    /* 알림 미지원 환경 — 무시 */
+  }
+}
+
+function startNotifyWatcher(): void {
+  if (notifyWatcher) return;
+  const token = loadToken(safeStorage, tokenIo());
+  if (token === null) return;
+  const conf = loadConfig(configIo());
+  const session = new ResilientMcpSession(mcpConnect(new URL("/mcp", conf.apiUrl ?? defaultApiUrl), token));
+  notifySession = session;
+  notifyWatcher = new NotificationWatcher({
+    callJson: async (name, args) => {
+      const r = await session.call(name, args);
+      if (r.isError) throw new Error(r.text || `${name} 실패`);
+      return JSON.parse(r.text) as Record<string, unknown>;
+    },
+    notify: fireOsNotification,
+    loadCursor: () => loadConfig(configIo()).notifyCursor,
+    saveCursor: (iso) => {
+      config = { ...loadConfig(configIo()), notifyCursor: iso };
+      saveConfig(configIo(), config);
+    },
+    log: (m) => console.error(m),
+  });
+  notifyWatcher.start();
+  console.error("▶ 독립 알림 워처 시작(러너 토큰 — 웹 세션 불필요)");
+}
+
+function stopNotifyWatcher(): void {
+  notifyWatcher?.stop();
+  notifyWatcher = null;
+  const s = notifySession;
+  notifySession = null;
+  if (s) void s.close().catch(() => {});
+}
+
 // 러너 컨트롤러 — 페어 상태 영속 + RunnerHost 수명주기. 상태는 웹 origin 창에만 push(불변식 4와 같은 경계).
 const controller = new RunnerController({
   loadToken: () => loadToken(safeStorage, tokenIo()),
@@ -148,6 +211,9 @@ const controller = new RunnerController({
   broadcast: (status) => {
     notifyDrainIfNeeded(latestRunnerStatus, status);
     latestRunnerStatus = status;
+    // 독립 알림(N6): 페어링되면 워처 시작, 해제되면 정지 — 웹 세션과 무관하게 피드가 흐른다.
+    if (status.paired) startNotifyWatcher();
+    else stopNotifyWatcher();
     refreshTrayMenu(); // 상태행·해제 항목·툴팁 동기화(tray 없으면 no-op)
     for (const win of BrowserWindow.getAllWindows()) {
       if (webOrigin !== null && senderAllowed(win.webContents.getURL(), webOrigin))

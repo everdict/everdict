@@ -9,6 +9,8 @@ export const DesktopConfigSchema = z.object({
   // 페어된 러너의 비밀 아닌 메타 — 토큰은 절대 여기 아님(token-store/safeStorage).
   runnerId: z.string().min(1).optional(),
   apiUrl: z.string().url().optional(),
+  // 독립 알림(N6) 커서 — 마지막 OS 발화 createdAt(ISO). 재시작 시 백로그 재발화 방지.
+  notifyCursor: z.string().optional(),
 });
 export type DesktopConfig = z.infer<typeof DesktopConfigSchema>;
 

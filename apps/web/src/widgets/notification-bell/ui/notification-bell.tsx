@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Bell, BellOff, BellRing, Check } from 'lucide-react'
 
 import { notificationsResponseSchema, type NotificationItem } from '@/entities/notification'
+import { getAssayDesktop } from '@/shared/lib/desktop-bridge'
 import { fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -50,6 +51,9 @@ export function NotificationBell({ workspace }: { workspace: string }) {
   const prefRef = useRef<NativePref>('on') // 폴링 클로저에서 최신 선호를 읽기 위한 ref
   const seeded = useRef(false) // 첫 로드 배치는 네이티브 발화 대상이 아니다(앱 켜자마자 과거 알림 폭주 방지)
   const seen = useRef<Set<string>>(new Set())
+  // 데스크톱 셸 + 러너 페어링이면 네이티브 발화를 메인 프로세스 워처(N6, 웹 세션 무관)에 양보 — 중복 방지.
+  const desktopHandlesNative = useRef(false)
+  const cleanupBridge = useRef<(() => void) | null>(null)
 
   const poll = useCallback(async () => {
     try {
@@ -65,6 +69,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
       if (
         seeded.current &&
         document.hidden &&
+        !desktopHandlesNative.current &&
         prefRef.current === 'on' &&
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted'
@@ -84,6 +89,20 @@ export function NotificationBell({ workspace }: { workspace: string }) {
   }, [router, workspace])
 
   useEffect(() => {
+    const bridge = getAssayDesktop()
+    if (bridge) {
+      void bridge
+        .runnerStatus()
+        .then((s) => {
+          desktopHandlesNative.current = s.paired
+        })
+        .catch(() => {})
+      // 구독 해지는 아래 cleanup 에서 폴링 타이머와 함께.
+      const off = bridge.onRunnerStatus((s) => {
+        desktopHandlesNative.current = s.paired
+      })
+      cleanupBridge.current = off
+    }
     setPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
     const stored = localStorage.getItem(NATIVE_PREF_KEY) === 'off' ? 'off' : 'on'
     setPref(stored)
@@ -95,6 +114,8 @@ export function NotificationBell({ workspace }: { workspace: string }) {
     return () => {
       clearInterval(timer)
       window.removeEventListener('focus', onFocus)
+      cleanupBridge.current?.()
+      cleanupBridge.current = null
     }
   }, [poll])
 
