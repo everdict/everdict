@@ -1,18 +1,20 @@
 'use client'
 
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
+import { CiLinksSettings } from '@/features/manage-ci-links'
 import { IntegrationsManager } from '@/features/manage-integrations'
 import { InvitesManager } from '@/features/manage-invites'
 import { MembersManager, WorkspaceApplications } from '@/features/manage-members'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { WorkspaceInfoCard } from '@/features/workspace-settings'
+import type { CiLink } from '@/entities/ci-link'
 import type { ConnectionMeta, WorkspaceIntegration } from '@/entities/connection'
 import type { Invite, Member } from '@/entities/member'
 import type { SecretMeta } from '@/entities/secret'
 import type { WorkspaceRecord } from '@/entities/workspace'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
-type TabKey = 'general' | 'model' | 'cluster' | 'integrations' | 'members'
+type TabKey = 'general' | 'model' | 'cluster' | 'integrations' | 'ci' | 'members'
 
 // 워크스페이스 설정 탭: 일반(정보/정책/삭제) · 모델 키 · 클러스터 자격증명 · 통합(self-hosted OAuth 앱) · 멤버(+애플리케이션
 // 로스터). 권한 없는 탭은 숨긴다. 외부 계정 연결의 연결/해제(관리)는 개인 소유라 계정(account) 페이지에 있다 — 여기 멤버 탭의
@@ -25,6 +27,7 @@ export function SettingsTabs(props: {
   applications: ConnectionMeta[] // 워크스페이스에 연결된 애플리케이션(읽기 전용 로스터)
   integrations: WorkspaceIntegration[] // self-hosted provider OAuth 앱 통합(관리자 1회 등록)
   integrationsCallbackUrl?: string // provider OAuth 앱에 등록할 콜백 URL
+  ciLinks: CiLink[] // CI repo link(레포↔하니스 슬롯 = OIDC trust) 목록
   members: Member[]
   invites: Invite[]
   canReadSettings: boolean
@@ -40,6 +43,7 @@ export function SettingsTabs(props: {
     { key: 'model', label: '모델 키', show: props.canReadSecrets },
     { key: 'cluster', label: '클러스터 자격증명', show: props.canReadSecrets },
     { key: 'integrations', label: '통합', show: props.canReadSettings },
+    { key: 'ci', label: 'CI 연동', show: props.canReadSettings },
     { key: 'members', label: '멤버', show: props.canReadMembers },
   ]
   const visible = tabs.filter((t) => t.show)
@@ -92,6 +96,9 @@ export function SettingsTabs(props: {
             ? { callbackUrl: props.integrationsCallbackUrl }
             : {})}
         />
+      </TabsContent>
+      <TabsContent value="ci">
+        <CiLinksSettings initialLinks={props.ciLinks} canWrite={props.canWriteSettings} />
       </TabsContent>
       <TabsContent value="members">
         <div className="space-y-8">

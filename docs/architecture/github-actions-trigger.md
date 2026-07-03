@@ -1,6 +1,19 @@
 # GitHub Actions trigger — CI-fired evals + zero-input repo↔service integration
 
-> **Status: DESIGN — no slices shipped.** Direction locked with the user (2026-07-03):
+> **Status: slices 1–3 SHIPPED (2026-07-03).**
+> S1 `5534b15` — `ScorecardRecord.origin` provenance (+`origin` jsonb mig 0033) + submit-time ephemeral
+> `harness.pins` (registry-level `resolveWithPins`, unknown slot = 400) + `POST /harnesses/:id/pins` headless
+> re-pin (digest-enforced, idempotent, auto patch-bump) + MCP parity (`pin_harness_images`, `run_scorecard`
+> pins/origin) + the in-repo reference Action `examples/github-action/run-eval` (zero-dep node20).
+> S2 `3be9c3e` — `githubActionsAuthenticator` (issuer pre-check, fail-closed, `AuthContext.workspaceHint`) +
+> `ci` role (scorecards:run/read + harnesses:register/read only) + membership-bootstrap exclusion.
+> S3 `2cc8b7f` (backend) + web slice — `CiLinkService` (links CRUD = trust, repos picker proxy, setup-PR
+> generator `renderCiWorkflow`) + routes/MCP ×5 + web: harness-detail "CI 연동" panel + connect-repo dialog
+> (connection→repo picker→slots→dataset→save→setup-PR), settings "CI 연동" tab, scorecard origin chips.
+> **Open:** live E2E vs real GitHub; server-side supersede; GitHub App (S4, demand-driven); personal-runner
+> `allowCi` gate; Track B pull-secrets for private GHCR.
+>
+> Direction locked with the user (2026-07-03):
 > **(1) Action-as-client, not webhook-receiver** — a first-party GitHub Action calls the Assay API outbound;
 > a GitHub App (inbound webhooks) is deferred until "no workflow-file change" demand is real.
 > **(2) Two firing semantics** — PR = *ephemeral* pin override at scorecard submit (registry untouched);

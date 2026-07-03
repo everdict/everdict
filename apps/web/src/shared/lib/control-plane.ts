@@ -246,6 +246,25 @@ export const controlPlane = {
     }),
   removeWorkspaceIntegration: (auth: AuthContext, provider: string) =>
     callVoid(auth, `/workspace/integrations/${encodeURIComponent(provider)}`, { method: 'DELETE' }),
+  // CI repo link(레포↔하니스 슬롯 = GitHub Actions OIDC trust). 조회=harnesses:read(viewer+), 생성/삭제=settings:write(admin).
+  // link 의 존재가 그 레포의 keyless CI 신뢰를 부여한다. 세 라우트 모두 현재 링크 전체({links})를 돌려준다(204 아님).
+  listCiLinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/ci/links'),
+  upsertCiLink: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/ci/links', { method: 'PUT', body: JSON.stringify(body) }),
+  // repository("owner/name")는 슬래시를 포함해 경로 대신 쿼리로 받는다.
+  deleteCiLink: <T>(auth: AuthContext, repository: string) =>
+    call<T>(auth, `/workspace/ci/links?repository=${encodeURIComponent(repository)}`, {
+      method: 'DELETE',
+    }),
+  // 레포 목록(picker) — 내(subject) GitHub 연결 토큰으로 프록시. bare array 응답. provider 는 github|github-enterprise 만.
+  listConnectionRepos: <T>(auth: AuthContext, connectionId: string, page?: number) =>
+    call<T>(
+      auth,
+      `/connections/${encodeURIComponent(connectionId)}/repos${page ? `?page=${page}` : ''}`
+    ),
+  // setup-PR — link 로부터 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR(내 GitHub 연결 토큰). viewer+.
+  setupCiLinkPr: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/ci/links/setup-pr', { method: 'POST', body: JSON.stringify(body) }),
   // 셀프호스티드 러너(개인 소유 디바이스 페어링). 목록=내(subject) 러너 메타만(토큰 없음).
   // pair 는 평문 토큰(rnr_…)을 1회만 돌려주고(저장은 해시), revoke 는 204(callVoid).
   listRunners: <T>(auth: AuthContext) => call<T>(auth, '/runners'),

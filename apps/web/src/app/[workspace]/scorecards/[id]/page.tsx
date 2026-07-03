@@ -12,6 +12,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { ModelChip } from '@/shared/ui/chip'
+import { OriginBlock } from '@/shared/ui/origin'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
@@ -189,6 +190,9 @@ export default async function ScorecardDetailPage({
         <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
       </Card>
+
+      {/* 트리거 출처(provenance) — CI/예약/API/웹 + 커밋·PR·CI run 링크 + PR 임시 핀(pinOverrides). */}
+      {record.origin && <OriginBlock origin={record.origin} />}
 
       {(record.models?.primary ||
         (record.models?.observed.length ?? 0) > 0 ||

@@ -1,0 +1,93 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+
+import {
+  ciLinksResponseSchema,
+  reposSchema,
+  setupPrResultSchema,
+  type CiLink,
+  type RepoInfo,
+} from '@/entities/ci-link'
+import { authContext } from '@/shared/auth/principal'
+import { controlPlane } from '@/shared/lib/control-plane'
+
+export interface ReposResult {
+  ok: boolean
+  repos?: RepoInfo[]
+  error?: string
+}
+export interface CiLinksResult {
+  ok: boolean
+  links?: CiLink[]
+  error?: string
+}
+export interface SetupPrResult {
+  ok: boolean
+  prUrl?: string
+  error?: string
+}
+
+// upsert 링크(레포↔하니스 슬롯) 입력 — dataset/slots 는 선택. 컨트롤플레인이 최종 검증(admin 게이트).
+export interface UpsertCiLinkInput {
+  repository: string
+  harness: string
+  dataset?: string
+  slots?: Record<string, { path?: string }>
+}
+
+// 레포 목록(picker) — 내 GitHub 연결로 프록시. provider 가 github(-enterprise) 아니면 컨트롤플레인이 400.
+export async function listConnectionReposAction(
+  connectionId: string,
+  page?: number
+): Promise<ReposResult> {
+  const ctx = await authContext()
+  try {
+    const repos = reposSchema.parse(await controlPlane.listConnectionRepos(ctx, connectionId, page))
+    return { ok: true, repos }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 링크 저장(생성/갱신) — link 의 존재가 그 레포의 keyless CI 신뢰를 부여(settings:write=admin, 컨트롤플레인 강제).
+export async function upsertCiLinkAction(input: UpsertCiLinkInput): Promise<CiLinksResult> {
+  const ctx = await authContext()
+  try {
+    const { links } = ciLinksResponseSchema.parse(await controlPlane.upsertCiLink(ctx, input))
+    revalidatePath('/[workspace]/harnesses/[id]', 'page')
+    revalidatePath('/[workspace]/settings', 'page')
+    return { ok: true, links }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 링크 해제(삭제) — settings:write(admin).
+export async function deleteCiLinkAction(repository: string): Promise<CiLinksResult> {
+  const ctx = await authContext()
+  try {
+    const { links } = ciLinksResponseSchema.parse(await controlPlane.deleteCiLink(ctx, repository))
+    revalidatePath('/[workspace]/harnesses/[id]', 'page')
+    revalidatePath('/[workspace]/settings', 'page')
+    return { ok: true, links }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}
+
+// 셋업 PR 열기 — link 의 워크플로 YAML 을 대상 레포에 PR(내 GitHub 연결 토큰). viewer+(머지는 GitHub 쪽 승인).
+export async function openSetupPrAction(
+  repository: string,
+  connectionId: string
+): Promise<SetupPrResult> {
+  const ctx = await authContext()
+  try {
+    const { prUrl } = setupPrResultSchema.parse(
+      await controlPlane.setupCiLinkPr(ctx, { repository, connectionId })
+    )
+    return { ok: true, prUrl }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

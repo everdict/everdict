@@ -18,9 +18,17 @@ token courier, never an auth authority. See `docs/auth.md`.
   non-member selection **falls back** to the default — never a 403 from a stale selection. `POST/GET /workspaces`
   are self-serve (no role gate; creator = admin) with MCP parity (`create_workspace`/`list_workspaces`). Keep
   active-workspace logic in the one `applyActiveWorkspace`, not in routes. See `docs/tenancy.md`.
-- **Two authenticators, composed.** `oidcAuthenticator` (Keycloak JWT) + `apiKeyAuthenticator` (`ak_…`) behind
+- **Authenticators, composed.** `githubActionsAuthenticator` (GitHub Actions OIDC federation — keyless CI) +
+  `oidcAuthenticator` (Keycloak JWT) + `apiKeyAuthenticator` (`ak_…`) + `runnerAuthenticator` (`rnr_…`) behind
   the one `Authenticator` interface via `compositeAuthenticator`. Add a new credential kind as another
-  `Authenticator`, not as a special case inside a route.
+  `Authenticator`, not as a special case inside a route. `authenticate(bearer, ctx?)` carries an optional
+  `AuthContext{ workspaceHint }` (the `x-assay-workspace` header) — the GitHub federation matches the verified
+  `repository` claim against **that workspace's** repo links (`WorkspaceSettings.ci.links`; link = trust) and
+  issues `roles:["ci"]` (scorecards:run/read + harnesses:register/read only). Keep the GitHub authenticator
+  FIRST in the chain (it pre-checks `iss` via decode and passes silently) so CI tokens don't spam the Keycloak
+  verifier's warn logs. `via ∈ {runner, github-actions}` principals are **excluded from membership bootstrap**
+  in `applyActiveWorkspace` (a device/CI repo must never gain a member row). See
+  `docs/architecture/github-actions-trigger.md`.
 - **Fail-closed, always.** Unknown key / bad signature / wrong issuer / expired ⇒ `authenticate` returns
   `undefined` ⇒ **401**. Never let an unverifiable token through. Verify JWTs with **`jose`** against the realm
   **JWKS** (`jwtVerify` with `issuer` + optional `audience`) — never decode-without-verify.

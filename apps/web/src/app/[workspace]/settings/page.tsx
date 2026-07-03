@@ -1,3 +1,4 @@
+import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import {
   workspaceApplicationsSchema,
   workspaceIntegrationsResponseSchema,
@@ -40,6 +41,7 @@ export default async function SettingsPage({
   let applications: ConnectionMeta[] = []
   let integrations: WorkspaceIntegration[] = []
   let integrationsCallbackUrl: string | undefined
+  let ciLinks: CiLink[] = []
   let members: Member[] = []
   let invites: Invite[] = []
   let error: string | undefined
@@ -52,6 +54,8 @@ export default async function SettingsPage({
       )
       integrations = ints.providers
       integrationsCallbackUrl = ints.callbackUrl
+      // CI repo link(레포↔하니스 슬롯 = OIDC trust) — 링크의 존재가 그 레포의 keyless CI 신뢰. 해제는 admin.
+      ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
     }
     if (canReadSecrets) secrets = secretsSchema.parse(await controlPlane.listSecrets(ctx))
     if (canReadMembers) {
@@ -91,6 +95,7 @@ export default async function SettingsPage({
           applications={applications}
           integrations={integrations}
           {...(integrationsCallbackUrl !== undefined ? { integrationsCallbackUrl } : {})}
+          ciLinks={ciLinks}
           members={members}
           invites={invites}
           canReadSettings={canReadSettings}

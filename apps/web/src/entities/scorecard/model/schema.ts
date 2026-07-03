@@ -77,6 +77,19 @@ export const scorecardModelsSchema = z.object({
 })
 export type ScorecardModels = z.infer<typeof scorecardModelsSchema>
 
+// 이 run 의 트리거 출처(provenance) — 어디서 발사됐나(github-actions|schedule|api|web) + 커밋 좌표.
+// GitHub Actions PR 발사는 제출 시점 임시 핀(pinOverrides: 슬롯→이미지)을 여기 기록한다(레지스트리 무변경). 경량 → 목록에도 포함.
+export const scorecardOriginSchema = z.object({
+  source: z.string(),
+  repo: z.string().optional(), // "owner/name"
+  sha: z.string().optional(),
+  ref: z.string().optional(), // refs/heads/… | refs/pull/…
+  prNumber: z.number().optional(),
+  runUrl: z.string().optional(), // CI run 링크
+  pinOverrides: z.record(z.string(), z.string()).optional(), // 제출 시점 임시 핀(슬롯→이미지)
+})
+export type ScorecardOrigin = z.infer<typeof scorecardOriginSchema>
+
 export const scorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -86,6 +99,7 @@ export const scorecardRecordSchema = z.object({
   summary: z.array(metricSummarySchema).optional(),
   models: scorecardModelsSchema.optional(), // 과거 레코드는 미설정(unknown)
   judgeModels: z.array(z.string()).optional(), // 이 run 을 채점한 judge 모델(들) — model 축과 별개(채점자)
+  origin: scorecardOriginSchema.optional(), // 트리거 출처(provenance) — 경량이라 목록에도 포함. 과거 레코드는 미설정.
   scorecard: fullScorecardSchema.optional(),
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })

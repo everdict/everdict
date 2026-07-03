@@ -10,6 +10,7 @@ import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EntityRef, MetricChip, ModelChip } from '@/shared/ui/chip'
 import { EmptyState } from '@/shared/ui/empty-state'
+import { OriginChip } from '@/shared/ui/origin'
 import { PageHeader } from '@/shared/ui/page-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusPill } from '@/shared/ui/status-pill'
@@ -117,6 +118,7 @@ export default async function ScorecardsPage({
                     <span className="text-faint">→</span>
                     <EntityRef id={s.harness.id} version={s.harness.version} />
                     {s.models?.primary ? <ModelChip>{s.models.primary}</ModelChip> : null}
+                    {s.origin ? <OriginChip origin={s.origin} /> : null}
                   </div>
                   <div className="flex flex-wrap items-center gap-1">
                     {(s.summary ?? []).length > 0 ? (

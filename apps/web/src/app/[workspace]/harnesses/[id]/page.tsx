@@ -2,6 +2,10 @@ import Link from 'next/link'
 import { ChevronLeft, GitBranchPlus } from 'lucide-react'
 
 import { ConfigPanel, HarnessDetail } from '@/features/inspect-harness'
+import { CiLinkPanel } from '@/features/manage-ci-links'
+import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
+import { connectionsResponseSchema, type ConnectionMeta } from '@/entities/connection'
+import { datasetsSchema } from '@/entities/dataset'
 import {
   harnessInstanceSpecSchema,
   harnessSpecSchema,
@@ -12,7 +16,8 @@ import {
   type HarnessSpec,
   type HarnessTemplateSpec,
 } from '@/entities/harness'
-import { authContext } from '@/shared/auth/principal'
+import { can } from '@/shared/auth/can'
+import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
@@ -65,7 +70,7 @@ export default async function HarnessDetailPage({
 }) {
   const { workspace, id } = await params
   const { v } = await searchParams
-  const ctx = await authContext()
+  const { principal, ctx } = await currentPrincipal()
 
   let versions: string[] = []
   let spec: HarnessSpec | undefined
@@ -98,6 +103,33 @@ export default async function HarnessDetailPage({
       config = { instance, template }
     } catch {
       config = undefined
+    }
+  }
+
+  // CI 연동(레포 링크) — 이 하니스에 매칭된 링크 + 레포 picker 에 필요한 내 GitHub 연결 + 데이터셋 후보.
+  // 셋 다 실패해도 상세는 계속 렌더(패널만 빈 상태). 저장/해제는 admin(settings:write) — 컨트롤플레인이 최종 강제.
+  let ciLinks: CiLink[] = []
+  let ciConnections: ConnectionMeta[] = []
+  let ciDatasets: string[] = []
+  if (spec) {
+    try {
+      ciLinks = ciLinksResponseSchema
+        .parse(await controlPlane.listCiLinks(ctx))
+        .links.filter((l) => l.harness === id)
+    } catch {
+      ciLinks = []
+    }
+    try {
+      ciConnections = connectionsResponseSchema
+        .parse(await controlPlane.listConnections(ctx))
+        .connections.filter((c) => c.provider === 'github' || c.provider === 'github-enterprise')
+    } catch {
+      ciConnections = []
+    }
+    try {
+      ciDatasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx)).map((d) => d.id)
+    } catch {
+      ciDatasets = []
     }
   }
 
@@ -177,6 +209,17 @@ export default async function HarnessDetailPage({
         <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">Resolved 스펙</h2>
         <HarnessDetail spec={spec} />
       </section>
+
+      <CiLinkPanel
+        harnessId={spec.id}
+        kind={spec.kind}
+        serviceNames={spec.kind === 'service' ? (spec.services ?? []).map((s) => s.name) : []}
+        datasets={ciDatasets}
+        connections={ciConnections}
+        initialLinks={ciLinks}
+        canWrite={can(principal?.roles, 'settings:write')}
+        workspace={workspace}
+      />
     </div>
   )
 }
