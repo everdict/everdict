@@ -7,6 +7,16 @@ export const TraceSourceSpecSchema = z.object({
 });
 export type TraceSourceSpec = z.infer<typeof TraceSourceSpecSchema>;
 
+// env 값 — 리터럴 문자열 또는 시크릿 참조({ secretRef }). 참조면 스펙(레지스트리)에 평문이 남지 않고,
+// 실행 직전 컨트롤플레인이 SecretStore 에서 값을 주입한다(resolveHarnessSecrets). 소비 지점은 flattenEnv 로 문자열화.
+// scope = 어느 시크릿 티어를 가리키는가. "workspace"(기본) = 공유 시크릿, "user" = 제출자 개인 시크릿.
+// user 시크릿을 참조하는 하니스는 그 개인만 실행/열람할 수 있다(referencesUserSecret → 비공개).
+export const EnvValueSchema = z.union([
+  z.string(),
+  z.object({ secretRef: z.string().min(1), scope: z.enum(["user", "workspace"]).optional() }).strict(),
+]);
+export type EnvValue = z.infer<typeof EnvValueSchema>;
+
 // 서비스 준비성(readiness) 폴링 — HTTP 엔드포인트가 응답할 때까지 얼마나/얼마 간격으로 기다리는가.
 // 부팅이 느린 서비스(첫 이미지 pull·DB 마이그레이션 등)는 더 길게. 미설정 = 런타임 기본(60s/1s).
 export const ServiceReadinessSchema = z.object({
@@ -36,7 +46,7 @@ export const TopologyServiceSchema = z.object({
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
   replicas: z.number().int().default(1),
-  env: z.record(z.string()).default({}),
+  env: z.record(EnvValueSchema).default({}), // 리터럴 또는 { secretRef } — 실행 직전 해석
   volumes: z.array(z.string()).optional(),
   readiness: ServiceReadinessSchema.optional(),
   resources: ServiceResourcesSchema.optional(), // cpu/memory 요청 — nomad/k8s/docker 가 해석(미설정=런타임 기본)
@@ -218,7 +228,7 @@ export const CommandHarnessSpecSchema = z.object({
   workDir: z.string().optional(), // setup/command 실행 디렉터리(기본 "work"). os-use 등 work 가 없는 환경은 절대경로(예: "/tmp").
   setup: z.array(z.string()).default([]), // 샌드박스에서 1회 실행(예: "pip install aider-chat==0.74.0")
   command: z.string(), // 예: "aider --yes --message {{task}} --model {{model}} --edit-format {{edit_format}} ."
-  env: z.record(z.string()).default({}),
+  env: z.record(EnvValueSchema).default({}), // 리터럴 또는 { secretRef } — 실행 직전 해석
   model: z.string().optional(),
   // 일반 {{var}} 치환 값 — command 의 {{key}} 를 params[key] 로 채운다(예약어 {{task}}/{{model}}/{{run_id}} 제외).
   // 같은 템플릿의 변주(인스턴스 overrides.params)가 CLI 플래그를 바꾸는 통로. 값은 셸 이스케이프 안 함(작성자 신뢰, {{model}} 과 동일).

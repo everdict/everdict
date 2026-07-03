@@ -3,6 +3,7 @@ import { BadRequestError } from "./errors.js";
 import {
   CommandHarnessSpecSchema,
   CommandTraceSpecSchema,
+  EnvValueSchema,
   FrontDoorSpecSchema,
   type HarnessSpec,
   ProcessHarnessSpecSchema,
@@ -54,7 +55,7 @@ export const CommandTemplateSpecSchema = z.object({
   workDir: z.string().optional(),
   setup: z.array(z.string()).default([]),
   command: z.string(),
-  env: z.record(z.string()).default({}),
+  env: z.record(EnvValueSchema).default({}), // 리터럴 또는 { secretRef }
   model: z.string().optional(), // pins.model 없을 때의 기본
   params: z.record(z.string()).default({}), // {{var}} 기본값(인스턴스 overrides.params 가 덮어쓴다)
   trace: CommandTraceSpecSchema.default({ kind: "none" }),
@@ -78,7 +79,7 @@ export type HarnessTemplateSpec = z.infer<typeof HarnessTemplateSpecSchema>;
 // 이미지 교체는 기존 pins 로(흔한 경우). overrides 는 같은 템플릿 안에서 모델/온도/플래그/페이로드 변주를 표현하는 통로.
 // 설계: docs/architecture/harness-taxonomy.md "Instance variation".
 export const InstanceServiceOverrideSchema = z.object({
-  env: z.record(z.string()).optional(), // 서비스 정적 env 오버레이(템플릿 env 위에 병합; storeEnv 아래) — Phase 1
+  env: z.record(EnvValueSchema).optional(), // 서비스 정적 env 오버레이(템플릿 env 위에 병합; storeEnv 아래) — Phase 1
   replicas: z.number().int().positive().optional(), // Phase 2 — nomad/k8s 존중(docker 단일호스트=1)
   resources: ServiceResourcesSchema.optional(), // Phase 2 — cpu/memory (scalar 치환)
   volumes: z.array(z.string()).optional(), // Phase 3 — docker 존중(nomad/k8s 후속) (scalar 치환)
@@ -104,7 +105,7 @@ export const InstanceOverridesSchema = z.object({
   // service 템플릿: 브라우저 타깃 익스텐션 ref 핀(Phase 3). 템플릿에 target 이 없으면 resolve 가 BadRequest.
   target: z.object({ extension: z.object({ ref: z.string() }) }).optional(),
   // command 템플릿: env 오버레이 + {{var}} 값. 각각 템플릿 위에 병합.
-  env: z.record(z.string()).optional(),
+  env: z.record(EnvValueSchema).optional(),
   params: z.record(z.string()).optional(),
 });
 export type InstanceOverrides = z.infer<typeof InstanceOverridesSchema>;
