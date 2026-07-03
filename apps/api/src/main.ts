@@ -112,6 +112,7 @@ import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
 import { QueueService } from "./queue-service.js";
 import { ScheduleService } from "./schedule-service.js";
+import { recoverInterrupted } from "./startup-recovery.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
@@ -166,6 +167,12 @@ async function main(): Promise<void> {
   await seedSharedModels(modelRegistry);
   // 런타임도 자동 시드하지 않는다 — 기본 _shared docker/local 은 "누구의 인프라인지" 모호한 노이즈였다.
   // 런타임은 워크스페이스가 자기 인프라를 직접 등록하는 개념(examples/runtimes/*.json 은 참고용으로만 유지).
+
+  // 부팅 시 고아 작업 회수 — 배치/run 은 이 프로세스 안에서 in-process 로 track 되므로, 재시작 시점에
+  // queued/running 인 레코드는 이어받을 주체가 없는 유령이다(작업 큐가 영원히 '실행 중'을 보이는 원인).
+  const recovered = await recoverInterrupted({ scorecards: scorecardStore, runs: store });
+  if (recovered.scorecards + recovered.runs > 0)
+    console.error(`▶ 중단된 작업 회수: 배치 ${recovered.scorecards} · run ${recovered.runs} → failed(INTERRUPTED)`);
 
   // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소는 항상 활성.
   const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
