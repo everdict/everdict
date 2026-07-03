@@ -61,6 +61,9 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
   versions(tenant: string, id: string): Promise<string[]> {
     return this.store.versions(tenant, id);
   }
+  async creatorOf(tenant: string, id: string): Promise<string | undefined> {
+    return (await this.store.listMeta(tenant)).find((m) => m.id === id)?.createdBy;
+  }
   async list(tenant: string): Promise<HarnessListEntry[]> {
     return enrichHarnessList(
       await this.store.listMeta(tenant),

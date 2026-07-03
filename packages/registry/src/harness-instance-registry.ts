@@ -4,6 +4,7 @@ import {
   type HarnessSpec,
   type HarnessTemplateSpec,
   type ServiceHarnessSpec,
+  referencesUserSecret,
   resolveHarnessInstance,
 } from "@assay/core";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
@@ -16,6 +17,9 @@ export interface HarnessListEntry extends VersionMeta {
   category?: string; // 최신 인스턴스의 템플릿 대분류(cli-agent 등)
   kind?: string; // command | service | process (resolved)
   subtitle?: string; // 모델/커맨드/서비스 요약(하니스는 free-text description 이 없어 이걸 부제로 쓴다)
+  // 최신 인스턴스가 개인(user) 스코프 시크릿을 참조하면 true — 이 하니스는 createdBy 만 볼 수 있다(비공개).
+  // API 가 이 값 + createdBy 로 목록/상세에서 다른 유저에게 숨긴다(값 자체는 파생 — 별도 저장 없음).
+  private?: boolean;
 }
 
 // resolved HarnessSpec → 부제(목록 표시용). command=모델/커맨드, service=서비스 수. 없으면 undefined.
@@ -33,13 +37,18 @@ export async function enrichHarnessList(
 ): Promise<HarnessListEntry[]> {
   const out: HarnessListEntry[] = [];
   for (const meta of metas) {
-    let extra: Partial<Pick<HarnessListEntry, "category" | "kind" | "subtitle">> = {};
+    let extra: Partial<Pick<HarnessListEntry, "category" | "kind" | "subtitle" | "private">> = {};
     try {
       const instance = await getInstance(meta.id, meta.latestVersion);
       const template = await getTemplate(instance.template.id, instance.template.version);
       const resolved = resolveHarnessInstance(template, instance);
       const sub = harnessSubtitle(resolved);
-      extra = { category: template.category, kind: resolved.kind, ...(sub !== undefined ? { subtitle: sub } : {}) };
+      extra = {
+        category: template.category,
+        kind: resolved.kind,
+        private: referencesUserSecret(resolved),
+        ...(sub !== undefined ? { subtitle: sub } : {}),
+      };
     } catch {
       // 템플릿 누락/해석 실패 — 파생 필드 생략(메타만 노출)
     }
@@ -89,6 +98,8 @@ export interface HarnessInstanceRegistry {
   getService(tenant: string, id: string, ref?: string): Promise<ServiceHarnessSpec>;
   versions(tenant: string, id: string): Promise<string[]>;
   list(tenant: string): Promise<HarnessListEntry[]>;
+  // 이 하니스 id 의 최초 등록자 subject(시드/공유는 없음) — 비공개(개인 시크릿 참조) 하니스의 소유자 확인용.
+  creatorOf(tenant: string, id: string): Promise<string | undefined>;
 }
 
 export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry {
@@ -127,6 +138,9 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
   }
   async versions(tenant: string, id: string): Promise<string[]> {
     return this.store.versions(tenant, id);
+  }
+  async creatorOf(tenant: string, id: string): Promise<string | undefined> {
+    return this.store.listMeta(tenant).find((m) => m.id === id)?.createdBy;
   }
   async list(tenant: string): Promise<HarnessListEntry[]> {
     return enrichHarnessList(
