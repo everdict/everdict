@@ -1,4 +1,12 @@
-import { BarChart3, Boxes, Database, LayoutDashboard, type LucideIcon } from 'lucide-react'
+import {
+  BarChart3,
+  Boxes,
+  CalendarClock,
+  Database,
+  FileText,
+  LayoutDashboard,
+  type LucideIcon,
+} from 'lucide-react'
 
 export interface NavItem {
   // 워크스페이스-상대 경로 suffix(예: '' = 개요, '/scorecards'). 렌더 시 활성 워크스페이스로 prefix → /{workspace}{suffix}.
@@ -40,6 +48,13 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: BarChart3,
         keywords: 'scorecard 배치 평가 비교 리더보드 leaderboard 추이',
       },
+      {
+        href: '/schedules',
+        label: '예약',
+        icon: CalendarClock,
+        keywords: 'schedule cron 예약 주기 회귀',
+      },
+      { href: '/report', label: '리포트', icon: FileText, keywords: 'report 회귀 추세' },
     ],
   },
 ]
