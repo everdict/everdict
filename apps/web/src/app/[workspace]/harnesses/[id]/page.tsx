@@ -151,12 +151,34 @@ export default async function HarnessDetailPage({
           title={spec.id}
           description={summarize(spec)}
           actions={
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center justify-end gap-2">
               <Badge tone={KIND_TONE[spec.kind]}>{spec.kind}</Badge>
-              <Badge tone="neutral">
-                v{active}
-                {active === versions[versions.length - 1] ? ' · latest' : ''}
-              </Badge>
+              {versions.length > 1 ? (
+                <div className="flex flex-wrap items-center gap-1">
+                  <span className="mr-0.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
+                    버전
+                  </span>
+                  {versions.map((ver) => {
+                    const isActive = ver === active
+                    return (
+                      <Link
+                        key={ver}
+                        href={`/${workspace}/harnesses/${encodeURIComponent(id)}?v=${encodeURIComponent(ver)}`}
+                        className={cn(
+                          'rounded-md border px-2 py-0.5 font-mono text-[12px] transition-colors',
+                          isActive
+                            ? 'border-primary/40 bg-primary/12 text-[var(--color-accent-foreground)]'
+                            : 'border-border bg-card text-muted-foreground hover:border-border-strong hover:text-foreground'
+                        )}
+                      >
+                        {ver}
+                      </Link>
+                    )
+                  })}
+                </div>
+              ) : (
+                <Badge tone="neutral">v{active} · latest</Badge>
+              )}
               <Link
                 href={`/${workspace}/harnesses/${encodeURIComponent(id)}/new-version?v=${encodeURIComponent(active ?? '')}`}
                 className={buttonVariants({ variant: 'secondary', size: 'sm' })}
@@ -167,31 +189,6 @@ export default async function HarnessDetailPage({
           }
         />
       </div>
-
-      {versions.length > 1 && (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="mr-1 text-[11px] font-[510] uppercase tracking-wide text-faint">
-            버전
-          </span>
-          {versions.map((ver) => {
-            const isActive = ver === active
-            return (
-              <Link
-                key={ver}
-                href={`/${workspace}/harnesses/${encodeURIComponent(id)}?v=${encodeURIComponent(ver)}`}
-                className={cn(
-                  'rounded-md border px-2 py-0.5 font-mono text-[12px] transition-colors',
-                  isActive
-                    ? 'border-primary/40 bg-primary/12 text-[var(--color-accent-foreground)]'
-                    : 'border-border bg-card text-muted-foreground hover:border-border-strong hover:text-foreground'
-                )}
-              >
-                {ver}
-              </Link>
-            )
-          })}
-        </div>
-      )}
 
       {config && (
         <section className="space-y-4">
