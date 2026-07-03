@@ -6,7 +6,7 @@ import { Search } from 'lucide-react'
 
 import type { ScorecardRecord } from '@/entities/scorecard'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
-import { Avatar } from '@/shared/ui/avatar'
+import { UserAvatar } from '@/shared/ui/avatar'
 import { EntityRef, MetricChip, ModelChip } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -240,22 +240,19 @@ export function ScorecardList({
                   </div>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
-                  <StatusPill status={s.status} />
+                  {/* 실행자 — 둥근 썸네일만(호버=이름), 위치는 다른 카드와 동일하게 우상단(상태 옆). */}
+                  <div className="flex items-center gap-1.5">
+                    {author.known && (
+                      <UserAvatar name={author.name} url={author.avatarUrl} label="실행자" />
+                    )}
+                    <StatusPill status={s.status} />
+                  </div>
                   <time
                     className="font-mono text-[11px] text-muted-foreground"
                     title={fmtDateTimeFull(s.createdAt)}
                   >
                     {fmtDateTime(s.createdAt)}
                   </time>
-                  {/* 실행자 — 프로필 아바타 + 이름(데이터셋 목록의 만든이와 동일 표기) */}
-                  {author.known && (
-                    <span className="flex items-center gap-1.5" title={`실행자 ${author.name}`}>
-                      <Avatar name={author.name} url={author.avatarUrl} size="sm" />
-                      <span className="max-w-[120px] truncate text-[11.5px] text-muted-foreground">
-                        {author.name}
-                      </span>
-                    </span>
-                  )}
                 </div>
               </Link>
             )

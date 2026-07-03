@@ -8,7 +8,7 @@ import type { Harness } from '@/entities/harness'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import type { HarnessRelation } from '@/shared/lib/harness-relations'
 import { cn } from '@/shared/lib/utils'
-import { Avatar } from '@/shared/ui/avatar'
+import { UserAvatar } from '@/shared/ui/avatar'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
@@ -223,15 +223,12 @@ export function HarnessList({
                     </div>
                   </div>
                   {author.known && (
-                    <span
-                      className="flex shrink-0 items-center gap-1.5"
-                      title={`만든이 ${author.name}`}
-                    >
-                      <Avatar name={author.name} url={author.avatarUrl} size="sm" />
-                      <span className="max-w-[120px] truncate text-[11.5px] text-muted-foreground">
-                        {author.name}
-                      </span>
-                    </span>
+                    <UserAvatar
+                      name={author.name}
+                      url={author.avatarUrl}
+                      label="만든이"
+                      className="shrink-0"
+                    />
                   )}
                 </div>
 

@@ -9,7 +9,7 @@ import type { DatasetRelation } from '@/shared/lib/dataset-relations'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { sortSemverDesc } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
-import { Avatar } from '@/shared/ui/avatar'
+import { UserAvatar } from '@/shared/ui/avatar'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
@@ -229,17 +229,14 @@ export function DatasetList({
                       )}
                     </div>
                   </div>
-                  {/* 만든이 — 프로필 아바타 + 이름(자연스러운 신원 표기) */}
+                  {/* 만든이 — 둥근 썸네일만, 이름은 호버(카드 표기 표준) */}
                   {author.known && (
-                    <span
-                      className="flex shrink-0 items-center gap-1.5"
-                      title={`만든이 ${author.name}`}
-                    >
-                      <Avatar name={author.name} url={author.avatarUrl} size="sm" />
-                      <span className="max-w-[120px] truncate text-[11.5px] text-muted-foreground">
-                        {author.name}
-                      </span>
-                    </span>
+                    <UserAvatar
+                      name={author.name}
+                      url={author.avatarUrl}
+                      label="만든이"
+                      className="shrink-0"
+                    />
                   )}
                 </div>
 

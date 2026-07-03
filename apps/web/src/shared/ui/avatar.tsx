@@ -1,4 +1,5 @@
 import { cn } from '@/shared/lib/utils'
+import { Tooltip } from '@/shared/ui/tooltip'
 
 // 이름 → 결정적 색조(인디고 계열 팔레트). 워크스페이스/유저 모노그램 아바타에 사용.
 const TONES = [
@@ -65,5 +66,27 @@ export function Avatar({
     >
       {monogram(name)}
     </span>
+  )
+}
+
+// 카드/목록의 작성자 표기 표준(일괄): **둥근 썸네일만** 노출하고 이름은 호버 툴팁으로.
+// 인라인 이름 병기 금지, 위치는 카드 우상단(타이틀 행 오른쪽)으로 통일한다.
+export function UserAvatar({
+  name,
+  url,
+  label,
+  size = 'sm',
+  className,
+}: {
+  name: string
+  url?: string
+  label?: string // 툴팁 접두(만든이/실행자 등)
+  size?: keyof typeof SIZES
+  className?: string // 래퍼(배치용 — shrink-0 등)
+}) {
+  return (
+    <Tooltip content={label ? `${label} · ${name}` : name} align="end" className={className}>
+      <Avatar name={name} url={url} size={size} className="rounded-full" />
+    </Tooltip>
   )
 }
