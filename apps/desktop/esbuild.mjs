@@ -12,6 +12,10 @@ await build({
   external: ["electron"],
   // CJS 의존(require 사용)을 ESM 번들에서 살리는 상용구.
   banner: { js: "import { createRequire } from 'node:module'; const require = createRequire(import.meta.url);" },
+  // 릴리즈 빌드에 굽는 기본 서버 URL(D8) — CI 가 ASSAY_DESKTOP_DEFAULT_WEB_URL 로 주입(미설정=빈 값 → 설정 화면).
+  define: {
+    __ASSAY_DEFAULT_WEB_URL__: JSON.stringify(process.env.ASSAY_DESKTOP_DEFAULT_WEB_URL ?? ""),
+  },
 });
 
 await build({

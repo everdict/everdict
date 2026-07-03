@@ -21,7 +21,7 @@ function fakeIpc(): IpcMainLike & {
 
 function deps(): BridgeDeps & { pair: ReturnType<typeof vi.fn> } {
   return {
-    webOrigin: WEB,
+    webOrigin: () => WEB,
     appInfo: async () => ({ version: "0", platform: "linux", hostname: "host", capabilities: ["repo"] }),
     pair: vi.fn(async () => {}),
     unpair: async () => {},

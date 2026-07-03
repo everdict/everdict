@@ -4,6 +4,8 @@ import { z } from "zod";
 // safeStorage 암호화 저장 전용(슬라이스 3, 스킬 desktop 불변식 5).
 export const DesktopConfigSchema = z.object({
   autostart: z.boolean().default(false),
+  // 접속할 웹(서버) URL — 첫 실행 화면/트레이 '서버 주소 변경'에서 저장(D8). env/CI 기본값과의 우선순위는 server-url.ts.
+  webUrl: z.string().url().optional(),
   // 페어된 러너의 비밀 아닌 메타 — 토큰은 절대 여기 아님(token-store/safeStorage).
   runnerId: z.string().min(1).optional(),
   apiUrl: z.string().url().optional(),

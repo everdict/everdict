@@ -11,6 +11,15 @@ declare const location: { origin: string };
 const ORIGIN_FLAG = "--assay-web-origin=";
 const expectedOrigin = process.argv.find((a) => a.startsWith(ORIGIN_FLAG))?.slice(ORIGIN_FLAG.length);
 
+// 설정(setup) 창 전용 브리지 — 서버 주소 조회/저장 2메서드(D8). 메인 쪽 IPC 가 setup.html 의
+// file:// URL 만 허용하므로(main.ts), 웹/외부 페이지에는 이 표면이 닿지 않는다.
+if (process.argv.includes("--assay-setup")) {
+  electron.contextBridge.exposeInMainWorld("assaySetup", {
+    getServerUrl: () => electron.ipcRenderer.invoke("assay:get-server-url"),
+    setServerUrl: (url: string) => electron.ipcRenderer.invoke("assay:set-server-url", url),
+  });
+}
+
 if (expectedOrigin !== undefined && location.origin === expectedOrigin) {
   electron.contextBridge.exposeInMainWorld("assayDesktop", {
     appInfo: () => electron.ipcRenderer.invoke("assay:app-info"),

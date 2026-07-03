@@ -148,6 +148,31 @@ export function RunnersManager({
         </Callout>
       )}
 
+      {/* 계정 전환/해제 불일치: 이 데스크톱이 내 목록에 없는 러너로 페어돼 있다 — 다른 계정의 페어링이거나
+          서버에서 해제된 페어링. 재연결로 로컬 페어링을 이 계정 소유의 새 러너로 대체한다. */}
+      {bridge &&
+        desktop?.paired === true &&
+        desktop.runnerId !== undefined &&
+        !runners.some((r) => r.id === desktop.runnerId) && (
+          <Callout tone="warning">
+            <span className="flex flex-wrap items-center justify-between gap-2">
+              <span>
+                이 기기는 다른 계정(또는 이미 해제된 페어링)으로 연결되어 있습니다. 다시 연결하면 이
+                계정의 러너로 대체됩니다.
+              </span>
+              <Button
+                size="xs"
+                variant="secondary"
+                onClick={onConnectThisDevice}
+                disabled={pending}
+              >
+                <Laptop />
+                {pending ? '연결 중…' : '이 계정으로 다시 연결'}
+              </Button>
+            </span>
+          </Callout>
+        )}
+
       {runners.length === 0 ? (
         <EmptyState
           icon={<Laptop strokeWidth={1.75} />}

@@ -29,6 +29,9 @@ logged-in web session over a minimal preload bridge.
 2. `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` — always.
 3. The bridge is **exactly** `pairRunner` / `runnerStatus` (+ status events) / `unpairRunner` /
    `appInfo`. No generic `invoke`, no fs/shell exposure. New methods need a locked design decision.
+   One separate surface exists (D8): `window.assaySetup` (`getServerUrl`/`setServerUrl`) — exposed only
+   with the `--assay-setup` argv flag (setup window), and main-side IPC accepts only the local
+   `setup.html` `file://` senderFrame. Never merge it into `assayDesktop`.
 4. Preload is attached only when loading the configured web origin; IPC handlers verify
    `senderFrame` origin before acting.
 5. The `rnr_` pairing token is persisted **only** `safeStorage`-encrypted under `app.getPath("userData")`;

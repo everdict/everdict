@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { RunnerHost, detectCapabilities } from "@assay/runner-core";
 import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
@@ -13,6 +14,7 @@ import {
 } from "./bridge.js";
 import { type ConfigIo, type DesktopConfig, loadConfig, saveConfig } from "./config-store.js";
 import { RunnerController } from "./runner-controller.js";
+import { normalizeWebUrl, resolveWebUrl } from "./server-url.js";
 import { type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
 import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
 import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
@@ -21,20 +23,30 @@ import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window
 // 데스크톱 셸 — 배포된 웹을 그대로 렌더링(D1: UI SSOT = apps/web)하고, 트레이에 상주하며,
 // 셀프호스티드 러너(@assay/runner-core)를 메인 프로세스에 내장한다(D3: 원클릭 페어링).
 // 설계: docs/architecture/desktop-app.md · 규약: .claude/skills/desktop/SKILL.md.
-const webUrl = process.env.ASSAY_WEB_URL ?? "http://localhost:3000";
-const webOrigin = webOriginOf(webUrl);
+
+// CI 가 릴리즈 빌드에 굽는 기본 서버 URL(esbuild define) — dev(tsc)에는 정의돼 있지 않다(D8).
+declare const __ASSAY_DEFAULT_WEB_URL__: string | undefined;
+
+// 웹(서버) URL 은 가변(D8) — env(개발/e2e) > config(사용자 저장) > CI 주입 기본값. 없으면 설정 화면.
+let webUrl: string | null = null;
+let webOrigin: string | null = null;
+function applyWebUrl(url: string | null): void {
+  webUrl = url;
+  webOrigin = url === null ? null : webOriginOf(url);
+}
+
 // 러너의 컨트롤플레인 기본값 — 페어링 페이로드의 apiUrl 이 우선한다(웹 서버가 아는 CONTROL_PLANE_URL).
 const defaultApiUrl = process.env.ASSAY_API_URL ?? "http://localhost:8787";
 
 // 스킬 desktop 보안 불변식 2 — 모든 창에 항상 이 webPreferences. preload 는 origin 게이트(preload.cts)를 위해
 // 웹 origin 을 인자로 받는다.
-function securePreferences(): Electron.WebPreferences {
+function securePreferences(origin: string): Electron.WebPreferences {
   return {
     contextIsolation: true,
     nodeIntegration: false,
     sandbox: true,
     preload: path.join(import.meta.dirname, "preload.cjs"),
-    additionalArguments: [`--assay-web-origin=${webOrigin}`],
+    additionalArguments: [`--assay-web-origin=${origin}`],
   };
 }
 
@@ -138,7 +150,8 @@ const controller = new RunnerController({
     latestRunnerStatus = status;
     refreshTrayMenu(); // 상태행·해제 항목·툴팁 동기화(tray 없으면 no-op)
     for (const win of BrowserWindow.getAllWindows()) {
-      if (senderAllowed(win.webContents.getURL(), webOrigin)) win.webContents.send(BRIDGE_CHANNELS.statusEvent, status);
+      if (webOrigin !== null && senderAllowed(win.webContents.getURL(), webOrigin))
+        win.webContents.send(BRIDGE_CHANNELS.statusEvent, status);
     }
   },
   log: (m) => console.error(m),
@@ -215,7 +228,45 @@ async function appInfo(): Promise<DesktopAppInfo> {
   };
 }
 
+// 첫 실행/서버 변경 설정 창 — 로컬 setup.html 을 setup 전용 preload 플래그로 연다(D8).
+let setupWindow: BrowserWindow | null = null;
+function setupPageUrl(): string {
+  return pathToFileURL(path.join(app.getAppPath(), "assets", "setup.html")).toString();
+}
+function openSetupWindow(): void {
+  if (setupWindow && !setupWindow.isDestroyed()) {
+    setupWindow.show();
+    setupWindow.focus();
+    return;
+  }
+  const win = new BrowserWindow({
+    width: 460,
+    height: 400,
+    resizable: false,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(import.meta.dirname, "preload.cjs"),
+      additionalArguments: ["--assay-setup"],
+    },
+  });
+  win.setMenuBarVisibility(false);
+  win.on("closed", () => {
+    setupWindow = null;
+  });
+  void win.loadURL(setupPageUrl());
+  setupWindow = win;
+}
+
 function createOrFocusWindow(): void {
+  // 서버 미구성 — 앱 창 대신 설정 화면(로그인 화면에 도달할 수 없으므로).
+  if (webUrl === null || webOrigin === null) {
+    openSetupWindow();
+    return;
+  }
+  const url = webUrl;
+  const origin = webOrigin;
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
     mainWindow.focus();
@@ -224,14 +275,14 @@ function createOrFocusWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
-    webPreferences: securePreferences(),
+    webPreferences: securePreferences(origin),
   });
   // window.open: 웹 origin 만 앱 새 창, 그 외 http/https 는 시스템 브라우저(정책 근거는 window-policy.ts 주석).
-  win.webContents.setWindowOpenHandler(({ url }) => {
-    const decision = decideWindowOpen(url, webOrigin);
-    if (decision === "external") void shell.openExternal(url);
+  win.webContents.setWindowOpenHandler(({ url: target }) => {
+    const decision = decideWindowOpen(target, origin);
+    if (decision === "external") void shell.openExternal(target);
     if (decision !== "in-app") return { action: "deny" };
-    return { action: "allow", overrideBrowserWindowOptions: { webPreferences: securePreferences() } };
+    return { action: "allow", overrideBrowserWindowOptions: { webPreferences: securePreferences(origin) } };
   });
   // 탑레벨 네비게이션: http/https 만 허용(OIDC/OAuth 리다이렉트 경유), 그 외 스킴 차단.
   win.webContents.on("will-navigate", (event, url) => {
@@ -246,7 +297,7 @@ function createOrFocusWindow(): void {
   win.on("closed", () => {
     mainWindow = null;
   });
-  void win.loadURL(webUrl);
+  void win.loadURL(url);
   mainWindow = win;
 }
 
@@ -260,6 +311,7 @@ function refreshTrayMenu(): void {
         {
           openApp: () => createOrFocusWindow(),
           setAutostart: (next) => applyAutostart(next),
+          changeServerUrl: () => openSetupWindow(),
           // 로컬 해제(토큰 폐기+정지) — 서버 레코드 revoke 는 웹 계정 페이지가 권위.
           unpairRunner: () => void controller.unpair().catch((e) => console.error(`러너 해제 실패: ${e}`)),
           applyUpdate: () => applyUpdateNow(),
@@ -295,8 +347,42 @@ if (!app.requestSingleInstanceLock()) {
       console.error("⚠ OS 키링이 없어 러너 토큰을 safeStorage basic_text(난독화)로 저장합니다 — 키링 설치를 권장.");
     }
     config = loadConfig(configIo());
+    // 서버 URL 결정(D8): env(개발/e2e) > 사용자 설정 > CI 주입 기본값. 없으면 설정 화면이 뜬다.
+    applyWebUrl(
+      resolveWebUrl({
+        envUrl: process.env.ASSAY_WEB_URL,
+        configUrl: config.webUrl,
+        bakedUrl: typeof __ASSAY_DEFAULT_WEB_URL__ === "undefined" ? undefined : __ASSAY_DEFAULT_WEB_URL__,
+      }),
+    );
+
+    // 설정 창 전용 IPC(D8) — setup.html 의 file:// URL 에서만 허용(웹/외부 페이지 차단).
+    const fromSetupPage = (event: { senderFrame: { url: string } | null }): boolean =>
+      event.senderFrame?.url === setupPageUrl();
+    ipcMain.handle("assay:get-server-url", (event) => {
+      if (!fromSetupPage(event)) throw new Error("허용되지 않은 호출입니다.");
+      return webUrl ?? "";
+    });
+    ipcMain.handle("assay:set-server-url", (event, raw: unknown) => {
+      if (!fromSetupPage(event)) throw new Error("허용되지 않은 호출입니다.");
+      const url = normalizeWebUrl(typeof raw === "string" ? raw : null);
+      if (url === null) throw new Error("올바른 http/https 서버 주소가 아닙니다.");
+      config = { ...loadConfig(configIo()), webUrl: url };
+      saveConfig(configIo(), config);
+      applyWebUrl(url);
+      // 기존 앱 창은 이전 origin 의 preload 인자를 갖고 있어 새로 연다(닫기=숨김 핸들러를 우회해 destroy).
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        const old = mainWindow;
+        mainWindow = null;
+        old.destroy();
+      }
+      setupWindow?.close();
+      createOrFocusWindow();
+      refreshTrayMenu();
+      return true;
+    });
     registerBridge(ipcMain, {
-      webOrigin,
+      webOrigin: () => webOrigin,
       appInfo,
       pair: (payload) => controller.pair(payload),
       unpair: () => controller.unpair(),

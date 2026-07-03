@@ -15,7 +15,14 @@ const BUSY: DesktopRunnerStatus = { ...IDLE, state: "running", activeJobs: 2 };
 const NO_UPDATE: UpdaterState = { kind: "disabled" };
 
 function actions(): TrayMenuActions & { openApp: ReturnType<typeof vi.fn> } {
-  return { openApp: vi.fn(), setAutostart: vi.fn(), unpairRunner: vi.fn(), applyUpdate: vi.fn(), quit: vi.fn() };
+  return {
+    openApp: vi.fn(),
+    setAutostart: vi.fn(),
+    changeServerUrl: vi.fn(),
+    unpairRunner: vi.fn(),
+    applyUpdate: vi.fn(),
+    quit: vi.fn(),
+  };
 }
 
 // click 은 electron 이 (menuItem, window, event) 로 부르지만 템플릿 빌더는 인자를 쓰지 않는다 — 무인자 호출로 검증.
@@ -41,6 +48,7 @@ describe("buildTrayMenuTemplate", () => {
       "Assay 열기",
       "separator",
       "로그인 시 자동 시작",
+      "서버 주소 변경…",
       "separator",
       "종료",
     ]);
@@ -80,6 +88,13 @@ describe("buildTrayMenuTemplate", () => {
     expect(apply).toBeDefined();
     click(apply ?? {});
     expect(a.applyUpdate).toHaveBeenCalledOnce();
+  });
+
+  it("'서버 주소 변경…' 클릭이 changeServerUrl 을 호출한다", () => {
+    const a = actions();
+    const t = buildTrayMenuTemplate({ autostart: false, runner: OFF, updater: NO_UPDATE }, a);
+    click(t.find((i) => i.label === "서버 주소 변경…") ?? {});
+    expect(a.changeServerUrl).toHaveBeenCalledOnce();
   });
 
   it("열기/종료 클릭이 액션을 호출한다", () => {

@@ -54,7 +54,8 @@ export interface IpcMainLike {
 }
 
 export interface BridgeDeps {
-  webOrigin: string;
+  // 현재 웹 origin 을 항상 새로 읽는다(D8: 서버 주소는 런타임에 바뀔 수 있음). null=서버 미구성 → 전부 차단.
+  webOrigin(): string | null;
   appInfo(): Promise<DesktopAppInfo>;
   pair(payload: PairPayload): Promise<void>;
   unpair(): Promise<void>;
@@ -65,7 +66,8 @@ export function registerBridge(ipc: IpcMainLike, deps: BridgeDeps): void {
   const guarded =
     (handler: (payload: unknown) => unknown) =>
     (event: InvokeEventLike, payload: unknown): unknown => {
-      if (!senderAllowed(event.senderFrame?.url, deps.webOrigin))
+      const origin = deps.webOrigin();
+      if (origin === null || !senderAllowed(event.senderFrame?.url, origin))
         throw new Error("허용되지 않은 origin 의 브리지 호출입니다.");
       return handler(payload);
     };

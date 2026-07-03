@@ -12,6 +12,7 @@ export interface TrayMenuState {
 export interface TrayMenuActions {
   openApp(): void;
   setAutostart(next: boolean): void;
+  changeServerUrl(): void; // 설정 창(setup.html) 열기 — D8
   unpairRunner(): void;
   applyUpdate(): void; // ready 상태에서만 노출 — 러너 정리 후 재시작·적용은 main 책임
   quit(): void;
@@ -53,6 +54,7 @@ export function buildTrayMenuTemplate(state: TrayMenuState, actions: TrayMenuAct
       checked: state.autostart,
       click: () => actions.setAutostart(!state.autostart),
     },
+    { label: "서버 주소 변경…", click: () => actions.changeServerUrl() },
     // 로컬 해제 — 이 기기의 토큰 폐기+러너 정지. 서버 쪽 러너 레코드 revoke 는 웹 계정 페이지가 권위.
     ...(state.runner.paired
       ? ([

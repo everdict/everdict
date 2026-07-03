@@ -24,6 +24,20 @@
 >   `POST /runners` (BFF+MCP `pair_runner`) stays, which is also the **headless path**: on a server/CI box,
 >   create the pairing with an API key (`curl -H "Authorization: Bearer ak_…" -X POST /runners`) and feed
 >   the returned `rnr_` token to `assay runner --pair`.
+> - **D8 — the packaged app must know its server (LOCKED 2026-07-03).** Web URL resolution:
+>   `ASSAY_WEB_URL` env (dev/e2e) > `config.json webUrl` (user-saved) > CI-baked default
+>   (`ASSAY_DESKTOP_DEFAULT_WEB_URL` repo Variable → esbuild `define` at package time). None → a local
+>   **first-run setup screen** (`assets/setup.html`) asks for the server address; also reachable from the
+>   tray ("서버 주소 변경…"). The setup window gets its own 2-method bridge (`window.assaySetup`:
+>   get/setServerUrl) behind a `--assay-setup` argv flag, and the main-side IPC only accepts calls whose
+>   `senderFrame` is exactly the local setup.html `file://` URL. Changing the server rebuilds the app
+>   window (old preload origin args are stale) and the runner bridge origin-guard reads the *current*
+>   origin (getter, not a captured value). **Login/auth status**: with D8 in place the auth story is
+>   closed — Keycloak OIDC runs inside the webview (D5, cookies persist like a browser), the runner
+>   authenticates independently via its `rnr_` keychain token, and an account-switch mismatch shows a
+>   re-pair callout on the account page. Live-verified end-to-end vs real Keycloak
+>   (`scripts/live/desktop-keycloak.mjs`): fresh machine → setup screen → server saved → OIDC login
+>   (alice) → one-click pair → runner online, against the real-auth control plane.
 >
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`

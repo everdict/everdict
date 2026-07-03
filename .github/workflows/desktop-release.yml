@@ -60,6 +60,9 @@ jobs:
 
       - name: 패키징 (esbuild 단일 번들 → electron-builder, unsigned)
         working-directory: apps/desktop
+        env:
+          # 릴리즈 빌드에 굽는 기본 서버 URL(D8) — repo Variables 에 설정(미설정 시 앱이 첫 실행 설정 화면을 띄움).
+          ASSAY_DESKTOP_DEFAULT_WEB_URL: ${{ vars.ASSAY_DESKTOP_DEFAULT_WEB_URL }}
         run: |
           node esbuild.mjs
           pnpm exec electron-builder ${{ matrix.args }} --publish never
