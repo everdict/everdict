@@ -116,8 +116,11 @@ def collect(path, positions, data_only=True):
     vals = {}
     for sheet, a1 in positions:
         ws = find_sheet(wb, sheet)
+        # 셀 키는 '해결된 시트 제목'이 아니라 answer_position 의 시트 지정(이름 | 첫 시트)으로 — golden/output 의 첫
+        # 시트 제목이 달라도(예: golden='Sheet', output='Sales') 첫 시트끼리 위치로 비교되게. 공식 eval 도 첫 시트 기준.
+        skey = sheet if sheet is not None else "\x00first"
         for c in cells_of(ws, a1):
-            vals[(ws.title, c.coordinate)] = c.value
+            vals[(skey, c.coordinate)] = c.value
     return vals
 
 

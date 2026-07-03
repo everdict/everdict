@@ -15,6 +15,21 @@
       "trace": {
         "kind": "none"
       }
+    },
+    {
+      "kind": "command",
+      "category": "cli-agent",
+      "id": "sbench-codex",
+      "version": "1",
+      "setup": [],
+      "command": "codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check {{task}} < /dev/null",
+      "model": "gpt-5-codex",
+      "env": {
+        "CODEX_HOME": "/codex"
+      },
+      "trace": {
+        "kind": "none"
+      }
     }
   ],
   "harnesses": [
@@ -24,6 +39,15 @@
         "version": "1"
       },
       "id": "codex",
+      "version": "1.0.0",
+      "pins": {}
+    },
+    {
+      "template": {
+        "id": "sbench-codex",
+        "version": "1"
+      },
+      "id": "sbench-codex",
       "version": "1.0.0",
       "pins": {}
     }
@@ -170,6 +194,50 @@
         "spreadsheetbench",
         "v2",
         "sample"
+      ]
+    },
+    {
+      "id": "spreadsheetbench-v1-codex-sample",
+      "version": "1.0.0",
+      "description": "codex-in-image 샘플 — codex 가 이미지(spreadsheetbench-codex:v1) 안에서 머신 로그인(러너 마운트)으로 수행, 수식 산출을 recalc 후 채점. 하니스=sbench-codex, 러너 `--mount-codex-login` 필요.",
+      "cases": [
+        {
+          "id": "sum-amount-formula",
+          "env": {
+            "kind": "repo",
+            "source": {
+              "files": {
+                "gen_v1.py": "# SpreadsheetBench v1 스타일 샘플 입력 생성 — 실제 xlsx 스프레드시트를 작업 디렉터리에 심는다.\n# 실제 SpreadsheetBench(912 instructions)은 포럼에서 수집한 xlsx 를 케이스별로 제공하지만, 번들에 바이너리를\n# 인라인할 수 없으므로 샘플은 setup 에서 이 스크립트로 결정적 xlsx 를 생성한다(파이프라인 실증용).\nimport openpyxl\n\nwb = openpyxl.Workbook()\nws = wb.active\nws.title = \"Sales\"\nws[\"A1\"], ws[\"B1\"] = \"Region\", \"Amount\"\nrows = [(\"North\", 120), (\"South\", 340), (\"East\", 80), (\"West\", 260), (\"North\", 150)]\nfor i, (region, amount) in enumerate(rows, start=2):\n    ws[f\"A{i}\"], ws[f\"B{i}\"] = region, amount\nwb.save(\"input.xlsx\")\nprint(f\"wrote input.xlsx ({len(rows)} rows), sum(Amount)={sum(a for _, a in rows)}\")\n"
+              }
+            },
+            "setup": [
+              "python3 gen_v1.py",
+              "python3 -c \"import openpyxl;i=openpyxl.load_workbook('input.xlsx')['Sales'];g=openpyxl.Workbook();g.active['D1']=sum(c.value for c in i['B'][1:] if isinstance(c.value,(int,float)));g.save('golden.xlsx')\""
+            ]
+          },
+          "image": "spreadsheetbench-codex:v1",
+          "task": "The file input.xlsx (sheet 'Sales') has 'Region' in A1 and 'Amount' in B1, with data in rows 2-6. Compute the total of the Amount column and put it into cell D1 of a NEW file output.xlsx in the working directory. A formula such as =SUM(...) is acceptable — it will be recalculated. Keep input.xlsx unchanged. Only create output.xlsx.",
+          "graders": [
+            {
+              "id": "tests-pass",
+              "config": {
+                "cmd": "/opt/recalc.sh output.xlsx && python3 /opt/sbench_grade.py --version v1 --output output.xlsx --golden golden.xlsx --answer-position \"D1\""
+              }
+            }
+          ],
+          "timeoutSec": 600,
+          "tags": [
+            "spreadsheetbench",
+            "v1",
+            "codex",
+            "in-image"
+          ]
+        }
+      ],
+      "tags": [
+        "spreadsheetbench",
+        "v1",
+        "codex"
       ]
     }
   ]

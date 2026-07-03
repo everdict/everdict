@@ -37,6 +37,23 @@ V2_TASK = (
     "(e.g. a 'Total' row). Save it as output.xlsx in the working directory."
 )
 
+# codex-in-image 샘플: codex 가 이미지 안에서 수식으로 풀어도 recalc 로 채점되도록.
+CODEX_TASK = (
+    "The file input.xlsx (sheet 'Sales') has 'Region' in A1 and 'Amount' in B1, with data in rows 2-6. "
+    "Compute the total of the Amount column and put it into cell D1 of a NEW file output.xlsx in the working "
+    "directory. A formula such as =SUM(...) is acceptable — it will be recalculated. Keep input.xlsx unchanged. "
+    "Only create output.xlsx."
+)
+# 입력에서 정답 golden.xlsx(D1=Amount 합계) 생성 — grader 가 recalc 후 이 golden 과 비교(공식 V1 방식).
+GOLDEN_FROM_INPUT = (
+    "python3 -c \"import openpyxl;i=openpyxl.load_workbook('input.xlsx')['Sales'];g=openpyxl.Workbook();"
+    "g.active['D1']=sum(c.value for c in i['B'][1:] if isinstance(c.value,(int,float)));g.save('golden.xlsx')\""
+)
+CODEX_GRADER = (
+    '/opt/recalc.sh output.xlsx && python3 /opt/sbench_grade.py --version v1 '
+    '--output output.xlsx --golden golden.xlsx --answer-position "D1"'
+)
+
 bundle = {
     "id": "spreadsheetbench",
     "version": "1.0.0",
@@ -57,9 +74,26 @@ bundle = {
             "model": "gpt-5-codex",
             "env": {},
             "trace": {"kind": "none"},
-        }
+        },
+        # codex-in-image 하니스 — codex 를 이미지 안에서 실행(SpreadsheetBench 처럼 채점 툴체인이 필요할 때). 인증은
+        # self-hosted 러너가 ~/.codex 를 /codex 로 마운트(머신 로그인=own-pays; `assay runner --mount-codex-login`).
+        # 컨테이너 안에선 codex 자체 sandbox 가 중첩 실패 → --dangerously-bypass-approvals-and-sandbox(격리는 컨테이너).
+        {
+            "kind": "command",
+            "category": "cli-agent",
+            "id": "sbench-codex",
+            "version": "1",
+            "setup": [],
+            "command": "codex exec --dangerously-bypass-approvals-and-sandbox --skip-git-repo-check {{task}} < /dev/null",
+            "model": "gpt-5-codex",
+            "env": {"CODEX_HOME": "/codex"},  # 러너가 마운트한 로그인 디렉터리
+            "trace": {"kind": "none"},
+        },
     ],
-    "harnesses": [{"template": {"id": "codex", "version": "1"}, "id": "codex", "version": "1.0.0", "pins": {}}],
+    "harnesses": [
+        {"template": {"id": "codex", "version": "1"}, "id": "codex", "version": "1.0.0", "pins": {}},
+        {"template": {"id": "sbench-codex", "version": "1"}, "id": "sbench-codex", "version": "1.0.0", "pins": {}},
+    ],
     # 레시피: 실제 SpreadsheetBench 데이터(HF)를 인입하기 위한 어댑터 템플릿.
     # xlsx 파일 트리는 텍스트 행으로 인입 불가 → 실데이터는 이미지에 스테이징(repoPath)하고, grader 가 answer_position 을
     # 보간해 공식식 채점(sbench_grade.py)을 돌린다. id/instruction/answer_position 은 dataset.json 필드 그대로.
@@ -174,6 +208,29 @@ bundle = {
                 }
             ],
             "tags": ["spreadsheetbench", "v2", "sample"],
+        },
+        # codex-in-image 샘플 — 하니스 sbench-codex 로 실행. codex 가 컨테이너 안에서 머신 로그인(러너 --mount-codex-login)으로
+        # 수행하고, 수식 산출을 이미지 안 LibreOffice 로 recalc 후 채점. image 는 codex+툴체인 결합본.
+        {
+            "id": "spreadsheetbench-v1-codex-sample",
+            "version": "1.0.0",
+            "description": "codex-in-image 샘플 — codex 가 이미지(spreadsheetbench-codex:v1) 안에서 머신 로그인(러너 마운트)으로 수행, 수식 산출을 recalc 후 채점. 하니스=sbench-codex, 러너 `--mount-codex-login` 필요.",
+            "cases": [
+                {
+                    "id": "sum-amount-formula",
+                    "env": {
+                        "kind": "repo",
+                        "source": {"files": {"gen_v1.py": script("gen_v1.py")}},
+                        "setup": ["python3 gen_v1.py", GOLDEN_FROM_INPUT],
+                    },
+                    "image": "spreadsheetbench-codex:v1",  # codex(에이전트) + libreoffice/openpyxl/grader(채점)
+                    "task": CODEX_TASK,
+                    "graders": [{"id": "tests-pass", "config": {"cmd": CODEX_GRADER}}],
+                    "timeoutSec": 600,
+                    "tags": ["spreadsheetbench", "v1", "codex", "in-image"],
+                }
+            ],
+            "tags": ["spreadsheetbench", "v1", "codex"],
         },
     ],
 }

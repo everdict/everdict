@@ -90,6 +90,23 @@ rule, score each `{N}_{id}_output.xlsx` and require all three. For V2 **Visualiz
 **judge** over the rendered chart against the `criteria` checklist instead of `tests-pass` (out of scope for the
 deterministic samples).
 
+## codex in the image (machine login, own-pays)
+
+`Dockerfile.codex` builds `spreadsheetbench-codex:v1` = the grader toolchain **+ node + codex**. The `sbench-codex`
+harness runs `codex exec --dangerously-bypass-approvals-and-sandbox …` **inside** that image (codex's own nested
+linux-sandbox fails in Docker, so the container provides isolation). Auth is the runner's **machine ChatGPT
+login**: start the self-hosted runner with `assay runner --pair … --mount-codex-login`, which bind-mounts
+`~/.codex → /codex` (`CODEX_HOME=/codex`) into containerized jobs — **own login pays, no API key** (see
+`docs/architecture/portable-harness-runtime.md` slice 4). Verified:
+
+```bash
+docker build -t spreadsheetbench-codex:v1 -f Dockerfile.codex examples/bundles/spreadsheetbench
+node scripts/live/spreadsheetbench-codex-selfhosted.mjs   # runner --mount-codex-login → codex-in-image → recalc → PASS
+```
+
+The `spreadsheetbench-v1-codex-sample` dataset (`image: spreadsheetbench-codex:v1`) runs codex through this path;
+a formula output is recalculated by the in-image LibreOffice before scoring, so codex may write `=SUM(...)`.
+
 ## Files
 
 | File | What |
@@ -97,6 +114,7 @@ deterministic samples).
 | `bundle.json` | the manifest (generated) — apply this |
 | `build-bundle.py` | regenerates `bundle.json`, embedding `scripts/*.py` into the sample datasets |
 | `Dockerfile` | builds `spreadsheetbench:v1` (python + libreoffice-calc + openpyxl + grader + recalc) — the portable runtime image |
+| `Dockerfile.codex` | builds `spreadsheetbench-codex:v1` (= `:v1` + node + codex) — runs codex *in* the image with the runner's mounted machine login (`sbench-codex` harness) |
 | `scripts/sbench_grade.py` | faithful V1/V2 scorer (golden-based) — for real data |
 | `scripts/recalc.sh` | LibreOffice-headless recalc of a formula xlsx → cached values (run in the grader, pre-scoring) |
 | `scripts/gen_v1.py` · `grade_v1.py` | v1 sample input generator + recompute grader |
