@@ -84,10 +84,12 @@ export default async function SchedulesPage({
         <ScheduleList
           schedules={schedules}
           authors={authors}
+          workspace={workspace}
           fires={fires}
           nowIso={nowIso}
           me={principal?.subject ?? ''}
           canWrite={canWrite}
+          isAdmin={principal?.roles.includes('admin') ?? false}
           initialView={initialView}
         />
       )}

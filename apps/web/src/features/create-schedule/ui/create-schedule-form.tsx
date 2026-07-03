@@ -11,6 +11,7 @@ import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { FieldError, Input, Label } from '@/shared/ui/input'
 
 import { createScheduleAction } from '../api/create-schedule'
+import { updateScheduleAction } from '../api/update-schedule'
 
 function versionOptions(versions: string[]): ComboboxOption[] {
   const sorted = sortSemverDesc(versions)
@@ -42,15 +43,22 @@ interface Values {
   concurrency: string
 }
 
-// 데이터셋×하니스를 cron 으로 주기 실행하는 예약 생성. 발사·해석은 컨트롤플레인(Temporal Schedule)이 한다.
+// 데이터셋×하니스를 cron 으로 주기 실행하는 예약 생성/수정. 발사·해석은 컨트롤플레인(Temporal Schedule)이 한다.
+// scheduleId 가 있으면 수정 모드(PATCH) — initial 로 프리필, initialJudges 로 기존 judge 보존.
 export function CreateScheduleForm({
   datasets,
   harnesses,
   runtimes,
+  initial,
+  scheduleId,
+  initialJudges = [],
 }: {
   datasets: { id: string; versions: string[] }[]
   harnesses: { id: string; versions: string[] }[]
   runtimes: { id: string }[]
+  initial?: Partial<Values>
+  scheduleId?: string
+  initialJudges?: { id: string; version: string }[]
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -74,6 +82,7 @@ export function CreateScheduleForm({
       harnessVersion: 'latest',
       runtime: '',
       concurrency: '',
+      ...initial,
     },
   })
 
@@ -99,12 +108,12 @@ export function CreateScheduleForm({
     setServerError(undefined)
     const { concurrency, ...rest } = values
     const n = Number.parseInt(concurrency, 10)
-    const res = await createScheduleAction({
-      ...rest,
-      ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
-    })
+    const input = { ...rest, ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}) }
+    const res = scheduleId
+      ? await updateScheduleAction(scheduleId, input, initialJudges)
+      : await createScheduleAction(input)
     if (res.ok) router.push(`/${workspace}/schedules`)
-    else setServerError(res.error ?? '예약 생성 실패')
+    else setServerError(res.error ?? (scheduleId ? '예약 수정 실패' : '예약 생성 실패'))
   }
 
   return (
@@ -309,7 +318,13 @@ export function CreateScheduleForm({
       </p>
 
       <Button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? '생성 중…' : '예약 생성'}
+        {isSubmitting
+          ? scheduleId
+            ? '저장 중…'
+            : '생성 중…'
+          : scheduleId
+            ? '변경 저장'
+            : '예약 생성'}
       </Button>
     </form>
   )

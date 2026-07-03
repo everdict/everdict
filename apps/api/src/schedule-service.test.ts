@@ -1,4 +1,4 @@
-import { BadRequestError, NotFoundError } from "@assay/core";
+import { BadRequestError, ForbiddenError, NotFoundError } from "@assay/core";
 import { InMemoryScheduleStore, type ScheduleRunTemplate } from "@assay/db";
 import { describe, expect, it } from "vitest";
 import { type ScheduleDriver, ScheduleService, type ScheduleSpec, isValidCron } from "./schedule-service.js";
@@ -362,5 +362,42 @@ describe("ScheduleService — Temporal authoritative 다음 발사(nextFireTimes
     const list = await s.list("acme");
     expect(list).toHaveLength(1);
     expect(list[0]?.nextFireTimes).toBeUndefined();
+  });
+});
+
+describe("ScheduleService.update — 내용 편집 소유권(생성자·admin) 게이트", () => {
+  it("생성자/admin 이 아닌 사람의 내용 편집은 ForbiddenError(403)", async () => {
+    const s = svc();
+    await s.create({ ...base, createdBy: "owner" }); // sch-1
+    await expect(
+      s.update("acme", "sch-1", { cron: "0 6 * * *" }, { subject: "someone-else", isAdmin: false }),
+    ).rejects.toBeInstanceOf(ForbiddenError);
+  });
+
+  it("생성자 본인·워크스페이스 admin 은 내용 편집 가능", async () => {
+    const s = svc();
+    await s.create({ ...base, createdBy: "owner" }); // sch-1
+    await expect(
+      s.update("acme", "sch-1", { name: "renamed" }, { subject: "owner", isAdmin: false }),
+    ).resolves.toMatchObject({ name: "renamed" });
+    await expect(
+      s.update("acme", "sch-1", { cron: "0 7 * * *" }, { subject: "any-admin", isAdmin: true }),
+    ).resolves.toMatchObject({ cron: "0 7 * * *" });
+  });
+
+  it("pause/resume(enabled-only)는 소유권 무관 — 내용 편집이 아니므로 게이트 안 함", async () => {
+    const s = svc();
+    await s.create({ ...base, createdBy: "owner" }); // sch-1
+    await expect(
+      s.update("acme", "sch-1", { enabled: false }, { subject: "someone-else", isAdmin: false }),
+    ).resolves.toMatchObject({ enabled: false });
+  });
+
+  it("actor 미주입(내부 호출)이면 소유권 검사를 건너뛴다", async () => {
+    const s = svc();
+    await s.create({ ...base, createdBy: "owner" });
+    await expect(s.update("acme", "sch-1", { cron: "0 8 * * *" })).resolves.toMatchObject({
+      cron: "0 8 * * *",
+    });
   });
 });

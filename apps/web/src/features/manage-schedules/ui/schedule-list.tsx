@@ -42,18 +42,22 @@ const UPCOMING_LIMIT = 24
 export function ScheduleList({
   schedules,
   authors,
+  workspace,
   fires,
   nowIso,
   me,
   canWrite,
+  isAdmin,
   initialView = 'list',
 }: {
   schedules: Schedule[]
   authors: Record<string, Author>
+  workspace: string // 데이터셋/하니스/수정 링크 prefix
   fires: Record<string, string[]> // 예약 id → 다음 발사 시각(ISO, 서버 계산). 일시중지면 빈 배열.
   nowIso: string // 서버 기준 now — 상대 날짜 라벨을 서버/클라 동일하게(hydration 안전).
-  me: string // 현재 사용자 subject — 소유자 표기에서 '(나)'.
-  canWrite: boolean
+  me: string // 현재 사용자 subject — 소유자 표기 + 수정 권한(생성자).
+  canWrite: boolean // 일시중지/삭제(member+)
+  isAdmin: boolean // 워크스페이스 admin — 남의 예약도 수정 가능
   initialView?: View // ?view= 로 초기 뷰 지정(딥링크). 이후 전환은 로컬 상태.
 }) {
   const router = useRouter()
@@ -149,11 +153,13 @@ export function ScheduleList({
       key={s.id}
       schedule={s}
       authors={authors}
+      workspace={workspace}
       next={(fires[s.id] ?? [])[0]}
       approx={s.enabled && !(s.nextFireTimes && s.nextFireTimes.length > 0)}
       nowIso={nowIso}
       me={me}
       canWrite={canWrite}
+      canEdit={s.createdBy === me || isAdmin}
       pending={pending}
       onToggle={onToggle}
       onDelete={onDelete}

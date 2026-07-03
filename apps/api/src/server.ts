@@ -1409,7 +1409,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
     try {
-      return reply.send(await deps.scheduleService.update(principal.workspace, req.params.id, body)); // 없으면 404
+      return reply.send(
+        await deps.scheduleService.update(principal.workspace, req.params.id, body, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        }),
+      ); // 없으면 404(내용 편집은 생성자·admin 만 → 403)
     } catch (err) {
       return sendError(reply, err);
     }

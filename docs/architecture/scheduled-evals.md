@@ -139,7 +139,10 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
   safe) and marks those rows **(예상)**.
 - **Internal** — `POST /internal/schedules/:id/fire`, `GET /internal/schedules/:id/last-status` (`x-internal-token`).
 - **Roles** — new `schedules:read` (viewer+) / `schedules:write` (member+) in the authz matrix; gate mutating
-  routes + workspace-scope; another workspace's schedule reads **404**.
+  routes + workspace-scope; another workspace's schedule reads **404**. **Content edit** (name/cron/timezone/
+  overlap/runTemplate) is further gated to **creator OR workspace admin** — enforced in `ScheduleService.update`
+  (route/MCP inject `actor={subject,isAdmin}`; a patch touching only `enabled`, i.e. pause/resume, stays
+  member+). Web mirrors this (edit button + edit page gated to creator/admin; the control plane is authoritative).
 - **Web** — a Schedules page with a **view switcher (리스트 / 소유자별 / 캘린더, `?view=` deep-link)** over shared
   owner·status·runtime filters: each row shows the **owner** (members-joined avatar), **runtime** chip,
   **benchmark→harness**, a human-readable **cadence** (`describeCron`), and the **next fire** (authoritative or

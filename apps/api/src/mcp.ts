@@ -910,7 +910,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           if (a.timezone !== undefined) patch.timezone = a.timezone;
           if (a.overlap_policy !== undefined) patch.overlapPolicy = a.overlap_policy;
           if (a.enabled !== undefined) patch.enabled = a.enabled;
-          return ok(await schedules.update(ws, a.id, patch));
+          return ok(
+            await schedules.update(ws, a.id, patch, {
+              subject: principal.subject,
+              isAdmin: principal.roles.includes("admin"),
+            }),
+          );
         }),
     );
 

@@ -1,5 +1,6 @@
 'use client'
 
+import Link from 'next/link'
 import { Server } from 'lucide-react'
 
 import type { Schedule } from '@/entities/schedule'
@@ -7,7 +8,7 @@ import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
-import { Button } from '@/shared/ui/button'
+import { Button, buttonVariants } from '@/shared/ui/button'
 import { EntityRef } from '@/shared/ui/chip'
 
 export type Author = { name: string; avatarUrl?: string }
@@ -58,22 +59,26 @@ export function ScheduleOwner({
 export function ScheduleCard({
   schedule: s,
   authors,
+  workspace,
   next,
   approx,
   nowIso,
   me,
   canWrite,
+  canEdit,
   pending,
   onToggle,
   onDelete,
 }: {
   schedule: Schedule
   authors: Record<string, Author>
+  workspace: string // 데이터셋/하니스/수정 링크 prefix
   next: string | undefined // 다음 발사 시각(ISO) — 없거나 일시중지면 undefined
   approx: boolean // 다음 발사가 cron 근사(Temporal authoritative 아님)면 '(예상)' 표기
   nowIso: string
   me: string
-  canWrite: boolean
+  canWrite: boolean // 일시중지/삭제(member+)
+  canEdit: boolean // 수정 = 생성자 또는 워크스페이스 admin
   pending: boolean
   onToggle: (s: Schedule) => void
   onDelete: (s: Schedule) => void
@@ -88,15 +93,24 @@ export function ScheduleCard({
         </div>
         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
           <span className="font-[510] text-foreground/90">{describeCron(s.cron)}</span>
-          <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
-            {s.cron}
-          </code>
           <span className="text-faint">{s.timezone}</span>
         </div>
         <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]">
-          <EntityRef id={s.runTemplate.dataset.id} version={s.runTemplate.dataset.version} />
+          <Link
+            href={`/${workspace}/datasets/${encodeURIComponent(s.runTemplate.dataset.id)}`}
+            className="rounded-sm hover:text-foreground hover:underline"
+            title="데이터셋(벤치마크) 상세"
+          >
+            <EntityRef id={s.runTemplate.dataset.id} version={s.runTemplate.dataset.version} />
+          </Link>
           <span className="text-faint">→</span>
-          <EntityRef id={s.runTemplate.harness.id} version={s.runTemplate.harness.version} />
+          <Link
+            href={`/${workspace}/harnesses/${encodeURIComponent(s.runTemplate.harness.id)}`}
+            className="rounded-sm hover:text-foreground hover:underline"
+            title="하니스 상세"
+          >
+            <EntityRef id={s.runTemplate.harness.id} version={s.runTemplate.harness.version} />
+          </Link>
           <RuntimeChip label={runtimeLabelOf(s)} />
         </div>
         <div className="flex flex-wrap items-center gap-x-1 text-[12px] text-muted-foreground">
@@ -122,7 +136,15 @@ export function ScheduleCard({
       </div>
       {canWrite ? (
         <div className="flex shrink-0 gap-2">
-          <Button size="sm" variant="secondary" disabled={pending} onClick={() => onToggle(s)}>
+          {canEdit ? (
+            <Link
+              href={`/${workspace}/schedules/${encodeURIComponent(s.id)}/edit`}
+              className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+            >
+              수정
+            </Link>
+          ) : null}
+          <Button size="sm" variant="ghost" disabled={pending} onClick={() => onToggle(s)}>
             {s.enabled ? '일시중지' : '재개'}
           </Button>
           <Button size="sm" variant="ghost" disabled={pending} onClick={() => onDelete(s)}>

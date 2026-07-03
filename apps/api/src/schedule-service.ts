@@ -1,4 +1,4 @@
-import { BadRequestError, NotFoundError } from "@assay/core";
+import { BadRequestError, ForbiddenError, NotFoundError } from "@assay/core";
 import type { ScheduleOverlapPolicy, ScheduleRecord, ScheduleRunTemplate, ScheduleStore } from "@assay/db";
 import type { RunScorecardInput } from "./scorecard-service.js";
 
@@ -172,14 +172,29 @@ export class ScheduleService {
     return records.map((r) => (next[r.id]?.length ? { ...r, nextFireTimes: next[r.id] } : r));
   }
 
-  async update(tenant: string, id: string, patch: UpdateScheduleInput): Promise<ScheduleRecord> {
+  // 수정 — pause/resume(enabled) 는 member+, 내용 편집(이름/cron/타임존/겹침/runTemplate)은 생성자 또는 admin 만.
+  // actor 는 호출 경계(라우트/MCP)가 주입한다; 미주입(내부 호출/테스트)이면 소유권 검사를 건너뛴다.
+  async update(
+    tenant: string,
+    id: string,
+    patch: UpdateScheduleInput,
+    actor?: { subject: string; isAdmin: boolean },
+  ): Promise<ScheduleRecord> {
     if (patch.cron !== undefined && !isValidCron(patch.cron))
       throw new BadRequestError(
         "BAD_REQUEST",
         { cron: patch.cron },
         `cron 식이 올바르지 않습니다(5필드 필요): '${patch.cron}'`,
       );
-    await this.getRecord(tenant, id); // 존재/소유 확인(404)
+    const existing = await this.getRecord(tenant, id); // 존재/소유 확인(404)
+    // enabled 외 필드를 바꾸는 '내용 편집'은 생성자·admin 만(발사가 생성자 신원으로 돌기 때문). pause 는 member+.
+    const editsContent = Object.keys(patch).some((k) => k !== "enabled");
+    if (editsContent && actor && existing.createdBy !== actor.subject && !actor.isAdmin)
+      throw new ForbiddenError(
+        "FORBIDDEN",
+        { id, action: "schedules:edit" },
+        "이 예약을 수정할 권한이 없습니다(예약 생성자 또는 워크스페이스 admin 만).",
+      );
     const updated = await this.deps.store.update(tenant, id, { ...patch, updatedAt: this.now() });
     if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `schedule '${id}' 를 찾을 수 없습니다.`);
     await this.deps.driver?.ensure(this.specOf(updated)); // cron/타임존/겹침/pause 재동기화
