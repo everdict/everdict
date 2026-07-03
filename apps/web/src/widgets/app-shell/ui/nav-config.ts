@@ -6,6 +6,7 @@ import {
   Database,
   FileText,
   LayoutDashboard,
+  Server,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -24,9 +25,9 @@ export interface NavSection {
   items: NavItem[]
 }
 
-// SaaS 표면은 3개 핵심 개념으로 좁힌다: 하니스(무엇을) · 벤치마크(무엇으로) · 스코어카드(결과) + 홈(개요).
-// judge/runtime/metric/model/recipe/bundle 은 엔진 부품/고급 옵션 — 벤치마크 실행에 필수가 아니라 내비에서 제외한다
-// (라우트는 남아 URL 로 접근 가능; 벤치마크가 채점을 내장해 원클릭 실행이 기본).
+// SaaS 표면의 1급 개념: 하니스(무엇을) · 벤치마크(무엇으로) · 스코어카드(결과) · 런타임(어디서, 워크스페이스가
+// 직접 등록하는 실행 인프라 — 기본 시드 없음) + 흐름(예약/작업) + 홈(개요).
+// judge/metric/model/recipe/bundle 은 엔진 부품/고급 옵션 — 내비에서 제외(라우트는 남아 URL 로 접근 가능).
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
@@ -60,6 +61,12 @@ export const NAV_SECTIONS: NavSection[] = [
         label: '작업',
         icon: Activity,
         keywords: 'queue 큐 작업 워크로드 진행 대기 런타임',
+      },
+      {
+        href: '/runtimes',
+        label: '런타임',
+        icon: Server,
+        keywords: 'runtime 런타임 실행 인프라 docker k8s nomad 러너',
       },
       { href: '/report', label: '리포트', icon: FileText, keywords: 'report 회귀 추세' },
     ],

@@ -1,5 +1,13 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { API_KEY_SCOPES, ASSAY_ROLES, type Action, type Authenticator, type Principal, authorize } from "@assay/auth";
+import {
+  API_KEY_SCOPES,
+  ASSAY_ROLES,
+  type Action,
+  type Authenticator,
+  type Principal,
+  authorize,
+  can,
+} from "@assay/auth";
 import {
   AppError,
   DatasetSchema,
@@ -11,6 +19,7 @@ import {
   ModelSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
+  referencesUserSecret,
   resolveHarnessInstance,
 } from "@assay/core";
 import { BenchmarkAdapterSpecSchema, diffDatasets } from "@assay/datasets";
@@ -44,11 +53,11 @@ import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
 import type { ProfileService } from "./profile-service.js";
+import type { QueueService } from "./queue-service.js";
 import type { RunService } from "./run-service.js";
 import type { RunnerHub } from "./runner-hub.js";
 import { PairRunnerBodySchema, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
-import type { QueueService } from "./queue-service.js";
 import { type ScheduleService, isValidCron } from "./schedule-service.js";
 import {
   IngestScorecardBodySchema,
@@ -727,7 +736,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
-      return reply.send(await deps.harnessInstances.list(principal.workspace)); // 템플릿 id 별로 묶인 인스턴스
+      const entries = await deps.harnessInstances.list(principal.workspace); // 템플릿 id 별로 묶인 인스턴스
+      // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 — 다른 유저의 목록에서 숨긴다.
+      return reply.send(entries.filter((e) => !e.private || e.createdBy === principal.subject));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -743,6 +754,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const versions = await deps.harnessInstances.versions(principal.workspace, req.params.id);
       if (versions.length === 0)
         return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
+      if (!(await harnessVisibleTo(deps, principal, req.params.id)))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
       return reply.send({ id: req.params.id, versions });
     } catch (err) {
       return sendError(reply, err);
@@ -757,7 +770,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "harnesses:read");
       // resolved HarnessSpec (template + pins) — 웹 pin diff/미리보기용.
-      return reply.send(await deps.harnessInstances.get(principal.workspace, req.params.id, req.params.version));
+      const resolved = await deps.harnessInstances.get(principal.workspace, req.params.id, req.params.version);
+      // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 열람 가능 → 타인은 404(존재 은닉).
+      if (
+        referencesUserSecret(resolved) &&
+        (await deps.harnessInstances.creatorOf(principal.workspace, req.params.id)) !== principal.subject
+      )
+        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
+      return reply.send(resolved);
     } catch (err) {
       return sendError(reply, err);
     }
@@ -1630,18 +1650,23 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   // --- secrets (워크스페이스 모델/프로바이더 키 관리; 값은 at-rest 암호화 + 절대 read-back 안 함) ---
+  // 시크릿 스코프: workspace(공유, admin 관리) + user(개인, 본인 셀프 관리). GET 은 멤버 누구나 접근하되
+  // 워크스페이스 시크릿 이름은 admin(secrets:read)만, 개인 시크릿은 항상 본인 것만 본다.
   app.get("/secrets", async (req, reply) => {
     if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "secrets:read");
-      return reply.send(await deps.secretStore.list(principal.workspace)); // 이름 + 메타만(값 없음)
+      const metas = await deps.secretStore.list(principal.workspace, principal.subject); // 이름+스코프만(값 없음)
+      // 워크스페이스(공유) 시크릿 이름은 admin 만 열람. 개인(user) 시크릿은 항상 본인 것만 포함돼 있어 그대로.
+      const visible = can(principal, "secrets:read") ? metas : metas.filter((m) => m.scope === "user");
+      return reply.send(visible);
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
+  // 워크스페이스 스코프 set 은 admin(secrets:write), 유저 스코프 set 은 본인 셀프(게이트 없음, owner=subject).
   app.put<{ Params: { name: string } }>("/secrets/:name", async (req, reply) => {
     if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -1649,24 +1674,28 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const name = SecretNameSchema.safeParse(req.params.name);
     if (!name.success)
       return reply.code(400).send({ code: "BAD_REQUEST", message: "시크릿 이름은 env 형식(^[A-Z_][A-Z0-9_]*$)" });
-    const body = z.object({ value: z.string().min(1) }).safeParse(req.body);
+    const body = z
+      .object({ value: z.string().min(1), scope: z.enum(["user", "workspace"]).default("workspace") })
+      .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
-      gate(principal, "secrets:write");
-      await deps.secretStore.set(principal.workspace, name.data, body.data.value);
+      const owner = body.data.scope === "user" ? principal.subject : "";
+      if (body.data.scope === "workspace") gate(principal, "secrets:write"); // 공유 시크릿만 admin
+      await deps.secretStore.set(principal.workspace, name.data, body.data.value, owner);
       return reply.code(204).send(); // 값은 다시 돌려주지 않는다
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  app.delete<{ Params: { name: string } }>("/secrets/:name", async (req, reply) => {
+  app.delete<{ Params: { name: string }; Querystring: { scope?: string } }>("/secrets/:name", async (req, reply) => {
     if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "secrets:write");
-      await deps.secretStore.remove(principal.workspace, req.params.name);
+      const owner = req.query.scope === "user" ? principal.subject : "";
+      if (req.query.scope !== "user") gate(principal, "secrets:write"); // 공유 시크릿만 admin
+      await deps.secretStore.remove(principal.workspace, req.params.name, owner);
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
@@ -2270,6 +2299,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 // authorize 래퍼 — ForbiddenError 를 그대로 던져 sendError 가 403 으로 매핑.
 function gate(principal: Principal, action: Action): void {
   authorize(principal, action);
+}
+
+// 비공개(개인 시크릿 참조) 하니스는 createdBy 만 볼 수 있다 — 최신 버전을 resolve 해 판정.
+// resolve 실패는 가시성 판단 불가로 보고 막지 않는다(호출부의 다른 404 경로가 처리).
+async function harnessVisibleTo(deps: ServerDeps, principal: Principal, id: string): Promise<boolean> {
+  if (!deps.harnessInstances) return true;
+  try {
+    const resolved = await deps.harnessInstances.get(principal.workspace, id);
+    if (!referencesUserSecret(resolved)) return true;
+    return (await deps.harnessInstances.creatorOf(principal.workspace, id)) === principal.subject;
+  } catch {
+    return true;
+  }
 }
 
 function sendError(reply: FastifyReply, err: unknown): FastifyReply {

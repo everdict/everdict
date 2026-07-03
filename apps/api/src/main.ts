@@ -199,6 +199,8 @@ async function main(): Promise<void> {
 
   // 테넌트 런타임 라우팅: placement.target 이 테넌트 등록 Runtime 이면 그 백엔드를 빌드/등록해 라우팅(아니면 글로벌 백엔드 그대로).
   const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
+  // harness env {secretRef} 해석용 두 티어 — 공유(owner='') + 제출자 개인(owner=subject). run/scorecard 가 제출자로 호출.
+  const scopedSecretsFor = (tenant: string, subject?: string) => secretStore.scopedEntries(tenant, subject ?? "");
   // RuntimeSpec → 라이브 백엔드. topology 런타임 → ServiceTopologyBackend, 나머지는 buildRuntimeBackend(local/docker/nomad/k8s).
   // 디스패치와 연결 테스트(probe)가 같은 빌더/인증 경로를 쓰도록 한 곳에서 정의.
   const runtimeBuildBackend = (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) =>
@@ -245,6 +247,8 @@ async function main(): Promise<void> {
     ...(artifacts ? { artifacts } : {}),
     // 선언형 하니스: 인스턴스 레지스트리에서 template+pins 를 resolve 해 spec 을 잡에 임베드(없으면 빌트인 폴백).
     resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),
+    // harness env 의 {secretRef}(공유+개인 시크릿) 를 디스패치 직전 해석(레지스트리엔 평문 미저장). scorecard 와 동일.
+    scopedSecretsFor,
     // 워크스페이스 단위 계측 정책(요청별 override 가 우선): DB 설정 스토어 우선, 미설정이면 env 정책 폴백.
     meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
     // 워크스페이스 기본 judge 모델(요청별 override 가 우선): inline judge grader 가 이 모델로 채점되도록 잡에 주입.
@@ -279,7 +283,8 @@ async function main(): Promise<void> {
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // pull 인제스트: 테넌트 OTel/MLflow 에서 트레이스를 당겨 채점. 자격증명은 테넌트 SecretStore(authSecret 이름).
     buildTraceSource,
-    secretsFor: runtimeSecretsFor,
+    secretsFor: runtimeSecretsFor, // judge 모델 키(공유 시크릿)
+    scopedSecretsFor, // harness env {secretRef} 해석(공유+제출자 개인)
     // 비공개-repo 데이터셋: 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve(단일 run 과 동일 경로).
     repoTokenFor: async (owner, connectionId) => (await connectionStore.tokenFor(owner, connectionId))?.accessToken,
     // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.

@@ -229,7 +229,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "list_harnesses",
       { description: "이 워크스페이스가 보는 하네스 인스턴스(템플릿별로 묶임; 소유 + _shared)", inputSchema: {} },
-      () => run(principal, "harnesses:read", async () => ok(await instances.list(ws))),
+      () =>
+        run(principal, "harnesses:read", async () => {
+          // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 — 다른 유저에게 숨긴다(HTTP 목록과 동일).
+          const entries = await instances.list(ws);
+          return ok(entries.filter((e) => !e.private || e.createdBy === principal.subject));
+        }),
     );
 
     server.registerTool(
@@ -1012,30 +1017,43 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const secrets = deps.secretStore;
     server.registerTool(
       "list_secrets",
-      { description: "이 워크스페이스의 시크릿 이름 목록(값은 반환하지 않음)", inputSchema: {} },
-      () => run(principal, "secrets:read", async () => ok(await secrets.list(ws))),
+      {
+        description:
+          "시크릿 이름 목록(값 없음) — 공유(workspace) + 내 개인(user) 시크릿, 각 scope 태그. 값은 반환하지 않음.",
+        inputSchema: {},
+      },
+      () => run(principal, "secrets:read", async () => ok(await secrets.list(ws, principal.subject))),
     );
     server.registerTool(
       "set_secret",
       {
         description:
-          "워크스페이스 시크릿 설정/갱신(at-rest 암호화; 값은 다시 못 봄). 모델/프로바이더 키. name 은 env 형식.",
-        inputSchema: { name: z.string().describe("env 이름 ^[A-Z_][A-Z0-9_]*$"), value: z.string() },
+          "시크릿 설정/갱신(at-rest 암호화; 값은 다시 못 봄). name 은 env 형식. scope: workspace(공유, 기본) | user(내 개인).",
+        inputSchema: {
+          name: z.string().describe("env 이름 ^[A-Z_][A-Z0-9_]*$"),
+          value: z.string(),
+          scope: z.enum(["user", "workspace"]).optional().describe("workspace(공유, 기본) | user(개인)"),
+        },
       },
-      ({ name, value }) =>
+      ({ name, value, scope }) =>
         run(principal, "secrets:write", async () => {
           if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) return fail("BAD_REQUEST: 시크릿 이름은 ^[A-Z_][A-Z0-9_]*$ 형식");
-          await secrets.set(ws, name, value);
-          return ok({ workspace: ws, name, set: true });
+          const owner = scope === "user" ? principal.subject : "";
+          await secrets.set(ws, name, value, owner);
+          return ok({ workspace: ws, name, scope: scope ?? "workspace", set: true });
         }),
     );
     server.registerTool(
       "delete_secret",
-      { description: "워크스페이스 시크릿 삭제", inputSchema: { name: z.string() } },
-      ({ name }) =>
+      {
+        description: "시크릿 삭제. scope: workspace(공유, 기본) | user(내 개인).",
+        inputSchema: { name: z.string(), scope: z.enum(["user", "workspace"]).optional() },
+      },
+      ({ name, scope }) =>
         run(principal, "secrets:write", async () => {
-          await secrets.remove(ws, name);
-          return ok({ workspace: ws, name, deleted: true });
+          const owner = scope === "user" ? principal.subject : "";
+          await secrets.remove(ws, name, owner);
+          return ok({ workspace: ws, name, scope: scope ?? "workspace", deleted: true });
         }),
     );
   }

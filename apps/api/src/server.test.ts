@@ -1666,14 +1666,33 @@ describe("API — secrets (workspace model/provider keys)", () => {
     await app.close();
   });
 
-  it("member 는 시크릿 관리 불가 (403)", async () => {
+  it("member 는 워크스페이스(공유) 시크릿은 관리 불가(403), 개인(user) 시크릿은 셀프 관리", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };
-    expect((await app.inject({ method: "GET", url: "/secrets", headers: h })).statusCode).toBe(403);
+    // 워크스페이스 스코프(기본) set → 403 (admin 전용)
     expect(
       (await app.inject({ method: "PUT", url: "/secrets/OPENAI_API_KEY", headers: h, payload: { value: "x" } }))
         .statusCode,
     ).toBe(403);
+    // GET → 200 이지만 공유 시크릿 이름은 안 보인다(admin 아님)
+    const empty = await app.inject({ method: "GET", url: "/secrets", headers: h });
+    expect(empty.statusCode).toBe(200);
+    expect(empty.json()).toEqual([]);
+    // 개인(user) 스코프 set → 204 (셀프, admin 불필요)
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/secrets/MY_KEY",
+          headers: h,
+          payload: { value: "p", scope: "user" },
+        })
+      ).statusCode,
+    ).toBe(204);
+    // 이제 GET 에 내 개인 시크릿만 scope:user 로 보인다
+    expect((await app.inject({ method: "GET", url: "/secrets", headers: h })).json()).toEqual([
+      { name: "MY_KEY", updatedAt: expect.any(String), scope: "user" },
+    ]);
     await app.close();
   });
 });
@@ -2157,7 +2176,10 @@ describe("API — GitHub Actions CI principal (via=github-actions, roles=[ci])",
     expect(post.json().origin).toMatchObject({ source: "github-actions", repo: "acme/app", prNumber: 7 });
     expect((await app.inject({ method: "GET", url: "/scorecards", headers: h })).statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: "/members", headers: h })).statusCode).toBe(403);
-    expect((await app.inject({ method: "GET", url: "/secrets", headers: h })).statusCode).toBe(403);
+    // GET /secrets 는 인증되면 열리지만 ci 는 admin 아니고 개인 시크릿도 없어 빈 목록(공유 시크릿 이름 누출 없음).
+    const ciSecrets = await app.inject({ method: "GET", url: "/secrets", headers: h });
+    expect(ciSecrets.statusCode).toBe(200);
+    expect(ciSecrets.json()).toEqual([]);
     await app.close();
   });
 
