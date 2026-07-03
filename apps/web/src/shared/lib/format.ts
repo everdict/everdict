@@ -65,3 +65,30 @@ export function fmtTimeAgo(iso: string): string {
   if (days <= 7) return `${days}일 전`
   return fmtDateTime(iso)
 }
+
+// 리스트 날짜 그룹 헤더 — 오늘/어제는 상대 표기, 그 외 'M월 D일'(다른 해면 연도 포함).
+export function fmtDateHeading(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const now = new Date()
+  const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
+  const diffDays = Math.round((startOf(now) - startOf(d)) / 86_400_000)
+  if (diffDays === 0) return '오늘'
+  if (diffDays === 1) return '어제'
+  const md = `${d.getMonth() + 1}월 ${d.getDate()}일`
+  return d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}년 ${md}`
+}
+
+// 날짜 그룹 행의 시각 — HH:MM(로컬). 날짜는 그룹 헤더가 갖는다.
+export function fmtTimeOnly(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+// 날짜 그룹 키(로컬 자정 기준) — 같은 날이면 같은 키.
+export function dayKeyOf(iso: string): string {
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`
+}

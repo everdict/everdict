@@ -5,7 +5,14 @@ import Link from 'next/link'
 import { Search } from 'lucide-react'
 
 import type { ScorecardRecord } from '@/entities/scorecard'
-import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
+import {
+  dayKeyOf,
+  fmtDateHeading,
+  fmtDateTime,
+  fmtDateTimeFull,
+  fmtSubject,
+  fmtTimeOnly,
+} from '@/shared/lib/format'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { EntityRef, MetricChip, ModelChip } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
@@ -13,7 +20,7 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
 import { OriginChip } from '@/shared/ui/origin'
 import { StatCard } from '@/shared/ui/stat-card'
-import { StatusPill } from '@/shared/ui/status-pill'
+import { StatusIcon } from '@/shared/ui/status-pill'
 
 type Sort = 'recent' | 'name'
 type Author = { name: string; avatarUrl?: string }
@@ -192,91 +199,119 @@ export function ScorecardList({
           hint="검색어나 필터를 바꿔보세요."
         />
       ) : (
-        <div className="space-y-2">
-          {visible.map((s, i) => {
-            const author = authorInfo(s)
-            const metrics = s.summary ?? []
-            const shownMetrics = metrics.slice(0, 3) // 카드 규격 유지 — 상위 3개만, 나머지는 +N
-            const judges = s.judgeModels ?? []
-            return (
-              // 고정 규격 카드 — 높이/슬롯을 통일(내용이 많아도 wrap 하지 않고 truncate/+N).
-              <Link
-                key={s.id}
-                href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
-                style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
-                className="rise flex h-[72px] items-center gap-3 rounded-lg border bg-card px-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
-              >
-                {/* 좌: 2줄 고정 — ① 데이터셋→하니스(+모델·출처) ② 집계 칩 */}
-                <div className="min-w-0 flex-1 space-y-1.5">
-                  <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
-                    <span className="truncate">
-                      <EntityRef id={s.dataset.id} version={s.dataset.version} />
-                    </span>
-                    <span className="shrink-0 text-faint">→</span>
-                    <span className="truncate">
-                      <EntityRef id={s.harness.id} version={s.harness.version} />
-                    </span>
-                    {s.models?.primary ? (
-                      <span className="hidden shrink-0 sm:inline-flex">
-                        <ModelChip>{s.models.primary}</ModelChip>
-                      </span>
-                    ) : null}
-                    {s.origin ? (
-                      <span className="hidden shrink-0 md:inline-flex">
-                        <OriginChip origin={s.origin} />
-                      </span>
-                    ) : null}
-                  </div>
-                  <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap">
-                    {shownMetrics.length > 0 ? (
-                      shownMetrics.map((m) => (
-                        <span key={m.metric} className="shrink-0">
-                          <MetricChip metric={m.metric} mean={m.mean} passRate={m.passRate} />
+        <div className="space-y-4">
+          {(sort === 'recent'
+            ? // recent 정렬: 날짜별 그룹(헤더=오늘/어제/M월 D일, 행에는 시간만)
+              [
+                ...visible
+                  .reduce((m, s) => {
+                    const k = dayKeyOf(s.createdAt)
+                    const g = m.get(k)
+                    if (g) g.push(s)
+                    else m.set(k, [s])
+                    return m
+                  }, new Map<string, ScorecardRecord[]>())
+                  .entries(),
+              ]
+            : ([['', visible]] as Array<[string, ScorecardRecord[]]>)
+          ).map(([day, items]) => (
+            <section key={day || 'all'} className="space-y-2">
+              {day && items[0] && (
+                <h4 className="px-0.5 text-[11.5px] font-[560] uppercase tracking-wide text-faint">
+                  {fmtDateHeading(items[0].createdAt)}
+                </h4>
+              )}
+              {items.map((s, i) => {
+                const author = authorInfo(s)
+                const metrics = s.summary ?? []
+                const shownMetrics = metrics.slice(0, 3) // 카드 규격 유지 — 상위 3개만, 나머지는 +N
+                const judges = s.judgeModels ?? []
+                return (
+                  // 고정 규격 카드 — 3줄(데이터셋/하니스/집계), 화살표·인라인 이름 없음. 상태는 색상 아이콘만.
+                  <Link
+                    key={s.id}
+                    href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
+                    style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
+                    className="rise flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+                  >
+                    {/* 좌: 3줄 — ① 데이터셋 ② 하니스(+모델·출처) ③ 집계 칩. 각 한 줄, 잘림 없이 truncate. */}
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <div className="flex items-center overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                        <span className="truncate">
+                          <EntityRef id={s.dataset.id} version={s.dataset.version} />
                         </span>
-                      ))
-                    ) : (
-                      <span className="text-[11px] text-faint">
-                        {s.status === 'failed' ? '집계 없음' : '집계 대기'}
-                      </span>
-                    )}
-                    {metrics.length > shownMetrics.length && (
-                      <span className="shrink-0 text-[11px] text-faint">
-                        +{metrics.length - shownMetrics.length}
-                      </span>
-                    )}
-                    {judges.length > 0 && (
-                      <span className="ml-1 hidden shrink-0 items-center gap-1 lg:inline-flex">
-                        <span className="text-[10px] uppercase tracking-wide text-faint">
-                          judge
+                      </div>
+                      <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                        <span className="truncate">
+                          <EntityRef id={s.harness.id} version={s.harness.version} />
                         </span>
-                        <ModelChip muted>{judges[0]}</ModelChip>
-                        {judges.length > 1 && (
-                          <span className="text-[11px] text-faint">+{judges.length - 1}</span>
+                        {s.models?.primary ? (
+                          <span className="hidden shrink-0 sm:inline-flex">
+                            <ModelChip>{s.models.primary}</ModelChip>
+                          </span>
+                        ) : null}
+                        {s.origin ? (
+                          <span className="hidden shrink-0 md:inline-flex">
+                            <OriginChip origin={s.origin} />
+                          </span>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap">
+                        {shownMetrics.length > 0 ? (
+                          shownMetrics.map((m) => (
+                            <span key={m.metric} className="shrink-0">
+                              <MetricChip metric={m.metric} mean={m.mean} passRate={m.passRate} />
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-[11px] text-faint">
+                            {s.status === 'failed' ? '집계 없음' : '집계 대기'}
+                          </span>
+                        )}
+                        {metrics.length > shownMetrics.length && (
+                          <span className="shrink-0 text-[11px] text-faint">
+                            +{metrics.length - shownMetrics.length}
+                          </span>
+                        )}
+                        {judges.length > 0 && (
+                          <span className="ml-1 hidden shrink-0 items-center gap-1 lg:inline-flex">
+                            <span className="text-[10px] uppercase tracking-wide text-faint">
+                              judge
+                            </span>
+                            <ModelChip muted>{judges[0]}</ModelChip>
+                            {judges.length > 1 && (
+                              <span className="text-[11px] text-faint">+{judges.length - 1}</span>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {/* 우: 고정 슬롯 — 실행자(썸네일) · 시각(그룹=시간만) · 상태(색상 아이콘). */}
+                    <div className="flex shrink-0 items-center gap-2.5">
+                      <span className="flex w-6 justify-center">
+                        {author.known && (
+                          <UserAvatar name={author.name} url={author.avatarUrl} label="실행자" />
                         )}
                       </span>
-                    )}
-                  </div>
-                </div>
-                {/* 우: 고정 슬롯 — 실행자(썸네일) · 시각(고정폭) · 상태(고정폭). 카드마다 같은 위치. */}
-                <div className="flex shrink-0 items-center gap-2.5">
-                  <span className="flex w-6 justify-center">
-                    {author.known && (
-                      <UserAvatar name={author.name} url={author.avatarUrl} label="실행자" />
-                    )}
-                  </span>
-                  <time
-                    className="hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block"
-                    title={fmtDateTimeFull(s.createdAt)}
-                  >
-                    {fmtDateTime(s.createdAt)}
-                  </time>
-                  <span className="flex w-[64px] justify-end">
-                    <StatusPill status={s.status} />
-                  </span>
-                </div>
-              </Link>
-            )
-          })}
+                      <time
+                        className={
+                          sort === 'recent'
+                            ? 'hidden w-[44px] text-right font-mono text-[11px] text-muted-foreground sm:block'
+                            : 'hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block'
+                        }
+                        title={fmtDateTimeFull(s.createdAt)}
+                      >
+                        {sort === 'recent' ? fmtTimeOnly(s.createdAt) : fmtDateTime(s.createdAt)}
+                      </time>
+                      <span className="flex w-5 justify-end">
+                        <StatusIcon status={s.status} />
+                      </span>
+                    </div>
+                  </Link>
+                )
+              })}
+            </section>
+          ))}
         </div>
       )}
     </div>
