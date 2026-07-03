@@ -1,0 +1,176 @@
+{
+  "id": "spreadsheetbench",
+  "version": "1.0.0",
+  "description": "SpreadsheetBench(v1 + v2) 벤치마크 번들 — 실제 스프레드시트 조작 벤치마크를 Assay 에 등록. v1(912 instructions, online-judge 셀 비교) + v2(4 카테고리, regression/modification 채점)의 레시피(실데이터 인입 템플릿) + 바로 돌아가는 자기완결 xlsx 샘플. codex 등 command 하니스로 수행.",
+  "harnessTemplates": [
+    {
+      "kind": "command",
+      "category": "cli-agent",
+      "id": "codex",
+      "version": "1",
+      "setup": [],
+      "command": "codex exec --sandbox workspace-write --skip-git-repo-check {{task}} < /dev/null",
+      "model": "gpt-5-codex",
+      "env": {},
+      "trace": {
+        "kind": "none"
+      }
+    }
+  ],
+  "harnesses": [
+    {
+      "template": {
+        "id": "codex",
+        "version": "1"
+      },
+      "id": "codex",
+      "version": "1.0.0",
+      "pins": {}
+    }
+  ],
+  "benchmarkRecipes": [
+    {
+      "id": "spreadsheetbench-v1",
+      "version": "1.0.0",
+      "description": "SpreadsheetBench v1(RUCKBReasoning/SpreadsheetBench, HF KAKA22/SpreadsheetBench) 어댑터. 912 instructions · 케이스별 3 test-case(‹N›_‹id›_input/answer.xlsx) · answer_position 셀 값 비교(전부 일치). 실행엔 dataset 을 이미지 /data 에 스테이징 + sbench_grade.py 동봉 필요(README 참고).",
+      "category": "coding",
+      "source": {
+        "kind": "huggingface",
+        "dataset": "KAKA22/SpreadsheetBench"
+      },
+      "mapping": {
+        "idField": "id",
+        "taskField": "instruction",
+        "repoPath": "/data",
+        "image": "spreadsheetbench:v1",
+        "placement": "docker",
+        "tagFields": [
+          "instruction_type"
+        ]
+      },
+      "graderTemplates": [
+        {
+          "id": "tests-pass",
+          "config": {
+            "cmd": "python3 /opt/sbench_grade.py --version v1 --output /data/outputs/{id}_output.xlsx --golden /data/spreadsheet/{id}/1_{id}_answer.xlsx --answer-position \"{answer_position}\""
+          }
+        }
+      ]
+    },
+    {
+      "id": "spreadsheetbench-v2",
+      "version": "1.0.0",
+      "description": "SpreadsheetBench v2(RUCKBReasoning/SpreadsheetBench-2, HF KAKA22/SpreadsheetBench-v2) 어댑터. 4 카테고리(Debugging/Financial_Model/Template=셀정확도, Visualization=VLM 체크리스트). 셀 카테고리는 regression(불변 셀 보존)+modification(변경 셀 정답) 1% 오차 채점. Visualization 은 judge(VLM) 로 criteria 채점(별도).",
+      "category": "coding",
+      "source": {
+        "kind": "huggingface",
+        "dataset": "KAKA22/SpreadsheetBench-v2"
+      },
+      "mapping": {
+        "idField": "id",
+        "taskField": "instruction",
+        "repoPath": "/data",
+        "image": "spreadsheetbench:v2",
+        "placement": "docker"
+      },
+      "graderTemplates": [
+        {
+          "id": "tests-pass",
+          "config": {
+            "cmd": "python3 /opt/sbench_grade.py --version v2 --output /data/outputs/{id}_output.xlsx --golden /data/{golden_response_path} --input /data/{spreadsheet_path} --answer-position \"{answer_position}\""
+          }
+        }
+      ]
+    }
+  ],
+  "datasets": [
+    {
+      "id": "spreadsheetbench-v1-sample",
+      "version": "1.0.0",
+      "description": "SpreadsheetBench v1 스타일 자기완결 샘플 — input.xlsx 의 Amount 합계를 output.xlsx D1 에. answer_position 셀 값 비교.",
+      "cases": [
+        {
+          "id": "sum-amount-column",
+          "env": {
+            "kind": "repo",
+            "source": {
+              "files": {
+                "gen_v1.py": "# SpreadsheetBench v1 스타일 샘플 입력 생성 — 실제 xlsx 스프레드시트를 작업 디렉터리에 심는다.\n# 실제 SpreadsheetBench(912 instructions)은 포럼에서 수집한 xlsx 를 케이스별로 제공하지만, 번들에 바이너리를\n# 인라인할 수 없으므로 샘플은 setup 에서 이 스크립트로 결정적 xlsx 를 생성한다(파이프라인 실증용).\nimport openpyxl\n\nwb = openpyxl.Workbook()\nws = wb.active\nws.title = \"Sales\"\nws[\"A1\"], ws[\"B1\"] = \"Region\", \"Amount\"\nrows = [(\"North\", 120), (\"South\", 340), (\"East\", 80), (\"West\", 260), (\"North\", 150)]\nfor i, (region, amount) in enumerate(rows, start=2):\n    ws[f\"A{i}\"], ws[f\"B{i}\"] = region, amount\nwb.save(\"input.xlsx\")\nprint(f\"wrote input.xlsx ({len(rows)} rows), sum(Amount)={sum(a for _, a in rows)}\")\n",
+                "grade_v1.py": "# SpreadsheetBench v1-샘플 채점(재계산식 — golden 파일 없이 input.xlsx 로부터 정답을 재계산해 output.xlsx 를 검증).\n# 실제 벤치마크는 golden xlsx 로 채점하지만(→ sbench_grade.py), 자기완결 샘플은 정답을 결정적으로 재계산해 커닝을 막는다.\n# answer_position 셀(여기선 D1 = Amount 합계)을 값-기준으로 비교. exit 0=PASS, 1=FAIL, 2=오류.\nimport os\nimport sys\n\ntry:\n    import openpyxl\nexcept ImportError:\n    print(\"openpyxl 미설치 — setup 의 pip 설치 실패\", file=sys.stderr)\n    sys.exit(2)\n\nif not os.path.exists(\"output.xlsx\"):\n    print(\"output.xlsx 가 없습니다 — 에이전트가 산출물을 만들지 않았습니다.\")\n    sys.exit(1)\n\nsrc = openpyxl.load_workbook(\"input.xlsx\")[\"Sales\"]\nexpected = sum(c.value for c in src[\"B\"][1:] if isinstance(c.value, (int, float)))  # answer_position=D1\ngot = openpyxl.load_workbook(\"output.xlsx\", data_only=True).active[\"D1\"].value\nok = isinstance(got, (int, float)) and abs(got - expected) < 1e-6\nprint(f\"answer_position D1: expected={expected} got={got} -> {'PASS' if ok else 'FAIL'}\")\nsys.exit(0 if ok else 1)\n"
+              }
+            },
+            "setup": [
+              "python3 -c \"import openpyxl\" 2>/dev/null || python3 -m pip install --user --break-system-packages --quiet openpyxl 2>/dev/null || python3 -m pip install --user --quiet openpyxl",
+              "python3 gen_v1.py"
+            ]
+          },
+          "task": "The file input.xlsx (sheet 'Sales') has a table with headers in row 1: 'Region' in A1 and 'Amount' in B1, and data in rows 2-6. Compute the total of the Amount column and write ONLY that number into cell D1 of a NEW file named output.xlsx in the working directory. Do not modify input.xlsx.",
+          "graders": [
+            {
+              "id": "tests-pass",
+              "config": {
+                "cmd": "python3 grade_v1.py"
+              }
+            }
+          ],
+          "timeoutSec": 600,
+          "tags": [
+            "spreadsheetbench",
+            "v1",
+            "sample",
+            "cell-level"
+          ]
+        }
+      ],
+      "tags": [
+        "spreadsheetbench",
+        "v1",
+        "sample"
+      ]
+    },
+    {
+      "id": "spreadsheetbench-v2-sample",
+      "version": "1.0.0",
+      "description": "SpreadsheetBench v2 스타일 자기완결 샘플 — Profit 열 추가(modification)+원본 보존(regression). v2 all-or-nothing 채점 재현.",
+      "cases": [
+        {
+          "id": "add-profit-column",
+          "env": {
+            "kind": "repo",
+            "source": {
+              "files": {
+                "gen_v2.py": "# SpreadsheetBench v2-샘플(워크플로/재무모델 스타일) 입력 생성 — Revenue/Cost 표가 든 model.xlsx.\n# 실제 v2 Financial_Model 은 다중시트 모델(수 MB)이지만, 샘플은 regression(불변 셀 보존)+modification(신규 셀 정답)\n# 이라는 v2 핵심 채점을 작은 표로 재현한다.\nimport openpyxl\n\nwb = openpyxl.Workbook()\nws = wb.active\nws.title = \"Model\"\nws[\"A1\"], ws[\"B1\"], ws[\"C1\"] = \"Product\", \"Revenue\", \"Cost\"\nrows = [(\"Alpha\", 1000, 600), (\"Beta\", 750, 500), (\"Gamma\", 1200, 900), (\"Delta\", 300, 100)]\nfor i, (p, r, c) in enumerate(rows, start=2):\n    ws[f\"A{i}\"], ws[f\"B{i}\"], ws[f\"C{i}\"] = p, r, c\nwb.save(\"model.xlsx\")\nprint(f\"wrote model.xlsx ({len(rows)} rows); profits={[r - c for _, r, c in rows]} total={sum(r - c for _, r, c in rows)}\")\n",
+                "grade_v2.py": "# SpreadsheetBench v2-샘플 채점(재계산식) — v2 의 핵심인 regression+modification 을 함께 검증.\n#   modification: 신규 D열 'Profit' = Revenue-Cost(행별) + 어딘가에 총이익 셀이 정확.\n#   regression:   원본 A/B/C 열(Product/Revenue/Cost)이 그대로 보존됐는가(불변 셀 훼손 금지).\n# 둘 다 100% 여야 PASS(v2 all-or-nothing). exit 0=PASS, 1=FAIL, 2=오류.\nimport os\nimport sys\n\ntry:\n    import openpyxl\nexcept ImportError:\n    print(\"openpyxl 미설치 — setup 의 pip 설치 실패\", file=sys.stderr)\n    sys.exit(2)\n\nif not os.path.exists(\"output.xlsx\"):\n    print(\"output.xlsx 가 없습니다 — 에이전트가 산출물을 만들지 않았습니다.\")\n    sys.exit(1)\n\nsrc = openpyxl.load_workbook(\"model.xlsx\")[\"Model\"]\ndata = [\n    (c[0].value, c[1].value, c[2].value)\n    for c in zip(src[\"A\"][1:], src[\"B\"][1:], src[\"C\"][1:])\n    if isinstance(c[1].value, (int, float))\n]\nexp_profits = [r - co for _, r, co in data]\nexp_total = sum(exp_profits)\n\nws = openpyxl.load_workbook(\"output.xlsx\", data_only=True).active\n\n# modification: 행별 Profit(D2..) 정확?\ngot_profits = [ws[f\"D{i}\"].value for i in range(2, 2 + len(exp_profits))]\nmod_profit_ok = all(isinstance(g, (int, float)) and abs(g - e) < 1e-6 for g, e in zip(got_profits, exp_profits))\n# modification: 총이익 셀이 어딘가 존재?\nall_nums = [c.value for row in ws.iter_rows() for c in row if isinstance(c.value, (int, float))]\nmod_total_ok = any(abs(v - exp_total) < 1e-6 for v in all_nums)\n# regression: 원본 Revenue/Cost 가 보존됐는가(B/C 열).\nreg_ok = all(\n    ws[f\"B{i}\"].value == r and ws[f\"C{i}\"].value == co for i, (_, r, co) in enumerate(data, start=2)\n)\n\nok = mod_profit_ok and mod_total_ok and reg_ok\nprint(\n    f\"modification: profits={got_profits}(ok={mod_profit_ok}) total(ok={mod_total_ok}); \"\n    f\"regression: Revenue/Cost preserved(ok={reg_ok}) -> {'PASS' if ok else 'FAIL'}\"\n)\nsys.exit(0 if ok else 1)\n"
+              }
+            },
+            "setup": [
+              "python3 -c \"import openpyxl\" 2>/dev/null || python3 -m pip install --user --break-system-packages --quiet openpyxl 2>/dev/null || python3 -m pip install --user --quiet openpyxl",
+              "python3 gen_v2.py"
+            ]
+          },
+          "task": "The file model.xlsx (sheet 'Model') has a table with headers in row 1: 'Product' (A), 'Revenue' (B), 'Cost' (C), and data in rows 2-5. Create output.xlsx that (1) preserves the original Product/Revenue/Cost columns unchanged, (2) adds a 'Profit' column in D (header D1='Profit', each row's profit = Revenue - Cost), and (3) writes the total profit somewhere below the table (e.g. a 'Total' row). Save it as output.xlsx in the working directory.",
+          "graders": [
+            {
+              "id": "tests-pass",
+              "config": {
+                "cmd": "python3 grade_v2.py"
+              }
+            }
+          ],
+          "timeoutSec": 600,
+          "tags": [
+            "spreadsheetbench",
+            "v2",
+            "sample",
+            "workflow"
+          ]
+        }
+      ],
+      "tags": [
+        "spreadsheetbench",
+        "v2",
+        "sample"
+      ]
+    }
+  ]
+}
