@@ -16,10 +16,15 @@ export const dynamic = 'force-dynamic'
 
 export default async function SchedulesPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ workspace: string }>
+  searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { workspace } = await params
+  const rawView = (await searchParams).view
+  const viewParam = Array.isArray(rawView) ? rawView[0] : rawView
+  const initialView = viewParam === 'owner' || viewParam === 'calendar' ? viewParam : 'list'
   const { principal, ctx } = await currentPrincipal()
   const canWrite = can(principal?.roles, 'schedules:write')
   let error: string | undefined
@@ -80,6 +85,7 @@ export default async function SchedulesPage({
           nowIso={nowIso}
           me={principal?.subject ?? ''}
           canWrite={canWrite}
+          initialView={initialView}
         />
       )}
     </div>

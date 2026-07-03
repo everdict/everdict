@@ -159,6 +159,20 @@ export function nextFires(
   return out
 }
 
+// 주어진 달력 날짜(연-월-일)에 이 예약이 한 번이라도 발사되는가 — 월/일/요일 필드만 확인(분·시 무관).
+// 캘린더 월뷰용(셀당 O(1)). 요일은 날짜에서 결정하므로 tz 무관 근사(자정 경계는 오차 가능).
+export function firesOnDate(expr: string, year: number, month: number, day: number): boolean {
+  const m = parseCron(expr)
+  if (!m) return false
+  if (!m.month.has(month)) return false
+  const dow = new Date(Date.UTC(year, month - 1, day)).getUTCDay() // 0=일 ~ 6=토
+  const domMatch = m.dom.has(day)
+  const dowMatch = m.dow.has(dow)
+  // Vixie cron: 요일·일 둘 다 제한이면 OR, 하나만 제한이면 AND.
+  if (m.domRestricted && m.dowRestricted) return domMatch || dowMatch
+  return domMatch && dowMatch
+}
+
 function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }

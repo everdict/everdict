@@ -2,24 +2,30 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { CalendarClock, Search, Server } from 'lucide-react'
+import { CalendarClock, Search } from 'lucide-react'
 
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
-import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
+import { fmtDateTimeFull } from '@/shared/lib/format'
+import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
-import { Badge } from '@/shared/ui/badge'
-import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { EntityRef } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
 import { StatCard } from '@/shared/ui/stat-card'
 
 import { deleteScheduleAction, setScheduleEnabledAction } from '../api/schedule-actions'
+import { type Author, ScheduleCard, ownerNameOf, runtimeLabelOf } from './schedule-card'
+import { ScheduleCalendar } from './schedule-calendar'
 
-type Author = { name: string; avatarUrl?: string }
+type View = 'list' | 'owner' | 'calendar'
+
+const VIEWS: { value: View; label: string }[] = [
+  { value: 'list', label: '리스트' },
+  { value: 'owner', label: '소유자별' },
+  { value: 'calendar', label: '캘린더' },
+]
 
 const STATUS_OPTIONS = [
   { value: '', label: '전체 상태' },
@@ -27,26 +33,12 @@ const STATUS_OPTIONS = [
   { value: 'paused', label: '일시중지' },
 ]
 
-const RUNTIME_DEFAULT = '기본 백엔드'
 const UPCOMING_HORIZON_DAYS = 7
 const UPCOMING_LIMIT = 24
 
-function runtimeLabelOf(s: Schedule): string {
-  return s.runTemplate.runtime ?? RUNTIME_DEFAULT
-}
-
-// 런타임 칩 — 발사가 도는 실행 인프라(런타임 미지정이면 '기본 백엔드'). 하니스/벤치마크 칩과 동일 밀도.
-function RuntimeChip({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-      <Server className="size-3" />
-      {label}
-    </span>
-  )
-}
-
-// 예약 목록 — 한 워크스페이스의 여러 사용자 크론잡을 소유자·런타임·벤치마크→하니스와 함께 한눈에.
-// 소유자·상태·런타임 필터 + '다가오는 실행' 타임라인. 발사 자체는 컨트롤플레인(Temporal)이 한다.
+// 예약 목록 — 한 워크스페이스의 여러 사용자 크론잡을 소유자·런타임·벤치마크→하니스와 함께.
+// 뷰 전환(리스트 / 소유자별 / 캘린더) + 소유자·상태·런타임 필터 + '다가오는 실행' 타임라인.
+// 발사 자체는 컨트롤플레인(Temporal)이 하고, 여기 시각은 표시용 근사(shared/lib/cron).
 export function ScheduleList({
   schedules,
   authors,
@@ -54,17 +46,20 @@ export function ScheduleList({
   nowIso,
   me,
   canWrite,
+  initialView = 'list',
 }: {
   schedules: Schedule[]
   authors: Record<string, Author>
   fires: Record<string, string[]> // 예약 id → 다음 발사 시각(ISO, 서버 계산). 일시중지면 빈 배열.
   nowIso: string // 서버 기준 now — 상대 날짜 라벨을 서버/클라 동일하게(hydration 안전).
-  me: string // 현재 사용자 subject — 소유자 필터에서 '(나)' 표기.
+  me: string // 현재 사용자 subject — 소유자 표기에서 '(나)'.
   canWrite: boolean
+  initialView?: View // ?view= 로 초기 뷰 지정(딥링크). 이후 전환은 로컬 상태.
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
+  const [view, setView] = useState<View>(initialView)
   const [query, setQuery] = useState('')
   const [owner, setOwner] = useState('') // 소유자(createdBy) 필터
   const [status, setStatus] = useState('') // '' | 'enabled' | 'paused'
@@ -78,8 +73,8 @@ export function ScheduleList({
       else setError(res.error ?? '작업 실패')
     })
   }
-
-  const ownerName = (sub: string) => authors[sub]?.name ?? fmtSubject(sub)
+  const onToggle = (s: Schedule) => act(() => setScheduleEnabledAction(s.id, !s.enabled))
+  const onDelete = (s: Schedule) => act(() => deleteScheduleAction(s.id))
 
   const total = schedules.length
   const enabledCount = schedules.filter((s) => s.enabled).length
@@ -87,7 +82,7 @@ export function ScheduleList({
 
   const ownerOptions = useMemo(() => {
     const m = new Map<string, string>()
-    for (const s of schedules) m.set(s.createdBy, ownerName(s.createdBy))
+    for (const s of schedules) m.set(s.createdBy, ownerNameOf(authors, s.createdBy))
     return [
       { value: '', label: '전체 소유자' },
       ...[...m.entries()]
@@ -117,7 +112,7 @@ export function ScheduleList({
           s.runTemplate.dataset.id,
           s.runTemplate.harness.id,
           runtimeLabelOf(s),
-          ownerName(s.createdBy),
+          ownerNameOf(authors, s.createdBy),
         ]
           .join(' ')
           .toLowerCase()
@@ -125,6 +120,15 @@ export function ScheduleList({
       })
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [schedules, authors, query, owner, status, runtime])
+
+  // 소유자별 그룹(소유자 이름순) — visible 을 createdBy 로 묶는다.
+  const ownerGroups = useMemo(() => {
+    const m = new Map<string, Schedule[]>()
+    for (const s of visible) m.set(s.createdBy, [...(m.get(s.createdBy) ?? []), s])
+    return [...m.entries()].sort((a, b) =>
+      ownerNameOf(authors, a[0]).localeCompare(ownerNameOf(authors, b[0]))
+    )
+  }, [visible, authors])
 
   // 다가오는 실행 — 보이는(필터 반영) 활성 예약들의 발사 시각을 병합·정렬. 7일 창, 상위 N건.
   const upcoming = useMemo(() => {
@@ -140,6 +144,21 @@ export function ScheduleList({
     return rows.slice(0, UPCOMING_LIMIT)
   }, [visible, fires, nowIso])
 
+  const card = (s: Schedule) => (
+    <ScheduleCard
+      key={s.id}
+      schedule={s}
+      authors={authors}
+      next={(fires[s.id] ?? [])[0]}
+      nowIso={nowIso}
+      me={me}
+      canWrite={canWrite}
+      pending={pending}
+      onToggle={onToggle}
+      onDelete={onDelete}
+    />
+  )
+
   return (
     <div className="space-y-5">
       {error && <Callout tone="danger">{error}</Callout>}
@@ -152,7 +171,25 @@ export function ScheduleList({
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5">
-        <div className="relative min-w-[200px] flex-1">
+        <div className="inline-flex overflow-hidden rounded-lg border bg-card shadow-raise">
+          {VIEWS.map((v, i) => (
+            <button
+              key={v.value}
+              type="button"
+              onClick={() => setView(v.value)}
+              className={cn(
+                'px-2.5 py-1.5 text-[12px] font-[510] transition-colors',
+                i > 0 && 'border-l border-border',
+                view === v.value
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              )}
+            >
+              {v.label}
+            </button>
+          ))}
+        </div>
+        <div className="relative min-w-[180px] flex-1">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
@@ -196,134 +233,73 @@ export function ScheduleList({
           title="조건에 맞는 예약이 없습니다."
           hint="검색어나 필터를 바꿔보세요."
         />
-      ) : (
-        <div className="space-y-2">
-          {visible.map((s) => {
-            const next = (fires[s.id] ?? [])[0]
-            return (
-              <div
-                key={s.id}
-                className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg border bg-card p-3.5 shadow-raise"
-              >
-                <div className="min-w-0 space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-[510] text-[14px]">{s.name}</span>
-                    <Badge tone={s.enabled ? 'success' : 'neutral'}>
-                      {s.enabled ? '활성' : '일시중지'}
-                    </Badge>
-                    <span
-                      className="flex items-center gap-1.5"
-                      title={`소유자 ${ownerName(s.createdBy)}`}
-                    >
-                      <Avatar name={ownerName(s.createdBy)} url={authors[s.createdBy]?.avatarUrl} size="sm" />
-                      <span className="max-w-[140px] truncate text-[11.5px] text-muted-foreground">
-                        {ownerName(s.createdBy)}
-                        {s.createdBy === me ? ' (나)' : ''}
-                      </span>
-                    </span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px]">
-                    <span className="font-[510] text-foreground/90">{describeCron(s.cron)}</span>
-                    <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
-                      {s.cron}
-                    </code>
-                    <span className="text-faint">{s.timezone}</span>
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px]">
-                    <EntityRef id={s.runTemplate.dataset.id} version={s.runTemplate.dataset.version} />
-                    <span className="text-faint">→</span>
-                    <EntityRef id={s.runTemplate.harness.id} version={s.runTemplate.harness.version} />
-                    <RuntimeChip label={runtimeLabelOf(s)} />
-                  </div>
-                  <div className="flex flex-wrap items-center gap-x-1 text-[12px] text-muted-foreground">
-                    {s.enabled ? (
-                      next ? (
-                        <span title={fmtDateTimeFull(next)}>
-                          다음 실행 {fireDayLabel(next, nowIso, s.timezone)}{' '}
-                          {fireTimeLabel(next, s.timezone)}
-                        </span>
-                      ) : (
-                        <span className="text-faint">다음 실행 시각 계산 불가</span>
-                      )
-                    ) : (
-                      <span className="text-faint">일시중지됨 — 발사 안 함</span>
-                    )}
-                    {s.lastStatus ? (
-                      <span className="text-faint">
-                        · 최근 {s.lastStatus}
-                        {s.lastFiredAt ? ` (${fmtDateTime(s.lastFiredAt)})` : ''}
-                      </span>
-                    ) : null}
-                  </div>
-                </div>
-                {canWrite ? (
-                  <div className="flex shrink-0 gap-2">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      disabled={pending}
-                      onClick={() => act(() => setScheduleEnabledAction(s.id, !s.enabled))}
-                    >
-                      {s.enabled ? '일시중지' : '재개'}
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      disabled={pending}
-                      onClick={() => act(() => deleteScheduleAction(s.id))}
-                    >
-                      삭제
-                    </Button>
-                  </div>
-                ) : null}
+      ) : view === 'calendar' ? (
+        <ScheduleCalendar schedules={visible} authors={authors} nowIso={nowIso} />
+      ) : view === 'owner' ? (
+        <div className="space-y-5">
+          {ownerGroups.map(([subject, list]) => (
+            <div key={subject} className="space-y-2">
+              <div className="flex items-center gap-2 px-0.5">
+                <Avatar
+                  name={ownerNameOf(authors, subject)}
+                  url={authors[subject]?.avatarUrl}
+                  size="sm"
+                />
+                <span className="text-[13px] font-[560]">
+                  {ownerNameOf(authors, subject)}
+                  {subject === me ? ' (나)' : ''}
+                </span>
+                <span className="text-[12px] text-faint">{list.length}건</span>
               </div>
-            )
-          })}
+              <div className="space-y-2">{list.map(card)}</div>
+            </div>
+          ))}
         </div>
+      ) : (
+        <div className="space-y-2">{visible.map(card)}</div>
       )}
 
-      <section className="space-y-2.5 rounded-lg border bg-card/60 p-4">
-        <div className="flex items-center gap-2 text-[12px] font-[510] uppercase tracking-wide text-faint">
-          <CalendarClock className="size-3.5" />
-          다가오는 실행 · 이후 {UPCOMING_HORIZON_DAYS}일
-        </div>
-        {upcoming.length === 0 ? (
-          <p className="text-[12px] text-muted-foreground">
-            예정된 실행이 없습니다(활성 예약이 없거나 이 기간에 발사가 없음).
-          </p>
-        ) : (
-          <div className="space-y-0.5">
-            {upcoming.map(({ iso, schedule }, i) => (
-              <div
-                key={`${schedule.id}-${iso}-${i}`}
-                className="flex items-center gap-3 rounded-md px-2 py-1.5 text-[13px] hover:bg-elevated"
-              >
-                <span
-                  className="w-[112px] shrink-0 font-mono tabular-nums text-muted-foreground"
-                  title={fmtDateTimeFull(iso)}
-                >
-                  {fireDayLabel(iso, nowIso, schedule.timezone)}{' '}
-                  <span className="text-foreground">{fireTimeLabel(iso, schedule.timezone)}</span>
-                </span>
-                <span className="min-w-0 flex-1 truncate font-[510]">{schedule.name}</span>
-                <span
-                  className="flex shrink-0 items-center gap-1.5 text-muted-foreground"
-                  title={`소유자 ${ownerName(schedule.createdBy)}`}
-                >
-                  <Avatar
-                    name={ownerName(schedule.createdBy)}
-                    url={authors[schedule.createdBy]?.avatarUrl}
-                    size="sm"
-                  />
-                  <span className="max-w-[120px] truncate text-[11.5px]">
-                    {ownerName(schedule.createdBy)}
-                  </span>
-                </span>
-              </div>
-            ))}
+      {view !== 'calendar' && (
+        <section className="space-y-2.5 rounded-lg border bg-card/60 p-4">
+          <div className="flex items-center gap-2 text-[12px] font-[510] uppercase tracking-wide text-faint">
+            <CalendarClock className="size-3.5" />
+            다가오는 실행 · 이후 {UPCOMING_HORIZON_DAYS}일
           </div>
-        )}
-      </section>
+          {upcoming.length === 0 ? (
+            <p className="text-[12px] text-muted-foreground">
+              예정된 실행이 없습니다(활성 예약이 없거나 이 기간에 발사가 없음).
+            </p>
+          ) : (
+            <div className="space-y-0.5">
+              {upcoming.map(({ iso, schedule }, i) => (
+                <div
+                  key={`${schedule.id}-${iso}-${i}`}
+                  className="flex items-center gap-3 rounded-md px-2 py-1.5 text-[13px] hover:bg-elevated"
+                >
+                  <span
+                    className="w-[112px] shrink-0 font-mono tabular-nums text-muted-foreground"
+                    title={fmtDateTimeFull(iso)}
+                  >
+                    {fireDayLabel(iso, nowIso, schedule.timezone)}{' '}
+                    <span className="text-foreground">{fireTimeLabel(iso, schedule.timezone)}</span>
+                  </span>
+                  <span className="min-w-0 flex-1 truncate font-[510]">{schedule.name}</span>
+                  <span className="flex shrink-0 items-center gap-1.5 text-muted-foreground">
+                    <Avatar
+                      name={ownerNameOf(authors, schedule.createdBy)}
+                      url={authors[schedule.createdBy]?.avatarUrl}
+                      size="sm"
+                    />
+                    <span className="max-w-[120px] truncate text-[11.5px]">
+                      {ownerNameOf(authors, schedule.createdBy)}
+                    </span>
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
     </div>
   )
 }
