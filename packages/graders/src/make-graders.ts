@@ -2,6 +2,7 @@ import { BadRequestError, type Grader, type GraderSpec } from "@assay/core";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
 import { type Judge, JudgeGrader } from "./judge.js";
+import { ScriptScoreGrader } from "./script-score.js";
 import { SweBenchGrader } from "./swe-bench.js";
 import { TestsPassGrader } from "./tests-pass.js";
 import { costGrader, latencyGrader, stepsGrader } from "./trace-graders.js";
@@ -29,6 +30,17 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
           ...(optStr(s.config?.cwd) ? { cwd: optStr(s.config?.cwd) } : {}),
           ...(optStr(s.config?.applyPatch) ? { applyPatch: optStr(s.config?.applyPatch) } : {}),
           ...(optStr(s.config?.passPattern) ? { passPattern: optStr(s.config?.passPattern) } : {}),
+          ...(optStr(s.config?.metric) ? { metric: optStr(s.config?.metric) } : {}),
+          ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
+        });
+      case "script-score":
+        // 제네릭 숫자-점수 grader(벤치마크 무관): 채점 스크립트가 stdout 에 낸 연속 점수를 그대로 방출.
+        return new ScriptScoreGrader({
+          cmd: String(s.config?.cmd ?? "true"),
+          ...(optStr(s.config?.cwd) ? { cwd: optStr(s.config?.cwd) } : {}),
+          ...(optStr(s.config?.scorePattern) ? { scorePattern: optStr(s.config?.scorePattern) } : {}),
+          ...(typeof s.config?.passThreshold === "number" ? { passThreshold: s.config.passThreshold } : {}),
+          ...(typeof s.config?.timeoutSec === "number" ? { timeoutSec: s.config.timeoutSec } : {}),
           ...(optStr(s.config?.metric) ? { metric: optStr(s.config?.metric) } : {}),
           ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
         });

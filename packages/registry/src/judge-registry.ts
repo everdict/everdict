@@ -1,21 +1,61 @@
 import { ConflictError, type JudgeSpec, NotFoundError } from "@assay/core";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
+// 목록 한 항목 — 버전 메타(등록 이력) + 최신 judge 스펙에서 파생한 표시 필드(kind/provider/model/description).
+// GET /judges 와 MCP list_judges 가 이 모양을 낸다. 데이터셋/하니스 ListEntry 와 같은 결.
+export interface JudgeListEntry {
+  id: string;
+  owner: string;
+  versions: string[];
+  latestVersion: string;
+  versionCount: number;
+  kind?: string; // model | harness (대분류 역할)
+  provider?: string; // model judge: anthropic | openai
+  model?: string; // model judge: 모델 id
+  description?: string; // judge 설명(스펙 필드)
+  subtitle?: string; // provider/model 또는 →harness 요약(목록 부제)
+  createdBy?: string; // 최초 등록 버전의 subject(시드/_shared 는 없음)
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+// 최신 JudgeSpec → 목록 파생 필드. model=provider/model, harness=→하니스 위임.
+export function judgeDerived(
+  spec: JudgeSpec,
+): Pick<JudgeListEntry, "kind" | "provider" | "model" | "description" | "subtitle"> {
+  if (spec.kind === "model") {
+    return {
+      kind: "model",
+      provider: spec.provider,
+      model: spec.model,
+      ...(spec.description !== undefined ? { description: spec.description } : {}),
+      subtitle: `${spec.provider}/${spec.model}`,
+    };
+  }
+  return {
+    kind: "harness",
+    ...(spec.description !== undefined ? { description: spec.description } : {}),
+    subtitle: `→ ${spec.harness.id}`,
+  };
+}
+
 // Agent Judge 버전 SSOT — (tenant, id, version) → JudgeSpec. 버전 불변. "latest" 는 semver/등록순 최신.
 // 하니스/데이터셋과 동일한 소유 모델: 테넌트 소유 우선, 없으면 SHARED_TENANT(first-party 기본 judge) 폴백.
 // 유저가 자기 judge(model/harness)를 직접 등록·버전관리한다. async — Postgres 도 같은 계약.
 export interface JudgeRegistry {
-  register(tenant: string, spec: JudgeSpec): Promise<void>;
+  register(tenant: string, spec: JudgeSpec, createdBy?: string): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   get(tenant: string, id: string, ref?: string): Promise<JudgeSpec>;
   versions(tenant: string, id: string): Promise<string[]>; // 정렬됨(semver 우선) — 소유 우선/_shared 폴백
   ownVersions(tenant: string, id: string): Promise<string[]>; // 이 테넌트가 직접 등록한 버전만(폴백 없음 — 충돌 판정용)
-  list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>>;
+  list(tenant: string): Promise<JudgeListEntry[]>;
 }
 
 interface Entry {
   spec: JudgeSpec;
   seq: number;
+  createdAt: string;
+  createdBy?: string;
 }
 
 export class InMemoryJudgeRegistry implements JudgeRegistry {
@@ -35,7 +75,7 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
     return undefined;
   }
 
-  async register(tenant: string, spec: JudgeSpec): Promise<void> {
+  async register(tenant: string, spec: JudgeSpec, createdBy?: string): Promise<void> {
     let ids = this.byOwner.get(tenant);
     if (!ids) {
       ids = new Map();
@@ -57,7 +97,12 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
       }
       return;
     }
-    versions.set(spec.version, { spec, seq: this.seq++ });
+    versions.set(spec.version, {
+      spec,
+      seq: this.seq++,
+      createdAt: new Date().toISOString(),
+      ...(createdBy !== undefined ? { createdBy } : {}),
+    });
   }
 
   async has(tenant: string, id: string, version: string): Promise<boolean> {
@@ -81,12 +126,31 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
     return (this.byOwner.get(owner)?.get(id)?.get(version) as Entry).spec;
   }
 
-  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
+  async list(tenant: string): Promise<JudgeListEntry[]> {
     const ids = new Map<string, string>(); // id → owner (테넌트 우선)
     for (const id of this.byOwner.get(SHARED_TENANT)?.keys() ?? []) ids.set(id, SHARED_TENANT);
     for (const id of this.byOwner.get(tenant)?.keys() ?? []) ids.set(id, tenant);
-    return [...ids.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([id, owner]) => ({ id, owner, versions: this.ownerVersions(owner, id) }));
+    const out: JudgeListEntry[] = [];
+    for (const [id, owner] of [...ids.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+      const versions = this.ownerVersions(owner, id);
+      const latestVersion = versions.at(-1);
+      if (latestVersion === undefined) continue;
+      const entries = [...(this.byOwner.get(owner)?.get(id)?.values() ?? [])].sort((a, b) => a.seq - b.seq);
+      const earliest = entries[0];
+      const latest = entries.at(-1);
+      const latestSpec = this.byOwner.get(owner)?.get(id)?.get(latestVersion)?.spec;
+      out.push({
+        id,
+        owner,
+        versions,
+        latestVersion,
+        versionCount: versions.length,
+        ...(latestSpec ? judgeDerived(latestSpec) : {}),
+        ...(earliest?.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
+        ...(earliest ? { createdAt: earliest.createdAt } : {}),
+        ...(latest ? { updatedAt: latest.createdAt } : {}),
+      });
+    }
+    return out;
   }
 }

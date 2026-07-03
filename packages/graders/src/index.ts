@@ -1,6 +1,7 @@
 export { TestsPassGrader } from "./tests-pass.js";
 export { CommandGrader, type CommandConfig } from "./command.js";
 export { SweBenchGrader, type SweBenchConfig } from "./swe-bench.js";
+export { ScriptScoreGrader, type ScriptScoreConfig } from "./script-score.js";
 export { stepsGrader, costGrader, latencyGrader } from "./trace-graders.js";
 export { DomContainsGrader, UrlMatchesGrader, AnswerMatchGrader } from "./browser-graders.js";
 export { type Judge, type JudgeVerdict, JudgeGrader } from "./judge.js";

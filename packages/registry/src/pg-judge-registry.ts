@@ -1,6 +1,6 @@
 import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@assay/core";
 import type { SqlClient } from "@assay/db";
-import type { JudgeRegistry } from "./judge-registry.js";
+import { type JudgeListEntry, type JudgeRegistry, judgeDerived } from "./judge-registry.js";
 import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
 interface JudgeRow {
@@ -29,7 +29,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
     return sortVersions(r.rows.map((x) => x.version));
   }
 
-  async register(tenant: string, spec: JudgeSpec): Promise<void> {
+  async register(tenant: string, spec: JudgeSpec, createdBy?: string): Promise<void> {
     const existing = await this.client.query<JudgeRow>(
       "SELECT judge FROM assay_judges WHERE tenant = $1 AND id = $2 AND version = $3",
       [tenant, spec.id, spec.version],
@@ -46,8 +46,8 @@ export class PgJudgeRegistry implements JudgeRegistry {
       return;
     }
     await this.client.query(
-      "INSERT INTO assay_judges (tenant, id, version, judge, created_at) VALUES ($1, $2, $3, $4, now())",
-      [tenant, spec.id, spec.version, JSON.stringify(spec)],
+      "INSERT INTO assay_judges (tenant, id, version, judge, created_at, created_by) VALUES ($1, $2, $3, $4, now(), $5)",
+      [tenant, spec.id, spec.version, JSON.stringify(spec), createdBy ?? null],
     );
   }
 
@@ -82,15 +82,40 @@ export class PgJudgeRegistry implements JudgeRegistry {
     return JudgeSpecSchema.parse((res.rows[0] as JudgeRow).judge);
   }
 
-  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
+  async list(tenant: string): Promise<JudgeListEntry[]> {
     const r = await this.client.query<{ id: string }>(
       "SELECT DISTINCT id FROM assay_judges WHERE tenant = $1 OR tenant = $2 ORDER BY id",
       [tenant, SHARED_TENANT],
     );
-    const out: Array<{ id: string; versions: string[]; owner: string }> = [];
+    const out: JudgeListEntry[] = [];
     for (const { id } of r.rows) {
       const owner = (await this.ownerOf(tenant, id)) as string;
-      out.push({ id, owner, versions: await this.ownerVersions(owner, id) });
+      const rows = (
+        await this.client.query<{
+          version: string;
+          created_at: string | Date;
+          created_by: string | null;
+          judge: unknown;
+        }>("SELECT version, created_at, created_by, judge FROM assay_judges WHERE tenant = $1 AND id = $2", [owner, id])
+      ).rows;
+      const versions = sortVersions(rows.map((x) => x.version));
+      const latestVersion = versions.at(-1);
+      if (latestVersion === undefined) continue;
+      const byTime = [...rows].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      const earliest = byTime[0];
+      const latest = byTime.at(-1);
+      const latestRow = rows.find((x) => x.version === latestVersion);
+      out.push({
+        id,
+        owner,
+        versions,
+        latestVersion,
+        versionCount: versions.length,
+        ...(latestRow ? judgeDerived(JudgeSpecSchema.parse(latestRow.judge)) : {}),
+        ...(earliest?.created_by != null ? { createdBy: earliest.created_by } : {}),
+        ...(earliest ? { createdAt: new Date(earliest.created_at).toISOString() } : {}),
+        ...(latest ? { updatedAt: new Date(latest.created_at).toISOString() } : {}),
+      });
     }
     return out;
   }

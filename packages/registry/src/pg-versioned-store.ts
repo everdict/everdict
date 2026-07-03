@@ -1,6 +1,7 @@
 import { ConflictError, NotFoundError } from "@assay/core";
 import type { SqlClient } from "@assay/db";
 import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
+import type { VersionMeta } from "./versioned-store.js";
 
 interface SpecRow {
   spec: unknown;
@@ -36,7 +37,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return sortVersions(r.rows.map((x) => x.version));
   }
 
-  async register(tenant: string, item: T): Promise<void> {
+  async register(tenant: string, item: T, createdBy?: string): Promise<void> {
     const existing = await this.client.query<SpecRow>(
       `SELECT spec FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3`,
       [tenant, item.id, item.version],
@@ -53,8 +54,8 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       return;
     }
     await this.client.query(
-      `INSERT INTO ${this.table} (tenant, id, version, spec, created_at) VALUES ($1, $2, $3, $4, now())`,
-      [tenant, item.id, item.version, JSON.stringify(item)],
+      `INSERT INTO ${this.table} (tenant, id, version, spec, created_at, created_by) VALUES ($1, $2, $3, $4, now(), $5)`,
+      [tenant, item.id, item.version, JSON.stringify(item), createdBy ?? null],
     );
   }
 
@@ -98,6 +99,34 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     for (const { id } of r.rows) {
       const owner = (await this.ownerOf(tenant, id)) as string;
       out.push({ id, owner, versions: await this.ownerVersions(owner, id) });
+    }
+    return out;
+  }
+
+  // 목록 메타 — id 별 버전 요약 + 등록 이력(최초 subject/시각, 최근 시각). 최신 버전만 파싱하지 않고 메타만 뽑는다.
+  async listMeta(tenant: string): Promise<VersionMeta[]> {
+    const out: VersionMeta[] = [];
+    for (const { id, owner } of await this.listIds(tenant)) {
+      const r = await this.client.query<{ version: string; created_at: string | Date; created_by: string | null }>(
+        `SELECT version, created_at, created_by FROM ${this.table} WHERE tenant = $1 AND id = $2`,
+        [owner, id],
+      );
+      const versions = sortVersions(r.rows.map((x) => x.version));
+      const latestVersion = versions.at(-1);
+      if (latestVersion === undefined) continue;
+      const byTime = [...r.rows].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+      const earliest = byTime[0];
+      const latest = byTime.at(-1);
+      out.push({
+        id,
+        owner,
+        versions,
+        latestVersion,
+        versionCount: versions.length,
+        ...(earliest?.created_by != null ? { createdBy: earliest.created_by } : {}),
+        ...(earliest ? { createdAt: new Date(earliest.created_at).toISOString() } : {}),
+        ...(latest ? { updatedAt: new Date(latest.created_at).toISOString() } : {}),
+      });
     }
     return out;
   }

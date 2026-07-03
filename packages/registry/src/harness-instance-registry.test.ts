@@ -71,11 +71,29 @@ describe("HarnessInstanceRegistry", () => {
     expect(resolved.services.map((s) => s.image)).toEqual(["p:9", "b:9"]);
   });
 
-  it("list 가 같은 템플릿 id 아래 인스턴스 버전들을 묶는다", async () => {
+  it("list 가 같은 템플릿 id 아래 인스턴스 버전들을 묶고 목록 메타(category/kind/subtitle/versionCount)를 얹는다", async () => {
     await templates.register("acme", buTemplate);
     await instances.register("acme", instance("pr-1", { planner: "p:1", browser: "b:1" }));
     await instances.register("acme", instance("pr-2", { planner: "p:2", browser: "b:2" }));
     const list = await instances.list("acme");
-    expect(list).toEqual([{ id: "bu", owner: "acme", versions: ["pr-1", "pr-2"] }]);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({
+      id: "bu",
+      owner: "acme",
+      versions: ["pr-1", "pr-2"],
+      latestVersion: "pr-2",
+      versionCount: 2,
+      category: "topology", // 템플릿 대분류
+      kind: "service", // resolved
+      subtitle: "2개 서비스",
+    });
+  });
+
+  it("register 의 createdBy(subject)가 목록 메타(최초 등록 버전)로 노출된다", async () => {
+    await templates.register("acme", buTemplate);
+    await instances.register("acme", instance("pr-1", { planner: "p:1", browser: "b:1" }), "user-carol");
+    await instances.register("acme", instance("pr-2", { planner: "p:2", browser: "b:2" }), "user-dave");
+    const list = await instances.list("acme");
+    expect(list[0]?.createdBy).toBe("user-carol"); // 최초 등록 버전의 subject
   });
 });

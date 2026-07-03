@@ -6,6 +6,20 @@ import { LATEST, SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "
 interface Entry<T> {
   item: T;
   seq: number;
+  createdAt: string; // 등록 시각(ISO)
+  createdBy?: string; // 등록한 subject(없으면 시드/파일)
+}
+
+// 목록 메타 — 한 id 의 살아있는 버전 요약(등록 이력에서). category/kind 등 스펙 파생은 상위 레지스트리가 채운다.
+export interface VersionMeta {
+  id: string;
+  owner: string;
+  versions: string[];
+  latestVersion: string;
+  versionCount: number;
+  createdBy?: string; // 최초 등록 버전의 subject
+  createdAt?: string; // 최초 등록 시각(ISO)
+  updatedAt?: string; // 최근 등록 시각(ISO)
 }
 
 export class VersionedStore<T extends { id: string; version: string }> {
@@ -26,7 +40,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return undefined;
   }
 
-  register(tenant: string, item: T): void {
+  register(tenant: string, item: T, createdBy?: string): void {
     let ids = this.byOwner.get(tenant);
     if (!ids) {
       ids = new Map();
@@ -48,7 +62,12 @@ export class VersionedStore<T extends { id: string; version: string }> {
       }
       return;
     }
-    versions.set(item.version, { item, seq: this.seq++ });
+    versions.set(item.version, {
+      item,
+      seq: this.seq++,
+      createdAt: new Date().toISOString(),
+      ...(createdBy !== undefined ? { createdBy } : {}),
+    });
   }
 
   has(tenant: string, id: string, version: string): boolean {
@@ -79,5 +98,29 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return [...ids.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([id, owner]) => ({ id, owner, versions: this.ownerVersions(owner, id) }));
+  }
+
+  // 목록 메타 — id 별 버전 요약 + 등록 이력(최초 subject/시각, 최근 시각). 상위 레지스트리가 스펙 파생(category 등)을 얹는다.
+  listMeta(tenant: string): VersionMeta[] {
+    const out: VersionMeta[] = [];
+    for (const { id, owner } of this.listIds(tenant)) {
+      const versions = this.ownerVersions(owner, id);
+      const latestVersion = versions.at(-1);
+      if (latestVersion === undefined) continue; // 버전 없는 id는 방어적으로 제외
+      const entries = [...(this.byOwner.get(owner)?.get(id)?.values() ?? [])].sort((a, b) => a.seq - b.seq);
+      const earliest = entries[0];
+      const latest = entries.at(-1);
+      out.push({
+        id,
+        owner,
+        versions,
+        latestVersion,
+        versionCount: versions.length,
+        ...(earliest?.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
+        ...(earliest ? { createdAt: earliest.createdAt } : {}),
+        ...(latest ? { updatedAt: latest.createdAt } : {}),
+      });
+    }
+    return out;
   }
 }

@@ -11,8 +11,8 @@ export class PgHarnessTemplateRegistry implements HarnessTemplateRegistry {
       HarnessTemplateSpecSchema.parse(v),
     );
   }
-  register(tenant: string, spec: HarnessTemplateSpec): Promise<void> {
-    return this.store.register(tenant, spec);
+  register(tenant: string, spec: HarnessTemplateSpec, createdBy?: string): Promise<void> {
+    return this.store.register(tenant, spec, createdBy);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);

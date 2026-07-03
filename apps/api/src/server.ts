@@ -291,7 +291,11 @@ function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyReply {
 export function buildServer(deps: ServerDeps): FastifyInstance {
   // logLevel 이 있으면 요청 단위 구조화 로그(pino) 활성 — 인증 거부/요청을 컨트롤플레인 로그로 진단.
   // 없으면(테스트) 비활성 — req.log 는 no-op 이라 아래 로깅 호출은 안전하다.
-  const app = Fastify({ logger: deps.logLevel ? { level: deps.logLevel } : false });
+  // bodyLimit 을 16MB 로 — 데이터셋/번들(케이스 인라인 파일·채점 스크립트 다수)이 Fastify 기본 1MB 를 넘길 수 있다.
+  const app = Fastify({
+    logger: deps.logLevel ? { level: deps.logLevel } : false,
+    bodyLimit: 16 * 1024 * 1024,
+  });
 
   // 본문 없는 변경 요청(주로 DELETE)에 클라이언트가 content-type: application/json 만 붙여 보내면
   // (브라우저 fetch·undici 의 흔한 동작) Fastify 기본 JSON 파서가 FST_ERR_CTP_EMPTY_JSON_BODY 로 400 을
@@ -547,7 +551,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       gate(principal, "templates:write");
-      await deps.harnessTemplates.register(principal.workspace, parsed.data);
+      await deps.harnessTemplates.register(principal.workspace, parsed.data, principal.subject);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err);
@@ -632,7 +636,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
       gate(principal, "harnesses:register");
-      await deps.harnessInstances.register(principal.workspace, parsed.data);
+      await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // 템플릿 없음 404 / 핀 누락 400 / 불변 409
@@ -1025,7 +1029,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const parsed = JudgeSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      await deps.judgeRegistry.register(principal.workspace, parsed.data);
+      await deps.judgeRegistry.register(principal.workspace, parsed.data, principal.subject);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
       return sendError(reply, err); // 불변성 409

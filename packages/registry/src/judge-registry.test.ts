@@ -58,14 +58,29 @@ describe("InMemoryJudgeRegistry (tenant-owned)", () => {
     await expect(r.register("acme", judge("j", "1.0.0", { rubric: "changed" }))).rejects.toBeInstanceOf(ConflictError);
   });
 
-  it("list 는 소유 + 공유를 보여주고 owner 표기", async () => {
+  it("list 는 소유 + 공유를 보여주고 owner + 목록 메타(kind/model/versionCount)를 얹는다", async () => {
     const r = new InMemoryJudgeRegistry();
     await r.register(SHARED_TENANT, judge("correctness", "1.0.0"));
     await r.register("acme", judge("mine", "1.0.0"));
-    expect(await r.list("acme")).toEqual([
-      { id: "correctness", owner: SHARED_TENANT, versions: ["1.0.0"] },
-      { id: "mine", owner: "acme", versions: ["1.0.0"] },
-    ]);
+    const list = await r.list("acme");
+    expect(list.map((j) => j.id)).toEqual(["correctness", "mine"]);
+    expect(list[1]).toMatchObject({
+      id: "mine",
+      owner: "acme",
+      versions: ["1.0.0"],
+      latestVersion: "1.0.0",
+      versionCount: 1,
+      kind: "model", // 대분류
+      model: "claude-opus-4-8",
+    });
+  });
+
+  it("register 의 createdBy(subject)가 목록 메타(최초 등록 버전)로 노출된다", async () => {
+    const r = new InMemoryJudgeRegistry();
+    await r.register("acme", judge("mine", "1.0.0"), "user-carol");
+    await r.register("acme", judge("mine", "1.1.0"), "user-dave");
+    const list = await r.list("acme");
+    expect(list[0]?.createdBy).toBe("user-carol"); // 최초 등록 버전의 subject
   });
 });
 
