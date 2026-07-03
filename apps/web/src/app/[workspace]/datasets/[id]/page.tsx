@@ -128,7 +128,7 @@ export default async function DatasetDetailPage({
           title={dataset.id}
           description={dataset.description ?? '하니스 무관 eval 케이스 묶음'}
           actions={
-            <div className="flex items-end gap-2">
+            <div className="flex items-center gap-2">
               {versions.length > 1 ? (
                 <VersionSwitcher
                   id={dataset.id}
@@ -142,7 +142,7 @@ export default async function DatasetDetailPage({
               {versions.length > 1 && (
                 <Link
                   href={`/${workspace}/datasets/${encodeURIComponent(dataset.id)}/diff`}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border bg-secondary/40 px-3 text-[13px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+                  className={buttonVariants({ variant: 'secondary', size: 'sm' })}
                 >
                   <GitCompare className="size-3.5" />
                   버전 비교

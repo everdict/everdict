@@ -12,7 +12,8 @@ export function PageHeader({
 }) {
   return (
     <div className="flex flex-wrap items-start justify-between gap-3">
-      <div className="min-w-0 space-y-1">
+      {/* flex-1 — 설명이 길어도 타이틀 블록이 줄어들며 액션은 항상 상단 우측에 남는다(액션 wrap 방지). */}
+      <div className="min-w-0 flex-1 basis-64 space-y-1">
         <h1 className="truncate text-[19px] font-[560] leading-tight tracking-[-0.01em] text-foreground">
           {title}
         </h1>
