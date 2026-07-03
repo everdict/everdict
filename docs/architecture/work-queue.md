@@ -21,18 +21,26 @@
 **진행률**(`progress { done, active, total? }`)로 접는다 — done/active 는 자식 run 카운트,
 total 은 데이터셋 케이스 수(해석 실패 시 생략). standalone run 은 그대로 1 작업.
 
+## 두 개의 큐 (스코프 분리 — 사용자 확정)
+**workspace 큐**와 **personal 큐는 다른 큐다.** workspace = 워크스페이스에서 요청되어 **공용 런타임**
+(기본 백엔드 `''` + 등록 인프라)에서 도는 작업 — `self:*` 항목은 여기 절대 나타나지 않는다.
+personal = 요청자 **본인의** 셀프호스티드 러너(`self:<runnerId>`) 큐(레인 label = 러너 호스트명).
+다른 멤버의 개인 러너 큐는 비노출(러너 소유 모델과 동일)이며 totals 집계에서도 제외된다.
+
 ## 서비스/전송 (BFF↔MCP 패리티)
-`QueueService.snapshot(tenant)` (`apps/api/src/queue-service.ts`) — 스토어 목록(경량)만으로 조립:
+`QueueService.snapshot(tenant, subject?)` (`apps/api/src/queue-service.ts`) — `{ workspace: lanes[],
+personal: lanes[] }` 를 스토어 목록(경량)만으로 조립(personal 스코프 판정 = `myRunners(subject)`):
 scorecards + runs(standalone) 의 활성 상태 + `ScheduleService.list` 의 `nextFireTimes`(Temporal
 authoritative; 없으면 upcoming 생략 — cron 근사는 웹 예약 화면 영역) + `RuntimeRegistry.list`.
 - HTTP: `GET /queue` (`runs:read`, viewer+)
 - MCP: `get_queue` (동일 게이트)
 
 ## 웹 (`/{workspace}/queue`, 내비 '작업')
-`widgets/queue-board` — 레인 카드(Server 아이콘 + 라벨 + 실행/대기 카운트, 유휴 배지)마다
-3열: **실행 중**(진행률 바) | **대기(선입선출)**(맨 앞 '다음' 배지) | **다음 예약**(발사 시각).
-항목은 고정 규격 행(52px): EntityRef 종류 아이콘(벤치마크/하니스) + 실행자 아바타 + 시각.
-활성 작업이 있으면 `AutoRefresh`(5s)로 라이브 갱신, 전부 유휴면 폴링 없음.
+`widgets/queue-board` — **워크스페이스 큐 / 내 개인 큐(셀프호스티드)** 두 그룹. 레인 카드
+(Server/Laptop 아이콘 + 라벨 + 카운트, 유휴 배지)마다 **흐름 방향**으로 3열:
+**다음 예약 ⇢ 대기(선입선출, 맨 앞 '다음' 배지) ⇢ 실행 중(진행률 바)** — 열 사이 펄스 커넥터로
+급류처럼 좌→우로 흐르는 느낌을 준다. 항목은 고정 규격 행(52px): EntityRef 종류 아이콘 +
+실행자 아바타 + 시각. 활성 작업이 있으면 `AutoRefresh`(5s), 전부 유휴면 폴링 없음.
 
 ## 한계 / 후속
 - 대기 순서는 createdAt FIFO **근사**다 — 실제 디스패치 순서는 Scheduler(WFQ)/러너 lease 가 정하며

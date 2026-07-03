@@ -594,7 +594,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return reply;
     try {
       gate(principal, "runs:read");
-      return reply.send(await deps.queueService.snapshot(principal.workspace));
+      // personal 큐(내 셀프호스티드 러너) 스코프 판정에 요청자 subject 필요.
+      return reply.send(await deps.queueService.snapshot(principal.workspace, principal.subject));
     } catch (err) {
       return sendError(reply, err);
     }

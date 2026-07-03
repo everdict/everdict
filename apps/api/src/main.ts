@@ -348,6 +348,8 @@ async function main(): Promise<void> {
     runs: store,
     schedules: scheduleService,
     runtimes: runtimeRegistry,
+    // personal 큐 스코프 — 요청자 본인 러너(self:<id>)만 개인 큐로 노출(다른 멤버 것은 비노출). label = 호스트명.
+    myRunners: async (subject) => (await runnerService.list(subject)).map((r) => ({ id: r.id, label: r.label })),
     // 배치 진행률의 total = 데이터셋 케이스 수(해석 실패 시 생략 — 진행률은 자식 run 카운트로만).
     caseCountFor: async (tenant, id, version) => (await datasetRegistry.get(tenant, id, version)).cases.length,
   });

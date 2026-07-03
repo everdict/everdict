@@ -31,6 +31,7 @@ export type QueueUpcoming = z.infer<typeof queueUpcomingSchema>
 
 export const queueLaneSchema = z.object({
   runtime: z.string(), // '' = 기본 백엔드, 'self:<id>' = 셀프호스티드 러너
+  label: z.string().optional(), // 사람이 읽는 라벨(personal 레인 = 러너 호스트명)
   registered: z.boolean(),
   running: z.array(queueItemSchema),
   queued: z.array(queueItemSchema), // FIFO — 맨 앞이 다음 작업
@@ -38,9 +39,11 @@ export const queueLaneSchema = z.object({
 })
 export type QueueLane = z.infer<typeof queueLaneSchema>
 
+// 큐는 스코프가 둘 — workspace(공용 런타임: 기본 백엔드 + 등록 인프라) / personal(내 셀프호스티드 러너).
 export const queueSnapshotSchema = z.object({
   generatedAt: z.string(),
   totals: z.object({ running: z.number(), queued: z.number(), upcoming: z.number() }),
-  lanes: z.array(queueLaneSchema),
+  workspace: z.array(queueLaneSchema),
+  personal: z.array(queueLaneSchema),
 })
 export type QueueSnapshot = z.infer<typeof queueSnapshotSchema>

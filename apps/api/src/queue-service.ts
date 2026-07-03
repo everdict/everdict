@@ -31,16 +31,21 @@ export interface QueueUpcoming {
 
 export interface QueueLane {
   runtime: string; // '' = 기본 백엔드
+  label?: string; // 사람이 읽는 라벨(personal 레인 = 러너 호스트명). 없으면 runtime 그대로 표시.
   registered: boolean; // 런타임 레지스트리에 등록된 레인인지(기본/셀프/삭제됨 구분용)
   running: QueueItem[]; // 실행 중 — 오래된 것부터
   queued: QueueItem[]; // 대기 — FIFO(맨 앞이 다음 작업)
   upcoming: QueueUpcoming[]; // 이 레인을 겨냥한 활성 예약의 다음 발사(임박순)
 }
 
+// 큐는 스코프가 둘이다(다른 큐): ① workspace — 워크스페이스에서 요청되어 공용 런타임(기본 백엔드 +
+// 등록 인프라)에서 도는 작업. ② personal — 요청자 "본인"의 셀프호스티드 러너(self:<id>) 큐.
+// 다른 멤버의 개인 러너 큐는 개인 소유라 보이지 않는다(러너 소유 모델과 동일).
 export interface QueueSnapshot {
   generatedAt: string;
-  totals: { running: number; queued: number; upcoming: number };
-  lanes: QueueLane[];
+  totals: { running: number; queued: number; upcoming: number }; // 보이는(workspace+personal) 항목 합
+  workspace: QueueLane[];
+  personal: QueueLane[];
 }
 
 export interface QueueServiceDeps {
@@ -48,6 +53,8 @@ export interface QueueServiceDeps {
   runs?: RunStore; // 단발 run 항목 + 배치 진행률(자식 카운트). 미설정이면 스코어카드만.
   schedules?: { list(tenant: string): Promise<ScheduleRecordWithNext[]> }; // 다음 발사(upcoming)
   runtimes?: { list(tenant: string): Promise<Array<{ id: string }>> }; // 등록 런타임 → 빈 레인도 노출
+  // 요청자 본인의 러너 목록(id + 표시 라벨) — personal 큐(self:<id>) 스코프 판정/라벨. 미설정이면 personal 은 빈 배열.
+  myRunners?: (subject: string) => Promise<Array<{ id: string; label?: string }>>;
   // 배치 진행률의 total(데이터셋 케이스 수) 해석 — 실패하면 생략(진행률은 자식 수로만 표시).
   caseCountFor?: (tenant: string, datasetId: string, version: string) => Promise<number | undefined>;
   upcomingPerLane?: number;
@@ -65,12 +72,13 @@ export class QueueService {
     this.upcomingPerLane = deps.upcomingPerLane ?? 5;
   }
 
-  async snapshot(tenant: string): Promise<QueueSnapshot> {
-    const [cards, runs, schedules, runtimes] = await Promise.all([
+  async snapshot(tenant: string, subject?: string): Promise<QueueSnapshot> {
+    const [cards, runs, schedules, runtimes, myRunners] = await Promise.all([
       this.deps.scorecards.list(tenant),
       this.deps.runs ? this.deps.runs.list(tenant) : Promise.resolve([]),
       this.deps.schedules ? this.deps.schedules.list(tenant).catch(() => []) : Promise.resolve([]),
       this.deps.runtimes ? this.deps.runtimes.list(tenant).catch(() => []) : Promise.resolve([]),
+      subject && this.deps.myRunners ? this.deps.myRunners(subject).catch(() => []) : Promise.resolve([]),
     ]);
 
     const activeCards = cards.filter((c) => ACTIVE.has(c.status));
@@ -141,41 +149,57 @@ export class QueueService {
       });
     }
 
-    // 레인 집합: 기본('') + 등록 런타임(빈 레인도 노출 — "이 런타임은 지금 놀고 있음"이 정보) + 활성 작업/예약이 참조하는 런타임.
+    // 스코프 분리 — workspace: 기본('') + 등록 런타임(공용). personal: 내 러너(self:<id>)만.
+    // 다른 멤버의 self:* 항목은 어느 쪽에도 넣지 않는다(개인 큐는 개인만).
     const registered = new Set(runtimes.map((r) => r.id));
-    const laneKeys = new Set<string>(["", ...registered]);
-    for (const { lane } of items) laneKeys.add(lane);
-    for (const { lane } of upcoming) laneKeys.add(lane);
+    const mySelfLanes = new Set(myRunners.map((r) => `self:${r.id}`));
+    const runnerLabel = new Map<string, string | undefined>(myRunners.map((r) => [`self:${r.id}`, r.label]));
+    const isSelf = (lane: string): boolean => lane.startsWith("self:");
+
+    const wsLaneKeys = new Set<string>(["", ...registered]);
+    for (const { lane } of items) if (!isSelf(lane)) wsLaneKeys.add(lane);
+    for (const { lane } of upcoming) if (!isSelf(lane)) wsLaneKeys.add(lane);
+
+    const personalLaneKeys = new Set<string>(mySelfLanes);
+    for (const { lane } of items) if (mySelfLanes.has(lane)) personalLaneKeys.add(lane);
 
     const byCreatedAsc = (a: QueueItem, b: QueueItem): number => a.createdAt.localeCompare(b.createdAt);
-    const lanes: QueueLane[] = [...laneKeys]
-      .sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b))) // 기본 백엔드 레인을 맨 위로
-      .map((key) => ({
-        runtime: key,
-        registered: registered.has(key),
-        running: items
-          .filter((x) => x.lane === key && x.item.status === "running")
-          .map((x) => x.item)
-          .sort(byCreatedAsc),
-        queued: items
-          .filter((x) => x.lane === key && x.item.status === "queued")
-          .map((x) => x.item)
-          .sort(byCreatedAsc), // FIFO — 맨 앞이 다음 작업
-        upcoming: upcoming
-          .filter((x) => x.lane === key)
-          .map((x) => x.entry)
-          .sort((a, b) => a.at.localeCompare(b.at))
-          .slice(0, this.upcomingPerLane),
-      }));
+    const buildLane = (key: string): QueueLane => ({
+      runtime: key,
+      ...(runnerLabel.get(key) ? { label: runnerLabel.get(key) } : {}),
+      registered: registered.has(key),
+      running: items
+        .filter((x) => x.lane === key && x.item.status === "running")
+        .map((x) => x.item)
+        .sort(byCreatedAsc),
+      queued: items
+        .filter((x) => x.lane === key && x.item.status === "queued")
+        .map((x) => x.item)
+        .sort(byCreatedAsc), // FIFO — 맨 앞이 다음 작업
+      upcoming: upcoming
+        .filter((x) => x.lane === key)
+        .map((x) => x.entry)
+        .sort((a, b) => a.at.localeCompare(b.at))
+        .slice(0, this.upcomingPerLane),
+    });
 
+    const workspace = [...wsLaneKeys]
+      .sort((a, b) => (a === "" ? -1 : b === "" ? 1 : a.localeCompare(b))) // 기본 백엔드 레인을 맨 위로
+      .map(buildLane);
+    const personal = [...personalLaneKeys].sort().map(buildLane);
+
+    // totals 는 보이는 항목만 — 다른 멤버의 개인(self) 항목은 집계에서도 제외한다.
+    const visibleLanes = new Set([...wsLaneKeys, ...personalLaneKeys]);
+    const visible = items.filter((x) => visibleLanes.has(x.lane));
     return {
       generatedAt: this.now(),
       totals: {
-        running: items.filter((x) => x.item.status === "running").length,
-        queued: items.filter((x) => x.item.status === "queued").length,
-        upcoming: upcoming.length,
+        running: visible.filter((x) => x.item.status === "running").length,
+        queued: visible.filter((x) => x.item.status === "queued").length,
+        upcoming: upcoming.filter((x) => !isSelf(x.lane) || mySelfLanes.has(x.lane)).length,
       },
-      lanes,
+      workspace,
+      personal,
     };
   }
 }

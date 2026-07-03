@@ -144,7 +144,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           "작업 큐 스냅샷 — 런타임 레인별 실행 중/대기(FIFO, 맨 앞이 다음 작업)/다음 예약 발사. 배치(스코어카드)=1작업(진행률 포함).",
         inputSchema: {},
       },
-      () => run(principal, "runs:read", async () => ok(await queue.snapshot(ws))),
+      () => run(principal, "runs:read", async () => ok(await queue.snapshot(ws, principal.subject))),
     );
   }
 

@@ -1,9 +1,8 @@
 import Link from 'next/link'
-import { CalendarClock, CircleDashed, Loader2, Server } from 'lucide-react'
+import { CalendarClock, ChevronsRight, CircleDashed, Laptop, Loader2, Server } from 'lucide-react'
 
 import type { QueueItem, QueueLane, QueueSnapshot } from '@/entities/queue'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
-import { cn } from '@/shared/lib/utils'
 import { UserAvatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
@@ -12,11 +11,12 @@ import { StatCard } from '@/shared/ui/stat-card'
 
 type Author = { name: string; avatarUrl?: string }
 
-// 레인 라벨 — '' = 기본 백엔드, self:<id> = 셀프호스티드 러너.
-function laneLabel(runtime: string): string {
-  if (runtime === '') return '기본 백엔드'
-  if (runtime.startsWith('self:')) return `내 러너 ${runtime.slice('self:'.length)}`
-  return runtime
+// 레인 라벨 — 서버가 준 label(러너 호스트명) 우선, '' = 기본 백엔드.
+function laneLabel(lane: QueueLane): string {
+  if (lane.label) return lane.label
+  if (lane.runtime === '') return '기본 백엔드'
+  if (lane.runtime.startsWith('self:')) return lane.runtime.slice('self:'.length)
+  return lane.runtime
 }
 
 // 배치 진행률 — total 있으면 바+n/total, 없으면 완료/실행 카운트 텍스트.
@@ -138,30 +138,42 @@ function EmptyColumn({ label }: { label: string }) {
   return <p className="py-2 text-[11.5px] text-faint">{label}</p>
 }
 
-// 런타임 레인 — 실행 중 | 대기(FIFO) | 다음 예약 3열(모바일은 세로 스택).
+// 흐름 커넥터 — 예정 ⇢ 대기 ⇢ 실행 중으로 "흘러가는" 방향을 시각화(넓은 화면에서만).
+function FlowConnector() {
+  return (
+    <div className="hidden items-center pt-6 lg:flex" aria-hidden>
+      <ChevronsRight className="size-4 animate-pulse text-primary/50" />
+    </div>
+  )
+}
+
+// 런타임 레인 — 흐름 순서(다음 예약 ⇢ 대기 FIFO ⇢ 실행 중)로 좌→우. 모바일은 세로 스택.
 function Lane({
   lane,
   workspace,
   authors,
+  personal,
 }: {
   lane: QueueLane
   workspace: string
   authors: Record<string, Author>
+  personal?: boolean
 }) {
   const idle = lane.running.length === 0 && lane.queued.length === 0 && lane.upcoming.length === 0
+  const Icon = personal ? Laptop : Server
   return (
     <Card className="space-y-3 p-4">
       <div className="flex items-center gap-2 overflow-hidden whitespace-nowrap">
-        <Server className="size-4 shrink-0 text-[#6ec6a8]" />
+        <Icon className="size-4 shrink-0 text-[#6ec6a8]" />
         {lane.registered ? (
           <Link
             href={`/${workspace}/runtimes/${encodeURIComponent(lane.runtime)}`}
             className="truncate text-[13.5px] font-[560] hover:underline"
           >
-            {laneLabel(lane.runtime)}
+            {laneLabel(lane)}
           </Link>
         ) : (
-          <span className="truncate text-[13.5px] font-[560]">{laneLabel(lane.runtime)}</span>
+          <span className="truncate text-[13.5px] font-[560]">{laneLabel(lane)}</span>
         )}
         <span className="shrink-0 text-[11.5px] text-faint">
           실행 {lane.running.length} · 대기 {lane.queued.length}
@@ -174,33 +186,7 @@ function Lane({
       </div>
 
       {!idle && (
-        <div className="grid gap-4 lg:grid-cols-3">
-          <div className="space-y-1.5">
-            <ColumnHeader title="실행 중" count={lane.running.length} />
-            {lane.running.length === 0 ? (
-              <EmptyColumn label="실행 중인 작업 없음" />
-            ) : (
-              lane.running.map((i) => (
-                <ItemRow key={i.id} item={i} workspace={workspace} authors={authors} />
-              ))
-            )}
-          </div>
-          <div className="space-y-1.5">
-            <ColumnHeader title="대기 (선입선출)" count={lane.queued.length} />
-            {lane.queued.length === 0 ? (
-              <EmptyColumn label="대기 중인 작업 없음" />
-            ) : (
-              lane.queued.map((i, idx) => (
-                <ItemRow
-                  key={i.id}
-                  item={i}
-                  workspace={workspace}
-                  authors={authors}
-                  next={idx === 0}
-                />
-              ))
-            )}
-          </div>
+        <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr]">
           <div className="space-y-1.5">
             <ColumnHeader title="다음 예약" count={lane.upcoming.length} />
             {lane.upcoming.length === 0 ? (
@@ -229,13 +215,91 @@ function Lane({
               ))
             )}
           </div>
+          <FlowConnector />
+          <div className="space-y-1.5">
+            <ColumnHeader title="대기 (선입선출)" count={lane.queued.length} />
+            {lane.queued.length === 0 ? (
+              <EmptyColumn label="대기 중인 작업 없음" />
+            ) : (
+              lane.queued.map((i, idx) => (
+                <ItemRow
+                  key={i.id}
+                  item={i}
+                  workspace={workspace}
+                  authors={authors}
+                  next={idx === 0}
+                />
+              ))
+            )}
+          </div>
+          <FlowConnector />
+          <div className="space-y-1.5">
+            <ColumnHeader title="실행 중" count={lane.running.length} />
+            {lane.running.length === 0 ? (
+              <EmptyColumn label="실행 중인 작업 없음" />
+            ) : (
+              lane.running.map((i) => (
+                <ItemRow key={i.id} item={i} workspace={workspace} authors={authors} />
+              ))
+            )}
+          </div>
         </div>
       )}
     </Card>
   )
 }
 
-// 작업 큐 보드 — 런타임 레인별 실행 중/대기/다음 예약. 유휴 레인은 접힌 헤더 한 줄로 유지(존재 자체가 정보).
+// 레인 그룹 — 워크스페이스 큐(공용 런타임)와 내 개인 큐(셀프호스티드)는 서로 다른 큐.
+function LaneGroup({
+  title,
+  lanes,
+  workspace,
+  authors,
+  personal,
+  emptyHint,
+}: {
+  title: string
+  lanes: QueueLane[]
+  workspace: string
+  authors: Record<string, Author>
+  personal?: boolean
+  emptyHint?: React.ReactNode
+}) {
+  // 활동 있는 레인 먼저, 유휴 레인은 아래로.
+  const busy = lanes.filter((l) => l.running.length + l.queued.length + l.upcoming.length > 0)
+  const idle = lanes.filter((l) => l.running.length + l.queued.length + l.upcoming.length === 0)
+  return (
+    <section className="space-y-2.5">
+      <h2 className="text-[14px] font-[560] tracking-[-0.01em] text-foreground">{title}</h2>
+      {lanes.length === 0 ? (
+        emptyHint
+      ) : (
+        <div className="space-y-3">
+          {busy.map((lane) => (
+            <Lane
+              key={lane.runtime}
+              lane={lane}
+              workspace={workspace}
+              authors={authors}
+              {...(personal ? { personal } : {})}
+            />
+          ))}
+          {idle.map((lane) => (
+            <Lane
+              key={lane.runtime}
+              lane={lane}
+              workspace={workspace}
+              authors={authors}
+              {...(personal ? { personal } : {})}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+// 작업 큐 보드 — 워크스페이스 큐(요청 → 공용 런타임)와 내 개인 큐(셀프호스티드)를 나눠 보인다.
 export function QueueBoard({
   snapshot,
   workspace,
@@ -245,14 +309,8 @@ export function QueueBoard({
   workspace: string
   authors: Record<string, Author>
 }) {
-  const busyLanes = snapshot.lanes.filter(
-    (l) => l.running.length + l.queued.length + l.upcoming.length > 0
-  )
-  const idleLanes = snapshot.lanes.filter(
-    (l) => l.running.length + l.queued.length + l.upcoming.length === 0
-  )
   return (
-    <div className="space-y-5">
+    <div className="space-y-7">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
           label="실행 중"
@@ -261,17 +319,35 @@ export function QueueBoard({
         />
         <StatCard label="대기" value={snapshot.totals.queued} />
         <StatCard label="예정 발사" value={snapshot.totals.upcoming} />
-        <StatCard label="런타임 레인" value={snapshot.lanes.length} />
+        <StatCard
+          label="런타임 레인"
+          value={snapshot.workspace.length + snapshot.personal.length}
+        />
       </div>
 
-      <div className={cn('space-y-3')}>
-        {busyLanes.map((lane) => (
-          <Lane key={lane.runtime} lane={lane} workspace={workspace} authors={authors} />
-        ))}
-        {idleLanes.map((lane) => (
-          <Lane key={lane.runtime} lane={lane} workspace={workspace} authors={authors} />
-        ))}
-      </div>
+      <LaneGroup
+        title="워크스페이스 큐"
+        lanes={snapshot.workspace}
+        workspace={workspace}
+        authors={authors}
+      />
+
+      <LaneGroup
+        title="내 개인 큐 (셀프호스티드)"
+        lanes={snapshot.personal}
+        workspace={workspace}
+        authors={authors}
+        personal
+        emptyHint={
+          <p className="text-[12px] text-faint">
+            연결된 내 러너가 없어요 —{' '}
+            <Link href={`/${workspace}/runtimes`} className="text-link hover:underline">
+              런타임에서 내 머신을 연결
+            </Link>
+            해보세요.
+          </p>
+        }
+      />
     </div>
   )
 }
