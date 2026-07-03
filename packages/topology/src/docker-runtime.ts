@@ -1,4 +1,10 @@
-import { type BrowserSnapshot, type ServiceHarnessSpec, type ServiceReadiness, UpstreamError } from "@assay/core";
+import {
+  type BrowserSnapshot,
+  type ServiceHarnessSpec,
+  type ServiceReadiness,
+  UpstreamError,
+  flattenEnv,
+} from "@assay/core";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
@@ -89,7 +95,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
           image: svc.image,
           network,
           alias: svc.name,
-          env: { ...connEnv, ...svc.env, ...this.opts.storeEnv },
+          env: { ...connEnv, ...flattenEnv(svc.env), ...this.opts.storeEnv },
           ...(svc.volumes && svc.volumes.length > 0 ? { volumes: svc.volumes } : {}),
           ...(svc.port !== undefined ? { publish: svc.port } : {}),
           // 리소스 요청: cpu 1000=1코어 → --cpus 코어(=cpu/1000), memoryMb → --memory. 정의된 것만.

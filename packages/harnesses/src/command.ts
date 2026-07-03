@@ -4,6 +4,7 @@ import {
   type EvaluableHarness,
   type RunContext,
   type TraceEvent,
+  flattenEnv,
   shq,
 } from "@assay/core";
 import {
@@ -61,7 +62,8 @@ export class CommandHarness implements EvaluableHarness {
     const runId = (this.opts.runId ?? defaultRunId)();
     const env: Record<string, string> = {
       ...ctx.apiKeyEnv,
-      ...this.spec.env,
+      // env 의 {secretRef} 는 컨트롤플레인이 디스패치 직전 이미 값으로 해석한다. 미해석분은 flattenEnv 가 제외(안전).
+      ...flattenEnv(this.spec.env),
       ASSAY_RUN_ID: runId, // 에이전트가 trace 를 상관(correlate)하도록 주입
       ...(this.spec.trace.kind !== "none" ? { OTEL_RESOURCE_ATTRIBUTES: `assay.run_id=${runId}` } : {}),
     };
