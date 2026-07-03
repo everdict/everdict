@@ -24,15 +24,28 @@ export function ownerNameOf(authors: Record<string, Author>, subject: string): s
   return authors[subject]?.name ?? fmtSubject(subject)
 }
 
-// 런타임 칩 — 발사가 도는 실행 인프라(런타임 미지정이면 '기본 백엔드'). 하니스/벤치마크 칩과 동일 밀도.
+// 런타임 칩 — 발사가 도는 실행 인프라(런타임 미지정이면 '기본 백엔드'). 아이콘(Server)으로 종류 구별.
 export function RuntimeChip({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-      <Server className="size-3" />
+      <Server className="size-3 shrink-0 text-[#6ec6a8]" />
       {label}
     </span>
   )
 }
+
+// 상태 — 텍스트 배지 대신 색 있는 아이콘(활성=초록 재생, 일시중지=주황 일시정지) + 호버 툴팁.
+// 클릭하면 상태별 작업 드롭다운(재개/일시중지·수정·삭제) — 상태 컨트롤 컨벤션(아이콘+드롭다운).
+function StateIcon({ enabled }: { enabled: boolean }) {
+  return enabled ? (
+    <CirclePlay className="size-[18px] text-[var(--color-success)]" />
+  ) : (
+    <CirclePause className="size-[18px] text-[var(--color-warning)]" />
+  )
+}
+
+const stateTip = (enabled: boolean): string =>
+  enabled ? '활성 — 주기대로 발사돼요' : '일시중지 — 발사하지 않아요'
 
 // 예약 한 건 — 소유자·상태·주기(사람이 읽는)·벤치마크→하니스·런타임·다음 실행 + pause/삭제.
 export function ScheduleCard({
@@ -64,16 +77,19 @@ export function ScheduleCard({
 }) {
   const router = useRouter()
   return (
-    // 고정 규격 카드 — 스코어카드 목록과 동일(72px·좌 2줄·우 고정 슬롯). wrap 대신 truncate.
-    <div className="flex h-[72px] items-center gap-3 rounded-lg border bg-card px-3.5 shadow-raise">
+    // 고정 규격 카드 — 모든 카드가 같은 3줄 구조(이름 / 대상 / 주기·다음 실행) + 우측 고정 슬롯.
+    <div className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-3 shadow-raise">
       <div className="min-w-0 flex-1 space-y-1.5">
-        {/* ① 이름 · 벤치마크→하니스(+런타임 칩) */}
-        <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+        {/* ① 이름 */}
+        <div className="flex items-center overflow-hidden whitespace-nowrap text-[13px] font-[560]">
           <span className="truncate">{s.name}</span>
-          <span className="shrink-0 text-faint">·</span>
+        </div>
+        {/* ② 대상 — 아이콘으로 종류 구별(벤치마크=Database·하니스=Boxes·런타임=Server). 잘림 방지:
+            좁은 화면은 벤치마크/하니스 각 한 줄(두 줄), md+ 는 한 줄. 화살표는 아이콘이 대신한다(스코어카드와 동일). */}
+        <div className="flex flex-col gap-y-1 text-[12.5px] md:flex-row md:items-center md:gap-x-2.5">
           <Link
             href={`/${workspace}/datasets/${encodeURIComponent(s.runTemplate.dataset.id)}`}
-            className="truncate rounded-sm hover:text-foreground hover:underline"
+            className="min-w-0 overflow-hidden whitespace-nowrap rounded-sm hover:text-foreground hover:underline"
             title="데이터셋(벤치마크) 상세"
           >
             <EntityRef
@@ -82,33 +98,34 @@ export function ScheduleCard({
               kind="dataset"
             />
           </Link>
-          <span className="shrink-0 text-faint">→</span>
-          <Link
-            href={`/${workspace}/harnesses/${encodeURIComponent(s.runTemplate.harness.id)}`}
-            className="truncate rounded-sm hover:text-foreground hover:underline"
-            title="하니스 상세"
-          >
-            <EntityRef
-              id={s.runTemplate.harness.id}
-              version={s.runTemplate.harness.version}
-              kind="harness"
-            />
-          </Link>
-          <span className="hidden shrink-0 md:inline-flex">
-            {s.runTemplate.runtime && !s.runTemplate.runtime.startsWith('self:') ? (
-              <Link
-                href={`/${workspace}/runtimes/${encodeURIComponent(s.runTemplate.runtime)}`}
-                className="rounded-sm hover:underline"
-                title="런타임 상세"
-              >
+          <span className="flex min-w-0 items-center gap-x-2 overflow-hidden whitespace-nowrap">
+            <Link
+              href={`/${workspace}/harnesses/${encodeURIComponent(s.runTemplate.harness.id)}`}
+              className="min-w-0 truncate rounded-sm hover:text-foreground hover:underline"
+              title="하니스 상세"
+            >
+              <EntityRef
+                id={s.runTemplate.harness.id}
+                version={s.runTemplate.harness.version}
+                kind="harness"
+              />
+            </Link>
+            <span className="hidden shrink-0 sm:inline-flex">
+              {s.runTemplate.runtime && !s.runTemplate.runtime.startsWith('self:') ? (
+                <Link
+                  href={`/${workspace}/runtimes/${encodeURIComponent(s.runTemplate.runtime)}`}
+                  className="rounded-sm hover:underline"
+                  title="런타임 상세"
+                >
+                  <RuntimeChip label={runtimeLabelOf(s)} />
+                </Link>
+              ) : (
                 <RuntimeChip label={runtimeLabelOf(s)} />
-              </Link>
-            ) : (
-              <RuntimeChip label={runtimeLabelOf(s)} />
-            )}
+              )}
+            </span>
           </span>
         </div>
-        {/* ② 주기 · 다음 실행 · 최근 상태 */}
+        {/* ③ 주기 · 다음 실행 · 최근 상태 */}
         <div className="flex items-center gap-x-2 overflow-hidden whitespace-nowrap text-[12px] text-muted-foreground">
           <span className="shrink-0 font-[510] text-foreground/90">{describeCron(s.cron)}</span>
           <span className="hidden shrink-0 text-faint sm:inline">{s.timezone}</span>
@@ -132,35 +149,37 @@ export function ScheduleCard({
           ) : null}
         </div>
       </div>
-      {/* 우: 고정 슬롯 — 소유자 썸네일 · 상태 배지 · 작업 메뉴. 카드마다 같은 위치. */}
-      <div className="flex shrink-0 items-center gap-2.5">
-        <span className="flex w-6 justify-center">
+      {/* 우: 고정 슬롯 — 소유자 썸네일 · 상태 아이콘(툴팁 + 클릭=작업 드롭다운). 카드마다 같은 위치. */}
+      <div className="flex shrink-0 items-center gap-1.5">
+        <span className="flex w-7 justify-center">
           <UserAvatar
             name={`${ownerNameOf(authors, s.createdBy)}${s.createdBy === me ? ' (나)' : ''}`}
             url={authors[s.createdBy]?.avatarUrl}
             label="소유자"
           />
         </span>
-        <span className="flex w-[64px] justify-end">
-          <Badge tone={s.enabled ? 'success' : 'neutral'}>{s.enabled ? '활성' : '일시중지'}</Badge>
-        </span>
-        <span className="flex w-8 justify-end">
+        <span className="flex w-8 justify-center">
           {canWrite ? (
             <DropdownMenu
               align="end"
               trigger={({ open, toggle }) => (
-                <button
-                  type="button"
-                  onClick={toggle}
-                  disabled={pending}
-                  aria-label="예약 작업"
-                  aria-expanded={open}
-                  className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
-                >
-                  <MoreHorizontal className="size-4" />
-                </button>
+                <Tooltip content={stateTip(s.enabled)} align="end">
+                  <button
+                    type="button"
+                    onClick={toggle}
+                    disabled={pending}
+                    aria-label={`상태: ${s.enabled ? '활성' : '일시중지'} — 작업 메뉴`}
+                    aria-expanded={open}
+                    className="grid size-8 place-items-center rounded-md transition-colors hover:bg-accent disabled:opacity-50"
+                  >
+                    <StateIcon enabled={s.enabled} />
+                  </button>
+                </Tooltip>
               )}
             >
+              <DropdownItem icon={s.enabled ? <Pause /> : <Play />} onSelect={() => onToggle(s)}>
+                {s.enabled ? '일시중지' : '재개'}
+              </DropdownItem>
               {canEdit ? (
                 <DropdownItem
                   icon={<Pencil />}
@@ -171,15 +190,18 @@ export function ScheduleCard({
                   수정
                 </DropdownItem>
               ) : null}
-              <DropdownItem icon={s.enabled ? <Pause /> : <Play />} onSelect={() => onToggle(s)}>
-                {s.enabled ? '일시중지' : '재개'}
-              </DropdownItem>
               <DropdownSeparator />
               <DropdownItem icon={<Trash2 />} tone="danger" onSelect={() => onDelete(s)}>
                 삭제
               </DropdownItem>
             </DropdownMenu>
-          ) : null}
+          ) : (
+            <Tooltip content={stateTip(s.enabled)} align="end">
+              <span className="grid size-8 place-items-center">
+                <StateIcon enabled={s.enabled} />
+              </span>
+            </Tooltip>
+          )}
         </span>
       </div>
     </div>
