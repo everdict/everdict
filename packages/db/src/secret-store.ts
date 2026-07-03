@@ -1,55 +1,95 @@
 import type { SqlClient } from "./client.js";
 import type { EncryptedSecret, SecretCipher } from "./secret-cipher.js";
 
-// 워크스페이스 시크릿 저장소 — 여러 모델/프로바이더 키(OPENAI_API_KEY, ANTHROPIC_API_KEY, LiteLLM 키 등)를
-// 워크스페이스별로 관리. 값은 AES-GCM 으로 at-rest 암호화되며 절대 평문으로 되돌려주지 않는다(list 는 이름만).
-// entries() 만 복호화 — 디스패치 시 그 워크스페이스의 잡 env 주입에만 사용(SecretProvider 경유).
+// 워크스페이스 시크릿 저장소 — 모델/프로바이더 키(OPENAI_API_KEY 등)를 스코프별로 관리.
+// scope: "workspace"(owner='') = 공유(admin 관리) · "user"(owner=subject) = 그 유저 개인(셀프 관리, 타인 불가시).
+// 값은 AES-GCM at-rest 암호화, 절대 평문 반환 안 함(list 는 이름+스코프만). entries/scopedEntries 만 복호화(주입 전용).
+export type SecretScope = "user" | "workspace";
+
 export interface SecretMeta {
   name: string;
   updatedAt: string;
+  scope: SecretScope;
+}
+
+// 디스패치 해석용 두 티어 — 공유 + 제출자 개인. resolveHarnessSecrets 가 참조 scope 로 골라 쓴다.
+export interface ScopedSecretEntries {
+  workspace: Record<string, string>;
+  user: Record<string, string>;
 }
 
 export interface SecretStore {
-  set(workspace: string, name: string, value: string): Promise<void>;
-  list(workspace: string): Promise<SecretMeta[]>; // 이름 + 메타만(값 없음)
-  remove(workspace: string, name: string): Promise<void>;
-  entries(workspace: string): Promise<Record<string, string>>; // 복호화 — 주입 전용(서버 내부)
+  // owner="" = 워크스페이스(공유) 시크릿, owner=subject = 유저 개인 시크릿.
+  set(workspace: string, name: string, value: string, owner?: string): Promise<void>;
+  // subject 를 주면 그 유저의 개인 시크릿도 함께(스코프 태그) 반환. 미지정이면 공유 시크릿만.
+  list(workspace: string, subject?: string): Promise<SecretMeta[]>;
+  remove(workspace: string, name: string, owner?: string): Promise<void>;
+  entries(workspace: string): Promise<Record<string, string>>; // 공유(owner='') 시크릿만 — 기존 소비자 호환
+  scopedEntries(workspace: string, subject: string): Promise<ScopedSecretEntries>; // 공유 + 그 유저 개인
+}
+
+interface MemRow {
+  enc: EncryptedSecret;
+  updatedAt: string;
+  workspace: string;
+  owner: string;
+  name: string;
 }
 
 export class InMemorySecretStore implements SecretStore {
-  private readonly byWs = new Map<string, Map<string, { enc: EncryptedSecret; updatedAt: string }>>();
+  private readonly rows = new Map<string, MemRow>();
   constructor(
     private readonly cipher: SecretCipher,
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
-  private ws(workspace: string) {
-    let m = this.byWs.get(workspace);
-    if (!m) {
-      m = new Map();
-      this.byWs.set(workspace, m);
+  private key(workspace: string, owner: string, name: string): string {
+    return `${workspace} ${owner} ${name}`;
+  }
+  async set(workspace: string, name: string, value: string, owner = ""): Promise<void> {
+    this.rows.set(this.key(workspace, owner, name), {
+      enc: this.cipher.encrypt(value),
+      updatedAt: this.now(),
+      workspace,
+      owner,
+      name,
+    });
+  }
+  async list(workspace: string, subject?: string): Promise<SecretMeta[]> {
+    const metas: SecretMeta[] = [];
+    for (const r of this.rows.values()) {
+      if (r.workspace !== workspace) continue;
+      if (r.owner === "") metas.push({ name: r.name, updatedAt: r.updatedAt, scope: "workspace" });
+      else if (subject && r.owner === subject) metas.push({ name: r.name, updatedAt: r.updatedAt, scope: "user" });
     }
-    return m;
+    // 공유 먼저, 그 다음 개인 — 각 스코프 안에서 이름순.
+    return metas.sort((a, b) =>
+      a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === "workspace" ? -1 : 1,
+    );
   }
-  async set(workspace: string, name: string, value: string): Promise<void> {
-    this.ws(workspace).set(name, { enc: this.cipher.encrypt(value), updatedAt: this.now() });
-  }
-  async list(workspace: string): Promise<SecretMeta[]> {
-    return [...(this.byWs.get(workspace)?.entries() ?? [])]
-      .map(([name, v]) => ({ name, updatedAt: v.updatedAt }))
-      .sort((a, b) => a.name.localeCompare(b.name));
-  }
-  async remove(workspace: string, name: string): Promise<void> {
-    this.byWs.get(workspace)?.delete(name);
+  async remove(workspace: string, name: string, owner = ""): Promise<void> {
+    this.rows.delete(this.key(workspace, owner, name));
   }
   async entries(workspace: string): Promise<Record<string, string>> {
     const out: Record<string, string> = {};
-    for (const [name, v] of this.byWs.get(workspace)?.entries() ?? []) out[name] = this.cipher.decrypt(v.enc);
+    for (const r of this.rows.values())
+      if (r.workspace === workspace && r.owner === "") out[r.name] = this.cipher.decrypt(r.enc);
     return out;
+  }
+  async scopedEntries(workspace: string, subject: string): Promise<ScopedSecretEntries> {
+    const workspaceEntries: Record<string, string> = {};
+    const user: Record<string, string> = {};
+    for (const r of this.rows.values()) {
+      if (r.workspace !== workspace) continue;
+      if (r.owner === "") workspaceEntries[r.name] = this.cipher.decrypt(r.enc);
+      else if (r.owner === subject) user[r.name] = this.cipher.decrypt(r.enc);
+    }
+    return { workspace: workspaceEntries, user };
   }
 }
 
 interface SecretRow {
   name: string;
+  owner: string;
   ciphertext: string;
   iv: string;
   tag: string;
@@ -61,32 +101,55 @@ export class PgSecretStore implements SecretStore {
     private readonly client: SqlClient,
     private readonly cipher: SecretCipher,
   ) {}
-  async set(workspace: string, name: string, value: string): Promise<void> {
+  async set(workspace: string, name: string, value: string, owner = ""): Promise<void> {
     const { ciphertext, iv, tag } = this.cipher.encrypt(value);
     await this.client.query(
-      `INSERT INTO assay_secrets (workspace, name, ciphertext, iv, tag, updated_at) VALUES ($1,$2,$3,$4,$5, now())
-       ON CONFLICT (workspace, name) DO UPDATE SET ciphertext = $3, iv = $4, tag = $5, updated_at = now()`,
-      [workspace, name, ciphertext, iv, tag],
+      `INSERT INTO assay_secrets (workspace, owner, name, ciphertext, iv, tag, updated_at) VALUES ($1,$2,$3,$4,$5,$6, now())
+       ON CONFLICT (workspace, owner, name) DO UPDATE SET ciphertext = $4, iv = $5, tag = $6, updated_at = now()`,
+      [workspace, owner, name, ciphertext, iv, tag],
     );
   }
-  async list(workspace: string): Promise<SecretMeta[]> {
-    const r = await this.client.query<{ name: string; updated_at: string }>(
-      "SELECT name, updated_at FROM assay_secrets WHERE workspace = $1 ORDER BY name",
-      [workspace],
+  async list(workspace: string, subject?: string): Promise<SecretMeta[]> {
+    // owner='' (공유) + owner=subject (개인). subject 없으면 공유만($2='').
+    const r = await this.client.query<{ name: string; owner: string; updated_at: string }>(
+      "SELECT name, owner, updated_at FROM assay_secrets WHERE workspace = $1 AND (owner = '' OR owner = $2) ORDER BY owner, name",
+      [workspace, subject ?? ""],
     );
-    return r.rows.map((x) => ({ name: x.name, updatedAt: x.updated_at }));
+    return r.rows.map((x) => ({
+      name: x.name,
+      updatedAt: x.updated_at,
+      scope: x.owner === "" ? "workspace" : "user",
+    }));
   }
-  async remove(workspace: string, name: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_secrets WHERE workspace = $1 AND name = $2", [workspace, name]);
+  async remove(workspace: string, name: string, owner = ""): Promise<void> {
+    await this.client.query("DELETE FROM assay_secrets WHERE workspace = $1 AND owner = $2 AND name = $3", [
+      workspace,
+      owner,
+      name,
+    ]);
   }
   async entries(workspace: string): Promise<Record<string, string>> {
     const r = await this.client.query<SecretRow>(
-      "SELECT name, ciphertext, iv, tag FROM assay_secrets WHERE workspace = $1",
+      "SELECT name, ciphertext, iv, tag FROM assay_secrets WHERE workspace = $1 AND owner = ''",
       [workspace],
     );
     const out: Record<string, string> = {};
     for (const row of r.rows)
       out[row.name] = this.cipher.decrypt({ ciphertext: row.ciphertext, iv: row.iv, tag: row.tag });
     return out;
+  }
+  async scopedEntries(workspace: string, subject: string): Promise<ScopedSecretEntries> {
+    const r = await this.client.query<SecretRow>(
+      "SELECT name, owner, ciphertext, iv, tag FROM assay_secrets WHERE workspace = $1 AND (owner = '' OR owner = $2)",
+      [workspace, subject],
+    );
+    const workspaceEntries: Record<string, string> = {};
+    const user: Record<string, string> = {};
+    for (const row of r.rows) {
+      const value = this.cipher.decrypt({ ciphertext: row.ciphertext, iv: row.iv, tag: row.tag });
+      if (row.owner === "") workspaceEntries[row.name] = value;
+      else user[row.name] = value;
+    }
+    return { workspace: workspaceEntries, user };
   }
 }

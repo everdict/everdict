@@ -35,10 +35,10 @@ describe("InMemorySecretStore", () => {
     await s.set("acme", "OPENAI_API_BASE", "http://litellm:4000");
     await s.set("globex", "OPENAI_API_KEY", "sk-globex");
 
-    // list 는 이름+메타만(값 없음)
+    // list 는 이름+메타(스코프)만(값 없음) — owner 미지정은 전부 workspace 스코프
     expect(await s.list("acme")).toEqual([
-      { name: "OPENAI_API_BASE", updatedAt: "2026-01-01T00:00:00Z" },
-      { name: "OPENAI_API_KEY", updatedAt: "2026-01-01T00:00:00Z" },
+      { name: "OPENAI_API_BASE", updatedAt: "2026-01-01T00:00:00Z", scope: "workspace" },
+      { name: "OPENAI_API_KEY", updatedAt: "2026-01-01T00:00:00Z", scope: "workspace" },
     ]);
     // entries 는 복호화된 주입용 맵
     expect(await s.entries("acme")).toEqual({ OPENAI_API_KEY: "sk-acme", OPENAI_API_BASE: "http://litellm:4000" });
@@ -54,5 +54,28 @@ describe("InMemorySecretStore", () => {
     await s.set("acme", "K", "v1");
     await s.set("acme", "K", "v2");
     expect((await s.entries("acme")).K).toBe("v2");
+  });
+
+  it("유저 스코프 시크릿은 본인만 보이고 공유 entries 에 안 섞인다", async () => {
+    const s = new InMemorySecretStore(cipher, () => "2026-01-01T00:00:00Z");
+    await s.set("acme", "SHARED", "ws-val"); // 공유(owner='')
+    await s.set("acme", "MY_KEY", "alice-val", "alice"); // alice 개인
+    await s.set("acme", "MY_KEY", "bob-val", "bob"); // bob 의 동명 개인 시크릿(격리)
+
+    expect(await s.list("acme")).toEqual([{ name: "SHARED", updatedAt: "2026-01-01T00:00:00Z", scope: "workspace" }]);
+    expect(await s.list("acme", "alice")).toEqual([
+      { name: "SHARED", updatedAt: "2026-01-01T00:00:00Z", scope: "workspace" },
+      { name: "MY_KEY", updatedAt: "2026-01-01T00:00:00Z", scope: "user" },
+    ]);
+    expect(await s.entries("acme")).toEqual({ SHARED: "ws-val" }); // 개인 미포함
+    expect(await s.scopedEntries("acme", "alice")).toEqual({
+      workspace: { SHARED: "ws-val" },
+      user: { MY_KEY: "alice-val" }, // bob 것 격리
+    });
+
+    await s.remove("acme", "MY_KEY"); // owner=''(공유) — alice 개인은 안 지워짐
+    expect((await s.list("acme", "alice")).map((m) => m.name)).toContain("MY_KEY");
+    await s.remove("acme", "MY_KEY", "alice");
+    expect((await s.list("acme", "alice")).map((m) => m.name)).not.toContain("MY_KEY");
   });
 });
