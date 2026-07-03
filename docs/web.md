@@ -115,8 +115,14 @@ panel/list guidance is not.
   outbound OAuth) · **연결된 러너** · API 키 탭(`account-tabs.tsx`). 연결된 러너(`features/manage-runners`):
   **manage-only** — 러너 목록(온라인 dot = `lastSeenAt` 신선도) + 해제. 수동 디바이스 페어링(토큰 1회 노출
   모달)은 제거됨(desktop D7): 개인 머신 페어링은 데스크톱 원클릭이 전담하고, 브라우저에는
-  `DESKTOP_DOWNLOAD_URL` 설정 시 "데스크톱 앱 받기" CTA 가 뜬다. headless 서버는 API 키로 `POST /runners`
-  → `assay runner --pair`. **데스크톱 셸 안에서는**(`window.assayDesktop` 감지 —
+  "데스크톱 앱 받기" CTA(→ `/{workspace}/download`)가 뜬다. headless 서버는 API 키로 `POST /runners`
+  → `assay runner --pair`.
+- **다운로드 `/{workspace}/download`** (`features/download-desktop`) — 데스크톱 설치파일 다운로드 페이지.
+  서버가 GitHub 릴리즈(private 유지)를 서버 전용 PAT(`DESKTOP_RELEASES_REPO`/`DESKTOP_RELEASES_TOKEN`,
+  5분 캐시)로 읽어 OS 감지(UA) 권장 버튼 + 전 플랫폼 목록 + 설치 후 안내(unsigned 주의 포함)를 렌더링.
+  실제 다운로드는 `GET /api/desktop/download?id=…` 라우트가 세션 검사(`currentPrincipal`) + 우리 릴리즈
+  에셋 검증 후 GitHub 의 서명된 임시 URL 로 302 — 대용량이 웹 서버를 통과하지 않고, 토큰은 클라이언트로
+  나가지 않는다. 토큰 미설정 시 `DESKTOP_DOWNLOAD_URL` 외부 링크 폴백. See `docs/architecture/desktop-app.md`. **데스크톱 셸 안에서는**(`window.assayDesktop` 감지 —
   `shared/lib/desktop-bridge.ts` 의 로컬 미러 타입, 웹은 `@assay/*` 미의존) **"이 기기를 러너로 연결"
   원클릭**: 라벨=호스트명 자동, 토큰은 화면에 노출되지 않고 브리지로만 하강(OS 키체인 저장); "이 기기" 행은
   lastSeenAt 추정 대신 브리지 **라이브 상태**(실행 중 (n)/온라인 + 라이브 capability, docker 없음 힌트)를

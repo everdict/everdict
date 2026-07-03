@@ -64,8 +64,9 @@ pnpm assay run --task "Create ok.txt with the text done" --test "grep -q done ok
 키체인에 저장). 트레이 상주(닫기=숨김), 잡 완료 알림, 자동 시작 토글.
 
 ```bash
-# 설치파일 다운로드 (linux AppImage/deb · mac dmg/zip x64+arm64 · win exe):
-#   https://github.com/Ho2eny/assay/releases/latest
+# 설치파일 다운로드: 웹의 /{workspace}/download — OS 자동 감지 + 로그인 뒤 302 프록시(리포 private 유지).
+#   (서버 env: DESKTOP_RELEASES_TOKEN=fine-grained PAT[contents:read]; GitHub 직접 접근은 콜라보레이터만
+#    가능 — https://github.com/Ho2eny/assay/releases/latest)
 # (unsigned — mac Gatekeeper/win SmartScreen 경고는 우회 실행. 서명은 인증서 확보 후)
 
 # dev 실행 (웹 :3000 + 컨트롤플레인 :8787 이 떠 있어야 함):
@@ -81,7 +82,7 @@ git tag desktop-v0.2.0 && git push origin desktop-v0.2.0
 - 라이브 e2e: `node scripts/live/desktop-runner.mjs` (원클릭 페어 → `self:<id>` 런 → provenance 검증).
 - **자동 업데이트**: 클라이언트는 내장·검증 완료(감지/다운로드 자동, 적용은 트레이에서 재시작).
   피드 공개 위치가 결정되면(`electron-builder.yml` publish 블록) 활성화됩니다 — 현재는 비활성.
-- 웹에 다운로드 링크를 띄우려면: `DESKTOP_DOWNLOAD_URL=https://github.com/Ho2eny/assay/releases/latest`.
+- 웹 다운로드 페이지(`/{ws}/download`) 활성화: `DESKTOP_RELEASES_TOKEN` 설정(미설정 시 `DESKTOP_DOWNLOAD_URL` 외부 링크 폴백).
 
 ## Self-hosted runner (내 머신에서 실행)
 워크스페이스의 공유 하니스·데이터셋을 **런타임만 `self:<id>` 로 바꿔** 내 호스트에서 실행하고 결과를

@@ -41,7 +41,6 @@ export function AccountTabs({
   providers,
   canManageIntegrations,
   runners,
-  desktopDownloadUrl,
   keys,
   keysError,
   canReadKeys,
@@ -55,7 +54,6 @@ export function AccountTabs({
   providers: ProviderInfo[]
   canManageIntegrations: boolean // settings:write — 미설정 self-hosted 통합 설정 딥링크 노출 여부
   runners: RunnerMeta[]
-  desktopDownloadUrl?: string // DESKTOP_DOWNLOAD_URL — 설정 시 러너 탭에 데스크톱 앱 다운로드 링크
   keys: ApiKeyMeta[]
   keysError?: string
   canReadKeys: boolean
@@ -114,10 +112,7 @@ export function AccountTabs({
       </TabsContent>
 
       <TabsContent value="runners">
-        <RunnersManager
-          runners={runners}
-          {...(desktopDownloadUrl !== undefined ? { desktopDownloadUrl } : {})}
-        />
+        <RunnersManager runners={runners} downloadHref={`/${principal.workspace}/download`} />
       </TabsContent>
 
       <TabsContent value="keys">

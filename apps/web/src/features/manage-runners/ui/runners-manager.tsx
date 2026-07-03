@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
+import Link from 'next/link'
 import { Download, Laptop, Trash2 } from 'lucide-react'
 
 import { runnerCapabilitySchema, type RunnerCapability, type RunnerMeta } from '@/entities/runner'
@@ -42,10 +43,10 @@ function isRunnerCapability(value: string): value is RunnerCapability {
 // `POST /runners` → `assay runner --pair` (docs/architecture/self-hosted-runner.md).
 export function RunnersManager({
   runners,
-  desktopDownloadUrl,
+  downloadHref,
 }: {
   runners: RunnerMeta[]
-  desktopDownloadUrl?: string // 설정 시(DESKTOP_DOWNLOAD_URL) 브라우저 사용자에게 데스크톱 앱 다운로드 CTA
+  downloadHref: string // /{workspace}/download — 브라우저 사용자용 데스크톱 다운로드 페이지
 }) {
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
@@ -132,16 +133,11 @@ export function RunnersManager({
               {pending ? '연결 중…' : '이 기기를 러너로 연결'}
             </Button>
           )}
-          {!bridge && desktopDownloadUrl && (
-            <a
-              href={desktopDownloadUrl}
-              target="_blank"
-              rel="noreferrer"
-              className={buttonVariants({ size: 'sm' })}
-            >
+          {!bridge && (
+            <Link href={downloadHref} className={buttonVariants({ size: 'sm' })}>
               <Download />
               데스크톱 앱 받기
-            </a>
+            </Link>
           )}
         </span>
       </div>
@@ -167,17 +163,15 @@ export function RunnersManager({
                 <Laptop />
                 {pending ? '연결 중…' : '이 기기를 러너로 연결'}
               </Button>
-            ) : desktopDownloadUrl ? (
-              <a
-                href={desktopDownloadUrl}
-                target="_blank"
-                rel="noreferrer"
+            ) : (
+              <Link
+                href={downloadHref}
                 className={buttonVariants({ size: 'sm', variant: 'secondary' })}
               >
                 <Download />
                 데스크톱 앱 받기
-              </a>
-            ) : undefined
+              </Link>
+            )
           }
         />
       ) : (
