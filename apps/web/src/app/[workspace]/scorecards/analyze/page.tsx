@@ -1,4 +1,4 @@
-import { ScorecardAnalyzer, paramsToConfig } from '@/features/analyze-scorecards'
+import { ScorecardAnalyzer, type QuestionId } from '@/features/analyze-scorecards'
 import { membersSchema } from '@/entities/member'
 import { scorecardsSchema } from '@/entities/scorecard'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -20,9 +20,10 @@ export default async function AnalyzePage({
 }) {
   await params
   const sp = await searchParams
-  const flat: Record<string, string | undefined> = {}
-  for (const [k, v] of Object.entries(sp)) flat[k] = Array.isArray(v) ? v[0] : v
-  const initialConfig = paramsToConfig(flat)
+  const rawQ = Array.isArray(sp.q) ? sp.q[0] : sp.q
+  const initialQuestion: QuestionId = rawQ === 'models' || rawQ === 'harnesses' ? rawQ : 'trend'
+  const initialHarness = (Array.isArray(sp.h) ? sp.h[0] : sp.h) ?? ''
+  const nowIso = new Date().toISOString()
 
   const { ctx } = await currentPrincipal()
   let error: string | undefined
@@ -46,7 +47,7 @@ export default async function AnalyzePage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="분석" description="필터·그룹·측정으로 스코어카드를 자유롭게 분석해요." />
+      <PageHeader title="분석" description="성능 추이·모델 비교·하니스 비교를 골라 바로 봐요." />
       {error ? (
         <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : scorecards.length === 0 ? (
@@ -55,7 +56,13 @@ export default async function AnalyzePage({
           hint="스코어카드를 실행하면 여기서 분석할 수 있어요."
         />
       ) : (
-        <ScorecardAnalyzer scorecards={scorecards} authors={authors} initialConfig={initialConfig} />
+        <ScorecardAnalyzer
+          scorecards={scorecards}
+          authors={authors}
+          nowIso={nowIso}
+          initialQuestion={initialQuestion}
+          initialHarness={initialHarness}
+        />
       )}
     </div>
   )
