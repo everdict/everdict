@@ -12,11 +12,9 @@ import {
 } from "@assay/backends";
 import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@assay/core";
 import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@assay/orchestrator";
+import { ResilientMcpSession, mcpConnect, runLeaseWorkers, runLeasedJob } from "@assay/runner-core";
 import { diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
 import type { DockerTopologyRuntimeOptions } from "@assay/topology";
-import { runLeasedJob } from "./run-leased-job.js";
-import { runLeaseWorkers } from "./runner-loop.js";
-import { ResilientMcpSession, mcpConnect } from "./runner-session.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -250,7 +248,7 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const dockerOk = await probeDocker();
   const capabilities = ["repo", ...(dockerOk ? ["docker", "browser"] : [])];
 
-  // wedge 방지: API 재시작/단절 시 세션을 자동 재초기화하는 회복형 MCP 세션(runner-session.ts). 지연 연결.
+  // wedge 방지: API 재시작/단절 시 세션을 자동 재초기화하는 회복형 MCP 세션(@assay/runner-core). 지연 연결.
   const session = new ResilientMcpSession(mcpConnect(mcpUrl, token));
   try {
     await session.ensureConnected();

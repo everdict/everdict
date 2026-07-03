@@ -175,7 +175,7 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
 - ✅ **Runner presence in the web** (`e9821cc`) — online/offline dot + label on the account roster, derived from
   `lastSeenAt` freshness (long-poll lease touches it ~every 25s). Page-load-time state (not live-updating).
 - ✅ **Case-level parallelism (`--max-concurrent`)** — the runner runs N lease workers concurrently
-  (`runLeaseWorkers`, `apps/cli/src/runner-loop.ts`), all sharing one MCP session. `RunnerHub.lease` is
+  (`runLeaseWorkers`, `packages/runner-core/src/runner-loop.ts`), all sharing one MCP session. `RunnerHub.lease` is
   single-thread-atomic, so concurrent `lease_job` calls never hand the same job out twice → the workers safely
   split a batch. A scorecard submitted with `concurrency=N` parks N jobs; effective parallel = `min(N, workers)`.
   Default 1 (serial, back-compat). For `service` harnesses the shared `DockerTopologyRuntime` makes

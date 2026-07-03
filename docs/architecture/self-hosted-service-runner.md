@@ -104,7 +104,7 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
    `TrustZone`/pool-silo (single-user host). Deterministic tests with a fake Docker (100/100 topology, +6). No
    runner/CLI change yet — backend-constructible in isolation. Host↔container CDP address nuance is a live-e2e
    (slice 3) concern.
-2. ✅ **Runner kind-branch** — DONE. `apps/cli/src/run-leased-job.ts` `runLeasedJob(job)`: `harnessSpec.kind ===
+2. ✅ **Runner kind-branch** — DONE. `packages/runner-core/src/run-leased-job.ts` (extracted from `apps/cli`) `runLeasedJob(job)`: `harnessSpec.kind ===
    "service"` → `ServiceTopologyBackend({ runtime: new DockerTopologyRuntime(), traceSource:
    buildTraceSource(spec.traceSource), specFor: () => spec })` (no trustZones; submit/getJson default fetch); else
    `runAgentJob` (absent `harnessSpec` ⇒ process path = today). The runner loop (`main.ts:273`) calls it instead of
