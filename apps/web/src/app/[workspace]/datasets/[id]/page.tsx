@@ -9,6 +9,7 @@ import {
   History,
   ScrollText,
   Tags,
+  Timer,
   Waypoints,
 } from 'lucide-react'
 
@@ -32,10 +33,10 @@ import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
+import { EnvBadge, GraderBadge } from '@/shared/ui/case-badges'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
-import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 import { InfoTip } from '@/shared/ui/tooltip'
 
 export const dynamic = 'force-dynamic'
@@ -119,6 +120,21 @@ export default async function DatasetDetailPage({
       </div>
     )
   }
+
+  // 케이스 구성 요약 — 환경(env.kind)·채점(grader.id) 분포(빈도순). 벤치마크 성격을 한눈에.
+  const envSummary = [
+    ...dataset.cases.reduce((m, c) => {
+      const k = c.env?.kind
+      if (k) m.set(k, (m.get(k) ?? 0) + 1)
+      return m
+    }, new Map<string, number>()),
+  ].sort((a, b) => b[1] - a[1])
+  const graderSummary = [
+    ...dataset.cases.reduce((m, c) => {
+      for (const g of c.graders) m.set(g.id, (m.get(g.id) ?? 0) + 1)
+      return m
+    }, new Map<string, number>()),
+  ].sort((a, b) => b[1] - a[1])
 
   return (
     <div className="space-y-7">
@@ -278,45 +294,94 @@ export default async function DatasetDetailPage({
         </div>
       )}
 
-      <section className="space-y-2.5">
+      <section className="space-y-3">
         <SectionHeader title={`케이스 (${dataset.cases.length})`} />
         {dataset.cases.length === 0 ? (
           <EmptyState title="케이스가 없습니다." />
         ) : (
-          <Table>
-            <THead>
-              <tr>
-                <TH className="w-[180px]">case</TH>
-                <TH>task</TH>
-                <TH className="text-right">env · graders</TH>
-              </tr>
-            </THead>
-            <TBody>
+          <>
+            {/* 구성 요약 — 이 벤치마크가 어떤 환경에서 무엇으로 채점되는지 한눈에 */}
+            <div className="space-y-2 rounded-lg border bg-card/60 p-3.5">
+              <div className="flex gap-3">
+                <span className="w-9 shrink-0 pt-1 text-[11px] font-[510] uppercase tracking-wide text-faint">
+                  환경
+                </span>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                  {envSummary.length === 0 ? (
+                    <span className="text-[12px] text-faint">—</span>
+                  ) : (
+                    envSummary.map(([kind, n]) => (
+                      <span key={kind} className="inline-flex items-center gap-1">
+                        <EnvBadge kind={kind} />
+                        <span className="text-[12px] tabular-nums text-faint">{n}</span>
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <span className="w-9 shrink-0 pt-1 text-[11px] font-[510] uppercase tracking-wide text-faint">
+                  채점
+                </span>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                  {graderSummary.length === 0 ? (
+                    <span className="text-[12px] text-faint">—</span>
+                  ) : (
+                    graderSummary.map(([gid, n]) => (
+                      <span key={gid} className="inline-flex items-center gap-1">
+                        <GraderBadge id={gid} />
+                        <span className="text-[12px] tabular-nums text-faint">{n}</span>
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* 케이스별 카드 — 태스크 강조 + 환경/채점 배지 + 태그·타임아웃 */}
+            <div className="space-y-2">
               {dataset.cases.map((c) => (
-                <TR key={c.id}>
-                  <TD className="font-mono text-[12px] text-foreground">{c.id}</TD>
-                  <TD className="text-[13px] text-muted-foreground">{c.task}</TD>
-                  <TD className="text-right">
-                    <span className="inline-flex flex-wrap justify-end gap-1">
-                      {c.env?.kind && (
-                        <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border">
-                          {c.env.kind}
-                        </code>
-                      )}
-                      {c.graders.map((g) => (
-                        <code
-                          key={g.id}
-                          className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border"
-                        >
-                          {g.id}
-                        </code>
-                      ))}
-                    </span>
-                  </TD>
-                </TR>
+                <div
+                  key={c.id}
+                  className="space-y-2 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="font-mono text-[12px] font-[510] text-foreground">{c.id}</span>
+                    {c.tags.length > 0 && (
+                      <div className="flex flex-wrap justify-end gap-x-1.5 gap-y-0.5">
+                        {c.tags.map((t) => (
+                          <span key={t} className="text-[10.5px] text-faint">
+                            #{t}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <p
+                    className="line-clamp-2 text-[13px] leading-relaxed text-muted-foreground"
+                    title={c.task}
+                  >
+                    {c.task}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    {c.env?.kind && <EnvBadge kind={c.env.kind} />}
+                    <span className="ml-0.5 text-[11px] text-faint">채점</span>
+                    {c.graders.length === 0 ? (
+                      <span className="text-[11px] text-faint">—</span>
+                    ) : (
+                      c.graders.map((g, i) => <GraderBadge key={`${g.id}-${i}`} id={g.id} />)
+                    )}
+                    {typeof c.timeoutSec === 'number' && (
+                      <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-faint">
+                        <Timer className="size-3" />
+                        {c.timeoutSec}s
+                      </span>
+                    )}
+                  </div>
+                </div>
               ))}
-            </TBody>
-          </Table>
+            </div>
+          </>
         )}
       </section>
     </div>

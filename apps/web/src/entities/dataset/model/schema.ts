@@ -37,6 +37,7 @@ export const datasetCaseSchema = z
     env: z.object({ kind: z.string() }).passthrough().optional(),
     graders: z.array(z.object({ id: z.string() }).passthrough()).default([]),
     tags: z.array(z.string()).default([]),
+    timeoutSec: z.number().optional(), // 케이스 시간 예산(초) — 있으면 표시
   })
   .passthrough()
 export type DatasetCase = z.infer<typeof datasetCaseSchema>
