@@ -68,9 +68,14 @@ fields, react-hook-form via `Controller`) opens the same Linear-style popover (s
   (`createdBy` resolved to a member name) and created/updated times, plus an owned/shared badge. A client widget
   adds **search** (id/description/tags), an **owner filter** (전체/소유/공유), and **sort** over a stat strip
   (first-party example datasets are no longer auto-seeded, so the list is the workspace's own datasets). **상세
-  `/{workspace}/datasets/[id]`** shows the latest version's eval cases + author/related-harnesses. **데이터셋 등록
-  `/{workspace}/datasets/new`** — id/version/description + cases-JSON with a **validate (dry-run)** step then
-  register (`POST /datasets`). Role-gated off `/me` (`datasets:write` = member+). See `docs/datasets.md`.
+  `/{workspace}/datasets/[id]`** shows a **meta panel** (case/version/scorecard counts, created/updated, author
+  avatar, tag chips — not a bare dl grid) above the eval-case table, plus a **"새 버전 만들기"** action
+  (`/{workspace}/datasets/[id]/new-version`, owned datasets + `datasets:write` only) that prefills the current
+  version's description/tags/cases into the register form — versions are immutable, so **editing = publishing a
+  new semver** (same pattern as harness new-version). **데이터셋 등록 `/{workspace}/datasets/new`** —
+  id/version/description/tags + cases-JSON with a **validate (dry-run)** step then register (`POST /datasets`;
+  server-action body limit raised to 8MB — embedded repo-seed cases easily exceed 1MB). Role-gated off `/me`
+  (`datasets:write` = member+). See `docs/datasets.md`.
 - **스코어카드 `/{workspace}/scorecards`** — batch-eval runs (dataset@v → harness@v, status, per-metric summary
   chips; rows link to detail). **상세 `/{workspace}/scorecards/[id]`** shows per-metric stat cards + per-case
   scores. **실행 `/{workspace}/scorecards/new`** — pick dataset + harness (+ optional judges) → `POST /scorecards`.

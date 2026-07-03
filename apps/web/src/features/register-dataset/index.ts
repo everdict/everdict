@@ -1,4 +1,4 @@
-export { RegisterDatasetForm } from './ui/register-dataset-form'
+export { RegisterDatasetForm, type DatasetPrefill } from './ui/register-dataset-form'
 export {
   validateDatasetAction,
   createDatasetAction,

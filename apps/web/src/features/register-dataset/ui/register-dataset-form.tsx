@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import { versionsForId } from '@/shared/lib/semver'
+import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label, Textarea } from '@/shared/ui/input'
@@ -26,18 +27,31 @@ const SAMPLE_CASES = `[
   }
 ]`
 
+// 상세의 "새 버전 만들기"가 기존 버전 내용을 흘려넣는 프리필 — 버전 불변이라 수정 = 새 버전.
+export interface DatasetPrefill {
+  id: string
+  description?: string
+  tags?: string[]
+  casesText: string
+}
+
 export function RegisterDatasetForm({
   existingDatasets = [],
+  prefill,
+  lockId = false,
 }: {
   existingDatasets?: { id: string; versions: string[] }[]
+  prefill?: DatasetPrefill
+  lockId?: boolean
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
-  const [id, setId] = useState('')
+  const [id, setId] = useState(prefill?.id ?? '')
   const [version, setVersion] = useState('1.0.0')
   const existing = versionsForId(existingDatasets, id)
-  const [description, setDescription] = useState('')
-  const [casesText, setCasesText] = useState(SAMPLE_CASES)
+  const [description, setDescription] = useState(prefill?.description ?? '')
+  const [tagsText, setTagsText] = useState((prefill?.tags ?? []).join(', '))
+  const [casesText, setCasesText] = useState(prefill?.casesText ?? SAMPLE_CASES)
   const [result, setResult] = useState<ValidateDatasetResult>()
   const [createError, setCreateError] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -49,7 +63,10 @@ export function RegisterDatasetForm({
       version,
       ...(description ? { description } : {}),
       cases: JSON.parse(casesText),
-      tags: [],
+      tags: tagsText
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean),
     }
   }
 
@@ -64,7 +81,12 @@ export function RegisterDatasetForm({
       setResult({ ok: false, error: 'cases JSON 파싱 실패' })
       return
     }
-    setResult(await validateDatasetAction(body))
+    // 액션 전송 자체가 실패(본문 크기 초과 등)해도 busy 가 풀리도록 방어.
+    try {
+      setResult(await validateDatasetAction(body))
+    } catch (e) {
+      setResult({ ok: false, error: e instanceof Error ? e.message : String(e) })
+    }
     setBusy(false)
   }
 
@@ -79,10 +101,18 @@ export function RegisterDatasetForm({
       setCreateError('cases JSON 파싱 실패')
       return
     }
-    const res: CreateDatasetResult = await createDatasetAction(body)
+    let res: CreateDatasetResult
+    try {
+      res = await createDatasetAction(body)
+    } catch (e) {
+      res = { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
     setBusy(false)
-    if (res.ok) router.push(`/${workspace}/datasets`)
-    else setCreateError(res.error ?? '등록 실패')
+    if (res.ok) {
+      // 새 버전 배포(프리필 진입)면 그 데이터셋 상세로 복귀 — 방금 배포한 버전이 곧 latest.
+      if (lockId) router.push(`/${workspace}/datasets/${encodeURIComponent(id)}`)
+      else router.push(`/${workspace}/datasets`)
+    } else setCreateError(res.error ?? '등록 실패')
   }
 
   return (
@@ -94,6 +124,8 @@ export function RegisterDatasetForm({
           value={id}
           onChange={(e) => setId(e.target.value)}
           placeholder="repo-smoke"
+          readOnly={lockId}
+          className={cn(lockId && 'opacity-60')}
         />
       </div>
       <VersionField existing={existing} value={version} onChange={setVersion} />
@@ -106,6 +138,19 @@ export function RegisterDatasetForm({
           onChange={(e) => setDescription(e.target.value)}
           placeholder="repo 평가용 스모크 케이스"
         />
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="tags">태그 (선택 — 콤마 구분)</Label>
+        <Input
+          id="tags"
+          value={tagsText}
+          onChange={(e) => setTagsText(e.target.value)}
+          placeholder="coding, smoke"
+        />
+        <p className="text-[12px] text-muted-foreground">
+          목록의 카테고리 필터로 쓰입니다 (예: coding, browser, qa).
+        </p>
       </div>
 
       <div className="space-y-1.5">
@@ -135,7 +180,7 @@ export function RegisterDatasetForm({
           {busy ? '…' : '검증 (dry-run)'}
         </Button>
         <Button type="button" onClick={onCreate} disabled={busy}>
-          {busy ? '처리 중…' : '데이터셋 등록'}
+          {busy ? '처리 중…' : lockId ? '새 버전 배포' : '데이터셋 등록'}
         </Button>
       </div>
     </div>
