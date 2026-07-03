@@ -1,23 +1,41 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import path from "node:path";
-import { BrowserWindow, Menu, Tray, app, nativeImage, shell } from "electron";
+import { RunnerHost, detectCapabilities } from "@assay/runner-core";
+import { BrowserWindow, Menu, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
+import { BRIDGE_CHANNELS, type DesktopAppInfo, registerBridge, senderAllowed } from "./bridge.js";
 import { type ConfigIo, type DesktopConfig, loadConfig, saveConfig } from "./config-store.js";
+import { RunnerController } from "./runner-controller.js";
+import { type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
 import { buildTrayMenuTemplate } from "./tray-menu.js";
 import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window-policy.js";
 
-// 데스크톱 셸 — 배포된 웹을 그대로 렌더링(D1: UI SSOT = apps/web)하고, 트레이에 상주한다.
+// 데스크톱 셸 — 배포된 웹을 그대로 렌더링(D1: UI SSOT = apps/web)하고, 트레이에 상주하며,
+// 셀프호스티드 러너(@assay/runner-core)를 메인 프로세스에 내장한다(D3: 원클릭 페어링).
 // 설계: docs/architecture/desktop-app.md · 규약: .claude/skills/desktop/SKILL.md.
 const webUrl = process.env.ASSAY_WEB_URL ?? "http://localhost:3000";
 const webOrigin = webOriginOf(webUrl);
+// 러너의 컨트롤플레인 기본값 — 페어링 페이로드의 apiUrl 이 우선한다(웹 서버가 아는 CONTROL_PLANE_URL).
+const defaultApiUrl = process.env.ASSAY_API_URL ?? "http://localhost:8787";
 
-// 스킬 desktop 보안 불변식 2 — 모든 창에 항상 이 webPreferences.
-const secureWebPreferences = { contextIsolation: true, nodeIntegration: false, sandbox: true } as const;
+// 스킬 desktop 보안 불변식 2 — 모든 창에 항상 이 webPreferences. preload 는 origin 게이트(preload.cts)를 위해
+// 웹 origin 을 인자로 받는다.
+function securePreferences(): Electron.WebPreferences {
+  return {
+    contextIsolation: true,
+    nodeIntegration: false,
+    sandbox: true,
+    preload: path.join(import.meta.dirname, "preload.cjs"),
+    additionalArguments: [`--assay-web-origin=${webOrigin}`],
+  };
+}
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
+let shuttingDown = false;
 
-// userData 의 config.json 에 비-비밀 설정 저장(자동시작 등). rnr_ 토큰은 여기 절대 금지(불변식 5).
+// userData 의 config.json 에 비-비밀 설정 저장(자동시작·러너 메타). rnr_ 토큰은 여기 절대 금지(불변식 5).
 function configIo(): ConfigIo {
   const dir = app.getPath("userData");
   const file = path.join(dir, "config.json");
@@ -27,6 +45,20 @@ function configIo(): ConfigIo {
       mkdirSync(dir, { recursive: true });
       writeFileSync(file, text);
     },
+  };
+}
+
+// rnr_ 토큰의 safeStorage 암호문 파일 IO — token-store 가 암복호를 맡는다.
+function tokenIo(): TokenIo {
+  const dir = app.getPath("userData");
+  const file = path.join(dir, "runner-token.bin");
+  return {
+    read: () => (existsSync(file) ? readFileSync(file) : null),
+    write: (data) => {
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(file, data);
+    },
+    remove: () => rmSync(file, { force: true }),
   };
 }
 
@@ -40,6 +72,53 @@ function applyAutostart(next: boolean): void {
   refreshTrayMenu();
 }
 
+// 러너 컨트롤러 — 페어 상태 영속 + RunnerHost 수명주기. 상태는 웹 origin 창에만 push(불변식 4와 같은 경계).
+const controller = new RunnerController({
+  loadToken: () => loadToken(safeStorage, tokenIo()),
+  saveToken: (token) => saveToken(safeStorage, tokenIo(), token),
+  clearToken: () => clearToken(tokenIo()),
+  loadMeta: () => {
+    const c = loadConfig(configIo());
+    return {
+      ...(c.runnerId !== undefined ? { runnerId: c.runnerId } : {}),
+      ...(c.apiUrl !== undefined ? { apiUrl: c.apiUrl } : {}),
+    };
+  },
+  saveMeta: (meta) => {
+    const { runnerId: _r, apiUrl: _a, ...rest } = loadConfig(configIo());
+    config = { ...rest, ...meta };
+    saveConfig(configIo(), config);
+  },
+  makeHost: ({ token, apiUrl, onStatus }) =>
+    new RunnerHost({
+      token,
+      apiUrl,
+      onStatus,
+      log: (m) => console.error(m),
+      // 데스크톱은 종료 지연을 줄이기 위해 long-poll 을 CLI(25s)보다 짧게 잡는다(정지는 현재 poll 완료까지 대기).
+      waitMs: 8_000,
+    }),
+  defaultApiUrl,
+  broadcast: (status) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (senderAllowed(win.webContents.getURL(), webOrigin)) win.webContents.send(BRIDGE_CHANNELS.statusEvent, status);
+    }
+  },
+  log: (m) => console.error(m),
+});
+
+// appInfo — 원클릭 페어링의 라벨(호스트명)/OS/capability 소스. capability 프로브는 1회 캐시.
+let capabilitiesPromise: Promise<string[]> | null = null;
+async function appInfo(): Promise<DesktopAppInfo> {
+  capabilitiesPromise ??= detectCapabilities();
+  return {
+    version: app.getVersion(),
+    platform: process.platform,
+    hostname: hostname(),
+    capabilities: await capabilitiesPromise,
+  };
+}
+
 function createOrFocusWindow(): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.show();
@@ -49,14 +128,14 @@ function createOrFocusWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
-    webPreferences: { ...secureWebPreferences },
+    webPreferences: securePreferences(),
   });
   // window.open: 웹 origin 만 앱 새 창, 그 외 http/https 는 시스템 브라우저(정책 근거는 window-policy.ts 주석).
   win.webContents.setWindowOpenHandler(({ url }) => {
     const decision = decideWindowOpen(url, webOrigin);
     if (decision === "external") void shell.openExternal(url);
     if (decision !== "in-app") return { action: "deny" };
-    return { action: "allow", overrideBrowserWindowOptions: { webPreferences: { ...secureWebPreferences } } };
+    return { action: "allow", overrideBrowserWindowOptions: { webPreferences: securePreferences() } };
   });
   // 탑레벨 네비게이션: http/https 만 허용(OIDC/OAuth 리다이렉트 경유), 그 외 스킴 차단.
   win.webContents.on("will-navigate", (event, url) => {
@@ -110,16 +189,30 @@ if (!app.requestSingleInstanceLock()) {
 
   void app.whenReady().then(() => {
     config = loadConfig(configIo());
+    registerBridge(ipcMain, {
+      webOrigin,
+      appInfo,
+      pair: (payload) => controller.pair(payload),
+      unpair: () => controller.unpair(),
+      status: () => controller.status(),
+    });
     createTray();
     createOrFocusWindow();
+    // 저장된 페어가 있으면 러너를 조용히 복원(로그인/창과 무관하게 상주).
+    void controller.startFromStore().catch((e) => console.error(`러너 복원 실패: ${e}`));
   });
 
-  // 모든 창이 닫혀도 종료하지 않는다 — 트레이 상주(이후 슬라이스에서 러너가 백그라운드로 돈다).
+  // 모든 창이 닫혀도 종료하지 않는다 — 트레이 상주(러너가 백그라운드로 돈다).
   app.on("window-all-closed", () => {
     /* 트레이 상주 */
   });
   app.on("activate", () => createOrFocusWindow()); // macOS dock 클릭
-  app.on("before-quit", () => {
+  // 종료 — 진행 중 잡 회신까지 러너를 우아하게 정지(1회 preventDefault 후 재-quit).
+  app.on("before-quit", (event) => {
     quitting = true;
+    if (shuttingDown) return;
+    shuttingDown = true;
+    event.preventDefault();
+    void controller.shutdown().finally(() => app.quit());
   });
 }

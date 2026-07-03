@@ -2,13 +2,21 @@
 
 import { revalidatePath } from 'next/cache'
 
-import { pairedRunnerSchema, pairRunnerInputSchema, type PairRunnerInput } from '@/entities/runner'
+import {
+  pairedRunnerSchema,
+  pairRunnerInputSchema,
+  type PairRunnerInput,
+  type RunnerMeta,
+} from '@/entities/runner'
 import { authContext } from '@/shared/auth/principal'
+import { env } from '@/shared/config/env'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 export interface PairRunnerResult {
   ok: boolean
-  token?: string // 평문(rnr_…) — 1회만. 모달에 보여주고 버린다.
+  token?: string // 평문(rnr_…) — 1회만. 모달에 보여주고 버리거나, 데스크톱 브리지로만 내려보낸다.
+  runner?: RunnerMeta // 방금 페어된 러너 메타 — 데스크톱 원클릭이 runnerId 를 브리지에 넘길 때 사용
+  apiUrl?: string // 러너가 접속할 컨트롤플레인 base(비밀 아님) — 데스크톱 브리지 전달용
   error?: string
 }
 export interface RunnerMutationResult {
@@ -30,7 +38,7 @@ export async function pairRunnerAction(input: PairRunnerInput): Promise<PairRunn
     })
     const res = pairedRunnerSchema.parse(await controlPlane.pairRunner(ctx, body))
     revalidatePath('/[workspace]/account')
-    return { ok: true, token: res.token }
+    return { ok: true, token: res.token, runner: res.runner, apiUrl: env.CONTROL_PLANE_URL }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }

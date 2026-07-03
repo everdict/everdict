@@ -4,6 +4,9 @@ import { z } from "zod";
 // safeStorage 암호화 저장 전용(슬라이스 3, 스킬 desktop 불변식 5).
 export const DesktopConfigSchema = z.object({
   autostart: z.boolean().default(false),
+  // 페어된 러너의 비밀 아닌 메타 — 토큰은 절대 여기 아님(token-store/safeStorage).
+  runnerId: z.string().min(1).optional(),
+  apiUrl: z.string().url().optional(),
 });
 export type DesktopConfig = z.infer<typeof DesktopConfigSchema>;
 

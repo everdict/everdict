@@ -3,7 +3,17 @@
 import { useEffect, useState, useTransition } from 'react'
 import { Check, Copy, Laptop, Plus, Trash2 } from 'lucide-react'
 
-import { runnerCapabilities, type RunnerCapability, type RunnerMeta } from '@/entities/runner'
+import {
+  runnerCapabilities,
+  runnerCapabilitySchema,
+  type RunnerCapability,
+  type RunnerMeta,
+} from '@/entities/runner'
+import {
+  getAssayDesktop,
+  type AssayDesktopBridge,
+  type DesktopRunnerStatus,
+} from '@/shared/lib/desktop-bridge'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -29,19 +39,72 @@ function isOnline(lastSeenAt?: string): boolean {
   return lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
 }
 
+function isRunnerCapability(value: string): value is RunnerCapability {
+  return runnerCapabilitySchema.safeParse(value).success
+}
+
 // 러너는 개인 소유(self-scoped by subject) — 역할 게이트 없음. 모든 유저가 자기 머신을 페어링/해제한다.
 export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
   const [pairOpen, setPairOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
+  // 데스크톱 셸 감지 — 브리지가 있으면 원클릭 페어링 + 이 기기 라이브 상태(마운트 후에만; SSR 불일치 방지).
+  const [bridge, setBridge] = useState<AssayDesktopBridge | null>(null)
+  const [desktop, setDesktop] = useState<DesktopRunnerStatus | null>(null)
+
+  useEffect(() => {
+    const b = getAssayDesktop()
+    if (!b) return
+    setBridge(b)
+    void b
+      .runnerStatus()
+      .then(setDesktop)
+      .catch(() => {})
+    return b.onRunnerStatus(setDesktop)
+  }, [])
 
   function onRevoke(id: string) {
     setError(undefined)
     startTransition(async () => {
       const r = await revokeRunnerAction(id)
       setConfirmId(undefined)
-      if (!r.ok) setError(r.error)
+      if (!r.ok) {
+        setError(r.error)
+        return
+      }
+      // 이 기기를 해제했다면 데스크톱 쪽 토큰/러너도 정리(서버 revoke 가 권위 — 브리지 실패는 무시).
+      if (bridge && desktop?.runnerId === id) await bridge.unpairRunner().catch(() => {})
+    })
+  }
+
+  // 원클릭 — appInfo(호스트명/OS/capability)로 페어링하고, 토큰은 화면에 노출하지 않고 브리지로만 내려보낸다.
+  function onConnectThisDevice() {
+    const b = bridge
+    if (!b) return
+    setError(undefined)
+    startTransition(async () => {
+      try {
+        const info = await b.appInfo()
+        const caps = info.capabilities.filter(isRunnerCapability)
+        const r = await pairRunnerAction({
+          label: info.hostname,
+          os: info.platform,
+          ...(caps.length > 0 ? { capabilities: caps } : {}),
+        })
+        if (!r.ok || !r.token) {
+          setError(r.error ?? '페어링에 실패했습니다.')
+          return
+        }
+        await b.pairRunner({
+          token: r.token,
+          ...(r.runner ? { runnerId: r.runner.id } : {}),
+          ...(r.apiUrl ? { apiUrl: r.apiUrl } : {}),
+        })
+        setDesktop(await b.runnerStatus())
+      } catch (e) {
+        setError(e instanceof Error ? e.message : String(e))
+      }
     })
   }
 
@@ -57,10 +120,22 @@ export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
             소유입니다. 페어링 토큰은 한 번만 표시됩니다.
           </p>
         </div>
-        <Button size="sm" className="shrink-0" onClick={() => setPairOpen(true)}>
-          <Plus />
-          디바이스 페어링
-        </Button>
+        <span className="flex shrink-0 items-center gap-2">
+          {bridge && !desktop?.paired && (
+            <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
+              <Laptop />
+              {pending ? '연결 중…' : '이 기기를 러너로 연결'}
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant={bridge && !desktop?.paired ? 'secondary' : undefined}
+            onClick={() => setPairOpen(true)}
+          >
+            <Plus />
+            디바이스 페어링
+          </Button>
+        </span>
       </div>
 
       {error && (
@@ -73,18 +148,40 @@ export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
         <EmptyState
           icon={<Laptop strokeWidth={1.75} />}
           title="아직 페어링된 러너가 없습니다."
-          hint="내 머신을 페어링해 워크스페이스의 평가를 내 호스트에서 실행하세요."
+          hint={
+            bridge
+              ? '버튼 한 번으로 이 기기를 러너로 연결할 수 있습니다.'
+              : '내 머신을 페어링해 워크스페이스의 평가를 내 호스트에서 실행하세요.'
+          }
           action={
-            <Button size="sm" variant="secondary" onClick={() => setPairOpen(true)}>
-              <Plus />
-              디바이스 페어링
-            </Button>
+            bridge ? (
+              <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
+                <Laptop />
+                {pending ? '연결 중…' : '이 기기를 러너로 연결'}
+              </Button>
+            ) : (
+              <Button size="sm" variant="secondary" onClick={() => setPairOpen(true)}>
+                <Plus />
+                디바이스 페어링
+              </Button>
+            )
           }
         />
       ) : (
         <ul className="divide-y divide-border rounded-lg border bg-card shadow-raise">
           {runners.map((r) => {
-            const online = isOnline(r.lastSeenAt)
+            // 이 기기(데스크톱 셸에 페어된 러너)는 lastSeenAt 추정 대신 브리지의 라이브 상태를 쓴다.
+            const thisDevice = desktop?.paired === true && desktop.runnerId === r.id
+            const online = thisDevice ? desktop.state !== 'off' : isOnline(r.lastSeenAt)
+            const statusText = thisDevice
+              ? desktop.state === 'running'
+                ? `실행 중 (${desktop.activeJobs})`
+                : desktop.state === 'idle'
+                  ? '온라인'
+                  : '오프라인'
+              : online
+                ? '온라인'
+                : '오프라인'
             return (
               <li key={r.id} className="flex items-center gap-3 px-3.5 py-3">
                 <span className="relative grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground">
@@ -103,13 +200,14 @@ export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
                     <span className="truncate text-[13px] font-[510] text-foreground">
                       {r.label}
                     </span>
+                    {thisDevice && <Badge>이 기기</Badge>}
                     <span
                       className={cn(
                         'text-[12px]',
                         online ? 'text-[var(--color-success)]' : 'text-faint'
                       )}
                     >
-                      {online ? '온라인' : '오프라인'}
+                      {statusText}
                     </span>
                     {r.os && <Badge tone="outline">{r.os}</Badge>}
                     {r.capabilities.map((c) => (
@@ -249,8 +347,8 @@ function PairRunnerDialog({ open, onClose }: { open: boolean; onClose: () => voi
             </Callout>
             <p className="text-[12px] leading-relaxed text-faint">
               내 머신에서 <code className="font-mono">assay runner --pair &lt;token&gt;</code> 으로
-              연결합니다(러너 클라이언트는 다음 단계에서 제공). 페어링 후 실행 폼의 런타임 선택에 이
-              러너가 나타납니다.
+              연결합니다. 데스크톱 앱에서는 이 과정 없이 &lsquo;이 기기를 러너로 연결&rsquo; 버튼 한
+              번으로 끝납니다. 페어링 후 실행 폼의 런타임 선택에 이 러너가 나타납니다.
             </p>
           </div>
           <footer className="flex justify-end border-t border-border px-5 py-3.5">

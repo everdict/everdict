@@ -11,6 +11,7 @@
     "dev": "pnpm build && electron ."
   },
   "dependencies": {
+    "@assay/runner-core": "workspace:*",
     "zod": "^3.24.1"
   },
   "devDependencies": {

@@ -151,15 +151,18 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
 
 ## Slices (each lands green: format/lint/typecheck/test/build)
 
-1. **`packages/runner-core` extraction** — move loop/session/leased-job + tests out of `apps/cli`;
+1. ✅ (`bbc7b58`) **`packages/runner-core` extraction** — move loop/session/leased-job + tests out of `apps/cli`;
    CLI re-imports; zero behavior change (CLI live e2e re-run proves it).
-2. **Shell** — `apps/desktop` Electron app: BrowserWindow on the deployed web URL, persistent session
+2. ✅ (`e2b903a`) **Shell** — `apps/desktop` Electron app: BrowserWindow on the deployed web URL, persistent session
    (Keycloak login sticks), navigation policy (top-level http/https allowed — OIDC/OAuth redirect flows
    must leave and re-enter the web origin; `window.open` to non-web origins → system browser), tray
    skeleton, autostart toggle. No runner yet — this alone already *is* "웹처럼 동일하게".
    (electron-updater moves to slice 5 — it belongs with electron-builder packaging.)
-3. **Bridge + one-click pairing** — preload `window.assayDesktop` (origin-gated), keychain storage,
-   `RunnerHost` embed; web: desktop-aware "이 기기를 러너로 연결" + live 이 기기 status row.
+3. ✅ **Bridge + one-click pairing** — preload `window.assayDesktop` (origin-gated: preload arg-origin gate +
+   main-side `senderFrame` check), `safeStorage` keychain token store, `RunnerHost` (runner-core facade:
+   start/stop/status events over `runLeaseWorkers`) embedded via `RunnerController` (pair/unpair/restore-on-boot);
+   web: desktop-aware "이 기기를 러너로 연결" one-click (label=hostname, token never shown — bridge-only) +
+   live "이 기기" status row (running(n)/온라인) replacing the `lastSeenAt` heuristic for this device.
 4. **Runner surface polish** — tray states, OS completion notifications + deep-link focus,
    capability row (docker), unpair.
 5. **Packaging + live e2e** — 3-OS builds (linux first), signed artifacts, account-page download links;
