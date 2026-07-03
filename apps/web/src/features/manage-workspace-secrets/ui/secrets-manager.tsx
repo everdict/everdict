@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 
-import type { SecretMeta } from '@/entities/secret'
+import type { SecretMeta, SecretScope } from '@/entities/secret'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
@@ -11,7 +11,7 @@ import { deleteSecretAction, setSecretAction } from '../api/manage-secrets'
 
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
-// 두 탭(모델 키 / 클러스터 자격증명)은 같은 워크스페이스 시크릿 네임스페이스를 공유하고, 입력 안내만 다르다.
+// model/cluster = 워크스페이스(공유) 시크릿(안내만 다름), personal = 내 개인 시크릿(계정 화면, 셀프 관리).
 const COPY = {
   model: {
     title: '모델·프로바이더 키',
@@ -25,6 +25,12 @@ const COPY = {
     namePlaceholder: 'NOMAD_TOKEN',
     multiline: true,
   },
+  personal: {
+    title: '내 개인 시크릿',
+    help: '나만 쓰는 개인 키예요 — 다른 멤버는 볼 수 없어요. 하니스 env 에서 "내 개인" 스코프로 참조하면 그 하니스는 나만 실행·열람할 수 있어요.',
+    namePlaceholder: 'MY_OPENAI_API_KEY',
+    multiline: false,
+  },
 } as const
 
 export function SecretsManager({
@@ -32,11 +38,13 @@ export function SecretsManager({
   secrets,
   canWrite,
 }: {
-  variant: 'model' | 'cluster'
+  variant: 'model' | 'cluster' | 'personal'
   secrets: SecretMeta[]
   canWrite: boolean
 }) {
   const copy = COPY[variant]
+  // personal = 개인(user) 스코프(셀프 관리), 그 외 = 워크스페이스(공유, admin).
+  const scope: SecretScope = variant === 'personal' ? 'user' : 'workspace'
   const [name, setName] = useState('')
   const [value, setValue] = useState('')
   const [error, setError] = useState<string>()
@@ -50,7 +58,7 @@ export function SecretsManager({
     setError(undefined)
     setSaved(undefined)
     startTransition(async () => {
-      const r = await setSecretAction(name, value)
+      const r = await setSecretAction(name, value, scope)
       if (r.ok) {
         setSaved(name)
         setName('')
@@ -65,7 +73,7 @@ export function SecretsManager({
     setError(undefined)
     setSaved(undefined)
     startTransition(async () => {
-      const r = await deleteSecretAction(target)
+      const r = await deleteSecretAction(target, scope)
       setConfirmName(undefined)
       if (!r.ok) setError(r.error)
     })
@@ -77,8 +85,10 @@ export function SecretsManager({
         <h3 className="text-[13px] font-[560] text-foreground">{copy.title}</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">{copy.help}</p>
         <p className="text-[12px] leading-relaxed text-faint">
-          시크릿은 암호화되고, 값은 다시 볼 수 없어요(목록에는 이름만 보여요). 두 탭은 같은 시크릿을
-          쓰고 안내만 달라요.
+          시크릿은 암호화되고, 값은 다시 볼 수 없어요(목록에는 이름만 보여요).
+          {variant === 'personal'
+            ? ' 내 개인 시크릿은 나만 보이고, 다른 멤버는 접근할 수 없어요.'
+            : ' 모델 키·클러스터 자격증명 탭은 같은 워크스페이스 시크릿을 쓰고 안내만 달라요.'}
         </p>
       </div>
 
@@ -189,9 +199,7 @@ export function SecretsManager({
           )}
         </div>
       ) : (
-        <p className="text-[13px] text-muted-foreground">
-          변경하려면 관리자 권한이 필요해요.
-        </p>
+        <p className="text-[13px] text-muted-foreground">변경하려면 관리자 권한이 필요해요.</p>
       )}
     </div>
   )

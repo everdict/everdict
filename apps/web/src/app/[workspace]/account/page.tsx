@@ -5,6 +5,7 @@ import {
   type ProviderInfo,
 } from '@/entities/connection'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
+import { secretsSchema, type SecretMeta } from '@/entities/secret'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -70,6 +71,16 @@ export default async function AccountPage({
     // 컨트롤플레인 러너 서비스 미설정/실패 — 빈 목록으로 폴백.
   }
 
+  // 내 개인(user) 시크릿 — GET /secrets 는 항상 본인 것만 포함(공유는 admin만). 셀프 관리라 역할 게이트 없음.
+  let personalSecrets: SecretMeta[] = []
+  try {
+    personalSecrets = secretsSchema
+      .parse(await controlPlane.listSecrets(ctx))
+      .filter((s) => s.scope === 'user')
+  } catch {
+    // 시크릿 저장소 미설정/실패 — 빈 목록으로 폴백.
+  }
+
   return (
     <div className="space-y-6">
       <PageHeader title="계정" description="내 프로필 · 워크스페이스 · API 키." />
@@ -79,6 +90,7 @@ export default async function AccountPage({
         providers={providers}
         canManageIntegrations={canManageIntegrations}
         runners={runners}
+        personalSecrets={personalSecrets}
         keys={keys}
         keysError={keysError}
         canReadKeys={canReadKeys}

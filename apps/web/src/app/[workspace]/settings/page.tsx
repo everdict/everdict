@@ -57,7 +57,11 @@ export default async function SettingsPage({
       // CI repo link(레포↔하니스 슬롯 = OIDC trust) — 링크의 존재가 그 레포의 keyless CI 신뢰. 해제는 admin.
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
     }
-    if (canReadSecrets) secrets = secretsSchema.parse(await controlPlane.listSecrets(ctx))
+    // 워크스페이스 설정엔 공유(workspace) 시크릿만 — GET /secrets 가 섞어주는 내 개인(user) 시크릿은 계정 화면에서 관리.
+    if (canReadSecrets)
+      secrets = secretsSchema
+        .parse(await controlPlane.listSecrets(ctx))
+        .filter((s) => s.scope === 'workspace')
     if (canReadMembers) {
       members = membersSchema.parse(await controlPlane.listMembers(ctx))
       // 워크스페이스 애플리케이션 로스터 — 이 워크스페이스에서 만들어진 외부 계정 연결(읽기 전용, 토큰 없음).
@@ -76,15 +80,9 @@ export default async function SettingsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="워크스페이스 설정"
-        description="정책, 키, 멤버를 관리해요."
-      />
+      <PageHeader title="워크스페이스 설정" description="정책, 키, 멤버를 관리해요." />
       {!canReadAny ? (
-        <EmptyState
-          title="설정을 볼 권한이 없어요."
-          hint="워크스페이스 관리자에게 문의해보세요."
-        />
+        <EmptyState title="설정을 볼 권한이 없어요." hint="워크스페이스 관리자에게 문의해보세요." />
       ) : error ? (
         <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : (

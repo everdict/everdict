@@ -6,10 +6,12 @@ import { LeaveWorkspaceButton } from '@/features/leave-workspace'
 import { ApiKeysManager } from '@/features/manage-api-keys'
 import { ConnectionsManager } from '@/features/manage-connections'
 import { RunnersManager } from '@/features/manage-runners'
+import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { ProfileForm } from '@/features/update-profile'
 import type { ApiKeyMeta } from '@/entities/api-key'
 import type { ConnectionMeta, ProviderInfo } from '@/entities/connection'
 import type { RunnerMeta } from '@/entities/runner'
+import type { SecretMeta } from '@/entities/secret'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
@@ -41,6 +43,7 @@ export function AccountTabs({
   providers,
   canManageIntegrations,
   runners,
+  personalSecrets,
   keys,
   keysError,
   canReadKeys,
@@ -54,6 +57,7 @@ export function AccountTabs({
   providers: ProviderInfo[]
   canManageIntegrations: boolean // settings:write — 미설정 self-hosted 통합 설정 딥링크 노출 여부
   runners: RunnerMeta[]
+  personalSecrets: SecretMeta[]
   keys: ApiKeyMeta[]
   keysError?: string
   canReadKeys: boolean
@@ -62,7 +66,7 @@ export function AccountTabs({
   connected?: string // ?connected=<provider>
   connectError?: string // ?error=<reason>
 }) {
-  const tabKeys = ['profile', 'connections', 'runners', 'keys']
+  const tabKeys = ['profile', 'connections', 'runners', 'secrets', 'keys']
   const defaultTab = initialTab && tabKeys.includes(initialTab) ? initialTab : 'profile'
 
   // 보고 있던 탭이 새로고침에도 유지되도록 ?tab= 에 동기화한다. 서버 컴포넌트가 이 값을
@@ -84,6 +88,7 @@ export function AccountTabs({
         <TabsTrigger value="profile">프로필</TabsTrigger>
         <TabsTrigger value="connections">연결된 계정</TabsTrigger>
         <TabsTrigger value="runners">연결된 러너</TabsTrigger>
+        <TabsTrigger value="secrets">시크릿</TabsTrigger>
         <TabsTrigger value="keys">API 키</TabsTrigger>
       </TabsList>
 
@@ -113,6 +118,11 @@ export function AccountTabs({
 
       <TabsContent value="runners">
         <RunnersManager runners={runners} downloadHref={`/${principal.workspace}/download`} />
+      </TabsContent>
+
+      <TabsContent value="secrets">
+        {/* 개인 시크릿 — 셀프 관리(admin 불필요). 다른 멤버는 못 봄. 하니스 env 에서 "내 개인" 참조. */}
+        <SecretsManager variant="personal" secrets={personalSecrets} canWrite />
       </TabsContent>
 
       <TabsContent value="keys">
