@@ -2,15 +2,15 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { MoreHorizontal, Pause, Pencil, Play, Server, Trash2 } from 'lucide-react'
+import { CirclePause, CirclePlay, Pause, Pencil, Play, Server, Trash2 } from 'lucide-react'
 
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { UserAvatar } from '@/shared/ui/avatar'
-import { Badge } from '@/shared/ui/badge'
 import { EntityRef } from '@/shared/ui/chip'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
+import { Tooltip } from '@/shared/ui/tooltip'
 
 export type Author = { name: string; avatarUrl?: string }
 
@@ -76,7 +76,11 @@ export function ScheduleCard({
             className="truncate rounded-sm hover:text-foreground hover:underline"
             title="데이터셋(벤치마크) 상세"
           >
-            <EntityRef id={s.runTemplate.dataset.id} version={s.runTemplate.dataset.version} />
+            <EntityRef
+              id={s.runTemplate.dataset.id}
+              version={s.runTemplate.dataset.version}
+              kind="dataset"
+            />
           </Link>
           <span className="shrink-0 text-faint">→</span>
           <Link
@@ -84,7 +88,11 @@ export function ScheduleCard({
             className="truncate rounded-sm hover:text-foreground hover:underline"
             title="하니스 상세"
           >
-            <EntityRef id={s.runTemplate.harness.id} version={s.runTemplate.harness.version} />
+            <EntityRef
+              id={s.runTemplate.harness.id}
+              version={s.runTemplate.harness.version}
+              kind="harness"
+            />
           </Link>
           <span className="hidden shrink-0 md:inline-flex">
             {s.runTemplate.runtime && !s.runTemplate.runtime.startsWith('self:') ? (

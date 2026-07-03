@@ -118,7 +118,7 @@ export function EvalDashboard({
                 <FlaskConical className="size-4" strokeWidth={1.75} />
               </span>
               <span className="min-w-0 flex-1 truncate text-[13px] font-[560] text-foreground">
-                <EntityRef id={b.id} />
+                <EntityRef id={b.id} kind="dataset" />
               </span>
               <span className="shrink-0 text-[11px] tabular-nums text-faint">
                 {b.cases} 케이스 · {b.runs.length}회 실행
@@ -133,7 +133,7 @@ export function EvalDashboard({
                   >
                     <Rank rank={i + 1} />
                     <span className="min-w-0 flex-1 truncate text-[12px] text-foreground/90">
-                      <EntityRef id={s.harness.id} version={s.harness.version} />
+                      <EntityRef id={s.harness.id} version={s.harness.version} kind="harness" />
                     </span>
                     {s.models?.primary ? <ModelChip muted>{s.models.primary}</ModelChip> : null}
                     <span className="shrink-0 text-[10.5px] tabular-nums text-faint">

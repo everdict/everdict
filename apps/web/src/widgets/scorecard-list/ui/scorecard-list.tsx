@@ -238,12 +238,12 @@ export function ScorecardList({
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center overflow-hidden whitespace-nowrap text-[13px] font-[510]">
                         <span className="truncate">
-                          <EntityRef id={s.dataset.id} version={s.dataset.version} />
+                          <EntityRef id={s.dataset.id} version={s.dataset.version} kind="dataset" />
                         </span>
                       </div>
                       <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
                         <span className="truncate">
-                          <EntityRef id={s.harness.id} version={s.harness.version} />
+                          <EntityRef id={s.harness.id} version={s.harness.version} kind="harness" />
                         </span>
                         {s.models?.primary ? (
                           <span className="hidden shrink-0 sm:inline-flex">

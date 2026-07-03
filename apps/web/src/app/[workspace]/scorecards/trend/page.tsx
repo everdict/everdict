@@ -201,8 +201,8 @@ export default async function TrendPage({
             </div>
             {trend.points.length < 2 ? (
               <p className="text-[13px] text-muted-foreground">
-                추이를 그리려면 완료된 스코어카드가 2건 이상 필요해요 (지금{' '}
-                {trend.points.length}건).
+                추이를 그리려면 완료된 스코어카드가 2건 이상 필요해요 (지금 {trend.points.length}
+                건).
               </p>
             ) : (
               <Sparkline points={trend.points} />
@@ -236,7 +236,7 @@ export default async function TrendPage({
                           href={`/${workspace}/scorecards/${p.scorecardId}`}
                           className="font-[510] text-link transition-colors hover:text-foreground"
                         >
-                          <EntityRef id={p.harness} />
+                          <EntityRef id={p.harness} kind="harness" />
                         </Link>
                       </TD>
                       <TD className="text-right">
