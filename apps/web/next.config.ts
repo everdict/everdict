@@ -3,6 +3,10 @@ import type { NextConfig } from 'next'
 const nextConfig: NextConfig = {
   // 컨트롤플레인(@assay/api) HTTP 클라이언트만 쓰므로 추가 서버 패키지 없음.
   reactStrictMode: true,
+  // dev 와 build 가 같은 .next 를 공유하면, 이 공유 WIP 트리에서 다른 세션의 next build 가 dev 터보팩
+  // 캐시를 오염시킨다(SST persist 실패/buildManifest ENOENT → 하이드레이션 죽어 모든 클릭 무반응).
+  // pnpm dev 는 NEXT_DIST_DIR=.next-dev 로 격리(빌드는 기본 .next 유지 — 프로덕션 무영향).
+  distDir: process.env.NEXT_DIST_DIR ?? '.next',
   // dev 서버를 0.0.0.0 으로 띄우고 LAN/Tailscale IP·localhost 로 접속하면, Next 16 은 그 origin 을
   // "cross-origin dev resource" 로 보고 /_next/webpack-hmr(HMR/턴보팩 런타임 부트스트랩)를 차단한다.
   // → 런타임이 초기화되지 않아 React 하이드레이션이 아예 안 일어나고 모든 onClick 이 죽는다(링크만 살아있음).

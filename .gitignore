@@ -21,3 +21,4 @@ coverage/
 # electron packaging artifacts (apps/desktop)
 apps/desktop/bundle/
 apps/desktop/release/
+apps/web/.next-dev/
