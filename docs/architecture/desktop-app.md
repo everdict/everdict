@@ -5,6 +5,18 @@
 > 수행** — the desktop must do *everything the web does*, plus what only a native app can do (resident
 > runner, one-click pairing, tray/notifications/autostart).
 > Dev conventions for `apps/desktop` / `packages/runner-core` live in skill `.claude/skills/desktop/`.
+> - **D6 — auto-update: detect/download automatic, APPLY is user-consented (LOCKED); feed location PENDING.**
+>   `electron-updater` in main behind `UpdaterController` (DI): check on launch + every 6h,
+>   `autoDownload`, `autoInstallOnAppQuit`; "적용" only via the tray restart item — never force-restart
+>   a runner mid-job (apply = graceful runner shutdown → `quitAndInstall`). Activation gate:
+>   `app.isPackaged` && (packaged `app-update.yml` [lands when a `publish` config is added] ||
+>   `ASSAY_UPDATE_FEED_URL` env → generic feed via a userData config injected through
+>   `autoUpdater.updateConfigPath` — `setFeedURL` alone is insufficient: AppImageUpdater reads the
+>   on-disk config during download). **The feed's public location is the user's pending decision**:
+>   (a) public `assay-releases` repo (code stays private; needs a cross-repo PAT secret in CI) vs
+>   (b) make `Ho2eny/assay` public (current CI works as-is). Until then the updater is cleanly
+>   disabled. mac auto-update stays inert until code signing exists; deb installs don't auto-update
+>   (AppImage/NSIS/mac-zip do).
 >
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`
@@ -190,6 +202,15 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    Point the web's `DESKTOP_DOWNLOAD_URL` at `https://github.com/Ho2eny/assay/releases/latest`.
    **Remaining**: signing certs (mac notarize / win Authenticode) — config hooks noted in
    `electron-builder.yml`.
+7. ✅ **Auto-update client** (D6) — `UpdaterController` (`updater.ts`, DI + vitest) + tray UX
+   (`업데이트 다운로드 중… (n%)` disabled row → `vX 업데이트 적용 (재시작)` action) + ready OS
+   notification; apply = graceful runner shutdown → `quitAndInstall(false, true)` with the
+   before-quit preventDefault path flagged off. **Live-verified** (2026-07-03, packaged AppImage vs
+   local generic feed): idle → checking → found 0.2.0 → downloading (126MB fresh) → sha512 verify →
+   ready. Finding: `setFeedURL` alone breaks at download (AppImageUpdater reads on-disk config) —
+   env activation writes `userData/app-update.yml` and injects it via `updateConfigPath`.
+   **Open**: flip the feed on — user decision (a) public `assay-releases` + CI PAT vs (b) repo
+   public; then add the `publish` block to `electron-builder.yml` (nothing else changes).
 
 ## Decisions / non-goals
 

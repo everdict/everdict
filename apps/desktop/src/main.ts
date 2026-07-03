@@ -3,6 +3,7 @@ import { hostname } from "node:os";
 import path from "node:path";
 import { RunnerHost, detectCapabilities } from "@assay/runner-core";
 import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
+import electronUpdater from "electron-updater";
 import {
   BRIDGE_CHANNELS,
   type DesktopAppInfo,
@@ -14,6 +15,7 @@ import { type ConfigIo, type DesktopConfig, loadConfig, saveConfig } from "./con
 import { RunnerController } from "./runner-controller.js";
 import { type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
 import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
+import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
 import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window-policy.js";
 
 // 데스크톱 셸 — 배포된 웹을 그대로 렌더링(D1: UI SSOT = apps/web)하고, 트레이에 상주하며,
@@ -142,6 +144,65 @@ const controller = new RunnerController({
   log: (m) => console.error(m),
 });
 
+// 자동 업데이트(설계 D6) — 활성 게이트: 패키징된 앱 && 피드 구성. 피드 목적지(공개 releases 리포 vs
+// 리포 public 전환)는 사용자 결정 대기 — 확정되면 electron-builder.yml 에 publish 블록을 추가하면
+// app-update.yml 이 패키지에 실려 자동 활성된다. 그 전엔 ASSAY_UPDATE_FEED_URL(generic 디렉터리 URL)로
+// 수동/검증 활성만 가능. dev(미패키징)는 항상 비활성.
+function resolveAutoUpdater(): AutoUpdaterLike | null {
+  if (!app.isPackaged) return null;
+  const feedUrl = process.env.ASSAY_UPDATE_FEED_URL;
+  if (feedUrl) {
+    // setFeedURL 만으로는 부족 — AppImageUpdater 등이 다운로드 단계에서 app-update.yml(디스크 설정)을
+    // 읽는다. env 활성화 시 userData 에 설정 파일을 써서 updateConfigPath 로 주입한다.
+    const configPath = path.join(app.getPath("userData"), "app-update.yml");
+    mkdirSync(app.getPath("userData"), { recursive: true });
+    writeFileSync(configPath, `provider: generic\nurl: ${JSON.stringify(feedUrl)}\n`);
+    electronUpdater.autoUpdater.updateConfigPath = configPath;
+    return electronUpdater.autoUpdater;
+  }
+  if (existsSync(path.join(process.resourcesPath, "app-update.yml"))) return electronUpdater.autoUpdater;
+  return null;
+}
+
+let updaterState: UpdaterState = { kind: "disabled" };
+const updater = new UpdaterController({
+  updater: resolveAutoUpdater(),
+  onStatus: (state) => {
+    const prev = updaterState;
+    updaterState = state;
+    if (state.kind !== prev.kind)
+      console.error(`업데이트 상태: ${state.kind}${"version" in state ? ` v${state.version}` : ""}`);
+    refreshTrayMenu();
+    // ready 진입 시 1회 알림 — 적용(재시작)은 사용자가 트레이에서 결정한다(러너 잡 강제 중단 없음).
+    if (state.kind === "ready" && prev.kind !== "ready") {
+      try {
+        if (Notification.isSupported()) {
+          const n = new Notification({
+            title: "Assay 업데이트 준비됨",
+            body: `재시작하면 v${state.version} 로 업데이트됩니다. 트레이 메뉴에서 적용하세요.`,
+          });
+          n.on("click", () => createOrFocusWindow());
+          n.show();
+        }
+      } catch {
+        /* 알림 미지원 환경 — 무시 */
+      }
+    }
+  },
+  log: (m) => console.error(m),
+});
+
+// 업데이트 적용 — 러너를 우아하게 정리한 뒤 재시작·설치. before-quit 의 preventDefault 경로를 타지 않게
+// 플래그를 먼저 세운다(설치가 중간에 취소되지 않도록).
+function applyUpdateNow(): void {
+  quitting = true;
+  shuttingDown = true;
+  void controller
+    .shutdown()
+    .catch(() => {})
+    .finally(() => updater.quitAndInstall());
+}
+
 // appInfo — 원클릭 페어링의 라벨(호스트명)/OS/capability 소스. capability 프로브는 1회 캐시.
 let capabilitiesPromise: Promise<string[]> | null = null;
 async function appInfo(): Promise<DesktopAppInfo> {
@@ -195,12 +256,13 @@ function refreshTrayMenu(): void {
   tray.setContextMenu(
     Menu.buildFromTemplate(
       buildTrayMenuTemplate(
-        { autostart: config.autostart, runner: latestRunnerStatus },
+        { autostart: config.autostart, runner: latestRunnerStatus, updater: updaterState },
         {
           openApp: () => createOrFocusWindow(),
           setAutostart: (next) => applyAutostart(next),
           // 로컬 해제(토큰 폐기+정지) — 서버 레코드 revoke 는 웹 계정 페이지가 권위.
           unpairRunner: () => void controller.unpair().catch((e) => console.error(`러너 해제 실패: ${e}`)),
+          applyUpdate: () => applyUpdateNow(),
           quit: () => {
             quitting = true;
             app.quit();
@@ -244,6 +306,8 @@ if (!app.requestSingleInstanceLock()) {
     createOrFocusWindow();
     // 저장된 페어가 있으면 러너를 조용히 복원(로그인/창과 무관하게 상주).
     void controller.startFromStore().catch((e) => console.error(`러너 복원 실패: ${e}`));
+    // 자동 업데이트 — 시작 시 1회 + 6시간 주기 체크(피드 미구성이면 no-op, 상태 disabled).
+    updater.start();
   });
 
   // 모든 창이 닫혀도 종료하지 않는다 — 트레이 상주(러너가 백그라운드로 돈다).

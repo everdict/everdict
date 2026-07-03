@@ -60,6 +60,13 @@ logged-in web session over a minimal preload bridge.
   builds the 3-OS matrix and publishes one GitHub Release (manual dispatch → draft). The version in
   `apps/desktop/package.json` stays `0.0.0` — CI injects the tag version at build time; do NOT bump
   it in commits. deb metadata requires `author` (with email) + `homepage` in package.json — keep them.
+- Auto-update (D6): all logic goes through `UpdaterController` (`updater.ts`, DI — tests never import
+  electron-updater). Detect/download automatic; APPLY only via tray (graceful runner shutdown first —
+  set `quitting`+`shuttingDown` before `quitAndInstall` or before-quit's preventDefault cancels the
+  install). Activation gate lives in `resolveAutoUpdater()` (main.ts): packaged app-update.yml (future
+  `publish` config) or `ASSAY_UPDATE_FEED_URL` → userData config via `updateConfigPath` (`setFeedURL`
+  alone breaks at download). Do NOT add a `publish` block to electron-builder.yml until the public
+  feed location is decided (repo is private — apps can't read its releases).
 
 ## Checklist
 1. Read `docs/architecture/desktop-app.md` first; slice order is binding.

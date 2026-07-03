@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@assay/runner-core": "workspace:*",
+    "electron-updater": "^6.8.9",
     "zod": "^3.24.1"
   },
   "devDependencies": {

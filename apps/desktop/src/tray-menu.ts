@@ -1,16 +1,19 @@
 import type { MenuItemConstructorOptions } from "electron";
 import type { DesktopRunnerStatus } from "./bridge.js";
+import type { UpdaterState } from "./updater.js";
 
 // 트레이 메뉴 템플릿 — 순수 빌더(electron 값 import 없음, 테스트 용이). 상태·액션은 main 이 주입한다.
 export interface TrayMenuState {
   autostart: boolean;
   runner: DesktopRunnerStatus;
+  updater: UpdaterState;
 }
 
 export interface TrayMenuActions {
   openApp(): void;
   setAutostart(next: boolean): void;
   unpairRunner(): void;
+  applyUpdate(): void; // ready 상태에서만 노출 — 러너 정리 후 재시작·적용은 main 책임
   quit(): void;
 }
 
@@ -22,8 +25,24 @@ export function runnerStatusLabel(runner: DesktopRunnerStatus): string {
   return "러너: 꺼짐";
 }
 
+// 업데이트 메뉴 행 — downloading 은 진행 표시(비활성), ready 는 적용 액션. 그 외 상태는 행 없음(메뉴 간결).
+function updaterItems(updater: UpdaterState, actions: TrayMenuActions): MenuItemConstructorOptions[] {
+  if (updater.kind === "downloading") {
+    const pct = updater.percent !== undefined ? ` (${updater.percent}%)` : "";
+    return [{ label: `업데이트 다운로드 중…${pct}`, enabled: false }, { type: "separator" }];
+  }
+  if (updater.kind === "ready") {
+    return [
+      { label: `v${updater.version} 업데이트 적용 (재시작)`, click: () => actions.applyUpdate() },
+      { type: "separator" },
+    ];
+  }
+  return [];
+}
+
 export function buildTrayMenuTemplate(state: TrayMenuState, actions: TrayMenuActions): MenuItemConstructorOptions[] {
   return [
+    ...updaterItems(state.updater, actions),
     { label: runnerStatusLabel(state.runner), enabled: false },
     { type: "separator" },
     { label: "Assay 열기", click: () => actions.openApp() },
