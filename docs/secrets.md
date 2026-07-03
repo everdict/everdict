@@ -5,25 +5,70 @@ Each **workspace** manages its own secrets; they are encrypted at rest, never re
 into that workspace's runs.
 
 ## Model
-- Keyed by **`(workspace, name)`**; `name` is an env-var (`^[A-Z_][A-Z0-9_]*$`) — it's injected as env.
+- Keyed by **`(workspace, owner, name)`**; `name` is an env-var (`^[A-Z_][A-Z0-9_]*$`) — it's injected as env.
+  **`owner`** is the scope discriminator (migration `0039_secret_owner.sql`): `''` = **workspace** (shared),
+  `<subject>` = a **user** (personal). So the same `name` can exist as a shared secret *and* as several users'
+  personal secrets, isolated.
+- **Two scopes:**
+  - **workspace** (`owner=''`) — shared, **admin-managed** (`secrets:write`). Provider keys the whole team uses.
+  - **user** (`owner=subject`) — personal, **self-managed** by any member (no admin gate; owner = `principal.subject`).
+    Other members never see or use them. A harness that references a user secret is **private to that user** (below).
 - **Encrypted at rest** (`@assay/db` `SecretStore`): AES-256-GCM, KEK from **`ASSAY_SECRETS_KEY`** (base64 32B;
   `openssl rand -base64 32`). DB holds only ciphertext/iv/tag. Prod should use Vault/KMS for the KEK.
-- **Write-only**: `list` returns names + `updatedAt` only — values are **never** returned by the API; they're
-  decrypted server-side solely to inject into a run.
+- **Write-only**: `list` returns `name` + `updatedAt` + `scope` only — values are **never** returned by the API;
+  they're decrypted server-side solely to inject into a run (`entries` = workspace-only for legacy consumers;
+  `scopedEntries(ws, subject)` = `{workspace, user}` for run/scorecard harness resolution).
 - **Fail-closed**: no `ASSAY_SECRETS_KEY` → no secret store → the routes/tools 404 (feature off).
-- **admin-only** (`secrets:read`/`secrets:write`) — provider keys are powerful.
 
-## Manage (API + MCP, same core)
-| Surface | Set | List (names) | Delete |
+## Manage (API + MCP, same core) — scope-aware authz
+`GET /secrets` is open to any authenticated member and returns **your own user secrets always** + **workspace
+secret names only if `secrets:read` (admin)**. `PUT`/`DELETE` take a **`scope`** (`workspace` default | `user`):
+workspace scope requires admin (`secrets:write`); user scope is self (no gate, `owner=subject`).
+| Surface | Set | List (names+scope) | Delete |
 |---|---|---|---|
-| HTTP | `PUT /secrets/:name` `{value}` → 204 | `GET /secrets` | `DELETE /secrets/:name` → 204 |
-| MCP | `set_secret {name,value}` | `list_secrets` | `delete_secret {name}` |
+| HTTP | `PUT /secrets/:name` `{value, scope?}` → 204 | `GET /secrets` | `DELETE /secrets/:name?scope=` → 204 |
+| MCP | `set_secret {name,value,scope?}` | `list_secrets` | `delete_secret {name,scope?}` |
 
 ## Injection into runs
 At dispatch, a store-backed `SecretProvider` gives the backend **only that tenant's** secrets, which are injected
 into the job env (Nomad alloc / K8s Job) — never crossing tenants. So a harness (e.g. aider) sees
 `OPENAI_API_KEY` etc. as env. Wired in `apps/api/main.ts` (`secretsFor: (t) => secretStore.entries(t)`), reusing
 the existing per-tenant `SecretProvider` path (now async).
+
+## Referencing a secret from harness `env` (`{secretRef}`)
+A harness's `env` values are **`string | { secretRef: "NAME", scope?: "user"|"workspace" }`** (`EnvValueSchema`,
+`@assay/core`) — a literal, or a **reference** to a secret by name in a tier (`scope`, default `workspace`). The
+reference is **content** (part of the immutable spec), so the registry stores **only the name+scope, never the
+plaintext value** — the actual value is injected only at run time. This covers `command` `env`, `service`
+`services[].env`, and instance `overrides.env` (all widened to the union; the resolved `HarnessSpec` env is likewise
+a union until resolution).
+
+### Private harnesses (referencing a `user` secret)
+A harness whose resolved env references a **`user`-scoped** secret is **private to its creator** — only they can see
+or run it. Two layers enforce it, both **derived** (no extra column): `referencesUserSecret(spec)` (`@assay/core`)
++ the instance's `createdBy`.
+- **Can't see** — `GET /harnesses` (+ `list_harnesses`) drops entries where `private && createdBy !== subject`
+  (`enrichHarnessList` stamps `private` from the latest resolved instance); `GET /harnesses/:id[/:version]` 404s a
+  non-creator. The web list shows a **비공개** badge on your own private harnesses.
+- **Can't run** — even if guessed, `resolveHarnessSecrets` for a non-owner fails: a `user` ref resolves against
+  **that submitter's** `user` tier only, which lacks the creator's personal secret → `BadRequestError` (the case
+  fails with a clear reason). So privacy is enforced by the secret resolution itself, not just the read filter.
+- **Resolution — `resolveHarnessSecrets(spec, {workspace, user})`** (`@assay/core`, pure): just before dispatch,
+  both `RunService.track` (single runs) and `ScorecardService.track` (batches, resolved once per batch) swap every
+  `{secretRef, scope}` for its value from the matching tier of `scopedSecretsFor(tenant, submitter)`
+  (= `secretStore.scopedEntries` = `{workspace: entries(''), user: entries(submitter)}`), for **all** backends
+  including self-hosted (resolved before the job is enqueued). A referenced secret that isn't set in its tier →
+  `BadRequestError` listing the missing names (`user:` prefix for a missing personal secret), so the run/case fails
+  with a clear reason instead of a silent gap.
+- **Consumers** (`CommandHarness`, topology runtimes) call `flattenEnv(env, lookup?)` to coerce to `Record<string,
+  string>` — post-dispatch the values are already literals; any residual ref is dropped (never emitted as
+  `[object Object]`).
+- **Web** — the harness-register env editor is a structured **`KEY + [값 | 시크릿]`** row list (not raw text): a
+  "시크릿" row picks a workspace secret name from a dropdown (loaded from `GET /secrets`, names-only) or creates one
+  **inline** (`createWorkspaceSecretAction` → `PUT /secrets/:name`). So a first-time user never pastes a raw key into
+  a spec. Detail views show a secret-backed var as `NAME · 시크릿` (`envValueText`), never the value.
+- Verified: `packages/core/src/harness-secrets.test.ts` (literal passthrough, ref resolution, missing-secret throw,
+  per-service resolution, process no-op).
 
 ## Example: aider on a LiteLLM-served model
 aider uses LiteLLM internally, so any LiteLLM-served model works — including a **LiteLLM proxy**

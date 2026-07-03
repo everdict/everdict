@@ -1,1 +1,7 @@
-export { secretMetaSchema, secretsSchema, type SecretMeta } from './model/schema'
+export {
+  secretMetaSchema,
+  secretsSchema,
+  secretScopeSchema,
+  type SecretMeta,
+  type SecretScope,
+} from './model/schema'

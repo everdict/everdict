@@ -1,6 +1,6 @@
 import { Boxes, Database, DoorOpen, Globe, Radio } from 'lucide-react'
 
-import type { HarnessSpec } from '@/entities/harness'
+import { envValueText, type HarnessSpec } from '@/entities/harness'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
 
@@ -63,10 +63,10 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
                     {Object.entries(s.env).map(([k, val]) => (
                       <code
                         key={k}
-                        title={`${k}=${val}`}
+                        title={`${k}=${envValueText(val)}`}
                         className="max-w-full truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-border"
                       >
-                        {k}=<span className="text-foreground/80">{val}</span>
+                        {k}=<span className="text-foreground/80">{envValueText(val)}</span>
                       </code>
                     ))}
                   </div>

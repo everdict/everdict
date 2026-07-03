@@ -6,11 +6,13 @@ import { Check, ChevronsUpDown, Search } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 
 // 옵션 — value 는 폼 값, label 은 표시(미지정=value), hint 는 우측 보조정보(소유자/별칭 해석 등),
+// description 은 옵션 아래 한 줄 설명(드롭다운 목록에만; 트리거는 간결하게 label 만),
 // keywords 는 검색 매칭에만 쓰는 추가 텍스트.
 export interface ComboboxOption {
   value: string
   label?: ReactNode
   hint?: ReactNode
+  description?: ReactNode
   keywords?: string
 }
 
@@ -194,24 +196,31 @@ export function Combobox({
                     onMouseEnter={() => setActive(idx)}
                     onClick={() => commit(opt)}
                     className={cn(
-                      'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
+                      'flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left transition-colors',
                       idx === active ? 'bg-accent' : 'hover:bg-accent/60'
                     )}
                   >
                     <Check
                       className={cn(
-                        'size-3.5 shrink-0 text-primary',
+                        'mt-0.5 size-3.5 shrink-0 text-primary',
                         isSelected ? 'opacity-100' : 'opacity-0'
                       )}
                     />
-                    <span className="flex-1 truncate text-foreground">
-                      {opt.label ?? opt.value}
-                    </span>
-                    {opt.hint != null && (
-                      <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
-                        {opt.hint}
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-2">
+                        <span className="truncate text-foreground">{opt.label ?? opt.value}</span>
+                        {opt.hint != null && (
+                          <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+                            {opt.hint}
+                          </span>
+                        )}
                       </span>
-                    )}
+                      {opt.description != null && (
+                        <span className="mt-0.5 block text-[11.5px] leading-snug text-muted-foreground">
+                          {opt.description}
+                        </span>
+                      )}
+                    </span>
                   </button>
                 )
               })

@@ -14,6 +14,8 @@ export {
   topologyTargetSchema,
   frontDoorSchema,
   commandTraceSchema,
+  envValueText,
+  type EnvValue,
   type Harness,
   type HarnessVersions,
   type HarnessSpec,

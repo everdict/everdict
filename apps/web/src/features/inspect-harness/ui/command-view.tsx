@@ -1,6 +1,6 @@
 import { ListOrdered, Radio, Settings2, Variable } from 'lucide-react'
 
-import type { HarnessSpec } from '@/entities/harness'
+import { envValueText, type HarnessSpec } from '@/entities/harness'
 import { Card } from '@/shared/ui/card'
 
 import { CommandPipeline } from './command-pipeline'
@@ -55,7 +55,7 @@ export function CommandView({ spec }: { spec: HarnessSpec }) {
             {envKeys.map((k) => (
               <div key={k} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
                 <code className="font-mono text-[12px] text-foreground">{k}</code>
-                <Mono>{env[k]}</Mono>
+                <Mono>{envValueText(env[k])}</Mono>
               </div>
             ))}
           </Card>

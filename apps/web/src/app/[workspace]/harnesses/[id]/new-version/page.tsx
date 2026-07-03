@@ -13,6 +13,7 @@ import {
   harnessVersionsSchema,
   templateSlotNames,
 } from '@/entities/harness'
+import { secretsSchema } from '@/entities/secret'
 import { can } from '@/shared/auth/can'
 import { authContext, currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -39,6 +40,20 @@ export default async function NewHarnessVersionPage({
   const ctx = await authContext()
   const { principal } = await currentPrincipal()
   const allowed = can(principal?.roles, 'harnesses:register')
+
+  // env 시크릿 참조 피커용 — 공유(workspace) + 내 개인(user) 시크릿 이름(값은 안 옴). 실패/무권한이면 빈 목록.
+  let secrets = { workspace: [] as string[], user: [] as string[] }
+  if (allowed) {
+    try {
+      const metas = secretsSchema.parse(await controlPlane.listSecrets(ctx))
+      secrets = {
+        workspace: metas.filter((m) => m.scope === 'workspace').map((m) => m.name),
+        user: metas.filter((m) => m.scope === 'user').map((m) => m.name),
+      }
+    } catch {
+      secrets = { workspace: [], user: [] }
+    }
+  }
 
   let initialInstance: InstanceState | undefined
   let initialTemplate: TemplateState | undefined
@@ -113,6 +128,7 @@ export default async function NewHarnessVersionPage({
             initialInstance={initialInstance}
             initialTemplate={initialTemplate}
             startTab={startTab}
+            secrets={secrets}
             {...(notice !== undefined ? { notice } : {})}
           />
         </Card>

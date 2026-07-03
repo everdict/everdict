@@ -7,6 +7,7 @@ import {
   InstanceForm,
   TemplateForm,
   type InstanceState,
+  type ScopedSecretNames,
   type TemplateState,
 } from '@/features/register-harness'
 import { cn } from '@/shared/lib/utils'
@@ -23,6 +24,7 @@ export function NewHarnessVersionForm({
   initialTemplate,
   startTab,
   notice,
+  secrets,
 }: {
   workspace: string
   id: string
@@ -30,6 +32,7 @@ export function NewHarnessVersionForm({
   initialTemplate: TemplateState
   startTab: Tab
   notice?: string
+  secrets: ScopedSecretNames
 }) {
   const router = useRouter()
   const [tab, setTab] = useState<Tab>(startTab)
@@ -59,12 +62,14 @@ export function NewHarnessVersionForm({
           initial={initialInstance}
           lockId
           redirectDetailId={id}
+          secrets={secrets}
         />
       ) : (
         <TemplateForm
           workspace={workspace}
           initial={initialTemplate}
           lockId
+          secrets={secrets}
           onRegistered={(version) =>
             router.push(
               `/${workspace}/harnesses/${encodeURIComponent(id)}/new-version?tab=instance&tplVersion=${encodeURIComponent(version)}`

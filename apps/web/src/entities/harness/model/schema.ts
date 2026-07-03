@@ -11,6 +11,7 @@ export const harnessSchema = z.object({
   category: z.string().optional(), // 최신 인스턴스의 템플릿 대분류(cli-agent 등)
   kind: z.string().optional(), // command | service | process
   subtitle: z.string().optional(), // 모델/커맨드/서비스 요약(하니스는 free-text 설명이 없어 부제로 사용)
+  private: z.boolean().optional(), // 개인(user) 시크릿을 참조 → createdBy 만 열람(비공개)
   createdBy: z.string().optional(), // 최초 등록 인스턴스의 subject(시드/_shared 는 없음)
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
@@ -28,6 +29,15 @@ export type HarnessVersions = z.infer<typeof harnessVersionsSchema>
 
 // --- resolved HarnessSpec (GET /harnesses/:id/:version) 의 클라이언트 미러 ---
 // 컨트롤플레인이 template + pins 를 resolve 한 최종 형식. 웹은 HTTP 로만 결합(코어 패키지 비의존).
+
+// env 값 — 리터럴 문자열 또는 워크스페이스 시크릿 참조({ secretRef }). 컨트롤플레인 EnvValueSchema 미러.
+// 참조면 스펙엔 이름만, 실행 직전 값이 주입된다(레지스트리엔 평문 미저장).
+export const envValueSchema = z.union([z.string(), z.object({ secretRef: z.string() })])
+export type EnvValue = z.infer<typeof envValueSchema>
+
+// env 값 표시 텍스트 — 리터럴은 그대로, 시크릿 참조는 "이름 · 시크릿"으로(값은 노출 안 됨).
+export const envValueText = (v: EnvValue): string =>
+  typeof v === 'string' ? v : `${v.secretRef} · 시크릿`
 
 // 트레이스 출처 — 하니스가 OTel/MLflow 로 내보낸 트레이스를 평가가 끌어온다.
 export const traceSourceSchema = z.object({
@@ -52,7 +62,7 @@ export const topologyServiceSchema = z.object({
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
   replicas: z.number().default(1),
-  env: z.record(z.string(), z.string()).default({}),
+  env: z.record(z.string(), envValueSchema).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
 })
@@ -114,7 +124,7 @@ export const harnessSpecSchema = z
     workDir: z.string().optional(),
     setup: z.array(z.string()).optional(),
     command: z.string().optional(),
-    env: z.record(z.string(), z.string()).optional(),
+    env: z.record(z.string(), envValueSchema).optional(),
     model: z.string().optional(),
     trace: commandTraceSchema.optional(),
   })
@@ -148,7 +158,7 @@ export const templateServiceSchema = z.object({
   needs: z.array(z.string()).default([]),
   perRun: z.array(z.string()).default([]),
   replicas: z.number().default(1),
-  env: z.record(z.string(), z.string()).default({}),
+  env: z.record(z.string(), envValueSchema).default({}),
   volumes: z.array(z.string()).optional(),
   readiness: serviceReadinessSchema.optional(),
 })
@@ -172,7 +182,7 @@ export const harnessTemplateSpecSchema = z
     workDir: z.string().optional(),
     setup: z.array(z.string()).optional(),
     command: z.string().optional(),
-    env: z.record(z.string(), z.string()).optional(),
+    env: z.record(z.string(), envValueSchema).optional(),
     model: z.string().optional(),
     trace: commandTraceSchema.optional(),
   })

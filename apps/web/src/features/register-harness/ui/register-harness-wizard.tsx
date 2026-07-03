@@ -7,8 +7,10 @@ import { ChevronDown, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Combobox } from '@/shared/ui/combobox'
+import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { InfoTip } from '@/shared/ui/tooltip'
+import { VersionField } from '@/shared/ui/version-field'
 
 import {
   registerHarnessAction,
@@ -33,17 +35,115 @@ import {
   type ServiceRow,
   type TemplateState,
 } from '../lib/build-spec'
+import { EnvEditor, type ScopedSecretNames } from './env-editor'
+
+const EMPTY_SECRETS: ScopedSecretNames = { workspace: [], user: [] }
 
 // front-door submit 본문 값 오버라이드 편집기의 안내 예시(자유 형식 JSON 객체).
 const BODY_PLACEHOLDER = `{ "max_steps": 30, "system_prompt": "..." }`
 
-const STORES = ['postgres', 'redis', 'minio']
-const ISOLATE = ['thread_id', 'key-prefix', 'object-prefix', 'schema', 'external']
-const CATEGORIES = ['topology', 'claude-code', 'codex', 'cli-agent', 'desktop', 'custom']
+const STORE_OPTIONS: ComboboxOption[] = [
+  { value: 'postgres', description: '관계형 DB' },
+  { value: 'redis', description: '인메모리 캐시·큐' },
+  { value: 'minio', description: 'S3 호환 오브젝트 스토어' },
+]
+const ISOLATE_OPTIONS: ComboboxOption[] = [
+  { value: 'thread_id', description: '케이스별 thread_id 로 논리 격리' },
+  { value: 'key-prefix', description: '케이스별 키 접두사로 격리' },
+  { value: 'object-prefix', description: '케이스별 오브젝트 경로 접두사로 격리' },
+  { value: 'schema', description: '케이스별 DB 스키마로 격리' },
+  { value: 'external', description: '외부·공유 스토어 — Assay 미배포, 연결만 넘김' },
+]
+
+// kind = 하니스를 실제로 어떻게 실행하는지(런타임 방식). process 는 코드로 정의하는 하니스라
+// 폼(선언형)으로는 빈 껍데기만 나와 여기선 제외한다 — command / service 둘만 노출.
+const KIND_OPTIONS: ComboboxOption[] = [
+  {
+    value: 'command',
+    label: 'command · 명령형 CLI',
+    description: 'aider·codex 같은 CLI 에이전트를 명령 한 줄로 정의해요. 대부분 여기서 시작해요.',
+  },
+  {
+    value: 'service',
+    label: 'service · 서비스 토폴로지',
+    description:
+      '에이전트 서버 + DB 같은 여러 컨테이너를 띄우고 front-door 로 케이스를 보내요. 고급.',
+  },
+]
+
+// category = 목록에서 묶어보기 위한 분류 라벨(실행 방식은 kind 가 정함 — category 는 실행에 영향 없음).
+// kind 별로 흔한 것만 노출해 선택을 좁힌다.
+const CATEGORY_OPTIONS: Record<'command' | 'service', ComboboxOption[]> = {
+  command: [
+    { value: 'cli-agent', label: 'cli-agent', description: '일반 CLI 에이전트 (aider 등)' },
+    { value: 'claude-code', label: 'claude-code', description: 'Claude Code 하니스' },
+    { value: 'codex', label: 'codex', description: 'OpenAI Codex CLI 하니스' },
+    { value: 'desktop', label: 'desktop', description: '데스크탑/OS 조작 에이전트' },
+    { value: 'custom', label: 'custom', description: '기타 — 분류만' },
+  ],
+  service: [
+    { value: 'topology', label: 'topology', description: '멀티 서비스 토폴로지' },
+    { value: 'custom', label: 'custom', description: '기타 — 분류만' },
+  ],
+}
+const categoriesForKind = (k: Kind): ComboboxOption[] =>
+  k === 'service' ? CATEGORY_OPTIONS.service : CATEGORY_OPTIONS.command
+
+// 라벨 + info 툴팁(안내는 인라인 금지 — info 아이콘에만). 등록 폼 전반에서 필드 설명에 사용.
+function FieldLabel({
+  children,
+  tip,
+  htmlFor,
+}: {
+  children: React.ReactNode
+  tip?: React.ReactNode
+  htmlFor?: string
+}) {
+  return (
+    <span className="flex items-center gap-1">
+      <Label {...(htmlFor ? { htmlFor } : {})}>{children}</Label>
+      {tip != null && <InfoTip content={tip} />}
+    </span>
+  )
+}
+
+// 버전 입력 — existing 이 주어지면 semver 범프 드롭다운(신규=1.0.0), 없으면 raw 입력(참조용 태그 등).
+function VersionRow({
+  existing,
+  value,
+  onChange,
+  rawLabel,
+  rawId,
+  placeholder,
+}: {
+  existing?: string[]
+  value: string
+  onChange: (v: string) => void
+  rawLabel: React.ReactNode
+  rawId: string
+  placeholder: string
+}) {
+  if (existing) return <VersionField existing={existing} value={value} onChange={onChange} />
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={rawId}>{rawLabel}</Label>
+      <Input
+        id={rawId}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+      />
+    </div>
+  )
+}
 
 type Tab = 'template' | 'instance'
 
-export function RegisterHarnessWizard() {
+export function RegisterHarnessWizard({
+  secrets = EMPTY_SECRETS,
+}: {
+  secrets?: ScopedSecretNames
+}) {
   const { workspace } = useParams<{ workspace: string }>()
   const [tab, setTab] = useState<Tab>('template')
 
@@ -63,9 +163,9 @@ export function RegisterHarnessWizard() {
           : '인스턴스는 템플릿의 슬롯마다 이미지·버전을 핀한 하나의 하니스예요. 보통 PR마다 하나씩 만들어요.'}
       </p>
       {tab === 'template' ? (
-        <TemplateForm workspace={workspace} />
+        <TemplateForm workspace={workspace} existingVersions={[]} secrets={secrets} />
       ) : (
-        <InstanceForm workspace={workspace} />
+        <InstanceForm workspace={workspace} existingVersions={[]} secrets={secrets} />
       )}
     </div>
   )
@@ -79,11 +179,15 @@ export function TemplateForm({
   initial,
   lockId = false,
   onRegistered,
+  existingVersions,
+  secrets = EMPTY_SECRETS,
 }: {
   workspace: string
   initial?: TemplateState
   lockId?: boolean
   onRegistered?: (version: string) => void
+  existingVersions?: string[]
+  secrets?: ScopedSecretNames
 }) {
   const router = useRouter()
   const [s, setS] = useState<TemplateState>(initial ?? INITIAL_TEMPLATE)
@@ -142,28 +246,49 @@ export function TemplateForm({
 
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
-          <Label>kind</Label>
+          <FieldLabel
+            tip={
+              <>
+                하니스를 <b>어떻게 실행</b>하는지예요.
+                <br />
+                <b>command</b> — CLI 한 줄로 정의(대부분 여기).
+                <br />
+                <b>service</b> — 여러 컨테이너를 띄우는 토폴로지(고급).
+              </>
+            }
+          >
+            kind
+          </FieldLabel>
           <Combobox
             value={s.kind}
-            onChange={(v) => set({ kind: v as Kind })}
+            onChange={(v) =>
+              set({
+                kind: v as Kind,
+                category: categoriesForKind(v as Kind)[0]?.value ?? 'custom',
+              })
+            }
             disabled={lockId}
-            options={[{ value: 'service' }, { value: 'command' }, { value: 'process' }]}
+            options={KIND_OPTIONS}
             className={cn('w-full', lockId && 'opacity-60')}
             aria-label="kind"
           />
         </div>
         <div className="space-y-1.5">
-          <Label>category (대분류)</Label>
+          <FieldLabel tip="목록에서 묶어보기 위한 분류 라벨이에요. 실행 방식은 kind 가 정해요 — category 는 실행에 영향 없어요.">
+            category
+          </FieldLabel>
           <Combobox
             value={s.category}
             onChange={(v) => set({ category: v })}
-            options={CATEGORIES.map((c) => ({ value: c }))}
+            options={categoriesForKind(s.kind)}
             className="w-full"
             aria-label="category"
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="tid">id</Label>
+          <FieldLabel htmlFor="tid" tip="이 하니스(대분류)의 이름이에요. 예: bu, aider, codex.">
+            id
+          </FieldLabel>
           <Input
             id="tid"
             value={s.id}
@@ -174,20 +299,25 @@ export function TemplateForm({
           />
         </div>
       </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="tver">version (구조가 바뀔 때만 올려요)</Label>
-        <Input
-          id="tver"
-          value={s.version}
-          onChange={(e) => set({ version: e.target.value })}
-          placeholder="1"
-        />
-      </div>
+      <VersionRow
+        existing={existingVersions}
+        value={s.version}
+        onChange={(v) => set({ version: v })}
+        rawLabel="version (구조가 바뀔 때만 올려요)"
+        rawId="tver"
+        placeholder="1"
+      />
 
       {mode === 'form' && s.kind === 'service' && (
         <div className="space-y-6">
           <Section
-            title="Services (슬롯 — 인스턴스가 이미지를 핀해요)"
+            title="서비스"
+            tip={
+              <>
+                토폴로지를 이루는 컨테이너들이에요. 각 서비스는 <b>슬롯</b>이 되고, 인스턴스가
+                거기에 이미지를 핀해요. 최소 하나(보통 에이전트 서버)가 필요해요.
+              </>
+            }
             onAdd={() =>
               set({
                 services: [
@@ -199,7 +329,7 @@ export function TemplateForm({
                     needs: '',
                     perRun: '',
                     replicas: '1',
-                    env: '',
+                    env: [],
                     volumes: '',
                     readinessTimeout: '',
                     readinessInterval: '',
@@ -209,61 +339,88 @@ export function TemplateForm({
             }
           >
             {s.services.map((sv, i) => (
-              <div key={i} className="space-y-2 rounded-lg border bg-card p-3">
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
+              <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
+                <div className="grid grid-cols-2 gap-2.5">
+                  <LabeledInput
+                    label="name"
+                    tip="서비스(컨테이너) 이름이에요. 예: agent-server, db."
                     value={sv.name}
-                    onChange={(e) => setService(i, { name: e.target.value })}
-                    placeholder="name (agent-server)"
+                    onChange={(v) => setService(i, { name: v })}
+                    placeholder="agent-server"
                   />
-                  <Input
+                  <LabeledInput
+                    label="slot"
+                    tip="인스턴스가 이미지를 핀할 때 쓰는 이름이에요. 비우면 name 을 그대로 슬롯으로 써요."
                     value={sv.slot}
-                    onChange={(e) => setService(i, { slot: e.target.value })}
-                    placeholder="slot (비우면 name)"
+                    onChange={(v) => setService(i, { slot: v })}
+                    placeholder="비우면 name"
                   />
-                  <Input
+                  <LabeledInput
+                    label="port"
+                    tip="이 서비스가 여는 포트예요. 에이전트 서버라면 front-door 가 이 포트로 케이스를 보내요."
                     value={sv.port}
-                    onChange={(e) => setService(i, { port: e.target.value })}
-                    placeholder="port (8080)"
+                    onChange={(v) => setService(i, { port: v })}
+                    placeholder="8080"
+                    inputMode="numeric"
                   />
-                  <Input
+                  <LabeledInput
+                    label="replicas"
+                    tip="띄울 복제본 수예요. 보통 1."
                     value={sv.replicas}
-                    onChange={(e) => setService(i, { replicas: e.target.value })}
-                    placeholder="replicas (1)"
+                    onChange={(v) => setService(i, { replicas: v })}
+                    placeholder="1"
+                    inputMode="numeric"
                   />
-                  <Input
+                  <LabeledInput
+                    label="needs"
+                    tip="이 서비스보다 먼저 떠 있어야 하는 서비스들이에요(의존 순서). 콤마로 구분해요. 예: db, redis."
                     value={sv.needs}
-                    onChange={(e) => setService(i, { needs: e.target.value })}
-                    placeholder="needs (콤마구분)"
+                    onChange={(v) => setService(i, { needs: v })}
+                    placeholder="db, redis"
                   />
-                  <Input
+                  <LabeledInput
+                    label="perRun"
+                    tip="케이스마다 런타임이 주입하는 키 이름들이에요(격리용). 콤마 구분. 예: thread_id."
                     value={sv.perRun}
-                    onChange={(e) => setService(i, { perRun: e.target.value })}
-                    placeholder="perRun (thread_id,…)"
+                    onChange={(v) => setService(i, { perRun: v })}
+                    placeholder="thread_id"
                   />
                 </div>
-                <Textarea
-                  className="min-h-14 text-[12px]"
-                  value={sv.env}
-                  onChange={(e) => setService(i, { env: e.target.value })}
-                  placeholder="env (KEY=VALUE 줄바꿈 구분: LOG_LEVEL=debug)"
+                <EnvEditor
+                  label="env"
+                  tip={
+                    <>
+                      이 서비스에 넣을 환경변수예요. API 키 같은 비밀은 <b>시크릿</b>으로 전환해
+                      참조하세요 — 스펙엔 이름만 저장돼요.
+                    </>
+                  }
+                  rows={sv.env}
+                  onChange={(env) => setService(i, { env })}
+                  secrets={secrets}
                 />
-                <Textarea
-                  className="min-h-14 text-[12px]"
+                <LabeledTextarea
+                  label="volumes"
+                  tip="컨테이너에 붙일 볼륨 마운트예요(docker -v). 한 줄에 하나. 예: pgdata:/var/lib/postgresql/data."
                   value={sv.volumes}
-                  onChange={(e) => setService(i, { volumes: e.target.value })}
-                  placeholder="volumes (줄바꿈 구분: pgdata:/var/lib/postgresql/data)"
+                  onChange={(v) => setService(i, { volumes: v })}
+                  placeholder="pgdata:/var/lib/postgresql/data"
                 />
-                <div className="grid grid-cols-2 gap-2">
-                  <Input
+                <div className="grid grid-cols-2 gap-2.5">
+                  <LabeledInput
+                    label="readiness timeout (ms)"
+                    tip="이 서비스가 준비될 때까지 기다리는 최대 시간이에요(ms). 비우면 런타임 기본값."
                     value={sv.readinessTimeout}
-                    onChange={(e) => setService(i, { readinessTimeout: e.target.value })}
-                    placeholder="readiness timeout ms (60000)"
+                    onChange={(v) => setService(i, { readinessTimeout: v })}
+                    placeholder="60000"
+                    inputMode="numeric"
                   />
-                  <Input
+                  <LabeledInput
+                    label="readiness interval (ms)"
+                    tip="준비됐는지 확인하는 간격이에요(ms). 비우면 런타임 기본값."
                     value={sv.readinessInterval}
-                    onChange={(e) => setService(i, { readinessInterval: e.target.value })}
-                    placeholder="readiness interval ms (1000)"
+                    onChange={(v) => setService(i, { readinessInterval: v })}
+                    placeholder="1000"
+                    inputMode="numeric"
                   />
                 </div>
                 {s.services.length > 1 && (
@@ -275,7 +432,13 @@ export function TemplateForm({
             ))}
           </Section>
           <Section
-            title="Dependencies (공유 스토어 · external=외부 스토어)"
+            title="의존 스토어"
+            tip={
+              <>
+                서비스들이 공유하는 상태 저장소예요(DB·캐시 등). 케이스마다 <b>논리적으로 격리</b>돼
+                섞이지 않아요. 필요 없으면 비워둬요.
+              </>
+            }
             onAdd={() =>
               set({
                 deps: [
@@ -287,79 +450,128 @@ export function TemplateForm({
           >
             {s.deps.length === 0 && <p className="text-[12px] text-muted-foreground">없음</p>}
             {s.deps.map((d, i) => (
-              <div key={i} className="space-y-2 rounded-lg border bg-card p-3">
-                <div className="flex items-center gap-2">
-                  <Combobox
-                    value={d.store}
-                    onChange={(v) => setDep(i, { store: v })}
-                    options={STORES.map((x) => ({ value: x }))}
-                    className="w-full"
-                    aria-label="store"
-                  />
-                  <Input
+              <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
+                <div className="grid grid-cols-3 gap-2.5">
+                  <div className="space-y-1">
+                    <span className="flex items-center gap-1">
+                      <span className="text-[11px] font-[510] text-muted-foreground">store</span>
+                      <InfoTip content="저장소 종류예요." />
+                    </span>
+                    <Combobox
+                      value={d.store}
+                      onChange={(v) => setDep(i, { store: v })}
+                      options={STORE_OPTIONS}
+                      className="w-full"
+                      aria-label="store"
+                    />
+                  </div>
+                  <LabeledInput
+                    label="role"
+                    tip="이 스토어의 용도 이름이에요(자유). 예: main, cache."
                     value={d.role}
-                    onChange={(e) => setDep(i, { role: e.target.value })}
-                    placeholder="role"
+                    onChange={(v) => setDep(i, { role: v })}
+                    placeholder="main"
                   />
-                  <Combobox
-                    value={d.isolateBy}
-                    onChange={(v) => setDep(i, { isolateBy: v })}
-                    options={ISOLATE.map((x) => ({ value: x }))}
-                    className="w-full"
-                    aria-label="isolateBy"
-                  />
-                  <RemoveBtn onClick={() => set({ deps: s.deps.filter((_, j) => j !== i) })} />
+                  <div className="space-y-1">
+                    <span className="flex items-center gap-1">
+                      <span className="text-[11px] font-[510] text-muted-foreground">
+                        isolateBy
+                      </span>
+                      <InfoTip content="케이스끼리 데이터가 안 섞이게 격리하는 방식이에요." />
+                    </span>
+                    <Combobox
+                      value={d.isolateBy}
+                      onChange={(v) => setDep(i, { isolateBy: v })}
+                      options={ISOLATE_OPTIONS}
+                      className="w-full"
+                      aria-label="isolateBy"
+                    />
+                  </div>
                 </div>
-                <Input
+                <LabeledInput
+                  label="service (선택)"
+                  tip="이 스토어를 쓰는 서비스명이에요. 비우면 토폴로지 전체가 공용으로 써요."
                   value={d.service}
-                  onChange={(e) => setDep(i, { service: e.target.value })}
-                  placeholder="service (이 스토어를 쓰는 서비스, 선택)"
+                  onChange={(v) => setDep(i, { service: v })}
+                  placeholder="agent-server"
                 />
                 {d.isolateBy === 'external' && (
                   <p className="text-[11px] text-muted-foreground">
-                    external은 Assay 밖에 있는 외부·공유 스토어예요. Assay가 직접 만들지 않고,
-                    연결 정보만 env로 넘겨줘요.
+                    external은 Assay 밖에 있는 외부·공유 스토어예요. Assay가 직접 만들지 않고, 연결
+                    정보만 env로 넘겨줘요.
                   </p>
                 )}
+                <RemoveBtn onClick={() => set({ deps: s.deps.filter((_, j) => j !== i) })} />
               </div>
             ))}
           </Section>
           <div className="space-y-3">
-            <h3 className="text-[13px] font-[560]">Front door</h3>
-            <div className="grid grid-cols-3 gap-2">
-              <Input
+            <h3 className="flex items-center gap-1 text-[13px] font-[560]">
+              Front door
+              <InfoTip
+                content={
+                  <>
+                    평가 드라이버가 <b>케이스를 제출하는 입구</b>예요. 어느 서비스의 어떤 요청으로
+                    케이스를 보낼지 정해요.
+                  </>
+                }
+              />
+            </h3>
+            <div className="grid grid-cols-3 gap-2.5">
+              <LabeledInput
+                label="service"
+                tip="케이스를 받을 서비스명이에요(보통 에이전트 서버)."
                 value={s.frontDoorService}
-                onChange={(e) => set({ frontDoorService: e.target.value })}
-                placeholder="service"
+                onChange={(v) => set({ frontDoorService: v })}
+                placeholder="agent-server"
               />
-              <Input
+              <LabeledInput
+                label="submit"
+                tip="케이스를 제출하는 HTTP 요청이에요. 예: POST /runs."
                 value={s.frontDoorSubmit}
-                onChange={(e) => set({ frontDoorSubmit: e.target.value })}
-                placeholder="submit (POST /runs)"
+                onChange={(v) => set({ frontDoorSubmit: v })}
+                placeholder="POST /runs"
               />
-              <Input
+              <LabeledInput
+                label="trace (선택)"
+                tip="완료/트레이스를 확인할 경로예요. 없으면 비워둬요."
                 value={s.frontDoorTrace}
-                onChange={(e) => set({ frontDoorTrace: e.target.value })}
-                placeholder="trace (optional)"
+                onChange={(v) => set({ frontDoorTrace: v })}
+                placeholder="선택"
               />
             </div>
           </div>
           <div className="space-y-3">
-            <h3 className="text-[13px] font-[560]">Trace source</h3>
-            <div className="grid grid-cols-3 gap-2">
-              <Combobox
-                value={s.traceKind}
-                onChange={(v) => set({ traceKind: v })}
-                options={[{ value: 'mlflow' }, { value: 'otel' }]}
-                className="w-full"
-                aria-label="trace source kind"
-              />
-              <Input
-                className="col-span-2"
-                value={s.traceEndpoint}
-                onChange={(e) => set({ traceEndpoint: e.target.value })}
-                placeholder="endpoint (http://…:5501)"
-              />
+            <h3 className="flex items-center gap-1 text-[13px] font-[560]">
+              Trace source
+              <InfoTip content="하니스가 내보낸 트레이스(OTel/MLflow)를 평가가 어디서 끌어올지예요." />
+            </h3>
+            <div className="grid grid-cols-3 gap-2.5">
+              <div className="space-y-1">
+                <span className="flex items-center gap-1">
+                  <span className="text-[11px] font-[510] text-muted-foreground">kind</span>
+                  <InfoTip content="트레이스 형식이에요." />
+                </span>
+                <Combobox
+                  value={s.traceKind}
+                  onChange={(v) => set({ traceKind: v })}
+                  options={[
+                    { value: 'mlflow', description: 'MLflow 트레이싱' },
+                    { value: 'otel', description: 'OpenTelemetry' },
+                  ]}
+                  className="w-full"
+                  aria-label="trace source kind"
+                />
+              </div>
+              <div className="col-span-2">
+                <LabeledInput
+                  label="endpoint"
+                  tip="트레이스를 끌어올 주소예요. 예: http://mlflow:5501."
+                  value={s.traceEndpoint}
+                  onChange={(v) => set({ traceEndpoint: v })}
+                  placeholder="http://…:5501"
+                />
+              </div>
             </div>
           </div>
         </div>
@@ -367,39 +579,65 @@ export function TemplateForm({
 
       {mode === 'form' && s.kind === 'command' && (
         <div className="space-y-3">
-          <div className="grid grid-cols-2 gap-2">
-            <Input
+          <div className="grid grid-cols-3 gap-2.5">
+            <LabeledInput
+              label="image (선택)"
+              tip="명령을 실행할 컨테이너 이미지예요. 비우면 기본 샌드박스. 인스턴스가 슬롯으로 덮어써요."
               value={s.image}
-              onChange={(e) => set({ image: e.target.value })}
-              placeholder="image (기본값 · 인스턴스가 덮어써요)"
+              onChange={(v) => set({ image: v })}
+              placeholder="ghcr.io/…"
             />
-            <Input
+            <LabeledInput
+              label="model (선택)"
+              tip="명령의 {{model}} 자리에 들어갈 기본 모델이에요. 인스턴스가 덮어써요."
               value={s.model}
-              onChange={(e) => set({ model: e.target.value })}
-              placeholder="model (기본값)"
+              onChange={(v) => set({ model: v })}
+              placeholder="claude-opus-4-8"
             />
-            <Input
+            <LabeledInput
+              label="workDir (선택)"
+              tip="명령을 실행할 작업 디렉터리예요. 예: /tmp."
               value={s.workDir}
-              onChange={(e) => set({ workDir: e.target.value })}
-              placeholder="workDir (예: /tmp)"
+              onChange={(v) => set({ workDir: v })}
+              placeholder="/tmp"
             />
           </div>
-          <Input
-            value={s.command}
-            onChange={(e) => set({ command: e.target.value })}
-            placeholder="command (예: aider --message {{task}} --model {{model}} .)"
-          />
-          <Textarea
-            className="min-h-20 text-[12px]"
+          <div className="space-y-1">
+            <FieldLabel
+              tip={
+                <>
+                  에이전트를 실행하는 <b>명령 한 줄</b>이에요. <code>{'{{task}}'}</code>·
+                  <code>{'{{model}}'}</code>·<code>{'{{run_id}}'}</code> 는 케이스마다 채워져요.
+                </>
+              }
+            >
+              command (필수)
+            </FieldLabel>
+            <Input
+              aria-label="command"
+              value={s.command}
+              onChange={(e) => set({ command: e.target.value })}
+              placeholder="aider --message {{task}} --model {{model}} ."
+            />
+          </div>
+          <LabeledTextarea
+            label="setup (선택)"
+            tip="명령 전에 한 번 실행할 설치 단계예요. 한 줄에 하나. 예: pip install aider-chat."
             value={s.setup}
-            onChange={(e) => set({ setup: e.target.value })}
-            placeholder="setup (줄바꿈 구분: pip install …)"
+            onChange={(v) => set({ setup: v })}
+            placeholder="pip install aider-chat"
           />
-          <Textarea
-            className="min-h-16 text-[12px]"
-            value={s.envText}
-            onChange={(e) => set({ envText: e.target.value })}
-            placeholder="env (KEY=VALUE 줄바꿈 구분)"
+          <EnvEditor
+            label="env (선택)"
+            tip={
+              <>
+                에이전트에 넣을 환경변수예요. API 키 같은 비밀은 <b>시크릿</b>으로 전환해 참조하세요
+                — 스펙엔 이름만 저장되고 실행할 때 값이 주입돼요.
+              </>
+            }
+            rows={s.envRows}
+            onChange={(envRows) => set({ envRows })}
+            secrets={secrets}
           />
         </div>
       )}
@@ -428,11 +666,15 @@ export function InstanceForm({
   initial,
   lockId = false,
   redirectDetailId,
+  existingVersions,
+  secrets = EMPTY_SECRETS,
 }: {
   workspace: string
   initial?: InstanceState
   lockId?: boolean
   redirectDetailId?: string
+  existingVersions?: string[]
+  secrets?: ScopedSecretNames
 }) {
   const router = useRouter()
   const [s, setS] = useState<InstanceState>(initial ?? INITIAL_INSTANCE)
@@ -477,9 +719,14 @@ export function InstanceForm({
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="itid">template id</Label>
+          <FieldLabel
+            htmlFor="itid"
+            tip="어떤 템플릿(대분류) 위에 만들지예요. 먼저 등록된 템플릿 id 를 적어요."
+          >
+            template id
+          </FieldLabel>
           <Input
             id="itid"
             value={s.templateId}
@@ -490,7 +737,12 @@ export function InstanceForm({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="itver">template version</Label>
+          <FieldLabel
+            htmlFor="itver"
+            tip="쓸 템플릿의 버전이에요. 템플릿 등록 때 정한 버전을 적어요."
+          >
+            template version
+          </FieldLabel>
           <Input
             id="itver"
             value={s.templateVersion}
@@ -498,16 +750,15 @@ export function InstanceForm({
             placeholder="1"
           />
         </div>
-        <div className="space-y-1.5">
-          <Label htmlFor="iver">instance version</Label>
-          <Input
-            id="iver"
-            value={s.version}
-            onChange={(e) => set({ version: e.target.value })}
-            placeholder="pr-123-sha-abc"
-          />
-        </div>
       </div>
+      <VersionRow
+        existing={existingVersions}
+        value={s.version}
+        onChange={(v) => set({ version: v })}
+        rawLabel="instance version"
+        rawId="iver"
+        placeholder="pr-123-sha-abc"
+      />
 
       <Section
         title="Pins (슬롯 → 이미지/값)"
@@ -532,7 +783,13 @@ export function InstanceForm({
         ))}
       </Section>
 
-      <OverridesEditor s={s} set={set} setSvcOv={setSvcOv} bodyError={bodyError} />
+      <OverridesEditor
+        s={s}
+        set={set}
+        setSvcOv={setSvcOv}
+        bodyError={bodyError}
+        secrets={secrets}
+      />
 
       <JsonPreview value={buildInstance(s)} />
       {result && <ValidateBanner result={result} />}
@@ -559,7 +816,7 @@ function hasOverrides(s: InstanceState): boolean {
     s.completionTimeout.trim() !== '' ||
     s.completionInterval.trim() !== '' ||
     s.targetExtensionRef.trim() !== '' ||
-    s.cmdEnv.trim() !== '' ||
+    s.cmdEnvRows.length > 0 ||
     s.cmdParams.trim() !== ''
   )
 }
@@ -569,11 +826,13 @@ function OverridesEditor({
   set,
   setSvcOv,
   bodyError,
+  secrets,
 }: {
   s: InstanceState
   set: (patch: Partial<InstanceState>) => void
   setSvcOv: (i: number, patch: Partial<ServiceOverrideRow>) => void
   bodyError?: string
+  secrets: ScopedSecretNames
 }) {
   const [open, setOpen] = useState(hasOverrides(s))
   return (
@@ -643,12 +902,16 @@ function OverridesEditor({
                       placeholder="4096"
                     />
                   </div>
-                  <Textarea
-                    value={r.env}
-                    onChange={(e) => setSvcOv(i, { env: e.target.value })}
-                    placeholder="env (KEY=VALUE 줄바꿈 — MODEL=claude-opus-4-8)"
-                    rows={2}
-                    className="font-mono text-[12px]"
+                  <EnvEditor
+                    label="env"
+                    tip={
+                      <>
+                        이 서비스의 env 를 덮어써요. 비밀은 <b>시크릿</b>으로 참조하세요.
+                      </>
+                    }
+                    rows={r.env}
+                    onChange={(env) => setSvcOv(i, { env })}
+                    secrets={secrets}
                   />
                   <Textarea
                     value={r.volumes}
@@ -718,17 +981,17 @@ function OverridesEditor({
           </OvBlock>
 
           <OvBlock title="Command 하니스">
-            <div className="space-y-1.5">
-              <Label htmlFor="ovcmdenv">env (KEY=VALUE 줄바꿈)</Label>
-              <Textarea
-                id="ovcmdenv"
-                value={s.cmdEnv}
-                onChange={(e) => set({ cmdEnv: e.target.value })}
-                placeholder="AIDER_TEMPERATURE=0"
-                rows={2}
-                className="font-mono text-[12px]"
-              />
-            </div>
+            <EnvEditor
+              label="env"
+              tip={
+                <>
+                  command 하니스의 env 를 덮어써요. 비밀은 <b>시크릿</b>으로 참조하세요.
+                </>
+              }
+              rows={s.cmdEnvRows}
+              onChange={(cmdEnvRows) => set({ cmdEnvRows })}
+              secrets={secrets}
+            />
             <div className="space-y-1.5">
               <Label htmlFor="ovcmdparams">{'params — command {{var}} 값 (KEY=VALUE)'}</Label>
               <Textarea
@@ -891,17 +1154,22 @@ function Actions({
 
 function Section({
   title,
+  tip,
   onAdd,
   children,
 }: {
   title: string
+  tip?: React.ReactNode
   onAdd: () => void
   children: React.ReactNode
 }) {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-[13px] font-[560] text-foreground">{title}</h3>
+        <h3 className="flex items-center gap-1 text-[13px] font-[560] text-foreground">
+          {title}
+          {tip != null && <InfoTip content={tip} />}
+        </h3>
         <button
           type="button"
           onClick={onAdd}
@@ -911,6 +1179,70 @@ function Section({
         </button>
       </div>
       <div className="space-y-2">{children}</div>
+    </div>
+  )
+}
+
+// 작은 라벨 + info 툴팁이 달린 텍스트 입력(서비스 행처럼 필드가 촘촘한 곳에서 "뭐가뭔지" 안내).
+function LabeledInput({
+  label,
+  tip,
+  value,
+  onChange,
+  placeholder,
+  inputMode,
+}: {
+  label: string
+  tip?: React.ReactNode
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+  inputMode?: 'numeric'
+}) {
+  return (
+    <div className="space-y-1">
+      <span className="flex items-center gap-1">
+        <span className="text-[11px] font-[510] text-muted-foreground">{label}</span>
+        {tip != null && <InfoTip content={tip} />}
+      </span>
+      <Input
+        {...(inputMode ? { inputMode } : {})}
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        {...(placeholder ? { placeholder } : {})}
+      />
+    </div>
+  )
+}
+
+// 작은 라벨 + info 툴팁이 달린 여러 줄 입력(env·volumes 처럼 줄 단위 값).
+function LabeledTextarea({
+  label,
+  tip,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string
+  tip?: React.ReactNode
+  value: string
+  onChange: (v: string) => void
+  placeholder?: string
+}) {
+  return (
+    <div className="space-y-1">
+      <span className="flex items-center gap-1">
+        <span className="text-[11px] font-[510] text-muted-foreground">{label}</span>
+        {tip != null && <InfoTip content={tip} />}
+      </span>
+      <Textarea
+        className="min-h-14 text-[12px]"
+        aria-label={label}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        {...(placeholder ? { placeholder } : {})}
+      />
     </div>
   )
 }

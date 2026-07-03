@@ -1,4 +1,5 @@
 export { RegisterHarnessWizard, InstanceForm, TemplateForm } from './ui/register-harness-wizard'
+export { type ScopedSecretNames } from './ui/env-editor'
 export {
   instanceStateFromSpec,
   templateStateFromSpec,

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Boxes, Clock, Layers, Waypoints } from 'lucide-react'
+import { Boxes, Clock, Layers, Lock, Waypoints } from 'lucide-react'
 
 import type { Harness } from '@/entities/harness'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
@@ -201,6 +201,14 @@ export function HarnessList({
                         )}
                         {nver > 1 && (
                           <span className="text-[11px] text-faint">+{nver - 1}개 버전</span>
+                        )}
+                        {h.private && (
+                          <span
+                            title="개인 시크릿을 참조 — 나만 볼 수 있어요"
+                            className="inline-flex items-center gap-0.5 rounded bg-[var(--color-warning)]/10 px-1.5 py-0.5 text-[10.5px] font-[510] text-[var(--color-warning)] ring-1 ring-inset ring-[var(--color-warning)]/30"
+                          >
+                            <Lock className="size-2.5" /> 비공개
+                          </span>
                         )}
                       </div>
                       {h.subtitle && (

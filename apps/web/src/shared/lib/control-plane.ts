@@ -223,13 +223,18 @@ export const controlPlane = {
   // 워크스페이스 시크릿(모델/프로바이더 키 + 클러스터 자격증명) — 값은 절대 반환되지 않음(목록=이름+updatedAt).
   // at-rest 암호화는 컨트롤플레인 SecretStore. set/delete 는 204(본문 없음) → callVoid.
   listSecrets: <T>(auth: AuthContext) => call<T>(auth, '/secrets'),
-  setSecret: (auth: AuthContext, name: string, value: string) =>
+  setSecret: (
+    auth: AuthContext,
+    name: string,
+    value: string,
+    scope: 'user' | 'workspace' = 'workspace'
+  ) =>
     callVoid(auth, `/secrets/${encodeURIComponent(name)}`, {
       method: 'PUT',
-      body: JSON.stringify({ value }),
+      body: JSON.stringify({ value, scope }),
     }),
-  deleteSecret: (auth: AuthContext, name: string) =>
-    callVoid(auth, `/secrets/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  deleteSecret: (auth: AuthContext, name: string, scope: 'user' | 'workspace' = 'workspace') =>
+    callVoid(auth, `/secrets/${encodeURIComponent(name)}?scope=${scope}`, { method: 'DELETE' }),
   // 외부 계정 연결(Connected accounts, 아웃바운드 OAuth). 개인 소유 — 목록=내(subject) 연결 메타만(토큰 없음) + 연결 가능한 provider.
   // start 는 authorizeUrl 을 돌려주고(브라우저를 그 URL 로 보낸다), disconnect 는 204(callVoid).
   // 멤버는 자격증명 입력 없음: github.com 은 env 기본, self-hosted 는 관리자가 등록한 워크스페이스 통합에서 resolve.

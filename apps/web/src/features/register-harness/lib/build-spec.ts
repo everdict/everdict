@@ -11,7 +11,7 @@ export interface ServiceRow {
   needs: string // 콤마 구분
   perRun: string // 콤마 구분
   replicas: string
-  env: string // KEY=VALUE 줄바꿈 구분 — 정적 env(비-스토어 설정)
+  env: EnvRow[] // 정적 env(비-스토어 설정) — 리터럴 또는 시크릿 참조
   volumes: string // docker -v 마운트, 줄바꿈 구분("vol:/data" · "/host:/c:ro")
   readinessTimeout: string // readiness 폴링 상한(ms) — 비우면 미설정
   readinessInterval: string // readiness 폴링 간격(ms)
@@ -47,7 +47,7 @@ export interface TemplateState {
   setup: string // 줄바꿈 구분
   command: string
   model: string
-  envText: string // KEY=VALUE 줄바꿈 구분
+  envRows: EnvRow[] // command env — 리터럴 또는 시크릿 참조
   cmdTraceKind: string // none | otel | mlflow
   cmdTraceEndpoint: string
 }
@@ -71,6 +71,57 @@ const kvLines = (s: string): Record<string, string> => {
   return out
 }
 
+// env 한 줄 — 이름(key) + [리터럴 값 | 시크릿 이름 참조]. secret=true 면 스펙에 {secretRef,scope} 로 나가
+// 평문이 레지스트리에 남지 않는다(값은 실행 직전 컨트롤플레인이 SecretStore 에서 주입).
+// scope: "workspace"(공유) | "user"(내 개인) — secret=true 일 때만 의미. user 참조 하니스는 그 개인만 볼 수 있다.
+export type SecretRefScope = 'user' | 'workspace'
+export interface EnvRow {
+  key: string
+  secret: boolean
+  value: string // secret=false → 리터럴 값 · secret=true → 시크릿 이름
+  scope?: SecretRefScope // secret=true 일 때 참조 티어(미지정=workspace)
+}
+export type EnvValue = string | { secretRef: string; scope?: SecretRefScope }
+
+// env 행들 → 스펙 env 맵(빈 key 제외). 리터럴=문자열, 시크릿=참조 객체(+scope; workspace 는 기본이라 생략).
+export function envRowsToSpec(rows: EnvRow[]): Record<string, EnvValue> {
+  const out: Record<string, EnvValue> = {}
+  for (const r of rows) {
+    const k = r.key.trim()
+    if (!k) continue
+    out[k] = r.secret
+      ? { secretRef: r.value.trim(), ...(r.scope === 'user' ? { scope: 'user' as const } : {}) }
+      : r.value
+  }
+  return out
+}
+
+// 스펙 env 맵 → env 행들(프리필 역변환). {secretRef} 는 시크릿 행(+scope), 그 외 문자열은 리터럴 행.
+export function envRowsFromSpec(env: unknown): EnvRow[] {
+  if (typeof env !== 'object' || env === null || Array.isArray(env)) return []
+  return Object.entries(env as Record<string, unknown>).map(([key, v]) => {
+    if (
+      typeof v === 'object' &&
+      v !== null &&
+      !Array.isArray(v) &&
+      typeof (v as { secretRef?: unknown }).secretRef === 'string'
+    ) {
+      const ref = v as { secretRef: string; scope?: unknown }
+      return {
+        key,
+        secret: true,
+        value: ref.secretRef,
+        scope: ref.scope === 'user' ? ('user' as const) : ('workspace' as const),
+      }
+    }
+    return {
+      key,
+      secret: false,
+      value: typeof v === 'string' ? v : typeof v === 'number' ? String(v) : '',
+    }
+  })
+}
+
 // 템플릿(대분류) 스펙 조립.
 export function buildTemplate(s: TemplateState): Record<string, unknown> {
   const base = { category: s.category || 'custom', id: s.id, version: s.version }
@@ -83,7 +134,7 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       ...(s.workDir.trim() ? { workDir: s.workDir } : {}),
       setup: lines(s.setup),
       command: s.command,
-      env: kvLines(s.envText),
+      env: envRowsToSpec(s.envRows),
       ...(s.model.trim() ? { model: s.model } : {}),
       trace:
         s.cmdTraceKind === 'none' || !s.cmdTraceKind
@@ -95,7 +146,7 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
     kind: 'service',
     ...base,
     services: s.services.map((sv) => {
-      const env = kvLines(sv.env)
+      const env = envRowsToSpec(sv.env)
       const volumes = lines(sv.volumes)
       const hasReadiness = sv.readinessTimeout.trim() !== '' || sv.readinessInterval.trim() !== ''
       return {
@@ -158,9 +209,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
       needs: (s.needs ?? []).join(', '),
       perRun: (s.perRun ?? []).join(', '),
       replicas: s.replicas !== undefined ? String(s.replicas) : '1',
-      env: Object.entries(s.env ?? {})
-        .map(([k, val]) => `${k}=${val}`)
-        .join('\n'),
+      env: envRowsFromSpec(s.env),
       volumes: (s.volumes ?? []).join('\n'),
       readinessTimeout: s.readiness?.timeoutMs !== undefined ? String(s.readiness.timeoutMs) : '',
       readinessInterval:
@@ -186,9 +235,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
     setup: (t.setup ?? []).join('\n'),
     command: t.command ?? '',
     model: t.model ?? '',
-    envText: Object.entries(env)
-      .map(([k, v]) => `${k}=${v}`)
-      .join('\n'),
+    envRows: envRowsFromSpec(env),
     cmdTraceKind: t.trace?.kind ?? 'none',
     cmdTraceEndpoint: t.trace?.endpoint ?? '',
   }
@@ -209,7 +256,7 @@ export interface PinRow {
 // 서비스별 변주 행(overrides.services[name]) — 구조(템플릿)는 그대로, 동작 노브만 델타.
 export interface ServiceOverrideRow {
   service: string // 대상 서비스명(템플릿에 존재해야 함)
-  env: string // KEY=VALUE 줄바꿈
+  env: EnvRow[] // 서비스 env 오버레이 — 리터럴 또는 시크릿 참조
   replicas: string // 숫자 또는 빈값
   cpu: string // resources.cpu (millicores, 1000=1코어)
   memoryMb: string // resources.memoryMb
@@ -229,13 +276,13 @@ export interface InstanceState {
   completionTimeout: string // service: front-door 완료 timeoutMs
   completionInterval: string // service: front-door 완료(poll) intervalMs
   targetExtensionRef: string // service: 브라우저 타깃 익스텐션 ref 핀
-  cmdEnv: string // command: env 오버레이(KEY=VALUE 줄바꿈)
+  cmdEnvRows: EnvRow[] // command: env 오버레이 — 리터럴 또는 시크릿 참조
   cmdParams: string // command: {{var}} 값(KEY=VALUE 줄바꿈)
 }
 
 const EMPTY_SERVICE_OVERRIDE: ServiceOverrideRow = {
   service: '',
-  env: '',
+  env: [],
   replicas: '',
   cpu: '',
   memoryMb: '',
@@ -271,7 +318,7 @@ export function buildOverrides(s: InstanceState): Record<string, unknown> | unde
     const name = r.service.trim()
     if (!name) continue
     const o: Record<string, unknown> = {}
-    const env = kvLines(r.env)
+    const env = envRowsToSpec(r.env)
     if (Object.keys(env).length) o.env = env
     if (r.replicas.trim()) o.replicas = Number(r.replicas)
     const resources: Record<string, number> = {}
@@ -302,7 +349,7 @@ export function buildOverrides(s: InstanceState): Record<string, unknown> | unde
   if (s.targetExtensionRef.trim())
     overrides.target = { extension: { ref: s.targetExtensionRef.trim() } }
   // command env/params
-  const cmdEnv = kvLines(s.cmdEnv)
+  const cmdEnv = envRowsToSpec(s.cmdEnvRows)
   if (Object.keys(cmdEnv).length) overrides.env = cmdEnv
   const cmdParams = kvLines(s.cmdParams)
   if (Object.keys(cmdParams).length) overrides.params = cmdParams
@@ -324,10 +371,10 @@ export function buildInstance(s: InstanceState): Record<string, unknown> {
 }
 
 export const INITIAL_TEMPLATE: TemplateState = {
-  kind: 'service',
-  category: 'topology',
+  kind: 'command',
+  category: 'cli-agent',
   id: '',
-  version: '1',
+  version: '1.0.0',
   services: [
     {
       name: 'agent-server',
@@ -336,7 +383,7 @@ export const INITIAL_TEMPLATE: TemplateState = {
       needs: '',
       perRun: '',
       replicas: '1',
-      env: '',
+      env: [],
       volumes: '',
       readinessTimeout: '',
       readinessInterval: '',
@@ -357,22 +404,22 @@ export const INITIAL_TEMPLATE: TemplateState = {
   setup: '',
   command: '',
   model: '',
-  envText: '',
+  envRows: [],
   cmdTraceKind: 'none',
   cmdTraceEndpoint: '',
 }
 
 export const INITIAL_INSTANCE: InstanceState = {
   templateId: '',
-  templateVersion: '1',
+  templateVersion: '1.0.0',
   version: '',
-  pins: [{ slot: 'agent-server', value: '' }],
+  pins: [{ slot: 'image', value: '' }],
   serviceOverrides: [],
   bodyTemplate: '',
   completionTimeout: '',
   completionInterval: '',
   targetExtensionRef: '',
-  cmdEnv: '',
+  cmdEnvRows: [],
   cmdParams: '',
 }
 
@@ -405,7 +452,7 @@ function serviceOverridesFromSpec(ov: Record<string, unknown>): ServiceOverrideR
     const rd = asObj(o.readiness) ?? {}
     return {
       service,
-      env: kvToLines(o.env),
+      env: envRowsFromSpec(o.env),
       replicas: numStr(o.replicas),
       cpu: numStr(res.cpu),
       memoryMb: numStr(res.memoryMb),
@@ -445,7 +492,7 @@ export function instanceStateFromSpec(
     completionTimeout: numStr(completion?.timeoutMs),
     completionInterval: numStr(completion?.intervalMs),
     targetExtensionRef: asStr(ext?.ref),
-    cmdEnv: kvToLines(ov.env),
+    cmdEnvRows: envRowsFromSpec(ov.env),
     cmdParams: kvToLines(ov.params),
   }
 }
