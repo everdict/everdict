@@ -49,8 +49,11 @@ logged-in web session over a minimal preload bridge.
 - Tests: Vitest on main-process **logic** with Electron injected as a dep (never `import "electron"`
   in a unit under test — pass `{ openExternal, safeStorage, … }` in, mirror `RunnerLoopDeps` style).
 - Packaging (`electron-builder`) is a separate `package` script, **not** part of turbo `build`
-  (gates must not download OS artifacts). Local dev: `pnpm -F @assay/desktop dev`
-  (`ASSAY_WEB_URL=http://localhost:3000` against a dev web).
+  (gates must not download OS artifacts). It bundles main/preload to single files first
+  (`esbuild.mjs`, `electron` external) so pnpm's symlinked `node_modules` never enters the asar;
+  the packaged entry is swapped via `extraMetadata.main` (dev keeps `dist/main.js`). Keep
+  `linux.executableName` path-safe (the package name `@assay/desktop` is not). Local dev:
+  `pnpm -F @assay/desktop dev` (`ASSAY_WEB_URL=http://localhost:3000` against a dev web).
 
 ## Checklist
 1. Read `docs/architecture/desktop-app.md` first; slice order is binding.

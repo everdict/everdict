@@ -1,0 +1,25 @@
+# 패키징(슬라이스 5) — 번들만 담는다(node_modules 미포함; esbuild.mjs 참고). 서명은 후속(현재 unsigned).
+appId: dev.assay.desktop
+productName: Assay
+directories:
+  output: release
+  buildResources: build
+files:
+  - bundle/**
+  - assets/**
+  - package.json
+extraMetadata:
+  main: bundle/main.js
+asar: true
+npmRebuild: false
+linux:
+  target:
+    - AppImage
+  executableName: assay-desktop
+  category: Development
+  icon: build/icon.png
+mac:
+  category: public.app-category.developer-tools
+win:
+  target:
+    - nsis

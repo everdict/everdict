@@ -169,9 +169,12 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    spam batches; click → focus window); web "이 기기" row prefers **live** capabilities from the
    bridge (+ "docker 없음 → service 하니스 불가" hint), so a docker daemon stopped after pairing
    shows immediately.
-5. **Packaging + live e2e** — 3-OS builds (linux first), signed artifacts, account-page download links;
-   live e2e: fresh machine → install → login → one-click pair → run a scorecard pinned to `self:<id>` →
-   result + provenance tag, all through the desktop.
+5. ◐ **Packaging + live e2e** — linux DONE: esbuild single-file bundle (main ESM + preload CJS,
+   `electron` external — avoids packing pnpm-symlinked `node_modules` into asar; `extraMetadata.main`
+   swaps the entry only in the package) + electron-builder AppImage (`pnpm -F @assay/desktop package`,
+   NOT in turbo gates), packaged binary smoke-verified. **Open**: signing, mac/win builds,
+   account-page download links, and the fresh-machine live e2e (install → login → one-click pair →
+   scorecard on `self:<id>` → result + provenance).
 
 ## Decisions / non-goals
 
