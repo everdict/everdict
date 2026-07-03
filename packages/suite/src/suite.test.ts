@@ -56,6 +56,22 @@ describe("runSuite", () => {
     // 성공 케이스는 정상 집계
     expect(caseVerdict(sc.results.find((r) => r.caseId === "b") ?? { scores: [] })).toBe(true);
   });
+
+  it("signal abort 후엔 남은 케이스를 발사하지 않는다(협조적 취소 — 이미 발사된 케이스는 완료돼 결과에 포함)", async () => {
+    // Given: 첫 케이스가 dispatch 되는 도중 abort 되는 배치(직렬 — concurrency 1 로 순서 고정)
+    const controller = new AbortController();
+    const dispatched: string[] = [];
+    const dispatch = async (job: AgentJob): Promise<CaseResult> => {
+      dispatched.push(job.evalCase.id);
+      controller.abort(); // 첫 케이스 실행 중 supersede 발생 시나리오
+      return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
+    };
+    // When: abort 시그널과 함께 돌리면
+    const sc = await runSuite(SUITE, "1.0.0", dispatch, { concurrency: 1, signal: controller.signal });
+    // Then: 두 번째 케이스는 발사되지 않고, 결과엔 완료된 첫 케이스만 남는다(빈 슬롯 없음)
+    expect(dispatched).toEqual(["a"]);
+    expect(sc.results.map((r) => r.caseId)).toEqual(["a"]);
+  });
 });
 
 describe("summarizeScorecard", () => {

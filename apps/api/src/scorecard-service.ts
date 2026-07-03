@@ -145,6 +145,9 @@ export class ScorecardService {
   private readonly concurrency: number;
   // 채점 관심사는 별도 서비스로 분리 — 라이브 배치와 ingest 가 동일 채점 로직을 공유(실행과 독립).
   private readonly scoring: ScoringService;
+  // in-flight 배치의 협조적 취소 핸들(supersede 용) — 단일 control-plane 프로세스 전제(in-process 랑데부와 동일).
+  // abort 는 "남은 케이스 미발사"까지만: 이미 발사된 백엔드 잡의 강제 kill 은 별개 문제(후속).
+  private readonly inFlight = new Map<string, AbortController>();
 
   constructor(private readonly deps: ScorecardServiceDeps) {
     this.newId = deps.newId ?? (() => crypto.randomUUID());
@@ -206,6 +209,12 @@ export class ScorecardService {
     const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
 
     await this.deps.store.create(record);
+    // 서버측 supersede — 같은 PR(origin.repo+prNumber) × 같은 (harness, dataset) 의 in-flight 배치를 회수하고
+    // 이번 발사로 대체한다. GH쪽 concurrency 는 "워크플로"만 취소하고 이미 제출된 배치는 서버에서 계속 돌기
+    // 때문(고아 평가의 환경/예산/러너 큐 점유 방지). merge/dev 발사(prNumber 없음)는 대상 아님.
+    if (origin?.repo && origin.prNumber !== undefined) {
+      await this.supersedeInFlight(input.tenant, origin.repo, origin.prNumber, input.harness.id, dataset.id, record.id);
+    }
     void this.track(
       record.id,
       input.tenant,
@@ -221,6 +230,33 @@ export class ScorecardService {
       input.concurrency ?? this.concurrency,
     );
     return record;
+  }
+
+  // 같은 (repo, PR, harness, dataset) 키의 queued/running 배치를 superseded 로 종결하고 abort 시그널을 보낸다.
+  // status/error 를 먼저 마킹(track 종결이 aborted 가드로 존중) + 남은 케이스 발사 중단. 이미 발사된 케이스는
+  // 자연 완료돼 자식 run 에 기록된다(강제 kill 아님). superseded 는 succeeded 가 아니므로 baseline/리더보드 무오염.
+  private async supersedeInFlight(
+    tenant: string,
+    repo: string,
+    prNumber: number,
+    harnessId: string,
+    datasetId: string,
+    newId: string,
+  ): Promise<void> {
+    const candidates: ScorecardRecord[] = [];
+    for (const status of ["queued", "running"] as const) {
+      candidates.push(...(await this.deps.store.list(tenant, { status, dataset: datasetId, harness: harnessId })));
+    }
+    for (const r of candidates) {
+      if (r.id === newId) continue;
+      if (r.origin?.repo?.toLowerCase() !== repo.toLowerCase() || r.origin?.prNumber !== prNumber) continue;
+      await this.deps.store.update(r.id, {
+        status: "superseded",
+        error: { code: "SUPERSEDED", message: `같은 PR 의 더 새 발사(${newId})로 대체됨` },
+        updatedAt: this.now(),
+      });
+      this.inFlight.get(r.id)?.abort(); // 남은 케이스 미발사(협조적) — track 이 부분 결과를 붙여 종결
+    }
   }
 
   // dispatched 스코어카드는 무거운 scorecard(케이스 결과)를 embed 하지 않고 runIds 만 저장(저장 dedup) →
@@ -392,6 +428,11 @@ export class ScorecardService {
     judge: JudgeRunConfig | undefined,
     concurrency: number, // 동시 디스패치할 케이스 수(요청 override→서비스 기본은 submit 에서 resolve).
   ): Promise<void> {
+    // supersede 가 이 배치를 이미 회수했으면 시작하지 않는다(queued→superseded 를 running 으로 되살리는 역행 방지).
+    if ((await this.deps.store.get(id))?.status === "superseded") return;
+    // 협조적 취소 핸들 등록 — supersedeInFlight 가 abort 하면 runSuite 가 남은 케이스를 발사하지 않는다.
+    const controller = new AbortController();
+    this.inFlight.set(id, controller);
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
     // 진행 과정(스텝) 타임라인 — run 이 진행되며 append + 증분 저장해 웹에서 "어디까지/무엇을" 하는지 보인다.
     const steps: ScorecardStep[] = [];
@@ -464,6 +505,7 @@ export class ScorecardService {
       // onResult: 케이스가 끝날 때마다(완료 순서) PASS/FAIL + 사유를 스텝으로 — "진행 과정"의 핵심.
       scorecard = await runSuite(suite, harnessVersion, dispatch, {
         concurrency,
+        signal: controller.signal, // supersede 시 남은 케이스 미발사(이미 발사된 케이스는 자연 완료)
         onResult: (r) => {
           const v = caseVerdict(r);
           const reason = caseReason(r);
@@ -479,6 +521,22 @@ export class ScorecardService {
       });
       pushStep("dispatch", "ok", `디스패치 완료 — ${scorecard.results.length}개 케이스`);
       await flushSteps();
+      // supersede 됨 — 더 새 발사가 이 배치를 회수. 남은 파이프라인(judge/offload/알림)을 생략하고
+      // 부분 결과만 붙여 superseded 로 종결한다(succeeded 가 아니므로 baseline/리더보드 무오염).
+      if (controller.signal.aborted) {
+        pushStep("supersede", "info", "같은 PR 의 더 새 발사로 대체됨 — 남은 케이스 미발사, 부분 결과만 보존");
+        const hasChildren = caseToChild.size > 0;
+        if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
+        await this.deps.store.update(id, {
+          status: "superseded",
+          ...(scorecard.results.length > 0 ? { summary: summarizeScorecard(scorecard) } : {}),
+          steps: [...steps],
+          ...(hasChildren ? { runIds: [...caseToChild.values()] } : { scorecard }),
+          updatedAt: this.now(),
+        });
+        this.inFlight.delete(id);
+        return; // 대체된 배치의 완료 알림은 소음 — 생략
+      }
       // runtime = 산출 run 의 배치 → judge 를 같은 런타임에 co-locate(관측물 옆에서 판정). ingest 경로엔 산출 run 없음.
       phase = "judges";
       if (judges.length > 0) {
@@ -505,7 +563,9 @@ export class ScorecardService {
       const hasChildren = caseToChild.size > 0;
       if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
       await this.deps.store.update(id, {
-        status: "succeeded",
+        // 파이프라인 도중(judge/offload) supersede 가 도착했으면 succeeded 로 되살리지 않는다 — 결과는 전부 붙지만
+        // 더 새 발사가 이 PR 의 정답이므로 superseded 로 종결(리더보드/baseline 은 새 것만 본다).
+        status: controller.signal.aborted ? "superseded" : "succeeded",
         summary,
         models,
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
@@ -525,7 +585,8 @@ export class ScorecardService {
       if (scorecard && hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
       const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
       await this.deps.store.update(id, {
-        status: "failed",
+        // supersede 이후의 실패는 실패로 보고하지 않는다(회수된 배치의 잔여 에러는 소음) — superseded 유지.
+        status: controller.signal.aborted ? "superseded" : "failed",
         error: { ...base, phase },
         steps: [...steps],
         ...(hasChildren ? { runIds: [...caseToChild.values()] } : {}),
@@ -539,8 +600,9 @@ export class ScorecardService {
         updatedAt: this.now(),
       });
     }
-    // 완료 알림(Mattermost 등) — 최신 레코드로. 실패는 스코어카드 결과 무관(swallow).
-    if (this.deps.onComplete) {
+    this.inFlight.delete(id);
+    // 완료 알림(Mattermost 등) — 최신 레코드로. 실패는 스코어카드 결과 무관(swallow). 대체된 배치는 알림 생략.
+    if (this.deps.onComplete && !controller.signal.aborted) {
       const rec = await this.deps.store.get(id);
       if (rec) await this.deps.onComplete(tenant, rec).catch(() => {});
     }

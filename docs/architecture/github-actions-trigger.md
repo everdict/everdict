@@ -10,8 +10,17 @@
 > S3 `2cc8b7f` (backend) + web slice — `CiLinkService` (links CRUD = trust, repos picker proxy, setup-PR
 > generator `renderCiWorkflow`) + routes/MCP ×5 + web: harness-detail "CI 연동" panel + connect-repo dialog
 > (connection→repo picker→slots→dataset→save→setup-PR), settings "CI 연동" tab, scorecard origin chips.
-> **Open:** live E2E vs real GitHub; server-side supersede; GitHub App (S4, demand-driven); personal-runner
-> `allowCi` gate; Track B pull-secrets for private GHCR.
+> **Server-side supersede — SHIPPED.** A new submit with the same `(origin.repo, prNumber, harness, dataset)`
+> key reclaims in-flight (queued/running) batches: marks them `superseded` (new scorecard status; neither
+> succeeded nor failed — invisible to baseline/diff/leaderboard) with `error.code=SUPERSEDED`, and aborts them
+> cooperatively (`runSuite` `signal` — remaining cases are never dispatched; already-dispatched cases drain
+> naturally into child runs, partial results preserved, completion notification skipped). GH-side workflow
+> `concurrency` cancels only the *workflow*; this reclaims the already-submitted batch (orphan-eval fix).
+> Merge/dev fires (no `prNumber`) are never superseded. Limits: cooperative only (no backend job kill);
+> single-control-plane-process assumption (in-memory AbortController map, same as the callback rendezvous).
+>
+> **Open:** live E2E vs real GitHub; GitHub App (S4, demand-driven); personal-runner
+> `allowCi` gate; Track B pull-secrets for private GHCR; backend job force-kill for superseded in-flight cases.
 >
 > Direction locked with the user (2026-07-03):
 > **(1) Action-as-client, not webhook-receiver** — a first-party GitHub Action calls the Assay API outbound;

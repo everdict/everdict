@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 // 컨트롤플레인 ScorecardRecord 의 클라이언트 미러. 웹은 HTTP 로만 결합 — 백엔드 패키지 비의존.
-export const scorecardStatusSchema = z.enum(['queued', 'running', 'succeeded', 'failed'])
+export const scorecardStatusSchema = z.enum(['queued', 'running', 'succeeded', 'failed', 'superseded'])
 export type ScorecardStatus = z.infer<typeof scorecardStatusSchema>
 
 // 메트릭별 집계(목록/상세 공통).

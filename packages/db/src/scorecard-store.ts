@@ -1,8 +1,10 @@
 import { ScorecardSchema } from "@assay/core";
 import { z } from "zod";
 
-// 스코어카드 run 의 수명: 데이터셋×하니스 배치 평가 접수 → 실행 → 성공/실패. 스토어가 이 레코드를 보관한다.
-export const ScorecardStatusSchema = z.enum(["queued", "running", "succeeded", "failed"]);
+// 스코어카드 run 의 수명: 데이터셋×하니스 배치 평가 접수 → 실행 → 성공/실패.
+// superseded = 같은 (origin.repo, prNumber, harness, dataset) 의 더 새 발사가 이 배치를 회수(취소·대체)한 종결 —
+// 실패도 성공도 아니라 baseline/diff/리더보드(succeeded 만)에 안 잡힌다. 스토어가 이 레코드를 보관한다.
+export const ScorecardStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "superseded"]);
 export type ScorecardStatus = z.infer<typeof ScorecardStatusSchema>;
 
 // phase = 실패한 파이프라인 구간(dispatch|judges|metrics|offload|persist) — "어떤 구간에서" 진단용(jsonb 라 마이그레이션 불요).

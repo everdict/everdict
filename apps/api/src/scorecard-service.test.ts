@@ -780,3 +780,110 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
     expect(rec.origin).toEqual({ source: "schedule" });
   });
 });
+
+describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가 in-flight 배치를 회수)", () => {
+  const twoCaseDataset: Dataset = {
+    id: "sd",
+    version: "1.0.0",
+    cases: [
+      { id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+      { id: "c2", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    ],
+    tags: [],
+  };
+  // 게이트 dispatcher — 발사 순간을 기록하고, release() 전까지 결과를 보류한다(배치를 "실행 중"에 세워두기 위함).
+  function gatedDispatcher() {
+    const dispatched: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        dispatched.push(job.evalCase.id);
+        await gate;
+        return { ...caseResult(true), caseId: job.evalCase.id };
+      },
+    };
+    return { dispatcher, dispatched, release: () => release() };
+  }
+  const until = async (cond: () => boolean | Promise<boolean>): Promise<void> => {
+    for (let i = 0; i < 100; i++) {
+      if (await cond()) return;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    throw new Error("condition not met");
+  };
+
+  it("같은 (repo,PR,harness,dataset) 재발사 → 이전 배치 superseded(남은 케이스 미발사·부분 결과 보존·알림 생략)", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", twoCaseDataset);
+    const gate = gatedDispatcher();
+    const completions: string[] = [];
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: gate.dispatcher,
+      store,
+      datasets,
+      concurrency: 1, // 직렬 — c1 이 게이트에 걸린 동안 c2 는 미발사 상태로 남는다
+      newId: () => `sup-${n++}`,
+      onComplete: async (_tenant, rec) => {
+        completions.push(rec.id);
+      },
+    });
+    const base = {
+      tenant: "acme",
+      dataset: { id: "sd", version: "latest" },
+      harness: { id: "scripted", version: "0" },
+    };
+    const origin = { source: "github-actions", repo: "acme/app", prNumber: 7 };
+
+    const first = await service.submit({ ...base, origin: { ...origin, sha: "old" } });
+    await until(() => gate.dispatched.length === 1); // c1 발사됨(게이트에 블록)
+
+    const second = await service.submit({ ...base, origin: { ...origin, sha: "new" } });
+    // 제출 시점에 이전 배치가 즉시 회수된다(202 응답 이전 — supersede 는 submit 안에서 await).
+    const supersededNow = await store.get(first.id);
+    expect(supersededNow?.status).toBe("superseded");
+    expect(supersededNow?.error?.code).toBe("SUPERSEDED");
+
+    gate.release();
+    await until(async () => (await store.get(second.id))?.status === "succeeded");
+    await until(async () => (await store.get(first.id))?.scorecard !== undefined); // 첫 배치 종결 대기
+
+    const finalFirst = await store.get(first.id);
+    expect(finalFirst?.status).toBe("superseded"); // track 종결이 succeeded 로 되살리지 않는다
+    expect(finalFirst?.scorecard?.results.map((r) => r.caseId)).toEqual(["c1"]); // 부분 결과(발사된 것만) 보존
+    // 남은 케이스(c2)는 첫 배치에서 발사되지 않았다 — 총 발사 = 첫 배치 c1 + 둘째 배치 c1,c2.
+    expect(gate.dispatched).toHaveLength(3);
+    expect(completions).toEqual([second.id]); // 대체된 배치는 완료 알림 생략
+  });
+
+  it("prNumber 없음(merge/dev) 또는 다른 PR 번호의 발사는 supersede 하지 않는다", async () => {
+    const store = new InMemoryScorecardStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", twoCaseDataset);
+    const gate = gatedDispatcher();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: gate.dispatcher,
+      store,
+      datasets,
+      concurrency: 2,
+      newId: () => `keep-${n++}`,
+    });
+    const base = {
+      tenant: "acme",
+      dataset: { id: "sd", version: "latest" },
+      harness: { id: "scripted", version: "0" },
+    };
+    const pr7 = await service.submit({ ...base, origin: { source: "github-actions", repo: "acme/app", prNumber: 7 } });
+    await until(() => gate.dispatched.length >= 1);
+    await service.submit({ ...base, origin: { source: "github-actions", repo: "acme/app" } }); // merge — prNumber 없음
+    await service.submit({ ...base, origin: { source: "github-actions", repo: "acme/app", prNumber: 8 } }); // 다른 PR
+    expect((await store.get(pr7.id))?.status).toBe("running"); // 회수되지 않음
+    gate.release();
+    await until(async () => (await store.get(pr7.id))?.status === "succeeded"); // 정상 완료
+  });
+});
