@@ -228,6 +228,7 @@ describe("MCP tools", () => {
       "list_workspace_integrations",
       "list_workspace_runners",
       "pair_runner",
+      "pin_harness_images",
       "probe_runtime",
       "pull_scorecard",
       "register_harness",

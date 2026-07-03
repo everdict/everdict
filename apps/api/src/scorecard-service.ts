@@ -15,7 +15,7 @@ import {
   type Suite,
   TraceEventSchema,
 } from "@assay/core";
-import type { RunStore, ScorecardRecord, ScorecardStep, ScorecardStore } from "@assay/db";
+import type { RunStore, ScorecardOrigin, ScorecardRecord, ScorecardStep, ScorecardStore } from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
 import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry, MetricRegistry } from "@assay/registry";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
@@ -68,7 +68,7 @@ export const IngestScorecardBodySchema = z.object({
   metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
 });
 export type IngestScorecardBody = z.infer<typeof IngestScorecardBodySchema>;
-export type IngestScorecardInput = IngestScorecardBody & { tenant: string };
+export type IngestScorecardInput = IngestScorecardBody & { tenant: string; origin?: ScorecardOrigin };
 
 // pull 인제스트 본문 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 채점(하니스 미실행).
 // source 자격증명은 authSecret 이름(SecretStore)으로만 — spec 에 평문 토큰 금지.
@@ -85,7 +85,15 @@ export const PullIngestBodySchema = z.object({
   metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
 });
 export type PullIngestBody = z.infer<typeof PullIngestBodySchema>;
-export type PullIngestInput = PullIngestBody & { tenant: string };
+export type PullIngestInput = PullIngestBody & { tenant: string; origin?: ScorecardOrigin };
+
+// principal.via → origin.source 매핑 — 제출 경로 provenance(어디서 발사됐나).
+// oidc=사람(web UI 토큰), github-actions=CI OIDC 페더레이션, 그 외(api-key/runner)=api. 스케줄 발사는 "schedule" 을 직접 스탬프.
+export function originSource(via: string): string {
+  if (via === "oidc") return "web";
+  if (via === "github-actions") return "github-actions";
+  return "api";
+}
 
 export interface RunScorecardInput {
   tenant: string;
@@ -93,7 +101,10 @@ export interface RunScorecardInput {
   // 결과적으로 비공개-repo 데이터셋은 사실상 단일 소유(케이스의 connectionId 는 그 소유자가 제출할 때만 resolve).
   submittedBy?: string;
   dataset: { id: string; version: string };
-  harness: { id: string; version: string };
+  // pins = 제출 시점 임시 핀 오버라이드(슬롯→이미지, 레지스트리 무변경) — CI PR 발사가 한 서비스 이미지만 스왑해 평가.
+  // 기록은 origin.pinOverrides 로(재현 근거). durable 한 변경은 POST /harnesses/:id/pins(새 인스턴스 버전)로.
+  harness: { id: string; version: string; pins?: Record<string, string> };
+  origin?: ScorecardOrigin; // 트리거 출처(provenance) — 라우트/스케줄이 source 를 스탬프
   judges?: Array<{ id: string; version: string }>; // 선택한 Agent Judge 들 — 트레이스에 적용
   metrics?: Array<{ id: string; version: string }>; // 선택한 등록 Metric 들 — 결과 scores 위에 post-hoc 적용
   runtime?: string; // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
@@ -155,9 +166,21 @@ export class ScorecardService {
     const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
 
     // 하니스 버전 해석(latest→구체) + 선언형 spec 임베드. 빌트인(scripted/claude-code)은 레지스트리에 없음 → as-given.
+    // 제출 시점 임시 핀(pins)이 있으면 폴백 없이 resolveWithPins — 핀을 조용히 무시한 채 평가가 통과하면 안 된다.
+    const pins = input.harness.pins && Object.keys(input.harness.pins).length > 0 ? input.harness.pins : undefined;
     let harnessVersion = input.harness.version || "latest";
     let harnessSpec: HarnessSpec | undefined;
-    if (this.deps.harnesses) {
+    if (pins) {
+      if (!this.deps.harnesses)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { harness: input.harness.id },
+          "핀 오버라이드(pins)는 레지스트리에 등록된 하니스에서만 가능합니다.",
+        );
+      const spec = await this.deps.harnesses.resolveWithPins(input.tenant, input.harness.id, harnessVersion, pins);
+      harnessVersion = spec.version; // 기반 인스턴스의 구체 버전(임시 핀은 버전을 만들지 않는다)
+      harnessSpec = spec;
+    } else if (this.deps.harnesses) {
       try {
         const spec = await this.deps.harnesses.get(input.tenant, input.harness.id, harnessVersion);
         harnessVersion = spec.version;
@@ -167,6 +190,12 @@ export class ScorecardService {
       }
     }
 
+    // provenance: 호출부가 준 origin 에 임시 핀 기록을 얹는다. 핀만 있고 origin 이 없어도 기록은 남긴다(재현 근거).
+    const origin: ScorecardOrigin | undefined =
+      input.origin || pins
+        ? { source: input.origin?.source ?? "api", ...(input.origin ?? {}), ...(pins ? { pinOverrides: pins } : {}) }
+        : undefined;
+
     const ts = this.now();
     const record: ScorecardRecord = {
       id: this.newId(),
@@ -174,6 +203,7 @@ export class ScorecardService {
       dataset: { id: dataset.id, version: dataset.version },
       harness: { id: input.harness.id, version: harnessVersion }, // 해석된 구체 버전(never "latest")
       status: "queued",
+      ...(origin ? { origin } : {}),
       createdAt: ts,
       updatedAt: ts,
     };
@@ -227,6 +257,7 @@ export class ScorecardService {
       dataset: { id: dataset.id, version: dataset.version },
       harness: { id: input.harness.id, version: harnessVersion }, // 트레이스를 만든 하니스(라벨)
       status: "queued",
+      ...(input.origin ? { origin: input.origin } : {}),
       createdAt: ts,
       updatedAt: ts,
     };
@@ -254,6 +285,7 @@ export class ScorecardService {
       dataset: { id: dataset.id, version: dataset.version },
       harness: { id: input.harness.id, version: harnessVersion }, // 트레이스를 만든 하니스(라벨)
       status: "queued",
+      ...(input.origin ? { origin: input.origin } : {}),
       createdAt: ts,
       updatedAt: ts,
     };

@@ -40,6 +40,7 @@ import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkSe
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
+import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
 import type { ProfileService } from "./profile-service.js";
@@ -48,7 +49,12 @@ import type { RunnerHub } from "./runner-hub.js";
 import { PairRunnerBodySchema, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { type ScheduleService, isValidCron } from "./schedule-service.js";
-import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
+import {
+  IngestScorecardBodySchema,
+  PullIngestBodySchema,
+  type ScorecardService,
+  originSource,
+} from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
 export const SubmitBodySchema = z.object({
@@ -61,10 +67,25 @@ export const SubmitBodySchema = z.object({
   judge: JudgeRunConfigSchema.optional(), // 이 요청만 judge 모델 override(미지정이면 워크스페이스 기본)
 });
 
+// 제출자가 첨부하는 출처 좌표(커밋/PR/CI run) — origin.source 는 서버가 principal.via 로 결정(클라이언트가 위조 불가).
+export const ScorecardOriginBodySchema = z.object({
+  repo: z.string().optional(), // "owner/name"
+  sha: z.string().optional(),
+  ref: z.string().optional(),
+  prNumber: z.number().int().optional(),
+  runUrl: z.string().optional(),
+});
+
 // 스코어카드 실행 본문 — 데이터셋×하니스(버전 기본 latest, 서비스가 구체 버전으로 해석) + 선택한 judge 들.
+// harness.pins = 제출 시점 임시 핀(슬롯→이미지, 레지스트리 무변경) — CI PR 발사가 한 서비스 이미지만 스왑해 평가.
 export const RunScorecardBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
-  harness: z.object({ id: z.string(), version: z.string().default("latest") }),
+  harness: z.object({
+    id: z.string(),
+    version: z.string().default("latest"),
+    pins: z.record(z.string()).optional(),
+  }),
+  origin: ScorecardOriginBodySchema.optional(),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
@@ -728,6 +749,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // durable 재핀(headless re-pin) — 기준 인스턴스 pins 에 병합해 새 버전 등록(웹 "새 버전 만들기"와 동일 의미).
+  // CI(dev/main 머지)가 자기 서비스 슬롯만 갈아끼우는 경로. digest 핀 강제(기본), 멱등(동일 핀 → unchanged).
+  app.post<{ Params: { id: string } }>("/harnesses/:id/pins", async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = RepinBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      gate(principal, "harnesses:register"); // 인스턴스 등록과 동일 게이트(무게이트 viewer+; CI role 도 보유)
+      const result = await repinHarnessImages(
+        deps.harnessInstances,
+        principal.workspace,
+        principal.subject,
+        req.params.id,
+        parsed.data,
+      );
+      return reply.code(result.unchanged ? 200 : 201).send(result);
+    } catch (err) {
+      return sendError(reply, err); // 기준 없음 404 / tag 핀·미지 슬롯 400 / 버전 불변 409
+    }
+  });
+
   // --- datasets (workspace-owned SSOT, 하니스 무관 eval 케이스 묶음) ---
   app.post("/datasets", async (req, reply) => {
     if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
@@ -1340,11 +1385,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       // 데이터셋 없으면 NotFoundError → 404. 통과하면 202 + queued 레코드(배치는 백그라운드).
       // submittedBy=subject → 비공개 repo 케이스를 제출자의 개인 연결로 clone.
-      return reply
-        .code(202)
-        .send(
-          await deps.scorecardService.submit({ tenant: principal.workspace, submittedBy: principal.subject, ...body }),
-        );
+      // origin.source 는 서버가 결정(via 매핑) — 클라이언트 좌표(repo/sha/…)만 body 에서 받는다.
+      return reply.code(202).send(
+        await deps.scorecardService.submit({
+          tenant: principal.workspace,
+          submittedBy: principal.subject,
+          ...body,
+          origin: { source: originSource(principal.via), ...(body.origin ?? {}) },
+        }),
+      );
     } catch (err) {
       return sendError(reply, err);
     }
@@ -1458,7 +1507,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const parsed = IngestScorecardBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      return reply.code(202).send(await deps.scorecardService.ingest({ tenant: principal.workspace, ...parsed.data }));
+      return reply.code(202).send(
+        await deps.scorecardService.ingest({
+          tenant: principal.workspace,
+          ...parsed.data,
+          origin: { source: originSource(principal.via) },
+        }),
+      );
     } catch (err) {
       return sendError(reply, err); // 데이터셋 없으면 404
     }
@@ -1477,9 +1532,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const parsed = PullIngestBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      return reply
-        .code(202)
-        .send(await deps.scorecardService.ingestPull({ tenant: principal.workspace, ...parsed.data }));
+      return reply.code(202).send(
+        await deps.scorecardService.ingestPull({
+          tenant: principal.workspace,
+          ...parsed.data,
+          origin: { source: originSource(principal.via) },
+        }),
+      );
     } catch (err) {
       return sendError(reply, err); // 데이터셋 없으면 404
     }

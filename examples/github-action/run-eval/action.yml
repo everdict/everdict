@@ -1,0 +1,61 @@
+name: "Assay Run Eval"
+description: >-
+  Fire an Assay evaluation from CI. Pull requests run the topology with this build's image
+  swapped in (ephemeral pins — registry untouched); pushes to dev/main re-pin the harness
+  to a new immutable version (the "dev channel") and evaluate it.
+author: "assay"
+
+inputs:
+  api-url:
+    description: "Assay control-plane base URL (e.g. https://assay.example.com)"
+    required: true
+  workspace:
+    description: "Workspace slug (x-assay-workspace)"
+    required: true
+  api-key:
+    description: "Workspace API key (ak_…). Omit to use GitHub OIDC federation (keyless; requires a repo link in the workspace)"
+    required: false
+  harness:
+    description: "Harness instance id"
+    required: true
+  dataset:
+    description: "Dataset id"
+    required: true
+  images:
+    description: 'JSON map of service slot → image ref, e.g. {"svc-x":"ghcr.io/acme/svc-x@sha256:…"}. PR: ephemeral pins. Push: durable re-pin.'
+    required: false
+  mode:
+    description: "auto | pr | push (auto derives from the GitHub event)"
+    required: false
+    default: "auto"
+  version:
+    description: "Instance version for push re-pin (default dev-<short-sha>)"
+    required: false
+  runtime:
+    description: "Workspace Runtime id to run on (e.g. self:<runner-id>)"
+    required: false
+  judges:
+    description: 'JSON array of judges, e.g. [{"id":"code-judge"}]'
+    required: false
+  baseline:
+    description: "Baseline scorecard id (default: latest succeeded scorecard of the same dataset×harness)"
+    required: false
+  fail-on-regression:
+    description: "Fail the job when the diff vs baseline has regressions (default true on PR, false on push)"
+    required: false
+  timeout-minutes:
+    description: "Max minutes to wait for the scorecard to finish"
+    required: false
+    default: "30"
+
+outputs:
+  scorecard-id:
+    description: "The created scorecard id"
+  status:
+    description: "Terminal scorecard status (succeeded | failed)"
+  regressions:
+    description: "Number of regressions vs baseline (empty when no baseline)"
+
+runs:
+  using: "node20"
+  main: "run-eval.mjs"

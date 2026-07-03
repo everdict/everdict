@@ -6,7 +6,12 @@ import {
   resolveHarnessInstance,
 } from "@assay/core";
 import type { SqlClient } from "@assay/db";
-import { type HarnessInstanceRegistry, type HarnessListEntry, enrichHarnessList } from "./harness-instance-registry.js";
+import {
+  type HarnessInstanceRegistry,
+  type HarnessListEntry,
+  enrichHarnessList,
+  resolveInstanceWithPins,
+} from "./harness-instance-registry.js";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
 import { PgVersionedStore } from "./pg-versioned-store.js";
 import { asService } from "./registry.js";
@@ -39,6 +44,16 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
     const instance = await this.store.get(tenant, id, ref);
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
     return resolveHarnessInstance(template, instance);
+  }
+  async resolveWithPins(
+    tenant: string,
+    id: string,
+    ref: string | undefined,
+    pins: Record<string, string>,
+  ): Promise<HarnessSpec> {
+    const instance = await this.store.get(tenant, id, ref);
+    const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
+    return resolveInstanceWithPins(template, instance, pins);
   }
   async getService(tenant: string, id: string, ref?: string): Promise<ServiceHarnessSpec> {
     return asService(await this.get(tenant, id, ref), id);

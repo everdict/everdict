@@ -13,12 +13,14 @@ export {
   type ScorecardStep,
   type MetricSummary,
   type ScorecardModels,
+  type ScorecardOrigin,
   type ScorecardListFilter,
   ScorecardRecordSchema,
   ScorecardStatusSchema,
   ScorecardStepSchema,
   MetricSummarySchema,
   ScorecardModelsSchema,
+  ScorecardOriginSchema,
   InMemoryScorecardStore,
 } from "./scorecard-store.js";
 export {

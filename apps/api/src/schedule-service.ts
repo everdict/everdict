@@ -196,6 +196,7 @@ export class ScheduleService {
     const rec = await this.deps.submitScorecard({
       tenant,
       submittedBy: schedule.createdBy, // 발사 run = 생성자 신원(예산 → tenant, 비공개-repo 연결 resolve)
+      origin: { source: "schedule" }, // provenance — 스케줄 발사임을 스탬프
       dataset: t.dataset,
       harness: t.harness,
       judges: t.judges,

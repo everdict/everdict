@@ -65,11 +65,7 @@ export function resolveInstanceWithPins(
   const known = new Set(templateSlots(template));
   for (const slot of Object.keys(pins)) {
     if (!known.has(slot)) {
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { slot, known: [...known] },
-        `핀 슬롯 '${slot}' 가 템플릿에 없습니다.`,
-      );
+      throw new BadRequestError("BAD_REQUEST", { slot, known: [...known] }, `핀 슬롯 '${slot}' 가 템플릿에 없습니다.`);
     }
   }
   return resolveHarnessInstance(template, { ...instance, pins: { ...instance.pins, ...pins } });
@@ -84,7 +80,12 @@ export interface HarnessInstanceRegistry {
   getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec>;
   get(tenant: string, id: string, ref?: string): Promise<HarnessSpec>; // resolved (template + pins)
   // resolved + 제출 시점 임시 핀(레지스트리 무변경) — CI PR 발사가 한 서비스 이미지만 스왑해 평가할 때.
-  resolveWithPins(tenant: string, id: string, ref: string | undefined, pins: Record<string, string>): Promise<HarnessSpec>;
+  resolveWithPins(
+    tenant: string,
+    id: string,
+    ref: string | undefined,
+    pins: Record<string, string>,
+  ): Promise<HarnessSpec>;
   getService(tenant: string, id: string, ref?: string): Promise<ServiceHarnessSpec>;
   versions(tenant: string, id: string): Promise<string[]>;
   list(tenant: string): Promise<HarnessListEntry[]>;

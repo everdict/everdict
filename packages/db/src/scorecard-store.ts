@@ -30,6 +30,20 @@ export const ScorecardModelsSchema = z.object({
 });
 export type ScorecardModels = z.infer<typeof ScorecardModelsSchema>;
 
+// 이 스코어카드 run 의 트리거 출처(provenance) — 어디서 발사됐나(schedule|github-actions|api|web…) + 커밋 좌표.
+// GitHub Actions PR 발사는 제출 시점 임시 핀(pinOverrides: 슬롯→이미지)을 여기 기록한다 — 레지스트리는 무변경이므로
+// "무엇으로 평가했나"의 재현 근거가 이 필드다. 경량 → 목록(list)에도 포함. Pg 는 origin jsonb(mig 0033, additive).
+export const ScorecardOriginSchema = z.object({
+  source: z.string(), // schedule|github-actions|api|web…
+  repo: z.string().optional(), // "owner/name"
+  sha: z.string().optional(),
+  ref: z.string().optional(), // refs/heads/… | refs/pull/…
+  prNumber: z.number().int().optional(),
+  runUrl: z.string().optional(), // CI run 링크
+  pinOverrides: z.record(z.string()).optional(), // 제출 시점 임시 핀(슬롯→이미지) — PR 이미지 스왑 기록
+});
+export type ScorecardOrigin = z.infer<typeof ScorecardOriginSchema>;
+
 // 실행 과정 스텝(타임라인) — "진행 과정"을 보이기 위해 run 이 진행되며 append 된다(증분 저장).
 // phase = dispatch|judges|metrics|offload|persist|case, status = started|ok|failed|info.
 // Pg 는 steps jsonb 컬럼(mig 0026, additive). 무거운 detail 이라 목록(list)에선 생략하고 get 에서만 돌려준다.
@@ -53,6 +67,7 @@ export const ScorecardRecordSchema = z.object({
   // 이 run 을 채점한 judge 모델(들) — model 축이 '하니스가 쓴 LLM'이라면 이건 '채점자'. 공정 비교(같은 judge)용
   // 필터/표시. inline judge config.model + 등록 model-judge spec.model 의 distinct. 경량 → 목록에도 포함.
   judgeModels: z.array(z.string()).optional(),
+  origin: ScorecardOriginSchema.optional(), // 트리거 출처(provenance) — 경량이라 목록에도 포함. 과거 레코드는 미설정.
   scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)

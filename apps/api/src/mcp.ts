@@ -28,6 +28,7 @@ import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkSe
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
+import { repinHarnessImages } from "./harness-pin-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
@@ -35,7 +36,12 @@ import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
 import { RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import type { ScheduleService, UpdateScheduleInput } from "./schedule-service.js";
-import { IngestScorecardBodySchema, PullIngestBodySchema, type ScorecardService } from "./scorecard-service.js";
+import {
+  IngestScorecardBodySchema,
+  PullIngestBodySchema,
+  type ScorecardService,
+  originSource,
+} from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
 // MCP 도구 표면 — HTTP 라우트와 같은 서비스 코어를 공유하는 "에이전트용 트랜스포트".
@@ -239,6 +245,32 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           await instances.register(ws, result.data); // resolve 검증(템플릿 없음/핀 누락 → 오류)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
+    );
+
+    server.registerTool(
+      "pin_harness_images",
+      {
+        description:
+          "하네스 인스턴스 durable 재핀(headless re-pin) — 기준 버전 pins 에 병합해 새 버전 등록. CI(dev/main 머지)가 자기 서비스 슬롯만 갈아끼우는 경로. digest 핀 강제(기본), 멱등(동일 핀 → unchanged)",
+        inputSchema: {
+          id: z.string(),
+          pins: z.record(z.string()).describe("슬롯→이미지 ref(@sha256:… digest 권장)"),
+          version: z.string().optional().describe('명시 버전(예: "dev-<sha>"). 미지정이면 자동 bump'),
+          base: z.string().optional().describe("기준 인스턴스 버전(기본 latest)"),
+          allow_tags: z.boolean().optional().describe("digest 강제 해제(기본 false — tag 핀은 재현성 깨짐)"),
+        },
+      },
+      ({ id, pins, version, base, allow_tags }) =>
+        run(principal, "harnesses:register", async () =>
+          ok(
+            await repinHarnessImages(instances, ws, principal.subject, id, {
+              pins,
+              ...(version !== undefined ? { version } : {}),
+              ...(base !== undefined ? { base } : {}),
+              allowTags: allow_tags ?? false,
+            }),
+          ),
+        ),
     );
   }
 
@@ -611,6 +643,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           dataset_version: z.string().optional(),
           harness_id: z.string(),
           harness_version: z.string().optional(),
+          harness_pins: z
+            .record(z.string())
+            .optional()
+            .describe("제출 시점 임시 핀(슬롯→이미지, 레지스트리 무변경) — CI PR 이미지 스왑용. origin 에 기록됨"),
           judges: z
             .array(z.object({ id: z.string(), version: z.string().optional() }))
             .optional()
@@ -622,16 +658,31 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .max(64)
             .optional()
             .describe("배치 내 동시 디스패치 케이스 수(병렬도). 미지정이면 서비스 기본(=4)"),
+          origin: z
+            .object({
+              repo: z.string().optional(),
+              sha: z.string().optional(),
+              ref: z.string().optional(),
+              prNumber: z.number().int().optional(),
+              runUrl: z.string().optional(),
+            })
+            .optional()
+            .describe("출처 좌표(커밋/PR/CI run) — source 는 서버가 결정"),
         },
       },
-      ({ dataset_id, dataset_version, harness_id, harness_version, judges, concurrency }) =>
+      ({ dataset_id, dataset_version, harness_id, harness_version, harness_pins, judges, concurrency, origin }) =>
         run(principal, "scorecards:run", async () =>
           ok(
             await scorecards.submit({
               tenant: ws,
               submittedBy: principal.subject, // 비공개 repo 케이스를 내 개인 연결로 clone
               dataset: { id: dataset_id, version: dataset_version ?? "latest" },
-              harness: { id: harness_id, version: harness_version ?? "latest" },
+              harness: {
+                id: harness_id,
+                version: harness_version ?? "latest",
+                ...(harness_pins ? { pins: harness_pins } : {}),
+              },
+              origin: { source: originSource(principal.via), ...(origin ?? {}) },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
               ...(concurrency !== undefined ? { concurrency } : {}),
             }),

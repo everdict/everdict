@@ -97,3 +97,28 @@ describe("HarnessInstanceRegistry", () => {
     expect(list[0]?.createdBy).toBe("user-carol"); // 최초 등록 버전의 subject
   });
 });
+
+describe("resolveWithPins — 제출 시점 임시 핀(레지스트리 무변경)", () => {
+  let templates: InMemoryHarnessTemplateRegistry;
+  let instances: InMemoryHarnessInstanceRegistry;
+  beforeEach(async () => {
+    templates = new InMemoryHarnessTemplateRegistry();
+    instances = new InMemoryHarnessInstanceRegistry(templates);
+    await templates.register("acme", buTemplate);
+    await instances.register("acme", instance("v1", { planner: "p:1", browser: "b:1" }));
+  });
+
+  it("인스턴스 pins 위에 임시 핀을 병합해 resolve 하고, 저장된 버전/핀은 그대로다", async () => {
+    const resolved = await instances.resolveWithPins("acme", "bu", "v1", { planner: "p:pr-7" });
+    if (resolved.kind !== "service") throw new Error("expected service");
+    expect(resolved.services.map((s) => s.image)).toEqual(["p:pr-7", "b:1"]); // planner 만 스왑
+    expect(await instances.versions("acme", "bu")).toEqual(["v1"]); // 새 버전 없음(레지스트리 무변경)
+    const stored = await instances.get("acme", "bu", "v1");
+    if (stored.kind !== "service") throw new Error("expected service");
+    expect(stored.services.map((s) => s.image)).toEqual(["p:1", "b:1"]); // 저장본 원본 그대로
+  });
+
+  it("알 수 없는 슬롯 핀 → BadRequestError (오타를 조용히 무시하면 PR 이미지가 안 갈린 채 통과한다)", async () => {
+    await expect(instances.resolveWithPins("acme", "bu", "v1", { nope: "x" })).rejects.toBeInstanceOf(BadRequestError);
+  });
+});
