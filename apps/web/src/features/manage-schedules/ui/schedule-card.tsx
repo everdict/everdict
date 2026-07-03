@@ -1,15 +1,16 @@
 'use client'
 
 import Link from 'next/link'
-import { Server } from 'lucide-react'
+import { useRouter } from 'next/navigation'
+import { MoreHorizontal, Pause, Pencil, Play, Server, Trash2 } from 'lucide-react'
 
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { Avatar } from '@/shared/ui/avatar'
 import { Badge } from '@/shared/ui/badge'
-import { Button, buttonVariants } from '@/shared/ui/button'
 import { EntityRef } from '@/shared/ui/chip'
+import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 
 export type Author = { name: string; avatarUrl?: string }
 
@@ -83,6 +84,7 @@ export function ScheduleCard({
   onToggle: (s: Schedule) => void
   onDelete: (s: Schedule) => void
 }) {
+  const router = useRouter()
   return (
     <div className="grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg border bg-card p-3.5 shadow-raise">
       <div className="min-w-0 space-y-1.5">
@@ -135,22 +137,37 @@ export function ScheduleCard({
         </div>
       </div>
       {canWrite ? (
-        <div className="flex shrink-0 gap-2">
+        <DropdownMenu
+          align="end"
+          trigger={({ open, toggle }) => (
+            <button
+              type="button"
+              onClick={toggle}
+              disabled={pending}
+              aria-label="예약 작업"
+              aria-expanded={open}
+              className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+            >
+              <MoreHorizontal className="size-4" />
+            </button>
+          )}
+        >
           {canEdit ? (
-            <Link
-              href={`/${workspace}/schedules/${encodeURIComponent(s.id)}/edit`}
-              className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+            <DropdownItem
+              icon={<Pencil />}
+              onSelect={() => router.push(`/${workspace}/schedules/${encodeURIComponent(s.id)}/edit`)}
             >
               수정
-            </Link>
+            </DropdownItem>
           ) : null}
-          <Button size="sm" variant="ghost" disabled={pending} onClick={() => onToggle(s)}>
+          <DropdownItem icon={s.enabled ? <Pause /> : <Play />} onSelect={() => onToggle(s)}>
             {s.enabled ? '일시중지' : '재개'}
-          </Button>
-          <Button size="sm" variant="ghost" disabled={pending} onClick={() => onDelete(s)}>
+          </DropdownItem>
+          <DropdownSeparator />
+          <DropdownItem icon={<Trash2 />} tone="danger" onSelect={() => onDelete(s)}>
             삭제
-          </Button>
-        </div>
+          </DropdownItem>
+        </DropdownMenu>
       ) : null}
     </div>
   )
