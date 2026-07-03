@@ -77,6 +77,9 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관
     "members:read",
   ]),
+  // GitHub Actions OIDC 페더레이션(via=github-actions) 전용 — CI 가 필요한 최소만:
+  // 발사/폴링/diff(scorecards) + 재핀(harnesses:register)/기준 조회(harnesses:read). 거버넌스/시크릿/멤버는 없음.
+  ci: new Set<Action>(["scorecards:read", "scorecards:run", "harnesses:read", "harnesses:register"]),
   admin: new Set<Action>([
     "runs:read",
     "runs:submit",

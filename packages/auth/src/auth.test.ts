@@ -4,6 +4,7 @@ import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
 import { apiKeyAuthenticator } from "./api-key.js";
 import { authorize, can } from "./authz.js";
+import { GITHUB_ACTIONS_ISSUER, githubActionsAuthenticator } from "./github-actions.js";
 import { oidcAuthenticator } from "./oidc.js";
 import { type Principal, compositeAuthenticator } from "./principal.js";
 import { runnerAuthenticator } from "./runner.js";
@@ -48,6 +49,19 @@ describe("authz", () => {
     expect(can(p(["member"]), "members:write")).toBe(false);
     expect(can(p(["admin"]), "members:write")).toBe(true);
   });
+  it("ci 역할(GitHub Actions 페더레이션)은 발사/폴링/diff + 재핀만 — 거버넌스/시크릿/멤버는 없다", () => {
+    expect(can(p(["ci"]), "scorecards:run")).toBe(true);
+    expect(can(p(["ci"]), "scorecards:read")).toBe(true); // 폴링 + diff
+    expect(can(p(["ci"]), "harnesses:register")).toBe(true); // durable 재핀(POST /harnesses/:id/pins)
+    expect(can(p(["ci"]), "harnesses:read")).toBe(true); // 기준 인스턴스 조회
+    expect(can(p(["ci"]), "datasets:write")).toBe(false);
+    expect(can(p(["ci"]), "runs:submit")).toBe(false);
+    expect(can(p(["ci"]), "secrets:read")).toBe(false);
+    expect(can(p(["ci"]), "members:read")).toBe(false);
+    expect(can(p(["ci"]), "settings:write")).toBe(false);
+    expect(can(p(["ci"]), "keys:write")).toBe(false);
+  });
+
   it("authorize 는 권한 없으면 403", () => {
     expect(() => authorize(p(["viewer"]), "secrets:write")).toThrow(ForbiddenError); // 시크릿 값 = admin 전용
     expect(() => authorize(p(["member"]), "runtimes:write")).not.toThrow(); // 런타임 등록 = role 무관
@@ -232,5 +246,78 @@ describe("compositeAuthenticator", () => {
     const composite = compositeAuthenticator([apiKeyAuthenticator({ keyStore: store })]);
     expect((await composite.authenticate("ak_k"))?.workspace).toBe("acme");
     expect(await composite.authenticate("nope")).toBeUndefined();
+  });
+});
+
+describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () => {
+  let keySet: ReturnType<typeof createLocalJWKSet>;
+  let priv: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
+
+  beforeAll(async () => {
+    const { publicKey, privateKey } = await generateKeyPair("RS256");
+    priv = privateKey;
+    const jwk = await exportJWK(publicKey);
+    jwk.kid = "gha";
+    jwk.alg = "RS256";
+    keySet = createLocalJWKSet({ keys: [jwk] });
+  });
+
+  const mint = (claims: Record<string, unknown>, issuer = GITHUB_ACTIONS_ISSUER, audience = "assay") =>
+    new SignJWT(claims)
+      .setProtectedHeader({ alg: "RS256", kid: "gha" })
+      .setIssuer(issuer)
+      .setAudience(audience)
+      .setSubject("repo:acme/app:ref:refs/heads/main")
+      .setExpirationTime("5m")
+      .sign(priv);
+
+  // 신뢰: 워크스페이스 acme 의 repo link 가 acme/app 만 신뢰(대소문자 무시).
+  const trustAcmeApp = async (claims: { repository: string }, hint: string) =>
+    hint === "acme" && claims.repository.toLowerCase() === "acme/app"
+      ? { workspace: "acme", roles: ["ci"] }
+      : undefined;
+
+  it("신뢰된 레포의 유효 토큰 + workspaceHint → Principal(via=github-actions, roles=[ci])", async () => {
+    const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
+    const token = await mint({ repository: "acme/app", ref: "refs/pull/7/merge", event_name: "pull_request" });
+    expect(await auth.authenticate(token, { workspaceHint: "acme" })).toEqual({
+      subject: "gha:acme/app",
+      workspace: "acme",
+      roles: ["ci"],
+      via: "github-actions",
+    });
+  });
+
+  it("workspaceHint 없음 → 미인증(fail-closed) — 어느 워크스페이스의 link 와 대조할지 없다", async () => {
+    const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
+    const token = await mint({ repository: "acme/app" });
+    expect(await auth.authenticate(token)).toBeUndefined();
+  });
+
+  it("link 에 없는 레포 → 미인증(401 — 존재 누출 없음)", async () => {
+    const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
+    const token = await mint({ repository: "evil/other" });
+    expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
+  });
+
+  it("audience 불일치(aud≠assay) → 미인증", async () => {
+    const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
+    const token = await mint({ repository: "acme/app" }, GITHUB_ACTIONS_ISSUER, "sts.amazonaws.com");
+    expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
+  });
+
+  it("다른 issuer(Keycloak 등)의 JWT 는 검증 시도 없이 패스 — resolveTrust 미호출(composite 소음 방지)", async () => {
+    const calls: unknown[] = [];
+    const auth = githubActionsAuthenticator({
+      keySet,
+      resolveTrust: async (c, h) => {
+        calls.push([c, h]);
+        return undefined;
+      },
+    });
+    const keycloak = await mint({ repository: "acme/app" }, "https://kc.example/realms/assay");
+    expect(await auth.authenticate(keycloak, { workspaceHint: "acme" })).toBeUndefined();
+    expect(await auth.authenticate("ak_key", { workspaceHint: "acme" })).toBeUndefined(); // 비-JWT 도 패스
+    expect(calls).toHaveLength(0);
   });
 });

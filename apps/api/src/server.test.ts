@@ -1,7 +1,7 @@
 import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
-import type { CaseResult } from "@assay/core";
+import { type CaseResult, DatasetSchema } from "@assay/core";
 import {
   InMemoryConnectionStore,
   InMemoryOAuthStateStore,
@@ -2166,6 +2166,54 @@ describe("API — schedules (예약 cron 스코어카드)", () => {
         })
       ).statusCode,
     ).toBe(404);
+    await app.close();
+  });
+});
+
+describe("API — GitHub Actions CI principal (via=github-actions, roles=[ci])", () => {
+  // 페더레이션 인증기 자체는 @assay/auth 테스트가 커버 — 여기선 서버 레벨: ci 게이트 + 멤버십 비부트스트랩 + origin 스탬프.
+  const ciAuth: Authenticator = {
+    async authenticate() {
+      return { subject: "gha:acme/app", workspace: "acme", roles: ["ci"], via: "github-actions" };
+    },
+  };
+  const CI_DATASET = {
+    id: "ci-ds",
+    version: "1.0.0",
+    cases: [
+      { id: "c1", env: { kind: "repo", source: { files: {} } }, task: "t", graders: [], timeoutSec: 60, tags: [] },
+    ],
+    tags: [],
+  };
+
+  it("ci 는 scorecard 발사(202, origin.source=github-actions 스탬프)와 조회만 — 멤버/시크릿은 403", async () => {
+    const { app, datasetRegistry } = server({ requireAuth: true, authenticator: ciAuth });
+    await datasetRegistry.register("acme", DatasetSchema.parse(CI_DATASET));
+    const h = { authorization: "Bearer gha-token" };
+    const post = await app.inject({
+      method: "POST",
+      url: "/scorecards",
+      headers: h,
+      payload: {
+        dataset: { id: "ci-ds" },
+        harness: { id: "scripted", version: "0" },
+        origin: { repo: "acme/app", prNumber: 7, sha: "abc" },
+      },
+    });
+    expect(post.statusCode).toBe(202);
+    // source 는 서버가 via 로 결정(클라이언트 위조 불가), 좌표는 body 에서.
+    expect(post.json().origin).toMatchObject({ source: "github-actions", repo: "acme/app", prNumber: 7 });
+    expect((await app.inject({ method: "GET", url: "/scorecards", headers: h })).statusCode).toBe(200);
+    expect((await app.inject({ method: "GET", url: "/members", headers: h })).statusCode).toBe(403);
+    expect((await app.inject({ method: "GET", url: "/secrets", headers: h })).statusCode).toBe(403);
+    await app.close();
+  });
+
+  it("ci principal 은 멤버십으로 부트스트랩되지 않는다(CI 레포가 멤버 행을 얻으면 안 됨)", async () => {
+    const { app, workspaceStore } = server({ requireAuth: true, authenticator: ciAuth });
+    const h = { authorization: "Bearer gha-token" };
+    await app.inject({ method: "GET", url: "/scorecards", headers: h });
+    expect(await workspaceStore.roleFor("acme", "gha:acme/app")).toBeUndefined();
     await app.close();
   });
 });

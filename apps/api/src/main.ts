@@ -3,6 +3,7 @@ import {
   type Authenticator,
   apiKeyAuthenticator,
   compositeAuthenticator,
+  githubActionsAuthenticator,
   oidcAuthenticator,
   runnerAuthenticator,
 } from "@assay/auth";
@@ -352,7 +353,7 @@ async function main(): Promise<void> {
     connectionService,
     runnerService,
     runnerHub,
-    authenticator: buildAuthenticator(keyStore, runnerStore),
+    authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,
     internalToken: process.env.ASSAY_INTERNAL_TOKEN,
     requireAuth: process.env.ASSAY_REQUIRE_AUTH === "1",
@@ -550,8 +551,26 @@ function buildOAuthProviders(): Map<string, ProviderEntry> {
 }
 
 // 컨트롤플레인이 소유하는 인증: KEYCLOAK_ISSUER 면 OIDC(JWT) + 항상 API 키. 둘 다 workspace 로 해석.
-function buildAuthenticator(keyStore: TenantKeyStore, runnerStore: RunnerStore): Authenticator {
+function buildAuthenticator(
+  keyStore: TenantKeyStore,
+  runnerStore: RunnerStore,
+  settingsStore: WorkspaceSettingsStore,
+): Authenticator {
   const authers: Authenticator[] = [];
+  // GitHub Actions OIDC 페더레이션 — keyless CI. issuer 프리체크가 있어 Keycloak/기타 JWT 는 조용히 패스하므로
+  // OIDC(Keycloak) 인증기보다 앞에 둔다(반대로 두면 CI 토큰이 Keycloak 검증 실패 warn 로그를 남긴다).
+  // 신뢰 = 지목된 워크스페이스(x-assay-workspace)의 repo link(WorkspaceSettings.ci.links) 매칭 → roles=["ci"].
+  authers.push(
+    githubActionsAuthenticator({
+      resolveTrust: async (claims, workspaceHint) => {
+        const settings = await settingsStore.get(workspaceHint);
+        const link = settings?.ci?.links.find(
+          (l) => !l.disabled && !l.host && l.repository.toLowerCase() === claims.repository.toLowerCase(),
+        );
+        return link ? { workspace: workspaceHint, roles: ["ci"] } : undefined;
+      },
+    }),
+  );
   if (process.env.KEYCLOAK_ISSUER) {
     console.error(`▶ auth: OIDC(JWT) 검증기 활성 issuer=${process.env.KEYCLOAK_ISSUER}`);
     authers.push(

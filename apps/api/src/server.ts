@@ -176,7 +176,10 @@ async function resolveIdentity(
 ): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
-    const principal = await deps.authenticator.authenticate(authz.slice(7).trim());
+    // workspaceHint(x-assay-workspace) — GitHub Actions 페더레이션이 그 워크스페이스의 repo link 와 대조하는 데 쓴다.
+    const principal = await deps.authenticator.authenticate(authz.slice(7).trim(), {
+      workspaceHint: workspaceHintOf(req),
+    });
     if (!principal) {
       // 검증 실패 — 구체 사유(issuer 불일치/JWKS 미도달/만료/서명/비-JWT)는 'auth: OIDC 토큰 검증 실패' 로그 참고.
       req.log.warn({ path: req.url }, "auth: Bearer 자격증명 거부 → 401");
@@ -207,10 +210,18 @@ async function resolveIdentity(
 // base.workspace 가 빈 문자열(외부 Keycloak: workspace 클레임 없음)이면 — 쿠키가 가리키는 멤버 워크스페이스로
 // 전환하고, 없으면 workspace="" 그대로 둔다(아직 멤버십 없음 → /me.workspaces=[] → 웹 온보딩). 401 아님.
 // 스토어가 없으면 기존 단일-워크스페이스 동작 그대로(하위호환).
+// 요청이 지목한 활성 워크스페이스 헤더(웹 쿠키/CI 워크플로가 보낸다). 없으면 undefined.
+function workspaceHintOf(req: FastifyRequest): string | undefined {
+  const header = (req.headers as Record<string, unknown>)["x-assay-workspace"];
+  return typeof header === "string" && header.length > 0 ? header : undefined;
+}
+
 async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: ServerDeps): Promise<Principal> {
   // 러너 토큰(via=runner)은 고정 워크스페이스 + 최소권한(roles:["runner"]) — 멤버십 부트스트랩/역할 승격에서 제외한다.
   // (제외하지 않으면 owner 의 멤버십 역할로 승격돼 디바이스 자격이 admin 을 얻는다.)
-  if (base.via === "runner") return base;
+  // GitHub Actions 페더레이션(via=github-actions)도 동일 — repo link 신뢰로 고정된 워크스페이스 + ci 역할이며
+  // 멤버가 아니다(부트스트랩하면 CI 레포가 멤버 행을 얻는다).
+  if (base.via === "runner" || base.via === "github-actions") return base;
   const store = deps.workspaceStore;
   if (!store) return base;
   const subject = base.subject;
@@ -233,8 +244,7 @@ async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: 
   }
 
   // x-assay-workspace 헤더(웹의 활성 워크스페이스 쿠키)가 다른 워크스페이스를 가리키고 그 멤버면 전환.
-  const header = (req.headers as Record<string, unknown>)["x-assay-workspace"];
-  const requested = typeof header === "string" && header.length > 0 ? header : base.workspace;
+  const requested = workspaceHintOf(req) ?? base.workspace;
   if (requested && requested !== base.workspace) {
     const role = await store.roleFor(requested, subject);
     if (role) return { ...base, workspace: requested, roles: [role] };
@@ -271,7 +281,7 @@ function zodIssues(err: z.ZodError): string[] {
 async function resolveBearerPrincipal(req: FastifyRequest, deps: ServerDeps): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
-    const base = await deps.authenticator.authenticate(authz.slice(7).trim());
+    const base = await deps.authenticator.authenticate(authz.slice(7).trim(), { workspaceHint: workspaceHintOf(req) });
     if (!base) {
       req.log.warn({ path: req.url }, "auth(mcp): Bearer 자격증명 거부 → 401 챌린지");
       return undefined;

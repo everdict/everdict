@@ -2,6 +2,21 @@ import { JudgeRunConfigSchema } from "@assay/core";
 import { z } from "zod";
 import type { SqlClient } from "./client.js";
 
+// CI repo link — repository ↔ 하니스 서비스 슬롯 매핑 + GitHub Actions OIDC trust policy 를 겸하는 한 레코드.
+// link 의 "존재"가 그 레포의 GitHub OIDC 토큰을 이 워크스페이스로 신뢰한다(별도 정책 화면 없음 — zero-input).
+// 발사 시점 인증은 레포 기반 페더레이션이라 개인 토큰 불사용 → creator-left 문제 없음(createdBy 는 감사용).
+// 설계: docs/architecture/github-actions-trigger.md (D3).
+export const WorkspaceCiLinkSchema = z.object({
+  repository: z.string().min(1), // "owner/name" (대소문자 무시 비교)
+  host: z.string().optional(), // 미지정 = github.com (GHES 페더레이션은 후속)
+  harness: z.string().min(1), // 하니스 인스턴스 id
+  // 서비스 슬롯 → 모노레포 path filter(선택). 이 레포의 CI 가 갈아끼우는 슬롯들.
+  slots: z.record(z.object({ path: z.string().optional() })).default({}),
+  createdBy: z.string(), // 감사용(발사 인증과 무관)
+  disabled: z.boolean().optional(),
+});
+export type WorkspaceCiLink = z.infer<typeof WorkspaceCiLinkSchema>;
+
 // 워크스페이스 단위 설정(컨트롤플레인 정책). JSONB 로 저장해 추후 확장 용이.
 // 요청별 override(POST /runs·/scorecards body.*)가 이보다 우선; 이 값은 env 기본 정책을 덮어쓴다.
 export const WorkspaceSettingsSchema = z.object({
@@ -23,6 +38,8 @@ export const WorkspaceSettingsSchema = z.object({
       z.object({ host: z.string().url(), clientId: z.string().min(1), clientSecretName: z.string().min(1) }),
     )
     .optional(),
+  // CI 통합(GitHub Actions) — repo link 목록(레포↔하니스 슬롯 매핑 = OIDC trust policy). 위 WorkspaceCiLinkSchema 참고.
+  ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;
 // 워크스페이스 통합 1건의 자격증명(provider별). 전부 비밀 아님(반환 안전) — clientSecret 값은 SecretStore 에만.

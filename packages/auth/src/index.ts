@@ -1,4 +1,4 @@
-export { type Principal, type Authenticator, compositeAuthenticator } from "./principal.js";
+export { type Principal, type Authenticator, type AuthContext, compositeAuthenticator } from "./principal.js";
 export {
   type Action,
   type AssayRole,
@@ -11,3 +11,10 @@ export {
 export { type OidcAuthOptions, type OidcVerifyErrorInfo, oidcAuthenticator } from "./oidc.js";
 export { type ApiKeyAuthOptions, apiKeyAuthenticator } from "./api-key.js";
 export { type RunnerAuthOptions, runnerAuthenticator } from "./runner.js";
+export {
+  type GithubActionsAuthOptions,
+  type GithubActionsClaims,
+  GITHUB_ACTIONS_ISSUER,
+  GITHUB_ACTIONS_AUDIENCE,
+  githubActionsAuthenticator,
+} from "./github-actions.js";
