@@ -15,6 +15,7 @@ export type Action =
   | "datasets:read"
   | "datasets:write"
   | "datasets:delete"
+  | "harnesses:delete"
   | "scorecards:read"
   | "scorecards:run"
   | "schedules:read"
@@ -84,6 +85,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "datasets:read",
     "datasets:write",
     "datasets:delete", // 데이터셋 버전 소프트 삭제 — admin 전용(생성자 본인은 서비스에서 별도 override). member/viewer 는 미보유
+    "harnesses:delete", // 하니스 버전 소프트 삭제 — 동일 패턴(admin 전용 + 생성자 예외는 서비스 계층)
     "scorecards:read",
     "scorecards:run",
     "schedules:read",

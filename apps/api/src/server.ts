@@ -48,6 +48,7 @@ import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bu
 import { type CiLinkService, UpsertCiLinkBodySchema } from "./ci-link-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
+import { deleteHarnessVersion } from "./harness-service.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
@@ -797,6 +798,23 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       );
     } catch (err) {
       return sendError(reply, err); // 없는 id/version → 404
+    }
+  });
+
+  // 하니스 버전 소프트 삭제 — 그 버전의 생성자 본인 또는 워크스페이스 admin 만(deleteHarnessVersion 가 게이트).
+  // 삭제는 tombstone(데이터 보존, read 제외) → 과거 스코어카드 이력·집계는 무영향(하니스 좌표는 레코드에 스냅샷).
+  // 그 하니스를 참조하는 "미래" 실행(재실행/예약/CI)은 해석 실패한다. 없는/이미 삭제/비소유 버전은 404.
+  app.delete<{ Params: { id: string; version: string } }>("/harnesses/:id/versions/:version", async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      return reply.send(
+        await deleteHarnessVersion(deps.harnessInstances, principal, req.params.id, req.params.version),
+      );
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 / 없음 404
     }
   });
 

@@ -8,6 +8,7 @@ interface Entry<T> {
   seq: number;
   createdAt: string; // 등록 시각(ISO)
   createdBy?: string; // 등록한 subject(없으면 시드/파일)
+  deletedAt?: number; // 소프트 삭제 tombstone — set 되면 모든 read 에서 제외(내용은 보존, 데이터셋과 동일 패턴)
 }
 
 // 목록 메타 — 한 id 의 살아있는 버전 요약(등록 이력에서). category/kind 등 스펙 파생은 상위 레지스트리가 채운다.
@@ -31,12 +32,13 @@ export class VersionedStore<T extends { id: string; version: string }> {
     const ids = this.byOwner.get(owner)?.get(id);
     if (!ids) return [];
     return [...ids.values()]
+      .filter((e) => e.deletedAt === undefined) // tombstone 제외 — 삭제된 버전은 모든 read 에서 안 보인다
       .sort((a, b) => compareVersions(a.item.version, b.item.version) || a.seq - b.seq)
       .map((e) => e.item.version);
   }
   private ownerOf(tenant: string, id: string): string | undefined {
-    if (this.byOwner.get(tenant)?.has(id)) return tenant;
-    if (this.byOwner.get(SHARED_TENANT)?.has(id)) return SHARED_TENANT;
+    if (this.ownerVersions(tenant, id).length > 0) return tenant;
+    if (this.ownerVersions(SHARED_TENANT, id).length > 0) return SHARED_TENANT;
     return undefined;
   }
 
@@ -60,6 +62,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
           `${this.label} ${item.id}@${item.version} 가 다른 스펙으로 이미 등록되어 있습니다(버전은 불변).`,
         );
       }
+      existing.deletedAt = undefined; // 동일 내용 재등록 = 부활(revive) — 내용 불변은 그대로
       return;
     }
     versions.set(item.version, {
@@ -72,7 +75,23 @@ export class VersionedStore<T extends { id: string; version: string }> {
 
   has(tenant: string, id: string, version: string): boolean {
     const owner = this.ownerOf(tenant, id);
-    return owner ? (this.byOwner.get(owner)?.get(id)?.has(version) ?? false) : false;
+    return owner ? this.ownerVersions(owner, id).includes(version) : false;
+  }
+
+  // 테넌트 직접 소유 + 살아있는 버전만(폴백 없음 — _shared 는 못 지운다). 없으면 NotFound. 데이터셋과 동일 패턴.
+  private ownLiveEntry(tenant: string, id: string, version: string): Entry<T> {
+    const entry = this.byOwner.get(tenant)?.get(id)?.get(version);
+    if (!entry || entry.deletedAt !== undefined)
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
+    return entry;
+  }
+
+  creatorOfVersion(tenant: string, id: string, version: string): string | undefined {
+    return this.ownLiveEntry(tenant, id, version).createdBy;
+  }
+
+  softDelete(tenant: string, id: string, version: string): void {
+    this.ownLiveEntry(tenant, id, version).deletedAt = Date.now();
   }
 
   versions(tenant: string, id: string): string[] {

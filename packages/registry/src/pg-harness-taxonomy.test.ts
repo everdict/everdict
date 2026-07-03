@@ -26,9 +26,10 @@ function fakePg(): SqlClient {
       const t = norm(text);
       const table = /(?:FROM|INTO)\s+(assay_harness_\w+)/.exec(t)?.[1] ?? "";
       const rows = rowsFor(table);
-      if (t.startsWith("SELECT spec FROM") && t.includes("version = $3")) {
+      if (t.startsWith("SELECT spec") && t.includes("version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
-        return { rows: (r ? [{ spec: r.spec }] : []) as R[] };
+        // register 의 충돌/부활 검사(spec, deleted_at)와 get(spec) 둘 다 — fake 는 삭제 없음(deleted_at null).
+        return { rows: (r ? [{ spec: r.spec, deleted_at: null }] : []) as R[] };
       }
       if (t.startsWith("SELECT 1 FROM") && t.includes("version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);

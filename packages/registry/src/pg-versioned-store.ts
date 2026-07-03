@@ -18,10 +18,10 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   ) {}
 
   private async ownsId(tenant: string, id: string): Promise<boolean> {
-    const r = await this.client.query(`SELECT 1 FROM ${this.table} WHERE tenant = $1 AND id = $2 LIMIT 1`, [
-      tenant,
-      id,
-    ]);
+    const r = await this.client.query(
+      `SELECT 1 FROM ${this.table} WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1`,
+      [tenant, id],
+    );
     return r.rows.length > 0;
   }
   private async ownerOf(tenant: string, id: string): Promise<string | undefined> {
@@ -31,15 +31,15 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   }
   private async ownerVersions(owner: string, id: string): Promise<string[]> {
     const r = await this.client.query<{ version: string }>(
-      `SELECT version FROM ${this.table} WHERE tenant = $1 AND id = $2`,
+      `SELECT version FROM ${this.table} WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL`,
       [owner, id],
     );
     return sortVersions(r.rows.map((x) => x.version));
   }
 
   async register(tenant: string, item: T, createdBy?: string): Promise<void> {
-    const existing = await this.client.query<SpecRow>(
-      `SELECT spec FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3`,
+    const existing = await this.client.query<SpecRow & { deleted_at: string | Date | null }>(
+      `SELECT spec, deleted_at FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3`,
       [tenant, item.id, item.version],
     );
     const row = existing.rows[0];
@@ -51,6 +51,12 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
           `${this.label} ${item.id}@${item.version} 가 다른 스펙으로 이미 등록되어 있습니다(버전은 불변).`,
         );
       }
+      // 동일 내용 재등록 = 부활(revive) — 내용 불변은 그대로(데이터셋 tombstone 과 동일 패턴).
+      if (row.deleted_at !== null)
+        await this.client.query(
+          `UPDATE ${this.table} SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3`,
+          [tenant, item.id, item.version],
+        );
       return;
     }
     await this.client.query(
@@ -62,12 +68,31 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     const owner = await this.ownerOf(tenant, id);
     if (!owner) return false;
-    const r = await this.client.query(`SELECT 1 FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3`, [
-      owner,
-      id,
-      version,
-    ]);
+    const r = await this.client.query(
+      `SELECT 1 FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL`,
+      [owner, id, version],
+    );
     return r.rows.length > 0;
+  }
+
+  // 테넌트 직접 소유 + 살아있는 버전만(폴백 없음 — _shared 는 못 지운다). 없으면 NotFound. 데이터셋과 동일 패턴.
+  async creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    const r = await this.client.query<{ created_by: string | null }>(
+      `SELECT created_by FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL`,
+      [tenant, id, version],
+    );
+    const row = r.rows[0];
+    if (!row) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
+    return row.created_by ?? undefined;
+  }
+
+  async softDelete(tenant: string, id: string, version: string): Promise<void> {
+    const r = await this.client.query<{ version: string }>(
+      `UPDATE ${this.table} SET deleted_at = now() WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version`,
+      [tenant, id, version],
+    );
+    if (r.rows.length === 0)
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
   }
 
   async versions(tenant: string, id: string): Promise<string[]> {
@@ -84,7 +109,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `${this.label} '${id}' 가 없습니다.`);
     const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
     const res = await this.client.query<SpecRow>(
-      `SELECT spec FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3`,
+      `SELECT spec FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL`,
       [owner, id, version],
     );
     return this.parse((res.rows[0] as SpecRow).spec);
@@ -92,7 +117,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
 
   async listIds(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
     const r = await this.client.query<{ id: string }>(
-      `SELECT DISTINCT id FROM ${this.table} WHERE tenant = $1 OR tenant = $2 ORDER BY id`,
+      `SELECT DISTINCT id FROM ${this.table} WHERE (tenant = $1 OR tenant = $2) AND deleted_at IS NULL ORDER BY id`,
       [tenant, SHARED_TENANT],
     );
     const out: Array<{ id: string; versions: string[]; owner: string }> = [];
@@ -108,7 +133,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     const out: VersionMeta[] = [];
     for (const { id, owner } of await this.listIds(tenant)) {
       const r = await this.client.query<{ version: string; created_at: string | Date; created_by: string | null }>(
-        `SELECT version, created_at, created_by FROM ${this.table} WHERE tenant = $1 AND id = $2`,
+        `SELECT version, created_at, created_by FROM ${this.table} WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL`,
         [owner, id],
       );
       const versions = sortVersions(r.rows.map((x) => x.version));

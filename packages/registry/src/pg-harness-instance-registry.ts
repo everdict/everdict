@@ -37,6 +37,12 @@ export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
   has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
   }
+  creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return this.store.creatorOfVersion(tenant, id, version);
+  }
+  softDelete(tenant: string, id: string, version: string): Promise<void> {
+    return this.store.softDelete(tenant, id, version);
+  }
   getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec> {
     return this.store.get(tenant, id, ref);
   }

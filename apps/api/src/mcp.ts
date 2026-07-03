@@ -29,6 +29,7 @@ import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bu
 import type { CiLinkService } from "./ci-link-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
+import { deleteHarnessVersion } from "./harness-service.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
@@ -245,6 +246,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ id, version }) =>
         run(principal, "harnesses:read", async () => ok(await instances.getInstance(ws, id, version))),
+    );
+
+    server.registerTool(
+      "delete_harness",
+      {
+        description:
+          "하니스 버전 소프트 삭제(tombstone — 과거 스코어카드 이력은 보존, 미래 실행은 해석 실패). 그 버전의 생성자 본인 또는 워크스페이스 admin 만.",
+        inputSchema: { id: z.string(), version: z.string().describe("삭제할 인스턴스 버전(정확한 버전 — latest 불가)") },
+      },
+      ({ id, version }) => plain(async () => ok(await deleteHarnessVersion(instances, principal, id, version))),
     );
 
     server.registerTool(

@@ -100,6 +100,10 @@ export interface HarnessInstanceRegistry {
   list(tenant: string): Promise<HarnessListEntry[]>;
   // 이 하니스 id 의 최초 등록자 subject(시드/공유는 없음) — 비공개(개인 시크릿 참조) 하니스의 소유자 확인용.
   creatorOf(tenant: string, id: string): Promise<string | undefined>;
+  // 이 "버전"의 등록자 subject — 삭제 authz(생성자-또는-admin)용. 비소유/삭제/부재 → NotFound(데이터셋과 동일).
+  creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
+  // 버전 소프트 삭제(tombstone) — 데이터는 보존(과거 스코어카드 재현성), 모든 read 에서 제외, 동일 내용 재등록은 부활.
+  softDelete(tenant: string, id: string, version: string): Promise<void>;
 }
 
 export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry {
@@ -114,6 +118,12 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
   }
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     return this.store.has(tenant, id, version);
+  }
+  async creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
+    return this.store.creatorOfVersion(tenant, id, version);
+  }
+  async softDelete(tenant: string, id: string, version: string): Promise<void> {
+    this.store.softDelete(tenant, id, version);
   }
   async getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec> {
     return this.store.get(tenant, id, ref);
