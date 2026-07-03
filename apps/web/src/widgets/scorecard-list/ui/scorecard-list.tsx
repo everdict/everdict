@@ -195,64 +195,84 @@ export function ScorecardList({
         <div className="space-y-2">
           {visible.map((s, i) => {
             const author = authorInfo(s)
+            const metrics = s.summary ?? []
+            const shownMetrics = metrics.slice(0, 3) // 카드 규격 유지 — 상위 3개만, 나머지는 +N
+            const judges = s.judgeModels ?? []
             return (
+              // 고정 규격 카드 — 높이/슬롯을 통일(내용이 많아도 wrap 하지 않고 truncate/+N).
               <Link
                 key={s.id}
                 href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
                 style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
-                className="rise grid grid-cols-[1fr_auto] items-center gap-3 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
+                className="rise flex h-[72px] items-center gap-3 rounded-lg border bg-card px-3.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
               >
-                <div className="min-w-0 space-y-1.5">
-                  <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] font-[510]">
-                    <EntityRef id={s.dataset.id} version={s.dataset.version} />
-                    <span className="text-faint">→</span>
-                    <EntityRef id={s.harness.id} version={s.harness.version} />
-                    {s.models?.primary ? <ModelChip>{s.models.primary}</ModelChip> : null}
-                    {s.origin ? <OriginChip origin={s.origin} /> : null}
+                {/* 좌: 2줄 고정 — ① 데이터셋→하니스(+모델·출처) ② 집계 칩 */}
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                    <span className="truncate">
+                      <EntityRef id={s.dataset.id} version={s.dataset.version} />
+                    </span>
+                    <span className="shrink-0 text-faint">→</span>
+                    <span className="truncate">
+                      <EntityRef id={s.harness.id} version={s.harness.version} />
+                    </span>
+                    {s.models?.primary ? (
+                      <span className="hidden shrink-0 sm:inline-flex">
+                        <ModelChip>{s.models.primary}</ModelChip>
+                      </span>
+                    ) : null}
+                    {s.origin ? (
+                      <span className="hidden shrink-0 md:inline-flex">
+                        <OriginChip origin={s.origin} />
+                      </span>
+                    ) : null}
                   </div>
-                  <div className="flex flex-wrap items-center gap-1">
-                    {(s.summary ?? []).length > 0 ? (
-                      (s.summary ?? []).map((m) => (
-                        <MetricChip
-                          key={m.metric}
-                          metric={m.metric}
-                          mean={m.mean}
-                          passRate={m.passRate}
-                        />
+                  <div className="flex items-center gap-1 overflow-hidden whitespace-nowrap">
+                    {shownMetrics.length > 0 ? (
+                      shownMetrics.map((m) => (
+                        <span key={m.metric} className="shrink-0">
+                          <MetricChip metric={m.metric} mean={m.mean} passRate={m.passRate} />
+                        </span>
                       ))
                     ) : (
                       <span className="text-[11px] text-faint">
                         {s.status === 'failed' ? '집계 없음' : '집계 대기'}
                       </span>
                     )}
-                    {s.judgeModels && s.judgeModels.length > 0 ? (
-                      <span className="ml-1 inline-flex items-center gap-1">
+                    {metrics.length > shownMetrics.length && (
+                      <span className="shrink-0 text-[11px] text-faint">
+                        +{metrics.length - shownMetrics.length}
+                      </span>
+                    )}
+                    {judges.length > 0 && (
+                      <span className="ml-1 hidden shrink-0 items-center gap-1 lg:inline-flex">
                         <span className="text-[10px] uppercase tracking-wide text-faint">
                           judge
                         </span>
-                        {s.judgeModels.map((jm) => (
-                          <ModelChip key={jm} muted>
-                            {jm}
-                          </ModelChip>
-                        ))}
+                        <ModelChip muted>{judges[0]}</ModelChip>
+                        {judges.length > 1 && (
+                          <span className="text-[11px] text-faint">+{judges.length - 1}</span>
+                        )}
                       </span>
-                    ) : null}
+                    )}
                   </div>
                 </div>
-                <div className="flex shrink-0 flex-col items-end gap-1">
-                  {/* 실행자 — 둥근 썸네일만(호버=이름), 위치는 다른 카드와 동일하게 우상단(상태 옆). */}
-                  <div className="flex items-center gap-1.5">
+                {/* 우: 고정 슬롯 — 실행자(썸네일) · 시각(고정폭) · 상태(고정폭). 카드마다 같은 위치. */}
+                <div className="flex shrink-0 items-center gap-2.5">
+                  <span className="flex w-6 justify-center">
                     {author.known && (
                       <UserAvatar name={author.name} url={author.avatarUrl} label="실행자" />
                     )}
-                    <StatusPill status={s.status} />
-                  </div>
+                  </span>
                   <time
-                    className="font-mono text-[11px] text-muted-foreground"
+                    className="hidden w-[84px] text-right font-mono text-[11px] text-muted-foreground sm:block"
                     title={fmtDateTimeFull(s.createdAt)}
                   >
                     {fmtDateTime(s.createdAt)}
                   </time>
+                  <span className="flex w-[64px] justify-end">
+                    <StatusPill status={s.status} />
+                  </span>
                 </div>
               </Link>
             )
