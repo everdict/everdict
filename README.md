@@ -85,9 +85,12 @@ git tag desktop-v0.2.0 && git push origin desktop-v0.2.0
 
 ## Self-hosted runner (내 머신에서 실행)
 워크스페이스의 공유 하니스·데이터셋을 **런타임만 `self:<id>` 로 바꿔** 내 호스트에서 실행하고 결과를
-회신합니다(내 로그인이 비용 부담 — 워크스페이스 예산 미차감, provenance 태그 부착). 데스크톱 앱이
-가장 쉽고, headless 는 CLI 로:
+회신합니다(내 로그인이 비용 부담 — 워크스페이스 예산 미차감, provenance 태그 부착).
+**개인 머신 = 데스크톱 앱 원클릭이 유일한 페어링 표면**(웹 브라우저는 목록/해제만 — D7).
+headless 서버/CI 박스는 API 키로 페어링 토큰을 만들어 CLI 로:
 ```bash
+curl -X POST <control-plane>/runners -H "Authorization: Bearer ak_…" \
+  -H "content-type: application/json" -d '{"label":"ci-linux-01"}'   # → { runner, token: "rnr_…" }
 assay runner --pair <rnr_…> --api-url <control-plane> [--max-concurrent N]
 ```
 See `docs/architecture/self-hosted-runner.md` (+ service harnesses on your Docker:

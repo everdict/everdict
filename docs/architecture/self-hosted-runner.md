@@ -154,6 +154,10 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
 
 1. ✅ **`RunnerStore` + pairing** — personal entity (mirrors `ConnectionStore`): pair (token shown once,
    SHA-256-hashed at rest), list, revoke; BFF + MCP parity; mig `0025_create_runners`. Account page "연결된 러너".
+   **Superseded UI note (desktop D7)**: the browser's manual pairing modal was later removed — personal-machine
+   pairing is the desktop app's one-click (`docs/architecture/desktop-app.md`); the browser account page is
+   manage-only (list/live status/revoke + 데스크톱 다운로드 CTA). The `POST /runners` API/MCP surface is
+   unchanged and is the **headless path**: pair with an API key, then `assay runner --pair <rnr_…>`.
 2. ✅ **Runtime selector merge + `self:` routing** — scorecard 실행 form lists the caller's own runners as
    `self:<runnerId>`; `RuntimeDispatcher` recognizes `self:` (resolve + owner-check → 404 if unowned). `AgentJob.submittedBy`
    threads the subject. (Shipped with a stub backend, replaced in slice 3.)

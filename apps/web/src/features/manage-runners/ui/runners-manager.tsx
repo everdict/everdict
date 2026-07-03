@@ -1,14 +1,9 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import { Check, Copy, Laptop, Plus, Trash2 } from 'lucide-react'
+import { Download, Laptop, Trash2 } from 'lucide-react'
 
-import {
-  runnerCapabilities,
-  runnerCapabilitySchema,
-  type RunnerCapability,
-  type RunnerMeta,
-} from '@/entities/runner'
+import { runnerCapabilitySchema, type RunnerCapability, type RunnerMeta } from '@/entities/runner'
 import {
   getAssayDesktop,
   type AssayDesktopBridge,
@@ -16,11 +11,9 @@ import {
 } from '@/shared/lib/desktop-bridge'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
-import { Button } from '@/shared/ui/button'
+import { Button, buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Dialog } from '@/shared/ui/dialog'
 import { EmptyState } from '@/shared/ui/empty-state'
-import { Input, Label } from '@/shared/ui/input'
 
 import { pairRunnerAction, revokeRunnerAction } from '../api/manage-runners'
 
@@ -43,15 +36,17 @@ function isRunnerCapability(value: string): value is RunnerCapability {
   return runnerCapabilitySchema.safeParse(value).success
 }
 
-// 러너는 개인 소유(self-scoped by subject) — 역할 게이트 없음. 모든 유저가 자기 머신을 페어링/해제한다.
+// 러너는 개인 소유(self-scoped by subject) — 역할 게이트 없음.
+// 페어링 표면은 데스크톱 앱이 전담한다(원클릭; 설계 D7): 브라우저에서는 수동 페어링(토큰 1회 노출)을
+// 제공하지 않고 목록/라이브 상태/해제만 — 대신 데스크톱 다운로드를 제안한다. headless 서버는 API 키로
+// `POST /runners` → `assay runner --pair` (docs/architecture/self-hosted-runner.md).
 export function RunnersManager({
   runners,
   desktopDownloadUrl,
 }: {
   runners: RunnerMeta[]
-  desktopDownloadUrl?: string // 설정 시(DESKTOP_DOWNLOAD_URL) 브라우저 사용자에게 데스크톱 앱 다운로드 안내
+  desktopDownloadUrl?: string // 설정 시(DESKTOP_DOWNLOAD_URL) 브라우저 사용자에게 데스크톱 앱 다운로드 CTA
 }) {
-  const [pairOpen, setPairOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
@@ -120,42 +115,34 @@ export function RunnersManager({
         <div className="space-y-1">
           <h3 className="text-[13px] font-[560] text-foreground">연결된 러너</h3>
           <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-            내 머신을 셀프호스티드 러너로 페어링하면, 워크스페이스의 공유 하니스·데이터셋을
+            내 머신을 셀프호스티드 러너로 연결하면, 워크스페이스의 공유 하니스·데이터셋을
             <span className="font-[510]"> 런타임만 바꿔</span> 내 호스트에서(내 로그인·repo 로)
             돌리고 결과를 워크스페이스로 회신할 수 있습니다. 러너는 워크스페이스가 아닌 내 계정
-            소유입니다. 페어링 토큰은 한 번만 표시됩니다.
-            {/* 브라우저 사용자에게만 — 데스크톱 앱 안에서는 이미 원클릭이 있으니 다운로드 안내가 무의미. */}
-            {!bridge && desktopDownloadUrl && (
-              <>
-                {' '}
-                <a
-                  href={desktopDownloadUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="font-[510] text-primary hover:underline"
-                >
-                  데스크톱 앱을 설치
-                </a>
-                하면 버튼 한 번으로 이 기기를 연결할 수 있습니다.
-              </>
-            )}
+            소유입니다.{' '}
+            {bridge
+              ? '연결은 버튼 한 번이면 됩니다.'
+              : '연결은 데스크톱 앱에서 버튼 한 번으로 이루어집니다 — 브라우저에서는 러너를 관리(상태 확인·해제)만 합니다.'}
           </p>
         </div>
         <span className="flex shrink-0 items-center gap-2">
+          {/* 페어링 표면은 데스크톱 전담(D7) — 브라우저에는 다운로드 CTA 만 노출. */}
           {bridge && !desktop?.paired && (
             <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
               <Laptop />
               {pending ? '연결 중…' : '이 기기를 러너로 연결'}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant={bridge && !desktop?.paired ? 'secondary' : undefined}
-            onClick={() => setPairOpen(true)}
-          >
-            <Plus />
-            디바이스 페어링
-          </Button>
+          {!bridge && desktopDownloadUrl && (
+            <a
+              href={desktopDownloadUrl}
+              target="_blank"
+              rel="noreferrer"
+              className={buttonVariants({ size: 'sm' })}
+            >
+              <Download />
+              데스크톱 앱 받기
+            </a>
+          )}
         </span>
       </div>
 
@@ -168,11 +155,11 @@ export function RunnersManager({
       {runners.length === 0 ? (
         <EmptyState
           icon={<Laptop strokeWidth={1.75} />}
-          title="아직 페어링된 러너가 없습니다."
+          title="아직 연결된 러너가 없습니다."
           hint={
             bridge
               ? '버튼 한 번으로 이 기기를 러너로 연결할 수 있습니다.'
-              : '내 머신을 페어링해 워크스페이스의 평가를 내 호스트에서 실행하세요.'
+              : '데스크톱 앱을 설치하면 버튼 한 번으로 이 기기를 러너로 연결할 수 있습니다.'
           }
           action={
             bridge ? (
@@ -180,12 +167,17 @@ export function RunnersManager({
                 <Laptop />
                 {pending ? '연결 중…' : '이 기기를 러너로 연결'}
               </Button>
-            ) : (
-              <Button size="sm" variant="secondary" onClick={() => setPairOpen(true)}>
-                <Plus />
-                디바이스 페어링
-              </Button>
-            )
+            ) : desktopDownloadUrl ? (
+              <a
+                href={desktopDownloadUrl}
+                target="_blank"
+                rel="noreferrer"
+                className={buttonVariants({ size: 'sm', variant: 'secondary' })}
+              >
+                <Download />
+                데스크톱 앱 받기
+              </a>
+            ) : undefined
           }
         />
       ) : (
@@ -289,176 +281,6 @@ export function RunnersManager({
           })}
         </ul>
       )}
-
-      <PairRunnerDialog open={pairOpen} onClose={() => setPairOpen(false)} />
     </div>
-  )
-}
-
-// 페어링 모달 — 디바이스 이름 + OS + capability 선택 후 페어링. 페어되면 같은 모달이 토큰 1회 노출 단계로 전환.
-function PairRunnerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
-  const [label, setLabel] = useState('')
-  const [os, setOs] = useState('')
-  const [caps, setCaps] = useState<RunnerCapability[]>([])
-  const [token, setToken] = useState<string>() // 방금 페어된 평문 토큰(1회 노출)
-  const [copied, setCopied] = useState(false)
-  const [error, setError] = useState<string>()
-  const [pending, startTransition] = useTransition()
-
-  // 열릴 때마다 폼 초기화(이전 페어/입력 잔상 제거).
-  useEffect(() => {
-    if (!open) return
-    setLabel('')
-    setOs('')
-    setCaps([])
-    setToken(undefined)
-    setCopied(false)
-    setError(undefined)
-  }, [open])
-
-  function toggleCap(c: RunnerCapability) {
-    setCaps((prev) => (prev.includes(c) ? prev.filter((x) => x !== c) : [...prev, c]))
-  }
-
-  function onPair() {
-    setError(undefined)
-    if (!label.trim()) {
-      setError('디바이스 이름을 입력하세요.')
-      return
-    }
-    startTransition(async () => {
-      const r = await pairRunnerAction({
-        label: label.trim(),
-        ...(os.trim() ? { os: os.trim() } : {}),
-        ...(caps.length > 0 ? { capabilities: caps } : {}),
-      })
-      if (r.ok) setToken(r.token)
-      else setError(r.error)
-    })
-  }
-
-  return (
-    <Dialog open={open} onClose={onClose} className="max-w-[460px]" labelledBy="pair-runner-title">
-      {token ? (
-        // 2단계 — 페어링 완료(토큰 1회 노출)
-        <>
-          <header className="border-b border-border px-5 py-4">
-            <h2 id="pair-runner-title" className="text-[15px] font-[560] text-foreground">
-              디바이스가 페어링되었습니다
-            </h2>
-            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              아래 토큰을 지금 복사해 안전한 곳에 보관하세요.
-            </p>
-          </header>
-          <div className="space-y-3 px-5 py-4">
-            <Callout
-              tone="warning"
-              hint="이 값은 다시 표시되지 않습니다. 러너 클라이언트(assay runner)가 이 토큰으로 인증합니다."
-            >
-              <div className="flex items-center gap-2">
-                <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
-                  {token}
-                </code>
-                <Button
-                  type="button"
-                  variant="secondary"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => {
-                    void navigator.clipboard?.writeText(token)
-                    setCopied(true)
-                  }}
-                >
-                  {copied ? <Check /> : <Copy />}
-                  {copied ? '복사됨' : '복사'}
-                </Button>
-              </div>
-            </Callout>
-            <p className="text-[12px] leading-relaxed text-faint">
-              내 머신에서 <code className="font-mono">assay runner --pair &lt;token&gt;</code> 으로
-              연결합니다. 데스크톱 앱에서는 이 과정 없이 &lsquo;이 기기를 러너로 연결&rsquo; 버튼 한
-              번으로 끝납니다. 페어링 후 실행 폼의 런타임 선택에 이 러너가 나타납니다.
-            </p>
-          </div>
-          <footer className="flex justify-end border-t border-border px-5 py-3.5">
-            <Button size="sm" onClick={onClose}>
-              완료
-            </Button>
-          </footer>
-        </>
-      ) : (
-        // 1단계 — 디바이스 이름 + OS + capability
-        <>
-          <header className="border-b border-border px-5 py-4">
-            <h2 id="pair-runner-title" className="text-[15px] font-[560] text-foreground">
-              디바이스 페어링
-            </h2>
-            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              이 머신을 식별할 이름과, 이 머신이 돌릴 수 있는 환경을 선택하세요.
-            </p>
-          </header>
-
-          <div className="space-y-4 px-5 py-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="runner-label">디바이스 이름</Label>
-              <Input
-                id="runner-label"
-                value={label}
-                placeholder="ho-macbook, ci-linux-01 …"
-                autoFocus
-                onChange={(e) => setLabel(e.target.value)}
-                maxLength={80}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="runner-os">OS (선택)</Label>
-              <Input
-                id="runner-os"
-                value={os}
-                placeholder="darwin · linux · win32"
-                onChange={(e) => setOs(e.target.value)}
-                maxLength={40}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>실행 가능 환경 (Capabilities)</Label>
-              <div className="flex flex-wrap gap-2">
-                {runnerCapabilities.map((c) => (
-                  <label
-                    key={c}
-                    className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-[13px] hover:border-border-strong"
-                  >
-                    <input
-                      type="checkbox"
-                      className="accent-primary"
-                      checked={caps.includes(c)}
-                      onChange={() => toggleCap(c)}
-                    />
-                    <span className="text-foreground">{CAP_LABEL[c] ?? c}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-
-            {error && (
-              <Callout tone="danger" className="py-1.5">
-                {error}
-              </Callout>
-            )}
-          </div>
-
-          <footer className="flex justify-end gap-2 border-t border-border px-5 py-3.5">
-            <Button variant="ghost" size="sm" onClick={onClose}>
-              취소
-            </Button>
-            <Button size="sm" onClick={onPair} disabled={pending}>
-              {pending ? '페어링 중…' : '페어링'}
-            </Button>
-          </footer>
-        </>
-      )}
-    </Dialog>
   )
 }

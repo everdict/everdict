@@ -17,6 +17,13 @@
 >   (b) make `Ho2eny/assay` public (current CI works as-is). Until then the updater is cleanly
 >   disabled. mac auto-update stays inert until code signing exists; deb installs don't auto-update
 >   (AppImage/NSIS/mac-zip do).
+> - **D7 — the desktop fully absorbs the pairing surface (LOCKED 2026-07-03).** The browser web no longer
+>   offers manual device pairing (the token-shown-once modal is removed): personal-machine pairing is the
+>   desktop's one-click only, and the browser account page becomes **manage-only** (list · live status ·
+>   revoke) + a "데스크톱 앱 받기" CTA (`DESKTOP_DOWNLOAD_URL`). The server surface is unchanged —
+>   `POST /runners` (BFF+MCP `pair_runner`) stays, which is also the **headless path**: on a server/CI box,
+>   create the pairing with an API key (`curl -H "Authorization: Bearer ak_…" -X POST /runners`) and feed
+>   the returned `rnr_` token to `assay runner --pair`.
 >
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`

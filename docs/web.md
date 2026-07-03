@@ -108,8 +108,10 @@ fields, react-hook-form via `Controller`) opens the same Linear-style popover (s
   See `docs/connections.md`.
 - **계정 `/{workspace}/account`** (personal — self-scoped, no role gate) — 프로필 · **연결된 계정**(개인
   outbound OAuth) · **연결된 러너** · API 키 탭(`account-tabs.tsx`). 연결된 러너(`features/manage-runners`):
-  디바이스 페어링 모달(`POST /runners` → `rnr_` 토큰 1회 노출, `assay runner --pair` 용) + 러너 목록(온라인
-  dot = `lastSeenAt` 신선도). **데스크톱 셸 안에서는**(`window.assayDesktop` 감지 —
+  **manage-only** — 러너 목록(온라인 dot = `lastSeenAt` 신선도) + 해제. 수동 디바이스 페어링(토큰 1회 노출
+  모달)은 제거됨(desktop D7): 개인 머신 페어링은 데스크톱 원클릭이 전담하고, 브라우저에는
+  `DESKTOP_DOWNLOAD_URL` 설정 시 "데스크톱 앱 받기" CTA 가 뜬다. headless 서버는 API 키로 `POST /runners`
+  → `assay runner --pair`. **데스크톱 셸 안에서는**(`window.assayDesktop` 감지 —
   `shared/lib/desktop-bridge.ts` 의 로컬 미러 타입, 웹은 `@assay/*` 미의존) **"이 기기를 러너로 연결"
   원클릭**: 라벨=호스트명 자동, 토큰은 화면에 노출되지 않고 브리지로만 하강(OS 키체인 저장); "이 기기" 행은
   lastSeenAt 추정 대신 브리지 **라이브 상태**(실행 중 (n)/온라인 + 라이브 capability, docker 없음 힌트)를
