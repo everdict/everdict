@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft, GitBranchPlus } from 'lucide-react'
 
+import { HarnessVersionSwitcher } from '@/features/harness-versions'
 import { ConfigPanel, HarnessDetail } from '@/features/inspect-harness'
 import { CiLinkPanel } from '@/features/manage-ci-links'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
@@ -19,7 +20,6 @@ import {
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -151,31 +151,15 @@ export default async function HarnessDetailPage({
           title={spec.id}
           description={summarize(spec)}
           actions={
-            <div className="flex flex-wrap items-center justify-end gap-2">
+            <div className="flex items-end gap-2">
               <Badge tone={KIND_TONE[spec.kind]}>{spec.kind}</Badge>
               {versions.length > 1 ? (
-                <div className="flex flex-wrap items-center gap-1">
-                  <span className="mr-0.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
-                    버전
-                  </span>
-                  {versions.map((ver) => {
-                    const isActive = ver === active
-                    return (
-                      <Link
-                        key={ver}
-                        href={`/${workspace}/harnesses/${encodeURIComponent(id)}?v=${encodeURIComponent(ver)}`}
-                        className={cn(
-                          'rounded-md border px-2 py-0.5 font-mono text-[12px] transition-colors',
-                          isActive
-                            ? 'border-primary/40 bg-primary/12 text-[var(--color-accent-foreground)]'
-                            : 'border-border bg-card text-muted-foreground hover:border-border-strong hover:text-foreground'
-                        )}
-                      >
-                        {ver}
-                      </Link>
-                    )
-                  })}
-                </div>
+                <HarnessVersionSwitcher
+                  id={id}
+                  versions={versions}
+                  current={active ?? ''}
+                  latest={versions[versions.length - 1]}
+                />
               ) : (
                 <Badge tone="neutral">v{active} · latest</Badge>
               )}
