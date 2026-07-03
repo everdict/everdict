@@ -69,7 +69,9 @@ export class RunnerHost {
       if (r.isError) throw new Error(r.text || `${name} 실패`);
       return JSON.parse(r.text) as Record<string, unknown>;
     };
-    const baseRun = this.opts.runJob ?? ((job: AgentJob) => runLeasedJob(job));
+    // image-케이스는 이 러너에 Docker 가 있을 때 로컬 Docker(DockerDriver)로 실행 — dockerAvailable 을 capability 에서 넘긴다.
+    const dockerAvailable = this.capabilities.includes("docker");
+    const baseRun = this.opts.runJob ?? ((job: AgentJob) => runLeasedJob(job, { dockerAvailable, log: this.opts.log }));
     // 잡 시작/종료를 감싸 activeJobs 를 추적(running/idle 이벤트 근거) + 종료 통지를 낸다.
     const runJob = async (job: AgentJob): Promise<CaseResult> => {
       this.activeJobs++;

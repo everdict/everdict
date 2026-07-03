@@ -29,14 +29,18 @@ export function resetSharedTopologyRuntime(): void {
   sharedRuntime = undefined;
 }
 
-// 리스한 잡을 하니스 kind 로 분기 실행. service(topology) → 로컬 Docker 토폴로지, 그 외 → runAgentJob(LocalDriver).
-// 설계: docs/architecture/self-hosted-service-runner.md (slice 2). 분기는 한 곳에서만.
+// 리스한 잡을 하니스 kind 로 분기 실행. service(topology) → 로컬 Docker 토폴로지, 그 외 → runAgentJob.
+// 비-service 케이스가 case.image 를 선언하고 이 러너에 Docker 가 있으면 그 이미지 컨테이너에서 실행(DockerDriver) —
+// 관리형 DockerBackend 와 동일한 경로라 "정의 하나가 관리형이든 로컬이든 동일 환경"이 성립한다. 없으면 호스트-네이티브 LocalDriver.
+// 설계: docs/architecture/portable-harness-runtime.md · self-hosted-service-runner.md. 분기는 한 곳에서만.
 export async function runLeasedJob(
   job: AgentJob,
   opts: {
     runService?: (job: AgentJob) => Promise<CaseResult>; // 테스트 주입
-    runProcess?: (job: AgentJob) => Promise<CaseResult>;
+    runProcess?: (job: AgentJob, runOpts: { containerize?: boolean }) => Promise<CaseResult>;
     runtimeOptions?: DockerTopologyRuntimeOptions; // service 토폴로지 런타임 튜닝(readiness 타임아웃 등)
+    dockerAvailable?: boolean; // 이 러너의 Docker 데몬 유무(capability) — image-케이스 컨테이너 실행 게이트
+    log?: (msg: string) => void; // image 요구인데 Docker 없음 등 사유 통지(조용한 실패 금지)
   } = {},
 ): Promise<CaseResult> {
   const spec = job.harnessSpec;
@@ -44,8 +48,14 @@ export async function runLeasedJob(
     const runService = opts.runService ?? ((j: AgentJob) => defaultRunService(j, spec, opts.runtimeOptions));
     return runService(job);
   }
-  // process/command — 이 머신의 로그인으로 인프로세스 실행(현행).
-  return (opts.runProcess ?? runAgentJob)(job);
+  // process/command. image 선언 + Docker 있으면 그 이미지 컨테이너에서 실행(툴체인 동봉 — 관리형과 동일). 아니면 호스트 인프로세스.
+  const image = job.evalCase.image;
+  const containerize = Boolean(image && opts.dockerAvailable);
+  if (image && !opts.dockerAvailable)
+    opts.log?.(
+      `case ${job.evalCase.id} 가 image '${image}' 를 요구하지만 이 러너엔 Docker 가 없습니다 → 호스트-네이티브 실행(툴체인은 호스트가 제공해야 함).`,
+    );
+  return (opts.runProcess ?? runAgentJob)(job, { containerize });
 }
 
 // service 하니스: 사용자 Docker 데몬에 토폴로지를 띄워 구동. 개인 호스트라 trustZones 없음; trace 미도달 시

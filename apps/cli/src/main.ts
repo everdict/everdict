@@ -264,7 +264,8 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
   await runLeaseWorkers(
     {
       callJson,
-      runJob: (job) => runLeasedJob(job, { runtimeOptions }), // service→Docker 토폴로지(readiness 옵션) / 그 외→LocalDriver
+      // service→Docker 토폴로지 / image-케이스→로컬 Docker(DockerDriver, dockerOk 게이트) / 그 외→호스트 LocalDriver
+      runJob: (job) => runLeasedJob(job, { runtimeOptions, dockerAvailable: dockerOk, log: (m) => console.error(m) }),
       log: (m) => console.error(m),
       sleep,
     },

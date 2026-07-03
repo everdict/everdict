@@ -1,5 +1,5 @@
 import { type AgentJob, type CaseResult, type Driver, type Environment, type Grader, judgeEnv } from "@assay/core";
-import { LocalDriver } from "@assay/drivers";
+import { DockerDriver, LocalDriver } from "@assay/drivers";
 import { OsUseEnvironment, PromptEnvironment, RepoEnvironment } from "@assay/environments";
 import { runCase } from "@assay/runner";
 import { runContextFromEnv } from "./env.js";
@@ -10,7 +10,12 @@ export const RESULT_SENTINEL = "__ASSAY_RESULT__";
 
 // AgentJob 한 건을 끝까지 수행한다. 기본 driver=LocalDriver(인프로세스), DockerBackend 는 DockerDriver 주입(케이스를
 // 자기 env 이미지 컨테이너에서 실행 — SWE-bench prebuilt 등). harnessSpec 있으면 선언형 command 하니스로 해석.
-export async function runAgentJob(job: AgentJob, opts: { driver?: Driver } = {}): Promise<CaseResult> {
+// containerize=true 면 case.image 컨테이너(DockerDriver)에서 실행한다 — self-hosted 러너가 로컬 Docker 로 image-케이스를
+// 관리형 DockerBackend 와 동일하게 돌릴 때 쓴다(driver 를 직접 넘기면 그게 우선). 설계: docs/architecture/portable-harness-runtime.md.
+export async function runAgentJob(
+  job: AgentJob,
+  opts: { driver?: Driver; containerize?: boolean } = {},
+): Promise<CaseResult> {
   // 사용량 계측(BYO + Assay 소유 버짓): 컨트롤플레인이 워크스페이스/요청 정책으로 결정해 job.meterUsage 로 보낸다.
   // 미지정이면 dev 폴백으로 ASSAY_METER_USAGE env(컨트롤플레인 없이 LocalBackend 직접 디스패치할 때).
   // 켜지면 command 하니스가 모델 호출을 usage-proxy 로 통과시켜 토큰을 회수 → 합성 trace 이벤트로 결과에 실린다.
@@ -32,7 +37,8 @@ export async function runAgentJob(job: AgentJob, opts: { driver?: Driver } = {})
         ? new OsUseEnvironment()
         : new RepoEnvironment(job.repoToken !== undefined ? { gitToken: job.repoToken } : {});
   return runCase(job.evalCase, {
-    driver: opts.driver ?? new LocalDriver(),
+    // 명시 driver 우선 → containerize(로컬 Docker, case.image) → 기본 LocalDriver(인프로세스).
+    driver: opts.driver ?? (opts.containerize ? new DockerDriver() : new LocalDriver()),
     environment,
     harness,
     graders,

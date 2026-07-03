@@ -62,6 +62,38 @@ describe("runLeasedJob — 하니스 kind 분기", () => {
   });
 });
 
+// 이식성 계약: case.image 를 선언한 비-service 케이스는, 러너에 Docker 가 있으면 그 이미지 컨테이너에서 실행(containerize)한다
+// → "정의 하나가 관리형이든 로컬이든 동일 환경". 설계: docs/architecture/portable-harness-runtime.md.
+describe("runLeasedJob — case.image 컨테이너 실행(이식성)", () => {
+  const imageJob: AgentJob = {
+    evalCase: { ...evalCase, image: "spreadsheetbench:v1" },
+    harness: { id: "codex", version: "1.0.0" },
+  };
+
+  it("image 선언 + Docker 있음 → 컨테이너 실행(containerize:true)", async () => {
+    const runProcess = vi.fn(async () => RESULT);
+    await runLeasedJob(imageJob, { runProcess, dockerAvailable: true });
+    expect(runProcess).toHaveBeenCalledWith(imageJob, { containerize: true });
+  });
+
+  it("image 선언 + Docker 없음 → 호스트-네이티브(containerize:false) + 사유 로그", async () => {
+    const runProcess = vi.fn(async () => RESULT);
+    const log = vi.fn();
+    await runLeasedJob(imageJob, { runProcess, dockerAvailable: false, log });
+    expect(runProcess).toHaveBeenCalledWith(imageJob, { containerize: false });
+    expect(log).toHaveBeenCalledOnce(); // 조용한 실패 금지 — image 요구인데 Docker 없음을 알린다
+    expect(String(log.mock.calls[0]?.[0])).toContain("spreadsheetbench:v1");
+  });
+
+  it("image 없음 → Docker 가 있어도 호스트-네이티브(containerize:false)", async () => {
+    const runProcess = vi.fn(async () => RESULT);
+    const log = vi.fn();
+    await runLeasedJob(processJob, { runProcess, dockerAvailable: true, log });
+    expect(runProcess).toHaveBeenCalledWith(processJob, { containerize: false });
+    expect(log).not.toHaveBeenCalled(); // image 미선언이면 알릴 것도 없음
+  });
+});
+
 // 회귀: 케이스마다 새 런타임을 만들면 warm-pool 이 매번 비어 토폴로지를 재배포 → 고정 이름 컨테이너 충돌.
 // 러너 프로세스 내 lazy 싱글톤으로 런타임을 재사용해야 warm-pool 이 케이스 간 유지된다.
 describe("sharedTopologyRuntime — 러너 프로세스 내 lazy 싱글톤", () => {
