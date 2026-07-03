@@ -163,8 +163,12 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    start/stop/status events over `runLeaseWorkers`) embedded via `RunnerController` (pair/unpair/restore-on-boot);
    web: desktop-aware "이 기기를 러너로 연결" one-click (label=hostname, token never shown — bridge-only) +
    live "이 기기" status row (running(n)/온라인) replacing the `lastSeenAt` heuristic for this device.
-4. **Runner surface polish** — tray states, OS completion notifications + deep-link focus,
-   capability row (docker), unpair.
+4. ✅ **Runner surface polish** — tray status row + tooltip (미페어/온라인 대기/실행 중 (n)) and
+   tray-local unpair (token discard + stop; server-side revoke stays the web's authority); OS
+   notification per **drain** (running→idle transition, 성공/실패 aggregate — per-case notify would
+   spam batches; click → focus window); web "이 기기" row prefers **live** capabilities from the
+   bridge (+ "docker 없음 → service 하니스 불가" hint), so a docker daemon stopped after pairing
+   shows immediately.
 5. **Packaging + live e2e** — 3-OS builds (linux first), signed artifacts, account-page download links;
    live e2e: fresh machine → install → login → one-click pair → run a scorecard pinned to `self:<id>` →
    result + provenance tag, all through the desktop.

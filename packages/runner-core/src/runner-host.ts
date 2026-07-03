@@ -15,6 +15,13 @@ export interface RunnerHostStatus {
   capabilities: string[];
 }
 
+// 잡 1건의 종료 통지 — GUI(OS 알림 등)가 소비한다. 실패면 error, 성공이면 result 가 실린다.
+export interface RunnerJobDone {
+  job: AgentJob;
+  result?: CaseResult;
+  error?: Error;
+}
+
 export interface RunnerHostOpts {
   apiUrl: string; // 컨트롤플레인 base URL — /mcp 를 붙여 접속
   token: string; // rnr_ 페어링 토큰
@@ -24,6 +31,7 @@ export interface RunnerHostOpts {
   pollMs?: number; // lease 에러 backoff(기본 2s)
   capabilities?: string[]; // 미지정 → detectCapabilities()
   onStatus?: (status: RunnerHostStatus) => void;
+  onJobDone?: (done: RunnerJobDone) => void; // 잡 종료 통지(성공/실패) — OS 알림 등
   log?: (msg: string) => void;
   // 테스트 주입점
   connect?: ConnectClient; // 기본 mcpConnect(new URL("/mcp", apiUrl), token)
@@ -62,12 +70,17 @@ export class RunnerHost {
       return JSON.parse(r.text) as Record<string, unknown>;
     };
     const baseRun = this.opts.runJob ?? ((job: AgentJob) => runLeasedJob(job));
-    // 잡 시작/종료를 감싸 activeJobs 를 추적 — running/idle 상태 이벤트의 근거.
+    // 잡 시작/종료를 감싸 activeJobs 를 추적(running/idle 이벤트 근거) + 종료 통지를 낸다.
     const runJob = async (job: AgentJob): Promise<CaseResult> => {
       this.activeJobs++;
       this.emit();
       try {
-        return await baseRun(job);
+        const result = await baseRun(job);
+        this.opts.onJobDone?.({ job, result });
+        return result;
+      } catch (e) {
+        this.opts.onJobDone?.({ job, error: e instanceof Error ? e : new Error(String(e)) });
+        throw e; // 루프가 fail_job 으로 회신하는 기존 경로 유지
       } finally {
         this.activeJobs--;
         this.emit();

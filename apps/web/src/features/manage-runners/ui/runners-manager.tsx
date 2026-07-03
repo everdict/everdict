@@ -173,6 +173,9 @@ export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
             // 이 기기(데스크톱 셸에 페어된 러너)는 lastSeenAt 추정 대신 브리지의 라이브 상태를 쓴다.
             const thisDevice = desktop?.paired === true && desktop.runnerId === r.id
             const online = thisDevice ? desktop.state !== 'off' : isOnline(r.lastSeenAt)
+            // capability 도 라이브 우선 — 페어 후 docker 데몬이 꺼졌다면 즉시 반영된다.
+            const caps =
+              thisDevice && desktop.capabilities.length > 0 ? desktop.capabilities : r.capabilities
             const statusText = thisDevice
               ? desktop.state === 'running'
                 ? `실행 중 (${desktop.activeJobs})`
@@ -210,11 +213,16 @@ export function RunnersManager({ runners }: { runners: RunnerMeta[] }) {
                       {statusText}
                     </span>
                     {r.os && <Badge tone="outline">{r.os}</Badge>}
-                    {r.capabilities.map((c) => (
+                    {caps.map((c) => (
                       <Badge key={c} tone="outline">
                         {CAP_LABEL[c] ?? c}
                       </Badge>
                     ))}
+                    {thisDevice && online && !caps.includes('docker') && (
+                      <span className="text-[12px] text-faint">
+                        docker 없음 → service 하니스 불가
+                      </span>
+                    )}
                   </div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
                     <span>페어링 {new Date(r.pairedAt).toLocaleString('ko-KR')}</span>

@@ -2,12 +2,18 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { hostname } from "node:os";
 import path from "node:path";
 import { RunnerHost, detectCapabilities } from "@assay/runner-core";
-import { BrowserWindow, Menu, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
-import { BRIDGE_CHANNELS, type DesktopAppInfo, registerBridge, senderAllowed } from "./bridge.js";
+import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
+import {
+  BRIDGE_CHANNELS,
+  type DesktopAppInfo,
+  type DesktopRunnerStatus,
+  registerBridge,
+  senderAllowed,
+} from "./bridge.js";
 import { type ConfigIo, type DesktopConfig, loadConfig, saveConfig } from "./config-store.js";
 import { RunnerController } from "./runner-controller.js";
 import { type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
-import { buildTrayMenuTemplate } from "./tray-menu.js";
+import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
 import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window-policy.js";
 
 // 데스크톱 셸 — 배포된 웹을 그대로 렌더링(D1: UI SSOT = apps/web)하고, 트레이에 상주하며,
@@ -72,6 +78,28 @@ function applyAutostart(next: boolean): void {
   refreshTrayMenu();
 }
 
+// 트레이/알림이 참조하는 최신 러너 상태 — broadcast 가 갱신한다.
+let latestRunnerStatus: DesktopRunnerStatus = { paired: false, state: "off", activeJobs: 0, capabilities: [] };
+// 드레인(running→idle) 단위 알림용 카운터 — 케이스마다 알리면 배치에서 스팸이 된다.
+let doneSinceIdle = 0;
+let failedSinceIdle = 0;
+
+// running→idle 전이 시 1회 알림(성공/실패 집계) — Mattermost 완료 알림의 로컬판.
+function notifyDrainIfNeeded(prev: DesktopRunnerStatus, next: DesktopRunnerStatus): void {
+  if (prev.state !== "running" || next.state !== "idle" || doneSinceIdle + failedSinceIdle === 0) return;
+  const body = `성공 ${doneSinceIdle} · 실패 ${failedSinceIdle}`;
+  doneSinceIdle = 0;
+  failedSinceIdle = 0;
+  try {
+    if (!Notification.isSupported()) return;
+    const n = new Notification({ title: "Assay 러너 — 잡 처리 완료", body });
+    n.on("click", () => createOrFocusWindow());
+    n.show();
+  } catch {
+    /* 알림 미지원 환경(libnotify 부재 등) — 무시 */
+  }
+}
+
 // 러너 컨트롤러 — 페어 상태 영속 + RunnerHost 수명주기. 상태는 웹 origin 창에만 push(불변식 4와 같은 경계).
 const controller = new RunnerController({
   loadToken: () => loadToken(safeStorage, tokenIo()),
@@ -94,12 +122,19 @@ const controller = new RunnerController({
       token,
       apiUrl,
       onStatus,
+      onJobDone: (done) => {
+        if (done.error) failedSinceIdle++;
+        else doneSinceIdle++;
+      },
       log: (m) => console.error(m),
       // 데스크톱은 종료 지연을 줄이기 위해 long-poll 을 CLI(25s)보다 짧게 잡는다(정지는 현재 poll 완료까지 대기).
       waitMs: 8_000,
     }),
   defaultApiUrl,
   broadcast: (status) => {
+    notifyDrainIfNeeded(latestRunnerStatus, status);
+    latestRunnerStatus = status;
+    refreshTrayMenu(); // 상태행·해제 항목·툴팁 동기화(tray 없으면 no-op)
     for (const win of BrowserWindow.getAllWindows()) {
       if (senderAllowed(win.webContents.getURL(), webOrigin)) win.webContents.send(BRIDGE_CHANNELS.statusEvent, status);
     }
@@ -156,13 +191,16 @@ function createOrFocusWindow(): void {
 
 function refreshTrayMenu(): void {
   if (!tray) return;
+  tray.setToolTip(`Assay — ${runnerStatusLabel(latestRunnerStatus)}`);
   tray.setContextMenu(
     Menu.buildFromTemplate(
       buildTrayMenuTemplate(
-        { autostart: config.autostart },
+        { autostart: config.autostart, runner: latestRunnerStatus },
         {
           openApp: () => createOrFocusWindow(),
           setAutostart: (next) => applyAutostart(next),
+          // 로컬 해제(토큰 폐기+정지) — 서버 레코드 revoke 는 웹 계정 페이지가 권위.
+          unpairRunner: () => void controller.unpair().catch((e) => console.error(`러너 해제 실패: ${e}`)),
           quit: () => {
             quitting = true;
             app.quit();
@@ -176,7 +214,6 @@ function refreshTrayMenu(): void {
 function createTray(): void {
   const icon = nativeImage.createFromPath(path.join(app.getAppPath(), "assets", "tray.png"));
   tray = new Tray(icon);
-  tray.setToolTip("Assay");
   tray.on("click", () => createOrFocusWindow());
   refreshTrayMenu();
 }

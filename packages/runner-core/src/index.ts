@@ -7,6 +7,7 @@ export {
   type RunnerHostOpts,
   type RunnerHostState,
   type RunnerHostStatus,
+  type RunnerJobDone,
 } from "./runner-host.js";
 export { type RunnerLoopDeps, type RunnerLoopOpts, runLeaseWorkers } from "./runner-loop.js";
 export {

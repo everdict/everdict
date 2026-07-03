@@ -1,7 +1,7 @@
 import type { AgentJob, CaseResult } from "@assay/core";
 import { describe, expect, it, vi } from "vitest";
 import { detectCapabilities } from "./capabilities.js";
-import { RunnerHost, type RunnerHostStatus } from "./runner-host.js";
+import { RunnerHost, type RunnerHostStatus, type RunnerJobDone } from "./runner-host.js";
 import type { RunnerClient } from "./runner-session.js";
 
 const evalCase: AgentJob["evalCase"] = {
@@ -42,6 +42,7 @@ describe("RunnerHost", () => {
   it("start→잡 실행(running)→회신→idle→stop(off) 의 상태 전이를 이벤트로 낸다", async () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const statuses: RunnerHostStatus[] = [];
+    const done: RunnerJobDone[] = [];
     let resolveRun: (() => void) | undefined;
     const runStarted = new Promise<void>((r) => {
       resolveRun = r;
@@ -56,6 +57,7 @@ describe("RunnerHost", () => {
         return RESULT;
       },
       onStatus: (s) => statuses.push(s),
+      onJobDone: (d) => done.push(d),
       sleep: async () => {},
       waitMs: 10,
       pollMs: 1,
@@ -71,6 +73,10 @@ describe("RunnerHost", () => {
     // 잡 결과가 회신됐다 — submit_job_result(j1, RESULT).
     const submit = calls.find((c) => c.name === "submit_job_result");
     expect(submit?.args).toMatchObject({ jobId: "j1", result: RESULT });
+    // 종료 통지(성공)가 났다 — OS 알림의 근거.
+    expect(done).toHaveLength(1);
+    expect(done[0]).toMatchObject({ result: RESULT });
+    expect(done[0]?.error).toBeUndefined();
   });
 
   it("start 는 멱등(중복 루프 없음), capabilities 는 상태에 실린다", async () => {
