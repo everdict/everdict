@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { Bell, BellRing, Check } from 'lucide-react'
+import { Bell, BellOff, BellRing, Check } from 'lucide-react'
 
 import { notificationsResponseSchema, type NotificationItem } from '@/entities/notification'
 import { fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
+import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 // 알림 벨(사이드바) — 개인 피드 인박스. docs/architecture/notifications.md:
 // 폴링(25s + 창 포커스)으로 /api/notifications(BFF 프록시)를 읽고, 새 미읽음은 표준 Web Notification 으로
@@ -22,11 +23,31 @@ function hrefOf(workspace: string, n: NotificationItem): string {
 
 type Permission = NotificationPermission | 'unsupported'
 
+// 유저의 네이티브 알림 선호(끄기/켜기) — 브라우저 권한과 별개의 로컬 스위치. 기본 켜짐.
+const NATIVE_PREF_KEY = 'assay:native-notifications'
+type NativePref = 'on' | 'off'
+
+// 권한 × 선호 → 상태 아이콘/드롭다운이 쓰는 파생 상태.
+type NativeStatus = 'on' | 'off' | 'needs-permission' | 'blocked'
+function nativeStatusOf(permission: Permission, pref: NativePref): NativeStatus {
+  if (permission === 'denied') return 'blocked'
+  if (permission === 'default') return 'needs-permission'
+  return pref === 'on' ? 'on' : 'off'
+}
+const NATIVE_STATUS_LABEL: Record<NativeStatus, string> = {
+  on: '켜짐',
+  off: '꺼짐',
+  'needs-permission': '권한 필요',
+  blocked: '브라우저에서 차단됨',
+}
+
 export function NotificationBell({ workspace }: { workspace: string }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<NotificationItem[]>([])
   const [permission, setPermission] = useState<Permission>('unsupported')
+  const [pref, setPref] = useState<NativePref>('on')
+  const prefRef = useRef<NativePref>('on') // 폴링 클로저에서 최신 선호를 읽기 위한 ref
   const seeded = useRef(false) // 첫 로드 배치는 네이티브 발화 대상이 아니다(앱 켜자마자 과거 알림 폭주 방지)
   const seen = useRef<Set<string>>(new Set())
 
@@ -44,6 +65,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
       if (
         seeded.current &&
         document.hidden &&
+        prefRef.current === 'on' &&
         typeof Notification !== 'undefined' &&
         Notification.permission === 'granted'
       ) {
@@ -63,6 +85,9 @@ export function NotificationBell({ workspace }: { workspace: string }) {
 
   useEffect(() => {
     setPermission(typeof Notification === 'undefined' ? 'unsupported' : Notification.permission)
+    const stored = localStorage.getItem(NATIVE_PREF_KEY) === 'off' ? 'off' : 'on'
+    setPref(stored)
+    prefRef.current = stored
     void poll()
     const timer = setInterval(() => void poll(), POLL_MS)
     const onFocus = () => void poll()
@@ -94,6 +119,13 @@ export function NotificationBell({ workspace }: { workspace: string }) {
     if (typeof Notification === 'undefined') return
     const p = await Notification.requestPermission()
     setPermission(p)
+    if (p === 'granted') applyPref('on')
+  }
+
+  function applyPref(next: NativePref) {
+    setPref(next)
+    prefRef.current = next
+    localStorage.setItem(NATIVE_PREF_KEY, next)
   }
 
   return (
@@ -132,32 +164,86 @@ export function NotificationBell({ workspace }: { workspace: string }) {
             onClick={() => setOpen(false)}
           />
           <div className="absolute left-0 top-full z-50 mt-1 w-[320px] rounded-lg border border-border bg-card shadow-pop">
-            <div className="flex items-center justify-between border-b border-border px-3 py-2">
-              <span className="text-[13px] font-[560] text-foreground">알림</span>
-              <span className="flex items-center gap-2">
-                {permission === 'default' && (
-                  <button
-                    type="button"
-                    onClick={() => void enableNative()}
-                    className="text-[12px] text-primary hover:underline"
-                  >
-                    브라우저 알림 켜기
-                  </button>
-                )}
-                {permission === 'denied' && (
-                  <span className="text-[11px] text-faint">브라우저 알림 차단됨</span>
-                )}
-                {unread > 0 && (
-                  <button
-                    type="button"
-                    onClick={() => void markRead({ all: true })}
-                    className="flex items-center gap-1 text-[12px] text-muted-foreground hover:text-foreground"
-                  >
-                    <Check className="size-3.5" />
-                    모두 읽음
-                  </button>
-                )}
-              </span>
+            {/* 헤더 — 타이틀 없이 컨트롤만: 네이티브 알림 상태 아이콘(클릭→상태 변경 드롭다운) + 모두 읽음. */}
+            <div className="flex items-center justify-end gap-1 border-b border-border px-2 py-1.5">
+              {unread > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void markRead({ all: true })}
+                  className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  <Check className="size-3.5" />
+                  모두 읽음
+                </button>
+              )}
+              {permission !== 'unsupported' &&
+                (() => {
+                  const status = nativeStatusOf(permission, pref)
+                  return (
+                    <DropdownMenu
+                      align="end"
+                      contentClassName="min-w-[240px]"
+                      trigger={({ toggle }) => (
+                        <button
+                          type="button"
+                          onClick={toggle}
+                          title={`네이티브 알림: ${NATIVE_STATUS_LABEL[status]}`}
+                          aria-label={`네이티브 알림 설정 (${NATIVE_STATUS_LABEL[status]})`}
+                          className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
+                        >
+                          {status === 'on' ? (
+                            <Bell className="size-4 text-primary" strokeWidth={1.75} />
+                          ) : (
+                            <BellOff
+                              className={cn(
+                                'size-4',
+                                status === 'blocked' && 'text-destructive/70'
+                              )}
+                              strokeWidth={1.75}
+                            />
+                          )}
+                        </button>
+                      )}
+                    >
+                      <DropdownLabel>네이티브 알림 — {NATIVE_STATUS_LABEL[status]}</DropdownLabel>
+                      {status === 'on' && (
+                        <DropdownItem icon={<BellOff />} onSelect={() => applyPref('off')}>
+                          알림 끄기
+                        </DropdownItem>
+                      )}
+                      {status === 'off' && (
+                        <DropdownItem icon={<Bell />} onSelect={() => applyPref('on')}>
+                          알림 켜기
+                        </DropdownItem>
+                      )}
+                      {status === 'needs-permission' && (
+                        <DropdownItem icon={<Bell />} onSelect={() => void enableNative()}>
+                          권한 허용하기
+                        </DropdownItem>
+                      )}
+                      {status === 'blocked' && (
+                        <p className="px-2 py-1.5 text-[12px] leading-relaxed text-faint">
+                          브라우저가 이 사이트의 알림을 차단했습니다. 주소창의 사이트 설정에서
+                          허용한 뒤 아래로 다시 확인하세요.
+                        </p>
+                      )}
+                      {status === 'blocked' && (
+                        <DropdownItem
+                          icon={<Bell />}
+                          onSelect={() =>
+                            setPermission(
+                              typeof Notification === 'undefined'
+                                ? 'unsupported'
+                                : Notification.permission
+                            )
+                          }
+                        >
+                          다시 확인
+                        </DropdownItem>
+                      )}
+                    </DropdownMenu>
+                  )
+                })()}
             </div>
             {items.length === 0 ? (
               <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
