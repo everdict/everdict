@@ -84,6 +84,7 @@ export interface RegressionAlert {
   scorecardId: string;
   previousScorecardId: string;
   regressions: RegressionDelta[];
+  createdBy?: string; // 예약 생성자 — 개인 알림 피드 수신자(notifications N2)
 }
 
 // 예약(cron) 스코어카드 CRUD. 발사(Temporal Schedule 동기화 + 워크플로)는 slice 2 — 여기선 SSOT 레코드만 관리.
@@ -275,6 +276,7 @@ export class ScheduleService {
       scorecardId,
       previousScorecardId,
       regressions,
+      createdBy: schedule.createdBy, // 예약 생성자 → 개인 알림 피드 수신자(notifications N2)
     });
   }
 }

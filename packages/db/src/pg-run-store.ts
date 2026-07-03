@@ -12,6 +12,7 @@ interface RunRow {
   error: unknown;
   parent_scorecard_id: string | null;
   trigger: string | null;
+  created_by: string | null;
   created_at: string | Date;
   updated_at: string | Date;
 }
@@ -30,6 +31,7 @@ function rowToRecord(row: RunRow): RunRecord {
     error: row.error ?? undefined,
     parentScorecardId: row.parent_scorecard_id ?? undefined,
     trigger: row.trigger ?? undefined,
+    createdBy: row.created_by ?? undefined,
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
@@ -43,8 +45,8 @@ export class PgRunStore implements RunStore {
   async create(r: RunRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO assay_runs
-        (id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+        (id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       [
         r.id,
         r.tenant,
@@ -56,6 +58,7 @@ export class PgRunStore implements RunStore {
         r.error ? JSON.stringify(r.error) : null,
         r.parentScorecardId ?? null,
         r.trigger ?? null,
+        r.createdBy ?? null,
         r.createdAt,
         r.updatedAt,
       ],

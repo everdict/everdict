@@ -1,8 +1,17 @@
-import type { ConnectionMeta, ConnectionToken, RunRecord, WorkspaceSettings } from "@assay/db";
+import type {
+  ConnectionMeta,
+  ConnectionToken,
+  NotificationListOptions,
+  NotificationRecord,
+  NotificationStore,
+  RunRecord,
+  WorkspaceSettings,
+} from "@assay/db";
 
-// 완료 알림 — 워크스페이스에 Mattermost 연결 notify 가 설정돼 있으면 채널에 게시.
-// 외부 계정 연결(Connected accounts)의 "소비" 슬라이스: 저장된 Mattermost 토큰으로 run/scorecard 완료를 알린다.
-// 알림 실패는 run 결과에 영향 없음(fire-and-forget — 스토어가 진실원천, 폴링으로도 조회 가능).
+// 완료 알림 — 한 완료 이벤트가 [개인 피드, Mattermost] 두 채널로 팬아웃된다(docs/architecture/notifications.md N5).
+// 피드: 개인(recipient=레코드 createdBy) 인박스 — 웹 벨/데스크톱 네이티브 알림이 소비(N1/N2).
+// Mattermost: 워크스페이스 notify 설정이 있으면 채널 게시(기존 연결계정 소비 슬라이스).
+// 알림 실패는 run/scorecard 결과에 영향 없음(fire-and-forget — 스토어가 진실원천, 폴링으로도 조회 가능).
 export interface NotificationServiceDeps {
   settingsFor: (tenant: string) => Promise<WorkspaceSettings | undefined>;
   // 연결은 개인 소유(owner=subject)로 조회 — notify 설정에 박힌 ownerSubject 의 토큰으로 게시한다.
@@ -10,16 +19,33 @@ export interface NotificationServiceDeps {
     list: (owner: string) => Promise<ConnectionMeta[]>;
     tokenFor: (owner: string, id: string) => Promise<ConnectionToken | null>;
   };
+  feed?: NotificationStore; // 개인 알림 피드 — 미설정이면 피드 채널만 조용히 생략
   fetch?: typeof fetch;
+  newId?: () => string;
+  now?: () => string;
 }
 
 export class NotificationService {
   private readonly fetchImpl: typeof fetch;
+  private readonly newId: () => string;
+  private readonly nowIso: () => string;
   constructor(private readonly deps: NotificationServiceDeps) {
     this.fetchImpl = deps.fetch ?? fetch;
+    this.newId = deps.newId ?? (() => crypto.randomUUID());
+    this.nowIso = deps.now ?? (() => new Date().toISOString());
   }
 
   async notifyRun(tenant: string, record: RunRecord): Promise<void> {
+    // 피드(N2): 실행자가 알려진 최상위 run 만 — 스코어카드 자식 run 은 배치 1건으로 갈음(범람 방지).
+    if (record.createdBy && !record.parentScorecardId && (record.status === "succeeded" || record.status === "failed"))
+      await this.pushFeed({
+        workspace: tenant,
+        recipient: record.createdBy,
+        kind: record.status === "succeeded" ? "run_completed" : "run_failed",
+        title: `Run ${record.status === "succeeded" ? "완료" : "실패"} — ${record.harness.id}@${record.harness.version}`,
+        body: `case ${record.caseId}`,
+        link: { runId: record.id },
+      });
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
     await this.post(
       tenant,
@@ -34,13 +60,42 @@ export class NotificationService {
       status: string;
       dataset: { id: string; version: string };
       harness: { id: string; version: string };
+      createdBy?: string;
     },
   ): Promise<void> {
+    if (record.createdBy && (record.status === "succeeded" || record.status === "failed"))
+      await this.pushFeed({
+        workspace: tenant,
+        recipient: record.createdBy,
+        kind: record.status === "succeeded" ? "scorecard_completed" : "scorecard_failed",
+        title: `스코어카드 ${record.status === "succeeded" ? "완료" : "실패"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
+        link: { scorecardId: record.id },
+      });
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
     await this.post(
       tenant,
       `${icon} **Scorecard \`${record.id}\`** ${record.status} — dataset \`${record.dataset.id}@${record.dataset.version}\` × \`${record.harness.id}@${record.harness.version}\``,
     );
+  }
+
+  // --- 개인 피드(벨 인박스) — self-scoped(connections/runners 와 동일), 역할 게이트 없음 ---
+
+  listFeed(recipient: string, workspace: string, opts?: NotificationListOptions): Promise<NotificationRecord[]> {
+    return this.deps.feed?.list(recipient, workspace, opts) ?? Promise.resolve([]);
+  }
+
+  markFeedRead(recipient: string, workspace: string, ids: string[] | "all"): Promise<number> {
+    return this.deps.feed?.markRead(recipient, workspace, ids, this.nowIso()) ?? Promise.resolve(0);
+  }
+
+  // 피드 적재 — Mattermost 와 독립적으로 실패를 삼킨다(한 채널 장애가 다른 채널을 막지 않게).
+  private async pushFeed(row: Omit<NotificationRecord, "id" | "createdAt">): Promise<void> {
+    if (!this.deps.feed) return;
+    try {
+      await this.deps.feed.add({ ...row, id: this.newId(), createdAt: this.nowIso() });
+    } catch {
+      // 피드 실패는 결과에 영향 없음.
+    }
   }
 
   // 예약(cron) 회귀 알림 — 직전 스케줄 run 대비 회귀가 잡히면 채널에 고신호 경고를 게시(완료 알림과 별개).
@@ -51,8 +106,21 @@ export class NotificationService {
       scorecardId: string;
       previousScorecardId: string;
       regressions: Array<{ caseId: string; metric: string; baseline: number; candidate: number }>;
+      createdBy?: string; // 예약 생성자 — 개인 피드 수신자(N2)
     },
   ): Promise<void> {
+    if (payload.createdBy)
+      await this.pushFeed({
+        workspace: tenant,
+        recipient: payload.createdBy,
+        kind: "schedule_regression",
+        title: `예약 회귀 — ${payload.scheduleName} (${payload.regressions.length}건)`,
+        body: payload.regressions
+          .slice(0, 3)
+          .map((r) => `${r.caseId} ${r.metric}: ${r.baseline} → ${r.candidate}`)
+          .join(" · "),
+        link: { scorecardId: payload.scorecardId },
+      });
     const lines = payload.regressions
       .slice(0, 10)
       .map((r) => `• \`${r.caseId}\` ${r.metric}: ${r.baseline} → ${r.candidate}`)

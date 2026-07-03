@@ -21,6 +21,7 @@ import type { RuntimeSpec } from "@assay/core";
 import {
   type ConnectionStore,
   InMemoryConnectionStore,
+  InMemoryNotificationStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
@@ -32,8 +33,10 @@ import {
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
+  type NotificationStore,
   type OAuthStateStore,
   PgConnectionStore,
+  PgNotificationStore,
   PgOAuthStateStore,
   PgRunStore,
   PgRunnerStore,
@@ -144,6 +147,7 @@ async function main(): Promise<void> {
     oauthStateStore,
     runnerStore,
     scheduleStore,
+    notificationStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   // scheduleService 는 아래에서 생성되지만(scorecardService 의존), 멤버 제거 훅은 클로저로 늦바인딩한다
@@ -231,6 +235,7 @@ async function main(): Promise<void> {
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
     connections: connectionStore,
+    feed: notificationStore, // 개인 알림 피드(벨 인박스) — docs/architecture/notifications.md
   });
   const service = new RunService({
     dispatcher,
@@ -353,6 +358,7 @@ async function main(): Promise<void> {
     connectionService,
     ciLinkService,
     runnerService,
+    notificationService, // 알림 피드(벨 인박스) 라우트 — self-scoped
     runnerHub,
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,
@@ -391,6 +397,7 @@ interface Persistence {
   oauthStateStore: OAuthStateStore; // OAuth authorize→callback 1회용 pending state
   runnerStore: RunnerStore; // 셀프호스티드 러너(개인 디바이스 페어링) — 페어링 토큰은 SHA-256 해시만 보관
   scheduleStore: ScheduleStore; // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식(SSOT, mutable)
+  notificationStore: NotificationStore; // 개인 알림 피드(벨 인박스) — run/scorecard 완료를 recipient=subject 로 적재
 }
 
 // at-rest 암호화 KEK: ASSAY_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
@@ -434,6 +441,7 @@ async function makePersistence(): Promise<Persistence> {
       oauthStateStore: new InMemoryOAuthStateStore(),
       runnerStore: new InMemoryRunnerStore(),
       scheduleStore: new InMemoryScheduleStore(),
+      notificationStore: new InMemoryNotificationStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -460,6 +468,7 @@ async function makePersistence(): Promise<Persistence> {
     oauthStateStore: new PgOAuthStateStore(client),
     runnerStore: new PgRunnerStore(client),
     scheduleStore: new PgScheduleStore(client),
+    notificationStore: new PgNotificationStore(client),
   };
 }
 

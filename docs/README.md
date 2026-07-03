@@ -32,7 +32,7 @@
 
 ## Design SSOTs (`architecture/` — one doc per effort, decisions locked with the user)
 - [desktop-app](architecture/desktop-app.md) · [self-hosted-runner](architecture/self-hosted-runner.md) · [self-hosted-service-runner](architecture/self-hosted-service-runner.md)
-- [scheduled-evals](architecture/scheduled-evals.md) · [github-actions-trigger](architecture/github-actions-trigger.md) · [bundles](architecture/bundles.md)
+- [notifications](architecture/notifications.md) · [scheduled-evals](architecture/scheduled-evals.md) · [github-actions-trigger](architecture/github-actions-trigger.md) · [bundles](architecture/bundles.md)
 - [leaderboard-model-dimension](architecture/leaderboard-model-dimension.md) · [run-as-primitive](architecture/run-as-primitive.md) · [execution-scoring-orchestration](architecture/execution-scoring-orchestration.md)
 - [judge-placement-locality](architecture/judge-placement-locality.md) · [front-door-generalization](architecture/front-door-generalization.md) · [target-acquisition-generalization](architecture/target-acquisition-generalization.md)
 - [completion-stream-callback](architecture/completion-stream-callback.md) · [portable-harness-runtime](architecture/portable-harness-runtime.md) · [harness-taxonomy](architecture/harness-taxonomy.md)

@@ -42,6 +42,7 @@ import { deleteDatasetVersion } from "./dataset-service.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
+import type { NotificationService } from "./notification-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
 import type { RunnerHub } from "./runner-hub.js";
@@ -55,6 +56,12 @@ import {
   originSource,
 } from "./scorecard-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
+
+// 알림 읽음 처리 요청 — ids 또는 all:true 중 하나(비면 no-op → read:0).
+const ReadNotificationsBodySchema = z.object({
+  ids: z.array(z.string()).optional(),
+  all: z.boolean().optional(),
+});
 
 export const SubmitBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
@@ -149,6 +156,7 @@ export interface ServerDeps {
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — 아웃바운드 OAuth (없으면 해당 라우트 비활성)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
+  notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — self-scoped (없으면 해당 라우트 비활성)
   runnerHub?: RunnerHub; // 셀프호스티드 러너 lease 허브 — MCP lease/result/heartbeat 도구가 쓴다 (없으면 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
@@ -1798,6 +1806,47 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- notifications (개인 알림 피드 — 벨 인박스; connections/runners 와 동일 self-scoped, 역할 게이트 없음.
+  //     docs/architecture/notifications.md — 웹이 폴링으로 소비, 새 항목은 브라우저/데스크톱 네이티브 알림으로 발화) ---
+  app.get("/notifications", async (req, reply) => {
+    if (!deps.notificationService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "notification 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const q = req.query as { unread?: string; limit?: string };
+    const limit = q.limit !== undefined ? Number(q.limit) : Number.NaN;
+    try {
+      // 개인 소유 — 본인(subject)+활성 워크스페이스의 피드만.
+      const notifications = await deps.notificationService.listFeed(principal.subject, principal.workspace, {
+        ...(q.unread === "1" || q.unread === "true" ? { unreadOnly: true } : {}),
+        ...(Number.isInteger(limit) && limit > 0 ? { limit: Math.min(limit, 200) } : {}),
+      });
+      return reply.send({ notifications });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 읽음 처리 — {ids:[…]} 또는 {all:true}. 처리 건수 반환(멱등 — 이미 읽은 건 건드리지 않음).
+  app.post("/notifications/read", async (req, reply) => {
+    if (!deps.notificationService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "notification 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = ReadNotificationsBodySchema.safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      const read = await deps.notificationService.markFeedRead(
+        principal.subject,
+        principal.workspace,
+        body.data.all === true ? "all" : (body.data.ids ?? []),
+      );
+      return reply.send({ read });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // 워크스페이스 러너 로스터 — 이 워크스페이스에서 페어링된 러너(메타만, 토큰 없음). 읽기 전용(members:read).
   // 페어/해제 관리는 개인 소유라 account 페이지(GET /runners)에서; 여기는 워크스페이스가 멤버 러너를 한눈에 보는 뷰.
   app.get("/workspace/runners", async (req, reply) => {
@@ -2169,6 +2218,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           connectionService: deps.connectionService,
           ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,
+          notificationService: deps.notificationService,
           runnerHub: deps.runnerHub,
           settingsStore: deps.settingsStore,
           benchmarkService: deps.benchmarkService,

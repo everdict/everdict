@@ -23,6 +23,8 @@ export const RunRecordSchema = z.object({
   // 이 run 이 왜 생겼는지(출처). standalone|scorecard|schedule|mcp|front-door 등 — 활동 뷰의 source 축.
   // dumb 스토어라 값 자체는 검증하지 않는다(자유 문자열). 미설정 = standalone.
   trigger: z.string().optional(),
+  // 실행자(제출자 subject) — 알림 피드 수신자(notifications N2) + "누가" 표기. 기계 발사는 미설정. mig 0036.
+  createdBy: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

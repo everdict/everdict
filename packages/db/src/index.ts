@@ -83,6 +83,16 @@ export {
   generateOAuthState,
 } from "./oauth-state-store.js";
 export {
+  type NotificationKind,
+  type NotificationListOptions,
+  type NotificationRecord,
+  type NotificationStore,
+  InMemoryNotificationStore,
+  NotificationKindSchema,
+  NotificationRecordSchema,
+  PgNotificationStore,
+} from "./notification-store.js";
+export {
   type RunnerMeta,
   type RunnerStore,
   type PairRunnerInput,

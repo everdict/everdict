@@ -71,6 +71,8 @@ export class RunService {
       caseId: effective.case.id,
       status: "queued",
       ...(effective.trigger ? { trigger: effective.trigger } : {}), // 활동 뷰 source 축(web|mcp|api…)
+      // 실행자 스탬프 — 알림 피드 수신자(notifications N2). 스코어카드 createdBy(0035)와 동일 패턴.
+      ...(effective.submittedBy ? { createdBy: effective.submittedBy } : {}),
       createdAt: ts,
       updatedAt: ts,
     };

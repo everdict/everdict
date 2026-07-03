@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LogIn, LogOut, Menu, Moon, Search, Settings, Sun, UserCog, X } from 'lucide-react'
 
+import { NotificationBell } from '@/widgets/notification-bell'
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
 import type { Workspace } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
@@ -195,6 +196,10 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
         <Kbd>{mac ? '⌘' : 'Ctrl'} K</Kbd>
       </button>
 
+      {/* 알림 인박스(개인 피드) — Linear 의 Inbox 위치. [workspace] 레이아웃이 principal 을 이미 검증했으므로
+          별도 게이트 없음(dev 폴백 포함 — authed 는 실 OIDC 전용 플래그라 부적합). */}
+      <NotificationBell workspace={props.workspace} />
+
       <div className="-mr-1 flex-1 overflow-y-auto pr-1">
         <NavLinks workspace={props.workspace} onNavigate={onNavigate} />
       </div>
@@ -246,7 +251,7 @@ export function Sidebar(props: SidebarProps) {
       </div>
 
       {/* 데스크톱 사이드바 */}
-      <aside className="sticky top-0 hidden h-screen w-[232px] shrink-0 border-r border-border bg-card/30 md:block">
+      <aside className="sticky top-0 z-20 hidden h-screen w-[232px] shrink-0 border-r border-border bg-card/30 md:block">
         <SidebarBody {...props} />
       </aside>
 

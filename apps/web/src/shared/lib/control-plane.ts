@@ -62,6 +62,10 @@ async function callVoid(auth: AuthContext, path: string, init?: RequestInit): Pr
 
 export const controlPlane = {
   me: <T>(auth: AuthContext) => call<T>(auth, '/me'),
+  // 알림 피드(개인 소유; 벨 인박스) — qs 는 '?unread=1&limit=30' 같은 원문 쿼리스트링.
+  listNotifications: <T>(auth: AuthContext, qs: string) => call<T>(auth, `/notifications${qs}`),
+  readNotifications: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/notifications/read', { method: 'POST', body: JSON.stringify(body) }),
   // 워크스페이스 멤버십(self-serve): 내 워크스페이스 목록 + 생성(생성자는 admin).
   listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
   createWorkspace: <T>(auth: AuthContext, body: unknown) =>

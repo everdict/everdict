@@ -31,6 +31,7 @@ import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
 import type { MembershipService } from "./membership-service.js";
+import type { NotificationService } from "./notification-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { RunService } from "./run-service.js";
 import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
@@ -62,6 +63,7 @@ export interface McpDeps {
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — list/connect-url/disconnect
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
+  notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — list/read (self-scoped)
   runnerHub?: RunnerHub; // 러너 lease 허브 — lease_job/submit_job_result/fail_job/heartbeat_job(러너 토큰 전용)
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
@@ -1178,6 +1180,44 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       ({ repository, connection_id }) =>
         run(principal, "harnesses:read", async () =>
           ok(await ci.openSetupPr(ws, principal.subject, connection_id, repository)),
+        ),
+    );
+  }
+
+  if (deps.notificationService) {
+    const notifications = deps.notificationService;
+    // 알림 피드는 개인 소유(recipient=principal.subject) — 역할 게이트 없음(self-scoped, plain). BFF 패리티: GET/POST /notifications.
+    server.registerTool(
+      "list_notifications",
+      {
+        description: "내 알림 피드(작업 완료 등) — 최신순. unread=true 로 미읽음만.",
+        inputSchema: {
+          unread: z.boolean().optional().describe("true 면 미읽음만"),
+          limit: z.number().int().positive().max(200).optional(),
+        },
+      },
+      ({ unread, limit }) =>
+        plain(async () =>
+          ok({
+            notifications: await notifications.listFeed(principal.subject, ws, {
+              ...(unread === true ? { unreadOnly: true } : {}),
+              ...(limit !== undefined ? { limit } : {}),
+            }),
+          }),
+        ),
+    );
+    server.registerTool(
+      "read_notifications",
+      {
+        description: "알림 읽음 처리 — ids 지정 또는 all=true. 처리 건수 반환(멱등).",
+        inputSchema: {
+          ids: z.array(z.string()).optional(),
+          all: z.boolean().optional(),
+        },
+      },
+      ({ ids, all }) =>
+        plain(async () =>
+          ok({ read: await notifications.markFeedRead(principal.subject, ws, all === true ? "all" : (ids ?? [])) }),
         ),
     );
   }
