@@ -96,7 +96,7 @@ export default async function ScorecardsPage({
       />
 
       {error ? (
-        <Callout tone="danger">컨트롤플레인 연결 실패: {error}</Callout>
+        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
       ) : scorecards.length === 0 ? (
         <EmptyState
           title="아직 스코어카드가 없어요."

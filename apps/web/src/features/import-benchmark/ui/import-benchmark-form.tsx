@@ -67,7 +67,7 @@ export function ImportBenchmarkForm({
         value: `recipe:${r.id}`,
         kind: 'recipe' as const,
         id: r.id,
-        label: `${r.id} · 레시피${r.owner === '_shared' ? '(shared)' : ''}`,
+        label: `${r.id} · 레시피${r.owner === '_shared' ? ' (공용)' : ''}`,
       })),
     ],
     [benchmarks, recipes]

@@ -46,7 +46,7 @@ function actionsFor(workspace: string): Command[] {
   return [
     {
       id: 'new-run',
-      label: '새 Run 제출',
+      label: '새 실행',
       icon: Plus,
       group: '액션',
       keywords: 'run 실행 평가 submit',
@@ -70,7 +70,7 @@ function actionsFor(workspace: string): Command[] {
     },
     {
       id: 'ingest-trace',
-      label: '트레이스 인제스트',
+      label: '트레이스 올리기',
       icon: Upload,
       group: '액션',
       keywords: 'ingest otel mlflow trace',
@@ -94,7 +94,7 @@ function actionsFor(workspace: string): Command[] {
     },
     {
       id: 'toggle-theme',
-      label: '테마 전환 (라이트/다크)',
+      label: '테마 바꾸기',
       icon: SunMoon,
       group: '액션',
       keywords: 'theme dark light 다크 라이트',
