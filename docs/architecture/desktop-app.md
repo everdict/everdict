@@ -154,8 +154,10 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
 1. **`packages/runner-core` extraction** — move loop/session/leased-job + tests out of `apps/cli`;
    CLI re-imports; zero behavior change (CLI live e2e re-run proves it).
 2. **Shell** — `apps/desktop` Electron app: BrowserWindow on the deployed web URL, persistent session
-   (Keycloak login sticks), external-link policy (non-web-origin → system browser), tray skeleton,
-   autostart toggle, electron-updater wiring. No runner yet — this alone already *is* "웹처럼 동일하게".
+   (Keycloak login sticks), navigation policy (top-level http/https allowed — OIDC/OAuth redirect flows
+   must leave and re-enter the web origin; `window.open` to non-web origins → system browser), tray
+   skeleton, autostart toggle. No runner yet — this alone already *is* "웹처럼 동일하게".
+   (electron-updater moves to slice 5 — it belongs with electron-builder packaging.)
 3. **Bridge + one-click pairing** — preload `window.assayDesktop` (origin-gated), keychain storage,
    `RunnerHost` embed; web: desktop-aware "이 기기를 러너로 연결" + live 이 기기 status row.
 4. **Runner surface polish** — tray states, OS completion notifications + deep-link focus,

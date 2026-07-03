@@ -20,8 +20,12 @@ logged-in web session over a minimal preload bridge.
   `shared/` — the web must NOT gain `@assay/*` deps).
 
 ## Security invariants (non-negotiable; changing any = update the SSOT doc + this skill in the same PR)
-1. The window loads **only** the configured web origin (`ASSAY_WEB_URL`); any other navigation /
-   `window.open` → `shell.openExternal` (system browser) and `event.preventDefault()`.
+1. The window is pinned to the configured web app (`ASSAY_WEB_URL`). Top-level navigation is allowed
+   for http/https only — OIDC (Keycloak) and connected-accounts OAuth are redirect flows that leave and
+   re-enter the web origin; blocking them breaks login. All other schemes are `preventDefault()`ed.
+   `window.open`: web origin → in-app child window (same webPreferences); other http/https →
+   `shell.openExternal`; anything else denied. Local power is never guarded by navigation policy —
+   only by the IPC-layer origin check (invariant 4).
 2. `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` — always.
 3. The bridge is **exactly** `pairRunner` / `runnerStatus` (+ status events) / `unpairRunner` /
    `appInfo`. No generic `invoke`, no fs/shell exposure. New methods need a locked design decision.
