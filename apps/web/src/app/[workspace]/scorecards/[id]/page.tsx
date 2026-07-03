@@ -1,11 +1,12 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 
+import { membersSchema } from '@/entities/member'
 import { runsSchema } from '@/entities/run'
 import { caseVerdict, scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
-import { fmtPct, HEALTH_TEXT, rateHealth } from '@/shared/lib/format'
+import { fmtPct, fmtSubject, HEALTH_TEXT, rateHealth } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { AutoRefresh } from '@/shared/ui/auto-refresh'
 import { Badge } from '@/shared/ui/badge'
@@ -111,6 +112,18 @@ export default async function ScorecardDetailPage({
     )
   }
 
+  // 실행자 이름(members 조인) — 부가 정보라 실패해도 상세는 보인다. 이름은 프로필 name > email 로컬파트 > subject 축약.
+  let authorName: string | undefined
+  if (record.createdBy) {
+    const createdBy = record.createdBy
+    const members = await controlPlane
+      .listMembers(ctx)
+      .then((r) => membersSchema.parse(r))
+      .catch(() => [])
+    const m = members.find((x) => x.subject === createdBy)
+    authorName = m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(createdBy)
+  }
+
   const summary = record.summary ?? []
   const results = record.scorecard?.results ?? []
   const steps = record.steps ?? []
@@ -189,6 +202,7 @@ export default async function ScorecardDetailPage({
         <Prop label="harness" value={`${record.harness.id}@${record.harness.version}`} />
         <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
+        {authorName && <Prop label="실행자" value={authorName} />}
       </Card>
 
       {/* 트리거 출처(provenance) — CI/예약/API/웹 + 커밋·PR·CI run 링크 + PR 임시 핀(pinOverrides). */}

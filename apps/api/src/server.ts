@@ -1448,6 +1448,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(202).send(
         await deps.scorecardService.ingest({
           tenant: principal.workspace,
+          submittedBy: principal.subject, // 실행자 표기/필터(createdBy)
           ...parsed.data,
           origin: { source: originSource(principal.via) },
         }),
@@ -1473,6 +1474,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(202).send(
         await deps.scorecardService.ingestPull({
           tenant: principal.workspace,
+          submittedBy: principal.subject, // 실행자 표기/필터(createdBy)
           ...parsed.data,
           origin: { source: originSource(principal.via) },
         }),

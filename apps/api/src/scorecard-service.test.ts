@@ -779,6 +779,41 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
     });
     expect(rec.origin).toEqual({ source: "schedule" });
   });
+
+  it("submittedBy(제출자)는 레코드 createdBy 로 스탬프된다 — origin(어디서)과 짝인 실행자(누가)", async () => {
+    const { datasets, instances } = await fixtures();
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      harnesses: instances,
+      newId: () => "sc-by",
+    });
+    const rec = await service.submit({
+      tenant: "acme",
+      submittedBy: "user-alice",
+      dataset: { id: "pd", version: "latest" },
+      harness: { id: "bu", version: "latest" },
+    });
+    expect(rec.createdBy).toBe("user-alice");
+    expect((await store.get("sc-by"))?.createdBy).toBe("user-alice");
+  });
+
+  it("ingest(트레이스 업로드)도 submittedBy 를 createdBy 로 스탬프한다", async () => {
+    const { datasets } = await fixtures();
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({ dispatcher, store, datasets, newId: () => "sc-ingest-by" });
+    const rec = await service.ingest({
+      tenant: "acme",
+      submittedBy: "user-bob",
+      dataset: { id: "pd", version: "latest" },
+      harness: { id: "bu", version: "1.0.0" },
+      traces: [{ caseId: "c1", trace: [] }],
+      judges: [],
+    });
+    expect(rec.createdBy).toBe("user-bob");
+  });
 });
 
 describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가 in-flight 배치를 회수)", () => {

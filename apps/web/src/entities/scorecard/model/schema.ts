@@ -1,7 +1,13 @@
 import { z } from 'zod'
 
 // 컨트롤플레인 ScorecardRecord 의 클라이언트 미러. 웹은 HTTP 로만 결합 — 백엔드 패키지 비의존.
-export const scorecardStatusSchema = z.enum(['queued', 'running', 'succeeded', 'failed', 'superseded'])
+export const scorecardStatusSchema = z.enum([
+  'queued',
+  'running',
+  'succeeded',
+  'failed',
+  'superseded',
+])
 export type ScorecardStatus = z.infer<typeof scorecardStatusSchema>
 
 // 메트릭별 집계(목록/상세 공통).
@@ -100,6 +106,7 @@ export const scorecardRecordSchema = z.object({
   models: scorecardModelsSchema.optional(), // 과거 레코드는 미설정(unknown)
   judgeModels: z.array(z.string()).optional(), // 이 run 을 채점한 judge 모델(들) — model 축과 별개(채점자)
   origin: scorecardOriginSchema.optional(), // 트리거 출처(provenance) — 경량이라 목록에도 포함. 과거 레코드는 미설정.
+  createdBy: z.string().optional(), // 실행자(제출자 subject) — origin(어디서)과 짝인 '누가'. 과거 레코드는 미설정.
   scorecard: fullScorecardSchema.optional(),
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })

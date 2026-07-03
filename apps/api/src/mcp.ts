@@ -779,7 +779,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           }
           const result = IngestScorecardBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          return ok(await scorecards.ingest({ tenant: ws, ...result.data }));
+          return ok(await scorecards.ingest({ tenant: ws, submittedBy: principal.subject, ...result.data }));
         }),
     );
 
@@ -800,7 +800,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           }
           const result = PullIngestBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          return ok(await scorecards.ingestPull({ tenant: ws, ...result.data }));
+          return ok(await scorecards.ingestPull({ tenant: ws, submittedBy: principal.subject, ...result.data }));
         }),
     );
   }

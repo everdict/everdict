@@ -50,9 +50,12 @@ Pg column `steps jsonb` (migration `0026`).
 
 ## Storage (`@assay/db`)
 `ScorecardStore` (`InMemoryScorecardStore` / `PgScorecardStore`), mirror of `RunStore`. `ScorecardRecord` =
-`{ id, tenant, dataset:{id,version}, harness:{id,version}, status, summary?, scorecard?, error?, …}`. **`list`
-omits the heavy `scorecard`** (traces) — only `summary` — so the list is cheap; `get` returns the full record.
-Migration: `packages/db/migrations/0006_create_scorecards.sql`.
+`{ id, tenant, dataset:{id,version}, harness:{id,version}, status, summary?, createdBy?, scorecard?, error?, …}`.
+**`list` omits the heavy `scorecard`** (traces) — only `summary` — so the list is cheap; `get` returns the full
+record. `createdBy` = the submitter's `principal.subject`, stamped on submit **and** both ingest paths (the *who*
+to `origin`'s *where*; older records / machine principals may lack it) — lightweight, so included in `list` for
+the web's author display + user filter (same pattern as datasets/harnesses `created_by`).
+Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_scorecard_created_by.sql`.
 
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |

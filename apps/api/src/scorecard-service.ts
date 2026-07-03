@@ -67,7 +67,11 @@ export const IngestScorecardBodySchema = z.object({
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
 });
 export type IngestScorecardBody = z.infer<typeof IngestScorecardBodySchema>;
-export type IngestScorecardInput = IngestScorecardBody & { tenant: string; origin?: ScorecardOrigin };
+export type IngestScorecardInput = IngestScorecardBody & {
+  tenant: string;
+  submittedBy?: string; // 제출자 subject → 레코드 createdBy(실행자 표기/필터)
+  origin?: ScorecardOrigin;
+};
 
 // pull 인제스트 본문 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 채점(하니스 미실행).
 // source 자격증명은 authSecret 이름(SecretStore)으로만 — spec 에 평문 토큰 금지.
@@ -83,7 +87,11 @@ export const PullIngestBodySchema = z.object({
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
 });
 export type PullIngestBody = z.infer<typeof PullIngestBodySchema>;
-export type PullIngestInput = PullIngestBody & { tenant: string; origin?: ScorecardOrigin };
+export type PullIngestInput = PullIngestBody & {
+  tenant: string;
+  submittedBy?: string; // 제출자 subject → 레코드 createdBy(실행자 표기/필터)
+  origin?: ScorecardOrigin;
+};
 
 // principal.via → origin.source 매핑 — 제출 경로 provenance(어디서 발사됐나).
 // oidc=사람(web UI 토큰), github-actions=CI OIDC 페더레이션, 그 외(api-key/runner)=api. 스케줄 발사는 "schedule" 을 직접 스탬프.
@@ -202,6 +210,7 @@ export class ScorecardService {
       harness: { id: input.harness.id, version: harnessVersion }, // 해석된 구체 버전(never "latest")
       status: "queued",
       ...(origin ? { origin } : {}),
+      ...(input.submittedBy ? { createdBy: input.submittedBy } : {}), // 실행자 — origin(어디서)과 짝인 '누가'
       createdAt: ts,
       updatedAt: ts,
     };
@@ -288,6 +297,7 @@ export class ScorecardService {
       harness: { id: input.harness.id, version: harnessVersion }, // 트레이스를 만든 하니스(라벨)
       status: "queued",
       ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       createdAt: ts,
       updatedAt: ts,
     };
@@ -315,6 +325,7 @@ export class ScorecardService {
       harness: { id: input.harness.id, version: harnessVersion }, // 트레이스를 만든 하니스(라벨)
       status: "queued",
       ...(input.origin ? { origin: input.origin } : {}),
+      ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
       createdAt: ts,
       updatedAt: ts,
     };

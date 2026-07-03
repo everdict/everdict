@@ -51,6 +51,13 @@ describe("InMemoryScorecardStore", () => {
     expect(list[0]?.scorecard).toBeUndefined(); // 목록엔 무거운 scorecard 없음
   });
 
+  it("createdBy(실행자)는 경량 메타 — get 과 list 둘 다에 포함된다", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(rec({ createdBy: "user-alice" }));
+    expect((await store.get("sc1"))?.createdBy).toBe("user-alice");
+    expect((await store.list("acme"))[0]?.createdBy).toBe("user-alice");
+  });
+
   it("list(filter) 로 dataset/harness/status 를 좁힌다(리더보드/트렌드가 전 워크스페이스 스캔 회피)", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec({ id: "a", dataset: { id: "d1", version: "1" }, status: "succeeded" }));
@@ -87,6 +94,7 @@ const ROW = {
   summary: [{ metric: "steps", count: 1, mean: 3, passRate: 1 }],
   models: { observed: ["m"], primary: "m" },
   judge_models: ["gpt-5.4-mini"],
+  created_by: "user-alice",
   scorecard: SCORECARD,
   error: null,
   created_at: new Date("2026-06-19T00:00:00.000Z"),
@@ -94,23 +102,25 @@ const ROW = {
 };
 
 describe("PgScorecardStore", () => {
-  it("create → 파라미터화 INSERT (jsonb 문자열화)", async () => {
+  it("create → 파라미터화 INSERT (jsonb 문자열화 + created_by 컬럼)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
-    await new PgScorecardStore(client).create(rec());
+    await new PgScorecardStore(client).create(rec({ createdBy: "user-alice" }));
     expect(calls[0]?.text).toMatch(/INSERT INTO assay_scorecards/);
     expect(calls[0]?.params?.[0]).toBe("sc1");
     expect(calls[0]?.params?.[8]).toBeNull(); // models 없음(rec 기본)
     expect(calls[0]?.params?.[9]).toBeNull(); // judge_models 없음
-    expect(calls[0]?.params?.[10]).toBeNull(); // scorecard 없음
+    expect(calls[0]?.params?.[11]).toBe("user-alice"); // created_by(실행자)
+    expect(calls[0]?.params?.[12]).toBeNull(); // scorecard 없음
   });
 
-  it("get → row 를 ScorecardRecord 로 매핑(전체 scorecard + models + judgeModels 포함)", async () => {
+  it("get → row 를 ScorecardRecord 로 매핑(전체 scorecard + models + judgeModels + createdBy 포함)", async () => {
     const { client } = fakeClient(() => ({ rows: [ROW] }));
     const got = await new PgScorecardStore(client).get("sc1");
     expect(got?.dataset).toEqual({ id: "repo-smoke", version: "1.0.0" });
     expect(got?.scorecard?.suiteId).toBe("repo-smoke");
     expect(got?.models?.primary).toBe("m");
     expect(got?.judgeModels).toEqual(["gpt-5.4-mini"]);
+    expect(got?.createdBy).toBe("user-alice");
   });
 
   it("list → scorecard 컬럼 미선택(경량)하되 models·judge_models 는 SELECT + 테넌트 필터 + 정렬", async () => {
@@ -120,11 +130,13 @@ describe("PgScorecardStore", () => {
     expect(selectClause).not.toMatch(/ scorecard/); // 무거운 컬럼은 SELECT 안 함(judge_models 의 _models 오탐 방지 위해 공백 앵커)
     expect(selectClause).toMatch(/models/); // model 축은 경량 → 목록에 포함(리더보드용)
     expect(selectClause).toMatch(/judge_models/); // judge 축도 경량 → 목록 포함
+    expect(selectClause).toMatch(/created_by/); // 실행자도 경량 → 목록 포함(표기/필터)
     expect(calls[0]?.text).toMatch(/ORDER BY created_at DESC, id DESC/);
     expect(list[0]?.scorecard).toBeUndefined();
     expect(list[0]?.summary).toHaveLength(1);
     expect(list[0]?.models?.primary).toBe("m");
     expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]);
+    expect(list[0]?.createdBy).toBe("user-alice");
   });
 
   it("list(filter) → SQL WHERE 에 dataset_id/status 절 + 파라미터화(전 스캔 회피)", async () => {
