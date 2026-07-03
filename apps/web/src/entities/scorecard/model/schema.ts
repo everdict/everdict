@@ -62,7 +62,7 @@ export const fullScorecardSchema = z
 // 실행 과정 스텝(타임라인) — run 이 진행되며 append. 웹은 이 순서대로 "진행 과정"을 보여준다.
 export const scorecardStepSchema = z.object({
   ts: z.string(),
-  phase: z.string(), // dispatch | judges | metrics | offload | persist | case
+  phase: z.string(), // dispatch | judges | offload | persist | case
   status: z.enum(['started', 'ok', 'failed', 'info']),
   message: z.string(),
   caseId: z.string().optional(),

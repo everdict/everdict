@@ -1,5 +1,5 @@
 import type { CaseResult, Dataset, GradeContext, JudgeSpec, Placement, Score } from "@assay/core";
-import { InMemoryJudgeRegistry, InMemoryMetricRegistry } from "@assay/registry";
+import { InMemoryJudgeRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import type { JudgeRunner } from "./judge-runner.js";
 import { ScoringService } from "./scoring-service.js";
@@ -20,23 +20,6 @@ const result = (): CaseResult => ({
 });
 
 describe("ScoringService — 실행과 분리된 채점 유닛", () => {
-  it("applyMetrics: 등록 임계 metric 을 이미 산출된 score 위에 적용해 새 점수를 덧붙인다", async () => {
-    const metrics = new InMemoryMetricRegistry();
-    await metrics.register("acme", {
-      kind: "threshold",
-      id: "must-pass",
-      version: "1.0.0",
-      source: "tests-pass",
-      op: "gte",
-      threshold: 1,
-      tags: [],
-    });
-    const scoring = new ScoringService({ metrics });
-    const results = [result()];
-    await scoring.applyMetrics("acme", results, [{ id: "must-pass", version: "latest" }]);
-    expect(results[0]?.scores.some((s) => s.metric === "must-pass")).toBe(true);
-  });
-
   it("applyJudges: JudgeRunner 판정 점수를 각 케이스에 덧붙인다(fake runner)", async () => {
     const judges = new InMemoryJudgeRegistry();
     const spec: JudgeSpec = {
@@ -88,7 +71,6 @@ describe("ScoringService — 실행과 분리된 채점 유닛", () => {
     const scoring = new ScoringService({});
     const results = [result()];
     await scoring.applyJudges("acme", DATASET, results, [{ id: "j", version: "latest" }]);
-    await scoring.applyMetrics("acme", results, [{ id: "m", version: "latest" }]);
     expect(results[0]?.scores).toHaveLength(1); // 원본 grader 점수만
     expect(await scoring.collectJudgeModels("acme", [], undefined)).toEqual([]);
   });

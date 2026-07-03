@@ -9,7 +9,6 @@ export const scheduleRunTemplateSchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string() }),
   harness: z.object({ id: z.string(), version: z.string() }),
   judges: z.array(z.object({ id: z.string(), version: z.string() })).default([]),
-  metrics: z.array(z.object({ id: z.string(), version: z.string() })).default([]),
   runtime: z.string().optional(),
   concurrency: z.number().optional(),
 })

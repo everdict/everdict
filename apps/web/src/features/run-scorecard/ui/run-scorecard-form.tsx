@@ -29,7 +29,7 @@ interface Values {
   concurrency: string // 병렬도(빈칸=컨트롤플레인 기본). 제출 시 숫자로 파싱.
 }
 
-// 벤치마크 × 하니스를 골라 배치 평가를 실행한다. 채점은 벤치마크에 내장 — judge/metric/런타임은 컨트롤플레인 기본값.
+// 벤치마크 × 하니스를 골라 배치 평가를 실행한다. 채점은 벤치마크에 내장 — judge/런타임은 컨트롤플레인 기본값.
 export function RunScorecardForm({
   datasets,
   harnesses,

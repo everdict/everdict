@@ -8,7 +8,6 @@ import {
   HarnessTemplateSpecSchema,
   JudgeRunConfigSchema,
   JudgeSpecSchema,
-  MetricSpecSchema,
   ModelSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
@@ -27,7 +26,6 @@ import type {
   HarnessInstanceRegistry,
   HarnessTemplateRegistry,
   JudgeRegistry,
-  MetricRegistry,
   ModelRegistry,
   RuntimeRegistry,
 } from "@assay/registry";
@@ -88,7 +86,6 @@ export const RunScorecardBodySchema = z.object({
   }),
   origin: ScorecardOriginBodySchema.optional(),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
-  metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
   judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
   // 배치 내 동시 디스패치 케이스 수(runSuite 병렬도). 미지정이면 서비스 기본(=4). 상한으로 과도한 fan-out 차단.
@@ -100,7 +97,6 @@ const ScheduleRunTemplateBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
-  metrics: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
   runtime: z.string().optional(),
   concurrency: z.number().int().min(1).max(64).optional(),
 });
@@ -146,7 +142,6 @@ export interface ServerDeps {
   datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
   judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (없으면 해당 라우트 비활성)
   modelRegistry?: ModelRegistry; // Model(추론/판정 모델) CRUD (없으면 해당 라우트 비활성)
-  metricRegistry?: MetricRegistry; // Metric(런타임 정의 합격규칙) CRUD (없으면 해당 라우트 비활성)
   runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
   // 런타임 연결 테스트 — RuntimeSpec → 라이브 백엔드 빌드 후 probe()(잡 없이 도달성/인증). main 이 시크릿+빌더로 주입.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
@@ -1057,7 +1052,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     },
   );
 
-  // --- bundles (번들 원샷 적용: 하니스+벤치마크+데이터셋+런타임+judge/model/metric 를 한 매니페스트로 등록) ---
+  // --- bundles (번들 원샷 적용: 하니스+벤치마크+데이터셋+런타임+judge/model 를 한 매니페스트로 등록) ---
   // authZ = 새 액션 없이 번들 내용으로부터 필요한 per-type 게이트를 조합해 각각 강제(requiredActionsForBundle).
   app.post("/bundles/apply", async (req, reply) => {
     if (!deps.bundleService) return reply.code(404).send({ code: "NOT_FOUND", message: "번들 서비스 미설정" });
@@ -1206,75 +1201,6 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "models:read");
       return reply.send(await deps.modelRegistry.get(principal.workspace, req.params.id, req.params.version));
-    } catch (err) {
-      return sendError(reply, err); // 없으면 NotFoundError → 404
-    }
-  });
-
-  // --- metrics (workspace-owned SSOT, 런타임 정의 합격규칙: threshold 등 — run 후 scores 위에 post-hoc 적용) ---
-  app.post("/metrics", async (req, reply) => {
-    if (!deps.metricRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "metric registry 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "metrics:write");
-    } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 (검증 전에 게이트)
-    }
-    const parsed = MetricSpecSchema.safeParse(req.body);
-    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
-    try {
-      await deps.metricRegistry.register(principal.workspace, parsed.data);
-      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
-    } catch (err) {
-      return sendError(reply, err); // 불변성 409
-    }
-  });
-
-  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음).
-  app.post("/metrics/validate", async (req, reply) => {
-    if (!deps.metricRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "metric registry 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "metrics:write");
-    } catch (err) {
-      return sendError(reply, err);
-    }
-    const parsed = MetricSpecSchema.safeParse(req.body);
-    if (!parsed.success)
-      return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
-    const existingVersions = await deps.metricRegistry.ownVersions(principal.workspace, parsed.data.id);
-    return reply.send({
-      ok: true,
-      kind: parsed.data.kind,
-      id: parsed.data.id,
-      version: parsed.data.version,
-      existingVersions,
-      versionExists: existingVersions.includes(parsed.data.version),
-    });
-  });
-
-  app.get("/metrics", async (req, reply) => {
-    if (!deps.metricRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "metric registry 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "metrics:read");
-      return reply.send(await deps.metricRegistry.list(principal.workspace));
-    } catch (err) {
-      return sendError(reply, err);
-    }
-  });
-
-  // 특정 버전의 전체 MetricSpec. version 은 "latest" 가능. 다른 워크스페이스 → NOT_FOUND.
-  app.get<{ Params: { id: string; version: string } }>("/metrics/:id/versions/:version", async (req, reply) => {
-    if (!deps.metricRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "metric registry 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      gate(principal, "metrics:read");
-      return reply.send(await deps.metricRegistry.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
       return sendError(reply, err); // 없으면 NotFoundError → 404
     }

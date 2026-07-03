@@ -811,7 +811,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "apply_bundle",
       {
         description:
-          "번들(JSON) 적용 — 하니스+벤치마크+데이터셋+런타임+judge/model/metric 를 한 번에 등록(멱등, 부분성공). 번들 내용에 따라 per-type 권한 필요.",
+          "번들(JSON) 적용 — 하니스+벤치마크+데이터셋+런타임+judge/model 를 한 번에 등록(멱등, 부분성공). 번들 내용에 따라 per-type 권한 필요.",
         inputSchema: { bundle: z.string().describe("Bundle JSON") },
       },
       ({ bundle }) =>
@@ -849,7 +849,6 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           harness_id: z.string(),
           harness_version: z.string().optional(),
           judges: z.array(z.object({ id: z.string(), version: z.string().optional() })).optional(),
-          metrics: z.array(z.object({ id: z.string(), version: z.string().optional() })).optional(),
           runtime: z.string().optional(),
           concurrency: z.number().int().min(1).max(64).optional(),
         },
@@ -869,7 +868,6 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
                 dataset: { id: a.dataset_id, version: a.dataset_version ?? "latest" },
                 harness: { id: a.harness_id, version: a.harness_version ?? "latest" },
                 judges: (a.judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
-                metrics: (a.metrics ?? []).map((m) => ({ id: m.id, version: m.version ?? "latest" })),
                 ...(a.runtime !== undefined ? { runtime: a.runtime } : {}),
                 ...(a.concurrency !== undefined ? { concurrency: a.concurrency } : {}),
               },

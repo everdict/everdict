@@ -15,8 +15,6 @@ export type WebAction =
   | 'judges:write'
   | 'models:read'
   | 'models:write'
-  | 'metrics:read'
-  | 'metrics:write'
   | 'runtimes:read'
   | 'runtimes:write'
   | 'secrets:read'
@@ -38,7 +36,6 @@ const PERMS: Record<string, WebAction[]> = {
     'schedules:read',
     'judges:read',
     'models:read',
-    'metrics:read',
     'runtimes:read',
     'runtimes:write', // 런타임 등록(+연결 테스트)은 role 무관 — harnesses:register 와 동일
     'members:read', // 팀 조회는 viewer+
@@ -58,8 +55,6 @@ const PERMS: Record<string, WebAction[]> = {
     'judges:write',
     'models:read',
     'models:write',
-    'metrics:read',
-    'metrics:write',
     'runtimes:read',
     'runtimes:write', // 런타임 등록(+연결 테스트)은 role 무관
     'members:read',
@@ -79,8 +74,6 @@ const PERMS: Record<string, WebAction[]> = {
     'judges:write',
     'models:read',
     'models:write',
-    'metrics:read',
-    'metrics:write',
     'runtimes:read',
     'runtimes:write', // 런타임 등록은 role 무관(자격증명 값은 secrets:write=admin 로 분리)
     'secrets:read', // 시크릿 관리 = admin

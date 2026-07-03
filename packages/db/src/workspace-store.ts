@@ -210,7 +210,6 @@ const WORKSPACE_SCOPED_TABLES: ReadonlyArray<readonly [table: string, column: st
   ["assay_runtimes", "tenant"],
   ["assay_benchmarks", "tenant"],
   ["assay_models", "tenant"],
-  ["assay_metrics", "tenant"],
   ["assay_harness_templates", "tenant"],
   ["assay_harness_instances", "tenant"],
   ["assay_tenant_keys", "tenant"],

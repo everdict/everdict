@@ -60,7 +60,8 @@ starts+awaits. `suiteWorkflow` fan-out is bounded. See `docs/orchestration.md` +
 - New env type (browser / os-use) → new `Environment` + `EnvSnapshot` variant + grader family.
   os-use adds a `Computer` capability (screenshot/click/type) to `ComputeHandle` + a desktop image.
 - New harness (Codex / LangGraph) → new `EvaluableHarness` adapter (+ a registry entry in `@assay/agent`).
-- New metric → new `Grader` (+ a registry entry).
+- New scoring signal → new `Grader` (+ a registry entry). Grader is the one scoring primitive (a model-backed
+  Grader = an Agent Judge); the automatic passRate/mean summary needs no definition.
 
 ## Build status & order
 Built: core → drivers(Local) → environments(Repo) → harnesses(claude-code/scripted) →

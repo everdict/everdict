@@ -5,7 +5,6 @@ import {
   HarnessInstanceSpecSchema,
   HarnessTemplateSpecSchema,
   JudgeSpecSchema,
-  MetricSpecSchema,
   ModelSpecSchema,
   RuntimeSpecSchema,
 } from "@assay/core";
@@ -15,14 +14,13 @@ import type {
   HarnessInstanceRegistry,
   HarnessTemplateRegistry,
   JudgeRegistry,
-  MetricRegistry,
   ModelRegistry,
   RuntimeRegistry,
 } from "@assay/registry";
 import { z } from "zod";
 import type { BenchmarkService } from "./benchmark-service.js";
 
-// 번들 — 여러 레지스트리에 흩어진 기존 스펙들의 매니페스트(하니스+벤치마크+데이터셋+런타임+judge/model/metric).
+// 번들 — 여러 레지스트리에 흩어진 기존 스펙들의 매니페스트(하니스+벤치마크+데이터셋+런타임+judge/model).
 // "특화물은 번들" 원칙: codex+pinch 같은 특정 하니스/벤치마크는 이 번들(순수 데이터)로 등록 — 코어 무변경.
 // 적용기는 각 섹션을 기존 per-type register() 로 팬아웃하는 얇은 오케스트레이션일 뿐(새 추상화/스토어 없음).
 export const BundleSchema = z.object({
@@ -35,7 +33,6 @@ export const BundleSchema = z.object({
   datasets: z.array(DatasetSchema).default([]), // 즉시 실행 가능한 케이스 번들
   judges: z.array(JudgeSpecSchema).default([]),
   models: z.array(ModelSpecSchema).default([]),
-  metrics: z.array(MetricSpecSchema).default([]),
   runtimes: z.array(RuntimeSpecSchema).default([]),
 });
 export type Bundle = z.infer<typeof BundleSchema>;
@@ -44,7 +41,7 @@ export type Bundle = z.infer<typeof BundleSchema>;
 export const BundleItemStatusSchema = z.enum(["ok", "conflict", "error", "skipped"]);
 export type BundleItemStatus = z.infer<typeof BundleItemStatusSchema>;
 export interface BundleItemResult {
-  kind: string; // harness-template | harness | benchmark-recipe | dataset | judge | model | metric | runtime
+  kind: string; // harness-template | harness | benchmark-recipe | dataset | judge | model | runtime
   id: string;
   version: string;
   status: BundleItemStatus;
@@ -65,7 +62,6 @@ export function requiredActionsForBundle(bundle: Bundle): Action[] {
   if (bundle.benchmarkRecipes.length > 0) need.add("datasets:write"); // 레시피=데이터셋 어댑터
   if (bundle.judges.length > 0) need.add("judges:write");
   if (bundle.models.length > 0) need.add("models:write");
-  if (bundle.metrics.length > 0) need.add("metrics:write");
   if (bundle.runtimes.length > 0) need.add("runtimes:write");
   return [...need];
 }
@@ -77,7 +73,6 @@ export interface BundleServiceDeps {
   datasets?: DatasetRegistry;
   judges?: JudgeRegistry;
   models?: ModelRegistry;
-  metrics?: MetricRegistry;
   runtimes?: RuntimeRegistry;
 }
 
@@ -116,7 +111,7 @@ export class BundleService {
 
   async apply(tenant: string, createdBy: string | undefined, bundle: Bundle): Promise<BundleApplyResult> {
     const results: BundleItemResult[] = [];
-    const { harnessTemplates, harnessInstances, benchmarks, datasets, judges, models, metrics, runtimes } = this.deps;
+    const { harnessTemplates, harnessInstances, benchmarks, datasets, judges, models, runtimes } = this.deps;
 
     await applySection(
       "harness-template",
@@ -148,7 +143,6 @@ export class BundleService {
     );
     await applySection("judge", bundle.judges, judges ? (s) => judges.register(tenant, s) : undefined, results);
     await applySection("model", bundle.models, models ? (s) => models.register(tenant, s) : undefined, results);
-    await applySection("metric", bundle.metrics, metrics ? (s) => metrics.register(tenant, s) : undefined, results);
     await applySection("runtime", bundle.runtimes, runtimes ? (s) => runtimes.register(tenant, s) : undefined, results);
 
     return { id: bundle.id, version: bundle.version, results };

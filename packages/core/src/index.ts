@@ -14,7 +14,6 @@ export * from "./harness-template.js";
 export * from "./suite.js";
 export * from "./dataset.js";
 export * from "./judge-spec.js";
-export * from "./metric-spec.js";
 export * from "./model-spec.js";
 export * from "./runtime-spec.js";
 export * from "./shell.js";

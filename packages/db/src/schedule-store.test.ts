@@ -14,7 +14,6 @@ const rec = (id: string, tenant: string, createdAt: string): ScheduleRecord => (
     dataset: { id: "d", version: "latest" },
     harness: { id: "h", version: "latest" },
     judges: [],
-    metrics: [],
   },
   createdAt,
   updatedAt: createdAt,

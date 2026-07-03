@@ -31,8 +31,8 @@ Control-plane runs/scorecards are split by concern — see `docs/architecture/ex
 - **Execution** = `execute-case.ts` `executeCase(deps, owner, job) → CaseResult` — **pure**: repo-token + dispatch.
   No settle/offload/notify. `RunService` and `ScorecardService` both call it; the shared unit is execution, NOT the
   single-run orchestrator (never route the batch through `RunService.submit`).
-- **Scoring** = `scoring-service.ts` `ScoringService` — judge/metric application over results, independent of how
-  they were produced. Live batch **and** ingest share it; aggregation stays pure in `@assay/suite`.
+- **Scoring** = `scoring-service.ts` `ScoringService` — judge application over results, independent of how
+  they were produced. Live batch **and** ingest share it; aggregation (passRate/mean summary) stays pure in `@assay/suite`.
 - **Orchestration** = the services drive execution (single/batch) and own admit/settle, delivery (202/webhook),
   notify, progress. `run` is just execution — the "after" belongs to the orchestrator.
 

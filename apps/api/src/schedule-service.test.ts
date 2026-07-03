@@ -8,7 +8,6 @@ const runTemplate: ScheduleRunTemplate = {
   dataset: { id: "repo-smoke", version: "latest" },
   harness: { id: "scripted", version: "latest" },
   judges: [],
-  metrics: [],
 };
 
 function svc(): ScheduleService {

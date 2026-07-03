@@ -23,8 +23,6 @@ export type Action =
   | "judges:write"
   | "models:read"
   | "models:write"
-  | "metrics:read"
-  | "metrics:write"
   | "runtimes:read"
   | "runtimes:write"
   | "secrets:read"
@@ -50,7 +48,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "schedules:read", // 예약 조회는 양성(스코어카드 조회와 동일) → viewer+
     "judges:read",
     "models:read",
-    "metrics:read",
     "runtimes:read",
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관 — 모든 멤버가 자기 워크스페이스 실행 인프라를 등록(harnesses:register 와 동일)
     "members:read", // 팀(워크스페이스 멤버) 조회는 양성 → viewer+
@@ -71,8 +68,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:write",
     "models:read",
     "models:write", // 모델 정의 = eval 콘텐츠(누구로 돌렸나) → judges/datasets 와 동일하게 member 가능
-    "metrics:read",
-    "metrics:write", // 메트릭 정의 = eval 콘텐츠(무엇으로 합격 판정하나) → member 가능
     "runtimes:read",
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관
     "members:read",
@@ -97,8 +92,6 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "judges:write",
     "models:read",
     "models:write",
-    "metrics:read",
-    "metrics:write",
     "runtimes:read",
     "runtimes:write", // 런타임 등록은 role 무관(viewer/member 도 보유) — 자격증명 '값'은 secrets:write(admin)로 분리 보호
     "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
@@ -128,7 +121,6 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "schedules:read",
   "judges:read",
   "models:read",
-  "metrics:read",
   "runtimes:read",
   "members:read",
 ];
@@ -143,7 +135,6 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "schedules:write",
   "judges:write",
   "models:write",
-  "metrics:write",
   "runtimes:write",
 ];
 // admin scope(=Full Access) = 모든 action. role 매트릭스의 합집합(admin role 이 전체를 보유)에서 도출.

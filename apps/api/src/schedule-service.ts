@@ -200,7 +200,6 @@ export class ScheduleService {
       dataset: t.dataset,
       harness: t.harness,
       judges: t.judges,
-      metrics: t.metrics,
       ...(t.runtime !== undefined ? { runtime: t.runtime } : {}),
       ...(t.concurrency !== undefined ? { concurrency: t.concurrency } : {}),
     });
