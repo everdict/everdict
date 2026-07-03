@@ -25,6 +25,9 @@ export const RunRecordSchema = z.object({
   trigger: z.string().optional(),
   // 실행자(제출자 subject) — 알림 피드 수신자(notifications N2) + "누가" 표기. 기계 발사는 미설정. mig 0036.
   createdBy: z.string().optional(),
+  // 배치된 런타임(placement.target: 등록 런타임 id | self:<runnerId>) — 작업 큐의 "어디서 도는가" 축. mig 0040.
+  // 미설정 = 기본 백엔드. 과거 레코드는 미설정.
+  runtime: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });

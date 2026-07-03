@@ -33,6 +33,7 @@ import { repinHarnessImages } from "./harness-pin-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
 import type { ProfileService } from "./profile-service.js";
+import type { QueueService } from "./queue-service.js";
 import type { RunService } from "./run-service.js";
 import type { RunnerHub, SelfHostedKey } from "./runner-hub.js";
 import { RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
@@ -52,6 +53,7 @@ export interface McpDeps {
   service: RunService;
   scorecardService?: ScorecardService;
   scheduleService?: ScheduleService;
+  queueService?: QueueService; // 작업 큐 스냅샷(런타임 레인별 실행 중/대기/다음 예약)
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
@@ -132,6 +134,19 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         return ok(record);
       }),
   );
+
+  if (deps.queueService) {
+    const queue = deps.queueService;
+    server.registerTool(
+      "get_queue",
+      {
+        description:
+          "작업 큐 스냅샷 — 런타임 레인별 실행 중/대기(FIFO, 맨 앞이 다음 작업)/다음 예약 발사. 배치(스코어카드)=1작업(진행률 포함).",
+        inputSchema: {},
+      },
+      () => run(principal, "runs:read", async () => ok(await queue.snapshot(ws))),
+    );
+  }
 
   server.registerTool(
     "submit_run",

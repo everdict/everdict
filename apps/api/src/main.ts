@@ -111,6 +111,7 @@ import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
+import { QueueService } from "./queue-service.js";
 import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
@@ -336,10 +337,21 @@ async function main(): Promise<void> {
     notifyRegression: (tenant, payload) => notificationService.notifyRegression(tenant, payload),
   });
 
+  // 작업 큐 스냅샷 — 지금 무엇이 어디(런타임 레인)에서 돌고/기다리고, 다음 예약 발사는 무엇인지(읽기 전용 가시성).
+  const queueService = new QueueService({
+    scorecards: scorecardStore,
+    runs: store,
+    schedules: scheduleService,
+    runtimes: runtimeRegistry,
+    // 배치 진행률의 total = 데이터셋 케이스 수(해석 실패 시 생략 — 진행률은 자식 run 카운트로만).
+    caseCountFor: async (tenant, id, version) => (await datasetRegistry.get(tenant, id, version)).cases.length,
+  });
+
   const app = buildServer({
     service,
     scorecardService,
     scheduleService,
+    queueService,
     benchmarkService,
     bundleService,
     harnessTemplates: harnessTemplateRegistry,

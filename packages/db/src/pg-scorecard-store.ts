@@ -19,6 +19,7 @@ interface ScorecardRow {
   judge_models: unknown;
   origin: unknown;
   created_by: string | null;
+  runtime: string | null;
   scorecard: unknown;
   error: unknown;
   steps: unknown;
@@ -43,6 +44,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     judgeModels: row.judge_models ?? undefined, // 경량 → 목록에도 포함(judge 축 필터/표시)
     origin: row.origin ?? undefined, // 경량 → 목록에도 포함(트리거 출처 칩/커밋 링크)
     createdBy: row.created_by ?? undefined, // 경량 → 목록에도 포함(실행자 표기/필터)
+    runtime: row.runtime ?? undefined, // 경량 → 목록에도 포함(작업 큐 런타임 축)
     scorecard: hasDetail ? (row.scorecard ?? undefined) : undefined,
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
@@ -59,8 +61,8 @@ export class PgScorecardStore implements ScorecardStore {
   async create(r: ScorecardRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO assay_scorecards
-        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, scorecard, error, steps, run_ids, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)`,
+        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, scorecard, error, steps, run_ids, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
       [
         r.id,
         r.tenant,
@@ -74,6 +76,7 @@ export class PgScorecardStore implements ScorecardStore {
         r.judgeModels ? JSON.stringify(r.judgeModels) : null,
         r.origin ? JSON.stringify(r.origin) : null,
         r.createdBy ?? null,
+        r.runtime ?? null,
         r.scorecard ? JSON.stringify(r.scorecard) : null,
         r.error ? JSON.stringify(r.error) : null,
         r.steps ? JSON.stringify(r.steps) : null,
@@ -161,7 +164,7 @@ export class PgScorecardStore implements ScorecardStore {
       vals.push(filter.status);
     }
     const res = await this.client.query<ScorecardRow>(
-      `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, error, created_at, updated_at
+      `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, error, created_at, updated_at
        FROM assay_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,

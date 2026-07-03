@@ -63,6 +63,8 @@ export class RunService {
     const effective: SubmitInput = input.runtime
       ? { ...input, case: { ...input.case, placement: { ...input.case.placement, target: input.runtime } } }
       : input;
+    // 배치된 런타임(작업 큐 축) — 명시 runtime 또는 케이스 자체의 placement.target. 없으면 기본 백엔드(미설정).
+    const placedRuntime = input.runtime ?? input.case.placement?.target;
     const ts = this.now();
     const record: RunRecord = {
       id: this.newId(),
@@ -73,6 +75,7 @@ export class RunService {
       ...(effective.trigger ? { trigger: effective.trigger } : {}), // 활동 뷰 source 축(web|mcp|api…)
       // 실행자 스탬프 — 알림 피드 수신자(notifications N2). 스코어카드 createdBy(0035)와 동일 패턴.
       ...(effective.submittedBy ? { createdBy: effective.submittedBy } : {}),
+      ...(placedRuntime ? { runtime: placedRuntime } : {}),
       createdAt: ts,
       updatedAt: ts,
     };

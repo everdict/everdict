@@ -82,6 +82,8 @@ export const controlPlane = {
       opts?.scorecardId ? `/runs?scorecardId=${encodeURIComponent(opts.scorecardId)}` : '/runs'
     ),
   getRun: <T>(auth: AuthContext, id: string) => call<T>(auth, `/runs/${encodeURIComponent(id)}`),
+  // 작업 큐 스냅샷 — 런타임 레인별 실행 중/대기(FIFO)/다음 예약 발사.
+  getQueue: <T>(auth: AuthContext) => call<T>(auth, '/queue'),
   submitRun: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/runs', { method: 'POST', body: JSON.stringify(body) }),
   listHarnesses: <T>(auth: AuthContext) => call<T>(auth, '/harnesses'),

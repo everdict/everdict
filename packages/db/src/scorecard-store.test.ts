@@ -51,11 +51,13 @@ describe("InMemoryScorecardStore", () => {
     expect(list[0]?.scorecard).toBeUndefined(); // 목록엔 무거운 scorecard 없음
   });
 
-  it("createdBy(실행자)는 경량 메타 — get 과 list 둘 다에 포함된다", async () => {
+  it("createdBy(실행자)·runtime(배치 런타임)은 경량 메타 — get 과 list 둘 다에 포함된다", async () => {
     const store = new InMemoryScorecardStore();
-    await store.create(rec({ createdBy: "user-alice" }));
+    await store.create(rec({ createdBy: "user-alice", runtime: "self:mac" }));
     expect((await store.get("sc1"))?.createdBy).toBe("user-alice");
+    expect((await store.get("sc1"))?.runtime).toBe("self:mac");
     expect((await store.list("acme"))[0]?.createdBy).toBe("user-alice");
+    expect((await store.list("acme"))[0]?.runtime).toBe("self:mac");
   });
 
   it("list(filter) 로 dataset/harness/status 를 좁힌다(리더보드/트렌드가 전 워크스페이스 스캔 회피)", async () => {
@@ -95,6 +97,7 @@ const ROW = {
   models: { observed: ["m"], primary: "m" },
   judge_models: ["gpt-5.4-mini"],
   created_by: "user-alice",
+  runtime: "docker",
   scorecard: SCORECARD,
   error: null,
   created_at: new Date("2026-06-19T00:00:00.000Z"),
@@ -121,6 +124,7 @@ describe("PgScorecardStore", () => {
     expect(got?.models?.primary).toBe("m");
     expect(got?.judgeModels).toEqual(["gpt-5.4-mini"]);
     expect(got?.createdBy).toBe("user-alice");
+    expect(got?.runtime).toBe("docker"); // 작업 큐 런타임 축
   });
 
   it("list → scorecard 컬럼 미선택(경량)하되 models·judge_models 는 SELECT + 테넌트 필터 + 정렬", async () => {
@@ -137,6 +141,7 @@ describe("PgScorecardStore", () => {
     expect(list[0]?.models?.primary).toBe("m");
     expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]);
     expect(list[0]?.createdBy).toBe("user-alice");
+    expect(list[0]?.runtime).toBe("docker"); // 경량 → 목록 포함(런타임 레인)
   });
 
   it("list(filter) → SQL WHERE 에 dataset_id/status 절 + 파라미터화(전 스캔 회피)", async () => {

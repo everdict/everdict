@@ -211,6 +211,7 @@ export class ScorecardService {
       status: "queued",
       ...(origin ? { origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}), // 실행자 — origin(어디서)과 짝인 '누가'
+      ...(input.runtime ? { runtime: input.runtime } : {}), // 배치된 런타임(작업 큐 축) — 미설정=기본 백엔드
       createdAt: ts,
       updatedAt: ts,
     };
@@ -480,6 +481,7 @@ export class ScorecardService {
           status: "running",
           parentScorecardId: id,
           trigger: "scorecard",
+          ...(runtime ? { runtime } : {}), // 배치의 런타임을 자식에도 — 큐의 런타임 레인 축
           createdAt: ts,
           updatedAt: ts,
         });

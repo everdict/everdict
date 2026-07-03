@@ -1,4 +1,5 @@
 import {
+  Activity,
   BarChart3,
   Boxes,
   CalendarClock,
@@ -53,6 +54,12 @@ export const NAV_SECTIONS: NavSection[] = [
         label: '예약',
         icon: CalendarClock,
         keywords: 'schedule cron 예약 주기 회귀',
+      },
+      {
+        href: '/queue',
+        label: '작업',
+        icon: Activity,
+        keywords: 'queue 큐 작업 워크로드 진행 대기 런타임',
       },
       { href: '/report', label: '리포트', icon: FileText, keywords: 'report 회귀 추세' },
     ],

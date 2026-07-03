@@ -89,6 +89,12 @@ panel/list guidance is not.
   `TraceEvent[]`; **pull** fetches from a tenant's OTel/MLflow (`source` + `runs:[{caseId,runId}]`, auth-secret name).
   Both produce a scorecard with no harness run. Role-gated off `/me` (run/ingest = member+, read/compare = viewer+).
   See `docs/scorecards.md`.
+- **작업 `/{workspace}/queue`** — the **work queue**: per-runtime lanes (기본 백엔드 · registered runtimes ·
+  `self:<runner>`) each showing **실행 중** (batch = one item with a case-progress bar), **대기** (FIFO — first
+  item badged '다음'), and **다음 예약** (upcoming schedule fires, Temporal-authoritative). Reads
+  `GET /queue` (`runs:read`; MCP parity `get_queue`); auto-refreshes while anything is active. Runtime placement
+  is captured on records (`RunRecord.runtime`/`ScorecardRecord.runtime`, mig 0040). See
+  `docs/architecture/work-queue.md`.
 - **Judge `/{workspace}/judges`** — owned vs `_shared` Agent Judges (kind + version chips; rows link to detail).
   **상세 `/{workspace}/judges/[id]`** shows kind + fields + rubric. **등록 `/{workspace}/judges/new`** — a
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`

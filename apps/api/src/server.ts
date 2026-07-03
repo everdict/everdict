@@ -48,6 +48,7 @@ import type { RunService } from "./run-service.js";
 import type { RunnerHub } from "./runner-hub.js";
 import { PairRunnerBodySchema, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
+import type { QueueService } from "./queue-service.js";
 import { type ScheduleService, isValidCron } from "./schedule-service.js";
 import {
   IngestScorecardBodySchema,
@@ -141,6 +142,7 @@ export interface ServerDeps {
   service: RunService;
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
   scheduleService?: ScheduleService; // 예약(cron) 스코어카드 CRUD (없으면 해당 라우트 비활성)
+  queueService?: QueueService; // 작업 큐 스냅샷(런타임 레인별 실행 중/대기/다음 예약) (없으면 라우트 비활성)
   benchmarkService?: BenchmarkService; // 벤치마크 카탈로그 + 인입 (없으면 해당 라우트 비활성)
   bundleService?: BundleService; // 번들 적용(하니스+벤치마크+런타임 원샷 등록; 없으면 라우트 비활성)
   harnessTemplates?: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조) CRUD
@@ -571,6 +573,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       // scorecardId 지정 시 그 배치의 자식 run(케이스 드릴다운); 아니면 standalone 활동 리스트(자식 숨김).
       const scorecardId = req.query.scorecardId;
       return reply.send(await deps.service.list(principal.workspace, scorecardId ? { scorecardId } : undefined));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- 작업 큐(워크로드 가시성) — 런타임 레인별 실행 중/대기(FIFO)/다음 예약 발사 스냅샷. viewer+ 읽기 전용. ---
+  app.get("/queue", async (req, reply) => {
+    if (!deps.queueService) return reply.code(404).send({ code: "NOT_FOUND", message: "queue 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "runs:read");
+      return reply.send(await deps.queueService.snapshot(principal.workspace));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -2207,6 +2222,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           service: deps.service,
           scorecardService: deps.scorecardService,
           scheduleService: deps.scheduleService,
+          queueService: deps.queueService,
           harnessTemplates: deps.harnessTemplates,
           harnessInstances: deps.harnessInstances,
           datasetRegistry: deps.datasetRegistry,

@@ -73,6 +73,8 @@ export const ScorecardRecordSchema = z.object({
   // 실행자(제출자 subject) — "누가 실행시켰나"(아바타+이름) 표기/필터용. origin.source 가 '어디서'라면 이건 '누가'.
   // 데이터셋/하니스의 created_by 와 동일 패턴. 과거 레코드·기계 발사(subject 없음)는 미설정. 경량 → 목록에도 포함.
   createdBy: z.string().optional(),
+  // 배치된 런타임(placement.target) — 작업 큐의 "어디서 도는가" 축. 미설정 = 기본 백엔드. mig 0040.
+  runtime: z.string().optional(),
   scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)
