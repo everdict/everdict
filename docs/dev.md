@@ -26,6 +26,14 @@ pnpm -C apps/web dev          # web with hot reload → http://localhost:3001
 ```
 Open http://localhost:3001 → **로그인** → Keycloak → sign in. Stop with `bash scripts/dev/down.sh`.
 
+Desktop shell against the dev web (renders the same web + embeds the self-hosted runner):
+```bash
+ASSAY_WEB_URL=http://localhost:3001 pnpm -F @assay/desktop dev
+```
+Desktop live e2e (Playwright drives the real shell — one-click pair → `self:` run → provenance):
+`node scripts/live/desktop-runner.mjs` (준비 커맨드는 스크립트 헤더 참고 — dev 폴백용으로 Keycloak 을 끈
+웹 인스턴스를 씀). See `docs/architecture/desktop-app.md`.
+
 ## Accounts (imported into the realm)
 | user | password | workspace | role |
 |---|---|---|---|

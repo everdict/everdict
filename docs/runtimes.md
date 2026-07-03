@@ -9,6 +9,8 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
 > `local` is in-process on the **control-plane** host (dev only). A self-hosted runner (personal, on the account
 > page; lease/pull transport) **supersedes** `local` for the "single machine" use case — the machine becomes the
 > *user's*, with the user's login and isolation. Cluster runtimes below stay workspace-shared as today.
+> Easiest path: the [desktop app](architecture/desktop-app.md) — one-click "이 기기를 러너로 연결" on the
+> account page (no token copy); headless boxes use `assay runner --pair <rnr_…>`.
 
 ## Contract (`@assay/core`)
 `RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`) with `id, version, description?, tags`:

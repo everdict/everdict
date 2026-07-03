@@ -27,10 +27,16 @@ See `docs/execution-backends.md` (Backend vs Driver) and `docs/sandbox-auth.md` 
 - new compute target (Nomad/K8s/Windows) → new `Backend` (agent + loop unchanged).
 - OS Win/macOS on a pool → `Backend` + per-run VM checkpoint isolation.
 - env browser/os-use → new `Environment` + snapshot variant (+ a `Computer` capability for os-use).
-- harness Codex/LangGraph → new `EvaluableHarness` (+ registry entry in `@assay/agent`).
+- harness Codex/LangGraph → new `EvaluableHarness` (+ registry entry in `@assay/agent`); any CLI with
+  zero code via the declarative `command` harness (`docs/command-harness.md`).
 - **service-topology harness** (multi-service + browser/OS target env) → `HarnessSpec(service)` +
   orchestrator-agnostic `ServiceTopologyBackend` (Nomad/K8s) + `@assay/trace` (OTel/MLflow). See `docs/service-harness.md`.
 - new scoring signal → new `Grader` (+ registry entry). A model-backed `Grader` is an Agent Judge.
+- run on the *user's own* machine → the push model flips to **pull**: `SelfHostedBackend` parks jobs in an
+  owner-scoped lease queue; `@assay/runner-core` (shared by the `assay runner` CLI and the **desktop app**
+  `apps/desktop`, which adds one-click pairing + tray residency) leases → runs the same eval loop locally →
+  posts the result back with a provenance tag. See `architecture/self-hosted-runner.md` +
+  `architecture/desktop-app.md`.
 
 ## Operational layer (multi-tenant SaaS)
 Above placement, the control plane turns "run one case" into "serve many tenants on finite/elastic infra":
@@ -40,19 +46,25 @@ Above placement, the control plane turns "run one case" into "serve many tenants
   namespace) and **warm pools are never shared across tenants**. **Secrets** (`SecretProvider`) are per-tenant.
 - **Budgets** (`BudgetTracker`) — per-tenant `{usd, tokens, runs}` admission (`PaymentRequiredError` 402) + cost
   accounting. **Autoscaler** — grows/shrinks capacity from queue depth.
-- **HTTP surface** (`apps/api`, Fastify) — async `POST /runs` → run-id, `GET /runs/:id` poll, webhooks, `RunStore`
-  (in-memory or **`PgRunStore`** on Postgres via `DATABASE_URL`; ClickHouse analytics behind the same interface
-  later). See `docs/api.md` + `docs/execution-backends.md`.
-- **Harness registry** (`@assay/registry`) — the version SSOT: `(tenant, id, version) → HarnessSpec` (immutable
-  versions, semver `latest`; in-memory / file-GitOps / `PgHarnessRegistry` on Postgres). `ServiceTopologyBackend.specFor`
-  resolves a job's `{id, version}` reference to a concrete spec at dispatch. See `docs/registry.md`.
+- **HTTP surface** (`apps/api`, Fastify) — async `POST /runs` → run-id, `GET /runs/:id` poll, webhooks; batch
+  **scorecards** (dataset×harness → `Scorecard`+summary, baseline↔candidate diff, push/pull trace ingest,
+  harness×model leaderboard, cron **schedules** on Temporal), **bundles** (one-shot install), personal
+  **connected accounts** + **runners**, CI triggers; stores: `RunStore` + `ScorecardStore` (in-memory or `Pg*`
+  on Postgres via `DATABASE_URL`). Full **BFF↔MCP parity** (`/mcp`). See `docs/api.md` + `docs/mcp.md` +
+  `docs/scorecards.md`.
+- **Registry** (`@assay/registry`) — the version SSOT for **harnesses · datasets · judges · runtimes**:
+  `(tenant, id, version)` (immutable versions, semver `latest`, tenant-owned + `_shared` fallback; in-memory /
+  file-GitOps / `Pg*` on Postgres). `ServiceTopologyBackend.specFor` resolves a job's `{id, version}` reference
+  to a concrete spec at dispatch. See `docs/registry.md` + `docs/datasets.md` + `docs/judges.md` +
+  `docs/runtimes.md`.
 - **Auth core** (`@assay/auth`, owned by `apps/api`) — every credential resolves to a `Principal{subject,
   workspace, roles, via}`: OIDC/Keycloak JWT (verified via `jose` JWKS) for humans, API keys (`ak_…`) for
   agents/MCP/CI, behind one `compositeAuthenticator`. `workspace = tenant = trust-zone`; a role→action matrix
   (`viewer/member/admin`) gates every route. The web is a token courier, **not** an auth authority. See `docs/auth.md`.
-- **Tenant access + SaaS web** — tenant-owned harnesses and workspace-scoped reads (`docs/tenancy.md`); the
-  `apps/web` Next.js dashboard (Keycloak user login, per-tenant scores/runs/harnesses) is a pure HTTP client of
-  the control plane (`docs/web.md`). Humans → Keycloak; agents → API keys.
+- **Tenant access + human surfaces** — tenant-owned entities and workspace-scoped reads (`docs/tenancy.md`); the
+  `apps/web` Next.js dashboard (Keycloak user login, `/{workspace}/…`) is a pure HTTP client of the control
+  plane (`docs/web.md`), and the `apps/desktop` Electron shell renders that same web (parity by construction)
+  while embedding the self-hosted runner (`architecture/desktop-app.md`). Humans → Keycloak; agents → API keys.
 
 ## Cross-cutting
 - Cost/token capture comes from the harness trace (e.g. Claude's `total_cost_usd` in stream-json); the same
