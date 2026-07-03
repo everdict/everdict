@@ -9,11 +9,11 @@ import {
   History,
   ScrollText,
   Tags,
-  Timer,
   Waypoints,
 } from 'lucide-react'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
+import { CaseCard } from '@/features/inspect-dataset'
 import {
   datasetSchema,
   datasetsSchema,
@@ -338,47 +338,10 @@ export default async function DatasetDetailPage({
               </div>
             </div>
 
-            {/* 케이스별 카드 — 태스크 강조 + 환경/채점 배지 + 태그·타임아웃 */}
+            {/* 케이스별 카드 — 클릭 시 다이얼로그로 전문(태스크 마크다운 + 원본 JSON) */}
             <div className="space-y-2">
               {dataset.cases.map((c) => (
-                <div
-                  key={c.id}
-                  className="space-y-2 rounded-lg border bg-card p-3.5 shadow-raise transition-colors hover:border-border-strong"
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="font-mono text-[12px] font-[510] text-foreground">{c.id}</span>
-                    {c.tags.length > 0 && (
-                      <div className="flex flex-wrap justify-end gap-x-1.5 gap-y-0.5">
-                        {c.tags.map((t) => (
-                          <span key={t} className="text-[10.5px] text-faint">
-                            #{t}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                  <p
-                    className="line-clamp-2 text-[13px] leading-relaxed text-muted-foreground"
-                    title={c.task}
-                  >
-                    {c.task}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-1.5">
-                    {c.env?.kind && <EnvBadge kind={c.env.kind} />}
-                    <span className="ml-0.5 text-[11px] text-faint">채점</span>
-                    {c.graders.length === 0 ? (
-                      <span className="text-[11px] text-faint">—</span>
-                    ) : (
-                      c.graders.map((g, i) => <GraderBadge key={`${g.id}-${i}`} id={g.id} />)
-                    )}
-                    {typeof c.timeoutSec === 'number' && (
-                      <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-faint">
-                        <Timer className="size-3" />
-                        {c.timeoutSec}s
-                      </span>
-                    )}
-                  </div>
-                </div>
+                <CaseCard key={c.id} item={c} />
               ))}
             </div>
           </>
