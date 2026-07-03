@@ -26,6 +26,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
+import type { CiLinkService } from "./ci-link-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
@@ -59,6 +60,7 @@ export interface McpDeps {
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // 런타임 연결 테스트
   secretStore?: SecretStore;
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — list/connect-url/disconnect
+  ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
   runnerHub?: RunnerHub; // 러너 lease 허브 — lease_job/submit_job_result/fail_job/heartbeat_job(러너 토큰 전용)
   settingsStore?: WorkspaceSettingsStore;
@@ -1107,6 +1109,72 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       ({ provider }) =>
         run(principal, "settings:write", async () =>
           ok({ providers: await connections.removeIntegration(ws, provider) }),
+        ),
+    );
+  }
+
+  // CI repo links — repository↔하니스 슬롯 매핑(= GitHub Actions OIDC trust policy) + picker + setup-PR.
+  if (deps.ciLinkService) {
+    const ci = deps.ciLinkService;
+    server.registerTool(
+      "list_ci_links",
+      { description: "이 워크스페이스의 CI repo link 목록(레포↔하니스 슬롯 매핑 = OIDC trust)", inputSchema: {} },
+      () => run(principal, "harnesses:read", async () => ok({ links: await ci.list(ws) })),
+    );
+    server.registerTool(
+      "link_ci_repository",
+      {
+        description:
+          "CI repo link 등록/갱신(관리자) — link 존재가 그 레포 GitHub Actions OIDC 토큰을 이 워크스페이스로 신뢰한다(keyless CI).",
+        inputSchema: {
+          repository: z.string().describe('"owner/name"'),
+          harness: z.string().describe("하니스 인스턴스 id"),
+          dataset: z.string().optional().describe("CI 가 발사할 데이터셋 id(setup-PR 워크플로에 사용)"),
+          slots: z
+            .record(z.object({ path: z.string().optional() }))
+            .optional()
+            .describe("서비스 슬롯 → 모노레포 path(선택) — 이 레포 CI 가 갈아끼우는 슬롯들"),
+        },
+      },
+      ({ repository, harness, dataset, slots }) =>
+        run(principal, "settings:write", async () =>
+          ok({
+            links: await ci.upsert(ws, principal.subject, {
+              repository,
+              harness,
+              slots: slots ?? {},
+              ...(dataset !== undefined ? { dataset } : {}),
+            }),
+          }),
+        ),
+    );
+    server.registerTool(
+      "unlink_ci_repository",
+      {
+        description: "CI repo link 해제(관리자) — 그 레포의 OIDC 신뢰도 함께 끊긴다.",
+        inputSchema: { repository: z.string().describe('"owner/name"') },
+      },
+      ({ repository }) => run(principal, "settings:write", async () => ok({ links: await ci.remove(ws, repository) })),
+    );
+    server.registerTool(
+      "list_connection_repos",
+      {
+        description: "내 GitHub 연결로 그 계정의 레포 목록 조회(picker) — 본인 연결만(self-scoped)",
+        inputSchema: { connection_id: z.string(), page: z.number().int().min(1).optional() },
+      },
+      ({ connection_id, page }) =>
+        plain(async () => ok(await ci.listRepos(principal.subject, connection_id, page ?? 1))),
+    );
+    server.registerTool(
+      "open_ci_setup_pr",
+      {
+        description:
+          "link 된 레포에 Assay eval 워크플로 YAML 을 합성해 setup-PR 을 연다(내 GitHub 연결 토큰 사용). 머지하면 CI eval 활성.",
+        inputSchema: { repository: z.string().describe('"owner/name"'), connection_id: z.string() },
+      },
+      ({ repository, connection_id }) =>
+        run(principal, "harnesses:read", async () =>
+          ok(await ci.openSetupPr(ws, principal.subject, connection_id, repository)),
         ),
     );
   }

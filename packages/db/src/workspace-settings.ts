@@ -10,6 +10,7 @@ export const WorkspaceCiLinkSchema = z.object({
   repository: z.string().min(1), // "owner/name" (대소문자 무시 비교)
   host: z.string().optional(), // 미지정 = github.com (GHES 페더레이션은 후속)
   harness: z.string().min(1), // 하니스 인스턴스 id
+  dataset: z.string().optional(), // CI 가 발사할 데이터셋 id — setup-PR 워크플로 생성에 사용
   // 서비스 슬롯 → 모노레포 path filter(선택). 이 레포의 CI 가 갈아끼우는 슬롯들.
   slots: z.record(z.object({ path: z.string().optional() })).default({}),
   createdBy: z.string(), // 감사용(발사 인증과 무관)

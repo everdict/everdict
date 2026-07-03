@@ -96,7 +96,9 @@ export {
   type WorkspaceSettings,
   type WorkspaceSettingsStore,
   type WorkspaceIntegrationConfig,
+  type WorkspaceCiLink,
   WorkspaceSettingsSchema,
+  WorkspaceCiLinkSchema,
   InMemoryWorkspaceSettingsStore,
   PgWorkspaceSettingsStore,
 } from "./workspace-settings.js";

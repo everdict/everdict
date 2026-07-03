@@ -98,6 +98,7 @@ import { InProcessCallbackRendezvous } from "@assay/topology";
 import { buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
+import { CiLinkService } from "./ci-link-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
@@ -317,6 +318,14 @@ async function main(): Promise<void> {
     },
   });
 
+  // CI repo link — 레포↔하니스 슬롯 매핑(= GitHub Actions OIDC trust) CRUD + 레포 picker + setup-PR 생성기.
+  // picker/setup-PR 은 멤버 개인 GitHub 연결 토큰(tokenFor)을 서버 안에서만 사용한다.
+  const ciLinkService = new CiLinkService({
+    settings: settingsStore,
+    connections: connectionStore,
+    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // 생성 워크플로의 api-url
+  });
+
   // 예약(cron) 스코어카드. SSOT = scheduleStore; Temporal 주소가 설정되면 TemporalScheduleDriver 로 Schedule 동기화
   // (발사 활성화). 발사는 워크플로→internal 라우트→여기 submitScorecard. 미설정이면 CRUD 만(발사 비활성, dev).
   const temporalAddress = process.env.ASSAY_TEMPORAL_ADDRESS;
@@ -351,6 +360,7 @@ async function main(): Promise<void> {
     profileService,
     secretStore,
     connectionService,
+    ciLinkService,
     runnerService,
     runnerHub,
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),

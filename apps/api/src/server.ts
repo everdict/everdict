@@ -38,6 +38,7 @@ import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest }
 import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
+import { type CiLinkService, UpsertCiLinkBodySchema } from "./ci-link-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
@@ -151,6 +152,7 @@ export interface ServerDeps {
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — 아웃바운드 OAuth (없으면 해당 라우트 비활성)
+  ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
   runnerHub?: RunnerHub; // 셀프호스티드 러너 lease 허브 — MCP lease/result/heartbeat 도구가 쓴다 (없으면 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
@@ -1784,6 +1786,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 레포 picker — 본인 GitHub 연결로 그 계정의 레포 목록을 프록시(토큰은 서버 안에서만). CI repo link 연결 UX 용.
+  app.get<{ Params: { id: string }; Querystring: { page?: string } }>("/connections/:id/repos", async (req, reply) => {
+    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      // 연결은 개인 소유 — 역할 게이트 없이 본인(subject)의 연결로만 조회.
+      const page = req.query.page ? Number(req.query.page) : 1;
+      return reply.send(
+        await deps.ciLinkService.listRepos(principal.subject, req.params.id, Number.isFinite(page) ? page : 1),
+      );
+    } catch (err) {
+      return sendError(reply, err); // 남의/없는 연결 404, 비-GitHub 연결 400, GitHub 실패 502
+    }
+  });
+
   // 워크스페이스 애플리케이션 로스터 — 이 워크스페이스에서 만들어진 외부 계정 연결(메타만, 토큰 없음). 읽기 전용(members:read).
   // 연결의 연결/해제 관리는 개인 소유라 account 페이지(GET /connections)에서; 여기는 워크스페이스가 자기 앱을 한눈에 보는 뷰.
   app.get("/workspace/applications", async (req, reply) => {
@@ -1948,6 +1966,73 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // --- CI repo links (repository ↔ 하니스 슬롯 매핑 = GitHub Actions OIDC trust policy) ---
+  // 읽기는 harnesses:read(하니스 상세에 노출되는 양성 메타), 생성/삭제는 settings:write(link=신뢰 부여 — admin).
+  app.get("/workspace/ci/links", async (req, reply) => {
+    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      return reply.send({ links: await deps.ciLinkService.list(principal.workspace) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.put("/workspace/ci/links", async (req, reply) => {
+    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = UpsertCiLinkBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write"); // link 존재 = 그 레포 OIDC 토큰 신뢰(trust grant) → admin
+      return reply.send({ links: await deps.ciLinkService.upsert(principal.workspace, principal.subject, body.data) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // repository 는 "owner/name"(슬래시 포함) — 경로 파라미터 대신 쿼리로 받는다.
+  app.delete<{ Querystring: { repository?: string } }>("/workspace/ci/links", async (req, reply) => {
+    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    if (!req.query.repository)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "repository 쿼리 파라미터가 필요합니다." });
+    try {
+      gate(principal, "settings:write");
+      return reply.send({ links: await deps.ciLinkService.remove(principal.workspace, req.query.repository) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // setup-PR — link 의 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR(호출자의 개인 GitHub 연결 토큰).
+  // link 가 이미 신뢰를 부여했으므로 여기는 viewer+ (PR 은 GitHub 쪽에서 머지 승인 필요 — 실행 권한 아님).
+  app.post("/workspace/ci/links/setup-pr", async (req, reply) => {
+    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ repository: z.string().min(1), connectionId: z.string().min(1) }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "harnesses:read");
+      return reply.send(
+        await deps.ciLinkService.openSetupPr(
+          principal.workspace,
+          principal.subject, // 연결은 개인 소유 — 본인 연결로만 PR 을 연다
+          body.data.connectionId,
+          body.data.repository,
+          baseUrl(req),
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err); // link 없음 404 / 비-GitHub 연결 400 / GitHub 실패 502
     }
   });
 
@@ -2149,6 +2234,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           probeRuntime: deps.probeRuntime,
           secretStore: deps.secretStore,
           connectionService: deps.connectionService,
+          ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,
           runnerHub: deps.runnerHub,
           settingsStore: deps.settingsStore,
