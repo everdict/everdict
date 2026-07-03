@@ -43,6 +43,12 @@ shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state/
 ```
 Import order enforces downward layer deps (app → widgets → features → entities → shared).
 
+**Dropdowns are always `shared/ui/combobox` (`Combobox`)** — the native `<select>` atom was removed from
+`shared/ui/input` and `<datalist>` suggestions were replaced too, so every picker (list sort/filter bars, form
+fields, react-hook-form via `Controller`) opens the same Linear-style popover (search, keyboard nav, hints).
+`<optgroup>` has no popover equivalent — encode the group as each option's `hint` (e.g. runtime picker's
+"내 로컬 호스트", benchmark import's "카탈로그/내 레시피").
+
 ## Screens
 - **워크스페이스 스위처** (사이드바 최상단, 모든 화면) — 현재 워크스페이스(이름+역할) 드롭다운으로 내가 속한
   워크스페이스 간 전환(= `/{id}` 로 이동; URL 첫 세그먼트가 활성 워크스페이스의 권위, 미들웨어가 쿠키 동기화) + **새 워크스페이스**

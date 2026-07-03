@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
-import { Label, Select } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Label } from '@/shared/ui/input'
 
 export interface HarnessOption {
   id: string
@@ -32,13 +33,13 @@ export function HarnessPicker({
   return (
     <div className="min-w-56 space-y-1.5">
       <Label htmlFor="harness">Harness</Label>
-      <Select id="harness" value={h} onChange={(e) => go(e.target.value)}>
-        {harnesses.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.label}
-          </option>
-        ))}
-      </Select>
+      <Combobox
+        id="harness"
+        value={h}
+        onChange={go}
+        options={harnesses.map((o) => ({ value: o.id, label: o.label }))}
+        className="w-full"
+      />
     </div>
   )
 }

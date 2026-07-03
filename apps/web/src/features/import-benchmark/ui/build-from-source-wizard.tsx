@@ -8,7 +8,8 @@ import { versionsForId } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Input, Label, Textarea } from '@/shared/ui/input'
 import { VersionField } from '@/shared/ui/version-field'
 
 import {
@@ -320,17 +321,16 @@ export function BuildFromSourceWizard({
                 {splits.length > 0 ? (
                   <div className="space-y-1.5">
                     <Label htmlFor="split">config / split</Label>
-                    <Select
+                    <Combobox
                       id="split"
                       value={splitSel}
-                      onChange={(e) => setSplitSel(e.target.value)}
-                    >
-                      {splits.map((s) => (
-                        <option key={splitKey(s)} value={splitKey(s)}>
-                          {s.config} / {s.split}
-                        </option>
-                      ))}
-                    </Select>
+                      onChange={setSplitSel}
+                      options={splits.map((s) => ({
+                        value: splitKey(s),
+                        label: `${s.config} / ${s.split}`,
+                      }))}
+                      className="w-full"
+                    />
                   </div>
                 ) : (
                   splitsNote && <p className="text-xs text-muted-foreground">{splitsNote}</p>
@@ -427,16 +427,18 @@ export function BuildFromSourceWizard({
             />
             <div className="space-y-1.5">
               <Label htmlFor="envKind">실행 환경</Label>
-              <Select
+              <Combobox
                 id="envKind"
                 value={envKind}
-                onChange={(e) => setEnvKind(e.target.value as EnvKind)}
-              >
-                <option value="browser">browser (웹, startUrl)</option>
-                <option value="prompt">prompt (QA, 무환경)</option>
-                <option value="repo">repo (git clone · 코딩)</option>
-                <option value="os-use">os-use (데스크탑)</option>
-              </Select>
+                onChange={(v) => setEnvKind(v as EnvKind)}
+                options={[
+                  { value: 'browser', label: 'browser (웹, startUrl)' },
+                  { value: 'prompt', label: 'prompt (QA, 무환경)' },
+                  { value: 'repo', label: 'repo (git clone · 코딩)' },
+                  { value: 'os-use', label: 'os-use (데스크탑)' },
+                ]}
+                className="w-full"
+              />
             </div>
           </div>
           {/* env 종류별 추가 필드 */}
@@ -493,16 +495,18 @@ export function BuildFromSourceWizard({
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="cat">category</Label>
-              <Select
+              <Combobox
                 id="cat"
                 value={category}
-                onChange={(e) => setCategory(e.target.value as Category)}
-              >
-                <option value="qa">qa</option>
-                <option value="browser">browser</option>
-                <option value="coding">coding</option>
-                <option value="tool">tool</option>
-              </Select>
+                onChange={(v) => setCategory(v as Category)}
+                options={[
+                  { value: 'qa' },
+                  { value: 'browser' },
+                  { value: 'coding' },
+                  { value: 'tool' },
+                ]}
+                className="w-full"
+              />
             </div>
           </div>
           <VersionField
@@ -582,15 +586,18 @@ function MapField({
   return (
     <div className="space-y-1.5">
       <Label>{label}</Label>
-      <Select value={value} onChange={(e) => onChange(e.target.value)}>
-        {optional && <option value="">(없음)</option>}
-        {!optional && value === '' && <option value="">— 선택 —</option>}
-        {fields.map((f) => (
-          <option key={f} value={f}>
-            {f}
-          </option>
-        ))}
-      </Select>
+      {/* optional=빈 값 '(없음)' 옵션 노출, 필수=빈 값이면 placeholder 로 선택 유도(기존 native 동작 유지) */}
+      <Combobox
+        value={value}
+        onChange={onChange}
+        options={[
+          ...(optional ? [{ value: '', label: '(없음)' }] : []),
+          ...fields.map((f) => ({ value: f })),
+        ]}
+        placeholder="— 선택 —"
+        className="w-full"
+        aria-label={label}
+      />
     </div>
   )
 }

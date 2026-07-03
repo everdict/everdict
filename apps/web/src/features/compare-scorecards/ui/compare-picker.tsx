@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
-import { Label, Select } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Label } from '@/shared/ui/input'
 
 export interface CompareOption {
   id: string
@@ -40,23 +41,23 @@ export function ComparePicker({
     <div className="flex flex-wrap items-end gap-3">
       <div className="min-w-56 space-y-1.5">
         <Label htmlFor="baseline">Baseline</Label>
-        <Select id="baseline" value={b} onChange={(e) => setB(e.target.value)}>
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+        <Combobox
+          id="baseline"
+          value={b}
+          onChange={setB}
+          options={options.map((o) => ({ value: o.id, label: o.label }))}
+          className="w-full"
+        />
       </div>
       <div className="min-w-56 space-y-1.5">
         <Label htmlFor="candidate">Candidate</Label>
-        <Select id="candidate" value={c} onChange={(e) => setC(e.target.value)}>
-          {options.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+        <Combobox
+          id="candidate"
+          value={c}
+          onChange={setC}
+          options={options.map((o) => ({ value: o.id, label: o.label }))}
+          className="w-full"
+        />
       </div>
       <Button type="button" onClick={compare} disabled={!b || !c}>
         비교

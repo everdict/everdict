@@ -6,7 +6,8 @@ import { useParams, useRouter } from 'next/navigation'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Input, Label, Textarea } from '@/shared/ui/input'
 
 import {
   ingestScorecardAction,
@@ -107,18 +108,15 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
           <Label htmlFor="datasetId">데이터셋 (caseId 정렬용)</Label>
-          <Input
+          <Combobox
             id="datasetId"
-            list="ds-ids"
             value={datasetId}
-            onChange={(e) => setDatasetId(e.target.value)}
-            placeholder="repo-smoke"
+            onChange={setDatasetId}
+            options={datasets.map((d) => ({ value: d.id }))}
+            placeholder="데이터셋 선택"
+            emptyText="데이터셋이 없습니다"
+            className="w-full"
           />
-          <datalist id="ds-ids">
-            {datasets.map((d) => (
-              <option key={d.id} value={d.id} />
-            ))}
-          </datalist>
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="datasetVersion">버전</Label>
@@ -174,14 +172,16 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
               <Label htmlFor="sourceKind">소스 종류</Label>
-              <Select
+              <Combobox
                 id="sourceKind"
                 value={sourceKind}
-                onChange={(e) => setSourceKind(e.target.value === 'mlflow' ? 'mlflow' : 'otel')}
-              >
-                <option value="otel">OTel</option>
-                <option value="mlflow">MLflow</option>
-              </Select>
+                onChange={(v) => setSourceKind(v === 'mlflow' ? 'mlflow' : 'otel')}
+                options={[
+                  { value: 'otel', label: 'OTel' },
+                  { value: 'mlflow', label: 'MLflow' },
+                ]}
+                className="w-full"
+              />
             </div>
             <div className="col-span-2 space-y-1.5">
               <Label htmlFor="endpoint">엔드포인트</Label>

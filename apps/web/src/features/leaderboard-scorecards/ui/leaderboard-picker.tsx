@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
-import { Input, Label, Select } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Input, Label } from '@/shared/ui/input'
 
 export interface DatasetOption {
   id: string
@@ -45,13 +46,13 @@ export function LeaderboardPicker({
     <div className="flex flex-wrap items-end gap-3">
       <div className="min-w-56 space-y-1.5">
         <Label htmlFor="dataset">Dataset (벤치마크)</Label>
-        <Select id="dataset" value={d} onChange={(e) => setD(e.target.value)}>
-          {datasets.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+        <Combobox
+          id="dataset"
+          value={d}
+          onChange={setD}
+          options={datasets.map((o) => ({ value: o.id, label: o.label }))}
+          className="w-full"
+        />
       </div>
       <div className="min-w-36 space-y-1.5">
         <Label htmlFor="metric">Metric</Label>
@@ -59,10 +60,16 @@ export function LeaderboardPicker({
       </div>
       <div className="min-w-44 space-y-1.5">
         <Label htmlFor="window">집계</Label>
-        <Select id="window" value={w} onChange={(e) => setW(e.target.value)}>
-          <option value="latest">latest (최신 실행)</option>
-          <option value="best">best (최고 점수)</option>
-        </Select>
+        <Combobox
+          id="window"
+          value={w}
+          onChange={setW}
+          options={[
+            { value: 'latest', label: 'latest (최신 실행)' },
+            { value: 'best', label: 'best (최고 점수)' },
+          ]}
+          className="w-full"
+        />
       </div>
       <div className="min-w-40 space-y-1.5">
         <Label htmlFor="judgeModel">Judge 모델 (선택)</Label>

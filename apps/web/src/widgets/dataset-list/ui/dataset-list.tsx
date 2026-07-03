@@ -12,7 +12,7 @@ import { cn } from '@/shared/lib/utils'
 import { Avatar } from '@/shared/ui/avatar'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
-import { Input, Select } from '@/shared/ui/input'
+import { Input } from '@/shared/ui/input'
 import { Score } from '@/shared/ui/score'
 import { StatCard } from '@/shared/ui/stat-card'
 
@@ -158,18 +158,14 @@ export function DatasetList({
             className="w-[150px]"
           />
         )}
-        <Select
+        <Combobox
+          options={SORTS.map((s) => ({ value: s.value, label: s.label }))}
           value={sort}
-          onChange={(e) => setSort(e.target.value as Sort)}
-          className="w-auto"
+          onChange={(v) => setSort(v as Sort)}
+          className="w-[130px]"
+          align="end"
           aria-label="정렬"
-        >
-          {SORTS.map((s) => (
-            <option key={s.value} value={s.value}>
-              {s.label}
-            </option>
-          ))}
-        </Select>
+        />
       </div>
 
       {visible.length === 0 ? (

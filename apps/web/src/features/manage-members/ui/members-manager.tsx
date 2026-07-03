@@ -6,7 +6,7 @@ import type { Member } from '@/entities/member'
 import { Avatar } from '@/shared/ui/avatar'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Select } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
 
 import { removeMemberAction, setMemberRoleAction } from '../api/manage-members'
 
@@ -75,18 +75,14 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
               </div>
               {canWrite ? (
                 <span className="flex items-center gap-2">
-                  <Select
+                  <Combobox
                     value={m.role}
                     disabled={pending}
-                    onChange={(e) => onRole(m.subject, e.target.value)}
+                    onChange={(v) => onRole(m.subject, v)}
+                    options={ROLES.map((r) => ({ value: r }))}
                     className="w-28"
-                  >
-                    {ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {r}
-                      </option>
-                    ))}
-                  </Select>
+                    aria-label="역할"
+                  />
                   {confirmSubject === m.subject ? (
                     <>
                       <Button

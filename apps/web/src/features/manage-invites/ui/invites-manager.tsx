@@ -5,7 +5,8 @@ import { useState, useTransition } from 'react'
 import type { Invite } from '@/entities/member'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label, Select } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Input, Label } from '@/shared/ui/input'
 
 import { createInviteAction, revokeInviteAction } from '../api/manage-invites'
 
@@ -143,18 +144,13 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         <div className="flex items-end gap-2.5">
           <div className="space-y-1.5">
             <Label htmlFor="invite-role">역할</Label>
-            <Select
+            <Combobox
               id="invite-role"
               value={role}
-              onChange={(e) => setRole(e.target.value)}
+              onChange={setRole}
+              options={ROLES.map((r) => ({ value: r }))}
               className="w-32"
-            >
-              {ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {r}
-                </option>
-              ))}
-            </Select>
+            />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="invite-expiry">만료(시간, 선택)</Label>

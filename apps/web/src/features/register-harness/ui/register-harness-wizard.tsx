@@ -7,7 +7,8 @@ import { ChevronDown, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Input, Label, Textarea } from '@/shared/ui/input'
 
 import {
   registerHarnessAction,
@@ -142,24 +143,24 @@ export function TemplateForm({
       <div className="grid grid-cols-3 gap-3">
         <div className="space-y-1.5">
           <Label>kind</Label>
-          <Select
+          <Combobox
             value={s.kind}
-            onChange={(e) => set({ kind: e.target.value as Kind })}
+            onChange={(v) => set({ kind: v as Kind })}
             disabled={lockId}
-            className={cn(lockId && 'opacity-60')}
-          >
-            <option value="service">service</option>
-            <option value="command">command</option>
-            <option value="process">process</option>
-          </Select>
+            options={[{ value: 'service' }, { value: 'command' }, { value: 'process' }]}
+            className={cn('w-full', lockId && 'opacity-60')}
+            aria-label="kind"
+          />
         </div>
         <div className="space-y-1.5">
           <Label>category (대분류)</Label>
-          <Select value={s.category} onChange={(e) => set({ category: e.target.value })}>
-            {CATEGORIES.map((c) => (
-              <option key={c}>{c}</option>
-            ))}
-          </Select>
+          <Combobox
+            value={s.category}
+            onChange={(v) => set({ category: v })}
+            options={CATEGORIES.map((c) => ({ value: c }))}
+            className="w-full"
+            aria-label="category"
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="tid">id</Label>
@@ -288,24 +289,25 @@ export function TemplateForm({
             {s.deps.map((d, i) => (
               <div key={i} className="space-y-2 rounded-lg border bg-card p-3">
                 <div className="flex items-center gap-2">
-                  <Select value={d.store} onChange={(e) => setDep(i, { store: e.target.value })}>
-                    {STORES.map((x) => (
-                      <option key={x}>{x}</option>
-                    ))}
-                  </Select>
+                  <Combobox
+                    value={d.store}
+                    onChange={(v) => setDep(i, { store: v })}
+                    options={STORES.map((x) => ({ value: x }))}
+                    className="w-full"
+                    aria-label="store"
+                  />
                   <Input
                     value={d.role}
                     onChange={(e) => setDep(i, { role: e.target.value })}
                     placeholder="role"
                   />
-                  <Select
+                  <Combobox
                     value={d.isolateBy}
-                    onChange={(e) => setDep(i, { isolateBy: e.target.value })}
-                  >
-                    {ISOLATE.map((x) => (
-                      <option key={x}>{x}</option>
-                    ))}
-                  </Select>
+                    onChange={(v) => setDep(i, { isolateBy: v })}
+                    options={ISOLATE.map((x) => ({ value: x }))}
+                    className="w-full"
+                    aria-label="isolateBy"
+                  />
                   <RemoveBtn onClick={() => set({ deps: s.deps.filter((_, j) => j !== i) })} />
                 </div>
                 <Input
@@ -345,10 +347,13 @@ export function TemplateForm({
           <div className="space-y-3">
             <h3 className="text-[13px] font-[560]">Trace source</h3>
             <div className="grid grid-cols-3 gap-2">
-              <Select value={s.traceKind} onChange={(e) => set({ traceKind: e.target.value })}>
-                <option value="mlflow">mlflow</option>
-                <option value="otel">otel</option>
-              </Select>
+              <Combobox
+                value={s.traceKind}
+                onChange={(v) => set({ traceKind: v })}
+                options={[{ value: 'mlflow' }, { value: 'otel' }]}
+                className="w-full"
+                aria-label="trace source kind"
+              />
               <Input
                 className="col-span-2"
                 value={s.traceEndpoint}

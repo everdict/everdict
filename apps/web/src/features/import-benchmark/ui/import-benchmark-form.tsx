@@ -6,7 +6,8 @@ import { useParams, useRouter } from 'next/navigation'
 import { versionsForId } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { Input, Label, Select, Textarea } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Input, Label, Textarea } from '@/shared/ui/input'
 import { VersionField } from '@/shared/ui/version-field'
 
 import { importBenchmarkAction, type ImportBenchmarkResult } from '../api/import-benchmark'
@@ -116,30 +117,19 @@ export function ImportBenchmarkForm({
     <div className="max-w-2xl space-y-6">
       <div className="space-y-1.5">
         <Label htmlFor="benchmark">벤치마크 / 레시피</Label>
-        <Select id="benchmark" value={sel} onChange={(e) => setSel(e.target.value)}>
-          {benchmarks.length > 0 && (
-            <optgroup label="카탈로그(first-party)">
-              {entries
-                .filter((e) => e.kind === 'catalog')
-                .map((e) => (
-                  <option key={e.value} value={e.value}>
-                    {e.label}
-                  </option>
-                ))}
-            </optgroup>
-          )}
-          {recipes.length > 0 && (
-            <optgroup label="내 레시피(워크스페이스)">
-              {entries
-                .filter((e) => e.kind === 'recipe')
-                .map((e) => (
-                  <option key={e.value} value={e.value}>
-                    {e.label}
-                  </option>
-                ))}
-            </optgroup>
-          )}
-        </Select>
+        {/* optgroup 대응 — 카탈로그/레시피 구분은 우측 hint 로(그룹 헤더 없는 flat 리스트) */}
+        <Combobox
+          id="benchmark"
+          value={sel}
+          onChange={setSel}
+          options={entries.map((e) => ({
+            value: e.value,
+            label: e.label,
+            hint: e.kind === 'catalog' ? '카탈로그' : '내 레시피',
+            keywords: e.kind === 'catalog' ? 'catalog first-party' : 'recipe workspace',
+          }))}
+          className="w-full"
+        />
         {selected?.description && (
           <p className="text-[12px] leading-relaxed text-muted-foreground">
             {selected.description}

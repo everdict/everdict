@@ -2,7 +2,8 @@
 
 import { useParams, useRouter } from 'next/navigation'
 
-import { Label, Select } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Label } from '@/shared/ui/input'
 
 // 상세 페이지에서 어느 버전의 케이스를 볼지 고른다 — ?version= 으로 이동(서버가 해당 버전을 조회).
 export function VersionSwitcher({
@@ -22,22 +23,20 @@ export function VersionSwitcher({
   return (
     <div className="min-w-44 space-y-1.5">
       <Label htmlFor="version-switch">버전</Label>
-      <Select
+      <Combobox
         id="version-switch"
         value={current}
-        onChange={(e) =>
+        onChange={(v) =>
           router.push(
-            `/${workspace}/datasets/${encodeURIComponent(id)}?version=${encodeURIComponent(e.target.value)}`
+            `/${workspace}/datasets/${encodeURIComponent(id)}?version=${encodeURIComponent(v)}`
           )
         }
-      >
-        {versions.map((v) => (
-          <option key={v} value={v}>
-            {v}
-            {v === latest ? ' (latest)' : ''}
-          </option>
-        ))}
-      </Select>
+        options={versions.map((v) => ({
+          value: v,
+          label: v === latest ? `${v} (latest)` : v,
+        }))}
+        className="w-full"
+      />
     </div>
   )
 }

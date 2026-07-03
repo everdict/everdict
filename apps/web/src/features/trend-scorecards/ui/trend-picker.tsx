@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
-import { Input, Label, Select } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Input, Label } from '@/shared/ui/input'
 
 export interface DatasetOption {
   id: string
@@ -41,13 +42,13 @@ export function TrendPicker({
     <div className="flex flex-wrap items-end gap-3">
       <div className="min-w-56 space-y-1.5">
         <Label htmlFor="dataset">Dataset</Label>
-        <Select id="dataset" value={d} onChange={(e) => setD(e.target.value)}>
-          {datasets.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </Select>
+        <Combobox
+          id="dataset"
+          value={d}
+          onChange={setD}
+          options={datasets.map((o) => ({ value: o.id, label: o.label }))}
+          className="w-full"
+        />
       </div>
       <div className="min-w-36 space-y-1.5">
         <Label htmlFor="metric">Metric</Label>
@@ -55,10 +56,16 @@ export function TrendPicker({
       </div>
       <div className="min-w-44 space-y-1.5">
         <Label htmlFor="baseline">Baseline</Label>
-        <Select id="baseline" value={b} onChange={(e) => setB(e.target.value)}>
-          <option value="first">first (첫 실행)</option>
-          <option value="previous">previous (직전 실행)</option>
-        </Select>
+        <Combobox
+          id="baseline"
+          value={b}
+          onChange={setB}
+          options={[
+            { value: 'first', label: 'first (첫 실행)' },
+            { value: 'previous', label: 'previous (직전 실행)' },
+          ]}
+          className="w-full"
+        />
       </div>
       <Button type="button" onClick={go} disabled={!d}>
         추이 보기

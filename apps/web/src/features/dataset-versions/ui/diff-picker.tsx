@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 
 import { Button } from '@/shared/ui/button'
-import { Label, Select } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { Label } from '@/shared/ui/input'
 
 // base/candidate 버전을 골라 diff URL 로 이동. 실제 diff 는 서버(컨트롤플레인 diffDatasets)가 계산.
 export function DiffPicker({
@@ -37,23 +38,23 @@ export function DiffPicker({
     <div className="flex flex-wrap items-end gap-3">
       <div className="min-w-44 space-y-1.5">
         <Label htmlFor="diff-base">base</Label>
-        <Select id="diff-base" value={b} onChange={(e) => setB(e.target.value)}>
-          {versions.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </Select>
+        <Combobox
+          id="diff-base"
+          value={b}
+          onChange={setB}
+          options={versions.map((v) => ({ value: v }))}
+          className="w-full"
+        />
       </div>
       <div className="min-w-44 space-y-1.5">
         <Label htmlFor="diff-candidate">candidate</Label>
-        <Select id="diff-candidate" value={c} onChange={(e) => setC(e.target.value)}>
-          {versions.map((v) => (
-            <option key={v} value={v}>
-              {v}
-            </option>
-          ))}
-        </Select>
+        <Combobox
+          id="diff-candidate"
+          value={c}
+          onChange={setC}
+          options={versions.map((v) => ({ value: v }))}
+          className="w-full"
+        />
       </div>
       <Button type="button" onClick={compare} disabled={!b || !c || b === c}>
         비교

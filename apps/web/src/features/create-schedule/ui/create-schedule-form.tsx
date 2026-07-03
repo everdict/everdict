@@ -8,7 +8,7 @@ import { sortSemverDesc } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
-import { FieldError, Input, Label, Select } from '@/shared/ui/input'
+import { FieldError, Input, Label } from '@/shared/ui/input'
 
 import { createScheduleAction } from '../api/create-schedule'
 
@@ -249,11 +249,22 @@ export function CreateScheduleForm({
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <Label htmlFor="overlapPolicy">겹침 정책</Label>
-          <Select id="overlapPolicy" {...register('overlapPolicy')}>
-            <option value="skip">skip (이전 실행 중이면 건너뜀)</option>
-            <option value="bufferOne">bufferOne (1건 대기)</option>
-            <option value="allowAll">allowAll (동시 허용)</option>
-          </Select>
+          <Controller
+            control={control}
+            name="overlapPolicy"
+            render={({ field }) => (
+              <Combobox
+                id="overlapPolicy"
+                options={[
+                  { value: 'skip', label: 'skip (이전 실행 중이면 건너뜀)' },
+                  { value: 'bufferOne', label: 'bufferOne (1건 대기)' },
+                  { value: 'allowAll', label: 'allowAll (동시 허용)' },
+                ]}
+                value={field.value}
+                onChange={field.onChange}
+              />
+            )}
+          />
         </div>
         <div className="space-y-1.5">
           <Label htmlFor="concurrency">병렬도 (선택)</Label>
@@ -270,14 +281,21 @@ export function CreateScheduleForm({
 
       <div className="space-y-1.5">
         <Label htmlFor="runtime">런타임 (선택)</Label>
-        <Select id="runtime" {...register('runtime')}>
-          <option value="">기본 백엔드</option>
-          {runtimes.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.id}
-            </option>
-          ))}
-        </Select>
+        <Controller
+          control={control}
+          name="runtime"
+          render={({ field }) => (
+            <Combobox
+              id="runtime"
+              options={[
+                { value: '', label: '기본 백엔드' },
+                ...runtimes.map((r) => ({ value: r.id })),
+              ]}
+              value={field.value}
+              onChange={field.onChange}
+            />
+          )}
+        />
         <p className="text-[12px] text-muted-foreground">
           셀프호스티드(self:) 런타임은 발사 시점에 러너가 온라인이어야 실행됩니다.
         </p>

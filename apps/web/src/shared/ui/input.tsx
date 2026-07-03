@@ -19,9 +19,7 @@ export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTex
   )
 }
 
-export function Select({ className, ...props }: React.SelectHTMLAttributes<HTMLSelectElement>) {
-  return <select className={cn(base, 'h-8 pr-8', className)} {...props} />
-}
+// 드롭다운은 native <select>/<datalist> 대신 shared/ui/combobox 의 Combobox 를 쓴다(전역 일관 — Select 아톰 제거됨).
 
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return <label className={cn('text-[13px] font-[510] text-foreground', className)} {...props} />

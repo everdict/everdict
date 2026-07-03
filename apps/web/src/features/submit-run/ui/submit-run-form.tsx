@@ -2,13 +2,14 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useForm } from 'react-hook-form'
+import { Controller, useForm } from 'react-hook-form'
 
 import type { ConnectionMeta } from '@/entities/connection'
 import type { Harness } from '@/entities/harness'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
-import { FieldError, Input, Label, Select, Textarea } from '@/shared/ui/input'
+import { Combobox } from '@/shared/ui/combobox'
+import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
 
 import { submitRunAction } from '../api/submit-run'
 
@@ -45,6 +46,7 @@ export function SubmitRunForm({
     (c) => c.provider === 'github' || c.provider === 'github-enterprise'
   )
   const {
+    control,
     register,
     handleSubmit,
     watch,
@@ -74,17 +76,21 @@ export function SubmitRunForm({
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-5">
       <div className="space-y-1.5">
         <Label htmlFor="harnessId">하니스</Label>
-        <Input
-          id="harnessId"
-          list="harness-ids"
-          placeholder="scripted"
-          {...register('harnessId', { required: '하니스 id 를 입력하세요' })}
+        <Controller
+          control={control}
+          name="harnessId"
+          rules={{ required: '하니스를 선택하세요' }}
+          render={({ field }) => (
+            <Combobox
+              id="harnessId"
+              options={harnesses.map((h) => ({ value: h.id }))}
+              value={field.value}
+              onChange={field.onChange}
+              placeholder="하니스 선택"
+              emptyText="하니스가 없습니다"
+            />
+          )}
         />
-        <datalist id="harness-ids">
-          {harnesses.map((h) => (
-            <option key={h.id} value={h.id} />
-          ))}
-        </datalist>
         <FieldError message={errors.harnessId?.message} />
       </div>
 
@@ -105,23 +111,27 @@ export function SubmitRunForm({
 
       <div className="space-y-1.5">
         <Label htmlFor="runtime">런타임 (실행 인프라)</Label>
-        <Select id="runtime" {...register('runtime')}>
-          <option value="">기본 백엔드</option>
-          {runtimes.map((r) => (
-            <option key={r.id} value={r.id}>
-              {r.id}
-            </option>
-          ))}
-          {runners.length > 0 && (
-            <optgroup label="내 로컬 호스트">
-              {runners.map((r) => (
-                <option key={r.id} value={`self:${r.id}`}>
-                  {r.label}
-                </option>
-              ))}
-            </optgroup>
+        {/* optgroup 대응 — 내 로컬 러너는 우측 hint 로 구분(flat 리스트) */}
+        <Controller
+          control={control}
+          name="runtime"
+          render={({ field }) => (
+            <Combobox
+              id="runtime"
+              options={[
+                { value: '', label: '기본 백엔드' },
+                ...runtimes.map((r) => ({ value: r.id })),
+                ...runners.map((r) => ({
+                  value: `self:${r.id}`,
+                  label: r.label,
+                  hint: '내 로컬 호스트',
+                })),
+              ]}
+              value={field.value}
+              onChange={field.onChange}
+            />
           )}
-        </Select>
+        />
         <p className="text-[12px] text-faint">
           비워두면 기본 백엔드에서 실행됩니다. 등록한 런타임이나 내 로컬 러너를 고르면 그곳에서
           실행됩니다.
@@ -130,14 +140,21 @@ export function SubmitRunForm({
 
       <div className="space-y-1.5">
         <Label htmlFor="sourceKind">작업트리(repo 시드)</Label>
-        <select
-          id="sourceKind"
-          className="h-9 w-full rounded-md border bg-background px-3 text-[13px]"
-          {...register('sourceKind')}
-        >
-          <option value="files">빈 작업트리</option>
-          <option value="git">Git repo (URL)</option>
-        </select>
+        <Controller
+          control={control}
+          name="sourceKind"
+          render={({ field }) => (
+            <Combobox
+              id="sourceKind"
+              options={[
+                { value: 'files', label: '빈 작업트리' },
+                { value: 'git', label: 'Git repo (URL)' },
+              ]}
+              value={field.value}
+              onChange={field.onChange}
+            />
+          )}
+        />
       </div>
 
       {sourceKind === 'git' && (
@@ -160,18 +177,21 @@ export function SubmitRunForm({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="connectionId">연결된 계정 (비공개 repo 인증)</Label>
-            <select
-              id="connectionId"
-              className="h-9 w-full rounded-md border bg-background px-3 text-[13px]"
-              {...register('connectionId')}
-            >
-              <option value="">없음 (public repo)</option>
-              {gitConnections.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {providerLabel(c)}
-                </option>
-              ))}
-            </select>
+            <Controller
+              control={control}
+              name="connectionId"
+              render={({ field }) => (
+                <Combobox
+                  id="connectionId"
+                  options={[
+                    { value: '', label: '없음 (public repo)' },
+                    ...gitConnections.map((c) => ({ value: c.id, label: providerLabel(c) })),
+                  ]}
+                  value={field.value}
+                  onChange={field.onChange}
+                />
+              )}
+            />
             <p className="text-[12px] text-faint">
               {gitConnections.length === 0
                 ? '연결된 GitHub 계정이 없습니다 — 비공개 repo 는 설정 → 연결된 계정에서 먼저 연결하세요(public 은 그대로 가능).'

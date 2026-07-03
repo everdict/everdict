@@ -30,6 +30,7 @@ export function Combobox({
   className,
   contentClassName,
   align = 'start',
+  'aria-label': ariaLabel,
 }: {
   options: ComboboxOption[]
   value: string
@@ -43,6 +44,7 @@ export function Combobox({
   className?: string
   contentClassName?: string
   align?: 'start' | 'end'
+  'aria-label'?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -137,6 +139,7 @@ export function Combobox({
         aria-expanded={open}
         aria-controls={listId}
         aria-haspopup="listbox"
+        aria-label={ariaLabel}
         disabled={disabled}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={onKeyDown}
