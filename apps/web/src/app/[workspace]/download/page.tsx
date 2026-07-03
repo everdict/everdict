@@ -13,7 +13,7 @@ export default async function DownloadPage() {
     <div className="space-y-6">
       <PageHeader
         title="데스크톱 앱"
-        description="웹과 동일한 기능에 더해, 이 기기를 셀프호스티드 러너로 씁니다 — 설치 후 계정 페이지에서 버튼 한 번이면 연결됩니다."
+        description="웹 기능 그대로, 이 컴퓨터를 러너로도 써요. 설치하고 계정에서 한 번만 연결하면 돼요."
       />
       <DownloadPanel
         release={release}

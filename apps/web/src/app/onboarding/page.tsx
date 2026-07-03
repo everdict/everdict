@@ -29,8 +29,7 @@ export default async function OnboardingPage() {
           워크스페이스를 만들어 시작하세요
         </h1>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          환영합니다. 평가를 담을 워크스페이스가 아직 없습니다. 하나 만들면 바로 그 워크스페이스로
-          들어갑니다.
+          평가를 담을 워크스페이스를 하나 만들어보세요. 만들면 바로 시작할 수 있어요.
         </p>
       </div>
       <Card className="p-5">

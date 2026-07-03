@@ -12,18 +12,18 @@ export const dynamic = 'force-dynamic'
 const FEATURES = [
   {
     icon: Layers,
-    title: '하니스·환경 무관',
-    body: 'Claude Code·Codex·LangGraph 등 어떤 에이전트 하니스든 repo/browser/os-use 환경에서 동일하게 평가.',
+    title: '어떤 에이전트든',
+    body: 'Claude Code, Codex, LangGraph… 어떤 에이전트든 같은 방식으로 평가해요.',
   },
   {
     icon: ShieldCheck,
-    title: '격리·예산·공정성',
-    body: '테넌트별 트러스트존 격리와 비용/런 예산, WFQ 스케줄링 위에서 안전하게 실행.',
+    title: '안전하고 공정하게',
+    body: '팀마다 격리하고 예산 안에서 안전하게 실행돼요.',
   },
   {
     icon: GitCompareArrows,
-    title: '버전 회귀 비교',
-    body: '데이터셋×하니스 배치 평가를 스코어카드로 집계하고 baseline↔candidate 회귀를 한눈에.',
+    title: '버전별 비교',
+    body: '버전이 좋아졌는지 나빠졌는지 한눈에 봐요.',
   },
 ] as const
 
@@ -73,15 +73,13 @@ export default async function Home() {
         </span>
 
         <h1 className="font-display text-5xl font-[560] leading-[1.06] tracking-[-0.025em] text-balance break-keep sm:text-6xl">
-          하니스를 등록하고, 평가를 돌리고,
-          <br className="hidden sm:block" /> <span className="text-primary">테넌트별 스코어</span>를
-          본다.
+          하니스를 등록하고, 평가하고,
+          <br className="hidden sm:block" /> <span className="text-primary">점수로 비교</span>해요.
         </h1>
 
         <p className="max-w-xl text-[15px] leading-relaxed text-balance text-muted-foreground">
-          Assay 는 어떤 에이전트 하니스든 환경·오케스트레이터에 무관하게 공정·격리·예산 하에
-          평가하는 멀티테넌트 런타임입니다. 사람은 이 웹으로, 에이전트는 MCP 로 같은 플랫폼을
-          씁니다.
+          Assay 는 어떤 에이전트든 공정하고 안전하게 평가해요. 사람은 웹으로, 에이전트는 MCP 로
+          같은 플랫폼을 써요.
         </p>
 
         <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">

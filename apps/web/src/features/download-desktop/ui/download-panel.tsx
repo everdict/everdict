@@ -65,8 +65,8 @@ export function DownloadPanel({
     return fallbackUrl ? (
       <EmptyState
         icon={<Download strokeWidth={1.75} />}
-        title="릴리즈 목록을 불러올 수 없습니다."
-        hint="서버에 릴리즈 토큰(DESKTOP_RELEASES_TOKEN)이 설정되지 않았거나 조회에 실패했습니다. 외부 릴리즈 페이지에서 받아주세요."
+        title="다운로드 목록을 불러오지 못했어요."
+        hint="지금은 여기서 바로 받을 수 없어요. 릴리즈 페이지에서 받아주세요."
         action={
           <a
             href={fallbackUrl}
@@ -82,8 +82,8 @@ export function DownloadPanel({
     ) : (
       <EmptyState
         icon={<Download strokeWidth={1.75} />}
-        title="다운로드를 준비 중입니다."
-        hint="관리자가 서버에 DESKTOP_RELEASES_TOKEN(GitHub fine-grained PAT, contents:read)을 설정하면 이 페이지에서 바로 받을 수 있습니다."
+        title="다운로드를 준비하고 있어요."
+        hint="관리자가 설정하면 이 페이지에서 바로 받을 수 있어요."
       />
     )
   }
@@ -98,7 +98,7 @@ export function DownloadPanel({
     <div className="space-y-6">
       {inDesktop && (
         <Callout tone="info">
-          이미 데스크톱 앱에서 보고 계십니다 — 계정 &gt; 연결된 러너에서 바로 이 기기를 연결하세요.
+          이미 데스크톱 앱에서 보고 있어요. 계정 &gt; 연결된 러너에서 바로 이 기기를 연결하세요.
         </Callout>
       )}
 
@@ -160,16 +160,16 @@ export function DownloadPanel({
       <section className="space-y-2.5">
         <h3 className="text-[13px] font-[560] text-foreground">설치 후</h3>
         <ol className="list-decimal space-y-1 pl-5 text-[13px] leading-relaxed text-muted-foreground">
-          <li>앱을 실행하고 웹과 같은 계정으로 로그인합니다.</li>
+          <li>앱을 실행하고 웹과 같은 계정으로 로그인해요.</li>
           <li>
             계정 &gt; <span className="font-[510]">연결된 러너</span>에서{' '}
-            <span className="font-[510]">이 기기를 러너로 연결</span> 버튼 한 번 — 끝입니다.
+            <span className="font-[510]">이 기기를 러너로 연결</span> 버튼 한 번이면 끝이에요.
           </li>
-          <li>스코어카드 실행 폼의 런타임 선택에 내 기기가 나타납니다.</li>
+          <li>스코어카드를 실행할 때 런타임에서 내 컴퓨터를 고를 수 있어요.</li>
         </ol>
         <Callout tone="warning" className="text-[13px]">
-          설치 파일은 아직 서명되지 않았습니다 — macOS 는 우클릭 → 열기(게이트키퍼), Windows 는
-          SmartScreen 의 &lsquo;추가 정보 → 실행&rsquo;, Linux AppImage 는{' '}
+          설치 파일은 아직 서명 전이에요. macOS 는 우클릭 → 열기, Windows 는 SmartScreen
+          &lsquo;추가 정보 → 실행&rsquo;, Linux AppImage 는{' '}
           <code className="font-mono text-xs">chmod +x</code> 후 실행하세요.
         </Callout>
       </section>
