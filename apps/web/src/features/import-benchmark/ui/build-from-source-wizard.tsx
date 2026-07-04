@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { Eye, Heart, Loader2, Lock, Search, Sparkles } from 'lucide-react'
 
@@ -66,8 +67,10 @@ const splitKey = (s: HfSplit) => `${s.config} / ${s.split}`
 // 그 뒤 미리보기로 필드를 감지하고 드롭다운 매핑 → 한 번에 데이터셋 생성(인라인 spec, 레시피 등록 생략).
 export function BuildFromSourceWizard({
   existingDatasets = [],
+  hfTokenScope,
 }: {
   existingDatasets?: { id: string; versions: string[] }[]
+  hfTokenScope?: 'user' | 'workspace' // 사용 가능한 HF_TOKEN 의 스코프 — gated 표시를 상태 인지형으로
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -357,14 +360,27 @@ export function BuildFromSourceWizard({
             {/* 선택됨 + split */}
             {hfDataset && (
               <div className="space-y-2 rounded-lg border bg-card p-3 shadow-raise">
-                <div className="flex items-center gap-2 text-[13px]">
+                <div className="flex flex-wrap items-center gap-2 text-[13px]">
                   <span className="text-muted-foreground">선택됨:</span>
                   <code className="font-mono text-foreground">{hfDataset}</code>
-                  {hfGated && (
-                    <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
-                      <Lock className="size-3" /> gated · HF_TOKEN 시크릿 필요
-                    </span>
-                  )}
+                  {hfGated &&
+                    (hfTokenScope ? (
+                      <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-success)]">
+                        <Lock className="size-3" /> gated ·{' '}
+                        {hfTokenScope === 'user' ? '내 시크릿' : '워크스페이스 시크릿'}의 HF_TOKEN
+                        사용
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
+                        <Lock className="size-3" /> gated · HF 토큰 필요
+                        <Link
+                          href={`/${workspace}/account?tab=secrets`}
+                          className="font-[510] text-primary underline-offset-2 hover:underline"
+                        >
+                          계정 시크릿에 HF_TOKEN 등록 →
+                        </Link>
+                      </span>
+                    ))}
                 </div>
                 {splits.length > 0 ? (
                   <div className="space-y-1.5">
@@ -415,7 +431,11 @@ export function BuildFromSourceWizard({
             tone="warning"
             {...(sourceKind === 'huggingface'
               ? {
-                  hint: "HuggingFace에 연결되지 않으면 'JSONL 붙여넣기'로 직접 넣어보세요.",
+                  // gated + 토큰 미보유가 가장 흔한 실패 — 셀프서비스 경로(계정 시크릿)를 바로 안내.
+                  hint:
+                    hfGated && !hfTokenScope
+                      ? 'gated 데이터셋이에요 — 계정 → 시크릿에 HF_TOKEN 을 등록하면 바로 가져올 수 있어요. (HuggingFace 에서 이 데이터셋의 약관 동의가 필요해요)'
+                      : "HuggingFace에 연결되지 않으면 'JSONL 붙여넣기'로 직접 넣어보세요.",
                 }
               : {})}
           >

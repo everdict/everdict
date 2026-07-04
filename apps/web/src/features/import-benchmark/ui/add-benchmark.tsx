@@ -19,11 +19,13 @@ export function AddBenchmark({
   recipes,
   existingDatasets = [],
   preselectRecipe,
+  hfTokenScope,
 }: {
   benchmarks: BenchmarkCatalogItem[]
   recipes: RecipeItem[]
   existingDatasets?: { id: string; versions: string[] }[]
   preselectRecipe?: string
+  hfTokenScope?: 'user' | 'workspace' // 사용 가능한 HF_TOKEN 시크릿의 스코프(없으면 미보유 — gated 안내)
 }) {
   // 레시피 상세에서 "데이터셋으로 만들기"로 진입하면(?recipe=) 가져오기 모드로 시작 + 해당 레시피 프리셀렉트.
   const [mode, setMode] = useState<'build' | 'import'>(preselectRecipe ? 'import' : 'build')
@@ -53,7 +55,10 @@ export function AddBenchmark({
       </div>
 
       {mode === 'build' ? (
-        <BuildFromSourceWizard existingDatasets={existingDatasets} />
+        <BuildFromSourceWizard
+          existingDatasets={existingDatasets}
+          {...(hfTokenScope ? { hfTokenScope } : {})}
+        />
       ) : (
         <ImportBenchmarkForm
           benchmarks={benchmarks}

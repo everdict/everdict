@@ -301,7 +301,12 @@ async function main(): Promise<void> {
   const benchmarkService = new BenchmarkService({
     datasets: datasetRegistry,
     benchmarks: benchmarkRegistry,
-    secretsFor: runtimeSecretsFor,
+    // gated HF 인증 — 요청자 "개인" 시크릿 우선, 워크스페이스 공유 폴백. 멤버는 admin 없이도
+    // 계정 시크릿에 HF_TOKEN 만 넣으면 웹에서 스스로 gated 벤치마크를 인입할 수 있다(셀프서비스).
+    secretsFor: async (tenant, subject) => {
+      const scoped = await secretStore.scopedEntries(tenant, subject ?? "");
+      return { ...scoped.workspace, ...scoped.user };
+    },
   });
   // 번들 원샷 설치 — 기존 레지스트리들로 팬아웃(하니스+벤치마크+데이터셋+런타임+judge/model). 새 스토어 없음.
   const bundleService = new BundleService({

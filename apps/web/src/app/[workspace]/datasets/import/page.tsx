@@ -33,6 +33,9 @@ export default async function ImportBenchmarkPage({
   let recipes: RecipeItem[] = []
   // 시스템 관리 버저닝: 기존 데이터셋 id→versions 를 위저드/가져오기 폼에 넘겨 다음 semver 를 제안.
   let existingDatasets: { id: string; versions: string[] }[] = []
+  // gated HF 인증에 쓸 HF_TOKEN 의 스코프 — 내(개인) 시크릿 우선, 워크스페이스 공유 폴백(서버 해석과 동일 우선순위).
+  // 목록엔 이름/스코프만 온다(값 없음). 실패해도 위저드는 동작(표시만 미보유로).
+  let hfTokenScope: 'user' | 'workspace' | undefined
   let error: string | undefined
   if (allowed) {
     try {
@@ -45,6 +48,14 @@ export default async function ImportBenchmarkPage({
       existingDatasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
     } catch {
       existingDatasets = []
+    }
+    try {
+      const secrets = await controlPlane.listSecrets<Array<{ name: string; scope?: string }>>(ctx)
+      const hf = secrets.filter((s) => s.name === 'HF_TOKEN')
+      if (hf.some((s) => s.scope === 'user')) hfTokenScope = 'user'
+      else if (hf.length > 0) hfTokenScope = 'workspace'
+    } catch {
+      hfTokenScope = undefined
     }
   }
 
@@ -75,6 +86,7 @@ export default async function ImportBenchmarkPage({
             recipes={recipes}
             existingDatasets={existingDatasets}
             preselectRecipe={preselectRecipe}
+            {...(hfTokenScope ? { hfTokenScope } : {})}
           />
         </Card>
       )}

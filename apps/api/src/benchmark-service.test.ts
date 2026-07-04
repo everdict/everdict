@@ -109,3 +109,88 @@ describe("BenchmarkService — HF 접속 실패는 자연스럽게(UpstreamError
     ).rejects.toBeInstanceOf(UpstreamError);
   });
 });
+
+describe("BenchmarkService — gated 인증은 요청자 개인 시크릿까지(셀프서비스)", () => {
+  // 회귀: secretsFor 가 workspace 공유만 읽으면 멤버(admin 아님)는 자기 HF_TOKEN 을 웹에 등록해도
+  // gated 인입이 불가했다. subject 가 secretsFor 로 전달되고 토큰이 HF 요청 헤더에 실려야 한다.
+  function capture() {
+    const seen: Array<{ url: string; auth?: string }> = [];
+    const fetchImpl: FetchLike = async (url, init) => {
+      seen.push({ url, ...(init?.headers?.Authorization ? { auth: init.headers.Authorization } : {}) });
+      return {
+        ok: true,
+        status: 200,
+        text: async () => JSON.stringify({ rows: [{ row: HF_ROW }], num_rows_total: 1 }),
+      };
+    };
+    return { seen, fetchImpl };
+  }
+
+  it("previewSource 가 subject 를 secretsFor 로 넘기고 HF_TOKEN 을 Authorization 으로 보낸다", async () => {
+    const { seen, fetchImpl } = capture();
+    const calls: Array<{ tenant: string; subject?: string }> = [];
+    const service = new BenchmarkService({
+      datasets: new InMemoryDatasetRegistry(),
+      fetchImpl,
+      secretsFor: async (tenant, subject) => {
+        calls.push({ tenant, ...(subject !== undefined ? { subject } : {}) });
+        return { HF_TOKEN: "hf_personal" };
+      },
+    });
+    await service.previewSource({
+      tenant: "acme",
+      subject: "u-member",
+      source: { kind: "huggingface", dataset: "databricks/officeqa" },
+    });
+    expect(calls).toEqual([{ tenant: "acme", subject: "u-member" }]);
+    expect(seen[0]?.auth).toBe("Bearer hf_personal");
+  });
+
+  it("import 는 인입자(createdBy)를 subject 로 사용한다", async () => {
+    const { seen, fetchImpl } = capture();
+    const calls: Array<string | undefined> = [];
+    const datasets = new InMemoryDatasetRegistry();
+    const service = new BenchmarkService({
+      datasets,
+      fetchImpl,
+      secretsFor: async (_tenant, subject) => {
+        calls.push(subject);
+        return { HF_TOKEN: "hf_personal" };
+      },
+    });
+    await service.import({
+      tenant: "acme",
+      createdBy: "u-member",
+      version: "1.0.0",
+      spec: {
+        id: "gated-bench",
+        version: "1.0.0",
+        category: "qa",
+        source: { kind: "huggingface", dataset: "databricks/officeqa" },
+        mapping: { idField: "id", taskField: "question", answerField: "answer", promptEnv: true },
+      },
+    });
+    expect(calls).toEqual(["u-member"]);
+    expect(seen[0]?.auth).toBe("Bearer hf_personal");
+    expect(await datasets.get("acme", "gated-bench", "1.0.0")).toBeTruthy();
+  });
+
+  it("searchHf/hfSplits 도 subject 를 전달한다", async () => {
+    const subjects: Array<string | undefined> = [];
+    const fetchImpl: FetchLike = async (url) =>
+      url.includes("/splits")
+        ? { ok: true, status: 200, text: async () => JSON.stringify({ splits: [] }) }
+        : { ok: true, status: 200, text: async () => JSON.stringify([]) };
+    const service = new BenchmarkService({
+      datasets: new InMemoryDatasetRegistry(),
+      fetchImpl,
+      secretsFor: async (_t, subject) => {
+        subjects.push(subject);
+        return {};
+      },
+    });
+    await service.searchHf("acme", "officeqa", 5, "u-member");
+    await service.hfSplits("acme", "databricks/officeqa", "u-member");
+    expect(subjects).toEqual(["u-member", "u-member"]);
+  });
+});

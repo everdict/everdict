@@ -68,7 +68,14 @@ add, all member+ (`datasets:write`), all immutable-on-register:
   (`/{ws}/recipes` list + detail, its own nav item); the produced dataset records `producedBy` so the dataset
   detail back-links to the recipe (and version) that made it.
 
-gated HF sources authenticate with the tenant SecretStore `HF_TOKEN`. **BFF↔MCP parity**: MCP tools
+gated HF sources authenticate with the SecretStore `HF_TOKEN` — resolved **requester-first**: the caller's
+**personal** (user-scoped) secret wins over the workspace-shared one, and all four surfaces (`searchHf` /
+`hfSplits` / `previewSource` / `import`) pass the requesting subject. So a plain **member** — who cannot touch
+workspace secrets (admin-only) or env vars — registers `HF_TOKEN` themselves at 계정 → 시크릿 and imports a
+gated benchmark end-to-end from the web. The wizard is state-aware: gated + no token ⇒ warning + deep link to
+`account?tab=secrets`; token present ⇒ "내 시크릿/워크스페이스 시크릿의 HF_TOKEN 사용" (note: a member can't
+*see* workspace secret names, so the badge may say "필요" while the shared token still works at fetch time).
+**BFF↔MCP parity**: MCP tools
 `preview_benchmark_source` + `import_benchmark` mirror the routes. See `docs/mcp.md`.
 
 ## Contract (`@assay/core`)

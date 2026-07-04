@@ -981,7 +981,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const limit = typeof limitRaw === "string" && Number.isFinite(Number(limitRaw)) ? Number(limitRaw) : undefined;
     try {
       gate(principal, "datasets:read");
-      return reply.send(await deps.benchmarkService.searchHf(principal.workspace, q.trim(), limit));
+      // subject → 요청자 개인 시크릿(HF_TOKEN)까지 gated 인증에 사용(멤버 셀프서비스)
+      return reply.send(await deps.benchmarkService.searchHf(principal.workspace, q.trim(), limit, principal.subject));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -997,7 +998,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset 이 필요합니다." });
     try {
       gate(principal, "datasets:read");
-      return reply.send(await deps.benchmarkService.hfSplits(principal.workspace, dataset.trim()));
+      return reply.send(await deps.benchmarkService.hfSplits(principal.workspace, dataset.trim(), principal.subject));
     } catch (err) {
       return sendError(reply, err);
     }
@@ -1016,7 +1017,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const parsed = BenchmarkPreviewBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      return reply.send(await deps.benchmarkService.previewSource({ tenant: principal.workspace, ...parsed.data }));
+      return reply.send(
+        await deps.benchmarkService.previewSource({
+          tenant: principal.workspace,
+          subject: principal.subject,
+          ...parsed.data,
+        }),
+      );
     } catch (err) {
       return sendError(reply, err); // HF 인출 실패/잘못된 jsonl 등
     }

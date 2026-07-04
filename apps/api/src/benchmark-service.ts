@@ -57,6 +57,7 @@ export interface BenchmarkImportInput {
 
 export interface PreviewSourceInput {
   tenant: string;
+  subject?: string; // 요청자 — 개인 시크릿(HF_TOKEN)까지 gated 인증에 사용
   source: BenchmarkSourceSpec;
   text?: string; // jsonl 소스 원문(앞 N줄만 파싱)
   limit?: number;
@@ -65,7 +66,9 @@ export interface PreviewSourceInput {
 export interface BenchmarkServiceDeps {
   datasets: DatasetRegistry;
   benchmarks?: BenchmarkRegistry; // 테넌트 레시피 레지스트리(없으면 레시피 기능 비활성)
-  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // gated 벤치마크용 HF_TOKEN
+  // gated 벤치마크용 HF_TOKEN — subject 를 주면 그 유저 "개인" 시크릿까지(개인 우선 병합). 멤버는 워크스페이스
+  // 시크릿(admin 전용)을 못 만져도 계정 시크릿에 HF_TOKEN 만 넣으면 스스로 인입할 수 있다(셀프서비스).
+  secretsFor?: (tenant: string, subject?: string) => Promise<Record<string, string>>;
   fetchImpl?: FetchLike; // 테스트 주입
 }
 
@@ -109,9 +112,9 @@ export class BenchmarkService {
   }
 
   // HF Hub 데이터셋 검색 — 위저드가 정확한 id 대신 검색어로 후보를 고른다(raw 입력 회피). gated 인출은 HF_TOKEN.
-  async searchHf(tenant: string, query: string, limit?: number): Promise<HfDatasetHit[]> {
+  async searchHf(tenant: string, query: string, limit?: number, subject?: string): Promise<HfDatasetHit[]> {
     const secrets: Record<string, string> = this.deps.secretsFor
-      ? await this.deps.secretsFor(tenant).catch(() => ({}))
+      ? await this.deps.secretsFor(tenant, subject).catch(() => ({}))
       : {};
     return searchHfDatasets(query, {
       ...(limit ? { limit } : {}),
@@ -121,9 +124,9 @@ export class BenchmarkService {
   }
 
   // 선택한 HF 데이터셋의 config/split 조합 — 위저드 드롭다운용(split 직접 타이핑 회피).
-  async hfSplits(tenant: string, dataset: string): Promise<HfSplit[]> {
+  async hfSplits(tenant: string, dataset: string, subject?: string): Promise<HfSplit[]> {
     const secrets: Record<string, string> = this.deps.secretsFor
-      ? await this.deps.secretsFor(tenant).catch(() => ({}))
+      ? await this.deps.secretsFor(tenant, subject).catch(() => ({}))
       : {};
     return fetchHfSplits(dataset, {
       ...(secrets.HF_TOKEN ? { token: secrets.HF_TOKEN } : {}),
@@ -135,7 +138,7 @@ export class BenchmarkService {
   // gated HF 는 테넌트 SecretStore 의 HF_TOKEN 으로 인증. 등록/쓰기는 없다(순수 인출).
   async previewSource(input: PreviewSourceInput): Promise<{ fields: string[]; rows: Array<Record<string, unknown>> }> {
     const secrets: Record<string, string> = this.deps.secretsFor
-      ? await this.deps.secretsFor(input.tenant).catch(() => ({}))
+      ? await this.deps.secretsFor(input.tenant, input.subject).catch(() => ({}))
       : {};
     const rows = await fetchSourceRows(input.source, {
       limit: input.limit ?? 5,
@@ -151,8 +154,9 @@ export class BenchmarkService {
   async import(
     input: BenchmarkImportInput,
   ): Promise<{ workspace: string; id: string; version: string; cases: number }> {
+    // 인입자(createdBy)가 곧 요청자 — 그 유저의 개인 HF_TOKEN 까지 gated 인증에 사용.
     const secrets: Record<string, string> = this.deps.secretsFor
-      ? await this.deps.secretsFor(input.tenant).catch(() => ({}))
+      ? await this.deps.secretsFor(input.tenant, input.createdBy).catch(() => ({}))
       : {};
     const token = secrets.HF_TOKEN;
     const opts = {

@@ -981,7 +981,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         inputSchema: { query: z.string(), limit: z.number().int().positive().max(50).optional() },
       },
       ({ query, limit }) =>
-        run(principal, "datasets:read", async () => ok(await benchmarks.searchHf(ws, query, limit))),
+        run(principal, "datasets:read", async () => ok(await benchmarks.searchHf(ws, query, limit, principal.subject))),
     );
     server.registerTool(
       "hf_dataset_splits",
@@ -989,7 +989,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         description: "선택한 HF 데이터셋의 config/split 조합 목록(split 직접 타이핑 대신 고르기 위해).",
         inputSchema: { dataset: z.string() },
       },
-      ({ dataset }) => run(principal, "datasets:read", async () => ok(await benchmarks.hfSplits(ws, dataset))),
+      ({ dataset }) =>
+        run(principal, "datasets:read", async () => ok(await benchmarks.hfSplits(ws, dataset, principal.subject))),
     );
     server.registerTool(
       "preview_benchmark_source",
@@ -1008,7 +1009,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           }
           const result = BenchmarkPreviewBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          return ok(await benchmarks.previewSource({ tenant: ws, ...result.data }));
+          return ok(await benchmarks.previewSource({ tenant: ws, subject: principal.subject, ...result.data }));
         }),
     );
     server.registerTool(
