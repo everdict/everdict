@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BarChart3, Loader2, MessageSquare, Sparkles, Trash2 } from 'lucide-react'
+import { BarChart3, History, Loader2, MessageSquare, Sparkles, Trash2 } from 'lucide-react'
 
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -41,6 +41,9 @@ export interface Mentionable {
   avatarUrl?: string
 }
 
+const INITIAL = 10 // 최근 N개만 기본 노출(댓글 리스트처럼) — 나머지는 '이전 이력 보기'로.
+const STEP = 20 // '이전 이력 보기' 한 번에 더 여는 개수.
+
 const STATUS_TONE: Record<string, string> = {
   succeeded: 'text-[var(--color-success)]',
   failed: 'text-[var(--color-danger)]',
@@ -70,27 +73,48 @@ export function ActivityTimeline({
   canComment: boolean
   mentionables: Mentionable[]
 }) {
-  // 알림에서 #comment-<id> 로 진입 시 해당 댓글로 스크롤 + 잠깐 하이라이트(컨텍스트 바로 이동).
+  // 최근 INITIAL 개만 기본 노출(items 는 오래된→최신이라 뒤에서 잘라 보인다). '이전 이력 보기'로 더.
+  const [shown, setShown] = useState(INITIAL)
+  const start = Math.max(0, items.length - shown)
+  const visible = items.slice(start)
+  const hidden = start
+
+  // 알림에서 #comment-<id> 로 진입 시: 접힘으로 대상이 없으면 전부 펼친 뒤, 해당 댓글로 스크롤 + 잠깐 하이라이트.
   useEffect(() => {
     const hash = window.location.hash
     if (!hash.startsWith('#comment-')) return
+    if (!document.getElementById(hash.slice(1))) {
+      setShown(items.length) // 오래된 댓글이면 먼저 전부 펼친다.
+      return
+    }
     const el = document.getElementById(hash.slice(1))
     if (!el) return
     el.scrollIntoView({ behavior: 'smooth', block: 'center' })
     el.classList.add('ring-2', 'ring-primary/60')
     const t = setTimeout(() => el.classList.remove('ring-2', 'ring-primary/60'), 2400)
     return () => clearTimeout(t)
-  }, [])
+    // shown 이 바뀌면(펼침) 다시 시도해 스크롤한다.
+  }, [items.length, shown])
 
   return (
     <div className="space-y-4">
+      {hidden > 0 && (
+        <button
+          type="button"
+          onClick={() => setShown((s) => s + STEP)}
+          className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-[12px] font-[510] text-muted-foreground shadow-raise transition-colors hover:border-border-strong hover:text-foreground"
+        >
+          <History className="size-3.5" />
+          이전 이력 {hidden}개 더 보기
+        </button>
+      )}
       <ol className="space-y-3">
-        {items.map((item, i) => (
+        {visible.map((item, i) => (
           <li
-            key={item.kind === 'comment' ? `c-${item.id}` : `${item.kind}-${i}`}
+            key={item.kind === 'comment' ? `c-${item.id}` : `${item.kind}-${start + i}`}
             className="flex gap-3"
           >
-            <TimelineRail item={item} last={i === items.length - 1} />
+            <TimelineRail item={item} last={i === visible.length - 1} />
             <div className="min-w-0 flex-1 pb-1">
               {item.kind === 'comment' ? (
                 <CommentItem item={item} mentionables={mentionables} />
