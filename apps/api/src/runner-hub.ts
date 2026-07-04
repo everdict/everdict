@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type AgentJob, type CaseResult, UpstreamError } from "@assay/core";
+import { type AgentJob, type CaseResult, UpstreamError, capabilityKind, requiredCapabilities } from "@assay/core";
 
 // 셀프호스티드 러너 디스패치 키 — 잡이 흘러갈 러너의 정체성. lease 큐는 (owner, runnerId)로 키된다(D3).
 // ⚠️ 워크스페이스(tenant)는 키에 넣지 않는다 — 러너는 소유자가 속한 여러 워크스페이스의 잡을 한 큐에서 받는다
@@ -13,11 +13,13 @@ export function selfHostedBackendName(key: SelfHostedKey): string {
   return `self:${key.owner}:${key.runnerId}`;
 }
 
-// 잡 실행에 러너가 반드시 광고해야 하는 capability — case.image 는 컨테이너 실행이라 Docker 가 필요하다.
-// image-필수 케이스를 Docker 없는 러너에 leasing 하면 호스트-네이티브 폴백으로 잘못된 환경에서 돌아버린다(경고만 남던 것).
-// 설계: docs/architecture/portable-harness-runtime.md (slice 3, placement 게이트).
+// 배치 게이트가 보는 것 = 잡이 요구하는 **functional** capability(러너가 광고 못 하면 거부).
+// 케이스에서 파생(@assay/core requiredCapabilities): image→docker · repo-git→git · browser→browser · os-use→computer-use.
+// security(sandbox)/auth(login)는 placement 가 아니라 각자 레이어(trust-zone/budget)가 강제하므로 여기선 functional 만 본다.
+// image-필수 잡을 Docker 없는 러너에 leasing 하면 호스트-네이티브 폴백으로 잘못된 환경에서 돌아버린다 → 명확히 거부.
+// 설계: docs/architecture/self-hosted-runtime-and-runners.md · portable-harness-runtime.md (placement 게이트).
 export function requiredRunnerCapabilities(job: AgentJob): string[] {
-  return job.evalCase.image ? ["docker"] : [];
+  return requiredCapabilities(job.evalCase).filter((c) => capabilityKind(c) === "functional");
 }
 
 // 러너가 lease 로 가져가는 잡 한 건(MCP lease_job 응답의 코어).
@@ -143,13 +145,13 @@ export class RunnerHub {
         this.remove(key, entry.jobId);
         clearTimeout(entry.timer);
         console.warn(
-          `[runner-hub] capability 불일치: 러너 ${selfHostedBackendName(key)} 에 [${missing.join(",")}] 없음 — case.image=${entry.job.evalCase.image} 잡 ${entry.jobId} 거부.`,
+          `[runner-hub] capability 불일치: 러너 ${selfHostedBackendName(key)} 에 [${missing.join(",")}] 없음 — 잡 ${entry.jobId} 거부.`,
         );
         entry.reject(
           new UpstreamError(
             "UPSTREAM_ERROR",
             { runnerId: key.runnerId, reason: "capability_mismatch", missing },
-            `러너에 필요한 capability [${missing.join(", ")}] 가 없습니다 — case.image(${entry.job.evalCase.image}) 는 Docker 가 필요합니다.`,
+            `러너에 이 잡이 요구하는 capability [${missing.join(", ")}] 가 없습니다 — 잘못된 환경(호스트 폴백) 방지를 위해 거부합니다.`,
           ),
         );
         continue; // 다음 잡 시도
