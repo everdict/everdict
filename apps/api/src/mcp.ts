@@ -1207,9 +1207,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .record(z.object({ path: z.string().optional() }))
             .optional()
             .describe("서비스 슬롯 → 모노레포 path(선택) — 이 레포 CI 가 갈아끼우는 슬롯들"),
+          runsOn: z.string().optional().describe('셀프호스티드 배치(선택) — 워크플로 runs-on(예: "[self-hosted, assay-<id>]")'),
+          runtime: z.string().optional().describe('run-eval runtime 입력(선택, 예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서'),
         },
       },
-      ({ repository, harness, dataset, slots }) =>
+      ({ repository, harness, dataset, slots, runsOn, runtime }) =>
         run(principal, "settings:write", async () =>
           ok({
             links: await ci.upsert(ws, principal.subject, {
@@ -1217,6 +1219,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               harness,
               slots: slots ?? {},
               ...(dataset !== undefined ? { dataset } : {}),
+              ...(runsOn !== undefined ? { runsOn } : {}),
+              ...(runtime !== undefined ? { runtime } : {}),
             }),
           }),
         ),

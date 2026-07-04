@@ -207,6 +207,33 @@ describe("renderCiWorkflow", () => {
     );
     expect(yaml).toContain("TODO");
   });
+
+  it("runsOn/runtime 미지정이면 ubuntu-latest + runtime 입력 없음(관리형 기본)", () => {
+    const yaml = renderCiWorkflow(
+      { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
+      "acme",
+      "https://assay.example.com",
+    );
+    expect(yaml).toContain("runs-on: ubuntu-latest");
+    expect(yaml).not.toContain("runtime:");
+  });
+
+  it("runsOn/runtime 지정 시 셀프호스티드 배치(runs-on 라벨 + run-eval runtime 입력)", () => {
+    const yaml = renderCiWorkflow(
+      {
+        repository: "acme/app",
+        harness: "bu",
+        slots: {},
+        createdBy: "a",
+        runsOn: "[self-hosted, assay-r1]",
+        runtime: "self:ws:r1",
+      },
+      "acme",
+      "https://assay.example.com",
+    );
+    expect(yaml).toContain("runs-on: [self-hosted, assay-r1]");
+    expect(yaml).toContain("runtime: self:ws:r1");
+  });
 });
 
 describe("CiLinkService.mintRunnerToken — GitHub Actions 러너 등록 토큰 발급", () => {

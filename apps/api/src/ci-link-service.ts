@@ -12,6 +12,8 @@ export const UpsertCiLinkBodySchema = z.object({
   harness: z.string().min(1), // 하니스 인스턴스 id
   dataset: z.string().optional(), // 발사할 데이터셋 id — setup-PR 워크플로 생성에 필요(없으면 YAML 에 TODO)
   slots: z.record(z.object({ path: z.string().optional() })).default({}), // 서비스 슬롯 → 모노레포 path(선택)
+  runsOn: z.string().min(1).optional(), // 셀프호스티드 배치(선택) — 워크플로 runs-on(예: "[self-hosted, assay-<id>]")
+  runtime: z.string().min(1).optional(), // run-eval runtime 입력(예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서
 });
 export type UpsertCiLinkBody = z.infer<typeof UpsertCiLinkBodySchema>;
 
@@ -54,6 +56,8 @@ export class CiLinkService {
       slots: body.slots,
       createdBy: subject,
       ...(body.dataset !== undefined ? { dataset: body.dataset } : {}),
+      ...(body.runsOn !== undefined ? { runsOn: body.runsOn } : {}),
+      ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
     };
     const rest = current.filter((l) => l.repository.toLowerCase() !== body.repository.toLowerCase());
     await this.deps.settings.set(workspace, { ci: { links: [...rest, next] } });
@@ -251,6 +255,9 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
   const imagesJson = `{${slots
     .map(([slot]) => `"${slot}":"ghcr.io/\${{ github.repository }}/${slot}@\${{ steps.build-${slot}.outputs.digest }}"`)
     .join(",")}}`;
+  // 셀프호스티드 배치(선택): runsOn 지정 시 그 러너에서 잡을 돌리고, runtime 지정 시 평가를 워크스페이스-공유 러너로.
+  const runsOn = link.runsOn ?? "ubuntu-latest";
+  const runtimeLine = link.runtime ? `\n          runtime: ${link.runtime}` : "";
   return `# Assay 가 생성한 CI eval 워크플로 — PR 은 임시 핀 평가, 기본 브랜치 push 는 재핀(새 버전)+평가.
 name: assay-eval
 on:
@@ -266,7 +273,7 @@ concurrency:
   cancel-in-progress: true
 jobs:
   eval:
-    runs-on: ubuntu-latest
+    runs-on: ${runsOn}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
@@ -282,6 +289,6 @@ ${buildSteps}
           workspace: ${workspace}
           harness: ${link.harness}
           dataset: ${link.dataset ?? "# TODO: 데이터셋 id 를 지정하세요"}
-          images: '${imagesJson}'
+          images: '${imagesJson}'${runtimeLine}
 `;
 }

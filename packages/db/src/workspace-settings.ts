@@ -15,6 +15,9 @@ export const WorkspaceCiLinkSchema = z.object({
   slots: z.record(z.object({ path: z.string().optional() })).default({}),
   createdBy: z.string(), // 감사용(발사 인증과 무관)
   disabled: z.boolean().optional(),
+  // 셀프호스티드 배치(선택) — setup-PR 워크플로가 직접 자가 러너를 타깃하게. 미지정 = ubuntu-latest + 관리형 런타임.
+  runsOn: z.string().optional(), // 워크플로 runs-on 값(예: "[self-hosted, assay-<id>]"). github-install 의 러너 라벨.
+  runtime: z.string().optional(), // run-eval runtime 입력(예: "self:ws:<id>"). 이 레포 평가를 그 워크스페이스-공유 러너에서.
 });
 export type WorkspaceCiLink = z.infer<typeof WorkspaceCiLinkSchema>;
 
