@@ -31,6 +31,10 @@ inputs:
   version:
     description: "Instance version for push re-pin (default dev-<short-sha>)"
     required: false
+  allow-tags:
+    description: "Allow non-digest (tag) image pins on push re-pin — for self-hosted/local/air-gapped registries where a digest isn't available. Default false (digest enforced)."
+    required: false
+    default: "false"
   runtime:
     description: "Workspace Runtime id to run on (e.g. self:<runner-id>)"
     required: false

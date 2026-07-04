@@ -6,8 +6,11 @@
 import { appendFileSync } from "node:fs";
 
 // GitHub 가 JS 액션 입력을 INPUT_<대문자> env 로 넘긴다(@actions/core 없이 직접 읽어 zero-dep 유지).
+// GitHub 는 공백만 _ 로 바꾸고 하이픈은 보존한다 → `api-url` = INPUT_API-URL. (하이픈을 _ 로 바꾸면 못 찾음.)
+// 하이픈 버전을 우선 읽고, 직접 env 주입(INPUT_API_URL) 케이스를 위해 _ 버전도 폴백으로 본다.
 function input(name, fallback) {
-  const v = process.env[`INPUT_${name.toUpperCase().replaceAll("-", "_")}`];
+  const up = name.toUpperCase();
+  const v = process.env[`INPUT_${up}`] ?? process.env[`INPUT_${up.replaceAll("-", "_")}`];
   return v !== undefined && v !== "" ? v : fallback;
 }
 function requireInput(name) {
@@ -80,7 +83,14 @@ async function main() {
   let harnessVersion = "latest";
   if (mode === "push" && images) {
     const version = input("version", `dev-${sha.slice(0, 7)}`);
-    const repin = await api("POST", `/harnesses/${encodeURIComponent(harness)}/pins`, { pins: images, version });
+    // 기본은 digest(@sha256:…) 강제 — tag 는 움직여 재현성이 깨진다. self-hosted/로컬/air-gapped 레지스트리처럼
+    // digest 를 못 쓰는 환경만 allow-tags:true 로 opt-out(그 책임은 사용자).
+    const allowTags = input("allow-tags") === "true";
+    const repin = await api("POST", `/harnesses/${encodeURIComponent(harness)}/pins`, {
+      pins: images,
+      version,
+      ...(allowTags ? { allowTags: true } : {}),
+    });
     harnessVersion = repin.version;
     summary(
       `### Assay re-pin\n\n\`${harness}@${repin.version}\` (base \`${repin.base}\`${repin.unchanged ? ", unchanged" : ""})`,
