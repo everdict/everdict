@@ -190,6 +190,7 @@ describe("MCP tools", () => {
       "create_runtime",
       "create_schedule",
       "delete_dataset",
+      "delete_harness",
       "delete_schedule",
       "diff_datasets",
       "diff_scorecards",
