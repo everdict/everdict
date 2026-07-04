@@ -31,14 +31,20 @@ export class RuntimeDispatcher implements Dispatcher {
     // self:<runnerId> — 개인 소유 셀프호스티드 러너. 제출자(submittedBy)가 그 러너를 소유하는지 확인 후
     // (tenant,owner,runnerId) 백엔드로 라우팅. 남의 러너/미상 소유자 타깃은 404(존재 누설 없음 + D3 격리).
     if (target?.startsWith("self:") && this.deps.resolveSelfRunner && this.deps.buildSelfHostedBackend) {
-      const runnerId = target.slice("self:".length);
-      const owner = job.submittedBy;
+      // self:ws:<runnerId> = 워크스페이스-공유 러너(owner=ws:<tenant> — 이 워크스페이스 멤버 누구나 타깃; 팀 빌드 서버/CI).
+      // self:<runnerId> = 개인 소유 러너(owner=제출자 — 내 러너만, D3). owner 를 tenant 로 파생하니 멤버십이 곧 접근권.
+      const rest = target.slice("self:".length);
+      const workspaceShared = rest.startsWith("ws:");
+      const runnerId = workspaceShared ? rest.slice("ws:".length) : rest;
+      const owner = workspaceShared ? `ws:${tenant}` : job.submittedBy;
       const caps = owner && runnerId ? await this.deps.resolveSelfRunner(owner, runnerId) : undefined;
       if (!owner || !runnerId || caps === undefined)
         throw new NotFoundError(
           "NOT_FOUND",
           { runnerId, resource: "runner" },
-          "셀프호스티드 러너를 찾을 수 없습니다 — 내가 소유한 러너만 타깃할 수 있습니다.",
+          workspaceShared
+            ? "이 워크스페이스의 공유 러너를 찾을 수 없습니다."
+            : "셀프호스티드 러너를 찾을 수 없습니다 — 내가 소유한 러너만 타깃할 수 있습니다.",
         );
       // service(토폴로지) 하니스는 로컬 Docker 토폴로지를 띄우므로 러너에 docker capability 필요 — 없으면 실행 전 명시적 거부.
       if (job.harnessSpec?.kind === "service" && !caps.includes("docker"))

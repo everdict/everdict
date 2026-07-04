@@ -44,4 +44,20 @@ export class RunnerService {
   async listForWorkspace(workspace: string): Promise<RunnerMeta[]> {
     return this.store.listByWorkspace(workspace);
   }
+
+  // 워크스페이스-공유 러너(팀 자원) — owner="ws:<workspace>". 개인 러너(owner=subject)와 달리 admin 이 등록하고
+  // 이 워크스페이스 멤버 누구나 타깃(self:ws:<id>)한다. 결제는 워크스페이스(개인 own-pays 아님 — 후속). 설계:
+  // docs/architecture/self-hosted-runtime-and-runners.md.
+  private static wsOwner(workspace: string): string {
+    return `ws:${workspace}`;
+  }
+  async pairWorkspace(input: Omit<PairRunnerInput, "owner">): Promise<PairedRunner> {
+    return this.store.pair({ ...input, owner: RunnerService.wsOwner(input.workspace) });
+  }
+  async listWorkspaceOwned(workspace: string): Promise<RunnerMeta[]> {
+    return this.store.list(RunnerService.wsOwner(workspace));
+  }
+  async revokeWorkspaceRunner(workspace: string, id: string): Promise<void> {
+    await this.store.remove(RunnerService.wsOwner(workspace), id);
+  }
 }

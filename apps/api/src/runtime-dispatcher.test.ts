@@ -172,4 +172,21 @@ describe("RuntimeDispatcher", () => {
     expect(backends.has("self:u-alice:dev-laptop")).toBe(true);
     expect(seen[0]?.evalCase.placement?.target).toBe("self:u-alice:dev-laptop");
   });
+
+  // self:ws:<runnerId> — 워크스페이스-공유 러너. 소유자를 제출자가 아닌 잡의 tenant(ws:<tenant>)에서 파생하므로
+  // 그 워크스페이스 멤버라면 누구든(submittedBy 무관) 타깃한다. 팀 빌드서버/CI 러너 공유용.
+  it("self:ws:<runnerId> 는 owner=ws:<tenant> 로 해석(멤버 누구나 — submittedBy 불필요)", async () => {
+    const { d, seen, backends, resolveSelfRunner } = selfDeps(["git", "docker"]);
+    await d.dispatch(selfJob("self:ws:team-builder")); // submittedBy 없음
+    expect(resolveSelfRunner).toHaveBeenCalledWith("ws:acme", "team-builder");
+    expect(backends.has("self:ws:acme:team-builder")).toBe(true);
+    expect(seen[0]?.evalCase.placement?.target).toBe("self:ws:acme:team-builder");
+  });
+
+  it("self:ws: 인데 그 워크스페이스에 공유 러너 없으면 NOT_FOUND(크로스 워크스페이스 차단)", async () => {
+    const { d, seen, resolveSelfRunner } = selfDeps(undefined);
+    await expect(d.dispatch(selfJob("self:ws:nope"))).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
+    expect(resolveSelfRunner).toHaveBeenCalledWith("ws:acme", "nope"); // 항상 잡의 tenant 로만 조회 — 남의 ws 못 봄
+    expect(seen).toHaveLength(0);
+  });
 });

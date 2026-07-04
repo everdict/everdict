@@ -2022,6 +2022,55 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 워크스페이스-공유 러너 등록(팀 자원) — admin 이 owner="ws:<workspace>" 로 페어링. 개인 러너(POST /runners,
+  // self-scoped)와 달리 이 워크스페이스 멤버 누구나 self:ws:<id> 로 타깃한다(팀 빌드서버/CI 러너). 평문 토큰은 한 번만.
+  app.post("/workspace/runners", async (req, reply) => {
+    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = PairRunnerBodySchema.safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write"); // 팀 자원 등록 = admin
+      const paired = await deps.runnerService.pairWorkspace({
+        workspace: principal.workspace,
+        label: body.data.label,
+        ...(body.data.os !== undefined ? { os: body.data.os } : {}),
+        ...(body.data.capabilities !== undefined ? { capabilities: body.data.capabilities } : {}),
+      });
+      return reply.send({ runner: paired.meta, token: paired.token });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 워크스페이스-공유 러너 목록(owner=ws:<workspace> 만 — 로스터[GET /workspace/runners]는 개인 러너 포함, 이건 팀 소유만).
+  app.get("/workspace/runners/owned", async (req, reply) => {
+    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:write");
+      return reply.send({ runners: await deps.runnerService.listWorkspaceOwned(principal.workspace) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 워크스페이스-공유 러너 해제 — admin 만(owner=ws:<workspace> 스코프; 개인 러너는 건드리지 못한다).
+  app.delete<{ Params: { id: string } }>("/workspace/runners/:id", async (req, reply) => {
+    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:write");
+      await deps.runnerService.revokeWorkspaceRunner(principal.workspace, req.params.id);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- workspace settings (계측 정책 등; admin 전용) ---
   app.get("/workspace/settings", async (req, reply) => {
     if (!deps.settingsStore) return reply.code(404).send({ code: "NOT_FOUND", message: "설정 저장소 미설정" });
