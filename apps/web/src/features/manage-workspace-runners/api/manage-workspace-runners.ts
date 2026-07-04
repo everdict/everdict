@@ -76,6 +76,7 @@ export async function githubInstallRunnerAction(input: {
   connectionId: string
   repository?: string
   org?: string
+  runnerGroup?: string
   label?: string
 }): Promise<GithubInstallResult> {
   const ctx = await authContext()
@@ -86,6 +87,9 @@ export async function githubInstallRunnerAction(input: {
         ? { repository: input.repository.trim() }
         : {}),
       ...(input.org && input.org.trim().length > 0 ? { org: input.org.trim() } : {}),
+      ...(input.runnerGroup && input.runnerGroup.trim().length > 0
+        ? { runnerGroup: input.runnerGroup.trim() }
+        : {}),
       ...(input.label && input.label.trim().length > 0 ? { label: input.label.trim() } : {}),
     }
     const install = githubRunnerInstallSchema.parse(

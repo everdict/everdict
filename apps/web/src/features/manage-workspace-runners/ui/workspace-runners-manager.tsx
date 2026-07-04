@@ -404,6 +404,7 @@ function GithubInstallDialog({
   const [mode, setMode] = useState<'repo' | 'org'>('repo')
   const [repository, setRepository] = useState('')
   const [org, setOrg] = useState('')
+  const [runnerGroup, setRunnerGroup] = useState('')
   const [result, setResult] = useState<GithubRunnerInstall>()
   const [copied, setCopied] = useState<'script' | 'hint'>()
   const [error, setError] = useState<string>()
@@ -418,6 +419,7 @@ function GithubInstallDialog({
     setMode('repo')
     setRepository('')
     setOrg('')
+    setRunnerGroup('')
     setResult(undefined)
     setCopied(undefined)
     setError(undefined)
@@ -439,7 +441,9 @@ function GithubInstallDialog({
     }
     startTransition(async () => {
       const r = await githubInstallRunnerAction(
-        mode === 'org' ? { connectionId, org } : { connectionId, repository }
+        mode === 'org'
+          ? { connectionId, org, ...(runnerGroup.trim() ? { runnerGroup } : {}) }
+          : { connectionId, repository }
       )
       if (r.ok && r.install) setResult(r.install)
       else setError(r.error ?? '생성에 실패했어요.')
@@ -594,6 +598,11 @@ function GithubInstallDialog({
                   org 러너는 그 조직의 모든 레포가 공유해요.{' '}
                   <span className="font-mono">admin:org</span> 권한 연결이 필요해요.
                 </p>
+                <Input
+                  value={runnerGroup}
+                  onChange={(e) => setRunnerGroup(e.target.value)}
+                  placeholder="러너 그룹 (선택 — 그룹 접근정책 적용)"
+                />
                 {!hasAdminOrg && (
                   <Callout tone="warning" className="py-1.5">
                     <span className="flex flex-wrap items-center justify-between gap-2">

@@ -1471,12 +1471,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             connectionId: z.string().describe("내 GitHub 연결 id(list_connections)"),
             repository: z.string().optional().describe('repo 레벨 대상 "owner/name"'),
             org: z.string().optional().describe("org 레벨 대상(그 org 의 모든 레포 공유) — admin:org 상향 연결 필요"),
+            runnerGroup: z.string().optional().describe("org 러너 그룹(org 레벨 전용, 선택) — 그 그룹의 접근 정책 적용"),
             label: z.string().max(80).optional().describe("Assay 러너 표시 이름(기본: repo/org 이름)"),
             githubLabels: z.array(z.string()).optional().describe("GH 러너 추가 라벨"),
             capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
           },
         },
-        ({ connectionId, repository, org, label, githubLabels, capabilities }) =>
+        ({ connectionId, repository, org, runnerGroup, label, githubLabels, capabilities }) =>
           run(principal, "settings:write", async () =>
             ok(
               await installGithubWorkspaceRunner(
@@ -1489,6 +1490,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
                   apiUrl: deps.apiPublicUrl ?? "http://localhost:8787",
                   ...(repository !== undefined ? { repository } : {}),
                   ...(org !== undefined ? { org } : {}),
+                  ...(runnerGroup !== undefined ? { runnerGroup } : {}),
                   ...(githubLabels !== undefined ? { githubLabels } : {}),
                   ...(capabilities !== undefined ? { capabilities } : {}),
                 },

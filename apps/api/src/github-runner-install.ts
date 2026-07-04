@@ -20,6 +20,7 @@ export interface GithubRunnerInstallInput {
   apiUrl: string; // 컨트롤플레인 base — `assay runner --api-url`
   githubLabels?: string[]; // GH 러너 추가 라벨(항상 self-hosted + assay-<id> 에 더해)
   capabilities?: string[]; // Assay 러너 초기 capability 라벨(러너가 붙을 때 재프로브)
+  runnerGroup?: string; // org 러너 그룹(org 레벨 전용, 선택) — 그 그룹의 접근 정책이 이 러너에 적용된다
 }
 
 export interface GithubRunnerInstallResult {
@@ -70,6 +71,8 @@ export async function installGithubWorkspaceRunner(
     assayRunnerToken: paired.token,
     apiUrl: input.apiUrl.replace(/\/$/, ""),
     runtimeTarget,
+    // 러너 그룹은 org 러너 전용(repo 러너엔 --runnergroup 이 무효). org 대상일 때만 전달.
+    ...("org" in target && input.runnerGroup ? { runnerGroup: input.runnerGroup } : {}),
   });
   const workflowHint = renderWorkflowHint(githubRunnerLabel, runtimeTarget);
 
@@ -92,8 +95,10 @@ function renderRunnerInstall(p: {
   assayRunnerToken: string;
   apiUrl: string;
   runtimeTarget: string;
+  runnerGroup?: string; // org 러너 그룹(org 레벨 전용, 선택) — config.sh --runnergroup
 }): string {
   const rv = "2.319.1"; // actions/runner 버전 — 필요 시 갱신
+  const groupFlag = p.runnerGroup ? ` \\\n  --runnergroup "${p.runnerGroup}"` : ""; // org 러너 그룹(있으면)
   return `#!/usr/bin/env bash
 # Assay 가 생성한 셀프호스티드 러너 설치 스크립트 — 이 빌드 서버에 GitHub Actions 러너 + Assay 러너를 함께 세웁니다.
 # 토큰이 포함되어 있으니 공유하지 마세요(GitHub 등록 토큰은 단기, Assay 토큰은 1회 노출).
@@ -109,7 +114,7 @@ fi
   --url "${p.repoUrl}" \\
   --token "${p.githubRegToken}" \\
   --name "${p.runnerName}" \\
-  --labels "${p.githubLabels.join(",")}"
+  --labels "${p.githubLabels.join(",")}"${groupFlag}
 nohup ./run.sh > /tmp/gh-actions-runner.log 2>&1 &
 cd ..
 

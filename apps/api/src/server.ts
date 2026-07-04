@@ -2249,6 +2249,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         connectionId: z.string().min(1),
         repository: z.string().min(1).optional(), // repo 레벨 대상 "owner/name"
         org: z.string().min(1).optional(), // org 레벨 대상(admin:org 연결 필요). repository 와 정확히 하나.
+        runnerGroup: z.string().min(1).optional(), // org 러너 그룹(org 레벨 전용, 선택)
         label: z.string().min(1).max(80).optional(),
         githubLabels: z.array(z.string().min(1)).optional(),
         capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
@@ -2269,6 +2270,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             apiUrl: baseUrl(req),
             ...(body.data.repository !== undefined ? { repository: body.data.repository } : {}),
             ...(body.data.org !== undefined ? { org: body.data.org } : {}),
+            ...(body.data.runnerGroup !== undefined ? { runnerGroup: body.data.runnerGroup } : {}),
             ...(body.data.githubLabels !== undefined ? { githubLabels: body.data.githubLabels } : {}),
             ...(body.data.capabilities !== undefined ? { capabilities: body.data.capabilities } : {}),
           },
