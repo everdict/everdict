@@ -384,17 +384,16 @@ export function BuildFromSourceWizard({
                     (hfTokenScope ? (
                       <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-success)]">
                         <Lock className="size-3" /> gated ·{' '}
-                        {hfTokenScope === 'user' ? '내 시크릿' : '워크스페이스 시크릿'}의 HF_TOKEN
-                        사용
+                        {hfTokenScope === 'user' ? '내' : '워크스페이스'} HuggingFace 토큰 사용
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
-                        <Lock className="size-3" /> gated · HF 토큰 필요
+                        <Lock className="size-3" /> gated · HuggingFace 토큰 필요
                         <Link
                           href={`/${workspace}/account?tab=secrets`}
                           className="font-[510] text-primary underline-offset-2 hover:underline"
                         >
-                          계정 시크릿에 HF_TOKEN 등록 →
+                          계정에서 등록 →
                         </Link>
                       </span>
                     ))}
@@ -466,7 +465,7 @@ export function BuildFromSourceWizard({
                   // gated + 토큰 미보유가 가장 흔한 실패 — 셀프서비스 경로(계정 시크릿)를 바로 안내.
                   hint:
                     hfGated && !hfTokenScope
-                      ? 'gated 데이터셋이에요 — 계정 → 시크릿에 HF_TOKEN 을 등록하면 바로 가져올 수 있어요. (HuggingFace 에서 이 데이터셋의 약관 동의가 필요해요)'
+                      ? 'gated 데이터셋이에요 — 계정 → 시크릿에서 HuggingFace 토큰을 등록하면 바로 가져올 수 있어요. (HuggingFace 에서 이 데이터셋의 약관 동의도 필요해요)'
                       : "HuggingFace에 연결되지 않으면 'JSONL 붙여넣기'로 직접 넣어보세요.",
                 }
               : {})}

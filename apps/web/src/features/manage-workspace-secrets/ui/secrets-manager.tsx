@@ -1,33 +1,46 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { Eye, EyeOff, KeyRound, Plus } from 'lucide-react'
 
-import type { SecretMeta, SecretScope } from '@/entities/secret'
+import {
+  PROVIDER_TOKENS,
+  providerTokenNames,
+  type ProviderTokenDef,
+  type SecretMeta,
+  type SecretScope,
+} from '@/entities/secret'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { FieldError, Input, Label, Textarea } from '@/shared/ui/input'
+import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 import { deleteSecretAction, setSecretAction } from '../api/manage-secrets'
 
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
 // model/cluster = 워크스페이스(공유) 시크릿(안내만 다름), personal = 내 개인 시크릿(계정 화면, 셀프 관리).
+// desc = 헤더 한 줄, help = info 툴팁 상세(가이드는 인라인 금지 — 아이콘 툴팁으로), multiline = 값이 여러 줄(kubeconfig).
 const COPY = {
   model: {
     title: '모델·프로바이더 키',
-    help: 'OPENAI_API_KEY, ANTHROPIC_API_KEY 같은 키예요. 실행할 때 이 워크스페이스의 작업에만 쓰여요.',
+    desc: '이 워크스페이스의 실행·채점에 쓰이는 키예요.',
+    help: '실행할 때 이 워크스페이스의 작업에만 주입돼요. 하니스 env 에서 “워크스페이스” 시크릿으로 참조할 수 있어요.',
     namePlaceholder: 'OPENAI_API_KEY',
     multiline: false,
   },
   cluster: {
     title: '클러스터 자격증명',
-    help: '런타임 연결용이에요 — NOMAD_TOKEN, K8s 토큰, kubeconfig 등. 클러스터 인증에만 쓰이고 실행 작업에는 노출되지 않아요.',
+    desc: '런타임 연결용 — NOMAD_TOKEN·K8s 토큰·kubeconfig 등.',
+    help: '클러스터 인증에만 쓰이고 실행 작업에는 노출되지 않아요.',
     namePlaceholder: 'NOMAD_TOKEN',
     multiline: true,
   },
   personal: {
     title: '내 개인 시크릿',
-    help: '나만 쓰는 개인 키예요 — 다른 멤버는 볼 수 없어요. 하니스 env 에서 "내 개인" 스코프로 참조하면 그 하니스는 나만 실행·열람할 수 있어요.',
+    desc: '나만 쓰는 개인 키 — 다른 멤버는 볼 수 없어요.',
+    help: '하니스 env 에서 “내 개인” 스코프로 참조하면 그 하니스는 나만 실행·열람할 수 있어요.',
     namePlaceholder: 'MY_OPENAI_API_KEY',
     multiline: false,
   },
@@ -45,33 +58,76 @@ export function SecretsManager({
   const copy = COPY[variant]
   // personal = 개인(user) 스코프(셀프 관리), 그 외 = 워크스페이스(공유, admin).
   const scope: SecretScope = variant === 'personal' ? 'user' : 'workspace'
-  const [name, setName] = useState('')
-  const [value, setValue] = useState('')
-  const [error, setError] = useState<string>()
-  const [saved, setSaved] = useState<string>()
+  // 프로바이더 토큰(예약 이름, 플랫폼이 소비) — model/personal 화면에서 큐레이션. cluster 는 해당 없음.
+  const providers =
+    variant === 'cluster' ? [] : PROVIDER_TOKENS.filter((t) => t.scopes.includes(scope))
+  // raw 목록에선 프로바이더 토큰을 제외(이중 노출 방지 — 위 큐레이션 섹션이 그 자리).
+  const rawSecrets = secrets.filter((s) => !(providerTokenNames.has(s.name) && s.scope === scope))
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 space-y-0.5">
+          <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
+            {copy.title}
+            <InfoTip
+              content={
+                <>
+                  {copy.help}
+                  <br />
+                  값은 at-rest 암호화되고, 저장 후에는 다시 볼 수 없어요(목록엔 이름만).
+                </>
+              }
+            />
+          </h3>
+          <p className="text-[12.5px] leading-relaxed text-muted-foreground">{copy.desc}</p>
+        </div>
+      </div>
+
+      {providers.length > 0 && (
+        <ProviderTokenRows
+          providers={providers}
+          secrets={secrets}
+          scope={scope}
+          canWrite={canWrite}
+        />
+      )}
+
+      <SecretRows
+        secrets={rawSecrets}
+        canWrite={canWrite}
+        scope={scope}
+        multiline={copy.multiline}
+        namePlaceholder={copy.namePlaceholder}
+        {...(providers.length > 0 ? { sectionLabel: '직접 추가한 시크릿' } : {})}
+      />
+
+      {!canWrite && (
+        <p className="text-[12.5px] text-muted-foreground">변경하려면 관리자 권한이 필요해요.</p>
+      )}
+    </div>
+  )
+}
+
+// 프로바이더 토큰 — 예약 이름이 미리 정해진 큐레이션 목록. 유저는 이름을 몰라도 "어떤 서비스 토큰인지"로 등록한다.
+function ProviderTokenRows({
+  providers,
+  secrets,
+  scope,
+  canWrite,
+}: {
+  providers: ProviderTokenDef[]
+  secrets: SecretMeta[]
+  scope: SecretScope
+  canWrite: boolean
+}) {
+  const [editing, setEditing] = useState<string>() // 등록/교체 폼이 열린 토큰 name
   const [confirmName, setConfirmName] = useState<string>()
+  const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
-
-  const nameInvalid = name.length > 0 && !NAME_RE.test(name)
-
-  function onAdd() {
-    setError(undefined)
-    setSaved(undefined)
-    startTransition(async () => {
-      const r = await setSecretAction(name, value, scope)
-      if (r.ok) {
-        setSaved(name)
-        setName('')
-        setValue('')
-      } else {
-        setError(r.error)
-      }
-    })
-  }
 
   function onDelete(target: string) {
     setError(undefined)
-    setSaved(undefined)
     startTransition(async () => {
       const r = await deleteSecretAction(target, scope)
       setConfirmName(undefined)
@@ -80,30 +136,198 @@ export function SecretsManager({
   }
 
   return (
-    <div className="space-y-6">
-      <div className="space-y-1">
-        <h3 className="text-[13px] font-[560] text-foreground">{copy.title}</h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">{copy.help}</p>
-        <p className="text-[12px] leading-relaxed text-faint">
-          시크릿은 암호화되고, 값은 다시 볼 수 없어요(목록에는 이름만 보여요).
-          {variant === 'personal'
-            ? ' 내 개인 시크릿은 나만 보이고, 다른 멤버는 접근할 수 없어요.'
-            : ' 모델 키·클러스터 자격증명 탭은 같은 워크스페이스 시크릿을 쓰고 안내만 달라요.'}
-        </p>
+    <div className="space-y-2.5">
+      <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+        프로바이더 토큰
+      </span>
+      <SettingsList>
+        {providers.map((t) => {
+          const registered = secrets.find((s) => s.name === t.name && s.scope === scope)
+          return (
+            <SettingsRow
+              key={t.name}
+              label={
+                <span className="flex items-center gap-1.5">
+                  <span className="text-[13px] font-[560] text-foreground">{t.provider}</span>
+                  <InfoTip
+                    content={
+                      <>
+                        {t.help}
+                        <br />
+                        시크릿 이름 <code className="font-mono">{t.name}</code> 으로 저장돼요.
+                      </>
+                    }
+                  />
+                </span>
+              }
+              hint={
+                registered
+                  ? `${t.usedFor} · 등록됨 (갱신 ${new Date(registered.updatedAt).toLocaleDateString('ko-KR')})`
+                  : t.usedFor
+              }
+            >
+              {canWrite && (
+                <span className="flex items-center gap-2.5">
+                  {registered ? (
+                    confirmName === t.name ? (
+                      <>
+                        <Button
+                          variant="destructive"
+                          size="sm"
+                          disabled={pending}
+                          onClick={() => onDelete(t.name)}
+                        >
+                          삭제 확인
+                        </Button>
+                        <button
+                          type="button"
+                          className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+                          onClick={() => setConfirmName(undefined)}
+                        >
+                          취소
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          type="button"
+                          className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+                          onClick={() => setEditing(editing === t.name ? undefined : t.name)}
+                        >
+                          교체
+                        </button>
+                        <button
+                          type="button"
+                          className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-destructive"
+                          onClick={() => setConfirmName(t.name)}
+                        >
+                          삭제
+                        </button>
+                      </>
+                    )
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      onClick={() => setEditing(editing === t.name ? undefined : t.name)}
+                    >
+                      등록
+                    </Button>
+                  )}
+                  <a
+                    href={t.helpUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-[12px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
+                  >
+                    발급 ↗
+                  </a>
+                </span>
+              )}
+            </SettingsRow>
+          )
+        })}
+      </SettingsList>
+      {editing && (
+        <AddSecretForm
+          scope={scope}
+          multiline={false}
+          namePlaceholder=""
+          fixedName={editing}
+          onDone={() => setEditing(undefined)}
+          onCancel={() => setEditing(undefined)}
+        />
+      )}
+      {error && (
+        <Callout tone="danger" className="py-1.5">
+          {error}
+        </Callout>
+      )}
+    </div>
+  )
+}
+
+// 리스트(구분선 카드) + 상단 우측 "시크릿 추가" → 토글 인라인 폼. Linear settings-list 스타일.
+function SecretRows({
+  secrets,
+  canWrite,
+  scope,
+  multiline,
+  namePlaceholder,
+  sectionLabel,
+}: {
+  secrets: SecretMeta[]
+  canWrite: boolean
+  scope: SecretScope
+  multiline: boolean
+  namePlaceholder: string
+  sectionLabel?: string // 프로바이더 토큰 섹션과 병렬일 때 구분 라벨
+}) {
+  const [adding, setAdding] = useState(false)
+  const [confirmName, setConfirmName] = useState<string>()
+  const [error, setError] = useState<string>()
+  const [pending, startTransition] = useTransition()
+
+  function onDelete(target: string) {
+    setError(undefined)
+    startTransition(async () => {
+      const r = await deleteSecretAction(target, scope)
+      setConfirmName(undefined)
+      if (!r.ok) setError(r.error)
+    })
+  }
+
+  return (
+    <div className="space-y-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[12px] font-[510] text-faint">
+          {sectionLabel ? (
+            <span className="text-[11px] uppercase tracking-wide">{sectionLabel}</span>
+          ) : secrets.length > 0 ? (
+            `등록됨 ${secrets.length}개`
+          ) : (
+            ''
+          )}
+        </span>
+        {canWrite && !adding && (
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="gap-1"
+            onClick={() => {
+              setAdding(true)
+              setError(undefined)
+            }}
+          >
+            <Plus className="size-3.5" /> 시크릿 추가
+          </Button>
+        )}
       </div>
 
+      {canWrite && adding && (
+        <AddSecretForm
+          scope={scope}
+          multiline={multiline}
+          namePlaceholder={namePlaceholder}
+          onDone={() => setAdding(false)}
+          onCancel={() => setAdding(false)}
+        />
+      )}
+
       {secrets.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">아직 등록한 시크릿이 없어요.</p>
+        <p className="rounded-lg border border-dashed bg-muted/20 px-4 py-6 text-center text-[13px] text-muted-foreground">
+          아직 등록한 시크릿이 없어요.{canWrite && ' “시크릿 추가”로 넣어요.'}
+        </p>
       ) : (
-        <ul className="divide-y rounded-lg border bg-card shadow-raise">
+        <SettingsList>
           {secrets.map((s) => (
-            <li key={s.name} className="flex items-center justify-between gap-3 px-3 py-2.5">
-              <div className="min-w-0">
-                <span className="font-mono text-[13px]">{s.name}</span>
-                <span className="ml-2 text-[12px] text-faint">
-                  {new Date(s.updatedAt).toLocaleString('ko-KR')}
-                </span>
-              </div>
+            <SettingsRow
+              key={s.name}
+              label={<code className="font-mono text-[13px] text-foreground">{s.name}</code>}
+              hint={`갱신 ${new Date(s.updatedAt).toLocaleString('ko-KR')}`}
+            >
               {canWrite &&
                 (confirmName === s.name ? (
                   <span className="flex items-center gap-2">
@@ -117,7 +341,7 @@ export function SecretsManager({
                     </Button>
                     <button
                       type="button"
-                      className="text-[12px] text-muted-foreground hover:text-foreground"
+                      className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
                       onClick={() => setConfirmName(undefined)}
                     >
                       취소
@@ -126,81 +350,138 @@ export function SecretsManager({
                 ) : (
                   <button
                     type="button"
-                    className="text-[12px] font-[510] text-destructive hover:underline"
+                    className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-destructive"
                     onClick={() => setConfirmName(s.name)}
                   >
                     삭제
                   </button>
                 ))}
-            </li>
+            </SettingsRow>
           ))}
-        </ul>
+        </SettingsList>
       )}
 
-      {canWrite ? (
-        <div className="space-y-3 rounded-lg border bg-muted/30 p-4">
+      {error && (
+        <Callout tone="danger" className="py-1.5">
+          {error}
+        </Callout>
+      )}
+    </div>
+  )
+}
+
+// 토글되는 인라인 추가 폼 — 이름 + 값(비-멀티라인은 보기 토글) + 저장/취소. 카드 안에 컴팩트하게.
+// fixedName = 프로바이더 토큰(예약 이름): 이름 입력을 숨기고 값만 받는다.
+function AddSecretForm({
+  scope,
+  multiline,
+  namePlaceholder,
+  fixedName,
+  onDone,
+  onCancel,
+}: {
+  scope: SecretScope
+  multiline: boolean
+  namePlaceholder: string
+  fixedName?: string
+  onDone: () => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(fixedName ?? '')
+  const [value, setValue] = useState('')
+  const [show, setShow] = useState(false)
+  const [error, setError] = useState<string>()
+  const [pending, startTransition] = useTransition()
+  const nameInvalid = name.length > 0 && !NAME_RE.test(name)
+
+  function onSave() {
+    setError(undefined)
+    startTransition(async () => {
+      const r = await setSecretAction(name, value, scope)
+      if (r.ok) onDone()
+      else setError(r.error)
+    })
+  }
+
+  return (
+    <div className="space-y-3 rounded-lg border bg-muted/30 p-3.5">
+      <div className={fixedName ? 'grid gap-3' : 'grid gap-3 sm:grid-cols-2'}>
+        {!fixedName && (
           <div className="space-y-1.5">
-            <Label htmlFor={`secret-name-${variant}`}>이름 (env 형식)</Label>
+            <Label htmlFor="secret-name">이름 (env 형식)</Label>
             <Input
-              id={`secret-name-${variant}`}
+              id="secret-name"
               value={name}
-              placeholder={copy.namePlaceholder}
-              onChange={(e) => {
-                setName(e.target.value.toUpperCase())
-                setSaved(undefined)
-              }}
+              placeholder={namePlaceholder}
+              onChange={(e) => setName(e.target.value.toUpperCase())}
               autoComplete="off"
               spellCheck={false}
+              className="font-mono text-[12px]"
             />
             {nameInvalid && (
               <FieldError message="대문자로 시작하고 대문자·숫자·밑줄만 쓸 수 있어요." />
             )}
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor={`secret-value-${variant}`}>값</Label>
-            {copy.multiline ? (
-              <Textarea
-                id={`secret-value-${variant}`}
-                value={value}
-                placeholder="토큰이나 kubeconfig 붙여넣기"
-                onChange={(e) => setValue(e.target.value)}
-                rows={6}
-                spellCheck={false}
-              />
-            ) : (
+        )}
+        <div className="space-y-1.5">
+          <Label htmlFor="secret-value">값</Label>
+          {multiline ? (
+            <Textarea
+              id="secret-value"
+              value={value}
+              placeholder="토큰이나 kubeconfig 붙여넣기"
+              onChange={(e) => setValue(e.target.value)}
+              rows={4}
+              spellCheck={false}
+              className="text-[12px]"
+            />
+          ) : (
+            <div className="relative">
               <Input
-                id={`secret-value-${variant}`}
-                type="password"
+                id="secret-value"
+                type={show ? 'text' : 'password'}
                 value={value}
                 placeholder="시크릿 값"
                 onChange={(e) => setValue(e.target.value)}
                 autoComplete="off"
+                spellCheck={false}
+                className="pr-8 text-[12px]"
               />
-            )}
-            <p className="text-[12px] text-faint">
-              같은 이름으로 저장하면 값이 바뀌어요. 저장한 뒤에는 값을 다시 볼 수 없어요.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <Button
-              onClick={onAdd}
-              disabled={pending || name.length === 0 || value.length === 0 || nameInvalid}
-            >
-              {pending ? '저장 중…' : '저장'}
-            </Button>
-            {saved && (
-              <span className="text-[13px] text-[var(--color-success)]">저장됨: {saved}</span>
-            )}
-          </div>
-          {error && (
-            <Callout tone="danger" className="py-1.5">
-              {error}
-            </Callout>
+              <button
+                type="button"
+                onClick={() => setShow((v) => !v)}
+                aria-label={show ? '값 숨기기' : '값 보기'}
+                className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+              >
+                {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
+              </button>
+            </div>
           )}
         </div>
-      ) : (
-        <p className="text-[13px] text-muted-foreground">변경하려면 관리자 권한이 필요해요.</p>
+      </div>
+      {error && (
+        <Callout tone="danger" className="py-1.5">
+          {error}
+        </Callout>
       )}
+      <div className="flex items-center gap-2">
+        <Button
+          size="sm"
+          className="gap-1"
+          disabled={pending || name.length === 0 || value.length === 0 || nameInvalid}
+          onClick={onSave}
+        >
+          <KeyRound className="size-3.5" /> {pending ? '저장 중…' : '저장'}
+        </Button>
+        <button
+          type="button"
+          className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
+          onClick={onCancel}
+        >
+          취소
+        </button>
+        <span className="text-[11px] text-faint">저장하면 값은 다시 볼 수 없어요.</span>
+      </div>
     </div>
   )
 }
