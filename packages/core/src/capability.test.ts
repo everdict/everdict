@@ -6,7 +6,9 @@ import {
   capabilityKind,
   functionalGate,
   partitionCapabilities,
+  runtimeSatisfies,
 } from "./capability.js";
+import { RuntimeSpecSchema } from "./runtime-spec.js";
 
 describe("capability 어휘 — kind 로 분리(functional/security/auth)", () => {
   it("각 capability 가 정확한 kind 를 가진다", () => {
@@ -48,5 +50,37 @@ describe("capability 어휘 — kind 로 분리(functional/security/auth)", () =
     for (const def of Object.values(CAPABILITY_DEFS)) {
       expect(["functional", "security", "auth"]).toContain(def.kind);
     }
+  });
+});
+
+describe("runtimeSatisfies — 등록 런타임 capability 매칭", () => {
+  it("capabilities 미선언(undefined)이면 미검사(true) — 하위호환", () => {
+    expect(runtimeSatisfies(undefined, ["docker"])).toBe(true);
+  });
+
+  it("선언했으면 functional 부분집합을 ⊆ 로 검사(security/auth 는 게이트 제외)", () => {
+    expect(runtimeSatisfies(["docker", "git"], ["docker"])).toBe(true);
+    expect(runtimeSatisfies(["git"], ["docker"])).toBe(false);
+    expect(runtimeSatisfies(["docker"], ["docker", "sandbox"])).toBe(true); // sandbox=security → 제외
+  });
+});
+
+describe("RuntimeSpec.capabilities — 등록 런타임이 capability 를 선언", () => {
+  it("capabilities 를 실은 런타임이 파싱된다(어휘 밖 값은 reject)", () => {
+    const ok = RuntimeSpecSchema.safeParse({
+      kind: "k8s",
+      id: "prod",
+      version: "1.0.0",
+      image: "agent:v1",
+      capabilities: ["docker", "sandbox"],
+    });
+    expect(ok.success).toBe(true);
+    const bad = RuntimeSpecSchema.safeParse({
+      kind: "docker",
+      id: "d",
+      version: "1.0.0",
+      capabilities: ["repo"], // 옛 이름 — 어휘 밖
+    });
+    expect(bad.success).toBe(false);
   });
 });

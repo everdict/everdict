@@ -50,3 +50,14 @@ export function functionalGate(required: readonly CapabilityName[], advertised: 
   const have = new Set(advertised);
   return required.filter((n) => capabilityKind(n) === "functional").every((n) => have.has(n));
 }
+
+// 런타임이 요구 capability 를 만족하는가 — 런타임이 capabilities 를 선언(또는 프로브)했으면 functional 부분집합을
+// ⊆ 로 검사, 선언이 없으면(undefined) 미검사(true) 로 둔다(아직 capability 를 안 붙인 등록 런타임의 하위호환).
+// self-hosted 러너의 배치 게이트(runner-hub)와 같은 판정을, 등록 런타임(RuntimeSpec.capabilities)에도 쓰는 진입점.
+export function runtimeSatisfies(
+  runtimeCapabilities: readonly string[] | undefined,
+  required: readonly CapabilityName[],
+): boolean {
+  if (runtimeCapabilities === undefined) return true;
+  return functionalGate(required, runtimeCapabilities);
+}

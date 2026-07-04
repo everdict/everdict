@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CapabilityNameSchema } from "./capability.js";
 
 // Runtime — 테넌트가 등록하는 실행 인프라 정의("어디서 eval 이 도나"). local | docker | nomad | k8s | topology.
 // 등록 가능한 1급 엔티티(소유/버전/lifecycle 은 하니스·데이터셋·judge 와 동일 패턴, 불변 버전 SSOT).
@@ -10,6 +11,10 @@ const base = {
   version: z.string(),
   description: z.string().optional(),
   tags: z.array(z.string()).default([]),
+  // 이 런타임이 제공하는 capability(선언 또는 probe-탐지) — harness 요구(requiredCapabilities)와 functionalGate 로
+  // 매칭한다. self-hosted 러너는 자가-프로브로 광고하고, 등록 런타임(nomad/k8s)은 여기 선언하거나 probe 로 채운다.
+  // 미지정이면 미검사(하위호환). 설계: docs/architecture/self-hosted-runtime-and-runners.md.
+  capabilities: z.array(CapabilityNameSchema).optional(),
 };
 
 // local — 컨트롤플레인 호스트에서 in-process 실행(dev 전용). 컨트롤플레인의 호스트지 "사용자 머신"이 아니다 —
