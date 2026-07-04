@@ -141,10 +141,23 @@ runner, once configured, holds its own GitHub credential — a company resource,
    (always looks up `ws:<tenant>`); personal `self:<id>` stays owner-only (D3). Full BFF↔MCP parity
    (`pair_workspace_runner`/`list_workspace_owned_runners`/`revoke_workspace_runner`) + web settings **공유 러너** tab
    (register → token-once + `assay runner --pair` command; list with online/capability badges; revoke).
-   **Open follow-up:** provenance/budget = workspace-scoped (not own-pays) — currently the runner still runs on the
-   team machine's own login like a personal runner; workspace-pays accounting is not yet wired.
-4. **GitHub Actions runner co-registration (repo-level).** Registration-token mint via connection + install-script
-   generator + workflow `runs-on` wiring; one command stands up GitHub runner + Assay runner on a build server.
+   **Workspace-pays — SHIPPED.** `billingTenant(result, tenant)` (`@assay/backends` budget): a run whose
+   `provenance.by` starts `ws:` settles to that workspace (team pays); personal self-hosted stays own-pays
+   (`undefined`); managed = the job tenant. `RunService`/`ScorecardService` settle through it. `provenance.by` =
+   the runner owner stamped by `SelfHostedBackend`, and a workspace runner's owner is `ws:<workspace>` — no new
+   signal. **Live e2e:** `scripts/live/workspace-shared-runner.mjs` (pair → `assay runner` → `self:ws:<id>` run →
+   `provenance.by="ws:default"` + cross-workspace `NOT_FOUND`); verified PASS.
+4. **GitHub Actions runner co-registration (repo-level). ✅ SHIPPED (backend + MCP).** `CiLinkService.mintRunnerToken`
+   (personal GitHub connection, `repo` scope → `POST /repos/{repo}/actions/runners/registration-token`, short-lived,
+   never stored) + `installGithubWorkspaceRunner` (`github-runner-install.ts`): pairs a workspace runner (fresh
+   `rnr_`) + mints the GitHub token + renders a one-shot install script (`config.sh` **and** `assay runner --pair`)
+   + a workflow hint (`runs-on: [self-hosted, assay-<id>]` + run-eval `runtime: self:ws:<id>`). Route
+   `POST /workspace/runners/github-install` + MCP `github_install_workspace_runner` (`settings:write`). This is the
+   resolution of the github-actions-trigger open item "CI can't lease a personal runner — needs `allowCi` **or a
+   workspace-shared runner tier**": a `via:"github-actions"` principal targeting `self:ws:<id>` works because the
+   dispatcher derives the owner from the job tenant (workspace membership = access). The run-eval action already
+   accepts a `runtime` input. **Open follow-up:** web GitHub-install UI (connection + repo picker reuse) + optional
+   `runsOn`/`runtime` on the RepoLink so the setup-PR workflow targets self-hosted directly; org-level (`admin:org`).
 5. **Org-level + polish.** `admin:org` scope upgrade path + org runner groups ↔ workspace runtimes; runner labels
    for placement; live e2e (multi-runner pool + real GitHub self-hosted registration).
 

@@ -178,9 +178,14 @@ preferred.
 - **Private image pull (Track B).** PR/dev images in private GHCR need pull credentials in the topology
   runtimes (k8s `imagePullSecrets` / docker login from the workspace SecretStore). This use case is the
   strongest argument for prioritizing Track B; interim: cluster-preconfigured pull secret.
-- **CI on a personal self-hosted runner.** `resolveSelfRunner(owner, runnerId)` enforces personal ownership;
-  a `via: "github-actions"` principal can't lease a member's runner. Needs an opt-in (`allowCi` flag on the
-  runner, or a workspace-shared runner tier) — the only place this feature touches an existing invariant.
+- **CI on a self-hosted runner. ✅ RESOLVED via the workspace-shared runner tier.** `resolveSelfRunner(owner,
+  runnerId)` still enforces personal ownership for `self:<id>` (a `via:"github-actions"` principal can't lease a
+  *member's personal* runner). But a **workspace-shared** runner (`self:ws:<id>`) is targetable by any principal
+  scoped to that workspace — including `via:"github-actions"` — because the dispatcher derives the owner from the
+  job's tenant (`ws:<tenant>`), so workspace membership *is* access. `POST /workspace/runners/github-install` /
+  MCP `github_install_workspace_runner` stand up a GitHub Actions runner + an Assay `self:ws:<id>` runner on one
+  build server in a single command. See `docs/architecture/self-hosted-runtime-and-runners.md` §3–4. (A per-runner
+  `allowCi` opt-in for *personal* runners is no longer needed for the CI use case.)
 - **Link write gating.** Creating a link both wires a harness and grants repo-federated access — lean
   `settings:write` (admin) for creation, since it is a trust grant; the picker/setup-PR UX stays member-visible
   read-only until an admin confirms. To revisit when the UX is built.
