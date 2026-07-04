@@ -465,7 +465,8 @@ describe("MCP tools", () => {
       text(await runner.callTool({ name: "submit_job_result", arguments: { jobId: leased.jobId, result } })),
     );
     expect(submit.accepted).toBe(true);
-    await expect(dispatched).resolves.toMatchObject({ caseId: "c1" });
+    // enqueue 는 {result, ranBy}(실제 완료 러너)로 resolve — 풀 잡의 provenance.runner 를 위해.
+    await expect(dispatched).resolves.toMatchObject({ result: { caseId: "c1" }, ranBy: "laptop" });
   });
 
   it("runner 도구는 러너 토큰(via=runner)만 — 일반 자격증명은 FORBIDDEN", async () => {
