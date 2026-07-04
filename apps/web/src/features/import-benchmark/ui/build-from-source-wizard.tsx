@@ -10,6 +10,7 @@ import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
 import { Input, Label, Textarea } from '@/shared/ui/input'
+import { InfoTip } from '@/shared/ui/tooltip'
 import { VersionField } from '@/shared/ui/version-field'
 
 import {
@@ -94,6 +95,7 @@ export function BuildFromSourceWizard({
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
   const [idField, setIdField] = useState('')
   const [taskField, setTaskField] = useState('')
+  const [taskTemplate, setTaskTemplate] = useState('')
   const [answerField, setAnswerField] = useState('')
   const [startUrlField, setStartUrlField] = useState('')
   // env 종류 + repo/이미지/placement 매핑(first-party 카탈로그와 동등한 표현력).
@@ -202,6 +204,7 @@ export function BuildFromSourceWizard({
       mapping: {
         idField,
         taskField,
+        ...(taskTemplate.trim() ? { taskTemplate } : {}),
         ...(answerField ? { answerField } : {}),
         // env 종류별 매핑 — first-party 카탈로그와 동등한 표현력(prompt/repo/os-use/browser).
         ...(envKind === 'browser' && startUrlField ? { startUrlField } : {}),
@@ -541,6 +544,29 @@ export function BuildFromSourceWizard({
                 className="w-full"
               />
             </div>
+          </div>
+          {/* task 템플릿(선택) — 여러 필드를 합쳐 task 를 만든다(예: 질문+근거 문서 URL). 비우면 task 필드 그대로. */}
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-1">
+              <Label htmlFor="taskTpl">task 템플릿 (선택)</Label>
+              <InfoTip content="여러 필드를 합쳐 task 를 만들어요. {필드명} 이 각 행의 값으로 치환돼요. 비우면 task 필드 값을 그대로 써요." />
+            </div>
+            <Textarea
+              id="taskTpl"
+              className="min-h-16 font-mono text-[12px]"
+              value={taskTemplate}
+              onChange={(e) => setTaskTemplate(e.target.value)}
+              spellCheck={false}
+              placeholder={'{question}\n\n근거 문서: {source_docs}'}
+            />
+            {taskTemplate.trim() && rows[0] ? (
+              <p
+                className="truncate font-mono text-[11px] text-muted-foreground/80"
+                title={taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
+              >
+                예: {taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
+              </p>
+            ) : null}
           </div>
           {/* env 종류별 추가 필드 */}
           {envKind === 'browser' && (

@@ -100,6 +100,44 @@ describe("BenchmarkAdapterSpec (데이터 정의)", () => {
     expect(c?.graders).toContainEqual({ id: "answer-match", config: { expect: "4", mode: "exact" } });
   });
 
+  it("taskTemplate 이 여러 필드를 {field} 보간으로 합성해 task 를 만든다(OfficeQA 류 근거 문서 URL 포함)", async () => {
+    const spec = BenchmarkAdapterSpecSchema.parse({
+      id: "officeqa-ish",
+      version: "1.0.0",
+      source: { kind: "jsonl" },
+      mapping: {
+        idField: "uid",
+        taskField: "question",
+        taskTemplate: "{question}\n\n근거 문서: {source_docs}",
+        answerField: "answer",
+        promptEnv: true,
+      },
+    });
+    expect(spec.mapping.taskTemplate).toContain("{source_docs}"); // Zod 가 strip 하지 않는다
+    const ds = await importFromSpec(
+      spec,
+      { id: "officeqa-ish", version: "1.0.0" },
+      {
+        text: '{"uid":"q1","question":"1945 회계연도 총부채는?","answer":"258.7","source_docs":"https://fraser.example/tb"}',
+      },
+    );
+    expect(ds.cases[0]?.task).toBe("1945 회계연도 총부채는?\n\n근거 문서: https://fraser.example/tb");
+  });
+
+  it("taskTemplate 이 없으면 taskField 를 그대로 쓴다(기존 매핑 무변경)", async () => {
+    const ds = await importFromSpec(
+      BenchmarkAdapterSpecSchema.parse({
+        id: "plain",
+        version: "1.0.0",
+        source: { kind: "jsonl" },
+        mapping: { idField: "id", taskField: "q", promptEnv: true },
+      }),
+      { id: "plain", version: "1.0.0" },
+      { text: '{"id":"r1","q":"2+2?"}' },
+    );
+    expect(ds.cases[0]?.task).toBe("2+2?");
+  });
+
   it("osUseEnv 매핑이 os-use env 를 만든다(레시피로 OSWorld 류도 self-serve)", async () => {
     const spec = BenchmarkAdapterSpecSchema.parse({
       id: "osworld-ish",

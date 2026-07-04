@@ -10,6 +10,7 @@ import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSp
 export interface CaseMapping {
   idField: string;
   taskField: string;
+  taskTemplate?: string; // 있으면 task = {field} 보간 결과(여러 필드 합성 — 예: 질문+근거 문서 URL). 없으면 taskField 그대로.
   startUrlField?: string; // 있으면 browser env(startUrl); 없으면 startUrl 없는 browser env
   promptEnv?: boolean; // true 면 환경 없는 prompt env(QA — gsm8k/GAIA). repo/browser 보다 우선순위 낮음(git/repoPath 가 이김).
   answerField?: string; // 있으면 answer-match{expect} grader 자동 추가
@@ -37,6 +38,11 @@ export interface DatasetMeta {
 
 function str(v: unknown): string {
   return v === undefined || v === null ? "" : String(v);
+}
+
+// {field} 보간 — 행에서 값 치환(없으면 빈 문자열). taskTemplate/graderTemplates 가 공유.
+export function interpolateFields(tpl: string, row: Record<string, unknown>): string {
+  return tpl.replace(/\{(\w+)\}/g, (_, k) => str(row[k]));
 }
 
 // 외부 행 → EvalCase (env/task/graders/tags). 매핑 규칙으로 변환.
@@ -76,7 +82,7 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   return {
     id: str(row[m.idField]) || `${meta.id}-${i}`,
     env,
-    task: str(row[m.taskField]),
+    task: m.taskTemplate ? interpolateFields(m.taskTemplate, row) : str(row[m.taskField]),
     graders,
     ...(image ? { image } : {}),
     ...(m.placement ? { placement: { target: m.placement } } : {}),

@@ -49,7 +49,10 @@ add, all member+ (`datasets:write`), all immutable-on-register:
 > `CaseMappingSchema` is **isomorphic to the internal `CaseMapping`** — a tenant recipe can pick the env kind
 > (`promptEnv` QA / `gitField`+`refField` or `repoPath` repo / `osUseEnv`+`osUseSetup`+`display`+`screenshotPath`
 > os-use / else browser) plus per-case `imageField`/`image` and `placement`, so recipe-registered benchmarks are
-> as expressive as the first-party code catalog (no field is silently dropped at `.parse()`).
+> as expressive as the first-party code catalog (no field is silently dropped at `.parse()`). An optional
+> **`taskTemplate`** composes the task from several fields via `{field}` interpolation (e.g. OfficeQA-style
+> `"{question}\n\nSource: {source_docs}"` so a doc-grounded QA case carries its source link); absent → the task
+> is `taskField` verbatim. The wizard exposes it as an optional "task 템플릿" textarea with a live first-row preview.
 - **Source wizard (primary)** — `POST /benchmarks/preview` fetches a few raw rows (no mapping) and returns the
   detected **fields** + samples; the web `/dashboard/datasets/import` "소스에서 만들기" wizard shows those rows as a
   **preview table you map by clicking a column header** (cycles task→id→answer→none; mapped columns are role-color

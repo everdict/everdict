@@ -1,7 +1,7 @@
 import { type Dataset, GraderSpecSchema } from "@assay/core";
 import { z } from "zod";
 import { type BenchmarkAdapter, type ImportBenchmarkOpts, importBenchmark } from "./catalog.js";
-import type { DatasetMeta } from "./mapping.js";
+import { type DatasetMeta, interpolateFields } from "./mapping.js";
 import { type FetchLike, fetchHfRows } from "./sources.js";
 
 // 벤치마크 정의를 JSON 직렬화 가능한 "데이터"로 — 테넌트가 자기 워크스페이스에 등록/버전관리하는 레시피.
@@ -13,6 +13,8 @@ import { type FetchLike, fetchHfRows } from "./sources.js";
 export const CaseMappingSchema = z.object({
   idField: z.string(),
   taskField: z.string(),
+  taskTemplate: z.string().optional(), // task 를 여러 필드로 합성({field} 보간) — 예: 질문+근거 문서 URL(OfficeQA 류)
+
   startUrlField: z.string().optional(),
   promptEnv: z.boolean().optional(), // true → prompt env(QA — gsm8k/GAIA). git/repoPath 가 우선.
   answerField: z.string().optional(),
@@ -79,14 +81,6 @@ export const BenchmarkAdapterSpecSchema = z.object({
 });
 export type BenchmarkAdapterSpec = z.infer<typeof BenchmarkAdapterSpecSchema>;
 
-// {field} 보간 — 행에서 값 치환(없으면 빈 문자열).
-function interpolate(tpl: string, row: Record<string, unknown>): string {
-  return tpl.replace(/\{(\w+)\}/g, (_, k) => {
-    const v = row[k];
-    return v == null ? "" : String(v);
-  });
-}
-
 // 데이터 spec → 런타임 BenchmarkAdapter. graderTemplates 는 graderBuilder(행별 보간)로. 코드 함수 없이 데이터로 정의.
 export function specToAdapter(spec: BenchmarkAdapterSpec): BenchmarkAdapter {
   const templates = spec.graderTemplates;
@@ -103,7 +97,11 @@ export function specToAdapter(spec: BenchmarkAdapterSpec): BenchmarkAdapter {
             templates.map((t) => ({
               id: t.id,
               ...(t.config
-                ? { config: Object.fromEntries(Object.entries(t.config).map(([k, v]) => [k, interpolate(v, row)])) }
+                ? {
+                    config: Object.fromEntries(
+                      Object.entries(t.config).map(([k, v]) => [k, interpolateFields(v, row)]),
+                    ),
+                  }
                 : {}),
             })),
         }
