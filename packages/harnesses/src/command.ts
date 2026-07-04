@@ -88,7 +88,21 @@ export class CommandHarness implements EvaluableHarness {
       cmd = cmd.replaceAll(`{{${key}}}`, value);
     }
     try {
-      await compute.exec(cmd, { cwd: this.cwd, env, timeoutSec: ctx.timeoutSec });
+      const res = await compute.exec(cmd, { cwd: this.cwd, env, timeoutSec: ctx.timeoutSec });
+      // 실패(exit≠0)를 가시화 — 이전엔 조용히 삼켜져 "빈 결과로 성공"처럼 보였다(스코어만 0).
+      if (res.exitCode !== 0) {
+        yield {
+          t: Date.now(),
+          kind: "error",
+          message: `command exit ${res.exitCode}: ${res.stderr.trim().slice(-2_000)}`,
+        };
+      }
+      // 자기 트레이스가 없는(trace:none) 블랙박스 CLI 의 최종 답 = stdout — QA 채점(answer-match/judge)이
+      // 읽도록 정규화 assistant message 로 내보낸다(tail 32k — 레코드 비대 방지). 트레이스가 있으면 그쪽이 답.
+      if (trace.kind === "none") {
+        const text = res.stdout.trim().slice(-32_000);
+        if (text) yield { t: Date.now(), kind: "message", role: "assistant", text };
+      }
 
       // 계측된 토큰+비용을 합성 llm_call 로 — sumCost/cost 그레이더가 기존 경로로 집계.
       // usd 는 게이트웨이 비용 헤더에서 회수(계량 모델은 실 비용, 구독 모델은 0).

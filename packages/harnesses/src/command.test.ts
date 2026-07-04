@@ -58,15 +58,71 @@ describe("CommandHarness", () => {
     expect(wd.execs.every((e) => e.cwd === "/tmp")).toBe(true); // setup(install) + command(run) 모두 /tmp
   });
 
-  it("run 은 command 를 템플릿 치환(셸 안전)하고 env(ASSAY_RUN_ID + spec.env)를 주입; trace none → 이벤트 없음", async () => {
+  it("run 은 command 를 템플릿 치환(셸 안전)하고 env(ASSAY_RUN_ID + spec.env)를 주입; trace none + 출력 없음 → 이벤트 없음", async () => {
     const { compute, execs } = fakeCompute();
     const events = await collect(new CommandHarness(spec(), { runId: () => "rid1" }).run(compute, "fix the bug", ctx));
-    expect(events).toEqual([]); // trace none
+    expect(events).toEqual([]); // trace none + stdout 빈 값
     const e = execs[0];
     expect(e?.cmd).toContain("--model sonnet");
     expect(e?.cmd).toContain("--message 'fix the bug'"); // {{task}} 는 shq 처리
     expect(e?.env?.ASSAY_RUN_ID).toBe("rid1");
     expect(e?.env?.FOO).toBe("bar");
+  });
+
+  it("trace none 이면 stdout 이 최종 assistant message 가 된다(블랙박스 CLI 의 QA 채점 — answer-match 가 읽는 답)", async () => {
+    // 회귀: 이전엔 trace:none 이 아무 이벤트도 내지 않아 prompt QA 벤치마크가 무조건 0점이었다(OfficeQA 류).
+    const compute: ComputeHandle = {
+      async exec() {
+        return { exitCode: 0, stdout: "thinking...\nThe answer is 258.7 billion.\n", stderr: "" };
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    const events = await collect(new CommandHarness(spec()).run(compute, "debt?", ctx));
+    expect(events).toEqual([
+      { t: expect.any(Number), kind: "message", role: "assistant", text: "thinking...\nThe answer is 258.7 billion." },
+    ]);
+  });
+
+  it("command 가 exit≠0 이면 error 이벤트로 가시화한다(조용한 삼킴 금지)", async () => {
+    const compute: ComputeHandle = {
+      async exec() {
+        return { exitCode: 127, stdout: "", stderr: "sh: codex: command not found" };
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    const events = await collect(new CommandHarness(spec()).run(compute, "t", ctx));
+    expect(events).toEqual([
+      { t: expect.any(Number), kind: "error", message: "command exit 127: sh: codex: command not found" },
+    ]);
+  });
+
+  it("trace 가 있으면 stdout message 를 내지 않는다(그쪽 트레이스가 답 — 이중 답 방지)", async () => {
+    const sourceEvents: TraceEvent[] = [{ t: 1, kind: "message", role: "assistant", text: "from-otel" }];
+    const source: TraceSource = { fetch: async () => sourceEvents };
+    const compute: ComputeHandle = {
+      async exec() {
+        return { exitCode: 0, stdout: "raw stdout noise", stderr: "" };
+      },
+      async writeFile() {},
+      async readFile() {
+        return "";
+      },
+      async dispose() {},
+    };
+    const events = await collect(
+      new CommandHarness(spec({ trace: { kind: "otel", endpoint: "http://j" } }), {
+        traceSourceFor: () => source,
+      }).run(compute, "t", ctx),
+    );
+    expect(events).toEqual(sourceEvents); // stdout message 없음
   });
 
   it("일반 {{var}} 는 spec.params 로 치환되고 예약어({{model}})는 params 가 덮지 못한다", async () => {

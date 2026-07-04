@@ -23,6 +23,9 @@ class LocalComputeHandle implements ComputeHandle {
   async exec(cmd: string, opts?: ExecOpts): Promise<ExecResult> {
     const cwd = opts?.cwd ? join(this.root, opts.cwd) : this.root;
     try {
+      // 샌드박스 안의 cwd 는 요청 시 생성 — 환경이 디렉터리를 만들지 않는 케이스(prompt QA 등)에서
+      // 하니스 기본 cwd("work") 부재로 spawn 이 조용히 죽는 문제를 원천 차단한다.
+      await mkdir(cwd, { recursive: true });
       const { stdout, stderr } = await pexec(cmd, {
         cwd,
         env: { ...process.env, ...opts?.env },
