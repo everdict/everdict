@@ -73,3 +73,40 @@ describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", ()
     expect(cap.seen()?.evalCase.id).toBe("c1");
   });
 });
+
+describe("executeCase — command 하니스 이미지 승격(evalCase.image ??= harnessSpec.image)", () => {
+  const commandSpec = (image?: string): NonNullable<AgentJob["harnessSpec"]> => ({
+    kind: "command",
+    id: "codex-sheets",
+    version: "1",
+    ...(image ? { image } : {}),
+    command: "codex exec {{task}}",
+    setup: [],
+    env: {},
+    params: {},
+    trace: { kind: "none" },
+  });
+
+  it("케이스가 이미지를 지정하지 않으면 command 하니스의 image(CI 재핀 대상)를 실행 컨테이너로 승격한다", async () => {
+    const cap = capture();
+    await executeCase({ dispatcher: cap.dispatcher }, "u", { ...JOB, harnessSpec: commandSpec("codex:v2") });
+    expect(cap.seen()?.evalCase.image).toBe("codex:v2");
+  });
+
+  it("케이스가 이미지를 명시하면 하니스 이미지로 덮어쓰지 않는다(케이스 우선 — 데이터셋은 하니스-무관)", async () => {
+    const cap = capture();
+    const jobWithImage: AgentJob = {
+      ...JOB,
+      evalCase: { ...JOB.evalCase, image: "case:v9" },
+      harnessSpec: commandSpec("codex:v2"),
+    };
+    await executeCase({ dispatcher: cap.dispatcher }, "u", jobWithImage);
+    expect(cap.seen()?.evalCase.image).toBe("case:v9");
+  });
+
+  it("이미지 없는 하니스면 케이스 이미지는 승격 없이 그대로다(호스트-네이티브 유지)", async () => {
+    const cap = capture();
+    await executeCase({ dispatcher: cap.dispatcher }, "u", { ...JOB, harnessSpec: commandSpec() });
+    expect(cap.seen()?.evalCase.image).toBeUndefined();
+  });
+});

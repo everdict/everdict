@@ -26,11 +26,24 @@ async function resolveRepoToken(
   return repoTokenFor(owner, src.connectionId).catch(() => undefined);
 }
 
-// 순수 실행: 비공개 repo 토큰 resolve+attach → dispatch → CaseResult. 그게 전부다.
+// command 하니스가 선언한 실행 이미지(spec.image — CI 재핀 `pins.image` 가 착지하는 필드)를, 케이스가 이미지를
+// 지정하지 않았을 때 케이스 실행 컨테이너로 승격한다(evalCase.image ??= harnessSpec.image). 케이스가 명시하면
+// 케이스가 우선 — 데이터셋은 하니스-무관을 유지한다. 이 승격이 없으면 command 하니스의 image 핀이 실행에 전혀
+// 닿지 않는다: 모든 백엔드가 evalCase.image 로 컨테이너를 고르고(harness 폴백 없음), 셀프호스트 러너는
+// job.evalCase.image 만 읽는다 → CI 이미지 재핀이 컨테이너를 바꾸지 못하는 무의미한 no-op 이 된다.
+// 설계: docs/architecture/portable-harness-runtime.md.
+function withHarnessImage(job: AgentJob): AgentJob {
+  const spec = job.harnessSpec;
+  if (!spec || spec.kind !== "command" || !spec.image || job.evalCase.image) return job;
+  return { ...job, evalCase: { ...job.evalCase, image: spec.image } };
+}
+
+// 순수 실행: (하니스 이미지 승격 →) 비공개 repo 토큰 resolve+attach → dispatch → CaseResult. 그게 전부다.
 // budget admit/settle 은 오케(호출부)의 회계 관심사 — 여기서 하지 않는다(run 은 그냥 실행). 잡은 호출부가 미리
 // enrich(tenant/harnessSpec/judge/meterUsage/submittedBy)한 채로 넘긴다.
 export async function executeCase(deps: ExecuteCaseDeps, owner: string, job: AgentJob): Promise<CaseResult> {
-  const repoToken = await resolveRepoToken(deps.repoTokenFor, owner, job.evalCase);
-  const enriched: AgentJob = repoToken ? { ...job, repoToken } : job;
+  const normalized = withHarnessImage(job);
+  const repoToken = await resolveRepoToken(deps.repoTokenFor, owner, normalized.evalCase);
+  const enriched: AgentJob = repoToken ? { ...normalized, repoToken } : normalized;
   return deps.dispatcher.dispatch(enriched);
 }

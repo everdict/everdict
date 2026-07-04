@@ -113,6 +113,18 @@ the `setup` best-effort installs. The two-layer model is why a definition can be
 single hard requirement — but for reproducibility, **image is the recommended contract** and `setup` is the
 degrade path.
 
+### Harness-declared image → `case.image` promotion (so CI image re-pins reach execution)
+
+A **command** harness may declare its own execution image (`CommandHarnessSpec.image` — the field a CI
+`pins.image` lands on via `resolveWithPins`). Every backend picks the container from `evalCase.image`
+(`case.image ?? backend default`) and the self-hosted runner reads `job.evalCase.image` with **no** harness
+fallback — so, left alone, a command harness's `image` (and any CI re-pin of it) would never change the
+container the agent runs in. `executeCase` (the shared run+scorecard exec seam) closes this: when the case omits
+an image it **promotes** the harness image onto the case (`evalCase.image ??= harnessSpec.image`). Case-declared
+images still win (datasets stay harness-agnostic). This is what lets a **codex-harness repo** work: the repo
+builds `…/codex:<sha>`, a merge re-pins the harness image, and the next eval runs codex *in that image* — on both
+managed backends and the user's self-hosted runner. See `docs/architecture/github-actions-trigger.md`.
+
 ### Recalc belongs in the grader, not the agent
 
 SpreadsheetBench's official eval reads **cached** cell values (`data_only=True`), so a formula-producing output
