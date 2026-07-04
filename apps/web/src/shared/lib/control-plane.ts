@@ -303,6 +303,12 @@ export const controlPlane = {
     call<T>(auth, '/workspace/runners', { method: 'POST', body: JSON.stringify(body) }),
   revokeWorkspaceRunner: (auth: AuthContext, id: string) =>
     callVoid(auth, `/workspace/runners/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // GitHub Actions 러너 자가등록 — 빌드 서버에 GitHub 러너 + Assay 워크스페이스-공유 러너를 함께 세우는 설치 스크립트 생성.
+  githubInstallWorkspaceRunner: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/runners/github-install', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   // API 키(에이전트/MCP 용 ak_…). 발급 시 평문은 1회만 반환, 목록은 prefix 만(평문/해시 미반환), 취소(204).
   listKeys: <T>(auth: AuthContext) => call<T>(auth, '/keys'),
   createKey: <T>(auth: AuthContext, body: unknown) =>

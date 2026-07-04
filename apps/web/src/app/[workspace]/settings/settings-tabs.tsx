@@ -31,6 +31,7 @@ export function SettingsTabs(props: {
   integrationsCallbackUrl?: string // provider OAuth 앱에 등록할 콜백 URL
   ciLinks: CiLink[] // CI repo link(레포↔하니스 슬롯 = OIDC trust) 목록
   workspaceRunners: RunnerMeta[] // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI (admin)
+  githubConnections: ConnectionMeta[] // 내 GitHub 연결(있으면 GitHub Actions 러너 자가등록 노출)
   members: Member[]
   invites: Invite[]
   canReadSettings: boolean
@@ -108,6 +109,7 @@ export function SettingsTabs(props: {
         <WorkspaceRunnersManager
           runners={props.workspaceRunners}
           canWrite={props.canWriteSettings}
+          githubConnections={props.githubConnections}
         />
       </TabsContent>
       <TabsContent value="members">

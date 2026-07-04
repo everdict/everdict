@@ -1,9 +1,15 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import { Check, Copy, Server, Trash2 } from 'lucide-react'
+import { Check, Copy, Github, Server, Trash2 } from 'lucide-react'
 
-import { capabilityMeta, type RunnerCapability, type RunnerMeta } from '@/entities/runner'
+import type { ConnectionMeta } from '@/entities/connection'
+import {
+  capabilityMeta,
+  type GithubRunnerInstall,
+  type RunnerCapability,
+  type RunnerMeta,
+} from '@/entities/runner'
 import { copyText } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
@@ -14,6 +20,7 @@ import { EmptyState } from '@/shared/ui/empty-state'
 import { Input, Label } from '@/shared/ui/input'
 
 import {
+  githubInstallRunnerAction,
   pairWorkspaceRunnerAction,
   revokeWorkspaceRunnerAction,
 } from '../api/manage-workspace-runners'
@@ -30,11 +37,14 @@ function isOnline(lastSeenAt?: string): boolean {
 export function WorkspaceRunnersManager({
   runners,
   canWrite,
+  githubConnections = [],
 }: {
   runners: RunnerMeta[]
   canWrite: boolean
+  githubConnections?: ConnectionMeta[] // 내 GitHub 연결(있으면 GitHub Actions 러너 자가등록 노출)
 }) {
   const [registerOpen, setRegisterOpen] = useState(false)
+  const [githubOpen, setGithubOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
@@ -60,9 +70,17 @@ export function WorkspaceRunnersManager({
           </p>
         </div>
         {canWrite && (
-          <Button size="sm" className="shrink-0" onClick={() => setRegisterOpen(true)}>
-            <Server />새 공유 러너 등록
-          </Button>
+          <span className="flex shrink-0 items-center gap-2">
+            {githubConnections.length > 0 && (
+              <Button size="sm" variant="secondary" onClick={() => setGithubOpen(true)}>
+                <Github />
+                GitHub Actions 러너
+              </Button>
+            )}
+            <Button size="sm" onClick={() => setRegisterOpen(true)}>
+              <Server />새 공유 러너 등록
+            </Button>
+          </span>
         )}
       </div>
 
@@ -186,6 +204,13 @@ export function WorkspaceRunnersManager({
 
       {canWrite && (
         <RegisterRunnerDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
+      )}
+      {canWrite && githubConnections.length > 0 && (
+        <GithubInstallDialog
+          open={githubOpen}
+          onClose={() => setGithubOpen(false)}
+          connections={githubConnections}
+        />
       )}
     </div>
   )
@@ -355,6 +380,171 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
             </Button>
             <Button size="sm" onClick={onRegister} disabled={pending}>
               {pending ? '등록 중…' : '등록'}
+            </Button>
+          </footer>
+        </>
+      )}
+    </Dialog>
+  )
+}
+
+// GitHub Actions 러너 자가등록 모달 — 내 GitHub 연결 + repo 선택 후 생성. 생성되면 빌드 서버에서 실행할 설치
+// 스크립트(GitHub 러너 + Assay 러너)와 워크플로 힌트(runs-on 라벨 + run-eval runtime)를 1회 노출한다.
+function GithubInstallDialog({
+  open,
+  onClose,
+  connections,
+}: {
+  open: boolean
+  onClose: () => void
+  connections: ConnectionMeta[]
+}) {
+  const [connectionId, setConnectionId] = useState(connections[0]?.id ?? '')
+  const [repository, setRepository] = useState('')
+  const [result, setResult] = useState<GithubRunnerInstall>()
+  const [copied, setCopied] = useState<'script' | 'hint'>()
+  const [error, setError] = useState<string>()
+  const [pending, startTransition] = useTransition()
+
+  useEffect(() => {
+    if (!open) return
+    setConnectionId(connections[0]?.id ?? '')
+    setRepository('')
+    setResult(undefined)
+    setCopied(undefined)
+    setError(undefined)
+  }, [open, connections])
+
+  function onGenerate() {
+    setError(undefined)
+    if (connectionId.length === 0) {
+      setError('GitHub 연결을 선택해주세요.')
+      return
+    }
+    if (!/^[^/\s]+\/[^/\s]+$/.test(repository.trim())) {
+      setError('레포지토리는 owner/name 형식으로 입력해주세요.')
+      return
+    }
+    startTransition(async () => {
+      const r = await githubInstallRunnerAction({ connectionId, repository })
+      if (r.ok && r.install) setResult(r.install)
+      else setError(r.error ?? '생성에 실패했어요.')
+    })
+  }
+
+  return (
+    <Dialog open={open} onClose={onClose} className="max-w-[620px]" labelledBy="gh-install-title">
+      {result ? (
+        <>
+          <header className="border-b border-border px-5 py-4">
+            <h2 id="gh-install-title" className="text-[15px] font-[560] text-foreground">
+              GitHub Actions 러너가 준비됐어요
+            </h2>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              빌드 서버에서 아래 스크립트를 실행하면 GitHub 러너와 Assay 러너(
+              <span className="font-mono">{result.runtimeTarget}</span>)가 함께 떠요. 스크립트에
+              토큰이 들어 있으니 다시 볼 수 없어요.
+            </p>
+          </header>
+          <div className="space-y-4 px-5 py-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label>설치 스크립트</Label>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  onClick={() => {
+                    void copyText(result.installScript).then((ok) => ok && setCopied('script'))
+                  }}
+                >
+                  {copied === 'script' ? <Check /> : <Copy />}
+                  {copied === 'script' ? '복사됨' : '복사'}
+                </Button>
+              </div>
+              <pre className="max-h-52 overflow-auto rounded-md border bg-elevated px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                {result.installScript}
+              </pre>
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <Label>워크플로에 추가</Label>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="xs"
+                  onClick={() => {
+                    void copyText(result.workflowHint).then((ok) => ok && setCopied('hint'))
+                  }}
+                >
+                  {copied === 'hint' ? <Check /> : <Copy />}
+                  {copied === 'hint' ? '복사됨' : '복사'}
+                </Button>
+              </div>
+              <pre className="max-h-40 overflow-auto rounded-md border bg-elevated px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
+                {result.workflowHint}
+              </pre>
+            </div>
+            <Callout tone="warning" className="py-1.5">
+              GitHub 등록 토큰은 단기예요 — 스크립트를 곧 실행하세요. 등록 만료:{' '}
+              {new Date(result.registrationExpiresAt).toLocaleString('ko-KR')}
+            </Callout>
+          </div>
+          <footer className="flex justify-end border-t border-border px-5 py-3.5">
+            <Button size="sm" onClick={onClose}>
+              완료
+            </Button>
+          </footer>
+        </>
+      ) : (
+        <>
+          <header className="border-b border-border px-5 py-4">
+            <h2 id="gh-install-title" className="text-[15px] font-[560] text-foreground">
+              GitHub Actions 러너 등록
+            </h2>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              빌드 서버 한 대에 GitHub Actions 러너와 Assay 공유 러너를 함께 세워요. CI 가 이미지를
+              빌드하고, 나란히 붙은 Assay 러너가 평가를 실행해요.
+            </p>
+          </header>
+          <div className="space-y-4 px-5 py-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="gh-conn">GitHub 연결</Label>
+              <select
+                id="gh-conn"
+                value={connectionId}
+                onChange={(e) => setConnectionId(e.target.value)}
+                className="h-9 w-full rounded-md border border-border bg-transparent px-2.5 text-[13px] text-foreground"
+              >
+                {connections.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.accountLabel} {c.host ? `(${c.host})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="gh-repo">레포지토리</Label>
+              <Input
+                id="gh-repo"
+                value={repository}
+                onChange={(e) => setRepository(e.target.value)}
+                placeholder="owner/name (예: acme/app)"
+                autoFocus
+              />
+            </div>
+            {error && (
+              <Callout tone="danger" className="py-1.5">
+                {error}
+              </Callout>
+            )}
+          </div>
+          <footer className="flex justify-end gap-2 border-t border-border px-5 py-3.5">
+            <Button size="sm" variant="secondary" onClick={onClose} disabled={pending}>
+              취소
+            </Button>
+            <Button size="sm" onClick={onGenerate} disabled={pending}>
+              {pending ? '생성 중…' : '설치 스크립트 생성'}
             </Button>
           </footer>
         </>

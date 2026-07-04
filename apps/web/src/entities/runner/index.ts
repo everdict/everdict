@@ -6,10 +6,12 @@ export {
   runnersResponseSchema,
   pairRunnerInputSchema,
   pairedRunnerSchema,
+  githubRunnerInstallSchema,
   type CapabilityKind,
   type RunnerCapability,
   type RunnerMeta,
   type RunnersResponse,
   type PairRunnerInput,
   type PairedRunner,
+  type GithubRunnerInstall,
 } from './model/schema'

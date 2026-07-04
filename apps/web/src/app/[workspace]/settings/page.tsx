@@ -1,5 +1,6 @@
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import {
+  connectionsResponseSchema,
   workspaceApplicationsSchema,
   workspaceIntegrationsResponseSchema,
   type ConnectionMeta,
@@ -44,6 +45,7 @@ export default async function SettingsPage({
   let integrationsCallbackUrl: string | undefined
   let ciLinks: CiLink[] = []
   let workspaceRunners: RunnerMeta[] = []
+  let githubConnections: ConnectionMeta[] = []
   let members: Member[] = []
   let invites: Invite[] = []
   let error: string | undefined
@@ -60,10 +62,15 @@ export default async function SettingsPage({
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
     }
     // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI. 등록/조회/해제 모두 admin(settings:write).
-    if (canWriteSettings)
+    if (canWriteSettings) {
       workspaceRunners = runnersResponseSchema.parse(
         await controlPlane.listWorkspaceOwnedRunners(ctx)
       ).runners
+      // 내 GitHub 연결(개인 소유, self-scoped) — 있으면 GitHub Actions 러너 자가등록 노출용. github/GHE 만.
+      githubConnections = connectionsResponseSchema
+        .parse(await controlPlane.listConnections(ctx))
+        .connections.filter((c) => c.provider === 'github' || c.provider === 'github-enterprise')
+    }
     // 워크스페이스 설정엔 공유(workspace) 시크릿만 — GET /secrets 가 섞어주는 내 개인(user) 시크릿은 계정 화면에서 관리.
     if (canReadSecrets)
       secrets = secretsSchema
@@ -102,6 +109,7 @@ export default async function SettingsPage({
           {...(integrationsCallbackUrl !== undefined ? { integrationsCallbackUrl } : {})}
           ciLinks={ciLinks}
           workspaceRunners={workspaceRunners}
+          githubConnections={githubConnections}
           members={members}
           invites={invites}
           canReadSettings={canReadSettings}
