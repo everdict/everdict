@@ -161,11 +161,18 @@ runner, once configured, holds its own GitHub credential — a company resource,
    GitHub connection. `WorkspaceCiLink` grew optional `runsOn`/`runtime` (additive JSONB) so `renderCiWorkflow`
    targets self-hosted directly (`runs-on: <label>` + run-eval `runtime: self:ws:<id>`); settable via the CI-links
    connect dialog ("5. 셀프호스티드 러너"), HTTP `PUT /workspace/ci/links`, and MCP `link_ci_repository`.
-   **Deferred by decision (2026-07-04):** org-level (`admin:org`) — broadening the GitHub OAuth scope for all
-   connections is a security cost the user chose not to pay yet; repo-level stands.
-5. **Org-level + polish (deferred).** `admin:org` scope upgrade path + org runner groups ↔ workspace runtimes —
-   held per the org-scope decision above. Polish: runner labels for placement; live e2e (multi-runner pool + real
-   GitHub self-hosted registration).
+5. **Org-level runner registration — ✅ SHIPPED (opt-in, default scope unchanged).** Org-level uses
+   `POST /orgs/{org}/actions/runners/registration-token` which needs `admin:org`. Rather than broaden the default
+   GitHub OAuth scope for everyone, it's **opt-in**: `OAuthProvider.elevatedScopes` (github=`admin:org`) +
+   `authorizeUrl({scopes})`; `ConnectionService.start({elevated})` requests default+elevated (the extra scope is
+   used only at the authorize step — never persisted through the callback, so **no migration**; the stored scope
+   is whatever GitHub actually granted). `mintRunnerToken` takes a `{repo}|{org}` target; a 403/404 on the org
+   endpoint remaps to a "reconnect with admin:org" `BadRequestError` (no raw 403). `installGithubWorkspaceRunner`
+   accepts `org` (mutually exclusive with `repository`) and points `config.sh --url` at the org URL. Surfaced on
+   `POST /connections/:provider/start {elevated?}`, `POST /workspace/runners/github-install {org?}`, MCP
+   `get_connect_url {elevated?}` + `github_install_workspace_runner {org?}`, and the web dialog (repo/org toggle +
+   `admin:org` detection + "reconnect elevated" CTA). Remaining polish: org runner groups ↔ workspace runtimes;
+   runner labels for placement; live e2e (multi-runner pool + real GitHub self-hosted registration).
 
 ## Decisions / non-goals
 
@@ -173,7 +180,9 @@ runner, once configured, holds its own GitHub credential — a company resource,
 - **Personal owner-only rule is unchanged** — an admin still cannot target a *member's personal* runtime. The new
   cross-member sharing lives only on **workspace** runtimes (which are workspace assets, tenant-isolated).
 - **Push backends untouched** (`docker|nomad|k8s|topology`); the in-process `local` runtime remains dev-only.
-- **Org-level GitHub registration is a follow-up** (scope cost); repo-level ships first.
+- **Org-level GitHub registration is opt-in** (SHIPPED, slice 5): the elevated `admin:org` scope is requested
+  only when the admin explicitly connects/reconnects elevated — the default connection scope stays
+  `repo, read:packages` (no over-request). Repo-level remains the zero-extra-scope default.
 
 ## See also
 
