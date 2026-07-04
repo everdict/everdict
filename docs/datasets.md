@@ -37,6 +37,21 @@ Datasets reuse the **`HarnessRegistry` ownership model** (`packages/registry`):
   eval *content*; harness specs stay admin-only because they define execution/placement). `datasets:delete` =
   admin (the creator override lets the original author delete their own without being admin).
 
+## Detail page = activity history + discussion (Linear-style)
+The dataset detail's main content is a **활동 timeline**, not a static case dump — "who did what, when". Items
+are merged chronologically from three sources: the **created** event (`createdBy`+`createdAt`), every
+**scorecard run** against this dataset (runner + time + `harness@version` + status + pass rate, links to the
+scorecard — derived from the scorecards list, no new storage), and **comments**. Cases are secondary — the list
+shows the **first 5** with an expander (`CaseList`).
+
+**Comments** are a small full-stack entity: `assay_comments` (mig 0044) + `CommentStore` (in-memory / `Pg`) +
+`CommentService` (`list`/`create`/`delete`) behind `GET/POST/DELETE /comments` (+ MCP `list/create/delete_comment`,
+parity). `resourceType` is generic (`"dataset"` today, extensible). Role-gating: `comments:read` = viewer+,
+`comments:write` = member+; **delete = author-or-admin** (service-layer creator override, like `datasets:delete`).
+The web composer sits at the bottom of the timeline (⌘/Ctrl+Enter to post); only the author or an admin sees a
+delete control. Author display names/avatars are resolved server-side (members join) so the client component gets
+display-ready items.
+
 ## Adding benchmarks (source → dataset)
 A benchmark = a `BenchmarkAdapterSpec` (`@assay/datasets`): `source` (HuggingFace dataset or jsonl) + `mapping`
 (which fields become a case's id/task/answer/…) + optional `graderTemplates` + optional **`origin`** (provenance
