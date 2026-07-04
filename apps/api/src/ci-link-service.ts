@@ -175,6 +175,24 @@ export class CiLinkService {
     throw await this.upstream(mkPr, "PR 생성 실패");
   }
 
+  // GitHub Actions 셀프호스티드 러너 등록 토큰 발급 — 멤버 개인 GitHub 연결(repo scope 이미 보유)로 그 레포에 대해 mint.
+  // 단기 토큰(≈1시간). Assay 는 장기 러너 토큰을 저장하지 않는다(필요 시마다 발급). repo 레벨(org 레벨=admin:org 필요, 후속).
+  // 반환에 host 도 실어 install 스크립트가 config.sh --url 를 github.com/GHE 로 맞추게 한다. 설계 doc §4.
+  async mintRunnerToken(
+    owner: string,
+    connectionId: string,
+    repository: string,
+  ): Promise<{ token: string; expiresAt: string; host?: string }> {
+    const { token, host } = await this.githubToken(owner, connectionId);
+    const res = await this.fetch(`${apiBase(host)}/repos/${repository}/actions/runners/registration-token`, {
+      method: "POST",
+      headers: this.headers(token),
+    });
+    if (!res.ok) throw await this.upstream(res, "러너 등록 토큰 발급 실패");
+    const data = z.object({ token: z.string(), expires_at: z.string() }).parse(await res.json());
+    return { token: data.token, expiresAt: data.expires_at, ...(host !== undefined ? { host } : {}) };
+  }
+
   private async githubToken(owner: string, connectionId: string): Promise<{ token: string; host?: string }> {
     const metas = await this.deps.connections.list(owner);
     const meta = metas.find((m) => m.id === connectionId);

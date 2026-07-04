@@ -27,6 +27,7 @@ import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
 import type { CiLinkService } from "./ci-link-service.js";
+import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
 import { deleteHarnessVersion } from "./harness-service.js";
@@ -77,6 +78,7 @@ export interface McpDeps {
   membershipService?: MembershipService; // 멤버 관리(목록/역할/제거/나가기) + 초대(발급/수락)
   profileService?: ProfileService; // 내 프로필(이름/유저네임/아바타) 조회·수정(self-serve)
   keyStore?: TenantKeyStore; // API 키 self-serve 발급/목록/취소(admin)
+  apiPublicUrl?: string; // 컨트롤플레인 public base — github_install_workspace_runner 의 assay runner --api-url (요청 base 폴백)
 }
 
 function ok(data: unknown): CallToolResult {
@@ -1437,6 +1439,43 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           return ok({ id, revoked: true });
         }),
     );
+    // GitHub Actions 러너 자가등록 — 빌드 서버에 GitHub 러너 + Assay 워크스페이스-공유 러너를 함께 세우는 설치
+    // 스크립트 생성(설계 doc §4). 개인 GitHub 연결 필요 → ciLinkService 있을 때만. admin 전용.
+    if (deps.ciLinkService) {
+      const ciForRunner = deps.ciLinkService;
+      server.registerTool(
+        "github_install_workspace_runner",
+        {
+          description:
+            "GitHub Actions 셀프호스티드 러너 + Assay 워크스페이스-공유 러너를 한 빌드 서버에 함께 세우는 설치 스크립트를 생성한다(설계 §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 토큰 1회) + 개인 GitHub 연결로 등록 토큰 mint. 반환 스크립트를 빌드 서버에서 실행. admin 전용.",
+          inputSchema: {
+            connectionId: z.string().describe("내 GitHub 연결 id(list_connections)"),
+            repository: z.string().describe('"owner/name"'),
+            label: z.string().max(80).optional().describe("Assay 러너 표시 이름(기본: repo 이름)"),
+            githubLabels: z.array(z.string()).optional().describe("GH 러너 추가 라벨"),
+            capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
+          },
+        },
+        ({ connectionId, repository, label, githubLabels, capabilities }) =>
+          run(principal, "settings:write", async () =>
+            ok(
+              await installGithubWorkspaceRunner(
+                { runnerService: runners, ciLinkService: ciForRunner },
+                {
+                  workspace: ws,
+                  subject: principal.subject,
+                  connectionId,
+                  repository,
+                  label: label ?? repository.split("/")[1] ?? "assay-ci",
+                  apiUrl: deps.apiPublicUrl ?? "http://localhost:8787",
+                  ...(githubLabels !== undefined ? { githubLabels } : {}),
+                  ...(capabilities !== undefined ? { capabilities } : {}),
+                },
+              ),
+            ),
+          ),
+      );
+    }
   }
 
   // 러너 프로토콜 — `assay runner` 가 자기 머신에서 호출(러너 토큰 rnr_ → via=runner, principal.runnerId).

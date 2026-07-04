@@ -36,7 +36,7 @@ inputs:
     required: false
     default: "false"
   runtime:
-    description: "Workspace Runtime id to run on (e.g. self:<runner-id>)"
+    description: "Workspace Runtime id to run on. A registered runtime id, a personal self-hosted runner (self:<runner-id>), or a workspace-shared runner co-located with this GitHub runner (self:ws:<runner-id>)."
     required: false
   judges:
     description: 'JSON array of judges, e.g. [{"id":"code-judge"}]'

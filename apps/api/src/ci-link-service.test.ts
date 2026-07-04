@@ -208,3 +208,51 @@ describe("renderCiWorkflow", () => {
     expect(yaml).toContain("TODO");
   });
 });
+
+describe("CiLinkService.mintRunnerToken — GitHub Actions 러너 등록 토큰 발급", () => {
+  const cipher = aesGcmCipher(Buffer.alloc(32, 1));
+
+  it("개인 GitHub 연결로 POST registration-token → {token, expiresAt}; 토큰은 Authorization 에만", async () => {
+    const connections = new InMemoryConnectionStore(cipher);
+    const meta = await connections.create({
+      owner: "alice",
+      workspace: "acme",
+      provider: "github",
+      accountLabel: "alice-gh",
+      scopes: ["repo"],
+      accessToken: "gho_secret",
+    });
+    const calls: Array<{ url: string; method: string }> = [];
+    const svc = new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      connections,
+      fetchImpl: fakeFetch(
+        [
+          (url, init) =>
+            url.endsWith("/repos/acme/app/actions/runners/registration-token") && init?.method === "POST"
+              ? json({ token: "AABBCC", expires_at: "2026-07-04T12:00:00Z" })
+              : undefined,
+        ],
+        calls,
+      ),
+    });
+    const res = await svc.mintRunnerToken("alice", meta.id, "acme/app");
+    expect(res).toEqual({ token: "AABBCC", expiresAt: "2026-07-04T12:00:00Z" });
+    expect(calls[0]?.method).toBe("POST");
+    expect(calls[0]?.url).toContain("/repos/acme/app/actions/runners/registration-token");
+  });
+
+  it("비-GitHub 연결이면 BAD_REQUEST", async () => {
+    const connections = new InMemoryConnectionStore(cipher);
+    const meta = await connections.create({
+      owner: "alice",
+      workspace: "acme",
+      provider: "mattermost",
+      accountLabel: "mm",
+      scopes: [],
+      accessToken: "x",
+    });
+    const svc = new CiLinkService({ settings: new InMemoryWorkspaceSettingsStore(), connections });
+    await expect(svc.mintRunnerToken("alice", meta.id, "acme/app")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});

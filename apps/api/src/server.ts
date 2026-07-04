@@ -58,7 +58,8 @@ import type { ProfileService } from "./profile-service.js";
 import type { QueueService } from "./queue-service.js";
 import type { RunService } from "./run-service.js";
 import type { RunnerHub } from "./runner-hub.js";
-import { PairRunnerBodySchema, type RunnerService } from "./runner-service.js";
+import { installGithubWorkspaceRunner } from "./github-runner-install.js";
+import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { type ScheduleService, isValidCron } from "./schedule-service.js";
 import {
@@ -2228,6 +2229,46 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // GitHub Actions 러너 자가등록 — 한 번의 admin 액션으로 빌드 서버에 GitHub 러너 + Assay 워크스페이스-공유 러너를
+  // 함께 세우는 설치 스크립트를 생성(설계 doc §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 1회) + 개인 GitHub 연결로
+  // 등록 토큰 mint. settings:write(팀 자원 + repo 신뢰 조작이므로 admin). 응답의 토큰들은 저장하지 않는다.
+  app.post("/workspace/runners/github-install", async (req, reply) => {
+    if (!deps.runnerService || !deps.ciLinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner/ci link 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        connectionId: z.string().min(1),
+        repository: z.string().min(1),
+        label: z.string().min(1).max(80).optional(),
+        githubLabels: z.array(z.string().min(1)).optional(),
+        capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(
+        await installGithubWorkspaceRunner(
+          { runnerService: deps.runnerService, ciLinkService: deps.ciLinkService },
+          {
+            workspace: principal.workspace,
+            subject: principal.subject,
+            connectionId: body.data.connectionId,
+            repository: body.data.repository,
+            label: body.data.label ?? body.data.repository.split("/")[1] ?? "assay-ci",
+            apiUrl: baseUrl(req),
+            ...(body.data.githubLabels !== undefined ? { githubLabels: body.data.githubLabels } : {}),
+            ...(body.data.capabilities !== undefined ? { capabilities: body.data.capabilities } : {}),
+          },
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err); // 연결 없음 404 / repo 형식 400 / GitHub 실패 502
+    }
+  });
+
   // --- workspace 메타(이름/로고/소유자) — 단수 /workspace = 활성 워크스페이스 레코드(복수 /workspaces 와 구분) ---
   app.get("/workspace", async (req, reply) => {
     if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
@@ -2439,6 +2480,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           membershipService: deps.membershipService,
           profileService: deps.profileService,
           keyStore: deps.keyStore,
+          apiPublicUrl: baseUrl(req), // github_install_workspace_runner 의 assay runner --api-url
         },
         principal,
       ).connect(transport);
