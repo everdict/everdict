@@ -222,4 +222,25 @@ describe("RuntimeDispatcher", () => {
     await expect(d.dispatch(selfJob("self:ws"))).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
     expect(seen).toHaveLength(0);
   });
+
+  // self(러너 id 없이) — 개인 풀. owner=제출자(submittedBy). 내 러너 아무거나(여러 프로세스/머신을 한 풀에).
+  it("self(id 없음) → 개인 풀 백엔드 self:<subject>:* 로 라우팅(owner=제출자)", async () => {
+    const { d, seen, backends, poolHasRunners } = poolDeps(true);
+    await d.dispatch(selfJob("self", "u-alice"));
+    expect(poolHasRunners).toHaveBeenCalledWith("u-alice"); // 워크스페이스가 아니라 제출자
+    expect(backends.has("self:u-alice:*")).toBe(true);
+    expect(seen[0]?.evalCase.placement?.target).toBe("self:u-alice:*");
+  });
+
+  it("self 인데 제출자(submittedBy) 미상이면 NOT_FOUND(개인 풀은 인증 필요)", async () => {
+    const { d, seen } = poolDeps(true);
+    await expect(d.dispatch(selfJob("self"))).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
+    expect(seen).toHaveLength(0);
+  });
+
+  it("self 인데 내 러너가 하나도 없으면 NOT_FOUND", async () => {
+    const { d, seen } = poolDeps(false);
+    await expect(d.dispatch(selfJob("self", "u-alice"))).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
+    expect(seen).toHaveLength(0);
+  });
 });

@@ -127,6 +127,10 @@ export function SubmitRunForm({
                 ...(hasWorkspaceRunners
                   ? [{ value: 'self:ws', label: '팀 공유 러너 (아무거나)', hint: '팀' }]
                   : []),
+                // 내 러너 풀 — 내 러너(여러 대일 수 있음) 중 아무거나. 특정 러너는 아래 개별 항목.
+                ...(runners.length > 0
+                  ? [{ value: 'self', label: '내 러너 (아무거나)', hint: '내 컴퓨터' }]
+                  : []),
                 ...runners.map((r) => ({
                   value: `self:${r.id}`,
                   label: r.label,

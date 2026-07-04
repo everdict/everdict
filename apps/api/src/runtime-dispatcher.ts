@@ -30,16 +30,25 @@ export class RuntimeDispatcher implements Dispatcher {
     const tenant = job.tenant ?? "default";
     const target = job.evalCase.placement?.target;
 
-    // self:ws(러너 id 없이) = 워크스페이스 풀 — 그 워크스페이스의 아무 공유 러너나(capability 충족) 가져간다(N 러너 드레인).
-    // 특정 러너 지정(self:ws:<id>) 없이 "팀 러너 중 아무거나". 멤버십=접근권(owner 를 잡 tenant 에서 파생).
+    // 풀 타깃(러너 id 없이 "아무 러너나", N 러너 드레인):
+    //  - self:ws = 워크스페이스 풀(owner=ws:<tenant> — 멤버 누구나; owner 를 잡 tenant 에서 파생 → 멤버십=접근권).
+    //  - self    = 개인 풀(owner=제출자 — 내 러너 아무거나; 여러 프로세스/머신을 한 개인 풀에 붙일 수 있다).
     // ⚠️ 아래 self:<runnerId> 블록보다 먼저 — self:ws 는 그 블록에서 runnerId="ws" 로 오인될 수 있다.
-    if (target === "self:ws" && this.deps.poolHasRunners && this.deps.buildSelfHostedBackend) {
-      const owner = `ws:${tenant}`;
+    if ((target === "self:ws" || target === "self") && this.deps.poolHasRunners && this.deps.buildSelfHostedBackend) {
+      const owner = target === "self:ws" ? `ws:${tenant}` : job.submittedBy;
+      if (!owner)
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { resource: "runner", pool: "self" },
+          "개인 풀(self)을 쓰려면 제출자가 필요합니다 — 인증된 요청만 개인 러너를 타깃할 수 있습니다.",
+        );
       if (!(await this.deps.poolHasRunners(owner)))
         throw new NotFoundError(
           "NOT_FOUND",
           { resource: "runner", pool: owner },
-          "이 워크스페이스에 등록된 공유 러너가 없습니다 — 먼저 공유 러너를 등록하세요.",
+          target === "self:ws"
+            ? "이 워크스페이스에 등록된 공유 러너가 없습니다 — 먼저 공유 러너를 등록하세요."
+            : "등록된 내 러너가 없습니다 — 먼저 러너를 페어링하세요.",
         );
       // service 하니스 docker 요구는 lease 시점 러너별 capability 게이트가 처리(requiredRunnerCapabilities 가 service→docker).
       const key = poolKeyFor(owner);
