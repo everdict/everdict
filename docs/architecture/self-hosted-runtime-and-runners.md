@@ -141,8 +141,10 @@ runner, once configured, holds its own GitHub credential — a company resource,
    docker runner. `RuntimeDispatcher` handles `target==="self:ws"` (before the `self:<id>` branch) via a
    `poolHasRunners(owner)` check (404 if none). Web: the run form's runtime picker shows "팀 공유 러너 (아무거나)"
    when the workspace has shared runners. Live e2e `scripts/live/multi-runner-pool.mjs` (2 runners → `self:ws` → all
-   routed to workspace runners; deterministic distribution proven by unit tests). Personal `--join self:<id>` pools
-   remain a follow-up (workspace pool covers the team use case).
+   routed to workspace runners; deterministic distribution proven by unit tests). **Personal pool (`self`) —
+   SHIPPED too:** the pool branch is generalized to `self:ws | self` (owner = `ws:<tenant>` | the submitter), so a
+   user can run N runner processes/machines under one personal pool and target `self` (own-pays). Web run form
+   offers "내 러너 (아무거나)"; live e2e `scripts/live/personal-pool.mjs` (PASS).
 3. **Workspace self-hosted runtime.** ✅ **SHIPPED.** Realized as a workspace-owned **runner** (owner=`ws:<workspace>`
    in the existing owner-keyed runner-store — no new store/schema; the shared "pool" *is* the workspace-owned runner
    set). Admin CRUD gated `settings:write`: `POST /workspace/runners` (pair, plaintext token once) ·
@@ -186,7 +188,10 @@ runner, once configured, holds its own GitHub credential — a company resource,
    (org-level only) adds `config.sh --runnergroup <name>` so the org's group access policy applies to the runner
    (route/MCP/web params). **Runner labels for placement — SHIPPED** as capability-gated pool routing (slice 2): the
    pool's lease gate skips runners lacking a job's required capabilities, so `self:ws` routes each job to a suitable
-   runner. Remaining: live e2e vs **real** GitHub self-hosted registration; personal multi-runner `--join`.
+   runner. **Real-GitHub self-hosted registration** is a manual runbook (needs a real org/build server):
+   `docs/runbooks/github-self-hosted-runner.md` + turnkey helper `scripts/live/github-self-hosted-runner.mjs`
+   (Assay side automated; GitHub-side Actions firing is the operator's step). Personal multi-runner is SHIPPED as
+   the `self` personal pool (slice 2).
 
 ## Decisions / non-goals
 
