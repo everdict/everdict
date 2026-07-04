@@ -33,11 +33,13 @@ export function SubmitRunForm({
   connections = [],
   runtimes = [],
   runners = [],
+  hasWorkspaceRunners = false,
 }: {
   harnesses: Harness[]
   connections?: ConnectionMeta[]
   runtimes?: { id: string }[]
   runners?: { id: string; label: string }[]
+  hasWorkspaceRunners?: boolean // 팀 공유 러너가 있으면 self:ws 풀 옵션 노출
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -121,6 +123,10 @@ export function SubmitRunForm({
               options={[
                 { value: '', label: '기본 실행 환경' },
                 ...runtimes.map((r) => ({ value: r.id })),
+                // 팀 공유 러너 풀 — 등록된 팀 러너 중 아무거나(capability 충족) 가져간다(멀티러너=동시성).
+                ...(hasWorkspaceRunners
+                  ? [{ value: 'self:ws', label: '팀 공유 러너 (아무거나)', hint: '팀' }]
+                  : []),
                 ...runners.map((r) => ({
                   value: `self:${r.id}`,
                   label: r.label,

@@ -299,6 +299,8 @@ export const controlPlane = {
   // 워크스페이스-공유 러너(팀 자원, owner=ws:<workspace>). admin 이 등록(settings:write) → 멤버 누구나 self:ws:<id> 로 타깃.
   // owned=팀 소유 러너만(로스터[GET /workspace/runners]는 개인 러너 포함), pair 는 평문 토큰 1회, revoke 204.
   listWorkspaceOwnedRunners: <T>(auth: AuthContext) => call<T>(auth, '/workspace/runners/owned'),
+  // 워크스페이스 러너 로스터(members:read) — 이 워크스페이스에 페어링된 러너 메타. self:ws 풀 노출 판단용.
+  listWorkspaceRunners: <T>(auth: AuthContext) => call<T>(auth, '/workspace/runners'),
   pairWorkspaceRunner: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/runners', { method: 'POST', body: JSON.stringify(body) }),
   revokeWorkspaceRunner: (auth: AuthContext, id: string) =>

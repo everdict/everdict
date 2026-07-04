@@ -23,6 +23,7 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
   let connections: ConnectionMeta[] = []
   let runtimes: { id: string }[] = []
   let runners: { id: string; label: string }[] = []
+  let hasWorkspaceRunners = false
   if (allowed) {
     try {
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
@@ -49,6 +50,13 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
     } catch {
       // 러너 목록 실패해도 폼은 동작
     }
+    // 워크스페이스에 팀 공유 러너가 있으면 self:ws 풀 옵션 노출(members:read 로스터). 실패/없음이면 미노출.
+    try {
+      hasWorkspaceRunners =
+        runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx)).runners.length > 0
+    } catch {
+      // 로스터 실패해도 폼은 동작(풀 옵션만 숨김)
+    }
   }
 
   return (
@@ -67,6 +75,7 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
             connections={connections}
             runtimes={runtimes}
             runners={runners}
+            hasWorkspaceRunners={hasWorkspaceRunners}
           />
         </Card>
       ) : (
