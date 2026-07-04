@@ -43,6 +43,25 @@ build server, and a live GitHub connection, so it is a **manual runbook**, not a
    the evaluation. Confirm: the scorecard's `origin` records `repo`/`sha`; the eval result posts back to the PR
    check; `provenance.by` on the run is `ws:<workspace>` (workspace-pays) and `provenance.runner` is the runner id.
 
+## Live-verified (repo-level, 2026-07-05)
+
+The full loop was run for real against GitHub Actions: this machine acted as the build server (local control
+plane + Assay runner + a real GitHub Actions **self-hosted runner** registered to a throwaway repo via the exact
+`mintRunnerToken` API call). A `workflow_dispatch` job dispatched to the self-hosted runner drove an Assay run on
+`self:ws`; the workflow log showed:
+
+```
+submitted run … -> self:ws
+status: succeeded
+"ranOn": "self-hosted"
+"by": "ws:default"          # workspace-pays
+OK: Assay eval ran on self:ws (self-hosted, workspace-pays)
+```
+
+Workflow conclusion: **success**. The runner was registered `--ephemeral`, so it auto-deregistered after the one
+job (no lingering runner). **Org-level** (`admin:org`) was not exercised — the test account's token had
+`repo`+`workflow` only; org-level remains verified by unit tests + this runbook.
+
 ## Notes
 
 - Registration tokens are short-lived — run the install script promptly (re-run the helper to mint a fresh one).

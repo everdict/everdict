@@ -188,9 +188,12 @@ runner, once configured, holds its own GitHub credential — a company resource,
    (org-level only) adds `config.sh --runnergroup <name>` so the org's group access policy applies to the runner
    (route/MCP/web params). **Runner labels for placement — SHIPPED** as capability-gated pool routing (slice 2): the
    pool's lease gate skips runners lacking a job's required capabilities, so `self:ws` routes each job to a suitable
-   runner. **Real-GitHub self-hosted registration** is a manual runbook (needs a real org/build server):
-   `docs/runbooks/github-self-hosted-runner.md` + turnkey helper `scripts/live/github-self-hosted-runner.mjs`
-   (Assay side automated; GitHub-side Actions firing is the operator's step). Personal multi-runner is SHIPPED as
+   runner. **Real-GitHub self-hosted registration — ✅ LIVE-VERIFIED (repo-level, 2026-07-05):** a genuine GitHub
+   Actions self-hosted runner (registered via the exact `mintRunnerToken` API call, `--ephemeral`) picked up a
+   `workflow_dispatch` job that drove an Assay run on `self:ws` → `succeeded`, `provenance.ranOn=self-hosted`,
+   `by=ws:default` (workspace-pays), workflow conclusion **success**. Runbook + evidence:
+   `docs/runbooks/github-self-hosted-runner.md`; turnkey helper `scripts/live/github-self-hosted-runner.mjs`.
+   Org-level (`admin:org`) still runbook-only (test token lacked the scope). Personal multi-runner is SHIPPED as
    the `self` personal pool (slice 2).
 
 ## Decisions / non-goals
