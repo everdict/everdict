@@ -253,7 +253,26 @@ async function main(): Promise<void> {
     connections: connectionStore,
     feed: notificationStore, // 개인 알림 피드(벨 인박스) — docs/architecture/notifications.md
   });
-  const commentService = new CommentService({ store: commentStore }); // 리소스 댓글(데이터셋 등) 협업 논의
+  // 리소스 댓글(데이터셋 등) 협업 논의 + @멘션 알림. 멘션되면 언급자 이름을 프로필/멤버에서 해석해 개인 피드로.
+  const commentService = new CommentService({
+    store: commentStore,
+    notifyMention: async ({ tenant, comment, recipients }) => {
+      // listMembers 가 프로필 이름을 이미 병합해 준다 — 언급자의 표시명(이름>이메일 로컬파트>기본).
+      const member = await membershipService
+        .listMembers(tenant)
+        .then((ms) => ms.find((m) => m.subject === comment.author))
+        .catch(() => undefined);
+      const actorName = member?.name ?? member?.email?.split("@")[0] ?? "누군가";
+      await notificationService.notifyMention(tenant, {
+        recipients,
+        actorName,
+        resourceType: comment.resourceType,
+        resourceId: comment.resourceId,
+        commentId: comment.id,
+        preview: comment.body,
+      });
+    },
+  });
   const service = new RunService({
     dispatcher,
     store,

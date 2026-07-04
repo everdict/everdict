@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BarChart3, Loader2, MessageSquare, Sparkles, Trash2 } from 'lucide-react'
@@ -33,6 +33,13 @@ export type ActivityItem =
     }
   | { kind: 'comment'; at: string; actor: Actor; id: string; body: string; canDelete: boolean }
 
+// @멘션 후보(워크스페이스 멤버) — 작성기 오토컴플리트 + 본문 내 @이름 하이라이트에 사용.
+export interface Mentionable {
+  subject: string
+  name: string
+  avatarUrl?: string
+}
+
 const STATUS_TONE: Record<string, string> = {
   succeeded: 'text-[var(--color-success)]',
   failed: 'text-[var(--color-danger)]',
@@ -54,12 +61,26 @@ export function ActivityTimeline({
   datasetId,
   items,
   canComment,
+  mentionables,
 }: {
   workspace: string
   datasetId: string
   items: ActivityItem[]
   canComment: boolean
+  mentionables: Mentionable[]
 }) {
+  // 알림에서 #comment-<id> 로 진입 시 해당 댓글로 스크롤 + 잠깐 하이라이트(컨텍스트 바로 이동).
+  useEffect(() => {
+    const hash = window.location.hash
+    if (!hash.startsWith('#comment-')) return
+    const el = document.getElementById(hash.slice(1))
+    if (!el) return
+    el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    el.classList.add('ring-2', 'ring-primary/60')
+    const t = setTimeout(() => el.classList.remove('ring-2', 'ring-primary/60'), 2400)
+    return () => clearTimeout(t)
+  }, [])
+
   return (
     <div className="space-y-4">
       <ol className="space-y-3">
@@ -71,7 +92,7 @@ export function ActivityTimeline({
             <TimelineRail item={item} last={i === items.length - 1} />
             <div className="min-w-0 flex-1 pb-1">
               {item.kind === 'comment' ? (
-                <CommentItem workspace={workspace} item={item} />
+                <CommentItem item={item} mentionables={mentionables} />
               ) : (
                 <EventItem workspace={workspace} item={item} />
               )}
@@ -80,7 +101,7 @@ export function ActivityTimeline({
         ))}
       </ol>
       {canComment ? (
-        <Composer datasetId={datasetId} />
+        <Composer datasetId={datasetId} mentionables={mentionables} />
       ) : (
         <p className="text-[12px] text-muted-foreground">댓글을 남기려면 멤버 권한이 필요해요.</p>
       )}
@@ -93,7 +114,13 @@ function TimelineRail({ item, last }: { item: ActivityItem; last: boolean }) {
   const node =
     item.actor.known &&
     (item.kind === 'comment' || item.kind === 'scorecard' || item.kind === 'created') ? (
-      <Avatar name={item.actor.name} url={item.actor.avatarUrl} size="sm" />
+      // 유저 프로필은 둥근 이미지로 통일(모노그램/업로드 모두 rounded-full).
+      <Avatar
+        name={item.actor.name}
+        url={item.actor.avatarUrl}
+        size="sm"
+        className="rounded-full"
+      />
     ) : (
       <span className="grid size-6 place-items-center rounded-full bg-secondary text-faint ring-1 ring-inset ring-border">
         {item.kind === 'comment' ? (
@@ -159,13 +186,38 @@ function EventItem({
   )
 }
 
-// 댓글 — 카드(작성자 + 시각 + 본문 + 삭제).
+// 본문 내 @이름 을 멤버와 매칭해 하이라이트(긴 이름 우선). 매칭 안 되면 그냥 텍스트.
+function renderBody(body: string, mentionables: Mentionable[]): ReactNode {
+  const names = mentionables.map((m) => m.name).filter(Boolean)
+  if (names.length === 0) return body
+  const sorted = [...new Set(names)].sort((a, b) => b.length - a.length)
+  const escaped = sorted.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+  const re = new RegExp(`@(${escaped.join('|')})`, 'g')
+  const out: ReactNode[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  let k = 0
+  // biome-ignore lint/suspicious/noAssignInExpressions: 정규식 순회 표준 패턴
+  while ((m = re.exec(body)) !== null) {
+    if (m.index > last) out.push(body.slice(last, m.index))
+    out.push(
+      <span key={k++} className="rounded bg-primary/12 px-1 font-[560] text-primary">
+        {m[0]}
+      </span>
+    )
+    last = m.index + m[0].length
+  }
+  if (last < body.length) out.push(body.slice(last))
+  return out
+}
+
+// 댓글 — 카드(작성자 + 시각 + 본문 + 삭제). id=comment-<id> 앵커(알림에서 스크롤 진입).
 function CommentItem({
-  workspace: _workspace,
   item,
+  mentionables,
 }: {
-  workspace: string
   item: Extract<ActivityItem, { kind: 'comment' }>
+  mentionables: Mentionable[]
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -179,7 +231,10 @@ function CommentItem({
     })
   }
   return (
-    <div className="rounded-lg border bg-card px-3.5 py-2.5 shadow-raise">
+    <div
+      id={`comment-${item.id}`}
+      className="scroll-mt-20 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-shadow"
+    >
       <div className="mb-1 flex items-center gap-2">
         <span className="text-[12.5px] font-[560] text-foreground">{item.actor.name}</span>
         <When at={item.at} />
@@ -200,7 +255,7 @@ function CommentItem({
         )}
       </div>
       <p className="whitespace-pre-wrap break-words text-[13px] leading-relaxed text-foreground">
-        {item.body}
+        {renderBody(item.body, mentionables)}
       </p>
       {error && (
         <Callout tone="danger" className="mt-2 py-1.5">
@@ -211,42 +266,146 @@ function CommentItem({
   )
 }
 
-// 댓글 작성기 — 하단 고정. 제출 후 refresh 로 타임라인 갱신.
-function Composer({ datasetId }: { datasetId: string }) {
+// 댓글 작성기 — 하단 고정. @ 입력 시 멤버 오토컴플리트, 제출 시 본문의 @이름 을 subject 로 해석해 mentions 전달.
+function Composer({ datasetId, mentionables }: { datasetId: string; mentionables: Mentionable[] }) {
   const router = useRouter()
+  const taRef = useRef<HTMLTextAreaElement>(null)
   const [value, setValue] = useState('')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
+  // @멘션 오토컴플리트 상태 — 커서 앞 '@쿼리' 를 잡아 후보를 띄운다.
+  const [menu, setMenu] = useState<{ query: string; at: number } | undefined>(undefined)
+  const [active, setActive] = useState(0)
+
+  // 커서 앞 텍스트에서 마지막 '@단어' 를 찾는다(공백 없이 이어지는 토큰). 없으면 메뉴 닫음.
+  function refreshMenu(text: string, caret: number) {
+    const upto = text.slice(0, caret)
+    const m = /(^|\s)@([^\s@]*)$/.exec(upto)
+    if (!m) {
+      setMenu(undefined)
+      return
+    }
+    setMenu({ query: m[2] ?? '', at: caret - (m[2] ?? '').length - 1 })
+    setActive(0)
+  }
+
+  const matches = menu
+    ? mentionables
+        .filter((mn) => mn.name.toLowerCase().includes(menu.query.toLowerCase()))
+        .slice(0, 6)
+    : []
+
+  function pick(mn: Mentionable) {
+    if (!menu) return
+    const before = value.slice(0, menu.at)
+    const after = value.slice(menu.at + 1 + menu.query.length)
+    const next = `${before}@${mn.name} ${after}`
+    setValue(next)
+    setMenu(undefined)
+    // 삽입 후 커서를 이름 뒤로.
+    queueMicrotask(() => {
+      const pos = (before + '@' + mn.name + ' ').length
+      taRef.current?.focus()
+      taRef.current?.setSelectionRange(pos, pos)
+    })
+  }
+
+  // 제출 시 본문에서 실제로 남아있는 @이름 을 멤버로 해석 → subject 목록.
+  function extractMentions(text: string): string[] {
+    return mentionables
+      .filter((mn) =>
+        new RegExp(`(^|\\s)@${mn.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|[.,!?])`).test(
+          text
+        )
+      )
+      .map((mn) => mn.subject)
+  }
+
   function onSubmit() {
     const body = value.trim()
     if (!body) return
     setError(undefined)
+    const mentions = extractMentions(body)
     startTransition(async () => {
-      const r = await createCommentAction(datasetId, body)
+      const r = await createCommentAction(datasetId, body, mentions)
       if (r.ok) {
         setValue('')
+        setMenu(undefined)
         router.refresh()
       } else setError(r.error)
     })
   }
+
   return (
     <div className="space-y-2 rounded-lg border bg-card/40 p-3">
-      <Textarea
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder="이 데이터셋에 대한 논의를 남겨요… (누가 언제 무엇을 했는지 맥락을 이어가요)"
-        className="min-h-16 text-[13px]"
-        onKeyDown={(e) => {
-          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSubmit()
-        }}
-      />
+      <div className="relative">
+        <Textarea
+          ref={taRef}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value)
+            refreshMenu(e.target.value, e.target.selectionStart ?? e.target.value.length)
+          }}
+          onClick={(e) => refreshMenu(value, e.currentTarget.selectionStart ?? 0)}
+          placeholder="이 데이터셋에 대한 논의를 남겨요… @로 멤버를 언급하면 알림이 가요"
+          className="min-h-16 text-[13px]"
+          onKeyDown={(e) => {
+            if (menu && matches.length > 0) {
+              if (e.key === 'ArrowDown') {
+                e.preventDefault()
+                setActive((a) => (a + 1) % matches.length)
+                return
+              }
+              if (e.key === 'ArrowUp') {
+                e.preventDefault()
+                setActive((a) => (a - 1 + matches.length) % matches.length)
+                return
+              }
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                const sel = matches[active]
+                if (sel) {
+                  e.preventDefault()
+                  pick(sel)
+                  return
+                }
+              }
+              if (e.key === 'Escape') {
+                setMenu(undefined)
+                return
+              }
+            }
+            if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') onSubmit()
+          }}
+        />
+        {menu && matches.length > 0 && (
+          <div className="absolute left-2 top-full z-20 mt-1 w-64 overflow-hidden rounded-lg border bg-popover shadow-pop">
+            {matches.map((mn, i) => (
+              <button
+                key={mn.subject}
+                type="button"
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  pick(mn)
+                }}
+                className={cn(
+                  'flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[13px] transition-colors',
+                  i === active ? 'bg-accent text-foreground' : 'hover:bg-accent/60'
+                )}
+              >
+                <Avatar name={mn.name} url={mn.avatarUrl} size="sm" className="rounded-full" />
+                <span className="truncate">{mn.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       {error && (
         <Callout tone="danger" className="py-1.5">
           {error}
         </Callout>
       )}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-faint">⌘/Ctrl + Enter 로 등록</span>
+        <span className="text-[11px] text-faint">@ 멘션 · ⌘/Ctrl + Enter 로 등록</span>
         <Button
           type="button"
           size="sm"

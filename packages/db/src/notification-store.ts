@@ -10,6 +10,7 @@ export const NotificationKindSchema = z.enum([
   "scorecard_completed",
   "scorecard_failed",
   "schedule_regression",
+  "comment_mention", // 댓글에서 @언급됨 — 링크로 바로 그 컨텍스트(데이터셋 댓글)로 이동
 ]);
 export type NotificationKind = z.infer<typeof NotificationKindSchema>;
 
@@ -20,8 +21,15 @@ export const NotificationRecordSchema = z.object({
   kind: NotificationKindSchema,
   title: z.string(),
   body: z.string().optional(),
-  // 클릭 시 이동할 대상 — run 또는 scorecard 상세.
-  link: z.object({ runId: z.string().optional(), scorecardId: z.string().optional() }).optional(),
+  // 클릭 시 이동할 대상 — run / scorecard 상세, 또는 데이터셋 댓글(멘션 시 commentId 앵커로 스크롤).
+  link: z
+    .object({
+      runId: z.string().optional(),
+      scorecardId: z.string().optional(),
+      datasetId: z.string().optional(),
+      commentId: z.string().optional(),
+    })
+    .optional(),
   createdAt: z.string(),
   readAt: z.string().optional(),
 });

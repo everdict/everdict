@@ -8,6 +8,7 @@ export const notificationKinds = [
   'scorecard_completed',
   'scorecard_failed',
   'schedule_regression',
+  'comment_mention',
 ] as const
 export const notificationKindSchema = z.enum(notificationKinds)
 export type NotificationKind = z.infer<typeof notificationKindSchema>
@@ -19,7 +20,14 @@ export const notificationSchema = z.object({
   kind: notificationKindSchema,
   title: z.string(),
   body: z.string().optional(),
-  link: z.object({ runId: z.string().optional(), scorecardId: z.string().optional() }).optional(),
+  link: z
+    .object({
+      runId: z.string().optional(),
+      scorecardId: z.string().optional(),
+      datasetId: z.string().optional(),
+      commentId: z.string().optional(),
+    })
+    .optional(),
   createdAt: z.string(),
   readAt: z.string().optional(),
 })

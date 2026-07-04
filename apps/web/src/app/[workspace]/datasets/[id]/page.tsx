@@ -20,7 +20,12 @@ import {
 } from 'lucide-react'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
-import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
+import {
+  ActivityTimeline,
+  type ActivityItem,
+  type Actor,
+  type Mentionable,
+} from '@/features/discuss-dataset'
 import { CaseList } from '@/features/inspect-dataset'
 import { commentsResponseSchema } from '@/entities/comment'
 import {
@@ -110,7 +115,7 @@ export default async function DatasetDetailPage({
     }
     const m = members.find((x) => x.subject === summary?.createdBy)
     return {
-      name: m?.name ?? m?.email ?? fmtSubject(summary.createdBy),
+      name: m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(summary.createdBy),
       ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
       known: true,
     }
@@ -153,11 +158,12 @@ export default async function DatasetDetailPage({
 
   // 활동 타임라인 — "누가 언제 무엇을"(생성 · 스코어카드 실행 · 댓글)을 시간순으로. actor 는 여기서 표시-준비.
   const isAdmin = can(principal?.roles, 'settings:write') // settings:write = admin 전용 → admin 판정 프록시
+  // 표시명 — 프로필 이름 우선, 없으면 이메일 로컬파트(전체 이메일 노출 금지), 그래도 없으면 subject 축약.
   const resolveActor = (subject?: string): Actor => {
     if (!subject) return { name: '시스템', known: false }
     const m = members.find((x) => x.subject === subject)
     return {
-      name: m?.name ?? m?.email ?? fmtSubject(subject),
+      name: m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(subject),
       ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
       known: Boolean(m),
     }
@@ -192,6 +198,12 @@ export default async function DatasetDetailPage({
     })
   activity.sort((a, b) => a.at.localeCompare(b.at))
   const canComment = can(principal?.roles, 'comments:write')
+  // @멘션 후보 — 워크스페이스 멤버(표시명 + 둥근 아바타). 작성기 오토컴플리트 + 본문 하이라이트.
+  const mentionables: Mentionable[] = members.map((m) => ({
+    subject: m.subject,
+    name: m.name ?? m.email?.split('@')[0] ?? fmtSubject(m.subject),
+    ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+  }))
 
   return (
     <div className="space-y-7">
@@ -273,7 +285,12 @@ export default async function DatasetDetailPage({
           )}
           <span className="inline-flex items-center gap-1.5" title={`만든이 ${author.name}`}>
             {author.known ? (
-              <Avatar name={author.name} url={author.avatarUrl} size="sm" />
+              <Avatar
+                name={author.name}
+                url={author.avatarUrl}
+                size="sm"
+                className="rounded-full"
+              />
             ) : (
               <span className="text-faint">만든이</span>
             )}
@@ -337,6 +354,7 @@ export default async function DatasetDetailPage({
           datasetId={dataset.id}
           items={activity}
           canComment={canComment}
+          mentionables={mentionables}
         />
       </section>
 

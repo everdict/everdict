@@ -10,9 +10,14 @@ export function Input({ className, ...props }: InputHTMLAttributes<HTMLInputElem
   return <input className={cn(base, 'h-8', className)} {...props} />
 }
 
-export function Textarea({ className, ...props }: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+export function Textarea({
+  className,
+  ref,
+  ...props
+}: TextareaHTMLAttributes<HTMLTextAreaElement> & { ref?: React.Ref<HTMLTextAreaElement> }) {
   return (
     <textarea
+      ref={ref}
       className={cn(base, 'min-h-24 py-2 font-mono leading-relaxed', className)}
       {...props}
     />

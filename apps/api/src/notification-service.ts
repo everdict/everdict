@@ -88,6 +88,33 @@ export class NotificationService {
     return this.deps.feed?.markRead(recipient, workspace, ids, this.nowIso()) ?? Promise.resolve(0);
   }
 
+  // 댓글 @멘션 — 언급된 유저(들)에게 개인 피드 알림. 링크는 그 컨텍스트(데이터셋 댓글, commentId 앵커)로.
+  // recipients = 멘션된 subject 들(작성자 자기 자신은 호출부에서 제외). 채널 게시는 하지 않는다(피드 전용, 저소음).
+  async notifyMention(
+    tenant: string,
+    input: {
+      recipients: string[];
+      actorName: string; // 언급한 사람의 표시명(이름/유저네임)
+      resourceType: string; // "dataset" 등
+      resourceId: string;
+      commentId: string;
+      preview: string; // 댓글 본문 미리보기
+    },
+  ): Promise<void> {
+    const preview = input.preview.trim().replace(/\s+/g, " ").slice(0, 140);
+    for (const recipient of [...new Set(input.recipients)]) {
+      await this.pushFeed({
+        workspace: tenant,
+        recipient,
+        kind: "comment_mention",
+        title: `${input.actorName}님이 회원님을 언급했어요`,
+        body: preview,
+        // 현재 멘션은 데이터셋 댓글만 — resourceType 이 확장되면 여기 링크 매핑도 확장.
+        link: input.resourceType === "dataset" ? { datasetId: input.resourceId, commentId: input.commentId } : {},
+      });
+    }
+  }
+
   // 피드 적재 — Mattermost 와 독립적으로 실패를 삼킨다(한 채널 장애가 다른 채널을 막지 않게).
   private async pushFeed(row: Omit<NotificationRecord, "id" | "createdAt">): Promise<void> {
     if (!this.deps.feed) return;

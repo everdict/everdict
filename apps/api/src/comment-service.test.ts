@@ -12,11 +12,29 @@ function svc() {
 describe("CommentService", () => {
   it("작성 후 리소스별로 오래된→최신 순으로 조회된다(워크스페이스 스코프)", async () => {
     const { service } = svc();
-    await service.create({ tenant: "acme", resourceType: "dataset", resourceId: "officeqa", author: "u-a", body: "첫 댓글" });
-    await service.create({ tenant: "acme", resourceType: "dataset", resourceId: "officeqa", author: "u-b", body: "둘째" });
+    await service.create({
+      tenant: "acme",
+      resourceType: "dataset",
+      resourceId: "officeqa",
+      author: "u-a",
+      body: "첫 댓글",
+    });
+    await service.create({
+      tenant: "acme",
+      resourceType: "dataset",
+      resourceId: "officeqa",
+      author: "u-b",
+      body: "둘째",
+    });
     // 다른 리소스/테넌트는 섞이지 않는다.
     await service.create({ tenant: "acme", resourceType: "dataset", resourceId: "other", author: "u-a", body: "무관" });
-    await service.create({ tenant: "beta", resourceType: "dataset", resourceId: "officeqa", author: "u-c", body: "타테넌트" });
+    await service.create({
+      tenant: "beta",
+      resourceType: "dataset",
+      resourceId: "officeqa",
+      author: "u-c",
+      body: "타테넌트",
+    });
 
     const list = await service.list("acme", "dataset", "officeqa");
     expect(list.map((c) => c.body)).toEqual(["첫 댓글", "둘째"]);
@@ -59,9 +77,53 @@ describe("CommentService", () => {
     );
   });
 
+  it("멘션이 있으면 작성자를 제외한 수신자들에게 notifyMention 을 호출한다(중복 제거)", async () => {
+    const store = new InMemoryCommentStore();
+    const calls: Array<{ recipients: string[] }> = [];
+    const service = new CommentService({
+      store,
+      newId: () => "cm",
+      now: () => "2026-07-04T00:00:00.000Z",
+      notifyMention: async ({ recipients }) => {
+        calls.push({ recipients });
+      },
+    });
+    await service.create({
+      tenant: "acme",
+      resourceType: "dataset",
+      resourceId: "d",
+      author: "u-me",
+      body: "@bob @carol 확인 부탁",
+      mentions: ["u-bob", "u-carol", "u-bob", "u-me"], // 중복 + 작성자 자신
+    });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.recipients.sort()).toEqual(["u-bob", "u-carol"]); // 자기 자신·중복 제외
+  });
+
+  it("멘션이 없으면 notifyMention 을 호출하지 않는다", async () => {
+    const store = new InMemoryCommentStore();
+    let called = 0;
+    const service = new CommentService({
+      store,
+      newId: () => "cm",
+      now: () => "2026-07-04T00:00:00.000Z",
+      notifyMention: async () => {
+        called++;
+      },
+    });
+    await service.create({ tenant: "acme", resourceType: "dataset", resourceId: "d", author: "u", body: "멘션 없음" });
+    expect(called).toBe(0);
+  });
+
   it("작성자 본인은 삭제 가능(admin 아니어도)", async () => {
     const { service } = svc();
-    const c = await service.create({ tenant: "acme", resourceType: "dataset", resourceId: "d", author: "u-me", body: "내 댓글" });
+    const c = await service.create({
+      tenant: "acme",
+      resourceType: "dataset",
+      resourceId: "d",
+      author: "u-me",
+      body: "내 댓글",
+    });
     await service.delete({ tenant: "acme", id: c.id, subject: "u-me", isAdmin: false });
     expect(await service.list("acme", "dataset", "d")).toHaveLength(0);
   });

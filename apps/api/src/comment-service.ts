@@ -10,6 +10,9 @@ const MAX_BODY = 10_000; // 과도한 본문 방지(리치 논의는 충분, DoS
 
 export interface CommentServiceDeps {
   store: CommentStore;
+  // 멘션 알림 훅 — 댓글이 @언급을 담으면 호출(작성자 제외한 수신자들). 미설정이면 조용히 생략.
+  // 배선은 main.ts 에서 NotificationService.notifyMention 로(actor 이름 해석 포함).
+  notifyMention?: (input: { tenant: string; comment: CommentRecord; recipients: string[] }) => Promise<void>;
   newId?: () => string;
   now?: () => string;
 }
@@ -25,11 +28,7 @@ export class CommentService {
 
   private assertType(resourceType: string): void {
     if (!(COMMENT_RESOURCE_TYPES as readonly string[]).includes(resourceType)) {
-      throw new BadRequestError(
-        "BAD_REQUEST",
-        { resourceType },
-        `지원하지 않는 댓글 대상입니다: ${resourceType}`,
-      );
+      throw new BadRequestError("BAD_REQUEST", { resourceType }, `지원하지 않는 댓글 대상입니다: ${resourceType}`);
     }
   }
 
@@ -39,13 +38,14 @@ export class CommentService {
     return this.deps.store.list(tenant, resourceType, resourceId);
   }
 
-  // 댓글 작성. body 빈값/과길이는 400. author = 작성자 subject.
+  // 댓글 작성. body 빈값/과길이는 400. author = 작성자 subject. mentions = @언급된 subject 들(작성자 제외 후 알림).
   async create(input: {
     tenant: string;
     resourceType: string;
     resourceId: string;
     author: string;
     body: string;
+    mentions?: string[];
   }): Promise<CommentRecord> {
     this.assertType(input.resourceType);
     const body = input.body.trim();
@@ -64,6 +64,15 @@ export class CommentService {
       updatedAt: ts,
     };
     await this.deps.store.add(record);
+    // 멘션 알림 — 작성자 자신은 제외, 중복 제거. 알림 실패는 댓글 작성 결과에 영향 없음(삼킴).
+    const recipients = [...new Set(input.mentions ?? [])].filter((s) => s && s !== input.author);
+    if (recipients.length > 0 && this.deps.notifyMention) {
+      try {
+        await this.deps.notifyMention({ tenant: input.tenant, comment: record, recipients });
+      } catch {
+        // 알림 실패는 무시(댓글은 이미 저장됨).
+      }
+    }
     return record;
   }
 
@@ -72,11 +81,7 @@ export class CommentService {
     const existing = await this.deps.store.get(input.tenant, input.id);
     if (!existing) throw new NotFoundError("NOT_FOUND", { id: input.id }, "댓글을 찾을 수 없습니다.");
     if (existing.author !== input.subject && !input.isAdmin) {
-      throw new ForbiddenError(
-        "FORBIDDEN",
-        { id: input.id },
-        "본인이 작성한 댓글 또는 관리자만 삭제할 수 있습니다.",
-      );
+      throw new ForbiddenError("FORBIDDEN", { id: input.id }, "본인이 작성한 댓글 또는 관리자만 삭제할 수 있습니다.");
     }
     await this.deps.store.remove(input.tenant, input.id);
   }

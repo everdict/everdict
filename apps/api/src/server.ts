@@ -75,11 +75,12 @@ const ReadNotificationsBodySchema = z.object({
   all: z.boolean().optional(),
 });
 
-// 댓글 작성 본문 — 대상(resourceType/resourceId) + 본문. body 검증(빈값/과길이)은 서비스가 강제.
+// 댓글 작성 본문 — 대상(resourceType/resourceId) + 본문 + @멘션 subject 들(알림 대상).
 const CreateCommentBodySchema = z.object({
   resourceType: z.enum(COMMENT_RESOURCE_TYPES),
   resourceId: z.string().min(1),
   body: z.string().min(1),
+  mentions: z.array(z.string().min(1)).max(50).optional(), // @언급된 멤버 subject 들(클라이언트 picker 가 채움)
 });
 
 export const SubmitBodySchema = z.object({
@@ -1981,6 +1982,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         resourceId: body.data.resourceId,
         author: principal.subject,
         body: body.data.body,
+        ...(body.data.mentions ? { mentions: body.data.mentions } : {}),
       });
       return reply.code(201).send(comment);
     } catch (err) {

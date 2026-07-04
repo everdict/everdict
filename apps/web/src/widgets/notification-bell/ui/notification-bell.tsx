@@ -19,6 +19,9 @@ const NATIVE_FIRE_CAP = 3 // 한 폴링에서 네이티브 알림 최대 발화 
 function hrefOf(workspace: string, n: NotificationItem): string {
   if (n.link?.runId) return `/${workspace}/runs/${n.link.runId}`
   if (n.link?.scorecardId) return `/${workspace}/scorecards/${n.link.scorecardId}`
+  // 데이터셋 댓글 멘션 — 그 데이터셋 상세로, commentId 앵커로 해당 댓글까지 스크롤.
+  if (n.link?.datasetId)
+    return `/${workspace}/datasets/${encodeURIComponent(n.link.datasetId)}${n.link.commentId ? `#comment-${n.link.commentId}` : ''}`
   return `/${workspace}`
 }
 
