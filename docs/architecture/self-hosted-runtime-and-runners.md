@@ -156,10 +156,16 @@ runner, once configured, holds its own GitHub credential — a company resource,
    resolution of the github-actions-trigger open item "CI can't lease a personal runner — needs `allowCi` **or a
    workspace-shared runner tier**": a `via:"github-actions"` principal targeting `self:ws:<id>` works because the
    dispatcher derives the owner from the job tenant (workspace membership = access). The run-eval action already
-   accepts a `runtime` input. **Open follow-up:** web GitHub-install UI (connection + repo picker reuse) + optional
-   `runsOn`/`runtime` on the RepoLink so the setup-PR workflow targets self-hosted directly; org-level (`admin:org`).
-5. **Org-level + polish.** `admin:org` scope upgrade path + org runner groups ↔ workspace runtimes; runner labels
-   for placement; live e2e (multi-runner pool + real GitHub self-hosted registration).
+   accepts a `runtime` input. **Web + RepoLink — SHIPPED.** Settings › 공유 러너 tab has a **GitHub Actions 러너**
+   dialog (pick a GitHub connection + repo → install script + workflow hint, token-once) when the admin has a
+   GitHub connection. `WorkspaceCiLink` grew optional `runsOn`/`runtime` (additive JSONB) so `renderCiWorkflow`
+   targets self-hosted directly (`runs-on: <label>` + run-eval `runtime: self:ws:<id>`); settable via the CI-links
+   connect dialog ("5. 셀프호스티드 러너"), HTTP `PUT /workspace/ci/links`, and MCP `link_ci_repository`.
+   **Deferred by decision (2026-07-04):** org-level (`admin:org`) — broadening the GitHub OAuth scope for all
+   connections is a security cost the user chose not to pay yet; repo-level stands.
+5. **Org-level + polish (deferred).** `admin:org` scope upgrade path + org runner groups ↔ workspace runtimes —
+   held per the org-scope decision above. Polish: runner labels for placement; live e2e (multi-runner pool + real
+   GitHub self-hosted registration).
 
 ## Decisions / non-goals
 
