@@ -1,0 +1,155 @@
+# Self-hosted runtime & runners — a pool you target, workers that drain it
+
+> **Status: DESIGN (not yet built).** A strict, additive generalization of the shipped
+> [self-hosted-runner](./self-hosted-runner.md): same pull/lease/MCP machinery, re-drawn around the correct
+> two-layer model so "runtime vs runner" stops being confusing. Nothing about the push backends
+> (`docker|nomad|k8s|topology`) changes.
+
+## Terminology (the whole point — lock this first)
+
+Two concepts, one axis each. **There is no "device" layer** — the machine *is* a self-hosted runtime.
+
+| Layer | What it is | Scales by | Examples |
+|---|---|---|---|
+| **Runtime** | **Where** execution happens — the environment / placement a job targets. | (fixed per environment) | `self-hosted` (localhost / your own infra), `docker`, `nomad`, `k8s`, `topology` |
+| **Runner** | **Who** executes — a **worker process**, the execution subject. Joins a runtime, leases one job at a time, runs it, reports back. | **more runners = more concurrent jobs** | an `assay runner` worker · a GitHub Actions runner |
+
+- A **runtime** is the *pool / placement*. A job's `runtime` field (→ `placement.target`) picks it.
+- A **runner** is a *worker* that joins a runtime and drains its queue. **One machine can host many runners; many machines can join one runtime.** Want to pull 2 jobs at once on a beefy host → run 2 runners.
+- **A machine is not a first-class thing.** "My laptop with plenty of resources" = a `self-hosted` runtime that I've joined N runners to. Both a **GitHub Actions runner** and an **Assay runner** are just workers that happen to live on that same self-hosted host, side by side.
+
+> **Naming migration.** The shipped code calls the *pairing* a "runner" (`POST /runners`, `self:<runnerId>`) **and**
+> the *worker process* a "runner" (`assay runner`). That collision is the confusion. Corrected: the pairing/pool
+> becomes a **self-hosted runtime**; the worker stays the **runner**. `self:<runnerId>` (target one specific worker)
+> generalizes to **`runtime = <self-hosted-runtime>`** (target the pool; any of its runners leases).
+
+## Problem — three gaps in the shipped model
+
+The shipped self-hosted runner nailed pull/lease/provenance/budget, but under the "runner ≈ personal device" framing it has three limits:
+
+1. **Placement targets one specific worker, not a pool.** `self:<runnerId>` pins a job to a single paired
+   runner. Concurrency comes only from `--max-concurrent` (N workers *inside one process*). You cannot spread a
+   queue across **multiple runner processes or multiple machines** by joining them to one target. (The user's
+   "2 jobs waiting, beefy host, pull 2" wants *runners* as the unit, not one process's worker count.)
+2. **Self-hosted runtimes are personal-only.** `RunnerStore` is keyed by `owner=subject`; there is no
+   **workspace-owned** self-hosted runtime. Team CI needs an always-on, shared, workspace-owned pool of build
+   servers that survives any individual member leaving — not one dev's laptop.
+3. **No self-serve GitHub Actions runner.** Registering a GitHub Actions self-hosted runner (to build images and
+   trigger evals from CI) is fully manual today (download `actions/runner`, fetch a registration token by hand,
+   `config.sh`, `run.sh`, set repo secrets). A workspace should be able to stand one up in a couple of clicks.
+
+## Current state — verified (`docs/architecture/self-hosted-runner.md`)
+
+- **Placement** — `runtime` selector → `placement.target`; `RuntimeDispatcher` (`apps/api/src/runtime-dispatcher.ts`)
+  branches on `target.startsWith("self:")` → owner-checked lease queue; else resolves a workspace `RuntimeSpec` →
+  `buildRuntimeBackend` → push via `Scheduler`.
+- **Pull/lease** — `SelfHostedBackend` + `RunnerHub` (`apps/api/src/runner-hub.ts`): lease queue keyed
+  `(owner, runnerId)` = `self:<owner>:<runnerId>` (cross-workspace). `RunnerHub.lease` is single-thread-atomic
+  (concurrent `lease_job` never double-hands a job → the basis for many workers/runners sharing a queue).
+- **Worker** — `assay runner --pair <rnr_…>` (`apps/cli` → `@assay/runner-core` `runLeaseWorkers`): one process,
+  `--max-concurrent N` lease workers over one MCP session. `runnerAuthenticator` maps `rnr_` → `Principal{via:"runner"}`.
+- **Ownership precedent** — personal (`owner=subject`, account page, no role gate) mirrors Connected accounts.
+  Workspace-shared runtimes (`docker|nomad|k8s|topology`) are the `RuntimeRegistry` (immutable, `_shared` fallback).
+
+## Design
+
+### 1. Self-hosted runtime = the pool you target (personal **or** workspace)
+
+Promote the pairing to a **self-hosted runtime**: a named queue that jobs target and runners join. Two ownership
+tiers on the *runtime* (not the worker):
+
+| | **Personal self-hosted runtime** | **Workspace self-hosted runtime** |
+|---|---|---|
+| owner | `principal.subject` (today's model) | the **workspace** (new) |
+| lives on | a member's own machine | company build server(s) / VM(s) |
+| pays | member's own login (own-pays, budget untouched) | workspace secrets / a team CI login (workspace-scoped) |
+| managed by | the member (account page, no role gate) | admin (`settings:write`) — a team asset |
+| isolation | user's own host (hardened-isolation bypassed, tagged) | tenant-isolated (`TrustZonePolicy`) — a shared host must not leak across tenants |
+| target | `runtime = self:<personal-runtime-id>` | `runtime = <workspace-runtime-id>` |
+| survives member leaving | no (personal) | **yes** (workspace-owned) |
+
+The **queue is keyed by the runtime** (pool), not by a single runner. `RunnerHub`'s key generalizes
+`(owner, runnerId)` → `(runtimeRef)` where `runtimeRef` is `self:<owner>:<id>` (personal) or `ws:<workspace>:<id>`
+(workspace). Any runner joined to that runtime leases from the one queue — `lease` atomicity already guarantees
+no double-hand.
+
+### 2. Runner = a worker that **joins** a runtime
+
+`assay runner` gains `--join <runtime-ref>` (a join token scopes it to one runtime). Run it **N times** (N
+processes, or on N machines) to put N runners on a pool → N concurrent jobs. `--max-concurrent` stays as a
+per-runner convenience (workers within one process); effective concurrency = `Σ runners × their workers`.
+Presence/heartbeat is per-runner, so the roster shows *the pool and each runner in it*.
+
+- **Personal** join: pair on the account page (or desktop one-click) → `rnr_` token bound to the personal runtime.
+- **Workspace** join: an admin creates a workspace self-hosted runtime, gets a **join token** (or an install
+  script); each build server runs `assay runner --join ws:<ws>:<id> --token …`. Multiple servers = multiple
+  runners on the pool.
+
+### 3. Placement & dispatch (reuse the seam)
+
+`RuntimeDispatcher` branch widens from `self:<runnerId>` to any self-hosted runtime ref:
+- `self:<subject>:<id>` → personal pool, **owner-checked** (only the owner may target it — unchanged rule).
+- `ws:<workspace>:<id>` → workspace pool, **workspace-scoped** (any member may target it, per role); tenant
+  isolation enforced because the pool is shared. No fallthrough to a cluster (a self-hosted pin is intentional).
+
+Everything downstream (`Scheduler` fairness/budget/capacity, `RunStore`/`ScorecardStore`, provenance tag) is unchanged.
+
+### 4. GitHub Actions runner = a co-resident worker on a self-hosted host (repo-level first)
+
+A machine in a **workspace self-hosted runtime** is exactly where a GitHub Actions self-hosted runner belongs
+(it builds the image and calls Assay; the Assay runner next to it executes the eval). Self-serve flow, reusing
+Connected accounts + CI links:
+
+1. Admin picks a **connected GitHub repo** (existing repo picker) for the workspace runtime.
+2. Assay mints a **registration token** via the connection: `POST /repos/{owner}/{repo}/actions/runners/registration-token`
+   (`ci-link-service` already calls the GitHub API with the connection token — same seam). *Org-level
+   (`/orgs/{org}/…`, needs `admin:org` scope) is a follow-up; **repo-level first** with the current `repo` scope.*
+3. Assay emits a **one-liner / install script** the build server runs: it (a) configures `actions/runner`
+   (`config.sh --url … --token <reg> --labels …`) **and** (b) `assay runner --join ws:<ws>:<id>` — one command
+   stands up *both* workers on that host.
+4. The generated workflow (`renderCiWorkflow`) targets `runs-on: [self-hosted, <label>]` and passes
+   `runtime: ws:<ws>:<id>` to the eval action, so the CI build and the eval both land on that pool.
+
+Registration tokens are **short-lived** and fetched on demand; Assay never stores a long-lived runner token. The
+runner, once configured, holds its own GitHub credential — a company resource, not tied to the admin's identity.
+
+### Reuse vs new
+
+| Piece | Status |
+|---|---|
+| `runAgentJob`/`AgentJob`/`CaseResult`, `Scheduler`, `RunStore`/`ScorecardStore`, MCP lease protocol, provenance/budget | **reused verbatim** |
+| `RunnerHub` lease queue | **generalized** key `(owner,runnerId)` → `(runtimeRef)` (pool) |
+| `RuntimeDispatcher` `self:` branch | **widened** to `self:<subj>:<id>` + `ws:<ws>:<id>` |
+| Personal self-hosted runtime (today's `RunnerStore` pairing) | **reused** (renamed concept: pairing = a personal runtime) |
+| **Workspace self-hosted runtime** (owner=workspace, admin-managed, tenant-isolated) | **new** |
+| `assay runner --join <runtime>` (worker joins a pool; N per pool) | **new** (extends `--pair`) |
+| GitHub Actions registration-token mint + install-script generator | **new** (`ci-link-service` seam) |
+| Workspace "Runners" settings UI (pools + runners + join/install + GitHub register) | **new** (web) |
+
+## Slices (each `pnpm`-green; BFF↔MCP parity where human-facing)
+
+1. **Terminology + pool key.** Land this doc; generalize `RunnerHub` to key by `runtimeRef` (personal pool with
+   1 runner = today's behavior, back-compat); rename in code/docs so *runtime* = pool, *runner* = worker. No user-visible change.
+2. **N runners per personal pool.** `assay runner --join self:<id>` (multiple processes/machines join one personal
+   runtime); roster shows the pool + its runners; presence per-runner. Proves "pull 2 by running 2 runners."
+3. **Workspace self-hosted runtime.** `owner=workspace` runtime + admin CRUD (`POST /workspace/runtimes` gated
+   `settings:write`) + join tokens + tenant isolation on the shared pool; `RuntimeDispatcher` `ws:` branch;
+   provenance/budget = workspace-scoped (not own-pays). Web settings "Runners" section.
+4. **GitHub Actions runner co-registration (repo-level).** Registration-token mint via connection + install-script
+   generator + workflow `runs-on` wiring; one command stands up GitHub runner + Assay runner on a build server.
+5. **Org-level + polish.** `admin:org` scope upgrade path + org runner groups ↔ workspace runtimes; runner labels
+   for placement; live e2e (multi-runner pool + real GitHub self-hosted registration).
+
+## Decisions / non-goals
+
+- **`--max-concurrent` stays**, but "add runners" is the primary scaling story (matches GitHub; spans machines).
+- **Personal owner-only rule is unchanged** — an admin still cannot target a *member's personal* runtime. The new
+  cross-member sharing lives only on **workspace** runtimes (which are workspace assets, tenant-isolated).
+- **Push backends untouched** (`docker|nomad|k8s|topology`); the in-process `local` runtime remains dev-only.
+- **Org-level GitHub registration is a follow-up** (scope cost); repo-level ships first.
+
+## See also
+
+[self-hosted-runner.md](./self-hosted-runner.md) · [runtimes.md](../runtimes.md) ·
+[github-actions-trigger.md](./github-actions-trigger.md) · [connections.md](../connections.md) · [tenancy.md](../tenancy.md) ·
+skills `backends`, `api-layer`.
