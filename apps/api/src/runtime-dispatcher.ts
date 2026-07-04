@@ -1,7 +1,7 @@
 import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@assay/backends";
 import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
 import type { RuntimeRegistry } from "@assay/registry";
-import { type SelfHostedKey, selfHostedBackendName } from "./runner-hub.js";
+import { type SelfHostedKey, poolKeyFor, selfHostedBackendName } from "./runner-hub.js";
 
 export interface RuntimeDispatcherDeps {
   inner: Dispatcher; // 글로벌 Scheduler — 공정성/예산/용량은 그대로 위임
@@ -14,6 +14,8 @@ export interface RuntimeDispatcherDeps {
   // self:<runnerId> 타깃 — 개인 소유 셀프호스티드 러너. 미소유=undefined(404), 소유=그 러너의 capabilities[]
   // (소유 확인 + capability 게이트를 한 번에). service 하니스는 docker capability 가 필요(아래 게이트).
   resolveSelfRunner?: (owner: string, runnerId: string) => Promise<string[] | undefined>;
+  // self:ws(러너 id 없이) 풀 타깃 — 그 owner(=ws:<tenant>)가 러너를 하나라도 가졌는지. 아무 러너나 lease 로 가져간다.
+  poolHasRunners?: (owner: string) => Promise<boolean>;
   // SelfHostedKey → Backend(Slice 2 스텁 → Slice 3 lease 큐). 주입 없으면 self: 는 일반 경로로 폴백(미설정).
   buildSelfHostedBackend?: (key: SelfHostedKey) => Backend;
 }
@@ -27,6 +29,27 @@ export class RuntimeDispatcher implements Dispatcher {
   async dispatch(job: AgentJob): Promise<CaseResult> {
     const tenant = job.tenant ?? "default";
     const target = job.evalCase.placement?.target;
+
+    // self:ws(러너 id 없이) = 워크스페이스 풀 — 그 워크스페이스의 아무 공유 러너나(capability 충족) 가져간다(N 러너 드레인).
+    // 특정 러너 지정(self:ws:<id>) 없이 "팀 러너 중 아무거나". 멤버십=접근권(owner 를 잡 tenant 에서 파생).
+    // ⚠️ 아래 self:<runnerId> 블록보다 먼저 — self:ws 는 그 블록에서 runnerId="ws" 로 오인될 수 있다.
+    if (target === "self:ws" && this.deps.poolHasRunners && this.deps.buildSelfHostedBackend) {
+      const owner = `ws:${tenant}`;
+      if (!(await this.deps.poolHasRunners(owner)))
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { resource: "runner", pool: owner },
+          "이 워크스페이스에 등록된 공유 러너가 없습니다 — 먼저 공유 러너를 등록하세요.",
+        );
+      // service 하니스 docker 요구는 lease 시점 러너별 capability 게이트가 처리(requiredRunnerCapabilities 가 service→docker).
+      const key = poolKeyFor(owner);
+      const name = selfHostedBackendName(key);
+      if (!this.deps.backends.has(name)) this.deps.backends.register(name, this.deps.buildSelfHostedBackend(key));
+      return this.deps.inner.dispatch({
+        ...job,
+        evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } },
+      });
+    }
 
     // self:<runnerId> — 개인 소유 셀프호스티드 러너. 제출자(submittedBy)가 그 러너를 소유하는지 확인 후
     // (tenant,owner,runnerId) 백엔드로 라우팅. 남의 러너/미상 소유자 타깃은 404(존재 누설 없음 + D3 격리).

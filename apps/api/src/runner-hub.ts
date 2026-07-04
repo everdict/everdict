@@ -9,6 +9,14 @@ export interface SelfHostedKey {
   runnerId: string;
 }
 
+// 풀(pool) 센티널 — runnerId 가 이 값이면 "특정 러너가 아니라 소유자(owner)의 풀". self:ws(러너 id 없이)로 제출된
+// 잡은 이 키로 파킹되고, 그 owner 의 아무 러너나(capability 충족) lease 로 가져간다(N 러너가 한 풀을 드레인).
+// 개별 러너 id 로 이 문자열은 쓰이지 않는다(러너 페어링 id 는 UUID) — 충돌 없음.
+export const POOL_RUNNER = "*";
+export function poolKeyFor(owner: string): SelfHostedKey {
+  return { owner, runnerId: POOL_RUNNER };
+}
+
 export function selfHostedBackendName(key: SelfHostedKey): string {
   return `self:${key.owner}:${key.runnerId}`;
 }
@@ -19,7 +27,11 @@ export function selfHostedBackendName(key: SelfHostedKey): string {
 // image-필수 잡을 Docker 없는 러너에 leasing 하면 호스트-네이티브 폴백으로 잘못된 환경에서 돌아버린다 → 명확히 거부.
 // 설계: docs/architecture/self-hosted-runtime-and-runners.md · portable-harness-runtime.md (placement 게이트).
 export function requiredRunnerCapabilities(job: AgentJob): string[] {
-  return requiredCapabilities(job.evalCase).filter((c) => capabilityKind(c) === "functional");
+  const caps = requiredCapabilities(job.evalCase).filter((c) => capabilityKind(c) === "functional");
+  // service(토폴로지) 하니스는 로컬 Docker 토폴로지를 띄우므로 docker 필요(케이스에 image 가 없어도) — 풀 lease 게이트가
+  // 이걸로 non-docker 러너를 건너뛰어 docker 러너에게 라우팅한다. 특정 러너 경로는 디스패처가 먼저 BadRequest 로 거른다.
+  if (job.harnessSpec?.kind === "service" && !caps.includes("docker")) caps.push("docker");
+  return caps;
 }
 
 // 러너가 lease 로 가져가는 잡 한 건(MCP lease_job 응답의 코어).
@@ -89,9 +101,20 @@ export class RunnerHub {
     });
     const entry: PendingEntry = { jobId, job, resolve, reject, timer: this.armTimeout(key, jobId, reject) };
     arr.push(entry);
-    // long-poll 대기 중인 러너가 있으면 깨운다(단일 스레드 → wake 안에서 lease 가 곧장 이 잡을 가져간다).
-    this.waiters.get(selfHostedBackendName(key))?.shift()?.();
+    // long-poll 대기 중인 러너를 깨운다(단일 스레드 → wake 안에서 lease 가 곧장 이 잡을 가져간다).
+    if (key.runnerId === POOL_RUNNER)
+      this.wakeOwner(key.owner); // 풀 잡 → 그 owner 의 폴링 중인 러너들을 깨워 lease 가 풀 큐를 훑게 한다
+    else this.waiters.get(selfHostedBackendName(key))?.shift()?.();
     return promise;
+  }
+
+  // owner 의 풀에 잡이 들어오면, 그 owner 로 long-poll 중인 러너들을 깨운다(각자 lease 가 풀 큐를 확인 → 하나가 가져감).
+  private wakeOwner(owner: string): void {
+    const prefix = `self:${owner}:`;
+    const poolName = selfHostedBackendName(poolKeyFor(owner));
+    for (const [k, arr] of this.waiters) {
+      if (k.startsWith(prefix) && k !== poolName) arr.shift()?.(); // 러너별 대기자 하나씩 깨움(풀 큐 자신은 제외)
+    }
   }
 
   // '유휴 타임아웃' 타이머 — queueTimeoutMs 동안 활동(lease/heartbeat)이 없으면 잡을 거부한다.
@@ -131,13 +154,11 @@ export class RunnerHub {
   lease(key: SelfHostedKey, capabilities?: string[]): LeasedJob | null {
     const arr = this.q(key);
     const now = this.now();
-    for (const e of arr) {
-      if (e.leasedAt !== undefined && now - e.leasedAt > this.leaseTtlMs) e.leasedAt = undefined; // 재큐
-    }
-    // 미-lease 잡을 순회: capability 불일치면 빠르게 실패시키고 다음 잡으로(매 반복이 return 하거나 1건을 제거하므로 종료).
+    this.requeueExpired(arr, now);
+    // 1) 자기 큐(특정 러너에 타깃된 잡) — capability 불일치면 즉시 거부(이 러너를 명시 지정했으므로 잘못된 환경 방지).
     for (;;) {
       const entry = arr.find((e) => e.leasedAt === undefined);
-      if (!entry) return null;
+      if (!entry) break;
       const missing = capabilities
         ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
         : [];
@@ -160,6 +181,43 @@ export class RunnerHub {
       this.rearm(key, entry); // 러너가 가져감 → 유휴 타임아웃 리셋(이제 heartbeat 가 살아있게 유지)
       return { jobId: entry.jobId, job: entry.job };
     }
+    // 2) 소유자 풀 큐(self:ws 로 제출된 잡, 특정 러너 미지정) — capability 불일치면 **거부하지 말고 건너뛴다**
+    //    (다른 capable 러너가 가져갈 수 있게). 아무도 못 가져가면 유휴 타임아웃이 결국 거부한다. 풀 잡은 풀 큐에 남겨
+    //    두고 leasedAt 만 마킹(러너 사망 시 재큐가 풀 안에서 자연히 일어나 다른 러너가 재획득).
+    if (key.runnerId === POOL_RUNNER) return null; // 풀 키 자체로는 self-lease 안 함(무한재귀 방지)
+    const poolKey = poolKeyFor(key.owner);
+    const poolArr = this.q(poolKey);
+    this.requeueExpired(poolArr, now);
+    for (const entry of poolArr) {
+      if (entry.leasedAt !== undefined) continue;
+      const missing = capabilities
+        ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
+        : [];
+      if (missing.length > 0) continue; // 이 러너는 못 돌림 → 건너뛰고 다른 러너에게 남긴다(거부 아님)
+      entry.leasedAt = now;
+      this.rearm(poolKey, entry); // 타이머는 풀 큐 기준(remove 가 풀에서 찾도록)
+      return { jobId: entry.jobId, job: entry.job };
+    }
+    return null;
+  }
+
+  // 만료된 lease(러너 사망/단절) 재큐 — leasedAt 을 지워 다시 lease 가능으로. 자기 큐/풀 큐 공용.
+  private requeueExpired(arr: PendingEntry[], now: number): void {
+    for (const e of arr) {
+      if (e.leasedAt !== undefined && now - e.leasedAt > this.leaseTtlMs) e.leasedAt = undefined;
+    }
+  }
+
+  // jobId 를 자기 큐에서 먼저, 없으면 소유자 풀 큐에서 찾는다(풀 잡은 풀 큐에 살아있고 러너가 자기 키로 complete/heartbeat).
+  private locate(key: SelfHostedKey, jobId: string): { entry: PendingEntry; key: SelfHostedKey } | undefined {
+    const own = this.q(key).find((e) => e.jobId === jobId);
+    if (own) return { entry: own, key };
+    if (key.runnerId !== POOL_RUNNER) {
+      const poolKey = poolKeyFor(key.owner);
+      const pooled = this.q(poolKey).find((e) => e.jobId === jobId);
+      if (pooled) return { entry: pooled, key: poolKey };
+    }
+    return undefined;
   }
 
   // long-poll lease — 즉시 가져갈 잡이 없으면 다음 enqueue(또는 waitMs 타임아웃)까지 대기 후 1건 반환(없으면 null).
@@ -188,30 +246,32 @@ export class RunnerHub {
     });
   }
 
-  // 러너 생존 신호 — lease 를 갱신(leasedAt 갱신)해 장기 실행 잡이 재큐되지 않게 한다. 큐에 없으면 false.
+  // 러너 생존 신호 — lease 를 갱신(leasedAt 갱신)해 장기 실행 잡이 재큐되지 않게 한다. 큐(자기/풀)에 없으면 false.
   heartbeat(key: SelfHostedKey, jobId: string): boolean {
-    const entry = this.q(key).find((e) => e.jobId === jobId);
-    if (!entry) return false;
-    entry.leasedAt = this.now();
-    this.rearm(key, entry); // 생존 신호 → 유휴 타임아웃 리셋(장기 실행 잡이 잘못 거부되지 않게)
+    const loc = this.locate(key, jobId);
+    if (!loc) return false;
+    loc.entry.leasedAt = this.now();
+    this.rearm(loc.key, loc.entry); // 생존 신호 → 유휴 타임아웃 리셋(장기 실행 잡이 잘못 거부되지 않게)
     return true;
   }
 
-  // 러너가 결과를 회신 → 파킹된 promise resolve. 큐에 없으면 false(이미 완료/만료/미상).
+  // 러너가 결과를 회신 → 파킹된 promise resolve. 큐(자기/풀)에 없으면 false(이미 완료/만료/미상).
   complete(key: SelfHostedKey, jobId: string, result: CaseResult): boolean {
-    const entry = this.remove(key, jobId);
-    if (!entry) return false;
-    clearTimeout(entry.timer);
-    entry.resolve(result);
+    const loc = this.locate(key, jobId);
+    if (!loc) return false;
+    this.remove(loc.key, jobId);
+    clearTimeout(loc.entry.timer);
+    loc.entry.resolve(result);
     return true;
   }
 
-  // 러너가 잡 실행 실패를 회신 → promise reject(우리 에러로 remap). 큐에 없으면 false.
+  // 러너가 잡 실행 실패를 회신 → promise reject(우리 에러로 remap). 큐(자기/풀)에 없으면 false.
   fail(key: SelfHostedKey, jobId: string, message: string): boolean {
-    const entry = this.remove(key, jobId);
-    if (!entry) return false;
-    clearTimeout(entry.timer);
-    entry.reject(new UpstreamError("UPSTREAM_ERROR", { runnerId: key.runnerId, jobId }, message));
+    const loc = this.locate(key, jobId);
+    if (!loc) return false;
+    this.remove(loc.key, jobId);
+    clearTimeout(loc.entry.timer);
+    loc.entry.reject(new UpstreamError("UPSTREAM_ERROR", { runnerId: key.runnerId, jobId }, message));
     return true;
   }
 

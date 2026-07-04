@@ -189,4 +189,37 @@ describe("RuntimeDispatcher", () => {
     expect(resolveSelfRunner).toHaveBeenCalledWith("ws:acme", "nope"); // 항상 잡의 tenant 로만 조회 — 남의 ws 못 봄
     expect(seen).toHaveLength(0);
   });
+
+  // self:ws(러너 id 없이) — 워크스페이스 풀. 특정 러너 대신 그 워크스페이스의 아무 러너나(capability 충족) 가져간다.
+  const poolDeps = (hasRunners: boolean) => {
+    const { inner, seen } = innerSpy();
+    const backends = new BackendRegistry();
+    const stub = { id: "stub", capacity: async () => ({ total: 1, used: 0 }), dispatch: async () => result };
+    const poolHasRunners = vi.fn(async () => hasRunners);
+    const buildSelfHostedBackend = vi.fn(() => stub);
+    const d = new RuntimeDispatcher({
+      inner,
+      backends,
+      runtimes: new InMemoryRuntimeRegistry(),
+      secretsFor: async () => ({}),
+      resolveSelfRunner: async () => undefined,
+      poolHasRunners,
+      buildSelfHostedBackend,
+    });
+    return { d, seen, backends, poolHasRunners };
+  };
+
+  it("self:ws(id 없음) → 워크스페이스 풀 백엔드 self:ws:acme:* 로 라우팅(아무 러너나 드레인)", async () => {
+    const { d, seen, backends, poolHasRunners } = poolDeps(true);
+    await d.dispatch(selfJob("self:ws"));
+    expect(poolHasRunners).toHaveBeenCalledWith("ws:acme");
+    expect(backends.has("self:ws:acme:*")).toBe(true);
+    expect(seen[0]?.evalCase.placement?.target).toBe("self:ws:acme:*");
+  });
+
+  it("self:ws 인데 워크스페이스에 러너가 하나도 없으면 NOT_FOUND", async () => {
+    const { d, seen } = poolDeps(false);
+    await expect(d.dispatch(selfJob("self:ws"))).rejects.toMatchObject({ code: "NOT_FOUND", status: 404 });
+    expect(seen).toHaveLength(0);
+  });
 });

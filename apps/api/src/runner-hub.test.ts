@@ -1,6 +1,6 @@
 import type { AgentJob, CaseResult } from "@assay/core";
 import { describe, expect, it, vi } from "vitest";
-import { RunnerHub, type SelfHostedKey } from "./runner-hub.js";
+import { RunnerHub, type SelfHostedKey, poolKeyFor } from "./runner-hub.js";
 
 const result: CaseResult = {
   caseId: "c1",
@@ -212,5 +212,62 @@ describe("RunnerHub", () => {
     t = 150; // 첫 lease 기준이면 만료지만 heartbeat(80) 기준이면 아직 → 재큐 안 됨
     expect(hub.lease(keyA)).toBeNull();
     expect(hub.heartbeat(keyA, "nope")).toBe(false); // 미상 jobId
+  });
+});
+
+// 워크스페이스 풀(self:ws) — 같은 owner 의 여러 러너가 한 풀 큐를 드레인. runnerId=POOL_RUNNER("*").
+describe("RunnerHub — 워크스페이스 풀(N 러너 드레인)", () => {
+  const OWNER = "ws:acme";
+  const r1: SelfHostedKey = { owner: OWNER, runnerId: "r1" };
+  const r2: SelfHostedKey = { owner: OWNER, runnerId: "r2" };
+
+  it("풀에 넣은 잡을 그 owner 의 여러 러너가 나눠 가져가고, 자기 키로 complete 한다", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    const d1 = hub.enqueue(poolKeyFor(OWNER), job("p1")); // j-0
+    const d2 = hub.enqueue(poolKeyFor(OWNER), job("p2")); // j-1
+    expect(hub.lease(r1)?.job.evalCase.id).toBe("p1"); // r1 풀에서 하나
+    expect(hub.lease(r2)?.job.evalCase.id).toBe("p2"); // r2 풀에서 다음
+    expect(hub.lease(r1)).toBeNull(); // 풀 소진
+    // 풀 잡은 풀 큐에 남아있지만 러너는 자기 키로 complete → locate 가 풀 큐에서 찾는다.
+    expect(hub.complete(r1, "j-0", result)).toBe(true);
+    await expect(d1).resolves.toEqual(result);
+    expect(hub.complete(r2, "j-1", result)).toBe(true);
+    await expect(d2).resolves.toEqual(result);
+  });
+
+  it("풀: capability 불일치는 거부가 아니라 건너뛴다 — docker 없는 러너는 지나치고 docker 러너가 가져간다", async () => {
+    const hub = new RunnerHub({ newJobId: () => "j-img" });
+    const d = hub.enqueue(poolKeyFor(OWNER), imageJob("needs-docker")); // docker 요구
+    expect(hub.lease({ owner: OWNER, runnerId: "no-docker" }, ["git"])).toBeNull(); // 건너뜀(거부 아님)
+    // 잡이 아직 살아있음 → docker 러너가 가져간다.
+    expect(hub.lease({ owner: OWNER, runnerId: "has-docker" }, ["git", "docker"])?.job.evalCase.id).toBe(
+      "needs-docker",
+    );
+    expect(hub.complete({ owner: OWNER, runnerId: "has-docker" }, "j-img", result)).toBe(true);
+    await expect(d).resolves.toEqual(result);
+  });
+
+  it("풀: 자기 큐 잡을 풀 잡보다 먼저 가져간다", () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `j-${n++}` });
+    hub.enqueue(poolKeyFor(OWNER), job("pool-job")); // j-0
+    hub.enqueue(r1, job("mine")); // j-1
+    expect(hub.lease(r1)?.job.evalCase.id).toBe("mine"); // 자기 큐 먼저
+    expect(hub.lease(r1)?.job.evalCase.id).toBe("pool-job"); // 그다음 풀
+  });
+
+  it("풀: 다른 owner 의 풀 잡은 안 보인다(격리)", () => {
+    const hub = new RunnerHub({ newJobId: () => "j-x" });
+    hub.enqueue(poolKeyFor("ws:beta"), job("beta-pool"));
+    expect(hub.lease(r1)).toBeNull(); // acme 러너는 beta 풀 못 봄
+  });
+
+  it("풀: enqueue 가 long-poll 중인 그 owner 의 러너를 깨운다", async () => {
+    const hub = new RunnerHub({ newJobId: () => "j-w" });
+    const waiting = hub.leaseWait(r1, 1000); // r1 이 자기 키로 대기
+    hub.enqueue(poolKeyFor(OWNER), job("pooled")); // 풀 enqueue → wakeOwner 가 r1 깨움
+    expect((await waiting)?.job.evalCase.id).toBe("pooled");
+    hub.complete(r1, "j-w", result);
   });
 });

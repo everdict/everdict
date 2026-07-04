@@ -235,6 +235,8 @@ async function main(): Promise<void> {
       buildBackend: runtimeBuildBackend,
       // self:<runnerId> — 개인 소유 러너. 소유 확인(미소유=undefined) + 그 러너의 capabilities 반환(service 게이트용).
       resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
+      // self:ws — 워크스페이스 풀. 그 owner(=ws:<tenant>)가 러너를 하나라도 가졌는지(아무 러너나 lease).
+      poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
       buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
     }),
   );
