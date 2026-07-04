@@ -31,4 +31,11 @@ describe("detectCapabilities — 어휘 프로브 실측 → 지원 capability �
     // git 이 codex-login 보다 어휘에서 앞 → 입력 순서와 무관하게 어휘 순으로.
     expect(await detectCapabilities(probes(["codex-login", "git"]))).toEqual(["git", "codex-login"]);
   });
+
+  it("프로브 없는 capability(예: topology)는 광고하지 않는다 — probes 는 Partial(로컬 미프로브 허용)", async () => {
+    // 어휘엔 topology 가 있지만 로컬 프로브가 없다(오케스트레이터 파생) → 부분 probes 로도 안전, topology 미노출.
+    const caps = await detectCapabilities({ git: async () => true, docker: async () => true });
+    expect(caps).toEqual(["git", "docker"]);
+    expect(caps).not.toContain("topology");
+  });
 });

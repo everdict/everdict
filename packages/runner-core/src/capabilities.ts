@@ -57,9 +57,13 @@ function playwrightCacheDir(): string {
 }
 
 // 각 capability 의 실측 프로브 — 이 머신이 실제로 그 기능을 지원하는지. 전부 주입 가능(테스트/커스텀).
-export type CapabilityProbes = Record<CapabilityName, () => Promise<boolean>>;
+// Partial: 모든 capability 가 머신-로컬로 프로브되는 건 아니다(예: `topology` 는 오케스트레이터/런타임에서 파생되는
+// 능력이지 로컬 바이너리 유무가 아님 — 셀프호스티드 러너의 topology 배치 게이트는 `docker` 로 판정). 미정의 프로브는
+// detectCapabilities 에서 false 로 폴백해 광고하지 않는다.
+export type CapabilityProbes = Partial<Record<CapabilityName, () => Promise<boolean>>>;
 
 // 기본 프로브 — 이 머신을 실제로 훑는다. 유저는 아무것도 안 고르고, 러너가 켜질 때 자가-판정한다.
+// (topology 는 로컬 프로브 없음 — 위 주석 참고. git/docker/browser/... 만 실측.)
 export const defaultProbes: CapabilityProbes = {
   git: () => cmdOk("git", ["--version"]),
   docker: () => probeDocker(),
