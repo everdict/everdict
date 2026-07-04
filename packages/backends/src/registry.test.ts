@@ -1,7 +1,14 @@
 import type { AgentJob, CaseResult, RuntimeSpec } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "./backend.js";
-import { BackendRegistry, Router, buildRegistry, k8sRuntimeOptions, nomadRuntimeOptions } from "./registry.js";
+import {
+  BackendRegistry,
+  Router,
+  buildRegistry,
+  buildRuntimeBackend,
+  k8sRuntimeOptions,
+  nomadRuntimeOptions,
+} from "./registry.js";
 
 class FakeBackend implements Backend {
   constructor(readonly id: string) {}
@@ -65,6 +72,22 @@ describe("buildRegistry", () => {
     });
     expect(registry.names().sort()).toEqual(["dev", "nomad-a"]);
     expect(defaultTarget).toBe("nomad-a");
+  });
+});
+
+describe("buildRuntimeBackend (kind 소진 후 런타임 방어)", () => {
+  it("local/nomad/k8s 는 백엔드를 빌드한다", () => {
+    expect(buildRuntimeBackend({ kind: "local", id: "a", version: "1.0.0", tags: [] })).toBeDefined();
+    expect(
+      buildRuntimeBackend({ kind: "nomad", id: "a", version: "1.0.0", tags: [], addr: "http://x:4646", image: "i" }),
+    ).toBeDefined();
+    expect(buildRuntimeBackend({ kind: "k8s", id: "a", version: "1.0.0", tags: [], image: "i" })).toBeDefined();
+  });
+
+  it("union 밖 kind(경계 미검증 값)는 BAD_REQUEST 로 거절 — dead branch 아님", () => {
+    // docker/topology 제거 후 union 은 local|nomad|k8s. 경계에서 미검증 kind 가 새면 명시적 거절(never 방어).
+    const bogus = { kind: "topology", id: "a", version: "1.0.0", tags: [] } as unknown as RuntimeSpec;
+    expect(() => buildRuntimeBackend(bogus)).toThrow(/BAD_REQUEST|topology/);
   });
 });
 

@@ -143,11 +143,18 @@ export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Recor
   if (spec.kind === "local") return new LocalBackend();
   if (spec.kind === "k8s") return new K8sBackend(k8sRuntimeOptions(spec, opts.secretEnv));
   if (spec.kind === "nomad") return new NomadBackend(nomadRuntimeOptions(spec, opts.secretEnv));
-  // topology 는 @assay/topology 의 ServiceTopologyBackend 가 필요(순환 의존 불가) → apps/api 의 buildBackend 가 처리한다.
+  // union(local|nomad|k8s) 소진 — 컴파일타임 도달 불가. topology-capable(nomad/k8s + traceSource)은
+  // @assay/topology ServiceTopologyBackend 가 필요(순환 의존 불가) → apps/api 의 buildBackend 가 처리한다.
+  // 런타임 방어: 경계에서 미검증 kind 가 들어오면 명시적으로 거절(never 캐스트로만 kind 문자열 확보).
+  return assertNeverRuntimeKind(spec);
+}
+
+function assertNeverRuntimeKind(spec: never): never {
+  const kind = (spec as { kind?: string }).kind;
   throw new BadRequestError(
     "BAD_REQUEST",
-    { kind: spec.kind },
-    `buildRuntimeBackend 는 '${spec.kind}' 를 직접 빌드하지 않습니다(topology 는 apps/api buildBackend 경유).`,
+    { kind },
+    `buildRuntimeBackend 는 '${kind}' 를 직접 빌드하지 않습니다(topology-capable 런타임은 apps/api buildBackend 경유).`,
   );
 }
 
