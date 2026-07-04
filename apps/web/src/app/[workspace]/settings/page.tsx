@@ -6,6 +6,7 @@ import {
   type WorkspaceIntegration,
 } from '@/entities/connection'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
+import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
 import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
@@ -42,6 +43,7 @@ export default async function SettingsPage({
   let integrations: WorkspaceIntegration[] = []
   let integrationsCallbackUrl: string | undefined
   let ciLinks: CiLink[] = []
+  let workspaceRunners: RunnerMeta[] = []
   let members: Member[] = []
   let invites: Invite[] = []
   let error: string | undefined
@@ -57,6 +59,11 @@ export default async function SettingsPage({
       // CI repo link(레포↔하니스 슬롯 = OIDC trust) — 링크의 존재가 그 레포의 keyless CI 신뢰. 해제는 admin.
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
     }
+    // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI. 등록/조회/해제 모두 admin(settings:write).
+    if (canWriteSettings)
+      workspaceRunners = runnersResponseSchema.parse(
+        await controlPlane.listWorkspaceOwnedRunners(ctx)
+      ).runners
     // 워크스페이스 설정엔 공유(workspace) 시크릿만 — GET /secrets 가 섞어주는 내 개인(user) 시크릿은 계정 화면에서 관리.
     if (canReadSecrets)
       secrets = secretsSchema
@@ -94,6 +101,7 @@ export default async function SettingsPage({
           integrations={integrations}
           {...(integrationsCallbackUrl !== undefined ? { integrationsCallbackUrl } : {})}
           ciLinks={ciLinks}
+          workspaceRunners={workspaceRunners}
           members={members}
           invites={invites}
           canReadSettings={canReadSettings}

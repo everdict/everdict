@@ -296,6 +296,13 @@ export const controlPlane = {
     call<T>(auth, '/runners', { method: 'POST', body: JSON.stringify(body) }),
   revokeRunner: (auth: AuthContext, id: string) =>
     callVoid(auth, `/runners/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 워크스페이스-공유 러너(팀 자원, owner=ws:<workspace>). admin 이 등록(settings:write) → 멤버 누구나 self:ws:<id> 로 타깃.
+  // owned=팀 소유 러너만(로스터[GET /workspace/runners]는 개인 러너 포함), pair 는 평문 토큰 1회, revoke 204.
+  listWorkspaceOwnedRunners: <T>(auth: AuthContext) => call<T>(auth, '/workspace/runners/owned'),
+  pairWorkspaceRunner: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/runners', { method: 'POST', body: JSON.stringify(body) }),
+  revokeWorkspaceRunner: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/workspace/runners/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // API 키(에이전트/MCP 용 ak_…). 발급 시 평문은 1회만 반환, 목록은 prefix 만(평문/해시 미반환), 취소(204).
   listKeys: <T>(auth: AuthContext) => call<T>(auth, '/keys'),
   createKey: <T>(auth: AuthContext, body: unknown) =>
