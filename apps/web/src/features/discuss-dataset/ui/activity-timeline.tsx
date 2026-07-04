@@ -132,8 +132,9 @@ function TimelineRail({ item, last }: { item: ActivityItem; last: boolean }) {
         )}
       </span>
     )
+  // 댓글은 카드(상단 패딩 py-2.5)라 아바타를 그 패딩만큼 내려 작성자 이름 줄과 세로 중앙을 맞춘다.
   return (
-    <div className="flex flex-col items-center">
+    <div className={cn('flex flex-col items-center', item.kind === 'comment' && 'pt-2')}>
       {node}
       {!last && <span className="mt-1 w-px flex-1 bg-border" />}
     </div>
@@ -158,7 +159,7 @@ function EventItem({
 }) {
   if (item.kind === 'created') {
     return (
-      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 pt-1 text-[12.5px] text-muted-foreground">
+      <div className="flex min-h-5 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12.5px] text-muted-foreground">
         <span className="font-[560] text-foreground">{item.actor.name}</span>
         님이 이 데이터셋을 만들었어요
         <When at={item.at} />
@@ -167,7 +168,7 @@ function EventItem({
   }
   const tone = STATUS_TONE[item.status] ?? 'text-muted-foreground'
   return (
-    <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5 pt-1 text-[12.5px] text-muted-foreground">
+    <div className="flex min-h-5 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12.5px] text-muted-foreground">
       <span className="font-[560] text-foreground">{item.actor.name}</span>
       님이
       <Link
