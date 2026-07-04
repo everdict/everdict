@@ -381,7 +381,7 @@ export function BuildFromSourceWizard({
   const sampleOf = (f: string): string => (f && rows[0] ? cellText(rows[0][f]) : '')
 
   return (
-    <div className="max-w-2xl space-y-6">
+    <div className="space-y-6">
       {/* 1. 소스 */}
       <section className="space-y-3">
         <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">1 · 소스</div>
