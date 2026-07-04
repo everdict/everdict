@@ -182,6 +182,7 @@ export default async function DatasetDetailPage({
       at: sc.createdAt,
       actor: resolveActor(sc.createdBy),
       scorecardId: sc.id,
+      harnessId: sc.harness.id,
       harness: `${sc.harness.id}@${sc.harness.version}`,
       status: sc.status,
       passRate: m?.passRate ?? null,

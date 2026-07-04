@@ -27,7 +27,8 @@ export type ActivityItem =
       at: string
       actor: Actor
       scorecardId: string
-      harness: string
+      harnessId: string // 하니스 상세 링크용(버전 제외 id)
+      harness: string // 표시용 id@version
       status: string
       passRate: number | null
     }
@@ -171,13 +172,20 @@ function EventItem({
     <div className="flex min-h-5 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12.5px] text-muted-foreground">
       <span className="font-[560] text-foreground">{item.actor.name}</span>
       님이
+      {/* 하니스 이름 → 하니스 상세, '스코어카드' → 이 실행(스코어카드) 상세. 각 텍스트에 해당 링크. */}
       <Link
-        href={`/${workspace}/scorecards/${encodeURIComponent(item.scorecardId)}`}
-        className="inline-flex items-center gap-1 underline-offset-2 hover:text-foreground hover:underline"
+        href={`/${workspace}/harnesses/${encodeURIComponent(item.harnessId)}`}
+        className="underline-offset-2 hover:text-foreground hover:underline"
       >
         <code className="font-mono text-foreground">{item.harness}</code>
       </Link>
-      스코어카드를 실행 ·
+      <Link
+        href={`/${workspace}/scorecards/${encodeURIComponent(item.scorecardId)}`}
+        className="font-[510] text-foreground underline-offset-2 hover:text-primary hover:underline"
+      >
+        스코어카드
+      </Link>
+      를 실행 ·
       <span className={cn('font-[560]', tone)}>{STATUS_LABEL[item.status] ?? item.status}</span>
       {item.passRate != null && (
         <span className="tabular-nums text-faint">통과율 {Math.round(item.passRate * 100)}%</span>
