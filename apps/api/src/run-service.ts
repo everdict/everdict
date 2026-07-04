@@ -1,4 +1,4 @@
-import { type BudgetTracker, type Dispatcher, costOf } from "@assay/backends";
+import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@assay/backends";
 import {
   type AgentJob,
   AppError,
@@ -134,8 +134,9 @@ export class RunService {
       // 순수 실행은 scorecard 와 공유하는 executeCase(토큰 resolve+attach → dispatch)가 담당. "뒤"(settle/offload/알림)는
       // 여기(오케)의 몫이다. admit 은 submit 에서 이미 동기로 카운트했으므로 중복하지 않는다.
       const result = await executeCase(this.deps, input.submittedBy ?? input.tenant, jobToRun);
-      // 셀프호스티드 실행은 유저 자기 로그인이 결제 주체 — 워크스페이스 usd/tokens 버짓 미차감(그 외는 비용만큼 settle).
-      if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(input.tenant, costOf(result));
+      // 비용 귀속: 관리형=잡 테넌트 · 워크스페이스-공유 러너=그 워크스페이스(팀 자원) · 개인 러너=own-pays(미차감).
+      const bill = billingTenant(result, input.tenant);
+      if (bill) this.deps.budget?.settle(bill, costOf(result));
       // os-use 스크린샷(동봉 base64)을 object storage 로 오프로드 → 레코드엔 URL 만(슬림). 실패해도 run 은 성공(폴백: base64 유지).
       if (this.deps.artifacts && result.snapshot) {
         try {

@@ -34,6 +34,7 @@ export {
   inMemoryBudget,
   sumCost,
   costOf,
+  billingTenant,
 } from "./budget.js";
 export {
   NomadBackend,

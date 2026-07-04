@@ -1,4 +1,4 @@
-import { type BudgetTracker, type Dispatcher, costOf } from "@assay/backends";
+import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@assay/backends";
 import {
   type AgentJob,
   AppError,
@@ -559,8 +559,9 @@ export class ScorecardService {
             ? { ...enriched, harnessSpec: resolveHarnessSecrets(enriched.harnessSpec, secretMap) }
             : enriched;
         const result = await executeCase(this.deps, owner, jobToRun);
-        // 셀프호스티드 실행은 유저 자기 로그인이 결제 주체 — 워크스페이스 버짓 미차감(그 외는 비용만큼 settle). 단일 run 과 동일.
-        if (result.provenance?.ranOn !== "self-hosted") this.deps.budget?.settle(tenant, costOf(result));
+        // 비용 귀속: 관리형=배치 테넌트 · 워크스페이스-공유 러너=그 워크스페이스(팀 자원) · 개인 러너=own-pays. 단일 run 과 동일.
+        const bill = billingTenant(result, tenant);
+        if (bill) this.deps.budget?.settle(bill, costOf(result));
         if (runStore && childId) await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
         return result;
       } catch (err) {

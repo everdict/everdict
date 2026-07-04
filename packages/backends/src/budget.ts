@@ -30,6 +30,20 @@ export function costOf(result: CaseResult): { usd: number; tokens: number } {
   return sumCost(result.trace);
 }
 
+// 이 run 의 비용을 누구 예산에 달 것인가(settle 대상 테넌트) — provenance 로 결정.
+//  - 관리형 백엔드(self-hosted 아님): 잡의 원래 테넌트가 결제(originalTenant).
+//  - 워크스페이스-공유 셀프호스티드 러너(provenance.by = "ws:<workspace>"): 그 워크스페이스가 결제(팀 자원).
+//    by 는 SelfHostedBackend 가 러너 owner 로 스탬프하고, 워크스페이스-공유 러너의 owner 는 "ws:<workspace>".
+//  - 개인 셀프호스티드 러너(by = subject): 유저 자기 로그인이 결제 주체 → 워크스페이스 버짓 미차감(undefined).
+// undefined = settle 하지 않음(own-pays). 설계: docs/architecture/self-hosted-runtime-and-runners.md.
+export function billingTenant(result: CaseResult, originalTenant: string): string | undefined {
+  const prov = result.provenance;
+  if (!prov || prov.ranOn !== "self-hosted") return originalTenant;
+  const by = prov.by;
+  if (by !== undefined && by.startsWith("ws:")) return by.slice("ws:".length);
+  return undefined;
+}
+
 // 테넌트 예산 추적기.
 //  - admit: 실행을 받기 전(큐잉 전) 검사. 이미 commit 된 usd/tokens 가 상한이거나, runs(예약 포함)가
 //    상한이면 PaymentRequiredError(402). 통과하면 run 1건을 즉시 예약(버스트가 상한을 못 넘게).

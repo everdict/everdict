@@ -1,6 +1,7 @@
+import type { CaseResult } from "@assay/core";
 import { PaymentRequiredError } from "@assay/core";
 import { describe, expect, it } from "vitest";
-import { inMemoryBudget, sumCost } from "./budget.js";
+import { billingTenant, inMemoryBudget, sumCost } from "./budget.js";
 
 describe("sumCost", () => {
   it("트레이스의 llm_call cost(usd/토큰)를 합산한다", () => {
@@ -43,5 +44,36 @@ describe("inMemoryBudget", () => {
     b.admit("t");
     b.admit("t");
     expect(b.usage("t").runs).toBe(2);
+  });
+});
+
+describe("billingTenant — 비용을 누구 예산에 다나(provenance 기반)", () => {
+  const result = (provenance?: CaseResult["provenance"]): CaseResult => ({
+    caseId: "c",
+    harness: "h@0",
+    trace: [],
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores: [],
+    ...(provenance ? { provenance } : {}),
+  });
+
+  it("관리형(provenance 없음): 잡의 원래 테넌트가 결제", () => {
+    expect(billingTenant(result(), "acme")).toBe("acme");
+  });
+
+  it("관리형(ranOn≠self-hosted): 원래 테넌트가 결제", () => {
+    expect(billingTenant(result({ ranOn: "nomad" }), "acme")).toBe("acme");
+  });
+
+  it("워크스페이스-공유 러너(by=ws:<ws>): 그 워크스페이스가 결제(팀 자원)", () => {
+    expect(billingTenant(result({ ranOn: "self-hosted", runner: "r1", by: "ws:acme" }), "acme")).toBe("acme");
+    // 다른 워크스페이스로 by 가 왔다면 by 를 신뢰(귀속 = 러너 소유 워크스페이스)
+    expect(billingTenant(result({ ranOn: "self-hosted", by: "ws:beta" }), "acme")).toBe("beta");
+  });
+
+  it("개인 셀프호스티드 러너(by=subject): own-pays → undefined(미차감)", () => {
+    expect(billingTenant(result({ ranOn: "self-hosted", runner: "r1", by: "u-alice" }), "acme")).toBeUndefined();
+    // by 없음(구형)도 개인으로 간주 — own-pays
+    expect(billingTenant(result({ ranOn: "self-hosted" }), "acme")).toBeUndefined();
   });
 });
