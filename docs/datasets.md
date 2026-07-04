@@ -56,11 +56,21 @@ add, all member+ (`datasets:write`), all immutable-on-register:
 - **Source wizard (primary)** — `POST /benchmarks/preview` fetches a few raw rows (no mapping) and returns the
   detected **fields** + samples; the web `/dashboard/datasets/import` "소스에서 만들기" wizard shows those rows as a
   **preview table you map by clicking a column header** (cycles task→id→answer→none; mapped columns are role-color
-  coded and each mapping control shows a **sample value**, so you map by seeing the data, not guessing field names)
-  — auto-guessed to start (id/task/answer) **plus an env-kind selector** (browser/prompt/repo/
-  os-use → `startUrlField`/`promptEnv`/`gitField`+`refField`/`osUseEnv`) and optional per-case `image`/`placement`,
+  coded and each mapping control shows a **sample value**, so you map by seeing the data, not guessing field names),
   then `POST /benchmarks/import` with an **inline `spec`** registers the dataset in **one action** — no separate
   recipe step, no hand-written JSON. (The recipe form accepts the same full mapping as raw JSON.)
+  - **Inference-assertion UX (not a form of questions).** The consumer path exposes only what a benchmark *user*
+    can answer: **source → preview → three roles (task/id/answer)**. Everything an *author* defines is either
+    inferred or hidden: the env kind is **auto-inferred** (git field → repo · start-url → browser · answer →
+    prompt-QA · else browser) and shown back as a one-sentence **"이렇게 실행돼요"** assertion (e.g. "에이전트가
+    각 행의 `question`을 받아 답을 만들어요. 만든 답을 `answer`와 대조해 채점해요") with a warn tone when the env is
+    incomplete (repo without git, os-use without image). `category` is **derived from env** (no selector). The
+    **version is system-managed** — hidden on first import (auto `1.0.0`), a patch/minor/major picker only on
+    re-import of an existing id. There is **no import-time case cap** — import is always the full dataset (data is
+    cheap; cost is at run time, controlled by the scorecard `cases` subset). The author knobs — **env-kind
+    override, `startUrlField`/`gitField`+`refField`, `taskTemplate`, per-case `image`/`placement`** — live behind a
+    collapsed **"고급 · 다르게 실행해야 하나요?"** disclosure, each with an InfoTip. The full expressive power
+    (env-kind isomorphism above) is unchanged — it's just no longer a mandatory quiz for the common QA case.
 - **Catalog** — `GET /benchmarks` lists the first-party code catalog (webvoyager/gaia/swe-bench/mind2web/gsm8k/
   osworld); `POST /benchmarks/import {benchmark}` pulls it.
 - **Recipe** — `POST /benchmark-recipes` saves a reusable `BenchmarkAdapterSpec` (`BenchmarkRegistry`, owner +

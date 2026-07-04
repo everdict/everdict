@@ -1,9 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { Eye, Heart, Loader2, Lock, Search, Sparkles } from 'lucide-react'
+import { ChevronRight, Eye, Heart, Loader2, Lock, Search, Settings2, Sparkles } from 'lucide-react'
 
 import { versionsForId } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
@@ -41,6 +41,91 @@ const ROLE_META: Record<string, { label: string; color: string }> = {
   url: { label: 'url', color: '#8b93e8' },
 }
 const cellText = (v: unknown) => (v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v))
+
+// 실행 환경 → 데이터셋 category(표시·필터용 메타). 유저가 고르지 않고 env 에서 파생한다.
+const ENV_TO_CATEGORY: Record<EnvKind, Category> = {
+  prompt: 'qa',
+  browser: 'browser',
+  repo: 'coding',
+  'os-use': 'tool',
+}
+
+// 매핑 상태 → "이 벤치마크가 실제로 어떻게 실행/채점되는지"를 한 문장으로 서술한다(선택이 아니라 결과 확인).
+// tone=warn 이면 env 설정이 불완전(고급 설정에서 보완 필요).
+function describeRun(a: {
+  envKind: EnvKind
+  taskField: string
+  answerField: string
+  startUrlField: string
+  gitField: string
+  hasImage: boolean
+}): { title: string; body: ReactNode; tone: 'ok' | 'warn' } {
+  const code = (f: string) => (
+    <code className="rounded bg-secondary/70 px-1 font-mono text-[11px] text-foreground">{f}</code>
+  )
+  const task = a.taskField ? (
+    code(a.taskField)
+  ) : (
+    <span className="text-[var(--color-warning)]">(task 미지정)</span>
+  )
+  const grade = a.answerField ? (
+    <> 만든 답을 {code(a.answerField)} 값과 대조해 채점해요.</>
+  ) : (
+    <> 정답 대조 채점은 없어요 — 나중에 judge나 별도 grader로 채점하면 돼요.</>
+  )
+  switch (a.envKind) {
+    case 'prompt':
+      return {
+        title: 'QA · 환경 없음',
+        body: (
+          <>
+            에이전트가 각 행의 {task}를 받아 답을 만들어요.{grade}
+          </>
+        ),
+        tone: 'ok',
+      }
+    case 'browser':
+      return {
+        title: '브라우저',
+        body: (
+          <>
+            에이전트가{' '}
+            {a.startUrlField ? <>{code(a.startUrlField)}에서 시작해 </> : '브라우저에서 '}
+            {task}를 수행해요.{a.answerField ? grade : null}
+          </>
+        ),
+        tone: 'ok',
+      }
+    case 'repo':
+      return a.gitField
+        ? {
+            title: '코드 저장소',
+            body: (
+              <>
+                {code(a.gitField)}를 클론한 뒤 에이전트가 {task}를 수행해요.
+              </>
+            ),
+            tone: 'ok',
+          }
+        : {
+            title: '코드 저장소',
+            body: <>repo 환경인데 클론할 git 필드가 없어요 — 고급 설정에서 지정하세요.</>,
+            tone: 'warn',
+          }
+    case 'os-use':
+      return a.hasImage
+        ? {
+            title: '데스크탑',
+            body: <>데스크탑 이미지 안에서 에이전트가 {task}를 수행해요.</>,
+            tone: 'ok',
+          }
+        : {
+            title: '데스크탑',
+            body: <>데스크탑 환경인데 케이스 이미지가 없어요 — 고급 설정에서 지정하세요.</>,
+            tone: 'warn',
+          }
+  }
+}
 
 // 감지된 필드명에서 매핑을 추측 — 사용자가 스키마를 몰라도 합리적 기본값을 채워준다.
 function guess(fields: string[], patterns: RegExp[]): string {
@@ -95,8 +180,7 @@ export function BuildFromSourceWizard({
 
   const [datasetId, setDatasetId] = useState('')
   const [version, setVersion] = useState('1.0.0')
-  const [category, setCategory] = useState<Category>('qa')
-  const [limit, setLimit] = useState('')
+  const [advanced, setAdvanced] = useState(false) // 고급(작성자) 설정 — 실행 환경/템플릿/이미지/placement
 
   const [fields, setFields] = useState<string[]>([])
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
@@ -211,6 +295,10 @@ export function BuildFromSourceWizard({
     setEnvKind(git ? 'repo' : url ? 'browser' : ans ? 'prompt' : 'browser')
   }
 
+  // 시스템 관리 버전 — 첫 인입이면 1.0.0(필드 숨김), 같은 id 재인입이면 VersionField 가 다음 버전을 계산.
+  const existingVersions = versionsForId(existingDatasets, datasetId)
+  const effectiveVersion = existingVersions.length > 0 ? version : '1.0.0'
+
   async function onCreate() {
     if (!idField || !taskField) return
     setCreateBusy(true)
@@ -218,8 +306,8 @@ export function BuildFromSourceWizard({
     const id = datasetId.trim() || (sourceKind === 'huggingface' ? slug(hfDataset) : 'benchmark')
     const spec: Record<string, unknown> = {
       id,
-      version,
-      category,
+      version: effectiveVersion,
+      category: ENV_TO_CATEGORY[envKind], // env 에서 파생(유저가 고르지 않음)
       source: buildSource(),
       mapping: {
         idField,
@@ -235,10 +323,8 @@ export function BuildFromSourceWizard({
         ...(placement.trim() ? { placement: placement.trim() } : {}),
       },
     }
-    const body: Record<string, unknown> = { spec, id, version }
+    const body: Record<string, unknown> = { spec, id, version: effectiveVersion }
     if (sourceKind === 'jsonl') body.text = jsonlText
-    if (sourceKind === 'huggingface' && limit && Number.isFinite(Number(limit)))
-      body.limit = Number(limit)
     const r = await importBenchmarkAction(body)
     setCreateBusy(false)
     setCreateResult(r)
@@ -251,6 +337,14 @@ export function BuildFromSourceWizard({
   const previewed = fields.length > 0
   const canPreview =
     sourceKind === 'huggingface' ? hfDataset.length > 0 : jsonlText.trim().length > 0
+  const run = describeRun({
+    envKind,
+    taskField,
+    answerField,
+    startUrlField,
+    gitField,
+    hasImage: image.trim().length > 0,
+  })
 
   // 현재 매핑 상태에서 필드의 역할을 역산(표 머리글/셀 강조에 사용).
   const roleOf = (f: string): string =>
@@ -548,7 +642,7 @@ export function BuildFromSourceWizard({
         )}
       </section>
 
-      {/* 2. 매핑 (미리보기 후) */}
+      {/* 2. 매핑 (미리보기 후) — 역할 3개만. 나머지(실행 환경/템플릿/이미지)는 자동 추론 + 고급 설정. */}
       {previewed && (
         <section className="space-y-3">
           <div className="flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -557,176 +651,198 @@ export function BuildFromSourceWizard({
               자동으로 채웠어요 — 필요하면 바꿔요
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-3 gap-3">
             <MapField
-              label="task 필드 (필수) — 에이전트가 받을 지시"
+              label="task (필수)"
+              hint="에이전트가 받을 지시"
               value={taskField}
               onChange={setTaskField}
               fields={fields}
               sample={sampleOf(taskField)}
             />
             <MapField
-              label="id 필드 (필수) — 케이스 식별자"
+              label="id (필수)"
+              hint="케이스 식별자"
               value={idField}
               onChange={setIdField}
               fields={fields}
               sample={sampleOf(idField)}
             />
             <MapField
-              label="answer 필드 (선택) — 채점 기준"
+              label="answer (선택)"
+              hint="채점 기준"
               value={answerField}
               onChange={setAnswerField}
               fields={fields}
               optional
               sample={sampleOf(answerField)}
             />
-            <div className="space-y-1.5">
-              <Label htmlFor="envKind">실행 환경</Label>
-              <Combobox
-                id="envKind"
-                value={envKind}
-                onChange={(v) => setEnvKind(v as EnvKind)}
-                options={[
-                  { value: 'browser', label: 'browser (웹, startUrl)' },
-                  { value: 'prompt', label: 'prompt (QA, 무환경)' },
-                  { value: 'repo', label: 'repo (git clone · 코딩)' },
-                  { value: 'os-use', label: 'os-use (데스크탑)' },
-                ]}
-                className="w-full"
-              />
-            </div>
           </div>
-          {/* task 템플릿(선택) — 여러 필드를 합쳐 task 를 만든다(예: 질문+근거 문서 URL). 비우면 task 필드 그대로. */}
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1">
-              <Label htmlFor="taskTpl">task 템플릿 (선택)</Label>
-              <InfoTip content="여러 필드를 합쳐 task 를 만들어요. {필드명} 이 각 행의 값으로 치환돼요. 비우면 task 필드 값을 그대로 써요." />
+
+          {/* 결과 서술 — "이 벤치마크가 실제로 어떻게 실행/채점되는지"를 한 문장으로(선택이 아니라 확인). */}
+          <div
+            className={cn(
+              'rounded-lg border px-3.5 py-3 text-[12.5px] leading-relaxed',
+              run.tone === 'warn'
+                ? 'border-[var(--color-warning)]/40 bg-[var(--color-warning)]/[0.06]'
+                : 'border-border bg-secondary/30'
+            )}
+          >
+            <div className="mb-0.5 flex items-center gap-1.5">
+              <span className="text-[11px] font-[560] uppercase tracking-wide text-faint">
+                이렇게 실행돼요
+              </span>
+              <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] font-[560] text-foreground">
+                {run.title}
+              </span>
             </div>
-            <Textarea
-              id="taskTpl"
-              className="min-h-16 font-mono text-[12px]"
-              value={taskTemplate}
-              onChange={(e) => setTaskTemplate(e.target.value)}
-              spellCheck={false}
-              placeholder={'{question}\n\n근거 문서: {source_docs}'}
-            />
-            {taskTemplate.trim() && rows[0] ? (
-              <p
-                className="truncate font-mono text-[11px] text-muted-foreground/80"
-                title={taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
-              >
-                예: {taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
-              </p>
-            ) : null}
+            <p className="text-muted-foreground">{run.body}</p>
           </div>
-          {/* env 종류별 추가 필드 */}
-          {envKind === 'browser' && (
-            <MapField
-              label="start URL 필드 (선택 · browser)"
-              value={startUrlField}
-              onChange={setStartUrlField}
-              fields={fields}
-              optional
-              sample={sampleOf(startUrlField)}
-            />
-          )}
-          {envKind === 'repo' && (
-            <div className="grid grid-cols-2 gap-3">
-              <MapField
-                label="git repo 필드 (필수 · repo)"
-                value={gitField}
-                onChange={setGitField}
-                fields={fields}
-                sample={sampleOf(gitField)}
+
+          {/* 고급(작성자) 설정 — 실행 환경 변경 · task 템플릿 · 케이스 이미지/placement. 기본 접힘. */}
+          <div className="rounded-lg border bg-card/40">
+            <button
+              type="button"
+              onClick={() => setAdvanced((v) => !v)}
+              className="flex w-full items-center gap-1.5 px-3.5 py-2.5 text-left text-[12.5px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
+            >
+              <ChevronRight
+                className={cn('size-3.5 transition-transform', advanced && 'rotate-90')}
               />
-              <MapField
-                label="ref/commit 필드 (선택)"
-                value={refField}
-                onChange={setRefField}
-                fields={fields}
-                optional
-                sample={sampleOf(refField)}
-              />
-            </div>
-          )}
-          {envKind === 'os-use' && (
-            <p className="text-[12px] text-muted-foreground">
-              os-use는 데스크탑 이미지에서 실행돼요. 아래 3단계에서 케이스 이미지를 지정해 주세요.
-            </p>
-          )}
+              <Settings2 className="size-3.5" />
+              고급 · 다르게 실행해야 하나요?
+              <span className="ml-auto text-[11px] font-normal text-faint">
+                실행 환경 · task 합성 · 이미지
+              </span>
+            </button>
+            {advanced && (
+              <div className="space-y-3 border-t border-border/60 px-3.5 py-3.5">
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor="envKind">실행 환경</Label>
+                    <InfoTip content="이 벤치마크의 각 케이스가 도는 세계예요. 대부분 자동 추론이 맞아요 — 실제 벤치마크가 웹(browser)·코드(repo)·데스크탑(os-use)을 요구할 때만 바꾸세요." />
+                  </div>
+                  <Combobox
+                    id="envKind"
+                    value={envKind}
+                    onChange={(v) => setEnvKind(v as EnvKind)}
+                    options={[
+                      { value: 'prompt', label: 'prompt · QA (환경 없음)' },
+                      { value: 'browser', label: 'browser · 웹 (startUrl)' },
+                      { value: 'repo', label: 'repo · 코드 (git clone)' },
+                      { value: 'os-use', label: 'os-use · 데스크탑 (이미지)' },
+                    ]}
+                    className="w-full"
+                  />
+                </div>
+
+                {envKind === 'browser' && (
+                  <MapField
+                    label="start URL"
+                    hint="선택 · 케이스별 시작 주소"
+                    value={startUrlField}
+                    onChange={setStartUrlField}
+                    fields={fields}
+                    optional
+                    sample={sampleOf(startUrlField)}
+                  />
+                )}
+                {envKind === 'repo' && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <MapField
+                      label="git repo (필수)"
+                      hint="클론할 저장소 URL"
+                      value={gitField}
+                      onChange={setGitField}
+                      fields={fields}
+                      sample={sampleOf(gitField)}
+                    />
+                    <MapField
+                      label="ref/commit"
+                      hint="선택 · 체크아웃 지점"
+                      value={refField}
+                      onChange={setRefField}
+                      fields={fields}
+                      optional
+                      sample={sampleOf(refField)}
+                    />
+                  </div>
+                )}
+
+                <div className="space-y-1.5">
+                  <div className="flex items-center gap-1">
+                    <Label htmlFor="taskTpl">task 합성 템플릿</Label>
+                    <InfoTip content="여러 필드를 합쳐 task 를 만들어요. {필드명} 이 각 행의 값으로 치환돼요. 비우면 task 필드 값을 그대로 써요. 예: 질문에 근거 문서 위치를 함께 실어줄 때." />
+                  </div>
+                  <Textarea
+                    id="taskTpl"
+                    className="min-h-16 font-mono text-[12px]"
+                    value={taskTemplate}
+                    onChange={(e) => setTaskTemplate(e.target.value)}
+                    spellCheck={false}
+                    placeholder={'{question}\n\n근거 문서: {source_docs}'}
+                  />
+                  {taskTemplate.trim() && rows[0] ? (
+                    <p
+                      className="truncate font-mono text-[11px] text-muted-foreground/80"
+                      title={taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
+                    >
+                      예: {taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
+                    </p>
+                  ) : null}
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1">
+                      <Label htmlFor="img">케이스 이미지</Label>
+                      <InfoTip content="케이스가 특정 컨테이너 이미지 안에서 돌아야 할 때만 지정해요(prebuilt 저장소·데스크탑 등). 순수 QA 는 필요 없어요." />
+                    </div>
+                    <Input
+                      id="img"
+                      value={image}
+                      onChange={(e) => setImage(e.target.value)}
+                      placeholder="예: my-osworld:latest"
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1">
+                      <Label htmlFor="place">placement</Label>
+                      <InfoTip content="이 케이스들을 특정 실행 인프라(런타임)로만 보낼 때만 지정해요. 비우면 기본 백엔드예요." />
+                    </div>
+                    <Input
+                      id="place"
+                      value={placement}
+                      onChange={(e) => setPlacement(e.target.value)}
+                      placeholder="예: docker"
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         </section>
       )}
 
-      {/* 3. 데이터셋 메타 + 생성 (미리보기 후) */}
+      {/* 3. 만들기 (미리보기 후) — id + (재인입 시에만 버전). 전량 인입이 기본, 실행에서 subset 조절. */}
       {previewed && (
         <section className="space-y-3">
           <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-            3 · 데이터셋
+            3 · 만들기
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="dsid">id</Label>
-              <Input
-                id="dsid"
-                value={datasetId}
-                onChange={(e) => setDatasetId(e.target.value)}
-                placeholder="my-bench"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="cat">category</Label>
-              <Combobox
-                id="cat"
-                value={category}
-                onChange={(v) => setCategory(v as Category)}
-                options={[
-                  { value: 'qa' },
-                  { value: 'browser' },
-                  { value: 'coding' },
-                  { value: 'tool' },
-                ]}
-                className="w-full"
-              />
-            </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="dsid">데이터셋 이름</Label>
+            <Input
+              id="dsid"
+              value={datasetId}
+              onChange={(e) => setDatasetId(e.target.value)}
+              placeholder="my-bench"
+            />
           </div>
-          <VersionField
-            existing={versionsForId(existingDatasets, datasetId)}
-            value={version}
-            onChange={setVersion}
-          />
-          {sourceKind === 'huggingface' && (
-            <div className="space-y-1.5">
-              <Label htmlFor="lim">최대 케이스 수 (선택)</Label>
-              <Input
-                id="lim"
-                value={limit}
-                onChange={(e) => setLimit(e.target.value)}
-                placeholder="예: 50"
-                inputMode="numeric"
-              />
-            </div>
+          {/* 버전은 첫 인입이면 자동 1.0.0(숨김) — 같은 이름 재인입일 때만 다음 버전 선택 노출. */}
+          {existingVersions.length > 0 && (
+            <VersionField existing={existingVersions} value={version} onChange={setVersion} />
           )}
-          {/* 케이스 컴퓨트 이미지 / placement(런타임 라우팅) — 모든 케이스 공통(선택). os-use/prebuilt 벤치마크용. */}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="img">케이스 이미지 (선택)</Label>
-              <Input
-                id="img"
-                value={image}
-                onChange={(e) => setImage(e.target.value)}
-                placeholder="예: my-osworld:latest"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="place">placement target (선택)</Label>
-              <Input
-                id="place"
-                value={placement}
-                onChange={(e) => setPlacement(e.target.value)}
-                placeholder="예: docker"
-              />
-            </div>
-          </div>
 
           {createResult && !createResult.ok && (
             <Callout tone="danger">만들지 못했어요: {createResult.error}</Callout>
@@ -742,7 +858,7 @@ export function BuildFromSourceWizard({
             벤치마크 만들기
           </Button>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
-            버전은 바꿀 수 없어요. 같은 버전을 다른 내용으로 다시 만들 수 없어요.
+            전체 케이스를 가져와요. 실행할 때 스코어카드에서 일부만 돌릴 수 있어요.
           </p>
         </section>
       )}
@@ -752,6 +868,7 @@ export function BuildFromSourceWizard({
 
 function MapField({
   label,
+  hint,
   value,
   onChange,
   fields,
@@ -759,6 +876,7 @@ function MapField({
   sample,
 }: {
   label: string
+  hint?: string // label 옆 회색 보조 설명(역할 의미)
   value: string
   onChange: (v: string) => void
   fields: string[]
@@ -767,7 +885,10 @@ function MapField({
 }) {
   return (
     <div className="space-y-1.5">
-      <Label>{label}</Label>
+      <Label>
+        {label}
+        {hint ? <span className="ml-1 font-normal text-faint">· {hint}</span> : null}
+      </Label>
       {/* optional=빈 값 '(없음)' 옵션 노출, 필수=빈 값이면 placeholder 로 선택 유도(기존 native 동작 유지) */}
       <Combobox
         value={value}
