@@ -693,6 +693,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .max(64)
             .optional()
             .describe("배치 내 동시 디스패치 케이스 수(병렬도). 미지정이면 서비스 기본(=4)"),
+          cases: z
+            .object({
+              ids: z.array(z.string().min(1)).min(1).optional(),
+              tags: z.array(z.string().min(1)).min(1).optional(),
+              limit: z.number().int().min(1).max(10_000).optional(),
+            })
+            .optional()
+            .describe("부분 실행 — 전체 데이터셋의 subset 만(ids 명시 → tags any-match → limit 앞 N개 순 적용)"),
           origin: z
             .object({
               repo: z.string().optional(),
@@ -705,7 +713,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .describe("출처 좌표(커밋/PR/CI run) — source 는 서버가 결정"),
         },
       },
-      ({ dataset_id, dataset_version, harness_id, harness_version, harness_pins, judges, concurrency, origin }) =>
+      ({ dataset_id, dataset_version, harness_id, harness_version, harness_pins, judges, concurrency, cases, origin }) =>
         run(principal, "scorecards:run", async () =>
           ok(
             await scorecards.submit({
@@ -720,6 +728,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               origin: { source: originSource(principal.via), ...(origin ?? {}) },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
               ...(concurrency !== undefined ? { concurrency } : {}),
+              ...(cases ? { cases } : {}),
             }),
           ),
         ),

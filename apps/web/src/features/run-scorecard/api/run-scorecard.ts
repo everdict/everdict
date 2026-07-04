@@ -11,6 +11,7 @@ export interface RunScorecardInput {
   harnessId: string
   harnessVersion: string
   concurrency?: number // 배치 내 동시 디스패치 케이스 수(병렬도). 미지정이면 컨트롤플레인 기본.
+  cases?: { limit?: number; tags?: string[] } // 부분 실행 — 전체 데이터셋의 subset 만(미지정=전체)
 }
 
 export interface RunScorecardResult {
@@ -27,6 +28,7 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
     ...(input.concurrency ? { concurrency: input.concurrency } : {}),
+    ...(input.cases ? { cases: input.cases } : {}),
   }
   try {
     const rec = await controlPlane.runScorecard<{ id: string }>(ctx, body)

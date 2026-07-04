@@ -107,6 +107,16 @@ export const scorecardRecordSchema = z.object({
   judgeModels: z.array(z.string()).optional(), // 이 run 을 채점한 judge 모델(들) — model 축과 별개(채점자)
   origin: scorecardOriginSchema.optional(), // 트리거 출처(provenance) — 경량이라 목록에도 포함. 과거 레코드는 미설정.
   createdBy: z.string().optional(), // 실행자(제출자 subject) — origin(어디서)과 짝인 '누가'. 과거 레코드는 미설정.
+  // 부분 실행(subset) 표식 — 이 배치가 데이터셋의 부분집합만 돌렸다({selected}/{total}). 미설정 = 전체 실행.
+  subset: z
+    .object({
+      total: z.number().int(),
+      selected: z.number().int(),
+      ids: z.array(z.string()).optional(),
+      tags: z.array(z.string()).optional(),
+      limit: z.number().int().optional(),
+    })
+    .optional(),
   scorecard: fullScorecardSchema.optional(),
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })

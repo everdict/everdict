@@ -58,6 +58,17 @@ export const ScorecardStepSchema = z.object({
 });
 export type ScorecardStep = z.infer<typeof ScorecardStepSchema>;
 
+// 부분 실행(subset) — 이 배치가 데이터셋의 어떤 부분집합을 돌렸나. 미설정 = 전체 실행.
+// 표식이 있어야 소비자(목록/상세/diff/리더보드)가 "전체 결과가 아니다"를 안다. 경량 → 목록에도 포함. mig 0043.
+export const ScorecardSubsetSchema = z.object({
+  total: z.number().int().nonnegative(), // 제출 시점 데이터셋 전체 케이스 수
+  selected: z.number().int().nonnegative(), // 실제 실행한 케이스 수
+  ids: z.array(z.string()).optional(), // 명시 선택한 케이스 id
+  tags: z.array(z.string()).optional(), // 태그 필터(any-match)
+  limit: z.number().int().positive().optional(), // 필터 적용 후 앞에서 N개
+});
+export type ScorecardSubset = z.infer<typeof ScorecardSubsetSchema>;
+
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -75,6 +86,7 @@ export const ScorecardRecordSchema = z.object({
   createdBy: z.string().optional(),
   // 배치된 런타임(placement.target) — 작업 큐의 "어디서 도는가" 축. 미설정 = 기본 백엔드. mig 0040.
   runtime: z.string().optional(),
+  subset: ScorecardSubsetSchema.optional(), // 부분 실행 표식(전체 실행이면 미설정)
   scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)

@@ -922,3 +922,87 @@ describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가
     await until(async () => (await store.get(pr7.id))?.status === "succeeded"); // 정상 완료
   });
 });
+
+describe("ScorecardService.submit — 부분 실행(subset)", () => {
+  const threeCaseDataset = (): Dataset => ({
+    id: "big",
+    version: "1.0.0",
+    cases: (["a", "b", "c"] as const).map((id, i) => ({
+      id,
+      env: { kind: "prompt" },
+      task: `q-${id}`,
+      graders: [],
+      timeoutSec: 60,
+      tags: i < 2 ? ["easy"] : ["hard"],
+    })),
+    tags: [],
+  });
+  const capture = () => {
+    const dispatched: string[] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job) {
+        dispatched.push(job.evalCase.id);
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "prompt", output: "" },
+          scores: [],
+        };
+      },
+    };
+    return { dispatched, dispatcher };
+  };
+  const build = async (id: string) => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", threeCaseDataset());
+    const store = new InMemoryScorecardStore();
+    const { dispatched, dispatcher } = capture();
+    const service = new ScorecardService({ dispatcher, store, datasets, newId: () => id });
+    return { datasets, store, dispatched, service };
+  };
+  const submitBase = {
+    tenant: "acme",
+    dataset: { id: "big", version: "1.0.0" },
+    harness: { id: "scripted", version: "0" },
+  };
+
+  it("limit 이면 앞에서 N개만 돌고 record.subset 이 스탬프된다", async () => {
+    const { store, dispatched, service } = await build("sc-lim");
+    const rec = await service.submit({ ...submitBase, cases: { limit: 2 } });
+    expect(rec.subset).toEqual({ total: 3, selected: 2, limit: 2 });
+    await waitTerminal(store, "sc-lim");
+    expect([...dispatched].sort()).toEqual(["a", "b"]);
+    expect((await store.get("sc-lim"))?.scorecard?.results).toHaveLength(2);
+  });
+
+  it("tags 는 any-match 필터(+limit 과 결합)", async () => {
+    const { store, dispatched, service } = await build("sc-tag");
+    const rec = await service.submit({ ...submitBase, cases: { tags: ["easy"], limit: 1 } });
+    expect(rec.subset).toEqual({ total: 3, selected: 1, tags: ["easy"], limit: 1 });
+    await waitTerminal(store, "sc-tag");
+    expect(dispatched).toEqual(["a"]);
+  });
+
+  it("ids 는 명시 선택 — 없는 id 는 400 으로 즉시 거절(조용한 부분 실행 금지)", async () => {
+    const { store, dispatched, service } = await build("sc-ids");
+    const rec = await service.submit({ ...submitBase, cases: { ids: ["c", "a"] } });
+    expect(rec.subset).toEqual({ total: 3, selected: 2, ids: ["c", "a"] });
+    await waitTerminal(store, "sc-ids");
+    expect([...dispatched].sort()).toEqual(["a", "c"]);
+    await expect(service.submit({ ...submitBase, cases: { ids: ["a", "nope"] } })).rejects.toThrow(/nope/);
+  });
+
+  it("선택 결과가 0개면 400(태그 불일치)", async () => {
+    const { service } = await build("sc-empty");
+    await expect(service.submit({ ...submitBase, cases: { tags: ["없는태그"] } })).rejects.toThrow(/케이스가 없습니다/);
+  });
+
+  it("cases 미지정이면 전체 실행 + subset 미스탬프(현행 무변경)", async () => {
+    const { store, dispatched, service } = await build("sc-all");
+    const rec = await service.submit({ ...submitBase });
+    expect(rec.subset).toBeUndefined();
+    await waitTerminal(store, "sc-all");
+    expect(dispatched).toHaveLength(3);
+  });
+});

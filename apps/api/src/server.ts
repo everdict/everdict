@@ -108,6 +108,14 @@ export const RunScorecardBodySchema = z.object({
   judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
   // 배치 내 동시 디스패치 케이스 수(runSuite 병렬도). 미지정이면 서비스 기본(=4). 상한으로 과도한 fan-out 차단.
   concurrency: z.number().int().min(1).max(64).optional(),
+  // 부분 실행 — 전체 데이터셋의 subset 만(비용/스모크). ids(명시) → tags(any-match) → limit(앞 N개) 순 적용.
+  cases: z
+    .object({
+      ids: z.array(z.string().min(1)).min(1).optional(),
+      tags: z.array(z.string().min(1)).min(1).optional(),
+      limit: z.number().int().min(1).max(10_000).optional(),
+    })
+    .optional(),
 });
 
 // 예약(cron) 스코어카드 요청 — 발사 시 ScorecardService.submit 으로 흐를 정의(= RunScorecardBody 에서 judge override 제외).

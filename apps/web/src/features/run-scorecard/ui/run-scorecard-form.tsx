@@ -9,6 +9,7 @@ import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { FieldError, Input, Label } from '@/shared/ui/input'
+import { InfoTip } from '@/shared/ui/tooltip'
 
 import { runScorecardAction } from '../api/run-scorecard'
 
@@ -27,6 +28,8 @@ interface Values {
   harnessId: string
   harnessVersion: string
   concurrency: string // 병렬도(빈칸=컨트롤플레인 기본). 제출 시 숫자로 파싱.
+  caseLimit: string // 부분 실행 — 앞에서 N개만(빈칸=전체). 제출 시 숫자로 파싱.
+  caseTags: string // 부분 실행 — 태그 필터(쉼표 구분, any-match. 빈칸=전체)
 }
 
 // 벤치마크 × 하니스를 골라 배치 평가를 실행한다. 채점은 벤치마크에 내장 — judge/런타임은 컨트롤플레인 기본값.
@@ -54,6 +57,8 @@ export function RunScorecardForm({
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
       concurrency: '',
+      caseLimit: '',
+      caseTags: '',
     },
   })
 
@@ -77,11 +82,22 @@ export function RunScorecardForm({
 
   async function onSubmit(values: Values) {
     setServerError(undefined)
-    const { concurrency, ...rest } = values
+    const { concurrency, caseLimit, caseTags, ...rest } = values
     const n = Number.parseInt(concurrency, 10) // 빈칸/비정상 → 생략(컨트롤플레인 기본 사용)
+    // 부분 실행 — limit(앞 N개)/tags(쉼표 구분). 둘 다 비면 전체 실행(cases 생략).
+    const limit = Number.parseInt(caseLimit, 10)
+    const tags = caseTags
+      .split(',')
+      .map((t) => t.trim())
+      .filter(Boolean)
+    const cases = {
+      ...(Number.isFinite(limit) && limit > 0 ? { limit } : {}),
+      ...(tags.length > 0 ? { tags } : {}),
+    }
     const res = await runScorecardAction({
       ...rest,
       ...(Number.isFinite(n) && n > 0 ? { concurrency: n } : {}),
+      ...(Object.keys(cases).length > 0 ? { cases } : {}),
     })
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
     else setServerError(res.error ?? '실행하지 못했어요')
@@ -186,11 +202,35 @@ export function RunScorecardForm({
         </p>
       </div>
 
+      {/* 부분 실행 — 전체 대신 케이스 일부만(비용/스모크). 결과엔 "일부 n/N" 표식이 남는다. */}
+      <div className="grid grid-cols-2 gap-3">
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            <Label htmlFor="caseLimit">케이스 수 제한 (선택)</Label>
+            <InfoTip content="전체 대신 앞에서 N개만 평가해요. 비워두면 전체를 실행해요. 결과에 '일부 n/N' 표식이 남아요." />
+          </div>
+          <Input
+            id="caseLimit"
+            type="number"
+            min={1}
+            placeholder="예: 10"
+            {...register('caseLimit')}
+          />
+        </div>
+        <div className="space-y-1.5">
+          <div className="flex items-center gap-1">
+            <Label htmlFor="caseTags">태그 필터 (선택)</Label>
+            <InfoTip content="이 태그가 있는 케이스만 평가해요(쉼표로 여러 개, 하나라도 일치하면 포함)." />
+          </div>
+          <Input id="caseTags" placeholder="예: easy, smoke" {...register('caseTags')} />
+        </div>
+      </div>
+
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <p className="text-[12px] text-muted-foreground">
-        벤치마크의 모든 케이스를 이 하니스로 평가해 점수를 모아요. 실행이 끝나면 상세 화면에서 결과를
-        확인해요.
+        벤치마크의 모든 케이스를 이 하니스로 평가해 점수를 모아요. 실행이 끝나면 상세 화면에서
+        결과를 확인해요.
       </p>
 
       <Button type="submit" disabled={isSubmitting}>

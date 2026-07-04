@@ -17,7 +17,14 @@ import {
   TraceEventSchema,
   resolveHarnessSecrets,
 } from "@assay/core";
-import type { RunStore, ScorecardOrigin, ScorecardRecord, ScorecardStep, ScorecardStore } from "@assay/db";
+import type {
+  RunStore,
+  ScorecardOrigin,
+  ScorecardRecord,
+  ScorecardStep,
+  ScorecardStore,
+  ScorecardSubset,
+} from "@assay/db";
 import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
 import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry } from "@assay/registry";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
@@ -103,6 +110,49 @@ export function originSource(via: string): string {
   return "api";
 }
 
+// 부분 실행 선택 — ids(명시) → tags(any-match) → limit(앞 N개) 순 적용. 순수 함수(테스트 용이).
+// 존재하지 않는 id 는 조용히 빈 결과가 되면 "일부만 돌았는데 전체처럼 보이는" 사고라 400 으로 즉시 거절.
+export function selectSubsetCases(
+  dataset: Dataset,
+  sel?: { ids?: string[]; tags?: string[]; limit?: number },
+): { cases: Dataset["cases"]; subset?: ScorecardSubset } {
+  if (!sel || (!sel.ids?.length && !sel.tags?.length && sel.limit === undefined)) return { cases: dataset.cases };
+  let cases = dataset.cases;
+  if (sel.ids && sel.ids.length > 0) {
+    const want = new Set(sel.ids);
+    const have = new Set(cases.map((c) => c.id));
+    const missing = [...want].filter((id) => !have.has(id));
+    if (missing.length > 0)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { dataset: dataset.id, missing },
+        `데이터셋에 없는 케이스 id 입니다: ${missing.join(", ")}`,
+      );
+    cases = cases.filter((c) => want.has(c.id));
+  }
+  if (sel.tags && sel.tags.length > 0) {
+    const want = new Set(sel.tags);
+    cases = cases.filter((c) => (c.tags ?? []).some((t) => want.has(t)));
+  }
+  if (sel.limit !== undefined) cases = cases.slice(0, sel.limit);
+  if (cases.length === 0)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { dataset: dataset.id, ...sel },
+      "선택 조건에 맞는 케이스가 없습니다(태그/limit 확인).",
+    );
+  return {
+    cases,
+    subset: {
+      total: dataset.cases.length,
+      selected: cases.length,
+      ...(sel.ids && sel.ids.length > 0 ? { ids: sel.ids } : {}),
+      ...(sel.tags && sel.tags.length > 0 ? { tags: sel.tags } : {}),
+      ...(sel.limit !== undefined ? { limit: sel.limit } : {}),
+    },
+  };
+}
+
 export interface RunScorecardInput {
   tenant: string;
   // 제출자(principal.subject) — 비공개 repo 케이스의 개인 소유 연결을 resolve 할 owner("내 연결로 clone").
@@ -119,6 +169,9 @@ export interface RunScorecardInput {
   // 한 배치 안에서 동시에 디스패치할 케이스 수(runSuite 병렬도). 미지정이면 서비스 기본.
   // 셀프호스티드 런타임은 이만큼 잡이 lease 큐에 파킹되고, 러너가 그만큼 동시에 lease 해야 실제 case-level 병렬이 된다.
   concurrency?: number;
+  // 부분 실행 — 전체 데이터셋의 subset 만 돌린다(비용/스모크). ids(명시 선택) → tags(any-match) → limit(앞 N개)
+  // 순으로 적용. 결과 레코드에 subset{total,selected,…} 이 스탬프되어 "전체가 아니다"가 표식된다.
+  cases?: { ids?: string[]; tags?: string[]; limit?: number };
 }
 
 export interface ScorecardServiceDeps {
@@ -173,7 +226,10 @@ export class ScorecardService {
 
   // 데이터셋을 동기 해석(NotFound→404), 하니스 버전/spec 해석 후 레코드 생성, 비동기 배치 실행.
   async submit(input: RunScorecardInput): Promise<ScorecardRecord> {
-    const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
+    const resolved = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
+    // 부분 실행 — 선택된 케이스만 담은 데이터셋으로 이후 전 구간(배치/judge/집계)이 동작. 표식은 record.subset.
+    const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);
+    const dataset: Dataset = subset ? { ...resolved, cases: selectedCases } : resolved;
 
     // 하니스 버전 해석(latest→구체) + 선언형 spec 임베드. 빌트인(scripted/claude-code)은 레지스트리에 없음 → as-given.
     // 제출 시점 임시 핀(pins)이 있으면 폴백 없이 resolveWithPins — 핀을 조용히 무시한 채 평가가 통과하면 안 된다.
@@ -216,6 +272,7 @@ export class ScorecardService {
       ...(origin ? { origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}), // 실행자 — origin(어디서)과 짝인 '누가'
       ...(input.runtime ? { runtime: input.runtime } : {}), // 배치된 런타임(작업 큐 축) — 미설정=기본 백엔드
+      ...(subset ? { subset } : {}), // 부분 실행 표식 — 소비자가 "전체가 아니다"를 안다
       createdAt: ts,
       updatedAt: ts,
     };

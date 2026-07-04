@@ -173,7 +173,13 @@ export default async function ScorecardDetailPage({
           <StatCard
             label="케이스"
             value={results.length}
-            hint={skipped > 0 ? `스킵 ${skipped}` : undefined}
+            hint={
+              record.subset
+                ? `전체 ${record.subset.total}개 중 일부${skipped > 0 ? ` · 스킵 ${skipped}` : ''}`
+                : skipped > 0
+                  ? `스킵 ${skipped}`
+                  : undefined
+            }
           />
           <StatCard label="통과" value={passed} tone={passed > 0 ? 'success' : 'default'} />
           <StatCard
@@ -203,6 +209,19 @@ export default async function ScorecardDetailPage({
         <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
         {authorName && <Prop label="실행자" value={authorName} />}
+        {record.subset && (
+          <Prop
+            label="케이스 선택 (부분 실행)"
+            value={`${record.subset.selected}/${record.subset.total}${(() => {
+              const parts = [
+                record.subset.ids ? `지정 ${record.subset.ids.length}개` : undefined,
+                record.subset.tags ? `태그 ${record.subset.tags.join(', ')}` : undefined,
+                record.subset.limit !== undefined ? `limit ${record.subset.limit}` : undefined,
+              ].filter(Boolean)
+              return parts.length > 0 ? ` — ${parts.join(' · ')}` : ''
+            })()}`}
+          />
+        )}
       </Card>
 
       {/* 트리거 출처(provenance) — CI/예약/API/웹 + 커밋·PR·CI run 링크 + PR 임시 핀(pinOverrides). */}

@@ -10,6 +10,12 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
 
 ## How it works (`apps/api` `ScorecardService`)
 1. Resolve the **dataset** (`DatasetRegistry`, owner-first/`_shared` fallback) → its cases. Missing → `404`.
+   The request's optional **`cases`** selects a **subset** (partial run — cost control / smoke): `ids`
+   (explicit; unknown id ⇒ `400`, never a silent partial) → `tags` (any-match) → `limit` (first N), applied in
+   that order; empty selection ⇒ `400`. The record stamps **`subset {total, selected, ids?, tags?, limit?}`**
+   (mig 0043, returned in list too) so every consumer (list/detail/diff/leaderboard) can see it's not a full
+   run — the web shows a "일부 n/N" chip (list) and a 케이스 선택 prop (detail), and the run form exposes
+   케이스 수 제한 + 태그 필터. Omitted ⇒ full dataset, no stamp.
 2. Resolve the **harness version** (`latest → concrete`) via the registry; embed the `HarnessSpec` for
    declarative harnesses (builtins fall back to id). The record stores the **resolved** `harness@version`.
 3. Build a `Suite` on the fly (`{ id: dataset.id, harness: { id }, cases }`) and run it with `@assay/suite`'s
@@ -60,7 +66,7 @@ Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_score
 ## BFF ↔ MCP parity
 | HTTP route | MCP tool | Action |
 |---|---|---|
-| `POST /scorecards` `{dataset, harness, judges?, runtime?, concurrency?}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
+| `POST /scorecards` `{dataset, harness, judges?, runtime?, concurrency?, cases?{ids,tags,limit}}` → 202 | `run_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest` `{dataset, harness, traces[], judges?}` → 202 | `ingest_scorecard` | `scorecards:run` (member+) |
 | `POST /scorecards/ingest/pull` `{dataset, harness, source{kind,endpoint,authSecret?}, runs[], judges?}` → 202 | `pull_scorecard` | `scorecards:run` (member+) |
 | `GET /scorecards` (summary only) | `list_scorecards` | `scorecards:read` (viewer+) |

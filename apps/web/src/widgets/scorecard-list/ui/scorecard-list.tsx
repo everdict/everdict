@@ -14,7 +14,7 @@ import {
   fmtTimeOnly,
 } from '@/shared/lib/format'
 import { UserAvatar } from '@/shared/ui/avatar'
-import { EntityRef, MetricChip, ModelChip } from '@/shared/ui/chip'
+import { EntityRef, MetricChip, ModelChip, SubsetChip } from '@/shared/ui/chip'
 import { Combobox } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
 import { Input } from '@/shared/ui/input'
@@ -236,10 +236,15 @@ export function ScorecardList({
                   >
                     {/* 좌: 3줄 — ① 데이터셋 ② 하니스(+모델·출처) ③ 집계 칩. 각 한 줄, 잘림 없이 truncate. */}
                     <div className="min-w-0 flex-1 space-y-1">
-                      <div className="flex items-center overflow-hidden whitespace-nowrap text-[13px] font-[510]">
+                      <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
                         <span className="truncate">
                           <EntityRef id={s.dataset.id} version={s.dataset.version} kind="dataset" />
                         </span>
+                        {s.subset ? (
+                          <span className="shrink-0">
+                            <SubsetChip selected={s.subset.selected} total={s.subset.total} />
+                          </span>
+                        ) : null}
                       </div>
                       <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
                         <span className="truncate">

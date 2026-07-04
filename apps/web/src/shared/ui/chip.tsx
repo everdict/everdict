@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Boxes, Cpu, Database } from 'lucide-react'
+import { Boxes, Cpu, Database, ListFilter } from 'lucide-react'
 
 import { fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -38,6 +38,19 @@ export function ModelChip({ children, muted }: { children: ReactNode; muted?: bo
       />
       {children}
     </code>
+  )
+}
+
+// 부분 실행 칩 — 데이터셋의 subset 만 돌린 스코어카드 표식(selected/total). 전체 실행이면 렌더하지 않는다.
+export function SubsetChip({ selected, total }: { selected: number; total: number }) {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-muted-foreground"
+      title={`부분 실행 — 전체 ${total}개 중 ${selected}개만 평가`}
+    >
+      <ListFilter className="size-3 shrink-0 text-[#e2b96b]" />
+      일부 {selected}/{total}
+    </span>
   )
 }
 

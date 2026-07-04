@@ -14,6 +14,7 @@ export {
   type MetricSummary,
   type ScorecardModels,
   type ScorecardOrigin,
+  type ScorecardSubset,
   type ScorecardListFilter,
   ScorecardRecordSchema,
   ScorecardStatusSchema,
@@ -21,6 +22,7 @@ export {
   MetricSummarySchema,
   ScorecardModelsSchema,
   ScorecardOriginSchema,
+  ScorecardSubsetSchema,
   InMemoryScorecardStore,
 } from "./scorecard-store.js";
 export {
