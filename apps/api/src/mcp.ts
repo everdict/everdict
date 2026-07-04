@@ -1390,6 +1390,53 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       { description: "이 워크스페이스에 페어링된 셀프호스티드 러너 로스터 — 메타만(토큰 없음)", inputSchema: {} },
       () => run(principal, "members:read", async () => ok({ runners: await runners.listForWorkspace(ws) })),
     );
+    // 워크스페이스-공유 러너(팀 자원, owner=ws:<workspace>) — admin 이 등록하면 멤버 누구나 self:ws:<id> 로 타깃.
+    // 개인 러너(pair_runner, self-scoped)와 달리 settings:write(admin) 게이트.
+    server.registerTool(
+      "pair_workspace_runner",
+      {
+        description:
+          "워크스페이스-공유 러너를 페어링(팀 빌드서버/CI). 멤버 누구나 self:ws:<id> 로 타깃한다. 평문 토큰(rnr_…)은 응답에 한 번만 노출. admin 전용.",
+        inputSchema: {
+          label: z.string().min(1).max(80).describe("표시용 러너 이름(예: acme-ci-runner)"),
+          os: z.string().min(1).max(40).optional().describe("linux | darwin | win32 등"),
+          capabilities: z
+            .array(z.enum(RUNNER_CAPABILITIES))
+            .optional()
+            .describe("이 러너가 돌릴 수 있는 것(git|docker|browser|computer-use|sandbox|codex-login|claude-login)"),
+        },
+      },
+      ({ label, os, capabilities }) =>
+        run(principal, "settings:write", async () => {
+          const paired = await runners.pairWorkspace({
+            workspace: ws,
+            label,
+            ...(os !== undefined ? { os } : {}),
+            ...(capabilities !== undefined ? { capabilities } : {}),
+          });
+          return ok({ runner: paired.meta, token: paired.token });
+        }),
+    );
+    server.registerTool(
+      "list_workspace_owned_runners",
+      {
+        description: "이 워크스페이스가 소유한 공유 러너만(owner=ws:<workspace>) — 로스터와 달리 개인 러너 제외. admin 전용.",
+        inputSchema: {},
+      },
+      () => run(principal, "settings:write", async () => ok({ runners: await runners.listWorkspaceOwned(ws) })),
+    );
+    server.registerTool(
+      "revoke_workspace_runner",
+      {
+        description: "워크스페이스-공유 러너 해제(삭제). id 는 list_workspace_owned_runners 의 id. admin 전용.",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) =>
+        run(principal, "settings:write", async () => {
+          await runners.revokeWorkspaceRunner(ws, id);
+          return ok({ id, revoked: true });
+        }),
+    );
   }
 
   // 러너 프로토콜 — `assay runner` 가 자기 머신에서 호출(러너 토큰 rnr_ → via=runner, principal.runnerId).

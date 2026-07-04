@@ -226,8 +226,10 @@ describe("MCP tools", () => {
       "list_scorecards",
       "list_workspace_applications",
       "list_workspace_integrations",
+      "list_workspace_owned_runners",
       "list_workspace_runners",
       "pair_runner",
+      "pair_workspace_runner",
       "pin_harness_images",
       "probe_runtime",
       "pull_scorecard",
@@ -238,6 +240,7 @@ describe("MCP tools", () => {
       "revoke_api_key",
       "revoke_invite",
       "revoke_runner",
+      "revoke_workspace_runner",
       "run_scorecard",
       "set_member_role",
       "set_workspace_integration",
@@ -391,6 +394,43 @@ describe("MCP tools", () => {
     const rev = JSON.parse(text(await viewer.callTool({ name: "revoke_runner", arguments: { id: paired.runner.id } })));
     expect(rev).toMatchObject({ revoked: true });
     expect(JSON.parse(text(await viewer.callTool({ name: "list_runners", arguments: {} }))).runners).toHaveLength(0);
+  });
+
+  it("워크스페이스-공유 러너: viewer 는 페어 불가(403), admin 만 등록/조회/해제(팀 자원)", async () => {
+    const deps = harness();
+    const viewer = await connect(deps, ["viewer"]);
+    const admin = await connect(deps, ["admin"]);
+
+    // viewer 는 팀 러너 등록 불가 — settings:write(admin) 게이트.
+    const denied = await viewer.callTool({ name: "pair_workspace_runner", arguments: { label: "ci" } });
+    expect(denied.isError).toBeTruthy();
+
+    // admin 이 등록 → 평문 토큰 1회, 메타엔 없음.
+    const paired = JSON.parse(
+      text(
+        await admin.callTool({
+          name: "pair_workspace_runner",
+          arguments: { label: "acme-ci", capabilities: ["git", "docker"] },
+        }),
+      ),
+    );
+    expect(paired.token).toMatch(/^rnr_/);
+    expect(paired.runner).toMatchObject({ label: "acme-ci", capabilities: ["git", "docker"] });
+
+    // 팀 소유 목록(owner=ws:<workspace>) → 1건.
+    const owned = JSON.parse(text(await admin.callTool({ name: "list_workspace_owned_runners", arguments: {} })));
+    expect(owned.runners).toHaveLength(1);
+    // viewer 는 팀 소유 목록도 못 봄(admin 게이트).
+    expect((await viewer.callTool({ name: "list_workspace_owned_runners", arguments: {} })).isError).toBeTruthy();
+
+    // 해제 → revoked:true → 목록 비어짐.
+    const rev = JSON.parse(
+      text(await admin.callTool({ name: "revoke_workspace_runner", arguments: { id: paired.runner.id } })),
+    );
+    expect(rev).toMatchObject({ revoked: true });
+    expect(
+      JSON.parse(text(await admin.callTool({ name: "list_workspace_owned_runners", arguments: {} }))).runners,
+    ).toHaveLength(0);
   });
 
   it("runner 프로토콜: 파킹된 잡을 lease → submit_job_result 로 회신 → 디스패치 promise resolve", async () => {
