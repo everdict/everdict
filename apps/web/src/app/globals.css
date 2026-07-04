@@ -246,8 +246,9 @@ body::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* 본문 콘텐츠는 오버레이 위로 */
-body > * {
+/* 본문 콘텐츠는 오버레이 위로. 단 body 로 포털된 고정 오버레이(모달 backdrop 등, .fixed)는 제외 —
+   그렇지 않으면 이 규칙의 position:relative 가 모달의 fixed 를 덮어써 화면이 아닌 문서 흐름에 박힌다. */
+body > *:not(.fixed) {
   position: relative;
   z-index: 1;
 }
