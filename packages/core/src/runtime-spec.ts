@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { CapabilityNameSchema } from "./capability.js";
 
-// Runtime — 테넌트가 등록하는 실행 인프라 정의("어디서 eval 이 도나"). local | nomad | k8s | topology.
-// (docker kind 는 slice 5b 에서 제거 — 단일 docker 호스트는 self-hosted 러너로 흡수. 컨테이너 실행 = capability.)
+// Runtime — 테넌트가 등록하는 실행 인프라 정의("어디서 eval 이 도나"). local | nomad | k8s.
+// (docker/topology kind 는 slice 5b 에서 제거 — docker→self-hosted 러너, topology→nomad/k8s 의 traceSource 설정[= topology capability].)
 // 등록 가능한 1급 엔티티(소유/버전/lifecycle 은 하니스·데이터셋·judge 와 동일 패턴, 불변 버전 SSOT).
 // ⚠️ 비밀 금지 — Nomad 토큰/kubeconfig 같은 자격증명은 테넌트 SecretStore 에서 주입(디스패치 시). 여기엔 비-비밀 연결정보만.
 // @assay/backends 의 BackendConfig 와 같은 필드(이름 대신 id/version) — buildRuntimeBackend 가 이걸 라이브 Backend 로 만든다.
@@ -25,6 +25,14 @@ export const LocalRuntimeSpecSchema = z.object({ kind: z.literal("local"), ...ba
 // docker(단일 호스트 데몬) 런타임 kind 는 제거됨(slice 5b) — "단일 docker 호스트"는 self-hosted 러너가
 // 로컬 docker 로 실행(pull)해 대체한다. 컨테이너 실행 능력은 이제 런타임 kind 가 아니라 `docker` capability 다.
 
+// topology 지원 설정 — nomad/k8s 런타임이 traceSource 를 가지면 멀티서비스 토폴로지 하니스(kind:"service",
+// 예: browser-use)를 호스팅한다(→ apps/api 가 ServiceTopologyBackend 로 라우팅; capability 로는 `topology`).
+// traceSource 없으면 일반 컴퓨트 런타임. (옛 topology kind 는 slice 5b-2 제거 — orchestrator 는 kind[nomad|k8s]에서 암시.)
+const topologyConfig = {
+  traceSource: z.object({ kind: z.enum(["otel", "mlflow"]), endpoint: z.string() }).optional(),
+  browserImage: z.string().optional(), // per-case 브라우저 이미지(없으면 런타임 기본)
+};
+
 export const NomadRuntimeSpecSchema = z.object({
   kind: z.literal("nomad"),
   ...base,
@@ -36,6 +44,7 @@ export const NomadRuntimeSpecSchema = z.object({
   // 컨트롤플레인↔Nomad API 인증(ACL)용 토큰의 SecretStore 키 이름 — X-Nomad-Token 헤더로 쓰인다.
   // 값(토큰)이 아니라 이름만. 이 토큰은 alloc env 로 주입되지 않는다(클러스터 토큰을 에이전트에 노출 금지).
   authSecret: z.string().optional(),
+  ...topologyConfig, // traceSource 있으면 이 Nomad 런타임이 topology(서비스 하니스)를 호스팅
 });
 
 export const K8sRuntimeSpecSchema = z.object({
@@ -52,28 +61,12 @@ export const K8sRuntimeSpecSchema = z.object({
   // 안 되는 클러스터(EKS/GKE 등)용. 디스패치 시 임시파일(0600)로 materialize → kubectl --kubeconfig, 그 뒤 제거.
   // 인증 우선순위: kubeconfigSecret > (server + authSecret) > context. 이 값도 alloc env 로 새지 않는다.
   kubeconfigSecret: z.string().optional(),
-});
-
-// topology — 멀티서비스 토폴로지 하니스(kind:"service", 예: browser-use)를 위한 런타임. orchestrator(nomad|k8s) 위에
-// warm 서비스 풀 + per-case 브라우저로 구동하고 OTel/MLflow 에서 트레이스를 당겨 채점한다(@assay/topology
-// ServiceTopologyBackend). 토폴로지 모양(services/dependencies/target)은 하니스 spec 이, 여기선 "어느 클러스터 + 어느
-// trace source" 만 정의. 클러스터 토큰/kubeconfig 는 SecretStore(authSecret) — 여긴 비-비밀 연결정보만.
-export const TopologyRuntimeSpecSchema = z.object({
-  kind: z.literal("topology"),
-  ...base,
-  orchestrator: z.enum(["nomad", "k8s"]),
-  addr: z.string().url().optional(), // nomad HTTP endpoint
-  context: z.string().optional(), // k8s kubeconfig context
-  namespace: z.string().optional(),
-  browserImage: z.string().optional(), // per-case 브라우저 이미지(없으면 런타임 기본)
-  traceSource: z.object({ kind: z.enum(["otel", "mlflow"]), endpoint: z.string() }), // 트레이스 pull 소스
-  authSecret: z.string().optional(), // 클러스터 API 토큰의 SecretStore 키 이름(값 아님)
+  ...topologyConfig, // traceSource 있으면 이 K8s 런타임이 topology(서비스 하니스)를 호스팅
 });
 
 export const RuntimeSpecSchema = z.discriminatedUnion("kind", [
   LocalRuntimeSpecSchema,
   NomadRuntimeSpecSchema,
   K8sRuntimeSpecSchema,
-  TopologyRuntimeSpecSchema,
 ]);
 export type RuntimeSpec = z.infer<typeof RuntimeSpecSchema>;

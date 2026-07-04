@@ -10,18 +10,26 @@ import {
 } from "@assay/topology";
 import { buildTraceSource } from "@assay/trace";
 
-// topology RuntimeSpec → ServiceTopologyBackend(Backend). @assay/backends 는 @assay/topology 를 의존할 수 없어서(순환:
-// topology 가 backends 의 Backend 를 구현) 이 와이어링은 둘 다 의존하는 apps/api 에 둔다. RuntimeDispatcher 가
-// 토폴로지 런타임을 만나면 이걸로 백엔드를 빌드해 Scheduler 레지스트리에 올린다(nomad/k8s 와 동일한 라우팅 경로).
-// 클러스터 구동(deploy/drive/trace pull)은 라이브 — 테넌트 Nomad/K8s + browser-use 이미지가 필요(Phase 2). 여기선 구성만.
+// topology-capable nomad/k8s RuntimeSpec → ServiceTopologyBackend(Backend). @assay/backends 는 @assay/topology 를
+// 의존할 수 없어서(순환) 이 와이어링은 둘 다 의존하는 apps/api 에 둔다. traceSource 를 가진 nomad/k8s 런타임을
+// 만나면(옛 topology kind 대신 — slice 5b-2) 이걸로 백엔드를 빌드해 Scheduler 레지스트리에 올린다.
+// orchestrator 는 이제 런타임 kind(nomad|k8s) 에서 암시. 클러스터 구동은 라이브(테넌트 Nomad/K8s + browser-use 이미지).
 export function buildTopologyBackend(
-  spec: Extract<RuntimeSpec, { kind: "topology" }>,
+  spec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }>,
   deps: { harnesses: HarnessInstanceRegistry; callbackRendezvous?: CallbackRendezvous },
 ): Backend {
+  const ts = spec.traceSource;
+  if (!ts) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { runtime: spec.id, kind: spec.kind },
+      "topology 백엔드는 traceSource 설정이 필요합니다(이 런타임은 topology-capable 이 아닙니다).",
+    );
+  }
   const runtime: TopologyRuntime =
-    spec.orchestrator === "nomad"
+    spec.kind === "nomad"
       ? new NomadTopologyRuntime({
-          addr: spec.addr ?? "",
+          addr: spec.addr,
           ...(spec.namespace ? { namespace: spec.namespace } : {}),
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
         })
@@ -30,7 +38,7 @@ export function buildTopologyBackend(
           ...(spec.namespace ? { namespacePrefix: spec.namespace } : {}),
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
         });
-  const traceSource = buildTraceSource({ kind: spec.traceSource.kind, endpoint: spec.traceSource.endpoint });
+  const traceSource = buildTraceSource({ kind: ts.kind, endpoint: ts.endpoint });
   return new ServiceTopologyBackend({
     runtime,
     traceSource,

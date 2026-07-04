@@ -12,7 +12,7 @@ import { Input, Label } from '@/shared/ui/input'
 
 import { createRuntimeAction, probeRuntimeAction } from '../api/register-runtime'
 
-type Kind = 'nomad' | 'k8s' | 'topology'
+type Kind = 'nomad' | 'k8s'
 
 // 등록 인프라 종류 — local(dev 전용) 과 docker(단일 호스트, slice 5b 에서 self-hosted 러너로 흡수)는 등록 UI 에서
 // 제외. "내 머신/단일 docker 호스트"는 러너로 연결하고, 컨테이너 실행은 런타임 kind 가 아니라 docker capability 다.
@@ -26,11 +26,6 @@ const KINDS: { value: Kind; label: string; description: string }[] = [
     value: 'k8s',
     label: 'Kubernetes',
     description: 'K8s 클러스터 — Job 으로 배치 (runtimeClassName 격리).',
-  },
-  {
-    value: 'topology',
-    label: 'Topology',
-    description: '멀티서비스 토폴로지 하니스용 — orchestrator(nomad|k8s) + 트레이스 소스.',
   },
 ]
 
@@ -50,7 +45,7 @@ interface Fields {
   server: string
   authSecret: string
   kubeconfigSecret: string
-  orchestrator: 'nomad' | 'k8s'
+  supportsTopology: boolean
   browserImage: string
   traceKind: 'otel' | 'mlflow'
   traceEndpoint: string
@@ -72,7 +67,7 @@ const INITIAL: Fields = {
   server: '',
   authSecret: '',
   kubeconfigSecret: '',
-  orchestrator: 'nomad',
+  supportsTopology: false,
   browserImage: '',
   traceKind: 'otel',
   traceEndpoint: '',
@@ -95,6 +90,14 @@ function buildSpec(f: Fields): Record<string, unknown> {
     ...(csv(f.tags).length ? { tags: csv(f.tags) } : {}),
   }
   const opt = (k: string, v: string) => (t(v) ? { [k]: t(v) } : {})
+  // topology 지원(nomad/k8s): traceSource + browserImage + topology capability 를 스펙에 실는다.
+  const topology = f.supportsTopology
+    ? {
+        traceSource: { kind: f.traceKind, endpoint: t(f.traceEndpoint) },
+        ...opt('browserImage', f.browserImage),
+        capabilities: ['topology'],
+      }
+    : {}
   if (f.kind === 'nomad')
     return {
       ...base,
@@ -104,28 +107,19 @@ function buildSpec(f: Fields): Record<string, unknown> {
       ...(csv(f.datacenters).length ? { datacenters: csv(f.datacenters) } : {}),
       ...opt('runtime', f.runtime),
       ...opt('authSecret', f.authSecret),
+      ...topology,
     }
-  if (f.kind === 'k8s')
-    return {
-      ...base,
-      image: t(f.image),
-      ...opt('context', f.context),
-      ...opt('namespace', f.namespace),
-      ...opt('runtimeClass', f.runtimeClass),
-      ...opt('server', f.server),
-      ...opt('authSecret', f.authSecret),
-      ...opt('kubeconfigSecret', f.kubeconfigSecret),
-    }
-  // topology
+  // k8s
   return {
     ...base,
-    orchestrator: f.orchestrator,
-    ...opt('addr', f.addr),
+    image: t(f.image),
     ...opt('context', f.context),
     ...opt('namespace', f.namespace),
-    ...opt('browserImage', f.browserImage),
-    traceSource: { kind: f.traceKind, endpoint: t(f.traceEndpoint) },
+    ...opt('runtimeClass', f.runtimeClass),
+    ...opt('server', f.server),
     ...opt('authSecret', f.authSecret),
+    ...opt('kubeconfigSecret', f.kubeconfigSecret),
+    ...topology,
   }
 }
 
@@ -136,8 +130,8 @@ function requiredError(f: Fields): string | null {
   if (f.kind === 'nomad' && (!f.addr.trim() || !f.image.trim()))
     return 'Nomad 는 주소(addr)와 이미지가 필요해요.'
   if (f.kind === 'k8s' && !f.image.trim()) return 'K8s 는 러너 이미지가 필요해요.'
-  if (f.kind === 'topology' && !f.traceEndpoint.trim())
-    return 'Topology 는 트레이스 소스 엔드포인트가 필요해요.'
+  if (f.supportsTopology && !f.traceEndpoint.trim())
+    return '토폴로지 지원은 트레이스 엔드포인트가 필요해요.'
   return null
 }
 
@@ -206,7 +200,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
     })
   }
 
-  const cluster = f.kind === 'nomad' || f.kind === 'k8s' || f.kind === 'topology'
+  const cluster = f.kind === 'nomad' || f.kind === 'k8s'
 
   return (
     <div className="max-w-2xl space-y-6">
@@ -374,48 +368,42 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
         </div>
       )}
 
-      {/* topology */}
-      {f.kind === 'topology' && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="오케스트레이터">
-              <Combobox
-                value={f.orchestrator}
-                onChange={(v) => set('orchestrator', v as 'nomad' | 'k8s')}
-                options={[
-                  { value: 'nomad', label: 'Nomad' },
-                  { value: 'k8s', label: 'Kubernetes' },
-                ]}
-              />
-            </Field>
-            <Field label="네임스페이스 (선택)">
-              <Input
-                value={f.namespace}
-                onChange={(e) => set('namespace', e.target.value)}
-                placeholder="assay"
-                autoComplete="off"
-              />
-            </Field>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label={f.orchestrator === 'nomad' ? '주소 (addr, 선택)' : '컨텍스트 (선택)'}>
-              {f.orchestrator === 'nomad' ? (
+      {/* topology 지원 — traceSource 를 넣으면 이 nomad/k8s 런타임이 서비스 토폴로지 하니스(browser-use 등)도 호스팅(topology capability) */}
+      <div className="space-y-3 rounded-lg border bg-card px-4 py-3.5 shadow-raise">
+        <label className="flex cursor-pointer items-center gap-2.5">
+          <input
+            type="checkbox"
+            className="accent-primary"
+            checked={f.supportsTopology}
+            onChange={(e) => set('supportsTopology', e.target.checked)}
+          />
+          <span className="text-[13px] font-[510] text-foreground">
+            서비스 토폴로지 하니스도 이 런타임으로 (topology)
+          </span>
+        </label>
+        {f.supportsTopology && (
+          <div className="space-y-4 pl-[26px]">
+            <div className="grid grid-cols-2 gap-4">
+              <Field label="트레이스 소스">
+                <Combobox
+                  value={f.traceKind}
+                  onChange={(v) => set('traceKind', v as 'otel' | 'mlflow')}
+                  options={[
+                    { value: 'otel', label: 'OTel' },
+                    { value: 'mlflow', label: 'MLflow' },
+                  ]}
+                />
+              </Field>
+              <Field label="트레이스 엔드포인트" hint="채점용 트레이스를 당겨올 소스.">
                 <Input
-                  value={f.addr}
-                  onChange={(e) => set('addr', e.target.value)}
-                  placeholder="http://nomad.internal:4646"
+                  value={f.traceEndpoint}
+                  onChange={(e) => set('traceEndpoint', e.target.value)}
+                  placeholder="http://mlflow.internal:5000"
                   autoComplete="off"
                 />
-              ) : (
-                <Input
-                  value={f.context}
-                  onChange={(e) => set('context', e.target.value)}
-                  placeholder="prod-cluster"
-                  autoComplete="off"
-                />
-              )}
-            </Field>
-            <Field label="브라우저 이미지 (선택)" hint="per-case 브라우저 이미지.">
+              </Field>
+            </div>
+            <Field label="브라우저 이미지 (선택)" hint="per-case 브라우저 이미지(browser-use 등).">
               <Input
                 value={f.browserImage}
                 onChange={(e) => set('browserImage', e.target.value)}
@@ -424,36 +412,8 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
               />
             </Field>
           </div>
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="트레이스 소스">
-              <Combobox
-                value={f.traceKind}
-                onChange={(v) => set('traceKind', v as 'otel' | 'mlflow')}
-                options={[
-                  { value: 'otel', label: 'OTel' },
-                  { value: 'mlflow', label: 'MLflow' },
-                ]}
-              />
-            </Field>
-            <Field label="트레이스 엔드포인트" hint="트레이스를 당겨올 소스.">
-              <Input
-                value={f.traceEndpoint}
-                onChange={(e) => set('traceEndpoint', e.target.value)}
-                placeholder="http://mlflow.internal:5000"
-                autoComplete="off"
-              />
-            </Field>
-          </div>
-          <Field label="클러스터 API 토큰 시크릿 (선택)" hint={secretHint}>
-            <Input
-              value={f.authSecret}
-              onChange={(e) => set('authSecret', e.target.value)}
-              placeholder="cluster-token"
-              autoComplete="off"
-            />
-          </Field>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* 공통: 설명·태그 */}
       <div className="grid grid-cols-2 gap-4">

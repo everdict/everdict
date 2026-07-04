@@ -19,6 +19,7 @@ export const CAPABILITY_DEFS = {
   docker: { kind: "functional" }, // 컨테이너 이미지 실행(case.image)
   browser: { kind: "functional" }, // Playwright 브라우저 자동화(확장 아님)
   "computer-use": { kind: "functional" }, // OS GUI 제어(screenshot/click/type)
+  topology: { kind: "functional" }, // 멀티서비스 토폴로지 오케스트레이션(service 하니스; nomad/k8s + traceSource)
   sandbox: { kind: "security" }, // 강격리(gVisor/Kata/Firecracker/Hyper-V/KVM)
   "codex-login": { kind: "auth" }, // 머신 codex 로그인(own-pays)
   "claude-login": { kind: "auth" }, // 머신 claude 로그인(own-pays)

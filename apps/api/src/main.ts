@@ -213,10 +213,11 @@ async function main(): Promise<void> {
   const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
   // harness env {secretRef} 해석용 두 티어 — 공유(owner='') + 제출자 개인(owner=subject). run/scorecard 가 제출자로 호출.
   const scopedSecretsFor = (tenant: string, subject?: string) => secretStore.scopedEntries(tenant, subject ?? "");
-  // RuntimeSpec → 라이브 백엔드. topology 런타임 → ServiceTopologyBackend, 나머지는 buildRuntimeBackend(local/docker/nomad/k8s).
+  // RuntimeSpec → 라이브 백엔드. traceSource 를 가진 nomad/k8s(= topology-capable) → ServiceTopologyBackend,
+  // 나머지는 buildRuntimeBackend(local/nomad/k8s). (옛 topology kind 는 slice 5b-2 에서 nomad/k8s + traceSource 로 접힘.)
   // 디스패치와 연결 테스트(probe)가 같은 빌더/인증 경로를 쓰도록 한 곳에서 정의.
   const runtimeBuildBackend = (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) =>
-    spec.kind === "topology"
+    (spec.kind === "nomad" || spec.kind === "k8s") && spec.traceSource
       ? buildTopologyBackend(spec, {
           harnesses: harnessInstanceRegistry,
           ...(callbackRendezvous ? { callbackRendezvous } : {}),

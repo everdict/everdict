@@ -3,20 +3,21 @@ import type { HarnessInstanceRegistry } from "@assay/registry";
 import { describe, expect, it } from "vitest";
 import { buildTopologyBackend } from "./topology-backend.js";
 
-const nomadSpec: Extract<RuntimeSpec, { kind: "topology" }> = {
-  kind: "topology",
+// topology kind 제거(5b-2) → topology-capable nomad/k8s(= traceSource 를 가진 런타임). orchestrator 는 kind 에서 암시.
+const nomadSpec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }> = {
+  kind: "nomad",
   id: "topo-nomad",
   version: "1.0.0",
-  orchestrator: "nomad",
   addr: "http://nomad.internal:4646",
+  image: "ghcr.io/acme/agent:v1",
   traceSource: { kind: "otel", endpoint: "http://otel:4318" },
   tags: [],
 };
-const k8sSpec: Extract<RuntimeSpec, { kind: "topology" }> = {
-  kind: "topology",
+const k8sSpec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }> = {
+  kind: "k8s",
   id: "topo-k8s",
   version: "1.0.0",
-  orchestrator: "k8s",
+  image: "ghcr.io/acme/agent:v1",
   context: "kind-assay",
   traceSource: { kind: "mlflow", endpoint: "http://mlflow:5000" },
   tags: [],
