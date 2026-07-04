@@ -64,6 +64,8 @@ export function ConnectRepoDialog({
   const [repository, setRepository] = useState('')
   const [slots, setSlots] = useState<Record<string, SlotState>>(() => initSlots(slotChoices, kind))
   const [dataset, setDataset] = useState('')
+  const [runsOn, setRunsOn] = useState('')
+  const [runtime, setRuntime] = useState('')
   const [saveError, setSaveError] = useState<string>()
   const [saving, startSaving] = useTransition()
   const [savedRepo, setSavedRepo] = useState<string>() // 저장 성공한 레포(셋업 PR 단계로 전환)
@@ -77,6 +79,8 @@ export function ConnectRepoDialog({
     setRepository('')
     setSlots(initSlots(slotChoices, kind))
     setDataset('')
+    setRunsOn('')
+    setRuntime('')
     setSaveError(undefined)
     setSavedRepo(undefined)
     setConnectionId(connections.length === 1 && connections[0] ? connections[0].id : '')
@@ -125,6 +129,8 @@ export function ConnectRepoDialog({
         harness: harnessId,
         ...(dataset ? { dataset } : {}),
         slots: slotPayload,
+        ...(runsOn.trim() ? { runsOn: runsOn.trim() } : {}),
+        ...(runtime.trim() ? { runtime: runtime.trim() } : {}),
       })
       if (r.ok && r.links) {
         onSaved(r.links)
@@ -347,6 +353,29 @@ export function ConnectRepoDialog({
                 />
                 <p className="text-[12px] text-faint">
                   지금 안 정하면 셋업 PR에 TODO로 남아요. 나중에 채워도 돼요.
+                </p>
+              </div>
+            )}
+
+            {/* 5. 셀프호스티드 러너 — CI 를 팀 빌드 서버에서 돌리려면(선택). github-install 로 세운 러너 라벨/런타임. */}
+            {repository && (
+              <div className="space-y-1.5">
+                <Label>5. 셀프호스티드 러너 (선택)</Label>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <Input
+                    value={runsOn}
+                    onChange={(e) => setRunsOn(e.target.value)}
+                    placeholder="runs-on: [self-hosted, assay-…]"
+                  />
+                  <Input
+                    value={runtime}
+                    onChange={(e) => setRuntime(e.target.value)}
+                    placeholder="runtime: self:ws:…"
+                  />
+                </div>
+                <p className="text-[12px] text-faint">
+                  비우면 <span className="font-mono">ubuntu-latest</span> + 관리형 런타임이에요.
+                  설정 › 공유 러너에서 “GitHub Actions 러너”로 만들면 넣을 값을 알려줘요.
                 </p>
               </div>
             )}

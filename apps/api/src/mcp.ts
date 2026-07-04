@@ -1312,15 +1312,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "create_comment",
       {
-        description: "리소스에 댓글 작성. 작성자 = 나(subject). mentions 로 멤버 subject 를 @언급하면 알림이 간다.",
+        description: "리소스에 댓글 작성. 작성자 = 나(subject). parent_id 로 대댓글, mentions 로 멤버 subject 를 @언급하면 알림이 간다.",
         inputSchema: {
           resource_type: z.enum(COMMENT_RESOURCE_TYPES),
           resource_id: z.string(),
+          parent_id: z.string().optional().describe("대댓글이면 부모 댓글 id(1단계 스레드)"),
           body: z.string().min(1),
           mentions: z.array(z.string()).optional().describe("@언급할 멤버 subject 들(알림 대상)"),
         },
       },
-      ({ resource_type, resource_id, body, mentions }) =>
+      ({ resource_type, resource_id, parent_id, body, mentions }) =>
         run(principal, "comments:write", async () =>
           ok(
             await comments.create({
@@ -1329,6 +1330,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               resourceId: resource_id,
               author: principal.subject,
               body,
+              ...(parent_id ? { parentId: parent_id } : {}),
               ...(mentions ? { mentions } : {}),
             }),
           ),

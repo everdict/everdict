@@ -109,8 +109,8 @@ export class NotificationService {
         kind: "comment_mention",
         title: `${input.actorName}님이 회원님을 언급했어요`,
         body: preview,
-        // 현재 멘션은 데이터셋 댓글만 — resourceType 이 확장되면 여기 링크 매핑도 확장.
-        link: input.resourceType === "dataset" ? { datasetId: input.resourceId, commentId: input.commentId } : {},
+        // 리소스 제네릭 링크 — 웹이 resourceType→경로 매핑 + commentId 앵커로 그 댓글까지 스크롤.
+        link: { resourceType: input.resourceType, resourceId: input.resourceId, commentId: input.commentId },
       });
     }
   }

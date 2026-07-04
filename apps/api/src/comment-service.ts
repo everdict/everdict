@@ -1,9 +1,17 @@
 import { BadRequestError, ForbiddenError, NotFoundError } from "@assay/core";
 import type { CommentRecord, CommentStore } from "@assay/db";
 
-// 댓글 서비스 — 리소스(데이터셋 등)에 대한 협업 논의. HTTP 라우트와 MCP 툴이 공유(BFF↔MCP 패리티).
-// authZ: 조회=comments:read(라우트), 작성=comments:write(라우트), 삭제=작성자-or-admin(여기서 판정).
-export const COMMENT_RESOURCE_TYPES = ["dataset"] as const;
+// 댓글 서비스 — 리소스(하니스/데이터셋/스코어카드/뷰/예약/작업/런타임)에 대한 협업 논의 + 1단계 대댓글.
+// HTTP 라우트와 MCP 툴이 공유(BFF↔MCP 패리티). authZ: 조회=comments:read, 작성=comments:write, 삭제=작성자-or-admin.
+export const COMMENT_RESOURCE_TYPES = [
+  "dataset",
+  "harness",
+  "scorecard",
+  "view",
+  "schedule",
+  "run",
+  "runtime",
+] as const;
 export type CommentResourceType = (typeof COMMENT_RESOURCE_TYPES)[number];
 
 const MAX_BODY = 10_000; // 과도한 본문 방지(리치 논의는 충분, DoS 는 차단)
@@ -39,12 +47,14 @@ export class CommentService {
   }
 
   // 댓글 작성. body 빈값/과길이는 400. author = 작성자 subject. mentions = @언급된 subject 들(작성자 제외 후 알림).
+  // parentId 가 있으면 대댓글 — 같은 리소스의 "최상위" 댓글에만 달 수 있다(1단계 스레드; 부모가 이미 대댓글이면 400).
   async create(input: {
     tenant: string;
     resourceType: string;
     resourceId: string;
     author: string;
     body: string;
+    parentId?: string;
     mentions?: string[];
   }): Promise<CommentRecord> {
     this.assertType(input.resourceType);
@@ -52,12 +62,24 @@ export class CommentService {
     if (body.length === 0) throw new BadRequestError("BAD_REQUEST", undefined, "댓글 내용을 입력하세요.");
     if (body.length > MAX_BODY)
       throw new BadRequestError("BAD_REQUEST", { max: MAX_BODY }, `댓글은 ${MAX_BODY}자 이하여야 합니다.`);
+    if (input.parentId) {
+      const parent = await this.deps.store.get(input.tenant, input.parentId);
+      if (!parent || parent.resourceType !== input.resourceType || parent.resourceId !== input.resourceId)
+        throw new BadRequestError("BAD_REQUEST", { parentId: input.parentId }, "부모 댓글을 찾을 수 없습니다.");
+      if (parent.parentId)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { parentId: input.parentId },
+          "대댓글에는 다시 답글을 달 수 없습니다.",
+        );
+    }
     const ts = this.now();
     const record: CommentRecord = {
       id: this.newId(),
       tenant: input.tenant,
       resourceType: input.resourceType,
       resourceId: input.resourceId,
+      ...(input.parentId ? { parentId: input.parentId } : {}),
       author: input.author,
       body,
       createdAt: ts,

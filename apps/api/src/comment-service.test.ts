@@ -51,7 +51,7 @@ describe("CommentService", () => {
   it("지원하지 않는 resourceType 은 400", async () => {
     const { service } = svc();
     await expect(
-      service.create({ tenant: "acme", resourceType: "harness", resourceId: "h", author: "u", body: "x" }),
+      service.create({ tenant: "acme", resourceType: "project", resourceId: "p", author: "u", body: "x" }),
     ).rejects.toThrow(/지원하지 않는/);
   });
 
@@ -113,6 +113,92 @@ describe("CommentService", () => {
     });
     await service.create({ tenant: "acme", resourceType: "dataset", resourceId: "d", author: "u", body: "멘션 없음" });
     expect(called).toBe(0);
+  });
+
+  it("대댓글: 최상위 댓글에만 달 수 있고, 대댓글에 다시 답글은 400", async () => {
+    const { service } = svc();
+    const top = await service.create({
+      tenant: "acme",
+      resourceType: "dataset",
+      resourceId: "d",
+      author: "u1",
+      body: "최상위",
+    });
+    const reply = await service.create({
+      tenant: "acme",
+      resourceType: "dataset",
+      resourceId: "d",
+      author: "u2",
+      body: "답글",
+      parentId: top.id,
+    });
+    expect(reply.parentId).toBe(top.id);
+    // 대댓글에 다시 답글 → 400(1단계 강제)
+    await expect(
+      service.create({
+        tenant: "acme",
+        resourceType: "dataset",
+        resourceId: "d",
+        author: "u3",
+        body: "재답글",
+        parentId: reply.id,
+      }),
+    ).rejects.toThrow(/다시 답글/);
+    // 다른 리소스/없는 부모 → 400
+    await expect(
+      service.create({
+        tenant: "acme",
+        resourceType: "dataset",
+        resourceId: "other",
+        author: "u3",
+        body: "x",
+        parentId: top.id,
+      }),
+    ).rejects.toThrow(/부모 댓글/);
+  });
+
+  it("부모 삭제 시 대댓글도 함께 삭제된다(cascade)", async () => {
+    const { service } = svc();
+    const top = await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u1",
+      body: "부모",
+    });
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u2",
+      body: "답글1",
+      parentId: top.id,
+    });
+    await service.create({
+      tenant: "acme",
+      resourceType: "harness",
+      resourceId: "h",
+      author: "u3",
+      body: "답글2",
+      parentId: top.id,
+    });
+    expect(await service.list("acme", "harness", "h")).toHaveLength(3);
+    await service.delete({ tenant: "acme", id: top.id, subject: "u1", isAdmin: false });
+    expect(await service.list("acme", "harness", "h")).toHaveLength(0); // 부모+대댓글 모두 삭제
+  });
+
+  it("확장된 resourceType(harness/scorecard/runtime 등)도 허용된다", async () => {
+    const { service } = svc();
+    for (const rt of ["harness", "scorecard", "view", "schedule", "run", "runtime"]) {
+      const c = await service.create({
+        tenant: "acme",
+        resourceType: rt,
+        resourceId: "x",
+        author: "u",
+        body: `${rt} 댓글`,
+      });
+      expect(c.resourceType).toBe(rt);
+    }
   });
 
   it("작성자 본인은 삭제 가능(admin 아니어도)", async () => {

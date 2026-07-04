@@ -1,6 +1,1 @@
-export {
-  ActivityTimeline,
-  type ActivityItem,
-  type Actor,
-  type Mentionable,
-} from './ui/activity-timeline'
+export { ActivityTimeline, type ActivityItem, type Actor } from './ui/activity-timeline'

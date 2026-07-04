@@ -10,6 +10,7 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
+import { CommentsSection } from '@/features/discuss'
 
 export const dynamic = 'force-dynamic'
 
@@ -115,6 +116,8 @@ export default async function RuntimeDetailPage({
           </div>
         </Card>
       )}
+
+      <CommentsSection workspace={workspace} resourceType="runtime" resourceId={id} title="논의" />
     </div>
   )
 }

@@ -21,12 +21,14 @@ export const NotificationRecordSchema = z.object({
   kind: NotificationKindSchema,
   title: z.string(),
   body: z.string().optional(),
-  // 클릭 시 이동할 대상 — run / scorecard 상세, 또는 데이터셋 댓글(멘션 시 commentId 앵커로 스크롤).
+  // 클릭 시 이동할 대상 — run/scorecard 상세, 또는 리소스 댓글(멘션: resourceType+resourceId 로 해당 상세 +
+  // commentId 앵커로 스크롤). resourceType ∈ dataset|harness|scorecard|view|schedule|run|runtime.
   link: z
     .object({
       runId: z.string().optional(),
       scorecardId: z.string().optional(),
-      datasetId: z.string().optional(),
+      resourceType: z.string().optional(),
+      resourceId: z.string().optional(),
       commentId: z.string().optional(),
     })
     .optional(),

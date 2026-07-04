@@ -16,12 +16,26 @@ import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-
 const POLL_MS = 25_000
 const NATIVE_FIRE_CAP = 3 // 한 폴링에서 네이티브 알림 최대 발화 수(폭주 방지)
 
+// 리소스 타입 → 상세 경로 세그먼트(예약은 상세가 없어 edit 로). 댓글 멘션 링크가 이 매핑으로 상세로 이동.
+const RESOURCE_PATH: Record<string, (id: string) => string> = {
+  dataset: (id) => `datasets/${id}`,
+  harness: (id) => `harnesses/${id}`,
+  scorecard: (id) => `scorecards/${id}`,
+  view: (id) => `views/${id}`,
+  schedule: (id) => `schedules/${id}/edit`,
+  run: (id) => `runs/${id}`,
+  runtime: (id) => `runtimes/${id}`,
+}
+
 function hrefOf(workspace: string, n: NotificationItem): string {
   if (n.link?.runId) return `/${workspace}/runs/${n.link.runId}`
   if (n.link?.scorecardId) return `/${workspace}/scorecards/${n.link.scorecardId}`
-  // 데이터셋 댓글 멘션 — 그 데이터셋 상세로, commentId 앵커로 해당 댓글까지 스크롤.
-  if (n.link?.datasetId)
-    return `/${workspace}/datasets/${encodeURIComponent(n.link.datasetId)}${n.link.commentId ? `#comment-${n.link.commentId}` : ''}`
+  // 리소스 댓글 멘션 — resourceType→경로 매핑, commentId 앵커로 해당 댓글까지 스크롤.
+  if (n.link?.resourceType && n.link?.resourceId) {
+    const seg = RESOURCE_PATH[n.link.resourceType]?.(encodeURIComponent(n.link.resourceId))
+    if (seg)
+      return `/${workspace}/${seg}${n.link.commentId ? `#comment-${n.link.commentId}` : ''}`
+  }
   return `/${workspace}`
 }
 

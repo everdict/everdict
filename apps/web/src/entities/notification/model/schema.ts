@@ -24,7 +24,8 @@ export const notificationSchema = z.object({
     .object({
       runId: z.string().optional(),
       scorecardId: z.string().optional(),
-      datasetId: z.string().optional(),
+      resourceType: z.string().optional(),
+      resourceId: z.string().optional(),
       commentId: z.string().optional(),
     })
     .optional(),

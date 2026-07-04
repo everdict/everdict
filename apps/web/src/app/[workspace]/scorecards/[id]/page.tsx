@@ -19,6 +19,7 @@ import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
+import { CommentsSection } from '@/features/discuss'
 
 export const dynamic = 'force-dynamic'
 
@@ -484,6 +485,8 @@ export default async function ScorecardDetailPage({
           </div>
         )}
       </section>
+
+      <CommentsSection workspace={workspace} resourceType="scorecard" resourceId={id} title="논의" />
     </div>
   )
 }

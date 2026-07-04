@@ -28,12 +28,14 @@ export interface SetupPrResult {
   error?: string
 }
 
-// upsert 링크(레포↔하니스 슬롯) 입력 — dataset/slots 는 선택. 컨트롤플레인이 최종 검증(admin 게이트).
+// upsert 링크(레포↔하니스 슬롯) 입력 — dataset/slots/runsOn/runtime 은 선택. 컨트롤플레인이 최종 검증(admin 게이트).
 export interface UpsertCiLinkInput {
   repository: string
   harness: string
   dataset?: string
   slots?: Record<string, { path?: string }>
+  runsOn?: string // 셀프호스티드 배치(선택) — 워크플로 runs-on
+  runtime?: string // run-eval runtime 입력(예: self:ws:<id>)
 }
 
 // 레포 목록(picker) — 내 GitHub 연결로 프록시. provider 가 github(-enterprise) 아니면 컨트롤플레인이 400.

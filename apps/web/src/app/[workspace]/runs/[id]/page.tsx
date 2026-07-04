@@ -11,6 +11,7 @@ import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatusPill } from '@/shared/ui/status-pill'
+import { CommentsSection } from '@/features/discuss'
 
 export const dynamic = 'force-dynamic'
 
@@ -183,6 +184,8 @@ export default async function RunDetailPage({
           </Card>
         </section>
       )}
+
+      <CommentsSection workspace={workspace} resourceType="run" resourceId={id} title="논의" />
     </div>
   )
 }

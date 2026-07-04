@@ -16,6 +16,8 @@ export const ciLinkSchema = z.object({
   slots: z.record(z.string(), ciLinkSlotSchema).default({}),
   createdBy: z.string(), // 감사용(발사 인증과 무관)
   disabled: z.boolean().optional(),
+  runsOn: z.string().optional(), // 셀프호스티드 배치(선택) — 워크플로 runs-on 값(예: "[self-hosted, assay-<id>]")
+  runtime: z.string().optional(), // run-eval runtime 입력(예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서
 })
 export type CiLink = z.infer<typeof ciLinkSchema>
 

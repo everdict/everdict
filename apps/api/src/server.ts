@@ -76,10 +76,11 @@ const ReadNotificationsBodySchema = z.object({
   all: z.boolean().optional(),
 });
 
-// 댓글 작성 본문 — 대상(resourceType/resourceId) + 본문 + @멘션 subject 들(알림 대상).
+// 댓글 작성 본문 — 대상(resourceType/resourceId) + 본문 + 선택적 parentId(대댓글) + @멘션 subject 들.
 const CreateCommentBodySchema = z.object({
   resourceType: z.enum(COMMENT_RESOURCE_TYPES),
   resourceId: z.string().min(1),
+  parentId: z.string().min(1).optional(), // 대댓글이면 부모 댓글 id(1단계 스레드)
   body: z.string().min(1),
   mentions: z.array(z.string().min(1)).max(50).optional(), // @언급된 멤버 subject 들(클라이언트 picker 가 채움)
 });
@@ -1983,6 +1984,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         resourceId: body.data.resourceId,
         author: principal.subject,
         body: body.data.body,
+        ...(body.data.parentId ? { parentId: body.data.parentId } : {}),
         ...(body.data.mentions ? { mentions: body.data.mentions } : {}),
       });
       return reply.code(201).send(comment);

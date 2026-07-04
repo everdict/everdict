@@ -6,8 +6,9 @@ import type { SqlClient } from "./client.js";
 export const CommentRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
-  resourceType: z.string(), // "dataset" (확장 가능)
+  resourceType: z.string(), // "dataset"|"harness"|"scorecard"|"view"|"schedule"|"run"|"runtime"
   resourceId: z.string(),
+  parentId: z.string().optional(), // 대댓글이면 부모 댓글 id(같은 리소스, 최상위만 부모 — 1단계 스레드). 없으면 최상위.
   author: z.string(), // 작성자 subject
   body: z.string(),
   createdAt: z.string(),
@@ -41,8 +42,11 @@ export class InMemoryCommentStore implements CommentStore {
   }
 
   async remove(tenant: string, id: string): Promise<void> {
-    const i = this.rows.findIndex((r) => r.tenant === tenant && r.id === id);
-    if (i >= 0) this.rows.splice(i, 1);
+    // 자기 자신 + 이 댓글에 달린 대댓글(children)까지 함께 삭제(고아 대댓글 방지).
+    for (let i = this.rows.length - 1; i >= 0; i--) {
+      const r = this.rows[i];
+      if (r && r.tenant === tenant && (r.id === id || r.parentId === id)) this.rows.splice(i, 1);
+    }
   }
 }
 
@@ -51,6 +55,7 @@ interface CommentRow {
   tenant: string;
   resource_type: string;
   resource_id: string;
+  parent_id: string | null;
   author: string;
   body: string;
   created_at: string | Date;
@@ -63,6 +68,7 @@ function rowToRecord(row: CommentRow): CommentRecord {
     tenant: row.tenant,
     resourceType: row.resource_type,
     resourceId: row.resource_id,
+    ...(row.parent_id !== null ? { parentId: row.parent_id } : {}),
     author: row.author,
     body: row.body,
     createdAt: new Date(row.created_at).toISOString(),
@@ -75,13 +81,14 @@ export class PgCommentStore implements CommentStore {
 
   async add(record: CommentRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_comments (id, tenant, resource_type, resource_id, author, body, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
+      `INSERT INTO assay_comments (id, tenant, resource_type, resource_id, parent_id, author, body, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
         record.id,
         record.tenant,
         record.resourceType,
         record.resourceId,
+        record.parentId ?? null,
         record.author,
         record.body,
         record.createdAt,
@@ -92,7 +99,7 @@ export class PgCommentStore implements CommentStore {
 
   async list(tenant: string, resourceType: string, resourceId: string): Promise<CommentRecord[]> {
     const res = await this.client.query<CommentRow>(
-      `SELECT id, tenant, resource_type, resource_id, author, body, created_at, updated_at
+      `SELECT id, tenant, resource_type, resource_id, parent_id, author, body, created_at, updated_at
        FROM assay_comments WHERE tenant = $1 AND resource_type = $2 AND resource_id = $3
        ORDER BY created_at ASC, id ASC`,
       [tenant, resourceType, resourceId],
@@ -102,7 +109,7 @@ export class PgCommentStore implements CommentStore {
 
   async get(tenant: string, id: string): Promise<CommentRecord | undefined> {
     const res = await this.client.query<CommentRow>(
-      `SELECT id, tenant, resource_type, resource_id, author, body, created_at, updated_at
+      `SELECT id, tenant, resource_type, resource_id, parent_id, author, body, created_at, updated_at
        FROM assay_comments WHERE tenant = $1 AND id = $2`,
       [tenant, id],
     );
@@ -110,6 +117,10 @@ export class PgCommentStore implements CommentStore {
   }
 
   async remove(tenant: string, id: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_comments WHERE tenant = $1 AND id = $2", [tenant, id]);
+    // 자기 자신 + 대댓글(parent_id = id)까지 함께 삭제(고아 방지).
+    await this.client.query("DELETE FROM assay_comments WHERE tenant = $1 AND (id = $2 OR parent_id = $2)", [
+      tenant,
+      id,
+    ]);
   }
 }

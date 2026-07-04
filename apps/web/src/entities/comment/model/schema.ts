@@ -6,6 +6,7 @@ export const commentSchema = z.object({
   tenant: z.string(),
   resourceType: z.string(),
   resourceId: z.string(),
+  parentId: z.string().optional(), // 대댓글이면 부모 댓글 id(1단계 스레드)
   author: z.string(), // 작성자 subject
   body: z.string(),
   createdAt: z.string(),

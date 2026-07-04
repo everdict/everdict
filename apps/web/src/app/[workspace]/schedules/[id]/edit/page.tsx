@@ -3,6 +3,7 @@ import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 
 import { CreateScheduleForm } from '@/features/create-schedule'
+import { CommentsSection } from '@/features/discuss'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
 import { runtimesSchema } from '@/entities/runtime'
@@ -83,6 +84,8 @@ export default async function EditSchedulePage({
           initialJudges={t.judges}
         />
       </Card>
+
+      <CommentsSection workspace={workspace} resourceType="schedule" resourceId={id} title="논의" />
     </div>
   )
 }

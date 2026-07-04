@@ -4,6 +4,7 @@ import { ChevronLeft, GitBranchPlus } from 'lucide-react'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
 import { ConfigPanel, HarnessDetail } from '@/features/inspect-harness'
 import { CiLinkPanel } from '@/features/manage-ci-links'
+import { CommentsSection } from '@/features/discuss'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { connectionsResponseSchema, type ConnectionMeta } from '@/entities/connection'
 import { datasetsSchema } from '@/entities/dataset'
@@ -201,6 +202,8 @@ export default async function HarnessDetailPage({
         canWrite={can(principal?.roles, 'settings:write')}
         workspace={workspace}
       />
+
+      <CommentsSection workspace={workspace} resourceType="harness" resourceId={spec.id} title="논의" />
     </div>
   )
 }
