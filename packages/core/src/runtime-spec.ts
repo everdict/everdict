@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { CapabilityNameSchema } from "./capability.js";
 
-// Runtime — 테넌트가 등록하는 실행 인프라 정의("어디서 eval 이 도나"). local | docker | nomad | k8s | topology.
+// Runtime — 테넌트가 등록하는 실행 인프라 정의("어디서 eval 이 도나"). local | nomad | k8s | topology.
+// (docker kind 는 slice 5b 에서 제거 — 단일 docker 호스트는 self-hosted 러너로 흡수. 컨테이너 실행 = capability.)
 // 등록 가능한 1급 엔티티(소유/버전/lifecycle 은 하니스·데이터셋·judge 와 동일 패턴, 불변 버전 SSOT).
 // ⚠️ 비밀 금지 — Nomad 토큰/kubeconfig 같은 자격증명은 테넌트 SecretStore 에서 주입(디스패치 시). 여기엔 비-비밀 연결정보만.
 // @assay/backends 의 BackendConfig 와 같은 필드(이름 대신 id/version) — buildRuntimeBackend 가 이걸 라이브 Backend 로 만든다.
@@ -21,13 +22,8 @@ const base = {
 // 워크스페이스 하니스/데이터셋을 자기 머신에서 돌리는 건 self-hosted runner(개인 소유)가 대체한다(docs/architecture/self-hosted-runner.md).
 export const LocalRuntimeSpecSchema = z.object({ kind: z.literal("local"), ...base });
 
-// docker — 케이스를 자기 env 이미지(EvalCase.image; 예: SWE-bench 공식 prebuilt = repo+deps 동봉) 컨테이너에서 실행.
-// 단일 호스트의 docker 데몬 사용(클러스터 아님). image = 케이스가 image 를 안 실을 때의 기본 이미지(선택).
-export const DockerRuntimeSpecSchema = z.object({
-  kind: z.literal("docker"),
-  ...base,
-  image: z.string().optional(), // 케이스 image 없을 때 기본 컨테이너 이미지
-});
+// docker(단일 호스트 데몬) 런타임 kind 는 제거됨(slice 5b) — "단일 docker 호스트"는 self-hosted 러너가
+// 로컬 docker 로 실행(pull)해 대체한다. 컨테이너 실행 능력은 이제 런타임 kind 가 아니라 `docker` capability 다.
 
 export const NomadRuntimeSpecSchema = z.object({
   kind: z.literal("nomad"),
@@ -76,7 +72,6 @@ export const TopologyRuntimeSpecSchema = z.object({
 
 export const RuntimeSpecSchema = z.discriminatedUnion("kind", [
   LocalRuntimeSpecSchema,
-  DockerRuntimeSpecSchema,
   NomadRuntimeSpecSchema,
   K8sRuntimeSpecSchema,
   TopologyRuntimeSpecSchema,

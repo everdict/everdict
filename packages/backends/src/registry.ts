@@ -1,7 +1,6 @@
 import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
 import { z } from "zod";
 import type { Backend } from "./backend.js";
-import { DockerBackend } from "./docker-backend.js";
 import { K8sBackend, type K8sBackendOptions } from "./k8s.js";
 import { LocalBackend } from "./local.js";
 import { NomadBackend, type NomadBackendOptions } from "./nomad.js";
@@ -142,7 +141,6 @@ export function k8sRuntimeOptions(
 // 컨트롤플레인이 디스패치 시 이걸로 테넌트 런타임을 만들어 Scheduler 레지스트리에 올린다.
 export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> } = {}): Backend {
   if (spec.kind === "local") return new LocalBackend();
-  if (spec.kind === "docker") return new DockerBackend(spec.image ? { image: spec.image } : {});
   if (spec.kind === "k8s") return new K8sBackend(k8sRuntimeOptions(spec, opts.secretEnv));
   if (spec.kind === "nomad") return new NomadBackend(nomadRuntimeOptions(spec, opts.secretEnv));
   // topology 는 @assay/topology 의 ServiceTopologyBackend 가 필요(순환 의존 불가) → apps/api 의 buildBackend 가 처리한다.

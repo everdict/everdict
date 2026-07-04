@@ -12,15 +12,11 @@ import { Input, Label } from '@/shared/ui/input'
 
 import { createRuntimeAction, probeRuntimeAction } from '../api/register-runtime'
 
-type Kind = 'docker' | 'nomad' | 'k8s' | 'topology'
+type Kind = 'nomad' | 'k8s' | 'topology'
 
-// 등록 인프라 종류 — local 은 dev 전용(컨트롤플레인 호스트 in-process)이라 등록 UI 에서 제외. "내 머신"은 러너로.
+// 등록 인프라 종류 — local(dev 전용) 과 docker(단일 호스트, slice 5b 에서 self-hosted 러너로 흡수)는 등록 UI 에서
+// 제외. "내 머신/단일 docker 호스트"는 러너로 연결하고, 컨테이너 실행은 런타임 kind 가 아니라 docker capability 다.
 const KINDS: { value: Kind; label: string; description: string }[] = [
-  {
-    value: 'docker',
-    label: 'Docker',
-    description: '단일 호스트 Docker 데몬 — 케이스 이미지 컨테이너로 실행 (클러스터 아님).',
-  },
   {
     value: 'nomad',
     label: 'Nomad',
@@ -61,7 +57,7 @@ interface Fields {
 }
 
 const INITIAL: Fields = {
-  kind: 'docker',
+  kind: 'nomad',
   id: '',
   version: '1.0.0',
   description: '',
@@ -99,7 +95,6 @@ function buildSpec(f: Fields): Record<string, unknown> {
     ...(csv(f.tags).length ? { tags: csv(f.tags) } : {}),
   }
   const opt = (k: string, v: string) => (t(v) ? { [k]: t(v) } : {})
-  if (f.kind === 'docker') return { ...base, ...opt('image', f.image) }
   if (f.kind === 'nomad')
     return {
       ...base,
@@ -164,7 +159,7 @@ function Field({
   )
 }
 
-// 워크스페이스 인프라 런타임 등록 폼(docker/nomad/k8s/topology). 자격증명은 여기 넣지 않고 SecretStore 키 이름으로 참조.
+// 워크스페이스 인프라 런타임 등록 폼(nomad/k8s/topology). 자격증명은 여기 넣지 않고 SecretStore 키 이름으로 참조.
 export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
   const router = useRouter()
   const [f, setF] = useState<Fields>(INITIAL)
@@ -249,21 +244,6 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
           />
         </Field>
       </div>
-
-      {/* docker */}
-      {f.kind === 'docker' && (
-        <Field
-          label="기본 이미지 (선택)"
-          hint="케이스가 image 를 지정하지 않을 때 쓰는 기본 컨테이너 이미지."
-        >
-          <Input
-            value={f.image}
-            onChange={(e) => set('image', e.target.value)}
-            placeholder="ghcr.io/acme/agent:latest"
-            autoComplete="off"
-          />
-        </Field>
-      )}
 
       {/* nomad */}
       {f.kind === 'nomad' && (
