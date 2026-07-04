@@ -4,7 +4,12 @@ import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Download, Laptop, Trash2 } from 'lucide-react'
 
-import { runnerCapabilitySchema, type RunnerCapability, type RunnerMeta } from '@/entities/runner'
+import {
+  capabilityMeta,
+  runnerCapabilitySchema,
+  type RunnerCapability,
+  type RunnerMeta,
+} from '@/entities/runner'
 import {
   getAssayDesktop,
   type AssayDesktopBridge,
@@ -17,14 +22,6 @@ import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
 
 import { pairRunnerAction, revokeRunnerAction } from '../api/manage-runners'
-
-// capability id → 표시 라벨.
-const CAP_LABEL: Record<string, string> = {
-  repo: 'Repo',
-  browser: 'Browser',
-  'os-use': 'OS-use',
-  docker: 'Docker',
-}
 
 // 온라인 판정 — 러너는 long-poll lease(~25s)마다 lastSeenAt 을 갱신하므로 90s 안이면 접속 중으로 본다.
 // (페이지 로드 시점 기준 — 실시간 갱신은 아님.)
@@ -233,16 +230,23 @@ export function RunnersManager({
                       {statusText}
                     </span>
                     {r.os && <Badge tone="outline">{r.os}</Badge>}
-                    {caps.map((c) => (
-                      <Badge key={c} tone="outline">
-                        {CAP_LABEL[c] ?? c}
-                      </Badge>
-                    ))}
-                    {thisDevice && online && !caps.includes('docker') && (
-                      <span className="text-[12px] text-faint">
-                        Docker 가 없어 service 하니스는 못 돌려요
-                      </span>
-                    )}
+                  </div>
+                  {/* capability 자가-라벨 — green(가능)/grey(불가). 러너가 자기 머신을 프로브해 광고한다. */}
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    {capabilityMeta.map(({ name, label }) => {
+                      const has = caps.includes(name)
+                      return (
+                        <Badge
+                          key={name}
+                          tone={has ? 'success' : 'outline'}
+                          className={has ? undefined : 'opacity-55'}
+                          title={has ? '이 머신이 지원' : '이 머신에서 불가'}
+                        >
+                          {has ? '✓ ' : ''}
+                          {label}
+                        </Badge>
+                      )
+                    })}
                   </div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
                     <span>연결 {new Date(r.pairedAt).toLocaleString('ko-KR')}</span>

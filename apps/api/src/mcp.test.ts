@@ -373,10 +373,10 @@ describe("MCP tools", () => {
 
     // 러너는 개인 소유 — viewer 도 pair 가능(역할 게이트 없음). 평문 토큰은 응답에만, 메타엔 없다.
     const paired = JSON.parse(
-      text(await viewer.callTool({ name: "pair_runner", arguments: { label: "ho-macbook", capabilities: ["repo"] } })),
+      text(await viewer.callTool({ name: "pair_runner", arguments: { label: "ho-macbook", capabilities: ["git"] } })),
     );
     expect(paired.token).toMatch(/^rnr_/);
-    expect(paired.runner).toMatchObject({ label: "ho-macbook", capabilities: ["repo"] });
+    expect(paired.runner).toMatchObject({ label: "ho-macbook", capabilities: ["git"] });
 
     // list → 본인 러너 1건, 토큰 미노출.
     const listed = JSON.parse(text(await viewer.callTool({ name: "list_runners", arguments: {} })));
@@ -456,9 +456,9 @@ describe("MCP tools", () => {
       (e: unknown) => ({ ok: false as const, e }),
     );
     const runner = await connectRunner(deps, "laptop");
-    // 러너가 docker 없이(repo 만) lease → 가져갈 잡 없음(게이트) + 그 잡은 명확히 거부된다.
+    // 러너가 docker 없이(git 만) lease → 가져갈 잡 없음(게이트) + 그 잡은 명확히 거부된다.
     const leased = JSON.parse(
-      text(await runner.callTool({ name: "lease_job", arguments: { capabilities: ["repo"] } })),
+      text(await runner.callTool({ name: "lease_job", arguments: { capabilities: ["git"] } })),
     );
     expect(leased.job).toBeNull();
     const r = await settled;

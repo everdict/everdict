@@ -629,12 +629,12 @@ describe("API — runners (셀프호스티드 러너, 개인 소유 디바이스
       method: "POST",
       url: "/runners",
       headers: h,
-      payload: { label: "ho-macbook", os: "darwin", capabilities: ["repo", "browser"] },
+      payload: { label: "ho-macbook", os: "darwin", capabilities: ["git", "browser"] },
     });
     expect(paired.statusCode).toBe(200);
     const body = paired.json();
     expect(body.token).toMatch(/^rnr_/);
-    expect(body.runner).toMatchObject({ label: "ho-macbook", os: "darwin", capabilities: ["repo", "browser"] });
+    expect(body.runner).toMatchObject({ label: "ho-macbook", os: "darwin", capabilities: ["git", "browser"] });
     expect(JSON.stringify(body.runner)).not.toContain("rnr_");
 
     // list → 본인 러너 1건, 토큰 미노출.

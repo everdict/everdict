@@ -1,9 +1,31 @@
 import { z } from 'zod'
 
-// 셀프호스티드 러너가 돌릴 수 있는 환경 — 컨트롤플레인 RUNNER_CAPABILITIES 미러.
-export const runnerCapabilities = ['repo', 'browser', 'os-use', 'docker'] as const
+// 셀프호스티드 러너가 지원할 수 있는 것 — 컨트롤플레인 core 어휘(CAPABILITY_DEFS) 미러. 러너가 자가-프로브해 광고.
+export const runnerCapabilities = [
+  'git',
+  'docker',
+  'browser',
+  'computer-use',
+  'sandbox',
+  'codex-login',
+  'claude-login',
+] as const
 export const runnerCapabilitySchema = z.enum(runnerCapabilities)
 export type RunnerCapability = z.infer<typeof runnerCapabilitySchema>
+
+// capability kind — 배지 의미(강제 레이어가 다름). core CapabilityKind 미러.
+export type CapabilityKind = 'functional' | 'security' | 'auth'
+
+// 표시 메타(이름·kind·라벨) — 러너 카드의 green(가능)/grey(불가) 배지에 쓴다. core 어휘 순서.
+export const capabilityMeta: { name: RunnerCapability; kind: CapabilityKind; label: string }[] = [
+  { name: 'git', kind: 'functional', label: 'Git' },
+  { name: 'docker', kind: 'functional', label: 'Docker' },
+  { name: 'browser', kind: 'functional', label: 'Browser' },
+  { name: 'computer-use', kind: 'functional', label: 'Computer-use' },
+  { name: 'sandbox', kind: 'security', label: 'Sandbox' },
+  { name: 'codex-login', kind: 'auth', label: 'Codex login' },
+  { name: 'claude-login', kind: 'auth', label: 'Claude login' },
+]
 
 // GET /runners 의 러너 메타 미러 — 토큰 없음(페어링 토큰은 페어 시 한 번만, 저장은 해시).
 export const runnerMetaSchema = z.object({

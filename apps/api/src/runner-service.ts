@@ -1,3 +1,4 @@
+import { CapabilityNameSchema } from "@assay/core";
 import type { PairRunnerInput, PairedRunner, RunnerMeta, RunnerStore } from "@assay/db";
 import { z } from "zod";
 
@@ -5,14 +6,15 @@ import { z } from "zod";
 // HTTP 라우트와 MCP 도구가 공유한다(BFF↔MCP 패리티). 토큰은 페어 시 한 번만 평문 반환(저장은 해시).
 // 디스패치/리스(MCP lease/result)는 이후 슬라이스 — 여기는 개인 소유 CRUD 만. 설계: docs/architecture/self-hosted-runner.md.
 
-// 러너가 돌릴 수 있는 환경 — 이후 슬라이스의 잡 어피니티(케이스 env.kind ↔ capability) 매칭에 쓰인다.
-export const RUNNER_CAPABILITIES = ["repo", "browser", "os-use", "docker"] as const;
+// 러너가 돌릴 수 있는 것 — core 어휘(CapabilityNameSchema) SSOT 와 동기화된 튜플(.options). z.enum 재료 겸
+// setCapabilities known-set(어휘 밖 자가-광고 값은 버림). core 어휘가 바뀌면 여기도 자동으로 따라간다.
+export const RUNNER_CAPABILITIES = CapabilityNameSchema.options;
 
 // 페어 요청 바디(owner/workspace 는 Principal 에서 — 바디로 받지 않는다).
 export const PairRunnerBodySchema = z.object({
   label: z.string().min(1).max(80),
   os: z.string().min(1).max(40).optional(),
-  capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
+  capabilities: z.array(CapabilityNameSchema).optional(),
 });
 export type PairRunnerBody = z.infer<typeof PairRunnerBodySchema>;
 

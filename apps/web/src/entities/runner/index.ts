@@ -1,10 +1,12 @@
 export {
   runnerCapabilities,
   runnerCapabilitySchema,
+  capabilityMeta,
   runnerMetaSchema,
   runnersResponseSchema,
   pairRunnerInputSchema,
   pairedRunnerSchema,
+  type CapabilityKind,
   type RunnerCapability,
   type RunnerMeta,
   type RunnersResponse,
