@@ -79,7 +79,19 @@ const csv = (s: string): string[] =>
     .map((x) => x.trim())
     .filter(Boolean)
 
-// 폼 → RuntimeSpec. 빈 옵셔널은 제외해 서버 스키마(discriminatedUnion)에 정확히 맞춘다.
+// 하드닝(강격리) 런타임 이름 — core trust-zone HARDENED_RUNTIMES 미러(nomad runtime / k8s runtimeClass).
+const HARDENED = new Set(['runsc', 'gvisor', 'kata', 'kata-runtime', 'firecracker', 'fc'])
+
+// 이 런타임이 자동으로 제공하는 capability — 앱이 스펙에서 라벨한다(유저 수동입력 없음; core defaultRuntimeCapabilities 미러).
+function runtimeCaps(f: Fields): string[] {
+  const caps = ['docker'] // nomad/k8s 는 컨테이너 이미지 실행
+  const iso = (f.kind === 'nomad' ? f.runtime : f.runtimeClass).trim()
+  if (iso && HARDENED.has(iso)) caps.push('sandbox') // 강격리 런타임
+  if (f.supportsTopology) caps.push('topology')
+  return caps
+}
+
+// 폼 → RuntimeSpec. 빈 옵셔널은 제외해 서버 스키마(discriminatedUnion)에 맞춘다. capabilities 는 앱이 자동 라벨.
 function buildSpec(f: Fields): Record<string, unknown> {
   const t = (v: string) => v.trim()
   const base: Record<string, unknown> = {
@@ -90,14 +102,13 @@ function buildSpec(f: Fields): Record<string, unknown> {
     ...(csv(f.tags).length ? { tags: csv(f.tags) } : {}),
   }
   const opt = (k: string, v: string) => (t(v) ? { [k]: t(v) } : {})
-  // topology 지원(nomad/k8s): traceSource + browserImage + topology capability 를 스펙에 실는다.
   const topology = f.supportsTopology
     ? {
         traceSource: { kind: f.traceKind, endpoint: t(f.traceEndpoint) },
         ...opt('browserImage', f.browserImage),
-        capabilities: ['topology'],
       }
     : {}
+  const capabilities = runtimeCaps(f)
   if (f.kind === 'nomad')
     return {
       ...base,
@@ -108,6 +119,7 @@ function buildSpec(f: Fields): Record<string, unknown> {
       ...opt('runtime', f.runtime),
       ...opt('authSecret', f.authSecret),
       ...topology,
+      capabilities,
     }
   // k8s
   return {
@@ -120,6 +132,7 @@ function buildSpec(f: Fields): Record<string, unknown> {
     ...opt('authSecret', f.authSecret),
     ...opt('kubeconfigSecret', f.kubeconfigSecret),
     ...topology,
+    capabilities,
   }
 }
 
