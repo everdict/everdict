@@ -254,10 +254,10 @@ export const controlPlane = {
   listConnections: <T>(auth: AuthContext) => call<T>(auth, '/connections'),
   // 워크스페이스 애플리케이션 로스터(읽기 전용) — 이 워크스페이스에서 만들어진 연결 메타만(members:read).
   listWorkspaceApplications: <T>(auth: AuthContext) => call<T>(auth, '/workspace/applications'),
-  startConnection: <T>(auth: AuthContext, provider: string) =>
+  startConnection: <T>(auth: AuthContext, provider: string, options?: { elevated?: boolean }) =>
     call<T>(auth, `/connections/${encodeURIComponent(provider)}/start`, {
       method: 'POST',
-      body: JSON.stringify({}),
+      body: JSON.stringify(options ?? {}),
     }),
   disconnectConnection: (auth: AuthContext, id: string) =>
     callVoid(auth, `/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),

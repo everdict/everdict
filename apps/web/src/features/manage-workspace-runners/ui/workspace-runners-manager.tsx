@@ -23,6 +23,7 @@ import {
   githubInstallRunnerAction,
   pairWorkspaceRunnerAction,
   revokeWorkspaceRunnerAction,
+  startElevatedGithubConnectAction,
 } from '../api/manage-workspace-runners'
 
 // 온라인 판정 — 러너는 long-poll lease(~25s)마다 lastSeenAt 을 갱신하므로 90s 안이면 접속 중으로 본다.
@@ -400,16 +401,23 @@ function GithubInstallDialog({
   connections: ConnectionMeta[]
 }) {
   const [connectionId, setConnectionId] = useState(connections[0]?.id ?? '')
+  const [mode, setMode] = useState<'repo' | 'org'>('repo')
   const [repository, setRepository] = useState('')
+  const [org, setOrg] = useState('')
   const [result, setResult] = useState<GithubRunnerInstall>()
   const [copied, setCopied] = useState<'script' | 'hint'>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
 
+  const selectedConn = connections.find((c) => c.id === connectionId)
+  const hasAdminOrg = selectedConn?.scopes.includes('admin:org') ?? false
+
   useEffect(() => {
     if (!open) return
     setConnectionId(connections[0]?.id ?? '')
+    setMode('repo')
     setRepository('')
+    setOrg('')
     setResult(undefined)
     setCopied(undefined)
     setError(undefined)
@@ -421,14 +429,31 @@ function GithubInstallDialog({
       setError('GitHub 연결을 선택해주세요.')
       return
     }
-    if (!/^[^/\s]+\/[^/\s]+$/.test(repository.trim())) {
+    if (mode === 'repo' && !/^[^/\s]+\/[^/\s]+$/.test(repository.trim())) {
       setError('레포지토리는 owner/name 형식으로 입력해주세요.')
       return
     }
+    if (mode === 'org' && !/^[^/\s]+$/.test(org.trim())) {
+      setError('조직(org) 이름을 입력해주세요(슬래시 없이).')
+      return
+    }
     startTransition(async () => {
-      const r = await githubInstallRunnerAction({ connectionId, repository })
+      const r = await githubInstallRunnerAction(
+        mode === 'org' ? { connectionId, org } : { connectionId, repository }
+      )
       if (r.ok && r.install) setResult(r.install)
       else setError(r.error ?? '생성에 실패했어요.')
+    })
+  }
+
+  // admin:org 권한으로 GitHub 재연결 — org 러너 등록 전 필요. 성공 시 authorize URL 로 이동(OAuth 동의).
+  function onReconnectElevated() {
+    setError(undefined)
+    const provider = selectedConn?.provider ?? 'github'
+    startTransition(async () => {
+      const r = await startElevatedGithubConnectAction(provider)
+      if (r.ok && r.authorizeUrl) window.location.href = r.authorizeUrl
+      else setError(r.error ?? '재연결을 시작하지 못했어요.')
     })
   }
 
@@ -523,16 +548,72 @@ function GithubInstallDialog({
                 ))}
               </select>
             </div>
+            {/* 대상: 레포(기본, repo scope) vs 조직(org, admin:org 상향 연결 필요) */}
             <div className="space-y-1.5">
-              <Label htmlFor="gh-repo">레포지토리</Label>
-              <Input
-                id="gh-repo"
-                value={repository}
-                onChange={(e) => setRepository(e.target.value)}
-                placeholder="owner/name (예: acme/app)"
-                autoFocus
-              />
+              <Label>대상</Label>
+              <div className="flex gap-1.5">
+                {(['repo', 'org'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setMode(m)}
+                    className={cn(
+                      'rounded-md border px-2.5 py-1 text-[12px] transition-colors',
+                      mode === m
+                        ? 'border-primary/40 bg-primary/10 text-foreground'
+                        : 'border-border text-muted-foreground hover:bg-elevated'
+                    )}
+                  >
+                    {m === 'repo' ? '레포지토리' : '조직 (org)'}
+                  </button>
+                ))}
+              </div>
             </div>
+            {mode === 'repo' ? (
+              <div className="space-y-1.5">
+                <Label htmlFor="gh-repo">레포지토리</Label>
+                <Input
+                  id="gh-repo"
+                  value={repository}
+                  onChange={(e) => setRepository(e.target.value)}
+                  placeholder="owner/name (예: acme/app)"
+                  autoFocus
+                />
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <Label htmlFor="gh-org">조직 (org)</Label>
+                <Input
+                  id="gh-org"
+                  value={org}
+                  onChange={(e) => setOrg(e.target.value)}
+                  placeholder="org 이름 (예: acme-inc)"
+                  autoFocus
+                />
+                <p className="text-[12px] text-faint">
+                  org 러너는 그 조직의 모든 레포가 공유해요.{' '}
+                  <span className="font-mono">admin:org</span> 권한 연결이 필요해요.
+                </p>
+                {!hasAdminOrg && (
+                  <Callout tone="warning" className="py-1.5">
+                    <span className="flex flex-wrap items-center justify-between gap-2">
+                      <span>
+                        이 GitHub 연결에 <span className="font-mono">admin:org</span> 권한이 없어요.
+                      </span>
+                      <Button
+                        size="xs"
+                        variant="secondary"
+                        onClick={onReconnectElevated}
+                        disabled={pending}
+                      >
+                        <Github />
+                        admin:org 권한으로 다시 연결
+                      </Button>
+                    </span>
+                  </Callout>
+                )}
+              </div>
+            )}
             {error && (
               <Callout tone="danger" className="py-1.5">
                 {error}
