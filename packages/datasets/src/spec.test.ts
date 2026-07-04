@@ -165,6 +165,25 @@ describe("BenchmarkAdapterSpec (데이터 정의)", () => {
     });
   });
 
+  it("source.file 이 있으면 뷰어 대신 repo 파일을 직접 인출한다(뷰어 미서빙 폴백 — officeqa 류)", async () => {
+    const urls: string[] = [];
+    const fileFetch: FetchLike = async (url) => {
+      urls.push(url);
+      return { ok: true, status: 200, text: async () => "uid,question,answer\nq1,capital?,paris\n" };
+    };
+    const spec = BenchmarkAdapterSpecSchema.parse({
+      id: "no-viewer",
+      version: "1.0.0",
+      source: { kind: "huggingface", dataset: "org/no-viewer", file: "data.csv" },
+      mapping: { idField: "uid", taskField: "question", answerField: "answer", promptEnv: true },
+    });
+    expect(spec.source.kind === "huggingface" && spec.source.file).toBe("data.csv"); // Zod 가 strip 하지 않는다
+    const ds = await importFromSpec(spec, { id: "no-viewer", version: "1.0.0" }, { fetchImpl: fileFetch });
+    expect(urls[0]).toContain("/resolve/main/data.csv"); // datasets-server 가 아니라 resolve API
+    expect(ds.cases).toHaveLength(1);
+    expect(ds.cases[0]?.task).toBe("capital?");
+  });
+
   it("jsonl 소스 스펙: opts.text 로 인입", async () => {
     const spec = BenchmarkAdapterSpecSchema.parse({
       id: "j",

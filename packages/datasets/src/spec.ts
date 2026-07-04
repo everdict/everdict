@@ -2,7 +2,7 @@ import { type Dataset, GraderSpecSchema } from "@assay/core";
 import { z } from "zod";
 import { type BenchmarkAdapter, type ImportBenchmarkOpts, importBenchmark } from "./catalog.js";
 import { type DatasetMeta, interpolateFields } from "./mapping.js";
-import { type FetchLike, fetchHfRows } from "./sources.js";
+import { type FetchLike, fetchHfFileRows, fetchHfRows } from "./sources.js";
 
 // 벤치마크 정의를 JSON 직렬화 가능한 "데이터"로 — 테넌트가 자기 워크스페이스에 등록/버전관리하는 레시피.
 // first-party 카탈로그 어댑터(코드: rowTransform/graderBuilder)와 달리, 이 spec 은 순수 데이터라 레지스트리에 저장 가능.
@@ -40,6 +40,7 @@ export const BenchmarkSourceSchema = z.discriminatedUnion("kind", [
     dataset: z.string(),
     config: z.string().optional(),
     split: z.string().optional(),
+    file: z.string().optional(), // 뷰어(datasets-server) 미서빙 데이터셋 폴백 — repo 데이터 파일 직접 인출(csv/jsonl/json)
     gated: z.boolean().optional(),
   }),
   z.object({ kind: z.literal("jsonl") }),
@@ -128,6 +129,13 @@ export async function fetchSourceRows(
 ): Promise<Array<Record<string, unknown>>> {
   const limit = Math.max(1, opts.limit ?? 5);
   if (source.kind === "huggingface") {
+    // file 이 지정되면 뷰어(datasets-server) 대신 repo 파일 직접 인출(뷰어 미서빙 데이터셋 폴백).
+    if (source.file) {
+      return fetchHfFileRows(
+        { dataset: source.dataset, file: source.file, limit, ...(opts.token ? { token: opts.token } : {}) },
+        opts.fetchImpl,
+      );
+    }
     return fetchHfRows(
       {
         dataset: source.dataset,

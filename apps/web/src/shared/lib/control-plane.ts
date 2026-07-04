@@ -134,6 +134,9 @@ export const controlPlane = {
     ),
   hfDatasetSplits: <T>(auth: AuthContext, dataset: string) =>
     call<T>(auth, `/benchmarks/hf/splits?dataset=${encodeURIComponent(dataset)}`),
+  // repo 데이터 파일 목록 — 뷰어 미서빙 데이터셋의 파일 직접 인출 폴백.
+  hfDatasetFiles: <T>(auth: AuthContext, dataset: string) =>
+    call<T>(auth, `/benchmarks/hf/files?dataset=${encodeURIComponent(dataset)}`),
   // 소스 미리보기(매핑 전 원본 행 + 감지된 필드) — "벤치마크 추가" 위저드.
   previewBenchmarkSource: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/benchmarks/preview', { method: 'POST', body: JSON.stringify(body) }),

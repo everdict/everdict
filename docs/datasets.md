@@ -68,6 +68,15 @@ add, all member+ (`datasets:write`), all immutable-on-register:
   (`/{ws}/recipes` list + detail, its own nav item); the produced dataset records `producedBy` so the dataset
   detail back-links to the recipe (and version) that made it.
 
+**Viewer-less datasets (file fallback).** Some HF datasets (e.g. `databricks/officeqa` — a gated repo of raw
+CSVs + a PDF corpus) are **not served by datasets-server**, so the viewer `/rows` path 404s even with a valid
+token. The `huggingface` source supports an optional **`file`** (repo path): rows are fetched via the Hub
+**resolve** API (`/datasets/{id}/resolve/main/{file}`, same `HF_TOKEN` auth) and parsed by extension
+(csv/jsonl/json-array). `GET /benchmarks/hf/files` (+ MCP `hf_dataset_files`) lists the repo's data files
+(root-first so benchmark CSVs aren't buried under corpus subdirs); the wizard falls back to a **데이터 파일**
+dropdown automatically when splits are unavailable. 401/403 from HF is surfaced with an actionable message
+(약관 동의 + 토큰 repo 읽기 권한 확인).
+
 gated HF sources authenticate with the SecretStore `HF_TOKEN` — resolved **requester-first**: the caller's
 **personal** (user-scoped) secret wins over the workspace-shared one, and all four surfaces (`searchHf` /
 `hfSplits` / `previewSource` / `import`) pass the requesting subject. So a plain **member** — who cannot touch

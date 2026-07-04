@@ -87,3 +87,15 @@ export async function hfSplitsAction(
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
   }
 }
+
+// repo 데이터 파일(csv/jsonl/json) 목록 — 뷰어(datasets-server) 미서빙 데이터셋의 파일 직접 인출 폴백.
+export async function hfFilesAction(
+  dataset: string
+): Promise<{ ok: boolean; files?: string[]; error?: string }> {
+  const ctx = await authContext()
+  try {
+    return { ok: true, files: await controlPlane.hfDatasetFiles<string[]>(ctx, dataset) }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
+}

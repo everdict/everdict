@@ -15,6 +15,7 @@ import { InfoTip } from '@/shared/ui/tooltip'
 import { VersionField } from '@/shared/ui/version-field'
 
 import {
+  hfFilesAction,
   hfSplitsAction,
   importBenchmarkAction,
   previewSourceAction,
@@ -86,6 +87,9 @@ export function BuildFromSourceWizard({
   const [splits, setSplits] = useState<HfSplit[]>([])
   const [splitSel, setSplitSel] = useState('') // splitKey
   const [splitsNote, setSplitsNote] = useState<string | undefined>(undefined)
+  // 뷰어(datasets-server) 미서빙 데이터셋 폴백 — repo 데이터 파일을 골라 직접 인출.
+  const [files, setFiles] = useState<string[]>([])
+  const [fileSel, setFileSel] = useState('')
 
   const [jsonlText, setJsonlText] = useState('')
 
@@ -142,6 +146,8 @@ export function BuildFromSourceWizard({
     setSplits([])
     setSplitSel('')
     setSplitsNote(undefined)
+    setFiles([])
+    setFileSel('')
     resetPreview()
     if (!datasetId) setDatasetId(slug(hit.id))
     // config/split 후보 인출 → 드롭다운.
@@ -151,6 +157,15 @@ export function BuildFromSourceWizard({
       // test 우선, 없으면 첫 번째.
       const pick = r.splits.find((s) => s.split === 'test') ?? r.splits[0]
       if (pick) setSplitSel(splitKey(pick))
+      return
+    }
+    // 뷰어가 이 데이터셋을 서빙하지 않음(officeqa 류) → repo 데이터 파일 직접 인출 폴백.
+    const fr = await hfFilesAction(hit.id)
+    if (fr.ok && fr.files && fr.files.length > 0) {
+      setFiles(fr.files)
+      const first = fr.files[0]
+      if (first) setFileSel(first)
+      setSplitsNote(undefined)
     } else {
       setSplitsNote('config/split 정보를 가져오지 못했습니다 — 기본값(train)으로 미리보기됩니다.')
     }
@@ -160,6 +175,8 @@ export function BuildFromSourceWizard({
 
   function buildSource(): Record<string, unknown> {
     if (sourceKind !== 'huggingface') return { kind: 'jsonl' }
+    // 파일 폴백 모드(뷰어 미서빙)면 file 로 직접 인출 — config/split 은 뷰어 전용이라 생략.
+    if (fileSel) return { kind: 'huggingface', dataset: hfDataset, file: fileSel }
     return {
       kind: 'huggingface',
       dataset: hfDataset,
@@ -393,6 +410,21 @@ export function BuildFromSourceWizard({
                         value: splitKey(s),
                         label: `${s.config} / ${s.split}`,
                       }))}
+                      className="w-full"
+                    />
+                  </div>
+                ) : files.length > 0 ? (
+                  // 뷰어 미서빙 → repo 데이터 파일 직접 선택(csv/jsonl/json).
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-1">
+                      <Label htmlFor="hfFile">데이터 파일</Label>
+                      <InfoTip content="이 데이터셋은 HuggingFace 미리보기 서버(뷰어)가 없어서 저장소의 데이터 파일을 직접 읽어요." />
+                    </div>
+                    <Combobox
+                      id="hfFile"
+                      value={fileSel}
+                      onChange={setFileSel}
+                      options={files.map((f) => ({ value: f }))}
                       className="w-full"
                     />
                   </div>

@@ -993,6 +993,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         run(principal, "datasets:read", async () => ok(await benchmarks.hfSplits(ws, dataset, principal.subject))),
     );
     server.registerTool(
+      "hf_dataset_files",
+      {
+        description:
+          "HF repo 의 데이터 파일(csv/jsonl/json) 목록 — 뷰어(datasets-server) 미서빙 데이터셋의 파일 직접 인출 폴백(source.file).",
+        inputSchema: { dataset: z.string() },
+      },
+      ({ dataset }) =>
+        run(principal, "datasets:read", async () => ok(await benchmarks.hfFiles(ws, dataset, principal.subject))),
+    );
+    server.registerTool(
       "preview_benchmark_source",
       {
         description:

@@ -1004,6 +1004,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 뷰어(datasets-server) 미서빙 데이터셋 폴백 — repo 데이터 파일(csv/jsonl/json) 목록. 위저드 파일 드롭다운용.
+  app.get("/benchmarks/hf/files", async (req, reply) => {
+    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const dataset = (req.query as Record<string, unknown>).dataset;
+    if (typeof dataset !== "string" || !dataset.trim())
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset 이 필요합니다." });
+    try {
+      gate(principal, "datasets:read");
+      return reply.send(await deps.benchmarkService.hfFiles(principal.workspace, dataset.trim(), principal.subject));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // 소스 미리보기 — 매핑 전 원본 행 N개 + 감지된 필드("벤치마크 추가" 위저드: 필드 자동감지 → 매핑). 등록 없음.
   app.post("/benchmarks/preview", async (req, reply) => {
     if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });

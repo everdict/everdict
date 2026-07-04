@@ -7,6 +7,7 @@ import {
   type FetchLike,
   type HfDatasetHit,
   type HfSplit,
+  fetchHfDataFiles,
   fetchHfSplits,
   fetchSourceRows,
   getBenchmark,
@@ -129,6 +130,18 @@ export class BenchmarkService {
       ? await this.deps.secretsFor(tenant, subject).catch(() => ({}))
       : {};
     return fetchHfSplits(dataset, {
+      ...(secrets.HF_TOKEN ? { token: secrets.HF_TOKEN } : {}),
+      ...(this.deps.fetchImpl ? { fetchImpl: this.deps.fetchImpl } : {}),
+    });
+  }
+
+  // 뷰어(datasets-server) 미서빙 데이터셋 폴백 — repo 의 데이터 파일(csv/jsonl/json) 목록.
+  // 위저드가 config/split 대신 파일을 골라 직접 인출한다(officeqa 류: 뷰어 없는 gated repo).
+  async hfFiles(tenant: string, dataset: string, subject?: string): Promise<string[]> {
+    const secrets: Record<string, string> = this.deps.secretsFor
+      ? await this.deps.secretsFor(tenant, subject).catch(() => ({}))
+      : {};
+    return fetchHfDataFiles(dataset, {
       ...(secrets.HF_TOKEN ? { token: secrets.HF_TOKEN } : {}),
       ...(this.deps.fetchImpl ? { fetchImpl: this.deps.fetchImpl } : {}),
     });

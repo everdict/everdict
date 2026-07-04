@@ -3,11 +3,11 @@ import { type Dataset, DatasetSchema, type GraderSpec } from "@assay/core";
 // 어댑터 = {소스(어디서 당기나), 매핑(필드→EvalCase), 채점(graders), 선택적 행 정규화}. first-party 어댑터는
 // 카탈로그로 배포(_shared 시드용), 유저는 자기 어댑터를 추가해 사설/신규 벤치마크를 워크스페이스에 등록.
 import { type CaseMapping, type DatasetMeta, WEBVOYAGER_MAPPING, rowToCase, rowsToDataset } from "./mapping.js";
-import { type FetchLike, fetchHfRows } from "./sources.js";
+import { type FetchLike, fetchHfFileRows, fetchHfRows } from "./sources.js";
 
 // 벤치마크가 사는 곳. huggingface = HF Hub(대부분의 신규 벤치마크), jsonl = 인라인/로컬 텍스트(호출자 제공).
 export type BenchmarkSource =
-  | { kind: "huggingface"; dataset: string; config?: string; split?: string; gated?: boolean }
+  | { kind: "huggingface"; dataset: string; config?: string; split?: string; file?: string; gated?: boolean }
   | { kind: "jsonl" };
 
 export interface BenchmarkAdapter {
@@ -60,16 +60,27 @@ export async function importBenchmark(
   opts: ImportBenchmarkOpts = {},
 ): Promise<Dataset> {
   if (adapter.source.kind === "huggingface") {
-    const rows = await fetchHfRows(
-      {
-        dataset: adapter.source.dataset,
-        config: adapter.source.config,
-        split: adapter.source.split,
-        limit: opts.limit ?? 100,
-        token: opts.token,
-      },
-      opts.fetchImpl,
-    );
+    // file 지정 = 뷰어 미서빙 데이터셋 폴백(repo 파일 직접 인출). limit 미지정이면 파일 전체(뷰어 경로는 기본 100).
+    const rows = adapter.source.file
+      ? await fetchHfFileRows(
+          {
+            dataset: adapter.source.dataset,
+            file: adapter.source.file,
+            ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
+            ...(opts.token ? { token: opts.token } : {}),
+          },
+          opts.fetchImpl,
+        )
+      : await fetchHfRows(
+          {
+            dataset: adapter.source.dataset,
+            config: adapter.source.config,
+            split: adapter.source.split,
+            limit: opts.limit ?? 100,
+            token: opts.token,
+          },
+          opts.fetchImpl,
+        );
     return adapterToDataset(adapter, rows, meta);
   }
   if (!opts.text) throw new Error(`adapter ${adapter.id}: jsonl source requires opts.text`);
