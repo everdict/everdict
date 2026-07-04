@@ -33,7 +33,7 @@ describe("RunnerHub", () => {
     expect(hub.lease(keyA)).toBeNull(); // 이미 lease 됨 → 더 없음
 
     expect(hub.complete(keyA, "j-0", result)).toBe(true);
-    await expect(dispatched).resolves.toEqual(result);
+    await expect(dispatched).resolves.toMatchObject({ result });
   });
 
   it("lease 는 FIFO; owner(키) 격리 — 다른 owner 의 잡은 안 보인다", async () => {
@@ -50,7 +50,7 @@ describe("RunnerHub", () => {
     expect(hub.lease(keyA)?.job.evalCase.id).toBe("a2");
 
     hub.complete(keyA, "j-0", result);
-    await expect(a1).resolves.toEqual(result);
+    await expect(a1).resolves.toMatchObject({ result });
   });
 
   it("fail 은 dispatch promise 를 UpstreamError 로 reject", async () => {
@@ -147,7 +147,7 @@ describe("RunnerHub", () => {
       }
       expect(rejected).toBe(false);
       expect(hub.complete(keyA, "j-long", result)).toBe(true);
-      await expect(d).resolves.toEqual(result);
+      await expect(d).resolves.toMatchObject({ result });
     } finally {
       vi.useRealTimers();
     }
@@ -230,10 +230,11 @@ describe("RunnerHub — 워크스페이스 풀(N 러너 드레인)", () => {
     expect(hub.lease(r2)?.job.evalCase.id).toBe("p2"); // r2 풀에서 다음
     expect(hub.lease(r1)).toBeNull(); // 풀 소진
     // 풀 잡은 풀 큐에 남아있지만 러너는 자기 키로 complete → locate 가 풀 큐에서 찾는다.
+    // ranBy = 실제 완료 러너(풀 키 "*" 가 아니라 진짜 r1/r2) → provenance.runner 가 올바르게 남는다.
     expect(hub.complete(r1, "j-0", result)).toBe(true);
-    await expect(d1).resolves.toEqual(result);
+    await expect(d1).resolves.toEqual({ result, ranBy: "r1" });
     expect(hub.complete(r2, "j-1", result)).toBe(true);
-    await expect(d2).resolves.toEqual(result);
+    await expect(d2).resolves.toEqual({ result, ranBy: "r2" });
   });
 
   it("풀: capability 불일치는 거부가 아니라 건너뛴다 — docker 없는 러너는 지나치고 docker 러너가 가져간다", async () => {
@@ -245,7 +246,7 @@ describe("RunnerHub — 워크스페이스 풀(N 러너 드레인)", () => {
       "needs-docker",
     );
     expect(hub.complete({ owner: OWNER, runnerId: "has-docker" }, "j-img", result)).toBe(true);
-    await expect(d).resolves.toEqual(result);
+    await expect(d).resolves.toMatchObject({ result });
   });
 
   it("풀: 자기 큐 잡을 풀 잡보다 먼저 가져간다", () => {
@@ -269,5 +270,29 @@ describe("RunnerHub — 워크스페이스 풀(N 러너 드레인)", () => {
     hub.enqueue(poolKeyFor(OWNER), job("pooled")); // 풀 enqueue → wakeOwner 가 r1 깨움
     expect((await waiting)?.job.evalCase.id).toBe("pooled");
     hub.complete(r1, "j-w", result);
+  });
+
+  it("풀 wake 공정성(라운드-로빈): 두 러너가 대기 중 두 잡 → 서로 다른 러너가 하나씩(한 러너 독식 방지)", async () => {
+    let n = 0;
+    const hub = new RunnerHub({ newJobId: () => `w-${n++}` });
+    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const seen: string[] = [];
+    // 미니 워커 루프 — 대기하다 잡 받으면 처리(complete) 후 재대기, null 이면 재폴링(실 워커와 동일). 최대 6회.
+    const worker = (runnerId: string) => async () => {
+      for (let i = 0; i < 6 && seen.length < 2; i++) {
+        const l = await hub.leaseWait({ owner: OWNER, runnerId }, 200);
+        if (l) {
+          seen.push(runnerId);
+          hub.complete({ owner: OWNER, runnerId }, l.jobId, result);
+        }
+      }
+    };
+    const workers = Promise.all([worker("r1")(), worker("r2")()]);
+    await sleep(15); // 둘 다 park
+    hub.enqueue(poolKeyFor(OWNER), job("p1")); // wake cursor=0 → r1 먼저 → r1 처리 후 재park
+    await sleep(15);
+    hub.enqueue(poolKeyFor(OWNER), job("p2")); // wake cursor=1 → r2 먼저 → r2 처리(회전)
+    await workers;
+    expect([...seen].sort()).toEqual(["r1", "r2"]); // 두 러너가 하나씩(독식 아님)
   });
 });

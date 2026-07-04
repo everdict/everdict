@@ -40,10 +40,17 @@ export interface LeasedJob {
   job: AgentJob;
 }
 
+// enqueue 결과 — 잡 결과 + 실제로 완료한 러너 id(ranBy). 풀(self:ws) 잡은 어느 러너가 가져갈지 파킹 시점엔
+// 모르므로, complete 한 러너의 id 를 여기로 돌려준다(백엔드가 provenance.runner 로 스탬프). 특정 러너 잡도 동일.
+export interface EnqueueResult {
+  result: CaseResult;
+  ranBy: string; // 실행/회신한 러너의 runnerId
+}
+
 interface PendingEntry {
   jobId: string;
   job: AgentJob;
-  resolve: (r: CaseResult) => void;
+  resolve: (r: EnqueueResult) => void;
   reject: (e: Error) => void;
   leasedAt?: number; // 러너가 가져간 시각(undefined=대기 중). Slice 6 의 만료/재큐가 이걸 본다.
   timer: ReturnType<typeof setTimeout>;
@@ -66,6 +73,7 @@ export interface RunnerHubDeps {
 export class RunnerHub {
   private readonly queues = new Map<string, PendingEntry[]>();
   private readonly waiters = new Map<string, Array<() => void>>(); // long-poll lease 대기자(키별 wake 콜백)
+  private readonly wakeCursor = new Map<string, number>(); // owner 별 라운드-로빈 커서(풀 wake 공정성)
   private readonly queueTimeoutMs: number;
   private readonly leaseTtlMs: number;
   private readonly newJobId: () => string;
@@ -89,13 +97,13 @@ export class RunnerHub {
 
   // 잡을 파킹하고 결과 promise 를 돌려준다(SelfHostedBackend.dispatch). 러너가 complete 하면 resolve,
   // '활동(lease/heartbeat)' 없이 queueTimeoutMs 가 지나면 reject(미연결/유휴). 키별 FIFO.
-  enqueue(key: SelfHostedKey, job: AgentJob): Promise<CaseResult> {
+  enqueue(key: SelfHostedKey, job: AgentJob): Promise<EnqueueResult> {
     const jobId = this.newJobId();
     const arr = this.q(key);
     // 실행자는 동기 실행이라 resolve/reject 가 곧바로 재할당된다(no-op 초기값은 no-`!` 규율 준수용).
-    let resolve: (r: CaseResult) => void = () => {};
+    let resolve: (r: EnqueueResult) => void = () => {};
     let reject: (e: Error) => void = () => {};
-    const promise = new Promise<CaseResult>((res, rej) => {
+    const promise = new Promise<EnqueueResult>((res, rej) => {
       resolve = res;
       reject = rej;
     });
@@ -109,11 +117,22 @@ export class RunnerHub {
   }
 
   // owner 의 풀에 잡이 들어오면, 그 owner 로 long-poll 중인 러너들을 깨운다(각자 lease 가 풀 큐를 확인 → 하나가 가져감).
+  // ⚠️ 공정성: 단일 스레드라 "먼저 깨운" 러너가 그 잡을 가져간다(뒤 러너는 null 로 재대기). 항상 같은 순서로 깨우면
+  // 한 러너가 풀을 독식한다(즉시 완료되는 잡일수록 심함) → 라운드-로빈으로 시작 러너를 회전시켜 N 러너에 고루 분배.
   private wakeOwner(owner: string): void {
     const prefix = `self:${owner}:`;
     const poolName = selfHostedBackendName(poolKeyFor(owner));
-    for (const [k, arr] of this.waiters) {
-      if (k.startsWith(prefix) && k !== poolName) arr.shift()?.(); // 러너별 대기자 하나씩 깨움(풀 큐 자신은 제외)
+    const keys = [...this.waiters.keys()].filter(
+      (k) => k.startsWith(prefix) && k !== poolName && (this.waiters.get(k)?.length ?? 0) > 0,
+    );
+    if (keys.length === 0) return;
+    keys.sort(); // 결정적 순서 + 회전 오프셋 → 매 잡마다 다른 러너가 먼저(공정)
+    const cur = this.wakeCursor.get(owner) ?? 0;
+    this.wakeCursor.set(owner, cur + 1);
+    const start = cur % keys.length;
+    for (let i = 0; i < keys.length; i++) {
+      const k = keys[(start + i) % keys.length];
+      if (k !== undefined) this.waiters.get(k)?.shift()?.();
     }
   }
 
@@ -261,7 +280,8 @@ export class RunnerHub {
     if (!loc) return false;
     this.remove(loc.key, jobId);
     clearTimeout(loc.entry.timer);
-    loc.entry.resolve(result);
+    // ranBy = complete 를 부른 러너의 실제 id(key.runnerId). 풀 잡이면 이게 "*"(풀 키)가 아니라 진짜 러너다.
+    loc.entry.resolve({ result, ranBy: key.runnerId });
     return true;
   }
 
