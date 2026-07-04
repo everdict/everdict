@@ -13,7 +13,9 @@ export interface GithubRunnerInstallInput {
   workspace: string;
   subject: string; // admin — 개인 GitHub 연결이 등록 토큰을 mint
   connectionId: string; // 그 GitHub 연결 id
-  repository: string; // "owner/name"
+  // 대상: repo 레벨(repository="owner/name", 기본 스코프) 또는 org 레벨(org="org", admin:org 연결 필요). 정확히 하나.
+  repository?: string; // "owner/name"
+  org?: string; // org 이름 — org 레벨(모든 레포가 이 러너를 공유). admin:org 스코프 연결 필요.
   label: string; // Assay 러너 표시 이름
   apiUrl: string; // 컨트롤플레인 base — `assay runner --api-url`
   githubLabels?: string[]; // GH 러너 추가 라벨(항상 self-hosted + assay-<id> 에 더해)
@@ -33,8 +35,15 @@ export async function installGithubWorkspaceRunner(
   deps: { runnerService: RunnerService; ciLinkService: CiLinkService },
   input: GithubRunnerInstallInput,
 ): Promise<GithubRunnerInstallResult> {
-  if (!/^[^/\s]+\/[^/\s]+$/.test(input.repository))
+  // 대상은 repo 또는 org 정확히 하나. repo 는 "owner/name", org 는 슬래시/공백 없는 단일 세그먼트.
+  if ((input.repository === undefined) === (input.org === undefined))
+    throw new BadRequestError("BAD_REQUEST", {}, "repository 또는 org 중 정확히 하나를 지정하세요.");
+  if (input.repository !== undefined && !/^[^/\s]+\/[^/\s]+$/.test(input.repository))
     throw new BadRequestError("BAD_REQUEST", { repository: input.repository }, "repository 는 'owner/name' 형식이어야 합니다.");
+  if (input.org !== undefined && !/^[^/\s]+$/.test(input.org))
+    throw new BadRequestError("BAD_REQUEST", { org: input.org }, "org 는 슬래시/공백 없는 org 이름이어야 합니다.");
+  const target: { repo: string } | { org: string } =
+    input.org !== undefined ? { org: input.org } : { repo: input.repository as string };
 
   // (2) Assay 워크스페이스-공유 러너 페어링 — 평문 rnr_ 토큰은 스크립트에만 실린다(저장은 해시).
   const paired = await deps.runnerService.pairWorkspace({
@@ -42,14 +51,16 @@ export async function installGithubWorkspaceRunner(
     label: input.label,
     ...(input.capabilities !== undefined ? { capabilities: input.capabilities } : {}),
   });
-  // (1) GitHub 등록 토큰 mint — 개인 연결로.
-  const reg = await deps.ciLinkService.mintRunnerToken(input.subject, input.connectionId, input.repository);
+  // (1) GitHub 등록 토큰 mint — 개인 연결로(org 는 admin:org 필요, 없으면 mint 가 BadRequest 안내).
+  const reg = await deps.ciLinkService.mintRunnerToken(input.subject, input.connectionId, target);
 
   const runnerId = paired.meta.id;
   const runtimeTarget = `self:ws:${runnerId}`;
   const githubRunnerLabel = `assay-${runnerId}`;
   const ghLabels = ["self-hosted", githubRunnerLabel, ...(input.githubLabels ?? [])];
-  const repoUrl = `${(reg.host ?? "https://github.com").replace(/\/$/, "")}/${input.repository}`;
+  // config.sh --url: repo 러너는 레포 URL, org 러너는 org URL(그 org 의 모든 레포가 공유).
+  const host = (reg.host ?? "https://github.com").replace(/\/$/, "");
+  const repoUrl = "org" in target ? `${host}/${target.org}` : `${host}/${target.repo}`;
 
   const installScript = renderRunnerInstall({
     repoUrl,

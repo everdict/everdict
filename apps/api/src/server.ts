@@ -1789,6 +1789,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(404).send({ code: "NOT_FOUND", message: "connection 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    // 상향(옵트인) 권한 연결 — github 이면 admin:org 도 요청(org 러너 등록용). 미지정=기본 scope.
+    const startBody = z.object({ elevated: z.boolean().optional() }).safeParse(req.body ?? {});
+    if (!startBody.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(startBody.error).join("; ") });
     try {
       // 연결은 개인 소유 — 역할 게이트 없음. workspace 는 self-hosted 통합 resolve + 콜백 redirect 용으로 운반.
       const { authorizeUrl } = await deps.connectionService.start({
@@ -1796,6 +1800,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         createdBy: principal.subject,
         provider: req.params.provider,
         requestBaseUrl: baseUrl(req),
+        ...(startBody.data.elevated !== undefined ? { elevated: startBody.data.elevated } : {}),
       });
       return reply.send({ authorizeUrl });
     } catch (err) {
@@ -2242,13 +2247,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const body = z
       .object({
         connectionId: z.string().min(1),
-        repository: z.string().min(1),
+        repository: z.string().min(1).optional(), // repo 레벨 대상 "owner/name"
+        org: z.string().min(1).optional(), // org 레벨 대상(admin:org 연결 필요). repository 와 정확히 하나.
         label: z.string().min(1).max(80).optional(),
         githubLabels: z.array(z.string().min(1)).optional(),
         capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
       })
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    const defaultLabel = body.data.org ?? body.data.repository?.split("/")[1] ?? "assay-ci";
     try {
       gate(principal, "settings:write");
       return reply.send(
@@ -2258,16 +2265,17 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             workspace: principal.workspace,
             subject: principal.subject,
             connectionId: body.data.connectionId,
-            repository: body.data.repository,
-            label: body.data.label ?? body.data.repository.split("/")[1] ?? "assay-ci",
+            label: body.data.label ?? defaultLabel,
             apiUrl: baseUrl(req),
+            ...(body.data.repository !== undefined ? { repository: body.data.repository } : {}),
+            ...(body.data.org !== undefined ? { org: body.data.org } : {}),
             ...(body.data.githubLabels !== undefined ? { githubLabels: body.data.githubLabels } : {}),
             ...(body.data.capabilities !== undefined ? { capabilities: body.data.capabilities } : {}),
           },
         ),
       );
     } catch (err) {
-      return sendError(reply, err); // 연결 없음 404 / repo 형식 400 / GitHub 실패 502
+      return sendError(reply, err); // 연결 없음 404 / repo·org 형식 400 / admin:org 없음 400 / GitHub 실패 502
     }
   });
 

@@ -208,4 +208,37 @@ describe("ConnectionService", () => {
     expect(after.find((p) => p.id === "github-enterprise")?.configured).toBe(false);
     expect(after.find((p) => p.id === "mattermost")?.configured).toBe(true); // 다른 통합 보존
   });
+
+  it("elevated=true: provider elevatedScopes 를 기본에 더해 요청(github admin:org, org 러너용); 미지정=기본만", async () => {
+    // scope 를 authorize URL 에 echo 하는 impl 로 상향 여부를 관찰(실 HTTP 없음).
+    const echoScopes: OAuthProvider = {
+      defaultScopes: ["repo", "read:packages"],
+      elevatedScopes: ["admin:org"],
+      authorizeUrl: ({ state, scopes }) =>
+        `https://gh.test/auth?state=${state}&scope=${encodeURIComponent((scopes ?? ["repo", "read:packages"]).join(" "))}`,
+      exchange: async () => ({ accessToken: "t", scopes: ["repo", "read:packages", "admin:org"] }),
+      whoami: async () => ({ label: "octocat" }),
+    };
+    const s = build(
+      new Map([["github", { impl: echoScopes, selfHosted: false, default: { clientId: "c", clientSecret: "s" } }]]),
+    );
+    const normal = await s.start({ workspace: "acme", createdBy: "u", provider: "github" });
+    expect(new URL(normal.authorizeUrl).searchParams.get("scope")).toBe("repo read:packages"); // 기본(과요청 없음)
+    const elevated = await s.start({ workspace: "acme", createdBy: "u", provider: "github", elevated: true });
+    expect(new URL(elevated.authorizeUrl).searchParams.get("scope")).toContain("admin:org"); // 상향
+  });
+
+  it("elevated=true 인데 provider 가 상향 scope 없으면 no-op(기본 scope) — 조용히 무해", async () => {
+    const noElevated: OAuthProvider = {
+      defaultScopes: ["read"],
+      authorizeUrl: ({ state, scopes }) => `https://mm.test/auth?state=${state}&scope=${(scopes ?? ["read"]).join(" ")}`,
+      exchange: async () => ({ accessToken: "t", scopes: ["read"] }),
+      whoami: async () => ({ label: "u" }),
+    };
+    const s = build(
+      new Map([["mattermost", { impl: noElevated, selfHosted: false, default: { clientId: "c", clientSecret: "s" } }]]),
+    );
+    const r = await s.start({ workspace: "acme", createdBy: "u", provider: "mattermost", elevated: true });
+    expect(new URL(r.authorizeUrl).searchParams.get("scope")).toBe("read"); // 상향 scope 없음 → 기본
+  });
 });

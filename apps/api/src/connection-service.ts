@@ -56,6 +56,9 @@ export interface StartConnectionInput {
   createdBy: string;
   provider: string;
   requestBaseUrl?: string; // HTTP 라우트는 요청 base 제공. MCP 는 미제공 → config.apiPublicUrl 필요.
+  // 상향(옵트인) 권한으로 연결 — provider 의 elevatedScopes 를 기본에 더해 요청(github=admin:org, org 러너 등록용).
+  // provider 가 상향 scope 를 안 가지면(예: mattermost) no-op(기본 scope). 저장되는 scope 는 GitHub 이 실제 승인한 값.
+  elevated?: boolean;
 }
 
 export class ConnectionService {
@@ -163,7 +166,13 @@ export class ConnectionService {
       { workspace: input.workspace, provider: input.provider, createdBy: input.createdBy },
       expiresAt,
     );
-    return { authorizeUrl: entry.impl.authorizeUrl({ config, state, redirectUri }) };
+    // 상향 연결이면 provider 의 elevatedScopes 를 기본에 더해 요청(github=admin:org). scopes 는 authorize 단계에서만
+    // 쓰이고 콜백까지 실려갈 필요 없다 — 저장 scope 는 GitHub 이 실제 승인한 tok.scopes(콜백에서 결정).
+    const elevated = entry.impl.elevatedScopes ?? [];
+    const scopes = input.elevated && elevated.length > 0 ? [...entry.impl.defaultScopes, ...elevated] : undefined;
+    return {
+      authorizeUrl: entry.impl.authorizeUrl({ config, state, redirectUri, ...(scopes ? { scopes } : {}) }),
+    };
   }
 
   // OAuth 콜백: state 1회 소비 → code 교환 → whoami → 저장. 항상 웹으로 돌려보낼 redirectTo(브라우저는 5xx 안 봄).

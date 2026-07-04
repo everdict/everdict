@@ -179,20 +179,32 @@ export class CiLinkService {
     throw await this.upstream(mkPr, "PR 생성 실패");
   }
 
-  // GitHub Actions 셀프호스티드 러너 등록 토큰 발급 — 멤버 개인 GitHub 연결(repo scope 이미 보유)로 그 레포에 대해 mint.
-  // 단기 토큰(≈1시간). Assay 는 장기 러너 토큰을 저장하지 않는다(필요 시마다 발급). repo 레벨(org 레벨=admin:org 필요, 후속).
+  // GitHub Actions 셀프호스티드 러너 등록 토큰 발급 — 멤버 개인 GitHub 연결로 그 대상(repo|org)에 대해 mint.
+  // 단기 토큰(≈1시간). Assay 는 장기 러너 토큰을 저장하지 않는다(필요 시마다 발급).
+  //  - repo 레벨: 기본 스코프(repo)면 충분. POST /repos/{owner/name}/actions/runners/registration-token.
+  //  - org 레벨(옵트인): admin:org 스코프 필요. POST /orgs/{org}/actions/runners/registration-token — 권한 없으면 403 을
+  //    "상향 권한으로 재연결" 안내(BadRequest)로 remap(원시 403 을 그대로 흘리지 않는다).
   // 반환에 host 도 실어 install 스크립트가 config.sh --url 를 github.com/GHE 로 맞추게 한다. 설계 doc §4.
   async mintRunnerToken(
     owner: string,
     connectionId: string,
-    repository: string,
+    target: { repo: string } | { org: string },
   ): Promise<{ token: string; expiresAt: string; host?: string }> {
     const { token, host } = await this.githubToken(owner, connectionId);
-    const res = await this.fetch(`${apiBase(host)}/repos/${repository}/actions/runners/registration-token`, {
+    const path = "repo" in target ? `/repos/${target.repo}` : `/orgs/${target.org}`;
+    const res = await this.fetch(`${apiBase(host)}${path}/actions/runners/registration-token`, {
       method: "POST",
       headers: this.headers(token),
     });
-    if (!res.ok) throw await this.upstream(res, "러너 등록 토큰 발급 실패");
+    if (!res.ok) {
+      if ("org" in target && (res.status === 403 || res.status === 404))
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { org: target.org, status: res.status },
+          "org 러너 등록 토큰 발급 실패 — 이 GitHub 연결에 admin:org 권한이 없거나 org 접근이 없습니다. 상향 권한(admin:org)으로 GitHub 를 다시 연결한 뒤 시도하세요.",
+        );
+      throw await this.upstream(res, "러너 등록 토큰 발급 실패");
+    }
     const data = z.object({ token: z.string(), expires_at: z.string() }).parse(await res.json());
     return { token: data.token, expiresAt: data.expires_at, ...(host !== undefined ? { host } : {}) };
   }

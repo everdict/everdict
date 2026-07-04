@@ -263,10 +263,59 @@ describe("CiLinkService.mintRunnerToken — GitHub Actions 러너 등록 토큰 
         calls,
       ),
     });
-    const res = await svc.mintRunnerToken("alice", meta.id, "acme/app");
+    const res = await svc.mintRunnerToken("alice", meta.id, { repo: "acme/app" });
     expect(res).toEqual({ token: "AABBCC", expiresAt: "2026-07-04T12:00:00Z" });
     expect(calls[0]?.method).toBe("POST");
     expect(calls[0]?.url).toContain("/repos/acme/app/actions/runners/registration-token");
+  });
+
+  it("org 레벨: POST /orgs/{org}/... 로 mint(admin:org 연결)", async () => {
+    const connections = new InMemoryConnectionStore(cipher);
+    const meta = await connections.create({
+      owner: "alice",
+      workspace: "acme",
+      provider: "github",
+      accountLabel: "alice-gh",
+      scopes: ["repo", "admin:org"],
+      accessToken: "gho_secret",
+    });
+    const calls: Array<{ url: string; method: string }> = [];
+    const svc = new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      connections,
+      fetchImpl: fakeFetch(
+        [
+          (url, init) =>
+            url.endsWith("/orgs/acme/actions/runners/registration-token") && init?.method === "POST"
+              ? json({ token: "ORGTOK", expires_at: "2026-07-04T12:00:00Z" })
+              : undefined,
+        ],
+        calls,
+      ),
+    });
+    const res = await svc.mintRunnerToken("alice", meta.id, { org: "acme" });
+    expect(res.token).toBe("ORGTOK");
+    expect(calls[0]?.url).toContain("/orgs/acme/actions/runners/registration-token");
+  });
+
+  it("org 레벨인데 admin:org 없어 403 이면 상향-권한 재연결 안내(BAD_REQUEST 로 remap)", async () => {
+    const connections = new InMemoryConnectionStore(cipher);
+    const meta = await connections.create({
+      owner: "alice",
+      workspace: "acme",
+      provider: "github",
+      accountLabel: "gh",
+      scopes: ["repo"],
+      accessToken: "gho_x",
+    });
+    const svc = new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      connections,
+      fetchImpl: fakeFetch([(url) => (url.includes("/orgs/") ? json({ message: "Forbidden" }, 403) : undefined)], []),
+    });
+    await expect(svc.mintRunnerToken("alice", meta.id, { org: "acme" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
   });
 
   it("비-GitHub 연결이면 BAD_REQUEST", async () => {
@@ -280,6 +329,8 @@ describe("CiLinkService.mintRunnerToken — GitHub Actions 러너 등록 토큰 
       accessToken: "x",
     });
     const svc = new CiLinkService({ settings: new InMemoryWorkspaceSettingsStore(), connections });
-    await expect(svc.mintRunnerToken("alice", meta.id, "acme/app")).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(svc.mintRunnerToken("alice", meta.id, { repo: "acme/app" })).rejects.toMatchObject({
+      code: "BAD_REQUEST",
+    });
   });
 });

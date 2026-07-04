@@ -1118,11 +1118,24 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           "멤버는 자격증명 입력 없음: github.com 은 env 기본, self-hosted(github-enterprise/mattermost)는 관리자가 등록한 워크스페이스 통합에서 resolve.",
         inputSchema: {
           provider: z.string().describe("github | github-enterprise | mattermost"),
+          elevated: z
+            .boolean()
+            .optional()
+            .describe("상향(옵트인) 권한으로 연결 — github 이면 admin:org 도 요청(org 러너 등록용)"),
         },
       },
-      ({ provider }) =>
+      ({ provider, elevated }) =>
         // workspace(ws)는 self-hosted 통합 resolve + 콜백 redirect 용으로 운반; 소유자는 createdBy(subject).
-        plain(async () => ok(await connections.start({ workspace: ws, createdBy: principal.subject, provider }))),
+        plain(async () =>
+          ok(
+            await connections.start({
+              workspace: ws,
+              createdBy: principal.subject,
+              provider,
+              ...(elevated !== undefined ? { elevated } : {}),
+            }),
+          ),
+        ),
     );
     server.registerTool(
       "disconnect_connection",
@@ -1453,16 +1466,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         "github_install_workspace_runner",
         {
           description:
-            "GitHub Actions 셀프호스티드 러너 + Assay 워크스페이스-공유 러너를 한 빌드 서버에 함께 세우는 설치 스크립트를 생성한다(설계 §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 토큰 1회) + 개인 GitHub 연결로 등록 토큰 mint. 반환 스크립트를 빌드 서버에서 실행. admin 전용.",
+            "GitHub Actions 셀프호스티드 러너 + Assay 워크스페이스-공유 러너를 한 빌드 서버에 함께 세우는 설치 스크립트를 생성한다(설계 §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 토큰 1회) + 개인 GitHub 연결로 등록 토큰 mint. repository(repo 레벨) 또는 org(org 레벨, admin:org 연결 필요) 정확히 하나. 반환 스크립트를 빌드 서버에서 실행. admin 전용.",
           inputSchema: {
             connectionId: z.string().describe("내 GitHub 연결 id(list_connections)"),
-            repository: z.string().describe('"owner/name"'),
-            label: z.string().max(80).optional().describe("Assay 러너 표시 이름(기본: repo 이름)"),
+            repository: z.string().optional().describe('repo 레벨 대상 "owner/name"'),
+            org: z.string().optional().describe("org 레벨 대상(그 org 의 모든 레포 공유) — admin:org 상향 연결 필요"),
+            label: z.string().max(80).optional().describe("Assay 러너 표시 이름(기본: repo/org 이름)"),
             githubLabels: z.array(z.string()).optional().describe("GH 러너 추가 라벨"),
             capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
           },
         },
-        ({ connectionId, repository, label, githubLabels, capabilities }) =>
+        ({ connectionId, repository, org, label, githubLabels, capabilities }) =>
           run(principal, "settings:write", async () =>
             ok(
               await installGithubWorkspaceRunner(
@@ -1471,9 +1485,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
                   workspace: ws,
                   subject: principal.subject,
                   connectionId,
-                  repository,
-                  label: label ?? repository.split("/")[1] ?? "assay-ci",
+                  label: label ?? org ?? repository?.split("/")[1] ?? "assay-ci",
                   apiUrl: deps.apiPublicUrl ?? "http://localhost:8787",
+                  ...(repository !== undefined ? { repository } : {}),
+                  ...(org !== undefined ? { org } : {}),
                   ...(githubLabels !== undefined ? { githubLabels } : {}),
                   ...(capabilities !== undefined ? { capabilities } : {}),
                 },

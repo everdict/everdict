@@ -23,8 +23,10 @@ export interface OAuthAccount {
 
 export interface OAuthProvider {
   readonly defaultScopes: string[]; // 요청 scope
-  // 사용자 브라우저를 보낼 authorize URL(state + redirect_uri 포함).
-  authorizeUrl(input: { config: OAuthProviderConfig; state: string; redirectUri: string }): string;
+  // 상향(옵트인) scope — 기본에 더해 요청할 수 있는 것(예: github 의 admin:org, org 러너 등록용). 없으면 상향 불가.
+  readonly elevatedScopes?: string[];
+  // 사용자 브라우저를 보낼 authorize URL(state + redirect_uri 포함). scopes 미지정이면 defaultScopes.
+  authorizeUrl(input: { config: OAuthProviderConfig; state: string; redirectUri: string; scopes?: string[] }): string;
   // 콜백 code → 토큰 교환(server-to-server, client_secret). 실패는 AppError(UpstreamError)로 remap.
   exchange(input: { config: OAuthProviderConfig; code: string; redirectUri: string }): Promise<OAuthExchangeResult>;
   // 토큰으로 계정 식별자 조회(표시용 라벨).

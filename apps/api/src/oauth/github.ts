@@ -14,6 +14,9 @@ const TokenError = z.object({ error: z.string(), error_description: z.string().o
 const UserResponse = z.object({ login: z.string() });
 
 const DEFAULT_SCOPES = ["repo", "read:packages"];
+// 상향(옵트인) scope — org 러너 등록(POST /orgs/{org}/actions/runners/registration-token)에 필요한 admin:org.
+// 기본 연결엔 요청하지 않는다(과요청 방지) — 사용자가 명시적으로 상향 연결할 때만.
+const ELEVATED_SCOPES = ["admin:org"];
 
 // host="https://ghe.acme.io" → web base = host, api base = host/api/v3. 없으면 github.com / api.github.com.
 function bases(host?: string): { web: string; api: string } {
@@ -25,11 +28,12 @@ function bases(host?: string): { web: string; api: string } {
 export function githubProvider(): OAuthProvider {
   return {
     defaultScopes: DEFAULT_SCOPES,
-    authorizeUrl({ config, state, redirectUri }) {
+    elevatedScopes: ELEVATED_SCOPES,
+    authorizeUrl({ config, state, redirectUri, scopes }) {
       const u = new URL(`${bases(config.host).web}/login/oauth/authorize`);
       u.searchParams.set("client_id", config.clientId);
       u.searchParams.set("redirect_uri", redirectUri);
-      u.searchParams.set("scope", DEFAULT_SCOPES.join(" "));
+      u.searchParams.set("scope", (scopes ?? DEFAULT_SCOPES).join(" "));
       u.searchParams.set("state", state);
       return u.toString();
     },
