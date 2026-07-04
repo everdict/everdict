@@ -30,8 +30,10 @@ are unchanged, so evaluation (git-diff snapshot, `tests-pass`, …) works as for
 path → runs on **Local / Nomad / K8s** backends with the existing isolation.
 
 ## Trace extraction
-- **`none`** — outcome-graded only (repo diff + `tests-pass`); no trajectory/cost. aider is objectively graded,
-  so this already evaluates it.
+- **`none`** — no trajectory/cost. The command's **stdout (tail 32k) becomes the final assistant `message`**
+  trace event, so prompt-QA benchmarks (`answer-match`/judge — e.g. OfficeQA-style) grade a black-box CLI's
+  printed answer; outcome grading (repo diff + `tests-pass`) is unchanged. A non-zero exit yields an `error`
+  trace event (never silently swallowed).
 - **`otel` / `mlflow`** — after the command, the trace is pulled via `@assay/trace`
   (`OtelTraceSource`/`MlflowTraceSource`) by `ASSAY_RUN_ID`. The agent must tag its spans with that id
   (`OTEL_RESOURCE_ATTRIBUTES=assay.run_id=…` is injected) — i.e. an instrumented agent; uninstrumented CLIs use
@@ -44,7 +46,8 @@ image/install versions.
 
 ## Verified
 - **Deterministic** (`packages/harnesses/src/command.test.ts`): setup ordering; `{{task}}` shell-quoting + env
-  injection (`ASSAY_RUN_ID`); `trace:none` → no events; `trace:otel` → pulls by run id; setup failure → error.
+  injection (`ASSAY_RUN_ID`); `trace:none` → stdout = final assistant message (empty stdout → no events);
+  exit≠0 → `error` event; `trace:otel` → pulls by run id (stdout not emitted); setup failure → error.
 - **Live, no key** (`scripts/live/command-harness.mjs`): a user-declared `command` spec
   (`echo … > result.txt`) dispatched through `LocalBackend` → ran in the real `LocalDriver` sandbox →
   `CaseResult` with `result.txt` in the git-diff snapshot. **Zero code, zero LLM key.**
