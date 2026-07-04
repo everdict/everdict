@@ -132,9 +132,17 @@ runner, once configured, holds its own GitHub credential — a company resource,
    1 runner = today's behavior, back-compat); rename in code/docs so *runtime* = pool, *runner* = worker. No user-visible change.
 2. **N runners per personal pool.** `assay runner --join self:<id>` (multiple processes/machines join one personal
    runtime); roster shows the pool + its runners; presence per-runner. Proves "pull 2 by running 2 runners."
-3. **Workspace self-hosted runtime.** `owner=workspace` runtime + admin CRUD (`POST /workspace/runtimes` gated
-   `settings:write`) + join tokens + tenant isolation on the shared pool; `RuntimeDispatcher` `ws:` branch;
-   provenance/budget = workspace-scoped (not own-pays). Web settings "Runners" section.
+3. **Workspace self-hosted runtime.** ✅ **SHIPPED.** Realized as a workspace-owned **runner** (owner=`ws:<workspace>`
+   in the existing owner-keyed runner-store — no new store/schema; the shared "pool" *is* the workspace-owned runner
+   set). Admin CRUD gated `settings:write`: `POST /workspace/runners` (pair, plaintext token once) ·
+   `GET /workspace/runners/owned` (team-owned only; the roster `GET /workspace/runners` still lists personal runners
+   paired in the ws) · `DELETE /workspace/runners/:id`. `RuntimeDispatcher` `self:ws:<id>` branch derives owner from
+   the **job's tenant** (`ws:<tenant>`), so membership *is* access and cross-workspace is structurally impossible
+   (always looks up `ws:<tenant>`); personal `self:<id>` stays owner-only (D3). Full BFF↔MCP parity
+   (`pair_workspace_runner`/`list_workspace_owned_runners`/`revoke_workspace_runner`) + web settings **공유 러너** tab
+   (register → token-once + `assay runner --pair` command; list with online/capability badges; revoke).
+   **Open follow-up:** provenance/budget = workspace-scoped (not own-pays) — currently the runner still runs on the
+   team machine's own login like a personal runner; workspace-pays accounting is not yet wired.
 4. **GitHub Actions runner co-registration (repo-level).** Registration-token mint via connection + install-script
    generator + workflow `runs-on` wiring; one command stands up GitHub runner + Assay runner on a build server.
 5. **Org-level + polish.** `admin:org` scope upgrade path + org runner groups ↔ workspace runtimes; runner labels
