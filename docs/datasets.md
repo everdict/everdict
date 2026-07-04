@@ -78,6 +78,18 @@ add, all member+ (`datasets:write`), all immutable-on-register:
   (`/{ws}/recipes` list + detail, its own nav item); the produced dataset records `producedBy` so the dataset
   detail back-links to the recipe (and version) that made it.
 
+**Lineage (`producedBy`).** Every import stamps the dataset's **`producedBy`** (immutable, part of the version)
+with three things: **how** it was made (`via` recipe/catalog/spec + `id`/`version` — recipe back-links to its
+detail), **where the raw rows came from** (`source`: `{kind, dataset, config?, split?, file?, url}` — for HF the
+canonical `https://huggingface.co/datasets/{id}` link + the exact file/split, captured automatically from what
+the wizard already selected — zero extra input), and the benchmark's **official provenance** (`origin`:
+homepage/paper/code/data/leaderboard/authors/license/citation/taskType — populated when a recipe/catalog spec
+carries `BenchmarkOrigin`; the wizard doesn't collect it). The web dataset detail renders these as a **출처 · 리니지**
+card (source link + official links + license/authors + made-via path) so an official open benchmark keeps its
+origin visible. Lineage is captured **going forward** — pre-existing datasets (imported before this) have no
+`source`; re-importing (a new version) captures it. `producedBy` is dataset **content**, so it participates in
+immutability/`specsEqual`.
+
 **Viewer-less datasets (file fallback).** Some HF datasets (e.g. `databricks/officeqa` — a gated repo of raw
 CSVs + a PDF corpus) are **not served by datasets-server**, so the viewer `/rows` path 404s even with a valid
 token. The `huggingface` source supports an optional **`file`** (repo path): rows are fetched via the Hub

@@ -1,7 +1,8 @@
-import { BadRequestError, type DatasetProvenance } from "@assay/core";
+import { BadRequestError, type DatasetOrigin, type DatasetProvenance, type DatasetSourceRef } from "@assay/core";
 import {
   type BenchmarkAdapterSpec,
   BenchmarkAdapterSpecSchema,
+  type BenchmarkOrigin,
   BenchmarkSourceSchema,
   type BenchmarkSourceSpec,
   type FetchLike,
@@ -71,6 +72,43 @@ export interface BenchmarkServiceDeps {
   // 시크릿(admin 전용)을 못 만져도 계정 시크릿에 HF_TOKEN 만 넣으면 스스로 인입할 수 있다(셀프서비스).
   secretsFor?: (tenant: string, subject?: string) => Promise<Record<string, string>>;
   fetchImpl?: FetchLike; // 테스트 주입
+}
+
+// BenchmarkSource → 데이터셋 리니지용 출처 참조(+HF 정규 링크). jsonl 은 붙여넣기라 원본 링크가 없다.
+function toSourceRef(source: BenchmarkSourceSpec): DatasetSourceRef {
+  if (source.kind === "huggingface") {
+    return {
+      kind: "huggingface",
+      dataset: source.dataset,
+      ...(source.config ? { config: source.config } : {}),
+      ...(source.split ? { split: source.split } : {}),
+      ...(source.file ? { file: source.file } : {}),
+      url: `https://huggingface.co/datasets/${source.dataset}`, // 정규 링크(데이터셋 페이지)
+    };
+  }
+  return { kind: "jsonl" };
+}
+
+// BenchmarkOrigin(발표 벤치마크 공식 출처, 옵셔널 필드 뭉치) → DatasetOrigin. 정의된 필드만 옮긴다(빈값 제외).
+function toDatasetOrigin(origin: BenchmarkOrigin): DatasetOrigin | undefined {
+  if (!origin) return undefined;
+  const keys = [
+    "homepage",
+    "paper",
+    "code",
+    "data",
+    "leaderboard",
+    "authors",
+    "license",
+    "citation",
+    "taskType",
+  ] as const;
+  const o: DatasetOrigin = {};
+  for (const k of keys) {
+    const v = origin[k];
+    if (v) o[k] = v;
+  }
+  return Object.keys(o).length > 0 ? o : undefined;
 }
 
 export class BenchmarkService {
@@ -192,7 +230,14 @@ export class BenchmarkService {
         },
         opts,
       );
-      producedBy = { via: "spec", id: input.spec.id };
+      // 리니지 각인 — 위저드가 이미 아는 원본(HF 데이터셋/파일)을 데이터셋에 남긴다(추가 입력 없이).
+      const origin = toDatasetOrigin(input.spec.origin);
+      producedBy = {
+        via: "spec",
+        id: input.spec.id,
+        source: toSourceRef(input.spec.source),
+        ...(origin ? { origin } : {}),
+      };
     } else if (input.recipe) {
       const spec = await this.registry().get(input.tenant, input.recipe.id, input.recipe.version ?? "latest");
       dataset = await importFromSpec(
@@ -205,7 +250,14 @@ export class BenchmarkService {
         opts,
       );
       // 등록된 레시피에서 인입 — 해석된 구체 버전(spec.version)으로 역링크가 정확한 버전을 가리킨다.
-      producedBy = { via: "recipe", id: spec.id, version: spec.version };
+      const origin = toDatasetOrigin(spec.origin);
+      producedBy = {
+        via: "recipe",
+        id: spec.id,
+        version: spec.version,
+        source: toSourceRef(spec.source),
+        ...(origin ? { origin } : {}),
+      };
     } else if (input.benchmark) {
       let adapter: ReturnType<typeof getBenchmark>;
       try {
@@ -222,7 +274,7 @@ export class BenchmarkService {
         { id: input.id ?? adapter.id, version: input.version, description: adapter.description },
         opts,
       );
-      producedBy = { via: "catalog", id: input.benchmark };
+      producedBy = { via: "catalog", id: input.benchmark, source: toSourceRef(adapter.source) };
     } else {
       throw new BadRequestError(
         "BAD_REQUEST",

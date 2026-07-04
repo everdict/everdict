@@ -9,4 +9,7 @@ export {
   type Dataset,
   type DatasetDiff,
   type DatasetFieldChange,
+  type DatasetProvenance,
+  type DatasetSourceRef,
+  type DatasetOrigin,
 } from './model/schema'

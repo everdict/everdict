@@ -1,14 +1,21 @@
 import Link from 'next/link'
 import {
   BarChart3,
+  BookText,
   Boxes,
   ChevronLeft,
   Clock,
+  Database,
+  ExternalLink,
+  FileText,
   GitBranchPlus,
   GitCompare,
   History,
+  Scale,
   ScrollText,
   Tags,
+  Trophy,
+  Users,
   Waypoints,
 } from 'lucide-react'
 
@@ -18,6 +25,7 @@ import {
   datasetSchema,
   datasetsSchema,
   type Dataset,
+  type DatasetProvenance,
   type DatasetSummary,
 } from '@/entities/dataset'
 import { membersSchema } from '@/entities/member'
@@ -249,26 +257,9 @@ export default async function DatasetDetailPage({
         </div>
       </Card>
 
-      {/* 출처(있으면) — 이 데이터셋이 어떤 레시피/카탈로그/spec 으로 만들어졌는지. 레시피면 상세로 역링크. */}
+      {/* 리니지(출처) — 이 데이터가 어디서 왔는지. 원본 소스(HF 링크) · 공식 provenance · 만든 경로. */}
       {dataset.producedBy && (
-        <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
-          <span className="text-faint">출처</span>
-          {dataset.producedBy.via === 'recipe' ? (
-            <span className="inline-flex items-center gap-1 font-mono text-muted-foreground">
-              <ScrollText className="size-3.5" />
-              {dataset.producedBy.id}
-              {dataset.producedBy.version ? (
-                <span className="text-faint">@{dataset.producedBy.version}</span>
-              ) : null}
-              <span className="text-faint">레시피</span>
-            </span>
-          ) : (
-            <span className="font-mono">
-              {dataset.producedBy.via === 'catalog' ? '카탈로그' : '인라인 정의'} ·{' '}
-              {dataset.producedBy.id}
-            </span>
-          )}
-        </div>
+        <DatasetLineage workspace={workspace} provenance={dataset.producedBy} />
       )}
 
       {/* 관계된 하니스 — 이 데이터셋으로 평가된 하니스(스코어카드에서 도출). 데이터셋은 하니스 무관. */}
@@ -348,5 +339,167 @@ export default async function DatasetDetailPage({
         )}
       </section>
     </div>
+  )
+}
+
+// 외부 링크 칩 — 리니지의 공식 provenance 링크(홈페이지/논문/코드/데이터/리더보드).
+function LinkChip({
+  href,
+  icon: Icon,
+  label,
+}: {
+  href: string
+  icon: typeof BookText
+  label: string
+}) {
+  return (
+    <a
+      href={href}
+      target="_blank"
+      rel="noreferrer"
+      className="inline-flex items-center gap-1 rounded bg-secondary px-1.5 py-0.5 text-[11px] font-[510] text-secondary-foreground ring-1 ring-inset ring-border transition-colors hover:text-foreground"
+    >
+      <Icon className="size-3" />
+      {label}
+      <ExternalLink className="size-2.5 text-faint" />
+    </a>
+  )
+}
+
+// 리니지(출처) 카드 — "이 데이터가 어디서 왔는지". 원본 소스(HF 링크) · 공식 provenance · 만든 경로.
+// 데이터셋은 리니지가 핵심(오피셜 오픈 벤치마크의 출처 보존) — 정의그리드 대신 라벨-값 행으로 읽히게.
+function DatasetLineage({
+  workspace,
+  provenance,
+}: {
+  workspace: string
+  provenance: DatasetProvenance
+}) {
+  const { source, origin } = provenance
+  const hfFileUrl =
+    source?.kind === 'huggingface' && source.url && source.file
+      ? `${source.url}/blob/main/${source.file}`
+      : undefined
+
+  return (
+    <Card className="space-y-3 p-4">
+      <div className="flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
+        <Waypoints className="size-3.5" /> 출처 · 리니지
+      </div>
+
+      {/* 원본 소스 — 데이터 행이 어디서 왔나(HF 데이터셋/파일 링크 or 붙여넣기). */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[12.5px]">
+        <span className="w-14 shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint">
+          소스
+        </span>
+        {source?.kind === 'huggingface' && source.dataset ? (
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <Database className="size-3.5 text-[#7cc0ff]" />
+            <span className="text-muted-foreground">HuggingFace</span>
+            {source.url ? (
+              <a
+                href={source.url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 font-mono font-[510] text-foreground underline-offset-2 hover:text-primary hover:underline"
+              >
+                {source.dataset}
+                <ExternalLink className="size-3 text-faint" />
+              </a>
+            ) : (
+              <code className="font-mono text-foreground">{source.dataset}</code>
+            )}
+            {source.file ? (
+              hfFileUrl ? (
+                <a
+                  href={hfFileUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-border transition-colors hover:text-foreground"
+                >
+                  <FileText className="size-3" />
+                  {source.file}
+                </a>
+              ) : (
+                <span className="rounded bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-border">
+                  {source.file}
+                </span>
+              )
+            ) : null}
+            {source.config || source.split ? (
+              <span className="font-mono text-[11px] text-faint">
+                {[source.config, source.split].filter(Boolean).join(' / ')}
+              </span>
+            ) : null}
+          </span>
+        ) : source?.kind === 'jsonl' ? (
+          <span className="text-muted-foreground">직접 붙여넣기 (JSONL)</span>
+        ) : (
+          <span className="text-faint">알 수 없음</span>
+        )}
+      </div>
+
+      {/* 공식 provenance — 발표 벤치마크의 홈페이지/논문/코드/리더보드 + 라이선스/저자(있으면). */}
+      {origin &&
+        (origin.homepage ||
+          origin.paper ||
+          origin.code ||
+          origin.data ||
+          origin.leaderboard ||
+          origin.license ||
+          origin.authors) && (
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5 border-t pt-3 text-[12.5px]">
+            <span className="w-14 shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint">
+              공식
+            </span>
+            <span className="flex flex-wrap items-center gap-1.5">
+              {origin.homepage && (
+                <LinkChip href={origin.homepage} icon={ExternalLink} label="홈페이지" />
+              )}
+              {origin.paper && <LinkChip href={origin.paper} icon={BookText} label="논문" />}
+              {origin.code && <LinkChip href={origin.code} icon={ScrollText} label="코드" />}
+              {origin.data && <LinkChip href={origin.data} icon={Database} label="데이터" />}
+              {origin.leaderboard && (
+                <LinkChip href={origin.leaderboard} icon={Trophy} label="리더보드" />
+              )}
+              {origin.license && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Scale className="size-3 text-faint" />
+                  {origin.license}
+                </span>
+              )}
+              {origin.authors && (
+                <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <Users className="size-3 text-faint" />
+                  {origin.authors}
+                </span>
+              )}
+            </span>
+          </div>
+        )}
+
+      {/* 만든 경로 — 레시피(역링크)/카탈로그/인라인 정의. */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t pt-3 text-[12.5px]">
+        <span className="w-14 shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint">
+          경로
+        </span>
+        {provenance.via === 'recipe' ? (
+          <Link
+            href={`/${workspace}/recipes/${encodeURIComponent(provenance.id)}`}
+            className="inline-flex items-center gap-1 font-mono text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            <ScrollText className="size-3.5" />
+            {provenance.id}
+            {provenance.version ? <span className="text-faint">@{provenance.version}</span> : null}
+            <span className="text-faint">레시피</span>
+          </Link>
+        ) : (
+          <span className="font-mono text-muted-foreground">
+            {provenance.via === 'catalog' ? '카탈로그' : '위저드 · 인라인 정의'}
+            {provenance.id ? <span className="text-faint"> · {provenance.id}</span> : null}
+          </span>
+        )}
+      </div>
+    </Card>
   )
 }

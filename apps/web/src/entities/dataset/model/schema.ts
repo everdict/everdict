@@ -2,11 +2,38 @@ import { z } from 'zod'
 
 // 컨트롤플레인 데이터셋의 클라이언트 미러. 웹은 HTTP 로만 결합 — 백엔드 패키지 비의존.
 
-// 데이터셋 출처 — 어떻게 만들어졌나(레시피/카탈로그/인라인 spec). 데이터셋 → 만든 레시피 역링크용.
+// 원본 데이터 출처(리니지) — 케이스 행이 어디서 왔나. HF 데이터셋/파일/split + 정규 링크.
+export const datasetSourceRefSchema = z.object({
+  kind: z.enum(['huggingface', 'jsonl']),
+  dataset: z.string().optional(),
+  config: z.string().optional(),
+  split: z.string().optional(),
+  file: z.string().optional(),
+  url: z.string().optional(),
+})
+export type DatasetSourceRef = z.infer<typeof datasetSourceRefSchema>
+
+// 발표 벤치마크의 공식 출처(있으면) — 홈페이지/논문/코드/데이터/리더보드/저자/라이선스/인용/과제유형.
+export const datasetOriginSchema = z.object({
+  homepage: z.string().optional(),
+  paper: z.string().optional(),
+  code: z.string().optional(),
+  data: z.string().optional(),
+  leaderboard: z.string().optional(),
+  authors: z.string().optional(),
+  license: z.string().optional(),
+  citation: z.string().optional(),
+  taskType: z.string().optional(),
+})
+export type DatasetOrigin = z.infer<typeof datasetOriginSchema>
+
+// 데이터셋 출처 — 만든 경로(레시피/카탈로그/spec) + 원본 데이터 출처(리니지) + 공식 provenance.
 export const datasetProvenanceSchema = z.object({
   via: z.enum(['recipe', 'catalog', 'spec']),
   id: z.string(),
   version: z.string().optional(),
+  source: datasetSourceRefSchema.optional(),
+  origin: datasetOriginSchema.optional(),
 })
 export type DatasetProvenance = z.infer<typeof datasetProvenanceSchema>
 
