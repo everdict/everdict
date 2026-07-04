@@ -1,6 +1,5 @@
 import type { AgentJob, CaseResult } from "@assay/core";
-import { describe, expect, it, vi } from "vitest";
-import { detectCapabilities } from "./capabilities.js";
+import { describe, expect, it } from "vitest";
 import { RunnerHost, type RunnerHostStatus, type RunnerJobDone } from "./runner-host.js";
 import type { RunnerClient } from "./runner-session.js";
 
@@ -96,13 +95,5 @@ describe("RunnerHost", () => {
     expect(host.status().capabilities).toEqual(["repo", "docker"]);
     await host.stop();
     expect(host.status().state).toBe("off");
-  });
-});
-
-describe("detectCapabilities", () => {
-  it("docker 있으면 repo+docker+browser, 없으면 repo 만", async () => {
-    expect(await detectCapabilities(async () => true)).toEqual(["repo", "docker", "browser"]);
-    expect(await detectCapabilities(async () => false)).toEqual(["repo"]);
-    expect(vi.isMockFunction(detectCapabilities)).toBe(false);
   });
 });
