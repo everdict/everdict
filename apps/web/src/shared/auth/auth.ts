@@ -73,6 +73,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       ]
     : [],
   callbacks: {
+    // 로그인 후 복귀 URL 정리 — favicon.ico 등 비-페이지(정적 자산·확장자·_next·api)나 외부 오리진으로는
+    // 보내지 않고 홈(/)으로 흘려보낸다. (죽은 callbackUrl=/favicon.ico 로 튕겨 앱에 못 들어가던 문제 차단.)
+    redirect({ url, baseUrl }) {
+      let target: URL
+      try {
+        target = url.startsWith('/') ? new URL(url, baseUrl) : new URL(url)
+      } catch {
+        return baseUrl
+      }
+      if (target.origin !== baseUrl) return baseUrl
+      const p = target.pathname
+      const isNonPage =
+        p === '/favicon.ico' || /\.[a-z0-9]+$/i.test(p) || p.startsWith('/_next') || p.startsWith('/api')
+      return isNonPage ? baseUrl : `${baseUrl}${target.pathname}${target.search}`
+    },
     async jwt({ token, account }) {
       // 첫 로그인: 액세스/리프레시 토큰 묶음 저장.
       if (account) {
