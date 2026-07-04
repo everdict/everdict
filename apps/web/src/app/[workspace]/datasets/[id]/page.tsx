@@ -20,7 +20,9 @@ import {
 } from 'lucide-react'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
-import { CaseCard } from '@/features/inspect-dataset'
+import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
+import { CaseList } from '@/features/inspect-dataset'
+import { commentsResponseSchema } from '@/entities/comment'
 import {
   datasetSchema,
   datasetsSchema,
@@ -91,6 +93,11 @@ export default async function DatasetDetailPage({
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
+  // 댓글(활동 타임라인의 논의) — 실패해도 상세는 보인다.
+  const comments = await controlPlane
+    .listComments(ctx, 'dataset', id)
+    .then((r) => commentsResponseSchema.parse(r).comments)
+    .catch(() => [])
   const relation = buildDatasetRelations(scorecards)[id]
   const currentWorkspace = principal?.workspace ?? workspace
   // 만든이 — 프로필 이름+아바타(있으면). 시드/_shared 는 first-party 로 표기(아바타 없음).
@@ -143,6 +150,48 @@ export default async function DatasetDetailPage({
       return m
     }, new Map<string, number>()),
   ].sort((a, b) => b[1] - a[1])
+
+  // 활동 타임라인 — "누가 언제 무엇을"(생성 · 스코어카드 실행 · 댓글)을 시간순으로. actor 는 여기서 표시-준비.
+  const isAdmin = can(principal?.roles, 'settings:write') // settings:write = admin 전용 → admin 판정 프록시
+  const resolveActor = (subject?: string): Actor => {
+    if (!subject) return { name: '시스템', known: false }
+    const m = members.find((x) => x.subject === subject)
+    return {
+      name: m?.name ?? m?.email ?? fmtSubject(subject),
+      ...(m?.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
+      known: Boolean(m),
+    }
+  }
+  const activity: ActivityItem[] = []
+  if (summary?.createdAt)
+    activity.push({
+      kind: 'created',
+      at: summary.createdAt,
+      actor: resolveActor(summary.createdBy),
+    })
+  for (const sc of scorecards.filter((s) => s.dataset.id === id)) {
+    const m = sc.summary?.find((x) => x.passRate != null) ?? sc.summary?.[0]
+    activity.push({
+      kind: 'scorecard',
+      at: sc.createdAt,
+      actor: resolveActor(sc.createdBy),
+      scorecardId: sc.id,
+      harness: `${sc.harness.id}@${sc.harness.version}`,
+      status: sc.status,
+      passRate: m?.passRate ?? null,
+    })
+  }
+  for (const c of comments)
+    activity.push({
+      kind: 'comment',
+      at: c.createdAt,
+      actor: resolveActor(c.author),
+      id: c.id,
+      body: c.body,
+      canDelete: c.author === principal?.subject || isAdmin,
+    })
+  activity.sort((a, b) => a.at.localeCompare(b.at))
+  const canComment = can(principal?.roles, 'comments:write')
 
   return (
     <div className="space-y-7">
@@ -262,7 +311,7 @@ export default async function DatasetDetailPage({
         <DatasetLineage workspace={workspace} provenance={dataset.producedBy} />
       )}
 
-      {/* 관계된 하니스 — 이 데이터셋으로 평가된 하니스(스코어카드에서 도출). 데이터셋은 하니스 무관. */}
+      {/* 관계된 하니스 — 이 데이터셋으로 평가된 하니스(스코어카드에서 도출). 아래 활동 타임라인의 요약. */}
       {relation && relation.harnesses.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
           <span className="inline-flex items-center gap-1 text-faint">
@@ -277,13 +326,19 @@ export default async function DatasetDetailPage({
               {h}
             </Link>
           ))}
-          {relation.lastRunAt && (
-            <span className="text-faint" title={fmtDateTimeFull(relation.lastRunAt)}>
-              · 최근 실행 {fmtDateTime(relation.lastRunAt)}
-            </span>
-          )}
         </div>
       )}
+
+      {/* 활동 — 이 데이터셋에 일어난 일(생성 · 스코어카드 실행 · 댓글)을 시간순으로. 상세의 주(主) 내용. */}
+      <section className="space-y-3">
+        <SectionHeader title="활동" />
+        <ActivityTimeline
+          workspace={workspace}
+          datasetId={dataset.id}
+          items={activity}
+          canComment={canComment}
+        />
+      </section>
 
       <section className="space-y-3">
         <SectionHeader title={`케이스 (${dataset.cases.length})`} />
@@ -329,12 +384,8 @@ export default async function DatasetDetailPage({
               </div>
             </div>
 
-            {/* 케이스별 카드 — 클릭 시 다이얼로그로 전문(태스크 마크다운 + 원본 JSON) */}
-            <div className="space-y-2">
-              {dataset.cases.map((c) => (
-                <CaseCard key={c.id} item={c} />
-              ))}
-            </div>
+            {/* 케이스별 카드 — 기본 5개만, 확장 가능(상세의 주는 활동 히스토리라 케이스는 부차적). */}
+            <CaseList cases={dataset.cases} />
           </>
         )}
       </section>

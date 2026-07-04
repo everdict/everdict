@@ -33,7 +33,9 @@ export type Action =
   | "members:read"
   | "members:write"
   | "settings:read"
-  | "settings:write";
+  | "settings:write"
+  | "comments:read"
+  | "comments:write";
 
 export const ASSAY_ROLES = ["viewer", "member", "admin"] as const;
 export type AssayRole = (typeof ASSAY_ROLES)[number];
@@ -52,6 +54,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:read",
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관 — 모든 멤버가 자기 워크스페이스 실행 인프라를 등록(harnesses:register 와 동일)
     "members:read", // 팀(워크스페이스 멤버) 조회는 양성 → viewer+
+    "comments:read", // 댓글 조회 = 양성(협업 논의 열람) → viewer+
   ]),
   member: new Set<Action>([
     "runs:read",
@@ -72,6 +75,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "runtimes:read",
     "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관
     "members:read",
+    "comments:read",
+    "comments:write", // 댓글 작성 = 협업 콘텐츠(누구로 돌렸나 논의) → member+ (삭제는 작성자-or-admin, 서비스 계층)
   ]),
   // GitHub Actions OIDC 페더레이션(via=github-actions) 전용 — CI 가 필요한 최소만:
   // 발사/폴링/diff(scorecards) + 재핀(harnesses:register)/기준 조회(harnesses:read). 거버넌스/시크릿/멤버는 없음.
@@ -104,6 +109,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "members:write", // 멤버 역할변경/제거/초대 발급 = 거버넌스(admin 초대 발급 포함) → admin 전용
     "settings:read", // 워크스페이스 정책(계측 등) = admin 전용 설정
     "settings:write",
+    "comments:read",
+    "comments:write",
   ]),
 };
 
@@ -125,6 +132,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "models:read",
   "runtimes:read",
   "members:read",
+  "comments:read",
 ];
 // write scope = read ∪ 콘텐츠 mutation(run 제출·등록·버전 생성·실행). 거버넌스(secrets/members/settings/keys write, datasets:delete)는 admin scope 전용.
 const SCOPE_WRITE_ACTIONS: readonly Action[] = [
@@ -138,6 +146,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "judges:write",
   "models:write",
   "runtimes:write",
+  "comments:write",
 ];
 // admin scope(=Full Access) = 모든 action. role 매트릭스의 합집합(admin role 이 전체를 보유)에서 도출.
 const ALL_ACTIONS = new Set<Action>(Object.values(ROLE_PERMISSIONS).flatMap((s) => [...s]));

@@ -95,6 +95,13 @@ export {
   PgNotificationStore,
 } from "./notification-store.js";
 export {
+  type CommentRecord,
+  type CommentStore,
+  InMemoryCommentStore,
+  CommentRecordSchema,
+  PgCommentStore,
+} from "./comment-store.js";
+export {
   type RunnerMeta,
   type RunnerStore,
   type PairRunnerInput,

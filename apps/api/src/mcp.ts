@@ -33,6 +33,7 @@ import { deleteHarnessVersion } from "./harness-service.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { QueueService } from "./queue-service.js";
 import type { RunService } from "./run-service.js";
@@ -67,6 +68,7 @@ export interface McpDeps {
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — list/read (self-scoped)
+  commentService?: CommentService; // 리소스 댓글(데이터셋 등) — list/create/delete
   runnerHub?: RunnerHub; // 러너 lease 허브 — lease_job/submit_job_result/fail_job/heartbeat_job(러너 토큰 전용)
   settingsStore?: WorkspaceSettingsStore;
   benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
@@ -1283,6 +1285,58 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         plain(async () =>
           ok({ read: await notifications.markFeedRead(principal.subject, ws, all === true ? "all" : (ids ?? [])) }),
         ),
+    );
+  }
+
+  if (deps.commentService) {
+    const comments = deps.commentService;
+    // 리소스 댓글 — 조회=comments:read, 작성=comments:write, 삭제=작성자-or-admin(서비스 판정). BFF 패리티: GET/POST/DELETE /comments.
+    server.registerTool(
+      "list_comments",
+      {
+        description: "리소스(데이터셋 등)의 댓글 — 오래된→최신(타임라인 순서).",
+        inputSchema: {
+          resource_type: z.enum(COMMENT_RESOURCE_TYPES),
+          resource_id: z.string(),
+        },
+      },
+      ({ resource_type, resource_id }) =>
+        run(principal, "comments:read", async () => ok({ comments: await comments.list(ws, resource_type, resource_id) })),
+    );
+    server.registerTool(
+      "create_comment",
+      {
+        description: "리소스에 댓글 작성. 작성자 = 나(subject).",
+        inputSchema: {
+          resource_type: z.enum(COMMENT_RESOURCE_TYPES),
+          resource_id: z.string(),
+          body: z.string().min(1),
+        },
+      },
+      ({ resource_type, resource_id, body }) =>
+        run(principal, "comments:write", async () =>
+          ok(
+            await comments.create({
+              tenant: ws,
+              resourceType: resource_type,
+              resourceId: resource_id,
+              author: principal.subject,
+              body,
+            }),
+          ),
+        ),
+    );
+    server.registerTool(
+      "delete_comment",
+      {
+        description: "댓글 삭제 — 본인 작성 or 워크스페이스 admin 만.",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) =>
+        plain(async () => {
+          await comments.delete({ tenant: ws, id, subject: principal.subject, isAdmin: principal.roles.includes("admin") });
+          return ok({ id, deleted: true });
+        }),
     );
   }
 

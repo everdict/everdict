@@ -25,6 +25,8 @@ export type WebAction =
   | 'members:write'
   | 'settings:read'
   | 'settings:write'
+  | 'comments:read'
+  | 'comments:write'
 
 const PERMS: Record<string, WebAction[]> = {
   viewer: [
@@ -39,6 +41,7 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:read',
     'runtimes:write', // 런타임 등록(+연결 테스트)은 role 무관 — harnesses:register 와 동일
     'members:read', // 팀 조회는 viewer+
+    'comments:read', // 댓글 조회는 viewer+
   ],
   member: [
     'runs:read',
@@ -58,6 +61,8 @@ const PERMS: Record<string, WebAction[]> = {
     'runtimes:read',
     'runtimes:write', // 런타임 등록(+연결 테스트)은 role 무관
     'members:read',
+    'comments:read',
+    'comments:write', // 댓글 작성은 member+ (삭제는 작성자-or-admin, 서버가 판정)
   ],
   admin: [
     'runs:read',
@@ -84,6 +89,8 @@ const PERMS: Record<string, WebAction[]> = {
     'members:write', // 멤버 역할변경/제거/초대 = admin
     'settings:read', // 워크스페이스 정책(계측 등) = admin
     'settings:write',
+    'comments:read',
+    'comments:write',
   ],
 }
 

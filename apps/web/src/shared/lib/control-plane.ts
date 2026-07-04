@@ -66,6 +66,16 @@ export const controlPlane = {
   listNotifications: <T>(auth: AuthContext, qs: string) => call<T>(auth, `/notifications${qs}`),
   readNotifications: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/notifications/read', { method: 'POST', body: JSON.stringify(body) }),
+  // 리소스 댓글(데이터셋 등) — 협업 논의. 조회=viewer+, 작성=member+, 삭제=작성자-or-admin(컨트롤플레인 강제).
+  listComments: <T>(auth: AuthContext, resourceType: string, resourceId: string) =>
+    call<T>(
+      auth,
+      `/comments?resourceType=${encodeURIComponent(resourceType)}&resourceId=${encodeURIComponent(resourceId)}`
+    ),
+  createComment: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/comments', { method: 'POST', body: JSON.stringify(body) }),
+  deleteComment: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/comments/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   // 워크스페이스 멤버십(self-serve): 내 워크스페이스 목록 + 생성(생성자는 admin).
   listWorkspaces: <T>(auth: AuthContext) => call<T>(auth, '/workspaces'),
   createWorkspace: <T>(auth: AuthContext, body: unknown) =>

@@ -21,6 +21,7 @@ import type { RuntimeSpec } from "@assay/core";
 import {
   type ConnectionStore,
   InMemoryConnectionStore,
+  InMemoryCommentStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
@@ -33,9 +34,11 @@ import {
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
+  type CommentStore,
   type NotificationStore,
   type OAuthStateStore,
   PgConnectionStore,
+  PgCommentStore,
   PgNotificationStore,
   PgOAuthStateStore,
   PgRunStore,
@@ -102,6 +105,7 @@ import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
 import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 import { NotificationService } from "./notification-service.js";
+import { CommentService } from "./comment-service.js";
 import { githubProvider } from "./oauth/github.js";
 import { mattermostProvider } from "./oauth/mattermost.js";
 import { ProfileService } from "./profile-service.js";
@@ -149,6 +153,7 @@ async function main(): Promise<void> {
     runnerStore,
     scheduleStore,
     notificationStore,
+    commentStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   // scheduleService 는 아래에서 생성되지만(scorecardService 의존), 멤버 제거 훅은 클로저로 늦바인딩한다
@@ -247,6 +252,7 @@ async function main(): Promise<void> {
     connections: connectionStore,
     feed: notificationStore, // 개인 알림 피드(벨 인박스) — docs/architecture/notifications.md
   });
+  const commentService = new CommentService({ store: commentStore }); // 리소스 댓글(데이터셋 등) 협업 논의
   const service = new RunService({
     dispatcher,
     store,
@@ -390,6 +396,7 @@ async function main(): Promise<void> {
     ciLinkService,
     runnerService,
     notificationService, // 알림 피드(벨 인박스) 라우트 — self-scoped
+    commentService, // 리소스 댓글 라우트 + MCP
     runnerHub,
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,
@@ -429,6 +436,7 @@ interface Persistence {
   runnerStore: RunnerStore; // 셀프호스티드 러너(개인 디바이스 페어링) — 페어링 토큰은 SHA-256 해시만 보관
   scheduleStore: ScheduleStore; // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식(SSOT, mutable)
   notificationStore: NotificationStore; // 개인 알림 피드(벨 인박스) — run/scorecard 완료를 recipient=subject 로 적재
+  commentStore: CommentStore; // 리소스 댓글(데이터셋 등) — 협업 논의
 }
 
 // at-rest 암호화 KEK: ASSAY_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
@@ -473,6 +481,7 @@ async function makePersistence(): Promise<Persistence> {
       runnerStore: new InMemoryRunnerStore(),
       scheduleStore: new InMemoryScheduleStore(),
       notificationStore: new InMemoryNotificationStore(),
+      commentStore: new InMemoryCommentStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -500,6 +509,7 @@ async function makePersistence(): Promise<Persistence> {
     runnerStore: new PgRunnerStore(client),
     scheduleStore: new PgScheduleStore(client),
     notificationStore: new PgNotificationStore(client),
+    commentStore: new PgCommentStore(client),
   };
 }
 

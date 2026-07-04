@@ -53,6 +53,7 @@ import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { QueueService } from "./queue-service.js";
 import type { RunService } from "./run-service.js";
@@ -72,6 +73,13 @@ import type { WorkspaceService } from "./workspace-service.js";
 const ReadNotificationsBodySchema = z.object({
   ids: z.array(z.string()).optional(),
   all: z.boolean().optional(),
+});
+
+// 댓글 작성 본문 — 대상(resourceType/resourceId) + 본문. body 검증(빈값/과길이)은 서비스가 강제.
+const CreateCommentBodySchema = z.object({
+  resourceType: z.enum(COMMENT_RESOURCE_TYPES),
+  resourceId: z.string().min(1),
+  body: z.string().min(1),
 });
 
 export const SubmitBodySchema = z.object({
@@ -177,6 +185,7 @@ export interface ServerDeps {
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — self-scoped (없으면 해당 라우트 비활성)
+  commentService?: CommentService; // 리소스 댓글(데이터셋 등) — 협업 논의 (없으면 해당 라우트 비활성)
   runnerHub?: RunnerHub; // 셀프호스티드 러너 lease 허브 — MCP lease/result/heartbeat 도구가 쓴다 (없으면 비활성)
   settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
   workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
@@ -1941,6 +1950,62 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- comments (리소스 댓글 — 데이터셋 등의 협업 논의; 조회=viewer+, 작성=member+, 삭제=작성자-or-admin) ---
+  app.get("/comments", async (req, reply) => {
+    if (!deps.commentService) return reply.code(404).send({ code: "NOT_FOUND", message: "comment 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const q = req.query as { resourceType?: string; resourceId?: string };
+    if (!q.resourceType || !q.resourceId)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "resourceType 과 resourceId 가 필요합니다." });
+    try {
+      gate(principal, "comments:read");
+      const comments = await deps.commentService.list(principal.workspace, q.resourceType, q.resourceId);
+      return reply.send({ comments });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.post("/comments", async (req, reply) => {
+    if (!deps.commentService) return reply.code(404).send({ code: "NOT_FOUND", message: "comment 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = CreateCommentBodySchema.safeParse(req.body);
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "comments:write");
+      const comment = await deps.commentService.create({
+        tenant: principal.workspace,
+        resourceType: body.data.resourceType,
+        resourceId: body.data.resourceId,
+        author: principal.subject,
+        body: body.data.body,
+      });
+      return reply.code(201).send(comment);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/comments/:id", async (req, reply) => {
+    if (!deps.commentService) return reply.code(404).send({ code: "NOT_FOUND", message: "comment 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      // 작성자-or-admin 은 서비스가 판정(라우트는 인증만) — datasets:delete 와 동일한 창작자 override 패턴.
+      await deps.commentService.delete({
+        tenant: principal.workspace,
+        id: req.params.id,
+        subject: principal.subject,
+        isAdmin: principal.roles.includes("admin"),
+      });
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // 워크스페이스 러너 로스터 — 이 워크스페이스에서 페어링된 러너(메타만, 토큰 없음). 읽기 전용(members:read).
   // 페어/해제 관리는 개인 소유라 account 페이지(GET /runners)에서; 여기는 워크스페이스가 멤버 러너를 한눈에 보는 뷰.
   app.get("/workspace/runners", async (req, reply) => {
@@ -2314,6 +2379,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,
           notificationService: deps.notificationService,
+          commentService: deps.commentService,
           runnerHub: deps.runnerHub,
           settingsStore: deps.settingsStore,
           benchmarkService: deps.benchmarkService,
