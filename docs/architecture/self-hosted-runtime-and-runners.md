@@ -130,8 +130,19 @@ runner, once configured, holds its own GitHub credential — a company resource,
 
 1. **Terminology + pool key.** Land this doc; generalize `RunnerHub` to key by `runtimeRef` (personal pool with
    1 runner = today's behavior, back-compat); rename in code/docs so *runtime* = pool, *runner* = worker. No user-visible change.
-2. **N runners per personal pool.** `assay runner --join self:<id>` (multiple processes/machines join one personal
-   runtime); roster shows the pool + its runners; presence per-runner. Proves "pull 2 by running 2 runners."
+2. **Multi-runner workspace pool (`self:ws`) — ✅ SHIPPED.** Target `self:ws` (no runner id) routes to the
+   **workspace pool**: any of that workspace's shared runners (capability-satisfying) drains it — N runners = N
+   concurrency. `RunnerHub` gains a `POOL_RUNNER` (`"*"`) sentinel + `poolKeyFor(owner)`: `lease(runnerKey)` serves
+   the runner's own queue first, then the owner's pool queue — and on the pool, a capability mismatch is **skipped**
+   (left for a capable runner), not rejected. Pool jobs live in the pool queue; a runner completes with its own key
+   and `locate()` finds it there; `enqueue` wakes the owner's polling runners **round-robin** (`wakeCursor`) so no
+   runner hogs. `enqueue` resolves `{result, ranBy}` so `provenance.runner` is the **actual** runner that ran a pool
+   job (not `"*"`). `requiredRunnerCapabilities` adds `docker` for service harnesses so the pool routes them to a
+   docker runner. `RuntimeDispatcher` handles `target==="self:ws"` (before the `self:<id>` branch) via a
+   `poolHasRunners(owner)` check (404 if none). Web: the run form's runtime picker shows "팀 공유 러너 (아무거나)"
+   when the workspace has shared runners. Live e2e `scripts/live/multi-runner-pool.mjs` (2 runners → `self:ws` → all
+   routed to workspace runners; deterministic distribution proven by unit tests). Personal `--join self:<id>` pools
+   remain a follow-up (workspace pool covers the team use case).
 3. **Workspace self-hosted runtime.** ✅ **SHIPPED.** Realized as a workspace-owned **runner** (owner=`ws:<workspace>`
    in the existing owner-keyed runner-store — no new store/schema; the shared "pool" *is* the workspace-owned runner
    set). Admin CRUD gated `settings:write`: `POST /workspace/runners` (pair, plaintext token once) ·
@@ -171,8 +182,11 @@ runner, once configured, holds its own GitHub credential — a company resource,
    accepts `org` (mutually exclusive with `repository`) and points `config.sh --url` at the org URL. Surfaced on
    `POST /connections/:provider/start {elevated?}`, `POST /workspace/runners/github-install {org?}`, MCP
    `get_connect_url {elevated?}` + `github_install_workspace_runner {org?}`, and the web dialog (repo/org toggle +
-   `admin:org` detection + "reconnect elevated" CTA). Remaining polish: org runner groups ↔ workspace runtimes;
-   runner labels for placement; live e2e (multi-runner pool + real GitHub self-hosted registration).
+   `admin:org` detection + "reconnect elevated" CTA). **Org runner groups — SHIPPED:** an optional `runnerGroup`
+   (org-level only) adds `config.sh --runnergroup <name>` so the org's group access policy applies to the runner
+   (route/MCP/web params). **Runner labels for placement — SHIPPED** as capability-gated pool routing (slice 2): the
+   pool's lease gate skips runners lacking a job's required capabilities, so `self:ws` routes each job to a suitable
+   runner. Remaining: live e2e vs **real** GitHub self-hosted registration; personal multi-runner `--join`.
 
 ## Decisions / non-goals
 
