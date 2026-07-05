@@ -137,6 +137,9 @@ async function main(): Promise<void> {
   const nomadAddr = process.env.NOMAD_ADDR;
   const k8sContext = process.env.ASSAY_K8S_CONTEXT;
   const image = process.env.ASSAY_AGENT_IMAGE;
+  // 배포 정책: 켜면 실행은 등록된 런타임 또는 self-hosted 러너에서만 — control-plane 호스트 in-process(LocalBackend) 금지.
+  // (1) local 폴백 미등록 (2) runtime/self 타깃 없는 run/scorecard 는 제출 시 400. 미설정(dev)이면 기존대로 local 폴백.
+  const requireRuntime = process.env.ASSAY_REQUIRE_RUNTIME === "1";
 
   const {
     store,
@@ -194,7 +197,8 @@ async function main(): Promise<void> {
     backends.register("nomad", new NomadBackend({ addr: nomadAddr, image, secretEnv: collectAuthEnv(), secrets }));
   } else if (k8sContext && image) {
     backends.register("k8s", new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv(), secrets }));
-  } else {
+  } else if (!requireRuntime) {
+    // dev 폴백 — 정책(ASSAY_REQUIRE_RUNTIME)이 켜지면 등록하지 않는다(모든 실행은 런타임/self 타깃 경유).
     backends.register("local", new LocalBackend());
   }
   const scheduler = new Scheduler(backends);
@@ -310,6 +314,7 @@ async function main(): Promise<void> {
     dispatcher,
     store,
     budget,
+    requireRuntime, // 정책: runtime/self 타깃 없는 run 은 제출 시 400(local 폴백 금지)
     ...(artifacts ? { artifacts } : {}),
     // 선언형 하니스: 인스턴스 레지스트리에서 template+pins 를 resolve 해 spec 을 잡에 임베드(없으면 빌트인 폴백).
     resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),
@@ -339,6 +344,7 @@ async function main(): Promise<void> {
   const scorecardService = new ScorecardService({
     dispatcher,
     store: scorecardStore,
+    requireRuntime, // 정책: runtime 없는 배치는 제출 시 400(local 폴백 금지)
     // 케이스마다 자식 run 을 팬아웃(단일 run 과 같은 RunStore 공유) — 각 케이스가 addressable run 이 되고 활동 리스트엔 기본 숨김.
     runStore: store,
     datasets: datasetRegistry,
@@ -400,7 +406,7 @@ async function main(): Promise<void> {
   // picker/setup-PR 은 멤버 개인 GitHub 연결 토큰(tokenFor)을 서버 안에서만 사용한다.
   const ciLinkService = new CiLinkService({
     settings: settingsStore,
-    connections: connectionStore,
+    githubApp: githubAppService, // repo picker + setup-PR + 러너 등록 토큰 = 워크스페이스 GitHub App(개인 연결 대체)
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // 생성 워크플로의 api-url
   });
 
@@ -474,7 +480,7 @@ async function main(): Promise<void> {
 
   await app.listen({ port, host: "0.0.0.0" });
   console.error(
-    `▶ assay-api on :${port} (backend:${nomadAddr ? "nomad" : "local"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.ASSAY_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"})`,
+    `▶ assay-api on :${port} (backend:${nomadAddr ? "nomad" : k8sContext ? "k8s" : requireRuntime ? "runtime-only" : "local"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.ASSAY_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:${requireRuntime ? "required" : "local-fallback"})`,
   );
 }
 

@@ -7,13 +7,11 @@ import type { RunnerService } from "./runner-service.js";
 //  (1) GitHub Actions 셀프호스티드 러너(config.sh — CI 가 이미지 빌드 + Assay 호출)
 //  (2) Assay 워크스페이스-공유 러너(assay runner — self:ws:<id> 잡을 lease 해 평가 실행)
 // 두 워커는 같은 호스트에 나란히 산다. Assay 러너 토큰은 워크스페이스-공유 러너를 새로 페어링해 발급하고(1회 노출),
-// GitHub 등록 토큰은 멤버 개인 GitHub 연결(repo scope)로 mint(단기). BFF↔MCP 공용 코어(라우트/도구가 이걸 호출).
+// GitHub 등록 토큰은 워크스페이스 GitHub App(administration)으로 mint(단기). BFF↔MCP 공용 코어(라우트/도구가 이걸 호출).
 
 export interface GithubRunnerInstallInput {
   workspace: string;
-  subject: string; // admin — 개인 GitHub 연결이 등록 토큰을 mint
-  connectionId: string; // 그 GitHub 연결 id
-  // 대상: repo 레벨(repository="owner/name", 기본 스코프) 또는 org 레벨(org="org", admin:org 연결 필요). 정확히 하나.
+  // 대상: repo 레벨(repository="owner/name") 또는 org 레벨(org="org"). 워크스페이스 GitHub App 이 그 org/repo 에 설치돼 있어야 한다. 정확히 하나.
   repository?: string; // "owner/name"
   org?: string; // org 이름 — org 레벨(모든 레포가 이 러너를 공유). admin:org 스코프 연결 필요.
   label: string; // Assay 러너 표시 이름
@@ -40,7 +38,11 @@ export async function installGithubWorkspaceRunner(
   if ((input.repository === undefined) === (input.org === undefined))
     throw new BadRequestError("BAD_REQUEST", {}, "repository 또는 org 중 정확히 하나를 지정하세요.");
   if (input.repository !== undefined && !/^[^/\s]+\/[^/\s]+$/.test(input.repository))
-    throw new BadRequestError("BAD_REQUEST", { repository: input.repository }, "repository 는 'owner/name' 형식이어야 합니다.");
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { repository: input.repository },
+      "repository 는 'owner/name' 형식이어야 합니다.",
+    );
   if (input.org !== undefined && !/^[^/\s]+$/.test(input.org))
     throw new BadRequestError("BAD_REQUEST", { org: input.org }, "org 는 슬래시/공백 없는 org 이름이어야 합니다.");
   const target: { repo: string } | { org: string } =
@@ -52,8 +54,8 @@ export async function installGithubWorkspaceRunner(
     label: input.label,
     ...(input.capabilities !== undefined ? { capabilities: input.capabilities } : {}),
   });
-  // (1) GitHub 등록 토큰 mint — 개인 연결로(org 는 admin:org 필요, 없으면 mint 가 BadRequest 안내).
-  const reg = await deps.ciLinkService.mintRunnerToken(input.subject, input.connectionId, target);
+  // (1) GitHub 등록 토큰 mint — 워크스페이스 GitHub App(administration)으로. App 이 그 org/repo 에 설치돼 있어야 한다.
+  const reg = await deps.ciLinkService.mintRunnerToken(input.workspace, target);
 
   const runnerId = paired.meta.id;
   const runtimeTarget = `self:ws:${runnerId}`;

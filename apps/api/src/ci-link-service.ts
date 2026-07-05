@@ -1,5 +1,5 @@
 import { BadRequestError, NotFoundError, UpstreamError } from "@assay/core";
-import type { ConnectionStore, WorkspaceCiLink, WorkspaceSettingsStore } from "@assay/db";
+import type { WorkspaceCiLink, WorkspaceSettingsStore } from "@assay/db";
 import { z } from "zod";
 
 // CI repo link 서비스 — repository ↔ 하니스 서비스 슬롯 매핑(= GitHub Actions OIDC trust policy) CRUD +
@@ -25,9 +25,23 @@ export interface RepoInfo {
   pushedAt?: string;
 }
 
+// picker/setup-PR/러너 등록이 필요로 하는 워크스페이스 GitHub App 능력(개인 연결 대체). GithubAppService 가 구조적으로 만족.
+export interface GithubAppRepoAccess {
+  listRepos(workspace: string): Promise<RepoInfo[]>;
+  tokenForRepository(
+    workspace: string,
+    repository: string,
+    permissions: Record<string, string>,
+  ): Promise<{ token: string; host?: string }>;
+  runnerRegistrationToken(
+    workspace: string,
+    target: { repo: string } | { org: string },
+  ): Promise<{ token: string; expiresAt: string; host?: string }>;
+}
+
 export interface CiLinkServiceDeps {
   settings: WorkspaceSettingsStore;
-  connections: ConnectionStore; // 멤버 개인 연결 토큰(tokenFor) — repos 프록시 + setup-PR 커밋/PR 용
+  githubApp: GithubAppRepoAccess; // 워크스페이스 소유 GitHub App — repos picker + setup-PR 커밋/PR + 러너 등록 토큰
   apiPublicUrl?: string; // 생성 워크플로의 api-url 값(미설정이면 요청 base 폴백)
   fetchImpl?: typeof fetch; // 테스트 주입
 }
@@ -71,37 +85,15 @@ export class CiLinkService {
     return this.list(workspace);
   }
 
-  // picker — 멤버 개인 GitHub 연결(owner=subject)로 그 계정의 레포 목록을 프록시. 토큰은 서버 안에서만.
-  async listRepos(owner: string, connectionId: string, page = 1): Promise<RepoInfo[]> {
-    const { token, host } = await this.githubToken(owner, connectionId);
-    const res = await this.gh(
-      `${apiBase(host)}/user/repos?sort=pushed&per_page=50&page=${page}&affiliation=owner,collaborator,organization_member`,
-      token,
-    );
-    const rows = z
-      .array(
-        z.object({
-          full_name: z.string(),
-          private: z.boolean(),
-          default_branch: z.string(),
-          pushed_at: z.string().nullable().optional(),
-        }),
-      )
-      .parse(await res.json());
-    return rows.map((r) => ({
-      fullName: r.full_name,
-      private: r.private,
-      defaultBranch: r.default_branch,
-      ...(r.pushed_at ? { pushedAt: r.pushed_at } : {}),
-    }));
+  // picker — 워크스페이스 GitHub App installation 이 접근 가능한 레포 목록(설치 시 고른 것만). 토큰은 서버 안에서만.
+  async listRepos(workspace: string): Promise<RepoInfo[]> {
+    return this.deps.githubApp.listRepos(workspace);
   }
 
-  // setup-PR — link 로부터 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR 을 연다(호출자의 개인 연결 토큰).
+  // setup-PR — link 로부터 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR 을 연다(워크스페이스 App 토큰).
   // 멱등에 가깝게: 브랜치/PR 이 이미 있으면 재사용/기존 PR 반환. 머지 여부는 GitHub 쪽 사람의 결정.
   async openSetupPr(
     workspace: string,
-    owner: string,
-    connectionId: string,
     repository: string,
     requestBaseUrl?: string,
   ): Promise<{ prUrl: string; branch: string }> {
@@ -109,7 +101,11 @@ export class CiLinkService {
       (l) => l.repository.toLowerCase() === repository.toLowerCase() && !l.disabled,
     );
     if (!link) throw new NotFoundError("NOT_FOUND", { repository }, `'${repository}' 의 repo link 가 없습니다.`);
-    const { token, host } = await this.githubToken(owner, connectionId);
+    // 워크스페이스 App installation 토큰(쓰기) — 브랜치/파일/PR 을 만들려면 contents + pull_requests write.
+    const { token, host } = await this.deps.githubApp.tokenForRepository(workspace, link.repository, {
+      contents: "write",
+      pull_requests: "write",
+    });
     const base = apiBase(host);
     const apiUrl = this.deps.apiPublicUrl ?? requestBaseUrl;
     if (!apiUrl)
@@ -179,45 +175,13 @@ export class CiLinkService {
     throw await this.upstream(mkPr, "PR 생성 실패");
   }
 
-  // GitHub Actions 셀프호스티드 러너 등록 토큰 발급 — 멤버 개인 GitHub 연결로 그 대상(repo|org)에 대해 mint.
-  // 단기 토큰(≈1시간). Assay 는 장기 러너 토큰을 저장하지 않는다(필요 시마다 발급).
-  //  - repo 레벨: 기본 스코프(repo)면 충분. POST /repos/{owner/name}/actions/runners/registration-token.
-  //  - org 레벨(옵트인): admin:org 스코프 필요. POST /orgs/{org}/actions/runners/registration-token — 권한 없으면 403 을
-  //    "상향 권한으로 재연결" 안내(BadRequest)로 remap(원시 403 을 그대로 흘리지 않는다).
-  // 반환에 host 도 실어 install 스크립트가 config.sh --url 를 github.com/GHE 로 맞추게 한다. 설계 doc §4.
+  // GitHub Actions 셀프호스티드 러너 등록 토큰 발급 — 워크스페이스 GitHub App(administration)으로 대상(repo|org)에 mint.
+  // 단기 토큰(≈1시간). Assay 는 장기 러너 토큰을 저장하지 않는다(필요 시마다 발급). App 이 그 org/repo 에 설치돼 있어야 한다.
   async mintRunnerToken(
-    owner: string,
-    connectionId: string,
+    workspace: string,
     target: { repo: string } | { org: string },
   ): Promise<{ token: string; expiresAt: string; host?: string }> {
-    const { token, host } = await this.githubToken(owner, connectionId);
-    const path = "repo" in target ? `/repos/${target.repo}` : `/orgs/${target.org}`;
-    const res = await this.fetch(`${apiBase(host)}${path}/actions/runners/registration-token`, {
-      method: "POST",
-      headers: this.headers(token),
-    });
-    if (!res.ok) {
-      if ("org" in target && (res.status === 403 || res.status === 404))
-        throw new BadRequestError(
-          "BAD_REQUEST",
-          { org: target.org, status: res.status },
-          "org 러너 등록 토큰 발급 실패 — 이 GitHub 연결에 admin:org 권한이 없거나 org 접근이 없습니다. 상향 권한(admin:org)으로 GitHub 를 다시 연결한 뒤 시도하세요.",
-        );
-      throw await this.upstream(res, "러너 등록 토큰 발급 실패");
-    }
-    const data = z.object({ token: z.string(), expires_at: z.string() }).parse(await res.json());
-    return { token: data.token, expiresAt: data.expires_at, ...(host !== undefined ? { host } : {}) };
-  }
-
-  private async githubToken(owner: string, connectionId: string): Promise<{ token: string; host?: string }> {
-    const metas = await this.deps.connections.list(owner);
-    const meta = metas.find((m) => m.id === connectionId);
-    if (!meta) throw new NotFoundError("NOT_FOUND", { connectionId }, "연결을 찾을 수 없습니다.");
-    if (meta.provider !== "github" && meta.provider !== "github-enterprise")
-      throw new BadRequestError("BAD_REQUEST", { provider: meta.provider }, "GitHub 연결이 아닙니다.");
-    const tok = await this.deps.connections.tokenFor(owner, connectionId);
-    if (!tok) throw new NotFoundError("NOT_FOUND", { connectionId }, "연결 토큰이 없습니다.");
-    return { token: tok.accessToken, ...(meta.host !== undefined ? { host: meta.host } : {}) };
+    return this.deps.githubApp.runnerRegistrationToken(workspace, target);
   }
 
   private headers(token: string): Record<string, string> {

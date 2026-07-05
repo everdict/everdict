@@ -1472,25 +1472,22 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       ({ repository }) => run(principal, "settings:write", async () => ok({ links: await ci.remove(ws, repository) })),
     );
     server.registerTool(
-      "list_connection_repos",
+      "list_github_app_repos",
       {
-        description: "내 GitHub 연결로 그 계정의 레포 목록 조회(picker) — 본인 연결만(self-scoped)",
-        inputSchema: { connection_id: z.string(), page: z.number().int().min(1).optional() },
+        description:
+          "워크스페이스 GitHub App installation 이 접근 가능한 레포 목록(picker) — 설치 시 고른 것만. settings:read.",
+        inputSchema: {},
       },
-      ({ connection_id, page }) =>
-        plain(async () => ok(await ci.listRepos(principal.subject, connection_id, page ?? 1))),
+      () => run(principal, "settings:read", async () => ok(await ci.listRepos(ws))),
     );
     server.registerTool(
       "open_ci_setup_pr",
       {
         description:
-          "link 된 레포에 Assay eval 워크플로 YAML 을 합성해 setup-PR 을 연다(내 GitHub 연결 토큰 사용). 머지하면 CI eval 활성.",
-        inputSchema: { repository: z.string().describe('"owner/name"'), connection_id: z.string() },
+          "link 된 레포에 Assay eval 워크플로 YAML 을 합성해 setup-PR 을 연다(워크스페이스 GitHub App 토큰). 머지하면 CI eval 활성.",
+        inputSchema: { repository: z.string().describe('"owner/name"') },
       },
-      ({ repository, connection_id }) =>
-        run(principal, "harnesses:read", async () =>
-          ok(await ci.openSetupPr(ws, principal.subject, connection_id, repository)),
-        ),
+      ({ repository }) => run(principal, "harnesses:read", async () => ok(await ci.openSetupPr(ws, repository))),
     );
   }
 
@@ -1693,18 +1690,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         }),
     );
     // GitHub Actions 러너 자가등록 — 빌드 서버에 GitHub 러너 + Assay 워크스페이스-공유 러너를 함께 세우는 설치
-    // 스크립트 생성(설계 doc §4). 개인 GitHub 연결 필요 → ciLinkService 있을 때만. admin 전용.
+    // 스크립트 생성(설계 doc §4). 워크스페이스 GitHub App 으로 등록 토큰 mint → ciLinkService 있을 때만. admin 전용.
     if (deps.ciLinkService) {
       const ciForRunner = deps.ciLinkService;
       server.registerTool(
         "github_install_workspace_runner",
         {
           description:
-            "GitHub Actions 셀프호스티드 러너 + Assay 워크스페이스-공유 러너를 한 빌드 서버에 함께 세우는 설치 스크립트를 생성한다(설계 §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 토큰 1회) + 개인 GitHub 연결로 등록 토큰 mint. repository(repo 레벨) 또는 org(org 레벨, admin:org 연결 필요) 정확히 하나. 반환 스크립트를 빌드 서버에서 실행. admin 전용.",
+            "GitHub Actions 셀프호스티드 러너 + Assay 워크스페이스-공유 러너를 한 빌드 서버에 함께 세우는 설치 스크립트를 생성한다(설계 §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 토큰 1회) + 워크스페이스 GitHub App 으로 등록 토큰 mint. repository(repo 레벨) 또는 org(org 레벨) 정확히 하나 — App 이 그 org/repo 에 설치돼 있어야 함. 반환 스크립트를 빌드 서버에서 실행. admin 전용.",
           inputSchema: {
-            connectionId: z.string().describe("내 GitHub 연결 id(list_connections)"),
             repository: z.string().optional().describe('repo 레벨 대상 "owner/name"'),
-            org: z.string().optional().describe("org 레벨 대상(그 org 의 모든 레포 공유) — admin:org 상향 연결 필요"),
+            org: z.string().optional().describe("org 레벨 대상(그 org 의 모든 레포 공유)"),
             runnerGroup: z
               .string()
               .optional()
@@ -1714,15 +1710,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
           },
         },
-        ({ connectionId, repository, org, runnerGroup, label, githubLabels, capabilities }) =>
+        ({ repository, org, runnerGroup, label, githubLabels, capabilities }) =>
           run(principal, "settings:write", async () =>
             ok(
               await installGithubWorkspaceRunner(
                 { runnerService: runners, ciLinkService: ciForRunner },
                 {
                   workspace: ws,
-                  subject: principal.subject,
-                  connectionId,
                   label: label ?? org ?? repository?.split("/")[1] ?? "assay-ci",
                   apiUrl: deps.apiPublicUrl ?? "http://localhost:8787",
                   ...(repository !== undefined ? { repository } : {}),

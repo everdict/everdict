@@ -1964,22 +1964,6 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 레포 picker — 본인 GitHub 연결로 그 계정의 레포 목록을 프록시(토큰은 서버 안에서만). CI repo link 연결 UX 용.
-  app.get<{ Params: { id: string }; Querystring: { page?: string } }>("/connections/:id/repos", async (req, reply) => {
-    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
-    const principal = await resolvePrincipal(req, reply, deps);
-    if (!principal) return reply;
-    try {
-      // 연결은 개인 소유 — 역할 게이트 없이 본인(subject)의 연결로만 조회.
-      const page = req.query.page ? Number(req.query.page) : 1;
-      return reply.send(
-        await deps.ciLinkService.listRepos(principal.subject, req.params.id, Number.isFinite(page) ? page : 1),
-      );
-    } catch (err) {
-      return sendError(reply, err); // 남의/없는 연결 404, 비-GitHub 연결 400, GitHub 실패 502
-    }
-  });
-
   // 워크스페이스 애플리케이션 로스터 — 이 워크스페이스에서 만들어진 외부 계정 연결(메타만, 토큰 없음). 읽기 전용(members:read).
   // 연결의 연결/해제 관리는 개인 소유라 account 페이지(GET /connections)에서; 여기는 워크스페이스가 자기 앱을 한눈에 보는 뷰.
   app.get("/workspace/applications", async (req, reply) => {
@@ -2311,6 +2295,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // repo picker — 워크스페이스 App installation 이 접근 가능한 레포 목록(설치 시 고른 것만). CI repo link 연결 UX 용. settings:read.
+  app.get("/workspace/github-app/repos", async (req, reply) => {
+    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:read");
+      return reply.send(await deps.githubAppService.listRepos(principal.workspace));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   app.post("/workspace/github-app/install/start", async (req, reply) => {
     if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -2492,33 +2489,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // setup-PR — link 의 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR(호출자의 개인 GitHub 연결 토큰).
-  // link 가 이미 신뢰를 부여했으므로 여기는 viewer+ (PR 은 GitHub 쪽에서 머지 승인 필요 — 실행 권한 아님).
+  // setup-PR — link 의 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR(워크스페이스 GitHub App 토큰).
+  // link 가 이미 신뢰를 부여했으므로 여기는 harnesses:read (PR 은 GitHub 쪽에서 머지 승인 필요 — 실행 권한 아님).
   app.post("/workspace/ci/links/setup-pr", async (req, reply) => {
     if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    const body = z.object({ repository: z.string().min(1), connectionId: z.string().min(1) }).safeParse(req.body ?? {});
+    const body = z.object({ repository: z.string().min(1) }).safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
       gate(principal, "harnesses:read");
-      return reply.send(
-        await deps.ciLinkService.openSetupPr(
-          principal.workspace,
-          principal.subject, // 연결은 개인 소유 — 본인 연결로만 PR 을 연다
-          body.data.connectionId,
-          body.data.repository,
-          baseUrl(req),
-        ),
-      );
+      return reply.send(await deps.ciLinkService.openSetupPr(principal.workspace, body.data.repository, baseUrl(req)));
     } catch (err) {
-      return sendError(reply, err); // link 없음 404 / 비-GitHub 연결 400 / GitHub 실패 502
+      return sendError(reply, err); // link 없음 404 / App 미설치 404 / GitHub 실패 502
     }
   });
 
   // GitHub Actions 러너 자가등록 — 한 번의 admin 액션으로 빌드 서버에 GitHub 러너 + Assay 워크스페이스-공유 러너를
-  // 함께 세우는 설치 스크립트를 생성(설계 doc §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 1회) + 개인 GitHub 연결로
-  // 등록 토큰 mint. settings:write(팀 자원 + repo 신뢰 조작이므로 admin). 응답의 토큰들은 저장하지 않는다.
+  // 함께 세우는 설치 스크립트를 생성(설계 doc §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 1회) + 워크스페이스 GitHub App
+  // 으로 등록 토큰 mint. settings:write(팀 자원 + repo 신뢰 조작이므로 admin). 응답의 토큰들은 저장하지 않는다.
   app.post("/workspace/runners/github-install", async (req, reply) => {
     if (!deps.runnerService || !deps.ciLinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "runner/ci link 서비스 미설정" });
@@ -2526,9 +2515,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return reply;
     const body = z
       .object({
-        connectionId: z.string().min(1),
         repository: z.string().min(1).optional(), // repo 레벨 대상 "owner/name"
-        org: z.string().min(1).optional(), // org 레벨 대상(admin:org 연결 필요). repository 와 정확히 하나.
+        org: z.string().min(1).optional(), // org 레벨 대상. repository 와 정확히 하나. App 이 그 org/repo 에 설치돼 있어야 함.
         runnerGroup: z.string().min(1).optional(), // org 러너 그룹(org 레벨 전용, 선택)
         label: z.string().min(1).max(80).optional(),
         githubLabels: z.array(z.string().min(1)).optional(),
@@ -2544,8 +2532,6 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           { runnerService: deps.runnerService, ciLinkService: deps.ciLinkService },
           {
             workspace: principal.workspace,
-            subject: principal.subject,
-            connectionId: body.data.connectionId,
             label: body.data.label ?? defaultLabel,
             apiUrl: baseUrl(req),
             ...(body.data.repository !== undefined ? { repository: body.data.repository } : {}),
@@ -2557,7 +2543,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ),
       );
     } catch (err) {
-      return sendError(reply, err); // 연결 없음 404 / repo·org 형식 400 / admin:org 없음 400 / GitHub 실패 502
+      return sendError(reply, err); // App 미설치 404 / repo·org 형식 400 / GitHub 실패 502
     }
   });
 

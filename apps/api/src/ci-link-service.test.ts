@@ -1,9 +1,9 @@
-import { BadRequestError, NotFoundError, UpstreamError } from "@assay/core";
-import { InMemoryConnectionStore, InMemoryWorkspaceSettingsStore, aesGcmCipher } from "@assay/db";
+import { NotFoundError, UpstreamError } from "@assay/core";
+import { InMemoryWorkspaceSettingsStore } from "@assay/db";
 import { beforeEach, describe, expect, it } from "vitest";
-import { CiLinkService, renderCiWorkflow } from "./ci-link-service.js";
+import { CiLinkService, type GithubAppRepoAccess, type RepoInfo, renderCiWorkflow } from "./ci-link-service.js";
 
-// fetch fake — URL 패턴별 응답 시나리오. 호출 기록으로 GitHub API dance 를 검증한다.
+// fetch fake — URL 패턴별 응답 시나리오(setup-PR 의 GitHub API dance 검증용).
 type Handler = (url: string, init?: RequestInit) => Response | undefined;
 function fakeFetch(handlers: Handler[], calls: Array<{ url: string; method: string; body?: unknown }>) {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -23,12 +23,22 @@ function fakeFetch(handlers: Handler[], calls: Array<{ url: string; method: stri
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
+// 워크스페이스 GitHub App 능력의 fake — picker/쓰기토큰/러너토큰(개인 연결 대체). GithubAppService 자체는 별도 테스트.
+function fakeGithubApp(over: Partial<GithubAppRepoAccess> = {}): GithubAppRepoAccess {
+  return {
+    listRepos: async () => [],
+    tokenForRepository: async () => ({ token: "app_tok" }),
+    runnerRegistrationToken: async () => ({ token: "RUNNER", expiresAt: "2026-07-04T12:00:00Z" }),
+    ...over,
+  };
+}
+
 describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)", () => {
   let settings: InMemoryWorkspaceSettingsStore;
   let svc: CiLinkService;
   beforeEach(() => {
     settings = new InMemoryWorkspaceSettingsStore();
-    svc = new CiLinkService({ settings, connections: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 1))) });
+    svc = new CiLinkService({ settings, githubApp: fakeGithubApp() });
   });
 
   it("upsert 는 같은 repository 를 교체하고(createdBy 스탬프), remove 는 신뢰까지 끊는다", async () => {
@@ -46,126 +56,53 @@ describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)"
   });
 });
 
-describe("CiLinkService.listRepos — 개인 GitHub 연결로 레포 picker 프록시", () => {
-  const cipher = aesGcmCipher(Buffer.alloc(32, 1));
-  let connections: InMemoryConnectionStore;
-  beforeEach(() => {
-    connections = new InMemoryConnectionStore(cipher);
-  });
-
-  it("GitHub /user/repos 를 얇게 정규화해 돌려주고 토큰은 Authorization 에만 실린다", async () => {
-    const meta = await connections.create({
-      owner: "alice",
-      workspace: "acme",
-      provider: "github",
-      accountLabel: "alice-gh",
-      scopes: ["repo"],
-      accessToken: "gho_secret",
-    });
-    const calls: Array<{ url: string; method: string }> = [];
+describe("CiLinkService.listRepos — 워크스페이스 App installation repos picker (위임)", () => {
+  it("githubApp.listRepos(workspace) 를 그대로 노출한다", async () => {
+    const repos: RepoInfo[] = [{ fullName: "acme-org/api", private: true, defaultBranch: "main" }];
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
-      connections,
-      fetchImpl: fakeFetch(
-        [
-          (url) =>
-            url.startsWith("https://api.github.com/user/repos")
-              ? json([{ full_name: "acme/app", private: true, default_branch: "main", pushed_at: "2026-07-01" }])
-              : undefined,
-        ],
-        calls,
-      ),
+      githubApp: fakeGithubApp({ listRepos: async () => repos }),
     });
-    const repos = await svc.listRepos("alice", meta.id);
-    expect(repos).toEqual([{ fullName: "acme/app", private: true, defaultBranch: "main", pushedAt: "2026-07-01" }]);
-    expect(calls[0]?.url).toContain("https://api.github.com/user/repos");
-  });
-
-  it("남의/없는 연결 → NotFound, 비-GitHub 연결 → BadRequest", async () => {
-    const mm = await connections.create({
-      owner: "alice",
-      workspace: "acme",
-      provider: "mattermost",
-      accountLabel: "alice-mm",
-      scopes: [],
-      accessToken: "mm_tok",
-    });
-    const svc = new CiLinkService({ settings: new InMemoryWorkspaceSettingsStore(), connections });
-    await expect(svc.listRepos("bob", mm.id)).rejects.toBeInstanceOf(NotFoundError); // 남의 연결
-    await expect(svc.listRepos("alice", "nope")).rejects.toBeInstanceOf(NotFoundError);
-    await expect(svc.listRepos("alice", mm.id)).rejects.toBeInstanceOf(BadRequestError); // GitHub 아님
-  });
-
-  it("GHE 연결(host)은 ${host}/api/v3 베이스로 호출한다", async () => {
-    const ghe = await connections.create({
-      owner: "alice",
-      workspace: "acme",
-      provider: "github-enterprise",
-      host: "https://ghe.acme.io",
-      accountLabel: "alice-ghe",
-      scopes: ["repo"],
-      accessToken: "ghe_tok",
-    });
-    const calls: Array<{ url: string; method: string }> = [];
-    const svc = new CiLinkService({
-      settings: new InMemoryWorkspaceSettingsStore(),
-      connections,
-      fetchImpl: fakeFetch([(url) => (url.includes("/api/v3/user/repos") ? json([]) : undefined)], calls),
-    });
-    await svc.listRepos("alice", ghe.id);
-    expect(calls[0]?.url.startsWith("https://ghe.acme.io/api/v3/user/repos")).toBe(true);
+    expect(await svc.listRepos("acme")).toEqual(repos);
   });
 });
 
-describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커밋/PR", () => {
-  const cipher = aesGcmCipher(Buffer.alloc(32, 1));
-
-  async function fixtures() {
-    const settings = new InMemoryWorkspaceSettingsStore();
-    const connections = new InMemoryConnectionStore(cipher);
-    const conn = await connections.create({
-      owner: "alice",
-      workspace: "acme",
-      provider: "github",
-      accountLabel: "alice-gh",
-      scopes: ["repo"],
-      accessToken: "gho_secret",
+describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커밋/PR (App 토큰)", () => {
+  function build(handlers: Handler[], calls: Array<{ url: string; method: string; body?: { content?: string } }>) {
+    return new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      githubApp: fakeGithubApp(), // token=app_tok
+      apiPublicUrl: "https://assay.example.com",
+      fetchImpl: fakeFetch(handlers, calls),
     });
-    return { settings, connections, conn };
   }
 
   it("link 로부터 YAML 을 만들고 branch→file→PR 순서로 생성해 prUrl 을 돌려준다", async () => {
-    const { settings, connections, conn } = await fixtures();
     const calls: Array<{ url: string; method: string; body?: { content?: string; ref?: string } }> = [];
-    const svc = new CiLinkService({
-      settings,
-      connections,
-      apiPublicUrl: "https://assay.example.com",
-      fetchImpl: fakeFetch(
-        [
-          (url, init) => {
-            const m = init?.method ?? "GET";
-            if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
-            if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
-            if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
-            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "GET")
-              return json({ message: "Not Found" }, 404);
-            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "PUT") return json({}, 201);
-            if (url.endsWith("/pulls") && m === "POST")
-              return json({ html_url: "https://github.com/acme/app/pull/42" }, 201);
-            return undefined;
-          },
-        ],
-        calls,
-      ),
-    });
+    const svc = build(
+      [
+        (url, init) => {
+          const m = init?.method ?? "GET";
+          if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
+          if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
+          if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
+          if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "GET")
+            return json({ message: "Not Found" }, 404);
+          if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "PUT") return json({}, 201);
+          if (url.endsWith("/pulls") && m === "POST")
+            return json({ html_url: "https://github.com/acme/app/pull/42" }, 201);
+          return undefined;
+        },
+      ],
+      calls,
+    );
     await svc.upsert("acme", "admin", {
       repository: "acme/app",
       harness: "my-topology",
       dataset: "pinch-bench",
       slots: { "svc-x": { path: "services/x" } },
     });
-    const result = await svc.openSetupPr("acme", "alice", conn.id, "acme/app");
+    const result = await svc.openSetupPr("acme", "acme/app");
     expect(result).toEqual({ prUrl: "https://github.com/acme/app/pull/42", branch: "assay/eval-setup" });
 
     // 커밋된 워크플로 내용 검증 — zero-input 의 실체: 워크스페이스/하니스/데이터셋/슬롯 빌드가 전부 박혀 있다.
@@ -182,19 +119,25 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
   });
 
   it("link 가 없으면 NotFound(신뢰 부여 전 PR 금지), GitHub 실패는 UpstreamError 로 remap", async () => {
-    const { settings, connections, conn } = await fixtures();
-    const svc = new CiLinkService({
-      settings,
-      connections,
-      apiPublicUrl: "https://assay.example.com",
-      fetchImpl: fakeFetch(
-        [(url) => (url.endsWith("/repos/acme/app") ? json({ message: "boom" }, 500) : undefined)],
-        [],
-      ),
-    });
-    await expect(svc.openSetupPr("acme", "alice", conn.id, "acme/app")).rejects.toBeInstanceOf(NotFoundError);
+    const svc = build([(url) => (url.endsWith("/repos/acme/app") ? json({ message: "boom" }, 500) : undefined)], []);
+    await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
-    await expect(svc.openSetupPr("acme", "alice", conn.id, "acme/app")).rejects.toBeInstanceOf(UpstreamError);
+    await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(UpstreamError);
+  });
+
+  it("App 이 그 repo 에 설치돼 있지 않으면 NotFound(tokenForRepository 가 던짐)", async () => {
+    const svc = new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      githubApp: fakeGithubApp({
+        tokenForRepository: async () => {
+          throw new NotFoundError("NOT_FOUND", {}, "설치된 App 없음");
+        },
+      }),
+      apiPublicUrl: "https://assay.example.com",
+      fetchImpl: fakeFetch([], []),
+    });
+    await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
+    await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
@@ -236,101 +179,18 @@ describe("renderCiWorkflow", () => {
   });
 });
 
-describe("CiLinkService.mintRunnerToken — GitHub Actions 러너 등록 토큰 발급", () => {
-  const cipher = aesGcmCipher(Buffer.alloc(32, 1));
-
-  it("개인 GitHub 연결로 POST registration-token → {token, expiresAt}; 토큰은 Authorization 에만", async () => {
-    const connections = new InMemoryConnectionStore(cipher);
-    const meta = await connections.create({
-      owner: "alice",
-      workspace: "acme",
-      provider: "github",
-      accountLabel: "alice-gh",
-      scopes: ["repo"],
-      accessToken: "gho_secret",
-    });
-    const calls: Array<{ url: string; method: string }> = [];
+describe("CiLinkService.mintRunnerToken — 워크스페이스 App 으로 러너 등록 토큰(위임)", () => {
+  it("githubApp.runnerRegistrationToken(workspace, target) 을 그대로 노출한다", async () => {
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
-      connections,
-      fetchImpl: fakeFetch(
-        [
-          (url, init) =>
-            url.endsWith("/repos/acme/app/actions/runners/registration-token") && init?.method === "POST"
-              ? json({ token: "AABBCC", expires_at: "2026-07-04T12:00:00Z" })
-              : undefined,
-        ],
-        calls,
-      ),
+      githubApp: fakeGithubApp({
+        runnerRegistrationToken: async (_ws, target) => ({
+          token: "repo" in target ? "REPOTOK" : "ORGTOK",
+          expiresAt: "2026-07-04T12:00:00Z",
+        }),
+      }),
     });
-    const res = await svc.mintRunnerToken("alice", meta.id, { repo: "acme/app" });
-    expect(res).toEqual({ token: "AABBCC", expiresAt: "2026-07-04T12:00:00Z" });
-    expect(calls[0]?.method).toBe("POST");
-    expect(calls[0]?.url).toContain("/repos/acme/app/actions/runners/registration-token");
-  });
-
-  it("org 레벨: POST /orgs/{org}/... 로 mint(admin:org 연결)", async () => {
-    const connections = new InMemoryConnectionStore(cipher);
-    const meta = await connections.create({
-      owner: "alice",
-      workspace: "acme",
-      provider: "github",
-      accountLabel: "alice-gh",
-      scopes: ["repo", "admin:org"],
-      accessToken: "gho_secret",
-    });
-    const calls: Array<{ url: string; method: string }> = [];
-    const svc = new CiLinkService({
-      settings: new InMemoryWorkspaceSettingsStore(),
-      connections,
-      fetchImpl: fakeFetch(
-        [
-          (url, init) =>
-            url.endsWith("/orgs/acme/actions/runners/registration-token") && init?.method === "POST"
-              ? json({ token: "ORGTOK", expires_at: "2026-07-04T12:00:00Z" })
-              : undefined,
-        ],
-        calls,
-      ),
-    });
-    const res = await svc.mintRunnerToken("alice", meta.id, { org: "acme" });
-    expect(res.token).toBe("ORGTOK");
-    expect(calls[0]?.url).toContain("/orgs/acme/actions/runners/registration-token");
-  });
-
-  it("org 레벨인데 admin:org 없어 403 이면 상향-권한 재연결 안내(BAD_REQUEST 로 remap)", async () => {
-    const connections = new InMemoryConnectionStore(cipher);
-    const meta = await connections.create({
-      owner: "alice",
-      workspace: "acme",
-      provider: "github",
-      accountLabel: "gh",
-      scopes: ["repo"],
-      accessToken: "gho_x",
-    });
-    const svc = new CiLinkService({
-      settings: new InMemoryWorkspaceSettingsStore(),
-      connections,
-      fetchImpl: fakeFetch([(url) => (url.includes("/orgs/") ? json({ message: "Forbidden" }, 403) : undefined)], []),
-    });
-    await expect(svc.mintRunnerToken("alice", meta.id, { org: "acme" })).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
-  });
-
-  it("비-GitHub 연결이면 BAD_REQUEST", async () => {
-    const connections = new InMemoryConnectionStore(cipher);
-    const meta = await connections.create({
-      owner: "alice",
-      workspace: "acme",
-      provider: "mattermost",
-      accountLabel: "mm",
-      scopes: [],
-      accessToken: "x",
-    });
-    const svc = new CiLinkService({ settings: new InMemoryWorkspaceSettingsStore(), connections });
-    await expect(svc.mintRunnerToken("alice", meta.id, { repo: "acme/app" })).rejects.toMatchObject({
-      code: "BAD_REQUEST",
-    });
+    expect((await svc.mintRunnerToken("acme", { repo: "acme/app" })).token).toBe("REPOTOK");
+    expect((await svc.mintRunnerToken("acme", { org: "acme-org" })).token).toBe("ORGTOK");
   });
 });

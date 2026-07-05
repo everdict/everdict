@@ -218,9 +218,12 @@ Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Qua
     pull_requests:write for setup-PR), and `runnerRegistrationToken(workspace, target)` (installation
     token w/ administration → `…/actions/runners/registration-token`). App permissions widen
     accordingly. Tests; no rewire yet.
-  - **S6b — Rewire `ci-link-service` + runner self-registration to the App:** picker/setup-PR/runner
-    token resolve by **workspace installation** (drop `owner, connectionId`); routes/MCP/web
-    (ci-links picker, workspace-runners) drop the connection param.
+  - **S6b — Rewire `ci-link-service` + runner self-registration (API) to the App:** picker/setup-PR/
+    runner token resolve by **workspace installation** (drop `owner, connectionId`); routes/MCP drop
+    the connection param (`GET /workspace/github-app/repos` picker, `open_ci_setup_pr`,
+    `github_install_workspace_runner`). The **web** ci-links picker + workspace-runners rewire folds
+    into S6c (same surgery as removing the connection concept from the web; web still builds green
+    between S6b↔S6c — the CI repo picker just 404s until S6c).
   - **S6c — Remove personal Connected accounts:** delete `ConnectionService`/`ConnectionStore`/
   OAuth `integrations`/routes (`/connections*`, `/workspace/applications`, `/workspace/integrations`)/
   MCP tools/web `manage-connections` + `entities/connection` + account "연결된 계정" tab +
