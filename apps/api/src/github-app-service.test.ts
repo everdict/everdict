@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from "node:crypto";
-import { BadRequestError } from "@assay/core";
+import { BadRequestError, NotFoundError } from "@assay/core";
 import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@assay/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GithubAppService } from "./github-app-service.js";
@@ -30,6 +30,31 @@ function stubGithub(login: string, token: string): void {
       const body = String(url).endsWith("/access_tokens")
         ? { token, expires_at: "2026-07-05T12:00:00Z" }
         : { id: 1, account: { login } };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }),
+  );
+}
+
+// App 능력용 종합 스텁 — access_tokens / installation 조회 / installation repos / 러너 등록토큰을 URL 로 분기.
+function stubApi(repos: string[], runnerTok = "RUNNERTOK"): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL) => {
+      const s = String(url);
+      const body = s.endsWith("/access_tokens")
+        ? { token: "ghs_inst", expires_at: "2026-07-05T12:00:00Z" }
+        : s.includes("/installation/repositories")
+          ? {
+              repositories: repos.map((r) => ({
+                full_name: r,
+                private: true,
+                default_branch: "main",
+                pushed_at: "2026-07-01T00:00:00Z",
+              })),
+            }
+          : s.endsWith("/registration-token")
+            ? { token: runnerTok, expires_at: "2026-07-05T12:00:00Z" }
+            : { id: 1, account: { login: "acme-org" } }; // getInstallation
       return new Response(JSON.stringify(body), { status: 200 });
     }),
   );
@@ -154,5 +179,43 @@ describe("GithubAppService", () => {
   it("tokenForRepo: 매칭 installation 이 없으면 undefined(폴백은 호출부 몫)", async () => {
     stubGithub("acme-org", "ghs_repo");
     expect(await svc.tokenForRepo("acme", "https://github.com/other-org/api")).toBeUndefined();
+  });
+
+  // App 능력(S6a) — 개인 연결 대체: picker / 쓰기 토큰 / 러너 등록 토큰.
+  async function installOrg(): Promise<void> {
+    const future = new Date(NOW.getTime() + 60_000).toISOString();
+    await states.put("st-x", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
+    await svc.callback({ installationId: 42, state: "st-x" }); // account=acme-org 설치
+  }
+
+  it("listRepos 는 installation 이 접근 가능한 repo 를 정규화해 돌려준다(설치 시 고른 것만)", async () => {
+    stubApi(["acme-org/api", "acme-org/web"]);
+    await installOrg();
+    const repos = await svc.listRepos("acme");
+    expect(repos.map((r) => r.fullName)).toEqual(["acme-org/api", "acme-org/web"]);
+    expect(repos[0]).toMatchObject({ private: true, defaultBranch: "main" });
+  });
+
+  it("tokenForRepository 는 지정 권한으로 그 repo 의 installation 토큰을 발급한다", async () => {
+    stubApi([]);
+    await installOrg();
+    const out = await svc.tokenForRepository("acme", "acme-org/api", {
+      contents: "write",
+      pull_requests: "write",
+    });
+    expect(out.token).toBe("ghs_inst");
+  });
+
+  it("tokenForRepository 는 매칭 installation 이 없으면 NotFound", async () => {
+    stubApi([]);
+    await installOrg();
+    await expect(svc.tokenForRepository("acme", "other-org/api", {})).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("runnerRegistrationToken 는 App(administration)으로 러너 등록 토큰을 발급한다", async () => {
+    stubApi([]);
+    await installOrg();
+    const out = await svc.runnerRegistrationToken("acme", { org: "acme-org" });
+    expect(out.token).toBe("RUNNERTOK");
   });
 });

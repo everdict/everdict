@@ -208,7 +208,20 @@ Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Qua
   host + bot token, self-serve web form) + switch the completion/regression notifier from
   personal-token post to **bot REST API** (`/api/v4/posts`, thread-aware). Replaces the old
   `notify.connectionId`. **Notifications keep working throughout.**
-- **S6 — Remove personal Connected accounts (last):** delete `ConnectionService`/`ConnectionStore`/
+- **S6 — Clean-migrate the personal-connection consumers to the App, then remove (last).** Removing
+  personal connections would break two shipped features that use a personal GitHub token
+  (`ci-link-service`: repo picker + setup-PR + runner registration token). So migrate first, then
+  delete. Sub-slices:
+  - **S6a — GitHub App capability foundation (additive):** extend `GithubAppService` with
+    `listRepos(workspace)` (`GET /installation/repositories` across installations),
+    `tokenForRepository(workspace, "owner/name", permissions)` (configurable perms — contents:write +
+    pull_requests:write for setup-PR), and `runnerRegistrationToken(workspace, target)` (installation
+    token w/ administration → `…/actions/runners/registration-token`). App permissions widen
+    accordingly. Tests; no rewire yet.
+  - **S6b — Rewire `ci-link-service` + runner self-registration to the App:** picker/setup-PR/runner
+    token resolve by **workspace installation** (drop `owner, connectionId`); routes/MCP/web
+    (ci-links picker, workspace-runners) drop the connection param.
+  - **S6c — Remove personal Connected accounts:** delete `ConnectionService`/`ConnectionStore`/
   OAuth `integrations`/routes (`/connections*`, `/workspace/applications`, `/workspace/integrations`)/
   MCP tools/web `manage-connections` + `entities/connection` + account "연결된 계정" tab +
   applications roster + `GITHUB_OAUTH_CLIENT_ID/SECRET` env. Add `assay_connections` **drop
