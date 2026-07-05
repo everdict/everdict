@@ -1290,12 +1290,22 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           host: z.string().url().describe("사내 Mattermost 베이스 URL"),
           botTokenSecretName: z.string().min(1).describe("bot access token 이 저장된 SecretStore 키 이름"),
           defaultChannelId: z.string().min(1).optional().describe("완료/회귀 알림 기본 채널 id"),
+          commandTokenSecretName: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("인바운드(슬래시커맨드/버튼) 검증 토큰의 SecretStore 이름 — 설정하면 /assay 커맨드 활성"),
         },
       },
-      ({ host, botTokenSecretName, defaultChannelId }) =>
+      ({ host, botTokenSecretName, defaultChannelId, commandTokenSecretName }) =>
         run(principal, "settings:write", async () =>
           ok({
-            config: await mm.set(ws, { host, botTokenSecretName, ...(defaultChannelId ? { defaultChannelId } : {}) }),
+            config: await mm.set(ws, {
+              host,
+              botTokenSecretName,
+              ...(defaultChannelId ? { defaultChannelId } : {}),
+              ...(commandTokenSecretName ? { commandTokenSecretName } : {}),
+            }),
           }),
         ),
     );

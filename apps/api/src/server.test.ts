@@ -30,6 +30,7 @@ import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
 import { GithubAppService } from "./github-app-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
+import { MattermostCommandService } from "./mattermost-command-service.js";
 import { MattermostService } from "./mattermost-service.js";
 import { MembershipService } from "./membership-service.js";
 import { RunService } from "./run-service.js";
@@ -184,6 +185,10 @@ function server(
     },
   });
   const mattermostService = new MattermostService(settingsStore);
+  const mattermostCommandService = new MattermostCommandService({
+    settings: settingsStore,
+    secretsFor: async () => ({}),
+  });
   const app = buildServer({
     service: svc,
     scorecardService,
@@ -200,6 +205,7 @@ function server(
     secretStore,
     githubAppService,
     mattermostService,
+    mattermostCommandService,
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     settingsStore,
     workspaceStore,
@@ -489,6 +495,27 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     });
     expect(denied.statusCode).toBe(403);
     await viewer.app.close();
+  });
+
+  it("Mattermost 인바운드: form-urlencoded 파싱 + ws 라우팅 + 미설정 워크스페이스는 검증 실패로 403(fail-closed)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // ws 없으면 400.
+    const noWs = await app.inject({
+      method: "POST",
+      url: "/integrations/mattermost/command",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "token=x&text=status",
+    });
+    expect(noWs.statusCode).toBe(400);
+    // commandToken 미설정(mattermost 미등록) → verify 가 ForbiddenError → 403. (form-urlencoded 파싱·라우팅 경유 증명)
+    const res = await app.inject({
+      method: "POST",
+      url: "/integrations/mattermost/command?ws=acme",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      payload: "token=whatever&text=status&user_name=alice",
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
   });
 
   it("GitHub App: 관리자는 설치 시작 URL·목록·GHE 등록이 되고, viewer 는 settings:write 없어 403", async () => {

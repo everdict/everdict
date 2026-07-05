@@ -6,6 +6,10 @@ export const mattermostConfigSchema = z.object({
   host: z.string(),
   botTokenSecretName: z.string(),
   defaultChannelId: z.string().optional(),
+  // 인바운드(슬래시커맨드/버튼) 검증 토큰 이름 + 관리자가 MM 에 등록할 인바운드 URL(설정 시에만).
+  commandTokenSecretName: z.string().optional(),
+  commandUrl: z.string().optional(),
+  actionUrl: z.string().optional(),
 })
 export type MattermostConfig = z.infer<typeof mattermostConfigSchema>
 

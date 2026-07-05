@@ -102,6 +102,7 @@ import { CiLinkService } from "./ci-link-service.js";
 import { CommentService } from "./comment-service.js";
 import { GithubAppService, type GithubComAppConfig } from "./github-app-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
+import { MattermostCommandService } from "./mattermost-command-service.js";
 import { MattermostService } from "./mattermost-service.js";
 import { MembershipService } from "./membership-service.js";
 import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
@@ -256,8 +257,10 @@ async function main(): Promise<void> {
     secretsFor: runtimeSecretsFor,
     feed: notificationStore, // 개인 알림 피드(벨 인박스) — docs/architecture/notifications.md
   });
-  // 워크스페이스 소유 Mattermost 통합(등록→bot 알림). 개인 연결 알림 대체. NotificationService 가 settings.mattermost 를 읽어 게시.
-  const mattermostService = new MattermostService(settingsStore);
+  // 워크스페이스 소유 Mattermost 통합(등록→bot 알림 + 인바운드 슬래시커맨드/버튼). apiPublicUrl 로 인바운드 URL 노출.
+  const mattermostService = new MattermostService(settingsStore, {
+    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+  });
   // 리소스 댓글(데이터셋 등) 협업 논의 + @멘션 알림. 멘션되면 언급자 이름을 프로필/멤버에서 해석해 개인 피드로.
   const commentService = new CommentService({
     store: commentStore,
@@ -350,6 +353,29 @@ async function main(): Promise<void> {
     // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
   });
+  // Mattermost 인바운드(슬래시커맨드/버튼) — commandToken 검증 후 채팅에서 스코어카드 실행/리더보드 조회.
+  const mattermostCommandService = new MattermostCommandService({
+    settings: settingsStore,
+    secretsFor: runtimeSecretsFor, // commandTokenSecretName 값 resolve(검증) — 워크스페이스 공유 시크릿
+    submitScorecard: async (workspace, { dataset, harness, submittedBy }) => {
+      const rec = await scorecardService.submit({
+        tenant: workspace,
+        submittedBy,
+        dataset: { id: dataset, version: "latest" },
+        harness: { id: harness, version: "latest" },
+        origin: { source: "mattermost" },
+      });
+      return { id: rec.id };
+    },
+    leaderboard: async (workspace, datasetId) => {
+      const lb = await scorecardService.leaderboard(workspace, { datasetId, metric: "tests_pass" });
+      return lb.rows.map((r) => ({
+        label: `${r.harness.id}@${r.harness.version}`,
+        value: r.score !== null ? r.score.toFixed(3) : "—",
+      }));
+    },
+    webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
+  });
   // 벤치마크 카탈로그 인입: first-party 벤치마크를 ID 만으로 당겨 테넌트 데이터셋으로 등록. gated 는 HF_TOKEN 시크릿.
   const benchmarkService = new BenchmarkService({
     datasets: datasetRegistry,
@@ -430,6 +456,7 @@ async function main(): Promise<void> {
     secretStore,
     githubAppService,
     mattermostService,
+    mattermostCommandService,
     ciLinkService,
     runnerService,
     notificationService, // 알림 피드(벨 인박스) 라우트 — self-scoped

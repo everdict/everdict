@@ -16,6 +16,7 @@ export async function setMattermostAction(input: {
   host: string
   botTokenSecretName: string
   defaultChannelId?: string
+  commandTokenSecretName?: string
 }): Promise<MattermostMutationResult> {
   const ctx = await authContext()
   try {

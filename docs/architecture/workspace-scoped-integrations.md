@@ -230,12 +230,19 @@ Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Qua
   applications roster + `GITHUB_OAUTH_CLIENT_ID/SECRET` env. Add `assay_connections` **drop
   migration** (expand→contract; preflight note). Retire `docs/connections.md`. Keep
   `API_PUBLIC_URL`/`WEB_BASE_URL` (the App install callback + Mattermost inbound URLs use them).
-- **S7 — Mattermost M2 (interactive):** outbound interactive messages (attachment `actions` buttons:
-  Re-run / View scorecard / Compare / Acknowledge) + inbound `POST /integrations/mattermost/action`
-  (verified, workspace-scoped via `inboundToken` + `commandTokenSecretName`) to handle clicks.
-- **S8 — Mattermost M3 (slash commands):** inbound `POST /integrations/mattermost/command`
-  (`/assay run|leaderboard|status …`) → dispatch → threaded response. Introduces the workspace-scoped
-  `chat` principal (`via: mattermost`, limited roles); optional MM-user→identity mapping by email.
+- **S7–S8 — Mattermost inbound (slash commands + button actions) — SHIPPED.** Public routes
+  `POST /integrations/mattermost/{command,action}` — workspace routed by `?ws=<slug>` (slug not
+  secret), authenticated by **constant-time compare** of the request `token` against the workspace's
+  `commandTokenSecretName` value (fail-closed: missing config / missing token / mismatch → 403).
+  `MattermostCommandService` parses `/assay run <harness> <dataset>` (submits a scorecard,
+  `submittedBy=mattermost:<user>`) · `/assay leaderboard <dataset>` · `/assay status` · `help`; the
+  action endpoint handles a `rerun` button context. Registration gains `commandTokenSecretName`
+  (API + MCP `set_workspace_mattermost` + web form); the view exposes the inbound URLs for the admin
+  to register on the MM side. form-urlencoded body parser added for MM slash commands.
+  - Chose ws-in-URL routing over a separate `inboundToken` (simpler, still token-verified); the schema
+    `inboundToken` field is now vestigial (harmless, unused).
+  - Follow-up: **auto-attach** the `rerun` button to outbound completion posts (the action endpoint
+    already handles clicks; only the outbound attachment is unwired) + MM-user→Assay-identity mapping.
 
 ## Rollout / safety
 

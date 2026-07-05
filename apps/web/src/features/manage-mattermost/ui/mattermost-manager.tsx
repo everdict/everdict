@@ -24,6 +24,7 @@ export function MattermostManager({
   const [host, setHost] = useState(config?.host ?? '')
   const [tokenName, setTokenName] = useState(config?.botTokenSecretName ?? '')
   const [channel, setChannel] = useState(config?.defaultChannelId ?? '')
+  const [cmdName, setCmdName] = useState(config?.commandTokenSecretName ?? '')
 
   function onSave() {
     setError(undefined)
@@ -36,6 +37,7 @@ export function MattermostManager({
         host: host.trim(),
         botTokenSecretName: tokenName.trim(),
         ...(channel.trim() ? { defaultChannelId: channel.trim() } : {}),
+        ...(cmdName.trim() ? { commandTokenSecretName: cmdName.trim() } : {}),
       })
       if (!r.ok) setError(r.error)
     })
@@ -102,7 +104,44 @@ export function MattermostManager({
                 onChange={(e) => setChannel(e.target.value)}
               />
             </div>
+            <div className="space-y-1">
+              <Label htmlFor="mm-cmd" className="flex items-center gap-1.5">
+                채팅 명령 토큰 이름 (선택)
+                <InfoTip
+                  content={
+                    <>
+                      Mattermost 에서 <span className="font-mono">/assay</span> 슬래시커맨드를 만들
+                      때 발급되는 토큰을 워크스페이스 시크릿에 저장하고 그 이름을 지정해요. 설정하면
+                      채팅에서 실행·조회가 가능해지고, 아래 인바운드 URL 을 커맨드에 등록해요.
+                    </>
+                  }
+                />
+              </Label>
+              <Input
+                id="mm-cmd"
+                placeholder="MATTERMOST_COMMAND_TOKEN"
+                value={cmdName}
+                onChange={(e) => setCmdName(e.target.value)}
+              />
+            </div>
           </div>
+
+          {config?.commandUrl && (
+            <div className="space-y-1 rounded-md border bg-elevated px-3 py-2 text-[12px]">
+              <p className="font-[510] text-foreground">Mattermost 에 등록할 인바운드 URL</p>
+              <p className="text-muted-foreground">
+                슬래시커맨드 요청 URL:{' '}
+                <code className="break-all text-foreground">{config.commandUrl}</code>
+              </p>
+              {config.actionUrl && (
+                <p className="text-muted-foreground">
+                  버튼 액션 URL:{' '}
+                  <code className="break-all text-foreground">{config.actionUrl}</code>
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             <Button size="sm" disabled={pending} onClick={onSave}>
               {pending ? '저장 중…' : config ? '갱신' : '등록'}

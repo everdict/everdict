@@ -52,6 +52,7 @@ import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
 import { deleteHarnessVersion } from "./harness-service.js";
+import type { MattermostCommandService } from "./mattermost-command-service.js";
 import type { MattermostService } from "./mattermost-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
@@ -202,6 +203,7 @@ export interface ServerDeps {
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
   githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo) (없으면 해당 라우트 비활성)
   mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림) (없으면 해당 라우트 비활성)
+  mattermostCommandService?: MattermostCommandService; // Mattermost 인바운드(슬래시커맨드/버튼) (없으면 해당 라우트 비활성)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — self-scoped (없으면 해당 라우트 비활성)
@@ -391,6 +393,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   app.addContentTypeParser<string>("application/json", { parseAs: "string" }, (req, body, done) => {
     if (body.length === 0) return done(null, undefined);
     return defaultJsonParser(req, body, done);
+  });
+  // Mattermost 슬래시커맨드는 application/x-www-form-urlencoded 로 온다(JSON 아님). URLSearchParams 로 평면 객체화.
+  app.addContentTypeParser<string>("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) => {
+    const out: Record<string, string> = {};
+    for (const [k, v] of new URLSearchParams(body)) out[k] = v;
+    done(null, out);
   });
 
   app.get("/healthz", async () => ({ ok: true }));
@@ -2266,6 +2274,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         host: z.string().url(),
         botTokenSecretName: z.string().min(1),
         defaultChannelId: z.string().min(1).optional(),
+        commandTokenSecretName: z.string().min(1).optional(), // 인바운드(슬래시커맨드/버튼) 검증 토큰의 SecretStore 이름
       })
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
@@ -2275,6 +2284,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         host: body.data.host,
         botTokenSecretName: body.data.botTokenSecretName,
         ...(body.data.defaultChannelId !== undefined ? { defaultChannelId: body.data.defaultChannelId } : {}),
+        ...(body.data.commandTokenSecretName !== undefined
+          ? { commandTokenSecretName: body.data.commandTokenSecretName }
+          : {}),
       });
       return reply.send({ config });
     } catch (err) {
@@ -2291,6 +2303,66 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       gate(principal, "settings:write");
       await deps.mattermostService.clear(principal.workspace);
       return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- Mattermost 인바운드(슬래시커맨드 + 인터랙티브 버튼) — 공개 라우트. 워크스페이스=?ws=, 진위=commandToken 상수시간 검증(fail-closed) ---
+  // MM 이 직접 호출(사용자 세션 아님). 검증 실패는 ForbiddenError→403. 슬래시커맨드는 form-urlencoded, 버튼 액션은 JSON.
+  app.post<{ Querystring: { ws?: string } }>("/integrations/mattermost/command", async (req, reply) => {
+    if (!deps.mattermostCommandService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 인바운드 미설정" });
+    const ws = req.query.ws;
+    if (!ws) return reply.code(400).send({ code: "BAD_REQUEST", message: "ws query 가 필요합니다" });
+    const body = z
+      .object({ token: z.string().optional(), text: z.string().optional(), user_name: z.string().optional() })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      const out = await deps.mattermostCommandService.handleCommand(ws, {
+        ...(body.data.token !== undefined ? { token: body.data.token } : {}),
+        ...(body.data.text !== undefined ? { text: body.data.text } : {}),
+        ...(body.data.user_name !== undefined ? { userName: body.data.user_name } : {}),
+      });
+      return reply.send(out); // Mattermost 가 렌더하는 { response_type, text }
+    } catch (err) {
+      return sendError(reply, err); // 검증 실패 → 403
+    }
+  });
+
+  app.post<{ Querystring: { ws?: string } }>("/integrations/mattermost/action", async (req, reply) => {
+    if (!deps.mattermostCommandService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 인바운드 미설정" });
+    const ws = req.query.ws;
+    if (!ws) return reply.code(400).send({ code: "BAD_REQUEST", message: "ws query 가 필요합니다" });
+    // MM 인터랙티브 액션은 우리가 심은 context 를 그대로 돌려준다(token/action/dataset/harness). 검증 토큰은 context.token.
+    const body = z
+      .object({
+        context: z
+          .object({
+            token: z.string().optional(),
+            action: z.string().optional(),
+            dataset: z.string().optional(),
+            harness: z.string().optional(),
+            userName: z.string().optional(),
+          })
+          .optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    const c = body.data.context ?? {};
+    try {
+      const out = await deps.mattermostCommandService.handleAction(ws, {
+        ...(c.token !== undefined ? { token: c.token } : {}),
+        ...(c.action !== undefined ? { action: c.action } : {}),
+        context: {
+          ...(c.dataset !== undefined ? { dataset: c.dataset } : {}),
+          ...(c.harness !== undefined ? { harness: c.harness } : {}),
+          ...(c.userName !== undefined ? { userName: c.userName } : {}),
+        },
+      });
+      return reply.send(out);
     } catch (err) {
       return sendError(reply, err);
     }
