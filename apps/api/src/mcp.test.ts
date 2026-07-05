@@ -29,6 +29,7 @@ import { describe, expect, it } from "vitest";
 import { BundleService } from "./bundle-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { GithubAppService } from "./github-app-service.js";
+import { MattermostService } from "./mattermost-service.js";
 import { buildMcpServer } from "./mcp.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
@@ -122,6 +123,7 @@ function harness() {
         githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST-----", slug: "assay-eval" },
       },
     }),
+    mattermostService: new MattermostService(new InMemoryWorkspaceSettingsStore()),
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     harnessTemplates,
     harnessInstances,
@@ -218,6 +220,7 @@ describe("MCP tools", () => {
       "get_runtime",
       "get_schedule",
       "get_scorecard",
+      "get_workspace_mattermost",
       "heartbeat_job",
       "ingest_scorecard",
       "leaderboard_scorecards",
@@ -253,6 +256,7 @@ describe("MCP tools", () => {
       "remove_member",
       "remove_workspace_github_app_registration",
       "remove_workspace_integration",
+      "remove_workspace_mattermost",
       "revoke_api_key",
       "revoke_invite",
       "revoke_runner",
@@ -260,6 +264,7 @@ describe("MCP tools", () => {
       "run_scorecard",
       "set_member_role",
       "set_workspace_integration",
+      "set_workspace_mattermost",
       "start_workspace_github_app_install",
       "submit_job_result",
       "submit_run",
@@ -409,6 +414,35 @@ describe("MCP tools", () => {
     const view = JSON.parse(text(await admin.callTool({ name: "list_workspace_github_app", arguments: {} })));
     expect(view.registrations).toHaveLength(1);
     expect(view.callbackUrl).toBe("http://api.test/workspace/github-app/callback");
+  });
+
+  it("workspace mattermost: admin 은 등록/조회/해제, member 는 settings:write 없어 불가", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"]);
+    const member = await connect(deps, ["member"]);
+
+    // member 는 settings:write 없음 → 등록 불가.
+    expect(
+      (
+        await member.callTool({
+          name: "set_workspace_mattermost",
+          arguments: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+        })
+      ).isError,
+    ).toBe(true);
+
+    // admin 등록 → 조회에 노출(비밀 값 없음).
+    await admin.callTool({
+      name: "set_workspace_mattermost",
+      arguments: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+    });
+    const got = JSON.parse(text(await admin.callTool({ name: "get_workspace_mattermost", arguments: {} })));
+    expect(got.config).toEqual({ host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
+
+    // 해제 → 조회에서 사라짐.
+    await admin.callTool({ name: "remove_workspace_mattermost", arguments: {} });
+    const after = JSON.parse(text(await admin.callTool({ name: "get_workspace_mattermost", arguments: {} })));
+    expect(after.config).toBeUndefined();
   });
 
   it("runners: 개인 소유 — pair/list/revoke 는 역할 게이트 없이 본인 러너, 로스터는 members:read, 토큰 한 번만", async () => {

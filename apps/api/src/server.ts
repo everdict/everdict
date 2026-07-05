@@ -53,6 +53,7 @@ import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
 import { deleteHarnessVersion } from "./harness-service.js";
+import type { MattermostService } from "./mattermost-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
@@ -202,6 +203,7 @@ export interface ServerDeps {
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — 아웃바운드 OAuth (없으면 해당 라우트 비활성)
   githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo) (없으면 해당 라우트 비활성)
+  mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림) (없으면 해당 라우트 비활성)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — self-scoped (없으면 해당 라우트 비활성)
@@ -2391,6 +2393,62 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- 워크스페이스 소유 Mattermost 통합(개인 연결 알림 대체) — 완료/회귀 알림을 bot 토큰으로 채널에 게시 ---
+  // 조회 settings:read / 등록·해제 settings:write. bot 토큰 값은 SecretStore 에만(여기선 이름 참조만).
+  app.get("/workspace/mattermost", async (req, reply) => {
+    if (!deps.mattermostService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:read");
+      const config = await deps.mattermostService.get(principal.workspace);
+      return reply.send({ ...(config ? { config } : {}) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.put("/workspace/mattermost", async (req, reply) => {
+    if (!deps.mattermostService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        host: z.string().url(),
+        botTokenSecretName: z.string().min(1),
+        defaultChannelId: z.string().min(1).optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      const config = await deps.mattermostService.set(principal.workspace, {
+        host: body.data.host,
+        botTokenSecretName: body.data.botTokenSecretName,
+        ...(body.data.defaultChannelId !== undefined ? { defaultChannelId: body.data.defaultChannelId } : {}),
+      });
+      return reply.send({ config });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete("/workspace/mattermost", async (req, reply) => {
+    if (!deps.mattermostService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:write");
+      await deps.mattermostService.clear(principal.workspace);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- CI repo links (repository ↔ 하니스 슬롯 매핑 = GitHub Actions OIDC trust policy) ---
   // 읽기는 harnesses:read(하니스 상세에 노출되는 양성 메타), 생성/삭제는 settings:write(link=신뢰 부여 — admin).
   app.get("/workspace/ci/links", async (req, reply) => {
@@ -2703,6 +2761,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           secretStore: deps.secretStore,
           connectionService: deps.connectionService,
           githubAppService: deps.githubAppService,
+          mattermostService: deps.mattermostService,
           ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,
           notificationService: deps.notificationService,

@@ -33,6 +33,20 @@ export const WorkspaceSettingsSchema = z.object({
   // 서버에서 ownerSubject 로 박아둔다(클라이언트가 못 보냄). 완료 시 그 owner 의 토큰으로 채널에 게시. ownerSubject 없으면 skip.
   // (토큰/채널 값은 저장 안 함 — id 참조만.)
   notify: z.object({ connectionId: z.string(), channelId: z.string(), ownerSubject: z.string().optional() }).optional(),
+  // 워크스페이스 소유 Mattermost 통합(개인 연결 알림 대체) — 사내 Mattermost 를 관리자가 워크스페이스에 1회 등록.
+  // 아웃바운드 알림 = bot 토큰(SecretStore name-ref)으로 POST /api/v4/posts. 인바운드(슬래시커맨드/버튼)는 후속(S7/S8).
+  // nullable: DELETE 는 null 로 클리어(jsonb 병합 || 은 키 삭제 불가라 null 로 무효화, 읽을 때 undefined 취급).
+  // 설계: docs/architecture/workspace-scoped-integrations.md
+  mattermost: z
+    .object({
+      host: z.string().url(), // 사내 Mattermost 베이스 URL
+      botTokenSecretName: z.string().min(1), // bot access token 의 SecretStore 키 이름(값 자체는 저장/반환 안 함)
+      defaultChannelId: z.string().min(1).optional(), // 완료/회귀 알림 기본 채널
+      commandTokenSecretName: z.string().min(1).optional(), // 슬래시커맨드/액션 검증 토큰 이름(S7/S8)
+      inboundToken: z.string().optional(), // 인바운드 라우팅 토큰(S7/S8)
+    })
+    .nullable()
+    .optional(),
   // self-hosted 외부 계정 연결(GitHub Enterprise/Mattermost)의 워크스페이스-레벨 OAuth 앱 설정 — provider id → 자격증명.
   // 관리자가 1회 등록하면(Settings → 통합) 멤버는 client ID 입력 없이 원클릭으로 연결한다(Linear 방식). 값은 비밀 아님:
   // host(서버 URL) + clientId(공개 OAuth app id) + clientSecretName(SecretStore 키 이름 — client_secret 값 자체는 저장 안 함).

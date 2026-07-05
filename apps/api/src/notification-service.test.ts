@@ -37,6 +37,8 @@ interface PostCall {
 
 function build(opts: {
   notify?: WorkspaceSettings["notify"];
+  mattermost?: WorkspaceSettings["mattermost"]; // 워크스페이스 등록(bot 토큰)
+  secrets?: Record<string, string>; // botTokenSecretName → 값
   conns?: ConnectionMeta[];
   token?: ConnectionToken | null; // undefined → 기본 토큰 있음, null → 토큰 없음
   fetchImpl?: typeof fetch;
@@ -48,7 +50,11 @@ function build(opts: {
   }) as unknown as typeof fetch;
   const feed = new InMemoryNotificationStore();
   const svc = new NotificationService({
-    settingsFor: async () => (opts.notify ? { notify: opts.notify } : {}),
+    settingsFor: async () => ({
+      ...(opts.notify ? { notify: opts.notify } : {}),
+      ...(opts.mattermost !== undefined ? { mattermost: opts.mattermost } : {}),
+    }),
+    secretsFor: async () => opts.secrets ?? {},
     connections: {
       list: async () => opts.conns ?? [],
       tokenFor: async () => (opts.token === undefined ? { accessToken: "mm_tok" } : opts.token),
@@ -113,6 +119,52 @@ describe("NotificationService.notifyRun (Mattermost)", () => {
       fetchImpl: failing,
     });
     await expect(svc.notifyRun("acme", runRec("succeeded"))).resolves.toBeUndefined();
+  });
+});
+
+describe("NotificationService.notifyRun (워크스페이스 Mattermost bot 우선)", () => {
+  const mm = { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch-ops" };
+
+  it("워크스페이스 등록(bot 토큰 + defaultChannelId) → 개인 연결 없이 bot 토큰으로 게시", async () => {
+    const { svc, calls } = build({ mattermost: mm, secrets: { MM_BOT: "botxyz" } });
+    await svc.notifyRun("acme", runRec("succeeded"));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.url).toBe("https://mm.corp.io/api/v4/posts");
+    expect(calls[0]?.auth).toBe("Bearer botxyz");
+    expect(calls[0]?.body.channel_id).toBe("ch-ops");
+  });
+
+  it("워크스페이스 Mattermost 는 개인 연결 notify 보다 우선한다(bot 토큰으로만 게시)", async () => {
+    const { svc, calls } = build({
+      mattermost: mm,
+      secrets: { MM_BOT: "botxyz" },
+      notify: { connectionId: "c-mm", channelId: "chan-1", ownerSubject: "u-alice" },
+      conns: [mmConn],
+    });
+    await svc.notifyRun("acme", runRec("succeeded"));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.auth).toBe("Bearer botxyz"); // 개인 mm_tok 아님
+  });
+
+  it("bot 토큰이 SecretStore 에 없으면 (레거시) 개인 연결 notify 로 폴백한다", async () => {
+    const { svc, calls } = build({
+      mattermost: mm,
+      secrets: {}, // 토큰 없음
+      notify: { connectionId: "c-mm", channelId: "chan-1", ownerSubject: "u-alice" },
+      conns: [mmConn],
+    });
+    await svc.notifyRun("acme", runRec("succeeded"));
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.auth).toBe("Bearer mm_tok"); // 폴백
+  });
+
+  it("defaultChannelId 미지정이면 bot 게시를 건너뛴다(폴백 없으면 무게시)", async () => {
+    const { svc, calls } = build({
+      mattermost: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT" },
+      secrets: { MM_BOT: "botxyz" },
+    });
+    await svc.notifyRun("acme", runRec("succeeded"));
+    expect(calls).toHaveLength(0);
   });
 });
 

@@ -34,6 +34,7 @@ import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
 import { deleteHarnessVersion } from "./harness-service.js";
+import type { MattermostService } from "./mattermost-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
 import type { ProfileService } from "./profile-service.js";
@@ -70,6 +71,7 @@ export interface McpDeps {
   secretStore?: SecretStore;
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — list/connect-url/disconnect
   githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
+  mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — list/read (self-scoped)
@@ -1368,6 +1370,51 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ installationId }) =>
         run(principal, "settings:write", async () => ok(await gh.unlinkInstallation(ws, installationId))),
+    );
+  }
+
+  // 워크스페이스 소유 Mattermost 통합(개인 연결 알림 대체) — 완료/회귀 알림을 bot 토큰으로 채널에 게시. settings:read/write.
+  if (deps.mattermostService) {
+    const mm = deps.mattermostService;
+    server.registerTool(
+      "get_workspace_mattermost",
+      {
+        description:
+          "이 워크스페이스의 Mattermost 통합 설정 — host/botTokenSecretName/defaultChannelId(비밀 값 아님). 미설정이면 config 없음.",
+        inputSchema: {},
+      },
+      () =>
+        run(principal, "settings:read", async () => {
+          const config = await mm.get(ws);
+          return ok({ ...(config ? { config } : {}) });
+        }),
+    );
+    server.registerTool(
+      "set_workspace_mattermost",
+      {
+        description:
+          "Mattermost 통합 등록/갱신(관리자). bot 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 botTokenSecretName 으로 지정. defaultChannelId = 완료/회귀 알림 채널.",
+        inputSchema: {
+          host: z.string().url().describe("사내 Mattermost 베이스 URL"),
+          botTokenSecretName: z.string().min(1).describe("bot access token 이 저장된 SecretStore 키 이름"),
+          defaultChannelId: z.string().min(1).optional().describe("완료/회귀 알림 기본 채널 id"),
+        },
+      },
+      ({ host, botTokenSecretName, defaultChannelId }) =>
+        run(principal, "settings:write", async () =>
+          ok({
+            config: await mm.set(ws, { host, botTokenSecretName, ...(defaultChannelId ? { defaultChannelId } : {}) }),
+          }),
+        ),
+    );
+    server.registerTool(
+      "remove_workspace_mattermost",
+      { description: "Mattermost 통합 해제(관리자). 이후 완료/회귀 알림은 게시되지 않는다.", inputSchema: {} },
+      () =>
+        run(principal, "settings:write", async () => {
+          await mm.clear(ws);
+          return ok({ ok: true });
+        }),
     );
   }
 

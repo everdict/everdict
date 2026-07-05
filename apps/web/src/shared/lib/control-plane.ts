@@ -304,6 +304,12 @@ export const controlPlane = {
     call<T>(auth, `/workspace/github-app/installations/${encodeURIComponent(installationId)}`, {
       method: 'DELETE',
     }),
+  // 워크스페이스 소유 Mattermost 통합(등록→bot 알림). 조회 settings:read / 등록·해제 settings:write. bot 토큰 값은 SecretStore 에만.
+  getMattermost: <T>(auth: AuthContext) => call<T>(auth, '/workspace/mattermost'),
+  setMattermost: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/mattermost', { method: 'PUT', body: JSON.stringify(body) }),
+  removeMattermost: (auth: AuthContext) =>
+    callVoid(auth, '/workspace/mattermost', { method: 'DELETE' }),
   // CI repo link(레포↔하니스 슬롯 = GitHub Actions OIDC trust). 조회=harnesses:read(viewer+), 생성/삭제=settings:write(admin).
   // link 의 존재가 그 레포의 keyless CI 신뢰를 부여한다. 세 라우트 모두 현재 링크 전체({links})를 돌려준다(204 아님).
   listCiLinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/ci/links'),

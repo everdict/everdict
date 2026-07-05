@@ -32,6 +32,7 @@ import { BundleService } from "./bundle-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { GithubAppService } from "./github-app-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
+import { MattermostService } from "./mattermost-service.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
@@ -205,6 +206,7 @@ function server(
       githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST KEY-----", slug: "assay-eval" },
     },
   });
+  const mattermostService = new MattermostService(settingsStore);
   const app = buildServer({
     service: svc,
     scorecardService,
@@ -221,6 +223,7 @@ function server(
     secretStore,
     connectionService,
     githubAppService,
+    mattermostService,
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     settingsStore,
     workspaceStore,
@@ -575,6 +578,40 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     });
     expect(res.statusCode).toBe(400);
     await app.close();
+  });
+
+  it("Mattermost: 관리자는 등록·조회·해제가 되고, viewer 는 settings:write 없어 403", async () => {
+    const h = { authorization: "Bearer x" };
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const put = await app.inject({
+      method: "PUT",
+      url: "/workspace/mattermost",
+      headers: h,
+      payload: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().config).toEqual({
+      host: "https://mm.corp.io",
+      botTokenSecretName: "MM_BOT",
+      defaultChannelId: "ch",
+    });
+    const get = await app.inject({ method: "GET", url: "/workspace/mattermost", headers: h });
+    expect(get.json().config.host).toBe("https://mm.corp.io");
+    expect((await app.inject({ method: "DELETE", url: "/workspace/mattermost", headers: h })).statusCode).toBe(204);
+    expect(
+      (await app.inject({ method: "GET", url: "/workspace/mattermost", headers: h })).json().config,
+    ).toBeUndefined();
+    await app.close();
+
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const denied = await viewer.app.inject({
+      method: "PUT",
+      url: "/workspace/mattermost",
+      headers: h,
+      payload: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT" },
+    });
+    expect(denied.statusCode).toBe(403);
+    await viewer.app.close();
   });
 
   it("GitHub App: 관리자는 설치 시작 URL·목록·GHE 등록이 되고, viewer 는 settings:write 없어 403", async () => {

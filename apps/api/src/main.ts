@@ -107,6 +107,7 @@ import { CommentService } from "./comment-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { GithubAppService, type GithubComAppConfig } from "./github-app-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
+import { MattermostService } from "./mattermost-service.js";
 import { MembershipService } from "./membership-service.js";
 import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 import { NotificationService } from "./notification-service.js";
@@ -258,9 +259,13 @@ async function main(): Promise<void> {
   // 완료 알림: 워크스페이스 설정 notify(Mattermost 연결+채널)가 있으면 run/scorecard 완료를 채널에 게시(소비 슬라이스).
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
-    connections: connectionStore,
+    // 워크스페이스 Mattermost(bot 토큰) — settings.mattermost.botTokenSecretName 을 공유 시크릿에서 resolve(우선).
+    secretsFor: runtimeSecretsFor,
+    connections: connectionStore, // (레거시) 개인 연결 notify 폴백 — S6 에서 제거
     feed: notificationStore, // 개인 알림 피드(벨 인박스) — docs/architecture/notifications.md
   });
+  // 워크스페이스 소유 Mattermost 통합(등록→bot 알림). 개인 연결 알림 대체. NotificationService 가 settings.mattermost 를 읽어 게시.
+  const mattermostService = new MattermostService(settingsStore);
   // 리소스 댓글(데이터셋 등) 협업 논의 + @멘션 알림. 멘션되면 언급자 이름을 프로필/멤버에서 해석해 개인 피드로.
   const commentService = new CommentService({
     store: commentStore,
@@ -450,6 +455,7 @@ async function main(): Promise<void> {
     secretStore,
     connectionService,
     githubAppService,
+    mattermostService,
     ciLinkService,
     runnerService,
     notificationService, // 알림 피드(벨 인박스) 라우트 — self-scoped

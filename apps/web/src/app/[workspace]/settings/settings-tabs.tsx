@@ -5,6 +5,7 @@ import { CiLinksSettings } from '@/features/manage-ci-links'
 import { GithubAppManager } from '@/features/manage-github-app'
 import { IntegrationsManager } from '@/features/manage-integrations'
 import { InvitesManager } from '@/features/manage-invites'
+import { MattermostManager } from '@/features/manage-mattermost'
 import { MembersManager, WorkspaceApplications } from '@/features/manage-members'
 import { WorkspaceRunnersManager } from '@/features/manage-workspace-runners'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
@@ -12,6 +13,7 @@ import { WorkspaceInfoCard } from '@/features/workspace-settings'
 import type { CiLink } from '@/entities/ci-link'
 import type { ConnectionMeta, WorkspaceIntegration } from '@/entities/connection'
 import type { GithubAppView } from '@/entities/github-app'
+import type { MattermostConfig } from '@/entities/mattermost'
 import type { Invite, Member } from '@/entities/member'
 import type { RunnerMeta } from '@/entities/runner'
 import type { SecretMeta } from '@/entities/secret'
@@ -32,6 +34,7 @@ export function SettingsTabs(props: {
   integrations: WorkspaceIntegration[] // self-hosted provider OAuth 앱 통합(관리자 1회 등록)
   integrationsCallbackUrl?: string // provider OAuth 앱에 등록할 콜백 URL
   githubApp: GithubAppView // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
+  mattermost?: MattermostConfig // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림)
   ciLinks: CiLink[] // CI repo link(레포↔하니스 슬롯 = OIDC trust) 목록
   workspaceRunners: RunnerMeta[] // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI (admin)
   githubConnections: ConnectionMeta[] // 내 GitHub 연결(있으면 GitHub Actions 러너 자가등록 노출)
@@ -99,6 +102,10 @@ export function SettingsTabs(props: {
       <TabsContent value="integrations">
         <div className="space-y-8">
           <GithubAppManager view={props.githubApp} canWrite={props.canWriteSettings} />
+          <MattermostManager
+            canWrite={props.canWriteSettings}
+            {...(props.mattermost !== undefined ? { config: props.mattermost } : {})}
+          />
           <IntegrationsManager
             providers={props.integrations}
             canWrite={props.canWriteSettings}

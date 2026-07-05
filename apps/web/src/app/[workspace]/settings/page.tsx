@@ -7,6 +7,7 @@ import {
   type WorkspaceIntegration,
 } from '@/entities/connection'
 import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
+import { mattermostResponseSchema, type MattermostConfig } from '@/entities/mattermost'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
@@ -45,6 +46,7 @@ export default async function SettingsPage({
   let integrations: WorkspaceIntegration[] = []
   let integrationsCallbackUrl: string | undefined
   let githubApp: GithubAppView = { registrations: [], installations: [] }
+  let mattermost: MattermostConfig | undefined
   let ciLinks: CiLink[] = []
   let workspaceRunners: RunnerMeta[] = []
   let githubConnections: ConnectionMeta[] = []
@@ -62,6 +64,8 @@ export default async function SettingsPage({
       integrationsCallbackUrl = ints.callbackUrl
       // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo). 개인 연결 대체. settings:read(admin).
       githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
+      // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림). 개인 연결 알림 대체. settings:read(admin).
+      mattermost = mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
       // CI repo link(레포↔하니스 슬롯 = OIDC trust) — 링크의 존재가 그 레포의 keyless CI 신뢰. 해제는 admin.
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
     }
@@ -112,6 +116,7 @@ export default async function SettingsPage({
           integrations={integrations}
           {...(integrationsCallbackUrl !== undefined ? { integrationsCallbackUrl } : {})}
           githubApp={githubApp}
+          {...(mattermost !== undefined ? { mattermost } : {})}
           ciLinks={ciLinks}
           workspaceRunners={workspaceRunners}
           githubConnections={githubConnections}
