@@ -44,6 +44,8 @@ export interface RunServiceDeps {
   // 연결은 개인 소유라 owner(=제출자 subject)로 resolve("내 연결로 clone"). 미설정/미해석이면 public clone.
   // 토큰은 잡(AgentJob.repoToken)에만 transient 로 실리고 레코드/케이스엔 저장 안 됨.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
+  // 워크스페이스 소유 GitHub App 토큰(우선) — 케이스 git URL owner 가 워크스페이스 installation 과 매칭되면 그 App 으로 발급.
+  installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 run 결과 무관(서비스가 swallow). webhook 과 별개.
   onComplete?: (tenant: string, record: RunRecord) => Promise<void>;
   // 아티팩트 스토어(설정 시): os-use 스크린샷을 object storage 로 오프로드 → 레코드엔 URL 만(base64 인라인 안 함).

@@ -281,6 +281,26 @@ async function main(): Promise<void> {
       });
     },
   });
+  // 워크스페이스 소유 GitHub App 통합 — 조직 설치→선택 repo→워크스페이스 소유 installation(개인 연결 대체).
+  // github.com App = operator env(GITHUB_APP_*); GHE App = 관리자가 워크스페이스에 등록(개인키=SecretStore name-ref).
+  // RunService/ScorecardService 의 installationTokenFor 가 이걸 부르므로 그 앞에서 생성한다.
+  const githubComApp = githubComAppConfig();
+  const githubAppService = new GithubAppService({
+    states: oauthStateStore,
+    settings: settingsStore,
+    secretsFor: runtimeSecretsFor,
+    config: {
+      webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
+      ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+      ...(githubComApp ? { githubCom: githubComApp } : {}),
+    },
+  });
+  if (githubComApp) console.error("▶ github-app: github.com App 활성(GITHUB_APP_ID/SLUG) — 조직 설치→선택 repo 원클릭");
+  else
+    console.warn(
+      "▶ github-app: GITHUB_APP_* 미설정 — github.com App 설치 비활성(GHE 는 관리자가 워크스페이스에 등록 시 가능).",
+    );
+
   const service = new RunService({
     dispatcher,
     store,
@@ -294,7 +314,9 @@ async function main(): Promise<void> {
     meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
     // 워크스페이스 기본 judge 모델(요청별 override 가 우선): inline judge grader 가 이 모델로 채점되도록 잡에 주입.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
-    // 비공개 repo 시드: 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve(잡에 transient 주입, 인증 clone).
+    // 비공개 repo 시드(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(팀 공용).
+    installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
+    // (레거시) 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve. S6 에서 제거.
     repoTokenFor: async (owner, connectionId) => (await connectionStore.tokenFor(owner, connectionId))?.accessToken,
     // 완료 알림(Mattermost) — 워크스페이스 notify 설정이 있으면 채널 게시. 실패는 run 결과 무관.
     onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
@@ -326,7 +348,9 @@ async function main(): Promise<void> {
     buildTraceSource,
     secretsFor: runtimeSecretsFor, // judge 모델 키(공유 시크릿)
     scopedSecretsFor, // harness env {secretRef} 해석(공유+제출자 개인)
-    // 비공개-repo 데이터셋: 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve(단일 run 과 동일 경로).
+    // 비공개-repo 데이터셋(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(단일 run 과 동일).
+    installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
+    // (레거시) 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve. S6 에서 제거.
     repoTokenFor: async (owner, connectionId) => (await connectionStore.tokenFor(owner, connectionId))?.accessToken,
     // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
@@ -366,25 +390,6 @@ async function main(): Promise<void> {
       ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // OAuth redirect_uri 베이스
     },
   });
-
-  // 워크스페이스 소유 GitHub App 통합 — 조직 설치→선택 repo→워크스페이스 소유 installation(개인 연결 대체).
-  // github.com App = operator env(GITHUB_APP_*); GHE App = 관리자가 워크스페이스에 등록(개인키=SecretStore name-ref).
-  const githubComApp = githubComAppConfig();
-  const githubAppService = new GithubAppService({
-    states: oauthStateStore,
-    settings: settingsStore,
-    secretsFor: runtimeSecretsFor,
-    config: {
-      webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
-      ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
-      ...(githubComApp ? { githubCom: githubComApp } : {}),
-    },
-  });
-  if (githubComApp) console.error("▶ github-app: github.com App 활성(GITHUB_APP_ID/SLUG) — 조직 설치→선택 repo 원클릭");
-  else
-    console.warn(
-      "▶ github-app: GITHUB_APP_* 미설정 — github.com App 설치 비활성(GHE 는 관리자가 워크스페이스에 등록 시 가능).",
-    );
 
   // CI repo link — 레포↔하니스 슬롯 매핑(= GitHub Actions OIDC trust) CRUD + 레포 picker + setup-PR 생성기.
   // picker/setup-PR 은 멤버 개인 GitHub 연결 토큰(tokenFor)을 서버 안에서만 사용한다.

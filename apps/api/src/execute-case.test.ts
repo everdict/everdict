@@ -60,6 +60,50 @@ describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", ()
     expect(cap.seen()?.repoToken).toBe("tok");
   });
 
+  it("워크스페이스 GitHub App 토큰을 개인 연결보다 먼저 시도해 잡에 attach 한다", async () => {
+    const cap = capture();
+    const gitJob: AgentJob = {
+      ...JOB,
+      tenant: "acme",
+      evalCase: {
+        ...JOB.evalCase,
+        env: { kind: "repo", source: { git: "https://github.com/acme/api", ref: "main", connectionId: "conn1" } },
+      },
+    };
+    await executeCase(
+      {
+        dispatcher: cap.dispatcher,
+        installationTokenFor: async (ws, git) => (ws === "acme" && git.includes("acme/api") ? "app-tok" : undefined),
+        repoTokenFor: async () => "personal-tok",
+      },
+      "alice",
+      gitJob,
+    );
+    expect(cap.seen()?.repoToken).toBe("app-tok"); // App 우선
+  });
+
+  it("워크스페이스 App 매칭이 없으면 개인 연결(connectionId)로 폴백한다", async () => {
+    const cap = capture();
+    const gitJob: AgentJob = {
+      ...JOB,
+      tenant: "acme",
+      evalCase: {
+        ...JOB.evalCase,
+        env: { kind: "repo", source: { git: "https://x/r.git", ref: "main", connectionId: "conn1" } },
+      },
+    };
+    await executeCase(
+      {
+        dispatcher: cap.dispatcher,
+        installationTokenFor: async () => undefined,
+        repoTokenFor: async (owner, cid) => (owner === "alice" && cid === "conn1" ? "personal-tok" : undefined),
+      },
+      "alice",
+      gitJob,
+    );
+    expect(cap.seen()?.repoToken).toBe("personal-tok");
+  });
+
   it("public/비-repo 케이스는 토큰을 붙이지 않는다(repoTokenFor 있어도)", async () => {
     const cap = capture();
     await executeCase({ dispatcher: cap.dispatcher, repoTokenFor: async () => "tok" }, "alice", JOB);

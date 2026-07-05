@@ -22,6 +22,19 @@ function stubInstallation(login: string): void {
   );
 }
 
+// installation 조회 + access token 발급을 URL 로 분기 스텁(tokenForRepo 용).
+function stubGithub(login: string, token: string): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string | URL) => {
+      const body = String(url).endsWith("/access_tokens")
+        ? { token, expires_at: "2026-07-05T12:00:00Z" }
+        : { id: 1, account: { login } };
+      return new Response(JSON.stringify(body), { status: 200 });
+    }),
+  );
+}
+
 describe("GithubAppService", () => {
   let states: InMemoryOAuthStateStore;
   let settings: InMemoryWorkspaceSettingsStore;
@@ -126,5 +139,20 @@ describe("GithubAppService", () => {
     const after = await svc.unlinkInstallation("acme", 42);
     expect(after.installations).toEqual([]);
     expect((await svc.unlinkInstallation("acme", 42)).installations).toEqual([]); // 멱등
+  });
+
+  it("tokenForRepo: git URL owner 가 워크스페이스 installation 과 매칭되면 그 repo 스코프 토큰을 발급한다", async () => {
+    stubGithub("acme-org", "ghs_repo");
+    const future = new Date(NOW.getTime() + 60_000).toISOString();
+    await states.put("st-t", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
+    await svc.callback({ installationId: 42, state: "st-t" }); // account=acme-org 로 설치 기록
+
+    const tok = await svc.tokenForRepo("acme", "https://github.com/acme-org/api.git");
+    expect(tok).toBe("ghs_repo");
+  });
+
+  it("tokenForRepo: 매칭 installation 이 없으면 undefined(폴백은 호출부 몫)", async () => {
+    stubGithub("acme-org", "ghs_repo");
+    expect(await svc.tokenForRepo("acme", "https://github.com/other-org/api")).toBeUndefined();
   });
 });

@@ -191,6 +191,8 @@ export interface ScorecardServiceDeps {
   // 비공개 repo 시드용 토큰 resolve — 케이스 env.source.connectionId → 외부 계정 연결 토큰. 단일 run 과 동일(RunService.repoTokenFor).
   // 연결은 개인 소유라 owner(=제출자 subject)로 resolve. 데이터셋의 케이스마다 적용 → 비공개-repo 데이터셋 배치 eval. 토큰은 잡(repoToken)에만 transient.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
+  // 워크스페이스 소유 GitHub App 토큰(우선) — 케이스 git URL owner 가 워크스페이스 installation 과 매칭되면 그 App 으로 발급(단일 run 과 동일).
+  installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 스코어카드 결과 무관(서비스가 swallow).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
   artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)

@@ -5,7 +5,7 @@ import {
   type WorkspaceSettingsStore,
   generateOAuthState,
 } from "@assay/db";
-import { getInstallation } from "./oauth/github-app.js";
+import { getInstallation, mintInstallationToken } from "./oauth/github-app.js";
 
 // 워크스페이스 소유 GitHub App 통합 서비스 — 개인 Connected accounts(OAuth 토큰) 대체.
 // 조직 설치→선택 repo→워크스페이스 소유 installation. github.com App = operator env(config.githubCom);
@@ -45,6 +45,25 @@ export interface StartInstallInput {
 
 function trimSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
+}
+
+// git URL → { host?, owner, repo }. github.com 은 host 생략(=env App), 그 외는 GHE 베이스로 취급.
+function parseGitRepo(gitUrl: string): { host?: string; owner: string; repo: string } | undefined {
+  let u: URL;
+  try {
+    u = new URL(gitUrl);
+  } catch {
+    return undefined;
+  }
+  const parts = u.pathname
+    .replace(/^\/+/, "")
+    .replace(/\.git$/, "")
+    .split("/");
+  const owner = parts[0];
+  const repo = parts[1];
+  if (!owner || !repo) return undefined;
+  const host = u.hostname === "github.com" ? undefined : `${u.protocol}//${u.host}`;
+  return host ? { host, owner, repo } : { owner, repo };
 }
 
 export class GithubAppService {
@@ -160,6 +179,30 @@ export class GithubAppService {
   callbackUrl(requestBaseUrl?: string): string | undefined {
     const base = this.config.apiPublicUrl ?? requestBaseUrl;
     return base ? `${trimSlash(base)}/workspace/github-app/callback` : undefined;
+  }
+
+  // 비공개 repo clone 토큰 — git URL 의 owner 가 워크스페이스 installation account 와 매칭되면 그 App 으로
+  // 그 repo 에 한정한 단기(~1h) installation 토큰을 발급(contents:read). 매칭 installation 없으면 undefined.
+  // 실행(execute-case)이 dispatch 시각에 부르고, 반환 토큰은 transient(AgentJob.repoToken)로만 실린다(저장 안 함).
+  async tokenForRepo(workspace: string, gitUrl: string): Promise<string | undefined> {
+    const parsed = parseGitRepo(gitUrl);
+    if (!parsed) return undefined;
+    const g = (await this.settings.get(workspace))?.githubApp;
+    const install = g?.installations.find(
+      (i) => (i.host ?? undefined) === parsed.host && i.account.toLowerCase() === parsed.owner.toLowerCase(),
+    );
+    if (!install) return undefined;
+    const creds = await this.resolveAppCreds(workspace, parsed.host);
+    const tok = await mintInstallationToken({
+      ...(parsed.host ? { host: parsed.host } : {}),
+      appId: creds.appId,
+      privateKeyPem: creds.privateKeyPem,
+      installationId: install.installationId,
+      repositories: [parsed.repo],
+      permissions: { contents: "read" },
+      nowSec: this.nowSec(),
+    });
+    return tok.token;
   }
 
   private nowSec(): number {
