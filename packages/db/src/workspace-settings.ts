@@ -44,6 +44,36 @@ export const WorkspaceSettingsSchema = z.object({
     .optional(),
   // CI 통합(GitHub Actions) — repo link 목록(레포↔하니스 슬롯 매핑 = OIDC trust policy). 위 WorkspaceCiLinkSchema 참고.
   ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
+  // 워크스페이스 소유 GitHub App 통합(개인 연결 대체) — 조직 설치→선택 repo→워크스페이스 소유 installation.
+  // github.com App = operator env(GITHUB_APP_*); GHE App = 관리자가 host+App자격증명 등록(private key=SecretStore name-ref).
+  // installation 은 단기 토큰을 App 개인키로 온디맨드 발급하므로 여기엔 비밀 없음 — 전부 반환 안전(host/appId/installationId).
+  // 설계: docs/architecture/workspace-scoped-integrations.md
+  githubApp: z
+    .object({
+      // GHE App 등록(github.com 은 env → 여기 없음). 관리자가 워크스페이스별 1회 등록.
+      registrations: z
+        .array(
+          z.object({
+            host: z.string().url(), // GHE 베이스 URL
+            appId: z.string().min(1),
+            privateKeySecretName: z.string().min(1), // SecretStore 키 — PEM 값 자체는 저장/반환 안 함
+          }),
+        )
+        .default([]),
+      // 워크스페이스 소유 installation(github.com + GHE). 설치된 org 당 1건.
+      installations: z
+        .array(
+          z.object({
+            host: z.string().url().optional(), // 미지정 = github.com
+            installationId: z.number().int(),
+            account: z.string().min(1), // 설치된 org/user login
+            connectedBy: z.string(), // 감사용 — 링크한 관리자 subject
+            connectedAt: z.string(),
+          }),
+        )
+        .default([]),
+    })
+    .optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;
 // 워크스페이스 통합 1건의 자격증명(provider별). 전부 비밀 아님(반환 안전) — clientSecret 값은 SecretStore 에만.
