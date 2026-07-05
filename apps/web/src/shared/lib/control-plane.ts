@@ -260,28 +260,6 @@ export const controlPlane = {
     }),
   deleteSecret: (auth: AuthContext, name: string, scope: 'user' | 'workspace' = 'workspace') =>
     callVoid(auth, `/secrets/${encodeURIComponent(name)}?scope=${scope}`, { method: 'DELETE' }),
-  // 외부 계정 연결(Connected accounts, 아웃바운드 OAuth). 개인 소유 — 목록=내(subject) 연결 메타만(토큰 없음) + 연결 가능한 provider.
-  // start 는 authorizeUrl 을 돌려주고(브라우저를 그 URL 로 보낸다), disconnect 는 204(callVoid).
-  // 멤버는 자격증명 입력 없음: github.com 은 env 기본, self-hosted 는 관리자가 등록한 워크스페이스 통합에서 resolve.
-  listConnections: <T>(auth: AuthContext) => call<T>(auth, '/connections'),
-  // 워크스페이스 애플리케이션 로스터(읽기 전용) — 이 워크스페이스에서 만들어진 연결 메타만(members:read).
-  listWorkspaceApplications: <T>(auth: AuthContext) => call<T>(auth, '/workspace/applications'),
-  startConnection: <T>(auth: AuthContext, provider: string, options?: { elevated?: boolean }) =>
-    call<T>(auth, `/connections/${encodeURIComponent(provider)}/start`, {
-      method: 'POST',
-      body: JSON.stringify(options ?? {}),
-    }),
-  disconnectConnection: (auth: AuthContext, id: string) =>
-    callVoid(auth, `/connections/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // self-hosted 외부계정 OAuth 앱 통합(관리자 1회 등록 → 멤버 원클릭). settings:read/write. 시크릿 값은 절대 안 내려옴.
-  getWorkspaceIntegrations: <T>(auth: AuthContext) => call<T>(auth, '/workspace/integrations'),
-  setWorkspaceIntegration: <T>(auth: AuthContext, provider: string, body: unknown) =>
-    call<T>(auth, `/workspace/integrations/${encodeURIComponent(provider)}`, {
-      method: 'PUT',
-      body: JSON.stringify(body),
-    }),
-  removeWorkspaceIntegration: (auth: AuthContext, provider: string) =>
-    callVoid(auth, `/workspace/integrations/${encodeURIComponent(provider)}`, { method: 'DELETE' }),
   // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo). 조회/설치시작/등록/해제 모두 settings:read|write(admin).
   // 개인키/토큰 값은 절대 안 내려옴 — installation 은 온디맨드 토큰 발급이라 비밀 없이 메타만.
   getGithubApp: <T>(auth: AuthContext) => call<T>(auth, '/workspace/github-app'),
@@ -304,6 +282,8 @@ export const controlPlane = {
     call<T>(auth, `/workspace/github-app/installations/${encodeURIComponent(installationId)}`, {
       method: 'DELETE',
     }),
+  // 워크스페이스 App installation 이 접근 가능한 레포 목록(CI repo link picker). 설치 시 고른 것만. settings:read.
+  getGithubAppRepos: <T>(auth: AuthContext) => call<T>(auth, '/workspace/github-app/repos'),
   // 워크스페이스 소유 Mattermost 통합(등록→bot 알림). 조회 settings:read / 등록·해제 settings:write. bot 토큰 값은 SecretStore 에만.
   getMattermost: <T>(auth: AuthContext) => call<T>(auth, '/workspace/mattermost'),
   setMattermost: <T>(auth: AuthContext, body: unknown) =>
@@ -320,13 +300,7 @@ export const controlPlane = {
     call<T>(auth, `/workspace/ci/links?repository=${encodeURIComponent(repository)}`, {
       method: 'DELETE',
     }),
-  // 레포 목록(picker) — 내(subject) GitHub 연결 토큰으로 프록시. bare array 응답. provider 는 github|github-enterprise 만.
-  listConnectionRepos: <T>(auth: AuthContext, connectionId: string, page?: number) =>
-    call<T>(
-      auth,
-      `/connections/${encodeURIComponent(connectionId)}/repos${page ? `?page=${page}` : ''}`
-    ),
-  // setup-PR — link 로부터 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR(내 GitHub 연결 토큰). viewer+.
+  // setup-PR — link 로부터 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR(워크스페이스 GitHub App 토큰). harnesses:read.
   setupCiLinkPr: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/ci/links/setup-pr', { method: 'POST', body: JSON.stringify(body) }),
   // 셀프호스티드 러너(개인 소유 디바이스 페어링). 목록=내(subject) 러너 메타만(토큰 없음).

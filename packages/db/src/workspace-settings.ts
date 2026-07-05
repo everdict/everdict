@@ -28,12 +28,7 @@ export const WorkspaceSettingsSchema = z.object({
   // inline judge grader(예: WebVoyager 프리셋) 채점에 쓸 기본 모델. 컨트롤플레인이 잡(job.judge)으로 자동 주입.
   // 키는 시크릿(SecretStore)에서 별도 주입, 여기엔 모델/프로바이더만(시크릿 아님). 요청별 override 가 우선.
   judge: JudgeRunConfigSchema.optional(),
-  // run/scorecard 완료 알림 대상 — Mattermost 외부 계정 연결(connectionId) + 채널(channelId) + 연결 소유자(ownerSubject).
-  // 연결은 이제 개인 소유(owner=subject)라 워크스페이스 알림이 어느 연결을 쓸지 모호 → notify 를 설정한 사람의 subject 를
-  // 서버에서 ownerSubject 로 박아둔다(클라이언트가 못 보냄). 완료 시 그 owner 의 토큰으로 채널에 게시. ownerSubject 없으면 skip.
-  // (토큰/채널 값은 저장 안 함 — id 참조만.)
-  notify: z.object({ connectionId: z.string(), channelId: z.string(), ownerSubject: z.string().optional() }).optional(),
-  // 워크스페이스 소유 Mattermost 통합(개인 연결 알림 대체) — 사내 Mattermost 를 관리자가 워크스페이스에 1회 등록.
+  // 워크스페이스 소유 Mattermost 통합 — 사내 Mattermost 를 관리자가 워크스페이스에 1회 등록.
   // 아웃바운드 알림 = bot 토큰(SecretStore name-ref)으로 POST /api/v4/posts. 인바운드(슬래시커맨드/버튼)는 후속(S7/S8).
   // nullable: DELETE 는 null 로 클리어(jsonb 병합 || 은 키 삭제 불가라 null 로 무효화, 읽을 때 undefined 취급).
   // 설계: docs/architecture/workspace-scoped-integrations.md
@@ -46,15 +41,6 @@ export const WorkspaceSettingsSchema = z.object({
       inboundToken: z.string().optional(), // 인바운드 라우팅 토큰(S7/S8)
     })
     .nullable()
-    .optional(),
-  // self-hosted 외부 계정 연결(GitHub Enterprise/Mattermost)의 워크스페이스-레벨 OAuth 앱 설정 — provider id → 자격증명.
-  // 관리자가 1회 등록하면(Settings → 통합) 멤버는 client ID 입력 없이 원클릭으로 연결한다(Linear 방식). 값은 비밀 아님:
-  // host(서버 URL) + clientId(공개 OAuth app id) + clientSecretName(SecretStore 키 이름 — client_secret 값 자체는 저장 안 함).
-  integrations: z
-    .record(
-      z.string(), // provider id: github-enterprise | mattermost
-      z.object({ host: z.string().url(), clientId: z.string().min(1), clientSecretName: z.string().min(1) }),
-    )
     .optional(),
   // CI 통합(GitHub Actions) — repo link 목록(레포↔하니스 슬롯 매핑 = OIDC trust policy). 위 WorkspaceCiLinkSchema 참고.
   ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
@@ -91,9 +77,6 @@ export const WorkspaceSettingsSchema = z.object({
     .optional(),
 });
 export type WorkspaceSettings = z.infer<typeof WorkspaceSettingsSchema>;
-// 워크스페이스 통합 1건의 자격증명(provider별). 전부 비밀 아님(반환 안전) — clientSecret 값은 SecretStore 에만.
-export type WorkspaceIntegrationConfig = NonNullable<WorkspaceSettings["integrations"]>[string];
-
 export interface WorkspaceSettingsStore {
   get(workspace: string): Promise<WorkspaceSettings | undefined>;
   set(workspace: string, patch: WorkspaceSettings): Promise<WorkspaceSettings>; // 부분 병합 upsert

@@ -1,11 +1,4 @@
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
-import {
-  connectionsResponseSchema,
-  workspaceApplicationsSchema,
-  workspaceIntegrationsResponseSchema,
-  type ConnectionMeta,
-  type WorkspaceIntegration,
-} from '@/entities/connection'
 import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
 import { mattermostResponseSchema, type MattermostConfig } from '@/entities/mattermost'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
@@ -42,27 +35,17 @@ export default async function SettingsPage({
 
   let workspace: WorkspaceRecord | undefined
   let secrets: SecretMeta[] = []
-  let applications: ConnectionMeta[] = []
-  let integrations: WorkspaceIntegration[] = []
-  let integrationsCallbackUrl: string | undefined
   let githubApp: GithubAppView = { registrations: [], installations: [] }
   let mattermost: MattermostConfig | undefined
   let ciLinks: CiLink[] = []
   let workspaceRunners: RunnerMeta[] = []
-  let githubConnections: ConnectionMeta[] = []
   let members: Member[] = []
   let invites: Invite[] = []
   let error: string | undefined
   try {
     if (canReadSettings) {
       workspace = workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
-      // self-hosted provider OAuth 앱 통합(관리자 1회 등록 → 멤버 원클릭). settings:read(admin).
-      const ints = workspaceIntegrationsResponseSchema.parse(
-        await controlPlane.getWorkspaceIntegrations(ctx)
-      )
-      integrations = ints.providers
-      integrationsCallbackUrl = ints.callbackUrl
-      // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo). 개인 연결 대체. settings:read(admin).
+      // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo). settings:read(admin).
       githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
       // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림). 개인 연결 알림 대체. settings:read(admin).
       mattermost = mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
@@ -74,23 +57,13 @@ export default async function SettingsPage({
       workspaceRunners = runnersResponseSchema.parse(
         await controlPlane.listWorkspaceOwnedRunners(ctx)
       ).runners
-      // 내 GitHub 연결(개인 소유, self-scoped) — 있으면 GitHub Actions 러너 자가등록 노출용. github/GHE 만.
-      githubConnections = connectionsResponseSchema
-        .parse(await controlPlane.listConnections(ctx))
-        .connections.filter((c) => c.provider === 'github' || c.provider === 'github-enterprise')
     }
     // 워크스페이스 설정엔 공유(workspace) 시크릿만 — GET /secrets 가 섞어주는 내 개인(user) 시크릿은 계정 화면에서 관리.
     if (canReadSecrets)
       secrets = secretsSchema
         .parse(await controlPlane.listSecrets(ctx))
         .filter((s) => s.scope === 'workspace')
-    if (canReadMembers) {
-      members = membersSchema.parse(await controlPlane.listMembers(ctx))
-      // 워크스페이스 애플리케이션 로스터 — 이 워크스페이스에서 만들어진 외부 계정 연결(읽기 전용, 토큰 없음).
-      applications = workspaceApplicationsSchema.parse(
-        await controlPlane.listWorkspaceApplications(ctx)
-      ).connections
-    }
+    if (canReadMembers) members = membersSchema.parse(await controlPlane.listMembers(ctx))
     if (canWriteMembers) invites = invitesSchema.parse(await controlPlane.listInvites(ctx))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
@@ -112,14 +85,10 @@ export default async function SettingsPage({
           isOwner={isOwner}
           {...(workspace !== undefined ? { workspace } : {})}
           secrets={secrets}
-          applications={applications}
-          integrations={integrations}
-          {...(integrationsCallbackUrl !== undefined ? { integrationsCallbackUrl } : {})}
           githubApp={githubApp}
           {...(mattermost !== undefined ? { mattermost } : {})}
           ciLinks={ciLinks}
           workspaceRunners={workspaceRunners}
-          githubConnections={githubConnections}
           members={members}
           invites={invites}
           canReadSettings={canReadSettings}

@@ -3,7 +3,6 @@
 import { useEffect, useState, useTransition } from 'react'
 import { Check, Copy, Github, Server, Trash2 } from 'lucide-react'
 
-import type { ConnectionMeta } from '@/entities/connection'
 import {
   capabilityMeta,
   type GithubRunnerInstall,
@@ -23,7 +22,6 @@ import {
   githubInstallRunnerAction,
   pairWorkspaceRunnerAction,
   revokeWorkspaceRunnerAction,
-  startElevatedGithubConnectAction,
 } from '../api/manage-workspace-runners'
 
 // 온라인 판정 — 러너는 long-poll lease(~25s)마다 lastSeenAt 을 갱신하므로 90s 안이면 접속 중으로 본다.
@@ -38,11 +36,9 @@ function isOnline(lastSeenAt?: string): boolean {
 export function WorkspaceRunnersManager({
   runners,
   canWrite,
-  githubConnections = [],
 }: {
   runners: RunnerMeta[]
   canWrite: boolean
-  githubConnections?: ConnectionMeta[] // 내 GitHub 연결(있으면 GitHub Actions 러너 자가등록 노출)
 }) {
   const [registerOpen, setRegisterOpen] = useState(false)
   const [githubOpen, setGithubOpen] = useState(false)
@@ -72,12 +68,10 @@ export function WorkspaceRunnersManager({
         </div>
         {canWrite && (
           <span className="flex shrink-0 items-center gap-2">
-            {githubConnections.length > 0 && (
-              <Button size="sm" variant="secondary" onClick={() => setGithubOpen(true)}>
-                <Github />
-                GitHub Actions 러너
-              </Button>
-            )}
+            <Button size="sm" variant="secondary" onClick={() => setGithubOpen(true)}>
+              <Github />
+              GitHub Actions 러너
+            </Button>
             <Button size="sm" onClick={() => setRegisterOpen(true)}>
               <Server />새 공유 러너 등록
             </Button>
@@ -206,13 +200,7 @@ export function WorkspaceRunnersManager({
       {canWrite && (
         <RegisterRunnerDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
       )}
-      {canWrite && githubConnections.length > 0 && (
-        <GithubInstallDialog
-          open={githubOpen}
-          onClose={() => setGithubOpen(false)}
-          connections={githubConnections}
-        />
-      )}
+      {canWrite && <GithubInstallDialog open={githubOpen} onClose={() => setGithubOpen(false)} />}
     </div>
   )
 }
@@ -391,16 +379,7 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
 
 // GitHub Actions 러너 자가등록 모달 — 내 GitHub 연결 + repo 선택 후 생성. 생성되면 빌드 서버에서 실행할 설치
 // 스크립트(GitHub 러너 + Assay 러너)와 워크플로 힌트(runs-on 라벨 + run-eval runtime)를 1회 노출한다.
-function GithubInstallDialog({
-  open,
-  onClose,
-  connections,
-}: {
-  open: boolean
-  onClose: () => void
-  connections: ConnectionMeta[]
-}) {
-  const [connectionId, setConnectionId] = useState(connections[0]?.id ?? '')
+function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const [mode, setMode] = useState<'repo' | 'org'>('repo')
   const [repository, setRepository] = useState('')
   const [org, setOrg] = useState('')
@@ -410,12 +389,8 @@ function GithubInstallDialog({
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
 
-  const selectedConn = connections.find((c) => c.id === connectionId)
-  const hasAdminOrg = selectedConn?.scopes.includes('admin:org') ?? false
-
   useEffect(() => {
     if (!open) return
-    setConnectionId(connections[0]?.id ?? '')
     setMode('repo')
     setRepository('')
     setOrg('')
@@ -423,14 +398,10 @@ function GithubInstallDialog({
     setResult(undefined)
     setCopied(undefined)
     setError(undefined)
-  }, [open, connections])
+  }, [open])
 
   function onGenerate() {
     setError(undefined)
-    if (connectionId.length === 0) {
-      setError('GitHub 연결을 선택해주세요.')
-      return
-    }
     if (mode === 'repo' && !/^[^/\s]+\/[^/\s]+$/.test(repository.trim())) {
       setError('레포지토리는 owner/name 형식으로 입력해주세요.')
       return
@@ -441,23 +412,10 @@ function GithubInstallDialog({
     }
     startTransition(async () => {
       const r = await githubInstallRunnerAction(
-        mode === 'org'
-          ? { connectionId, org, ...(runnerGroup.trim() ? { runnerGroup } : {}) }
-          : { connectionId, repository }
+        mode === 'org' ? { org, ...(runnerGroup.trim() ? { runnerGroup } : {}) } : { repository }
       )
       if (r.ok && r.install) setResult(r.install)
       else setError(r.error ?? '생성에 실패했어요.')
-    })
-  }
-
-  // admin:org 권한으로 GitHub 재연결 — org 러너 등록 전 필요. 성공 시 authorize URL 로 이동(OAuth 동의).
-  function onReconnectElevated() {
-    setError(undefined)
-    const provider = selectedConn?.provider ?? 'github'
-    startTransition(async () => {
-      const r = await startElevatedGithubConnectAction(provider)
-      if (r.ok && r.authorizeUrl) window.location.href = r.authorizeUrl
-      else setError(r.error ?? '재연결을 시작하지 못했어요.')
     })
   }
 
@@ -537,22 +495,10 @@ function GithubInstallDialog({
             </p>
           </header>
           <div className="space-y-4 px-5 py-4">
-            <div className="space-y-1.5">
-              <Label htmlFor="gh-conn">GitHub 연결</Label>
-              <select
-                id="gh-conn"
-                value={connectionId}
-                onChange={(e) => setConnectionId(e.target.value)}
-                className="h-9 w-full rounded-md border border-border bg-transparent px-2.5 text-[13px] text-foreground"
-              >
-                {connections.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.accountLabel} {c.host ? `(${c.host})` : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-            {/* 대상: 레포(기본, repo scope) vs 조직(org, admin:org 상향 연결 필요) */}
+            <p className="text-[12px] text-faint">
+              워크스페이스 GitHub App 이 그 레포/조직에 설치돼 있어야 해요(설정 › 통합에서 설치).
+            </p>
+            {/* 대상: 레포 vs 조직(org — 그 org 의 모든 레포 공유) */}
             <div className="space-y-1.5">
               <Label>대상</Label>
               <div className="flex gap-1.5">
@@ -594,33 +540,12 @@ function GithubInstallDialog({
                   placeholder="org 이름 (예: acme-inc)"
                   autoFocus
                 />
-                <p className="text-[12px] text-faint">
-                  org 러너는 그 조직의 모든 레포가 공유해요.{' '}
-                  <span className="font-mono">admin:org</span> 권한 연결이 필요해요.
-                </p>
+                <p className="text-[12px] text-faint">org 러너는 그 조직의 모든 레포가 공유해요.</p>
                 <Input
                   value={runnerGroup}
                   onChange={(e) => setRunnerGroup(e.target.value)}
                   placeholder="러너 그룹 (선택 — 그룹 접근정책 적용)"
                 />
-                {!hasAdminOrg && (
-                  <Callout tone="warning" className="py-1.5">
-                    <span className="flex flex-wrap items-center justify-between gap-2">
-                      <span>
-                        이 GitHub 연결에 <span className="font-mono">admin:org</span> 권한이 없어요.
-                      </span>
-                      <Button
-                        size="xs"
-                        variant="secondary"
-                        onClick={onReconnectElevated}
-                        disabled={pending}
-                      >
-                        <Github />
-                        admin:org 권한으로 다시 연결
-                      </Button>
-                    </span>
-                  </Callout>
-                )}
               </div>
             )}
             {error && (

@@ -1,7 +1,6 @@
 import Link from 'next/link'
 
 import { SubmitRunForm } from '@/features/submit-run'
-import { connectionsResponseSchema, type ConnectionMeta } from '@/entities/connection'
 import { harnessesSchema, type Harness } from '@/entities/harness'
 import { runnersResponseSchema } from '@/entities/runner'
 import { runtimesSchema } from '@/entities/runtime'
@@ -20,7 +19,6 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
   const allowed = can(principal?.roles, 'runs:submit')
 
   let harnesses: Harness[] = []
-  let connections: ConnectionMeta[] = []
   let runtimes: { id: string }[] = []
   let runners: { id: string; label: string }[] = []
   let hasWorkspaceRunners = false
@@ -29,14 +27,6 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
     } catch {
       // 하니스 목록 실패해도 폼은 텍스트 입력으로 동작
-    }
-    // 비공개 repo 시드용 연결 picker — 연결은 개인 소유라 내(subject) 연결 메타만(역할 게이트 없음). 실패/없음이면 public 만.
-    try {
-      connections = connectionsResponseSchema.parse(
-        await controlPlane.listConnections(ctx)
-      ).connections
-    } catch {
-      // 연결 목록 실패해도 폼은 public repo 로 동작
     }
     // 런타임 picker — 등록 런타임(테넌트 소유+_shared). 실패/없음이면 기본 백엔드만.
     try {
@@ -72,7 +62,6 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
         <Card className="p-6">
           <SubmitRunForm
             harnesses={harnesses}
-            connections={connections}
             runtimes={runtimes}
             runners={runners}
             hasWorkspaceRunners={hasWorkspaceRunners}

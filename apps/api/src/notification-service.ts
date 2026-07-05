@@ -1,6 +1,4 @@
 import type {
-  ConnectionMeta,
-  ConnectionToken,
   NotificationListOptions,
   NotificationRecord,
   NotificationStore,
@@ -16,11 +14,6 @@ export interface NotificationServiceDeps {
   settingsFor: (tenant: string) => Promise<WorkspaceSettings | undefined>;
   // 워크스페이스 Mattermost(bot 토큰) — settings.mattermost.botTokenSecretName 을 워크스페이스 SecretStore 에서 resolve.
   secretsFor?: (tenant: string) => Promise<Record<string, string>>;
-  // (레거시) 연결은 개인 소유(owner=subject)로 조회 — notify 설정의 ownerSubject 토큰으로 게시. S6 에서 제거.
-  connections: {
-    list: (owner: string) => Promise<ConnectionMeta[]>;
-    tokenFor: (owner: string, id: string) => Promise<ConnectionToken | null>;
-  };
   feed?: NotificationStore; // 개인 알림 피드 — 미설정이면 피드 채널만 조용히 생략
   fetch?: typeof fetch;
   newId?: () => string;
@@ -162,37 +155,19 @@ export class NotificationService {
     );
   }
 
-  // Mattermost 채널에 게시. 워크스페이스 등록(bot 토큰)을 우선하고, 없으면 (레거시) 개인 연결 notify 로 폴백.
-  // 미설정/토큰없음/실패는 조용히 무시(알림 실패는 run/scorecard 결과에 영향 없음).
+  // 워크스페이스 등록 Mattermost(bot 토큰)로 채널에 게시. 미설정/토큰없음/실패는 조용히 무시(알림 실패는 결과에 영향 없음).
   private async post(tenant: string, message: string): Promise<void> {
     try {
-      const settings = await this.deps.settingsFor(tenant);
-      // 1) 워크스페이스 소유 Mattermost(bot 토큰) — 우선. defaultChannelId + SecretStore 의 bot 토큰이 있어야 게시.
-      const mm = settings?.mattermost;
-      if (mm?.defaultChannelId && this.deps.secretsFor) {
-        const token = (await this.deps.secretsFor(tenant))[mm.botTokenSecretName];
-        if (token) {
-          const base = mm.host.endsWith("/") ? mm.host.slice(0, -1) : mm.host;
-          await this.fetchImpl(`${base}/api/v4/posts`, {
-            method: "POST",
-            headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
-            body: JSON.stringify({ channel_id: mm.defaultChannelId, message }),
-          });
-          return;
-        }
-      }
-      // 2) (레거시) 개인 소유 연결 notify — ownerSubject 의 토큰으로 게시. S6 에서 제거.
-      const cfg = settings?.notify;
-      if (!cfg || !cfg.ownerSubject) return;
-      const conn = (await this.deps.connections.list(cfg.ownerSubject)).find((c) => c.id === cfg.connectionId);
-      if (!conn || conn.provider !== "mattermost" || !conn.host) return;
-      const tok = await this.deps.connections.tokenFor(cfg.ownerSubject, cfg.connectionId);
-      if (!tok) return;
-      const base = conn.host.endsWith("/") ? conn.host.slice(0, -1) : conn.host;
+      const mm = (await this.deps.settingsFor(tenant))?.mattermost;
+      // defaultChannelId + SecretStore 의 bot 토큰이 있어야 게시.
+      if (!mm?.defaultChannelId || !this.deps.secretsFor) return;
+      const token = (await this.deps.secretsFor(tenant))[mm.botTokenSecretName];
+      if (!token) return;
+      const base = mm.host.endsWith("/") ? mm.host.slice(0, -1) : mm.host;
       await this.fetchImpl(`${base}/api/v4/posts`, {
         method: "POST",
-        headers: { authorization: `Bearer ${tok.accessToken}`, "content-type": "application/json" },
-        body: JSON.stringify({ channel_id: cfg.channelId, message }),
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ channel_id: mm.defaultChannelId, message }),
       });
     } catch {
       // 알림 실패는 run/scorecard 결과에 영향 없음.

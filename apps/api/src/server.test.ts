@@ -3,7 +3,6 @@ import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
 import { type CaseResult, DatasetSchema } from "@assay/core";
 import {
-  InMemoryConnectionStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
@@ -29,12 +28,10 @@ import {
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
-import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { GithubAppService } from "./github-app-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MattermostService } from "./mattermost-service.js";
 import { MembershipService } from "./membership-service.js";
-import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
 import { RunnerService } from "./runner-service.js";
 import { ScheduleService } from "./schedule-service.js";
@@ -114,15 +111,6 @@ const roleAuth = (roles: string[], workspace = "acme"): Authenticator => ({
   },
 });
 
-// 외부 호출 없는 fake OAuth provider — 라우트/서비스 dance 만 결정적으로 검증(실제 GitHub HTTP 없음).
-const fakeOAuth: OAuthProvider = {
-  defaultScopes: ["repo"],
-  authorizeUrl: ({ config, state, redirectUri }) =>
-    `https://gh.test/login/oauth/authorize?state=${state}&redirect_uri=${encodeURIComponent(redirectUri)}&host=${config.host ?? ""}`,
-  exchange: async () => ({ accessToken: "gho_test", scopes: ["repo", "read:packages"] }),
-  whoami: async () => ({ label: "octocat" }),
-};
-
 let n = 0;
 function server(
   opts: {
@@ -185,17 +173,6 @@ function server(
     judges: judgeRegistry,
     runtimes: runtimeRegistry,
   });
-  const connectionService = new ConnectionService({
-    store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 9))),
-    states: new InMemoryOAuthStateStore(),
-    providers: new Map<string, ProviderEntry>([
-      ["github", { impl: fakeOAuth, selfHosted: false, default: { clientId: "cid", clientSecret: "csec" } }],
-      ["github-enterprise", { impl: fakeOAuth, selfHosted: true }],
-    ]),
-    secretsFor: async () => ({ GHE_SECRET: "ghs_real" }), // self-hosted client_secret name-ref
-    settings: settingsStore, // self-hosted 통합(관리자 등록) 자격증명의 SSOT
-    config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
-  });
   const githubAppService = new GithubAppService({
     states: new InMemoryOAuthStateStore(),
     settings: settingsStore,
@@ -221,7 +198,6 @@ function server(
     // 연결 테스트 stub — 실제 클러스터 I/O 없이 라우트 와이어링/역할 게이트만 검증.
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
     secretStore,
-    connectionService,
     githubAppService,
     mattermostService,
     runnerService: new RunnerService(new InMemoryRunnerStore()),
@@ -480,106 +456,7 @@ describe("API — authorization (roles)", () => {
   });
 });
 
-describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", () => {
-  it("GET /connections → 200 — 카탈로그는 3종 전부 노출, 통합 미설정 self-hosted(GHE)는 connectable=false", async () => {
-    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
-    const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
-    expect(res.statusCode).toBe(200);
-    expect(res.json()).toEqual({
-      connections: [],
-      // 항상 카탈로그로 노출 — github 은 env 기본 있어 connectable, GHE 는 통합 미설정이라 connectable=false(설정 안내 대상).
-      providers: [
-        { id: "github", selfHosted: false, connectable: true },
-        { id: "github-enterprise", selfHosted: true, connectable: false },
-      ],
-    });
-    await app.close();
-  });
-  it("연결은 개인 소유 — 역할 게이트 없이 viewer 도 본인 연결 GET /connections → 200", async () => {
-    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
-    const res = await app.inject({ method: "GET", url: "/connections", headers: { authorization: "Bearer x" } });
-    expect(res.statusCode).toBe(200);
-    await app.close();
-  });
-  it("연결은 개인 소유 — viewer 도 본인 연결 start 가능(역할 게이트 없음) → 200 authorizeUrl", async () => {
-    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
-    const res = await app.inject({
-      method: "POST",
-      url: "/connections/github/start",
-      headers: { authorization: "Bearer x" },
-      payload: {},
-    });
-    expect(res.statusCode).toBe(200);
-    expect(res.json().authorizeUrl).toBeTruthy();
-    await app.close();
-  });
-  it("미설정 provider start → 400", async () => {
-    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
-    const res = await app.inject({
-      method: "POST",
-      url: "/connections/gitlab/start",
-      headers: { authorization: "Bearer x" },
-      payload: {},
-    });
-    expect(res.statusCode).toBe(400);
-    await app.close();
-  });
-  it("end-to-end: start → authorizeUrl(state 운반) → callback 302 → 연결 1건 + 토큰 미노출", async () => {
-    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
-    const h = { authorization: "Bearer x" };
-    const start = await app.inject({ method: "POST", url: "/connections/github/start", headers: h, payload: {} });
-    expect(start.statusCode).toBe(200);
-    const authorizeUrl = new URL(start.json().authorizeUrl as string);
-    expect(authorizeUrl.origin).toBe("https://gh.test");
-    // redirect_uri 는 apiPublicUrl 베이스.
-    expect(authorizeUrl.searchParams.get("redirect_uri")).toBe("http://api.test/connections/callback");
-    const state = authorizeUrl.searchParams.get("state");
-    expect(state).toBeTruthy();
-
-    // provider 가 호출하는 콜백(Bearer 없음) — state 1회 소비 → 토큰 교환 → 저장 → 웹으로 302.
-    const cb = await app.inject({ method: "GET", url: `/connections/callback?code=abc&state=${state}` });
-    expect(cb.statusCode).toBe(302);
-    expect(cb.headers.location).toBe("http://web.test/acme/account?tab=connections&connected=github");
-
-    // 연결이 잡혔고, list 는 토큰을 절대 노출하지 않는다.
-    const list = await app.inject({ method: "GET", url: "/connections", headers: h });
-    const body = list.json();
-    expect(body.connections).toHaveLength(1);
-    expect(body.connections[0]).toMatchObject({
-      provider: "github",
-      accountLabel: "octocat",
-      scopes: ["repo", "read:packages"],
-    });
-    expect(JSON.stringify(body)).not.toContain("gho_");
-
-    // 워크스페이스 애플리케이션 로스터(members:read) — 만들어진 워크스페이스 기준으로도 1건 노출.
-    const roster = await app.inject({ method: "GET", url: "/workspace/applications", headers: h });
-    expect(roster.statusCode).toBe(200);
-    expect(roster.json().connections).toHaveLength(1);
-
-    // 재사용된 state 는 invalid → 에러 리다이렉트.
-    const replay = await app.inject({ method: "GET", url: `/connections/callback?code=abc&state=${state}` });
-    expect(replay.statusCode).toBe(302);
-    expect(replay.headers.location).toBe("http://web.test/?connection_error=invalid_state");
-
-    // disconnect → 204 → 목록 비어짐.
-    const id = body.connections[0].id as string;
-    expect((await app.inject({ method: "DELETE", url: `/connections/${id}`, headers: h })).statusCode).toBe(204);
-    expect((await app.inject({ method: "GET", url: "/connections", headers: h })).json().connections).toHaveLength(0);
-    await app.close();
-  });
-  it("self-hosted(GHE): 통합 미설정이면 멤버 start→400(자격증명 안 받음)", async () => {
-    const { app } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
-    const res = await app.inject({
-      method: "POST",
-      url: "/connections/github-enterprise/start",
-      headers: { authorization: "Bearer x" },
-      payload: {},
-    });
-    expect(res.statusCode).toBe(400);
-    await app.close();
-  });
-
+describe("API — workspace integrations (GitHub App / Mattermost)", () => {
   it("Mattermost: 관리자는 등록·조회·해제가 되고, viewer 는 settings:write 없어 403", async () => {
     const h = { authorization: "Bearer x" };
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
@@ -651,59 +528,6 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     });
     expect(denied.statusCode).toBe(403);
     await viewer.app.close();
-  });
-
-  it("통합: viewer 는 등록 불가(403), admin 1회 등록 → 멤버 원클릭 start(host 반영) + GET /connections 노출", async () => {
-    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
-    const h = { authorization: "Bearer x" };
-    const cfg = { host: "https://ghe.acme.io", clientId: "Iv1.cafe", clientSecretName: "GHE_SECRET" };
-
-    // viewer 는 통합 쓰기 불가(settings:write 게이트).
-    const { app: viewerApp } = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
-    const denied = await viewerApp.inject({
-      method: "PUT",
-      url: "/workspace/integrations/github-enterprise",
-      headers: { authorization: "Bearer x" },
-      payload: cfg,
-    });
-    expect(denied.statusCode).toBe(403);
-    await viewerApp.close();
-
-    // admin 등록 → 200, listIntegrations 에 configured.
-    const put = await app.inject({
-      method: "PUT",
-      url: "/workspace/integrations/github-enterprise",
-      headers: h,
-      payload: cfg,
-    });
-    expect(put.statusCode).toBe(200);
-    const ghe = (put.json().providers as Array<{ id: string; configured: boolean; host?: string }>).find(
-      (p) => p.id === "github-enterprise",
-    );
-    expect(ghe).toMatchObject({ configured: true, host: "https://ghe.acme.io", clientSecretName: "GHE_SECRET" });
-    expect(JSON.stringify(put.json())).not.toContain("ghs_real"); // 시크릿 값은 절대 미반환
-
-    // 멤버는 자격증명 없이 원클릭 start → authorizeUrl 에 통합의 host 반영.
-    const start = await app.inject({
-      method: "POST",
-      url: "/connections/github-enterprise/start",
-      headers: h,
-      payload: {},
-    });
-    expect(start.statusCode).toBe(200);
-    expect(new URL(start.json().authorizeUrl as string).searchParams.get("host")).toBe("https://ghe.acme.io");
-
-    // 이제 GET /connections 카탈로그가 GHE 를 connectable=true 로 노출(원클릭 가능).
-    const conns = await app.inject({ method: "GET", url: "/connections", headers: h });
-    expect(conns.json().providers).toContainEqual({ id: "github-enterprise", selfHosted: true, connectable: true });
-
-    // DELETE 통합 → 204 → 카탈로그엔 남되 connectable=false(다시 설정 안내 대상).
-    expect(
-      (await app.inject({ method: "DELETE", url: "/workspace/integrations/github-enterprise", headers: h })).statusCode,
-    ).toBe(204);
-    const after = await app.inject({ method: "GET", url: "/connections", headers: h });
-    expect(after.json().providers).toContainEqual({ id: "github-enterprise", selfHosted: true, connectable: false });
-    await app.close();
   });
 });
 

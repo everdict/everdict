@@ -4,7 +4,6 @@ import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { Controller, useForm } from 'react-hook-form'
 
-import type { ConnectionMeta } from '@/entities/connection'
 import type { Harness } from '@/entities/harness'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -21,22 +20,15 @@ interface Values {
   sourceKind: 'files' | 'git'
   gitUrl: string
   gitRef: string
-  connectionId: string
 }
 
-const providerLabel = (c: ConnectionMeta): string =>
-  `${c.provider === 'github-enterprise' ? 'GHE' : 'GitHub'} · ${c.accountLabel}${c.host ? ` (${c.host})` : ''}`
-
-// connections: repo clone 에 쓸 수 있는 건 git provider(github / github-enterprise)뿐 — Mattermost 등은 제외.
 export function SubmitRunForm({
   harnesses,
-  connections = [],
   runtimes = [],
   runners = [],
   hasWorkspaceRunners = false,
 }: {
   harnesses: Harness[]
-  connections?: ConnectionMeta[]
   runtimes?: { id: string }[]
   runners?: { id: string; label: string }[]
   hasWorkspaceRunners?: boolean // 팀 공유 러너가 있으면 self:ws 풀 옵션 노출
@@ -44,9 +36,6 @@ export function SubmitRunForm({
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const [serverError, setServerError] = useState<string>()
-  const gitConnections = connections.filter(
-    (c) => c.provider === 'github' || c.provider === 'github-enterprise'
-  )
   const {
     control,
     register,
@@ -62,7 +51,6 @@ export function SubmitRunForm({
       sourceKind: 'files',
       gitUrl: '',
       gitRef: 'main',
-      connectionId: '',
     },
   })
   const sourceKind = watch('sourceKind')
@@ -184,29 +172,10 @@ export function SubmitRunForm({
             <Label htmlFor="gitRef">브랜치</Label>
             <Input id="gitRef" placeholder="main" {...register('gitRef')} />
           </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="connectionId">연결된 계정</Label>
-            <Controller
-              control={control}
-              name="connectionId"
-              render={({ field }) => (
-                <Combobox
-                  id="connectionId"
-                  options={[
-                    { value: '', label: '없음 (공개 저장소)' },
-                    ...gitConnections.map((c) => ({ value: c.id, label: providerLabel(c) })),
-                  ]}
-                  value={field.value}
-                  onChange={field.onChange}
-                />
-              )}
-            />
-            <p className="text-[12px] text-faint">
-              {gitConnections.length === 0
-                ? '연결된 GitHub 계정이 없어요. 비공개 저장소는 설정 → 연결된 계정에서 먼저 연결해주세요. 공개 저장소는 지금 바로 실행할 수 있어요.'
-                : '비공개 저장소면 연결을 골라주세요. 토큰은 내려받을 때만 쓰이고 어디에도 저장되지 않아요.'}
-            </p>
-          </div>
+          <p className="text-[12px] text-faint">
+            비공개 저장소는 워크스페이스 GitHub App 이 그 저장소에 설치돼 있으면 자동으로 인증해
+            내려받아요(설정 › 통합). 공개 저장소는 바로 실행할 수 있어요.
+          </p>
         </div>
       )}
 

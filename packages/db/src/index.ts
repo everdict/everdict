@@ -35,6 +35,15 @@ export {
   ScheduleRunTemplateSchema,
   InMemoryScheduleStore,
 } from "./schedule-store.js";
+export {
+  type ViewRecord,
+  type ViewStore,
+  type ViewVisibility,
+  ViewRecordSchema,
+  ViewVisibilitySchema,
+  InMemoryViewStore,
+  PgViewStore,
+} from "./view-store.js";
 export { type SqlClient, type PgPool, makePool, sqlClient } from "./client.js";
 export { PgRunStore } from "./pg-run-store.js";
 export { PgScorecardStore } from "./pg-scorecard-store.js";
@@ -69,14 +78,6 @@ export {
   InMemorySecretStore,
   PgSecretStore,
 } from "./secret-store.js";
-export {
-  type ConnectionMeta,
-  type ConnectionStore,
-  type ConnectionToken,
-  type CreateConnectionInput,
-  InMemoryConnectionStore,
-  PgConnectionStore,
-} from "./connection-store.js";
 export {
   type OAuthStatePending,
   type OAuthStateStore,
@@ -114,7 +115,6 @@ export {
 export {
   type WorkspaceSettings,
   type WorkspaceSettingsStore,
-  type WorkspaceIntegrationConfig,
   type WorkspaceCiLink,
   WorkspaceSettingsSchema,
   WorkspaceCiLinkSchema,

@@ -38,14 +38,11 @@ export interface UpsertCiLinkInput {
   runtime?: string // run-eval runtime 입력(예: self:ws:<id>)
 }
 
-// 레포 목록(picker) — 내 GitHub 연결로 프록시. provider 가 github(-enterprise) 아니면 컨트롤플레인이 400.
-export async function listConnectionReposAction(
-  connectionId: string,
-  page?: number
-): Promise<ReposResult> {
+// 레포 목록(picker) — 워크스페이스 GitHub App installation 이 접근 가능한 레포(설치 시 고른 것만). settings:read.
+export async function listGithubAppReposAction(): Promise<ReposResult> {
   const ctx = await authContext()
   try {
-    const repos = reposSchema.parse(await controlPlane.listConnectionRepos(ctx, connectionId, page))
+    const repos = reposSchema.parse(await controlPlane.getGithubAppRepos(ctx))
     return { ok: true, repos }
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : String(e) }
@@ -78,15 +75,12 @@ export async function deleteCiLinkAction(repository: string): Promise<CiLinksRes
   }
 }
 
-// 셋업 PR 열기 — link 의 워크플로 YAML 을 대상 레포에 PR(내 GitHub 연결 토큰). viewer+(머지는 GitHub 쪽 승인).
-export async function openSetupPrAction(
-  repository: string,
-  connectionId: string
-): Promise<SetupPrResult> {
+// 셋업 PR 열기 — link 의 워크플로 YAML 을 대상 레포에 PR(워크스페이스 GitHub App 토큰). harnesses:read(머지는 GitHub 쪽 승인).
+export async function openSetupPrAction(repository: string): Promise<SetupPrResult> {
   const ctx = await authContext()
   try {
     const { prUrl } = setupPrResultSchema.parse(
-      await controlPlane.setupCiLinkPr(ctx, { repository, connectionId })
+      await controlPlane.setupCiLinkPr(ctx, { repository })
     )
     return { ok: true, prUrl }
   } catch (e) {

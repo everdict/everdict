@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { Check, GitBranch, Lock, Search } from 'lucide-react'
 
 import type { CiLink, RepoInfo } from '@/entities/ci-link'
-import type { ConnectionMeta } from '@/entities/connection'
 import type { HarnessKind } from '@/entities/harness'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -15,7 +14,7 @@ import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
 
-import { listConnectionReposAction, upsertCiLinkAction } from '../api/manage-ci-links'
+import { listGithubAppReposAction, upsertCiLinkAction } from '../api/manage-ci-links'
 import { SetupPrButton } from './setup-pr-button'
 
 interface SlotState {
@@ -31,8 +30,8 @@ function initSlots(slotChoices: string[], kind: HarnessKind): Record<string, Slo
   ) as Record<string, SlotState>
 }
 
-// 레포↔하니스 연결 다이얼로그(zero-input) — 연결 고르기 → 레포 고르기 → 슬롯 고르기 → 데이터셋 → 저장 → 셋업 PR.
-// 사용자는 워크플로 YAML 이나 client ID 를 만지지 않는다. 저장은 admin 만(비-admin 은 읽기 전용 + 안내).
+// 레포↔하니스 연결 다이얼로그(zero-input) — 레포 고르기 → 슬롯 고르기 → 데이터셋 → 저장 → 셋업 PR.
+// 레포 목록은 워크스페이스 GitHub App installation 이 접근 가능한 것(설치 시 고른 것만). 저장은 admin 만.
 export function ConnectRepoDialog({
   open,
   onClose,
@@ -40,7 +39,6 @@ export function ConnectRepoDialog({
   kind,
   slotChoices,
   datasets,
-  connections,
   workspace,
   canWrite,
   onSaved,
@@ -51,12 +49,10 @@ export function ConnectRepoDialog({
   kind: HarnessKind
   slotChoices: string[] // service=서비스 이름들, command=['image'], process=[]
   datasets: string[] // 데이터셋 id 목록
-  connections: ConnectionMeta[] // github | github-enterprise 로 필터된 내 연결
   workspace: string
   canWrite: boolean
   onSaved: (links: CiLink[]) => void
 }) {
-  const [connectionId, setConnectionId] = useState('')
   const [repos, setRepos] = useState<RepoInfo[]>()
   const [reposError, setReposError] = useState<string>()
   const [reposLoading, startReposLoad] = useTransition()
@@ -70,10 +66,9 @@ export function ConnectRepoDialog({
   const [saving, startSaving] = useTransition()
   const [savedRepo, setSavedRepo] = useState<string>() // 저장 성공한 레포(셋업 PR 단계로 전환)
 
-  // 열릴 때마다 초기화 + 연결이 하나면 자동 선택(즉시 레포 로드).
+  // 열릴 때마다 초기화 + 워크스페이스 App installation 의 레포 목록 로드.
   useEffect(() => {
     if (!open) return
-    setRepos(undefined)
     setReposError(undefined)
     setRepoQuery('')
     setRepository('')
@@ -83,22 +78,14 @@ export function ConnectRepoDialog({
     setRuntime('')
     setSaveError(undefined)
     setSavedRepo(undefined)
-    setConnectionId(connections.length === 1 && connections[0] ? connections[0].id : '')
-    // 슬롯/연결 목록은 열리는 순간의 스냅샷으로 고정(open 토글에만 반응).
-  }, [open])
-
-  // 연결이 정해지면 그 연결로 레포 목록을 불러온다(내 GitHub 토큰 프록시).
-  useEffect(() => {
-    if (!open || !connectionId) return
     setRepos(undefined)
-    setReposError(undefined)
-    setRepository('')
     startReposLoad(async () => {
-      const r = await listConnectionReposAction(connectionId)
+      const r = await listGithubAppReposAction()
       if (r.ok && r.repos) setRepos(r.repos)
       else setReposError(r.error ?? '레포 목록을 불러오지 못했습니다.')
     })
-  }, [connectionId, open])
+    // 슬롯/레포 목록은 열리는 순간의 스냅샷으로 고정(open 토글에만 반응).
+  }, [open])
 
   const filteredRepos = (repos ?? []).filter((r) =>
     r.fullName.toLowerCase().includes(repoQuery.trim().toLowerCase())
@@ -139,6 +126,8 @@ export function ConnectRepoDialog({
     })
   }
 
+  const noRepos = repos !== undefined && repos.length === 0
+
   return (
     <Dialog open={open} onClose={onClose} className="max-w-[560px]" labelledBy="ci-connect-title">
       <header className="border-b border-border px-5 py-4">
@@ -151,17 +140,18 @@ export function ConnectRepoDialog({
         </p>
       </header>
 
-      {connections.length === 0 ? (
-        // 연결 없음 — 계정 페이지로 안내(개인 소유 OAuth).
+      {noRepos ? (
+        // App 미설치/접근 레포 없음 — 설정 → 통합에서 GitHub App 설치 안내.
         <div className="space-y-3 px-5 py-5">
           <Callout tone="info">
-            먼저 GitHub 계정을 연결해야 레포를 고를 수 있어요.
+            연결할 수 있는 레포가 없어요. 관리자가 워크스페이스에 GitHub App 을 설치하고 저장소를
+            선택해야 여기에 보여요.
             <div className="mt-2">
               <Link
-                href={`/${encodeURIComponent(workspace)}/account?tab=connections`}
+                href={`/${encodeURIComponent(workspace)}/settings?tab=integrations`}
                 className="text-[12px] font-[510] text-primary hover:underline"
               >
-                계정 → 연결된 계정에서 GitHub 연결하기 →
+                설정 → 통합에서 GitHub App 설치하기 →
               </Link>
             </div>
           </Callout>
@@ -180,12 +170,7 @@ export function ConnectRepoDialog({
             열면 워크플로 파일이 레포에 추가돼요. 머지하면 CI 평가가 시작돼요.
           </Callout>
           <div className="flex items-center justify-between gap-3">
-            <SetupPrButton
-              repository={savedRepo}
-              connections={connections}
-              size="sm"
-              onError={setSaveError}
-            />
+            <SetupPrButton repository={savedRepo} size="sm" onError={setSaveError} />
             <Button size="sm" onClick={onClose}>
               완료
             </Button>
@@ -199,36 +184,10 @@ export function ConnectRepoDialog({
       ) : (
         <>
           <div className="max-h-[62vh] space-y-5 overflow-y-auto px-5 py-4">
-            {/* 1. 연결 — 여럿이면 고르고, 하나면 고정 표시. */}
-            {connections.length > 1 ? (
-              <div className="space-y-1.5">
-                <Label>1. GitHub 연결</Label>
-                <Combobox
-                  options={connections.map((c) => ({
-                    value: c.id,
-                    label: c.accountLabel,
-                    hint: c.provider,
-                  }))}
-                  value={connectionId}
-                  onChange={setConnectionId}
-                  placeholder="연결 선택"
-                />
-              </div>
-            ) : (
-              connections[0] && (
-                <p className="text-[12px] text-muted-foreground">
-                  연결:{' '}
-                  <span className="font-mono text-foreground">{connections[0].accountLabel}</span>
-                </p>
-              )
-            )}
-
-            {/* 2. 레포 picker — 내 연결로 프록시한 목록, 클라이언트 검색. */}
+            {/* 1. 레포 picker — App installation 이 접근 가능한 레포, 클라이언트 검색. */}
             <div className="space-y-1.5">
-              <Label>2. 레포지토리</Label>
-              {!connectionId ? (
-                <p className="text-[12px] text-muted-foreground">먼저 연결을 선택하세요.</p>
-              ) : reposLoading ? (
+              <Label>1. 레포지토리</Label>
+              {reposLoading || repos === undefined ? (
                 <p className="text-[12px] text-muted-foreground">레포 목록을 불러오는 중…</p>
               ) : reposError ? (
                 <Callout tone="danger" className="py-1.5">
@@ -248,9 +207,7 @@ export function ConnectRepoDialog({
                   <div className="max-h-52 divide-y divide-border/70 overflow-y-auto rounded-md border bg-card">
                     {filteredRepos.length === 0 ? (
                       <p className="px-3 py-4 text-center text-[12px] text-muted-foreground">
-                        {(repos ?? []).length === 0
-                          ? '연결된 계정에서 접근할 수 있는 레포가 없어요.'
-                          : '검색 결과가 없어요.'}
+                        검색 결과가 없어요.
                       </p>
                     ) : (
                       filteredRepos.map((r) => {
@@ -294,10 +251,10 @@ export function ConnectRepoDialog({
               )}
             </div>
 
-            {/* 3. 슬롯 — service=서비스 다중선택(+경로), command=image, process=없음. */}
+            {/* 2. 슬롯 — service=서비스 다중선택(+경로), command=image, process=없음. */}
             {repository && (
               <div className="space-y-2">
-                <Label>3. 빌드 슬롯</Label>
+                <Label>2. 빌드 슬롯</Label>
                 {slotChoices.length === 0 ? (
                   <p className="text-[12px] text-muted-foreground">
                     이 하니스는 CI가 바꿔 끼울 이미지 슬롯이 없어요(process). 링크는 트리거만 해요.
@@ -338,10 +295,10 @@ export function ConnectRepoDialog({
               </div>
             )}
 
-            {/* 4. 데이터셋 — CI 가 발사할 벤치마크(선택). */}
+            {/* 3. 데이터셋 — CI 가 발사할 벤치마크(선택). */}
             {repository && datasets.length > 0 && (
               <div className="space-y-1.5">
-                <Label>4. 데이터셋 (선택)</Label>
+                <Label>3. 데이터셋 (선택)</Label>
                 <Combobox
                   options={[
                     { value: '', label: '지정 안 함', hint: '나중에' },
@@ -357,10 +314,10 @@ export function ConnectRepoDialog({
               </div>
             )}
 
-            {/* 5. 셀프호스티드 러너 — CI 를 팀 빌드 서버에서 돌리려면(선택). github-install 로 세운 러너 라벨/런타임. */}
+            {/* 4. 셀프호스티드 러너 — CI 를 팀 빌드 서버에서 돌리려면(선택). github-install 로 세운 러너 라벨/런타임. */}
             {repository && (
               <div className="space-y-1.5">
-                <Label>5. 셀프호스티드 러너 (선택)</Label>
+                <Label>4. 셀프호스티드 러너 (선택)</Label>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Input
                     value={runsOn}

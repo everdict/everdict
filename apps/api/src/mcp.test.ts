@@ -2,7 +2,6 @@ import type { Principal } from "@assay/auth";
 import type { Dispatcher } from "@assay/backends";
 import type { AgentJob, CaseResult, RuntimeSpec } from "@assay/core";
 import {
-  InMemoryConnectionStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
   InMemoryRunnerStore,
@@ -13,7 +12,6 @@ import {
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
-  aesGcmCipher,
 } from "@assay/db";
 import {
   InMemoryDatasetRegistry,
@@ -27,12 +25,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { BundleService } from "./bundle-service.js";
-import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { GithubAppService } from "./github-app-service.js";
 import { MattermostService } from "./mattermost-service.js";
 import { buildMcpServer } from "./mcp.js";
 import { MembershipService } from "./membership-service.js";
-import type { OAuthProvider } from "./oauth/provider.js";
 import { RunService } from "./run-service.js";
 import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
@@ -77,12 +73,6 @@ const DATASET = JSON.stringify({
 });
 
 let n = 0;
-const fakeOAuth: OAuthProvider = {
-  defaultScopes: ["repo"],
-  authorizeUrl: ({ state, redirectUri }) => `https://github.test/auth?state=${state}&redirect_uri=${redirectUri}`,
-  exchange: async () => ({ accessToken: "gho_test", scopes: ["repo"] }),
-  whoami: async () => ({ label: "octocat" }),
-};
 
 function harness() {
   const datasetRegistry = new InMemoryDatasetRegistry();
@@ -102,17 +92,6 @@ function harness() {
   });
   return {
     bundleService,
-    connectionService: new ConnectionService({
-      store: new InMemoryConnectionStore(aesGcmCipher(Buffer.alloc(32, 5))),
-      states: new InMemoryOAuthStateStore(),
-      providers: new Map<string, ProviderEntry>([
-        ["github", { impl: fakeOAuth, selfHosted: false, default: { clientId: "cid", clientSecret: "csec" } }],
-        ["github-enterprise", { impl: fakeOAuth, selfHosted: true }],
-      ]),
-      secretsFor: async () => ({ GHE_SECRET: "ghs_real" }),
-      settings: new InMemoryWorkspaceSettingsStore(),
-      config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
-    }),
     githubAppService: new GithubAppService({
       states: new InMemoryOAuthStateStore(),
       settings: new InMemoryWorkspaceSettingsStore(),
@@ -208,9 +187,7 @@ describe("MCP tools", () => {
       "delete_schedule",
       "diff_datasets",
       "diff_scorecards",
-      "disconnect_connection",
       "fail_job",
-      "get_connect_url",
       "get_dataset",
       "get_harness_instance",
       "get_harness_template",
@@ -227,7 +204,6 @@ describe("MCP tools", () => {
       "lease_job",
       "leave_workspace",
       "list_api_keys",
-      "list_connections",
       "list_datasets",
       "list_harness_templates",
       "list_harnesses",
@@ -240,9 +216,7 @@ describe("MCP tools", () => {
       "list_runtimes",
       "list_schedules",
       "list_scorecards",
-      "list_workspace_applications",
       "list_workspace_github_app",
-      "list_workspace_integrations",
       "list_workspace_owned_runners",
       "list_workspace_runners",
       "pair_runner",
@@ -255,7 +229,6 @@ describe("MCP tools", () => {
       "register_workspace_github_app",
       "remove_member",
       "remove_workspace_github_app_registration",
-      "remove_workspace_integration",
       "remove_workspace_mattermost",
       "revoke_api_key",
       "revoke_invite",
@@ -263,7 +236,6 @@ describe("MCP tools", () => {
       "revoke_workspace_runner",
       "run_scorecard",
       "set_member_role",
-      "set_workspace_integration",
       "set_workspace_mattermost",
       "start_workspace_github_app_install",
       "submit_job_result",
@@ -315,83 +287,6 @@ describe("MCP tools", () => {
     // 없는 버전 → 오류.
     const miss = await viewer.callTool({ name: "get_harness_instance", arguments: { id: "bu", version: "nope" } });
     expect(miss.isError).toBe(true);
-  });
-
-  it("connections: 개인 소유 — list/get_connect_url/disconnect 는 역할 게이트 없이 본인 연결, 로스터는 members:read", async () => {
-    const deps = harness();
-    const admin = await connect(deps, ["admin"]);
-    const viewer = await connect(deps, ["viewer"]);
-
-    // 연결은 개인 소유 — viewer 도 본인 연결 list 가능(빈 목록). 카탈로그는 3종 전부 노출: github 은 default 있어 connectable,
-    // GHE 는 통합 미설정이라 connectable=false(숨기지 않고 설정 안내 대상으로 노출).
-    const viewerList = JSON.parse(text(await viewer.callTool({ name: "list_connections", arguments: {} })));
-    expect(viewerList).toEqual({
-      connections: [],
-      providers: [
-        { id: "github", selfHosted: false, connectable: true },
-        { id: "github-enterprise", selfHosted: true, connectable: false },
-      ],
-    });
-    // viewer 도 본인 연결 start 가능(역할 게이트 없음) → authorizeUrl.
-    const vUrl = await viewer.callTool({ name: "get_connect_url", arguments: { provider: "github" } });
-    expect(vUrl.isError).toBeFalsy();
-    expect(JSON.parse(text(vUrl)).authorizeUrl).toContain("https://github.test/auth?state=");
-
-    // admin list → connections:[] + 카탈로그(github connectable / GHE 미설정).
-    const listed = JSON.parse(text(await admin.callTool({ name: "list_connections", arguments: {} })));
-    expect(listed).toEqual({
-      connections: [],
-      providers: [
-        { id: "github", selfHosted: false, connectable: true },
-        { id: "github-enterprise", selfHosted: true, connectable: false },
-      ],
-    });
-
-    // disconnect (없는 id 라도 멱등) → disconnected:true.
-    const dis = JSON.parse(text(await admin.callTool({ name: "disconnect_connection", arguments: { id: "x" } })));
-    expect(dis).toMatchObject({ disconnected: true });
-
-    // 워크스페이스 애플리케이션 로스터 — members:read(viewer+) → 빈 목록(토큰 없음).
-    const roster = JSON.parse(text(await viewer.callTool({ name: "list_workspace_applications", arguments: {} })));
-    expect(roster).toEqual({ connections: [] });
-  });
-
-  it("workspace integrations: admin 1회 등록 → 멤버 원클릭(list_connections 노출), 시크릿 미반환, member 는 쓰기 불가", async () => {
-    const deps = harness();
-    const admin = await connect(deps, ["admin"]);
-    const member = await connect(deps, ["member"]);
-    const cfg = {
-      provider: "github-enterprise",
-      host: "https://ghe.acme.io",
-      clientId: "Iv1.cafe",
-      clientSecretName: "GHE_SECRET",
-    };
-
-    // member 는 settings:write 없음 → 등록 불가.
-    expect((await member.callTool({ name: "set_workspace_integration", arguments: cfg })).isError).toBe(true);
-
-    // admin 등록 → configured + 시크릿 값 미반환.
-    const set = await admin.callTool({ name: "set_workspace_integration", arguments: cfg });
-    expect(set.isError).toBeFalsy();
-    expect(text(set)).not.toContain("ghs_real");
-    const integrations = JSON.parse(text(await admin.callTool({ name: "list_workspace_integrations", arguments: {} })));
-    expect(integrations.providers).toContainEqual({
-      id: "github-enterprise",
-      selfHosted: true,
-      configured: true,
-      host: "https://ghe.acme.io",
-      clientId: "Iv1.cafe",
-      clientSecretName: "GHE_SECRET",
-    });
-
-    // 멤버는 이제 GHE 를 원클릭 연결 가능(list_connections 카탈로그에서 connectable=true).
-    const conns = JSON.parse(text(await member.callTool({ name: "list_connections", arguments: {} })));
-    expect(conns.providers).toContainEqual({ id: "github-enterprise", selfHosted: true, connectable: true });
-
-    // remove → configured false.
-    await admin.callTool({ name: "remove_workspace_integration", arguments: { provider: "github-enterprise" } });
-    const after = JSON.parse(text(await admin.callTool({ name: "list_workspace_integrations", arguments: {} })));
-    expect(after.providers.find((p: { id: string }) => p.id === "github-enterprise").configured).toBe(false);
   });
 
   it("workspace github app: admin 은 설치 시작·GHE 등록·목록이 되고, member 는 settings:write 없어 불가", async () => {

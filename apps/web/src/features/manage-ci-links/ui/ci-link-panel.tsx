@@ -4,7 +4,6 @@ import { useMemo, useState, useTransition } from 'react'
 import { GitBranch, Plus } from 'lucide-react'
 
 import type { CiLink } from '@/entities/ci-link'
-import type { ConnectionMeta } from '@/entities/connection'
 import type { HarnessKind } from '@/entities/harness'
 import { fmtSubject } from '@/shared/lib/format'
 import { Badge } from '@/shared/ui/badge'
@@ -29,7 +28,6 @@ export function CiLinkPanel({
   kind,
   serviceNames,
   datasets,
-  connections,
   initialLinks,
   canWrite,
   workspace,
@@ -38,7 +36,6 @@ export function CiLinkPanel({
   kind: HarnessKind
   serviceNames: string[]
   datasets: string[]
-  connections: ConnectionMeta[] // github | github-enterprise 로 필터된 내 연결
   initialLinks: CiLink[] // 이 하니스에 매칭된 링크(서버에서 필터)
   canWrite: boolean
   workspace: string
@@ -123,11 +120,7 @@ export function CiLinkPanel({
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <SetupPrButton
-                      repository={l.repository}
-                      connections={connections}
-                      onError={setError}
-                    />
+                    <SetupPrButton repository={l.repository} onError={setError} />
                     {canWrite &&
                       (confirmRepo === l.repository ? (
                         <span className="flex items-center gap-2">
@@ -192,7 +185,6 @@ export function CiLinkPanel({
         kind={kind}
         slotChoices={slotChoices}
         datasets={datasets}
-        connections={connections}
         workspace={workspace}
         canWrite={canWrite}
         onSaved={applyLinks}

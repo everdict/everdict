@@ -3,15 +3,13 @@
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
 import { CiLinksSettings } from '@/features/manage-ci-links'
 import { GithubAppManager } from '@/features/manage-github-app'
-import { IntegrationsManager } from '@/features/manage-integrations'
 import { InvitesManager } from '@/features/manage-invites'
 import { MattermostManager } from '@/features/manage-mattermost'
-import { MembersManager, WorkspaceApplications } from '@/features/manage-members'
+import { MembersManager } from '@/features/manage-members'
 import { WorkspaceRunnersManager } from '@/features/manage-workspace-runners'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { WorkspaceInfoCard } from '@/features/workspace-settings'
 import type { CiLink } from '@/entities/ci-link'
-import type { ConnectionMeta, WorkspaceIntegration } from '@/entities/connection'
 import type { GithubAppView } from '@/entities/github-app'
 import type { MattermostConfig } from '@/entities/mattermost'
 import type { Invite, Member } from '@/entities/member'
@@ -22,22 +20,16 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
 type TabKey = 'general' | 'model' | 'cluster' | 'integrations' | 'ci' | 'runners' | 'members'
 
-// 워크스페이스 설정 탭: 일반(정보/정책/삭제) · 모델 키 · 클러스터 자격증명 · 통합(self-hosted OAuth 앱) · 멤버(+애플리케이션
-// 로스터). 권한 없는 탭은 숨긴다. 외부 계정 연결의 연결/해제(관리)는 개인 소유라 계정(account) 페이지에 있다 — 여기 멤버 탭의
-// "애플리케이션"은 이 워크스페이스에서 만들어진 연결의 읽기 전용 로스터(applications)이고, "통합" 탭은 관리자가 self-hosted
-// provider OAuth 앱을 1회 등록해 멤버 원클릭 연결을 가능케 하는 곳이다.
+// 워크스페이스 설정 탭: 일반(정보/정책/삭제) · 모델 키 · 클러스터 자격증명 · 통합(GitHub App/Mattermost) · CI · 공유 러너 · 멤버.
+// 권한 없는 탭은 숨긴다. "통합" 탭은 워크스페이스 소유 GitHub App(조직 설치→선택 repo)과 Mattermost 알림을 관리한다.
 export function SettingsTabs(props: {
   workspace?: WorkspaceRecord // 활성 워크스페이스 레코드(이름/로고/소유자) — settings:read 일 때만
   isOwner: boolean // owner 면 위험 구역(삭제) 노출
   secrets: SecretMeta[]
-  applications: ConnectionMeta[] // 워크스페이스에 연결된 애플리케이션(읽기 전용 로스터)
-  integrations: WorkspaceIntegration[] // self-hosted provider OAuth 앱 통합(관리자 1회 등록)
-  integrationsCallbackUrl?: string // provider OAuth 앱에 등록할 콜백 URL
   githubApp: GithubAppView // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
   mattermost?: MattermostConfig // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림)
   ciLinks: CiLink[] // CI repo link(레포↔하니스 슬롯 = OIDC trust) 목록
   workspaceRunners: RunnerMeta[] // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI (admin)
-  githubConnections: ConnectionMeta[] // 내 GitHub 연결(있으면 GitHub Actions 러너 자가등록 노출)
   members: Member[]
   invites: Invite[]
   canReadSettings: boolean
@@ -106,13 +98,6 @@ export function SettingsTabs(props: {
             canWrite={props.canWriteSettings}
             {...(props.mattermost !== undefined ? { config: props.mattermost } : {})}
           />
-          <IntegrationsManager
-            providers={props.integrations}
-            canWrite={props.canWriteSettings}
-            {...(props.integrationsCallbackUrl !== undefined
-              ? { callbackUrl: props.integrationsCallbackUrl }
-              : {})}
-          />
         </div>
       </TabsContent>
       <TabsContent value="ci">
@@ -122,13 +107,11 @@ export function SettingsTabs(props: {
         <WorkspaceRunnersManager
           runners={props.workspaceRunners}
           canWrite={props.canWriteSettings}
-          githubConnections={props.githubConnections}
         />
       </TabsContent>
       <TabsContent value="members">
         <div className="space-y-8">
           <MembersManager members={props.members} canWrite={props.canWriteMembers} />
-          <WorkspaceApplications connections={props.applications} />
           {props.canWriteMembers && <InvitesManager invites={props.invites} canWrite />}
         </div>
       </TabsContent>

@@ -3,7 +3,7 @@ export { CiLinksSettings } from './ui/ci-links-settings'
 export { SetupPrButton } from './ui/setup-pr-button'
 export {
   deleteCiLinkAction,
-  listConnectionReposAction,
+  listGithubAppReposAction,
   openSetupPrAction,
   upsertCiLinkAction,
   type CiLinksResult,

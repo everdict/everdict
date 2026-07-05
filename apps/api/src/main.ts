@@ -11,7 +11,6 @@ import {
   BackendRegistry,
   type BudgetLimit,
   K8sBackend,
-  LocalBackend,
   NomadBackend,
   Scheduler,
   buildRuntimeBackend,
@@ -20,9 +19,7 @@ import {
 import type { RuntimeSpec } from "@assay/core";
 import {
   type CommentStore,
-  type ConnectionStore,
   InMemoryCommentStore,
-  InMemoryConnectionStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
@@ -39,7 +36,6 @@ import {
   type NotificationStore,
   type OAuthStateStore,
   PgCommentStore,
-  PgConnectionStore,
   PgNotificationStore,
   PgOAuthStateStore,
   PgRunStore,
@@ -104,15 +100,12 @@ import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
 import { CiLinkService } from "./ci-link-service.js";
 import { CommentService } from "./comment-service.js";
-import { ConnectionService, type ProviderEntry } from "./connection-service.js";
 import { GithubAppService, type GithubComAppConfig } from "./github-app-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MattermostService } from "./mattermost-service.js";
 import { MembershipService } from "./membership-service.js";
 import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 import { NotificationService } from "./notification-service.js";
-import { githubProvider } from "./oauth/github.js";
-import { mattermostProvider } from "./oauth/mattermost.js";
 import { ProfileService } from "./profile-service.js";
 import { QueueService } from "./queue-service.js";
 import { RunService } from "./run-service.js";
@@ -137,9 +130,6 @@ async function main(): Promise<void> {
   const nomadAddr = process.env.NOMAD_ADDR;
   const k8sContext = process.env.ASSAY_K8S_CONTEXT;
   const image = process.env.ASSAY_AGENT_IMAGE;
-  // 배포 정책: 켜면 실행은 등록된 런타임 또는 self-hosted 러너에서만 — control-plane 호스트 in-process(LocalBackend) 금지.
-  // (1) local 폴백 미등록 (2) runtime/self 타깃 없는 run/scorecard 는 제출 시 400. 미설정(dev)이면 기존대로 local 폴백.
-  const requireRuntime = process.env.ASSAY_REQUIRE_RUNTIME === "1";
 
   const {
     store,
@@ -157,7 +147,6 @@ async function main(): Promise<void> {
     userProfileStore,
     inviteStore,
     secretStore,
-    connectionStore,
     oauthStateStore,
     runnerStore,
     scheduleStore,
@@ -197,10 +186,10 @@ async function main(): Promise<void> {
     backends.register("nomad", new NomadBackend({ addr: nomadAddr, image, secretEnv: collectAuthEnv(), secrets }));
   } else if (k8sContext && image) {
     backends.register("k8s", new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv(), secrets }));
-  } else if (!requireRuntime) {
-    // dev 폴백 — 정책(ASSAY_REQUIRE_RUNTIME)이 켜지면 등록하지 않는다(모든 실행은 런타임/self 타깃 경유).
-    backends.register("local", new LocalBackend());
   }
+  // 정책(기본): LocalBackend(격리 없는 컨트롤플레인 호스트 in-process)는 절대 등록하지 않는다 — 모든 실행은 등록된
+  // 테넌트 런타임 또는 self-hosted 러너(self:<id>/self:ws)를 target 으로 지정해야 한다. 옵트인 env 없이 이게 기본 동작.
+  // (dev/단일-호스트 in-process 실행이 필요하면 apps/cli 의 assay run 을 쓴다 — API 는 관리형/원격 실행만.)
   const scheduler = new Scheduler(backends);
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
@@ -263,9 +252,8 @@ async function main(): Promise<void> {
   // 완료 알림: 워크스페이스 설정 notify(Mattermost 연결+채널)가 있으면 run/scorecard 완료를 채널에 게시(소비 슬라이스).
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
-    // 워크스페이스 Mattermost(bot 토큰) — settings.mattermost.botTokenSecretName 을 공유 시크릿에서 resolve(우선).
+    // 워크스페이스 Mattermost(bot 토큰) — settings.mattermost.botTokenSecretName 을 공유 시크릿에서 resolve.
     secretsFor: runtimeSecretsFor,
-    connections: connectionStore, // (레거시) 개인 연결 notify 폴백 — S6 에서 제거
     feed: notificationStore, // 개인 알림 피드(벨 인박스) — docs/architecture/notifications.md
   });
   // 워크스페이스 소유 Mattermost 통합(등록→bot 알림). 개인 연결 알림 대체. NotificationService 가 settings.mattermost 를 읽어 게시.
@@ -314,7 +302,7 @@ async function main(): Promise<void> {
     dispatcher,
     store,
     budget,
-    requireRuntime, // 정책: runtime/self 타깃 없는 run 은 제출 시 400(local 폴백 금지)
+    requireRuntime: true, // 정책(기본): runtime/self 타깃 없는 run 은 제출 시 400 — API 는 local 을 등록하지 않는다
     ...(artifacts ? { artifacts } : {}),
     // 선언형 하니스: 인스턴스 레지스트리에서 template+pins 를 resolve 해 spec 을 잡에 임베드(없으면 빌트인 폴백).
     resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),
@@ -326,8 +314,6 @@ async function main(): Promise<void> {
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // 비공개 repo 시드(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(팀 공용).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
-    // (레거시) 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve. S6 에서 제거.
-    repoTokenFor: async (owner, connectionId) => (await connectionStore.tokenFor(owner, connectionId))?.accessToken,
     // 완료 알림(Mattermost) — 워크스페이스 notify 설정이 있으면 채널 게시. 실패는 run 결과 무관.
     onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
   });
@@ -344,7 +330,7 @@ async function main(): Promise<void> {
   const scorecardService = new ScorecardService({
     dispatcher,
     store: scorecardStore,
-    requireRuntime, // 정책: runtime 없는 배치는 제출 시 400(local 폴백 금지)
+    requireRuntime: true, // 정책(기본): runtime 없는 배치는 제출 시 400 — API 는 local 을 등록하지 않는다
     // 케이스마다 자식 run 을 팬아웃(단일 run 과 같은 RunStore 공유) — 각 케이스가 addressable run 이 되고 활동 리스트엔 기본 숨김.
     runStore: store,
     datasets: datasetRegistry,
@@ -361,8 +347,6 @@ async function main(): Promise<void> {
     scopedSecretsFor, // harness env {secretRef} 해석(공유+제출자 개인)
     // 비공개-repo 데이터셋(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(단일 run 과 동일).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
-    // (레거시) 케이스 env.source.connectionId → 제출자(owner=subject)의 개인 연결 토큰 resolve. S6 에서 제거.
-    repoTokenFor: async (owner, connectionId) => (await connectionStore.tokenFor(owner, connectionId))?.accessToken,
     // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
   });
@@ -387,21 +371,6 @@ async function main(): Promise<void> {
     models: modelRegistry,
     runtimes: runtimeRegistry,
   });
-  // 외부 계정 연결(Connected accounts): github.com 은 env 기본 OAuth App(원클릭), GHE/Mattermost 는 관리자가 워크스페이스
-  // 통합(Settings → 통합)에 1회 등록한 host+clientId+SecretStore name-ref 로 연결(멤버는 client ID 입력 없이 원클릭).
-  // 토큰은 secretStore 와 같은 cipher 로 암호화. self-hosted client_secret 은 runtimeSecretsFor 로 resolve.
-  const connectionService = new ConnectionService({
-    store: connectionStore,
-    states: oauthStateStore,
-    providers: buildOAuthProviders(),
-    secretsFor: runtimeSecretsFor,
-    settings: settingsStore, // self-hosted 통합 자격증명(워크스페이스-레벨, 관리자 설정)의 SSOT
-    config: {
-      webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001", // 콜백 후 브라우저 복귀 베이스(dev 기본 웹 포트)
-      ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // OAuth redirect_uri 베이스
-    },
-  });
-
   // CI repo link — 레포↔하니스 슬롯 매핑(= GitHub Actions OIDC trust) CRUD + 레포 picker + setup-PR 생성기.
   // picker/setup-PR 은 멤버 개인 GitHub 연결 토큰(tokenFor)을 서버 안에서만 사용한다.
   const ciLinkService = new CiLinkService({
@@ -459,7 +428,6 @@ async function main(): Promise<void> {
     membershipService,
     profileService,
     secretStore,
-    connectionService,
     githubAppService,
     mattermostService,
     ciLinkService,
@@ -480,7 +448,7 @@ async function main(): Promise<void> {
 
   await app.listen({ port, host: "0.0.0.0" });
   console.error(
-    `▶ assay-api on :${port} (backend:${nomadAddr ? "nomad" : k8sContext ? "k8s" : requireRuntime ? "runtime-only" : "local"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.ASSAY_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:${requireRuntime ? "required" : "local-fallback"})`,
+    `▶ assay-api on :${port} (backend:${nomadAddr ? "nomad" : k8sContext ? "k8s" : "runtime-only"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.ASSAY_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:required)`,
   );
 }
 
@@ -500,7 +468,6 @@ interface Persistence {
   userProfileStore: UserProfileStore; // 유저 프로필(이름/유저네임/아바타) — 항상 사용 가능
   inviteStore: WorkspaceInviteStore; // 멤버 초대(토큰/링크 redemption) — 항상 사용 가능
   secretStore: SecretStore; // 항상 사용 가능(기본 ON) — KEK 는 ASSAY_SECRETS_KEY, 없으면 임시 키 자동생성
-  connectionStore: ConnectionStore; // 외부 계정 연결(OAuth 토큰) — secretStore 와 같은 cipher 로 at-rest 암호화
   oauthStateStore: OAuthStateStore; // OAuth authorize→callback 1회용 pending state
   runnerStore: RunnerStore; // 셀프호스티드 러너(개인 디바이스 페어링) — 페어링 토큰은 SHA-256 해시만 보관
   scheduleStore: ScheduleStore; // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식(SSOT, mutable)
@@ -546,7 +513,6 @@ async function makePersistence(): Promise<Persistence> {
       userProfileStore: new InMemoryUserProfileStore(),
       inviteStore: new InMemoryWorkspaceInviteStore(workspaceStore),
       secretStore: new InMemorySecretStore(cipher),
-      connectionStore: new InMemoryConnectionStore(cipher),
       oauthStateStore: new InMemoryOAuthStateStore(),
       runnerStore: new InMemoryRunnerStore(),
       scheduleStore: new InMemoryScheduleStore(),
@@ -575,7 +541,6 @@ async function makePersistence(): Promise<Persistence> {
     userProfileStore: new PgUserProfileStore(client),
     inviteStore: new PgWorkspaceInviteStore(client),
     secretStore: new PgSecretStore(client, cipher),
-    connectionStore: new PgConnectionStore(client, cipher),
     oauthStateStore: new PgOAuthStateStore(client),
     runnerStore: new PgRunnerStore(client),
     scheduleStore: new PgScheduleStore(client),
@@ -636,27 +601,6 @@ function githubComAppConfig(): GithubComAppConfig | undefined {
   if (!appId || !key || !slug) return undefined;
   const privateKeyPem = key.includes("BEGIN") ? key.replace(/\\n/g, "\n") : Buffer.from(key, "base64").toString("utf8");
   return { appId, slug, privateKeyPem };
-}
-
-function buildOAuthProviders(): Map<string, ProviderEntry> {
-  const github = githubProvider();
-  const ghId = process.env.GITHUB_OAUTH_CLIENT_ID;
-  const ghSecret = process.env.GITHUB_OAUTH_CLIENT_SECRET;
-  const providers = new Map<string, ProviderEntry>();
-  providers.set("github", {
-    impl: github,
-    selfHosted: false,
-    ...(ghId && ghSecret ? { default: { clientId: ghId, clientSecret: ghSecret } } : {}),
-  });
-  providers.set("github-enterprise", { impl: github, selfHosted: true });
-  providers.set("mattermost", { impl: mattermostProvider(), selfHosted: true });
-  if (ghId && ghSecret)
-    console.error("▶ connections: GitHub OAuth(github.com) 원클릭 활성 + GHE/Mattermost self-hosted");
-  else
-    console.warn(
-      "▶ connections: GITHUB_OAUTH_CLIENT_ID/SECRET 미설정 — github.com 원클릭 비활성(GHE/Mattermost 는 관리자가 워크스페이스 통합 등록 시 연결 가능).",
-    );
-  return providers;
 }
 
 // 컨트롤플레인이 소유하는 인증: KEYCLOAK_ISSUER 면 OIDC(JWT) + 항상 API 키. 둘 다 workspace 로 해석.
