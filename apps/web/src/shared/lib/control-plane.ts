@@ -175,6 +175,18 @@ export const controlPlane = {
     }),
   deleteSchedule: (auth: AuthContext, id: string) =>
     callVoid(auth, `/schedules/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  // 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명), 비공개|공유. 열 때 현재 데이터로 재실행(라이브).
+  listViews: <T>(auth: AuthContext) => call<T>(auth, '/views'),
+  getView: <T>(auth: AuthContext, id: string) => call<T>(auth, `/views/${encodeURIComponent(id)}`),
+  createView: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/views', { method: 'POST', body: JSON.stringify(body) }),
+  updateView: <T>(auth: AuthContext, id: string, patch: unknown) =>
+    call<T>(auth, `/views/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+  deleteView: (auth: AuthContext, id: string) =>
+    callVoid(auth, `/views/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   listScorecards: <T>(auth: AuthContext) => call<T>(auth, '/scorecards'),
   getScorecard: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/scorecards/${encodeURIComponent(id)}`),
@@ -270,6 +282,28 @@ export const controlPlane = {
     }),
   removeWorkspaceIntegration: (auth: AuthContext, provider: string) =>
     callVoid(auth, `/workspace/integrations/${encodeURIComponent(provider)}`, { method: 'DELETE' }),
+  // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo). 조회/설치시작/등록/해제 모두 settings:read|write(admin).
+  // 개인키/토큰 값은 절대 안 내려옴 — installation 은 온디맨드 토큰 발급이라 비밀 없이 메타만.
+  getGithubApp: <T>(auth: AuthContext) => call<T>(auth, '/workspace/github-app'),
+  startGithubAppInstall: <T>(auth: AuthContext, body?: unknown) =>
+    call<T>(auth, '/workspace/github-app/install/start', {
+      method: 'POST',
+      body: JSON.stringify(body ?? {}),
+    }),
+  registerGithubApp: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/github-app/registrations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  // host 는 URL(슬래시/콜론 포함)이라 경로 대신 쿼리로.
+  removeGithubAppRegistration: <T>(auth: AuthContext, host: string) =>
+    call<T>(auth, `/workspace/github-app/registrations?host=${encodeURIComponent(host)}`, {
+      method: 'DELETE',
+    }),
+  unlinkGithubAppInstallation: <T>(auth: AuthContext, installationId: number) =>
+    call<T>(auth, `/workspace/github-app/installations/${encodeURIComponent(installationId)}`, {
+      method: 'DELETE',
+    }),
   // CI repo link(레포↔하니스 슬롯 = GitHub Actions OIDC trust). 조회=harnesses:read(viewer+), 생성/삭제=settings:write(admin).
   // link 의 존재가 그 레포의 keyless CI 신뢰를 부여한다. 세 라우트 모두 현재 링크 전체({links})를 돌려준다(204 아님).
   listCiLinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/ci/links'),

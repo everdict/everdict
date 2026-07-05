@@ -6,6 +6,7 @@ import {
   type ConnectionMeta,
   type WorkspaceIntegration,
 } from '@/entities/connection'
+import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
@@ -43,6 +44,7 @@ export default async function SettingsPage({
   let applications: ConnectionMeta[] = []
   let integrations: WorkspaceIntegration[] = []
   let integrationsCallbackUrl: string | undefined
+  let githubApp: GithubAppView = { registrations: [], installations: [] }
   let ciLinks: CiLink[] = []
   let workspaceRunners: RunnerMeta[] = []
   let githubConnections: ConnectionMeta[] = []
@@ -58,6 +60,8 @@ export default async function SettingsPage({
       )
       integrations = ints.providers
       integrationsCallbackUrl = ints.callbackUrl
+      // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo). 개인 연결 대체. settings:read(admin).
+      githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
       // CI repo link(레포↔하니스 슬롯 = OIDC trust) — 링크의 존재가 그 레포의 keyless CI 신뢰. 해제는 admin.
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
     }
@@ -107,6 +111,7 @@ export default async function SettingsPage({
           applications={applications}
           integrations={integrations}
           {...(integrationsCallbackUrl !== undefined ? { integrationsCallbackUrl } : {})}
+          githubApp={githubApp}
           ciLinks={ciLinks}
           workspaceRunners={workspaceRunners}
           githubConnections={githubConnections}

@@ -2,6 +2,7 @@
 
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
 import { CiLinksSettings } from '@/features/manage-ci-links'
+import { GithubAppManager } from '@/features/manage-github-app'
 import { IntegrationsManager } from '@/features/manage-integrations'
 import { InvitesManager } from '@/features/manage-invites'
 import { MembersManager, WorkspaceApplications } from '@/features/manage-members'
@@ -10,6 +11,7 @@ import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { WorkspaceInfoCard } from '@/features/workspace-settings'
 import type { CiLink } from '@/entities/ci-link'
 import type { ConnectionMeta, WorkspaceIntegration } from '@/entities/connection'
+import type { GithubAppView } from '@/entities/github-app'
 import type { Invite, Member } from '@/entities/member'
 import type { RunnerMeta } from '@/entities/runner'
 import type { SecretMeta } from '@/entities/secret'
@@ -29,6 +31,7 @@ export function SettingsTabs(props: {
   applications: ConnectionMeta[] // 워크스페이스에 연결된 애플리케이션(읽기 전용 로스터)
   integrations: WorkspaceIntegration[] // self-hosted provider OAuth 앱 통합(관리자 1회 등록)
   integrationsCallbackUrl?: string // provider OAuth 앱에 등록할 콜백 URL
+  githubApp: GithubAppView // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
   ciLinks: CiLink[] // CI repo link(레포↔하니스 슬롯 = OIDC trust) 목록
   workspaceRunners: RunnerMeta[] // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI (admin)
   githubConnections: ConnectionMeta[] // 내 GitHub 연결(있으면 GitHub Actions 러너 자가등록 노출)
@@ -94,13 +97,16 @@ export function SettingsTabs(props: {
         />
       </TabsContent>
       <TabsContent value="integrations">
-        <IntegrationsManager
-          providers={props.integrations}
-          canWrite={props.canWriteSettings}
-          {...(props.integrationsCallbackUrl !== undefined
-            ? { callbackUrl: props.integrationsCallbackUrl }
-            : {})}
-        />
+        <div className="space-y-8">
+          <GithubAppManager view={props.githubApp} canWrite={props.canWriteSettings} />
+          <IntegrationsManager
+            providers={props.integrations}
+            canWrite={props.canWriteSettings}
+            {...(props.integrationsCallbackUrl !== undefined
+              ? { callbackUrl: props.integrationsCallbackUrl }
+              : {})}
+          />
+        </div>
       </TabsContent>
       <TabsContent value="ci">
         <CiLinksSettings initialLinks={props.ciLinks} canWrite={props.canWriteSettings} />
