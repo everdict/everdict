@@ -55,6 +55,7 @@ export const WorkspaceSettingsSchema = z.object({
         .array(
           z.object({
             host: z.string().url(), // GHE 베이스 URL
+            slug: z.string().min(1), // App slug(설치 URL /github-apps/{slug}/installations/new 에 사용)
             appId: z.string().min(1),
             privateKeySecretName: z.string().min(1), // SecretStore 키 — PEM 값 자체는 저장/반환 안 함
           }),

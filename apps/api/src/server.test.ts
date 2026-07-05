@@ -30,6 +30,7 @@ import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
+import { GithubAppService } from "./github-app-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
@@ -194,6 +195,16 @@ function server(
     settings: settingsStore, // self-hosted 통합(관리자 등록) 자격증명의 SSOT
     config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
   });
+  const githubAppService = new GithubAppService({
+    states: new InMemoryOAuthStateStore(),
+    settings: settingsStore,
+    secretsFor: async () => ({}),
+    config: {
+      webBaseUrl: "http://web.test",
+      apiPublicUrl: "http://api.test",
+      githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST KEY-----", slug: "assay-eval" },
+    },
+  });
   const app = buildServer({
     service: svc,
     scorecardService,
@@ -209,6 +220,7 @@ function server(
     probeRuntime: async (_ws, spec) => ({ kind: spec.kind, reachable: true, detail: "stub-reachable" }),
     secretStore,
     connectionService,
+    githubAppService,
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     settingsStore,
     workspaceStore,
@@ -565,6 +577,45 @@ describe("API — connections (외부 계정 연결, 아웃바운드 OAuth)", ()
     await app.close();
   });
 
+  it("GitHub App: 관리자는 설치 시작 URL·목록·GHE 등록이 되고, viewer 는 settings:write 없어 403", async () => {
+    const h = { authorization: "Bearer x" };
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // 설치 시작 → github.com App 설치 페이지 URL.
+    const start = await app.inject({
+      method: "POST",
+      url: "/workspace/github-app/install/start",
+      headers: h,
+      payload: {},
+    });
+    expect(start.statusCode).toBe(200);
+    expect(start.json().installUrl).toContain("https://github.com/apps/assay-eval/installations/new");
+    // 목록 — 비었고 App Setup URL 로 등록할 callbackUrl 노출.
+    const list = await app.inject({ method: "GET", url: "/workspace/github-app", headers: h });
+    expect(list.statusCode).toBe(200);
+    expect(list.json()).toMatchObject({ registrations: [], installations: [] });
+    expect(list.json().callbackUrl).toBe("http://api.test/workspace/github-app/callback");
+    // GHE App 등록(관리자) → 목록에 1건.
+    const reg = await app.inject({
+      method: "POST",
+      url: "/workspace/github-app/registrations",
+      headers: h,
+      payload: { host: "https://ghe.acme.io", slug: "assay-ghe", appId: "222", privateKeySecretName: "ghe-key" },
+    });
+    expect(reg.statusCode).toBe(200);
+    expect(reg.json().registrations).toHaveLength(1);
+    await app.close();
+
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const denied = await viewer.app.inject({
+      method: "POST",
+      url: "/workspace/github-app/install/start",
+      headers: h,
+      payload: {},
+    });
+    expect(denied.statusCode).toBe(403);
+    await viewer.app.close();
+  });
+
   it("통합: viewer 는 등록 불가(403), admin 1회 등록 → 멤버 원클릭 start(host 반영) + GET /connections 노출", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
     const h = { authorization: "Bearer x" };
@@ -771,6 +822,7 @@ describe("API — harness taxonomy (template 대분류 + instance)", () => {
     template: { id: "bu", version: "1" },
     id: "bu",
     version: "pr-1",
+    description: "승인 프롬프트 자동 통과 플래그 추가",
     pins: { agent: "ghcr.io/x/agent:abc" },
   };
 
@@ -812,13 +864,14 @@ describe("API — harness taxonomy (template 대분류 + instance)", () => {
     expect(tpl.statusCode).toBe(200);
     expect(tpl.json()).toMatchObject({ kind: "service", id: "bu", version: "1", services: [{ name: "agent" }] });
 
-    // raw 인스턴스(template 참조 + pins) — resolved 와 달리 슬롯→값 그대로.
+    // raw 인스턴스(template 참조 + pins + 이 버전의 변경 내역) — resolved 와 달리 슬롯→값 그대로.
     const inst = await app.inject({ method: "GET", url: "/harnesses/bu/pr-1/instance", headers: h });
     expect(inst.statusCode).toBe(200);
     expect(inst.json()).toMatchObject({
       template: { id: "bu", version: "1" },
       id: "bu",
       version: "pr-1",
+      description: "승인 프롬프트 자동 통과 플래그 추가", // 배포 시 입력한 변경 내역이 raw 인스턴스에 보존
       pins: { agent: "ghcr.io/x/agent:abc" },
     });
     await app.close();
@@ -1737,17 +1790,24 @@ describe("API — keys (self-serve API 키, admin)", () => {
     await app.close();
   });
 
-  it("member 는 키 발급/조회 불가 (403)", async () => {
+  it("member 는 본인 키를 셀프 발급/조회하고, 그 키는 member 권한으로만 동작한다(admin 블랭킷 아님)", async () => {
     const { app } = server({ requireAuth: true, authenticator: roleAuth(["member"]) });
     const h = { authorization: "Bearer x" };
-    expect((await app.inject({ method: "GET", url: "/keys", headers: h })).statusCode).toBe(403);
-    expect((await app.inject({ method: "POST", url: "/keys", headers: h, payload: {} })).statusCode).toBe(403);
-    await app.close();
+    // self-scoped: 목록(내 것, 빈) + 발급(201) — 관리자 권한 불필요
+    expect((await app.inject({ method: "GET", url: "/keys", headers: h })).statusCode).toBe(200);
+    const created = await app.inject({ method: "POST", url: "/keys", headers: h, payload: { label: "mine" } });
+    expect(created.statusCode).toBe(201);
+    const memberKey = { authorization: `Bearer ${created.json().apiKey as string}` };
+    // 발급된 키는 발급자(member) 권한 — 인증 OK 지만 admin 액션은 403(권한 상승 없음).
+    expect((await app.inject({ method: "GET", url: "/me", headers: memberKey })).json().roles).toEqual(["member"]);
+    expect(
+      (await app.inject({ method: "PUT", url: "/secrets/X", headers: memberKey, payload: { value: "v" } })).statusCode,
+    ).toBe(403);
   });
 
-  it("scopes 로 발급한 키는 그 범위로 좁혀진다 (read 키: 조회 가능, 민감/쓰기 불가); 미지정=Full Access", async () => {
+  it("scopes 로 발급한 키는 발급자 역할 안에서 그 범위로 좁혀진다 (read 키: 읽기만)", async () => {
     const { app, keyStore } = server({ requireAuth: true });
-    const admin = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` }; // scope 없는 풀(full) 키
+    const admin = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` }; // 머신 키(owner='', admin)
 
     // read scope 키 발급 → 평문 1회
     const created = await app.inject({
@@ -1759,23 +1819,20 @@ describe("API — keys (self-serve API 키, admin)", () => {
     expect(created.statusCode).toBe(201);
     const readKey = { authorization: `Bearer ${created.json().apiKey as string}` };
 
-    // 목록은 scopes 를 메타로 노출
+    // 목록은 scopes 를 메타로 노출(발급자의 키 목록)
     const rows = (await app.inject({ method: "GET", url: "/keys", headers: admin })).json() as Array<{
       label?: string;
       scopes?: string[];
     }>;
     expect(rows.find((r) => r.label === "read-only")?.scopes).toEqual(["read"]);
 
-    // read 키: 인증 OK + runs:read 허용
+    // read 키: 읽기 허용
     expect((await app.inject({ method: "GET", url: "/me", headers: readKey })).statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: "/runs", headers: readKey })).statusCode).toBe(200);
-    // read 키: keys:read 는 admin scope 전용 → 403(키가 admin role 아래로 좁혀졌음)
-    expect((await app.inject({ method: "GET", url: "/keys", headers: readKey })).statusCode).toBe(403);
-
-    // scopes 미지정 발급 = Full Access → keys:read 가능
-    const full = await app.inject({ method: "POST", url: "/keys", headers: admin, payload: { label: "full" } });
-    const fullKey = { authorization: `Bearer ${full.json().apiKey as string}` };
-    expect((await app.inject({ method: "GET", url: "/keys", headers: fullKey })).statusCode).toBe(200);
+    // read 키: 쓰기/admin 액션은 403(read scope 로 좁혀짐)
+    expect(
+      (await app.inject({ method: "PUT", url: "/secrets/X", headers: readKey, payload: { value: "v" } })).statusCode,
+    ).toBe(403);
 
     // 빈 scopes 배열은 400(nonempty)
     expect(

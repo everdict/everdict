@@ -1,7 +1,7 @@
 import { generateKeyPairSync, verify } from "node:crypto";
 import { UpstreamError } from "@assay/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { githubAppJwt, mintInstallationToken } from "./github-app.js";
+import { getInstallation, githubAppJwt, mintInstallationToken } from "./github-app.js";
 
 // 테스트용 RSA 키페어(App 개인키 대역). PEM 으로 뽑아 서명/검증에 사용.
 const { privateKey, publicKey } = generateKeyPairSync("rsa", {
@@ -76,6 +76,20 @@ describe("mintInstallationToken (github.com)", () => {
   it("외부 실패(비-2xx)는 UpstreamError 로 remap 된다", async () => {
     mockFetch(() => ({ status: 404, body: { message: "Not Found" } }));
     await expect(mintInstallationToken({ ...base, repositories: ["api"] })).rejects.toBeInstanceOf(UpstreamError);
+  });
+});
+
+describe("getInstallation", () => {
+  it("App JWT 로 installation 을 조회해 account(org login)를 뽑는다", async () => {
+    const calls = mockFetch(() => ({ body: { id: 42, account: { login: "acme-org" } } }));
+    const info = await getInstallation({
+      appId: "12345",
+      privateKeyPem: privateKey,
+      installationId: 42,
+      nowSec: 1_000_000,
+    });
+    expect(info).toEqual({ account: "acme-org" });
+    expect(calls[0]?.url).toBe("https://api.github.com/app/installations/42");
   });
 });
 

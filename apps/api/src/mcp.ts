@@ -27,14 +27,15 @@ import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
 import type { CiLinkService } from "./ci-link-service.js";
-import { installGithubWorkspaceRunner } from "./github-runner-install.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
-import { deleteHarnessVersion } from "./harness-service.js";
+import type { GithubAppService } from "./github-app-service.js";
+import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
+import { deleteHarnessVersion } from "./harness-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { QueueService } from "./queue-service.js";
 import type { RunService } from "./run-service.js";
@@ -48,6 +49,7 @@ import {
   type ScorecardService,
   originSource,
 } from "./scorecard-service.js";
+import type { UpdateViewInput, ViewService } from "./view-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
 // MCP 도구 표면 — HTTP 라우트와 같은 서비스 코어를 공유하는 "에이전트용 트랜스포트".
@@ -57,6 +59,7 @@ export interface McpDeps {
   scorecardService?: ScorecardService;
   scheduleService?: ScheduleService;
   queueService?: QueueService; // 작업 큐 스냅샷(런타임 레인별 실행 중/대기/다음 예약)
+  viewService?: ViewService; // 저장된 스코어카드 분석 View — create/list/get/update/delete
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
@@ -66,6 +69,7 @@ export interface McpDeps {
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // 런타임 연결 테스트
   secretStore?: SecretStore;
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — list/connect-url/disconnect
+  githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — list/read (self-scoped)
@@ -257,7 +261,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       {
         description:
           "하니스 버전 소프트 삭제(tombstone — 과거 스코어카드 이력은 보존, 미래 실행은 해석 실패). 그 버전의 생성자 본인 또는 워크스페이스 admin 만.",
-        inputSchema: { id: z.string(), version: z.string().describe("삭제할 인스턴스 버전(정확한 버전 — latest 불가)") },
+        inputSchema: {
+          id: z.string(),
+          version: z.string().describe("삭제할 인스턴스 버전(정확한 버전 — latest 불가)"),
+        },
       },
       ({ id, version }) => plain(async () => ok(await deleteHarnessVersion(instances, principal, id, version))),
     );
@@ -266,9 +273,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "register_harness",
       {
         description:
-          "하네스 인스턴스(template 참조 + pins, JSON 문자열) 등록(불변; 템플릿 없음/핀 누락 시 오류). 무게이트(viewer+)",
+          "하네스 인스턴스(template 참조 + pins, JSON 문자열) 등록(불변; 템플릿 없음/핀 누락 시 오류). 무게이트(viewer+). 선택 description = 이 버전의 변경 내역(상세에 표시)",
         inputSchema: {
-          spec: z.string().describe("HarnessInstanceSpec JSON: { template:{id,version}, id, version, pins }"),
+          spec: z
+            .string()
+            .describe(
+              "HarnessInstanceSpec JSON: { template:{id,version}, id, version, pins, description? } (description=이 버전의 변경 내역, 선택)",
+            ),
         },
       },
       ({ spec }) =>
@@ -717,7 +728,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .describe("출처 좌표(커밋/PR/CI run) — source 는 서버가 결정"),
         },
       },
-      ({ dataset_id, dataset_version, harness_id, harness_version, harness_pins, judges, concurrency, cases, origin }) =>
+      ({
+        dataset_id,
+        dataset_version,
+        harness_id,
+        harness_version,
+        harness_pins,
+        judges,
+        concurrency,
+        cases,
+        origin,
+      }) =>
         run(principal, "scorecards:run", async () =>
           ok(
             await scorecards.submit({
@@ -976,6 +997,92 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
+  if (deps.viewService) {
+    const views = deps.viewService;
+    // 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명). scorecards:read/run 권한 재사용(새 authz 없음).
+    server.registerTool(
+      "create_view",
+      {
+        description:
+          "스코어카드 분석 View 저장 — 이름 붙인 분석 설정(config)을 워크스페이스에 저장. visibility=private(나만) | workspace(공유). config 는 웹 AnalysisConfig(불투명).",
+        inputSchema: {
+          name: z.string(),
+          config: z.unknown().describe("웹 AnalysisConfig(recipe). 라이브 재실행이라 스냅샷 아님."),
+          visibility: z.enum(["private", "workspace"]).optional().describe("기본 private"),
+        },
+      },
+      (a) =>
+        run(principal, "scorecards:run", async () =>
+          ok(
+            await views.create({
+              tenant: ws,
+              createdBy: principal.subject,
+              name: a.name,
+              config: a.config,
+              ...(a.visibility !== undefined ? { visibility: a.visibility } : {}),
+            }),
+          ),
+        ),
+    );
+
+    server.registerTool(
+      "list_views",
+      { description: "내가 볼 수 있는 분석 View 목록(워크스페이스 공유 + 내 비공개)", inputSchema: {} },
+      () => run(principal, "scorecards:read", async () => ok(await views.list(ws, principal.subject))),
+    );
+
+    server.registerTool(
+      "get_view",
+      {
+        description: "분석 View 1건 조회(남의 비공개/없으면 NOT_FOUND)",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) => run(principal, "scorecards:read", async () => ok(await views.get(ws, id, principal.subject))),
+    );
+
+    server.registerTool(
+      "update_view",
+      {
+        description: "분석 View 수정 — 이름/설정(config)/가시성 변경. 소유자 또는 워크스페이스 admin 만.",
+        inputSchema: {
+          id: z.string(),
+          name: z.string().optional(),
+          config: z.unknown().optional(),
+          visibility: z.enum(["private", "workspace"]).optional(),
+        },
+      },
+      (a) =>
+        run(principal, "scorecards:run", async () => {
+          const patch: UpdateViewInput = {};
+          if (a.name !== undefined) patch.name = a.name;
+          if (a.config !== undefined) patch.config = a.config;
+          if (a.visibility !== undefined) patch.visibility = a.visibility;
+          return ok(
+            await views.update(ws, a.id, patch, {
+              subject: principal.subject,
+              isAdmin: principal.roles.includes("admin"),
+            }),
+          );
+        }),
+    );
+
+    server.registerTool(
+      "delete_view",
+      {
+        description: "분석 View 삭제 — 소유자 또는 워크스페이스 admin 만(다른 워크스페이스는 NOT_FOUND)",
+        inputSchema: { id: z.string() },
+      },
+      ({ id }) =>
+        run(principal, "scorecards:run", async () => {
+          await views.remove(ws, id, {
+            subject: principal.subject,
+            isAdmin: principal.roles.includes("admin"),
+          });
+          return ok({ id, deleted: true });
+        }),
+    );
+  }
+
   if (deps.benchmarkService) {
     const benchmarks = deps.benchmarkService;
     server.registerTool(
@@ -1199,6 +1306,71 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
+  // 워크스페이스 소유 GitHub App 통합(개인 연결 대체) — 조직 설치→선택 repo→워크스페이스 소유 installation. settings:read/write.
+  if (deps.githubAppService) {
+    const gh = deps.githubAppService;
+    server.registerTool(
+      "list_workspace_github_app",
+      {
+        description:
+          "이 워크스페이스의 GitHub App 통합 — GHE App 등록 목록 + 워크스페이스 소유 installation(host/installationId/account) + App Setup URL 로 등록할 callbackUrl. 비밀 값 없음.",
+        inputSchema: {},
+      },
+      () =>
+        run(principal, "settings:read", async () => {
+          const view = await gh.list(ws);
+          const callbackUrl = gh.callbackUrl();
+          return ok({ ...view, ...(callbackUrl !== undefined ? { callbackUrl } : {}) });
+        }),
+    );
+    server.registerTool(
+      "start_workspace_github_app_install",
+      {
+        description:
+          "GitHub App 설치 시작(관리자) → GitHub 설치 페이지 URL 반환(관리자가 열어 repo 선택). host 미지정=github.com(env App), 지정=등록된 GHE App.",
+        inputSchema: { host: z.string().url().optional().describe("GHE 베이스 URL(미지정=github.com)") },
+      },
+      ({ host }) =>
+        run(principal, "settings:write", async () =>
+          ok(await gh.startInstall({ workspace: ws, createdBy: principal.subject, ...(host ? { host } : {}) })),
+        ),
+    );
+    server.registerTool(
+      "register_workspace_github_app",
+      {
+        description:
+          "GHE App 등록/갱신(관리자). host 기준 upsert. App 개인키(PEM)는 SecretStore 에 먼저 넣고 그 이름을 privateKeySecretName 으로 지정.",
+        inputSchema: {
+          host: z.string().url().describe("GHE 베이스 URL"),
+          slug: z.string().min(1).describe("App slug(설치 URL 에 사용)"),
+          appId: z.string().min(1).describe("GitHub App ID"),
+          privateKeySecretName: z.string().min(1).describe("App 개인키(PEM)가 저장된 SecretStore 키 이름"),
+        },
+      },
+      ({ host, slug, appId, privateKeySecretName }) =>
+        run(principal, "settings:write", async () =>
+          ok(await gh.registerGheApp(ws, { host, slug, appId, privateKeySecretName })),
+        ),
+    );
+    server.registerTool(
+      "remove_workspace_github_app_registration",
+      {
+        description: "GHE App 등록 해제(관리자). 기존 installation 레코드는 남지만 자격증명이 없어 토큰 발급 불가.",
+        inputSchema: { host: z.string().url().describe("GHE 베이스 URL") },
+      },
+      ({ host }) => run(principal, "settings:write", async () => ok(await gh.removeRegistration(ws, host))),
+    );
+    server.registerTool(
+      "unlink_workspace_github_app_installation",
+      {
+        description: "installation 링크 해제(관리자). 실제 uninstall 은 GitHub 쪽 — 여기선 레코드만 잊는다(멱등).",
+        inputSchema: { installationId: z.number().int().describe("GitHub installation id") },
+      },
+      ({ installationId }) =>
+        run(principal, "settings:write", async () => ok(await gh.unlinkInstallation(ws, installationId))),
+    );
+  }
+
   // CI repo links — repository↔하니스 슬롯 매핑(= GitHub Actions OIDC trust policy) + picker + setup-PR.
   if (deps.ciLinkService) {
     const ci = deps.ciLinkService;
@@ -1220,8 +1392,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .record(z.object({ path: z.string().optional() }))
             .optional()
             .describe("서비스 슬롯 → 모노레포 path(선택) — 이 레포 CI 가 갈아끼우는 슬롯들"),
-          runsOn: z.string().optional().describe('셀프호스티드 배치(선택) — 워크플로 runs-on(예: "[self-hosted, assay-<id>]")'),
-          runtime: z.string().optional().describe('run-eval runtime 입력(선택, 예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서'),
+          runsOn: z
+            .string()
+            .optional()
+            .describe('셀프호스티드 배치(선택) — 워크플로 runs-on(예: "[self-hosted, assay-<id>]")'),
+          runtime: z
+            .string()
+            .optional()
+            .describe('run-eval runtime 입력(선택, 예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서'),
         },
       },
       ({ repository, harness, dataset, slots, runsOn, runtime }) =>
@@ -1320,12 +1498,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         },
       },
       ({ resource_type, resource_id }) =>
-        run(principal, "comments:read", async () => ok({ comments: await comments.list(ws, resource_type, resource_id) })),
+        run(principal, "comments:read", async () =>
+          ok({ comments: await comments.list(ws, resource_type, resource_id) }),
+        ),
     );
     server.registerTool(
       "create_comment",
       {
-        description: "리소스에 댓글 작성. 작성자 = 나(subject). parent_id 로 대댓글, mentions 로 멤버 subject 를 @언급하면 알림이 간다.",
+        description:
+          "리소스에 댓글 작성. 작성자 = 나(subject). parent_id 로 대댓글, mentions 로 멤버 subject 를 @언급하면 알림이 간다.",
         inputSchema: {
           resource_type: z.enum(COMMENT_RESOURCE_TYPES),
           resource_id: z.string(),
@@ -1357,7 +1538,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ id }) =>
         plain(async () => {
-          await comments.delete({ tenant: ws, id, subject: principal.subject, isAdmin: principal.roles.includes("admin") });
+          await comments.delete({
+            tenant: ws,
+            id,
+            subject: principal.subject,
+            isAdmin: principal.roles.includes("admin"),
+          });
           return ok({ id, deleted: true });
         }),
     );
@@ -1380,7 +1566,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           capabilities: z
             .array(z.enum(RUNNER_CAPABILITIES))
             .optional()
-            .describe("이 머신이 돌릴 수 있는 환경(repo|browser|os-use|docker)"),
+            .describe("이 머신이 돌릴 수 있는 것(git|docker|browser|computer-use|sandbox|codex-login|claude-login)"),
         },
       },
       ({ label, os, capabilities }) =>
@@ -1441,7 +1627,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "list_workspace_owned_runners",
       {
-        description: "이 워크스페이스가 소유한 공유 러너만(owner=ws:<workspace>) — 로스터와 달리 개인 러너 제외. admin 전용.",
+        description:
+          "이 워크스페이스가 소유한 공유 러너만(owner=ws:<workspace>) — 로스터와 달리 개인 러너 제외. admin 전용.",
         inputSchema: {},
       },
       () => run(principal, "settings:write", async () => ok({ runners: await runners.listWorkspaceOwned(ws) })),
@@ -1471,7 +1658,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             connectionId: z.string().describe("내 GitHub 연결 id(list_connections)"),
             repository: z.string().optional().describe('repo 레벨 대상 "owner/name"'),
             org: z.string().optional().describe("org 레벨 대상(그 org 의 모든 레포 공유) — admin:org 상향 연결 필요"),
-            runnerGroup: z.string().optional().describe("org 러너 그룹(org 레벨 전용, 선택) — 그 그룹의 접근 정책 적용"),
+            runnerGroup: z
+              .string()
+              .optional()
+              .describe("org 러너 그룹(org 레벨 전용, 선택) — 그 그룹의 접근 정책 적용"),
             label: z.string().max(80).optional().describe("Assay 러너 표시 이름(기본: repo/org 이름)"),
             githubLabels: z.array(z.string()).optional().describe("GH 러너 추가 라벨"),
             capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
@@ -1581,34 +1771,35 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   if (deps.keyStore) {
     const keys = deps.keyStore;
+    // 개인 API 키 — self-scoped(역할 게이트 없음). 각 유저가 본인(subject) 키만 보고/발급/취소. 키는 발급자 권한으로 동작.
     server.registerTool(
       "list_api_keys",
-      { description: "이 워크스페이스의 API 키 목록(메타만 — 평문/해시 없음, prefix 로 식별)", inputSchema: {} },
-      () => run(principal, "keys:read", async () => ok(await keys.list(ws))),
+      { description: "내 API 키 목록(메타만 — 평문/해시 없음, prefix 로 식별)", inputSchema: {} },
+      () => plain(async () => ok(await keys.list(ws, principal.subject))),
     );
     server.registerTool(
       "create_api_key",
       {
         description:
-          "새 API 키 발급. scopes 로 권한을 좁힐 수 있다(read|write|admin, 누적). 미지정이면 Full Access(admin). 평문(ak_…)은 응답에 한 번만 노출되고 다시 못 본다.",
+          "새 개인 API 키 발급 — 발급자(나)의 권한으로 동작한다. scopes 로 더 좁힐 수 있다(read|write|admin, 역할을 넘지 못함). 미지정이면 내 역할 그대로. 평문(ak_…)은 응답에 한 번만 노출되고 다시 못 본다.",
         inputSchema: {
           label: z.string().max(80).optional().describe("식별용 레이블(선택)"),
           scopes: z
             .array(z.enum(API_KEY_SCOPES))
             .nonempty()
             .optional()
-            .describe("권한 범위(read|write|admin). 미지정=Full Access(admin)"),
+            .describe("권한 범위(read|write|admin). 미지정=내 역할 그대로"),
         },
       },
       ({ label, scopes }) =>
-        run(principal, "keys:write", async () => ok({ apiKey: await issueKey(keys, ws, label, scopes ?? ["admin"]) })),
+        plain(async () => ok({ apiKey: await issueKey(keys, ws, label, scopes ?? ["admin"], principal.subject) })),
     );
     server.registerTool(
       "revoke_api_key",
-      { description: "API 키 취소(즉시 무효). id 는 list_api_keys 의 id.", inputSchema: { id: z.string() } },
+      { description: "내 API 키 취소(즉시 무효). id 는 list_api_keys 의 id.", inputSchema: { id: z.string() } },
       ({ id }) =>
-        run(principal, "keys:write", async () => {
-          await keys.revoke(ws, id); // tenant 스코프 — 다른 워크스페이스 id 는 no-op
+        plain(async () => {
+          await keys.revoke(ws, id, principal.subject); // 내 키만 — 남의 키/머신 키는 no-op
           return ok({ workspace: ws, id, revoked: true });
         }),
     );

@@ -19,9 +19,10 @@ import {
 } from "@assay/backends";
 import type { RuntimeSpec } from "@assay/core";
 import {
+  type CommentStore,
   type ConnectionStore,
-  InMemoryConnectionStore,
   InMemoryCommentStore,
+  InMemoryConnectionStore,
   InMemoryNotificationStore,
   InMemoryOAuthStateStore,
   InMemoryRunStore,
@@ -31,14 +32,14 @@ import {
   InMemorySecretStore,
   InMemoryTenantKeyStore,
   InMemoryUserProfileStore,
+  InMemoryViewStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
-  type CommentStore,
   type NotificationStore,
   type OAuthStateStore,
-  PgConnectionStore,
   PgCommentStore,
+  PgConnectionStore,
   PgNotificationStore,
   PgOAuthStateStore,
   PgRunStore,
@@ -48,6 +49,7 @@ import {
   PgSecretStore,
   PgTenantKeyStore,
   PgUserProfileStore,
+  PgViewStore,
   PgWorkspaceInviteStore,
   PgWorkspaceSettingsStore,
   PgWorkspaceStore,
@@ -59,6 +61,7 @@ import {
   type SecretStore,
   type TenantKeyStore,
   type UserProfileStore,
+  type ViewStore,
   type WorkspaceInviteStore,
   type WorkspaceSettingsStore,
   type WorkspaceStore,
@@ -100,28 +103,30 @@ import { buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
 import { CiLinkService } from "./ci-link-service.js";
+import { CommentService } from "./comment-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
+import { GithubAppService, type GithubComAppConfig } from "./github-app-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MembershipService } from "./membership-service.js";
 import { ModelResolvingDispatcher } from "./model-resolving-dispatcher.js";
 import { NotificationService } from "./notification-service.js";
-import { CommentService } from "./comment-service.js";
 import { githubProvider } from "./oauth/github.js";
 import { mattermostProvider } from "./oauth/mattermost.js";
 import { ProfileService } from "./profile-service.js";
+import { QueueService } from "./queue-service.js";
 import { RunService } from "./run-service.js";
 import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
-import { QueueService } from "./queue-service.js";
 import { ScheduleService } from "./schedule-service.js";
-import { recoverInterrupted } from "./startup-recovery.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
+import { recoverInterrupted } from "./startup-recovery.js";
 import { TemporalScheduleDriver } from "./temporal-schedule-driver.js";
 import { buildTopologyBackend } from "./topology-backend.js";
+import { ViewService } from "./view-service.js";
 import { WorkspaceService } from "./workspace-service.js";
 
 // 멀티테넌트 컨트롤플레인 서버. tenant 는 Bearer API 키에서 파생(없으면 dev 헤더 폴백).
@@ -154,6 +159,7 @@ async function main(): Promise<void> {
     scheduleStore,
     notificationStore,
     commentStore,
+    viewStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
   // scheduleService 는 아래에서 생성되지만(scorecardService 의존), 멤버 제거 훅은 클로저로 늦바인딩한다
@@ -361,6 +367,25 @@ async function main(): Promise<void> {
     },
   });
 
+  // 워크스페이스 소유 GitHub App 통합 — 조직 설치→선택 repo→워크스페이스 소유 installation(개인 연결 대체).
+  // github.com App = operator env(GITHUB_APP_*); GHE App = 관리자가 워크스페이스에 등록(개인키=SecretStore name-ref).
+  const githubComApp = githubComAppConfig();
+  const githubAppService = new GithubAppService({
+    states: oauthStateStore,
+    settings: settingsStore,
+    secretsFor: runtimeSecretsFor,
+    config: {
+      webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
+      ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+      ...(githubComApp ? { githubCom: githubComApp } : {}),
+    },
+  });
+  if (githubComApp) console.error("▶ github-app: github.com App 활성(GITHUB_APP_ID/SLUG) — 조직 설치→선택 repo 원클릭");
+  else
+    console.warn(
+      "▶ github-app: GITHUB_APP_* 미설정 — github.com App 설치 비활성(GHE 는 관리자가 워크스페이스에 등록 시 가능).",
+    );
+
   // CI repo link — 레포↔하니스 슬롯 매핑(= GitHub Actions OIDC trust) CRUD + 레포 picker + setup-PR 생성기.
   // picker/setup-PR 은 멤버 개인 GitHub 연결 토큰(tokenFor)을 서버 안에서만 사용한다.
   const ciLinkService = new CiLinkService({
@@ -394,11 +419,15 @@ async function main(): Promise<void> {
     caseCountFor: async (tenant, id, version) => (await datasetRegistry.get(tenant, id, version)).cases.length,
   });
 
+  // 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명 config)을 워크스페이스에 저장/공유. 라이브 재실행이라 스냅샷 없음.
+  const viewService = new ViewService({ store: viewStore });
+
   const app = buildServer({
     service,
     scorecardService,
     scheduleService,
     queueService,
+    viewService,
     benchmarkService,
     bundleService,
     harnessTemplates: harnessTemplateRegistry,
@@ -415,6 +444,7 @@ async function main(): Promise<void> {
     profileService,
     secretStore,
     connectionService,
+    githubAppService,
     ciLinkService,
     runnerService,
     notificationService, // 알림 피드(벨 인박스) 라우트 — self-scoped
@@ -459,6 +489,7 @@ interface Persistence {
   scheduleStore: ScheduleStore; // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식(SSOT, mutable)
   notificationStore: NotificationStore; // 개인 알림 피드(벨 인박스) — run/scorecard 완료를 recipient=subject 로 적재
   commentStore: CommentStore; // 리소스 댓글(데이터셋 등) — 협업 논의
+  viewStore: ViewStore; // 저장된 스코어카드 분석 View(이름 붙인 AnalysisConfig, 비공개|공유) — 라이브 재실행
 }
 
 // at-rest 암호화 KEK: ASSAY_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
@@ -504,6 +535,7 @@ async function makePersistence(): Promise<Persistence> {
       scheduleStore: new InMemoryScheduleStore(),
       notificationStore: new InMemoryNotificationStore(),
       commentStore: new InMemoryCommentStore(),
+      viewStore: new InMemoryViewStore(),
     };
   }
   const client = sqlClient(makePool(url));
@@ -532,6 +564,7 @@ async function makePersistence(): Promise<Persistence> {
     scheduleStore: new PgScheduleStore(client),
     notificationStore: new PgNotificationStore(client),
     commentStore: new PgCommentStore(client),
+    viewStore: new PgViewStore(client),
   };
 }
 
@@ -577,6 +610,17 @@ async function seedSharedModels(registry: ModelRegistry): Promise<void> {
 //  - github-enterprise: 같은 github impl + self-hosted(연결 시 host + clientId + clientSecretName 입력).
 //  - mattermost: self-hosted 전용.
 // self-hosted 의 client_secret 값은 워크스페이스 SecretStore 에서 NAME 으로 resolve(값은 spec/state 에 저장 안 함).
+// github.com operator App 자격증명(env) — 셋 다 있어야 활성. 개인키(PEM)는 env-file 단일행 안전성 위해
+// base64(PEM) 권장; "BEGIN" 포함이면 raw PEM(\n 이스케이프 복원)도 허용. 미설정이면 github.com App 설치 비활성.
+function githubComAppConfig(): GithubComAppConfig | undefined {
+  const appId = process.env.GITHUB_APP_ID;
+  const key = process.env.GITHUB_APP_PRIVATE_KEY;
+  const slug = process.env.GITHUB_APP_SLUG;
+  if (!appId || !key || !slug) return undefined;
+  const privateKeyPem = key.includes("BEGIN") ? key.replace(/\\n/g, "\n") : Buffer.from(key, "base64").toString("utf8");
+  return { appId, slug, privateKeyPem };
+}
+
 function buildOAuthProviders(): Map<string, ProviderEntry> {
   const github = githubProvider();
   const ghId = process.env.GITHUB_OAUTH_CLIENT_ID;

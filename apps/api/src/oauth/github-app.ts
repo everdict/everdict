@@ -65,3 +65,26 @@ export async function mintInstallationToken(input: {
   const parsed = InstallationTokenResponse.parse(body);
   return { token: parsed.token, expiresAt: parsed.expires_at };
 }
+
+// installation 메타 — 설치된 org/user login 만 필요(콜백에서 account 확정에 사용).
+const InstallationInfo = z.object({ account: z.object({ login: z.string() }) });
+
+// installation 조회 — App JWT 로 GET /app/installations/{id}. 설치 콜백은 installation_id 만 주므로
+// 저장할 account(org login) 를 여기서 확정한다. host 유무로 github.com↔GHE.
+export async function getInstallation(input: {
+  host?: string;
+  appId: string;
+  privateKeyPem: string;
+  installationId: number;
+  nowSec: number;
+}): Promise<{ account: string }> {
+  const jwt = githubAppJwt({ appId: input.appId, privateKeyPem: input.privateKeyPem, nowSec: input.nowSec });
+  const body = await oauthFetchJson(`${apiBase(input.host)}/app/installations/${input.installationId}`, {
+    headers: {
+      authorization: `Bearer ${jwt}`,
+      accept: "application/vnd.github+json",
+      "user-agent": "assay",
+    },
+  });
+  return { account: InstallationInfo.parse(body).account.login };
+}

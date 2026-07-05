@@ -1,0 +1,130 @@
+import { generateKeyPairSync } from "node:crypto";
+import { BadRequestError } from "@assay/core";
+import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@assay/db";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { GithubAppService } from "./github-app-service.js";
+
+const { privateKey } = generateKeyPairSync("rsa", {
+  modulusLength: 2048,
+  publicKeyEncoding: { type: "spki", format: "pem" },
+  privateKeyEncoding: { type: "pkcs8", format: "pem" },
+});
+
+const NOW = new Date("2026-07-05T00:00:00Z");
+
+afterEach(() => vi.unstubAllGlobals());
+
+// GET /app/installations/{id} 응답만 스텁(설치 account 확정).
+function stubInstallation(login: string): void {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () => new Response(JSON.stringify({ id: 1, account: { login } }), { status: 200 })),
+  );
+}
+
+describe("GithubAppService", () => {
+  let states: InMemoryOAuthStateStore;
+  let settings: InMemoryWorkspaceSettingsStore;
+  let secrets: Record<string, Record<string, string>>;
+  let svc: GithubAppService;
+
+  beforeEach(() => {
+    states = new InMemoryOAuthStateStore(() => NOW.toISOString());
+    settings = new InMemoryWorkspaceSettingsStore();
+    secrets = {};
+    svc = new GithubAppService({
+      states,
+      settings,
+      secretsFor: async (ws) => secrets[ws] ?? {},
+      config: {
+        webBaseUrl: "http://web.test",
+        apiPublicUrl: "http://api.test",
+        githubCom: { appId: "111", privateKeyPem: privateKey, slug: "assay-eval" },
+      },
+      now: () => NOW,
+    });
+  });
+
+  it("github.com 설치 시작은 /apps/{slug}/installations/new URL + state 를 만든다", async () => {
+    const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u-admin" });
+    const u = new URL(installUrl);
+    expect(u.origin + u.pathname).toBe("https://github.com/apps/assay-eval/installations/new");
+    expect(u.searchParams.get("state")).toBeTruthy();
+  });
+
+  it("등록 안 된 GHE host 로 설치 시작하면 BadRequestError", async () => {
+    await expect(
+      svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io" }),
+    ).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("GHE App 등록 후 설치 시작은 {host}/github-apps/{slug}/installations/new URL", async () => {
+    await svc.registerGheApp("acme", {
+      host: "https://ghe.acme.io",
+      slug: "assay-ghe",
+      appId: "222",
+      privateKeySecretName: "ghe-app-key",
+    });
+    const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io" });
+    expect(new URL(installUrl).origin + new URL(installUrl).pathname).toBe(
+      "https://ghe.acme.io/github-apps/assay-ghe/installations/new",
+    );
+  });
+
+  it("콜백은 installation_id+state → account 확정 후 워크스페이스에 설치를 기록한다", async () => {
+    stubInstallation("acme-org");
+    const future = new Date(NOW.getTime() + 60_000).toISOString();
+    await states.put("st-1", { workspace: "acme", provider: "github-app", createdBy: "u-admin" }, future);
+
+    const { redirectTo } = await svc.callback({ installationId: 42, state: "st-1" });
+    expect(redirectTo).toContain("/acme/settings?tab=integrations");
+    expect(redirectTo).toContain("githubApp=installed");
+
+    const view = await svc.list("acme");
+    expect(view.installations).toEqual([
+      { installationId: 42, account: "acme-org", connectedBy: "u-admin", connectedAt: NOW.toISOString() },
+    ]);
+  });
+
+  it("잘못된/만료 state 콜백은 에러 리다이렉트(설치 기록 안 함)", async () => {
+    const { redirectTo } = await svc.callback({ installationId: 42, state: "nope" });
+    expect(redirectTo).toContain("error=invalid_state");
+    expect((await svc.list("acme")).installations).toEqual([]);
+  });
+
+  it("GHE 콜백은 SecretStore 의 App 개인키로 account 를 확정한다", async () => {
+    stubInstallation("ghe-team");
+    secrets.acme = { "ghe-app-key": privateKey };
+    await svc.registerGheApp("acme", {
+      host: "https://ghe.acme.io",
+      slug: "assay-ghe",
+      appId: "222",
+      privateKeySecretName: "ghe-app-key",
+    });
+    const future = new Date(NOW.getTime() + 60_000).toISOString();
+    await states.put(
+      "st-ghe",
+      { workspace: "acme", provider: "github-app", createdBy: "u", host: "https://ghe.acme.io" },
+      future,
+    );
+
+    await svc.callback({ installationId: 7, state: "st-ghe" });
+    const view = await svc.list("acme");
+    expect(view.installations[0]).toMatchObject({
+      installationId: 7,
+      account: "ghe-team",
+      host: "https://ghe.acme.io",
+    });
+  });
+
+  it("installation 링크 해제는 멱등하게 레코드를 지운다", async () => {
+    stubInstallation("acme-org");
+    const future = new Date(NOW.getTime() + 60_000).toISOString();
+    await states.put("st-2", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
+    await svc.callback({ installationId: 42, state: "st-2" });
+
+    const after = await svc.unlinkInstallation("acme", 42);
+    expect(after.installations).toEqual([]);
+    expect((await svc.unlinkInstallation("acme", 42)).installations).toEqual([]); // 멱등
+  });
+});

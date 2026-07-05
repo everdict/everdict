@@ -46,19 +46,20 @@ import { z } from "zod";
 import { BenchmarkImportBodySchema, BenchmarkPreviewBodySchema, type BenchmarkService } from "./benchmark-service.js";
 import { BundleSchema, type BundleService, requiredActionsForBundle } from "./bundle-service.js";
 import { type CiLinkService, UpsertCiLinkBodySchema } from "./ci-link-service.js";
+import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
 import type { ConnectionService } from "./connection-service.js";
 import { deleteDatasetVersion } from "./dataset-service.js";
-import { deleteHarnessVersion } from "./harness-service.js";
+import type { GithubAppService } from "./github-app-service.js";
+import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
+import { deleteHarnessVersion } from "./harness-service.js";
 import { buildMcpServer } from "./mcp.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
-import { COMMENT_RESOURCE_TYPES, type CommentService } from "./comment-service.js";
 import type { ProfileService } from "./profile-service.js";
 import type { QueueService } from "./queue-service.js";
 import type { RunService } from "./run-service.js";
 import type { RunnerHub } from "./runner-hub.js";
-import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { PairRunnerBodySchema, RUNNER_CAPABILITIES, type RunnerService } from "./runner-service.js";
 import type { RuntimeProbeResult } from "./runtime-probe.js";
 import { type ScheduleService, isValidCron } from "./schedule-service.js";
@@ -68,6 +69,7 @@ import {
   type ScorecardService,
   originSource,
 } from "./scorecard-service.js";
+import type { ViewService } from "./view-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
 // 알림 읽음 처리 요청 — ids 또는 all:true 중 하나(비면 no-op → read:0).
@@ -156,6 +158,19 @@ export const UpdateScheduleBodySchema = z.object({
   runTemplate: ScheduleRunTemplateBodySchema.optional(),
 });
 
+// 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명 config: 웹이 형태 검증) + 가시성(비공개|공유).
+const ViewVisibilityBody = z.enum(["private", "workspace"]);
+export const CreateViewBodySchema = z.object({
+  name: z.string().min(1),
+  config: z.unknown(), // 웹 AnalysisConfig(recipe). 컨트롤플레인은 형태를 강제하지 않는다.
+  visibility: ViewVisibilityBody.default("private"),
+});
+export const UpdateViewBodySchema = z.object({
+  name: z.string().min(1).optional(),
+  config: z.unknown().optional(),
+  visibility: ViewVisibilityBody.optional(),
+});
+
 // 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
@@ -172,6 +187,7 @@ export interface ServerDeps {
   scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
   scheduleService?: ScheduleService; // 예약(cron) 스코어카드 CRUD (없으면 해당 라우트 비활성)
   queueService?: QueueService; // 작업 큐 스냅샷(런타임 레인별 실행 중/대기/다음 예약) (없으면 라우트 비활성)
+  viewService?: ViewService; // 저장된 스코어카드 분석 View CRUD (없으면 해당 라우트 비활성)
   benchmarkService?: BenchmarkService; // 벤치마크 카탈로그 + 인입 (없으면 해당 라우트 비활성)
   bundleService?: BundleService; // 번들 적용(하니스+벤치마크+런타임 원샷 등록; 없으면 라우트 비활성)
   harnessTemplates?: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조) CRUD
@@ -185,6 +201,7 @@ export interface ServerDeps {
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
   secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
   connectionService?: ConnectionService; // 외부 계정 연결(Connected accounts) — 아웃바운드 OAuth (없으면 해당 라우트 비활성)
+  githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo) (없으면 해당 라우트 비활성)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — self-scoped (없으면 해당 라우트 비활성)
@@ -1542,6 +1559,113 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명). 읽기=공유+내 비공개, 수정·삭제=소유자·admin. ---
+  // 스코어카드 읽기/실행 권한을 재사용(새 authz 액션 없음): 읽기 scorecards:read, 쓰기 scorecards:run.
+  app.post("/views", async (req, reply) => {
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof CreateViewBodySchema>;
+    try {
+      body = CreateViewBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      return reply.code(201).send(
+        await deps.viewService.create({
+          tenant: principal.workspace,
+          createdBy: principal.subject,
+          name: body.name,
+          config: body.config,
+          visibility: body.visibility,
+        }),
+      );
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get("/views", async (req, reply) => {
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    return reply.send(await deps.viewService.list(principal.workspace, principal.subject));
+  });
+
+  app.get<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:read");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    try {
+      return reply.send(await deps.viewService.get(principal.workspace, req.params.id, principal.subject)); // 비공개 남의 것/없으면 404
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.patch<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    let body: z.infer<typeof UpdateViewBodySchema>;
+    try {
+      body = UpdateViewBodySchema.parse(req.body);
+    } catch (err) {
+      return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
+    }
+    try {
+      return reply.send(
+        await deps.viewService.update(principal.workspace, req.params.id, body, {
+          subject: principal.subject,
+          isAdmin: principal.roles.includes("admin"),
+        }),
+      ); // 없으면 404(수정은 생성자·admin 만 → 403)
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "scorecards:run");
+    } catch (err) {
+      return sendError(reply, err);
+    }
+    try {
+      await deps.viewService.remove(principal.workspace, req.params.id, {
+        subject: principal.subject,
+        isAdmin: principal.roles.includes("admin"),
+      }); // 없으면 404(삭제는 생성자·admin 만 → 403)
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // 트레이스 인제스트 — 외부에서 이미 수행한 트레이스(TraceEvent[])를 올려 scorecard 로(하니스 미실행). 경계에서 검증.
   app.post("/scorecards/ingest", async (req, reply) => {
     if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
@@ -2169,6 +2293,104 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- 워크스페이스 소유 GitHub App 통합(개인 연결 대체) — 조직 설치→선택 repo→워크스페이스 소유 installation ---
+  // 읽기 settings:read / 설치·등록·해제 settings:write. 콜백은 GitHub 이 부르는 공개 라우트(인증 없음, state 로 검증).
+  app.get("/workspace/github-app", async (req, reply) => {
+    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:read");
+      const view = await deps.githubAppService.list(principal.workspace);
+      const callbackUrl = deps.githubAppService.callbackUrl(baseUrl(req)); // App Setup URL 로 등록할 값(표시용)
+      return reply.send({ ...view, ...(callbackUrl !== undefined ? { callbackUrl } : {}) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.post("/workspace/github-app/install/start", async (req, reply) => {
+    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z.object({ host: z.string().url().optional() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      const out = await deps.githubAppService.startInstall({
+        workspace: principal.workspace,
+        createdBy: principal.subject,
+        ...(body.data.host !== undefined ? { host: body.data.host } : {}),
+      });
+      return reply.send(out);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // 공개 콜백 — GitHub App 설치 후 Setup URL 로 리다이렉트(installation_id + setup_action + state).
+  app.get("/workspace/github-app/callback", async (req, reply) => {
+    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    const q = z
+      .object({ installation_id: z.coerce.number().int().optional(), state: z.string().optional() })
+      .parse(req.query ?? {});
+    const { redirectTo } = await deps.githubAppService.callback({
+      ...(q.installation_id !== undefined ? { installationId: q.installation_id } : {}),
+      ...(q.state !== undefined ? { state: q.state } : {}),
+    });
+    return reply.redirect(redirectTo);
+  });
+
+  app.post("/workspace/github-app/registrations", async (req, reply) => {
+    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        host: z.string().url(),
+        slug: z.string().min(1),
+        appId: z.string().min(1),
+        privateKeySecretName: z.string().min(1),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(await deps.githubAppService.registerGheApp(principal.workspace, body.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete("/workspace/github-app/registrations", async (req, reply) => {
+    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const q = z.object({ host: z.string().url() }).safeParse(req.query ?? {});
+    if (!q.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(q.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(await deps.githubAppService.removeRegistration(principal.workspace, q.data.host));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete<{ Params: { id: string } }>("/workspace/github-app/installations/:id", async (req, reply) => {
+    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const id = z.coerce.number().int().safeParse(req.params.id);
+    if (!id.success)
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "installation id 가 숫자가 아닙니다" });
+    try {
+      gate(principal, "settings:write");
+      return reply.send(await deps.githubAppService.unlinkInstallation(principal.workspace, id.data));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- CI repo links (repository ↔ 하니스 슬롯 매핑 = GitHub Actions OIDC trust policy) ---
   // 읽기는 harnesses:read(하니스 상세에 노출되는 양성 메타), 생성/삭제는 settings:write(link=신뢰 부여 — admin).
   app.get("/workspace/ci/links", async (req, reply) => {
@@ -2390,14 +2612,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     },
   );
 
-  // --- API 키 self-serve (admin 전용; 발급된 키는 이 워크스페이스 admin 권한을 가진다) ---
+  // --- 개인 API 키 self-serve (역할 게이트 없음 — 개인 소유. 키는 발급자의 신원·권한으로 동작한다) ---
+  // 연결(connections)·개인 시크릿과 같은 self-scoped: 각 유저가 본인(subject) 키만 보고/발급/취소한다.
   app.get("/keys", async (req, reply) => {
     if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "keys:read");
-      return reply.send(await deps.keyStore.list(principal.workspace)); // 메타만(평문/해시 없음)
+      return reply.send(await deps.keyStore.list(principal.workspace, principal.subject)); // 내 키 메타만(평문/해시 없음)
     } catch (err) {
       return sendError(reply, err);
     }
@@ -2412,10 +2634,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
-      gate(principal, "keys:write");
-      // scope 미지정이면 Full Access(admin) — 기존 동작과 동일. 지정하면 그 범위로 키를 좁힌다.
+      // scope 미지정=발급자 역할 그대로(Full Access within role). 지정하면 그 범위로 더 좁힌다(역할을 넘지 못함).
       const scopes = body.data.scopes ?? ["admin"];
-      const apiKey = await issueKey(deps.keyStore, principal.workspace, body.data.label, scopes);
+      // owner=발급자 subject → 이 키는 발급자 권한으로 동작(멤버 키=멤버 권한).
+      const apiKey = await issueKey(deps.keyStore, principal.workspace, body.data.label, scopes, principal.subject);
       return reply.code(201).send({ apiKey }); // 평문은 여기서 한 번만
     } catch (err) {
       return sendError(reply, err);
@@ -2427,9 +2649,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "keys:write");
-      // tenant 스코프 취소 — 다른 워크스페이스의 id 는 no-op(존재 누출 없음). 항상 204.
-      await deps.keyStore.revoke(principal.workspace, req.params.id);
+      // 내(subject) 키만 취소 — 남의 키/머신 키(owner="")는 no-op(항상 204, 존재 누출 없음).
+      await deps.keyStore.revoke(principal.workspace, req.params.id, principal.subject);
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
@@ -2471,6 +2692,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           scorecardService: deps.scorecardService,
           scheduleService: deps.scheduleService,
           queueService: deps.queueService,
+          viewService: deps.viewService,
           harnessTemplates: deps.harnessTemplates,
           harnessInstances: deps.harnessInstances,
           datasetRegistry: deps.datasetRegistry,
@@ -2480,6 +2702,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           probeRuntime: deps.probeRuntime,
           secretStore: deps.secretStore,
           connectionService: deps.connectionService,
+          githubAppService: deps.githubAppService,
           ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,
           notificationService: deps.notificationService,

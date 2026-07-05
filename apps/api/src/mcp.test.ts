@@ -28,6 +28,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
 import { BundleService } from "./bundle-service.js";
 import { ConnectionService, type ProviderEntry } from "./connection-service.js";
+import { GithubAppService } from "./github-app-service.js";
 import { buildMcpServer } from "./mcp.js";
 import { MembershipService } from "./membership-service.js";
 import type { OAuthProvider } from "./oauth/provider.js";
@@ -64,6 +65,7 @@ const HARNESS_INSTANCE = JSON.stringify({
   template: { id: "bu", version: "1" },
   id: "bu",
   version: "1.0.0",
+  description: "승인 프롬프트 자동 통과 플래그 추가",
   pins: { "agent-server": "img" },
 });
 
@@ -109,6 +111,16 @@ function harness() {
       secretsFor: async () => ({ GHE_SECRET: "ghs_real" }),
       settings: new InMemoryWorkspaceSettingsStore(),
       config: { webBaseUrl: "http://web.test", apiPublicUrl: "http://api.test" },
+    }),
+    githubAppService: new GithubAppService({
+      states: new InMemoryOAuthStateStore(),
+      settings: new InMemoryWorkspaceSettingsStore(),
+      secretsFor: async () => ({}),
+      config: {
+        webBaseUrl: "http://web.test",
+        apiPublicUrl: "http://api.test",
+        githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST-----", slug: "assay-eval" },
+      },
     }),
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     harnessTemplates,
@@ -226,6 +238,7 @@ describe("MCP tools", () => {
       "list_schedules",
       "list_scorecards",
       "list_workspace_applications",
+      "list_workspace_github_app",
       "list_workspace_integrations",
       "list_workspace_owned_runners",
       "list_workspace_runners",
@@ -236,7 +249,9 @@ describe("MCP tools", () => {
       "pull_scorecard",
       "register_harness",
       "register_harness_template",
+      "register_workspace_github_app",
       "remove_member",
+      "remove_workspace_github_app_registration",
       "remove_workspace_integration",
       "revoke_api_key",
       "revoke_invite",
@@ -245,8 +260,10 @@ describe("MCP tools", () => {
       "run_scorecard",
       "set_member_role",
       "set_workspace_integration",
+      "start_workspace_github_app_install",
       "submit_job_result",
       "submit_run",
+      "unlink_workspace_github_app_installation",
       "update_schedule",
       "validate_dataset",
       "validate_judge",
@@ -286,6 +303,7 @@ describe("MCP tools", () => {
       template: { id: "bu", version: "1" },
       id: "bu",
       version: "1.0.0",
+      description: "승인 프롬프트 자동 통과 플래그 추가", // 등록 시 넣은 변경 내역이 raw 인스턴스에 보존
       pins: { "agent-server": "img" },
     });
 
@@ -369,6 +387,28 @@ describe("MCP tools", () => {
     await admin.callTool({ name: "remove_workspace_integration", arguments: { provider: "github-enterprise" } });
     const after = JSON.parse(text(await admin.callTool({ name: "list_workspace_integrations", arguments: {} })));
     expect(after.providers.find((p: { id: string }) => p.id === "github-enterprise").configured).toBe(false);
+  });
+
+  it("workspace github app: admin 은 설치 시작·GHE 등록·목록이 되고, member 는 settings:write 없어 불가", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"]);
+    const member = await connect(deps, ["member"]);
+
+    // member 는 settings:write 없음 → 설치 시작 불가.
+    expect((await member.callTool({ name: "start_workspace_github_app_install", arguments: {} })).isError).toBe(true);
+
+    // admin 설치 시작 → github.com App 설치 페이지 URL.
+    const start = JSON.parse(text(await admin.callTool({ name: "start_workspace_github_app_install", arguments: {} })));
+    expect(start.installUrl).toContain("https://github.com/apps/assay-eval/installations/new");
+
+    // admin GHE App 등록 → 목록에 1건 + App Setup URL 로 등록할 callbackUrl.
+    await admin.callTool({
+      name: "register_workspace_github_app",
+      arguments: { host: "https://ghe.acme.io", slug: "assay-ghe", appId: "222", privateKeySecretName: "ghe-key" },
+    });
+    const view = JSON.parse(text(await admin.callTool({ name: "list_workspace_github_app", arguments: {} })));
+    expect(view.registrations).toHaveLength(1);
+    expect(view.callbackUrl).toBe("http://api.test/workspace/github-app/callback");
   });
 
   it("runners: 개인 소유 — pair/list/revoke 는 역할 게이트 없이 본인 러너, 로스터는 members:read, 토큰 한 번만", async () => {
@@ -499,9 +539,7 @@ describe("MCP tools", () => {
     );
     const runner = await connectRunner(deps, "laptop");
     // 러너가 docker 없이(git 만) lease → 가져갈 잡 없음(게이트) + 그 잡은 명확히 거부된다.
-    const leased = JSON.parse(
-      text(await runner.callTool({ name: "lease_job", arguments: { capabilities: ["git"] } })),
-    );
+    const leased = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: { capabilities: ["git"] } })));
     expect(leased.job).toBeNull();
     const r = await settled;
     expect(r).toMatchObject({ ok: false, e: { code: "UPSTREAM_ERROR", extra: { reason: "capability_mismatch" } } });
@@ -998,7 +1036,7 @@ describe("MCP tools", () => {
     );
   });
 
-  it("api keys: admin 발급(평문 1회)/목록(prefix 만)/취소; member 는 권한오류", async () => {
+  it("api keys: 본인 키 셀프 발급(평문 1회)/목록(prefix 만)/취소 — member 도 self-serve", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"], "acme");
     const created = await admin.callTool({ name: "create_api_key", arguments: { label: "ci" } });
@@ -1018,9 +1056,10 @@ describe("MCP tools", () => {
     await admin.callTool({ name: "revoke_api_key", arguments: { id } });
     expect(JSON.parse(text(await admin.callTool({ name: "list_api_keys", arguments: {} })))).toEqual([]); // 취소됨
 
+    // member 도 본인 키를 셀프 발급/조회할 수 있다(역할 게이트 없음 — 키는 발급자 권한으로 동작).
     const member = await connect(deps, ["member"], "acme");
-    expect((await member.callTool({ name: "create_api_key", arguments: {} })).isError).toBe(true);
-    expect((await member.callTool({ name: "list_api_keys", arguments: {} })).isError).toBe(true);
+    expect((await member.callTool({ name: "create_api_key", arguments: {} })).isError).toBeFalsy();
+    expect((await member.callTool({ name: "list_api_keys", arguments: {} })).isError).toBeFalsy();
   });
 
   it("api keys: scopes 로 발급하면 목록에 scopes 가 노출된다(미지정=Full Access); 빈 배열은 오류", async () => {
