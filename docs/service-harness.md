@@ -683,9 +683,13 @@ data** and dispatches it through the **real HTTP control plane** — what a SaaS
   `GET /datasets`.
 - `examples/harnesses/desktop-ssh-agent.json` — the `command` desktop agent (`workDir:"/tmp"`); served at
   `GET /harnesses`.
-- `examples/runtimes/docker-1.0.0.json` — a `docker` `RuntimeSpec`; `RuntimeDispatcher` resolves `placement.target`
-  `"docker"` → `buildRuntimeBackend` → `DockerBackend` → `runAgentJob(DockerDriver)`. No new dispatch code: the existing
-  control-plane path (`RunService.submit` → `RuntimeDispatcher` → `Scheduler` → backend) already carries an os-use job.
+- Execution runtime — the os-use case's `image` runs in a local container. When this section first shipped, a
+  registerable `docker` `RuntimeSpec` (`examples/runtimes/docker-1.0.0.json`) resolved `placement.target:"docker"` →
+  `buildRuntimeBackend` → `DockerBackend` → `runAgentJob(DockerDriver)`. Since slice 5b (`ab7e2d2`) `docker` is **no
+  longer a registerable runtime kind** (kinds are `local|nomad|k8s`) and that example file was removed (`038c31d`);
+  container execution is now the self-hosted runner's `docker` **capability** (a local `DockerDriver`), or a `nomad`/`k8s`
+  runtime honoring `EvalCase.image`. Either way there's no new dispatch code: the existing control-plane path
+  (`RunService.submit` → `RuntimeDispatcher` → `Scheduler` → backend) already carries an os-use job.
 - Seed-guard tests (`harness-seed.test.ts`, +3) assert all three catalogs parse with their schemas and land in `_shared`.
 
 **Verified live** against the running API server (`apps/api` on a port, InMemory store, dev-tenant header): `GET /datasets`
@@ -724,7 +728,9 @@ The hand-authored `hermes-desktop-ssh` dataset proves the runtime; this connects
 `BenchmarkAdapter` path that already carries GSM8K/GAIA/SWE-bench/WebVoyager. "New benchmark = one adapter, not code."
 - `CaseMapping` (+ `rowToCase`) gained an **os-use branch** plus constant `image`/`placement` (data-driven, so it's
   JSON-serializable for tenant `BenchmarkAdapterSpec` too): `osUseEnv` → `{kind:"os-use", display, setup, screenshotPath}`,
-  `placement:"docker"` on every case, a shared desktop `image`.
+  `placement:"docker"` on every case, a shared desktop `image`. (The literal `"docker"` target predates slice 5b, when
+  `docker` was a registerable runtime kind; container execution is now the self-hosted runner's `docker` capability or a
+  `nomad`/`k8s` runtime honoring the case `image` — the adapter still emits the legacy string.)
 - The `osworld` catalog adapter maps `id`/`instruction` → an os-use case; grading is a **per-row VLM judge**
   (`graderBuilder` interpolates each task's `instruction` into the rubric — "PASS only if the final desktop screenshot
   shows this task completed: …"). OSWorld's upstream per-task Python evaluators don't port across runtimes, so the
@@ -853,7 +859,9 @@ per-row rubric.
 
 **Verified live, full chain** (real Docker + real VLM): `POST /benchmarks/import { benchmark:"osworld", text:<task jsonl> }`
 (task `Type 'Hello from OSWorld' into the text editor.`) → registered os-use dataset; `POST /runs` with the
-`desktop-osworld-agent` harness → `RuntimeDispatcher` → `DockerBackend` → os-use env (Xvfb+openbox) → the agent launches
+`desktop-osworld-agent` harness → `RuntimeDispatcher` → the container runtime (ran at the time via the then-registerable
+`docker` runtime → `DockerBackend`; that entry point is now the self-hosted runner's `docker` capability — slice 5b) →
+os-use env (Xvfb+openbox) → the agent launches
 **Mousepad** and types the text → `OsUseEnvironment` snapshot → VLM judge **pass `1.0`** ("the text editor visibly contains
 the exact text 'Hello from OSWorld'"). The decoded screenshot shows a real Mousepad window with the typed text. So an
 OSWorld-category task runs on a real GUI application and is auto-graded — import → dispatch → drive (real OS input) →
