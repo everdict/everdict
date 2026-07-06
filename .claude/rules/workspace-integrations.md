@@ -4,8 +4,9 @@ paths: "apps/api/src/github-app-service.ts,apps/api/src/mattermost-service.ts,ap
 # Workspace-scoped integrations rules (push)
 
 External integrations are **workspace-owned, not personal** (personal Connected accounts were removed in S6c).
-GitHub App + Mattermost + CI links live on `WorkspaceSettings`, gated by `settings:write` (admin). SSOT:
-`docs/architecture/workspace-scoped-integrations.md` + `docs/architecture/github-actions-trigger.md`.
+GitHub App + Mattermost + CI links + the image registry live on `WorkspaceSettings`, gated by `settings:write`
+(admin). SSOT: `docs/architecture/workspace-scoped-integrations.md` +
+`docs/architecture/github-actions-trigger.md` + `docs/architecture/workspace-image-registry.md`.
 
 - **Secrets are NAME references, never values.** `privateKeySecretName` (GHE App private key), `botTokenSecretName`,
   `commandTokenSecretName` are SecretStore *names* — resolved at point of use, never stored on the settings record

@@ -1,10 +1,12 @@
 # Workspace-scoped image registry — classify + publish harness images
 
-> **Status:** design (S0) + S1–S3 landing in this change set. SSOT for the workspace image
-> registry: where a harness's images *live*, how Assay tells a **local-only** image from a
-> **workspace-registry** image from an **external** one, and how a user **publishes** a locally
-> built image to the workspace registry through Assay. Concretizes "Track B — image-source
-> integrations" from `docs/architecture/harness-taxonomy.md` (reference-not-build stays true).
+> **Status:** S0–S3 SHIPPED (S1 registration+classification `bd979a4` · S2 `assay image push`
+> `921f93a` · S3 web `79ad895`); S4 (pull auth at dispatch) is the designed follow-up. SSOT for
+> the workspace image registry: where a harness's images *live*, how Assay tells a **local-only**
+> image from a **workspace-registry** image from an **external** one, and how a user **publishes**
+> a locally built image to the workspace registry through Assay. Concretizes "Track B —
+> image-source integrations" from `docs/architecture/harness-taxonomy.md` (reference-not-build
+> stays true).
 
 ## Why
 
