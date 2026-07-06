@@ -14,7 +14,9 @@ export { type RunnerAuthOptions, runnerAuthenticator } from "./runner.js";
 export {
   type GithubActionsAuthOptions,
   type GithubActionsClaims,
+  type GithubActionsEnterpriseOptions,
   GITHUB_ACTIONS_ISSUER,
   GITHUB_ACTIONS_AUDIENCE,
   githubActionsAuthenticator,
+  githubEnterpriseIssuer,
 } from "./github-actions.js";

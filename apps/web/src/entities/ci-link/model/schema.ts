@@ -25,9 +25,10 @@ export type CiLink = z.infer<typeof ciLinkSchema>
 export const ciLinksResponseSchema = z.object({ links: z.array(ciLinkSchema) })
 export type CiLinksResponse = z.infer<typeof ciLinksResponseSchema>
 
-// GET /connections/:id/repos 한 행 — GitHub 레포 목록(picker)을 얇게 정규화한 형태(bare array).
+// GET /workspace/github-app/repos 한 행 — GitHub 레포 목록(picker)을 얇게 정규화한 형태(bare array).
 export const repoInfoSchema = z.object({
   fullName: z.string(), // "owner/name"
+  host: z.string().optional(), // 이 repo 가 속한 installation 의 GHE 베이스 URL — 미지정 = github.com
   private: z.boolean(),
   defaultBranch: z.string(),
   pushedAt: z.string().optional(),

@@ -54,6 +54,34 @@ describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)"
     await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {} });
     expect(await svc.list("beta")).toEqual([]);
   });
+
+  it("link 키는 (host, repository) — 같은 owner/name 이라도 github.com 과 GHE 는 별개 link 로 공존한다", async () => {
+    await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {} });
+    await svc.upsert("acme", "alice", {
+      repository: "acme/app",
+      host: "https://ghe.acme.io",
+      harness: "bu-ghe",
+      slots: {},
+    });
+    expect(await svc.list("acme")).toHaveLength(2);
+
+    // 같은 host 의 upsert 만 교체된다(host 비교는 대소문자/트레일링 슬래시 무시).
+    await svc.upsert("acme", "bob", {
+      repository: "ACME/APP",
+      host: "https://GHE.acme.io/",
+      harness: "bu-ghe-v2",
+      slots: {},
+    });
+    const links = await svc.list("acme");
+    expect(links).toHaveLength(2);
+    expect(links.find((l) => l.host !== undefined)?.harness).toBe("bu-ghe-v2");
+    expect(links.find((l) => l.host === undefined)?.harness).toBe("bu");
+
+    // remove 도 host 로 좁힌다 — GHE link 만 지워지고 github.com link 는 남는다.
+    const after = await svc.remove("acme", "acme/app", "https://ghe.acme.io");
+    expect(after).toHaveLength(1);
+    expect(after[0]?.host).toBeUndefined();
+  });
 });
 
 describe("CiLinkService.listRepos — 워크스페이스 App installation repos picker (위임)", () => {
@@ -125,6 +153,49 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(UpstreamError);
   });
 
+  it("GHE link 는 link.host 로 토큰을 발급하고 GHE API(/api/v3)로 dance 한다", async () => {
+    const calls: Array<{ url: string; method: string; body?: { content?: string } }> = [];
+    const tokenHosts: Array<string | undefined> = [];
+    const svc = new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      githubApp: fakeGithubApp({
+        tokenForRepository: async (_ws, _repo, _perm, host) => {
+          tokenHosts.push(host);
+          return { token: "app_tok", ...(host ? { host } : {}) };
+        },
+      }),
+      apiPublicUrl: "https://assay.example.com",
+      fetchImpl: fakeFetch(
+        [
+          (url, init) => {
+            const m = init?.method ?? "GET";
+            if (!url.startsWith("https://ghe.acme.io/api/v3/")) return undefined; // GHE 베이스 이외는 500
+            if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
+            if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
+            if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
+            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "GET")
+              return json({ message: "Not Found" }, 404);
+            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "PUT") return json({}, 201);
+            if (url.endsWith("/pulls") && m === "POST")
+              return json({ html_url: "https://ghe.acme.io/acme/app/pull/3" }, 201);
+            return undefined;
+          },
+        ],
+        calls,
+      ),
+    });
+    await svc.upsert("acme", "admin", {
+      repository: "acme/app",
+      host: "https://ghe.acme.io",
+      harness: "bu",
+      slots: { app: {} },
+    });
+    const result = await svc.openSetupPr("acme", "acme/app", { host: "https://ghe.acme.io" });
+    expect(result.prUrl).toBe("https://ghe.acme.io/acme/app/pull/3");
+    expect(tokenHosts).toEqual(["https://ghe.acme.io"]); // link.host 가 installation 선택으로 전달
+    expect(calls.every((c) => c.url.startsWith("https://ghe.acme.io/api/v3/"))).toBe(true);
+  });
+
   it("App 이 그 repo 에 설치돼 있지 않으면 NotFound(tokenForRepository 가 던짐)", async () => {
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
@@ -176,6 +247,34 @@ describe("renderCiWorkflow", () => {
     );
     expect(yaml).toContain("runs-on: [self-hosted, assay-r1]");
     expect(yaml).toContain("runtime: self:ws:r1");
+  });
+
+  it("github.com link 는 GHCR 로 빌드/푸시한다(레지스트리 기본값)", () => {
+    const yaml = renderCiWorkflow(
+      { repository: "acme/app", harness: "bu", slots: { web: {} }, createdBy: "a" },
+      "acme",
+      "https://assay.example.com",
+    );
+    expect(yaml).toContain("registry: ghcr.io");
+    expect(yaml).toContain("tags: ghcr.io/${{ github.repository }}/web:${{ github.sha }}");
+  });
+
+  it("GHE link 는 그 인스턴스의 컨테이너 레지스트리(containers.<hostname>)로 빌드/푸시한다 — GHES 의 GITHUB_TOKEN 은 ghcr.io 로그인 불가", () => {
+    const yaml = renderCiWorkflow(
+      {
+        repository: "acme/app",
+        host: "https://ghe.acme.io",
+        harness: "bu",
+        slots: { web: {} },
+        createdBy: "a",
+      },
+      "acme",
+      "https://assay.example.com",
+    );
+    expect(yaml).toContain("registry: containers.ghe.acme.io");
+    expect(yaml).toContain("tags: containers.ghe.acme.io/${{ github.repository }}/web:${{ github.sha }}");
+    expect(yaml).toContain('"web":"containers.ghe.acme.io/${{ github.repository }}/web@');
+    expect(yaml).not.toContain("ghcr.io");
   });
 });
 

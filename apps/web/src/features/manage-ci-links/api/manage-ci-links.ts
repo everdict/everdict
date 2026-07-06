@@ -31,6 +31,7 @@ export interface SetupPrResult {
 // upsert 링크(레포↔하니스 슬롯) 입력 — dataset/slots/runsOn/runtime 은 선택. 컨트롤플레인이 최종 검증(admin 게이트).
 export interface UpsertCiLinkInput {
   repository: string
+  host?: string // GHE 베이스 URL(예: https://ghe.acme.io) — 미지정 = github.com
   harness: string
   dataset?: string
   slots?: Record<string, { path?: string }>
@@ -62,11 +63,16 @@ export async function upsertCiLinkAction(input: UpsertCiLinkInput): Promise<CiLi
   }
 }
 
-// 링크 해제(삭제) — settings:write(admin).
-export async function deleteCiLinkAction(repository: string): Promise<CiLinksResult> {
+// 링크 해제(삭제) — settings:write(admin). host 미지정 = github.com link.
+export async function deleteCiLinkAction(
+  repository: string,
+  host?: string
+): Promise<CiLinksResult> {
   const ctx = await authContext()
   try {
-    const { links } = ciLinksResponseSchema.parse(await controlPlane.deleteCiLink(ctx, repository))
+    const { links } = ciLinksResponseSchema.parse(
+      await controlPlane.deleteCiLink(ctx, repository, host)
+    )
     revalidatePath('/[workspace]/harnesses/[id]', 'page')
     revalidatePath('/[workspace]/settings', 'page')
     return { ok: true, links }
@@ -76,11 +82,11 @@ export async function deleteCiLinkAction(repository: string): Promise<CiLinksRes
 }
 
 // 셋업 PR 열기 — link 의 워크플로 YAML 을 대상 레포에 PR(워크스페이스 GitHub App 토큰). harnesses:read(머지는 GitHub 쪽 승인).
-export async function openSetupPrAction(repository: string): Promise<SetupPrResult> {
+export async function openSetupPrAction(repository: string, host?: string): Promise<SetupPrResult> {
   const ctx = await authContext()
   try {
     const { prUrl } = setupPrResultSchema.parse(
-      await controlPlane.setupCiLinkPr(ctx, { repository })
+      await controlPlane.setupCiLinkPr(ctx, { repository, ...(host ? { host } : {}) })
     )
     return { ok: true, prUrl }
   } catch (e) {

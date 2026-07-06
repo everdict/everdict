@@ -647,14 +647,29 @@ function buildAuthenticator(
   // GitHub Actions OIDC 페더레이션 — keyless CI. issuer 프리체크가 있어 Keycloak/기타 JWT 는 조용히 패스하므로
   // OIDC(Keycloak) 인증기보다 앞에 둔다(반대로 두면 CI 토큰이 Keycloak 검증 실패 warn 로그를 남긴다).
   // 신뢰 = 지목된 워크스페이스(x-assay-workspace)의 repo link(WorkspaceSettings.ci.links) 매칭 → roles=["ci"].
+  // GHES 도 지원: GHE link 가 있는 host 의 issuer(https://<host>/_services/token)만 동적으로 신뢰(fail-closed),
+  // link 매칭은 (host, repository) — github.com 토큰이 같은 이름의 GHE link 를(또는 그 반대로) 통과하지 못한다.
+  const normHost = (h?: string): string | undefined => h?.replace(/\/$/, "").toLowerCase();
   authers.push(
     githubActionsAuthenticator({
       resolveTrust: async (claims, workspaceHint) => {
         const settings = await settingsStore.get(workspaceHint);
         const link = settings?.ci?.links.find(
-          (l) => !l.disabled && !l.host && l.repository.toLowerCase() === claims.repository.toLowerCase(),
+          (l) =>
+            !l.disabled &&
+            normHost(l.host) === normHost(claims.host) &&
+            l.repository.toLowerCase() === claims.repository.toLowerCase(),
         );
         return link ? { workspace: workspaceHint, roles: ["ci"] } : undefined;
+      },
+      enterprise: {
+        // 이 워크스페이스가 GHE link 로 신뢰를 부여한 host 들 — 그 issuer 의 GHES 토큰만 검증 대상이 된다.
+        hostsFor: async (workspaceHint) => {
+          const settings = await settingsStore.get(workspaceHint);
+          const hosts = new Set<string>();
+          for (const l of settings?.ci?.links ?? []) if (!l.disabled && l.host) hosts.add(l.host);
+          return [...hosts];
+        },
       },
     }),
   );

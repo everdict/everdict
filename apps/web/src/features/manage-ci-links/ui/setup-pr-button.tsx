@@ -11,11 +11,13 @@ import { openSetupPrAction } from '../api/manage-ci-links'
 // App 이 그 레포에 설치돼 있지 않으면 컨트롤플레인이 404 → onError 로 안내.
 export function SetupPrButton({
   repository,
+  host,
   size = 'xs',
   variant = 'secondary',
   onError,
 }: {
   repository: string
+  host?: string // GHE 베이스 URL — 미지정 = github.com link
   size?: 'xs' | 'sm'
   variant?: 'secondary' | 'outline'
   onError?: (message: string) => void
@@ -25,7 +27,7 @@ export function SetupPrButton({
 
   function onClick() {
     startTransition(async () => {
-      const r = await openSetupPrAction(repository)
+      const r = await openSetupPrAction(repository, host)
       if (r.ok && r.prUrl) {
         setOpened(r.prUrl)
         window.open(r.prUrl, '_blank', 'noopener,noreferrer')

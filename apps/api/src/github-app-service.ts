@@ -49,6 +49,12 @@ function trimSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
+// GHE 베이스 URL 동등성 — 대소문자/트레일링 슬래시 차이를 무시. undefined = github.com.
+function sameHost(a: string | undefined, b: string | undefined): boolean {
+  if (a === undefined || b === undefined) return a === b;
+  return trimSlash(a).toLowerCase() === trimSlash(b).toLowerCase();
+}
+
 // GitHub API 베이스 — github.com 은 api.github.com, GHE 는 host/api/v3. installation.host 로 판별.
 function apiBase(host?: string): string {
   return host ? `${trimSlash(host)}/api/v3` : "https://api.github.com";
@@ -66,6 +72,7 @@ function appTokenHeaders(token: string): Record<string, string> {
 // picker 한 행 — installation 이 접근 가능한 repo(GET /installation/repositories)를 얇게 정규화.
 export interface InstallationRepo {
   fullName: string; // "owner/name"
+  host?: string; // 이 repo 가 속한 installation 의 GHE 베이스 URL — 미지정 = github.com
   private: boolean;
   defaultBranch: string;
   pushedAt?: string;
@@ -222,7 +229,7 @@ export class GithubAppService {
   async tokenForRepo(workspace: string, gitUrl: string): Promise<string | undefined> {
     const parsed = parseGitRepo(gitUrl);
     if (!parsed) return undefined;
-    const install = await this.installationForOwner(workspace, parsed.owner);
+    const install = await this.installationForOwner(workspace, parsed.owner, parsed.host);
     if (!install) return undefined;
     return this.mintFor(workspace, install, { repositories: [parsed.repo], permissions: { contents: "read" } });
   }
@@ -240,6 +247,7 @@ export class GithubAppService {
       for (const r of InstallationReposResponse.parse(body).repositories)
         out.push({
           fullName: r.full_name,
+          ...(install.host ? { host: install.host } : {}), // GHE repo 는 host 를 실어 picker/link 가 호스트를 보존
           private: r.private,
           defaultBranch: r.default_branch,
           ...(r.pushed_at ? { pushedAt: r.pushed_at } : {}),
@@ -250,20 +258,22 @@ export class GithubAppService {
 
   // "owner/name" repo 에 대한 installation 토큰(지정 권한) + host. setup-PR 등 쓰기 작업용(예: contents/pull_requests write).
   // 매칭 installation 없으면 NotFound(개인 연결과 달리 워크스페이스가 그 org 에 App 을 설치해야 함).
+  // host 미지정 = github.com — 같은 org 명이 github.com/GHE 양쪽에 있어도 정확한 installation 을 고른다.
   async tokenForRepository(
     workspace: string,
     repository: string,
     permissions: Record<string, string>,
+    host?: string,
   ): Promise<{ token: string; host?: string }> {
     const [owner, repo] = repository.split("/");
     if (!owner || !repo)
       throw new BadRequestError("BAD_REQUEST", { repository }, `repository 는 "owner/name" 형식이어야 합니다.`);
-    const install = await this.installationForOwner(workspace, owner);
+    const install = await this.installationForOwner(workspace, owner, host);
     if (!install)
       throw new NotFoundError(
         "NOT_FOUND",
-        { repository },
-        `'${repository}' 에 설치된 워크스페이스 GitHub App 이 없습니다.`,
+        { repository, ...(host ? { host } : {}) },
+        `'${repository}'${host ? `(${host})` : ""} 에 설치된 워크스페이스 GitHub App 이 없습니다.`,
       );
     const token = await this.mintFor(workspace, install, { repositories: [repo], permissions });
     return { token, ...(install.host ? { host: install.host } : {}) };
@@ -276,7 +286,8 @@ export class GithubAppService {
     target: { repo: string } | { org: string },
   ): Promise<{ token: string; expiresAt: string; host?: string }> {
     const owner = "repo" in target ? (target.repo.split("/")[0] ?? "") : target.org;
-    const install = await this.installationForOwner(workspace, owner);
+    // 러너 등록 대상엔 host 입력이 없다 — owner 만으로 아무 호스트의 installation 이나 매칭(레거시 동작 유지).
+    const install = await this.anyHostInstallationForOwner(workspace, owner);
     if (!install)
       throw new NotFoundError("NOT_FOUND", { owner }, `'${owner}' 에 설치된 워크스페이스 GitHub App 이 없습니다.`);
     const appToken = await this.mintFor(workspace, install, { permissions: { administration: "write" } });
@@ -289,8 +300,19 @@ export class GithubAppService {
     return { token: data.token, expiresAt: data.expires_at, ...(install.host ? { host: install.host } : {}) };
   }
 
-  // owner(org/user login) 로 워크스페이스 installation 을 찾는다(org 는 한 GitHub 호스트에 유일 → host 무시).
-  private async installationForOwner(workspace: string, owner: string): Promise<Installation | undefined> {
+  // (owner, host) 로 워크스페이스 installation 을 찾는다. host 미지정 = github.com — 같은 org 명이
+  // github.com 과 GHE 양쪽에 설치돼 있어도 다른 호스트의 installation 으로 토큰을 발급하지 않는다.
+  private async installationForOwner(
+    workspace: string,
+    owner: string,
+    host?: string,
+  ): Promise<Installation | undefined> {
+    const g = (await this.settings.get(workspace))?.githubApp;
+    return g?.installations.find((i) => i.account.toLowerCase() === owner.toLowerCase() && sameHost(i.host, host));
+  }
+
+  // owner 만으로 매칭(호스트 무관) — host 입력이 아직 없는 경로(러너 등록)용.
+  private async anyHostInstallationForOwner(workspace: string, owner: string): Promise<Installation | undefined> {
     const g = (await this.settings.get(workspace))?.githubApp;
     return g?.installations.find((i) => i.account.toLowerCase() === owner.toLowerCase());
   }

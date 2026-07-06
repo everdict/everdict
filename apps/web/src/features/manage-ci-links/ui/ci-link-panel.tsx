@@ -11,7 +11,7 @@ import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 
 import { deleteCiLinkAction } from '../api/manage-ci-links'
-import { ConnectRepoDialog } from './connect-repo-dialog'
+import { ConnectRepoDialog, hostLabel } from './connect-repo-dialog'
 import { SetupPrButton } from './setup-pr-button'
 
 // kind → 이 하니스가 CI 에 노출할 빌드 슬롯 후보. service=서비스 이름, command=image, process=없음.
@@ -20,6 +20,10 @@ function slotChoicesFor(kind: HarnessKind, serviceNames: string[]): string[] {
   if (kind === 'command') return ['image']
   return []
 }
+
+// link 식별 키 — 같은 "owner/name" 이 github.com 과 GHE 양쪽에 링크될 수 있어 host 까지 포함한다.
+const linkKey = (l: Pick<CiLink, 'repository' | 'host'>) =>
+  `${l.host ?? 'github.com'}:${l.repository}`
 
 // 하니스 상세의 "CI 연동" 패널 — 이 하니스에 연결된 레포 링크 목록 + "GitHub 레포 연결"(zero-input) + 셋업 PR/해제.
 // 조회는 viewer+, 저장/해제는 admin(컨트롤플레인 강제). 링크의 존재가 그 레포의 keyless CI 신뢰를 부여한다.
@@ -53,10 +57,10 @@ export function CiLinkPanel({
     setLinks(all.filter((l) => l.harness === harnessId))
   }
 
-  function onDelete(repository: string) {
+  function onDelete(link: CiLink) {
     setError(undefined)
     startTransition(async () => {
-      const r = await deleteCiLinkAction(repository)
+      const r = await deleteCiLinkAction(link.repository, link.host)
       setConfirmRepo(undefined)
       if (r.ok && r.links) applyLinks(r.links)
       else setError(r.error ?? '링크 해제에 실패했습니다.')
@@ -104,14 +108,19 @@ export function CiLinkPanel({
           {links.map((l) => {
             const slotNames = Object.keys(l.slots ?? {})
             return (
-              <li key={l.repository} className="space-y-2 px-4 py-3">
+              <li key={linkKey(l)} className="space-y-2 px-4 py-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex min-w-0 flex-wrap items-center gap-2">
                     <span className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-0.5 font-mono text-[12px] text-foreground">
                       <GitBranch className="size-3 text-muted-foreground/70" />
                       {l.repository}
                     </span>
-                    {l.host && <span className="text-[11px] text-faint">{l.host}</span>}
+                    {l.host && (
+                      // GHE link — 어느 인스턴스인지 호스트명 배지(github.com 은 무표기).
+                      <span className="rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
+                        {hostLabel(l.host)}
+                      </span>
+                    )}
                     {l.disabled && <Badge tone="warning">비활성</Badge>}
                     {l.dataset && (
                       <span className="text-[11px] text-muted-foreground">
@@ -120,15 +129,15 @@ export function CiLinkPanel({
                     )}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    <SetupPrButton repository={l.repository} onError={setError} />
+                    <SetupPrButton repository={l.repository} host={l.host} onError={setError} />
                     {canWrite &&
-                      (confirmRepo === l.repository ? (
+                      (confirmRepo === linkKey(l) ? (
                         <span className="flex items-center gap-2">
                           <Button
                             variant="destructive"
                             size="xs"
                             disabled={pending}
-                            onClick={() => onDelete(l.repository)}
+                            onClick={() => onDelete(l)}
                           >
                             해제 확인
                           </Button>
@@ -144,7 +153,7 @@ export function CiLinkPanel({
                         <button
                           type="button"
                           className="text-[12px] font-[510] text-destructive hover:underline"
-                          onClick={() => setConfirmRepo(l.repository)}
+                          onClick={() => setConfirmRepo(linkKey(l))}
                         >
                           해제
                         </button>

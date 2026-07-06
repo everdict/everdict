@@ -2504,8 +2504,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // repository 는 "owner/name"(슬래시 포함) — 경로 파라미터 대신 쿼리로 받는다.
-  app.delete<{ Querystring: { repository?: string } }>("/workspace/ci/links", async (req, reply) => {
+  // repository 는 "owner/name"(슬래시 포함) — 경로 파라미터 대신 쿼리로 받는다. host 미지정 = github.com link.
+  app.delete<{ Querystring: { repository?: string; host?: string } }>("/workspace/ci/links", async (req, reply) => {
     if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
@@ -2513,7 +2513,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(400).send({ code: "BAD_REQUEST", message: "repository 쿼리 파라미터가 필요합니다." });
     try {
       gate(principal, "settings:write");
-      return reply.send({ links: await deps.ciLinkService.remove(principal.workspace, req.query.repository) });
+      return reply.send({
+        links: await deps.ciLinkService.remove(principal.workspace, req.query.repository, req.query.host),
+      });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -2525,11 +2527,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    const body = z.object({ repository: z.string().min(1) }).safeParse(req.body ?? {});
+    const body = z
+      .object({ repository: z.string().min(1), host: z.string().url().optional() })
+      .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
       gate(principal, "harnesses:read");
-      return reply.send(await deps.ciLinkService.openSetupPr(principal.workspace, body.data.repository, baseUrl(req)));
+      return reply.send(
+        await deps.ciLinkService.openSetupPr(principal.workspace, body.data.repository, {
+          ...(body.data.host !== undefined ? { host: body.data.host } : {}),
+          requestBaseUrl: baseUrl(req),
+        }),
+      );
     } catch (err) {
       return sendError(reply, err); // link 없음 404 / App 미설치 404 / GitHub 실패 502
     }

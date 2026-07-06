@@ -22,6 +22,16 @@ interface SlotState {
   path: string
 }
 
+// picker 선택 좌표 — 같은 "owner/name" 이 github.com 과 GHE 양쪽에 있을 수 있어 host 까지가 식별자다.
+interface SelectedRepo {
+  fullName: string
+  host?: string // GHE 베이스 URL — 미지정 = github.com
+}
+
+const repoKey = (r: SelectedRepo) => `${r.host ?? 'github.com'}:${r.fullName}`
+// GHE host 표시는 URL 스킴을 뗀 호스트명만 — picker 행/패널 배지 공용.
+export const hostLabel = (host: string) => host.replace(/^https?:\/\//, '').replace(/\/$/, '')
+
 // 슬롯 초기값 — command 는 image 를 기본 선택, 서비스 슬롯이 하나뿐이면 자동 선택, 여럿이면 사용자가 고른다.
 function initSlots(slotChoices: string[], kind: HarnessKind): Record<string, SlotState> {
   const preselect = kind === 'command' || slotChoices.length === 1
@@ -57,21 +67,21 @@ export function ConnectRepoDialog({
   const [reposError, setReposError] = useState<string>()
   const [reposLoading, startReposLoad] = useTransition()
   const [repoQuery, setRepoQuery] = useState('')
-  const [repository, setRepository] = useState('')
+  const [repository, setRepository] = useState<SelectedRepo>()
   const [slots, setSlots] = useState<Record<string, SlotState>>(() => initSlots(slotChoices, kind))
   const [dataset, setDataset] = useState('')
   const [runsOn, setRunsOn] = useState('')
   const [runtime, setRuntime] = useState('')
   const [saveError, setSaveError] = useState<string>()
   const [saving, startSaving] = useTransition()
-  const [savedRepo, setSavedRepo] = useState<string>() // 저장 성공한 레포(셋업 PR 단계로 전환)
+  const [savedRepo, setSavedRepo] = useState<SelectedRepo>() // 저장 성공한 레포(셋업 PR 단계로 전환)
 
   // 열릴 때마다 초기화 + 워크스페이스 App installation 의 레포 목록 로드.
   useEffect(() => {
     if (!open) return
     setReposError(undefined)
     setRepoQuery('')
-    setRepository('')
+    setRepository(undefined)
     setSlots(initSlots(slotChoices, kind))
     setDataset('')
     setRunsOn('')
@@ -87,8 +97,11 @@ export function ConnectRepoDialog({
     // 슬롯/레포 목록은 열리는 순간의 스냅샷으로 고정(open 토글에만 반응).
   }, [open])
 
+  // 검색은 레포명 + GHE 호스트명 모두에 매칭(호스트로 좁혀 찾을 수 있게).
   const filteredRepos = (repos ?? []).filter((r) =>
-    r.fullName.toLowerCase().includes(repoQuery.trim().toLowerCase())
+    `${r.fullName} ${r.host ? hostLabel(r.host) : ''}`
+      .toLowerCase()
+      .includes(repoQuery.trim().toLowerCase())
   )
   const enabledSlots = Object.entries(slots).filter(([, s]) => s.enabled)
 
@@ -106,13 +119,15 @@ export function ConnectRepoDialog({
   }
 
   function onSave() {
+    if (!repository) return
     setSaveError(undefined)
     const slotPayload: Record<string, { path?: string }> = {}
     for (const [name, s] of enabledSlots)
       slotPayload[name] = s.path.trim() ? { path: s.path.trim() } : {}
     startSaving(async () => {
       const r = await upsertCiLinkAction({
-        repository,
+        repository: repository.fullName,
+        ...(repository.host ? { host: repository.host } : {}),
         harness: harnessId,
         ...(dataset ? { dataset } : {}),
         slots: slotPayload,
@@ -165,12 +180,23 @@ export function ConnectRepoDialog({
         // 저장 완료 — 셋업 PR 단계.
         <div className="space-y-4 px-5 py-5">
           <Callout tone="info">
-            <span className="font-mono text-foreground">{savedRepo}</span> 를{' '}
-            <span className="font-mono text-foreground">{harnessId}</span> 에 연결했어요. 셋업 PR을
-            열면 워크플로 파일이 레포에 추가돼요. 머지하면 CI 평가가 시작돼요.
+            <span className="font-mono text-foreground">{savedRepo.fullName}</span>
+            {savedRepo.host && (
+              <span className="font-mono text-muted-foreground">
+                {' '}
+                ({hostLabel(savedRepo.host)})
+              </span>
+            )}{' '}
+            를 <span className="font-mono text-foreground">{harnessId}</span> 에 연결했어요. 셋업
+            PR을 열면 워크플로 파일이 레포에 추가돼요. 머지하면 CI 평가가 시작돼요.
           </Callout>
           <div className="flex items-center justify-between gap-3">
-            <SetupPrButton repository={savedRepo} size="sm" onError={setSaveError} />
+            <SetupPrButton
+              repository={savedRepo.fullName}
+              host={savedRepo.host}
+              size="sm"
+              onError={setSaveError}
+            />
             <Button size="sm" onClick={onClose}>
               완료
             </Button>
@@ -211,12 +237,18 @@ export function ConnectRepoDialog({
                       </p>
                     ) : (
                       filteredRepos.map((r) => {
-                        const active = r.fullName === repository
+                        const active =
+                          repository !== undefined && repoKey(r) === repoKey(repository)
                         return (
                           <button
-                            key={r.fullName}
+                            key={repoKey(r)}
                             type="button"
-                            onClick={() => setRepository(r.fullName)}
+                            onClick={() =>
+                              setRepository({
+                                fullName: r.fullName,
+                                ...(r.host ? { host: r.host } : {}),
+                              })
+                            }
                             className={cn(
                               'flex w-full items-center gap-2 px-3 py-2 text-left transition-colors',
                               active ? 'bg-accent' : 'hover:bg-accent/60'
@@ -231,6 +263,12 @@ export function ConnectRepoDialog({
                             <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
                               {r.fullName}
                             </span>
+                            {r.host && (
+                              // GHE repo — 어느 인스턴스에서 온 것인지 호스트명으로 구분(github.com 은 무표기).
+                              <span className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
+                                {hostLabel(r.host)}
+                              </span>
+                            )}
                             {r.private && (
                               <Lock className="size-3 shrink-0 text-muted-foreground/70" />
                             )}
@@ -353,8 +391,9 @@ export function ConnectRepoDialog({
             <span className="text-[12px] text-faint">
               {repository ? (
                 <>
-                  <span className="font-mono text-muted-foreground">{repository}</span> ·{' '}
-                  {enabledSlots.length}개 슬롯
+                  <span className="font-mono text-muted-foreground">{repository.fullName}</span>
+                  {repository.host && <> ({hostLabel(repository.host)})</>} · {enabledSlots.length}
+                  개 슬롯
                 </>
               ) : (
                 '레포를 선택하세요'

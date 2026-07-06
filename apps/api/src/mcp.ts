@@ -1392,6 +1392,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           "CI repo link 등록/갱신(관리자) — link 존재가 그 레포 GitHub Actions OIDC 토큰을 이 워크스페이스로 신뢰한다(keyless CI).",
         inputSchema: {
           repository: z.string().describe('"owner/name"'),
+          host: z.string().url().optional().describe('GHE 베이스 URL(예: "https://ghe.acme.io") — 미지정 = github.com'),
           harness: z.string().describe("하니스 인스턴스 id"),
           dataset: z.string().optional().describe("CI 가 발사할 데이터셋 id(setup-PR 워크플로에 사용)"),
           slots: z
@@ -1426,9 +1427,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "unlink_ci_repository",
       {
         description: "CI repo link 해제(관리자) — 그 레포의 OIDC 신뢰도 함께 끊긴다.",
-        inputSchema: { repository: z.string().describe('"owner/name"') },
+        inputSchema: {
+          repository: z.string().describe('"owner/name"'),
+          host: z.string().url().optional().describe("GHE 베이스 URL — 미지정 = github.com link"),
+        },
       },
-      ({ repository }) => run(principal, "settings:write", async () => ok({ links: await ci.remove(ws, repository) })),
+      ({ repository, host }) =>
+        run(principal, "settings:write", async () => ok({ links: await ci.remove(ws, repository, host) })),
     );
     server.registerTool(
       "list_github_app_repos",
@@ -1444,9 +1449,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       {
         description:
           "link 된 레포에 Assay eval 워크플로 YAML 을 합성해 setup-PR 을 연다(워크스페이스 GitHub App 토큰). 머지하면 CI eval 활성.",
-        inputSchema: { repository: z.string().describe('"owner/name"') },
+        inputSchema: {
+          repository: z.string().describe('"owner/name"'),
+          host: z.string().url().optional().describe("GHE 베이스 URL — 미지정 = github.com link"),
+        },
       },
-      ({ repository }) => run(principal, "harnesses:read", async () => ok(await ci.openSetupPr(ws, repository))),
+      ({ repository, host }) =>
+        run(principal, "harnesses:read", async () =>
+          ok(await ci.openSetupPr(ws, repository, host !== undefined ? { host } : {})),
+        ),
     );
   }
 

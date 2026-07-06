@@ -9,6 +9,7 @@ import { z } from "zod";
 
 export const UpsertCiLinkBodySchema = z.object({
   repository: z.string().min(1), // "owner/name"
+  host: z.string().url().optional(), // GHE 베이스 URL(예: "https://ghe.acme.io") — 미지정 = github.com
   harness: z.string().min(1), // 하니스 인스턴스 id
   dataset: z.string().optional(), // 발사할 데이터셋 id — setup-PR 워크플로 생성에 필요(없으면 YAML 에 TODO)
   slots: z.record(z.object({ path: z.string().optional() })).default({}), // 서비스 슬롯 → 모노레포 path(선택)
@@ -20,6 +21,7 @@ export type UpsertCiLinkBody = z.infer<typeof UpsertCiLinkBodySchema>;
 // picker 한 행 — GitHub API 응답을 얇게 정규화(무거운 원본 미노출).
 export interface RepoInfo {
   fullName: string; // "owner/name"
+  host?: string; // 이 repo 가 속한 installation 의 GHE 베이스 URL — 미지정 = github.com
   private: boolean;
   defaultBranch: string;
   pushedAt?: string;
@@ -32,6 +34,7 @@ export interface GithubAppRepoAccess {
     workspace: string,
     repository: string,
     permissions: Record<string, string>,
+    host?: string, // 미지정 = github.com — link 의 host 로 정확한 installation 을 고른다
   ): Promise<{ token: string; host?: string }>;
   runnerRegistrationToken(
     workspace: string,
@@ -51,6 +54,13 @@ function apiBase(host?: string): string {
   return host ? `${host.replace(/\/$/, "")}/api/v3` : "https://api.github.com";
 }
 
+// link 동일성 키 = (host, repository) — 같은 "owner/name" 이 github.com 과 GHE 양쪽에 있을 수 있다.
+// host 비교는 트레일링 슬래시/대소문자 무시, undefined = github.com.
+function sameLinkKey(link: { repository: string; host?: string }, repository: string, host?: string): boolean {
+  const norm = (h?: string): string | undefined => h?.replace(/\/$/, "").toLowerCase();
+  return link.repository.toLowerCase() === repository.toLowerCase() && norm(link.host) === norm(host);
+}
+
 export class CiLinkService {
   private readonly fetch: typeof fetch;
   constructor(private readonly deps: CiLinkServiceDeps) {
@@ -61,7 +71,7 @@ export class CiLinkService {
     return (await this.deps.settings.get(workspace))?.ci?.links ?? [];
   }
 
-  // upsert — repository(대소문자 무시)당 1건. link 의 존재가 그 레포의 OIDC trust 이므로 생성=신뢰 부여(admin 게이트는 라우트).
+  // upsert — (host, repository) 키(대소문자 무시)당 1건. link 의 존재가 그 레포의 OIDC trust 이므로 생성=신뢰 부여(admin 게이트는 라우트).
   async upsert(workspace: string, subject: string, body: UpsertCiLinkBody): Promise<WorkspaceCiLink[]> {
     const current = await this.list(workspace);
     const next: WorkspaceCiLink = {
@@ -69,18 +79,19 @@ export class CiLinkService {
       harness: body.harness,
       slots: body.slots,
       createdBy: subject,
+      ...(body.host !== undefined ? { host: body.host } : {}),
       ...(body.dataset !== undefined ? { dataset: body.dataset } : {}),
       ...(body.runsOn !== undefined ? { runsOn: body.runsOn } : {}),
       ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
     };
-    const rest = current.filter((l) => l.repository.toLowerCase() !== body.repository.toLowerCase());
+    const rest = current.filter((l) => !sameLinkKey(l, body.repository, body.host));
     await this.deps.settings.set(workspace, { ci: { links: [...rest, next] } });
     return this.list(workspace);
   }
 
-  async remove(workspace: string, repository: string): Promise<WorkspaceCiLink[]> {
+  async remove(workspace: string, repository: string, host?: string): Promise<WorkspaceCiLink[]> {
     const current = await this.list(workspace);
-    const rest = current.filter((l) => l.repository.toLowerCase() !== repository.toLowerCase());
+    const rest = current.filter((l) => !sameLinkKey(l, repository, host));
     if (rest.length !== current.length) await this.deps.settings.set(workspace, { ci: { links: rest } });
     return this.list(workspace);
   }
@@ -95,19 +106,20 @@ export class CiLinkService {
   async openSetupPr(
     workspace: string,
     repository: string,
-    requestBaseUrl?: string,
+    opts: { host?: string; requestBaseUrl?: string } = {},
   ): Promise<{ prUrl: string; branch: string }> {
-    const link = (await this.list(workspace)).find(
-      (l) => l.repository.toLowerCase() === repository.toLowerCase() && !l.disabled,
-    );
+    const link = (await this.list(workspace)).find((l) => sameLinkKey(l, repository, opts.host) && !l.disabled);
     if (!link) throw new NotFoundError("NOT_FOUND", { repository }, `'${repository}' 의 repo link 가 없습니다.`);
     // 워크스페이스 App installation 토큰(쓰기) — 브랜치/파일/PR 을 만들려면 contents + pull_requests write.
-    const { token, host } = await this.deps.githubApp.tokenForRepository(workspace, link.repository, {
-      contents: "write",
-      pull_requests: "write",
-    });
+    // link.host 로 installation 을 고른다(같은 org 명이 github.com/GHE 양쪽에 있어도 정확히).
+    const { token, host } = await this.deps.githubApp.tokenForRepository(
+      workspace,
+      link.repository,
+      { contents: "write", pull_requests: "write" },
+      link.host,
+    );
     const base = apiBase(host);
-    const apiUrl = this.deps.apiPublicUrl ?? requestBaseUrl;
+    const apiUrl = this.deps.apiPublicUrl ?? opts.requestBaseUrl;
     if (!apiUrl)
       throw new BadRequestError("BAD_REQUEST", {}, "API_PUBLIC_URL 미설정 — 워크플로의 api-url 을 결정할 수 없습니다.");
     const yaml = renderCiWorkflow(link, workspace, apiUrl.replace(/\/$/, ""));
@@ -210,10 +222,24 @@ export class CiLinkService {
   }
 }
 
+// link.host → CI 빌드가 push 할 컨테이너 레지스트리. github.com 은 GHCR, GHE 는 그 인스턴스의
+// 컨테이너 레지스트리(containers.<hostname> — 서브도메인 격리). GHES 의 `GITHUB_TOKEN` 은 ghcr.io 에
+// 로그인할 수 없으므로 GHE link 에 ghcr.io 를 내보내면 워크플로가 반드시 실패한다.
+function registryFor(host?: string): string {
+  if (!host) return "ghcr.io";
+  try {
+    return `containers.${new URL(host).hostname}`;
+  } catch {
+    throw new BadRequestError("BAD_REQUEST", { host }, `link 의 host 가 URL 이 아닙니다: ${host}`);
+  }
+}
+
 // link → 워크플로 YAML 합성 — 사용자는 YAML 을 만지지 않는다(zero-input 의 핵심).
-// PR/push 겸용 한 파일: 슬롯별 이미지 빌드(GHCR, digest 출력) → assay run-eval 액션(모드 자동, OIDC keyless).
+// PR/push 겸용 한 파일: 슬롯별 이미지 빌드(레지스트리는 link.host 에 따라 GHCR/GHE, digest 출력) →
+// assay run-eval 액션(모드 자동, OIDC keyless — GHES issuer 도 컨트롤플레인이 신뢰).
 // 모노레포 최적화(path filter 로 바뀐 슬롯만 빌드)는 후속 — v1 은 링크된 슬롯 전부 빌드(정확성 우선).
 export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUrl: string): string {
+  const registry = registryFor(link.host);
   const slots = Object.entries(link.slots);
   const buildSteps = slots
     .map(([slot, cfg]) =>
@@ -224,12 +250,15 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
         "        with:",
         `          context: ${cfg.path ?? "."}`,
         "          push: true",
-        `          tags: ghcr.io/\${{ github.repository }}/${slot}:\${{ github.sha }}`,
+        `          tags: ${registry}/\${{ github.repository }}/${slot}:\${{ github.sha }}`,
       ].join("\n"),
     )
     .join("\n");
   const imagesJson = `{${slots
-    .map(([slot]) => `"${slot}":"ghcr.io/\${{ github.repository }}/${slot}@\${{ steps.build-${slot}.outputs.digest }}"`)
+    .map(
+      ([slot]) =>
+        `"${slot}":"${registry}/\${{ github.repository }}/${slot}@\${{ steps.build-${slot}.outputs.digest }}"`,
+    )
     .join(",")}}`;
   // 셀프호스티드 배치(선택): runsOn 지정 시 그 러너에서 잡을 돌리고, runtime 지정 시 평가를 워크스페이스-공유 러너로.
   const runsOn = link.runsOn ?? "ubuntu-latest";
@@ -254,7 +283,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${registry}
           username: \${{ github.actor }}
           password: \${{ secrets.GITHUB_TOKEN }}
 ${buildSteps}

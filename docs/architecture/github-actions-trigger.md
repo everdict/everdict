@@ -19,7 +19,21 @@
 > Merge/dev fires (no `prNumber`) are never superseded. Limits: cooperative only (no backend job kill);
 > single-control-plane-process assumption (in-memory AbortController map, same as the callback rendezvous).
 >
-> **Open:** live E2E vs real GitHub; GitHub App (S4, demand-driven); personal-runner
+> **GitHub Enterprise (GHES) support — SHIPPED (2026-07-06).** The repo connect flow is host-aware
+> end-to-end: the picker (`GET /workspace/github-app/repos`) carries each repo's installation `host`
+> (GHE badge in the web picker), the RepoLink stores `host` and is keyed by **(host, repository)**
+> (the same `owner/name` may be linked on github.com *and* a GHE), installation-token resolution is
+> host-strict (`tokenForRepository(…, host)` — no cross-host mismint when the same org name exists on
+> both), the generated workflow pushes to the instance's container registry
+> (`containers.<hostname>`, not ghcr.io — GHES `GITHUB_TOKEN` cannot log in to ghcr.io), and
+> fire-time auth accepts the GHES Actions issuer `https://<host>/_services/token` dynamically:
+> `githubActionsAuthenticator({ enterprise.hostsFor })` trusts only hosts that appear in the hinted
+> workspace's GHE links (fail-closed), and trust matching compares `(claims.host, claims.repository)`
+> against the link — a github.com token never satisfies a GHE link of the same name (or vice versa).
+> Routes/MCP grew the optional `host` (`PUT/DELETE /workspace/ci/links`, setup-pr,
+> `link_ci_repository`/`unlink_ci_repository`/`open_ci_setup_pr`).
+>
+> **Open:** live E2E vs real GitHub (github.com + GHES); GitHub App (S4, demand-driven); personal-runner
 > `allowCi` gate; Track B pull-secrets for private GHCR; backend job force-kill for superseded in-flight cases.
 >
 > Direction locked with the user (2026-07-03):

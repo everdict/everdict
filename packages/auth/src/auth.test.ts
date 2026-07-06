@@ -4,7 +4,12 @@ import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
 import { apiKeyAuthenticator } from "./api-key.js";
 import { authorize, can } from "./authz.js";
-import { GITHUB_ACTIONS_ISSUER, githubActionsAuthenticator } from "./github-actions.js";
+import {
+  GITHUB_ACTIONS_ISSUER,
+  type GithubActionsClaims,
+  githubActionsAuthenticator,
+  githubEnterpriseIssuer,
+} from "./github-actions.js";
 import { oidcAuthenticator } from "./oidc.js";
 import { type Principal, compositeAuthenticator } from "./principal.js";
 import { runnerAuthenticator } from "./runner.js";
@@ -319,5 +324,68 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
     expect(await auth.authenticate(keycloak, { workspaceHint: "acme" })).toBeUndefined();
     expect(await auth.authenticate("ak_key", { workspaceHint: "acme" })).toBeUndefined(); // 비-JWT 도 패스
     expect(calls).toHaveLength(0);
+  });
+
+  describe("GHES 페더레이션(enterprise) — 워크스페이스가 신뢰하는 GHE host 의 issuer 만 동적으로 검증", () => {
+    const GHE_HOST = "https://ghe.acme.io";
+    const GHE_ISSUER = githubEnterpriseIssuer(GHE_HOST); // https://ghe.acme.io/_services/token
+
+    it("신뢰 host 의 GHES 토큰 → claims.host 가 실려 resolveTrust 로 전달되고 Principal 발급", async () => {
+      const seen: GithubActionsClaims[] = [];
+      const auth = githubActionsAuthenticator({
+        keySet,
+        enterprise: { hostsFor: async (hint) => (hint === "acme" ? [GHE_HOST] : []), keySetFor: () => keySet },
+        resolveTrust: async (claims) => {
+          seen.push(claims);
+          return claims.host === GHE_HOST && claims.repository === "acme/app"
+            ? { workspace: "acme", roles: ["ci"] }
+            : undefined;
+        },
+      });
+      const token = await mint({ repository: "acme/app" }, GHE_ISSUER);
+      expect(await auth.authenticate(token, { workspaceHint: "acme" })).toEqual({
+        subject: "gha:acme/app",
+        workspace: "acme",
+        roles: ["ci"],
+        via: "github-actions",
+      });
+      expect(seen[0]?.host).toBe(GHE_HOST);
+    });
+
+    it("hostsFor 에 없는 GHE issuer 는 검증 시도 없이 미인증(fail-closed) — resolveTrust 미호출", async () => {
+      const calls: unknown[] = [];
+      const auth = githubActionsAuthenticator({
+        keySet,
+        enterprise: { hostsFor: async () => ["https://other-ghe.example"], keySetFor: () => keySet },
+        resolveTrust: async (c) => {
+          calls.push(c);
+          return { workspace: "acme", roles: ["ci"] };
+        },
+      });
+      const token = await mint({ repository: "acme/app" }, GHE_ISSUER);
+      expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
+      expect(calls).toHaveLength(0);
+    });
+
+    it("enterprise 미설정이면 GHES 토큰은 종전대로 조용히 패스한다", async () => {
+      const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
+      const token = await mint({ repository: "acme/app" }, GHE_ISSUER);
+      expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
+    });
+
+    it("github.com issuer 토큰의 claims.host 는 undefined — GHE link 와 구분된다", async () => {
+      const seen: GithubActionsClaims[] = [];
+      const auth = githubActionsAuthenticator({
+        keySet,
+        enterprise: { hostsFor: async () => [GHE_HOST], keySetFor: () => keySet },
+        resolveTrust: async (claims) => {
+          seen.push(claims);
+          return { workspace: "acme", roles: ["ci"] };
+        },
+      });
+      const token = await mint({ repository: "acme/app" });
+      await auth.authenticate(token, { workspaceHint: "acme" });
+      expect(seen[0]?.host).toBeUndefined();
+    });
   });
 });

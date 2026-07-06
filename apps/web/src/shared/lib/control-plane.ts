@@ -302,11 +302,13 @@ export const controlPlane = {
   listCiLinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/ci/links'),
   upsertCiLink: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/ci/links', { method: 'PUT', body: JSON.stringify(body) }),
-  // repository("owner/name")는 슬래시를 포함해 경로 대신 쿼리로 받는다.
-  deleteCiLink: <T>(auth: AuthContext, repository: string) =>
-    call<T>(auth, `/workspace/ci/links?repository=${encodeURIComponent(repository)}`, {
-      method: 'DELETE',
-    }),
+  // repository("owner/name")는 슬래시를 포함해 경로 대신 쿼리로 받는다. host 미지정 = github.com link.
+  deleteCiLink: <T>(auth: AuthContext, repository: string, host?: string) =>
+    call<T>(
+      auth,
+      `/workspace/ci/links?repository=${encodeURIComponent(repository)}${host ? `&host=${encodeURIComponent(host)}` : ''}`,
+      { method: 'DELETE' }
+    ),
   // setup-PR — link 로부터 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR(워크스페이스 GitHub App 토큰). harnesses:read.
   setupCiLinkPr: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/ci/links/setup-pr', { method: 'POST', body: JSON.stringify(body) }),
