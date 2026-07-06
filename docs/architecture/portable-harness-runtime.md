@@ -26,7 +26,8 @@
 Assay is a multi-tenant SaaS where a benchmark/harness is **registered as data** (a bundle: harness + recipe +
 dataset + runtime), never code. A user must be able to run that definition:
 
-- on a **managed runtime** (control-plane docker / nomad / k8s), and
+- on a **managed runtime** (control-plane nomad / k8s — both honor `case.image`; the old `kind:"docker"` runtime was
+  removed in slice 5b, its single-host container execution folded into the self-hosted runner's `docker` capability), and
 - on **their own machine** (self-hosted runner — own login pays, workspace budget untouched).
 
 For that to hold, **the definition itself must fully describe its execution environment** so it works whole in

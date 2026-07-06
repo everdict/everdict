@@ -109,9 +109,9 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
 ### The Assay-specific decisions
 
 - **Identity** — a fire has no live user token. The schedule stores `createdBy` (subject); the run executes as
-  that subject: budget → `tenant` (workspace), private-repo case tokens resolve against the **creator's**
-  personal connections (`repoTokenFor(createdBy, connectionId)`) — identical to a manual submit. **If the creator
-  leaves the workspace or revokes the connection, private-repo fires break** → policy: **auto-disable** the
+  that subject: budget → `tenant` (workspace), private-repo case tokens resolve against the **workspace GitHub
+  App** installation (`installationTokenFor(tenant, gitUrl)`) — identical to a manual submit. **If the creator
+  leaves the workspace, fires carrying their identity break** → policy: **auto-disable** the
   schedule and surface the reason (`lastStatus`/last-fire error on the record). A new `via:"schedule"` is **not**
   needed — the internal route is token-guarded and passes `tenant` + `submittedBy` explicitly.
 - **Self-hosted runtime** — `runtime=self:<id>` requires the runner be **online at fire time**, else jobs park
@@ -197,5 +197,5 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
 ## See also
 
 [scorecards.md](../scorecards.md) · [orchestration.md](../orchestration.md) · [suites.md](../suites.md)
-(trend/diff) · [connections.md](../connections.md) (private-repo token lifecycle) ·
+(trend/diff) · [workspace-scoped-integrations.md](./workspace-scoped-integrations.md) (private-repo token lifecycle) ·
 [self-hosted-runner.md](./self-hosted-runner.md) (runtime online-ness) · rules `orchestrator` / `api-layer` / `auth`.

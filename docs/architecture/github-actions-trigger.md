@@ -62,9 +62,11 @@ repo↔service wiring. Competing products call this an "integration" and make it
   fire → finalize → diff-vs-previous → `notifyRegression` (Mattermost).
 - **Self-hosted placement exists**: `runtime: "self:<id>"` routes through `runtime-dispatcher.ts` →
   `SelfHostedBackend` → runner-hub `lease_job` long-poll. CI-fired runs can land on a member's machine.
-- **Connected accounts** hold personal GitHub OAuth tokens (scopes `repo`, `read:packages`), host-aware
-  (github.com / GHE via `WorkspaceSettings.integrations`). There is **no** repo-listing proxy route yet, and
-  **no** GitHub webhook/App infrastructure (`x-hub-signature`, installations) — by design we don't add any.
+- **Workspace GitHub App** holds workspace-owned installation tokens (org install → selected repos), host-aware
+  (github.com via operator env / GHE workspace-registered). A repo-listing proxy route exists
+  (`GET /workspace/github-app/repos`) and GitHub App infrastructure (installations, per-repo installation tokens)
+  is in place — see [workspace-scoped-integrations.md](./workspace-scoped-integrations.md). (Migrated in S6b/S6c
+  from the earlier personal Connected accounts, since removed.)
 - **`ScorecardRecord` has no origin/provenance fields** (`packages/db/src/scorecard-store.ts`) — submitter,
   trigger source, and commit identity are not recorded today.
 
@@ -120,9 +122,9 @@ ci?: {
 ```
 
 **Connect UX (no typing):** harness detail → topology diagram → click a service node → "Connect repository" →
-repo picker (new thin proxy `GET /connections/:id/repos` over the member's GitHub connection token → GitHub
-`GET /user/repos`) → select repo (monorepo: multi-select services, optional path) → link saved. Then one button:
-**"Open setup PR"** — Assay uses the member's connection token (`repo` scope already granted) to push a branch
+repo picker (thin proxy `GET /workspace/github-app/repos` over the workspace GitHub App installation → the repos
+GitHub scoped to the install) → select repo (monorepo: multi-select services, optional path) → link saved. Then one button:
+**"Open setup PR"** — Assay uses the workspace installation token (scoped to the linked repos) to push a branch
 adding `.github/workflows/assay-eval.yml` and open a PR. The generated file embeds everything (workspace slug,
 `permissions: id-token: write`, build steps with GHCR digest outputs per linked service, path filters for
 monorepos, `concurrency: assay-eval-${{ github.ref }}` for GH-side superseding). Merge it — done. The Action
@@ -167,7 +169,7 @@ preferred.
    `run_scorecard` gains `pins`. Independently useful without any GitHub wiring.
 2. **OIDC federation:** `githubActionsAuthenticator` + `ci` role + workspace verification against `ci.links`
    (link records may initially be written via a plain settings route). Removes long-lived repo secrets.
-3. **Zero-input UX:** `GET /connections/:id/repos` proxy + harness-detail "Connect repository" picker +
+3. **Zero-input UX:** `GET /workspace/github-app/repos` proxy + harness-detail "Connect repository" picker +
    `ci.links` CRUD (BFF + MCP parity) + **setup-PR generator** (workflow YAML synthesized from the link:
    build steps, digest outputs, path filters, concurrency, workspace slug).
 4. **Later / demand-driven:** server-side supersede; GitHub App (webhook-fired, zero workflow file); Check Runs

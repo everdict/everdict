@@ -35,8 +35,8 @@ app/        Next App Router — landing(/), [workspace]/{layout(shell+멤버십 
             onboarding·new-workspace·invite ; api/auth/[...nextauth] ; middleware(URL 첫 세그먼트 → x-assay-active-workspace 헤더 주입)
 widgets/    page-level composition: app-shell (sidebar+topbar), workspace-switcher (Linear-style sidebar dropdown:
             현재 워크스페이스 + 전환(= /{workspace} 로 이동) + "새 워크스페이스"), scorecard-summary, runs-table, trace-timeline
-features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace, manage-workspace-secrets, manage-workspace-connections (연결된 계정/OAuth: Connect 버튼→start 액션→authorizeUrl 로 브라우저 이동; 목록/해제) (client form/액션 → control plane; 워크스페이스 전환은 URL 이동이라 별도 액션 없음)
-entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace, secret, connection)
+features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace, manage-workspace-secrets, manage-github-app + manage-mattermost (워크스페이스 소유 통합: GitHub App 조직 설치→선택 repo, Mattermost 알림/슬래시커맨드) (client form/액션 → control plane; 워크스페이스 전환은 URL 이동이라 별도 액션 없음)
+entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace, secret, github-app, mattermost)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state/callout/section-header/theme-toggle), lib (utils, control-plane),
             config (env), providers (query), auth (Keycloak token store/refresh, server-only access-token (getToken),
             authContext + currentPrincipal + can, workspace-scope(URL↔쿠키↔헤더 상수) + active-workspace cookie → x-assay-workspace)
@@ -109,24 +109,21 @@ panel/list guidance is not.
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
   실행 form gains a 런타임 selector. See `docs/runtimes.md`.
 - **워크스페이스 설정 `/{workspace}/settings`** — admin-gated 탭: 일반 · 모델 키 · 클러스터 자격증명 ·
-  **연결된 계정**(Connected accounts) · 멤버. **일반 탭**: 워크스페이스 카드(`features/workspace-settings`
+  **통합**(GitHub App · Mattermost) · CI · 공유 러너 · 멤버. **일반 탭**: 워크스페이스 카드(`features/workspace-settings`
   `WorkspaceInfoCard`) — 로고 **파일 업로드**(`shared/lib/image-resize` 로 256px data URL, 유저 아바타와 동일
   방식)·이름 수정 + **URL(slug) 읽기 전용**(복사; slug=tenant 키라 불변) → `PATCH /workspace`. 그 아래 사용량
   계측 정책(`SettingsForm`), 그리고 **owner 에게만** 위험 구역(`features/delete-workspace` `DeleteWorkspaceCard`):
   워크스페이스 이름을 타이핑 확인해야 활성화되는 hard delete → `DELETE /workspace` 후 홈(`/`)으로 이동(서버는
-  `getWorkspace.owner === principal.subject` 로 노출 여부 판단, 최종 강제는 컨트롤플레인). 연결된 계정
-  탭(`features/manage-workspace-connections`)은 외부
-  계정(GitHub 등)을 OAuth 로 연결: **Connect** 버튼 → `startConnectionAction` → 컨트롤플레인 `POST
-  /connections/:provider/start` 의 `authorizeUrl` 로 브라우저 이동 → provider 콜백 → 컨트롤플레인이
-  `/{workspace}/settings?tab=connections&connected=…`(또는 `&error=…`)로 복귀 → 페이지가 `searchParams` 로
-  성공/실패 콜아웃을 표시. 목록은 메타만(토큰 없음), 해제는 `DELETE /connections/:id`. `connections:*`=admin.
-  See `docs/connections.md`.
-- **계정 `/{workspace}/account`** (personal — self-scoped, no role gate) — 프로필 · **연결된 계정**(개인
-  outbound OAuth) · **연결된 러너** · API 키 탭(`account-tabs.tsx`). 연결된 러너(`features/manage-runners`):
-  **manage-only** — 러너 목록(온라인 dot = `lastSeenAt` 신선도) + 해제. 수동 디바이스 페어링(토큰 1회 노출
-  모달)은 제거됨(desktop D7): 개인 머신 페어링은 데스크톱 원클릭이 전담하고, 브라우저에는
-  "데스크톱 앱 받기" CTA(→ `/{workspace}/download`)가 뜬다. headless 서버는 API 키로 `POST /runners`
-  → `assay runner --pair`.
+  `getWorkspace.owner === principal.subject` 로 노출 여부 판단, 최종 강제는 컨트롤플레인). 통합
+  탭(`features/manage-github-app` + `features/manage-mattermost`)은 워크스페이스 소유 외부 통합을 관리:
+  **GitHub App**(조직 설치 → 선택 repo → 워크스페이스 소유 installation 토큰: private-repo clone·CI setup-PR·러너
+  등록; `GET/POST/DELETE /workspace/github-app*`, repo picker `GET /workspace/github-app/repos`) + **Mattermost**
+  (완료/회귀 알림 + 슬래시커맨드/버튼; `GET/PUT/DELETE /workspace/mattermost`). `settings:*`=admin.
+  See `architecture/workspace-scoped-integrations.md`.
+- **계정 `/{workspace}/account`** (personal — self-scoped, no role gate) — 프로필 · **개인 시크릿** ·
+  **API 키** 탭(`account-tabs.tsx`). 개인 outbound OAuth "연결된 계정"은 제거됨(S6c) — 외부 통합은 워크스페이스
+  소유 GitHub App/Mattermost 로 일원화(설정 › 통합, See `architecture/workspace-scoped-integrations.md`);
+  개인 러너 관리(`features/manage-runners`)는 런타임 페이지로 이동(위 참조).
 - **다운로드 `/{workspace}/download`** (`features/download-desktop`) — 데스크톱 설치파일 다운로드 페이지.
   서버가 GitHub 릴리즈(private 유지)를 서버 전용 PAT(`DESKTOP_RELEASES_REPO`/`DESKTOP_RELEASES_TOKEN`,
   5분 캐시)로 읽어 OS 감지(UA) 권장 버튼 + 전 플랫폼 목록 + 설치 후 안내(unsigned 주의 포함)를 렌더링.

@@ -26,7 +26,7 @@ core ← { drivers · environments · harnesses · graders · trace } ← runner
 - `orchestrator` — durable control plane (Temporal): `DirectOrchestrator` / `TemporalOrchestrator` + worker.
 - `trace` — pull a harness trace from OTel/MLflow → `TraceEvent`. `topology` — service-topology harnesses
   (multi-service + target env): orchestrator-agnostic `ServiceTopologyBackend` + Nomad/K8s builders.
-- `db` — result stores: `RunStore` (single runs) + `ScorecardStore` (batch evals; `list` omits heavy per-case results) (`InMemory*`/`Pg*`) + numbered SQL migrations + idempotent `migrate`/`preflight`.
+- `db` — result stores: `RunStore` (single runs) + `ScorecardStore` (batch evals; `list` omits heavy per-case results) + `ViewStore` (saved scorecard-analysis views, `private|workspace`) (`InMemory*`/`Pg*`) + numbered SQL migrations + idempotent `migrate`/`preflight`.
 - `registry` — versioned SSOT (harnesses + datasets + judges + runtimes): `(tenant, id, version)→HarnessSpec` / `→Dataset` / `→JudgeSpec` / `→RuntimeSpec` (immutable versions, semver `latest`, tenant-owned + `_shared` fallback, file/GitOps loader); backs `ServiceTopologyBackend.specFor`. Datasets = harness-agnostic case bundles; Agent Judges = `model`|`harness`; Runtimes = local|nomad|k8s execution infra (`local` = dev/control-plane-host; "run on my machine" → self-hosted runner) (`docs/datasets.md`, `docs/judges.md`, `docs/runtimes.md`).
 - `runner-core` — self-hosted runner core shared by CLI + desktop (MCP lease loop, resilient session, kind-branch execution). GUI-free, DI-style.
 - `apps/cli` — dev control plane (`assay run`, `assay worker`, `assay runner`).

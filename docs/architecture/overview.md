@@ -48,8 +48,8 @@ Above placement, the control plane turns "run one case" into "serve many tenants
   accounting. **Autoscaler** — grows/shrinks capacity from queue depth.
 - **HTTP surface** (`apps/api`, Fastify) — async `POST /runs` → run-id, `GET /runs/:id` poll, webhooks; batch
   **scorecards** (dataset×harness → `Scorecard`+summary, baseline↔candidate diff, push/pull trace ingest,
-  harness×model leaderboard, cron **schedules** on Temporal), **bundles** (one-shot install), personal
-  **connected accounts** + **runners**, CI triggers; stores: `RunStore` + `ScorecardStore` (in-memory or `Pg*`
+  harness×model leaderboard, cron **schedules** on Temporal), **bundles** (one-shot install), workspace
+  **integrations** (GitHub App + Mattermost) + **runners**, CI triggers; stores: `RunStore` + `ScorecardStore` (in-memory or `Pg*`
   on Postgres via `DATABASE_URL`). Full **BFF↔MCP parity** (`/mcp`). See `docs/api.md` + `docs/mcp.md` +
   `docs/scorecards.md`.
 - **Registry** (`@assay/registry`) — the version SSOT for **harnesses · datasets · judges · runtimes**:

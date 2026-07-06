@@ -48,7 +48,8 @@ The shipped self-hosted runner nailed pull/lease/provenance/budget, but under th
   (concurrent `lease_job` never double-hands a job → the basis for many workers/runners sharing a queue).
 - **Worker** — `assay runner --pair <rnr_…>` (`apps/cli` → `@assay/runner-core` `runLeaseWorkers`): one process,
   `--max-concurrent N` lease workers over one MCP session. `runnerAuthenticator` maps `rnr_` → `Principal{via:"runner"}`.
-- **Ownership precedent** — personal (`owner=subject`, account page, no role gate) mirrors Connected accounts.
+- **Ownership precedent** — personal (`owner=subject`, account page, no role gate) mirrors Connected accounts
+  (since removed in S6c — see [workspace-scoped-integrations.md](./workspace-scoped-integrations.md)).
   Workspace-shared runtimes (`nomad|k8s`) are the `RuntimeRegistry` (immutable, `_shared` fallback).
 
 ## Design
@@ -98,12 +99,12 @@ Everything downstream (`Scheduler` fairness/budget/capacity, `RunStore`/`Scoreca
 
 A machine in a **workspace self-hosted runtime** is exactly where a GitHub Actions self-hosted runner belongs
 (it builds the image and calls Assay; the Assay runner next to it executes the eval). Self-serve flow, reusing
-Connected accounts + CI links:
+the workspace GitHub App + CI links:
 
-1. Admin picks a **connected GitHub repo** (existing repo picker) for the workspace runtime.
-2. Assay mints a **registration token** via the connection: `POST /repos/{owner}/{repo}/actions/runners/registration-token`
-   (`ci-link-service` already calls the GitHub API with the connection token — same seam). *Org-level
-   (`/orgs/{org}/…`, needs `admin:org` scope) is a follow-up; **repo-level first** with the current `repo` scope.*
+1. Admin picks a **GitHub repo** (workspace GitHub App repo picker, `GET /workspace/github-app/repos`) for the workspace runtime.
+2. Assay mints a **registration token** via the workspace GitHub App installation: `POST /repos/{owner}/{repo}/actions/runners/registration-token`
+   (`ci-link-service` calls the GitHub API with the workspace installation token — same seam). *Org-level
+   (`/orgs/{org}/…`, needs `admin:org` opt-in) is supported; **repo-level** works with the App's default repo install.*
 3. Assay emits a **one-liner / install script** the build server runs: it (a) configures `actions/runner`
    (`config.sh --url … --token <reg> --labels …`) **and** (b) `assay runner --join ws:<ws>:<id>` — one command
    stands up *both* workers on that host.
@@ -174,17 +175,15 @@ runner, once configured, holds its own GitHub credential — a company resource,
    GitHub connection. `WorkspaceCiLink` grew optional `runsOn`/`runtime` (additive JSONB) so `renderCiWorkflow`
    targets self-hosted directly (`runs-on: <label>` + run-eval `runtime: self:ws:<id>`); settable via the CI-links
    connect dialog ("5. 셀프호스티드 러너"), HTTP `PUT /workspace/ci/links`, and MCP `link_ci_repository`.
-5. **Org-level runner registration — ✅ SHIPPED (opt-in, default scope unchanged).** Org-level uses
-   `POST /orgs/{org}/actions/runners/registration-token` which needs `admin:org`. Rather than broaden the default
-   GitHub OAuth scope for everyone, it's **opt-in**: `OAuthProvider.elevatedScopes` (github=`admin:org`) +
-   `authorizeUrl({scopes})`; `ConnectionService.start({elevated})` requests default+elevated (the extra scope is
-   used only at the authorize step — never persisted through the callback, so **no migration**; the stored scope
-   is whatever GitHub actually granted). `mintRunnerToken` takes a `{repo}|{org}` target; a 403/404 on the org
-   endpoint remaps to a "reconnect with admin:org" `BadRequestError` (no raw 403). `installGithubWorkspaceRunner`
-   accepts `org` (mutually exclusive with `repository`) and points `config.sh --url` at the org URL. Surfaced on
-   `POST /connections/:provider/start {elevated?}`, `POST /workspace/runners/github-install {org?}`, MCP
-   `get_connect_url {elevated?}` + `github_install_workspace_runner {org?}`, and the web dialog (repo/org toggle +
-   `admin:org` detection + "reconnect elevated" CTA). **Org runner groups — SHIPPED:** an optional `runnerGroup`
+5. **Org-level runner registration — ✅ SHIPPED.** Org-level uses
+   `POST /orgs/{org}/actions/runners/registration-token`, which needs `administration:write` on the target. Rather
+   than a personal OAuth `admin:org` scope, this comes from the **workspace GitHub App** installation:
+   `GithubAppService.runnerRegistrationToken(workspace, {repo}|{org})` resolves the installation for the target
+   owner and mints an App token with `administration: write` — a missing install on that owner is a `NotFoundError`
+   (install the workspace App on the org first). `mintRunnerToken` takes a `{repo}|{org}` target;
+   `installGithubWorkspaceRunner` accepts `org` (mutually exclusive with `repository`) and points `config.sh --url`
+   at the org URL. Surfaced on `POST /workspace/runners/github-install {org?}`, MCP
+   `github_install_workspace_runner {org?}`, and the web dialog (repo/org toggle). **Org runner groups — SHIPPED:** an optional `runnerGroup`
    (org-level only) adds `config.sh --runnergroup <name>` so the org's group access policy applies to the runner
    (route/MCP/web params). **Runner labels for placement — SHIPPED** as capability-gated pool routing (slice 2): the
    pool's lease gate skips runners lacking a job's required capabilities, so `self:ws` routes each job to a suitable
@@ -209,5 +208,5 @@ runner, once configured, holds its own GitHub credential — a company resource,
 ## See also
 
 [self-hosted-runner.md](./self-hosted-runner.md) · [runtimes.md](../runtimes.md) ·
-[github-actions-trigger.md](./github-actions-trigger.md) · [connections.md](../connections.md) · [tenancy.md](../tenancy.md) ·
+[github-actions-trigger.md](./github-actions-trigger.md) · [workspace-scoped-integrations.md](./workspace-scoped-integrations.md) · [tenancy.md](../tenancy.md) ·
 skills `backends`, `api-layer`.

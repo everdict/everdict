@@ -5,10 +5,11 @@
 > selector) · `SelfHostedBackend`+`RunnerHub` lease queue (`4036215`) · MCP runner protocol + pairing-token auth
 > (`104bc34`) · `assay runner` CLI (`f0dfeca`) · provenance tag + budget split (`7c751bb`) · lease expiry/requeue +
 > heartbeat + live e2e (`a8e74c1`). Five decisions locked with the user (below) all honored.
-> - **D1 — ownership is personal.** A self-hosted runner is owned by `principal.subject` (like
->   [Connected accounts](../connections.md)), **not** the workspace. The workspace's harnesses/datasets stay
->   shared SSOT; only the *runtime* becomes personal. It lives on the **account** page (next to 연결된 계정 /
->   API keys), self-scoped, **no role gate**. Cluster runtimes (`nomad|k8s`) remain
+> - **D1 — ownership is personal.** A self-hosted runner is owned by `principal.subject` (the personal-ownership
+>   pattern originally mirrored from Connected accounts, since removed in S6c — see
+>   [workspace-scoped-integrations.md](./workspace-scoped-integrations.md)), **not** the workspace. The workspace's
+>   harnesses/datasets stay shared SSOT; only the *runtime* becomes personal. It lives on the personal, self-scoped
+>   surface (next to API keys), **no role gate**. Cluster runtimes (`nomad|k8s`) remain
 >   workspace-shared as today.
 > - **D2 — results flow back to the workspace, tagged.** A self-hosted run is a normal workspace run in
 >   `RunStore`/`ScorecardStore`, carrying a **provenance tag** (`ranOn: self-hosted`, `runner=<device>`,
@@ -72,12 +73,13 @@ box, identity, and bill.
   `placement.target` → tenant `RuntimeSpec` → live `Backend`, then routes through the global `Scheduler` so
   **fairness/budget/capacity/isolation are preserved**. We reuse this seam: a self-hosted target is just
   another `placement.target` value.
-- **Personal-ownership precedent** — Connected accounts (`docs/connections.md`) are keyed by
+- **Personal-ownership precedent** — Connected accounts (since removed in S6c —
+  see [workspace-scoped-integrations.md](./workspace-scoped-integrations.md)) were keyed by
   `(owner=principal.subject, id)`, managed on the account page, **no role gate**, tokens encrypted at rest
-  (`ConnectionStore`), and resolve **against the submitter's subject** at dispatch (Phase 3a `repoToken`). The
-  self-hosted runner mirrors this model exactly (`RunnerStore` ≈ `ConnectionStore`).
+  (`ConnectionStore`), and resolved **against the submitter's subject** at dispatch (Phase 3a `repoToken`). The
+  self-hosted runner mirrors this model exactly (`RunnerStore` ≈ the former `ConnectionStore`).
 - **MCP surface** — `apps/api/src/mcp.ts` already hosts role-gated, API-key-authenticated tools with full
-  BFF↔MCP parity. Personal tools (`list_connections`, …) demonstrate the **no-role-gate, subject-scoped**
+  BFF↔MCP parity. Personal tools (`list_api_keys`, `list_runners`, …) demonstrate the **no-role-gate, subject-scoped**
   pattern the runner tools follow.
 
 ## Design
@@ -86,7 +88,7 @@ box, identity, and bill.
 
 A self-hosted runner is a **personal device pairing**, stored in a new `RunnerStore` (`@assay/db`), keyed by
 `(owner=principal.subject, runnerId)` with a non-key `workspace` column (where it was paired) — the same shape
-as `ConnectionStore`. Metadata: `label` (device name), `os`, `capabilities[]` (e.g. `repo`, `browser`,
+as the former `ConnectionStore`. Metadata: `label` (device name), `os`, `capabilities[]` (e.g. `repo`, `browser`,
 `os-use`, `docker`), `lastSeenAt`, `connectedAt`. It is **not** in the workspace `RuntimeRegistry` (which stays
 the immutable, workspace-shared SSOT for `nomad|k8s`).
 
@@ -115,7 +117,7 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
   someone else's machine). Build/look up the `SelfHostedBackend` keyed to that runner and route via the
   `Scheduler`. No self-hosted runner registered / not owned → no fallthrough to a cluster (explicit error — a
   self-hosted pin is intentional).
-- **MCP runner tools** (subject-scoped, no role gate — personal, like `list_connections`):
+- **MCP runner tools** (subject-scoped, no role gate — personal, like `list_api_keys`):
   - `lease_job {runnerId, capabilities, waitMs}` → long-call returning the next `AgentJob` pinned to a
     self-runner **owned by the leasing subject**, or empty on timeout (the runner re-polls). Double-sided
     enforcement: the queue only holds the owner's jobs, and the tool only serves the owner's queue.
@@ -144,7 +146,7 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
 | `runAgentJob` / `AgentJob` / `CaseResult` (base64-JSON) | **reused verbatim** — the whole point |
 | API-key auth (`@assay/auth`), `Scheduler`/`FairQueue`/`BudgetTracker`, `RunStore`/`ScorecardStore` | **reused** |
 | Runtime selector → `placement.target` → `RuntimeDispatcher` | **reused** (new `self:` branch) |
-| Personal ownership model (`owner=subject`, account page, encrypted at rest, no role gate) | **mirrored** from Connected accounts |
+| Personal ownership model (`owner=subject`, account page, encrypted at rest, no role gate) | **mirrored** from Connected accounts (since removed in S6c) |
 | `RunnerStore` (`@assay/db`) + pairing | **new** |
 | `SelfHostedBackend` + owner-scoped lease queue | **new** (`@assay/backends`) |
 | MCP tools `lease_job`/`submit_result`/`heartbeat_job` + pairing tools (BFF parity) | **new** (`apps/api`) |
@@ -152,7 +154,7 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
 
 ## Slices (all shipped; `pnpm` gates + live e2e green at each step)
 
-1. ✅ **`RunnerStore` + pairing** — personal entity (mirrors `ConnectionStore`): pair (token shown once,
+1. ✅ **`RunnerStore` + pairing** — personal entity (mirrors the former `ConnectionStore`): pair (token shown once,
    SHA-256-hashed at rest), list, revoke; BFF + MCP parity; mig `0025_create_runners`. Account page "연결된 러너".
    **Superseded UI note (desktop D7)**: the browser's manual pairing modal was later removed — personal-machine
    pairing is the desktop app's one-click (`docs/architecture/desktop-app.md`); the browser account page is
@@ -202,5 +204,5 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
 
 ## See also
 
-[runtimes.md](../runtimes.md) · [connections.md](../connections.md) · [execution-backends.md](../execution-backends.md) ·
+[runtimes.md](../runtimes.md) · [workspace-scoped-integrations.md](./workspace-scoped-integrations.md) · [execution-backends.md](../execution-backends.md) ·
 [judge-placement-locality](./judge-placement-locality.md) · skills `backends`, `api-layer`.

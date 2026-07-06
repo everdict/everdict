@@ -21,8 +21,8 @@ logged-in web session over a minimal preload bridge.
 
 ## Security invariants (non-negotiable; changing any = update the SSOT doc + this skill in the same PR)
 1. The window is pinned to the configured web app (`ASSAY_WEB_URL`). Top-level navigation is allowed
-   for http/https only — OIDC (Keycloak) and connected-accounts OAuth are redirect flows that leave and
-   re-enter the web origin; blocking them breaks login. All other schemes are `preventDefault()`ed.
+   for http/https only — OIDC (Keycloak) login is a redirect flow that leaves and
+   re-enters the web origin; blocking it breaks login. All other schemes are `preventDefault()`ed.
    `window.open`: web origin → in-app child window (same webPreferences); other http/https →
    `shell.openExternal`; anything else denied. Local power is never guarded by navigation policy —
    only by the IPC-layer origin check (invariant 4).
