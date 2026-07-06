@@ -659,6 +659,15 @@ export function TemplateForm({
   )
 }
 
+// 슬롯별 라벨 설명·예시 — 슬롯이 템플릿으로 고정된 수정 화면에서 "이 핀이 뭔지"를 바로 보이게 한다.
+// command 는 image·model 두 슬롯이 고정, service 는 슬롯명이 서비스명.
+function pinGuide(slot: string): { hint: string; placeholder: string } {
+  if (slot === 'image')
+    return { hint: '명령을 실행할 컨테이너 이미지', placeholder: 'ghcr.io/acme/codex:pr-12' }
+  if (slot === 'model') return { hint: '에이전트가 쓸 추론 모델', placeholder: 'claude-opus-4-8' }
+  return { hint: `'${slot}' 서비스에 쓸 이미지`, placeholder: 'ghcr.io/acme/agent:abc' }
+}
+
 // --- 인스턴스(template + pins) 등록 ---
 // initial 프리필 + lockId(같은 하니스의 새 버전 — id 고정) + redirectDetailId(성공 시 상세로 복귀).
 export function InstanceForm({
@@ -668,6 +677,7 @@ export function InstanceForm({
   redirectDetailId,
   existingVersions,
   secrets = EMPTY_SECRETS,
+  kind,
 }: {
   workspace: string
   initial?: InstanceState
@@ -675,6 +685,9 @@ export function InstanceForm({
   redirectDetailId?: string
   existingVersions?: string[]
   secrets?: ScopedSecretNames
+  // 이 인스턴스가 올라탄 템플릿의 kind — 알면 overrides 를 그 kind 에 맞는 블록만 노출한다(수정 화면).
+  // 신규 인스턴스 위저드처럼 kind 를 모르면 undefined → 모든 블록 노출(하위호환).
+  kind?: Kind
 }) {
   const router = useRouter()
   const [s, setS] = useState<InstanceState>(initial ?? INITIAL_INSTANCE)
@@ -760,28 +773,75 @@ export function InstanceForm({
         placeholder="pr-123-sha-abc"
       />
 
-      <Section
-        title="Pins (슬롯 → 이미지/값)"
-        onAdd={() => set({ pins: [...s.pins, { slot: '', value: '' }] })}
-      >
-        {s.pins.map((p, i) => (
-          <div key={i} className="flex items-center gap-2 rounded-lg border bg-card p-3">
-            <Input
-              value={p.slot}
-              onChange={(e) => setPin(i, { slot: e.target.value })}
-              placeholder="slot (agent-server / image / model)"
-            />
-            <Input
-              value={p.value}
-              onChange={(e) => setPin(i, { value: e.target.value })}
-              placeholder="value (ghcr.io/…/agent:abc)"
-            />
-            {s.pins.length > 1 && (
-              <RemoveBtn onClick={() => set({ pins: s.pins.filter((_, j) => j !== i) })} />
-            )}
-          </div>
-        ))}
-      </Section>
+      <div className="space-y-1.5">
+        <FieldLabel
+          htmlFor="idesc"
+          tip="이 버전에서 무엇이 바뀌었는지 적어두는 자유 메모예요. 하니스 상세에서 이 버전을 볼 때 표시돼요."
+        >
+          변경 내역 (선택)
+        </FieldLabel>
+        <Textarea
+          id="idesc"
+          value={s.description}
+          onChange={(e) => set({ description: e.target.value })}
+          placeholder="예: 승인 프롬프트 자동 통과 플래그 추가 · 모델 opus-4-8 로 상향"
+          rows={2}
+        />
+      </div>
+
+      {kind === 'command' || kind === 'service' ? (
+        // 슬롯이 템플릿으로 고정된 경우(수정 화면) — 슬롯 라벨 + 한 줄 설명 + 값만. 슬롯 편집/추가·삭제 없음.
+        <Section
+          title="Pins (슬롯마다 이미지·값 지정)"
+          tip={
+            kind === 'command'
+              ? 'command 하니스는 image·model 두 슬롯만 채우면 돼요. 슬롯은 템플릿이 정해요.'
+              : '서비스마다 쓸 이미지를 지정해요. 슬롯은 템플릿의 서비스명이에요.'
+          }
+        >
+          {s.pins.map((p, i) => {
+            const g = pinGuide(p.slot)
+            return (
+              <div key={i} className="space-y-1.5 rounded-lg border bg-card p-3">
+                <div className="flex items-baseline gap-2">
+                  <span className="font-mono text-[13px] font-[560] text-foreground">{p.slot}</span>
+                  <span className="text-[12px] text-muted-foreground">{g.hint}</span>
+                </div>
+                <Input
+                  value={p.value}
+                  onChange={(e) => setPin(i, { value: e.target.value })}
+                  placeholder={g.placeholder}
+                  aria-label={`${p.slot} 값`}
+                />
+              </div>
+            )
+          })}
+        </Section>
+      ) : (
+        // 신규 인스턴스 위저드 — 아직 kind·슬롯을 모르니 자유 입력(슬롯 직접 타이핑) + 추가/삭제.
+        <Section
+          title="Pins (슬롯 → 이미지/값)"
+          onAdd={() => set({ pins: [...s.pins, { slot: '', value: '' }] })}
+        >
+          {s.pins.map((p, i) => (
+            <div key={i} className="flex items-center gap-2 rounded-lg border bg-card p-3">
+              <Input
+                value={p.slot}
+                onChange={(e) => setPin(i, { slot: e.target.value })}
+                placeholder="slot (agent-server / image / model)"
+              />
+              <Input
+                value={p.value}
+                onChange={(e) => setPin(i, { value: e.target.value })}
+                placeholder="value (ghcr.io/…/agent:abc)"
+              />
+              {s.pins.length > 1 && (
+                <RemoveBtn onClick={() => set({ pins: s.pins.filter((_, j) => j !== i) })} />
+              )}
+            </div>
+          ))}
+        </Section>
+      )}
 
       <OverridesEditor
         s={s}
@@ -789,6 +849,7 @@ export function InstanceForm({
         setSvcOv={setSvcOv}
         bodyError={bodyError}
         secrets={secrets}
+        kind={kind}
       />
 
       <JsonPreview value={buildInstance(s)} />
@@ -827,14 +888,20 @@ function OverridesEditor({
   setSvcOv,
   bodyError,
   secrets,
+  kind,
 }: {
   s: InstanceState
   set: (patch: Partial<InstanceState>) => void
   setSvcOv: (i: number, patch: Partial<ServiceOverrideRow>) => void
   bodyError?: string
   secrets: ScopedSecretNames
+  kind?: Kind
 }) {
   const [open, setOpen] = useState(hasOverrides(s))
+  // kind 를 알면 그 kind 의 변주만 노출한다: command→Command 블록만, service→서비스/front-door/target 만.
+  // 모르면(undefined, 예: 신규 인스턴스 위저드) 전부 노출(하위호환).
+  const showService = kind !== 'command'
+  const showCommand = kind !== 'service'
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-secondary/30">
       <button
@@ -856,154 +923,160 @@ function OverridesEditor({
 
       {open && (
         <div className="space-y-6 border-t border-border px-4 py-4">
-          <Section
-            title="서비스 변주 (service 하니스)"
-            onAdd={() =>
-              set({ serviceOverrides: [...s.serviceOverrides, { ...EMPTY_SERVICE_OVERRIDE }] })
-            }
-          >
-            {s.serviceOverrides.length === 0 ? (
-              <p className="text-[12px] text-muted-foreground">
-                서비스마다 env·replicas 같은 설정을 덮어써요. 이미지 교체는 위 Pins에서 하고,
-                서비스명은 템플릿에 있어야 해요.
-              </p>
-            ) : (
-              s.serviceOverrides.map((r, i) => (
-                <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={r.service}
-                      onChange={(e) => setSvcOv(i, { service: e.target.value })}
-                      placeholder="서비스명 (agent-server)"
-                    />
-                    <RemoveBtn
-                      onClick={() =>
-                        set({ serviceOverrides: s.serviceOverrides.filter((_, j) => j !== i) })
-                      }
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    <NumField
-                      label="replicas"
-                      value={r.replicas}
-                      onChange={(v) => setSvcOv(i, { replicas: v })}
-                      placeholder="2"
-                    />
-                    <NumField
-                      label="cpu (m · 1000=1코어)"
-                      value={r.cpu}
-                      onChange={(v) => setSvcOv(i, { cpu: v })}
-                      placeholder="2000"
-                    />
-                    <NumField
-                      label="memory (MB)"
-                      value={r.memoryMb}
-                      onChange={(v) => setSvcOv(i, { memoryMb: v })}
-                      placeholder="4096"
-                    />
-                  </div>
-                  <EnvEditor
-                    label="env"
-                    tip={
-                      <>
-                        이 서비스의 env 를 덮어써요. 비밀은 <b>시크릿</b>으로 참조하세요.
-                      </>
-                    }
-                    rows={r.env}
-                    onChange={(env) => setSvcOv(i, { env })}
-                    secrets={secrets}
-                  />
+          {showService && (
+            <>
+              <Section
+                title="서비스 변주 (service 하니스)"
+                onAdd={() =>
+                  set({ serviceOverrides: [...s.serviceOverrides, { ...EMPTY_SERVICE_OVERRIDE }] })
+                }
+              >
+                {s.serviceOverrides.length === 0 ? (
+                  <p className="text-[12px] text-muted-foreground">
+                    서비스마다 env·replicas 같은 설정을 덮어써요. 이미지 교체는 위 Pins에서 하고,
+                    서비스명은 템플릿에 있어야 해요.
+                  </p>
+                ) : (
+                  s.serviceOverrides.map((r, i) => (
+                    <div key={i} className="space-y-2.5 rounded-lg border bg-card p-3">
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={r.service}
+                          onChange={(e) => setSvcOv(i, { service: e.target.value })}
+                          placeholder="서비스명 (agent-server)"
+                        />
+                        <RemoveBtn
+                          onClick={() =>
+                            set({ serviceOverrides: s.serviceOverrides.filter((_, j) => j !== i) })
+                          }
+                        />
+                      </div>
+                      <div className="grid grid-cols-3 gap-2">
+                        <NumField
+                          label="replicas"
+                          value={r.replicas}
+                          onChange={(v) => setSvcOv(i, { replicas: v })}
+                          placeholder="2"
+                        />
+                        <NumField
+                          label="cpu (m · 1000=1코어)"
+                          value={r.cpu}
+                          onChange={(v) => setSvcOv(i, { cpu: v })}
+                          placeholder="2000"
+                        />
+                        <NumField
+                          label="memory (MB)"
+                          value={r.memoryMb}
+                          onChange={(v) => setSvcOv(i, { memoryMb: v })}
+                          placeholder="4096"
+                        />
+                      </div>
+                      <EnvEditor
+                        label="env"
+                        tip={
+                          <>
+                            이 서비스의 env 를 덮어써요. 비밀은 <b>시크릿</b>으로 참조하세요.
+                          </>
+                        }
+                        rows={r.env}
+                        onChange={(env) => setSvcOv(i, { env })}
+                        secrets={secrets}
+                      />
+                      <Textarea
+                        value={r.volumes}
+                        onChange={(e) => setSvcOv(i, { volumes: e.target.value })}
+                        placeholder="volumes (줄바꿈 — cache:/cache · /host:/c:ro)"
+                        rows={2}
+                        className="font-mono text-[12px]"
+                      />
+                      <div className="grid grid-cols-2 gap-2">
+                        <NumField
+                          label="readiness timeout (ms)"
+                          value={r.readinessTimeout}
+                          onChange={(v) => setSvcOv(i, { readinessTimeout: v })}
+                          placeholder="60000"
+                        />
+                        <NumField
+                          label="readiness interval (ms)"
+                          value={r.readinessInterval}
+                          onChange={(v) => setSvcOv(i, { readinessInterval: v })}
+                          placeholder="1000"
+                        />
+                      </div>
+                    </div>
+                  ))
+                )}
+              </Section>
+
+              <OvBlock title="Front-door (service 하니스)">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ovbody">submit 본문 값 (JSON 객체)</Label>
                   <Textarea
-                    value={r.volumes}
-                    onChange={(e) => setSvcOv(i, { volumes: e.target.value })}
-                    placeholder="volumes (줄바꿈 — cache:/cache · /host:/c:ro)"
-                    rows={2}
+                    id="ovbody"
+                    value={s.bodyTemplate}
+                    onChange={(e) => set({ bodyTemplate: e.target.value })}
+                    placeholder={BODY_PLACEHOLDER}
+                    rows={3}
                     className="font-mono text-[12px]"
                   />
-                  <div className="grid grid-cols-2 gap-2">
-                    <NumField
-                      label="readiness timeout (ms)"
-                      value={r.readinessTimeout}
-                      onChange={(v) => setSvcOv(i, { readinessTimeout: v })}
-                      placeholder="60000"
-                    />
-                    <NumField
-                      label="readiness interval (ms)"
-                      value={r.readinessInterval}
-                      onChange={(v) => setSvcOv(i, { readinessInterval: v })}
-                      placeholder="1000"
-                    />
-                  </div>
+                  {bodyError && <Callout tone="danger">본문 JSON 오류: {bodyError}</Callout>}
                 </div>
-              ))
-            )}
-          </Section>
+                <div className="grid grid-cols-2 gap-2">
+                  <NumField
+                    label="완료 timeout (ms)"
+                    value={s.completionTimeout}
+                    onChange={(v) => set({ completionTimeout: v })}
+                    placeholder="120000"
+                  />
+                  <NumField
+                    label="완료 interval (ms · poll)"
+                    value={s.completionInterval}
+                    onChange={(v) => set({ completionInterval: v })}
+                    placeholder="1000"
+                  />
+                </div>
+              </OvBlock>
 
-          <OvBlock title="Front-door (service 하니스)">
-            <div className="space-y-1.5">
-              <Label htmlFor="ovbody">submit 본문 값 (JSON 객체)</Label>
-              <Textarea
-                id="ovbody"
-                value={s.bodyTemplate}
-                onChange={(e) => set({ bodyTemplate: e.target.value })}
-                placeholder={BODY_PLACEHOLDER}
-                rows={3}
-                className="font-mono text-[12px]"
-              />
-              {bodyError && <Callout tone="danger">본문 JSON 오류: {bodyError}</Callout>}
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <NumField
-                label="완료 timeout (ms)"
-                value={s.completionTimeout}
-                onChange={(v) => set({ completionTimeout: v })}
-                placeholder="120000"
-              />
-              <NumField
-                label="완료 interval (ms · poll)"
-                value={s.completionInterval}
-                onChange={(v) => set({ completionInterval: v })}
-                placeholder="1000"
-              />
-            </div>
-          </OvBlock>
+              <OvBlock title="Target (service · browser 하니스)">
+                <div className="space-y-1.5">
+                  <Label htmlFor="ovext">익스텐션 ref</Label>
+                  <Input
+                    id="ovext"
+                    value={s.targetExtensionRef}
+                    onChange={(e) => set({ targetExtensionRef: e.target.value })}
+                    placeholder="ghcr.io/acme/ext:2"
+                  />
+                </div>
+              </OvBlock>
+            </>
+          )}
 
-          <OvBlock title="Target (service · browser 하니스)">
-            <div className="space-y-1.5">
-              <Label htmlFor="ovext">익스텐션 ref</Label>
-              <Input
-                id="ovext"
-                value={s.targetExtensionRef}
-                onChange={(e) => set({ targetExtensionRef: e.target.value })}
-                placeholder="ghcr.io/acme/ext:2"
+          {showCommand && (
+            <OvBlock title="Command 하니스">
+              <EnvEditor
+                label="env"
+                tip={
+                  <>
+                    command 하니스의 env 를 덮어써요. 비밀은 <b>시크릿</b>으로 참조하세요.
+                  </>
+                }
+                rows={s.cmdEnvRows}
+                onChange={(cmdEnvRows) => set({ cmdEnvRows })}
+                secrets={secrets}
               />
-            </div>
-          </OvBlock>
-
-          <OvBlock title="Command 하니스">
-            <EnvEditor
-              label="env"
-              tip={
-                <>
-                  command 하니스의 env 를 덮어써요. 비밀은 <b>시크릿</b>으로 참조하세요.
-                </>
-              }
-              rows={s.cmdEnvRows}
-              onChange={(cmdEnvRows) => set({ cmdEnvRows })}
-              secrets={secrets}
-            />
-            <div className="space-y-1.5">
-              <Label htmlFor="ovcmdparams">{'params — command {{var}} 값 (KEY=VALUE)'}</Label>
-              <Textarea
-                id="ovcmdparams"
-                value={s.cmdParams}
-                onChange={(e) => set({ cmdParams: e.target.value })}
-                placeholder="edit_format=diff"
-                rows={2}
-                className="font-mono text-[12px]"
-              />
-            </div>
-          </OvBlock>
+              <div className="space-y-1.5">
+                <Label htmlFor="ovcmdparams">{'params — command {{var}} 값 (KEY=VALUE)'}</Label>
+                <Textarea
+                  id="ovcmdparams"
+                  value={s.cmdParams}
+                  onChange={(e) => set({ cmdParams: e.target.value })}
+                  placeholder="edit_format=diff"
+                  rows={2}
+                  className="font-mono text-[12px]"
+                />
+              </div>
+            </OvBlock>
+          )}
         </div>
       )}
     </div>
@@ -1160,7 +1233,7 @@ function Section({
 }: {
   title: string
   tip?: React.ReactNode
-  onAdd: () => void
+  onAdd?: () => void // 없으면 '추가' 버튼 숨김(고정 슬롯처럼 행을 늘릴 수 없는 섹션)
   children: React.ReactNode
 }) {
   return (
@@ -1170,13 +1243,15 @@ function Section({
           {title}
           {tip != null && <InfoTip content={tip} />}
         </h3>
-        <button
-          type="button"
-          onClick={onAdd}
-          className="flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
-        >
-          <Plus className="size-3.5" /> 추가
-        </button>
+        {onAdd && (
+          <button
+            type="button"
+            onClick={onAdd}
+            className="flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
+          >
+            <Plus className="size-3.5" /> 추가
+          </button>
+        )}
       </div>
       <div className="space-y-2">{children}</div>
     </div>

@@ -116,6 +116,9 @@ export const HarnessInstanceSpecSchema = z.object({
   template: z.object({ id: z.string(), version: z.string() }),
   id: z.string(), // resolved 하네스 id (관례상 template.id 와 동일)
   version: z.string(), // 인스턴스 태그
+  // 이 버전의 변경 내역(자유 텍스트 changelog) — 새 버전 배포 시 사용자가 입력, 하니스 상세에 표시. 미설정 = 없음.
+  // 버전 스펙의 일부라 불변(specsEqual 대상): 같은 버전을 다른 내역으로 재등록하면 409. 런타임 무관 메타라 resolve 는 실지 않는다.
+  description: z.string().optional(),
   pins: z.record(z.string()).default({}), // slot → 값(이미지 ref; command 는 "image"/"model")
   overrides: InstanceOverridesSchema.optional(), // 구조 불변 동작 변주(env/본문/params) — 미설정 = 이미지만(현행)
 });

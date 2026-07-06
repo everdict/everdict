@@ -269,6 +269,7 @@ export interface InstanceState {
   templateId: string
   templateVersion: string
   version: string // 인스턴스 태그(예: pr-123-sha-abc)
+  description: string // 이 버전의 변경 내역(자유 텍스트) — 배포 시 입력, 상세에 표시
   pins: PinRow[]
   // 변주(overrides) — 구조 불변 동작 델타(구조적 편집). 컨트롤플레인이 스키마를 최종 검증.
   serviceOverrides: ServiceOverrideRow[] // service 템플릿: 서비스별 env/replicas/resources/volumes/readiness
@@ -365,6 +366,7 @@ export function buildInstance(s: InstanceState): Record<string, unknown> {
     template: { id: s.templateId, version: s.templateVersion },
     id: s.templateId, // 인스턴스 id = 템플릿 id(관례)
     version: s.version,
+    ...(s.description.trim() ? { description: s.description.trim() } : {}),
     pins,
     ...(overrides ? { overrides } : {}),
   }
@@ -413,6 +415,7 @@ export const INITIAL_INSTANCE: InstanceState = {
   templateId: '',
   templateVersion: '1.0.0',
   version: '',
+  description: '',
   pins: [{ slot: 'image', value: '' }],
   serviceOverrides: [],
   bodyTemplate: '',
@@ -486,6 +489,7 @@ export function instanceStateFromSpec(
     templateId: inst.template.id,
     templateVersion: inst.template.version,
     version: '',
+    description: '', // 새 버전은 새 변경 내역 — 이전 버전 설명을 물려받지 않는다(버전 태그와 동일 정신)
     pins: rows.length > 0 ? rows : [{ slot: '', value: '' }],
     serviceOverrides: serviceOverridesFromSpec(ov),
     bodyTemplate: body ? JSON.stringify(body, null, 2) : '',

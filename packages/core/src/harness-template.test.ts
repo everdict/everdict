@@ -364,6 +364,36 @@ describe("resolveHarnessInstance — command", () => {
   });
 });
 
+describe("HarnessInstanceSpec — description(버전 변경 내역)", () => {
+  it("인스턴스에 자유 텍스트 description(변경 내역)을 붙일 수 있고 파싱에 보존된다", () => {
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "aider", version: "1" },
+      id: "aider",
+      version: "sha-def",
+      pins: { image: "ghcr.io/acme/aider:def" },
+      description: "승인 프롬프트 자동 통과 플래그 추가",
+    });
+    expect(instance.description).toBe("승인 프롬프트 자동 통과 플래그 추가");
+  });
+
+  it("description 은 선택 — 런타임 무관 메타라 resolved 스펙에는 실려가지 않는다", () => {
+    const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
+      kind: "process",
+      category: "claude-code",
+      id: "claude-code",
+      version: "1",
+    });
+    const instance = HarnessInstanceSpecSchema.parse({
+      template: { id: "claude-code", version: "1" },
+      id: "claude-code",
+      version: "2026.06",
+      description: "note",
+    });
+    const resolved = resolveHarnessInstance(tpl, instance);
+    expect("description" in resolved).toBe(false);
+  });
+});
+
 describe("resolveHarnessInstance — process", () => {
   it("process 템플릿 → resolved ProcessHarnessSpec(id@version)", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({

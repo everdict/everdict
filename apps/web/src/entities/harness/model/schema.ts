@@ -145,6 +145,7 @@ export const harnessInstanceSpecSchema = z.object({
   template: z.object({ id: z.string(), version: z.string() }),
   id: z.string(),
   version: z.string(),
+  description: z.string().optional(), // 이 버전의 변경 내역(자유 텍스트) — 상세에 표시
   pins: z.record(z.string(), z.string()).default({}),
   overrides: harnessOverridesSchema.optional(),
 })

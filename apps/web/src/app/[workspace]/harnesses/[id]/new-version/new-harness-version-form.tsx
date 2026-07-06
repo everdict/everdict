@@ -63,6 +63,7 @@ export function NewHarnessVersionForm({
           lockId
           redirectDetailId={id}
           secrets={secrets}
+          kind={initialTemplate.kind}
         />
       ) : (
         <TemplateForm

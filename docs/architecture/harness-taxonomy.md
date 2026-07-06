@@ -32,7 +32,10 @@ Template (대분류)            "the shape"          versions unpinned, declares
   slot. A template is itself **versioned** — changing the *shape* (add/remove a service, change wiring) is a new
   template version (e.g. `bu` structure `v1` → `v2`). Pinning a service version is **not** a template change.
 - **Instance (개별 하네스)** — a template reference + **pins** (the delta): the concrete image/version for each
-  slot. Typically one per PR/SHA, created by CI. Stored as pins only, never a full copy of the structure.
+  slot. Typically one per PR/SHA, created by CI. Stored as pins only, never a full copy of the structure. May
+  carry an optional free-text **`description`** — this version's changelog note ("무엇이 바뀌었는지"), entered when
+  deploying a new version and shown on the harness detail. It is part of the version's immutable content
+  (`specsEqual`), but runtime-irrelevant so `resolve()` does not carry it into the resolved `HarnessSpec`.
 - **Resolved `HarnessSpec`** — `template structure (at the referenced template version) + pins`. This is the
   existing `process | service | command` spec the backends/runtime already consume. **Nothing downstream of
   resolution changes** — `AgentJob.harness:{id,version}` still names a concrete, runnable thing.
@@ -63,6 +66,7 @@ input.
 {
   "template": { "id": "bu", "version": "1" },
   "id": "bu", "version": "pr-123-sha-abc",
+  "description": "planner 프롬프트 개편 + browser 119 로 상향", // optional — 이 버전의 변경 내역(상세에 표시)
   "pins": {
     "planner":       "ghcr.io/acme/bu-planner:abc123",
     "browser":       "chromedp/headless-shell:119",
