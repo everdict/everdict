@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { EvalCaseSchema } from "./eval-case.js";
 import { HarnessSpecSchema } from "./harness-spec.js";
+import { RegistryAuthSchema } from "./image-ref.js";
 
 // per-run judge 모델 설정(시크릿 아님). 컨트롤플레인이 워크스페이스/스위트 정책으로 결정해 잡에 싣는다.
 // inline judge grader(예: WebVoyager 프리셋)가 dispatch 경로에서 이 모델로 판정된다. 프로바이더 '키'는 시크릿(secretEnv).
@@ -44,6 +45,10 @@ export const AgentJobSchema = z.object({
   // (Connected accounts)의 토큰으로 resolve 해 실어 보낸다. RepoEnvironment 가 인증 clone(http.extraheader)에만 쓰고,
   // RunRecord/데이터셋엔 저장되지 않는다(케이스엔 connectionId 참조만 남는다).
   repoToken: z.string().optional(),
+  // 워크스페이스 이미지 레지스트리 pull 자격증명(transient) — 잡 이미지 중 워크스페이스 레지스트리 호스트의 것이
+  // 있을 때 컨트롤플레인이 pullSecretName 을 resolve 해 실어 보낸다(repoToken 과 동일 규율 — 결과/데이터셋 영속 금지).
+  // 소비: DockerDriver·러너 토폴로지 pre-pull / nomad docker auth / k8s imagePullSecrets. docs/architecture/workspace-image-registry.md
+  registryAuth: RegistryAuthSchema.optional(),
   // per-dispatch 이미지 핀(서비스명 → 이미지) — 등록된 service 토폴로지 spec 의 서비스 이미지를 런 시점에 override
   // (등록 시점 HarnessTemplate slot/pins 를 dispatch 시점으로 확장). service 하니스에서만 의미.
   // 핀이 있으면 warm 풀이 섞이지 않도록 effective version 에 결정적 접미사가 붙는다(별개 토폴로지 정체성).

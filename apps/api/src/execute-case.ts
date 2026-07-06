@@ -1,5 +1,5 @@
 import type { Dispatcher } from "@assay/backends";
-import type { AgentJob, CaseResult } from "@assay/core";
+import { type AgentJob, type CaseResult, type RegistryAuth, imageUsesRegistryHost } from "@assay/core";
 
 // 실행(Execution) 관심사 — 케이스 하나를 돌려 결과를 만드는 순수 유닛. run/scorecard 가 공유한다.
 // "뒤(정산·오프로드·알림)"는 신경 쓰지 않는다 — 그건 오케스트레이션의 몫(RunService/배치가 결과를 받아 settle/notify).
@@ -12,6 +12,26 @@ export interface ExecuteCaseDeps {
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // (레거시) 개인 연결 — evalCase.env.source.connectionId → 외부 계정 연결 토큰(개인 소유, owner 로 resolve). S6 에서 제거.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
+  // 워크스페이스 이미지 레지스트리 pull 자격증명(best-effort) — 잡 이미지 중 그 레지스트리 호스트의 것이 있으면
+  // job.registryAuth(transient)로 attach 한다. docs/architecture/workspace-image-registry.md
+  registryAuthFor?: (workspace: string) => Promise<RegistryAuth | undefined>;
+}
+
+// 이 잡이 pull 할 수 있는 모든 이미지 참조 — 케이스 이미지 + service 하니스 서비스 이미지(+per-dispatch 핀 override).
+function jobImages(job: AgentJob): string[] {
+  const images: string[] = [];
+  if (job.evalCase.image) images.push(job.evalCase.image);
+  const spec = job.harnessSpec;
+  if (spec?.kind === "service") for (const s of spec.services) images.push(job.imagePins?.[s.name] ?? s.image);
+  return images;
+}
+
+// 잡 이미지 중 워크스페이스 레지스트리 것이 있으면 pull 자격증명을 attach(repoToken 과 동일 규율 — 비영속 transient).
+async function resolveRegistryAuth(deps: ExecuteCaseDeps, job: AgentJob): Promise<RegistryAuth | undefined> {
+  if (!deps.registryAuthFor || !job.tenant) return undefined;
+  const auth = await deps.registryAuthFor(job.tenant).catch(() => undefined);
+  if (!auth) return undefined;
+  return jobImages(job).some((image) => imageUsesRegistryHost(image, auth.host)) ? auth : undefined;
 }
 
 // 케이스 repo 시드가 비공개(git)면 토큰을 resolve. 워크스페이스 GitHub App(installation) 을 먼저 시도하고
@@ -50,6 +70,11 @@ function withHarnessImage(job: AgentJob): AgentJob {
 export async function executeCase(deps: ExecuteCaseDeps, owner: string, job: AgentJob): Promise<CaseResult> {
   const normalized = withHarnessImage(job);
   const repoToken = await resolveRepoToken(deps, owner, normalized);
-  const enriched: AgentJob = repoToken ? { ...normalized, repoToken } : normalized;
+  const registryAuth = await resolveRegistryAuth(deps, normalized);
+  const enriched: AgentJob = {
+    ...normalized,
+    ...(repoToken ? { repoToken } : {}),
+    ...(registryAuth ? { registryAuth } : {}),
+  };
   return deps.dispatcher.dispatch(enriched);
 }

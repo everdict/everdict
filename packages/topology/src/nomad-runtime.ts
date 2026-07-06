@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import {
   type BrowserSnapshot,
+  type RegistryAuth,
   type ServiceHarnessSpec,
   type ServiceReadiness,
   type TrustZone,
@@ -108,6 +109,7 @@ export interface NomadTopologyRuntimeOptions {
   pollIntervalMs?: number;
   maxPolls?: number;
   readyTimeoutMs?: number;
+  registryAuth?: RegistryAuth; // 워크스페이스 이미지 레지스트리 pull 자격증명 — 빌더가 docker auth 로 렌더
 }
 
 // 라이브 NomadTopologyRuntime: warm 서비스 잡 등록 + 엔드포인트 발견 + per-case 브라우저(실 CDP).
@@ -153,6 +155,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       namespace: ns,
       storeEnv,
       zoneId: zone?.id,
+      ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),
     });
     await this.register(job, ns);
 

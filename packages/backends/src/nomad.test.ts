@@ -42,6 +42,22 @@ describe("buildNomadJob", () => {
     expect(decoded.harness.id).toBe("claude-code");
   });
 
+  it("case.image 가 워크스페이스 레지스트리 것이면 docker auth 블록을 렌더한다(job.registryAuth)", () => {
+    const withAuth: AgentJob = {
+      ...JOB,
+      evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" },
+      registryAuth: { host: "ghcr.io", username: "bot", password: "pull-tok" },
+    };
+    const spec = buildNomadJob(withAuth, { addr: "http://nomad:4646", image: "reg/assay-agent:1" });
+    expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Config.auth).toEqual([{ username: "bot", password: "pull-tok" }]);
+    // 호스트 불일치(기본 에이전트 이미지 등)면 auth 미렌더 — 무관 레지스트리에 자격증명을 보내지 않는다.
+    const mismatch = buildNomadJob(
+      { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },
+      { addr: "http://nomad:4646", image: "reg/assay-agent:1" },
+    );
+    expect(mismatch.Job.TaskGroups[0]?.Tasks[0]?.Config.auth).toBeUndefined();
+  });
+
   it("job.judge 가 있으면 judge 모델 env 를 alloc 에 주입한다(키는 secretEnv)", () => {
     const spec = buildNomadJob(
       { ...JOB, judge: { provider: "openai", model: "gpt-5.4-mini" } },

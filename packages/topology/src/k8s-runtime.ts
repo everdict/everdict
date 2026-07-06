@@ -1,5 +1,11 @@
 import { lookup as dnsLookup } from "node:dns/promises";
-import { type BrowserSnapshot, type ServiceHarnessSpec, type TrustZone, UpstreamError } from "@assay/core";
+import {
+  type BrowserSnapshot,
+  type RegistryAuth,
+  type ServiceHarnessSpec,
+  type TrustZone,
+  UpstreamError,
+} from "@assay/core";
 import { STORE_DEFS, buildSharedStoreManifests, dependencyStores } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
@@ -27,6 +33,7 @@ export interface K8sTopologyRuntimeOptions {
   dnsLookup?: (host: string) => Promise<string[]>; // 테스트 주입용 resolver (기본 node:dns)
   browserImage?: string;
   imagePullPolicy?: string; // kind 등 사전 로드 이미지: "IfNotPresent"
+  registryAuth?: RegistryAuth; // 워크스페이스 이미지 레지스트리 pull 자격증명 — dockerconfigjson Secret + imagePullSecrets 렌더
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
   fetchImpl?: typeof fetch; // 엔드포인트 readiness/CDP 조회용 (테스트 주입)
@@ -102,6 +109,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       storeEnv,
       imagePullPolicy: this.opts.imagePullPolicy,
       provisionDependencies: isSilo, // silo 만 전용 스토어를 zone ns 에 배포(SLICE 39); pool/external 은 안 함.
+      ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),
     });
     await this.kubectl.apply(manifests);
 

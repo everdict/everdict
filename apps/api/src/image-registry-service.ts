@@ -1,4 +1,10 @@
-import { BadRequestError, type ImageRegistryCoordinates, NotFoundError, imageRegistryPrefix } from "@assay/core";
+import {
+  BadRequestError,
+  type ImageRegistryCoordinates,
+  NotFoundError,
+  type RegistryAuth,
+  imageRegistryPrefix,
+} from "@assay/core";
 import type { WorkspaceSettings, WorkspaceSettingsStore } from "@assay/db";
 
 // 워크스페이스 이미지 레지스트리(BYO) 서비스 — 하니스 이미지 분류 기준 + assay image push 발행 대상.
@@ -89,6 +95,18 @@ export class ImageRegistryService {
   // 해제(관리자). jsonb 병합 || 은 키 삭제 불가라 null 로 무효화한다(읽을 때 undefined 취급).
   async clear(workspace: string): Promise<void> {
     await this.deps.settings.set(workspace, { imageRegistry: null });
+  }
+
+  // pull 자격증명(디스패치 enrichment 용, best-effort) — pullSecretName 값을 resolve 해 RegistryAuth 로.
+  // 미등록/pull 미구성/시크릿 부재면 undefined(주입만 생략 — pull 이 정말 필요하면 다운스트림 docker 가 명확히 실패).
+  // 호출자: executeCase(job.registryAuth attach) + RuntimeDispatcher(topology 백엔드 빌드).
+  async pullAuth(workspace: string): Promise<RegistryAuth | undefined> {
+    const reg = (await this.deps.settings.get(workspace))?.imageRegistry;
+    if (!reg?.pullSecretName) return undefined;
+    const secrets = await this.deps.secretsFor(workspace);
+    const password = secrets[reg.pullSecretName];
+    if (password === undefined) return undefined;
+    return { host: reg.host, ...(reg.username ? { username: reg.username } : {}), password };
   }
 
   // push 자격증명 발급(member+, images:push) — pushSecretName 값을 워크스페이스 시크릿에서 resolve 해 반환.

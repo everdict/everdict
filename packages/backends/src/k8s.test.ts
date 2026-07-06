@@ -2,7 +2,16 @@ import { stat } from "node:fs/promises";
 import { RESULT_SENTINEL } from "@assay/agent";
 import { type AgentJob, BadRequestError, type CaseResult, UpstreamError } from "@assay/core";
 import { describe, expect, it } from "vitest";
-import { type K8sApi, K8sBackend, buildK8sJob, k8sJobName, kubectlArgs, materializeKubeconfig } from "./k8s.js";
+import {
+  K8S_REGISTRY_AUTH_SECRET,
+  type K8sApi,
+  K8sBackend,
+  buildK8sJob,
+  k8sJobName,
+  k8sRegistryAuthSecret,
+  kubectlArgs,
+  materializeKubeconfig,
+} from "./k8s.js";
 import { staticSecrets } from "./secrets.js";
 import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
@@ -31,6 +40,7 @@ interface JobManifest {
     template: {
       spec: {
         runtimeClassName?: string;
+        imagePullSecrets?: Array<{ name: string }>;
         containers: Array<{ image: string; imagePullPolicy: string; env: Array<{ name: string; value: string }> }>;
       };
     };
@@ -88,6 +98,32 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(m.spec.template.spec.containers[0]?.image).toBe("swebench/sweb.eval.x86_64.x_1776_y-1:latest");
     const off = buildK8sJob(JOB, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
     expect(off.spec.template.spec.containers[0]?.image).toBe("reg/agent:1");
+  });
+
+  it("case.image 가 워크스페이스 레지스트리 것이면 imagePullSecrets 를 렌더한다(Secret 은 dispatch 가 함께 apply)", () => {
+    const withAuth = {
+      ...JOB,
+      evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" },
+      registryAuth: { host: "ghcr.io", username: "bot", password: "pull-tok" },
+    };
+    const m = buildK8sJob(withAuth, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
+    expect(m.spec.template.spec.imagePullSecrets).toEqual([{ name: K8S_REGISTRY_AUTH_SECRET }]);
+    // 호스트 불일치(기본 에이전트 이미지)면 미렌더.
+    const off = buildK8sJob(
+      { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },
+      { image: "reg/agent:1" },
+      "n",
+      "ns",
+    ) as unknown as JobManifest;
+    expect(off.spec.template.spec.imagePullSecrets).toBeUndefined();
+    // Secret 매니페스트 자체는 dockerconfigjson 형식.
+    const secret = k8sRegistryAuthSecret({ host: "ghcr.io", username: "bot", password: "pull-tok" }, "ns") as {
+      type: string;
+      data: Record<string, string>;
+    };
+    expect(secret.type).toBe("kubernetes.io/dockerconfigjson");
+    const config = JSON.parse(Buffer.from(secret.data[".dockerconfigjson"] ?? "", "base64").toString());
+    expect(Buffer.from(config.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:pull-tok");
   });
 
   it("job.judge 가 있으면 judge 모델 env 를 파드에 주입한다(키는 secretEnv)", () => {

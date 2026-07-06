@@ -5,6 +5,7 @@ import {
   CaseResultSchema,
   UpstreamError,
   assertHardenedIsolation,
+  imageUsesRegistryHost,
   judgeEnv,
 } from "@assay/core";
 import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
@@ -58,7 +59,8 @@ export interface NomadBackendOptions {
 interface NomadTask {
   Name: string;
   Driver: string;
-  Config: { image: string; runtime?: string };
+  // auth = docker 레지스트리 인증(HCL auth 블록의 JSON API 표현 = 배열) — case.image 가 워크스페이스 레지스트리일 때.
+  Config: { image: string; runtime?: string; auth?: Array<{ username: string; password: string }> };
   Env: Record<string, string>;
   Resources: { CPU: number; MemoryMB: number };
 }
@@ -90,6 +92,12 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJo
   };
   // per-case 이미지(예: SWE-bench 공식 prebuilt = deps+repo 동봉) 우선, 없으면 기본 에이전트 이미지.
   const image = job.evalCase.image ?? opts.image;
+  // 워크스페이스 레지스트리 이미지면 docker auth(잡 transient 자격증명) — 호스트가 일치할 때만.
+  const registryAuth = job.registryAuth;
+  const auth =
+    registryAuth && imageUsesRegistryHost(image, registryAuth.host)
+      ? [{ username: registryAuth.username ?? "assay", password: registryAuth.password }]
+      : undefined;
   return {
     Job: {
       ID: nomadJobId(job),
@@ -105,7 +113,11 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJo
             {
               Name: "agent",
               Driver: "docker",
-              Config: opts.runtime ? { image, runtime: opts.runtime } : { image },
+              Config: {
+                image,
+                ...(opts.runtime ? { runtime: opts.runtime } : {}),
+                ...(auth ? { auth } : {}),
+              },
               Env: env,
               Resources: { CPU: opts.cpuMhz ?? 1000, MemoryMB: opts.memMb ?? 1024 },
             },

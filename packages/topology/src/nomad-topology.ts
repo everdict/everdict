@@ -1,4 +1,4 @@
-import { type ServiceHarnessSpec, flattenEnv } from "@assay/core";
+import { type RegistryAuth, type ServiceHarnessSpec, flattenEnv, imageUsesRegistryHost } from "@assay/core";
 import { meshServiceName } from "./consul-intentions.js";
 import { dependencyStores } from "./dependencies.js";
 import { sanitizeIdent } from "./store-binding.js";
@@ -9,7 +9,15 @@ import { sanitizeIdent } from "./store-binding.js";
 interface NomadTopoTask {
   Name: string;
   Driver: string;
-  Config: { image: string; runtime?: string; ports?: string[]; args?: string[]; volumes?: string[] };
+  Config: {
+    image: string;
+    runtime?: string;
+    ports?: string[];
+    args?: string[];
+    volumes?: string[];
+    // docker 드라이버 레지스트리 인증(HCL auth 블록의 JSON API 표현 = 배열) — 워크스페이스 레지스트리 이미지 pull 용.
+    auth?: Array<{ username: string; password: string }>;
+  };
   Env: Record<string, string>;
   Resources: { CPU: number; MemoryMB: number };
 }
@@ -56,6 +64,9 @@ export interface NomadTopologyOptions {
   zoneId?: string; // trust-zone(테넌트) 식별자 — warm 잡 ID 에 섞어 테넌트 간 공유를 막는다
   provisionDependencies?: boolean; // spec.dependencies[](postgres/redis)도 같은 잡에 task group 으로 배포
   connect?: boolean; // Consul Connect mesh 활성화(bridge + sidecar) → intentions 가 데이터플레인에서 enforce
+  // 워크스페이스 이미지 레지스트리 pull 자격증명(transient) — 서비스 이미지의 호스트가 일치하는 task 에만
+  // docker auth 블록을 렌더한다. docs/architecture/workspace-image-registry.md
+  registryAuth?: RegistryAuth;
 }
 
 // Connect 그룹 service(sidecar + upstream). 토폴로지 빌더와 라이브 enforce 프루프가 공유하는 빌딩블록.
@@ -155,6 +166,10 @@ export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopol
     const config: NomadTopoTask["Config"] = opts.runtime
       ? { image: svc.image, runtime: opts.runtime }
       : { image: svc.image };
+    // 워크스페이스 레지스트리 이미지면 docker auth(레지스트리 자격증명) — 호스트가 일치하는 task 에만.
+    const auth = opts.registryAuth;
+    if (auth && imageUsesRegistryHost(svc.image, auth.host))
+      config.auth = [{ username: auth.username ?? "assay", password: auth.password }];
     const group: NomadTopoGroup = {
       Name: svc.name,
       Count: svc.replicas,

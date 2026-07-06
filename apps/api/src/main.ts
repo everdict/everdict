@@ -16,7 +16,7 @@ import {
   buildRuntimeBackend,
   inMemoryBudget,
 } from "@assay/backends";
-import type { RuntimeSpec } from "@assay/core";
+import type { RegistryAuth, RuntimeSpec } from "@assay/core";
 import {
   type CommentStore,
   InMemoryCommentStore,
@@ -215,14 +215,25 @@ async function main(): Promise<void> {
   const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
   // harness env {secretRef} 해석용 두 티어 — 공유(owner='') + 제출자 개인(owner=subject). run/scorecard 가 제출자로 호출.
   const scopedSecretsFor = (tenant: string, subject?: string) => secretStore.scopedEntries(tenant, subject ?? "");
+  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상 + pull 자격증명 주입.
+  // 런타임 빌더/디스패치 enrichment 가 pullAuth 를 쓰므로 그 앞에서 생성한다.
+  const imageRegistryService = new ImageRegistryService({
+    settings: settingsStore,
+    secretsFor: runtimeSecretsFor, // push/pull 자격증명·등록 경고는 공유(workspace) 시크릿 티어에서 resolve
+  });
   // RuntimeSpec → 라이브 백엔드. traceSource 를 가진 nomad/k8s(= topology-capable) → ServiceTopologyBackend,
   // 나머지는 buildRuntimeBackend(local/nomad/k8s). (옛 topology kind 는 slice 5b-2 에서 nomad/k8s + traceSource 로 접힘.)
   // 디스패치와 연결 테스트(probe)가 같은 빌더/인증 경로를 쓰도록 한 곳에서 정의.
-  const runtimeBuildBackend = (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) =>
+  const runtimeBuildBackend = (
+    spec: RuntimeSpec,
+    opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
+  ) =>
     (spec.kind === "nomad" || spec.kind === "k8s") && spec.traceSource
       ? buildTopologyBackend(spec, {
           harnesses: harnessInstanceRegistry,
           ...(callbackRendezvous ? { callbackRendezvous } : {}),
+          // 워크스페이스 레지스트리 pull 자격증명 — 토폴로지 런타임이 서비스 이미지를 인증 pull(nomad auth/k8s imagePullSecrets).
+          ...(opts.registryAuth ? { registryAuth: opts.registryAuth } : {}),
         })
       : buildRuntimeBackend(spec, opts);
   // command 하니스의 {{model}} 을 등록 Model id 로 해석(아니면 raw)한 뒤 RuntimeDispatcher(placement)로 위임.
@@ -235,6 +246,8 @@ async function main(): Promise<void> {
       runtimes: runtimeRegistry,
       secretsFor: runtimeSecretsFor,
       buildBackend: runtimeBuildBackend,
+      // 워크스페이스 레지스트리 pull 자격증명 — topology 백엔드 빌드에 실어 서비스 이미지 인증 pull.
+      registryAuthFor: (tenant) => imageRegistryService.pullAuth(tenant),
       // self:<runnerId> — 개인 소유 러너. 소유 확인(미소유=undefined) + 그 러너의 capabilities 반환(service 게이트용).
       resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
       // self:ws — 워크스페이스 풀. 그 owner(=ws:<tenant>)가 러너를 하나라도 가졌는지(아무 러너나 lease).
@@ -261,11 +274,6 @@ async function main(): Promise<void> {
   // 워크스페이스 소유 Mattermost 통합(등록→bot 알림 + 인바운드 슬래시커맨드/버튼). apiPublicUrl 로 인바운드 URL 노출.
   const mattermostService = new MattermostService(settingsStore, {
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
-  });
-  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
-  const imageRegistryService = new ImageRegistryService({
-    settings: settingsStore,
-    secretsFor: runtimeSecretsFor, // push 자격증명/등록 경고는 공유(workspace) 시크릿 티어에서 resolve
   });
   // 리소스 댓글(데이터셋 등) 협업 논의 + @멘션 알림. 멘션되면 언급자 이름을 프로필/멤버에서 해석해 개인 피드로.
   const commentService = new CommentService({
@@ -323,6 +331,8 @@ async function main(): Promise<void> {
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
     // 비공개 repo 시드(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(팀 공용).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
+    // 워크스페이스 레지스트리 이미지 pull 자격증명 — 잡 이미지가 그 레지스트리 것이면 job.registryAuth 로 attach.
+    registryAuthFor: (workspace) => imageRegistryService.pullAuth(workspace),
     // 완료 알림(Mattermost) — 워크스페이스 notify 설정이 있으면 채널 게시. 실패는 run 결과 무관.
     onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
   });
@@ -356,6 +366,8 @@ async function main(): Promise<void> {
     scopedSecretsFor, // harness env {secretRef} 해석(공유+제출자 개인)
     // 비공개-repo 데이터셋(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(단일 run 과 동일).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
+    // 워크스페이스 레지스트리 이미지 pull 자격증명 — 배치 케이스도 단일 run 과 동일하게 attach.
+    registryAuthFor: (workspace) => imageRegistryService.pullAuth(workspace),
     // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
   });

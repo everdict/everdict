@@ -1,7 +1,12 @@
 import type { AgentJob, CaseResult } from "@assay/core";
 import type { TopologyRuntime } from "@assay/topology";
 import { describe, expect, it, vi } from "vitest";
-import { resetSharedTopologyRuntime, runLeasedJob, sharedTopologyRuntime } from "./run-leased-job.js";
+import {
+  resetSharedTopologyRuntime,
+  runLeasedJob,
+  sharedTopologyRuntime,
+  workspaceImagesToPull,
+} from "./run-leased-job.js";
 
 const evalCase: AgentJob["evalCase"] = {
   id: "c1",
@@ -59,6 +64,52 @@ describe("runLeasedJob — 하니스 kind 분기", () => {
     await runLeasedJob({ ...serviceJob, harnessSpec: undefined }, { runService, runProcess });
     expect(runProcess).toHaveBeenCalledOnce();
     expect(runService).not.toHaveBeenCalled();
+  });
+});
+
+// 워크스페이스 레지스트리 서비스 이미지: 배포 전에 인증 pre-pull(임시 DOCKER_CONFIG) — 핀 override 반영, 호스트 일치만.
+describe("runLeasedJob — 워크스페이스 레지스트리 pre-pull(service)", () => {
+  const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
+  const spec: NonNullable<AgentJob["harnessSpec"]> = {
+    kind: "service",
+    id: "bu",
+    version: "1.0.0",
+    services: [
+      { name: "agent", image: "ghcr.io/acme/agent:v1", needs: [], perRun: [], replicas: 1, env: {} },
+      { name: "echo", image: "mendhak/http-https-echo:latest", needs: [], perRun: [], replicas: 1, env: {} },
+    ],
+    dependencies: [],
+    frontDoor: { service: "agent", submit: "POST /runs" },
+    traceSource: { kind: "mlflow", endpoint: "http://mlflow:5000" },
+  };
+
+  it("registryAuth 가 있으면 호스트 일치 이미지만 pre-pull 후 runService 로 간다", async () => {
+    const pulled: string[] = [];
+    const runService = vi.fn(async () => RESULT);
+    await runLeasedJob(
+      { evalCase, harness: { id: "bu", version: "1.0.0" }, harnessSpec: spec, registryAuth: AUTH },
+      { runService, pullImage: async (image) => void pulled.push(image) },
+    );
+    expect(pulled).toEqual(["ghcr.io/acme/agent:v1"]); // echo(docker.io)는 pull 대상 아님
+    expect(runService).toHaveBeenCalledOnce();
+  });
+
+  it("workspaceImagesToPull — per-dispatch 핀 override 를 반영하고 중복 제거한다", () => {
+    expect(workspaceImagesToPull(spec, { echo: "ghcr.io/acme/echo:pr-1" }, AUTH)).toEqual([
+      "ghcr.io/acme/agent:v1",
+      "ghcr.io/acme/echo:pr-1",
+    ]);
+    expect(workspaceImagesToPull(spec, undefined, { host: "quay.io", password: "p" })).toEqual([]);
+  });
+
+  it("registryAuth 없으면 pre-pull 없이 그대로(현행 무회귀)", async () => {
+    const pullImage = vi.fn(async () => {});
+    const runService = vi.fn(async () => RESULT);
+    await runLeasedJob(
+      { evalCase, harness: { id: "bu", version: "1.0.0" }, harnessSpec: spec },
+      { runService, pullImage },
+    );
+    expect(pullImage).not.toHaveBeenCalled();
   });
 });
 

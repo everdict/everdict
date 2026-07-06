@@ -1,7 +1,13 @@
 import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
 import { describe, expect, it } from "vitest";
 import { K8sTopologyRuntime } from "./k8s-runtime.js";
-import { browserDeployName, buildBrowserManifests, namespaceManifest } from "./k8s-topology.js";
+import {
+  REGISTRY_AUTH_SECRET_NAME,
+  browserDeployName,
+  buildBrowserManifests,
+  buildK8sManifests,
+  namespaceManifest,
+} from "./k8s-topology.js";
 import type { Kubectl, PortForward } from "./kubectl.js";
 
 const SPEC: ServiceHarnessSpec = {
@@ -62,6 +68,40 @@ const ZONE = (id: string): TrustZone => ({
   namespace: `assay-${id}`,
   network: "deny-cross-tenant",
   trusted: false,
+});
+
+describe("buildK8sManifests — 워크스페이스 레지스트리 pull 인증(registryAuth)", () => {
+  const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
+  const withImage = (image: string): ServiceHarnessSpec => ({
+    ...SPEC,
+    services: SPEC.services.map((s) => ({ ...s, image })),
+  });
+
+  it("서비스 이미지 호스트가 일치하면 dockerconfigjson Secret + imagePullSecrets 를 렌더한다", () => {
+    const manifests = buildK8sManifests(withImage("ghcr.io/acme/agent:v1"), { registryAuth: AUTH });
+    const secret = manifests.find((m) => m.kind === "Secret") as unknown as {
+      metadata: { name: string };
+      type: string;
+      data: Record<string, string>;
+    };
+    expect(secret.metadata.name).toBe(REGISTRY_AUTH_SECRET_NAME);
+    expect(secret.type).toBe("kubernetes.io/dockerconfigjson");
+    const config = JSON.parse(Buffer.from(secret.data[".dockerconfigjson"] ?? "", "base64").toString());
+    expect(Buffer.from(config.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:pull-tok");
+    const deploy = manifests.find((m) => m.kind === "Deployment") as unknown as {
+      spec: { template: { spec: { imagePullSecrets?: Array<{ name: string }> } } };
+    };
+    expect(deploy.spec.template.spec.imagePullSecrets).toEqual([{ name: REGISTRY_AUTH_SECRET_NAME }]);
+  });
+
+  it("일치하는 이미지가 없으면 Secret 도 imagePullSecrets 도 렌더하지 않는다(무관 자격증명 미살포)", () => {
+    const manifests = buildK8sManifests(withImage("quay.io/x/y:1"), { registryAuth: AUTH });
+    expect(manifests.some((m) => m.kind === "Secret")).toBe(false);
+    const deploy = manifests.find((m) => m.kind === "Deployment") as unknown as {
+      spec: { template: { spec: { imagePullSecrets?: unknown } } };
+    };
+    expect(deploy.spec.template.spec.imagePullSecrets).toBeUndefined();
+  });
 });
 
 describe("buildBrowserManifests (K8s)", () => {

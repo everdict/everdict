@@ -1,5 +1,11 @@
-import { type DriverMount, runAgentJob } from "@assay/agent";
-import type { AgentJob, CaseResult, ServiceHarnessSpec } from "@assay/core";
+import { type DriverMount, pullWithRegistryAuth, runAgentJob } from "@assay/agent";
+import {
+  type AgentJob,
+  type CaseResult,
+  type RegistryAuth,
+  type ServiceHarnessSpec,
+  imageUsesRegistryHost,
+} from "@assay/core";
 import {
   DockerTopologyRuntime,
   type DockerTopologyRuntimeOptions,
@@ -42,10 +48,19 @@ export async function runLeasedJob(
     dockerAvailable?: boolean; // 이 러너의 Docker 데몬 유무(capability) — image-케이스 컨테이너 실행 게이트
     mounts?: DriverMount[]; // containerize 시 컨테이너에 바인드할 호스트 자원(예: codex 로그인) — 러너 opt-in
     log?: (msg: string) => void; // image 요구인데 Docker 없음 등 사유 통지(조용한 실패 금지)
+    pullImage?: (image: string, auth: RegistryAuth) => Promise<void>; // 테스트 주입(기본 pullWithRegistryAuth)
   } = {},
 ): Promise<CaseResult> {
   const spec = job.harnessSpec;
   if (spec?.kind === "service") {
+    // 워크스페이스 레지스트리 서비스 이미지는 배포 전에 인증 pre-pull(임시 DOCKER_CONFIG) — 토폴로지 런타임의
+    // docker run 은 로컬 이미지를 쓴다(런타임 인터페이스 무변경). 실패는 그대로 전파(pull 안 되면 배포도 못 한다).
+    if (job.registryAuth) {
+      for (const image of workspaceImagesToPull(spec, job.imagePins, job.registryAuth)) {
+        opts.log?.(`워크스페이스 레지스트리 이미지 pull: ${image}`);
+        await (opts.pullImage ?? pullWithRegistryAuth)(image, job.registryAuth);
+      }
+    }
     const runService = opts.runService ?? ((j: AgentJob) => defaultRunService(j, spec, opts.runtimeOptions));
     return runService(job);
   }
@@ -61,6 +76,17 @@ export async function runLeasedJob(
     containerize,
     ...(containerize && opts.mounts?.length ? { mounts: opts.mounts } : {}),
   });
+}
+
+// 인증 pre-pull 대상(순수) — 서비스 이미지(+per-dispatch 이미지 핀 override 반영) 중 레지스트리 호스트가
+// auth.host 와 일치하는 것만, 중복 제거. 핀이 서비스 이미지를 갈아끼우므로 핀 값이 그 서비스의 pull 대상이다.
+export function workspaceImagesToPull(
+  spec: ServiceHarnessSpec,
+  imagePins: Record<string, string> | undefined,
+  auth: RegistryAuth,
+): string[] {
+  const images = spec.services.map((s) => imagePins?.[s.name] ?? s.image);
+  return [...new Set(images.filter((image) => imageUsesRegistryHost(image, auth.host)))];
 }
 
 // service 하니스: 사용자 Docker 데몬에 토폴로지를 띄워 구동. 개인 호스트라 trustZones 없음; trace 미도달 시

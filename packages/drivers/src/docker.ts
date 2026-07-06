@@ -1,4 +1,7 @@
 import { execFile, spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import {
   BadRequestError,
@@ -8,6 +11,9 @@ import {
   type ExecOpts,
   type ExecResult,
   InternalError,
+  type RegistryAuth,
+  dockerAuthConfigJson,
+  imageUsesRegistryHost,
 } from "@assay/core";
 
 const pexecFile = promisify(execFile);
@@ -88,15 +94,39 @@ export interface DriverMount {
   readOnly?: boolean;
 }
 
+// 워크스페이스 레지스트리 이미지의 인증 pull — 자격증명을 임시 DOCKER_CONFIG 디렉터리에만 쓰고(0600) 끝나면
+// 지운다(호스트 ~/.docker/config.json 불가침, assay image push 와 동일 규율). 이미지 호스트가 auth.host 와
+// 일치할 때만 호출된다. pull 이 끝나면 이어지는 docker run 은 로컬 이미지를 쓴다.
+export async function pullWithRegistryAuth(image: string, auth: RegistryAuth): Promise<void> {
+  const configDir = await mkdtemp(join(tmpdir(), "assay-pull-"));
+  try {
+    await writeFile(join(configDir, "config.json"), dockerAuthConfigJson(auth), { mode: 0o600 });
+    await pexecFile("docker", ["--config", configDir, "pull", image], { maxBuffer: MAX_BUFFER }).catch((err) => {
+      const e = err as { stderr?: string; message?: string };
+      throw new InternalError("DRIVER_PROVISION_FAILED", { image, registry: auth.host }, e.stderr || e.message);
+    });
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+}
+
 // env 이미지로 컨테이너를 띄우는 Driver. 격리는 docker(컨테이너) — Backend(Nomad/K8s)의 강격리와 별개의 로컬/단순 실행용.
 export class DockerDriver implements Driver {
   readonly id = "docker";
   private readonly base: string;
   private readonly mounts: DriverMount[];
   // defaultImage: 케이스가 image 를 안 실으면 쓸 기본 이미지. keepAlive: 컨테이너 유지 sleep 인자. base: 상대경로 작업루트.
-  // mounts: 호스트→컨테이너 바인드 마운트(러너가 주입 — 예: codex 로그인). 설계: docs/architecture/portable-harness-runtime.md.
+  // mounts: 호스트→컨테이너 바인드 마운트(러너가 주입 — 예: codex 로그인). registryAuth: 워크스페이스 레지스트리
+  // pull 자격증명(transient, AgentJob.registryAuth) — 이미지 호스트가 일치하면 인증 pre-pull 후 run.
+  // 설계: docs/architecture/portable-harness-runtime.md · workspace-image-registry.md.
   constructor(
-    private readonly opts: { defaultImage?: string; keepAlive?: string; base?: string; mounts?: DriverMount[] } = {},
+    private readonly opts: {
+      defaultImage?: string;
+      keepAlive?: string;
+      base?: string;
+      mounts?: DriverMount[];
+      registryAuth?: RegistryAuth;
+    } = {},
   ) {
     this.base = opts.base ?? "/assay";
     this.mounts = opts.mounts ?? [];
@@ -111,6 +141,9 @@ export class DockerDriver implements Driver {
         "DockerDriver 는 spec.image 또는 defaultImage 가 필요합니다.",
       );
     }
+    // 워크스페이스 레지스트리 이미지면 인증 pre-pull(임시 DOCKER_CONFIG) — 호스트 데몬에 로그인 흔적을 남기지 않는다.
+    const auth = this.opts.registryAuth;
+    if (auth && imageUsesRegistryHost(image, auth.host)) await pullWithRegistryAuth(image, auth);
     const keep = this.opts.keepAlive ?? "infinity";
     // 바인드 마운트 인자(-v source:target[:ro]) — 이미지 앞에 온다.
     const mountArgs = this.mounts.flatMap((m) => ["-v", `${m.source}:${m.target}${m.readOnly ? ":ro" : ""}`]);

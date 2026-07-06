@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { BadRequestError } from "./errors.js";
-import { classifyImageRef, imageRegistryPrefix, parseImageRef } from "./image-ref.js";
+import {
+  classifyImageRef,
+  dockerAuthConfigJson,
+  imageRegistryPrefix,
+  imageUsesRegistryHost,
+  parseImageRef,
+} from "./image-ref.js";
 
 const acme = { host: "ghcr.io", namespace: "acme" };
 
@@ -77,5 +83,23 @@ describe("imageRegistryPrefix — 대상 ref 조립용 프리픽스", () => {
   it("namespace 유무에 따라 host[/namespace]/ 를 만든다", () => {
     expect(imageRegistryPrefix(acme)).toBe("ghcr.io/acme/");
     expect(imageRegistryPrefix({ host: "registry.acme.dev:5000" })).toBe("registry.acme.dev:5000/");
+  });
+});
+
+describe("imageUsesRegistryHost — 인증 주입 대상 판정(명시 호스트 일치만)", () => {
+  it("명시 호스트가 일치할 때만 true — 무호스트(unqualified/org명)는 false", () => {
+    expect(imageUsesRegistryHost("ghcr.io/acme/agent:v1", "ghcr.io")).toBe(true);
+    expect(imageUsesRegistryHost("quay.io/x/y:1", "ghcr.io")).toBe(false);
+    expect(imageUsesRegistryHost("spreadsheetbench:v1", "ghcr.io")).toBe(false);
+    expect(imageUsesRegistryHost("mendhak/http-https-echo:latest", "ghcr.io")).toBe(false);
+  });
+});
+
+describe("dockerAuthConfigJson — 임시 DOCKER_CONFIG 내용(pull/push 공용)", () => {
+  it("auths[host].auth = base64(user:pass); username 미지정은 토큰 단독 관례로 assay", () => {
+    const parsed = JSON.parse(dockerAuthConfigJson({ host: "ghcr.io", username: "bot", password: "p" }));
+    expect(Buffer.from(parsed.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:p");
+    const tokenOnly = JSON.parse(dockerAuthConfigJson({ host: "r.io", password: "t" }));
+    expect(Buffer.from(tokenOnly.auths["r.io"].auth, "base64").toString()).toBe("assay:t");
   });
 });

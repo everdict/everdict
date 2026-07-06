@@ -1,5 +1,5 @@
 import type { Backend } from "@assay/backends";
-import { BadRequestError, type RuntimeSpec } from "@assay/core";
+import { BadRequestError, type RegistryAuth, type RuntimeSpec } from "@assay/core";
 import type { HarnessInstanceRegistry } from "@assay/registry";
 import {
   type CallbackRendezvous,
@@ -16,7 +16,13 @@ import { buildTraceSource } from "@assay/trace";
 // orchestrator 는 이제 런타임 kind(nomad|k8s) 에서 암시. 클러스터 구동은 라이브(테넌트 Nomad/K8s + browser-use 이미지).
 export function buildTopologyBackend(
   spec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }>,
-  deps: { harnesses: HarnessInstanceRegistry; callbackRendezvous?: CallbackRendezvous },
+  deps: {
+    harnesses: HarnessInstanceRegistry;
+    callbackRendezvous?: CallbackRendezvous;
+    // 워크스페이스 이미지 레지스트리 pull 자격증명(빌드 시점 resolve) — 서비스 이미지 인증 pull
+    // (nomad docker auth / k8s dockerconfigjson Secret + imagePullSecrets).
+    registryAuth?: RegistryAuth;
+  },
 ): Backend {
   const ts = spec.traceSource;
   if (!ts) {
@@ -32,11 +38,13 @@ export function buildTopologyBackend(
           addr: spec.addr,
           ...(spec.namespace ? { namespace: spec.namespace } : {}),
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
+          ...(deps.registryAuth ? { registryAuth: deps.registryAuth } : {}),
         })
       : new K8sTopologyRuntime({
           ...(spec.context ? { context: spec.context } : {}),
           ...(spec.namespace ? { namespacePrefix: spec.namespace } : {}),
           ...(spec.browserImage ? { browserImage: spec.browserImage } : {}),
+          ...(deps.registryAuth ? { registryAuth: deps.registryAuth } : {}),
         });
   const traceSource = buildTraceSource({ kind: ts.kind, endpoint: ts.endpoint });
   return new ServiceTopologyBackend({

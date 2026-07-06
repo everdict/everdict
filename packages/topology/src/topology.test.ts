@@ -145,6 +145,29 @@ describe("buildNomadTopologyJob", () => {
   });
 });
 
+describe("buildNomadTopologyJob — 워크스페이스 레지스트리 pull 인증(registryAuth)", () => {
+  const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
+
+  it("이미지 호스트가 일치하는 task 에만 docker auth 블록을 렌더한다", () => {
+    const spec: ServiceHarnessSpec = {
+      ...SPEC,
+      services: [
+        { name: "a", image: "ghcr.io/acme/agent:v1", port: 8000, needs: [], perRun: [], replicas: 1, env: {} },
+        { name: "b", image: "reg/other:1", port: 9000, needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+    };
+    const job = buildNomadTopologyJob(spec, { registryAuth: AUTH });
+    const [a, b] = job.Job.TaskGroups.map((g) => g.Tasks[0]);
+    expect(a?.Config.auth).toEqual([{ username: "bot", password: "pull-tok" }]);
+    expect(b?.Config.auth).toBeUndefined();
+  });
+
+  it("registryAuth 미설정이면 auth 블록 없음(현행 무회귀)", () => {
+    const job = buildNomadTopologyJob(SPEC);
+    for (const g of job.Job.TaskGroups) expect(g.Tasks[0]?.Config.auth).toBeUndefined();
+  });
+});
+
 describe("buildNomadTopologyJob — Connect mesh", () => {
   it("connect 면 bridge 네트워크 + 메시 service(sidecar) + 같은 테넌트 needs 를 upstream 으로 렌더한다", () => {
     const job = buildNomadTopologyJob(SPEC, { connect: true, zoneId: "acme" });

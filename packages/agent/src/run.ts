@@ -39,9 +39,15 @@ export async function runAgentJob(
         : new RepoEnvironment(job.repoToken !== undefined ? { gitToken: job.repoToken } : {});
   return runCase(job.evalCase, {
     // 명시 driver 우선 → containerize(로컬 Docker, case.image, 호스트 마운트) → 기본 LocalDriver(인프로세스).
+    // registryAuth(잡 transient) — 워크스페이스 레지스트리 이미지를 인증 pre-pull(임시 DOCKER_CONFIG)한다.
     driver:
       opts.driver ??
-      (opts.containerize ? new DockerDriver(opts.mounts ? { mounts: opts.mounts } : {}) : new LocalDriver()),
+      (opts.containerize
+        ? new DockerDriver({
+            ...(opts.mounts ? { mounts: opts.mounts } : {}),
+            ...(job.registryAuth ? { registryAuth: job.registryAuth } : {}),
+          })
+        : new LocalDriver()),
     environment,
     harness,
     graders,

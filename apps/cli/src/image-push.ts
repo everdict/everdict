@@ -3,7 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { BadRequestError, UpstreamError, parseImageRef } from "@assay/core";
+import { BadRequestError, UpstreamError, dockerAuthConfigJson, parseImageRef } from "@assay/core";
 import { z } from "zod";
 
 const pexecFile = promisify(execFile);
@@ -36,11 +36,13 @@ export function buildImageTargetRef(imagePrefix: string, localRef: string, name?
   return `${imagePrefix}${finalName}:${finalTag}`;
 }
 
-// 임시 DOCKER_CONFIG 용 config.json — auths[host].auth = base64("user:pass").
-// username 미지정 레지스트리는 대부분 토큰 단독(아무 사용자명 허용) → "assay" 를 사용.
+// 임시 DOCKER_CONFIG 용 config.json — core dockerAuthConfigJson(pull 경로와 같은 빌더)에 위임.
 export function buildDockerAuthConfig(credentials: Pick<PushCredentials, "host" | "username" | "password">): string {
-  const auth = Buffer.from(`${credentials.username ?? "assay"}:${credentials.password}`).toString("base64");
-  return JSON.stringify({ auths: { [credentials.host]: { auth } } });
+  return dockerAuthConfigJson({
+    host: credentials.host,
+    ...(credentials.username ? { username: credentials.username } : {}),
+    password: credentials.password,
+  });
 }
 
 // 컨트롤플레인에서 push 자격증명 발급 — 실패는 에러 봉투 message 를 그대로 살려 사용자에게 보인다.

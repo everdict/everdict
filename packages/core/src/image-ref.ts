@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { BadRequestError } from "./errors.js";
 import type { HarnessSpec } from "./harness-spec.js";
 
@@ -97,4 +98,27 @@ export function imageWarnings(images: string[], registry?: ImageRegistryCoordina
     if (cls === "local" || cls === "unqualified") warnings.push({ image, class: cls });
   }
   return warnings;
+}
+
+// 레지스트리 pull/push 자격증명(transient) — 컨트롤플레인이 워크스페이스 SecretStore 에서 resolve 해
+// AgentJob.registryAuth 로 실어 보내고(repoToken 과 동일 규율: 결과/데이터셋에 영속 금지), 소비자
+// (DockerDriver/러너/토폴로지 빌더)는 인증 pull 에만 쓰고 버린다.
+export const RegistryAuthSchema = z.object({
+  host: z.string().min(1), // 이 자격증명이 유효한 레지스트리 host[:port]
+  username: z.string().min(1).optional(),
+  password: z.string().min(1),
+});
+export type RegistryAuth = z.infer<typeof RegistryAuthSchema>;
+
+// 이 이미지가 해당 레지스트리 호스트에서 pull 되는가 — 인증 주입 대상 판정(명시 호스트 일치만).
+export function imageUsesRegistryHost(image: string, host: string): boolean {
+  return parseImageRef(image).host === host;
+}
+
+// docker config.json 내용(auths[host].auth = base64("user:pass")) — 임시 DOCKER_CONFIG 디렉터리에 써서
+// docker --config <dir> pull/push 로 쓴다(유저 ~/.docker/config.json 불가침). username 미지정 레지스트리는
+// 대부분 토큰 단독(아무 사용자명 허용) → "assay" 를 쓴다.
+export function dockerAuthConfigJson(auth: RegistryAuth): string {
+  const encoded = Buffer.from(`${auth.username ?? "assay"}:${auth.password}`).toString("base64");
+  return JSON.stringify({ auths: { [auth.host]: { auth: encoded } } });
 }

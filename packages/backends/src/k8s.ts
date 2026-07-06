@@ -9,6 +9,8 @@ import {
   CaseResultSchema,
   UpstreamError,
   assertHardenedIsolation,
+  dockerAuthConfigJson,
+  imageUsesRegistryHost,
   judgeEnv,
 } from "@assay/core";
 import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
@@ -182,6 +184,24 @@ export function k8sJobName(job: AgentJob): string {
   return `assay-${slug || "case"}`;
 }
 
+// imagePullSecrets 가 참조하는 Secret 이름 — 네임스페이스당 하나, apply 가 멱등 upsert 한다(잡 삭제와 무관하게 유지).
+export const K8S_REGISTRY_AUTH_SECRET = "assay-registry-auth";
+
+// 워크스페이스 레지스트리 자격증명(job.registryAuth transient) → dockerconfigjson Secret. case.image 가
+// 그 레지스트리 호스트일 때 dispatch 가 Job 과 함께 List 로 apply 한다.
+export function k8sRegistryAuthSecret(
+  auth: NonNullable<AgentJob["registryAuth"]>,
+  ns: string,
+): Record<string, unknown> {
+  return {
+    apiVersion: "v1",
+    kind: "Secret",
+    metadata: { name: K8S_REGISTRY_AUTH_SECRET, namespace: ns, labels: { app: "assay" } },
+    type: "kubernetes.io/dockerconfigjson",
+    data: { ".dockerconfigjson": Buffer.from(dockerAuthConfigJson(auth)).toString("base64") },
+  };
+}
+
 // AgentJob → K8s batch Job. 페이로드는 ASSAY_AGENT_JOB(base64) env. 격리는 runtimeClassName.
 export function buildK8sJob(
   job: AgentJob,
@@ -197,6 +217,8 @@ export function buildK8sJob(
   };
   // per-case 이미지(예: SWE-bench 공식 prebuilt = deps+repo 동봉) 우선, 없으면 기본 에이전트 이미지.
   const image = job.evalCase.image ?? opts.image;
+  // 워크스페이스 레지스트리 이미지면 imagePullSecrets(위 Secret 은 dispatch 가 함께 apply) — 호스트 일치 시에만.
+  const pullAuth = Boolean(job.registryAuth && imageUsesRegistryHost(image, job.registryAuth.host));
   const tenant = job.tenant ?? "default";
   return {
     apiVersion: "batch/v1",
@@ -211,6 +233,7 @@ export function buildK8sJob(
           restartPolicy: "Never",
           ...(runtimeClassName ? { runtimeClassName } : {}),
           ...(opts.hostNetwork ? { hostNetwork: true } : {}),
+          ...(pullAuth ? { imagePullSecrets: [{ name: K8S_REGISTRY_AUTH_SECRET }] } : {}),
           containers: [
             {
               name: "agent",
@@ -315,7 +338,15 @@ export class K8sBackend implements Backend {
     // kubeconfig 인증이면 잡 1건 동안만 임시 kubeconfig 가 살아 있다(완료/실패 후 제거). deleteJob 이후 cleanup.
     return this.withApi(async (api) => {
       await api.ensureNamespace(ns);
-      await api.applyJob(buildK8sJob(job, { ...this.opts, secretEnv }, name, ns, runtimeClassName), ns);
+      const manifest = buildK8sJob(job, { ...this.opts, secretEnv }, name, ns, runtimeClassName);
+      // 워크스페이스 레지스트리 이미지면 dockerconfigjson Secret 을 Job 과 함께 apply(List) — 이름 고정, 멱등 upsert.
+      const auth = job.registryAuth;
+      const image = job.evalCase.image ?? this.opts.image;
+      const payload =
+        auth && imageUsesRegistryHost(image, auth.host)
+          ? { apiVersion: "v1", kind: "List", items: [k8sRegistryAuthSecret(auth, ns), manifest] }
+          : manifest;
+      await api.applyJob(payload, ns);
       try {
         await this.waitForJob(api, name, ns);
         return parseResult(await api.podLogs(name, ns));

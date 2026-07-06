@@ -1,5 +1,12 @@
 import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@assay/backends";
-import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
+import {
+  type AgentJob,
+  BadRequestError,
+  type CaseResult,
+  NotFoundError,
+  type RegistryAuth,
+  type RuntimeSpec,
+} from "@assay/core";
 import type { RuntimeRegistry } from "@assay/registry";
 import { type SelfHostedKey, poolKeyFor, selfHostedBackendName } from "./runner-hub.js";
 
@@ -10,7 +17,12 @@ export interface RuntimeDispatcherDeps {
   secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries → 백엔드 secretEnv
   // RuntimeSpec → Backend 빌더(기본 buildRuntimeBackend = local/docker/nomad/k8s). topology 처럼 @assay/backends 가
   // 의존할 수 없는 백엔드(순환)는 apps/api 가 이걸 주입해 처리한다(buildRuntimeBackend 로 폴백).
-  buildBackend?: (spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> }) => Backend;
+  buildBackend?: (
+    spec: RuntimeSpec,
+    opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
+  ) => Backend;
+  // 워크스페이스 이미지 레지스트리 pull 자격증명(best-effort) — topology 백엔드 빌드에 실어 서비스 이미지 인증 pull.
+  registryAuthFor?: (tenant: string) => Promise<RegistryAuth | undefined>;
   // self:<runnerId> 타깃 — 개인 소유 셀프호스티드 러너. 미소유=undefined(404), 소유=그 러너의 capabilities[]
   // (소유 확인 + capability 게이트를 한 번에). service 하니스는 docker capability 가 필요(아래 게이트).
   resolveSelfRunner?: (owner: string, runnerId: string) => Promise<string[] | undefined>;
@@ -103,8 +115,10 @@ export class RuntimeDispatcher implements Dispatcher {
         const name = `rt:${tenant}:${spec.id}@${spec.version}`; // 테넌트·버전별 1 백엔드 인스턴스(재사용)
         if (!this.deps.backends.has(name)) {
           const secretEnv = await this.deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
+          // 워크스페이스 레지스트리 pull 자격증명(있으면) — topology 런타임의 서비스 이미지 인증 pull 에 쓰인다.
+          const registryAuth = await this.deps.registryAuthFor?.(tenant).catch(() => undefined);
           const build = this.deps.buildBackend ?? buildRuntimeBackend;
-          this.deps.backends.register(name, build(spec, { secretEnv }));
+          this.deps.backends.register(name, build(spec, { secretEnv, ...(registryAuth ? { registryAuth } : {}) }));
         }
         routed = { ...job, evalCase: { ...job.evalCase, placement: { ...job.evalCase.placement, target: name } } };
       }

@@ -1,12 +1,12 @@
 # Workspace-scoped image registry — classify + publish harness images
 
-> **Status:** S0–S3 SHIPPED (S1 registration+classification `bd979a4` · S2 `assay image push`
-> `921f93a` · S3 web `79ad895`); S4 (pull auth at dispatch) is the designed follow-up. SSOT for
-> the workspace image registry: where a harness's images *live*, how Assay tells a **local-only**
-> image from a **workspace-registry** image from an **external** one, and how a user **publishes**
-> a locally built image to the workspace registry through Assay. Concretizes "Track B —
-> image-source integrations" from `docs/architecture/harness-taxonomy.md` (reference-not-build
-> stays true).
+> **Status:** ALL SLICES SHIPPED — S1 registration+classification `bd979a4` · S2 `assay image
+> push` `921f93a` · S3 web `79ad895` · S4 pull auth at dispatch (this doc's section below). SSOT
+> for the workspace image registry: where a harness's images *live*, how Assay tells a
+> **local-only** image from a **workspace-registry** image from an **external** one, and how a
+> user **publishes** a locally built image to the workspace registry through Assay. Concretizes
+> "Track B — image-source integrations" from `docs/architecture/harness-taxonomy.md`
+> (reference-not-build stays true).
 
 ## Why
 
@@ -146,21 +146,41 @@ does the same tag/push mechanics itself. `docker` invocations are the CLI's conc
 pure helpers (`buildImageTargetRef`, `buildDockerAuthConfig`, local-ref parsing) are exported
 and unit-tested.
 
-## Pull wiring (follow-up slices — designed, not yet implemented)
+## Pull wiring (S4 — shipped)
 
-Classification and publish land first; making managed/self-hosted runtimes *authenticate*
-pulls from the workspace registry is the follow-up, per runtime:
+One transient contract, consumed per runtime. `AgentJob.registryAuth` (`RegistryAuthSchema` =
+`{host, username?, password}`) follows the `repoToken` discipline exactly: the control plane
+resolves `pullSecretName` at dispatch (`executeCase` → `registryAuthFor`, wired for run AND
+scorecard), attaches it **only when a job image's explicit host matches the registry host**
+(`imageUsesRegistryHost` over `case.image` + service images with per-dispatch `imagePins`
+applied), and it is never persisted to any record/dataset.
 
-- **K8s topology/backend:** render a `kubernetes.io/dockerconfigjson` Secret from
-  `{host, username, pull value}` + `imagePullSecrets: [{name}]` on pod specs (the
-  `imagePullPolicy` knob already exists).
-- **Nomad:** docker driver `auth { username, password }` in the task config.
-- **Self-hosted runner / DockerDriver:** carry pull auth transiently on the job (like
-  `AgentJob.repoToken` — never persisted), runner does an isolated-`DOCKER_CONFIG` pull.
-- **Placement:** `local`/`unqualified` images can gate placement the way `case.image`→`docker`
-  capability already does (`capability_mismatch` fast-fail instead of a doomed pull).
+Consumers (auth is always rendered **only** for host-matching images — no credential spray):
 
-Until then the existing behavior is unchanged: runtimes pull with host-level credentials.
+- **Self-hosted runner, `case.image` path:** `runAgentJob` threads `job.registryAuth` into
+  `DockerDriver({registryAuth})` → authenticated pre-pull via a temp-`DOCKER_CONFIG`
+  (`pullWithRegistryAuth`, 0600, removed in `finally` — the host's `~/.docker/config.json` is
+  never touched), then `docker run` uses the local image.
+- **Self-hosted runner, service path:** `runLeasedJob` pre-pulls `workspaceImagesToPull(spec,
+  imagePins, auth)` before topology deploy — the `TopologyRuntime` interface is unchanged
+  (its `docker run` finds the images locally).
+- **Nomad (topology + backend):** docker task `Config.auth = [{username, password}]` (HCL block
+  in JSON-API array form) — `buildNomadTopologyJob` (via `NomadTopologyRuntimeOptions.registryAuth`)
+  and `buildNomadJob` (from `job.registryAuth`).
+- **K8s (topology + backend):** a `kubernetes.io/dockerconfigjson` Secret named
+  `assay-registry-auth` (per namespace, idempotent apply) + `imagePullSecrets` on matching pod
+  specs — `buildK8sManifests` (via `K8sTopologyRuntimeOptions.registryAuth`) and `buildK8sJob`
+  (the backend applies a `List` of Secret+Job).
+- **Wiring:** `RuntimeDispatcher.registryAuthFor(tenant)` resolves pull auth when building a
+  tenant's topology backend (`buildTopologyBackend({registryAuth})`); baked at first build like
+  `secretEnv` (rotation takes effect on backend rebuild/restart — same existing tradeoff).
+
+**Placement gating — deliberately NOT a hard gate.** `local`/`unqualified` images cannot be
+*proven* un-pullable: kind's local-registry pattern uses `localhost:5001/...` refs that resolve
+in-cluster, and preloaded images (`imagePullPolicy: IfNotPresent`) are a supported managed-runtime
+workflow (how the existing examples run). A hard `capability_mismatch` on image class would break
+both. The signal stays warn-only: registration/validate `imageWarnings` + web badges. Revisit only
+if a real footgun shows up that warnings don't catch.
 
 ## Non-goals
 
@@ -183,5 +203,7 @@ Until then the existing behavior is unchanged: runtimes pull with host-level cre
 - **S3 — web:** Settings → 통합 "이미지 레지스트리" card (admin form, Linear settings-list) +
   harness-detail image classification badges (서비스/커맨드 이미지) + push-command hint in the
   register wizard.
-- **S4 — pull auth (follow-up):** k8s `imagePullSecrets` / nomad docker `auth` / runner
-  transient pull auth + placement gating, per the section above.
+- **S4 — pull auth (shipped):** `AgentJob.registryAuth` transient + DockerDriver/runner pre-pull
+  (temp `DOCKER_CONFIG`) + nomad docker `auth` + k8s `dockerconfigjson` Secret/`imagePullSecrets`
+  (topology builders AND managed case backends) + dispatch wiring (`executeCase` ·
+  `RuntimeDispatcher`). Placement stays warn-only (see the pull-wiring section for why).

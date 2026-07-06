@@ -118,6 +118,47 @@ describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", ()
   });
 });
 
+describe("executeCase — 워크스페이스 레지스트리 pull 자격증명 attach(job.registryAuth)", () => {
+  const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
+
+  it("케이스 이미지가 워크스페이스 레지스트리 것이면 registryAuth 를 attach 한다", async () => {
+    const cap = capture();
+    const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
+    await executeCase(
+      { dispatcher: cap.dispatcher, registryAuthFor: async (ws) => (ws === "acme" ? AUTH : undefined) },
+      "u",
+      job,
+    );
+    expect(cap.seen()?.registryAuth).toEqual(AUTH);
+  });
+
+  it("잡 이미지가 그 레지스트리 호스트가 아니면 자격증명을 붙이지 않는다(불필요 유출 방지)", async () => {
+    const cap = capture();
+    const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "spreadsheetbench:v1" } };
+    await executeCase({ dispatcher: cap.dispatcher, registryAuthFor: async () => AUTH }, "u", job);
+    expect(cap.seen()?.registryAuth).toBeUndefined();
+  });
+
+  it("service 하니스는 서비스 이미지(+per-dispatch 핀 override)로 판정한다", async () => {
+    const cap = capture();
+    const serviceSpec: NonNullable<AgentJob["harnessSpec"]> = {
+      kind: "service",
+      id: "bu",
+      version: "1",
+      services: [
+        { name: "agent", image: "mendhak/http-https-echo:latest", needs: [], perRun: [], replicas: 1, env: {} },
+      ],
+      dependencies: [],
+      frontDoor: { service: "agent", submit: "POST /runs" },
+      traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
+    };
+    // spec 이미지는 외부지만 핀이 워크스페이스 레지스트리로 override → attach.
+    const job: AgentJob = { ...JOB, harnessSpec: serviceSpec, imagePins: { agent: "ghcr.io/acme/agent:pr-1" } };
+    await executeCase({ dispatcher: cap.dispatcher, registryAuthFor: async () => AUTH }, "u", job);
+    expect(cap.seen()?.registryAuth).toEqual(AUTH);
+  });
+});
+
 describe("executeCase — command 하니스 이미지 승격(evalCase.image ??= harnessSpec.image)", () => {
   const commandSpec = (image?: string): NonNullable<AgentJob["harnessSpec"]> => ({
     kind: "command",
