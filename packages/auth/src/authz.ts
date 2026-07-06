@@ -35,7 +35,10 @@ export type Action =
   | "settings:read"
   | "settings:write"
   | "comments:read"
-  | "comments:write";
+  | "comments:write"
+  // 워크스페이스 이미지 레지스트리 push 자격증명 발급 — 자격증명 '값'이 호출자에게 나가는 유일한 member 액션이라
+  // harnesses:register(viewer+) 재사용 대신 별도 액션으로 정직하게 명명(등록/해제는 settings:write, 조회는 harnesses:read).
+  | "images:push";
 
 export const ASSAY_ROLES = ["viewer", "member", "admin"] as const;
 export type AssayRole = (typeof ASSAY_ROLES)[number];
@@ -77,6 +80,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "members:read",
     "comments:read",
     "comments:write", // 댓글 작성 = 협업 콘텐츠(누구로 돌렸나 논의) → member+ (삭제는 작성자-or-admin, 서비스 계층)
+    "images:push", // 워크스페이스 레지스트리 push 자격증명 — 하니스 저작(이미지 발행)은 member 의 일
   ]),
   // GitHub Actions OIDC 페더레이션(via=github-actions) 전용 — CI 가 필요한 최소만:
   // 발사/폴링/diff(scorecards) + 재핀(harnesses:register)/기준 조회(harnesses:read). 거버넌스/시크릿/멤버는 없음.
@@ -111,6 +115,7 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "settings:write",
     "comments:read",
     "comments:write",
+    "images:push",
   ]),
 };
 
@@ -147,6 +152,7 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "models:write",
   "runtimes:write",
   "comments:write",
+  "images:push", // 이미지 발행 = 하니스 저작의 일부(대상이 자기 워크스페이스 레지스트리로 한정된 자격증명)
 ];
 // admin scope(=Full Access) = 모든 action. role 매트릭스의 합집합(admin role 이 전체를 보유)에서 도출.
 const ALL_ACTIONS = new Set<Action>(Object.values(ROLE_PERMISSIONS).flatMap((s) => [...s]));

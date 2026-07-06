@@ -42,6 +42,19 @@ export const WorkspaceSettingsSchema = z.object({
     })
     .nullable()
     .optional(),
+  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지의 분류 기준 + assay image push 발행 대상. 워크스페이스당 1개.
+  // 시크릿은 전부 SecretStore name-ref(값 저장/반환 안 함). nullable: DELETE 는 null 로 클리어(mattermost 와 동일).
+  // 설계: docs/architecture/workspace-image-registry.md
+  imageRegistry: z
+    .object({
+      host: z.string().min(1), // 레지스트리 host[:port] — "ghcr.io" · "registry.acme.dev:5000"
+      namespace: z.string().min(1).optional(), // host 아래 경로 프리픽스 — "acme" → ghcr.io/acme/<name>:<tag>
+      username: z.string().min(1).optional(), // docker login 사용자명(토큰 단독 레지스트리는 생략)
+      pullSecretName: z.string().min(1).optional(), // SecretStore 키 — pull 토큰/패스워드
+      pushSecretName: z.string().min(1).optional(), // SecretStore 키 — push 토큰/패스워드
+    })
+    .nullable()
+    .optional(),
   // CI 통합(GitHub Actions) — repo link 목록(레포↔하니스 슬롯 매핑 = OIDC trust policy). 위 WorkspaceCiLinkSchema 참고.
   ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
   // 워크스페이스 소유 GitHub App 통합(개인 연결 대체) — 조직 설치→선택 repo→워크스페이스 소유 installation.

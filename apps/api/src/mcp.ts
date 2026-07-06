@@ -33,6 +33,7 @@ import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
 import { deleteHarnessVersion } from "./harness-service.js";
+import type { ImageRegistryService } from "./image-registry-service.js";
 import type { MattermostService } from "./mattermost-service.js";
 import type { MembershipService } from "./membership-service.js";
 import type { NotificationService } from "./notification-service.js";
@@ -70,6 +71,7 @@ export interface McpDeps {
   secretStore?: SecretStore;
   githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
   mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림)
+  imageRegistryService?: ImageRegistryService; // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — list/read (self-scoped)
@@ -1317,6 +1319,61 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           await mm.clear(ws);
           return ok({ ok: true });
         }),
+    );
+  }
+
+  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
+  // 조회 harnesses:read / 등록·해제 settings:write / push 자격증명 images:push(member+).
+  if (deps.imageRegistryService) {
+    const registry = deps.imageRegistryService;
+    server.registerTool(
+      "get_workspace_image_registry",
+      {
+        description:
+          "이 워크스페이스의 이미지 레지스트리 — host/namespace/username/시크릿 이름 참조 + imagePrefix(비밀 값 아님). 미설정이면 config 없음.",
+        inputSchema: {},
+      },
+      () =>
+        run(principal, "harnesses:read", async () => {
+          const config = await registry.get(ws);
+          return ok({ ...(config ? { config } : {}) });
+        }),
+    );
+    server.registerTool(
+      "set_workspace_image_registry",
+      {
+        description:
+          "이미지 레지스트리 등록/갱신(관리자, 선언형 전체 교체). pull/push 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 지정. 참조 시크릿이 없으면 missingSecrets 경고.",
+        inputSchema: {
+          host: z.string().min(1).describe('레지스트리 host[:port] — "ghcr.io" · "registry.acme.dev:5000"'),
+          namespace: z.string().min(1).optional().describe('host 아래 경로 프리픽스 — "acme" → ghcr.io/acme/<name>'),
+          username: z.string().min(1).optional().describe("docker login 사용자명(토큰 단독 레지스트리는 생략)"),
+          pullSecretName: z.string().min(1).optional().describe("pull 토큰/패스워드가 저장된 SecretStore 키 이름"),
+          pushSecretName: z.string().min(1).optional().describe("push 토큰/패스워드가 저장된 SecretStore 키 이름"),
+        },
+      },
+      (input) => run(principal, "settings:write", async () => ok(await registry.set(ws, input))),
+    );
+    server.registerTool(
+      "remove_workspace_image_registry",
+      {
+        description: "이미지 레지스트리 해제(관리자). 이후 이미지 분류는 레지스트리 없이(workspace 클래스 없음) 동작.",
+        inputSchema: {},
+      },
+      () =>
+        run(principal, "settings:write", async () => {
+          await registry.clear(ws);
+          return ok({ ok: true });
+        }),
+    );
+    server.registerTool(
+      "get_image_push_credentials",
+      {
+        description:
+          "워크스페이스 레지스트리 push 자격증명 발급(member+) — {host,namespace?,username?,password,imagePrefix}. docker tag+login+push 후 폐기(비영속). 로컬 빌드 이미지를 워크스페이스 레지스트리로 발행할 때 사용.",
+        inputSchema: {},
+      },
+      () => run(principal, "images:push", async () => ok({ credentials: await registry.pushCredentials(ws) })),
     );
   }
 

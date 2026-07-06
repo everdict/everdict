@@ -14,11 +14,14 @@ import {
   EvalCaseSchema,
   HarnessInstanceSpecSchema,
   HarnessTemplateSpecSchema,
+  type ImageWarning,
   JudgeRunConfigSchema,
   JudgeSpecSchema,
   ModelSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
+  collectHarnessImages,
+  imageWarnings,
   referencesUserSecret,
   resolveHarnessInstance,
 } from "@assay/core";
@@ -52,6 +55,7 @@ import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
 import { deleteHarnessVersion } from "./harness-service.js";
+import type { ImageRegistryService } from "./image-registry-service.js";
 import type { MattermostCommandService } from "./mattermost-command-service.js";
 import type { MattermostService } from "./mattermost-service.js";
 import { buildMcpServer } from "./mcp.js";
@@ -204,6 +208,7 @@ export interface ServerDeps {
   githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo) (없으면 해당 라우트 비활성)
   mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림) (없으면 해당 라우트 비활성)
   mattermostCommandService?: MattermostCommandService; // Mattermost 인바운드(슬래시커맨드/버튼) (없으면 해당 라우트 비활성)
+  imageRegistryService?: ImageRegistryService; // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행) (없으면 해당 라우트 비활성)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
   notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — self-scoped (없으면 해당 라우트 비활성)
@@ -585,6 +590,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 미리보기 — 비인증(토큰이 곧 비밀). redeem 하지 않고 워크스페이스 이름/로고/역할만(링크 랜딩용). 무효/만료/수락=404.
+  app.get<{ Querystring: { token?: string } }>("/invites/preview", async (req, reply) => {
+    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    const token = req.query.token;
+    if (!token) return reply.code(400).send({ code: "BAD_REQUEST", message: "token 이 필요해요." });
+    try {
+      return reply.send(await deps.membershipService.previewInvite(token));
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- runs ---
   app.post("/runs", async (req, reply) => {
     const principal = await resolvePrincipal(req, reply, deps);
@@ -744,7 +761,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "harnesses:register");
       await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject);
-      return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
+      // 이미지 분류 경고(warn-not-block) — local/unqualified 이미지는 pull 보장이 없다(빌드 머신 밖 실행 위험).
+      const warnings = await harnessImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
+      return reply.code(201).send({
+        workspace: principal.workspace,
+        id: parsed.data.id,
+        version: parsed.data.version,
+        ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+      });
     } catch (err) {
       return sendError(reply, err); // 템플릿 없음 404 / 핀 누락 400 / 불변 409
     }
@@ -770,7 +794,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         parsed.data.template.version,
       );
       const resolved = resolveHarnessInstance(template, parsed.data); // 핀 누락/불일치/템플릿 없음이면 throw
-      return reply.send({ ok: true, kind: resolved.kind, id: parsed.data.id, version: parsed.data.version });
+      // 이미지 분류 경고(warn-not-block) — 등록 전 사전 점검에서 local/unqualified 이미지를 드러낸다.
+      const registry = await deps.imageRegistryService?.get(principal.workspace);
+      const warnings = imageWarnings(
+        collectHarnessImages(resolved),
+        registry
+          ? { host: registry.host, ...(registry.namespace ? { namespace: registry.namespace } : {}) }
+          : undefined,
+      );
+      return reply.send({
+        ok: true,
+        kind: resolved.kind,
+        id: parsed.data.id,
+        version: parsed.data.version,
+        ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
+      });
     } catch (err) {
       return reply.send({ ok: false, errors: [err instanceof AppError ? err.message : String(err)] });
     }
@@ -2308,6 +2346,76 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상 ---
+  // 조회 harnesses:read(viewer+ — 분류 배지는 하니스 읽기 관심사, 뷰는 이름 참조/좌표만) / 등록·해제 settings:write /
+  // push 자격증명 images:push(member+ — 값 유출을 별도 액션으로 명명). 설계: docs/architecture/workspace-image-registry.md
+  app.get("/workspace/image-registry", async (req, reply) => {
+    if (!deps.imageRegistryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "harnesses:read");
+      const config = await deps.imageRegistryService.get(principal.workspace);
+      return reply.send({ ...(config ? { config } : {}) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.put("/workspace/image-registry", async (req, reply) => {
+    if (!deps.imageRegistryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        host: z.string().min(1), // 레지스트리 host[:port] — URL 아님(스킴 없음)
+        namespace: z.string().min(1).optional(),
+        username: z.string().min(1).optional(),
+        pullSecretName: z.string().min(1).optional(),
+        pushSecretName: z.string().min(1).optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      const result = await deps.imageRegistryService.set(principal.workspace, body.data);
+      return reply.send(result);
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete("/workspace/image-registry", async (req, reply) => {
+    if (!deps.imageRegistryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:write");
+      await deps.imageRegistryService.clear(principal.workspace);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // push 자격증명 발급 — pushSecretName 의 '값'이 응답으로 나간다(비영속, 호출자가 docker login+push 후 폐기).
+  app.post("/workspace/image-registry/push-credentials", async (req, reply) => {
+    if (!deps.imageRegistryService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "images:push");
+      const credentials = await deps.imageRegistryService.pushCredentials(principal.workspace);
+      return reply.send({ credentials });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- Mattermost 인바운드(슬래시커맨드 + 인터랙티브 버튼) — 공개 라우트. 워크스페이스=?ws=, 진위=commandToken 상수시간 검증(fail-closed) ---
   // MM 이 직접 호출(사용자 세션 아님). 검증 실패는 ForbiddenError→403. 슬래시커맨드는 form-urlencoded, 버튼 액션은 JSON.
   app.post<{ Querystring: { ws?: string } }>("/integrations/mattermost/command", async (req, reply) => {
@@ -2669,6 +2777,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           secretStore: deps.secretStore,
           githubAppService: deps.githubAppService,
           mattermostService: deps.mattermostService,
+          imageRegistryService: deps.imageRegistryService,
           ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,
           notificationService: deps.notificationService,
@@ -2709,6 +2818,27 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 // authorize 래퍼 — ForbiddenError 를 그대로 던져 sendError 가 403 으로 매핑.
 function gate(principal: Principal, action: Action): void {
   authorize(principal, action);
+}
+
+// 등록 직후 이미지 분류 경고 — resolve 된 스펙의 이미지들을 워크스페이스 레지스트리 기준으로 분류해
+// local/unqualified(pull 보장 없음)만 추린다. 경고 계산 실패는 등록을 막지 않는다(warn-not-block).
+async function harnessImageWarnings(
+  deps: ServerDeps,
+  workspace: string,
+  id: string,
+  version: string,
+): Promise<ImageWarning[]> {
+  if (!deps.harnessInstances) return [];
+  try {
+    const resolved = await deps.harnessInstances.get(workspace, id, version);
+    const registry = await deps.imageRegistryService?.get(workspace);
+    return imageWarnings(
+      collectHarnessImages(resolved),
+      registry ? { host: registry.host, ...(registry.namespace ? { namespace: registry.namespace } : {}) } : undefined,
+    );
+  } catch {
+    return [];
+  }
 }
 
 // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 볼 수 있다 — 최신 버전을 resolve 해 판정.

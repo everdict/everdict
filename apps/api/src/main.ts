@@ -101,6 +101,7 @@ import { BundleService } from "./bundle-service.js";
 import { CiLinkService } from "./ci-link-service.js";
 import { CommentService } from "./comment-service.js";
 import { GithubAppService, type GithubComAppConfig } from "./github-app-service.js";
+import { ImageRegistryService } from "./image-registry-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MattermostCommandService } from "./mattermost-command-service.js";
 import { MattermostService } from "./mattermost-service.js";
@@ -260,6 +261,11 @@ async function main(): Promise<void> {
   // 워크스페이스 소유 Mattermost 통합(등록→bot 알림 + 인바운드 슬래시커맨드/버튼). apiPublicUrl 로 인바운드 URL 노출.
   const mattermostService = new MattermostService(settingsStore, {
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
+  });
+  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
+  const imageRegistryService = new ImageRegistryService({
+    settings: settingsStore,
+    secretsFor: runtimeSecretsFor, // push 자격증명/등록 경고는 공유(workspace) 시크릿 티어에서 resolve
   });
   // 리소스 댓글(데이터셋 등) 협업 논의 + @멘션 알림. 멘션되면 언급자 이름을 프로필/멤버에서 해석해 개인 피드로.
   const commentService = new CommentService({
@@ -457,6 +463,7 @@ async function main(): Promise<void> {
     githubAppService,
     mattermostService,
     mattermostCommandService,
+    imageRegistryService,
     ciLinkService,
     runnerService,
     notificationService, // 알림 피드(벨 인박스) 라우트 — self-scoped

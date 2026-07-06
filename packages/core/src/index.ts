@@ -12,6 +12,7 @@ export * from "./trust-zone.js";
 export * from "./capability.js";
 export * from "./capability-requirements.js";
 export * from "./harness-spec.js";
+export * from "./image-ref.js";
 export * from "./harness-secrets.js";
 export * from "./harness-template.js";
 export * from "./suite.js";

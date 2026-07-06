@@ -29,6 +29,7 @@ import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
 import { GithubAppService } from "./github-app-service.js";
+import { ImageRegistryService } from "./image-registry-service.js";
 import { defaultJudgeRunner } from "./judge-runner.js";
 import { MattermostCommandService } from "./mattermost-command-service.js";
 import { MattermostService } from "./mattermost-service.js";
@@ -189,6 +190,10 @@ function server(
     settings: settingsStore,
     secretsFor: async () => ({}),
   });
+  const imageRegistryService = new ImageRegistryService({
+    settings: settingsStore,
+    secretsFor: (ws) => secretStore.entries(ws),
+  });
   const app = buildServer({
     service: svc,
     scorecardService,
@@ -206,6 +211,7 @@ function server(
     githubAppService,
     mattermostService,
     mattermostCommandService,
+    imageRegistryService,
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     settingsStore,
     workspaceStore,
@@ -555,6 +561,114 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
     });
     expect(denied.statusCode).toBe(403);
     await viewer.app.close();
+  });
+});
+
+describe("API — workspace image registry (이미지 분류 기준 + push 발행)", () => {
+  const h = { authorization: "Bearer x" };
+  const REGISTRY = { host: "ghcr.io", namespace: "acme", username: "bot", pushSecretName: "GHCR_PUSH" };
+
+  it("관리자는 등록·해제, 조회는 viewer 도 가능(harnesses:read) — imagePrefix 포함, 비밀 값 없음", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    const put = await app.inject({ method: "PUT", url: "/workspace/image-registry", headers: h, payload: REGISTRY });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().config).toMatchObject({ host: "ghcr.io", namespace: "acme", imagePrefix: "ghcr.io/acme/" });
+    // 참조 시크릿이 아직 없으면 경고(warn-not-block).
+    expect(put.json().missingSecrets).toEqual(["GHCR_PUSH"]);
+    expect((await app.inject({ method: "DELETE", url: "/workspace/image-registry", headers: h })).statusCode).toBe(204);
+    expect(
+      (await app.inject({ method: "GET", url: "/workspace/image-registry", headers: h })).json().config,
+    ).toBeUndefined();
+    await app.close();
+
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    // viewer: 조회는 가능(분류 배지용), 등록은 settings:write 없어 403.
+    expect((await viewer.app.inject({ method: "GET", url: "/workspace/image-registry", headers: h })).statusCode).toBe(
+      200,
+    );
+    expect(
+      (await viewer.app.inject({ method: "PUT", url: "/workspace/image-registry", headers: h, payload: REGISTRY }))
+        .statusCode,
+    ).toBe(403);
+    await viewer.app.close();
+  });
+
+  it("push 자격증명: member 는 시크릿 값 발급, viewer 는 403, 미등록 404 · push 미구성 400", async () => {
+    const admin = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // 미등록 → 404.
+    expect(
+      (await admin.app.inject({ method: "POST", url: "/workspace/image-registry/push-credentials", headers: h }))
+        .statusCode,
+    ).toBe(404);
+    // pushSecretName 미구성 → 400.
+    await admin.app.inject({
+      method: "PUT",
+      url: "/workspace/image-registry",
+      headers: h,
+      payload: { host: "ghcr.io", namespace: "acme" },
+    });
+    expect(
+      (await admin.app.inject({ method: "POST", url: "/workspace/image-registry/push-credentials", headers: h }))
+        .statusCode,
+    ).toBe(400);
+    await admin.app.inject({ method: "PUT", url: "/workspace/image-registry", headers: h, payload: REGISTRY });
+    await admin.secretStore.set("acme", "GHCR_PUSH", "tok-123");
+    const creds = await admin.app.inject({
+      method: "POST",
+      url: "/workspace/image-registry/push-credentials",
+      headers: h,
+    });
+    expect(creds.statusCode).toBe(200);
+    expect(creds.json().credentials).toEqual({
+      host: "ghcr.io",
+      namespace: "acme",
+      username: "bot",
+      password: "tok-123",
+      imagePrefix: "ghcr.io/acme/",
+    });
+    await admin.app.close();
+
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    expect(
+      (await viewer.app.inject({ method: "POST", url: "/workspace/image-registry/push-credentials", headers: h }))
+        .statusCode,
+    ).toBe(403); // images:push 는 member+
+    await viewer.app.close();
+  });
+
+  it("등록/검증 응답에 imageWarnings — local/unqualified 이미지만(워크스페이스/외부는 경고 없음)", async () => {
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    await app.inject({ method: "PUT", url: "/workspace/image-registry", headers: h, payload: REGISTRY });
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: HARNESS_TEMPLATE });
+    // unqualified 핀 → 경고.
+    const bad = await app.inject({
+      method: "POST",
+      url: "/harnesses/validate",
+      headers: h,
+      payload: { ...HARNESS_INSTANCE, pins: { "agent-server": "spreadsheetbench:v1" } },
+    });
+    expect(bad.json()).toMatchObject({
+      ok: true,
+      imageWarnings: [{ image: "spreadsheetbench:v1", class: "unqualified" }],
+    });
+    // 워크스페이스 레지스트리 이미지 → 경고 없음.
+    const good = await app.inject({
+      method: "POST",
+      url: "/harnesses/validate",
+      headers: h,
+      payload: { ...HARNESS_INSTANCE, pins: { "agent-server": "ghcr.io/acme/agent:v1" } },
+    });
+    expect(good.json().imageWarnings).toBeUndefined();
+    // 실제 등록도 동일 경고를 돌려준다(201 + imageWarnings).
+    const reg = await app.inject({
+      method: "POST",
+      url: "/harnesses",
+      headers: h,
+      payload: { ...HARNESS_INSTANCE, pins: { "agent-server": "localhost:5000/agent:dev" } },
+    });
+    expect(reg.statusCode).toBe(201);
+    expect(reg.json().imageWarnings).toEqual([{ image: "localhost:5000/agent:dev", class: "local" }]);
+    await app.close();
   });
 });
 
