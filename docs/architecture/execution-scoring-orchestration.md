@@ -6,7 +6,9 @@
 > `ScorecardService`). Goal is architectural cleanliness — concern isolation + a clean collaboration model.
 >
 > **The three concerns are now separated:**
-> - **Execution** = `execute-case.ts` `executeCase(deps, owner, job) → CaseResult` — pure: repo-token + dispatch.
+> - **Execution** = `execute-case.ts` `executeCase(deps, owner, job) → CaseResult` — pure: repo-token + dispatch
+>   (+ completing a job-deferred trace collection, `traceRef` — see
+>   [streaming-case-pipeline](./streaming-case-pipeline.md) D4).
 >   No settle/offload/notify (S2 stripped `settle` out). `run` no longer cares about "after".
 > - **Scoring** = `scoring-service.ts` `ScoringService` — judge application over results, independent of how
 >   they were produced (S1). Live batch **and** ingest share it. Aggregation stays pure in `@assay/suite`.

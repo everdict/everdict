@@ -68,11 +68,49 @@ The batch pipeline is already async at the API surface (202 + background `track(
 - `ServiceTopologyBackend`: dispose the browser target right after `observe()` (observations are in hand),
   before grading — same idempotent-release pattern.
 
+### D4 — 2-phase trace collection (`traceRef`)
+
+The user-facing model: **phase 1 = run the harness against the dataset; phase 2 = collect the trace the
+harness exported to an observability platform near the runtime.** Two modes, one knob:
+
+- **Contract.** `RunContext.runId` — `runCase` mints (or receives) the correlation id and hands the *same*
+  value to `run()` (harness injects it as `ASSAY_RUN_ID`/`assay.run_id`) and to collection.
+  `EvaluableHarness` gains two optional hooks: `traceSource()` (the platform coordinates + collect mode,
+  from the harness spec) and `collectTrace(runId)` (the actual pull). `CommandHarnessSpec.trace` gains
+  **`collect: "job" | "control-plane"` (default `"job"`)**.
+- **Mode `job` (default — no regression, in-job pull moved after release).** `CommandHarness.run()` no longer
+  pulls at the generator tail; `runCase` calls `collectTrace(runId)` **after compute release** and appends the
+  platform events before observation-only grading. The sandbox is free during OTel/MLflow flush lag. Outcome
+  (`needsCompute`) graders grade before release on the exec-only trace — they never read the trace, so this
+  is semantically identical.
+- **Mode `control-plane` (opt-in — the job ends at execution end).** The agent skips collection AND
+  observation-only grading entirely; the `CaseResult` carries compute-bound scores + snapshot (os-use
+  screenshot materialized *into* the result, since the control plane can't reach the sandbox) +
+  **`traceRef {kind, endpoint, runId}`**. `executeCase` (shared by run + scorecard) completes the result:
+  pull via `buildTraceSource` → append events → reconstruct the deferred observation graders from
+  `case.graders` (same `needsCompute` partition rule, both sides deterministic) → grade. Settle
+  (`costOf`) runs after completion, so cost accounting sees the collected `llm_call` events. Judges then
+  stream over the completed result unchanged (D2).
+- **Why the knob is on the harness spec (locality).** The trace endpoint is often cluster-internal
+  (reachable only from the runtime network) — that is exactly why traces are loaded "near the runtime".
+  Only the harness owner knows whether the endpoint is control-plane-reachable; default `job` keeps pulls
+  inside the runtime network.
+- **Failure semantics.** `job` mode: pull failure fails the case (unchanged). `control-plane` mode:
+  **soft-degrade** — an `error` event is appended and observation grading proceeds; execution artifacts
+  (snapshot + ground-truth scores already produced in-job) are never thrown away, and `caseVerdict`
+  authority ranking means a missing trace cannot overturn a ground-truth pass. An inline `judge` *case
+  grader* cannot be reconstructed control-plane-side without its Judge → explicit `skipped` score (registry
+  judges — the main path — are unaffected).
+
 ## Follow-ups (deliberately not in this pass)
 
-- **traceRef 2-phase collection** — `CaseResult.trace` stays inline today; moving to a pull-after-release
-  `traceRef` contract (command/service harnesses already correlate by `assay.run_id`) frees compute during
-  OTel flush lag and enables a fully detached collect phase. Requires a `CaseResult`/store contract change.
+- **`trace.authSecret` for control-plane collection** — deferred pulls hit the endpoint unauthenticated
+  today (in-network pulls never needed auth); a SecretStore ref on `CommandTraceSpec` closes that when a
+  tenant's platform requires it.
+- **Collection retry/backoff** — control-plane collect is a single fetch (job teardown + result transport
+  already absorb typical flush lag); add bounded retry if real platforms prove laggier.
+- **Command trace kinds beyond otel/mlflow** — langfuse/langsmith/phoenix exist in `buildTraceSource`;
+  extending `CommandTraceSpec` is mechanical once someone needs it.
 - **Per-case sink export streaming** — export after each case's judging instead of post-batch; today's export
   is one fast HTTP pass, low value until sinks dominate the tail.
 - **Durable batch orchestration on Temporal** — per-case activities give restart resilience + horizontal
