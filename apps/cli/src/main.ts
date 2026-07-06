@@ -15,6 +15,7 @@ import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker 
 import { ResilientMcpSession, detectCapabilities, mcpConnect, runLeaseWorkers, runLeasedJob } from "@assay/runner-core";
 import { diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
 import type { DockerTopologyRuntimeOptions } from "@assay/topology";
+import { imagePushCommand } from "./image-push.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
   const flags = new Map<string, string>();
@@ -50,6 +51,10 @@ function usage(): void {
       "",
       "assay suite --suite <file.json> [--harness-version <v>] [--baseline <scorecard.json>] [--concurrency N]",
       "  run a suite (cases × a version) → Scorecard + summary; --baseline diffs two versions (regression)",
+      "",
+      "assay image push <local-ref> [--name <n>] [--tag <t>] [--api-url <url>] [--api-key <ak_…>]",
+      "  publish a locally built image to the workspace image registry (docker tag+push,",
+      "  credentials minted by the control plane, isolated temp DOCKER_CONFIG) → prints the ref to pin",
       "",
       "assay runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N] [--max-concurrent N]",
       "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
@@ -312,6 +317,12 @@ async function main(): Promise<void> {
     }
     if (cmd === "runner") {
       await runnerCommand(parseFlags(argv.slice(1)));
+      return;
+    }
+    if (cmd === "image" && argv[1] === "push") {
+      // 위치 인자(로컬 ref)는 플래그 파서가 안 먹으므로 직접 — image push <ref> [--flags]
+      const positional = argv[2] && !argv[2].startsWith("--") ? argv[2] : undefined;
+      await imagePushCommand(positional, parseFlags(argv.slice(2)));
       return;
     }
     usage();

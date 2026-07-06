@@ -1,0 +1,121 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import { BadRequestError, UpstreamError, parseImageRef } from "@assay/core";
+import { z } from "zod";
+
+const pexecFile = promisify(execFile);
+
+// assay image push — 로컬 빌드 이미지를 워크스페이스 레지스트리로 발행한다.
+// 컨트롤플레인에서 push 자격증명을 발급받아(POST /workspace/image-registry/push-credentials, images:push)
+// 이 머신의 docker 로 tag+push. 자격증명은 임시 DOCKER_CONFIG 디렉터리에만 쓰고 끝나면 지운다
+// (~/.docker/config.json 을 읽지도 쓰지도 않음). 설계: docs/architecture/workspace-image-registry.md
+
+// push 자격증명 응답(비영속) — 컨트롤플레인 계약과 동일 형태.
+const PushCredentialsSchema = z.object({
+  host: z.string().min(1),
+  namespace: z.string().min(1).optional(),
+  username: z.string().min(1).optional(),
+  password: z.string().min(1),
+  imagePrefix: z.string().min(1),
+});
+export type PushCredentials = z.infer<typeof PushCredentialsSchema>;
+
+// 대상 ref 조립 — imagePrefix("host[/namespace]/") 아래로, name/tag 는 로컬 ref 에서 기본값을 얻는다.
+// 예: prefix=ghcr.io/acme/ + local=spreadsheetbench:v1 → ghcr.io/acme/spreadsheetbench:v1
+export function buildImageTargetRef(imagePrefix: string, localRef: string, name?: string, tag?: string): string {
+  const parsed = parseImageRef(localRef);
+  const segments = parsed.path.split("/");
+  const defaultName = segments[segments.length - 1];
+  if (!defaultName)
+    throw new BadRequestError("BAD_REQUEST", { localRef }, "로컬 이미지 참조에서 이름을 얻지 못했습니다");
+  const finalName = name ?? defaultName;
+  const finalTag = tag ?? parsed.tag ?? "latest";
+  return `${imagePrefix}${finalName}:${finalTag}`;
+}
+
+// 임시 DOCKER_CONFIG 용 config.json — auths[host].auth = base64("user:pass").
+// username 미지정 레지스트리는 대부분 토큰 단독(아무 사용자명 허용) → "assay" 를 사용.
+export function buildDockerAuthConfig(credentials: Pick<PushCredentials, "host" | "username" | "password">): string {
+  const auth = Buffer.from(`${credentials.username ?? "assay"}:${credentials.password}`).toString("base64");
+  return JSON.stringify({ auths: { [credentials.host]: { auth } } });
+}
+
+// 컨트롤플레인에서 push 자격증명 발급 — 실패는 에러 봉투 message 를 그대로 살려 사용자에게 보인다.
+export async function fetchPushCredentials(apiUrl: string, apiKey: string): Promise<PushCredentials> {
+  const url = new URL("/workspace/image-registry/push-credentials", apiUrl);
+  let res: Response;
+  try {
+    res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${apiKey}` } });
+  } catch (e) {
+    throw new UpstreamError("UPSTREAM_ERROR", { url: url.toString() }, `컨트롤플레인 연결 실패: ${String(e)}`);
+  }
+  const body = (await res.json().catch(() => ({}))) as { credentials?: unknown; message?: string };
+  if (!res.ok)
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { status: res.status },
+      body.message ?? `push 자격증명 발급 실패(HTTP ${res.status})`,
+    );
+  return PushCredentialsSchema.parse(body.credentials);
+}
+
+interface ImagePushIo {
+  log: (message: string) => void;
+  docker: (args: string[], env?: Record<string, string>) => Promise<void>;
+}
+
+const defaultDocker = async (args: string[], env?: Record<string, string>): Promise<void> => {
+  try {
+    // 진행 출력은 버퍼로 받되 실패 시 stderr 를 살려 보여준다(푸시는 수 분 걸릴 수 있어 무소음이 아님을 로그로 안내).
+    await pexecFile("docker", args, { env: { ...process.env, ...env }, maxBuffer: 16 * 1024 * 1024 });
+  } catch (e) {
+    const stderr = e instanceof Error && "stderr" in e ? String((e as { stderr?: unknown }).stderr ?? "") : "";
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { args: args.join(" ") },
+      `docker ${args[0]} 실패: ${stderr || String(e)}`,
+    );
+  }
+};
+
+// tag → 임시 DOCKER_CONFIG 로그인 파일 → push → 정리(finally). 성공 시 발행된 ref 를 돌려준다.
+export async function pushImage(
+  credentials: PushCredentials,
+  localRef: string,
+  opts: { name?: string; tag?: string; io?: ImagePushIo } = {},
+): Promise<string> {
+  const io: ImagePushIo = opts.io ?? { log: (m) => console.error(m), docker: defaultDocker };
+  const target = buildImageTargetRef(credentials.imagePrefix, localRef, opts.name, opts.tag);
+  io.log(`▶ docker tag ${localRef} ${target}`);
+  await io.docker(["tag", localRef, target]);
+  const configDir = await mkdtemp(join(tmpdir(), "assay-docker-"));
+  try {
+    await writeFile(join(configDir, "config.json"), buildDockerAuthConfig(credentials), { mode: 0o600 });
+    io.log(`▶ docker push ${target} (자격증명: 임시 DOCKER_CONFIG, 종료 후 삭제)`);
+    await io.docker(["--config", configDir, "push", target]);
+  } finally {
+    await rm(configDir, { recursive: true, force: true });
+  }
+  return target;
+}
+
+// assay image push <local-ref> [--name N] [--tag T] [--api-url URL] [--api-key ak_…]
+export async function imagePushCommand(localRef: string | undefined, flags: Map<string, string>): Promise<void> {
+  if (!localRef)
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      undefined,
+      "발행할 로컬 이미지 참조가 필요합니다 — assay image push <ref>",
+    );
+  const apiUrl = flags.get("api-url") ?? process.env.ASSAY_API_URL ?? "http://localhost:8787";
+  const apiKey = flags.get("api-key") ?? process.env.ASSAY_API_KEY;
+  if (!apiKey)
+    throw new BadRequestError("BAD_REQUEST", undefined, "--api-key <ak_…> (또는 ASSAY_API_KEY) 가 필요합니다");
+  const credentials = await fetchPushCredentials(apiUrl, apiKey);
+  const target = await pushImage(credentials, localRef, { name: flags.get("name"), tag: flags.get("tag") });
+  console.error("✓ 발행 완료 — 하니스 핀/서비스 이미지로 이 참조를 쓰세요:");
+  console.log(target);
+}
