@@ -212,14 +212,25 @@ export type ServiceHarnessSpec = z.infer<typeof ServiceHarnessSpecSchema>;
 // command 하니스의 트레이스 추출: 없음(결과만) | OTel/MLflow pull(runId 로 상관).
 // collect: 수집 위치 — "job"(기본, 잡 안에서 compute 해제 후 pull; 클러스터 내부 엔드포인트도 동작) |
 // "control-plane"(잡은 실행에서 끝, 컨트롤플레인이 pull+관측물 채점 — 엔드포인트가 컨트롤플레인에서 닿을 때만).
+// authSecret: 엔드포인트 인증(SecretStore 이름 — 값은 verbatim Authorization 헤더; pull-ingest source.authSecret
+// 과 동일 관례). auth 는 transient — 디스패치 직전 resolveHarnessSecrets 가 값으로 채운다(레지스트리 저장 금지).
 // docs/architecture/streaming-case-pipeline.md D4
+const commandTraceAuth = {
+  authSecret: z.string().optional(),
+  auth: z.string().optional(), // transient(디스패치 시 해석) — 등록 스펙에 넣지 말 것
+  collect: z.enum(["job", "control-plane"]).default("job"),
+};
 export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }),
-  z.object({ kind: z.literal("otel"), endpoint: z.string(), collect: z.enum(["job", "control-plane"]).default("job") }),
+  z.object({ kind: z.literal("otel"), endpoint: z.string(), ...commandTraceAuth }),
   z.object({
     kind: z.literal("mlflow"),
     endpoint: z.string(),
-    collect: z.enum(["job", "control-plane"]).default("job"),
+    ...commandTraceAuth,
+    // 상관 방식: "id"(기본) = runId 가 곧 MLflow trace_id(pull-ingest 관례) | "tag" = 계측 에이전트가
+    // 자기 trace 에 남긴 assay.run_id 태그로 검색(id 는 서버 mint — 실 에이전트 경로). tag 는 experiment 필수.
+    correlate: z.enum(["id", "tag"]).default("id"),
+    experiment: z.string().optional(), // tag 상관의 검색 범위(MLflow traces/search 는 locations 필수)
   }),
 ]);
 export type CommandTraceSpec = z.infer<typeof CommandTraceSpecSchema>;

@@ -26,6 +26,9 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
 - **Match the real upstream API, not a guess.** `MlflowTraceSource` hits MLflow 3.x `GET /api/3.0/mlflow/traces/get?trace_id=`
   and parses **OTLP-style spans** (`attributes` = `{key,value:{string_value|int_value|bool_value|kvlist_value…}}`
   array, snake_case — distinct from OTel's camelCase `stringValue`). Verified live against MLflow 3.11.1.
+  `correlate:"tag"` resolves an assay `runId` via `POST /api/3.0/mlflow/traces/search` — `locations` is
+  REQUIRED (`experimentIds`), the filter is `` tags.`assay.run_id` = '…' `` (backtick-quoted), and the agent-side
+  tag write is `PATCH /api/3.0/mlflow/traces/{id}/tags`. Verified live against MLflow 3.14.0.
 - Remap upstream failures to our error model: a non-2xx → `UpstreamError` (so a pull run fails honestly), EXCEPT
   `404` → `[]` (trace not present yet; service-harness path scores 0 events).
 - **Sinks (`*-sink.ts`, `buildTraceSink`)** mirror the source discipline with three deltas: ① auth is a single

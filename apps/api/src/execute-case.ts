@@ -13,6 +13,9 @@ export interface ExecuteCaseDeps {
   dispatcher: Dispatcher;
   // 잡 밖 트레이스 수집(collect="control-plane")용 소스 팩토리(@assay/trace). 미설정이면 수집 불가를 가시화.
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
+  // traceRef.authSecret(이름) 재해석용 테넌트 SecretStore(복호화 값) — 수집 pull 의 Authorization 헤더.
+  secretsFor?: (tenant: string) => Promise<Record<string, string>>;
+  sleep?: (ms: number) => Promise<void>; // 수집 재시도 백오프(테스트 주입, 기본 setTimeout)
   // 비공개 repo 시드용 토큰 resolve(우선) — 워크스페이스 소유 GitHub App. 케이스 git URL 의 owner 가 워크스페이스
   // installation account 와 매칭되면 그 App 으로 repo-스코프 installation 토큰을 발급(제출자 개인 로그인 무관, 팀 공용).
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
@@ -86,5 +89,5 @@ export async function executeCase(deps: ExecuteCaseDeps, owner: string, job: Age
   };
   const result = await deps.dispatcher.dispatch(enriched);
   // 수집이 잡 밖으로 미뤄진 케이스(traceRef)는 여기서 완성 — 잡은 실행 종료와 함께 반납됐다(2-페이즈).
-  return collectDeferredTrace(deps, enriched.evalCase, result);
+  return collectDeferredTrace(deps, enriched.tenant, enriched.evalCase, result);
 }

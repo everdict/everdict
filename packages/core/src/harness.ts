@@ -18,6 +18,9 @@ export interface HarnessTraceSource {
   kind: "otel" | "mlflow";
   endpoint: string;
   collect: "job" | "control-plane";
+  authSecret?: string; // 인증 시크릿 '이름'(컨트롤플레인이 collect 시 재해석) — 값은 traceRef 에 싣지 않는다
+  correlate?: "id" | "tag"; // mlflow 전용 — tag 면 assay.run_id 태그 검색으로 상관
+  experiment?: string; // mlflow tag 상관의 검색 범위(experiment id)
 }
 
 // 피평가 대상. ComputeHandle(샌드박스) 안에서 구동되며, native 출력을

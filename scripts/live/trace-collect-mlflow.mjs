@@ -100,10 +100,11 @@ try {
   const seeded = await sink.export({ scorecardId: "sc-e2e", dataset: "d@1", harness: "h@1" }, [
     { caseId: "seed-job", trace: seedTrace, scores: [] },
     { caseId: "seed-cp", trace: seedTrace, scores: [] },
+    { caseId: "seed-tag", trace: seedTrace, scores: [] },
   ]);
   for (const c of seeded.cases) if (c.error) throw new Error(`시드 실패(${c.caseId}): ${c.error}`);
-  const [tidJob, tidCp] = seeded.cases.map((c) => c.externalId);
-  console.log(`seeded traces: job=${tidJob} cp=${tidCp}`);
+  const [tidJob, tidCp, tidTag] = seeded.cases.map((c) => c.externalId);
+  console.log(`seeded traces: job=${tidJob} cp=${tidCp} tag=${tidTag}`);
   // 스팬이 읽힐 때까지 폴링(업로드 직후 지연 흡수).
   const source = buildTraceSource({ kind: "mlflow", endpoint: ENDPOINT });
   let seedEvents = [];
@@ -193,8 +194,42 @@ try {
   );
   assert(score(degraded, "tests-pass")?.pass === true, "S3 ground-truth 점수 보존(soft-degrade)");
 
+  // 5) S4 — correlate="tag": 실 계측 에이전트 관례. 에이전트는 자기 trace 에 assay.run_id 태그만 남기고
+  //    (실 SDK 의 set_trace_tag = PATCH /traces/{id}/tags), assay 는 자기가 mint 한 runId(트레이스 id 가
+  //    아님!)로 태그 검색 상관 — runId=trace_id 관례 없이 실 MLflow 에서 수집이 도는지 검증.
+  console.log("\n=== S4: correlate=tag — assay.run_id 태그 검색 상관(잡 밖 수집) ===");
+  const tagRunId = `assay-e2e-${Date.now().toString(36)}`;
+  await api(`/api/3.0/mlflow/traces/${tidTag}/tags`, {
+    method: "PATCH",
+    body: JSON.stringify({ key: "assay.run_id", value: tagRunId }),
+  });
+  const specTag = {
+    ...specFor("control-plane"),
+    trace: {
+      kind: "mlflow",
+      endpoint: ENDPOINT,
+      collect: "control-plane",
+      correlate: "tag",
+      experiment: String(experimentId),
+    },
+  };
+  const preTag = await runCase(caseFor("c-tag"), {
+    ...depsFor("control-plane", tagRunId),
+    harness: new CommandHarness(specTag),
+  });
+  assert(
+    preTag.traceRef?.correlate === "tag" && preTag.traceRef?.experiment === String(experimentId),
+    "S4 traceRef 에 tag 상관 좌표(correlate/experiment) 동봉",
+  );
+  assert(preTag.snapshot.diff.includes(`run_id=${tagRunId}`), "S4 커맨드가 본 ASSAY_RUN_ID = 태그 값(에이전트 계약)");
+  const jobTag = { evalCase: caseFor("c-tag"), harness: { id: "instrumented-cli", version: "1.0.0" }, tenant: "e2e" };
+  const doneTag = await executeCase({ dispatcher: { dispatch: async () => preTag }, buildTraceSource }, "e2e", jobTag);
+  const llmTag = doneTag.trace.find((e) => e.kind === "llm_call");
+  assert(llmTag?.model === "gpt-5.4-mini", "S4 태그 검색으로 실 스팬 수집(runId ≠ trace_id 인데도 상관 성공)");
+  assert((score(doneTag, "steps")?.value ?? 0) > 0, "S4 미뤄진 관측물 채점 완성");
+
   console.log(
-    "\n✅ trace-collect live e2e PASS — 실 MLflow 3.14 상대로 D4 검증: 해제 후 in-job pull 왕복(S1) · 잡 밖 수집 완성(S2) · soft-degrade(S3).",
+    "\n✅ trace-collect live e2e PASS — 실 MLflow 3.14 상대로 D4 검증: 해제 후 in-job pull 왕복(S1) · 잡 밖 수집 완성(S2) · soft-degrade(S3) · assay.run_id 태그 상관(S4).",
   );
 } finally {
   if (bootedDocker) {

@@ -18,9 +18,14 @@ import {
 
 export interface CommandHarnessOptions {
   workDir?: string;
-  // 테스트 주입: trace 소스 팩토리(기본 Otel/Mlflow) + runId 생성기.
-  traceSourceFor?: (kind: "otel" | "mlflow", endpoint: string) => TraceSource;
+  // 테스트 주입: trace 소스 팩토리(기본 Otel/Mlflow) + runId 생성기 + 재시도 대기.
+  traceSourceFor?: (
+    kind: "otel" | "mlflow",
+    endpoint: string,
+    opts?: { auth?: string; correlate?: "id" | "tag"; experiment?: string },
+  ) => TraceSource;
   runId?: () => string;
+  sleep?: (ms: number) => Promise<void>; // collectTrace 재시도 백오프(기본 setTimeout)
   // 사용량 계측(opt-in): trace:none 인 블랙박스 하니스의 모델 호출을 로컬 usage-proxy 로 통과시켜 토큰을 회수,
   // 합성 llm_call 트레이스 이벤트로 내보낸다(→ budget/cost 그레이더가 기존 경로로 집계). BYO + Assay 소유 버짓.
   meterUsage?: boolean;
@@ -60,23 +65,50 @@ export class CommandHarness implements EvaluableHarness {
   }
 
   // 플랫폼 트레이스 좌표(otel/mlflow) — runCase 가 수집 위치(job/control-plane)를 이걸로 분기한다. none 이면 undefined.
+  // authSecret 은 '이름'만 노출(컨트롤플레인이 collect 시 재해석) — 해석된 값(trace.auth)은 traceRef 로 새지 않는다.
   traceSource(): HarnessTraceSource | undefined {
     const trace = this.spec.trace;
     if (trace.kind === "none") return undefined;
-    return { kind: trace.kind, endpoint: trace.endpoint, collect: trace.collect };
+    return {
+      kind: trace.kind,
+      endpoint: trace.endpoint,
+      collect: trace.collect,
+      ...(trace.authSecret ? { authSecret: trace.authSecret } : {}),
+      ...(trace.kind === "mlflow" && trace.correlate !== "id" ? { correlate: trace.correlate } : {}),
+      ...(trace.kind === "mlflow" && trace.experiment ? { experiment: trace.experiment } : {}),
+    };
   }
 
   // 적재된 트레이스를 runId 로 pull — runCase 가 compute 해제 후 호출한다(플러시 지연 동안 샌드박스 미점유).
   // run() 은 실행 이벤트만 yield 하고 플랫폼 이벤트는 여기서 온다(과거엔 run() 꼬리에서 pull — 샌드박스 점유).
+  // 프로세스 종료 직후는 플랫폼 플러시가 늦을 수 있어 0건이면 짧게 재시도한다(총 3회). 인증은 디스패치 직전
+  // 해석된 trace.auth(verbatim Authorization — resolveHarnessSecrets)로.
   async collectTrace(runId: string): Promise<TraceEvent[]> {
     const trace = this.spec.trace;
     if (trace.kind === "none") return [];
+    const headers = trace.auth ? { authorization: trace.auth } : undefined;
+    const correlate = trace.kind === "mlflow" ? trace.correlate : undefined;
+    const experiment = trace.kind === "mlflow" ? trace.experiment : undefined;
     const source =
-      this.opts.traceSourceFor?.(trace.kind, trace.endpoint) ??
+      this.opts.traceSourceFor?.(trace.kind, trace.endpoint, {
+        ...(trace.auth ? { auth: trace.auth } : {}),
+        ...(correlate ? { correlate } : {}),
+        ...(experiment ? { experiment } : {}),
+      }) ??
       (trace.kind === "otel"
-        ? new OtelTraceSource({ endpoint: trace.endpoint })
-        : new MlflowTraceSource({ endpoint: trace.endpoint }));
-    return source.fetch(runId);
+        ? new OtelTraceSource({ endpoint: trace.endpoint, ...(headers ? { headers } : {}) })
+        : new MlflowTraceSource({
+            endpoint: trace.endpoint,
+            ...(headers ? { headers } : {}),
+            ...(correlate ? { correlate } : {}),
+            ...(experiment ? { experimentIds: [experiment] } : {}),
+          }));
+    const sleep = this.opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
+    for (let attempt = 0; ; attempt++) {
+      const events = await source.fetch(runId);
+      if (events.length > 0 || attempt >= 2) return events;
+      await sleep(2000); // 플러시 지연 흡수 — compute 는 이미 반납됐으니 샌드박스 점유 없음
+    }
   }
 
   async *run(compute: ComputeHandle, task: string, ctx: RunContext): AsyncIterable<TraceEvent> {

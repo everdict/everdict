@@ -12,7 +12,8 @@ export interface TraceSourceConfig {
   // 자격증명 '값'(SecretStore 에서 resolve) — 헤더 이름은 어댑터가 플랫폼 관례대로 소유
   // (langfuse/phoenix: Authorization 그대로, langsmith: x-api-key). otel/mlflow 는 기존 headers 경로 유지.
   auth?: string;
-  project?: string; // phoenix 스팬 조회 경로에 필수(프로젝트 이름/ID). 그 외 kind 는 무시.
+  project?: string; // phoenix 스팬 조회 경로에 필수(프로젝트 이름/ID) · mlflow tag 상관의 experiment id. 그 외 kind 는 무시.
+  correlate?: "id" | "tag"; // mlflow 전용 — "tag" 면 assay.run_id 태그 검색으로 trace 를 찾는다(기본 "id").
   fetchImpl?: typeof fetch;
 }
 
@@ -34,7 +35,11 @@ export function buildTraceSource(cfg: TraceSourceConfig): TraceSource {
     case "otel":
       return new OtelTraceSource(opts);
     case "mlflow":
-      return new MlflowTraceSource(opts);
+      return new MlflowTraceSource({
+        ...opts,
+        ...(cfg.correlate ? { correlate: cfg.correlate } : {}),
+        ...(cfg.project ? { experimentIds: [cfg.project] } : {}),
+      });
     case "langfuse":
       return new LangfuseTraceSource(authOpts);
     case "langsmith":

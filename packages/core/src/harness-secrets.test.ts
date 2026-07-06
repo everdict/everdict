@@ -60,6 +60,39 @@ describe("resolveHarnessSecrets", () => {
     }
   });
 
+  it("trace.authSecret(이름)을 workspace 시크릿 값으로 해석해 transient trace.auth 에 싣는다(잡 안 pull 인증)", () => {
+    const spec = CommandHarnessSpecSchema.parse({
+      kind: "command",
+      id: "cli",
+      version: "1.0.0",
+      command: "run",
+      env: {},
+      trace: { kind: "mlflow", endpoint: "http://m", authSecret: "MLFLOW_AUTH" },
+    });
+    const resolved = resolveHarnessSecrets(spec, { workspace: { MLFLOW_AUTH: "Basic abc" } });
+    if (resolved.kind !== "command" || resolved.trace.kind !== "mlflow") throw new Error("command/mlflow 기대");
+    expect(resolved.trace.auth).toBe("Basic abc"); // 값은 잡 payload 에만(transient) — 레지스트리 스펙엔 이름만
+    expect(resolved.trace.authSecret).toBe("MLFLOW_AUTH");
+  });
+
+  it("trace.authSecret 이 미등록이면 env 시크릿과 동일하게 BadRequestError(명시 실패)", () => {
+    const spec = CommandHarnessSpecSchema.parse({
+      kind: "command",
+      id: "cli",
+      version: "1.0.0",
+      command: "run",
+      env: {},
+      trace: { kind: "otel", endpoint: "http://j", authSecret: "OTEL_AUTH" },
+    });
+    try {
+      resolveHarnessSecrets(spec, { workspace: {} });
+      throw new Error("expected throw");
+    } catch (e) {
+      expect(e).toBeInstanceOf(BadRequestError);
+      expect((e as BadRequestError).message).toContain("OTEL_AUTH");
+    }
+  });
+
   it("resolves each service's env for service harnesses", () => {
     const serviceSpec = ServiceHarnessSpecSchema.parse({
       kind: "service",

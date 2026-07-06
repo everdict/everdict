@@ -79,3 +79,46 @@ describe("MlflowTraceSource.fetch", () => {
     await expect(src.fetch("t")).rejects.toBeInstanceOf(AppError);
   });
 });
+
+// correlate="tag" — 계측 에이전트가 자기 trace 에 남긴 assay.run_id 태그로 검색(실 MLflow 3.14 API 형태 고정).
+describe("MlflowTraceSource — tag 상관", () => {
+  it("traces/search(locations+tags.`assay.run_id` 필터)로 trace_id 를 찾은 뒤 그 id 로 스팬을 가져온다", async () => {
+    const calls: Array<{ url: string; body?: string }> = [];
+    const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
+      const url = String(args[0]);
+      calls.push({ url, body: args[1]?.body as string | undefined });
+      if (url.includes("/traces/search"))
+        return Promise.resolve(new Response(JSON.stringify({ traces: [{ trace_id: "tr-found" }] }), { status: 200 }));
+      return Promise.resolve(new Response(JSON.stringify(REAL_TRACE), { status: 200 }));
+    });
+    const src = new MlflowTraceSource({
+      endpoint: "http://m",
+      correlate: "tag",
+      experimentIds: ["7"],
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const events = await src.fetch("assay-run-1");
+
+    const search = JSON.parse(calls[0]?.body ?? "{}");
+    // 실 3.14 검증 형태: locations 필수 + 백틱 태그 필터.
+    expect(search.locations).toEqual([{ type: "MLFLOW_EXPERIMENT", mlflow_experiment: { experiment_id: "7" } }]);
+    expect(search.filter).toBe("tags.`assay.run_id` = 'assay-run-1'");
+    expect(calls[1]?.url).toContain("trace_id=tr-found");
+    expect(events.some((e) => e.kind === "llm_call")).toBe(true);
+  });
+
+  it("태그 미발견 → [] degrade(id 모드의 404 와 동일), experiment 미지정 → 명시 에러(locations 필수)", async () => {
+    const empty = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ traces: [] }), { status: 200 })));
+    const src = new MlflowTraceSource({
+      endpoint: "http://m",
+      correlate: "tag",
+      experimentIds: ["7"],
+      fetchImpl: empty as typeof fetch,
+    });
+    expect(await src.fetch("x")).toEqual([]);
+
+    const none = new MlflowTraceSource({ endpoint: "http://m", correlate: "tag", fetchImpl: empty as typeof fetch });
+    await expect(none.fetch("x")).rejects.toThrow("experiment");
+  });
+});

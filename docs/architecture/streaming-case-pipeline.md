@@ -101,6 +101,21 @@ harness exported to an observability platform near the runtime.** Two modes, one
   authority ranking means a missing trace cannot overturn a ground-truth pass. An inline `judge` *case
   grader* cannot be reconstructed control-plane-side without its Judge → explicit `skipped` score (registry
   judges — the main path — are unaffected).
+- **Auth (`trace.authSecret`).** A SecretStore *name* on the spec (value = verbatim `Authorization` header,
+  the pull-ingest convention). `job` mode: `resolveHarnessSecrets` resolves it into transient `trace.auth`
+  at dispatch (the agent can't reach the SecretStore; same discipline as env `{secretRef}` — value in the
+  job payload only, never the registry). `control-plane` mode: the *name* rides on `traceRef.authSecret`
+  (values are never persisted — `CaseResult` is stored) and `collectDeferredTrace` re-resolves via
+  `secretsFor(tenant)`; a missing secret is a visible soft-failure, never a silent unauthenticated pull.
+- **Retry (flush lag).** Both collect paths retry an *empty* pull (3 attempts, 2s backoff — emptiness is
+  the flush-lag shape; hard errors stay conclusive). A still-empty control-plane collect appends an `error`
+  event naming the correlation key instead of silently scoring 0.
+- **Tag correlation (`correlate:"tag"`, mlflow).** Real platforms mint their own trace ids, so an
+  assay-minted `runId` can never equal one. A real instrumented agent instead tags its trace with
+  `assay.run_id` = `$ASSAY_RUN_ID` (SDK `set_trace_tag` = `PATCH /api/3.0/mlflow/traces/{id}/tags`), and
+  `MlflowTraceSource` resolves it via `POST /api/3.0/mlflow/traces/search` (backtick tag filter;
+  `locations` is required → `trace.experiment` must scope the search). Default `"id"` keeps the
+  runId=trace-id (pull-ingest) convention. Live-verified as S4 (below).
 
 ### D4 — verified live (real MLflow 3.14, `scripts/live/trace-collect-mlflow.mjs`)
 
@@ -110,22 +125,17 @@ The script boots `ghcr.io/mlflow/mlflow:v3.14.0` (docker, auto-cleaned; or `MLFL
 `ASSAY_RUN_ID` (round-trips into the git-diff snapshot) and `collectTrace(runId)` pulls the real spans
 post-release (llm_call 42/7 tokens → steps/cost derived). **S2** `collect="control-plane"` — the job returns
 only `traceRef` + ground-truth scores; `executeCase` pulls from real MLflow and grades the deferred
-steps/cost (no double-scoring). **S3** dead endpoint → soft-degrade (`error` event, ground-truth preserved).
-All PASS 2026-07-06. Correlation note: real MLflow mints trace ids, so `runId` = the platform trace id
-(pull-ingest convention); tag-search correlation stays a follow-up below.
+steps/cost (no double-scoring). **S3** dead endpoint → soft-degrade (`error` event, ground-truth preserved). **S4** `correlate:"tag"` —
+the seeded trace is tagged `assay.run_id` (the real-SDK contract) and an assay-minted `runId` (≠ trace id)
+resolves through `traces/search` to the real spans, completing the deferred grading.
+All PASS 2026-07-06.
 
 ## Follow-ups (deliberately not in this pass)
 
-- **`trace.authSecret` for control-plane collection** — deferred pulls hit the endpoint unauthenticated
-  today (in-network pulls never needed auth); a SecretStore ref on `CommandTraceSpec` closes that when a
-  tenant's platform requires it.
-- **Collection retry/backoff** — control-plane collect is a single fetch (job teardown + result transport
-  already absorb typical flush lag); add bounded retry if real platforms prove laggier.
 - **Command trace kinds beyond otel/mlflow** — langfuse/langsmith/phoenix exist in `buildTraceSource`;
   extending `CommandTraceSpec` is mechanical once someone needs it.
-- **Tag-search correlation for MLflow** — `MlflowTraceSource.fetch` resolves the id as the platform trace id;
-  platforms that mint their own ids can't equal an assay-minted `runId`. A `search-traces by tag
-  assay.run_id` mode would let a real instrumented agent correlate without the runId=trace-id convention.
+- **Tag correlation for OTel** — the Jaeger-style query is also id-addressed; a resource-attribute search
+  mode (mirroring the mlflow tag mode) needs a per-backend query shape survey first.
 - **Per-case sink export streaming** — export after each case's judging instead of post-batch; today's export
   is one fast HTTP pass, low value until sinks dominate the tail.
 - **Durable batch orchestration on Temporal** — per-case activities give restart resilience + horizontal

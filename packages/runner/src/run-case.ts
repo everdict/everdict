@@ -104,7 +104,19 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       trace,
       snapshot,
       scores: slots.filter((s): s is Score => s !== undefined),
-      ...(defer && source ? { traceRef: { kind: source.kind, endpoint: source.endpoint, runId } } : {}),
+      ...(defer && source
+        ? {
+            traceRef: {
+              kind: source.kind,
+              endpoint: source.endpoint,
+              runId,
+              // 인증은 시크릿 '이름'만 — 값은 컨트롤플레인이 collect 시 재해석(CaseResult 는 영속된다).
+              ...(source.authSecret ? { authSecret: source.authSecret } : {}),
+              ...(source.correlate ? { correlate: source.correlate } : {}),
+              ...(source.experiment ? { experiment: source.experiment } : {}),
+            },
+          }
+        : {}),
     };
   } finally {
     await release();

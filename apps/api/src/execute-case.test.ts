@@ -263,6 +263,84 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
     expect(result.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // 보존
   });
 
+  it("authSecret 은 테넌트 SecretStore 에서 재해석해 Authorization 으로, correlate/experiment 는 소스 설정으로 흐른다", async () => {
+    const authedRef = (job: AgentJob): CaseResult => ({
+      ...deferredResult(job),
+      traceRef: {
+        kind: "mlflow",
+        endpoint: "http://m",
+        runId: "assay-r1",
+        authSecret: "MLFLOW_AUTH",
+        correlate: "tag",
+        experiment: "7",
+      },
+    });
+    let seenCfg: { headers?: Record<string, string>; correlate?: string; project?: string } | undefined;
+    const result = await executeCase(
+      {
+        dispatcher: dispatcherOf(authedRef),
+        secretsFor: async (tenant): Promise<Record<string, string>> =>
+          tenant === "acme" ? { MLFLOW_AUTH: "Basic abc" } : {},
+        buildTraceSource: (cfg) => {
+          seenCfg = cfg;
+          return {
+            async fetch() {
+              return [{ t: 1, kind: "llm_call", model: "m" }];
+            },
+          };
+        },
+      },
+      "u",
+      jobWithGraders,
+    );
+    expect(seenCfg?.headers?.authorization).toBe("Basic abc"); // 이름 → 값 재해석(verbatim Authorization)
+    expect(seenCfg?.correlate).toBe("tag");
+    expect(seenCfg?.project).toBe("7"); // experiment → 소스의 검색 범위
+    expect(result.trace.some((e) => e.kind === "llm_call")).toBe(true);
+  });
+
+  it("수집 0건이면 재시도(플러시 지연) 후 도착분을 싣고, 시크릿 미등록이면 soft 실패로 가시화한다", async () => {
+    let fetches = 0;
+    const slept: number[] = [];
+    const retried = await executeCase(
+      {
+        dispatcher: dispatcherOf(deferredResult),
+        sleep: async (ms) => void slept.push(ms),
+        buildTraceSource: () => ({
+          async fetch() {
+            fetches += 1;
+            return fetches < 3 ? [] : [{ t: 1, kind: "llm_call", model: "m" }];
+          },
+        }),
+      },
+      "u",
+      jobWithGraders,
+    );
+    expect(fetches).toBe(3);
+    expect(slept).toEqual([2000, 2000]);
+    expect(retried.trace.some((e) => e.kind === "llm_call")).toBe(true);
+
+    // authSecret 참조 + 시크릿 미등록 → 실행 산출물 보존 + error 이벤트(수집 불가 사유).
+    const missing = await executeCase(
+      {
+        dispatcher: dispatcherOf((job) => ({
+          ...deferredResult(job),
+          traceRef: { kind: "otel", endpoint: "http://j", runId: "r", authSecret: "NOPE" },
+        })),
+        secretsFor: async () => ({}),
+        buildTraceSource: () => ({
+          async fetch() {
+            throw new Error("호출되면 안 됨 — 인증 해석 실패가 먼저");
+          },
+        }),
+      },
+      "u",
+      jobWithGraders,
+    );
+    expect(missing.trace.some((e) => e.kind === "error" && e.message.includes("NOPE"))).toBe(true);
+    expect(missing.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true);
+  });
+
   it("traceRef 없는 결과(기본 job 수집)는 그대로 통과한다(무회귀) + buildTraceSource 미설정은 가시화", async () => {
     const plain = await executeCase({ dispatcher: dispatcherOf(resultFor) }, "u", jobWithGraders);
     expect(plain.trace).toEqual([]); // 손대지 않음

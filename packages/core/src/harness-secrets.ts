@@ -47,9 +47,21 @@ export function resolveHarnessSecrets(spec: HarnessSpec, secrets: HarnessSecretM
     return out;
   };
 
+  // command 의 trace.authSecret(워크스페이스 시크릿 이름) → transient trace.auth 값 — 잡 안(collect=job) pull 이
+  // 인증 헤더로 쓴다(에이전트는 SecretStore 에 닿지 못하므로 env 와 동일하게 디스패치 직전 해석).
+  const resolveTrace = (trace: Extract<HarnessSpec, { kind: "command" }>["trace"]) => {
+    if (trace.kind === "none" || !trace.authSecret) return trace;
+    const val = secrets.workspace[trace.authSecret];
+    if (val === undefined) {
+      missing.add(trace.authSecret);
+      return trace;
+    }
+    return { ...trace, auth: val };
+  };
+
   const next: HarnessSpec =
     spec.kind === "command"
-      ? { ...spec, env: resolve(spec.env) }
+      ? { ...spec, env: resolve(spec.env), trace: resolveTrace(spec.trace) }
       : spec.kind === "service"
         ? { ...spec, services: spec.services.map((s) => ({ ...s, env: resolve(s.env) })) }
         : spec;

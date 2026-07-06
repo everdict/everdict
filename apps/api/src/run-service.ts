@@ -35,6 +35,8 @@ export interface RunServiceDeps {
   store: RunStore;
   // 잡 밖 트레이스 수집(collect="control-plane")용 소스 팩토리 — executeCase 가 traceRef 결과를 완성할 때 사용.
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
+  // 수집 pull 의 인증(traceRef.authSecret 이름 재해석) — 워크스페이스 SecretStore 복호화 값. scorecard 와 동일.
+  secretsFor?: (tenant: string) => Promise<Record<string, string>>;
   // 정책 게이트: true 면 runtime/self 타깃 없는 run 을 제출 시 400(local 폴백 금지). API(main.ts)는 항상 true.
   // 미지정(테스트: mock dispatcher 직접 주입)=게이트 없음. env 토글 아님 — 배포의 고정 정책.
   requireRuntime?: boolean;

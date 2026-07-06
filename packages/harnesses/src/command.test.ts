@@ -163,13 +163,71 @@ describe("CommandHarness", () => {
 
   it("ctx.runId 가 오면 자체 mint 대신 그 값으로 상관하고, traceSource() 가 스펙 좌표(collect 포함)를 노출한다", async () => {
     const { compute, execs } = fakeCompute();
-    const h = new CommandHarness(spec({ trace: { kind: "mlflow", endpoint: "http://m", collect: "control-plane" } }), {
-      runId: () => "self-minted",
-    });
+    const h = new CommandHarness(
+      spec({
+        trace: {
+          kind: "mlflow",
+          endpoint: "http://m",
+          collect: "control-plane",
+          correlate: "tag",
+          experiment: "7",
+          authSecret: "MLFLOW_AUTH",
+        },
+      }),
+      { runId: () => "self-minted" },
+    );
     await collect(h.run(compute, "t", { ...ctx, runId: "from-runcase" }));
     expect(execs[0]?.env?.ASSAY_RUN_ID).toBe("from-runcase"); // runCase 상관 키 우선
-    expect(h.traceSource()).toEqual({ kind: "mlflow", endpoint: "http://m", collect: "control-plane" });
+    // authSecret 은 '이름'만(값 trace.auth 는 노출 금지), mlflow 는 correlate/experiment 도 좌표에 포함.
+    expect(h.traceSource()).toEqual({
+      kind: "mlflow",
+      endpoint: "http://m",
+      collect: "control-plane",
+      correlate: "tag",
+      experiment: "7",
+      authSecret: "MLFLOW_AUTH",
+    });
     expect(new CommandHarness(spec()).traceSource()).toBeUndefined(); // trace:none
+  });
+
+  it("collectTrace: 해석된 auth(값)·correlate·experiment 를 소스에 전달하고, 0건이면 재시도한다(플러시 지연)", async () => {
+    let seenOpts: { auth?: string; correlate?: "id" | "tag"; experiment?: string } | undefined;
+    let fetches = 0;
+    const traceSourceFor = (
+      _k: "otel" | "mlflow",
+      _e: string,
+      opts?: { auth?: string; correlate?: "id" | "tag"; experiment?: string },
+    ): TraceSource => {
+      seenOpts = opts;
+      return {
+        async fetch() {
+          fetches += 1;
+          // 두 번은 플러시 전(0건), 세 번째에 도착 — 재시도가 없으면 빈 트레이스로 끝난다.
+          return fetches < 3 ? [] : [{ t: 0, kind: "llm_call", model: "m" }];
+        },
+      };
+    };
+    const slept: number[] = [];
+    const h = new CommandHarness(
+      spec({
+        trace: {
+          kind: "mlflow",
+          endpoint: "http://m",
+          collect: "job",
+          correlate: "tag",
+          experiment: "7",
+          auth: "Basic abc", // resolveHarnessSecrets 가 디스패치 직전 채운 transient 값
+        },
+      }),
+      { traceSourceFor, sleep: async (ms) => void slept.push(ms) },
+    );
+
+    const events = await h.collectTrace("rid");
+
+    expect(seenOpts).toEqual({ auth: "Basic abc", correlate: "tag", experiment: "7" });
+    expect(fetches).toBe(3); // 0건 → 재시도 → 도착
+    expect(slept).toEqual([2000, 2000]);
+    expect(events).toHaveLength(1);
   });
 
   // 사용량 계측: trace:none 하니스의 모델 호출을 usage-proxy 로 통과시켜 토큰을 합성 llm_call 로 회수.

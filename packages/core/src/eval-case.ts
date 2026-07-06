@@ -48,6 +48,11 @@ export const TraceRefSchema = z.object({
   kind: z.enum(["otel", "mlflow"]),
   endpoint: z.string(),
   runId: z.string(), // 상관 키(assay.run_id) — 이 값으로 플랫폼에서 트레이스를 찾는다
+  // 인증 시크릿 '이름'(SecretStore) — 컨트롤플레인이 collect 시 값으로 재해석해 verbatim Authorization 헤더로.
+  // 값은 절대 싣지 않는다(CaseResult 는 영속된다).
+  authSecret: z.string().optional(),
+  correlate: z.enum(["id", "tag"]).optional(), // mlflow 전용 — tag 면 assay.run_id 태그 검색으로 상관
+  experiment: z.string().optional(), // mlflow tag 상관의 검색 범위(experiment id)
 });
 export type TraceRef = z.infer<typeof TraceRefSchema>;
 
