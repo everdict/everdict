@@ -51,7 +51,7 @@ describe("first-party 데이터셋·런타임 카탈로그 시드", () => {
   // 참고용 예제(자동 시드 아님 — 런타임은 워크스페이스가 직접 등록): 파일이 스키마에 맞게 파싱되는지만 보장.
   it("examples/runtimes 예제 파일이 파싱된다(참고용 — 자동 시드 없음)", async () => {
     const reg = await loadRuntimeDir(RUNTIME_DIR);
-    const rt = await reg.get("any-tenant", "docker");
-    expect(rt.kind).toBe("docker");
+    const rt = await reg.get("any-tenant", "local");
+    expect(rt.kind).toBe("local");
   });
 });

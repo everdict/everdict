@@ -1,7 +1,0 @@
-{
-  "kind": "docker",
-  "id": "docker",
-  "version": "1.0.0",
-  "description": "first-party 공용 런타임 — 단일 호스트 docker 데몬에서 케이스를 자기 env 이미지 컨테이너로 실행(os-use 데스크탑/SWE-bench prebuilt 등). 외부 자격증명 불필요.",
-  "tags": ["shared", "docker"]
-}
