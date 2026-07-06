@@ -50,9 +50,10 @@ export interface PullScorecardInput {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
-  sourceKind: 'otel' | 'mlflow'
+  sourceKind: 'otel' | 'mlflow' | 'langfuse' | 'langsmith' | 'phoenix'
   endpoint: string
   authSecret: string
+  sourceProject?: string // phoenix 전용 — 스팬 조회 경로의 프로젝트 이름/ID
   runsJson: string
 }
 
@@ -75,6 +76,7 @@ export async function pullScorecardAction(
       kind: input.sourceKind,
       endpoint: input.endpoint,
       ...(input.authSecret ? { authSecret: input.authSecret } : {}),
+      ...(input.sourceProject ? { project: input.sourceProject } : {}),
     },
     runs,
   }

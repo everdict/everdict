@@ -45,9 +45,12 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
   const [harnessVersion, setHarnessVersion] = useState('external')
   const [tracesJson, setTracesJson] = useState(SAMPLE_TRACES)
   // pull 모드 전용
-  const [sourceKind, setSourceKind] = useState<'otel' | 'mlflow'>('otel')
+  const [sourceKind, setSourceKind] = useState<
+    'otel' | 'mlflow' | 'langfuse' | 'langsmith' | 'phoenix'
+  >('otel')
   const [endpoint, setEndpoint] = useState('')
   const [authSecret, setAuthSecret] = useState('')
+  const [sourceProject, setSourceProject] = useState('') // phoenix 전용(스팬 조회 경로의 프로젝트)
   const [runsJson, setRunsJson] = useState(SAMPLE_RUNS)
   const [serverError, setServerError] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -72,6 +75,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
             sourceKind,
             endpoint,
             authSecret,
+            ...(sourceProject.trim() ? { sourceProject: sourceProject.trim() } : {}),
             runsJson,
           })
     setBusy(false)
@@ -102,7 +106,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
       <p className="text-[12px] text-muted-foreground">
         {mode === 'push'
           ? '이미 가진 트레이스를 직접 올려요.'
-          : 'OTel/MLflow에서 트레이스를 가져와요. 인증 정보는 값을 직접 적지 말고 워크스페이스 시크릿 이름으로 넣어주세요.'}
+          : 'OTel·MLflow·Langfuse·LangSmith·Phoenix에서 트레이스를 가져와요. 인증 정보는 값을 직접 적지 말고 워크스페이스 시크릿 이름으로 넣어주세요.'}
       </p>
 
       <div className="grid grid-cols-3 gap-3">
@@ -175,10 +179,19 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
               <Combobox
                 id="sourceKind"
                 value={sourceKind}
-                onChange={(v) => setSourceKind(v === 'mlflow' ? 'mlflow' : 'otel')}
+                onChange={(v) =>
+                  setSourceKind(
+                    v === 'mlflow' || v === 'langfuse' || v === 'langsmith' || v === 'phoenix'
+                      ? v
+                      : 'otel'
+                  )
+                }
                 options={[
                   { value: 'otel', label: 'OTel' },
                   { value: 'mlflow', label: 'MLflow' },
+                  { value: 'langfuse', label: 'Langfuse' },
+                  { value: 'langsmith', label: 'LangSmith' },
+                  { value: 'phoenix', label: 'Phoenix' },
                 ]}
                 className="w-full"
               />
@@ -189,10 +202,33 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
                 id="endpoint"
                 value={endpoint}
                 onChange={(e) => setEndpoint(e.target.value)}
-                placeholder={sourceKind === 'mlflow' ? 'http://mlflow:5000' : 'http://jaeger:16686'}
+                placeholder={
+                  sourceKind === 'mlflow'
+                    ? 'http://mlflow:5000'
+                    : sourceKind === 'langfuse'
+                      ? 'https://cloud.langfuse.com'
+                      : sourceKind === 'langsmith'
+                        ? 'https://api.smith.langchain.com'
+                        : sourceKind === 'phoenix'
+                          ? 'http://phoenix:6006'
+                          : 'http://jaeger:16686'
+                }
               />
             </div>
           </div>
+
+          {/* phoenix 는 스팬 조회 경로에 프로젝트가 필수 — 그 외 kind 에선 숨김. */}
+          {sourceKind === 'phoenix' && (
+            <div className="space-y-1.5">
+              <Label htmlFor="sourceProject">프로젝트</Label>
+              <Input
+                id="sourceProject"
+                value={sourceProject}
+                onChange={(e) => setSourceProject(e.target.value)}
+                placeholder="프로젝트 이름 또는 ID"
+              />
+            </div>
+          )}
 
           <div className="space-y-1.5">
             <Label htmlFor="authSecret">인증 시크릿 이름 (선택)</Label>

@@ -2,6 +2,17 @@ export { type TraceSource, type Span, spansToTraceEvents } from "./trace-source.
 export { OtelTraceSource, type OtelTraceSourceOptions, parseOtlpSpans, parseJaegerSpans } from "./otel.js";
 export { MlflowTraceSource, type MlflowTraceSourceOptions, parseMlflowTrace } from "./mlflow.js";
 export { buildTraceSource, type TraceSourceConfig } from "./build-source.js";
+export {
+  LangfuseTraceSource,
+  type LangfuseTraceSourceOptions,
+  langfuseObservationsToTraceEvents,
+} from "./langfuse-source.js";
+export {
+  LangsmithTraceSource,
+  type LangsmithTraceSourceOptions,
+  langsmithRunsToTraceEvents,
+} from "./langsmith-source.js";
+export { PhoenixTraceSource, type PhoenixTraceSourceOptions, phoenixSpansToTraceEvents } from "./phoenix-source.js";
 export type {
   TraceSink,
   TraceSinkCase,
@@ -12,8 +23,19 @@ export type {
   TraceSinkScore,
 } from "./trace-sink.js";
 export { buildTraceSink } from "./build-sink.js";
-export { MlflowTraceSink, type MlflowTraceSinkOptions, mlflowAssessmentBody, mlflowTraceBody } from "./mlflow-sink.js";
-export { LangfuseTraceSink, type LangfuseTraceSinkOptions, langfuseBatch } from "./langfuse-sink.js";
+export {
+  MlflowTraceSink,
+  type MlflowTraceSinkOptions,
+  mlflowAssessmentBody,
+  mlflowOtlpSpans,
+  mlflowTraceBody,
+} from "./mlflow-sink.js";
+export {
+  LangfuseTraceSink,
+  type LangfuseTraceSinkOptions,
+  chunkLangfuseEvents,
+  langfuseBatch,
+} from "./langfuse-sink.js";
 export {
   LangsmithTraceSink,
   type LangsmithTraceSinkOptions,

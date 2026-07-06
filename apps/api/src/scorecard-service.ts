@@ -98,9 +98,12 @@ export const PullIngestBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
   source: z.object({
-    kind: z.enum(["otel", "mlflow"]),
+    kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
     endpoint: z.string().url(),
-    authSecret: z.string().optional(), // SecretStore 키 이름 → 그 값을 Authorization 헤더로 그대로(스킴 포함: "Bearer …"|"Basic …")
+    // SecretStore 키 이름 → 그 값을 자격증명으로. otel/mlflow 는 Authorization 헤더 그대로(스킴 포함:
+    // "Bearer …"|"Basic …"), langfuse/langsmith/phoenix 는 어댑터가 플랫폼 관례 헤더에 배치(langsmith=x-api-key).
+    authSecret: z.string().optional(),
+    project: z.string().optional(), // phoenix 스팬 조회 경로에 필수(프로젝트 이름/ID). 그 외 kind 는 무시.
   }),
   runs: z.array(z.object({ caseId: z.string(), runId: z.string() })).min(1),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
@@ -780,6 +783,9 @@ export class ScorecardService {
         kind: source.kind,
         endpoint: source.endpoint,
         ...(headers ? { headers } : {}),
+        // 신형 소스(langfuse/langsmith/phoenix)용 자격증명 '값' — 어댑터가 헤더 이름을 소유한다.
+        ...(headers?.authorization ? { auth: headers.authorization } : {}),
+        ...(source.project ? { project: source.project } : {}),
       });
       const perCase: IngestScorecardBody["traces"] = [];
       for (const r of runs) {
