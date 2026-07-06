@@ -15,7 +15,7 @@ single generic `CommandHarness` interprets it. A SaaS user registers a spec → 
   "command": "aider --yes --no-git --message {{task}} --model {{model}} .",
   "model": "sonnet",
   "env": { },                          // extra env (LLM keys come from per-tenant secrets, not here)
-  "trace": { "kind": "none" }          // | { "kind":"otel"|"mlflow", "endpoint":"…" }
+  "trace": { "kind": "none" }          // | { "kind":"otel"|"mlflow", "endpoint":"…", "collect":"job"|"control-plane" }
 }
 ```
 Template tokens in `command`: **`{{task}}`** (shell-quoted automatically — don't wrap it in quotes),
@@ -37,7 +37,12 @@ path → runs on **Local / Nomad / K8s** backends with the existing isolation.
 - **`otel` / `mlflow`** — after the command, the trace is pulled via `@assay/trace`
   (`OtelTraceSource`/`MlflowTraceSource`) by `ASSAY_RUN_ID`. The agent must tag its spans with that id
   (`OTEL_RESOURCE_ATTRIBUTES=assay.run_id=…` is injected) — i.e. an instrumented agent; uninstrumented CLIs use
-  `none`.
+  `none`. **Where the pull happens** is the `collect` knob (2-phase collection,
+  `docs/architecture/streaming-case-pipeline.md` D4): `"job"` (default) — `runCase` calls the harness's
+  `collectTrace(runId)` **after compute release** (sandbox not held during flush lag; works for
+  cluster-internal endpoints); `"control-plane"` — the job ends at execution, the result carries
+  `traceRef {kind, endpoint, runId}`, and `executeCase` pulls + grades the deferred observation graders on the
+  control plane (only if the endpoint is reachable from there).
 
 ## Security
 `setup`/`command` are **arbitrary user code** → they run only inside a **trust zone** (gVisor/Kata + per-tenant

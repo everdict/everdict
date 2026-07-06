@@ -339,6 +339,8 @@ async function main(): Promise<void> {
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
     // 워크스페이스 레지스트리 이미지 pull 자격증명 — 잡 이미지가 그 레지스트리 것이면 job.registryAuth 로 attach.
     registryAuthsFor: (workspace) => imageRegistryService.pullAuths(workspace),
+    // 잡 밖 트레이스 수집(하니스 trace.collect="control-plane") — executeCase 가 traceRef 결과를 완성.
+    buildTraceSource,
     // 완료 알림(Mattermost) — 워크스페이스 notify 설정이 있으면 채널 게시. 실패는 run 결과 무관.
     onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
   });

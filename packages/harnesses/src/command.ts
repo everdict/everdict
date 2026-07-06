@@ -2,6 +2,7 @@ import {
   type CommandHarnessSpec,
   type ComputeHandle,
   type EvaluableHarness,
+  type HarnessTraceSource,
   type RunContext,
   type TraceEvent,
   flattenEnv,
@@ -58,8 +59,29 @@ export class CommandHarness implements EvaluableHarness {
     }
   }
 
+  // 플랫폼 트레이스 좌표(otel/mlflow) — runCase 가 수집 위치(job/control-plane)를 이걸로 분기한다. none 이면 undefined.
+  traceSource(): HarnessTraceSource | undefined {
+    const trace = this.spec.trace;
+    if (trace.kind === "none") return undefined;
+    return { kind: trace.kind, endpoint: trace.endpoint, collect: trace.collect };
+  }
+
+  // 적재된 트레이스를 runId 로 pull — runCase 가 compute 해제 후 호출한다(플러시 지연 동안 샌드박스 미점유).
+  // run() 은 실행 이벤트만 yield 하고 플랫폼 이벤트는 여기서 온다(과거엔 run() 꼬리에서 pull — 샌드박스 점유).
+  async collectTrace(runId: string): Promise<TraceEvent[]> {
+    const trace = this.spec.trace;
+    if (trace.kind === "none") return [];
+    const source =
+      this.opts.traceSourceFor?.(trace.kind, trace.endpoint) ??
+      (trace.kind === "otel"
+        ? new OtelTraceSource({ endpoint: trace.endpoint })
+        : new MlflowTraceSource({ endpoint: trace.endpoint }));
+    return source.fetch(runId);
+  }
+
   async *run(compute: ComputeHandle, task: string, ctx: RunContext): AsyncIterable<TraceEvent> {
-    const runId = (this.opts.runId ?? defaultRunId)();
+    // 상관 키: runCase 가 준 runId(수집과 동일 값) > 테스트 주입 > 자체 mint(runCase 밖 하위호환).
+    const runId = ctx.runId ?? (this.opts.runId ?? defaultRunId)();
     const env: Record<string, string> = {
       ...ctx.apiKeyEnv,
       // env 의 {secretRef} 는 컨트롤플레인이 디스패치 직전 이미 값으로 해석한다. 미해석분은 flattenEnv 가 제외(안전).
@@ -117,13 +139,8 @@ export class CommandHarness implements EvaluableHarness {
           };
       }
 
-      if (trace.kind === "none") return; // 결과(repo diff)만으로 객관 그레이딩
-      const source =
-        this.opts.traceSourceFor?.(trace.kind, trace.endpoint) ??
-        (trace.kind === "otel"
-          ? new OtelTraceSource({ endpoint: trace.endpoint })
-          : new MlflowTraceSource({ endpoint: trace.endpoint }));
-      for (const ev of await source.fetch(runId)) yield ev;
+      // 플랫폼 트레이스(otel/mlflow)는 여기서 pull 하지 않는다 — runCase 가 compute 해제 후
+      // collectTrace(runId) 로 당긴다(같은 runId 상관). run() 은 실행 이벤트만.
     } finally {
       await proxy?.close();
     }

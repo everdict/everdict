@@ -11,6 +11,7 @@ import {
 } from "@assay/core";
 import type { RunRecord, RunStore } from "@assay/db";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
+import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { executeCase } from "./execute-case.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
 
@@ -32,6 +33,8 @@ export interface SubmitInput {
 export interface RunServiceDeps {
   dispatcher: Dispatcher; // Scheduler(권장) 또는 Router — placement/공정성/오토스케일은 그쪽이 담당
   store: RunStore;
+  // 잡 밖 트레이스 수집(collect="control-plane")용 소스 팩토리 — executeCase 가 traceRef 결과를 완성할 때 사용.
+  buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
   // 정책 게이트: true 면 runtime/self 타깃 없는 run 을 제출 시 400(local 폴백 금지). API(main.ts)는 항상 true.
   // 미지정(테스트: mock dispatcher 직접 주입)=게이트 없음. env 토글 아님 — 배포의 고정 정책.
   requireRuntime?: boolean;

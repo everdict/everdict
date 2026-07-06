@@ -1,12 +1,18 @@
 import type { Dispatcher } from "@assay/backends";
 import { type AgentJob, type CaseResult, type RegistryAuth, imageUsesRegistryHost } from "@assay/core";
+import type { TraceSource, TraceSourceConfig } from "@assay/trace";
+import { collectDeferredTrace } from "./collect-trace.js";
 
 // 실행(Execution) 관심사 — 케이스 하나를 돌려 결과를 만드는 순수 유닛. run/scorecard 가 공유한다.
 // "뒤(정산·오프로드·알림)"는 신경 쓰지 않는다 — 그건 오케스트레이션의 몫(RunService/배치가 결과를 받아 settle/notify).
+// 잡이 수집을 미룬 결과(traceRef)는 여기서 완성한다(플랫폼 pull+미뤄진 관측물 채점) — "완전한 CaseResult 반환"
+// 계약을 지켜 정산(costOf)·judge 가 수집된 트레이스를 보게. docs/architecture/streaming-case-pipeline.md D4
 // 두 서비스의 Deps 가 이 형태의 구조적 상위집합이라 각 서비스는 `this.deps` 를 그대로 넘길 수 있다.
 // docs/architecture/execution-scoring-orchestration.md
 export interface ExecuteCaseDeps {
   dispatcher: Dispatcher;
+  // 잡 밖 트레이스 수집(collect="control-plane")용 소스 팩토리(@assay/trace). 미설정이면 수집 불가를 가시화.
+  buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
   // 비공개 repo 시드용 토큰 resolve(우선) — 워크스페이스 소유 GitHub App. 케이스 git URL 의 owner 가 워크스페이스
   // installation account 와 매칭되면 그 App 으로 repo-스코프 installation 토큰을 발급(제출자 개인 로그인 무관, 팀 공용).
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
@@ -66,7 +72,7 @@ function withHarnessImage(job: AgentJob): AgentJob {
   return { ...job, evalCase: { ...job.evalCase, image: spec.image } };
 }
 
-// 순수 실행: (하니스 이미지 승격 →) 비공개 repo 토큰 resolve+attach → dispatch → CaseResult. 그게 전부다.
+// 순수 실행: (하니스 이미지 승격 →) 비공개 repo 토큰 resolve+attach → dispatch → (수집 완성) → CaseResult.
 // budget admit/settle 은 오케(호출부)의 회계 관심사 — 여기서 하지 않는다(run 은 그냥 실행). 잡은 호출부가 미리
 // enrich(tenant/harnessSpec/judge/meterUsage/submittedBy)한 채로 넘긴다.
 export async function executeCase(deps: ExecuteCaseDeps, owner: string, job: AgentJob): Promise<CaseResult> {
@@ -78,5 +84,7 @@ export async function executeCase(deps: ExecuteCaseDeps, owner: string, job: Age
     ...(repoToken ? { repoToken } : {}),
     ...(registryAuth ? { registryAuth } : {}),
   };
-  return deps.dispatcher.dispatch(enriched);
+  const result = await deps.dispatcher.dispatch(enriched);
+  // 수집이 잡 밖으로 미뤄진 케이스(traceRef)는 여기서 완성 — 잡은 실행 종료와 함께 반납됐다(2-페이즈).
+  return collectDeferredTrace(deps, enriched.evalCase, result);
 }

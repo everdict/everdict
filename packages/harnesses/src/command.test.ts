@@ -104,7 +104,7 @@ describe("CommandHarness", () => {
     ]);
   });
 
-  it("trace 가 있으면 stdout message 를 내지 않는다(그쪽 트레이스가 답 — 이중 답 방지)", async () => {
+  it("trace 가 있으면 run() 은 stdout message 를 내지 않고(그쪽 트레이스가 답), 플랫폼 이벤트는 collectTrace 로 온다", async () => {
     const sourceEvents: TraceEvent[] = [{ t: 1, kind: "message", role: "assistant", text: "from-otel" }];
     const source: TraceSource = { fetch: async () => sourceEvents };
     const compute: ComputeHandle = {
@@ -117,12 +117,12 @@ describe("CommandHarness", () => {
       },
       async dispose() {},
     };
-    const events = await collect(
-      new CommandHarness(spec({ trace: { kind: "otel", endpoint: "http://j" } }), {
-        traceSourceFor: () => source,
-      }).run(compute, "t", ctx),
-    );
-    expect(events).toEqual(sourceEvents); // stdout message 없음
+    const h = new CommandHarness(spec({ trace: { kind: "otel", endpoint: "http://j", collect: "job" } }), {
+      traceSourceFor: () => source,
+    });
+    const events = await collect(h.run(compute, "t", ctx));
+    expect(events).toEqual([]); // stdout message 없음 + run() 은 플랫폼 pull 안 함(수집은 compute 해제 후)
+    expect(await h.collectTrace("rid")).toEqual(sourceEvents);
   });
 
   it("일반 {{var}} 는 spec.params 로 치환되고 예약어({{model}})는 params 가 덮지 못한다", async () => {
@@ -141,8 +141,8 @@ describe("CommandHarness", () => {
     expect(cmd).toContain("--model sonnet"); // 예약어가 먼저 치환됨 → params.model 무시
   });
 
-  it("trace otel → 주입된 소스에서 runId 로 이벤트를 가져온다", async () => {
-    const { compute } = fakeCompute();
+  it("trace otel → collectTrace(runId) 가 주입된 소스에서 이벤트를 가져온다(run 과 같은 상관 키)", async () => {
+    const { compute, execs } = fakeCompute();
     let fetched = "";
     const traceSourceFor = (kind: "otel" | "mlflow", endpoint: string): TraceSource => ({
       async fetch(id: string) {
@@ -150,13 +150,26 @@ describe("CommandHarness", () => {
         return [{ t: 0, kind: "tool_call", id: "x", name: "n", args: {} }];
       },
     });
-    const h = new CommandHarness(spec({ trace: { kind: "otel", endpoint: "http://j" } }), {
+    const h = new CommandHarness(spec({ trace: { kind: "otel", endpoint: "http://j", collect: "job" } }), {
       runId: () => "rid2",
       traceSourceFor,
     });
-    const events = await collect(h.run(compute, "t", ctx));
+    await collect(h.run(compute, "t", ctx));
+    expect(execs[0]?.env?.ASSAY_RUN_ID).toBe("rid2"); // 실행에 주입된 상관 키
+    const events = await h.collectTrace("rid2"); // 같은 키로 pull(runCase 가 compute 해제 후 호출)
     expect(fetched).toBe("otel:http://j:rid2");
     expect(events).toHaveLength(1);
+  });
+
+  it("ctx.runId 가 오면 자체 mint 대신 그 값으로 상관하고, traceSource() 가 스펙 좌표(collect 포함)를 노출한다", async () => {
+    const { compute, execs } = fakeCompute();
+    const h = new CommandHarness(spec({ trace: { kind: "mlflow", endpoint: "http://m", collect: "control-plane" } }), {
+      runId: () => "self-minted",
+    });
+    await collect(h.run(compute, "t", { ...ctx, runId: "from-runcase" }));
+    expect(execs[0]?.env?.ASSAY_RUN_ID).toBe("from-runcase"); // runCase 상관 키 우선
+    expect(h.traceSource()).toEqual({ kind: "mlflow", endpoint: "http://m", collect: "control-plane" });
+    expect(new CommandHarness(spec()).traceSource()).toBeUndefined(); // trace:none
   });
 
   // 사용량 계측: trace:none 하니스의 모델 호출을 usage-proxy 로 통과시켜 토큰을 합성 llm_call 로 회수.
@@ -201,7 +214,10 @@ describe("CommandHarness", () => {
     const { compute, execs } = fakeCompute();
     const { start, calls } = fakeMeter();
     const h = new CommandHarness(
-      spec({ trace: { kind: "otel", endpoint: "http://j" }, env: { OPENAI_API_BASE: "http://litellm:4000" } }),
+      spec({
+        trace: { kind: "otel", endpoint: "http://j", collect: "job" },
+        env: { OPENAI_API_BASE: "http://litellm:4000" },
+      }),
       {
         runId: () => "rid",
         meterUsage: true,

@@ -210,10 +210,17 @@ export const ServiceHarnessSpecSchema = z.object({
 export type ServiceHarnessSpec = z.infer<typeof ServiceHarnessSpecSchema>;
 
 // command 하니스의 트레이스 추출: 없음(결과만) | OTel/MLflow pull(runId 로 상관).
+// collect: 수집 위치 — "job"(기본, 잡 안에서 compute 해제 후 pull; 클러스터 내부 엔드포인트도 동작) |
+// "control-plane"(잡은 실행에서 끝, 컨트롤플레인이 pull+관측물 채점 — 엔드포인트가 컨트롤플레인에서 닿을 때만).
+// docs/architecture/streaming-case-pipeline.md D4
 export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }),
-  z.object({ kind: z.literal("otel"), endpoint: z.string() }),
-  z.object({ kind: z.literal("mlflow"), endpoint: z.string() }),
+  z.object({ kind: z.literal("otel"), endpoint: z.string(), collect: z.enum(["job", "control-plane"]).default("job") }),
+  z.object({
+    kind: z.literal("mlflow"),
+    endpoint: z.string(),
+    collect: z.enum(["job", "control-plane"]).default("job"),
+  }),
 ]);
 export type CommandTraceSpec = z.infer<typeof CommandTraceSpecSchema>;
 

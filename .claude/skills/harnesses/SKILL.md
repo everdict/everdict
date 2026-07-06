@@ -12,6 +12,10 @@ never scores itself — `graders` read the trace and the env snapshot (see skill
 ## Checklist
 1. Implement `EvaluableHarness` (`packages/core/src/harness.ts`); carry a pinned `version` (the unit of versioning).
 2. `run()` MUST yield normalized `TraceEvent`s — convert native output in an adapter, never leak raw output upstream.
+   A harness whose trace lands on an external platform (OTel/MLflow) does NOT pull it in `run()` — implement
+   the optional `traceSource()`/`collectTrace(runId)` hooks; `runCase` pulls **after compute release**
+   (correlate with `ctx.runId` — it injects the same id it later collects by). See
+   `docs/architecture/streaming-case-pipeline.md` D4.
 3. Cost/tokens come from the harness's **own trace** (`llm_call.cost`, e.g. Claude `total_cost_usd`) — never measured by us.
 4. Do all work through the provided `ComputeHandle` (`compute.exec`, cwd `work`); assume no host state.
 5. Map install/run failures to `AppError` (`HARNESS_INSTALL_FAILED` / `HARNESS_RUN_FAILED`).
@@ -19,7 +23,8 @@ never scores itself — `graders` read the trace and the env snapshot (see skill
 
 ## The contract
 `EvaluableHarness` (`packages/core/src/harness.ts`): `{ id, version, install(compute), run(compute, task, ctx) }`.
-`run` is an `AsyncIterable<TraceEvent>`; `RunContext = { apiKeyEnv, timeoutSec }`. `apiKeyEnv` is usually
+`run` is an `AsyncIterable<TraceEvent>`; `RunContext = { apiKeyEnv, timeoutSec, runId? }` (`runId` = the trace
+correlation key `runCase` mints and later collects by). `apiKeyEnv` is usually
 **empty** — `LocalDriver` uses the machine's own `claude` login (own-pays); keys are injected only in a
 keyless sandbox. The interface lives in `core` (a deliberate inversion of digo's "no interfaces" — Assay is a
 plugin runtime); impls live in `packages/harnesses`. The dispatch factory `makeHarness(id, version, spec?)`

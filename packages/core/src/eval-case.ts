@@ -41,6 +41,16 @@ export const CaseProvenanceSchema = z.object({
 });
 export type CaseProvenance = z.infer<typeof CaseProvenanceSchema>;
 
+// 수집이 잡 밖(컨트롤플레인)으로 미뤄진 케이스의 플랫폼 좌표 — spec.trace.collect="control-plane" 일 때
+// 에이전트가 실어 보내고, executeCase 가 pull+미뤄진 관측물 채점으로 결과를 완성한다(수집 후에도 provenance 로 유지).
+// docs/architecture/streaming-case-pipeline.md D4
+export const TraceRefSchema = z.object({
+  kind: z.enum(["otel", "mlflow"]),
+  endpoint: z.string(),
+  runId: z.string(), // 상관 키(assay.run_id) — 이 값으로 플랫폼에서 트레이스를 찾는다
+});
+export type TraceRef = z.infer<typeof TraceRefSchema>;
+
 export const CaseResultSchema = z.object({
   caseId: z.string(),
   harness: z.string(), // "claude-code@1.2.3"
@@ -48,6 +58,7 @@ export const CaseResultSchema = z.object({
   snapshot: EnvSnapshotSchema,
   scores: z.array(ScoreSchema),
   provenance: CaseProvenanceSchema.optional(), // 셀프호스티드 등 비관리 실행의 출처(컨트롤플레인 스탬프)
+  traceRef: TraceRefSchema.optional(), // 컨트롤플레인 수집 대상(위) — job 수집(기본)에는 없음
 });
 export type CaseResult = z.infer<typeof CaseResultSchema>;
 

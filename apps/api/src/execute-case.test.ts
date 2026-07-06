@@ -195,3 +195,78 @@ describe("executeCase — command 하니스 이미지 승격(evalCase.image ??= 
     expect(cap.seen()?.evalCase.image).toBeUndefined();
   });
 });
+
+// ── 잡 밖 트레이스 수집(D4) — traceRef 결과의 완성 단계 ──
+// docs/architecture/streaming-case-pipeline.md
+
+describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
+  const deferredResult = (job: AgentJob): CaseResult => ({
+    caseId: job.evalCase.id,
+    harness: "cmd@1",
+    trace: [{ t: 0, kind: "error", message: "command exit 1: boom" }], // 잡이 남긴 실행 이벤트
+    snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+    scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }], // ground-truth 는 잡에서
+    traceRef: { kind: "otel", endpoint: "http://collector", runId: "rid-9" },
+  });
+  const dispatcherOf = (result: (job: AgentJob) => CaseResult): Dispatcher => ({
+    async dispatch(job) {
+      return result(job);
+    },
+  });
+  // steps/cost 를 컨트롤플레인에서 재구성해 채점할 수 있도록 케이스에 관측물 grader 스펙을 단다.
+  const jobWithGraders: AgentJob = {
+    ...JOB,
+    evalCase: { ...JOB.evalCase, graders: [{ id: "tests-pass", config: { cmd: "true" } }, { id: "steps" }] },
+  };
+
+  it("traceRef 가 있으면 플랫폼에서 pull 해 트레이스를 완성하고, 미뤄진 관측물 grader(steps)만 채점한다", async () => {
+    let fetchedBy = "";
+    const result = await executeCase(
+      {
+        dispatcher: dispatcherOf(deferredResult),
+        buildTraceSource: (cfg) => ({
+          async fetch(runId) {
+            fetchedBy = `${cfg.kind}:${cfg.endpoint}:${runId}`;
+            return [
+              { t: 1, kind: "tool_call", id: "x", name: "bash", args: {} },
+              { t: 2, kind: "llm_call", model: "m" },
+            ];
+          },
+        }),
+      },
+      "u",
+      jobWithGraders,
+    );
+    expect(fetchedBy).toBe("otel:http://collector:rid-9"); // traceRef 좌표+상관 키로 pull
+    expect(result.trace).toHaveLength(3); // 잡 이벤트 1 + 플랫폼 2
+    // needsCompute(tests-pass)는 잡에서 이미 채점 — 여기선 미뤄진 steps 만 덧붙는다(이중 채점 없음).
+    expect(result.scores.map((s) => s.graderId)).toEqual(["tests-pass", "steps"]);
+    const steps = result.scores.find((s) => s.graderId === "steps");
+    expect(steps?.value).toBe(1); // tool_call 1건 — 수집된 트레이스 위에서 도출됐다는 증거
+    expect(result.traceRef?.runId).toBe("rid-9"); // provenance 로 유지
+  });
+
+  it("pull 실패는 soft — error 이벤트로 가시화하고 실행 산출물(ground-truth 점수)은 보존한다", async () => {
+    const result = await executeCase(
+      {
+        dispatcher: dispatcherOf(deferredResult),
+        buildTraceSource: () => ({
+          async fetch() {
+            throw new Error("collector down");
+          },
+        }),
+      },
+      "u",
+      jobWithGraders,
+    );
+    expect(result.trace.some((e) => e.kind === "error" && e.message.includes("collector down"))).toBe(true);
+    expect(result.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // 보존
+  });
+
+  it("traceRef 없는 결과(기본 job 수집)는 그대로 통과한다(무회귀) + buildTraceSource 미설정은 가시화", async () => {
+    const plain = await executeCase({ dispatcher: dispatcherOf(resultFor) }, "u", jobWithGraders);
+    expect(plain.trace).toEqual([]); // 손대지 않음
+    const noSource = await executeCase({ dispatcher: dispatcherOf(deferredResult) }, "u", JOB);
+    expect(noSource.trace.some((e) => e.kind === "error" && e.message.includes("buildTraceSource"))).toBe(true);
+  });
+});
