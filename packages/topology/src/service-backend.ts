@@ -91,6 +91,13 @@ export class ServiceTopologyBackend implements Backend {
           zone,
         })
       : undefined;
+    // 타깃은 무슨 일이 있어도 해제(finally) — 관측물 회수 직후 조기 해제하면 이후 no-op(플래그 멱등화).
+    let targetReleased = false;
+    const releaseTarget = async (): Promise<void> => {
+      if (!target || targetReleased) return;
+      targetReleased = true;
+      await target.dispose();
+    };
     try {
       const base = topo.endpoints[spec.frontDoor.service];
       if (!base) {
@@ -173,6 +180,9 @@ export class ServiceTopologyBackend implements Backend {
         getJson: this.opts.getJson ?? fetchJson,
         wiring: { ...wiring, run_id: outcome.traceRef },
       });
+      // 관측물(trace+snapshot)이 손에 들어왔으니 타깃(브라우저 등)은 더 필요 없다 — 채점(judge LLM 등)
+      // 동안 점유하지 않도록 조기 해제. docs/architecture/streaming-case-pipeline.md
+      await releaseTarget();
 
       // 케이스가 그레이더를 지정하면 그것으로(dom-contains/url-matches 등), 아니면 trace 기반 기본값.
       const graders =
@@ -187,7 +197,7 @@ export class ServiceTopologyBackend implements Backend {
 
       return { caseId: job.evalCase.id, harness: `${spec.id}@${spec.version}`, trace, snapshot, scores };
     } finally {
-      if (target) await target.dispose();
+      await releaseTarget();
     }
   }
 }

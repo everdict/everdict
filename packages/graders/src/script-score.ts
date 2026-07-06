@@ -17,6 +17,7 @@ export interface ScriptScoreConfig {
 export class ScriptScoreGrader implements Grader {
   readonly id: string;
   readonly metric: string;
+  readonly needsCompute = true; // 환경에서 채점 스크립트 실행 — compute 해제 전에 채점되어야 한다
   private readonly pattern: RegExp;
   private readonly threshold: number;
   constructor(private readonly cfg: ScriptScoreConfig) {

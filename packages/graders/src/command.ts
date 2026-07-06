@@ -20,6 +20,7 @@ function shArg(s: string): string {
 export class CommandGrader implements Grader {
   readonly id: string;
   readonly metric: string;
+  readonly needsCompute = true; // 환경에서 채점 명령 실행 — compute 해제 전에 채점되어야 한다
   constructor(private readonly cfg: CommandConfig) {
     this.id = cfg.id ?? "command";
     this.metric = cfg.metric ?? "command";

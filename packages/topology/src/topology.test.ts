@@ -807,6 +807,43 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     expect(b.disposed()).toBe(true); // finally 로 per-case 브라우저 정리
   });
 
+  it("타깃(브라우저)은 관측물 회수 직후 — 채점 전에 — 해제된다(채점 동안 미점유)", async () => {
+    const b = mockBrowser();
+    const driver: FrontDoorDriver = {
+      async drive() {
+        return { traceRef: "fixed", status: "done" };
+      },
+    };
+    let disposedAtGrade: boolean | undefined;
+    const backend = new ServiceTopologyBackend({
+      runtime: mockRuntime(b.handle),
+      traceSource: {
+        async fetch() {
+          return [];
+        },
+      },
+      specFor: () => SPEC,
+      frontDoorDriver: driver,
+      newRunId: () => "fixed",
+      // 채점 시점에 타깃이 이미 반납됐는지 기록하는 관측 grader.
+      graders: [
+        {
+          id: "probe",
+          async grade() {
+            disposedAtGrade = b.disposed();
+            return { graderId: "probe", metric: "probe", value: 1, pass: true };
+          },
+        },
+      ],
+    });
+
+    const result = await backend.dispatch(job);
+
+    expect(disposedAtGrade).toBe(true); // 조기 해제 — judge LLM 등 채점 동안 브라우저를 잡아두지 않는다
+    expect(result.scores.some((s) => s.graderId === "probe")).toBe(true);
+    expect(b.disposed()).toBe(true);
+  });
+
   it("완료 모델이 failed 를 돌려줘도 스냅샷+트레이스로 채점은 진행한다", async () => {
     const b = mockBrowser();
     const driver: FrontDoorDriver = {

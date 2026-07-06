@@ -26,5 +26,9 @@ export interface GradeContext {
 // 하니스/버전 간 공정 비교가 가능해진다.
 export interface Grader {
   readonly id: string;
+  // 채점 시 환경(compute)에서 명령을 실행하는 grader 는 true 로 선언(tests-pass/command 등 outcome 계열).
+  // 미선언 = 관측물(trace/snapshot) 전용 → runCase 가 compute 를 해제한 뒤에 채점해 샌드박스 점유를
+  // 실행 구간으로 최소화한다(judge LLM 대기 동안 미점유). docs/architecture/streaming-case-pipeline.md
+  readonly needsCompute?: boolean;
   grade(ctx: GradeContext): Promise<Score>;
 }

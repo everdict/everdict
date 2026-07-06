@@ -17,6 +17,8 @@ function shArg(s: string): string {
 // 참고: per-repo 의존성 설치는 env.setup(또는 공식 prebuilt 이미지)이 담당 — 이 그레이더는 "채점"만.
 export class SweBenchGrader implements Grader {
   readonly id = "swe-bench";
+  readonly needsCompute = true; // 환경에서 gold 패치 적용+테스트 실행 — compute 해제 전에 채점되어야 한다
+
   constructor(private readonly cfg: SweBenchConfig) {}
 
   async grade(ctx: GradeContext): Promise<Score> {

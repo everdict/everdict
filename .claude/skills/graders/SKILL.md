@@ -14,6 +14,10 @@ case. Same grader scores every harness identically → fair cross-harness/versio
 2. Read from `ctx` only — NEVER mutate the trace/env and NEVER re-run the harness.
 3. `ctx.compute` is OPTIONAL (service/browser harnesses have none) — outcome graders MUST guard it
    (else `BadRequestError`); trace graders read ONLY `ctx.trace`; browser graders require the snapshot `kind`.
+   A grader that execs in the environment MUST also declare **`readonly needsCompute = true`** — `runCase`
+   grades those *before* releasing compute and everything else *after* (sandbox not held during judge/LLM
+   waits; os-use screenshot is materialized into the grading snapshot pre-release). Observation-only graders
+   leave it undeclared. See `docs/architecture/streaming-case-pipeline.md`.
 4. Register a no-dep grader in `makeGraders` and give it a `GraderSpec` `{id, config?}` shape.
 5. Unit-test with a hand-built `GradeContext` (fake trace/snapshot) — no harness, no network.
 6. External/HTTP failure → `UpstreamError` (never a raw `Error`); wrong-kind/missing-compute → `BadRequestError`.

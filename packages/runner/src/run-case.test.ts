@@ -1,4 +1,14 @@
-import type { EvalCase } from "@assay/core";
+import type {
+  ComputeHandle,
+  Driver,
+  EnvSnapshot,
+  Environment,
+  EvalCase,
+  EvaluableHarness,
+  GradeContext,
+  Grader,
+  Score,
+} from "@assay/core";
 import { LocalDriver } from "@assay/drivers";
 import { RepoEnvironment } from "@assay/environments";
 import { TestsPassGrader, costGrader, stepsGrader } from "@assay/graders";
@@ -46,5 +56,122 @@ describe("runCase — 실제 하니스 실행 → 트레이스 → 채점 (전�
     const steps = result.scores.find((s) => s.graderId === "steps");
     expect(steps?.value).toBeGreaterThan(0);
     expect(result.snapshot.changedFiles).toContain("value.txt");
+  });
+});
+
+// ── compute 조기 해제 — 관측물 전용 grader 는 샌드박스 반납 후 채점 ──
+// docs/architecture/streaming-case-pipeline.md D3
+
+const CASE: EvalCase = {
+  id: "c1",
+  env: { kind: "repo", source: { files: {} } },
+  task: "t",
+  graders: [],
+  timeoutSec: 60,
+  tags: [],
+};
+
+function fakeCompute(overrides: Partial<ComputeHandle> = {}): ComputeHandle & { disposed: boolean } {
+  const handle = {
+    disposed: false,
+    async exec() {
+      return { exitCode: 0, stdout: "", stderr: "" };
+    },
+    async writeFile() {},
+    async readFile() {
+      return "";
+    },
+    async dispose() {
+      handle.disposed = true;
+    },
+    ...overrides,
+  };
+  return handle;
+}
+
+function fakeDeps(compute: ComputeHandle, snapshot: EnvSnapshot, graders: Grader[]) {
+  const driver: Driver = { id: "fake", provision: async () => compute };
+  const environment: Environment = { kind: snapshot.kind, seed: async () => {}, snapshot: async () => snapshot };
+  const harness: EvaluableHarness = {
+    id: "fake",
+    version: "0",
+    install: async () => {},
+    async *run() {}, // 트레이스 없는 페이크 하니스(yield 없음)
+  };
+  return { driver, environment, harness, graders, runCtx: { apiKeyEnv: {}, timeoutSec: 60 } };
+}
+
+const REPO_SNAPSHOT: EnvSnapshot = { kind: "repo", diff: "", changedFiles: [], headSha: "h" };
+
+describe("runCase — compute 조기 해제(관측물 전용 grader 는 샌드박스 반납 후 채점)", () => {
+  it("needsCompute grader 는 해제 전(compute 동봉)·미선언 grader 는 해제 후(compute 없음) 채점되고 점수 순서는 grader 배열 순서를 유지한다", async () => {
+    const compute = fakeCompute();
+    const seen: Array<{ id: string; disposedAtGrade: boolean; hadCompute: boolean }> = [];
+    const grader = (id: string, needsCompute?: boolean): Grader => ({
+      id,
+      ...(needsCompute ? { needsCompute } : {}),
+      async grade(ctx: GradeContext): Promise<Score> {
+        seen.push({ id, disposedAtGrade: compute.disposed, hadCompute: ctx.compute !== undefined });
+        return { graderId: id, metric: id, value: 1, pass: true };
+      },
+    });
+    // 관측물 전용 grader 를 앞에 둬서 "순서 유지"가 채점 시점과 독립임을 같이 검증한다.
+    const graders = [grader("trace-only"), grader("outcome", true)];
+
+    const result = await runCase(CASE, fakeDeps(compute, REPO_SNAPSHOT, graders));
+
+    // compute-바운드는 해제 전에 compute 를 들고 채점, 관측물 전용은 해제 후 compute 없이 채점.
+    expect(seen).toEqual([
+      { id: "outcome", disposedAtGrade: false, hadCompute: true },
+      { id: "trace-only", disposedAtGrade: true, hadCompute: false },
+    ]);
+    // 점수 배열은 grader 배열 순서 그대로.
+    expect(result.scores.map((s) => s.graderId)).toEqual(["trace-only", "outcome"]);
+    expect(compute.disposed).toBe(true);
+  });
+
+  it("os-use ref-only 스크린샷은 해제 전에 물질화되어 채점 스냅샷에만 동봉된다(저장 스냅샷은 ref 그대로)", async () => {
+    const compute = fakeCompute({
+      async exec(cmd: string) {
+        // materialize 의 base64 캡처 명령 — 해제 후 호출되면 이 페이크가 아니라 disposed 검증에서 걸린다.
+        expect(cmd).toContain("base64");
+        expect(compute.disposed).toBe(false);
+        return { exitCode: 0, stdout: "UE5H\n", stderr: "" };
+      },
+    });
+    const osUse: EnvSnapshot = { kind: "os-use", screenshotRef: "/tmp/shot.png", screenshot: "", windows: [] };
+    let judged: EnvSnapshot | undefined;
+    const vlmJudge: Grader = {
+      id: "judge",
+      async grade(ctx: GradeContext): Promise<Score> {
+        judged = ctx.snapshot;
+        return { graderId: "judge", metric: "judge", value: 1, pass: true };
+      },
+    };
+
+    const result = await runCase(CASE, fakeDeps(compute, osUse, [vlmJudge]));
+
+    // 채점 컨텍스트에는 물질화된 base64 스크린샷이 동봉된다(해제 후에도 VLM judge 가 쓸 수 있게).
+    expect(judged?.kind === "os-use" && judged.screenshot).toBe("UE5H");
+    // 저장 스냅샷(CaseResult)은 현행대로 ref-only — 레코드 비대 없음.
+    expect(result.snapshot.kind === "os-use" && result.snapshot.screenshot).toBe("");
+  });
+
+  it("grader 가 던져도 compute 는 해제된다(조기 해제 이후 finally 는 no-op — 이중 dispose 없음)", async () => {
+    let disposeCount = 0;
+    const compute = fakeCompute({
+      async dispose() {
+        disposeCount += 1;
+      },
+    });
+    const failing: Grader = {
+      id: "boom",
+      async grade(): Promise<Score> {
+        throw new Error("boom");
+      },
+    };
+
+    await expect(runCase(CASE, fakeDeps(compute, REPO_SNAPSHOT, [failing]))).rejects.toThrow("boom");
+    expect(disposeCount).toBe(1);
   });
 });
