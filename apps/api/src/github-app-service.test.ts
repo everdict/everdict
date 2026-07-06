@@ -109,6 +109,33 @@ describe("GithubAppService", () => {
     );
   });
 
+  it("GHE host 는 정규화 동등성 — 트레일링 슬래시/대소문자만 다른 재등록은 upsert(중복 행 금지), 해제·설치 URL 도 동일 취급", async () => {
+    // Given: 트레일링 슬래시 붙은 host 로 등록.
+    await svc.registerGheApp("acme", {
+      host: "https://ghe.acme.io/",
+      slug: "app-v1",
+      appId: "111",
+      privateKeySecretName: "k1",
+    });
+    // When: 슬래시 없이 + 대문자 섞어 재등록 — 같은 서버다.
+    await svc.registerGheApp("acme", {
+      host: "https://GHE.Acme.io",
+      slug: "app-v2",
+      appId: "222",
+      privateKeySecretName: "k2",
+    });
+    // Then: 중복 행이 아니라 갱신 1건(수정 전엔 문자열 불일치로 2건이 됐다 — '미설치' 오인의 뿌리).
+    const view = await svc.list("acme");
+    expect(view.registrations).toHaveLength(1);
+    expect(view.registrations[0]?.slug).toBe("app-v2");
+    // 설치 URL 해석도 표기가 달라도 통과.
+    const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io/" });
+    expect(installUrl).toContain("/github-apps/app-v2/");
+    // 해제도 표기가 달라도 지워진다.
+    await svc.removeRegistration("acme", "HTTPS://ghe.acme.io");
+    expect((await svc.list("acme")).registrations).toEqual([]);
+  });
+
   it("콜백은 installation_id+state → account 확정 후 워크스페이스에 설치를 기록한다", async () => {
     stubInstallation("acme-org");
     const future = new Date(NOW.getTime() + 60_000).toISOString();

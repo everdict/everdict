@@ -145,7 +145,8 @@ export class GithubAppService {
   // GHE App 등록/갱신(관리자). host 기준 upsert. 개인키는 SecretStore 에 먼저 넣고 그 이름을 지정.
   async registerGheApp(workspace: string, input: Registration): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
-    const registrations = [...(g?.registrations ?? []).filter((r) => r.host !== input.host), input];
+    // host 는 정규화 동등성(sameHost)으로 upsert — 트레일링 슬래시/대소문자만 다른 중복 등록을 막는다.
+    const registrations = [...(g?.registrations ?? []).filter((r) => !sameHost(r.host, input.host)), input];
     await this.write(workspace, { registrations, installations: g?.installations ?? [] });
     return { registrations, installations: g?.installations ?? [] };
   }
@@ -154,7 +155,7 @@ export class GithubAppService {
   async removeRegistration(workspace: string, host: string): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
     if (!g) return { registrations: [], installations: [] };
-    const registrations = g.registrations.filter((r) => r.host !== host);
+    const registrations = g.registrations.filter((r) => !sameHost(r.host, host));
     await this.write(workspace, { registrations, installations: g.installations });
     return { registrations, installations: g.installations };
   }
@@ -380,7 +381,7 @@ export class GithubAppService {
       if (!gc) throw new BadRequestError("BAD_REQUEST", {}, "github.com App 미설정입니다(GITHUB_APP_* env).");
       return { slug: gc.slug, webBase: "https://github.com", installPath: "/apps" };
     }
-    const reg = (await this.settings.get(workspace))?.githubApp?.registrations.find((r) => r.host === host);
+    const reg = (await this.settings.get(workspace))?.githubApp?.registrations.find((r) => sameHost(r.host, host));
     if (!reg) throw new BadRequestError("BAD_REQUEST", { host }, `등록되지 않은 GHE App host 입니다: ${host}`);
     return { slug: reg.slug, webBase: trimSlash(host), installPath: "/github-apps" };
   }
@@ -391,7 +392,7 @@ export class GithubAppService {
       if (!gc) throw new BadRequestError("BAD_REQUEST", {}, "github.com App 미설정입니다(GITHUB_APP_* env).");
       return { appId: gc.appId, privateKeyPem: gc.privateKeyPem };
     }
-    const reg = (await this.settings.get(workspace))?.githubApp?.registrations.find((r) => r.host === host);
+    const reg = (await this.settings.get(workspace))?.githubApp?.registrations.find((r) => sameHost(r.host, host));
     if (!reg) throw new BadRequestError("BAD_REQUEST", { host }, `등록되지 않은 GHE App host 입니다: ${host}`);
     const pem = (await this.secretsFor(workspace))[reg.privateKeySecretName];
     if (!pem)

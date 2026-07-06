@@ -307,7 +307,8 @@ function GheSection({
         <SettingsList>
           {view.registrations.map((r) => {
             // 이 GHE 서버로 설치된 조직 — 등록 행에서도 설치 상태가 바로 보인다(미설치면 outline 배지).
-            const installedOrgs = view.installations.filter((i) => i.host === r.host)
+            // host 비교는 정규화 동등성(sameHost) — 트레일링 슬래시/대소문자만 달라도 '미설치'로 오인하지 않게.
+            const installedOrgs = view.installations.filter((i) => sameHost(i.host, r.host))
             return (
               <SettingsRow
                 key={r.host}
@@ -395,6 +396,13 @@ function GheSection({
       </Button>
     </div>
   )
+}
+
+// GHE 베이스 URL 동등성 — 대소문자/트레일링 슬래시 차이를 무시(서버 github-app-service 의 sameHost 미러).
+function sameHost(a?: string, b?: string): boolean {
+  if (a === undefined || b === undefined) return a === b
+  const norm = (u: string) => (u.endsWith('/') ? u.slice(0, -1) : u).toLowerCase()
+  return norm(a) === norm(b)
 }
 
 // "https://ghe.example.com" → "ghe.example.com"; github.com 설치(host 없음)는 "github.com" — 칩 상시 표기로 일관.
