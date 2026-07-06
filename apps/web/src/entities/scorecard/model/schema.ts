@@ -96,6 +96,27 @@ export const scorecardOriginSchema = z.object({
 })
 export type ScorecardOrigin = z.infer<typeof scorecardOriginSchema>
 
+// 트레이스 싱크 적재 결과 — 채점 완료 후 케이스별 trace+점수를 워크스페이스 관측 플랫폼에 내보낸 기록.
+// 실패해도 스코어카드 상태와 무관(여기 status 로만 표시). 상세(get) 전용 — 목록엔 안 온다.
+export const scorecardExportSchema = z.object({
+  sink: z.enum(['mlflow', 'langfuse', 'langsmith', 'phoenix']),
+  status: z.enum(['succeeded', 'partial', 'failed']),
+  url: z.string().optional(), // 상위(experiment/project) 딥링크
+  message: z.string().optional(), // 실패/부분 사유
+  exportedAt: z.string(),
+  cases: z
+    .array(
+      z.object({
+        caseId: z.string(),
+        externalId: z.string().optional(), // 플랫폼 trace/run id
+        url: z.string().optional(), // 케이스 trace 딥링크
+        error: z.string().optional(),
+      })
+    )
+    .optional(),
+})
+export type ScorecardExport = z.infer<typeof scorecardExportSchema>
+
 export const scorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -119,6 +140,7 @@ export const scorecardRecordSchema = z.object({
     })
     .optional(),
   scorecard: fullScorecardSchema.optional(),
+  export: scorecardExportSchema.optional(), // 트레이스 싱크 적재 결과(상세 전용)
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })
     .optional(),

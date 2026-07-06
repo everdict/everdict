@@ -144,6 +144,9 @@ export default async function ScorecardDetailPage({
   const shown = filter === 'failed' ? ordered.filter((c) => c.verdict === false) : ordered
   const base = `/${workspace}/scorecards/${encodeURIComponent(id)}`
 
+  // 트레이스 싱크 적재 결과 — 케이스별 외부 딥링크(관측 플랫폼의 trace 상세)로 점프.
+  const exportByCase = new Map((record.export?.cases ?? []).map((c) => [c.caseId, c]))
+
   // 케이스 드릴다운: 이 스코어카드가 팬아웃한 자식 run(있으면) → caseId→runId. 구(舊)/ingest 스코어카드는 자식이 없어 빈 맵.
   const childRunByCase = new Map<string, string>()
   if (results.length > 0) {
@@ -246,6 +249,46 @@ export default async function ScorecardDetailPage({
 
       {/* 트리거 출처(provenance) — CI/예약/API/웹 + 커밋·PR·CI run 링크 + PR 임시 핀(pinOverrides). */}
       {record.origin && <OriginBlock origin={record.origin} />}
+
+      {/* 트레이스 싱크 적재 — 상세 결과가 팀 관측 플랫폼에 있음을 알리고 바로가기를 준다(미설정 레코드는 통째로 숨김). */}
+      {record.export && (
+        <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
+          <div className="flex items-center gap-2">
+            <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
+              트레이스 싱크
+            </span>
+            <Badge tone="neutral">{record.export.sink}</Badge>
+            <Badge
+              tone={
+                record.export.status === 'succeeded'
+                  ? 'success'
+                  : record.export.status === 'partial'
+                    ? 'warning'
+                    : 'danger'
+              }
+            >
+              {record.export.status === 'succeeded'
+                ? '적재 완료'
+                : record.export.status === 'partial'
+                  ? '부분 적재'
+                  : '적재 실패'}
+            </Badge>
+          </div>
+          {record.export.url && (
+            <a
+              href={record.export.url}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[12px] font-[510] text-link transition-colors hover:text-foreground"
+            >
+              플랫폼에서 상세 보기 ↗
+            </a>
+          )}
+          {record.export.message && (
+            <span className="text-[12px] text-muted-foreground">{record.export.message}</span>
+          )}
+        </Card>
+      )}
 
       {(record.models?.primary ||
         (record.models?.observed.length ?? 0) > 0 ||
@@ -444,6 +487,17 @@ export default async function ScorecardDetailPage({
                       >
                         → run
                       </Link>
+                    )}
+                    {/* 트레이스 싱크 딥링크(있으면) — 관측 플랫폼의 원본/적재 trace 로 점프. */}
+                    {exportByCase.get(r.caseId)?.url && (
+                      <a
+                        href={exportByCase.get(r.caseId)?.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="font-mono text-[11px] text-link transition-colors hover:text-foreground"
+                      >
+                        → {record.export?.sink} ↗
+                      </a>
                     )}
                   </span>
                   <div className="flex flex-wrap items-center gap-1.5">

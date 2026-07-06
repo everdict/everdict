@@ -109,15 +109,23 @@ export const controlPlane = {
       { method: 'PUT', body: JSON.stringify({ tags }) }
     ),
   setDatasetVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
-    call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`, {
-      method: 'PUT',
-      body: JSON.stringify({ tags }),
-    }),
+    call<T>(
+      auth,
+      `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ tags }),
+      }
+    ),
   setRuntimeVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
-    call<T>(auth, `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`, {
-      method: 'PUT',
-      body: JSON.stringify({ tags }),
-    }),
+    call<T>(
+      auth,
+      `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ tags }),
+      }
+    ),
   // GET /harnesses/:id/:version — resolved HarnessSpec(template + pins). 상세/도식화용.
   getHarnessSpec: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}`),
@@ -308,6 +316,13 @@ export const controlPlane = {
     call<T>(auth, '/workspace/mattermost', { method: 'PUT', body: JSON.stringify(body) }),
   removeMattermost: (auth: AuthContext) =>
     callVoid(auth, '/workspace/mattermost', { method: 'DELETE' }),
+  // 워크스페이스 트레이스 싱크 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow 등)에 적재.
+  // 조회 settings:read / 등록·해제 settings:write. 인증 값은 SecretStore 에만(이름 참조만 오간다).
+  getTraceSink: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-sink'),
+  setTraceSink: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/trace-sink', { method: 'PUT', body: JSON.stringify(body) }),
+  removeTraceSink: (auth: AuthContext) =>
+    callVoid(auth, '/workspace/trace-sink', { method: 'DELETE' }),
   // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
   // 조회 harnesses:read(viewer+ — 분류 배지용) / 등록·해제 settings:write. 시크릿은 이름 참조만 오간다.
   getImageRegistry: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registry'),

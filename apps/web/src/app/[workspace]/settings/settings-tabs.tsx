@@ -7,6 +7,7 @@ import { ImageRegistryManager } from '@/features/manage-image-registry'
 import { InvitesManager } from '@/features/manage-invites'
 import { MattermostManager } from '@/features/manage-mattermost'
 import { MembersManager } from '@/features/manage-members'
+import { TraceSinkManager } from '@/features/manage-trace-sink'
 import { WorkspaceRunnersManager } from '@/features/manage-workspace-runners'
 import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { WorkspaceInfoCard } from '@/features/workspace-settings'
@@ -17,6 +18,7 @@ import type { MattermostConfig } from '@/entities/mattermost'
 import type { Invite, Member } from '@/entities/member'
 import type { RunnerMeta } from '@/entities/runner'
 import type { SecretMeta } from '@/entities/secret'
+import type { TraceSinkConfig } from '@/entities/trace-sink'
 import type { WorkspaceRecord } from '@/entities/workspace'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
@@ -32,6 +34,7 @@ export function SettingsTabs(props: {
   githubApp: GithubAppView // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
   githubAppNotice?: GithubAppNotice // 설치 콜백 리다이렉트(?githubApp=installed / ?error=…) 직후 안내
   mattermost?: MattermostConfig // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림)
+  traceSink?: TraceSinkConfig // 워크스페이스 트레이스 싱크(스코어카드 상세 결과의 관측 플랫폼 적재)
   imageRegistry?: ImageRegistryConfig // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행)
   ciLinks: CiLink[] // CI repo link(레포↔하니스 슬롯 = OIDC trust) 목록
   workspaceRunners: RunnerMeta[] // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI (admin)
@@ -108,6 +111,11 @@ export function SettingsTabs(props: {
             canWrite={props.canWriteSettings}
             secretNames={props.secrets.map((s) => s.name)}
             {...(props.mattermost !== undefined ? { config: props.mattermost } : {})}
+          />
+          <TraceSinkManager
+            canWrite={props.canWriteSettings}
+            secretNames={props.secrets.map((s) => s.name)}
+            {...(props.traceSink !== undefined ? { config: props.traceSink } : {})}
           />
           <ImageRegistryManager
             canWrite={props.canWriteSettings}

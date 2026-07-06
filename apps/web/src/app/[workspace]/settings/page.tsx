@@ -5,6 +5,7 @@ import { mattermostResponseSchema, type MattermostConfig } from '@/entities/matt
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
+import { traceSinkResponseSchema, type TraceSinkConfig } from '@/entities/trace-sink'
 import { workspaceRecordSchema, type WorkspaceRecord } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -46,6 +47,7 @@ export default async function SettingsPage({
   let secrets: SecretMeta[] = []
   let githubApp: GithubAppView = { registrations: [], installations: [] }
   let mattermost: MattermostConfig | undefined
+  let traceSink: TraceSinkConfig | undefined
   let imageRegistry: ImageRegistryConfig | undefined
   let ciLinks: CiLink[] = []
   let workspaceRunners: RunnerMeta[] = []
@@ -59,6 +61,8 @@ export default async function SettingsPage({
       githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
       // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림). 개인 연결 알림 대체. settings:read(admin).
       mattermost = mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
+      // 워크스페이스 트레이스 싱크(스코어카드 상세 결과의 관측 플랫폼 적재). settings:read(admin).
+      traceSink = traceSinkResponseSchema.parse(await controlPlane.getTraceSink(ctx)).config
       // 워크스페이스 이미지 레지스트리(분류 기준 + assay image push 대상). 조회 자체는 viewer+ 지만 관리 UI 는 이 탭.
       imageRegistry = imageRegistryResponseSchema.parse(
         await controlPlane.getImageRegistry(ctx)
@@ -102,6 +106,7 @@ export default async function SettingsPage({
           githubApp={githubApp}
           {...(githubAppNotice !== undefined ? { githubAppNotice } : {})}
           {...(mattermost !== undefined ? { mattermost } : {})}
+          {...(traceSink !== undefined ? { traceSink } : {})}
           {...(imageRegistry !== undefined ? { imageRegistry } : {})}
           ciLinks={ciLinks}
           workspaceRunners={workspaceRunners}
