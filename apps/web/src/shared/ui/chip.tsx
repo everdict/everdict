@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Boxes, Cpu, Database, ListFilter } from 'lucide-react'
+import { Boxes, Cpu, Database, ListFilter, Server } from 'lucide-react'
 
 import { fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -38,6 +38,16 @@ export function ModelChip({ children, muted }: { children: ReactNode; muted?: bo
       />
       {children}
     </code>
+  )
+}
+
+// 런타임 칩 — 워크로드가 도는 실행 인프라(등록 런타임 id | self:* 러너 | '기본 백엔드'). 아이콘(Server)으로 종류 구별.
+export function RuntimeChip({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
+      <Server className="size-3 shrink-0 text-[#6ec6a8]" />
+      {label}
+    </span>
   )
 }
 

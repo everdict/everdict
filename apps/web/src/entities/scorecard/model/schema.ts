@@ -107,6 +107,7 @@ export const scorecardRecordSchema = z.object({
   judgeModels: z.array(z.string()).optional(), // 이 run 을 채점한 judge 모델(들) — model 축과 별개(채점자)
   origin: scorecardOriginSchema.optional(), // 트리거 출처(provenance) — 경량이라 목록에도 포함. 과거 레코드는 미설정.
   createdBy: z.string().optional(), // 실행자(제출자 subject) — origin(어디서)과 짝인 '누가'. 과거 레코드는 미설정.
+  runtime: z.string().optional(), // 배치가 실행된 런타임(placement.target: 등록 런타임 id | self:* 러너). 미설정 = 과거·ingest 레코드. 경량 → 목록에도 포함.
   // 부분 실행(subset) 표식 — 이 배치가 데이터셋의 부분집합만 돌렸다({selected}/{total}). 미설정 = 전체 실행.
   subset: z
     .object({

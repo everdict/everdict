@@ -2,13 +2,13 @@
 
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { CirclePause, CirclePlay, Pause, Pencil, Play, Server, Trash2 } from 'lucide-react'
+import { CirclePause, CirclePlay, Pause, Pencil, Play, Trash2 } from 'lucide-react'
 
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
 import { UserAvatar } from '@/shared/ui/avatar'
-import { EntityRef } from '@/shared/ui/chip'
+import { EntityRef, RuntimeChip } from '@/shared/ui/chip'
 import { DropdownItem, DropdownMenu, DropdownSeparator } from '@/shared/ui/dropdown-menu'
 import { Tooltip } from '@/shared/ui/tooltip'
 
@@ -22,16 +22,6 @@ export function runtimeLabelOf(s: Schedule): string {
 
 export function ownerNameOf(authors: Record<string, Author>, subject: string): string {
   return authors[subject]?.name ?? fmtSubject(subject)
-}
-
-// 런타임 칩 — 발사가 도는 실행 인프라(런타임 미지정이면 '기본 백엔드'). 아이콘(Server)으로 종류 구별.
-export function RuntimeChip({ label }: { label: string }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
-      <Server className="size-3 shrink-0 text-[#6ec6a8]" />
-      {label}
-    </span>
-  )
 }
 
 // 상태 — 텍스트 배지 대신 색 있는 아이콘(활성=초록 재생, 일시중지=주황 일시정지) + 호버 툴팁.

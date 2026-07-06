@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
 
+import { CommentsSection } from '@/features/discuss'
 import { membersSchema } from '@/entities/member'
 import { runsSchema } from '@/entities/run'
 import { caseVerdict, scorecardRecordSchema, type ScorecardRecord } from '@/entities/scorecard'
@@ -12,14 +13,13 @@ import { AutoRefresh } from '@/shared/ui/auto-refresh'
 import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
-import { ModelChip } from '@/shared/ui/chip'
+import { ModelChip, RuntimeChip } from '@/shared/ui/chip'
 import { OriginBlock } from '@/shared/ui/origin'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusPill } from '@/shared/ui/status-pill'
 import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
-import { CommentsSection } from '@/features/discuss'
 
 export const dynamic = 'force-dynamic'
 
@@ -210,6 +210,25 @@ export default async function ScorecardDetailPage({
         <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
         {authorName && <Prop label="실행자" value={authorName} />}
+        {/* 이 배치가 실행된 런타임 — 등록 런타임이면 상세로 링크, self:* 러너는 칩만(러너엔 런타임 상세 페이지 없음). 미설정(과거·ingest)이면 숨김. */}
+        {record.runtime && (
+          <div className="min-w-0">
+            <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">런타임</dt>
+            <dd className="mt-1">
+              {record.runtime.startsWith('self:') ? (
+                <RuntimeChip label={record.runtime} />
+              ) : (
+                <Link
+                  href={`/${workspace}/runtimes/${encodeURIComponent(record.runtime)}`}
+                  className="rounded-sm hover:underline"
+                  title="런타임 상세"
+                >
+                  <RuntimeChip label={record.runtime} />
+                </Link>
+              )}
+            </dd>
+          </div>
+        )}
         {record.subset && (
           <Prop
             label="케이스 선택 (부분 실행)"
@@ -486,7 +505,12 @@ export default async function ScorecardDetailPage({
         )}
       </section>
 
-      <CommentsSection workspace={workspace} resourceType="scorecard" resourceId={id} title="논의" />
+      <CommentsSection
+        workspace={workspace}
+        resourceType="scorecard"
+        resourceId={id}
+        title="논의"
+      />
     </div>
   )
 }
