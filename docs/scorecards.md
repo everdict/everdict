@@ -73,8 +73,11 @@ Migrations: `packages/db/migrations/0006_create_scorecards.sql`, `0035_add_score
 | `GET /scorecards/:id` (full) | `get_scorecard` | `scorecards:read` |
 | `GET /scorecards/diff?baseline=&candidate=` | `diff_scorecards` | `scorecards:read` |
 
-Optional `judges:[{id,version?}]` applies registered **Agent Judges** to each case's trace after the run →
-`judge:<id>` scores in the summary (control-plane, trace-based). See `docs/judges.md`.
+Optional `judges:[{id,version?}]` applies registered **Agent Judges** to each case's trace →
+`judge:<id>` scores in the summary (control-plane, trace-based). Judging **streams per case**: each case is
+judged as soon as it completes (bounded case-axis parallelism, deterministic per-case judge order), overlapping
+the LLM-bound judge phase with dispatch; the `judges` step after dispatch is just the join of remaining tasks.
+See `docs/judges.md` + `docs/architecture/streaming-case-pipeline.md`.
 
 ### Trace ingestion (`POST /scorecards/ingest`)
 The "이미 수행한 트레이스" path: produce a scorecard from **externally-run traces without dispatching a harness**.

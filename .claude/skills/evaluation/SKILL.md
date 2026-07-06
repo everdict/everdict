@@ -18,9 +18,12 @@ dataset×harness → `Scorecard` + summary via `runSuite`. Regression = `diffSco
 
 ## Reference impl
 `apps/api/src/scorecard-service.ts` — the batch lifecycle: dataset resolve (404) → `queued` record (202)
-→ `runSuite` (per-case child runs, admit/settle budget, cooperative `AbortSignal` supersede) → apply judges
-→ offload → aggregate (`summarizeScorecard`+`scorecardModels`) → persist. Scoring is split out to
-`apps/api/src/scoring-service.ts` (`ScoringService.applyJudges`/`collectJudgeModels`).
+→ `runSuite` (per-case child runs, admit/settle budget, cooperative `AbortSignal` supersede) with **streaming
+judges** (each case is pushed into `ScoringService.createJudgeStream` from `onResult` the moment it completes —
+bounded case-axis parallelism, deterministic per-case judge order; the `judges` phase after dispatch is just
+`settle()`, the join) → offload → aggregate (`summarizeScorecard`+`scorecardModels`) → persist. Scoring is
+split out to `apps/api/src/scoring-service.ts` (`ScoringService.createJudgeStream`/`applyJudges`(=push-all+settle,
+used by ingest)/`collectJudgeModels`). See `docs/architecture/streaming-case-pipeline.md`.
 
 ## Scoring model — Grader-only (recently consolidated — IMPORTANT)
 Scoring is unified to **Graders**. There is no separate "scorer", and the **Metric(threshold) entity is

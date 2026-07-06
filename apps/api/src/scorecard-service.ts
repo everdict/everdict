@@ -615,6 +615,10 @@ export class ScorecardService {
         ? dataset.cases.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
         : dataset.cases;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
+      // judge 스트리밍 — 배치 전체 완료를 기다리지 않고 케이스가 끝나는 즉시 그 케이스의 judge 를 발사한다
+      // (케이스 축 병렬·bounded). 가장 느린 케이스가 나머지 judging 을 막던 배리어 제거.
+      // docs/architecture/streaming-case-pipeline.md
+      const judgeStream = await this.scoring.createJudgeStream(tenant, dataset, judges, runtime);
       pushStep("dispatch", "started", `${cases.length}개 케이스 실행 시작`);
       await flushSteps();
       // onResult: 케이스가 끝날 때마다(완료 순서) PASS/FAIL + 사유를 스텝으로 — "진행 과정"의 핵심.
@@ -632,6 +636,8 @@ export class ScorecardService {
             r.caseId,
           );
           void flushSteps();
+          // supersede 이후엔 judge 발사도 생략(회수된 배치에 LLM 비용을 더 쓰지 않는다).
+          if (!controller.signal.aborted) judgeStream.push(r);
         },
       });
       pushStep("dispatch", "ok", `디스패치 완료 — ${scorecard.results.length}개 케이스`);
@@ -639,6 +645,9 @@ export class ScorecardService {
       // supersede 됨 — 더 새 발사가 이 배치를 회수. 남은 파이프라인(judge/offload/알림)을 생략하고
       // 부분 결과만 붙여 superseded 로 종결한다(succeeded 가 아니므로 baseline/리더보드 무오염).
       if (controller.signal.aborted) {
+        // 이미 발사된 judge 태스크는 합류 후 저장(진행 중 scores 변이와 write-back 레이스 방지).
+        // 회수된 배치의 judge 에러는 소음 — swallow.
+        await judgeStream.settle().catch(() => {});
         pushStep("supersede", "info", "같은 PR 의 더 새 발사로 대체됨 — 남은 케이스 미발사, 부분 결과만 보존");
         const hasChildren = caseToChild.size > 0;
         if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
@@ -653,12 +662,14 @@ export class ScorecardService {
         return; // 대체된 배치의 완료 알림은 소음 — 생략
       }
       // runtime = 산출 run 의 배치 → judge 를 같은 런타임에 co-locate(관측물 옆에서 판정). ingest 경로엔 산출 run 없음.
+      // 스트리밍이라 대부분 디스패치와 겹쳐 이미 끝나 있다 — 여기는 잔여 태스크 합류(join)만.
+      // 태스크 에러는 여기서 rethrow → 현행과 동일하게 error.phase="judges" 로 귀속된다.
       phase = "judges";
       if (judges.length > 0) {
-        pushStep("judges", "started", `judge ${judges.length}종 적용`);
+        pushStep("judges", "started", `judge ${judges.length}종 — 스트리밍 적용 잔여 태스크 합류`);
         await flushSteps();
       }
-      await this.scoring.applyJudges(tenant, dataset, scorecard.results, judges, runtime); // 트레이스 → judge 점수(컨트롤플레인)
+      await judgeStream.settle(); // 트레이스 → judge 점수(컨트롤플레인, 케이스 완료 즉시 스트리밍)
       if (judges.length > 0) {
         pushStep("judges", "ok", "judge 적용 완료");
         await flushSteps();
