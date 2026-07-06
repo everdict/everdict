@@ -34,14 +34,18 @@ token courier, never an auth authority. See `docs/auth.md`.
   **JWKS** (`jwtVerify` with `issuer` + optional `audience`) — never decode-without-verify.
 - **Secrets:** store only the **SHA-256 hash** of an API key (`@assay/db`); plaintext is returned **once** at
   issuance. `/internal/**` is guarded by `x-internal-token` (constant-time compare, fail-closed if unset).
-  Self-serve key management (`POST/GET/DELETE /keys` + MCP `create/list/revoke_api_key`) is **admin-only**
-  (`keys:read`/`keys:write`) because an `ak_…` key resolves to workspace **admin** — `list` exposes only
-  non-secret metadata (`id`/`prefix`/`label`/`scopes`/`createdAt`), never the hash/plaintext; `revoke` is
-  tenant-scoped. A key may carry per-key **`scopes`** (`read|write|admin`, cumulative; `admin` = Full Access,
-  the default when omitted) stored alongside the hash; `apiKeyAuthenticator` loads them via the single
-  `keyStore.resolveByHash` resolver onto `Principal.scopes`, and `can()` applies them as an **intersection** with
-  the role matrix (`SCOPE_PERMISSIONS` in `authz.ts`) — a scoped key never exceeds its role; a key with no scopes
-  (legacy) stays unrestricted. Keys are **immutable** — change permissions by revoke + reissue.
+  Key management (`POST/GET/DELETE /keys` + MCP `create/list/revoke_api_key`) is **personal / self-scoped** — no
+  role gate (like connections/personal-secrets): each user sees/issues/revokes only their **own** keys (keyed by
+  `owner = principal.subject`, migration `0041`). A **personal** key (`owner ≠ ''`) resolves via
+  `apiKeyAuthenticator` to the **issuer's** identity (`subject = owner`) and — through `applyActiveWorkspace`
+  membership — the **issuer's role** (member key = member perms, base `viewer` if the owner isn't a member); it is
+  **never** a blanket workspace-admin. A **legacy/machine** key (`owner = ''`, e.g. `/internal/tenant-keys`) keeps
+  the old workspace-**admin** semantics (`subject = key:<ws>`). `list` exposes only non-secret metadata
+  (`id`/`prefix`/`label`/`scopes`/`createdAt`), never the hash/plaintext; `revoke` is `(tenant, id, owner)`-scoped
+  (can't revoke another user's key). A key may carry per-key **`scopes`** (`read|write|admin`, cumulative; `admin`
+  = Full Access, the default when omitted); `apiKeyAuthenticator` loads them via `keyStore.resolveByHash` onto
+  `Principal.scopes`, and `can()` applies them as an **intersection** with the role matrix (`SCOPE_PERMISSIONS`) —
+  a scoped key never exceeds its issuer's role. Keys are **immutable** — change permissions by revoke + reissue.
 - **AuthZ is a flat matrix** (`authz.ts`): `can`/`authorize(principal, action)`; `authorize` throws
   `ForbiddenError` → **403**. Roles are cumulative (`admin ⊃ member ⊃ viewer`). Gate every mutating route;
   reads of another workspace's resource return **404** (no existence leak), not 403.

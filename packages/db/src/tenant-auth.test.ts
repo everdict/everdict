@@ -74,4 +74,26 @@ describe("tenant key store", () => {
     const [meta] = await store.list("acme");
     expect(meta?.scopes).toBeUndefined();
   });
+
+  it("개인 키: owner 를 저장하고, list(owner)/revoke(owner)는 그 유저 것만 다룬다", async () => {
+    const store = new InMemoryTenantKeyStore();
+    const aliceKey = await issueKey(store, "acme", "alice-key", undefined, "alice");
+    await issueKey(store, "acme", "bob-key", undefined, "bob");
+    const machineKey = await issueKey(store, "acme", "ci"); // owner=""(머신 키)
+
+    // resolveByHash 는 owner 를 그대로 — 인증이 발급자로 해석하게 한다.
+    expect((await store.resolveByHash(hashKey(aliceKey)))?.owner).toBe("alice");
+    expect((await store.resolveByHash(hashKey(machineKey)))?.owner).toBe("");
+
+    // list(owner): alice 것만(bob·머신 키 제외). list(): 전체(머신 키 관리용).
+    expect((await store.list("acme", "alice")).map((m) => m.label)).toEqual(["alice-key"]);
+    expect((await store.list("acme")).length).toBe(3);
+
+    // revoke(owner): 남의 id 는 no-op(존재 누출 없음).
+    const [bobMeta] = await store.list("acme", "bob");
+    await store.revoke("acme", bobMeta?.id ?? "", "alice"); // alice 가 bob 키 취소 시도 → 무효
+    expect((await store.list("acme", "bob")).length).toBe(1);
+    await store.revoke("acme", bobMeta?.id ?? "", "bob"); // 본인 취소 → 유효
+    expect((await store.list("acme", "bob")).length).toBe(0);
+  });
 });

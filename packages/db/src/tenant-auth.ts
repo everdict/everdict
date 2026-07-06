@@ -16,26 +16,31 @@ export interface TenantKeyMeta {
   createdAt: string;
 }
 
-// auth 경로의 키 해석 결과 — 워크스페이스 + 키별 스코프(있으면).
+// auth 경로의 키 해석 결과 — 워크스페이스 + 발급자(owner) + 키별 스코프(있으면).
+// owner="" = 레거시 워크스페이스 머신 키(admin), owner=<subject> = 그 유저의 개인 키(발급자 역할로 해석).
 export interface ResolvedKey {
   tenant: string;
+  owner: string;
   scopes?: string[]; // 미지정(레거시/full access) → undefined = 무제한
 }
 
 export interface TenantKeyStore {
-  // meta 미지정(테스트/부트스트랩)이면 id 는 자동 생성, prefix 는 빈 문자열, scopes 는 무제한. issueKey 가 정식 발급 경로다.
+  // meta 미지정(테스트/부트스트랩)이면 id 는 자동 생성, prefix 는 빈 문자열, scopes 는 무제한, owner 는 ""(머신 키). issueKey 가 정식 발급 경로다.
   add(
     tenant: string,
     keyHash: string,
-    meta?: { id?: string; label?: string; prefix?: string; scopes?: string[] },
+    meta?: { id?: string; label?: string; prefix?: string; scopes?: string[]; owner?: string },
   ): Promise<void>;
-  resolveByHash(keyHash: string): Promise<ResolvedKey | undefined>; // auth 경로(불변) — 해시로 워크스페이스+스코프 해석
-  list(tenant: string): Promise<TenantKeyMeta[]>; // 메타만 — key_hash/평문은 절대 반환하지 않는다
-  revoke(tenant: string, id: string): Promise<void>; // tenant 스코프 — 다른 워크스페이스 id 는 no-op
+  resolveByHash(keyHash: string): Promise<ResolvedKey | undefined>; // auth 경로(불변) — 해시로 워크스페이스+발급자+스코프 해석
+  // 메타만(key_hash/평문 없음). owner 주면 그 유저의 개인 키만(셀프 목록), 미지정이면 워크스페이스 전체(머신 키 관리).
+  list(tenant: string, owner?: string): Promise<TenantKeyMeta[]>;
+  // tenant 스코프 취소 — 다른 워크스페이스 id 는 no-op. owner 주면 그 owner 의 키만 취소(남의 키 취소 방지).
+  revoke(tenant: string, id: string, owner?: string): Promise<void>;
 }
 
 interface KeyRow {
   tenant: string;
+  owner: string;
   id: string;
   label?: string;
   prefix: string;
@@ -59,10 +64,11 @@ export class InMemoryTenantKeyStore implements TenantKeyStore {
   async add(
     tenant: string,
     keyHash: string,
-    meta?: { id?: string; label?: string; prefix?: string; scopes?: string[] },
+    meta?: { id?: string; label?: string; prefix?: string; scopes?: string[]; owner?: string },
   ): Promise<void> {
     this.byHash.set(keyHash, {
       tenant,
+      owner: meta?.owner ?? "",
       id: meta?.id ?? randomUUID(),
       label: meta?.label,
       prefix: meta?.prefix ?? "",
@@ -72,16 +78,18 @@ export class InMemoryTenantKeyStore implements TenantKeyStore {
   }
   async resolveByHash(keyHash: string): Promise<ResolvedKey | undefined> {
     const row = this.byHash.get(keyHash);
-    return row ? { tenant: row.tenant, scopes: row.scopes } : undefined;
+    return row ? { tenant: row.tenant, owner: row.owner, scopes: row.scopes } : undefined;
   }
-  async list(tenant: string): Promise<TenantKeyMeta[]> {
+  async list(tenant: string, owner?: string): Promise<TenantKeyMeta[]> {
     return [...this.byHash.values()]
-      .filter((r) => r.tenant === tenant)
+      .filter((r) => r.tenant === tenant && (owner === undefined || r.owner === owner))
       .map((r) => ({ id: r.id, label: r.label, prefix: r.prefix, scopes: r.scopes, createdAt: r.createdAt }))
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // 최신순
   }
-  async revoke(tenant: string, id: string): Promise<void> {
-    for (const [hash, row] of this.byHash) if (row.tenant === tenant && row.id === id) this.byHash.delete(hash);
+  async revoke(tenant: string, id: string, owner?: string): Promise<void> {
+    for (const [hash, row] of this.byHash)
+      if (row.tenant === tenant && row.id === id && (owner === undefined || row.owner === owner))
+        this.byHash.delete(hash);
   }
 }
 
@@ -90,14 +98,15 @@ export class PgTenantKeyStore implements TenantKeyStore {
   async add(
     tenant: string,
     keyHash: string,
-    meta?: { id?: string; label?: string; prefix?: string; scopes?: string[] },
+    meta?: { id?: string; label?: string; prefix?: string; scopes?: string[]; owner?: string },
   ): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_tenant_keys (key_hash, tenant, id, label, prefix, scopes, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, now()) ON CONFLICT (key_hash) DO NOTHING`,
+      `INSERT INTO assay_tenant_keys (key_hash, tenant, owner, id, label, prefix, scopes, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, now()) ON CONFLICT (key_hash) DO NOTHING`,
       [
         keyHash,
         tenant,
+        meta?.owner ?? "",
         meta?.id ?? randomUUID(),
         meta?.label ?? null,
         meta?.prefix ?? "",
@@ -106,14 +115,14 @@ export class PgTenantKeyStore implements TenantKeyStore {
     );
   }
   async resolveByHash(keyHash: string): Promise<ResolvedKey | undefined> {
-    const res = await this.client.query<{ tenant: string; scopes: string | null }>(
-      "SELECT tenant, scopes FROM assay_tenant_keys WHERE key_hash = $1",
+    const res = await this.client.query<{ tenant: string; owner: string; scopes: string | null }>(
+      "SELECT tenant, owner, scopes FROM assay_tenant_keys WHERE key_hash = $1",
       [keyHash],
     );
     const row = res.rows[0];
-    return row ? { tenant: row.tenant, scopes: parseScopes(row.scopes) } : undefined;
+    return row ? { tenant: row.tenant, owner: row.owner, scopes: parseScopes(row.scopes) } : undefined;
   }
-  async list(tenant: string): Promise<TenantKeyMeta[]> {
+  async list(tenant: string, owner?: string): Promise<TenantKeyMeta[]> {
     // key_hash 는 select 하지 않는다(절대 노출 금지). prefix 는 레거시 행 대비 COALESCE.
     const res = await this.client.query<{
       id: string;
@@ -122,8 +131,8 @@ export class PgTenantKeyStore implements TenantKeyStore {
       scopes: string | null;
       created_at: string;
     }>(
-      "SELECT id, label, COALESCE(prefix, '') AS prefix, scopes, created_at FROM assay_tenant_keys WHERE tenant = $1 ORDER BY created_at DESC",
-      [tenant],
+      "SELECT id, label, COALESCE(prefix, '') AS prefix, scopes, created_at FROM assay_tenant_keys WHERE tenant = $1 AND ($2::text IS NULL OR owner = $2) ORDER BY created_at DESC",
+      [tenant, owner ?? null],
     );
     return res.rows.map((x) => ({
       id: x.id,
@@ -133,8 +142,11 @@ export class PgTenantKeyStore implements TenantKeyStore {
       createdAt: x.created_at,
     }));
   }
-  async revoke(tenant: string, id: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_tenant_keys WHERE tenant = $1 AND id = $2", [tenant, id]);
+  async revoke(tenant: string, id: string, owner?: string): Promise<void> {
+    await this.client.query(
+      "DELETE FROM assay_tenant_keys WHERE tenant = $1 AND id = $2 AND ($3::text IS NULL OR owner = $3)",
+      [tenant, id, owner ?? null],
+    );
   }
 }
 
@@ -156,9 +168,10 @@ export async function issueKey(
   tenant: string,
   label?: string,
   scopes?: string[],
+  owner?: string, // 발급자 subject(개인 키). 미지정=""(워크스페이스 머신 키, admin 해석).
 ): Promise<string> {
   const key = generateKey();
   const prefix = key.slice(0, 12); // "ak_" + 처음 9자 — 목록 식별 힌트(해시/평문 아님)
-  await store.add(tenant, hashKey(key), { id: randomUUID(), label, prefix, scopes });
+  await store.add(tenant, hashKey(key), { id: randomUUID(), label, prefix, scopes, owner });
   return key; // 평문 반환
 }
