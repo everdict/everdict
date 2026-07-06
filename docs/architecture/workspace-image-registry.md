@@ -39,10 +39,13 @@ So two features, one axis:
 
 ## Decisions (locked)
 
-- **One registry per workspace** (v1). `WorkspaceSettings.imageRegistry` is a single nullable
-  object, exactly like `mattermost` (clear = `null`). Multiple registries ("image sources
-  roster") is a later generalization if ever needed; external public images need no
-  registration to be classified `external`.
+- **Multiple named registries per workspace.** `WorkspaceSettings.imageRegistries[]` is a
+  name-keyed roster (upsert by `name`, `DELETE …/:name`). Classification and pull-auth match
+  against **all** registered registries (an image is `workspace`-class if it belongs to any);
+  push selects one by name (`?name=` / `--registry`, omitted allowed only when exactly one is
+  registered — ambiguity is a 400, never a silent pick). The legacy single
+  `imageRegistry` field is read as a `name: "default"` entry and cleared on the first write.
+  External public images still need no registration to be classified `external`.
 - **The registry is BYO** (GHCR, Harbor, a plain `registry:2`, cloud artifact registries…).
   Assay stores coordinates + SecretStore **name-refs**; it never operates a registry.
 - **Secrets are NAME references** (`pullSecretName` / `pushSecretName`), values live in the
@@ -53,7 +56,7 @@ So two features, one axis:
   (web is a pure HTTP client; precedent: `harnessInstanceSpecSchema` loose mirror).
 - **Push happens on the user's machine, credentials minted by the control plane.** The control
   plane has no Docker; the image exists where it was built. `assay image push` asks
-  `POST /workspace/image-registry/push-credentials` for `{host, namespace, username, password}`,
+  `POST /workspace/image-registries/push-credentials[?name=]` for `{name, host, namespace, username, password}`,
   then `docker tag` + `docker push` locally using an **isolated temp `DOCKER_CONFIG`** (never
   touches `~/.docker/config.json`).
 - **New authz action `images:push` (member+).** Push-credential minting hands out a credential
@@ -70,14 +73,16 @@ So two features, one axis:
 ## Data model
 
 ```ts
-// packages/db/src/workspace-settings.ts — WorkspaceSettingsSchema addition (JSONB, additive)
-imageRegistry: z.object({
+// packages/db/src/workspace-settings.ts — WorkspaceSettingsSchema (JSONB, additive)
+imageRegistries: z.array(z.object({
+  name: z.string().min(1),               // reference key — push selection points at this
   host: z.string().min(1),               // registry host[:port] — "ghcr.io", "registry.acme.dev:5000"
   namespace: z.string().min(1).optional(), // path prefix under host — "acme" → ghcr.io/acme/<name>:<tag>
   username: z.string().min(1).optional(),  // docker login username (token-only registries omit)
   pullSecretName: z.string().min(1).optional(), // SecretStore name-ref — pull token/password
   pushSecretName: z.string().min(1).optional(), // SecretStore name-ref — push token/password
-}).nullable().optional(),
+})).optional(),
+// legacy single `imageRegistry` — read as name:"default", cleared on first write
 ```
 
 No new table, no migration: additive JSONB on `assay_workspace_settings` + values in
@@ -113,10 +118,10 @@ tool twins in `mcp.ts`:
 
 | HTTP | MCP tool | Gate |
 |---|---|---|
-| `GET /workspace/image-registry` | `get_workspace_image_registry` | `harnesses:read` (viewer+) |
-| `PUT /workspace/image-registry` | `set_workspace_image_registry` | `settings:write` (admin) |
-| `DELETE /workspace/image-registry` | `remove_workspace_image_registry` | `settings:write` (admin) |
-| `POST /workspace/image-registry/push-credentials` | `get_image_push_credentials` | `images:push` (member+) |
+| `GET /workspace/image-registries` → `{registries}` | `list_workspace_image_registries` | `harnesses:read` (viewer+) |
+| `PUT /workspace/image-registries` (name upsert) | `set_workspace_image_registry` | `settings:write` (admin) |
+| `DELETE /workspace/image-registries/:name` | `remove_workspace_image_registry` | `settings:write` (admin) |
+| `POST /workspace/image-registries/push-credentials?name=` | `get_image_push_credentials` (`registry` arg) | `images:push` (member+) |
 
 - The GET view returns `{host, namespace?, username?, pullSecretName?, pushSecretName?,
   imagePrefix}` — never secret values. `imagePrefix` = `host[/namespace]/` for client-side ref
@@ -135,7 +140,7 @@ assay image push spreadsheetbench:v1 [--name spreadsheetbench] [--tag v1] \
   --api-url http://api.assay.dev --api-key ak_…       (env: ASSAY_API_URL / ASSAY_API_KEY)
 ```
 
-1. `POST /workspace/image-registry/push-credentials` (Bearer = API key → issuer's role).
+1. `POST /workspace/image-registries/push-credentials?name=` (Bearer = API key → issuer's role; 이름 생략은 1개일 때만).
 2. Target ref = `host[/namespace]/<name>:<tag>` — `name`/`tag` default from the local ref.
 3. `docker tag <local> <target>`.
 4. Write `{auths: {host: {auth: base64(user:pass)}}}` to a **temp `DOCKER_CONFIG` dir**,
@@ -190,8 +195,8 @@ if a real footgun shows up that warnings don't catch.
 - **Building images** — Assay references images, never builds them (locked in
   `portable-harness-runtime.md`).
 - **Operating a registry** — BYO only.
-- **Multiple registries per workspace** (v1) — single `imageRegistry`; revisit only with a
-  concrete need.
+- (retired non-goal) ~~Multiple registries per workspace~~ — shipped: name-keyed roster,
+  per-push selection.
 - **Rewriting/aliasing image refs at dispatch** — refs stay verbatim in specs; the registry
   informs classification/auth, it does not rewrite pins.
 

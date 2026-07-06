@@ -105,10 +105,12 @@ non-2xx surfaces as the run going `failed` (`UpstreamError`); a `404` (trace not
 trace. MLflow uses the 3.x tracing REST (`GET /api/3.0/mlflow/traces/get`, OTLP-style spans).
 
 ### Trace sink (export judged detail to the team's observability platform)
-The outbound mirror of pull-ingest. If the workspace registered a **trace sink**
-(`GET/PUT/DELETE /workspace/trace-sink` — kind `mlflow|langfuse|langsmith|phoenix` + endpoint +
-`authSecretName` name-ref + per-kind `project`), every scorecard (live batch **and** ingest) exports each
-case's trace+scores to that platform right after judging, and the record carries the outcome in
+The outbound mirror of pull-ingest. The workspace registers **named sinks**
+(`GET/PUT /workspace/trace-sinks` + `DELETE /workspace/trace-sinks/:name` — kind
+`mlflow|langfuse|langsmith|phoenix` + endpoint + `authSecretName` name-ref + per-kind `project`),
+and each **harness opts in** by selecting one (`PUT /harnesses/:id/trace-sink`, member+). A
+scorecard (live batch **and** ingest) whose harness selected a sink exports each case's
+trace+scores to that platform right after judging, and the record carries the outcome in
 **`export`** (`{sink, status: succeeded|partial|failed, url?, message?, cases[{caseId, externalId, url?,
 error?}], exportedAt}`; Pg `sink_export` jsonb, mig 0048; detail-only — omitted from `list` like `steps`).
 Export failure never fails the scorecard — the steps timeline gains an `export` entry and the detail page

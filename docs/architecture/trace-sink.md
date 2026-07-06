@@ -26,9 +26,14 @@ integration that configures it and the pipeline step that drives it.
 
 ## Decisions (locked)
 
-- **One sink per workspace**, configured as a workspace-scoped integration
-  (`WorkspaceSettings.traceSink`, `settings:write`) — same pattern as Mattermost / image registry.
-  A per-scorecard override is a non-goal for v1 (the sink is team infra, not a per-run knob).
+- **Multiple named sinks per workspace, selected per harness.** Sinks are registered as a
+  workspace-scoped integration (`WorkspaceSettings.traceSinks[]`, name-keyed upsert,
+  `settings:write`) — a team runs more than one observability platform. **Which sink a scorecard
+  exports to is a per-harness choice** (`WorkspaceSettings.traceSinkByHarness`:
+  harness id → sink name, `PUT /harnesses/:id/trace-sink`, `harnesses:register` = member+;
+  no selection = no export, opt-in). Removing a sink also clears assignments pointing at it
+  (no dangling refs). Reads are `harnesses:read` (viewer+ — the harness detail shows the
+  selection; views carry name-refs only). A per-scorecard override remains a non-goal.
 - **Two modes, decided per case:**
   - **create** (flow ①): the trace was born in Assay → create the trace in the platform, then
     attach the scores. Used by live batch and push-ingest.
@@ -50,17 +55,22 @@ integration that configures it and the pipeline step that drives it.
 
 ## Data model
 
-### `WorkspaceSettings.traceSink` (packages/db, JSONB — additive, no migration)
+### `WorkspaceSettings.traceSinks` + `traceSinkByHarness` (packages/db, JSONB — additive, no migration)
 
 ```ts
-traceSink: z.object({
+traceSinks: z.array(z.object({
+  name: z.string().min(1),                  // reference key — harness assignments point at this
   kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
   endpoint: z.string().url(),               // API base URL of the tenant's platform
   authSecretName: z.string().min(1).optional(), // SecretStore key — auth header VALUE (optional: unauthenticated dev servers)
   project: z.string().min(1).optional(),    // per-kind: mlflow experiment_id · langsmith project(session_name) · phoenix project · langfuse projectId (links)
   webUrl: z.string().url().optional(),      // UI deep-link base when it differs from endpoint (e.g. LangSmith api vs smith.langchain.com)
-}).nullable().optional()                    // DELETE clears with null (JSONB || can't drop keys)
+})).optional(),
+traceSinkByHarness: z.record(z.string()).optional() // harness id → sink name; no entry = no export (opt-in)
 ```
+
+`exportScorecard` resolves the sink from `ctx.harness`'s id via the assignment map; the recorded
+outcome carries the sink `name` (which of the workspace's sinks it was).
 
 ### `ScorecardRecord.export` (packages/db — new `sink_export` jsonb column, migration 0048)
 
@@ -161,17 +171,21 @@ Call sites (both share it — same seam as `ScoringService`):
 
 | HTTP route | MCP tool | Action |
 |---|---|---|
-| `GET /workspace/trace-sink` | `get_workspace_trace_sink` | `settings:read` |
-| `PUT /workspace/trace-sink` | `set_workspace_trace_sink` | `settings:write` (admin) |
-| `DELETE /workspace/trace-sink` | `remove_workspace_trace_sink` | `settings:write` (admin) |
+| `GET /workspace/trace-sinks` → `{sinks, assignments}` | `list_workspace_trace_sinks` | `harnesses:read` (viewer+) |
+| `PUT /workspace/trace-sinks` (name upsert) | `set_workspace_trace_sink` | `settings:write` (admin) |
+| `DELETE /workspace/trace-sinks/:name` | `remove_workspace_trace_sink` | `settings:write` (admin) |
+| `PUT /harnesses/:id/trace-sink` `{sink\|null}` | `assign_harness_trace_sink` | `harnesses:register` (member+) |
 
 The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` /
 `get_scorecard`) — no new read route.
 
 ## Web (apps/web)
 
-- **Settings → 통합**: "트레이스 싱크" card (Linear settings-list pattern) — kind select +
-  endpoint + `authSecretName` (SecretPicker) + project + webUrl; guide text via InfoTip.
+- **Settings → 통합**: the integrations tab is a **summary list** (row per integration:
+  연결됨/등록 개수 badge + 관리 진입점) — clicking 트레이스 싱크 opens the sink list manager
+  (name-keyed add/edit/remove; kind select + endpoint + `authSecretName` SecretPicker + per-kind
+  project + webUrl; InfoTip guide). **Harness detail** gains a 싱크 선택 selector
+  (`HarnessSinkSelect`, member+) — this is where export is turned on per harness.
 - **Scorecard detail**: an export strip — sink kind badge + status + top-level link + per-case
   external links in the cases table; failure shows the recorded message. No section when the
   record has no `export` (hide-empty convention).
@@ -182,7 +196,7 @@ The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` 
 - **S1 — `packages/trace` sink core:** `TraceSink` contract + `buildTraceSink` + 4 adapters +
   shared `TraceEvent→OTLP` mapping; pure builders unit-tested per adapter (injected fetch),
   Korean BDD.
-- **S2 — workspace integration:** `WorkspaceSettings.traceSink` + `TraceSinkService` (CRUD) +
+- **S2 — workspace integration:** `WorkspaceSettings.traceSinks` + `TraceSinkService` (CRUD) +
   routes + MCP tools + tests (server inject + MCP client).
 - **S3 — pipeline export:** `ScorecardRecord.export` (+ mig 0048 `sink_export jsonb`, additive) +
   `TraceSinkService.exportScorecard` + `track()`/`finishIngest()` wiring (+ pull attach-mode) +

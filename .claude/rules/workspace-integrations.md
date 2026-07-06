@@ -4,8 +4,12 @@ paths: "apps/api/src/github-app-service.ts,apps/api/src/mattermost-service.ts,ap
 # Workspace-scoped integrations rules (push)
 
 External integrations are **workspace-owned, not personal** (personal Connected accounts were removed in S6c).
-GitHub App + Mattermost + CI links + the image registry + the trace sink live on `WorkspaceSettings`, gated by
-`settings:write` (admin). SSOT: `docs/architecture/workspace-scoped-integrations.md` +
+GitHub App + Mattermost + CI links + image registries + trace sinks live on `WorkspaceSettings`, gated by
+`settings:write` (admin). Registries and sinks are **plural, name-keyed rosters** (upsert by `name`,
+`DELETE …/:name`); which trace sink a harness exports to is a **per-harness member+ choice**
+(`traceSinkByHarness`, `PUT /harnesses/:id/trace-sink`) — config is admin, selection is member.
+GHE **host comparisons are normalized** (`sameHost` — trailing slash/case-insensitive; the web mirrors it) —
+never compare registration/installation hosts with `===`. SSOT: `docs/architecture/workspace-scoped-integrations.md` +
 `docs/architecture/github-actions-trigger.md` + `docs/architecture/workspace-image-registry.md` +
 `docs/architecture/trace-sink.md`.
 

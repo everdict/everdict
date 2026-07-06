@@ -64,8 +64,10 @@ otel/mlflow = verbatim `Authorization` header, the newer three place the value i
 langsmith `x-api-key`; phoenix needs `source.project`), then score.
 
 ## Trace sink (export judged detail OUT — outbound mirror of ingest)
-If the workspace registered a **trace sink** (`WorkspaceSettings.traceSink`: MLflow/Langfuse/LangSmith/Phoenix,
-routes `/workspace/trace-sink`), the pipeline exports each case's trace+scores to that platform after judging
+The workspace registers **named sinks** (`WorkspaceSettings.traceSinks[]`: MLflow/Langfuse/LangSmith/Phoenix,
+routes `/workspace/trace-sinks*`), and each **harness opts in** by selecting one
+(`traceSinkByHarness`, `PUT /harnesses/:id/trace-sink`, member+). The pipeline exports the selecting
+harness's case trace+scores to that platform after judging
 (`TraceSinkService.exportScorecard` → `@assay/trace` `buildTraceSink`), records the outcome on
 `ScorecardRecord.export` (mig 0048 `sink_export` jsonb, detail-only like `steps`), and the web shows summary +
 deep links. **Export failure NEVER fails the scorecard** (outcome-only; `error.phase` untouched). Pull-ingest
