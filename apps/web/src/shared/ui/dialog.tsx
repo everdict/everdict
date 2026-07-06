@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 
 import { cn } from '@/shared/lib/utils'
 
@@ -34,9 +35,12 @@ export function Dialog({
     }
   }, [open, onClose])
 
-  if (!open) return null
+  // 열려 있지 않거나(닫힘) SSR(document 없음)이면 렌더하지 않는다.
+  if (!open || typeof document === 'undefined') return null
 
-  return (
+  // document.body 로 포탈 — 앱셸의 transform/filter(그레인·글로우) 조상이 fixed 의 컨테이닝 블록이 되어
+  // backdrop 이 뷰포트 전체를 못 덮던 문제를 피한다(fixed inset-0 이 항상 뷰포트 기준이 되도록).
+  return createPortal(
     <div
       className={cn(
         'fixed inset-0 z-[100] flex justify-center bg-black/45 backdrop-blur-[2px] animate-in fade-in-0 duration-150',
@@ -58,6 +62,7 @@ export function Dialog({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
