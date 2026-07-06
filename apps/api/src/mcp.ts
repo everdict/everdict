@@ -923,7 +923,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "pull_scorecard",
       {
         description:
-          "테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 scorecard 로(하니스 미실행). body=PullIngest JSON {dataset,harness,source:{kind,endpoint,authSecret?},runs:[{caseId,runId}],judges?}",
+          "테넌트 관측 플랫폼(otel|mlflow|langfuse|langsmith|phoenix)에서 runId 별 트레이스를 당겨와 scorecard 로(하니스 미실행). body=PullIngest JSON {dataset,harness,source:{kind,endpoint,authSecret?,project?[phoenix 필수]},runs:[{caseId,runId}],judges?}",
         inputSchema: { body: z.string().describe("PullIngest JSON") },
       },
       ({ body }) =>
@@ -1389,29 +1389,27 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
-  // 워크스페이스 트레이스 싱크 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow/Langfuse/LangSmith/Phoenix)에 적재.
-  // settings:read/write. 설계: docs/architecture/trace-sink.md
+  // 워크스페이스 트레이스 싱크(복수) — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼에 적재. 여러 싱크를 이름으로
+  // 등록하고 '하니스별로' 선택한다. 조회 harnesses:read / 등록·해제 settings:write / 선택 harnesses:register.
+  // 설계: docs/architecture/trace-sink.md
   if (deps.traceSinkService) {
     const sink = deps.traceSinkService;
     server.registerTool(
-      "get_workspace_trace_sink",
+      "list_workspace_trace_sinks",
       {
         description:
-          "이 워크스페이스의 트레이스 싱크 설정 — kind/endpoint/authSecretName/project(비밀 값 아님). 미설정이면 config 없음.",
+          "이 워크스페이스의 트레이스 싱크 목록 + 하니스별 선택 현황 — {sinks:[{name,kind,endpoint,…}], assignments:{harnessId→sinkName}}(비밀 값 아님).",
         inputSchema: {},
       },
-      () =>
-        run(principal, "settings:read", async () => {
-          const config = await sink.get(ws);
-          return ok({ ...(config ? { config } : {}) });
-        }),
+      () => run(principal, "harnesses:read", async () => ok(await sink.list(ws))),
     );
     server.registerTool(
       "set_workspace_trace_sink",
       {
         description:
-          "트레이스 싱크 등록/갱신(관리자, 선언형 전체 교체). 스코어카드 완료 시 케이스별 trace+점수를 이 플랫폼에 적재하고 스코어카드엔 외부 링크를 기록. 인증 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 authSecretName 으로 지정.",
+          "트레이스 싱크 등록/갱신(관리자, name 기준 upsert). 하니스가 이 싱크를 선택하면 스코어카드 완료 시 케이스별 trace+점수를 이 플랫폼에 적재. 인증 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 authSecretName 으로 지정.",
         inputSchema: {
+          name: z.string().min(1).describe("싱크 이름(참조 키 — 하니스 선택이 이 이름을 가리킨다)"),
           kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]).describe("관측 플랫폼 종류"),
           endpoint: z.string().url().describe("플랫폼 API 베이스 URL"),
           authSecretName: z
@@ -1429,45 +1427,57 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           webUrl: z.string().url().optional().describe("UI 딥링크 베이스(API endpoint 와 다를 때)"),
         },
       },
-      (input) => run(principal, "settings:write", async () => ok({ config: await sink.set(ws, input) })),
+      (input) => run(principal, "settings:write", async () => ok({ config: await sink.upsert(ws, input) })),
     );
     server.registerTool(
       "remove_workspace_trace_sink",
       {
-        description: "트레이스 싱크 해제(관리자). 이후 스코어카드 상세 결과는 외부 적재 없이 Assay 에만 남는다.",
-        inputSchema: {},
+        description: "트레이스 싱크 해제(관리자, 이름 지정). 그 싱크를 가리키던 하니스 선택도 함께 정리된다.",
+        inputSchema: { name: z.string().min(1).describe("해제할 싱크 이름") },
       },
-      () =>
+      ({ name }) =>
         run(principal, "settings:write", async () => {
-          await sink.clear(ws);
+          await sink.remove(ws, name);
           return ok({ ok: true });
         }),
     );
+    server.registerTool(
+      "assign_harness_trace_sink",
+      {
+        description:
+          "하니스별 트레이스 싱크 선택(member+) — 그 하니스의 스코어카드 완료 시 어느 싱크로 적재할지. sink 를 생략하면 선택 해제(적재 끔).",
+        inputSchema: {
+          harness: z.string().min(1).describe("하니스 id"),
+          sink: z.string().min(1).optional().describe("싱크 이름(생략 = 선택 해제)"),
+        },
+      },
+      ({ harness, sink: sinkName }) =>
+        run(principal, "harnesses:register", async () =>
+          ok({ assignments: await sink.assign(ws, harness, sinkName ?? null) }),
+        ),
+    );
   }
 
-  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
-  // 조회 harnesses:read / 등록·해제 settings:write / push 자격증명 images:push(member+).
+  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
+  // 여러 개를 이름으로 등록하고 push 시 선택. 조회 harnesses:read / 등록·해제 settings:write / push 자격증명 images:push(member+).
   if (deps.imageRegistryService) {
     const registry = deps.imageRegistryService;
     server.registerTool(
-      "get_workspace_image_registry",
+      "list_workspace_image_registries",
       {
         description:
-          "이 워크스페이스의 이미지 레지스트리 — host/namespace/username/시크릿 이름 참조 + imagePrefix(비밀 값 아님). 미설정이면 config 없음.",
+          "이 워크스페이스의 이미지 레지스트리 목록 — [{name,host,namespace?,username?,시크릿 이름 참조,imagePrefix}](비밀 값 아님). 분류/pull 인증은 전체를 대상으로 host 매칭.",
         inputSchema: {},
       },
-      () =>
-        run(principal, "harnesses:read", async () => {
-          const config = await registry.get(ws);
-          return ok({ ...(config ? { config } : {}) });
-        }),
+      () => run(principal, "harnesses:read", async () => ok({ registries: await registry.list(ws) })),
     );
     server.registerTool(
       "set_workspace_image_registry",
       {
         description:
-          "이미지 레지스트리 등록/갱신(관리자, 선언형 전체 교체). pull/push 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 지정. 참조 시크릿이 없으면 missingSecrets 경고.",
+          "이미지 레지스트리 등록/갱신(관리자, name 기준 upsert — 선언형 전체 교체). pull/push 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 지정. 참조 시크릿이 없으면 missingSecrets 경고.",
         inputSchema: {
+          name: z.string().min(1).describe("레지스트리 이름(참조 키 — push 선택이 이 이름을 가리킨다)"),
           host: z.string().min(1).describe('레지스트리 host[:port] — "ghcr.io" · "registry.acme.dev:5000"'),
           namespace: z.string().min(1).optional().describe('host 아래 경로 프리픽스 — "acme" → ghcr.io/acme/<name>'),
           username: z.string().min(1).optional().describe("docker login 사용자명(토큰 단독 레지스트리는 생략)"),
@@ -1475,17 +1485,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           pushSecretName: z.string().min(1).optional().describe("push 토큰/패스워드가 저장된 SecretStore 키 이름"),
         },
       },
-      (input) => run(principal, "settings:write", async () => ok(await registry.set(ws, input))),
+      (input) => run(principal, "settings:write", async () => ok(await registry.upsert(ws, input))),
     );
     server.registerTool(
       "remove_workspace_image_registry",
       {
-        description: "이미지 레지스트리 해제(관리자). 이후 이미지 분류는 레지스트리 없이(workspace 클래스 없음) 동작.",
-        inputSchema: {},
+        description: "이미지 레지스트리 해제(관리자, 이름 지정). 이후 그 레지스트리 이미지는 external 로 분류된다.",
+        inputSchema: { name: z.string().min(1).describe("해제할 레지스트리 이름") },
       },
-      () =>
+      ({ name }) =>
         run(principal, "settings:write", async () => {
-          await registry.clear(ws);
+          await registry.remove(ws, name);
           return ok({ ok: true });
         }),
     );
@@ -1493,10 +1503,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "get_image_push_credentials",
       {
         description:
-          "워크스페이스 레지스트리 push 자격증명 발급(member+) — {host,namespace?,username?,password,imagePrefix}. docker tag+login+push 후 폐기(비영속). 로컬 빌드 이미지를 워크스페이스 레지스트리로 발행할 때 사용.",
-        inputSchema: {},
+          "워크스페이스 레지스트리 push 자격증명 발급(member+) — {name,host,namespace?,username?,password,imagePrefix}. registry 로 선택(레지스트리가 1개뿐이면 생략 가능). docker tag+login+push 후 폐기(비영속).",
+        inputSchema: {
+          registry: z.string().min(1).optional().describe("레지스트리 이름(1개뿐이면 생략 가능)"),
+        },
       },
-      () => run(principal, "images:push", async () => ok({ credentials: await registry.pushCredentials(ws) })),
+      ({ registry: name }) =>
+        run(principal, "images:push", async () => ok({ credentials: await registry.pushCredentials(ws, name) })),
     );
   }
 

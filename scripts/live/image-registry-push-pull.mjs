@@ -8,7 +8,7 @@
 //
 // 흐름:
 //   ① 인증 레지스트리 기동(무인증 401 확인) → ② 마커 이미지 빌드 → ③ CP 기동 + API 키 발급
-//   → ④ 시크릿(REG_PUSH/REG_PULL) + /workspace/image-registry 등록 → ⑤ assay image push
+//   → ④ 시크릿(REG_PUSH/REG_PULL) + /workspace/image-registries 등록(복수 모델, name 지정) → ⑤ assay image push
 //   → ⑥ 카탈로그에 리포 확인 + ~/.docker/config.json 불가침 확인 + 로컬 이미지 제거 후 무인증 pull 실패 확인
 //   → ⑦ pullWithRegistryAuth(임시 DOCKER_CONFIG) 로 인증 pull 성공 + 이미지 sha 일치 → ⑧ 정리.
 //
@@ -96,10 +96,16 @@ try {
   // ④ 시크릿 + 레지스트리 등록.
   for (const name of ["REG_PUSH", "REG_PULL"])
     await fetch(`${BASE}/secrets/${name}`, { method: "PUT", headers: H, body: JSON.stringify({ value: PASS }) });
-  const reg = await fetch(`${BASE}/workspace/image-registry`, {
+  const reg = await fetch(`${BASE}/workspace/image-registries`, {
     method: "PUT",
     headers: H,
-    body: JSON.stringify({ host: REG_HOST, username: USER, pullSecretName: "REG_PULL", pushSecretName: "REG_PUSH" }),
+    body: JSON.stringify({
+      name: "local",
+      host: REG_HOST,
+      username: USER,
+      pullSecretName: "REG_PULL",
+      pushSecretName: "REG_PUSH",
+    }),
   }).then((r) => r.json());
   if (reg.config?.imagePrefix !== `${REG_HOST}/`) throw new Error(`레지스트리 등록 실패: ${JSON.stringify(reg)}`);
   console.log(`④ 레지스트리 등록: ${reg.config.imagePrefix}`);

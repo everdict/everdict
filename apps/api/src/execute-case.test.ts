@@ -125,7 +125,7 @@ describe("executeCase — 워크스페이스 레지스트리 pull 자격증명 a
     const cap = capture();
     const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
     await executeCase(
-      { dispatcher: cap.dispatcher, registryAuthFor: async (ws) => (ws === "acme" ? AUTH : undefined) },
+      { dispatcher: cap.dispatcher, registryAuthsFor: async (ws) => (ws === "acme" ? [AUTH] : []) },
       "u",
       job,
     );
@@ -135,7 +135,7 @@ describe("executeCase — 워크스페이스 레지스트리 pull 자격증명 a
   it("잡 이미지가 그 레지스트리 호스트가 아니면 자격증명을 붙이지 않는다(불필요 유출 방지)", async () => {
     const cap = capture();
     const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "spreadsheetbench:v1" } };
-    await executeCase({ dispatcher: cap.dispatcher, registryAuthFor: async () => AUTH }, "u", job);
+    await executeCase({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }, "u", job);
     expect(cap.seen()?.registryAuth).toBeUndefined();
   });
 
@@ -154,7 +154,7 @@ describe("executeCase — 워크스페이스 레지스트리 pull 자격증명 a
     };
     // spec 이미지는 외부지만 핀이 워크스페이스 레지스트리로 override → attach.
     const job: AgentJob = { ...JOB, harnessSpec: serviceSpec, imagePins: { agent: "ghcr.io/acme/agent:pr-1" } };
-    await executeCase({ dispatcher: cap.dispatcher, registryAuthFor: async () => AUTH }, "u", job);
+    await executeCase({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }, "u", job);
     expect(cap.seen()?.registryAuth).toEqual(AUTH);
   });
 });

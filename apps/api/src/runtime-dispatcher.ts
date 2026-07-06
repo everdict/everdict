@@ -6,8 +6,10 @@ import {
   NotFoundError,
   type RegistryAuth,
   type RuntimeSpec,
+  imageUsesRegistryHost,
 } from "@assay/core";
 import type { RuntimeRegistry } from "@assay/registry";
+import { jobImages } from "./execute-case.js";
 import { type SelfHostedKey, poolKeyFor, selfHostedBackendName } from "./runner-hub.js";
 
 export interface RuntimeDispatcherDeps {
@@ -22,7 +24,7 @@ export interface RuntimeDispatcherDeps {
     opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
   ) => Backend;
   // 워크스페이스 이미지 레지스트리 pull 자격증명(best-effort) — topology 백엔드 빌드에 실어 서비스 이미지 인증 pull.
-  registryAuthFor?: (tenant: string) => Promise<RegistryAuth | undefined>;
+  registryAuthsFor?: (tenant: string) => Promise<RegistryAuth[]>;
   // self:<runnerId> 타깃 — 개인 소유 셀프호스티드 러너. 미소유=undefined(404), 소유=그 러너의 capabilities[]
   // (소유 확인 + capability 게이트를 한 번에). service 하니스는 docker capability 가 필요(아래 게이트).
   resolveSelfRunner?: (owner: string, runnerId: string) => Promise<string[] | undefined>;
@@ -115,8 +117,11 @@ export class RuntimeDispatcher implements Dispatcher {
         const name = `rt:${tenant}:${spec.id}@${spec.version}`; // 테넌트·버전별 1 백엔드 인스턴스(재사용)
         if (!this.deps.backends.has(name)) {
           const secretEnv = await this.deps.secretsFor(tenant).catch(() => ({}) as Record<string, string>);
-          // 워크스페이스 레지스트리 pull 자격증명(있으면) — topology 런타임의 서비스 이미지 인증 pull 에 쓰인다.
-          const registryAuth = await this.deps.registryAuthFor?.(tenant).catch(() => undefined);
+          // 워크스페이스 레지스트리(복수) pull 자격증명 — 이 잡 이미지의 host 와 매칭되는 것 1건을 백엔드에
+          // 굽는다(백엔드는 런타임당 1회 빌드·재사용 — 첫 빌드 잡 기준. 단수 계약의 문서화된 한계).
+          const auths = (await this.deps.registryAuthsFor?.(tenant).catch(() => [])) ?? [];
+          const images = jobImages(job);
+          const registryAuth = auths.find((a) => images.some((image) => imageUsesRegistryHost(image, a.host)));
           const build = this.deps.buildBackend ?? buildRuntimeBackend;
           this.deps.backends.register(name, build(spec, { secretEnv, ...(registryAuth ? { registryAuth } : {}) }));
         }

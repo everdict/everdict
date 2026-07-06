@@ -176,6 +176,7 @@ describe("MCP tools", () => {
     expect(names).toEqual([
       "accept_invite",
       "apply_bundle",
+      "assign_harness_trace_sink",
       "backfill_scorecard_models",
       "create_api_key",
       "create_dataset",
@@ -200,7 +201,6 @@ describe("MCP tools", () => {
       "get_schedule",
       "get_scorecard",
       "get_workspace_mattermost",
-      "get_workspace_trace_sink",
       "heartbeat_job",
       "ingest_scorecard",
       "leaderboard_scorecards",
@@ -222,6 +222,7 @@ describe("MCP tools", () => {
       "list_workspace_github_app",
       "list_workspace_owned_runners",
       "list_workspace_runners",
+      "list_workspace_trace_sinks",
       "pair_runner",
       "pair_workspace_runner",
       "pin_harness_images",
@@ -377,33 +378,48 @@ describe("MCP tools", () => {
     expect(after.config).toBeUndefined();
   });
 
-  it("workspace trace sink: admin 은 등록/조회/해제, member 는 settings:write 없어 불가", async () => {
+  it("workspace trace sinks: admin 은 복수 등록/해제, member 는 하니스별 선택만 가능(settings:write 불가)", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const member = await connect(deps, ["member"]);
 
-    // member 는 settings:write 없음 → 등록 불가.
+    // member 는 settings:write 없음 → 싱크 등록 불가.
     expect(
       (
         await member.callTool({
           name: "set_workspace_trace_sink",
-          arguments: { kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
+          arguments: { name: "lf", kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
         })
       ).isError,
     ).toBe(true);
 
-    // admin 등록 → 조회에 노출(비밀 값 없음).
+    // admin 이 싱크 2개 등록 → 목록에 노출(비밀 값 없음).
     await admin.callTool({
       name: "set_workspace_trace_sink",
-      arguments: { kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
+      arguments: { name: "lf", kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
     });
-    const got = JSON.parse(text(await admin.callTool({ name: "get_workspace_trace_sink", arguments: {} })));
-    expect(got.config).toEqual({ kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" });
+    await admin.callTool({
+      name: "set_workspace_trace_sink",
+      arguments: { name: "mlf", kind: "mlflow", endpoint: "http://mlflow.corp.io:5000", project: "7" },
+    });
+    const got = JSON.parse(text(await admin.callTool({ name: "list_workspace_trace_sinks", arguments: {} })));
+    expect(got.sinks.map((s: { name: string }) => s.name).sort()).toEqual(["lf", "mlf"]);
 
-    // 해제 → 조회에서 사라짐.
-    await admin.callTool({ name: "remove_workspace_trace_sink", arguments: {} });
-    const after = JSON.parse(text(await admin.callTool({ name: "get_workspace_trace_sink", arguments: {} })));
-    expect(after.config).toBeUndefined();
+    // member 가 하니스별 선택(harnesses:register) — 등록되지 않은 싱크는 에러.
+    expect(
+      (await member.callTool({ name: "assign_harness_trace_sink", arguments: { harness: "h1", sink: "없는싱크" } }))
+        .isError,
+    ).toBe(true);
+    const assigned = JSON.parse(
+      text(await member.callTool({ name: "assign_harness_trace_sink", arguments: { harness: "h1", sink: "mlf" } })),
+    );
+    expect(assigned.assignments).toEqual({ h1: "mlf" });
+
+    // 싱크 해제 → 목록에서 사라지고 그 싱크를 가리키던 선택도 정리된다.
+    await admin.callTool({ name: "remove_workspace_trace_sink", arguments: { name: "mlf" } });
+    const after = JSON.parse(text(await admin.callTool({ name: "list_workspace_trace_sinks", arguments: {} })));
+    expect(after.sinks.map((s: { name: string }) => s.name)).toEqual(["lf"]);
+    expect(after.assignments).toEqual({});
   });
 
   it("runners: 개인 소유 — pair/list/revoke 는 역할 게이트 없이 본인 러너, 로스터는 members:read, 토큰 한 번만", async () => {

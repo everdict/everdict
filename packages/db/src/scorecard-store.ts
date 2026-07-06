@@ -75,6 +75,7 @@ export type ScorecardSubset = z.infer<typeof ScorecardSubsetSchema>;
 // 설계: docs/architecture/trace-sink.md
 export const ScorecardExportSchema = z.object({
   sink: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
+  name: z.string().optional(), // 사용한 싱크 이름(복수 싱크에서 어느 것이었나 — 과거 레코드는 미설정)
   status: z.enum(["succeeded", "partial", "failed"]),
   url: z.string().optional(), // 상위(experiment/project) 딥링크
   message: z.string().optional(), // 실패/부분 사유

@@ -1,4 +1,4 @@
-import type { CaseResult } from "@assay/core";
+import { BadRequestError, type CaseResult } from "@assay/core";
 import { InMemoryWorkspaceSettingsStore } from "@assay/db";
 import type { TraceSinkConfig } from "@assay/trace";
 import { describe, expect, it } from "vitest";
@@ -16,22 +16,52 @@ const RESULT: CaseResult = {
 };
 const CTX = { scorecardId: "sc-1", dataset: "d@1", harness: "h@1" };
 
-// 설정된 스토어 + 캡처하는 fake buildSink 로 서비스 구성.
+describe("TraceSinkService — 복수 싱크 CRUD + 하니스별 선택", () => {
+  it("이름 기준 upsert 로 여러 싱크를 등록/갱신하고 목록으로 조회한다", async () => {
+    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
+    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000", project: "7" });
+    await svc.upsert("acme", { name: "lf", kind: "langfuse", endpoint: "https://lf.corp.io" });
+    // 같은 이름 upsert = 교체(선언형).
+    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow2:5000" });
+    const { sinks } = await svc.list("acme");
+    expect(sinks.map((s) => s.name).sort()).toEqual(["lf", "mlf"]);
+    expect(sinks.find((s) => s.name === "mlf")?.endpoint).toBe("http://mlflow2:5000");
+    expect(sinks.find((s) => s.name === "mlf")?.project).toBeUndefined(); // 전체 교체 — 이전 project 이월 안 함
+  });
+
+  it("하니스별 선택: 등록된 싱크만 가리킬 수 있고(없으면 400), null 은 선택 해제다", async () => {
+    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
+    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000" });
+    await expect(svc.assign("acme", "h1", "없는싱크")).rejects.toBeInstanceOf(BadRequestError);
+    expect(await svc.assign("acme", "h1", "mlf")).toEqual({ h1: "mlf" });
+    expect(await svc.assign("acme", "h2", "mlf")).toEqual({ h1: "mlf", h2: "mlf" });
+    expect(await svc.assign("acme", "h1", null)).toEqual({ h2: "mlf" }); // 해제
+  });
+
+  it("싱크 해제(remove)는 그 싱크를 가리키던 하니스 선택도 함께 정리한다(dangling 방지) + 워크스페이스 격리", async () => {
+    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
+    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000" });
+    await svc.upsert("acme", { name: "lf", kind: "langfuse", endpoint: "https://lf" });
+    await svc.assign("acme", "h1", "mlf");
+    await svc.assign("acme", "h2", "lf");
+    await svc.upsert("globex", { name: "mlf", kind: "mlflow", endpoint: "http://other:5000" });
+    await svc.remove("acme", "mlf");
+    const acme = await svc.list("acme");
+    expect(acme.sinks.map((s) => s.name)).toEqual(["lf"]);
+    expect(acme.assignments).toEqual({ h2: "lf" }); // mlf 를 가리키던 h1 만 정리
+    expect((await svc.list("globex")).sinks).toHaveLength(1); // 테넌트 격리
+  });
+});
+
+// 하니스 h 가 mlf 싱크를 선택한 상태의 서비스 + 캡처 fake buildSink.
 async function exportHarness(over: {
   sinkResult?: { url?: string; cases: Array<{ caseId: string; externalId?: string; error?: string }> };
   throwOnExport?: boolean;
   secrets?: Record<string, string>;
   authSecretName?: string;
+  assignTo?: string | null; // 기본 "h"(CTX.harness 의 id). null = 선택 없음
 }) {
   const store = new InMemoryWorkspaceSettingsStore();
-  await store.set("acme", {
-    traceSink: {
-      kind: "mlflow",
-      endpoint: "http://mlflow:5000",
-      project: "7",
-      ...(over.authSecretName ? { authSecretName: over.authSecretName } : {}),
-    },
-  });
   const captured: { cfg?: TraceSinkConfig; cases?: Array<{ caseId: string; externalId?: string }> } = {};
   const svc = new TraceSinkService(store, {
     secretsFor: async () => over.secrets ?? {},
@@ -50,17 +80,24 @@ async function exportHarness(over: {
     },
     now: () => "2026-07-06T00:00:00.000Z",
   });
+  await svc.upsert("acme", {
+    name: "mlf",
+    kind: "mlflow",
+    endpoint: "http://mlflow:5000",
+    project: "7",
+    ...(over.authSecretName ? { authSecretName: over.authSecretName } : {}),
+  });
+  if (over.assignTo !== null) await svc.assign("acme", over.assignTo ?? "h", "mlf");
   return { svc, captured };
 }
 
-describe("TraceSinkService.exportScorecard", () => {
-  it("싱크 설정+시크릿을 resolve 해 어댑터로 내보내고 succeeded outcome 을 만든다", async () => {
+describe("TraceSinkService.exportScorecard — 하니스별 선택 해석", () => {
+  it("ctx.harness 의 id 로 선택된 싱크를 해석해 내보내고, outcome 에 싱크 이름을 남긴다", async () => {
     const { svc, captured } = await exportHarness({
       authSecretName: "MLFLOW_AUTH",
       secrets: { MLFLOW_AUTH: "Basic x" },
     });
     const out = await svc.exportScorecard("acme", CTX, [RESULT]);
-    // 설정 → 어댑터 config(auth 는 시크릿 '값'), 점수는 metric→name/detail→comment 로 매핑.
     expect(captured.cfg).toMatchObject({
       kind: "mlflow",
       endpoint: "http://mlflow:5000",
@@ -68,14 +105,17 @@ describe("TraceSinkService.exportScorecard", () => {
       project: "7",
     });
     expect(out?.status).toBe("succeeded");
+    expect(out?.name).toBe("mlf"); // 어느 싱크였는지 기록
     expect(out?.cases?.[0]?.externalId).toBe("ext-c1");
-    expect(out?.exportedAt).toBe("2026-07-06T00:00:00.000Z");
   });
 
-  it("싱크 미설정이면 no-op(undefined) — 스코어카드는 아무 것도 기록하지 않는다", async () => {
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore(), {
-      buildSink: () => ({ export: async () => ({ cases: [] }) }),
-    });
+  it("하니스가 싱크를 선택하지 않았으면 no-op(undefined) — 적재는 옵트인", async () => {
+    const { svc } = await exportHarness({ assignTo: null });
+    expect(await svc.exportScorecard("acme", CTX, [RESULT])).toBeUndefined();
+  });
+
+  it("다른 하니스의 선택은 이 하니스에 적용되지 않는다(하니스별 분리)", async () => {
+    const { svc } = await exportHarness({ assignTo: "other-harness" });
     expect(await svc.exportScorecard("acme", CTX, [RESULT])).toBeUndefined();
   });
 
@@ -88,17 +128,11 @@ describe("TraceSinkService.exportScorecard", () => {
 
   it("attach 는 소스와 싱크 플랫폼이 같을 때만 externalId 를 넘기고, 다르면 create 모드로 폴백한다", async () => {
     const { svc, captured } = await exportHarness({});
-    await svc.exportScorecard("acme", CTX, [RESULT], {
-      sourceKind: "mlflow",
-      externalIdByCase: { c1: "tr-orig" },
-    });
+    await svc.exportScorecard("acme", CTX, [RESULT], { sourceKind: "mlflow", externalIdByCase: { c1: "tr-orig" } });
     expect(captured.cases?.[0]?.externalId).toBe("tr-orig"); // mlflow=mlflow → attach
 
     const { svc: svc2, captured: cap2 } = await exportHarness({});
-    await svc2.exportScorecard("acme", CTX, [RESULT], {
-      sourceKind: "otel",
-      externalIdByCase: { c1: "tr-orig" },
-    });
+    await svc2.exportScorecard("acme", CTX, [RESULT], { sourceKind: "otel", externalIdByCase: { c1: "tr-orig" } });
     expect(cap2.cases?.[0]?.externalId).toBeUndefined(); // otel≠mlflow → create
   });
 
@@ -119,40 +153,5 @@ describe("TraceSinkService.exportScorecard", () => {
     const failed = await svc2.exportScorecard("acme", CTX, [RESULT]);
     expect(failed?.status).toBe("failed");
     expect(failed?.message).toContain("업스트림 연결 실패");
-  });
-});
-
-describe("TraceSinkService", () => {
-  it("관리자가 싱크를 등록하면 조회에 노출되고, 선언형 전체 교체로 갱신된다", async () => {
-    // Given: 설정 스토어와 서비스.
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
-    // When: MLflow 싱크 등록(시크릿은 이름 참조만).
-    const set = await svc.set("acme", {
-      kind: "mlflow",
-      endpoint: "http://mlflow.corp.io:5000",
-      authSecretName: "MLFLOW_AUTH",
-      project: "7",
-    });
-    // Then: 조회에 그대로 노출된다(비밀 값 없음).
-    expect(set).toEqual({
-      kind: "mlflow",
-      endpoint: "http://mlflow.corp.io:5000",
-      authSecretName: "MLFLOW_AUTH",
-      project: "7",
-    });
-    // When: 다른 플랫폼으로 전체 교체(이전 project 는 이월되지 않는다 — 선언형).
-    const replaced = await svc.set("acme", { kind: "langfuse", endpoint: "https://langfuse.corp.io" });
-    expect(replaced).toEqual({ kind: "langfuse", endpoint: "https://langfuse.corp.io" });
-  });
-
-  it("해제(clear)하면 조회에서 사라지고, 워크스페이스 간에 격리된다", async () => {
-    const svc = new TraceSinkService(new InMemoryWorkspaceSettingsStore());
-    await svc.set("acme", { kind: "phoenix", endpoint: "http://phoenix.corp.io:6006" });
-    await svc.set("globex", { kind: "langsmith", endpoint: "https://api.smith.langchain.com" });
-    // When: acme 만 해제.
-    await svc.clear("acme");
-    // Then: acme 는 미설정, globex 는 유지(테넌트 격리).
-    expect(await svc.get("acme")).toBeUndefined();
-    expect((await svc.get("globex"))?.kind).toBe("langsmith");
   });
 });

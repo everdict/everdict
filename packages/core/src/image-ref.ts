@@ -57,16 +57,21 @@ function isLoopbackHost(host: string): boolean {
   return name === "localhost" || name === "127.0.0.1" || name === "[::1]";
 }
 
-export function classifyImageRef(ref: string, registry?: ImageRegistryCoordinates): ImageRefClass {
+// registry 는 단수 또는 복수 — 워크스페이스는 레지스트리를 여러 개 등록할 수 있고, '어느 하나'에 속하면 workspace 다.
+export function classifyImageRef(
+  ref: string,
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[],
+): ImageRefClass {
+  const registries = registry === undefined ? [] : Array.isArray(registry) ? registry : [registry];
   const parsed = parseImageRef(ref);
   if (parsed.host) {
     if (isLoopbackHost(parsed.host)) return "local";
-    if (
-      registry &&
-      parsed.host === registry.host &&
-      (!registry.namespace || parsed.path === registry.namespace || parsed.path.startsWith(`${registry.namespace}/`))
-    )
-      return "workspace";
+    const inWorkspace = registries.some(
+      (r) =>
+        parsed.host === r.host &&
+        (!r.namespace || parsed.path === r.namespace || parsed.path.startsWith(`${r.namespace}/`)),
+    );
+    if (inWorkspace) return "workspace";
     return "external";
   }
   // 호스트 없음: org/name 은 docker.io 암시(외부), 단일 세그먼트는 모호(unqualified).
@@ -91,7 +96,10 @@ export interface ImageWarning {
   class: Extract<ImageRefClass, "local" | "unqualified">;
 }
 
-export function imageWarnings(images: string[], registry?: ImageRegistryCoordinates): ImageWarning[] {
+export function imageWarnings(
+  images: string[],
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[],
+): ImageWarning[] {
   const warnings: ImageWarning[] = [];
   for (const image of images) {
     const cls = classifyImageRef(image, registry);

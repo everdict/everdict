@@ -41,6 +41,20 @@ describe("parseImageRef — docker reference 문법 분해", () => {
   });
 });
 
+describe("classifyImageRef — 복수 레지스트리(어느 하나에 속하면 workspace)", () => {
+  const many = [{ host: "ghcr.io", namespace: "acme" }, { host: "registry.acme.dev:5000" }];
+  it("등록된 레지스트리 중 하나와 매칭되면 workspace, 아니면 external", () => {
+    expect(classifyImageRef("ghcr.io/acme/agent:v3", many)).toBe("workspace");
+    expect(classifyImageRef("registry.acme.dev:5000/anything:1", many)).toBe("workspace");
+    expect(classifyImageRef("ghcr.io/other/agent:v3", many)).toBe("external");
+    expect(classifyImageRef("docker.io/lib/x:1", many)).toBe("external");
+  });
+  it("빈 배열은 미등록과 동일(workspace 클래스 없음) — 단수 인자와 하위호환", () => {
+    expect(classifyImageRef("ghcr.io/acme/agent:v3", [])).toBe("external");
+    expect(classifyImageRef("ghcr.io/acme/agent:v3", { host: "ghcr.io", namespace: "acme" })).toBe("workspace");
+  });
+});
+
 describe("classifyImageRef — 워크스페이스 레지스트리 관점의 4분류", () => {
   it("워크스페이스 레지스트리(host+namespace 일치) → workspace", () => {
     expect(classifyImageRef("ghcr.io/acme/agent:v3", acme)).toBe("workspace");

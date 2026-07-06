@@ -248,7 +248,7 @@ async function main(): Promise<void> {
       secretsFor: runtimeSecretsFor,
       buildBackend: runtimeBuildBackend,
       // 워크스페이스 레지스트리 pull 자격증명 — topology 백엔드 빌드에 실어 서비스 이미지 인증 pull.
-      registryAuthFor: (tenant) => imageRegistryService.pullAuth(tenant),
+      registryAuthsFor: (tenant) => imageRegistryService.pullAuths(tenant),
       // self:<runnerId> — 개인 소유 러너. 소유 확인(미소유=undefined) + 그 러너의 capabilities 반환(service 게이트용).
       resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
       // self:ws — 워크스페이스 풀. 그 owner(=ws:<tenant>)가 러너를 하나라도 가졌는지(아무 러너나 lease).
@@ -338,7 +338,7 @@ async function main(): Promise<void> {
     // 비공개 repo 시드(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(팀 공용).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
     // 워크스페이스 레지스트리 이미지 pull 자격증명 — 잡 이미지가 그 레지스트리 것이면 job.registryAuth 로 attach.
-    registryAuthFor: (workspace) => imageRegistryService.pullAuth(workspace),
+    registryAuthsFor: (workspace) => imageRegistryService.pullAuths(workspace),
     // 완료 알림(Mattermost) — 워크스페이스 notify 설정이 있으면 채널 게시. 실패는 run 결과 무관.
     onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
   });
@@ -373,7 +373,7 @@ async function main(): Promise<void> {
     // 비공개-repo 데이터셋(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(단일 run 과 동일).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
     // 워크스페이스 레지스트리 이미지 pull 자격증명 — 배치 케이스도 단일 run 과 동일하게 attach.
-    registryAuthFor: (workspace) => imageRegistryService.pullAuth(workspace),
+    registryAuthsFor: (workspace) => imageRegistryService.pullAuths(workspace),
     // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
     // 트레이스 싱크 적재 — 채점 완료된 상세 결과를 워크스페이스 관측 플랫폼으로(record.export 에 outcome 기록).

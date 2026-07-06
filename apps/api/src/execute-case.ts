@@ -12,13 +12,13 @@ export interface ExecuteCaseDeps {
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // (레거시) 개인 연결 — evalCase.env.source.connectionId → 외부 계정 연결 토큰(개인 소유, owner 로 resolve). S6 에서 제거.
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
-  // 워크스페이스 이미지 레지스트리 pull 자격증명(best-effort) — 잡 이미지 중 그 레지스트리 호스트의 것이 있으면
-  // job.registryAuth(transient)로 attach 한다. docs/architecture/workspace-image-registry.md
-  registryAuthFor?: (workspace: string) => Promise<RegistryAuth | undefined>;
+  // 워크스페이스 이미지 레지스트리(복수) pull 자격증명(best-effort) — 잡 이미지의 host 와 매칭되는 레지스트리가
+  // 있으면 그 자격증명을 job.registryAuth(transient)로 attach 한다. docs/architecture/workspace-image-registry.md
+  registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
 }
 
 // 이 잡이 pull 할 수 있는 모든 이미지 참조 — 케이스 이미지 + service 하니스 서비스 이미지(+per-dispatch 핀 override).
-function jobImages(job: AgentJob): string[] {
+export function jobImages(job: AgentJob): string[] {
   const images: string[] = [];
   if (job.evalCase.image) images.push(job.evalCase.image);
   const spec = job.harnessSpec;
@@ -26,12 +26,14 @@ function jobImages(job: AgentJob): string[] {
   return images;
 }
 
-// 잡 이미지 중 워크스페이스 레지스트리 것이 있으면 pull 자격증명을 attach(repoToken 과 동일 규율 — 비영속 transient).
+// 잡 이미지 중 워크스페이스 레지스트리(복수) 것이 있으면 그 레지스트리의 pull 자격증명을 attach
+// (repoToken 과 동일 규율 — 비영속 transient). 첫 host 매칭 1건만 — AgentJob.registryAuth 는 단수 계약이라
+// 서로 다른 두 BYO 레지스트리 이미지를 한 잡에 섞으면 첫 매칭만 인증된다(문서화된 한계).
 async function resolveRegistryAuth(deps: ExecuteCaseDeps, job: AgentJob): Promise<RegistryAuth | undefined> {
-  if (!deps.registryAuthFor || !job.tenant) return undefined;
-  const auth = await deps.registryAuthFor(job.tenant).catch(() => undefined);
-  if (!auth) return undefined;
-  return jobImages(job).some((image) => imageUsesRegistryHost(image, auth.host)) ? auth : undefined;
+  if (!deps.registryAuthsFor || !job.tenant) return undefined;
+  const auths = await deps.registryAuthsFor(job.tenant).catch(() => [] as RegistryAuth[]);
+  const images = jobImages(job);
+  return auths.find((auth) => images.some((image) => imageUsesRegistryHost(image, auth.host)));
 }
 
 // 케이스 repo 시드가 비공개(git)면 토큰을 resolve. 워크스페이스 GitHub App(installation) 을 먼저 시도하고

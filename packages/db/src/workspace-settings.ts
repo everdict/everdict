@@ -42,32 +42,51 @@ export const WorkspaceSettingsSchema = z.object({
     })
     .nullable()
     .optional(),
-  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지의 분류 기준 + assay image push 발행 대상. 워크스페이스당 1개.
-  // 시크릿은 전부 SecretStore name-ref(값 저장/반환 안 함). nullable: DELETE 는 null 로 클리어(mattermost 와 동일).
-  // 설계: docs/architecture/workspace-image-registry.md
+  // (레거시, 읽기 전용 호환) 단수 이미지 레지스트리 — imageRegistries(복수)로 대체됨. 서비스가 읽을 때
+  // imageRegistries 가 없으면 이 값을 name="default" 항목으로 승계하고, 다음 쓰기에서 null 로 청산한다.
   imageRegistry: z
     .object({
-      host: z.string().min(1), // 레지스트리 host[:port] — "ghcr.io" · "registry.acme.dev:5000"
-      namespace: z.string().min(1).optional(), // host 아래 경로 프리픽스 — "acme" → ghcr.io/acme/<name>:<tag>
-      username: z.string().min(1).optional(), // docker login 사용자명(토큰 단독 레지스트리는 생략)
-      pullSecretName: z.string().min(1).optional(), // SecretStore 키 — pull 토큰/패스워드
-      pushSecretName: z.string().min(1).optional(), // SecretStore 키 — push 토큰/패스워드
+      host: z.string().min(1),
+      namespace: z.string().min(1).optional(),
+      username: z.string().min(1).optional(),
+      pullSecretName: z.string().min(1).optional(),
+      pushSecretName: z.string().min(1).optional(),
     })
     .nullable()
     .optional(),
-  // 워크스페이스 트레이스 싱크 — judge 된 스코어카드 상세 결과(trace+점수)를 팀 관측 플랫폼으로 적재(아웃바운드).
-  // TraceSource(인바운드 pull)의 거울. 시크릿은 SecretStore name-ref(값 저장/반환 안 함). nullable: DELETE 는 null 클리어.
-  // 설계: docs/architecture/trace-sink.md
-  traceSink: z
-    .object({
-      kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
-      endpoint: z.string().url(), // 플랫폼 API 베이스 URL
-      authSecretName: z.string().min(1).optional(), // SecretStore 키 — 인증 헤더 '값'(무인증 dev 서버는 생략)
-      project: z.string().min(1).optional(), // kind별 의미: mlflow experiment_id · langsmith project · phoenix project · langfuse projectId(링크)
-      webUrl: z.string().url().optional(), // UI 딥링크 베이스(API endpoint 와 다를 때 — 예: LangSmith api vs smith)
-    })
-    .nullable()
+  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지의 분류 기준 + assay image push 발행 대상.
+  // 여러 개를 이름으로 등록하고 push 시 선택한다(분류/pull 인증은 전체를 대상으로 host 매칭).
+  // 시크릿은 전부 SecretStore name-ref(값 저장/반환 안 함). 설계: docs/architecture/workspace-image-registry.md
+  imageRegistries: z
+    .array(
+      z.object({
+        name: z.string().min(1), // 레지스트리 이름(참조 키 — push 선택/해제가 이 이름을 가리킨다)
+        host: z.string().min(1), // 레지스트리 host[:port] — "ghcr.io" · "registry.acme.dev:5000"
+        namespace: z.string().min(1).optional(), // host 아래 경로 프리픽스 — "acme" → ghcr.io/acme/<name>:<tag>
+        username: z.string().min(1).optional(), // docker login 사용자명(토큰 단독 레지스트리는 생략)
+        pullSecretName: z.string().min(1).optional(), // SecretStore 키 — pull 토큰/패스워드
+        pushSecretName: z.string().min(1).optional(), // SecretStore 키 — push 토큰/패스워드
+      }),
+    )
     .optional(),
+  // 워크스페이스 트레이스 싱크(복수) — judge 된 스코어카드 상세 결과(trace+점수)를 팀 관측 플랫폼으로 적재(아웃바운드).
+  // TraceSource(인바운드 pull)의 거울. 여러 개를 이름으로 등록하고 '하니스별로' 골라 쓴다(워크스페이스 단일 아님).
+  // 시크릿은 SecretStore name-ref(값 저장/반환 안 함). 설계: docs/architecture/trace-sink.md
+  traceSinks: z
+    .array(
+      z.object({
+        name: z.string().min(1), // 싱크 이름(참조 키 — 하니스 선택이 이 이름을 가리킨다)
+        kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
+        endpoint: z.string().url(), // 플랫폼 API 베이스 URL
+        authSecretName: z.string().min(1).optional(), // SecretStore 키 — 인증 헤더 '값'(무인증 dev 서버는 생략)
+        project: z.string().min(1).optional(), // kind별 의미: mlflow experiment_id · langsmith project · phoenix project · langfuse projectId(링크)
+        webUrl: z.string().url().optional(), // UI 딥링크 베이스(API endpoint 와 다를 때 — 예: LangSmith api vs smith)
+      }),
+    )
+    .optional(),
+  // 하니스별 싱크 선택(harness id → 싱크 이름). 선택 없는 하니스는 적재하지 않는다(옵트인).
+  // nullable 값: 선택 해제는 키 삭제 대신 jsonb 병합 특성상 새 맵으로 통째 교체한다(서비스가 관리).
+  traceSinkByHarness: z.record(z.string()).optional(),
   // CI 통합(GitHub Actions) — repo link 목록(레포↔하니스 슬롯 매핑 = OIDC trust policy). 위 WorkspaceCiLinkSchema 참고.
   ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
   // 워크스페이스 소유 GitHub App 통합(개인 연결 대체) — 조직 설치→선택 repo→워크스페이스 소유 installation.

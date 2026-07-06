@@ -9,12 +9,13 @@ import { z } from "zod";
 const pexecFile = promisify(execFile);
 
 // assay image push — 로컬 빌드 이미지를 워크스페이스 레지스트리로 발행한다.
-// 컨트롤플레인에서 push 자격증명을 발급받아(POST /workspace/image-registry/push-credentials, images:push)
-// 이 머신의 docker 로 tag+push. 자격증명은 임시 DOCKER_CONFIG 디렉터리에만 쓰고 끝나면 지운다
+// 컨트롤플레인에서 push 자격증명을 발급받아(POST /workspace/image-registries/push-credentials[?name=], images:push)
+// 이 머신의 docker 로 tag+push. 레지스트리가 여러 개면 --registry <name> 으로 선택(1개뿐이면 생략 가능). 자격증명은 임시 DOCKER_CONFIG 디렉터리에만 쓰고 끝나면 지운다
 // (~/.docker/config.json 을 읽지도 쓰지도 않음). 설계: docs/architecture/workspace-image-registry.md
 
 // push 자격증명 응답(비영속) — 컨트롤플레인 계약과 동일 형태.
 const PushCredentialsSchema = z.object({
+  name: z.string().min(1).optional(), // 발급된 레지스트리 이름(복수 레지스트리 식별용)
   host: z.string().min(1),
   namespace: z.string().min(1).optional(),
   username: z.string().min(1).optional(),
@@ -46,8 +47,13 @@ export function buildDockerAuthConfig(credentials: Pick<PushCredentials, "host" 
 }
 
 // 컨트롤플레인에서 push 자격증명 발급 — 실패는 에러 봉투 message 를 그대로 살려 사용자에게 보인다.
-export async function fetchPushCredentials(apiUrl: string, apiKey: string): Promise<PushCredentials> {
-  const url = new URL("/workspace/image-registry/push-credentials", apiUrl);
+export async function fetchPushCredentials(
+  apiUrl: string,
+  apiKey: string,
+  registry?: string,
+): Promise<PushCredentials> {
+  const url = new URL("/workspace/image-registries/push-credentials", apiUrl);
+  if (registry) url.searchParams.set("name", registry);
   let res: Response;
   try {
     res = await fetch(url, { method: "POST", headers: { authorization: `Bearer ${apiKey}` } });
@@ -104,7 +110,7 @@ export async function pushImage(
   return target;
 }
 
-// assay image push <local-ref> [--name N] [--tag T] [--api-url URL] [--api-key ak_…]
+// assay image push <local-ref> [--registry R] [--name N] [--tag T] [--api-url URL] [--api-key ak_…]
 export async function imagePushCommand(localRef: string | undefined, flags: Map<string, string>): Promise<void> {
   if (!localRef)
     throw new BadRequestError(
@@ -116,7 +122,7 @@ export async function imagePushCommand(localRef: string | undefined, flags: Map<
   const apiKey = flags.get("api-key") ?? process.env.ASSAY_API_KEY;
   if (!apiKey)
     throw new BadRequestError("BAD_REQUEST", undefined, "--api-key <ak_…> (또는 ASSAY_API_KEY) 가 필요합니다");
-  const credentials = await fetchPushCredentials(apiUrl, apiKey);
+  const credentials = await fetchPushCredentials(apiUrl, apiKey, flags.get("registry"));
   const target = await pushImage(credentials, localRef, { name: flags.get("name"), tag: flags.get("tag") });
   console.error("✓ 발행 완료 — 하니스 핀/서비스 이미지로 이 참조를 쓰세요:");
   console.log(target);

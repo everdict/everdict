@@ -207,7 +207,7 @@ export interface ScorecardServiceDeps {
   // 워크스페이스 소유 GitHub App 토큰(우선) — 케이스 git URL owner 가 워크스페이스 installation 과 매칭되면 그 App 으로 발급(단일 run 과 동일).
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
   // 워크스페이스 이미지 레지스트리 pull 자격증명 — 잡 이미지가 그 레지스트리 것이면 job.registryAuth 로 attach(executeCase, 단일 run 과 동일).
-  registryAuthFor?: (workspace: string) => Promise<RegistryAuth | undefined>;
+  registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
   // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 스코어카드 결과 무관(서비스가 swallow).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
   // 트레이스 싱크 적재(설정 시) — 채점 완료된 결과(trace+점수)를 워크스페이스 관측 플랫폼으로(TraceSinkService).

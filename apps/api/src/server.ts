@@ -798,13 +798,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       );
       const resolved = resolveHarnessInstance(template, parsed.data); // 핀 누락/불일치/템플릿 없음이면 throw
       // 이미지 분류 경고(warn-not-block) — 등록 전 사전 점검에서 local/unqualified 이미지를 드러낸다.
-      const registry = await deps.imageRegistryService?.get(principal.workspace);
-      const warnings = imageWarnings(
-        collectHarnessImages(resolved),
-        registry
-          ? { host: registry.host, ...(registry.namespace ? { namespace: registry.namespace } : {}) }
-          : undefined,
-      );
+      // 분류는 등록된 레지스트리 '전부'를 대상으로 — 어느 하나에 속하면 workspace 클래스.
+      const coords = await deps.imageRegistryService?.coordinates(principal.workspace);
+      const warnings = imageWarnings(collectHarnessImages(resolved), coords);
       return reply.send({
         ok: true,
         kind: resolved.kind,
@@ -2454,30 +2450,31 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 워크스페이스 트레이스 싱크 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow 등)에 적재 ---
-  // 조회 settings:read / 등록·해제 settings:write. 인증 토큰 값은 SecretStore 에만(여기선 이름 참조만).
-  // 설계: docs/architecture/trace-sink.md
-  app.get("/workspace/trace-sink", async (req, reply) => {
+  // --- 워크스페이스 트레이스 싱크(복수) — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow 등)에 적재 ---
+  // 여러 싱크를 이름으로 등록하고 '하니스별로' 선택한다(선택 없는 하니스는 적재 안 함 — 옵트인).
+  // 조회 harnesses:read(viewer+ — 하니스 상세의 싱크 표시용, 뷰는 이름 참조/URL 만) / 등록·해제 settings:write /
+  // 하니스별 선택 harnesses:register(member+ — 하니스 구성의 일부). 설계: docs/architecture/trace-sink.md
+  app.get("/workspace/trace-sinks", async (req, reply) => {
     if (!deps.traceSinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "settings:read");
-      const config = await deps.traceSinkService.get(principal.workspace);
-      return reply.send({ ...(config ? { config } : {}) });
+      gate(principal, "harnesses:read");
+      return reply.send(await deps.traceSinkService.list(principal.workspace));
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  app.put("/workspace/trace-sink", async (req, reply) => {
+  app.put("/workspace/trace-sinks", async (req, reply) => {
     if (!deps.traceSinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
       .object({
+        name: z.string().min(1),
         kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
         endpoint: z.string().url(),
         authSecretName: z.string().min(1).optional(),
@@ -2488,51 +2485,71 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
       gate(principal, "settings:write");
-      const config = await deps.traceSinkService.set(principal.workspace, body.data);
+      const config = await deps.traceSinkService.upsert(principal.workspace, body.data);
       return reply.send({ config });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  app.delete("/workspace/trace-sink", async (req, reply) => {
+  app.delete("/workspace/trace-sinks/:name", async (req, reply) => {
     if (!deps.traceSinkService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    const { name } = req.params as { name: string };
     try {
       gate(principal, "settings:write");
-      await deps.traceSinkService.clear(principal.workspace);
+      await deps.traceSinkService.remove(principal.workspace, name);
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // --- 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상 ---
-  // 조회 harnesses:read(viewer+ — 분류 배지는 하니스 읽기 관심사, 뷰는 이름 참조/좌표만) / 등록·해제 settings:write /
-  // push 자격증명 images:push(member+ — 값 유출을 별도 액션으로 명명). 설계: docs/architecture/workspace-image-registry.md
-  app.get("/workspace/image-registry", async (req, reply) => {
+  // 하니스별 싱크 선택 — 그 하니스의 스코어카드 완료 시 어느 싱크로 적재할지. sink:null = 선택 해제(적재 끔).
+  app.put("/harnesses/:id/trace-sink", async (req, reply) => {
+    if (!deps.traceSinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const { id } = req.params as { id: string };
+    const body = z.object({ sink: z.string().min(1).nullable() }).safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "harnesses:register");
+      const assignments = await deps.traceSinkService.assign(principal.workspace, id, body.data.sink);
+      return reply.send({ assignments });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  // --- 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + assay image push 발행 대상 ---
+  // 여러 개를 이름으로 등록하고 push 시 선택한다(분류/pull 인증은 전체 host 매칭). 조회 harnesses:read(viewer+ —
+  // 분류 배지는 하니스 읽기 관심사, 뷰는 이름 참조/좌표만) / 등록·해제 settings:write / push 자격증명
+  // images:push(member+ — 값 유출을 별도 액션으로 명명). 설계: docs/architecture/workspace-image-registry.md
+  app.get("/workspace/image-registries", async (req, reply) => {
     if (!deps.imageRegistryService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
-      const config = await deps.imageRegistryService.get(principal.workspace);
-      return reply.send({ ...(config ? { config } : {}) });
+      return reply.send({ registries: await deps.imageRegistryService.list(principal.workspace) });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  app.put("/workspace/image-registry", async (req, reply) => {
+  app.put("/workspace/image-registries", async (req, reply) => {
     if (!deps.imageRegistryService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
       .object({
+        name: z.string().min(1), // 레지스트리 이름(참조 키)
         host: z.string().min(1), // 레지스트리 host[:port] — URL 아님(스킴 없음)
         namespace: z.string().min(1).optional(),
         username: z.string().min(1).optional(),
@@ -2543,21 +2560,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
       gate(principal, "settings:write");
-      const result = await deps.imageRegistryService.set(principal.workspace, body.data);
+      const result = await deps.imageRegistryService.upsert(principal.workspace, body.data);
       return reply.send(result);
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  app.delete("/workspace/image-registry", async (req, reply) => {
+  app.delete("/workspace/image-registries/:name", async (req, reply) => {
     if (!deps.imageRegistryService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
+    const { name } = req.params as { name: string };
     try {
       gate(principal, "settings:write");
-      await deps.imageRegistryService.clear(principal.workspace);
+      await deps.imageRegistryService.remove(principal.workspace, name);
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
@@ -2565,14 +2583,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   // push 자격증명 발급 — pushSecretName 의 '값'이 응답으로 나간다(비영속, 호출자가 docker login+push 후 폐기).
-  app.post("/workspace/image-registry/push-credentials", async (req, reply) => {
+  // ?name= 으로 레지스트리 선택 — 생략은 정확히 1개일 때만(복수인데 생략이면 400, 이름 나열).
+  app.post<{ Querystring: { name?: string } }>("/workspace/image-registries/push-credentials", async (req, reply) => {
     if (!deps.imageRegistryService)
       return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "images:push");
-      const credentials = await deps.imageRegistryService.pushCredentials(principal.workspace);
+      const credentials = await deps.imageRegistryService.pushCredentials(principal.workspace, req.query.name);
       return reply.send({ credentials });
     } catch (err) {
       return sendError(reply, err);
@@ -3004,11 +3023,9 @@ async function harnessImageWarnings(
   if (!deps.harnessInstances) return [];
   try {
     const resolved = await deps.harnessInstances.get(workspace, id, version);
-    const registry = await deps.imageRegistryService?.get(workspace);
-    return imageWarnings(
-      collectHarnessImages(resolved),
-      registry ? { host: registry.host, ...(registry.namespace ? { namespace: registry.namespace } : {}) } : undefined,
-    );
+    // 분류는 등록된 레지스트리 '전부'를 대상으로 — 어느 하나에 속하면 workspace 클래스.
+    const coords = await deps.imageRegistryService?.coordinates(workspace);
+    return imageWarnings(collectHarnessImages(resolved), coords);
   } catch {
     return [];
   }
