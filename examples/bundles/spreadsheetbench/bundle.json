@@ -76,7 +76,6 @@
         "taskField": "instruction",
         "repoPath": "/data",
         "image": "spreadsheetbench:v1",
-        "placement": "docker",
         "tagFields": [
           "instruction_type"
         ]
@@ -112,8 +111,7 @@
         "idField": "id",
         "taskField": "instruction",
         "repoPath": "/data",
-        "image": "spreadsheetbench:v2",
-        "placement": "docker"
+        "image": "spreadsheetbench:v2"
       },
       "graderTemplates": [
         {

@@ -245,8 +245,7 @@ export const BENCHMARK_CATALOG = {
       ],
       display: ":99",
       screenshotPath: "/tmp/osuse.png",
-      placement: "docker",
-      image: "assay-osworld:demo", // OSWorld 데스크탑 이미지(앱 동봉) — 유저가 빌드/등록
+      image: "assay-osworld:demo", // OSWorld 데스크탑 이미지(앱 동봉) — 유저가 빌드/등록. image 가 컨테이너 라우팅(docker capability)을 구동하므로 별도 placement 핀 불필요.
       tagFields: ["snapshot", "source"],
     },
     // 채점: VLM judge(스크린샷) + 선택적 상태검사. row.verify(셸 명령, OSWorld evaluator 의 이식형 대응)가 있으면

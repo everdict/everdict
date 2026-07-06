@@ -42,7 +42,7 @@ describe("first-party 데이터셋·런타임 카탈로그 시드", () => {
     expect(ds.cases.length).toBeGreaterThanOrEqual(2); // 스코어카드 배치(여러 케이스)
     expect(ds.cases.map((c) => c.id)).toEqual(["hermes-ssh-connect", "hermes-open-settings"]);
     expect(ds.cases.every((c) => c.env.kind === "os-use")).toBe(true);
-    expect(ds.cases.every((c) => c.placement?.target === "docker")).toBe(true);
+    expect(ds.cases.every((c) => c.image === "assay-hermes-dispatch:demo")).toBe(true); // image 가 컨테이너 실행을 구동(런타임은 제출 시 선택)
     expect(ds.cases.every((c) => c.graders.some((g) => g.id === "judge" && g.config?.useScreenshot === true))).toBe(
       true,
     );

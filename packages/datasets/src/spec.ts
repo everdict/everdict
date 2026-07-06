@@ -28,7 +28,7 @@ export const CaseMappingSchema = z.object({
   screenshotPath: z.string().optional(), // os-use 스냅샷 경로(VLM judge)
   imageField: z.string().optional(), // 행별 컴퓨트 이미지 필드
   image: z.string().optional(), // 공통 컴퓨트 이미지(imageField 가 행별로 우선)
-  placement: z.string().optional(), // 모든 케이스 placement.target(예: "docker")
+  placement: z.string().optional(), // 모든 케이스 placement.target(등록된 런타임 id)
   testCmdField: z.string().optional(),
   tagFields: z.array(z.string()).optional(),
   extraGraders: z.array(GraderSpecSchema).optional(),

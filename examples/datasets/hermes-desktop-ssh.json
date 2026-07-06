@@ -33,7 +33,6 @@
           }
         }
       ],
-      "placement": { "target": "docker" },
       "timeoutSec": 300,
       "tags": ["os-use", "ssh"]
     },
@@ -66,7 +65,6 @@
           }
         }
       ],
-      "placement": { "target": "docker" },
       "timeoutSec": 300,
       "tags": ["os-use", "navigation"]
     }

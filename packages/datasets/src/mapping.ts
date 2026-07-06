@@ -24,7 +24,7 @@ export interface CaseMapping {
   screenshotPath?: string; // os-use 스냅샷 경로(VLM judge 가 읽음)
   imageField?: string; // 있으면 EvalCase.image(per-case 컴퓨트 이미지) — 예: SWE-bench 공식 prebuilt(deps+repo)
   image?: string; // 모든 케이스 공통 컴퓨트 이미지(imageField 가 행별로 이김) — 예: OSWorld 데스크탑 이미지
-  placement?: string; // 모든 케이스 placement.target(예: "docker") — 컨트롤플레인 라우팅
+  placement?: string; // 모든 케이스 placement.target(등록된 런타임 id) — 컨트롤플레인 라우팅. image 케이스는 docker capability 로 라우팅되니 보통 불필요.
   testCmdField?: string; // 있으면 tests-pass{cmd} (행별 테스트 명령)
   tagFields?: string[]; // 태그로 쓸 필드들
   extraGraders?: GraderSpec[]; // 항상 추가(예: steps, judge{rubric})
