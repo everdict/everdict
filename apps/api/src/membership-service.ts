@@ -123,6 +123,21 @@ export class MembershipService {
     if (r.reason === "expired") throw new BadRequestError("BAD_REQUEST", undefined, "만료된 초대입니다.");
     throw new NotFoundError("NOT_FOUND", undefined, "유효하지 않은 초대입니다."); // unknown == 취소됨(존재 누출 없음)
   }
+
+  // 초대 미리보기(비소비) — 링크 랜딩에서 "어느 워크스페이스인지"를 보이려 이름/로고/역할만 돌려준다.
+  // redeem 하지 않고 멤버십도 만들지 않는다. 만료/수락/취소/무효는 통합 404(존재 누출 없음). 토큰이 곧 비밀이라 인증 게이트 없음.
+  async previewInvite(token: string): Promise<{ workspace: string; name: string; logoUrl?: string; role: string }> {
+    const found = await this.invites.previewInvite(hashKey(token));
+    if (!found) throw new NotFoundError("NOT_FOUND", undefined, "유효하지 않은 초대입니다.");
+    const ws = await this.members.get(found.workspace);
+    if (!ws) throw new NotFoundError("NOT_FOUND", undefined, "유효하지 않은 초대입니다.");
+    return {
+      workspace: found.workspace,
+      name: ws.name,
+      role: found.role,
+      ...(ws.logoUrl !== undefined ? { logoUrl: ws.logoUrl } : {}),
+    };
+  }
 }
 
 function adminCount(members: MemberRecord[]): number {

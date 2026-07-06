@@ -347,6 +347,9 @@ export const controlPlane = {
     callVoid(auth, `/invites/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   acceptInvite: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/invites/accept', { method: 'POST', body: JSON.stringify(body) }),
+  // 비인증 미리보기(서버가 토큰만 검증) — 링크 랜딩에서 워크스페이스 이름/썸네일 표시. auth 는 있으면 실려가지만 서버가 무시.
+  previewInvite: <T>(auth: AuthContext, token: string) =>
+    call<T>(auth, `/invites/preview?token=${encodeURIComponent(token)}`),
   // 내 프로필(이름/유저네임/아바타) 수정 — email 은 SSO(읽기전용)라 안 받는다. PATCH /me/profile → 갱신된 프로필.
   updateProfile: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/me/profile', { method: 'PATCH', body: JSON.stringify(body) }),

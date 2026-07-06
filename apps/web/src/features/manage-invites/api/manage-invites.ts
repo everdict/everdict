@@ -18,14 +18,10 @@ export interface InviteMutationResult {
 }
 
 // 초대 발급. 평문 토큰을 1회만 받아 링크로 공유. authZ(admin=members:write)는 컨트롤플레인이 강제.
-export async function createInviteAction(
-  role: string,
-  expiresInHours?: number
-): Promise<CreateInviteResult> {
+export async function createInviteAction(role: string): Promise<CreateInviteResult> {
   const ctx = await authContext()
   try {
-    const body = expiresInHours !== undefined ? { role, expiresInHours } : { role }
-    const res = createdInviteSchema.parse(await controlPlane.createInvite(ctx, body))
+    const res = createdInviteSchema.parse(await controlPlane.createInvite(ctx, { role }))
     revalidatePath('/[workspace]/settings')
     return { ok: true, token: res.token }
   } catch (e) {

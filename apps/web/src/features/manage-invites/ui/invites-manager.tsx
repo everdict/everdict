@@ -7,7 +7,7 @@ import { copyText } from '@/shared/lib/clipboard'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
-import { Input, Label } from '@/shared/ui/input'
+import { Label } from '@/shared/ui/input'
 
 import { createInviteAction, revokeInviteAction } from '../api/manage-invites'
 
@@ -21,7 +21,6 @@ function inviteLink(token: string): string {
 
 export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWrite: boolean }) {
   const [role, setRole] = useState<string>('member')
-  const [expiry, setExpiry] = useState('') // 시간(빈칸=무기한)
   const [link, setLink] = useState<string>() // 방금 발급된 초대 링크(1회)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string>()
@@ -32,16 +31,10 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
     setError(undefined)
     setLink(undefined)
     setCopied(false)
-    const hours = expiry.trim() === '' ? undefined : Number(expiry)
-    if (hours !== undefined && (!Number.isFinite(hours) || hours <= 0)) {
-      setError('만료 시간은 0 보다 큰 숫자여야 해요.')
-      return
-    }
     startTransition(async () => {
-      const r = await createInviteAction(role, hours)
+      const r = await createInviteAction(role)
       if (r.ok && r.token) {
         setLink(inviteLink(r.token))
-        setExpiry('')
       } else {
         setError(r.error ?? '발급하지 못했어요')
       }
@@ -65,8 +58,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         <h3 className="text-[13px] font-[560] text-foreground">초대</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
           초대 링크를 만들어 보내면, 받은 사람이 로그인하고 수락해 이 워크스페이스에 참여해요.
-          링크는 <span className="font-[510] text-foreground">한 번만</span> 쓸 수 있고, 만료 시간을
-          정할 수 있어요.
+          링크는 <span className="font-[510] text-foreground">한 번만</span> 쓸 수 있어요.
         </p>
       </div>
 
@@ -146,17 +138,6 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
               value={role}
               onChange={setRole}
               options={ROLES.map((r) => ({ value: r }))}
-              className="w-32"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="invite-expiry">만료(시간, 선택)</Label>
-            <Input
-              id="invite-expiry"
-              value={expiry}
-              onChange={(e) => setExpiry(e.target.value)}
-              placeholder="예: 168"
-              inputMode="numeric"
               className="w-32"
             />
           </div>

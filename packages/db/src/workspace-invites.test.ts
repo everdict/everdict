@@ -85,4 +85,28 @@ describe("WorkspaceInviteStore — 초대 토큰(redemption)", () => {
     await invites.revokeInvite("globex", meta.id); // 남의 워크스페이스에서 취소 시도 → 무효
     expect((await invites.listInvites("acme")).length).toBe(1);
   });
+
+  it("previewInvite: 비소비로 workspace/role 만; 만료·수락·미존재는 undefined", async () => {
+    const { invites } = setup();
+    const { token } = await issue(invites, { workspace: "acme", role: "member", createdBy: "alice" });
+    // 유효 → workspace/role. 재조회해도 그대로(소비하지 않으므로 이후 수락도 여전히 가능).
+    expect(await invites.previewInvite(hashKey(token))).toEqual({ workspace: "acme", role: "member" });
+    expect(await invites.previewInvite(hashKey(token))).toEqual({ workspace: "acme", role: "member" });
+    expect(await invites.consumeInvite(hashKey(token), "bob")).toEqual({
+      ok: true,
+      result: { workspace: "acme", role: "member" },
+    });
+    // 수락 후 → undefined
+    expect(await invites.previewInvite(hashKey(token))).toBeUndefined();
+    // 만료 → undefined
+    const { token: expired } = await issue(invites, {
+      workspace: "acme",
+      role: "member",
+      createdBy: "a",
+      expiresAt: new Date(Date.now() - 1000).toISOString(),
+    });
+    expect(await invites.previewInvite(hashKey(expired))).toBeUndefined();
+    // 미존재/취소 → undefined
+    expect(await invites.previewInvite(hashKey("inv_nope"))).toBeUndefined();
+  });
 });

@@ -34,3 +34,12 @@ export type CreatedInvite = z.infer<typeof createdInviteSchema>
 // POST /invites/accept 응답.
 export const acceptedInviteSchema = z.object({ workspace: z.string(), role: z.string() })
 export type AcceptedInvite = z.infer<typeof acceptedInviteSchema>
+
+// GET /invites/preview 응답 — 링크 랜딩에서 "어느 워크스페이스인지"(이름·썸네일·역할). 비소비.
+export const invitePreviewSchema = z.object({
+  workspace: z.string(),
+  name: z.string(),
+  logoUrl: z.string().optional(),
+  role: z.string(),
+})
+export type InvitePreview = z.infer<typeof invitePreviewSchema>

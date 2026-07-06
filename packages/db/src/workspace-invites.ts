@@ -45,6 +45,8 @@ export interface WorkspaceInviteStore {
   revokeInvite(workspace: string, id: string): Promise<void>; // tenant 스코프, 멱등(no-op)
   // 원자적: 존재+미만료+미수락 확인 → 멤버십 생성/email 갱신 → invite accepted 마킹.
   consumeInvite(tokenHash: string, subject: string, email?: string): Promise<ConsumeOutcome>;
+  // 비소비 미리보기 — 토큰 해시로 워크스페이스/역할만(멤버십 생성·redeem 없음). 미존재/만료/수락 → undefined.
+  previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined>;
 }
 
 // inv_<랜덤> — 평문 초대 토큰(링크에 담김). 생성 시 한 번만 노출되고 저장은 해시만.
@@ -122,6 +124,13 @@ export class InMemoryWorkspaceInviteStore implements WorkspaceInviteStore {
     // 기존 멤버였다면 role 은 유지되므로 실제 역할을 읽어 보고(공유 링크로 권한 변경 방지).
     const finalRole = (await this.members.roleFor(row.workspace, subject)) ?? row.role;
     return { ok: true, result: { workspace: row.workspace, role: finalRole } };
+  }
+
+  async previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined> {
+    const row = this.byHash.get(tokenHash);
+    if (!row || row.acceptedAt !== undefined) return undefined;
+    if (row.expiresAt !== undefined && row.expiresAt <= this.now()) return undefined;
+    return { workspace: row.workspace, role: row.role };
   }
 }
 
@@ -220,5 +229,16 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
     if (!w) return { ok: false, reason: "unknown" }; // 없음 == 취소됨(구분 안 함)
     if (w.accepted_at !== null) return { ok: false, reason: "accepted" };
     return { ok: false, reason: "expired" };
+  }
+
+  async previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined> {
+    // token_hash 로만 조회하고 redeem 하지 않는다. 미수락·미만료 행만.
+    const res = await this.client.query<{ workspace: string; role: string }>(
+      `SELECT workspace, role FROM assay_workspace_invites
+        WHERE token_hash = $1 AND accepted_at IS NULL AND (expires_at IS NULL OR expires_at > now())`,
+      [tokenHash],
+    );
+    const row = res.rows[0];
+    return row ? { workspace: row.workspace, role: row.role } : undefined;
   }
 }
