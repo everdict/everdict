@@ -6,6 +6,8 @@ export const runtimeSummarySchema = z.object({
   id: z.string(),
   owner: z.string(),
   versions: z.array(z.string()),
+  // 버전 → 자유 라벨(태그 있는 버전만) — 스펙 밖 가변 메타(버전 분간용).
+  versionTags: z.record(z.string(), z.array(z.string())).optional(),
 })
 export type RuntimeSummary = z.infer<typeof runtimeSummarySchema>
 export const runtimesSchema = z.array(runtimeSummarySchema)

@@ -104,6 +104,10 @@ export interface HarnessInstanceRegistry {
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
   // 버전 소프트 삭제(tombstone) — 데이터는 보존(과거 스코어카드 재현성), 모든 read 에서 제외, 동일 내용 재등록은 부활.
   softDelete(tenant: string, id: string, version: string): Promise<void>;
+  // 버전 태그(자유 라벨, 전체 교체) — 가변 레지스트리 메타(스펙 불변성 밖). 테넌트 소유 살아있는 버전만; _shared 는 NotFound.
+  setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
+  // 버전 → 태그 맵(태그 있는 버전만). 읽기는 versions() 와 동일하게 owner 해석(_shared 폴백 포함).
+  versionTags(tenant: string, id: string): Promise<Record<string, string[]>>;
 }
 
 export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry {
@@ -124,6 +128,12 @@ export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry 
   }
   async softDelete(tenant: string, id: string, version: string): Promise<void> {
     this.store.softDelete(tenant, id, version);
+  }
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    this.store.setVersionTags(tenant, id, version, tags);
+  }
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    return this.store.versionTags(tenant, id);
   }
   async getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec> {
     return this.store.get(tenant, id, ref);

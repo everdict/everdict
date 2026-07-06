@@ -52,6 +52,8 @@ export const datasetSummarySchema = z.object({
   createdBy: z.string().optional(), // 최초 등록 버전의 생성자 subject(시드/_shared 는 없음)
   createdAt: z.string().optional(), // 최초 버전 등록 시각(ISO)
   updatedAt: z.string().optional(), // 최근 버전 등록 시각(ISO)
+  // 버전 → 자유 라벨(태그 있는 버전만) — 내용의 tags(엔티티 분류)와 별개인 스펙 밖 가변 메타(버전 분간용).
+  versionTags: z.record(z.string(), z.array(z.string())).optional(),
 })
 export type DatasetSummary = z.infer<typeof datasetSummarySchema>
 export const datasetsSchema = z.array(datasetSummarySchema)

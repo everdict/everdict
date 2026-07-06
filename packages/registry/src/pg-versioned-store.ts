@@ -1,6 +1,6 @@
 import { ConflictError, NotFoundError } from "@assay/core";
 import type { SqlClient } from "@assay/db";
-import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
+import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 import type { VersionMeta } from "./versioned-store.js";
 
 interface SpecRow {
@@ -82,8 +82,36 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       [tenant, id, version],
     );
     const row = r.rows[0];
-    if (!row) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
+    if (!row)
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
     return row.created_by ?? undefined;
+  }
+
+  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 + 살아있는 버전만(softDelete 와 동일 규율; _shared 는 못 태깅).
+  // 태그는 가변 메타 컬럼 — spec(jsonb) 밖이라 specsEqual/버전 불변성에 안 걸린다. 마이그레이션 0047.
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    const r = await this.client.query<{ version: string }>(
+      `UPDATE ${this.table} SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version`,
+      [tenant, id, version, JSON.stringify(tags)],
+    );
+    if (r.rows.length === 0)
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
+  }
+
+  // 버전 → 태그 맵(살아있는 버전 중 태그가 있는 것만). 읽기는 owner 해석(_shared 폴백 포함) — versions() 와 동일 시야.
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    const owner = await this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const r = await this.client.query<{ version: string; tags: unknown }>(
+      `SELECT version, tags FROM ${this.table} WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL`,
+      [owner, id],
+    );
+    const out: Record<string, string[]> = {};
+    for (const row of r.rows) {
+      const tags = parseVersionTags(row.tags);
+      if (tags.length > 0) out[row.version] = tags;
+    }
+    return out;
   }
 
   async softDelete(tenant: string, id: string, version: string): Promise<void> {
@@ -132,8 +160,13 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
   async listMeta(tenant: string): Promise<VersionMeta[]> {
     const out: VersionMeta[] = [];
     for (const { id, owner } of await this.listIds(tenant)) {
-      const r = await this.client.query<{ version: string; created_at: string | Date; created_by: string | null }>(
-        `SELECT version, created_at, created_by FROM ${this.table} WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL`,
+      const r = await this.client.query<{
+        version: string;
+        created_at: string | Date;
+        created_by: string | null;
+        tags: unknown;
+      }>(
+        `SELECT version, created_at, created_by, tags FROM ${this.table} WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL`,
         [owner, id],
       );
       const versions = sortVersions(r.rows.map((x) => x.version));
@@ -142,6 +175,11 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       const byTime = [...r.rows].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       const earliest = byTime[0];
       const latest = byTime.at(-1);
+      const versionTags: Record<string, string[]> = {};
+      for (const row of r.rows) {
+        const tags = parseVersionTags(row.tags);
+        if (tags.length > 0) versionTags[row.version] = tags;
+      }
       out.push({
         id,
         owner,
@@ -151,6 +189,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         ...(earliest?.created_by != null ? { createdBy: earliest.created_by } : {}),
         ...(earliest ? { createdAt: new Date(earliest.created_at).toISOString() } : {}),
         ...(latest ? { updatedAt: new Date(latest.created_at).toISOString() } : {}),
+        ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
       });
     }
     return out;

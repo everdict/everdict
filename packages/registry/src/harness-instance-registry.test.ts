@@ -98,6 +98,41 @@ describe("HarnessInstanceRegistry", () => {
   });
 });
 
+describe("버전 태그 — 스펙 밖 가변 레지스트리 메타(자유 라벨, 버전 분간용)", () => {
+  let templates: InMemoryHarnessTemplateRegistry;
+  let instances: InMemoryHarnessInstanceRegistry;
+  beforeEach(async () => {
+    templates = new InMemoryHarnessTemplateRegistry();
+    instances = new InMemoryHarnessInstanceRegistry(templates);
+    await templates.register("acme", buTemplate);
+    await instances.register("acme", instance("1.0.0", { planner: "p:1", browser: "b:1" }));
+    await instances.register("acme", instance("1.1.0", { planner: "p:2", browser: "b:2" }));
+  });
+
+  it("setVersionTags 가 붙인 태그를 versionTags/list.versionTags 로 노출한다(전체 교체; 빈 배열 = 제거)", async () => {
+    await instances.setVersionTags("acme", "bu", "1.0.0", ["baseline"]);
+    expect(await instances.versionTags("acme", "bu")).toEqual({ "1.0.0": ["baseline"] });
+    expect((await instances.list("acme"))[0]?.versionTags).toEqual({ "1.0.0": ["baseline"] });
+    await instances.setVersionTags("acme", "bu", "1.0.0", []);
+    expect(await instances.versionTags("acme", "bu")).toEqual({});
+    expect((await instances.list("acme"))[0]?.versionTags).toBeUndefined();
+  });
+
+  it("태그는 버전 불변성과 무관 — 태그 후에도 같은 pins 재등록은 멱등(Conflict 아님)", async () => {
+    await instances.setVersionTags("acme", "bu", "1.0.0", ["baseline"]);
+    await instances.register("acme", instance("1.0.0", { planner: "p:1", browser: "b:1" }));
+    expect(await instances.versionTags("acme", "bu")).toEqual({ "1.0.0": ["baseline"] });
+  });
+
+  it("없는·삭제된 버전은 NotFound; 삭제된 버전은 versionTags read 에서도 빠진다", async () => {
+    await expect(instances.setVersionTags("acme", "bu", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+    await instances.setVersionTags("acme", "bu", "1.0.0", ["baseline"]);
+    await instances.softDelete("acme", "bu", "1.0.0");
+    expect(await instances.versionTags("acme", "bu")).toEqual({});
+    await expect(instances.setVersionTags("acme", "bu", "1.0.0", ["y"])).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
 describe("resolveWithPins — 제출 시점 임시 핀(레지스트리 무변경)", () => {
   let templates: InMemoryHarnessTemplateRegistry;
   let instances: InMemoryHarnessInstanceRegistry;

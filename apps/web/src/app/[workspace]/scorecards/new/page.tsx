@@ -22,8 +22,8 @@ export default async function NewScorecardPage({
   const { principal, ctx } = await currentPrincipal()
   const allowed = can(principal?.roles, 'scorecards:run')
 
-  let datasets: { id: string; versions: string[] }[] = []
-  let harnesses: { id: string; versions: string[] }[] = []
+  let datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
+  let harnesses: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
   if (allowed) {
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))

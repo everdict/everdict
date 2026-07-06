@@ -52,3 +52,22 @@ The registry is keyed by **`(tenant, id, version)`** (migration `0004_harness_te
 tenant's own harness and falls back to the **`_shared`** owner for first-party harnesses (the file loader
 registers under `_shared` by default). `loadHarnessDir(dir, { into, tenant })` chooses the owner. The HTTP
 surface (`POST/GET /harnesses`, authed) exposes this per-tenant — see `docs/tenancy.md`.
+
+## Version tags (mutable registry metadata)
+Version numbers alone are hard to tell apart, so every versioned entity (harness instance / dataset / judge /
+runtime) supports **per-version free-form tags** (e.g. `baseline`, `gpt-5 실험`). Tags are **registry metadata
+outside the immutable spec** — same layer as `createdBy` — so they can be edited *after* registration (the whole
+point: label versions that already exist) and never participate in `specsEqual`/immutability. Contract on all four
+registries:
+- `setVersionTags(tenant, id, version, tags)` — full-array replace (empty = remove all). **Tenant-owned live
+  versions only** (no `_shared` fallback — first-party versions can't be tagged), else `NotFoundError`; tombstoned
+  versions are excluded like every other read/write.
+- `versionTags(tenant, id)` → `Record<version, string[]>` (only versions that have tags). Reads resolve
+  owner-first with `_shared` fallback, same visibility as `versions()`.
+- List entries (`HarnessListEntry`/`DatasetListEntry`/`JudgeListEntry`/`RuntimeListEntry`) carry an optional
+  `versionTags` map; `GET /harnesses/:id` includes it too.
+Postgres stores tags in a `tags jsonb NOT NULL DEFAULT '[]'` column (migration `0047_version_tags`). HTTP surface:
+`PUT /{harnesses,datasets,judges,runtimes}/:id/versions/:version/tags` gated by each entity's content-mutation
+action (`harnesses:register` / `datasets:write` / `judges:write` / `runtimes:write` — no new authz action); MCP
+parity via `set_*_version_tags`. Input is normalized in `apps/api` `version-tag-service.ts` (trim, drop empties,
+order-preserving dedupe; ≤20 tags × ≤60 chars).

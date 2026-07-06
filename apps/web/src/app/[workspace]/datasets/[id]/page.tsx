@@ -20,9 +20,10 @@ import {
 } from 'lucide-react'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
-import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
 import { CommentsSection } from '@/features/discuss'
+import { ActivityTimeline, type ActivityItem, type Actor } from '@/features/discuss-dataset'
 import { CaseList } from '@/features/inspect-dataset'
+import { VersionTagsEditor } from '@/features/version-tags'
 import {
   datasetSchema,
   datasetsSchema,
@@ -131,6 +132,9 @@ export default async function DatasetDetailPage({
     )
   }
 
+  // 이 버전의 태그(자유 라벨) — 콘텐츠 태그(분류)와 별개인 버전 분간용 가변 메타. 버전 불변성과 무관.
+  const versionTags = summary?.versionTags?.[dataset.version] ?? []
+
   // 케이스 구성 요약 — 환경(env.kind)·채점(grader.id) 분포(빈도순). 벤치마크 성격을 한눈에.
   const envSummary = [
     ...dataset.cases.reduce((m, c) => {
@@ -194,6 +198,7 @@ export default async function DatasetDetailPage({
                   versions={versions}
                   current={dataset.version}
                   latest={versions[0]}
+                  versionTags={summary?.versionTags ?? {}}
                 />
               ) : (
                 <Badge tone="neutral">v{dataset.version} (latest)</Badge>
@@ -295,6 +300,22 @@ export default async function DatasetDetailPage({
             />
           )}
         </div>
+
+        {/* 이 버전의 태그 — 위 콘텐츠 태그(분류)와 별개인 버전 분간용 자유 라벨. 편집 불가 + 태그 없음이면 행 숨김. */}
+        {(canPublish || versionTags.length > 0) && (
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+            <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+              버전 태그
+            </span>
+            <VersionTagsEditor
+              entity="dataset"
+              id={dataset.id}
+              version={dataset.version}
+              tags={versionTags}
+              canEdit={canPublish}
+            />
+          </div>
+        )}
       </Card>
 
       {/* 리니지(출처) — 이 데이터가 어디서 왔는지. 원본 소스(HF 링크) · 공식 provenance · 만든 경로. */}
@@ -327,7 +348,12 @@ export default async function DatasetDetailPage({
       </section>
 
       {/* 논의 — 댓글 + 대댓글(스레드) + @멘션. 모든 상세 화면 공통 컴포넌트. */}
-      <CommentsSection workspace={workspace} resourceType="dataset" resourceId={dataset.id} title="논의" />
+      <CommentsSection
+        workspace={workspace}
+        resourceType="dataset"
+        resourceId={dataset.id}
+        title="논의"
+      />
 
       <section className="space-y-3">
         <SectionHeader title={`케이스 (${dataset.cases.length})`} />

@@ -41,6 +41,11 @@ export function specsEqual(a: unknown, b: unknown): boolean {
   return stableStringify(a) === stableStringify(b);
 }
 
+// Pg `tags jsonb` 컬럼 → string[] (버전 태그). jsonb 는 임의 값이 올 수 있으니 방어적으로 문자열만 취한다.
+export function parseVersionTags(v: unknown): string[] {
+  return Array.isArray(v) ? v.filter((t): t is string => typeof t === "string") : [];
+}
+
 export function resolveRef(id: string, ref: string, sorted: string[]): string {
   if (sorted.length === 0) throw new NotFoundError("NOT_FOUND", { id }, `하니스 '${id}' 가 없습니다.`);
   if (ref === LATEST) return sorted[sorted.length - 1] as string;

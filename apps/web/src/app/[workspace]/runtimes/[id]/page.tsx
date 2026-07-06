@@ -1,8 +1,16 @@
-import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
 
-import { type RuntimeSpec, runtimeSpecSchema, runtimesSchema } from '@/entities/runtime'
+import { CommentsSection } from '@/features/discuss'
+import { VersionTagsEditor } from '@/features/version-tags'
+import {
+  runtimeSpecSchema,
+  runtimesSchema,
+  type RuntimeSpec,
+  type RuntimeSummary,
+} from '@/entities/runtime'
+import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { sortSemverDesc } from '@/shared/lib/semver'
@@ -10,7 +18,6 @@ import { Badge } from '@/shared/ui/badge'
 import { Callout } from '@/shared/ui/callout'
 import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
-import { CommentsSection } from '@/features/discuss'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,10 +49,10 @@ export default async function RuntimeDetailPage({
   params: Promise<{ workspace: string; id: string }>
 }) {
   const { workspace, id } = await params
-  const { ctx } = await currentPrincipal()
+  const { principal, ctx } = await currentPrincipal()
 
   // 목록에서 이 런타임의 요약(버전/소유자) 확보 — 없거나 연결 실패면 목록으로.
-  let summary: { id: string; owner: string; versions: string[] } | undefined
+  let summary: RuntimeSummary | undefined
   try {
     summary = runtimesSchema.parse(await controlPlane.listRuntimes(ctx)).find((r) => r.id === id)
   } catch {
@@ -64,6 +71,11 @@ export default async function RuntimeDetailPage({
   }
 
   const rows = spec ? specRows(spec) : []
+
+  // 이 버전(표시본=latest)의 태그(자유 라벨) — 등록과 동일 게이트(runtimes:write) + 소유 워크스페이스일 때만 편집.
+  const currentWorkspace = principal?.workspace ?? workspace
+  const canEditTags = can(principal?.roles, 'runtimes:write') && summary.owner === currentWorkspace
+  const latestTags = summary.versionTags?.[latest] ?? []
 
   return (
     <div className="space-y-6">
@@ -99,7 +111,25 @@ export default async function RuntimeDetailPage({
               ))}
             </div>
           ) : (
-            <p className="border-t border-border pt-4 text-[12px] text-faint">추가 설정이 없어요.</p>
+            <p className="border-t border-border pt-4 text-[12px] text-faint">
+              추가 설정이 없어요.
+            </p>
+          )}
+          {/* 이 버전(표시본=latest)의 태그 — placement 태그(위 rows 의 '태그')와 별개인 버전 분간용 자유 라벨.
+              편집 불가 + 태그 없음이면 블록 자체를 숨긴다(빈 섹션 노출 금지). */}
+          {(canEditTags || latestTags.length > 0) && (
+            <div className="border-t border-border pt-4">
+              <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
+                버전 태그
+              </p>
+              <VersionTagsEditor
+                entity="runtime"
+                id={id}
+                version={latest}
+                tags={latestTags}
+                canEdit={canEditTags}
+              />
+            </div>
           )}
           <div className="border-t border-border pt-4">
             <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">버전</p>

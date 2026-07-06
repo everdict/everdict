@@ -1,6 +1,23 @@
 import { type Principal, can } from "@assay/auth";
-import { ForbiddenError } from "@assay/core";
+import { ForbiddenError, referencesUserSecret } from "@assay/core";
 import type { HarnessInstanceRegistry } from "@assay/registry";
+
+// 비공개(개인 시크릿 참조) 하니스는 createdBy 만 볼 수 있다 — 최신 버전을 resolve 해 판정.
+// resolve 실패는 가시성 판단 불가로 보고 막지 않는다(호출부의 다른 404 경로가 처리).
+// HTTP 라우트(server.ts)와 MCP 도구(mcp.ts)가 공유한다(BFF↔MCP parity).
+export async function harnessVisibleTo(
+  registry: HarnessInstanceRegistry,
+  principal: Principal,
+  id: string,
+): Promise<boolean> {
+  try {
+    const resolved = await registry.get(principal.workspace, id);
+    if (!referencesUserSecret(resolved)) return true;
+    return (await registry.creatorOf(principal.workspace, id)) === principal.subject;
+  } catch {
+    return true;
+  }
+}
 
 // 하니스(인스턴스) 버전 소프트 삭제의 공유 코어 — HTTP 라우트(server.ts)와 MCP 도구(mcp.ts)가 같은 로직을
 // 쓴다(BFF↔MCP parity). 데이터셋 삭제(dataset-service.deleteDatasetVersion)와 동일 패턴.

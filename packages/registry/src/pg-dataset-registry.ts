@@ -1,7 +1,7 @@
 import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@assay/core";
 import type { SqlClient } from "@assay/db";
 import type { DatasetListEntry, DatasetRegistry } from "./dataset-registry.js";
-import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
+import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
 interface DatasetRow {
   dataset: unknown;
@@ -111,8 +111,9 @@ export class PgDatasetRegistry implements DatasetRegistry {
       dataset: unknown;
       created_at: string | Date;
       created_by: string | null;
+      tags: unknown;
     }>(
-      "SELECT version, dataset, created_at, created_by FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+      "SELECT version, dataset, created_at, created_by, tags FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
       [owner, id],
     );
     const rows = r.rows;
@@ -134,6 +135,11 @@ export class PgDatasetRegistry implements DatasetRegistry {
     const newest = byTime[byTime.length - 1]; // 최근 등록 버전(수정시각)
     if (!earliest || !newest)
       throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `데이터셋 '${id}' 가 없습니다.`);
+    const versionTags: Record<string, string[]> = {};
+    for (const row of rows) {
+      const rowTags = parseVersionTags(row.tags);
+      if (rowTags.length > 0) versionTags[row.version] = rowTags;
+    }
     return {
       id,
       owner,
@@ -146,6 +152,7 @@ export class PgDatasetRegistry implements DatasetRegistry {
       ...(latest.description !== undefined ? { description: latest.description } : {}),
       ...(latest.producedBy !== undefined ? { producedBy: latest.producedBy } : {}),
       ...(earliest.created_by !== null ? { createdBy: earliest.created_by } : {}),
+      ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
     };
   }
 
@@ -167,5 +174,30 @@ export class PgDatasetRegistry implements DatasetRegistry {
     );
     if (r.rows.length === 0)
       throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `데이터셋 ${id}@${version} 가 없습니다.`);
+  }
+
+  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 + 살아있는 버전만(softDelete 와 동일 규율). 마이그레이션 0047.
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    const r = await this.client.query<{ version: string }>(
+      "UPDATE assay_datasets SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
+      [tenant, id, version, JSON.stringify(tags)],
+    );
+    if (r.rows.length === 0)
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `데이터셋 ${id}@${version} 가 없습니다.`);
+  }
+
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    const owner = await this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const r = await this.client.query<{ version: string; tags: unknown }>(
+      "SELECT version, tags FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+      [owner, id],
+    );
+    const out: Record<string, string[]> = {};
+    for (const row of r.rows) {
+      const rowTags = parseVersionTags(row.tags);
+      if (rowTags.length > 0) out[row.version] = rowTags;
+    }
+    return out;
   }
 }

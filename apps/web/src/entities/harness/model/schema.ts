@@ -15,15 +15,18 @@ export const harnessSchema = z.object({
   createdBy: z.string().optional(), // 최초 등록 인스턴스의 subject(시드/_shared 는 없음)
   createdAt: z.string().optional(),
   updatedAt: z.string().optional(),
+  // 버전 → 자유 라벨(태그 있는 버전만) — 스펙 밖 가변 메타. 버전을 번호만으로 분간하기 어려울 때 붙인다.
+  versionTags: z.record(z.string(), z.array(z.string())).optional(),
 })
 export type Harness = z.infer<typeof harnessSchema>
 
 export const harnessesSchema = z.array(harnessSchema)
 
-// GET /harnesses/:id 응답: 한 하니스의 인스턴스 버전 태그 목록(등록순/semver).
+// GET /harnesses/:id 응답: 한 하니스의 인스턴스 버전 목록(등록순/semver) + 버전별 태그(있는 버전만).
 export const harnessVersionsSchema = z.object({
   id: z.string(),
   versions: z.array(z.string()),
+  versionTags: z.record(z.string(), z.array(z.string())).optional(),
 })
 export type HarnessVersions = z.infer<typeof harnessVersionsSchema>
 

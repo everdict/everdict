@@ -58,6 +58,20 @@ describe("InMemoryJudgeRegistry (tenant-owned)", () => {
     await expect(r.register("acme", judge("j", "1.0.0", { rubric: "changed" }))).rejects.toBeInstanceOf(ConflictError);
   });
 
+  it("setVersionTags(버전 태그) — versionTags/list 로 노출, 빈 배열 = 제거, _shared·없는 버전은 NotFound", async () => {
+    const r = new InMemoryJudgeRegistry();
+    await r.register("acme", judge("j", "1.0.0"));
+    await r.register("acme", judge("j", "1.1.0"));
+    await r.setVersionTags("acme", "j", "1.0.0", ["엄격 루브릭"]);
+    expect(await r.versionTags("acme", "j")).toEqual({ "1.0.0": ["엄격 루브릭"] });
+    expect((await r.list("acme")).find((x) => x.id === "j")?.versionTags).toEqual({ "1.0.0": ["엄격 루브릭"] });
+    await r.setVersionTags("acme", "j", "1.0.0", []);
+    expect(await r.versionTags("acme", "j")).toEqual({});
+    await r.register(SHARED_TENANT, judge("correctness", "1.0.0"));
+    await expect(r.setVersionTags("acme", "correctness", "1.0.0", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+    await expect(r.setVersionTags("acme", "j", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+  });
+
   it("list 는 소유 + 공유를 보여주고 owner + 목록 메타(kind/model/versionCount)를 얹는다", async () => {
     const r = new InMemoryJudgeRegistry();
     await r.register(SHARED_TENANT, judge("correctness", "1.0.0"));
@@ -97,13 +111,30 @@ describe("loadJudgeDir", () => {
   });
 });
 
-// 가짜 SqlClient — tenant-aware assay_judges 흉내.
+// 가짜 SqlClient — tenant-aware assay_judges 흉내(tags[버전 태그] 포함).
 function fakePg(): SqlClient {
-  const rows: Array<{ tenant: string; id: string; version: string; judge: unknown }> = [];
+  const rows: Array<{ tenant: string; id: string; version: string; judge: unknown; tags: unknown }> = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
+      if (t.startsWith("SELECT version, tags FROM assay_judges WHERE tenant = $1 AND id = $2")) {
+        return {
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1])
+            .map((x) => ({ version: x.version, tags: x.tags })) as R[],
+        };
+      }
+      if (
+        t.startsWith(
+          "UPDATE assay_judges SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+        )
+      ) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
+        if (!r) return { rows: [] };
+        r.tags = JSON.parse(p[3] as string);
+        return { rows: [{ version: r.version }] as R[] };
+      }
       if (t.startsWith("SELECT judge FROM assay_judges WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{ judge: r.judge }] : []) as R[] };
@@ -131,6 +162,7 @@ function fakePg(): SqlClient {
           id: p[1] as string,
           version: p[2] as string,
           judge: JSON.parse(p[3] as string),
+          tags: [], // 마이그레이션 0047 기본값
         });
         return { rows: [] };
       }
@@ -154,5 +186,15 @@ describe("PgJudgeRegistry (tenant-owned)", () => {
     await expect(r.register("acme", judge("mine", "1.0.0", { rubric: "changed" }))).rejects.toBeInstanceOf(
       ConflictError,
     );
+  });
+
+  it("setVersionTags(버전 태그) — versionTags 로 노출, 없는 버전은 NotFound", async () => {
+    const r = new PgJudgeRegistry(fakePg());
+    await r.register("acme", judge("j", "1.0.0"));
+    await r.setVersionTags("acme", "j", "1.0.0", ["엄격 루브릭"]);
+    expect(await r.versionTags("acme", "j")).toEqual({ "1.0.0": ["엄격 루브릭"] });
+    await r.setVersionTags("acme", "j", "1.0.0", []);
+    expect(await r.versionTags("acme", "j")).toEqual({});
+    await expect(r.setVersionTags("acme", "j", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
   });
 });

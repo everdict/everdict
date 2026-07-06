@@ -235,7 +235,11 @@ describe("MCP tools", () => {
       "revoke_runner",
       "revoke_workspace_runner",
       "run_scorecard",
+      "set_dataset_version_tags",
+      "set_harness_version_tags",
+      "set_judge_version_tags",
       "set_member_role",
+      "set_runtime_version_tags",
       "set_workspace_mattermost",
       "start_workspace_github_app_install",
       "submit_job_result",
@@ -262,6 +266,34 @@ describe("MCP tools", () => {
     // 잘못된 JSON → 오류.
     const bad = await viewer.callTool({ name: "register_harness", arguments: { spec: "{not json" } });
     expect(bad.isError).toBe(true);
+  });
+
+  it("set_harness_version_tags — 버전 태그 교체(스펙 밖 가변 메타) 후 list_harnesses.versionTags 로 노출", async () => {
+    const deps = harness();
+    const viewer = await connect(deps, ["viewer"]); // harnesses:register 는 viewer+ (등록과 동일 게이트)
+    await viewer.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
+    await viewer.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
+
+    const set = await viewer.callTool({
+      name: "set_harness_version_tags",
+      arguments: { id: "bu", version: "1.0.0", tags: ["baseline", " baseline ", "gpt-5 실험"] },
+    });
+    expect(set.isError).toBeFalsy();
+    expect(JSON.parse(text(set))).toMatchObject({ id: "bu", version: "1.0.0", tags: ["baseline", "gpt-5 실험"] }); // 정규화(dedupe)
+
+    const list = await viewer.callTool({ name: "list_harnesses", arguments: {} });
+    const entry = (JSON.parse(text(list)) as Array<{ id: string; versionTags?: Record<string, string[]> }>).find(
+      (e) => e.id === "bu",
+    );
+    expect(entry?.versionTags).toEqual({ "1.0.0": ["baseline", "gpt-5 실험"] });
+
+    // 없는 버전 → NOT_FOUND(isError)
+    const miss = await viewer.callTool({
+      name: "set_harness_version_tags",
+      arguments: { id: "bu", version: "9.9.9", tags: ["x"] },
+    });
+    expect(miss.isError).toBe(true);
+    expect(text(miss)).toContain("NOT_FOUND");
   });
 
   it("get_harness_template / get_harness_instance: raw 스펙 조회(구성 보기·프리필) — viewer 가능", async () => {

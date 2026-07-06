@@ -64,6 +64,21 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
       { id: "shared", owner: SHARED_TENANT, versions: ["1.0.0"] },
     ]);
   });
+
+  it("setVersionTags(버전 태그) — versionTags/list 로 노출, 빈 배열 = 제거, _shared·없는 버전은 NotFound", async () => {
+    const r = new InMemoryRuntimeRegistry();
+    await r.register("acme", rt("mine", "1.0.0"));
+    await r.register("acme", rt("mine", "1.1.0"));
+    await r.setVersionTags("acme", "mine", "1.0.0", ["gpu 노드"]);
+    expect(await r.versionTags("acme", "mine")).toEqual({ "1.0.0": ["gpu 노드"] });
+    expect((await r.list("acme")).find((x) => x.id === "mine")?.versionTags).toEqual({ "1.0.0": ["gpu 노드"] });
+    await r.setVersionTags("acme", "mine", "1.0.0", []);
+    expect(await r.versionTags("acme", "mine")).toEqual({});
+    expect((await r.list("acme")).find((x) => x.id === "mine")?.versionTags).toBeUndefined();
+    await r.register(SHARED_TENANT, rt("shared", "1.0.0"));
+    await expect(r.setVersionTags("acme", "shared", "1.0.0", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+    await expect(r.setVersionTags("acme", "mine", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+  });
 });
 
 describe("loadRuntimeDir", () => {
@@ -80,11 +95,28 @@ describe("loadRuntimeDir", () => {
 });
 
 function fakePg(): SqlClient {
-  const rows: Array<{ tenant: string; id: string; version: string; runtime: unknown }> = [];
+  const rows: Array<{ tenant: string; id: string; version: string; runtime: unknown; tags: unknown }> = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
+      if (t.startsWith("SELECT version, tags FROM assay_runtimes WHERE tenant = $1 AND id = $2")) {
+        return {
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1])
+            .map((x) => ({ version: x.version, tags: x.tags })) as R[],
+        };
+      }
+      if (
+        t.startsWith(
+          "UPDATE assay_runtimes SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+        )
+      ) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
+        if (!r) return { rows: [] };
+        r.tags = JSON.parse(p[3] as string);
+        return { rows: [{ version: r.version }] as R[] };
+      }
       if (t.startsWith("SELECT runtime FROM assay_runtimes WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{ runtime: r.runtime }] : []) as R[] };
@@ -112,6 +144,7 @@ function fakePg(): SqlClient {
           id: p[1] as string,
           version: p[2] as string,
           runtime: JSON.parse(p[3] as string),
+          tags: [], // 마이그레이션 0047 기본값
         });
         return { rows: [] };
       }
@@ -130,5 +163,16 @@ describe("PgRuntimeRegistry (tenant-owned)", () => {
     expect(await r.has("beta", "mine", "1.0.0")).toBe(false);
     await expect(r.get("beta", "mine")).rejects.toBeInstanceOf(NotFoundError);
     await expect(r.register("acme", rt("mine", "1.0.0", { description: "x" }))).rejects.toBeInstanceOf(ConflictError);
+  });
+
+  it("setVersionTags(버전 태그) — versionTags/list 로 노출, 없는 버전은 NotFound", async () => {
+    const r = new PgRuntimeRegistry(fakePg());
+    await r.register("acme", rt("mine", "1.0.0"));
+    await r.setVersionTags("acme", "mine", "1.0.0", ["gpu 노드"]);
+    expect(await r.versionTags("acme", "mine")).toEqual({ "1.0.0": ["gpu 노드"] });
+    expect((await r.list("acme")).find((x) => x.id === "mine")?.versionTags).toEqual({ "1.0.0": ["gpu 노드"] });
+    await r.setVersionTags("acme", "mine", "1.0.0", []);
+    expect(await r.versionTags("acme", "mine")).toEqual({});
+    await expect(r.setVersionTags("acme", "mine", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
   });
 });

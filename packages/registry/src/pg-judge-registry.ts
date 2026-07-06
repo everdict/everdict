@@ -1,7 +1,7 @@
 import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@assay/core";
 import type { SqlClient } from "@assay/db";
 import { type JudgeListEntry, type JudgeRegistry, judgeDerived } from "./judge-registry.js";
-import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
+import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
 interface JudgeRow {
   judge: unknown;
@@ -96,7 +96,11 @@ export class PgJudgeRegistry implements JudgeRegistry {
           created_at: string | Date;
           created_by: string | null;
           judge: unknown;
-        }>("SELECT version, created_at, created_by, judge FROM assay_judges WHERE tenant = $1 AND id = $2", [owner, id])
+          tags: unknown;
+        }>("SELECT version, created_at, created_by, judge, tags FROM assay_judges WHERE tenant = $1 AND id = $2", [
+          owner,
+          id,
+        ])
       ).rows;
       const versions = sortVersions(rows.map((x) => x.version));
       const latestVersion = versions.at(-1);
@@ -105,6 +109,11 @@ export class PgJudgeRegistry implements JudgeRegistry {
       const earliest = byTime[0];
       const latest = byTime.at(-1);
       const latestRow = rows.find((x) => x.version === latestVersion);
+      const versionTags: Record<string, string[]> = {};
+      for (const row of rows) {
+        const rowTags = parseVersionTags(row.tags);
+        if (rowTags.length > 0) versionTags[row.version] = rowTags;
+      }
       out.push({
         id,
         owner,
@@ -115,7 +124,33 @@ export class PgJudgeRegistry implements JudgeRegistry {
         ...(earliest?.created_by != null ? { createdBy: earliest.created_by } : {}),
         ...(earliest ? { createdAt: new Date(earliest.created_at).toISOString() } : {}),
         ...(latest ? { updatedAt: new Date(latest.created_at).toISOString() } : {}),
+        ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
       });
+    }
+    return out;
+  }
+
+  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 버전만(_shared 는 NotFound). 마이그레이션 0047.
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    const r = await this.client.query<{ version: string }>(
+      "UPDATE assay_judges SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+      [tenant, id, version, JSON.stringify(tags)],
+    );
+    if (r.rows.length === 0)
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `judge ${id}@${version} 가 없습니다.`);
+  }
+
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    const owner = await this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const r = await this.client.query<{ version: string; tags: unknown }>(
+      "SELECT version, tags FROM assay_judges WHERE tenant = $1 AND id = $2",
+      [owner, id],
+    );
+    const out: Record<string, string[]> = {};
+    for (const row of r.rows) {
+      const rowTags = parseVersionTags(row.tags);
+      if (rowTags.length > 0) out[row.version] = rowTags;
     }
     return out;
   }

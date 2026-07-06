@@ -887,6 +887,46 @@ describe("API — harness taxonomy (template 대분류 + instance)", () => {
     expect((await app.inject({ method: "GET", url: "/harnesses/bu/nope/instance", headers: h })).statusCode).toBe(404);
     await app.close();
   });
+
+  it("PUT 버전 태그(등록과 동일 게이트) → GET /harnesses/:id 와 목록에 versionTags 노출; 없는 버전 404", async () => {
+    const { app, keyStore } = server({ requireAuth: true });
+    const h = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    await app.inject({ method: "POST", url: "/harness-templates", headers: h, payload: TEMPLATE });
+    await app.inject({ method: "POST", url: "/harnesses", headers: h, payload: INSTANCE });
+
+    const put = await app.inject({
+      method: "PUT",
+      url: "/harnesses/bu/versions/pr-1/tags",
+      headers: h,
+      payload: { tags: ["baseline", "gpt-5 실험"] },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toMatchObject({ id: "bu", version: "pr-1", tags: ["baseline", "gpt-5 실험"] });
+
+    // 버전 목록 + 목록 메타 양쪽에 노출 — 버전 스위처/목록이 번호를 분간하는 소스.
+    const detail = await app.inject({ method: "GET", url: "/harnesses/bu", headers: h });
+    expect(detail.json()).toMatchObject({ id: "bu", versionTags: { "pr-1": ["baseline", "gpt-5 실험"] } });
+    const list = await app.inject({ method: "GET", url: "/harnesses", headers: h });
+    expect(list.json().find((x: { id: string }) => x.id === "bu").versionTags).toEqual({
+      "pr-1": ["baseline", "gpt-5 실험"],
+    });
+
+    // 빈 배열 = 전체 제거 → 필드 자체가 사라진다.
+    await app.inject({ method: "PUT", url: "/harnesses/bu/versions/pr-1/tags", headers: h, payload: { tags: [] } });
+    expect((await app.inject({ method: "GET", url: "/harnesses/bu", headers: h })).json().versionTags).toBeUndefined();
+
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/harnesses/bu/versions/nope/tags",
+          headers: h,
+          payload: { tags: ["x"] },
+        })
+      ).statusCode,
+    ).toBe(404);
+    await app.close();
+  });
 });
 
 describe("API — internal key issuance", () => {
@@ -1066,6 +1106,54 @@ describe("API — datasets (workspace-owned, member+ write)", () => {
           method: "GET",
           url: "/datasets/smoke/versions/1.0.0",
           headers: { authorization: acme },
+        })
+      ).statusCode,
+    ).toBe(404);
+    await app.close();
+  });
+
+  it("PUT 버전 태그 — viewer 403 / 소유자 교체(200, 정규화) → 목록 versionTags 노출 / 타 워크스페이스 404", async () => {
+    // viewer 는 datasets:write 가 없어 403 (존재 여부와 무관 — 게이트가 먼저).
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    expect(
+      (
+        await viewer.app.inject({
+          method: "PUT",
+          url: "/datasets/smoke/versions/1.0.0/tags",
+          headers: { authorization: "Bearer x" },
+          payload: { tags: ["x"] },
+        })
+      ).statusCode,
+    ).toBe(403);
+    await viewer.app.close();
+
+    const { app, keyStore } = server({ requireAuth: true });
+    const acme = { authorization: `Bearer ${await issueKey(keyStore, "acme")}` };
+    const beta = { authorization: `Bearer ${await issueKey(keyStore, "beta")}` };
+    await app.inject({ method: "POST", url: "/datasets", headers: acme, payload: DATASET });
+
+    // 교체(전체 배열 PUT) — trim + dedupe 정규화되어 반환/저장.
+    const put = await app.inject({
+      method: "PUT",
+      url: "/datasets/smoke/versions/1.0.0/tags",
+      headers: acme,
+      payload: { tags: [" baseline ", "baseline", "gpt-5 실험"] },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json()).toMatchObject({ id: "smoke", version: "1.0.0", tags: ["baseline", "gpt-5 실험"] });
+    const list = await app.inject({ method: "GET", url: "/datasets", headers: acme });
+    expect(list.json().find((x: { id: string }) => x.id === "smoke").versionTags).toEqual({
+      "1.0.0": ["baseline", "gpt-5 실험"],
+    });
+
+    // 타 워크스페이스 버전은 404(존재 은닉) — 태그는 소유 버전만 편집 가능.
+    expect(
+      (
+        await app.inject({
+          method: "PUT",
+          url: "/datasets/smoke/versions/1.0.0/tags",
+          headers: beta,
+          payload: { tags: ["x"] },
         })
       ).statusCode,
     ).toBe(404);

@@ -17,6 +17,7 @@ export interface JudgeListEntry {
   createdBy?: string; // 최초 등록 버전의 subject(시드/_shared 는 없음)
   createdAt?: string;
   updatedAt?: string;
+  versionTags?: Record<string, string[]>; // 버전 → 자유 라벨(태그 있는 버전만) — 가변 레지스트리 메타(스펙 밖)
 }
 
 // 최신 JudgeSpec → 목록 파생 필드. model=provider/model, harness=→하니스 위임.
@@ -49,6 +50,10 @@ export interface JudgeRegistry {
   versions(tenant: string, id: string): Promise<string[]>; // 정렬됨(semver 우선) — 소유 우선/_shared 폴백
   ownVersions(tenant: string, id: string): Promise<string[]>; // 이 테넌트가 직접 등록한 버전만(폴백 없음 — 충돌 판정용)
   list(tenant: string): Promise<JudgeListEntry[]>;
+  // 버전 태그(자유 라벨, 전체 교체) — 가변 레지스트리 메타(스펙 불변성 밖). 테넌트 소유 버전만; _shared 는 NotFound.
+  setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
+  // 버전 → 태그 맵(태그 있는 버전만). 읽기는 versions() 와 동일하게 owner 해석(_shared 폴백 포함).
+  versionTags(tenant: string, id: string): Promise<Record<string, string[]>>;
 }
 
 interface Entry {
@@ -56,6 +61,7 @@ interface Entry {
   seq: number;
   createdAt: string;
   createdBy?: string;
+  tags?: string[]; // 버전 태그 — 가변 레지스트리 메타(스펙 불변성 밖, createdBy 와 동급)
 }
 
 export class InMemoryJudgeRegistry implements JudgeRegistry {
@@ -139,6 +145,7 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
       const earliest = entries[0];
       const latest = entries.at(-1);
       const latestSpec = this.byOwner.get(owner)?.get(id)?.get(latestVersion)?.spec;
+      const versionTags = await this.versionTags(owner, id);
       out.push({
         id,
         owner,
@@ -149,7 +156,24 @@ export class InMemoryJudgeRegistry implements JudgeRegistry {
         ...(earliest?.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
         ...(earliest ? { createdAt: earliest.createdAt } : {}),
         ...(latest ? { updatedAt: latest.createdAt } : {}),
+        ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
       });
+    }
+    return out;
+  }
+
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    const entry = this.byOwner.get(tenant)?.get(id)?.get(version); // 직접 소유만(폴백 없음 — _shared 는 못 태깅)
+    if (!entry) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `judge ${id}@${version} 가 없습니다.`);
+    entry.tags = tags.length > 0 ? tags : undefined; // 빈 배열 = 제거(revive 의 deletedAt=undefined 와 동일 관용)
+  }
+
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    const owner = this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const out: Record<string, string[]> = {};
+    for (const e of this.byOwner.get(owner)?.get(id)?.values() ?? []) {
+      if (e.tags !== undefined && e.tags.length > 0) out[e.spec.version] = e.tags;
     }
     return out;
   }

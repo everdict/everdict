@@ -13,12 +13,27 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 import { runScorecardAction } from '../api/run-scorecard'
 
-// 버전 선택지 — 'latest' 별칭(가장 위, 해석 결과를 hint 로) + 등록된 버전들(semver 최신 먼저).
-function versionOptions(versions: string[]): ComboboxOption[] {
+// 버전 선택지 — 'latest' 별칭(가장 위, 해석 결과+태그를 hint 로) + 등록된 버전들(semver 최신 먼저, 태그 있으면 hint).
+// versionTags = 버전 → 자유 라벨(태그 있는 버전만). 번호만으로 분간하기 어려운 버전을 태그로 식별.
+function versionOptions(
+  versions: string[],
+  versionTags?: Record<string, string[]>
+): ComboboxOption[] {
   const sorted = sortSemverDesc(versions)
+  const latest = sorted[0]
+  const latestTags = latest ? (versionTags?.[latest] ?? []) : []
   return [
-    { value: 'latest', label: 'latest', hint: sorted[0] ? `→ ${sorted[0]}` : undefined },
-    ...sorted.map((v) => ({ value: v })),
+    {
+      value: 'latest',
+      label: 'latest',
+      hint: latest
+        ? `→ ${latest}${latestTags.length > 0 ? ` · ${latestTags.join(' · ')}` : ''}`
+        : undefined,
+    },
+    ...sorted.map((v) => {
+      const tags = versionTags?.[v] ?? []
+      return { value: v, ...(tags.length > 0 ? { hint: tags.join(' · ') } : {}) }
+    }),
   ]
 }
 
@@ -37,8 +52,8 @@ export function RunScorecardForm({
   datasets,
   harnesses,
 }: {
-  datasets: { id: string; versions: string[] }[]
-  harnesses: { id: string; versions: string[] }[]
+  datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
+  harnesses: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -73,11 +88,15 @@ export function RunScorecardForm({
     value: h.id,
     hint: `${h.versions.length}개 버전`,
   }))
+  const datasetEntry = datasets.find((d) => d.id === datasetId)
+  const harnessEntry = harnesses.find((h) => h.id === harnessId)
   const datasetVersionOptions = versionOptions(
-    datasets.find((d) => d.id === datasetId)?.versions ?? []
+    datasetEntry?.versions ?? [],
+    datasetEntry?.versionTags
   )
   const harnessVersionOptions = versionOptions(
-    harnesses.find((h) => h.id === harnessId)?.versions ?? []
+    harnessEntry?.versions ?? [],
+    harnessEntry?.versionTags
   )
 
   async function onSubmit(values: Values) {

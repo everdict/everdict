@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { Boxes, Cpu, Database, ListFilter, Server } from 'lucide-react'
+import { Boxes, Cpu, Database, ListFilter, Server, Tag } from 'lucide-react'
 
 import { fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -60,6 +60,18 @@ export function SubsetChip({ selected, total }: { selected: number; total: numbe
     >
       <ListFilter className="size-3 shrink-0 text-[#e2b96b]" />
       일부 {selected}/{total}
+    </span>
+  )
+}
+
+// 버전 태그 칩 — 버전을 번호만으로 분간하기 어려울 때 붙이는 자유 라벨(스펙 밖 레지스트리 메타). 전역 통일.
+// trailing(삭제 ✕ 등)은 편집 표면이 주입한다 — 칩 자체는 표시 전용.
+export function VersionTagChip({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) {
+  return (
+    <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground">
+      <Tag className="size-3 shrink-0 text-[#b78de8]" />
+      {children}
+      {trailing}
     </span>
   )
 }

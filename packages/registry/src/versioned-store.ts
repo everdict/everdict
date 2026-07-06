@@ -9,6 +9,7 @@ interface Entry<T> {
   createdAt: string; // 등록 시각(ISO)
   createdBy?: string; // 등록한 subject(없으면 시드/파일)
   deletedAt?: number; // 소프트 삭제 tombstone — set 되면 모든 read 에서 제외(내용은 보존, 데이터셋과 동일 패턴)
+  tags?: string[]; // 버전 태그 — 번호만으로 버전을 분간하기 어려워 붙이는 자유 라벨. 가변 메타(내용 불변성 밖, createdBy 와 동급)
 }
 
 // 목록 메타 — 한 id 의 살아있는 버전 요약(등록 이력에서). category/kind 등 스펙 파생은 상위 레지스트리가 채운다.
@@ -21,6 +22,7 @@ export interface VersionMeta {
   createdBy?: string; // 최초 등록 버전의 subject
   createdAt?: string; // 최초 등록 시각(ISO)
   updatedAt?: string; // 최근 등록 시각(ISO)
+  versionTags?: Record<string, string[]>; // 버전 → 태그(빈 버전은 생략; 태그가 하나도 없으면 필드 자체 생략)
 }
 
 export class VersionedStore<T extends { id: string; version: string }> {
@@ -90,6 +92,24 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return this.ownLiveEntry(tenant, id, version).createdBy;
   }
 
+  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 + 살아있는 버전만(softDelete 와 동일 규율; _shared 는 못 태깅).
+  // 태그는 가변 레지스트리 메타 — 스펙 내용이 아니라 specsEqual/불변성에 안 걸린다.
+  setVersionTags(tenant: string, id: string, version: string, tags: string[]): void {
+    const entry = this.ownLiveEntry(tenant, id, version);
+    entry.tags = tags.length > 0 ? tags : undefined; // 빈 배열 = 제거(revive 의 deletedAt=undefined 와 동일 관용)
+  }
+
+  // 버전 → 태그 맵(살아있는 버전 중 태그가 있는 것만). 읽기는 owner 해석(_shared 폴백 포함) — versions() 와 동일 시야.
+  versionTags(tenant: string, id: string): Record<string, string[]> {
+    const owner = this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const out: Record<string, string[]> = {};
+    for (const e of this.byOwner.get(owner)?.get(id)?.values() ?? []) {
+      if (e.deletedAt === undefined && e.tags !== undefined && e.tags.length > 0) out[e.item.version] = e.tags;
+    }
+    return out;
+  }
+
   softDelete(tenant: string, id: string, version: string): void {
     this.ownLiveEntry(tenant, id, version).deletedAt = Date.now();
   }
@@ -129,6 +149,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
       const entries = [...(this.byOwner.get(owner)?.get(id)?.values() ?? [])].sort((a, b) => a.seq - b.seq);
       const earliest = entries[0];
       const latest = entries.at(-1);
+      const versionTags = this.versionTags(owner, id);
       out.push({
         id,
         owner,
@@ -138,6 +159,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
         ...(earliest?.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
         ...(earliest ? { createdAt: earliest.createdAt } : {}),
         ...(latest ? { updatedAt: latest.createdAt } : {}),
+        ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
       });
     }
     return out;

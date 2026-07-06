@@ -6,6 +6,7 @@ import { CommentsSection } from '@/features/discuss'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
 import { HarnessDetail, RawConfigDisclosure } from '@/features/inspect-harness'
 import { CiLinkPanel } from '@/features/manage-ci-links'
+import { VersionTagsEditor } from '@/features/version-tags'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { datasetsSchema } from '@/entities/dataset'
 import {
@@ -106,12 +107,14 @@ export default async function HarnessDetailPage({
   const { principal, ctx } = await currentPrincipal()
 
   let versions: string[] = []
+  let versionTags: Record<string, string[]> = {}
   let spec: HarnessSpec | undefined
   let error: string | undefined
   let active: string | undefined
   try {
     const detail = harnessVersionsSchema.parse(await controlPlane.getHarness(ctx, id))
     versions = detail.versions
+    versionTags = detail.versionTags ?? {}
     const requested = typeof v === 'string' && versions.includes(v) ? v : undefined
     active = requested ?? versions[versions.length - 1] // latest = semver/등록순 최상위
     if (active) spec = harnessSpecSchema.parse(await controlPlane.getHarnessSpec(ctx, id, active))
@@ -164,6 +167,11 @@ export default async function HarnessDetailPage({
       if (template) config = { instance, template }
     }
   }
+
+  // 버전 태그 편집 가능 여부 — 등록과 동일 게이트(harnesses:register) + 이 워크스페이스 소유일 때만
+  // (_shared/first-party 는 컨트롤플레인이 404 로 거부하므로 편집 UI 자체를 숨긴다).
+  const canTagVersions =
+    can(principal?.roles, 'harnesses:register') && entry !== undefined && entry.owner === currentWorkspace
 
   // 워크스페이스 이미지 레지스트리 좌표(viewer+) — 서비스/커맨드 이미지의 출처 분류 배지용. 실패해도 상세는 렌더.
   const imageRegistry = await controlPlane
@@ -221,6 +229,7 @@ export default async function HarnessDetailPage({
                   versions={versions}
                   current={active ?? ''}
                   latest={versions[versions.length - 1]}
+                  versionTags={versionTags}
                 />
               ) : (
                 <Badge tone="neutral">v{active} · latest</Badge>
@@ -263,6 +272,20 @@ export default async function HarnessDetailPage({
           )}
           <span className="text-[11px] text-faint">· {versions.length || 1}개</span>
         </MetaItem>
+        {/* 이 버전의 태그(자유 라벨) — 편집 불가 + 태그 없음이면 행 자체를 숨긴다(빈 섹션 노출 금지).
+            _shared(first-party) 하니스는 태깅 불가(레지스트리가 404) → 소유 워크스페이스일 때만 편집 노출. */}
+        {active &&
+          (canTagVersions || (versionTags[active] ?? []).length > 0) && (
+            <MetaItem label="태그">
+              <VersionTagsEditor
+                entity="harness"
+                id={id}
+                version={active}
+                tags={versionTags[active] ?? []}
+                canEdit={canTagVersions}
+              />
+            </MetaItem>
+          )}
         {entry?.createdAt && (
           <MetaItem label="생성" title={`생성 ${fmtDateTimeFull(entry.createdAt)}`}>
             {fmtDateTime(entry.createdAt)}

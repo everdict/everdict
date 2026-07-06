@@ -11,11 +11,13 @@ export function VersionSwitcher({
   versions,
   current,
   latest,
+  versionTags,
 }: {
   id: string
   versions: string[]
   current: string
   latest?: string
+  versionTags?: Record<string, string[]> // 버전 태그(자유 라벨) — 옵션 우측 hint 로 붙여 번호를 분간
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -30,10 +32,14 @@ export function VersionSwitcher({
           `/${workspace}/datasets/${encodeURIComponent(id)}?version=${encodeURIComponent(v)}`
         )
       }
-      options={versions.map((v) => ({
-        value: v,
-        label: v === latest ? `${v} (latest)` : v,
-      }))}
+      options={versions.map((v) => {
+        const tags = versionTags?.[v]
+        return {
+          value: v,
+          label: v === latest ? `${v} (latest)` : v,
+          ...(tags && tags.length > 0 ? { hint: tags.join(' · ') } : {}),
+        }
+      })}
       className="w-44"
     />
   )

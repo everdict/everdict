@@ -9,9 +9,12 @@ import { PgHarnessInstanceRegistry } from "./pg-harness-instance-registry.js";
 import { PgHarnessTemplateRegistry } from "./pg-harness-template-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 
-// 여러 assay_harness_* 테이블을 흉내내는 가짜 SqlClient(테이블명은 쿼리에서 추출).
+// 여러 assay_harness_* 테이블을 흉내내는 가짜 SqlClient(테이블명은 쿼리에서 추출; tags = 버전 태그).
 function fakePg(): SqlClient {
-  const tables = new Map<string, Array<{ tenant: string; id: string; version: string; spec: unknown }>>();
+  const tables = new Map<
+    string,
+    Array<{ tenant: string; id: string; version: string; spec: unknown; tags: unknown }>
+  >();
   const rowsFor = (t: string) => {
     let a = tables.get(t);
     if (!a) {
@@ -24,7 +27,7 @@ function fakePg(): SqlClient {
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
-      const table = /(?:FROM|INTO)\s+(assay_harness_\w+)/.exec(t)?.[1] ?? "";
+      const table = /(?:FROM|INTO|UPDATE)\s+(assay_harness_\w+)/.exec(t)?.[1] ?? "";
       const rows = rowsFor(table);
       if (t.startsWith("SELECT spec") && t.includes("version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
@@ -39,10 +42,23 @@ function fakePg(): SqlClient {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1]);
         return { rows: (r ? [{}] : []) as R[] };
       }
+      if (t.startsWith("SELECT version, tags FROM")) {
+        return {
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1])
+            .map((x) => ({ version: x.version, tags: x.tags })) as R[],
+        };
+      }
       if (t.startsWith("SELECT version FROM")) {
         return {
           rows: rows.filter((x) => x.tenant === p[0] && x.id === p[1]).map((x) => ({ version: x.version })) as R[],
         };
+      }
+      if (t.includes("SET tags = $4::jsonb") && t.includes("RETURNING version")) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
+        if (!r) return { rows: [] };
+        r.tags = JSON.parse(p[3] as string);
+        return { rows: [{ version: r.version }] as R[] };
       }
       if (t.startsWith("SELECT DISTINCT id FROM")) {
         const ids = [...new Set(rows.filter((x) => x.tenant === p[0] || x.tenant === p[1]).map((x) => x.id))].sort();
@@ -54,6 +70,7 @@ function fakePg(): SqlClient {
           id: p[1] as string,
           version: p[2] as string,
           spec: JSON.parse(p[3] as string),
+          tags: [], // 마이그레이션 0047 기본값
         });
         return { rows: [] };
       }
@@ -111,6 +128,19 @@ describe("PgHarnessTemplateRegistry + PgHarnessInstanceRegistry (fake pg)", () =
     await templates.register("acme", buTemplate);
     await expect(instances.register("acme", inst("y", { planner: "p" }))).rejects.toBeInstanceOf(BadRequestError);
     expect(await instances.has("acme", "bu", "y")).toBe(false);
+  });
+
+  it("setVersionTags(버전 태그) — versionTags 로 노출, 빈 배열 = 제거, 없는 버전은 NotFound", async () => {
+    const pg = fakePg();
+    const templates = new PgHarnessTemplateRegistry(pg);
+    const instances = new PgHarnessInstanceRegistry(pg, templates);
+    await templates.register("acme", buTemplate);
+    await instances.register("acme", inst("1.0.0", { planner: "p:1", browser: "b:1" }));
+    await instances.setVersionTags("acme", "bu", "1.0.0", ["baseline"]);
+    expect(await instances.versionTags("acme", "bu")).toEqual({ "1.0.0": ["baseline"] });
+    await instances.setVersionTags("acme", "bu", "1.0.0", []);
+    expect(await instances.versionTags("acme", "bu")).toEqual({});
+    await expect(instances.setVersionTags("acme", "bu", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 

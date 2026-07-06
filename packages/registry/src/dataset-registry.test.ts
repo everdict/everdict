@@ -148,6 +148,43 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
     expect((await r.get("acme", "d")).version).toBe("1.0.0");
   });
 
+  it("setVersionTags 가 버전에 자유 라벨을 붙이고 versionTags/list 로 노출한다(전체 교체; 빈 배열 = 제거)", async () => {
+    // Given: 두 버전
+    const r = new InMemoryDatasetRegistry();
+    await r.register("acme", ds("d", "1.0.0"));
+    await r.register("acme", ds("d", "1.1.0"));
+    // When: 한 버전에 태그를 붙이면
+    await r.setVersionTags("acme", "d", "1.0.0", ["baseline", "gpt-5 실험"]);
+    // Then: versionTags 와 list 메타에 그 버전만 노출(내용 tags 와 별개)
+    expect(await r.versionTags("acme", "d")).toEqual({ "1.0.0": ["baseline", "gpt-5 실험"] });
+    const entry = (await r.list("acme")).find((x) => x.id === "d");
+    expect(entry?.versionTags).toEqual({ "1.0.0": ["baseline", "gpt-5 실험"] });
+    // And: 빈 배열로 교체하면 제거되고 필드 자체가 사라진다
+    await r.setVersionTags("acme", "d", "1.0.0", []);
+    expect(await r.versionTags("acme", "d")).toEqual({});
+    expect((await r.list("acme")).find((x) => x.id === "d")?.versionTags).toBeUndefined();
+  });
+
+  it("태그는 내용 불변성과 무관 — 태그 후에도 같은 내용 재등록은 멱등, get 내용은 그대로", async () => {
+    const r = new InMemoryDatasetRegistry();
+    await r.register("acme", ds("d", "1.0.0"));
+    await r.setVersionTags("acme", "d", "1.0.0", ["baseline"]);
+    await r.register("acme", ds("d", "1.0.0")); // 태그가 붙어도 내용은 동일 → 멱등(Conflict 아님)
+    expect((await r.get("acme", "d", "1.0.0")).tags).toEqual([]); // 내용 tags(엔티티 분류)는 무변
+    expect(await r.versionTags("acme", "d")).toEqual({ "1.0.0": ["baseline"] });
+  });
+
+  it("setVersionTags 는 테넌트 직접 소유 살아있는 버전만 — _shared·삭제된 버전은 NotFound; 삭제되면 read 에서도 빠진다", async () => {
+    const r = new InMemoryDatasetRegistry();
+    await r.register(SHARED_TENANT, ds("bench", "1.0.0"));
+    await expect(r.setVersionTags("acme", "bench", "1.0.0", ["x"])).rejects.toBeInstanceOf(NotFoundError);
+    await r.register("acme", ds("mine", "1.0.0"), "user-1");
+    await r.setVersionTags("acme", "mine", "1.0.0", ["baseline"]);
+    await r.softDelete("acme", "mine", "1.0.0");
+    expect(await r.versionTags("acme", "mine")).toEqual({}); // tombstone 은 태그 read 에서도 제외
+    await expect(r.setVersionTags("acme", "mine", "1.0.0", ["y"])).rejects.toBeInstanceOf(NotFoundError);
+  });
+
   it("softDelete/creatorOf 는 이 테넌트 직접 소유만 — _shared·타 테넌트는 NotFound(폴백 없음)", async () => {
     const r = new InMemoryDatasetRegistry();
     await r.register(SHARED_TENANT, ds("bench", "1.0.0"), "sys");
@@ -174,7 +211,7 @@ describe("loadDatasetDir", () => {
   });
 });
 
-// 가짜 SqlClient — tenant-aware assay_datasets 흉내(created_by + deleted_at tombstone 포함).
+// 가짜 SqlClient — tenant-aware assay_datasets 흉내(created_by + deleted_at tombstone + tags[버전 태그] 포함).
 interface FakeRow {
   tenant: string;
   id: string;
@@ -183,6 +220,7 @@ interface FakeRow {
   created_at: string;
   created_by: string | null;
   deleted_at: number | null;
+  tags: unknown;
 }
 function fakePg(): SqlClient {
   const rows: FakeRow[] = [];
@@ -233,10 +271,10 @@ function fakePg(): SqlClient {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1] && live(x));
         return { rows: (r ? [{}] : []) as R[] };
       }
-      // summarize — 살아있는 버전의 version/dataset/created_at/created_by(list 메타 요약용).
+      // summarize — 살아있는 버전의 version/dataset/created_at/created_by/tags(list 메타 요약용).
       if (
         t.startsWith(
-          "SELECT version, dataset, created_at, created_by FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+          "SELECT version, dataset, created_at, created_by, tags FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
         )
       ) {
         return {
@@ -247,8 +285,30 @@ function fakePg(): SqlClient {
               dataset: x.dataset,
               created_at: x.created_at,
               created_by: x.created_by,
+              tags: x.tags,
             })) as R[],
         };
+      }
+      // versionTags — 살아있는 버전의 (version, tags) 맵 소스.
+      if (
+        t.startsWith("SELECT version, tags FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL")
+      ) {
+        return {
+          rows: rows
+            .filter((x) => x.tenant === p[0] && x.id === p[1] && live(x))
+            .map((x) => ({ version: x.version, tags: x.tags })) as R[],
+        };
+      }
+      // setVersionTags — 살아있는 직접 소유 버전만, RETURNING 으로 적중 여부 판정.
+      if (
+        t.startsWith(
+          "UPDATE assay_datasets SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
+        )
+      ) {
+        const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
+        if (!r) return { rows: [] };
+        r.tags = JSON.parse(p[3] as string);
+        return { rows: [{ version: r.version }] as R[] };
       }
       // ownerVersions — 살아있는 버전만.
       if (t.startsWith("SELECT version FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL")) {
@@ -293,6 +353,7 @@ function fakePg(): SqlClient {
           created_at: new Date(base + clock++ * 1000).toISOString(),
           created_by: (p[4] as string | null) ?? null,
           deleted_at: null,
+          tags: [], // 마이그레이션 0047 기본값
         });
         return { rows: [] };
       }
@@ -351,5 +412,17 @@ describe("PgDatasetRegistry (tenant-owned)", () => {
     });
     // fake 는 INSERT 마다 created_at 을 1초씩 올린다 → 수정 시각 > 생성 시각.
     expect(new Date(entry?.updatedAt ?? 0).getTime()).toBeGreaterThan(new Date(entry?.createdAt ?? 0).getTime());
+  });
+
+  it("setVersionTags(버전 태그) — versionTags/list 로 노출, 빈 배열 = 제거, 없는 버전은 NotFound", async () => {
+    const r = new PgDatasetRegistry(fakePg());
+    await r.register("acme", ds("d", "1.0.0"));
+    await r.register("acme", ds("d", "1.1.0"));
+    await r.setVersionTags("acme", "d", "1.0.0", ["baseline"]);
+    expect(await r.versionTags("acme", "d")).toEqual({ "1.0.0": ["baseline"] });
+    expect((await r.list("acme")).find((x) => x.id === "d")?.versionTags).toEqual({ "1.0.0": ["baseline"] });
+    await r.setVersionTags("acme", "d", "1.0.0", []);
+    expect(await r.versionTags("acme", "d")).toEqual({});
+    await expect(r.setVersionTags("acme", "d", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);
   });
 });

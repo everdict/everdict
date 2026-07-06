@@ -16,6 +16,9 @@ export interface DatasetListEntry {
   createdBy?: string; // 최초 등록 버전의 생성자 subject(시드/_shared 는 없음)
   createdAt?: string; // 최초 버전이 등록된 시각(ISO)
   updatedAt?: string; // 가장 최근 버전이 등록된 시각(ISO)
+  // 버전 태그 — 버전 → 자유 라벨(태그 있는 버전만). 내용의 tags(엔티티 분류)와 달리 등록 후에도 편집되는
+  // 레지스트리 메타(버전을 번호만으로 분간하기 어려울 때 붙인다).
+  versionTags?: Record<string, string[]>;
 }
 
 // 데이터셋 버전 SSOT — (tenant, id, version) → Dataset. 버전 불변. "latest" 는 semver/등록순 최신.
@@ -33,6 +36,10 @@ export interface DatasetRegistry {
   creatorOf(tenant: string, id: string, version: string): Promise<string | undefined>;
   // 소프트 삭제(tombstone) — 데이터는 보존하되 read 에서 제외(재현성 유지). 이 테넌트 직접 소유만; 없는/이미 삭제된 버전은 NotFound.
   softDelete(tenant: string, id: string, version: string): Promise<void>;
+  // 버전 태그(자유 라벨, 전체 교체) — 가변 레지스트리 메타(내용 불변성 밖). 테넌트 소유 살아있는 버전만; _shared 는 NotFound.
+  setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
+  // 버전 → 태그 맵(태그 있는 버전만). 읽기는 versions() 와 동일하게 owner 해석(_shared 폴백 포함).
+  versionTags(tenant: string, id: string): Promise<Record<string, string[]>>;
 }
 
 interface Entry {
@@ -41,6 +48,7 @@ interface Entry {
   createdAt: number; // 등록 시각(ms) — list 의 createdAt/updatedAt 메타
   createdBy?: string;
   deletedAt?: number; // tombstone — set 되면 모든 read 에서 제외(데이터는 보존)
+  tags?: string[]; // 버전 태그 — 가변 레지스트리 메타(내용 불변성 밖, createdBy 와 동급)
 }
 
 export class InMemoryDatasetRegistry implements DatasetRegistry {
@@ -142,6 +150,8 @@ export class InMemoryDatasetRegistry implements DatasetRegistry {
       );
     const earliest = live.reduce((a, b) => (a.seq <= b.seq ? a : b)); // 최초 등록 버전(생성자·생성시각)
     const newest = live.reduce((a, b) => (a.seq >= b.seq ? a : b)); // 최근 등록 버전(수정시각)
+    const versionTags: Record<string, string[]> = {};
+    for (const e of live) if (e.tags !== undefined && e.tags.length > 0) versionTags[e.dataset.version] = e.tags;
     return {
       id,
       owner,
@@ -154,6 +164,7 @@ export class InMemoryDatasetRegistry implements DatasetRegistry {
       ...(latest.dataset.description !== undefined ? { description: latest.dataset.description } : {}),
       ...(latest.dataset.producedBy !== undefined ? { producedBy: latest.dataset.producedBy } : {}),
       ...(earliest.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
+      ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
     };
   }
 
@@ -171,5 +182,20 @@ export class InMemoryDatasetRegistry implements DatasetRegistry {
 
   async softDelete(tenant: string, id: string, version: string): Promise<void> {
     this.ownLiveEntry(tenant, id, version).deletedAt = Date.now();
+  }
+
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    const entry = this.ownLiveEntry(tenant, id, version);
+    entry.tags = tags.length > 0 ? tags : undefined; // 빈 배열 = 제거(revive 의 deletedAt=undefined 와 동일 관용)
+  }
+
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    const owner = this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const out: Record<string, string[]> = {};
+    for (const e of this.byOwner.get(owner)?.get(id)?.values() ?? []) {
+      if (e.deletedAt === undefined && e.tags !== undefined && e.tags.length > 0) out[e.dataset.version] = e.tags;
+    }
+    return out;
   }
 }

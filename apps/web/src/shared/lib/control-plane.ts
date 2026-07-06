@@ -100,6 +100,24 @@ export const controlPlane = {
   // GET /harnesses/:id — 한 하니스의 인스턴스 버전 태그 목록.
   getHarness: <T>(auth: AuthContext, id: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}`),
+  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 자유 라벨(버전 분간용). 게이트는 각 엔티티의
+  // 콘텐츠 mutation 액션(harnesses:register / datasets:write / runtimes:write) — 컨트롤플레인이 강제.
+  setHarnessVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
+    call<T>(
+      auth,
+      `/harnesses/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`,
+      { method: 'PUT', body: JSON.stringify({ tags }) }
+    ),
+  setDatasetVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
+    call<T>(auth, `/datasets/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+    }),
+  setRuntimeVersionTags: <T>(auth: AuthContext, id: string, version: string, tags: string[]) =>
+    call<T>(auth, `/runtimes/${encodeURIComponent(id)}/versions/${encodeURIComponent(version)}/tags`, {
+      method: 'PUT',
+      body: JSON.stringify({ tags }),
+    }),
   // GET /harnesses/:id/:version — resolved HarnessSpec(template + pins). 상세/도식화용.
   getHarnessSpec: <T>(auth: AuthContext, id: string, version: string) =>
     call<T>(auth, `/harnesses/${encodeURIComponent(id)}/${encodeURIComponent(version)}`),

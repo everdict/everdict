@@ -54,7 +54,7 @@ import { deleteDatasetVersion } from "./dataset-service.js";
 import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { RepinBodySchema, repinHarnessImages } from "./harness-pin-service.js";
-import { deleteHarnessVersion } from "./harness-service.js";
+import { deleteHarnessVersion, harnessVisibleTo } from "./harness-service.js";
 import type { ImageRegistryService } from "./image-registry-service.js";
 import type { MattermostCommandService } from "./mattermost-command-service.js";
 import type { MattermostService } from "./mattermost-service.js";
@@ -74,6 +74,7 @@ import {
   type ScorecardService,
   originSource,
 } from "./scorecard-service.js";
+import { VersionTagsBodySchema, setVersionTags } from "./version-tag-service.js";
 import type { ViewService } from "./view-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
@@ -839,9 +840,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const versions = await deps.harnessInstances.versions(principal.workspace, req.params.id);
       if (versions.length === 0)
         return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
-      if (!(await harnessVisibleTo(deps, principal, req.params.id)))
+      if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
         return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
-      return reply.send({ id: req.params.id, versions });
+      // versionTags: 버전 → 자유 라벨(태그 있는 버전만) — 버전 스위처/목록에서 번호를 분간하는 표시용.
+      const versionTags = await deps.harnessInstances.versionTags(principal.workspace, req.params.id);
+      return reply.send({
+        id: req.params.id,
+        versions,
+        ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
+      });
     } catch (err) {
       return sendError(reply, err);
     }
@@ -898,6 +905,34 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       );
     } catch (err) {
       return sendError(reply, err); // 권한 없음 403 / 없음 404
+    }
+  });
+
+  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 가변 메타(자유 라벨, 버전 분간용).
+  // 등록과 동일 게이트(harnesses:register, viewer+) — 협업 eval 콘텐츠 큐레이션. _shared/타 워크스페이스 버전은 404.
+  app.put<{ Params: { id: string; version: string } }>("/harnesses/:id/versions/:version/tags", async (req, reply) => {
+    if (!deps.harnessInstances)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = VersionTagsBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 — 타인에게는 존재 은닉(404, 읽기와 동일).
+      if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
+        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
+      return reply.send(
+        await setVersionTags(
+          deps.harnessInstances,
+          principal,
+          "harnesses:register",
+          req.params.id,
+          req.params.version,
+          parsed.data.tags,
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 / 없음·비소유 404
     }
   });
 
@@ -1004,6 +1039,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.send(await deleteDatasetVersion(deps.datasetRegistry, principal, req.params.id, req.params.version));
     } catch (err) {
       return sendError(reply, err); // 권한 없음 403 / 없음 404
+    }
+  });
+
+  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 가변 메타(자유 라벨, 버전 분간용).
+  // 내용의 tags(엔티티 분류)와 별개. 게이트는 datasets:write 재사용. _shared/타 워크스페이스 버전은 404.
+  app.put<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version/tags", async (req, reply) => {
+    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = VersionTagsBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await setVersionTags(
+          deps.datasetRegistry,
+          principal,
+          "datasets:write",
+          req.params.id,
+          req.params.version,
+          parsed.data.tags,
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 / 없음·비소유 404
     }
   });
 
@@ -1305,6 +1364,29 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 가변 메타(자유 라벨, 버전 분간용). judges:write 재사용.
+  app.put<{ Params: { id: string; version: string } }>("/judges/:id/versions/:version/tags", async (req, reply) => {
+    if (!deps.judgeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = VersionTagsBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await setVersionTags(
+          deps.judgeRegistry,
+          principal,
+          "judges:write",
+          req.params.id,
+          req.params.version,
+          parsed.data.tags,
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 / 없음·비소유 404
+    }
+  });
+
   // --- models (workspace-owned SSOT, 추론/판정 모델: provider + 하부 모델 + baseUrl) ---
   app.post("/models", async (req, reply) => {
     if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
@@ -1469,6 +1551,29 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.send(await deps.runtimeRegistry.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
       return sendError(reply, err);
+    }
+  });
+
+  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 가변 메타(자유 라벨, 버전 분간용). runtimes:write 재사용.
+  app.put<{ Params: { id: string; version: string } }>("/runtimes/:id/versions/:version/tags", async (req, reply) => {
+    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const parsed = VersionTagsBodySchema.safeParse(req.body);
+    if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
+    try {
+      return reply.send(
+        await setVersionTags(
+          deps.runtimeRegistry,
+          principal,
+          "runtimes:write",
+          req.params.id,
+          req.params.version,
+          parsed.data.tags,
+        ),
+      );
+    } catch (err) {
+      return sendError(reply, err); // 권한 없음 403 / 없음·비소유 404
     }
   });
 
@@ -2847,19 +2952,6 @@ async function harnessImageWarnings(
     );
   } catch {
     return [];
-  }
-}
-
-// 비공개(개인 시크릿 참조) 하니스는 createdBy 만 볼 수 있다 — 최신 버전을 resolve 해 판정.
-// resolve 실패는 가시성 판단 불가로 보고 막지 않는다(호출부의 다른 404 경로가 처리).
-async function harnessVisibleTo(deps: ServerDeps, principal: Principal, id: string): Promise<boolean> {
-  if (!deps.harnessInstances) return true;
-  try {
-    const resolved = await deps.harnessInstances.get(principal.workspace, id);
-    if (!referencesUserSecret(resolved)) return true;
-    return (await deps.harnessInstances.creatorOf(principal.workspace, id)) === principal.subject;
-  } catch {
-    return true;
   }
 }
 

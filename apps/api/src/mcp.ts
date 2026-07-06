@@ -32,7 +32,7 @@ import { deleteDatasetVersion } from "./dataset-service.js";
 import type { GithubAppService } from "./github-app-service.js";
 import { installGithubWorkspaceRunner } from "./github-runner-install.js";
 import { repinHarnessImages } from "./harness-pin-service.js";
-import { deleteHarnessVersion } from "./harness-service.js";
+import { deleteHarnessVersion, harnessVisibleTo } from "./harness-service.js";
 import type { ImageRegistryService } from "./image-registry-service.js";
 import type { MattermostService } from "./mattermost-service.js";
 import type { MembershipService } from "./membership-service.js";
@@ -50,6 +50,7 @@ import {
   type ScorecardService,
   originSource,
 } from "./scorecard-service.js";
+import { setVersionTags } from "./version-tag-service.js";
 import type { UpdateViewInput, ViewService } from "./view-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
@@ -272,6 +273,25 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
 
     server.registerTool(
+      "set_harness_version_tags",
+      {
+        description:
+          "하니스 버전의 태그 전체 교체(빈 배열 = 모두 제거) — 버전을 번호만으로 분간하기 어려울 때 붙이는 자유 라벨(예: baseline, gpt-5 실험). 스펙 밖 가변 메타라 버전 불변성과 무관하며 등록 후에도 편집 가능. 등록과 동일 게이트(harnesses:register). _shared/타 워크스페이스 버전은 NOT_FOUND.",
+        inputSchema: {
+          id: z.string(),
+          version: z.string().describe("정확한 인스턴스 버전(latest 불가)"),
+          tags: z.array(z.string()).describe("이 버전의 태그 전체(각 60자·버전당 20개 이하; 교체 의미)"),
+        },
+      },
+      ({ id, version, tags }) =>
+        plain(async () => {
+          // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 — 타인에게는 존재 은닉(HTTP 라우트와 동일).
+          if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: 하니스를 찾을 수 없습니다.");
+          return ok(await setVersionTags(instances, principal, "harnesses:register", id, version, tags));
+        }),
+    );
+
+    server.registerTool(
       "register_harness",
       {
         description:
@@ -440,6 +460,21 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ id, version }) => plain(async () => ok(await deleteDatasetVersion(datasets, principal, id, version))),
     );
+
+    server.registerTool(
+      "set_dataset_version_tags",
+      {
+        description:
+          "데이터셋 버전의 태그 전체 교체(빈 배열 = 모두 제거) — 버전 분간용 자유 라벨. 내용(Dataset.tags, 엔티티 분류)과 별개인 스펙 밖 가변 메타라 버전 불변성과 무관. 게이트: datasets:write. _shared/타 워크스페이스 버전은 NOT_FOUND.",
+        inputSchema: {
+          id: z.string().describe("데이터셋 id"),
+          version: z.string().describe("정확한 버전(latest 불가)"),
+          tags: z.array(z.string()).describe("이 버전의 태그 전체(각 60자·버전당 20개 이하; 교체 의미)"),
+        },
+      },
+      ({ id, version, tags }) =>
+        plain(async () => ok(await setVersionTags(datasets, principal, "datasets:write", id, version, tags))),
+    );
   }
 
   if (deps.judgeRegistry) {
@@ -457,6 +492,21 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
       ({ id, version }) => run(principal, "judges:read", async () => ok(await judges.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "set_judge_version_tags",
+      {
+        description:
+          "judge 버전의 태그 전체 교체(빈 배열 = 모두 제거) — 버전 분간용 자유 라벨(스펙 밖 가변 메타, 불변성 무관). 게이트: judges:write. _shared/타 워크스페이스 버전은 NOT_FOUND.",
+        inputSchema: {
+          id: z.string(),
+          version: z.string().describe("정확한 버전(latest 불가)"),
+          tags: z.array(z.string()).describe("이 버전의 태그 전체(각 60자·버전당 20개 이하; 교체 의미)"),
+        },
+      },
+      ({ id, version, tags }) =>
+        plain(async () => ok(await setVersionTags(judges, principal, "judges:write", id, version, tags))),
     );
 
     server.registerTool(
@@ -602,6 +652,21 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       },
       ({ id, version }) =>
         run(principal, "runtimes:read", async () => ok(await runtimes.get(ws, id, version ?? "latest"))),
+    );
+
+    server.registerTool(
+      "set_runtime_version_tags",
+      {
+        description:
+          "런타임 버전의 태그 전체 교체(빈 배열 = 모두 제거) — 버전 분간용 자유 라벨(스펙 밖 가변 메타, 불변성 무관). 게이트: runtimes:write. _shared/타 워크스페이스 버전은 NOT_FOUND.",
+        inputSchema: {
+          id: z.string(),
+          version: z.string().describe("정확한 버전(latest 불가)"),
+          tags: z.array(z.string()).describe("이 버전의 태그 전체(각 60자·버전당 20개 이하; 교체 의미)"),
+        },
+      },
+      ({ id, version, tags }) =>
+        plain(async () => ok(await setVersionTags(runtimes, principal, "runtimes:write", id, version, tags))),
     );
 
     server.registerTool(

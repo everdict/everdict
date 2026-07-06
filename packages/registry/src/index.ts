@@ -13,7 +13,7 @@ export { loadJudgeDir } from "./load-judges.js";
 export { type ModelRegistry, InMemoryModelRegistry } from "./model-registry.js";
 export { PgModelRegistry } from "./pg-model-registry.js";
 export { loadModelDir } from "./load-models.js";
-export { type RuntimeRegistry, InMemoryRuntimeRegistry } from "./runtime-registry.js";
+export { type RuntimeRegistry, type RuntimeListEntry, InMemoryRuntimeRegistry } from "./runtime-registry.js";
 export { PgRuntimeRegistry } from "./pg-runtime-registry.js";
 export { loadRuntimeDir } from "./load-runtimes.js";
 export { type BenchmarkRegistry, InMemoryBenchmarkRegistry } from "./benchmark-registry.js";

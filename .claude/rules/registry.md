@@ -24,7 +24,14 @@ infra (no secrets in the spec; `local` = dev/control-plane-host, superseded for 
   `ownVersions` (no fallback) is for conflict checks; `versions`/`get`/`list` apply the fallback. Identical for
   `HarnessRegistry` / `DatasetRegistry` / `JudgeRegistry` / `RuntimeRegistry` — add a new versioned entity by
   mirroring this, not a new model.
-- `"latest"` resolves by semver when versions parse as semver, else by registration order. Resolution is pure.
+- **Version tags are mutable metadata, NOT spec content.** Per-version free-form labels (`setVersionTags` /
+  `versionTags` on all four registries) live beside `createdBy` — outside `specsEqual`, editable after
+  registration (that's the point: label versions that already exist). Writes hit **tenant-owned live versions
+  only** (no `_shared` fallback, tombstones excluded) → `NotFound` otherwise; reads resolve owner-first like
+  `versions()`. Never move tags into the spec (that would freeze them behind immutability) and never let them
+  affect conflict/idempotency checks. Surface: `PUT /:id/versions/:version/tags` + MCP `set_*_version_tags`,
+  gated by each entity's existing content-mutation action (no new authz action); normalization (trim/dedupe/caps)
+  lives in `apps/api` `version-tag-service.ts` — one core, two transports.
 - Validate file/external specs with `HarnessSpecSchema` (`@assay/core`) at the boundary; unknown id/version →
   `NotFoundError`; `getService` narrows to `ServiceHarnessSpec` (throws on process).
 - Keep registry impls interchangeable (in-memory / file loader / Postgres) behind the one **async** interface.

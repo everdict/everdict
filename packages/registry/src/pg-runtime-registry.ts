@@ -1,7 +1,7 @@
 import { ConflictError, NotFoundError, type RuntimeSpec, RuntimeSpecSchema } from "@assay/core";
 import type { SqlClient } from "@assay/db";
-import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
-import type { RuntimeRegistry } from "./runtime-registry.js";
+import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
+import type { RuntimeListEntry, RuntimeRegistry } from "./runtime-registry.js";
 
 interface RuntimeRow {
   runtime: unknown;
@@ -85,15 +85,46 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
     return RuntimeSpecSchema.parse((res.rows[0] as RuntimeRow).runtime);
   }
 
-  async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
+  async list(tenant: string): Promise<RuntimeListEntry[]> {
     const r = await this.client.query<{ id: string }>(
       "SELECT DISTINCT id FROM assay_runtimes WHERE tenant = $1 OR tenant = $2 ORDER BY id",
       [tenant, SHARED_TENANT],
     );
-    const out: Array<{ id: string; versions: string[]; owner: string }> = [];
+    const out: RuntimeListEntry[] = [];
     for (const { id } of r.rows) {
       const owner = (await this.ownerOf(tenant, id)) as string;
-      out.push({ id, owner, versions: await this.ownerVersions(owner, id) });
+      const versionTags = await this.versionTags(owner, id);
+      out.push({
+        id,
+        owner,
+        versions: await this.ownerVersions(owner, id),
+        ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
+      });
+    }
+    return out;
+  }
+
+  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 버전만(_shared 는 NotFound). 마이그레이션 0047.
+  async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
+    const r = await this.client.query<{ version: string }>(
+      "UPDATE assay_runtimes SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+      [tenant, id, version, JSON.stringify(tags)],
+    );
+    if (r.rows.length === 0)
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `runtime ${id}@${version} 가 없습니다.`);
+  }
+
+  async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
+    const owner = await this.ownerOf(tenant, id);
+    if (!owner) return {};
+    const r = await this.client.query<{ version: string; tags: unknown }>(
+      "SELECT version, tags FROM assay_runtimes WHERE tenant = $1 AND id = $2",
+      [owner, id],
+    );
+    const out: Record<string, string[]> = {};
+    for (const row of r.rows) {
+      const rowTags = parseVersionTags(row.tags);
+      if (rowTags.length > 0) out[row.version] = rowTags;
     }
     return out;
   }
