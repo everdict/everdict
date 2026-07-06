@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 
 import type { Invite } from '@/entities/member'
+import { copyText } from '@/shared/lib/clipboard'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
@@ -63,18 +64,15 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
       <div className="space-y-1">
         <h3 className="text-[13px] font-[560] text-foreground">초대</h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          초대 링크를 만들어 보내면, 받은 사람이 로그인하고 수락해 이 워크스페이스에 참여해요. 링크는{' '}
-          <span className="font-[510] text-foreground">한 번만</span> 쓸 수 있고, 만료 시간을 정할 수
-          있어요.
+          초대 링크를 만들어 보내면, 받은 사람이 로그인하고 수락해 이 워크스페이스에 참여해요.
+          링크는 <span className="font-[510] text-foreground">한 번만</span> 쓸 수 있고, 만료 시간을
+          정할 수 있어요.
         </p>
       </div>
 
       {/* 방금 발급된 링크 — 1회 노출 */}
       {link && (
-        <Callout
-          tone="warning"
-          hint="이 링크는 한 번만 보여요. 지금 복사해서 전달하세요."
-        >
+        <Callout tone="warning" hint="이 링크는 한 번만 보여요. 지금 복사해서 전달하세요.">
           <div className="flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate font-mono text-xs">{link}</code>
             <Button
@@ -82,8 +80,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
               variant="secondary"
               size="sm"
               onClick={() => {
-                void navigator.clipboard?.writeText(link)
-                setCopied(true)
+                void copyText(link).then((ok) => ok && setCopied(true))
               }}
             >
               {copied ? '복사됨' : '링크 복사'}

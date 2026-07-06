@@ -1,6 +1,7 @@
 import type { Metadata } from 'next'
 
 import { QueryProvider } from '@/shared/providers/query-provider'
+import { Toaster } from '@/shared/ui/toaster'
 
 import './globals.css'
 
@@ -22,6 +23,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-background text-foreground antialiased">
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
         <QueryProvider>{children}</QueryProvider>
+        <Toaster />
       </body>
     </html>
   )

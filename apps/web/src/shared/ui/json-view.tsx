@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from 'react'
 import { Check, ChevronRight, Copy } from 'lucide-react'
 
+import { copyText } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
 
 // 구문강조 + 접기 가능한 JSON 트리. 코어 패키지 무의존(웹은 HTTP 미러만) — 임의 JSON 값을 그대로 도식 없이 검토.
@@ -123,12 +124,10 @@ export function JsonView({ value, className }: { value: unknown; className?: str
   const text = JSON.stringify(value, null, 2)
 
   async function copy() {
-    try {
-      await navigator.clipboard.writeText(text)
+    // http(비-secure) 컨텍스트에선 navigator.clipboard 가 없어 copyText 가 execCommand 로 폴백한다.
+    if (await copyText(text)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
-    } catch {
-      // 클립보드 접근 거부 — 무시(읽기 전용 뷰)
     }
   }
 

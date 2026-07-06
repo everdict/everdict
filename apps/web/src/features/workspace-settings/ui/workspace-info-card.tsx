@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Check, Copy, Loader2, Trash2, Upload } from 'lucide-react'
 
 import { workspaceUrlBase } from '@/entities/workspace'
+import { copyText } from '@/shared/lib/clipboard'
 import { fileToImageDataUrl, MAX_IMAGE_UPLOAD_BYTES } from '@/shared/lib/image-resize'
 import { cn } from '@/shared/lib/utils'
 import { Button, buttonVariants } from '@/shared/ui/button'
@@ -97,11 +98,11 @@ export function WorkspaceInfoCard({
   }
 
   async function onCopy() {
-    try {
-      await navigator.clipboard.writeText(url)
+    // http(비-secure) 컨텍스트 폴백 포함 — navigator.clipboard 미존재 시 execCommand.
+    if (await copyText(url)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
-    } catch {
+    } else {
       setError('복사하지 못했어요.')
     }
   }

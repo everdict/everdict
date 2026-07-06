@@ -4,6 +4,7 @@ import { useEffect, useState, useTransition } from 'react'
 import { Check, Copy, KeyRound, Plus, Trash2 } from 'lucide-react'
 
 import type { ApiKeyMeta, ApiKeyScope } from '@/entities/api-key'
+import { copyText } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Button } from '@/shared/ui/button'
@@ -215,8 +216,8 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
                   size="sm"
                   className="shrink-0"
                   onClick={() => {
-                    void navigator.clipboard?.writeText(issued)
-                    setCopied(true)
+                    // http(비-secure) 컨텍스트 폴백 포함 — navigator.clipboard 미존재 시 execCommand.
+                    void copyText(issued).then((ok) => ok && setCopied(true))
                   }}
                 >
                   {copied ? <Check /> : <Copy />}
