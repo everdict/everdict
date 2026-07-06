@@ -102,6 +102,18 @@ harness exported to an observability platform near the runtime.** Two modes, one
   grader* cannot be reconstructed control-plane-side without its Judge → explicit `skipped` score (registry
   judges — the main path — are unaffected).
 
+### D4 — verified live (real MLflow 3.14, `scripts/live/trace-collect-mlflow.mjs`)
+
+The script boots `ghcr.io/mlflow/mlflow:v3.14.0` (docker, auto-cleaned; or `MLFLOW_ENDPOINT`), seeds
+"instrumented-agent" traces via `MlflowTraceSink` (create + OTLP spans — the sink-e2e-verified path), then:
+**S1** `collect="job"` — real `runCase`+`CommandHarness`+`LocalDriver`; the command sees the injected
+`ASSAY_RUN_ID` (round-trips into the git-diff snapshot) and `collectTrace(runId)` pulls the real spans
+post-release (llm_call 42/7 tokens → steps/cost derived). **S2** `collect="control-plane"` — the job returns
+only `traceRef` + ground-truth scores; `executeCase` pulls from real MLflow and grades the deferred
+steps/cost (no double-scoring). **S3** dead endpoint → soft-degrade (`error` event, ground-truth preserved).
+All PASS 2026-07-06. Correlation note: real MLflow mints trace ids, so `runId` = the platform trace id
+(pull-ingest convention); tag-search correlation stays a follow-up below.
+
 ## Follow-ups (deliberately not in this pass)
 
 - **`trace.authSecret` for control-plane collection** — deferred pulls hit the endpoint unauthenticated
@@ -111,6 +123,9 @@ harness exported to an observability platform near the runtime.** Two modes, one
   already absorb typical flush lag); add bounded retry if real platforms prove laggier.
 - **Command trace kinds beyond otel/mlflow** — langfuse/langsmith/phoenix exist in `buildTraceSource`;
   extending `CommandTraceSpec` is mechanical once someone needs it.
+- **Tag-search correlation for MLflow** — `MlflowTraceSource.fetch` resolves the id as the platform trace id;
+  platforms that mint their own ids can't equal an assay-minted `runId`. A `search-traces by tag
+  assay.run_id` mode would let a real instrumented agent correlate without the runId=trace-id convention.
 - **Per-case sink export streaming** — export after each case's judging instead of post-batch; today's export
   is one fast HTTP pass, low value until sinks dominate the tail.
 - **Durable batch orchestration on Temporal** — per-case activities give restart resilience + horizontal

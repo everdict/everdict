@@ -53,6 +53,10 @@ image/install versions.
 - **Deterministic** (`packages/harnesses/src/command.test.ts`): setup ordering; `{{task}}` shell-quoting + env
   injection (`ASSAY_RUN_ID`); `trace:none` → stdout = final assistant message (empty stdout → no events);
   exit≠0 → `error` event; `trace:otel` → pulls by run id (stdout not emitted); setup failure → error.
+- **2-phase collection live, real MLflow 3.14** (`scripts/live/trace-collect-mlflow.mjs`): `collect:"job"`
+  round trip (injected `ASSAY_RUN_ID` → post-release pull of real spans → steps/cost derived) +
+  `collect:"control-plane"` (job returns `traceRef`; `executeCase` pulls + grades deferred observation
+  graders) + dead-endpoint soft-degrade. All PASS.
 - **Live, no key** (`scripts/live/command-harness.mjs`): a user-declared `command` spec
   (`echo … > result.txt`) dispatched through `LocalBackend` → ran in the real `LocalDriver` sandbox →
   `CaseResult` with `result.txt` in the git-diff snapshot. **Zero code, zero LLM key.**
