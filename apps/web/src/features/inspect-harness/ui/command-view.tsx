@@ -1,12 +1,12 @@
-import { ListOrdered, Radio, Settings2, Variable } from 'lucide-react'
+import { ListOrdered, Variable } from 'lucide-react'
 
 import { envValueText, type HarnessSpec } from '@/entities/harness'
 import { Card } from '@/shared/ui/card'
 
-import { CommandPipeline } from './command-pipeline'
-import { Field, Mono, SubSection } from './parts'
+import { DefRow, highlightTemplate, Mono, SubSection } from './parts'
 
-// command(선언형 CLI) 하니스 구성 — 파이프라인 도식 + setup/env/trace 상세.
+// command(선언형 CLI) 하니스 — 핵심 값(명령·모델·이미지·작업경로·트레이스)을 한 카드의 값 리스트로,
+// 그 아래 Setup/환경변수는 있을 때만. 파이프라인 도식·중복 그리드는 제거(깔끔한 스캔 뷰).
 export function CommandView({ spec }: { spec: HarnessSpec }) {
   const setup = spec.setup ?? []
   const env = spec.env ?? {}
@@ -14,23 +14,35 @@ export function CommandView({ spec }: { spec: HarnessSpec }) {
   const trace = spec.trace
 
   return (
-    <div className="space-y-7">
-      <CommandPipeline spec={spec} />
-
-      <Card>
-        <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3">
-          <Field label="이미지" value={spec.image ?? '기본'} />
-          <Field label="작업 디렉터리" value={spec.workDir ?? 'work'} />
-          <Field label="모델" value={spec.model ?? '—'} />
-        </dl>
+    <div className="space-y-6">
+      {/* 화면이 넓을수록 열을 늘려 값을 넉넉히 펼친다. 명령은 길어서 전체 폭(col-span-full). */}
+      <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
+        {spec.command && (
+          <DefRow label="명령" wide>
+            <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-[12.5px] leading-relaxed text-foreground">
+              <span className="select-none text-faint">$ </span>
+              {highlightTemplate(spec.command)}
+            </pre>
+          </DefRow>
+        )}
+        <DefRow label="모델" mono>
+          {spec.model ?? '—'}
+        </DefRow>
+        <DefRow label="이미지" mono>
+          {spec.image ?? '기본 에이전트 이미지'}
+        </DefRow>
+        <DefRow label="작업 경로" mono>
+          {spec.workDir ?? 'work'}
+        </DefRow>
+        {trace && trace.kind !== 'none' && (
+          <DefRow label="트레이스" mono>
+            {trace.kind} · pull{trace.endpoint ? ` · ${trace.endpoint}` : ''}
+          </DefRow>
+        )}
       </Card>
 
-      <SubSection title="Setup" icon={<ListOrdered className="size-4" />} count={setup.length}>
-        {setup.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">
-            설치 단계 없음 — 이미지에 도구가 이미 포함.
-          </p>
-        ) : (
+      {setup.length > 0 && (
+        <SubSection title="Setup" icon={<ListOrdered className="size-4" />} count={setup.length}>
           <ol className="space-y-2">
             {setup.map((step, i) => (
               <li
@@ -46,8 +58,8 @@ export function CommandView({ spec }: { spec: HarnessSpec }) {
               </li>
             ))}
           </ol>
-        )}
-      </SubSection>
+        </SubSection>
+      )}
 
       {envKeys.length > 0 && (
         <SubSection title="환경변수" icon={<Variable className="size-4" />} count={envKeys.length}>
@@ -61,21 +73,6 @@ export function CommandView({ spec }: { spec: HarnessSpec }) {
           </Card>
         </SubSection>
       )}
-
-      <SubSection title="트레이스 추출" icon={<Radio className="size-4" />}>
-        <Card>
-          <dl className="grid grid-cols-2 gap-4 p-4">
-            <Field label="종류" value={trace?.kind ?? 'none'} />
-            {trace?.endpoint && <Field label="엔드포인트" value={trace.endpoint} />}
-          </dl>
-          {(!trace || trace.kind === 'none') && (
-            <p className="border-t border-border px-4 py-2.5 text-[12px] text-muted-foreground">
-              <Settings2 className="mr-1 inline size-3.5 align-text-bottom" />
-              트레이스 없음 — 결과(파일 diff/종료코드)만으로 채점.
-            </p>
-          )}
-        </Card>
-      </SubSection>
     </div>
   )
 }

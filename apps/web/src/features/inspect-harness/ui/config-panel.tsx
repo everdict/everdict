@@ -8,7 +8,7 @@ import {
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
 
-import { Field, Mono, SubSection } from './parts'
+import { Mono, SubSection } from './parts'
 
 // 구성(Config) — resolve 전 원본: 어떤 템플릿(대분류) 위에서 슬롯마다 어떤 값을 핀했는가.
 // resolved "구성" 탭(병합된 최종 스펙)과 달리, 여기 값들이 곧 "새 버전 만들기"의 편집 대상이다.
@@ -29,34 +29,23 @@ export function ConfigPanel({
           ? template.model
           : undefined
       : undefined
+  // 값이 하나라도 있는 슬롯이 있나 — 전부 미설정이면 Pins 섹션 자체를 숨긴다(빈 섹션 노출 금지).
+  const anyPinned = slots.some((slot) => instance.pins[slot] ?? defaultFor(slot))
 
   return (
     <div className="space-y-7">
+      {/* kind·category·버전은 상단 메타 스트립에 있으니 여기선 이 인스턴스가 올라탄 템플릿 참조만. */}
       <SubSection title="템플릿 (대분류)" icon={<Layers className="size-4" />}>
-        <Card>
-          <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-            <Field
-              label="참조"
-              value={
-                <Mono>
-                  {template.id}@{template.version}
-                </Mono>
-              }
-              mono={false}
-            />
-            <Field label="kind" value={template.kind} />
-            <Field label="category" value={template.category} />
-            <Field label="구조 버전" value={template.version} />
-          </dl>
+        <Card className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-[13px]">
+          <span className="text-muted-foreground">참조</span>
+          <Mono>
+            {template.id}@{template.version}
+          </Mono>
         </Card>
       </SubSection>
 
-      <SubSection title="Pins (슬롯 → 값)" icon={<Pin className="size-4" />} count={slots.length}>
-        {slots.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">
-            핀할 슬롯이 없습니다 (process 템플릿).
-          </p>
-        ) : (
+      {slots.length > 0 && anyPinned && (
+        <SubSection title="Pins (슬롯 → 값)" icon={<Pin className="size-4" />} count={slots.length}>
           <Card className="divide-y divide-border">
             {slots.map((slot) => {
               const pinned = instance.pins[slot]
@@ -85,8 +74,8 @@ export function ConfigPanel({
               )
             })}
           </Card>
-        )}
-      </SubSection>
+        </SubSection>
+      )}
 
       {instance.overrides && Object.keys(instance.overrides).length > 0 && (
         <SubSection title="변주 (overrides)" icon={<SlidersHorizontal className="size-4" />}>
