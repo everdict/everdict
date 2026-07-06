@@ -1,8 +1,8 @@
 export {
   traceSinkConfigSchema,
   traceSinkKindSchema,
-  traceSinkResponseSchema,
+  traceSinksResponseSchema,
   type TraceSinkConfig,
   type TraceSinkKind,
-  type TraceSinkResponse,
+  type TraceSinksResponse,
 } from './model/schema'

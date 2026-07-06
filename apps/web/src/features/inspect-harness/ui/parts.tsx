@@ -18,7 +18,7 @@ export function ImageClassBadge({
   registry,
 }: {
   image: string
-  registry?: ImageRegistryCoordinates
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 — 어느 하나 매칭이면 workspace
 }) {
   const cls = classifyImageRef(image, registry)
   if (cls === 'external') return null

@@ -7,42 +7,74 @@ import type { ImageRegistryConfig } from '@/entities/image-registry'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Input, Label } from '@/shared/ui/input'
+import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { removeImageRegistryAction, setImageRegistryAction } from '../api/manage-image-registry'
+import { removeImageRegistryAction, upsertImageRegistryAction } from '../api/manage-image-registry'
 
-// 워크스페이스 이미지 레지스트리(BYO) — 관리자가 한 번 등록하면 하니스 이미지의 출처 분류 기준이 되고,
-// 멤버는 assay image push 로 로컬 빌드 이미지를 여기로 발행한다. pull/push 토큰 값은 워크스페이스 시크릿
-// 참조(이름)로만 저장. 두 피커가 목록을 공유하므로 인라인 생성분은 created 로 합류시킨다.
+// 워크스페이스 이미지 레지스트리(BYO, 복수) — 관리자가 등록하면 하니스 이미지의 출처 분류 기준이 되고,
+// 멤버는 assay image push 로 로컬 빌드 이미지를 여기로 발행한다(여러 개면 --registry <이름> 으로 선택).
+// pull/push 토큰 값은 워크스페이스 시크릿 참조(이름)로만 저장. 두 피커가 목록을 공유하므로 인라인
+// 생성분은 created 로 합류시킨다.
 export function ImageRegistryManager({
-  config,
+  registries,
   canWrite,
   secretNames,
 }: {
-  config?: ImageRegistryConfig
+  registries: ImageRegistryConfig[]
   canWrite: boolean
   secretNames: string[]
 }) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [missingSecrets, setMissingSecrets] = useState<string[]>()
-  const [host, setHost] = useState(config?.host ?? '')
-  const [namespace, setNamespace] = useState(config?.namespace ?? '')
-  const [username, setUsername] = useState(config?.username ?? '')
-  const [pullName, setPullName] = useState(config?.pullSecretName ?? '')
-  const [pushName, setPushName] = useState(config?.pushSecretName ?? '')
+  // 편집 대상 name — 행 클릭으로 폼에 프리필(저장은 name 기준 upsert). undefined = 새 레지스트리 추가.
+  const [editing, setEditing] = useState<string>()
+  const [name, setName] = useState('')
+  const [host, setHost] = useState('')
+  const [namespace, setNamespace] = useState('')
+  const [username, setUsername] = useState('')
+  const [pullName, setPullName] = useState('')
+  const [pushName, setPushName] = useState('')
   const [created, setCreated] = useState<string[]>([])
   const names = [...new Set([...secretNames, ...created])]
+
+  function resetForm() {
+    setEditing(undefined)
+    setName('')
+    setHost('')
+    setNamespace('')
+    setUsername('')
+    setPullName('')
+    setPushName('')
+  }
+
+  function startEdit(r: ImageRegistryConfig) {
+    setError(undefined)
+    setMissingSecrets(undefined)
+    setEditing(r.name)
+    setName(r.name)
+    setHost(r.host)
+    setNamespace(r.namespace ?? '')
+    setUsername(r.username ?? '')
+    setPullName(r.pullSecretName ?? '')
+    setPushName(r.pushSecretName ?? '')
+  }
 
   function onSave() {
     setError(undefined)
     setMissingSecrets(undefined)
+    if (!name.trim()) {
+      setError('레지스트리 이름을 입력해주세요.')
+      return
+    }
     if (!host.trim()) {
       setError('레지스트리 호스트를 입력해주세요.')
       return
     }
     startTransition(async () => {
-      const r = await setImageRegistryAction({
+      const r = await upsertImageRegistryAction({
+        name: name.trim(),
         host: host.trim(),
         ...(namespace.trim() ? { namespace: namespace.trim() } : {}),
         ...(username.trim() ? { username: username.trim() } : {}),
@@ -50,25 +82,22 @@ export function ImageRegistryManager({
         ...(pushName.trim() ? { pushSecretName: pushName.trim() } : {}),
       })
       if (!r.ok) setError(r.error)
-      else setMissingSecrets(r.missingSecrets)
-    })
-  }
-  function onRemove() {
-    setError(undefined)
-    setMissingSecrets(undefined)
-    startTransition(async () => {
-      const r = await removeImageRegistryAction()
-      if (r.ok) {
-        setHost('')
-        setNamespace('')
-        setUsername('')
-        setPullName('')
-        setPushName('')
-      } else setError(r.error)
+      else {
+        setMissingSecrets(r.missingSecrets)
+        resetForm()
+      }
     })
   }
 
-  const prefix = config?.imagePrefix
+  function onRemove(target: string) {
+    setError(undefined)
+    setMissingSecrets(undefined)
+    startTransition(async () => {
+      const r = await removeImageRegistryAction(target)
+      if (!r.ok) setError(r.error)
+      else if (editing === target) resetForm()
+    })
+  }
 
   return (
     <div className="space-y-3">
@@ -81,20 +110,95 @@ export function ImageRegistryManager({
                 팀 이미지 레지스트리(GHCR·Harbor 등)를 등록하면 하니스 이미지가 로컬 빌드인지
                 워크스페이스 이미지인지 구분돼요. 멤버는{' '}
                 <span className="font-mono">assay image push</span> 로 로컬 빌드 이미지를 여기로
-                발행해요. 토큰은 워크스페이스 시크릿에서 고르거나 “새로”로 바로 저장해요 — 여기엔 그
-                이름만 남아요.
+                발행해요 — 여러 개면 <span className="font-mono">--registry &lt;이름&gt;</span> 으로
+                고르고, 1개뿐이면 생략해도 돼요. 토큰은 워크스페이스 시크릿에서 고르거나 “새로”로
+                바로 저장해요 — 여기엔 그 이름만 남아요.
               </>
             }
           />
         </h3>
         <p className="text-[13px] leading-relaxed text-muted-foreground">
-          워크스페이스 단위로 한 번 등록하면 이미지 출처 분류와 발행에 쓰여요.
+          워크스페이스 단위로 등록하면 이미지 출처 분류와 발행에 쓰여요.
         </p>
       </div>
 
-      {canWrite ? (
+      {registries.length === 0 ? (
+        <p className="text-[13px] text-muted-foreground">아직 등록된 이미지 레지스트리가 없어요.</p>
+      ) : (
+        <SettingsList>
+          {registries.map((r) => (
+            <SettingsRow
+              key={r.name}
+              label={
+                <span className="inline-flex items-center gap-1.5">
+                  {r.name}
+                  <code className="rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
+                    {r.host}
+                    {r.namespace ? `/${r.namespace}` : ''}
+                  </code>
+                </span>
+              }
+              hint={
+                <span className="break-all font-mono text-[11.5px]">
+                  {r.imagePrefix}&lt;이미지&gt;:&lt;태그&gt;
+                </span>
+              }
+            >
+              {canWrite && (
+                <>
+                  <button
+                    type="button"
+                    className="text-[12px] font-[510] text-link hover:text-foreground"
+                    disabled={pending}
+                    onClick={() => startEdit(r)}
+                  >
+                    편집
+                  </button>
+                  <button
+                    type="button"
+                    className="text-[12px] font-[510] text-destructive hover:underline"
+                    disabled={pending}
+                    onClick={() => onRemove(r.name)}
+                  >
+                    삭제
+                  </button>
+                </>
+              )}
+            </SettingsRow>
+          ))}
+        </SettingsList>
+      )}
+
+      {registries.length > 0 && (
+        <div className="space-y-1 rounded-md border bg-elevated px-3 py-2 text-[12px]">
+          <p className="font-[510] text-foreground">발행(push) 방법</p>
+          <p className="text-muted-foreground">
+            <code className="break-all text-foreground">
+              assay image push &lt;로컬 이미지&gt; --registry &lt;이름&gt;
+            </code>{' '}
+            — 그 레지스트리의 프리픽스 아래로 발행해요. 레지스트리가 1개뿐이면{' '}
+            <code className="break-all">--registry</code> 는 생략 가능해요.
+          </p>
+        </div>
+      )}
+
+      {canWrite && (
         <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
+          <p className="text-[12px] font-[560] text-foreground">
+            {editing ? `${editing} 수정` : '새 레지스트리 추가'}
+          </p>
           <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1">
+              <Label htmlFor="reg-name">이름</Label>
+              {/* 이름 = upsert 키 — 편집 중엔 잠가서 의도치 않은 별도 레지스트리 생성(rename≠upsert)을 막는다. */}
+              <Input
+                id="reg-name"
+                placeholder="예: team-ghcr"
+                value={name}
+                disabled={editing !== undefined}
+                onChange={(e) => setName(e.target.value)}
+              />
+            </div>
             <div className="space-y-1">
               <Label htmlFor="reg-host">레지스트리 호스트</Label>
               <Input
@@ -161,43 +265,22 @@ export function ImageRegistryManager({
             </div>
           </div>
 
-          {prefix && (
-            <div className="space-y-1 rounded-md border bg-elevated px-3 py-2 text-[12px]">
-              <p className="font-[510] text-foreground">발행 대상 프리픽스</p>
-              <p className="text-muted-foreground">
-                <code className="break-all text-foreground">
-                  {prefix}&lt;이미지&gt;:&lt;태그&gt;
-                </code>{' '}
-                — <code className="break-all">assay image push &lt;로컬 이미지&gt;</code> 가 이
-                아래로 발행해요.
-              </p>
-            </div>
-          )}
-
           <div className="flex items-center gap-3">
             <Button size="sm" disabled={pending} onClick={onSave}>
-              {pending ? '저장 중…' : config ? '갱신' : '등록'}
+              {pending ? '저장 중…' : editing ? '갱신' : '등록'}
             </Button>
-            {config && (
+            {editing && (
               <button
                 type="button"
-                className="text-[12px] font-[510] text-destructive hover:underline"
+                className="text-[12px] text-muted-foreground hover:text-foreground"
                 disabled={pending}
-                onClick={onRemove}
+                onClick={resetForm}
               >
-                해제
+                취소
               </button>
             )}
           </div>
         </div>
-      ) : config ? (
-        <p className="text-[13px] text-muted-foreground">
-          {config.imagePrefix} 레지스트리가 등록돼 있어요.
-        </p>
-      ) : (
-        <p className="text-[13px] text-muted-foreground">
-          아직 이미지 레지스트리가 등록되지 않았어요.
-        </p>
       )}
 
       {missingSecrets && missingSecrets.length > 0 && (

@@ -316,20 +316,30 @@ export const controlPlane = {
     call<T>(auth, '/workspace/mattermost', { method: 'PUT', body: JSON.stringify(body) }),
   removeMattermost: (auth: AuthContext) =>
     callVoid(auth, '/workspace/mattermost', { method: 'DELETE' }),
-  // 워크스페이스 트레이스 싱크 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow 등)에 적재.
-  // 조회 settings:read / 등록·해제 settings:write. 인증 값은 SecretStore 에만(이름 참조만 오간다).
-  getTraceSink: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-sink'),
-  setTraceSink: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/workspace/trace-sink', { method: 'PUT', body: JSON.stringify(body) }),
-  removeTraceSink: (auth: AuthContext) =>
-    callVoid(auth, '/workspace/trace-sink', { method: 'DELETE' }),
-  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
-  // 조회 harnesses:read(viewer+ — 분류 배지용) / 등록·해제 settings:write. 시크릿은 이름 참조만 오간다.
-  getImageRegistry: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registry'),
-  setImageRegistry: <T>(auth: AuthContext, body: unknown) =>
-    call<T>(auth, '/workspace/image-registry', { method: 'PUT', body: JSON.stringify(body) }),
-  removeImageRegistry: (auth: AuthContext) =>
-    callVoid(auth, '/workspace/image-registry', { method: 'DELETE' }),
+  // 워크스페이스 트레이스 싱크(복수) — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow 등)에 적재.
+  // 조회 harnesses:read(viewer+ — 하니스별 선택 표시용) / 등록(name 기준 upsert)·삭제 settings:write.
+  // 인증 값은 SecretStore 에만(이름 참조만 오간다).
+  listTraceSinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/trace-sinks'),
+  upsertTraceSink: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/trace-sinks', { method: 'PUT', body: JSON.stringify(body) }),
+  removeTraceSink: (auth: AuthContext, name: string) =>
+    callVoid(auth, `/workspace/trace-sinks/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  // 하니스별 싱크 선택(assignment) — body { sink: name | null }, null 이면 선택 해제(적재 안 함).
+  // harnesses:register(member+) — 싱크 자체(등록/삭제)는 admin, 어디에 적재할지는 하니스 소유자 몫.
+  assignHarnessTraceSink: <T>(auth: AuthContext, harnessId: string, body: unknown) =>
+    call<T>(auth, `/harnesses/${encodeURIComponent(harnessId)}/trace-sink`, {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
+  // 조회 harnesses:read(viewer+ — 분류 배지용) / 등록(name 기준 upsert)·삭제 settings:write. 시크릿은 이름 참조만 오간다.
+  listImageRegistries: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registries'),
+  upsertImageRegistry: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/image-registries', { method: 'PUT', body: JSON.stringify(body) }),
+  removeImageRegistry: (auth: AuthContext, name: string) =>
+    callVoid(auth, `/workspace/image-registries/${encodeURIComponent(name)}`, {
+      method: 'DELETE',
+    }),
   // CI repo link(레포↔하니스 슬롯 = GitHub Actions OIDC trust). 조회=harnesses:read(viewer+), 생성/삭제=settings:write(admin).
   // link 의 존재가 그 레포의 keyless CI 신뢰를 부여한다. 세 라우트 모두 현재 링크 전체({links})를 돌려준다(204 아님).
   listCiLinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/ci/links'),

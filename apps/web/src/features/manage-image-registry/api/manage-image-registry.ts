@@ -12,9 +12,10 @@ export interface ImageRegistryMutationResult {
   missingSecrets?: string[] // 참조 시크릿 부재 경고(warn-not-block) — 저장은 됐고 시크릿만 나중에
 }
 
-// 이미지 레지스트리 등록/갱신(관리자, 선언형 전체 교체). pull/push 토큰(값)은 워크스페이스 시크릿에
+// 이미지 레지스트리 등록/갱신(관리자, name 기준 upsert). pull/push 토큰(값)은 워크스페이스 시크릿에
 // 먼저 넣고 그 이름만 지정. authZ(admin=settings:write)는 컨트롤플레인이 강제.
-export async function setImageRegistryAction(input: {
+export async function upsertImageRegistryAction(input: {
+  name: string
   host: string
   namespace?: string
   username?: string
@@ -23,7 +24,9 @@ export async function setImageRegistryAction(input: {
 }): Promise<ImageRegistryMutationResult> {
   const ctx = await authContext()
   try {
-    const r = imageRegistrySetResponseSchema.parse(await controlPlane.setImageRegistry(ctx, input))
+    const r = imageRegistrySetResponseSchema.parse(
+      await controlPlane.upsertImageRegistry(ctx, input)
+    )
     revalidatePath('/[workspace]/settings')
     return { ok: true, ...(r.missingSecrets ? { missingSecrets: r.missingSecrets } : {}) }
   } catch (e) {
@@ -31,11 +34,13 @@ export async function setImageRegistryAction(input: {
   }
 }
 
-// 이미지 레지스트리 해제(관리자). 이후 분류에서 workspace 클래스는 나오지 않는다.
-export async function removeImageRegistryAction(): Promise<ImageRegistryMutationResult> {
+// 이미지 레지스트리 삭제(관리자). 이후 분류에서 그 레지스트리의 workspace 클래스는 나오지 않는다.
+export async function removeImageRegistryAction(
+  name: string
+): Promise<ImageRegistryMutationResult> {
   const ctx = await authContext()
   try {
-    await controlPlane.removeImageRegistry(ctx)
+    await controlPlane.removeImageRegistry(ctx, name)
     revalidatePath('/[workspace]/settings')
     return { ok: true }
   } catch (e) {

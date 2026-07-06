@@ -1,8 +1,8 @@
 export {
+  imageRegistriesResponseSchema,
   imageRegistryConfigSchema,
-  imageRegistryResponseSchema,
   imageRegistrySetResponseSchema,
+  type ImageRegistriesResponse,
   type ImageRegistryConfig,
-  type ImageRegistryResponse,
   type ImageRegistrySetResponse,
 } from './model/schema'

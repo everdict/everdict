@@ -6,6 +6,7 @@ import { CommentsSection } from '@/features/discuss'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
 import { HarnessDetail, RawConfigDisclosure } from '@/features/inspect-harness'
 import { CiLinkPanel } from '@/features/manage-ci-links'
+import { HarnessSinkSelect } from '@/features/manage-trace-sink'
 import { VersionTagsEditor } from '@/features/version-tags'
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { datasetsSchema } from '@/entities/dataset'
@@ -21,8 +22,9 @@ import {
   type HarnessSpec,
   type HarnessTemplateSpec,
 } from '@/entities/harness'
-import { imageRegistryResponseSchema } from '@/entities/image-registry'
+import { imageRegistriesResponseSchema } from '@/entities/image-registry'
 import { membersSchema } from '@/entities/member'
+import { traceSinksResponseSchema, type TraceSinksResponse } from '@/entities/trace-sink'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -171,19 +173,28 @@ export default async function HarnessDetailPage({
   // 버전 태그 편집 가능 여부 — 등록과 동일 게이트(harnesses:register) + 이 워크스페이스 소유일 때만
   // (_shared/first-party 는 컨트롤플레인이 404 로 거부하므로 편집 UI 자체를 숨긴다).
   const canTagVersions =
-    can(principal?.roles, 'harnesses:register') && entry !== undefined && entry.owner === currentWorkspace
+    can(principal?.roles, 'harnesses:register') &&
+    entry !== undefined &&
+    entry.owner === currentWorkspace
 
-  // 워크스페이스 이미지 레지스트리 좌표(viewer+) — 서비스/커맨드 이미지의 출처 분류 배지용. 실패해도 상세는 렌더.
-  const imageRegistry = await controlPlane
-    .getImageRegistry(ctx)
-    .then((r) => imageRegistryResponseSchema.parse(r).config)
-    .catch(() => undefined)
-  const registryCoords = imageRegistry
-    ? {
-        host: imageRegistry.host,
-        ...(imageRegistry.namespace ? { namespace: imageRegistry.namespace } : {}),
-      }
-    : undefined
+  // 워크스페이스 이미지 레지스트리 좌표(viewer+, 복수) — 서비스/커맨드 이미지의 출처 분류 배지용
+  // (어느 레지스트리든 매칭되면 workspace). 실패해도 상세는 렌더.
+  const imageRegistries = await controlPlane
+    .listImageRegistries(ctx)
+    .then((r) => imageRegistriesResponseSchema.parse(r).registries)
+    .catch(() => [])
+  const registryCoords = imageRegistries.map((r) => ({
+    host: r.host,
+    ...(r.namespace ? { namespace: r.namespace } : {}),
+  }))
+
+  // 트레이스 싱크(복수) + 이 하니스의 선택(assignment) — 채점 상세를 어느 관측 플랫폼에 적재할지.
+  // 실패해도 상세는 렌더(선택 행만 숨김).
+  const traceSinks: TraceSinksResponse = await controlPlane
+    .listTraceSinks(ctx)
+    .then((r) => traceSinksResponseSchema.parse(r))
+    .catch(() => ({ sinks: [], assignments: {} }))
+  const assignedSink: string | undefined = traceSinks.assignments[id]
 
   // CI 연동(레포 링크) — 이 하니스에 매칭된 링크 + 레포 picker 에 필요한 내 GitHub 연결 + 데이터셋 후보.
   // 셋 다 실패해도 상세는 계속 렌더(패널만 빈 상태). 저장/해제는 admin(settings:write) — 컨트롤플레인이 최종 강제.
@@ -274,18 +285,17 @@ export default async function HarnessDetailPage({
         </MetaItem>
         {/* 이 버전의 태그(자유 라벨) — 편집 불가 + 태그 없음이면 행 자체를 숨긴다(빈 섹션 노출 금지).
             _shared(first-party) 하니스는 태깅 불가(레지스트리가 404) → 소유 워크스페이스일 때만 편집 노출. */}
-        {active &&
-          (canTagVersions || (versionTags[active] ?? []).length > 0) && (
-            <MetaItem label="태그">
-              <VersionTagsEditor
-                entity="harness"
-                id={id}
-                version={active}
-                tags={versionTags[active] ?? []}
-                canEdit={canTagVersions}
-              />
-            </MetaItem>
-          )}
+        {active && (canTagVersions || (versionTags[active] ?? []).length > 0) && (
+          <MetaItem label="태그">
+            <VersionTagsEditor
+              entity="harness"
+              id={id}
+              version={active}
+              tags={versionTags[active] ?? []}
+              canEdit={canTagVersions}
+            />
+          </MetaItem>
+        )}
         {entry?.createdAt && (
           <MetaItem label="생성" title={`생성 ${fmtDateTimeFull(entry.createdAt)}`}>
             {fmtDateTime(entry.createdAt)}
@@ -300,6 +310,17 @@ export default async function HarnessDetailPage({
           {author.known && <Avatar name={author.name} url={author.avatarUrl} size="sm" />}
           <span>{author.name}</span>
         </MetaItem>
+        {/* 하니스별 트레이스 싱크 선택 — 워크스페이스에 싱크가 없고 선택도 없으면 행 자체를 숨긴다(빈 섹션 노출 금지). */}
+        {(traceSinks.sinks.length > 0 || assignedSink !== undefined) && (
+          <MetaItem label="트레이스 싱크">
+            <HarnessSinkSelect
+              harnessId={id}
+              sinks={traceSinks.sinks.map((s) => ({ name: s.name, kind: s.kind }))}
+              {...(assignedSink !== undefined ? { current: assignedSink } : {})}
+              canAssign={can(principal?.roles, 'harnesses:register')}
+            />
+          </MetaItem>
+        )}
         {entry?.private && (
           <MetaItem label="공개 범위">
             <span className="inline-flex items-center gap-1 text-[var(--color-warning)]">
@@ -317,7 +338,10 @@ export default async function HarnessDetailPage({
             이 하니스가 실제로 실행되는 설정이에요.
           </p>
         </div>
-        <HarnessDetail spec={spec} {...(registryCoords ? { registry: registryCoords } : {})} />
+        <HarnessDetail
+          spec={spec}
+          {...(registryCoords.length > 0 ? { registry: registryCoords } : {})}
+        />
         <RawConfigDisclosure {...(config ? { config } : {})} spec={spec} />
       </section>
 

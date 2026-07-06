@@ -99,6 +99,7 @@ export type ScorecardOrigin = z.infer<typeof scorecardOriginSchema>
 // 트레이스 싱크 적재 결과 — 채점 완료 후 케이스별 trace+점수를 워크스페이스 관측 플랫폼에 내보낸 기록.
 // 실패해도 스코어카드 상태와 무관(여기 status 로만 표시). 상세(get) 전용 — 목록엔 안 온다.
 export const scorecardExportSchema = z.object({
+  name: z.string().optional(), // 적재된 싱크의 등록 이름(복수 싱크 — 어느 싱크였는지)
   sink: z.enum(['mlflow', 'langfuse', 'langsmith', 'phoenix']),
   status: z.enum(['succeeded', 'partial', 'failed']),
   url: z.string().optional(), // 상위(experiment/project) 딥링크

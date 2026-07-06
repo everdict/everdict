@@ -1,9 +1,10 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 /workspace/image-registry 응답의 클라이언트 미러 — 워크스페이스 이미지 레지스트리(BYO).
+// 컨트롤플레인 /workspace/image-registries 응답의 클라이언트 미러 — 워크스페이스 이미지 레지스트리(BYO, 복수).
 // 비밀 없음: pull/pushSecretName 은 값이 아닌 SecretStore 이름 참조. imagePrefix = "host[/namespace]/"
 // (분류 배지·assay image push 대상 ref 조립용).
 export const imageRegistryConfigSchema = z.object({
+  name: z.string(), // 레지스트리 식별자 — upsert/삭제/assay image push --registry 의 키
   host: z.string(),
   namespace: z.string().optional(),
   username: z.string().optional(),
@@ -13,12 +14,13 @@ export const imageRegistryConfigSchema = z.object({
 })
 export type ImageRegistryConfig = z.infer<typeof imageRegistryConfigSchema>
 
-// GET /workspace/image-registry → { config? }; PUT → { config, missingSecrets? }(참조 시크릿 부재 경고).
-export const imageRegistryResponseSchema = z.object({
-  config: imageRegistryConfigSchema.optional(),
+// GET /workspace/image-registries → { registries }.
+export const imageRegistriesResponseSchema = z.object({
+  registries: z.array(imageRegistryConfigSchema),
 })
-export type ImageRegistryResponse = z.infer<typeof imageRegistryResponseSchema>
+export type ImageRegistriesResponse = z.infer<typeof imageRegistriesResponseSchema>
 
+// PUT /workspace/image-registries → { config, missingSecrets? }(참조 시크릿 부재 경고).
 export const imageRegistrySetResponseSchema = z.object({
   config: imageRegistryConfigSchema,
   missingSecrets: z.array(z.string()).optional(),

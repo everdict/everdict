@@ -27,16 +27,21 @@ function isLoopbackHost(host: string): boolean {
   return name === 'localhost' || name === '127.0.0.1' || name === '[::1]'
 }
 
-export function classifyImageRef(ref: string, registry?: ImageRegistryCoordinates): ImageRefClass {
+// registry — 워크스페이스 레지스트리가 복수라 배열도 받는다(어느 하나에 매칭되면 workspace).
+export function classifyImageRef(
+  ref: string,
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[]
+): ImageRefClass {
+  const registries = Array.isArray(registry) ? registry : registry ? [registry] : []
   const { host, path } = splitRef(ref.trim())
   if (host) {
     if (isLoopbackHost(host)) return 'local'
     if (
-      registry &&
-      host === registry.host &&
-      (!registry.namespace ||
-        path === registry.namespace ||
-        path.startsWith(`${registry.namespace}/`))
+      registries.some(
+        (r) =>
+          host === r.host &&
+          (!r.namespace || path === r.namespace || path.startsWith(`${r.namespace}/`))
+      )
     )
       return 'workspace'
     return 'external'

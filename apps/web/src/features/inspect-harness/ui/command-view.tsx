@@ -14,7 +14,7 @@ export function CommandView({
   registry,
 }: {
   spec: HarnessSpec
-  registry?: ImageRegistryCoordinates
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 지원
 }) {
   const setup = spec.setup ?? []
   const env = spec.env ?? {}

@@ -257,7 +257,9 @@ export default async function ScorecardDetailPage({
             <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
               트레이스 싱크
             </span>
-            <Badge tone="neutral">{record.export.sink}</Badge>
+            {/* 싱크 등록 이름(있으면) 먼저, kind 는 보조 배지로 — 이름이 없으면 kind 하나만. */}
+            <Badge tone="neutral">{record.export.name ?? record.export.sink}</Badge>
+            {record.export.name && <Badge tone="neutral">{record.export.sink}</Badge>}
             <Badge
               tone={
                 record.export.status === 'succeeded'

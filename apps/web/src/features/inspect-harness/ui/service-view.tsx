@@ -14,7 +14,7 @@ export function ServiceView({
   registry,
 }: {
   spec: HarnessSpec
-  registry?: ImageRegistryCoordinates
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 지원
 }) {
   const services = spec.services ?? []
   const deps = spec.dependencies ?? []
