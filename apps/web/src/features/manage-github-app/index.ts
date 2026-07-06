@@ -1,1 +1,1 @@
-export { GithubAppManager } from './ui/github-app-manager'
+export { GithubAppManager, type GithubAppNotice } from './ui/github-app-manager'

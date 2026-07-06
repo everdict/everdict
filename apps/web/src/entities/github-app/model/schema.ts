@@ -12,13 +12,26 @@ export const githubAppRegistrationSchema = z.object({
 })
 export type GithubAppRegistration = z.infer<typeof githubAppRegistrationSchema>
 
+// 설치가 접근을 허용받은 저장소(설치 시 GitHub 에서 고른 것) — GET /workspace/github-app 이 설치별로 동봉.
+export const githubAppRepoSchema = z.object({
+  fullName: z.string(), // "owner/name"
+  host: z.string().optional(),
+  private: z.boolean(),
+  defaultBranch: z.string(),
+  pushedAt: z.string().optional(),
+})
+export type GithubAppRepo = z.infer<typeof githubAppRepoSchema>
+
 // 워크스페이스 소유 installation(github.com + GHE). 설치된 org 당 1건.
+// repos/reposError 는 설치별 soft-fail — 조회 실패해도 설치 레코드는 보인다.
 export const githubAppInstallationSchema = z.object({
   host: z.string().optional(), // 미지정 = github.com
   installationId: z.number(),
   account: z.string(), // 설치된 org/user login
   connectedBy: z.string(),
   connectedAt: z.string(),
+  repos: z.array(githubAppRepoSchema).optional(), // 허용 저장소 목록
+  reposError: z.string().optional(), // 조회 실패 시 사람이 읽을 메시지
 })
 export type GithubAppInstallation = z.infer<typeof githubAppInstallationSchema>
 

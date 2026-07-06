@@ -2288,7 +2288,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return reply;
     try {
       gate(principal, "settings:read");
-      const view = await deps.githubAppService.list(principal.workspace);
+      // 설치 현황 + 각 설치의 허용 저장소(soft-fail) — 설정 화면이 "설치됨 + 무엇이 허용됐나"를 보여준다.
+      const view = await deps.githubAppService.viewWithRepos(principal.workspace);
       const callbackUrl = deps.githubAppService.callbackUrl(baseUrl(req)); // App Setup URL 로 등록할 값(표시용)
       return reply.send({ ...view, ...(callbackUrl !== undefined ? { callbackUrl } : {}) });
     } catch (err) {

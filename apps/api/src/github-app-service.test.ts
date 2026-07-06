@@ -292,6 +292,20 @@ describe("GithubAppService", () => {
       expect(urls.some((u) => u.startsWith("https://api.github.com/app/installations/42/access_tokens"))).toBe(true);
     });
 
+    it("viewWithRepos 는 각 설치에 허용 저장소를 동봉하고, 실패한 설치만 reposError 로 soft-fail 한다", async () => {
+      stubApiRecording([]);
+      await installBothHosts(); // github.com(42) + GHE(7) — 둘 다 account=acme-org
+      stubApiRecording(["acme-org/api"]);
+      secrets.acme = {}; // GHE App 개인키 소실 → GHE 설치의 저장소 조회만 실패해야 한다
+      const view = await svc.viewWithRepos("acme");
+      const com = view.installations.find((i) => i.host === undefined);
+      const ghe = view.installations.find((i) => i.host === "https://ghe.acme.io");
+      expect(com?.repos?.map((r) => r.fullName)).toEqual(["acme-org/api"]);
+      expect(com?.reposError).toBeUndefined();
+      expect(ghe?.repos).toBeUndefined();
+      expect(ghe?.reposError).toBeTruthy(); // 원시 GitHub/자격증명 에러 대신 사람이 읽을 상태만
+    });
+
     it("tokenForRepo 회귀: GHE git URL 은 github.com installation 으로 토큰을 발급하지 않는다(host-strict)", async () => {
       stubGithub("acme-org", "ghs_repo");
       const future = new Date(NOW.getTime() + 60_000).toISOString();

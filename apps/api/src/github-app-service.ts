@@ -39,6 +39,14 @@ export interface GithubAppView {
   installations: Installation[];
 }
 
+// 설치 현황 뷰의 installation — GitHub 이 이 설치에 허용한 저장소 목록(설치 시 고른 것)을 동봉.
+// repos 조회는 설치별 soft-fail: 한 설치의 자격증명/네트워크 문제로 나머지 설치·화면이 죽지 않는다.
+export type InstallationWithRepos = Installation & { repos?: InstallationRepo[]; reposError?: string };
+export interface GithubAppDetailView {
+  registrations: Registration[];
+  installations: InstallationWithRepos[];
+}
+
 export interface StartInstallInput {
   workspace: string;
   createdBy: string;
@@ -234,26 +242,44 @@ export class GithubAppService {
     return this.mintFor(workspace, install, { repositories: [parsed.repo], permissions: { contents: "read" } });
   }
 
+  // 한 installation 이 접근 가능한 repo 목록(설치 시 고른 것만) — GET /installation/repositories.
+  private async reposFor(workspace: string, install: Installation): Promise<InstallationRepo[]> {
+    const token = await this.mintFor(workspace, install, {}); // 제한 없음 → 설치된 repo 전부 조회
+    const body = await oauthFetchJson(`${apiBase(install.host)}/installation/repositories?per_page=100`, {
+      headers: appTokenHeaders(token),
+    });
+    return InstallationReposResponse.parse(body).repositories.map((r) => ({
+      fullName: r.full_name,
+      ...(install.host ? { host: install.host } : {}), // GHE repo 는 host 를 실어 picker/link 가 호스트를 보존
+      private: r.private,
+      defaultBranch: r.default_branch,
+      ...(r.pushed_at ? { pushedAt: r.pushed_at } : {}),
+    }));
+  }
+
   // picker — 워크스페이스 installation(들)이 접근 가능한 repo 목록(개인 연결 대체). 각 installation 의
   // GET /installation/repositories 를 합친다. 설치 시 고른 repo 만 나온다(=팀이 명시 허용한 것만).
   async listRepos(workspace: string): Promise<InstallationRepo[]> {
     const g = (await this.settings.get(workspace))?.githubApp;
     const out: InstallationRepo[] = [];
-    for (const install of g?.installations ?? []) {
-      const token = await this.mintFor(workspace, install, {}); // 제한 없음 → 설치된 repo 전부 조회
-      const body = await oauthFetchJson(`${apiBase(install.host)}/installation/repositories?per_page=100`, {
-        headers: appTokenHeaders(token),
-      });
-      for (const r of InstallationReposResponse.parse(body).repositories)
-        out.push({
-          fullName: r.full_name,
-          ...(install.host ? { host: install.host } : {}), // GHE repo 는 host 를 실어 picker/link 가 호스트를 보존
-          private: r.private,
-          defaultBranch: r.default_branch,
-          ...(r.pushed_at ? { pushedAt: r.pushed_at } : {}),
-        });
-    }
+    for (const install of g?.installations ?? []) out.push(...(await this.reposFor(workspace, install)));
     return out;
+  }
+
+  // 설치 현황 + 각 설치의 허용 저장소 — 설정 화면/에이전트가 "무엇이 설치됐고 어떤 저장소가 허용됐나"를 본다.
+  // 저장소 조회는 설치별 soft-fail(reposError): 한 설치의 자격증명/네트워크 문제로 나머지 설치·화면이 죽지 않는다.
+  async viewWithRepos(workspace: string): Promise<GithubAppDetailView> {
+    const g = (await this.settings.get(workspace))?.githubApp;
+    const installations: InstallationWithRepos[] = [];
+    for (const install of g?.installations ?? []) {
+      try {
+        installations.push({ ...install, repos: await this.reposFor(workspace, install) });
+      } catch {
+        // 원시 GitHub 에러를 화면으로 흘리지 않는다 — "조회 실패" 상태만 표시(설치 레코드 자체는 보인다).
+        installations.push({ ...install, reposError: "저장소 목록을 불러오지 못했습니다." });
+      }
+    }
+    return { registrations: g?.registrations ?? [], installations };
   }
 
   // "owner/name" repo 에 대한 installation 토큰(지정 권한) + host. setup-PR 등 쓰기 작업용(예: contents/pull_requests write).

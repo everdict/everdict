@@ -1274,12 +1274,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_workspace_github_app",
       {
         description:
-          "이 워크스페이스의 GitHub App 통합 — GHE App 등록 목록 + 워크스페이스 소유 installation(host/installationId/account) + App Setup URL 로 등록할 callbackUrl. 비밀 값 없음.",
+          "이 워크스페이스의 GitHub App 통합 — GHE App 등록 목록 + 워크스페이스 소유 installation(host/installationId/account + 허용 저장소 repos) + App Setup URL 로 등록할 callbackUrl. 비밀 값 없음.",
         inputSchema: {},
       },
       () =>
         run(principal, "settings:read", async () => {
-          const view = await gh.list(ws);
+          const view = await gh.viewWithRepos(ws);
           const callbackUrl = gh.callbackUrl();
           return ok({ ...view, ...(callbackUrl !== undefined ? { callbackUrl } : {}) });
         }),
@@ -1474,13 +1474,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .describe('run-eval runtime 입력(선택, 예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서'),
         },
       },
-      ({ repository, harness, dataset, slots, runsOn, runtime }) =>
+      ({ repository, host, harness, dataset, slots, runsOn, runtime }) =>
         run(principal, "settings:write", async () =>
           ok({
             links: await ci.upsert(ws, principal.subject, {
               repository,
               harness,
               slots: slots ?? {},
+              ...(host !== undefined ? { host } : {}),
               ...(dataset !== undefined ? { dataset } : {}),
               ...(runsOn !== undefined ? { runsOn } : {}),
               ...(runtime !== undefined ? { runtime } : {}),

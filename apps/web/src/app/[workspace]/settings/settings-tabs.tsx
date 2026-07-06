@@ -2,7 +2,7 @@
 
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
 import { CiLinksSettings } from '@/features/manage-ci-links'
-import { GithubAppManager } from '@/features/manage-github-app'
+import { GithubAppManager, type GithubAppNotice } from '@/features/manage-github-app'
 import { ImageRegistryManager } from '@/features/manage-image-registry'
 import { InvitesManager } from '@/features/manage-invites'
 import { MattermostManager } from '@/features/manage-mattermost'
@@ -30,6 +30,7 @@ export function SettingsTabs(props: {
   isOwner: boolean // owner 면 위험 구역(삭제) 노출
   secrets: SecretMeta[]
   githubApp: GithubAppView // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
+  githubAppNotice?: GithubAppNotice // 설치 콜백 리다이렉트(?githubApp=installed / ?error=…) 직후 안내
   mattermost?: MattermostConfig // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림)
   imageRegistry?: ImageRegistryConfig // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행)
   ciLinks: CiLink[] // CI repo link(레포↔하니스 슬롯 = OIDC trust) 목록
@@ -101,6 +102,7 @@ export function SettingsTabs(props: {
             view={props.githubApp}
             canWrite={props.canWriteSettings}
             secretNames={props.secrets.map((s) => s.name)}
+            {...(props.githubAppNotice !== undefined ? { notice: props.githubAppNotice } : {})}
           />
           <MattermostManager
             canWrite={props.canWriteSettings}

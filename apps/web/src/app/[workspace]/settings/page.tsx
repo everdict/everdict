@@ -20,12 +20,20 @@ export const dynamic = 'force-dynamic'
 // 워크스페이스 설정 — 정책·시크릿·멤버(+ 이 워크스페이스에 연결된 애플리케이션 로스터, 읽기 전용).
 // 외부 계정 연결의 연결/해제(관리)는 개인 소유라 계정(account) 페이지에 있다. 여기 로스터는 만들어진 워크스페이스 기준(members:read).
 // searchParams.tab — 계정→연결 탭의 "통합 설정 →" 딥링크가 통합 탭으로 바로 안착하도록 받는다.
+// searchParams.githubApp/error — GitHub App 설치 콜백 리다이렉트의 결과 안내(통합 탭에서 표시).
 export default async function SettingsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ tab?: string }>
+  searchParams: Promise<{ tab?: string; githubApp?: string; error?: string }>
 }) {
   const sp = await searchParams
+  const githubAppNotice =
+    sp.githubApp === 'installed' || sp.error !== undefined
+      ? {
+          ...(sp.githubApp === 'installed' ? { installed: true } : {}),
+          ...(sp.error !== undefined ? { error: sp.error } : {}),
+        }
+      : undefined
   const { principal, ctx } = await currentPrincipal()
   const canReadSettings = can(principal?.roles, 'settings:read')
   const canWriteSettings = can(principal?.roles, 'settings:write')
@@ -92,6 +100,7 @@ export default async function SettingsPage({
           {...(workspace !== undefined ? { workspace } : {})}
           secrets={secrets}
           githubApp={githubApp}
+          {...(githubAppNotice !== undefined ? { githubAppNotice } : {})}
           {...(mattermost !== undefined ? { mattermost } : {})}
           {...(imageRegistry !== undefined ? { imageRegistry } : {})}
           ciLinks={ciLinks}
