@@ -37,7 +37,8 @@ export function GithubAppManager({
     setError(undefined)
     startTransition(async () => {
       const r = await startGithubAppInstallAction(host)
-      if (r.ok && r.installUrl) window.location.href = r.installUrl
+      // 설치는 새 탭에서 — 설정 화면을 떠나지 않고 GitHub 설치 플로우를 진행.
+      if (r.ok && r.installUrl) window.open(r.installUrl, '_blank', 'noopener,noreferrer')
       else setError(r.error ?? '설치를 시작하지 못했어요.')
     })
   }
