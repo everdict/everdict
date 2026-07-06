@@ -10,7 +10,7 @@ export const runtimeSummarySchema = z.object({
 export type RuntimeSummary = z.infer<typeof runtimeSummarySchema>
 export const runtimesSchema = z.array(runtimeSummarySchema)
 
-// 전체 RuntimeSpec(local | docker | nomad | k8s | topology) — 표시용 느슨 미러(나머지 passthrough).
+// 전체 RuntimeSpec(local | nomad | k8s) — 표시용 느슨 미러(나머지 passthrough).
 export const runtimeSpecSchema = z
   .object({
     kind: z.enum(['local', 'nomad', 'k8s']),

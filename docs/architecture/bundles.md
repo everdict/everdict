@@ -90,8 +90,9 @@ dataset-bearing bundle → 403 (exactly as the per-type routes already behave). 
   template the user tailors to real pinch (swap `source` + grader).
 - `pinch-sample.dataset.json` — a few inline cases so the flow is runnable end-to-end immediately (prompt env +
   `answer-match`), independent of external data.
-- `docker.runtime.json` — a docker runtime for isolated CLI execution.
 - `bundle.json` — the manifest referencing all of the above; `README.md` documents the self-serve flow.
+  (Execution infra is **not** bundled — a runtime is registered separately per workspace: `local`/`nomad`/`k8s`,
+  or "run on my machine" via the self-hosted runner.)
 
 Applied via `POST /bundles/apply` (tenant self-serve) OR seeded to `_shared` via the existing file loaders.
 **Zero core/package changes** — codex+pinch is entirely data behind the generalized surfaces.
@@ -112,7 +113,7 @@ Applied via `POST /bundles/apply` (tenant self-serve) OR seeded to `_shared` via
    codex+pinch bundle → runs the real `pinch-building-dashboards` benchmark → prints the `(harness × model)`
    leaderboard row. **Verified locally (exit 0)**: 4/4 bundle items apply `ok`; pinch runs to `succeeded`;
    leaderboard shows a ranked row. Runs on the builtin `scripted` harness by default (zero external deps); swap to
-   real codex via `ASSAY_HARNESS=codex ASSAY_RUNTIME=<codex-image docker runtime>` (+ LiteLLM for the judge). The
+   real codex via `ASSAY_HARNESS=codex ASSAY_RUNTIME=<codex-image runtime>` (+ LiteLLM for the judge). The
    only piece not runnable headlessly here is the real codex CLI itself (needs its image + provider keys).
 
 ## Decisions / non-goals

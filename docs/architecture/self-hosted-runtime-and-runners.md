@@ -3,7 +3,7 @@
 > **Status: DESIGN (not yet built).** A strict, additive generalization of the shipped
 > [self-hosted-runner](./self-hosted-runner.md): same pull/lease/MCP machinery, re-drawn around the correct
 > two-layer model so "runtime vs runner" stops being confusing. Nothing about the push backends
-> (`docker|nomad|k8s|topology`) changes.
+> (`nomad|k8s`) changes.
 
 ## Terminology (the whole point — lock this first)
 
@@ -49,7 +49,7 @@ The shipped self-hosted runner nailed pull/lease/provenance/budget, but under th
 - **Worker** — `assay runner --pair <rnr_…>` (`apps/cli` → `@assay/runner-core` `runLeaseWorkers`): one process,
   `--max-concurrent N` lease workers over one MCP session. `runnerAuthenticator` maps `rnr_` → `Principal{via:"runner"}`.
 - **Ownership precedent** — personal (`owner=subject`, account page, no role gate) mirrors Connected accounts.
-  Workspace-shared runtimes (`docker|nomad|k8s|topology`) are the `RuntimeRegistry` (immutable, `_shared` fallback).
+  Workspace-shared runtimes (`nomad|k8s`) are the `RuntimeRegistry` (immutable, `_shared` fallback).
 
 ## Design
 
@@ -201,7 +201,7 @@ runner, once configured, holds its own GitHub credential — a company resource,
 - **`--max-concurrent` stays**, but "add runners" is the primary scaling story (matches GitHub; spans machines).
 - **Personal owner-only rule is unchanged** — an admin still cannot target a *member's personal* runtime. The new
   cross-member sharing lives only on **workspace** runtimes (which are workspace assets, tenant-isolated).
-- **Push backends untouched** (`docker|nomad|k8s|topology`); the in-process `local` runtime remains dev-only.
+- **Push backends untouched** (`nomad|k8s`); the in-process `local` runtime remains dev-only.
 - **Org-level GitHub registration is opt-in** (SHIPPED, slice 5): the elevated `admin:org` scope is requested
   only when the admin explicitly connects/reconnects elevated — the default connection scope stays
   `repo, read:packages` (no over-request). Repo-level remains the zero-extra-scope default.

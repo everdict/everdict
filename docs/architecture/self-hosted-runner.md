@@ -8,7 +8,7 @@
 > - **D1 — ownership is personal.** A self-hosted runner is owned by `principal.subject` (like
 >   [Connected accounts](../connections.md)), **not** the workspace. The workspace's harnesses/datasets stay
 >   shared SSOT; only the *runtime* becomes personal. It lives on the **account** page (next to 연결된 계정 /
->   API keys), self-scoped, **no role gate**. Cluster runtimes (`docker|nomad|k8s|topology`) remain
+>   API keys), self-scoped, **no role gate**. Cluster runtimes (`nomad|k8s`) remain
 >   workspace-shared as today.
 > - **D2 — results flow back to the workspace, tagged.** A self-hosted run is a normal workspace run in
 >   `RunStore`/`ScorecardStore`, carrying a **provenance tag** (`ranOn: self-hosted`, `runner=<device>`,
@@ -27,7 +27,7 @@
 >
 > Like [judge-placement-locality](./judge-placement-locality.md) and
 > [front-door-generalization](./front-door-generalization.md): **strict generalization, not a clean break.**
-> Every new piece is additive; the existing push backends (`docker|nomad|k8s|topology`) are untouched, and the
+> Every new piece is additive; the existing push backends (`nomad|k8s`) are untouched, and the
 > absence of a self-hosted runner dispatches exactly as today. The in-process `local` runtime
 > ([runtimes.md](../runtimes.md)) is **superseded** by this for the "run on a single machine" use case — the
 > machine is now the *user's*, not the control-plane host.
@@ -43,7 +43,7 @@ locally, and report the result back.
 
 Three things make this awkward under the current model:
 
-1. **`RuntimeSpec` is workspace-shared.** `local|docker|nomad|k8s|topology` are registered in the
+1. **`RuntimeSpec` is workspace-shared.** `local|nomad|k8s` are registered in the
    workspace-owned `RuntimeRegistry` (immutable versions, `_shared` fallback). A personal laptop is **not** a
    workspace asset — modeling it there would let one member's job land on another member's machine.
 2. **Dispatch is push-only.** Every `Backend` *pushes* a job to an orchestrator. The control plane needs
@@ -88,7 +88,7 @@ A self-hosted runner is a **personal device pairing**, stored in a new `RunnerSt
 `(owner=principal.subject, runnerId)` with a non-key `workspace` column (where it was paired) — the same shape
 as `ConnectionStore`. Metadata: `label` (device name), `os`, `capabilities[]` (e.g. `repo`, `browser`,
 `os-use`, `docker`), `lastSeenAt`, `connectedAt`. It is **not** in the workspace `RuntimeRegistry` (which stays
-the immutable, workspace-shared SSOT for `docker|nomad|k8s|topology`).
+the immutable, workspace-shared SSOT for `nomad|k8s`).
 
 It nonetheless **surfaces as a runtime choice**: the scorecard 실행 form's existing runtime selector merges in
 the caller's own runners as `내 로컬 호스트 — <label>` options. Selecting one sets a synthetic
@@ -198,7 +198,7 @@ Self-hosted:   member's `assay runner` → MCP lease_job (long-call) → runAgen
   `runnerStore.get(submitterSubject, runnerId)`, so any non-owner (incl. a workspace admin) targeting `self:<id>`
   gets 404. No `shared` flag, no admin override.
 - **Desktop GUI client** — CLI (`assay runner`) covers the headless case; a Tauri/Electron app is a separate later effort.
-- **Replacing push backends** — `docker|nomad|k8s|topology` are unchanged; self-hosted is additive.
+- **Replacing push backends** — `nomad|k8s` are unchanged; self-hosted is additive.
 
 ## See also
 

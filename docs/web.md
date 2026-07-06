@@ -100,7 +100,7 @@ panel/list guidance is not.
   **kind-toggle form** (model | harness) with a validate (dry-run) step → `POST /judges`. Role-gated off `/me`
   (`judges:write` = member+). See `docs/judges.md`.
 - **런타임 `/{workspace}/runtimes`** — the single **"where evals run"** surface (first-class nav, Server icon):
-  ① **등록 인프라** — tenant execution infra (docker | nomad | k8s | topology; push — the control plane connects),
+  ① **등록 인프라** — tenant execution infra (nomad | k8s; push — the control plane connects),
   no auto-seeded defaults; ② **내 머신 연결 (셀프호스티드 러너)** — the personal self-hosted runners section
   (RunnersManager moved here from the account page: desktop one-click pairing, presence, revoke, download CTA;
   runners stay subject-owned — only the management entry point moved). **등록
