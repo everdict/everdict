@@ -76,9 +76,7 @@
         "taskField": "instruction",
         "repoPath": "/data",
         "image": "spreadsheetbench:v1",
-        "tagFields": [
-          "instruction_type"
-        ]
+        "tagFields": ["instruction_type"]
       },
       "graderTemplates": [
         {
@@ -154,19 +152,10 @@
             }
           ],
           "timeoutSec": 600,
-          "tags": [
-            "spreadsheetbench",
-            "v1",
-            "sample",
-            "cell-level"
-          ]
+          "tags": ["spreadsheetbench", "v1", "sample", "cell-level"]
         }
       ],
-      "tags": [
-        "spreadsheetbench",
-        "v1",
-        "sample"
-      ]
+      "tags": ["spreadsheetbench", "v1", "sample"]
     },
     {
       "id": "spreadsheetbench-v2-sample",
@@ -198,19 +187,10 @@
             }
           ],
           "timeoutSec": 600,
-          "tags": [
-            "spreadsheetbench",
-            "v2",
-            "sample",
-            "workflow"
-          ]
+          "tags": ["spreadsheetbench", "v2", "sample", "workflow"]
         }
       ],
-      "tags": [
-        "spreadsheetbench",
-        "v2",
-        "sample"
-      ]
+      "tags": ["spreadsheetbench", "v2", "sample"]
     },
     {
       "id": "spreadsheetbench-v1-codex-sample",
@@ -242,19 +222,10 @@
             }
           ],
           "timeoutSec": 600,
-          "tags": [
-            "spreadsheetbench",
-            "v1",
-            "codex",
-            "in-image"
-          ]
+          "tags": ["spreadsheetbench", "v1", "codex", "in-image"]
         }
       ],
-      "tags": [
-        "spreadsheetbench",
-        "v1",
-        "codex"
-      ]
+      "tags": ["spreadsheetbench", "v1", "codex"]
     }
   ]
 }

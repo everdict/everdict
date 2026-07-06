@@ -82,7 +82,7 @@ try {
   const known = new Set([r1.id, r2.id]);
   for (const id of ranOn) if (!known.has(id)) throw new Error(`알 수 없는 러너가 처리: ${id}`);
   console.log(`✓ ${N} runs 전부 succeeded (self-hosted, by=dev/own-pays); 처리 러너: ${[...ranOn].join(", ")}`);
-  console.log(`✓ PASS — self(개인 풀)이 내 러너로 라우팅(owner=제출자). 분배 완전성은 유닛 테스트가 증명.`);
+  console.log("✓ PASS — self(개인 풀)이 내 러너로 라우팅(owner=제출자). 분배 완전성은 유닛 테스트가 증명.");
 } finally {
   cleanup();
 }

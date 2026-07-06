@@ -1,6 +1,17 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
-  "files": { "ignore": ["dist", "node_modules", ".turbo", "coverage", "apps/web", ".next"] },
+  "files": {
+    "ignore": [
+      "dist",
+      "node_modules",
+      ".turbo",
+      "coverage",
+      "apps/web",
+      ".next",
+      "apps/desktop/bundle",
+      "apps/desktop/release"
+    ]
+  },
   "formatter": {
     "enabled": true,
     "indentStyle": "space",

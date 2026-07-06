@@ -34,8 +34,9 @@ try {
 // 1) 신규 머신처럼: 깨끗한 userData + ASSAY_WEB_URL 없이 기동 → 설정 화면이 떠야 한다(D8).
 const configHome = mkdtempSync(path.join(tmpdir(), "assay-desktop-kc-"));
 const appDir = new URL("../../apps/desktop", import.meta.url).pathname;
-const env = { ...process.env, XDG_CONFIG_HOME: configHome };
-delete env.ASSAY_WEB_URL;
+// ASSAY_WEB_URL 은 구조분해로 제외(신규 머신 시뮬레이션) — delete 는 성능 린트 대상이라 스프레드 제외 패턴 사용.
+const { ASSAY_WEB_URL: _webUrl, ...inheritedEnv } = process.env;
+const env = { ...inheritedEnv, XDG_CONFIG_HOME: configHome };
 const app = await _electron.launch({
   executablePath: electronPath,
   args: [appDir, "--no-sandbox", "--password-store=basic"],
@@ -89,7 +90,7 @@ try {
   await main.getByText("이 기기", { exact: true }).waitFor({ state: "visible", timeout: 60_000 });
   console.log("✓ 원클릭 페어 → '이 기기' 라이브 행(온라인)");
 
-  console.log(`✓ PASS — 설정 화면→서버 저장→실 Keycloak 로그인→원클릭 페어까지 실 데스크톱에서 검증됨`);
+  console.log("✓ PASS — 설정 화면→서버 저장→실 Keycloak 로그인→원클릭 페어까지 실 데스크톱에서 검증됨");
   console.log(`  (e2e 러너 레코드가 ${USER}@${WS} 에 남습니다 — 필요 시 계정 페이지에서 해제)`);
 } finally {
   await cleanup();

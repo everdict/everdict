@@ -43,19 +43,21 @@ const { connections } = await api("/connections");
 const githubConns = connections.filter((c) => c.provider === "github" || c.provider === "github-enterprise");
 if (githubConns.length === 0) {
   console.error("✗ GitHub 연결이 없습니다. 먼저 계정 → 연결된 계정에서 GitHub 를 연결하세요.");
-  console.error("  org 레벨을 쓰려면 admin:org 상향 권한으로 연결해야 합니다(설정 › 공유 러너 › GitHub Actions 러너 › '조직').");
+  console.error(
+    "  org 레벨을 쓰려면 admin:org 상향 권한으로 연결해야 합니다(설정 › 공유 러너 › GitHub Actions 러너 › '조직').",
+  );
   process.exit(1);
 }
-const conn = process.env.CONNECTION_ID
-  ? githubConns.find((c) => c.id === process.env.CONNECTION_ID)
-  : githubConns[0];
+const conn = process.env.CONNECTION_ID ? githubConns.find((c) => c.id === process.env.CONNECTION_ID) : githubConns[0];
 if (!conn) {
   console.error(`✗ CONNECTION_ID=${process.env.CONNECTION_ID} 인 GitHub 연결을 찾지 못했습니다.`);
   console.error(`  가능한 연결: ${githubConns.map((c) => `${c.id}(${c.accountLabel})`).join(", ")}`);
   process.exit(1);
 }
 if (org && !conn.scopes.includes("admin:org")) {
-  console.error(`✗ org 레벨은 admin:org 권한 연결이 필요합니다. 이 연결(${conn.accountLabel}) scope: ${conn.scopes.join(",")}`);
+  console.error(
+    `✗ org 레벨은 admin:org 권한 연결이 필요합니다. 이 연결(${conn.accountLabel}) scope: ${conn.scopes.join(",")}`,
+  );
   console.error("  설정 › 공유 러너 › GitHub Actions 러너 › '조직' 에서 'admin:org 권한으로 다시 연결' 하세요.");
   process.exit(1);
 }

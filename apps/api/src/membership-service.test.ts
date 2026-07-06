@@ -1,10 +1,10 @@
 import { NotFoundError } from "@assay/core";
 import {
-  generateInviteToken,
-  hashKey,
   InMemoryUserProfileStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceStore,
+  generateInviteToken,
+  hashKey,
 } from "@assay/db";
 import { describe, expect, it } from "vitest";
 import { MembershipService } from "./membership-service.js";

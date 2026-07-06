@@ -102,13 +102,13 @@ try {
   // 코어 불변식: self:ws 풀이 등록된 러너들로 라우팅됐다(ranBy 가 실제 두 러너 중 하나 — 풀 센티널 "*" 아님).
   const known = new Set([r1.id, r2.id]);
   for (const id of ranOn) if (!known.has(id)) throw new Error(`✗ 알 수 없는 러너가 처리: ${id}`);
-  console.log(`✓ self:ws 풀이 워크스페이스 러너로 라우팅됨(멀티러너 등록 상태에서 전부 처리)`);
+  console.log("✓ self:ws 풀이 워크스페이스 러너로 라우팅됨(멀티러너 등록 상태에서 전부 처리)");
 
   // 분배(두 러너 모두 처리)는 잡 지속시간 의존적 — scripted 는 순식간이라 빠른 러너 하나가 큐를 즉시 비울 수 있다.
   // (실제 잡[codex/claude-code 등, 수초~수분]은 러너가 오래 바빠 자연히 분배됨.) 결정적 분배는 유닛 테스트가 증명:
   // runner-hub.test "풀에 넣은 잡을 여러 러너가 나눠 가져간다"(두 러너가 각각 lease). 여기선 관측만.
   if (ranOn.has(r1.id) && ranOn.has(r2.id))
-    console.log(`✓ PASS — self:ws 풀을 러너 2개가 나눠 드레인(관측된 분배: 완전)`);
+    console.log("✓ PASS — self:ws 풀을 러너 2개가 나눠 드레인(관측된 분배: 완전)");
   else
     console.log(
       `✓ PASS — self:ws 풀 라우팅 확인(이번엔 ${[...ranOn].length}개 러너가 처리 — instant 잡 특성; 분배는 유닛테스트가 결정적으로 증명)`,

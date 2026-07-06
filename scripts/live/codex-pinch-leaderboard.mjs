@@ -69,7 +69,8 @@ try {
   const inst = await post("/bundles/apply", bundle);
   console.log(`  → ${inst.status}`);
   for (const r of inst.json.results ?? []) console.log(`     ${r.status.padEnd(8)} ${r.kind} ${r.id}@${r.version}`);
-  const installOk = inst.status === 200 && (inst.json.results ?? []).every((r) => r.status === "ok" || r.status === "conflict");
+  const installOk =
+    inst.status === 200 && (inst.json.results ?? []).every((r) => r.status === "ok" || r.status === "conflict");
 
   // ② pinch 실행(judge 채점). 기본 scripted(무-외부의존), 실 codex 는 ASSAY_HARNESS=codex + ASSAY_RUNTIME 로 스왑.
   console.log(`\n=== ② POST /scorecards (pinch-building-dashboards × ${HARNESS}) ===`);
@@ -88,7 +89,9 @@ try {
       process.stdout.write(`  status=${rec.status}\r`);
       if (rec.status === "succeeded" || rec.status === "failed") break;
     }
-    console.log(`\n  최종 status=${rec.status}${rec.models?.primary ? ` model=${rec.models.primary}` : " model=unknown"}`);
+    console.log(
+      `\n  최종 status=${rec.status}${rec.models?.primary ? ` model=${rec.models.primary}` : " model=unknown"}`,
+    );
   }
 
   // ③ 리더보드

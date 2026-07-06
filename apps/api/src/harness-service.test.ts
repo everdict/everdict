@@ -1,5 +1,11 @@
 import type { Principal } from "@assay/auth";
-import { ConflictError, ForbiddenError, type HarnessInstanceSpec, type HarnessTemplateSpec, NotFoundError } from "@assay/core";
+import {
+  ConflictError,
+  ForbiddenError,
+  type HarnessInstanceSpec,
+  type HarnessTemplateSpec,
+  NotFoundError,
+} from "@assay/core";
 import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@assay/registry";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deleteHarnessVersion } from "./harness-service.js";

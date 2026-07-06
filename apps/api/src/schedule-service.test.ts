@@ -311,7 +311,12 @@ describe("ScheduleService — Temporal authoritative 다음 발사(nextFireTimes
         return next;
       },
     };
-    return new ScheduleService({ store: new InMemoryScheduleStore(), driver, newId: () => `sch-${++n}`, now: () => "t" });
+    return new ScheduleService({
+      store: new InMemoryScheduleStore(),
+      driver,
+      newId: () => `sch-${++n}`,
+      now: () => "t",
+    });
   }
 
   it("드라이버가 있으면 list/get 에 nextFireTimes 를 부착한다(활성만 조회)", async () => {

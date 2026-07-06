@@ -40,7 +40,7 @@ export function billingTenant(result: CaseResult, originalTenant: string): strin
   const prov = result.provenance;
   if (!prov || prov.ranOn !== "self-hosted") return originalTenant;
   const by = prov.by;
-  if (by !== undefined && by.startsWith("ws:")) return by.slice("ws:".length);
+  if (by?.startsWith("ws:")) return by.slice("ws:".length);
   return undefined;
 }
 
