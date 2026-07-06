@@ -1,10 +1,10 @@
 import { UpstreamError } from "@assay/core";
 import type { TraceSink, TraceSinkCase, TraceSinkCaseResult, TraceSinkContext, TraceSinkResult } from "./trace-sink.js";
 
-// Langfuse 싱크 — 전 케이스를 배치 ingestion 1콜로(POST /api/public/ingestion), 점수는 score-create 이벤트.
+// Langfuse 싱크 — 전 케이스를 배치 ingestion 으로(POST /api/public/ingestion), 점수는 score-create 이벤트.
 // 실 API 검증 요점: 인증은 Basic base64(pk:sk) 그대로, 이벤트 envelope id=중복제거 키·body.id=엔티티 upsert 키,
 // usage 대신 usageDetails(+costDetails)가 현행, 응답은 207(성공/실패 혼재 — errors[] 로 케이스 격리).
-// 배치 상한 3.5MB — v1 은 미분할(대형 배치는 후속).
+// 배치 상한 3.5MB(서버 고정) — 직렬화 크기 기준으로 청크 분할해 여러 번 보낸다(이벤트 순서 보존).
 export interface LangfuseTraceSinkOptions {
   endpoint: string;
   auth?: string; // Authorization 헤더 '값' 그대로("Basic <base64(pk:sk)>")
@@ -100,6 +100,26 @@ export function langfuseBatch(
   return { events, eventCase, traceIdByCase };
 }
 
+// 배치 상한(3.5MB)보다 보수적인 3MB 로 청크 분할(순수). 이벤트 하나가 상한을 넘는 극단은 단독 청크로 보낸다
+// (서버가 그 이벤트만 errors[] 로 거절 → 케이스 격리로 흡수, 조용한 드랍 없음).
+export function chunkLangfuseEvents<T>(events: T[], maxBytes = 3_000_000): T[][] {
+  const chunks: T[][] = [];
+  let current: T[] = [];
+  let size = 0;
+  for (const e of events) {
+    const s = JSON.stringify(e).length + 1;
+    if (current.length > 0 && size + s > maxBytes) {
+      chunks.push(current);
+      current = [];
+      size = 0;
+    }
+    current.push(e);
+    size += s;
+  }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
+}
+
 export class LangfuseTraceSink implements TraceSink {
   private readonly newId: () => string;
   private readonly nowIso: () => string;
@@ -120,33 +140,36 @@ export class LangfuseTraceSink implements TraceSink {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
     const { events, eventCase, traceIdByCase } = langfuseBatch(ctx, cases, this.newId, this.nowIso);
-    const res = await f(`${base}/api/public/ingestion`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        ...(this.opts.auth ? { authorization: this.opts.auth } : {}),
-      },
-      body: JSON.stringify({ batch: events }),
-    });
-    if (!res.ok && res.status !== 207) {
-      const text = await res.text().catch(() => "");
-      throw new UpstreamError(
-        "UPSTREAM_ERROR",
-        { status: res.status },
-        `Langfuse ingestion ${res.status}: ${text.slice(0, 200)}`,
-      );
-    }
-    // 207: errors[] 의 envelope 이벤트 id → 케이스로 역매핑(부분 실패 격리).
-    let body: { errors?: Array<{ id?: string; message?: string; error?: unknown }> } = {};
-    try {
-      body = (await res.json()) as typeof body;
-    } catch {
-      // 빈/비 JSON 응답은 전건 성공으로 취급(2xx 였으므로)
-    }
+    // 3.5MB 배치 상한 대응 — 청크로 나눠 순차 전송, 207 errors[] 는 청크 전체에서 수집한다.
     const failedCase = new Map<string, string>();
-    for (const e of body.errors ?? []) {
-      const caseId = e.id ? eventCase.get(e.id) : undefined;
-      if (caseId && !failedCase.has(caseId)) failedCase.set(caseId, e.message ?? "ingestion 이벤트 실패");
+    for (const chunk of chunkLangfuseEvents(events)) {
+      const res = await f(`${base}/api/public/ingestion`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          ...(this.opts.auth ? { authorization: this.opts.auth } : {}),
+        },
+        body: JSON.stringify({ batch: chunk }),
+      });
+      if (!res.ok && res.status !== 207) {
+        const text = await res.text().catch(() => "");
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { status: res.status },
+          `Langfuse ingestion ${res.status}: ${text.slice(0, 200)}`,
+        );
+      }
+      // 207: errors[] 의 envelope 이벤트 id → 케이스로 역매핑(부분 실패 격리).
+      let body: { errors?: Array<{ id?: string; message?: string; error?: unknown }> } = {};
+      try {
+        body = (await res.json()) as typeof body;
+      } catch {
+        // 빈/비 JSON 응답은 전건 성공으로 취급(2xx 였으므로)
+      }
+      for (const e of body.errors ?? []) {
+        const caseId = e.id ? eventCase.get(e.id) : undefined;
+        if (caseId && !failedCase.has(caseId)) failedCase.set(caseId, e.message ?? "ingestion 이벤트 실패");
+      }
     }
     const out: TraceSinkCaseResult[] = cases.map((c) => {
       const traceId = traceIdByCase.get(c.caseId);

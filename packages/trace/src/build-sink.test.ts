@@ -1,7 +1,7 @@
 import { AppError, type TraceEvent } from "@assay/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildTraceSink } from "./build-sink.js";
-import { LangfuseTraceSink, langfuseBatch } from "./langfuse-sink.js";
+import { LangfuseTraceSink, chunkLangfuseEvents, langfuseBatch } from "./langfuse-sink.js";
 import { LangsmithTraceSink } from "./langsmith-sink.js";
 import { MlflowTraceSink, mlflowAssessmentBody } from "./mlflow-sink.js";
 import { PhoenixTraceSink, phoenixAnnotation, phoenixSpans } from "./phoenix-sink.js";
@@ -56,19 +56,29 @@ describe("MlflowTraceSink", () => {
       now: () => "2026-07-06T00:00:00.000Z",
     });
     const out = await sink.export(CTX, [CASE]);
-    // trace 생성 1콜 + 점수 2콜.
-    expect(ff.count()).toBe(3);
+    // trace 생성 1콜 + OTLP 스팬 1콜 + 점수 2콜.
+    expect(ff.count()).toBe(4);
     expect(ff.call(0).url).toBe("http://mlflow:5000/api/3.0/mlflow/traces");
     const info = (ff.body(0).trace as { trace_info: Record<string, unknown> }).trace_info;
     expect(info.trace_id).toMatch(/^tr-[0-9a-f]{32}$/);
     expect(info.trace_location).toEqual({ type: "MLFLOW_EXPERIMENT", mlflow_experiment: { experiment_id: "7" } });
     expect(info.request_preview).toBe("task 지시");
+    // 스팬: OTLP/JSON — x-mlflow-experiment-id 헤더 + TraceInfo 와 같은 hex(tr- 접두 제거)로 조인.
+    expect(ff.call(1).url).toBe("http://mlflow:5000/v1/traces");
+    expect((ff.call(1).init.headers as Record<string, string>)["x-mlflow-experiment-id"]).toBe("7");
+    const rs = ff.body(1).resourceSpans as Array<{ scopeSpans: Array<{ spans: Array<Record<string, unknown>> }> }>;
+    const spans = rs[0]?.scopeSpans[0]?.spans ?? [];
+    expect(spans[0]?.traceId).toBe(String(info.trace_id).slice(3));
+    // 자식 스팬 속성은 우리 소스가 읽는 OTel GenAI 관례 → pull 되읽기 왕복 정합.
+    const llmAttrs = spans[1]?.attributes as Array<{ key: string; value: Record<string, unknown> }>;
+    expect(llmAttrs.find((a) => a.key === "gen_ai.request.model")?.value).toEqual({ stringValue: "gpt-x" });
+    expect(llmAttrs.find((a) => a.key === "gen_ai.usage.input_tokens")?.value).toEqual({ intValue: "100" });
     // 점수: snake_case + assessment_name + source_type 분류(CODE/LLM_JUDGE) + rationale.
-    expect(ff.call(1).url).toMatch(/\/api\/3\.0\/mlflow\/traces\/tr-[0-9a-f]{32}\/assessments$/);
-    const a1 = ff.body(1).assessment as Record<string, unknown>;
+    expect(ff.call(2).url).toMatch(/\/api\/3\.0\/mlflow\/traces\/tr-[0-9a-f]{32}\/assessments$/);
+    const a1 = ff.body(2).assessment as Record<string, unknown>;
     expect(a1.assessment_name).toBe("tests_pass");
     expect(a1.source).toEqual({ source_type: "CODE", source_id: "assay:sc-1" });
-    const a2 = ff.body(2).assessment as Record<string, unknown>;
+    const a2 = ff.body(3).assessment as Record<string, unknown>;
     expect(a2.source).toEqual({ source_type: "LLM_JUDGE", source_id: "assay:sc-1" });
     expect(a2.rationale).toBe("근거 충분");
     // 인증 헤더는 값 그대로(Basic …) + 케이스 결과에 외부 id/딥링크.
@@ -78,13 +88,26 @@ describe("MlflowTraceSink", () => {
     expect(out.url).toBe("http://mlflow:5000/#/experiments/7/traces");
   });
 
-  it("attach 모드(externalId): trace 생성 없이 기존 trace 에 점수만 부착한다(흐름② — 복제 금지)", async () => {
+  it("attach 모드(externalId): trace 생성/스팬 업로드 없이 기존 trace 에 점수만 부착한다(흐름② — 복제 금지)", async () => {
     const ff = fakeFetch();
     const sink = new MlflowTraceSink({ endpoint: "http://mlflow:5000", fetchImpl: ff.impl });
     const out = await sink.export(CTX, [{ ...CASE, externalId: "tr-orig" }]);
-    expect(ff.count()).toBe(2); // 점수 2콜만 — StartTraceV3 없음
+    expect(ff.count()).toBe(2); // 점수 2콜만 — StartTraceV3/OTLP 없음
     expect(ff.call(0).url).toContain("/traces/tr-orig/assessments");
     expect(out.cases[0]?.externalId).toBe("tr-orig");
+  });
+
+  it("스팬 업로드(OTLP)가 실패해도 케이스는 성공 — best-effort(구버전 서버 degrade)", async () => {
+    const ff = fakeFetch([
+      new Response("{}", { status: 200 }), // trace 생성
+      new Response("unsupported", { status: 415 }), // 스팬 업로드 실패(protobuf 전용 서버)
+      new Response("{}", { status: 200 }),
+      new Response("{}", { status: 200 }),
+    ]);
+    const sink = new MlflowTraceSink({ endpoint: "http://m", project: "7", fetchImpl: ff.impl });
+    const out = await sink.export(CTX, [CASE]);
+    expect(out.cases[0]?.error).toBeUndefined();
+    expect(out.cases[0]?.externalId).toMatch(/^tr-/);
   });
 
   it("create 모드에서 project(experiment_id) 미설정 → 케이스별 정직한 실패(조용한 스킵 금지)", async () => {
@@ -98,8 +121,10 @@ describe("MlflowTraceSink", () => {
   it("assessment 비-2xx → 그 케이스만 실패로 격리(다른 케이스는 계속)", async () => {
     const ff = fakeFetch([
       new Response("{}", { status: 200 }), // c1 trace 생성
+      new Response("{}", { status: 200 }), // c1 스팬
       new Response("boom", { status: 500 }), // c1 첫 점수 실패
       new Response("{}", { status: 200 }), // c2 trace 생성
+      new Response("{}", { status: 200 }), // c2 스팬
       new Response("{}", { status: 200 }),
       new Response("{}", { status: 200 }),
     ]);
@@ -173,6 +198,29 @@ describe("LangfuseTraceSink", () => {
     const sink = new LangfuseTraceSink({ endpoint: "https://lf", fetchImpl: ff.impl });
     await expect(sink.export(CTX, [CASE])).rejects.toBeInstanceOf(AppError);
   });
+
+  it("3.5MB 상한: 직렬화 크기 기준으로 청크 분할 — 여러 ingestion 콜, 순서 보존, 조용한 드랍 없음", async () => {
+    // 이벤트 2개가 한 청크(약 1KB 상한)에 안 들어가게 만들어 분할을 강제한다.
+    const big = "x".repeat(700);
+    const events = [
+      { id: "e1", body: big },
+      { id: "e2", body: big },
+      { id: "e3", body: big },
+    ];
+    const chunks = chunkLangfuseEvents(events, 1500);
+    expect(chunks.map((c) => c.length)).toEqual([2, 1]); // 2+1 로 분할(700*2+α < 1500 < 700*3)
+    expect(chunks.flat().map((e) => e.id)).toEqual(["e1", "e2", "e3"]); // 순서/전수 보존
+
+    // 실제 export 경로에서도 분할된 만큼 콜이 나간다.
+    const ff = fakeFetch([
+      new Response(JSON.stringify({ successes: [], errors: [] }), { status: 207 }),
+      new Response(JSON.stringify({ successes: [], errors: [] }), { status: 207 }),
+    ]);
+    const sink = new LangfuseTraceSink({ endpoint: "https://lf", fetchImpl: ff.impl, newId: seq("aaaa") });
+    // 케이스 2개(각각 trace+관측+점수 이벤트) — 기본 3MB 상한에선 1콜이어야 한다(회귀 확인).
+    await sink.export(CTX, [CASE, { ...CASE, caseId: "c2" }]);
+    expect(ff.count()).toBe(1);
+  });
 });
 
 describe("LangsmithTraceSink", () => {
@@ -187,7 +235,7 @@ describe("LangsmithTraceSink", () => {
       now: () => "2026-07-06T00:00:00.000Z",
     });
     const out = await sink.export(CTX, [CASE]);
-    expect(ff.count()).toBe(3); // run 1 + feedback 2
+    expect(ff.count()).toBe(4); // run 1 + feedback 2 + app_path 조회 1
     expect(ff.call(0).url).toBe("https://api.smith.langchain.com/runs");
     expect((ff.call(0).init.headers as Record<string, string>)["x-api-key"]).toBe("lsv2_key"); // Authorization 아님
     const run = ff.body(0);
@@ -208,11 +256,29 @@ describe("LangsmithTraceSink", () => {
       new Response("not found", { status: 404 }), // 첫 feedback — 아직 미접수
       new Response("{}", { status: 200 }), // 재시도 성공
       new Response("{}", { status: 200 }), // 두 번째 점수
+      new Response("{}", { status: 200 }), // app_path 조회(빈 응답 → 링크 생략)
     ]);
     const sink = new LangsmithTraceSink({ endpoint: "https://ls", fetchImpl: ff.impl });
     const out = await sink.export(CTX, [CASE]);
-    expect(ff.count()).toBe(4);
+    expect(ff.count()).toBe(5);
     expect(out.cases[0]?.error).toBeUndefined();
+    expect(out.cases[0]?.url).toBeUndefined(); // app_path 없으면 링크 생략(best-effort)
+  });
+
+  it("케이스 딥링크: GET /runs/{id} 의 app_path 를 웹 베이스에 조인한다(uuid 직접 조립 금지)", async () => {
+    const ff = fakeFetch([
+      new Response("{}", { status: 202 }), // run
+      new Response("{}", { status: 200 }), // feedback 1
+      new Response("{}", { status: 200 }), // feedback 2
+      new Response(JSON.stringify({ app_path: "/o/t-1/projects/p/p-1/r/r-1" }), { status: 200 }),
+    ]);
+    const sink = new LangsmithTraceSink({
+      endpoint: "https://ls",
+      webUrl: "https://smith.corp.io",
+      fetchImpl: ff.impl,
+    });
+    const out = await sink.export(CTX, [CASE]);
+    expect(out.cases[0]?.url).toBe("https://smith.corp.io/o/t-1/projects/p/p-1/r/r-1");
   });
 });
 

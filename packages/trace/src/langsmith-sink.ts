@@ -116,8 +116,15 @@ export class LangsmithTraceSink implements TraceSink {
             break;
           }
         }
-        // 케이스 딥링크는 tenant/project uuid 가 필요해 v1 은 생략(웹 베이스만) — 후속: GET /runs/{id}.app_path.
-        out.push({ caseId: c.caseId, externalId: runId, ...(scoreError ? { error: scoreError } : {}) });
+        // 케이스 딥링크 — GET /runs/{id} 응답의 app_path(UI 경로)를 웹 베이스에 조인(best-effort).
+        // 딥링크 생성에 tenant/project uuid 를 직접 조립하지 않는다(SDK 도 app_path 를 쓴다).
+        const url = await this.runAppUrl(f, base, runId);
+        out.push({
+          caseId: c.caseId,
+          externalId: runId,
+          ...(url ? { url } : {}),
+          ...(scoreError ? { error: scoreError } : {}),
+        });
       } catch (err) {
         throw new UpstreamError(
           "UPSTREAM_ERROR",
@@ -128,5 +135,23 @@ export class LangsmithTraceSink implements TraceSink {
     }
     const url = (this.opts.webUrl ?? "https://smith.langchain.com").replace(/\/$/, "");
     return { url, cases: out };
+  }
+
+  // run 의 UI 경로(app_path) 조회 — run 접수(202)가 비동기라 404 는 1회 재시도, 그래도 없으면 링크 생략(best-effort).
+  private async runAppUrl(f: typeof fetch, base: string, runId: string): Promise<string | undefined> {
+    try {
+      let res = await f(`${base}/runs/${encodeURIComponent(runId)}`, { headers: this.headers() });
+      if (res.status === 404) {
+        await new Promise((r) => setTimeout(r, 300));
+        res = await f(`${base}/runs/${encodeURIComponent(runId)}`, { headers: this.headers() });
+      }
+      if (!res.ok) return undefined;
+      const body = (await res.json()) as { app_path?: string };
+      if (!body.app_path) return undefined;
+      const web = (this.opts.webUrl ?? "https://smith.langchain.com").replace(/\/$/, "");
+      return `${web}${body.app_path.startsWith("/") ? "" : "/"}${body.app_path}`;
+    } catch {
+      return undefined; // 링크는 부가 정보 — 실패해도 케이스 결과에 영향 없음
+    }
   }
 }
