@@ -52,6 +52,35 @@ function svc(store: InMemoryScorecardStore): ScorecardService {
   return new ScorecardService({ dispatcher, store, datasets: new InMemoryDatasetRegistry() });
 }
 
+describe("ScorecardService.submit — requireRuntime 정책(local 폴백 금지)", () => {
+  const input = (over: Record<string, unknown> = {}) => ({
+    tenant: "acme",
+    dataset: { id: "d", version: "1.0.0" },
+    harness: { id: "h", version: "1" },
+    ...over,
+  });
+  const build = (requireRuntime: boolean) =>
+    new ScorecardService({
+      dispatcher,
+      store: new InMemoryScorecardStore(),
+      datasets: new InMemoryDatasetRegistry(),
+      requireRuntime,
+    });
+
+  it("정책 ON + runtime 없으면 400(BadRequest) — 데이터셋 해석 전에 fail-fast", async () => {
+    await expect(build(true).submit(input())).rejects.toBeInstanceOf(BadRequestError);
+  });
+
+  it("정책 ON + runtime(등록 런타임/self) 지정 시 게이트 통과 — 이후 단계로 진행(없는 데이터셋이라 NotFound)", async () => {
+    // BadRequest 가 아니라 NotFound 라는 것 = 런타임 게이트를 통과했다는 증거(게이트는 target 존재만 본다).
+    await expect(build(true).submit(input({ runtime: "self:laptop" }))).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("정책 OFF(dev)이면 runtime 없이도 게이트를 통과한다(기존 동작 불변)", async () => {
+    await expect(build(false).submit(input())).rejects.toBeInstanceOf(NotFoundError);
+  });
+});
+
 describe("ScorecardService.diff", () => {
   it("pass 전이를 회귀/개선으로 보고한다", async () => {
     const store = new InMemoryScorecardStore();

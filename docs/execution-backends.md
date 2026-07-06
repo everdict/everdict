@@ -15,13 +15,30 @@ sentinel → the Backend parses it.
 
 | Backend | Target | Isolation | Status |
 |---------|--------|-----------|--------|
-| `LocalBackend` | this host (in-process) | none | dev |
+| `LocalBackend` | this host (in-process) | none | dev/CLI only — the API never registers it (see below) |
 | `NomadBackend` | on-prem Nomad (batch alloc, docker driver) | docker `runtime` (e.g. `runsc`=gVisor) | **phase 1** |
 | `K8sBackend` | cloud + on-prem K8s (Job) | `runtimeClassName` (gVisor/Kata) | **built** (live on kind; `scripts/live/k8s-backend.mjs`) |
 | `WindowsBackend` | on-prem Windows node pool | Hyper-V VM checkpoint | phase 3 |
 
 Cloud vs on-prem K8s is the **same** `K8sBackend` — differences are config (kubeconfig/context/
 registry/runtimeClass/namespace).
+
+### The control-plane API never uses `LocalBackend` (default, no toggle)
+`LocalBackend` runs the job **in-process on the control-plane host with no isolation** — fine for a
+single-dev CLI, unacceptable for the control-plane API (untrusted eval code on the control plane). So the
+API enforces this **by default — there is no opt-in env flag**:
+- `main.ts` **never registers** a `local` backend (only `nomad`/`k8s` if configured; otherwise the global
+  registry is empty and *every* job must route to a tenant runtime / self-hosted runner).
+- `RunService.submit` and `ScorecardService.submit` **reject at submit time (400)** any run/scorecard with no
+  execution target — i.e. no `runtime` (a registered tenant `RuntimeSpec` id) and no `self:<id>`/`self:ws`
+  self-hosted target. Fail-fast (`assertRuntimeTarget`, `require-runtime.ts`), so there is **no silent fallback
+  to in-process host execution**. Target *validity* (does the runtime/runner exist) is still checked later by
+  `RuntimeDispatcher`/`Scheduler` (`NOT_FOUND`); the submit gate only enforces that a target was chosen. This
+  gate is the API's fixed policy (`main.ts` wires it on unconditionally), **not** a configurable toggle — the
+  service exposes an internal boolean only so mock-dispatcher unit tests, which bypass the backend layer, stay valid.
+
+Need in-process single-host execution for dev? Use `apps/cli` (`assay run`), which owns `LocalBackend` — the
+API is for managed / remote (runtime / self-hosted) execution only.
 
 ## Routing across many clusters (control plane)
 **1 Backend instance = 1 target** (one Nomad endpoint / one kubeconfig context / one Windows pool).

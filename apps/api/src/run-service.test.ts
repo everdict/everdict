@@ -1,6 +1,6 @@
 import type { Dispatcher } from "@assay/backends";
 import { inMemoryBudget } from "@assay/backends";
-import type { AgentJob, CaseResult, EvalCase } from "@assay/core";
+import { type AgentJob, BadRequestError, type CaseResult, type EvalCase } from "@assay/core";
 import { InMemoryRunStore } from "@assay/db";
 import { describe, expect, it, vi } from "vitest";
 import { RunService } from "./run-service.js";
@@ -69,6 +69,24 @@ describe("RunService", () => {
     await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
     await flush();
     expect(jobs[1]?.evalCase.placement).toBeUndefined();
+  });
+
+  it("requireRuntime 정책: runtime/self 타깃 없으면 400(BadRequest)이고 레코드도 안 생긴다(local 폴백 금지)", async () => {
+    const store = new InMemoryRunStore();
+    const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids, requireRuntime: true });
+    // 타깃 없음 → 제출 거절(게이트가 budget/record 생성 전에 막는다)
+    await expect(svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE })).rejects.toBeInstanceOf(
+      BadRequestError,
+    );
+    expect(await svc.list("t")).toHaveLength(0);
+    // 등록 런타임 id 또는 self:<러너> 지정 → 게이트 통과, 정상 queued
+    const ok = await svc.submit({
+      tenant: "t",
+      harness: { id: "s", version: "0" },
+      case: CASE,
+      runtime: "self:laptop",
+    });
+    expect(ok.status).toBe("queued");
   });
 
   it("list(scorecardId) 는 그 배치 자식만, 기본 list 는 standalone 만(케이스 드릴다운)", async () => {

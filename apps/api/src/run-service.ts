@@ -11,6 +11,7 @@ import {
 import type { RunRecord, RunStore } from "@assay/db";
 import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
 import { executeCase } from "./execute-case.js";
+import { assertRuntimeTarget } from "./require-runtime.js";
 
 export interface SubmitInput {
   tenant: string;
@@ -30,6 +31,9 @@ export interface SubmitInput {
 export interface RunServiceDeps {
   dispatcher: Dispatcher; // Scheduler(권장) 또는 Router — placement/공정성/오토스케일은 그쪽이 담당
   store: RunStore;
+  // 정책 게이트: true 면 runtime/self 타깃 없는 run 을 제출 시 400(local 폴백 금지). API(main.ts)는 항상 true.
+  // 미지정(테스트: mock dispatcher 직접 주입)=게이트 없음. env 토글 아님 — 배포의 고정 정책.
+  requireRuntime?: boolean;
   budget?: BudgetTracker; // API 가 admission 게이트(초과 시 402)와 cost settle 을 담당
   // 선언형 하니스 spec 을 레지스트리에서 풀어 잡에 임베드(없으면 빌트인 id 분기). 없는 하니스는 reject → undefined 폴백.
   resolveHarness?: (tenant: string, id: string, version: string) => Promise<HarnessSpec | undefined>;
@@ -70,6 +74,8 @@ export class RunService {
 
   // 동기 admission(예산 초과면 throw → 402). 통과하면 레코드 생성 후 비동기 디스패치(기다리지 않음).
   async submit(input: SubmitInput): Promise<RunRecord> {
+    // 배포 정책: 실행 위치(등록 런타임 또는 self:<러너>)를 반드시 명시 — 없으면 400(조용한 local 폴백 차단).
+    assertRuntimeTarget(this.deps.requireRuntime, input.runtime ?? input.case.placement?.target);
     this.deps.budget?.admit(input.tenant); // 초과 시 PaymentRequiredError(402) — run 생성 안 함
     // runtime 선택 시 케이스 placement.target 으로 주입 → RuntimeDispatcher 가 테넌트 런타임으로 라우팅(scorecard 와 동일 대칭).
     const effective: SubmitInput = input.runtime

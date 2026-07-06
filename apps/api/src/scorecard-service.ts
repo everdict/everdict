@@ -45,6 +45,7 @@ import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { z } from "zod";
 import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
+import { assertRuntimeTarget } from "./require-runtime.js";
 import { ScoringService } from "./scoring-service.js";
 
 // 케이스 실패/판정 사유 한 줄 — 진행 스텝 메시지용. trace 의 error 이벤트 > pass:false 인 score.detail 순. 길면 자른다.
@@ -200,6 +201,9 @@ export interface ScorecardServiceDeps {
   // 미설정이면 현행대로 자식 run 없이 임베드 scorecard 만(단일 run 과 같은 RunStore 를 공유). 자식은 활동 리스트에서 기본 숨김.
   runStore?: RunStore;
   concurrency?: number;
+  // 정책 게이트: true 면 runtime 없는 배치를 제출 시 400(local 폴백 금지). API(main.ts)는 항상 true.
+  // 미지정(테스트: mock dispatcher 직접 주입)=게이트 없음. env 토글 아님 — 배포의 고정 정책.
+  requireRuntime?: boolean;
   newId?: () => string;
   now?: () => string;
 }
@@ -228,6 +232,8 @@ export class ScorecardService {
 
   // 데이터셋을 동기 해석(NotFound→404), 하니스 버전/spec 해석 후 레코드 생성, 비동기 배치 실행.
   async submit(input: RunScorecardInput): Promise<ScorecardRecord> {
+    // 배포 정책: 배치 실행 위치(등록 런타임 또는 self:<러너>)를 반드시 명시 — 없으면 400(조용한 local 폴백 차단).
+    assertRuntimeTarget(this.deps.requireRuntime, input.runtime);
     const resolved = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
     // 부분 실행 — 선택된 케이스만 담은 데이터셋으로 이후 전 구간(배치/judge/집계)이 동작. 표식은 record.subset.
     const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);

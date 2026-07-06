@@ -26,6 +26,14 @@ A Backend = placement: dispatch a runner-agent job to an orchestrator. See skill
   `ASSAY_AGENT_JOB` (base64 JSON) env; the agent runs `runCase` and prints the `__ASSAY_RESULT__`
   sentinel. Parse the CaseResult from job logs (v1) — keep transport swappable (HTTP callback later).
 - Isolation is the orchestrator's (`Nomad task runtime` / K8s `runtimeClassName`), set via config — never hardcoded.
+- **The control-plane API never uses `LocalBackend` — by default, no toggle.** `LocalBackend` (in-process host,
+  no isolation) is dev/CLI only. `main.ts` never registers a `local` backend, and `RunService`/`ScorecardService`
+  `submit` reject (400, `assertRuntimeTarget`) any run/scorecard with no execution target — no `runtime`
+  (tenant `RuntimeSpec` id) and no `self:<id>`/`self:ws` target. Fail-fast at submit; **never a silent fallback
+  to in-process host execution**. This is the API's fixed policy (`main.ts` wires the gate on unconditionally —
+  there is **no** `ASSAY_REQUIRE_RUNTIME`-style env flag); the service's `requireRuntime` boolean exists only so
+  mock-dispatcher unit tests stay valid. Target existence is still validated later by `RuntimeDispatcher`/`Scheduler`
+  (`NOT_FOUND`). In-process single-host dev execution lives in `apps/cli` (`assay run`). See `docs/execution-backends.md`.
 - Inject auth via `collectAuthEnv()` (`@assay/agent`) into the job env; never log or commit it.
 - Map orchestrator failures to `UpstreamError`; never leak a raw HTTP/SDK error.
 - Placement: `Router` = static (pin/default, dev); `Scheduler` = capacity-aware + **tenant-fair** (WFQ via
