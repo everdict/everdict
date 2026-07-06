@@ -21,6 +21,7 @@ function inviteLink(token: string): string {
 
 export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWrite: boolean }) {
   const [role, setRole] = useState<string>('member')
+  const [open, setOpen] = useState(false) // 발급 폼 펼침 — 평소엔 접어 역할 선택 등 초대 UI 를 숨긴다.
   const [link, setLink] = useState<string>() // 방금 발급된 초대 링크(1회)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string>()
@@ -35,6 +36,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
       const r = await createInviteAction(role)
       if (r.ok && r.token) {
         setLink(inviteLink(r.token))
+        setOpen(false) // 만들었으면 폼을 다시 접는다 — 링크는 위 콜아웃에 노출.
       } else {
         setError(r.error ?? '발급하지 못했어요')
       }
@@ -56,10 +58,12 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
     <div className="space-y-5">
       <div className="space-y-1">
         <h3 className="text-[13px] font-[560] text-foreground">초대</h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          초대 링크를 만들어 보내면, 받은 사람이 로그인하고 수락해 이 워크스페이스에 참여해요.
-          링크는 <span className="font-[510] text-foreground">한 번만</span> 쓸 수 있어요.
-        </p>
+        {open && (
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            초대 링크를 만들어 보내면, 받은 사람이 로그인하고 수락해 이 워크스페이스에 참여해요.
+            링크는 <span className="font-[510] text-foreground">한 번만</span> 쓸 수 있어요.
+          </p>
+        )}
       </div>
 
       {/* 방금 발급된 링크 — 1회 노출 */}
@@ -128,23 +132,44 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         </ul>
       )}
 
-      {/* 발급 */}
+      {/* 발급 — 평소엔 버튼만. 누르면 역할 선택 + 만들기 폼을 편다(초대 안 할 땐 역할 UI 숨김). */}
       {canWrite ? (
-        <div className="flex items-end gap-2.5">
-          <div className="space-y-1.5">
-            <Label htmlFor="invite-role">역할</Label>
-            <Combobox
-              id="invite-role"
-              value={role}
-              onChange={setRole}
-              options={ROLES.map((r) => ({ value: r }))}
-              className="w-32"
-            />
+        open ? (
+          <div className="flex items-end gap-2.5">
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-role">역할</Label>
+              <Combobox
+                id="invite-role"
+                value={role}
+                onChange={setRole}
+                options={ROLES.map((r) => ({ value: r }))}
+                className="w-32"
+              />
+            </div>
+            <Button onClick={onCreate} disabled={pending}>
+              {pending ? '만드는 중…' : '링크 만들기'}
+            </Button>
+            <button
+              type="button"
+              className="self-end pb-2 text-[12px] text-muted-foreground hover:text-foreground"
+              onClick={() => setOpen(false)}
+              disabled={pending}
+            >
+              닫기
+            </button>
           </div>
-          <Button onClick={onCreate} disabled={pending}>
-            {pending ? '발급 중…' : '초대 링크 만들기'}
+        ) : (
+          <Button
+            type="button"
+            onClick={() => {
+              setOpen(true)
+              setLink(undefined)
+              setError(undefined)
+            }}
+          >
+            초대 링크 만들기
           </Button>
-        </div>
+        )
       ) : (
         <p className="text-[13px] text-muted-foreground">
           초대를 만들거나 취소하려면 관리자 권한이 필요해요.
