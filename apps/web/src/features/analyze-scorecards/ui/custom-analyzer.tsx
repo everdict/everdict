@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link2, Search } from 'lucide-react'
 
 import type { ScorecardRecord } from '@/entities/scorecard'
-import { fmtPct, fmtScore, rateHealth, HEALTH_TEXT, fmtSubject } from '@/shared/lib/format'
+import type { View } from '@/entities/view'
+import { fmtPct, fmtScore, fmtSubject, HEALTH_TEXT, rateHealth } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Combobox, type ComboboxOption } from '@/shared/ui/combobox'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -12,17 +13,18 @@ import { Input } from '@/shared/ui/input'
 import { StatCard } from '@/shared/ui/stat-card'
 
 import {
+  computeAnalysis,
+  configToParams,
+  DIMENSION_LABEL,
+  dimValue,
+  MEASURE_LABEL,
+  metricsOf,
   type AnalysisConfig,
   type Dimension,
   type Measure,
   type Viz,
-  DIMENSION_LABEL,
-  MEASURE_LABEL,
-  computeAnalysis,
-  configToParams,
-  dimValue,
-  metricsOf,
 } from '../model/analysis'
+import { SavedViewsBar } from './saved-views-bar'
 
 type Author = { name: string; avatarUrl?: string }
 
@@ -51,16 +53,34 @@ const VIZ: { value: Viz; label: string }[] = [
 const PRESETS: { label: string; patch: Partial<AnalysisConfig> }[] = [
   {
     label: '리더보드',
-    patch: { groupBy: ['harness', 'model'], measure: 'passRate', viz: 'bars', sort: { by: 'measure', dir: 'desc' } },
+    patch: {
+      groupBy: ['harness', 'model'],
+      measure: 'passRate',
+      viz: 'bars',
+      sort: { by: 'measure', dir: 'desc' },
+    },
   },
-  { label: '하니스별', patch: { groupBy: ['harness'], pivotBy: 'dataset', measure: 'passRate', viz: 'table' } },
+  {
+    label: '하니스별',
+    patch: { groupBy: ['harness'], pivotBy: 'dataset', measure: 'passRate', viz: 'table' },
+  },
   {
     label: '추이',
-    patch: { groupBy: ['day', 'harness'], measure: 'passRate', viz: 'line', sort: { by: 'label', dir: 'asc' } },
+    patch: {
+      groupBy: ['day', 'harness'],
+      measure: 'passRate',
+      viz: 'line',
+      sort: { by: 'label', dir: 'asc' },
+    },
   },
   {
     label: '버전 비교',
-    patch: { groupBy: ['harnessVersion'], measure: 'passRate', viz: 'table', sort: { by: 'label', dir: 'asc' } },
+    patch: {
+      groupBy: ['harnessVersion'],
+      measure: 'passRate',
+      viz: 'table',
+      sort: { by: 'label', dir: 'asc' },
+    },
   },
 ]
 
@@ -93,10 +113,21 @@ function LineChart({
   const n = buckets.length
   const x = (i: number) => pad.l + (n <= 1 ? 0 : (i * (W - pad.l - pad.r)) / (n - 1))
   const y = (v: number) => pad.t + (1 - (v - min) / span) * (H - pad.t - pad.b)
-  const COLORS = ['var(--color-primary)', 'var(--color-success)', 'var(--color-warning)', '#4ea7ff', '#eb5757']
+  const COLORS = [
+    'var(--color-primary)',
+    'var(--color-success)',
+    'var(--color-warning)',
+    '#4ea7ff',
+    '#eb5757',
+  ]
   return (
     <div className="space-y-2 overflow-x-auto rounded-lg border bg-card p-4 shadow-raise">
-      <svg viewBox={`0 0 ${W} ${H}`} className="h-52 w-full min-w-[520px]" role="img" aria-label="점수 추이">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        className="h-52 w-full min-w-[520px]"
+        role="img"
+        aria-label="점수 추이"
+      >
         {series.map((s, si) => {
           const pts = s.points
             .map((v, i) => (v === undefined ? null : `${x(i)},${y(v)}`))
@@ -141,14 +172,25 @@ function LineChart({
 }
 
 // 스코어카드 유연 분석 대시보드 — 필터·그룹·측정·검색으로 리더보드/하니스별/추이/비교를 한 화면에서 구성.
+// 구성한 분석은 이름 붙여 View 로 저장(비공개|공유)하고, 저장된 뷰를 열면 현재 데이터로 재실행(라이브).
 export function CustomAnalyzer({
   scorecards,
   authors,
   initialConfig,
+  savedViews = [],
+  currentSubject = '',
+  canManage = false,
+  isAdmin = false,
+  activeViewId,
 }: {
   scorecards: ScorecardRecord[]
   authors: Record<string, Author>
   initialConfig: AnalysisConfig
+  savedViews?: View[]
+  currentSubject?: string
+  canManage?: boolean
+  isAdmin?: boolean
+  activeViewId?: string
 }) {
   const [config, setConfig] = useState<AnalysisConfig>(initialConfig)
   const [copied, setCopied] = useState(false)
@@ -183,7 +225,10 @@ export function CustomAnalyzer({
   }, [scorecards])
   const metrics = useMemo(() => metricsOf(scorecards), [scorecards])
 
-  const result = useMemo(() => computeAnalysis(scorecards, config, resolveOwner), [scorecards, config, authors])
+  const result = useMemo(
+    () => computeAnalysis(scorecards, config, resolveOwner),
+    [scorecards, config, authors]
+  )
 
   const filterCombo = (
     label: string,
@@ -215,7 +260,10 @@ export function CustomAnalyzer({
     <Combobox
       options={[
         { value: '', label: placeholder },
-        ...GROUP_DIMS.filter((d) => !exclude.includes(d)).map((d) => ({ value: d, label: DIMENSION_LABEL[d] })),
+        ...GROUP_DIMS.filter((d) => !exclude.includes(d)).map((d) => ({
+          value: d,
+          label: DIMENSION_LABEL[d],
+        })),
       ]}
       value={value}
       onChange={(v) => onChange(v as Dimension | '')}
@@ -237,6 +285,16 @@ export function CustomAnalyzer({
 
   return (
     <div className="space-y-4">
+      <SavedViewsBar
+        config={config}
+        onLoad={setConfig}
+        savedViews={savedViews}
+        currentSubject={currentSubject}
+        canManage={canManage}
+        isAdmin={isAdmin}
+        activeViewId={activeViewId}
+      />
+
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard label="스코어카드" value={result.total} hint="필터 적용" />
         <StatCard label="벤치마크" value={opts.dataset.length} />
@@ -288,14 +346,21 @@ export function CustomAnalyzer({
         <Input
           type="date"
           value={config.filters.from ?? ''}
-          onChange={(e) => setConfig((c) => ({ ...c, filters: { ...c.filters, from: e.target.value || undefined } }))}
+          onChange={(e) =>
+            setConfig((c) => ({
+              ...c,
+              filters: { ...c.filters, from: e.target.value || undefined },
+            }))
+          }
           className="w-[140px]"
           aria-label="시작일"
         />
         <Input
           type="date"
           value={config.filters.to ?? ''}
-          onChange={(e) => setConfig((c) => ({ ...c, filters: { ...c.filters, to: e.target.value || undefined } }))}
+          onChange={(e) =>
+            setConfig((c) => ({ ...c, filters: { ...c.filters, to: e.target.value || undefined } }))
+          }
           className="w-[140px]"
           aria-label="종료일"
         />
@@ -304,13 +369,36 @@ export function CustomAnalyzer({
       {/* 형태(그룹·피벗·측정·정렬·시각화) */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card/60 p-2.5">
         <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">그룹</span>
-        {dimCombo(config.groupBy[0] ?? '', (v) => patch({ groupBy: v ? [v, ...(config.groupBy[1] ? [config.groupBy[1]] : [])] : config.groupBy.slice(1) }), '그룹 1', [config.groupBy[1]])}
-        {dimCombo(config.groupBy[1] ?? '', (v) => patch({ groupBy: [config.groupBy[0] ?? 'harness', ...(v ? [v] : [])] }), '그룹 2', [config.groupBy[0]])}
+        {dimCombo(
+          config.groupBy[0] ?? '',
+          (v) =>
+            patch({
+              groupBy: v
+                ? [v, ...(config.groupBy[1] ? [config.groupBy[1]] : [])]
+                : config.groupBy.slice(1),
+            }),
+          '그룹 1',
+          [config.groupBy[1]]
+        )}
+        {dimCombo(
+          config.groupBy[1] ?? '',
+          (v) => patch({ groupBy: [config.groupBy[0] ?? 'harness', ...(v ? [v] : [])] }),
+          '그룹 2',
+          [config.groupBy[0]]
+        )}
         <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">열</span>
-        {dimCombo(config.pivotBy ?? '', (v) => patch({ pivotBy: v || undefined }), '피벗(선택)', config.groupBy)}
+        {dimCombo(
+          config.pivotBy ?? '',
+          (v) => patch({ pivotBy: v || undefined }),
+          '피벗(선택)',
+          config.groupBy
+        )}
         <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">측정</span>
         <Combobox
-          options={(Object.keys(MEASURE_LABEL) as Measure[]).map((m) => ({ value: m, label: MEASURE_LABEL[m] }))}
+          options={(Object.keys(MEASURE_LABEL) as Measure[]).map((m) => ({
+            value: m,
+            label: MEASURE_LABEL[m],
+          }))}
           value={config.measure}
           onChange={(v) => patch({ measure: v as Measure })}
           searchable={false}
@@ -318,7 +406,10 @@ export function CustomAnalyzer({
         />
         {metrics.length > 1 && (
           <Combobox
-            options={[{ value: '', label: '기본 metric' }, ...metrics.map((m) => ({ value: m, label: m }))]}
+            options={[
+              { value: '', label: '기본 metric' },
+              ...metrics.map((m) => ({ value: m, label: m })),
+            ]}
             value={config.metric ?? ''}
             onChange={(v) => patch({ metric: v || undefined })}
             className="w-[140px]"
@@ -327,7 +418,9 @@ export function CustomAnalyzer({
         <button
           type="button"
           onClick={() =>
-            patch({ sort: { by: config.sort.by, dir: config.sort.dir === 'desc' ? 'asc' : 'desc' } })
+            patch({
+              sort: { by: config.sort.by, dir: config.sort.dir === 'desc' ? 'asc' : 'desc' },
+            })
           }
           className="rounded-md border border-border bg-card px-2 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
         >
@@ -342,7 +435,9 @@ export function CustomAnalyzer({
               className={cn(
                 'px-2.5 py-1.5 text-[12px] font-[510] transition-colors',
                 i > 0 && 'border-l border-border',
-                config.viz === v.value ? 'bg-secondary text-foreground' : 'text-muted-foreground hover:text-foreground'
+                config.viz === v.value
+                  ? 'bg-secondary text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
               )}
             >
               {v.label}
@@ -363,7 +458,10 @@ export function CustomAnalyzer({
             const pct = v <= 1 ? v : 0
             return (
               <div key={r.key} className="flex items-center gap-3">
-                <span className="w-48 shrink-0 truncate text-[13px] font-[510]" title={r.labels.join(' · ')}>
+                <span
+                  className="w-48 shrink-0 truncate text-[13px] font-[510]"
+                  title={r.labels.join(' · ')}
+                >
                   {r.labels.join(' · ') || '전체'}
                 </span>
                 <div className="relative h-5 flex-1 overflow-hidden rounded bg-secondary/50">
@@ -372,7 +470,9 @@ export function CustomAnalyzer({
                     style={{ width: `${Math.round(pct * 100)}%` }}
                   />
                 </div>
-                <span className="w-16 shrink-0 text-right">{measureCell(r.value, config.measure)}</span>
+                <span className="w-16 shrink-0 text-right">
+                  {measureCell(r.value, config.measure)}
+                </span>
                 <span className="w-10 shrink-0 text-right text-[11px] text-faint">{r.count}건</span>
               </div>
             )
@@ -395,14 +495,19 @@ export function CustomAnalyzer({
                     </th>
                   ))
                 ) : (
-                  <th className="px-3 py-2 text-right font-[510]">{MEASURE_LABEL[config.measure]}</th>
+                  <th className="px-3 py-2 text-right font-[510]">
+                    {MEASURE_LABEL[config.measure]}
+                  </th>
                 )}
                 <th className="px-3 py-2 text-right font-[510]">건수</th>
               </tr>
             </thead>
             <tbody>
               {result.rows.map((r) => (
-                <tr key={r.key} className="border-b border-border/60 last:border-0 hover:bg-elevated">
+                <tr
+                  key={r.key}
+                  className="border-b border-border/60 last:border-0 hover:bg-elevated"
+                >
                   {r.labels.map((l, i) => (
                     <td key={i} className="px-3 py-2 font-[510] text-foreground">
                       {l || '—'}

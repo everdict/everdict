@@ -88,7 +88,10 @@ function isoWeek(iso: string): string {
   const week =
     1 +
     Math.round(
-      ((d.getTime() - firstThursday.getTime()) / 86_400_000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7
+      ((d.getTime() - firstThursday.getTime()) / 86_400_000 -
+        3 +
+        ((firstThursday.getUTCDay() + 6) % 7)) /
+        7
     )
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
 }
@@ -134,7 +137,11 @@ function scoreOf(sc: ScorecardRecord, metric: string | undefined): number | unde
 }
 
 // 그룹(스코어카드 묶음)의 측정값.
-function aggregate(cards: ScorecardRecord[], metric: string | undefined, measure: Measure): number | undefined {
+function aggregate(
+  cards: ScorecardRecord[],
+  metric: string | undefined,
+  measure: Measure
+): number | undefined {
   if (cards.length === 0) return undefined
   if (measure === 'count') return cards.length
   if (measure === 'latest') {
@@ -150,16 +157,25 @@ function aggregate(cards: ScorecardRecord[], metric: string | undefined, measure
 // 워크스페이스의 모든 metric 이름(빈도순) + 기본 metric.
 export function metricsOf(scorecards: ScorecardRecord[]): string[] {
   const freq = new Map<string, number>()
-  for (const sc of scorecards) for (const s of sc.summary ?? []) freq.set(s.metric, (freq.get(s.metric) ?? 0) + 1)
+  for (const sc of scorecards)
+    for (const s of sc.summary ?? []) freq.set(s.metric, (freq.get(s.metric) ?? 0) + 1)
   return [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m)
 }
 
 // 필터 통과?
-function passesFilters(sc: ScorecardRecord, c: AnalysisConfig, resolveOwner: (s: string) => string): boolean {
+function passesFilters(
+  sc: ScorecardRecord,
+  c: AnalysisConfig,
+  resolveOwner: (s: string) => string
+): boolean {
   const f = c.filters
-  if (!c.includeIncomplete && (sc.status === 'superseded' || sc.status === 'queued' || sc.status === 'running'))
+  if (
+    !c.includeIncomplete &&
+    (sc.status === 'superseded' || sc.status === 'queued' || sc.status === 'running')
+  )
     return false
-  const inList = (list: string[] | undefined, v: string) => !list || list.length === 0 || list.includes(v)
+  const inList = (list: string[] | undefined, v: string) =>
+    !list || list.length === 0 || list.includes(v)
   if (!inList(f.dataset, sc.dataset.id)) return false
   if (!inList(f.harness, sc.harness.id)) return false
   if (!inList(f.model, dimValue(sc, 'model'))) return false
@@ -270,18 +286,41 @@ export function computeAnalysis(
           ),
         }))
       : []
-    return { key, labels, count: cards.length, value: aggregate(cards, metric, config.measure), cells }
+    return {
+      key,
+      labels,
+      count: cards.length,
+      value: aggregate(cards, metric, config.measure),
+      cells,
+    }
   })
 
   const dir = config.sort.dir === 'asc' ? 1 : -1
   rows = rows.sort((a, b) => {
-    if (config.sort.by === 'label') return dir * a.labels.join(' ').localeCompare(b.labels.join(' '))
+    if (config.sort.by === 'label')
+      return dir * a.labels.join(' ').localeCompare(b.labels.join(' '))
     const av = a.value ?? -Infinity
     const bv = b.value ?? -Infinity
     return dir * (av - bv)
   })
 
   return { kind: 'grid', rows, pivotKeys, metric, total: filtered.length }
+}
+
+const VIZ_LABEL: Record<Viz, string> = { table: '표', bars: '막대', line: '추이' }
+
+// config 를 사람이 읽는 짧은 칩 목록으로 — View 카드가 스스로를 설명하게(그룹·열·측정·형태·필터 수).
+export function describeConfig(c: AnalysisConfig): string[] {
+  const chips: string[] = []
+  if (c.groupBy.length) chips.push(`그룹 ${c.groupBy.map((d) => DIMENSION_LABEL[d]).join('·')}`)
+  if (c.pivotBy) chips.push(`열 ${DIMENSION_LABEL[c.pivotBy]}`)
+  chips.push(MEASURE_LABEL[c.measure])
+  chips.push(VIZ_LABEL[c.viz])
+  const activeFilters = Object.values(c.filters).filter((v) =>
+    Array.isArray(v) ? v.length > 0 : Boolean(v)
+  ).length
+  if (activeFilters > 0) chips.push(`필터 ${activeFilters}`)
+  return chips
 }
 
 // ── URL 코덱 (config ↔ query) — 딥링크/공유용. ────────────────────────────────
@@ -306,6 +345,19 @@ export function configToParams(c: AnalysisConfig): URLSearchParams {
   p.set('viz', c.viz)
   if (c.includeIncomplete) p.set('incomplete', '1')
   return p
+}
+
+// ── View 저장 코덱 — config 를 평면 문자열 맵(jsonb 안전)으로 저장하고, paramsToConfig 로 검증하며 복원. ──
+// 저장은 스냅샷이 아니라 "레시피"라, 열 때 paramsToConfig 가 모든 필드를 정규화한다(오형식이어도 안전한 config).
+export function configToStored(c: AnalysisConfig): Record<string, string> {
+  return Object.fromEntries(configToParams(c))
+}
+export function storedToConfig(raw: unknown): AnalysisConfig {
+  const rec: Record<string, string | undefined> = {}
+  if (raw && typeof raw === 'object')
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>))
+      if (typeof v === 'string') rec[k] = v
+  return paramsToConfig(rec)
 }
 
 const DIMS = new Set<string>(Object.keys(DIMENSION_LABEL))

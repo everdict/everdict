@@ -2,14 +2,12 @@ import Link from 'next/link'
 
 import {
   CustomAnalyzer,
-  ScorecardAnalyzer,
+  loadAnalysisData,
   paramsToConfig,
+  ScorecardAnalyzer,
+  storedToConfig,
   type QuestionId,
 } from '@/features/analyze-scorecards'
-import { membersSchema } from '@/entities/member'
-import { scorecardsSchema } from '@/entities/scorecard'
-import { currentPrincipal } from '@/shared/auth/principal'
-import { controlPlane } from '@/shared/lib/control-plane'
 import { cn } from '@/shared/lib/utils'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -17,7 +15,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 스코어카드 분석 — 쉬운(질문 3개) · 커스텀(유연 피벗) 두 모드.
+// 스코어카드 분석 — 쉬운(질문 3개) · 커스텀(유연 피벗) 두 모드. 저장된 뷰는 1급 객체(/{ws}/views).
 // 설계: docs/architecture/scorecard-analysis-views.md.
 export default async function AnalyzePage({
   params,
@@ -31,31 +29,17 @@ export default async function AnalyzePage({
   const flat: Record<string, string | undefined> = {}
   for (const [k, v] of Object.entries(sp)) flat[k] = Array.isArray(v) ? v[0] : v
 
-  const mode = flat.mode === 'custom' ? 'custom' : 'easy'
   const initialQuestion: QuestionId =
     flat.q === 'models' || flat.q === 'harnesses' ? flat.q : 'trend'
   const initialHarness = flat.h ?? ''
   const nowIso = new Date().toISOString()
 
-  const { ctx } = await currentPrincipal()
-  let error: string | undefined
-  let scorecards = scorecardsSchema.parse([])
-  try {
-    scorecards = scorecardsSchema.parse(await controlPlane.listScorecards(ctx))
-  } catch (e) {
-    error = e instanceof Error ? e.message : String(e)
-  }
+  const { scorecards, authors, savedViews, subject, canManage, isAdmin, error } =
+    await loadAnalysisData()
 
-  const members = await controlPlane
-    .listMembers(ctx)
-    .then((r) => membersSchema.parse(r))
-    .catch(() => [])
-  const authors: Record<string, { name: string; avatarUrl?: string }> = {}
-  for (const m of members)
-    authors[m.subject] = {
-      name: m.name ?? m.email?.split('@')[0] ?? m.subject,
-      ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
-    }
+  // ?view=<id> 딥링크 — 저장된 View 를 열면 그 config 로 커스텀 모드 진입(라이브 재실행).
+  const linkedView = flat.view ? savedViews.find((v) => v.id === flat.view) : undefined
+  const mode = flat.mode === 'custom' || linkedView ? 'custom' : 'easy'
 
   const seg = (active: boolean) =>
     cn(
@@ -74,7 +58,10 @@ export default async function AnalyzePage({
         }
         actions={
           <div className="inline-flex overflow-hidden rounded-lg border bg-card shadow-raise">
-            <Link href={`/${workspace}/scorecards/analyze?mode=easy`} className={seg(mode === 'easy')}>
+            <Link
+              href={`/${workspace}/scorecards/analyze?mode=easy`}
+              className={seg(mode === 'easy')}
+            >
               쉬운 분석
             </Link>
             <Link
@@ -94,7 +81,16 @@ export default async function AnalyzePage({
           hint="스코어카드를 실행하면 여기서 분석할 수 있어요."
         />
       ) : mode === 'custom' ? (
-        <CustomAnalyzer scorecards={scorecards} authors={authors} initialConfig={paramsToConfig(flat)} />
+        <CustomAnalyzer
+          scorecards={scorecards}
+          authors={authors}
+          initialConfig={linkedView ? storedToConfig(linkedView.config) : paramsToConfig(flat)}
+          savedViews={savedViews}
+          currentSubject={subject}
+          canManage={canManage}
+          isAdmin={isAdmin}
+          activeViewId={linkedView?.id}
+        />
       ) : (
         <ScorecardAnalyzer
           scorecards={scorecards}

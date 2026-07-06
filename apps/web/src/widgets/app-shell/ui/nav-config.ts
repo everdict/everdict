@@ -1,6 +1,7 @@
 import {
   Activity,
   BarChart3,
+  Bookmark,
   Boxes,
   CalendarClock,
   Database,
@@ -26,7 +27,7 @@ export interface NavSection {
 }
 
 // SaaS 표면의 1급 개념: 하니스(무엇을) · 벤치마크(무엇으로) · 스코어카드(결과) · 런타임(어디서, 워크스페이스가
-// 직접 등록하는 실행 인프라 — 기본 시드 없음) + 흐름(예약/작업) + 홈(개요).
+// 직접 등록하는 실행 인프라 — 기본 시드 없음) + 흐름(뷰/예약/작업) + 홈(개요).
 // judge/metric/model/recipe/bundle 은 엔진 부품/고급 옵션 — 내비에서 제외(라우트는 남아 URL 로 접근 가능).
 export const NAV_SECTIONS: NavSection[] = [
   {
@@ -49,6 +50,12 @@ export const NAV_SECTIONS: NavSection[] = [
         label: '스코어카드',
         icon: BarChart3,
         keywords: 'scorecard 배치 평가 비교 리더보드 leaderboard 추이',
+      },
+      {
+        href: '/views',
+        label: '뷰',
+        icon: Bookmark,
+        keywords: 'view 뷰 분석 저장 대시보드 리더보드 추이 비교 피벗',
       },
       {
         href: '/schedules',

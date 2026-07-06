@@ -125,21 +125,45 @@ mem/Pg stores, Zod at every boundary, web is a pure HTTP mirror.
   (`leaderboard`/`trend`/`diff`) stay for MCP/agents; the web dashboard computes from `listScorecards`.
 - Reuse: by-harness grouping logic, trend SVG sparkline, `shared/lib/format`, `shared/ui/{score,chip,stat-card}`.
 
-### S2 — `View` entity (persist & load)
-- `@assay/db`: `ViewStore` interface + `InMemoryViewStore` + `PgViewStore` + numbered migration
-  (`assay_views`: id, tenant, name, config `jsonb`, visibility, created_by, created_at, updated_at; index on
-  `(tenant, visibility)` and `(tenant, created_by)`).
-- `apps/api`: `ViewService` (CRUD + ownership gate) + routes `POST/GET/GET :id/PATCH :id/DELETE :id /views` +
-  `views:read`(viewer+) / `views:write`(member+) authz actions; MCP tools `create/list/get/update/delete_view`
-  (BFF↔MCP parity). `config` validated by the same Zod `AnalysisConfigSchema` shared with the dashboard shape.
-- `apps/web`: `entities/view` (Zod mirror) + save-current-config / load / list. Opening a View hydrates the
-  dashboard from its `config`.
+### S2 — `View` entity (persist & load) — **SHIPPED**
+- `@assay/db`: `ViewStore` interface + `InMemoryViewStore` + `PgViewStore` + migration `0038_create_views.sql`
+  (`assay_views`: id, tenant, name, config `jsonb`, visibility, created_by, created_at, updated_at; single index
+  `(tenant, visibility, created_at DESC)` — the one read path is "workspace-shared + my-private, newest first").
+  `listVisible(tenant, subject)` = `visibility='workspace' OR created_by=subject`.
+- `apps/api`: `ViewService` (CRUD + ownership gate — edit/delete = creator **or** workspace admin, via injected
+  `actor{subject,isAdmin}`, mirrors `ScheduleService`) + routes `POST/GET/GET :id/PATCH :id/DELETE :id /views` +
+  MCP tools `create/list/get/update/delete_view` (BFF↔MCP parity).
+  - **authz reuse (no new actions):** reads gate on `scorecards:read`, writes on `scorecards:run`. A View is just a
+    saved lens over scorecards, so it inherits scorecard permissions rather than introducing a `views:*` axis.
+  - `config` is **opaque** (`z.unknown()` → jsonb) at the control plane; the **web** owns its shape. Stored as the
+    flat params form (`configToStored` = `Object.fromEntries(configToParams)`), so loading (`storedToConfig` →
+    `paramsToConfig`) re-validates/normalizes every field and can never yield an invalid config. Recipe, not
+    snapshot — no result data is persisted.
+  - Read of another workspace's / another user's private View → **404** (existence-leak-safe), not 403.
+- `apps/web`: `entities/view` (Zod mirror) + `SavedViewsBar` (save-current / list / load / owner manage) wired into
+  `CustomAnalyzer`. Opening a View hydrates the dashboard from its `config` and re-runs over current data.
 
-### S3 — Sharing + live
-- Visibility toggle (`private ↔ workspace`) in the web + control-plane enforcement; shared Views list for members;
-  **fork** action for non-owners. Deep-link `/{ws}/scorecards/analyze?view=<id>`.
-- "Live" is inherent (re-run on open). Add a subtle "N개 스코어카드 기준 · 방금" freshness line so it's clear the
-  View reflects current data.
+### S2b — View as a **first-class object** (nav + own routes) — **SHIPPED**
+Views aren't buried inside the analyze dashboard; they're a top-level concept.
+- **Sidebar nav** entry "뷰" (`nav-config.ts`, `Bookmark`) → `/{ws}/views`; auto-appears in the command palette
+  (`ALL_NAV_ITEMS`).
+- `/{ws}/views` — **list/manage** page: `ViewList` cards (name · visibility badge · `describeConfig` config-summary
+  chips · owner avatar · "n분 전 수정" · ⋯ kebab[share-toggle / delete for owner-or-admin]). Empty-state CTA →
+  build one in the analyze dashboard.
+- `/{ws}/views/[id]` — **open** page (clean canonical URL): renders `CustomAnalyzer` hydrated from the View's
+  `config`, live re-run; missing/other-user-private → `notFound()` (404, existence-leak-safe).
+- Shared server loader `loadAnalysisData()` (`api/load-analysis-data.ts`, `server-only`) dedupes the
+  scorecards+members+views+principal fetch across the analyze dashboard, `/views`, and `/views/[id]`. Returns
+  `{scorecards, authors, savedViews, subject, canManage, isAdmin}`; `isAdmin` lets admins manage others' shared
+  Views from both the list kebab and the `SavedViewsBar`.
+
+### S3 — Sharing + live — **SHIPPED (fork deferred)**
+- Visibility toggle (`private ↔ workspace`) in the owner-manage row + control-plane enforcement; shared Views listed
+  for all members; deep-link `/{ws}/scorecards/analyze?view=<id>` (server resolves the linked View → custom mode →
+  live re-run). "Copy link" for shared Views.
+- "Live" is inherent (re-run on open) — the dashboard footer already reads "N개 스코어카드 기준 · 현재 데이터로 실시간 집계".
+- **Deferred:** a **fork** action for non-owners (copy a shared View into a private one). Not yet built; non-owners
+  load-and-tweak (URL state) but can't persist over someone else's View.
 
 ### S4 — (optional / future)
 - Server-side `POST /scorecards/analyze` (config → grouped result) for large workspaces where client-side pivot
