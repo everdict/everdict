@@ -16,7 +16,7 @@ import { SettingsTabs } from './settings-tabs'
 
 export const dynamic = 'force-dynamic'
 
-// 워크스페이스 설정 — 정책·모델 키·클러스터 자격증명·멤버(+ 이 워크스페이스에 연결된 애플리케이션 로스터, 읽기 전용).
+// 워크스페이스 설정 — 정책·시크릿·멤버(+ 이 워크스페이스에 연결된 애플리케이션 로스터, 읽기 전용).
 // 외부 계정 연결의 연결/해제(관리)는 개인 소유라 계정(account) 페이지에 있다. 여기 로스터는 만들어진 워크스페이스 기준(members:read).
 // searchParams.tab — 계정→연결 탭의 "통합 설정 →" 딥링크가 통합 탭으로 바로 안착하도록 받는다.
 export default async function SettingsPage({

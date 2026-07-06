@@ -108,8 +108,11 @@ panel/list guidance is not.
   via secrets, not the spec) with `authSecret`/`server`/`kubeconfigSecret` fields + a **연결 테스트** button (nomad/k8s) that runs
   the live probe (`POST /runtimes/probe`) to confirm the cluster actually responds before committing. The scorecard
   실행 form gains a 런타임 selector. See `docs/runtimes.md`.
-- **워크스페이스 설정 `/{workspace}/settings`** — admin-gated 탭: 일반 · 모델 키 · 클러스터 자격증명 ·
-  **통합**(GitHub App · Mattermost) · CI · 공유 러너 · 멤버. **일반 탭**: 워크스페이스 카드(`features/workspace-settings`
+- **워크스페이스 설정 `/{workspace}/settings`** — admin-gated 탭: 일반 · **시크릿** ·
+  **통합**(GitHub App · Mattermost) · CI · 공유 러너 · 멤버. **시크릿 탭**: 프로바이더 토큰 큐레이션 + 직접
+  추가한 시크릿의 **단일 목록** — the SecretStore is one flat namespace, so one list (splitting by purpose
+  showed the same secrets twice); multi-line values (kubeconfig) are a toggle on the add form, and legacy
+  `?tab=model|cluster` deep links land on this tab. **일반 탭**: 워크스페이스 카드(`features/workspace-settings`
   `WorkspaceInfoCard`) — 로고 **파일 업로드**(`shared/lib/image-resize` 로 256px data URL, 유저 아바타와 동일
   방식)·이름 수정 + **URL(slug) 읽기 전용**(복사; slug=tenant 키라 불변) → `PATCH /workspace`. 그 아래 사용량
   계측 정책(`SettingsForm`), 그리고 **owner 에게만** 위험 구역(`features/delete-workspace` `DeleteWorkspaceCard`):

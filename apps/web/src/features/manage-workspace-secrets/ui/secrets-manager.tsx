@@ -20,29 +20,21 @@ import { deleteSecretAction, setSecretAction } from '../api/manage-secrets'
 
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
-// model/cluster = 워크스페이스(공유) 시크릿(안내만 다름), personal = 내 개인 시크릿(계정 화면, 셀프 관리).
-// desc = 헤더 한 줄, help = info 툴팁 상세(가이드는 인라인 금지 — 아이콘 툴팁으로), multiline = 값이 여러 줄(kubeconfig).
+// workspace = 워크스페이스(공유) 시크릿 — 저장소가 카테고리 없는 단일 평면 네임스페이스라 UI 도 한 목록
+// (모델 키·클러스터 자격증명을 나누면 같은 시크릿이 양쪽에 중복 노출된다). personal = 내 개인 시크릿(계정 화면, 셀프 관리).
+// desc = 헤더 한 줄, help = info 툴팁 상세(가이드는 인라인 금지 — 아이콘 툴팁으로).
 const COPY = {
-  model: {
-    title: '모델·프로바이더 키',
-    desc: '이 워크스페이스의 실행·채점에 쓰이는 키예요.',
-    help: '실행할 때 이 워크스페이스의 작업에만 주입돼요. 하니스 env 에서 “워크스페이스” 시크릿으로 참조할 수 있어요.',
+  workspace: {
+    title: '워크스페이스 시크릿',
+    desc: '실행·채점과 런타임 연결에 쓰는 공유 키 — 모델 키·NOMAD_TOKEN·kubeconfig 등.',
+    help: '하니스 env 의 “워크스페이스” 시크릿 참조, 런타임 등록의 자격증명 이름으로 소비돼요. 각 용도엔 참조된 값만 쓰여요.',
     namePlaceholder: 'OPENAI_API_KEY',
-    multiline: false,
-  },
-  cluster: {
-    title: '클러스터 자격증명',
-    desc: '런타임 연결용 — NOMAD_TOKEN·K8s 토큰·kubeconfig 등.',
-    help: '클러스터 인증에만 쓰이고 실행 작업에는 노출되지 않아요.',
-    namePlaceholder: 'NOMAD_TOKEN',
-    multiline: true,
   },
   personal: {
     title: '내 개인 시크릿',
     desc: '나만 쓰는 개인 키 — 다른 멤버는 볼 수 없어요.',
     help: '하니스 env 에서 “내 개인” 스코프로 참조하면 그 하니스는 나만 실행·열람할 수 있어요.',
     namePlaceholder: 'MY_OPENAI_API_KEY',
-    multiline: false,
   },
 } as const
 
@@ -51,16 +43,15 @@ export function SecretsManager({
   secrets,
   canWrite,
 }: {
-  variant: 'model' | 'cluster' | 'personal'
+  variant: 'workspace' | 'personal'
   secrets: SecretMeta[]
   canWrite: boolean
 }) {
   const copy = COPY[variant]
-  // personal = 개인(user) 스코프(셀프 관리), 그 외 = 워크스페이스(공유, admin).
+  // personal = 개인(user) 스코프(셀프 관리), workspace = 공유(admin).
   const scope: SecretScope = variant === 'personal' ? 'user' : 'workspace'
-  // 프로바이더 토큰(예약 이름, 플랫폼이 소비) — model/personal 화면에서 큐레이션. cluster 는 해당 없음.
-  const providers =
-    variant === 'cluster' ? [] : PROVIDER_TOKENS.filter((t) => t.scopes.includes(scope))
+  // 프로바이더 토큰(예약 이름, 플랫폼이 소비) — 스코프에서 소비되는 것만 큐레이션.
+  const providers = PROVIDER_TOKENS.filter((t) => t.scopes.includes(scope))
   // raw 목록에선 프로바이더 토큰을 제외(이중 노출 방지 — 위 큐레이션 섹션이 그 자리).
   const rawSecrets = secrets.filter((s) => !(providerTokenNames.has(s.name) && s.scope === scope))
 
@@ -97,7 +88,6 @@ export function SecretsManager({
         secrets={rawSecrets}
         canWrite={canWrite}
         scope={scope}
-        multiline={copy.multiline}
         namePlaceholder={copy.namePlaceholder}
         {...(providers.length > 0 ? { sectionLabel: '직접 추가한 시크릿' } : {})}
       />
@@ -232,7 +222,6 @@ function ProviderTokenRows({
       {editing && (
         <AddSecretForm
           scope={scope}
-          multiline={false}
           namePlaceholder=""
           fixedName={editing}
           onDone={() => setEditing(undefined)}
@@ -253,14 +242,12 @@ function SecretRows({
   secrets,
   canWrite,
   scope,
-  multiline,
   namePlaceholder,
   sectionLabel,
 }: {
   secrets: SecretMeta[]
   canWrite: boolean
   scope: SecretScope
-  multiline: boolean
   namePlaceholder: string
   sectionLabel?: string // 프로바이더 토큰 섹션과 병렬일 때 구분 라벨
 }) {
@@ -309,7 +296,6 @@ function SecretRows({
       {canWrite && adding && (
         <AddSecretForm
           scope={scope}
-          multiline={multiline}
           namePlaceholder={namePlaceholder}
           onDone={() => setAdding(false)}
           onCancel={() => setAdding(false)}
@@ -370,18 +356,16 @@ function SecretRows({
   )
 }
 
-// 토글되는 인라인 추가 폼 — 이름 + 값(비-멀티라인은 보기 토글) + 저장/취소. 카드 안에 컴팩트하게.
-// fixedName = 프로바이더 토큰(예약 이름): 이름 입력을 숨기고 값만 받는다.
+// 토글되는 인라인 추가 폼 — 이름 + 값(한 줄 ↔ 여러 줄 전환, 한 줄은 보기 토글) + 저장/취소. 카드 안에 컴팩트하게.
+// fixedName = 프로바이더 토큰(예약 이름): 이름 입력을 숨기고 값만(한 줄) 받는다.
 function AddSecretForm({
   scope,
-  multiline,
   namePlaceholder,
   fixedName,
   onDone,
   onCancel,
 }: {
   scope: SecretScope
-  multiline: boolean
   namePlaceholder: string
   fixedName?: string
   onDone: () => void
@@ -390,6 +374,7 @@ function AddSecretForm({
   const [name, setName] = useState(fixedName ?? '')
   const [value, setValue] = useState('')
   const [show, setShow] = useState(false)
+  const [multiline, setMultiline] = useState(false) // kubeconfig 같은 여러 줄 값 입력 전환
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
   const nameInvalid = name.length > 0 && !NAME_RE.test(name)
@@ -424,7 +409,18 @@ function AddSecretForm({
           </div>
         )}
         <div className="space-y-1.5">
-          <Label htmlFor="secret-value">값</Label>
+          <div className="flex items-center justify-between gap-2">
+            <Label htmlFor="secret-value">값</Label>
+            {!fixedName && (
+              <button
+                type="button"
+                className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
+                onClick={() => setMultiline((v) => !v)}
+              >
+                {multiline ? '한 줄 값으로' : '여러 줄 값으로 (kubeconfig 등)'}
+              </button>
+            )}
+          </div>
           {multiline ? (
             <Textarea
               id="secret-value"

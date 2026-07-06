@@ -84,7 +84,7 @@ unreachable address. The credential is used only for the probe's auth header (ne
   **kind-toggle form** (local | nomad | k8s) with a validate (dry-run) step → `POST /runtimes` (role 무관 — any member
   can register). The form takes secret **names** (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets`
   (names referenced but not yet in the SecretStore) as a non-blocking warning. Store the values in 워크스페이스 설정
-  → 클러스터 자격증명. A **연결 테스트** button (nomad/k8s) runs the live probe (`POST /runtimes/probe`) and shows
+  → 시크릿. A **연결 테스트** button (nomad/k8s) runs the live probe (`POST /runtimes/probe`) and shows
   reachable/detail before you commit.
 - The scorecard **실행** form gains a **런타임** selector (defaults to the global backend).
 

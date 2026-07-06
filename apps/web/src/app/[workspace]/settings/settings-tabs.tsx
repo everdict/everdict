@@ -18,10 +18,11 @@ import type { SecretMeta } from '@/entities/secret'
 import type { WorkspaceRecord } from '@/entities/workspace'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
-type TabKey = 'general' | 'model' | 'cluster' | 'integrations' | 'ci' | 'runners' | 'members'
+type TabKey = 'general' | 'secrets' | 'integrations' | 'ci' | 'runners' | 'members'
 
-// 워크스페이스 설정 탭: 일반(정보/정책/삭제) · 모델 키 · 클러스터 자격증명 · 통합(GitHub App/Mattermost) · CI · 공유 러너 · 멤버.
+// 워크스페이스 설정 탭: 일반(정보/정책/삭제) · 시크릿 · 통합(GitHub App/Mattermost) · CI · 공유 러너 · 멤버.
 // 권한 없는 탭은 숨긴다. "통합" 탭은 워크스페이스 소유 GitHub App(조직 설치→선택 repo)과 Mattermost 알림을 관리한다.
+// 시크릿은 단일 탭 — 저장소가 카테고리 없는 평면 네임스페이스라 모델 키/클러스터 자격증명으로 나누면 같은 목록이 중복 노출된다.
 export function SettingsTabs(props: {
   workspace?: WorkspaceRecord // 활성 워크스페이스 레코드(이름/로고/소유자) — settings:read 일 때만
   isOwner: boolean // owner 면 위험 구역(삭제) 노출
@@ -42,8 +43,7 @@ export function SettingsTabs(props: {
 }) {
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
     { key: 'general', label: '일반', show: props.canReadSettings },
-    { key: 'model', label: '모델 키', show: props.canReadSecrets },
-    { key: 'cluster', label: '클러스터 자격증명', show: props.canReadSecrets },
+    { key: 'secrets', label: '시크릿', show: props.canReadSecrets },
     { key: 'integrations', label: '통합', show: props.canReadSettings },
     { key: 'ci', label: 'CI 연동', show: props.canReadSettings },
     { key: 'runners', label: '공유 러너', show: props.canWriteSettings },
@@ -51,7 +51,10 @@ export function SettingsTabs(props: {
   ]
   const visible = tabs.filter((t) => t.show)
   // ?tab= 가 보이는 탭 중 하나면 그 탭으로, 아니면 첫 표시 탭.
-  const requestedTab = visible.find((t) => t.key === props.initialTab)?.key
+  // model/cluster = 시크릿이 두 탭이던 시절의 구 딥링크 — 병합 탭으로 흡수.
+  const wantedTab =
+    props.initialTab === 'model' || props.initialTab === 'cluster' ? 'secrets' : props.initialTab
+  const requestedTab = visible.find((t) => t.key === wantedTab)?.key
   const defaultTab = requestedTab ?? visible[0]?.key ?? 'general'
 
   return (
@@ -81,12 +84,9 @@ export function SettingsTabs(props: {
           )}
         </div>
       </TabsContent>
-      <TabsContent value="model">
-        <SecretsManager variant="model" secrets={props.secrets} canWrite={props.canWriteSecrets} />
-      </TabsContent>
-      <TabsContent value="cluster">
+      <TabsContent value="secrets">
         <SecretsManager
-          variant="cluster"
+          variant="workspace"
           secrets={props.secrets}
           canWrite={props.canWriteSecrets}
         />
