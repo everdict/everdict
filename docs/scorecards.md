@@ -103,6 +103,18 @@ hardcoded. No raw token crosses the API boundary — same discipline as runtimes
 non-2xx surfaces as the run going `failed` (`UpstreamError`); a `404` (trace not present yet) degrades to an empty
 trace. MLflow uses the 3.x tracing REST (`GET /api/3.0/mlflow/traces/get`, OTLP-style spans).
 
+### Trace sink (export judged detail to the team's observability platform)
+The outbound mirror of pull-ingest. If the workspace registered a **trace sink**
+(`GET/PUT/DELETE /workspace/trace-sink` — kind `mlflow|langfuse|langsmith|phoenix` + endpoint +
+`authSecretName` name-ref + per-kind `project`), every scorecard (live batch **and** ingest) exports each
+case's trace+scores to that platform right after judging, and the record carries the outcome in
+**`export`** (`{sink, status: succeeded|partial|failed, url?, message?, cases[{caseId, externalId, url?,
+error?}], exportedAt}`; Pg `sink_export` jsonb, mig 0048; detail-only — omitted from `list` like `steps`).
+Export failure never fails the scorecard — the steps timeline gains an `export` entry and the detail page
+shows status + deep links; `error.phase` is never set by export. **Attach-back (flow ②):** a pull-ingest
+whose `source.kind` matches the sink kind attaches scores to the **original** trace ids (from the request's
+`runs` mapping) instead of duplicating traces. Design SSOT: `docs/architecture/trace-sink.md`.
+
 All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service core, one auth core. See
 `docs/api.md`, `docs/mcp.md`, `docs/web.md`, `docs/datasets.md`, `docs/suites.md`.
 

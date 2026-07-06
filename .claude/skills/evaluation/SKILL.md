@@ -61,6 +61,15 @@ resolve, missing key ⇒ explicit `skip` score, never silent). Score metric = `j
 `POST /scorecards/ingest/pull`: pull per-run traces from a tenant OTel/MLflow via `@assay/trace`
 `buildTraceSource` (`source.authSecret` → SecretStore value → verbatim `Authorization` header), then score.
 
+## Trace sink (export judged detail OUT — outbound mirror of ingest)
+If the workspace registered a **trace sink** (`WorkspaceSettings.traceSink`: MLflow/Langfuse/LangSmith/Phoenix,
+routes `/workspace/trace-sink`), the pipeline exports each case's trace+scores to that platform after judging
+(`TraceSinkService.exportScorecard` → `@assay/trace` `buildTraceSink`), records the outcome on
+`ScorecardRecord.export` (mig 0048 `sink_export` jsonb, detail-only like `steps`), and the web shows summary +
+deep links. **Export failure NEVER fails the scorecard** (outcome-only; `error.phase` untouched). Pull-ingest
+whose `source.kind` equals the sink kind **attaches scores to the original trace** (no duplication) — the
+`runs[{caseId,runId}]` mapping flows through as `attach`. SSOT `docs/architecture/trace-sink.md` + rule `trace`.
+
 ## Saved Views
 `apps/api/src/view-service.ts` + `packages/db/src/view-store.ts` — private|workspace saved scorecard-analysis
 lenses (opaque `config`, live re-run). AuthZ **reuses** `scorecards:read` (read) / `scorecards:run` (write) —
