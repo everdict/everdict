@@ -58,8 +58,10 @@ resolve, missing key ⇒ explicit `skip` score, never silent). Score metric = `j
 ## Trace ingest (no harness run)
 `POST /scorecards/ingest` (push): upload externally-run `TraceEvent[]`; re-derive trace graders
 (steps/cost/latency) + keep uploaded scores, then judge + aggregate (`ScorecardService.ingest`).
-`POST /scorecards/ingest/pull`: pull per-run traces from a tenant OTel/MLflow via `@assay/trace`
-`buildTraceSource` (`source.authSecret` → SecretStore value → verbatim `Authorization` header), then score.
+`POST /scorecards/ingest/pull`: pull per-run traces from the tenant's platform via `@assay/trace`
+`buildTraceSource` — kinds `otel|mlflow|langfuse|langsmith|phoenix` (`source.authSecret` → SecretStore value;
+otel/mlflow = verbatim `Authorization` header, the newer three place the value in their platform's header —
+langsmith `x-api-key`; phoenix needs `source.project`), then score.
 
 ## Trace sink (export judged detail OUT — outbound mirror of ingest)
 If the workspace registered a **trace sink** (`WorkspaceSettings.traceSink`: MLflow/Langfuse/LangSmith/Phoenix,

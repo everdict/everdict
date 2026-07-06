@@ -125,9 +125,9 @@ Verified against official docs / OpenAPI / proto / source (2026-07):
 
 | kind | auth header (secret value) | create (flow ①) | attach (flow ②) | deep link |
 |---|---|---|---|---|
-| `mlflow` | `Authorization` verbatim (`Basic …`; OSS default is no auth) | `POST /api/3.0/mlflow/traces` (StartTraceV3, `trace_info` only — client-supplied `tr-<32hex>` id, `trace_location.mlflow_experiment.experiment_id` = `project`). **The `spans` array is ignored by the server**; span upload is a separate OTLP path (JSON only ≥3.12) → v1 exports trace-info (previews + metadata) + assessments, spans are a follow-up. `project` required for create; per-case honest error without it. | `POST /api/3.0/mlflow/traces/{trace_id}/assessments` — field is **`assessment_name`** (not `name`); `source.source_type` `LLM_JUDGE`(judge:*) / `CODE` + `source_id` required; `rationale` top-level; `feedback.value` = score | `{web}/#/experiments/{project}/traces?selectedEvaluationId={id}` (≥3.6 UI) |
-| `langfuse` | `Authorization: Basic base64(pk:sk)` verbatim | `POST /api/public/ingestion` — one batch (`{batch:[{id,type,timestamp,body}]}`; envelope `id` = dedup key): `trace-create` + `generation-create` (**`usageDetails`/`costDetails`**, not deprecated `usage`) + `span-create` (tool calls) + `score-create`. Response **207**; `errors[].id` → event → case (partial isolation). 3.5 MB batch cap (splitting = follow-up). | `score-create` events with `traceId` = existing id (no trace-create) | `{web}/project/{project}/traces/{id}`; without project: `{web}/trace/{id}` server-side redirect |
-| `langsmith` | **`x-api-key`** (raw key — not Authorization) | `POST /runs` (bare path, like the SDK) per case — client uuid, root run `trace_id` = own id, one-shot with `outputs`/`end_time`, `session_name` = `project` (auto-creates) | `POST /feedback` (`run_id`, `key`, `score`, `comment`, `feedback_source.type` `model`(judge)/`api`). Run ingest is async (202) → one 404-retry | per-case link needs tenant/project uuids → v1 links the web base only (follow-up: `GET /runs/{id}`.`app_path`) |
+| `mlflow` | `Authorization` verbatim (`Basic …`; OSS default is no auth) | `POST /api/3.0/mlflow/traces` (StartTraceV3, `trace_info` only — client-supplied `tr-<32hex>` id, `trace_location.mlflow_experiment.experiment_id` = `project`; **the `spans` array is ignored by the server**) **+ spans via OTLP/JSON `POST /v1/traces`** (`x-mlflow-experiment-id` header; attrs emitted in the OTel GenAI conventions our own `spansToTraceEvents` reads → pull round-trips). OTLP/JSON needs server ≥3.12 → span upload is **best-effort**: on older servers the case still succeeds with trace-info+assessments (live-verified: 3.11 degrades — its `traces/get` 500s "Trace data not stored" — 3.14 round-trips). `project` required for create; per-case honest error without it. | `POST /api/3.0/mlflow/traces/{trace_id}/assessments` — field is **`assessment_name`** (not `name`); `source.source_type` `LLM_JUDGE`(judge:*) / `CODE` + `source_id` required; `rationale` top-level; `feedback.value` = score | `{web}/#/experiments/{project}/traces?selectedEvaluationId={id}` (≥3.6 UI) |
+| `langfuse` | `Authorization: Basic base64(pk:sk)` verbatim | `POST /api/public/ingestion` — batch (`{batch:[{id,type,timestamp,body}]}`; envelope `id` = dedup key): `trace-create` + `generation-create` (**`usageDetails`/`costDetails`**, not deprecated `usage`) + `span-create` (tool calls) + `score-create`. Response **207**; `errors[].id` → event → case (partial isolation). 3.5 MB batch cap → events are **chunked** (~3 MB serialized, order-preserving) across multiple POSTs. | `score-create` events with `traceId` = existing id (no trace-create) | `{web}/project/{project}/traces/{id}`; without project: `{web}/trace/{id}` server-side redirect |
+| `langsmith` | **`x-api-key`** (raw key — not Authorization) | `POST /runs` (bare path, like the SDK) per case — client uuid, root run `trace_id` = own id, one-shot with `outputs`/`end_time`, `session_name` = `project` (auto-creates) | `POST /feedback` (`run_id`, `key`, `score`, `comment`, `feedback_source.type` `model`(judge)/`api`). Run ingest is async (202) → one 404-retry | per-case: `GET /runs/{id}`.`app_path` joined onto the web base (best-effort, one 404-retry; no link if unavailable — never hand-assembled from uuids) |
 | `phoenix` | `Authorization: Bearer …` verbatim | `POST /v1/projects/{project}/spans` (**plain-JSON endpoint, ≥10.12**) — `/v1/traces` is protobuf-only OTLP, NOT used. OTel hex ids (trace 32 / span 16), root `CHAIN` + `LLM`/`TOOL` child spans, per-case batch (all-or-nothing per case). `project` required for create. | `POST /v1/trace_annotations` (`annotator_kind` `LLM`/`CODE`, `result{score,label,explanation}`); enqueued (`sync=false`) to avoid 404 on just-queued spans | `{web}/redirects/traces/{hex}` (id-only redirect, 2025+ servers) |
 
 The **TraceEvent → platform-native** mapping is the inverse of `spansToTraceEvents`: `llm_call` →
@@ -188,9 +188,22 @@ The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` 
   `TraceSinkService.exportScorecard` + `track()`/`finishIngest()` wiring (+ pull attach-mode) +
   tests (export recorded; failure isolated; attach receives external ids).
 - **S4 — web:** settings card + scorecard-detail export strip + BFF client fns.
-- **Follow-ups:** Langfuse/LangSmith/Phoenix as **pull sources** (`TraceSourceConfig.kind`
-  extension — completes flow ② round-trip beyond MLflow); live e2e against a real MLflow
-  (`scripts/live/`); per-scorecard sink override if demanded.
+- **F1 — pull sources (SHIPPED):** `TraceSourceConfig.kind` extended to
+  `otel|mlflow|langfuse|langsmith|phoenix` — flow ②'s round-trip works on all four sink platforms.
+  Read APIs (verified against OpenAPI/source): Langfuse `GET /api/public/traces/{id}`
+  (observations inline, `usageDetails` over deprecated `usage`, type enum is 10-wide — don't
+  hardcode 3); LangSmith `POST /runs/query {trace}` + `cursors.next` loop (**v1**, not v2 which
+  requires `project_ids`+1-day window; `total_cost` is a **decimal string**); Phoenix
+  `GET /v1/projects/{p}/spans?trace_id=` (filter needs server ≥13.9.0; read-side `attributes` are
+  **nested**, create-side flat — both normalized). New config knobs: `auth` (value; adapter owns
+  the header name — langsmith `x-api-key`) + `project` (phoenix path requirement);
+  `headers.authorization` is inherited as `auth` for the existing pull path.
+- **F5 — live e2e (PASS, 2026-07-06):** `scripts/live/trace-sink-mlflow.mjs` — real MLflow
+  3.11.1 (infra stack, Basic auth): create + attach verified by assessment read-back, span upload
+  degrades (documented; `traces/get` 500s span-less traces); MLflow 3.14.0 (sqlite): full span
+  round-trip (sink OTLP/JSON → source → 4 normalized events, model/tokens intact).
+- **Remaining follow-ups:** live e2e for Langfuse/LangSmith/Phoenix (needs real accounts/servers);
+  per-scorecard sink override if demanded.
 
 ## Non-goals
 

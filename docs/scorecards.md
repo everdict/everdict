@@ -88,8 +88,9 @@ there judges/diff/dashboard reuse the same pipeline.
 
 ### Pull-mode trace ingestion (`POST /scorecards/ingest/pull`)
 Two ways to get the trace in: **push** (upload `TraceEvent[]`, above) or **pull** (the control plane fetches it).
-Pull is for harnesses that already emit to a tenant's own **OTel/MLflow** — instead of re-uploading, you give the
-`source` (`kind` `otel`|`mlflow` + `endpoint`) and a `runs:[{caseId, runId}]` mapping. `ScorecardService.ingestPull`
+Pull is for harnesses that already emit to a tenant's own observability platform — instead of re-uploading, you
+give the `source` (`kind` `otel`|`mlflow`|`langfuse`|`langsmith`|`phoenix` + `endpoint` + phoenix-only `project`)
+and a `runs:[{caseId, runId}]` mapping. `ScorecardService.ingestPull`
 builds a `TraceSource` (`packages/trace` `buildTraceSource`), fetches each `runId` (→ normalized `TraceEvent[]` via
 the same `spansToTraceEvents` seam — per-harness span variance is absorbed by the adapter), then runs the **same**
 `finishIngest` pipeline as push (re-derive `tool_calls`/`usd`/`span`, apply judges, store). So push and pull converge
