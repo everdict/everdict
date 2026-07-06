@@ -93,9 +93,15 @@ export function SettingsTabs(props: {
       </TabsContent>
       <TabsContent value="integrations">
         <div className="space-y-8">
-          <GithubAppManager view={props.githubApp} canWrite={props.canWriteSettings} />
+          {/* GHE 개인키·MM 토큰 피커용 워크스페이스 시크릿 이름(값은 안 옴) — props.secrets 는 이미 workspace 스코프만. */}
+          <GithubAppManager
+            view={props.githubApp}
+            canWrite={props.canWriteSettings}
+            secretNames={props.secrets.map((s) => s.name)}
+          />
           <MattermostManager
             canWrite={props.canWriteSettings}
+            secretNames={props.secrets.map((s) => s.name)}
             {...(props.mattermost !== undefined ? { config: props.mattermost } : {})}
           />
         </div>

@@ -1,19 +1,14 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
-import { Building2, Eye, EyeOff, KeyRound, Lock, Plus, Trash2, User } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Building2, Lock, Plus, Trash2, User } from 'lucide-react'
 
+import { SecretPicker } from '@/features/pick-secret'
 import { cn } from '@/shared/lib/utils'
-import { Button } from '@/shared/ui/button'
-import { Callout } from '@/shared/ui/callout'
-import { Combobox } from '@/shared/ui/combobox'
 import { Input } from '@/shared/ui/input'
 import { InfoTip } from '@/shared/ui/tooltip'
 
-import { createSecretAction } from '../api/secrets'
 import type { EnvRow, SecretRefScope } from '../lib/build-spec'
-
-const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
 // 워크스페이스가 로드한 시크릿 이름 — 공유(workspace) + 내 개인(user) 두 티어.
 export interface ScopedSecretNames {
@@ -205,7 +200,7 @@ function ScopeToggle({
   )
 }
 
-// 시크릿 참조 값 — 스코프(개인/워크스페이스) 선택 + 그 티어 시크릿에서 고르거나 인라인 생성.
+// 시크릿 참조 값 — 스코프(개인/워크스페이스) 선택 + 그 티어 시크릿에서 고르거나 인라인 생성(SecretPicker 공용).
 function SecretValue({
   scope,
   names,
@@ -221,149 +216,26 @@ function SecretValue({
   onChange: (v: string) => void
   onCreated: (name: string, scope: SecretRefScope) => void
 }) {
-  const [creating, setCreating] = useState(false)
   const list = scope === 'user' ? names.user : names.workspace
   return (
     <div className="space-y-2">
       <ScopeToggle scope={scope} onChange={onScopeChange} />
-      <div className="flex items-center gap-1.5">
-        <Combobox
-          value={value}
-          onChange={onChange}
-          options={list.map((n) => ({ value: n }))}
-          placeholder={list.length > 0 ? '시크릿 선택' : '등록된 시크릿 없음'}
-          emptyText="시크릿이 없어요 — 새로 만들어요"
-          className="flex-1"
-          aria-label="시크릿 선택"
-        />
-        <Button
-          type="button"
-          variant="secondary"
-          size="sm"
-          className="shrink-0 gap-1"
-          onClick={() => setCreating((c) => !c)}
-        >
-          <KeyRound className="size-3.5" /> 새로
-        </Button>
-      </div>
-      {value && !creating && (
-        <p className="text-[11px] text-muted-foreground">
-          실행할 때 {scope === 'user' ? '내 개인' : '워크스페이스'} 시크릿{' '}
-          <code className="font-mono text-foreground">{value}</code> 값이 주입돼요. 스펙엔 이름만
-          저장돼요.
-          {scope === 'user' && ' 개인 시크릿을 쓰면 이 하니스는 나만 볼 수 있어요.'}
-        </p>
-      )}
-      {creating && (
-        <CreateSecretInline
-          scope={scope}
-          onDone={(name) => {
-            onCreated(name, scope)
-            setCreating(false)
-          }}
-          onCancel={() => setCreating(false)}
-        />
-      )}
-    </div>
-  )
-}
-
-// 인라인 시크릿 생성 — 이름(env 형식) + 값 → 저장 후 상위가 그 이름을 참조로 선택. scope 로 개인/공유 저장.
-function CreateSecretInline({
-  scope,
-  onDone,
-  onCancel,
-}: {
-  scope: SecretRefScope
-  onDone: (name: string) => void
-  onCancel: () => void
-}) {
-  const [name, setName] = useState('')
-  const [val, setVal] = useState('')
-  const [show, setShow] = useState(false)
-  const [error, setError] = useState<string>()
-  const [pending, start] = useTransition()
-  const nameInvalid = name.length > 0 && !NAME_RE.test(name)
-
-  function save() {
-    setError(undefined)
-    start(async () => {
-      const r = await createSecretAction(name, val, scope)
-      if (r.ok) onDone(name)
-      else setError(r.error ?? '저장 실패')
-    })
-  }
-
-  return (
-    <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-2.5">
-      <p className="text-[11px] text-muted-foreground">
-        {scope === 'user'
-          ? '내 개인 시크릿 — 나만 쓰고 다른 멤버는 못 봐요.'
-          : '워크스페이스 공유 시크릿 — 멤버가 함께 써요(관리자만 등록).'}
-      </p>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <span className="text-[11px] text-muted-foreground">이름 (env 형식)</span>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value.toUpperCase())}
-            placeholder="OPENAI_API_KEY"
-            spellCheck={false}
-            autoComplete="off"
-            className="font-mono text-[12px]"
-          />
-        </div>
-        <div className="space-y-1">
-          <span className="text-[11px] text-muted-foreground">값</span>
-          <div className="relative">
-            <Input
-              type={show ? 'text' : 'password'}
-              value={val}
-              onChange={(e) => setVal(e.target.value)}
-              placeholder="시크릿 값"
-              autoComplete="off"
-              spellCheck={false}
-              className="pr-8 text-[12px]"
-            />
-            <button
-              type="button"
-              onClick={() => setShow((v) => !v)}
-              aria-label={show ? '값 숨기기' : '값 보기'}
-              className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
-            >
-              {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
-            </button>
-          </div>
-        </div>
-      </div>
-      {nameInvalid && (
-        <p className="text-[11px] text-destructive">
-          대문자로 시작하고 대문자·숫자·밑줄만 쓸 수 있어요.
-        </p>
-      )}
-      {error && (
-        <Callout tone="danger" className="py-1.5">
-          {error}
-        </Callout>
-      )}
-      <div className="flex items-center gap-2">
-        <Button
-          type="button"
-          size="sm"
-          disabled={pending || name.length === 0 || val.length === 0 || nameInvalid}
-          onClick={save}
-        >
-          {pending ? '저장 중…' : '시크릿 저장'}
-        </Button>
-        <button
-          type="button"
-          className="text-[12px] text-muted-foreground hover:text-foreground"
-          onClick={onCancel}
-        >
-          취소
-        </button>
-        <span className="text-[11px] text-faint">저장하면 값은 다시 볼 수 없어요.</span>
-      </div>
+      <SecretPicker
+        value={value}
+        onChange={onChange}
+        names={list}
+        scope={scope}
+        // 생성을 상위(EnvEditor)로 올려 다른 env 행에서도 바로 선택 가능하게 한다.
+        onCreated={(name) => onCreated(name, scope)}
+        hint={
+          <p className="text-[11px] text-muted-foreground">
+            실행할 때 {scope === 'user' ? '내 개인' : '워크스페이스'} 시크릿{' '}
+            <code className="font-mono text-foreground">{value}</code> 값이 주입돼요. 스펙엔 이름만
+            저장돼요.
+            {scope === 'user' && ' 개인 시크릿을 쓰면 이 하니스는 나만 볼 수 있어요.'}
+          </p>
+        }
+      />
     </div>
   )
 }

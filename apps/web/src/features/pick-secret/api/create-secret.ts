@@ -11,8 +11,9 @@ export interface CreateSecretResult {
   error?: string
 }
 
-// 하니스 env 에서 참조할 시크릿을 인라인으로 생성/갱신한다(값은 at-rest 암호화, 다시 못 봄).
-// scope: "user"(내 개인, 셀프) | "workspace"(공유, admin). authZ 는 컨트롤플레인이 강제 — 권한 없으면 error.
+// 시크릿 참조 입력(하니스 env·GHE App 개인키·Mattermost 토큰 등)에서 인라인으로 생성/갱신한다
+// (값은 at-rest 암호화, 다시 못 봄). scope: "user"(내 개인, 셀프) | "workspace"(공유, admin).
+// authZ 는 컨트롤플레인이 강제 — 권한 없으면 error.
 export async function createSecretAction(
   name: string,
   value: string,

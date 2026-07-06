@@ -63,6 +63,9 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   bare `dl` grid.
 - **State toggles** = a status icon + click dropdown (`shared/ui/dropdown-menu.tsx`; e.g.
   `widgets/notification-bell/`), not text links.
+- **Secret-name inputs** are never free text — use `SecretPicker` from `features/pick-secret`
+  (combobox over preloaded names + "새로" inline create; `defaultMultiline` for PEM/kubeconfig).
+  Used by harness env, GHE App private key, Mattermost tokens.
 
 ## Language (per CLAUDE.md)
 Skill/rule bodies English; **code comments Korean**, user-facing UI copy Korean.

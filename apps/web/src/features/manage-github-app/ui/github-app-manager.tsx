@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 
+import { SecretPicker } from '@/features/pick-secret'
 import type { GithubAppView } from '@/entities/github-app'
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -18,7 +19,16 @@ import {
 
 // 워크스페이스 소유 GitHub App 통합 — 조직 설치→선택 repo→워크스페이스 소유 installation(개인 연결 대체).
 // github.com 은 원클릭 설치(operator env App), GHE 는 관리자가 각 서버 App 을 등록 후 설치. authZ 는 컨트롤플레인이 강제.
-export function GithubAppManager({ view, canWrite }: { view: GithubAppView; canWrite: boolean }) {
+// secretNames = 워크스페이스 시크릿 이름(GHE 개인키 피커용 — 값은 안 옴).
+export function GithubAppManager({
+  view,
+  canWrite,
+  secretNames,
+}: {
+  view: GithubAppView
+  canWrite: boolean
+  secretNames: string[]
+}) {
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [showGhe, setShowGhe] = useState(view.registrations.length > 0)
@@ -107,7 +117,13 @@ export function GithubAppManager({ view, canWrite }: { view: GithubAppView; canW
       )}
 
       {canWrite && showGhe && (
-        <GheSection view={view} pending={pending} onInstall={onInstall} onError={setError} />
+        <GheSection
+          view={view}
+          secretNames={secretNames}
+          pending={pending}
+          onInstall={onInstall}
+          onError={setError}
+        />
       )}
 
       {error && (
@@ -122,11 +138,13 @@ export function GithubAppManager({ view, canWrite }: { view: GithubAppView; canW
 // GitHub Enterprise — 각 GHE 서버에 App 을 만들어 등록(host+slug+appId+개인키 SecretStore 이름) 후 설치.
 function GheSection({
   view,
+  secretNames,
   pending,
   onInstall,
   onError,
 }: {
   view: GithubAppView
+  secretNames: string[]
   pending: boolean
   onInstall: (host: string) => void
   onError: (msg?: string) => void
@@ -174,7 +192,7 @@ function GheSection({
           content={
             <>
               GHE 는 서버마다 App 을 직접 만들어 등록해야 해요. App 개인키(PEM)는 워크스페이스
-              시크릿에 먼저 저장하고 그 이름만 지정해요.
+              시크릿에서 고르거나 “새로”로 바로 저장해요 — 등록엔 그 이름만 남아요.
               {view.callbackUrl && (
                 <>
                   <br />
@@ -239,13 +257,18 @@ function GheSection({
             onChange={(e) => setAppId(e.target.value)}
           />
         </div>
-        <div className="space-y-1">
-          <Label htmlFor="ghe-key">개인키 시크릿 이름</Label>
-          <Input
+        {/* 개인키(PEM)는 자유 텍스트 입력이 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성(여러 줄 기본). */}
+        <div className="space-y-1 sm:col-span-2">
+          <Label htmlFor="ghe-key">개인키 시크릿</Label>
+          <SecretPicker
             id="ghe-key"
-            placeholder="GHE_APP_PRIVATE_KEY"
             value={keyName}
-            onChange={(e) => setKeyName(e.target.value)}
+            onChange={setKeyName}
+            names={secretNames}
+            scope="workspace"
+            defaultMultiline
+            createValuePlaceholder="-----BEGIN RSA PRIVATE KEY----- (PEM 붙여넣기)"
+            aria-label="개인키 시크릿 선택"
           />
         </div>
       </div>
