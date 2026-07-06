@@ -42,18 +42,25 @@ interface Values {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
+  runtime: string // 실행 위치(등록 런타임 id 또는 self 러너 타깃). 컨트롤플레인이 미지정 배치를 400 — 필수.
   concurrency: string // 병렬도(빈칸=컨트롤플레인 기본). 제출 시 숫자로 파싱.
   caseLimit: string // 부분 실행 — 앞에서 N개만(빈칸=전체). 제출 시 숫자로 파싱.
   caseTags: string // 부분 실행 — 태그 필터(쉼표 구분, any-match. 빈칸=전체)
 }
 
-// 벤치마크 × 하니스를 골라 배치 평가를 실행한다. 채점은 벤치마크에 내장 — judge/런타임은 컨트롤플레인 기본값.
+// 벤치마크 × 하니스를 골라 배치 평가를 실행한다. 채점은 벤치마크에 내장 — judge 는 컨트롤플레인 기본값.
 export function RunScorecardForm({
   datasets,
   harnesses,
+  runtimes = [],
+  runners = [],
+  hasWorkspaceRunners = false,
 }: {
   datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
   harnesses: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
+  runtimes?: { id: string }[]
+  runners?: { id: string; label: string }[]
+  hasWorkspaceRunners?: boolean // 팀 공유 러너가 있으면 self:ws 풀 옵션 노출
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -71,6 +78,7 @@ export function RunScorecardForm({
       datasetVersion: 'latest',
       harnessId: harnesses[0]?.id ?? 'scripted',
       harnessVersion: 'latest',
+      runtime: '',
       concurrency: '',
       caseLimit: '',
       caseTags: '',
@@ -204,6 +212,45 @@ export function RunScorecardForm({
             )}
           />
         </div>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="runtime">런타임</Label>
+        {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 미지정 배치는 400. run 폼과 동일 선택지. */}
+        <Controller
+          control={control}
+          name="runtime"
+          rules={{ required: '런타임을 선택하세요' }}
+          render={({ field }) => (
+            <Combobox
+              id="runtime"
+              options={[
+                ...runtimes.map((r) => ({ value: r.id })),
+                // 팀 공유 러너 풀 — 등록된 팀 러너 중 아무거나(capability 충족) 가져간다(멀티러너=동시성).
+                ...(hasWorkspaceRunners
+                  ? [{ value: 'self:ws', label: '팀 공유 러너 (아무거나)', hint: '팀' }]
+                  : []),
+                // 내 러너 풀 — 내 러너(여러 대일 수 있음) 중 아무거나. 특정 러너는 아래 개별 항목.
+                ...(runners.length > 0
+                  ? [{ value: 'self', label: '내 러너 (아무거나)', hint: '내 컴퓨터' }]
+                  : []),
+                ...runners.map((r) => ({
+                  value: `self:${r.id}`,
+                  label: r.label,
+                  hint: '내 컴퓨터',
+                })),
+              ]}
+              value={field.value}
+              onChange={field.onChange}
+              placeholder="런타임 선택"
+              emptyText="등록된 런타임이나 러너가 없어요"
+            />
+          )}
+        />
+        <FieldError message={errors.runtime?.message} />
+        <p className="text-[12px] text-muted-foreground">
+          케이스를 어디서 실행할지 골라요. 등록한 런타임이나 러너가 없다면 먼저 등록해주세요.
+        </p>
       </div>
 
       <div className="space-y-1.5">

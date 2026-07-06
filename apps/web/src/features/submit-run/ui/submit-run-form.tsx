@@ -102,14 +102,15 @@ export function SubmitRunForm({
       <div className="space-y-1.5">
         <Label htmlFor="runtime">런타임</Label>
         {/* optgroup 대응 — 내 로컬 러너는 우측 hint 로 구분(flat 리스트) */}
+        {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 미지정 run 은 400. */}
         <Controller
           control={control}
           name="runtime"
+          rules={{ required: '런타임을 선택하세요' }}
           render={({ field }) => (
             <Combobox
               id="runtime"
               options={[
-                { value: '', label: '기본 실행 환경' },
                 ...runtimes.map((r) => ({ value: r.id })),
                 // 팀 공유 러너 풀 — 등록된 팀 러너 중 아무거나(capability 충족) 가져간다(멀티러너=동시성).
                 ...(hasWorkspaceRunners
@@ -127,11 +128,14 @@ export function SubmitRunForm({
               ]}
               value={field.value}
               onChange={field.onChange}
+              placeholder="런타임 선택"
+              emptyText="등록된 런타임이나 러너가 없어요"
             />
           )}
         />
+        <FieldError message={errors.runtime?.message} />
         <p className="text-[12px] text-faint">
-          비워두면 기본 환경에서 실행돼요. 등록한 런타임이나 내 컴퓨터를 고르면 그곳에서 실행돼요.
+          어디서 실행할지 골라요. 등록한 런타임이나 러너가 없다면 먼저 등록해주세요.
         </p>
       </div>
 

@@ -113,7 +113,10 @@ export function CreateScheduleForm({
       ? await updateScheduleAction(scheduleId, input, initialJudges)
       : await createScheduleAction(input)
     if (res.ok) router.push(`/${workspace}/schedules`)
-    else setServerError(res.error ?? (scheduleId ? '예약을 수정하지 못했어요' : '예약을 만들지 못했어요'))
+    else
+      setServerError(
+        res.error ?? (scheduleId ? '예약을 수정하지 못했어요' : '예약을 만들지 못했어요')
+      )
   }
 
   return (
@@ -289,22 +292,24 @@ export function CreateScheduleForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="runtime">런타임 (선택)</Label>
+        <Label htmlFor="runtime">런타임</Label>
+        {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 런타임 없는 예약은 발사 때마다 400 실패. */}
         <Controller
           control={control}
           name="runtime"
+          rules={{ required: '런타임을 선택하세요' }}
           render={({ field }) => (
             <Combobox
               id="runtime"
-              options={[
-                { value: '', label: '기본 런타임' },
-                ...runtimes.map((r) => ({ value: r.id })),
-              ]}
+              options={runtimes.map((r) => ({ value: r.id }))}
               value={field.value}
               onChange={field.onChange}
+              placeholder="런타임 선택"
+              emptyText="등록된 런타임이 없어요"
             />
           )}
         />
+        <FieldError message={errors.runtime?.message} />
         <p className="text-[12px] text-muted-foreground">
           셀프호스티드(self:) 런타임은 실행 시점에 러너가 켜져 있어야 해요.
         </p>

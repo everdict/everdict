@@ -787,6 +787,52 @@ describe("MCP tools", () => {
     expect(JSON.parse(text(bf))).toHaveProperty("updated");
   });
 
+  it("run_scorecard: runtime 지정 시 케이스 placement.target 으로 디스패치되고 레코드에 기록된다(BFF↔MCP parity)", async () => {
+    let seen: AgentJob | undefined;
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        seen = job;
+        return result;
+      },
+    };
+    const datasetRegistry = new InMemoryDatasetRegistry();
+    const deps = {
+      service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
+      datasetRegistry,
+      scorecardService: new ScorecardService({
+        dispatcher: capture,
+        store: new InMemoryScorecardStore(),
+        datasets: datasetRegistry,
+        newId: () => `sc-${n++}`,
+      }),
+    };
+    const principal: Principal = { subject: "u", workspace: "acme", roles: ["member"], via: "oidc" };
+    const server = buildMcpServer(deps, principal);
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await server.connect(serverT);
+    await client.connect(clientT);
+    await client.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+
+    const sub = await client.callTool({
+      name: "run_scorecard",
+      arguments: { dataset_id: "smoke", harness_id: "scripted", runtime: "nomad-seoul" },
+    });
+    expect(sub.isError).toBeFalsy();
+    const id = JSON.parse(text(sub)).id as string;
+
+    // 비동기 배치 — 완료까지 폴링 후 디스패치된 잡과 레코드 양쪽에서 runtime 전달을 확인.
+    let rec: { status: string; runtime?: string } = { status: "queued" };
+    for (let i = 0; i < 50; i++) {
+      rec = JSON.parse(text(await client.callTool({ name: "get_scorecard", arguments: { id } })));
+      if (rec.status === "succeeded" || rec.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(rec.status).toBe("succeeded");
+    expect(rec.runtime).toBe("nomad-seoul");
+    expect(seen?.evalCase.placement?.target).toBe("nomad-seoul");
+  });
+
   it("apply_bundle: member 가 번들(dataset) 설치 ok; viewer 는 datasets:write 없어 FORBIDDEN", async () => {
     const deps = harness();
     const bundle = JSON.stringify({

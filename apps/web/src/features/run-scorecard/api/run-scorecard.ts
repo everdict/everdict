@@ -10,6 +10,9 @@ export interface RunScorecardInput {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
+  // 실행할 테넌트 Runtime id(placement.target) 또는 self 러너 타깃(self / self:<id> / self:ws).
+  // 컨트롤플레인은 미지정 배치를 400(requireRuntime — 호스트 폴백 금지).
+  runtime?: string
   concurrency?: number // 배치 내 동시 디스패치 케이스 수(병렬도). 미지정이면 컨트롤플레인 기본.
   cases?: { limit?: number; tags?: string[] } // 부분 실행 — 전체 데이터셋의 subset 만(미지정=전체)
 }
@@ -27,6 +30,8 @@ export async function runScorecardAction(input: RunScorecardInput): Promise<RunS
   const body = {
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
     harness: { id: input.harnessId, version: input.harnessVersion || 'latest' },
+    // runtime 선택 시 컨트롤플레인이 각 케이스 placement.target 으로 주입 → RuntimeDispatcher 라우팅.
+    ...(input.runtime ? { runtime: input.runtime } : {}),
     ...(input.concurrency ? { concurrency: input.concurrency } : {}),
     ...(input.cases ? { cases: input.cases } : {}),
   }

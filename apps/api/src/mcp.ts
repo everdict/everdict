@@ -756,12 +756,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "run_scorecard",
       {
         description:
-          "데이터셋을 하니스@버전으로 돌려 스코어카드 집계(비동기 — queued 레코드 반환, 이후 get_scorecard 로 폴링)",
+          "데이터셋을 하니스@버전으로 돌려 스코어카드 집계(비동기 — queued 레코드 반환, 이후 get_scorecard 로 폴링). runtime 지정 시 그 런타임에서 실행.",
         inputSchema: {
           dataset_id: z.string(),
           dataset_version: z.string().optional(),
           harness_id: z.string(),
           harness_version: z.string().optional(),
+          runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target) 또는 self 러너 타깃. 없으면 배포 정책에 따라 400.
           harness_pins: z
             .record(z.string())
             .optional()
@@ -803,6 +804,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         harness_id,
         harness_version,
         harness_pins,
+        runtime,
         judges,
         concurrency,
         cases,
@@ -821,6 +823,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               },
               origin: { source: originSource(principal.via), ...(origin ?? {}) },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
+              ...(runtime ? { runtime } : {}),
               ...(concurrency !== undefined ? { concurrency } : {}),
               ...(cases ? { cases } : {}),
             }),
