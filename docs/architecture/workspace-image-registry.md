@@ -1,7 +1,10 @@
 # Workspace-scoped image registry — classify + publish harness images
 
-> **Status:** ALL SLICES SHIPPED — S1 registration+classification `bd979a4` · S2 `assay image
-> push` `921f93a` · S3 web `79ad895` · S4 pull auth at dispatch (this doc's section below). SSOT
+> **Status:** ALL SLICES SHIPPED + LIVE-VERIFIED — S1 registration+classification `bd979a4` ·
+> S2 `assay image push` `921f93a` · S3 web `79ad895` · S4 pull auth at dispatch `9d14595`.
+> Live e2e `scripts/live/image-registry-push-pull.mjs` (local authenticated `registry:2`):
+> registry registration → `assay image push` (temp `DOCKER_CONFIG`, user config untouched) →
+> unauthenticated pull rejected → `pullWithRegistryAuth` succeeds, sha-identical. SSOT
 > for the workspace image registry: where a harness's images *live*, how Assay tells a
 > **local-only** image from a **workspace-registry** image from an **external** one, and how a
 > user **publishes** a locally built image to the workspace registry through Assay. Concretizes
