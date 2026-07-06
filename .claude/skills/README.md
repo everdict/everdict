@@ -8,7 +8,8 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
   otherwise "do the standard TS way" and get wrong for Assay.
 - Keep each file thin (~20 lines): inlined critical rules + a pointer to the matching skill.
 - Current rules: `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `agent`,
-  `backends`, `orchestrator`, `trace`, `topology`, `api-layer`, `testing`, `infra-deploy`.
+  `backends`, `orchestrator`, `trace`, `topology`, `api-layer`, `mcp`, `auth`, `db`, `registry`,
+  `web`, `datasets`, `suite`, `workspace-integrations`, `testing`, `infra-deploy`.
 
 ## PULL layer — `.claude/skills/*/`
 - Model-driven: matched via frontmatter `description`, or invoked explicitly as `/name`.
@@ -23,6 +24,10 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
   (capacity-aware + tenant-fair `Scheduler`, trust-zone isolation, secrets, budgets, autoscaling).
 - `topology/`       — service-topology harnesses: HarnessSpec(service), warm-pool/shared-store/per-case efficiency, live `NomadTopologyRuntime` + per-tenant warm pools, Nomad+K8s, OTel/MLflow trace.
 - `api-layer/`      — control-plane HTTP (`apps/api`, Fastify): async `POST /runs`/poll/webhook, `RunStore`, flat envelopes.
+- `web/`            — the SaaS web app (`apps/web`): Next.js FSD, pure-HTTP token-courier BFF, `[workspace]` scoping, UI conventions.
+- `evaluation/`     — the eval-first core: graders, judges, scorecards, regression/leaderboard, saved views, trace ingest.
+- `self-hosted-runner/` — `runner-core` lease loop + the runtime/capability model + personal/workspace runner tiers.
+- `desktop/`        — Electron shell (`apps/desktop`): renders the deployed web, origin-gated bridge, embedded runner.
 - `core-contracts/` — the EvaluableHarness / Environment / Driver / Grader contracts + Zod (planned).
 - `drivers/`        — implementing a Driver (in-sandbox compute; Local) (planned).
 - `harnesses/`      — implementing an EvaluableHarness + trace normalization (planned).
@@ -31,6 +36,7 @@ We split "how to build Assay" knowledge by **how the knowledge fails**:
 - `infra-deploy/`   — Docker/K8s/Helm, IaC, secrets, GitOps (planned).
 - `docs-update`     — `/docs-update` command: audit drift between code and skill references (planned).
 
-(`foundation`, `backends`, `topology`, `api-layer` exist today; the rest are stubs to fill as those areas grow.)
+(`foundation`, `backends`, `topology`, `api-layer`, `web`, `evaluation`, `self-hosted-runner`, `desktop` exist today;
+`core-contracts`/`drivers`/`harnesses`/`graders`/`testing`/`infra-deploy`/`docs-update` remain stubs to fill as those areas grow.)
 
 Language: all skill/rule bodies are **English** (see CLAUDE.md language policy).
