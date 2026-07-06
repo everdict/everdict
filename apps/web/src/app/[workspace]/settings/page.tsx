@@ -1,5 +1,6 @@
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
+import { imageRegistryResponseSchema, type ImageRegistryConfig } from '@/entities/image-registry'
 import { mattermostResponseSchema, type MattermostConfig } from '@/entities/mattermost'
 import { invitesSchema, membersSchema, type Invite, type Member } from '@/entities/member'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
@@ -37,6 +38,7 @@ export default async function SettingsPage({
   let secrets: SecretMeta[] = []
   let githubApp: GithubAppView = { registrations: [], installations: [] }
   let mattermost: MattermostConfig | undefined
+  let imageRegistry: ImageRegistryConfig | undefined
   let ciLinks: CiLink[] = []
   let workspaceRunners: RunnerMeta[] = []
   let members: Member[] = []
@@ -49,6 +51,10 @@ export default async function SettingsPage({
       githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
       // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림). 개인 연결 알림 대체. settings:read(admin).
       mattermost = mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
+      // 워크스페이스 이미지 레지스트리(분류 기준 + assay image push 대상). 조회 자체는 viewer+ 지만 관리 UI 는 이 탭.
+      imageRegistry = imageRegistryResponseSchema.parse(
+        await controlPlane.getImageRegistry(ctx)
+      ).config
       // CI repo link(레포↔하니스 슬롯 = OIDC trust) — 링크의 존재가 그 레포의 keyless CI 신뢰. 해제는 admin.
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
     }
@@ -87,6 +93,7 @@ export default async function SettingsPage({
           secrets={secrets}
           githubApp={githubApp}
           {...(mattermost !== undefined ? { mattermost } : {})}
+          {...(imageRegistry !== undefined ? { imageRegistry } : {})}
           ciLinks={ciLinks}
           workspaceRunners={workspaceRunners}
           members={members}

@@ -1,13 +1,21 @@
 import { Boxes, Database, DoorOpen, Globe, Radio } from 'lucide-react'
 
 import { envValueText, type HarnessSpec } from '@/entities/harness'
+import type { ImageRegistryCoordinates } from '@/shared/lib/image-ref'
 import { Badge } from '@/shared/ui/badge'
 import { Card } from '@/shared/ui/card'
 
-import { Field, Mono, SubSection } from './parts'
+import { Field, ImageClassBadge, Mono, SubSection } from './parts'
 
 // service(토폴로지) 하니스 구성 — 다이어그램의 텍스트 대응판. 프론트도어/서비스/의존/타깃/트레이스.
-export function ServiceView({ spec }: { spec: HarnessSpec }) {
+// registry = 워크스페이스 레지스트리 좌표 — 서비스 이미지의 출처 분류 배지(로컬 전용/미지정/워크스페이스).
+export function ServiceView({
+  spec,
+  registry,
+}: {
+  spec: HarnessSpec
+  registry?: ImageRegistryCoordinates
+}) {
   const services = spec.services ?? []
   const deps = spec.dependencies ?? []
   const target = spec.target
@@ -43,11 +51,14 @@ export function ServiceView({ spec }: { spec: HarnessSpec }) {
                 </div>
               </div>
               {s.image && (
-                <div
-                  className="mt-2 truncate font-mono text-[12px] text-muted-foreground"
-                  title={s.image}
-                >
-                  {s.image}
+                <div className="mt-2 flex min-w-0 items-center gap-2">
+                  <span
+                    className="truncate font-mono text-[12px] text-muted-foreground"
+                    title={s.image}
+                  >
+                    {s.image}
+                  </span>
+                  <ImageClassBadge image={s.image} {...(registry ? { registry } : {})} />
                 </div>
               )}
               <div className="mt-3 grid grid-cols-2 gap-4">

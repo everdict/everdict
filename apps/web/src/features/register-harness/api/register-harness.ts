@@ -14,6 +14,8 @@ export interface ValidateHarnessResult {
   version?: string
   kind?: string
   error?: string
+  // 이미지 출처 경고(warn-not-block) — local/unqualified 이미지는 pull 보장이 없다(등록은 됨).
+  imageWarnings?: { image: string; class: 'local' | 'unqualified' }[]
 }
 
 export interface RegisterHarnessResult {

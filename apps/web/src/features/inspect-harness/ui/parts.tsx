@@ -1,8 +1,33 @@
 import type { ReactNode } from 'react'
 
+import {
+  classifyImageRef,
+  IMAGE_CLASS_HINT,
+  IMAGE_CLASS_LABEL,
+  type ImageRegistryCoordinates,
+} from '@/shared/lib/image-ref'
 import { cn } from '@/shared/lib/utils'
+import { Badge } from '@/shared/ui/badge'
 
 // inspect-harness 뷰 공통 프리미티브 — 라벨/값 필드, 모노 칩, 라벨 섹션.
+
+// 이미지 출처 배지 — 워크스페이스 레지스트리(파랑)/로컬 전용·미지정(경고). external 은 기본 상태라 배지 없음(소음 방지).
+// hint 는 title 로(이미지 ref 자체가 이미 title 을 쓰는 관례와 동일). 분류 SSOT 는 컨트롤플레인, 여기는 표시용 미러.
+export function ImageClassBadge({
+  image,
+  registry,
+}: {
+  image: string
+  registry?: ImageRegistryCoordinates
+}) {
+  const cls = classifyImageRef(image, registry)
+  if (cls === 'external') return null
+  return (
+    <Badge tone={cls === 'workspace' ? 'info' : 'warning'} title={IMAGE_CLASS_HINT[cls]}>
+      {IMAGE_CLASS_LABEL[cls]}
+    </Badge>
+  )
+}
 
 export function Field({
   label,

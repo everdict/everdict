@@ -1,13 +1,21 @@
 import { ListOrdered, Variable } from 'lucide-react'
 
 import { envValueText, type HarnessSpec } from '@/entities/harness'
+import type { ImageRegistryCoordinates } from '@/shared/lib/image-ref'
 import { Card } from '@/shared/ui/card'
 
-import { DefRow, highlightTemplate, Mono, SubSection } from './parts'
+import { DefRow, highlightTemplate, ImageClassBadge, Mono, SubSection } from './parts'
 
 // command(선언형 CLI) 하니스 — 핵심 값(명령·모델·이미지·작업경로·트레이스)을 한 카드의 값 리스트로,
 // 그 아래 Setup/환경변수는 있을 때만. 파이프라인 도식·중복 그리드는 제거(깔끔한 스캔 뷰).
-export function CommandView({ spec }: { spec: HarnessSpec }) {
+// registry = 워크스페이스 레지스트리 좌표 — 디스패치 이미지의 출처 분류 배지.
+export function CommandView({
+  spec,
+  registry,
+}: {
+  spec: HarnessSpec
+  registry?: ImageRegistryCoordinates
+}) {
   const setup = spec.setup ?? []
   const env = spec.env ?? {}
   const envKeys = Object.keys(env)
@@ -29,7 +37,14 @@ export function CommandView({ spec }: { spec: HarnessSpec }) {
           {spec.model ?? '—'}
         </DefRow>
         <DefRow label="이미지" mono>
-          {spec.image ?? '기본 에이전트 이미지'}
+          {spec.image ? (
+            <span className="inline-flex min-w-0 items-center gap-2">
+              <span className="truncate">{spec.image}</span>
+              <ImageClassBadge image={spec.image} {...(registry ? { registry } : {})} />
+            </span>
+          ) : (
+            '기본 에이전트 이미지'
+          )}
         </DefRow>
         <DefRow label="작업 경로" mono>
           {spec.workDir ?? 'work'}

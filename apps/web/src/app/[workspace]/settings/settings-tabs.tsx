@@ -3,6 +3,7 @@
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
 import { CiLinksSettings } from '@/features/manage-ci-links'
 import { GithubAppManager } from '@/features/manage-github-app'
+import { ImageRegistryManager } from '@/features/manage-image-registry'
 import { InvitesManager } from '@/features/manage-invites'
 import { MattermostManager } from '@/features/manage-mattermost'
 import { MembersManager } from '@/features/manage-members'
@@ -11,6 +12,7 @@ import { SecretsManager } from '@/features/manage-workspace-secrets'
 import { WorkspaceInfoCard } from '@/features/workspace-settings'
 import type { CiLink } from '@/entities/ci-link'
 import type { GithubAppView } from '@/entities/github-app'
+import type { ImageRegistryConfig } from '@/entities/image-registry'
 import type { MattermostConfig } from '@/entities/mattermost'
 import type { Invite, Member } from '@/entities/member'
 import type { RunnerMeta } from '@/entities/runner'
@@ -29,6 +31,7 @@ export function SettingsTabs(props: {
   secrets: SecretMeta[]
   githubApp: GithubAppView // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
   mattermost?: MattermostConfig // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림)
+  imageRegistry?: ImageRegistryConfig // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행)
   ciLinks: CiLink[] // CI repo link(레포↔하니스 슬롯 = OIDC trust) 목록
   workspaceRunners: RunnerMeta[] // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI (admin)
   members: Member[]
@@ -103,6 +106,11 @@ export function SettingsTabs(props: {
             canWrite={props.canWriteSettings}
             secretNames={props.secrets.map((s) => s.name)}
             {...(props.mattermost !== undefined ? { config: props.mattermost } : {})}
+          />
+          <ImageRegistryManager
+            canWrite={props.canWriteSettings}
+            secretNames={props.secrets.map((s) => s.name)}
+            {...(props.imageRegistry !== undefined ? { config: props.imageRegistry } : {})}
           />
         </div>
       </TabsContent>

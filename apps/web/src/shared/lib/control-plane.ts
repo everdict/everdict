@@ -290,6 +290,13 @@ export const controlPlane = {
     call<T>(auth, '/workspace/mattermost', { method: 'PUT', body: JSON.stringify(body) }),
   removeMattermost: (auth: AuthContext) =>
     callVoid(auth, '/workspace/mattermost', { method: 'DELETE' }),
+  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
+  // 조회 harnesses:read(viewer+ — 분류 배지용) / 등록·해제 settings:write. 시크릿은 이름 참조만 오간다.
+  getImageRegistry: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registry'),
+  setImageRegistry: <T>(auth: AuthContext, body: unknown) =>
+    call<T>(auth, '/workspace/image-registry', { method: 'PUT', body: JSON.stringify(body) }),
+  removeImageRegistry: (auth: AuthContext) =>
+    callVoid(auth, '/workspace/image-registry', { method: 'DELETE' }),
   // CI repo link(레포↔하니스 슬롯 = GitHub Actions OIDC trust). 조회=harnesses:read(viewer+), 생성/삭제=settings:write(admin).
   // link 의 존재가 그 레포의 keyless CI 신뢰를 부여한다. 세 라우트 모두 현재 링크 전체({links})를 돌려준다(204 아님).
   listCiLinks: <T>(auth: AuthContext) => call<T>(auth, '/workspace/ci/links'),

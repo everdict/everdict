@@ -1360,6 +1360,19 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
           {result.versionExists && ' — 같은 내용이면 그대로 두고, 다르면 등록이 막혀요.'}
         </div>
       )}
+      {/* 이미지 출처 경고 — 로컬 빌드/미지정 이미지는 다른 런타임에서 pull 이 안 된다(등록은 가능). */}
+      {result.imageWarnings && result.imageWarnings.length > 0 && (
+        <div className="mt-1 text-[12px] text-muted-foreground">
+          이미지 경고:{' '}
+          {result.imageWarnings.map((w) => (
+            <code key={w.image} className="mr-1 font-mono">
+              {w.image}({w.class === 'local' ? '로컬 전용' : '레지스트리 미지정'})
+            </code>
+          ))}
+          — <code className="font-mono">assay image push</code> 로 워크스페이스 레지스트리에
+          발행하면 어디서든 실행돼요.
+        </div>
+      )}
     </Callout>
   )
 }

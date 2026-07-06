@@ -20,6 +20,7 @@ import {
   type HarnessSpec,
   type HarnessTemplateSpec,
 } from '@/entities/harness'
+import { imageRegistryResponseSchema } from '@/entities/image-registry'
 import { membersSchema } from '@/entities/member'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -164,6 +165,18 @@ export default async function HarnessDetailPage({
     }
   }
 
+  // 워크스페이스 이미지 레지스트리 좌표(viewer+) — 서비스/커맨드 이미지의 출처 분류 배지용. 실패해도 상세는 렌더.
+  const imageRegistry = await controlPlane
+    .getImageRegistry(ctx)
+    .then((r) => imageRegistryResponseSchema.parse(r).config)
+    .catch(() => undefined)
+  const registryCoords = imageRegistry
+    ? {
+        host: imageRegistry.host,
+        ...(imageRegistry.namespace ? { namespace: imageRegistry.namespace } : {}),
+      }
+    : undefined
+
   // CI 연동(레포 링크) — 이 하니스에 매칭된 링크 + 레포 picker 에 필요한 내 GitHub 연결 + 데이터셋 후보.
   // 셋 다 실패해도 상세는 계속 렌더(패널만 빈 상태). 저장/해제는 admin(settings:write) — 컨트롤플레인이 최종 강제.
   let ciLinks: CiLink[] = []
@@ -281,7 +294,7 @@ export default async function HarnessDetailPage({
             이 하니스가 실제로 실행되는 설정이에요.
           </p>
         </div>
-        <HarnessDetail spec={spec} />
+        <HarnessDetail spec={spec} {...(registryCoords ? { registry: registryCoords } : {})} />
         <RawConfigDisclosure {...(config ? { config } : {})} spec={spec} />
       </section>
 
