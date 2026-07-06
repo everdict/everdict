@@ -39,6 +39,7 @@ import { RunnerService } from "./runner-service.js";
 import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { buildServer } from "./server.js";
+import { TraceSinkService } from "./trace-sink-service.js";
 import { WorkspaceService } from "./workspace-service.js";
 
 const result: CaseResult = {
@@ -186,6 +187,7 @@ function server(
     },
   });
   const mattermostService = new MattermostService(settingsStore);
+  const traceSinkService = new TraceSinkService(settingsStore);
   const mattermostCommandService = new MattermostCommandService({
     settings: settingsStore,
     secretsFor: async () => ({}),
@@ -211,6 +213,7 @@ function server(
     githubAppService,
     mattermostService,
     mattermostCommandService,
+    traceSinkService,
     imageRegistryService,
     runnerService: new RunnerService(new InMemoryRunnerStore()),
     settingsStore,
@@ -498,6 +501,51 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
       url: "/workspace/mattermost",
       headers: h,
       payload: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT" },
+    });
+    expect(denied.statusCode).toBe(403);
+    await viewer.app.close();
+  });
+
+  it("트레이스 싱크: 관리자는 등록·조회·해제가 되고, viewer 는 settings:write 없어 403", async () => {
+    const h = { authorization: "Bearer x" };
+    const { app } = server({ requireAuth: true, authenticator: roleAuth(["admin"]) });
+    // Given/When: 관리자가 MLflow 싱크를 등록한다(시크릿은 이름 참조만).
+    const put = await app.inject({
+      method: "PUT",
+      url: "/workspace/trace-sink",
+      headers: h,
+      payload: { kind: "mlflow", endpoint: "http://mlflow.corp.io:5000", authSecretName: "MLFLOW_AUTH", project: "7" },
+    });
+    expect(put.statusCode).toBe(200);
+    expect(put.json().config).toEqual({
+      kind: "mlflow",
+      endpoint: "http://mlflow.corp.io:5000",
+      authSecretName: "MLFLOW_AUTH",
+      project: "7",
+    });
+    // Then: 조회에 노출(비밀 값 없음), 해제 후엔 사라진다.
+    const get = await app.inject({ method: "GET", url: "/workspace/trace-sink", headers: h });
+    expect(get.json().config.kind).toBe("mlflow");
+    expect((await app.inject({ method: "DELETE", url: "/workspace/trace-sink", headers: h })).statusCode).toBe(204);
+    expect(
+      (await app.inject({ method: "GET", url: "/workspace/trace-sink", headers: h })).json().config,
+    ).toBeUndefined();
+    // 잘못된 kind 는 400(경계 Zod 검증).
+    const bad = await app.inject({
+      method: "PUT",
+      url: "/workspace/trace-sink",
+      headers: h,
+      payload: { kind: "datadog", endpoint: "http://x" },
+    });
+    expect(bad.statusCode).toBe(400);
+    await app.close();
+
+    const viewer = server({ requireAuth: true, authenticator: roleAuth(["viewer"]) });
+    const denied = await viewer.app.inject({
+      method: "PUT",
+      url: "/workspace/trace-sink",
+      headers: h,
+      payload: { kind: "langfuse", endpoint: "https://langfuse.corp.io" },
     });
     expect(denied.statusCode).toBe(403);
     await viewer.app.close();

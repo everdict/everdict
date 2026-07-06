@@ -22,6 +22,7 @@ interface ScorecardRow {
   runtime: string | null;
   subset: unknown;
   scorecard: unknown;
+  sink_export: unknown;
   error: unknown;
   steps: unknown;
   run_ids: unknown;
@@ -48,6 +49,7 @@ function rowToRecord(row: ScorecardRow, hasDetail: boolean): ScorecardRecord {
     runtime: row.runtime ?? undefined, // 경량 → 목록에도 포함(작업 큐 런타임 축)
     subset: row.subset ?? undefined, // 경량 → 목록에도 포함(부분 실행 배지)
     scorecard: hasDetail ? (row.scorecard ?? undefined) : undefined,
+    export: hasDetail ? (row.sink_export ?? undefined) : undefined, // 상세용(steps 처럼 get 에서만). 컬럼명은 sink_export(예약어 회피)
     error: row.error ?? undefined,
     steps: hasDetail ? (row.steps ?? undefined) : undefined,
     runIds: hasDetail ? (row.run_ids ?? undefined) : undefined, // 상세용 경량 참조(steps 처럼 get 에서만)
@@ -63,8 +65,8 @@ export class PgScorecardStore implements ScorecardStore {
   async create(r: ScorecardRecord): Promise<void> {
     await this.client.query(
       `INSERT INTO assay_scorecards
-        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, scorecard, error, steps, run_ids, created_at, updated_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+        (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, scorecard, sink_export, error, steps, run_ids, created_at, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
       [
         r.id,
         r.tenant,
@@ -81,6 +83,7 @@ export class PgScorecardStore implements ScorecardStore {
         r.runtime ?? null,
         r.subset ? JSON.stringify(r.subset) : null,
         r.scorecard ? JSON.stringify(r.scorecard) : null,
+        r.export ? JSON.stringify(r.export) : null,
         r.error ? JSON.stringify(r.error) : null,
         r.steps ? JSON.stringify(r.steps) : null,
         r.runIds ? JSON.stringify(r.runIds) : null,
@@ -118,6 +121,10 @@ export class PgScorecardStore implements ScorecardStore {
     if (patch.scorecard !== undefined) {
       sets.push(`scorecard = $${i++}`);
       vals.push(JSON.stringify(patch.scorecard));
+    }
+    if (patch.export !== undefined) {
+      sets.push(`sink_export = $${i++}`);
+      vals.push(JSON.stringify(patch.export));
     }
     if (patch.error !== undefined) {
       sets.push(`error = $${i++}`);

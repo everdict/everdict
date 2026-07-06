@@ -60,6 +60,22 @@ describe("InMemoryScorecardStore", () => {
     expect((await store.list("acme"))[0]?.runtime).toBe("self:mac");
   });
 
+  it("트레이스 싱크 적재 결과(export)는 상세(get)에만 — 목록(list)에선 생략된다", async () => {
+    const store = new InMemoryScorecardStore();
+    await store.create(rec());
+    await store.update("sc1", {
+      export: {
+        sink: "mlflow",
+        status: "succeeded",
+        url: "http://mlflow.corp.io/#/experiments/7",
+        exportedAt: "2026-06-19T00:00:02.000Z",
+        cases: [{ caseId: "c1", externalId: "tr-abc", url: "http://mlflow.corp.io/#/experiments/7?tr=tr-abc" }],
+      },
+    });
+    expect((await store.get("sc1"))?.export?.cases?.[0]?.externalId).toBe("tr-abc");
+    expect((await store.list("acme"))[0]?.export).toBeUndefined(); // 목록엔 없음(steps 와 동급 상세)
+  });
+
   it("list(filter) 로 dataset/harness/status 를 좁힌다(리더보드/트렌드가 전 워크스페이스 스캔 회피)", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec({ id: "a", dataset: { id: "d1", version: "1" }, status: "succeeded" }));
@@ -142,6 +158,28 @@ describe("PgScorecardStore", () => {
     expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]);
     expect(list[0]?.createdBy).toBe("user-alice");
     expect(list[0]?.runtime).toBe("docker"); // 경량 → 목록 포함(런타임 레인)
+  });
+
+  it("export → update 는 sink_export 컬럼에 쓰고, get 은 export 필드로 되매핑한다(예약어 회피 컬럼명)", async () => {
+    const EXPORT = {
+      sink: "mlflow",
+      status: "partial",
+      exportedAt: "2026-06-19T00:00:02.000Z",
+      cases: [
+        { caseId: "c1", externalId: "tr-abc" },
+        { caseId: "c2", error: "업스트림 500" },
+      ],
+    };
+    // When: update 패치에 export — SQL 은 sink_export 컬럼으로.
+    const upd = fakeClient(() => ({ rows: [{ ...ROW, sink_export: EXPORT }] }));
+    const updated = await new PgScorecardStore(upd.client).update("sc1", {
+      export: EXPORT as ScorecardRecord["export"],
+    });
+    expect(upd.calls[0]?.text).toMatch(/sink_export = \$1/);
+    expect(upd.calls[0]?.params?.[0]).toBe(JSON.stringify(EXPORT));
+    // Then: row 의 sink_export 가 record.export 로 돌아온다(get 경로 동일 매핑).
+    expect(updated?.export?.status).toBe("partial");
+    expect(updated?.export?.cases?.[1]?.error).toBe("업스트림 500");
   });
 
   it("list(filter) → SQL WHERE 에 dataset_id/status 절 + 파라미터화(전 스캔 회피)", async () => {

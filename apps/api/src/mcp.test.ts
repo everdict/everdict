@@ -34,6 +34,7 @@ import { RunnerHub } from "./runner-hub.js";
 import { RunnerService } from "./runner-service.js";
 import { ScheduleService } from "./schedule-service.js";
 import { ScorecardService } from "./scorecard-service.js";
+import { TraceSinkService } from "./trace-sink-service.js";
 
 const result: CaseResult = {
   caseId: "c1",
@@ -103,6 +104,7 @@ function harness() {
       },
     }),
     mattermostService: new MattermostService(new InMemoryWorkspaceSettingsStore()),
+    traceSinkService: new TraceSinkService(new InMemoryWorkspaceSettingsStore()),
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
     harnessTemplates,
     harnessInstances,
@@ -198,6 +200,7 @@ describe("MCP tools", () => {
       "get_schedule",
       "get_scorecard",
       "get_workspace_mattermost",
+      "get_workspace_trace_sink",
       "heartbeat_job",
       "ingest_scorecard",
       "leaderboard_scorecards",
@@ -230,6 +233,7 @@ describe("MCP tools", () => {
       "remove_member",
       "remove_workspace_github_app_registration",
       "remove_workspace_mattermost",
+      "remove_workspace_trace_sink",
       "revoke_api_key",
       "revoke_invite",
       "revoke_runner",
@@ -241,6 +245,7 @@ describe("MCP tools", () => {
       "set_member_role",
       "set_runtime_version_tags",
       "set_workspace_mattermost",
+      "set_workspace_trace_sink",
       "start_workspace_github_app_install",
       "submit_job_result",
       "submit_run",
@@ -369,6 +374,35 @@ describe("MCP tools", () => {
     // 해제 → 조회에서 사라짐.
     await admin.callTool({ name: "remove_workspace_mattermost", arguments: {} });
     const after = JSON.parse(text(await admin.callTool({ name: "get_workspace_mattermost", arguments: {} })));
+    expect(after.config).toBeUndefined();
+  });
+
+  it("workspace trace sink: admin 은 등록/조회/해제, member 는 settings:write 없어 불가", async () => {
+    const deps = harness();
+    const admin = await connect(deps, ["admin"]);
+    const member = await connect(deps, ["member"]);
+
+    // member 는 settings:write 없음 → 등록 불가.
+    expect(
+      (
+        await member.callTool({
+          name: "set_workspace_trace_sink",
+          arguments: { kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
+        })
+      ).isError,
+    ).toBe(true);
+
+    // admin 등록 → 조회에 노출(비밀 값 없음).
+    await admin.callTool({
+      name: "set_workspace_trace_sink",
+      arguments: { kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
+    });
+    const got = JSON.parse(text(await admin.callTool({ name: "get_workspace_trace_sink", arguments: {} })));
+    expect(got.config).toEqual({ kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" });
+
+    // 해제 → 조회에서 사라짐.
+    await admin.callTool({ name: "remove_workspace_trace_sink", arguments: {} });
+    const after = JSON.parse(text(await admin.callTool({ name: "get_workspace_trace_sink", arguments: {} })));
     expect(after.config).toBeUndefined();
   });
 

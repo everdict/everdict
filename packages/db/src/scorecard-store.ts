@@ -69,6 +69,29 @@ export const ScorecardSubsetSchema = z.object({
 });
 export type ScorecardSubset = z.infer<typeof ScorecardSubsetSchema>;
 
+// 트레이스 싱크 적재 결과 — 채점 완료 후 케이스별 trace+점수를 워크스페이스 관측 플랫폼에 내보낸 기록.
+// 실패해도 스코어카드 상태에는 영향 없음(status 는 여기에만). 케이스별 외부 trace id/링크를 보존한다
+// (pull-ingest 의 runs 매핑이 사라지지 않도록). Pg 는 sink_export jsonb(mig 0048, additive).
+// 설계: docs/architecture/trace-sink.md
+export const ScorecardExportSchema = z.object({
+  sink: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
+  status: z.enum(["succeeded", "partial", "failed"]),
+  url: z.string().optional(), // 상위(experiment/project) 딥링크
+  message: z.string().optional(), // 실패/부분 사유
+  exportedAt: z.string(),
+  cases: z
+    .array(
+      z.object({
+        caseId: z.string(),
+        externalId: z.string().optional(), // 플랫폼 trace/run id(생성했거나 부착한 대상)
+        url: z.string().optional(), // 케이스 trace 딥링크
+        error: z.string().optional(), // 케이스별 실패(격리 — 다른 케이스는 계속 적재)
+      }),
+    )
+    .optional(),
+});
+export type ScorecardExport = z.infer<typeof ScorecardExportSchema>;
+
 export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
@@ -88,6 +111,7 @@ export const ScorecardRecordSchema = z.object({
   runtime: z.string().optional(),
   subset: ScorecardSubsetSchema.optional(), // 부분 실행 표식(전체 실행이면 미설정)
   scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
+  export: ScorecardExportSchema.optional(), // 트레이스 싱크 적재 결과(상세용 — steps 처럼 get 에서만)
   error: ScorecardRunErrorSchema.optional(),
   steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)
   // 이 배치가 팬아웃한 자식 run 들의 id(있으면). scorecard = run × N 을 참조로 표현 — 케이스별 addressable run 드릴다운.
@@ -140,7 +164,7 @@ export class InMemoryScorecardStore implements ScorecardStore {
       .filter((c) => !filter?.dataset || c.dataset.id === filter.dataset)
       .filter((c) => !filter?.harness || c.harness.id === filter.harness)
       .filter((c) => !filter?.status || c.status === filter.status);
-    // 목록은 무거운 scorecard/steps + 상세용 runIds 생략(summary/models 만) — 상세는 get 으로.
-    return all.map(({ scorecard, steps, runIds, ...rest }) => rest);
+    // 목록은 무거운 scorecard/steps + 상세용 runIds/export 생략(summary/models 만) — 상세는 get 으로.
+    return all.map(({ scorecard, steps, runIds, export: _export, ...rest }) => rest);
   }
 }

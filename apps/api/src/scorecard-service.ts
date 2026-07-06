@@ -20,6 +20,7 @@ import {
 } from "@assay/core";
 import type {
   RunStore,
+  ScorecardExport,
   ScorecardOrigin,
   ScorecardRecord,
   ScorecardStep,
@@ -48,6 +49,13 @@ import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
 import { ScoringService } from "./scoring-service.js";
+
+// 트레이스 싱크 적재 결과 한 줄 — 진행 스텝 메시지용(성공/부분/실패 + 사유).
+function exportStepMessage(e: ScorecardExport): string {
+  if (e.status === "succeeded") return `트레이스 싱크(${e.sink}) 적재 완료 — ${e.cases?.length ?? 0}건`;
+  const label = e.status === "partial" ? "부분 적재" : "적재 실패";
+  return `트레이스 싱크(${e.sink}) ${label}${e.message ? ` — ${e.message}` : ""}`;
+}
 
 // 케이스 실패/판정 사유 한 줄 — 진행 스텝 메시지용. trace 의 error 이벤트 > pass:false 인 score.detail 순. 길면 자른다.
 function caseReason(r: CaseResult): string | undefined {
@@ -199,6 +207,15 @@ export interface ScorecardServiceDeps {
   registryAuthFor?: (workspace: string) => Promise<RegistryAuth | undefined>;
   // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 스코어카드 결과 무관(서비스가 swallow).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
+  // 트레이스 싱크 적재(설정 시) — 채점 완료된 결과(trace+점수)를 워크스페이스 관측 플랫폼으로(TraceSinkService).
+  // 반환 outcome 은 record.export 에 기록; 실패는 스코어카드 결과와 격리(outcome.status 로만). docs/architecture/trace-sink.md
+  // attach: pull 인제스트의 (source.kind, caseId→외부 runId) — 소스=싱크 플랫폼이면 기존 trace 에 점수만 부착.
+  exportResults?: (
+    tenant: string,
+    ctx: { scorecardId: string; dataset: string; harness: string },
+    results: CaseResult[],
+    attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
+  ) => Promise<ScorecardExport | undefined>;
   artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)
   // 설정 시 케이스마다 자식 run(RunRecord)을 팬아웃 생성해 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
   // 미설정이면 현행대로 자식 run 없이 임베드 scorecard 만(단일 run 과 같은 RunStore 를 공유). 자식은 활동 리스트에서 기본 숨김.
@@ -645,6 +662,22 @@ export class ScorecardService {
       }
       phase = "offload";
       await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
+      // 트레이스 싱크 적재(설정 시) — 실패해도 스코어카드는 성공(outcome.status 로만 기록, error.phase 미사용).
+      // TraceSinkService 가 이미 throw 하지 않지만, 만약을 위해 여기서도 격리(catch → 미기록).
+      const exported = this.deps.exportResults
+        ? await this.deps
+            .exportResults(
+              tenant,
+              {
+                scorecardId: id,
+                dataset: `${dataset.id}@${dataset.version}`,
+                harness: `${harnessId}@${harnessVersion}`,
+              },
+              scorecard.results,
+            )
+            .catch(() => undefined)
+        : undefined;
+      if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
       phase = "persist";
       const summary = summarizeScorecard(scorecard);
       // 리더보드 model 축: 트레이스 관측 우선 + spec 선언(command 하니스만) 폴백.
@@ -664,6 +697,7 @@ export class ScorecardService {
         summary,
         models,
         ...(judgeModels.length > 0 ? { judgeModels } : {}),
+        ...(exported ? { export: exported } : {}),
         steps: [...steps],
         ...(hasChildren ? { runIds: [...caseToChild.values()] } : { scorecard }),
         updatedAt: this.now(),
@@ -752,13 +786,18 @@ export class ScorecardService {
         const trace = await src.fetch(r.runId); // 외부 실패는 UpstreamError → catch → failed
         perCase.push({ caseId: r.caseId, trace });
       }
-      await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges);
+      // attach 힌트: 원본 trace 가 이미 소스 플랫폼에 있다 — 싱크가 같은 플랫폼이면 복제 대신 점수만 부착(흐름②).
+      await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges, {
+        sourceKind: source.kind,
+        externalIdByCase: Object.fromEntries(runs.map((r) => [r.caseId, r.runId])),
+      });
     } catch (err) {
       await this.failIngest(id, err);
     }
   }
 
   // 공유: perCase 트레이스 → CaseResult(트레이스 그레이더 재도출 + 업로드 점수) → judge → 집계 저장(succeeded). 실패는 throw.
+  // attach = pull 경로의 원본 좌표(소스 kind + caseId→외부 runId) — 트레이스 싱크가 같은 플랫폼이면 점수만 부착.
   private async finishIngest(
     id: string,
     tenant: string,
@@ -766,6 +805,7 @@ export class ScorecardService {
     harnessLabel: string,
     perCase: IngestScorecardBody["traces"],
     judges: Array<{ id: string; version: string }>,
+    attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ): Promise<void> {
     const caseById = new Map(dataset.cases.map((c) => [c.id, c]));
     const results: CaseResult[] = [];
@@ -787,6 +827,17 @@ export class ScorecardService {
     const scorecard: Scorecard = { suiteId: dataset.id, harness: harnessLabel, results };
     await this.scoring.applyJudges(tenant, dataset, results, judges); // 트레이스 → judge 점수(컨트롤플레인)
     await this.offloadResults(id, results); // os-use 스크린샷 → object storage(레코드 슬림)
+    // 트레이스 싱크 적재(설정 시) — 라이브 배치와 동일 위치(채점 후). pull 은 attach 로 원본 trace 에 점수만 부착.
+    const exported = this.deps.exportResults
+      ? await this.deps
+          .exportResults(
+            tenant,
+            { scorecardId: id, dataset: `${dataset.id}@${dataset.version}`, harness: harnessLabel },
+            results,
+            attach,
+          )
+          .catch(() => undefined)
+      : undefined;
     const summary = summarizeScorecard(scorecard);
     // 인제스트는 하니스 spec 을 해석하지 않음 → 관측(트레이스)만으로 model 축.
     const models = scorecardModels(scorecard);
@@ -798,6 +849,7 @@ export class ScorecardService {
       summary,
       models,
       ...(judgeModels.length > 0 ? { judgeModels } : {}),
+      ...(exported ? { export: exported } : {}),
       updatedAt: this.now(),
     });
   }

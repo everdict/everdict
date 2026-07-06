@@ -50,6 +50,7 @@ import {
   type ScorecardService,
   originSource,
 } from "./scorecard-service.js";
+import type { TraceSinkService } from "./trace-sink-service.js";
 import { setVersionTags } from "./version-tag-service.js";
 import type { UpdateViewInput, ViewService } from "./view-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
@@ -72,6 +73,7 @@ export interface McpDeps {
   secretStore?: SecretStore;
   githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
   mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림)
+  traceSinkService?: TraceSinkService; // 워크스페이스 트레이스 싱크(관측 플랫폼 적재)
   imageRegistryService?: ImageRegistryService; // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
@@ -1382,6 +1384,62 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       () =>
         run(principal, "settings:write", async () => {
           await mm.clear(ws);
+          return ok({ ok: true });
+        }),
+    );
+  }
+
+  // 워크스페이스 트레이스 싱크 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow/Langfuse/LangSmith/Phoenix)에 적재.
+  // settings:read/write. 설계: docs/architecture/trace-sink.md
+  if (deps.traceSinkService) {
+    const sink = deps.traceSinkService;
+    server.registerTool(
+      "get_workspace_trace_sink",
+      {
+        description:
+          "이 워크스페이스의 트레이스 싱크 설정 — kind/endpoint/authSecretName/project(비밀 값 아님). 미설정이면 config 없음.",
+        inputSchema: {},
+      },
+      () =>
+        run(principal, "settings:read", async () => {
+          const config = await sink.get(ws);
+          return ok({ ...(config ? { config } : {}) });
+        }),
+    );
+    server.registerTool(
+      "set_workspace_trace_sink",
+      {
+        description:
+          "트레이스 싱크 등록/갱신(관리자, 선언형 전체 교체). 스코어카드 완료 시 케이스별 trace+점수를 이 플랫폼에 적재하고 스코어카드엔 외부 링크를 기록. 인증 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 authSecretName 으로 지정.",
+        inputSchema: {
+          kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]).describe("관측 플랫폼 종류"),
+          endpoint: z.string().url().describe("플랫폼 API 베이스 URL"),
+          authSecretName: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("인증 헤더 '값'이 저장된 SecretStore 키 이름(무인증 dev 서버는 생략)"),
+          project: z
+            .string()
+            .min(1)
+            .optional()
+            .describe(
+              "kind별 프로젝트 좌표 — mlflow experiment_id · langsmith project · phoenix project · langfuse projectId",
+            ),
+          webUrl: z.string().url().optional().describe("UI 딥링크 베이스(API endpoint 와 다를 때)"),
+        },
+      },
+      (input) => run(principal, "settings:write", async () => ok({ config: await sink.set(ws, input) })),
+    );
+    server.registerTool(
+      "remove_workspace_trace_sink",
+      {
+        description: "트레이스 싱크 해제(관리자). 이후 스코어카드 상세 결과는 외부 적재 없이 Assay 에만 남는다.",
+        inputSchema: {},
+      },
+      () =>
+        run(principal, "settings:write", async () => {
+          await sink.clear(ws);
           return ok({ ok: true });
         }),
     );

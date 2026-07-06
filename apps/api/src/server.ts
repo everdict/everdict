@@ -74,6 +74,7 @@ import {
   type ScorecardService,
   originSource,
 } from "./scorecard-service.js";
+import type { TraceSinkService } from "./trace-sink-service.js";
 import { VersionTagsBodySchema, setVersionTags } from "./version-tag-service.js";
 import type { ViewService } from "./view-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
@@ -209,6 +210,7 @@ export interface ServerDeps {
   githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo) (없으면 해당 라우트 비활성)
   mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림) (없으면 해당 라우트 비활성)
   mattermostCommandService?: MattermostCommandService; // Mattermost 인바운드(슬래시커맨드/버튼) (없으면 해당 라우트 비활성)
+  traceSinkService?: TraceSinkService; // 워크스페이스 트레이스 싱크(관측 플랫폼 적재) (없으면 해당 라우트 비활성)
   imageRegistryService?: ImageRegistryService; // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행) (없으면 해당 라우트 비활성)
   ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
   runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
@@ -2452,6 +2454,61 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
+  // --- 워크스페이스 트레이스 싱크 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow 등)에 적재 ---
+  // 조회 settings:read / 등록·해제 settings:write. 인증 토큰 값은 SecretStore 에만(여기선 이름 참조만).
+  // 설계: docs/architecture/trace-sink.md
+  app.get("/workspace/trace-sink", async (req, reply) => {
+    if (!deps.traceSinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:read");
+      const config = await deps.traceSinkService.get(principal.workspace);
+      return reply.send({ ...(config ? { config } : {}) });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.put("/workspace/trace-sink", async (req, reply) => {
+    if (!deps.traceSinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    const body = z
+      .object({
+        kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
+        endpoint: z.string().url(),
+        authSecretName: z.string().min(1).optional(),
+        project: z.string().min(1).optional(),
+        webUrl: z.string().url().optional(),
+      })
+      .safeParse(req.body ?? {});
+    if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
+    try {
+      gate(principal, "settings:write");
+      const config = await deps.traceSinkService.set(principal.workspace, body.data);
+      return reply.send({ config });
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.delete("/workspace/trace-sink", async (req, reply) => {
+    if (!deps.traceSinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
+    const principal = await resolvePrincipal(req, reply, deps);
+    if (!principal) return reply;
+    try {
+      gate(principal, "settings:write");
+      await deps.traceSinkService.clear(principal.workspace);
+      return reply.code(204).send();
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
   // --- 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상 ---
   // 조회 harnesses:read(viewer+ — 분류 배지는 하니스 읽기 관심사, 뷰는 이름 참조/좌표만) / 등록·해제 settings:write /
   // push 자격증명 images:push(member+ — 값 유출을 별도 액션으로 명명). 설계: docs/architecture/workspace-image-registry.md
@@ -2892,6 +2949,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           secretStore: deps.secretStore,
           githubAppService: deps.githubAppService,
           mattermostService: deps.mattermostService,
+          traceSinkService: deps.traceSinkService,
           imageRegistryService: deps.imageRegistryService,
           ciLinkService: deps.ciLinkService,
           runnerService: deps.runnerService,

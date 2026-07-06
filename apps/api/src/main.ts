@@ -95,7 +95,7 @@ import {
 } from "@assay/registry";
 import { S3ArtifactStore } from "@assay/storage";
 import { InProcessCallbackRendezvous } from "@assay/topology";
-import { buildTraceSource } from "@assay/trace";
+import { buildTraceSink, buildTraceSource } from "@assay/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
 import { CiLinkService } from "./ci-link-service.js";
@@ -122,6 +122,7 @@ import { buildServer } from "./server.js";
 import { recoverInterrupted } from "./startup-recovery.js";
 import { TemporalScheduleDriver } from "./temporal-schedule-driver.js";
 import { buildTopologyBackend } from "./topology-backend.js";
+import { TraceSinkService } from "./trace-sink-service.js";
 import { ViewService } from "./view-service.js";
 import { WorkspaceService } from "./workspace-service.js";
 
@@ -275,6 +276,11 @@ async function main(): Promise<void> {
   const mattermostService = new MattermostService(settingsStore, {
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
   });
+  // 워크스페이스 트레이스 싱크 — 스코어카드 상세 결과를 팀 관측 플랫폼에 적재. docs/architecture/trace-sink.md
+  const traceSinkService = new TraceSinkService(settingsStore, {
+    secretsFor: runtimeSecretsFor, // authSecretName → 공유(workspace) 시크릿 값
+    buildSink: buildTraceSink,
+  });
   // 리소스 댓글(데이터셋 등) 협업 논의 + @멘션 알림. 멘션되면 언급자 이름을 프로필/멤버에서 해석해 개인 피드로.
   const commentService = new CommentService({
     store: commentStore,
@@ -370,6 +376,8 @@ async function main(): Promise<void> {
     registryAuthFor: (workspace) => imageRegistryService.pullAuth(workspace),
     // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
+    // 트레이스 싱크 적재 — 채점 완료된 상세 결과를 워크스페이스 관측 플랫폼으로(record.export 에 outcome 기록).
+    exportResults: (tenant, ctx, results, attach) => traceSinkService.exportScorecard(tenant, ctx, results, attach),
   });
   // Mattermost 인바운드(슬래시커맨드/버튼) — commandToken 검증 후 채팅에서 스코어카드 실행/리더보드 조회.
   const mattermostCommandService = new MattermostCommandService({
@@ -475,6 +483,7 @@ async function main(): Promise<void> {
     githubAppService,
     mattermostService,
     mattermostCommandService,
+    traceSinkService,
     imageRegistryService,
     ciLinkService,
     runnerService,

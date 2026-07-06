@@ -55,6 +55,19 @@ export const WorkspaceSettingsSchema = z.object({
     })
     .nullable()
     .optional(),
+  // 워크스페이스 트레이스 싱크 — judge 된 스코어카드 상세 결과(trace+점수)를 팀 관측 플랫폼으로 적재(아웃바운드).
+  // TraceSource(인바운드 pull)의 거울. 시크릿은 SecretStore name-ref(값 저장/반환 안 함). nullable: DELETE 는 null 클리어.
+  // 설계: docs/architecture/trace-sink.md
+  traceSink: z
+    .object({
+      kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
+      endpoint: z.string().url(), // 플랫폼 API 베이스 URL
+      authSecretName: z.string().min(1).optional(), // SecretStore 키 — 인증 헤더 '값'(무인증 dev 서버는 생략)
+      project: z.string().min(1).optional(), // kind별 의미: mlflow experiment_id · langsmith project · phoenix project · langfuse projectId(링크)
+      webUrl: z.string().url().optional(), // UI 딥링크 베이스(API endpoint 와 다를 때 — 예: LangSmith api vs smith)
+    })
+    .nullable()
+    .optional(),
   // CI 통합(GitHub Actions) — repo link 목록(레포↔하니스 슬롯 매핑 = OIDC trust policy). 위 WorkspaceCiLinkSchema 참고.
   ci: z.object({ links: z.array(WorkspaceCiLinkSchema).default([]) }).optional(),
   // 워크스페이스 소유 GitHub App 통합(개인 연결 대체) — 조직 설치→선택 repo→워크스페이스 소유 installation.

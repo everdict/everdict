@@ -432,6 +432,139 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
   });
 });
 
+describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
+  const okDispatch: Dispatcher = {
+    async dispatch(job) {
+      return {
+        caseId: job.evalCase.id,
+        harness: `${job.harness.id}@${job.harness.version}`,
+        trace: [],
+        snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+        scores: [{ graderId: "tests-pass", metric: "tests-pass", value: 1, pass: true }],
+      };
+    },
+  };
+
+  it("라이브 배치: 채점 후 exportResults outcome 이 record.export 와 steps(export)로 기록된다", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const calls: Array<{ ctx: { scorecardId: string; dataset: string; harness: string }; caseIds: string[] }> = [];
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      newId: () => "sc-export",
+      exportResults: async (_tenant, ctx, results) => {
+        calls.push({ ctx, caseIds: results.map((r) => r.caseId) });
+        return {
+          sink: "mlflow",
+          status: "succeeded",
+          url: "http://mlflow/#/experiments/7",
+          exportedAt: "2026-07-06T00:00:00.000Z",
+          cases: [{ caseId: "c1", externalId: "tr-1", url: "http://mlflow/#/experiments/7?tr=tr-1" }],
+        };
+      },
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+    });
+    const done = await waitTerminal(store, "sc-export");
+    // Then: 채점 완료된 결과가 export 로 넘어가고, outcome 이 레코드에 남는다.
+    expect(calls[0]?.ctx).toEqual({ scorecardId: "sc-export", dataset: "d@1.0.0", harness: "h@1" });
+    expect(calls[0]?.caseIds).toEqual(["c1"]);
+    expect(done.status).toBe("succeeded");
+    expect(done.export?.status).toBe("succeeded");
+    expect(done.export?.cases?.[0]?.externalId).toBe("tr-1");
+    expect(done.steps?.some((s) => s.phase === "export" && s.status === "ok")).toBe(true);
+  });
+
+  it("export 실패(outcome=failed·throw)여도 스코어카드는 succeeded — 격리 원칙", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    // outcome=failed 로 기록되는 경우.
+    const store = new InMemoryScorecardStore();
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      newId: () => "sc-exf",
+      exportResults: async () => ({
+        sink: "langfuse",
+        status: "failed",
+        message: "업스트림 401",
+        exportedAt: "2026-07-06T00:00:00.000Z",
+      }),
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+    });
+    const done = await waitTerminal(store, "sc-exf");
+    expect(done.status).toBe("succeeded"); // export 실패는 결과에 영향 없음
+    expect(done.error).toBeUndefined(); // error.phase 미사용
+    expect(done.export?.status).toBe("failed");
+    expect(done.steps?.some((s) => s.phase === "export" && s.status === "failed")).toBe(true);
+
+    // 훅 자체가 throw 해도(계약 위반) 스코어카드는 성공하고 export 만 미기록.
+    const store2 = new InMemoryScorecardStore();
+    const service2 = new ScorecardService({
+      dispatcher: okDispatch,
+      store: store2,
+      datasets,
+      newId: () => "sc-exth",
+      exportResults: async () => {
+        throw new Error("계약 위반 throw");
+      },
+    });
+    await service2.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+    });
+    const done2 = await waitTerminal(store2, "sc-exth");
+    expect(done2.status).toBe("succeeded");
+    expect(done2.export).toBeUndefined();
+  });
+
+  it("pull 인제스트: (source.kind, caseId→runId) attach 힌트가 export 로 전달되고 outcome 이 기록된다", async () => {
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    let attachSeen: { sourceKind: string; externalIdByCase: Record<string, string> } | undefined;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      buildTraceSource: () => ({ fetch: async () => [{ t: 0, kind: "llm_call", model: "m" }] }),
+      exportResults: async (_tenant, _ctx, _results, attach) => {
+        attachSeen = attach;
+        return {
+          sink: "mlflow",
+          status: "succeeded",
+          exportedAt: "2026-07-06T00:00:00.000Z",
+          cases: [{ caseId: "c1", externalId: "tr-orig-1" }],
+        };
+      },
+    });
+    const created = await service.ingestPull({
+      tenant: "acme",
+      dataset: { id: "d", version: "latest" },
+      harness: { id: "h", version: "1.0.0" },
+      source: { kind: "mlflow", endpoint: "http://mlflow:5000" },
+      runs: [{ caseId: "c1", runId: "tr-orig-1" }],
+      judges: [],
+    });
+    const done = await waitTerminal(store, created.id);
+    // Then: 원본 trace 좌표가 attach 로 흘러 기존 trace 에 점수만 부착할 수 있다(흐름②).
+    expect(attachSeen).toEqual({ sourceKind: "mlflow", externalIdByCase: { c1: "tr-orig-1" } });
+    expect(done.export?.cases?.[0]?.externalId).toBe("tr-orig-1");
+  });
+});
+
 describe("ScorecardService.submit — 리더보드 model 축 캡처", () => {
   // 각 케이스가 llm_call(model) 을 남기는 dispatcher — 관측 모델의 출처.
   const llmDispatch = (model: string): Dispatcher => ({
