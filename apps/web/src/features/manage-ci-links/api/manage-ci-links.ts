@@ -37,6 +37,7 @@ export interface UpsertCiLinkInput {
   slots?: Record<string, { path?: string }>
   runsOn?: string // 셀프호스티드 배치(선택) — 워크플로 runs-on
   runtime?: string // run-eval runtime 입력(예: self:ws:<id>)
+  trigger?: 'auto' | 'comment' | 'both' // PR 평가 발화 방식 — 미지정 = both(자동 + /evaluate 코멘트)
 }
 
 // 레포 목록(picker) — 워크스페이스 GitHub App installation 이 접근 가능한 레포(설치 시 고른 것만). settings:read.

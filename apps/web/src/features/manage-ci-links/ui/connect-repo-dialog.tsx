@@ -4,7 +4,7 @@ import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Check, GitBranch, Lock, Search } from 'lucide-react'
 
-import type { CiLink, RepoInfo } from '@/entities/ci-link'
+import type { CiLink, CiTrigger, RepoInfo } from '@/entities/ci-link'
 import type { HarnessKind } from '@/entities/harness'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -70,6 +70,7 @@ export function ConnectRepoDialog({
   const [repository, setRepository] = useState<SelectedRepo>()
   const [slots, setSlots] = useState<Record<string, SlotState>>(() => initSlots(slotChoices, kind))
   const [dataset, setDataset] = useState('')
+  const [trigger, setTrigger] = useState<CiTrigger>('both')
   const [runsOn, setRunsOn] = useState('')
   const [runtime, setRuntime] = useState('')
   const [saveError, setSaveError] = useState<string>()
@@ -84,6 +85,7 @@ export function ConnectRepoDialog({
     setRepository(undefined)
     setSlots(initSlots(slotChoices, kind))
     setDataset('')
+    setTrigger('both')
     setRunsOn('')
     setRuntime('')
     setSaveError(undefined)
@@ -131,6 +133,7 @@ export function ConnectRepoDialog({
         harness: harnessId,
         ...(dataset ? { dataset } : {}),
         slots: slotPayload,
+        ...(trigger !== 'both' ? { trigger } : {}), // 미지정 = both 가 계약 — 기본값은 저장하지 않는다
         ...(runsOn.trim() ? { runsOn: runsOn.trim() } : {}),
         ...(runtime.trim() ? { runtime: runtime.trim() } : {}),
       })
@@ -352,10 +355,31 @@ export function ConnectRepoDialog({
               </div>
             )}
 
-            {/* 4. 셀프호스티드 러너 — CI 를 팀 빌드 서버에서 돌리려면(선택). github-install 로 세운 러너 라벨/런타임. */}
+            {/* 4. PR 평가 발화 방식 — 자동/코멘트(/evaluate)/둘 다. push(머지 재핀)는 방식과 무관하게 항상. */}
             {repository && (
               <div className="space-y-1.5">
-                <Label>4. 셀프호스티드 러너 (선택)</Label>
+                <Label>4. PR 평가 방식</Label>
+                <Combobox
+                  options={[
+                    { value: 'both', label: '자동 + /evaluate 코멘트', hint: '기본' },
+                    { value: 'auto', label: '자동만', hint: 'PR 푸시마다' },
+                    { value: 'comment', label: '/evaluate 코멘트만', hint: '온디맨드' },
+                  ]}
+                  value={trigger}
+                  onChange={(v) => setTrigger(v === 'auto' || v === 'comment' ? v : 'both')}
+                  placeholder="발화 방식"
+                />
+                <p className="text-[12px] text-faint">
+                  코멘트 방식은 PR 대화에 <span className="font-mono">/evaluate</span> 를 남기면
+                  평가가 돌고 결과가 대화로 회신돼요. 협력자 이상만 발화할 수 있어요.
+                </p>
+              </div>
+            )}
+
+            {/* 5. 셀프호스티드 러너 — CI 를 팀 빌드 서버에서 돌리려면(선택). github-install 로 세운 러너 라벨/런타임. */}
+            {repository && (
+              <div className="space-y-1.5">
+                <Label>5. 셀프호스티드 러너 (선택)</Label>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Input
                     value={runsOn}

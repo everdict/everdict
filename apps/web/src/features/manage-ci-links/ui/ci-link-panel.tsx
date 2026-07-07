@@ -127,6 +127,15 @@ export function CiLinkPanel({
                         데이터셋 <span className="font-mono text-foreground/85">{l.dataset}</span>
                       </span>
                     )}
+                    {/* PR 평가 발화 방식 — 기본(both)은 무표기, 좁힌 경우만 표시. */}
+                    {l.trigger === 'auto' && (
+                      <span className="text-[11px] text-muted-foreground">PR 자동만</span>
+                    )}
+                    {l.trigger === 'comment' && (
+                      <span className="text-[11px] text-muted-foreground">
+                        <span className="font-mono text-foreground/85">/evaluate</span> 코멘트만
+                      </span>
+                    )}
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <SetupPrButton repository={l.repository} host={l.host} onError={setError} />

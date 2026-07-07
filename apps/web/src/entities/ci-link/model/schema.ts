@@ -18,8 +18,11 @@ export const ciLinkSchema = z.object({
   disabled: z.boolean().optional(),
   runsOn: z.string().optional(), // 셀프호스티드 배치(선택) — 워크플로 runs-on 값(예: "[self-hosted, assay-<id>]")
   runtime: z.string().optional(), // run-eval runtime 입력(예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서
+  // PR 평가 발화 방식 — auto=PR 이벤트 자동만 · comment=PR 코멘트 /evaluate 만(온디맨드) · 미지정=both(둘 다)
+  trigger: z.enum(['auto', 'comment', 'both']).optional(),
 })
 export type CiLink = z.infer<typeof ciLinkSchema>
+export type CiTrigger = NonNullable<CiLink['trigger']>
 
 // GET/PUT/DELETE /workspace/ci/links 응답 — 항상 현재 링크 전체를 돌려준다.
 export const ciLinksResponseSchema = z.object({ links: z.array(ciLinkSchema) })
