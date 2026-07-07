@@ -155,6 +155,8 @@ ci?: {
     createdBy: string;                        // audit only — fire-time auth does NOT depend on the creator
     disabled?: boolean;
     trigger?: "auto" | "comment" | "both";    // PR firing surface (default both); push re-pin always fires
+    runsOn?: string;                          // narrowing override — default "[self-hosted]" (D6)
+    runtime?: string;                         // narrowing override — default "self:ws" pool (D6; personal self:… rejected)
   }>;
 }
 ```
@@ -199,6 +201,34 @@ preferred.
 - Server-side supersede (in-flight scorecard with same `origin.repo+prNumber` gets cancelled by a newer fire) is
   a later slice; the generated workflow's `concurrency` group covers the common case for free.
 
+### D6 — Placement: CI always runs on self-hosted runners (decided 2026-07-07)
+
+The generated workflow **never targets GitHub-hosted runners**. An Assay control plane is frequently deployed on
+a private network; a GitHub-hosted runner cannot reach `api-url`, so a `runs-on: ubuntu-latest` workflow fails
+late (merged, then a CI network timeout — the most confusing failure mode). Rather than modeling reachability
+(operator env + heuristics + a conditional generator), we removed the branch: **every generated workflow is
+self-hosted**, which is fail-closed by construction and matches the shipped one-command dual-worker install
+(`POST /workspace/runners/github-install` = GitHub Actions runner + Assay `self:ws` runner on one build server).
+
+- **Defaults (zero-input):** `runs-on: [self-hosted]` (any self-hosted runner registered on the repo/org) +
+  `runtime: self:ws` (the workspace runner pool — any capable shared runner drains it). `link.runsOn` /
+  `link.runtime` are **narrowing overrides** (a specific label / `self:ws:<id>` / a managed runtime id), not the
+  hosted-vs-self decision.
+- **Fail-closed at setup-PR time:** when the link's effective runtime targets the workspace pool
+  (`self:ws`/`self:ws:<id>`), `openSetupPr` requires the pool to be non-empty (specific id must exist) and
+  otherwise throws `BadRequestError` pointing at the runner install flow. A workflow merged with zero runners
+  would sit silently queued on the GitHub side — blocking the PR is the earliest observable failure point.
+- **Personal runners are rejected:** `link.runtime` of `self`/`self:<id>` is a `BadRequestError` at upsert — a
+  `via:"github-actions"` principal can never lease a member's personal runner (owner = submitter), so such a
+  link can only fail at fire time.
+- **Side benefits:** build and eval share the build server's docker daemon (the just-pushed image is already
+  local — private-GHCR pull mostly moot), persistent layer cache, no GitHub-hosted minute billing.
+- **Costs, accepted:** the zero-infra path for *publicly reachable* control planes is gone (a team must register
+  one runner before CI evals; acceptable — evals need compute anyway). If a hosted-runner story is ever wanted
+  again it returns as an explicit `runsOn: ubuntu-latest`-style opt-in (fields already exist, no migration).
+  **Public-repo caveat:** fork PRs on self-hosted runners execute untrusted code — GitHub advises against
+  self-hosted runners for public repos; Assay's target is private team repos, documented here.
+
 ## Slices
 
 1. **Fire path (no new auth):** `origin` field + `RunScorecardInput.harness.pins` (ephemeral merge at the
@@ -225,7 +255,8 @@ preferred.
   job's tenant (`ws:<tenant>`), so workspace membership *is* access. `POST /workspace/runners/github-install` /
   MCP `github_install_workspace_runner` stand up a GitHub Actions runner + an Assay `self:ws:<id>` runner on one
   build server in a single command. See `docs/architecture/self-hosted-runtime-and-runners.md` §3–4. (A per-runner
-  `allowCi` opt-in for *personal* runners is no longer needed for the CI use case.)
+  `allowCi` opt-in for *personal* runners is no longer needed for the CI use case.) As of D6 this is not just
+  *supported* but the **only** placement the generator emits.
 - **Link write gating.** Creating a link both wires a harness and grants repo-federated access — lean
   `settings:write` (admin) for creation, since it is a trust grant; the picker/setup-PR UX stays member-visible
   read-only until an admin confirms. To revisit when the UX is built.

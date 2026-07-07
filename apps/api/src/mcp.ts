@@ -1541,11 +1541,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           runsOn: z
             .string()
             .optional()
-            .describe('셀프호스티드 배치(선택) — 워크플로 runs-on(예: "[self-hosted, assay-<id>]")'),
+            .describe('좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, assay-<id>]")'),
           runtime: z
             .string()
             .optional()
-            .describe('run-eval runtime 입력(선택, 예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서'),
+            .describe(
+              '좁히기 오버라이드 — run-eval runtime(기본 "self:ws" 워크스페이스 러너 풀, 예: "self:ws:<id>"). 개인 러너(self…)는 400',
+            ),
           trigger: z
             .enum(["auto", "comment", "both"])
             .optional()
@@ -1595,7 +1597,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "open_ci_setup_pr",
       {
         description:
-          "link 된 레포에 Assay eval 워크플로 YAML 을 합성해 setup-PR 을 연다(워크스페이스 GitHub App 토큰). 머지하면 CI eval 활성.",
+          "link 된 레포에 Assay eval 워크플로 YAML 을 합성해 setup-PR 을 연다(워크스페이스 GitHub App 토큰). 머지하면 CI eval 활성. 워크플로는 항상 셀프호스티드 러너 대상 — self:ws 풀에 공유 러너가 없으면 400(github_install_workspace_runner 로 먼저 등록).",
         inputSchema: {
           repository: z.string().describe('"owner/name"'),
           host: z.string().url().optional().describe("GHE 베이스 URL — 미지정 = github.com link"),

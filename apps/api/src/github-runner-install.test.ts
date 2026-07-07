@@ -14,12 +14,13 @@ function fakeGithubApp(): GithubAppRepoAccess {
 }
 
 function setup() {
+  const runnerStore = new InMemoryRunnerStore();
+  const runnerService = new RunnerService(runnerStore);
   const ciLinkService = new CiLinkService({
     settings: new InMemoryWorkspaceSettingsStore(),
     githubApp: fakeGithubApp(),
+    runners: runnerService, // setup-PR 의 self:ws 풀 존재 검사(D6) — 실제 배선과 동일하게 RunnerService 를 그대로
   });
-  const runnerStore = new InMemoryRunnerStore();
-  const runnerService = new RunnerService(runnerStore);
   return { runnerService, ciLinkService, runnerStore };
 }
 

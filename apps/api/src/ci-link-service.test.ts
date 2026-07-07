@@ -1,7 +1,13 @@
-import { NotFoundError, UpstreamError } from "@assay/core";
+import { BadRequestError, NotFoundError, UpstreamError } from "@assay/core";
 import { InMemoryWorkspaceSettingsStore } from "@assay/db";
 import { beforeEach, describe, expect, it } from "vitest";
-import { CiLinkService, type GithubAppRepoAccess, type RepoInfo, renderCiWorkflow } from "./ci-link-service.js";
+import {
+  CiLinkService,
+  type GithubAppRepoAccess,
+  type RepoInfo,
+  type WorkspaceRunnerRoster,
+  renderCiWorkflow,
+} from "./ci-link-service.js";
 
 // fetch fake — URL 패턴별 응답 시나리오(setup-PR 의 GitHub API dance 검증용).
 type Handler = (url: string, init?: RequestInit) => Response | undefined;
@@ -33,12 +39,17 @@ function fakeGithubApp(over: Partial<GithubAppRepoAccess> = {}): GithubAppRepoAc
   };
 }
 
+// 워크스페이스-공유 러너 로스터 fake — 기본 1대(r1). setup-PR 의 self:ws 풀 fail-closed 검사(D6)용.
+function fakeRunners(ids: string[] = ["r1"]): WorkspaceRunnerRoster {
+  return { listWorkspaceOwned: async () => ids.map((id) => ({ id })) };
+}
+
 describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)", () => {
   let settings: InMemoryWorkspaceSettingsStore;
   let svc: CiLinkService;
   beforeEach(() => {
     settings = new InMemoryWorkspaceSettingsStore();
-    svc = new CiLinkService({ settings, githubApp: fakeGithubApp() });
+    svc = new CiLinkService({ settings, githubApp: fakeGithubApp(), runners: fakeRunners() });
   });
 
   it("upsert 는 같은 repository 를 교체하고(createdBy 스탬프), remove 는 신뢰까지 끊는다", async () => {
@@ -53,6 +64,18 @@ describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)"
   it("trigger 노브(auto|comment|both)가 link 에 저장된다 — setup-PR 워크플로의 PR 발화 방식", async () => {
     await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {}, trigger: "comment" });
     expect((await svc.list("acme"))[0]?.trigger).toBe("comment");
+  });
+
+  it("개인 러너 runtime(self / self:<id>)은 BadRequest — CI principal 은 개인 러너를 리스할 수 없다(발사 시점 실패를 저장에서 차단)", async () => {
+    for (const runtime of ["self", "self:r9"])
+      await expect(
+        svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {}, runtime }),
+      ).rejects.toBeInstanceOf(BadRequestError);
+    // 워크스페이스-공유 계열과 관리형 런타임 id 는 허용된다("self" 로 시작하는 일반 id 포함).
+    for (const runtime of ["self:ws", "self:ws:r1", "k8s-prod", "selfhosted-k8s"])
+      await expect(
+        svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {}, runtime }),
+      ).resolves.toBeDefined();
   });
 
   it("다른 워크스페이스 설정을 건드리지 않는다(워크스페이스 스코프)", async () => {
@@ -95,6 +118,7 @@ describe("CiLinkService.listRepos — 워크스페이스 App installation repos 
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp({ listRepos: async () => repos }),
+      runners: fakeRunners(),
     });
     expect(await svc.listRepos("acme")).toEqual(repos);
   });
@@ -105,6 +129,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
     return new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(), // token=app_tok
+      runners: fakeRunners(), // self:ws 풀 러너 1대(r1) — 기본 배치 검사 통과
       apiPublicUrl: "https://assay.example.com",
       fetchImpl: fakeFetch(handlers, calls),
     });
@@ -169,6 +194,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
           return { token: "app_tok", ...(host ? { host } : {}) };
         },
       }),
+      runners: fakeRunners(),
       apiPublicUrl: "https://assay.example.com",
       fetchImpl: fakeFetch(
         [
@@ -209,11 +235,69 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
           throw new NotFoundError("NOT_FOUND", {}, "설치된 App 없음");
         },
       }),
+      runners: fakeRunners(),
       apiPublicUrl: "https://assay.example.com",
       fetchImpl: fakeFetch([], []),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  // D6 — CI 배치는 항상 셀프호스티드: 기본 runtime(self:ws 풀)이 비어 있으면 PR 을 열기 전에 fail-closed.
+  it("공유 러너가 0대면 setup-PR 을 열지 않는다(BadRequest) — 머지 후 GitHub 큐 무한대기가 가장 늦은 실패라서", async () => {
+    const calls: Array<{ url: string; method: string }> = [];
+    const svc = new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      githubApp: fakeGithubApp(),
+      runners: fakeRunners([]), // 워크스페이스 공유 러너 없음
+      apiPublicUrl: "https://assay.example.com",
+      fetchImpl: fakeFetch([], calls),
+    });
+    await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
+    await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(BadRequestError);
+    expect(calls).toHaveLength(0); // GitHub 에 브랜치/커밋/PR 어느 것도 만들지 않았다
+  });
+
+  it("runtime 이 특정 러너(self:ws:<id>)인데 로스터에 없으면 NotFound — 재등록하거나 풀(self:ws)로 비우라고 안내", async () => {
+    const svc = new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      githubApp: fakeGithubApp(),
+      runners: fakeRunners(["r1"]),
+      apiPublicUrl: "https://assay.example.com",
+      fetchImpl: fakeFetch([], []),
+    });
+    await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {}, runtime: "self:ws:gone" });
+    await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
+  });
+
+  it("관리형 런타임 오버라이드(runtime 이 self:ws 계열이 아님)는 러너 로스터 없이도 PR 을 연다", async () => {
+    const svc = new CiLinkService({
+      settings: new InMemoryWorkspaceSettingsStore(),
+      githubApp: fakeGithubApp(),
+      runners: fakeRunners([]), // 공유 러너 없음 — 그래도 관리형 런타임이면 무관
+      apiPublicUrl: "https://assay.example.com",
+      fetchImpl: fakeFetch(
+        [
+          (url, init) => {
+            const m = init?.method ?? "GET";
+            if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
+            if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
+            if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
+            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "GET")
+              return json({ message: "Not Found" }, 404);
+            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "PUT") return json({}, 201);
+            if (url.endsWith("/pulls") && m === "POST")
+              return json({ html_url: "https://github.com/acme/app/pull/7" }, 201);
+            return undefined;
+          },
+        ],
+        [],
+      ),
+    });
+    await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {}, runtime: "k8s-prod" });
+    await expect(svc.openSetupPr("acme", "acme/app")).resolves.toMatchObject({
+      prUrl: "https://github.com/acme/app/pull/7",
+    });
   });
 });
 
@@ -227,14 +311,15 @@ describe("renderCiWorkflow", () => {
     expect(yaml).toContain("TODO");
   });
 
-  it("runsOn/runtime 미지정이면 ubuntu-latest + runtime 입력 없음(관리형 기본)", () => {
+  it("runsOn/runtime 미지정이면 셀프호스티드 기본([self-hosted] + self:ws 풀) — GitHub-호스티드 경로 없음(D6)", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
       "acme",
       "https://assay.example.com",
     );
-    expect(yaml).toContain("runs-on: ubuntu-latest");
-    expect(yaml).not.toContain("runtime:");
+    expect(yaml).toContain("runs-on: [self-hosted]");
+    expect(yaml).toContain("runtime: self:ws");
+    expect(yaml).not.toContain("ubuntu-latest");
   });
 
   it("runsOn/runtime 지정 시 셀프호스티드 배치(runs-on 라벨 + run-eval runtime 입력)", () => {
@@ -338,6 +423,7 @@ describe("CiLinkService.mintRunnerToken — 워크스페이스 App 으로 러너
           expiresAt: "2026-07-04T12:00:00Z",
         }),
       }),
+      runners: fakeRunners(),
     });
     expect((await svc.mintRunnerToken("acme", { repo: "acme/app" })).token).toBe("REPOTOK");
     expect((await svc.mintRunnerToken("acme", { org: "acme-org" })).token).toBe("ORGTOK");

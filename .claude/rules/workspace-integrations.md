@@ -36,6 +36,14 @@ never compare registration/installation hosts with `===`. SSOT: `docs/architectu
   the author-association gate (fork-PR defense), explicit `refs/pull/N/head` checkout + `git rev-parse HEAD`
   (`GITHUB_SHA` points at main), PR-number `concurrency`, and conversation feedback via `github-token`
   (comment fires get no PR check). In run-eval, `issue_comment` maps to **pr** mode — never a durable re-pin.
+- **CI placement is ALWAYS self-hosted (D6).** `renderCiWorkflow` has no GitHub-hosted path — a private control
+  plane must stay reachable from the workflow, so the defaults are `runs-on: [self-hosted]` +
+  `runtime: self:ws` (workspace runner pool); `link.runsOn`/`runtime` only *narrow* (a specific label /
+  `self:ws:<id>` / a managed runtime id). Personal-runner runtimes (`self`, `self:<id>`) are rejected at upsert
+  (a `via:"github-actions"` principal can never lease them), and `openSetupPr` **fails closed** when the
+  effective runtime targets the pool and the workspace has zero shared runners (a merged workflow with no
+  runner sits silently queued on GitHub — block before the PR, the earliest observable point). Never
+  reintroduce `ubuntu-latest` as a default.
 - **Mattermost**: bot-token notifications (completion/regression) + inbound slash-commands/buttons; inbound is only
   active when `commandTokenSecretName` is set (verify the command token before acting on `/assay`).
 - Remap every GitHub/Mattermost API failure to an `AppError` (never leak a raw upstream error). One service core,

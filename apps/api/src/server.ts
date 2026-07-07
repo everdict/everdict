@@ -2722,7 +2722,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         }),
       );
     } catch (err) {
-      return sendError(reply, err); // link 없음 404 / App 미설치 404 / GitHub 실패 502
+      return sendError(reply, err); // link 없음 404 / 공유 러너 0대 400(D6 fail-closed) / App 미설치 404 / GitHub 실패 502
     }
   });
 

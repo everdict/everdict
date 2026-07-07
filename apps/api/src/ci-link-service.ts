@@ -13,8 +13,8 @@ export const UpsertCiLinkBodySchema = z.object({
   harness: z.string().min(1), // 하니스 인스턴스 id
   dataset: z.string().optional(), // 발사할 데이터셋 id — setup-PR 워크플로 생성에 필요(없으면 YAML 에 TODO)
   slots: z.record(z.object({ path: z.string().optional() })).default({}), // 서비스 슬롯 → 모노레포 path(선택)
-  runsOn: z.string().min(1).optional(), // 셀프호스티드 배치(선택) — 워크플로 runs-on(예: "[self-hosted, assay-<id>]")
-  runtime: z.string().min(1).optional(), // run-eval runtime 입력(예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서
+  runsOn: z.string().min(1).optional(), // 좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, assay-<id>]")
+  runtime: z.string().min(1).optional(), // 좁히기 오버라이드 — run-eval runtime(기본 "self:ws" 풀, 예: "self:ws:<id>")
   trigger: z.enum(["auto", "comment", "both"]).optional(), // PR 평가 발화 방식(미지정=both) — WorkspaceCiLinkSchema 참고
 });
 export type UpsertCiLinkBody = z.infer<typeof UpsertCiLinkBodySchema>;
@@ -43,9 +43,17 @@ export interface GithubAppRepoAccess {
   ): Promise<{ token: string; expiresAt: string; host?: string }>;
 }
 
+// 워크스페이스-공유 러너 로스터(존재 확인용) — RunnerService 가 구조적으로 만족. CI 배치는 항상 셀프호스티드(설계 D6)라
+// setup-PR 이 기본 self:ws 풀의 러너 유무를 fail-closed 로 검사한다(러너 0대인 채 머지된 워크플로는 GitHub 큐에서
+// 조용히 대기 — 가장 늦고 가장 헷갈리는 실패 지점이므로 PR 을 열기 전에 막는다).
+export interface WorkspaceRunnerRoster {
+  listWorkspaceOwned(workspace: string): Promise<{ id: string }[]>;
+}
+
 export interface CiLinkServiceDeps {
   settings: WorkspaceSettingsStore;
   githubApp: GithubAppRepoAccess; // 워크스페이스 소유 GitHub App — repos picker + setup-PR 커밋/PR + 러너 등록 토큰
+  runners: WorkspaceRunnerRoster; // 워크스페이스-공유 러너 로스터 — setup-PR 의 self:ws 풀 존재 검사
   apiPublicUrl?: string; // 생성 워크플로의 api-url 값(미설정이면 요청 base 폴백)
   fetchImpl?: typeof fetch; // 테스트 주입
 }
@@ -74,6 +82,15 @@ export class CiLinkService {
 
   // upsert — (host, repository) 키(대소문자 무시)당 1건. link 의 존재가 그 레포의 OIDC trust 이므로 생성=신뢰 부여(admin 게이트는 라우트).
   async upsert(workspace: string, subject: string, body: UpsertCiLinkBody): Promise<WorkspaceCiLink[]> {
+    // CI 는 개인 러너를 리스할 수 없다(dispatcher 의 self/self:<id> 는 owner=제출자 — via:"github-actions" principal 은
+    // 멤버 개인 러너의 owner 가 아니다). 개인 self 계열 runtime 은 발사 시점에만 터지므로 링크 저장에서 미리 막는다.
+    const rt = body.runtime;
+    if (rt === "self" || (rt?.startsWith("self:") === true && rt !== "self:ws" && !rt.startsWith("self:ws:")))
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { runtime: rt },
+        `CI 는 개인 러너(runtime '${rt}')를 쓸 수 없습니다 — 워크스페이스 공유 러너("self:ws" 풀 또는 "self:ws:<id>")를 지정하세요.`,
+      );
     const current = await this.list(workspace);
     const next: WorkspaceCiLink = {
       repository: body.repository,
@@ -112,6 +129,25 @@ export class CiLinkService {
   ): Promise<{ prUrl: string; branch: string }> {
     const link = (await this.list(workspace)).find((l) => sameLinkKey(l, repository, opts.host) && !l.disabled);
     if (!link) throw new NotFoundError("NOT_FOUND", { repository }, `'${repository}' 의 repo link 가 없습니다.`);
+    // 배치는 항상 셀프호스티드(설계 D6) — 워크플로가 self:ws 풀을 타깃하면 러너가 실제로 등록돼 있어야 한다.
+    // 러너 0대로 머지된 워크플로는 GitHub 큐에서 조용히 대기하므로, PR 을 열기 전(가장 이른 관측 지점)에 fail-closed.
+    const runtime = link.runtime ?? "self:ws";
+    if (runtime === "self:ws" || runtime.startsWith("self:ws:")) {
+      const roster = await this.deps.runners.listWorkspaceOwned(workspace);
+      if (roster.length === 0)
+        throw new BadRequestError(
+          "BAD_REQUEST",
+          { repository },
+          "워크스페이스 공유 러너가 없습니다 — CI 워크플로는 셀프호스티드 러너에서 실행됩니다. 설정 › 공유 러너의 'GitHub Actions 러너'(POST /workspace/runners/github-install)로 빌드 서버를 먼저 등록하세요.",
+        );
+      const runnerId = runtime.startsWith("self:ws:") ? runtime.slice("self:ws:".length) : undefined;
+      if (runnerId !== undefined && !roster.some((r) => r.id === runnerId))
+        throw new NotFoundError(
+          "NOT_FOUND",
+          { runtime },
+          `link 의 runtime '${runtime}' 에 해당하는 공유 러너가 없습니다 — 러너를 다시 등록하거나 runtime 을 비워("self:ws" 풀) 두세요.`,
+        );
+    }
     // 워크스페이스 App installation 토큰(쓰기) — 브랜치/파일/PR 을 만들려면 contents + pull_requests write.
     // link.host 로 installation 을 고른다(같은 org 명이 github.com/GHE 양쪽에 있어도 정확히).
     const { token, host } = await this.deps.githubApp.tokenForRepository(
@@ -267,9 +303,11 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
         `"${slot}":"${registry}/\${{ github.repository }}/${slot}@\${{ steps.build-${slot}.outputs.digest }}"`,
     )
     .join(",")}}`;
-  // 셀프호스티드 배치(선택): runsOn 지정 시 그 러너에서 잡을 돌리고, runtime 지정 시 평가를 워크스페이스-공유 러너로.
-  const runsOn = link.runsOn ?? "ubuntu-latest";
-  const runtimeLine = link.runtime ? `\n          runtime: ${link.runtime}` : "";
+  // 배치는 항상 셀프호스티드(설계 D6) — 컨트롤플레인이 사설망이어도 CI(run-eval)가 도달해야 하므로 GitHub-호스티드
+  // 러너 경로는 없다. 기본: 레포에 등록된 아무 셀프호스티드 러너([self-hosted]) + 워크스페이스 러너 풀(self:ws).
+  // link.runsOn/runtime 은 특정 라벨/러너·관리형 런타임으로 좁히는 오버라이드다.
+  const runsOn = link.runsOn ?? "[self-hosted]";
+  const runtimeLine = `\n          runtime: ${link.runtime ?? "self:ws"}`;
   const trigger = link.trigger ?? "both";
   const onBlock = [
     ...(trigger !== "comment" ? ["  pull_request:"] : []),
@@ -298,6 +336,8 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
           ref: \${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}`
       : "";
   return `# Assay 가 생성한 CI eval 워크플로 — PR 은 임시 핀 평가, PR 코멘트 /evaluate 는 온디맨드 재평가, 기본 브랜치 push 는 재핀(새 버전)+평가.
+# 셀프호스티드 러너 전용 — Assay 컨트롤플레인이 사설망이어도 러너가 도달할 수 있어야 합니다(GitHub-호스티드 미지원).
+# 주의: 퍼블릭 레포의 fork PR 은 셀프호스티드 러너에서 임의 코드를 실행할 수 있습니다(프라이빗 팀 레포 전제).
 name: assay-eval
 on:
 ${onBlock}

@@ -433,6 +433,7 @@ async function main(): Promise<void> {
   const ciLinkService = new CiLinkService({
     settings: settingsStore,
     githubApp: githubAppService, // repo picker + setup-PR + 러너 등록 토큰 = 워크스페이스 GitHub App(개인 연결 대체)
+    runners: runnerService, // setup-PR 의 self:ws 풀 존재 검사(D6 — CI 배치는 항상 셀프호스티드, fail-closed)
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // 생성 워크플로의 api-url
   });
 
