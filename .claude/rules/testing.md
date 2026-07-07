@@ -1,7 +1,7 @@
 ---
 paths: "**/*.test.ts"
 ---
-# Testing rules (push) — Vitest reinterpretation of digo-api's testing idioms
+# Testing rules (push) — Vitest idioms
 
 See skill `testing`.
 

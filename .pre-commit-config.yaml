@@ -1,6 +1,5 @@
-# digo-api(format+lint) + digo-infra(gitleaks) 이디엄 재해석.
-# 무거운 test는 pre-commit이 아니라 CI에서 (digo-api는 pre-commit test까지 돌리지만
-# 모노레포 초기엔 turbo 캐시 안정화 전까지 CI로 둔다).
+# pre-commit = format+lint + gitleaks 백스톱.
+# 무거운 test는 pre-commit이 아니라 CI에서 (모노레포 초기엔 turbo 캐시 안정화 전까지 CI로 둔다).
 repos:
   - repo: local
     hooks:

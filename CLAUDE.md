@@ -9,9 +9,9 @@
 ## 🚨 Documentation-first — read before you code
 Always read the relevant skill in `.claude/skills/` **before** writing code. No exceptions.
 Read the matching `<area>/SKILL.md` first, then pull `references/*.md` on demand.
-`.claude/` is the **single source of truth** for how we build. (idiom from digo-api)
+`.claude/` is the **single source of truth** for how we build.
 
-## Language policy (idiom carried from digo-api)
+## Language policy
 - `.claude/skills/` + `.claude/rules/` bodies → **English**.
 - Code comments + OpenAPI `summary` → **Korean**.
 - User-facing communication → **Korean**.
@@ -24,7 +24,7 @@ Read the matching `<area>/SKILL.md` first, then pull `references/*.md` on demand
 5. `pnpm build`    — turbo build
 Quality is non-negotiable: all five must pass before a PR.
 
-## Architecture — one-way dependency, by concern (idiom from digo-api)
+## Architecture — one-way dependency, by concern
 ```
 core ← { drivers · environments · harnesses · graders · trace } ← runner ← agent ← backends ← { orchestrator · topology · suite } ← runner-core ← { apps/cli · apps/desktop }
 ```
@@ -56,16 +56,16 @@ Reverse imports are bugs. The same concern name recurs per package (vertical sli
 - **Driver** (`@assay/core`/`drivers`) = *in-sandbox compute*: the agent runs the harness via
   `LocalDriver` inside its already-isolated job. See `docs/execution-backends.md`.
 
-### ⚠️ Deliberate deviation from digo-api: interfaces ARE used
-digo-api bans interfaces for DI because it has exactly one implementation per concept.
+### ⚠️ Deliberate deviation: interfaces ARE used
+Single-implementation codebases rightly ban interfaces for DI (exactly one impl per concept).
 Assay's *whole product* is pluggable adapters (many Backends / Drivers / Harnesses / Graders), so the
-`core` contracts MUST be interfaces. This is the one digo idiom we intentionally invert —
-everywhere else (null discipline, error model, naming, layering) we follow it.
+`core` contracts MUST be interfaces. This is the one idiom we intentionally invert —
+everywhere else (null discipline, error model, naming, layering) we keep the strict default.
 
 ## Critical rules (the non-default ones — see `.claude/rules/`)
 - No `any`, no non-null `!`, no silent nullable defaults; validate every boundary with Zod.
 - Errors: throw an `AppError` subclass (`@assay/core`); HTTP status derives from the subtype.
-- External/SDK failures are remapped to our `AppError` (never propagated raw) so monitoring blames us, not the user. (digo idiom)
+- External/SDK failures are remapped to our `AppError` (never propagated raw) so monitoring blames us, not the user.
 - Cost/tokens come from the harness's own trace (e.g. Claude reports `total_cost_usd`); for LocalDriver the harness uses the machine's existing login (no API key).
 - `ComputeHandle` is always released in a `finally`.
 - Backends never run the harness; they dispatch the `@assay/agent` image and parse its `__ASSAY_RESULT__` stdout sentinel.
@@ -75,8 +75,8 @@ everywhere else (null discipline, error model, naming, layering) we follow it.
 1. **Read first, code second — NO EXCEPTIONS.**
 2. **Quality is non-negotiable** — format/lint/typecheck/test/build all green.
 3. **Skills travel with the code** — a PR that changes a convention/invariant updates the matching skill reference *in the same PR* (mere implementation churn is not a doc trigger).
-4. **Reinterpret, don't copy** — digo-api/digo-infra-dev idioms are reinterpreted for TS; cite the source idiom when non-obvious.
+4. **Reinterpret, don't copy** — proven idioms from prior codebases are adapted to TS, not transplanted verbatim; note the source idea when non-obvious.
 
-## Commits (idiom from digo-api / digo-infra)
+## Commits
 Conventional Commits, scoped: `feat(drivers): ...`, `fix(runner): ...`. Body explains the *why*.
 Every `fix:` ships a regression test that fails on the pre-fix code.

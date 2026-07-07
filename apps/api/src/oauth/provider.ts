@@ -33,7 +33,7 @@ export interface OAuthProvider {
   whoami(input: { config: OAuthProviderConfig; accessToken: string }): Promise<OAuthAccount>;
 }
 
-// JSON fetch + 외부 실패를 UpstreamError 로 remap(원시 에러를 호출자에게 전파하지 않는다 — digo 이디엄).
+// JSON fetch + 외부 실패를 UpstreamError 로 remap(원시 에러를 호출자에게 전파하지 않는다).
 // github/mattermost provider 가 공유. fetch 실패/파싱 실패/비-2xx 모두 UpstreamError.
 export async function oauthFetchJson(url: string, init: Parameters<typeof fetch>[1]): Promise<unknown> {
   let res: Awaited<ReturnType<typeof fetch>>;

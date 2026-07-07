@@ -3,7 +3,7 @@ dist/
 .turbo/
 coverage/
 
-# env / secrets — never commit (digo-infra 이디엄: no secret in git)
+# env / secrets — never commit (no secret in git)
 .env
 .env.*
 !.env.example

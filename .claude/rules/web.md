@@ -1,7 +1,7 @@
 ---
 paths: "apps/web/**"
 ---
-# Web (apps/web) rules (push) — Next.js + FSD, reinterpreted from digo-admin
+# Web (apps/web) rules (push) — Next.js + FSD
 
 See `docs/web.md`. This app is SELF-CONTAINED (own eslint+prettier; excluded from root Biome/turbo gate).
 

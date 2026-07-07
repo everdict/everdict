@@ -1,4 +1,4 @@
-// Assay 도메인 에러 — digo-api의 AppException/ErrorType 이디엄을 TS로 재해석.
+// Assay 도메인 에러 — AppException/ErrorType 이디엄의 TS 재해석.
 // 핵심: HTTP 상태는 ErrorCode(enum)에 넣지 않고, 에러 "서브타입"에서 파생한다.
 
 export const ErrorCode = {

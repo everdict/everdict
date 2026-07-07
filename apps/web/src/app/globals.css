@@ -2,9 +2,8 @@
 @plugin 'tailwindcss-animate';
 
 /* 폰트 self-host(public/fonts) — 외부 CDN 무의존(오프라인·무FOUC·프라이버시·속도). variable woff2.
-   · 본문·디스플레이 = Pretendard(Latin+한글) — 앱 전면 기본 폰트(사용자 지시: digo-mobile 스타일).
-     디고모바일 컨벤션대로 음수 자간 letter-spacing:-0.02em 을 body 에 적용(한글 타이트닝; RN 의
-     크기별 -0.26/-0.3/-0.4… ≈ -0.02em 을 em 으로 일반화).
+   · 본문·디스플레이 = Pretendard(Latin+한글) — 앱 전면 기본 폰트.
+     음수 자간 letter-spacing:-0.02em 을 body 에 적용(한글 타이트닝 컨벤션).
    · Inter Variable / Bricolage @font-face 는 보존하되 폰트 체인에서 빠져 미다운로드(과거 자산 —
      이전엔 Latin=Inter[Linear 레터폼]였으나 Pretendard 전면 전환으로 대체). 코드/id 는 여전히 --font-mono. */
 @font-face {
@@ -54,7 +53,7 @@ body {
     -apple-system,
     'Segoe UI',
     sans-serif;
-  letter-spacing: -0.02em; /* digo-mobile 컨벤션 — 한글 음수 자간 */
+  letter-spacing: -0.02em; /* 한글 음수 자간 컨벤션 */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;

@@ -1,4 +1,4 @@
-# Database migrations — expand → deploy → contract (idiom from digo-api)
+# Database migrations — expand → deploy → contract
 
 Carried discipline (reinterpreted for Postgres + plain numbered SQL — Flyway-style):
 

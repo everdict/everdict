@@ -17,8 +17,8 @@ Re-exported flat from `packages/core/src/index.ts`.
 5. No `any`, no `!`, no silent nullable default (`?? ""`); named exports; `import type` for types.
 6. Verify no forbidden import crept in: `core` may not touch drivers/harnesses/graders/runner/apps/SDKs.
 
-## Interfaces ARE used here (deliberate digo inversion)
-digo-api bans interfaces (one impl per concept); Assay's whole product is pluggable adapters, so the
+## Interfaces ARE used here (deliberate inversion)
+Single-impl codebases ban interfaces (one impl per concept); Assay's whole product is pluggable adapters, so the
 spine contracts MUST be interfaces — many impls live in adapter packages, the interface lives in `core`.
 - `EvaluableHarness` — the agent under test (`harness.ts`); `install`+`run`→`AsyncIterable<TraceEvent>`.
 - `Environment<S>` — the world it acts on (`environment.ts`); `seed(spec)` → `snapshot()` → `EnvSnapshot`.

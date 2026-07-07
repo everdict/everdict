@@ -2,7 +2,7 @@
 
 The multi-tenant SaaS frontend — a Next.js app (FSD architecture, **Linear-style** design — refined dark-first
 minimalism with a light/dark toggle) where tenant **users** log in (Keycloak), see their **per-tenant scores**,
-runs, and harnesses. Reference architecture: digo-admin.
+runs, and harnesses.
 
 ## Two complementary auth paths
 - **Humans → Keycloak (OIDC)** via Auth.js in `apps/web`. The web is a **BFF token courier, not an auth
@@ -20,7 +20,7 @@ runs, and harnesses. Reference architecture: digo-admin.
 These don't conflict: Keycloak = people in the browser, API keys = machines. Both resolve to the same
 control-plane `Principal{workspace, roles}`.
 
-## Stack (mirrors digo-admin)
+## Stack
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 (`@theme inline` tokens) · shadcn-style UI
 (new-york, neutral base, **Linear-style** indigo `#5e6ad2` primary + tight `0.5rem` radius + near-black dark
 surface; light/dark toggle via `shared/ui/theme-toggle`, no-flash inline script in `layout.tsx`) · TanStack

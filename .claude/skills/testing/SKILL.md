@@ -3,7 +3,7 @@ name: testing
 description: How Assay tests — Vitest only, Korean BDD descriptions, in-memory stores + fake Dispatcher for units, buildServer+inject for the API surface, fake SqlClient for Postgres logic, env-gated *.scenario.test.ts for live E2E. Use when writing or editing tests (Vitest unit + scenario E2E).
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
-# Testing (Vitest reinterpretation of digo-api's test idioms)
+# Testing (Vitest test idioms)
 
 One tool: **Vitest**. `pnpm test` = `turbo run test` (per-package `vitest run`, `dependsOn ^build`). Cover
 business logic + permissions + edge/validation; skip trivial CRUD and framework behavior. Every `fix:` ships a

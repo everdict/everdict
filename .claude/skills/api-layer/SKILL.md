@@ -9,7 +9,7 @@ The external SaaS surface. A Fastify server over the runtime (Scheduler + trust 
 autoscaling). Runs are **async**: submit returns a `runId`; the result arrives by polling or webhook. See
 `docs/api.md`. Rule: `.claude/rules/api-layer.md`.
 
-## Layering (digo-api reinterpretation)
+## Layering
 - **server.ts** = routes only (registration + HTTP), **run-service.ts** = logic (framework-agnostic),
   **run-store.ts** = persistence. Routes never hold business logic; the service never touches HTTP.
 - Request/response schemas are Zod (`SubmitBodySchema`, `RunRecordSchema`) — external input is validated.

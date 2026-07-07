@@ -37,5 +37,4 @@
 - [judge-placement-locality](architecture/judge-placement-locality.md) · [front-door-generalization](architecture/front-door-generalization.md) · [target-acquisition-generalization](architecture/target-acquisition-generalization.md)
 - [completion-stream-callback](architecture/completion-stream-callback.md) · [portable-harness-runtime](architecture/portable-harness-runtime.md) · [harness-taxonomy](architecture/harness-taxonomy.md)
 
-Conventions (single source of truth): [`../CLAUDE.md`](../CLAUDE.md) + `../.claude/` (rules + skills),
-reinterpreted — not copied — from `digo-api` (backend) and `digo-infra-dev` (infra).
+Conventions (single source of truth): [`../CLAUDE.md`](../CLAUDE.md) + `../.claude/` (rules + skills).

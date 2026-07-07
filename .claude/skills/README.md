@@ -1,4 +1,4 @@
-# Convention system — two layers (reinterpreted from digo-api)
+# Convention system — two layers
 
 We split "how to build Assay" knowledge by **how the knowledge fails**:
 

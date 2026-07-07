@@ -26,7 +26,7 @@ never scores itself — `graders` read the trace and the env snapshot (see skill
 `run` is an `AsyncIterable<TraceEvent>`; `RunContext = { apiKeyEnv, timeoutSec, runId? }` (`runId` = the trace
 correlation key `runCase` mints and later collects by). `apiKeyEnv` is usually
 **empty** — `LocalDriver` uses the machine's own `claude` login (own-pays); keys are injected only in a
-keyless sandbox. The interface lives in `core` (a deliberate inversion of digo's "no interfaces" — Assay is a
+keyless sandbox. The interface lives in `core` (a deliberate inversion of the single-impl "no interfaces" rule — Assay is a
 plugin runtime); impls live in `packages/harnesses`. The dispatch factory `makeHarness(id, version, spec?)`
 (`packages/agent/src/registry.ts`) picks the impl: `spec.kind==="command"` → `CommandHarness`, else id-branch.
 

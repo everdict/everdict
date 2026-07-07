@@ -46,6 +46,6 @@ A run = provision(Driver) → seed(Environment) → install+run(Harness)→trace
 
 ## Critical rules (also pushed via .claude/rules)
 - No `any` / no `!` / no silent nullable defaults; Zod-validate boundaries.
-- Interfaces live in `core` (deliberate inversion of digo-api's no-interface rule — Assay is a plugin runtime).
+- Interfaces live in `core` (deliberate inversion of the single-impl no-interface rule — Assay is a plugin runtime).
 - Cost is read from the harness trace (Claude reports `total_cost_usd`); LocalDriver uses the machine's `claude` login (no API key).
 - Backends never run the harness — they dispatch the `@assay/agent` image and parse its `__ASSAY_RESULT__` output.

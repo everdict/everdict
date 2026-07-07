@@ -1,7 +1,7 @@
 ---
 paths: "apps/api/**"
 ---
-# API layer rules (push) — Fastify reinterpretation of digo-api's controller idioms
+# API layer rules (push) — Fastify controller idioms
 
 See skill `api-layer`.
 

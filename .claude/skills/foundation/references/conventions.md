@@ -1,4 +1,4 @@
-# Conventions reference (reinterpreted from digo-api)
+# Conventions reference
 
 ## Naming
 - Files/dirs: lowercase-kebab, singular. Symbols: PascalCase types/classes, camelCase values, UPPER_SNAKE consts.
@@ -8,7 +8,7 @@
 
 ## Error model (exceptions, flat envelope)
 - `AppError` base (abstract `status`) + subclasses: `BadRequestError`(400) `NotFoundError`(404) `ConflictError`(409) `RateLimitError`(429) `UpstreamError`(502) `InternalError`(500).
-- `ErrorCode` is a code→message map; HTTP status is NOT in the code — it derives from the subtype (digo idiom).
+- `ErrorCode` is a code→message map; HTTP status is NOT in the code — it derives from the subtype.
 - Envelope is flat: `{ code, message, data? }` via `AppError.toEnvelope()`. No `{error:{...}}` nesting.
 - External/SDK failures are REMAPPED to our `AppError` (misconfig→5xx, upstream-5xx→502, 429→429) — never propagated raw, so monitoring blames us, not the user.
 
@@ -17,7 +17,7 @@
 - Zod `.parse()` throws on a bad enum — no `UNKNOWN` fallback.
 
 ## Persistence (when DB lands — Drizzle + Postgres)
-- snake_case columns; FK = `ref_{table}_id` (digo idiom). Base columns: `id` (uuid), `created_at`, `updated_at`.
+- snake_case columns; FK = `ref_{table}_id`. Base columns: `id` (uuid), `created_at`, `updated_at`.
 - Migrations follow expand→deploy→contract phasing with a preflight check per migration (see `docs/migration/`). Destructive changes are reviewed runbooks, not auto-applied on deploy.
 
 ## Language policy
