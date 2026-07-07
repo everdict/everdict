@@ -414,18 +414,23 @@ describe("renderCiWorkflow", () => {
 });
 
 describe("CiLinkService.mintRunnerToken — 워크스페이스 App 으로 러너 등록 토큰(위임)", () => {
-  it("githubApp.runnerRegistrationToken(workspace, target) 을 그대로 노출한다", async () => {
+  it("githubApp.runnerRegistrationToken(workspace, target, host) 을 그대로 노출한다", async () => {
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp({
-        runnerRegistrationToken: async (_ws, target) => ({
+        runnerRegistrationToken: async (_ws, target, host) => ({
           token: "repo" in target ? "REPOTOK" : "ORGTOK",
           expiresAt: "2026-07-04T12:00:00Z",
+          ...(host !== undefined ? { host } : {}),
         }),
       }),
       runners: fakeRunners(),
     });
     expect((await svc.mintRunnerToken("acme", { repo: "acme/app" })).token).toBe("REPOTOK");
     expect((await svc.mintRunnerToken("acme", { org: "acme-org" })).token).toBe("ORGTOK");
+    // host 스레딩 — picker 가 고른 GHE installation 이 그대로 전달된다.
+    expect((await svc.mintRunnerToken("acme", { org: "acme-org" }, "https://ghe.acme.io")).host).toBe(
+      "https://ghe.acme.io",
+    );
   });
 });

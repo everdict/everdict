@@ -311,12 +311,21 @@ export class GithubAppService {
   async runnerRegistrationToken(
     workspace: string,
     target: { repo: string } | { org: string },
+    host?: string,
   ): Promise<{ token: string; expiresAt: string; host?: string }> {
     const owner = "repo" in target ? (target.repo.split("/")[0] ?? "") : target.org;
-    // 러너 등록 대상엔 host 입력이 없다 — owner 만으로 아무 호스트의 installation 이나 매칭(레거시 동작 유지).
-    const install = await this.anyHostInstallationForOwner(workspace, owner);
+    // host 지정 = 그 호스트의 installation 만(host-strict — 웹 picker 가 고른 GHE 설치 그대로).
+    // 미지정 = github.com 우선, 없으면 아무 호스트(레거시 — GHE-only 워크스페이스가 host 없이도 동작).
+    const install =
+      host !== undefined
+        ? await this.installationForOwner(workspace, owner, host)
+        : await this.anyHostInstallationForOwner(workspace, owner);
     if (!install)
-      throw new NotFoundError("NOT_FOUND", { owner }, `'${owner}' 에 설치된 워크스페이스 GitHub App 이 없습니다.`);
+      throw new NotFoundError(
+        "NOT_FOUND",
+        { owner, ...(host !== undefined ? { host } : {}) },
+        `'${owner}'${host !== undefined ? `(${host})` : ""} 에 설치된 워크스페이스 GitHub App 이 없습니다.`,
+      );
     const appToken = await this.mintFor(workspace, install, { permissions: { administration: "write" } });
     const path = "repo" in target ? `/repos/${target.repo}` : `/orgs/${target.org}`;
     const body = await oauthFetchJson(`${apiBase(install.host)}${path}/actions/runners/registration-token`, {
@@ -338,10 +347,12 @@ export class GithubAppService {
     return g?.installations.find((i) => i.account.toLowerCase() === owner.toLowerCase() && sameHost(i.host, host));
   }
 
-  // owner 만으로 매칭(호스트 무관) — host 입력이 아직 없는 경로(러너 등록)용.
+  // host 입력이 없을 때의 owner 매칭 — github.com installation 우선(같은 owner 가 GHE 에도 있을 때 모호성 제거),
+  // 없으면 아무 호스트(레거시 — GHE-only 워크스페이스가 host 없이도 동작).
   private async anyHostInstallationForOwner(workspace: string, owner: string): Promise<Installation | undefined> {
     const g = (await this.settings.get(workspace))?.githubApp;
-    return g?.installations.find((i) => i.account.toLowerCase() === owner.toLowerCase());
+    const mine = g?.installations.filter((i) => i.account.toLowerCase() === owner.toLowerCase()) ?? [];
+    return mine.find((i) => sameHost(i.host, undefined)) ?? mine[0];
   }
 
   // 한 installation 에 대해 installation 토큰 발급(repositories/permissions 로 좁힘). 자격증명은 env(github.com) 또는 GHE 등록.

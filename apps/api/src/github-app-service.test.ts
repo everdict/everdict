@@ -267,7 +267,9 @@ describe("GithubAppService", () => {
                     pushed_at: "2026-07-01T00:00:00Z",
                   })),
                 }
-              : { id: 1, account: { login: "acme-org" } };
+              : s.endsWith("/registration-token")
+                ? { token: "RUNNERTOK", expires_at: "2026-07-05T12:00:00Z" }
+                : { id: 1, account: { login: "acme-org" } };
           return new Response(JSON.stringify(body), { status: 200 });
         }),
       );
@@ -317,6 +319,32 @@ describe("GithubAppService", () => {
       const com = await svc.tokenForRepository("acme", "acme-org/api", {});
       expect(com.host).toBeUndefined();
       expect(urls.some((u) => u.startsWith("https://api.github.com/app/installations/42/access_tokens"))).toBe(true);
+    });
+
+    it("runnerRegistrationToken 은 host 로 installation 을 고른다 — GHE host 지정 시 GHE(id 7), 미지정 시 github.com(id 42) 우선", async () => {
+      stubApiRecording([]);
+      await installBothHosts();
+
+      // host 지정 → 그 GHE installation 으로만 mint(host-strict).
+      let urls = stubApiRecording([]);
+      const ghe = await svc.runnerRegistrationToken("acme", { org: "acme-org" }, "https://ghe.acme.io");
+      expect(ghe.host).toBe("https://ghe.acme.io");
+      expect(urls.some((u) => u.startsWith("https://ghe.acme.io/api/v3/app/installations/7/access_tokens"))).toBe(true);
+      expect(urls.some((u) => u.includes("/orgs/acme-org/actions/runners/registration-token"))).toBe(true);
+
+      // host 미지정 → 같은 owner 가 양쪽에 있어도 github.com installation 우선(모호성 제거).
+      urls = stubApiRecording([]);
+      const com = await svc.runnerRegistrationToken("acme", { org: "acme-org" });
+      expect(com.host).toBeUndefined();
+      expect(urls.some((u) => u.startsWith("https://api.github.com/app/installations/42/access_tokens"))).toBe(true);
+    });
+
+    it("runnerRegistrationToken 은 지정 host 에 installation 이 없으면 NotFound(다른 호스트로 대체 발급하지 않는다)", async () => {
+      stubApiRecording([]);
+      await installBothHosts();
+      await expect(
+        svc.runnerRegistrationToken("acme", { org: "acme-org" }, "https://other.example.com"),
+      ).rejects.toBeInstanceOf(NotFoundError);
     });
 
     it("viewWithRepos 는 각 설치에 허용 저장소를 동봉하고, 실패한 설치만 reposError 로 soft-fail 한다", async () => {

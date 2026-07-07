@@ -14,6 +14,7 @@ export interface GithubRunnerInstallInput {
   // 대상: repo 레벨(repository="owner/name") 또는 org 레벨(org="org"). 워크스페이스 GitHub App 이 그 org/repo 에 설치돼 있어야 한다. 정확히 하나.
   repository?: string; // "owner/name"
   org?: string; // org 이름 — org 레벨(모든 레포가 이 러너를 공유). admin:org 스코프 연결 필요.
+  host?: string; // GHE 베이스 URL — 미지정 = github.com 우선. 같은 owner 가 여러 호스트에 설치돼 있어도 정확한 installation 으로 mint.
   label: string; // Assay 러너 표시 이름
   apiUrl: string; // 컨트롤플레인 base — `assay runner --api-url`
   githubLabels?: string[]; // GH 러너 추가 라벨(항상 self-hosted + assay-<id> 에 더해)
@@ -55,7 +56,7 @@ export async function installGithubWorkspaceRunner(
     ...(input.capabilities !== undefined ? { capabilities: input.capabilities } : {}),
   });
   // (1) GitHub 등록 토큰 mint — 워크스페이스 GitHub App(administration)으로. App 이 그 org/repo 에 설치돼 있어야 한다.
-  const reg = await deps.ciLinkService.mintRunnerToken(input.workspace, target);
+  const reg = await deps.ciLinkService.mintRunnerToken(input.workspace, target, input.host);
 
   const runnerId = paired.meta.id;
   const runtimeTarget = `self:ws:${runnerId}`;

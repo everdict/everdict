@@ -40,6 +40,7 @@ export interface GithubAppRepoAccess {
   runnerRegistrationToken(
     workspace: string,
     target: { repo: string } | { org: string },
+    host?: string, // 미지정 = github.com 우선 매칭 — picker 를 거친 호출은 host 로 정확한 installation 을 고른다
   ): Promise<{ token: string; expiresAt: string; host?: string }>;
 }
 
@@ -230,8 +231,9 @@ export class CiLinkService {
   async mintRunnerToken(
     workspace: string,
     target: { repo: string } | { org: string },
+    host?: string,
   ): Promise<{ token: string; expiresAt: string; host?: string }> {
-    return this.deps.githubApp.runnerRegistrationToken(workspace, target);
+    return this.deps.githubApp.runnerRegistrationToken(workspace, target, host);
   }
 
   private headers(token: string): Record<string, string> {

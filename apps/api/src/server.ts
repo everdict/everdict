@@ -2738,6 +2738,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       .object({
         repository: z.string().min(1).optional(), // repo 레벨 대상 "owner/name"
         org: z.string().min(1).optional(), // org 레벨 대상. repository 와 정확히 하나. App 이 그 org/repo 에 설치돼 있어야 함.
+        host: z.string().url().optional(), // GHE 베이스 URL — 미지정 = github.com 우선. 그 호스트의 installation 으로 mint.
         runnerGroup: z.string().min(1).optional(), // org 러너 그룹(org 레벨 전용, 선택)
         label: z.string().min(1).max(80).optional(),
         githubLabels: z.array(z.string().min(1)).optional(),
@@ -2757,6 +2758,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
             apiUrl: baseUrl(req),
             ...(body.data.repository !== undefined ? { repository: body.data.repository } : {}),
             ...(body.data.org !== undefined ? { org: body.data.org } : {}),
+            ...(body.data.host !== undefined ? { host: body.data.host } : {}),
             ...(body.data.runnerGroup !== undefined ? { runnerGroup: body.data.runnerGroup } : {}),
             ...(body.data.githubLabels !== undefined ? { githubLabels: body.data.githubLabels } : {}),
             ...(body.data.capabilities !== undefined ? { capabilities: body.data.capabilities } : {}),
