@@ -37,9 +37,9 @@ jobs:
       # No signing certificate — disable automatic signing discovery (so macOS keychain lookup in particular doesn't break the build).
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4 # version from the root package.json packageManager field
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6 # version from the root package.json packageManager field
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm

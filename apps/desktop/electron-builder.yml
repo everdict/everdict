@@ -3,6 +3,14 @@
 # add signing once certificates are obtained (mac: CSC_LINK/CSC_KEY_PASSWORD + notarize, win: sign config).
 appId: dev.everdict.desktop
 productName: Everdict
+# Auto-update feed (design D6). everdict/everdict is a public repo, so electron-updater reads
+# releases without a token; this block makes electron-builder bundle app-update.yml into the app
+# (which main.ts's resolveAutoUpdater gate detects) and emit a provider-correct latest*.yml.
+# Publishing the assets themselves is done by the release workflow (softprops), so builds use --publish never.
+publish:
+  provider: github
+  owner: everdict
+  repo: everdict
 # A deterministic filename that is safe in a download link — no spaces, os/arch spelled out.
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 directories:
