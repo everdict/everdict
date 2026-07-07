@@ -9,12 +9,18 @@ import {
   type CiLink,
   type RepoInfo,
 } from '@/entities/ci-link'
+import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
 export interface ReposResult {
   ok: boolean
   repos?: RepoInfo[]
+  error?: string
+}
+export interface SharedRunnersResult {
+  ok: boolean
+  runners?: RunnerMeta[]
   error?: string
 }
 export interface CiLinksResult {
@@ -35,9 +41,23 @@ export interface UpsertCiLinkInput {
   harness: string
   dataset?: string
   slots?: Record<string, { path?: string }>
-  runsOn?: string // 셀프호스티드 배치(선택) — 워크플로 runs-on
-  runtime?: string // run-eval runtime 입력(예: self:ws:<id>)
+  runsOn?: string // 좁히기 오버라이드 — 워크플로 runs-on(기본 [self-hosted])
+  runtime?: string // 좁히기 오버라이드 — run-eval runtime(기본 self:ws 풀, 예: self:ws:<id>)
   trigger?: 'auto' | 'comment' | 'both' // PR 평가 발화 방식 — 미지정 = both(자동 + /evaluate 코멘트)
+}
+
+// 워크스페이스 공유 러너(팀 소유) 목록 — CI 배치는 항상 셀프호스티드(기본 self:ws 풀)라 연결 다이얼로그가
+// 러너 준비 상태를 보여준다. 컨트롤플레인 게이트=settings:write — canWrite(admin)일 때만 호출할 것.
+export async function listSharedRunnersAction(): Promise<SharedRunnersResult> {
+  const ctx = await authContext()
+  try {
+    const { runners } = runnersResponseSchema.parse(
+      await controlPlane.listWorkspaceOwnedRunners(ctx)
+    )
+    return { ok: true, runners }
+  } catch (e) {
+    return { ok: false, error: e instanceof Error ? e.message : String(e) }
+  }
 }
 
 // 레포 목록(picker) — 워크스페이스 GitHub App installation 이 접근 가능한 레포(설치 시 고른 것만). settings:read.

@@ -6,6 +6,7 @@ import { Check, GitBranch, Lock, Search } from 'lucide-react'
 
 import type { CiLink, CiTrigger, RepoInfo } from '@/entities/ci-link'
 import type { HarnessKind } from '@/entities/harness'
+import type { RunnerMeta } from '@/entities/runner'
 import { fmtDateTime, fmtDateTimeFull } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -14,7 +15,11 @@ import { Combobox } from '@/shared/ui/combobox'
 import { Dialog } from '@/shared/ui/dialog'
 import { Input, Label } from '@/shared/ui/input'
 
-import { listGithubAppReposAction, upsertCiLinkAction } from '../api/manage-ci-links'
+import {
+  listGithubAppReposAction,
+  listSharedRunnersAction,
+  upsertCiLinkAction,
+} from '../api/manage-ci-links'
 import { SetupPrButton } from './setup-pr-button'
 
 interface SlotState {
@@ -39,6 +44,18 @@ function initSlots(slotChoices: string[], kind: HarnessKind): Record<string, Slo
     slotChoices.map((s) => [s, { enabled: preselect, path: '' }])
   ) as Record<string, SlotState>
 }
+
+// 공유 러너 준비 상태 — CI 워크플로는 항상 셀프호스티드 러너에서 실행(D6)되므로 연결 시점에 풀 상태를 보여준다.
+// unavailable = 조회 불가(비관리자/조회 실패) — 안내 문구만.
+type RunnerCheck =
+  | { state: 'loading' }
+  | { state: 'ready'; runners: RunnerMeta[] }
+  | { state: 'unavailable' }
+
+// 온라인 판정 — 러너는 long-poll lease(~25s)마다 lastSeenAt 을 갱신하므로 90s 안이면 접속 중(공유 러너 탭과 동일 관례).
+const ONLINE_WINDOW_MS = 90_000
+const isOnline = (lastSeenAt?: string) =>
+  lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
 
 // 레포↔하니스 연결 다이얼로그(zero-input) — 레포 고르기 → 슬롯 고르기 → 데이터셋 → 저장 → 셋업 PR.
 // 레포 목록은 워크스페이스 GitHub App installation 이 접근 가능한 것(설치 시 고른 것만). 저장은 admin 만.
@@ -76,6 +93,7 @@ export function ConnectRepoDialog({
   const [saveError, setSaveError] = useState<string>()
   const [saving, startSaving] = useTransition()
   const [savedRepo, setSavedRepo] = useState<SelectedRepo>() // 저장 성공한 레포(셋업 PR 단계로 전환)
+  const [runnerCheck, setRunnerCheck] = useState<RunnerCheck>({ state: 'loading' })
 
   // 열릴 때마다 초기화 + 워크스페이스 App installation 의 레포 목록 로드.
   useEffect(() => {
@@ -91,11 +109,19 @@ export function ConnectRepoDialog({
     setSaveError(undefined)
     setSavedRepo(undefined)
     setRepos(undefined)
+    setRunnerCheck(canWrite ? { state: 'loading' } : { state: 'unavailable' })
     startReposLoad(async () => {
       const r = await listGithubAppReposAction()
       if (r.ok && r.repos) setRepos(r.repos)
       else setReposError(r.error ?? '레포 목록을 불러오지 못했습니다.')
     })
+    // 공유 러너 준비 상태 — 조회 게이트가 admin(settings:write)이라 canWrite 일 때만. 실패는 안내 문구로 강등.
+    if (canWrite)
+      void listSharedRunnersAction().then((r) =>
+        setRunnerCheck(
+          r.ok && r.runners ? { state: 'ready', runners: r.runners } : { state: 'unavailable' }
+        )
+      )
     // 슬롯/레포 목록은 열리는 순간의 스냅샷으로 고정(open 토글에만 반응).
   }, [open])
 
@@ -376,25 +402,59 @@ export function ConnectRepoDialog({
               </div>
             )}
 
-            {/* 5. 셀프호스티드 러너 — CI 를 팀 빌드 서버에서 돌리려면(선택). github-install 로 세운 러너 라벨/런타임. */}
+            {/* 5. 실행 러너 — CI 워크플로는 항상 셀프호스티드 러너에서(D6, 사설망 컨트롤플레인 도달). 기본 = 공유 러너 풀. */}
             {repository && (
               <div className="space-y-1.5">
-                <Label>5. 셀프호스티드 러너 (선택)</Label>
+                <Label>5. 실행 러너</Label>
+                {runnerCheck.state === 'loading' ? (
+                  <p className="text-[12px] text-muted-foreground">공유 러너를 확인하는 중…</p>
+                ) : runnerCheck.state === 'ready' && runnerCheck.runners.length === 0 ? (
+                  // 러너 0대 — 셋업 PR 이 서버에서 차단되므로(fail-closed) 등록 경로를 먼저 안내한다.
+                  <Callout tone="warning" className="py-1.5">
+                    공유 러너가 없어요. CI 워크플로는 셀프호스티드 러너에서 실행돼서, 러너를 먼저
+                    등록해야 셋업 PR을 열 수 있어요.
+                    <div className="mt-1.5">
+                      <Link
+                        href={`/${encodeURIComponent(workspace)}/settings?tab=runners`}
+                        className="text-[12px] font-[510] text-primary hover:underline"
+                      >
+                        설정 → 공유 러너에서 GitHub Actions 러너 등록하기 →
+                      </Link>
+                    </div>
+                  </Callout>
+                ) : runnerCheck.state === 'ready' ? (
+                  <p className="flex items-center gap-1.5 text-[12px] text-muted-foreground">
+                    <span
+                      className="inline-block size-1.5 shrink-0 rounded-full bg-[var(--color-success)]"
+                      aria-hidden
+                    />
+                    공유 러너 {runnerCheck.runners.length}대 (온라인{' '}
+                    {runnerCheck.runners.filter((r) => isOnline(r.lastSeenAt)).length}대) — 팀 러너
+                    풀(<span className="font-mono">self:ws</span>)에서 빌드·평가가 실행돼요.
+                  </p>
+                ) : (
+                  <p className="text-[12px] text-muted-foreground">
+                    CI 워크플로는 워크스페이스 공유 러너(셀프호스티드)에서 실행돼요. 러너
+                    등록·관리는 관리자가 해요.
+                  </p>
+                )}
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Input
                     value={runsOn}
                     onChange={(e) => setRunsOn(e.target.value)}
-                    placeholder="runs-on: [self-hosted, assay-…]"
+                    placeholder="runs-on 오버라이드 (기본 [self-hosted])"
                   />
                   <Input
                     value={runtime}
                     onChange={(e) => setRuntime(e.target.value)}
-                    placeholder="runtime: self:ws:…"
+                    placeholder="runtime 오버라이드 (기본 self:ws)"
                   />
                 </div>
                 <p className="text-[12px] text-faint">
-                  비우면 <span className="font-mono">ubuntu-latest</span> + 관리형 런타임이에요.
-                  설정 › 공유 러너에서 “GitHub Actions 러너”로 만들면 넣을 값을 알려줘요.
+                  특정 러너로 좁히려면 라벨(예:{' '}
+                  <span className="font-mono">[self-hosted, assay-…]</span>)과 런타임(예:{' '}
+                  <span className="font-mono">self:ws:…</span>)을 지정해요. 비우면 풀에서 아무
+                  러너나 잡아요.
                 </p>
               </div>
             )}
