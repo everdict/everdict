@@ -1,10 +1,10 @@
-// 라이브: 실 MLflow 3.x 백엔드에서 트레이스 ingestion — browser-use Phase 2 의 "real MLflow span ingestion".
-// emitter 가 실 MLflow(:5501)에 browser-use 모양 트레이스를 만들고, 우리 **MlflowTraceSource** 가 Basic auth 로
-// 끌어와 정규화 TraceEvent[] 로 변환 → trace 기반 그레이더(steps/cost)로 채점. (stand-in 의 빈 트레이스 한계를 닫음.)
+// Live: trace ingestion from a real MLflow 3.x backend — browser-use Phase 2's "real MLflow span ingestion".
+// The emitter creates a browser-use-shaped trace in real MLflow (:5501), and our **MlflowTraceSource** pulls it
+// with Basic auth and normalizes it to TraceEvent[] → grade with trace-based graders (steps/cost). (Closes the empty-trace limitation of the stand-in.)
 //   emit(real MLflow) → MlflowTraceSource.fetch(trace_id) → spansToTraceEvents → grade.
 //
-// 준비: MLflow 3.x(:5501, Basic auth) + mlflow-skinny venv. 환경: MLFLOW_ENDPOINT, MLFLOW_USER, MLFLOW_PASSWORD,
-//   MLFLOW_PY(venv python). 사용 예:
+// Setup: MLflow 3.x (:5501, Basic auth) + mlflow-skinny venv. Env: MLFLOW_ENDPOINT, MLFLOW_USER, MLFLOW_PASSWORD,
+//   MLFLOW_PY (venv python). Example:
 //   MLFLOW_PASSWORD=*** MLFLOW_PY=/tmp/mlf-venv/bin/python node scripts/live/mlflow-trace-ingest.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
@@ -18,7 +18,7 @@ const PY = process.env.MLFLOW_PY ?? "python3";
 const auth = `Basic ${Buffer.from(`${USER}:${PASS}`).toString("base64")}`;
 
 console.log("real MLflow span ingestion — emit → MlflowTraceSource → TraceEvent[] → grade\n");
-// 1) 실 MLflow 에 트레이스 생성(emitter).
+// 1) Create a trace in real MLflow (emitter).
 const out = execFileSync(PY, ["scripts/live/mlflow-emit-trace.py"], {
   encoding: "utf8",
   env: {
@@ -29,10 +29,10 @@ const out = execFileSync(PY, ["scripts/live/mlflow-emit-trace.py"], {
   },
 });
 const traceId = /TRACE_ID=(\S+)/.exec(out)?.[1];
-if (!traceId) throw new Error(`emitter 에서 TRACE_ID 못 찾음:\n${out}`);
+if (!traceId) throw new Error(`no TRACE_ID found in emitter output:\n${out}`);
 console.log("emitted trace_id:", traceId);
 
-// 2) 우리 MlflowTraceSource 로 실 트레이스 ingest(Basic auth).
+// 2) Ingest the real trace with our MlflowTraceSource (Basic auth).
 const source = new MlflowTraceSource({ endpoint: ENDPOINT, headers: { Authorization: auth } });
 const trace = await source.fetch(traceId);
 console.log("ingested TraceEvent[]:");
@@ -47,7 +47,7 @@ for (const e of trace) {
   else console.log(`  ${e.kind}`);
 }
 
-// 3) 채점: 실 트레이스 위에서 steps/cost 그레이더.
+// 3) Grade: steps/cost graders over the real trace.
 const evalCase = {
   id: "mlflow-ingest-1",
   env: { kind: "repo", source: { files: {} } },
@@ -75,7 +75,7 @@ const ok =
   steps.value >= 1;
 console.log(
   ok
-    ? "\n✅ real MLflow span ingestion: MlflowTraceSource 가 실 MLflow 3.x 트레이스를 끌어와 llm_call(모델/토큰/비용)+tool_call 로 정규화하고 trace 그레이더로 채점. browser-use Phase 2 — 실 트레이스 인제스트 동작."
-    : "\n⚠️ ingestion/매핑 불일치",
+    ? "\n✅ real MLflow span ingestion: MlflowTraceSource pulls a real MLflow 3.x trace, normalizes it to llm_call (model/tokens/cost) + tool_call, and grades with trace graders. browser-use Phase 2 — real trace ingest works."
+    : "\n⚠️ ingestion/mapping mismatch",
 );
 process.exit(ok ? 0 : 1);

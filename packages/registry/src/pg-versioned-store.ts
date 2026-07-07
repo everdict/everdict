@@ -7,8 +7,8 @@ interface SpecRow {
   spec: unknown;
 }
 
-// Postgres 버전 (tenant, id, version) → T. _shared 폴백 + latest/semver + 버전 불변. table 은 신뢰된 상수(코드 제공).
-// in-memory VersionedStore 의 Pg 짝 — 하네스 taxonomy(템플릿/인스턴스) Pg 레지스트리가 공유한다.
+// Postgres version of (tenant, id, version) → T. _shared fallback + latest/semver + immutable versions. `table` is a trusted constant (code-provided).
+// The Pg counterpart of the in-memory VersionedStore — shared by the harness taxonomy (template/instance) Pg registries.
 export class PgVersionedStore<T extends { id: string; version: string }> {
   constructor(
     private readonly client: SqlClient,
@@ -48,10 +48,10 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         throw new ConflictError(
           "CONFLICT",
           { tenant, id: item.id, version: item.version },
-          `${this.label} ${item.id}@${item.version} 가 다른 스펙으로 이미 등록되어 있습니다(버전은 불변).`,
+          `${this.label} ${item.id}@${item.version} is already registered with a different spec (versions are immutable).`,
         );
       }
-      // 동일 내용 재등록 = 부활(revive) — 내용 불변은 그대로(데이터셋 tombstone 과 동일 패턴).
+      // re-registering identical content = revive — content immutability is preserved (same pattern as dataset tombstones).
       if (row.deleted_at !== null)
         await this.client.query(
           `UPDATE ${this.table} SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3`,
@@ -75,7 +75,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return r.rows.length > 0;
   }
 
-  // 테넌트 직접 소유 + 살아있는 버전만(폴백 없음 — _shared 는 못 지운다). 없으면 NotFound. 데이터셋과 동일 패턴.
+  // tenant directly-owned + live versions only (no fallback — _shared can't be deleted). NotFound otherwise. Same pattern as datasets.
   async creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined> {
     const r = await this.client.query<{ created_by: string | null }>(
       `SELECT created_by FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL`,
@@ -83,22 +83,22 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     );
     const row = r.rows[0];
     if (!row)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} not found.`);
     return row.created_by ?? undefined;
   }
 
-  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 + 살아있는 버전만(softDelete 와 동일 규율; _shared 는 못 태깅).
-  // 태그는 가변 메타 컬럼 — spec(jsonb) 밖이라 specsEqual/버전 불변성에 안 걸린다. 마이그레이션 0047.
+  // version tag replacement (full-array PUT semantics) — tenant directly-owned + live versions only (same discipline as softDelete; _shared can't be tagged).
+  // Tags are a mutable metadata column — outside spec(jsonb), so they don't factor into specsEqual/version immutability. Migration 0047.
   async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
     const r = await this.client.query<{ version: string }>(
       `UPDATE ${this.table} SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version`,
       [tenant, id, version, JSON.stringify(tags)],
     );
     if (r.rows.length === 0)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} not found.`);
   }
 
-  // 버전 → 태그 맵(살아있는 버전 중 태그가 있는 것만). 읽기는 owner 해석(_shared 폴백 포함) — versions() 와 동일 시야.
+  // version → tags map (only live versions that have tags). Reads use owner resolution (including _shared fallback) — same view as versions().
   async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {
     const owner = await this.ownerOf(tenant, id);
     if (!owner) return {};
@@ -120,7 +120,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       [tenant, id, version],
     );
     if (r.rows.length === 0)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} not found.`);
   }
 
   async versions(tenant: string, id: string): Promise<string[]> {
@@ -134,7 +134,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
 
   async get(tenant: string, id: string, ref = "latest"): Promise<T> {
     const owner = await this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `${this.label} '${id}' 가 없습니다.`);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `${this.label} '${id}' not found.`);
     const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
     const res = await this.client.query<SpecRow>(
       `SELECT spec FROM ${this.table} WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL`,
@@ -156,7 +156,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
     return out;
   }
 
-  // 목록 메타 — id 별 버전 요약 + 등록 이력(최초 subject/시각, 최근 시각). 최신 버전만 파싱하지 않고 메타만 뽑는다.
+  // List metadata — per-id version summary + registration history (first subject/time, most recent time). Extracts only metadata, without parsing even the latest version's spec.
   async listMeta(tenant: string): Promise<VersionMeta[]> {
     const out: VersionMeta[] = [];
     for (const { id, owner } of await this.listIds(tenant)) {

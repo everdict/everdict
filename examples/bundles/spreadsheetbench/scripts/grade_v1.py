@@ -1,17 +1,17 @@
-# SpreadsheetBench v1-샘플 채점(재계산식 — golden 파일 없이 input.xlsx 로부터 정답을 재계산해 output.xlsx 를 검증).
-# 실제 벤치마크는 golden xlsx 로 채점하지만(→ sbench_grade.py), 자기완결 샘플은 정답을 결정적으로 재계산해 커닝을 막는다.
-# answer_position 셀(여기선 D1 = Amount 합계)을 값-기준으로 비교. exit 0=PASS, 1=FAIL, 2=오류.
+# SpreadsheetBench v1-sample scoring (recalculation — verifies output.xlsx by recomputing the answer from input.xlsx, without a golden file).
+# The real benchmark scores against a golden xlsx (→ sbench_grade.py), but the self-contained sample deterministically recomputes the answer to prevent cheating.
+# Compares the answer_position cell (here D1 = Amount total) value-wise. exit 0=PASS, 1=FAIL, 2=error.
 import os
 import sys
 
 try:
     import openpyxl
 except ImportError:
-    print("openpyxl 미설치 — setup 의 pip 설치 실패", file=sys.stderr)
+    print("openpyxl not installed — the pip install in setup failed", file=sys.stderr)
     sys.exit(2)
 
 if not os.path.exists("output.xlsx"):
-    print("output.xlsx 가 없습니다 — 에이전트가 산출물을 만들지 않았습니다.")
+    print("output.xlsx is missing — the agent did not produce an output.")
     sys.exit(1)
 
 src = openpyxl.load_workbook("input.xlsx")["Sales"]

@@ -1,11 +1,11 @@
 import type { TraceEvent } from "@everdict/core";
 
-// 하니스가 OTel/MLflow 로 내보낸 한 run 의 트레이스를 끌어와 정규화 TraceEvent[] 로 돌려준다.
+// Pull one run's trace that the harness exported to OTel/MLflow and return it as normalized TraceEvent[].
 export interface TraceSource {
   fetch(runId: string): Promise<TraceEvent[]>;
 }
 
-// OTel/MLflow 공통 중간표현 스팬.
+// The shared intermediate-representation span for OTel/MLflow.
 export interface Span {
   name: string;
   startMs: number;
@@ -22,7 +22,7 @@ function str(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-// 스팬 → TraceEvent. OTel GenAI semantic conventions 기반(하니스 계측에 맞춰 키는 보정 가능).
+// Span → TraceEvent. Based on the OTel GenAI semantic conventions (keys are adjustable to match the harness instrumentation).
 export function spansToTraceEvents(spans: Span[]): TraceEvent[] {
   const sorted = [...spans].sort((a, b) => a.startMs - b.startMs);
   const base = sorted[0]?.startMs ?? 0;
@@ -32,8 +32,8 @@ export function spansToTraceEvents(spans: Span[]): TraceEvent[] {
     if (!s) continue;
     const t = s.startMs - base;
     const a = s.attrs;
-    // OTel GenAI conventions(주) + MLflow 3.x 네이티브(mlflow.chat.tokenUsage/mlflow.llm.model/.cost) 폴백 —
-    // 실 MLflow 3.11 autolog 트레이스는 gen_ai.* 없이도 mlflow.* 로 토큰/모델을 싣는다(라이브 검증).
+    // OTel GenAI conventions (primary) + MLflow 3.x native (mlflow.chat.tokenUsage/mlflow.llm.model/.cost) fallback —
+    // real MLflow 3.11 autolog traces carry tokens/model via mlflow.* even without gen_ai.* (live-verified).
     const tu = (a["mlflow.chat.tokenUsage"] ?? {}) as Record<string, unknown>;
     const llmCost = (a["mlflow.llm.cost"] ?? {}) as Record<string, unknown>;
     const model = str(a["gen_ai.request.model"]) ?? str(a["gen_ai.response.model"]) ?? str(a["mlflow.llm.model"]);

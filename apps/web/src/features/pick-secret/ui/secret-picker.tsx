@@ -15,9 +15,9 @@ const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
 export type SecretPickerScope = 'user' | 'workspace'
 
-// 시크릿 참조 피커 — 로드된 시크릿 이름에서 고르거나 "새로"로 인라인 생성해 그 이름을 참조로 쓴다.
-// 값 원문은 폼/스펙에 남지 않는다(이름만 저장). 시크릿 이름을 받는 입력은 자유 텍스트 대신 이 피커를 쓴다
-// (하니스 env·GHE App 개인키·Mattermost 토큰 …).
+// Secret-reference picker — choose from the loaded secret names, or create one inline via "New" and use that name as the reference.
+// The raw value never lands in the form/spec (only the name is stored). Inputs that take a secret name use this picker instead of free text
+// (harness env · GHE App private key · Mattermost token …).
 export function SecretPicker({
   value,
   onChange,
@@ -32,18 +32,18 @@ export function SecretPicker({
 }: {
   value: string
   onChange: (name: string) => void
-  names: string[] // 서버 프리로드된 이 스코프의 시크릿 이름(값은 안 옴)
-  scope: SecretPickerScope // 인라인 생성이 저장될 티어(개인/워크스페이스)
-  onCreated?: (name: string) => void // 인라인 생성 통지 — 상위가 목록을 여러 피커에 공유할 때
-  hint?: React.ReactNode // 선택된 값 아래 안내(생성 폼이 열려 있으면 숨김)
-  defaultMultiline?: boolean // PEM/kubeconfig 처럼 여러 줄 값이 기본인 시크릿
+  names: string[] // this scope's secret names, preloaded server-side (values not included)
+  scope: SecretPickerScope // tier where an inline-created secret is stored (personal/workspace)
+  onCreated?: (name: string) => void // notify on inline creation — when the parent shares the list across multiple pickers
+  hint?: React.ReactNode // note shown below the selected value (hidden while the create form is open)
+  defaultMultiline?: boolean // secret whose value is multi-line by default, like PEM/kubeconfig
   createValuePlaceholder?: string
   id?: string
   'aria-label'?: string
 }) {
   const t = useTranslations('pickSecret')
   const [creating, setCreating] = useState(false)
-  // 인라인으로 만든 시크릿은 즉시 선택지에 더한다(서버 프리로드 + 신규).
+  // An inline-created secret is added to the options immediately (server preload + new).
   const [created, setCreated] = useState<string[]>([])
   const options = useMemo(() => [...new Set([...names, ...created])].sort(), [names, created])
   return (
@@ -88,8 +88,8 @@ export function SecretPicker({
   )
 }
 
-// 인라인 시크릿 생성 — 이름(env 형식) + 값 → 저장 후 상위가 그 이름을 참조로 선택. scope 로 개인/공유 저장.
-// 좁은 컨테이너(폼 그리드 셀)에도 들어가야 해서 이름/값은 세로 스택.
+// Inline secret creation — name (env format) + value → after saving, the parent selects that name as the reference. scope stores it as personal/shared.
+// Name/value are stacked vertically so it fits even in a narrow container (a form grid cell).
 function CreateSecretInline({
   scope,
   defaultMultiline,
@@ -107,7 +107,7 @@ function CreateSecretInline({
   const [name, setName] = useState('')
   const [val, setVal] = useState('')
   const [show, setShow] = useState(false)
-  const [multiline, setMultiline] = useState(defaultMultiline) // PEM/kubeconfig 같은 여러 줄 값 전환
+  const [multiline, setMultiline] = useState(defaultMultiline) // toggle for a multi-line value like PEM/kubeconfig
   const [error, setError] = useState<string>()
   const [pending, start] = useTransition()
   const nameInvalid = name.length > 0 && !NAME_RE.test(name)

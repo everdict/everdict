@@ -15,7 +15,7 @@ import { Input, Label } from '@/shared/ui/input'
 
 import { updateWorkspaceAction } from '../api/workspace-meta'
 
-// 워크스페이스 로고 미리보기 — 라운드 사각(유저 아바타의 원형과 구분). 없거나 로드 실패면 이름 첫 글자 모노그램.
+// Workspace logo preview — rounded square (distinct from the user avatar's circle). If absent or load fails, a monogram of the name's first letter.
 function LogoPreview({ url, seed }: { url: string; seed: string }) {
   const t = useTranslations('workspaceSettings')
   const [broken, setBroken] = useState(false)
@@ -28,7 +28,7 @@ function LogoPreview({ url, seed }: { url: string; seed: string }) {
     )
   }
   return (
-    // 업로드 data URL/외부 URL 이라 next/image(원격 화이트리스트)가 아닌 일반 img.
+    // Uploaded data URL / external URL, so a plain img rather than next/image (remote allowlist).
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
@@ -39,8 +39,8 @@ function LogoPreview({ url, seed }: { url: string; seed: string }) {
   )
 }
 
-// 워크스페이스 일반 정보 — 로고(파일 업로드)·이름 수정 + URL(slug) 읽기 전용 표시/복사. URL 은 모든 데이터의
-// 스코프 키(tenant)라 불변. 비-admin 은 읽기 전용(컨트롤플레인이 최종 강제).
+// Workspace general info — logo (file upload) and name editing + URL (slug) shown read-only / copyable. The URL is the scope key
+// (tenant) for all data, so it's immutable. Non-admins are read-only (the control plane does the final enforcement).
 export function WorkspaceInfoCard({
   id,
   name,
@@ -68,7 +68,7 @@ export function WorkspaceInfoCard({
 
   async function onPickFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    e.target.value = '' // 같은 파일 재선택도 change 가 발생하도록 초기화.
+    e.target.value = '' // reset so re-selecting the same file still fires change.
     if (!file) return
     setError(undefined)
     setSaved(false)
@@ -102,7 +102,7 @@ export function WorkspaceInfoCard({
   }
 
   async function onCopy() {
-    // http(비-secure) 컨텍스트 폴백 포함 — navigator.clipboard 미존재 시 execCommand.
+    // Includes an http (non-secure) context fallback — execCommand when navigator.clipboard is absent.
     if (await copyText(url, undefined, locale)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)

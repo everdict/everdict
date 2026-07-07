@@ -40,10 +40,10 @@ import { EnvEditor, type ScopedSecretNames } from './env-editor'
 
 const EMPTY_SECRETS: ScopedSecretNames = { workspace: [], user: [] }
 
-// front-door submit 본문 값 오버라이드 편집기의 안내 예시(자유 형식 JSON 객체).
+// Example hint for the front-door submit body value override editor (free-form JSON object).
 const BODY_PLACEHOLDER = `{ "max_steps": 30, "system_prompt": "..." }`
 
-// 카탈로그 라벨/설명은 module-level 상수로 둘 수 없어(t 필요) 컴포넌트에서 t 를 받아 만든다(command-palette 관례).
+// Catalog labels/descriptions can't be module-level constants (they need t), so they're built inside the component from an injected t (command-palette convention).
 type Translate = ReturnType<typeof useTranslations>
 
 const storeOptions = (t: Translate): ComboboxOption[] => [
@@ -59,8 +59,8 @@ const isolateOptions = (t: Translate): ComboboxOption[] => [
   { value: 'external', description: t('isolateExternal') },
 ]
 
-// kind = 하니스를 실제로 어떻게 실행하는지(런타임 방식). process 는 코드로 정의하는 하니스라
-// 폼(선언형)으로는 빈 껍데기만 나와 여기선 제외한다 — command / service 둘만 노출.
+// kind = how the harness actually runs (runtime style). process is a harness defined in code,
+// so a (declarative) form only yields an empty shell — excluded here; only command / service are exposed.
 const kindOptions = (t: Translate): ComboboxOption[] => [
   {
     value: 'command',
@@ -74,8 +74,8 @@ const kindOptions = (t: Translate): ComboboxOption[] => [
   },
 ]
 
-// category = 목록에서 묶어보기 위한 분류 라벨(실행 방식은 kind 가 정함 — category 는 실행에 영향 없음).
-// kind 별로 흔한 것만 노출해 선택을 좁힌다.
+// category = a classification label for grouping in lists (kind decides how it runs — category has no effect on execution).
+// Only the common ones per kind are exposed to narrow the choice.
 const categoriesForKind = (k: Kind, t: Translate): ComboboxOption[] =>
   k === 'service'
     ? [
@@ -90,7 +90,7 @@ const categoriesForKind = (k: Kind, t: Translate): ComboboxOption[] =>
         { value: 'custom', label: 'custom', description: t('catCustomDesc') },
       ]
 
-// 라벨 + info 툴팁(안내는 인라인 금지 — info 아이콘에만). 등록 폼 전반에서 필드 설명에 사용.
+// Label + info tooltip (guidance is never inline — only on the info icon). Used for field descriptions across the registration form.
 function FieldLabel({
   children,
   tip,
@@ -108,7 +108,7 @@ function FieldLabel({
   )
 }
 
-// 버전 입력 — existing 이 주어지면 semver 범프 드롭다운(신규=1.0.0), 없으면 raw 입력(참조용 태그 등).
+// Version input — if existing is given, a semver bump dropdown (new=1.0.0); otherwise raw input (e.g. a reference tag).
 function VersionRow({
   existing,
   value,
@@ -171,9 +171,9 @@ export function RegisterHarnessWizard({
   )
 }
 
-// --- 템플릿(대분류) 등록 ---
-// initial 프리필 + lockId(같은 대분류의 새 구조 버전 — id/kind 고정) + onRegistered(성공 시 호출자가 후처리,
-// 예: 새 버전을 참조하는 인스턴스 탭으로 이동). onRegistered 없으면 기본은 하니스 목록으로 이동.
+// --- Template (top-level category) registration ---
+// initial prefill + lockId (a new shape version of the same top-level category — id/kind fixed) + onRegistered (on success the caller post-processes,
+// e.g. moving to the instance tab that references the new version). Without onRegistered, the default is to move to the harness list.
 export function TemplateForm({
   workspace,
   initial,
@@ -629,16 +629,16 @@ export function TemplateForm({
   )
 }
 
-// 슬롯별 라벨 설명·예시 — 슬롯이 템플릿으로 고정된 수정 화면에서 "이 핀이 뭔지"를 바로 보이게 한다.
-// command 는 image·model 두 슬롯이 고정, service 는 슬롯명이 서비스명.
+// Per-slot label description/example — on the edit screen where slots are fixed by the template, shows "what this pin is" up front.
+// command has two fixed slots, image·model; for service the slot name is the service name.
 function pinGuide(slot: string, t: Translate): { hint: string; placeholder: string } {
   if (slot === 'image') return { hint: t('pinImageHint'), placeholder: 'ghcr.io/acme/codex:pr-12' }
   if (slot === 'model') return { hint: t('pinModelHint'), placeholder: 'claude-opus-4-8' }
   return { hint: t('pinServiceHint', { slot }), placeholder: 'ghcr.io/acme/agent:abc' }
 }
 
-// --- 인스턴스(template + pins) 등록 ---
-// initial 프리필 + lockId(같은 하니스의 새 버전 — id 고정) + redirectDetailId(성공 시 상세로 복귀).
+// --- Instance (template + pins) registration ---
+// initial prefill + lockId (a new version of the same harness — id fixed) + redirectDetailId (return to detail on success).
 export function InstanceForm({
   workspace,
   initial,
@@ -654,8 +654,8 @@ export function InstanceForm({
   redirectDetailId?: string
   existingVersions?: string[]
   secrets?: ScopedSecretNames
-  // 이 인스턴스가 올라탄 템플릿의 kind — 알면 overrides 를 그 kind 에 맞는 블록만 노출한다(수정 화면).
-  // 신규 인스턴스 위저드처럼 kind 를 모르면 undefined → 모든 블록 노출(하위호환).
+  // The kind of the template this instance rides on — if known, only the overrides block matching that kind is exposed (edit screen).
+  // If the kind is unknown (like the new-instance wizard), undefined → all blocks exposed (backward compatible).
   kind?: Kind
 }) {
   const router = useRouter()
@@ -673,9 +673,9 @@ export function InstanceForm({
       serviceOverrides: s.serviceOverrides.map((row, j) => (j === i ? { ...row, ...patch } : row)),
     })
 
-  // front-door 본문 JSON 파싱 상태 — 오류면 검증/등록을 막는다(잘못된 JSON 을 컨트롤플레인에 보내지 않음).
+  // front-door body JSON parse state — on error, block validate/register (don't send invalid JSON to the control plane).
   const bodyParse = parseJsonObject(s.bodyTemplate)
-  // build-spec 은 에러 코드를 반환 — 여기서 t() 로 번역(그 외는 엔진 원문 메시지 그대로 통과).
+  // build-spec returns an error code — translated here with t() (anything else passes through as the engine's original message).
   const rawBodyError = bodyParse.ok ? undefined : bodyParse.error
   const bodyError =
     rawBodyError === 'invalidJson'
@@ -698,7 +698,7 @@ export function InstanceForm({
     const res = await registerHarnessAction(buildInstance(s))
     setBusy(false)
     if (res.ok) {
-      // 새 버전(redirectDetailId) 이면 해당 버전 상세로, 아니면 목록으로.
+      // If a new version (redirectDetailId), go to that version's detail; otherwise the list.
       router.push(
         redirectDetailId
           ? `/${workspace}/harnesses/${encodeURIComponent(redirectDetailId)}?v=${encodeURIComponent(res.version ?? s.version)}`
@@ -758,7 +758,7 @@ export function InstanceForm({
       </div>
 
       {kind === 'command' || kind === 'service' ? (
-        // 슬롯이 템플릿으로 고정된 경우(수정 화면) — 슬롯 라벨 + 한 줄 설명 + 값만. 슬롯 편집/추가·삭제 없음.
+        // When slots are fixed by the template (edit screen) — slot label + one-line description + value only. No slot editing/add/delete.
         <Section
           title={t('pinsFixedTitle')}
           tip={kind === 'command' ? t('pinsCommandTip') : t('pinsServiceTip')}
@@ -782,7 +782,7 @@ export function InstanceForm({
           })}
         </Section>
       ) : (
-        // 신규 인스턴스 위저드 — 아직 kind·슬롯을 모르니 자유 입력(슬롯 직접 타이핑) + 추가/삭제.
+        // New-instance wizard — kind/slots not yet known, so free input (type the slot directly) + add/delete.
         <Section
           title={t('pinsFreeTitle')}
           onAdd={() => set({ pins: [...s.pins, { slot: '', value: '' }] })}
@@ -830,8 +830,8 @@ export function InstanceForm({
   )
 }
 
-// 변주(overrides) 구조적 편집기 — 같은 템플릿 위에서 동작만 바꾸는 델타. 선택이라 접이식(disclosure)으로 숨겨
-// 기본 폼(이미지 핀)은 깔끔하게 두고, 필요한 사람만 펼친다. 기존 변주가 있으면(새 버전 편집) 자동 펼침.
+// overrides structured editor — a delta that changes only behavior on top of the same template. It's optional, so it's hidden in a disclosure
+// to keep the default form (image pin) clean; only those who need it expand it. If existing overrides are present (editing a new version), auto-expand.
 function hasOverrides(s: InstanceState): boolean {
   return (
     s.serviceOverrides.length > 0 ||
@@ -861,8 +861,8 @@ function OverridesEditor({
 }) {
   const t = useTranslations('registerHarness')
   const [open, setOpen] = useState(hasOverrides(s))
-  // kind 를 알면 그 kind 의 변주만 노출한다: command→Command 블록만, service→서비스/front-door/target 만.
-  // 모르면(undefined, 예: 신규 인스턴스 위저드) 전부 노출(하위호환).
+  // If the kind is known, expose only that kind's overrides: command→Command block only, service→service/front-door/target only.
+  // If unknown (undefined, e.g. the new-instance wizard), expose all (backward compatible).
   const showService = kind !== 'command'
   const showCommand = kind !== 'service'
   return (
@@ -1040,7 +1040,7 @@ function OverridesEditor({
   )
 }
 
-// 작은 라벨 + 숫자 입력(폼은 문자열 보관 — Number() 환원). 행마다 반복되므로 id 충돌 없이 aria-label 로.
+// Small label + numeric input (the form stores strings — reduced via Number()). Repeated per row, so aria-label instead of an id (no id collisions).
 function NumField({
   label,
   value,
@@ -1066,7 +1066,7 @@ function NumField({
   )
 }
 
-// 변주 하위 묶음 카드 — 옅은 제목 + 내용.
+// Override sub-group card — faint title + content.
 function OvBlock({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3 rounded-lg border bg-card p-3">
@@ -1192,7 +1192,7 @@ function Section({
 }: {
   title: string
   tip?: React.ReactNode
-  onAdd?: () => void // 없으면 '추가' 버튼 숨김(고정 슬롯처럼 행을 늘릴 수 없는 섹션)
+  onAdd?: () => void // if absent, the 'add' button is hidden (a section where rows can't grow, like fixed slots)
   children: React.ReactNode
 }) {
   const t = useTranslations('registerHarness')
@@ -1218,7 +1218,7 @@ function Section({
   )
 }
 
-// 작은 라벨 + info 툴팁이 달린 텍스트 입력(서비스 행처럼 필드가 촘촘한 곳에서 "뭐가뭔지" 안내).
+// Text input with a small label + info tooltip (guides "what's what" where fields are dense, like service rows).
 function LabeledInput({
   label,
   tip,
@@ -1251,7 +1251,7 @@ function LabeledInput({
   )
 }
 
-// 작은 라벨 + info 툴팁이 달린 여러 줄 입력(env·volumes 처럼 줄 단위 값).
+// Multi-line input with a small label + info tooltip (for line-based values like env·volumes).
 function LabeledTextarea({
   label,
   tip,
@@ -1323,7 +1323,7 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
           {result.versionExists && ` — ${t('versionExistsNote')}`}
         </div>
       )}
-      {/* 이미지 출처 경고 — 로컬 빌드/미지정 이미지는 다른 런타임에서 pull 이 안 된다(등록은 가능). */}
+      {/* Image provenance warning — locally built/unqualified images can't be pulled from another runtime (registration is still allowed). */}
       {result.imageWarnings && result.imageWarnings.length > 0 && (
         <div className="mt-1 text-[12px] text-muted-foreground">
           {t('imageWarningsLabel')}{' '}

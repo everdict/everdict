@@ -2,14 +2,14 @@ import { ConflictError, NotFoundError } from "@everdict/core";
 import type { BenchmarkAdapterSpec } from "@everdict/datasets";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
-// 벤치마크 정의(레시피) SSOT — (tenant, id, version) → BenchmarkAdapterSpec(데이터). 버전 불변.
-// 데이터셋/하니스/judge 와 동일한 소유 모델: 테넌트 소유 우선, 없으면 _shared(first-party) 폴백.
-// 이게 "유저별/테넌트별 벤치마크" 일반화의 핵심 — 카탈로그(코드)를 테넌트가 등록하는 데이터로.
+// Benchmark definition (recipe) SSOT — (tenant, id, version) → BenchmarkAdapterSpec (data). Versions are immutable.
+// Same ownership model as dataset/harness/judge: tenant-owned first, else _shared (first-party) fallback.
+// This is the core of the "per-user/per-tenant benchmark" generalization — turning the catalog (code) into data a tenant registers.
 export interface BenchmarkRegistry {
   register(tenant: string, spec: BenchmarkAdapterSpec): Promise<void>;
   get(tenant: string, id: string, ref?: string): Promise<BenchmarkAdapterSpec>;
-  versions(tenant: string, id: string): Promise<string[]>; // 소유 우선/_shared 폴백
-  ownVersions(tenant: string, id: string): Promise<string[]>; // 이 테넌트 소유만(충돌 판정)
+  versions(tenant: string, id: string): Promise<string[]>; // owner-first / _shared fallback
+  ownVersions(tenant: string, id: string): Promise<string[]>; // this tenant's owned only (conflict check)
   list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>>;
 }
 
@@ -52,7 +52,7 @@ export class InMemoryBenchmarkRegistry implements BenchmarkRegistry {
         throw new ConflictError(
           "CONFLICT",
           { tenant, id: spec.id, version: spec.version },
-          `벤치마크 ${spec.id}@${spec.version} 가 다른 내용으로 이미 등록되어 있습니다(버전은 불변).`,
+          `Benchmark ${spec.id}@${spec.version} is already registered with different content (versions are immutable).`,
         );
       }
       return;
@@ -71,7 +71,7 @@ export class InMemoryBenchmarkRegistry implements BenchmarkRegistry {
 
   async get(tenant: string, id: string, ref = "latest"): Promise<BenchmarkAdapterSpec> {
     const owner = this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `벤치마크 '${id}' 가 없습니다.`);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `Benchmark '${id}' not found.`);
     const version = resolveRef(id, ref, this.ownerVersions(owner, id));
     return (this.byOwner.get(owner)?.get(id)?.get(version) as Entry).spec;
   }

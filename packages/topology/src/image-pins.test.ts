@@ -16,20 +16,20 @@ const SPEC: ServiceHarnessSpec = {
 };
 
 describe("applyImagePins", () => {
-  it("핀이 없으면 spec 을 그대로(동일 참조) 반환한다 — 무회귀", () => {
+  it("returns the spec unchanged (same reference) when there are no pins — no regression", () => {
     expect(applyImagePins(SPEC, undefined)).toBe(SPEC);
     expect(applyImagePins(SPEC, {})).toBe(SPEC);
   });
 
-  it("매칭 서비스의 이미지만 override 하고 version 에 결정적 핀 접미사를 붙인다", () => {
+  it("overrides only the matching service's image and appends a deterministic pin suffix to the version", () => {
     const out = applyImagePins(SPEC, { agent: "reg/agent:2" });
     expect(out.services.find((s) => s.name === "agent")?.image).toBe("reg/agent:2");
-    expect(out.services.find((s) => s.name === "mcp")?.image).toBe("reg/mcp:1"); // 미핀 서비스는 그대로
+    expect(out.services.find((s) => s.name === "mcp")?.image).toBe("reg/mcp:1"); // unpinned service unchanged
     expect(out.version).toMatch(/^1\.0\.0-pin-[0-9a-f]{8}$/);
-    expect(SPEC.services[0]?.image).toBe("reg/agent:1"); // 원본 불변(순수)
+    expect(SPEC.services[0]?.image).toBe("reg/agent:1"); // original unchanged (pure)
   });
 
-  it("같은 핀이면 같은 version 접미사(결정적), 다른 핀이면 다른 접미사 → warm 풀 분리", () => {
+  it("same pins → same version suffix (deterministic), different pins → different suffix → warm pool separation", () => {
     const a1 = applyImagePins(SPEC, { agent: "reg/agent:2" }).version;
     const a2 = applyImagePins(SPEC, { agent: "reg/agent:2" }).version;
     const b = applyImagePins(SPEC, { agent: "reg/agent:3" }).version;
@@ -37,13 +37,13 @@ describe("applyImagePins", () => {
     expect(a1).not.toBe(b);
   });
 
-  it("키 순서가 달라도 같은 핀이면 같은 접미사(정렬 정규화)", () => {
+  it("same pins in a different key order still yield the same suffix (sort normalization)", () => {
     const x = applyImagePins(SPEC, { agent: "reg/agent:2", mcp: "reg/mcp:2" }).version;
     const y = applyImagePins(SPEC, { mcp: "reg/mcp:2", agent: "reg/agent:2" }).version;
     expect(x).toBe(y);
   });
 
-  it("토폴로지에 없는 서비스 핀이면 BadRequestError 로 거절한다", () => {
+  it("rejects with BadRequestError when a pin targets a service not in the topology", () => {
     expect(() => applyImagePins(SPEC, { nope: "reg/x:1" })).toThrow(BadRequestError);
   });
 });

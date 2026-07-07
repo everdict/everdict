@@ -20,24 +20,24 @@ import type {
 import { z } from "zod";
 import type { BenchmarkService } from "./benchmark-service.js";
 
-// 번들 — 여러 레지스트리에 흩어진 기존 스펙들의 매니페스트(하니스+벤치마크+데이터셋+런타임+judge/model).
-// "특화물은 번들" 원칙: codex+pinch 같은 특정 하니스/벤치마크는 이 번들(순수 데이터)로 등록 — 코어 무변경.
-// 적용기는 각 섹션을 기존 per-type register() 로 팬아웃하는 얇은 오케스트레이션일 뿐(새 추상화/스토어 없음).
+// Bundle — a manifest of existing specs scattered across registries (harness+benchmark+dataset+runtime+judge/model).
+// "specializations are bundles" principle: specific harnesses/benchmarks like codex+pinch are registered via this bundle (pure data) — core unchanged.
+// The applier is just thin orchestration that fans each section out to the existing per-type register() (no new abstraction/store).
 export const BundleSchema = z.object({
   id: z.string(),
   version: z.string(),
   description: z.string().optional(),
   harnessTemplates: z.array(HarnessTemplateSpecSchema).default([]),
-  harnesses: z.array(HarnessInstanceSpecSchema).default([]), // 인스턴스(template + pins)
-  benchmarkRecipes: z.array(BenchmarkAdapterSpecSchema).default([]), // 소스→데이터셋 어댑터(인입은 별도)
-  datasets: z.array(DatasetSchema).default([]), // 즉시 실행 가능한 케이스 번들
+  harnesses: z.array(HarnessInstanceSpecSchema).default([]), // instances (template + pins)
+  benchmarkRecipes: z.array(BenchmarkAdapterSpecSchema).default([]), // source→dataset adapters (import is separate)
+  datasets: z.array(DatasetSchema).default([]), // ready-to-run case bundles
   judges: z.array(JudgeSpecSchema).default([]),
   models: z.array(ModelSpecSchema).default([]),
   runtimes: z.array(RuntimeSpecSchema).default([]),
 });
 export type Bundle = z.infer<typeof BundleSchema>;
 
-// 적용 결과(항목별) — 배치는 절대 중단하지 않는다. 같은 내용 재적용=ok(레지스트리 멱등), 충돌 내용=conflict, 레지스트리 미설정=skipped.
+// Per-item apply result — the batch is never aborted. Re-applying the same content = ok (registry idempotency), conflicting content = conflict, registry not configured = skipped.
 export const BundleItemStatusSchema = z.enum(["ok", "conflict", "error", "skipped"]);
 export type BundleItemStatus = z.infer<typeof BundleItemStatusSchema>;
 export interface BundleItemResult {
@@ -53,13 +53,13 @@ export interface BundleApplyResult {
   results: BundleItemResult[];
 }
 
-// 번들 내용으로부터 필요한 authZ 액션을 도출 — 새 액션 없이 기존 per-type 게이트를 조합(라우트/MCP 가 각각 강제).
+// Derive the required authZ actions from the bundle contents — compose existing per-type gates with no new action (routes/MCP enforce each).
 export function requiredActionsForBundle(bundle: Bundle): Action[] {
   const need = new Set<Action>();
   if (bundle.harnessTemplates.length > 0) need.add("templates:write");
   if (bundle.harnesses.length > 0) need.add("harnesses:register");
   if (bundle.datasets.length > 0) need.add("datasets:write");
-  if (bundle.benchmarkRecipes.length > 0) need.add("datasets:write"); // 레시피=데이터셋 어댑터
+  if (bundle.benchmarkRecipes.length > 0) need.add("datasets:write"); // a recipe = a dataset adapter
   if (bundle.judges.length > 0) need.add("judges:write");
   if (bundle.models.length > 0) need.add("models:write");
   if (bundle.runtimes.length > 0) need.add("runtimes:write");
@@ -69,7 +69,7 @@ export function requiredActionsForBundle(bundle: Bundle): Action[] {
 export interface BundleServiceDeps {
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
-  benchmarks?: BenchmarkService; // 레시피 등록(BenchmarkService.registerRecipe)
+  benchmarks?: BenchmarkService; // recipe registration (BenchmarkService.registerRecipe)
   datasets?: DatasetRegistry;
   judges?: JudgeRegistry;
   models?: ModelRegistry;
@@ -81,7 +81,7 @@ interface Registrable {
   version: string;
 }
 
-// 한 섹션 적용 — 항목마다 register 를 호출하고 결과를 수집한다. register 미설정이면 skipped(레지스트리 없음).
+// Apply one section — call register per item and collect results. If register is unset, skipped (no registry).
 async function applySection<T extends Registrable>(
   kind: string,
   items: T[],
@@ -91,21 +91,21 @@ async function applySection<T extends Registrable>(
   for (const item of items) {
     const base = { kind, id: item.id, version: item.version };
     if (!register) {
-      results.push({ ...base, status: "skipped", message: "레지스트리가 설정되지 않았습니다." });
+      results.push({ ...base, status: "skipped", message: "registry is not configured." });
       continue;
     }
     try {
       await register(item);
       results.push({ ...base, status: "ok" });
     } catch (err) {
-      // 불변 레지스트리: 같은 내용 재등록은 예외 없음(멱등). 다른 내용 재등록만 ConflictError → conflict 로 구분.
+      // Immutable registry: re-registering the same content raises no exception (idempotent). Only re-registering different content raises ConflictError → distinguished as conflict.
       const status: BundleItemStatus = err instanceof ConflictError ? "conflict" : "error";
       results.push({ ...base, status, message: err instanceof Error ? err.message : String(err) });
     }
   }
 }
 
-// 번들 적용 — 각 섹션을 기존 레지스트리로 팬아웃(멱등, 부분성공). authZ 는 라우트/MCP 가 requiredActionsForBundle 로 강제.
+// Apply a bundle — fan each section out to the existing registry (idempotent, partial success). authZ is enforced by routes/MCP via requiredActionsForBundle.
 export class BundleService {
   constructor(private readonly deps: BundleServiceDeps) {}
 

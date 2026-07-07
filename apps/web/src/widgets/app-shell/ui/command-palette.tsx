@@ -40,7 +40,7 @@ function toggleTheme() {
   }
 }
 
-// 액션 경로는 활성 워크스페이스로 prefix(Linear 식 /{workspace}/...). 라벨은 카탈로그 키로 해석.
+// Action paths are prefixed with the active workspace (Linear-style /{workspace}/...). Labels are resolved from catalog keys.
 function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): Command[] {
   const push = (suffix: string) => (r: ReturnType<typeof useRouter>) =>
     r.push(`/${workspace}${suffix}`)
@@ -51,7 +51,7 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       label: t('palette.newRun'),
       icon: Plus,
       group,
-      keywords: 'run 실행 평가 submit',
+      keywords: 'run execute evaluate submit',
       perform: push('/runs/new'),
     },
     {
@@ -59,7 +59,7 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       label: t('palette.newScorecard'),
       icon: Plus,
       group,
-      keywords: 'scorecard 배치',
+      keywords: 'scorecard batch',
       perform: push('/scorecards/new'),
     },
     {
@@ -67,7 +67,7 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       label: t('palette.compareScorecards'),
       icon: GitCompareArrows,
       group,
-      keywords: 'compare diff 회귀',
+      keywords: 'compare diff regression',
       perform: push('/scorecards/compare'),
     },
     {
@@ -83,7 +83,7 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       label: t('palette.newDataset'),
       icon: Plus,
       group,
-      keywords: 'dataset 벤치마크',
+      keywords: 'dataset benchmark',
       perform: push('/datasets/new'),
     },
     {
@@ -91,7 +91,7 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       label: t('palette.newJudge'),
       icon: Plus,
       group,
-      keywords: 'judge 심사',
+      keywords: 'judge review',
       perform: push('/judges/new'),
     },
     {
@@ -99,7 +99,7 @@ function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): C
       label: t('palette.toggleTheme'),
       icon: SunMoon,
       group,
-      keywords: 'theme dark light 다크 라이트',
+      keywords: 'theme dark light',
       perform: () => toggleTheme(),
     },
   ]
@@ -135,7 +135,7 @@ export function CommandPalette({ workspace }: { workspace: string }) {
     return commands.filter((c) => `${c.label} ${c.keywords ?? ''}`.toLowerCase().includes(q))
   }, [commands, query])
 
-  // 그룹 순서 유지하며 묶기
+  // Group while preserving group order
   const groups = useMemo(() => {
     const order: string[] = []
     const map = new Map<string, Command[]>()
@@ -151,7 +151,7 @@ export function CommandPalette({ workspace }: { workspace: string }) {
 
   const close = useCallback(() => setOpen(false), [])
 
-  // 전역 단축키 + 사이드바 검색 버튼 이벤트
+  // Global shortcut + sidebar search button event
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {

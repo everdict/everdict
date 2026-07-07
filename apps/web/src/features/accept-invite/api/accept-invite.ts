@@ -14,8 +14,8 @@ export interface AcceptInviteResult {
   error?: string
 }
 
-// 초대 수락 — 토큰을 컨트롤플레인에 제출(인증만, 워크스페이스 게이트 없음). 성공 시 그 워크스페이스로 활성 전환.
-// 만료/사용/무효(400/404/409)·머신키(400)는 컨트롤플레인이 강제하고 에러 메시지로 전달.
+// Accept an invite — submit the token to the control plane (auth only, no workspace gate). On success, switch active to that workspace.
+// Expired/used/invalid (400/404/409) and machine keys (400) are enforced by the control plane and surfaced as the error message.
 export async function acceptInviteAction(token: string): Promise<AcceptInviteResult> {
   const ctx = await authContext()
   try {

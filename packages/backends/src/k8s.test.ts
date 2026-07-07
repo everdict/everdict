@@ -82,7 +82,7 @@ function mockApi(
 }
 
 describe("buildK8sJob / k8sJobName", () => {
-  it("이미지·풀폴리시·잡 페이로드(EVERDICT_AGENT_JOB)·네임스페이스를 담는다", () => {
+  it("puts the image, pull policy, job payload (EVERDICT_AGENT_JOB), and namespace", () => {
     const m = buildK8sJob(
       JOB,
       { image: "reg/everdict-agent:1" },
@@ -97,7 +97,7 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(decoded.harness.id).toBe("aider");
   });
 
-  it("evalCase.image 가 있으면 per-case 컨테이너 이미지로 override(SWE-bench prebuilt)", () => {
+  it("with evalCase.image, override with the per-case container image (SWE-bench prebuilt)", () => {
     const withImage = { ...JOB, evalCase: { ...JOB.evalCase, image: "swebench/sweb.eval.x86_64.x_1776_y-1:latest" } };
     const m = buildK8sJob(withImage, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
     expect(m.spec.template.spec.containers[0]?.image).toBe("swebench/sweb.eval.x86_64.x_1776_y-1:latest");
@@ -105,7 +105,7 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(off.spec.template.spec.containers[0]?.image).toBe("reg/agent:1");
   });
 
-  it("case.image 가 워크스페이스 레지스트리 것이면 imagePullSecrets 를 렌더한다(Secret 은 dispatch 가 함께 apply)", () => {
+  it("renders imagePullSecrets when case.image is a workspace-registry one (the Secret is applied together by dispatch)", () => {
     const withAuth = {
       ...JOB,
       evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" },
@@ -113,7 +113,7 @@ describe("buildK8sJob / k8sJobName", () => {
     };
     const m = buildK8sJob(withAuth, { image: "reg/agent:1" }, "n", "ns") as unknown as JobManifest;
     expect(m.spec.template.spec.imagePullSecrets).toEqual([{ name: K8S_REGISTRY_AUTH_SECRET }]);
-    // 호스트 불일치(기본 에이전트 이미지)면 미렌더.
+    // On a host mismatch (the default agent image), not rendered.
     const off = buildK8sJob(
       { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },
       { image: "reg/agent:1" },
@@ -121,7 +121,7 @@ describe("buildK8sJob / k8sJobName", () => {
       "ns",
     ) as unknown as JobManifest;
     expect(off.spec.template.spec.imagePullSecrets).toBeUndefined();
-    // Secret 매니페스트 자체는 dockerconfigjson 형식.
+    // The Secret manifest itself is in dockerconfigjson format.
     const secret = k8sRegistryAuthSecret({ host: "ghcr.io", username: "bot", password: "pull-tok" }, "ns") as {
       type: string;
       data: Record<string, string>;
@@ -131,7 +131,7 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(Buffer.from(config.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:pull-tok");
   });
 
-  it("job.judge 가 있으면 judge 모델 env 를 파드에 주입한다(키는 secretEnv)", () => {
+  it("with job.judge, injects the judge model env into the pod (keys via secretEnv)", () => {
     const m = buildK8sJob(
       { ...JOB, judge: { model: "gpt-5.4-mini" } },
       { image: "img", secretEnv: { OPENAI_API_KEY: "k" } },
@@ -144,12 +144,12 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(envOf(off, "EVERDICT_JUDGE_MODEL")).toBeUndefined();
   });
 
-  it("runtimeClassName 이 주어지면 파드 스펙에 실린다", () => {
+  it("when runtimeClassName is given, it's carried in the pod spec", () => {
     const m = buildK8sJob(JOB, { image: "img" }, "n", "ns", "gvisor") as unknown as JobManifest;
     expect(m.spec.template.spec.runtimeClassName).toBe("gvisor");
   });
 
-  it("hostNetwork 옵션이 파드 스펙에 실린다(dev: 호스트 서비스 접근용)", () => {
+  it("the hostNetwork option is carried in the pod spec (dev: to reach host services)", () => {
     const m = buildK8sJob(JOB, { image: "img", hostNetwork: true }, "n", "ns") as unknown as {
       spec: { template: { spec: { hostNetwork?: boolean } } };
     };
@@ -160,38 +160,38 @@ describe("buildK8sJob / k8sJobName", () => {
     expect(off.spec.template.spec.hostNetwork).toBeUndefined();
   });
 
-  it("k8sJobName 은 DNS-1123 으로 정규화한다", () => {
+  it("k8sJobName normalizes to DNS-1123", () => {
     expect(k8sJobName({ ...JOB, evalCase: { ...JOB.evalCase, id: "Web_Case#1" } })).toBe("everdict-web-case-1");
   });
 });
 
 describe("K8sBackend.dispatch", () => {
-  it("Job apply → 완료 폴링 → 파드 로그 sentinel 파싱 → 정리(delete)", async () => {
+  it("Job apply → poll completion → parse pod-log sentinel → cleanup (delete)", async () => {
     const { api, applied, deleted } = mockApi();
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
     const result = await backend.dispatch(JOB);
     expect(result.caseId).toBe("c1");
     expect(result.harness).toBe("aider@latest");
     expect(applied).toHaveLength(1);
-    expect(deleted).toEqual(["everdict-c1"]); // finally 정리
+    expect(deleted).toEqual(["everdict-c1"]); // finally cleanup
   });
 
-  it("Job 실패 → UpstreamError 이지만 정리는 수행", async () => {
+  it("Job failure → UpstreamError but cleanup still runs", async () => {
     const { api, deleted } = mockApi({ failed: true });
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
     await expect(backend.dispatch(JOB)).rejects.toBeInstanceOf(UpstreamError);
     expect(deleted).toEqual(["everdict-c1"]);
   });
 
-  it("trustZones: 테넌트 존을 잡마다 적용(네임스페이스 + runtimeClassName=gvisor)", async () => {
+  it("trustZones: applies the tenant zone per job (namespace + runtimeClassName=gvisor)", async () => {
     const { api, applied } = mockApi();
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1, trustZones: perTenantTrustZones() });
     await backend.dispatch({ ...JOB, tenant: "acme" });
     expect(applied[0]?.metadata.namespace).toBe("everdict-acme");
-    expect(applied[0]?.spec.template.spec.runtimeClassName).toBe("gvisor"); // runsc → gvisor 매핑
+    expect(applied[0]?.spec.template.spec.runtimeClassName).toBe("gvisor"); // runsc → gvisor mapping
   });
 
-  it("trustZones: untrusted 에 runc 강제면 디스패치 거부", async () => {
+  it("trustZones: forcing runc on untrusted refuses the dispatch", async () => {
     const { api } = mockApi();
     const backend = new K8sBackend({
       image: "img",
@@ -201,7 +201,7 @@ describe("K8sBackend.dispatch", () => {
     await expect(backend.dispatch({ ...JOB, tenant: "x" })).rejects.toBeInstanceOf(BadRequestError);
   });
 
-  it("secrets: 잡마다 그 테넌트 키만 주입(누출 없음)", async () => {
+  it("secrets: injects only that tenant's keys per job (no leakage)", async () => {
     const { api, applied } = mockApi();
     const backend = new K8sBackend({
       image: "img",
@@ -215,15 +215,15 @@ describe("K8sBackend.dispatch", () => {
     expect(envOf(applied[1] as JobManifest, "ANTHROPIC_API_KEY")).toBe("sk-globex");
   });
 
-  it("capacity: 라이브 프로브로 used 를 보고", async () => {
+  it("capacity: reports used via a live probe", async () => {
     const { api } = mockApi({ active: 5 });
     const backend = new K8sBackend({ image: "img", api, maxConcurrent: 10 });
     expect(await backend.capacity()).toEqual({ total: 10, used: 5 });
   });
 });
 
-describe("kubectlArgs (인증 선택자)", () => {
-  it("kubeconfig(파일 경로)가 있으면 --kubeconfig 를 맨 앞에 둔다", () => {
+describe("kubectlArgs (auth selector)", () => {
+  it("puts --kubeconfig first when a kubeconfig (file path) is present", () => {
     expect(kubectlArgs({ kubeconfig: "/tmp/kc", context: "kind-everdict" })).toEqual([
       "--kubeconfig",
       "/tmp/kc",
@@ -232,7 +232,7 @@ describe("kubectlArgs (인증 선택자)", () => {
     ]);
   });
 
-  it("server + token 은 외부 클러스터 bearer 인증으로 실린다", () => {
+  it("server + token are carried as external-cluster bearer auth", () => {
     expect(kubectlArgs({ server: "https://k8s:6443", token: "t" })).toEqual([
       "--server",
       "https://k8s:6443",
@@ -241,32 +241,32 @@ describe("kubectlArgs (인증 선택자)", () => {
     ]);
   });
 
-  it("아무 것도 없으면 빈 배열(앰비언트 kubeconfig)", () => {
+  it("empty array when nothing is given (ambient kubeconfig)", () => {
     expect(kubectlArgs({})).toEqual([]);
   });
 });
 
 describe("materializeKubeconfig", () => {
-  it("kubeconfig YAML 을 0600 임시파일로 쓰고 cleanup 으로 제거한다", async () => {
+  it("writes the kubeconfig YAML to a 0600 temp file and removes it via cleanup", async () => {
     const yaml = "apiVersion: v1\nkind: Config\n";
     const { path, cleanup } = await materializeKubeconfig(yaml);
     const st = await stat(path);
-    expect(st.mode & 0o777).toBe(0o600); // 복호화된 클러스터 자격증명 — 소유자만 읽기/쓰기
+    expect(st.mode & 0o777).toBe(0o600); // decrypted cluster credential — owner read/write only
     const { readFile } = await import("node:fs/promises");
     expect(await readFile(path, "utf8")).toBe(yaml);
     await cleanup();
-    await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" }); // 제거됨
+    await expect(stat(path)).rejects.toMatchObject({ code: "ENOENT" }); // removed
   });
 });
 
 describe("K8sBackend.probe", () => {
-  it("서버 버전을 받으면 reachable", async () => {
+  it("reachable when it gets the server version", async () => {
     const { api } = mockApi({ version: "v1.30.2" });
     const backend = new K8sBackend({ image: "img", api });
     expect(await backend.probe()).toEqual({ reachable: true, detail: "K8s server v1.30.2" });
   });
 
-  it("API 서버 미도달/인증실패면 unreachable + 사유", async () => {
+  it("unreachable + reason when the API server is unreachable/auth fails", async () => {
     const { api } = mockApi({ unreachable: true });
     const backend = new K8sBackend({ image: "img", api });
     const r = await backend.probe();

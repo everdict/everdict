@@ -18,7 +18,7 @@ import { describeConfig, storedToConfig } from '../model/analysis'
 
 type Author = { name: string; avatarUrl?: string }
 
-// 저장된 분석 View 목록(1급 객체) — 카드마다 구성 요약 + 가시성 + 소유자, 열기=라이브 재실행, 소유자·admin 은 공유토글/삭제.
+// Saved-analysis View list (first-class objects) — each card shows a config summary + visibility + owner; open = live re-run; owner·admin can toggle sharing/delete.
 export function ViewList({
   views,
   authors,

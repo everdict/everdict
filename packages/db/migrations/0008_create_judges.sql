@@ -1,7 +1,7 @@
--- 0008_create_judges — additive (expand): Agent Judge 버전 SSOT 영속 테이블.
--- (tenant, id, version) 는 불변 — 코드(PgJudgeRegistry)가 다른 내용 재등록을 거부한다.
--- judge = JudgeSpec(model | harness). _shared = first-party 기본 judge 폴백.
--- (0007 은 동시 작업의 secrets 마이그레이션 → judges 는 0008.)
+-- 0008_create_judges — additive (expand): the Agent Judge-version SSOT persistence table.
+-- (tenant, id, version) is immutable — the code (PgJudgeRegistry) rejects re-registering different content.
+-- judge = JudgeSpec(model | harness). _shared = first-party default judge fallback.
+-- (0007 is the secrets migration from concurrent work → judges is 0008.)
 CREATE TABLE IF NOT EXISTS everdict_judges (
   tenant     text NOT NULL,
   id         text NOT NULL,

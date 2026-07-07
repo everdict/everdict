@@ -2,7 +2,7 @@ import type { HTMLAttributes } from 'react'
 
 import { cn } from '@/shared/lib/utils'
 
-// Linear st. 키 힌트 — 작은 모노 chip(예: ⌘ K). 사이드바 검색·command 팔레트 힌트에 사용.
+// Linear st. key hint — small mono chip (e.g. ⌘ K). Used for sidebar search·command palette hints.
 export function Kbd({ className, ...props }: HTMLAttributes<HTMLElement>) {
   return (
     <kbd

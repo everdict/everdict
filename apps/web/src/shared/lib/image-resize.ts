@@ -1,7 +1,7 @@
-// 업로드 이미지를 정사각 한 변 max(기본 256px)로 리사이즈·압축해 JPEG data URL 로 만든다.
-// 투명 배경은 흰색으로 깔아 검게 뜨는 것을 막는다. 별도 스토리지 없이 프로필 아바타·워크스페이스 로고가 공유.
-// 컨트롤플레인이 data:image base64(≤~1MB)를 그대로 저장하므로 작은 data URL 이 안전하게 담긴다.
-// locale 은 호출부가 넘긴다(기본 ko) — 던져진 메시지가 err.message 로 화면에 노출됨.
+// Resize·compress an uploaded image to a square whose longest side is max (default 256px) and produce a JPEG data URL.
+// A transparent background is filled with white to avoid it turning black. Shared by the profile avatar·workspace logo, with no separate storage.
+// The control plane stores the data:image base64 (≤~1MB) as-is, so a small data URL fits safely.
+// locale is passed by the caller (default ko) — the thrown message surfaces on screen via err.message.
 export async function fileToImageDataUrl(
   file: File,
   max = 256,
@@ -34,5 +34,5 @@ export async function fileToImageDataUrl(
   }
 }
 
-// 원본 업로드 허용 한도(처리 전 디코딩 부담 방지). 처리 후엔 max px 로 줄어 훨씬 작아진다.
+// Allowed limit for the raw upload (avoids the decode burden before processing). After processing it shrinks to max px and gets much smaller.
 export const MAX_IMAGE_UPLOAD_BYTES = 8 * 1024 * 1024

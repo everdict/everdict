@@ -20,8 +20,8 @@ interface PostCall {
 }
 
 function build(opts: {
-  mattermost?: WorkspaceSettings["mattermost"]; // 워크스페이스 등록(bot 토큰)
-  secrets?: Record<string, string>; // botTokenSecretName → 값
+  mattermost?: WorkspaceSettings["mattermost"]; // workspace registration (bot token)
+  secrets?: Record<string, string>; // botTokenSecretName → value
   fetchImpl?: typeof fetch;
 }) {
   const calls: PostCall[] = [];
@@ -39,10 +39,10 @@ function build(opts: {
   return { svc, calls, feed };
 }
 
-describe("NotificationService.notifyRun (워크스페이스 Mattermost bot)", () => {
+describe("NotificationService.notifyRun (workspace Mattermost bot)", () => {
   const mm = { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch-ops" };
 
-  it("워크스페이스 등록(bot 토큰 + defaultChannelId) → bot 토큰으로 채널에 게시", async () => {
+  it("workspace registration (bot token + defaultChannelId) → posts to the channel with the bot token", async () => {
     const { svc, calls } = build({ mattermost: mm, secrets: { MM_BOT: "botxyz" } });
     await svc.notifyRun("acme", runRec("succeeded"));
     expect(calls).toHaveLength(1);
@@ -53,19 +53,19 @@ describe("NotificationService.notifyRun (워크스페이스 Mattermost bot)", ()
     expect(calls[0]?.body.message).toContain("run-1");
   });
 
-  it("mattermost 미설정 → 게시 안 함", async () => {
+  it("Mattermost unset → does not post", async () => {
     const { svc, calls } = build({});
     await svc.notifyRun("acme", runRec("succeeded"));
     expect(calls).toHaveLength(0);
   });
 
-  it("bot 토큰이 SecretStore 에 없으면 게시 안 함(graceful skip)", async () => {
+  it("does not post if the bot token is missing from the SecretStore (graceful skip)", async () => {
     const { svc, calls } = build({ mattermost: mm, secrets: {} });
     await svc.notifyRun("acme", runRec("succeeded"));
     expect(calls).toHaveLength(0);
   });
 
-  it("defaultChannelId 미지정이면 게시 안 함", async () => {
+  it("does not post if defaultChannelId is unset", async () => {
     const { svc, calls } = build({
       mattermost: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT" },
       secrets: { MM_BOT: "botxyz" },
@@ -74,15 +74,15 @@ describe("NotificationService.notifyRun (워크스페이스 Mattermost bot)", ()
     expect(calls).toHaveLength(0);
   });
 
-  it("게시 실패는 swallow (throw 안 함 — run 결과 무관)", async () => {
+  it("swallows post failures (no throw — unrelated to the run result)", async () => {
     const failing = (() => Promise.reject(new Error("network"))) as unknown as typeof fetch;
     const { svc } = build({ mattermost: mm, secrets: { MM_BOT: "botxyz" }, fetchImpl: failing });
     await expect(svc.notifyRun("acme", runRec("succeeded"))).resolves.toBeUndefined();
   });
 });
 
-describe("NotificationService 개인 피드(벨 인박스) — notifications N1/N2", () => {
-  it("createdBy 있는 최상위 run 완료 → 실행자 피드에 적재(링크=runId)", async () => {
+describe("NotificationService personal feed (bell inbox) — notifications N1/N2", () => {
+  it("top-level run with createdBy completes → written to the initiator's feed (link=runId)", async () => {
     const { svc } = build({});
     await svc.notifyRun("acme", { ...runRec("succeeded"), createdBy: "alice" });
     const rows = await svc.listFeed("alice", "acme");
@@ -90,7 +90,7 @@ describe("NotificationService 개인 피드(벨 인박스) — notifications N1/
     expect(rows[0]).toMatchObject({ kind: "run_completed", link: { runId: "run-1" }, recipient: "alice" });
   });
 
-  it("실패 run 은 run_failed 로, 다른 사람/다른 워크스페이스에는 안 보인다", async () => {
+  it("a failed run becomes run_failed, and is not visible to other people / other workspaces", async () => {
     const { svc } = build({});
     await svc.notifyRun("acme", { ...runRec("failed"), createdBy: "alice" });
     expect((await svc.listFeed("alice", "acme"))[0]?.kind).toBe("run_failed");
@@ -98,14 +98,14 @@ describe("NotificationService 개인 피드(벨 인박스) — notifications N1/
     expect(await svc.listFeed("alice", "other")).toHaveLength(0);
   });
 
-  it("스코어카드 자식 run 과 createdBy 없는 run 은 피드에 적재하지 않는다(범람 방지/수신자 불명)", async () => {
+  it("does not write scorecard child runs or runs without createdBy to the feed (flood prevention / unknown recipient)", async () => {
     const { svc } = build({});
     await svc.notifyRun("acme", { ...runRec("succeeded"), createdBy: "alice", parentScorecardId: "sc-1" });
     await svc.notifyRun("acme", runRec("succeeded"));
     expect(await svc.listFeed("alice", "acme")).toHaveLength(0);
   });
 
-  it("스코어카드 완료 → scorecard_completed(링크=scorecardId) + 읽음 처리(markFeedRead)", async () => {
+  it("scorecard completes → scorecard_completed (link=scorecardId) + mark-read (markFeedRead)", async () => {
     const { svc } = build({});
     await svc.notifyScorecard("acme", {
       id: "sc-9",
@@ -119,10 +119,10 @@ describe("NotificationService 개인 피드(벨 인박스) — notifications N1/
     expect(rows[0]).toMatchObject({ kind: "scorecard_completed", link: { scorecardId: "sc-9" } });
     expect(await svc.markFeedRead("alice", "acme", "all")).toBe(1);
     expect(await svc.listFeed("alice", "acme", { unreadOnly: true })).toHaveLength(0);
-    expect(await svc.markFeedRead("alice", "acme", "all")).toBe(0); // 멱등
+    expect(await svc.markFeedRead("alice", "acme", "all")).toBe(0); // idempotent
   });
 
-  it("예약 회귀 → schedule_regression 이 예약 생성자 피드로", async () => {
+  it("scheduled regression → schedule_regression goes to the schedule creator's feed", async () => {
     const { svc } = build({});
     await svc.notifyRegression("acme", {
       scheduleName: "nightly",

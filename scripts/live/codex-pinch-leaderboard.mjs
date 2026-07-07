@@ -1,13 +1,13 @@
-// 라이브 e2e: *번들 원샷 적용* → pinch 벤치마크 실행 → **리더보드(harness × model)**.
-// 유저 시나리오(멀티테넌트 SaaS, HTTP API 만):
-//   ① POST /bundles/apply : codex(하니스) + pinch(벤치마크) 번들을 한 번에 등록 — 일반화된 self-serve 등록.
-//   ② POST /scorecards      : pinch 를 하니스로 실행(judge 채점). codex 는 그 CLI+런타임이 필요하므로,
-//      기본은 builtin 'scripted' 로 실행해 apply→run→leaderboard 루프 전체를 무-외부의존으로 실증한다.
-//      실제 codex 실행은 EVERDICT_HARNESS=codex + docker 런타임(코덱스 적용 이미지)로 스왑(아래 주석).
-//   ③ GET /scorecards/leaderboard : 한 벤치마크의 (harness × model) 랭킹 행을 출력.
-// judge 채점에는 모델이 필요 → LiteLLM(:4000) 키를 CP judge env 로 주입(pinch-hermes-e2e 와 동일).
+// Live e2e: *one-shot bundle apply* → run the pinch benchmark → **leaderboard (harness × model)**.
+// User scenario (multi-tenant SaaS, HTTP API only):
+//   ① POST /bundles/apply : register the codex (harness) + pinch (benchmark) bundle at once — generalized self-serve registration.
+//   ② POST /scorecards      : run pinch as the harness (judge-scored). codex needs its CLI+runtime, so
+//      the default runs the builtin 'scripted' to prove out the whole apply→run→leaderboard loop with no external dependency.
+//      For an actual codex run, swap to EVERDICT_HARNESS=codex + a docker runtime (codex-provisioned image) (see comment below).
+//   ③ GET /scorecards/leaderboard : print a benchmark's (harness × model) ranking rows.
+// Judge scoring needs a model → inject the LiteLLM(:4000) key into the CP judge env (same as pinch-hermes-e2e).
 //
-// 사용: node scripts/live/codex-pinch-leaderboard.mjs   (apps/api/dist 빌드 필요; LiteLLM 있으면 judge 실채점)
+// Usage: node scripts/live/codex-pinch-leaderboard.mjs   (needs apps/api/dist built; judge scores for real if LiteLLM is present)
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
@@ -15,8 +15,8 @@ import process from "node:process";
 const PORT = process.env.CP_PORT ?? "8789";
 const BASE = `http://127.0.0.1:${PORT}`;
 const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
-const HARNESS = process.env.EVERDICT_HARNESS ?? "scripted"; // 실제 codex 실행은 EVERDICT_HARNESS=codex + EVERDICT_RUNTIME=<codex 이미지 docker 런타임>
-const RUNTIME = process.env.EVERDICT_RUNTIME; // 미설정이면 기본 백엔드(scripted 는 호스트 in-process)
+const HARNESS = process.env.EVERDICT_HARNESS ?? "scripted"; // for an actual codex run: EVERDICT_HARNESS=codex + EVERDICT_RUNTIME=<codex-image docker runtime>
+const RUNTIME = process.env.EVERDICT_RUNTIME; // if unset, the default backend (scripted runs in-process on the host)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function litellmKey() {
@@ -38,7 +38,7 @@ const get = async (path) => (await fetch(`${BASE}${path}`, { headers: H })).json
 
 const bundle = JSON.parse(readFileSync(new URL("../../examples/bundles/codex-pinch/bundle.json", import.meta.url)));
 
-console.log(`=== 컨트롤플레인 기동 (apps/api dist, dev, :${PORT}) ===`);
+console.log(`=== start control plane (apps/api dist, dev, :${PORT}) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: new URL("../..", import.meta.url).pathname,
   env: {
@@ -62,17 +62,17 @@ try {
       up = (await fetch(`${BASE}/datasets`, { headers: H })).status === 200;
     } catch {}
   }
-  if (!up) throw new Error("control plane 기동 실패");
+  if (!up) throw new Error("control plane failed to start");
 
-  // ① 번들 원샷 적용
-  console.log("\n=== ① POST /bundles/apply (codex + pinch 번들) ===");
+  // ① one-shot bundle apply
+  console.log("\n=== ① POST /bundles/apply (codex + pinch bundle) ===");
   const inst = await post("/bundles/apply", bundle);
   console.log(`  → ${inst.status}`);
   for (const r of inst.json.results ?? []) console.log(`     ${r.status.padEnd(8)} ${r.kind} ${r.id}@${r.version}`);
   const installOk =
     inst.status === 200 && (inst.json.results ?? []).every((r) => r.status === "ok" || r.status === "conflict");
 
-  // ② pinch 실행(judge 채점). 기본 scripted(무-외부의존), 실 codex 는 EVERDICT_HARNESS=codex + EVERDICT_RUNTIME 로 스왑.
+  // ② run pinch (judge-scored). Default scripted (no external dependency); real codex via EVERDICT_HARNESS=codex + EVERDICT_RUNTIME.
   console.log(`\n=== ② POST /scorecards (pinch-building-dashboards × ${HARNESS}) ===`);
   const run = await post("/scorecards", {
     dataset: { id: "pinch-building-dashboards", version: "1.0.0" },
@@ -90,11 +90,11 @@ try {
       if (rec.status === "succeeded" || rec.status === "failed") break;
     }
     console.log(
-      `\n  최종 status=${rec.status}${rec.models?.primary ? ` model=${rec.models.primary}` : " model=unknown"}`,
+      `\n  final status=${rec.status}${rec.models?.primary ? ` model=${rec.models.primary}` : " model=unknown"}`,
     );
   }
 
-  // ③ 리더보드
+  // ③ leaderboard
   console.log("\n=== ③ GET /scorecards/leaderboard (pinch-building-dashboards × harness×model) ===");
   const lb = await get("/scorecards/leaderboard?dataset=pinch-building-dashboards&metric=judge");
   for (const row of lb.rows ?? [])
@@ -105,8 +105,8 @@ try {
   ok = installOk && (lb.rows ?? []).length > 0;
   console.log(
     ok
-      ? "\n✅ apply(번들 원샷) → run(pinch) → leaderboard(harness×model) 루프 실증. codex 는 EVERDICT_HARNESS=codex + EVERDICT_RUNTIME=<codex docker 런타임> 로 스왑."
-      : "\n⚠️ 일부 단계 불일치(위 로그 참고). judge 실채점엔 LiteLLM(:4000) 필요; codex 실행엔 codex 적용 런타임 필요.",
+      ? "\n✅ Proved out the apply(one-shot bundle) → run(pinch) → leaderboard(harness×model) loop. Swap to codex via EVERDICT_HARNESS=codex + EVERDICT_RUNTIME=<codex docker runtime>."
+      : "\n⚠️ some steps mismatched (see logs above). Real judge scoring needs LiteLLM(:4000); running codex needs a codex-provisioned runtime.",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

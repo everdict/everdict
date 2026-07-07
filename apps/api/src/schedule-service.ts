@@ -2,8 +2,8 @@ import { BadRequestError, ForbiddenError, NotFoundError } from "@everdict/core";
 import type { ScheduleOverlapPolicy, ScheduleRecord, ScheduleRunTemplate, ScheduleStore } from "@everdict/db";
 import type { RunScorecardInput } from "./scorecard-service.js";
 
-// 5-field cron 의 경량 구조 검증 — 발사(Temporal Schedule, slice 2)가 정밀 파싱을 하므로 여기선 명백한 오형식만 거른다.
-// 각 필드: * | n | n-m, 선택 스텝(/k), 콤마 리스트. (값 범위 semantics 는 Temporal 이 강제)
+// Lightweight structural check of a 5-field cron — firing (Temporal Schedule, slice 2) parses precisely, so here we only reject obviously malformed input.
+// Each field: * | n | n-m, optional step (/k), comma list. (Value-range semantics are enforced by Temporal.)
 const CRON_FIELD = /^(\*|\d+(-\d+)?)(\/\d+)?(,(\*|\d+(-\d+)?)(\/\d+)?)*$/;
 export function isValidCron(expr: string): boolean {
   const parts = expr.trim().split(/\s+/);
@@ -12,12 +12,12 @@ export function isValidCron(expr: string): boolean {
 
 export interface CreateScheduleInput {
   tenant: string;
-  createdBy: string; // 제출자 subject — 발사 run 의 submittedBy(예산 → tenant, 비공개-repo 연결 resolve)
+  createdBy: string; // submitter subject — the fired run's submittedBy (budget → tenant, private-repo connection resolve)
   name: string;
   cron: string;
-  timezone?: string; // 기본 "UTC"
-  overlapPolicy?: ScheduleOverlapPolicy; // 기본 "skip"
-  enabled?: boolean; // 기본 true
+  timezone?: string; // default "UTC"
+  overlapPolicy?: ScheduleOverlapPolicy; // default "skip"
+  enabled?: boolean; // default true
   runTemplate: ScheduleRunTemplate;
 }
 
@@ -30,7 +30,7 @@ export interface UpdateScheduleInput {
   runTemplate?: ScheduleRunTemplate;
 }
 
-// Temporal Schedule 로 넘길 최소 사양(드라이버가 cron→Schedule 로 변환). 발사 워크플로 인자는 (tenant, id).
+// Minimal spec handed to a Temporal Schedule (the driver converts cron→Schedule). The firing workflow's args are (tenant, id).
 export interface ScheduleSpec {
   id: string;
   tenant: string;
@@ -40,39 +40,39 @@ export interface ScheduleSpec {
   paused: boolean; // = !enabled
 }
 
-// DB↔Temporal 동기화 드라이버(구현=@everdict/orchestrator TemporalScheduleDriver). 미주입이면 DB-only(발사 안 함 — dev/Direct).
+// DB↔Temporal sync driver (implementation = @everdict/orchestrator TemporalScheduleDriver). Not injected = DB-only (no firing — dev/Direct).
 export interface ScheduleDriver {
-  ensure(spec: ScheduleSpec): Promise<void>; // create-or-update(멱등), paused 반영
+  ensure(spec: ScheduleSpec): Promise<void>; // create-or-update (idempotent), reflects paused
   remove(id: string): Promise<void>;
-  // 선택: Temporal 이 계산한 다음 발사 시각(authoritative). 한 커넥션으로 여러 id 를 조회 → id별 ISO 배열.
-  // 미구현(dev/Direct)이면 서비스가 enrich 를 건너뛰고 웹이 cron 근사로 폴백한다.
+  // Optional: the next fire times computed by Temporal (authoritative). Query many ids over one connection → per-id ISO array.
+  // If unimplemented (dev/Direct), the service skips enrichment and the web falls back to a cron approximation.
   describeMany?(ids: string[]): Promise<Record<string, string[]>>;
 }
 
-// 조회 응답 = 저장 레코드 + (드라이버 있으면) Temporal 이 계산한 다음 발사 시각. 비저장 — 읽기 시 부착.
+// Read response = stored record + (if a driver is present) the next fire times computed by Temporal. Not persisted — attached at read time.
 export type ScheduleRecordWithNext = ScheduleRecord & { nextFireTimes?: string[] };
 
 export interface ScheduleServiceDeps {
   store: ScheduleStore;
-  // Temporal 동기화 — 미주입이면 스케줄은 저장/관리만 되고 발사되지 않는다(Temporal 미배포 dev 경로).
+  // Temporal sync — if not injected, schedules are only stored/managed and never fire (Temporal-less dev path).
   driver?: ScheduleDriver;
-  // 발사 시 호출(= ScorecardService.submit). 미주입이면 fire 가 BadRequest(발사 비활성).
+  // Called on fire (= ScorecardService.submit). If not injected, fire throws BadRequest (firing disabled).
   submitScorecard?: (input: RunScorecardInput) => Promise<{ id: string; status: string }>;
-  // 발사한 스코어카드 status 폴링(워크플로 poll-to-terminal). 미주입이면 status 라우트 비활성.
+  // Polls the fired scorecard's status (workflow poll-to-terminal). If not injected, the status route is disabled.
   scorecardStatus?: (scorecardId: string) => Promise<string | undefined>;
-  // 회귀 알림용: 직전↔이번 스코어카드 diff(= ScorecardService.diff). 미완료/오류면 throw → finalize 가 swallow.
+  // For regression alerts: previous↔current scorecard diff (= ScorecardService.diff). Throws if either is incomplete/errored → finalize swallows it.
   diffScorecards?: (
     tenant: string,
     baselineId: string,
     candidateId: string,
   ) => Promise<{ regressions: RegressionDelta[] }>;
-  // 회귀가 잡히면 알림(= NotificationService.notifyRegression). 미주입이면 회귀 알림 비활성(완료 알림은 스코어카드 onComplete).
+  // Alert when a regression is caught (= NotificationService.notifyRegression). If not injected, regression alerts are disabled (completion alerts come from the scorecard's onComplete).
   notifyRegression?: (tenant: string, payload: RegressionAlert) => Promise<void>;
   newId?: () => string;
   now?: () => string;
 }
 
-// diff 의 회귀 1건(케이스×메트릭) — 알림 메시지에 필요한 필드만.
+// One regression from a diff (case × metric) — only the fields the alert message needs.
 export interface RegressionDelta {
   caseId: string;
   metric: string;
@@ -84,12 +84,12 @@ export interface RegressionAlert {
   scorecardId: string;
   previousScorecardId: string;
   regressions: RegressionDelta[];
-  createdBy?: string; // 예약 생성자 — 개인 알림 피드 수신자(notifications N2)
+  createdBy?: string; // schedule creator — personal notification-feed recipient (notifications N2)
 }
 
-// 예약(cron) 스코어카드 CRUD. 발사(Temporal Schedule 동기화 + 워크플로)는 slice 2 — 여기선 SSOT 레코드만 관리.
-// 워크스페이스(tenant) 스코프; AppError 는 그대로 던져 호출부(서버/MCP)가 상태코드로 매핑한다.
-// 설계: docs/architecture/scheduled-evals.md.
+// Scheduled (cron) scorecard CRUD. Firing (Temporal Schedule sync + workflow) is slice 2 — here we manage only the SSOT record.
+// Workspace (tenant) scoped; AppError is thrown as-is so the caller (server/MCP) maps it to a status code.
+// Design: docs/architecture/scheduled-evals.md.
 export class ScheduleService {
   private readonly newId: () => string;
   private readonly now: () => string;
@@ -106,7 +106,7 @@ export class ScheduleService {
       cron: record.cron,
       timezone: record.timezone,
       overlapPolicy: record.overlapPolicy,
-      paused: !record.enabled, // 비활성 스케줄은 Temporal 에서 paused → 발사 안 함
+      paused: !record.enabled, // a disabled schedule is paused in Temporal → does not fire
     };
   }
 
@@ -115,7 +115,7 @@ export class ScheduleService {
       throw new BadRequestError(
         "BAD_REQUEST",
         { cron: input.cron },
-        `cron 식이 올바르지 않습니다(5필드 필요): '${input.cron}'`,
+        `cron expression is invalid (5 fields required): '${input.cron}'`,
       );
     const ts = this.now();
     const record: ScheduleRecord = {
@@ -132,7 +132,7 @@ export class ScheduleService {
       updatedAt: ts,
     };
     await this.deps.store.create(record);
-    // Temporal 동기화 — 실패 시 DB 레코드를 되돌려 일관성 유지(스케줄이 떴는데 발사 안 되는 상태 방지).
+    // Temporal sync — on failure, roll back the DB record to stay consistent (avoid a schedule that exists but never fires).
     if (this.deps.driver) {
       try {
         await this.deps.driver.ensure(this.specOf(record));
@@ -148,22 +148,22 @@ export class ScheduleService {
     return this.attachNextFires(await this.deps.store.list(tenant));
   }
 
-  // 워크스페이스 스코프 단건(공개 — API/MCP). 없거나 타 워크스페이스면 404(존재 누출 금지). Temporal 다음 발사 부착.
+  // Workspace-scoped single fetch (public — API/MCP). Missing or another workspace → 404 (no existence leak). Attaches the Temporal next fire times.
   async get(tenant: string, id: string): Promise<ScheduleRecordWithNext> {
     const record = await this.getRecord(tenant, id);
     const [enriched] = await this.attachNextFires([record]);
     return enriched ?? record;
   }
 
-  // 내부용 단건(순수 레코드 — Temporal describe 안 함). update/remove/fire/finalize 의 존재·소유 확인·필드 읽기용.
+  // Internal single fetch (raw record — no Temporal describe). For update/remove/fire/finalize existence/ownership checks and field reads.
   private async getRecord(tenant: string, id: string): Promise<ScheduleRecord> {
     const record = await this.deps.store.get(tenant, id);
-    if (!record) throw new NotFoundError("NOT_FOUND", { id }, `schedule '${id}' 를 찾을 수 없습니다.`);
+    if (!record) throw new NotFoundError("NOT_FOUND", { id }, `schedule '${id}' not found.`);
     return record;
   }
 
-  // 활성 예약에 Temporal 이 계산한 다음 발사 시각(nextFireTimes)을 부착 — 드라이버·describeMany 있을 때만.
-  // 한 커넥션으로 일괄 조회. 실패/미구현이면 그대로 반환(웹이 cron 근사로 폴백). 일시중지는 조회 제외(발사 안 함).
+  // Attach Temporal-computed next fire times (nextFireTimes) to enabled schedules — only when a driver + describeMany are present.
+  // Batch-queried over one connection. On failure/unimplemented, return as-is (the web falls back to a cron approximation). Paused schedules are excluded from the query (they don't fire).
   private async attachNextFires(records: ScheduleRecord[]): Promise<ScheduleRecordWithNext[]> {
     const driver = this.deps.driver;
     if (!driver?.describeMany) return records;
@@ -173,8 +173,8 @@ export class ScheduleService {
     return records.map((r) => (next[r.id]?.length ? { ...r, nextFireTimes: next[r.id] } : r));
   }
 
-  // 수정 — pause/resume(enabled) 는 member+, 내용 편집(이름/cron/타임존/겹침/runTemplate)은 생성자 또는 admin 만.
-  // actor 는 호출 경계(라우트/MCP)가 주입한다; 미주입(내부 호출/테스트)이면 소유권 검사를 건너뛴다.
+  // Update — pause/resume (enabled) is member+, content edits (name/cron/timezone/overlap/runTemplate) are creator or admin only.
+  // actor is injected by the call boundary (route/MCP); if not injected (internal call/test), the ownership check is skipped.
   async update(
     tenant: string,
     id: string,
@@ -185,38 +185,38 @@ export class ScheduleService {
       throw new BadRequestError(
         "BAD_REQUEST",
         { cron: patch.cron },
-        `cron 식이 올바르지 않습니다(5필드 필요): '${patch.cron}'`,
+        `cron expression is invalid (5 fields required): '${patch.cron}'`,
       );
-    const existing = await this.getRecord(tenant, id); // 존재/소유 확인(404)
-    // enabled 외 필드를 바꾸는 '내용 편집'은 생성자·admin 만(발사가 생성자 신원으로 돌기 때문). pause 는 member+.
+    const existing = await this.getRecord(tenant, id); // existence/ownership check (404)
+    // A 'content edit' — changing any field other than enabled — is creator/admin only (because firing runs under the creator's identity). pause is member+.
     const editsContent = Object.keys(patch).some((k) => k !== "enabled");
     if (editsContent && actor && existing.createdBy !== actor.subject && !actor.isAdmin)
       throw new ForbiddenError(
         "FORBIDDEN",
         { id, action: "schedules:edit" },
-        "이 예약을 수정할 권한이 없습니다(예약 생성자 또는 워크스페이스 admin 만).",
+        "You do not have permission to edit this schedule (schedule creator or workspace admin only).",
       );
     const updated = await this.deps.store.update(tenant, id, { ...patch, updatedAt: this.now() });
-    if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `schedule '${id}' 를 찾을 수 없습니다.`);
-    await this.deps.driver?.ensure(this.specOf(updated)); // cron/타임존/겹침/pause 재동기화
+    if (!updated) throw new NotFoundError("NOT_FOUND", { id }, `schedule '${id}' not found.`);
+    await this.deps.driver?.ensure(this.specOf(updated)); // re-sync cron/timezone/overlap/pause
     return updated;
   }
 
   async remove(tenant: string, id: string): Promise<void> {
-    await this.getRecord(tenant, id); // 존재/소유 확인(404)
-    await this.deps.driver?.remove(id); // 먼저 Temporal 에서 제거(발사 중단) — 실패하면 DB 는 그대로 둔다
+    await this.getRecord(tenant, id); // existence/ownership check (404)
+    await this.deps.driver?.remove(id); // remove from Temporal first (stop firing) — if it fails, leave the DB untouched
     await this.deps.store.remove(tenant, id);
   }
 
-  // 생성자(createdBy)가 워크스페이스를 떠나면 그 사람이 만든 활성 예약을 일괄 비활성한다 — 발사 run 은 생성자 신원으로
-  // 돌아가므로(예산·비공개-repo 연결) 더는 신뢰할 수 없다. Temporal 도 pause(driver.ensure). 멤버 제거 훅에서 호출.
-  // 반환 = 비활성된 예약 수.
+  // When a creator (createdBy) leaves the workspace, bulk-disable the active schedules they created — the fired run runs
+  // under the creator's identity (budget, private-repo connection), so it can no longer be trusted. Also pause in Temporal (driver.ensure). Called from the member-removal hook.
+  // Returns = number of schedules disabled.
   async disableByCreator(tenant: string, createdBy: string): Promise<number> {
     const targets = (await this.deps.store.list(tenant)).filter((s) => s.createdBy === createdBy && s.enabled);
     for (const s of targets) {
       const updated = await this.deps.store.update(tenant, s.id, {
         enabled: false,
-        lastStatus: "생성자가 워크스페이스를 떠나 자동 비활성",
+        lastStatus: "Auto-disabled: creator left the workspace",
         updatedAt: this.now(),
       });
       if (updated) await this.deps.driver?.ensure(this.specOf(updated)); // Temporal pause
@@ -224,19 +224,19 @@ export class ScheduleService {
     return targets.length;
   }
 
-  // 발사(Temporal 워크플로가 internal 라우트로 호출) — 스케줄의 runTemplate 을 생성자 신원으로 submit.
-  // lastFired/last* 를 기록하고, 직전 스케줄 run id(이번 발사 직전의 lastScorecardId)를 같이 돌려준다(회귀 비교용).
-  // 발사기 미설정이면 BadRequest(Temporal 미배포 dev).
+  // Fire (called by the Temporal workflow via an internal route) — submit the schedule's runTemplate under the creator's identity.
+  // Records lastFired/last* and also returns the previous schedule run id (the lastScorecardId just before this fire) for regression comparison.
+  // If no firer is configured, BadRequest (Temporal-less dev).
   async fire(tenant: string, id: string): Promise<{ scorecardId: string; previousScorecardId?: string }> {
     const schedule = await this.getRecord(tenant, id); // 404
     if (!this.deps.submitScorecard)
-      throw new BadRequestError("BAD_REQUEST", { id }, "스코어카드 발사기가 설정되지 않았습니다(발사 비활성).");
-    const previousScorecardId = schedule.lastScorecardId; // 이번 발사 전의 직전 run(finalize 의 회귀 baseline)
+      throw new BadRequestError("BAD_REQUEST", { id }, "Scorecard firer is not configured (firing disabled).");
+    const previousScorecardId = schedule.lastScorecardId; // the run just before this fire (finalize's regression baseline)
     const t = schedule.runTemplate;
     const rec = await this.deps.submitScorecard({
       tenant,
-      submittedBy: schedule.createdBy, // 발사 run = 생성자 신원(예산 → tenant, 비공개-repo 연결 resolve)
-      origin: { source: "schedule" }, // provenance — 스케줄 발사임을 스탬프
+      submittedBy: schedule.createdBy, // fired run = creator's identity (budget → tenant, private-repo connection resolve)
+      origin: { source: "schedule" }, // provenance — stamp that this is a schedule fire
       dataset: t.dataset,
       harness: t.harness,
       judges: t.judges,
@@ -252,15 +252,15 @@ export class ScheduleService {
     return { scorecardId: rec.id, ...(previousScorecardId !== undefined ? { previousScorecardId } : {}) };
   }
 
-  // 발사한 스코어카드 status(워크플로 poll-to-terminal). 미설정이면 undefined.
+  // The fired scorecard's status (workflow poll-to-terminal). undefined if not configured.
   scorecardStatus(scorecardId: string): Promise<string | undefined> {
     return this.deps.scorecardStatus?.(scorecardId) ?? Promise.resolve(undefined);
   }
 
-  // 종료 처리(워크플로가 poll-to-terminal 후 호출) — 최종 status 를 기록하고, 직전 run 대비 회귀가 있으면 알림.
-  // diff 는 둘 다 완료여야 가능(미완료/오류면 throw) → swallow 하고 회귀 알림만 건너뛴다(완료 알림은 스코어카드 onComplete).
+  // Finalize (called by the workflow after poll-to-terminal) — record the final status and, if there are regressions vs the previous run, alert.
+  // diff requires both to be complete (throws if incomplete/errored) → swallow and skip only the regression alert (completion alerts come from the scorecard's onComplete).
   async finalize(tenant: string, id: string, scorecardId: string, previousScorecardId?: string): Promise<void> {
-    const schedule = await this.getRecord(tenant, id); // 404(스케줄이 지워졌으면 더 할 일 없음)
+    const schedule = await this.getRecord(tenant, id); // 404 (if the schedule was deleted, nothing more to do)
     const status = await this.scorecardStatus(scorecardId);
     if (status !== undefined) await this.deps.store.update(tenant, id, { lastStatus: status, updatedAt: this.now() });
     if (!previousScorecardId || !this.deps.diffScorecards || !this.deps.notifyRegression) return;
@@ -268,7 +268,7 @@ export class ScheduleService {
     try {
       ({ regressions } = await this.deps.diffScorecards(tenant, previousScorecardId, scorecardId));
     } catch {
-      return; // 한쪽이 미완료/실패 → 비교 불가, 회귀 알림 스킵
+      return; // one side is incomplete/failed → cannot compare, skip the regression alert
     }
     if (regressions.length === 0) return;
     await this.deps.notifyRegression(tenant, {
@@ -276,7 +276,7 @@ export class ScheduleService {
       scorecardId,
       previousScorecardId,
       regressions,
-      createdBy: schedule.createdBy, // 예약 생성자 → 개인 알림 피드 수신자(notifications N2)
+      createdBy: schedule.createdBy, // schedule creator → personal notification-feed recipient (notifications N2)
     });
   }
 }

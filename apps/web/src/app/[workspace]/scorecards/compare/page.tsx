@@ -23,7 +23,7 @@ function delta(n: number): string {
   return `${arrow} ${n > 0 ? '+' : ''}${n.toFixed(2)}`
 }
 
-// 한 side(baseline/candidate) 헤더 — 스코어카드 상세로 링크 + 사용 모델 칩.
+// One side (baseline/candidate) header — links to the scorecard detail + model-used chip.
 function SideRef({
   workspace,
   label,
@@ -62,7 +62,7 @@ export default async function CompareScorecardsPage({
   const ctx = await authContext()
   const t = await getTranslations('scorecardsPage')
 
-  // 비교는 완료된 스코어카드만(미완료는 diff 불가).
+  // Comparison uses only completed scorecards (incomplete ones can't diff).
   let options: CompareOption[] = []
   let baselineModel: string | undefined
   let candidateModel: string | undefined
@@ -74,12 +74,12 @@ export default async function CompareScorecardsPage({
         id: s.id,
         label: `${s.dataset.id}@${s.dataset.version} → ${s.harness.id}@${s.harness.version}`,
       }))
-    // 각 side 의 model(선택된 스코어카드 레코드에서) — 헤더에 곁들여 표시.
+    // Each side's model (from the selected scorecard record) — shown alongside the header.
     const byId = new Map(all.map((s) => [s.id, s]))
     baselineModel = baseline ? byId.get(baseline)?.models?.primary : undefined
     candidateModel = candidate ? byId.get(candidate)?.models?.primary : undefined
   } catch {
-    // 목록 실패해도 페이지는 안내를 보여준다
+    // Even if the list fails, the page still shows guidance
   }
 
   let diff: ScorecardDiff | undefined
@@ -202,7 +202,7 @@ function DeltaList({
   items: ScorecardDiff['regressions']
   empty: string
 }) {
-  // 변화 폭이 큰 케이스부터 — 눈에 띄는 회귀/개선을 위로.
+  // Cases with the largest change first — put the notable regressions/improvements on top.
   const sorted = [...items].sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))
   return (
     <Card className="space-y-2.5 p-4">

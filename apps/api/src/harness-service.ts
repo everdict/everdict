@@ -2,9 +2,9 @@ import { type Principal, can } from "@everdict/auth";
 import { ForbiddenError, referencesUserSecret } from "@everdict/core";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 
-// 비공개(개인 시크릿 참조) 하니스는 createdBy 만 볼 수 있다 — 최신 버전을 resolve 해 판정.
-// resolve 실패는 가시성 판단 불가로 보고 막지 않는다(호출부의 다른 404 경로가 처리).
-// HTTP 라우트(server.ts)와 MCP 도구(mcp.ts)가 공유한다(BFF↔MCP parity).
+// A private (personal-secret-referencing) harness is visible only to createdBy — decided by resolving the latest version.
+// A resolve failure is treated as "can't determine visibility" and not blocked (the caller's other 404 path handles it).
+// Shared by the HTTP routes (server.ts) and MCP tools (mcp.ts) (BFF↔MCP parity).
 export async function harnessVisibleTo(
   registry: HarnessInstanceRegistry,
   principal: Principal,
@@ -19,12 +19,12 @@ export async function harnessVisibleTo(
   }
 }
 
-// 하니스(인스턴스) 버전 소프트 삭제의 공유 코어 — HTTP 라우트(server.ts)와 MCP 도구(mcp.ts)가 같은 로직을
-// 쓴다(BFF↔MCP parity). 데이터셋 삭제(dataset-service.deleteDatasetVersion)와 동일 패턴.
-// 권한: 그 버전을 등록한 생성자 본인(createdBy === subject) 또는 워크스페이스 admin(harnesses:delete) 만.
-// 삭제는 tombstone — 데이터 보존(과거 스코어카드는 harness 좌표를 스냅샷으로 들고 있어 이력·집계 무영향),
-// read 에서만 제외. 그 하니스를 참조하는 "미래" 실행(재실행/예약/CI)은 해석 실패한다.
-// 없는·이미 삭제된·_shared·타 워크스페이스 버전은 registry 가 NotFound(404).
+// Shared core for harness (instance) version soft delete — the HTTP routes (server.ts) and MCP tools (mcp.ts) use the same
+// logic (BFF↔MCP parity). Same pattern as dataset delete (dataset-service.deleteDatasetVersion).
+// Permission: only the version's registrant (createdBy === subject) or a workspace admin (harnesses:delete).
+// Delete is a tombstone — data preserved (past scorecards hold the harness coordinates as a snapshot, so history/aggregation are unaffected),
+// excluded only from reads. "Future" runs referencing that harness (re-run/schedule/CI) fail to resolve.
+// Missing · already-deleted · _shared · other-workspace versions are NotFound (404) from the registry.
 export async function deleteHarnessVersion(
   registry: HarnessInstanceRegistry,
   principal: Principal,
@@ -32,14 +32,14 @@ export async function deleteHarnessVersion(
   version: string,
 ): Promise<{ workspace: string; id: string; version: string; deleted: true }> {
   const ws = principal.workspace;
-  const creator = await registry.creatorOfVersion(ws, id, version); // 비소유/삭제/부재 → NotFound
-  const isAdmin = can(principal, "harnesses:delete"); // admin 전용 액션
+  const creator = await registry.creatorOfVersion(ws, id, version); // not-owned/deleted/absent → NotFound
+  const isAdmin = can(principal, "harnesses:delete"); // admin-only action
   const isCreator = creator !== undefined && creator === principal.subject;
   if (!isAdmin && !isCreator) {
     throw new ForbiddenError(
       "FORBIDDEN",
       { workspace: ws, id, version, action: "harnesses:delete" },
-      "이 하니스 버전을 삭제할 권한이 없습니다(버전 생성자 또는 워크스페이스 admin 만).",
+      "You are not allowed to delete this harness version (only the version's creator or a workspace admin).",
     );
   }
   await registry.softDelete(ws, id, version);

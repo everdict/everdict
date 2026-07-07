@@ -7,8 +7,8 @@ import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 
 const execFileAsync = promisify(execFile);
 
-// 단일 호스트 docker 백엔드 — 잡을 케이스의 env 이미지(EvalCase.image; 예: SWE-bench 공식 prebuilt) 컨테이너에서 실행한다.
-// 에이전트를 이미지에 굽지 않고 DockerDriver(환경 컨테이너)로 하니스+채점을 그 안에서 돌린다. 격리는 docker 컨테이너.
+// A single-host docker backend — runs the job in a container of the case's env image (EvalCase.image; e.g. the official SWE-bench prebuilt).
+// Rather than baking the agent into the image, it runs the harness+scoring inside via DockerDriver (environment container). Isolation is the docker container.
 export class DockerBackend implements Backend {
   readonly id = "docker";
   private readonly driver: DockerDriver;
@@ -23,15 +23,15 @@ export class DockerBackend implements Backend {
   }
 
   dispatch(job: AgentJob): Promise<CaseResult> {
-    return runAgentJob(job, { driver: this.driver }); // 케이스를 컨테이너(case.image ?? 기본 image)에서 실행
+    return runAgentJob(job, { driver: this.driver }); // run the case in a container (case.image ?? default image)
   }
 
-  // docker 데몬 도달성 — 서버 버전을 물어본다(데몬 미기동/권한없음이면 비-제로 종료).
+  // docker daemon reachability — asks for the server version (non-zero exit if the daemon isn't running / no permission).
   async probe(): Promise<ProbeResult> {
     try {
       const { stdout } = await execFileAsync("docker", ["version", "--format", "{{.Server.Version}}"]);
       const version = stdout.trim();
-      return { reachable: true, detail: version ? `docker server ${version}` : "docker daemon 응답" };
+      return { reachable: true, detail: version ? `docker server ${version}` : "docker daemon responded" };
     } catch (e) {
       return { reachable: false, detail: e instanceof Error ? e.message : String(e) };
     }

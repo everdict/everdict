@@ -1,17 +1,17 @@
 import { randomUUID } from "node:crypto";
 import { type AgentJob, type CaseResult, UpstreamError, capabilityKind, requiredCapabilities } from "@everdict/core";
 
-// 셀프호스티드 러너 디스패치 키 — 잡이 흘러갈 러너의 정체성. lease 큐는 (owner, runnerId)로 키된다(D3).
-// ⚠️ 워크스페이스(tenant)는 키에 넣지 않는다 — 러너는 소유자가 속한 여러 워크스페이스의 잡을 한 큐에서 받는다
-// (크로스 워크스페이스). 잡 자신이 tenant 를 들고 다니므로 결과는 올바른 워크스페이스에 기록된다.
+// Self-hosted runner dispatch key — the identity of the runner a job will flow to. The lease queue is keyed by (owner, runnerId) (D3).
+// ⚠️ The workspace (tenant) is NOT part of the key — a runner receives jobs from all of its owner's workspaces on a single queue
+// (cross-workspace). The job carries its own tenant, so results are recorded against the correct workspace.
 export interface SelfHostedKey {
-  owner: string; // 러너 소유자 = principal.subject
+  owner: string; // runner owner = principal.subject
   runnerId: string;
 }
 
-// 풀(pool) 센티널 — runnerId 가 이 값이면 "특정 러너가 아니라 소유자(owner)의 풀". self:ws(러너 id 없이)로 제출된
-// 잡은 이 키로 파킹되고, 그 owner 의 아무 러너나(capability 충족) lease 로 가져간다(N 러너가 한 풀을 드레인).
-// 개별 러너 id 로 이 문자열은 쓰이지 않는다(러너 페어링 id 는 UUID) — 충돌 없음.
+// Pool sentinel — a runnerId of this value means "not a specific runner but the owner's pool". A job submitted as
+// self:ws (with no runner id) is parked under this key, and any of that owner's runners (that satisfy the capabilities)
+// leases it (N runners drain one pool). This string is never used as an individual runner id (runner pairing ids are UUIDs) — no collision.
 export const POOL_RUNNER = "*";
 export function poolKeyFor(owner: string): SelfHostedKey {
   return { owner, runnerId: POOL_RUNNER };
@@ -21,30 +21,30 @@ export function selfHostedBackendName(key: SelfHostedKey): string {
   return `self:${key.owner}:${key.runnerId}`;
 }
 
-// 배치 게이트가 보는 것 = 잡이 요구하는 **functional** capability(러너가 광고 못 하면 거부).
-// 케이스에서 파생(@everdict/core requiredCapabilities): image→docker · repo-git→git · browser→browser · os-use→computer-use.
-// security(sandbox)/auth(login)는 placement 가 아니라 각자 레이어(trust-zone/budget)가 강제하므로 여기선 functional 만 본다.
-// image-필수 잡을 Docker 없는 러너에 leasing 하면 호스트-네이티브 폴백으로 잘못된 환경에서 돌아버린다 → 명확히 거부.
-// 설계: docs/architecture/self-hosted-runtime-and-runners.md · portable-harness-runtime.md (placement 게이트).
+// What the placement gate looks at = the **functional** capabilities the job requires (rejected if the runner can't advertise them).
+// Derived from the case (@everdict/core requiredCapabilities): image→docker · repo-git→git · browser→browser · os-use→computer-use.
+// security(sandbox)/auth(login) are enforced by their own layers (trust-zone/budget), not placement, so here we only look at functional.
+// Leasing an image-required job to a runner without Docker would run it in the wrong environment via host-native fallback → reject explicitly.
+// Design: docs/architecture/self-hosted-runtime-and-runners.md · portable-harness-runtime.md (placement gate).
 export function requiredRunnerCapabilities(job: AgentJob): string[] {
   const caps = requiredCapabilities(job.evalCase).filter((c) => capabilityKind(c) === "functional");
-  // service(토폴로지) 하니스는 로컬 Docker 토폴로지를 띄우므로 docker 필요(케이스에 image 가 없어도) — 풀 lease 게이트가
-  // 이걸로 non-docker 러너를 건너뛰어 docker 러너에게 라우팅한다. 특정 러너 경로는 디스패처가 먼저 BadRequest 로 거른다.
+  // A service (topology) harness stands up a local Docker topology, so it needs docker (even if the case has no image) — the pool lease gate
+  // uses this to skip non-docker runners and route to a docker runner. The specific-runner path is rejected earlier with BadRequest by the dispatcher.
   if (job.harnessSpec?.kind === "service" && !caps.includes("docker")) caps.push("docker");
   return caps;
 }
 
-// 러너가 lease 로 가져가는 잡 한 건(MCP lease_job 응답의 코어).
+// A single job the runner leases (the core of the MCP lease_job response).
 export interface LeasedJob {
   jobId: string;
   job: AgentJob;
 }
 
-// enqueue 결과 — 잡 결과 + 실제로 완료한 러너 id(ranBy). 풀(self:ws) 잡은 어느 러너가 가져갈지 파킹 시점엔
-// 모르므로, complete 한 러너의 id 를 여기로 돌려준다(백엔드가 provenance.runner 로 스탬프). 특정 러너 잡도 동일.
+// enqueue result — the job result + the id of the runner that actually completed it (ranBy). For a pool (self:ws) job we don't
+// know at park time which runner will take it, so we return the completing runner's id here (the backend stamps it as provenance.runner). Same for a specific-runner job.
 export interface EnqueueResult {
   result: CaseResult;
-  ranBy: string; // 실행/회신한 러너의 runnerId
+  ranBy: string; // runnerId of the runner that ran/reported back
 }
 
 interface PendingEntry {
@@ -52,35 +52,35 @@ interface PendingEntry {
   job: AgentJob;
   resolve: (r: EnqueueResult) => void;
   reject: (e: Error) => void;
-  leasedAt?: number; // 러너가 가져간 시각(undefined=대기 중). Slice 6 의 만료/재큐가 이걸 본다.
+  leasedAt?: number; // time the runner took it (undefined = waiting). Slice 6's expiry/requeue looks at this.
   timer: ReturnType<typeof setTimeout>;
 }
 
 export interface RunnerHubDeps {
-  // 잡에 '활동(lease/heartbeat)'이 없는 채로 매달릴 수 있는 최대 시간 — lease/heartbeat 가 리셋한다.
-  // 활발히 heartbeat 하는 러너의 장기 실행 잡은 무기한 살아있고, 미연결/유휴/사망 러너의 잡만 이 시간 뒤 거부된다.
+  // Max time a job may hang with no 'activity' (lease/heartbeat) — lease/heartbeat resets it.
+  // A long-running job on an actively-heartbeating runner stays alive indefinitely; only jobs on unconnected/idle/dead runners are rejected after this time.
   queueTimeoutMs?: number;
-  // 러너가 lease 한 뒤 complete/heartbeat 없이 이 시간이 지나면 재큐(러너 사망/네트워크 단절 → 다른/재접속 러너가 가져감).
+  // If this much time passes after a runner leases a job with no complete/heartbeat, requeue it (runner died / network cut → another/reconnected runner takes it).
   leaseTtlMs?: number;
   newJobId?: () => string;
   now?: () => number;
 }
 
-// 개인 소유 셀프호스티드 러너의 인메모리 lease 허브 — push→pull 의 핵심.
-// SelfHostedBackend.dispatch 가 잡을 여기 파킹(promise 반환)하고, 러너 프로토콜(MCP, Slice 4)이
-// lease(가져가기)/complete(결과 회신)로 그 promise 를 resolve 한다. 키별(=러너별) FIFO 큐.
-// 설계: docs/architecture/self-hosted-runner.md.
+// In-memory lease hub for personally-owned self-hosted runners — the heart of push→pull.
+// SelfHostedBackend.dispatch parks a job here (returning a promise), and the runner protocol (MCP, Slice 4)
+// resolves that promise via lease (take) / complete (report result). FIFO queue per key (= per runner).
+// Design: docs/architecture/self-hosted-runner.md.
 export class RunnerHub {
   private readonly queues = new Map<string, PendingEntry[]>();
-  private readonly waiters = new Map<string, Array<() => void>>(); // long-poll lease 대기자(키별 wake 콜백)
-  private readonly wakeCursor = new Map<string, number>(); // owner 별 라운드-로빈 커서(풀 wake 공정성)
+  private readonly waiters = new Map<string, Array<() => void>>(); // long-poll lease waiters (per-key wake callbacks)
+  private readonly wakeCursor = new Map<string, number>(); // per-owner round-robin cursor (pool wake fairness)
   private readonly queueTimeoutMs: number;
   private readonly leaseTtlMs: number;
   private readonly newJobId: () => string;
   private readonly now: () => number;
   constructor(deps: RunnerHubDeps = {}) {
-    this.queueTimeoutMs = deps.queueTimeoutMs ?? 300_000; // 기본 5분
-    this.leaseTtlMs = deps.leaseTtlMs ?? 120_000; // 기본 2분(heartbeat 로 갱신)
+    this.queueTimeoutMs = deps.queueTimeoutMs ?? 300_000; // default 5 minutes
+    this.leaseTtlMs = deps.leaseTtlMs ?? 120_000; // default 2 minutes (renewed by heartbeat)
     this.newJobId = deps.newJobId ?? randomUUID;
     this.now = deps.now ?? Date.now;
   }
@@ -95,12 +95,12 @@ export class RunnerHub {
     return arr;
   }
 
-  // 잡을 파킹하고 결과 promise 를 돌려준다(SelfHostedBackend.dispatch). 러너가 complete 하면 resolve,
-  // '활동(lease/heartbeat)' 없이 queueTimeoutMs 가 지나면 reject(미연결/유휴). 키별 FIFO.
+  // Park a job and return the result promise (SelfHostedBackend.dispatch). Resolves when a runner completes it;
+  // rejects if queueTimeoutMs passes with no 'activity' (lease/heartbeat) (unconnected/idle). FIFO per key.
   enqueue(key: SelfHostedKey, job: AgentJob): Promise<EnqueueResult> {
     const jobId = this.newJobId();
     const arr = this.q(key);
-    // 실행자는 동기 실행이라 resolve/reject 가 곧바로 재할당된다(no-op 초기값은 no-`!` 규율 준수용).
+    // The executor runs synchronously, so resolve/reject are reassigned immediately (the no-op initial values are for the no-`!` discipline).
     let resolve: (r: EnqueueResult) => void = () => {};
     let reject: (e: Error) => void = () => {};
     const promise = new Promise<EnqueueResult>((res, rej) => {
@@ -109,16 +109,16 @@ export class RunnerHub {
     });
     const entry: PendingEntry = { jobId, job, resolve, reject, timer: this.armTimeout(key, jobId, reject) };
     arr.push(entry);
-    // long-poll 대기 중인 러너를 깨운다(단일 스레드 → wake 안에서 lease 가 곧장 이 잡을 가져간다).
+    // Wake a runner that is long-poll waiting (single-threaded → inside wake, lease immediately takes this job).
     if (key.runnerId === POOL_RUNNER)
-      this.wakeOwner(key.owner); // 풀 잡 → 그 owner 의 폴링 중인 러너들을 깨워 lease 가 풀 큐를 훑게 한다
+      this.wakeOwner(key.owner); // pool job → wake that owner's polling runners so their lease scans the pool queue
     else this.waiters.get(selfHostedBackendName(key))?.shift()?.();
     return promise;
   }
 
-  // owner 의 풀에 잡이 들어오면, 그 owner 로 long-poll 중인 러너들을 깨운다(각자 lease 가 풀 큐를 확인 → 하나가 가져감).
-  // ⚠️ 공정성: 단일 스레드라 "먼저 깨운" 러너가 그 잡을 가져간다(뒤 러너는 null 로 재대기). 항상 같은 순서로 깨우면
-  // 한 러너가 풀을 독식한다(즉시 완료되는 잡일수록 심함) → 라운드-로빈으로 시작 러너를 회전시켜 N 러너에 고루 분배.
+  // When a job lands in an owner's pool, wake that owner's long-poll-waiting runners (each one's lease checks the pool queue → one takes it).
+  // ⚠️ Fairness: single-threaded, so the runner woken "first" takes the job (later runners re-wait with null). Always waking in the same order
+  // lets one runner monopolize the pool (worse the faster jobs complete) → round-robin rotates the start runner to spread evenly across N runners.
   private wakeOwner(owner: string): void {
     const prefix = `self:${owner}:`;
     const poolName = selfHostedBackendName(poolKeyFor(owner));
@@ -126,7 +126,7 @@ export class RunnerHub {
       (k) => k.startsWith(prefix) && k !== poolName && (this.waiters.get(k)?.length ?? 0) > 0,
     );
     if (keys.length === 0) return;
-    keys.sort(); // 결정적 순서 + 회전 오프셋 → 매 잡마다 다른 러너가 먼저(공정)
+    keys.sort(); // deterministic order + rotation offset → a different runner goes first for each job (fair)
     const cur = this.wakeCursor.get(owner) ?? 0;
     this.wakeCursor.set(owner, cur + 1);
     const start = cur % keys.length;
@@ -136,45 +136,45 @@ export class RunnerHub {
     }
   }
 
-  // '유휴 타임아웃' 타이머 — queueTimeoutMs 동안 활동(lease/heartbeat)이 없으면 잡을 거부한다.
-  // lease/heartbeat 가 이 타이머를 리셋하므로, 활발히 heartbeat 하는 러너의 장기 실행 잡(codex/claude-code 등
-  // 수 분~수십 분)은 절대 잘못 거부되지 않는다. 아무 러너도 안 가져가거나(미연결/유휴), 가져간 뒤 러너가 죽어
-  // heartbeat 가 끊기면 이 시간 뒤 no_runner 로 거부.
+  // The 'idle timeout' timer — reject the job if there's no activity (lease/heartbeat) for queueTimeoutMs.
+  // lease/heartbeat resets this timer, so a long-running job on an actively-heartbeating runner (codex/claude-code etc.,
+  // minutes to tens of minutes) is never wrongly rejected. If no runner takes it (unconnected/idle), or a runner takes it and then dies so
+  // its heartbeat stops, it is rejected as no_runner after this time.
   private armTimeout(key: SelfHostedKey, jobId: string, reject: (e: Error) => void): ReturnType<typeof setTimeout> {
     const timer = setTimeout(() => {
       this.remove(key, jobId);
-      // reject 가 어딘가에서 삼켜지면 "이유없이 조용히 실패"로 보인다 — 원인(미연결/유휴)과 시간을 서버 로그로 가시화.
+      // If the reject is swallowed somewhere it looks like a "silent failure for no reason" — surface the cause (unconnected/idle) and elapsed time in the server log.
       console.warn(
-        `[runner-hub] 유휴 타임아웃: 러너 ${selfHostedBackendName(key)} 가 ${this.queueTimeoutMs}ms 동안 잡 ${jobId} 에 활동(lease/heartbeat)이 없습니다 — 미연결/유휴로 판단.`,
+        `[runner-hub] idle timeout: runner ${selfHostedBackendName(key)} had no activity (lease/heartbeat) on job ${jobId} for ${this.queueTimeoutMs}ms — treating as unconnected/idle.`,
       );
       reject(
         new UpstreamError(
           "UPSTREAM_ERROR",
           { runnerId: key.runnerId, reason: "no_runner" },
-          "셀프호스티드 러너 활동이 없습니다 — 연결된 러너가 없거나 유휴/사망 상태입니다.",
+          "No self-hosted runner activity — no runner is connected, or it is idle/dead.",
         ),
       );
     }, this.queueTimeoutMs);
-    // 타이머가 프로세스를 붙잡지 않게(테스트/종료 친화). Node 외 런타임엔 unref 없음 → 옵셔널 체이닝.
+    // Don't let the timer hold the process open (test/shutdown friendly). Non-Node runtimes have no unref → optional chaining.
     (timer as { unref?: () => void }).unref?.();
     return timer;
   }
 
-  // 활동 시 유휴 타임아웃을 리셋(lease 로 가져가거나 heartbeat 할 때). 기존 타이머를 갈아끼운다.
+  // Reset the idle timeout on activity (lease take or heartbeat). Swaps out the existing timer.
   private rearm(key: SelfHostedKey, entry: PendingEntry): void {
     clearTimeout(entry.timer);
     entry.timer = this.armTimeout(key, entry.jobId, entry.reject);
   }
 
-  // 다음 미-lease 잡을 가져간다(러너 pull). 없으면 null(러너는 재폴링). leasedAt 기록.
-  // 먼저 lease 가 만료된 잡(러너 사망/단절)을 재큐한다 — 다른/재접속 러너가 다시 가져갈 수 있게.
-  // capabilities 를 주면(러너 자가-광고) placement 게이트: 잡이 요구하는 capability(case.image→docker)를 러너가 못
-  // 갖췄으면 그 잡을 즉시 실패시킨다 — 잘못된 환경(호스트 폴백)에서 돌리는 대신 명확한 사유로 거부(조용한 유휴 타임아웃 방지).
+  // Take the next un-leased job (runner pull). None → null (the runner re-polls). Records leasedAt.
+  // First requeues expired leases (runner dead/disconnected) — so another/reconnected runner can take them again.
+  // If capabilities are given (runner self-advertised) this is a placement gate: if the runner lacks a capability the job requires
+  // (case.image→docker), fail that job immediately — reject with a clear reason instead of running in the wrong environment (host fallback), avoiding a silent idle timeout.
   lease(key: SelfHostedKey, capabilities?: string[]): LeasedJob | null {
     const arr = this.q(key);
     const now = this.now();
     this.requeueExpired(arr, now);
-    // 1) 자기 큐(특정 러너에 타깃된 잡) — capability 불일치면 즉시 거부(이 러너를 명시 지정했으므로 잘못된 환경 방지).
+    // 1) Own queue (jobs targeted at a specific runner) — on capability mismatch, reject immediately (this runner was explicitly named, so avoid the wrong environment).
     for (;;) {
       const entry = arr.find((e) => e.leasedAt === undefined);
       if (!entry) break;
@@ -185,25 +185,25 @@ export class RunnerHub {
         this.remove(key, entry.jobId);
         clearTimeout(entry.timer);
         console.warn(
-          `[runner-hub] capability 불일치: 러너 ${selfHostedBackendName(key)} 에 [${missing.join(",")}] 없음 — 잡 ${entry.jobId} 거부.`,
+          `[runner-hub] capability mismatch: runner ${selfHostedBackendName(key)} lacks [${missing.join(",")}] — rejecting job ${entry.jobId}.`,
         );
         entry.reject(
           new UpstreamError(
             "UPSTREAM_ERROR",
             { runnerId: key.runnerId, reason: "capability_mismatch", missing },
-            `러너에 이 잡이 요구하는 capability [${missing.join(", ")}] 가 없습니다 — 잘못된 환경(호스트 폴백) 방지를 위해 거부합니다.`,
+            `The runner lacks the capabilities [${missing.join(", ")}] this job requires — rejecting to avoid the wrong environment (host fallback).`,
           ),
         );
-        continue; // 다음 잡 시도
+        continue; // try the next job
       }
       entry.leasedAt = now;
-      this.rearm(key, entry); // 러너가 가져감 → 유휴 타임아웃 리셋(이제 heartbeat 가 살아있게 유지)
+      this.rearm(key, entry); // runner took it → reset idle timeout (heartbeat now keeps it alive)
       return { jobId: entry.jobId, job: entry.job };
     }
-    // 2) 소유자 풀 큐(self:ws 로 제출된 잡, 특정 러너 미지정) — capability 불일치면 **거부하지 말고 건너뛴다**
-    //    (다른 capable 러너가 가져갈 수 있게). 아무도 못 가져가면 유휴 타임아웃이 결국 거부한다. 풀 잡은 풀 큐에 남겨
-    //    두고 leasedAt 만 마킹(러너 사망 시 재큐가 풀 안에서 자연히 일어나 다른 러너가 재획득).
-    if (key.runnerId === POOL_RUNNER) return null; // 풀 키 자체로는 self-lease 안 함(무한재귀 방지)
+    // 2) Owner pool queue (jobs submitted as self:ws, no specific runner) — on capability mismatch **skip, don't reject**
+    //    (so another capable runner can take it). If nobody can, the idle timeout eventually rejects it. A pool job stays in the pool queue
+    //    with only leasedAt marked (on runner death the requeue happens naturally within the pool so another runner re-acquires it).
+    if (key.runnerId === POOL_RUNNER) return null; // the pool key itself doesn't self-lease (prevents infinite recursion)
     const poolKey = poolKeyFor(key.owner);
     const poolArr = this.q(poolKey);
     this.requeueExpired(poolArr, now);
@@ -212,22 +212,22 @@ export class RunnerHub {
       const missing = capabilities
         ? requiredRunnerCapabilities(entry.job).filter((c) => !capabilities.includes(c))
         : [];
-      if (missing.length > 0) continue; // 이 러너는 못 돌림 → 건너뛰고 다른 러너에게 남긴다(거부 아님)
+      if (missing.length > 0) continue; // this runner can't run it → skip and leave it for another runner (not a rejection)
       entry.leasedAt = now;
-      this.rearm(poolKey, entry); // 타이머는 풀 큐 기준(remove 가 풀에서 찾도록)
+      this.rearm(poolKey, entry); // the timer is keyed to the pool queue (so remove finds it in the pool)
       return { jobId: entry.jobId, job: entry.job };
     }
     return null;
   }
 
-  // 만료된 lease(러너 사망/단절) 재큐 — leasedAt 을 지워 다시 lease 가능으로. 자기 큐/풀 큐 공용.
+  // Requeue expired leases (runner dead/disconnected) — clear leasedAt to make them leasable again. Shared by the own queue and the pool queue.
   private requeueExpired(arr: PendingEntry[], now: number): void {
     for (const e of arr) {
       if (e.leasedAt !== undefined && now - e.leasedAt > this.leaseTtlMs) e.leasedAt = undefined;
     }
   }
 
-  // jobId 를 자기 큐에서 먼저, 없으면 소유자 풀 큐에서 찾는다(풀 잡은 풀 큐에 살아있고 러너가 자기 키로 complete/heartbeat).
+  // Find jobId in the own queue first, else in the owner pool queue (a pool job lives in the pool queue and the runner completes/heartbeats with its own key).
   private locate(key: SelfHostedKey, jobId: string): { entry: PendingEntry; key: SelfHostedKey } | undefined {
     const own = this.q(key).find((e) => e.jobId === jobId);
     if (own) return { entry: own, key };
@@ -239,8 +239,8 @@ export class RunnerHub {
     return undefined;
   }
 
-  // long-poll lease — 즉시 가져갈 잡이 없으면 다음 enqueue(또는 waitMs 타임아웃)까지 대기 후 1건 반환(없으면 null).
-  // 러너가 타이트 루프로 재폴링하지 않게 한다(서버가 잡이 생길 때까지 잡아둔다).
+  // long-poll lease — if there's no job to take immediately, wait until the next enqueue (or the waitMs timeout) then return one (null if none).
+  // Keeps runners from re-polling in a tight loop (the server holds the request until a job appears).
   leaseWait(key: SelfHostedKey, waitMs: number, capabilities?: string[]): Promise<LeasedJob | null> {
     const immediate = this.lease(key, capabilities);
     if (immediate || waitMs <= 0) return Promise.resolve(immediate);
@@ -256,7 +256,7 @@ export class RunnerHub {
         if (a && i >= 0) a.splice(i, 1);
         resolve(v);
       };
-      const wake = () => finish(this.lease(key, capabilities)); // enqueue 가 깨움 → 곧장 그 잡을 lease(게이트 포함)
+      const wake = () => finish(this.lease(key, capabilities)); // enqueue wakes us → immediately lease that job (gate included)
       const timer = setTimeout(() => finish(null), waitMs);
       (timer as { unref?: () => void }).unref?.();
       const arr = this.waiters.get(k) ?? [];
@@ -265,27 +265,27 @@ export class RunnerHub {
     });
   }
 
-  // 러너 생존 신호 — lease 를 갱신(leasedAt 갱신)해 장기 실행 잡이 재큐되지 않게 한다. 큐(자기/풀)에 없으면 false.
+  // Runner liveness signal — renew the lease (update leasedAt) so a long-running job isn't requeued. false if not in a queue (own/pool).
   heartbeat(key: SelfHostedKey, jobId: string): boolean {
     const loc = this.locate(key, jobId);
     if (!loc) return false;
     loc.entry.leasedAt = this.now();
-    this.rearm(loc.key, loc.entry); // 생존 신호 → 유휴 타임아웃 리셋(장기 실행 잡이 잘못 거부되지 않게)
+    this.rearm(loc.key, loc.entry); // liveness signal → reset idle timeout (so a long-running job isn't wrongly rejected)
     return true;
   }
 
-  // 러너가 결과를 회신 → 파킹된 promise resolve. 큐(자기/풀)에 없으면 false(이미 완료/만료/미상).
+  // Runner reports a result → resolve the parked promise. false if not in a queue (own/pool) (already completed/expired/unknown).
   complete(key: SelfHostedKey, jobId: string, result: CaseResult): boolean {
     const loc = this.locate(key, jobId);
     if (!loc) return false;
     this.remove(loc.key, jobId);
     clearTimeout(loc.entry.timer);
-    // ranBy = complete 를 부른 러너의 실제 id(key.runnerId). 풀 잡이면 이게 "*"(풀 키)가 아니라 진짜 러너다.
+    // ranBy = the real id of the runner that called complete (key.runnerId). For a pool job this is the real runner, not "*" (the pool key).
     loc.entry.resolve({ result, ranBy: key.runnerId });
     return true;
   }
 
-  // 러너가 잡 실행 실패를 회신 → promise reject(우리 에러로 remap). 큐(자기/풀)에 없으면 false.
+  // Runner reports a job failure → reject the promise (remapped to our error). false if not in a queue (own/pool).
   fail(key: SelfHostedKey, jobId: string, message: string): boolean {
     const loc = this.locate(key, jobId);
     if (!loc) return false;
@@ -295,7 +295,7 @@ export class RunnerHub {
     return true;
   }
 
-  // 대기/lease 중 잡 수(capacity/관측용).
+  // Number of waiting/leased jobs (for capacity/observability).
   pending(key: SelfHostedKey): number {
     return this.q(key).length;
   }

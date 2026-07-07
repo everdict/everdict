@@ -1,6 +1,6 @@
 import type { GradeContext, Grader, Score } from "@everdict/core";
 
-// ⓑ 궤적 — 트레이스에서 공짜로 (툴 호출 수).
+// ⓑ Trajectory — free from the trace (tool-call count).
 export const stepsGrader: Grader = {
   id: "steps",
   async grade(ctx: GradeContext): Promise<Score> {
@@ -9,7 +9,7 @@ export const stepsGrader: Grader = {
   },
 };
 
-// ⓒ 비용 — 트레이스의 llm_call cost 합산 (LLM 프록시가 채운 값).
+// ⓒ Cost — sum of llm_call cost in the trace (values filled by the LLM proxy).
 export const costGrader: Grader = {
   id: "cost",
   async grade(ctx: GradeContext): Promise<Score> {
@@ -21,7 +21,7 @@ export const costGrader: Grader = {
   },
 };
 
-// ⓒ 지연 — 트레이스 시작~끝 논리시간.
+// ⓒ Latency — logical time from trace start to end.
 export const latencyGrader: Grader = {
   id: "latency",
   async grade(ctx: GradeContext): Promise<Score> {

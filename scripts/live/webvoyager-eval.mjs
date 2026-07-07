@@ -1,11 +1,11 @@
-// 라이브 e2e: 멀티테넌트 SaaS 데이터셋 평가 — import → tenant-owned registry → load → runSuite → Scorecard store.
-// 유저 흐름 그대로: 외부 벤치마크(WebVoyager jsonl)를 @everdict/datasets 로 import → DatasetRegistry.register(tenant)
-// (유저-소유) → registry.get(tenant) 로 로드 → 실 browser-use 하니스로 per-case 평가 → Scorecard → ScorecardStore.
+// live e2e: multi-tenant SaaS dataset evaluation — import → tenant-owned registry → load → runSuite → Scorecard store.
+// The user flow as-is: import an external benchmark (WebVoyager jsonl) via @everdict/datasets → DatasetRegistry.register(tenant)
+// (user-owned) → load via registry.get(tenant) → per-case evaluation with the real browser-use harness → Scorecard → ScorecardStore.
 //
-// 벤치마크: WebVoyager(github.com/MinorJerry/WebVoyager). 전체는 15개 상용사이트+VLM 채점 → 여기선 접근가능 서브셋
-// (datasets/webvoyager-mini.jsonl, 동일 포맷). 같은 importer 가 전체 WebVoyager_data.jsonl 에도 동작(DATASET=).
+// Benchmark: WebVoyager (github.com/MinorJerry/WebVoyager). The full set is 15 commercial sites + VLM scoring → here an accessible subset
+// (datasets/webvoyager-mini.jsonl, same format). The same importer also works on the full WebVoyager_data.jsonl (DATASET=).
 //
-// 준비: chromedp CDP + LiteLLM(gpt-5.4-mini) + browser-use venv. 환경: OPENAI_API_KEY, OPENAI_BASE_URL, CDP_URL, BU_PY.
+// Prereq: chromedp CDP + LiteLLM (gpt-5.4-mini) + browser-use venv. Env: OPENAI_API_KEY, OPENAI_BASE_URL, CDP_URL, BU_PY.
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
@@ -22,7 +22,7 @@ const DS_ID = "webvoyager-mini";
 const DS_VER = "1.0.0";
 const HV = "0.13.1";
 
-// 1) import(외부 포맷 → Everdict Dataset) → tenant-owned 레지스트리 등록(유저가 자기 워크스페이스에 추가).
+// 1) import (external format → Everdict Dataset) → register in the tenant-owned registry (the user adds it to their workspace).
 const dataset = importWebVoyager(readFileSync(DATASET, "utf8"), {
   id: DS_ID,
   version: DS_VER,
@@ -32,12 +32,12 @@ const registry = new InMemoryDatasetRegistry();
 await registry.register(TENANT, dataset);
 console.log(`imported + registered: ${TENANT}/${DS_ID}@${DS_VER} (${dataset.cases.length} cases)`);
 
-// 2) registry 에서 로드(테넌트-소유 round-trip) → Suite.
+// 2) load from the registry (tenant-owned round-trip) → Suite.
 const loaded = await registry.get(TENANT, DS_ID, DS_VER);
 const suite = { id: loaded.id, harness: { id: "browser-use" }, cases: loaded.cases };
-console.log(`WebVoyager eval — ${suite.cases.length} cases × 실 browser-use(${HV}), dataset from registry\n`);
+console.log(`WebVoyager eval — ${suite.cases.length} cases × real browser-use (${HV}), dataset from registry\n`);
 
-// 3) dispatch = 실 browser-use 에이전트로 케이스 1건 실행 → CaseResult(레지스트리 case 의 graders 로 채점).
+// 3) dispatch = run one case with the real browser-use agent → CaseResult (scored by the registry case's graders).
 const dispatch = async (job) => {
   const c = job.evalCase;
   let r = { final: "", steps: 0, actions: [], urls: [] };
@@ -99,6 +99,6 @@ for (const s of summary)
   );
 const passRate = summary.find((s) => s.metric === "answer_match")?.passRate ?? 0;
 console.log(
-  `\n✅ 멀티테넌트 dataset eval e2e: WebVoyager import → tenant-owned registry(${TENANT}) → load → 실 browser-use 평가 → Scorecard 저장. task success(answer_match)=${(passRate * 100).toFixed(0)}%.`,
+  `\n✅ multi-tenant dataset eval e2e: WebVoyager import → tenant-owned registry (${TENANT}) → load → real browser-use evaluation → Scorecard stored. task success (answer_match)=${(passRate * 100).toFixed(0)}%.`,
 );
 process.exit(0);

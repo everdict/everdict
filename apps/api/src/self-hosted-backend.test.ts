@@ -25,7 +25,7 @@ const job: AgentJob = {
 const key: SelfHostedKey = { owner: "u-alice", runnerId: "laptop" };
 
 describe("SelfHostedBackend", () => {
-  it("dispatch 는 hub 에 파킹하고, 러너 complete 시 프로비넌스(ranOn:self-hosted)를 스탬프해 resolve", async () => {
+  it("dispatch parks in the hub and, on runner complete, resolves with stamped provenance (ranOn:self-hosted)", async () => {
     const hub = new RunnerHub({ newJobId: () => "j1" });
     const backend = new SelfHostedBackend(key, hub);
     const dispatched = backend.dispatch(job);
@@ -37,7 +37,7 @@ describe("SelfHostedBackend", () => {
     });
   });
 
-  it("capacity 는 total=maxConcurrent, used=0(파킹은 실자원 0)", async () => {
+  it("capacity is total=maxConcurrent, used=0 (parking uses no real resources)", async () => {
     const backend = new SelfHostedBackend(key, new RunnerHub());
     expect(await backend.capacity()).toEqual({ total: 8, used: 0 });
   });

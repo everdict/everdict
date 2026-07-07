@@ -13,7 +13,7 @@ import { VersionField } from '@/shared/ui/version-field'
 
 import { importBenchmarkAction, type ImportBenchmarkResult } from '../api/import-benchmark'
 
-// GET /benchmarks 항목(컨트롤플레인 카탈로그). source=huggingface 는 ID 인출, jsonl 은 파일 업로드 필요.
+// A GET /benchmarks item (control-plane catalog). source=huggingface fetches by ID; jsonl needs a file upload.
 export interface BenchmarkCatalogItem {
   id: string
   category: string
@@ -23,7 +23,7 @@ export interface BenchmarkCatalogItem {
   description: string
 }
 
-// GET /benchmark-recipes 항목(테넌트/_shared 레시피, 데이터).
+// A GET /benchmark-recipes item (tenant/_shared recipe, data).
 export interface RecipeItem {
   id: string
   owner: string
@@ -49,7 +49,7 @@ export function ImportBenchmarkForm({
   benchmarks: BenchmarkCatalogItem[]
   recipes?: RecipeItem[]
   existingDatasets?: { id: string; versions: string[] }[]
-  preselect?: string // "recipe:<id>" — 레시피 상세에서 진입 시 초기 선택.
+  preselect?: string // "recipe:<id>" — initial selection when entering from a recipe detail.
 }) {
   const t = useTranslations('importBenchmark')
   const router = useRouter()
@@ -117,7 +117,7 @@ export function ImportBenchmarkForm({
     <div className="max-w-2xl space-y-6">
       <div className="space-y-1.5">
         <Label htmlFor="benchmark">{t('benchmarkOrRecipe')}</Label>
-        {/* optgroup 대응 — 카탈로그/레시피 구분은 우측 hint 로(그룹 헤더 없는 flat 리스트) */}
+        {/* optgroup equivalent — the catalog/recipe distinction is shown as a right-side hint (a flat list with no group headers) */}
         <Combobox
           id="benchmark"
           value={sel}

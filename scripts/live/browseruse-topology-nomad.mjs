@@ -1,14 +1,15 @@
-// 라이브 e2e (service-topology, Nomad): 실 browser-use 를 **NomadTopologyRuntime 으로 실 Nomad(dev)에 배포**해서
-// ServiceTopologyBackend 로 구동. browseruse-topology-k8s.mjs(kind)와 대칭 — *오케스트레이터-비종속* 재확인: 같은
-// 백엔드/하니스/태스크를 런타임만 K8s↔Nomad 로 교체. NomadTopologyRuntime.ensureTopology 가 browser-use front-door
-// 잡을 등록 → alloc running 대기 → dynamic host:port 발견. 파드(alloc) 안 실 LLM(host LiteLLM)+실 chromium 이 인터랙티브
-// 폼을 멀티스텝 구동하고, run 의 실 토큰/액션/USD 를 Jaeger 로 OTLP 배출 → 백엔드가 OtelTraceSource 로 끌어와 채점.
+// Live e2e (service-topology, Nomad): **deploy real browser-use to real Nomad (dev) via NomadTopologyRuntime** and
+// drive it with ServiceTopologyBackend. Symmetric to browseruse-topology-k8s.mjs (kind) — re-confirms *orchestrator-agnostic*:
+// same backend/harness/task, only the runtime swapped K8s↔Nomad. NomadTopologyRuntime.ensureTopology registers the
+// browser-use front-door job → waits for alloc running → discovers the dynamic host:port. Inside the pod (alloc), real LLM
+// (host LiteLLM) + real chromium drive the interactive form multi-step, and the run's real tokens/actions/USD are emitted to
+// Jaeger over OTLP → the backend pulls them via OtelTraceSource to score.
 //
-// 사전: nomad agent -dev (docker driver) 기동. browser-use 이미지는 호스트 docker 에 빌드돼 있어야(레지스트리 불필요,
-//   Nomad docker 드라이버가 로컬 이미지 사용 — SLICE 92 stub 와 동일):
+// Prereqs: start nomad agent -dev (docker driver). The browser-use image must be built in host docker (no registry needed,
+//   the Nomad docker driver uses the local image — same as the SLICE 92 stub):
 //   docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live
-// 호스트 도달: Nomad docker task 는 기본 브리지 → 파드가 LiteLLM(172.17.0.1:4000)/Jaeger(172.17.0.5:4318) 도달.
-// 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
+// Host reachability: Nomad docker tasks are on the default bridge → pods reach LiteLLM(172.17.0.1:4000)/Jaeger(172.17.0.5:4318).
+// Key: OPENAI_API_KEY env or infra/litellm/.env(LITELLM_MASTER_KEY) — runtime only, never committed.
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -38,7 +39,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env).");
+  console.error("No LLM key (OPENAI_API_KEY or infra/litellm/.env).");
   process.exit(2);
 }
 
@@ -91,7 +92,7 @@ const nomad = new NomadTopologyRuntime({
 let frontDoor = "";
 let ok = false;
 try {
-  console.log(`=== NomadTopologyRuntime.ensureTopology — 실 Nomad(${ADDR})에 browser-use front-door 배포 ===`);
+  console.log(`=== NomadTopologyRuntime.ensureTopology — deploy browser-use front-door to real Nomad(${ADDR}) ===`);
   console.log(`LiteLLM=http://${LITELLM_HOST}:4000/v1 | OTLP=${OTLP_URL}`);
   const runtime = {
     id: "nomad-browseruse",
@@ -151,7 +152,7 @@ try {
   };
 
   console.log(
-    "\n=== ServiceTopologyBackend.dispatch — Nomad alloc 의 실 browser-use 인터랙티브 구동 + 실 트레이스 채점 ===",
+    "\n=== ServiceTopologyBackend.dispatch — drive real browser-use in the Nomad alloc interactively + score from real trace ===",
   );
   console.log("model:", MODEL, "| task:", job.evalCase.task);
   const result = await backend.dispatch(job);
@@ -184,11 +185,11 @@ try {
   ok = result.snapshot.kind === "browser" && urlOk && domOk && stepsOk && tracePulled;
   console.log(
     ok
-      ? "\n✅ ①(Nomad): 실 browser-use 이미지를 **NomadTopologyRuntime 으로 실 Nomad(dev)에 배포**(잡 등록→alloc running→" +
-          "dynamic host:port 발견)하고 ServiceTopologyBackend 로 구동 — alloc 안 실 LLM+실 chromium 이 인터랙티브 폼을 멀티스텝 " +
-          "구동(url/dom PASS), 실 토큰/액션/USD 를 Jaeger 로 OTLP 배출 → OtelTraceSource 로 끌어와 steps/cost 채점. " +
-          "K8s 와 대칭 — 오케스트레이터-비종속 백엔드가 Nomad 에서도 실 browser-use 를 deploy+drive+grade."
-      : "\n⚠️ 기대와 불일치(위 actions/trace/scores 참고)",
+      ? "\n✅ ①(Nomad): **deployed the real browser-use image to real Nomad (dev) via NomadTopologyRuntime** (register job→alloc running→" +
+          "discover dynamic host:port) and drove it with ServiceTopologyBackend — inside the alloc, real LLM + real chromium drove the " +
+          "interactive form multi-step (url/dom PASS), real tokens/actions/USD emitted to Jaeger over OTLP → pulled via OtelTraceSource to " +
+          "score steps/cost. Symmetric to K8s — the orchestrator-agnostic backend deploys+drives+grades real browser-use on Nomad too."
+      : "\n⚠️ mismatch vs expected (see actions/trace/scores above)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

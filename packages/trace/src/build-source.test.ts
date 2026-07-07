@@ -14,7 +14,7 @@ const otlp = {
 };
 
 describe("buildTraceSource", () => {
-  it("otel: 헤더 주입 + fetch 로 가져와 정규화", async () => {
+  it("otel: fetches with header injection and normalizes", async () => {
     const fetchImpl = vi.fn((_u: string, _i?: RequestInit) =>
       Promise.resolve(new Response(JSON.stringify(otlp), { status: 200 })),
     );
@@ -37,8 +37,8 @@ describe("buildTraceSource", () => {
     await expect(src.fetch("t")).rejects.toBeInstanceOf(AppError);
   });
 
-  it("mlflow: 3.x OTLP 스팬(snake_case AnyValue 배열) + 헤더 주입 → 정규화", async () => {
-    // 실제 MLflow 3.x `/api/3.0/mlflow/traces/get` 응답: attributes 는 {key,value:{string_value}} 배열(OTLP, snake_case).
+  it("mlflow: 3.x OTLP spans (snake_case AnyValue array) + header injection → normalized", async () => {
+    // Real MLflow 3.x `/api/3.0/mlflow/traces/get` response: attributes are a {key,value:{string_value}} array (OTLP, snake_case).
     const body = {
       trace: {
         spans: [

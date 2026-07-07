@@ -1,17 +1,17 @@
 import type { AgentJob, CaseResult } from "@everdict/core";
 
-// 워크플로가 호출하는 액티비티 시그니처(순수 타입 — 워크플로 번들에 안전하게 import 됨).
+// Activity signatures the workflow calls (pure types — safely imported into the workflow bundle).
 export interface Activities {
   dispatchCase(job: AgentJob): Promise<CaseResult>;
-  // 예약 발사 — 컨트롤플레인 internal 라우트로 스코어카드 submit(워커엔 ScorecardService 가 없어 HTTP 브리지).
-  // 직전 스케줄 run id(회귀 baseline)도 같이 받아 finalize 로 넘긴다.
+  // Scheduled fire — submit a scorecard via the control-plane internal route (the worker has no ScorecardService, so an HTTP bridge).
+  // Also receives the previous schedule run id (the regression baseline) and passes it to finalize.
   fireScheduledScorecard(input: {
     scheduleId: string;
     tenant: string;
   }): Promise<{ scorecardId: string; previousScorecardId?: string }>;
-  // 발사한 스코어카드 status 폴링(워크플로 poll-to-terminal — overlap 정책이 의미를 갖게).
+  // Poll the fired scorecard's status (workflow poll-to-terminal — so the overlap policy is meaningful).
   scheduledScorecardStatus(scorecardId: string): Promise<string | null>;
-  // 종료 처리 — 최종 status 기록 + 직전 run 대비 회귀 알림(internal 라우트 → ScheduleService.finalize).
+  // Finalization — record the final status + alert on regression vs the previous run (internal route → ScheduleService.finalize).
   finalizeScheduledScorecard(input: {
     scheduleId: string;
     tenant: string;

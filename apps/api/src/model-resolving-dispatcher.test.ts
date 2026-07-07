@@ -35,7 +35,7 @@ function job(harnessSpec: AgentJob["harnessSpec"], tenant = "acme"): AgentJob {
 
 async function registry(): Promise<InMemoryModelRegistry> {
   const models = new InMemoryModelRegistry();
-  // 등록 model "opus" → 하부 모델 "claude-opus-4-8"
+  // registered model "opus" → underlying model "claude-opus-4-8"
   await models.register("acme", {
     id: "opus",
     version: "1.0.0",
@@ -47,25 +47,25 @@ async function registry(): Promise<InMemoryModelRegistry> {
 }
 
 describe("resolveJobModel", () => {
-  it("command.model 이 등록된 Model id 면 하부 모델 식별자로 해석한다", async () => {
+  it("resolves command.model to the underlying model identifier when it's a registered Model id", async () => {
     const models = await registry();
     const resolved = await resolveJobModel(models, job(commandSpec("opus")));
     expect((resolved.harnessSpec as CommandHarnessSpec).model).toBe("claude-opus-4-8");
   });
 
-  it("등록 id 가 아니면 raw 모델 문자열을 그대로 둔다(폴백)", async () => {
+  it("leaves the raw model string as-is when it's not a registered id (fallback)", async () => {
     const models = await registry();
     const resolved = await resolveJobModel(models, job(commandSpec("gpt-5.4-mini")));
     expect((resolved.harnessSpec as CommandHarnessSpec).model).toBe("gpt-5.4-mini");
   });
 
-  it("다른 워크스페이스의 model id 는 해석하지 않는다(테넌트 스코프)", async () => {
-    const models = await registry(); // "opus" 는 acme 소유
+  it("doesn't resolve another workspace's model id (tenant scope)", async () => {
+    const models = await registry(); // "opus" is owned by acme
     const resolved = await resolveJobModel(models, job(commandSpec("opus"), "beta"));
     expect((resolved.harnessSpec as CommandHarnessSpec).model).toBe("opus");
   });
 
-  it("command 하니스가 아니거나 model 미설정이면 잡을 그대로 돌려준다", async () => {
+  it("returns the job unchanged if it's not a command harness or model is unset", async () => {
     const models = await registry();
     const noModel = job(commandSpec(undefined));
     expect(await resolveJobModel(models, noModel)).toBe(noModel);
@@ -75,7 +75,7 @@ describe("resolveJobModel", () => {
 });
 
 describe("ModelResolvingDispatcher", () => {
-  it("해석된 모델로 inner 디스패처에 위임한다", async () => {
+  it("delegates to the inner dispatcher with the resolved model", async () => {
     const models = await registry();
     let seen: AgentJob | undefined;
     const result = {

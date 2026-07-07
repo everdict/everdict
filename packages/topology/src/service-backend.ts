@@ -30,34 +30,34 @@ import { observationSourceFor } from "./observation-source.js";
 import { type AcquireRequestFn, targetAcquirerFor } from "./target-acquirer.js";
 import type { TopologyRuntime } from "./topology-runtime.js";
 
-// 하위호환 re-export — 기존 import { type SubmitFn } from "./service-backend.js" 유지.
+// Backward-compatible re-export — keep existing `import { type SubmitFn } from "./service-backend.js"`.
 export type { SubmitFn } from "./front-door-driver.js";
 
 export interface ServiceTopologyBackendOptions {
   runtime: TopologyRuntime;
   traceSource: TraceSource;
   specFor: (tenant: string, id: string, version: string) => ServiceHarnessSpec | Promise<ServiceHarnessSpec>;
-  graders?: Grader[]; // 기본: trace 기반(steps/cost/latency). 브라우저 그레이더(dom/vlm)는 Phase 2.
-  submit?: SubmitFn; // 기본 HttpFrontDoorDriver 의 POST 프리미티브(없으면 fetch)
-  getJson?: GetJsonFn; // poll 완료 모델의 상태 GET 프리미티브(없으면 fetch)
-  openStream?: OpenStreamFn; // stream 완료 모델의 SSE 소비 프리미티브(없으면 fetch)
-  callbackRendezvous?: CallbackRendezvous; // callback 완료 모델의 inbound 대기 + {{callback_url}} 발급(callback 모델인데 없으면 실패)
-  acquireRequest?: AcquireRequestFn; // target.acquire=service 의 세션 open/close HTTP 프리미티브(없으면 fetch)
-  frontDoorDriver?: FrontDoorDriver; // 구동(HOW) 추상화 전체를 주입(없으면 HttpFrontDoorDriver)
+  graders?: Grader[]; // default: trace-based (steps/cost/latency). Browser graders (dom/vlm) are Phase 2.
+  submit?: SubmitFn; // the POST primitive of the default HttpFrontDoorDriver (fetch if absent)
+  getJson?: GetJsonFn; // the status GET primitive for the poll completion model (fetch if absent)
+  openStream?: OpenStreamFn; // the SSE-consuming primitive for the stream completion model (fetch if absent)
+  callbackRendezvous?: CallbackRendezvous; // inbound wait + {{callback_url}} issuance for the callback completion model (a callback model with none fails)
+  acquireRequest?: AcquireRequestFn; // the session open/close HTTP primitive for target.acquire=service (fetch if absent)
+  frontDoorDriver?: FrontDoorDriver; // inject the whole driving (HOW) abstraction (HttpFrontDoorDriver if absent)
   newRunId?: () => string;
-  maxConcurrent?: number | (() => number); // 동시 per-case 브라우저 상한(함수면 오토스케일러가 동적 조정)
-  trustZones?: TrustZonePolicy; // 테넌트별 격리 — warm 풀을 존별로 분리(공유 금지)
+  maxConcurrent?: number | (() => number); // cap on concurrent per-case browsers (a function lets the autoscaler adjust it dynamically)
+  trustZones?: TrustZonePolicy; // per-tenant isolation — separate the warm pool per zone (no sharing)
 }
 
-// 오케스트레이터-비종속 서비스 토폴로지 백엔드 (Backend 구현).
-// ensure warm topology → per-case 브라우저 → drive(front-door, per-run wiring) → collectTrace → observe → grade.
+// The orchestrator-agnostic service-topology backend (a Backend implementation).
+// ensure warm topology → per-case browser → drive (front-door, per-run wiring) → collectTrace → observe → grade.
 export class ServiceTopologyBackend implements Backend {
   readonly id: string;
   constructor(private readonly opts: ServiceTopologyBackendOptions) {
     this.id = `service:${opts.runtime.id}`;
   }
 
-  // 용량: 동시에 띄울 수 있는 per-case 브라우저 수(warm 서비스는 공유 풀이라 per-case 가 병목).
+  // Capacity: how many per-case browsers can run at once (warm services are a shared pool, so the per-case browser is the bottleneck).
   async capacity(): Promise<BackendCapacity> {
     const mc = this.opts.maxConcurrent;
     return { total: (typeof mc === "function" ? mc() : mc) ?? 8, used: 0 };
@@ -65,13 +65,13 @@ export class ServiceTopologyBackend implements Backend {
 
   async dispatch(job: AgentJob): Promise<CaseResult> {
     const registered = await this.opts.specFor(job.tenant ?? "default", job.harness.id, job.harness.version);
-    // per-dispatch 이미지 핀(#5) — 서비스 이미지를 런 시점에 override. 핀이 있으면 effective version 에 접미사가 붙어
-    // warm 풀이 별개 정체성으로 분리된다(같은 토폴로지를 service X v1↔v2 로 평가 가능).
+    // per-dispatch image pins (#5) — override service images at run time. When pins are present, a suffix is appended to the effective version
+    // so the warm pool separates into a distinct identity (the same topology can be evaluated as service X v1 ↔ v2).
     const spec = applyImagePins(registered, job.imagePins);
     const runId = (this.opts.newRunId ?? newRunId)();
     const keys = keysFor(runId);
 
-    // 테넌트 존 해석 — untrusted 는 강격리 강제, warm 풀은 존별로 분리된다.
+    // Resolve the tenant zone — untrusted forces hardened isolation, and the warm pool is separated per zone.
     let zone: TrustZone | undefined;
     if (this.opts.trustZones) {
       zone = this.opts.trustZones.resolve(job.tenant ?? "default");
@@ -79,9 +79,9 @@ export class ServiceTopologyBackend implements Backend {
     }
 
     const topo = await this.opts.runtime.ensureTopology(spec, zone);
-    // 타깃 획득(#2/#4): spec.target 이 선언됐을 때만. acquire 전략으로 분기 — provision(기본, 런타임 브라우저) |
-    // service(선언된 서비스의 세션 API). 없으면 관측 무대 없이 trace-only. open/close path 보간용 베이스 wiring 을 넘긴다
-    // (target.wiring 은 여기서 나오므로 베이스에는 제외 — run_id + isolateBy 파생 + task 만).
+    // Target acquisition (#2/#4): only when spec.target is declared. Branch by acquire strategy — provision (default, runtime browser) |
+    // service (the session API of a declared service). If absent, trace-only with no observation stage. Pass the base wiring for open/close path interpolation
+    // (target.wiring comes out of here, so it's excluded from the base — only run_id + isolateBy-derived + task).
     const target = spec.target
       ? await targetAcquirerFor(spec.target, this.opts.runtime, this.opts.acquireRequest).acquire({
           spec,
@@ -91,7 +91,7 @@ export class ServiceTopologyBackend implements Backend {
           zone,
         })
       : undefined;
-    // 타깃은 무슨 일이 있어도 해제(finally) — 관측물 회수 직후 조기 해제하면 이후 no-op(플래그 멱등화).
+    // Release the target no matter what (finally) — an early release right after observation retrieval makes later calls a no-op (flag idempotency).
     let targetReleased = false;
     const releaseTarget = async (): Promise<void> => {
       if (!target || targetReleased) return;
@@ -101,13 +101,9 @@ export class ServiceTopologyBackend implements Backend {
     try {
       const base = topo.endpoints[spec.frontDoor.service];
       if (!base) {
-        throw new InternalError(
-          "HARNESS_RUN_FAILED",
-          { service: spec.frontDoor.service },
-          "front-door 엔드포인트가 없습니다.",
-        );
+        throw new InternalError("HARNESS_RUN_FAILED", { service: spec.frontDoor.service }, "No front-door endpoint.");
       }
-      // 구동(HOW): submit + per-run wiring 주입 → 완료 모델(sync/poll/stream/callback)대로 대기. 인프라(WHERE)와 분리된 관심사.
+      // Driving (HOW): submit + inject per-run wiring → wait per the completion model (sync/poll/stream/callback). A concern separate from infra (WHERE).
       const driver =
         this.opts.frontDoorDriver ??
         new HttpFrontDoorDriver({
@@ -116,19 +112,19 @@ export class ServiceTopologyBackend implements Backend {
           openStream: this.opts.openStream,
           callbackRendezvous: this.opts.callbackRendezvous,
         });
-      // per-run 와이어링 — isolateBy 파생 격리 변수(+ task + 타깃 좌표 bag + callback 모델이면 callback_url). 본문 템플릿/statusPath 공용.
-      // 타깃 wiring 은 provision=`{ target_cdp_url }`, service=선언된 좌표들(playwright_server_url/session_id…) — 어휘 개방.
+      // per-run wiring — isolateBy-derived isolation variables (+ task + the target coordinate bag + callback_url for the callback model). Shared by the body template / statusPath.
+      // Target wiring is provision=`{ target_cdp_url }`, service=the declared coordinates (playwright_server_url/session_id…) — an open vocabulary.
       const callbackWiring: Record<string, string> =
         spec.frontDoor.completion?.mode === "callback" && this.opts.callbackRendezvous
-          ? { callback_url: this.opts.callbackRendezvous.url(runId) } // 에이전트가 종단 결과를 POST 할 곳(runId 로 상관)
+          ? { callback_url: this.opts.callbackRendezvous.url(runId) } // where the agent POSTs the terminal result (correlated by runId)
           : {};
       const wiring = wiringVars(runId, spec.dependencies, {
         task: job.evalCase.task,
         ...(target ? target.wiring : {}),
         ...callbackWiring,
       });
-      // 본문(#1): request.bodyTemplate 이 있으면 wiring 으로 보간, 없으면 현행 browser-use 5-field 본문(무회귀).
-      // 타깃이 없으면 browser_cdp_url 은 뺀다(브라우저가 없으므로). 현행 본문은 provision 타깃의 target_cdp_url 을 쓴다.
+      // Body (#1): if request.bodyTemplate is present, interpolate it with wiring, otherwise the current browser-use 5-field body (no regression).
+      // With no target, omit browser_cdp_url (there's no browser). The current body uses the provision target's target_cdp_url.
       const payload = spec.frontDoor.request?.bodyTemplate
         ? interpolateTemplate(spec.frontDoor.request.bodyTemplate, wiring)
         : {
@@ -138,7 +134,7 @@ export class ServiceTopologyBackend implements Backend {
             minio_prefix: keys.minioPrefix,
             ...(target ? { browser_cdp_url: target.wiring.target_cdp_url } : {}),
           };
-      // 요청 헤더(선택): 선언 headers 의 {{var}} 를 wiring 으로 보간(Authorization 등). 미지정 = 없음.
+      // Request headers (optional): interpolate {{var}} in the declared headers with wiring (Authorization etc.). Unset = none.
       const headers = spec.frontDoor.request?.headers
         ? interpolateHeaders(spec.frontDoor.request.headers, wiring)
         : undefined;
@@ -152,43 +148,43 @@ export class ServiceTopologyBackend implements Backend {
         traceRef: runId,
         ...(headers ? { headers } : {}),
       });
-      // 완료 시한 초과 = 평가 결과를 확정할 수 없음(반쪽 상태 채점은 오인 유발) → run 실패로 명시.
+      // Completion deadline exceeded = the eval result can't be confirmed (grading a half-done state misleads) → make it an explicit run failure.
       if (outcome.status === "timeout") {
         throw new InternalError(
           "HARNESS_RUN_FAILED",
           { runId, reason: "completion-timeout" },
-          "에이전트가 완료 시한 내에 끝나지 않았습니다.",
+          "The agent did not finish within the completion deadline.",
         );
       }
 
-      // 트레이스 소스 장애(인증/일시 down/미배출)는 run 을 죽이지 않는다 — error 이벤트로 기록하고 스냅샷+채점은 진행.
-      // (서비스 토폴로지의 1차 신호는 브라우저 스냅샷; 트레이스는 보조. 침묵 손실 대신 가시화.)
+      // A trace-source failure (auth / transient down / not emitted) does not kill the run — record it as an error event and proceed with snapshot + grading.
+      // (The primary signal of a service topology is the browser snapshot; the trace is secondary. Surface it instead of losing it silently.)
       let trace: TraceEvent[];
       try {
         trace = await this.opts.traceSource.fetch(outcome.traceRef);
       } catch (err) {
         trace = [
-          { t: 0, kind: "error", message: `trace fetch 실패: ${err instanceof Error ? err.message : String(err)}` },
+          { t: 0, kind: "error", message: `trace fetch failed: ${err instanceof Error ? err.message : String(err)}` },
         ];
       }
-      // 관측(#4 + delivery): delivery.mode 별 ObservationSource 로 관측물 회수. 미설정=reference(store-fetch, 무회귀)
-      // — 타깃 있으면 스냅샷 pull, 없으면 prompt. sentinel = outcome.response(결과 채널)에서 인라인 추출.
-      // egress = sink 에서 GET 회수(에이전트가 push 한 위치; trace 와 같은 상관키로 {run_id} 보간).
+      // Observation (#4 + delivery): retrieve the observation via the per-delivery.mode ObservationSource. Unset = reference (store-fetch, no regression)
+      // — pull the snapshot if there's a target, otherwise prompt. sentinel = extract inline from outcome.response (result channel).
+      // egress = GET-retrieve from the sink (where the agent pushed; {run_id}-interpolated with the same correlation key as the trace).
       const snapshot: EnvSnapshot = await observationSourceFor(spec.target?.delivery).observe({
         target,
         response: outcome.response,
         getJson: this.opts.getJson ?? fetchJson,
         wiring: { ...wiring, run_id: outcome.traceRef },
       });
-      // 관측물(trace+snapshot)이 손에 들어왔으니 타깃(브라우저 등)은 더 필요 없다 — 채점(judge LLM 등)
-      // 동안 점유하지 않도록 조기 해제. docs/architecture/streaming-case-pipeline.md
+      // The observations (trace + snapshot) are in hand, so the target (browser etc.) is no longer needed — release it early
+      // so it isn't held during grading (judge LLM etc.). docs/architecture/streaming-case-pipeline.md
       await releaseTarget();
 
-      // 케이스가 그레이더를 지정하면 그것으로(dom-contains/url-matches 등), 아니면 trace 기반 기본값.
+      // If the case specifies graders, use those (dom-contains/url-matches etc.), otherwise the trace-based defaults.
       const graders =
         this.opts.graders ??
         (job.evalCase.graders.length > 0
-          ? makeGradersFromEnv(job.evalCase.graders) // judge grader 포함(env Judge; 미구성이면 judge 만 skip)
+          ? makeGradersFromEnv(job.evalCase.graders) // includes the judge grader (env Judge; if unconfigured, only judge is skipped)
           : [stepsGrader, costGrader, latencyGrader]);
       const scores: Score[] = [];
       for (const grader of graders) {

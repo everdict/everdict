@@ -1,8 +1,8 @@
-// 레퍼런스 데스크탑 에이전트 — OSWorld 류 텍스트 태스크용(멀티스텝). everdict command 하니스가 os-use env-container 안에서
-// `node /agent-osworld.cjs {{task}}` 로 실행(workDir=/tmp, DISPLAY=:99). env(OsUseEnvironment.seed)가 Xvfb+openbox 를
-// 띄우고, 에이전트는 실제 앱(mousepad)을 열어 instruction 의 따옴표 텍스트를 실 OS 키보드(xdotool)로 입력한다.
-// instruction 에 파일명(예: note.txt)이 있으면 멀티스텝으로: 입력 → Ctrl+S(저장 다이얼로그) → 절대경로 입력 → Enter 저장.
-// 채점은 everdict: VLM judge(스크린샷) + (row.verify 있으면) command grader 가 실제 파일 상태 검증.
+// Reference desktop agent — for OSWorld-style text tasks (multi-step). The everdict command harness runs it inside an os-use env-container as
+// `node /agent-osworld.cjs {{task}}` (workDir=/tmp, DISPLAY=:99). The env (OsUseEnvironment.seed) brings up Xvfb+openbox,
+// and the agent opens a real app (mousepad) and types the instruction's quoted text via the real OS keyboard (xdotool).
+// If the instruction contains a filename (e.g. note.txt), it goes multi-step: type → Ctrl+S (save dialog) → type absolute path → Enter to save.
+// Scoring is by everdict: a VLM judge (screenshot) + (if row.verify is present) a command grader verifies the actual file state.
 const { execFileSync, spawn } = require("node:child_process");
 const DISPLAY = process.env.DISPLAY || ":99";
 const sh = (c) => execFileSync("bash", ["-lc", c], { encoding: "utf8" }).trim();
@@ -19,12 +19,12 @@ const typeText = (t) => sh(`DISPLAY=${DISPLAY} xdotool type --clearmodifiers --d
 
 (async () => {
   const task = process.argv.slice(2).join(" ");
-  const content = (task.match(/["']([^"']+)["']/) || [])[1] || "Hello from OSWorld"; // 따옴표 안 텍스트
-  const fn = (task.match(/([\w.\-/]+\.\w{1,5})\b/) || [])[1] || ""; // 파일명(예: note.txt)
-  const filename = fn ? (fn.startsWith("/") ? fn : `/root/${fn}`) : ""; // 상대명은 home(/root) 로
+  const content = (task.match(/["']([^"']+)["']/) || [])[1] || "Hello from OSWorld"; // text inside the quotes
+  const fn = (task.match(/([\w.\-/]+\.\w{1,5})\b/) || [])[1] || ""; // filename (e.g. note.txt)
+  const filename = fn ? (fn.startsWith("/") ? fn : `/root/${fn}`) : ""; // a relative name goes under home (/root)
   console.error("[osworld-agent] content:", content, "| filename:", filename || "(none)");
 
-  // 1) 텍스트 에디터(mousepad) 실행 — cwd=home 으로 저장 다이얼로그 기본 위치 정렬.
+  // 1) Launch the text editor (mousepad) — cwd=home to align the save dialog's default location.
   spawn("mousepad", [], { env: { ...process.env, DISPLAY }, cwd: "/root", detached: true, stdio: "ignore" }).unref();
   let wid = "";
   for (let i = 0; i < 30 && !wid; i++) {
@@ -35,20 +35,20 @@ const typeText = (t) => sh(`DISPLAY=${DISPLAY} xdotool type --clearmodifiers --d
   sh(`DISPLAY=${DISPLAY} xdotool windowactivate --sync ${wid} windowfocus ${wid} windowraise ${wid}`);
   await sleep(600);
 
-  // 2) 본문 입력(실 OS 키보드).
+  // 2) Type the body (real OS keyboard).
   typeText(content);
   await sleep(800);
 
-  // 3) 파일명이 있으면 멀티스텝 저장: Ctrl+S → 다이얼로그 name 엔트리 전체선택 → 절대경로 입력 → Enter.
+  // 3) If there is a filename, save multi-step: Ctrl+S → select all in the dialog's name entry → type the absolute path → Enter.
   if (filename) {
     key("ctrl+s");
-    await sleep(1600); // 저장 다이얼로그 대기
-    key("ctrl+a"); // name 엔트리 기존값 선택
+    await sleep(1600); // wait for the save dialog
+    key("ctrl+a"); // select the name entry's existing value
     await sleep(200);
-    typeText(filename); // GtkFileChooser 는 절대경로 입력을 수용
+    typeText(filename); // GtkFileChooser accepts an absolute path
     await sleep(400);
-    key("Return"); // 기본 동작=Save
-    await sleep(1600); // 저장 정착
+    key("Return"); // default action = Save
+    await sleep(1600); // let the save settle
   }
   console.error("[osworld-agent] done");
 })().catch((e) => {

@@ -2,8 +2,8 @@ import { AppError } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { MlflowTraceSource, parseMlflowTrace } from "./mlflow.js";
 
-// 실제 MLflow 3.11.1 `GET /api/3.0/mlflow/traces/get` 응답에서 캡처한 스팬 모양(OTLP AnyValue, snake_case).
-// 어댑터를 실제 MLflow 스키마에 고정한다 — 라이브 인프라 없이도 CI 가 드리프트를 잡도록.
+// Span shape captured from a real MLflow 3.11.1 `GET /api/3.0/mlflow/traces/get` response (OTLP AnyValue, snake_case).
+// Pins the adapter to the real MLflow schema — so CI catches drift even without live infra.
 const REAL_TRACE = {
   trace: {
     spans: [
@@ -43,7 +43,7 @@ const REAL_TRACE = {
 };
 
 describe("parseMlflowTrace (MLflow 3.x OTLP AnyValue)", () => {
-  it("snake_case AnyValue 배열을 평탄화한다(string/bool/중첩 kvlist)", () => {
+  it("flattens the snake_case AnyValue array (string/bool/nested kvlist)", () => {
     const spans = parseMlflowTrace(REAL_TRACE.trace);
     expect(spans).toHaveLength(3);
     const llm = spans.find((s) => s.name === "llm_call");
@@ -55,7 +55,7 @@ describe("parseMlflowTrace (MLflow 3.x OTLP AnyValue)", () => {
 });
 
 describe("MlflowTraceSource.fetch", () => {
-  it("실제 응답 모양 → llm_call(model) + tool_call(bash) 로 정규화", async () => {
+  it("real response shape → normalized to llm_call (model) + tool_call (bash)", async () => {
     const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
       Promise.resolve(new Response(JSON.stringify(REAL_TRACE), { status: 200 })),
     );
@@ -63,26 +63,26 @@ describe("MlflowTraceSource.fetch", () => {
     const ev = await src.fetch("tr-abc");
     expect(ev.find((e) => e.kind === "llm_call")).toMatchObject({ model: "gpt-5.4-mini" });
     expect(ev.find((e) => e.kind === "tool_call")).toMatchObject({ name: "bash" });
-    // V3 엔드포인트 경로 확인
+    // verify the V3 endpoint path
     expect(fetchImpl.mock.calls[0]?.[0] as string).toMatch(/\/api\/3\.0\/mlflow\/traces\/get\?trace_id=tr-abc$/);
   });
 
-  it("404(트레이스 없음) → [] degrade(서비스 하니스 경로)", async () => {
+  it("404 (trace absent) → [] degrade (service-harness path)", async () => {
     const fetchImpl = vi.fn(() => Promise.resolve(new Response("not found", { status: 404 })));
     const src = new MlflowTraceSource({ endpoint: "http://m", fetchImpl: fetchImpl as typeof fetch });
     expect(await src.fetch("missing")).toEqual([]);
   });
 
-  it("401/5xx 등 non-2xx(404 외) → UpstreamError", async () => {
+  it("non-2xx other than 404 (401/5xx etc.) → UpstreamError", async () => {
     const fetchImpl = vi.fn(() => Promise.resolve(new Response("denied", { status: 401 })));
     const src = new MlflowTraceSource({ endpoint: "http://m", fetchImpl: fetchImpl as typeof fetch });
     await expect(src.fetch("t")).rejects.toBeInstanceOf(AppError);
   });
 });
 
-// correlate="tag" — 계측 에이전트가 자기 trace 에 남긴 everdict.run_id 태그로 검색(실 MLflow 3.14 API 형태 고정).
-describe("MlflowTraceSource — tag 상관", () => {
-  it("traces/search(locations+tags.`everdict.run_id` 필터)로 trace_id 를 찾은 뒤 그 id 로 스팬을 가져온다", async () => {
+// correlate="tag" — search by the everdict.run_id tag the instrumented agent wrote to its own trace (pinned to the real MLflow 3.14 API shape).
+describe("MlflowTraceSource — tag correlation", () => {
+  it("finds the trace_id via traces/search (locations + tags.`everdict.run_id` filter), then fetches spans by that id", async () => {
     const calls: Array<{ url: string; body?: string }> = [];
     const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
       const url = String(args[0]);
@@ -101,14 +101,14 @@ describe("MlflowTraceSource — tag 상관", () => {
     const events = await src.fetch("everdict-run-1");
 
     const search = JSON.parse(calls[0]?.body ?? "{}");
-    // 실 3.14 검증 형태: locations 필수 + 백틱 태그 필터.
+    // Real 3.14 verified shape: locations required + backtick tag filter.
     expect(search.locations).toEqual([{ type: "MLFLOW_EXPERIMENT", mlflow_experiment: { experiment_id: "7" } }]);
     expect(search.filter).toBe("tags.`everdict.run_id` = 'everdict-run-1'");
     expect(calls[1]?.url).toContain("trace_id=tr-found");
     expect(events.some((e) => e.kind === "llm_call")).toBe(true);
   });
 
-  it("태그 미발견 → [] degrade(id 모드의 404 와 동일), experiment 미지정 → 명시 에러(locations 필수)", async () => {
+  it("tag not found → [] degrade (same as id mode's 404), experiment unset → explicit error (locations required)", async () => {
     const empty = vi.fn(() => Promise.resolve(new Response(JSON.stringify({ traces: [] }), { status: 200 })));
     const src = new MlflowTraceSource({
       endpoint: "http://m",

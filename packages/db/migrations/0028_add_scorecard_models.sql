@@ -1,4 +1,4 @@
--- 스코어카드가 실제로 쓴 모델(리더보드 model 축) — {observed:[],declared?,primary?}.
--- observed=트레이스 관측, declared=spec 선언, primary=그룹 키. 경량이라 무거운 scorecard 와 달리 목록(list)에도 포함한다.
--- 추가 컬럼이라 additive(preflight 불필요). 과거 레코드는 NULL(=primary unknown; 백필은 후속).
+-- The models a scorecard actually used (leaderboard model axis) — {observed:[],declared?,primary?}.
+-- observed=observed from the trace, declared=declared in the spec, primary=group key. Lightweight, so unlike the heavy scorecard it's included in list too.
+-- Just an added column, so additive (no preflight needed). Past records are NULL (=primary unknown; backfill is a follow-up).
 ALTER TABLE everdict_scorecards ADD COLUMN IF NOT EXISTS models jsonb;

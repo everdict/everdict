@@ -1,12 +1,12 @@
-// 하니스 → 그 하니스로 평가한 벤치마크(데이터셋)들 + 최근 실행 결과. 하니스는 데이터셋 무관이라
-// 실제 연관은 실행(스코어카드)에서만 드러난다 — 목록에서 "이 하니스로 뭘 돌렸나 / 최근 결과"를 스코어카드에서 도출한다.
+// Harness → the benchmarks (datasets) evaluated with that harness + recent run results. A harness is dataset-agnostic, so
+// the actual relation only surfaces in runs (scorecards) — we derive "what was run with this harness / recent result" for the list from scorecards.
 export interface HarnessRelation {
-  datasets: string[] // 이 하니스로 평가된 서로 다른 데이터셋(벤치마크) id(등장 순)
-  scorecards: number // 이 하니스가 등장한 스코어카드 실행 수
-  lastRunAt?: string // 가장 최근 실행 시각(ISO)
-  lastStatus?: string // 가장 최근 실행의 상태(queued|running|succeeded|failed)
-  lastPassRate?: number | null // 가장 최근 실행의 대표 통과율(성공 시)
-  lastMean?: number | null // 가장 최근 실행의 대표 평균
+  datasets: string[] // distinct dataset (benchmark) ids evaluated with this harness (in order of appearance)
+  scorecards: number // number of scorecard runs this harness appeared in
+  lastRunAt?: string // most recent run timestamp (ISO)
+  lastStatus?: string // status of the most recent run (queued|running|succeeded|failed)
+  lastPassRate?: number | null // representative pass rate of the most recent run (on success)
+  lastMean?: number | null // representative mean of the most recent run
 }
 
 interface MetricLike {

@@ -1,8 +1,8 @@
 import type { SqlClient } from "./client.js";
 
-// 유저 프로필 — Keycloak(OIDC) 신원에 덧입히는 가변 표시 정보(이름/유저네임/아바타). subject(=sub)가 키.
-// email 은 여기 두지 않는다 — SSO 클레임(표시 전용·읽기전용)이라 Principal 에서만 온다. 이 스토어는
-// 컨트롤플레인이 소유하는 가변 프로필(Linear 식): 사람이 자기 표시 정보를 직접 수정한다(authz 무관).
+// User profile — mutable display info (name/username/avatar) layered on top of the Keycloak (OIDC) identity. subject (=sub) is the key.
+// email is not kept here — it's an SSO claim (display-only/read-only), so it comes only from the Principal. This store is
+// a mutable profile owned by the control plane (Linear-style): a person edits their own display info directly (no authz bearing).
 export interface UserProfile {
   subject: string;
   name?: string;
@@ -11,7 +11,7 @@ export interface UserProfile {
   updatedAt: string;
 }
 
-// 부분 갱신. 키가 없으면 그대로 두고, null 이면 그 필드를 지운다, 문자열이면 설정한다.
+// Partial update. Absent key = keep, null = clear the field, string = set it.
 export interface UserProfilePatch {
   name?: string | null;
   username?: string | null;
@@ -20,7 +20,7 @@ export interface UserProfilePatch {
 
 export interface UserProfileStore {
   get(subject: string): Promise<UserProfile | undefined>;
-  // 여러 subject 의 프로필을 한 번에(멤버 목록을 이름/아바타로 보강하는 용도). 프로필이 없는 subject 는 결과에서 누락.
+  // Multiple subjects' profiles at once (to enrich a member list with name/avatar). Subjects with no profile are omitted from the result.
   getMany(subjects: string[]): Promise<UserProfile[]>;
   upsert(subject: string, patch: UserProfilePatch): Promise<UserProfile>;
 }
@@ -29,7 +29,7 @@ function nowIso(): string {
   return new Date().toISOString();
 }
 
-// patch 필드 적용: undefined=유지, null=지움(undefined), 문자열=설정.
+// Apply a patch field: undefined=keep, null=clear (undefined), string=set.
 function applyField(current: string | undefined, incoming: string | null | undefined): string | undefined {
   if (incoming === undefined) return current;
   if (incoming === null) return undefined;
@@ -109,7 +109,7 @@ export class PgUserProfileStore implements UserProfileStore {
   }
 
   async upsert(subject: string, patch: UserProfilePatch): Promise<UserProfile> {
-    // read-merge-write — undefined=유지, null=지움 의 3-상태 병합을 동적 SQL 없이 처리.
+    // read-merge-write — handles the 3-state merge (undefined=keep, null=clear) without dynamic SQL.
     const cur = await this.get(subject);
     const name = applyField(cur?.name, patch.name) ?? null;
     const username = applyField(cur?.username, patch.username) ?? null;

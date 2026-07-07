@@ -40,7 +40,7 @@ let n = 0;
 const ids = () => `run-${n++}`;
 
 describe("RunService", () => {
-  it("submit → queued → 디스패치 성공 시 succeeded + result 저장", async () => {
+  it("submit → queued → succeeded + result stored on dispatch success", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
     const rec = await svc.submit({ tenant: "t", harness: { id: "scripted", version: "0" }, case: CASE });
@@ -51,7 +51,7 @@ describe("RunService", () => {
     expect(done?.result?.caseId).toBe("c1");
   });
 
-  it("runtime 지정 시 케이스 placement.target 으로 주입해 디스패치한다(scorecard 와 동일 대칭)", async () => {
+  it("when a runtime is given, injects it as the case's placement.target and dispatches (same symmetry as scorecard)", async () => {
     const store = new InMemoryRunStore();
     const jobs: AgentJob[] = [];
     const capture: Dispatcher = {
@@ -65,21 +65,21 @@ describe("RunService", () => {
     await flush();
     expect(jobs[0]?.evalCase.placement?.target).toBe("nomad-seoul");
 
-    // 대조: runtime 미지정이면 placement 를 건드리지 않는다(기존 동작 불변).
+    // Contrast: with no runtime, placement is untouched (existing behavior preserved).
     await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE });
     await flush();
     expect(jobs[1]?.evalCase.placement).toBeUndefined();
   });
 
-  it("requireRuntime 정책: runtime/self 타깃 없으면 400(BadRequest)이고 레코드도 안 생긴다(local 폴백 금지)", async () => {
+  it("requireRuntime policy: with no runtime/self target it's 400 (BadRequest) and no record is created (no local fallback)", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids, requireRuntime: true });
-    // 타깃 없음 → 제출 거절(게이트가 budget/record 생성 전에 막는다)
+    // No target → submission rejected (the gate blocks before budget/record creation)
     await expect(svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE })).rejects.toBeInstanceOf(
       BadRequestError,
     );
     expect(await svc.list("t")).toHaveLength(0);
-    // 등록 런타임 id 또는 self:<러너> 지정 → 게이트 통과, 정상 queued
+    // A registered runtime id or self:<runner> → passes the gate, normally queued
     const ok = await svc.submit({
       tenant: "t",
       harness: { id: "s", version: "0" },
@@ -89,7 +89,7 @@ describe("RunService", () => {
     expect(ok.status).toBe("queued");
   });
 
-  it("list(scorecardId) 는 그 배치 자식만, 기본 list 는 standalone 만(케이스 드릴다운)", async () => {
+  it("list(scorecardId) returns only that batch's children, default list only standalone (case drilldown)", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
     const base = {
@@ -102,11 +102,11 @@ describe("RunService", () => {
     await store.create({ ...base, id: "solo", caseId: "c" });
     await store.create({ ...base, id: "ch1", caseId: "c1", parentScorecardId: "sc1", trigger: "scorecard" });
     await store.create({ ...base, id: "ch2", caseId: "c2", parentScorecardId: "sc2", trigger: "scorecard" });
-    expect((await svc.list("t")).map((r) => r.id)).toEqual(["solo"]); // 기본: 자식 숨김
-    expect((await svc.list("t", { scorecardId: "sc1" })).map((r) => r.id)).toEqual(["ch1"]); // 배치 드릴다운
+    expect((await svc.list("t")).map((r) => r.id)).toEqual(["solo"]); // default: children hidden
+    expect((await svc.list("t", { scorecardId: "sc1" })).map((r) => r.id)).toEqual(["ch1"]); // batch drilldown
   });
 
-  it("trigger 를 레코드에 기록한다(활동 뷰 source 축) — 미지정이면 미설정", async () => {
+  it("records the trigger on the record (activity-view source axis) — unset if not given", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({ dispatcher: okDispatcher, store, newId: ids });
     const rec = await svc.submit({ tenant: "t", harness: { id: "s", version: "0" }, case: CASE, trigger: "web" });
@@ -115,7 +115,7 @@ describe("RunService", () => {
     expect(bare.trigger).toBeUndefined();
   });
 
-  it("셀프호스티드 실행(provenance.ranOn=self-hosted)은 워크스페이스 usd/tokens 버짓을 차감하지 않는다", async () => {
+  it("self-hosted execution (provenance.ranOn=self-hosted) does not draw down the workspace usd/tokens budget", async () => {
     const store = new InMemoryRunStore();
     const selfHosted: Dispatcher = {
       async dispatch(job) {
@@ -127,20 +127,20 @@ describe("RunService", () => {
     const svc = new RunService({ dispatcher: selfHosted, store, budget, newId: ids });
     await svc.submit({ tenant: "acme", submittedBy: "u", harness: { id: "s", version: "0" }, case: CASE });
     await flush();
-    expect(settle).not.toHaveBeenCalled(); // 유저 자기 로그인이 결제 — 워크스페이스 버짓 미차감
+    expect(settle).not.toHaveBeenCalled(); // the user's own login pays — workspace budget not charged
 
-    // 대조: 관리형 백엔드 결과(프로비넌스 없음)는 settle 된다.
+    // Contrast: a managed backend result (no provenance) is settled.
     await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
     await flush();
-    expect(settle).not.toHaveBeenCalled(); // selfHosted 디스패처라 여전히 호출 안 됨
+    expect(settle).not.toHaveBeenCalled(); // still not called — this is the selfHosted dispatcher
 
     const managed = new RunService({ dispatcher: okDispatcher, store, budget, newId: ids });
     await managed.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE });
     await flush();
-    expect(settle).toHaveBeenCalledTimes(1); // 관리형은 settle
+    expect(settle).toHaveBeenCalledTimes(1); // managed is settled
   });
 
-  it("디스패치 실패 시 failed + error 봉투", async () => {
+  it("failed + error envelope on dispatch failure", async () => {
     const store = new InMemoryRunStore();
     const svc = new RunService({ dispatcher: failDispatcher, store, newId: ids });
     const rec = await svc.submit({ tenant: "t", harness: { id: "scripted", version: "0" }, case: CASE });
@@ -150,7 +150,7 @@ describe("RunService", () => {
     expect(done?.error?.message).toBe("boom");
   });
 
-  it("예산 초과면 submit 이 던진다 (run 생성 안 함, 402 매핑)", async () => {
+  it("submit throws when over budget (no run created, maps to 402)", async () => {
     const store = new InMemoryRunStore();
     const budget = inMemoryBudget({ limitFor: () => ({ runs: 1 }) });
     const svc = new RunService({ dispatcher: okDispatcher, store, budget, newId: ids });
@@ -161,7 +161,7 @@ describe("RunService", () => {
     });
   });
 
-  it("계측: 요청 override > 워크스페이스 정책 > off, 결정값을 job.meterUsage 로 실어 보낸다", async () => {
+  it("metering: request override > workspace policy > off, carries the decided value as job.meterUsage", async () => {
     const seen: Array<boolean | undefined> = [];
     const dispatcher: Dispatcher = {
       async dispatch(job) {
@@ -169,22 +169,22 @@ describe("RunService", () => {
         return resultFor(job);
       },
     };
-    // 정책: acme 만 on. 요청 override 가 정책을 이긴다.
+    // Policy: only acme on. A request override beats the policy.
     const svc = new RunService({
       dispatcher,
       store: new InMemoryRunStore(),
       newId: ids,
       meterUsageFor: (t) => t === "acme",
     });
-    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE }); // 정책 on
-    await svc.submit({ tenant: "beta", harness: { id: "s", version: "0" }, case: CASE }); // 정책 off
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE }); // policy on
+    await svc.submit({ tenant: "beta", harness: { id: "s", version: "0" }, case: CASE }); // policy off
     await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE, meterUsage: false }); // override off
     await svc.submit({ tenant: "beta", harness: { id: "s", version: "0" }, case: CASE, meterUsage: true }); // override on
     await flush();
     expect(seen).toEqual([true, false, false, true]);
   });
 
-  it("judge 모델: 요청 override > 워크스페이스 기본 > 없음, 결정값을 job.judge 로 실어 보낸다", async () => {
+  it("judge model: request override > workspace default > none, carries the decided value as job.judge", async () => {
     const seen: Array<AgentJob["judge"]> = [];
     const dispatcher: Dispatcher = {
       async dispatch(job) {
@@ -196,11 +196,11 @@ describe("RunService", () => {
       dispatcher,
       store: new InMemoryRunStore(),
       newId: ids,
-      // 워크스페이스 기본: acme 만 judge 모델 설정.
+      // Workspace default: only acme has a judge model configured.
       judgeFor: async (t) => (t === "acme" ? { provider: "openai", model: "gpt-5.4-mini" } : undefined),
     });
-    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE }); // 기본 적용
-    await svc.submit({ tenant: "beta", harness: { id: "s", version: "0" }, case: CASE }); // 기본 없음
+    await svc.submit({ tenant: "acme", harness: { id: "s", version: "0" }, case: CASE }); // default applied
+    await svc.submit({ tenant: "beta", harness: { id: "s", version: "0" }, case: CASE }); // no default
     await svc.submit({
       tenant: "beta",
       harness: { id: "s", version: "0" },
@@ -209,11 +209,11 @@ describe("RunService", () => {
     }); // override
     await flush();
     expect(seen[0]).toEqual({ provider: "openai", model: "gpt-5.4-mini" });
-    expect(seen[1]).toBeUndefined(); // 기본 없으면 job.judge 미설정 → agent 에서 judge skip
+    expect(seen[1]).toBeUndefined(); // no default → job.judge unset → the agent skips the judge
     expect(seen[2]).toEqual({ provider: "anthropic", model: "claude-opus-4-8" });
   });
 
-  it("계측 정책은 async 가능(DB 설정 스토어) — await 해서 job 에 싣는다", async () => {
+  it("the metering policy can be async (DB settings store) — awaited and carried on the job", async () => {
     let seen: boolean | undefined;
     const dispatcher: Dispatcher = {
       async dispatch(job) {
@@ -221,7 +221,7 @@ describe("RunService", () => {
         return resultFor(job);
       },
     };
-    // DB 조회처럼 Promise<boolean> 반환
+    // Returns Promise<boolean> like a DB lookup
     const svc = new RunService({
       dispatcher,
       store: new InMemoryRunStore(),
@@ -233,7 +233,7 @@ describe("RunService", () => {
     expect(seen).toBe(true);
   });
 
-  it("정책 없으면 기본 off (job.meterUsage=false)", async () => {
+  it("with no policy, default off (job.meterUsage=false)", async () => {
     let seen: boolean | undefined;
     const dispatcher: Dispatcher = {
       async dispatch(job) {
@@ -247,7 +247,7 @@ describe("RunService", () => {
     expect(seen).toBe(false);
   });
 
-  it("비공개 repo: env.source.connectionId → repoTokenFor 로 resolve 해 job.repoToken 으로 실어 보낸다", async () => {
+  it("private repo: env.source.connectionId → resolved via repoTokenFor and carried as job.repoToken", async () => {
     const seen: Array<AgentJob["repoToken"]> = [];
     const dispatcher: Dispatcher = {
       async dispatch(job) {
@@ -255,7 +255,7 @@ describe("RunService", () => {
         return resultFor(job);
       },
     };
-    // 연결은 개인 소유 → repoTokenFor 는 owner(제출자 subject)로 resolve("내 연결로 clone").
+    // The connection is personally owned → repoTokenFor resolves by owner (submitter subject) ("clone with my connection").
     const calls: Array<{ owner: string; connectionId: string }> = [];
     const svc = new RunService({
       dispatcher,
@@ -275,20 +275,20 @@ describe("RunService", () => {
     });
     const submit = (c: EvalCase) =>
       svc.submit({ tenant: "acme", submittedBy: "u-alice", harness: { id: "s", version: "0" }, case: c });
-    await submit(gitCase("conn-alice")); // 해석됨(내 연결)
-    await submit(gitCase("conn-missing")); // 미해석
-    await submit(gitCase()); // connectionId 없음(public)
-    await submit(CASE); // files 시드(비-git)
+    await submit(gitCase("conn-alice")); // resolved (my connection)
+    await submit(gitCase("conn-missing")); // unresolved
+    await submit(gitCase()); // no connectionId (public)
+    await submit(CASE); // files seed (non-git)
     await flush();
     expect(seen).toEqual(["gho_resolved", undefined, undefined, undefined]);
-    // connectionId 없는 케이스/비-repo 는 repoTokenFor 를 아예 호출하지 않는다. owner 는 제출자 subject.
+    // Cases with no connectionId / non-repo cases never call repoTokenFor. owner is the submitter subject.
     expect(calls).toEqual([
       { owner: "u-alice", connectionId: "conn-alice" },
       { owner: "u-alice", connectionId: "conn-missing" },
     ]);
   });
 
-  it("완료 시 onComplete 콜백을 최신 레코드로 호출(알림 훅)", async () => {
+  it("on completion, calls the onComplete callback with the latest record (notification hook)", async () => {
     const seen: Array<{ tenant: string; status: string; id: string }> = [];
     const store = new InMemoryRunStore();
     const svc = new RunService({
@@ -304,7 +304,7 @@ describe("RunService", () => {
     expect(seen).toEqual([{ tenant: "acme", status: "succeeded", id: rec.id }]);
   });
 
-  it("디스패치 실패해도 onComplete 는 failed 레코드로 호출된다", async () => {
+  it("even on dispatch failure, onComplete is called with the failed record", async () => {
     const seen: string[] = [];
     const svc = new RunService({
       dispatcher: failDispatcher,
@@ -319,7 +319,7 @@ describe("RunService", () => {
     expect(seen).toEqual(["failed"]);
   });
 
-  it("완료 시 cost 가 settle 된다", async () => {
+  it("cost is settled on completion", async () => {
     const store = new InMemoryRunStore();
     const budget = inMemoryBudget({ limitFor: () => ({ usd: 1 }) });
     const dispatcher: Dispatcher = {
@@ -334,7 +334,7 @@ describe("RunService", () => {
     expect((await svc.get(rec.id))?.status).toBe("succeeded");
   });
 
-  it("종료 시 웹훅을 쏜다", async () => {
+  it("fires the webhook on completion", async () => {
     const store = new InMemoryRunStore();
     const calls: Array<{ url: string; status: string }> = [];
     const fakeFetch = (async (url: string | URL, init?: { body?: string }) => {

@@ -32,7 +32,7 @@ export function SubmitRunForm({
   harnesses: Harness[]
   runtimes?: { id: string }[]
   runners?: { id: string; label: string }[]
-  hasWorkspaceRunners?: boolean // 팀 공유 러너가 있으면 self:ws 풀 옵션 노출
+  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -103,8 +103,8 @@ export function SubmitRunForm({
 
       <div className="space-y-1.5">
         <Label htmlFor="runtime">{t('runtimeLabel')}</Label>
-        {/* optgroup 대응 — 내 로컬 러너는 우측 hint 로 구분(flat 리스트) */}
-        {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 미지정 run 은 400. */}
+        {/* optgroup stand-in — my local runners are distinguished by the right-side hint (flat list) */}
+        {/* Execution location is required — the control plane host fallback is disabled (requireRuntime), so an unspecified run 400s. */}
         <Controller
           control={control}
           name="runtime"
@@ -114,7 +114,7 @@ export function SubmitRunForm({
               id="runtime"
               options={[
                 ...runtimes.map((r) => ({ value: r.id })),
-                // 팀 공유 러너 풀 — 등록된 팀 러너 중 아무거나(capability 충족) 가져간다(멀티러너=동시성).
+                // Team shared runner pool — takes any registered team runner that meets capability (multiple runners = concurrency).
                 ...(hasWorkspaceRunners
                   ? [
                       {
@@ -124,7 +124,7 @@ export function SubmitRunForm({
                       },
                     ]
                   : []),
-                // 내 러너 풀 — 내 러너(여러 대일 수 있음) 중 아무거나. 특정 러너는 아래 개별 항목.
+                // My runner pool — any of my runners (there may be several). A specific runner is an individual item below.
                 ...(runners.length > 0
                   ? [{ value: 'self', label: t('poolSelfLabel'), hint: t('poolSelfHint') }]
                   : []),

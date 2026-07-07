@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
-// 알림 피드 미러 — 컨트롤플레인 GET /notifications (docs/architecture/notifications.md).
-// 개인 소유(recipient=subject) — "내가 시킨 작업이 끝났다"를 벨 인박스/네이티브 알림이 소비.
+// Notification feed mirror — control plane GET /notifications (docs/architecture/notifications.md).
+// Personally owned (recipient=subject) — "a job I triggered finished" consumed by the bell inbox/native notification.
 export const notificationKinds = [
   'run_completed',
   'run_failed',

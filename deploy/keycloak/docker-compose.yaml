@@ -1,14 +1,14 @@
-# 로컬 Keycloak (사람=테넌트 유저 인증, OIDC) — apps/api 가 JWT 를 검증(인증 코어는 컨트롤플레인 소유).
-# 기동: docker compose -f deploy/keycloak/docker-compose.yaml up -d   (admin 콘솔: http://localhost:8080, admin/admin)
+# Local Keycloak (human = tenant user auth, OIDC) — apps/api verifies the JWT (the auth core is owned by the control plane).
+# Start: docker compose -f deploy/keycloak/docker-compose.yaml up -d   (admin console: http://localhost:8080, admin/admin)
 #
-# realm-everdict.json 을 --import-realm 로 자동 임포트한다:
+# Auto-imports realm-everdict.json via --import-realm:
 #  - realm `everdict`, realm roles viewer/member/admin
 #  - client `everdict-web` (confidential, secret=everdict-web-secret, standard flow + direct grant, redirect 3001)
-#  - protocol mapper: user attribute `workspace` → token claim `workspace` (apps/api 가 이 클레임으로 워크스페이스 식별)
+#  - protocol mapper: user attribute `workspace` → token claim `workspace` (apps/api identifies the workspace from this claim)
 #  - demo users: alice/alice (member, workspace=acme), carol/carol (admin, workspace=acme)
 #
-# apps/api 측: KEYCLOAK_ISSUER=http://localhost:8080/realms/everdict EVERDICT_REQUIRE_AUTH=1 node apps/api/dist/main.js
-# apps/web 측 .env: KEYCLOAK_ISSUER=…/realms/everdict, KEYCLOAK_CLIENT_ID=everdict-web, KEYCLOAK_CLIENT_SECRET=everdict-web-secret
+# apps/api side: KEYCLOAK_ISSUER=http://localhost:8080/realms/everdict EVERDICT_REQUIRE_AUTH=1 node apps/api/dist/main.js
+# apps/web side .env: KEYCLOAK_ISSUER=…/realms/everdict, KEYCLOAK_CLIENT_ID=everdict-web, KEYCLOAK_CLIENT_SECRET=everdict-web-secret
 services:
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
@@ -17,17 +17,17 @@ services:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
       KC_HTTP_ENABLED: "true"
-      # 공개(external) 접속용 정규 호스트. 브라우저 리다이렉트·토큰 issuer 가 이 URL 로 통일된다.
-      # localhost 면 외부 접속이 깨지므로 외부 접속 시 KC_HOSTNAME 을 외부 호스트로 설정해야 한다
-      # (scripts/dev/up.sh 가 EVERDICT_PUBLIC_HOST 로 자동 설정). 기본값은 로컬 전용.
+      # The canonical host for external access. Browser redirects and the token issuer are unified to this URL.
+      # localhost breaks external access, so for external access KC_HOSTNAME must be set to the external host
+      # (scripts/dev/up.sh sets it automatically from EVERDICT_PUBLIC_HOST). The default is local-only.
       KC_HOSTNAME: ${KC_HOSTNAME:-http://localhost:${KEYCLOAK_PORT:-8080}}
       KC_HOSTNAME_STRICT: "false"
     ports:
       - "${KEYCLOAK_PORT:-8080}:8080"
     volumes:
       - ./realm-everdict.json:/opt/keycloak/data/import/realm-everdict.json:ro
-      # 영속화: realm/유저/세션이 재시작해도 유지된다. --import-realm 은 realm 이 없을 때(첫 기동)만
-      # 임포트하므로, 이후 admin 콘솔 변경분은 보존된다. 처음부터 다시 임포트하려면 이 볼륨을 삭제:
+      # Persistence: realm/users/sessions survive restarts. --import-realm imports only when the realm is absent
+      # (first startup), so subsequent admin-console changes are preserved. To re-import from scratch, delete this volume:
       #   docker compose -f deploy/keycloak/docker-compose.yaml down -v
       - keycloak-data:/opt/keycloak/data
 

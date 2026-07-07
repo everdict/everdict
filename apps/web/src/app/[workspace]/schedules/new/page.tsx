@@ -34,7 +34,7 @@ export default async function NewSchedulePage({
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
       runtimes = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
     } catch {
-      // 목록 실패해도 폼은 동작(텍스트/빈 선택)
+      // Even if the list fails, the form still works (text / empty selection)
     }
   }
 

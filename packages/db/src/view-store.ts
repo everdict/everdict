@@ -2,9 +2,9 @@ import { z } from "zod";
 
 import type { SqlClient } from "./client.js";
 
-// 저장된 스코어카드 분석 "View" — 웹 AnalysisConfig(필터·그룹·측정·검색 구성)를 이름 붙여 저장하고
-// 워크스페이스에 공유한다. 스냅샷이 아니라 구성(레시피)만 — 열 때 현재 데이터로 재실행(라이브).
-// config 는 컨트롤플레인엔 불투명 jsonb(웹이 형태를 검증). 설계: docs/architecture/scorecard-analysis-views.md.
+// Saved scorecard-analysis "View" — save the web AnalysisConfig (filter·group·measure·search config) under a name and
+// share it in the workspace. Not a snapshot, only the config (recipe) — re-runs with current data when opened (live).
+// config is opaque jsonb to the control plane (the web validates its shape). Design: docs/architecture/scorecard-analysis-views.md.
 export const ViewVisibilitySchema = z.enum(["private", "workspace"]);
 export type ViewVisibility = z.infer<typeof ViewVisibilitySchema>;
 
@@ -12,15 +12,15 @@ export const ViewRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   name: z.string(),
-  config: z.unknown(), // 웹 AnalysisConfig — 여기선 불투명(jsonb).
+  config: z.unknown(), // the web AnalysisConfig — opaque here (jsonb).
   visibility: ViewVisibilitySchema,
-  createdBy: z.string(), // 소유자 subject
+  createdBy: z.string(), // owner subject
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type ViewRecord = z.infer<typeof ViewRecordSchema>;
 
-// 워크스페이스(tenant) 스코프. listVisible = 내 비공개 + 워크스페이스 공유(다른 사람 비공개는 안 보임).
+// Workspace (tenant) scoped. listVisible = my private + workspace-shared (others' private are not visible).
 export interface ViewStore {
   create(record: ViewRecord): Promise<void>;
   get(tenant: string, id: string): Promise<ViewRecord | undefined>;
@@ -38,7 +38,7 @@ export class InMemoryViewStore implements ViewStore {
 
   async get(tenant: string, id: string): Promise<ViewRecord | undefined> {
     const r = this.byId.get(id);
-    return r && r.tenant === tenant ? r : undefined; // 타 워크스페이스는 없는 것으로
+    return r && r.tenant === tenant ? r : undefined; // treat another workspace's as nonexistent
   }
 
   async listVisible(tenant: string, subject: string): Promise<ViewRecord[]> {
@@ -87,7 +87,7 @@ function rowToRecord(row: ViewRow): ViewRecord {
   });
 }
 
-// Postgres 뷰 스토어 — 인메모리와 동일 계약. config 는 jsonb.
+// Postgres view store — same contract as in-memory. config is jsonb.
 export class PgViewStore implements ViewStore {
   constructor(private readonly client: SqlClient) {}
 

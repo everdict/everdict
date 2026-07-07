@@ -8,7 +8,7 @@ import { Callout } from '@/shared/ui/callout'
 
 import { updateWorkspaceSettingsAction, type WorkspaceSettings } from '../api/workspace-settings'
 
-// 워크스페이스 정책 폼. 지금은 사용량 계측 토글. 비-admin 은 읽기 전용(컨트롤플레인이 최종 강제).
+// Workspace policy form. Currently a usage-metering toggle. Non-admins are read-only (the control plane does the final enforcement).
 export function SettingsForm({
   initial,
   canWrite,

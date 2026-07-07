@@ -3,11 +3,11 @@ import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "@
 import type { WorkspaceRecord, WorkspaceStore, WorkspaceWithRole } from "@everdict/db";
 import { validateImageRef } from "./image-ref.js";
 
-// 워크스페이스 self-serve 멤버십의 서비스 코어 — HTTP 라우트와 MCP 툴이 공유한다(패리티: 로직 1개, 트랜스포트 2개).
-// 인증된 subject 기준으로 동작(워크스페이스 내부 역할 게이트 없음 — 새 워크스페이스 생성은 누구나 가능한 self-serve).
+// Service core for self-serve workspace membership — shared by the HTTP route and the MCP tool (parity: one logic, two transports).
+// Operates on the authenticated subject (no workspace-internal role gate — creating a new workspace is self-serve, open to anyone).
 const SLUG = /^[a-z0-9][a-z0-9-]*$/;
 
-// 표시 이름 → URL-safe slug(워크스페이스 id = tenant 키). 영숫자 외는 하이픈으로, 최대 40자.
+// Display name → URL-safe slug (workspace id = tenant key). Non-alphanumeric → hyphen, max 40 chars.
 function slugify(name: string): string {
   return name
     .toLowerCase()
@@ -20,63 +20,63 @@ function slugify(name: string): string {
 export class WorkspaceService {
   constructor(private readonly store: WorkspaceStore) {}
 
-  // 내가 멤버인 워크스페이스 목록(역할 포함).
+  // Workspaces I'm a member of (with role).
   async listForSubject(subject: string): Promise<WorkspaceWithRole[]> {
     return this.store.listForSubject(subject);
   }
 
-  // 활성 워크스페이스의 레코드(id/name/owner/logoUrl/createdAt). 없으면 404.
+  // The active workspace's record (id/name/owner/logoUrl/createdAt). 404 if absent.
   async get(workspace: string): Promise<WorkspaceRecord> {
     const rec = await this.store.get(workspace);
-    if (!rec) throw new NotFoundError("NOT_FOUND", { workspace }, "워크스페이스를 찾을 수 없습니다.");
+    if (!rec) throw new NotFoundError("NOT_FOUND", { workspace }, "Workspace not found.");
     return rec;
   }
 
-  // 표시 정보(이름/로고) 갱신. slug(id)는 불변. 빈 문자열 logoUrl 은 로고 제거로 해석.
+  // Update display info (name/logo). The slug (id) is immutable. An empty-string logoUrl means removing the logo.
   async update(workspace: string, input: { name?: string; logoUrl?: string }): Promise<WorkspaceRecord> {
     const patch: { name?: string; logoUrl?: string | null } = {};
     if (input.name !== undefined) {
       const name = input.name.trim();
-      if (!name) throw new BadRequestError("BAD_REQUEST", { field: "name" }, "워크스페이스 이름이 필요합니다.");
-      if (name.length > 80) throw new BadRequestError("BAD_REQUEST", { field: "name" }, "이름은 80자 이하여야 합니다.");
+      if (!name) throw new BadRequestError("BAD_REQUEST", { field: "name" }, "Workspace name is required.");
+      if (name.length > 80)
+        throw new BadRequestError("BAD_REQUEST", { field: "name" }, "Name must be at most 80 characters.");
       patch.name = name;
     }
     if (input.logoUrl !== undefined) {
       const clean = input.logoUrl.trim();
-      patch.logoUrl = clean === "" ? null : validateImageRef(clean, "logoUrl"); // 빈 문자열 → 제거
+      patch.logoUrl = clean === "" ? null : validateImageRef(clean, "logoUrl"); // empty string → remove
     }
     const updated = await this.store.update(workspace, patch);
-    if (!updated) throw new NotFoundError("NOT_FOUND", { workspace }, "워크스페이스를 찾을 수 없습니다.");
+    if (!updated) throw new NotFoundError("NOT_FOUND", { workspace }, "Workspace not found.");
     return updated;
   }
 
-  // 워크스페이스 + 모든 스코프 데이터를 하드 삭제. owner(생성자)만 가능 — 역할 매트릭스가 아니라 소유권 게이트.
+  // Hard-delete the workspace + all scoped data. Owner (creator) only — an ownership gate, not the role matrix.
   async delete(workspace: string, subject: string): Promise<void> {
     const rec = await this.store.get(workspace);
-    if (!rec) throw new NotFoundError("NOT_FOUND", { workspace }, "워크스페이스를 찾을 수 없습니다.");
+    if (!rec) throw new NotFoundError("NOT_FOUND", { workspace }, "Workspace not found.");
     if (rec.owner !== subject)
       throw new ForbiddenError(
         "FORBIDDEN",
         { workspace, action: "workspace:delete" },
-        "워크스페이스는 생성자(owner)만 삭제할 수 있습니다.",
+        "Only the creator (owner) can delete a workspace.",
       );
     await this.store.delete(workspace);
   }
 
-  // self-serve 생성: name(필수) + 선택 id(slug). 생성자는 그 워크스페이스의 admin.
-  // 명시 id 충돌은 409. 이름에서 파생한 slug 충돌은 짧은 접미사로 유니크 보장(막다른 길 회피).
+  // Self-serve creation: name (required) + optional id (slug). The creator becomes the workspace's admin.
+  // An explicit-id collision is 409. A slug collision derived from the name is made unique with a short suffix (avoid a dead end).
   async create(subject: string, input: { name: string; id?: string }): Promise<WorkspaceWithRole> {
     const name = input.name.trim();
-    if (!name) throw new BadRequestError("BAD_REQUEST", undefined, "워크스페이스 이름이 필요합니다.");
+    if (!name) throw new BadRequestError("BAD_REQUEST", undefined, "Workspace name is required.");
 
     const explicit = typeof input.id === "string" && input.id.length > 0;
     let id = explicit ? (input.id as string).trim() : slugify(name);
     if (!id || !SLUG.test(id))
-      throw new BadRequestError("BAD_REQUEST", undefined, "워크스페이스 ID 는 ^[a-z0-9][a-z0-9-]*$ 형식이어야 합니다.");
+      throw new BadRequestError("BAD_REQUEST", undefined, "Workspace ID must match ^[a-z0-9][a-z0-9-]*$.");
 
     let created = await this.store.create({ id, name, owner: subject });
-    if (!created && explicit)
-      throw new ConflictError("CONFLICT", { id }, `이미 존재하는 워크스페이스 ID 입니다: ${id}`);
+    if (!created && explicit) throw new ConflictError("CONFLICT", { id }, `Workspace ID already exists: ${id}`);
 
     const stem = slugify(name) || "ws";
     for (let attempt = 0; !created && attempt < 6; attempt += 1) {
@@ -87,7 +87,7 @@ export class WorkspaceService {
       throw new ConflictError(
         "CONFLICT",
         undefined,
-        "유니크한 워크스페이스 ID 를 만들지 못했습니다. id 를 직접 지정해 보세요.",
+        "Could not create a unique workspace ID. Try specifying an id yourself.",
       );
 
     return { id: created.id, name: created.name, role: "admin" };

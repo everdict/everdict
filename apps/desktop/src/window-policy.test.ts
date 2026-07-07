@@ -4,26 +4,26 @@ import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window
 const WEB = "https://app.everdict.dev";
 
 describe("webOriginOf", () => {
-  it("URL 에서 origin 만 뽑는다(경로/쿼리 무시)", () => {
+  it("extracts only the origin from a URL (ignores path/query)", () => {
     expect(webOriginOf("https://app.everdict.dev/ws/runs?x=1")).toBe("https://app.everdict.dev");
   });
 
-  it("잘못된 웹 URL 은 throw(기동 실패가 맞다)", () => {
+  it("throws on a bad web URL (failing startup is correct)", () => {
     expect(() => webOriginOf("not-a-url")).toThrow();
   });
 });
 
 describe("decideWindowOpen", () => {
-  it("웹 origin 새 창은 앱 안에 허용", () => {
+  it("allows a web-origin new window inside the app", () => {
     expect(decideWindowOpen(`${WEB}/acme/runs/1`, WEB)).toBe("in-app");
   });
 
-  it("다른 http/https origin 은 시스템 브라우저로", () => {
+  it("sends another http/https origin to the system browser", () => {
     expect(decideWindowOpen("https://github.com/octo/repo", WEB)).toBe("external");
     expect(decideWindowOpen("http://mattermost.internal/hook", WEB)).toBe("external");
   });
 
-  it("http/https 외 스킴(javascript:/file:)과 비 URL 은 차단", () => {
+  it("blocks non-http/https schemes (javascript:/file:) and non-URLs", () => {
     expect(decideWindowOpen("javascript:alert(1)", WEB)).toBe("deny");
     expect(decideWindowOpen("file:///etc/passwd", WEB)).toBe("deny");
     expect(decideWindowOpen("%%%", WEB)).toBe("deny");
@@ -31,12 +31,12 @@ describe("decideWindowOpen", () => {
 });
 
 describe("allowTopLevelNavigation", () => {
-  it("OIDC/OAuth 경유를 위해 http/https 탑레벨 네비게이션은 origin 무관 허용", () => {
+  it("allows http/https top-level navigation regardless of origin (for OIDC/OAuth redirects)", () => {
     expect(allowTopLevelNavigation("https://keycloak.everdict.dev/realms/everdict/auth")).toBe(true);
     expect(allowTopLevelNavigation("https://github.com/login/oauth/authorize")).toBe(true);
   });
 
-  it("file:/javascript:/비 URL 은 차단", () => {
+  it("blocks file:/javascript:/non-URLs", () => {
     expect(allowTopLevelNavigation("file:///etc/passwd")).toBe(false);
     expect(allowTopLevelNavigation("javascript:alert(1)")).toBe(false);
     expect(allowTopLevelNavigation("nope")).toBe(false);

@@ -7,9 +7,9 @@ import { useTranslations } from 'next-intl'
 import type { HarnessSpec, TopologyDependency, TopologyService } from '@/entities/harness'
 import { cn } from '@/shared/lib/utils'
 
-// 서비스(토폴로지) 하니스의 인프라 관계를 측정 기반 SVG 도식으로 그린다.
-// 레인: Ingress(프론트도어) → Agent topology(서비스 + needs 엣지) → State & world(스토어 + 타깃).
-// 트레이스 출처는 out-of-band(에이전트가 내보내고 평가가 끌어옴). 좌표는 실제 노드 위치를 측정해 반응형으로 재계산.
+// Draws the infra relationships of a service (topology) harness as a measurement-based SVG diagram.
+// Lanes: Ingress (front-door) → Agent topology (services + needs edges) → State & world (stores + target).
+// The trace source is out-of-band (the agent emits it and the eval pulls it). Coordinates are recomputed responsively by measuring the actual node positions.
 
 type Side = 'left' | 'right'
 type EdgeKind = 'submit' | 'needs' | 'store' | 'external' | 'target' | 'trace'
@@ -41,7 +41,7 @@ const EDGE_DASH: Partial<Record<EdgeKind, string>> = {
   trace: '2 5',
 }
 
-// store 종류별 색 — 시각적으로 구분(스키마 무관 문자열이므로 폴백 indigo).
+// Color per store kind — for visual distinction (schema-agnostic string, so fallback indigo).
 const STORE_COLOR: Record<string, string> = {
   postgres: '#4c8dff',
   redis: '#ef6f6c',
@@ -65,7 +65,7 @@ function pathFor(
   p1: { x: number; y: number },
   s1: Side
 ): { d: string; lx: number; ly: number } {
-  // 같은 레인 내 needs 엣지(좌→좌): 왼쪽 거터로 휘어지는 브래킷.
+  // needs edge within the same lane (left→left): a bracket curving into the left gutter.
   if (s0 === 'left' && s1 === 'left') {
     const g = 26
     const x = Math.min(p0.x, p1.x) - g
@@ -75,7 +75,7 @@ function pathFor(
       ly: (p0.y + p1.y) / 2,
     }
   }
-  // 레인 횡단(우→좌): 수평 큐빅 베지어.
+  // crossing lanes (right→left): a horizontal cubic Bézier.
   const dx = Math.max(48, p1.x - p0.x)
   const c0x = p0.x + dx * 0.5
   const c1x = p1.x - dx * 0.5
@@ -116,7 +116,7 @@ function buildEdges(
           label: 'needs',
         })
   deps.forEach((d, i) => {
-    // 어느 서비스가 쓰는지(d.service) 알면 그 서비스→스토어로, 모르면 front-door anchor 에서.
+    // If we know which service uses it (d.service), draw that service→store; otherwise from the front-door anchor.
     const from = d.service && names.has(d.service) ? `svc:${d.service}` : anchorId
     const external = d.isolateBy === 'external'
     edges.push({
@@ -187,7 +187,7 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
     const ro = new ResizeObserver(() => compute())
     ro.observe(container)
     window.addEventListener('resize', compute)
-    // 폰트 로드 후 메트릭이 바뀌면 한 번 더(레이아웃 시프트 보정).
+    // Once more if the metrics change after fonts load (layout-shift correction).
     const t = setTimeout(compute, 220)
     return () => {
       ro.disconnect()
@@ -205,7 +205,7 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
   return (
     <div className="overflow-x-auto rounded-xl border border-border bg-[var(--color-muted)]/40 [background-image:radial-gradient(var(--color-border)_1px,transparent_1px)] [background-size:22px_22px]">
       <div ref={containerRef} className="relative min-w-[700px] p-6">
-        {/* 엣지 레이어 */}
+        {/* edge layer */}
         <svg
           className="pointer-events-none absolute inset-0 size-full overflow-visible"
           aria-hidden
@@ -238,7 +238,7 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
           ))}
         </svg>
 
-        {/* 엣지 라벨 레이어 */}
+        {/* edge label layer */}
         <div className="pointer-events-none absolute inset-0 z-[5]">
           {edges
             .filter((e) => e.label)
@@ -253,7 +253,7 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
             ))}
         </div>
 
-        {/* 노드 레인 */}
+        {/* node lanes */}
         <div className="relative z-10 grid grid-cols-[minmax(0,0.82fr)_minmax(0,1.25fr)_minmax(0,1fr)] gap-x-12">
           <Lane label="Ingress">
             <Node

@@ -13,7 +13,7 @@ export interface ImportBenchmarkResult {
   error?: string
 }
 
-// 카탈로그/레시피/인라인 spec 을 당겨 이 워크스페이스의 데이터셋으로 등록. authZ(member+)·HF 인출·불변성(409)은 컨트롤플레인이 강제.
+// Pull a catalog/recipe/inline spec and register it as a dataset in this workspace. AuthZ (member+), HF fetch, and immutability (409) are enforced by the control plane.
 export async function importBenchmarkAction(body: unknown): Promise<ImportBenchmarkResult> {
   const ctx = await authContext()
   try {
@@ -36,7 +36,7 @@ export interface PreviewSourceResult {
   error?: string
 }
 
-// 소스 미리보기 — 매핑 전 원본 행 + 감지된 필드. 위저드가 필드를 드롭다운에 채우고 매핑하기 전에 호출.
+// Source preview — raw rows + detected fields, before mapping. Called by the wizard before it fills the field dropdowns and maps them.
 export async function previewSourceAction(body: unknown): Promise<PreviewSourceResult> {
   const ctx = await authContext()
   try {
@@ -60,7 +60,7 @@ export interface HfSplit {
   split: string
 }
 
-// HF Hub 검색 — 검색어로 데이터셋 후보를 찾는다(정확한 id 직접 입력 회피).
+// HF Hub search — find dataset candidates by query (avoids typing an exact id directly).
 export async function searchHfDatasetsAction(
   query: string,
   limit?: number
@@ -76,7 +76,7 @@ export async function searchHfDatasetsAction(
   }
 }
 
-// 선택한 HF 데이터셋의 config/split 조합 — 드롭다운용.
+// config/split combinations for the selected HF dataset — for the dropdown.
 export async function hfSplitsAction(
   dataset: string
 ): Promise<{ ok: boolean; splits?: HfSplit[]; error?: string }> {
@@ -88,7 +88,7 @@ export async function hfSplitsAction(
   }
 }
 
-// repo 데이터 파일(csv/jsonl/json) 목록 — 뷰어(datasets-server) 미서빙 데이터셋의 파일 직접 인출 폴백.
+// List of repo data files (csv/jsonl/json) — a direct file-fetch fallback for datasets not served by the viewer (datasets-server).
 export async function hfFilesAction(
   dataset: string
 ): Promise<{ ok: boolean; files?: string[]; error?: string }> {

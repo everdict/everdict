@@ -3,7 +3,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/shared/lib/utils'
 
-// Linear st. 라벨 — 작은 11px chip, tint 배경 + inset ring, weight 510.
+// Linear st. label — small 11px chip, tint background + inset ring, weight 510.
 const badgeVariants = cva(
   'inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-[510] leading-none ring-1 ring-inset',
   {

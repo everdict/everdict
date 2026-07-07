@@ -1,20 +1,20 @@
--- 0025_create_runners — 셀프호스티드 러너(self-hosted runner) 개인 디바이스 페어링.
--- 개인 소유(owner=principal.subject) + 워크스페이스 가시성(workspace 컬럼). Connected accounts(0019/0023)와 동일 사상.
--- 페어링 토큰은 평문 금지 — SHA-256 해시만 보관(tenant API key 와 동일). 설계: docs/architecture/self-hosted-runner.md.
+-- 0025_create_runners — self-hosted runner personal-device pairing.
+-- Personally owned (owner=principal.subject) + workspace-visible (workspace column). Same model as Connected accounts (0019/0023).
+-- No plaintext for the pairing token — only the SHA-256 hash is stored (same as a tenant API key). Design: docs/architecture/self-hosted-runner.md.
 CREATE TABLE IF NOT EXISTS everdict_runners (
   owner        text NOT NULL,
   id           text NOT NULL,
-  workspace    text NOT NULL,            -- 페어링된 워크스페이스(로스터용). 소유는 owner.
-  label        text NOT NULL,            -- 표시용 디바이스 이름
-  os           text,                     -- linux | darwin | win32 등(선택)
-  capabilities text NOT NULL DEFAULT '', -- repo | browser | os-use | docker, 공백 구분
-  token_hash   text NOT NULL,            -- 페어링 토큰의 SHA-256 해시(평문 금지)
+  workspace    text NOT NULL,            -- the paired workspace (for the roster). Ownership is owner.
+  label        text NOT NULL,            -- display device name
+  os           text,                     -- linux | darwin | win32 etc. (optional)
+  capabilities text NOT NULL DEFAULT '', -- repo | browser | os-use | docker, space-delimited
+  token_hash   text NOT NULL,            -- SHA-256 hash of the pairing token (no plaintext)
   paired_at    timestamptz NOT NULL DEFAULT now(),
-  last_seen_at timestamptz,              -- 마지막 lease/heartbeat(이후 슬라이스)
+  last_seen_at timestamptz,              -- last lease/heartbeat (later slice)
   PRIMARY KEY (owner, id)
 );
 
--- 워크스페이스 로스터(listByWorkspace) 조회용.
+-- For workspace-roster (listByWorkspace) lookups.
 CREATE INDEX IF NOT EXISTS everdict_runners_workspace_idx ON everdict_runners (workspace);
--- 토큰 해시 → 러너 해석(resolveByToken). 토큰은 전역 유일.
+-- Token hash → runner resolution (resolveByToken). Tokens are globally unique.
 CREATE UNIQUE INDEX IF NOT EXISTS everdict_runners_token_hash_idx ON everdict_runners (token_hash);

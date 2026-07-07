@@ -7,10 +7,10 @@ import { createPortal } from 'react-dom'
 
 import { cn } from '@/shared/lib/utils'
 
-// 커스텀 툴팁(Linear st. popover) — 가이드/안내 문구는 화면에 인라인 노출하지 않고,
-// 트리거(주로 info 아이콘)에 호버/포커스했을 때만 보여준다. Combobox 처럼 의존성 없는 경량 구현.
-// 콘텐츠는 body 포털 + fixed 배치 — overflow-hidden 컨테이너(설정 리스트 카드 등)나 스태킹
-// 컨텍스트 안에서도 잘리지 않는다(트리거 rect 기준으로 열 때 좌표 계산, 스크롤/리사이즈 시 닫음).
+// Custom tooltip (Linear st. popover) — don't render guide/notice text inline on screen;
+// show it only on hover/focus of the trigger (usually the info icon). Dependency-free lightweight implementation, like Combobox.
+// The content is a body portal + fixed placement — it's not clipped inside an overflow-hidden container (settings list card, etc.) or a stacking
+// context (compute coordinates from the trigger rect on open, close on scroll/resize).
 export function Tooltip({
   content,
   children,
@@ -26,7 +26,7 @@ export function Tooltip({
   className?: string
   contentClassName?: string
 }) {
-  const [style, setStyle] = useState<CSSProperties>() // undefined = 닫힘
+  const [style, setStyle] = useState<CSSProperties>() // undefined = closed
   const triggerRef = useRef<HTMLSpanElement>(null)
 
   function openAtTrigger() {
@@ -46,7 +46,7 @@ export function Tooltip({
   }
   const close = () => setStyle(undefined)
 
-  // 열려 있는 동안 스크롤/리사이즈 → 좌표가 낡으므로 닫는다(호버 툴팁은 재계산보다 닫힘이 자연스럽다).
+  // While open, scroll/resize → coordinates go stale, so close (for a hover tooltip, closing is more natural than recalculating).
   useEffect(() => {
     if (!style) return
     window.addEventListener('scroll', close, true)
@@ -89,7 +89,7 @@ export function Tooltip({
   )
 }
 
-// info 아이콘 트리거 툴팁 — 안내 문구의 표준 노출 방식(인라인 캡션 금지).
+// info-icon trigger tooltip — the standard way to surface guide text (no inline captions).
 export function InfoTip({
   content,
   side,

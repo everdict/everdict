@@ -2,12 +2,12 @@ import { sign } from "node:crypto";
 import { z } from "zod";
 import { oauthFetchJson } from "./provider.js";
 
-// GitHub App(installation) 토큰 발급 — 워크스페이스 소유 통합의 코어(개인 OAuth 연결 대체).
-// OAuth App 의 `repo` 스코프(전 repo all-or-nothing)와 달리, App 은 설치 시 고른 repo + 지정 권한으로
-// GitHub 이 직접 제한한 단기(~1h) installation access token 을 준다. host 유무로 github.com↔GHE 동시 처리.
-// 설계: docs/architecture/workspace-scoped-integrations.md
+// GitHub App (installation) token minting — the core of workspace-owned integrations (replaces personal OAuth connections).
+// Unlike an OAuth App's `repo` scope (all-or-nothing across all repos), an App yields a short-lived (~1h) installation
+// access token that GitHub itself restricts to the repos chosen at install time + the granted permissions. Presence of host handles github.com↔GHE together.
+// Design: docs/architecture/workspace-scoped-integrations.md
 
-// host="https://ghe.acme.io" → api base = host/api/v3. 없으면 api.github.com(github.com).
+// host="https://ghe.acme.io" → api base = host/api/v3. If absent, api.github.com (github.com).
 function apiBase(host?: string): string {
   if (!host) return "https://api.github.com";
   const trimmed = host.endsWith("/") ? host.slice(0, -1) : host;
@@ -18,8 +18,8 @@ function b64url(input: string): string {
   return Buffer.from(input).toString("base64url");
 }
 
-// App JWT(RS256) — iss=appId, 만료 10분 이내. PEM 개인키로 서명(Node 내장 crypto — 외부 의존성 없음).
-// iat 를 60초 당겨 컨트롤플레인↔GitHub 시계 오차를 흡수한다(GitHub 권장). nowSec 주입 → 결정적 테스트.
+// App JWT (RS256) — iss=appId, expires within 10 minutes. Signed with the PEM private key (Node built-in crypto — no external dependency).
+// Backdates iat by 60s to absorb control-plane↔GitHub clock skew (GitHub-recommended). Injecting nowSec → deterministic tests.
 export function githubAppJwt(input: { appId: string; privateKeyPem: string; nowSec: number }): string {
   const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const payload = b64url(JSON.stringify({ iat: input.nowSec - 60, exp: input.nowSec + 540, iss: input.appId }));
@@ -28,17 +28,17 @@ export function githubAppJwt(input: { appId: string; privateKeyPem: string; nowS
   return `${data}.${signature}`;
 }
 
-// installation token 응답 — 필요한 두 필드만(나머지 무시). 실패 시 oauthFetchJson 이 UpstreamError 로 remap.
+// installation token response — only the two fields we need (the rest ignored). On failure, oauthFetchJson remaps to UpstreamError.
 const InstallationTokenResponse = z.object({ token: z.string(), expires_at: z.string() });
 
 export interface InstallationToken {
   token: string;
-  expiresAt: string; // ISO — 이 토큰 만료(약 1시간 뒤)
+  expiresAt: string; // ISO — this token's expiry (about an hour out)
 }
 
-// installation access token 발급 — App JWT 로 인증하고 repositories/permissions 로 좁혀 요청한다.
-// repositories: 소유 계정 기준 repo **name** 배열(owner 제외 — installation 이 이미 그 계정 소유). 미지정이면 설치 전체.
-// permissions: 예 { contents: "read" }(clone). 미지정이면 App 이 승인받은 기본 권한.
+// Mint an installation access token — authenticate with the App JWT and narrow the request by repositories/permissions.
+// repositories: an array of repo **names** under the owning account (owner omitted — the installation already owns that account). If unset, the whole installation.
+// permissions: e.g. { contents: "read" } (clone). If unset, the App's granted default permissions.
 export async function mintInstallationToken(input: {
   host?: string;
   appId: string;
@@ -54,7 +54,7 @@ export async function mintInstallationToken(input: {
     headers: {
       authorization: `Bearer ${jwt}`,
       accept: "application/vnd.github+json",
-      "user-agent": "everdict", // GitHub API 는 User-Agent 필수
+      "user-agent": "everdict", // GitHub API requires a User-Agent
       "content-type": "application/json",
     },
     body: JSON.stringify({
@@ -66,11 +66,11 @@ export async function mintInstallationToken(input: {
   return { token: parsed.token, expiresAt: parsed.expires_at };
 }
 
-// installation 메타 — 설치된 org/user login 만 필요(콜백에서 account 확정에 사용).
+// installation meta — only the installed org/user login is needed (used to determine account in the callback).
 const InstallationInfo = z.object({ account: z.object({ login: z.string() }) });
 
-// installation 조회 — App JWT 로 GET /app/installations/{id}. 설치 콜백은 installation_id 만 주므로
-// 저장할 account(org login) 를 여기서 확정한다. host 유무로 github.com↔GHE.
+// installation lookup — GET /app/installations/{id} with the App JWT. The install callback gives only installation_id, so
+// we determine the account (org login) to store here. github.com↔GHE via the presence of host.
 export async function getInstallation(input: {
   host?: string;
   appId: string;

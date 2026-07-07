@@ -1,7 +1,7 @@
 {
   "id": "hermes-desktop-ssh",
   "version": "1.0.0",
-  "description": "os-use 데스크탑 컴퓨터-유즈 벤치마크(hermes-desktop). 여러 케이스로 에이전트 능력을 측정한다: (1) SSH 로 원격 연결(에이전트가 SSH 폼을 실 OS 입력으로 채우고 hermes 가 진짜 SSH 터널을 열어 메인 진입), (2) 연결 후 Settings 화면으로 내비게이션. 각 케이스의 최종 화면을 VLM judge 가 채점 → 스코어카드(케이스별 pass + 집계 pass-rate)로 하니스 간 공정 비교. 이미지는 scripts/live/Dockerfile.hermes-ssh-agent 로 빌드(hermes + sshd + /agent.cjs).",
+  "description": "os-use desktop computer-use benchmark (hermes-desktop). Measures agent capability across several cases: (1) connect remotely via SSH (the agent fills the SSH form with real OS input and hermes opens a real SSH tunnel to enter the main UI), (2) navigate to the Settings screen after connecting. A VLM judge scores each case's final screen → a scorecard (per-case pass + aggregate pass-rate) for a fair comparison across harnesses. Build the image with scripts/live/Dockerfile.hermes-ssh-agent (hermes + sshd + /agent.cjs).",
   "tags": ["os-use", "desktop", "ssh", "computer-use", "shared"],
   "cases": [
     {

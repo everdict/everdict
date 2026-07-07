@@ -1,11 +1,11 @@
-// 라이브 검증: 하니스 버전 SSOT 를 실제 Postgres 에 영속한다.
+// Live verification: persist the harness version SSOT in real Postgres.
 //
-//  1) migrate (everdict_harnesses 생성, 0001+0002 멱등)
-//  2) 파일 SSOT(examples/harnesses) → PgHarnessRegistry 로 시드(loadHarnessDir(into=pg))
-//  3) versions/getService(latest) + 불변성(다른 스펙 재등록 → 409 Conflict)
-//  4) 새 풀(프로세스 재기동 모사)로 같은 스펙 조회 → 영속 증명
+//  1) migrate (create everdict_harnesses, 0001+0002 idempotent)
+//  2) seed file SSOT (examples/harnesses) → PgHarnessRegistry (loadHarnessDir(into=pg))
+//  3) versions/getService(latest) + immutability (re-register a different spec → 409 Conflict)
+//  4) resolve the same spec with a fresh pool (simulating a process restart) → proves persistence
 //
-// 사용: DATABASE_URL=postgresql://USER:PASS@127.0.0.1:5432/postgres node scripts/live/pg-harness-registry.mjs
+// Usage: DATABASE_URL=postgresql://USER:PASS@127.0.0.1:5432/postgres node scripts/live/pg-harness-registry.mjs
 
 import { makePool, migrate, sqlClient } from "../../packages/db/dist/index.js";
 import {
@@ -15,7 +15,7 @@ import {
 } from "../../packages/registry/dist/index.js";
 
 const DB_URL = process.env.DATABASE_URL;
-if (!DB_URL) throw new Error("DATABASE_URL 필요 — 크리덴셜은 env 로만 (git 에 기본값 금지)");
+if (!DB_URL) throw new Error("DATABASE_URL required — credentials via env only (no default committed to git)");
 const DIR = new URL("../../examples/harness-templates", import.meta.url).pathname;
 const T = "_shared";
 
@@ -30,7 +30,7 @@ async function main() {
   console.log("\n=== (2) seed taxonomy(file SSOT: templates + instances) → Postgres ===");
   const templates = new PgHarnessTemplateRegistry(client);
   const instances = new PgHarnessInstanceRegistry(client, templates);
-  await loadHarnessTaxonomyDir(DIR, { templates, instances }); // 파일을 PG 에 등록(멱등)
+  await loadHarnessTaxonomyDir(DIR, { templates, instances }); // register files into PG (idempotent)
   for (const { id, versions } of await instances.list(T)) console.log(`  ${id}: ${versions.join(", ")}`);
 
   console.log("\n=== (3) resolve + immutability ===");
@@ -58,7 +58,7 @@ async function main() {
   const ok = reread.version === inst.version && conflict;
   console.log(ok ? "✅ harness taxonomy persisted in Postgres (immutable, survives reconnect)" : "❌ unexpected");
 
-  // 정리: 데모 row 삭제(테이블/마이그레이션 유지).
+  // Clean up: delete the demo rows (keep tables/migrations).
   await client2.query("DELETE FROM everdict_harness_instances WHERE id = $1", ["bu"]);
   await client2.query("DELETE FROM everdict_harness_templates WHERE id = $1", ["bu"]);
   await pool2.end();

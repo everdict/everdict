@@ -1,10 +1,10 @@
-// 라이브 검증: 용량 인지 Scheduler 가 실제 Nomad 클러스터로 작업을 "유동 배분" 한다.
+// Live verification: the capacity-aware Scheduler "fluidly distributes" work across a real Nomad cluster.
 //
-// N개의 케이스를 동시에 제출하지만, NomadBackend 의 maxConcurrent=CAP 때문에
-// 스케줄러는 한 번에 CAP개만 실제 alloc 으로 띄우고 나머지는 큐잉한다. 슬롯이 비면 다음을 흘려보낸다.
-// 별도 폴러가 Nomad 의 진행중 everdict-sched-* 잡 수를 관측해 동시 alloc 이 CAP 을 넘지 않음을 증명한다.
+// N cases are submitted at once, but because of NomadBackend's maxConcurrent=CAP the
+// scheduler brings up only CAP allocs at a time and queues the rest. As slots free up, it lets the next ones through.
+// A separate poller observes the number of in-flight everdict-sched-* jobs on Nomad to prove concurrent allocs never exceed CAP.
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/scheduler-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/scheduler-nomad.mjs
 
 import { BackendRegistry, NomadBackend, Scheduler } from "../../packages/backends/dist/index.js";
 
@@ -43,7 +43,7 @@ async function main() {
     "nomad",
     new NomadBackend({ addr: NOMAD_ADDR, image: IMAGE, maxConcurrent: CAP }),
   );
-  const sched = new Scheduler(registry); // leastLoaded 기본
+  const sched = new Scheduler(registry); // leastLoaded by default
 
   console.log(`submitting ${N} cases at once; backend cap = ${CAP}/concurrent\n`);
   const t0 = Date.now();

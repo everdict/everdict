@@ -1,12 +1,12 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 /workspace/mattermost 응답의 클라이언트 미러 — 워크스페이스 소유 Mattermost 통합.
-// 비밀 없음: botTokenSecretName 은 값이 아닌 SecretStore 이름 참조. bot 토큰 값은 브라우저로 절대 안 내려온다.
+// Client mirror of the control plane /workspace/mattermost response — workspace-owned Mattermost integration.
+// No secrets: botTokenSecretName is a SecretStore name reference, not the value. The bot token value never reaches the browser.
 export const mattermostConfigSchema = z.object({
   host: z.string(),
   botTokenSecretName: z.string(),
   defaultChannelId: z.string().optional(),
-  // 인바운드(슬래시커맨드/버튼) 검증 토큰 이름 + 관리자가 MM 에 등록할 인바운드 URL(설정 시에만).
+  // inbound (slash command/button) verification token name + the inbound URL an admin registers in MM (only when configured).
   commandTokenSecretName: z.string().optional(),
   commandUrl: z.string().optional(),
   actionUrl: z.string().optional(),

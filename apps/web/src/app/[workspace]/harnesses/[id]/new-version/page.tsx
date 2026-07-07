@@ -27,8 +27,8 @@ import { NewHarnessVersionForm } from './new-harness-version-form'
 
 export const dynamic = 'force-dynamic'
 
-// 하니스 새 버전 — 인스턴스(pins 재핀) | 템플릿(구조) 두 축. 모두 기존 구성을 프리필.
-// 버전은 불변이라 "수정 = 새 버전". 같은 하니스라 id/kind 는 고정.
+// New harness version — two axes: instance (re-pin pins) | template (structure). Both prefill the existing config.
+// Versions are immutable, so "edit = new version". Same harness, so id/kind are fixed.
 export default async function NewHarnessVersionPage({
   params,
   searchParams,
@@ -43,7 +43,7 @@ export default async function NewHarnessVersionPage({
   const t = await getTranslations('harnessesPage')
   const allowed = can(principal?.roles, 'harnesses:register')
 
-  // env 시크릿 참조 피커용 — 공유(workspace) + 내 개인(user) 시크릿 이름(값은 안 옴). 실패/무권한이면 빈 목록.
+  // For the env secret reference picker — shared (workspace) + my personal (user) secret names (no values). Empty list on failure/no permission.
   let secrets = { workspace: [] as string[], user: [] as string[] }
   if (allowed) {
     try {
@@ -73,7 +73,7 @@ export default async function NewHarnessVersionPage({
     )
 
     if (typeof tplVersion === 'string' && tplVersion) {
-      // 템플릿 새 버전 등록 직후 — 그 버전을 참조하는 인스턴스를 만들도록 인스턴스 탭으로 복귀.
+      // Right after registering a new template version — return to the instance tab to create an instance referencing that version.
       const newTemplate = harnessTemplateSpecSchema.parse(
         await controlPlane.getHarnessTemplateSpec(ctx, id, tplVersion)
       )

@@ -1,9 +1,9 @@
-// 라이브: minio(오브젝트 스토어) pool 멀티테넌트 격리. K8sTopologyRuntime 이 공유 minio 1대에 테넌트별 전용
-// access key + 버킷 + 버킷-한정 정책을 mc 로 mint(서버 이미지에 mc 내장 → exec). 핵심 증명(PG pool 과 동일):
-// 테넌트 A access key 로 테넌트 B 버킷 접근 → AccessDenied, 자기 버킷 → OK.
+// live: minio (object store) pool multi-tenant isolation. K8sTopologyRuntime mints per-tenant dedicated
+// access key + bucket + bucket-scoped policy on a single shared minio via mc (mc is bundled in the server image → exec). Core proof (same as PG pool):
+// tenant A's access key accessing tenant B's bucket → AccessDenied, its own bucket → OK.
 //
-// 준비: kind 'everdict' + quay.io/minio/minio 노드 로드 + mendhak/http-https-echo.
-// 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/minio-pool-k8s.mjs
+// Prereq: kind 'everdict' + load the quay.io/minio/minio node image + mendhak/http-https-echo.
+// Usage: PATH=$HOME/.local/bin:$PATH node scripts/live/minio-pool-k8s.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { K8sTopologyRuntime, planTenantStores } from "../../packages/topology/dist/index.js";
@@ -17,7 +17,7 @@ const spec = {
   kind: "service",
   id: "minio-demo",
   version: "1.0.0",
-  // 포트 없는 서비스 → ensureTopology 의 front-door 엔드포인트 발견(port-forward) skip. minio 스토어 격리만 검증.
+  // a port-less service → skip ensureTopology's front-door endpoint discovery (port-forward). Verifies only minio store isolation.
   services: [{ name: "agent-server", image: "mendhak/http-https-echo:latest", needs: [], perRun: [], replicas: 1 }],
   dependencies: [{ store: "minio", role: "snapshots", isolateBy: "object-prefix" }],
   frontDoor: { service: "agent-server", submit: "POST /" },
@@ -50,7 +50,7 @@ const minioPod = () =>
     "-o",
     "jsonpath={.items[0].metadata.name}",
   ]).trim();
-// 공유 minio 안에서 임의 access key 로 alias 설정 후 버킷 ls → OK / DENIED.
+// inside the shared minio, set an alias with a given access key, then ls the bucket → OK / DENIED.
 const tryAccess = (accessKey, secret, bucket) => {
   try {
     const out = kc([
@@ -70,7 +70,9 @@ const tryAccess = (accessKey, secret, bucket) => {
   }
 };
 
-console.log("minio pool 멀티테넌트 격리 — 공유 minio + 테넌트별 access key/버킷, 교차 버킷 접근 거부 검증\n");
+console.log(
+  "minio pool multi-tenant isolation — shared minio + per-tenant access key/bucket, verify cross-bucket access is denied\n",
+);
 let ok = false;
 try {
   await rt.ensureTopology(spec, zone("acme"));
@@ -96,7 +98,7 @@ try {
       .join(", "),
   );
 
-  // 런타임이 서비스에 주입하는 것과 동일한 scoped creds(같은 plan).
+  // the same scoped creds the runtime injects into the service (same plan).
   const creds = (id) => {
     const e = planTenantStores(spec, zone(id), { poolNamespace: POOL_NS }).serviceEnv;
     return { key: e.AWS_ACCESS_KEY_ID, secret: e.AWS_SECRET_ACCESS_KEY, bucket: e.S3_BUCKET };
@@ -106,10 +108,10 @@ try {
 
   const ownAcme = tryAccess(a.key, a.secret, a.bucket);
   const ownGlobex = tryAccess(g.key, g.secret, g.bucket);
-  const cross = tryAccess(a.key, a.secret, g.bucket); // acme key → globex 버킷
+  const cross = tryAccess(a.key, a.secret, g.bucket); // acme key → globex bucket
   console.log(`\nacme key → tenant-acme    : ${ownAcme}`);
   console.log(`globex key → tenant-globex : ${ownGlobex}`);
-  console.log(`acme key → tenant-globex  : ${cross}   <-- 교차 접근(거부돼야 함)`);
+  console.log(`acme key → tenant-globex  : ${cross}   <-- cross access (should be denied)`);
 
   ok = ownAcme === "OK" && ownGlobex === "OK" && cross === "DENIED";
   console.log(
@@ -117,13 +119,13 @@ try {
   );
   console.log(
     ok
-      ? "\n✅ minio pool: 공유 오브젝트 스토어 + 테넌트별 access key/버킷/정책 — 테넌트 A 키로 B 버킷 접근 거부, 자기 버킷만 허용. 3번째 스토어 타입(스냅샷) 격리 완성."
-      : "\n⚠️ 일부 체크 실패",
+      ? "\n✅ minio pool: shared object store + per-tenant access key/bucket/policy — tenant A's key is denied access to B's bucket, allowed only on its own bucket. Third store type (snapshots) isolation complete."
+      : "\n⚠️ some checks failed",
   );
 } finally {
   await rt.teardown(spec, zone("acme")).catch(() => {});
   await rt.teardown(spec, zone("globex")).catch(() => {});
   kc(["delete", "ns", POOL_NS, "--ignore-not-found", "--wait=false"]);
-  console.log("teardown: ns 삭제 요청됨");
+  console.log("teardown: ns deletion requested");
 }
 process.exit(ok ? 0 : 1);

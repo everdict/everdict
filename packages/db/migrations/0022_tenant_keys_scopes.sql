@@ -1,4 +1,4 @@
--- 0022_tenant_keys_scopes — additive (expand): API 키별 권한 범위(read|write|admin).
--- scopes = 공백 구분 문자열(예: "read write"). NULL = 레거시 행/full access(무제한) — 인증 코어가 무제한으로 해석한다.
--- 권한 매트릭스(scope→action)는 @everdict/auth 가 소유; 여기는 저장만 한다. 기존 키 동작 불변(NULL→무제한).
+-- 0022_tenant_keys_scopes — additive (expand): per-API-key permission scope (read|write|admin).
+-- scopes = space-delimited string (e.g. "read write"). NULL = legacy row/full access (unrestricted) — the auth core interprets it as unrestricted.
+-- The permission matrix (scope→action) is owned by @everdict/auth; here we only store it. Existing key behavior is unchanged (NULL→unrestricted).
 ALTER TABLE everdict_tenant_keys ADD COLUMN IF NOT EXISTS scopes text;

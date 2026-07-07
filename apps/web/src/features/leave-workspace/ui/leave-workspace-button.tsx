@@ -10,9 +10,9 @@ import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 
 import { leaveWorkspaceAction } from '../api/leave-workspace'
 
-// 이 워크스페이스에서 나가기 — Linear "Workspace access" 패턴(설명 좌 · 액션 우).
-// 2단계 확인(잘못 누름 방지). 성공 시 홈(/)으로 보내 남은 워크스페이스/온보딩으로 재라우팅.
-// 마지막 admin 은 컨트롤플레인이 409 로 막고, 그 메시지를 인라인으로 보여준다.
+// Leave this workspace — Linear "Workspace access" pattern (description left · action right).
+// Two-step confirmation (misclick prevention). On success, redirect to home (/) to re-route to a remaining workspace/onboarding.
+// The last admin is blocked by the control plane with 409, and that message is shown inline.
 export function LeaveWorkspaceButton() {
   const t = useTranslations('leaveWorkspace')
   const router = useRouter()

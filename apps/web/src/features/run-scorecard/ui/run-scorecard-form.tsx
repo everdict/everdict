@@ -14,8 +14,8 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 import { runScorecardAction } from '../api/run-scorecard'
 
-// 버전 선택지 — 'latest' 별칭(가장 위, 해석 결과+태그를 hint 로) + 등록된 버전들(semver 최신 먼저, 태그 있으면 hint).
-// versionTags = 버전 → 자유 라벨(태그 있는 버전만). 번호만으로 분간하기 어려운 버전을 태그로 식별.
+// Version options — 'latest' alias (at top, with the resolved result + tags as hint) + registered versions (newest semver first, tags as hint when present).
+// versionTags = version → free-form label (only versions that have tags). Identify versions that are hard to tell apart by number alone via their tags.
 function versionOptions(
   versions: string[],
   versionTags?: Record<string, string[]>
@@ -43,13 +43,13 @@ interface Values {
   datasetVersion: string
   harnessId: string
   harnessVersion: string
-  runtime: string // 실행 위치(등록 런타임 id 또는 self 러너 타깃). 컨트롤플레인이 미지정 배치를 400 — 필수.
-  concurrency: string // 병렬도(빈칸=컨트롤플레인 기본). 제출 시 숫자로 파싱.
-  caseLimit: string // 부분 실행 — 앞에서 N개만(빈칸=전체). 제출 시 숫자로 파싱.
-  caseTags: string // 부분 실행 — 태그 필터(쉼표 구분, any-match. 빈칸=전체)
+  runtime: string // Execution location (registered runtime id or self runner target). The control plane 400s an unspecified placement — required.
+  concurrency: string // Parallelism (empty = control plane default). Parsed to a number on submit.
+  caseLimit: string // Partial run — only the first N (empty = all). Parsed to a number on submit.
+  caseTags: string // Partial run — tag filter (comma-separated, any-match; empty = all)
 }
 
-// 벤치마크 × 하니스를 골라 배치 평가를 실행한다. 채점은 벤치마크에 내장 — judge 는 컨트롤플레인 기본값.
+// Pick a benchmark × harness and run a batch evaluation. Scoring is built into the benchmark — judge defaults to the control plane default.
 export function RunScorecardForm({
   datasets,
   harnesses,
@@ -61,7 +61,7 @@ export function RunScorecardForm({
   harnesses: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[]
   runtimes?: { id: string }[]
   runners?: { id: string; label: string }[]
-  hasWorkspaceRunners?: boolean // 팀 공유 러너가 있으면 self:ws 풀 옵션 노출
+  hasWorkspaceRunners?: boolean // Expose the self:ws pool option when team shared runners exist
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -87,7 +87,7 @@ export function RunScorecardForm({
     },
   })
 
-  // id 선택에 따라 버전 선택지를 좁힌다(목록에 이미 버전이 실려옴 — 추가 요청 X).
+  // Narrow the version options by the selected id (versions already come with the list — no extra request).
   const datasetId = watch('datasetId')
   const harnessId = watch('harnessId')
   const datasetIdOptions: ComboboxOption[] = datasets.map((d) => ({
@@ -112,8 +112,8 @@ export function RunScorecardForm({
   async function onSubmit(values: Values) {
     setServerError(undefined)
     const { concurrency, caseLimit, caseTags, ...rest } = values
-    const n = Number.parseInt(concurrency, 10) // 빈칸/비정상 → 생략(컨트롤플레인 기본 사용)
-    // 부분 실행 — limit(앞 N개)/tags(쉼표 구분). 둘 다 비면 전체 실행(cases 생략).
+    const n = Number.parseInt(concurrency, 10) // empty/invalid → omit (use control plane default)
+    // Partial run — limit (first N) / tags (comma-separated). If both are empty, run all (omit cases).
     const limit = Number.parseInt(caseLimit, 10)
     const tags = caseTags
       .split(',')
@@ -148,7 +148,7 @@ export function RunScorecardForm({
                 value={field.value}
                 onChange={(v) => {
                   field.onChange(v)
-                  setValue('datasetVersion', 'latest') // id 바뀌면 버전은 latest 로 리셋(이전 버전이 새 id 엔 없을 수 있음).
+                  setValue('datasetVersion', 'latest') // reset version to latest when the id changes (the previous version may not exist for the new id).
                 }}
                 placeholder={t('datasetPlaceholder')}
                 emptyText={t('datasetEmpty')}
@@ -218,7 +218,7 @@ export function RunScorecardForm({
 
       <div className="space-y-1.5">
         <Label htmlFor="runtime">{t('runtimeLabel')}</Label>
-        {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 미지정 배치는 400. run 폼과 동일 선택지. */}
+        {/* Execution location is required — the control plane host fallback is disabled (requireRuntime), so an unspecified placement 400s. Same options as the run form. */}
         <Controller
           control={control}
           name="runtime"
@@ -228,7 +228,7 @@ export function RunScorecardForm({
               id="runtime"
               options={[
                 ...runtimes.map((r) => ({ value: r.id })),
-                // 팀 공유 러너 풀 — 등록된 팀 러너 중 아무거나(capability 충족) 가져간다(멀티러너=동시성).
+                // Team shared runner pool — takes any registered team runner that meets capability (multiple runners = concurrency).
                 ...(hasWorkspaceRunners
                   ? [
                       {
@@ -238,7 +238,7 @@ export function RunScorecardForm({
                       },
                     ]
                   : []),
-                // 내 러너 풀 — 내 러너(여러 대일 수 있음) 중 아무거나. 특정 러너는 아래 개별 항목.
+                // My runner pool — any of my runners (there may be several). A specific runner is an individual item below.
                 ...(runners.length > 0
                   ? [{ value: 'self', label: t('poolSelfLabel'), hint: t('poolSelfHint') }]
                   : []),
@@ -272,7 +272,7 @@ export function RunScorecardForm({
         <p className="text-[12px] text-muted-foreground">{t('concurrencyHelp')}</p>
       </div>
 
-      {/* 부분 실행 — 전체 대신 케이스 일부만(비용/스모크). 결과엔 "일부 n/N" 표식이 남는다. */}
+      {/* Partial run — only a subset of cases instead of all (cost/smoke). The result keeps a "partial n/N" marker. */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <div className="flex items-center gap-1">

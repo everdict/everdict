@@ -97,7 +97,7 @@ function buildJob(flags: Map<string, string>, task: string): AgentJob {
   };
 }
 
-// direct 모드용 Router 구성. 에러를 출력하고 exitCode 를 세팅했으면 undefined 반환.
+// Build the Router for direct mode. Returns undefined if it printed an error and set exitCode.
 function buildDirectRouter(flags: Map<string, string>): Router | undefined {
   const harnessName = flags.get("harness") ?? "claude-code";
   const backendName = flags.get("backend") ?? "local";
@@ -112,13 +112,13 @@ function buildDirectRouter(flags: Map<string, string>): Router | undefined {
     const addr = flags.get("nomad-addr") ?? process.env.NOMAD_ADDR;
     const image = flags.get("image") ?? process.env.EVERDICT_AGENT_IMAGE;
     if (!addr || !image) {
-      console.error("✗ nomad 백엔드엔 --nomad-addr 와 --image (또는 NOMAD_ADDR / EVERDICT_AGENT_IMAGE) 가 필요합니다.");
+      console.error("✗ nomad backend requires --nomad-addr and --image (or NOMAD_ADDR / EVERDICT_AGENT_IMAGE).");
       process.exitCode = 1;
       return undefined;
     }
     if (harnessName === "claude-code" && !hasClaudeAuth()) {
       console.error(
-        "✗ 샌드박스 잡엔 CLAUDE_CODE_OAUTH_TOKEN 또는 ANTHROPIC_API_KEY 가 필요합니다(.env). ⚠ alloc 으로 전달됩니다.",
+        "✗ Sandbox jobs require CLAUDE_CODE_OAUTH_TOKEN or ANTHROPIC_API_KEY (.env). ⚠ It is passed into the alloc.",
       );
       process.exitCode = 2;
       return undefined;
@@ -134,11 +134,11 @@ function buildDirectRouter(flags: Map<string, string>): Router | undefined {
   return new Router(new BackendRegistry().register("local", new LocalBackend()), "local");
 }
 
-// orchestrator(direct/temporal) 구성. 에러를 출력했으면 undefined.
+// Build the orchestrator (direct/temporal). Returns undefined if it printed an error.
 function buildOrchestrator(flags: Map<string, string>): Orchestrator | undefined {
   const orchestratorName = flags.get("orchestrator") ?? "direct";
   if (orchestratorName === "temporal") {
-    // durable: 워크플로를 시작하고 결과를 기다린다. 실제 디스패치는 워커가 수행.
+    // durable: start the workflow and wait for the result. The actual dispatch runs in the worker.
     return new TemporalOrchestrator({ address: flags.get("temporal-address"), taskQueue: flags.get("task-queue") });
   }
   const router = buildDirectRouter(flags);
@@ -149,7 +149,7 @@ function buildOrchestrator(flags: Map<string, string>): Orchestrator | undefined
 async function runCommand(flags: Map<string, string>): Promise<void> {
   const task = flags.get("task");
   if (!task) {
-    console.error("✗ --task 는 필수입니다.");
+    console.error("✗ --task is required.");
     usage();
     process.exitCode = 1;
     return;
@@ -157,9 +157,9 @@ async function runCommand(flags: Map<string, string>): Promise<void> {
   const job = buildJob(flags, task);
   const orchestratorName = flags.get("orchestrator") ?? "direct";
   const orch = buildOrchestrator(flags);
-  if (!orch) return; // 에러 출력됨
+  if (!orch) return; // error already printed
 
-  console.error(`▶ ${job.harness.id} via ${orchestratorName} 오케스트레이터 …`);
+  console.error(`▶ ${job.harness.id} via ${orchestratorName} orchestrator …`);
   const result = await orch.run(job);
   console.log(
     JSON.stringify(
@@ -180,10 +180,10 @@ async function workerCommand(flags: Map<string, string>): Promise<void> {
   const configPath = flags.get("backends-config") ?? process.env.EVERDICT_BACKENDS_CONFIG;
   const config = configPath ? BackendsConfigSchema.parse(JSON.parse(readFileSync(configPath, "utf8"))) : undefined;
   if (!hasClaudeAuth()) {
-    console.error("ℹ worker env 에 claude 인증이 없습니다 — claude-code 잡이 샌드박스 백엔드에서 실패할 수 있습니다.");
+    console.error("ℹ No claude auth in the worker env — claude-code jobs may fail on a sandbox backend.");
   }
   console.error(
-    `▶ everdict worker — task queue '${flags.get("task-queue") ?? "everdict-eval"}' @ ${flags.get("temporal-address") ?? "localhost:7233"} (Ctrl-C 종료) …`,
+    `▶ everdict worker — task queue '${flags.get("task-queue") ?? "everdict-eval"}' @ ${flags.get("temporal-address") ?? "localhost:7233"} (Ctrl-C to stop) …`,
   );
   await runWorker({ address: flags.get("temporal-address"), taskQueue: flags.get("task-queue"), config });
 }
@@ -191,7 +191,7 @@ async function workerCommand(flags: Map<string, string>): Promise<void> {
 async function suiteCommand(flags: Map<string, string>): Promise<void> {
   const suitePath = flags.get("suite");
   if (!suitePath) {
-    console.error("✗ --suite <file.json> 는 필수입니다.");
+    console.error("✗ --suite <file.json> is required.");
     process.exitCode = 1;
     return;
   }
@@ -214,87 +214,85 @@ async function suiteCommand(flags: Map<string, string>): Promise<void> {
   console.log(JSON.stringify(out, null, 2));
 }
 
-// 셀프호스티드 러너 — 이 머신에서 워크스페이스의 잡을 가져가(pull) 돌리고 결과를 회신한다(push→pull).
-// 페어링 토큰(rnr_)으로 /mcp 에 인증하고 lease_job → runLeasedJob(service→Docker 토폴로지/그외→LocalDriver) → submit_job_result.
-// docker 데몬 도달성 — 있으면 러너가 docker/browser capability 를 광고(service 하니스를 로컬 Docker 토폴로지로 구동).
-// 설계: docs/architecture/self-hosted-runner.md (+ self-hosted-service-runner.md).
+// Self-hosted runner — pull the workspace's jobs onto this machine, run them, and report back (push→pull).
+// Authenticates to /mcp with the pairing token (rnr_) and lease_job → runLeasedJob (service→Docker topology / else→LocalDriver) → submit_job_result.
+// Docker daemon reachability — when present, the runner advertises the docker/browser capability (runs a service harness as a local Docker topology).
+// Design: docs/architecture/self-hosted-runner.md (+ self-hosted-service-runner.md).
 async function runnerCommand(flags: Map<string, string>): Promise<void> {
   const token = flags.get("pair") ?? process.env.EVERDICT_RUNNER_TOKEN;
   if (!token || !token.startsWith("rnr_")) {
-    console.error(
-      "✗ --pair <rnr_…> (또는 EVERDICT_RUNNER_TOKEN) 가 필요합니다 — 계정 페이지에서 디바이스를 페어링하세요.",
-    );
+    console.error("✗ --pair <rnr_…> (or EVERDICT_RUNNER_TOKEN) is required — pair a device on the account page.");
     process.exitCode = 1;
     return;
   }
   const apiUrl = flags.get("api-url") ?? process.env.EVERDICT_API_URL ?? "http://localhost:8787";
   const mcpUrl = new URL("/mcp", apiUrl);
-  const pollMs = Number(flags.get("poll-interval-ms") ?? "2000"); // 에러 재시도 backoff
-  const waitMs = Number(flags.get("wait-ms") ?? "25000"); // lease long-poll 대기(서버가 잡 생길 때까지 잡아둠)
-  const hbMs = Number(flags.get("heartbeat-ms") ?? "30000"); // 실행 중 lease 갱신 주기
-  // 동시에 돌릴 lease 워커 수 — 한 러너가 case-level 병렬을 실현하는 손잡이. 기본 1(현행 직렬 보존).
-  // 스코어카드를 concurrency=N 으로 제출하면 N 개 잡이 파킹되고, 이 값만큼만 동시 실행된다(실병렬 = min(N, 이값)).
+  const pollMs = Number(flags.get("poll-interval-ms") ?? "2000"); // error-retry backoff
+  const waitMs = Number(flags.get("wait-ms") ?? "25000"); // lease long-poll wait (server holds until a job appears)
+  const hbMs = Number(flags.get("heartbeat-ms") ?? "30000"); // lease-renewal interval while running
+  // Number of lease workers to run concurrently — the knob by which one runner achieves case-level parallelism. Default 1 (preserves the current serial behavior).
+  // Submitting a scorecard with concurrency=N parks N jobs, and only this many run at once (actual parallelism = min(N, this value)).
   const maxConcurrent = Math.max(1, Number(flags.get("max-concurrent") ?? "1"));
-  // service(topology) 하니스 readiness 폴링 상한 — 서비스 스펙이 자체 readiness 를 선언하지 않을 때의 런타임 기본.
+  // service(topology) harness readiness polling ceiling — the runtime default when a service spec does not declare its own readiness.
   const runtimeOptions: DockerTopologyRuntimeOptions = {};
   if (flags.has("ready-timeout-ms")) runtimeOptions.readyTimeoutMs = Number(flags.get("ready-timeout-ms"));
   if (flags.has("ready-interval-ms")) runtimeOptions.pollIntervalMs = Number(flags.get("ready-interval-ms"));
   if (!hasClaudeAuth()) {
     console.error(
-      "ℹ 이 머신 env 에 claude 인증이 없습니다 — claude-code 잡은 이 머신의 로그인을 씁니다(없으면 실패할 수 있음).",
+      "ℹ No claude auth in this machine's env — claude-code jobs use this machine's login (may fail if absent).",
     );
   }
 
   const errMsg = (e: unknown) => (e instanceof Error ? e.message : String(e));
   const sleep = (ms: number) => new Promise<void>((res) => setTimeout(res, ms));
-  // 실제 capability 자가-광고: docker 데몬이 있으면 docker/browser(service 하니스 가능). 매 lease 마다 보고.
+  // Real capability self-advertisement: if the docker daemon is present, docker/browser (service harnesses possible). Reported on every lease.
   const capabilities = await detectCapabilities();
   const dockerOk = capabilities.includes("docker");
 
-  // codex 로그인 마운트(opt-in): --mount-codex-login 이면 이 러너의 codex 로그인 디렉터리를 containerize 되는 잡의 컨테이너에
-  // /codex 로 마운트 → 이미지 안 codex 가 머신 로그인으로 인증(own-pays, API 키 불필요). 하니스는 CODEX_HOME=/codex 로 참조.
-  // 보안: 명시적 opt-in(러너 소유자 결정) — 로그인 자격이 그 러너가 도는 잡 컨테이너에 노출되므로.
+  // codex login mount (opt-in): with --mount-codex-login, mount this runner's codex login directory into the
+  // containerized job's container at /codex → codex inside the image authenticates with the machine login (own-pays, no API key). The harness references it via CODEX_HOME=/codex.
+  // Security: explicit opt-in (the runner owner's decision) — because the login credential is exposed to the job container this runner runs.
   const mounts: DriverMount[] = [];
   if (flags.has("mount-codex-login")) {
     const codexHome = process.env.CODEX_HOME ?? join(homedir(), ".codex");
     if (dockerOk && existsSync(codexHome)) {
-      mounts.push({ source: codexHome, target: "/codex" }); // rw — codex 가 토큰 리프레시/락 파일에 쓰기 필요
+      mounts.push({ source: codexHome, target: "/codex" }); // rw — codex needs to write the token refresh / lock file
       console.error(
-        `▶ codex 로그인 마운트: ${codexHome} → /codex (containerize 잡). 하니스에서 CODEX_HOME=/codex 로 참조하세요.`,
+        `▶ codex login mount: ${codexHome} → /codex (containerized jobs). Reference it via CODEX_HOME=/codex in the harness.`,
       );
     } else {
-      console.error(`⚠ --mount-codex-login: ${dockerOk ? `${codexHome} 없음` : "docker 없음"} → 마운트 생략.`);
+      console.error(`⚠ --mount-codex-login: ${dockerOk ? `${codexHome} not found` : "no docker"} → skipping mount.`);
     }
   }
 
-  // wedge 방지: API 재시작/단절 시 세션을 자동 재초기화하는 회복형 MCP 세션(@everdict/runner-core). 지연 연결.
+  // wedge prevention: a resilient MCP session (@everdict/runner-core) that auto-reinitializes on API restart/disconnect. Lazy connect.
   const session = new ResilientMcpSession(mcpConnect(mcpUrl, token));
   try {
     await session.ensureConnected();
     console.error(
-      `▶ everdict runner — ${mcpUrl} 연결됨. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (docker 없음 → service 하니스 불가)"}. 동시 ${maxConcurrent} 워커로 잡 폴링 중(Ctrl-C 종료) …`,
+      `▶ everdict runner — connected to ${mcpUrl}. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (no docker → service harnesses unavailable)"}. Polling for jobs with ${maxConcurrent} concurrent worker(s) (Ctrl-C to stop) …`,
     );
   } catch (e) {
-    console.error(`⚠ 초기 연결 실패(${errMsg(e)}) — 폴링하며 재시도합니다 …`);
+    console.error(`⚠ Initial connection failed (${errMsg(e)}) — retrying while polling …`);
   }
 
   const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
-    const r = await session.call(name, args); // 세션이 죽었으면 내부에서 재초기화 후 재시도
-    if (r.isError) throw new Error(r.text || `${name} 실패`);
+    const r = await session.call(name, args); // if the session died, it reinitializes internally and retries
+    if (r.isError) throw new Error(r.text || `${name} failed`);
     return JSON.parse(r.text) as Record<string, unknown>;
   };
 
   let stop = false;
   process.on("SIGINT", () => {
     stop = true;
-    console.error("\n▶ 종료 신호 — 현재 잡 후 정지합니다 …");
+    console.error("\n▶ Stop signal — stopping after the current job …");
   });
 
-  // maxConcurrent 워커가 같은 세션을 공유하며 동시에 lease/실행/회신 — 한 러너가 case-level 병렬을 실현.
+  // maxConcurrent workers share the same session and lease/run/report concurrently — one runner achieves case-level parallelism.
   await runLeaseWorkers(
     {
       callJson,
-      // service→Docker 토폴로지 / image-케이스→로컬 Docker(DockerDriver, dockerOk 게이트, 호스트 마운트) / 그 외→호스트 LocalDriver
+      // service→Docker topology / image-case→local Docker (DockerDriver, dockerOk gate, host mounts) / else→host LocalDriver
       runJob: (job) =>
         runLeasedJob(job, { runtimeOptions, dockerAvailable: dockerOk, mounts, log: (m) => console.error(m) }),
       log: (m) => console.error(m),
@@ -326,7 +324,7 @@ async function main(): Promise<void> {
       return;
     }
     if (cmd === "image" && argv[1] === "push") {
-      // 위치 인자(로컬 ref)는 플래그 파서가 안 먹으므로 직접 — image push <ref> [--flags]
+      // the positional arg (local ref) is not consumed by the flag parser, so handle it directly — image push <ref> [--flags]
       const positional = argv[2] && !argv[2].startsWith("--") ? argv[2] : undefined;
       await imagePushCommand(positional, parseFlags(argv.slice(2)));
       return;

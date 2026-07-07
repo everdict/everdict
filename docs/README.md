@@ -5,7 +5,7 @@
 - [architecture/collaboration.md](architecture/collaboration.md) — module collaboration diagrams (Mermaid): bird's-eye dependency/eval-loop/control-plane + one detailed diagram per package & app
 - [api.md](api.md) — the control-plane HTTP API (`@everdict/api`): runs, scorecards, datasets, judges, runtimes, schedules, bundles, workspace integrations (GitHub App/Mattermost), runners — async `POST /runs` + poll/webhook
 - [mcp.md](mcp.md) — the agent-facing **MCP server** (`apps/api` `/mcp`): OAuth-protected (Keycloak, "login like Linear MCP") + API keys, role-gated, **full BFF↔MCP parity**
-- [web.md](web.md) — the SaaS web (`apps/web`, Next.js FSD, Linear-style): Keycloak login, `/{workspace}/…` dashboard, workspace settings, personal 계정 page
+- [web.md](web.md) — the SaaS web (`apps/web`, Next.js FSD, Linear-style): Keycloak login, `/{workspace}/…` dashboard, workspace settings, personal account page
 - [architecture/desktop-app.md](architecture/desktop-app.md) — the **desktop app** (`apps/desktop`, Electron): web-parity shell + resident self-hosted runner + one-click pairing + auto-update + 3-OS release CI
 
 ## Eval entities

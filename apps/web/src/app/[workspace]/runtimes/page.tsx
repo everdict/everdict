@@ -15,7 +15,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 섹션 타이틀 + 한 줄 설명 — 실행 대상 두 축(등록 인프라/내 머신)을 구분.
+// Section title + one-line description — distinguishes the two execution-target axes (registered infra / my machine).
 function Section({
   title,
   description,
@@ -36,9 +36,9 @@ function Section({
   )
 }
 
-// 런타임 — "평가가 어디서 실행되는가"의 단일 표면.
-// ① 등록 인프라(push: 컨트롤플레인이 접속하는 docker/nomad/k8s/topology — 워크스페이스 소유)
-// ② 내 머신(pull: 셀프호스티드 러너 — 개인 소유 디바이스가 잡을 lease 로 당겨감).
+// Runtimes — the single surface for "where evaluations run".
+// ① Registered infra (push: docker/nomad/k8s/topology the control plane connects to — workspace-owned)
+// ② My machine (pull: self-hosted runner — a personally-owned device pulls jobs via lease).
 export default async function RuntimesPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const t = await getTranslations('runtimesPage')
@@ -51,12 +51,12 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 셀프호스티드 러너 — 개인 소유라 역할 게이트 없이 본인(subject)의 러너만 조회. 실패해도 페이지는 렌더(빈 목록).
+  // Self-hosted runners — personally owned, so no role gate; queries only the caller's (subject) runners. Renders the page even on failure (empty list).
   let runners: RunnerMeta[] = []
   try {
     runners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
   } catch {
-    // 컨트롤플레인 러너 서비스 미설정/실패 — 빈 목록으로 폴백.
+    // Control-plane runner service unconfigured/failed — fall back to an empty list.
   }
 
   return (

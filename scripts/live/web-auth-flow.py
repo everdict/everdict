@@ -12,7 +12,7 @@ import requests
 from bs4 import BeautifulSoup
 
 WEB = os.environ.get("WEB", "http://localhost:3001")
-WS = os.environ.get("WS", "acme")  # 테스트 픽스처의 워크스페이스(slug = URL 첫 세그먼트)
+WS = os.environ.get("WS", "acme")  # workspace from the test fixture (slug = first URL segment)
 USERS = {"alice": ("alice", "member"), "carol": ("carol", "admin")}
 
 
@@ -73,9 +73,9 @@ def main():
 
         # role-gated UI (mirrors the control-plane authz matrix, driven by /me roles)
         rc, rbody = get(s, f"/{WS}/runs/new")
-        run_form = "권한이 없습니다" not in rbody  # member+ may submit
+        run_form = "권한이 없습니다" not in rbody  # member+ may submit (asserts ko-locale UI output — KEEP)
         hc, hbody = get(s, f"/{WS}/harnesses/new")
-        harness_form = "권한이 없습니다" not in hbody  # admin only
+        harness_form = "권한이 없습니다" not in hbody  # admin only (asserts ko-locale UI output — KEEP)
 
         want_harness = role == "admin"
         print(f"           runs/new form:{run_form} (want True)   harnesses/new form:{harness_form} (want {want_harness})")

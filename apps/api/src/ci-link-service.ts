@@ -2,70 +2,70 @@ import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/core";
 import type { WorkspaceCiLink, WorkspaceSettingsStore } from "@everdict/db";
 import { z } from "zod";
 
-// CI repo link 서비스 — repository ↔ 하니스 서비스 슬롯 매핑(= GitHub Actions OIDC trust policy) CRUD +
-// 멤버 개인 GitHub 연결로 레포 목록 프록시(picker) + setup-PR 생성기(워크플로 YAML 을 대상 레포에 PR).
-// "별다른 입력 없이": picker 에서 레포 선택 → link 저장 → setup-PR 버튼 → 머지 — 사용자는 YAML/키를 만지지 않는다.
-// 설계: docs/architecture/github-actions-trigger.md (D3). HTTP 라우트와 MCP 도구가 같은 코어를 공유(BFF↔MCP 패리티).
+// CI repo link service — CRUD for repository ↔ harness service-slot mappings (= the GitHub Actions OIDC trust policy) +
+// a repo-list proxy over the member's personal GitHub connection (picker) + a setup-PR generator (PRs the workflow YAML into the target repo).
+// "zero extra input": pick a repo in the picker → save the link → setup-PR button → merge — the user never touches YAML/keys.
+// Design: docs/architecture/github-actions-trigger.md (D3). The HTTP route and the MCP tool share one core (BFF↔MCP parity).
 
 export const UpsertCiLinkBodySchema = z.object({
   repository: z.string().min(1), // "owner/name"
-  host: z.string().url().optional(), // GHE 베이스 URL(예: "https://ghe.acme.io") — 미지정 = github.com
-  harness: z.string().min(1), // 하니스 인스턴스 id
-  dataset: z.string().optional(), // 발사할 데이터셋 id — setup-PR 워크플로 생성에 필요(없으면 YAML 에 TODO)
-  slots: z.record(z.object({ path: z.string().optional() })).default({}), // 서비스 슬롯 → 모노레포 path(선택)
-  runsOn: z.string().min(1).optional(), // 좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, everdict-<id>]")
-  runtime: z.string().min(1).optional(), // 좁히기 오버라이드 — run-eval runtime(기본 "self:ws" 풀, 예: "self:ws:<id>")
-  trigger: z.enum(["auto", "comment", "both"]).optional(), // PR 평가 발화 방식(미지정=both) — WorkspaceCiLinkSchema 참고
+  host: z.string().url().optional(), // GHE base URL (e.g. "https://ghe.acme.io") — absent = github.com
+  harness: z.string().min(1), // harness instance id
+  dataset: z.string().optional(), // dataset id to fire — needed for setup-PR workflow generation (absent → TODO in the YAML)
+  slots: z.record(z.object({ path: z.string().optional() })).default({}), // service slot → monorepo path (optional)
+  runsOn: z.string().min(1).optional(), // narrowing override — workflow runs-on (default "[self-hosted]", e.g. "[self-hosted, everdict-<id>]")
+  runtime: z.string().min(1).optional(), // narrowing override — run-eval runtime (default "self:ws" pool, e.g. "self:ws:<id>")
+  trigger: z.enum(["auto", "comment", "both"]).optional(), // how PR evals fire (absent = both) — see WorkspaceCiLinkSchema
 });
 export type UpsertCiLinkBody = z.infer<typeof UpsertCiLinkBodySchema>;
 
-// picker 한 행 — GitHub API 응답을 얇게 정규화(무거운 원본 미노출).
+// One picker row — a thin normalization of the GitHub API response (heavy original not exposed).
 export interface RepoInfo {
   fullName: string; // "owner/name"
-  host?: string; // 이 repo 가 속한 installation 의 GHE 베이스 URL — 미지정 = github.com
+  host?: string; // GHE base URL of the installation this repo belongs to — absent = github.com
   private: boolean;
   defaultBranch: string;
   pushedAt?: string;
 }
 
-// picker/setup-PR/러너 등록이 필요로 하는 워크스페이스 GitHub App 능력(개인 연결 대체). GithubAppService 가 구조적으로 만족.
+// The workspace GitHub App capabilities that picker/setup-PR/runner-registration need (replacing personal connections). GithubAppService satisfies this structurally.
 export interface GithubAppRepoAccess {
   listRepos(workspace: string): Promise<RepoInfo[]>;
   tokenForRepository(
     workspace: string,
     repository: string,
     permissions: Record<string, string>,
-    host?: string, // 미지정 = github.com — link 의 host 로 정확한 installation 을 고른다
+    host?: string, // absent = github.com — the link's host picks the exact installation
   ): Promise<{ token: string; host?: string }>;
   runnerRegistrationToken(
     workspace: string,
     target: { repo: string } | { org: string },
-    host?: string, // 미지정 = github.com 우선 매칭 — picker 를 거친 호출은 host 로 정확한 installation 을 고른다
+    host?: string, // absent = github.com preferred match — a call that went through the picker picks the exact installation by host
   ): Promise<{ token: string; expiresAt: string; host?: string }>;
 }
 
-// 워크스페이스-공유 러너 로스터(존재 확인용) — RunnerService 가 구조적으로 만족. CI 배치는 항상 셀프호스티드(설계 D6)라
-// setup-PR 이 기본 self:ws 풀의 러너 유무를 fail-closed 로 검사한다(러너 0대인 채 머지된 워크플로는 GitHub 큐에서
-// 조용히 대기 — 가장 늦고 가장 헷갈리는 실패 지점이므로 PR 을 열기 전에 막는다).
+// Workspace-shared runner roster (existence check) — RunnerService satisfies this structurally. CI placement is always self-hosted (design D6),
+// so setup-PR fail-closed checks whether the default self:ws pool has any runner (a workflow merged with zero runners
+// sits silently queued on GitHub — the latest and most confusing failure point, so we block it before opening the PR).
 export interface WorkspaceRunnerRoster {
   listWorkspaceOwned(workspace: string): Promise<{ id: string }[]>;
 }
 
 export interface CiLinkServiceDeps {
   settings: WorkspaceSettingsStore;
-  githubApp: GithubAppRepoAccess; // 워크스페이스 소유 GitHub App — repos picker + setup-PR 커밋/PR + 러너 등록 토큰
-  runners: WorkspaceRunnerRoster; // 워크스페이스-공유 러너 로스터 — setup-PR 의 self:ws 풀 존재 검사
-  apiPublicUrl?: string; // 생성 워크플로의 api-url 값(미설정이면 요청 base 폴백)
-  fetchImpl?: typeof fetch; // 테스트 주입
+  githubApp: GithubAppRepoAccess; // workspace-owned GitHub App — repos picker + setup-PR commit/PR + runner registration token
+  runners: WorkspaceRunnerRoster; // workspace-shared runner roster — setup-PR's self:ws pool existence check
+  apiPublicUrl?: string; // the api-url value in the generated workflow (falls back to the request base if unset)
+  fetchImpl?: typeof fetch; // test injection
 }
 
-// GitHub API 베이스 — github.com 은 api. 서브도메인, GHE 는 /api/v3 (연결의 host 로 판별).
+// GitHub API base — github.com uses the api. subdomain, GHE uses /api/v3 (determined by the link's host).
 function apiBase(host?: string): string {
   return host ? `${host.replace(/\/$/, "")}/api/v3` : "https://api.github.com";
 }
 
-// link 동일성 키 = (host, repository) — 같은 "owner/name" 이 github.com 과 GHE 양쪽에 있을 수 있다.
-// host 비교는 트레일링 슬래시/대소문자 무시, undefined = github.com.
+// link identity key = (host, repository) — the same "owner/name" can exist on both github.com and a GHE.
+// host comparison ignores trailing slash/case; undefined = github.com.
 function sameLinkKey(link: { repository: string; host?: string }, repository: string, host?: string): boolean {
   const norm = (h?: string): string | undefined => h?.replace(/\/$/, "").toLowerCase();
   return link.repository.toLowerCase() === repository.toLowerCase() && norm(link.host) === norm(host);
@@ -81,16 +81,16 @@ export class CiLinkService {
     return (await this.deps.settings.get(workspace))?.ci?.links ?? [];
   }
 
-  // upsert — (host, repository) 키(대소문자 무시)당 1건. link 의 존재가 그 레포의 OIDC trust 이므로 생성=신뢰 부여(admin 게이트는 라우트).
+  // upsert — one record per (host, repository) key (case-insensitive). A link existing IS that repo's OIDC trust, so create = grant trust (the admin gate is on the route).
   async upsert(workspace: string, subject: string, body: UpsertCiLinkBody): Promise<WorkspaceCiLink[]> {
-    // CI 는 개인 러너를 리스할 수 없다(dispatcher 의 self/self:<id> 는 owner=제출자 — via:"github-actions" principal 은
-    // 멤버 개인 러너의 owner 가 아니다). 개인 self 계열 runtime 은 발사 시점에만 터지므로 링크 저장에서 미리 막는다.
+    // CI cannot lease a personal runner (the dispatcher's self/self:<id> have owner=submitter — a via:"github-actions" principal
+    // is not the owner of a member's personal runner). A personal self-family runtime only blows up at fire time, so we block it up front at link save.
     const rt = body.runtime;
     if (rt === "self" || (rt?.startsWith("self:") === true && rt !== "self:ws" && !rt.startsWith("self:ws:")))
       throw new BadRequestError(
         "BAD_REQUEST",
         { runtime: rt },
-        `CI 는 개인 러너(runtime '${rt}')를 쓸 수 없습니다 — 워크스페이스 공유 러너("self:ws" 풀 또는 "self:ws:<id>")를 지정하세요.`,
+        `CI cannot use a personal runner (runtime '${rt}') — specify a workspace-shared runner (the "self:ws" pool or "self:ws:<id>").`,
       );
     const current = await this.list(workspace);
     const next: WorkspaceCiLink = {
@@ -116,22 +116,22 @@ export class CiLinkService {
     return this.list(workspace);
   }
 
-  // picker — 워크스페이스 GitHub App installation 이 접근 가능한 레포 목록(설치 시 고른 것만). 토큰은 서버 안에서만.
+  // picker — the repos the workspace GitHub App installation can access (only the ones chosen at install time). The token stays inside the server.
   async listRepos(workspace: string): Promise<RepoInfo[]> {
     return this.deps.githubApp.listRepos(workspace);
   }
 
-  // setup-PR — link 로부터 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR 을 연다(워크스페이스 App 토큰).
-  // 멱등에 가깝게: 브랜치/PR 이 이미 있으면 재사용/기존 PR 반환. 머지 여부는 GitHub 쪽 사람의 결정.
+  // setup-PR — synthesizes the workflow YAML from the link and opens a branch+commit+PR in the target repo (workspace App token).
+  // Near-idempotent: if the branch/PR already exists, reuse it / return the existing PR. Whether to merge is a human decision on GitHub's side.
   async openSetupPr(
     workspace: string,
     repository: string,
     opts: { host?: string; requestBaseUrl?: string } = {},
   ): Promise<{ prUrl: string; branch: string }> {
     const link = (await this.list(workspace)).find((l) => sameLinkKey(l, repository, opts.host) && !l.disabled);
-    if (!link) throw new NotFoundError("NOT_FOUND", { repository }, `'${repository}' 의 repo link 가 없습니다.`);
-    // 배치는 항상 셀프호스티드(설계 D6) — 워크플로가 self:ws 풀을 타깃하면 러너가 실제로 등록돼 있어야 한다.
-    // 러너 0대로 머지된 워크플로는 GitHub 큐에서 조용히 대기하므로, PR 을 열기 전(가장 이른 관측 지점)에 fail-closed.
+    if (!link) throw new NotFoundError("NOT_FOUND", { repository }, `No repo link for '${repository}'.`);
+    // Placement is always self-hosted (design D6) — if the workflow targets the self:ws pool, a runner must actually be registered.
+    // A workflow merged with zero runners sits silently queued on GitHub, so we fail-closed before opening the PR (the earliest observable point).
     const runtime = link.runtime ?? "self:ws";
     if (runtime === "self:ws" || runtime.startsWith("self:ws:")) {
       const roster = await this.deps.runners.listWorkspaceOwned(workspace);
@@ -139,18 +139,18 @@ export class CiLinkService {
         throw new BadRequestError(
           "BAD_REQUEST",
           { repository },
-          "워크스페이스 공유 러너가 없습니다 — CI 워크플로는 셀프호스티드 러너에서 실행됩니다. 설정 › 공유 러너의 'GitHub Actions 러너'(POST /workspace/runners/github-install)로 빌드 서버를 먼저 등록하세요.",
+          "No workspace-shared runner — CI workflows run on self-hosted runners. Register a build server first via Settings › Shared runners' 'GitHub Actions runner' (POST /workspace/runners/github-install).",
         );
       const runnerId = runtime.startsWith("self:ws:") ? runtime.slice("self:ws:".length) : undefined;
       if (runnerId !== undefined && !roster.some((r) => r.id === runnerId))
         throw new NotFoundError(
           "NOT_FOUND",
           { runtime },
-          `link 의 runtime '${runtime}' 에 해당하는 공유 러너가 없습니다 — 러너를 다시 등록하거나 runtime 을 비워("self:ws" 풀) 두세요.`,
+          `No shared runner matches the link's runtime '${runtime}' — re-register the runner or leave runtime empty (the "self:ws" pool).`,
         );
     }
-    // 워크스페이스 App installation 토큰(쓰기) — 브랜치/파일/PR 을 만들려면 contents + pull_requests write.
-    // link.host 로 installation 을 고른다(같은 org 명이 github.com/GHE 양쪽에 있어도 정확히).
+    // Workspace App installation token (write) — creating branch/file/PR needs contents + pull_requests write.
+    // Pick the installation by link.host (exact, even if the same org name exists on both github.com/GHE).
     const { token, host } = await this.deps.githubApp.tokenForRepository(
       workspace,
       link.repository,
@@ -160,7 +160,7 @@ export class CiLinkService {
     const base = apiBase(host);
     const apiUrl = this.deps.apiPublicUrl ?? opts.requestBaseUrl;
     if (!apiUrl)
-      throw new BadRequestError("BAD_REQUEST", {}, "API_PUBLIC_URL 미설정 — 워크플로의 api-url 을 결정할 수 없습니다.");
+      throw new BadRequestError("BAD_REQUEST", {}, "API_PUBLIC_URL unset — cannot determine the workflow's api-url.");
     const yaml = renderCiWorkflow(link, workspace, apiUrl.replace(/\/$/, ""));
     const branch = "everdict/eval-setup";
     const path = ".github/workflows/everdict-eval.yml";
@@ -174,15 +174,15 @@ export class CiLinkService {
         await (await this.gh(`${base}/repos/${link.repository}/git/ref/heads/${repo.default_branch}`, token)).json(),
       );
 
-    // 브랜치 생성(이미 있으면 재사용 — 422 Reference already exists).
+    // Create branch (reuse if it already exists — 422 Reference already exists).
     const mkRef = await this.fetch(`${base}/repos/${link.repository}/git/refs`, {
       method: "POST",
       headers: this.headers(token),
       body: JSON.stringify({ ref: `refs/heads/${branch}`, sha: head.object.sha }),
     });
-    if (!mkRef.ok && mkRef.status !== 422) throw await this.upstream(mkRef, "브랜치 생성 실패");
+    if (!mkRef.ok && mkRef.status !== 422) throw await this.upstream(mkRef, "branch creation failed");
 
-    // 파일 커밋 — 기존 파일이 있으면 sha 필요(update). 404 면 신규.
+    // Commit the file — if the file already exists, its sha is required (update). 404 = new.
     const existing = await this.fetch(`${base}/repos/${link.repository}/contents/${path}?ref=${branch}`, {
       headers: this.headers(token),
     });
@@ -197,17 +197,17 @@ export class CiLinkService {
         ...(existingSha ? { sha: existingSha } : {}),
       }),
     });
-    if (!put.ok) throw await this.upstream(put, "워크플로 파일 커밋 실패");
+    if (!put.ok) throw await this.upstream(put, "workflow file commit failed");
 
-    // PR 생성 — 이미 열려 있으면(422) 기존 PR 을 찾아 반환.
+    // Create PR — if one is already open (422), find and return the existing PR.
     const mkPr = await this.fetch(`${base}/repos/${link.repository}/pulls`, {
       method: "POST",
       headers: this.headers(token),
       body: JSON.stringify({
-        title: "Everdict eval 워크플로 추가",
+        title: "Add Everdict eval workflow",
         head: branch,
         base: repo.default_branch,
-        body: `Everdict 가 생성한 CI eval 셋업입니다. 머지하면 PR/머지마다 \`${link.harness}\` 평가가 발사됩니다.\n\n- workspace: \`${workspace}\`\n- 인증: GitHub OIDC 페더레이션(keyless — repo link 가 신뢰를 부여)`,
+        body: `CI eval setup generated by Everdict. Once merged, every PR/merge fires a \`${link.harness}\` eval.\n\n- workspace: \`${workspace}\`\n- auth: GitHub OIDC federation (keyless — the repo link grants trust)`,
       }),
     });
     if (mkPr.ok) {
@@ -223,11 +223,11 @@ export class CiLinkService {
       const first = prs[0];
       if (first) return { prUrl: first.html_url, branch };
     }
-    throw await this.upstream(mkPr, "PR 생성 실패");
+    throw await this.upstream(mkPr, "PR creation failed");
   }
 
-  // GitHub Actions 셀프호스티드 러너 등록 토큰 발급 — 워크스페이스 GitHub App(administration)으로 대상(repo|org)에 mint.
-  // 단기 토큰(≈1시간). Everdict 는 장기 러너 토큰을 저장하지 않는다(필요 시마다 발급). App 이 그 org/repo 에 설치돼 있어야 한다.
+  // GitHub Actions self-hosted runner registration token — mint against the target (repo|org) via the workspace GitHub App (administration).
+  // Short-lived token (≈1 hour). Everdict does not store long-lived runner tokens (mints one on demand). The App must be installed on that org/repo.
   async mintRunnerToken(
     workspace: string,
     target: { repo: string } | { org: string },
@@ -245,10 +245,10 @@ export class CiLinkService {
     };
   }
 
-  // GET 계열 공통 — 비-2xx 는 UpstreamError 로 remap(원시 GitHub 에러를 그대로 흘리지 않는다).
+  // Common for GET-family — remap non-2xx to UpstreamError (never leak a raw GitHub error).
   private async gh(url: string, token: string): Promise<Response> {
     const res = await this.fetch(url, { headers: this.headers(token) });
-    if (!res.ok) throw await this.upstream(res, "GitHub API 호출 실패");
+    if (!res.ok) throw await this.upstream(res, "GitHub API call failed");
     return res;
   }
 
@@ -262,27 +262,27 @@ export class CiLinkService {
   }
 }
 
-// link.host → CI 빌드가 push 할 컨테이너 레지스트리. github.com 은 GHCR, GHE 는 그 인스턴스의
-// 컨테이너 레지스트리(containers.<hostname> — 서브도메인 격리). GHES 의 `GITHUB_TOKEN` 은 ghcr.io 에
-// 로그인할 수 없으므로 GHE link 에 ghcr.io 를 내보내면 워크플로가 반드시 실패한다.
+// link.host → the container registry the CI build pushes to. github.com → GHCR, GHE → that instance's
+// container registry (containers.<hostname> — subdomain isolation). GHES's `GITHUB_TOKEN` cannot log in to
+// ghcr.io, so exporting ghcr.io on a GHE link makes the workflow fail every time.
 function registryFor(host?: string): string {
   if (!host) return "ghcr.io";
   try {
     return `containers.${new URL(host).hostname}`;
   } catch {
-    throw new BadRequestError("BAD_REQUEST", { host }, `link 의 host 가 URL 이 아닙니다: ${host}`);
+    throw new BadRequestError("BAD_REQUEST", { host }, `the link's host is not a URL: ${host}`);
   }
 }
 
-// link → 워크플로 YAML 합성 — 사용자는 YAML 을 만지지 않는다(zero-input 의 핵심).
-// PR/push/PR-코멘트(/evaluate) 겸용 한 파일: 슬롯별 이미지 빌드(레지스트리는 link.host 에 따라 GHCR/GHE, digest 출력) →
-// everdict run-eval 액션(모드 자동, OIDC keyless — GHES issuer 도 컨트롤플레인이 신뢰).
-// trigger 노브: auto=PR 이벤트 자동만 · comment=/evaluate 코멘트만(비싼 스위트 온디맨드) · both(기본)=둘 다.
-// push(기본 브랜치 재핀)는 항상. issue_comment 의 함정 3개를 이 템플릿이 흡수한다(사용자 YAML 지식 불요):
-//  ① 기본 브랜치 컨텍스트로 돌므로 PR head 를 명시 체크아웃(refs/pull/N/head)하고 sha 는 git 으로 해석,
-//  ② concurrency 그룹을 PR 번호로 묶어 코멘트 발화 ↔ 같은 PR 의 자동 발화가 서로 supersede,
-//  ③ 코멘트 발화는 PR 체크가 안 달리므로(기본 브랜치 런) 대화 코멘트가 유일한 피드백 — 쓰기 권한+토큰을 내려준다.
-// 모노레포 최적화(path filter 로 바뀐 슬롯만 빌드)는 후속 — v1 은 링크된 슬롯 전부 빌드(정확성 우선).
+// link → workflow YAML synthesis — the user never touches YAML (the heart of zero-input).
+// One file for PR/push/PR-comment (/evaluate): per-slot image build (registry is GHCR/GHE per link.host, digest output) →
+// the everdict run-eval action (mode auto, OIDC keyless — the control plane trusts the GHES issuer too).
+// trigger knob: auto = PR-event auto only · comment = /evaluate comment only (expensive suites on demand) · both (default) = both.
+// push (default-branch re-pin) is always on. This template absorbs the 3 issue_comment pitfalls (no user YAML knowledge needed):
+//  ① it runs in default-branch context, so explicitly check out the PR head (refs/pull/N/head) and resolve the sha via git,
+//  ② group concurrency by PR number so a comment fire ↔ the same PR's auto fire supersede each other,
+//  ③ a comment fire gets no PR check (default-branch run), so the conversation comment is the only feedback — hand it write permission + a token.
+// Monorepo optimization (path filter to build only changed slots) is a follow-up — v1 builds every linked slot (correctness first).
 export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUrl: string): string {
   const registry = registryFor(link.host);
   const slots = Object.entries(link.slots);
@@ -305,9 +305,9 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
         `"${slot}":"${registry}/\${{ github.repository }}/${slot}@\${{ steps.build-${slot}.outputs.digest }}"`,
     )
     .join(",")}}`;
-  // 배치는 항상 셀프호스티드(설계 D6) — 컨트롤플레인이 사설망이어도 CI(run-eval)가 도달해야 하므로 GitHub-호스티드
-  // 러너 경로는 없다. 기본: 레포에 등록된 아무 셀프호스티드 러너([self-hosted]) + 워크스페이스 러너 풀(self:ws).
-  // link.runsOn/runtime 은 특정 라벨/러너·관리형 런타임으로 좁히는 오버라이드다.
+  // Placement is always self-hosted (design D6) — CI (run-eval) must reach the control plane even on a private network, so there is no GitHub-hosted
+  // runner path. Default: any self-hosted runner registered on the repo ([self-hosted]) + the workspace runner pool (self:ws).
+  // link.runsOn/runtime are overrides that narrow to a specific label/runner or a managed runtime.
   const runsOn = link.runsOn ?? "[self-hosted]";
   const runtimeLine = `\n          runtime: ${link.runtime ?? "self:ws"}`;
   const trigger = link.trigger ?? "both";
@@ -317,10 +317,10 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
     "  push:",
     "    branches: [main]",
   ].join("\n");
-  // 코멘트 발화 피드백(👀 리액션 + 결과 코멘트)용 쓰기 권한/토큰 — 코멘트 트리거가 없으면 부여하지 않는다(최소 권한).
+  // Write permission/token for comment-fire feedback (👀 reaction + result comment) — not granted when there is no comment trigger (least privilege).
   const commentPermissions = trigger !== "auto" ? "\n  issues: write\n  pull-requests: write" : "";
   const commentTokenLine = trigger !== "auto" ? "\n          github-token: ${{ github.token }}" : "";
-  // /evaluate 게이트 — PR 대화의 코멘트이고 작성자가 협력자 이상일 때만(포크 PR 의 임의 코멘트로 평가 발화 방어).
+  // /evaluate gate — only when it's a comment on a PR conversation and the author is a collaborator or above (defends against evals fired by arbitrary comments on fork PRs).
   const commentGate =
     trigger !== "auto"
       ? `
@@ -330,23 +330,23 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
       startsWith(github.event.comment.body, '/evaluate') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))`
       : "";
-  // 코멘트 발화는 기본 브랜치 컨텍스트 — PR head 를 명시 체크아웃(그 외 이벤트는 빈 ref = 기본 동작).
+  // A comment fire is in default-branch context — explicitly check out the PR head (other events get an empty ref = default behavior).
   const checkoutRef =
     trigger !== "auto"
       ? `
         with:
           ref: \${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}`
       : "";
-  return `# Everdict 가 생성한 CI eval 워크플로 — PR 은 임시 핀 평가, PR 코멘트 /evaluate 는 온디맨드 재평가, 기본 브랜치 push 는 재핀(새 버전)+평가.
-# 셀프호스티드 러너 전용 — Everdict 컨트롤플레인이 사설망이어도 러너가 도달할 수 있어야 합니다(GitHub-호스티드 미지원).
-# 주의: 퍼블릭 레포의 fork PR 은 셀프호스티드 러너에서 임의 코드를 실행할 수 있습니다(프라이빗 팀 레포 전제).
+  return `# CI eval workflow generated by Everdict — a PR is an ephemeral-pin eval, a /evaluate PR comment is an on-demand re-eval, a default-branch push is a re-pin (new version) + eval.
+# Self-hosted runners only — the runner must be able to reach the Everdict control plane even on a private network (GitHub-hosted not supported).
+# Caution: a fork PR on a public repo can run arbitrary code on a self-hosted runner (private team repos assumed).
 name: everdict-eval
 on:
 ${onBlock}
 permissions:
   contents: read
   packages: write
-  id-token: write # Everdict OIDC 페더레이션(keyless)${commentPermissions}
+  id-token: write # Everdict OIDC federation (keyless)${commentPermissions}
 concurrency:
   group: everdict-eval-\${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
   cancel-in-progress: true
@@ -370,7 +370,7 @@ ${buildSteps}
           api-url: ${apiUrl}
           workspace: ${workspace}
           harness: ${link.harness}
-          dataset: ${link.dataset ?? "# TODO: 데이터셋 id 를 지정하세요"}
+          dataset: ${link.dataset ?? "# TODO: specify a dataset id"}
           images: '${imagesJson}'
           head-sha: \${{ steps.head.outputs.sha }}${commentTokenLine}${runtimeLine}
 `;

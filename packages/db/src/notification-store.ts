@@ -1,28 +1,28 @@
 import { z } from "zod";
 import type { SqlClient } from "./client.js";
 
-// 알림 피드 — "내가 시킨 작업이 끝났다"를 웹 벨 인박스/데스크톱 네이티브 알림이 소비한다.
-// 개인 소유(recipient=subject) + 워크스페이스 스코프 — connections/runners 와 같은 self-scoped 모델.
-// 설계: docs/architecture/notifications.md (N1~N5).
+// Notification feed — the web bell inbox/desktop native notifications consume "the job I asked for is done".
+// Personally owned (recipient=subject) + workspace-scoped — same self-scoped model as connections/runners.
+// Design: docs/architecture/notifications.md (N1~N5).
 export const NotificationKindSchema = z.enum([
   "run_completed",
   "run_failed",
   "scorecard_completed",
   "scorecard_failed",
   "schedule_regression",
-  "comment_mention", // 댓글에서 @언급됨 — 링크로 바로 그 컨텍스트(데이터셋 댓글)로 이동
+  "comment_mention", // @-mentioned in a comment — the link jumps straight to that context (dataset comment)
 ]);
 export type NotificationKind = z.infer<typeof NotificationKindSchema>;
 
 export const NotificationRecordSchema = z.object({
   id: z.string(),
   workspace: z.string(),
-  recipient: z.string(), // 작업을 시킨 사람(subject) — N2
+  recipient: z.string(), // the person who asked for the job (subject) — N2
   kind: NotificationKindSchema,
   title: z.string(),
   body: z.string().optional(),
-  // 클릭 시 이동할 대상 — run/scorecard 상세, 또는 리소스 댓글(멘션: resourceType+resourceId 로 해당 상세 +
-  // commentId 앵커로 스크롤). resourceType ∈ dataset|harness|scorecard|view|schedule|run|runtime.
+  // Where a click navigates — run/scorecard detail, or a resource comment (mention: to that detail via resourceType+resourceId +
+  // scroll to the commentId anchor). resourceType ∈ dataset|harness|scorecard|view|schedule|run|runtime.
   link: z
     .object({
       runId: z.string().optional(),
@@ -39,14 +39,14 @@ export type NotificationRecord = z.infer<typeof NotificationRecordSchema>;
 
 export interface NotificationListOptions {
   unreadOnly?: boolean;
-  limit?: number; // 기본 50 — 벨 인박스는 최근 것만
+  limit?: number; // default 50 — the bell inbox shows only recent ones
 }
 
 export interface NotificationStore {
   add(record: NotificationRecord): Promise<void>;
-  // 최신순(createdAt DESC). 본인(recipient)+워크스페이스 스코프.
+  // Newest first (createdAt DESC). Own (recipient) + workspace scoped.
   list(recipient: string, workspace: string, opts?: NotificationListOptions): Promise<NotificationRecord[]>;
-  // ids 또는 전체를 읽음 처리 — 처리된 건수 반환(이미 읽은 것은 건드리지 않음).
+  // Mark ids or all as read — returns the number processed (doesn't touch already-read ones).
   markRead(recipient: string, workspace: string, ids: string[] | "all", readAt: string): Promise<number>;
 }
 
@@ -146,7 +146,7 @@ export class PgNotificationStore implements NotificationStore {
     const idFilter = ids === "all" ? "" : " AND id = ANY($4)";
     const params: unknown[] = [recipient, workspace, readAt];
     if (ids !== "all") params.push(ids);
-    // SqlClient 는 rows 만 노출 — RETURNING 으로 처리 건수를 센다.
+    // SqlClient exposes only rows — count the processed rows via RETURNING.
     const res = await this.client.query<{ id: string }>(
       `UPDATE everdict_notifications SET read_at = $3
        WHERE recipient = $1 AND workspace = $2 AND read_at IS NULL${idFilter}

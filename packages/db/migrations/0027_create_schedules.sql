@@ -1,6 +1,6 @@
--- 0027_create_schedules — additive (expand): 예약(cron) 스코어카드 영속 테이블.
--- 스케줄 = 저장된 RunScorecardInput(run_template jsonb) + 크론식 + 정책. 이 테이블이 SSOT,
--- Temporal Schedule 은 실행 메커니즘(slice 2). 워크스페이스(tenant) 스코프. 설계: docs/architecture/scheduled-evals.md.
+-- 0027_create_schedules — additive (expand): scheduled (cron) scorecard persistence table.
+-- A schedule = a stored RunScorecardInput (run_template jsonb) + cron expression + policy. This table is the SSOT;
+-- the Temporal Schedule is the execution mechanism (slice 2). Workspace (tenant) scoped. Design: docs/architecture/scheduled-evals.md.
 CREATE TABLE IF NOT EXISTS everdict_schedules (
   id                text PRIMARY KEY,
   tenant            text NOT NULL,
@@ -18,5 +18,5 @@ CREATE TABLE IF NOT EXISTS everdict_schedules (
   updated_at        timestamptz NOT NULL
 );
 
--- 테넌트별 목록 + 커서(created_at DESC, id DESC) 정렬용.
+-- For per-tenant listing + cursor (created_at DESC, id DESC) ordering.
 CREATE INDEX IF NOT EXISTS everdict_schedules_tenant_created_idx ON everdict_schedules (tenant, created_at DESC, id DESC);

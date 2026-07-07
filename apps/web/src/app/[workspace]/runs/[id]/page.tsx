@@ -16,7 +16,7 @@ import { StatusPill } from '@/shared/ui/status-pill'
 
 export const dynamic = 'force-dynamic'
 
-// os-use 스크린샷 src: base64 동봉(dev) → data URL, 아니면 object storage URL(오프로드). 둘 다 없으면 undefined.
+// os-use screenshot src: inline base64 (dev) → data URL, else object storage URL (offloaded). undefined if neither.
 function osUseShotSrc(snapshot?: {
   screenshot?: string
   screenshotRef?: string
@@ -124,7 +124,7 @@ export default async function RunDetailPage({
                   {s.value}
                 </div>
                 <div className="text-[12px] text-faint">{s.metric}</div>
-                {/* 판정 사유(judge 루브릭 reasoning, command 출력 등) — os-use VLM 채점에서 "왜" 를 보여준다. */}
+                {/* Verdict reasoning (judge rubric reasoning, command output, etc.) — shows the "why" in os-use VLM grading. */}
                 {s.detail && (
                   <p className="mt-2 border-t border-border/60 pt-2 text-[12px] leading-relaxed text-muted-foreground">
                     {s.detail}
@@ -147,7 +147,7 @@ export default async function RunDetailPage({
         <section className="space-y-2.5">
           <SectionHeader title={t('snapshot', { kind: String(snapshot.kind) })} />
           <Card className="space-y-3 p-4">
-            {/* os-use 스크린샷 — base64 동봉(dev) 또는 object storage URL(오프로드). 에이전트가 본 최종 화면. */}
+            {/* os-use screenshot — inline base64 (dev) or object storage URL (offloaded). The final screen the agent saw. */}
             {osUseShotSrc(snapshot) && (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -156,7 +156,7 @@ export default async function RunDetailPage({
                 className="max-h-[480px] w-auto rounded-lg border"
               />
             )}
-            {/* browser(서비스-토폴로지: browser-use 등) — 에이전트가 도달한 최종 URL + 추출 DOM 발췌. */}
+            {/* browser (service-topology: browser-use, etc.) — the final URL the agent reached + an extracted DOM excerpt. */}
             {snapshot.kind === 'browser' && (
               <div className="space-y-2">
                 {snapshot.url && (

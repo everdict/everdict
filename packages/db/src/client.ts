@@ -1,6 +1,6 @@
 import pg from "pg";
 
-// 최소 SQL 클라이언트 추상화 — 테스트에서 모킹 가능(NomadHttp 패턴과 동일).
+// Minimal SQL-client abstraction — mockable in tests (same pattern as NomadHttp).
 export interface SqlClient {
   query<R = Record<string, unknown>>(text: string, params?: unknown[]): Promise<{ rows: R[] }>;
 }
@@ -10,12 +10,12 @@ export interface PgPool {
   end(): Promise<void>;
 }
 
-// 실제 Postgres 풀. connectionString 예: postgresql://user:pass@host:5432/db
+// A real Postgres pool. connectionString example: postgresql://user:pass@host:5432/db
 export function makePool(connectionString: string): pg.Pool {
   return new pg.Pool({ connectionString });
 }
 
-// pg.Pool → SqlClient (구조적으로 호환되지만 제네릭 마찰을 피하려 얇게 감싼다).
+// pg.Pool → SqlClient (structurally compatible, but wrapped thinly to avoid generic friction).
 export function sqlClient(pool: { query(text: string, params?: unknown[]): Promise<{ rows: unknown[] }> }): SqlClient {
   return {
     async query(text, params) {

@@ -1,22 +1,22 @@
-// 라이브 e2e (SLICE 74): os-use 스크린샷을 VLM(비전) judge 로 자동 채점 — "화면이 목표 상태인가?".
-// SLICE73 은 데스크탑 GUI 를 실제 구동(전이)까지였고, 채점은 DOM/바이트 체크였다. 여기선 *모델이 스크린샷을 보고*
-// 태스크 목표 달성 여부를 판정하게 한다(벤치마크 종속 grader 없이 임의 데스크탑 태스크 자동 채점).
+// Live e2e (SLICE 74): auto-grade an os-use screenshot with a VLM (vision) judge — "is the screen in the goal state?".
+// SLICE73 went up to actually driving (transitioning) the desktop GUI, with grading via DOM/byte checks. Here we let *the model look at the screenshot*
+// and decide whether the task goal was met (auto-grade an arbitrary desktop task with no benchmark-specific grader).
 //
-//   경로(전부 실제 프로덕션 코드):
-//     judgeFromEnv(env) → modelJudge(openaiComplete(LiteLLM 프록시))  [실 VLM, gpt-5.4-mini]
-//     JudgeGrader({useScreenshot:true, rubric}) → resolveScreenshot(os-use 스냅샷, compute=LocalDriver)
-//       → 환경에서 `base64` 로 PNG 읽어 image_url(data-URL)로 멀티모달 전송 → JSON 판정.
-//   검증: SLICE73 이 캡처한 실제 hermes os-use 스크린샷 2장으로 *목표/비목표 구분*.
-//     after(Connect to Remote Hermes 폼=목표) → pass=true,  before(Welcome 랜딩=비목표) → pass=false.
+//   Path (all real production code):
+//     judgeFromEnv(env) → modelJudge(openaiComplete(LiteLLM proxy))  [real VLM, gpt-5.4-mini]
+//     JudgeGrader({useScreenshot:true, rubric}) → resolveScreenshot(os-use snapshot, compute=LocalDriver)
+//       → read the PNG as `base64` from the environment and send multimodal as image_url (data-URL) → JSON verdict.
+//   Verify: distinguish *goal/non-goal* using 2 real hermes os-use screenshots captured by SLICE73.
+//     after (Connect to Remote Hermes form = goal) → pass=true,  before (Welcome landing = non-goal) → pass=false.
 //
-// 키는 infra/litellm/.env(또는 OPENAI_API_KEY env)에서만 읽고 절대 출력/커밋하지 않는다.
+// The key is read only from infra/litellm/.env (or the OPENAI_API_KEY env) and is never printed/committed.
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { JudgeGrader, judgeFromEnv } from "../../packages/graders/dist/index.js";
 
-// --- judge env 구성(LiteLLM OpenAI-호환 프록시) ---
-// everdict/scripts/live → workclaw/infra/litellm/.env 는 4 단계 상위.
+// --- judge env config (LiteLLM OpenAI-compatible proxy) ---
+// everdict/scripts/live → workclaw/infra/litellm/.env is 4 levels up.
 const ENV_PATH = process.env.LITELLM_ENV ?? "../../../../infra/litellm/.env";
 function masterKey() {
   if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
@@ -29,7 +29,7 @@ function masterKey() {
 }
 const key = masterKey();
 if (!key) {
-  console.error("VLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env 의 LITELLM_MASTER_KEY 필요).");
+  console.error("no VLM key (OPENAI_API_KEY or LITELLM_MASTER_KEY in infra/litellm/.env required).");
   process.exit(2);
 }
 const env = {
@@ -41,11 +41,11 @@ const env = {
 
 const judge = judgeFromEnv(env);
 if (!judge) {
-  console.error("judgeFromEnv 가 Judge 를 구성하지 못함.");
+  console.error("judgeFromEnv failed to construct a Judge.");
   process.exit(2);
 }
 
-// 데스크탑 태스크 목표 + 루브릭(벤치마크 종속 코드 0 — 유저가 데이터로 정의하는 그 자리).
+// Desktop task goal + rubric (zero benchmark-specific code — this is where the user defines it as data).
 const task = "Reach the 'Connect to Remote Hermes' screen where a user can type a remote Hermes API server URL.";
 const rubric =
   "PASS only if a 'Server URL' input field for connecting to a remote server is visible on screen. " +
@@ -53,16 +53,24 @@ const rubric =
 
 const grader = new JudgeGrader(judge, { id: "vlm-judge", useScreenshot: true, rubric });
 
-// os-use 스냅샷(SLICE73 이 캡처한 실 스크린샷, 절대경로).
+// os-use snapshots (real screenshots captured by SLICE73, absolute paths).
 const shots = [
-  { label: "after  (Remote 연결폼 = 목표)", ref: process.env.SHOT_AFTER ?? "/tmp/hermes-after.png", expect: true },
-  { label: "before (Welcome 랜딩 = 비목표)", ref: process.env.SHOT_BEFORE ?? "/tmp/hermes-before.png", expect: false },
+  {
+    label: "after  (Remote connect form = goal)",
+    ref: process.env.SHOT_AFTER ?? "/tmp/hermes-after.png",
+    expect: true,
+  },
+  {
+    label: "before (Welcome landing = non-goal)",
+    ref: process.env.SHOT_BEFORE ?? "/tmp/hermes-before.png",
+    expect: false,
+  },
 ];
 
 const driver = new LocalDriver();
 const compute = await driver.provision({ os: "linux", needs: ["shell"] });
 
-console.log(`=== VLM judge 로 os-use 스크린샷 자동 채점 (model=${env.EVERDICT_JUDGE_MODEL}) ===\n`);
+console.log(`=== auto-grade os-use screenshots with a VLM judge (model=${env.EVERDICT_JUDGE_MODEL}) ===\n`);
 let allOk = true;
 try {
   for (const s of shots) {
@@ -75,7 +83,7 @@ try {
     const ok = score.pass === s.expect;
     allOk = allOk && ok;
     console.log(`${ok ? "✓" : "✗"} ${s.label}`);
-    console.log(`    pass=${score.pass} score=${score.value} (기대 pass=${s.expect})`);
+    console.log(`    pass=${score.pass} score=${score.value} (expected pass=${s.expect})`);
     console.log(`    reason: ${String(score.detail).slice(0, 200)}\n`);
   }
 } finally {
@@ -84,7 +92,7 @@ try {
 
 console.log(
   allOk
-    ? "✅ SLICE 74: VLM judge 가 os-use 스크린샷만 보고 데스크탑 태스크 목표 달성 여부를 정확히 판정 — 목표(Remote 폼)=pass, 비목표(Welcome)=fail. 벤치마크 종속 grader 없이 임의 데스크탑/UI 태스크를 모델이 자동 채점. (실 프로덕션 경로: judgeFromEnv→modelJudge→openaiComplete(image_url)→JudgeGrader.resolveScreenshot)"
-    : "⚠️ 기대와 불일치(VLM 판정이 목표/비목표를 구분 못함)",
+    ? "✅ SLICE 74: the VLM judge accurately decides whether the desktop task goal was met from the os-use screenshot alone — goal (Remote form)=pass, non-goal (Welcome)=fail. The model auto-grades an arbitrary desktop/UI task with no benchmark-specific grader. (real production path: judgeFromEnv→modelJudge→openaiComplete(image_url)→JudgeGrader.resolveScreenshot)"
+    : "⚠️ does not match expectation (VLM verdict fails to distinguish goal/non-goal)",
 );
 process.exit(allOk ? 0 : 1);

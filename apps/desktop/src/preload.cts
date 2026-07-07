@@ -1,18 +1,18 @@
-// 프리로드 — window.everdictDesktop 브리지의 렌더러 쪽 절반(스킬 desktop 불변식 3: 이 4개+구독이 전부).
-// 채널 문자열은 bridge.ts BRIDGE_CHANNELS 와 수동 동기화(이 파일은 sandbox CJS 라 ESM 모듈을 import 못 한다).
-// 1차 게이트: main 이 additionalArguments 로 넘긴 웹 origin 과 문서 origin 이 일치할 때만 노출 —
-// 탑레벨 네비게이션이 Keycloak/GitHub 로 나가 있는 동안엔 브리지 자체가 없다. (실제 권한 경계는
-// main 의 senderFrame origin 검사 — bridge.ts. 이중 방어.)
+// Preload — the renderer-side half of the window.everdictDesktop bridge (skill desktop invariant 3: these four + the subscription are all there is).
+// The channel strings are manually kept in sync with bridge.ts BRIDGE_CHANNELS (this file is sandbox CJS and cannot import ESM modules).
+// First gate: exposed only when the document origin matches the web origin main passed via additionalArguments —
+// while top-level navigation has gone out to Keycloak/GitHub, the bridge itself is absent. (The real permission boundary is
+// main's senderFrame origin check — bridge.ts. Defense in depth.)
 import electron = require("electron");
 
-// sandbox preload 는 렌더러 문서 컨텍스트라 location 이 존재한다 — DOM lib 없는 tsconfig 라 최소 선언만.
+// A sandbox preload runs in the renderer document context, so location exists — with a DOM-lib-free tsconfig, just a minimal declaration.
 declare const location: { origin: string };
 
 const ORIGIN_FLAG = "--everdict-web-origin=";
 const expectedOrigin = process.argv.find((a) => a.startsWith(ORIGIN_FLAG))?.slice(ORIGIN_FLAG.length);
 
-// 설정(setup) 창 전용 브리지 — 서버 주소 조회/저장 2메서드(D8). 메인 쪽 IPC 가 setup.html 의
-// file:// URL 만 허용하므로(main.ts), 웹/외부 페이지에는 이 표면이 닿지 않는다.
+// Setup-window-only bridge — two methods to get/set the server address (D8). Because the main-side IPC allows only
+// setup.html's file:// URL (main.ts), this surface never reaches web/external pages.
 if (process.argv.includes("--everdict-setup")) {
   electron.contextBridge.exposeInMainWorld("everdictSetup", {
     getServerUrl: () => electron.ipcRenderer.invoke("everdict:get-server-url"),

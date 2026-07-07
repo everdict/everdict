@@ -1,6 +1,6 @@
-// 라이브 e2e (SLICE 61): 벤치마크 정의를 "유저별/테넌트별"로 일반화 — 카탈로그(코드)를 테넌트가 등록하는 데이터로.
-// BenchmarkAdapterSpec(JSON) 을 InMemoryBenchmarkRegistry(tenant + _shared)에 등록 → 격리 + _shared 폴백,
-// 그리고 importFromSpec 으로 테넌트-소유 Dataset 인입. per-row SWE-bench 형태도 graderTemplates({field} 보간)로 데이터.
+// Live e2e (SLICE 61): generalize benchmark definitions to "per-user / per-tenant" — from a catalog (code) to data the tenant registers.
+// Register a BenchmarkAdapterSpec (JSON) in InMemoryBenchmarkRegistry (tenant + _shared) → isolation + _shared fallback,
+// then ingest a tenant-owned Dataset via importFromSpec. The per-row SWE-bench form is also data, via graderTemplates ({field} interpolation).
 import process from "node:process";
 import { importFromSpec } from "../../packages/datasets/dist/index.js";
 import { InMemoryBenchmarkRegistry, InMemoryDatasetRegistry } from "../../packages/registry/dist/index.js";
@@ -8,7 +8,7 @@ import { InMemoryBenchmarkRegistry, InMemoryDatasetRegistry } from "../../packag
 const reg = new InMemoryBenchmarkRegistry();
 const datasets = new InMemoryDatasetRegistry();
 
-// first-party 공유 레시피(_shared) — 모든 테넌트가 봄.
+// first-party shared recipe (_shared) — visible to every tenant.
 await reg.register("_shared", {
   id: "gsm8k",
   version: "1.0.0",
@@ -17,7 +17,7 @@ await reg.register("_shared", {
   source: { kind: "huggingface", dataset: "openai/gsm8k", config: "main", split: "test" },
   mapping: { idField: "id", taskField: "question", answerField: "answer" },
 });
-// 테넌트 acme 의 private 코딩 벤치마크 — per-row test_patch 를 command grader 로(데이터, 코드 0줄).
+// tenant acme's private coding benchmark — per-row test_patch as a command grader (data, zero lines of code).
 await reg.register("acme", {
   id: "acme-code",
   version: "1.0.0",
@@ -28,7 +28,7 @@ await reg.register("acme", {
     { id: "command", config: { applyPatch: "{test_patch}", cmd: "python -m pytest -q", metric: "resolved" } },
   ],
 });
-// 테넌트 globex 의 private QA 벤치마크.
+// tenant globex's private QA benchmark.
 await reg.register("globex", {
   id: "globex-qa",
   version: "1.0.0",
@@ -36,22 +36,24 @@ await reg.register("globex", {
   mapping: { idField: "id", taskField: "q", answerField: "a" },
 });
 
-console.log("=== 테넌트별 벤치마크 레시피 (registry: tenant + _shared) ===");
+console.log("=== per-tenant benchmark recipes (registry: tenant + _shared) ===");
 console.log("acme  list:", (await reg.list("acme")).map((b) => `${b.id}(${b.owner})`).join(", "));
 console.log("globex list:", (await reg.list("globex")).map((b) => `${b.id}(${b.owner})`).join(", "));
 
-// 격리: acme 의 private 레시피는 globex 가 못 봄.
+// isolation: globex cannot see acme's private recipe.
 let isolated = false;
 try {
   await reg.get("globex", "acme-code");
 } catch {
   isolated = true;
 }
-console.log(`\n격리: globex 가 acme-code 조회 → ${isolated ? "거부됨(격리 OK)" : "보임(격리 실패!)"}`);
+console.log(
+  `\nisolation: globex reads acme-code → ${isolated ? "denied (isolation OK)" : "visible (isolation failed!)"}`,
+);
 const sharedBoth = (await reg.get("acme", "gsm8k")).id === "gsm8k" && (await reg.get("globex", "gsm8k")).id === "gsm8k";
-console.log(`_shared 폴백: acme/globex 둘 다 gsm8k 봄 → ${sharedBoth}`);
+console.log(`_shared fallback: acme/globex both see gsm8k → ${sharedBoth}`);
 
-// acme 가 자기 private 레시피로 인입(데이터-only SWE-bench 형태) → 테넌트-소유 Dataset.
+// acme ingests via its own private recipe (data-only SWE-bench form) → tenant-owned Dataset.
 const acmeSpec = await reg.get("acme", "acme-code");
 const acmeDs = await importFromSpec(
   acmeSpec,
@@ -63,29 +65,29 @@ const acmeDs = await importFromSpec(
 await datasets.register("acme", acmeDs);
 const c = acmeDs.cases[0];
 const cmd = c.graders.find((g) => g.id === "command");
-console.log(`\nacme 인입: ${acmeDs.id}@${acmeDs.version} (${acmeDs.cases.length} case)  env=${c.env.kind}`);
+console.log(`\nacme ingest: ${acmeDs.id}@${acmeDs.version} (${acmeDs.cases.length} case)  env=${c.env.kind}`);
 console.log(
-  `  command grader applyPatch(보간)=${JSON.stringify(cmd?.config?.applyPatch)}  cmd=${JSON.stringify(cmd?.config?.cmd)}`,
+  `  command grader applyPatch(interpolated)=${JSON.stringify(cmd?.config?.applyPatch)}  cmd=${JSON.stringify(cmd?.config?.cmd)}`,
 );
 const interpolated = String(cmd?.config?.applyPatch).includes("def test()");
 
-// globex 가 _shared gsm8k 레시피로 실 HF 인입(등록된 spec → 데이터셋).
+// globex ingests via the _shared gsm8k recipe from real HF (registered spec → dataset).
 let realHf = false;
 try {
   const g = await importFromSpec(await reg.get("globex", "gsm8k"), { id: "gsm8k", version: "1.0.0" }, { limit: 2 });
   await datasets.register("globex", g);
   console.log(
-    `\nglobex 인입(_shared gsm8k, 실 HF): ${g.cases.length} case, grader=${g.cases[0]?.graders.map((x) => x.id).join(",")}`,
+    `\nglobex ingest(_shared gsm8k, real HF): ${g.cases.length} case, grader=${g.cases[0]?.graders.map((x) => x.id).join(",")}`,
   );
   realHf = g.cases.length === 2;
 } catch (e) {
-  console.log(`\nglobex gsm8k 실 HF 인입 실패: ${(e.message ?? "").slice(0, 80)}`);
+  console.log(`\nglobex gsm8k real HF ingest failed: ${(e.message ?? "").slice(0, 80)}`);
 }
 
 const ok = isolated && sharedBoth && interpolated && realHf;
 console.log(
   ok
-    ? "\n✅ SLICE 61: 벤치마크 정의가 테넌트별 데이터로 일반화 — 각 테넌트가 자기 레시피(BenchmarkAdapterSpec) 등록(격리) + _shared 폴백, importFromSpec 으로 테넌트-소유 Dataset 인입. per-row SWE-bench 형태도 graderTemplates 보간으로 코드 없이. 카탈로그(코드)→테넌트 레지스트리(데이터) 일반화 완료."
-    : "\n⚠️ 기대와 불일치",
+    ? "\n✅ SLICE 61: benchmark definitions generalized to per-tenant data — each tenant registers its own recipe (BenchmarkAdapterSpec) (isolated) + _shared fallback, and ingests a tenant-owned Dataset via importFromSpec. The per-row SWE-bench form works with no code, via graderTemplates interpolation. Catalog (code) → tenant registry (data) generalization complete."
+    : "\n⚠️ Mismatch vs expected",
 );
 process.exit(ok ? 0 : 1);

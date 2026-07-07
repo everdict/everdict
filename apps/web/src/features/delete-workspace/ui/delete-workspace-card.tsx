@@ -12,8 +12,8 @@ import { Input, Label } from '@/shared/ui/input'
 
 import { deleteWorkspaceAction } from '../api/delete-workspace'
 
-// 위험 구역 — owner 에게만 렌더된다(상위에서 isOwner 게이트). 카드에는 삭제 버튼만 노출하고, 누르면 팝업에서
-// 워크스페이스 이름을 정확히 입력해야 삭제가 활성(실수 방지). 성공 시 홈(/)으로 보내 남은 워크스페이스/온보딩으로 재라우팅.
+// Danger zone — rendered only to the owner (isOwner-gated upstream). The card exposes only a delete button; clicking it opens a popup where
+// you must type the workspace name exactly to enable deletion (mistake prevention). On success, redirect to home (/) to re-route to a remaining workspace/onboarding.
 export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }) {
   const t = useTranslations('deleteWorkspace')
   const router = useRouter()

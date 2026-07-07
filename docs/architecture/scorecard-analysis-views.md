@@ -12,10 +12,10 @@ Scorecard analysis is fragmented across four routes, each with its own page, pic
 
 | Lens | Route | Data source | What it is |
 | --- | --- | --- | --- |
-| 리더보드 | `/scorecards/leaderboard` | `GET /scorecards/leaderboard?dataset` | rank harness×model by score, per benchmark |
-| 하니스별 | `/scorecards/by-harness` | client group of `listScorecards` | each harness's score per benchmark |
-| 추이 | `/scorecards/trend` | `GET /scorecards/trend?dataset&harness` | score over time |
-| 비교 | `/scorecards/compare` | `GET /scorecards/diff?baseline&candidate` | regressions/improvements between two |
+| Leaderboard | `/scorecards/leaderboard` | `GET /scorecards/leaderboard?dataset` | rank harness×model by score, per benchmark |
+| By harness | `/scorecards/by-harness` | client group of `listScorecards` | each harness's score per benchmark |
+| Trend | `/scorecards/trend` | `GET /scorecards/trend?dataset&harness` | score over time |
+| Compare | `/scorecards/compare` | `GET /scorecards/diff?baseline&candidate` | regressions/improvements between two |
 
 Each is a **fixed** slice. The user wants a **stock-analysis-style** dashboard: flexible filters, flexible
 grouping, and search — one surface where any of those four (and combinations) are just *configurations* — and the
@@ -34,10 +34,10 @@ So the whole analysis is a **client-side pivot** over that array — no new heav
 
 | Lens | = configuration of the pivot |
 | --- | --- |
-| 리더보드 | filter `dataset=X` · group by `[harness, model]` · measure `passRate` · sort desc |
-| 하니스별 | group rows by `harness` · pivot columns by `dataset` · measure `passRate` |
-| 추이 | filter `dataset=X, harness=Y` · group by `time bucket(createdAt)` · measure `passRate` → line |
-| 비교 | pick two groups (e.g. two `harness.version`s, or two time buckets) · show **Δ** of `passRate` |
+| Leaderboard | filter `dataset=X` · group by `[harness, model]` · measure `passRate` · sort desc |
+| By harness | group rows by `harness` · pivot columns by `dataset` · measure `passRate` |
+| Trend | filter `dataset=X, harness=Y` · group by `time bucket(createdAt)` · measure `passRate` → line |
+| Compare | pick two groups (e.g. two `harness.version`s, or two time buckets) · show **Δ** of `passRate` |
 
 ## The analysis model
 
@@ -78,7 +78,7 @@ Rendering (S1, all client-side, extends the existing by-harness grouping code + 
 - **line** — measure over the time bucket (trend feel), reusing the existing SVG sparkline in `trend/page.tsx`.
 
 The measure comes from `summary`: `passRate` (fallback `mean`) via the shared `fmtScore`/`rateHealth` atoms; a
-group's value = mean of its rows' scores (or `latest` = most recent row's score). "Δ / 나빠짐" uses the same
+group's value = mean of its rows' scores (or `latest` = most recent row's score). "Δ / worse" uses the same
 regression semantics as `diffScorecards` but computed over the grouped values.
 
 `superseded`/incomplete scorecards are excluded by default (a filter toggle can include them).
@@ -86,7 +86,7 @@ regression semantics as `diffScorecards` but computed over the grouped values.
 ## The `View` entity
 
 A `View` is a **named, saved `AnalysisConfig`** — the pivot recipe, not a data snapshot. Opening a View re-runs the
-pivot against the **current** `listScorecards`, so new scorecards appear automatically (the "macro / 지속적" ask).
+pivot against the **current** `listScorecards`, so new scorecards appear automatically (the "macro / continuous" ask).
 
 ```ts
 interface ViewRecord {
@@ -145,10 +145,10 @@ mem/Pg stores, Zod at every boundary, web is a pure HTTP mirror.
 
 ### S2b — View as a **first-class object** (nav + own routes) — **SHIPPED**
 Views aren't buried inside the analyze dashboard; they're a top-level concept.
-- **Sidebar nav** entry "뷰" (`nav-config.ts`, `Bookmark`) → `/{ws}/views`; auto-appears in the command palette
+- **Sidebar nav** entry "Views" (`nav-config.ts`, `Bookmark`) → `/{ws}/views`; auto-appears in the command palette
   (`ALL_NAV_ITEMS`).
 - `/{ws}/views` — **list/manage** page: `ViewList` cards (name · visibility badge · `describeConfig` config-summary
-  chips · owner avatar · "n분 전 수정" · ⋯ kebab[share-toggle / delete for owner-or-admin]). Empty-state CTA →
+  chips · owner avatar · "edited n minutes ago" · ⋯ kebab[share-toggle / delete for owner-or-admin]). Empty-state CTA →
   build one in the analyze dashboard.
 - `/{ws}/views/[id]` — **open** page (clean canonical URL): renders `CustomAnalyzer` hydrated from the View's
   `config`, live re-run; missing/other-user-private → `notFound()` (404, existence-leak-safe).
@@ -161,7 +161,7 @@ Views aren't buried inside the analyze dashboard; they're a top-level concept.
 - Visibility toggle (`private ↔ workspace`) in the owner-manage row + control-plane enforcement; shared Views listed
   for all members; deep-link `/{ws}/scorecards/analyze?view=<id>` (server resolves the linked View → custom mode →
   live re-run). "Copy link" for shared Views.
-- "Live" is inherent (re-run on open) — the dashboard footer already reads "N개 스코어카드 기준 · 현재 데이터로 실시간 집계".
+- "Live" is inherent (re-run on open) — the dashboard footer already reads "based on N scorecards · live aggregation over current data".
 - **Deferred:** a **fork** action for non-owners (copy a shared View into a private one). Not yet built; non-owners
   load-and-tweak (URL state) but can't persist over someone else's View.
 
@@ -173,7 +173,7 @@ Views aren't buried inside the analyze dashboard; they're a top-level concept.
   user).
 
 ## Non-goals (this iteration)
-- No multi-panel dashboards, no View versioning (user: "패널이나 버전 있을 필요 없음").
+- No multi-panel dashboards, no View versioning (user: "no need for panels or versions").
 - No new snapshotting — Views are recipes, always live.
 - No per-case drill-down inside the dashboard (that stays on the scorecard detail page); the dashboard operates on
   the light `summary`, not per-case results.

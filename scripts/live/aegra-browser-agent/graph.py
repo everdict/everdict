@@ -28,7 +28,7 @@ async def act(state: MessagesState, config: RunnableConfig) -> dict:
     url, page_text = "", ""
     m = re.search(r"https?://[^\s]+", task)
     if cdp and m:
-        os.environ["HOME"] = "/tmp"  # 비루트 앱 사용자 HOME=/nonexistent → playwright 드라이버 캐시 쓰기용
+        os.environ["HOME"] = "/tmp"  # non-root app user has HOME=/nonexistent → give playwright a writable driver cache
         os.environ["XDG_CACHE_HOME"] = "/tmp/.cache"
         from playwright.async_api import async_playwright
 
@@ -39,7 +39,7 @@ async def act(state: MessagesState, config: RunnableConfig) -> dict:
             await page.goto(m.group(0), wait_until="domcontentloaded", timeout=30000)
             url = page.url
             page_text = (await page.inner_text("body"))[:3000]
-            # 원격 chromedp + 페이지 타깃은 Everdict 스냅샷용으로 유지(close 안 함)
+            # keep the remote chromedp + page target open for Everdict's snapshot (don't close)
 
     prompt = (
         f"Task: {task}\n\nThe browser is at: {url}\nPage text:\n{page_text}\n\n"

@@ -19,36 +19,36 @@ import {
 } from "@everdict/graders";
 import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
 
-// judge 실행기 — JudgeSpec + tenant + GradeContext(트레이스) → Score. 컨트롤플레인이 트레이스 기반으로 판정.
-// model(anthropic/openai)·harness 모두 modelJudge(전송)로 통일 — 전송만 다르다(API 호출 / 에이전트 디스패치).
+// Judge runner — JudgeSpec + tenant + GradeContext (trace) → Score. The control plane judges from the trace.
+// model (anthropic/openai) and harness are unified via modelJudge (a transport) — only the transport differs (API call / agent dispatch).
 export interface JudgeRunner {
-  // placement = 산출 run 의 배치(관측물이 있는 곳). harness judge 는 spec.runtime 우선, 없으면 이걸 상속(co-locate).
+  // placement = the source run's placement (where the observations are). A harness judge prefers spec.runtime, else inherits this (co-locate).
   run(spec: JudgeSpec, tenant: string, ctx: GradeContext, placement?: Placement): Promise<Score>;
 }
 
-// 여러 judge 를 요약에서 구분하기 위한 메트릭 키.
+// The metric key that distinguishes multiple judges in the summary.
 const metricOf = (spec: JudgeSpec): string => `judge:${spec.id}`;
 
-// skip score — 키 없음/디스패치 없음 등. 사용자가 고른 judge 가 조용히 사라지지 않도록 detail 로 사유 명시.
+// skip score — no key / no dispatch, etc. State the reason in detail so a judge the user chose doesn't silently vanish.
 function skip(spec: JudgeSpec, reason: string): Score {
   return { graderId: spec.id, metric: metricOf(spec), value: 0, pass: undefined, detail: `skipped: ${reason}` };
 }
 
-const ANTHROPIC_KEY = "ANTHROPIC_API_KEY"; // 테넌트 SecretStore 에서 찾는 키 이름
+const ANTHROPIC_KEY = "ANTHROPIC_API_KEY"; // the key name looked up in the tenant SecretStore
 const OPENAI_KEY = "OPENAI_API_KEY";
-const OPENAI_BASE_URL = "OPENAI_BASE_URL"; // LiteLLM 등 OpenAI-호환 프록시 베이스(선택)
+const OPENAI_BASE_URL = "OPENAI_BASE_URL"; // OpenAI-compatible proxy base like LiteLLM (optional)
 
 export interface DefaultJudgeRunnerDeps {
-  secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries (복호화, 서버 내부 전용)
-  dispatch?: (job: AgentJob) => Promise<CaseResult>; // harness judge 용 에이전트 디스패치(단일 run 과 동일 경로)
-  harnesses?: HarnessInstanceRegistry; // judge 가 참조하는 하니스 인스턴스 해석(template+pins→resolved)
-  models?: ModelRegistry; // judge.model 이 등록된 model id 면 provider/baseUrl/하부모델을 해석(없으면 raw 문자열)
+  secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries (decrypted, server-internal only)
+  dispatch?: (job: AgentJob) => Promise<CaseResult>; // agent dispatch for harness judges (same path as a single run)
+  harnesses?: HarnessInstanceRegistry; // resolve the harness instance a judge references (template+pins→resolved)
+  models?: ModelRegistry; // if judge.model is a registered model id, resolve provider/baseUrl/underlying model (else a raw string)
   fetchImpl?: typeof fetch;
   anthropicBaseUrl?: string;
   openaiBaseUrl?: string;
 }
 
-// 참조 하니스 해석: 구체 버전 + (선언형) spec. 빌트인/미등록은 as-given.
+// Resolve the referenced harness: concrete version + (declarative) spec. Built-in/unregistered are as-given.
 async function resolveJudgeHarness(
   harnesses: HarnessInstanceRegistry | undefined,
   tenant: string,
@@ -63,26 +63,26 @@ async function resolveJudgeHarness(
   }
 }
 
-// 기본 구현: model 은 테넌트 시크릿 키로 프로바이더 호출(anthropic/openai), harness 는 참조 에이전트를 띄워 판정.
+// Default implementation: model calls the provider with the tenant secret key (anthropic/openai), harness spins up the referenced agent to judge.
 export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
   return {
     async run(spec, tenant, ctx, placement) {
-      // 1) 전송 선택. 키/디스패처 없으면 skip(사유 명시).
+      // 1) Choose the transport. Skip (with a stated reason) if there's no key/dispatcher.
       let complete: JudgeCompletion;
       if (spec.kind === "harness") {
-        if (!deps.dispatch) return skip(spec, "harness judge dispatch 미설정");
+        if (!deps.dispatch) return skip(spec, "harness judge dispatch not configured");
         const dispatch = deps.dispatch;
         const ref = spec.harness;
         const resolved = await resolveJudgeHarness(deps.harnesses, tenant, ref);
-        // 배치 결정: spec.runtime(명시) 우선 → 없으면 산출 run 의 placement 상속(co-locate, 관측물 옆에서 판정).
-        // 둘 다 없으면 placement 없음(기본 백엔드). 미등록 런타임이면 디스패처가 throw → 아래 try/catch 가 skip 처리.
+        // Placement decision: spec.runtime (explicit) first → else inherit the source run's placement (co-locate, judge next to the observations).
+        // If neither, no placement (default backend). An unregistered runtime makes the dispatcher throw → the try/catch below handles it as skip.
         const judgePlacement: Placement | undefined = spec.runtime ? { target: spec.runtime } : placement;
         complete = harnessComplete({
           dispatch: async (task) => {
             const evalCase: EvalCase = {
               id: `judge-${spec.id}-${ctx.case.id}`,
               env: { kind: "repo", source: { files: {} } },
-              task, // 판정 프롬프트(rubric + 트레이스 + JSON 요구)를 에이전트에 그대로 전달
+              task, // pass the judging prompt (rubric + trace + JSON requirement) straight to the agent
               graders: [],
               timeoutSec: 300,
               tags: ["judge"],
@@ -98,16 +98,16 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           },
         });
       } else {
-        // 시크릿 복호화 실패(예: EVERDICT_SECRETS_KEY / 암호화 키 불일치)를 빈 맵으로 삼키면, 시크릿이
-        // 실제로 있는데도 아래 `secrets[KEY]` 가 undefined 라 "미설정"으로 오판돼 judge 가 조용히 skip 된다.
-        // throw 를 잡되 빈 맵 폴백 없이 실제 복호화 사유를 그대로 노출해 skip.
+        // Swallowing a secret-decryption failure (e.g. EVERDICT_SECRETS_KEY / encryption-key mismatch) as an empty map would make a secret that
+        // actually exists read as undefined at `secrets[KEY]` below, misjudged as "not configured", silently skipping the judge.
+        // Catch the throw but skip while exposing the real decryption reason, with no empty-map fallback.
         let secrets: Record<string, string>;
         try {
           secrets = await deps.secretsFor(tenant);
         } catch (err) {
-          return skip(spec, `시크릿 복호화 실패: ${err instanceof Error ? err.message : String(err)}`);
+          return skip(spec, `secret decryption failed: ${err instanceof Error ? err.message : String(err)}`);
         }
-        // judge.model 이 등록된 model id 면 그 spec(provider/하부모델/baseUrl)으로 해석 — 아니면 raw 모델 문자열 그대로.
+        // If judge.model is a registered model id, resolve it via that spec (provider/underlying model/baseUrl) — else use the raw model string.
         let provider: "anthropic" | "openai" = spec.provider;
         let model = spec.model;
         let modelBaseUrl: string | undefined;
@@ -118,12 +118,12 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
             model = m.model;
             modelBaseUrl = m.baseUrl;
           } catch {
-            // 등록된 model id 가 아님 → spec.model 을 raw 모델 문자열로 사용.
+            // Not a registered model id → use spec.model as a raw model string.
           }
         }
         if (provider === "anthropic") {
           const apiKey = secrets[ANTHROPIC_KEY];
-          if (!apiKey) return skip(spec, `${ANTHROPIC_KEY} 시크릿 미설정`);
+          if (!apiKey) return skip(spec, `${ANTHROPIC_KEY} secret not configured`);
           const baseUrl = modelBaseUrl ?? deps.anthropicBaseUrl;
           complete = anthropicComplete({
             apiKey,
@@ -133,7 +133,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           });
         } else {
           const apiKey = secrets[OPENAI_KEY];
-          if (!apiKey) return skip(spec, `${OPENAI_KEY} 시크릿 미설정`);
+          if (!apiKey) return skip(spec, `${OPENAI_KEY} secret not configured`);
           const baseUrl = secrets[OPENAI_BASE_URL] ?? modelBaseUrl ?? deps.openaiBaseUrl;
           complete = openaiComplete({
             apiKey,
@@ -144,7 +144,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
         }
       }
 
-      // 2) 통일된 판정: modelJudge(전송)을 JudgeGrader 로 감싸 트레이스 채점 → judge:<id> 점수.
+      // 2) Unified judging: wrap modelJudge (transport) in JudgeGrader to score the trace → a judge:<id> score.
       try {
         const rubric = spec.rubric;
         const useScreenshot = spec.kind === "model" && (spec.inputs ?? []).includes("screenshot");

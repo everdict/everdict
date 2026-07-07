@@ -8,7 +8,7 @@ import { controlPlane } from '@/shared/lib/control-plane'
 
 export interface CreateInviteResult {
   ok: boolean
-  token?: string // inv_… 평문(링크에 담음) — 1회만.
+  token?: string // inv_… plaintext (embedded in the link) — once only.
   error?: string
 }
 
@@ -17,7 +17,7 @@ export interface InviteMutationResult {
   error?: string
 }
 
-// 초대 발급. 평문 토큰을 1회만 받아 링크로 공유. authZ(admin=members:write)는 컨트롤플레인이 강제.
+// Create an invite. Receive the plaintext token once and share it via link. authZ (admin = members:write) is enforced by the control plane.
 export async function createInviteAction(role: string): Promise<CreateInviteResult> {
   const ctx = await authContext()
   try {
@@ -29,7 +29,7 @@ export async function createInviteAction(role: string): Promise<CreateInviteResu
   }
 }
 
-// 대기중 초대 취소. authZ(admin=members:write)는 컨트롤플레인이 강제.
+// Revoke a pending invite. authZ (admin = members:write) is enforced by the control plane.
 export async function revokeInviteAction(id: string): Promise<InviteMutationResult> {
   const ctx = await authContext()
   try {

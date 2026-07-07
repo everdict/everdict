@@ -1,7 +1,7 @@
-// 레퍼런스 데스크탑 에이전트 #2 — desktop-ssh-agent 보다 유능(task-aware). SSH 로 연결한 뒤, 태스크가 Settings 를
-// 요구하면 사이드바 Settings 로 내비게이션까지 한다. 같은 데이터셋을 agent #1(SSH 만) vs #2 로 돌려 diffScorecards 로
-// 하니스 A/B 비교를 실증하기 위한 두 번째 하니스. command 하니스가 `node /agent-settings.cjs {{task}}` 로 실행.
-// 행동만 — 관측/채점은 everdict(OsUseEnvironment.snapshot + VLM JudgeGrader).
+// Reference desktop agent #2 — more capable than desktop-ssh-agent (task-aware). After connecting via SSH, if the task
+// requires Settings, it also navigates to Settings in the sidebar. A second harness to demonstrate an A/B harness comparison
+// via diffScorecards by running the same dataset with agent #1 (SSH only) vs #2. The command harness runs it as `node /agent-settings.cjs {{task}}`.
+// Action only — observation/scoring is by everdict (OsUseEnvironment.snapshot + VLM JudgeGrader).
 const { chromium } = require("/app/node_modules/playwright");
 const { execFileSync } = require("node:child_process");
 const sh = (c) => execFileSync("bash", ["-lc", c], { encoding: "utf8" }).trim();
@@ -64,7 +64,7 @@ const DISPLAY = process.env.DISPLAY || ":99";
     await sleep(200);
   };
 
-  // 1) SSH 연결(agent #1 과 동일).
+  // 1) SSH connect (same as agent #1).
   const sshBtn = page.getByRole("button", { name: /Connect via SSH/i });
   await sshBtn.waitFor({ timeout: 60000 });
   await click(sshBtn);
@@ -75,7 +75,7 @@ const DISPLAY = process.env.DISPLAY || ":99";
   await type(page.getByPlaceholder("~/.ssh/id_rsa"), "/root/.ssh/id_rsa");
   await click(page.getByRole("button", { name: /Connect via SSH/i }));
 
-  // 2) 메인 UI 진입 대기.
+  // 2) Wait for the main UI to appear.
   const composer = page.getByPlaceholder("Ask anything");
   for (let i = 0; i < 50; i++) {
     await sleep(1000);
@@ -90,14 +90,14 @@ const DISPLAY = process.env.DISPLAY || ":99";
   }
   await sleep(1000);
 
-  // 3) task-aware: Settings 를 요구하면 모달 닫고 사이드바 Settings 로 내비게이션(agent #1 은 안 함).
+  // 3) task-aware: if the task requires Settings, close the modal and navigate to Settings in the sidebar (agent #1 does not).
   if (/settings/i.test(task)) {
     const notNow = page.getByText("Not Now", { exact: false });
     if (await notNow.isVisible().catch(() => false)) await click(notNow).catch(() => {});
     const settings = page.getByText("Settings", { exact: true }).first();
     await settings.waitFor({ timeout: 10000 }).catch(() => {});
     if (await settings.isVisible().catch(() => false)) await click(settings).catch(() => {});
-    await sleep(2500); // Settings 페이지 렌더 정착
+    await sleep(2500); // let the Settings page render settle
   }
 
   await browser.close();

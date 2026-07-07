@@ -10,9 +10,9 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 초대 수락 페이지 — 공유 링크 `/invite?token=…` 진입점(가입 전이라 워크스페이스 슬러그가 없으므로 최상위 라우트).
-// GET 으로 자동 수락하지 않고(일회용 토큰 prefetch 소진 방지) 카드의 버튼(POST 액션)으로만 redeem.
-// 인증은 액션(사람 계정/OIDC 전용)이 강제한다 — 수락 성공 시 그 워크스페이스(/{workspace})로 들어간다.
+// Invite-accept page — the entry point for the shared link `/invite?token=…` (before joining there's no workspace slug, so a top-level route).
+// Doesn't auto-accept on GET (avoids burning the one-time token on prefetch); redeem only via the card's button (POST action).
+// Auth is enforced by the action (human account / OIDC only) — on a successful accept, enter that workspace (/{workspace}).
 export default async function InvitePage({
   searchParams,
 }: {
@@ -22,8 +22,8 @@ export default async function InvitePage({
   const t = await getTranslations('invitePage')
   const token = typeof sp.token === 'string' ? sp.token : undefined
 
-  // 비소비 미리보기 — 로그인 전에도 "어느 워크스페이스인지"(이름/썸네일)를 보여준다(서버가 토큰만 검증).
-  // 실패(무효/만료/취소 또는 일시 오류)면 헤더 없이 수락 카드만 — 실제 사유는 수락 액션이 전달한다.
+  // Non-consuming preview — shows "which workspace" (name/thumbnail) even before login (the server only validates the token).
+  // On failure (invalid/expired/revoked or a transient error) show only the accept card without the header — the real reason is delivered by the accept action.
   let preview: InvitePreview | undefined
   if (token) {
     try {
@@ -57,13 +57,13 @@ export default async function InvitePage({
   )
 }
 
-// 초대 랜딩 헤더 — 워크스페이스 썸네일(로고, 없으면 이니셜) + 이름 + 초대 역할. 어느 워크스페이스인지 한눈에.
+// Invite landing header — workspace thumbnail (logo, else initials) + name + invited role. See which workspace at a glance.
 async function WorkspaceInviteHeader({ preview }: { preview: InvitePreview }) {
   const t = await getTranslations('invitePage')
   return (
     <div className="flex flex-col items-center gap-4 text-center">
       {preview.logoUrl ? (
-        // 업로드 data URL/외부 URL 이라 next/image(원격 화이트리스트)가 아닌 일반 img.
+        // An upload data URL / external URL, so a plain img rather than next/image (remote whitelist).
         // eslint-disable-next-line @next/next/no-img-element
         <img
           src={preview.logoUrl}

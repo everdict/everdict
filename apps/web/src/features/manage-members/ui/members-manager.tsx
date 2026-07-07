@@ -13,7 +13,7 @@ import { removeMemberAction, setMemberRoleAction } from '../api/manage-members'
 
 const ROLES = ['viewer', 'member', 'admin'] as const
 
-// 표시용 신원 — opaque subject 는 마지막 폴백일 뿐, 가능하면 이름>이메일 순으로 보여준다.
+// Display identity — the opaque subject is only the last fallback; prefer name > email when available.
 function memberLabel(m: Member): string {
   return m.name ?? m.email ?? m.subject
 }

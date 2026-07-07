@@ -11,8 +11,8 @@ import { AccountTabs } from './account-tabs'
 
 export const dynamic = 'force-dynamic'
 
-// 유저 설정 페이지 — 프로필(수정) · 워크스페이스 나가기 · 개인 시크릿 · API 키(활성 워크스페이스).
-// (외부 계정 연결은 워크스페이스 소유 GitHub App/Mattermost 로 대체 — 설정 › 통합에서 관리)
+// User settings page — profile (edit) · leave workspace · personal secrets · API keys (active workspace).
+// (External account connections are replaced by the workspace-owned GitHub App/Mattermost — managed in Settings › Integrations)
 export default async function AccountPage({
   searchParams,
 }: {
@@ -30,7 +30,7 @@ export default async function AccountPage({
     )
   }
 
-  // 개인 API 키 — self-scoped(역할 게이트 없음). GET /keys 는 본인(subject) 키만 돌려준다. 실패해도 페이지는 렌더.
+  // Personal API keys — self-scoped (no role gate). GET /keys returns only my own (subject) keys. The page renders even if it fails.
   let keys: ApiKeyMeta[] = []
   let keysError: string | undefined
   try {
@@ -39,14 +39,14 @@ export default async function AccountPage({
     keysError = e instanceof Error ? e.message : String(e)
   }
 
-  // 내 개인(user) 시크릿 — GET /secrets 는 항상 본인 것만 포함(공유는 admin만). 셀프 관리라 역할 게이트 없음.
+  // My personal (user) secrets — GET /secrets always includes only my own (shared is admin-only). Self-managed, so no role gate.
   let personalSecrets: SecretMeta[] = []
   try {
     personalSecrets = secretsSchema
       .parse(await controlPlane.listSecrets(ctx))
       .filter((s) => s.scope === 'user')
   } catch {
-    // 시크릿 저장소 미설정/실패 — 빈 목록으로 폴백.
+    // Secret store unconfigured/failed — fall back to an empty list.
   }
 
   return (

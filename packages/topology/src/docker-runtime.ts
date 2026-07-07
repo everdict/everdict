@@ -10,21 +10,21 @@ import { type Docker, dockerCli } from "./docker.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
 export interface DockerTopologyRuntimeOptions {
-  docker?: Docker; // 주입형(테스트는 가짜 Docker). 기본 execFile("docker", …)
-  browserImage?: string; // per-case 브라우저 이미지(기본 chromedp/headless-shell:latest)
-  storeEnv?: Record<string, string>; // 명시 접속 env(자동 connEnv 를 덮어쓴다 — harness 별 변수명)
+  docker?: Docker; // injectable (tests pass a fake Docker). Default execFile("docker", …)
+  browserImage?: string; // per-case browser image (default chromedp/headless-shell:latest)
+  storeEnv?: Record<string, string>; // explicit connection env (overrides the automatic connEnv — per-harness variable names)
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
-  fetchImpl?: typeof fetch; // 엔드포인트 readiness/CDP 조회용(테스트 주입)
+  fetchImpl?: typeof fetch; // for endpoint readiness/CDP lookups (test injection)
 }
 
 interface WarmEntry {
   handle: TopologyHandle;
   network: string;
-  containers: string[]; // 이 토폴로지가 띄운 컨테이너(teardown 대상)
+  containers: string[]; // the containers this topology brought up (teardown targets)
 }
 
-// docker 이름 규칙([a-zA-Z0-9][a-zA-Z0-9_.-])에 맞게 정리.
+// Sanitize to the docker naming rule ([a-zA-Z0-9][a-zA-Z0-9_.-]).
 function sanitize(s: string): string {
   return s.replace(/[^a-zA-Z0-9_.-]/g, "-");
 }
@@ -32,18 +32,18 @@ function netName(spec: ServiceHarnessSpec): string {
   return `everdict-${sanitize(spec.id)}-${sanitize(spec.version)}`;
 }
 
-// 라이브 DockerTopologyRuntime: 사용자 Docker 데몬에 토폴로지(스토어+서비스) + per-case 브라우저를 띄운다.
-// NomadTopologyRuntime / K8sTopologyRuntime 의 형제 — ServiceTopologyBackend 는 셋을 교체만 한다(오케스트레이터-비종속).
-// self-hosted runner 가 service 하니스를 노트북에서 구동하기 위한 로컬 토폴로지. 설계: docs/architecture/self-hosted-service-runner.md.
-// 개인 호스트 = 단일 trust 도메인 → TrustZone/강격리/pool·silo 없음(설계 비목표). 케이스별 논리격리는 front-door wiring 이 담당.
+// Live DockerTopologyRuntime: brings up the topology (stores + services) + a per-case browser on the user's Docker daemon.
+// A sibling of NomadTopologyRuntime / K8sTopologyRuntime — ServiceTopologyBackend only swaps among the three (orchestrator-agnostic).
+// The local topology by which the self-hosted runner drives service harnesses on a laptop. Design: docs/architecture/self-hosted-service-runner.md.
+// A personal host = a single trust domain → no TrustZone/strong-isolation/pool·silo (a design non-goal). Per-case logical isolation is handled by front-door wiring.
 export class DockerTopologyRuntime implements TopologyRuntime {
   readonly id = "docker";
   private readonly docker: Docker;
   private readonly fetchImpl: typeof fetch;
   private readonly warm = new Map<string, WarmEntry>(); // key: id@version (per-version warm)
-  // 진행 중인 배포(key: id@version) — 같은 토폴로지를 동시에 ensure 하면 합류시킨다(single-flight).
-  // case-level 병렬(러너 maxConcurrent)에서 warm 이 아직 비었을 때 둘이 동시에 배포하면 고정 이름 컨테이너가
-  // docker run --name 충돌로 cascade 실패한다 → 첫 배포 promise 를 공유해 토폴로지는 버전당 한 번만 띄운다.
+  // In-progress deploy (key: id@version) — concurrent ensures of the same topology join in (single-flight).
+  // Under case-level parallelism (runner maxConcurrent), if two deploy at once while warm is still empty, the fixed-name
+  // containers cascade-fail on a docker run --name collision → share the first deploy promise so the topology comes up only once per version.
   private readonly inFlight = new Map<string, Promise<TopologyHandle>>();
 
   constructor(private readonly opts: DockerTopologyRuntimeOptions = {}) {
@@ -54,42 +54,42 @@ export class DockerTopologyRuntime implements TopologyRuntime {
   async ensureTopology(spec: ServiceHarnessSpec): Promise<TopologyHandle> {
     const key = `${spec.id}@${spec.version}`;
     const cached = this.warm.get(key);
-    if (cached) return cached.handle; // warm: 버전당 한 번만 배포
+    if (cached) return cached.handle; // warm: deployed only once per version
     const inflight = this.inFlight.get(key);
-    if (inflight) return inflight; // 동시 ensure 합류 — 중복 배포(이름 충돌) 방지
+    if (inflight) return inflight; // concurrent ensures join in — prevents duplicate deploy (name collision)
 
-    // 배포 promise 를 inFlight 에 등록해 동시 호출이 공유하게 하고, 완료(성공/실패) 시 제거.
-    // 실패는 deploy 안에서 부분기동을 정리하고 throw → warm 미캐싱(다음 ensure 가 새로 시도).
+    // Register the deploy promise in inFlight so concurrent callers share it, and remove it on completion (success/failure).
+    // On failure, deploy cleans up the partial startup and throws → not cached in warm (the next ensure retries fresh).
     const p = this.deploy(spec, key).finally(() => this.inFlight.delete(key));
     this.inFlight.set(key, p);
     return p;
   }
 
-  // 실제 토폴로지 배포(네트워크→스토어→서비스). single-flight 래퍼(ensureTopology)만 호출한다.
+  // The actual topology deploy (network → stores → services). Only the single-flight wrapper (ensureTopology) calls it.
   private async deploy(spec: ServiceHarnessSpec, key: string): Promise<TopologyHandle> {
     const network = netName(spec);
-    // 기동한(또는 기동 시도한) 컨테이너 이름 — 부분실패 시 정리 대상. run 전에 push 하므로 run 자체가 throw 한 이름도 잡힌다.
+    // Names of the containers we brought up (or tried to) — cleanup targets on partial failure. Pushed before run, so a name whose run itself threw is still caught.
     const containers: string[] = [];
     try {
       await this.docker.ensureNetwork(network);
 
-      // 1) 의존 스토어(타입별 1개) — 네트워크 alias = `<id>-<store>`(dependencyConnEnv 의 호스트와 일치 → 서비스가 그 이름으로 접속).
+      // 1) Dependency stores (one per type) — network alias = `<id>-<store>` (matches the host in dependencyConnEnv → services connect by that name).
       for (const { store, name, def } of dependencyStores(spec)) {
         const cname = `${network}-${name}`;
         containers.push(cname);
-        await this.docker.rm([cname]).catch(() => {}); // 멱등 재배포 — 러너 재시작으로 남은 동명 컨테이너를 먼저 제거(--name 충돌 cascade 방지)
+        await this.docker.rm([cname]).catch(() => {}); // idempotent redeploy — first remove a leftover same-name container from a runner restart (avoid --name collision cascade)
         await this.docker.run({ name: cname, image: def.image, network, alias: name, env: def.env, args: def.args });
-        await this.waitStoreAccepting(store, cname); // pg_isready/redis ping — 서비스가 부팅 시 접속하므로 먼저 준비.
+        await this.waitStoreAccepting(store, cname); // pg_isready/redis ping — ready it first since services connect on boot.
       }
-      // 서비스 접속 env: 자동 connEnv(<id>-<store>:<port>). 우선순위: connEnv < svc.env(서비스 정적) < storeEnv(명시가 이긴다).
+      // Service connection env: automatic connEnv (<id>-<store>:<port>). Precedence: connEnv < svc.env (service static) < storeEnv (explicit wins).
       const connEnv = dependencyConnEnv(spec);
 
-      // 2) 서비스 — alias = svc.name(needs/front-door 내부 주소). port 있으면 임의 호스트 포트로 게시 → 러너(도커 밖)가 도달.
+      // 2) Services — alias = svc.name (needs/front-door internal address). With a port, publish to an arbitrary host port → the runner (outside docker) can reach it.
       const endpoints: Record<string, string> = {};
       for (const svc of spec.services) {
         const cname = `${network}-${sanitize(svc.name)}`;
         containers.push(cname);
-        await this.docker.rm([cname]).catch(() => {}); // 멱등 재배포 — 남은 동명 컨테이너 제거(--name 비멱등 충돌 cascade 방지)
+        await this.docker.rm([cname]).catch(() => {}); // idempotent redeploy — remove a leftover same-name container (avoid the non-idempotent --name collision cascade)
         await this.docker.run({
           name: cname,
           image: svc.image,
@@ -98,14 +98,14 @@ export class DockerTopologyRuntime implements TopologyRuntime {
           env: { ...connEnv, ...flattenEnv(svc.env), ...this.opts.storeEnv },
           ...(svc.volumes && svc.volumes.length > 0 ? { volumes: svc.volumes } : {}),
           ...(svc.port !== undefined ? { publish: svc.port } : {}),
-          // 리소스 요청: cpu 1000=1코어 → --cpus 코어(=cpu/1000), memoryMb → --memory. 정의된 것만.
+          // Resource request: cpu 1000 = 1 core → --cpus cores (=cpu/1000), memoryMb → --memory. Only what is defined.
           ...(svc.resources?.cpu !== undefined ? { cpus: svc.resources.cpu / 1000 } : {}),
           ...(svc.resources?.memoryMb !== undefined ? { memoryMb: svc.resources.memoryMb } : {}),
         });
         if (svc.port !== undefined) {
           const hostPort = await this.docker.hostPort(cname, svc.port);
           const url = `http://127.0.0.1:${hostPort}`;
-          await this.waitForHttp(url, svc.readiness); // 서비스가 자체 readiness 상한을 선언하면 그걸, 아니면 런타임 기본
+          await this.waitForHttp(url, svc.readiness); // use the service's own readiness budget if declared, otherwise the runtime default
           endpoints[svc.name] = url;
         }
       }
@@ -114,8 +114,8 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       this.warm.set(key, { handle, network, containers });
       return handle;
     } catch (err) {
-      // 부분 기동 정리 — 고정 이름 컨테이너가 남으면 다음 케이스의 docker run(--name 비멱등)이 이름 충돌로 cascade 실패한다.
-      // 실패 토폴로지는 warm 캐시에 넣지 않으므로(깨진 핸들 캐싱 금지) teardown 으로도 못 잡는다 → 여기서 즉시 제거.
+      // Clean up the partial startup — a leftover fixed-name container makes the next case's docker run (--name is non-idempotent) cascade-fail on a name collision.
+      // A failed topology is never put in the warm cache (no caching broken handles), so teardown can't catch it either → remove it here immediately.
       await this.docker.rm(containers).catch(() => {});
       await this.docker.removeNetwork(network).catch(() => {});
       throw err;
@@ -133,7 +133,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       network,
       alias,
       publish: 9222,
-      args: ["--remote-allow-origins=*"], // headless-shell 은 CDP 를 스스로 9222 로 노출
+      args: ["--remote-allow-origins=*"], // headless-shell exposes CDP itself on 9222
     });
     try {
       const hostPort = await this.docker.hostPort(cname, 9222);
@@ -144,24 +144,24 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     }
   }
 
-  // 브라우저 핸들: 에이전트(네트워크 내부)는 cdpUrl=alias:9222 로, snapshot(러너=도커 밖)은 호스트 게시 포트로 도달.
+  // Browser handle: the agent (inside the network) reaches it via cdpUrl=alias:9222, snapshot (runner = outside docker) via the host published port.
   private async connectBrowser(
     runId: string,
     cname: string,
     alias: string,
     hostPort: number,
   ): Promise<TargetEnvHandle> {
-    const fetchImpl = this.fetchImpl; // 반환 closure 에서 this 가 바뀌므로 로컬 캡처
+    const fetchImpl = this.fetchImpl; // capture locally since `this` changes inside the returned closures
     const docker = this.docker;
     const hostCdp = `http://127.0.0.1:${hostPort}`;
     await this.waitForHttp(`${hostCdp}/json/version`);
     try {
       await fetchImpl(`${hostCdp}/json/new?about:blank`, { method: "PUT" });
     } catch {
-      // 빈 탭 생성 실패는 치명적 아님
+      // failing to create a blank tab is not fatal
     }
     return {
-      // 에이전트(같은 네트워크)가 도달할 CDP — wiring 의 target_cdp_url 로 front-door 페이로드에 주입된다.
+      // The CDP the agent (same network) reaches — injected into the front-door payload as wiring's target_cdp_url.
       wiring: { target_cdp_url: `http://${alias}:9222` },
       async snapshot(): Promise<BrowserSnapshot> {
         let targets: Array<{ url?: string }> = [];
@@ -179,12 +179,12 @@ export class DockerTopologyRuntime implements TopologyRuntime {
         };
       },
       dispose: async () => {
-        await docker.rm([cname]).catch(() => {}); // per-case 브라우저만 제거 — warm 토폴로지는 유지
+        await docker.rm([cname]).catch(() => {}); // remove only the per-case browser — keep the warm topology
       },
     };
   }
 
-  // 명시 teardown — warm 토폴로지의 컨테이너 + 네트워크 제거(인터페이스 외 — ServiceTopologyBackend 는 dispose 만 호출).
+  // Explicit teardown — remove the warm topology's containers + network (outside the interface — ServiceTopologyBackend only calls dispose).
   async teardown(spec: ServiceHarnessSpec): Promise<void> {
     const key = `${spec.id}@${spec.version}`;
     const entry = this.warm.get(key);
@@ -194,7 +194,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     await this.docker.removeNetwork(entry.network).catch(() => {});
   }
 
-  // 런타임 기본 readiness(서비스가 자체 readiness 를 선언하지 않을 때 + 스토어/브라우저 폴링에 쓰임).
+  // Runtime default readiness (when a service declares no readiness of its own + used for store/browser polling).
   private get defaultReadyTimeoutMs(): number {
     return this.opts.readyTimeoutMs ?? 60_000;
   }
@@ -202,8 +202,8 @@ export class DockerTopologyRuntime implements TopologyRuntime {
     return this.opts.pollIntervalMs ?? 1000;
   }
 
-  // 준비성 폴링(공유) — timeoutMs/intervalMs 동안 probe 가 true 를 돌려줄 때까지 재시도. 초과하면 onTimeout 으로 throw.
-  // probe 가 throw 하는 것도 "아직 안 준비"로 보고 재시도(연결거부/명령실패 등).
+  // Readiness polling (shared) — retry until probe returns true within timeoutMs/intervalMs. On timeout, throw via onTimeout.
+  // A probe that throws is also treated as "not ready yet" and retried (connection refused / command failure etc.).
   private async pollReady(
     timeoutMs: number,
     intervalMs: number,
@@ -215,14 +215,14 @@ export class DockerTopologyRuntime implements TopologyRuntime {
       try {
         if (await probe()) return;
       } catch {
-        // 아직 안 준비 → 재시도
+        // not ready yet → retry
       }
       await new Promise((r) => setTimeout(r, intervalMs));
     }
     onTimeout();
   }
 
-  // 스토어가 실제 연결을 받을 때까지 폴링(docker exec pg_isready / redis-cli ping). minio 는 스킵.
+  // Poll until the store actually accepts connections (docker exec pg_isready / redis-cli ping). minio is skipped.
   private async waitStoreAccepting(store: string, container: string): Promise<void> {
     const probe =
       store === "postgres" ? ["pg_isready", "-U", "everdict"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
@@ -235,19 +235,19 @@ export class DockerTopologyRuntime implements TopologyRuntime {
         return true;
       },
       () => {
-        throw new UpstreamError("UPSTREAM_ERROR", { store }, "스토어 준비 대기 시간초과");
+        throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the store to become ready");
       },
     );
   }
 
-  // HTTP 엔드포인트 준비 대기. readiness 가 주어지면 서비스가 선언한 timeout/interval 을, 아니면 런타임 기본을 쓴다.
+  // Wait for the HTTP endpoint to become ready. With readiness given, use the service's declared timeout/interval, otherwise the runtime default.
   private async waitForHttp(url: string, readiness?: ServiceReadiness): Promise<void> {
     await this.pollReady(
       readiness?.timeoutMs ?? this.defaultReadyTimeoutMs,
       readiness?.intervalMs ?? this.defaultIntervalMs,
       async () => (await this.fetchImpl(url)).status < 500,
       () => {
-        throw new UpstreamError("UPSTREAM_ERROR", { url }, "엔드포인트 준비 대기 시간초과");
+        throw new UpstreamError("UPSTREAM_ERROR", { url }, "Timed out waiting for the endpoint to become ready");
       },
     );
   }

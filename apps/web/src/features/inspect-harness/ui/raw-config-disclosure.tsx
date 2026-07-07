@@ -10,8 +10,8 @@ import { JsonView } from '@/shared/ui/json-view'
 
 import { ConfigPanel } from './config-panel'
 
-// 원본 구성(템플릿 참조 + pins + overrides) + 최종 스펙 JSON — 기본은 접혀 있고, 필요할 때만 펼친다.
-// 주 화면은 깔끔한 값 리스트, "원본/JSON" 은 새 버전 편집·디버깅용 부가 정보라 여기 접어둔다.
+// Raw config (template reference + pins + overrides) + the final spec JSON — collapsed by default, expanded only when needed.
+// The main screen is a clean value list; "raw/JSON" is auxiliary info for new-version editing·debugging, so it's collapsed here.
 export function RawConfigDisclosure({
   config,
   spec,

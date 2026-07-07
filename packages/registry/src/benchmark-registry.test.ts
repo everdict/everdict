@@ -10,32 +10,32 @@ const spec = (id: string, version: string, dataset = "me/x"): BenchmarkAdapterSp
   mapping: { idField: "id", taskField: "q", answerField: "a" },
 });
 
-describe("InMemoryBenchmarkRegistry (테넌트별 벤치마크 레시피)", () => {
-  it("테넌트 격리: A 가 등록한 벤치마크를 B 는 못 본다", async () => {
+describe("InMemoryBenchmarkRegistry (per-tenant benchmark recipes)", () => {
+  it("tenant isolation: B cannot see a benchmark A registered", async () => {
     const r = new InMemoryBenchmarkRegistry();
     await r.register("acme", spec("priv", "1.0.0"));
     expect((await r.get("acme", "priv")).id).toBe("priv");
-    await expect(r.get("globex", "priv")).rejects.toThrow(/없습니다/);
+    await expect(r.get("globex", "priv")).rejects.toThrow(/not found/);
     expect((await r.list("globex")).find((b) => b.id === "priv")).toBeUndefined();
   });
 
-  it("_shared 폴백: first-party 벤치마크는 모든 테넌트가 본다(테넌트 소유 우선)", async () => {
+  it("_shared fallback: every tenant sees first-party benchmarks (tenant-owned takes precedence)", async () => {
     const r = new InMemoryBenchmarkRegistry();
     await r.register("_shared", spec("gsm8k", "1.0.0", "openai/gsm8k"));
-    await r.register("acme", spec("gsm8k", "2.0.0", "acme/custom")); // 같은 id 를 테넌트가 오버라이드
+    await r.register("acme", spec("gsm8k", "2.0.0", "acme/custom")); // tenant overrides the same id
     expect((await r.get("globex", "gsm8k")).source).toMatchObject({ dataset: "openai/gsm8k" }); // _shared
-    expect((await r.get("acme", "gsm8k")).source).toMatchObject({ dataset: "acme/custom" }); // 소유 우선
+    expect((await r.get("acme", "gsm8k")).source).toMatchObject({ dataset: "acme/custom" }); // owned takes precedence
   });
 
-  it("버전 불변: 같은 (id,version) 다른 내용 → CONFLICT, 같은 내용 → no-op", async () => {
+  it("immutable versions: same (id,version) with different content → CONFLICT, same content → no-op", async () => {
     const r = new InMemoryBenchmarkRegistry();
     await r.register("acme", spec("b", "1.0.0", "a/one"));
-    await r.register("acme", spec("b", "1.0.0", "a/one")); // 동일 → no-op
-    await expect(r.register("acme", spec("b", "1.0.0", "a/two"))).rejects.toThrow(/불변/);
+    await r.register("acme", spec("b", "1.0.0", "a/one")); // identical → no-op
+    await expect(r.register("acme", spec("b", "1.0.0", "a/two"))).rejects.toThrow(/immutable/);
     expect(await r.ownVersions("acme", "b")).toEqual(["1.0.0"]);
   });
 
-  it("latest 해석 + list(소유/공유 표기)", async () => {
+  it("latest resolution + list (owned/shared labeling)", async () => {
     const r = new InMemoryBenchmarkRegistry();
     await r.register("acme", spec("b", "1.0.0"));
     await r.register("acme", spec("b", "1.2.0"));

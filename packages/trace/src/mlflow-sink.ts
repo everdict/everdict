@@ -8,28 +8,28 @@ import type {
   TraceSinkScore,
 } from "./trace-sink.js";
 
-// MLflow 3.x 싱크 — 점수는 assessments REST(≥3.2), trace 생성은 StartTraceV3(trace_info) + OTLP 스팬 업로드.
-// 실 API 검증 요점: 필드는 snake_case, 점수 필드명은 `assessment_name`(name 아님), source_type/source_id 필수,
-// rationale 은 feedback 밖 최상위. StartTraceV3 의 spans 배열은 서버가 무시한다 — 스팬은 별도의
-// POST {host}/v1/traces (OTLP, `x-mlflow-experiment-id` 헤더 필수)로 올리며 OTLP/JSON 은 서버 ≥3.12 부터
-// (3.4–3.11 은 protobuf 전용). 그래서 스팬 업로드는 best-effort: 실패해도 trace_info+assessments 는 유효하므로
-// 케이스를 실패로 만들지 않는다(구버전 서버에서 스팬만 빠진 trace 로 degrade).
+// MLflow 3.x sink — scores via assessments REST (≥3.2), trace creation via StartTraceV3 (trace_info) + OTLP span upload.
+// Real-API notes: fields are snake_case, the score field name is `assessment_name` (not name), source_type/source_id are required,
+// and rationale is top-level, outside feedback. The server ignores the StartTraceV3 spans array — spans go via a separate
+// POST {host}/v1/traces (OTLP, `x-mlflow-experiment-id` header required), and OTLP/JSON is server ≥3.12
+// (3.4–3.11 are protobuf-only). So span upload is best-effort: a failure still leaves trace_info+assessments valid, so
+// it doesn't make the case fail (on older servers it degrades to a trace with only the spans missing).
 export interface MlflowTraceSinkOptions {
   endpoint: string;
-  auth?: string; // Authorization 헤더 '값' 그대로(Basic …). 무인증 서버는 생략
-  project?: string; // experiment_id — trace 생성(create 모드)과 딥링크에 필요
-  webUrl?: string; // UI 베이스(미지정 = endpoint)
+  auth?: string; // the Authorization header 'value' verbatim (Basic …). Omit for an auth-less server
+  project?: string; // experiment_id — required for trace creation (create mode) and deep links
+  webUrl?: string; // UI base (unset = endpoint)
   fetchImpl?: typeof fetch;
-  newId?: () => string; // 테스트 주입(trace id 생성)
+  newId?: () => string; // test injection (trace id generation)
   now?: () => string;
 }
 
-// judge:<id> 점수는 LLM_JUDGE, 그 외(결과/트레이스 그레이더)는 CODE — MLflow assessment source 분류.
+// A judge:<id> score is LLM_JUDGE, otherwise (result/trace graders) CODE — MLflow assessment source classification.
 function sourceType(name: string): "LLM_JUDGE" | "CODE" {
   return name.startsWith("judge:") ? "LLM_JUDGE" : "CODE";
 }
 
-// 점수 1건 → CreateAssessment 요청 바디(순수 — 단위 테스트 대상).
+// One score → a CreateAssessment request body (pure — unit-testable).
 export function mlflowAssessmentBody(score: TraceSinkScore, sourceId: string): Record<string, unknown> {
   return {
     assessment: {
@@ -42,7 +42,7 @@ export function mlflowAssessmentBody(score: TraceSinkScore, sourceId: string): R
   };
 }
 
-// 케이스 1건 → StartTraceV3 요청 바디(순수). 프리뷰는 트레이스의 첫 user 메시지/마지막 assistant 메시지.
+// One case → a StartTraceV3 request body (pure). The preview is the trace's first user message / last assistant message.
 export function mlflowTraceBody(
   ctx: TraceSinkContext,
   c: TraceSinkCase,
@@ -75,7 +75,7 @@ export function mlflowTraceBody(
   };
 }
 
-// OTLP JSON AnyValue — 스팬 속성 값(camelCase; MLflow 응답의 snake_case 와 별개인 OTLP 요청 포맷).
+// OTLP JSON AnyValue — span attribute value (camelCase; the OTLP request format, distinct from the snake_case of MLflow responses).
 type OtlpValue = { stringValue: string } | { intValue: string } | { doubleValue: number } | { boolValue: boolean };
 function otlpAttrs(
   entries: Record<string, string | number | boolean | undefined>,
@@ -86,18 +86,18 @@ function otlpAttrs(
     if (typeof v === "string") out.push({ key, value: { stringValue: v } });
     else if (typeof v === "boolean") out.push({ key, value: { boolValue: v } });
     else if (Number.isInteger(v))
-      out.push({ key, value: { intValue: String(v) } }); // OTLP int64 = 문자열
+      out.push({ key, value: { intValue: String(v) } }); // OTLP int64 = string
     else out.push({ key, value: { doubleValue: v } });
   }
   return out;
 }
 
-// 케이스 1건 → OTLP/JSON ExportTraceServiceRequest(순수). 속성은 우리 spansToTraceEvents 가 읽는
-// OTel GenAI 관례(gen_ai.*/tool.*/message.content)로 방출 — pull 로 되읽으면 같은 TraceEvent 로 왕복된다.
+// One case → an OTLP/JSON ExportTraceServiceRequest (pure). Attributes are emitted in the OTel GenAI conventions
+// (gen_ai.*/tool.*/message.content) that our spansToTraceEvents reads — reading them back via pull round-trips to the same TraceEvent.
 export function mlflowOtlpSpans(
   ctx: TraceSinkContext,
   c: TraceSinkCase,
-  traceIdHex: string, // "tr-" 접두 없는 32-hex(OTel trace id) — MLflow 가 tr-<hex> TraceInfo 에 조인한다
+  traceIdHex: string, // 32-hex without the "tr-" prefix (OTel trace id) — MLflow joins it to the tr-<hex> TraceInfo
   nowIso: string,
   newId: () => string,
 ): Record<string, unknown> {
@@ -201,7 +201,7 @@ export class MlflowTraceSink implements TraceSink {
 
   private caseUrl(traceId: string): string | undefined {
     if (!this.opts.project) return undefined;
-    // MLflow ≥3.6 UI 라우트(해시 라우터) — selectedEvaluationId 로 trace 를 선택.
+    // MLflow ≥3.6 UI route (hash router) — select the trace via selectedEvaluationId.
     return `${this.web}/#/experiments/${encodeURIComponent(this.opts.project)}/traces?selectedEvaluationId=${encodeURIComponent(traceId)}`;
   }
 
@@ -212,10 +212,13 @@ export class MlflowTraceSink implements TraceSink {
       try {
         let traceId = c.externalId;
         if (!traceId) {
-          // create 모드 — experiment 좌표(project) 없이는 trace 를 만들 수 없다(정직한 케이스 실패).
+          // create mode — a trace can't be created without the experiment coordinate (project) (an honest case failure).
           const project = this.opts.project;
           if (!project) {
-            out.push({ caseId: c.caseId, error: "mlflow trace 생성엔 project(experiment_id) 설정이 필요합니다." });
+            out.push({
+              caseId: c.caseId,
+              error: "MLflow trace creation requires the project (experiment_id) setting.",
+            });
             continue;
           }
           const hex = this.newId().replace(/-/g, "").slice(0, 32).padEnd(32, "0");
@@ -227,18 +230,18 @@ export class MlflowTraceSink implements TraceSink {
           });
           if (!res.ok) {
             const text = await res.text().catch(() => "");
-            out.push({ caseId: c.caseId, error: `MLflow trace 생성 ${res.status}: ${text.slice(0, 200)}` });
+            out.push({ caseId: c.caseId, error: `MLflow trace creation ${res.status}: ${text.slice(0, 200)}` });
             continue;
           }
-          // 스팬 업로드(OTLP/JSON, 서버 ≥3.12) — best-effort: 구버전(protobuf 전용)/미지원이면 스팬만 빠진
-          // trace 로 degrade(trace_info+assessments 는 유효하므로 케이스 실패로 만들지 않는다).
+          // Span upload (OTLP/JSON, server ≥3.12) — best-effort: on older (protobuf-only) / unsupported servers, degrade to
+          // a trace with only the spans missing (trace_info+assessments stay valid, so it doesn't make the case fail).
           await f(`${this.base}/v1/traces`, {
             method: "POST",
             headers: { ...this.headers(), "x-mlflow-experiment-id": project },
             body: JSON.stringify(mlflowOtlpSpans(ctx, c, hex, this.nowIso(), this.newId)),
           }).catch(() => undefined);
         }
-        // 점수 부착 — assessment 하나당 1콜. 첫 실패에서 케이스를 실패로 격리(나머지 케이스는 계속).
+        // Attach scores — one call per assessment. Isolate the case as failed on the first failure (other cases continue).
         let scoreError: string | undefined;
         for (const s of c.scores) {
           const res = await f(`${this.base}/api/3.0/mlflow/traces/${encodeURIComponent(traceId)}/assessments`, {
@@ -260,11 +263,11 @@ export class MlflowTraceSink implements TraceSink {
           ...(scoreError ? { error: scoreError } : {}),
         });
       } catch (err) {
-        // 연결 수준 실패 — 전 케이스가 같은 원인일 가능성이 높아 전면 실패로 승격.
+        // A connection-level failure — likely the same cause for all cases, so escalate to a wholesale failure.
         throw new UpstreamError(
           "UPSTREAM_ERROR",
           {},
-          `MLflow 싱크 연결 실패: ${err instanceof Error ? err.message : String(err)}`,
+          `MLflow sink connection failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

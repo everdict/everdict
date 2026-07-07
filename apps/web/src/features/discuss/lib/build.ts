@@ -4,12 +4,12 @@ import { fmtSubject } from '@/shared/lib/format'
 
 import type { Mentionable, ThreadComment } from '../model/types'
 
-// 표시명 — 프로필 이름 우선, 없으면 이메일 로컬파트(전체 이메일 노출 금지), 그래도 없으면 subject 축약.
+// Display name — profile name first, else the email local-part (never expose the full email), else an abbreviated subject.
 function displayName(m: Member | undefined, subject: string): string {
   return m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(subject)
 }
 
-// 워크스페이스 멤버 → @멘션 후보(표시명 + 둥근 아바타).
+// Workspace members → @mention candidates (display name + round avatar).
 export function buildMentionables(members: Member[]): Mentionable[] {
   return members.map((m) => ({
     subject: m.subject,
@@ -18,7 +18,7 @@ export function buildMentionables(members: Member[]): Mentionable[] {
   }))
 }
 
-// 컨트롤플레인 댓글 → 표시-준비 ThreadComment(actor 해석 + 삭제 권한 계산). 어느 상세 페이지든 동일하게 조립.
+// Control-plane comment → display-ready ThreadComment (actor resolution + delete-permission computation). Assembled identically on any detail page.
 export function buildThread(
   comments: Comment[],
   members: Member[],

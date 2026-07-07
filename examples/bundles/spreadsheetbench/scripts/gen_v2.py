@@ -1,6 +1,6 @@
-# SpreadsheetBench v2-샘플(워크플로/재무모델 스타일) 입력 생성 — Revenue/Cost 표가 든 model.xlsx.
-# 실제 v2 Financial_Model 은 다중시트 모델(수 MB)이지만, 샘플은 regression(불변 셀 보존)+modification(신규 셀 정답)
-# 이라는 v2 핵심 채점을 작은 표로 재현한다.
+# Generate a SpreadsheetBench v2-sample (workflow/financial-model style) input — model.xlsx with a Revenue/Cost table.
+# Real v2 Financial_Model is a multi-sheet model (several MB), but the sample reproduces v2's core scoring — regression (invariant cells preserved)
+# + modification (new cells correct) — with a small table.
 import openpyxl
 
 wb = openpyxl.Workbook()

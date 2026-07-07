@@ -13,7 +13,7 @@ function browserCtx(dom: string, url: string): GradeContext {
 }
 
 describe("browser graders", () => {
-  it("dom-contains 통과/실패", async () => {
+  it("dom-contains pass/fail", async () => {
     expect((await new DomContainsGrader("Success").grade(browserCtx("<div>Success</div>", "https://x"))).pass).toBe(
       true,
     );
@@ -22,7 +22,7 @@ describe("browser graders", () => {
   it("url-matches", async () => {
     expect((await new UrlMatchesGrader("/done$").grade(browserCtx("", "https://x/done"))).pass).toBe(true);
   });
-  it("repo 스냅샷이면 에러", async () => {
+  it("errors on a repo snapshot", async () => {
     const ctx: GradeContext = {
       case: browserCtx("", "").case,
       trace: [],
@@ -32,13 +32,13 @@ describe("browser graders", () => {
   });
 });
 
-describe("answer-match grader (QA 벤치마크 정답대조)", () => {
+describe("answer-match grader (QA benchmark answer matching)", () => {
   const ctxWithAnswer = (text: string): GradeContext => ({
     case: { id: "c", env: { kind: "browser", startUrl: "https://x" }, task: "q", graders: [], timeoutSec: 1, tags: [] },
     trace: [{ t: 0, kind: "message", role: "assistant", text }] as TraceEvent[],
     snapshot: { kind: "browser", url: "https://x", dom: "", console: [] },
   });
-  it("정규화 substring 으로 정답 포함 여부 채점", async () => {
+  it("scores answer inclusion via normalized substring", async () => {
     expect(
       (await new AnswerMatchGrader("Example Domain").grade(ctxWithAnswer("The heading is: Example Domain."))).pass,
     ).toBe(true);
@@ -47,7 +47,7 @@ describe("answer-match grader (QA 벤치마크 정답대조)", () => {
     );
     expect((await new AnswerMatchGrader("404").grade(ctxWithAnswer("It means Not Found."))).pass).toBe(false);
   });
-  it("exact 모드 + 마지막 assistant message 사용", async () => {
+  it("exact mode + uses the last assistant message", async () => {
     expect((await new AnswerMatchGrader("example domain", "exact").grade(ctxWithAnswer("Example Domain"))).pass).toBe(
       true,
     );
@@ -67,7 +67,7 @@ describe("JudgeGrader", () => {
       return { pass: true, score: 0.9, reason: "looks good" };
     },
   };
-  it("Judge 판정을 Score 로 변환한다", async () => {
+  it("converts a Judge verdict to a Score", async () => {
     const score = await new JudgeGrader(mockJudge, { id: "vlm-judge", useScreenshot: true }).grade(
       browserCtx("<html/>", "https://x"),
     );
@@ -76,7 +76,7 @@ describe("JudgeGrader", () => {
     expect(score.value).toBe(0.9);
   });
 
-  it("os-use 스냅샷: 환경에서 스크린샷을 base64 로 읽어 VLM 입력(screenshot)으로 넘긴다", async () => {
+  it("os-use snapshot: reads the screenshot as base64 from the environment and passes it as VLM input (screenshot)", async () => {
     let received: Parameters<Judge["judge"]>[0] | undefined;
     const spy: Judge = {
       async judge(input) {
@@ -88,7 +88,7 @@ describe("JudgeGrader", () => {
     const compute = {
       async exec(cmd: string) {
         calls.push(cmd);
-        return { exitCode: 0, stdout: "QkFTRTY0\n", stderr: "" }; // base64 stdout(개행 포함)
+        return { exitCode: 0, stdout: "QkFTRTY0\n", stderr: "" }; // base64 stdout (with newline)
       },
       async writeFile() {},
       async readFile() {
@@ -99,17 +99,17 @@ describe("JudgeGrader", () => {
     const ctx: GradeContext = {
       case: { id: "c", env: { kind: "os-use" }, task: "open the remote form", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
-      snapshot: { kind: "os-use", screenshotRef: "/tmp/everdict-screen.png", screenshot: "", windows: [] }, // 동봉 없음 → 컴퓨트 폴백
+      snapshot: { kind: "os-use", screenshotRef: "/tmp/everdict-screen.png", screenshot: "", windows: [] }, // none embedded → compute fallback
       compute,
     };
     const score = await new JudgeGrader(spy, { id: "vlm", useScreenshot: true }).grade(ctx);
     expect(score.pass).toBe(true);
     expect(calls[0]).toContain("base64 -w0");
     expect(calls[0]).toContain("/tmp/everdict-screen.png");
-    expect(received?.screenshot).toEqual({ base64: "QkFTRTY0", mediaType: "image/png" }); // 개행 trim + png
+    expect(received?.screenshot).toEqual({ base64: "QkFTRTY0", mediaType: "image/png" }); // newline trimmed + png
   });
 
-  it("os-use 스냅샷에 base64 가 동봉돼 있으면 컴퓨트 없이 그대로 쓴다(결과 채점/dispose 후)", async () => {
+  it("uses the embedded base64 as-is without compute when the os-use snapshot includes it (after result scoring/dispose)", async () => {
     let received: Parameters<Judge["judge"]>[0] | undefined;
     const spy: Judge = {
       async judge(input) {
@@ -136,11 +136,11 @@ describe("JudgeGrader", () => {
       compute,
     };
     await new JudgeGrader(spy, { useScreenshot: true }).grade(ctx);
-    expect(execCalls).toBe(0); // 동봉 base64 사용 → 컴퓨트 exec 없음
+    expect(execCalls).toBe(0); // uses embedded base64 → no compute exec
     expect(received?.screenshot).toEqual({ base64: "RU1CRURERUQ=", mediaType: "image/png" });
   });
 
-  it("useScreenshot 가 false 면 os-use 라도 스크린샷을 읽지 않는다", async () => {
+  it("does not read the screenshot even for os-use when useScreenshot is false", async () => {
     let received: Parameters<Judge["judge"]>[0] | undefined;
     const spy: Judge = {
       async judge(input) {
@@ -173,7 +173,7 @@ describe("JudgeGrader", () => {
 });
 
 describe("makeGraders", () => {
-  it("spec 으로 그레이더를 만든다", () => {
+  it("builds graders from specs", () => {
     const g = makeGraders([
       { id: "steps" },
       { id: "dom-contains", config: { text: "ok" } },
@@ -181,17 +181,17 @@ describe("makeGraders", () => {
     ]);
     expect(g.map((x) => x.id)).toEqual(["steps", "dom-contains", "url-matches"]);
   });
-  it("알 수 없는 그레이더는 에러", () => {
+  it("errors on an unknown grader", () => {
     expect(() => makeGraders([{ id: "nope" }])).toThrow();
   });
-  it("judge 스펙은 Judge 주입이 있어야 만들어진다(없으면 명시 에러)", () => {
-    expect(() => makeGraders([{ id: "judge", config: { rubric: "r" } }])).toThrow(/Judge 주입/);
+  it("a judge spec is only built with an injected Judge (explicit error otherwise)", () => {
+    expect(() => makeGraders([{ id: "judge", config: { rubric: "r" } }])).toThrow(/Judge injection/);
     const judge: Judge = {
       async judge() {
         return { pass: true, score: 1, reason: "ok" };
       },
     };
     const g = makeGraders([{ id: "judge", config: { id: "wv-judge", rubric: "r" } }], { judge });
-    expect(g[0]?.id).toBe("wv-judge"); // config.id 로 grader id 지정
+    expect(g[0]?.id).toBe("wv-judge"); // grader id specified by config.id
   });
 });

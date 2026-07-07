@@ -25,7 +25,7 @@ export interface SidebarProps {
   showLogin: boolean
 }
 
-// Cmd+K 팔레트 열기 — 모듈 레벨 커스텀 이벤트(컨텍스트 배선 없이 검색 버튼 ↔ 팔레트 연결).
+// Open the Cmd+K palette — a module-level custom event (wires the search button ↔ palette without context plumbing).
 function openCommandPalette() {
   window.dispatchEvent(new CustomEvent('everdict:command'))
 }
@@ -40,7 +40,7 @@ function setTheme(dark: boolean) {
   try {
     localStorage.setItem('theme', dark ? 'dark' : 'light')
   } catch {
-    /* localStorage 차단 환경 */
+    /* localStorage-blocked environment */
   }
 }
 
@@ -62,7 +62,7 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
             </p>
           )}
           {section.items.map((item) => {
-            const href = `/${workspace}${item.href}` // suffix → 활성 워크스페이스로 prefix
+            const href = `/${workspace}${item.href}` // suffix → prefixed with the active workspace
             const active = item.exact
               ? pathname === href
               : pathname === href || pathname.startsWith(`${href}/`)
@@ -103,8 +103,8 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
   )
 }
 
-// 하단 푸터 — 계정/설정/테마/로그아웃 직접 링크. 워크스페이스 칩과 생김새를 분리(중복 제거),
-// 드롭다운에 의존하지 않아 항상 보이고 항상 눌린다.
+// Bottom footer — direct links to account/settings/theme/logout. Visually separated from the workspace chip (dedup),
+// and not dependent on a dropdown so it's always visible and always clickable.
 function SidebarFooter({
   workspace,
   roles,
@@ -202,8 +202,8 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
         <Kbd>{mac ? '⌘' : 'Ctrl'} K</Kbd>
       </button>
 
-      {/* 알림 인박스(개인 피드) — Linear 의 Inbox 위치. [workspace] 레이아웃이 principal 을 이미 검증했으므로
-          별도 게이트 없음(dev 폴백 포함 — authed 는 실 OIDC 전용 플래그라 부적합). */}
+      {/* Notification inbox (personal feed) — Linear's Inbox slot. The [workspace] layout already validated the principal, so
+          no separate gate (dev fallback included — authed is unsuitable since it's a real-OIDC-only flag). */}
       <NotificationBell workspace={props.workspace} />
 
       <div className="-mr-1 flex-1 overflow-y-auto pr-1">
@@ -228,7 +228,7 @@ export function Sidebar(props: SidebarProps) {
   const workspaceLabel = activeWorkspace?.name ?? props.workspace
   return (
     <>
-      {/* 모바일 상단 바 */}
+      {/* Mobile top bar */}
       <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-xl md:hidden">
         <button
           type="button"
@@ -257,12 +257,12 @@ export function Sidebar(props: SidebarProps) {
         </button>
       </div>
 
-      {/* 데스크톱 사이드바 */}
+      {/* Desktop sidebar */}
       <aside className="sticky top-0 z-20 hidden h-screen w-[232px] shrink-0 border-r border-border bg-card/30 md:block">
         <SidebarBody {...props} />
       </aside>
 
-      {/* 모바일 드로어 */}
+      {/* Mobile drawer */}
       {mobileOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <div

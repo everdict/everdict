@@ -1,18 +1,18 @@
-// 라이브 e2e: 셀프호스티드 러너. 멤버가 자기 머신(이 프로세스)에서 워크스페이스의 잡을 받아(pull) 돌리고
-// 결과를 회신한다(push→pull). 워크스페이스의 공유 하니스/데이터셋을 "런타임만 바꿔"(self:<runnerId>) 내 호스트에서.
-// 검증: 페어링 → everdict runner 기동 → runtime=self:<id> 로 run 제출 → succeeded + result.provenance.ranOn=self-hosted.
-// 설계: docs/architecture/self-hosted-runner.md.
+// Live e2e: self-hosted runner. A member pulls the workspace's job onto their own machine (this process), runs it,
+// and returns the result (push→pull). Runs the workspace's shared harness/dataset "just by swapping the runtime" (self:<runnerId>) on my host.
+// Verify: pairing → start everdict runner → submit run with runtime=self:<id> → succeeded + result.provenance.ranOn=self-hosted.
+// Design: docs/architecture/self-hosted-runner.md.
 //
-// 준비:
+// Prereqs:
 //   pnpm build
-//   node apps/api/dist/main.js            # 컨트롤플레인 API (:8787, in-memory, dev 폴백 인증)
-// 사용:
+//   node apps/api/dist/main.js            # control plane API (:8787, in-memory, dev fallback auth)
+// Usage:
 //   node scripts/live/self-hosted-runner.mjs
 import { spawn } from "node:child_process";
 import process from "node:process";
 
 const B = (process.env.EVERDICT_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
-// dev 폴백(미인증) → subject=dev, workspace=default. 러너도 같은 dev 소유로 페어링되어 self: 라우팅이 맞물린다.
+// dev fallback (unauthenticated) → subject=dev, workspace=default. The runner is paired under the same dev owner, so self: routing lines up.
 const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -22,14 +22,14 @@ const api = async (path, init = {}) => {
   return r.status === 204 ? null : r.json();
 };
 
-// 1) 디바이스 페어링 → rnr_ 토큰(1회 노출).
+// 1) device pairing → rnr_ token (shown once).
 const { runner, token } = await api("/runners", {
   method: "POST",
   body: JSON.stringify({ label: "e2e-laptop", capabilities: ["repo"] }),
 });
 console.log(`▶ paired runner ${runner.id} (${runner.label})`);
 
-// 2) 이 머신을 러너로 기동(everdict runner). 페어링 토큰으로 /mcp 에 인증.
+// 2) start this machine as a runner (everdict runner). Authenticates to /mcp with the pairing token.
 const runnerProc = spawn(
   process.execPath,
   ["apps/cli/dist/main.js", "runner", "--pair", token, "--api-url", B, "--poll-interval-ms", "1000"],
@@ -41,10 +41,10 @@ const cleanup = () => {
 process.on("exit", cleanup);
 
 try {
-  await sleep(2500); // 러너 MCP 연결 대기
+  await sleep(2500); // wait for the runner's MCP connection
 
-  // 한 워크스페이스(x-everdict-tenant 헤더)에서 runtime=self:<id> 로 run 을 돌리고 결과를 검증한다.
-  // scripted 하니스 — 로컬, 외부 의존 없음(이 머신에서 실행). dev 폴백 subject="dev" 라 워크스페이스가 달라도 owner 동일.
+  // In a single workspace (x-everdict-tenant header), run with runtime=self:<id> and verify the result.
+  // scripted harness — local, no external deps (runs on this machine). With dev fallback subject="dev", the owner is the same even across different workspaces.
   const runOnSelf = async (workspace) => {
     const wsHeaders = { "x-everdict-tenant": workspace };
     const submitted = await api("/runs", {
@@ -59,7 +59,7 @@ try {
           graders: [{ id: "steps" }],
           timeoutSec: 120,
           tags: ["e2e"],
-          placement: { target: `self:${runner.id}` }, // ← "런타임만 바꿔" — 내 로컬 호스트
+          placement: { target: `self:${runner.id}` }, // ← "just swap the runtime" — my local host
         },
       }),
     });
@@ -73,20 +73,22 @@ try {
     if (rec.status !== "succeeded") throw new Error(`[${workspace}] run ${rec.status}: ${JSON.stringify(rec.error)}`);
     const prov = rec.result?.provenance;
     if (prov?.ranOn !== "self-hosted" || prov.runner !== runner.id || prov.by !== "dev")
-      throw new Error(`[${workspace}] ✗ 프로비넌스 불일치: ${JSON.stringify(prov)}`);
-    console.log(`✓ [${workspace}] run ${rec.id} (tenant=${rec.tenant}) ← 같은 러너(${prov.runner})에서 실행, 태그됨`);
+      throw new Error(`[${workspace}] ✗ provenance mismatch: ${JSON.stringify(prov)}`);
+    console.log(
+      `✓ [${workspace}] run ${rec.id} (tenant=${rec.tenant}) ← ran on the same runner (${prov.runner}), tagged`,
+    );
     return rec;
   };
 
-  // 3) 기본 워크스페이스에서 1건.
+  // 3) one run in the default workspace.
   await runOnSelf("default");
 
-  // 4) 크로스 워크스페이스: 같은 러너가 다른 워크스페이스(team-b)의 잡도 받는다(러너는 소유자의 여러 워크스페이스를 한 큐로).
+  // 4) cross-workspace: the same runner also takes a job from another workspace (team-b) (a runner serves the owner's multiple workspaces from one queue).
   const other = await runOnSelf("team-b");
-  if (other.tenant !== "team-b") throw new Error("✗ 두 번째 run 의 워크스페이스가 team-b 가 아님");
+  if (other.tenant !== "team-b") throw new Error("✗ the second run's workspace is not team-b");
 
   console.log(
-    `✓ PASS — 한 러너(${runner.id})가 default + team-b 두 워크스페이스의 잡을 수행하고 각 워크스페이스에 태그됨`,
+    `✓ PASS — one runner (${runner.id}) ran jobs from both the default and team-b workspaces and tagged each to its workspace`,
   );
 } finally {
   cleanup();

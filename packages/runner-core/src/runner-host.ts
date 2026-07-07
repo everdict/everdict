@@ -4,9 +4,9 @@ import { runLeasedJob } from "./run-leased-job.js";
 import { runLeaseWorkers } from "./runner-loop.js";
 import { type ConnectClient, ResilientMcpSession, mcpConnect } from "./runner-session.js";
 
-// GUI 내장용 러너 퍼사드 — start/stop/상태 이벤트로 lease 루프를 감싼다(데스크톱 메인 프로세스가 소비).
-// CLI 는 runLeaseWorkers 를 직접 쓰고, 데스크톱은 이 퍼사드를 쓴다 — 실행 동작 자체는 동일(runLeasedJob).
-// 설계: docs/architecture/desktop-app.md.
+// A runner facade for GUI embedding — wraps the lease loop with start/stop/status events (consumed by the desktop main process).
+// The CLI uses runLeaseWorkers directly; desktop uses this facade — the execution behavior itself is identical (runLeasedJob).
+// Design: docs/architecture/desktop-app.md.
 export type RunnerHostState = "off" | "idle" | "running";
 
 export interface RunnerHostStatus {
@@ -15,7 +15,7 @@ export interface RunnerHostStatus {
   capabilities: string[];
 }
 
-// 잡 1건의 종료 통지 — GUI(OS 알림 등)가 소비한다. 실패면 error, 성공이면 result 가 실린다.
+// Completion notice for one job — consumed by the GUI (OS notifications etc.). On failure it carries error, on success result.
 export interface RunnerJobDone {
   job: AgentJob;
   result?: CaseResult;
@@ -23,20 +23,20 @@ export interface RunnerJobDone {
 }
 
 export interface RunnerHostOpts {
-  apiUrl: string; // 컨트롤플레인 base URL — /mcp 를 붙여 접속
-  token: string; // rnr_ 페어링 토큰
-  maxConcurrent?: number; // 기본 1(CLI 기본과 동일)
-  waitMs?: number; // lease long-poll 대기(기본 25s)
-  heartbeatMs?: number; // 실행 중 lease 갱신 주기(기본 30s)
-  pollMs?: number; // lease 에러 backoff(기본 2s)
-  capabilities?: string[]; // 미지정 → detectCapabilities()
+  apiUrl: string; // control-plane base URL — append /mcp to connect
+  token: string; // rnr_ pairing token
+  maxConcurrent?: number; // default 1 (same as the CLI default)
+  waitMs?: number; // lease long-poll wait (default 25s)
+  heartbeatMs?: number; // lease renewal interval while running (default 30s)
+  pollMs?: number; // lease error backoff (default 2s)
+  capabilities?: string[]; // unset → detectCapabilities()
   onStatus?: (status: RunnerHostStatus) => void;
-  onJobDone?: (done: RunnerJobDone) => void; // 잡 종료 통지(성공/실패) — OS 알림 등
+  onJobDone?: (done: RunnerJobDone) => void; // job completion notice (success/failure) — OS notifications etc.
   log?: (msg: string) => void;
-  // 테스트 주입점
-  connect?: ConnectClient; // 기본 mcpConnect(new URL("/mcp", apiUrl), token)
-  runJob?: (job: AgentJob) => Promise<CaseResult>; // 기본 runLeasedJob
-  detect?: () => Promise<string[]>; // 기본 detectCapabilities
+  // Test injection points
+  connect?: ConnectClient; // default mcpConnect(new URL("/mcp", apiUrl), token)
+  runJob?: (job: AgentJob) => Promise<CaseResult>; // default runLeasedJob
+  detect?: () => Promise<string[]>; // default detectCapabilities
   sleep?: (ms: number) => Promise<void>;
 }
 
@@ -54,7 +54,7 @@ export class RunnerHost {
     return { state, activeJobs: this.activeJobs, capabilities: this.capabilities };
   }
 
-  // 멱등 시작 — 이미 돌고 있으면 no-op. 초기 연결 실패는 루프가 backoff 재시도하므로 throw 하지 않는다.
+  // Idempotent start — no-op if already running. An initial connection failure isn't thrown since the loop retries with backoff.
   async start(): Promise<void> {
     if (this.loop) return;
     this.stopFlag = false;
@@ -66,13 +66,13 @@ export class RunnerHost {
 
     const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
       const r = await session.call(name, args);
-      if (r.isError) throw new Error(r.text || `${name} 실패`);
+      if (r.isError) throw new Error(r.text || `${name} failed`);
       return JSON.parse(r.text) as Record<string, unknown>;
     };
-    // image-케이스는 이 러너에 Docker 가 있을 때 로컬 Docker(DockerDriver)로 실행 — dockerAvailable 을 capability 에서 넘긴다.
+    // An image-case runs on local Docker (DockerDriver) when this runner has Docker — pass dockerAvailable from the capabilities.
     const dockerAvailable = this.capabilities.includes("docker");
     const baseRun = this.opts.runJob ?? ((job: AgentJob) => runLeasedJob(job, { dockerAvailable, log: this.opts.log }));
-    // 잡 시작/종료를 감싸 activeJobs 를 추적(running/idle 이벤트 근거) + 종료 통지를 낸다.
+    // Wrap job start/finish to track activeJobs (the basis for running/idle events) + emit a completion notice.
     const runJob = async (job: AgentJob): Promise<CaseResult> => {
       this.activeJobs++;
       this.emit();
@@ -82,7 +82,7 @@ export class RunnerHost {
         return result;
       } catch (e) {
         this.opts.onJobDone?.({ job, error: e instanceof Error ? e : new Error(String(e)) });
-        throw e; // 루프가 fail_job 으로 회신하는 기존 경로 유지
+        throw e; // keep the existing path where the loop replies via fail_job
       } finally {
         this.activeJobs--;
         this.emit();
@@ -106,7 +106,7 @@ export class RunnerHost {
     this.emit();
   }
 
-  // 우아한 정지 — 진행 중 잡은 끝까지 실행·회신하고, 유휴 워커는 현재 long-poll(≤waitMs)이 끝나면 빠진다.
+  // Graceful stop — in-flight jobs run to completion and reply; idle workers drop out once the current long-poll (≤waitMs) ends.
   async stop(): Promise<void> {
     this.stopFlag = true;
     const loop = this.loop;

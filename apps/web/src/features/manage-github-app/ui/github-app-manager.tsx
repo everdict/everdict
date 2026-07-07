@@ -19,12 +19,12 @@ import {
   unlinkGithubAppInstallationAction,
 } from '../api/manage-github-app'
 
-// 설치 콜백 리다이렉트(?githubApp=installed / ?error=…)의 사람이 읽을 안내 — 설치 직후 명시적 피드백.
+// Human-readable notice for the install-callback redirect (?githubApp=installed / ?error=…) — explicit feedback right after install.
 export interface GithubAppNotice {
   installed?: boolean
   error?: string
 }
-// 설치 콜백 오류 코드 → 메시지 키(카탈로그에서 사람이 읽을 안내를 해석).
+// Install-callback error code → message key (resolves human-readable text from the catalog).
 const INSTALL_ERROR_KEYS: Record<string, string> = {
   missing_state: 'installErrorMissingState',
   invalid_state: 'installErrorInvalidState',
@@ -32,10 +32,10 @@ const INSTALL_ERROR_KEYS: Record<string, string> = {
   install_failed: 'installErrorInstallFailed',
 }
 
-// 워크스페이스 소유 GitHub App 통합 — 조직 설치→선택 repo→워크스페이스 소유 installation(개인 연결 대체).
-// github.com 은 원클릭 설치(operator env App), GHE 는 관리자가 각 서버 App 을 등록 후 설치. authZ 는 컨트롤플레인이 강제.
-// 설치 목록은 github.com·GHE 를 같은 모양(계정 + host 칩 + 설치됨 배지 + 허용 저장소 칩)으로 보여준다 — 일관성.
-// secretNames = 워크스페이스 시크릿 이름(GHE 개인키 피커용 — 값은 안 옴).
+// Workspace-owned GitHub App integration — org install → selected repos → workspace-owned installation (replaces personal connections).
+// github.com is one-click install (operator env App); GHE requires an admin to register each server's App, then install. authZ is enforced by the control plane.
+// The install list shows github.com and GHE in the same shape (account + host chip + installed badge + allowed-repo chips) — consistency.
+// secretNames = workspace secret names (for the GHE private-key picker — values are not sent).
 export function GithubAppManager({
   view,
   canWrite,
@@ -57,7 +57,7 @@ export function GithubAppManager({
     setError(undefined)
     startTransition(async () => {
       const r = await startGithubAppInstallAction(host)
-      // 설치는 새 탭에서 — 설정 화면을 떠나지 않고 GitHub 설치 플로우를 진행.
+      // Install in a new tab — proceed through the GitHub install flow without leaving the settings screen.
       if (r.ok && r.installUrl) window.open(r.installUrl, '_blank', 'noopener,noreferrer')
       else setError(r.error ?? t('installStartFailed'))
     })
@@ -80,7 +80,7 @@ export function GithubAppManager({
         <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
       </div>
 
-      {/* 설치 콜백 직후 피드백 — GitHub 에서 돌아온 순간 "됐다/안 됐다"를 명시적으로 알린다. */}
+      {/* Feedback right after the install callback — the moment we return from GitHub, explicitly say "succeeded/failed". */}
       {notice?.installed && (
         <Callout tone="info" className="py-1.5">
           {t('installedNotice')}
@@ -147,10 +147,10 @@ export function GithubAppManager({
   )
 }
 
-// 접기 전 보여줄 허용 저장소 칩 수 — 넘치면 "+n개 더"로 펼친다.
+// Number of allowed-repo chips to show before collapsing — the rest expand behind a "+n more" toggle.
 const REPO_PREVIEW_COUNT = 6
 
-// 설치 한 건 — github.com 과 GHE 를 같은 모양으로: 계정 + host 칩(상시) + 설치됨 배지 + 허용 저장소 칩 목록.
+// A single installation — github.com and GHE in the same shape: account + host chip (always) + installed badge + allowed-repo chip list.
 function InstallationRow({
   install,
   canWrite,
@@ -231,8 +231,8 @@ function InstallationRow({
   )
 }
 
-// GitHub Enterprise — 각 GHE 서버에 App 을 만들어 등록(host+slug+appId+개인키 SecretStore 이름) 후 설치.
-// 등록 행에 설치 여부(설치됨/미설치)를 보여 github.com 과 같은 "상태가 보이는" 흐름으로 잇는다.
+// GitHub Enterprise — create an App on each GHE server and register it (host+slug+appId+private-key SecretStore name), then install.
+// The registration row shows install status (installed/not installed) to carry the same "status-visible" flow as github.com.
 function GheSection({
   view,
   secretNames,
@@ -304,8 +304,8 @@ function GheSection({
       {view.registrations.length > 0 && (
         <SettingsList>
           {view.registrations.map((r) => {
-            // 이 GHE 서버로 설치된 조직 — 등록 행에서도 설치 상태가 바로 보인다(미설치면 outline 배지).
-            // host 비교는 정규화 동등성(sameHost) — 트레일링 슬래시/대소문자만 달라도 '미설치'로 오인하지 않게.
+            // Orgs installed on this GHE server — install status is visible right on the registration row (outline badge when not installed).
+            // Host comparison uses normalized equality (sameHost) — so a trailing-slash/case-only difference isn't misread as 'not installed'.
             const installedOrgs = view.installations.filter((i) => sameHost(i.host, r.host))
             return (
               <SettingsRow
@@ -376,7 +376,7 @@ function GheSection({
             onChange={(e) => setAppId(e.target.value)}
           />
         </div>
-        {/* 개인키(PEM)는 자유 텍스트 입력이 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성(여러 줄 기본). */}
+        {/* The private key (PEM) is a workspace secret reference, not free-text input — pick one or create inline (multiline by default). */}
         <div className="space-y-1 sm:col-span-2">
           <Label htmlFor="ghe-key">{t('privateKeySecret')}</Label>
           <SecretPicker
@@ -398,14 +398,14 @@ function GheSection({
   )
 }
 
-// GHE 베이스 URL 동등성 — 대소문자/트레일링 슬래시 차이를 무시(서버 github-app-service 의 sameHost 미러).
+// GHE base URL equality — ignores case/trailing-slash differences (mirrors the server github-app-service's sameHost).
 function sameHost(a?: string, b?: string): boolean {
   if (a === undefined || b === undefined) return a === b
   const norm = (u: string) => (u.endsWith('/') ? u.slice(0, -1) : u).toLowerCase()
   return norm(a) === norm(b)
 }
 
-// "https://ghe.example.com" → "ghe.example.com"; github.com 설치(host 없음)는 "github.com" — 칩 상시 표기로 일관.
+// "https://ghe.example.com" → "ghe.example.com"; a github.com install (no host) is "github.com" — always shown as a chip for consistency.
 function hostLabel(host?: string): string {
   if (!host) return 'github.com'
   try {

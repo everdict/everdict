@@ -1,5 +1,5 @@
-// 데스크톱 셸(apps/desktop preload)이 주입하는 window.everdictDesktop 의 로컬 미러 타입.
-// 웹은 @everdict/* 패키지를 의존하지 않으므로(웹 룰) apps/desktop/src/bridge.ts 와 수동 동기화한다.
+// Local mirror type of window.everdictDesktop injected by the desktop shell (apps/desktop preload).
+// The web doesn't depend on @everdict/* packages (web rule), so this is manually kept in sync with apps/desktop/src/bridge.ts.
 export interface DesktopRunnerStatus {
   paired: boolean
   runnerId?: string
@@ -17,15 +17,15 @@ export interface DesktopAppInfo {
 
 export interface EverdictDesktopBridge {
   appInfo(): Promise<DesktopAppInfo>
-  // 원클릭 페어링 — 토큰은 이 호출로만 내려가 OS keychain 에 저장된다(화면 노출·되읽기 없음).
+  // One-click pairing — the token is passed down only via this call and stored in the OS keychain (no screen exposure / read-back).
   pairRunner(payload: { token: string; runnerId?: string; apiUrl?: string }): Promise<void>
   unpairRunner(): Promise<void>
   runnerStatus(): Promise<DesktopRunnerStatus>
-  // 상태 구독 — 해지 함수를 돌려준다.
+  // Subscribe to status — returns an unsubscribe function.
   onRunnerStatus(callback: (status: DesktopRunnerStatus) => void): () => void
 }
 
-// 데스크톱 셸 안에서 렌더링 중일 때만 존재 — 일반 브라우저에선 null.
+// Present only when rendering inside the desktop shell — null in a regular browser.
 export function getEverdictDesktop(): EverdictDesktopBridge | null {
   if (typeof window === 'undefined') return null
   return (window as Window & { everdictDesktop?: EverdictDesktopBridge }).everdictDesktop ?? null

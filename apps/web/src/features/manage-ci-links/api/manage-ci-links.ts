@@ -34,20 +34,20 @@ export interface SetupPrResult {
   error?: string
 }
 
-// upsert 링크(레포↔하니스 슬롯) 입력 — dataset/slots/runsOn/runtime 은 선택. 컨트롤플레인이 최종 검증(admin 게이트).
+// Upsert link (repo↔harness slot) input — dataset/slots/runsOn/runtime are optional. The control plane does the final validation (admin gate).
 export interface UpsertCiLinkInput {
   repository: string
-  host?: string // GHE 베이스 URL(예: https://ghe.acme.io) — 미지정 = github.com
+  host?: string // GHE base URL (e.g. https://ghe.acme.io) — unset = github.com
   harness: string
   dataset?: string
   slots?: Record<string, { path?: string }>
-  runsOn?: string // 좁히기 오버라이드 — 워크플로 runs-on(기본 [self-hosted])
-  runtime?: string // 좁히기 오버라이드 — run-eval runtime(기본 self:ws 풀, 예: self:ws:<id>)
-  trigger?: 'auto' | 'comment' | 'both' // PR 평가 발화 방식 — 미지정 = both(자동 + /evaluate 코멘트)
+  runsOn?: string // narrowing override — workflow runs-on (default [self-hosted])
+  runtime?: string // narrowing override — run-eval runtime (default self:ws pool, e.g. self:ws:<id>)
+  trigger?: 'auto' | 'comment' | 'both' // PR evaluation trigger mode — unset = both (automatic + /evaluate comment)
 }
 
-// 워크스페이스 공유 러너(팀 소유) 목록 — CI 배치는 항상 셀프호스티드(기본 self:ws 풀)라 연결 다이얼로그가
-// 러너 준비 상태를 보여준다. 컨트롤플레인 게이트=settings:write — canWrite(admin)일 때만 호출할 것.
+// Workspace shared runners (team-owned) list — CI dispatch is always self-hosted (default self:ws pool), so the connect dialog
+// shows runner readiness. Control-plane gate = settings:write — only call when canWrite (admin).
 export async function listSharedRunnersAction(): Promise<SharedRunnersResult> {
   const ctx = await authContext()
   try {
@@ -60,7 +60,7 @@ export async function listSharedRunnersAction(): Promise<SharedRunnersResult> {
   }
 }
 
-// 레포 목록(picker) — 워크스페이스 GitHub App installation 이 접근 가능한 레포(설치 시 고른 것만). settings:read.
+// Repo list (picker) — repos the workspace GitHub App installation can access (only those chosen at install time). settings:read.
 export async function listGithubAppReposAction(): Promise<ReposResult> {
   const ctx = await authContext()
   try {
@@ -71,7 +71,7 @@ export async function listGithubAppReposAction(): Promise<ReposResult> {
   }
 }
 
-// 링크 저장(생성/갱신) — link 의 존재가 그 레포의 keyless CI 신뢰를 부여(settings:write=admin, 컨트롤플레인 강제).
+// Save link (create/update) — a link's existence grants that repo's keyless CI trust (settings:write=admin, enforced by the control plane).
 export async function upsertCiLinkAction(input: UpsertCiLinkInput): Promise<CiLinksResult> {
   const ctx = await authContext()
   try {
@@ -84,7 +84,7 @@ export async function upsertCiLinkAction(input: UpsertCiLinkInput): Promise<CiLi
   }
 }
 
-// 링크 해제(삭제) — settings:write(admin). host 미지정 = github.com link.
+// Unlink (delete) — settings:write (admin). host unset = github.com link.
 export async function deleteCiLinkAction(
   repository: string,
   host?: string
@@ -102,7 +102,7 @@ export async function deleteCiLinkAction(
   }
 }
 
-// 셋업 PR 열기 — link 의 워크플로 YAML 을 대상 레포에 PR(워크스페이스 GitHub App 토큰). harnesses:read(머지는 GitHub 쪽 승인).
+// Open setup PR — PRs the link's workflow YAML into the target repo (workspace GitHub App token). harnesses:read (the merge is approved on the GitHub side).
 export async function openSetupPrAction(repository: string, host?: string): Promise<SetupPrResult> {
   const ctx = await authContext()
   try {

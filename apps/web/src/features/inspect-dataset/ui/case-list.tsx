@@ -11,7 +11,7 @@ import { CaseCard } from './case-card'
 
 const INITIAL = 5
 
-// 케이스 목록 — 기본 5개만 보이고 나머지는 접힘(상세의 주는 활동 히스토리라 케이스는 부차적). 확장/접기.
+// Case list — only 5 shown by default, the rest collapsed (the detail's main content is the activity history, so cases are secondary). Expand/collapse.
 export function CaseList({ cases }: { cases: DatasetCase[] }) {
   const t = useTranslations('inspectDataset')
   const [expanded, setExpanded] = useState(false)

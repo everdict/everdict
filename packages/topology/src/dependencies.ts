@@ -1,15 +1,15 @@
 import type { ServiceHarnessSpec } from "@everdict/core";
 
-// 공유 스토어(spec.dependencies[])의 표준 이미지/포트/부트env. 토폴로지를 통째로 띄울 때
-// (provisionDependencies) 런타임이 이 정의로 PG/Redis 를 서비스와 함께 배포하고, 서비스에는
-// 접속 URL(connEnv)을 자동 주입한다. 스토어는 (harness-version, zone) 당 한 번 — 케이스 간 공유,
-// 케이스별 격리는 isolateBy(thread_id/key-prefix/...) 로 논리 분리(플랜 그대로).
+// Standard image/port/boot-env for shared stores (spec.dependencies[]). When the whole topology is brought up
+// (provisionDependencies) the runtime deploys PG/Redis alongside the services from these defs and auto-injects the
+// connection URL (connEnv) into the services. A store is deployed once per (harness-version, zone) — shared across
+// cases, with per-case isolation logically separated by isolateBy (thread_id/key-prefix/...) (as planned).
 export interface StoreDef {
   image: string;
   port: number;
-  env?: Record<string, string>; // 부트 env (예: POSTGRES_PASSWORD)
-  args?: string[]; // 컨테이너 실행 인자/커맨드 (예: minio "server /data")
-  // "host:port" 엔드포인트로부터 서비스 접속 env 를 만든다. K8s=Service DNS:port(빌드타임), Nomad=발견 host:port.
+  env?: Record<string, string>; // boot env (e.g. POSTGRES_PASSWORD)
+  args?: string[]; // container run args/command (e.g. minio "server /data")
+  // Build the service connection env from a "host:port" endpoint. K8s=Service DNS:port (build-time), Nomad=discovered host:port.
   connEnv: (endpoint: string) => Record<string, string>;
 }
 
@@ -23,16 +23,16 @@ export const STORE_DEFS: Record<string, StoreDef> = {
   redis: {
     image: "redis:7-alpine",
     port: 6379,
-    // REDIS_URL(드팩토) + REDIS_URI(aegra/일부 LangGraph) 둘 다 — 명시 storeEnv 가 있으면 그게 이긴다.
+    // Both REDIS_URL (de facto) + REDIS_URI (aegra / some LangGraph) — an explicit storeEnv wins if present.
     connEnv: (ep) => ({ REDIS_URL: `redis://${ep}`, REDIS_URI: `redis://${ep}` }),
   },
-  // minio: 오브젝트 스토어(스냅샷). 서버 이미지에 mc 포함 → pool 프로비저닝(버킷/유저/정책)을 exec 로. 루트 비번 ≥8자.
+  // minio: object store (snapshots). The server image bundles mc → pool provisioning (bucket/user/policy) via exec. Root password ≥8 chars.
   minio: {
     image: "quay.io/minio/minio:latest",
     port: 9000,
     args: ["server", "/data"],
     env: { MINIO_ROOT_USER: "everdict", MINIO_ROOT_PASSWORD: "everdictsecret" },
-    // 기본/silo(전용 인스턴스) = 루트 creds. pool 은 planner 가 테넌트별 scoped 키/버킷으로 덮어쓴다.
+    // Default/silo (dedicated instance) = root creds. For pool the planner overrides with per-tenant scoped keys/buckets.
     connEnv: (ep) => ({
       AWS_S3_ENDPOINT: `http://${ep}`,
       MINIO_ENDPOINT: `http://${ep}`,
@@ -42,12 +42,12 @@ export const STORE_DEFS: Record<string, StoreDef> = {
   },
 };
 
-// 배포할 스토어(타입별 1개; 같은 스토어를 여러 role 로 선언해도 한 번만 띄운다).
+// Stores to deploy (one per type; declaring the same store under multiple roles still brings it up once).
 export function dependencyStores(spec: ServiceHarnessSpec): Array<{ store: string; name: string; def: StoreDef }> {
   const seen = new Set<string>();
   const out: Array<{ store: string; name: string; def: StoreDef }> = [];
   for (const dep of spec.dependencies ?? []) {
-    if (dep.isolateBy === "external") continue; // BYO 외부 스토어 — Everdict 가 배포/connEnv 주입하지 않음(연결=storeEnv)
+    if (dep.isolateBy === "external") continue; // BYO external store — Everdict deploys nothing and injects no connEnv (connection = storeEnv)
     if (seen.has(dep.store)) continue;
     const def = STORE_DEFS[dep.store];
     if (!def) continue;
@@ -57,21 +57,21 @@ export function dependencyStores(spec: ServiceHarnessSpec): Array<{ store: strin
   return out;
 }
 
-// 배포될 스토어들로부터 서비스에 주입할 접속 env(컨벤션). 명시 storeEnv 가 이긴다.
-// K8s: 엔드포인트 = Service DNS:port (배포명:기본포트, 빌드타임 확정).
+// Connection env (by convention) injected into the services from the deployed stores. An explicit storeEnv wins.
+// K8s: endpoint = Service DNS:port (deployment name : default port, fixed at build time).
 export function dependencyConnEnv(spec: ServiceHarnessSpec): Record<string, string> {
   const out: Record<string, string> = {};
   for (const { name, def } of dependencyStores(spec)) Object.assign(out, def.connEnv(`${name}:${def.port}`));
   return out;
 }
 
-// 스토어 배포명 = Service DNS 이름(같은 네임스페이스 안에서 서비스가 그대로 접속).
+// Store deployment name = Service DNS name (services connect to it directly within the same namespace).
 export function storeName(spec: ServiceHarnessSpec, store: string): string {
   return `${spec.id}-${store}`;
 }
 
-// pool 모델용 공유 스토어 Deployment+Service (클러스터에 1대; 이름 고정 everdict-shared-<store>).
-// 빌더는 순수 — K8s manifest object 만 반환(런타임이 apply/rollout).
+// Shared-store Deployment+Service for the pool model (one per cluster; fixed name everdict-shared-<store>).
+// The builder is pure — it returns only K8s manifest objects (the runtime does apply/rollout).
 export function buildSharedStoreManifests(
   stores: string[],
   ns: string,

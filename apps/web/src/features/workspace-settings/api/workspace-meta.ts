@@ -10,8 +10,8 @@ export interface UpdateWorkspaceResult {
   error?: string
 }
 
-// 워크스페이스 표시 정보(이름/로고) 수정 → PATCH /workspace. slug(URL)은 불변이라 보내지 않는다.
-// 빈 문자열 logoUrl 은 로고 제거로 컨트롤플레인이 해석한다. authZ(admin=settings:write)는 컨트롤플레인이 강제.
+// Update workspace display info (name/logo) → PATCH /workspace. slug (URL) is immutable so it isn't sent.
+// The control plane interprets an empty-string logoUrl as removing the logo. authZ (admin=settings:write) is enforced by the control plane.
 export async function updateWorkspaceAction(input: {
   name?: string
   logoUrl?: string

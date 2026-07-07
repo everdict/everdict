@@ -9,7 +9,7 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
 > `local` is in-process on the **control-plane** host (dev only). A self-hosted runner (personal, on the account
 > page; lease/pull transport) **supersedes** `local` for the "single machine" use case — the machine becomes the
 > *user's*, with the user's login and isolation. Cluster runtimes below stay workspace-shared as today.
-> Easiest path: the [desktop app](architecture/desktop-app.md) — one-click "이 기기를 러너로 연결" on the
+> Easiest path: the [desktop app](architecture/desktop-app.md) — one-click "Connect this device as a runner" on the
 > account page (no token copy); headless boxes use `everdict runner --pair <rnr_…>`.
 
 ## Contract (`@everdict/core`)
@@ -43,7 +43,7 @@ kubeconfigs are self-contained.
 a workspace registers its own execution infra (`examples/runtimes/*.json` are reference specs only; the old
 default `_shared` `local`/`docker` seeds were removed — for "run on my own machine" register a self-hosted
 runner instead).
-**Role-gating**: `runtimes:read` = viewer+, `runtimes:write` = **viewer+ (role 무관)** —
+**Role-gating**: `runtimes:read` = viewer+, `runtimes:write` = **viewer+ (role-agnostic)** —
 registering a runtime spec (+validate/probe) is open to every member, same as `harnesses:register`. The runtime spec
 holds **no secrets**; the credential *values* it references are still admin-only (`secrets:write`), so opening
 registration doesn't expose cluster tokens.
@@ -79,13 +79,13 @@ unreachable address. The credential is used only for the probe's auth header (ne
 `makeRuntimeProber` is the single service core behind both transports.
 
 ## Web (`apps/web`)
-- **런타임 `/dashboard/runtimes`** — owned vs `_shared` runtimes (kind + version chips).
-- **상세 `/dashboard/runtimes/[id]`** — kind + connection fields. **등록 `/dashboard/runtimes/new`** — a
-  **kind-toggle form** (local | nomad | k8s) with a validate (dry-run) step → `POST /runtimes` (role 무관 — any member
+- **Runtimes `/dashboard/runtimes`** — owned vs `_shared` runtimes (kind + version chips).
+- **Detail `/dashboard/runtimes/[id]`** — kind + connection fields. **Register `/dashboard/runtimes/new`** — a
+  **kind-toggle form** (local | nomad | k8s) with a validate (dry-run) step → `POST /runtimes` (role-agnostic — any member
   can register). The form takes secret **names** (`authSecret`/`kubeconfigSecret`), never values; `validate` returns `missingSecrets`
-  (names referenced but not yet in the SecretStore) as a non-blocking warning. Store the values in 워크스페이스 설정
-  → 시크릿. A **연결 테스트** button (nomad/k8s) runs the live probe (`POST /runtimes/probe`) and shows
+  (names referenced but not yet in the SecretStore) as a non-blocking warning. Store the values in Workspace settings
+  → Secrets. A **Connection test** button (nomad/k8s) runs the live probe (`POST /runtimes/probe`) and shows
   reachable/detail before you commit.
-- The scorecard **실행** form gains a **런타임** selector (defaults to the global backend).
+- The scorecard **Run** form gains a **Runtime** selector (defaults to the global backend).
 
 See `docs/backends.md` (skill `backends`), `docs/tenancy.md`, `docs/scorecards.md`.

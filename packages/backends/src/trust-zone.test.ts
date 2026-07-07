@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { perTenantTrustZones, staticTrustZones } from "./trust-zone.js";
 
 describe("perTenantTrustZones", () => {
-  it("기본: 테넌트마다 전용 네임스페이스 + 강격리 + untrusted", () => {
+  it("default: each tenant gets a dedicated namespace + strong isolation + untrusted", () => {
     const policy = perTenantTrustZones();
     const z = policy.resolve("acme");
     expect(z.id).toBe("acme");
@@ -12,12 +12,12 @@ describe("perTenantTrustZones", () => {
     expect(z.trusted).toBe(false);
   });
 
-  it("서로 다른 테넌트는 서로 다른 존/네임스페이스를 받는다 (공유 없음)", () => {
+  it("different tenants get different zones/namespaces (no sharing)", () => {
     const policy = perTenantTrustZones();
     expect(policy.resolve("a").namespace).not.toBe(policy.resolve("b").namespace);
   });
 
-  it("overrides 로 first-party(trusted) 테넌트는 격리를 완화할 수 있다", () => {
+  it("via overrides, a first-party (trusted) tenant can relax isolation", () => {
     const policy = perTenantTrustZones({
       overrides: {
         internal: { id: "internal", isolationRuntime: "runc", network: "open", trusted: true },
@@ -30,7 +30,7 @@ describe("perTenantTrustZones", () => {
 });
 
 describe("staticTrustZones", () => {
-  it("매핑에 없으면 fallback 존으로", () => {
+  it("falls back to the fallback zone when not in the mapping", () => {
     const fallback = {
       id: "default",
       isolationRuntime: "runsc",

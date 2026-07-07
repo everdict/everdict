@@ -1,6 +1,6 @@
-// 라이브 e2e (SLICE 72): os-use env kind — 데스크탑(OS) 컴퓨터-유즈를 1급 환경으로. 호스트에 GUI 스택이 없어
-// docker env-container(Xvfb 포함) 안에서 데스크탑을 띄우고 OsUseEnvironment 가 스크린샷으로 관측. (OSWorld/hermes-desktop 류.)
-// 메커니즘 검증: Xvfb + 경량 GUI(xclock) → OsUseEnvironment.seed(디스플레이/앱 기동) → snapshot(scrot 캡처) → 실 스크린샷.
+// Live e2e (SLICE 72): os-use env kind — desktop (OS) computer-use as a first-class environment. The host has no GUI stack,
+// so we bring up a desktop inside a docker env-container (with Xvfb) and OsUseEnvironment observes it via screenshot. (OSWorld/hermes-desktop style.)
+// Mechanism verification: Xvfb + lightweight GUI (xclock) → OsUseEnvironment.seed (start display/app) → snapshot (scrot capture) → real screenshot.
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
@@ -10,13 +10,13 @@ import { runCase } from "../../packages/runner/dist/index.js";
 
 const IMAGE = "everdict-osdesk:demo";
 
-// 데스크탑 컴퓨트 이미지: Xvfb(가상 디스플레이) + scrot(스크린샷) + wmctrl(창목록) + x11-apps(xclock GUI).
+// Desktop compute image: Xvfb (virtual display) + scrot (screenshot) + wmctrl (window list) + x11-apps (xclock GUI).
 const dockerfile =
   "FROM debian:bookworm-slim\nRUN apt-get update && apt-get install -y --no-install-recommends xvfb scrot wmctrl x11-apps && rm -rf /var/lib/apt/lists/*\n";
-console.log("=== 데스크탑 이미지 빌드(Xvfb + scrot + x11-apps) ===");
+console.log("=== build desktop image (Xvfb + scrot + x11-apps) ===");
 execFileSync("docker", ["build", "-t", IMAGE, "-"], { input: dockerfile, stdio: ["pipe", "ignore", "inherit"] });
 
-// os-use 케이스: 데스크탑 기동 setup + 스크린샷 경로. (실 벤치마크면 graderBuilder/judge 가 스크린샷을 VLM 으로 채점.)
+// os-use case: desktop-start setup + screenshot path. (For a real benchmark, graderBuilder/judge would grade the screenshot with a VLM.)
 const osCase = {
   id: "desktop-1",
   env: {
@@ -32,7 +32,7 @@ const osCase = {
   tags: [],
 };
 
-// "에이전트": 실제론 화면을 보고 마우스/키보드(computer-use). 여기선 no-op(메커니즘 = env 기동+관측 검증).
+// "agent": in reality it looks at the screen and uses mouse/keyboard (computer-use). Here it's a no-op (mechanism = verify env start + observation).
 const noopHarness = {
   id: "noop",
   version: "1.0.0",
@@ -42,19 +42,19 @@ const noopHarness = {
     yield { t: 1, kind: "message", role: "assistant", text: "observed the desktop" };
   },
 };
-// 스크린샷이 실제로 캡처됐는지(비어있지 않은 PNG) 검증하는 grader — 컨테이너 안에서.
+// grader that verifies the screenshot was actually captured (non-empty PNG) — inside the container.
 const grader = makeGraders([
   {
     id: "command",
     config: {
       cmd: 's=$(wc -c < /tmp/everdict-screen.png); echo "screenshot bytes=$s"; test "$s" -gt 1000',
-      cwd: "/tmp", // os-use env 은 RepoEnvironment 처럼 work 디렉터리를 만들지 않음 → 존재하는 절대경로 사용
+      cwd: "/tmp", // the os-use env does not create a work directory like RepoEnvironment → use an existing absolute path
       metric: "screenshot",
     },
   },
 ]);
 
-console.log("\n=== os-use eval: 컨테이너 데스크탑 기동 → 스크린샷 관측 ===");
+console.log("\n=== os-use eval: start container desktop → observe screenshot ===");
 const result = await runCase(osCase, {
   driver: new DockerDriver(),
   environment: new OsUseEnvironment(),
@@ -74,7 +74,7 @@ execFileSync("docker", ["builder", "prune", "-f"], { stdio: "ignore" });
 const ok = result.snapshot.kind === "os-use" && shot?.pass === true;
 console.log(
   ok
-    ? "\n✅ SLICE 72: os-use env kind — 데스크탑(OS)을 docker env-container(Xvfb)에서 띄우고 OsUseEnvironment 가 seed(디스플레이/앱 기동) + snapshot(scrot 스크린샷)으로 관측. 실 X 데스크탑 + 실 스크린샷 캡처(비어있지 않은 PNG). 컴퓨터-유즈(OSWorld/hermes-desktop) 평가의 1급 환경 경로."
-    : "\n⚠️ 기대와 불일치",
+    ? "\n✅ SLICE 72: os-use env kind — a desktop (OS) brought up in a docker env-container (Xvfb) and observed by OsUseEnvironment via seed (start display/app) + snapshot (scrot screenshot). Real X desktop + real screenshot capture (non-empty PNG). First-class environment path for computer-use (OSWorld/hermes-desktop) evaluation."
+    : "\n⚠️ does not match expectation",
 );
 process.exit(ok ? 0 : 1);

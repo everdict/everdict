@@ -1,12 +1,12 @@
-// 라이브(service-topology, 실제 OSS 하니스): aegra(오픈소스 self-hosted LangGraph 서버, Agent Protocol)에 떠 있는
-// ReAct 에이전트를 우리 모델(workclaw LiteLLM gpt-5.4-mini)로 구동하고 응답을 채점한다. browser-use-langgraph 와 같은
-// service-topology 모양(agent-server + Postgres checkpoints[thread_id] + Redis + HTTP frontDoor)을 실제 OSS 로 e2e.
+// Live (service-topology, real OSS harness): drive a ReAct agent running on aegra (an open-source self-hosted
+// LangGraph server, Agent Protocol) with our model (workclaw LiteLLM gpt-5.4-mini) and grade the response. An e2e
+// on real OSS of the same service-topology shape as browser-use-langgraph (agent-server + Postgres checkpoints[thread_id] + Redis + HTTP frontDoor).
 //
-// 준비(요지 — docs/service-harness.md 의 "Real OSS harness e2e: aegra" 참고):
+// Setup (gist — see "Real OSS harness e2e: aegra" in docs/service-harness.md):
 //   git clone https://github.com/aegra/aegra && cd aegra
 //   .env: OPENAI_API_KEY=<litellm key>, OPENAI_BASE_URL=http://172.17.0.1:4000, MODEL=openai/gpt-5.4-mini
-//   docker compose up -d --build && docker network connect bridge aegra-aegra-1   # 호스트 LiteLLM 도달용
-// 사용: [AEGRA_URL=http://localhost:2026] node scripts/live/aegra-langgraph.mjs
+//   docker compose up -d --build && docker network connect bridge aegra-aegra-1   # to reach the host LiteLLM
+// Usage: [AEGRA_URL=http://localhost:2026] node scripts/live/aegra-langgraph.mjs
 import process from "node:process";
 
 const B = (process.env.AEGRA_URL ?? "http://localhost:2026").replace(/\/$/, "");
@@ -23,7 +23,7 @@ const j = async (path, body) => {
   return r.json();
 };
 
-// Agent Protocol: assistant(graph "agent") → thread → run/wait. (frontDoor 구동 = ServiceHarness.drive 의 OSS 버전)
+// Agent Protocol: assistant(graph "agent") → thread → run/wait. (driving the frontDoor = the OSS version of ServiceHarness.drive)
 const search = await j("/assistants/search", { graph_id: "agent" });
 const assistants = Array.isArray(search) ? search : (search.assistants ?? []);
 const assistantId = assistants[0]?.assistant_id ?? (await j("/assistants", { graph_id: "agent" })).assistant_id;
@@ -42,10 +42,10 @@ const last = ai.at(-1)?.content;
 const answer = (Array.isArray(last) ? last.map((x) => x.text ?? "").join(" ") : (last ?? "")).trim();
 console.log(`\nagent (${((Date.now() - t0) / 1000).toFixed(0)}s, via gpt-5.4-mini): ${answer.slice(0, 280)}`);
 
-const ok = answer.length > 0 && /done/i.test(answer); // 비어있지 않고 지시(DONE)를 따랐는가
+const ok = answer.length > 0 && /done/i.test(answer); // non-empty and followed the instruction (DONE)?
 console.log(
   ok
-    ? "\n✅ OSS LangGraph 하니스(aegra) e2e OK — 실 에이전트가 우리 모델로 과업 수행(service-topology 모양: agent-server+PG[thread_id]+frontDoor)"
-    : "\n❌ 응답이 비었거나 지시 미준수",
+    ? "\n✅ OSS LangGraph harness (aegra) e2e OK — a real agent performed the task with our model (service-topology shape: agent-server+PG[thread_id]+frontDoor)"
+    : "\n❌ empty response or instruction not followed",
 );
 process.exit(ok ? 0 : 1);

@@ -10,7 +10,7 @@ function mock(): { compute: ComputeHandle; calls: Array<{ cmd: string; display?:
       const stdout = cmd.startsWith("wmctrl")
         ? "Hermes Desktop\nxclock\n"
         : cmd.startsWith("base64")
-          ? "UE5HYmFzZTY0\n" // 스크린샷 base64 (mock)
+          ? "UE5HYmFzZTY0\n" // screenshot base64 (mock)
           : "";
       return { exitCode: 0, stdout, stderr: "" };
     },
@@ -23,8 +23,8 @@ function mock(): { compute: ComputeHandle; calls: Array<{ cmd: string; display?:
   return { compute, calls };
 }
 
-describe("OsUseEnvironment (데스크탑 컴퓨터-유즈)", () => {
-  it("seed: setup 을 DISPLAY 주입해 실행, snapshot: 스크린샷 캡처 + 창 목록", async () => {
+describe("OsUseEnvironment (desktop computer-use)", () => {
+  it("seed: runs setup with DISPLAY injected, snapshot: captures a screenshot + window list", async () => {
     const env = new OsUseEnvironment();
     const { compute, calls } = mock();
     await env.seed(compute, {
@@ -33,21 +33,21 @@ describe("OsUseEnvironment (데스크탑 컴퓨터-유즈)", () => {
       setup: ["Xvfb :99 -screen 0 1024x768x24 &", "hermes &"],
       screenshotPath: "/tmp/shot.png",
     });
-    // setup 명령이 DISPLAY=:99 로 실행됨.
+    // setup commands run with DISPLAY=:99.
     expect(calls.map((c) => c.cmd)).toEqual(["Xvfb :99 -screen 0 1024x768x24 &", "hermes &"]);
     expect(calls.every((c) => c.display === ":99")).toBe(true);
 
     const snap = await env.snapshot(compute);
     expect(snap.kind).toBe("os-use");
-    expect(snap.screenshotRef).toBe("/tmp/shot.png"); // 설정 경로
-    expect(snap.screenshot).toBe("UE5HYmFzZTY0"); // 스크린샷 PNG 를 base64 로 동봉(결과 밖으로 운반)
-    expect(snap.windows).toEqual(["Hermes Desktop", "xclock"]); // wmctrl 파싱
-    // 스크린샷 캡처(scrot) + base64 읽기 명령이 실행됨.
+    expect(snap.screenshotRef).toBe("/tmp/shot.png"); // configured path
+    expect(snap.screenshot).toBe("UE5HYmFzZTY0"); // the screenshot PNG is embedded as base64 (carried out of the result)
+    expect(snap.windows).toEqual(["Hermes Desktop", "xclock"]); // wmctrl parsing
+    // the screenshot capture (scrot) + base64 read commands run.
     expect(calls.some((c) => c.cmd.includes("scrot") && c.cmd.includes("/tmp/shot.png"))).toBe(true);
     expect(calls.some((c) => c.cmd.startsWith("base64") && c.cmd.includes("/tmp/shot.png"))).toBe(true);
   });
 
-  it("os-use 가 아닌 spec 은 거부", async () => {
+  it("rejects a non-os-use spec", async () => {
     const { compute } = mock();
     await expect(new OsUseEnvironment().seed(compute, { kind: "prompt" })).rejects.toThrow();
   });

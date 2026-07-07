@@ -1,12 +1,12 @@
-// 라이브 e2e (service-topology): 표준 web 벤치마크(WebVoyager) 어댑터 → 데이터셋 → 실 browser-use 하니스 → 스코어카드.
-// importWebVoyager(@everdict/datasets) 가 WebVoyager 형식 jsonl(web_name/ques/web/answer)을 browser 케이스로 매핑
-// (task=ques, env=browser{startUrl:web}, graders=[answer-match{answer}, steps, judge]). 여기선 그 데이터셋을 실
-// browser-use front-door 로 돌려 CaseResult[] → Scorecard → summarizeScorecard(정답대조 통과율 + 평균 steps/cost).
-// 채점=answer-match(서버가 최종 답을 trace message 스팬으로 배출 → answer-match 가 trace 의 답을 본다) + steps.
-// (공식 WebVoyager 는 GPT-4V judge — everdict 어댑터도 judge 그레이더를 포함하나, 라이브 데모는 결정론적 answer-match 사용.)
+// Live e2e (service-topology): standard web benchmark (WebVoyager) adapter → dataset → real browser-use harness → scorecard.
+// importWebVoyager(@everdict/datasets) maps WebVoyager-format jsonl (web_name/ques/web/answer) to browser cases
+// (task=ques, env=browser{startUrl:web}, graders=[answer-match{answer}, steps, judge]). Here we run that dataset through the
+// real browser-use front-door → CaseResult[] → Scorecard → summarizeScorecard (answer-match pass rate + mean steps/cost).
+// Scoring = answer-match (the server emits the final answer as a trace message span → answer-match reads the answer from the trace) + steps.
+// (Official WebVoyager uses a GPT-4V judge — everdict's adapter also includes a judge grader, but this live demo uses deterministic answer-match.)
 //
-// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
-// 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
+// Prereqs: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
+// Key: OPENAI_API_KEY env or infra/litellm/.env(LITELLM_MASTER_KEY) — runtime only, never committed.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -18,7 +18,7 @@ import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
 const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
-const MODEL = process.env.BROWSERUSE_MODEL ?? "chatgpt/gpt-5.4"; // 실사이트 → 강한 모델
+const MODEL = process.env.BROWSERUSE_MODEL ?? "chatgpt/gpt-5.4"; // real sites → stronger model
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 const NAME = "everdict-bu-webvoyager";
 const FRONT = `http://127.0.0.1:${PORT}`;
@@ -35,19 +35,19 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env).");
+  console.error("No LLM key (OPENAI_API_KEY or infra/litellm/.env).");
   process.exit(2);
 }
 const cleanup = () => spawnSync("docker", ["rm", "-f", NAME], { stdio: "ignore" });
 
-// WebVoyager 형식 샘플 → 어댑터로 Dataset(browser 케이스 + answer-match/steps/judge).
+// WebVoyager-format sample → Dataset via the adapter (browser cases + answer-match/steps/judge).
 const jsonl = readFileSync(new URL("../../examples/benchmarks/webvoyager-sample.jsonl", import.meta.url), "utf8");
 const dataset = importWebVoyager(jsonl, {
   id: "webvoyager-sample",
   version: "v1",
   source: "github:MinorJerry/WebVoyager",
 });
-console.log(`=== WebVoyager 어댑터 → Dataset: ${dataset.cases.length} 케이스 ===`);
+console.log(`=== WebVoyager adapter → Dataset: ${dataset.cases.length} cases ===`);
 for (const c of dataset.cases) {
   console.log(
     `  ${c.id}: task="${c.task.slice(0, 60)}..." startUrl=${c.env.startUrl ?? "-"} graders=[${c.graders.map((g) => g.id).join(",")}]`,
@@ -55,7 +55,7 @@ for (const c of dataset.cases) {
 }
 
 cleanup();
-console.log(`\n=== 실 browser-use front-door 기동 (model=${MODEL}) ===`);
+console.log(`\n=== start real browser-use front-door (model=${MODEL}) ===`);
 execFileSync(
   "docker",
   [
@@ -88,7 +88,7 @@ execFileSync(
 let ok = false;
 try {
   let healthy = false;
-  process.stdout.write("health 대기");
+  process.stdout.write("waiting for health");
   for (let i = 0; i < 60 && !healthy; i++) {
     await sleep(2000);
     process.stdout.write(".");
@@ -146,9 +146,9 @@ try {
 
   const results = [];
   for (const c of dataset.cases) {
-    // 라이브 데모는 결정론적 채점: 어댑터 graders 에서 judge(주입 필요) 를 빼고 answer-match + steps 만.
+    // Live demo uses deterministic scoring: drop judge (needs injection) from the adapter graders, keep only answer-match + steps.
     const graders = c.graders.filter((g) => g.id !== "judge");
-    // browser-use 가 startUrl 로 가도록 태스크 앞에 명시(env.startUrl 은 백엔드가 front-door 로 안 넘김).
+    // Prepend the startUrl to the task so browser-use navigates there (the backend does not pass env.startUrl to the front-door).
     const task = c.env.startUrl ? `Go to ${c.env.startUrl} . ${c.task}` : c.task;
     let r;
     try {
@@ -171,7 +171,7 @@ try {
   }
 
   const sc = { suiteId: "webvoyager-sample", harness: "browseruse@webvoyager", results };
-  console.log("\n=== Scorecard 요약 (summarizeScorecard) ===");
+  console.log("\n=== Scorecard summary (summarizeScorecard) ===");
   for (const m of summarizeScorecard(sc)) {
     const pr = m.passRate !== undefined ? ` passRate=${(m.passRate * 100).toFixed(0)}%` : "";
     console.log(`  ${m.metric}: n=${m.count} mean=${m.mean.toFixed(6)}${pr}`);
@@ -180,8 +180,8 @@ try {
   ok = results.length === dataset.cases.length && (amSummary?.passRate ?? 0) > 0;
   console.log(
     ok
-      ? `\n✅ ③: WebVoyager 어댑터(importWebVoyager)로 표준 web 벤치마크 형식을 Dataset 으로 매핑 → 실 browser-use 하니스로 ${dataset.cases.length} 케이스를 돌려 Scorecard 생성, answer-match(정답대조) 통과율 ${((amSummary?.passRate ?? 0) * 100).toFixed(0)}% + 평균 steps/cost 집계. OSWorld(데스크탑)에 이은 WebVoyager(웹) 벤치마크를 browser-use 로 라이브.`
-      : "\n⚠️ 기대와 불일치(일부 케이스 실패 — 위 로그/모델 참고)",
+      ? `\n✅ ③: mapped the standard web benchmark format to a Dataset via the WebVoyager adapter (importWebVoyager) → ran ${dataset.cases.length} cases through the real browser-use harness to produce a Scorecard, answer-match pass rate ${((amSummary?.passRate ?? 0) * 100).toFixed(0)}% + mean steps/cost. WebVoyager (web) benchmark live via browser-use, following OSWorld (desktop).`
+      : "\n⚠️ mismatch vs expected (some cases failed — see logs/model above)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

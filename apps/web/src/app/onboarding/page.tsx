@@ -8,14 +8,14 @@ import { Card } from '@/shared/ui/card'
 
 export const dynamic = 'force-dynamic'
 
-// 첫 로그인 온보딩 — 워크스페이스가 0개인 사용자가 첫 워크스페이스를 만든다(Linear 식). 슬러그가 아직 없어
-// [workspace] 밑이 아니라 최상위 라우트로 둔다. 만들면 그 워크스페이스(/{id})로 들어간다.
+// First-login onboarding — a user with 0 workspaces creates their first workspace (Linear-style). Since there's no slug yet,
+// keep it as a top-level route rather than under [workspace]. On creation, enter that workspace (/{id}).
 export default async function OnboardingPage() {
   const t = await getTranslations('onboardingPage')
   const { principal } = await currentPrincipal()
-  // 미인증/인증 교환 실패 → 랜딩(/)이 아니라 곧장 로그인으로. `/` 로 보내면 미들웨어·페이지가 다시 튕겨 루프.
+  // Unauthenticated / auth-exchange failure → go straight to login, not the landing (/). Sending to `/` makes the middleware·page bounce into a loop.
   if (!principal) redirect('/api/auth/signin')
-  // 이미 워크스페이스가 있으면 온보딩이 필요 없다 → 기본 워크스페이스로.
+  // If a workspace already exists, onboarding isn't needed → go to the default workspace.
   if ((principal.workspaces?.length ?? 0) > 0) redirect(`/${principal.workspace}`)
 
   return (

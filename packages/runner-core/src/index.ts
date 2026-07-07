@@ -1,5 +1,5 @@
-// 셀프-호스티드 러너 코어 — lease 루프/회복형 MCP 세션/잡 kind 분기 실행을 CLI·데스크톱이 공유한다.
-// 설계: docs/architecture/desktop-app.md (+ self-hosted-runner.md). GUI-무관, 전송 주입식(DI) 유지.
+// Self-hosted runner core — the lease loop / resilient MCP session / job-kind-branched execution shared by CLI and desktop.
+// Design: docs/architecture/desktop-app.md (+ self-hosted-runner.md). GUI-agnostic, kept transport-injectable (DI).
 export { detectCapabilities, probeDocker } from "./capabilities.js";
 export { resetSharedTopologyRuntime, runLeasedJob, sharedTopologyRuntime } from "./run-leased-job.js";
 export {

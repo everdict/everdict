@@ -1,8 +1,8 @@
-// 레퍼런스 데스크탑 에이전트(컴퓨터-유즈 baseline) — hermes SSH 연결 태스크용.
-// everdict 의 command 하니스가 os-use env-container 안에서 `node /agent.cjs {{task}}` 로 실행한다(workDir=/tmp, DISPLAY=:99).
-// 역할 = "행동"만: CDP(좌표 파악) + xdotool(실 OS 마우스/키보드)로 SSH 폼을 채우고 연결한다.
-// 관측/채점은 에이전트가 아니라 everdict 가 한다(OsUseEnvironment.snapshot 스크린샷 → VLM JudgeGrader). 관심사 분리.
-// 실 BYO 에이전트(VLM 루프 등)는 같은 자리에 자기 프로그램을 둔다 — 이건 스크립트형 기준 에이전트.
+// Reference desktop agent (computer-use baseline) — for the hermes SSH connection task.
+// The everdict command harness runs it inside an os-use env-container as `node /agent.cjs {{task}}` (workDir=/tmp, DISPLAY=:99).
+// Its role is "action" only: fill in the SSH form and connect via CDP (to find coordinates) + xdotool (the real OS mouse/keyboard).
+// Observation/scoring is done by everdict, not the agent (OsUseEnvironment.snapshot screenshot → VLM JudgeGrader). Separation of concerns.
+// A real BYO agent (a VLM loop, etc.) puts its own program in the same place — this is a scripted reference agent.
 const { chromium } = require("/app/node_modules/playwright");
 const { execFileSync } = require("node:child_process");
 const sh = (c) => execFileSync("bash", ["-lc", c], { encoding: "utf8" }).trim();
@@ -34,7 +34,7 @@ const DISPLAY = process.env.DISPLAY || ":99";
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   const dpr = await page.evaluate(() => window.devicePixelRatio);
 
-  // hermes X 윈도우(가장 큰 가시 창)의 화면 원점 — CSS 박스 → 화면 px 변환용.
+  // Screen origin of the hermes X window (the largest visible window) — for converting the CSS box → screen px.
   let win = null;
   for (const id of shq(`DISPLAY=${DISPLAY} xdotool search --onlyvisible --name '.'`).split(/\s+/).filter(Boolean)) {
     try {
@@ -66,7 +66,7 @@ const DISPLAY = process.env.DISPLAY || ":99";
     await sleep(200);
   };
 
-  // Welcome → SSH 패널 → 폼 작성(실 OS 키보드) → 연결.
+  // Welcome → SSH panel → fill in the form (real OS keyboard) → connect.
   const sshBtn = page.getByRole("button", { name: /Connect via SSH/i });
   await sshBtn.waitFor({ timeout: 60000 });
   await click(sshBtn);
@@ -77,8 +77,8 @@ const DISPLAY = process.env.DISPLAY || ":99";
   await type(page.getByPlaceholder("~/.ssh/id_rsa"), "/root/.ssh/id_rsa");
   await click(page.getByRole("button", { name: /Connect via SSH/i }));
 
-  // 연결 성공 = 메인 UI 진입까지 대기(폼 이탈 → splash "Starting SSH tunnel…" → main). 메인 마커 'Ask anything'
-  // 컴포저가 뜨면 끝. (실패 시 sshError 가 뜨면 중단 — 최종 화면을 everdict 가 스냅샷+VLM 으로 채점한다.)
+  // Connection success = wait until the main UI appears (leave the form → splash "Starting SSH tunnel…" → main). Done when the
+  // main-marker 'Ask anything' composer shows. (On failure, stop when sshError appears — everdict scores the final screen via snapshot+VLM.)
   const composer = page.getByPlaceholder("Ask anything");
   for (let i = 0; i < 50; i++) {
     await sleep(1000);
@@ -91,7 +91,7 @@ const DISPLAY = process.env.DISPLAY || ":99";
     )
       break;
   }
-  await sleep(1500); // 렌더 정착
+  await sleep(1500); // let the render settle
   await browser.close();
   console.error("[agent] done");
 })().catch((e) => {

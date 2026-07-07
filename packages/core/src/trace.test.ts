@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { type TraceEvent, usageFromTrace } from "./trace.js";
 
 describe("usageFromTrace", () => {
-  it("llm_call 의 토큰/비용을 합산하고 calls 를 센다", () => {
+  it("sums the tokens/cost of llm_calls and counts calls", () => {
     const trace: TraceEvent[] = [
       { t: 0, kind: "message", role: "user", text: "hi" },
       { t: 1, kind: "llm_call", model: "m", cost: { inputTokens: 10, outputTokens: 4, usd: 0.01 } },
@@ -18,7 +18,7 @@ describe("usageFromTrace", () => {
     });
   });
 
-  it("cost 없는 llm_call 은 calls 만 세고 토큰/비용은 0", () => {
+  it("an llm_call with no cost counts toward calls only; tokens/cost are 0", () => {
     const trace: TraceEvent[] = [{ t: 0, kind: "llm_call", model: "m" }];
     expect(usageFromTrace(trace)).toEqual({
       promptTokens: 0,
@@ -29,7 +29,7 @@ describe("usageFromTrace", () => {
     });
   });
 
-  it("llm_call 이 없으면 전부 0", () => {
+  it("everything is 0 when there are no llm_calls", () => {
     expect(usageFromTrace([{ t: 0, kind: "message", role: "assistant", text: "x" }])).toEqual({
       promptTokens: 0,
       completionTokens: 0,

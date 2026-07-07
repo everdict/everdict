@@ -53,19 +53,19 @@ async function fixtures() {
 }
 
 describe("QueueService.snapshot", () => {
-  it("런타임 레인별로 실행 중/대기(FIFO)/다음 예약을 집계한다 — 배치=1작업 + 진행률", async () => {
+  it("aggregates running/waiting (FIFO)/next fires per runtime lane — batch=1 item + progress", async () => {
     const { scorecards, runs } = await fixtures();
-    // docker 레인: 실행 중 배치(자식 2 종결 + 1 실행 중) + 다음 예약 발사
+    // docker lane: a running batch (2 finished children + 1 running) + a next scheduled fire
     await scorecards.create(card("sc-run", { status: "running", runtime: "docker", createdBy: "alice" }));
     for (const [i, st] of (["succeeded", "failed", "running"] as const).entries()) {
       await runs.create(runRec(`child-${i}`, { status: st, parentScorecardId: "sc-run", runtime: "docker" }));
     }
-    // 기본 백엔드 레인: 대기 배치
+    // default backend lane: a waiting batch
     await scorecards.create(card("sc-wait", { createdAt: "2026-07-03T01:00:00.000Z" }));
-    // 내(bob) 러너 레인: 대기 단발 run + 남(carol)의 러너 작업(개인 큐 — 남에겐 비노출)
+    // my (bob's) runner lane: a waiting standalone run + someone else's (carol's) runner job (personal queue — invisible to others)
     await runs.create(runRec("r1", { runtime: "self:mac", createdBy: "bob", trigger: "web" }));
     await runs.create(runRec("r-other", { runtime: "self:carol-pc", createdBy: "carol" }));
-    // 종결 상태는 큐에 없다
+    // finished states aren't in the queue
     await scorecards.create(card("sc-done", { status: "succeeded" }));
 
     const svc = new QueueService({
@@ -79,11 +79,11 @@ describe("QueueService.snapshot", () => {
     });
     const snap = await svc.snapshot("acme", "bob");
 
-    // workspace 큐 = 공용 런타임만(self:* 제외), personal 큐 = 내 러너만. 남의 self 항목은 집계에서도 제외.
+    // workspace queue = shared runtimes only (self:* excluded), personal queue = my runners only. Others' self items are excluded from tallies too.
     expect(snap.totals).toEqual({ running: 1, queued: 2, upcoming: 1 });
-    expect(snap.workspace.map((l) => l.runtime)).toEqual(["", "docker"]); // 기본 레인 맨 위, self 없음
+    expect(snap.workspace.map((l) => l.runtime)).toEqual(["", "docker"]); // default lane at the top, no self
     expect(snap.personal.map((l) => l.runtime)).toEqual(["self:mac"]);
-    expect(snap.personal[0]?.label).toBe("bob-macbook"); // 레인 라벨 = 러너 호스트명
+    expect(snap.personal[0]?.label).toBe("bob-macbook"); // lane label = runner hostname
     const base = snap.workspace[0];
     const docker = snap.workspace[1];
     const self = snap.personal[0];
@@ -98,14 +98,14 @@ describe("QueueService.snapshot", () => {
     });
     expect(docker?.upcoming[0]).toMatchObject({ scheduleId: "sch1", name: "nightly", at: "2026-07-04T03:00:00.000Z" });
     expect(self?.queued[0]).toMatchObject({ type: "run", id: "r1", caseId: "c1", trigger: "web" });
-    // 종결 배치(sc-done)·배치 자식 run·남의 self 항목은 나타나지 않는다
+    // the finished batch (sc-done), batch child runs, and others' self items don't appear
     const allIds = [...snap.workspace, ...snap.personal].flatMap((l) => [...l.running, ...l.queued]).map((i) => i.id);
     expect(allIds).not.toContain("sc-done");
     expect(allIds).not.toContain("r-other");
     expect(allIds.filter((x) => x.startsWith("child-"))).toEqual([]);
   });
 
-  it("대기 큐는 createdAt 오름차순(FIFO) — 맨 앞이 다음 작업", async () => {
+  it("the waiting queue is createdAt ascending (FIFO) — the front is the next item", async () => {
     const { scorecards, runs } = await fixtures();
     await scorecards.create(card("later", { createdAt: "2026-07-03T02:00:00.000Z" }));
     await scorecards.create(card("first", { createdAt: "2026-07-03T01:00:00.000Z" }));
@@ -114,7 +114,7 @@ describe("QueueService.snapshot", () => {
     expect(snap.workspace[0]?.queued.map((i) => i.id)).toEqual(["first", "later"]);
   });
 
-  it("비활성 예약·발사 시각 없는 예약은 upcoming 에 없다; 등록 런타임은 빈 레인도 노출", async () => {
+  it("disabled schedules and schedules with no fire time aren't in upcoming; registered runtimes surface empty lanes too", async () => {
     const { scorecards, runs } = await fixtures();
     const svc = new QueueService({
       scorecards,

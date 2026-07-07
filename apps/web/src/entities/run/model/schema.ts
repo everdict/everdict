@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 RunRecord 의 클라이언트 미러. 웹은 HTTP 로만 결합 — 백엔드 패키지 비의존.
+// Client mirror of the control plane RunRecord. The web couples over HTTP only — no backend package dependency.
 export const scoreSchema = z.object({
   graderId: z.string(),
   metric: z.string(),
@@ -10,7 +10,7 @@ export const scoreSchema = z.object({
 })
 export type Score = z.infer<typeof scoreSchema>
 
-// 트레이스 이벤트는 kind 별 형태가 다양 → 느슨하게(passthrough) 파싱하고 UI 에서 분기.
+// Trace events vary in shape per kind → parse loosely (passthrough) and branch in the UI.
 export const traceEventSchema = z.object({ t: z.number(), kind: z.string() }).passthrough()
 export type TraceEvent = z.infer<typeof traceEventSchema>
 
@@ -18,8 +18,8 @@ export const resultSchema = z
   .object({
     scores: z.array(scoreSchema).default([]),
     trace: z.array(traceEventSchema).default([]),
-    // os-use=데스크탑 스냅샷(screenshot=base64 PNG dev 인라인 / screenshotRef=object storage URL 오프로드 → <img>).
-    // browser=서비스-토폴로지(browser-use 등) 스냅샷: url=최종 방문 URL, dom=추출 텍스트/DOM 발췌.
+    // os-use=desktop snapshot (screenshot=base64 PNG inline in dev / screenshotRef=object storage URL offload → <img>).
+    // browser=service-topology (browser-use, etc.) snapshot: url=final visited URL, dom=extracted text/DOM excerpt.
     snapshot: z
       .object({
         kind: z.string(),
@@ -34,7 +34,7 @@ export const resultSchema = z
   })
   .partial()
 
-// 사용량 요약 — 컨트롤플레인이 result.trace 에서 파생(usageFromTrace). 활동 리스트가 트레이스 파싱 없이 비용/토큰 표시.
+// Usage summary — the control plane derives it from result.trace (usageFromTrace). The activity list shows cost/tokens without parsing the trace.
 export const usageSchema = z.object({
   promptTokens: z.number(),
   completionTokens: z.number(),
@@ -53,9 +53,9 @@ export const runSchema = z.object({
   result: resultSchema.optional(),
   usage: usageSchema.optional(),
   error: z.object({ code: z.string(), message: z.string() }).optional(),
-  // 출처(활동 뷰 source 축): web|mcp|api|scorecard|schedule|front-door… 미설정=직접 API.
+  // provenance (activity view source axis): web|mcp|api|scorecard|schedule|front-door… unset=direct API.
   trigger: z.string().optional(),
-  // 이 run 이 속한 스코어카드 배치(있으면). 활동 리스트는 자식(값 있음)을 컨트롤플레인이 기본 제외.
+  // the scorecard batch this run belongs to (if any). The control plane excludes children (where set) from the activity list by default.
   parentScorecardId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),

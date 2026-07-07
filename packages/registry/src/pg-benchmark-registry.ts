@@ -8,8 +8,8 @@ interface SpecRow {
   spec: unknown;
 }
 
-// Postgres 기반 테넌트-소유 벤치마크 레시피 SSOT. (tenant, id, version) 키. 테넌트 소유 우선, 없으면 _shared 폴백.
-// 스키마: @everdict/db/migrations/0011_create_benchmarks. PgDatasetRegistry 와 동일 구조.
+// Postgres-backed tenant-owned benchmark recipe SSOT. Key (tenant, id, version). Tenant-owned first, else _shared fallback.
+// Schema: @everdict/db/migrations/0011_create_benchmarks. Same structure as PgDatasetRegistry.
 export class PgBenchmarkRegistry implements BenchmarkRegistry {
   constructor(private readonly client: SqlClient) {}
 
@@ -44,7 +44,7 @@ export class PgBenchmarkRegistry implements BenchmarkRegistry {
         throw new ConflictError(
           "CONFLICT",
           { tenant, id: spec.id, version: spec.version },
-          `벤치마크 ${spec.id}@${spec.version} 가 다른 내용으로 이미 등록되어 있습니다(버전은 불변).`,
+          `Benchmark ${spec.id}@${spec.version} is already registered with different content (versions are immutable).`,
         );
       }
       return;
@@ -66,7 +66,7 @@ export class PgBenchmarkRegistry implements BenchmarkRegistry {
 
   async get(tenant: string, id: string, ref = "latest"): Promise<BenchmarkAdapterSpec> {
     const owner = await this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `벤치마크 '${id}' 가 없습니다.`);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `Benchmark '${id}' not found.`);
     const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
     const res = await this.client.query<SpecRow>(
       "SELECT spec FROM everdict_benchmarks WHERE tenant = $1 AND id = $2 AND version = $3",

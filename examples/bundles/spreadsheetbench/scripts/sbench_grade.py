@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# SpreadsheetBench 공식 채점 로직의 이식(openpyxl 전용) — 실제 데이터(golden xlsx) 채점용.
-# 실행: python3 sbench_grade.py --version v1|v2 --output OUT.xlsx --golden GOLD.xlsx --answer-position "'Sheet'!A1:B10,C3" [--input IN.xlsx]
-#   exit 0 = PASS, 1 = FAIL, 2 = 오류(파일/openpyxl 없음).
-#   v1: answer_position 셀을 값-기준(2dp 반올림·타입일치)으로 비교, 전부 일치해야 PASS.
-#   v2: input→golden 을 diff 해 regression(불변 셀 보존)·modification(변경 셀 정답)으로 나눠 채점(1% 상대오차),
-#       regression 과 modification 이 모두 100% 여야 PASS(--input 필요; regression/modification 분리를 위해).
-# 참고: 공식 eval 은 data_only 로 캐시값을 읽으므로 산출 xlsx 는 사전 재계산(LibreOffice 등)돼 있어야 한다.
+# Port of SpreadsheetBench's official scoring logic (openpyxl only) — for scoring real data (golden xlsx).
+# Run: python3 sbench_grade.py --version v1|v2 --output OUT.xlsx --golden GOLD.xlsx --answer-position "'Sheet'!A1:B10,C3" [--input IN.xlsx]
+#   exit 0 = PASS, 1 = FAIL, 2 = error (missing file/openpyxl).
+#   v1: compare answer_position cells value-wise (round to 2dp, type match), all must match for PASS.
+#   v2: diff input→golden and score split into regression (invariant cells preserved) · modification (changed cells correct) (1% relative tolerance);
+#       both regression and modification must be 100% for PASS (--input required, to split regression/modification).
+# Note: the official eval reads cached values with data_only, so the produced xlsx must be pre-recalculated (LibreOffice, etc.).
 import argparse
 import datetime
 import re
@@ -14,14 +14,14 @@ import sys
 try:
     import openpyxl
 except ImportError:
-    print("openpyxl 미설치 — 채점 불가", file=sys.stderr)
+    print("openpyxl not installed — cannot score", file=sys.stderr)
     sys.exit(2)
 
 _RANGE_RE = re.compile(r"^(?:'([^']+)'!|([^'!]+)!)?(.+)$")
 
 
 def parse_answer_position(spec):
-    # 콤마로 분리하되 따옴표 안의 콤마는 무시. 각 조각 → (sheet|None, a1range).
+    # Split on commas but ignore commas inside quotes. Each piece → (sheet|None, a1range).
     parts, buf, in_q = [], [], False
     for ch in spec:
         if ch == "'":
@@ -61,7 +61,7 @@ def cells_of(ws, a1):
 
 
 def transform_value(v):
-    # v1 정규화: 숫자 2dp, 시간/날짜, float 파싱 가능한 문자열.
+    # v1 normalization: numbers to 2dp, time/date, and float-parsable strings.
     if v is None or v == "":
         return None
     if isinstance(v, bool):
@@ -93,7 +93,7 @@ _NM = {"#div/0!", "#n/a", "n/a", "na", "n.a.", "n/m", "nm", "n.m.", "-", "--", "
 
 
 def eq_v2(a, b, tol=0.01):
-    # 숫자는 1% 상대오차, 무의미 placeholder 동치, None≡0, ""≡None.
+    # Numbers within 1% relative tolerance, meaningless placeholders equivalent, None≡0, ""≡None.
     if (a is None or a == "") and (b is None or b == ""):
         return True
     if a is None:
@@ -116,8 +116,8 @@ def collect(path, positions, data_only=True):
     vals = {}
     for sheet, a1 in positions:
         ws = find_sheet(wb, sheet)
-        # 셀 키는 '해결된 시트 제목'이 아니라 answer_position 의 시트 지정(이름 | 첫 시트)으로 — golden/output 의 첫
-        # 시트 제목이 달라도(예: golden='Sheet', output='Sales') 첫 시트끼리 위치로 비교되게. 공식 eval 도 첫 시트 기준.
+        # The cell key uses answer_position's sheet designation (name | first sheet), not the "resolved sheet title" — so that even if
+        # golden/output have different first-sheet titles (e.g. golden='Sheet', output='Sales'), the first sheets are compared positionally. The official eval is also first-sheet based.
         skey = sheet if sheet is not None else "\x00first"
         for c in cells_of(ws, a1):
             vals[(skey, c.coordinate)] = c.value
@@ -130,14 +130,14 @@ def main():
     ap.add_argument("--output", required=True)
     ap.add_argument("--golden", required=True)
     ap.add_argument("--answer-position", required=True)
-    ap.add_argument("--input", help="v2 regression/modification 분리에 필요한 원본 입력 xlsx")
+    ap.add_argument("--input", help="the original input xlsx needed to split v2 regression/modification")
     a = ap.parse_args()
     pos = parse_answer_position(a.answer_position)
     try:
         gold = collect(a.golden, pos)
         out = collect(a.output, pos)
     except FileNotFoundError as e:
-        print(f"파일 없음: {e}")
+        print(f"file not found: {e}")
         sys.exit(1)
 
     if a.version == "v1":
@@ -147,9 +147,9 @@ def main():
             print("  e.g.", [(k, gold[k], out.get(k)) for k in bad[:5]])
         sys.exit(0 if not bad else 1)
 
-    # v2: regression(불변) vs modification(변경) 분리
+    # v2: split regression (invariant) vs modification (changed)
     if not a.input:
-        print("v2 채점엔 --input 이 필요합니다(regression/modification 분리)")
+        print("v2 scoring requires --input (to split regression/modification)")
         sys.exit(2)
     inp = collect(a.input, pos)
     reg = [k for k in gold if eq_v2(inp.get(k), gold[k])]

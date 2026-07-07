@@ -9,7 +9,7 @@ import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 type Translate = ReturnType<typeof useTranslations<'runsTable'>>
 
-// 출처(활동 뷰 source 축) — 사람이 읽는 라벨. 미설정=직접 API.
+// Source (the activity view's source axis) — a human-readable label. Unset = direct API.
 const SOURCE_KEY: Record<string, string> = {
   web: 'sourceWeb',
   mcp: 'sourceMcp',
@@ -24,7 +24,7 @@ function sourceLabel(t: Translate, trigger?: string): string {
   return key ? t(key) : trigger
 }
 
-// 비용/토큰 요약 — 트레이스에서 파생된 usage. 없으면 —(아직 실행 전/트레이스 없음).
+// Cost/token summary — usage derived from the trace. If absent, — (not yet run / no trace).
 function cost(usage?: Usage): string | undefined {
   if (!usage || (usage.usd === 0 && usage.totalTokens === 0)) return undefined
   const tok =
@@ -32,7 +32,7 @@ function cost(usage?: Usage): string | undefined {
   return `$${usage.usd.toFixed(2)} · ${tok} tok`
 }
 
-// 상대 시간 — Linear 식 간결 표기.
+// Relative time — Linear-style concise rendering.
 function ago(t: Translate, locale: string, iso: string): string {
   const d = new Date(iso).getTime()
   const diff = Date.now() - d
@@ -46,8 +46,8 @@ function ago(t: Translate, locale: string, iso: string): string {
   return new Date(iso).toLocaleDateString(locale, { month: 'short', day: 'numeric' })
 }
 
-// 활동 리스트: 이 워크스페이스에서 실행 중/실행된 standalone run(스코어카드 자식은 컨트롤플레인이 기본 제외).
-// 평가 결과판이 아니라 "무엇이 · 어디서 · 얼마로 · 지금 어떤 상태로 돌고 있나"를 보이는 운영 콘솔.
+// Activity list: standalone runs running/run in this workspace (scorecard children are excluded by default by the control plane).
+// Not an eval scoreboard but an operations console showing "what · where · at what cost · in what state it's running right now".
 export function RunsTable({
   runs,
   workspace,

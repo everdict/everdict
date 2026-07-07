@@ -20,8 +20,8 @@ export interface IngestScorecardResult {
   error?: string
 }
 
-// 서버 액션: 외부에서 이미 수행한 트레이스(TraceEvent[])를 올려 scorecard 로. 검증/정규화 계약은 컨트롤플레인이 강제.
-// tracesJson 은 [{caseId, trace, snapshot?, scores?}] 형태. 파싱 실패/스키마 오류는 컨트롤플레인이 400.
+// Server action: upload externally-run traces (TraceEvent[]) as a scorecard. The validation/normalization contract is enforced by the control plane.
+// tracesJson is [{caseId, trace, snapshot?, scores?}] shape. Parse/schema errors are 400 from the control plane.
 export async function ingestScorecardAction(
   input: IngestScorecardInput
 ): Promise<IngestScorecardResult> {
@@ -55,12 +55,12 @@ export interface PullScorecardInput {
   sourceKind: 'otel' | 'mlflow' | 'langfuse' | 'langsmith' | 'phoenix'
   endpoint: string
   authSecret: string
-  sourceProject?: string // phoenix 전용 — 스팬 조회 경로의 프로젝트 이름/ID
+  sourceProject?: string // phoenix-only — the project name/ID in the span lookup path
   runsJson: string
 }
 
-// 서버 액션: pull 모드 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 scorecard 로. 자격증명은 authSecret 이름(SecretStore).
-// runsJson 은 [{caseId, runId}] 형태. 파싱 실패는 여기서 400, 스키마/네트워크 오류는 컨트롤플레인이 처리.
+// Server action: pull mode — pull traces by runId from the tenant's OTel/MLflow into a scorecard. Credentials are the authSecret name (SecretStore).
+// runsJson is [{caseId, runId}] shape. Parse failure is 400 here; schema/network errors are handled by the control plane.
 export async function pullScorecardAction(
   input: PullScorecardInput
 ): Promise<IngestScorecardResult> {

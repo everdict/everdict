@@ -20,7 +20,7 @@ interface RunRow {
 
 const iso = (v: string | Date): string => (typeof v === "string" ? v : v.toISOString());
 
-// row → RunRecord (jsonb 는 pg 가 이미 파싱; timestamptz 는 Date → ISO). 계약은 Zod 로 한 번 검증.
+// row → RunRecord (jsonb is already parsed by pg; timestamptz is Date → ISO). The contract is validated once with Zod.
 function rowToRecord(row: RunRow): RunRecord {
   const rec = RunRecordSchema.parse({
     id: row.id,
@@ -37,10 +37,10 @@ function rowToRecord(row: RunRow): RunRecord {
     createdAt: iso(row.created_at),
     updatedAt: iso(row.updated_at),
   });
-  return withRunUsage(rec); // usage 는 컬럼이 아니라 result.trace 에서 파생
+  return withRunUsage(rec); // usage is not a column, it's derived from result.trace
 }
 
-// Postgres 기반 결과 스토어. 인메모리와 동일한 RunStore 계약 — apps/api 는 둘을 교체만 한다.
+// Postgres-backed result store. Same RunStore contract as in-memory — apps/api just swaps the two.
 export class PgRunStore implements RunStore {
   constructor(private readonly client: SqlClient) {}
 
@@ -69,7 +69,7 @@ export class PgRunStore implements RunStore {
   }
 
   async update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined> {
-    // 수명 필드만 갱신 허용(status/result/error/updatedAt).
+    // Only lifecycle fields are allowed to be updated (status/result/error/updatedAt).
     const sets: string[] = [];
     const vals: unknown[] = [];
     let i = 1;
@@ -104,7 +104,7 @@ export class PgRunStore implements RunStore {
   }
 
   async list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]> {
-    // scorecardId 지정 → 그 배치 자식만; 아니면 standalone(부모 없는) run 만(자식 숨김 → 활동 리스트 범람 방지).
+    // scorecardId given → that batch's children only; otherwise standalone (parentless) runs only (children hidden → prevents activity-list flooding).
     const res = await this.client.query<RunRow>(
       `SELECT * FROM everdict_runs
        WHERE ($1::text IS NULL OR tenant = $1)

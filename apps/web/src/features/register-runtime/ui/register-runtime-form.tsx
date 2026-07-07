@@ -15,8 +15,8 @@ import { createRuntimeAction, probeRuntimeAction } from '../api/register-runtime
 
 type Kind = 'nomad' | 'k8s'
 
-// 등록 인프라 종류 — local(dev 전용) 과 docker(단일 호스트, slice 5b 에서 self-hosted 러너로 흡수)는 등록 UI 에서
-// 제외. "내 머신/단일 docker 호스트"는 러너로 연결하고, 컨테이너 실행은 런타임 kind 가 아니라 docker capability 다.
+// Registrable infra kinds — local (dev-only) and docker (single host, absorbed into the self-hosted runner in slice 5b) are excluded
+// from the register UI. "My machine / single docker host" connects as a runner, and container execution is a docker capability, not a runtime kind.
 const KINDS: { value: Kind; label: string; descriptionKey: string }[] = [
   { value: 'nomad', label: 'Nomad', descriptionKey: 'kindNomadDescription' },
   { value: 'k8s', label: 'Kubernetes', descriptionKey: 'kindK8sDescription' },
@@ -72,19 +72,19 @@ const csv = (s: string): string[] =>
     .map((x) => x.trim())
     .filter(Boolean)
 
-// 하드닝(강격리) 런타임 이름 — core trust-zone HARDENED_RUNTIMES 미러(nomad runtime / k8s runtimeClass).
+// Hardened (strong-isolation) runtime names — mirrors core trust-zone HARDENED_RUNTIMES (nomad runtime / k8s runtimeClass).
 const HARDENED = new Set(['runsc', 'gvisor', 'kata', 'kata-runtime', 'firecracker', 'fc'])
 
-// 이 런타임이 자동으로 제공하는 capability — 앱이 스펙에서 라벨한다(유저 수동입력 없음; core defaultRuntimeCapabilities 미러).
+// Capabilities this runtime provides automatically — the app labels them from the spec (no manual user input; mirrors core defaultRuntimeCapabilities).
 function runtimeCaps(f: Fields): string[] {
-  const caps = ['docker'] // nomad/k8s 는 컨테이너 이미지 실행
+  const caps = ['docker'] // nomad/k8s run container images
   const iso = (f.kind === 'nomad' ? f.runtime : f.runtimeClass).trim()
-  if (iso && HARDENED.has(iso)) caps.push('sandbox') // 강격리 런타임
+  if (iso && HARDENED.has(iso)) caps.push('sandbox') // strong-isolation runtime
   if (f.supportsTopology) caps.push('topology')
   return caps
 }
 
-// 폼 → RuntimeSpec. 빈 옵셔널은 제외해 서버 스키마(discriminatedUnion)에 맞춘다. capabilities 는 앱이 자동 라벨.
+// Form → RuntimeSpec. Empty optionals are excluded to fit the server schema (discriminatedUnion). capabilities are auto-labeled by the app.
 function buildSpec(f: Fields): Record<string, unknown> {
   const t = (v: string) => v.trim()
   const base: Record<string, unknown> = {
@@ -129,7 +129,7 @@ function buildSpec(f: Fields): Record<string, unknown> {
   }
 }
 
-// 클라이언트 필수값 점검(서버도 강제하지만 즉시 피드백). null=통과. 반환값은 메시지 카탈로그 키.
+// Client-side required-field check (the server enforces too, but this gives immediate feedback). null = pass. Returns a message catalog key.
 function requiredErrorKey(f: Fields): string | null {
   if (!f.id.trim()) return 'errorIdRequired'
   if (!f.version.trim()) return 'errorVersionRequired'
@@ -157,7 +157,7 @@ function Field({
   )
 }
 
-// 워크스페이스 인프라 런타임 등록 폼(nomad/k8s/topology). 자격증명은 여기 넣지 않고 SecretStore 키 이름으로 참조.
+// Workspace infra runtime registration form (nomad/k8s/topology). Credentials aren't entered here; they're referenced by SecretStore key name.
 export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
   const router = useRouter()
   const t = useTranslations('registerRuntime')
@@ -209,7 +209,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
 
   return (
     <div className="max-w-2xl space-y-6">
-      {/* 종류 */}
+      {/* Kind */}
       <div className="space-y-1.5">
         <Label>{t('kindLabel')}</Label>
         <Combobox
@@ -226,7 +226,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
         )}
       </div>
 
-      {/* 공통 */}
+      {/* Common */}
       <div className="grid grid-cols-2 gap-4">
         <Field label={t('idLabel')} hint={t('idHint')}>
           <Input
@@ -372,7 +372,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
         </div>
       )}
 
-      {/* topology 지원 — traceSource 를 넣으면 이 nomad/k8s 런타임이 서비스 토폴로지 하니스(browser-use 등)도 호스팅(topology capability) */}
+      {/* topology support — adding a traceSource lets this nomad/k8s runtime also host service-topology harnesses (browser-use, etc.) (topology capability) */}
       <div className="space-y-3 rounded-lg border bg-card px-4 py-3.5 shadow-raise">
         <label className="flex cursor-pointer items-center gap-2.5">
           <input
@@ -417,7 +417,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
         )}
       </div>
 
-      {/* 공통: 설명·태그 */}
+      {/* Common: description · tags */}
       <div className="grid grid-cols-2 gap-4">
         <Field label={t('descriptionLabel')}>
           <Input

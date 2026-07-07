@@ -1,11 +1,11 @@
-// 라이브 e2e: hermes-desktop 하니스가 *pinch(PinchBench) 벤치마크* 태스크를 얼마나 수행하는지 측정 + 이력 기록.
-// ① 컨트롤플레인(dev) 기동 → POST /datasets(pinch 벤치마크 추가) + POST /harnesses(hermes-desktop 등록)
-// ② PinchBench core task_*.md 를 github 에서 받아 instruction(+workspace_files) 추출
-// ③ 각 태스크를 hermes(everdict-hermes-agent:demo, provider=LiteLLM)로 `hermes -z` 실행 → 답 캡처
-// ④ LiteLLM judge 로 채점(태스크 충족 여부 pass + score)
-// ⑤ POST /scorecards/ingest → Scorecard 레코드로 *이력* 기록(벤치마크 dataset id/ver + 하니스 id/ver + 점수 + 트레이스의
-//    모델 llm_call). ⑥ GET /scorecards/:id 로 기록된 이력(하니스·모델·성능·벤치마크) 출력.
-// 사전: everdict-hermes-agent:demo 빌드됨, LiteLLM(:4000), apps/api/dist.
+// Live e2e: measure how well the hermes-desktop harness performs on *pinch (PinchBench) benchmark* tasks + record history.
+// ① start control plane (dev) → POST /datasets (add pinch benchmark) + POST /harnesses (register hermes-desktop)
+// ② fetch PinchBench core task_*.md from github and extract instruction (+workspace_files)
+// ③ run each task with hermes (everdict-hermes-agent:demo, provider=LiteLLM) via `hermes -z` → capture the answer
+// ④ grade with a LiteLLM judge (task completion pass + score)
+// ⑤ POST /scorecards/ingest → record *history* as a Scorecard record (benchmark dataset id/ver + harness id/ver + scores + the trace's
+//    model llm_call). ⑥ GET /scorecards/:id to print the recorded history (harness / model / performance / benchmark).
+// Prereqs: everdict-hermes-agent:demo built, LiteLLM (:4000), apps/api/dist.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
@@ -30,7 +30,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음.");
+  console.error("No LLM key.");
   process.exit(2);
 }
 const post = async (p, b) => {
@@ -55,7 +55,7 @@ async function fetchTask(id) {
   const front = fm ? fm[1] : "";
   const body = (fm ? fm[2] : md).trim();
   const grading = (front.match(/grading_type:\s*(\S+)/) || [])[1] ?? "llm_judge";
-  // workspace_files 블록의 content 를 프롬프트에 인라인(있으면)
+  // inline the content of the workspace_files block into the prompt (if present)
   const files = [];
   if (front.includes("workspace_files:")) {
     for (const m of front.matchAll(/path:\s*"([^"]+)"\n\s*content:\s*\|\n([\s\S]*?)(?=\n\s*- path:|\n\w+:|$)/g)) {
@@ -66,7 +66,7 @@ async function fetchTask(id) {
   return { id, instruction: body.slice(0, 400), prompt, grading };
 }
 
-console.log("=== 컨트롤플레인 기동(dev) ===");
+console.log("=== control plane start (dev) ===");
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: new URL("../..", import.meta.url).pathname,
   env: {
@@ -100,7 +100,7 @@ try {
   )
     await sleep(1000);
 
-  console.log(`\n=== ② PinchBench core 태스크 ${TASK_IDS.length}개 로드 ===`);
+  console.log(`\n=== ② load ${TASK_IDS.length} PinchBench core tasks ===`);
   const tasks = [];
   for (const id of TASK_IDS) {
     try {
@@ -112,12 +112,12 @@ try {
     }
   }
 
-  // ① pinch 벤치마크 등록(dataset) + hermes-desktop 하니스 등록
-  console.log("\n=== ① pinch 벤치마크 + hermes-desktop 하니스 등록 ===");
+  // ① register pinch benchmark (dataset) + hermes-desktop harness
+  console.log("\n=== ① register pinch benchmark + hermes-desktop harness ===");
   const ds = {
     id: "pinch-core",
     version: "1.0.0",
-    description: "PinchBench (github.com/pinchbench/skill) — core 태스크 subset. LLM 에이전트 수행 능력 평가.",
+    description: "PinchBench (github.com/pinchbench/skill) — core task subset. Evaluates LLM agent performance.",
     tags: ["pinchbench", "external", "agent"],
     cases: tasks.map((t) => ({
       id: t.id,
@@ -145,8 +145,8 @@ try {
     ).status,
   );
 
-  // ③④ 각 태스크 hermes 실행 + judge 채점
-  console.log(`\n=== ③④ hermes(${AGENT_MODEL}) 실행 + judge(${JUDGE_MODEL}) 채점 ===`);
+  // ③④ run hermes per task + judge grading
+  console.log(`\n=== ③④ run hermes(${AGENT_MODEL}) + judge(${JUDGE_MODEL}) grading ===`);
   const traces = [];
   for (const t of tasks) {
     let answer = "";
@@ -210,8 +210,8 @@ try {
     });
   }
 
-  // ⑤ ingest → 이력 기록
-  console.log("\n=== ⑤ POST /scorecards/ingest (이력 기록) ===");
+  // ⑤ ingest → record history
+  console.log("\n=== ⑤ POST /scorecards/ingest (record history) ===");
   const ing = await post("/scorecards/ingest", {
     dataset: { id: "pinch-core", version: "1.0.0" },
     harness: { id: "hermes-desktop", version: "1.0.0" },
@@ -220,37 +220,37 @@ try {
   console.log(`  → ${ing.status} id=${ing.json.id}`);
   const scId = ing.json.id;
 
-  // ⑥ 기록된 이력 출력
+  // ⑥ print the recorded history
   let rec;
   for (let i = 0; i < 40; i++) {
     await sleep(1500);
     rec = await (await fetch(`${BASE}/scorecards/${scId}`, { headers: H })).json();
     if (rec.status === "succeeded" || rec.status === "failed") break;
   }
-  console.log(`\n================ 기록된 평가 이력 (GET /scorecards/${scId.slice(0, 8)}…) ================`);
-  console.log(`  벤치마크(dataset): ${rec.dataset?.id}@${rec.dataset?.version}`);
-  console.log(`  하니스(harness)  : ${rec.harness?.id}@${rec.harness?.version}`);
-  console.log(`  상태/시각        : ${rec.status} · ${rec.createdAt}`);
-  console.log(`  성능(집계)       : ${JSON.stringify(rec.summary)}`);
+  console.log(`\n================ recorded eval history (GET /scorecards/${scId.slice(0, 8)}…) ================`);
+  console.log(`  benchmark (dataset): ${rec.dataset?.id}@${rec.dataset?.version}`);
+  console.log(`  harness            : ${rec.harness?.id}@${rec.harness?.version}`);
+  console.log(`  status/time        : ${rec.status} · ${rec.createdAt}`);
+  console.log(`  performance (agg)  : ${JSON.stringify(rec.summary)}`);
   for (const r of rec.scorecard?.results ?? []) {
     const j = r.scores?.find((s) => s.metric === "judge");
     const m = r.trace?.find((e) => e.kind === "llm_call");
-    console.log(`   - ${r.caseId}: judge=${j?.pass ? "PASS" : "FAIL"}(${j?.value}) | 모델(trace)=${m?.model}`);
+    console.log(`   - ${r.caseId}: judge=${j?.pass ? "PASS" : "FAIL"}(${j?.value}) | model(trace)=${m?.model}`);
   }
   const j = (rec.summary ?? []).find((m) => m.metric === "judge");
   console.log(
-    `\n  → pinch 수행도: judge passRate=${((j?.passRate ?? 0) * 100) | 0}% (n=${j?.count ?? 0}), agent 모델=${AGENT_MODEL}, judge 모델=${JUDGE_MODEL}`,
+    `\n  → pinch performance: judge passRate=${((j?.passRate ?? 0) * 100) | 0}% (n=${j?.count ?? 0}), agent model=${AGENT_MODEL}, judge model=${JUDGE_MODEL}`,
   );
   ok = ing.status === 202 && rec.status === "succeeded";
   console.log(
     ok
-      ? "\n✅ hermes-desktop 의 pinch 수행도를 측정하고, 벤치마크/하니스 id+버전/모델/성능을 Scorecard 이력으로 기록함."
-      : "\n⚠️ 기대와 불일치",
+      ? "\n✅ measured hermes-desktop's pinch performance and recorded the benchmark/harness id+version/model/performance as Scorecard history."
+      : "\n⚠️ does not match expectations",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.stack : e);
 } finally {
   shutdown();
-  console.log("control plane 종료.");
+  console.log("control plane shut down.");
 }
 process.exit(ok ? 0 : 1);

@@ -1,8 +1,8 @@
 import type { MetricSummary } from "./scorecard.js";
 
-// 기간 트렌드 / 회귀-오버-타임 — 한 (dataset, metric) 의 스코어카드들을 시간순으로 늘어놓고 baseline 대비 변화·회귀를 본다.
-// 입력은 스코어카드의 *경량* 형태(목록 summary 로 충분) — @everdict/db 의 ScorecardRecord 가 구조적으로 이걸 만족한다
-// (suite 는 db 에 의존하지 않음). diffScorecards 가 2개 ad-hoc 비교라면, 이건 N개를 기간 위에 늘어놓은 시계열이다.
+// Period trend / regression-over-time — lays out one (dataset, metric)'s scorecards in time order and views change/regression vs baseline.
+// The input is the *lightweight* shape of a scorecard (list summary is enough) — @everdict/db's ScorecardRecord satisfies this structurally
+// (suite does not depend on db). Where diffScorecards is a 2-item ad-hoc comparison, this is a time series of N items over a period.
 export interface TrendCard {
   id: string;
   dataset: { id: string; version: string };
@@ -18,21 +18,21 @@ export interface TrendPoint {
   createdAt: string;
   mean: number | null;
   passRate: number | null;
-  score: number | null; // passRate 우선(없으면 mean) — 트렌드/회귀 판정 기준값
-  deltaVsBaseline: number | null; // score - baseline.score (둘 다 있을 때만)
-  regressed: boolean; // score 가 baseline 대비 하락(> epsilon)
+  score: number | null; // passRate first (mean if absent) — the trend/regression decision key
+  deltaVsBaseline: number | null; // score - baseline.score (only when both exist)
+  regressed: boolean; // score dropped vs baseline (> epsilon)
 }
 
 export interface ScorecardTrend {
   dataset: string; // datasetId
   metric: string;
-  baseline: string; // "first" | "previous" | <scorecardId> (요청 그대로)
-  points: TrendPoint[]; // createdAt 오름차순
+  baseline: string; // "first" | "previous" | <scorecardId> (as requested)
+  points: TrendPoint[]; // createdAt ascending
 }
 
 const EPS = 1e-9;
 
-// baseline: "first"(첫 포인트, 기본) | "previous"(각 포인트의 직전) | <scorecardId>(지정 기준).
+// baseline: "first" (first point, default) | "previous" (each point's predecessor) | <scorecardId> (specified reference).
 export function trendSeries(
   cards: TrendCard[],
   opts: { datasetId: string; metric: string; harnessId?: string; from?: string; to?: string; baseline?: string },
@@ -53,7 +53,7 @@ export function trendSeries(
       return { card: c, mean, passRate, score };
     });
 
-  // 고정 baseline 의 기준 score(첫 유효 포인트 / 지정 스코어카드). "previous" 는 포인트별로 직전을 본다.
+  // Reference score of a fixed baseline (first valid point / specified scorecard). "previous" looks at the predecessor per point.
   const fixedBaselineScore =
     baseline === "first"
       ? (scored.find((s) => s.score !== null)?.score ?? null)

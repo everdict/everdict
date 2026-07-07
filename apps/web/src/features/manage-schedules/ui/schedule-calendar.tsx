@@ -10,10 +10,10 @@ import { cn } from '@/shared/lib/utils'
 import { ownerNameOf, type Author } from './schedule-card'
 
 const DOW_KEYS = ['dowSun', 'dowMon', 'dowTue', 'dowWed', 'dowThu', 'dowFri', 'dowSat'] as const
-const CELL_LIMIT = 3 // 셀에 이름으로 보여줄 최대 예약 수(넘치면 +N)
+const CELL_LIMIT = 3 // max schedules shown by name per cell (overflow shows +N)
 
-// 예약 캘린더(월) — 각 날짜 셀에 그날 발사되는 예약을 이름 칩으로. 반복이 조밀해도 예약당 하루 1개만
-// 표시(분·시 무관, firesOnDate O(1))라 뭉개지지 않는다. 시각별 나열은 '다가오는 실행' 타임라인이 담당.
+// Schedule calendar (month) — each date cell shows the schedules firing that day as name chips. Even with dense
+// repetition it stays uncluttered because each schedule shows at most once per day (regardless of minute/hour, firesOnDate O(1)). Per-time listing is handled by the 'upcoming runs' timeline.
 export function ScheduleCalendar({
   schedules,
   authors,
@@ -25,7 +25,7 @@ export function ScheduleCalendar({
 }) {
   const t = useTranslations('manageSchedules')
   const locale = useLocale()
-  // 월/오늘은 nowIso(UTC 기준)에서 결정 — 서버/클라 동일(hydration 안전). 월뷰 오차는 자정 경계 근사.
+  // Month/today are derived from nowIso (UTC-based) — identical on server/client (hydration-safe). Month-view drift is a midnight-boundary approximation.
   const { year, month, todayDay, cells, leading } = useMemo(() => {
     const now = new Date(nowIso)
     const y = now.getUTCFullYear()

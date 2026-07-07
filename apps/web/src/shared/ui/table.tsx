@@ -2,7 +2,7 @@ import type { HTMLAttributes, TdHTMLAttributes, ThHTMLAttributes } from 'react'
 
 import { cn } from '@/shared/lib/utils'
 
-// Linear st. 데이터 테이블 — 밀도 높은 행, 옅은 hover, hairline 구분선, 모노/타뉴머 정렬.
+// Linear st. data table — dense rows, faint hover, hairline dividers, mono/tabular-nums alignment.
 export function Table({
   className,
   containerClassName,

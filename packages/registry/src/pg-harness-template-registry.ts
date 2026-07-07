@@ -3,11 +3,11 @@ import type { SqlClient } from "@everdict/db";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
 import { PgVersionedStore } from "./pg-versioned-store.js";
 
-// Postgres 기반 하네스 Template(대분류) SSOT. 스키마: @everdict/db/migrations/0016_create_harness_taxonomy.
+// Postgres-backed harness template (category) SSOT. Schema: @everdict/db/migrations/0016_create_harness_taxonomy.
 export class PgHarnessTemplateRegistry implements HarnessTemplateRegistry {
   private readonly store: PgVersionedStore<HarnessTemplateSpec>;
   constructor(client: SqlClient) {
-    this.store = new PgVersionedStore(client, "everdict_harness_templates", "템플릿", (v) =>
+    this.store = new PgVersionedStore(client, "everdict_harness_templates", "template", (v) =>
       HarnessTemplateSpecSchema.parse(v),
     );
   }

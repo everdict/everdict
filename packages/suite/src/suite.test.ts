@@ -26,7 +26,7 @@ const SUITE: Suite = {
 };
 
 describe("runSuite", () => {
-  it("케이스마다 하니스 버전을 붙여 dispatch 하고 Scorecard 로 모은다", async () => {
+  it("dispatches each case with the harness version attached and collects them into a Scorecard", async () => {
     const seen: AgentJob[] = [];
     const dispatch = async (job: AgentJob): Promise<CaseResult> => {
       seen.push(job);
@@ -38,44 +38,44 @@ describe("runSuite", () => {
     expect(seen.every((j) => j.harness.version === "1.0.0")).toBe(true);
   });
 
-  it("한 케이스 dispatch 가 던져도 배치를 멈추지 않고 실패 CaseResult 로 기록한다", async () => {
-    // Given: 케이스 a 는 던지고 b 는 성공하는 dispatch
+  it("does not stop the batch when one case's dispatch throws and records it as a failed CaseResult", async () => {
+    // Given: a dispatch where case a throws and b succeeds
     const dispatch = async (job: AgentJob): Promise<CaseResult> => {
       if (job.evalCase.id === "a") throw new Error("boom");
       return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 3);
     };
-    // When: 스위트를 돌리면
+    // When: running the suite
     const sc = await runSuite(SUITE, "1.0.0", dispatch, { concurrency: 2 });
-    // Then: 두 케이스 모두 결과가 있고, a 는 error trace + pass:false 로 박제된다
+    // Then: both cases have results, and a is captured with an error trace + pass:false
     expect(sc.results.map((r) => r.caseId).sort()).toEqual(["a", "b"]);
     const failed = sc.results.find((r) => r.caseId === "a");
     expect(failed?.harness).toBe("claude-code@1.0.0");
     expect(failed?.trace).toEqual([{ t: 0, kind: "error", message: "boom" }]);
     expect(failed?.scores).toEqual([{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: "boom" }]);
     expect(caseVerdict(failed ?? { scores: [] })).toBe(false);
-    // 성공 케이스는 정상 집계
+    // the successful case aggregates normally
     expect(caseVerdict(sc.results.find((r) => r.caseId === "b") ?? { scores: [] })).toBe(true);
   });
 
-  it("signal abort 후엔 남은 케이스를 발사하지 않는다(협조적 취소 — 이미 발사된 케이스는 완료돼 결과에 포함)", async () => {
-    // Given: 첫 케이스가 dispatch 되는 도중 abort 되는 배치(직렬 — concurrency 1 로 순서 고정)
+  it("does not launch remaining cases after signal abort (cooperative cancellation — already-launched cases complete and are included in the results)", async () => {
+    // Given: a batch that aborts while the first case is being dispatched (serial — concurrency 1 fixes the order)
     const controller = new AbortController();
     const dispatched: string[] = [];
     const dispatch = async (job: AgentJob): Promise<CaseResult> => {
       dispatched.push(job.evalCase.id);
-      controller.abort(); // 첫 케이스 실행 중 supersede 발생 시나리오
+      controller.abort(); // scenario where supersede happens while the first case runs
       return caseResult(job.evalCase.id, `${job.harness.id}@${job.harness.version}`, true, 1);
     };
-    // When: abort 시그널과 함께 돌리면
+    // When: running with the abort signal
     const sc = await runSuite(SUITE, "1.0.0", dispatch, { concurrency: 1, signal: controller.signal });
-    // Then: 두 번째 케이스는 발사되지 않고, 결과엔 완료된 첫 케이스만 남는다(빈 슬롯 없음)
+    // Then: the second case is not launched, and only the completed first case remains in the results (no empty slots)
     expect(dispatched).toEqual(["a"]);
     expect(sc.results.map((r) => r.caseId)).toEqual(["a"]);
   });
 });
 
 describe("summarizeScorecard", () => {
-  it("메트릭별 통과율/평균을 집계한다", () => {
+  it("aggregates pass rate/mean per metric", () => {
     const sc: Scorecard = {
       suiteId: "s1",
       harness: "h@1",
@@ -90,7 +90,7 @@ describe("summarizeScorecard", () => {
 });
 
 describe("diffScorecards", () => {
-  it("pass 전이로 회귀/개선을 잡고 메트릭 delta 를 낸다", () => {
+  it("catches regressions/improvements by pass transitions and produces metric deltas", () => {
     const base: Scorecard = {
       suiteId: "s1",
       harness: "h@1",
@@ -110,13 +110,13 @@ describe("diffScorecards", () => {
   });
 });
 
-describe("caseVerdict (권위 기준)", () => {
+describe("caseVerdict (authority-based)", () => {
   const sc = (scores: { metric: string; pass?: boolean; value?: number }[]): { scores: never } =>
     ({
       scores: scores.map((s) => ({ graderId: s.metric, metric: s.metric, value: s.value ?? 0, pass: s.pass })),
     }) as never;
 
-  it("ground-truth(state)가 judge 를 이긴다 — OSWorld 파일저장: state PASS + judge FAIL → PASS", () => {
+  it("ground-truth (state) beats the judge — OSWorld file save: state PASS + judge FAIL → PASS", () => {
     expect(
       caseVerdict(
         sc([
@@ -126,7 +126,7 @@ describe("caseVerdict (권위 기준)", () => {
       ),
     ).toBe(true);
   });
-  it("객관(answer_match)이 judge 보다 우선", () => {
+  it("objective (answer_match) takes precedence over the judge", () => {
     expect(
       caseVerdict(
         sc([
@@ -136,7 +136,7 @@ describe("caseVerdict (권위 기준)", () => {
       ),
     ).toBe(false);
   });
-  it("객관 그레이더가 여럿이면 모두 pass 여야", () => {
+  it("with multiple objective graders, all must pass", () => {
     expect(
       caseVerdict(
         sc([
@@ -146,13 +146,13 @@ describe("caseVerdict (권위 기준)", () => {
       ),
     ).toBe(false);
   });
-  it("객관/ground-truth 없으면 judge 가 결정", () => {
+  it("with no objective/ground-truth, the judge decides", () => {
     expect(caseVerdict(sc([{ metric: "judge", pass: true }, { metric: "tool_calls" }]))).toBe(true);
   });
-  it("pass 판정 그레이더가 없으면 undefined", () => {
+  it("undefined when there is no pass-deciding grader", () => {
     expect(caseVerdict(sc([{ metric: "tool_calls", value: 5 }]))).toBeUndefined();
   });
-  it("scorecardPassRate: 권위 기준 케이스 통과율", () => {
+  it("scorecardPassRate: authority-based case pass rate", () => {
     const card: Scorecard = {
       suiteId: "s",
       harness: "h",

@@ -9,45 +9,45 @@ import { getAccessToken } from './access-token'
 import { getActiveWorkspace } from './active-workspace'
 import { ACTIVE_WORKSPACE_HEADER } from './workspace-scope'
 
-// 내가 속한 워크스페이스(=GET /me 의 workspaces, 사이드바 스위처용).
+// The workspaces I belong to (= GET /me's workspaces, for the sidebar switcher).
 export interface WebWorkspace {
   id: string
   name: string
   role: string
 }
 
-// 내 프로필(이름/유저네임/아바타) — 컨트롤플레인 소유 가변 정보(GET /me.profile). email 은 여기 없다(SSO 클레임).
+// My profile (name/username/avatar) — control-plane-owned mutable info (GET /me.profile). email isn't here (SSO claim).
 export interface WebProfile {
   name?: string
   username?: string
   avatarUrl?: string
 }
 
-// 컨트롤플레인이 돌려주는 Principal (= GET /me). 웹은 이 값을 해석하지 않고 그대로 신뢰한다.
+// The Principal the control plane returns (= GET /me). The web doesn't interpret this value, it trusts it as-is.
 export interface WebPrincipal {
   subject: string
-  workspace: string // 현재 활성 워크스페이스 id
+  workspace: string // current active workspace id
   roles: string[]
   via: 'oidc' | 'api-key'
-  email?: string // OIDC email/preferred_username 클레임(표시 전용·읽기전용)
-  workspaces?: WebWorkspace[] // 내가 속한 워크스페이스 목록(멤버십 스토어 있을 때)
-  profile?: WebProfile // 가변 표시 정보(이름/유저네임/아바타)
+  email?: string // OIDC email/preferred_username claim (display-only·read-only)
+  workspaces?: WebWorkspace[] // list of workspaces I belong to (when a membership store exists)
+  profile?: WebProfile // mutable display info (name/username/avatar)
 }
 
-// 현재 요청의 컨트롤플레인 인증 컨텍스트. 로그인 사용자 → Keycloak Bearer, dev(미설정) → x-everdict-tenant=default.
-// 활성 워크스페이스의 권위는 URL 첫 세그먼트 — 미들웨어가 x-everdict-active-workspace 헤더로 주입한다(Linear 식 /{workspace}/...).
-// 미들웨어가 못 탄 경로(루트 등)에선 most-recent 쿠키로 폴백. 동봉(x-everdict-workspace)된 워크스페이스가 비멤버면 컨트롤플레인이 기본으로 폴백.
+// The control plane auth context for the current request. Logged-in user → Keycloak Bearer, dev (unset) → x-everdict-tenant=default.
+// The authority for the active workspace is the URL's first segment — middleware injects it as the x-everdict-active-workspace header (Linear-style /{workspace}/...).
+// On paths middleware didn't hit (root etc.) fall back to the most-recent cookie. If the enclosed (x-everdict-workspace) workspace is a non-member, the control plane falls back to the default.
 export async function authContext(): Promise<AuthContext> {
   const fromHeader = (await headers()).get(ACTIVE_WORKSPACE_HEADER) ?? undefined
   const workspace = fromHeader ?? (await getActiveWorkspace())
   const ws = workspace ? { workspace } : {}
   if (!keycloakConfigured) return { devTenant: 'default', ...ws }
-  const token = await getAccessToken() // 서버 전용 — 클라이언트 세션에 토큰을 노출하지 않는다(BFF)
+  const token = await getAccessToken() // server-only — don't expose the token to the client session (BFF)
   return token ? { bearer: token, ...ws } : { devTenant: 'default', ...ws }
 }
 
-// 현재 Principal + 인증 컨텍스트. 워크스페이스/역할의 권위는 컨트롤플레인 GET /me (웹이 토큰을 해석하지 않음).
-// 컨트롤플레인 미가동 등으로 실패하면 principal=null (호출부가 graceful 처리).
+// The current Principal + auth context. The authority for workspace/roles is the control plane's GET /me (the web doesn't interpret the token).
+// If it fails (control plane down etc.) principal=null (the caller handles it gracefully).
 export async function currentPrincipal(): Promise<{
   principal: WebPrincipal | null
   ctx: AuthContext

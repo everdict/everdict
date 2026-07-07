@@ -1,10 +1,10 @@
-// 라이브 e2e: *데스크탑 + 웹 통합 리포트* — 하니스-비종속 입증. 같은 everdict 채점/스코어카드 흐름으로 두 트랙을 한 리포트에:
-//   • 데스크탑(os-use/OSWorld): runAgentJob(command 하니스 + OsUseEnvironment) → mousepad 로 파일 생성 → VLM judge(스크린샷)
-//     + command/state grader(verify 로 실제 파일 검증).  [packages/agent runAgentJob + DockerDriver]
-//   • 웹(browser-use/WebVoyager): ServiceTopologyBackend(service 하니스) → 실 사이트 구동 → answer-match + judge.
-// 두 트랙의 CaseResult 를 각각 Scorecard 로 모아 summarizeScorecard + 통합 요약(트랙별 + 전체 통과율)을 출력.
+// live e2e: *unified desktop + web report* — demonstrates harness-agnosticism. Two tracks in one report via the same everdict grading/scorecard flow:
+//   • desktop (os-use/OSWorld): runAgentJob (command harness + OsUseEnvironment) → create a file with mousepad → VLM judge (screenshot)
+//     + command/state grader (verify checks the actual file).  [packages/agent runAgentJob + DockerDriver]
+//   • web (browser-use/WebVoyager): ServiceTopologyBackend (service harness) → drive a real site → answer-match + judge.
+// Collect each track's CaseResults into a Scorecard and print summarizeScorecard + a unified summary (per-track + overall pass rate).
 //
-// 사전: docker. 이미지(everdict-osworld:demo / everdict-browseruse:demo)는 이 스크립트가 없으면 빌드. Jaeger/LiteLLM 가동.
+// Prereq: docker. The script builds the images (everdict-osworld:demo / everdict-browseruse:demo) if absent. Jaeger/LiteLLM running.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync } from "node:fs";
@@ -36,7 +36,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음.");
+  console.error("No LLM key.");
   process.exit(2);
 }
 process.env.OPENAI_API_KEY = KEY;
@@ -53,11 +53,11 @@ function ensureImage(image, build) {
   }
 }
 
-// ───────── 데스크탑 트랙 (os-use / OSWorld) ─────────
+// ───────── desktop track (os-use / OSWorld) ─────────
 async function desktopTrack() {
   ensureImage(OSWORLD_IMAGE, () => {
     copyFileSync(here("../../examples/agents/desktop-osworld-agent.cjs"), here("desktop-osworld-agent.cjs.ctx"));
-    // 빌드 컨텍스트에 agent-osworld.cjs 로 복사 필요 → 임시로 scripts/live 에 두고 build.
+    // Needs to be copied to agent-osworld.cjs in the build context → temporarily place it in scripts/live and build.
     execFileSync("cp", [
       here("../../examples/agents/desktop-osworld-agent.cjs").pathname,
       here("agent-osworld.cjs").pathname,
@@ -73,7 +73,7 @@ async function desktopTrack() {
     .split("\n")
     .filter(Boolean)
     .map((l) => JSON.parse(l))
-    .slice(0, 1); // 1 케이스(데모; 데스크탑 자동화는 무거움)
+    .slice(0, 1); // 1 case (demo; desktop automation is heavy)
   const results = [];
   for (const row of rows) {
     const job = {
@@ -130,7 +130,7 @@ async function desktopTrack() {
   return { suiteId: "osworld-sample", harness: "desktop-osworld@1.0.0", results };
 }
 
-// ───────── 웹 트랙 (browser-use / WebVoyager) ─────────
+// ───────── web track (browser-use / WebVoyager) ─────────
 async function webTrack() {
   ensureImage(BU_IMAGE, () => {
     execFileSync(
@@ -237,19 +237,19 @@ async function webTrack() {
       }
     }
   } else {
-    console.log("  [web] front-door health timeout — 웹 트랙 건너뜀");
+    console.log("  [web] front-door health timeout — skipping web track");
   }
   spawnSync("docker", ["rm", "-f", NAME], { stdio: "ignore" });
   return { suiteId: "webvoyager-sample", harness: "browseruse@webvoyager", results };
 }
 
-// 케이스 통과율은 권위 기준(scorecardPassRate/caseVerdict) — ground-truth(state) > 객관 > judge. OSWorld 파일저장처럼
-// state grader 가 PASS 면 VLM judge 가 FAIL 해도 케이스 PASS.
+// Case pass rate is the authoritative measure (scorecardPassRate/caseVerdict) — ground-truth(state) > objective > judge. As with OSWorld file-save,
+// if the state grader PASSes, the case PASSes even when the VLM judge FAILs.
 let ok = false;
 try {
-  console.log("=== 통합 리포트: 데스크탑(OSWorld/os-use) + 웹(WebVoyager/browser-use) ===\n--- 데스크탑 트랙 ---");
+  console.log("=== unified report: desktop(OSWorld/os-use) + web(WebVoyager/browser-use) ===\n--- desktop track ---");
   const desktop = await desktopTrack();
-  console.log("\n--- 웹 트랙 ---");
+  console.log("\n--- web track ---");
   const web = await webTrack();
 
   console.log("\n================ UNIFIED REPORT ================");
@@ -258,7 +258,7 @@ try {
     ["WEB (browser-use/WebVoyager)", web],
   ]) {
     const pr = scorecardPassRate(sc);
-    console.log(`\n[${label}] harness=${sc.harness} — 케이스 ${sc.results.length}, pass ${pr.pass}/${pr.total}`);
+    console.log(`\n[${label}] harness=${sc.harness} — cases ${sc.results.length}, pass ${pr.pass}/${pr.total}`);
     for (const m of summarizeScorecard(sc)) {
       const p = m.passRate !== undefined ? ` passRate=${(m.passRate * 100).toFixed(0)}%` : "";
       console.log(`   ${m.metric}: n=${m.count} mean=${m.mean.toFixed(4)}${p}`);
@@ -269,15 +269,15 @@ try {
   const totPass = dpr.pass + wpr.pass;
   const totN = dpr.total + wpr.total;
   console.log(
-    `\n[COMBINED] 데스크탑+웹 전체 case pass ${totPass}/${totN} (${totN ? ((totPass / totN) * 100).toFixed(0) : 0}%)`,
+    `\n[COMBINED] desktop+web overall case pass ${totPass}/${totN} (${totN ? ((totPass / totN) * 100).toFixed(0) : 0}%)`,
   );
   ok = desktop.results.length > 0 && web.results.length > 0;
   console.log(
     ok
-      ? "\n✅ ③: 하나의 통합 리포트가 *데스크탑(os-use/OSWorld, runAgentJob)* 과 *웹(browser-use/WebVoyager, " +
-          "ServiceTopologyBackend)* 두 트랙을 같은 everdict CaseResult→Scorecard→summarize 흐름으로 묶음 — 하니스/인프라-비종속 " +
-          "평가 런타임이 데스크탑+웹 벤치마크를 하나의 리포트로 산출."
-      : "\n⚠️ 한 트랙 결과 없음(위 로그 참고)",
+      ? "\n✅ ③: one unified report ties both tracks — *desktop (os-use/OSWorld, runAgentJob)* and *web (browser-use/WebVoyager, " +
+          "ServiceTopologyBackend)* — through the same everdict CaseResult→Scorecard→summarize flow — a harness/infra-agnostic " +
+          "eval runtime produces desktop+web benchmarks in a single report."
+      : "\n⚠️ one track has no results (see logs above)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

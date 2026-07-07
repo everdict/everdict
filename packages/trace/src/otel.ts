@@ -1,7 +1,7 @@
 import { type TraceEvent, UpstreamError } from "@everdict/core";
 import { type Span, type TraceSource, spansToTraceEvents } from "./trace-source.js";
 
-// OTLP 스팬(속성은 {key,value} 배열) → 정규화 Span.
+// OTLP span (attributes are a {key,value} array) → normalized Span.
 interface OtlpAttr {
   key: string;
   value?: { stringValue?: string; intValue?: string | number; doubleValue?: number; boolValue?: boolean };
@@ -34,8 +34,8 @@ export function parseOtlpSpans(spans: OtlpSpan[]): Span[] {
   });
 }
 
-// Jaeger query API(`GET /api/traces/{id}`) 형식: data[].spans[] {operationName, startTime/duration(μs), tags:[{key,value}]}.
-// 태그 value 는 이미 타입 디코딩됨(string/number/bool) — OTLP 의 {stringValue/intValue} 와 다름.
+// Jaeger query API (`GET /api/traces/{id}`) shape: data[].spans[] {operationName, startTime/duration(μs), tags:[{key,value}]}.
+// Tag values are already type-decoded (string/number/bool) — unlike OTLP's {stringValue/intValue}.
 interface JaegerTag {
   key: string;
   value?: unknown;
@@ -64,20 +64,20 @@ export function parseJaegerSpans(spans: JaegerSpan[]): Span[] {
 
 export interface OtelTraceSourceOptions {
   endpoint: string;
-  headers?: Record<string, string>; // 테넌트 자격증명 등(예: Authorization). SecretStore 에서 주입.
-  fetchImpl?: typeof fetch; // 테스트 주입
-  // 상관 방식: "id"(기본) = fetch(runId) 의 runId 가 곧 trace id(pull-ingest 관례).
-  // "tag" = 계측 에이전트의 리소스 속성 `everdict.run_id`(주입 env OTEL_RESOURCE_ATTRIBUTES 그대로)로 검색 —
-  // Jaeger query API 전용(`GET /api/traces?service=…&tags=…`, 실 1.62 검증: 리소스 속성=process 태그 매칭,
-  // service 필수). OTLP-네이티브 백엔드(검색 API 없음)는 id 상관 유지.
+  headers?: Record<string, string>; // tenant credentials etc. (e.g. Authorization). Injected from the SecretStore.
+  fetchImpl?: typeof fetch; // test injection
+  // Correlation mode: "id" (default) = the runId in fetch(runId) is the trace id (the pull-ingest convention).
+  // "tag" = search by the instrumented agent's resource attribute `everdict.run_id` (the injected env OTEL_RESOURCE_ATTRIBUTES verbatim) —
+  // Jaeger-query-API only (`GET /api/traces?service=…&tags=…`, verified on real 1.62: resource attribute = process-tag match,
+  // service required). OTLP-native backends (no search API) stay id-correlated.
   correlate?: "id" | "tag";
-  service?: string; // tag 상관의 검색 범위(Jaeger 는 service 파라미터 필수) — 에이전트의 service.name
+  service?: string; // search scope for tag correlation (Jaeger requires the service parameter) — the agent's service.name
 }
 
-const RUN_ID_ATTR = "everdict.run_id"; // 계측 에이전트가 남기는 상관 리소스 속성(주입 env 와 동일 값)
+const RUN_ID_ATTR = "everdict.run_id"; // the correlation resource attribute the instrumented agent writes (same value as the injected env)
 
-// OTLP/Jaeger 호환 HTTP 에서 runId(=trace id)로 스팬을 가져와 TraceEvent 로 정규화.
-// correlate="tag" 면 Jaeger 검색(service+tags)으로 찾는다 — 검색 응답이 스팬을 동봉하므로 요청 1회.
+// Fetch spans from an OTLP/Jaeger-compatible HTTP endpoint by runId (=trace id) and normalize to TraceEvents.
+// With correlate="tag", find it via a Jaeger search (service+tags) — the search response embeds the spans, so it's one request.
 export class OtelTraceSource implements TraceSource {
   constructor(private readonly opts: OtelTraceSourceOptions) {}
 
@@ -88,7 +88,7 @@ export class OtelTraceSource implements TraceSource {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { correlate: "tag" },
-        "OTel tag 상관에는 service 범위가 필요합니다(Jaeger 검색의 service 파라미터 필수).",
+        "OTel tag correlation requires a service scope (the Jaeger search's service parameter is required).",
       );
     }
     const qs = new URLSearchParams({
@@ -109,11 +109,11 @@ export class OtelTraceSource implements TraceSource {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { status: res.status },
-        `OTel 트레이스 조회 ${res.status}: ${text.slice(0, 200)}`,
+        `OTel trace fetch ${res.status}: ${text.slice(0, 200)}`,
       );
     }
-    // 응답 형식 자동 감지: Jaeger query(`{data:[{spans}]}`) vs OTLP-네이티브(`{spans:[...]}`).
-    // tag 검색 미발견은 data=[] → 0건 degrade(플러시 지연 — 재시도는 호출부 몫).
+    // Auto-detect the response shape: Jaeger query (`{data:[{spans}]}`) vs OTLP-native (`{spans:[...]}`).
+    // A tag search miss is data=[] → degrade to 0 events (flush lag — retry is the caller's job).
     const body = (await res.json()) as { spans?: OtlpSpan[]; data?: Array<{ spans?: JaegerSpan[] }> };
     if (Array.isArray(body.data)) {
       return spansToTraceEvents(parseJaegerSpans(body.data.flatMap((t) => t.spans ?? [])));

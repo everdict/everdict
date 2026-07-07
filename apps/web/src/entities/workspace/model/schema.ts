@@ -1,17 +1,17 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 GET /workspaces 항목(내가 멤버인 워크스페이스 + 내 역할). API 모양을 zod 로 미러.
+// Control-plane GET /workspaces item (workspaces I'm a member of + my role). Mirrors the API shape with zod.
 export const workspaceSchema = z.object({
   id: z.string(),
   name: z.string(),
   role: z.string(),
-  logoUrl: z.string().optional(), // 사이드바/스위처 표시용
+  logoUrl: z.string().optional(), // for the sidebar/switcher display
 })
 export type Workspace = z.infer<typeof workspaceSchema>
 
 export const workspacesSchema = z.array(workspaceSchema)
 
-// 컨트롤플레인 GET /workspace(단수) — 활성 워크스페이스 레코드(설정 페이지용). owner 로 삭제 권한을 판단한다.
+// Control-plane GET /workspace (singular) — the active workspace record (for the settings page). owner determines delete permission.
 export const workspaceRecordSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -21,4 +21,4 @@ export const workspaceRecordSchema = z.object({
 })
 export type WorkspaceRecord = z.infer<typeof workspaceRecordSchema>
 
-export const workspaceUrlBase = 'workspace.everdict.io' // 읽기 전용 URL 표시용(slug = id)
+export const workspaceUrlBase = 'workspace.everdict.io' // for read-only URL display (slug = id)

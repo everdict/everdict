@@ -12,8 +12,8 @@ export interface UpdateScheduleResult {
   error?: string
 }
 
-// 서버 액션: 예약 내용 수정(PATCH). authZ 는 컨트롤플레인이 강제 — 내용 편집은 생성자 또는 워크스페이스 admin 만(403 가능).
-// runTemplate 은 통째로 교체되므로 기존 judges 는 그대로 실어 보존한다(폼엔 judge 필드가 없음). enabled 는 건드리지 않음.
+// Server action: edit a schedule's contents (PATCH). AuthZ is enforced by the control plane — editing contents is creator or workspace admin only (may 403).
+// runTemplate is replaced wholesale, so the existing judges are carried through unchanged to preserve them (the form has no judge field). enabled is left untouched.
 export async function updateScheduleAction(
   id: string,
   input: CreateScheduleInput,

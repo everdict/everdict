@@ -70,36 +70,36 @@ pnpm everdict run --task "Create ok.txt with the text done" --test "grep -q done
 ```
 
 ## Desktop app (`apps/desktop`)
-웹과 **동일한 기능**(배포된 웹을 그대로 렌더링) + 이 기기를 셀프호스티드 러너로 쓰는 상주 앱.
-계정 페이지에서 **"이 기기를 러너로 연결" 버튼 한 번**으로 페어링됩니다(토큰 복사 없음 — OS
-키체인에 저장). 트레이 상주(닫기=숨김), 잡 완료 알림, 자동 시작 토글.
+**Full parity with the web** (renders the deployed web as-is) + a resident app that turns this machine into a self-hosted runner.
+Pair from the account page with **a single "Connect this device as a runner" button** (no token copy — stored in the OS
+keychain). Tray-resident (close = hide), job-completion notifications, auto-start toggle.
 
 ```bash
-# 설치파일 다운로드: 웹의 /{workspace}/download — OS 자동 감지 + 로그인 뒤 302 프록시(리포 private 유지).
-#   (서버 env: DESKTOP_RELEASES_TOKEN=fine-grained PAT[contents:read]; GitHub 직접 접근은 콜라보레이터만
-#    가능 — https://github.com/Ho2eny/everdict/releases/latest)
-# (unsigned — mac Gatekeeper/win SmartScreen 경고는 우회 실행. 서명은 인증서 확보 후)
+# Download the installer: the web's /{workspace}/download — auto OS detection + a 302 proxy after login (keeps the repo private).
+#   (server env: DESKTOP_RELEASES_TOKEN=fine-grained PAT[contents:read]; direct GitHub access is collaborators-only
+#    — https://github.com/Ho2eny/everdict/releases/latest)
+# (unsigned — bypass the mac Gatekeeper / win SmartScreen warning to run. Signing once a certificate is obtained.)
 
-# dev 실행 (웹 :3000 + 컨트롤플레인 :8787 이 떠 있어야 함):
+# dev run (the web :3000 + control plane :8787 must be up):
 EVERDICT_WEB_URL=http://localhost:3000 pnpm -F @everdict/desktop dev
 
-# 로컬 패키징 (이 OS 타깃, turbo 게이트 밖):
+# local packaging (this OS target, outside the turbo gate):
 pnpm -F @everdict/desktop package        # → apps/desktop/release/
 
-# 3-OS 릴리즈 (CI): 태그 하나로 GitHub Release 발행
+# 3-OS release (CI): a single tag publishes a GitHub Release
 git tag desktop-v0.2.0 && git push origin desktop-v0.2.0
 ```
 
-- 라이브 e2e: `node scripts/live/desktop-runner.mjs` (원클릭 페어 → `self:<id>` 런 → provenance 검증).
-- **자동 업데이트**: 클라이언트는 내장·검증 완료(감지/다운로드 자동, 적용은 트레이에서 재시작).
-  피드 공개 위치가 결정되면(`electron-builder.yml` publish 블록) 활성화됩니다 — 현재는 비활성.
-- 웹 다운로드 페이지(`/{ws}/download`) 활성화: `DESKTOP_RELEASES_TOKEN` 설정(미설정 시 `DESKTOP_DOWNLOAD_URL` 외부 링크 폴백).
+- Live e2e: `node scripts/live/desktop-runner.mjs` (one-click pair → `self:<id>` run → provenance check).
+- **Auto-update**: the client is built in and verified (detect/download automatic; applying restarts from the tray).
+  It activates once the feed's public location is decided (`electron-builder.yml` publish block) — currently disabled.
+- Enabling the web download page (`/{ws}/download`): set `DESKTOP_RELEASES_TOKEN` (unset ⇒ falls back to the `DESKTOP_DOWNLOAD_URL` external link).
 
-## Self-hosted runner (내 머신에서 실행)
-워크스페이스의 공유 하니스·데이터셋을 **런타임만 `self:<id>` 로 바꿔** 내 호스트에서 실행하고 결과를
-회신합니다(내 로그인이 비용 부담 — 워크스페이스 예산 미차감, provenance 태그 부착).
-**개인 머신 = 데스크톱 앱 원클릭이 유일한 페어링 표면**(웹 브라우저는 목록/해제만 — D7).
-headless 서버/CI 박스는 API 키로 페어링 토큰을 만들어 CLI 로:
+## Self-hosted runner (run on your own machine)
+Run a workspace's shared harnesses/datasets on your own host by **changing only the runtime to `self:<id>`**, and report the
+results back (your own login pays the cost — the workspace budget is untouched, a provenance tag is attached).
+**Personal machine = the desktop app's one-click is the only pairing surface** (the web browser only lists/revokes — D7).
+Headless servers / CI boxes mint a pairing token with an API key and use the CLI:
 ```bash
 curl -X POST <control-plane>/runners -H "Authorization: Bearer ak_…" \
   -H "content-type: application/json" -d '{"label":"ci-linux-01"}'   # → { runner, token: "rnr_…" }
@@ -139,7 +139,7 @@ verified end-to-end by `scripts/live/mcp-oauth.mjs`.
 
 OAuth needs anonymous Dynamic Client Registration enabled once on Keycloak
 (`deploy/keycloak/enable-mcp-dcr.sh` — loopback redirect URIs only). Get an API key from the web
-(**계정 → API 키**) or `POST /keys`. Both credentials resolve to the same `Principal{workspace, roles}`.
+(**Account → API keys**) or `POST /keys`. Both credentials resolve to the same `Principal{workspace, roles}`.
 See `docs/mcp.md`.
 
 ### When the browser doesn't open

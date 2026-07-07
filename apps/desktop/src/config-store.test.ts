@@ -13,17 +13,17 @@ function memoryIo(initial: string | null = null): ConfigIo & { text: string | nu
 }
 
 describe("config-store", () => {
-  it("파일이 없으면 기본값", () => {
+  it("defaults when the file is absent", () => {
     expect(loadConfig(memoryIo())).toEqual({ autostart: false });
   });
 
-  it("저장 → 로드 라운드트립", () => {
+  it("save → load round-trip", () => {
     const io = memoryIo();
     saveConfig(io, { autostart: true });
     expect(loadConfig(io)).toEqual({ autostart: true });
   });
 
-  it("손상된 JSON/스키마 불일치는 기본값으로 복구(기동을 막지 않는다)", () => {
+  it("recovers to defaults on corrupt JSON / a schema mismatch (does not block startup)", () => {
     expect(loadConfig(memoryIo("{oops"))).toEqual({ autostart: false });
     expect(loadConfig(memoryIo('{"autostart":"yes"}'))).toEqual({ autostart: false });
   });

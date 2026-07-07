@@ -21,7 +21,7 @@ const SPEC: ServiceHarnessSpec = {
   traceSource: { kind: "mlflow", endpoint: "http://mlflow:5000" },
 };
 
-// 호출을 기록하는 가짜 kubectl; port-forward 는 고정 로컬 포트를 돌려준다.
+// A fake kubectl that records calls; port-forward returns a fixed local port.
 function fakeKubectl(): { kubectl: Kubectl; calls: string[]; applied: Array<Record<string, unknown>> } {
   const calls: string[] = [];
   const applied: Array<Record<string, unknown>> = [];
@@ -70,14 +70,14 @@ const ZONE = (id: string): TrustZone => ({
   trusted: false,
 });
 
-describe("buildK8sManifests — 워크스페이스 레지스트리 pull 인증(registryAuth)", () => {
+describe("buildK8sManifests — workspace-registry pull auth (registryAuth)", () => {
   const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
   const withImage = (image: string): ServiceHarnessSpec => ({
     ...SPEC,
     services: SPEC.services.map((s) => ({ ...s, image })),
   });
 
-  it("서비스 이미지 호스트가 일치하면 dockerconfigjson Secret + imagePullSecrets 를 렌더한다", () => {
+  it("renders a dockerconfigjson Secret + imagePullSecrets when the service image host matches", () => {
     const manifests = buildK8sManifests(withImage("ghcr.io/acme/agent:v1"), { registryAuth: AUTH });
     const secret = manifests.find((m) => m.kind === "Secret") as unknown as {
       metadata: { name: string };
@@ -94,7 +94,7 @@ describe("buildK8sManifests — 워크스페이스 레지스트리 pull 인증(r
     expect(deploy.spec.template.spec.imagePullSecrets).toEqual([{ name: REGISTRY_AUTH_SECRET_NAME }]);
   });
 
-  it("일치하는 이미지가 없으면 Secret 도 imagePullSecrets 도 렌더하지 않는다(무관 자격증명 미살포)", () => {
+  it("renders neither Secret nor imagePullSecrets when no image matches (no scattering of irrelevant credentials)", () => {
     const manifests = buildK8sManifests(withImage("quay.io/x/y:1"), { registryAuth: AUTH });
     expect(manifests.some((m) => m.kind === "Secret")).toBe(false);
     const deploy = manifests.find((m) => m.kind === "Deployment") as unknown as {
@@ -105,7 +105,7 @@ describe("buildK8sManifests — 워크스페이스 레지스트리 pull 인증(r
 });
 
 describe("buildBrowserManifests (K8s)", () => {
-  it("headless Chromium Deployment + Service 를 네임스페이스에 렌더한다", () => {
+  it("renders a headless Chromium Deployment + Service into the namespace", () => {
     const m = buildBrowserManifests("r1", { namespace: "everdict-acme" });
     expect(m.map((x) => x.kind)).toEqual(["Deployment", "Service"]);
     expect(m[0]?.metadata.name).toBe(browserDeployName("r1"));
@@ -124,7 +124,7 @@ describe("buildBrowserManifests (K8s)", () => {
 });
 
 describe("K8sTopologyRuntime", () => {
-  it("apply(ns+manifests) → rollout → port-forward 로 엔드포인트를 발견한다", async () => {
+  it("discovers endpoints via apply(ns+manifests) → rollout → port-forward", async () => {
     const { kubectl, calls } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     const topo = await rt.ensureTopology(SPEC, ZONE("acme"));
@@ -134,20 +134,20 @@ describe("K8sTopologyRuntime", () => {
     expect(calls).toContain("pf:everdict-acme/svc/bu-agent-server");
   });
 
-  it("멀티테넌트: 존마다 다른 네임스페이스로 warm 토폴로지를 분리한다", async () => {
+  it("multi-tenant: separates the warm topology into a different namespace per zone", async () => {
     const { kubectl, calls } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC, ZONE("alpha"));
     await rt.ensureTopology(SPEC, ZONE("beta"));
     expect(calls).toContain("ns:everdict-alpha");
-    expect(calls).toContain("ns:everdict-beta"); // 공유 아님 — 존별 네임스페이스
+    expect(calls).toContain("ns:everdict-beta"); // not shared — per-zone namespace
   });
 
-  it("warm 풀은 (spec,version,zone) 당 한 번만 배포한다(캐시)", async () => {
+  it("the warm pool deploys only once per (spec, version, zone) (cache)", async () => {
     const { kubectl, calls } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC, ZONE("acme"));
-    await rt.ensureTopology(SPEC, ZONE("acme")); // 두 번째는 캐시
+    await rt.ensureTopology(SPEC, ZONE("acme")); // the second is cached
     expect(calls.filter((c) => c === "ns:everdict-acme")).toHaveLength(1);
   });
 
@@ -164,18 +164,18 @@ describe("K8sTopologyRuntime", () => {
     dependencies: [{ store: "postgres", role: "checkpoints", isolateBy: "thread_id" }],
   };
 
-  it("pool: 공유 스토어 1회 배포 + 테넌트 DB/role mint(psql exec) + 서비스에 scoped DATABASE_URL 주입", async () => {
+  it("pool: deploys the shared store once + mints the tenant DB/role (psql exec) + injects a scoped DATABASE_URL into the service", async () => {
     const { kubectl, calls, applied } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
-    // 공유 스토어를 pool 네임스페이스에 배포 + rollout.
+    // deploys + rolls out the shared store into the pool namespace.
     expect(calls).toContain("ns:everdict-shared");
     expect(calls).toContain("rollout:everdict-shared/everdict-shared-postgres");
-    // 어드민 psql 로 테넌트 DB/role mint(stdin 으로 DDL).
+    // mints the tenant DB/role via admin psql (DDL over stdin).
     expect(calls.some((c) => c.startsWith("exec:everdict-shared/") && c.includes("psql") && c.includes("stdin"))).toBe(
       true,
     );
-    // 서비스에 scoped DATABASE_URL(tenant_acme/r_acme, 공유 스토어 DNS) 주입.
+    // injects a scoped DATABASE_URL (tenant_acme/r_acme, shared-store DNS) into the service.
     const agent = applied.find(
       (m) => m.kind === "Deployment" && (m.metadata as { name: string }).name === "bu-agent-server",
     ) as { spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } } };
@@ -183,38 +183,38 @@ describe("K8sTopologyRuntime", () => {
     expect(env.DATABASE_URL).toMatch(
       /^postgresql:\/\/r_acme:.+@everdict-shared-postgres\.everdict-shared\.svc\.cluster\.local:5432\/tenant_acme$/,
     );
-    // pool 은 전용 스토어를 zone ns 에 띄우지 않는다(공유만).
+    // pool does not bring up a dedicated store in the zone ns (shared only).
     expect(applied.some((m) => (m.metadata as { name?: string })?.name === "bu-postgres")).toBe(false);
   });
 
-  it("network: zone ingress 정책 + 공유스토어 ingress 정책을 적용한다(cross-tenant 차단)", async () => {
+  it("network: applies the zone ingress policy + shared-store ingress policy (cross-tenant block)", async () => {
     const { kubectl, applied } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
     const policies = applied.filter((m) => m.kind === "NetworkPolicy");
     const names = policies.map((m) => (m.metadata as { name: string }).name);
-    expect(names).toContain("everdict-zone-ingress"); // 존 ns: 같은-ns ingress 만
-    expect(names).toContain("everdict-shared-store-ingress"); // 공유스토어: managed ns 만
+    expect(names).toContain("everdict-zone-ingress"); // zone ns: same-ns ingress only
+    expect(names).toContain("everdict-shared-store-ingress"); // shared store: managed ns only
   });
 
-  it("network: networkPolicies:false 면 정책을 적용하지 않는다", async () => {
+  it("network: applies no policies when networkPolicies:false", async () => {
     const { kubectl, applied } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1, networkPolicies: false });
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
     expect(applied.some((m) => m.kind === "NetworkPolicy")).toBe(false);
   });
 
-  it("pool: 공유 스토어는 클러스터에 1회만 배포(여러 테넌트가 공유)", async () => {
+  it("pool: the shared store is deployed only once per cluster (shared by multiple tenants)", async () => {
     const { kubectl, calls } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("globex"));
     expect(calls.filter((c) => c === "rollout:everdict-shared/everdict-shared-postgres")).toHaveLength(1);
-    // 그래도 테넌트별 mint 는 각각 실행(2회).
+    // but per-tenant mint still runs for each (twice).
     expect(calls.filter((c) => c.startsWith("exec:everdict-shared/") && c.includes("psql"))).toHaveLength(2);
   });
 
-  it("per-case 브라우저 dispose 는 브라우저 리소스만 지운다(네임스페이스 유지)", async () => {
+  it("per-case browser dispose removes only the browser resources (keeps the namespace)", async () => {
     const { kubectl, calls } = fakeKubectl();
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     const env = await rt.provisionBrowserEnv(SPEC, "run1", ZONE("acme"));
@@ -222,6 +222,6 @@ describe("K8sTopologyRuntime", () => {
     expect(calls).toContain(
       `del:everdict-acme/deployment/${browserDeployName("run1")}+service/${browserDeployName("run1")}`,
     );
-    expect(calls.some((c) => c.startsWith("delns:"))).toBe(false); // ns 는 안 지움
+    expect(calls.some((c) => c.startsWith("delns:"))).toBe(false); // does not delete the ns
   });
 });

@@ -7,7 +7,7 @@ import {
   resolveHarnessInstance,
 } from "./harness-template.js";
 
-// service 템플릿(대분류): 서비스 구조만, 이미지 없음(slot).
+// service template (category): service structure only, no images (slot).
 const buTemplate: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
   kind: "service",
   category: "topology",
@@ -24,7 +24,7 @@ const buTemplate: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
 });
 
 describe("resolveHarnessInstance — service(topology)", () => {
-  it("템플릿 구조 + 인스턴스 pins → resolved ServiceHarnessSpec (슬롯이 이미지로 치환)", () => {
+  it("template structure + instance pins → resolved ServiceHarnessSpec (slots substituted with images)", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "bu", version: "1" },
       id: "bu",
@@ -39,13 +39,13 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.services.map((s) => [s.name, s.image])).toEqual([
       ["planner", "ghcr.io/acme/planner:abc"],
       ["browser", "chromedp/headless-shell:119"],
-      ["action-stream", "reg/action:abc"], // slot 'action' 으로 핀됨
+      ["action-stream", "reg/action:abc"], // pinned via slot 'action'
     ]);
     expect(resolved.dependencies).toHaveLength(1);
     expect(resolved.frontDoor.service).toBe("planner");
   });
 
-  it("서비스 env 가 resolved spec 까지 보존된다(default {} 로 덮어쓰지 않음)", () => {
+  it("service env is preserved through to the resolved spec (not overwritten by default {})", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
       category: "topology",
@@ -67,7 +67,7 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.services[0]?.env).toEqual({ LOG_LEVEL: "debug", MODEL: "x" });
   });
 
-  it("서비스 volumes/readiness 가 resolved spec 까지 보존된다(런타임이 해석할 수 있도록)", () => {
+  it("service volumes/readiness are preserved through to the resolved spec (so the runtime can interpret them)", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
       category: "topology",
@@ -97,7 +97,7 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.services[0]?.readiness).toEqual({ timeoutMs: 120000, intervalMs: 2000 });
   });
 
-  it("external(BYO) dependency + service 가 resolved spec 까지 보존된다", () => {
+  it("external(BYO) dependency + service is preserved through to the resolved spec", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
       category: "topology",
@@ -124,7 +124,7 @@ describe("resolveHarnessInstance — service(topology)", () => {
     });
   });
 
-  it("overrides.services[].env 가 템플릿 env 위에 병합된다(인스턴스 변주 — 같은 이미지, 다른 동작)", () => {
+  it("overrides.services[].env is merged on top of the template env (instance variation — same image, different behavior)", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
       category: "topology",
@@ -144,11 +144,11 @@ describe("resolveHarnessInstance — service(topology)", () => {
     });
     const resolved = resolveHarnessInstance(tpl, instance);
     if (resolved.kind !== "service") throw new Error("expected service");
-    // MODEL 은 인스턴스가 덮고, LOG_LEVEL 은 템플릿 유지, TEMPERATURE 는 추가.
+    // MODEL is overridden by the instance, LOG_LEVEL is kept from the template, TEMPERATURE is added.
     expect(resolved.services[0]?.env).toEqual({ LOG_LEVEL: "info", MODEL: "claude-opus-4-8", TEMPERATURE: "0.2" });
   });
 
-  it("overrides.frontDoor.request.bodyTemplate 가 템플릿 본문 위에 shallow-merge 된다", () => {
+  it("overrides.frontDoor.request.bodyTemplate is shallow-merged on top of the template body", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
       category: "topology",
@@ -175,7 +175,7 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(resolved.frontDoor.request?.bodyTemplate).toEqual({ task: "{{task}}", max_steps: 30 });
   });
 
-  it("overrides.services[] 의 replicas/resources/volumes/readiness 가 scalar 치환된다(Phase 2/3)", () => {
+  it("overrides.services[]'s replicas/resources/volumes/readiness are scalar-substituted (Phase 2/3)", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
       category: "topology",
@@ -211,7 +211,7 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(s?.readiness).toEqual({ timeoutMs: 120000, intervalMs: 2000 });
   });
 
-  it("overrides.target.extension.ref 가 템플릿 target 의 익스텐션을 핀하고, target 없으면 BadRequest(Phase 3)", () => {
+  it("overrides.target.extension.ref pins the template target's extension, and BadRequest if no target (Phase 3)", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
       category: "topology",
@@ -234,12 +234,12 @@ describe("resolveHarnessInstance — service(topology)", () => {
     if (resolved.kind !== "service") throw new Error("expected service");
     expect(resolved.target?.extension?.ref).toBe("ghcr.io/acme/ext:2");
 
-    // target 없는 템플릿에 target override → BadRequest
+    // target override on a template without a target → BadRequest
     const noTarget = HarnessTemplateSpecSchema.parse({ ...tpl, target: undefined });
     expect(() => resolveHarnessInstance(noTarget, instance)).toThrow(BadRequestError);
   });
 
-  it("overrides.frontDoor.completion 타이밍이 템플릿 completion 위에 병합되고 모드 불일치 키는 제거된다(Phase 3)", () => {
+  it("overrides.frontDoor.completion timing is merged on top of the template completion and mode-mismatched keys are dropped (Phase 3)", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "service",
       category: "topology",
@@ -267,10 +267,10 @@ describe("resolveHarnessInstance — service(topology)", () => {
     if (c?.mode !== "poll") throw new Error("expected poll");
     expect(c.timeoutMs).toBe(300000);
     expect(c.intervalMs).toBe(5000);
-    expect(c.statusPath).toBe("GET /runs/{run_id}"); // 모드/구조는 보존
+    expect(c.statusPath).toBe("GET /runs/{run_id}"); // mode/structure are preserved
   });
 
-  it("overrides 대상 서비스가 템플릿에 없으면 BadRequestError", () => {
+  it("BadRequestError when the override target service is not in the template", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "bu", version: "1" },
       id: "bu",
@@ -281,19 +281,19 @@ describe("resolveHarnessInstance — service(topology)", () => {
     expect(() => resolveHarnessInstance(buTemplate, instance)).toThrow(BadRequestError);
   });
 
-  it("슬롯 pin 누락 → BadRequestError", () => {
+  it("missing slot pin → BadRequestError", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "bu", version: "1" },
       id: "bu",
       version: "x",
-      pins: { planner: "p:1", browser: "b:1" }, // action 누락
+      pins: { planner: "p:1", browser: "b:1" }, // action missing
     });
     expect(() => resolveHarnessInstance(buTemplate, instance)).toThrow(BadRequestError);
   });
 
-  it("인스턴스의 template 참조가 템플릿과 불일치 → BadRequestError", () => {
+  it("instance's template reference mismatches the template → BadRequestError", () => {
     const instance = HarnessInstanceSpecSchema.parse({
-      template: { id: "bu", version: "2" }, // 버전 불일치
+      template: { id: "bu", version: "2" }, // version mismatch
       id: "bu",
       version: "x",
       pins: { planner: "p", browser: "b", action: "a" },
@@ -314,7 +314,7 @@ describe("resolveHarnessInstance — command", () => {
     model: "gpt-4o",
   });
 
-  it("pins.image/model 이 템플릿 기본을 오버라이드", () => {
+  it("pins.image/model override the template defaults", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "aider", version: "1" },
       id: "aider",
@@ -328,7 +328,7 @@ describe("resolveHarnessInstance — command", () => {
     expect(resolved.command).toContain("aider --yes");
   });
 
-  it("pins 가 비면 템플릿 기본값 사용", () => {
+  it("uses template defaults when pins are empty", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "aider", version: "1" },
       id: "aider",
@@ -340,7 +340,7 @@ describe("resolveHarnessInstance — command", () => {
     expect(resolved.model).toBe("gpt-4o");
   });
 
-  it("overrides.env/params 가 템플릿 위에 병합된다(같은 command, 다른 플래그 변주)", () => {
+  it("overrides.env/params are merged on top of the template (same command, different flag variation)", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "command",
       category: "aider",
@@ -360,23 +360,23 @@ describe("resolveHarnessInstance — command", () => {
     const resolved = resolveHarnessInstance(tpl, instance);
     if (resolved.kind !== "command") throw new Error("expected command");
     expect(resolved.env).toEqual({ AIDER_YES: "1", AIDER_TEMPERATURE: "0" });
-    expect(resolved.params).toEqual({ edit_format: "diff" }); // 인스턴스가 템플릿 기본을 덮음
+    expect(resolved.params).toEqual({ edit_format: "diff" }); // the instance overrides the template default
   });
 });
 
-describe("HarnessInstanceSpec — description(버전 변경 내역)", () => {
-  it("인스턴스에 자유 텍스트 description(변경 내역)을 붙일 수 있고 파싱에 보존된다", () => {
+describe("HarnessInstanceSpec — description (version changelog)", () => {
+  it("a free-text description (changelog) can be attached to the instance and is preserved on parse", () => {
     const instance = HarnessInstanceSpecSchema.parse({
       template: { id: "aider", version: "1" },
       id: "aider",
       version: "sha-def",
       pins: { image: "ghcr.io/acme/aider:def" },
-      description: "승인 프롬프트 자동 통과 플래그 추가",
+      description: "add flag to auto-approve the approval prompt",
     });
-    expect(instance.description).toBe("승인 프롬프트 자동 통과 플래그 추가");
+    expect(instance.description).toBe("add flag to auto-approve the approval prompt");
   });
 
-  it("description 은 선택 — 런타임 무관 메타라 resolved 스펙에는 실려가지 않는다", () => {
+  it("description is optional — runtime-agnostic meta, so it is not carried into the resolved spec", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "process",
       category: "claude-code",
@@ -395,7 +395,7 @@ describe("HarnessInstanceSpec — description(버전 변경 내역)", () => {
 });
 
 describe("resolveHarnessInstance — process", () => {
-  it("process 템플릿 → resolved ProcessHarnessSpec(id@version)", () => {
+  it("process template → resolved ProcessHarnessSpec(id@version)", () => {
     const tpl: HarnessTemplateSpec = HarnessTemplateSpecSchema.parse({
       kind: "process",
       category: "claude-code",

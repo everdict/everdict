@@ -19,7 +19,7 @@ import {
 
 type Author = { name: string; avatarUrl?: string }
 
-// 사용자에게 노출하는 "질문"은 3개뿐 — 나머지 피벗 설정은 각 질문이 내부적으로 고정한다.
+// Only 3 "questions" are exposed to the user — each question fixes the rest of the pivot settings internally.
 export type QuestionId = 'trend' | 'models' | 'harnesses'
 const QUESTIONS: { id: QuestionId; labelKey: string; descKey: string; pick: 'harness' | null }[] = [
   { id: 'trend', labelKey: 'trendLabel', descKey: 'trendDesc', pick: 'harness' },
@@ -56,7 +56,7 @@ function buildConfig(q: QuestionId, harness: string, nowIso: string): AnalysisCo
       pivotBy: 'dataset',
     }
   }
-  // harnesses — 벤치마크(행) × 하니스(열)
+  // harnesses — benchmark (rows) × harness (columns)
   return { ...base, groupBy: ['dataset'], pivotBy: 'harness' }
 }
 
@@ -70,7 +70,7 @@ function scoreCell(value: number | undefined) {
   )
 }
 
-// 벤치마크별 추이 라인(벤치마크당 1선).
+// Per-benchmark trend lines (one line per benchmark).
 function LineChart({ result }: { result: LineResult }) {
   const t = useTranslations('analyzeScorecards')
   const ariaLabel = t('scoreTrend')
@@ -150,7 +150,7 @@ function LineChart({ result }: { result: LineResult }) {
   )
 }
 
-// 그리드(표) — 그룹 행 + 피벗 열 + 통과율 셀.
+// Grid (table) — group rows + pivot columns + pass-rate cells.
 function GridTable({ result, config }: { result: GridResult; config: AnalysisConfig }) {
   const t = useTranslations('analyzeScorecards')
   return (
@@ -199,7 +199,7 @@ function GridTable({ result, config }: { result: GridResult; config: AnalysisCon
   )
 }
 
-// 스코어카드 분석 — 구체적 질문 3개(추이·모델 비교·하니스 비교)만 아주 쉽게.
+// Scorecard analysis — makes just 3 concrete questions (trend·model compare·harness compare) very easy.
 export function ScorecardAnalyzer({
   scorecards,
   authors,
@@ -237,7 +237,7 @@ export function ScorecardAnalyzer({
 
   return (
     <div className="space-y-4">
-      {/* 질문 선택 */}
+      {/* question selection */}
       <div className="grid gap-2 sm:grid-cols-3">
         {QUESTIONS.map((x) => (
           <button
@@ -259,7 +259,7 @@ export function ScorecardAnalyzer({
         ))}
       </div>
 
-      {/* 최소 입력 — 하니스 선택(추이·모델 비교만) */}
+      {/* minimal input — harness selection (trend·model compare only) */}
       {question.pick === 'harness' && (
         <div className="flex items-center gap-2">
           <span className="text-[12px] text-muted-foreground">{t('harness')}</span>
@@ -274,7 +274,7 @@ export function ScorecardAnalyzer({
         </div>
       )}
 
-      {/* 결과 */}
+      {/* results */}
       {result.total === 0 ? (
         <EmptyState
           title={t('emptyTitle')}

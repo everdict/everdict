@@ -1,13 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { mapClaudeStreamJson } from "./stream-json.js";
 
-describe("mapClaudeStreamJson — stream-json → 정규화 TraceEvent", () => {
+describe("mapClaudeStreamJson — stream-json → normalized TraceEvent", () => {
   const clock = () => {
     let t = 0;
     return () => t++;
   };
 
-  it("assistant 텍스트+tool_use+usage를 매핑한다", () => {
+  it("maps assistant text + tool_use + usage", () => {
     const next = clock();
     const events = mapClaudeStreamJson(
       {
@@ -15,7 +15,7 @@ describe("mapClaudeStreamJson — stream-json → 정규화 TraceEvent", () => {
         message: {
           model: "claude-opus-4-8",
           content: [
-            { type: "text", text: "고치겠습니다" },
+            { type: "text", text: "I'll fix it" },
             { type: "tool_use", id: "tu_1", name: "Edit", input: { path: "a.ts" } },
           ],
           usage: { input_tokens: 10, output_tokens: 3 },
@@ -28,7 +28,7 @@ describe("mapClaudeStreamJson — stream-json → 정규화 TraceEvent", () => {
     expect(llm?.kind === "llm_call" && llm.cost?.inputTokens).toBe(10);
   });
 
-  it("user tool_result와 result(비용)을 매핑한다", () => {
+  it("maps user tool_result and result (cost)", () => {
     const next = clock();
     const toolResult = mapClaudeStreamJson(
       {

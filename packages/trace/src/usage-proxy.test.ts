@@ -13,7 +13,7 @@ function listen(server: http.Server): Promise<number> {
 const close = (s: http.Server): Promise<void> => new Promise((r) => s.close(() => r()));
 
 describe("extractUsage", () => {
-  it("usage 를 추출하고, total 없으면 prompt+completion 으로 보정", () => {
+  it("extracts usage, and falls back to prompt+completion when total is absent", () => {
     expect(
       extractUsage(JSON.stringify({ usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 } })),
     ).toEqual({
@@ -27,7 +27,7 @@ describe("extractUsage", () => {
       total: 10,
     });
   });
-  it("usage 없음 / 비JSON → null", () => {
+  it("no usage / non-JSON → null", () => {
     expect(extractUsage(JSON.stringify({ choices: [] }))).toBeNull();
     expect(extractUsage("data: [DONE]")).toBeNull();
     expect(extractUsage("")).toBeNull();
@@ -35,9 +35,9 @@ describe("extractUsage", () => {
 });
 
 describe("costFromHeaders", () => {
-  it("LiteLLM 비용 헤더(버전별 이름)에서 $ 를 읽고, 없으면 0", () => {
+  it("reads $ from the LiteLLM cost header (per-version names), 0 when absent", () => {
     expect(costFromHeaders({ "x-litellm-response-cost": "0.0031" })).toBeCloseTo(0.0031);
-    expect(costFromHeaders({ "x-litellm-response-cost-original": "0.5" })).toBe(0.5); // 이 버전 헤더명
+    expect(costFromHeaders({ "x-litellm-response-cost-original": "0.5" })).toBe(0.5); // this version's header name
     expect(costFromHeaders({ "content-type": "application/json" })).toBe(0);
     expect(costFromHeaders({ "x-litellm-response-cost": "nope" })).toBe(0);
   });
@@ -51,7 +51,7 @@ describe("createUsageProxy", () => {
   const tally = inMemoryUsageTally();
 
   beforeAll(async () => {
-    // 가짜 업스트림: usage 가 든 chat/completions 를 돌려주고, 받은 귀속 헤더를 기록.
+    // Fake upstream: returns chat/completions with usage, and records the attribution header it received.
     upstream = http.createServer((req, res) => {
       seenRunHeader = req.headers["x-everdict-run"] as string | undefined;
       const body = JSON.stringify({
@@ -59,7 +59,7 @@ describe("createUsageProxy", () => {
         choices: [{ message: { role: "assistant", content: "hi" } }],
         usage: { prompt_tokens: 10, completion_tokens: 5, total_tokens: 15 },
       });
-      // 계량 모델처럼 비용 헤더를 함께 반환(프록시가 $도 회수하는지 검증).
+      // Return the cost header too, like a metered model (verify the proxy collects $ as well).
       res.writeHead(200, { "content-type": "application/json", "x-litellm-response-cost-original": "0.002" });
       res.end(body);
     });
@@ -80,28 +80,28 @@ describe("createUsageProxy", () => {
       body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "u" }] }),
     });
 
-  it("응답을 그대로 통과시키고(passthrough) run 별 토큰+비용을 누적", async () => {
+  it("passes the response through unchanged and accumulates tokens+cost per run", async () => {
     const r = await callThrough("r1");
     expect(r.status).toBe(200);
     const j = (await r.json()) as { choices: { message: { content: string } }[] };
-    expect(j.choices[0]?.message.content).toBe("hi"); // 본문 변형 없음
+    expect(j.choices[0]?.message.content).toBe("hi"); // no body mutation
     await callThrough("r1");
     await callThrough("r2");
 
     const r1 = tally.get("r1");
     expect(r1).toMatchObject({ promptTokens: 20, completionTokens: 10, totalTokens: 30, calls: 2 });
-    expect(r1.usd).toBeCloseTo(0.004); // 0.002 × 2 (비용 헤더 누적)
+    expect(r1.usd).toBeCloseTo(0.004); // 0.002 × 2 (cost header accumulated)
     const r2 = tally.get("r2");
     expect(r2).toMatchObject({ promptTokens: 10, completionTokens: 5, totalTokens: 15, calls: 1 });
     expect(r2.usd).toBeCloseTo(0.002);
   });
 
-  it("귀속 헤더는 업스트림으로 새지 않는다(프록시가 제거)", async () => {
+  it("the attribution header does not leak to the upstream (the proxy strips it)", async () => {
     await callThrough("rX");
     expect(seenRunHeader).toBeUndefined();
   });
 
-  it("헤더 없으면 default run 에 귀속", async () => {
+  it("attributes to the default run when the header is absent", async () => {
     const before = tally.get("default").calls;
     await callThrough();
     expect(tally.get("default").calls).toBe(before + 1);

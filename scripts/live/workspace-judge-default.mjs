@@ -1,27 +1,27 @@
-// 라이브 e2e (SLICE 57): 워크스페이스 기본 judge 모델 → 컨트롤플레인(RunService)이 job.judge 를 자동으로 채움.
-// 유저는 케이스에 judge grader 만 두고(모델 미지정), 워크스페이스 설정에 기본 judge 모델만 등록하면
-// 모든 run 이 그 모델로 inline judge 채점된다. 요청별 override 가 워크스페이스 기본을 이긴다.
-// process.env.EVERDICT_JUDGE_MODEL 은 일부러 비운다 → 모델은 오직 워크스페이스 설정 → job.judge 에서 와야 한다.
+// live e2e (SLICE 57): workspace default judge model → the control plane (RunService) fills in job.judge automatically.
+// The user only puts a judge grader on the case (no model specified) and registers a default judge model in the workspace settings, then
+// every run is inline-judge scored with that model. A per-request override beats the workspace default.
+// process.env.EVERDICT_JUDGE_MODEL is left empty on purpose → the model must come only from the workspace settings → job.judge.
 import process from "node:process";
 import { RunService } from "../../apps/api/dist/run-service.js";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { InMemoryRunStore, InMemoryWorkspaceSettingsStore } from "../../packages/db/dist/index.js";
 
-// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(워크스페이스 기본값만 적용됨을 검증)
+// biome-ignore lint/performance/noDelete: removing the process.env key is intentional (verifies only the workspace default applies)
 delete process.env.EVERDICT_JUDGE_MODEL;
-// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(테스트 격리)
+// biome-ignore lint/performance/noDelete: removing the process.env key is intentional (test isolation)
 delete process.env.EVERDICT_JUDGE_PROVIDER;
 
 const settings = new InMemoryWorkspaceSettingsStore();
-// 워크스페이스 기본 judge 모델 등록(키는 시크릿/ env, 여기엔 모델/프로바이더만).
+// register the workspace default judge model (the key comes from secrets/env; here just model/provider).
 await settings.set("acme", { judge: { provider: "openai", model: process.env.LLM_MODEL ?? "gpt-5.4-mini" } });
 
-// 컨트롤플레인이 in-process 로 케이스를 돌리는 디스패처(LocalBackend 동치). runAgentJob 이 job.judge 로 judge 구성.
+// dispatcher that runs the case in-process on the control plane (LocalBackend equivalent). runAgentJob builds the judge from job.judge.
 const dispatcher = { dispatch: (job) => runAgentJob(job) };
 const svc = new RunService({
   dispatcher,
   store: new InMemoryRunStore(),
-  judgeFor: async (t) => (await settings.get(t))?.judge, // main.ts 와 동일 배선
+  judgeFor: async (t) => (await settings.get(t))?.judge, // same wiring as main.ts
 });
 
 const judgeCase = {
@@ -44,7 +44,7 @@ const judgeCase = {
 
 async function runFor(tenant) {
   const rec = await svc.submit({ tenant, harness: { id: "scripted", version: "1.0.0" }, case: judgeCase });
-  // track 은 fire-and-forget → 완료까지 폴링.
+  // track is fire-and-forget → poll until complete.
   for (let i = 0; i < 60; i++) {
     const r = await svc.get(rec.id);
     if (r && r.status !== "queued" && r.status !== "running") return r;
@@ -53,9 +53,9 @@ async function runFor(tenant) {
   return svc.get(rec.id);
 }
 
-console.log("=== 워크스페이스 기본 judge 모델 → job.judge 자동 주입 ===");
-const acme = await runFor("acme"); // 워크스페이스 기본 judge 있음 → 실 모델 판정
-const beta = await runFor("beta"); // 기본 없음 → judge skip
+console.log("=== workspace default judge model → job.judge auto-injection ===");
+const acme = await runFor("acme"); // has a workspace default judge → real model verdict
+const beta = await runFor("beta"); // no default → judge skipped
 
 const jOf = (r) => r?.result?.scores?.find((s) => s.metric === "judge");
 const ja = jOf(acme);
@@ -74,7 +74,7 @@ const ok =
 
 console.log(
   ok
-    ? "\n✅ SLICE 57: 워크스페이스 기본 judge 모델이 컨트롤플레인(RunService)에서 job.judge 로 자동 주입 → acme 는 실 모델 judge 채점(pass), 기본 없는 beta 는 judge skip. 유저는 케이스에 judge grader 만 두면 됨(모델은 워크스페이스 설정)."
-    : "\n⚠️ 기대와 불일치",
+    ? "\n✅ SLICE 57: the workspace default judge model is auto-injected as job.judge by the control plane (RunService) → acme gets real-model judge scoring (pass), and beta (no default) skips the judge. The user only needs a judge grader on the case (the model comes from workspace settings)."
+    : "\n⚠️ does not match expectation",
 );
 process.exit(ok ? 0 : 1);

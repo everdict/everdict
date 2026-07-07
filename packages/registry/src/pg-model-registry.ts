@@ -7,8 +7,8 @@ interface ModelRow {
   model: unknown;
 }
 
-// Postgres 기반 테넌트-소유 model SSOT. (tenant, id, version) 키. 테넌트 소유 우선, 없으면 _shared 폴백.
-// 스키마: @everdict/db/migrations/0013_create_models. PgJudgeRegistry 와 동일 구조.
+// Postgres-backed tenant-owned model SSOT. (tenant, id, version) key. Tenant-owned first, else _shared fallback.
+// Schema: @everdict/db/migrations/0013_create_models. Same structure as PgJudgeRegistry.
 export class PgModelRegistry implements ModelRegistry {
   constructor(private readonly client: SqlClient) {}
 
@@ -43,7 +43,7 @@ export class PgModelRegistry implements ModelRegistry {
         throw new ConflictError(
           "CONFLICT",
           { tenant, id: spec.id, version: spec.version },
-          `model ${spec.id}@${spec.version} 가 다른 내용으로 이미 등록되어 있습니다(버전은 불변).`,
+          `model ${spec.id}@${spec.version} is already registered with different content (versions are immutable).`,
         );
       }
       return;
@@ -71,12 +71,12 @@ export class PgModelRegistry implements ModelRegistry {
   }
 
   async ownVersions(tenant: string, id: string): Promise<string[]> {
-    return this.ownerVersions(tenant, id); // 정확히 이 테넌트 소유만(폴백 없음)
+    return this.ownerVersions(tenant, id); // exactly this tenant's own (no fallback)
   }
 
   async get(tenant: string, id: string, ref = "latest"): Promise<ModelSpec> {
     const owner = await this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `model '${id}' 가 없습니다.`);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `model '${id}' not found.`);
     const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
     const res = await this.client.query<ModelRow>(
       "SELECT model FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3",

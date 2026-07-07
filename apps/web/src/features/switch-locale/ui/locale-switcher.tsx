@@ -11,8 +11,8 @@ import { DropdownItem, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
 import { setLocale } from '../api/set-locale'
 
-// 언어 전환 — 상태 아이콘 + 클릭 드롭다운 컨벤션(테마 토글 옆, 사이드바 푸터 행 스타일).
-// 선택은 쿠키로 저장되고 router.refresh 로 서버 컴포넌트 문자열까지 즉시 반영된다.
+// Language switcher — status icon + click dropdown convention (next to the theme toggle, sidebar footer row style).
+// The choice is stored in a cookie and applied immediately, down to server component strings, via router.refresh.
 export function LocaleSwitcher({ rowClassName }: { rowClassName?: string }) {
   const t = useTranslations('locale')
   const locale = useLocale()

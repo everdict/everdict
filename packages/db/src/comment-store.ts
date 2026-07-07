@@ -1,15 +1,15 @@
 import { z } from "zod";
 import type { SqlClient } from "./client.js";
 
-// 리소스(데이터셋 등)에 달리는 댓글 — Linear 이슈 댓글처럼 협업 논의를 남긴다. 활동 타임라인에 이벤트와 섞여 흐른다.
-// resourceType 은 확장 가능(현재 "dataset"). 워크스페이스 스코프 + author=작성자 subject.
+// Comments on a resource (dataset etc.) — collaborative discussion, like Linear issue comments. Flows mixed with events in the activity timeline.
+// resourceType is extensible (currently "dataset"). Workspace-scoped + author=author subject.
 export const CommentRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   resourceType: z.string(), // "dataset"|"harness"|"scorecard"|"view"|"schedule"|"run"|"runtime"
   resourceId: z.string(),
-  parentId: z.string().optional(), // 대댓글이면 부모 댓글 id(같은 리소스, 최상위만 부모 — 1단계 스레드). 없으면 최상위.
-  author: z.string(), // 작성자 subject
+  parentId: z.string().optional(), // if a reply, the parent comment id (same resource, only top-level can be a parent — one-level thread). Absent = top-level.
+  author: z.string(), // author subject
   body: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),
@@ -18,7 +18,7 @@ export type CommentRecord = z.infer<typeof CommentRecordSchema>;
 
 export interface CommentStore {
   add(record: CommentRecord): Promise<void>;
-  // 오래된→최신(createdAt ASC) — 타임라인 순서. 워크스페이스+리소스 스코프.
+  // Oldest→newest (createdAt ASC) — timeline order. Workspace + resource scoped.
   list(tenant: string, resourceType: string, resourceId: string): Promise<CommentRecord[]>;
   get(tenant: string, id: string): Promise<CommentRecord | undefined>;
   remove(tenant: string, id: string): Promise<void>;
@@ -42,7 +42,7 @@ export class InMemoryCommentStore implements CommentStore {
   }
 
   async remove(tenant: string, id: string): Promise<void> {
-    // 자기 자신 + 이 댓글에 달린 대댓글(children)까지 함께 삭제(고아 대댓글 방지).
+    // Delete itself + the replies (children) on this comment together (prevents orphaned replies).
     for (let i = this.rows.length - 1; i >= 0; i--) {
       const r = this.rows[i];
       if (r && r.tenant === tenant && (r.id === id || r.parentId === id)) this.rows.splice(i, 1);
@@ -117,7 +117,7 @@ export class PgCommentStore implements CommentStore {
   }
 
   async remove(tenant: string, id: string): Promise<void> {
-    // 자기 자신 + 대댓글(parent_id = id)까지 함께 삭제(고아 방지).
+    // Delete itself + the replies (parent_id = id) together (prevents orphans).
     await this.client.query("DELETE FROM everdict_comments WHERE tenant = $1 AND (id = $2 OR parent_id = $2)", [
       tenant,
       id,

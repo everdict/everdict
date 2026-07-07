@@ -1,8 +1,8 @@
 import { Buffer } from "node:buffer";
-// 라이브 e2e (SLICE 66): in-image repo env-mode — 코딩 에이전트가 prebuilt 이미지의 repo(/testbed)에 직접 작업.
-// 완전 자율 흐름(실 docker, full runCase): DockerDriver 가 env 이미지로 컨테이너 → RepoEnvironment(source:{path:/testbed})
-// 가 clone 없이 work→/testbed 심볼릭링크 → 하니스(에이전트)가 /testbed 의 코드를 고침 → SweBenchGrader 가 /testbed 에서
-// test_patch 적용 + pytest → resolved. (실 SWE-bench prebuilt 도 동일: 이미지에 repo@base_commit + deps 동봉.)
+// Live e2e (SLICE 66): in-image repo env-mode — the coding agent works directly on the prebuilt image's repo (/testbed).
+// Fully autonomous flow (real docker, full runCase): DockerDriver launches a container from the env image → RepoEnvironment(source:{path:/testbed})
+// symlinks work→/testbed without cloning → the harness (agent) fixes the code in /testbed → SweBenchGrader, in /testbed,
+// applies test_patch + pytest → resolved. (The real SWE-bench prebuilt is the same: the image bundles repo@base_commit + deps.)
 import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -22,7 +22,7 @@ const TEST_ADD =
   "from calc import add, mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n\ndef test_add():\n    assert add(2, 3) == 5\n";
 const b64 = (s) => Buffer.from(s).toString("base64");
 
-// 1) gold test_patch 생성(호스트 git): baseline → test_add 추가.
+// 1) Generate the gold test_patch (host git): baseline → add test_add.
 const wd = mkdtempSync(join(tmpdir(), "tb-"));
 const git = (a) => execFileSync("git", ["-C", wd, ...a], { encoding: "utf8" });
 writeFileSync(join(wd, "test_calc.py"), TEST_BASE);
@@ -33,7 +33,7 @@ writeFileSync(join(wd, "test_calc.py"), TEST_ADD);
 const TEST_PATCH = git(["diff", "--", "test_calc.py"]);
 rmSync(wd, { recursive: true, force: true });
 
-// 2) prebuilt 대역 이미지: /testbed = git repo(버그 + 기존 테스트) @ baseline, deps(pytest) 동봉. 에이전트 미포함.
+// 2) Stand-in for the prebuilt image: /testbed = git repo (bug + existing test) @ baseline, deps (pytest) bundled. Agent not included.
 const dockerfile = `FROM python:3.11-slim
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/* && pip install --no-cache-dir -q pytest
 RUN mkdir -p /testbed
@@ -42,12 +42,12 @@ RUN python -c "import base64;open('calc.py','wb').write(base64.b64decode('${b64(
  && python -c "import base64;open('test_calc.py','wb').write(base64.b64decode('${b64(TEST_BASE)}'))" \\
  && git init -q && git -c user.email=a@b.c -c user.name=everdict add -A && git -c user.email=a@b.c -c user.name=everdict commit -q -m base
 `;
-console.log("=== prebuilt 대역 이미지 빌드(/testbed repo@baseline + deps, 에이전트 미포함) ===");
+console.log("=== build prebuilt stand-in image (/testbed repo@baseline + deps, agent not included) ===");
 execFileSync("docker", ["build", "-t", IMAGE, "-"], { input: dockerfile, stdio: ["pipe", "ignore", "inherit"] });
 
 const evalCase = {
   id: "calc-add",
-  env: { kind: "repo", source: { path: "/testbed" } }, // 이미지-내 repo — clone 안 함
+  env: { kind: "repo", source: { path: "/testbed" } }, // in-image repo — no clone
   image: IMAGE,
   task: "Fix add() in /testbed/calc.py so the added test passes (should return a+b).",
   graders: [],
@@ -59,9 +59,9 @@ const grader = new SweBenchGrader({
   failToPass: ["test_calc.py::test_add"],
   passToPass: ["test_calc.py::test_mul"],
   testCmd: "python -m pytest -q --no-header",
-  // cwd 기본 "work" → 컨테이너에서 /everdict/work → /testbed 심볼릭링크
+  // cwd defaults to "work" → /everdict/work in the container → symlink to /testbed
 });
-// "에이전트": work(=/testbed) 의 calc.py 를 고친다. (실 코딩 에이전트 자리 — 여기선 scripted.)
+// "agent": fixes calc.py in work (=/testbed). (Placeholder for a real coding agent — scripted here.)
 const fixPlan = () => [{ tool: "bash", cmd: `echo ${b64(FIXED)} | base64 -d > calc.py` }];
 const noopPlan = () => [];
 
@@ -80,7 +80,7 @@ async function run(label, plan) {
   return r;
 }
 
-console.log("\n=== 에이전트가 /testbed 에 직접 작업 → /testbed 에서 채점 (실 docker + 실 pytest) ===");
+console.log("\n=== agent works directly on /testbed → grade in /testbed (real docker + real pytest) ===");
 const fixed = await run("agent fixes", fixPlan);
 const noop = await run("no fix    ", noopPlan);
 
@@ -89,7 +89,7 @@ execFileSync("docker", ["rmi", "-f", IMAGE], { stdio: "ignore" });
 const ok = fixed?.pass === true && (fixed?.changed ?? []) && noop?.pass === false;
 console.log(
   ok
-    ? "\n✅ SLICE 66: in-image repo env-mode — RepoEnvironment(source:{path:/testbed})가 clone 없이 work→/testbed 링크 → 에이전트(scripted)가 이미지의 repo 를 직접 고침 → SweBenchGrader 가 /testbed 에서 test_patch+pytest → 고치면 resolved, 안 고치면 unresolved. 실 prebuilt 이미지로 SWE-bench 완전 자율 실행 경로 완성(deps+repo 는 이미지, 에이전트는 안 구움)."
-    : "\n⚠️ 기대와 불일치",
+    ? "\n✅ SLICE 66: in-image repo env-mode — RepoEnvironment(source:{path:/testbed}) links work→/testbed without cloning → the agent (scripted) fixes the image's repo directly → SweBenchGrader runs test_patch+pytest in /testbed → resolved if fixed, unresolved if not. Completes the fully-autonomous SWE-bench run path with a real prebuilt image (deps+repo in the image, agent not baked in)."
+    : "\n⚠️ Mismatch vs expected",
 );
 process.exit(ok ? 0 : 1);

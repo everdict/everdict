@@ -32,18 +32,18 @@ const bundle = (over: Record<string, unknown> = {}) =>
   BundleSchema.parse({ id: "codex-pinch", version: "1.0.0", datasets: [DATASET], judges: [JUDGE], ...over });
 
 describe("requiredActionsForBundle", () => {
-  it("번들 내용에서 필요한 per-type 액션을 도출한다(새 액션 없이 조합)", () => {
+  it("derives the required per-type actions from the bundle contents (composed, no new action)", () => {
     expect(requiredActionsForBundle(bundle()).sort()).toEqual(["datasets:write", "judges:write"]);
     expect(requiredActionsForBundle(BundleSchema.parse({ id: "x", version: "1", datasets: [DATASET] }))).toEqual([
       "datasets:write",
     ]);
-    // 빈 번들 → 요구 액션 없음
+    // empty bundle → no required actions
     expect(requiredActionsForBundle(BundleSchema.parse({ id: "x", version: "1" }))).toEqual([]);
   });
 });
 
 describe("BundleService.apply", () => {
-  it("각 섹션을 기존 레지스트리로 팬아웃해 등록하고 멱등하다(같은 내용 재적용=ok)", async () => {
+  it("fans each section out to its existing registry to register, idempotently (re-applying the same content = ok)", async () => {
     const datasets = new InMemoryDatasetRegistry();
     const judges = new InMemoryJudgeRegistry();
     const svc = new BundleService({ datasets, judges });
@@ -53,29 +53,29 @@ describe("BundleService.apply", () => {
       ["dataset", "ok"],
       ["judge", "ok"],
     ]);
-    // 실제로 등록됨
+    // actually registered
     expect((await datasets.get("acme", "d", "1.0.0")).id).toBe("d");
 
-    // 멱등: 같은 내용 재적용는 예외 없이 ok(불변 레지스트리).
+    // idempotent: re-applying the same content is ok with no exception (immutable registry).
     const again = await svc.apply("acme", "u-alice", bundle());
     expect(again.results.every((r) => r.status === "ok")).toBe(true);
   });
 
-  it("같은 (id,version) 에 다른 내용 → 그 항목만 conflict(배치는 중단하지 않음)", async () => {
+  it("different content at the same (id,version) → only that item conflicts (the batch is not aborted)", async () => {
     const datasets = new InMemoryDatasetRegistry();
     const judges = new InMemoryJudgeRegistry();
-    await datasets.register("acme", DatasetSchema.parse({ ...DATASET, description: "original" })); // 선점(다른 내용)
+    await datasets.register("acme", DatasetSchema.parse({ ...DATASET, description: "original" })); // pre-claim (different content)
     const svc = new BundleService({ datasets, judges });
 
     const res = await svc.apply("acme", "u-alice", bundle());
     const byKind = Object.fromEntries(res.results.map((r) => [r.kind, r.status]));
-    expect(byKind.dataset).toBe("conflict"); // 다른 내용 → 충돌
-    expect(byKind.judge).toBe("ok"); // 그래도 나머지는 계속 진행
+    expect(byKind.dataset).toBe("conflict"); // different content → conflict
+    expect(byKind.judge).toBe("ok"); // the rest still proceeds
   });
 
-  it("섹션의 레지스트리가 없으면 그 항목은 skipped(배치 계속)", async () => {
+  it("if a section's registry is absent, that item is skipped (the batch continues)", async () => {
     const datasets = new InMemoryDatasetRegistry();
-    const svc = new BundleService({ datasets }); // judges 레지스트리 미설정
+    const svc = new BundleService({ datasets }); // no judges registry configured
     const res = await svc.apply("acme", "u-alice", bundle());
     const byKind = Object.fromEntries(res.results.map((r) => [r.kind, r.status]));
     expect(byKind.dataset).toBe("ok");
@@ -83,8 +83,8 @@ describe("BundleService.apply", () => {
   });
 });
 
-describe("examples/bundles/codex-pinch bundle (아티팩트 가드)", () => {
-  it("실제 번들 파일이 스키마를 만족하고 전 항목이 적용된다", async () => {
+describe("examples/bundles/codex-pinch bundle (artifact guard)", () => {
+  it("the real bundle file satisfies the schema and every item applies", async () => {
     const raw = readFileSync(new URL("../../../examples/bundles/codex-pinch/bundle.json", import.meta.url), "utf8");
     const parsed = BundleSchema.parse(JSON.parse(raw));
     const templates = new InMemoryHarnessTemplateRegistry();
@@ -98,7 +98,7 @@ describe("examples/bundles/codex-pinch bundle (아티팩트 가드)", () => {
       }),
     });
     const res = await svc.apply("acme", "u", parsed);
-    expect(res.results.every((r) => r.status === "ok")).toBe(true); // codex 템플릿+인스턴스 + pinch 레시피 + 샘플 데이터셋
+    expect(res.results.every((r) => r.status === "ok")).toBe(true); // codex template+instance + pinch recipe + sample dataset
     expect([...new Set(res.results.map((r) => r.kind))].sort()).toEqual([
       "benchmark-recipe",
       "dataset",

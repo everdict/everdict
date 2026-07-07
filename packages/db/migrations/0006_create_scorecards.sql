@@ -1,5 +1,5 @@
--- 0006_create_scorecards — additive (expand): 스코어카드 run(데이터셋×하니스 배치 평가) 영속 테이블.
--- summary = 경량 집계(목록용), scorecard = 케이스별 전체 결과(상세용, 트레이스 포함 → 무거움).
+-- 0006_create_scorecards — additive (expand): scorecard-run (dataset×harness batch eval) persistence table.
+-- summary = lightweight aggregate (for listing), scorecard = full per-case results (for detail, includes traces → heavy).
 CREATE TABLE IF NOT EXISTS everdict_scorecards (
   id              text PRIMARY KEY,
   tenant          text NOT NULL,
@@ -15,5 +15,5 @@ CREATE TABLE IF NOT EXISTS everdict_scorecards (
   updated_at      timestamptz NOT NULL
 );
 
--- 테넌트별 목록 + 커서(created_at DESC, id DESC) 정렬용.
+-- For per-tenant listing + cursor (created_at DESC, id DESC) ordering.
 CREATE INDEX IF NOT EXISTS everdict_scorecards_tenant_created_idx ON everdict_scorecards (tenant, created_at DESC, id DESC);

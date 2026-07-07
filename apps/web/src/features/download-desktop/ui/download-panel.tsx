@@ -14,7 +14,7 @@ import type { DesktopAsset, DesktopOs, DesktopRelease } from '../api/releases'
 
 const OS_LABEL: Record<DesktopOs, string> = { linux: 'Linux', mac: 'macOS', win: 'Windows' }
 
-// 브라우저 UA → 권장 OS. arm/x64 구분은 UA 로 신뢰할 수 없어(특히 Apple Silicon) OS 까지만 감지한다.
+// Browser UA → recommended OS. The arm/x64 distinction can't be trusted from the UA (especially Apple Silicon), so detect only down to the OS.
 function detectOs(): DesktopOs | null {
   const ua = navigator.userAgent
   if (/Windows/i.test(ua)) return 'win'
@@ -27,7 +27,7 @@ function formatSize(bytes: number): string {
   return `${Math.round(bytes / 1024 / 1024)} MB`
 }
 
-// 사람이 고르기 쉬운 라벨 — 파일 확장자/arch 를 풀어서 쓴다.
+// A label that's easy for a human to pick — spells out the file extension/arch.
 function assetLabel(a: DesktopAsset, t: ReturnType<typeof useTranslations>): string {
   if (a.ext === 'AppImage') return 'Linux AppImage (x86_64)'
   if (a.ext === 'deb') return 'Ubuntu/Debian .deb (amd64)'
@@ -36,7 +36,7 @@ function assetLabel(a: DesktopAsset, t: ReturnType<typeof useTranslations>): str
   return a.ext === 'dmg' ? `macOS .dmg — ${macArch}` : `macOS .zip — ${macArch}`
 }
 
-// OS 별 권장 순서 — 감지된 OS 섹션의 버튼 정렬(리스트에도 같은 순서).
+// Recommended order per OS — sorts the buttons in the detected-OS section (same order in the list too).
 const RECOMMEND_ORDER: Record<DesktopOs, (a: DesktopAsset) => number> = {
   linux: (a) => (a.ext === 'AppImage' ? 0 : 1),
   mac: (a) => (a.ext === 'dmg' ? (a.arch === 'arm64' ? 0 : 1) : 2),
@@ -52,7 +52,7 @@ export function DownloadPanel({
   fallbackUrl,
 }: {
   release: DesktopRelease | null
-  fallbackUrl?: string // DESKTOP_DOWNLOAD_URL — 릴리즈 토큰 미설정 환경의 외부 링크 폴백
+  fallbackUrl?: string // DESKTOP_DOWNLOAD_URL — external-link fallback for environments where the release token is unset
 }) {
   const t = useTranslations('downloadDesktop')
   const [os, setOs] = useState<DesktopOs | null>(null)
@@ -100,7 +100,7 @@ export function DownloadPanel({
     <div className="space-y-6">
       {inDesktop && <Callout tone="info">{t('inDesktopNote')}</Callout>}
 
-      {/* 감지된 OS 의 권장 다운로드 */}
+      {/* recommended download for the detected OS */}
       {os && recommended.length > 0 && (
         <section className="space-y-2.5">
           <h3 className="text-[13px] font-[560] text-foreground">
@@ -126,7 +126,7 @@ export function DownloadPanel({
         </section>
       )}
 
-      {/* 전체 플랫폼 목록 */}
+      {/* full platform list */}
       <section className="space-y-2.5">
         <h3 className="text-[13px] font-[560] text-foreground">{t('allPlatforms')}</h3>
         <ul className="divide-y divide-border rounded-lg border bg-card shadow-raise">
@@ -151,7 +151,7 @@ export function DownloadPanel({
         </ul>
       </section>
 
-      {/* 설치 후 안내 + unsigned 주의 */}
+      {/* post-install guidance + unsigned caveat */}
       <section className="space-y-2.5">
         <h3 className="text-[13px] font-[560] text-foreground">{t('afterInstall')}</h3>
         <ol className="list-decimal space-y-1 pl-5 text-[13px] leading-relaxed text-muted-foreground">

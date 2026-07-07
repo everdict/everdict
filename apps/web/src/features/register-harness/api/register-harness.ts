@@ -14,7 +14,7 @@ export interface ValidateHarnessResult {
   version?: string
   kind?: string
   error?: string
-  // 이미지 출처 경고(warn-not-block) — local/unqualified 이미지는 pull 보장이 없다(등록은 됨).
+  // Image provenance warning (warn-not-block) — local/unqualified images have no pull guarantee (registration still succeeds).
   imageWarnings?: { image: string; class: 'local' | 'unqualified' }[]
 }
 
@@ -25,7 +25,7 @@ export interface RegisterHarnessResult {
   error?: string
 }
 
-// dry-run 검증: 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). authZ/검증은 컨트롤플레인이 강제.
+// dry-run validation: schema + this workspace's existing versions/conflicts (does not register). The control plane enforces authZ/validation.
 export async function validateHarnessAction(spec: unknown): Promise<ValidateHarnessResult> {
   const ctx = await authContext()
   try {
@@ -35,7 +35,7 @@ export async function validateHarnessAction(spec: unknown): Promise<ValidateHarn
   }
 }
 
-// 인스턴스 등록(커밋). 템플릿 존재 + pins resolve / 불변성(409) 은 컨트롤플레인이 강제(무게이트 viewer+).
+// Register an instance (commit). Template existence + pins resolve / immutability (409) are enforced by the control plane (no gate, viewer+).
 export async function registerHarnessAction(instance: unknown): Promise<RegisterHarnessResult> {
   const ctx = await authContext()
   try {
@@ -48,7 +48,7 @@ export async function registerHarnessAction(instance: unknown): Promise<Register
   }
 }
 
-// 템플릿(대분류) dry-run 검증 — 스키마 + 기존 버전(등록하지 않음).
+// Template (top-level category) dry-run validation — schema + existing versions (does not register).
 export async function validateHarnessTemplateAction(spec: unknown): Promise<ValidateHarnessResult> {
   const ctx = await authContext()
   try {
@@ -58,7 +58,7 @@ export async function validateHarnessTemplateAction(spec: unknown): Promise<Vali
   }
 }
 
-// 템플릿(대분류) 등록(커밋). 불변성(409)/검증은 컨트롤플레인이 강제(무게이트 viewer+).
+// Template (top-level category) registration (commit). Immutability (409)/validation are enforced by the control plane (no gate, viewer+).
 export async function registerHarnessTemplateAction(spec: unknown): Promise<RegisterHarnessResult> {
   const ctx = await authContext()
   try {

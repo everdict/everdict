@@ -1,24 +1,24 @@
--- 0019_create_connections — 워크스페이스 외부 계정 연결(Connected accounts) + OAuth 1회용 pending state.
--- 토큰(access/refresh)은 AES-GCM 암호문만 보관(평문 금지). KEK 는 앱 환경(EVERDICT_SECRETS_KEY)/Vault.
+-- 0019_create_connections — workspace external-account links (Connected accounts) + single-use OAuth pending state.
+-- Tokens (access/refresh) keep only the AES-GCM ciphertext (no plaintext). The KEK lives in the app environment (EVERDICT_SECRETS_KEY)/Vault.
 CREATE TABLE IF NOT EXISTS everdict_connections (
   workspace          text NOT NULL,
   id                 text NOT NULL,
   provider           text NOT NULL,
   host               text,
   account_label      text NOT NULL,
-  scopes             text NOT NULL DEFAULT '', -- OAuth scope, 공백 구분
-  ciphertext         text NOT NULL,            -- access token 봉투암호화
+  scopes             text NOT NULL DEFAULT '', -- OAuth scope, space-delimited
+  ciphertext         text NOT NULL,            -- envelope-encrypted access token
   iv                 text NOT NULL,
   tag                text NOT NULL,
-  refresh_ciphertext text,                     -- refresh token(있으면) 봉투암호화
+  refresh_ciphertext text,                     -- envelope-encrypted refresh token (if any)
   refresh_iv         text,
   refresh_tag        text,
-  expires_at         timestamptz,              -- access token 만료(있으면)
+  expires_at         timestamptz,              -- access token expiry (if any)
   connected_at       timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (workspace, id)
 );
 
--- OAuth authorize→callback 사이의 1회용 pending state(CSRF + 콜백 컨텍스트 복원). take 시 DELETE.
+-- Single-use pending state between OAuth authorize→callback (CSRF + callback-context restore). DELETE on take.
 CREATE TABLE IF NOT EXISTS everdict_oauth_states (
   state      text PRIMARY KEY,
   workspace  text NOT NULL,

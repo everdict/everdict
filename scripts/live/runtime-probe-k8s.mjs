@@ -1,15 +1,15 @@
-// 라이브 e2e: runtime 연결 프로브 — makeRuntimeProber → buildRuntimeBackend → Backend.probe() 를
-// 실제 kind-everdict K8s 클러스터에 대고 돌린다. validate(스키마)와 달리 잡 없이 실제 도달성/인증을 확인.
-// 대조군: 도달(kind-everdict context) vs 미도달(잘못된 context / 죽은 Nomad).
-//   실행: node scripts/live/runtime-probe-k8s.mjs   (apps/api·packages 빌드 후)
+// Live e2e: runtime connection probe — makeRuntimeProber → buildRuntimeBackend → Backend.probe(),
+// run against a real kind-everdict K8s cluster. Unlike validate (schema), this checks actual reachability/auth with no job.
+// Control groups: reachable (kind-everdict context) vs unreachable (wrong context / dead Nomad).
+//   Run: node scripts/live/runtime-probe-k8s.mjs   (after building apps/api and packages)
 import process from "node:process";
 import { makeRuntimeProber } from "../../apps/api/dist/runtime-probe.js";
 
-const probe = makeRuntimeProber({ secretsFor: async () => ({}) }); // context 인증이라 시크릿 불필요
+const probe = makeRuntimeProber({ secretsFor: async () => ({}) }); // context auth, so no secret needed
 
 const cases = [
   {
-    label: "k8s kind-everdict (context, 도달 기대)",
+    label: "k8s kind-everdict (context, expect reachable)",
     spec: {
       kind: "k8s",
       id: "kind-everdict",
@@ -21,7 +21,7 @@ const cases = [
     expect: true,
   },
   {
-    label: "k8s 잘못된 context (미도달 기대)",
+    label: "k8s wrong context (expect unreachable)",
     spec: {
       kind: "k8s",
       id: "bad-ctx",
@@ -33,7 +33,7 @@ const cases = [
     expect: false,
   },
   {
-    label: "nomad localhost:4646 (죽은 서버, 미도달 기대)",
+    label: "nomad localhost:4646 (dead server, expect unreachable)",
     spec: {
       kind: "nomad",
       id: "dead-nomad",
@@ -54,5 +54,5 @@ for (const c of cases) {
   console.log(`${ok ? "✓" : "✗"} ${c.label}`);
   console.log(`    → reachable=${r.reachable} detail="${r.detail}"`);
 }
-console.log(`\n${pass}/${cases.length} 기대대로 동작`);
+console.log(`\n${pass}/${cases.length} behaved as expected`);
 process.exit(pass === cases.length ? 0 : 1);

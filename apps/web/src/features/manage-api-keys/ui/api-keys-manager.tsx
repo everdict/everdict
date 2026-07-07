@@ -16,7 +16,7 @@ import { Input, Label } from '@/shared/ui/input'
 
 import { createKeyAction, revokeKeyAction } from '../api/manage-api-keys'
 
-// scopes 미지정/admin = Full Access. 그 외는 선택 권한을 사람이 읽는 라벨로.
+// scopes unset/admin = Full Access. Otherwise render the selected permissions as a human-readable label.
 function scopeLabel(scopes?: ApiKeyScope[]): string {
   if (!scopes || scopes.length === 0 || scopes.includes('admin')) return 'Full Access'
   return scopes.map((s) => (s === 'read' ? 'Read' : 'Write')).join(' · ')
@@ -41,7 +41,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
 
   return (
     <div className="space-y-5">
-      {/* 헤더 — 설명 + 발급 액션(목록과 같은 화면, 발급은 모달로) */}
+      {/* Header — description + create action (same screen as the list; creation goes through a modal) */}
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <h3 className="text-[13px] font-[560] text-foreground">{t('title')}</h3>
@@ -65,7 +65,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
         </Callout>
       )}
 
-      {/* 목록 */}
+      {/* List */}
       {keys.length === 0 ? (
         <EmptyState
           icon={<KeyRound strokeWidth={1.75} />}
@@ -144,20 +144,20 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
   )
 }
 
-// 발급 모달 — 레이블 + 권한 선택 후 발급. 발급되면 같은 모달이 평문 1회 노출 단계로 전환된다.
+// Create modal — pick a label + scopes, then issue. Once issued, the same modal switches to the one-time plaintext reveal step.
 function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useTranslations('manageApiKeys')
   const locale = useLocale()
   const [label, setLabel] = useState('')
-  const [mode, setMode] = useState<'full' | 'custom'>('full') // 전체 액세스 vs 범위 지정
+  const [mode, setMode] = useState<'full' | 'custom'>('full') // full access vs scoped
   const [scopeRead, setScopeRead] = useState(true)
   const [scopeWrite, setScopeWrite] = useState(false)
-  const [issued, setIssued] = useState<string>() // 방금 발급된 평문(1회 노출)
+  const [issued, setIssued] = useState<string>() // the plaintext just issued (revealed once)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
 
-  // 열릴 때마다 폼 초기화(이전 발급/입력 잔상 제거).
+  // Reset the form each time it opens (clear leftover state from a previous issue/input).
   useEffect(() => {
     if (!open) return
     setLabel('')
@@ -171,7 +171,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
 
   function onCreate() {
     setError(undefined)
-    // 범위 지정이면 선택한 scope 만, 전체 액세스면 미지정(=서버에서 Full Access).
+    // If scoped, send only the selected scopes; for full access, leave unset (= Full Access on the server).
     let scopes: ApiKeyScope[] | undefined
     if (mode === 'custom') {
       scopes = []
@@ -192,7 +192,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
   return (
     <Dialog open={open} onClose={onClose} className="max-w-[460px]" labelledBy="create-key-title">
       {issued ? (
-        // 2단계 — 발급 완료(평문 1회 노출)
+        // Step 2 — issued (plaintext revealed once)
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="create-key-title" className="text-[15px] font-[560] text-foreground">
@@ -214,7 +214,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
                   size="sm"
                   className="shrink-0"
                   onClick={() => {
-                    // http(비-secure) 컨텍스트 폴백 포함 — navigator.clipboard 미존재 시 execCommand.
+                    // Includes an http (non-secure) context fallback — execCommand when navigator.clipboard is absent.
                     void copyText(issued, undefined, locale).then((ok) => ok && setCopied(true))
                   }}
                 >
@@ -231,7 +231,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
           </footer>
         </>
       ) : (
-        // 1단계 — 레이블 + 권한
+        // Step 1 — label + scopes
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="create-key-title" className="text-[15px] font-[560] text-foreground">
@@ -311,7 +311,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
   )
 }
 
-// 라디오 형태의 선택 카드 — 선택 시 인디고 보더 + 옅은 tint. custom 일 때 children(체크박스)을 펼친다.
+// Radio-style selection card — indigo border + faint tint when selected. Expands children (checkboxes) when custom.
 function ScopeOption({
   selected,
   onSelect,
@@ -327,7 +327,7 @@ function ScopeOption({
   description: string
   children?: React.ReactNode
 }) {
-  // children(체크박스)은 label 밖에 둔다 — 중첩 label 은 무효 HTML + 클릭 충돌.
+  // The children (checkboxes) sit outside the label — a nested label is invalid HTML + causes click conflicts.
   return (
     <div
       className={cn(
@@ -357,7 +357,7 @@ function ScopeOption({
   )
 }
 
-// 체크박스 행 — custom 범위의 개별 권한.
+// Checkbox row — an individual permission within the custom scope.
 function ScopeCheck({
   checked,
   onChange,

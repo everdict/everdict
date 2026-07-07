@@ -2,39 +2,39 @@ import { z } from "zod";
 import { BadRequestError } from "./errors.js";
 import type { HarnessSpec } from "./harness-spec.js";
 
-// 이미지 참조 분류 — 워크스페이스 레지스트리 관점에서 이 이미지가 "어디 것"인가.
-// workspace  = 워크스페이스 레지스트리(host+namespace 일치) — 자격만 있으면 어디서든 pull 가능.
-// external   = 명시 외부 호스트(ghcr.io/… 등) 또는 org/name 형태(docker.io 암시) — 공개/외부 소스.
-// local      = 명시 루프백 호스트(localhost:5000/… 등) — 빌드/푸시된 머신에만 존재.
-// unqualified= 단일 세그먼트 이름(spreadsheetbench:v1·postgres:16-alpine) — 로컬 데몬 빌드인지
-//              Docker Hub library 인지 문법으로 판별 불가(모호함 자체를 클래스로 명명).
-// placement 관점: local+unqualified = pull 보장 없음, workspace+external = pull 가능(인증 전제).
-// 설계: docs/architecture/workspace-image-registry.md
+// Image reference classification — from the workspace registry's perspective, "whose" image this is.
+// workspace  = the workspace registry (host+namespace match) — pullable from anywhere with credentials.
+// external   = an explicit external host (ghcr.io/… etc.) or org/name form (implies docker.io) — public/external source.
+// local      = an explicit loopback host (localhost:5000/… etc.) — exists only on the machine it was built/pushed on.
+// unqualified= a single-segment name (spreadsheetbench:v1·postgres:16-alpine) — syntactically indistinguishable between a
+//              local daemon build and a Docker Hub library image (naming the ambiguity itself as a class).
+// Placement view: local+unqualified = no pull guarantee, workspace+external = pullable (given auth).
+// Design: docs/architecture/workspace-image-registry.md
 export type ImageRefClass = "workspace" | "external" | "local" | "unqualified";
 
-// 워크스페이스 레지스트리 좌표(비밀 없음) — WorkspaceSettings.imageRegistry 의 분류용 부분집합.
+// Workspace registry coordinates (no secrets) — the classification subset of WorkspaceSettings.imageRegistry.
 export interface ImageRegistryCoordinates {
-  host: string; // 레지스트리 host[:port] — "ghcr.io" · "registry.acme.dev:5000"
-  namespace?: string; // host 아래 경로 프리픽스 — "acme" → ghcr.io/acme/<name>:<tag>
+  host: string; // registry host[:port] — "ghcr.io" · "registry.acme.dev:5000"
+  namespace?: string; // path prefix under host — "acme" → ghcr.io/acme/<name>:<tag>
 }
 
-// docker reference 문법으로 분해한 이미지 참조. host 는 첫 경로 컴포넌트가
-// '.'/':' 를 포함하거나 "localhost" 일 때만 레지스트리 호스트다(docker 규칙 그대로).
+// An image reference decomposed by docker reference syntax. host is a registry host only when the first path component
+// contains '.'/':' or is "localhost" (the docker rule as-is).
 export interface ParsedImageRef {
   host?: string;
-  path: string; // host 뒤 이름 경로(태그/다이제스트 제외)
+  path: string; // the name path after host (excluding tag/digest)
   tag?: string;
   digest?: string;
 }
 
 export function parseImageRef(ref: string): ParsedImageRef {
   const trimmed = ref.trim();
-  if (!trimmed) throw new BadRequestError("BAD_REQUEST", undefined, "빈 이미지 참조는 분류할 수 없습니다");
-  // 다이제스트(@sha256:…)를 먼저 떼어낸다 — 태그의 ':' 탐색과 섞이지 않도록.
+  if (!trimmed) throw new BadRequestError("BAD_REQUEST", undefined, "cannot classify an empty image reference");
+  // Strip the digest (@sha256:…) first — so it doesn't mix with the tag's ':' scan.
   const atIndex = trimmed.indexOf("@");
   const digest = atIndex >= 0 ? trimmed.slice(atIndex + 1) : undefined;
   let rest = atIndex >= 0 ? trimmed.slice(0, atIndex) : trimmed;
-  // 태그 = 마지막 '/' 뒤에 오는 ':' — 호스트 포트(localhost:5000/x)와 혼동 방지.
+  // tag = the ':' after the last '/' — avoids confusion with a host port (localhost:5000/x).
   const lastSlash = rest.lastIndexOf("/");
   const colonIndex = rest.indexOf(":", lastSlash + 1);
   const tag = colonIndex >= 0 ? rest.slice(colonIndex + 1) : undefined;
@@ -51,13 +51,13 @@ export function parseImageRef(ref: string): ParsedImageRef {
   };
 }
 
-// 루프백 호스트인가 — 이 레지스트리 참조는 그 머신 밖에선 의미가 없다.
+// Is it a loopback host — this registry reference is meaningless outside that machine.
 function isLoopbackHost(host: string): boolean {
   const name = host.startsWith("[") ? host.slice(0, host.indexOf("]") + 1) : host.split(":")[0];
   return name === "localhost" || name === "127.0.0.1" || name === "[::1]";
 }
 
-// registry 는 단수 또는 복수 — 워크스페이스는 레지스트리를 여러 개 등록할 수 있고, '어느 하나'에 속하면 workspace 다.
+// registry is singular or plural — a workspace can register multiple registries, and belonging to 'any one' makes it workspace.
 export function classifyImageRef(
   ref: string,
   registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[],
@@ -74,23 +74,23 @@ export function classifyImageRef(
     if (inWorkspace) return "workspace";
     return "external";
   }
-  // 호스트 없음: org/name 은 docker.io 암시(외부), 단일 세그먼트는 모호(unqualified).
+  // No host: org/name implies docker.io (external), a single segment is ambiguous (unqualified).
   return parsed.path.includes("/") ? "external" : "unqualified";
 }
 
-// 레지스트리 이미지 프리픽스 — "host[/namespace]/". 클라이언트가 대상 ref 를 조립할 때 쓴다.
+// Registry image prefix — "host[/namespace]/". Used by the client to assemble the target ref.
 export function imageRegistryPrefix(registry: ImageRegistryCoordinates): string {
   return registry.namespace ? `${registry.host}/${registry.namespace}/` : `${registry.host}/`;
 }
 
-// (resolve 된) 하니스 스펙이 참조하는 모든 이미지 — service 는 서비스별, command 는 디스패치 이미지.
+// All images a (resolved) harness spec references — service is per-service, command is the dispatch image.
 export function collectHarnessImages(spec: HarnessSpec): string[] {
   if (spec.kind === "service") return spec.services.map((s) => s.image);
   if (spec.kind === "command") return spec.image ? [spec.image] : [];
-  return []; // process — 이미지 참조 없음(코드 어댑터)
+  return []; // process — no image reference (code adapter)
 }
 
-// pull 보장이 없는 이미지 경고 — 등록/검증 응답의 imageWarnings(warn-not-block, missingSecrets 관례와 동일).
+// A warning for an image with no pull guarantee — imageWarnings in the register/validate response (warn-not-block, same convention as missingSecrets).
 export interface ImageWarning {
   image: string;
   class: Extract<ImageRefClass, "local" | "unqualified">;
@@ -108,24 +108,24 @@ export function imageWarnings(
   return warnings;
 }
 
-// 레지스트리 pull/push 자격증명(transient) — 컨트롤플레인이 워크스페이스 SecretStore 에서 resolve 해
-// AgentJob.registryAuth 로 실어 보내고(repoToken 과 동일 규율: 결과/데이터셋에 영속 금지), 소비자
-// (DockerDriver/러너/토폴로지 빌더)는 인증 pull 에만 쓰고 버린다.
+// Registry pull/push credentials (transient) — the control plane resolves them from the workspace SecretStore
+// and ships them via AgentJob.registryAuth (same discipline as repoToken: never persist to results/datasets); the
+// consumer (DockerDriver/runner/topology builder) uses them only for an authenticated pull and then discards them.
 export const RegistryAuthSchema = z.object({
-  host: z.string().min(1), // 이 자격증명이 유효한 레지스트리 host[:port]
+  host: z.string().min(1), // the registry host[:port] these credentials are valid for
   username: z.string().min(1).optional(),
   password: z.string().min(1),
 });
 export type RegistryAuth = z.infer<typeof RegistryAuthSchema>;
 
-// 이 이미지가 해당 레지스트리 호스트에서 pull 되는가 — 인증 주입 대상 판정(명시 호스트 일치만).
+// Whether this image is pulled from the given registry host — decides the auth-injection target (explicit host match only).
 export function imageUsesRegistryHost(image: string, host: string): boolean {
   return parseImageRef(image).host === host;
 }
 
-// docker config.json 내용(auths[host].auth = base64("user:pass")) — 임시 DOCKER_CONFIG 디렉터리에 써서
-// docker --config <dir> pull/push 로 쓴다(유저 ~/.docker/config.json 불가침). username 미지정 레지스트리는
-// 대부분 토큰 단독(아무 사용자명 허용) → "everdict" 를 쓴다.
+// docker config.json contents (auths[host].auth = base64("user:pass")) — written to a temporary DOCKER_CONFIG directory
+// and used via docker --config <dir> pull/push (the user's ~/.docker/config.json is untouched). A registry with no
+// username is usually token-only (any username accepted) → we use "everdict".
 export function dockerAuthConfigJson(auth: RegistryAuth): string {
   const encoded = Buffer.from(`${auth.username ?? "everdict"}:${auth.password}`).toString("base64");
   return JSON.stringify({ auths: { [auth.host]: { auth: encoded } } });

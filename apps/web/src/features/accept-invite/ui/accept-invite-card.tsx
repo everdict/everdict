@@ -9,7 +9,7 @@ import { Callout } from '@/shared/ui/callout'
 
 import { acceptInviteAction } from '../api/accept-invite'
 
-// 초대 수락 카드. GET 자동 수락을 피하려 명시적 버튼(POST 서버 액션)으로만 redeem — prefetch 가 일회용 토큰을 소진하지 않게.
+// Invite acceptance card. To avoid auto-accepting on GET, redeem only via an explicit button (POST server action) — so a prefetch never consumes the single-use token.
 export function AcceptInviteCard({ token }: { token: string }) {
   const t = useTranslations('acceptInvite')
   const router = useRouter()

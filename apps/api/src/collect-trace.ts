@@ -2,25 +2,25 @@ import type { CaseResult, EvalCase, GradeContext, Grader, Score } from "@everdic
 import { makeGraders } from "@everdict/graders";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 
-// 잡 밖 트레이스 수집(2-페이즈의 수집 페이즈, D4) — spec.trace.collect="control-plane" 케이스의 완성 단계.
-// 잡은 실행에서 끝났고(CaseResult.traceRef 만 들고 옴), 여기서: 플랫폼 pull(runId 상관, 플러시 지연은
-// 짧은 재시도로 흡수) → 잡이 미룬 관측물 채점(case.graders 중 needsCompute 아닌 것 — 에이전트와 같은
-// 분리 규칙) → 완성된 CaseResult. 인증은 traceRef.authSecret(이름)을 테넌트 SecretStore 에서 재해석해
-// verbatim Authorization 헤더로(pull-ingest 와 동일 관례). mlflow correlate="tag" 면 everdict.run_id 태그 검색.
-// executeCase 가 dispatch 직후 호출하므로 정산(costOf)·judge 스트림은 수집된 트레이스를 그대로 본다.
+// Out-of-job trace collection (the collection phase of the 2-phase design, D4) — the completion step for spec.trace.collect="control-plane" cases.
+// The job ended at execution (bringing only CaseResult.traceRef); here we: pull from the platform (runId-correlated, absorbing flush
+// latency with a short retry) → score the observations the job deferred (case.graders that aren't needsCompute — the same
+// separation rule as the agent) → a completed CaseResult. Auth re-resolves traceRef.authSecret (a name) from the tenant SecretStore
+// into a verbatim Authorization header (same convention as pull-ingest). With mlflow correlate="tag", search the everdict.run_id tag.
+// executeCase calls this right after dispatch, so settlement (costOf) and the judge stream see the collected trace as-is.
 // docs/architecture/streaming-case-pipeline.md D4
 export interface CollectTraceDeps {
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
-  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // traceRef.authSecret 재해석(SecretStore)
-  sleep?: (ms: number) => Promise<void>; // 재시도 백오프(테스트 주입, 기본 setTimeout)
+  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // re-resolve traceRef.authSecret (SecretStore)
+  sleep?: (ms: number) => Promise<void>; // retry backoff (test injection, default setTimeout)
 }
 
-// 재구성 불가 grader(inline judge 등)의 명시 skip — 사용자가 고른 grader 가 조용히 사라지지 않게.
+// Explicit skip for non-reconstructable graders (e.g. inline judge) — so a grader the user chose doesn't silently vanish.
 function skipScore(graderId: string, reason: string): Score {
   return { graderId, metric: graderId, value: 0, detail: `skipped: ${reason}` };
 }
 
-const COLLECT_ATTEMPTS = 3; // 플러시 지연 흡수 — 잡 종료→결과 수송이 이미 수 초를 벌어주지만, 느린 플랫폼 대비
+const COLLECT_ATTEMPTS = 3; // absorb flush latency — job end→result transport already buys a few seconds, but this guards against slow platforms
 
 export async function collectDeferredTrace(
   deps: CollectTraceDeps,
@@ -29,25 +29,25 @@ export async function collectDeferredTrace(
   result: CaseResult,
 ): Promise<CaseResult> {
   const ref = result.traceRef;
-  if (!ref) return result; // 수집이 미뤄지지 않은 결과(기본) — 그대로(무회귀)
+  if (!ref) return result; // a result whose collection wasn't deferred (default) — as-is (no regression)
 
-  // 1) 플랫폼 pull. 실패는 soft — 실행 산출물(스냅샷·ground-truth 점수)을 버리지 않고 error 이벤트로 가시화
-  //    (caseVerdict 권위 랭킹상 트레이스 부재가 ground-truth 판정을 뒤집지 못한다). 0건도 재시도 후 가시화
-  //    (플러시 지연/상관 키 문제를 조용히 0점으로 삼키지 않는다).
+  // 1) Platform pull. Failure is soft — surface it as an error event without discarding execution output (snapshot · ground-truth scores)
+  //    (in the caseVerdict authority ranking, an absent trace can't override a ground-truth verdict). Zero results are also surfaced after retry
+  //    (don't silently swallow a flush-latency / correlation-key problem as a zero score).
   const trace = [...result.trace];
   if (deps.buildTraceSource) {
     try {
-      // 인증: authSecret 이름 → 테넌트 SecretStore 값 → verbatim Authorization(pull-ingest 관례).
+      // Auth: authSecret name → tenant SecretStore value → verbatim Authorization (pull-ingest convention).
       let headers: Record<string, string> | undefined;
       if (ref.authSecret) {
         const secrets = tenant && deps.secretsFor ? await deps.secretsFor(tenant) : {};
         const auth = secrets[ref.authSecret];
         if (auth === undefined)
-          throw new Error(`인증 시크릿 '${ref.authSecret}' 미등록(워크스페이스 SecretStore) — 수집 불가`);
+          throw new Error(`auth secret '${ref.authSecret}' not registered (workspace SecretStore) — cannot collect`);
         headers = { authorization: auth };
       }
-      // 검색 범위: mlflow tag 상관의 experiment | phoenix 의 project — TraceSourceConfig.project 로 수렴.
-      // otel tag 상관의 service 는 별도 파라미터(Jaeger service).
+      // Search scope: the experiment for mlflow tag correlation | phoenix's project — converges to TraceSourceConfig.project.
+      // The service for otel tag correlation is a separate parameter (Jaeger service).
       const project = ref.experiment ?? ref.project;
       const source = deps.buildTraceSource({
         kind: ref.kind,
@@ -68,7 +68,7 @@ export async function collectDeferredTrace(
         trace.push({
           t: Date.now(),
           kind: "error",
-          message: `트레이스 수집 0건(${COLLECT_ATTEMPTS}회 시도, ${ref.kind} ${ref.endpoint}) — 상관 키(${ref.runId})/플러시 지연 확인`,
+          message: `collected 0 traces (${COLLECT_ATTEMPTS} attempts, ${ref.kind} ${ref.endpoint}) — check the correlation key (${ref.runId}) / flush latency`,
         });
       }
       trace.push(...events);
@@ -76,15 +76,15 @@ export async function collectDeferredTrace(
       trace.push({
         t: Date.now(),
         kind: "error",
-        message: `트레이스 수집 실패(${ref.kind} ${ref.endpoint}): ${err instanceof Error ? err.message : String(err)}`,
+        message: `trace collection failed (${ref.kind} ${ref.endpoint}): ${err instanceof Error ? err.message : String(err)}`,
       });
     }
   } else {
-    trace.push({ t: Date.now(), kind: "error", message: "트레이스 수집 불가 — buildTraceSource 미설정" });
+    trace.push({ t: Date.now(), kind: "error", message: "cannot collect traces — buildTraceSource not configured" });
   }
 
-  // 2) 잡이 미룬 관측물 채점 — 분리 규칙은 에이전트와 동일(needsCompute=true 는 잡에서 이미 채점됨).
-  //    inline judge 는 Judge 주입 없이 재구성 불가 → 명시 skip(등록 judge 는 judge 스트림이 별도 처리).
+  // 2) Score the observations the job deferred — the separation rule matches the agent (needsCompute=true was already scored in the job).
+  //    An inline judge can't be reconstructed without a Judge injection → explicit skip (registered judges are handled separately by the judge stream).
   const scores = [...result.scores];
   const ctx: GradeContext = { case: evalCase, trace, snapshot: result.snapshot };
   for (const spec of evalCase.graders) {
@@ -95,10 +95,15 @@ export async function collectDeferredTrace(
       if (!first) continue;
       grader = first;
     } catch {
-      scores.push(skipScore(spec.id, "control-plane 수집 모드에서 재구성 불가(inline judge 는 등록 judge 사용)"));
+      scores.push(
+        skipScore(
+          spec.id,
+          "cannot reconstruct in control-plane collection mode (use a registered judge for inline judges)",
+        ),
+      );
       continue;
     }
-    if (grader.needsCompute === true) continue; // 잡(compute 해제 전)에서 이미 채점됨
+    if (grader.needsCompute === true) continue; // already scored in the job (before compute was released)
     scores.push(await grader.grade(ctx));
   }
 

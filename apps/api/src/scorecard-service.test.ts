@@ -27,7 +27,7 @@ const dispatcher: Dispatcher = {
   },
 };
 
-// 한 케이스에 tests-pass 점수 1건. pass 를 바꿔 회귀/개선을 만든다.
+// One tests-pass score per case. Flip pass to create a regression/improvement.
 const caseResult = (pass: boolean): CaseResult => ({
   caseId: "c1",
   harness: "h@1",
@@ -53,7 +53,7 @@ function svc(store: InMemoryScorecardStore): ScorecardService {
   return new ScorecardService({ dispatcher, store, datasets: new InMemoryDatasetRegistry() });
 }
 
-describe("ScorecardService.submit — requireRuntime 정책(local 폴백 금지)", () => {
+describe("ScorecardService.submit — requireRuntime policy (no local fallback)", () => {
   const input = (over: Record<string, unknown> = {}) => ({
     tenant: "acme",
     dataset: { id: "d", version: "1.0.0" },
@@ -68,22 +68,22 @@ describe("ScorecardService.submit — requireRuntime 정책(local 폴백 금지)
       requireRuntime,
     });
 
-  it("정책 ON + runtime 없으면 400(BadRequest) — 데이터셋 해석 전에 fail-fast", async () => {
+  it("policy ON + no runtime → 400 (BadRequest) — fail-fast before resolving the dataset", async () => {
     await expect(build(true).submit(input())).rejects.toBeInstanceOf(BadRequestError);
   });
 
-  it("정책 ON + runtime(등록 런타임/self) 지정 시 게이트 통과 — 이후 단계로 진행(없는 데이터셋이라 NotFound)", async () => {
-    // BadRequest 가 아니라 NotFound 라는 것 = 런타임 게이트를 통과했다는 증거(게이트는 target 존재만 본다).
+  it("policy ON + a runtime (registered runtime/self) passes the gate — proceeds to the next step (NotFound because the dataset is missing)", async () => {
+    // NotFound rather than BadRequest = proof it passed the runtime gate (the gate only checks that a target exists).
     await expect(build(true).submit(input({ runtime: "self:laptop" }))).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("정책 OFF(dev)이면 runtime 없이도 게이트를 통과한다(기존 동작 불변)", async () => {
+  it("policy OFF (dev) passes the gate without a runtime (existing behavior unchanged)", async () => {
     await expect(build(false).submit(input())).rejects.toBeInstanceOf(NotFoundError);
   });
 });
 
 describe("ScorecardService.diff", () => {
-  it("pass 전이를 회귀/개선으로 보고한다", async () => {
+  it("reports pass transitions as regression/improvement", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(record("base", { scorecard: scorecard(true) }));
     await store.create(record("cand", { scorecard: scorecard(false) }));
@@ -100,15 +100,15 @@ describe("ScorecardService.diff", () => {
     });
   });
 
-  it("없는/타 워크스페이스 스코어카드 → NotFoundError(404)", async () => {
+  it("missing / other-workspace scorecard → NotFoundError (404)", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(record("base", { scorecard: scorecard(true) }));
     await store.create(record("other", { tenant: "beta", scorecard: scorecard(true) }));
     await expect(svc(store).diff("acme", "base", "nope")).rejects.toBeInstanceOf(NotFoundError);
-    await expect(svc(store).diff("acme", "base", "other")).rejects.toBeInstanceOf(NotFoundError); // 타 워크스페이스
+    await expect(svc(store).diff("acme", "base", "other")).rejects.toBeInstanceOf(NotFoundError); // other workspace
   });
 
-  it("미완료(scorecard 없음) → BadRequestError(400)", async () => {
+  it("not completed (no scorecard) → BadRequestError (400)", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(record("base", { scorecard: scorecard(true) }));
     await store.create(record("queued", { status: "queued" }));
@@ -117,29 +117,29 @@ describe("ScorecardService.diff", () => {
 });
 
 describe("ScorecardService.leaderboard", () => {
-  // judge passRate + primary model 을 가진 완료 스코어카드.
+  // A completed scorecard with a judge passRate + primary model.
   const scored = (id: string, harnessVersion: string, model: string, passRate: number): Partial<ScorecardRecord> => ({
     harness: { id: "h", version: harnessVersion },
     summary: [{ metric: "judge", count: 10, mean: passRate, passRate }],
     models: { observed: [model], primary: model },
   });
 
-  it("한 데이터셋의 (harness × model) 을 metric 내림차순으로 랭킹하고 워크스페이스로 스코프한다", async () => {
+  it("ranks a dataset's (harness × model) descending by metric and scopes to the workspace", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(record("a", scored("a", "1", "gpt-5", 0.6)));
     await store.create(record("b", scored("b", "2", "claude-opus-4-8", 0.9)));
-    await store.create(record("other", { ...scored("other", "2", "x", 1.0), tenant: "beta" })); // 타 워크스페이스
+    await store.create(record("other", { ...scored("other", "2", "x", 1.0), tenant: "beta" })); // other workspace
     const lb = await svc(store).leaderboard("acme", { datasetId: "d", metric: "judge" });
     expect(lb.rows.map((r) => [r.rank, r.harness.version, r.model, r.score])).toEqual([
       [1, "2", "claude-opus-4-8", 0.9],
       [2, "1", "gpt-5", 0.6],
     ]);
-    expect(lb.rows.some((r) => r.model === "x")).toBe(false); // beta 워크스페이스 제외
+    expect(lb.rows.some((r) => r.model === "x")).toBe(false); // beta workspace excluded
   });
 });
 
 describe("ScorecardService.backfillModels", () => {
-  // 트레이스에 관측 모델을 가진 완료 스코어카드(구 레코드처럼 models 필드는 없음).
+  // A completed scorecard with an observed model in the trace (no models field, like an old record).
   const scWithModel = (model: string): Scorecard => ({
     suiteId: "d",
     harness: "h@1",
@@ -154,24 +154,24 @@ describe("ScorecardService.backfillModels", () => {
     ],
   });
 
-  it("models 없는 succeeded 레코드를 저장 트레이스 관측으로 채운다(멱등; 미완료/기존 models 는 스킵)", async () => {
+  it("fills succeeded records lacking models from stored-trace observations (idempotent; skips incomplete / existing models)", async () => {
     const store = new InMemoryScorecardStore();
-    await store.create(record("old", { scorecard: scWithModel("gpt-4o") })); // models 없음
-    await store.create(record("queued", { status: "queued" })); // 산출물 없음 → 스킵
+    await store.create(record("old", { scorecard: scWithModel("gpt-4o") })); // no models
+    await store.create(record("queued", { status: "queued" })); // no output → skip
     await store.create(
       record("already", { scorecard: scWithModel("o3"), models: { observed: ["o3"], primary: "o3" } }),
     );
 
     const res = await svc(store).backfillModels("acme");
-    expect(res.updated).toBe(1); // old 만
+    expect(res.updated).toBe(1); // old only
     expect((await store.get("old"))?.models?.primary).toBe("gpt-4o");
 
-    // 멱등: 두 번째 실행은 채울 게 없다.
+    // idempotent: the second run has nothing to fill.
     expect((await svc(store).backfillModels("acme")).updated).toBe(0);
   });
 });
 
-// 한 케이스(c1)만 가진 데이터셋. pull 인제스트 정렬 대상.
+// A dataset with a single case (c1). The target for pull-ingest ordering.
 const datasetWithCase = (): Dataset => ({
   id: "d",
   version: "1.0.0",
@@ -188,18 +188,18 @@ const datasetWithCase = (): Dataset => ({
   tags: [],
 });
 
-// 백그라운드 trackPull 이 끝날 때까지(terminal status) 폴링한다.
+// Poll until the background trackPull finishes (terminal status).
 async function waitTerminal(store: InMemoryScorecardStore, id: string): Promise<ScorecardRecord> {
   for (let i = 0; i < 50; i++) {
     const rec = await store.get(id);
     if (rec && (rec.status === "succeeded" || rec.status === "failed")) return rec;
     await new Promise((r) => setTimeout(r, 5));
   }
-  throw new Error("pull 인제스트가 끝나지 않음");
+  throw new Error("pull ingest did not finish");
 }
 
 describe("ScorecardService.ingestPull", () => {
-  it("trace source 에서 트레이스를 당겨와 메트릭을 도출하고 succeeded 로 저장한다", async () => {
+  it("pulls traces from a trace source, derives metrics, and stores as succeeded", async () => {
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
@@ -235,11 +235,11 @@ describe("ScorecardService.ingestPull", () => {
     expect(done.status).toBe("succeeded");
     expect(done.scorecard?.results.map((r) => r.caseId)).toEqual(["c1"]);
     expect(done.scorecard?.results[0]?.scores.some((s) => s.metric === "tool_calls")).toBe(true);
-    // authSecret → SecretStore 값 → Authorization: Bearer 헤더로 trace source 에 주입
+    // authSecret → SecretStore value → injected into the trace source as an Authorization: Bearer header
     expect(captured?.headers?.authorization).toBe("Bearer secret-xyz");
   });
 
-  it("없는 데이터셋 → NotFoundError(404)", async () => {
+  it("missing dataset → NotFoundError (404)", async () => {
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({
       dispatcher,
@@ -259,7 +259,7 @@ describe("ScorecardService.ingestPull", () => {
     ).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("buildTraceSource 미설정 → run 이 failed 로 종료(BAD_REQUEST)", async () => {
+  it("buildTraceSource unset → the run ends failed (BAD_REQUEST)", async () => {
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
@@ -278,8 +278,8 @@ describe("ScorecardService.ingestPull", () => {
   });
 });
 
-describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스별)", () => {
-  it("케이스 env.source.connectionId → repoTokenFor resolve → 케이스별 job.repoToken; public/비-git 은 미주입", async () => {
+describe("ScorecardService.submit — private-repo repoToken injection (per case)", () => {
+  it("case env.source.connectionId → repoTokenFor resolve → per-case job.repoToken; public/non-git are not injected", async () => {
     const seen: Array<{ caseId: string; repoToken?: string }> = [];
     const cap: Dispatcher = {
       async dispatch(job) {
@@ -318,7 +318,7 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
       ],
     });
     const store = new InMemoryScorecardStore();
-    // 연결은 개인 소유 → repoTokenFor 는 owner(제출자 subject)로 resolve.
+    // Connections are personally owned → repoTokenFor resolves by owner (submitter subject).
     const calls: Array<{ owner: string; connectionId: string }> = [];
     const service = new ScorecardService({
       dispatcher: cap,
@@ -340,10 +340,10 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
     const byCase = Object.fromEntries(seen.map((s) => [s.caseId, s.repoToken]));
     expect(byCase["git-priv"]).toBe("gho_sc");
     expect(byCase["files-pub"]).toBeUndefined();
-    expect(calls).toEqual([{ owner: "u-alice", connectionId: "conn-1" }]); // files 케이스는 resolver 미호출
+    expect(calls).toEqual([{ owner: "u-alice", connectionId: "conn-1" }]); // the files case does not call the resolver
   });
 
-  it("디스패치 이후 구간(judges) 실패 → status=failed + error.phase=judges + 부분 결과 보존(가시성)", async () => {
+  it("failure after dispatch (judges phase) → status=failed + error.phase=judges + partial results preserved (visibility)", async () => {
     const okDispatch: Dispatcher = {
       async dispatch(job) {
         return {
@@ -389,24 +389,24 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
     });
     const rec = await waitTerminal(store, "sc-phase");
     expect(rec.status).toBe("failed");
-    expect(rec.error?.phase).toBe("judges"); // "어떤 구간에서" — judges 단계 실패
-    expect(rec.error?.message).toContain("judge boom"); // "어떻게" — 사유
-    // 부분 결과 보존: 디스패치까지 모인 케이스 결과가 실패 레코드에도 남아 가시성을 준다.
+    expect(rec.error?.phase).toBe("judges"); // "which phase" — judges-phase failure
+    expect(rec.error?.message).toContain("judge boom"); // "how" — the reason
+    // Partial results preserved: cases gathered up to dispatch remain in the failed record for visibility.
     expect(rec.scorecard?.results.map((r) => r.caseId)).toEqual(["c1"]);
-    // 진행 과정(스텝) 타임라인 — 케이스 완료 + judges 구간 실패가 순서대로 기록된다.
+    // Progress (step) timeline — case completion + judges-phase failure are recorded in order.
     expect(rec.steps?.some((s) => s.phase === "case" && s.caseId === "c1")).toBe(true);
     expect(rec.steps?.some((s) => s.phase === "judges" && s.status === "failed")).toBe(true);
   });
 
-  it("judge 는 스트리밍 — 배치 전체 완료를 기다리지 않고 케이스 완료 즉시 적용된다(배리어면 이 테스트는 행)", async () => {
-    // rendezvous: c2 디스패치는 c1 의 judge 가 시작될 때까지 블록 — judge 가 배치 뒤 배리어라면 영원히 못 만난다.
+  it("judge is streaming — applied the moment a case completes rather than waiting for the whole batch (a barrier would hang this test)", async () => {
+    // rendezvous: c2 dispatch blocks until c1's judge starts — if the judge were a post-batch barrier, they'd never meet.
     let judgeStarted: () => void = () => {};
     const c1Judged = new Promise<void>((resolve) => {
       judgeStarted = resolve;
     });
     const okDispatch: Dispatcher = {
       async dispatch(job) {
-        if (job.evalCase.id === "c2") await c1Judged; // c1 judge 시작 전엔 완료되지 않는 느린 케이스
+        if (job.evalCase.id === "c2") await c1Judged; // a slow case that doesn't complete until c1's judge starts
         return {
           caseId: job.evalCase.id,
           harness: `${job.harness.id}@${job.harness.version}`,
@@ -419,7 +419,7 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
     const datasets = new InMemoryDatasetRegistry();
     const twoCase = datasetWithCase();
     const c1 = twoCase.cases[0];
-    if (!c1) throw new Error("datasetWithCase 는 케이스 1개를 보장한다");
+    if (!c1) throw new Error("datasetWithCase guarantees one case");
     await datasets.register("acme", { ...twoCase, cases: [c1, { ...c1, id: "c2" }] });
     const judges = new InMemoryJudgeRegistry();
     await judges.register("acme", {
@@ -440,7 +440,7 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
       judges,
       judgeRunner: {
         async run(spec) {
-          judgeStarted(); // c1 완료 직후(스트리밍) 여기 도달 → c2 가 풀린다
+          judgeStarted(); // reached right after c1 completes (streaming) → c2 is released
           return { graderId: spec.id, metric: `judge:${spec.id}`, value: 1, pass: true };
         },
       },
@@ -454,13 +454,13 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
     });
     const rec = await waitTerminal(store, "sc-stream");
     expect(rec.status).toBe("succeeded");
-    // 두 케이스 모두 judge 점수까지 부착.
+    // Both cases get a judge score attached.
     for (const r of rec.scorecard?.results ?? []) {
       expect(r.scores.some((s) => s.metric === "judge:j1")).toBe(true);
     }
   }, 5000);
 
-  it("완료 시 onComplete 콜백을 최신 레코드로 호출(알림 훅)", async () => {
+  it("on completion, calls the onComplete callback with the latest record (notification hook)", async () => {
     const okDispatch: Dispatcher = {
       async dispatch(job) {
         return {
@@ -495,7 +495,7 @@ describe("ScorecardService.submit — 비공개 repo repoToken 주입(케이스�
   });
 });
 
-describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
+describe("ScorecardService — trace sink export", () => {
   const okDispatch: Dispatcher = {
     async dispatch(job) {
       return {
@@ -508,8 +508,8 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
     },
   };
 
-  it("싱크 export 는 케이스 스트리밍(D5) — 케이스 완성 즉시 발사된다(배치 후 일괄이면 이 테스트는 행)", async () => {
-    // rendezvous: c2 디스패치는 c1 의 export push 를 기다린다 — export 가 배치 뒤 일괄이면 영원히 못 만난다.
+  it("sink export is case-streaming (D5) — fires the moment a case completes (a post-batch bulk export would hang this test)", async () => {
+    // rendezvous: c2 dispatch waits for c1's export push — if export were post-batch bulk, they'd never meet.
     let c1Exported: () => void = () => {};
     const exportedC1 = new Promise<void>((resolve) => {
       c1Exported = resolve;
@@ -529,14 +529,14 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
     const datasets = new InMemoryDatasetRegistry();
     const one = datasetWithCase();
     const c1 = one.cases[0];
-    if (!c1) throw new Error("datasetWithCase 는 케이스 1개를 보장한다");
+    if (!c1) throw new Error("datasetWithCase guarantees one case");
     await datasets.register("acme", { ...one, cases: [c1, { ...c1, id: "c2" }] });
     const store = new InMemoryScorecardStore();
     const pushed: string[] = [];
     const exportStreamFor = async (): Promise<CaseExportStream> => ({
       push: (r) => {
         pushed.push(r.caseId);
-        if (r.caseId === "c1") c1Exported(); // c1 이 나가는 순간 c2 가 풀린다(스트리밍 증명)
+        if (r.caseId === "c1") c1Exported(); // the instant c1 goes out, c2 is released (proves streaming)
       },
       settle: async () => ({
         sink: "mlflow",
@@ -560,12 +560,12 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
     });
     const rec = await waitTerminal(store, "sc-export-stream");
     expect(rec.status).toBe("succeeded");
-    expect(pushed).toEqual(["c1", "c2"]); // 완성 순서대로 케이스별 발사
-    expect(rec.export?.cases?.map((c) => c.caseId)).toEqual(["c1", "c2"]); // settle 합산이 record.export 로
+    expect(pushed).toEqual(["c1", "c2"]); // fired per case in completion order
+    expect(rec.export?.cases?.map((c) => c.caseId)).toEqual(["c1", "c2"]); // settle aggregation lands in record.export
     expect(rec.steps?.some((s) => s.phase === "export" && s.status === "ok")).toBe(true);
   }, 5000);
 
-  it("라이브 배치: 채점 후 exportResults outcome 이 record.export 와 steps(export)로 기록된다", async () => {
+  it("live batch: after scoring, the exportResults outcome is recorded in record.export and steps(export)", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const store = new InMemoryScorecardStore();
@@ -592,7 +592,7 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
       harness: { id: "h", version: "1" },
     });
     const done = await waitTerminal(store, "sc-export");
-    // Then: 채점 완료된 결과가 export 로 넘어가고, outcome 이 레코드에 남는다.
+    // Then: the scored results go to export and the outcome remains in the record.
     expect(calls[0]?.ctx).toEqual({ scorecardId: "sc-export", dataset: "d@1.0.0", harness: "h@1" });
     expect(calls[0]?.caseIds).toEqual(["c1"]);
     expect(done.status).toBe("succeeded");
@@ -601,10 +601,10 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
     expect(done.steps?.some((s) => s.phase === "export" && s.status === "ok")).toBe(true);
   });
 
-  it("export 실패(outcome=failed·throw)여도 스코어카드는 succeeded — 격리 원칙", async () => {
+  it("even on export failure (outcome=failed·throw), the scorecard is succeeded — isolation principle", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
-    // outcome=failed 로 기록되는 경우.
+    // the case recorded as outcome=failed.
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({
       dispatcher: okDispatch,
@@ -614,7 +614,7 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
       exportResults: async () => ({
         sink: "langfuse",
         status: "failed",
-        message: "업스트림 401",
+        message: "upstream 401",
         exportedAt: "2026-07-06T00:00:00.000Z",
       }),
     });
@@ -624,12 +624,12 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
       harness: { id: "h", version: "1" },
     });
     const done = await waitTerminal(store, "sc-exf");
-    expect(done.status).toBe("succeeded"); // export 실패는 결과에 영향 없음
-    expect(done.error).toBeUndefined(); // error.phase 미사용
+    expect(done.status).toBe("succeeded"); // export failure does not affect the result
+    expect(done.error).toBeUndefined(); // error.phase unused
     expect(done.export?.status).toBe("failed");
     expect(done.steps?.some((s) => s.phase === "export" && s.status === "failed")).toBe(true);
 
-    // 훅 자체가 throw 해도(계약 위반) 스코어카드는 성공하고 export 만 미기록.
+    // Even if the hook itself throws (contract violation), the scorecard succeeds and only export is left unrecorded.
     const store2 = new InMemoryScorecardStore();
     const service2 = new ScorecardService({
       dispatcher: okDispatch,
@@ -637,7 +637,7 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
       datasets,
       newId: () => "sc-exth",
       exportResults: async () => {
-        throw new Error("계약 위반 throw");
+        throw new Error("contract-violation throw");
       },
     });
     await service2.submit({
@@ -650,7 +650,7 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
     expect(done2.export).toBeUndefined();
   });
 
-  it("pull 인제스트: (source.kind, caseId→runId) attach 힌트가 export 로 전달되고 outcome 이 기록된다", async () => {
+  it("pull ingest: the (source.kind, caseId→runId) attach hint is passed to export and the outcome is recorded", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const store = new InMemoryScorecardStore();
@@ -679,14 +679,14 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
       judges: [],
     });
     const done = await waitTerminal(store, created.id);
-    // Then: 원본 trace 좌표가 attach 로 흘러 기존 trace 에 점수만 부착할 수 있다(흐름②).
+    // Then: the original trace coordinates flow through attach so scores can be attached to the existing trace (flow ②).
     expect(attachSeen).toEqual({ sourceKind: "mlflow", externalIdByCase: { c1: "tr-orig-1" } });
     expect(done.export?.cases?.[0]?.externalId).toBe("tr-orig-1");
   });
 });
 
-describe("ScorecardService.submit — 리더보드 model 축 캡처", () => {
-  // 각 케이스가 llm_call(model) 을 남기는 dispatcher — 관측 모델의 출처.
+describe("ScorecardService.submit — leaderboard model-axis capture", () => {
+  // A dispatcher that emits an llm_call(model) per case — the source of the observed model.
   const llmDispatch = (model: string): Dispatcher => ({
     async dispatch(job) {
       return {
@@ -699,7 +699,7 @@ describe("ScorecardService.submit — 리더보드 model 축 캡처", () => {
     },
   });
 
-  it("트레이스 관측 모델을 succeeded 레코드의 models 로 저장한다(관측 우선)", async () => {
+  it("stores the trace-observed model as the succeeded record's models (observation first)", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const store = new InMemoryScorecardStore();
@@ -720,7 +720,7 @@ describe("ScorecardService.submit — 리더보드 model 축 캡처", () => {
     expect(rec.models?.primary).toBe("claude-opus-4-8");
   });
 
-  it("inline judge config 모델을 succeeded 레코드의 judgeModels 로 저장한다(judge 축)", async () => {
+  it("stores the inline judge-config model as the succeeded record's judgeModels (judge axis)", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const store = new InMemoryScorecardStore();
@@ -734,16 +734,16 @@ describe("ScorecardService.submit — 리더보드 model 축 캡처", () => {
       tenant: "acme",
       dataset: { id: "d", version: "1.0.0" },
       harness: { id: "scripted", version: "0" },
-      judge: { provider: "openai", model: "gpt-5.4-mini" }, // 채점자
+      judge: { provider: "openai", model: "gpt-5.4-mini" }, // grader
     });
     const rec = await waitTerminal(store, "sc-judge");
     expect(rec.status).toBe("succeeded");
-    expect(rec.models?.primary).toBe("gpt-4o"); // 하니스가 쓴 LLM
-    expect(rec.judgeModels).toEqual(["gpt-5.4-mini"]); // 채점자 — 별개 축
+    expect(rec.models?.primary).toBe("gpt-4o"); // the LLM the harness used
+    expect(rec.judgeModels).toEqual(["gpt-5.4-mini"]); // grader — a separate axis
   });
 });
 
-describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
+describe("ScorecardService.submit — child-run fan-out (runStore)", () => {
   const okDispatch: Dispatcher = {
     async dispatch(job) {
       return {
@@ -756,7 +756,7 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
     },
   };
 
-  it("runStore 설정 시 케이스마다 자식 run 을 만들고, 활동 리스트엔 숨기며, scorecard.runIds 로 참조한다", async () => {
+  it("with runStore set, creates a child run per case, hides them from the activity list, and references them via scorecard.runIds", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const store = new InMemoryScorecardStore();
@@ -767,7 +767,7 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
       store,
       runStore,
       datasets,
-      newId: () => `sc-${n++}`, // sc-0 = 스코어카드, sc-1 = 케이스 c1 의 자식 run
+      newId: () => `sc-${n++}`, // sc-0 = scorecard, sc-1 = child run of case c1
     });
     await service.submit({
       tenant: "acme",
@@ -776,8 +776,8 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
     });
     const rec = await waitTerminal(store, "sc-0");
     expect(rec.status).toBe("succeeded");
-    expect(rec.runIds).toEqual(["sc-1"]); // 팬아웃한 자식 run 참조
-    expect(rec.scorecard).toBeUndefined(); // 저장 dedup — 무거운 embed 는 저장하지 않는다(runIds 만)
+    expect(rec.runIds).toEqual(["sc-1"]); // reference to the fanned-out child run
+    expect(rec.scorecard).toBeUndefined(); // storage dedup — the heavy embed is not stored (runIds only)
 
     const child = await runStore.get("sc-1");
     expect(child?.status).toBe("succeeded");
@@ -785,24 +785,24 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
     expect(child?.trigger).toBe("scorecard");
     expect(child?.caseId).toBe("c1");
 
-    // get 은 자식 run 으로 scorecard 를 hydrate — 응답 형태는 embed 시절과 동일(웹/diff 불변).
+    // get hydrates the scorecard from child runs — the response shape is identical to the embed era (web/diff unchanged).
     const hydrated = await service.get("sc-0");
     expect(hydrated?.scorecard?.results).toHaveLength(1);
     expect(hydrated?.scorecard?.results[0]?.caseId).toBe("c1");
-    // write-back 으로 케이스 점수(grader/judge/metric)가 자식에 보존 → hydrate 시 그대로 돌아온다.
+    // Write-back preserves case scores (grader/judge/metric) on the child → they come back intact on hydrate.
     expect(hydrated?.scorecard?.results[0]?.scores[0]?.metric).toBe("tests_pass");
 
-    // 활동 리스트(기본)는 자식을 숨기고, scorecardId 로는 그 배치 자식이 보인다.
+    // The activity list (default) hides children, but by scorecardId those batch children are visible.
     expect(await runStore.list("acme")).toEqual([]);
     expect((await runStore.list("acme", { scorecardId: "sc-0" })).map((r) => r.id)).toEqual(["sc-1"]);
   });
 
-  it("diff 는 dedup(runIds) 스코어카드도 hydrate 해서 회귀/개선을 계산한다", async () => {
+  it("diff hydrates dedup (runIds) scorecards too and computes regression/improvement", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const store = new InMemoryScorecardStore();
     const runStore = new InMemoryRunStore();
-    // pass 를 바꾸는 dispatcher — base 는 pass, cand 는 fail(회귀).
+    // A dispatcher that flips pass — base passes, candidate fails (regression).
     const dispatchPass = (pass: boolean): Dispatcher => ({
       async dispatch(job) {
         return {
@@ -814,7 +814,7 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
         };
       },
     });
-    // 서비스별 독립 카운터 — base 스코어카드=b-0(+자식 b-1), cand 스코어카드=c-0(+자식 c-1).
+    // Per-service independent counters — base scorecard=b-0 (+child b-1), candidate scorecard=c-0 (+child c-1).
     let bn = 0;
     let cn = 0;
     const base = new ScorecardService({
@@ -836,7 +836,7 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
     await cand.submit({ tenant: "acme", dataset: { id: "d", version: "1.0.0" }, harness: { id: "s", version: "0" } });
     await waitTerminal(store, "c-0");
 
-    // 두 스코어카드 모두 embed 없이 runIds 만 저장됐지만, diff 는 hydrate 해서 pass→fail 회귀를 잡는다.
+    // Both scorecards stored only runIds without embed, yet diff hydrates and catches the pass→fail regression.
     const diff = await base.diff("acme", "b-0", "c-0");
     expect(diff.regressions).toContainEqual({
       caseId: "c1",
@@ -848,7 +848,7 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
     });
   });
 
-  it("runStore 미설정이면 자식 run 없이 임베드 scorecard 만(현행 유지)", async () => {
+  it("without runStore, embed the scorecard with no child runs (unchanged)", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", datasetWithCase());
     const store = new InMemoryScorecardStore();
@@ -861,12 +861,12 @@ describe("ScorecardService.submit — 자식 run 팬아웃(runStore)", () => {
     const rec = await waitTerminal(store, "sc-x");
     expect(rec.status).toBe("succeeded");
     expect(rec.runIds).toBeUndefined();
-    expect(rec.scorecard?.results).toHaveLength(1); // 임베드 결과는 그대로
+    expect(rec.scorecard?.results).toHaveLength(1); // embedded results are intact
   });
 });
 
-describe("ScorecardService.submit — 요청 concurrency 가 runSuite 병렬도로 흐른다", () => {
-  // 동시 in-flight 디스패치 수를 계측하는 dispatcher — 각 dispatch 가 잠깐 지연돼야 병렬이 쌓인다.
+describe("ScorecardService.submit — request concurrency flows into runSuite parallelism", () => {
+  // A dispatcher that measures concurrent in-flight dispatches — each dispatch must delay briefly for parallelism to build up.
   function probe(): { dispatcher: Dispatcher; peak: () => number } {
     let inFlight = 0;
     let max = 0;
@@ -888,7 +888,7 @@ describe("ScorecardService.submit — 요청 concurrency 가 runSuite 병렬도�
     return { dispatcher, peak: () => max };
   }
 
-  // 케이스 N 개짜리 데이터셋(병렬도 검증용 — 케이스가 동시도보다 많아야 의미 있다).
+  // A dataset of N cases (for parallelism testing — meaningful only when cases outnumber the concurrency).
   async function datasetN(datasets: InMemoryDatasetRegistry, n: number): Promise<void> {
     await datasets.register("acme", {
       id: "many",
@@ -905,7 +905,7 @@ describe("ScorecardService.submit — 요청 concurrency 가 runSuite 병렬도�
     });
   }
 
-  it("요청 concurrency=3 → 동시에 3개까지 디스패치(서비스 기본을 덮어쓴다)", async () => {
+  it("request concurrency=3 → dispatches up to 3 at once (overrides the service default)", async () => {
     const { dispatcher, peak } = probe();
     const datasets = new InMemoryDatasetRegistry();
     await datasetN(datasets, 6);
@@ -919,10 +919,10 @@ describe("ScorecardService.submit — 요청 concurrency 가 runSuite 병렬도�
     });
     const done = await waitTerminal(store, "sc-conc");
     expect(done.status).toBe("succeeded");
-    expect(peak()).toBe(3); // 서비스 기본(1)이 아니라 요청값(3)이 적용됐다
+    expect(peak()).toBe(3); // the request value (3) applied, not the service default (1)
   });
 
-  it("요청 concurrency 미지정 → 서비스 기본 동시도(=1)로 직렬 디스패치", async () => {
+  it("request concurrency unset → serial dispatch at the service default concurrency (=1)", async () => {
     const { dispatcher, peak } = probe();
     const datasets = new InMemoryDatasetRegistry();
     await datasetN(datasets, 4);
@@ -938,7 +938,7 @@ describe("ScorecardService.submit — 요청 concurrency 가 runSuite 병렬도�
   });
 });
 
-describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin provenance", () => {
+describe("ScorecardService.submit — submit-time ephemeral pins + origin provenance", () => {
   const topoTemplate: HarnessTemplateSpec = {
     kind: "service",
     category: "topology",
@@ -976,7 +976,7 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
     return { datasets, instances };
   }
 
-  it("pins 는 dispatched harnessSpec 의 해당 슬롯 이미지만 스왑하고 origin.pinOverrides 로 기록된다(레지스트리 무변경)", async () => {
+  it("pins swap only the matching slot image in the dispatched harnessSpec and are recorded via origin.pinOverrides (registry unchanged)", async () => {
     const { datasets, instances } = await fixtures();
     const store = new InMemoryScorecardStore();
     const jobs: AgentJob[] = [];
@@ -999,21 +999,21 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
       harness: { id: "bu", version: "latest", pins: { planner: "p:pr-7" } },
       origin: { source: "github-actions", repo: "acme/app", prNumber: 7 },
     });
-    expect(rec.harness).toEqual({ id: "bu", version: "1.0.0" }); // 임시 핀은 버전을 만들지 않는다(기반 버전 기록)
+    expect(rec.harness).toEqual({ id: "bu", version: "1.0.0" }); // ephemeral pins don't create a version (the base version is recorded)
     expect(rec.origin).toMatchObject({
       source: "github-actions",
       repo: "acme/app",
       prNumber: 7,
-      pinOverrides: { planner: "p:pr-7" }, // 무엇으로 평가했는지의 재현 근거
+      pinOverrides: { planner: "p:pr-7" }, // reproducibility record of what was evaluated
     });
     await waitTerminal(store, "sc-pins");
     const spec = jobs[0]?.harnessSpec;
     if (spec?.kind !== "service") throw new Error("expected service harnessSpec");
-    expect(spec.services.map((s) => s.image)).toEqual(["p:pr-7", "b:1"]); // planner 만 스왑
-    expect(await instances.versions("acme", "bu")).toEqual(["1.0.0"]); // 레지스트리 무변경
+    expect(spec.services.map((s) => s.image)).toEqual(["p:pr-7", "b:1"]); // only planner swapped
+    expect(await instances.versions("acme", "bu")).toEqual(["1.0.0"]); // registry unchanged
   });
 
-  it("알 수 없는 슬롯 핀 → BadRequest (핀 무시 채 통과 방지 — 폴백 없음)", async () => {
+  it("unknown slot pin → BadRequest (prevents silently passing while ignoring the pin — no fallback)", async () => {
     const { datasets, instances } = await fixtures();
     const service = new ScorecardService({
       dispatcher,
@@ -1030,7 +1030,7 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
     ).rejects.toBeInstanceOf(BadRequestError);
   });
 
-  it("레지스트리 미설정 + pins → BadRequest (빌트인 하니스에 핀은 불가)", async () => {
+  it("no registry + pins → BadRequest (can't pin a built-in harness)", async () => {
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", pinDataset);
     const service = new ScorecardService({ dispatcher, store: new InMemoryScorecardStore(), datasets });
@@ -1043,7 +1043,7 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
     ).rejects.toBeInstanceOf(BadRequestError);
   });
 
-  it("origin 은 pins 없이도 그대로 기록된다(schedule/web/api 공통 provenance)", async () => {
+  it("origin is recorded as-is even without pins (common provenance for schedule/web/api)", async () => {
     const { datasets, instances } = await fixtures();
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({
@@ -1062,7 +1062,7 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
     expect(rec.origin).toEqual({ source: "schedule" });
   });
 
-  it("submittedBy(제출자)는 레코드 createdBy 로 스탬프된다 — origin(어디서)과 짝인 실행자(누가)", async () => {
+  it("submittedBy (submitter) is stamped as the record's createdBy — the actor (who) paired with origin (where)", async () => {
     const { datasets, instances } = await fixtures();
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({
@@ -1082,7 +1082,7 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
     expect((await store.get("sc-by"))?.createdBy).toBe("user-alice");
   });
 
-  it("ingest(트레이스 업로드)도 submittedBy 를 createdBy 로 스탬프한다", async () => {
+  it("ingest (trace upload) also stamps submittedBy as createdBy", async () => {
     const { datasets } = await fixtures();
     const store = new InMemoryScorecardStore();
     const service = new ScorecardService({ dispatcher, store, datasets, newId: () => "sc-ingest-by" });
@@ -1098,7 +1098,7 @@ describe("ScorecardService.submit — 제출 시점 임시 핀(pins) + origin pr
   });
 });
 
-describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가 in-flight 배치를 회수)", () => {
+describe("ScorecardService.submit — server-side supersede (re-firing the same PR reclaims the in-flight batch)", () => {
   const twoCaseDataset: Dataset = {
     id: "sd",
     version: "1.0.0",
@@ -1108,7 +1108,7 @@ describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가
     ],
     tags: [],
   };
-  // 게이트 dispatcher — 발사 순간을 기록하고, release() 전까지 결과를 보류한다(배치를 "실행 중"에 세워두기 위함).
+  // A gating dispatcher — records the moment of firing and holds the result until release() (to keep the batch "running").
   function gatedDispatcher() {
     const dispatched: string[] = [];
     let release!: () => void;
@@ -1132,7 +1132,7 @@ describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가
     throw new Error("condition not met");
   };
 
-  it("같은 (repo,PR,harness,dataset) 재발사 → 이전 배치 superseded(남은 케이스 미발사·부분 결과 보존·알림 생략)", async () => {
+  it("re-firing the same (repo,PR,harness,dataset) → the previous batch is superseded (remaining cases unfired · partial results preserved · notification skipped)", async () => {
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", twoCaseDataset);
@@ -1143,7 +1143,7 @@ describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가
       dispatcher: gate.dispatcher,
       store,
       datasets,
-      concurrency: 1, // 직렬 — c1 이 게이트에 걸린 동안 c2 는 미발사 상태로 남는다
+      concurrency: 1, // serial — while c1 is stuck at the gate, c2 stays unfired
       newId: () => `sup-${n++}`,
       onComplete: async (_tenant, rec) => {
         completions.push(rec.id);
@@ -1157,27 +1157,27 @@ describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가
     const origin = { source: "github-actions", repo: "acme/app", prNumber: 7 };
 
     const first = await service.submit({ ...base, origin: { ...origin, sha: "old" } });
-    await until(() => gate.dispatched.length === 1); // c1 발사됨(게이트에 블록)
+    await until(() => gate.dispatched.length === 1); // c1 fired (blocked at the gate)
 
     const second = await service.submit({ ...base, origin: { ...origin, sha: "new" } });
-    // 제출 시점에 이전 배치가 즉시 회수된다(202 응답 이전 — supersede 는 submit 안에서 await).
+    // The previous batch is reclaimed immediately at submit time (before the 202 response — supersede is awaited inside submit).
     const supersededNow = await store.get(first.id);
     expect(supersededNow?.status).toBe("superseded");
     expect(supersededNow?.error?.code).toBe("SUPERSEDED");
 
     gate.release();
     await until(async () => (await store.get(second.id))?.status === "succeeded");
-    await until(async () => (await store.get(first.id))?.scorecard !== undefined); // 첫 배치 종결 대기
+    await until(async () => (await store.get(first.id))?.scorecard !== undefined); // wait for the first batch to settle
 
     const finalFirst = await store.get(first.id);
-    expect(finalFirst?.status).toBe("superseded"); // track 종결이 succeeded 로 되살리지 않는다
-    expect(finalFirst?.scorecard?.results.map((r) => r.caseId)).toEqual(["c1"]); // 부분 결과(발사된 것만) 보존
-    // 남은 케이스(c2)는 첫 배치에서 발사되지 않았다 — 총 발사 = 첫 배치 c1 + 둘째 배치 c1,c2.
+    expect(finalFirst?.status).toBe("superseded"); // track settlement does not revive it to succeeded
+    expect(finalFirst?.scorecard?.results.map((r) => r.caseId)).toEqual(["c1"]); // partial results (only what fired) preserved
+    // The remaining case (c2) never fired in the first batch — total firings = first-batch c1 + second-batch c1,c2.
     expect(gate.dispatched).toHaveLength(3);
-    expect(completions).toEqual([second.id]); // 대체된 배치는 완료 알림 생략
+    expect(completions).toEqual([second.id]); // the superseded batch skips its completion notification
   });
 
-  it("prNumber 없음(merge/dev) 또는 다른 PR 번호의 발사는 supersede 하지 않는다", async () => {
+  it("firings with no prNumber (merge/dev) or a different PR number do not supersede", async () => {
     const store = new InMemoryScorecardStore();
     const datasets = new InMemoryDatasetRegistry();
     await datasets.register("acme", twoCaseDataset);
@@ -1197,15 +1197,15 @@ describe("ScorecardService.submit — 서버측 supersede(같은 PR 재발사가
     };
     const pr7 = await service.submit({ ...base, origin: { source: "github-actions", repo: "acme/app", prNumber: 7 } });
     await until(() => gate.dispatched.length >= 1);
-    await service.submit({ ...base, origin: { source: "github-actions", repo: "acme/app" } }); // merge — prNumber 없음
-    await service.submit({ ...base, origin: { source: "github-actions", repo: "acme/app", prNumber: 8 } }); // 다른 PR
-    expect((await store.get(pr7.id))?.status).toBe("running"); // 회수되지 않음
+    await service.submit({ ...base, origin: { source: "github-actions", repo: "acme/app" } }); // merge — no prNumber
+    await service.submit({ ...base, origin: { source: "github-actions", repo: "acme/app", prNumber: 8 } }); // a different PR
+    expect((await store.get(pr7.id))?.status).toBe("running"); // not reclaimed
     gate.release();
-    await until(async () => (await store.get(pr7.id))?.status === "succeeded"); // 정상 완료
+    await until(async () => (await store.get(pr7.id))?.status === "succeeded"); // completes normally
   });
 });
 
-describe("ScorecardService.submit — 부분 실행(subset)", () => {
+describe("ScorecardService.submit — partial run (subset)", () => {
   const threeCaseDataset = (): Dataset => ({
     id: "big",
     version: "1.0.0",
@@ -1249,7 +1249,7 @@ describe("ScorecardService.submit — 부분 실행(subset)", () => {
     harness: { id: "scripted", version: "0" },
   };
 
-  it("limit 이면 앞에서 N개만 돌고 record.subset 이 스탬프된다", async () => {
+  it("with limit, only the first N run and record.subset is stamped", async () => {
     const { store, dispatched, service } = await build("sc-lim");
     const rec = await service.submit({ ...submitBase, cases: { limit: 2 } });
     expect(rec.subset).toEqual({ total: 3, selected: 2, limit: 2 });
@@ -1258,7 +1258,7 @@ describe("ScorecardService.submit — 부분 실행(subset)", () => {
     expect((await store.get("sc-lim"))?.scorecard?.results).toHaveLength(2);
   });
 
-  it("tags 는 any-match 필터(+limit 과 결합)", async () => {
+  it("tags is an any-match filter (combined with limit)", async () => {
     const { store, dispatched, service } = await build("sc-tag");
     const rec = await service.submit({ ...submitBase, cases: { tags: ["easy"], limit: 1 } });
     expect(rec.subset).toEqual({ total: 3, selected: 1, tags: ["easy"], limit: 1 });
@@ -1266,7 +1266,7 @@ describe("ScorecardService.submit — 부분 실행(subset)", () => {
     expect(dispatched).toEqual(["a"]);
   });
 
-  it("ids 는 명시 선택 — 없는 id 는 400 으로 즉시 거절(조용한 부분 실행 금지)", async () => {
+  it("ids is explicit selection — an unknown id is rejected immediately with 400 (no silent partial run)", async () => {
     const { store, dispatched, service } = await build("sc-ids");
     const rec = await service.submit({ ...submitBase, cases: { ids: ["c", "a"] } });
     expect(rec.subset).toEqual({ total: 3, selected: 2, ids: ["c", "a"] });
@@ -1275,12 +1275,14 @@ describe("ScorecardService.submit — 부분 실행(subset)", () => {
     await expect(service.submit({ ...submitBase, cases: { ids: ["a", "nope"] } })).rejects.toThrow(/nope/);
   });
 
-  it("선택 결과가 0개면 400(태그 불일치)", async () => {
+  it("zero selected → 400 (tag mismatch)", async () => {
     const { service } = await build("sc-empty");
-    await expect(service.submit({ ...submitBase, cases: { tags: ["없는태그"] } })).rejects.toThrow(/케이스가 없습니다/);
+    await expect(service.submit({ ...submitBase, cases: { tags: ["no-such-tag"] } })).rejects.toThrow(
+      /No cases match the selection/,
+    );
   });
 
-  it("cases 미지정이면 전체 실행 + subset 미스탬프(현행 무변경)", async () => {
+  it("unset cases runs everything + no subset stamp (unchanged)", async () => {
     const { store, dispatched, service } = await build("sc-all");
     const rec = await service.submit({ ...submitBase });
     expect(rec.subset).toBeUndefined();

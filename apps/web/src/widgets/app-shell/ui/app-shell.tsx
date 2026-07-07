@@ -6,9 +6,9 @@ import { CommandPalette } from './command-palette'
 import { PageTransition } from './page-transition'
 import { Sidebar } from './sidebar'
 
-// 대시보드 공통 셸 — 좌측 섹션형 사이드바(워크스페이스 스위처 + Cmd+K + 내비 + 푸터 유저메뉴) + 본문.
-// 데스크톱엔 글로벌 상단 바 없음(Linear 식): 페이지가 자체 PageHeader 를 소유한다. 모바일만 슬림 상단 바(사이드바가 렌더).
-// workspace·roles·workspaces·subject 의 권위는 컨트롤플레인 GET /me (웹은 토큰을 해석하지 않는다).
+// Shared dashboard shell — left sectioned sidebar (workspace switcher + Cmd+K + nav + footer user menu) + body.
+// No global top bar on desktop (Linear-style): each page owns its own PageHeader. Only mobile gets a slim top bar (rendered by the sidebar).
+// The authority for workspace·roles·workspaces·subject is the control plane's GET /me (the web does not decode the token).
 export function AppShell({
   workspace,
   workspaces,

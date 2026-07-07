@@ -10,8 +10,8 @@ export interface MattermostMutationResult {
   error?: string
 }
 
-// Mattermost 통합 등록/갱신(관리자). bot 토큰(값)은 워크스페이스 시크릿에 먼저 넣고 그 이름만 지정.
-// authZ(admin=settings:write)는 컨트롤플레인이 강제.
+// Register/update the Mattermost integration (admin). Put the bot token (value) into a workspace secret first and specify only its name.
+// authZ (admin = settings:write) is enforced by the control plane.
 export async function setMattermostAction(input: {
   host: string
   botTokenSecretName: string
@@ -28,7 +28,7 @@ export async function setMattermostAction(input: {
   }
 }
 
-// Mattermost 통합 해제(관리자). 이후 완료/회귀 알림은 게시되지 않는다.
+// Remove the Mattermost integration (admin). Completion/regression notifications are no longer posted afterward.
 export async function removeMattermostAction(): Promise<MattermostMutationResult> {
   const ctx = await authContext()
   try {

@@ -1,7 +1,7 @@
 {
   "id": "repo-smoke",
   "version": "1.0.0",
-  "description": "first-party 벤치마크 — repo 환경 기본 스모크(파일 생성/수정). 하니스 무관: 어느 하니스든 같은 케이스로 평가.",
+  "description": "first-party benchmark — basic repo-environment smoke (file create/edit). Harness-agnostic: any harness is evaluated on the same cases.",
   "tags": ["benchmark", "repo"],
   "cases": [
     {

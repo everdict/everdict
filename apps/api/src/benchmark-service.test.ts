@@ -4,7 +4,7 @@ import { InMemoryBenchmarkRegistry, InMemoryDatasetRegistry } from "@everdict/re
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 
-// HF datasets-server /rows 응답을 흉내내는 가짜 fetch(네트워크 없이 결정적 테스트).
+// A fake fetch mimicking the HF datasets-server /rows response (deterministic test with no network).
 const HF_ROW = { id: "q1", question: "2+2?", answer: "4" };
 const fakeFetch: FetchLike = async () => ({
   ok: true,
@@ -18,8 +18,8 @@ function svc() {
   return { service, datasets };
 }
 
-describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위저드)", () => {
-  it("previewSource(huggingface) 는 매핑 전 감지된 필드와 샘플 행을 돌려준다", async () => {
+describe("BenchmarkService — source preview + inline spec import (wizard)", () => {
+  it("previewSource(huggingface) returns the detected fields and sample rows before mapping", async () => {
     const { service } = svc();
     const { fields, rows } = await service.previewSource({
       tenant: "acme",
@@ -29,7 +29,7 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
     expect(rows[0]).toMatchObject({ question: "2+2?" });
   });
 
-  it("previewSource(jsonl) 는 text 앞줄을 파싱해 필드를 감지한다(limit 적용)", async () => {
+  it("previewSource(jsonl) parses the leading lines of text to detect fields (limit applied)", async () => {
     const { service } = svc();
     const text = '{"id":"a","ques":"hi","answer":"x"}\n{"id":"b","ques":"yo","answer":"y"}';
     const { fields, rows } = await service.previewSource({ tenant: "acme", source: { kind: "jsonl" }, text, limit: 5 });
@@ -37,7 +37,7 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
     expect(rows).toHaveLength(2);
   });
 
-  it("인라인 spec 으로 레시피 등록 없이 한 번에 데이터셋으로 인입된다(위저드의 한-번-액션)", async () => {
+  it("an inline spec imports as a dataset in one shot with no recipe registration (the wizard's one-action)", async () => {
     const { service, datasets } = svc();
     const rec = await service.import({
       tenant: "acme",
@@ -51,11 +51,11 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
       },
     });
     expect(rec).toMatchObject({ workspace: "acme", id: "my-bench", cases: 1 });
-    // 데이터셋 레지스트리에 실제 등록됨 — task 가 question 필드에서 매핑.
+    // Actually registered in the dataset registry — task is mapped from the question field.
     const ds = await datasets.get("acme", "my-bench", "1.0.0");
     expect(ds.cases).toHaveLength(1);
     expect(ds.cases[0]?.task).toBe("2+2?");
-    // 인라인 spec 인입도 출처를 남긴다(via:spec) + 리니지(원본 HF 소스 + 정규 링크) 각인.
+    // An inline-spec import also records provenance (via:spec) + etches lineage (the source HF source + canonical link).
     expect(ds.producedBy).toEqual({
       via: "spec",
       id: "my-bench",
@@ -63,11 +63,11 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
     });
   });
 
-  it("리니지: source.file(뷰어 미서빙 폴백)과 origin(공식 출처)이 producedBy 에 각인된다", async () => {
+  it("lineage: source.file (viewer-less fallback) and origin (official provenance) are etched into producedBy", async () => {
     const datasets = new InMemoryDatasetRegistry();
     const service = new BenchmarkService({
       datasets,
-      // resolve API(파일 직접 인출) 응답을 흉내: CSV 한 줄.
+      // Mimic the resolve API (direct file fetch) response: a single CSV row.
       fetchImpl: (async () => ({
         ok: true,
         status: 200,
@@ -100,7 +100,7 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
     });
   });
 
-  it("등록된 레시피로 인입하면 데이터셋에 producedBy(via:recipe, 해석된 버전)가 스탬프된다", async () => {
+  it("importing from a registered recipe stamps producedBy (via:recipe, resolved version) on the dataset", async () => {
     const datasets = new InMemoryDatasetRegistry();
     const benchmarks = new InMemoryBenchmarkRegistry();
     const service = new BenchmarkService({ datasets, benchmarks, fetchImpl: fakeFetch });
@@ -113,7 +113,7 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
     });
     await service.import({ tenant: "acme", version: "1.0.0", recipe: { id: "gsm" } });
     const ds = await datasets.get("acme", "gsm", "1.0.0");
-    // latest 로 해석된 구체 버전(1.2.0)을 역링크가 가리킨다 + 리니지(원본 HF 소스)도 각인.
+    // The back-link points at the concrete version (1.2.0) resolved from latest + lineage (the source HF source) is etched too.
     expect(ds.producedBy).toEqual({
       via: "recipe",
       id: "gsm",
@@ -123,8 +123,8 @@ describe("BenchmarkService — 소스 미리보기 + 인라인 spec 인입(위�
   });
 });
 
-describe("BenchmarkService — HF 접속 실패는 자연스럽게(UpstreamError, raw 에러 노출 금지)", () => {
-  it("네트워크 실패(fetch 가 throw) → UpstreamError + 사람 친화 메시지", async () => {
+describe("BenchmarkService — HF connection failures surface cleanly (UpstreamError, no raw error exposed)", () => {
+  it("network failure (fetch throws) → UpstreamError + human-friendly message", async () => {
     const svc = new BenchmarkService({
       datasets: new InMemoryDatasetRegistry(),
       fetchImpl: (async () => {
@@ -132,10 +132,10 @@ describe("BenchmarkService — HF 접속 실패는 자연스럽게(UpstreamError
       }) as FetchLike,
     });
     await expect(svc.searchHf("acme", "gsm8k")).rejects.toBeInstanceOf(UpstreamError);
-    await expect(svc.searchHf("acme", "gsm8k")).rejects.toThrow(/접속할 수 없습니다/);
+    await expect(svc.searchHf("acme", "gsm8k")).rejects.toThrow(/Cannot reach HuggingFace/);
   });
 
-  it("non-2xx(503 등) → UpstreamError(응답 오류)", async () => {
+  it("non-2xx (503 etc.) → UpstreamError (response error)", async () => {
     const svc = new BenchmarkService({
       datasets: new InMemoryDatasetRegistry(),
       fetchImpl: (async () => ({ ok: false, status: 503, text: async () => "down" })) as FetchLike,
@@ -143,7 +143,7 @@ describe("BenchmarkService — HF 접속 실패는 자연스럽게(UpstreamError
     await expect(svc.hfSplits("acme", "openai/gsm8k")).rejects.toBeInstanceOf(UpstreamError);
   });
 
-  it("미리보기/인입의 HF 인출도 UpstreamError 로(레시피/도메인 에러는 그대로)", async () => {
+  it("preview/import HF fetches also become UpstreamError (recipe/domain errors pass through)", async () => {
     const svc = new BenchmarkService({
       datasets: new InMemoryDatasetRegistry(),
       fetchImpl: (async () => {
@@ -156,9 +156,9 @@ describe("BenchmarkService — HF 접속 실패는 자연스럽게(UpstreamError
   });
 });
 
-describe("BenchmarkService — gated 인증은 요청자 개인 시크릿까지(셀프서비스)", () => {
-  // 회귀: secretsFor 가 workspace 공유만 읽으면 멤버(admin 아님)는 자기 HF_TOKEN 을 웹에 등록해도
-  // gated 인입이 불가했다. subject 가 secretsFor 로 전달되고 토큰이 HF 요청 헤더에 실려야 한다.
+describe("BenchmarkService — gated auth reaches the requester's personal secrets (self-service)", () => {
+  // Regression: if secretsFor only read workspace-shared secrets, a member (non-admin) could not do a gated
+  // import even after registering their HF_TOKEN in the web. The subject must be passed to secretsFor and the token carried in the HF request header.
   function capture() {
     const seen: Array<{ url: string; auth?: string }> = [];
     const fetchImpl: FetchLike = async (url, init) => {
@@ -172,7 +172,7 @@ describe("BenchmarkService — gated 인증은 요청자 개인 시크릿까지(
     return { seen, fetchImpl };
   }
 
-  it("previewSource 가 subject 를 secretsFor 로 넘기고 HF_TOKEN 을 Authorization 으로 보낸다", async () => {
+  it("previewSource passes the subject to secretsFor and sends HF_TOKEN as Authorization", async () => {
     const { seen, fetchImpl } = capture();
     const calls: Array<{ tenant: string; subject?: string }> = [];
     const service = new BenchmarkService({
@@ -192,7 +192,7 @@ describe("BenchmarkService — gated 인증은 요청자 개인 시크릿까지(
     expect(seen[0]?.auth).toBe("Bearer hf_personal");
   });
 
-  it("import 는 인입자(createdBy)를 subject 로 사용한다", async () => {
+  it("import uses the importer (createdBy) as the subject", async () => {
     const { seen, fetchImpl } = capture();
     const calls: Array<string | undefined> = [];
     const datasets = new InMemoryDatasetRegistry();
@@ -221,7 +221,7 @@ describe("BenchmarkService — gated 인증은 요청자 개인 시크릿까지(
     expect(await datasets.get("acme", "gated-bench", "1.0.0")).toBeTruthy();
   });
 
-  it("searchHf/hfSplits 도 subject 를 전달한다", async () => {
+  it("searchHf/hfSplits also pass the subject", async () => {
     const subjects: Array<string | undefined> = [];
     const fetchImpl: FetchLike = async (url) =>
       url.includes("/splits")

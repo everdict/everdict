@@ -12,10 +12,10 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 import { removeMattermostAction, setMattermostAction } from '../api/manage-mattermost'
 
-// 워크스페이스 소유 Mattermost 통합 — 사내 Mattermost 를 관리자가 등록하면 실행·스코어카드 완료/회귀 알림을
-// bot 토큰으로 채널에 게시한다(개인 연결 대체). bot 토큰 값은 워크스페이스 시크릿 참조(이름)로만 저장.
-// secretNames = 워크스페이스 시크릿 이름(토큰 피커용 — 값은 안 옴). 두 피커가 목록을 공유하므로
-// 인라인 생성분은 created 로 합류시킨다.
+// Workspace-owned Mattermost integration — once an admin registers the company Mattermost, run and scorecard completion/regression
+// notifications are posted to a channel with a bot token (replaces personal connections). The bot token value is stored only as a workspace secret reference (name).
+// secretNames = workspace secret names (for the token picker — values not included). Both pickers share the list, so
+// inline-created ones are merged in via created.
 export function MattermostManager({
   config,
   canWrite,
@@ -85,7 +85,7 @@ export function MattermostManager({
                 onChange={(e) => setHost(e.target.value)}
               />
             </div>
-            {/* bot 토큰은 자유 텍스트가 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성. */}
+            {/* The bot token is a workspace secret reference, not free text — choose or create inline. */}
             <div className="space-y-1">
               <Label htmlFor="mm-token">{t('botTokenSecret')}</Label>
               <SecretPicker

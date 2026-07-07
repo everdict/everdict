@@ -9,12 +9,12 @@ import { InMemoryModelRegistry } from "./model-registry.js";
 import { PgModelRegistry } from "./pg-model-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 
-// 최소 model. extra 로 내용 변경(불변성 검증용).
+// Minimal model. extra changes content (for immutability checks).
 const model = (id: string, version: string, extra: Record<string, unknown> = {}): ModelSpec =>
   ModelSpecSchema.parse({ id, version, provider: "anthropic", model: "claude-opus-4-8", ...extra });
 
 describe("InMemoryModelRegistry (tenant-owned)", () => {
-  it("테넌트 소유 등록 + latest(semver) 조회", async () => {
+  it("registers tenant-owned + resolves latest (semver)", async () => {
     const r = new InMemoryModelRegistry();
     await r.register("acme", model("m", "1.9.0"));
     await r.register("acme", model("m", "1.10.0"));
@@ -22,7 +22,7 @@ describe("InMemoryModelRegistry (tenant-owned)", () => {
     expect((await r.get("acme", "m")).version).toBe("1.10.0");
   });
 
-  it("openai(프록시) 모델도 baseUrl 과 함께 등록/조회된다", async () => {
+  it("registers/reads an openai (proxy) model with baseUrl too", async () => {
     const r = new InMemoryModelRegistry();
     const om = ModelSpecSchema.parse({
       id: "gpt-mini",
@@ -37,7 +37,7 @@ describe("InMemoryModelRegistry (tenant-owned)", () => {
     expect(got.baseUrl).toBe("http://localhost:4000/v1");
   });
 
-  it("테넌트 격리: 한 테넌트의 model 을 다른 테넌트는 못 본다", async () => {
+  it("tenant isolation: one tenant's model is invisible to another", async () => {
     const r = new InMemoryModelRegistry();
     await r.register("acme", model("priv", "1.0.0"));
     expect(await r.has("acme", "priv", "1.0.0")).toBe(true);
@@ -45,24 +45,24 @@ describe("InMemoryModelRegistry (tenant-owned)", () => {
     await expect(r.get("beta", "priv")).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("_shared(기본 model) 폴백 + 테넌트 소유 우선", async () => {
+  it("_shared (default model) fallback + tenant-owned first", async () => {
     const r = new InMemoryModelRegistry();
     await r.register(SHARED_TENANT, model("opus", "1.0.0"));
     await r.register("acme", model("opus", "2.0.0"));
-    expect((await r.get("acme", "opus")).version).toBe("2.0.0"); // 자기 것
-    expect((await r.get("beta", "opus")).version).toBe("1.0.0"); // 공유 폴백
+    expect((await r.get("acme", "opus")).version).toBe("2.0.0"); // its own
+    expect((await r.get("beta", "opus")).version).toBe("1.0.0"); // shared fallback
   });
 
-  it("버전 불변: 같은 (tenant,id,version) 다른 내용은 충돌", async () => {
+  it("version immutability: same (tenant,id,version) with different content conflicts", async () => {
     const r = new InMemoryModelRegistry();
     await r.register("acme", model("m", "1.0.0"));
-    await r.register("acme", model("m", "1.0.0")); // 동일 → 멱등
+    await r.register("acme", model("m", "1.0.0")); // identical → idempotent
     await expect(r.register("acme", model("m", "1.0.0", { description: "changed" }))).rejects.toBeInstanceOf(
       ConflictError,
     );
   });
 
-  it("list 는 소유 + 공유를 보여주고 owner 표기", async () => {
+  it("list shows owned + shared and marks the owner", async () => {
     const r = new InMemoryModelRegistry();
     await r.register(SHARED_TENANT, model("opus", "1.0.0"));
     await r.register("acme", model("mine", "1.0.0"));
@@ -74,7 +74,7 @@ describe("InMemoryModelRegistry (tenant-owned)", () => {
 });
 
 describe("loadModelDir", () => {
-  it("기본 SHARED 로 로드(파일 SSOT) → 모든 테넌트가 폴백으로 봄", async () => {
+  it("loads as SHARED by default (file SSOT) → every tenant sees it via fallback", async () => {
     const dir = mkdtempSync(join(tmpdir(), "everdict-model-"));
     try {
       writeFileSync(join(dir, "opus-1.0.0.json"), JSON.stringify(model("opus", "1.0.0")));
@@ -86,7 +86,7 @@ describe("loadModelDir", () => {
   });
 });
 
-// 가짜 SqlClient — tenant-aware everdict_models 흉내.
+// Fake SqlClient — mimics the tenant-aware everdict_models.
 function fakePg(): SqlClient {
   const rows: Array<{ tenant: string; id: string; version: string; model: unknown }> = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
@@ -129,15 +129,15 @@ function fakePg(): SqlClient {
 }
 
 describe("PgModelRegistry (tenant-owned)", () => {
-  it("register/versions/latest + 폴백 + 격리 + 불변성", async () => {
+  it("register/versions/latest + fallback + isolation + immutability", async () => {
     const r = new PgModelRegistry(fakePg());
     await r.register(SHARED_TENANT, model("opus", "1.0.0"));
     await r.register(SHARED_TENANT, model("opus", "1.10.0"));
     await r.register("acme", model("mine", "1.0.0"));
 
-    expect((await r.get("acme", "opus")).version).toBe("1.10.0"); // 공유 폴백 + semver
-    expect((await r.get("acme", "mine")).version).toBe("1.0.0"); // 자기 것
-    expect(await r.has("beta", "mine", "1.0.0")).toBe(false); // 격리
+    expect((await r.get("acme", "opus")).version).toBe("1.10.0"); // shared fallback + semver
+    expect((await r.get("acme", "mine")).version).toBe("1.0.0"); // its own
+    expect(await r.has("beta", "mine", "1.0.0")).toBe(false); // isolation
     await expect(r.get("beta", "mine")).rejects.toBeInstanceOf(NotFoundError);
 
     await expect(r.register("acme", model("mine", "1.0.0", { description: "changed" }))).rejects.toBeInstanceOf(

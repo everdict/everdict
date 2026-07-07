@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 예약(cron) 스코어카드의 클라이언트 미러. 웹은 HTTP 로만 결합 — @everdict/* 비의존.
-// GET /schedules 응답: 워크스페이스의 예약 목록. 발사(Temporal)는 컨트롤플레인 책임.
+// Client mirror of the control plane scheduled (cron) scorecard. The web couples over HTTP only — no @everdict/* dependency.
+// GET /schedules response: the workspace's schedule list. Firing (Temporal) is the control plane's responsibility.
 export const scheduleOverlapPolicySchema = z.enum(['skip', 'bufferOne', 'allowAll'])
 export type ScheduleOverlapPolicy = z.infer<typeof scheduleOverlapPolicySchema>
 
@@ -26,8 +26,8 @@ export const scheduleSchema = z.object({
   lastFiredAt: z.string().optional(),
   lastStatus: z.string().optional(),
   lastScorecardId: z.string().optional(),
-  // Temporal 이 계산한 authoritative 다음 발사 시각(ISO). 컨트롤플레인이 드라이버로 부착 —
-  // 없으면(Temporal 미배포) 웹이 cron 으로 근사한다. 비저장·읽기 전용.
+  // the authoritative next fire time computed by Temporal (ISO). The control plane attaches it via the driver —
+  // if absent (Temporal not deployed) the web approximates from cron. Not stored·read-only.
   nextFireTimes: z.array(z.string()).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),

@@ -21,14 +21,14 @@ import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
 import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
 import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window-policy.js";
 
-// 데스크톱 셸 — 배포된 웹을 그대로 렌더링(D1: UI SSOT = apps/web)하고, 트레이에 상주하며,
-// 셀프호스티드 러너(@everdict/runner-core)를 메인 프로세스에 내장한다(D3: 원클릭 페어링).
-// 설계: docs/architecture/desktop-app.md · 규약: .claude/skills/desktop/SKILL.md.
+// Desktop shell — renders the deployed web as-is (D1: UI SSOT = apps/web), stays resident in the tray, and
+// embeds the self-hosted runner (@everdict/runner-core) in the main process (D3: one-click pairing).
+// Design: docs/architecture/desktop-app.md · conventions: .claude/skills/desktop/SKILL.md.
 
-// CI 가 릴리즈 빌드에 굽는 기본 서버 URL(esbuild define) — dev(tsc)에는 정의돼 있지 않다(D8).
+// Default server URL that CI bakes into release builds (esbuild define) — not defined in dev (tsc) (D8).
 declare const __EVERDICT_DEFAULT_WEB_URL__: string | undefined;
 
-// 웹(서버) URL 은 가변(D8) — env(개발/e2e) > config(사용자 저장) > CI 주입 기본값. 없으면 설정 화면.
+// The web (server) URL is mutable (D8) — env (dev/e2e) > config (user-saved) > CI-injected default. If none, the setup screen.
 let webUrl: string | null = null;
 let webOrigin: string | null = null;
 function applyWebUrl(url: string | null): void {
@@ -36,11 +36,11 @@ function applyWebUrl(url: string | null): void {
   webOrigin = url === null ? null : webOriginOf(url);
 }
 
-// 러너의 컨트롤플레인 기본값 — 페어링 페이로드의 apiUrl 이 우선한다(웹 서버가 아는 CONTROL_PLANE_URL).
+// The runner's control-plane default — the pairing payload's apiUrl takes precedence (the CONTROL_PLANE_URL the web server knows).
 const defaultApiUrl = process.env.EVERDICT_API_URL ?? "http://localhost:8787";
 
-// 스킬 desktop 보안 불변식 2 — 모든 창에 항상 이 webPreferences. preload 는 origin 게이트(preload.cts)를 위해
-// 웹 origin 을 인자로 받는다.
+// Skill desktop security invariant 2 — always these webPreferences on every window. preload takes the web origin
+// as an argument for its origin gate (preload.cts).
 function securePreferences(origin: string): Electron.WebPreferences {
   return {
     contextIsolation: true,
@@ -56,7 +56,7 @@ let tray: Tray | null = null;
 let quitting = false;
 let shuttingDown = false;
 
-// userData 의 config.json 에 비-비밀 설정 저장(자동시작·러너 메타). rnr_ 토큰은 여기 절대 금지(불변식 5).
+// Store non-secret settings in userData's config.json (autostart · runner meta). The rnr_ token is never allowed here (invariant 5).
 function configIo(): ConfigIo {
   const dir = app.getPath("userData");
   const file = path.join(dir, "config.json");
@@ -69,7 +69,7 @@ function configIo(): ConfigIo {
   };
 }
 
-// rnr_ 토큰의 safeStorage 암호문 파일 IO — token-store 가 암복호를 맡는다.
+// safeStorage ciphertext file IO for the rnr_ token — token-store handles encrypt/decrypt.
 function tokenIo(): TokenIo {
   const dir = app.getPath("userData");
   const file = path.join(dir, "runner-token.bin");
@@ -88,35 +88,35 @@ let config: DesktopConfig;
 function applyAutostart(next: boolean): void {
   config = { ...config, autostart: next };
   saveConfig(configIo(), config);
-  // macOS/Windows 만 지원(Linux 는 Electron 이 no-op) — 패키징 슬라이스에서 .desktop autostart 로 보완.
+  // macOS/Windows only (Electron no-ops on Linux) — supplemented by a .desktop autostart in the packaging slice.
   app.setLoginItemSettings({ openAtLogin: next });
   refreshTrayMenu();
 }
 
-// 트레이/알림이 참조하는 최신 러너 상태 — broadcast 가 갱신한다.
+// Latest runner status referenced by the tray/notifications — updated by broadcast.
 let latestRunnerStatus: DesktopRunnerStatus = { paired: false, state: "off", activeJobs: 0, capabilities: [] };
-// 드레인(running→idle) 단위 알림용 카운터 — 케이스마다 알리면 배치에서 스팸이 된다.
+// Counters for the drain (running→idle) notification — notifying per case would spam in a batch.
 let doneSinceIdle = 0;
 let failedSinceIdle = 0;
 
-// running→idle 전이 시 1회 알림(성공/실패 집계) — Mattermost 완료 알림의 로컬판.
+// One notification on the running→idle transition (success/failure tally) — the local counterpart of the Mattermost completion notification.
 function notifyDrainIfNeeded(prev: DesktopRunnerStatus, next: DesktopRunnerStatus): void {
   if (prev.state !== "running" || next.state !== "idle" || doneSinceIdle + failedSinceIdle === 0) return;
-  const body = `성공 ${doneSinceIdle} · 실패 ${failedSinceIdle}`;
+  const body = `${doneSinceIdle} succeeded · ${failedSinceIdle} failed`;
   doneSinceIdle = 0;
   failedSinceIdle = 0;
   try {
     if (!Notification.isSupported()) return;
-    const n = new Notification({ title: "Everdict 러너 — 잡 처리 완료", body });
+    const n = new Notification({ title: "Everdict runner — jobs processed", body });
     n.on("click", () => createOrFocusWindow());
     n.show();
   } catch {
-    /* 알림 미지원 환경(libnotify 부재 등) — 무시 */
+    /* environment without notification support (e.g. no libnotify) — ignore */
   }
 }
 
-// 독립 알림 워처(N6) — 러너 페어링 토큰으로 컨트롤플레인 피드를 직접 폴링해 OS 알림을 쏜다.
-// 웹 세션/창과 무관: 웹을 안 쓰는(러너 전용) 유저도 "내가 시킨 작업 완료"를 받는다. 페어링 수명주기에 연동.
+// Independent notification watcher (N6) — polls the control-plane feed directly with the runner pairing token and fires OS notifications.
+// Independent of any web session/window: even a web-less (runner-only) user gets "the work I started is done". Tied to the pairing lifecycle.
 let notifyWatcher: NotificationWatcher | null = null;
 let notifySession: ResilientMcpSession | null = null;
 
@@ -127,7 +127,7 @@ function notifyPathOf(row: WatcherNotification): string | null {
 }
 
 function fireOsNotification(row: WatcherNotification): void {
-  // 앱 창이 보이는 중이면 스킵 — 웹 벨 배지가 이미 보이고 있다(웹 쪽 발화도 document.hidden 게이트로 대칭).
+  // Skip if the app window is visible — the web bell badge is already showing (the web side's firing is symmetric via the document.hidden gate).
   if (mainWindow && !mainWindow.isDestroyed() && mainWindow.isVisible() && mainWindow.isFocused()) return;
   try {
     if (!Notification.isSupported()) return;
@@ -140,7 +140,7 @@ function fireOsNotification(row: WatcherNotification): void {
     });
     n.show();
   } catch {
-    /* 알림 미지원 환경 — 무시 */
+    /* environment without notification support — ignore */
   }
 }
 
@@ -154,7 +154,7 @@ function startNotifyWatcher(): void {
   notifyWatcher = new NotificationWatcher({
     callJson: async (name, args) => {
       const r = await session.call(name, args);
-      if (r.isError) throw new Error(r.text || `${name} 실패`);
+      if (r.isError) throw new Error(r.text || `${name} failed`);
       return JSON.parse(r.text) as Record<string, unknown>;
     },
     notify: fireOsNotification,
@@ -166,7 +166,7 @@ function startNotifyWatcher(): void {
     log: (m) => console.error(m),
   });
   notifyWatcher.start();
-  console.error("▶ 독립 알림 워처 시작(러너 토큰 — 웹 세션 불필요)");
+  console.error("▶ Independent notification watcher started (runner token — no web session needed)");
 }
 
 function stopNotifyWatcher(): void {
@@ -177,7 +177,7 @@ function stopNotifyWatcher(): void {
   if (s) void s.close().catch(() => {});
 }
 
-// 러너 컨트롤러 — 페어 상태 영속 + RunnerHost 수명주기. 상태는 웹 origin 창에만 push(불변식 4와 같은 경계).
+// Runner controller — persists pair state + RunnerHost lifecycle. Status is pushed only to web-origin windows (the same boundary as invariant 4).
 const controller = new RunnerController({
   loadToken: () => loadToken(safeStorage, tokenIo()),
   saveToken: (token) => saveToken(safeStorage, tokenIo(), token),
@@ -204,17 +204,17 @@ const controller = new RunnerController({
         else doneSinceIdle++;
       },
       log: (m) => console.error(m),
-      // 데스크톱은 종료 지연을 줄이기 위해 long-poll 을 CLI(25s)보다 짧게 잡는다(정지는 현재 poll 완료까지 대기).
+      // Desktop uses a shorter long-poll than the CLI (25s) to reduce shutdown latency (stop waits for the current poll to complete).
       waitMs: 8_000,
     }),
   defaultApiUrl,
   broadcast: (status) => {
     notifyDrainIfNeeded(latestRunnerStatus, status);
     latestRunnerStatus = status;
-    // 독립 알림(N6): 페어링되면 워처 시작, 해제되면 정지 — 웹 세션과 무관하게 피드가 흐른다.
+    // Independent notifications (N6): start the watcher when paired, stop it when unpaired — the feed flows regardless of any web session.
     if (status.paired) startNotifyWatcher();
     else stopNotifyWatcher();
-    refreshTrayMenu(); // 상태행·해제 항목·툴팁 동기화(tray 없으면 no-op)
+    refreshTrayMenu(); // sync the status row · unpair item · tooltip (no-op if no tray)
     for (const win of BrowserWindow.getAllWindows()) {
       if (webOrigin !== null && senderAllowed(win.webContents.getURL(), webOrigin))
         win.webContents.send(BRIDGE_CHANNELS.statusEvent, status);
@@ -223,16 +223,16 @@ const controller = new RunnerController({
   log: (m) => console.error(m),
 });
 
-// 자동 업데이트(설계 D6) — 활성 게이트: 패키징된 앱 && 피드 구성. 피드 목적지(공개 releases 리포 vs
-// 리포 public 전환)는 사용자 결정 대기 — 확정되면 electron-builder.yml 에 publish 블록을 추가하면
-// app-update.yml 이 패키지에 실려 자동 활성된다. 그 전엔 EVERDICT_UPDATE_FEED_URL(generic 디렉터리 URL)로
-// 수동/검증 활성만 가능. dev(미패키징)는 항상 비활성.
+// Auto-update (design D6) — activation gate: packaged app && feed configured. The feed destination (a public
+// releases repo vs making the repo public) awaits the user's decision — once settled, adding a publish block to
+// electron-builder.yml ships app-update.yml in the package and auto-enables it. Until then, only manual/verification
+// activation via EVERDICT_UPDATE_FEED_URL (a generic directory URL). dev (unpackaged) is always disabled.
 function resolveAutoUpdater(): AutoUpdaterLike | null {
   if (!app.isPackaged) return null;
   const feedUrl = process.env.EVERDICT_UPDATE_FEED_URL;
   if (feedUrl) {
-    // setFeedURL 만으로는 부족 — AppImageUpdater 등이 다운로드 단계에서 app-update.yml(디스크 설정)을
-    // 읽는다. env 활성화 시 userData 에 설정 파일을 써서 updateConfigPath 로 주입한다.
+    // setFeedURL alone is insufficient — AppImageUpdater and others read app-update.yml (the on-disk config) during
+    // the download step. On env activation, write a config file to userData and inject it via updateConfigPath.
     const configPath = path.join(app.getPath("userData"), "app-update.yml");
     mkdirSync(app.getPath("userData"), { recursive: true });
     writeFileSync(configPath, `provider: generic\nurl: ${JSON.stringify(feedUrl)}\n`);
@@ -250,29 +250,29 @@ const updater = new UpdaterController({
     const prev = updaterState;
     updaterState = state;
     if (state.kind !== prev.kind)
-      console.error(`업데이트 상태: ${state.kind}${"version" in state ? ` v${state.version}` : ""}`);
+      console.error(`Update status: ${state.kind}${"version" in state ? ` v${state.version}` : ""}`);
     refreshTrayMenu();
-    // ready 진입 시 1회 알림 — 적용(재시작)은 사용자가 트레이에서 결정한다(러너 잡 강제 중단 없음).
+    // One notification on entering ready — applying it (restart) is the user's decision from the tray (no forced abort of runner jobs).
     if (state.kind === "ready" && prev.kind !== "ready") {
       try {
         if (Notification.isSupported()) {
           const n = new Notification({
-            title: "Everdict 업데이트 준비됨",
-            body: `재시작하면 v${state.version} 로 업데이트됩니다. 트레이 메뉴에서 적용하세요.`,
+            title: "Everdict update ready",
+            body: `Restarting will update to v${state.version}. Apply it from the tray menu.`,
           });
           n.on("click", () => createOrFocusWindow());
           n.show();
         }
       } catch {
-        /* 알림 미지원 환경 — 무시 */
+        /* environment without notification support — ignore */
       }
     }
   },
   log: (m) => console.error(m),
 });
 
-// 업데이트 적용 — 러너를 우아하게 정리한 뒤 재시작·설치. before-quit 의 preventDefault 경로를 타지 않게
-// 플래그를 먼저 세운다(설치가 중간에 취소되지 않도록).
+// Apply the update — gracefully clean up the runner, then restart and install. Set the flags first so it does not take
+// the before-quit preventDefault path (so the install is not canceled midway).
 function applyUpdateNow(): void {
   quitting = true;
   shuttingDown = true;
@@ -282,7 +282,7 @@ function applyUpdateNow(): void {
     .finally(() => updater.quitAndInstall());
 }
 
-// appInfo — 원클릭 페어링의 라벨(호스트명)/OS/capability 소스. capability 프로브는 1회 캐시.
+// appInfo — source of the one-click pairing label (hostname)/OS/capability. The capability probe is cached once.
 let capabilitiesPromise: Promise<string[]> | null = null;
 async function appInfo(): Promise<DesktopAppInfo> {
   capabilitiesPromise ??= detectCapabilities();
@@ -294,7 +294,7 @@ async function appInfo(): Promise<DesktopAppInfo> {
   };
 }
 
-// 첫 실행/서버 변경 설정 창 — 로컬 setup.html 을 setup 전용 preload 플래그로 연다(D8).
+// First-run/server-change setup window — opens the local setup.html with the setup-only preload flag (D8).
 let setupWindow: BrowserWindow | null = null;
 function setupPageUrl(): string {
   return pathToFileURL(path.join(app.getAppPath(), "assets", "setup.html")).toString();
@@ -326,7 +326,7 @@ function openSetupWindow(): void {
 }
 
 function createOrFocusWindow(): void {
-  // 서버 미구성 — 앱 창 대신 설정 화면(로그인 화면에 도달할 수 없으므로).
+  // Server not configured — the setup screen instead of the app window (since the login screen is unreachable).
   if (webUrl === null || webOrigin === null) {
     openSetupWindow();
     return;
@@ -343,18 +343,18 @@ function createOrFocusWindow(): void {
     height: 800,
     webPreferences: securePreferences(origin),
   });
-  // window.open: 웹 origin 만 앱 새 창, 그 외 http/https 는 시스템 브라우저(정책 근거는 window-policy.ts 주석).
+  // window.open: only the web origin gets a new app window; other http/https go to the system browser (rationale in the window-policy.ts comment).
   win.webContents.setWindowOpenHandler(({ url: target }) => {
     const decision = decideWindowOpen(target, origin);
     if (decision === "external") void shell.openExternal(target);
     if (decision !== "in-app") return { action: "deny" };
     return { action: "allow", overrideBrowserWindowOptions: { webPreferences: securePreferences(origin) } };
   });
-  // 탑레벨 네비게이션: http/https 만 허용(OIDC/OAuth 리다이렉트 경유), 그 외 스킴 차단.
+  // Top-level navigation: allow only http/https (for OIDC/OAuth redirects); block other schemes.
   win.webContents.on("will-navigate", (event, url) => {
     if (!allowTopLevelNavigation(url)) event.preventDefault();
   });
-  // 닫기 = 트레이로 숨김(러너 상주 유지). 종료는 트레이 메뉴에서만.
+  // Close = hide to the tray (keep the runner resident). Quit only from the tray menu.
   win.on("close", (event) => {
     if (quitting) return;
     event.preventDefault();
@@ -378,8 +378,8 @@ function refreshTrayMenu(): void {
           openApp: () => createOrFocusWindow(),
           setAutostart: (next) => applyAutostart(next),
           changeServerUrl: () => openSetupWindow(),
-          // 로컬 해제(토큰 폐기+정지) — 서버 레코드 revoke 는 웹 계정 페이지가 권위.
-          unpairRunner: () => void controller.unpair().catch((e) => console.error(`러너 해제 실패: ${e}`)),
+          // Local unpair (discard the token + stop) — the web account page is authoritative for revoking the server record.
+          unpairRunner: () => void controller.unpair().catch((e) => console.error(`Runner unpair failed: ${e}`)),
           applyUpdate: () => applyUpdateNow(),
           quit: () => {
             quitting = true;
@@ -398,22 +398,24 @@ function createTray(): void {
   refreshTrayMenu();
 }
 
-// 단일 인스턴스 — 두 번째 실행은 기존 창을 앞으로.
+// Single instance — a second launch brings the existing window to the front.
 if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", () => createOrFocusWindow());
 
   void app.whenReady().then(() => {
-    // Linux 키링 부재(headless 등): safeStorage 가 basic_text 백엔드로 떨어지면 명시 옵트인 없이는
-    // isEncryptionAvailable()=false → 원클릭 페어링이 불가능해진다. VSCode 와 같은 폴백을 택한다 —
-    // 난독화 수준임을 경고하고 옵트인. GNOME/KDE 키링이 있으면 실제 암호화 백엔드라 이 경로를 타지 않는다.
+    // No Linux keyring (headless, etc.): if safeStorage falls back to the basic_text backend, then without an explicit opt-in
+    // isEncryptionAvailable()=false → one-click pairing becomes impossible. We take the same fallback as VSCode —
+    // warn that it is only obfuscation-level and opt in. With a GNOME/KDE keyring present, it is a real encryption backend and does not take this path.
     if (process.platform === "linux" && safeStorage.getSelectedStorageBackend() === "basic_text") {
       safeStorage.setUsePlainTextEncryption(true);
-      console.error("⚠ OS 키링이 없어 러너 토큰을 safeStorage basic_text(난독화)로 저장합니다 — 키링 설치를 권장.");
+      console.error(
+        "⚠ No OS keyring, so storing the runner token in safeStorage basic_text (obfuscation) — installing a keyring is recommended.",
+      );
     }
     config = loadConfig(configIo());
-    // 서버 URL 결정(D8): env(개발/e2e) > 사용자 설정 > CI 주입 기본값. 없으면 설정 화면이 뜬다.
+    // Resolve the server URL (D8): env (dev/e2e) > user config > CI-injected default. If none, the setup screen appears.
     applyWebUrl(
       resolveWebUrl({
         envUrl: process.env.EVERDICT_WEB_URL,
@@ -422,21 +424,21 @@ if (!app.requestSingleInstanceLock()) {
       }),
     );
 
-    // 설정 창 전용 IPC(D8) — setup.html 의 file:// URL 에서만 허용(웹/외부 페이지 차단).
+    // Setup-window-only IPC (D8) — allowed only from setup.html's file:// URL (web/external pages blocked).
     const fromSetupPage = (event: { senderFrame: { url: string } | null }): boolean =>
       event.senderFrame?.url === setupPageUrl();
     ipcMain.handle("everdict:get-server-url", (event) => {
-      if (!fromSetupPage(event)) throw new Error("허용되지 않은 호출입니다.");
+      if (!fromSetupPage(event)) throw new Error("This call is not allowed.");
       return webUrl ?? "";
     });
     ipcMain.handle("everdict:set-server-url", (event, raw: unknown) => {
-      if (!fromSetupPage(event)) throw new Error("허용되지 않은 호출입니다.");
+      if (!fromSetupPage(event)) throw new Error("This call is not allowed.");
       const url = normalizeWebUrl(typeof raw === "string" ? raw : null);
-      if (url === null) throw new Error("올바른 http/https 서버 주소가 아닙니다.");
+      if (url === null) throw new Error("Not a valid http/https server address.");
       config = { ...loadConfig(configIo()), webUrl: url };
       saveConfig(configIo(), config);
       applyWebUrl(url);
-      // 기존 앱 창은 이전 origin 의 preload 인자를 갖고 있어 새로 연다(닫기=숨김 핸들러를 우회해 destroy).
+      // The existing app window holds the previous origin's preload argument, so open a fresh one (destroy it, bypassing the close=hide handler).
       if (mainWindow && !mainWindow.isDestroyed()) {
         const old = mainWindow;
         mainWindow = null;
@@ -456,18 +458,18 @@ if (!app.requestSingleInstanceLock()) {
     });
     createTray();
     createOrFocusWindow();
-    // 저장된 페어가 있으면 러너를 조용히 복원(로그인/창과 무관하게 상주).
-    void controller.startFromStore().catch((e) => console.error(`러너 복원 실패: ${e}`));
-    // 자동 업데이트 — 시작 시 1회 + 6시간 주기 체크(피드 미구성이면 no-op, 상태 disabled).
+    // If there is a saved pair, silently restore the runner (resident regardless of login/window).
+    void controller.startFromStore().catch((e) => console.error(`Runner restore failed: ${e}`));
+    // Auto-update — one check at startup + every 6 hours (no-op if no feed configured, status disabled).
     updater.start();
   });
 
-  // 모든 창이 닫혀도 종료하지 않는다 — 트레이 상주(러너가 백그라운드로 돈다).
+  // Do not quit when all windows close — resident in the tray (the runner runs in the background).
   app.on("window-all-closed", () => {
-    /* 트레이 상주 */
+    /* resident in the tray */
   });
-  app.on("activate", () => createOrFocusWindow()); // macOS dock 클릭
-  // 종료 — 진행 중 잡 회신까지 러너를 우아하게 정지(1회 preventDefault 후 재-quit).
+  app.on("activate", () => createOrFocusWindow()); // macOS dock click
+  // Quit — gracefully stop the runner through reporting the in-flight job (preventDefault once, then re-quit).
   app.on("before-quit", (event) => {
     quitting = true;
     if (shuttingDown) return;

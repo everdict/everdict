@@ -1,6 +1,6 @@
 ---
 name: testing
-description: How Everdict tests — Vitest only, Korean BDD descriptions, in-memory stores + fake Dispatcher for units, buildServer+inject for the API surface, fake SqlClient for Postgres logic, env-gated *.scenario.test.ts for live E2E. Use when writing or editing tests (Vitest unit + scenario E2E).
+description: How Everdict tests — Vitest only, English BDD descriptions, in-memory stores + fake Dispatcher for units, buildServer+inject for the API surface, fake SqlClient for Postgres logic, env-gated *.scenario.test.ts for live E2E. Use when writing or editing tests (Vitest unit + scenario E2E).
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Testing (Vitest test idioms)
@@ -12,7 +12,7 @@ so it's excluded from the root run — never add web unit tests here.
 
 ## Checklist
 1. File suffix: `*.test.ts` = unit/integration; `*.scenario.test.ts` = live E2E over real infra.
-2. `it("유저가 자신의 suite를 제출할 수 있다", …)` — **Korean BDD**, Given/When/Then (comment the phases).
+2. `it("a user can submit their own suite", …)` — **English BDD**, Given/When/Then (comment the phases).
 3. Unit: `InMemory*` stores + inject a fake `Dispatcher`/dep; assert one behavior, no live I/O, no network.
 4. Cover permission gates (401/403/404/409/402) and error/edge paths; another workspace's resource reads **404**.
 5. Live E2E: `describe.skipIf(!env)` so CI stays green; boot the real thing via a shared factory, not ad-hoc wiring.

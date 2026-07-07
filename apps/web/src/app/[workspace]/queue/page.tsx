@@ -11,7 +11,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 작업 큐 — 예약 발사·스코어카드·run 워크로드가 어느 런타임에서 돌고/기다리고, 다음은 무엇인지.
+// Work queue — which runtime each scheduled-fire·scorecard·run workload is running/waiting on, and what's next.
 export default async function QueuePage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const t = await getTranslations('queuePage')
@@ -25,7 +25,7 @@ export default async function QueuePage({ params }: { params: Promise<{ workspac
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 실행자 이름(members 조인)은 부가 정보 — 실패해도 보드 자체는 보인다.
+  // The runner's name (members join) is supplementary — the board still shows even if it fails.
   const members = await controlPlane
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
@@ -41,7 +41,7 @@ export default async function QueuePage({ params }: { params: Promise<{ workspac
 
   return (
     <div className="space-y-6">
-      {/* 활성 작업이 있으면 주기 재실행으로 진행률/큐를 라이브 갱신(모두 유휴면 폴링 없음). */}
+      {/* If there are active jobs, periodically re-run to live-refresh progress/queue (no polling when all idle). */}
       <AutoRefresh enabled={live} intervalMs={5000} />
       <PageHeader title={t('title')} description={t('description')} />
       {error || !snapshot ? (

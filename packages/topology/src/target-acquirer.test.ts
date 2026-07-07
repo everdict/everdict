@@ -19,7 +19,7 @@ const SPEC: ServiceHarnessSpec = {
   traceSource: { kind: "mlflow", endpoint: "http://m" },
 };
 
-// 호출을 기록하고 method+url 키로 응답을 돌려주는 가짜 HTTP 프리미티브.
+// A fake HTTP primitive that records calls and returns responses keyed by method+url.
 function fakeRequest(responses: Record<string, unknown>): {
   fn: AcquireRequestFn;
   calls: Array<{ method: string; url: string; body?: unknown }>;
@@ -41,7 +41,7 @@ const SERVICE_ACQUIRE: Extract<TargetAcquire, { mode: "service" }> = {
 };
 
 describe("serviceAcquirer", () => {
-  it("세션을 열어 응답 필드를 wiring 좌표로 매핑하고, dispose 시 session_id 로 close 한다", async () => {
+  it("opens a session, maps response fields to wiring coordinates, and closes by session_id on dispose", async () => {
     const { fn, calls } = fakeRequest({
       "POST http://browsers:7000/sessions": { id: "sess-7", cdp_url: "ws://x/7" },
     });
@@ -54,18 +54,18 @@ describe("serviceAcquirer", () => {
       wiring: { run_id: "r1" },
     });
 
-    // 단일 cdpUrl 이 아니라 좌표 bag — 세션형 좌표가 모두 wiring 으로.
+    // A coordinate bag, not a single cdpUrl — all session coordinates become wiring.
     expect(handle.wiring).toEqual({ session_id: "sess-7", target_cdp_url: "ws://x/7" });
-    // Everdict 소유 무대 없음 → snapshot 은 prompt(실 관측은 delivery 로).
+    // No Everdict-owned stage → snapshot is prompt (the real observation goes via delivery).
     expect((await handle.snapshot()).kind).toBe("prompt");
 
     await handle.dispose();
-    // close 는 좌표(session_id)로 보간된 경로로 DELETE.
+    // close DELETEs the path interpolated with the coordinate (session_id).
     expect(calls).toContainEqual({ method: "DELETE", url: "http://browsers:7000/sessions/sess-7", body: undefined });
   });
 
-  it("좌표 누락은 명확히 실패하되, 이미 받은 좌표로 best-effort close 한다(세션 누수 방지)", async () => {
-    // 응답에 cdp_url 없음 → session_id 는 받고 target_cdp_url 매핑에서 throw.
+  it("a missing coordinate fails explicitly but best-effort closes with the coordinates already received (avoid session leak)", async () => {
+    // No cdp_url in the response → session_id is received but the target_cdp_url mapping throws.
     const { fn, calls } = fakeRequest({ "POST http://browsers:7000/sessions": { id: "sess-7" } });
     const acq = serviceAcquirer(SERVICE_ACQUIRE, fn);
 
@@ -78,29 +78,29 @@ describe("serviceAcquirer", () => {
       }),
     ).rejects.toThrow();
 
-    // 열린 세션을 흘리지 않는다 — session_id 를 받았으므로 close 가능.
+    // Don't leak the open session — session_id was received, so it can be closed.
     expect(calls.some((c) => c.method === "DELETE" && c.url === "http://browsers:7000/sessions/sess-7")).toBe(true);
   });
 
-  it("타깃 서비스 엔드포인트가 없으면 실패한다", async () => {
+  it("fails when there's no target service endpoint", async () => {
     const acq = serviceAcquirer(SERVICE_ACQUIRE, async () => ({}));
-    await expect(acq.acquire({ spec: SPEC, runId: "r1", endpoints: {}, wiring: {} })).rejects.toThrow(/엔드포인트/);
+    await expect(acq.acquire({ spec: SPEC, runId: "r1", endpoints: {}, wiring: {} })).rejects.toThrow(/endpoint/);
   });
 
-  // --- 준비 게이트(ready): 세션 클라이언트가 자기등록하기 전엔 명령이 404 로 튕기므로 200 될 때까지 대기 ---
+  // --- Readiness gate (ready): until the session client self-registers, commands bounce with 404, so wait until 200 ---
   const WITH_READY: Extract<TargetAcquire, { mode: "service" }> = {
     ...SERVICE_ACQUIRE,
     ready: { service: "browsers", poll: "GET /sessions/{session_id}/ready", intervalMs: 10, timeoutMs: 1000 },
   };
 
-  it("ready: 상태 URL 이 200 될 때까지 폴링한 뒤에야 좌표를 넘긴다(좌표로 보간된 경로)", async () => {
+  it("ready: hands back coordinates only after polling the status URL until 200 (coordinate-interpolated path)", async () => {
     const { fn } = fakeRequest({ "POST http://browsers:7000/sessions": { id: "sess-7", cdp_url: "ws://x/7" } });
     let probes = 0;
     const probedUrls: string[] = [];
     const probe: ProbeFn = async (_method, url) => {
       probes += 1;
       probedUrls.push(url);
-      return probes >= 3; // 처음 2회는 아직 안 준비(404), 3회째 200
+      return probes >= 3; // first 2 not ready yet (404), 200 on the 3rd
     };
     const acq = serviceAcquirer(WITH_READY, fn, { probe, now: () => 0, sleep: async () => {} });
 
@@ -112,14 +112,14 @@ describe("serviceAcquirer", () => {
     });
 
     expect(probes).toBe(3);
-    // poll 경로가 좌표(session_id)로 보간됐다.
+    // the poll path was interpolated with the coordinate (session_id).
     expect(probedUrls[0]).toBe("http://browsers:7000/sessions/sess-7/ready");
     expect(handle.wiring).toEqual({ session_id: "sess-7", target_cdp_url: "ws://x/7" });
   });
 
-  it("ready: 시한 초과면 열린 세션을 close 하고 실패한다(누수 방지)", async () => {
+  it("ready: on timeout, closes the open session and fails (leak prevention)", async () => {
     const { fn, calls } = fakeRequest({ "POST http://browsers:7000/sessions": { id: "sess-7", cdp_url: "ws://x/7" } });
-    const probe: ProbeFn = async () => false; // 영영 준비 안 됨
+    const probe: ProbeFn = async () => false; // never becomes ready
     let t = 0;
     const acq = serviceAcquirer(
       { ...SERVICE_ACQUIRE, ready: { service: "browsers", poll: "GET /ready", intervalMs: 10, timeoutMs: 30 } },
@@ -140,8 +140,8 @@ describe("serviceAcquirer", () => {
         endpoints: { browsers: "http://browsers:7000" },
         wiring: { run_id: "r1" },
       }),
-    ).rejects.toThrow(/준비 대기 시간초과/);
-    // 열린 세션을 흘리지 않는다 — 좌표(session_id)로 close.
+    ).rejects.toThrow(/Timed out waiting for the target session/);
+    // Don't leak the open session — close by the coordinate (session_id).
     expect(calls.some((c) => c.method === "DELETE" && c.url === "http://browsers:7000/sessions/sess-7")).toBe(true);
   });
 });
@@ -151,7 +151,7 @@ describe("fetchAcquire", () => {
     vi.unstubAllGlobals();
   });
 
-  // method+init 을 기록하고 빈 JSON 을 돌려주는 fetch 스텁.
+  // A fetch stub that records method+init and returns empty JSON.
   function stubFetch(): { calls: Array<{ url: string; init: RequestInit }> } {
     const calls: Array<{ url: string; init: RequestInit }> = [];
     vi.stubGlobal("fetch", async (url: string, init: RequestInit) => {
@@ -161,20 +161,20 @@ describe("fetchAcquire", () => {
     return { calls };
   }
 
-  it("본문 없는 POST 는 빈 {} JSON 본문 + content-type 으로 보낸다(JSON 요구 서버의 422 방지)", async () => {
+  it("a bodyless POST is sent with an empty {} JSON body + content-type (prevents 422 from a JSON-requiring server)", async () => {
     const { calls } = stubFetch();
     await fetchAcquire("POST", "http://s/sessions");
     expect(calls[0]?.init.body).toBe("{}");
     expect((calls[0]?.init.headers as Record<string, string>)["content-type"]).toBe("application/json");
   });
 
-  it("소문자 post 도 동일하게 빈 {} 를 보낸다(메서드 대소문자 무관)", async () => {
+  it("lowercase post also sends an empty {} (method is case-insensitive)", async () => {
     const { calls } = stubFetch();
     await fetchAcquire("post", "http://s/sessions");
     expect(calls[0]?.init.body).toBe("{}");
   });
 
-  it("GET/DELETE 는 본문을 주입하지 않는다(content-type 없이)", async () => {
+  it("GET/DELETE inject no body (without content-type)", async () => {
     const { calls } = stubFetch();
     await fetchAcquire("GET", "http://s/x");
     await fetchAcquire("DELETE", "http://s/sessions/1");
@@ -183,7 +183,7 @@ describe("fetchAcquire", () => {
     expect(calls[1]?.init.body).toBeUndefined();
   });
 
-  it("명시 본문이 있으면 POST 든 무엇이든 그대로 직렬화해 보낸다", async () => {
+  it("with an explicit body, serializes and sends it as-is for POST or anything", async () => {
     const { calls } = stubFetch();
     await fetchAcquire("POST", "http://s/sessions", { task: "t" });
     expect(calls[0]?.init.body).toBe(JSON.stringify({ task: "t" }));
@@ -191,7 +191,7 @@ describe("fetchAcquire", () => {
 });
 
 describe("targetAcquirerFor", () => {
-  it("acquire 미설정(provision)이면 런타임 provisionBrowserEnv 로 위임한다(현행)", async () => {
+  it("delegates to the runtime's provisionBrowserEnv when acquire is unset (provision) (current)", async () => {
     let provisioned = false;
     const runtime: TopologyRuntime = {
       id: "fake",

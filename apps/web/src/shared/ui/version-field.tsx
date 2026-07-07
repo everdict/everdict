@@ -9,8 +9,8 @@ import { Label } from '@/shared/ui/input'
 
 const KINDS: BumpKind[] = ['patch', 'minor', 'major']
 
-// 시스템 관리 버저닝: 같은 id 에 기존 버전이 있으면 patch/minor/major 범프를 고른다(raw 입력 X — 항상 최신 위로).
-// 처음 등록이면 1.0.0. value 는 시스템이 계산해 부모로 흘려보낸다.
+// System-managed versioning: if an existing version exists for the same id, pick a patch/minor/major bump (no raw input — always above the latest).
+// First registration is 1.0.0. value is computed by the system and flowed up to the parent.
 export function VersionField({
   existing,
   value,
@@ -24,8 +24,8 @@ export function VersionField({
   const latest = maxSemver(existing)
   const [kind, setKind] = useState<BumpKind>('patch')
 
-  // latest(=id 의 기존 버전) 또는 kind 가 바뀌면 다음 버전을 시스템이 계산해 반영.
-  // onChange 는 의존성에서 제외(부모 재렌더마다 신원이 바뀌어 무한 루프가 됨).
+  // When latest (= the id's existing version) or kind changes, the system computes and applies the next version.
+  // onChange is excluded from the deps (its identity changes on every parent re-render, causing an infinite loop).
   const onChangeRef = useRef(onChange)
   onChangeRef.current = onChange
   useEffect(() => {

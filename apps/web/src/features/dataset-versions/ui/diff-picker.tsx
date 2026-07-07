@@ -8,7 +8,7 @@ import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
 import { Label } from '@/shared/ui/input'
 
-// base/candidate 버전을 골라 diff URL 로 이동. 실제 diff 는 서버(컨트롤플레인 diffDatasets)가 계산.
+// Pick base/candidate versions to navigate to the diff URL. The actual diff is computed by the server (control-plane diffDatasets).
 export function DiffPicker({
   id,
   versions,
@@ -23,7 +23,7 @@ export function DiffPicker({
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const t = useTranslations('datasetVersions')
-  // 기본값: candidate=최신, base=직전(versions 는 최신순 정렬되어 전달됨).
+  // Defaults: candidate=latest, base=previous (versions are passed sorted newest-first).
   const [b, setB] = useState(base ?? versions[1] ?? versions[0] ?? '')
   const [c, setC] = useState(candidate ?? versions[0] ?? '')
 

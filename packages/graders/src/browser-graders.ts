@@ -1,21 +1,21 @@
 import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
 
-// 최종 DOM 에 특정 텍스트가 있는지 (browser 스냅샷 대상).
+// Whether the final DOM contains specific text (browser snapshot target).
 export class DomContainsGrader implements Grader {
   readonly id = "dom-contains";
   constructor(private readonly needle: string) {}
   async grade(ctx: GradeContext): Promise<Score> {
     const snap = ctx.snapshot;
     if (snap.kind !== "browser") {
-      throw new BadRequestError("BAD_REQUEST", { kind: snap.kind }, "dom-contains 는 browser 스냅샷이 필요합니다.");
+      throw new BadRequestError("BAD_REQUEST", { kind: snap.kind }, "dom-contains requires a browser snapshot.");
     }
     const pass = snap.dom.includes(this.needle);
     return { graderId: this.id, metric: "dom_contains", value: pass ? 1 : 0, pass, detail: this.needle };
   }
 }
 
-// QA 벤치마크 outcome: 에이전트 최종 답(trace 의 마지막 assistant message)이 기대 답을 포함/일치하는지.
-// WebVoyager/GAIA 류의 정답대조 채점. mode=contains(정규화 substring, 기본) | exact(정규화 완전일치).
+// QA benchmark outcome: whether the agent's final answer (the last assistant message in the trace) contains/matches the expected answer.
+// WebVoyager/GAIA-style answer-matching scoring. mode=contains (normalized substring, default) | exact (normalized full match).
 export class AnswerMatchGrader implements Grader {
   readonly id = "answer-match";
   constructor(
@@ -34,14 +34,14 @@ export class AnswerMatchGrader implements Grader {
   }
 }
 
-// 최종 URL 이 패턴(정규식)과 일치하는지.
+// Whether the final URL matches the pattern (regex).
 export class UrlMatchesGrader implements Grader {
   readonly id = "url-matches";
   constructor(private readonly pattern: string) {}
   async grade(ctx: GradeContext): Promise<Score> {
     const snap = ctx.snapshot;
     if (snap.kind !== "browser") {
-      throw new BadRequestError("BAD_REQUEST", { kind: snap.kind }, "url-matches 는 browser 스냅샷이 필요합니다.");
+      throw new BadRequestError("BAD_REQUEST", { kind: snap.kind }, "url-matches requires a browser snapshot.");
     }
     const pass = new RegExp(this.pattern).test(snap.url);
     return { graderId: this.id, metric: "url_matches", value: pass ? 1 : 0, pass, detail: this.pattern };

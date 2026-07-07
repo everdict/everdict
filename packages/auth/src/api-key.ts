@@ -3,14 +3,14 @@ import type { Authenticator } from "./principal.js";
 
 export interface ApiKeyAuthOptions {
   keyStore: TenantKeyStore;
-  roles?: string[]; // 키 = 운영자 발급 워크스페이스 머신 자격 → 기본 풀 권한(admin)
+  roles?: string[]; // key = operator-issued workspace machine credential → default full permissions (admin)
 }
 
-// API 키(ak_) 인증기 — 에이전트/MCP/CI 용. 키 해시 → 워크스페이스(tenant) + 발급자(owner) + 키별 scope.
-// 개인 키(owner=발급자 subject): 발급자로 해석 → applyActiveWorkspace 가 그 사람의 멤버십 역할을 부여한다
-//   (멤버 키=멤버 권한, admin 블랭킷 아님). 비-멤버면 viewer 로 폴백(권한 상승 없음).
-// 머신 키(owner=""; 레거시/internal 발급): 종전대로 워크스페이스 머신 자격(roles 기본=admin).
-// scope 가 있으면 Principal 에 실어 authz can() 이 role 권한과 교집합으로 키를 더 좁힌다(레거시/미지정=무제한).
+// API key (ak_) authenticator — for agents/MCP/CI. key hash → workspace (tenant) + issuer (owner) + per-key scope.
+// Personal key (owner = issuer subject): resolved as the issuer → applyActiveWorkspace grants that person's membership role
+//   (member key = member permissions, not a blanket admin). A non-member falls back to viewer (no privilege escalation).
+// Machine key (owner = ""; legacy/internal issuance): keeps the old workspace machine credential (roles default = admin).
+// If scopes are present, they're carried onto the Principal so authz can() further narrows the key by intersecting with role permissions (legacy/unset = unlimited).
 export function apiKeyAuthenticator(opts: ApiKeyAuthOptions): Authenticator {
   const roles = opts.roles ?? ["admin"];
   return {

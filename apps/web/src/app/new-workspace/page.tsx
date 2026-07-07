@@ -10,14 +10,14 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 워크스페이스 생성은 누구나 가능한 self-serve(역할 게이트 없음) — 생성자는 그 워크스페이스의 admin.
-// 슬러그가 새로 생기므로 [workspace] 밖 최상위 라우트. 만들면 그 워크스페이스(/{id})로 들어간다.
+// Workspace creation is self-serve for anyone (no role gate) — the creator becomes that workspace's admin.
+// A new slug is minted, so it's a top-level route outside [workspace]. On creation, enter that workspace (/{id}).
 export default async function NewWorkspacePage() {
   const t = await getTranslations('newWorkspacePage')
   const { principal } = await currentPrincipal()
-  // 미인증/인증 교환 실패 → 랜딩(/)이 아니라 곧장 로그인으로. `/` 로 보내면 미들웨어·페이지가 다시 튕겨 루프.
+  // Unauthenticated / auth-exchange failure → go straight to login, not the landing (/). Sending to `/` makes the middleware·page bounce into a loop.
   if (!principal) redirect('/api/auth/signin')
-  // 워크스페이스가 하나도 없으면 "또 만들기"가 아니라 온보딩이 맞다.
+  // If there are no workspaces at all, onboarding is the right place, not "create another".
   if ((principal.workspaces?.length ?? 0) === 0) redirect('/onboarding')
   const back = `/${principal.workspace}`
 

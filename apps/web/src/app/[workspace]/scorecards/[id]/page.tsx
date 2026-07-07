@@ -24,7 +24,7 @@ import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 export const dynamic = 'force-dynamic'
 
-// os-use 스크린샷 src: base64 동봉(dev) → data URL, 아니면 object storage URL(오프로드). 둘 다 없으면 undefined.
+// os-use screenshot src: base64 embedded (dev) → data URL, otherwise object storage URL (offload). undefined if neither.
 function osUseShotSrc(snapshot?: {
   screenshot?: string
   screenshotRef?: string
@@ -56,7 +56,7 @@ function BackLink({ workspace, label }: { workspace: string; label: string }) {
   )
 }
 
-// 케이스 필터 세그먼트 — 전체 ↔ 실패만(#cases 앵커로 스크롤 유지). 서버 컴포넌트라 URL 파라미터로 토글.
+// Case filter segment — all ↔ failed only (#cases anchor keeps scroll). Server component, so toggle via URL param.
 function CaseFilterTab({
   href,
   active,
@@ -115,7 +115,7 @@ export default async function ScorecardDetailPage({
     )
   }
 
-  // 실행자 이름(members 조인) — 부가 정보라 실패해도 상세는 보인다. 이름은 프로필 name > email 로컬파트 > subject 축약.
+  // Run-by name (members join) — supplementary info, so the detail still renders even if it fails. Name is profile name > email local part > shortened subject.
   let authorName: string | undefined
   if (record.createdBy) {
     const createdBy = record.createdBy
@@ -132,37 +132,37 @@ export default async function ScorecardDetailPage({
   const steps = record.steps ?? []
   const live = record.status === 'queued' || record.status === 'running'
 
-  // 케이스별 판정을 한 번만 계산해 롤업·정렬·필터에 공유.
+  // Compute the per-case verdict once and share it across rollup · sort · filter.
   const cased = results.map((r) => ({ r, verdict: caseVerdict(r.scores) }))
   const passed = cased.filter((c) => c.verdict === true).length
   const failedCount = cased.filter((c) => c.verdict === false).length
   const skipped = cased.filter((c) => c.verdict == null).length
   const passRate = results.length > 0 ? passed / results.length : null
 
-  // 실패 우선 정렬(fail → skip → pass), 그다음 실패만/전체 필터.
+  // Failure-first sort (fail → skip → pass), then failed-only/all filter.
   const filter = cases === 'failed' ? 'failed' : 'all'
   const weight = (v: boolean | undefined) => (v === false ? 0 : v == null ? 1 : 2)
   const ordered = [...cased].sort((a, b) => weight(a.verdict) - weight(b.verdict))
   const shown = filter === 'failed' ? ordered.filter((c) => c.verdict === false) : ordered
   const base = `/${workspace}/scorecards/${encodeURIComponent(id)}`
 
-  // 트레이스 싱크 적재 결과 — 케이스별 외부 딥링크(관측 플랫폼의 trace 상세)로 점프.
+  // Trace sink export results — jump via per-case external deep link (trace detail on the observability platform).
   const exportByCase = new Map((record.export?.cases ?? []).map((c) => [c.caseId, c]))
 
-  // 케이스 드릴다운: 이 스코어카드가 팬아웃한 자식 run(있으면) → caseId→runId. 구(舊)/ingest 스코어카드는 자식이 없어 빈 맵.
+  // Case drilldown: child runs this scorecard fanned out (if any) → caseId→runId. Old/ingest scorecards have no children, so an empty map.
   const childRunByCase = new Map<string, string>()
   if (results.length > 0) {
     try {
       const children = runsSchema.parse(await controlPlane.listRuns(ctx, { scorecardId: id }))
       for (const c of children) childRunByCase.set(c.caseId, c.id)
     } catch {
-      // 자식 run 조회 실패/없음 → 드릴다운 링크 없이 렌더(현행 유지)
+      // Child run lookup fails/missing → render without drilldown links (keep current behavior)
     }
   }
 
   return (
     <div className="space-y-7">
-      {/* 진행 중이면 서버 컴포넌트를 주기 재실행해 스텝을 라이브 갱신(종단되면 멈춤). */}
+      {/* In progress: periodically re-run the server component to live-update steps (stops once terminal). */}
       <AutoRefresh enabled={live} />
       <div className="space-y-3">
         <BackLink workspace={workspace} label={t('backToList')} />
@@ -173,7 +173,7 @@ export default async function ScorecardDetailPage({
         />
       </div>
 
-      {/* 케이스 롤업 — 이 실행의 헤드라인 결과(통과/실패 한눈에). 결과가 있을 때만. */}
+      {/* Case rollup — the headline result of this run (pass/fail at a glance). Only when there are results. */}
       {results.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard
@@ -219,7 +219,7 @@ export default async function ScorecardDetailPage({
         <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
         {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
-        {/* 이 배치가 실행된 런타임 — 등록 런타임이면 상세로 링크, self:* 러너는 칩만(러너엔 런타임 상세 페이지 없음). 미설정(과거·ingest)이면 숨김. */}
+        {/* The runtime this batch ran on — a registered runtime links to its detail, self:* runners get only a chip (runners have no runtime detail page). Hidden if unset (legacy · ingest). */}
         {record.runtime && (
           <div className="min-w-0">
             <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -257,17 +257,17 @@ export default async function ScorecardDetailPage({
         )}
       </Card>
 
-      {/* 트리거 출처(provenance) — CI/예약/API/웹 + 커밋·PR·CI run 링크 + PR 임시 핀(pinOverrides). */}
+      {/* Trigger provenance — CI/schedule/API/web + commit · PR · CI run links + PR ephemeral pins (pinOverrides). */}
       {record.origin && <OriginBlock origin={record.origin} />}
 
-      {/* 트레이스 싱크 적재 — 상세 결과가 팀 관측 플랫폼에 있음을 알리고 바로가기를 준다(미설정 레코드는 통째로 숨김). */}
+      {/* Trace sink export — signals that the detailed results live on the team's observability platform and gives a shortcut (unset records are hidden entirely). */}
       {record.export && (
         <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
           <div className="flex items-center gap-2">
             <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
               {t('traceSinkLabel')}
             </span>
-            {/* 싱크 등록 이름(있으면) 먼저, kind 는 보조 배지로 — 이름이 없으면 kind 하나만. */}
+            {/* Sink registration name first (if any), kind as a secondary badge — just kind alone if no name. */}
             <Badge tone="neutral">{record.export.name ?? record.export.sink}</Badge>
             {record.export.name && <Badge tone="neutral">{record.export.sink}</Badge>}
             <Badge
@@ -491,7 +491,7 @@ export default async function ScorecardDetailPage({
                       {verdict == null ? 'SKIP' : verdict ? 'PASS' : 'FAIL'}
                     </Badge>
                     <span className="font-mono text-[13px] font-[510]">{r.caseId}</span>
-                    {/* 이 케이스의 자식 run(있으면) — 전체 트레이스/usage/provenance 드릴다운. */}
+                    {/* This case's child run (if any) — full trace/usage/provenance drilldown. */}
                     {childRunByCase.get(r.caseId) && (
                       <Link
                         href={`/${workspace}/runs/${childRunByCase.get(r.caseId)}`}
@@ -500,7 +500,7 @@ export default async function ScorecardDetailPage({
                         → run
                       </Link>
                     )}
-                    {/* 트레이스 싱크 딥링크(있으면) — 관측 플랫폼의 원본/적재 trace 로 점프. */}
+                    {/* Trace sink deep link (if any) — jump to the original/exported trace on the observability platform. */}
                     {exportByCase.get(r.caseId)?.url && (
                       <a
                         href={exportByCase.get(r.caseId)?.url}
@@ -528,7 +528,7 @@ export default async function ScorecardDetailPage({
                     )}
                   </div>
                 </div>
-                {/* os-use 스크린샷 — base64 동봉(dev) 또는 object storage URL(오프로드). VLM 이 채점한 그 이미지. */}
+                {/* os-use screenshot — base64 embedded (dev) or object storage URL (offload). The very image the VLM scored. */}
                 {osUseShotSrc(r.snapshot) && (
                   // eslint-disable-next-line @next/next/no-img-element
                   <img
@@ -537,13 +537,13 @@ export default async function ScorecardDetailPage({
                     className="max-h-72 w-auto rounded-lg border"
                   />
                 )}
-                {/* browser(서비스-토폴로지: browser-use 등) — 에이전트가 도달한 최종 URL(+ DOM 발췌). */}
+                {/* browser (service-topology: browser-use etc.) — the final URL the agent reached (+ DOM excerpt). */}
                 {r.snapshot?.kind === 'browser' && r.snapshot.url && (
                   <p className="break-all font-mono text-[12px] text-muted-foreground">
                     <span className="font-[510] text-foreground">final url</span> · {r.snapshot.url}
                   </p>
                 )}
-                {/* judge/grader 판정 사유(VLM 루브릭 reasoning 등) — os-use 등에서 "왜 pass/fail" 을 보여준다. */}
+                {/* judge/grader verdict reasoning (VLM rubric reasoning etc.) — shows "why pass/fail" for os-use and the like. */}
                 {r.scores
                   .filter((s) => s.detail)
                   .map((s) => (
@@ -554,7 +554,7 @@ export default async function ScorecardDetailPage({
                       <span className="font-[510] text-foreground">{s.metric}</span> · {s.detail}
                     </p>
                   ))}
-                {/* 실행 트레이스의 error 이벤트 — 케이스가 어떻게 실패했는지(하니스 크래시/디스패치 오류). */}
+                {/* error events from the run trace — how the case failed (harness crash/dispatch error). */}
                 {(r.trace ?? [])
                   .filter((e) => e.kind === 'error' && typeof e.message === 'string')
                   .map((e, i) => (

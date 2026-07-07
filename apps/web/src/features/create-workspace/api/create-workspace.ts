@@ -13,7 +13,7 @@ export interface CreateWorkspaceResult {
   error?: string
 }
 
-// self-serve 워크스페이스 생성(누구나) → 생성자는 admin. 생성 후 그 워크스페이스로 즉시 전환(쿠키).
+// Self-serve workspace creation (anyone) → the creator is admin. After creation, switch to that workspace immediately (cookie).
 export async function createWorkspaceAction(input: {
   name: string
   id?: string

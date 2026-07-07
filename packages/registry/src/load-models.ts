@@ -3,8 +3,8 @@ import { ModelSpecSchema } from "@everdict/core";
 import { InMemoryModelRegistry, type ModelRegistry } from "./model-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 
-// 디렉터리의 *.json model 들을 레지스트리에 로드. 버전 관리되는 파일 = SSOT(GitOps).
-// 기본 소유자는 SHARED_TENANT(first-party 기본 모델 — 모든 테넌트가 폴백으로 봄). into 를 주면 거기에 등록(Pg 시드 등).
+// Load a directory's *.json models into the registry. Version-controlled files = SSOT (GitOps).
+// Default owner is SHARED_TENANT (first-party default model — every tenant sees it via fallback). Pass into to register there (e.g. Pg seed).
 export async function loadModelDir(
   dir: string,
   opts: { into?: ModelRegistry; tenant?: string } = {},

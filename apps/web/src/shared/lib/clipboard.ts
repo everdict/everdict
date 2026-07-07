@@ -1,7 +1,7 @@
 import { toast } from 'sonner'
 
-// 안전 컨텍스트(https·localhost)에선 navigator.clipboard, 그 외(http Tailscale IP 등)에선
-// navigator.clipboard 가 undefined 라 legacy execCommand('copy') 로 폴백한다(그래서 http 접속에서도 동작).
+// In a secure context (https·localhost) use navigator.clipboard; elsewhere (http Tailscale IP, etc.)
+// navigator.clipboard is undefined, so fall back to legacy execCommand('copy') (so it works over http too).
 async function writeClipboard(text: string): Promise<boolean> {
   try {
     if (navigator.clipboard?.writeText) {
@@ -9,7 +9,7 @@ async function writeClipboard(text: string): Promise<boolean> {
       return true
     }
   } catch {
-    // 안전 컨텍스트여도 권한 거부될 수 있음 — 아래 폴백으로.
+    // Even in a secure context permission may be denied — fall through to the fallback below.
   }
   try {
     const ta = document.createElement('textarea')
@@ -29,9 +29,9 @@ async function writeClipboard(text: string): Promise<boolean> {
   }
 }
 
-// 텍스트 복사 + 토스트. 성공하면 sonner 토스트로 "복사했어요"를 띄우고(message 로 문구 변경, null=토스트 끔),
-// 실패하면 오류 토스트. 성공 여부를 반환 — 호출부가 인라인 "복사됨" 상태도 함께 쓸 수 있다.
-// message 미지정(undefined) = 로케일 기본 문구, null = 토스트 끔. locale 은 호출부가 넘긴다(기본 ko).
+// Copy text + toast. On success, show a sonner "copied" success toast (message overrides the text, null = no toast);
+// on failure, show an error toast. Returns whether it succeeded — the caller can also drive an inline "copied" state.
+// message unset (undefined) = locale default text, null = no toast. locale is passed by the caller (default ko).
 export async function copyText(
   text: string,
   message?: string | null,

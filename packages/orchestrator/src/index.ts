@@ -8,4 +8,4 @@ export {
   TemporalOrchestrator,
   type TemporalOrchestratorOptions,
 } from "./orchestrator.js";
-// 주의: workflows.ts 는 여기서 re-export 하지 않는다 — 워커가 workflowsPath 로 따로 번들한다.
+// Note: workflows.ts is not re-exported here — the worker bundles it separately via workflowsPath.

@@ -5,21 +5,21 @@ import { classifyImageRef, type ImageRegistryCoordinates } from '@/shared/lib/im
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 
-// inspect-harness 뷰 공통 프리미티브 — 라벨/값 필드, 모노 칩, 라벨 섹션.
+// Shared primitives for the inspect-harness views — label/value field, mono chip, labeled section.
 
-// 이미지 출처 배지 — 워크스페이스 레지스트리(파랑)/로컬 전용·미지정(경고). external 은 기본 상태라 배지 없음(소음 방지).
-// hint 는 title 로(이미지 ref 자체가 이미 title 을 쓰는 관례와 동일). 분류 SSOT 는 컨트롤플레인, 여기는 표시용 미러.
+// Image provenance badge — workspace registry (blue) / local-only·unqualified (warning). external is the default state, so no badge (noise avoidance).
+// The hint is on title (same convention as the image ref, which already uses title). The classification SSOT is the control plane; this is a display-only mirror.
 export function ImageClassBadge({
   image,
   registry,
 }: {
   image: string
-  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 — 어느 하나 매칭이면 workspace
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // multiple registries — a match on any one means workspace
 }) {
   const t = useTranslations('lib')
   const cls = classifyImageRef(image, registry)
   if (cls === 'external') return null
-  // 분류값(workspace/local/unqualified)을 카탈로그 키 접미사로: imageClass*/imageHint*.
+  // Turn the classification value (workspace/local/unqualified) into a catalog-key suffix: imageClass*/imageHint*.
   const suffix = cls.charAt(0).toUpperCase() + cls.slice(1)
   return (
     <Badge tone={cls === 'workspace' ? 'info' : 'warning'} title={t(`imageHint${suffix}`)}>
@@ -54,7 +54,7 @@ export function Field({
   )
 }
 
-// 라벨(좁은 왼칸) + 값(채움) 한 줄 — 반응형 그리드 셀. wide=전체 폭(명령처럼 긴 값). 패딩은 그리드 gap 이 담당.
+// One row of label (narrow left column) + value (fill) — a responsive grid cell. wide=full width (long values like a command). The grid gap handles padding.
 export function DefRow({
   label,
   children,
@@ -88,7 +88,7 @@ export function DefRow({
   )
 }
 
-// 명령 템플릿의 {{task}}/{{model}}/{{run_id}} 자리표시자를 강조 분리(순수). command 뷰에서 사용.
+// Split out and highlight the {{task}}/{{model}}/{{run_id}} placeholders in a command template (pure). Used by the command view.
 export function highlightTemplate(command: string): ReactNode[] {
   return command.split(/(\{\{[^}]+\}\})/g).map((part, i) =>
     /^\{\{[^}]+\}\}$/.test(part) ? (

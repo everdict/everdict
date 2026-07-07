@@ -1,10 +1,10 @@
 import type { ScorecardRecord } from '@/entities/scorecard'
 
-// 스코어카드 유연 분석 엔진 — listScorecards 배열 위의 순수 피벗(필터·그룹·측정·정렬·검색).
-// 리더보드/하니스별/추이/비교는 전부 이 config 의 구성으로 재현된다. 설계: docs/architecture/scorecard-analysis-views.md.
+// Flexible scorecard analysis engine — a pure pivot over the listScorecards array (filter/group/measure/sort/search).
+// Leaderboard/by-harness/trend/compare are all reproduced as compositions of this config. Design: docs/architecture/scorecard-analysis-views.md.
 
-// 라벨 해석용 최소 translator 시그니처 — next-intl useTranslations/getTranslations 반환과 구조적으로 호환.
-// 모델은 프레임워크 무의존을 유지하고, 호출부(analyzeScorecards 네임스페이스 바인딩)가 t 를 주입한다.
+// Minimal translator signature for label resolution — structurally compatible with next-intl's useTranslations/getTranslations return.
+// The model stays framework-agnostic; the caller (bound to the analyzeScorecards namespace) injects t.
 type Translate = (key: string, values?: Record<string, string | number>) => string
 
 export type Dimension =
@@ -24,7 +24,7 @@ export type Dimension =
 
 export const TIME_DIMENSIONS: Dimension[] = ['day', 'week', 'month']
 
-// 차원 → 카탈로그 키(analyzeScorecards 네임스페이스). 표시 문자열은 렌더에서 t() 로 해석.
+// Dimension → catalog key (analyzeScorecards namespace). Display strings are resolved at render via t().
 export const DIMENSION_KEY: Record<Dimension, string> = {
   dataset: 'dimDataset',
   datasetVersion: 'dimDatasetVersion',
@@ -64,14 +64,14 @@ export interface AnalysisFilters {
 
 export interface AnalysisConfig {
   filters: AnalysisFilters
-  groupBy: Dimension[] // 0..2 dims → 그룹 행
-  pivotBy?: Dimension // 선택 열 차원 → 매트릭스
-  metric?: string // 어느 summary metric (미지정=가장 흔한 것)
+  groupBy: Dimension[] // 0..2 dims → group rows
+  pivotBy?: Dimension // optional column dimension → matrix
+  metric?: string // which summary metric (unset = the most common one)
   measure: Measure
   sort: { by: 'measure' | 'label'; dir: 'asc' | 'desc' }
   search?: string
   viz: Viz
-  includeIncomplete?: boolean // superseded/미완료 포함(기본 제외)
+  includeIncomplete?: boolean // include superseded/incomplete (excluded by default)
 }
 
 export const DEFAULT_CONFIG: AnalysisConfig = {
@@ -86,7 +86,7 @@ const UNKNOWN = '—'
 
 function isoWeek(iso: string): string {
   const d = new Date(iso)
-  // ISO week 근사 — YYYY-Www (표시용). 목요일 기준.
+  // ISO week approximation — YYYY-Www (for display). Thursday-based.
   const day = (d.getUTCDay() + 6) % 7
   d.setUTCDate(d.getUTCDate() - day + 3)
   const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4))
@@ -101,7 +101,7 @@ function isoWeek(iso: string): string {
   return `${d.getUTCFullYear()}-W${String(week).padStart(2, '0')}`
 }
 
-// 한 스코어카드의 차원 값(원시 — owner 는 subject; 표시 이름은 렌더에서 resolve).
+// A scorecard's dimension value (raw — owner is the subject; the display name is resolved at render).
 export function dimValue(sc: ScorecardRecord, dim: Dimension): string {
   switch (dim) {
     case 'dataset':
@@ -133,7 +133,7 @@ export function dimValue(sc: ScorecardRecord, dim: Dimension): string {
   }
 }
 
-// 이 스코어카드의 점수(선택 metric) — passRate 우선, 없으면 mean.
+// This scorecard's score (for the selected metric) — passRate first, else mean.
 function scoreOf(sc: ScorecardRecord, metric: string | undefined): number | undefined {
   const rows = sc.summary ?? []
   const row = (metric ? rows.find((r) => r.metric === metric) : undefined) ?? rows[0]
@@ -141,7 +141,7 @@ function scoreOf(sc: ScorecardRecord, metric: string | undefined): number | unde
   return row.passRate ?? row.mean
 }
 
-// 그룹(스코어카드 묶음)의 측정값.
+// A group's (bundle of scorecards) measured value.
 function aggregate(
   cards: ScorecardRecord[],
   metric: string | undefined,
@@ -153,13 +153,13 @@ function aggregate(
     const latest = [...cards].sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0]
     return latest ? scoreOf(latest, metric) : undefined
   }
-  // passRate | mean — 각 카드 점수의 평균(정의된 것만)
+  // passRate | mean — the average of each card's score (only the defined ones)
   const vals = cards.map((c) => scoreOf(c, metric)).filter((v): v is number => v !== undefined)
   if (vals.length === 0) return undefined
   return vals.reduce((a, b) => a + b, 0) / vals.length
 }
 
-// 워크스페이스의 모든 metric 이름(빈도순) + 기본 metric.
+// All metric names in the workspace (by frequency) + the default metric.
 export function metricsOf(scorecards: ScorecardRecord[]): string[] {
   const freq = new Map<string, number>()
   for (const sc of scorecards)
@@ -167,7 +167,7 @@ export function metricsOf(scorecards: ScorecardRecord[]): string[] {
   return [...freq.entries()].sort((a, b) => b[1] - a[1]).map(([m]) => m)
 }
 
-// 필터 통과?
+// Passes the filters?
 function passesFilters(
   sc: ScorecardRecord,
   c: AnalysisConfig,
@@ -210,21 +210,21 @@ function passesFilters(
 
 export interface GridRow {
   key: string
-  labels: string[] // groupBy 차원별 라벨(표시용, owner 는 resolve됨)
+  labels: string[] // label per groupBy dimension (for display; owner is resolved)
   count: number
-  value?: number // pivot 없을 때의 측정값
-  cells: { key: string; value?: number }[] // pivot 열별 값
+  value?: number // measured value when there is no pivot
+  cells: { key: string; value?: number }[] // value per pivot column
 }
 export interface GridResult {
   kind: 'grid'
   rows: GridRow[]
-  pivotKeys: string[] // pivotBy 값들(정렬됨); 없으면 []
+  pivotKeys: string[] // pivotBy values (sorted); [] if none
   metric?: string
-  total: number // 필터 통과한 스코어카드 수
+  total: number // number of scorecards that passed the filters
 }
 export interface LineResult {
   kind: 'line'
-  buckets: string[] // 시간 버킷(정렬)
+  buckets: string[] // time buckets (sorted)
   series: { label: string; points: (number | undefined)[] }[]
   metric?: string
   total: number
@@ -235,19 +235,19 @@ function groupKey(sc: ScorecardRecord, dims: Dimension[]): string {
   return dims.map((d) => dimValue(sc, d)).join('')
 }
 
-// 메인 — 스코어카드 배열 + config → 결과(grid|line). resolveOwner: subject→표시이름.
+// Main — scorecard array + config → result (grid|line). resolveOwner: subject→display name.
 export function computeAnalysis(
   scorecards: ScorecardRecord[],
   config: AnalysisConfig,
   resolveOwner: (s: string) => string = (s) => s,
-  allLabel: string = '전체' // series 차원이 없을 때의 단일 시리즈 라벨(호출부가 t('all') 주입)
+  allLabel: string = '전체' // single-series label when there is no series dimension (the caller injects t('all'))
 ): AnalysisResult {
   const filtered = scorecards.filter((sc) => passesFilters(sc, config, resolveOwner))
   const metric = config.metric
   const labelOf = (dim: Dimension, raw: string) => (dim === 'owner' ? resolveOwner(raw) : raw)
 
   if (config.viz === 'line') {
-    // x축 = groupBy 의 시간 차원(첫 번째), series = 나머지 groupBy 차원(있으면).
+    // x-axis = the time dimension in groupBy (the first one), series = the remaining groupBy dimension (if any).
     const timeDim = config.groupBy.find((d) => TIME_DIMENSIONS.includes(d)) ?? 'day'
     const seriesDim = config.groupBy.find((d) => !TIME_DIMENSIONS.includes(d))
     const buckets = [...new Set(filtered.map((sc) => dimValue(sc, timeDim)))].sort()
@@ -315,8 +315,8 @@ export function computeAnalysis(
 
 const VIZ_KEY: Record<Viz, string> = { table: 'vizTable', bars: 'vizBars', line: 'trend' }
 
-// config 를 사람이 읽는 짧은 칩 목록으로 — View 카드가 스스로를 설명하게(그룹·열·측정·형태·필터 수).
-// t = analyzeScorecards 네임스페이스 translator(호출부 주입; 서버는 getTranslations, 클라는 useTranslations).
+// Render the config as a short list of human-readable chips — so a View card describes itself (group/column/measure/shape/filter count).
+// t = the analyzeScorecards namespace translator (caller-injected; getTranslations on the server, useTranslations on the client).
 export function describeConfig(c: AnalysisConfig, t: Translate): string[] {
   const chips: string[] = []
   if (c.groupBy.length)
@@ -331,7 +331,7 @@ export function describeConfig(c: AnalysisConfig, t: Translate): string[] {
   return chips
 }
 
-// ── URL 코덱 (config ↔ query) — 딥링크/공유용. ────────────────────────────────
+// ── URL codec (config ↔ query) — for deep-linking/sharing. ────────────────────────────────
 export function configToParams(c: AnalysisConfig): URLSearchParams {
   const p = new URLSearchParams()
   const f = c.filters
@@ -355,8 +355,8 @@ export function configToParams(c: AnalysisConfig): URLSearchParams {
   return p
 }
 
-// ── View 저장 코덱 — config 를 평면 문자열 맵(jsonb 안전)으로 저장하고, paramsToConfig 로 검증하며 복원. ──
-// 저장은 스냅샷이 아니라 "레시피"라, 열 때 paramsToConfig 가 모든 필드를 정규화한다(오형식이어도 안전한 config).
+// ── View persistence codec — store config as a flat string map (jsonb-safe), and restore by validating through paramsToConfig. ──
+// The saved form is a "recipe", not a snapshot, so on open paramsToConfig normalizes every field (a safe config even if malformed).
 export function configToStored(c: AnalysisConfig): Record<string, string> {
   return Object.fromEntries(configToParams(c))
 }

@@ -2,9 +2,9 @@ import { BadRequestError } from "@everdict/core";
 import type { UserProfile, UserProfilePatch, UserProfileStore } from "@everdict/db";
 import { validateImageRef } from "./image-ref.js";
 
-// 프로필 수정 코어 — HTTP 라우트(PATCH /me/profile)와 MCP 도구(update_profile)가 공유하는 단일 코어(패리티).
-// 자기 프로필만 수정한다(subject = principal.subject) — 역할 게이트 없음(authz 무관, SSO 신원과 분리된 표시 정보).
-// email 은 다루지 않는다 — Keycloak 클레임이라 읽기전용. 빈 문자열은 해당 필드 삭제로 해석한다.
+// Profile-edit core — the single core shared by the HTTP route (PATCH /me/profile) and the MCP tool (update_profile) (parity).
+// Only edits your own profile (subject = principal.subject) — no role gate (authz-irrelevant display info decoupled from SSO identity).
+// Does not handle email — it is a Keycloak claim, so read-only. An empty string is interpreted as deleting that field.
 export class ProfileService {
   constructor(private readonly store: UserProfileStore) {}
 
@@ -21,7 +21,7 @@ export class ProfileService {
   }
 }
 
-// 빈/공백 → null(삭제), 아니면 trim 한 값.
+// Empty/whitespace → null (delete), otherwise the trimmed value.
 function clean(v: string): string | null {
   const t = v.trim();
   return t === "" ? null : t;
@@ -29,14 +29,14 @@ function clean(v: string): string | null {
 
 function validateName(v: string | null): string | null {
   if (v === null) return null;
-  if (v.length > 80) throw new BadRequestError("BAD_REQUEST", { field: "name" }, "이름은 80자 이하여야 합니다.");
+  if (v.length > 80) throw new BadRequestError("BAD_REQUEST", { field: "name" }, "Name must be at most 80 characters.");
   return v;
 }
 
-// 유저네임: 영숫자 + _/- (2~39자). 유일성은 아직 강제하지 않는다(형식만 검증).
+// Username: alphanumeric + _/- (2–39 chars). Uniqueness is not yet enforced (format only).
 function validateUsername(v: string | null): string | null {
   if (v === null) return null;
   if (!/^[a-z0-9][a-z0-9_-]{1,38}$/i.test(v))
-    throw new BadRequestError("BAD_REQUEST", { field: "username" }, "유저네임은 영숫자/_/- 2~39자여야 합니다.");
+    throw new BadRequestError("BAD_REQUEST", { field: "username" }, "Username must be 2–39 chars of alphanumeric/_/-.");
   return v;
 }

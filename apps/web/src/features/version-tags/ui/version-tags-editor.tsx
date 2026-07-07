@@ -10,9 +10,9 @@ import { VersionTagChip } from '@/shared/ui/chip'
 
 import { setVersionTagsAction, type VersionTagEntity } from '../api/set-version-tags'
 
-// 한 "버전"의 태그 칩 목록 + 인라인 편집(추가/삭제) — 하니스/데이터셋/런타임 상세가 공유한다.
-// 태그 = 버전을 번호만으로 분간하기 어려울 때 붙이는 자유 라벨(스펙 밖 가변 메타 — 버전 불변성과 무관).
-// canEdit=false 면 표시 전용(칩만). 편집 불가 + 태그 없음이면 호출부가 행 자체를 숨긴다(빈 섹션 노출 금지).
+// Tag chip list for one "version" + inline editing (add/remove) — shared by the harness/dataset/runtime detail views.
+// Tag = a free-form label attached when a version is hard to tell apart by number alone (mutable meta outside the spec — unrelated to version immutability).
+// canEdit=false is display-only (chips only). When not editable and there are no tags, the caller hides the row itself (no empty section shown).
 export function VersionTagsEditor({
   entity,
   id,

@@ -14,7 +14,7 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `list_runs` | `runs:read` (viewer+) | the caller's workspace runs |
 | `get_run` | `runs:read` | one run (other workspace → `NOT_FOUND`) |
 | `submit_run` | `runs:submit` (member+) | submit an eval run (repo empty seed + default graders) |
-| `list_harness_templates` | `harnesses:read` (viewer+) | workspace-owned + `_shared` harness templates (대분류 structure) |
+| `list_harness_templates` | `harnesses:read` (viewer+) | workspace-owned + `_shared` harness templates (top-level category structure) |
 | `get_harness_template` | `harnesses:read` | one `HarnessTemplateSpec` (structure/slots; `version` or `latest`) — config view / new-version prefill |
 | `register_harness_template` | `templates:write` (viewer+) | register a `HarnessTemplateSpec` (immutable → `CONFLICT`) |
 | `list_harnesses` | `harnesses:read` (viewer+) | workspace-owned + `_shared` instances (grouped by template id) |
@@ -30,10 +30,10 @@ the HTTP routes (`RunService` + `ScorecardService` + `HarnessRegistry` + `Datase
 | `get_judge` | `judges:read` | one `JudgeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_judge` | `judges:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
 | `create_judge` | `judges:write` (member+) | register a `JudgeSpec` (immutable → `CONFLICT`) |
-| `list_models` | `models:read` (viewer+) | workspace-owned + `_shared` Models (provider + 하부 모델 + baseUrl) |
+| `list_models` | `models:read` (viewer+) | workspace-owned + `_shared` Models (provider + sub-model + baseUrl) |
 | `get_model` | `models:read` | one `ModelSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_model` | `models:write` (member+) | dry-run: schema + existing versions/conflict (no write) |
-| `create_model` | `models:write` (member+) | register a `ModelSpec` (immutable → `CONFLICT`); judge·command 하니스가 id 로 참조 |
+| `create_model` | `models:write` (member+) | register a `ModelSpec` (immutable → `CONFLICT`); referenced by id from judge·command harnesses |
 | `list_runtimes` | `runtimes:read` (viewer+) | workspace-owned + `_shared` execution runtimes (local \| nomad \| k8s) |
 | `get_runtime` | `runtimes:read` | one `RuntimeSpec` (`version` opt, default `latest`; other workspace → `NOT_FOUND`) |
 | `validate_runtime` | `runtimes:write` (viewer+) | dry-run: schema + existing versions/conflict (no write) |

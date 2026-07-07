@@ -7,15 +7,15 @@ import { Card } from '@/shared/ui/card'
 
 import { DefRow, highlightTemplate, ImageClassBadge, Mono, SubSection } from './parts'
 
-// command(선언형 CLI) 하니스 — 핵심 값(명령·모델·이미지·작업경로·트레이스)을 한 카드의 값 리스트로,
-// 그 아래 Setup/환경변수는 있을 때만. 파이프라인 도식·중복 그리드는 제거(깔끔한 스캔 뷰).
-// registry = 워크스페이스 레지스트리 좌표 — 디스패치 이미지의 출처 분류 배지.
+// command (declarative CLI) harness — the core values (command·model·image·working path·trace) as one card's value list,
+// with Setup/env vars below only when present. The pipeline diagram and duplicate grid are dropped (a clean scan view).
+// registry = workspace registry coordinates — the provenance-classification badge for the dispatch image.
 export function CommandView({
   spec,
   registry,
 }: {
   spec: HarnessSpec
-  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 지원
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // supports multiple registries
 }) {
   const t = useTranslations('inspectHarness')
   const setup = spec.setup ?? []
@@ -25,7 +25,7 @@ export function CommandView({
 
   return (
     <div className="space-y-6">
-      {/* 화면이 넓을수록 열을 늘려 값을 넉넉히 펼친다. 명령은 길어서 전체 폭(col-span-full). */}
+      {/* The wider the screen, the more columns, so values spread out generously. The command is long, so it spans full width (col-span-full). */}
       <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
         {spec.command && (
           <DefRow label={t('command')} wide>

@@ -20,61 +20,61 @@ import {
 import type { BenchmarkRegistry, DatasetRegistry } from "@everdict/registry";
 import { z } from "zod";
 
-// 벤치마크 인입 본문 — spec(인라인 정의/위저드) · benchmark(카탈로그) · recipe(등록된 레시피) 중 하나로 데이터셋 등록.
-// HTTP 라우트와 MCP 툴이 공유(BFF↔MCP 패리티: 검증 스키마는 서비스 옆에 둔다).
+// Benchmark import body — register a dataset from one of spec (inline definition/wizard) · benchmark (catalog) · recipe (registered recipe).
+// Shared by the HTTP route and the MCP tool (BFF↔MCP parity: the validation schema lives next to the service).
 export const BenchmarkImportBodySchema = z
   .object({
-    spec: BenchmarkAdapterSpecSchema.optional(), // 인라인 정의(위저드) — 레시피 등록 없이 한 번에 인입
-    benchmark: z.string().optional(), // 카탈로그 id (first-party)
-    recipe: z.object({ id: z.string(), version: z.string().optional() }).optional(), // 등록된 레시피
-    id: z.string().optional(), // 대상 데이터셋 id (기본 = 소스 id)
+    spec: BenchmarkAdapterSpecSchema.optional(), // inline definition (wizard) — import in one shot with no recipe registration
+    benchmark: z.string().optional(), // catalog id (first-party)
+    recipe: z.object({ id: z.string(), version: z.string().optional() }).optional(), // registered recipe
+    id: z.string().optional(), // target dataset id (default = source id)
     version: z.string().default("1.0.0"),
     limit: z.number().int().positive().max(1000).optional(),
-    text: z.string().optional(), // jsonl 소스 업로드 원문
+    text: z.string().optional(), // uploaded jsonl source text
   })
   .refine((b) => Boolean(b.spec) || Boolean(b.benchmark) || Boolean(b.recipe), {
-    message: "spec(인라인 정의) · benchmark(카탈로그) · recipe(레시피) 중 하나가 필요합니다.",
+    message: "One of spec (inline definition) · benchmark (catalog) · recipe (recipe) is required.",
   });
 
-// 소스 미리보기 본문 — 매핑 전 원본 행 N개 + 감지된 필드(위저드용). 등록 없음.
+// Source preview body — N raw rows + detected fields before mapping (for the wizard). No registration.
 export const BenchmarkPreviewBodySchema = z.object({
   source: BenchmarkSourceSchema,
-  text: z.string().optional(), // jsonl 소스 원문
+  text: z.string().optional(), // jsonl source text
   limit: z.number().int().positive().max(20).optional(),
 });
 
-// 벤치마크 카탈로그(first-party 코드) + 테넌트 레시피(데이터, BenchmarkRegistry) → 테넌트-소유 Dataset 인입.
-// 유저 셀프서비스: 카탈로그에서 고르거나, 자기 워크스페이스에 레시피(BenchmarkAdapterSpec)를 등록해 재사용. authZ 는 라우트.
+// Benchmark catalog (first-party code) + tenant recipes (data, BenchmarkRegistry) → import into a tenant-owned Dataset.
+// User self-service: pick from the catalog, or register a recipe (BenchmarkAdapterSpec) in your own workspace and reuse it. authZ is in the route.
 export interface BenchmarkImportInput {
   tenant: string;
-  createdBy?: string; // 인입한 subject — 생성된 데이터셋의 생성자(소프트 삭제 권한)
-  spec?: BenchmarkAdapterSpec; // 인라인 정의(위저드) — 레시피 등록 없이 한 번에 인입
-  benchmark?: string; // 카탈로그 id (first-party)
-  recipe?: { id: string; version?: string }; // 등록된 테넌트/공유 레시피
-  id?: string; // 대상 데이터셋 id (기본 = 소스 id)
+  createdBy?: string; // the importing subject — the created dataset's creator (soft-delete permission)
+  spec?: BenchmarkAdapterSpec; // inline definition (wizard) — import in one shot with no recipe registration
+  benchmark?: string; // catalog id (first-party)
+  recipe?: { id: string; version?: string }; // registered tenant/shared recipe
+  id?: string; // target dataset id (default = source id)
   version: string;
   limit?: number;
-  text?: string; // jsonl 소스 업로드 원문
+  text?: string; // uploaded jsonl source text
 }
 
 export interface PreviewSourceInput {
   tenant: string;
-  subject?: string; // 요청자 — 개인 시크릿(HF_TOKEN)까지 gated 인증에 사용
+  subject?: string; // requester — used for gated auth down to personal secrets (HF_TOKEN)
   source: BenchmarkSourceSpec;
-  text?: string; // jsonl 소스 원문(앞 N줄만 파싱)
+  text?: string; // jsonl source text (only the first N lines are parsed)
   limit?: number;
 }
 
 export interface BenchmarkServiceDeps {
   datasets: DatasetRegistry;
-  benchmarks?: BenchmarkRegistry; // 테넌트 레시피 레지스트리(없으면 레시피 기능 비활성)
-  // gated 벤치마크용 HF_TOKEN — subject 를 주면 그 유저 "개인" 시크릿까지(개인 우선 병합). 멤버는 워크스페이스
-  // 시크릿(admin 전용)을 못 만져도 계정 시크릿에 HF_TOKEN 만 넣으면 스스로 인입할 수 있다(셀프서비스).
+  benchmarks?: BenchmarkRegistry; // tenant recipe registry (recipe features disabled if absent)
+  // HF_TOKEN for gated benchmarks — passing a subject includes that user's "personal" secrets (personal-first merge). A member
+  // who cannot touch workspace secrets (admin-only) can still import on their own by putting HF_TOKEN in their account secrets (self-service).
   secretsFor?: (tenant: string, subject?: string) => Promise<Record<string, string>>;
-  fetchImpl?: FetchLike; // 테스트 주입
+  fetchImpl?: FetchLike; // test injection
 }
 
-// BenchmarkSource → 데이터셋 리니지용 출처 참조(+HF 정규 링크). jsonl 은 붙여넣기라 원본 링크가 없다.
+// BenchmarkSource → source reference for dataset lineage (+ canonical HF link). jsonl is pasted, so it has no source link.
 function toSourceRef(source: BenchmarkSourceSpec): DatasetSourceRef {
   if (source.kind === "huggingface") {
     return {
@@ -83,13 +83,13 @@ function toSourceRef(source: BenchmarkSourceSpec): DatasetSourceRef {
       ...(source.config ? { config: source.config } : {}),
       ...(source.split ? { split: source.split } : {}),
       ...(source.file ? { file: source.file } : {}),
-      url: `https://huggingface.co/datasets/${source.dataset}`, // 정규 링크(데이터셋 페이지)
+      url: `https://huggingface.co/datasets/${source.dataset}`, // canonical link (dataset page)
     };
   }
   return { kind: "jsonl" };
 }
 
-// BenchmarkOrigin(발표 벤치마크 공식 출처, 옵셔널 필드 뭉치) → DatasetOrigin. 정의된 필드만 옮긴다(빈값 제외).
+// BenchmarkOrigin (a published benchmark's official provenance, a bag of optional fields) → DatasetOrigin. Copy only defined fields (exclude empties).
 function toDatasetOrigin(origin: BenchmarkOrigin): DatasetOrigin | undefined {
   if (!origin) return undefined;
   const keys = [
@@ -114,19 +114,19 @@ function toDatasetOrigin(origin: BenchmarkOrigin): DatasetOrigin | undefined {
 export class BenchmarkService {
   constructor(private readonly deps: BenchmarkServiceDeps) {}
 
-  // first-party 카탈로그(코드).
+  // first-party catalog (code).
   list(): ReturnType<typeof listBenchmarks> {
     return listBenchmarks();
   }
 
   private registry(): BenchmarkRegistry {
     if (!this.deps.benchmarks) {
-      throw new BadRequestError("BAD_REQUEST", undefined, "benchmark 레시피 레지스트리가 설정되지 않았습니다.");
+      throw new BadRequestError("BAD_REQUEST", undefined, "The benchmark recipe registry is not configured.");
     }
     return this.deps.benchmarks;
   }
 
-  // 테넌트 레시피 등록(데이터). 버전 불변(충돌 409). 자기 워크스페이스 소유.
+  // Register a tenant recipe (data). Versions are immutable (conflict 409). Owned by your own workspace.
   async registerRecipe(
     tenant: string,
     spec: BenchmarkAdapterSpec,
@@ -135,22 +135,22 @@ export class BenchmarkService {
     return { workspace: tenant, id: spec.id, version: spec.version };
   }
 
-  // 테넌트 + _shared 레시피 목록.
+  // Tenant + _shared recipe list.
   listRecipes(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
     return this.registry().list(tenant);
   }
 
-  // 한 레시피(소유 우선/_shared 폴백). 없으면 NotFound(404).
+  // A single recipe (owned-first / _shared fallback). NotFound (404) if absent.
   getRecipe(tenant: string, id: string, ref?: string): Promise<BenchmarkAdapterSpec> {
     return this.registry().get(tenant, id, ref);
   }
 
-  // 이 테넌트가 직접 등록한 버전만(폴백 없음) — validate dry-run 의 충돌 판정용.
+  // Only versions this tenant registered directly (no fallback) — for the validate dry-run's conflict decision.
   recipeOwnVersions(tenant: string, id: string): Promise<string[]> {
     return this.registry().ownVersions(tenant, id);
   }
 
-  // HF Hub 데이터셋 검색 — 위저드가 정확한 id 대신 검색어로 후보를 고른다(raw 입력 회피). gated 인출은 HF_TOKEN.
+  // HF Hub dataset search — the wizard picks candidates by search term instead of an exact id (avoids raw input). Gated fetch uses HF_TOKEN.
   async searchHf(tenant: string, query: string, limit?: number, subject?: string): Promise<HfDatasetHit[]> {
     const secrets: Record<string, string> = this.deps.secretsFor
       ? await this.deps.secretsFor(tenant, subject).catch(() => ({}))
@@ -162,7 +162,7 @@ export class BenchmarkService {
     });
   }
 
-  // 선택한 HF 데이터셋의 config/split 조합 — 위저드 드롭다운용(split 직접 타이핑 회피).
+  // The config/split combinations of the chosen HF dataset — for the wizard dropdown (avoids typing the split by hand).
   async hfSplits(tenant: string, dataset: string, subject?: string): Promise<HfSplit[]> {
     const secrets: Record<string, string> = this.deps.secretsFor
       ? await this.deps.secretsFor(tenant, subject).catch(() => ({}))
@@ -173,8 +173,8 @@ export class BenchmarkService {
     });
   }
 
-  // 뷰어(datasets-server) 미서빙 데이터셋 폴백 — repo 의 데이터 파일(csv/jsonl/json) 목록.
-  // 위저드가 config/split 대신 파일을 골라 직접 인출한다(officeqa 류: 뷰어 없는 gated repo).
+  // Fallback for datasets not served by the viewer (datasets-server) — the list of data files (csv/jsonl/json) in the repo.
+  // The wizard picks a file instead of config/split and fetches it directly (officeqa-style: a gated repo with no viewer).
   async hfFiles(tenant: string, dataset: string, subject?: string): Promise<string[]> {
     const secrets: Record<string, string> = this.deps.secretsFor
       ? await this.deps.secretsFor(tenant, subject).catch(() => ({}))
@@ -185,8 +185,8 @@ export class BenchmarkService {
     });
   }
 
-  // 소스 미리보기 — 매핑 전 원본 행 N개 + 감지된 필드 목록. 위저드가 이걸로 필드를 드롭다운에 채우고 매핑한다.
-  // gated HF 는 테넌트 SecretStore 의 HF_TOKEN 으로 인증. 등록/쓰기는 없다(순수 인출).
+  // Source preview — N raw rows + the list of detected fields before mapping. The wizard uses this to populate field dropdowns and map them.
+  // Gated HF authenticates with the tenant SecretStore's HF_TOKEN. No registration/writes (pure fetch).
   async previewSource(input: PreviewSourceInput): Promise<{ fields: string[]; rows: Array<Record<string, unknown>> }> {
     const secrets: Record<string, string> = this.deps.secretsFor
       ? await this.deps.secretsFor(input.tenant, input.subject).catch(() => ({}))
@@ -201,11 +201,11 @@ export class BenchmarkService {
     return { fields, rows };
   }
 
-  // 인입 → 테넌트-소유 Dataset. recipe(등록된 데이터) 또는 benchmark(카탈로그 코드) 중 하나.
+  // Import → tenant-owned Dataset. Either recipe (registered data) or benchmark (catalog code).
   async import(
     input: BenchmarkImportInput,
   ): Promise<{ workspace: string; id: string; version: string; cases: number }> {
-    // 인입자(createdBy)가 곧 요청자 — 그 유저의 개인 HF_TOKEN 까지 gated 인증에 사용.
+    // The importer (createdBy) is the requester — used for gated auth down to that user's personal HF_TOKEN.
     const secrets: Record<string, string> = this.deps.secretsFor
       ? await this.deps.secretsFor(input.tenant, input.createdBy).catch(() => ({}))
       : {};
@@ -218,9 +218,9 @@ export class BenchmarkService {
     };
 
     let dataset: Awaited<ReturnType<typeof importBenchmark>>;
-    let producedBy: DatasetProvenance | undefined; // 인입 출처 — 데이터셋→레시피 역링크의 근거로 스탬프.
+    let producedBy: DatasetProvenance | undefined; // import provenance — stamped as the basis for the dataset→recipe back-link.
     if (input.spec) {
-      // 인라인 정의(위저드) — 레지스트리에 레시피를 먼저 등록할 필요 없이 바로 인입.
+      // Inline definition (wizard) — import directly, no need to register a recipe in the registry first.
       dataset = await importFromSpec(
         input.spec,
         {
@@ -230,7 +230,7 @@ export class BenchmarkService {
         },
         opts,
       );
-      // 리니지 각인 — 위저드가 이미 아는 원본(HF 데이터셋/파일)을 데이터셋에 남긴다(추가 입력 없이).
+      // Etch lineage — record on the dataset the source the wizard already knows (HF dataset/file), with no extra input.
       const origin = toDatasetOrigin(input.spec.origin);
       producedBy = {
         via: "spec",
@@ -249,7 +249,7 @@ export class BenchmarkService {
         },
         opts,
       );
-      // 등록된 레시피에서 인입 — 해석된 구체 버전(spec.version)으로 역링크가 정확한 버전을 가리킨다.
+      // Imported from a registered recipe — the resolved concrete version (spec.version) makes the back-link point at the exact version.
       const origin = toDatasetOrigin(spec.origin);
       producedBy = {
         via: "recipe",
@@ -279,11 +279,11 @@ export class BenchmarkService {
       throw new BadRequestError(
         "BAD_REQUEST",
         undefined,
-        "spec(인라인 정의) · benchmark(카탈로그) · recipe(레시피) 중 하나가 필요합니다.",
+        "One of spec (inline definition) · benchmark (catalog) · recipe (recipe) is required.",
       );
     }
-    const stamped = producedBy ? { ...dataset, producedBy } : dataset; // 출처를 데이터셋에 각인(역참조용)
-    await this.deps.datasets.register(input.tenant, stamped, input.createdBy); // 버전 불변(충돌 409); 생성자 = 인입한 subject
+    const stamped = producedBy ? { ...dataset, producedBy } : dataset; // etch provenance onto the dataset (for back-reference)
+    await this.deps.datasets.register(input.tenant, stamped, input.createdBy); // versions immutable (conflict 409); creator = the importing subject
     return { workspace: input.tenant, id: stamped.id, version: stamped.version, cases: stamped.cases.length };
   }
 }

@@ -1,28 +1,28 @@
 import type { SqlClient } from "./client.js";
 
-// 워크스페이스 멤버십 저장소 — subject(유저 sub/키)가 어떤 workspace 에 어떤 role 로 속하는지.
-// workspace === tenant === trust-zone 키. 컨트롤플레인이 멤버십의 SSOT(토큰 클레임은 부트스트랩 기본값일 뿐).
-// 평문/비밀 없음 — 순수 멤버십 그래프. role → action 매핑은 @everdict/auth 의 authz 가 담당한다.
-// email 은 OIDC 클레임(email/preferred_username) 캐시 — opaque subject 보완 표시 전용, authz 무관.
+// Workspace membership store — which workspace a subject (user sub/key) belongs to with which role.
+// workspace === tenant === trust-zone key. The control plane is the membership SSOT (the token claim is merely a bootstrap default).
+// No plaintext/secrets — a pure membership graph. The role → action mapping is handled by @everdict/auth's authz.
+// email is a cache of OIDC claims (email/preferred_username) — display only, to supplement the opaque subject, no authz bearing.
 export interface WorkspaceRecord {
-  id: string; // = tenant 키(모든 데이터 스코프)
-  name: string; // 표시 이름
-  owner: string; // 생성한 subject
-  logoUrl?: string; // 로고(아바타와 동일: http(s) URL 또는 data:image base64)
+  id: string; // = tenant key (the scope of all data)
+  name: string; // display name
+  owner: string; // the subject who created it
+  logoUrl?: string; // logo (same as avatar: http(s) URL or data:image base64)
   createdAt: string;
 }
 
-// 특정 subject 관점의 워크스페이스(그 subject 의 멤버십 역할 포함).
+// A workspace from a specific subject's perspective (includes that subject's membership role).
 export interface WorkspaceWithRole {
   id: string;
   name: string;
   role: string;
-  logoUrl?: string; // 사이드바/스위처 표시용
+  logoUrl?: string; // for sidebar/switcher display
 }
 
-// 워크스페이스 멤버(역할 + 표시용 email + 가입시각). 멤버 관리 UI 표시용.
-// name/avatarUrl 은 멤버십 스토어가 아니라 프로필(everdict_user_profiles)을 합쳐 보강하는 필드 —
-// WorkspaceStore 는 비워 두고 MembershipService 가 채운다(opaque subject 대신 사람이 읽는 신원 표시용).
+// A workspace member (role + display email + join time). For the member-management UI.
+// name/avatarUrl are fields enriched by joining the profile (everdict_user_profiles), not the membership store —
+// WorkspaceStore leaves them empty and MembershipService fills them (for a human-readable identity instead of the opaque subject).
 export interface MemberRecord {
   subject: string;
   role: string;
@@ -33,25 +33,25 @@ export interface MemberRecord {
 }
 
 export interface WorkspaceStore {
-  // 워크스페이스 생성 + 생성자를 admin 멤버로. id 충돌 시 undefined(서비스가 ConflictError 로 매핑).
+  // Create a workspace + make the creator an admin member. undefined on id collision (the service maps it to ConflictError).
   create(rec: { id: string; name: string; owner: string }): Promise<WorkspaceRecord | undefined>;
   get(id: string): Promise<WorkspaceRecord | undefined>;
-  // subject 가 멤버인 워크스페이스 목록(역할 포함), 생성 시각 오름차순.
+  // The workspaces the subject is a member of (with role), ascending by creation time.
   listForSubject(subject: string): Promise<WorkspaceWithRole[]>;
-  // 표시 정보 갱신(이름/로고). slug(id)는 불변. 없으면 undefined. logoUrl=null 은 로고 제거.
+  // Update display info (name/logo). The slug (id) is immutable. undefined if not found. logoUrl=null removes the logo.
   update(id: string, patch: { name?: string; logoUrl?: string | null }): Promise<WorkspaceRecord | undefined>;
-  // 워크스페이스 + 그 모든 workspace/tenant 스코프 데이터를 하드 삭제(cascade). 멱등(없으면 no-op).
+  // Hard-delete the workspace + all its workspace/tenant-scoped data (cascade). Idempotent (no-op if absent).
   delete(id: string): Promise<void>;
-  // (workspace, subject) 멤버십 역할 — 멤버가 아니면 undefined.
+  // (workspace, subject) membership role — undefined if not a member.
   roleFor(workspace: string, subject: string): Promise<string | undefined>;
-  // 멱등 부트스트랩: 워크스페이스 + 멤버십을 없을 때만 만든다(기존 토큰/dev workspace 를 멤버십으로 승격).
-  // 이미 멤버면 role 은 유지(admin 강등 금지)하고 email 만 갱신(null 로 기존값 덮어쓰지 않음 — COALESCE).
+  // Idempotent bootstrap: create the workspace + membership only when absent (promotes an existing token/dev workspace to a membership).
+  // If already a member, keep the role (no admin demotion) and only refresh email (never clobber the existing value with null — COALESCE).
   ensureMembership(workspace: string, subject: string, role: string, email?: string): Promise<void>;
-  // 멤버 목록(가입시각 오름차순). admin 표시용.
+  // Member list (ascending by join time). For admin display.
   listMembers(workspace: string): Promise<MemberRecord[]>;
-  // 기존 멤버의 역할만 변경. 멤버가 아니면 false(가입은 초대로만 — 여기서 생성하지 않음). 도메인 에러는 서비스가 던진다.
+  // Change only an existing member's role. false if not a member (joining is invite-only — nothing is created here). Domain errors are thrown by the service.
   setRole(workspace: string, subject: string, role: string): Promise<boolean>;
-  // 멤버 제거(멱등 — 없으면 no-op, 존재 누출 없음).
+  // Remove a member (idempotent — no-op if absent, no existence leak).
   removeMember(workspace: string, subject: string): Promise<void>;
 }
 
@@ -108,7 +108,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
   async update(id: string, patch: { name?: string; logoUrl?: string | null }): Promise<WorkspaceRecord | undefined> {
     const rec = this.workspaces.get(id);
     if (!rec) return undefined;
-    // logoUrl: null=제거(undefined), 문자열=설정, undefined=유지. 키를 지우지 않고 spread-conditional 로 깔끔히 재구성.
+    // logoUrl: null=remove (undefined), string=set, undefined=keep. Cleanly rebuild via spread-conditional without deleting the key.
     const logoUrl = patch.logoUrl === null ? undefined : (patch.logoUrl ?? rec.logoUrl);
     const next: WorkspaceRecord = {
       id: rec.id,
@@ -121,7 +121,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     return next;
   }
 
-  // in-memory 는 멤버십 그래프만 보유 — 다른 in-memory 스토어(secrets/runs 등)는 프로세스 로컬·도달 불가라 무해.
+  // in-memory holds only the membership graph — other in-memory stores (secrets/runs etc.) are process-local and unreachable, so harmless.
   async delete(id: string): Promise<void> {
     this.workspaces.delete(id);
     this.members.delete(id);
@@ -137,7 +137,7 @@ export class InMemoryWorkspaceStore implements WorkspaceStore {
     const m = this.cell(workspace);
     const existing = m.get(subject);
     if (existing) {
-      if (email !== undefined) existing.email = email; // role 유지, email 만 갱신
+      if (email !== undefined) existing.email = email; // keep role, refresh only email
     } else {
       m.set(subject, { role, addedAt: nowIso(), ...(email !== undefined ? { email } : {}) });
     }
@@ -195,8 +195,8 @@ function toRecord(row: WorkspaceRow): WorkspaceRecord {
   };
 }
 
-// 워크스페이스 + 그 모든 스코프 데이터를 지우기 위한 (테이블, 스코프컬럼) 목록. everdict_workspaces 는 별도로 마지막에.
-// 모든 마이그레이션이 @everdict/db 소유라 테이블명 인지는 레이어 위반이 아니다. _shared 는 실제 id 와 절대 같지 않다.
+// The (table, scope-column) list used to delete a workspace + all its scoped data. everdict_workspaces is done separately, last.
+// All migrations are owned by @everdict/db, so knowing table names is not a layer violation. _shared is never equal to a real id.
 const WORKSPACE_SCOPED_TABLES: ReadonlyArray<readonly [table: string, column: string]> = [
   ["everdict_oauth_states", "workspace"],
   ["everdict_workspace_invites", "workspace"],
@@ -226,7 +226,7 @@ export class PgWorkspaceStore implements WorkspaceStore {
       [rec.id, rec.name, rec.owner],
     );
     const row = res.rows[0];
-    if (!row) return undefined; // id 충돌
+    if (!row) return undefined; // id collision
     await this.client.query(
       "INSERT INTO everdict_workspace_members (workspace, subject, role) VALUES ($1, $2, 'admin') ON CONFLICT (workspace, subject) DO NOTHING",
       [rec.id, rec.owner],
@@ -256,8 +256,8 @@ export class PgWorkspaceStore implements WorkspaceStore {
   }
 
   async update(id: string, patch: { name?: string; logoUrl?: string | null }): Promise<WorkspaceRecord | undefined> {
-    // name=COALESCE(유지), logo_url 은 명시 패치만 반영($3 sentinel 없이 3-상태): undefined=유지, null=지움, 값=설정.
-    const setLogo = patch.logoUrl !== undefined; // undefined 면 logo_url 컬럼을 건드리지 않는다.
+    // name=COALESCE (keep); logo_url reflects only an explicit patch (3-state without a $3 sentinel): undefined=keep, null=clear, value=set.
+    const setLogo = patch.logoUrl !== undefined; // if undefined, don't touch the logo_url column.
     const res = await this.client.query<WorkspaceRow>(
       `UPDATE everdict_workspaces
          SET name = COALESCE($2, name)${setLogo ? ", logo_url = $3" : ""}
@@ -268,8 +268,8 @@ export class PgWorkspaceStore implements WorkspaceStore {
     return res.rows[0] ? toRecord(res.rows[0]) : undefined;
   }
 
-  // 순차·멱등 cascade. everdict_workspaces 를 마지막에 지워(그 전까진 재시도 가능) 부분 실패에도 안전.
-  // SqlClient 는 트랜잭션 추상화가 없어 단일 BEGIN/COMMIT 을 보장할 수 없으므로 멱등 DELETE 로 처리한다.
+  // Sequential, idempotent cascade. Delete everdict_workspaces last (retryable up to then), so it's safe even on partial failure.
+  // SqlClient has no transaction abstraction and can't guarantee a single BEGIN/COMMIT, so this uses idempotent DELETEs.
   async delete(id: string): Promise<void> {
     for (const [table, column] of WORKSPACE_SCOPED_TABLES) {
       await this.client.query(`DELETE FROM ${table} WHERE ${column} = $1`, [id]);
@@ -290,7 +290,7 @@ export class PgWorkspaceStore implements WorkspaceStore {
       "INSERT INTO everdict_workspaces (id, name, owner) VALUES ($1, $1, $2) ON CONFLICT (id) DO NOTHING",
       [workspace, subject],
     );
-    // role 은 신규일 때만 적용(ON CONFLICT 시 유지 — admin 강등 금지). email 은 COALESCE 로 갱신/백필(null clobber 금지).
+    // role applies only when new (kept on ON CONFLICT — no admin demotion). email is refreshed/backfilled via COALESCE (no null clobber).
     await this.client.query(
       `INSERT INTO everdict_workspace_members (workspace, subject, role, email) VALUES ($1, $2, $3, $4)
        ON CONFLICT (workspace, subject) DO UPDATE SET email = COALESCE(EXCLUDED.email, everdict_workspace_members.email)`,
@@ -321,7 +321,7 @@ export class PgWorkspaceStore implements WorkspaceStore {
       "UPDATE everdict_workspace_members SET role = $3 WHERE workspace = $1 AND subject = $2 RETURNING subject",
       [workspace, subject, role],
     );
-    return res.rows.length > 0; // 멤버가 아니면 0행 → false
+    return res.rows.length > 0; // not a member → 0 rows → false
   }
 
   async removeMember(workspace: string, subject: string): Promise<void> {

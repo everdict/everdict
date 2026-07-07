@@ -1,10 +1,10 @@
 import { type TraceEvent, UpstreamError } from "@everdict/core";
 import type { TraceSource } from "./trace-source.js";
 
-// Langfuse 관측(observation) — GET /api/public/traces/{traceId} 응답의 TraceWithFullDetails.observations[].
-// 실 API 검증 요점: observations 는 인라인 전체(페이지네이션 없음), 필드는 present-but-null(옵셔널 아님),
-// usage 는 deprecated 이고 usageDetails/costDetails 가 현행, type 은 GENERATION/SPAN/EVENT 외에 AGENT/TOOL/
-// CHAIN/RETRIEVER 등 신형 enum 도 온다(3종만 하드코딩 금지).
+// Langfuse observations — TraceWithFullDetails.observations[] in the GET /api/public/traces/{traceId} response.
+// Real-API notes: observations are fully inline (no pagination), fields are present-but-null (not optional),
+// usage is deprecated and usageDetails/costDetails are current, and type carries newer enums (AGENT/TOOL/
+// CHAIN/RETRIEVER) beyond GENERATION/SPAN/EVENT (don't hardcode only the three).
 interface LangfuseObservation {
   type?: string | null;
   name?: string | null;
@@ -25,7 +25,7 @@ interface LangfuseTraceDetail {
 
 const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 0);
 
-// 관측 배열 → TraceEvent[] (순수). model 있으면 llm_call, TOOL 관측은 tool_call/result 쌍, 그 외 구조 관측은 스킵.
+// Observation array → TraceEvent[] (pure). model present → llm_call, a TOOL observation → a tool_call/result pair, other structural observations are skipped.
 export function langfuseObservationsToTraceEvents(observations: LangfuseObservation[]): TraceEvent[] {
   const sorted = [...observations].sort((a, b) => ms(a.startTime) - ms(b.startTime));
   const base = ms(sorted[0]?.startTime);
@@ -56,18 +56,18 @@ export function langfuseObservationsToTraceEvents(observations: LangfuseObservat
         output: typeof o.output === "string" ? o.output : o.output === undefined ? "" : JSON.stringify(o.output),
       });
     }
-    // GENERATION 외의 구조 관측(SPAN/CHAIN/AGENT 등, model 없음)은 스킵 — 지표 파생에 기여하지 않는다.
+    // Structural observations other than GENERATION (SPAN/CHAIN/AGENT etc., no model) are skipped — they don't contribute to metric derivation.
   }
   return out;
 }
 
 export interface LangfuseTraceSourceOptions {
   endpoint: string;
-  auth?: string; // Authorization 헤더 '값' 그대로("Basic <base64(pk:sk)>"). SecretStore 에서 주입.
-  fetchImpl?: typeof fetch; // 테스트 주입
+  auth?: string; // the Authorization header 'value' verbatim ("Basic <base64(pk:sk)>"). Injected from the SecretStore.
+  fetchImpl?: typeof fetch; // test injection
 }
 
-// Langfuse 에서 runId(=traceId)로 trace 상세를 가져와 TraceEvent 로 정규화(관측 인라인 전체 — 커서 없음).
+// Fetch the trace detail from Langfuse by runId (=traceId) and normalize to TraceEvents (observations fully inline — no cursor).
 export class LangfuseTraceSource implements TraceSource {
   constructor(private readonly opts: LangfuseTraceSourceOptions) {}
   async fetch(runId: string): Promise<TraceEvent[]> {
@@ -76,13 +76,13 @@ export class LangfuseTraceSource implements TraceSource {
     const res = await f(`${base}/api/public/traces/${encodeURIComponent(runId)}`, {
       ...(this.opts.auth ? { headers: { authorization: this.opts.auth } } : {}),
     });
-    if (res.status === 404) return []; // 트레이스가 아직 없으면 0건으로 degrade(소스 공통 규칙)
+    if (res.status === 404) return []; // if the trace isn't present yet, degrade to 0 events (the shared source rule)
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { status: res.status },
-        `Langfuse 트레이스 조회 ${res.status}: ${text.slice(0, 200)}`,
+        `Langfuse trace fetch ${res.status}: ${text.slice(0, 200)}`,
       );
     }
     let body: LangfuseTraceDetail;

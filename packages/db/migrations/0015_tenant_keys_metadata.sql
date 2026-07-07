@@ -1,7 +1,7 @@
--- 0015_tenant_keys_metadata — additive (expand): API 키 self-serve 관리(목록/취소)용 비-비밀 메타데이터.
--- id     = 안정적 식별자(취소 대상 지정; key_hash 노출 금지). 레거시 행은 md5(key_hash)로 결정적 백필.
--- label  = 사람이 붙인 이름(선택). prefix = ak_abcd…(평문 식별 힌트; 해시 아님). 레거시 행은 평문이 없어 빈 문자열.
--- key_hash PK 는 그대로(auth 경로 / ON CONFLICT(key_hash) 불변).
+-- 0015_tenant_keys_metadata — additive (expand): non-secret metadata for self-serve API-key management (list/revoke).
+-- id     = stable identifier (targets the revoke; never exposes key_hash). Legacy rows are deterministically backfilled with md5(key_hash).
+-- label  = human-assigned name (optional). prefix = ak_abcd… (plaintext identification hint; not a hash). Legacy rows have no plaintext, so it's an empty string.
+-- The key_hash PK is unchanged (auth path / ON CONFLICT(key_hash) invariant).
 ALTER TABLE everdict_tenant_keys ADD COLUMN IF NOT EXISTS id text;
 ALTER TABLE everdict_tenant_keys ADD COLUMN IF NOT EXISTS label text;
 ALTER TABLE everdict_tenant_keys ADD COLUMN IF NOT EXISTS prefix text;

@@ -38,7 +38,7 @@ export default async function ByHarnessPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // harness 옵션 = 스코어카드에 등장한 distinct harness id(개수 라벨).
+  // harness options = distinct harness ids that appear in scorecards (count label).
   const counts = new Map<string, number>()
   for (const s of scorecards) counts.set(s.harness.id, (counts.get(s.harness.id) ?? 0) + 1)
   const options: HarnessOption[] = [...counts.entries()]
@@ -48,7 +48,7 @@ export default async function ByHarnessPage({
   const selected = harness ?? options[0]?.id
   const rows = selected ? scorecards.filter((s) => s.harness.id === selected) : []
 
-  // dataset.id 별 그룹(각 그룹은 created desc). "이 harness 가 어떤 벤치마크에서 어떤 model 로 어떤 점수를".
+  // Group by dataset.id (each group is created desc). "What score this harness got on which benchmark with which model".
   const byDataset = new Map<string, ScorecardRecord[]>()
   for (const s of rows) {
     const arr = byDataset.get(s.dataset.id) ?? []

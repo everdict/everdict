@@ -11,7 +11,7 @@ export type PreflightVerdict = "OK_TO_APPLY" | "ALREADY_APPLIED" | "BLOCKED";
 
 const TRACK = "everdict_schema_migrations";
 
-// migrations 디렉터리에서 정렬된 .sql 파일을 읽는다. 기본 경로는 packages/db/migrations.
+// Reads sorted .sql files from the migrations directory. The default path is packages/db/migrations.
 export function readMigrations(dir?: string): Migration[] {
   const path = dir ?? fileURLToPath(new URL("../migrations/", import.meta.url));
   return readdirSync(path)
@@ -31,14 +31,14 @@ async function isApplied(client: SqlClient, name: string): Promise<boolean> {
   return res.rows.length > 0;
 }
 
-// 읽기 전용 preflight: 적용 여부를 알린다(OK_TO_APPLY / ALREADY_APPLIED). 호출 전 트래킹 테이블 보장.
+// Read-only preflight: reports whether it's applied (OK_TO_APPLY / ALREADY_APPLIED). Ensures the tracking table before the check.
 export async function preflight(client: SqlClient, name: string): Promise<PreflightVerdict> {
   await ensureTracking(client);
   return (await isApplied(client, name)) ? "ALREADY_APPLIED" : "OK_TO_APPLY";
 }
 
-// 미적용 마이그레이션을 순서대로 적용하고 트래킹 테이블에 기록. 적용된 이름 목록을 돌려준다.
-// 0001(create_runs)은 additive 라 deploy 와 함께 안전하게 적용된다.
+// Applies un-applied migrations in order and records them in the tracking table. Returns the list of applied names.
+// 0001 (create_runs) is additive, so it applies safely alongside the deploy.
 export async function migrate(
   client: SqlClient,
   opts: { migrations?: Migration[]; dir?: string } = {},

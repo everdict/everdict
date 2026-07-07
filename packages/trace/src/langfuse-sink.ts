@@ -1,14 +1,14 @@
 import { UpstreamError } from "@everdict/core";
 import type { TraceSink, TraceSinkCase, TraceSinkCaseResult, TraceSinkContext, TraceSinkResult } from "./trace-sink.js";
 
-// Langfuse 싱크 — 전 케이스를 배치 ingestion 으로(POST /api/public/ingestion), 점수는 score-create 이벤트.
-// 실 API 검증 요점: 인증은 Basic base64(pk:sk) 그대로, 이벤트 envelope id=중복제거 키·body.id=엔티티 upsert 키,
-// usage 대신 usageDetails(+costDetails)가 현행, 응답은 207(성공/실패 혼재 — errors[] 로 케이스 격리).
-// 배치 상한 3.5MB(서버 고정) — 직렬화 크기 기준으로 청크 분할해 여러 번 보낸다(이벤트 순서 보존).
+// Langfuse sink — all cases via batch ingestion (POST /api/public/ingestion), scores as score-create events.
+// Real-API notes: auth is Basic base64(pk:sk) verbatim, the event envelope id is the dedup key and body.id the entity upsert key,
+// usageDetails (+costDetails) is current instead of usage, and the response is 207 (mixed success/failure — isolate cases via errors[]).
+// The batch cap is 3.5MB (fixed by the server) — split into chunks by serialized size and send in several requests (event order preserved).
 export interface LangfuseTraceSinkOptions {
   endpoint: string;
-  auth?: string; // Authorization 헤더 '값' 그대로("Basic <base64(pk:sk)>")
-  project?: string; // projectId — 딥링크용(없으면 /trace/{id} 리다이렉트 사용)
+  auth?: string; // the Authorization header 'value' verbatim ("Basic <base64(pk:sk)>")
+  project?: string; // projectId — for deep links (falls back to the /trace/{id} redirect if absent)
   webUrl?: string;
   fetchImpl?: typeof fetch;
   newId?: () => string;
@@ -20,10 +20,10 @@ interface LangfuseEvent {
   type: string;
   timestamp: string;
   body: Record<string, unknown>;
-  // envelope 이벤트 → 케이스 역매핑용(전송 전 제거하지 않아도 무해하나, 전송 바디엔 싣지 않는다)
+  // for reverse-mapping the envelope event → case (harmless to leave in even if not stripped before sending, but it's not put in the send body)
 }
 
-// 케이스들 → ingestion 이벤트 배열(순수 — 단위 테스트 대상). 반환: 이벤트 + 이벤트id→caseId 역매핑 + 케이스별 traceId.
+// cases → ingestion event array (pure — unit-testable). Returns: events + eventId→caseId reverse map + per-case traceId.
 export function langfuseBatch(
   ctx: TraceSinkContext,
   cases: TraceSinkCase[],
@@ -43,9 +43,9 @@ export function langfuseBatch(
     const traceId = c.externalId ?? newId();
     traceIdByCase.set(c.caseId, traceId);
     const maxT = c.trace.reduce((m, e) => Math.max(m, e.t), 0);
-    const baseMs = Date.parse(now) - maxT; // 상대 t(ms) → 절대 시각(막 끝난 것으로 정렬)
+    const baseMs = Date.parse(now) - maxT; // relative t(ms) → absolute time (aligned as if it just finished)
     if (!c.externalId) {
-      // create 모드 — trace + 관측(generation/span). attach 모드는 기존 trace 에 score 만.
+      // create mode — trace + observations (generation/span). attach mode is scores-only on the existing trace.
       const firstUser = c.trace.find((e) => e.kind === "message" && e.role === "user");
       const lastAssistant = [...c.trace].reverse().find((e) => e.kind === "message" && e.role === "assistant");
       push(c.caseId, "trace-create", {
@@ -100,8 +100,8 @@ export function langfuseBatch(
   return { events, eventCase, traceIdByCase };
 }
 
-// 배치 상한(3.5MB)보다 보수적인 3MB 로 청크 분할(순수). 이벤트 하나가 상한을 넘는 극단은 단독 청크로 보낸다
-// (서버가 그 이벤트만 errors[] 로 거절 → 케이스 격리로 흡수, 조용한 드랍 없음).
+// Chunk-split at 3MB, more conservative than the batch cap (3.5MB) (pure). If a single event exceeds the cap, send it as its own chunk
+// (the server rejects only that event via errors[] → absorbed by case isolation, no silent drop).
 export function chunkLangfuseEvents<T>(events: T[], maxBytes = 3_000_000): T[][] {
   const chunks: T[][] = [];
   let current: T[] = [];
@@ -130,7 +130,7 @@ export class LangfuseTraceSink implements TraceSink {
 
   private caseUrl(traceId: string): string {
     const web = (this.opts.webUrl ?? this.opts.endpoint).replace(/\/$/, "");
-    // projectId 를 알면 정식 라우트, 모르면 서버측 리다이렉트(/trace/{id}).
+    // the canonical route if projectId is known, otherwise a server-side redirect (/trace/{id}).
     return this.opts.project
       ? `${web}/project/${encodeURIComponent(this.opts.project)}/traces/${encodeURIComponent(traceId)}`
       : `${web}/trace/${encodeURIComponent(traceId)}`;
@@ -140,7 +140,7 @@ export class LangfuseTraceSink implements TraceSink {
     const f = this.opts.fetchImpl ?? fetch;
     const base = this.opts.endpoint.replace(/\/$/, "");
     const { events, eventCase, traceIdByCase } = langfuseBatch(ctx, cases, this.newId, this.nowIso);
-    // 3.5MB 배치 상한 대응 — 청크로 나눠 순차 전송, 207 errors[] 는 청크 전체에서 수집한다.
+    // Handle the 3.5MB batch cap — split into chunks and send sequentially, collecting 207 errors[] across all chunks.
     const failedCase = new Map<string, string>();
     for (const chunk of chunkLangfuseEvents(events)) {
       const res = await f(`${base}/api/public/ingestion`, {
@@ -159,16 +159,16 @@ export class LangfuseTraceSink implements TraceSink {
           `Langfuse ingestion ${res.status}: ${text.slice(0, 200)}`,
         );
       }
-      // 207: errors[] 의 envelope 이벤트 id → 케이스로 역매핑(부분 실패 격리).
+      // 207: reverse-map the envelope event id in errors[] → case (partial-failure isolation).
       let body: { errors?: Array<{ id?: string; message?: string; error?: unknown }> } = {};
       try {
         body = (await res.json()) as typeof body;
       } catch {
-        // 빈/비 JSON 응답은 전건 성공으로 취급(2xx 였으므로)
+        // an empty/non-JSON response is treated as all-success (it was a 2xx)
       }
       for (const e of body.errors ?? []) {
         const caseId = e.id ? eventCase.get(e.id) : undefined;
-        if (caseId && !failedCase.has(caseId)) failedCase.set(caseId, e.message ?? "ingestion 이벤트 실패");
+        if (caseId && !failedCase.has(caseId)) failedCase.set(caseId, e.message ?? "ingestion event failed");
       }
     }
     const out: TraceSinkCaseResult[] = cases.map((c) => {

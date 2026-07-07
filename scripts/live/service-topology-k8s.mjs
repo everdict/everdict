@@ -1,12 +1,12 @@
-// 라이브 검증: service-topology 하니스를 실제 Kubernetes(kind)에서 구동한다 — Nomad 와 동형.
+// Live verification: run a service-topology harness on a real Kubernetes (kind) — isomorphic to Nomad.
 //
-//  - warm 토폴로지: front-door 를 Deployment+Service 로 apply → rollout 대기 → port-forward 로 엔드포인트 발견
-//  - per-case 타깃: headless Chromium Deployment 를 띄우고 port-forward 로 실 CDP 발견
-//  - drive: 발견한 front-door 로 실제 POST /runs (per-run wiring) — 응답 200 으로 검증
-//  - 테넌트 격리: trust-zone(perTenantTrustZones) → 테넌트별 네임스페이스 everdict-<tenant> (K8s 네이티브 격리)
-//  - grade: 실 브라우저 스냅샷 + trace → CaseResult → teardown(네임스페이스 삭제)
+//  - warm topology: apply the front-door as a Deployment+Service → wait for rollout → discover the endpoint via port-forward
+//  - per-case target: bring up a headless Chromium Deployment and discover the real CDP via port-forward
+//  - drive: real POST /runs (per-run wiring) to the discovered front-door — verify via an HTTP 200 response
+//  - tenant isolation: trust-zone (perTenantTrustZones) → per-tenant namespace everdict-<tenant> (K8s-native isolation)
+//  - grade: real browser snapshot + trace → CaseResult → teardown (delete the namespace)
 //
-// 사용: KUBECONFIG 컨텍스트 kind-everdict, PATH 에 kubectl 필요.
+// Usage: KUBECONFIG context kind-everdict, kubectl on PATH.
 //   PATH=$HOME/.local/bin:$PATH node scripts/live/service-topology-k8s.mjs
 
 import { perTenantTrustZones } from "../../packages/backends/dist/index.js";
@@ -52,7 +52,7 @@ async function main() {
   const runtime = new K8sTopologyRuntime({
     context: CONTEXT,
     browserImage: "chromedp/headless-shell:latest",
-    imagePullPolicy: "IfNotPresent", // kind 에 사전 로드한 이미지 사용
+    imagePullPolicy: "IfNotPresent", // use images preloaded into kind
     readyTimeoutMs: 120_000,
     pollIntervalMs: 1500,
   });
@@ -62,7 +62,7 @@ async function main() {
     runtime,
     traceSource: new MlflowTraceSource({ endpoint: MLFLOW }),
     specFor: () => SPEC,
-    trustZones: perTenantTrustZones(), // 테넌트별 네임스페이스 격리
+    trustZones: perTenantTrustZones(), // per-tenant namespace isolation
     submit: async (url, payload) => {
       delivered.push(payload);
       console.log(`  → POST ${url}`);

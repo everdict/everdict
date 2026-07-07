@@ -3,20 +3,20 @@ import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
 import { ScoreSchema } from "./grader.js";
 import { TraceEventSchema } from "./trace.js";
 
-// 그레이더 지정: id + 선택적 config (예: tests-pass 의 { cmd }).
-// 에이전트가 이 스펙으로부터 Grader 인스턴스를 재구성한다.
+// Grader spec: id + optional config (e.g. tests-pass's { cmd }).
+// The agent reconstructs a Grader instance from this spec.
 export const GraderSpecSchema = z.object({
   id: z.string(),
   config: z.record(z.unknown()).optional(),
 });
 export type GraderSpec = z.infer<typeof GraderSpecSchema>;
 
-// 배치(placement) 힌트 — 컨트롤플레인 라우터가 어느 백엔드로 보낼지 결정할 때 본다.
-// 에이전트는 이 필드를 무시한다(실행 위치는 에이전트의 관심사가 아니다).
+// Placement hint — the control-plane router reads it when deciding which backend to send to.
+// The agent ignores this field (where it runs is not the agent's concern).
 export const PlacementSchema = z.object({
-  target: z.string().optional(), // 등록된 백엔드 이름 (예: "nomad-seoul")
+  target: z.string().optional(), // registered backend name (e.g. "nomad-seoul")
   os: z.enum(["linux", "windows", "macos"]).optional(),
-  isolation: z.string().optional(), // 예: "gvisor"
+  isolation: z.string().optional(), // e.g. "gvisor"
 });
 export type Placement = z.infer<typeof PlacementSchema>;
 
@@ -32,29 +32,29 @@ export const EvalCaseSchema = z.object({
 });
 export type EvalCase = z.infer<typeof EvalCaseSchema>;
 
-// 실행 출처(프로비넌스) — 컨트롤플레인이 스탬프(러너 자기보고 아님). 셀프호스티드 러너처럼 "비관리 호스트"에서
-// 돈 결과를 워크스페이스가 식별/신뢰가중하도록. 기본(관리형 백엔드)은 미설정.
+// Execution provenance — stamped by the control plane (not self-reported by the runner). So the workspace can identify/trust-weight
+// results run on an "unmanaged host" like a self-hosted runner. Unset by default (managed backends).
 export const CaseProvenanceSchema = z.object({
-  ranOn: z.string(), // 예: "self-hosted"
-  runner: z.string().optional(), // 러너 id(디바이스)
-  by: z.string().optional(), // 실행한 주체(principal.subject)
+  ranOn: z.string(), // e.g. "self-hosted"
+  runner: z.string().optional(), // runner id (device)
+  by: z.string().optional(), // the subject that ran it (principal.subject)
 });
 export type CaseProvenance = z.infer<typeof CaseProvenanceSchema>;
 
-// 수집이 잡 밖(컨트롤플레인)으로 미뤄진 케이스의 플랫폼 좌표 — spec.trace.collect="control-plane" 일 때
-// 에이전트가 실어 보내고, executeCase 가 pull+미뤄진 관측물 채점으로 결과를 완성한다(수집 후에도 provenance 로 유지).
+// The platform coordinates of a case whose collection is deferred out of the job (to the control plane) — when spec.trace.collect="control-plane"
+// the agent loads it and executeCase completes the result by pull + scoring the deferred observation (kept as provenance even after collection).
 // docs/architecture/streaming-case-pipeline.md D4
 export const TraceRefSchema = z.object({
-  kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]), // buildTraceSource 5종과 동일
+  kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]), // same as buildTraceSource's 5 kinds
   endpoint: z.string(),
-  runId: z.string(), // 상관 키(everdict.run_id) — 이 값으로 플랫폼에서 트레이스를 찾는다
-  // 인증 시크릿 '이름'(SecretStore) — 컨트롤플레인이 collect 시 값으로 재해석해 어댑터 관례 헤더로
-  // (otel/mlflow=verbatim Authorization, langsmith=x-api-key 등). 값은 절대 싣지 않는다(CaseResult 는 영속된다).
+  runId: z.string(), // correlation key (everdict.run_id) — used to find the trace on the platform
+  // The authentication secret 'name' (SecretStore) — the control plane reinterprets it to the value at collect time and places it in the adapter-convention header
+  // (otel/mlflow=verbatim Authorization, langsmith=x-api-key etc.). The value is never loaded (CaseResult is persisted).
   authSecret: z.string().optional(),
-  correlate: z.enum(["id", "tag"]).optional(), // mlflow/otel — tag 면 everdict.run_id 태그(리소스 속성) 검색으로 상관
-  experiment: z.string().optional(), // mlflow tag 상관의 검색 범위(experiment id)
-  project: z.string().optional(), // phoenix 전용 — 스팬 조회 경로의 프로젝트
-  service: z.string().optional(), // otel tag 상관의 검색 범위(Jaeger service — 에이전트의 service.name)
+  correlate: z.enum(["id", "tag"]).optional(), // mlflow/otel — with tag, correlate by searching the everdict.run_id tag (resource attribute)
+  experiment: z.string().optional(), // search scope for mlflow tag correlation (experiment id)
+  project: z.string().optional(), // phoenix only — the project on the span lookup path
+  service: z.string().optional(), // search scope for otel tag correlation (Jaeger service — the agent's service.name)
 });
 export type TraceRef = z.infer<typeof TraceRefSchema>;
 
@@ -64,8 +64,8 @@ export const CaseResultSchema = z.object({
   trace: z.array(TraceEventSchema),
   snapshot: EnvSnapshotSchema,
   scores: z.array(ScoreSchema),
-  provenance: CaseProvenanceSchema.optional(), // 셀프호스티드 등 비관리 실행의 출처(컨트롤플레인 스탬프)
-  traceRef: TraceRefSchema.optional(), // 컨트롤플레인 수집 대상(위) — job 수집(기본)에는 없음
+  provenance: CaseProvenanceSchema.optional(), // provenance of unmanaged execution like self-hosted (control-plane stamp)
+  traceRef: TraceRefSchema.optional(), // control-plane collection target (above) — absent for job collection (default)
 });
 export type CaseResult = z.infer<typeof CaseResultSchema>;
 

@@ -1,8 +1,8 @@
 import type { HarnessTemplateSpec } from "@everdict/core";
 import { VersionedStore } from "./versioned-store.js";
 
-// 하네스 Template(대분류) 버전 SSOT — (tenant, id, version) → HarnessTemplateSpec. 버전 불변, _shared 폴백.
-// 구조(서비스/의존성/슬롯)만 담는다(버전 미고정). 인스턴스는 HarnessInstanceRegistry 가 이 템플릿을 핀해 만든다.
+// Harness template (category) version SSOT — (tenant, id, version) → HarnessTemplateSpec. Versions immutable, _shared fallback.
+// Holds structure only (services/dependencies/slots) (versions not pinned). Instances are made by HarnessInstanceRegistry pinning this template.
 export interface HarnessTemplateRegistry {
   register(tenant: string, spec: HarnessTemplateSpec, createdBy?: string): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
@@ -13,7 +13,7 @@ export interface HarnessTemplateRegistry {
 }
 
 export class InMemoryHarnessTemplateRegistry implements HarnessTemplateRegistry {
-  private readonly store = new VersionedStore<HarnessTemplateSpec>("템플릿");
+  private readonly store = new VersionedStore<HarnessTemplateSpec>("template");
 
   async register(tenant: string, spec: HarnessTemplateSpec, createdBy?: string): Promise<void> {
     this.store.register(tenant, spec, createdBy);

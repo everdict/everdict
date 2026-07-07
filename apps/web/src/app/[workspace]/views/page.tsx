@@ -9,7 +9,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 저장된 분석 뷰 — 1급 객체. 목록/관리 + 열기(라이브 재실행). 만들기는 분석 대시보드(커스텀)에서.
+// Saved analysis views — first-class objects. List/manage + open (live re-run). Creation happens in the analysis dashboard (custom).
 export default async function ViewsPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const t = await getTranslations('viewsPage')

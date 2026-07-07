@@ -30,20 +30,20 @@ const ctx = (compute?: ComputeHandle): GradeContext => ({
   ...(compute ? { compute } : {}),
 });
 
-describe("CommandGrader (제네릭 테스트-실행, 유저 설정 가능)", () => {
-  it("cmd 종료코드 0 → pass (패치 없이)", async () => {
+describe("CommandGrader (generic test-runner, user-configurable)", () => {
+  it("cmd exit code 0 → pass (no patch)", async () => {
     const { compute, cmds } = mockCompute({ cmdExit: 0 });
     const s = await new CommandGrader({ cmd: "pytest -q" }).grade(ctx(compute));
     expect(s.pass).toBe(true);
-    expect(cmds.some((c) => c.startsWith("git apply"))).toBe(false); // applyPatch 없으면 안 함
+    expect(cmds.some((c) => c.startsWith("git apply"))).toBe(false); // no git apply without applyPatch
   });
 
-  it("cmd 종료코드 ≠0 → fail", async () => {
+  it("cmd exit code ≠0 → fail", async () => {
     const { compute } = mockCompute({ cmdExit: 1 });
     expect((await new CommandGrader({ cmd: "pytest -q" }).grade(ctx(compute))).pass).toBe(false);
   });
 
-  it("applyPatch 있으면 채점 시점에 git apply 후 실행; 적용 실패면 fail", async () => {
+  it("with applyPatch, git apply then run at grading time; fail if apply fails", async () => {
     const ok = mockCompute({ applyExit: 0, cmdExit: 0 });
     expect((await new CommandGrader({ cmd: "pytest", applyPatch: "diff --git a b" }).grade(ctx(ok.compute))).pass).toBe(
       true,
@@ -52,11 +52,11 @@ describe("CommandGrader (제네릭 테스트-실행, 유저 설정 가능)", () 
     const bad = mockCompute({ applyExit: 1 });
     const s = await new CommandGrader({ cmd: "pytest", applyPatch: "bad" }).grade(ctx(bad.compute));
     expect(s.pass).toBe(false);
-    expect(String(s.detail)).toContain("applyPatch 실패");
-    expect(bad.cmds.some((c) => c.includes("pytest"))).toBe(false); // 적용 실패 시 실행 안 함
+    expect(String(s.detail)).toContain("applyPatch failed");
+    expect(bad.cmds.some((c) => c.includes("pytest"))).toBe(false); // no run when apply fails
   });
 
-  it("passPattern 으로 출력 매칭(종료코드 무관) + metric/id 설정", async () => {
+  it("passPattern matches output (regardless of exit code) + metric/id set", async () => {
     const { compute } = mockCompute({ cmdExit: 1, stdout: "RESULT: ok 12/12" });
     const s = await new CommandGrader({
       cmd: "run",
@@ -64,19 +64,19 @@ describe("CommandGrader (제네릭 테스트-실행, 유저 설정 가능)", () 
       metric: "resolved",
       id: "mybench",
     }).grade(ctx(compute));
-    expect(s.pass).toBe(true); // 종료코드 1이지만 패턴 매칭
+    expect(s.pass).toBe(true); // exit code 1 but pattern matches
     expect(s.metric).toBe("resolved");
     expect(s.graderId).toBe("mybench");
   });
 
-  it("makeGraders 로 spec→grader (유저 데이터 경로)", async () => {
+  it("makeGraders spec→grader (user data path)", async () => {
     const { compute } = mockCompute({ cmdExit: 0 });
     const [g] = makeGraders([{ id: "command", config: { cmd: "pytest -q", metric: "resolved" } }]);
     expect(g?.id).toBe("command");
     expect((await g?.grade(ctx(compute)))?.metric).toBe("resolved");
   });
 
-  it("compute 없으면 에러", async () => {
+  it("errors without compute", async () => {
     await expect(new CommandGrader({ cmd: "x" }).grade(ctx())).rejects.toThrow(/compute/);
   });
 });

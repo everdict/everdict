@@ -30,7 +30,7 @@ function deps(): BridgeDeps & { pair: ReturnType<typeof vi.fn> } {
 }
 
 describe("senderAllowed", () => {
-  it("웹 origin 프레임만 허용", () => {
+  it("allows only web-origin frames", () => {
     expect(senderAllowed(`${WEB}/acme/account`, WEB)).toBe(true);
     expect(senderAllowed("https://keycloak.everdict.dev/auth", WEB)).toBe(false);
     expect(senderAllowed(undefined, WEB)).toBe(false);
@@ -39,7 +39,7 @@ describe("senderAllowed", () => {
 });
 
 describe("registerBridge", () => {
-  it("다른 origin(예: OAuth 페이지)에서의 호출은 전 채널 차단", () => {
+  it("blocks all channels for calls from another origin (e.g. an OAuth page)", () => {
     const ipc = fakeIpc();
     registerBridge(ipc, deps());
     for (const ch of [BRIDGE_CHANNELS.appInfo, BRIDGE_CHANNELS.pair, BRIDGE_CHANNELS.unpair, BRIDGE_CHANNELS.status]) {
@@ -48,7 +48,7 @@ describe("registerBridge", () => {
     }
   });
 
-  it("페어링 페이로드는 Zod 경계 검증(rnr_ 아닌 토큰/이상 URL 거부)", async () => {
+  it("validates the pairing payload at the Zod boundary (rejects a non-rnr_ token / a malformed URL)", async () => {
     const ipc = fakeIpc();
     const d = deps();
     registerBridge(ipc, d);
@@ -62,7 +62,7 @@ describe("registerBridge", () => {
     expect(d.pair).toHaveBeenCalledWith({ token: "rnr_x", runnerId: "r1", apiUrl: "http://localhost:8787" });
   });
 
-  it("웹 origin 호출은 status/appInfo 를 돌려준다", async () => {
+  it("returns status/appInfo for a web-origin call", async () => {
     const ipc = fakeIpc();
     registerBridge(ipc, deps());
     expect(ipc.invoke(BRIDGE_CHANNELS.status, `${WEB}/a`)).toMatchObject({ paired: false, state: "off" });

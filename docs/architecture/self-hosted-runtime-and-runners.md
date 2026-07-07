@@ -140,12 +140,12 @@ runner, once configured, holds its own GitHub credential — a company resource,
    runner hogs. `enqueue` resolves `{result, ranBy}` so `provenance.runner` is the **actual** runner that ran a pool
    job (not `"*"`). `requiredRunnerCapabilities` adds `docker` for service harnesses so the pool routes them to a
    docker runner. `RuntimeDispatcher` handles `target==="self:ws"` (before the `self:<id>` branch) via a
-   `poolHasRunners(owner)` check (404 if none). Web: the run form's runtime picker shows "팀 공유 러너 (아무거나)"
+   `poolHasRunners(owner)` check (404 if none). Web: the run form's runtime picker shows "Team shared runner (any)"
    when the workspace has shared runners. Live e2e `scripts/live/multi-runner-pool.mjs` (2 runners → `self:ws` → all
    routed to workspace runners; deterministic distribution proven by unit tests). **Personal pool (`self`) —
    SHIPPED too:** the pool branch is generalized to `self:ws | self` (owner = `ws:<tenant>` | the submitter), so a
    user can run N runner processes/machines under one personal pool and target `self` (own-pays). Web run form
-   offers "내 러너 (아무거나)"; live e2e `scripts/live/personal-pool.mjs` (PASS).
+   offers "My runner (any)"; live e2e `scripts/live/personal-pool.mjs` (PASS).
 3. **Workspace self-hosted runtime.** ✅ **SHIPPED.** Realized as a workspace-owned **runner** (owner=`ws:<workspace>`
    in the existing owner-keyed runner-store — no new store/schema; the shared "pool" *is* the workspace-owned runner
    set). Admin CRUD gated `settings:write`: `POST /workspace/runners` (pair, plaintext token once) ·
@@ -153,7 +153,7 @@ runner, once configured, holds its own GitHub credential — a company resource,
    paired in the ws) · `DELETE /workspace/runners/:id`. `RuntimeDispatcher` `self:ws:<id>` branch derives owner from
    the **job's tenant** (`ws:<tenant>`), so membership *is* access and cross-workspace is structurally impossible
    (always looks up `ws:<tenant>`); personal `self:<id>` stays owner-only (D3). Full BFF↔MCP parity
-   (`pair_workspace_runner`/`list_workspace_owned_runners`/`revoke_workspace_runner`) + web settings **공유 러너** tab
+   (`pair_workspace_runner`/`list_workspace_owned_runners`/`revoke_workspace_runner`) + web settings **Shared runners** tab
    (register → token-once + `everdict runner --pair` command; list with online/capability badges; revoke).
    **Workspace-pays — SHIPPED.** `billingTenant(result, tenant)` (`@everdict/backends` budget): a run whose
    `provenance.by` starts `ws:` settles to that workspace (team pays); personal self-hosted stays own-pays
@@ -170,14 +170,14 @@ runner, once configured, holds its own GitHub credential — a company resource,
    resolution of the github-actions-trigger open item "CI can't lease a personal runner — needs `allowCi` **or a
    workspace-shared runner tier**": a `via:"github-actions"` principal targeting `self:ws:<id>` works because the
    dispatcher derives the owner from the job tenant (workspace membership = access). The run-eval action already
-   accepts a `runtime` input. **Web + RepoLink — SHIPPED.** Settings › 공유 러너 tab has a **GitHub Actions 러너**
+   accepts a `runtime` input. **Web + RepoLink — SHIPPED.** Settings › Shared runners tab has a **GitHub Actions runner**
    dialog driven by the **workspace GitHub App** (no raw owner/name input): the target is picked from the
    installations' allowed repos (search + GHE host badge) or the installed orgs; when the App isn't installed the
-   dialog requires it (CTA that switches to the 통합 tab — install first, then pick). The picker threads the
+   dialog requires it (CTA that switches to the Integrations tab — install first, then pick). The picker threads the
    installation's `host` so the registration token is minted against the exact installation (host-strict).
    `WorkspaceCiLink` grew optional `runsOn`/`runtime` (additive JSONB) so `renderCiWorkflow`
    targets self-hosted directly (`runs-on: <label>` + run-eval `runtime: self:ws:<id>`); settable via the CI-links
-   connect dialog ("5. 셀프호스티드 러너"), HTTP `PUT /workspace/ci/links`, and MCP `link_ci_repository`.
+   connect dialog ("5. Self-hosted runner"), HTTP `PUT /workspace/ci/links`, and MCP `link_ci_repository`.
 5. **Org-level runner registration — ✅ SHIPPED.** Org-level uses
    `POST /orgs/{org}/actions/runners/registration-token`, which needs `administration:write` on the target. Rather
    than a personal OAuth `admin:org` scope, this comes from the **workspace GitHub App** installation:

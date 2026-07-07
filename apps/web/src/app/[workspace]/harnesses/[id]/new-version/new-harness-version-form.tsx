@@ -16,8 +16,8 @@ import { Callout } from '@/shared/ui/callout'
 
 type Tab = 'instance' | 'template'
 
-// 하니스 새 버전 — 두 축: 인스턴스(pins 재핀 → 새 인스턴스 버전) | 템플릿(구조 변경 → 새 템플릿 semver).
-// 템플릿 새 버전 등록 후엔 그 버전을 참조하는 인스턴스를 만들도록 인스턴스 탭으로 돌려보낸다(tplVersion 쿼리).
+// New harness version — two axes: instance (re-pin pins → new instance version) | template (structural change → new template semver).
+// After registering a new template version, redirect back to the instance tab to create an instance referencing that version (tplVersion query).
 export function NewHarnessVersionForm({
   workspace,
   id,

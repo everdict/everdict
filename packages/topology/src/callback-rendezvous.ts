@@ -1,19 +1,19 @@
 import type { CallbackRendezvous } from "./front-door-driver.js";
 
-// callback 의 inbound(수신) 측 — HTTP 수신기(control-plane 라우트/셀프호스트 runner)가 매칭 POST 를 받아 호출.
-// outbound(드라이버) 측 CallbackRendezvous(url/wait)와 역할 분리: 같은 인스턴스가 둘 다 구현해 한 프로세스에서 짝을 이룬다.
+// The inbound (receiving) side of callback — the HTTP receiver (control-plane route / self-hosted runner) calls this on a matching POST.
+// Role-separated from the outbound (driver) side CallbackRendezvous (url/wait): one instance implements both to pair up within a single process.
 export interface CallbackSink {
   deliver(runId: string, body: unknown): void;
 }
 
-// in-process 콜백 랑데부 — callback 완료 모델용. run 별 inbound POST 본문을 큐잉하고, 대기자(드라이버)에게 전달한다.
-// 전송(HTTP 수신)은 분리: 수신기(셀프호스트 runner / control-plane)가 매칭 POST 를 받아 deliver(runId, body) 를 호출.
-// 단일 호스트/프로세스(셀프호스트·dev)용. SaaS 는 control-plane 엔드포인트 + 스토어로 같은 인터페이스를 구현한다.
-// 설계: docs/architecture/completion-stream-callback.md.
+// in-process callback rendezvous — for the callback completion model. Queues the inbound POST body per run and hands it to the waiter (driver).
+// Transport (HTTP receive) is separated: the receiver (self-hosted runner / control-plane) takes the matching POST and calls deliver(runId, body).
+// For a single host/process (self-hosted, dev). SaaS implements the same interface with a control-plane endpoint + a store.
+// Design: docs/architecture/completion-stream-callback.md.
 export class InProcessCallbackRendezvous implements CallbackRendezvous, CallbackSink {
-  // runId → 아직 소비 안 된 inbound 본문 큐(대기자보다 POST 가 먼저 온 경우).
+  // runId → queue of not-yet-consumed inbound bodies (when a POST arrives before its waiter).
   private readonly pending = new Map<string, unknown[]>();
-  // runId → 대기 중 resolver(POST 가 대기자보다 먼저 없을 때). run 당 대기자는 하나(드라이버 1).
+  // runId → pending resolver (when a waiter arrives before its POST). One waiter per run (a single driver).
   private readonly waiters = new Map<string, (body: unknown) => void>();
 
   constructor(private readonly baseUrl: string) {}
@@ -22,7 +22,7 @@ export class InProcessCallbackRendezvous implements CallbackRendezvous, Callback
     return `${this.baseUrl.replace(/\/$/, "")}/${runId}`;
   }
 
-  // 인바운드 POST 전달 — 수신기가 호출. 대기자가 있으면 즉시 깨우고, 없으면 큐잉(순서 보존).
+  // Deliver an inbound POST — called by the receiver. Wake the waiter immediately if present, otherwise queue (order preserved).
   deliver(runId: string, body: unknown): void {
     const waiter = this.waiters.get(runId);
     if (waiter) {
@@ -35,7 +35,7 @@ export class InProcessCallbackRendezvous implements CallbackRendezvous, Callback
     this.pending.set(runId, queue);
   }
 
-  // 다음 inbound POST 를 기다린다. 이미 큐에 있으면 즉시, 없으면 timeoutMs 까지 대기(초과 시 undefined).
+  // Wait for the next inbound POST. Return immediately if already queued, otherwise wait up to timeoutMs (undefined on timeout).
   async wait(runId: string, timeoutMs: number): Promise<{ body: unknown } | undefined> {
     const queue = this.pending.get(runId);
     if (queue && queue.length > 0) {

@@ -12,7 +12,7 @@ import {
   methodPath,
 } from "./front-door-driver.js";
 
-// 호출마다 step 만큼 증가하는 가짜 시계 — 타임아웃을 결정적으로 검증.
+// A fake clock that increments by step on each call — for deterministic timeout verification.
 function steppingClock(step: number): () => number {
   let t = 0;
   return () => {
@@ -34,19 +34,19 @@ const baseReq = (over: Partial<FrontDoorDriveRequest>): FrontDoorDriveRequest =>
 });
 
 describe("methodPath / interpolatePath", () => {
-  it("method 토큰을 분리하고, 없으면 POST 로 본다", () => {
+  it("splits the method token, defaulting to POST when absent", () => {
     expect(methodPath("POST /runs")).toEqual({ method: "POST", path: "/runs" });
     expect(methodPath("/runs")).toEqual({ method: "POST", path: "/runs" });
   });
 
-  it("{var} 토큰을 wiring 으로 치환하고 미매칭은 원문을 유지한다", () => {
+  it("replaces {var} tokens with wiring and keeps unmatched ones as the original", () => {
     expect(interpolatePath("/runs/{run_id}/status", { run_id: "abc" })).toBe("/runs/abc/status");
     expect(interpolatePath("/runs/{unknown}", {})).toBe("/runs/{unknown}");
   });
 });
 
 describe("interpolateTemplate", () => {
-  it("문자열 값의 {{var}} 를 wiring 으로 치환하고 중첩 객체/배열도 재귀 처리, 비문자열은 그대로 둔다", () => {
+  it("replaces {{var}} in string values with wiring, recurses into nested objects/arrays, and leaves non-strings untouched", () => {
     const out = interpolateTemplate(
       { task: "{{task}}", nested: { thread: "{{thread_id}}" }, list: ["{{run_id}}", "lit"], n: 7, b: true },
       { task: "do it", thread_id: "run-1", run_id: "1" },
@@ -54,13 +54,13 @@ describe("interpolateTemplate", () => {
     expect(out).toEqual({ task: "do it", nested: { thread: "run-1" }, list: ["1", "lit"], n: 7, b: true });
   });
 
-  it("미매칭 토큰은 원문을 유지한다", () => {
+  it("keeps unmatched tokens as the original", () => {
     expect(interpolateTemplate({ x: "{{unknown}}" }, {})).toEqual({ x: "{{unknown}}" });
   });
 });
 
 describe("interpolateHeaders", () => {
-  it("헤더 값의 {{var}} 를 wiring 으로 보간하고 키는 그대로 둔다(미매칭은 원문)", () => {
+  it("interpolates {{var}} in header values with wiring and keeps keys as-is (unmatched stays original)", () => {
     expect(
       interpolateHeaders(
         { Authorization: "Bearer {{run_id}}", "X-Lit": "static", "X-Miss": "{{nope}}" },
@@ -71,7 +71,7 @@ describe("interpolateHeaders", () => {
 });
 
 describe("HttpFrontDoorDriver.drive", () => {
-  it("completion 미지정이면 submit 한 번만 하고 done — 상태 폴링은 하지 않는다(현행 sync 동작)", async () => {
+  it("with completion unset, submits once and is done — no status polling (current sync behavior)", async () => {
     const submitted: Array<{ url: string; payload: Record<string, unknown> }> = [];
     let polls = 0;
     const driver = new HttpFrontDoorDriver({
@@ -91,7 +91,7 @@ describe("HttpFrontDoorDriver.drive", () => {
     expect(polls).toBe(0);
   });
 
-  it("submit 에 method(submit 동사) + headers 를 전달한다(request.headers/method knob)", async () => {
+  it("passes method (submit verb) + headers to submit (request.headers/method knob)", async () => {
     let opts: FrontDoorRequestOpts | undefined;
     const driver = new HttpFrontDoorDriver({
       submit: async (_url, _payload, o) => {
@@ -104,7 +104,7 @@ describe("HttpFrontDoorDriver.drive", () => {
     expect(opts?.headers).toEqual({ Authorization: "Bearer x" });
   });
 
-  it("poll: 상태가 종료조건(done)이 될 때까지 폴링하고 done 을 돌려준다", async () => {
+  it("poll: polls until the status hits the terminal condition (done) and returns done", async () => {
     const responses = [{ status: "running" }, { status: "running" }, { status: "done" }];
     let i = 0;
     const polledUrls: string[] = [];
@@ -129,11 +129,11 @@ describe("HttpFrontDoorDriver.drive", () => {
 
     expect(outcome.status).toBe("done");
     expect(polledUrls).toHaveLength(3);
-    // {run_id} 가 wiring 으로 치환되어 폴링된다.
+    // {run_id} is replaced with wiring for the poll.
     expect(polledUrls[0]).toBe("http://agent:8000/runs/fixed/status");
   });
 
-  it("poll: failed 종료조건에 매칭되면 failed 를 돌려준다(채점 진행용)", async () => {
+  it("poll: returns failed when the failed terminal condition matches (for grading to proceed)", async () => {
     const completion: FrontDoorCompletion = {
       mode: "poll",
       statusPath: "GET /runs/{run_id}/status",
@@ -154,7 +154,7 @@ describe("HttpFrontDoorDriver.drive", () => {
     expect(outcome.status).toBe("failed");
   });
 
-  it("poll: 타임아웃 안에 종료조건을 못 만나면 timeout 을 돌려준다", async () => {
+  it("poll: returns timeout when the terminal condition isn't met within the timeout", async () => {
     const completion: FrontDoorCompletion = {
       mode: "poll",
       statusPath: "GET /runs/{run_id}/status",
@@ -164,9 +164,9 @@ describe("HttpFrontDoorDriver.drive", () => {
     };
     const driver = new HttpFrontDoorDriver({
       submit: async () => {},
-      getJson: async () => ({ status: "running" }), // 영원히 running
+      getJson: async () => ({ status: "running" }), // running forever
       sleep: async () => {},
-      now: steppingClock(1000), // start=0, 다음 조건체크=1000(<1500 통과), 그 다음=2000(>=1500 종료)
+      now: steppingClock(1000), // start=0, next condition check=1000 (<1500 passes), then=2000 (>=1500 ends)
     });
 
     const outcome = await driver.drive(baseReq({ completion }));
@@ -176,13 +176,13 @@ describe("HttpFrontDoorDriver.drive", () => {
 });
 
 describe("HttpFrontDoorDriver.drive — stream", () => {
-  // 이벤트를 순서대로 yield 하는 가짜 SSE 스트림(소켓 없이 결정적).
+  // A fake SSE stream that yields events in order (deterministic, no socket).
   const streamOf = (events: unknown[]) =>
     async function* () {
       for (const e of events) yield e;
     };
 
-  it("stream: 종단 이벤트(done 매칭)까지 소비하고 done + 그 이벤트를 결과 채널로 돌려준다", async () => {
+  it("stream: consumes up to the terminal event (done match) and returns done + that event as the result channel", async () => {
     const completion: FrontDoorCompletion = {
       mode: "stream",
       done: { field: "status.state", equals: "completed" },
@@ -193,14 +193,14 @@ describe("HttpFrontDoorDriver.drive — stream", () => {
         { id: "task-1", status: { state: "working" } },
         { id: "task-1", status: { state: "completed" }, final: true },
       ]),
-      now: () => 0, // 타임아웃 없음
+      now: () => 0, // no timeout
     });
     const outcome = await driver.drive(baseReq({ completion }));
     expect(outcome.status).toBe("done");
     expect(outcome.response).toEqual({ id: "task-1", status: { state: "completed" }, final: true });
   });
 
-  it("stream: failed 종료조건에 매칭되면 failed 를 돌려준다", async () => {
+  it("stream: returns failed when the failed terminal condition matches", async () => {
     const completion: FrontDoorCompletion = {
       mode: "stream",
       done: { field: "status.state", equals: "completed" },
@@ -216,7 +216,7 @@ describe("HttpFrontDoorDriver.drive — stream", () => {
     expect(outcome.response).toEqual({ status: { state: "canceled" } });
   });
 
-  it("stream: 종단 매치 없이 스트림이 끝나면 timeout(완료 미확정)", async () => {
+  it("stream: timeout when the stream ends with no terminal match (completion unconfirmed)", async () => {
     const completion: FrontDoorCompletion = {
       mode: "stream",
       done: { field: "status.state", equals: "completed" },
@@ -230,7 +230,7 @@ describe("HttpFrontDoorDriver.drive — stream", () => {
     expect(outcome.status).toBe("timeout");
   });
 
-  it("stream: wall-clock 타임아웃을 넘기면 종단 전에 timeout", async () => {
+  it("stream: times out before the terminal event once the wall-clock timeout passes", async () => {
     const completion: FrontDoorCompletion = {
       mode: "stream",
       done: { field: "status.state", equals: "completed" },
@@ -238,13 +238,13 @@ describe("HttpFrontDoorDriver.drive — stream", () => {
     };
     const driver = new HttpFrontDoorDriver({
       openStream: streamOf([{ status: { state: "working" } }, { status: { state: "completed" } }]),
-      now: steppingClock(10), // start=0, 첫 이벤트 후 now()=10 ≥ 5 → 완료 이벤트 도달 전 timeout
+      now: steppingClock(10), // start=0, after the first event now()=10 ≥ 5 → timeout before reaching the completed event
     });
     const outcome = await driver.drive(baseReq({ completion }));
     expect(outcome.status).toBe("timeout");
   });
 
-  it("stream + correlate returned: 첫 이벤트에서 에이전트 id 를 추출해 traceRef 로 쓴다", async () => {
+  it("stream + correlate returned: extracts the agent id from the first event and uses it as traceRef", async () => {
     const completion: FrontDoorCompletion = {
       mode: "stream",
       done: { field: "status.state", equals: "completed" },
@@ -264,7 +264,7 @@ describe("HttpFrontDoorDriver.drive — stream", () => {
 });
 
 describe("HttpFrontDoorDriver.drive — callback", () => {
-  // 스크립트된 결과를 순서대로 돌려주는 가짜 랑데부(이후엔 undefined=timeout). wait 호출 키를 기록.
+  // A fake rendezvous that returns scripted results in order (undefined=timeout afterward). Records wait-call keys.
   const scriptedRendezvous = (
     results: Array<{ body: unknown } | undefined>,
   ): CallbackRendezvous & { keys: string[] } => {
@@ -280,7 +280,7 @@ describe("HttpFrontDoorDriver.drive — callback", () => {
     };
   };
 
-  it("callback: fire-and-forget 후 inbound POST 본문으로 done(done 미지정=어떤 POST 든 완료)", async () => {
+  it("callback: after fire-and-forget, done from the inbound POST body (done unset = any POST completes)", async () => {
     const completion: FrontDoorCompletion = { mode: "callback", timeoutMs: 10000 };
     const driver = new HttpFrontDoorDriver({
       submit: async () => ({}),
@@ -292,7 +292,7 @@ describe("HttpFrontDoorDriver.drive — callback", () => {
     expect(outcome.response).toEqual({ observation: 1 });
   });
 
-  it("callback: done 지정 시 interim 콜백은 흘려보내고 매칭되는 POST 까지 기다린다", async () => {
+  it("callback: with done specified, lets interim callbacks through and waits for a matching POST", async () => {
     const completion: FrontDoorCompletion = {
       mode: "callback",
       done: { field: "state", equals: "completed" },
@@ -308,7 +308,7 @@ describe("HttpFrontDoorDriver.drive — callback", () => {
     expect(outcome.response).toEqual({ state: "completed" });
   });
 
-  it("callback: failed 종료조건에 매칭되면 failed", async () => {
+  it("callback: failed when the failed terminal condition matches", async () => {
     const completion: FrontDoorCompletion = {
       mode: "callback",
       done: { field: "state", equals: "ok" },
@@ -324,18 +324,18 @@ describe("HttpFrontDoorDriver.drive — callback", () => {
     expect(outcome.status).toBe("failed");
   });
 
-  it("callback: inbound 이 안 오면(랑데부 undefined) timeout", async () => {
+  it("callback: timeout when no inbound arrives (rendezvous undefined)", async () => {
     const completion: FrontDoorCompletion = { mode: "callback", timeoutMs: 10000 };
     const driver = new HttpFrontDoorDriver({
       submit: async () => ({}),
-      callbackRendezvous: scriptedRendezvous([]), // 첫 wait 부터 undefined
+      callbackRendezvous: scriptedRendezvous([]), // undefined from the first wait
       now: () => 0,
     });
     const outcome = await driver.drive(baseReq({ completion }));
     expect(outcome.status).toBe("timeout");
   });
 
-  it("callback: 랑데부 키는 runId(callback_url 에 박힌 값), traceRef 는 correlate 결과(에이전트 id)", async () => {
+  it("callback: the rendezvous key is runId (the value embedded in callback_url), traceRef is the correlate result (agent id)", async () => {
     const completion: FrontDoorCompletion = { mode: "callback", timeoutMs: 10000 };
     const r = scriptedRendezvous([{ body: {} }]);
     const driver = new HttpFrontDoorDriver({
@@ -346,37 +346,37 @@ describe("HttpFrontDoorDriver.drive — callback", () => {
     const outcome = await driver.drive(
       baseReq({ completion, correlate: { mode: "returned", path: "id" }, traceRef: "run-1" }),
     );
-    expect(outcome.traceRef).toBe("agent-9"); // 트레이스 fetch 키
-    expect(r.keys).toEqual(["run-1"]); // 랑데부 키 = runId
+    expect(outcome.traceRef).toBe("agent-9"); // the trace fetch key
+    expect(r.keys).toEqual(["run-1"]); // rendezvous key = runId
   });
 
-  it("callback: 랑데부가 없으면 명확히 실패한다", async () => {
+  it("callback: fails explicitly when there's no rendezvous", async () => {
     const driver = new HttpFrontDoorDriver({ submit: async () => ({}) });
     await expect(driver.drive(baseReq({ completion: { mode: "callback", timeoutMs: 1000 } }))).rejects.toThrow();
   });
 });
 
-describe("HttpFrontDoorDriver.drive — 상관(correlate)", () => {
-  it("correlate 미지정이면 injected: traceRef = 주어진 runId(현행)", async () => {
+describe("HttpFrontDoorDriver.drive — correlate", () => {
+  it("with correlate unset, injected: traceRef = the given runId (current)", async () => {
     const driver = new HttpFrontDoorDriver({ submit: async () => ({ run_id: "agent-xyz" }) });
     const outcome = await driver.drive(baseReq({ correlate: undefined, traceRef: "fixed" }));
-    expect(outcome.traceRef).toBe("fixed"); // 응답의 agent-xyz 가 아니라 주입한 runId
+    expect(outcome.traceRef).toBe("fixed"); // the injected runId, not agent-xyz from the response
   });
 
-  it("correlate returned: submit 응답에서 dot-path 로 에이전트 id 를 추출해 traceRef 로 쓴다", async () => {
+  it("correlate returned: extracts the agent id from the submit response by dot-path and uses it as traceRef", async () => {
     const driver = new HttpFrontDoorDriver({ submit: async () => ({ data: { id: "agent-9" } }) });
     const outcome = await driver.drive(baseReq({ correlate: { mode: "returned", path: "data.id" } }));
-    // sync → 결과 채널 본문 = submit 응답(sentinel 회수가 읽는다).
+    // sync → result-channel body = submit response (sentinel retrieval reads this).
     expect(outcome).toEqual({ traceRef: "agent-9", status: "done", response: { data: { id: "agent-9" } } });
   });
 
-  it("결과 채널 본문(response): sync 면 submit 응답, poll 이면 완료 상태 본문", async () => {
-    // sync: submit 응답이 곧 결과 채널.
+  it("result-channel body (response): the submit response for sync, the completed status body for poll", async () => {
+    // sync: the submit response is the result channel.
     const syncDriver = new HttpFrontDoorDriver({ submit: async () => ({ observation: { kind: "browser" } }) });
     const sync = await syncDriver.drive(baseReq({ completion: undefined }));
     expect(sync.response).toEqual({ observation: { kind: "browser" } });
 
-    // poll: 완료(done) 상태 본문이 결과 채널(submit 응답이 아니라).
+    // poll: the completed (done) status body is the result channel (not the submit response).
     const bodies = [{ status: "running" }, { status: "done", observation: { kind: "prompt" } }];
     let i = 0;
     const pollDriver = new HttpFrontDoorDriver({
@@ -399,7 +399,7 @@ describe("HttpFrontDoorDriver.drive — 상관(correlate)", () => {
     expect(poll.response).toEqual({ status: "done", observation: { kind: "prompt" } });
   });
 
-  it("correlate returned + poll: 추출한 에이전트 id 로 statusPath 를 보간해 폴링한다", async () => {
+  it("correlate returned + poll: polls with the statusPath interpolated by the extracted agent id", async () => {
     const polledUrls: string[] = [];
     const driver = new HttpFrontDoorDriver({
       submit: async () => ({ run_id: "agent-9" }),
@@ -425,11 +425,11 @@ describe("HttpFrontDoorDriver.drive — 상관(correlate)", () => {
     );
 
     expect(outcome.traceRef).toBe("agent-9");
-    // 주입 runId(fixed)가 아니라 에이전트가 돌려준 agent-9 로 폴링한다.
+    // polls with agent-9 returned by the agent, not the injected runId (fixed).
     expect(polledUrls[0]).toBe("http://agent:8000/runs/agent-9/status");
   });
 
-  it("correlate returned: 응답에 상관 필드가 없으면 UpstreamError 로 명확히 실패한다", async () => {
+  it("correlate returned: fails explicitly with UpstreamError when the correlation field is absent from the response", async () => {
     const driver = new HttpFrontDoorDriver({ submit: async () => ({}) });
     const err = await driver
       .drive(baseReq({ correlate: { mode: "returned", path: "run_id" } }))
@@ -439,9 +439,9 @@ describe("HttpFrontDoorDriver.drive — 상관(correlate)", () => {
   });
 });
 
-// 기본 submit 은 node:http 직접 요청 — undici(전역 fetch)의 headersTimeout(기본 300s) 회피가 목적.
-// 실 http 서버로 왕복 + 소켓 idle 타임아웃(무흐름 끊기)을 검증한다(submit io 미주입 = 기본 경로).
-describe("HttpFrontDoorDriver 기본 submit (node http)", () => {
+// The default submit is a direct node:http request — the point is to avoid undici's (global fetch) headersTimeout (default 300s).
+// Verifies a round trip against a real http server + the socket idle timeout (cutting on no-flow) (no submit io injected = the default path).
+describe("HttpFrontDoorDriver default submit (node http)", () => {
   async function listen(handler: (req: IncomingMessage, res: ServerResponse) => void): Promise<{
     port: number;
     close: () => Promise<void>;
@@ -463,7 +463,7 @@ describe("HttpFrontDoorDriver 기본 submit (node http)", () => {
     };
   }
 
-  it("응답 JSON 본문을 받아 상관(returned)에 쓴다 — node http 왕복", async () => {
+  it("reads the response JSON body and uses it for correlation (returned) — node http round trip", async () => {
     const srv = await listen((req, res) => {
       let body = "";
       req.on("data", (c) => {
@@ -479,18 +479,18 @@ describe("HttpFrontDoorDriver 기본 submit (node http)", () => {
         baseReq({ base: `http://127.0.0.1:${srv.port}`, correlate: { mode: "returned", path: "run_id" } }),
       );
       expect(outcome.status).toBe("done");
-      expect(outcome.traceRef).toBe("srv-1"); // 서버 응답 본문에서 상관 id 추출 → 왕복 성공
+      expect(outcome.traceRef).toBe("srv-1"); // extracted the correlation id from the server response body → round trip succeeded
     } finally {
       await srv.close();
     }
   });
 
-  it("서버가 응답을 무흐름으로 붙잡으면 timeoutMs(소켓 idle)로 끊고 UpstreamError", async () => {
+  it("when the server holds the response with no flow, cuts on timeoutMs (socket idle) and UpstreamError", async () => {
     const srv = await listen((_req, res) => {
-      srv.held.push(res); // 절대 응답하지 않음 — 소켓 무흐름
+      srv.held.push(res); // never responds — socket no-flow
     });
     try {
-      // poll 완료 모델 → drive 가 submit 에 completion.timeoutMs 를 소켓 idle 타임아웃으로 전달한다.
+      // poll completion model → drive passes completion.timeoutMs to submit as the socket idle timeout.
       const err = await new HttpFrontDoorDriver({ getJson: async () => ({ status: "done" }) })
         .drive(
           baseReq({

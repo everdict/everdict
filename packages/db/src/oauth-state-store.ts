@@ -1,24 +1,24 @@
 import { randomBytes } from "node:crypto";
 import type { SqlClient } from "./client.js";
 
-// OAuth authorize→callback 사이의 1회용 pending state 저장소(CSRF + 콜백 컨텍스트 복원).
-// start 시 put, callback 시 take(1회용 — 소비하며 삭제). 만료된 건 null. self-hosted(GHE/Mattermost)는
-// host + clientId(공개값) + clientSecretName(SecretStore 키 이름 — 값 아님)을 운반해 callback 에서 자격증명 재해석.
+// Single-use pending-state store between OAuth authorize→callback (CSRF + callback-context restore).
+// put on start, take on callback (single-use — consumed and deleted). Expired ones are null. self-hosted (GHE/Mattermost)
+// carries host + clientId (public) + clientSecretName (a SecretStore key name — not the value) to re-resolve the credentials in the callback.
 export interface OAuthStatePending {
   workspace: string;
   provider: string;
   host?: string;
-  clientId?: string; // self-hosted OAuth app client_id(공개값)
-  clientSecretName?: string; // self-hosted client_secret 의 SecretStore 키 이름(값 아님)
+  clientId?: string; // self-hosted OAuth app client_id (public)
+  clientSecretName?: string; // SecretStore key name of the self-hosted client_secret (not the value)
   createdBy: string;
 }
 
 export interface OAuthStateStore {
   put(state: string, pending: OAuthStatePending, expiresAt: string): Promise<void>;
-  take(state: string): Promise<OAuthStatePending | null>; // 1회용 — 소비 시 삭제. 없음/만료면 null.
+  take(state: string): Promise<OAuthStatePending | null>; // single-use — deleted on consume. null if absent/expired.
 }
 
-// 추측 불가한 state nonce. authorize URL 의 state 파라미터로 나가고 callback 에서 그대로 돌아온다.
+// An unguessable state nonce. Goes out as the authorize URL's state parameter and comes back as-is in the callback.
 export function generateOAuthState(): string {
   return randomBytes(24).toString("base64url");
 }
@@ -53,8 +53,8 @@ export class InMemoryOAuthStateStore implements OAuthStateStore {
   async take(state: string): Promise<OAuthStatePending | null> {
     const row = this.byState.get(state);
     if (!row) return null;
-    this.byState.delete(state); // 1회용
-    if (row.expiresAt <= this.now()) return null; // 만료(이미 소비됨)
+    this.byState.delete(state); // single-use
+    if (row.expiresAt <= this.now()) return null; // expired (already consumed)
     return row.pending;
   }
 }
@@ -79,7 +79,7 @@ export class PgOAuthStateStore implements OAuthStateStore {
     );
   }
   async take(state: string): Promise<OAuthStatePending | null> {
-    // DELETE … RETURNING = 원자적 1회용 소비(만료 건도 삭제 → 자가 청소). 만료는 앱에서 판정.
+    // DELETE … RETURNING = atomic single-use consume (expired ones are deleted too → self-cleaning). Expiry is judged in the app.
     const res = await this.client.query<StateRow>(
       `DELETE FROM everdict_oauth_states WHERE state = $1
        RETURNING workspace, provider, host, client_id, client_secret_name, created_by, expires_at`,

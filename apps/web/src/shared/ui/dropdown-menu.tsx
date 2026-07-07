@@ -4,7 +4,7 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 
 import { cn } from '@/shared/lib/utils'
 
-// 의존성 없는 경량 드롭다운 메뉴(Linear st. popover). 외부클릭/Esc 로 닫힘, 트리거 기준 정렬.
+// Dependency-free lightweight dropdown menu (Linear st. popover). Closes on outside-click/Esc, aligned to the trigger.
 const Ctx = createContext<{ close: () => void } | null>(null)
 
 export function DropdownMenu({

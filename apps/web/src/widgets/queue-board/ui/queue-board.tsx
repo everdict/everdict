@@ -13,7 +13,7 @@ import { StatCard } from '@/shared/ui/stat-card'
 type Author = { name: string; avatarUrl?: string }
 type Translate = ReturnType<typeof useTranslations<'queueBoard'>>
 
-// 레인 라벨 — 서버가 준 label(러너 호스트명) 우선, '' = 기본 백엔드.
+// Lane label — prefer the server-provided label (runner hostname); '' = default backend.
 function laneLabel(lane: QueueLane, t: Translate): string {
   if (lane.label) return lane.label
   if (lane.runtime === '') return t('defaultBackend')
@@ -21,7 +21,7 @@ function laneLabel(lane: QueueLane, t: Translate): string {
   return lane.runtime
 }
 
-// 배치 진행률 — total 있으면 바+n/total, 없으면 완료/실행 카운트 텍스트.
+// Batch progress — if total is present, a bar + n/total, otherwise a completed/running count text.
 function Progress({ progress }: { progress: NonNullable<QueueItem['progress']> }) {
   const t = useTranslations('queueBoard')
   const { done, active, total } = progress
@@ -50,7 +50,7 @@ function Progress({ progress }: { progress: NonNullable<QueueItem['progress']> }
   )
 }
 
-// 큐 항목 — 고정 규격 한 줄: 대상(아이콘 EntityRef) + 진행률/케이스 + 실행자·시각.
+// Queue item — a fixed-format single line: target (icon EntityRef) + progress/case + runner·time.
 function ItemRow({
   item,
   workspace,
@@ -60,7 +60,7 @@ function ItemRow({
   item: QueueItem
   workspace: string
   authors: Record<string, Author>
-  next?: boolean // 대기 큐 맨 앞(다음 작업) 표시
+  next?: boolean // marks the front of the waiting queue (next job)
 }) {
   const t = useTranslations('queueBoard')
   const href =
@@ -148,7 +148,7 @@ function EmptyColumn({ label }: { label: string }) {
   return <p className="py-2 text-[11.5px] text-faint">{label}</p>
 }
 
-// 흐름 커넥터 — 예정 ⇢ 대기 ⇢ 실행 중으로 "흘러가는" 방향을 시각화(넓은 화면에서만).
+// Flow connector — visualizes the "flowing" direction scheduled ⇢ waiting ⇢ running (wide screens only).
 function FlowConnector() {
   return (
     <div className="hidden items-center pt-6 lg:flex" aria-hidden>
@@ -157,7 +157,7 @@ function FlowConnector() {
   )
 }
 
-// 런타임 레인 — 흐름 순서(다음 예약 ⇢ 대기 FIFO ⇢ 실행 중)로 좌→우. 모바일은 세로 스택.
+// Runtime lane — left→right in flow order (next scheduled ⇢ waiting FIFO ⇢ running). Vertical stack on mobile.
 function Lane({
   lane,
   workspace,
@@ -260,7 +260,7 @@ function Lane({
   )
 }
 
-// 레인 그룹 — 워크스페이스 큐(공용 런타임)와 내 개인 큐(셀프호스티드)는 서로 다른 큐.
+// Lane group — the workspace queue (shared runtime) and my personal queue (self-hosted) are separate queues.
 function LaneGroup({
   title,
   lanes,
@@ -276,7 +276,7 @@ function LaneGroup({
   personal?: boolean
   emptyHint?: React.ReactNode
 }) {
-  // 활동 있는 레인 먼저, 유휴 레인은 아래로.
+  // Active lanes first, idle lanes below.
   const busy = lanes.filter((l) => l.running.length + l.queued.length + l.upcoming.length > 0)
   const idle = lanes.filter((l) => l.running.length + l.queued.length + l.upcoming.length === 0)
   return (
@@ -310,7 +310,7 @@ function LaneGroup({
   )
 }
 
-// 작업 큐 보드 — 워크스페이스 큐(요청 → 공용 런타임)와 내 개인 큐(셀프호스티드)를 나눠 보인다.
+// Work-queue board — shows the workspace queue (request → shared runtime) and my personal queue (self-hosted) separately.
 export function QueueBoard({
   snapshot,
   workspace,

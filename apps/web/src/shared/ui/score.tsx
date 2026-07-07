@@ -1,8 +1,8 @@
 import { fmtScore, HEALTH_TEXT, rateHealth } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 
-// 점수 원자 — passRate 는 건강도 색(green/amber/red), 수치 메트릭(mean-only)은 중립. 항상 모노 tabular-nums.
-// 대시보드 전역에서 점수를 이 컴포넌트로 통일(색·서식 일관성).
+// Score atom — passRate uses health colors (green/amber/red), numeric metrics (mean-only) are neutral. Always mono tabular-nums.
+// Standardize scores across the dashboard through this component (color·format consistency).
 export function Score({
   passRate,
   mean,

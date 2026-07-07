@@ -55,39 +55,39 @@ import { setVersionTags } from "./version-tag-service.js";
 import type { UpdateViewInput, ViewService } from "./view-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
-// MCP 도구 표면 — HTTP 라우트와 같은 서비스 코어를 공유하는 "에이전트용 트랜스포트".
-// 각 도구는 Principal 의 역할로 authorize 되고 workspace 로 스코프된다(컨트롤플레인이 인증/인가 권위).
+// MCP tool surface — the "agent transport" sharing the same service core as the HTTP routes.
+// Each tool is authorized by the Principal's roles and scoped to workspace (the control plane is the auth/authz authority).
 export interface McpDeps {
   service: RunService;
   scorecardService?: ScorecardService;
   scheduleService?: ScheduleService;
-  queueService?: QueueService; // 작업 큐 스냅샷(런타임 레인별 실행 중/대기/다음 예약)
-  viewService?: ViewService; // 저장된 스코어카드 분석 View — create/list/get/update/delete
+  queueService?: QueueService; // work queue snapshot (running/waiting/next-scheduled per runtime lane)
+  viewService?: ViewService; // saved scorecard-analysis Views — create/list/get/update/delete
   harnessTemplates?: HarnessTemplateRegistry;
   harnessInstances?: HarnessInstanceRegistry;
   datasetRegistry?: DatasetRegistry;
   judgeRegistry?: JudgeRegistry;
-  modelRegistry?: ModelRegistry; // Model(추론/판정 모델) 등록/조회 — judge·command 하니스가 id 로 참조
+  modelRegistry?: ModelRegistry; // Model (inference/judgment model) register/read — judge and command harnesses reference it by id
   runtimeRegistry?: RuntimeRegistry;
-  probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // 런타임 연결 테스트
+  probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>; // runtime connection test
   secretStore?: SecretStore;
-  githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo)
-  mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림)
-  traceSinkService?: TraceSinkService; // 워크스페이스 트레이스 싱크(관측 플랫폼 적재)
-  imageRegistryService?: ImageRegistryService; // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행)
-  ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR
-  runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) — pair/list/revoke + 워크스페이스 로스터
-  notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — list/read (self-scoped)
-  commentService?: CommentService; // 리소스 댓글(데이터셋 등) — list/create/delete
-  runnerHub?: RunnerHub; // 러너 lease 허브 — lease_job/submit_job_result/fail_job/heartbeat_job(러너 토큰 전용)
+  githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install → selected repos)
+  mattermostService?: MattermostService; // workspace-owned Mattermost integration (register → bot notifications)
+  traceSinkService?: TraceSinkService; // workspace trace sinks (export to an observability platform)
+  imageRegistryService?: ImageRegistryService; // workspace image registry (classification baseline + push publishing)
+  ciLinkService?: CiLinkService; // CI repo link (repo↔harness slot + OIDC trust) + picker/setup-PR
+  runnerService?: RunnerService; // self-hosted runners (personal device pairing) — pair/list/revoke + workspace roster
+  notificationService?: NotificationService; // personal notification feed (bell inbox) — list/read (self-scoped)
+  commentService?: CommentService; // resource comments (datasets, etc.) — list/create/delete
+  runnerHub?: RunnerHub; // runner lease hub — lease_job/submit_job_result/fail_job/heartbeat_job (runner token only)
   settingsStore?: WorkspaceSettingsStore;
-  benchmarkService?: BenchmarkService; // 벤치마크 미리보기 + 인입(소스→데이터셋)
-  bundleService?: BundleService; // 번들 원샷 적용(하니스+벤치마크+런타임 등)
-  workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성(역할 게이트 없음 — subject 기준)
-  membershipService?: MembershipService; // 멤버 관리(목록/역할/제거/나가기) + 초대(발급/수락)
-  profileService?: ProfileService; // 내 프로필(이름/유저네임/아바타) 조회·수정(self-serve)
-  keyStore?: TenantKeyStore; // API 키 self-serve 발급/목록/취소(admin)
-  apiPublicUrl?: string; // 컨트롤플레인 public base — github_install_workspace_runner 의 everdict runner --api-url (요청 base 폴백)
+  benchmarkService?: BenchmarkService; // benchmark preview + import (source → dataset)
+  bundleService?: BundleService; // bundle one-shot apply (harness + benchmark + runtime, etc.)
+  workspaceService?: WorkspaceService; // workspace self-serve list/create (no role gate — by subject)
+  membershipService?: MembershipService; // member management (list/role/remove/leave) + invites (issue/accept)
+  profileService?: ProfileService; // my profile (name/username/avatar) read/edit (self-serve)
+  keyStore?: TenantKeyStore; // API key self-serve issue/list/revoke (admin)
+  apiPublicUrl?: string; // control-plane public base — the everdict runner --api-url in github_install_workspace_runner (falls back to the request base)
 }
 
 function ok(data: unknown): CallToolResult {
@@ -97,7 +97,7 @@ function fail(message: string): CallToolResult {
   return { content: [{ type: "text", text: message }], isError: true };
 }
 
-// authorize + AppError → isError 변환(에이전트가 도구 에러/권한오류로 인지).
+// authorize + AppError → isError conversion (so the agent recognizes it as a tool error / permission error).
 async function run(principal: Principal, action: Action, fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
     authorize(principal, action);
@@ -108,7 +108,7 @@ async function run(principal: Principal, action: Action, fn: () => Promise<CallT
   }
 }
 
-// 역할 게이트 없는 도구(워크스페이스 self-serve 목록/생성). AppError → isError 변환만.
+// Tools with no role gate (workspace self-serve list/create). AppError → isError conversion only.
 async function plain(fn: () => Promise<CallToolResult>): Promise<CallToolResult> {
   try {
     return await fn();
@@ -118,18 +118,19 @@ async function plain(fn: () => Promise<CallToolResult>): Promise<CallToolResult>
   }
 }
 
-// 해당 Principal 에 묶인 MCP 서버(상태 없는 요청당 인스턴스). tools = runs/harnesses CRUD.
+// MCP server bound to this Principal (stateless per-request instance). tools = runs/harnesses CRUD.
 export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   const server = new McpServer(
     { name: "everdict", version: "0.1.0" },
-    { instructions: "Everdict 평가 컨트롤플레인. 워크스페이스 스코프 run/harness 도구." },
+    { instructions: "Everdict eval control plane. Workspace-scoped run/harness tools." },
   );
   const ws = principal.workspace;
 
   server.registerTool(
     "list_runs",
     {
-      description: "이 워크스페이스의 run 목록(standalone 활동). scorecard_id 지정 시 그 스코어카드의 케이스 자식 run.",
+      description:
+        "This workspace's run list (standalone activity). With scorecard_id, the case child-runs of that scorecard.",
       inputSchema: { scorecard_id: z.string().optional() },
     },
     ({ scorecard_id }) =>
@@ -140,11 +141,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   server.registerTool(
     "get_run",
-    { description: "run 1건 조회(다른 워크스페이스는 NOT_FOUND)", inputSchema: { id: z.string() } },
+    { description: "Fetch one run (another workspace's is NOT_FOUND)", inputSchema: { id: z.string() } },
     ({ id }) =>
       run(principal, "runs:read", async () => {
         const record = await deps.service.get(id);
-        if (!record || record.tenant !== ws) return fail("NOT_FOUND: run 을 찾을 수 없습니다.");
+        if (!record || record.tenant !== ws) return fail("NOT_FOUND: run not found.");
         return ok(record);
       }),
   );
@@ -155,7 +156,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "get_queue",
       {
         description:
-          "작업 큐 스냅샷 — 런타임 레인별 실행 중/대기(FIFO, 맨 앞이 다음 작업)/다음 예약 발사. 배치(스코어카드)=1작업(진행률 포함).",
+          "Work queue snapshot — per runtime lane: running/waiting (FIFO, the front is the next job)/next scheduled fire. A batch (scorecard) = 1 job (with progress).",
         inputSchema: {},
       },
       () => run(principal, "runs:read", async () => ok(await queue.snapshot(ws, principal.subject))),
@@ -166,12 +167,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     "submit_run",
     {
       description:
-        "평가 run 제출(repo 빈 시드 + 기본 그레이더). harness 는 id@version(기본 latest). runtime 지정 시 그 런타임에서 실행.",
+        "Submit an eval run (empty repo seed + default graders). harness is id@version (default latest). With runtime, run on that runtime.",
       inputSchema: {
         harness_id: z.string(),
         version: z.string().optional(),
         task: z.string(),
-        runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
+        runtime: z.string().optional(), // tenant Runtime id to run on (placement.target). If absent, the default backend.
         timeout_sec: z.number().int().positive().optional(),
       },
     },
@@ -187,30 +188,31 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         });
         const rec = await deps.service.submit({
           tenant: ws,
-          submittedBy: principal.subject, // 비공개 repo 시드를 내 개인 연결로 clone
+          submittedBy: principal.subject, // clone the private-repo seed via my personal connection
           harness: { id: harness_id, version: version ?? "latest" },
           case: evalCase,
-          trigger: "mcp", // 활동 뷰 source 축 — 에이전트가 MCP 로 제출
+          trigger: "mcp", // activity-view source axis — submitted by the agent over MCP
           ...(runtime ? { runtime } : {}),
         });
         return ok(rec);
       }),
   );
 
-  // 하네스 대분류(템플릿: 구조/슬롯). 무게이트(viewer+) — 협업 콘텐츠.
+  // Harness category (template: structure/slots). No gate (viewer+) — collaborative content.
   if (deps.harnessTemplates) {
     const templates = deps.harnessTemplates;
     server.registerTool(
       "list_harness_templates",
-      { description: "이 워크스페이스가 보는 하네스 템플릿(대분류; 소유 + _shared)", inputSchema: {} },
+      { description: "Harness templates this workspace sees (categories; owned + _shared)", inputSchema: {} },
       () => run(principal, "harnesses:read", async () => ok(await templates.list(ws))),
     );
 
     server.registerTool(
       "get_harness_template",
       {
-        description: "하네스 템플릿(대분류) 구조 스펙 1건 조회 — 구성 보기/새 버전 편집 프리필용",
-        inputSchema: { id: z.string(), version: z.string().describe('템플릿 버전 또는 "latest"') },
+        description:
+          "Fetch one harness template (category) structure spec — for config view / new-version edit prefill",
+        inputSchema: { id: z.string(), version: z.string().describe('template version or "latest"') },
       },
       ({ id, version }) => run(principal, "harnesses:read", async () => ok(await templates.get(ws, id, version))),
     );
@@ -218,7 +220,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "register_harness_template",
       {
-        description: "하네스 템플릿(대분류 구조, JSON 문자열) 등록(불변; 충돌 시 CONFLICT). 무게이트(viewer+)",
+        description:
+          "Register a harness template (category structure, JSON string) (immutable; CONFLICT on clash). No gate (viewer+)",
         inputSchema: { spec: z.string().describe("HarnessTemplateSpec JSON") },
       },
       ({ spec }) =>
@@ -227,7 +230,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(spec);
           } catch {
-            return fail("BAD_REQUEST: 유효한 HarnessTemplateSpec JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid HarnessTemplateSpec JSON.");
           }
           const result = HarnessTemplateSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -237,15 +240,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
-  // 개별 하네스(인스턴스: template 참조 + pins). 무게이트(viewer+).
+  // Individual harness (instance: template reference + pins). No gate (viewer+).
   if (deps.harnessInstances) {
     const instances = deps.harnessInstances;
     server.registerTool(
       "list_harnesses",
-      { description: "이 워크스페이스가 보는 하네스 인스턴스(템플릿별로 묶임; 소유 + _shared)", inputSchema: {} },
+      { description: "Harness instances this workspace sees (grouped by template; owned + _shared)", inputSchema: {} },
       () =>
         run(principal, "harnesses:read", async () => {
-          // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 — 다른 유저에게 숨긴다(HTTP 목록과 동일).
+          // A private harness (references a personal secret) is createdBy-only — hidden from other users (same as the HTTP list).
           const entries = await instances.list(ws);
           return ok(entries.filter((e) => !e.private || e.createdBy === principal.subject));
         }),
@@ -254,8 +257,9 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "get_harness_instance",
       {
-        description: "하네스 인스턴스 raw 스펙(template 참조 + pins) 1건 조회 — 구성 보기/새 버전 re-pin 프리필용",
-        inputSchema: { id: z.string(), version: z.string().describe('인스턴스 버전 태그 또는 "latest"') },
+        description:
+          "Fetch one harness instance raw spec (template reference + pins) — for config view / new-version re-pin prefill",
+        inputSchema: { id: z.string(), version: z.string().describe('instance version tag or "latest"') },
       },
       ({ id, version }) =>
         run(principal, "harnesses:read", async () => ok(await instances.getInstance(ws, id, version))),
@@ -265,10 +269,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "delete_harness",
       {
         description:
-          "하니스 버전 소프트 삭제(tombstone — 과거 스코어카드 이력은 보존, 미래 실행은 해석 실패). 그 버전의 생성자 본인 또는 워크스페이스 admin 만.",
+          "Soft-delete a harness version (tombstone — past scorecard history is preserved, future runs fail to resolve). Only that version's creator or a workspace admin.",
         inputSchema: {
           id: z.string(),
-          version: z.string().describe("삭제할 인스턴스 버전(정확한 버전 — latest 불가)"),
+          version: z.string().describe("instance version to delete (exact version — latest not allowed)"),
         },
       },
       ({ id, version }) => plain(async () => ok(await deleteHarnessVersion(instances, principal, id, version))),
@@ -278,17 +282,19 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_harness_version_tags",
       {
         description:
-          "하니스 버전의 태그 전체 교체(빈 배열 = 모두 제거) — 버전을 번호만으로 분간하기 어려울 때 붙이는 자유 라벨(예: baseline, gpt-5 실험). 스펙 밖 가변 메타라 버전 불변성과 무관하며 등록 후에도 편집 가능. 등록과 동일 게이트(harnesses:register). _shared/타 워크스페이스 버전은 NOT_FOUND.",
+          "Replace a harness version's full tag set (empty array = remove all) — free labels for when a version number alone is hard to tell apart (e.g. baseline, gpt-5 experiment). Off-spec mutable metadata, so independent of version immutability and editable after registration. Same gate as registration (harnesses:register). _shared / other-workspace versions are NOT_FOUND.",
         inputSchema: {
           id: z.string(),
-          version: z.string().describe("정확한 인스턴스 버전(latest 불가)"),
-          tags: z.array(z.string()).describe("이 버전의 태그 전체(각 60자·버전당 20개 이하; 교체 의미)"),
+          version: z.string().describe("exact instance version (latest not allowed)"),
+          tags: z
+            .array(z.string())
+            .describe("this version's full tag set (each ≤60 chars, ≤20 per version; replace semantics)"),
         },
       },
       ({ id, version, tags }) =>
         plain(async () => {
-          // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 — 타인에게는 존재 은닉(HTTP 라우트와 동일).
-          if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: 하니스를 찾을 수 없습니다.");
+          // A private harness (references a personal secret) is createdBy-only — its existence is hidden from others (same as the HTTP route).
+          if (!(await harnessVisibleTo(instances, principal, id))) return fail("NOT_FOUND: harness not found.");
           return ok(await setVersionTags(instances, principal, "harnesses:register", id, version, tags));
         }),
     );
@@ -297,12 +303,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "register_harness",
       {
         description:
-          "하네스 인스턴스(template 참조 + pins, JSON 문자열) 등록(불변; 템플릿 없음/핀 누락 시 오류). 무게이트(viewer+). 선택 description = 이 버전의 변경 내역(상세에 표시)",
+          "Register a harness instance (template reference + pins, JSON string) (immutable; error if the template is missing / pins are absent). No gate (viewer+). Optional description = this version's changelog (shown on the detail page)",
         inputSchema: {
           spec: z
             .string()
             .describe(
-              "HarnessInstanceSpec JSON: { template:{id,version}, id, version, pins, description? } (description=이 버전의 변경 내역, 선택)",
+              "HarnessInstanceSpec JSON: { template:{id,version}, id, version, pins, description? } (description = this version's changelog, optional)",
             ),
         },
       },
@@ -312,11 +318,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(spec);
           } catch {
-            return fail("BAD_REQUEST: 유효한 HarnessInstanceSpec JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid HarnessInstanceSpec JSON.");
           }
           const result = HarnessInstanceSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await instances.register(ws, result.data); // resolve 검증(템플릿 없음/핀 누락 → 오류)
+          await instances.register(ws, result.data); // resolve validation (missing template / absent pins → error)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
@@ -325,13 +331,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "pin_harness_images",
       {
         description:
-          "하네스 인스턴스 durable 재핀(headless re-pin) — 기준 버전 pins 에 병합해 새 버전 등록. CI(dev/main 머지)가 자기 서비스 슬롯만 갈아끼우는 경로. digest 핀 강제(기본), 멱등(동일 핀 → unchanged)",
+          "Durable re-pin of a harness instance (headless re-pin) — merge into the base version's pins and register a new version. The path where CI (dev/main merge) swaps only its own service slots. Enforces digest pins (default), idempotent (identical pins → unchanged)",
         inputSchema: {
           id: z.string(),
-          pins: z.record(z.string()).describe("슬롯→이미지 ref(@sha256:… digest 권장)"),
-          version: z.string().optional().describe('명시 버전(예: "dev-<sha>"). 미지정이면 자동 bump'),
-          base: z.string().optional().describe("기준 인스턴스 버전(기본 latest)"),
-          allow_tags: z.boolean().optional().describe("digest 강제 해제(기본 false — tag 핀은 재현성 깨짐)"),
+          pins: z.record(z.string()).describe("slot → image ref (@sha256:… digest recommended)"),
+          version: z.string().optional().describe('explicit version (e.g. "dev-<sha>"). Auto-bump if unspecified'),
+          base: z.string().optional().describe("base instance version (default latest)"),
+          allow_tags: z
+            .boolean()
+            .optional()
+            .describe("lift the digest requirement (default false — tag pins break reproducibility)"),
         },
       },
       ({ id, pins, version, base, allow_tags }) =>
@@ -354,7 +363,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_datasets",
       {
         description:
-          "이 워크스페이스가 보는 데이터셋 목록(소유 + _shared 벤치마크). 워크스페이스는 자격증명으로 고정된 '활성 워크스페이스'다 — 어느 워크스페이스를 다루는지 먼저 사용자에게 확인하라(파라미터로 못 바꾼다; 다른 워크스페이스면 그 워크스페이스 자격증명/세션으로 다시 붙어야 함). 각 항목은 하나의 id 아래 여러 불변 버전을 묶는다(id → versions[]). 새 데이터셋을 만들기 전에 먼저 이 목록으로 같은 id 가 이미 있는지 확인하라.",
+          "Datasets this workspace sees (owned + _shared benchmarks). The workspace is the 'active workspace' fixed by your credential — confirm with the user which workspace you are working in first (you cannot change it via a parameter; a different workspace requires reconnecting with that workspace's credential/session). Each entry groups multiple immutable versions under one id (id → versions[]). Before creating a new dataset, first use this list to check whether the same id already exists.",
         inputSchema: {},
       },
       () => run(principal, "datasets:read", async () => ok(await datasets.list(ws))),
@@ -364,10 +373,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "get_dataset",
       {
         description:
-          "데이터셋 1건 전체(케이스 포함). 하나의 id 는 여러 불변 버전을 가지므로 version(기본 latest)으로 특정 버전을 고른다. 활성 워크스페이스 스코프 — 어느 워크스페이스인지 사용자와 확인(다른 워크스페이스 id 는 NOT_FOUND).",
+          "One dataset in full (cases included). Since one id holds multiple immutable versions, pick a specific one via version (default latest). Active-workspace scoped — confirm with the user which workspace it is (another workspace's id is NOT_FOUND).",
         inputSchema: {
-          id: z.string().describe("데이터셋 id(이 워크스페이스에서 고유; 같은 id 가 여러 버전을 묶는다)"),
-          version: z.string().optional().describe("semver 버전 또는 latest(기본). 생략 시 latest"),
+          id: z.string().describe("dataset id (unique within this workspace; the same id groups multiple versions)"),
+          version: z.string().optional().describe("semver version or latest (default). latest if omitted"),
         },
       },
       ({ id, version }) =>
@@ -378,11 +387,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "diff_datasets",
       {
         description:
-          "두 데이터셋 버전의 diff — 케이스 추가/삭제/변경(달라진 필드 포함) + 메타 변경. base/candidate 는 'latest' 가능. 다른 워크스페이스는 NOT_FOUND",
+          "Diff of two dataset versions — cases added/removed/changed (with the differing fields) + metadata changes. base/candidate may be 'latest'. Another workspace is NOT_FOUND",
         inputSchema: {
           id: z.string(),
-          base: z.string().describe("기준 버전(예: 1.0.0 또는 latest)"),
-          candidate: z.string().describe("비교 버전(예: 1.1.0 또는 latest)"),
+          base: z.string().describe("base version (e.g. 1.0.0 or latest)"),
+          candidate: z.string().describe("comparison version (e.g. 1.1.0 or latest)"),
         },
       },
       ({ id, base, candidate }) =>
@@ -399,7 +408,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "validate_dataset",
       {
         description:
-          "Dataset(JSON) dry-run 검증(등록하지 않음) — 스키마 + 활성 워크스페이스의 같은 id 기존 버전/충돌(existingVersions, versionExists)을 보여준다. create_dataset 전에 이걸로 'id 가 이미 있는지 → 새 버전으로 올릴지'를 판단하라(새 id 로 같은 데이터셋을 중복 생성하지 말 것).",
+          "Dry-run validate a Dataset (JSON) (does not register) — shows the schema result + this active workspace's existing versions/collision for the same id (existingVersions, versionExists). Use this before create_dataset to decide 'does the id already exist → bump to a new version' (do not duplicate the same dataset under a new id).",
         inputSchema: { dataset: z.string().describe("Dataset JSON (id·version·cases)") },
       },
       ({ dataset }) =>
@@ -408,7 +417,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(dataset);
           } catch {
-            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+            return ok({ ok: false, errors: ["(root): not valid JSON."] });
           }
           const result = DatasetSchema.safeParse(parsed);
           if (!result.success)
@@ -432,7 +441,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "create_dataset",
       {
         description:
-          "Dataset(JSON 문자열)을 활성 워크스페이스 소유로 등록(버전 불변; 같은 id@version 을 다른 내용으로 재등록하면 CONFLICT). 등록 전 반드시 순서대로 확인하라: (1) 워크스페이스 — 어느 워크스페이스인지 사용자와 확인(자격증명으로 고정, 파라미터로 못 바꿈). (2) id — 하나의 id 가 여러 버전을 묶는다. 같은 데이터셋에 케이스를 추가/수정하는 것이라면 기존 id 를 재사용해 새 '버전'으로 올려라(예: 1.0.0 → 1.1.0). 매번 새 id 로 flatten 하게 쪼개지 말 것. (3) version — 기존과 충돌하지 않는 새 semver. 먼저 list_datasets/validate_dataset 로 기존 id·버전을 확인하라.",
+          "Register a Dataset (JSON string) as owned by the active workspace (versions immutable; re-registering the same id@version with different content is CONFLICT). Before registering, always confirm in order: (1) workspace — confirm with the user which workspace (fixed by credential, not changeable via a parameter). (2) id — one id groups multiple versions. If you are adding/editing cases in the same dataset, reuse the existing id and bump to a new 'version' (e.g. 1.0.0 → 1.1.0). Do not flatten into a new id each time. (3) version — a new semver that doesn't collide with an existing one. First check existing ids/versions via list_datasets/validate_dataset.",
         inputSchema: { dataset: z.string().describe("Dataset JSON (id·version·cases)") },
       },
       ({ dataset }) =>
@@ -441,11 +450,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(dataset);
           } catch {
-            return fail("BAD_REQUEST: 유효한 Dataset JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid Dataset JSON.");
           }
           const result = DatasetSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await datasets.register(ws, result.data, principal.subject); // 생성자 = subject(삭제 권한)
+          await datasets.register(ws, result.data, principal.subject); // creator = subject (delete permission)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
@@ -454,10 +463,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "delete_dataset",
       {
         description:
-          "데이터셋 1건(버전)을 소프트 삭제(tombstone — list/get 에서 사라지지만 데이터는 보존, 과거 스코어카드 재현성 유지). version 필수 — 한 버전만 지운다('latest' 로 뭉뚱그리지 말 것). 순서대로 확인하라: 어느 워크스페이스(자격증명 고정) → 어떤 id → 어떤 version. 권한: 그 버전의 '생성자 본인' 또는 '워크스페이스 admin' 만(아니면 FORBIDDEN). 없는·이미 삭제된·_shared·타 워크스페이스 버전은 NOT_FOUND.",
+          "Soft-delete one dataset (version) (tombstone — disappears from list/get but the data is preserved, keeping past scorecards reproducible). version is required — deletes exactly one version (do not lump it under 'latest'). Confirm in order: which workspace (fixed by credential) → which id → which version. Permission: only that version's 'creator' or a 'workspace admin' (else FORBIDDEN). Missing / already-deleted / _shared / other-workspace versions are NOT_FOUND.",
         inputSchema: {
-          id: z.string().describe("데이터셋 id"),
-          version: z.string().describe("삭제할 정확한 버전(필수; latest 불가 — 정확히 한 버전만 삭제)"),
+          id: z.string().describe("dataset id"),
+          version: z
+            .string()
+            .describe("exact version to delete (required; latest not allowed — deletes exactly one version)"),
         },
       },
       ({ id, version }) => plain(async () => ok(await deleteDatasetVersion(datasets, principal, id, version))),
@@ -467,11 +478,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_dataset_version_tags",
       {
         description:
-          "데이터셋 버전의 태그 전체 교체(빈 배열 = 모두 제거) — 버전 분간용 자유 라벨. 내용(Dataset.tags, 엔티티 분류)과 별개인 스펙 밖 가변 메타라 버전 불변성과 무관. 게이트: datasets:write. _shared/타 워크스페이스 버전은 NOT_FOUND.",
+          "Replace a dataset version's full tag set (empty array = remove all) — free labels for telling versions apart. Off-spec mutable metadata separate from content (Dataset.tags, entity classification), so independent of version immutability. Gate: datasets:write. _shared / other-workspace versions are NOT_FOUND.",
         inputSchema: {
-          id: z.string().describe("데이터셋 id"),
-          version: z.string().describe("정확한 버전(latest 불가)"),
-          tags: z.array(z.string()).describe("이 버전의 태그 전체(각 60자·버전당 20개 이하; 교체 의미)"),
+          id: z.string().describe("dataset id"),
+          version: z.string().describe("exact version (latest not allowed)"),
+          tags: z
+            .array(z.string())
+            .describe("this version's full tag set (each ≤60 chars, ≤20 per version; replace semantics)"),
         },
       },
       ({ id, version, tags }) =>
@@ -483,14 +496,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const judges = deps.judgeRegistry;
     server.registerTool(
       "list_judges",
-      { description: "이 워크스페이스가 보는 Agent Judge(소유 + _shared 기본 judge)", inputSchema: {} },
+      { description: "Agent Judges visible to this workspace (owned + _shared default judges)", inputSchema: {} },
       () => run(principal, "judges:read", async () => ok(await judges.list(ws))),
     );
 
     server.registerTool(
       "get_judge",
       {
-        description: "JudgeSpec 1건 전체(model | harness). version 기본 latest. 다른 워크스페이스는 NOT_FOUND",
+        description: "A full JudgeSpec (model | harness). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
       ({ id, version }) => run(principal, "judges:read", async () => ok(await judges.get(ws, id, version ?? "latest"))),
@@ -500,11 +513,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_judge_version_tags",
       {
         description:
-          "judge 버전의 태그 전체 교체(빈 배열 = 모두 제거) — 버전 분간용 자유 라벨(스펙 밖 가변 메타, 불변성 무관). 게이트: judges:write. _shared/타 워크스페이스 버전은 NOT_FOUND.",
+          "Replace all tags on a judge version (empty array = remove all) — free-form labels to tell versions apart (mutable metadata outside the spec, independent of immutability). Gate: judges:write. _shared / other-workspace versions get NOT_FOUND.",
         inputSchema: {
           id: z.string(),
-          version: z.string().describe("정확한 버전(latest 불가)"),
-          tags: z.array(z.string()).describe("이 버전의 태그 전체(각 60자·버전당 20개 이하; 교체 의미)"),
+          version: z.string().describe("exact version (latest not allowed)"),
+          tags: z.array(z.string()).describe("all tags for this version (≤60 chars each, ≤20 per version; replaces)"),
         },
       },
       ({ id, version, tags }) =>
@@ -514,7 +527,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "validate_judge",
       {
-        description: "JudgeSpec(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
+        description:
+          "Dry-run validate a JudgeSpec (JSON) — schema + this workspace's existing versions/conflict (does not register)",
         inputSchema: { judge: z.string().describe("JudgeSpec JSON (kind: model | harness)") },
       },
       ({ judge }) =>
@@ -523,7 +537,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(judge);
           } catch {
-            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+            return ok({ ok: false, errors: ["(root): not valid JSON."] });
           }
           const result = JudgeSpecSchema.safeParse(parsed);
           if (!result.success)
@@ -546,7 +560,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "create_judge",
       {
-        description: "JudgeSpec(JSON 문자열)을 이 워크스페이스 소유로 등록(model/harness; 불변; 충돌 시 CONFLICT)",
+        description:
+          "Register a JudgeSpec (JSON string) as owned by this workspace (model/harness; immutable; CONFLICT on collision)",
         inputSchema: { judge: z.string().describe("JudgeSpec JSON") },
       },
       ({ judge }) =>
@@ -555,7 +570,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(judge);
           } catch {
-            return fail("BAD_REQUEST: 유효한 JudgeSpec JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid JudgeSpec JSON.");
           }
           const result = JudgeSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -569,7 +584,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const models = deps.modelRegistry;
     server.registerTool(
       "list_models",
-      { description: "이 워크스페이스가 보는 Model(추론/판정 모델: 소유 + _shared)", inputSchema: {} },
+      { description: "Models visible to this workspace (inference/judge models: owned + _shared)", inputSchema: {} },
       () => run(principal, "models:read", async () => ok(await models.list(ws))),
     );
 
@@ -577,7 +592,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "get_model",
       {
         description:
-          "ModelSpec 1건 전체(provider + 하부 모델 + baseUrl). version 기본 latest. 다른 워크스페이스는 NOT_FOUND",
+          "A full ModelSpec (provider + underlying model + baseUrl). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
       ({ id, version }) => run(principal, "models:read", async () => ok(await models.get(ws, id, version ?? "latest"))),
@@ -586,7 +601,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "validate_model",
       {
-        description: "ModelSpec(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
+        description:
+          "Dry-run validate a ModelSpec (JSON) — schema + this workspace's existing versions/conflict (does not register)",
         inputSchema: { model: z.string().describe("ModelSpec JSON") },
       },
       ({ model }) =>
@@ -595,7 +611,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(model);
           } catch {
-            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+            return ok({ ok: false, errors: ["(root): not valid JSON."] });
           }
           const result = ModelSpecSchema.safeParse(parsed);
           if (!result.success)
@@ -619,7 +635,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "create_model",
       {
         description:
-          "ModelSpec(JSON 문자열)을 이 워크스페이스 소유로 등록(provider + 하부 모델 + baseUrl; 불변; 충돌 시 CONFLICT)",
+          "Register a ModelSpec (JSON string) as owned by this workspace (provider + underlying model + baseUrl; immutable; CONFLICT on collision)",
         inputSchema: { model: z.string().describe("ModelSpec JSON") },
       },
       ({ model }) =>
@@ -628,7 +644,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(model);
           } catch {
-            return fail("BAD_REQUEST: 유효한 ModelSpec JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid ModelSpec JSON.");
           }
           const result = ModelSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -642,14 +658,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const runtimes = deps.runtimeRegistry;
     server.registerTool(
       "list_runtimes",
-      { description: "이 워크스페이스가 보는 실행 인프라(Runtime: 소유 + _shared)", inputSchema: {} },
+      { description: "Execution infra visible to this workspace (Runtime: owned + _shared)", inputSchema: {} },
       () => run(principal, "runtimes:read", async () => ok(await runtimes.list(ws))),
     );
 
     server.registerTool(
       "get_runtime",
       {
-        description: "RuntimeSpec 1건 전체(local | nomad | k8s). version 기본 latest. 다른 워크스페이스는 NOT_FOUND",
+        description:
+          "A full RuntimeSpec (local | nomad | k8s). version defaults to latest. Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string(), version: z.string().optional() },
       },
       ({ id, version }) =>
@@ -660,11 +677,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_runtime_version_tags",
       {
         description:
-          "런타임 버전의 태그 전체 교체(빈 배열 = 모두 제거) — 버전 분간용 자유 라벨(스펙 밖 가변 메타, 불변성 무관). 게이트: runtimes:write. _shared/타 워크스페이스 버전은 NOT_FOUND.",
+          "Replace all tags on a runtime version (empty array = remove all) — free-form labels to tell versions apart (mutable metadata outside the spec, independent of immutability). Gate: runtimes:write. _shared / other-workspace versions get NOT_FOUND.",
         inputSchema: {
           id: z.string(),
-          version: z.string().describe("정확한 버전(latest 불가)"),
-          tags: z.array(z.string()).describe("이 버전의 태그 전체(각 60자·버전당 20개 이하; 교체 의미)"),
+          version: z.string().describe("exact version (latest not allowed)"),
+          tags: z.array(z.string()).describe("all tags for this version (≤60 chars each, ≤20 per version; replaces)"),
         },
       },
       ({ id, version, tags }) =>
@@ -674,7 +691,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "validate_runtime",
       {
-        description: "RuntimeSpec(JSON) dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음)",
+        description:
+          "Dry-run validate a RuntimeSpec (JSON) — schema + this workspace's existing versions/conflict (does not register)",
         inputSchema: { runtime: z.string().describe("RuntimeSpec JSON (kind: local | nomad | k8s)") },
       },
       ({ runtime }) =>
@@ -683,7 +701,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(runtime);
           } catch {
-            return ok({ ok: false, errors: ["(root): 유효한 JSON 이 아닙니다."] });
+            return ok({ ok: false, errors: ["(root): not valid JSON."] });
           }
           const result = RuntimeSpecSchema.safeParse(parsed);
           if (!result.success)
@@ -707,7 +725,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "create_runtime",
       {
         description:
-          "RuntimeSpec(JSON 문자열)을 이 워크스페이스 소유로 등록(불변; 충돌 시 CONFLICT). 자격증명은 SecretStore",
+          "Register a RuntimeSpec (JSON string) as owned by this workspace (immutable; CONFLICT on collision). Credentials live in the SecretStore",
         inputSchema: { runtime: z.string().describe("RuntimeSpec JSON") },
       },
       ({ runtime }) =>
@@ -716,7 +734,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(runtime);
           } catch {
-            return fail("BAD_REQUEST: 유효한 RuntimeSpec JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid RuntimeSpec JSON.");
           }
           const result = RuntimeSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -732,7 +750,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "probe_runtime",
       {
         description:
-          "RuntimeSpec(JSON) 연결 테스트 — 잡 없이 실제 클러스터에 붙어 도달성/인증 확인(local 제외). {kind,reachable,detail}",
+          "Connection test for a RuntimeSpec (JSON) — attaches to the real cluster with no job to check reachability/auth (excludes local). {kind,reachable,detail}",
         inputSchema: { runtime: z.string().describe("RuntimeSpec JSON (kind: local | nomad | k8s)") },
       },
       ({ runtime }) =>
@@ -741,7 +759,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(runtime);
           } catch {
-            return fail("BAD_REQUEST: 유효한 RuntimeSpec JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid RuntimeSpec JSON.");
           }
           const result = RuntimeSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -756,28 +774,32 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "run_scorecard",
       {
         description:
-          "데이터셋을 하니스@버전으로 돌려 스코어카드 집계(비동기 — queued 레코드 반환, 이후 get_scorecard 로 폴링). runtime 지정 시 그 런타임에서 실행.",
+          "Run a dataset against harness@version and aggregate a scorecard (async — returns a queued record, then poll with get_scorecard). If runtime is given, execute on that runtime.",
         inputSchema: {
           dataset_id: z.string(),
           dataset_version: z.string().optional(),
           harness_id: z.string(),
           harness_version: z.string().optional(),
-          runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target) 또는 self 러너 타깃. 없으면 배포 정책에 따라 400.
+          runtime: z.string().optional(), // tenant Runtime id to run on (placement.target) or a self runner target. If absent, 400 per the deployment policy.
           harness_pins: z
             .record(z.string())
             .optional()
-            .describe("제출 시점 임시 핀(슬롯→이미지, 레지스트리 무변경) — CI PR 이미지 스왑용. origin 에 기록됨"),
+            .describe(
+              "submit-time ephemeral pins (slot→image, registry unchanged) — for CI PR image swaps. Recorded in origin",
+            ),
           judges: z
             .array(z.object({ id: z.string(), version: z.string().optional() }))
             .optional()
-            .describe("트레이스에 적용할 Agent Judge 들(version 기본 latest)"),
+            .describe("Agent Judges to apply to the trace (version defaults to latest)"),
           concurrency: z
             .number()
             .int()
             .min(1)
             .max(64)
             .optional()
-            .describe("배치 내 동시 디스패치 케이스 수(병렬도). 미지정이면 서비스 기본(=4)"),
+            .describe(
+              "number of cases dispatched concurrently within the batch (parallelism). Defaults to the service default (=4) if unset",
+            ),
           cases: z
             .object({
               ids: z.array(z.string().min(1)).min(1).optional(),
@@ -785,7 +807,9 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               limit: z.number().int().min(1).max(10_000).optional(),
             })
             .optional()
-            .describe("부분 실행 — 전체 데이터셋의 subset 만(ids 명시 → tags any-match → limit 앞 N개 순 적용)"),
+            .describe(
+              "partial run — only a subset of the full dataset (explicit ids → tags any-match → limit first N, applied in that order)",
+            ),
           origin: z
             .object({
               repo: z.string().optional(),
@@ -795,7 +819,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               runUrl: z.string().optional(),
             })
             .optional()
-            .describe("출처 좌표(커밋/PR/CI run) — source 는 서버가 결정"),
+            .describe("origin coordinates (commit/PR/CI run) — source is decided by the server"),
         },
       },
       ({
@@ -814,7 +838,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           ok(
             await scorecards.submit({
               tenant: ws,
-              submittedBy: principal.subject, // 비공개 repo 케이스를 내 개인 연결로 clone
+              submittedBy: principal.subject, // clone private-repo cases via my personal connection
               dataset: { id: dataset_id, version: dataset_version ?? "latest" },
               harness: {
                 id: harness_id,
@@ -833,20 +857,20 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
     server.registerTool(
       "list_scorecards",
-      { description: "이 워크스페이스의 스코어카드 목록(summary 만 — 무거운 케이스 결과 제외)", inputSchema: {} },
+      { description: "This workspace's scorecards (summary only — excludes heavy per-case results)", inputSchema: {} },
       () => run(principal, "scorecards:read", async () => ok(await scorecards.list(ws))),
     );
 
     server.registerTool(
       "get_scorecard",
       {
-        description: "스코어카드 1건 전체(케이스별 결과 포함). 다른 워크스페이스는 NOT_FOUND",
+        description: "A full scorecard (including per-case results). Other workspaces get NOT_FOUND",
         inputSchema: { id: z.string() },
       },
       ({ id }) =>
         run(principal, "scorecards:read", async () => {
           const record = await scorecards.get(id);
-          if (!record || record.tenant !== ws) return fail("NOT_FOUND: scorecard 를 찾을 수 없습니다.");
+          if (!record || record.tenant !== ws) return fail("NOT_FOUND: scorecard not found.");
           return ok(record);
         }),
     );
@@ -855,7 +879,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "diff_scorecards",
       {
         description:
-          "두 스코어카드 비교(baseline vs candidate) → 메트릭 delta + 케이스 회귀/개선. 둘 다 이 워크스페이스 완료여야",
+          "Compare two scorecards (baseline vs candidate) → metric delta + per-case regression/improvement. Both must be completed in this workspace",
         inputSchema: { baseline: z.string(), candidate: z.string() },
       },
       ({ baseline, candidate }) =>
@@ -866,7 +890,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "leaderboard_scorecards",
       {
         description:
-          "한 데이터셋(벤치마크)의 (harness × model) 랭킹 — metric 기준 내림차순. window=latest(기본)|best. harness/model/judge_model 필터 선택(judge_model=같은 채점자끼리 공정 비교).",
+          "(harness × model) ranking for one dataset (benchmark) — descending by metric. window=latest(default)|best. Optional harness/model/judge_model filters (judge_model = fair comparison among the same grader).",
         inputSchema: {
           dataset: z.string(),
           metric: z.string().optional(),
@@ -895,7 +919,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "backfill_scorecard_models",
       {
         description:
-          "models 가 없는 과거 succeeded 스코어카드를 저장 트레이스에서 관측 모델로 채운다(멱등). 리더보드에 과거 실행을 포함시킬 때.",
+          "Backfill the observed model from stored traces into past succeeded scorecards that lack models (idempotent). Use to include past runs on the leaderboard.",
         inputSchema: {},
       },
       () => run(principal, "scorecards:run", async () => ok(await scorecards.backfillModels(ws))),
@@ -905,7 +929,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "ingest_scorecard",
       {
         description:
-          "외부에서 이미 수행한 트레이스(TraceEvent[])를 올려 scorecard 로(하니스 미실행). body=IngestScorecard JSON {dataset,harness,traces:[{caseId,trace}],judges?}",
+          "Upload externally produced traces (TraceEvent[]) into a scorecard (harness not run). body=IngestScorecard JSON {dataset,harness,traces:[{caseId,trace}],judges?}",
         inputSchema: { body: z.string().describe("IngestScorecard JSON") },
       },
       ({ body }) =>
@@ -914,7 +938,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(body);
           } catch {
-            return fail("BAD_REQUEST: 유효한 IngestScorecard JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid IngestScorecard JSON.");
           }
           const result = IngestScorecardBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -926,7 +950,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "pull_scorecard",
       {
         description:
-          "테넌트 관측 플랫폼(otel|mlflow|langfuse|langsmith|phoenix)에서 runId 별 트레이스를 당겨와 scorecard 로(하니스 미실행). body=PullIngest JSON {dataset,harness,source:{kind,endpoint,authSecret?,project?[phoenix 필수]},runs:[{caseId,runId}],judges?}",
+          "Pull per-runId traces from the tenant's observability platform (otel|mlflow|langfuse|langsmith|phoenix) into a scorecard (harness not run). body=PullIngest JSON {dataset,harness,source:{kind,endpoint,authSecret?,project?[required for phoenix]},runs:[{caseId,runId}],judges?}",
         inputSchema: { body: z.string().describe("PullIngest JSON") },
       },
       ({ body }) =>
@@ -935,7 +959,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(body);
           } catch {
-            return fail("BAD_REQUEST: 유효한 PullIngest JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid PullIngest JSON.");
           }
           const result = PullIngestBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -950,7 +974,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "apply_bundle",
       {
         description:
-          "번들(JSON) 적용 — 하니스+벤치마크+데이터셋+런타임+judge/model 를 한 번에 등록(멱등, 부분성공). 번들 내용에 따라 per-type 권한 필요.",
+          "Apply a bundle (JSON) — register harness + benchmark + dataset + runtime + judge/model in one shot (idempotent, partial success). Requires per-type permissions depending on the bundle contents.",
         inputSchema: { bundle: z.string().describe("Bundle JSON") },
       },
       ({ bundle }) =>
@@ -959,11 +983,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(bundle);
           } catch {
-            return fail("BAD_REQUEST: 유효한 Bundle JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid Bundle JSON.");
           }
           const result = BundleSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          // 섹션별 인가(throw→plain catch→fail) — 새 액션 없이 기존 per-type 게이트 조합.
+          // per-section authorization (throw→plain catch→fail) — combines existing per-type gates with no new action.
           for (const action of requiredActionsForBundle(result.data)) authorize(principal, action);
           return ok(await bundles.apply(ws, principal.subject, result.data));
         }),
@@ -976,12 +1000,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "create_schedule",
       {
         description:
-          "예약(cron) 스코어카드 생성 — 데이터셋×하니스를 크론으로 주기 실행(회귀 추적). 발사 run 은 내 신원으로 실행(예산→워크스페이스). cron 은 5필드(분 시 일 월 요일).",
+          "Create a scheduled (cron) scorecard — periodically run dataset×harness on a cron (regression tracking). Fired runs execute under my identity (budget→workspace). cron is 5 fields (min hour day month weekday).",
         inputSchema: {
           name: z.string(),
-          cron: z.string().describe("5-field cron (예: '0 3 * * *' = 매일 03:00)"),
-          timezone: z.string().optional().describe("IANA tz (기본 UTC)"),
-          overlap_policy: z.enum(["skip", "bufferOne", "allowAll"]).optional().describe("겹침 정책 (기본 skip)"),
+          cron: z.string().describe("5-field cron (e.g. '0 3 * * *' = daily at 03:00)"),
+          timezone: z.string().optional().describe("IANA tz (default UTC)"),
+          overlap_policy: z
+            .enum(["skip", "bufferOne", "allowAll"])
+            .optional()
+            .describe("overlap policy (default skip)"),
           enabled: z.boolean().optional(),
           dataset_id: z.string(),
           dataset_version: z.string().optional(),
@@ -1017,13 +1044,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
     server.registerTool(
       "list_schedules",
-      { description: "이 워크스페이스의 예약 스코어카드 목록", inputSchema: {} },
+      { description: "This workspace's scheduled scorecards", inputSchema: {} },
       () => run(principal, "schedules:read", async () => ok(await schedules.list(ws))),
     );
 
     server.registerTool(
       "get_schedule",
-      { description: "예약 1건 조회(다른 워크스페이스는 NOT_FOUND)", inputSchema: { id: z.string() } },
+      { description: "Read one schedule (other workspaces get NOT_FOUND)", inputSchema: { id: z.string() } },
       ({ id }) => run(principal, "schedules:read", async () => ok(await schedules.get(ws, id))),
     );
 
@@ -1031,7 +1058,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "update_schedule",
       {
         description:
-          "예약 수정 — pause/resume(enabled), 재예약(cron/timezone), 이름/겹침정책 변경. runTemplate(데이터셋·하니스) 교체는 BFF 또는 재생성으로.",
+          "Update a schedule — pause/resume (enabled), reschedule (cron/timezone), change name/overlap policy. Swap runTemplate (dataset·harness) via the BFF or by recreating.",
         inputSchema: {
           id: z.string(),
           name: z.string().optional(),
@@ -1060,7 +1087,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
     server.registerTool(
       "delete_schedule",
-      { description: "예약 삭제(다른 워크스페이스는 NOT_FOUND)", inputSchema: { id: z.string() } },
+      { description: "Delete a schedule (other workspaces get NOT_FOUND)", inputSchema: { id: z.string() } },
       ({ id }) =>
         run(principal, "schedules:write", async () => {
           await schedules.remove(ws, id);
@@ -1071,16 +1098,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   if (deps.viewService) {
     const views = deps.viewService;
-    // 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명). scorecards:read/run 권한 재사용(새 authz 없음).
+    // Saved scorecard-analysis Views — a named AnalysisConfig (opaque). Reuses scorecards:read/run (no new authz).
     server.registerTool(
       "create_view",
       {
         description:
-          "스코어카드 분석 View 저장 — 이름 붙인 분석 설정(config)을 워크스페이스에 저장. visibility=private(나만) | workspace(공유). config 는 웹 AnalysisConfig(불투명).",
+          "Save a scorecard-analysis View — store a named analysis config in the workspace. visibility=private (just me) | workspace (shared). config is the web AnalysisConfig (opaque).",
         inputSchema: {
           name: z.string(),
-          config: z.unknown().describe("웹 AnalysisConfig(recipe). 라이브 재실행이라 스냅샷 아님."),
-          visibility: z.enum(["private", "workspace"]).optional().describe("기본 private"),
+          config: z.unknown().describe("web AnalysisConfig (recipe). Re-run live, not a snapshot."),
+          visibility: z.enum(["private", "workspace"]).optional().describe("default private"),
         },
       },
       (a) =>
@@ -1099,14 +1126,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
     server.registerTool(
       "list_views",
-      { description: "내가 볼 수 있는 분석 View 목록(워크스페이스 공유 + 내 비공개)", inputSchema: {} },
+      { description: "Analysis Views I can see (workspace-shared + my private)", inputSchema: {} },
       () => run(principal, "scorecards:read", async () => ok(await views.list(ws, principal.subject))),
     );
 
     server.registerTool(
       "get_view",
       {
-        description: "분석 View 1건 조회(남의 비공개/없으면 NOT_FOUND)",
+        description: "Read one analysis View (others' private / missing → NOT_FOUND)",
         inputSchema: { id: z.string() },
       },
       ({ id }) => run(principal, "scorecards:read", async () => ok(await views.get(ws, id, principal.subject))),
@@ -1115,7 +1142,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "update_view",
       {
-        description: "분석 View 수정 — 이름/설정(config)/가시성 변경. 소유자 또는 워크스페이스 admin 만.",
+        description: "Update an analysis View — change name/config/visibility. Owner or workspace admin only.",
         inputSchema: {
           id: z.string(),
           name: z.string().optional(),
@@ -1141,7 +1168,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "delete_view",
       {
-        description: "분석 View 삭제 — 소유자 또는 워크스페이스 admin 만(다른 워크스페이스는 NOT_FOUND)",
+        description: "Delete an analysis View — owner or workspace admin only (other workspaces get NOT_FOUND)",
         inputSchema: { id: z.string() },
       },
       ({ id }) =>
@@ -1160,7 +1187,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "search_hf_datasets",
       {
-        description: "HuggingFace Hub 데이터셋 검색 — 정확한 id 를 모를 때 검색어로 후보({id,likes,gated})를 찾는다.",
+        description:
+          "Search HuggingFace Hub datasets — find candidates ({id,likes,gated}) by query when you don't know the exact id.",
         inputSchema: { query: z.string(), limit: z.number().int().positive().max(50).optional() },
       },
       ({ query, limit }) =>
@@ -1169,7 +1197,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "hf_dataset_splits",
       {
-        description: "선택한 HF 데이터셋의 config/split 조합 목록(split 직접 타이핑 대신 고르기 위해).",
+        description:
+          "List the config/split combinations of a chosen HF dataset (to pick a split instead of typing it).",
         inputSchema: { dataset: z.string() },
       },
       ({ dataset }) =>
@@ -1179,7 +1208,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "hf_dataset_files",
       {
         description:
-          "HF repo 의 데이터 파일(csv/jsonl/json) 목록 — 뷰어(datasets-server) 미서빙 데이터셋의 파일 직접 인출 폴백(source.file).",
+          "List an HF repo's data files (csv/jsonl/json) — fallback to fetch files directly (source.file) for datasets not served by the viewer (datasets-server).",
         inputSchema: { dataset: z.string() },
       },
       ({ dataset }) =>
@@ -1189,7 +1218,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "preview_benchmark_source",
       {
         description:
-          "벤치마크 소스 미리보기 — 매핑 전 원본 행 N개 + 감지된 필드(필드명을 모를 때 매핑 전 확인). body=preview JSON {source:{kind:'huggingface',dataset,config?,split?}|{kind:'jsonl'}, text?, limit?}",
+          "Preview a benchmark source — N raw rows before mapping + detected fields (to check before mapping when you don't know the field names). body=preview JSON {source:{kind:'huggingface',dataset,config?,split?}|{kind:'jsonl'}, text?, limit?}",
         inputSchema: { body: z.string().describe("preview body JSON") },
       },
       ({ body }) =>
@@ -1198,7 +1227,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(body);
           } catch {
-            return fail("BAD_REQUEST: 유효한 preview JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid preview JSON.");
           }
           const result = BenchmarkPreviewBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -1209,7 +1238,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "import_benchmark",
       {
         description:
-          "벤치마크를 이 워크스페이스 데이터셋으로 인입(불변; 충돌 409) — spec(인라인 정의) · benchmark(카탈로그 id) · recipe 중 하나. body=import JSON {spec?|benchmark?|recipe?, id?, version?, limit?, text?}",
+          "Import a benchmark as a dataset in this workspace (immutable; 409 on conflict) — one of spec (inline definition) · benchmark (catalog id) · recipe. body=import JSON {spec?|benchmark?|recipe?, id?, version?, limit?, text?}",
         inputSchema: { body: z.string().describe("import body JSON") },
       },
       ({ body }) =>
@@ -1218,7 +1247,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           try {
             parsed = JSON.parse(body);
           } catch {
-            return fail("BAD_REQUEST: 유효한 import JSON 이 아닙니다.");
+            return fail("BAD_REQUEST: not a valid import JSON.");
           }
           const result = BenchmarkImportBodySchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
@@ -1233,7 +1262,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_secrets",
       {
         description:
-          "시크릿 이름 목록(값 없음) — 공유(workspace) + 내 개인(user) 시크릿, 각 scope 태그. 값은 반환하지 않음.",
+          "List secret names (no values) — shared (workspace) + my personal (user) secrets, each tagged with scope. Values are never returned.",
         inputSchema: {},
       },
       () => run(principal, "secrets:read", async () => ok(await secrets.list(ws, principal.subject))),
@@ -1242,16 +1271,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_secret",
       {
         description:
-          "시크릿 설정/갱신(at-rest 암호화; 값은 다시 못 봄). name 은 env 형식. scope: workspace(공유, 기본) | user(내 개인).",
+          "Set/update a secret (encrypted at rest; the value can't be read back). name is env-style. scope: workspace (shared, default) | user (my personal).",
         inputSchema: {
-          name: z.string().describe("env 이름 ^[A-Z_][A-Z0-9_]*$"),
+          name: z.string().describe("env name ^[A-Z_][A-Z0-9_]*$"),
           value: z.string(),
-          scope: z.enum(["user", "workspace"]).optional().describe("workspace(공유, 기본) | user(개인)"),
+          scope: z.enum(["user", "workspace"]).optional().describe("workspace (shared, default) | user (personal)"),
         },
       },
       ({ name, value, scope }) =>
         run(principal, "secrets:write", async () => {
-          if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) return fail("BAD_REQUEST: 시크릿 이름은 ^[A-Z_][A-Z0-9_]*$ 형식");
+          if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) return fail("BAD_REQUEST: secret name must match ^[A-Z_][A-Z0-9_]*$");
           const owner = scope === "user" ? principal.subject : "";
           await secrets.set(ws, name, value, owner);
           return ok({ workspace: ws, name, scope: scope ?? "workspace", set: true });
@@ -1260,7 +1289,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "delete_secret",
       {
-        description: "시크릿 삭제. scope: workspace(공유, 기본) | user(내 개인).",
+        description: "Delete a secret. scope: workspace (shared, default) | user (my personal).",
         inputSchema: { name: z.string(), scope: z.enum(["user", "workspace"]).optional() },
       },
       ({ name, scope }) =>
@@ -1272,14 +1301,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
-  // 워크스페이스 소유 GitHub App 통합(개인 연결 대체) — 조직 설치→선택 repo→워크스페이스 소유 installation. settings:read/write.
+  // Workspace-owned GitHub App integration (replaces personal connections) — org install→selected repos→workspace-owned installation. settings:read/write.
   if (deps.githubAppService) {
     const gh = deps.githubAppService;
     server.registerTool(
       "list_workspace_github_app",
       {
         description:
-          "이 워크스페이스의 GitHub App 통합 — GHE App 등록 목록 + 워크스페이스 소유 installation(host/installationId/account + 허용 저장소 repos) + App Setup URL 로 등록할 callbackUrl. 비밀 값 없음.",
+          "This workspace's GitHub App integration — GHE App registrations + workspace-owned installations (host/installationId/account + allowed repos) + the callbackUrl to register as the App Setup URL. No secret values.",
         inputSchema: {},
       },
       () =>
@@ -1293,8 +1322,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "start_workspace_github_app_install",
       {
         description:
-          "GitHub App 설치 시작(관리자) → GitHub 설치 페이지 URL 반환(관리자가 열어 repo 선택). host 미지정=github.com(env App), 지정=등록된 GHE App.",
-        inputSchema: { host: z.string().url().optional().describe("GHE 베이스 URL(미지정=github.com)") },
+          "Start a GitHub App install (admin) → returns the GitHub installation-page URL (admin opens it and selects repos). host unset=github.com (env App), set=a registered GHE App.",
+        inputSchema: { host: z.string().url().optional().describe("GHE base URL (unset=github.com)") },
       },
       ({ host }) =>
         run(principal, "settings:write", async () =>
@@ -1305,12 +1334,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "register_workspace_github_app",
       {
         description:
-          "GHE App 등록/갱신(관리자). host 기준 upsert. App 개인키(PEM)는 SecretStore 에 먼저 넣고 그 이름을 privateKeySecretName 으로 지정.",
+          "Register/update a GHE App (admin). Upsert by host. Put the App private key (PEM) in the SecretStore first and pass its name as privateKeySecretName.",
         inputSchema: {
-          host: z.string().url().describe("GHE 베이스 URL"),
-          slug: z.string().min(1).describe("App slug(설치 URL 에 사용)"),
+          host: z.string().url().describe("GHE base URL"),
+          slug: z.string().min(1).describe("App slug (used in the install URL)"),
           appId: z.string().min(1).describe("GitHub App ID"),
-          privateKeySecretName: z.string().min(1).describe("App 개인키(PEM)가 저장된 SecretStore 키 이름"),
+          privateKeySecretName: z.string().min(1).describe("SecretStore key name holding the App private key (PEM)"),
         },
       },
       ({ host, slug, appId, privateKeySecretName }) =>
@@ -1321,15 +1350,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "remove_workspace_github_app_registration",
       {
-        description: "GHE App 등록 해제(관리자). 기존 installation 레코드는 남지만 자격증명이 없어 토큰 발급 불가.",
-        inputSchema: { host: z.string().url().describe("GHE 베이스 URL") },
+        description:
+          "Unregister a GHE App (admin). Existing installation records remain but no token can be minted without credentials.",
+        inputSchema: { host: z.string().url().describe("GHE base URL") },
       },
       ({ host }) => run(principal, "settings:write", async () => ok(await gh.removeRegistration(ws, host))),
     );
     server.registerTool(
       "unlink_workspace_github_app_installation",
       {
-        description: "installation 링크 해제(관리자). 실제 uninstall 은 GitHub 쪽 — 여기선 레코드만 잊는다(멱등).",
+        description:
+          "Unlink an installation (admin). The actual uninstall happens on GitHub — here we just forget the record (idempotent).",
         inputSchema: { installationId: z.number().int().describe("GitHub installation id") },
       },
       ({ installationId }) =>
@@ -1337,14 +1368,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
-  // 워크스페이스 소유 Mattermost 통합(개인 연결 알림 대체) — 완료/회귀 알림을 bot 토큰으로 채널에 게시. settings:read/write.
+  // Workspace-owned Mattermost integration (replaces personal-connection notifications) — post completion/regression alerts to a channel with a bot token. settings:read/write.
   if (deps.mattermostService) {
     const mm = deps.mattermostService;
     server.registerTool(
       "get_workspace_mattermost",
       {
         description:
-          "이 워크스페이스의 Mattermost 통합 설정 — host/botTokenSecretName/defaultChannelId(비밀 값 아님). 미설정이면 config 없음.",
+          "This workspace's Mattermost integration settings — host/botTokenSecretName/defaultChannelId (not secret values). If unset, no config.",
         inputSchema: {},
       },
       () =>
@@ -1357,16 +1388,22 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_workspace_mattermost",
       {
         description:
-          "Mattermost 통합 등록/갱신(관리자). bot 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 botTokenSecretName 으로 지정. defaultChannelId = 완료/회귀 알림 채널.",
+          "Register/update the Mattermost integration (admin). Put the bot token (value) in the SecretStore first and pass its name as botTokenSecretName. defaultChannelId = the completion/regression alert channel.",
         inputSchema: {
-          host: z.string().url().describe("사내 Mattermost 베이스 URL"),
-          botTokenSecretName: z.string().min(1).describe("bot access token 이 저장된 SecretStore 키 이름"),
-          defaultChannelId: z.string().min(1).optional().describe("완료/회귀 알림 기본 채널 id"),
+          host: z.string().url().describe("internal Mattermost base URL"),
+          botTokenSecretName: z.string().min(1).describe("SecretStore key name holding the bot access token"),
+          defaultChannelId: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("default channel id for completion/regression alerts"),
           commandTokenSecretName: z
             .string()
             .min(1)
             .optional()
-            .describe("인바운드(슬래시커맨드/버튼) 검증 토큰의 SecretStore 이름 — 설정하면 /everdict 커맨드 활성"),
+            .describe(
+              "SecretStore name of the inbound (slash-command/button) verification token — set it to enable the /everdict command",
+            ),
         },
       },
       ({ host, botTokenSecretName, defaultChannelId, commandTokenSecretName }) =>
@@ -1383,7 +1420,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
     server.registerTool(
       "remove_workspace_mattermost",
-      { description: "Mattermost 통합 해제(관리자). 이후 완료/회귀 알림은 게시되지 않는다.", inputSchema: {} },
+      {
+        description:
+          "Unregister the Mattermost integration (admin). Completion/regression alerts are no longer posted afterward.",
+        inputSchema: {},
+      },
       () =>
         run(principal, "settings:write", async () => {
           await mm.clear(ws);
@@ -1392,16 +1433,16 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
-  // 워크스페이스 트레이스 싱크(복수) — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼에 적재. 여러 싱크를 이름으로
-  // 등록하고 '하니스별로' 선택한다. 조회 harnesses:read / 등록·해제 settings:write / 선택 harnesses:register.
-  // 설계: docs/architecture/trace-sink.md
+  // Workspace trace sinks (multiple) — export judged scorecard detail to the team's observability platform. Register multiple sinks by
+  // name and select 'per harness'. Read harnesses:read / register·remove settings:write / select harnesses:register.
+  // Design: docs/architecture/trace-sink.md
   if (deps.traceSinkService) {
     const sink = deps.traceSinkService;
     server.registerTool(
       "list_workspace_trace_sinks",
       {
         description:
-          "이 워크스페이스의 트레이스 싱크 목록 + 하니스별 선택 현황 — {sinks:[{name,kind,endpoint,…}], assignments:{harnessId→sinkName}}(비밀 값 아님).",
+          "This workspace's trace sinks + per-harness selection state — {sinks:[{name,kind,endpoint,…}], assignments:{harnessId→sinkName}} (not secret values).",
         inputSchema: {},
       },
       () => run(principal, "harnesses:read", async () => ok(await sink.list(ws))),
@@ -1410,24 +1451,24 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_workspace_trace_sink",
       {
         description:
-          "트레이스 싱크 등록/갱신(관리자, name 기준 upsert). 하니스가 이 싱크를 선택하면 스코어카드 완료 시 케이스별 trace+점수를 이 플랫폼에 적재. 인증 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 authSecretName 으로 지정.",
+          "Register/update a trace sink (admin, upsert by name). When a harness selects this sink, per-case trace+scores are exported to this platform on scorecard completion. Put the auth token (value) in the SecretStore first and pass its name as authSecretName.",
         inputSchema: {
-          name: z.string().min(1).describe("싱크 이름(참조 키 — 하니스 선택이 이 이름을 가리킨다)"),
-          kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]).describe("관측 플랫폼 종류"),
-          endpoint: z.string().url().describe("플랫폼 API 베이스 URL"),
+          name: z.string().min(1).describe("sink name (reference key — per-harness selection points at this name)"),
+          kind: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]).describe("observability platform kind"),
+          endpoint: z.string().url().describe("platform API base URL"),
           authSecretName: z
             .string()
             .min(1)
             .optional()
-            .describe("인증 헤더 '값'이 저장된 SecretStore 키 이름(무인증 dev 서버는 생략)"),
+            .describe("SecretStore key name holding the auth-header 'value' (omit for an unauthenticated dev server)"),
           project: z
             .string()
             .min(1)
             .optional()
             .describe(
-              "kind별 프로젝트 좌표 — mlflow experiment_id · langsmith project · phoenix project · langfuse projectId",
+              "per-kind project coordinate — mlflow experiment_id · langsmith project · phoenix project · langfuse projectId",
             ),
-          webUrl: z.string().url().optional().describe("UI 딥링크 베이스(API endpoint 와 다를 때)"),
+          webUrl: z.string().url().optional().describe("UI deep-link base (when it differs from the API endpoint)"),
         },
       },
       (input) => run(principal, "settings:write", async () => ok({ config: await sink.upsert(ws, input) })),
@@ -1435,8 +1476,9 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "remove_workspace_trace_sink",
       {
-        description: "트레이스 싱크 해제(관리자, 이름 지정). 그 싱크를 가리키던 하니스 선택도 함께 정리된다.",
-        inputSchema: { name: z.string().min(1).describe("해제할 싱크 이름") },
+        description:
+          "Remove a trace sink (admin, by name). Any per-harness selection pointing at it is cleaned up too.",
+        inputSchema: { name: z.string().min(1).describe("name of the sink to remove") },
       },
       ({ name }) =>
         run(principal, "settings:write", async () => {
@@ -1448,10 +1490,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "assign_harness_trace_sink",
       {
         description:
-          "하니스별 트레이스 싱크 선택(member+) — 그 하니스의 스코어카드 완료 시 어느 싱크로 적재할지. sink 를 생략하면 선택 해제(적재 끔).",
+          "Per-harness trace sink selection (member+) — which sink to export to when that harness's scorecard completes. Omit sink to clear the selection (export off).",
         inputSchema: {
-          harness: z.string().min(1).describe("하니스 id"),
-          sink: z.string().min(1).optional().describe("싱크 이름(생략 = 선택 해제)"),
+          harness: z.string().min(1).describe("harness id"),
+          sink: z.string().min(1).optional().describe("sink name (omit = clear selection)"),
         },
       },
       ({ harness, sink: sinkName }) =>
@@ -1461,15 +1503,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
-  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + everdict image push 발행 대상.
-  // 여러 개를 이름으로 등록하고 push 시 선택. 조회 harnesses:read / 등록·해제 settings:write / push 자격증명 images:push(member+).
+  // Workspace image registries (BYO, multiple) — the harness-image classification baseline + target for everdict image push issuance.
+  // Register several by name and select one on push. Read harnesses:read / register·remove settings:write / push credentials images:push (member+).
   if (deps.imageRegistryService) {
     const registry = deps.imageRegistryService;
     server.registerTool(
       "list_workspace_image_registries",
       {
         description:
-          "이 워크스페이스의 이미지 레지스트리 목록 — [{name,host,namespace?,username?,시크릿 이름 참조,imagePrefix}](비밀 값 아님). 분류/pull 인증은 전체를 대상으로 host 매칭.",
+          "This workspace's image registries — [{name,host,namespace?,username?,secret-name reference,imagePrefix}] (not secret values). Classification/pull auth matches by host across all of them.",
         inputSchema: {},
       },
       () => run(principal, "harnesses:read", async () => ok({ registries: await registry.list(ws) })),
@@ -1478,14 +1520,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_workspace_image_registry",
       {
         description:
-          "이미지 레지스트리 등록/갱신(관리자, name 기준 upsert — 선언형 전체 교체). pull/push 토큰(값)은 SecretStore 에 먼저 넣고 그 이름을 지정. 참조 시크릿이 없으면 missingSecrets 경고.",
+          "Register/update an image registry (admin, upsert by name — declarative full replace). Put the pull/push token (value) in the SecretStore first and pass its name. Warns via missingSecrets if a referenced secret is absent.",
         inputSchema: {
-          name: z.string().min(1).describe("레지스트리 이름(참조 키 — push 선택이 이 이름을 가리킨다)"),
-          host: z.string().min(1).describe('레지스트리 host[:port] — "ghcr.io" · "registry.acme.dev:5000"'),
-          namespace: z.string().min(1).optional().describe('host 아래 경로 프리픽스 — "acme" → ghcr.io/acme/<name>'),
-          username: z.string().min(1).optional().describe("docker login 사용자명(토큰 단독 레지스트리는 생략)"),
-          pullSecretName: z.string().min(1).optional().describe("pull 토큰/패스워드가 저장된 SecretStore 키 이름"),
-          pushSecretName: z.string().min(1).optional().describe("push 토큰/패스워드가 저장된 SecretStore 키 이름"),
+          name: z.string().min(1).describe("registry name (reference key — push selection points at this name)"),
+          host: z.string().min(1).describe('registry host[:port] — "ghcr.io" · "registry.acme.dev:5000"'),
+          namespace: z.string().min(1).optional().describe('path prefix under host — "acme" → ghcr.io/acme/<name>'),
+          username: z.string().min(1).optional().describe("docker login username (omit for token-only registries)"),
+          pullSecretName: z.string().min(1).optional().describe("SecretStore key name holding the pull token/password"),
+          pushSecretName: z.string().min(1).optional().describe("SecretStore key name holding the push token/password"),
         },
       },
       (input) => run(principal, "settings:write", async () => ok(await registry.upsert(ws, input))),
@@ -1493,8 +1535,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "remove_workspace_image_registry",
       {
-        description: "이미지 레지스트리 해제(관리자, 이름 지정). 이후 그 레지스트리 이미지는 external 로 분류된다.",
-        inputSchema: { name: z.string().min(1).describe("해제할 레지스트리 이름") },
+        description: "Remove an image registry (admin, by name). Afterward its images are classified as external.",
+        inputSchema: { name: z.string().min(1).describe("name of the registry to remove") },
       },
       ({ name }) =>
         run(principal, "settings:write", async () => {
@@ -1506,9 +1548,9 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "get_image_push_credentials",
       {
         description:
-          "워크스페이스 레지스트리 push 자격증명 발급(member+) — {name,host,namespace?,username?,password,imagePrefix}. registry 로 선택(레지스트리가 1개뿐이면 생략 가능). docker tag+login+push 후 폐기(비영속).",
+          "Mint push credentials for a workspace registry (member+) — {name,host,namespace?,username?,password,imagePrefix}. Choose via registry (omittable if there's only one). Discard after docker tag+login+push (non-persistent).",
         inputSchema: {
-          registry: z.string().min(1).optional().describe("레지스트리 이름(1개뿐이면 생략 가능)"),
+          registry: z.string().min(1).optional().describe("registry name (omittable if there's only one)"),
         },
       },
       ({ registry: name }) =>
@@ -1516,43 +1558,45 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
-  // CI repo links — repository↔하니스 슬롯 매핑(= GitHub Actions OIDC trust policy) + picker + setup-PR.
+  // CI repo links — repository↔harness slot mapping (= GitHub Actions OIDC trust policy) + picker + setup-PR.
   if (deps.ciLinkService) {
     const ci = deps.ciLinkService;
     server.registerTool(
       "list_ci_links",
-      { description: "이 워크스페이스의 CI repo link 목록(레포↔하니스 슬롯 매핑 = OIDC trust)", inputSchema: {} },
+      { description: "This workspace's CI repo links (repo↔harness slot mapping = OIDC trust)", inputSchema: {} },
       () => run(principal, "harnesses:read", async () => ok({ links: await ci.list(ws) })),
     );
     server.registerTool(
       "link_ci_repository",
       {
         description:
-          "CI repo link 등록/갱신(관리자) — link 존재가 그 레포 GitHub Actions OIDC 토큰을 이 워크스페이스로 신뢰한다(keyless CI).",
+          "Register/update a CI repo link (admin) — the link's existence trusts that repo's GitHub Actions OIDC token into this workspace (keyless CI).",
         inputSchema: {
           repository: z.string().describe('"owner/name"'),
-          host: z.string().url().optional().describe('GHE 베이스 URL(예: "https://ghe.acme.io") — 미지정 = github.com'),
-          harness: z.string().describe("하니스 인스턴스 id"),
-          dataset: z.string().optional().describe("CI 가 발사할 데이터셋 id(setup-PR 워크플로에 사용)"),
+          host: z.string().url().optional().describe('GHE base URL (e.g. "https://ghe.acme.io") — unset = github.com'),
+          harness: z.string().describe("harness instance id"),
+          dataset: z.string().optional().describe("dataset id the CI fires (used in the setup-PR workflow)"),
           slots: z
             .record(z.object({ path: z.string().optional() }))
             .optional()
-            .describe("서비스 슬롯 → 모노레포 path(선택) — 이 레포 CI 가 갈아끼우는 슬롯들"),
+            .describe("service slot → monorepo path (optional) — the slots this repo's CI swaps"),
           runsOn: z
             .string()
             .optional()
-            .describe('좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, everdict-<id>]")'),
+            .describe(
+              'narrowing override — workflow runs-on (default "[self-hosted]", e.g. "[self-hosted, everdict-<id>]")',
+            ),
           runtime: z
             .string()
             .optional()
             .describe(
-              '좁히기 오버라이드 — run-eval runtime(기본 "self:ws" 워크스페이스 러너 풀, 예: "self:ws:<id>"). 개인 러너(self…)는 400',
+              'narrowing override — run-eval runtime (default "self:ws" workspace runner pool, e.g. "self:ws:<id>"). Personal runners (self…) → 400',
             ),
           trigger: z
             .enum(["auto", "comment", "both"])
             .optional()
             .describe(
-              "PR 평가 발화 방식(선택) — auto=PR 이벤트 자동만, comment=PR 코멘트 /evaluate 만(온디맨드), both(기본)=둘 다",
+              "how PR evaluation is triggered (optional) — auto=only automatic on PR events, comment=only the /evaluate PR comment (on-demand), both(default)=both",
             ),
         },
       },
@@ -1575,10 +1619,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "unlink_ci_repository",
       {
-        description: "CI repo link 해제(관리자) — 그 레포의 OIDC 신뢰도 함께 끊긴다.",
+        description: "Remove a CI repo link (admin) — that repo's OIDC trust is severed too.",
         inputSchema: {
           repository: z.string().describe('"owner/name"'),
-          host: z.string().url().optional().describe("GHE 베이스 URL — 미지정 = github.com link"),
+          host: z.string().url().optional().describe("GHE base URL — unset = github.com link"),
         },
       },
       ({ repository, host }) =>
@@ -1588,7 +1632,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_github_app_repos",
       {
         description:
-          "워크스페이스 GitHub App installation 이 접근 가능한 레포 목록(picker) — 설치 시 고른 것만. settings:read.",
+          "Repos accessible to the workspace's GitHub App installation (picker) — only those chosen at install time. settings:read.",
         inputSchema: {},
       },
       () => run(principal, "settings:read", async () => ok(await ci.listRepos(ws))),
@@ -1597,10 +1641,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "open_ci_setup_pr",
       {
         description:
-          "link 된 레포에 Everdict eval 워크플로 YAML 을 합성해 setup-PR 을 연다(워크스페이스 GitHub App 토큰). 머지하면 CI eval 활성. 워크플로는 항상 셀프호스티드 러너 대상 — self:ws 풀에 공유 러너가 없으면 400(github_install_workspace_runner 로 먼저 등록).",
+          "Synthesize the Everdict eval workflow YAML in a linked repo and open a setup-PR (workspace GitHub App token). Merging it activates CI eval. The workflow always targets self-hosted runners — 400 if the self:ws pool has no shared runner (register one first via github_install_workspace_runner).",
         inputSchema: {
           repository: z.string().describe('"owner/name"'),
-          host: z.string().url().optional().describe("GHE 베이스 URL — 미지정 = github.com link"),
+          host: z.string().url().optional().describe("GHE base URL — unset = github.com link"),
         },
       },
       ({ repository, host }) =>
@@ -1612,13 +1656,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   if (deps.notificationService) {
     const notifications = deps.notificationService;
-    // 알림 피드는 개인 소유(recipient=principal.subject) — 역할 게이트 없음(self-scoped, plain). BFF 패리티: GET/POST /notifications.
+    // The notification feed is personally owned (recipient=principal.subject) — no role gate (self-scoped, plain). BFF parity: GET/POST /notifications.
     server.registerTool(
       "list_notifications",
       {
-        description: "내 알림 피드(작업 완료 등) — 최신순. unread=true 로 미읽음만.",
+        description: "My notification feed (job completions, etc.) — newest first. unread=true for unread only.",
         inputSchema: {
-          unread: z.boolean().optional().describe("true 면 미읽음만"),
+          unread: z.boolean().optional().describe("if true, unread only"),
           limit: z.number().int().positive().max(200).optional(),
         },
       },
@@ -1635,7 +1679,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "read_notifications",
       {
-        description: "알림 읽음 처리 — ids 지정 또는 all=true. 처리 건수 반환(멱등).",
+        description: "Mark notifications read — give ids or all=true. Returns the count processed (idempotent).",
         inputSchema: {
           ids: z.array(z.string()).optional(),
           all: z.boolean().optional(),
@@ -1650,11 +1694,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   if (deps.commentService) {
     const comments = deps.commentService;
-    // 리소스 댓글 — 조회=comments:read, 작성=comments:write, 삭제=작성자-or-admin(서비스 판정). BFF 패리티: GET/POST/DELETE /comments.
+    // Resource comments — read=comments:read, write=comments:write, delete=author-or-admin (decided by the service). BFF parity: GET/POST/DELETE /comments.
     server.registerTool(
       "list_comments",
       {
-        description: "리소스(데이터셋 등)의 댓글 — 오래된→최신(타임라인 순서).",
+        description: "Comments on a resource (dataset, etc.) — oldest→newest (timeline order).",
         inputSchema: {
           resource_type: z.enum(COMMENT_RESOURCE_TYPES),
           resource_id: z.string(),
@@ -1669,13 +1713,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "create_comment",
       {
         description:
-          "리소스에 댓글 작성. 작성자 = 나(subject). parent_id 로 대댓글, mentions 로 멤버 subject 를 @언급하면 알림이 간다.",
+          "Post a comment on a resource. Author = me (subject). Reply via parent_id; @-mentioning member subjects via mentions notifies them.",
         inputSchema: {
           resource_type: z.enum(COMMENT_RESOURCE_TYPES),
           resource_id: z.string(),
-          parent_id: z.string().optional().describe("대댓글이면 부모 댓글 id(1단계 스레드)"),
+          parent_id: z.string().optional().describe("parent comment id if this is a reply (single-level thread)"),
           body: z.string().min(1),
-          mentions: z.array(z.string()).optional().describe("@언급할 멤버 subject 들(알림 대상)"),
+          mentions: z.array(z.string()).optional().describe("member subjects to @-mention (notification targets)"),
         },
       },
       ({ resource_type, resource_id, parent_id, body, mentions }) =>
@@ -1696,7 +1740,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "delete_comment",
       {
-        description: "댓글 삭제 — 본인 작성 or 워크스페이스 admin 만.",
+        description: "Delete a comment — author or workspace admin only.",
         inputSchema: { id: z.string() },
       },
       ({ id }) =>
@@ -1714,26 +1758,26 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   if (deps.runnerService) {
     const runners = deps.runnerService;
-    // 셀프호스티드 러너는 개인 소유(owner=principal.subject) — 역할 게이트 없이 본인 러너만 다룬다(연결과 동일 self-scoped, plain).
-    server.registerTool("list_runners", { description: "내 셀프호스티드 러너 목록(토큰 없음)", inputSchema: {} }, () =>
+    // Self-hosted runners are personally owned (owner=principal.subject) — no role gate, you handle only your own runners (self-scoped, plain, like connections).
+    server.registerTool("list_runners", { description: "My self-hosted runners (no tokens)", inputSchema: {} }, () =>
       plain(async () => ok({ runners: await runners.list(principal.subject) })),
     );
     server.registerTool(
       "pair_runner",
       {
         description:
-          "새 디바이스를 셀프호스티드 러너로 페어링. 평문 토큰(rnr_…)이 응답에 한 번만 노출되며 다시 못 본다 — everdict runner 가 이 토큰으로 인증한다.",
+          "Pair a new device as a self-hosted runner. The plaintext token (rnr_…) is shown once in the response and can't be read again — everdict runner authenticates with it.",
         inputSchema: {
-          label: z.string().min(1).max(80).describe("표시용 디바이스 이름(예: ho-macbook)"),
-          os: z.string().min(1).max(40).optional().describe("linux | darwin | win32 등"),
+          label: z.string().min(1).max(80).describe("display device name (e.g. ho-macbook)"),
+          os: z.string().min(1).max(40).optional().describe("linux | darwin | win32, etc."),
           capabilities: z
             .array(z.enum(RUNNER_CAPABILITIES))
             .optional()
-            .describe("이 머신이 돌릴 수 있는 것(git|docker|browser|computer-use|sandbox|codex-login|claude-login)"),
+            .describe("what this machine can run (git|docker|browser|computer-use|sandbox|codex-login|claude-login)"),
         },
       },
       ({ label, os, capabilities }) =>
-        // 개인 소유: owner=subject. ws 는 페어링된 워크스페이스(로스터/가시성) 기록용.
+        // Personally owned: owner=subject. ws records the paired workspace (roster/visibility).
         plain(async () => {
           const paired = await runners.pair({
             owner: principal.subject,
@@ -1747,33 +1791,39 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
     server.registerTool(
       "revoke_runner",
-      { description: "내 셀프호스티드 러너 해제(삭제). id 는 list_runners 의 id.", inputSchema: { id: z.string() } },
+      {
+        description: "Unpair (delete) my self-hosted runner. id is the id from list_runners.",
+        inputSchema: { id: z.string() },
+      },
       ({ id }) =>
         plain(async () => {
           await runners.revoke(principal.subject, id);
           return ok({ id, revoked: true });
         }),
     );
-    // 워크스페이스 러너 로스터 — 이 워크스페이스에서 페어링된 러너(메타만). 읽기 전용(members:read). 관리는 개인(list_runners).
+    // Workspace runner roster — runners paired in this workspace (metadata only). Read-only (members:read). Management is personal (list_runners).
     server.registerTool(
       "list_workspace_runners",
-      { description: "이 워크스페이스에 페어링된 셀프호스티드 러너 로스터 — 메타만(토큰 없음)", inputSchema: {} },
+      {
+        description: "Roster of self-hosted runners paired in this workspace — metadata only (no tokens)",
+        inputSchema: {},
+      },
       () => run(principal, "members:read", async () => ok({ runners: await runners.listForWorkspace(ws) })),
     );
-    // 워크스페이스-공유 러너(팀 자원, owner=ws:<workspace>) — admin 이 등록하면 멤버 누구나 self:ws:<id> 로 타깃.
-    // 개인 러너(pair_runner, self-scoped)와 달리 settings:write(admin) 게이트.
+    // Workspace-shared runners (team resource, owner=ws:<workspace>) — once an admin registers one, any member can target self:ws:<id>.
+    // Unlike personal runners (pair_runner, self-scoped), gated by settings:write (admin).
     server.registerTool(
       "pair_workspace_runner",
       {
         description:
-          "워크스페이스-공유 러너를 페어링(팀 빌드서버/CI). 멤버 누구나 self:ws:<id> 로 타깃한다. 평문 토큰(rnr_…)은 응답에 한 번만 노출. admin 전용.",
+          "Pair a workspace-shared runner (team build server/CI). Any member targets it as self:ws:<id>. The plaintext token (rnr_…) is shown once in the response. Admin only.",
         inputSchema: {
-          label: z.string().min(1).max(80).describe("표시용 러너 이름(예: acme-ci-runner)"),
-          os: z.string().min(1).max(40).optional().describe("linux | darwin | win32 등"),
+          label: z.string().min(1).max(80).describe("display runner name (e.g. acme-ci-runner)"),
+          os: z.string().min(1).max(40).optional().describe("linux | darwin | win32, etc."),
           capabilities: z
             .array(z.enum(RUNNER_CAPABILITIES))
             .optional()
-            .describe("이 러너가 돌릴 수 있는 것(git|docker|browser|computer-use|sandbox|codex-login|claude-login)"),
+            .describe("what this runner can run (git|docker|browser|computer-use|sandbox|codex-login|claude-login)"),
         },
       },
       ({ label, os, capabilities }) =>
@@ -1791,7 +1841,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "list_workspace_owned_runners",
       {
         description:
-          "이 워크스페이스가 소유한 공유 러너만(owner=ws:<workspace>) — 로스터와 달리 개인 러너 제외. admin 전용.",
+          "Only shared runners owned by this workspace (owner=ws:<workspace>) — unlike the roster, excludes personal runners. Admin only.",
         inputSchema: {},
       },
       () => run(principal, "settings:write", async () => ok({ runners: await runners.listWorkspaceOwned(ws) })),
@@ -1799,7 +1849,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "revoke_workspace_runner",
       {
-        description: "워크스페이스-공유 러너 해제(삭제). id 는 list_workspace_owned_runners 의 id. admin 전용.",
+        description:
+          "Unpair (delete) a workspace-shared runner. id is the id from list_workspace_owned_runners. Admin only.",
         inputSchema: { id: z.string() },
       },
       ({ id }) =>
@@ -1808,25 +1859,25 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           return ok({ id, revoked: true });
         }),
     );
-    // GitHub Actions 러너 자가등록 — 빌드 서버에 GitHub 러너 + Everdict 워크스페이스-공유 러너를 함께 세우는 설치
-    // 스크립트 생성(설계 doc §4). 워크스페이스 GitHub App 으로 등록 토큰 mint → ciLinkService 있을 때만. admin 전용.
+    // GitHub Actions runner self-registration — installer that stands up a GitHub runner + an Everdict workspace-shared runner together on a build server
+    // script generation (design doc §4). Mints a registration token via the workspace GitHub App → only when ciLinkService exists. Admin only.
     if (deps.ciLinkService) {
       const ciForRunner = deps.ciLinkService;
       server.registerTool(
         "github_install_workspace_runner",
         {
           description:
-            "GitHub Actions 셀프호스티드 러너 + Everdict 워크스페이스-공유 러너를 한 빌드 서버에 함께 세우는 설치 스크립트를 생성한다(설계 §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 토큰 1회) + 워크스페이스 GitHub App 으로 등록 토큰 mint. repository(repo 레벨) 또는 org(org 레벨) 정확히 하나 — App 이 그 org/repo 에 설치돼 있어야 함. 반환 스크립트를 빌드 서버에서 실행. admin 전용.",
+            "Generate an install script that stands up a GitHub Actions self-hosted runner + an Everdict workspace-shared runner together on one build server (design §4). Pairs a new workspace-shared runner (rnr_ token once) + mints a registration token via the workspace GitHub App. Exactly one of repository (repo level) or org (org level) — the App must be installed on that org/repo. Run the returned script on the build server. Admin only.",
           inputSchema: {
-            repository: z.string().optional().describe('repo 레벨 대상 "owner/name"'),
-            org: z.string().optional().describe("org 레벨 대상(그 org 의 모든 레포 공유)"),
-            host: z.string().url().optional().describe("GHE 베이스 URL — 미지정 = github.com 우선 매칭"),
+            repository: z.string().optional().describe('repo-level target "owner/name"'),
+            org: z.string().optional().describe("org-level target (shared by all repos in that org)"),
+            host: z.string().url().optional().describe("GHE base URL — unset = github.com matched first"),
             runnerGroup: z
               .string()
               .optional()
-              .describe("org 러너 그룹(org 레벨 전용, 선택) — 그 그룹의 접근 정책 적용"),
-            label: z.string().max(80).optional().describe("Everdict 러너 표시 이름(기본: repo/org 이름)"),
-            githubLabels: z.array(z.string()).optional().describe("GH 러너 추가 라벨"),
+              .describe("org runner group (org level only, optional) — applies that group's access policy"),
+            label: z.string().max(80).optional().describe("Everdict runner display name (default: repo/org name)"),
+            githubLabels: z.array(z.string()).optional().describe("extra labels for the GH runner"),
             capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
           },
         },
@@ -1853,21 +1904,21 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     }
   }
 
-  // 러너 프로토콜 — `everdict runner` 가 자기 머신에서 호출(러너 토큰 rnr_ → via=runner, principal.runnerId).
-  // 잡을 가져가(lease) 로컬 실행 후 결과를 회신(submit/fail)한다. 러너 토큰만 — 일반 자격증명은 거부.
+  // Runner protocol — `everdict runner` calls this from its own machine (runner token rnr_ → via=runner, principal.runnerId).
+  // It leases a job, runs it locally, and reports the result (submit/fail). Runner token only — regular credentials are rejected.
   if (deps.runnerHub) {
     const hub = deps.runnerHub;
-    // (owner=subject, runnerId) — 디스패처가 self: 잡을 파킹한 키와 동일. runnerId 는 토큰에서.
-    // 워크스페이스 무관: 한 러너가 소유자가 속한 여러 워크스페이스의 잡을 받는다(크로스 워크스페이스).
+    // (owner=subject, runnerId) — the same key the dispatcher parked the self: job under. runnerId comes from the token.
+    // Workspace-agnostic: one runner takes jobs from every workspace its owner belongs to (cross-workspace).
     const runnerKey = (): SelfHostedKey | undefined =>
       principal.runnerId ? { owner: principal.subject, runnerId: principal.runnerId } : undefined;
-    const NEED_RUNNER = "FORBIDDEN: 러너 자격증명(rnr_ 페어링 토큰)이 필요합니다.";
+    const NEED_RUNNER = "FORBIDDEN: runner credentials (rnr_ pairing token) required.";
 
     server.registerTool(
       "lease_job",
       {
         description:
-          "다음 평가 잡 1건을 가져온다(러너 pull, long-poll). 잡이 없으면 wait_ms 까지 대기 후 {job:null} — 즉시 재호출 가능. capabilities 를 주면 러너 자가-광고(docker 감지 등 → service 하니스 게이트). 결과는 submit_job_result 로 회신.",
+          "Fetch the next eval job (runner pull, long-poll). If none, wait up to wait_ms then {job:null} — safe to call again immediately. Passing capabilities self-advertises the runner (e.g. docker detection → service-harness gate). Report the result via submit_job_result.",
         inputSchema: {
           wait_ms: z.number().int().min(0).max(60_000).optional(),
           capabilities: z.array(z.string()).optional(),
@@ -1878,19 +1929,19 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           const key = runnerKey();
           if (!key) return fail(NEED_RUNNER);
           if (deps.runnerService) {
-            await deps.runnerService.touch(key.owner, key.runnerId); // 접속 표시
-            // 러너가 실제 capability 를 보고하면 갱신(docker 감지 → service 하니스 디스패치 게이트가 정확해진다).
+            await deps.runnerService.touch(key.owner, key.runnerId); // mark as connected
+            // Update when the runner reports its actual capabilities (docker detection → sharpens the service-harness dispatch gate).
             if (capabilities) await deps.runnerService.setCapabilities(key.owner, key.runnerId, capabilities);
           }
-          // capabilities 를 허브에 전달 → placement 게이트(case.image→docker 필요한데 러너에 없으면 그 잡을 명확히 거부).
-          const leased = await hub.leaseWait(key, wait_ms ?? 0, capabilities); // 미지정=즉시반환(하위호환)
+          // Pass capabilities to the hub → placement gate (if a case.image needs docker but the runner lacks it, reject that job outright).
+          const leased = await hub.leaseWait(key, wait_ms ?? 0, capabilities); // unset = return immediately (backward compatible)
           return ok(leased ?? { job: null });
         }),
     );
     server.registerTool(
       "submit_job_result",
       {
-        description: "lease 한 잡의 실행 결과(CaseResult)를 회신 → 컨트롤플레인의 대기 중 디스패치를 완료한다.",
+        description: "Report the leased job's result (CaseResult) → completes the control plane's pending dispatch.",
         inputSchema: { jobId: z.string(), result: CaseResultSchema },
       },
       ({ jobId, result }) =>
@@ -1903,7 +1954,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "fail_job",
       {
-        description: "lease 한 잡의 실행 실패를 회신 → 대기 중 디스패치를 에러로 종료.",
+        description: "Report the leased job's failure → ends the pending dispatch with an error.",
         inputSchema: { jobId: z.string(), message: z.string() },
       },
       ({ jobId, message }) =>
@@ -1917,7 +1968,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "heartbeat_job",
       {
         description:
-          "러너 생존 신호 — 접속 시각(lastSeenAt) 갱신. jobId 를 주면 그 잡의 lease 도 갱신해 장기 실행 중 재큐를 막는다.",
+          "Runner liveness signal — refresh lastSeenAt. Passing jobId also renews that job's lease to prevent requeue during long runs.",
         inputSchema: { jobId: z.string().optional() },
       },
       ({ jobId }) =>
@@ -1933,24 +1984,24 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
 
   if (deps.keyStore) {
     const keys = deps.keyStore;
-    // 개인 API 키 — self-scoped(역할 게이트 없음). 각 유저가 본인(subject) 키만 보고/발급/취소. 키는 발급자 권한으로 동작.
+    // Personal API keys — self-scoped (no role gate). Each user views/issues/revokes only their own (subject) keys. A key acts with the issuer's privileges.
     server.registerTool(
       "list_api_keys",
-      { description: "내 API 키 목록(메타만 — 평문/해시 없음, prefix 로 식별)", inputSchema: {} },
+      { description: "My API keys (metadata only — no plaintext/hash, identified by prefix)", inputSchema: {} },
       () => plain(async () => ok(await keys.list(ws, principal.subject))),
     );
     server.registerTool(
       "create_api_key",
       {
         description:
-          "새 개인 API 키 발급 — 발급자(나)의 권한으로 동작한다. scopes 로 더 좁힐 수 있다(read|write|admin, 역할을 넘지 못함). 미지정이면 내 역할 그대로. 평문(ak_…)은 응답에 한 번만 노출되고 다시 못 본다.",
+          "Issue a new personal API key — acts with the issuer's (my) privileges. scopes can narrow it further (read|write|admin, never exceeding your role). If unset, keeps my role. The plaintext (ak_…) is shown once in the response and can't be read again.",
         inputSchema: {
-          label: z.string().max(80).optional().describe("식별용 레이블(선택)"),
+          label: z.string().max(80).optional().describe("identifying label (optional)"),
           scopes: z
             .array(z.enum(API_KEY_SCOPES))
             .nonempty()
             .optional()
-            .describe("권한 범위(read|write|admin). 미지정=내 역할 그대로"),
+            .describe("permission scope (read|write|admin). unset = keep my role"),
         },
       },
       ({ label, scopes }) =>
@@ -1958,10 +2009,13 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
     server.registerTool(
       "revoke_api_key",
-      { description: "내 API 키 취소(즉시 무효). id 는 list_api_keys 의 id.", inputSchema: { id: z.string() } },
+      {
+        description: "Revoke my API key (effective immediately). id is the id from list_api_keys.",
+        inputSchema: { id: z.string() },
+      },
       ({ id }) =>
         plain(async () => {
-          await keys.revoke(ws, id, principal.subject); // 내 키만 — 남의 키/머신 키는 no-op
+          await keys.revoke(ws, id, principal.subject); // only my keys — others' keys / machine keys are a no-op
           return ok({ workspace: ws, id, revoked: true });
         }),
     );
@@ -1971,13 +2025,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const membership = deps.membershipService;
     server.registerTool(
       "list_members",
-      { description: "이 워크스페이스의 멤버 목록(subject·role·email·가입시각)", inputSchema: {} },
+      { description: "This workspace's members (subject·role·email·joined-at)", inputSchema: {} },
       () => run(principal, "members:read", async () => ok(await membership.listMembers(ws))),
     );
     server.registerTool(
       "set_member_role",
       {
-        description: "멤버 역할 변경(viewer|member|admin). 멤버 아니면 NOT_FOUND, 마지막 admin 강등은 CONFLICT.",
+        description:
+          "Change a member's role (viewer|member|admin). NOT_FOUND if not a member, CONFLICT when demoting the last admin.",
         inputSchema: { subject: z.string(), role: z.enum(EVERDICT_ROLES) },
       },
       ({ subject, role }) =>
@@ -1988,7 +2043,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
     server.registerTool(
       "remove_member",
-      { description: "멤버 제거(멱등). 마지막 admin 제거는 CONFLICT.", inputSchema: { subject: z.string() } },
+      {
+        description: "Remove a member (idempotent). Removing the last admin is CONFLICT.",
+        inputSchema: { subject: z.string() },
+      },
       ({ subject }) =>
         run(principal, "members:write", async () => {
           await membership.removeMember(ws, subject);
@@ -1997,13 +2055,14 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
     server.registerTool(
       "list_invites",
-      { description: "이 워크스페이스의 대기중 초대 목록(메타만 — 토큰/해시 없음)", inputSchema: {} },
+      { description: "This workspace's pending invites (metadata only — no token/hash)", inputSchema: {} },
       () => run(principal, "members:write", async () => ok(await membership.listInvites(ws))),
     );
     server.registerTool(
       "create_invite",
       {
-        description: "초대 토큰 발급. 응답의 token(inv_…)은 한 번만 노출 — 링크로 공유하면 수락 시 그 role 로 가입.",
+        description:
+          "Issue an invite token. The response token (inv_…) is shown once — share it as a link, and accepting joins with that role.",
         inputSchema: { role: z.enum(EVERDICT_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() },
       },
       ({ role, expiresInHours }) =>
@@ -2019,7 +2078,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
     server.registerTool(
       "revoke_invite",
-      { description: "대기중 초대 취소(id 는 list_invites 의 id)", inputSchema: { id: z.string() } },
+      { description: "Cancel a pending invite (id is the id from list_invites)", inputSchema: { id: z.string() } },
       ({ id }) =>
         run(principal, "members:write", async () => {
           await membership.revokeInvite(ws, id);
@@ -2029,7 +2088,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "accept_invite",
       {
-        description: "초대 토큰 수락 → 그 워크스페이스에 가입(역할 게이트 없음; 사람 계정만). 만료/사용/무효는 에러.",
+        description:
+          "Accept an invite token → join that workspace (no role gate; human accounts only). Expired/used/invalid → error.",
         inputSchema: { token: z.string() },
       },
       ({ token }) => plain(async () => ok(await membership.acceptInvite(principal, token))),
@@ -2040,17 +2100,17 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const workspaces = deps.workspaceService;
     server.registerTool(
       "list_workspaces",
-      { description: "내가 속한 워크스페이스 목록(역할 포함)", inputSchema: {} },
+      { description: "Workspaces I belong to (including role)", inputSchema: {} },
       () => plain(async () => ok(await workspaces.listForSubject(principal.subject))),
     );
     server.registerTool(
       "create_workspace",
       {
         description:
-          "새 워크스페이스 생성(나는 admin 멤버). name 필수, id(slug) 선택 — 생성 후 그 워크스페이스로 스코프된다.",
+          "Create a new workspace (I become an admin member). name required, id (slug) optional — scope moves to it after creation.",
         inputSchema: {
-          name: z.string().describe("표시 이름"),
-          id: z.string().optional().describe("워크스페이스 id(slug, ^[a-z0-9][a-z0-9-]*$). 생략 시 name 에서 파생"),
+          name: z.string().describe("display name"),
+          id: z.string().optional().describe("workspace id (slug, ^[a-z0-9][a-z0-9-]*$). Derived from name if omitted"),
         },
       },
       ({ name, id }) =>
@@ -2059,7 +2119,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     server.registerTool(
       "get_workspace",
       {
-        description: "활성 워크스페이스 레코드(id/name/logoUrl/owner/createdAt). admin(settings:read).",
+        description: "The active workspace record (id/name/logoUrl/owner/createdAt). admin (settings:read).",
         inputSchema: {},
       },
       () => run(principal, "settings:read", async () => ok(await workspaces.get(ws))),
@@ -2068,10 +2128,10 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "update_workspace",
       {
         description:
-          "워크스페이스 이름/로고 수정(admin, settings:write). slug(URL)은 불변. 로고는 http(s) URL 또는 data:image base64. 빈 문자열은 로고 제거.",
+          "Update the workspace name/logo (admin, settings:write). The slug (URL) is immutable. Logo is an http(s) URL or data:image base64. Empty string removes the logo.",
         inputSchema: {
-          name: z.string().optional().describe("표시 이름(80자 이하)"),
-          logoUrl: z.string().optional().describe("로고 이미지 — http(s) URL 또는 data:image base64"),
+          name: z.string().optional().describe("display name (≤80 chars)"),
+          logoUrl: z.string().optional().describe("logo image — http(s) URL or data:image base64"),
         },
       },
       ({ name, logoUrl }) =>
@@ -2088,12 +2148,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "delete_workspace",
       {
         description:
-          "활성 워크스페이스 삭제(생성자[owner]만; 취소 불가). 멤버·런·설정 등 모든 워크스페이스 데이터가 함께 삭제된다.",
+          "Delete the active workspace (owner/creator only; irreversible). All workspace data — members, runs, settings, etc. — is deleted with it.",
         inputSchema: {},
       },
       () =>
         plain(async () => {
-          await workspaces.delete(ws, principal.subject); // 서비스가 owner 검증(아니면 FORBIDDEN)
+          await workspaces.delete(ws, principal.subject); // the service verifies owner (else FORBIDDEN)
           return ok({ workspace: ws, deleted: true });
         }),
     );
@@ -2105,7 +2165,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "get_profile",
       {
         description:
-          "내 프로필(이름/유저네임/아바타) 조회. 없으면 빈 객체. email 은 SSO(읽기전용)라 whoami/me 에서 본다.",
+          "Read my profile (name/username/avatar). Empty object if none. email is SSO (read-only), seen via whoami/me.",
         inputSchema: {},
       },
       () => plain(async () => ok((await profiles.get(principal.subject)) ?? {})),
@@ -2114,11 +2174,11 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "update_profile",
       {
         description:
-          "내 프로필 수정(self-serve, 역할 무관). 제공한 필드만 갱신, 빈 문자열은 그 필드 삭제. email 은 SSO 라 수정 불가.",
+          "Update my profile (self-serve, role-agnostic). Only provided fields change, an empty string clears that field. email is SSO and can't be edited.",
         inputSchema: {
-          name: z.string().optional().describe("표시 이름(80자 이하)"),
-          username: z.string().optional().describe("유저네임(영숫자/_/- 2~39자)"),
-          avatarUrl: z.string().optional().describe("아바타 이미지 — http(s) URL 또는 data:image base64"),
+          name: z.string().optional().describe("display name (≤80 chars)"),
+          username: z.string().optional().describe("username (alphanumeric/_/-, 2–39 chars)"),
+          avatarUrl: z.string().optional().describe("avatar image — http(s) URL or data:image base64"),
         },
       },
       ({ name, username, avatarUrl }) =>
@@ -2140,7 +2200,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "leave_workspace",
       {
         description:
-          "이 워크스페이스에서 나간다(self-serve, 자기 멤버십만). 마지막 admin 은 나갈 수 없다(에러). 나간 뒤엔 다른 워크스페이스로 스코프하라.",
+          "Leave this workspace (self-serve, your own membership only). The last admin can't leave (error). After leaving, scope to another workspace.",
         inputSchema: {},
       },
       () =>
@@ -2155,14 +2215,20 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     const settings = deps.settingsStore;
     server.registerTool(
       "get_workspace_settings",
-      { description: "이 워크스페이스의 설정(계측 정책 등). 미설정이면 빈 객체.", inputSchema: {} },
+      { description: "This workspace's settings (metering policy, etc.). Empty object if unset.", inputSchema: {} },
       () => run(principal, "settings:read", async () => ok((await settings.get(ws)) ?? {})),
     );
     server.registerTool(
       "set_workspace_settings",
       {
-        description: "워크스페이스 설정 부분 갱신(병합). meterUsage: 이 워크스페이스 run 의 사용량 계측 on/off.",
-        inputSchema: { meterUsage: z.boolean().optional().describe("사용량 계측 기본값(요청별 override 가 우선)") },
+        description:
+          "Partially update (merge) workspace settings. meterUsage: turn usage metering for this workspace's runs on/off.",
+        inputSchema: {
+          meterUsage: z
+            .boolean()
+            .optional()
+            .describe("default for usage metering (per-request override takes precedence)"),
+        },
       },
       ({ meterUsage }) =>
         run(principal, "settings:write", async () =>

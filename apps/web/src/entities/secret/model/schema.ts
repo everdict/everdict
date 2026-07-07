@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 GET /secrets 응답의 클라이언트 미러 — 이름 + 갱신시각 + 스코프.
-// scope: "workspace"(공유, admin 관리) | "user"(내 개인, 셀프 관리). 값은 write-only(저장 후 반환 안 됨).
+// Client mirror of the control-plane GET /secrets response — name + updated time + scope.
+// scope: "workspace" (shared, admin-managed) | "user" (my personal, self-managed). Values are write-only (never returned after saving).
 export const secretScopeSchema = z.enum(['user', 'workspace'])
 export type SecretScope = z.infer<typeof secretScopeSchema>
 

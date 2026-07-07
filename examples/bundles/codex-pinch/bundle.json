@@ -1,7 +1,7 @@
 {
   "id": "codex-pinch",
   "version": "1.1.0",
-  "description": "codex(CLI 코딩 에이전트) 하니스 + pinch 벤치마크 번들. self-hosted 러너에서 codex 를 머신 로그인으로 실행. 순수 데이터 — 코어 무변경.",
+  "description": "codex (CLI coding agent) harness + pinch benchmark bundle. Runs codex on a self-hosted runner with the machine login. Pure data — no core changes.",
   "harnessTemplates": [
     {
       "kind": "command",
@@ -27,7 +27,7 @@
     {
       "id": "pinch",
       "version": "1.0.0",
-      "description": "pinch 코딩 벤치마크 어댑터(템플릿) — jsonl 소스의 repo/ref/테스트커맨드를 케이스로. 실제 pinch 의 소스 종류·필드명은 사용자가 교체.",
+      "description": "pinch coding-benchmark adapter (template) — turns a jsonl source's repo/ref/test-command into cases. Replace the real pinch's source kind and field names yourself.",
       "category": "coding",
       "source": { "kind": "jsonl" },
       "mapping": {
@@ -44,7 +44,7 @@
     {
       "id": "pinch-dashboards",
       "version": "1.0.0",
-      "description": "PinchBench building-dashboards — 코딩 에이전트 변형(repo env): 에이전트가 dashboard.json 을 작성하고, 산출물을 결정적 체크(valid JSON + 4개 패널 키)로 채점. judge 모델 불필요 — codex 머신 로그인만으로 self-hosted 실행/채점.",
+      "description": "PinchBench building-dashboards — coding-agent variant (repo env): the agent writes dashboard.json, and the output is scored by deterministic checks (valid JSON + 4 panel keys). No judge model needed — self-hosted run/scoring with just the codex machine login.",
       "cases": [
         {
           "id": "api-health-dashboard",
@@ -67,7 +67,7 @@
     {
       "id": "pinch-building-dashboards",
       "version": "1.0.0",
-      "description": "PinchBench(github.com/pinchbench/skill) building-dashboards — 원본(prompt env + judge 루브릭). judge 모델 필요. hermes 스크립트가 쓰는 그 벤치마크와 동일 — codex 와 나란히 비교용.",
+      "description": "PinchBench (github.com/pinchbench/skill) building-dashboards — the original (prompt env + judge rubric). Requires a judge model. Same benchmark the hermes script uses — for a side-by-side comparison with codex.",
       "cases": [
         {
           "id": "api-health-dashboard",

@@ -12,9 +12,9 @@ import {
   type RecipeItem,
 } from './import-benchmark-form'
 
-// "벤치마크 추가" 진입점 — 두 모드:
-//  · 소스에서 만들기(기본): 가이드 위저드(소스→미리보기/필드감지→매핑→한 번에 생성). 신규 벤치마크의 주 경로.
-//  · 카탈로그·레시피: 기존 first-party 카탈로그/등록된 레시피에서 가져오기.
+// "Add benchmark" entry point — two modes:
+//  · Build from source (default): a guided wizard (source→preview/field-detect→mapping→create in one shot). The primary path for a new benchmark.
+//  · Catalog·recipe: import from an existing first-party catalog / a registered recipe.
 export function AddBenchmark({
   benchmarks,
   recipes,
@@ -26,10 +26,10 @@ export function AddBenchmark({
   recipes: RecipeItem[]
   existingDatasets?: { id: string; versions: string[] }[]
   preselectRecipe?: string
-  hfTokenScope?: 'user' | 'workspace' // 사용 가능한 HF_TOKEN 시크릿의 스코프(없으면 미보유 — gated 안내)
+  hfTokenScope?: 'user' | 'workspace' // scope of the available HF_TOKEN secret (absent = not held — gated notice)
 }) {
   const t = useTranslations('importBenchmark')
-  // 레시피 상세에서 "데이터셋으로 만들기"로 진입하면(?recipe=) 가져오기 모드로 시작 + 해당 레시피 프리셀렉트.
+  // Entering from a recipe detail via "make into a dataset" (?recipe=) starts in import mode + preselects that recipe.
   const [mode, setMode] = useState<'build' | 'import'>(preselectRecipe ? 'import' : 'build')
   return (
     <div className="space-y-5">

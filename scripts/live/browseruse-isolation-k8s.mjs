@@ -1,13 +1,13 @@
-// 라이브 e2e (service-topology, K8s 멀티테넌트 격리): browser-use 하니스를 *테넌트(trustZone)별로* 띄워 격리 실증.
-// ServiceTopologyBackend 가 tenant→TrustZone 으로 해석(trustZones.resolve) → assertHardenedIsolation → 존별
-// K8sTopologyRuntime.ensureTopology(spec, zone): warm 토폴로지를 **테넌트 전용 네임스페이스**에 배포(테넌트 간 warm 풀
-// 공유 금지) + zone.network 로 NetworkPolicy 적용. 두 테넌트(acme/globex)를 띄워 ns/Deployment 분리 + netpol 적용을
-// 증거로 확인하고, 각 테넌트의 front-door 를 인터랙티브 구동해 둘 다 자기 존에서 동작함을 보인다.
+// Live e2e (service-topology, K8s multi-tenant isolation): launch the browser-use harness *per tenant (trustZone)* to prove isolation.
+// ServiceTopologyBackend resolves tenant→TrustZone (trustZones.resolve) → assertHardenedIsolation → per-zone
+// K8sTopologyRuntime.ensureTopology(spec, zone): deploy the warm topology into a **tenant-dedicated namespace** (no cross-tenant warm-pool
+// sharing) + apply a NetworkPolicy from zone.network. Launch two tenants (acme/globex), confirm ns/Deployment separation + netpol
+// application as evidence, and interactively drive each tenant's front-door to show both work in their own zone.
 //
-// 사전: kind(컨텍스트 kind-everdict). 노드↔기본 브리지(파드→host LiteLLM 172.17.0.1) + 이미지 kind 로드는 이 스크립트가 수행.
-// 주의: kind 기본 CNI(kindnet)는 NetworkPolicy 를 *적용*만 하고 강제(enforce)는 안 함 — 강제엔 Calico/Cilium 필요.
-//   여기선 정책 매니페스트가 존별로 생성·적용되는 것까지 검증(네임스페이스 경계는 실효).
-// 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
+// Prereq: kind (context kind-everdict). This script handles node↔default-bridge (pod→host LiteLLM 172.17.0.1) + kind image load.
+// Note: kind's default CNI (kindnet) only *applies* NetworkPolicy, it does not *enforce* it — enforcement needs Calico/Cilium.
+//   Here we verify only that the policy manifest is generated and applied per zone (the namespace boundary is real).
+// Key: OPENAI_API_KEY env or infra/litellm/.env (LITELLM_MASTER_KEY) — runtime only, never committed.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -39,7 +39,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env).");
+  console.error("no LLM key (OPENAI_API_KEY or infra/litellm/.env).");
   process.exit(2);
 }
 function jaegerBridgeIp() {
@@ -60,12 +60,12 @@ function jaegerBridgeIp() {
   }
 }
 
-console.log("=== dev 호스트 도달 + kind 이미지 로드 ===");
+console.log("=== reach the dev host + kind image load ===");
 spawnSync("docker", ["network", "connect", "bridge", NODE], { stdio: "ignore" });
 execFileSync("kind", ["load", "docker-image", IMAGE, "--name", CLUSTER], { stdio: "ignore" });
 console.log("loaded.");
 
-// 테넌트별 존: trusted=true + runc(=kind 에 gvisor 없음 → assertHardenedIsolation 통과), 전용 네임스페이스, cross-tenant 차단.
+// Per-tenant zone: trusted=true + runc (=no gvisor in kind → passes assertHardenedIsolation), dedicated namespace, cross-tenant deny.
 const zoneFor = (id) => ({
   id,
   isolationRuntime: "runc",
@@ -90,7 +90,7 @@ const k8s = new K8sTopologyRuntime({
   context: CONTEXT,
   imagePullPolicy: "IfNotPresent",
   readyTimeoutMs: 180000,
-  networkPolicies: true, // zone.network → NetworkPolicy 매니페스트 생성·적용(kindnet 은 미강제, 매니페스트는 적용됨)
+  networkPolicies: true, // zone.network → generate & apply NetworkPolicy manifest (kindnet doesn't enforce, but the manifest is applied)
   storeEnv: {
     OPENAI_API_KEY: KEY,
     OPENAI_BASE_URL: `http://${LITELLM_HOST}:4000/v1`,
@@ -186,8 +186,8 @@ try {
     }
   }
 
-  // === 격리 증거: 테넌트별 네임스페이스 분리 + 각 ns 의 browseruse-agent Deployment + NetworkPolicy ===
-  console.log("\n=== 격리 증거 ===");
+  // === Isolation evidence: per-tenant namespace separation + a browseruse-agent Deployment + NetworkPolicy in each ns ===
+  console.log("\n=== isolation evidence ===");
   const ns = k(["get", "ns", "-o", "name"]).trim().split("\n");
   const evidence = {};
   for (const tenant of TENANTS) {
@@ -215,11 +215,11 @@ try {
   ok = bothPass && separateNs && distinctEndpoints;
   console.log(
     ok
-      ? "\n✅ ②: browser-use 하니스가 테넌트별 trustZone 으로 격리 배포됨 — 각 테넌트가 *전용 네임스페이스*(everdict-acme / " +
-          "everdict-globex)에 자기 warm 토폴로지(browseruse-agent Deployment)를 갖고(테넌트 간 풀 공유 없음, 서로 다른 front-door " +
-          "엔드포인트), zone.network 로 NetworkPolicy 가 ns 별 적용됨. 두 테넌트 모두 자기 존에서 인터랙티브 구동 PASS. " +
-          "(kindnet 은 netpol 미강제 — 강제엔 Calico/Cilium; 네임스페이스 경계는 실효.)"
-      : "\n⚠️ 기대와 불일치(위 perTenant/evidence 참고)",
+      ? "\n✅ ②: the browser-use harness is deployed isolated per-tenant by trustZone — each tenant has its own warm topology " +
+          "(browseruse-agent Deployment) in a *dedicated namespace* (everdict-acme / everdict-globex) (no cross-tenant pool sharing, " +
+          "distinct front-door endpoints), and a NetworkPolicy is applied per ns from zone.network. Both tenants drive interactively in " +
+          "their own zone: PASS. (kindnet doesn't enforce netpol — enforcement needs Calico/Cilium; the namespace boundary is real.)"
+      : "\n⚠️ does not match expectation (see perTenant/evidence above)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

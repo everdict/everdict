@@ -2,7 +2,7 @@ import type { ComputeHandle, ExecOpts, ExecResult, RunContext, TraceEvent } from
 import { describe, expect, it } from "vitest";
 import { ClaudeCodeHarness } from "./claude-code.js";
 
-// claude 를 실제로 부르지 않고, 주입된 인증 env 와 stream-json 파싱을 결정적으로 검증한다.
+// Without actually calling claude, deterministically verify the injected auth env and stream-json parsing.
 class MockCompute implements ComputeHandle {
   lastEnv: Record<string, string> | undefined;
   lastCmd = "";
@@ -39,7 +39,7 @@ const STREAM = [
 ].join("\n");
 
 describe("ClaudeCodeHarness", () => {
-  it("샌드박스용 구독 토큰을 compute 실행 env 로 주입하고 stream-json 을 트레이스로 변환한다", async () => {
+  it("injects the sandbox subscription token into the compute exec env and converts stream-json into a trace", async () => {
     const compute = new MockCompute(STREAM);
     const ctx: RunContext = { apiKeyEnv: { CLAUDE_CODE_OAUTH_TOKEN: "tok-123" }, timeoutSec: 60 };
 

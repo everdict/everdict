@@ -63,7 +63,7 @@ box, identity, and bill.
 
 - **Unit of work** — `runAgentJob(job: AgentJob): Promise<CaseResult>` (`packages/agent/src/run.ts:13`) runs a
   whole case over `LocalDriver` (`opts.driver ?? new LocalDriver()`). `run.ts:15` already documents a dev
-  fallback for "LocalBackend 직접 디스패치할 때" — exactly the self-hosted shape, minus the pull transport.
+  fallback for "when dispatching LocalBackend directly" — exactly the self-hosted shape, minus the pull transport.
 - **Job wire format** — `AgentJob` (`packages/core/src/agent-job.ts`) is Zod-validated and base64-JSON
   serializable; it already carries `tenant`, `meterUsage`, transient `repoToken`, etc. `CaseResult` is the
   return contract. The push path scrapes `__EVERDICT_RESULT__` from logs; the pull path posts `CaseResult` JSON
@@ -92,9 +92,9 @@ as the former `ConnectionStore`. Metadata: `label` (device name), `os`, `capabil
 `os-use`, `docker`), `lastSeenAt`, `connectedAt`. It is **not** in the workspace `RuntimeRegistry` (which stays
 the immutable, workspace-shared SSOT for `nomad|k8s`).
 
-It nonetheless **surfaces as a runtime choice**: the scorecard 실행 form's existing runtime selector merges in
-the caller's own runners as `내 로컬 호스트 — <label>` options. Selecting one sets a synthetic
-`placement.target = self:<runnerId>` (distinct from a registry runtime id). This is the user's "런타임만 바꿔"
+It nonetheless **surfaces as a runtime choice**: the scorecard Run form's existing runtime selector merges in
+the caller's own runners as `My local host — <label>` options. Selecting one sets a synthetic
+`placement.target = self:<runnerId>` (distinct from a registry runtime id). This is the user's "just swap the runtime"
 mental model with zero change to harness/dataset selection.
 
 ### How a job reaches the runner (D3, D5) — pull via MCP, owner-scoped lease queue
@@ -137,7 +137,7 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runA
   token/usd budget**; it counts only against `runs` (so quota still applies). The harness's reported
   `total_cost_usd` is recorded as **provenance**, not billed to the workspace.
 - **Provenance tag** — the `CaseResult`/run record carries `{ ranOn: "self-hosted", runner: <runnerId/label>,
-  by: <subject> }`. This is the D2 "workspace에 기록 + 태그" outcome.
+  by: <subject> }`. This is the D2 "recorded in the workspace + tagged" outcome.
 
 ### Reuse vs new
 
@@ -155,12 +155,12 @@ Self-hosted:   member's `everdict runner` → MCP lease_job (long-call) → runA
 ## Slices (all shipped; `pnpm` gates + live e2e green at each step)
 
 1. ✅ **`RunnerStore` + pairing** — personal entity (mirrors the former `ConnectionStore`): pair (token shown once,
-   SHA-256-hashed at rest), list, revoke; BFF + MCP parity; mig `0025_create_runners`. Account page "연결된 러너".
+   SHA-256-hashed at rest), list, revoke; BFF + MCP parity; mig `0025_create_runners`. Account page "Connected runners".
    **Superseded UI note (desktop D7)**: the browser's manual pairing modal was later removed — personal-machine
    pairing is the desktop app's one-click (`docs/architecture/desktop-app.md`); the browser account page is
-   manage-only (list/live status/revoke + 데스크톱 다운로드 CTA). The `POST /runners` API/MCP surface is
+   manage-only (list/live status/revoke + a desktop-download CTA). The `POST /runners` API/MCP surface is
    unchanged and is the **headless path**: pair with an API key, then `everdict runner --pair <rnr_…>`.
-2. ✅ **Runtime selector merge + `self:` routing** — scorecard 실행 form lists the caller's own runners as
+2. ✅ **Runtime selector merge + `self:` routing** — scorecard Run form lists the caller's own runners as
    `self:<runnerId>`; `RuntimeDispatcher` recognizes `self:` (resolve + owner-check → 404 if unowned). `AgentJob.submittedBy`
    threads the subject. (Shipped with a stub backend, replaced in slice 3.)
 3. ✅ **`SelfHostedBackend` + `RunnerHub` lease queue** — in-memory owner-scoped FIFO park queue; `dispatch` parks +

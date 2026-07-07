@@ -6,7 +6,7 @@ import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 import { Tooltip } from '@/shared/ui/tooltip'
 
-// superseded 는 스코어카드 전용 종결(같은 PR 의 더 새 발사가 회수·대체) — 실패도 성공도 아닌 중립.
+// superseded is a scorecard-only terminal state (a newer launch on the same PR recalls·replaces it) — neither failure nor success, but neutral.
 type PillStatus = RunStatus | 'superseded'
 
 const MAP: Record<
@@ -36,7 +36,7 @@ export function StatusPill({ status }: { status: PillStatus }) {
   )
 }
 
-// 목록 카드용 상태 표기 — **색상 아이콘만**, 라벨은 호버 툴팁(카드 표기 표준: UserAvatar 와 동일 원칙).
+// Status display for list cards — **color icon only**, label in a hover tooltip (card display standard: same principle as UserAvatar).
 const ICON_CLASS: Record<PillStatus, string> = {
   succeeded: 'text-[var(--color-success)]',
   failed: 'text-destructive',

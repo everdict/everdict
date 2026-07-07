@@ -19,17 +19,17 @@ const rec = (
 });
 
 describe("InMemoryViewStore", () => {
-  it("listVisible 는 워크스페이스 공유 뷰 + 내 비공개 뷰만(남의 비공개 제외), 최신순", async () => {
+  it("listVisible returns only workspace-shared views + my private views (others' private excluded), newest first", async () => {
     const store = new InMemoryViewStore();
     await store.create(rec("mine-priv", "acme", "alice", "private", "2026-06-01T00:00:00.000Z"));
     await store.create(rec("shared", "acme", "bob", "workspace", "2026-06-02T00:00:00.000Z"));
     await store.create(rec("bob-priv", "acme", "bob", "private", "2026-06-03T00:00:00.000Z"));
     await store.create(rec("other-ws", "beta", "alice", "workspace", "2026-06-04T00:00:00.000Z"));
-    // alice 는 자기 비공개 + 워크스페이스 공유만. bob 의 비공개는 안 보이고, 다른 워크스페이스도 제외.
+    // alice sees only her own private + workspace-shared. bob's private isn't visible, and other workspaces are excluded.
     expect((await store.listVisible("acme", "alice")).map((r) => r.id)).toEqual(["shared", "mine-priv"]);
   });
 
-  it("get/update/remove 는 타 워크스페이스를 건드리지 못한다(존재 누출 금지)", async () => {
+  it("get/update/remove can't touch another workspace (no existence leak)", async () => {
     const store = new InMemoryViewStore();
     await store.create(rec("a", "acme", "alice", "workspace", "2026-06-01T00:00:00.000Z"));
     expect(await store.get("beta", "a")).toBeUndefined();
@@ -38,7 +38,7 @@ describe("InMemoryViewStore", () => {
     expect(await store.get("acme", "a")).toBeDefined();
   });
 
-  it("update 는 patch 를 병합하되 id/tenant 는 불변", async () => {
+  it("update merges the patch but keeps id/tenant immutable", async () => {
     const store = new InMemoryViewStore();
     await store.create(rec("a", "acme", "alice", "private", "2026-06-01T00:00:00.000Z"));
     const updated = await store.update("acme", "a", {

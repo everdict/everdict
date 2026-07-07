@@ -1,28 +1,28 @@
 import { ConflictError, NotFoundError } from "@everdict/core";
 import { LATEST, SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
-// (tenant, id, version) → T 의 공통 in-memory 저장/해석: _shared 폴백, latest/semver, 버전 불변.
-// 하네스 taxonomy 레지스트리(템플릿/인스턴스)가 공유한다 — 기존 HarnessRegistry 의 머신을 일반화한 것.
+// Shared in-memory storage/resolution for (tenant, id, version) → T: _shared fallback, latest/semver, immutable versions.
+// Shared by the harness taxonomy registries (template/instance) — a generalization of the former HarnessRegistry machinery.
 interface Entry<T> {
   item: T;
   seq: number;
-  createdAt: string; // 등록 시각(ISO)
-  createdBy?: string; // 등록한 subject(없으면 시드/파일)
-  deletedAt?: number; // 소프트 삭제 tombstone — set 되면 모든 read 에서 제외(내용은 보존, 데이터셋과 동일 패턴)
-  tags?: string[]; // 버전 태그 — 번호만으로 버전을 분간하기 어려워 붙이는 자유 라벨. 가변 메타(내용 불변성 밖, createdBy 와 동급)
+  createdAt: string; // registration time (ISO)
+  createdBy?: string; // registering subject (absent for seed/file)
+  deletedAt?: number; // soft-delete tombstone — once set, excluded from every read (content preserved, same pattern as datasets)
+  tags?: string[]; // version tags — free-form labels attached because a version is hard to tell apart by number alone. Mutable metadata (outside content immutability, on par with createdBy)
 }
 
-// 목록 메타 — 한 id 의 살아있는 버전 요약(등록 이력에서). category/kind 등 스펙 파생은 상위 레지스트리가 채운다.
+// List metadata — live-version summary for one id (from registration history). Spec derivations like category/kind are filled in by the upstream registry.
 export interface VersionMeta {
   id: string;
   owner: string;
   versions: string[];
   latestVersion: string;
   versionCount: number;
-  createdBy?: string; // 최초 등록 버전의 subject
-  createdAt?: string; // 최초 등록 시각(ISO)
-  updatedAt?: string; // 최근 등록 시각(ISO)
-  versionTags?: Record<string, string[]>; // 버전 → 태그(빈 버전은 생략; 태그가 하나도 없으면 필드 자체 생략)
+  createdBy?: string; // subject of the first registered version
+  createdAt?: string; // first registration time (ISO)
+  updatedAt?: string; // most recent registration time (ISO)
+  versionTags?: Record<string, string[]>; // version → tags (empty versions omitted; if no tags at all, the field itself is omitted)
 }
 
 export class VersionedStore<T extends { id: string; version: string }> {
@@ -34,7 +34,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
     const ids = this.byOwner.get(owner)?.get(id);
     if (!ids) return [];
     return [...ids.values()]
-      .filter((e) => e.deletedAt === undefined) // tombstone 제외 — 삭제된 버전은 모든 read 에서 안 보인다
+      .filter((e) => e.deletedAt === undefined) // exclude tombstones — deleted versions are invisible to every read
       .sort((a, b) => compareVersions(a.item.version, b.item.version) || a.seq - b.seq)
       .map((e) => e.item.version);
   }
@@ -61,10 +61,10 @@ export class VersionedStore<T extends { id: string; version: string }> {
         throw new ConflictError(
           "CONFLICT",
           { tenant, id: item.id, version: item.version },
-          `${this.label} ${item.id}@${item.version} 가 다른 스펙으로 이미 등록되어 있습니다(버전은 불변).`,
+          `${this.label} ${item.id}@${item.version} is already registered with a different spec (versions are immutable).`,
         );
       }
-      existing.deletedAt = undefined; // 동일 내용 재등록 = 부활(revive) — 내용 불변은 그대로
+      existing.deletedAt = undefined; // re-registering identical content = revive — content immutability is preserved
       return;
     }
     versions.set(item.version, {
@@ -80,11 +80,11 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return owner ? this.ownerVersions(owner, id).includes(version) : false;
   }
 
-  // 테넌트 직접 소유 + 살아있는 버전만(폴백 없음 — _shared 는 못 지운다). 없으면 NotFound. 데이터셋과 동일 패턴.
+  // tenant directly-owned + live versions only (no fallback — _shared can't be deleted). NotFound otherwise. Same pattern as datasets.
   private ownLiveEntry(tenant: string, id: string, version: string): Entry<T> {
     const entry = this.byOwner.get(tenant)?.get(id)?.get(version);
     if (!entry || entry.deletedAt !== undefined)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} 가 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `${this.label} ${id}@${version} not found.`);
     return entry;
   }
 
@@ -92,14 +92,14 @@ export class VersionedStore<T extends { id: string; version: string }> {
     return this.ownLiveEntry(tenant, id, version).createdBy;
   }
 
-  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 + 살아있는 버전만(softDelete 와 동일 규율; _shared 는 못 태깅).
-  // 태그는 가변 레지스트리 메타 — 스펙 내용이 아니라 specsEqual/불변성에 안 걸린다.
+  // version tag replacement (full-array PUT semantics) — tenant directly-owned + live versions only (same discipline as softDelete; _shared can't be tagged).
+  // Tags are mutable registry metadata — not spec content, so they don't factor into specsEqual/immutability.
   setVersionTags(tenant: string, id: string, version: string, tags: string[]): void {
     const entry = this.ownLiveEntry(tenant, id, version);
-    entry.tags = tags.length > 0 ? tags : undefined; // 빈 배열 = 제거(revive 의 deletedAt=undefined 와 동일 관용)
+    entry.tags = tags.length > 0 ? tags : undefined; // empty array = removal (same idiom as revive's deletedAt=undefined)
   }
 
-  // 버전 → 태그 맵(살아있는 버전 중 태그가 있는 것만). 읽기는 owner 해석(_shared 폴백 포함) — versions() 와 동일 시야.
+  // version → tags map (only live versions that have tags). Reads use owner resolution (including _shared fallback) — same view as versions().
   versionTags(tenant: string, id: string): Record<string, string[]> {
     const owner = this.ownerOf(tenant, id);
     if (!owner) return {};
@@ -120,18 +120,18 @@ export class VersionedStore<T extends { id: string; version: string }> {
   }
 
   ownVersions(tenant: string, id: string): string[] {
-    return this.ownerVersions(tenant, id); // 폴백 없음 — 충돌 판정용
+    return this.ownerVersions(tenant, id); // no fallback — for conflict checks
   }
 
   get(tenant: string, id: string, ref: string = LATEST): T {
     const owner = this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `${this.label} '${id}' 가 없습니다.`);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `${this.label} '${id}' not found.`);
     const version = resolveRef(id, ref, this.ownerVersions(owner, id));
     return (this.byOwner.get(owner)?.get(id)?.get(version) as Entry<T>).item;
   }
 
   listIds(tenant: string): Array<{ id: string; versions: string[]; owner: string }> {
-    const ids = new Map<string, string>(); // id → owner (테넌트 우선)
+    const ids = new Map<string, string>(); // id → owner (tenant takes precedence)
     for (const id of this.byOwner.get(SHARED_TENANT)?.keys() ?? []) ids.set(id, SHARED_TENANT);
     for (const id of this.byOwner.get(tenant)?.keys() ?? []) ids.set(id, tenant);
     return [...ids.entries()]
@@ -139,13 +139,13 @@ export class VersionedStore<T extends { id: string; version: string }> {
       .map(([id, owner]) => ({ id, owner, versions: this.ownerVersions(owner, id) }));
   }
 
-  // 목록 메타 — id 별 버전 요약 + 등록 이력(최초 subject/시각, 최근 시각). 상위 레지스트리가 스펙 파생(category 등)을 얹는다.
+  // List metadata — per-id version summary + registration history (first subject/time, most recent time). The upstream registry layers on spec derivations (category, etc.).
   listMeta(tenant: string): VersionMeta[] {
     const out: VersionMeta[] = [];
     for (const { id, owner } of this.listIds(tenant)) {
       const versions = this.ownerVersions(owner, id);
       const latestVersion = versions.at(-1);
-      if (latestVersion === undefined) continue; // 버전 없는 id는 방어적으로 제외
+      if (latestVersion === undefined) continue; // defensively exclude ids with no versions
       const entries = [...(this.byOwner.get(owner)?.get(id)?.values() ?? [])].sort((a, b) => a.seq - b.seq);
       const earliest = entries[0];
       const latest = entries.at(-1);

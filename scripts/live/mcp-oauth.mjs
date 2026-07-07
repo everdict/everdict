@@ -112,7 +112,7 @@ while (hops++ < 6) {
   html = await res.text();
   action = formAction(html);
   if (!action) die(`stuck: no redirect and no form (HTTP ${res.status})`);
-  const consent = /OAUTH_GRANT|consent|동의|grant/i.test(html);
+  const consent = /OAUTH_GRANT|consent|동의|grant/i.test(html); // "동의" = ko-locale Keycloak consent UI — KEEP
   res = await fetch(action, {
     method: "POST",
     redirect: "manual",

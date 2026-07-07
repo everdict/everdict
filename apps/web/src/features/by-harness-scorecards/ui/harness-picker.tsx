@@ -12,7 +12,7 @@ export interface HarnessOption {
   label: string
 }
 
-// harness 를 골라 harness-중심 뷰로 이동(그 harness 가 수행한 모든 벤치마크 스코어 + 버전별 모델).
+// Pick a harness to navigate to its harness-centric view (every benchmark score that harness ran + per-version models).
 export function HarnessPicker({
   harnesses,
   harness,

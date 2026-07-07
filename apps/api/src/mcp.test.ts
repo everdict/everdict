@@ -63,7 +63,7 @@ const HARNESS_INSTANCE = JSON.stringify({
   template: { id: "bu", version: "1" },
   id: "bu",
   version: "1.0.0",
-  description: "승인 프롬프트 자동 통과 플래그 추가",
+  description: "add a flag to auto-approve the approval prompt",
   pins: { "agent-server": "img" },
 });
 
@@ -151,7 +151,7 @@ async function connect(
   return client;
 }
 
-// 러너 토큰 principal(via=runner, runnerId) 로 연결 — 러너 프로토콜 도구(lease/submit/…)용.
+// Connect with a runner-token principal (via=runner, runnerId) — for runner-protocol tools (lease/submit/…).
 async function connectRunner(
   deps: ReturnType<typeof harness>,
   runnerId: string,
@@ -170,7 +170,7 @@ async function connectRunner(
 const text = (r: unknown): string => (r as { content?: Array<{ text?: string }> }).content?.[0]?.text ?? "";
 
 describe("MCP tools", () => {
-  it("tools/list 에 run/harness 도구가 노출된다", async () => {
+  it("tools/list exposes the run/harness tools", async () => {
     const client = await connect(harness(), ["admin"]);
     const names = (await client.listTools()).tools.map((t) => t.name).sort();
     expect(names).toEqual([
@@ -259,41 +259,41 @@ describe("MCP tools", () => {
     ]);
   });
 
-  it("register_harness_template → register_harness(instance); viewer 도 가능(무게이트)", async () => {
+  it("register_harness_template → register_harness(instance); viewer can too (ungated)", async () => {
     const deps = harness();
     const viewer = await connect(deps, ["viewer"]);
-    // 템플릿(대분류) 등록 — 무게이트.
+    // Register a template (category) — ungated.
     const tpl = await viewer.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
     expect(tpl.isError).toBeFalsy();
-    // 인스턴스 등록(template+pins) — 무게이트.
+    // Register an instance (template+pins) — ungated.
     const inst = await viewer.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
     expect(inst.isError).toBeFalsy();
     expect(text(inst)).toContain("bu");
-    // 잘못된 JSON → 오류.
+    // Malformed JSON → error.
     const bad = await viewer.callTool({ name: "register_harness", arguments: { spec: "{not json" } });
     expect(bad.isError).toBe(true);
   });
 
-  it("set_harness_version_tags — 버전 태그 교체(스펙 밖 가변 메타) 후 list_harnesses.versionTags 로 노출", async () => {
+  it("set_harness_version_tags — replace version tags (mutable metadata outside the spec), then exposed via list_harnesses.versionTags", async () => {
     const deps = harness();
-    const viewer = await connect(deps, ["viewer"]); // harnesses:register 는 viewer+ (등록과 동일 게이트)
+    const viewer = await connect(deps, ["viewer"]); // harnesses:register is viewer+ (same gate as register)
     await viewer.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
     await viewer.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
 
     const set = await viewer.callTool({
       name: "set_harness_version_tags",
-      arguments: { id: "bu", version: "1.0.0", tags: ["baseline", " baseline ", "gpt-5 실험"] },
+      arguments: { id: "bu", version: "1.0.0", tags: ["baseline", " baseline ", "gpt-5 experiment"] },
     });
     expect(set.isError).toBeFalsy();
-    expect(JSON.parse(text(set))).toMatchObject({ id: "bu", version: "1.0.0", tags: ["baseline", "gpt-5 실험"] }); // 정규화(dedupe)
+    expect(JSON.parse(text(set))).toMatchObject({ id: "bu", version: "1.0.0", tags: ["baseline", "gpt-5 experiment"] }); // normalized (dedupe)
 
     const list = await viewer.callTool({ name: "list_harnesses", arguments: {} });
     const entry = (JSON.parse(text(list)) as Array<{ id: string; versionTags?: Record<string, string[]> }>).find(
       (e) => e.id === "bu",
     );
-    expect(entry?.versionTags).toEqual({ "1.0.0": ["baseline", "gpt-5 실험"] });
+    expect(entry?.versionTags).toEqual({ "1.0.0": ["baseline", "gpt-5 experiment"] });
 
-    // 없는 버전 → NOT_FOUND(isError)
+    // missing version → NOT_FOUND (isError)
     const miss = await viewer.callTool({
       name: "set_harness_version_tags",
       arguments: { id: "bu", version: "9.9.9", tags: ["x"] },
@@ -302,7 +302,7 @@ describe("MCP tools", () => {
     expect(text(miss)).toContain("NOT_FOUND");
   });
 
-  it("get_harness_template / get_harness_instance: raw 스펙 조회(구성 보기·프리필) — viewer 가능", async () => {
+  it("get_harness_template / get_harness_instance: read the raw spec (config view · prefill) — viewer allowed", async () => {
     const deps = harness();
     const viewer = await connect(deps, ["viewer"]);
     await viewer.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
@@ -318,28 +318,28 @@ describe("MCP tools", () => {
       template: { id: "bu", version: "1" },
       id: "bu",
       version: "1.0.0",
-      description: "승인 프롬프트 자동 통과 플래그 추가", // 등록 시 넣은 변경 내역이 raw 인스턴스에 보존
+      description: "add a flag to auto-approve the approval prompt", // change notes entered at register time are preserved in the raw instance
       pins: { "agent-server": "img" },
     });
 
-    // 없는 버전 → 오류.
+    // missing version → error.
     const miss = await viewer.callTool({ name: "get_harness_instance", arguments: { id: "bu", version: "nope" } });
     expect(miss.isError).toBe(true);
   });
 
-  it("workspace github app: admin 은 설치 시작·GHE 등록·목록이 되고, member 는 settings:write 없어 불가", async () => {
+  it("workspace github app: admin can start install · register GHE · list, member lacks settings:write → denied", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const member = await connect(deps, ["member"]);
 
-    // member 는 settings:write 없음 → 설치 시작 불가.
+    // member lacks settings:write → cannot start install.
     expect((await member.callTool({ name: "start_workspace_github_app_install", arguments: {} })).isError).toBe(true);
 
-    // admin 설치 시작 → github.com App 설치 페이지 URL.
+    // admin install start → github.com App installation-page URL.
     const start = JSON.parse(text(await admin.callTool({ name: "start_workspace_github_app_install", arguments: {} })));
     expect(start.installUrl).toContain("https://github.com/apps/everdict-eval/installations/new");
 
-    // admin GHE App 등록 → 목록에 1건 + App Setup URL 로 등록할 callbackUrl.
+    // admin registers a GHE App → one in the list + the callbackUrl to register as the App Setup URL.
     await admin.callTool({
       name: "register_workspace_github_app",
       arguments: { host: "https://ghe.acme.io", slug: "everdict-ghe", appId: "222", privateKeySecretName: "ghe-key" },
@@ -349,12 +349,12 @@ describe("MCP tools", () => {
     expect(view.callbackUrl).toBe("http://api.test/workspace/github-app/callback");
   });
 
-  it("workspace mattermost: admin 은 등록/조회/해제, member 는 settings:write 없어 불가", async () => {
+  it("workspace mattermost: admin can register/read/unregister, member lacks settings:write → denied", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const member = await connect(deps, ["member"]);
 
-    // member 는 settings:write 없음 → 등록 불가.
+    // member lacks settings:write → cannot register.
     expect(
       (
         await member.callTool({
@@ -364,7 +364,7 @@ describe("MCP tools", () => {
       ).isError,
     ).toBe(true);
 
-    // admin 등록 → 조회에 노출(비밀 값 없음).
+    // admin registers → visible on read (no secret values).
     await admin.callTool({
       name: "set_workspace_mattermost",
       arguments: { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" },
@@ -372,18 +372,18 @@ describe("MCP tools", () => {
     const got = JSON.parse(text(await admin.callTool({ name: "get_workspace_mattermost", arguments: {} })));
     expect(got.config).toEqual({ host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
 
-    // 해제 → 조회에서 사라짐.
+    // unregister → disappears from read.
     await admin.callTool({ name: "remove_workspace_mattermost", arguments: {} });
     const after = JSON.parse(text(await admin.callTool({ name: "get_workspace_mattermost", arguments: {} })));
     expect(after.config).toBeUndefined();
   });
 
-  it("workspace trace sinks: admin 은 복수 등록/해제, member 는 하니스별 선택만 가능(settings:write 불가)", async () => {
+  it("workspace trace sinks: admin registers/removes multiple, member can only select per harness (no settings:write)", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"]);
     const member = await connect(deps, ["member"]);
 
-    // member 는 settings:write 없음 → 싱크 등록 불가.
+    // member lacks settings:write → cannot register a sink.
     expect(
       (
         await member.callTool({
@@ -393,7 +393,7 @@ describe("MCP tools", () => {
       ).isError,
     ).toBe(true);
 
-    // admin 이 싱크 2개 등록 → 목록에 노출(비밀 값 없음).
+    // admin registers two sinks → visible in the list (no secret values).
     await admin.callTool({
       name: "set_workspace_trace_sink",
       arguments: { name: "lf", kind: "langfuse", endpoint: "https://langfuse.corp.io", authSecretName: "LF_AUTH" },
@@ -405,9 +405,9 @@ describe("MCP tools", () => {
     const got = JSON.parse(text(await admin.callTool({ name: "list_workspace_trace_sinks", arguments: {} })));
     expect(got.sinks.map((s: { name: string }) => s.name).sort()).toEqual(["lf", "mlf"]);
 
-    // member 가 하니스별 선택(harnesses:register) — 등록되지 않은 싱크는 에러.
+    // member selects per harness (harnesses:register) — an unregistered sink is an error.
     expect(
-      (await member.callTool({ name: "assign_harness_trace_sink", arguments: { harness: "h1", sink: "없는싱크" } }))
+      (await member.callTool({ name: "assign_harness_trace_sink", arguments: { harness: "h1", sink: "no-such-sink" } }))
         .isError,
     ).toBe(true);
     const assigned = JSON.parse(
@@ -415,49 +415,49 @@ describe("MCP tools", () => {
     );
     expect(assigned.assignments).toEqual({ h1: "mlf" });
 
-    // 싱크 해제 → 목록에서 사라지고 그 싱크를 가리키던 선택도 정리된다.
+    // unregister a sink → it disappears from the list and any selection pointing at it is cleaned up.
     await admin.callTool({ name: "remove_workspace_trace_sink", arguments: { name: "mlf" } });
     const after = JSON.parse(text(await admin.callTool({ name: "list_workspace_trace_sinks", arguments: {} })));
     expect(after.sinks.map((s: { name: string }) => s.name)).toEqual(["lf"]);
     expect(after.assignments).toEqual({});
   });
 
-  it("runners: 개인 소유 — pair/list/revoke 는 역할 게이트 없이 본인 러너, 로스터는 members:read, 토큰 한 번만", async () => {
+  it("runners: personally owned — pair/list/revoke your own runner with no role gate, roster is members:read, token shown once", async () => {
     const deps = harness();
     const viewer = await connect(deps, ["viewer"]);
 
-    // 러너는 개인 소유 — viewer 도 pair 가능(역할 게이트 없음). 평문 토큰은 응답에만, 메타엔 없다.
+    // Runners are personally owned — even a viewer can pair (no role gate). The plaintext token is only in the response, not the metadata.
     const paired = JSON.parse(
       text(await viewer.callTool({ name: "pair_runner", arguments: { label: "ho-macbook", capabilities: ["git"] } })),
     );
     expect(paired.token).toMatch(/^rnr_/);
     expect(paired.runner).toMatchObject({ label: "ho-macbook", capabilities: ["git"] });
 
-    // list → 본인 러너 1건, 토큰 미노출.
+    // list → one owned runner, token not exposed.
     const listed = JSON.parse(text(await viewer.callTool({ name: "list_runners", arguments: {} })));
     expect(listed.runners).toHaveLength(1);
     expect(JSON.stringify(listed)).not.toContain("rnr_");
 
-    // 워크스페이스 러너 로스터 — members:read(viewer+) → 1건(토큰 없음).
+    // Workspace runner roster — members:read (viewer+) → one entry (no token).
     const roster = JSON.parse(text(await viewer.callTool({ name: "list_workspace_runners", arguments: {} })));
     expect(roster.runners).toHaveLength(1);
 
-    // revoke → revoked:true → 목록 비어짐.
+    // revoke → revoked:true → list becomes empty.
     const rev = JSON.parse(text(await viewer.callTool({ name: "revoke_runner", arguments: { id: paired.runner.id } })));
     expect(rev).toMatchObject({ revoked: true });
     expect(JSON.parse(text(await viewer.callTool({ name: "list_runners", arguments: {} }))).runners).toHaveLength(0);
   });
 
-  it("워크스페이스-공유 러너: viewer 는 페어 불가(403), admin 만 등록/조회/해제(팀 자원)", async () => {
+  it("workspace-shared runner: viewer cannot pair (403), only admin registers/reads/unregisters (team resource)", async () => {
     const deps = harness();
     const viewer = await connect(deps, ["viewer"]);
     const admin = await connect(deps, ["admin"]);
 
-    // viewer 는 팀 러너 등록 불가 — settings:write(admin) 게이트.
+    // viewer cannot register a team runner — settings:write (admin) gate.
     const denied = await viewer.callTool({ name: "pair_workspace_runner", arguments: { label: "ci" } });
     expect(denied.isError).toBeTruthy();
 
-    // admin 이 등록 → 평문 토큰 1회, 메타엔 없음.
+    // admin registers → plaintext token once, not in metadata.
     const paired = JSON.parse(
       text(
         await admin.callTool({
@@ -469,13 +469,13 @@ describe("MCP tools", () => {
     expect(paired.token).toMatch(/^rnr_/);
     expect(paired.runner).toMatchObject({ label: "acme-ci", capabilities: ["git", "docker"] });
 
-    // 팀 소유 목록(owner=ws:<workspace>) → 1건.
+    // Team-owned list (owner=ws:<workspace>) → one entry.
     const owned = JSON.parse(text(await admin.callTool({ name: "list_workspace_owned_runners", arguments: {} })));
     expect(owned.runners).toHaveLength(1);
-    // viewer 는 팀 소유 목록도 못 봄(admin 게이트).
+    // viewer can't see the team-owned list either (admin gate).
     expect((await viewer.callTool({ name: "list_workspace_owned_runners", arguments: {} })).isError).toBeTruthy();
 
-    // 해제 → revoked:true → 목록 비어짐.
+    // unregister → revoked:true → list becomes empty.
     const rev = JSON.parse(
       text(await admin.callTool({ name: "revoke_workspace_runner", arguments: { id: paired.runner.id } })),
     );
@@ -485,7 +485,7 @@ describe("MCP tools", () => {
     ).toHaveLength(0);
   });
 
-  it("runner 프로토콜: 파킹된 잡을 lease → submit_job_result 로 회신 → 디스패치 promise resolve", async () => {
+  it("runner protocol: lease a parked job → report via submit_job_result → the dispatch promise resolves", async () => {
     const deps = harness();
     const key = { owner: "u-alice", runnerId: "laptop" };
     const parkedJob: AgentJob = {
@@ -500,41 +500,41 @@ describe("MCP tools", () => {
       harness: { id: "scripted", version: "0" },
       tenant: "acme",
     };
-    // 디스패처가 self: 잡을 파킹한 상황을 재현(SelfHostedBackend.dispatch → hub.enqueue).
+    // Reproduce the dispatcher parking a self: job (SelfHostedBackend.dispatch → hub.enqueue).
     const dispatched = deps.runnerHub.enqueue(key, parkedJob);
 
     const runner = await connectRunner(deps, "laptop");
-    // 잡을 가져온다(pull).
+    // Fetch the job (pull).
     const leased = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: {} })));
     expect(leased.jobId).toBeTruthy();
     expect(leased.job.evalCase.id).toBe("c1");
-    // 더 없으면 {job:null}.
+    // {job:null} when there are no more.
     expect(JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: {} }))).job).toBeNull();
 
-    // 결과 회신 → 파킹된 dispatch promise 가 resolve.
+    // Report the result → the parked dispatch promise resolves.
     const submit = JSON.parse(
       text(await runner.callTool({ name: "submit_job_result", arguments: { jobId: leased.jobId, result } })),
     );
     expect(submit.accepted).toBe(true);
-    // enqueue 는 {result, ranBy}(실제 완료 러너)로 resolve — 풀 잡의 provenance.runner 를 위해.
+    // enqueue resolves with {result, ranBy} (the runner that actually finished) — for the pool job's provenance.runner.
     await expect(dispatched).resolves.toMatchObject({ result: { caseId: "c1" }, ranBy: "laptop" });
   });
 
-  it("runner 도구는 러너 토큰(via=runner)만 — 일반 자격증명은 FORBIDDEN", async () => {
-    const admin = await connect(harness(), ["admin"]); // via=oidc, runnerId 없음
+  it("runner tools require a runner token (via=runner) only — regular credentials are FORBIDDEN", async () => {
+    const admin = await connect(harness(), ["admin"]); // via=oidc, no runnerId
     const r = await admin.callTool({ name: "lease_job", arguments: {} });
     expect(r.isError).toBe(true);
     expect(text(r)).toContain("FORBIDDEN");
   });
 
-  it("placement 게이트: image 잡을 docker 없는 러너가 lease → {job:null} + 그 잡은 capability_mismatch 로 거부", async () => {
+  it("placement gate: a runner without docker leasing an image job → {job:null} + that job is rejected as capability_mismatch", async () => {
     const deps = harness();
     const key = { owner: "u-alice", runnerId: "laptop" };
     const imageJob: AgentJob = {
       evalCase: {
         id: "c-img",
         env: { kind: "repo", source: { files: {} } },
-        image: "spreadsheetbench:v1", // 컨테이너 실행 요구 → docker 필요
+        image: "spreadsheetbench:v1", // requires container execution → needs docker
         task: "t",
         graders: [],
         timeoutSec: 60,
@@ -549,14 +549,14 @@ describe("MCP tools", () => {
       (e: unknown) => ({ ok: false as const, e }),
     );
     const runner = await connectRunner(deps, "laptop");
-    // 러너가 docker 없이(git 만) lease → 가져갈 잡 없음(게이트) + 그 잡은 명확히 거부된다.
+    // A runner leasing without docker (git only) → no job to take (gate) + that job is explicitly rejected.
     const leased = JSON.parse(text(await runner.callTool({ name: "lease_job", arguments: { capabilities: ["git"] } })));
     expect(leased.job).toBeNull();
     const r = await settled;
     expect(r).toMatchObject({ ok: false, e: { code: "UPSTREAM_ERROR", extra: { reason: "capability_mismatch" } } });
   });
 
-  it("member: submit_run + register_harness(instance) 가능", async () => {
+  it("member: can submit_run + register_harness(instance)", async () => {
     const client = await connect(harness(), ["member"]);
     const sub = await client.callTool({ name: "submit_run", arguments: { harness_id: "scripted", task: "t" } });
     expect(sub.isError).toBeFalsy();
@@ -567,7 +567,7 @@ describe("MCP tools", () => {
     expect(text(reg)).toContain("bu");
   });
 
-  it("submit_run: runtime 지정 시 케이스 placement.target 으로 디스패치된다(BFF↔MCP parity)", async () => {
+  it("submit_run: with a runtime, the case is dispatched to placement.target (BFF↔MCP parity)", async () => {
     let seen: AgentJob | undefined;
     const capture: Dispatcher = {
       async dispatch(job) {
@@ -593,7 +593,7 @@ describe("MCP tools", () => {
     expect(seen?.evalCase.placement?.target).toBe("nomad-seoul");
   });
 
-  it("viewer: 읽기만 — submit_run 은 권한오류", async () => {
+  it("viewer: read only — submit_run is a permission error", async () => {
     const client = await connect(harness(), ["viewer"]);
     expect((await client.callTool({ name: "list_runs", arguments: {} })).isError).toBeFalsy();
     const sub = await client.callTool({ name: "submit_run", arguments: { harness_id: "x", task: "t" } });
@@ -601,7 +601,7 @@ describe("MCP tools", () => {
     expect(text(sub)).toContain("FORBIDDEN");
   });
 
-  it("admin: register_harness(instance) 가능", async () => {
+  it("admin: can register_harness(instance)", async () => {
     const client = await connect(harness(), ["admin"]);
     await client.callTool({ name: "register_harness_template", arguments: { spec: HARNESS_TEMPLATE } });
     const reg = await client.callTool({ name: "register_harness", arguments: { spec: HARNESS_INSTANCE } });
@@ -609,7 +609,7 @@ describe("MCP tools", () => {
     expect(text(reg)).toContain("bu");
   });
 
-  it("workspace 스코프: 다른 워크스페이스의 run 은 안 보이고 get 은 NOT_FOUND", async () => {
+  it("workspace scope: another workspace's run is invisible and get is NOT_FOUND", async () => {
     const deps = harness();
     const acme = await connect(deps, ["member"], "acme");
     const sub = await acme.callTool({ name: "submit_run", arguments: { harness_id: "scripted", task: "t" } });
@@ -622,7 +622,7 @@ describe("MCP tools", () => {
     expect(text(got)).toContain("NOT_FOUND");
   });
 
-  it("datasets: member 는 create 가능, viewer 는 write 권한오류", async () => {
+  it("datasets: member can create, viewer's write is a permission error", async () => {
     const deps = harness();
     const member = await connect(deps, ["member"]);
     const created = await member.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
@@ -633,11 +633,11 @@ describe("MCP tools", () => {
     const denied = await viewer.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("FORBIDDEN");
-    // viewer 는 읽기는 됨
+    // viewer can read
     expect((await viewer.callTool({ name: "list_datasets", arguments: {} })).isError).toBeFalsy();
   });
 
-  it("datasets: get_dataset 는 전체(케이스 포함) 반환; 다른 워크스페이스는 NOT_FOUND", async () => {
+  it("datasets: get_dataset returns the full thing (including cases); another workspace is NOT_FOUND", async () => {
     const deps = harness();
     const acme = await connect(deps, ["member"], "acme");
     await acme.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
@@ -651,7 +651,7 @@ describe("MCP tools", () => {
     expect(text(denied)).toContain("NOT_FOUND");
   });
 
-  it("datasets: diff_datasets 가 두 버전의 추가/변경을 보고(BFF parity); 타 워크스페이스는 NOT_FOUND", async () => {
+  it("datasets: diff_datasets reports adds/changes between two versions (BFF parity); other workspace is NOT_FOUND", async () => {
     const deps = harness();
     const acme = await connect(deps, ["member"], "acme");
     await acme.callTool({ name: "create_dataset", arguments: { dataset: DATASET } }); // smoke 1.0.0 (c1)
@@ -688,7 +688,7 @@ describe("MCP tools", () => {
     expect(text(denied)).toContain("NOT_FOUND");
   });
 
-  it("delete_dataset: 생성자 본인은 자기 버전을 소프트 삭제(이후 get/list 에서 사라짐)", async () => {
+  it("delete_dataset: the creator soft-deletes their own version (disappears from get/list afterward)", async () => {
     const deps = harness();
     const creator = await connect(deps, ["member"], "acme", "alice");
     await creator.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
@@ -696,48 +696,48 @@ describe("MCP tools", () => {
     const del = await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
     expect(del.isError).toBeFalsy();
     expect(text(del)).toContain("deleted");
-    // tombstone — get 은 NOT_FOUND, list 에서 사라진다(데이터는 보존되지만 read 제외).
+    // tombstone — get is NOT_FOUND, disappears from list (data preserved but excluded from reads).
     const got = await creator.callTool({ name: "get_dataset", arguments: { id: "smoke" } });
     expect(got.isError).toBe(true);
     expect(text(got)).toContain("NOT_FOUND");
     expect(JSON.parse(text(await creator.callTool({ name: "list_datasets", arguments: {} })))).toEqual([]);
   });
 
-  it("delete_dataset: 생성자도 admin 도 아니면 FORBIDDEN; admin 은 남의 버전도 삭제", async () => {
+  it("delete_dataset: FORBIDDEN if neither creator nor admin; admin can delete others' versions too", async () => {
     const deps = harness();
     const creator = await connect(deps, ["member"], "acme", "alice");
     await creator.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
 
-    // 같은 워크스페이스의 다른 member(생성자 아님) → FORBIDDEN
+    // Another member in the same workspace (not the creator) → FORBIDDEN
     const other = await connect(deps, ["member"], "acme", "bob");
     const denied = await other.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
     expect(denied.isError).toBe(true);
     expect(text(denied)).toContain("FORBIDDEN");
-    // 아직 살아있음
+    // still alive
     expect((await creator.callTool({ name: "get_dataset", arguments: { id: "smoke" } })).isError).toBeFalsy();
 
-    // admin(생성자 아님) → 남의 버전도 삭제 가능
+    // admin (not the creator) → can delete others' versions too
     const admin = await connect(deps, ["admin"], "acme", "carol");
     const del = await admin.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
     expect(del.isError).toBeFalsy();
   });
 
-  it("delete_dataset: 없는/이미 삭제된 버전은 NOT_FOUND", async () => {
+  it("delete_dataset: missing / already-deleted version is NOT_FOUND", async () => {
     const deps = harness();
     const creator = await connect(deps, ["member"], "acme", "alice");
     await creator.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
     await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
-    // 두 번째 삭제 → 이미 tombstone → NOT_FOUND
+    // second delete → already a tombstone → NOT_FOUND
     const again = await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "1.0.0" } });
     expect(again.isError).toBe(true);
     expect(text(again)).toContain("NOT_FOUND");
-    // 없는 버전
+    // missing version
     const missing = await creator.callTool({ name: "delete_dataset", arguments: { id: "smoke", version: "9.9.9" } });
     expect(missing.isError).toBe(true);
     expect(text(missing)).toContain("NOT_FOUND");
   });
 
-  it("scorecards: member 가 데이터셋을 돌려 집계(run→poll succeeded); viewer 는 실행 권한오류; 타 ws 는 NOT_FOUND", async () => {
+  it("scorecards: member runs a dataset and aggregates (run→poll succeeded); viewer's run is a permission error; other ws is NOT_FOUND", async () => {
     const deps = harness();
     const member = await connect(deps, ["member"], "acme");
     await member.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
@@ -770,7 +770,7 @@ describe("MCP tools", () => {
     expect(notFound.isError).toBe(true);
     expect(text(notFound)).toContain("NOT_FOUND");
 
-    // 리더보드: 방금 완료한 스코어카드가 (harness×model) 한 행으로 랭킹된다(워크스페이스 스코프).
+    // Leaderboard: the just-completed scorecard is ranked as one (harness×model) row (workspace-scoped).
     const lb = await member.callTool({
       name: "leaderboard_scorecards",
       arguments: { dataset: "smoke", metric: "steps" },
@@ -781,13 +781,13 @@ describe("MCP tools", () => {
     expect(board.rows[0]?.rank).toBe(1);
     expect(board.rows[0]?.harness.id).toBe("scripted");
 
-    // 백필: 멱등 recompute — 이미 models 가 채워진 run 뿐이라 updated=0.
+    // Backfill: idempotent recompute — only runs with models already filled, so updated=0.
     const bf = await member.callTool({ name: "backfill_scorecard_models", arguments: {} });
     expect(bf.isError).toBeFalsy();
     expect(JSON.parse(text(bf))).toHaveProperty("updated");
   });
 
-  it("run_scorecard: runtime 지정 시 케이스 placement.target 으로 디스패치되고 레코드에 기록된다(BFF↔MCP parity)", async () => {
+  it("run_scorecard: with a runtime, cases are dispatched to placement.target and recorded (BFF↔MCP parity)", async () => {
     let seen: AgentJob | undefined;
     const capture: Dispatcher = {
       async dispatch(job) {
@@ -821,7 +821,7 @@ describe("MCP tools", () => {
     expect(sub.isError).toBeFalsy();
     const id = JSON.parse(text(sub)).id as string;
 
-    // 비동기 배치 — 완료까지 폴링 후 디스패치된 잡과 레코드 양쪽에서 runtime 전달을 확인.
+    // Async batch — poll to completion, then confirm runtime propagation in both the dispatched job and the record.
     let rec: { status: string; runtime?: string } = { status: "queued" };
     for (let i = 0; i < 50; i++) {
       rec = JSON.parse(text(await client.callTool({ name: "get_scorecard", arguments: { id } })));
@@ -833,7 +833,7 @@ describe("MCP tools", () => {
     expect(seen?.evalCase.placement?.target).toBe("nomad-seoul");
   });
 
-  it("apply_bundle: member 가 번들(dataset) 설치 ok; viewer 는 datasets:write 없어 FORBIDDEN", async () => {
+  it("apply_bundle: member installs a bundle (dataset) ok; viewer lacks datasets:write → FORBIDDEN", async () => {
     const deps = harness();
     const bundle = JSON.stringify({
       id: "codex-pinch",
@@ -868,7 +868,7 @@ describe("MCP tools", () => {
     expect(text(denied)).toContain("FORBIDDEN");
   });
 
-  it("schedules: member 가 예약 생성·조회·pause·삭제; viewer 는 생성 권한오류; 타 ws 는 NOT_FOUND", async () => {
+  it("schedules: member creates·reads·pauses·deletes a schedule; viewer's create is a permission error; other ws is NOT_FOUND", async () => {
     const deps = harness();
     const member = await connect(deps, ["member"], "acme");
     const created = await member.callTool({
@@ -892,7 +892,7 @@ describe("MCP tools", () => {
     const paused = await member.callTool({ name: "update_schedule", arguments: { id: rec.id, enabled: false } });
     expect(JSON.parse(text(paused)).enabled).toBe(false);
 
-    // viewer 는 schedules:read 만 → 생성/수정 불가(FORBIDDEN), 조회는 가능
+    // viewer has only schedules:read → cannot create/update (FORBIDDEN), can read
     const viewer = await connect(deps, ["viewer"], "acme");
     const denied = await viewer.callTool({
       name: "create_schedule",
@@ -902,7 +902,7 @@ describe("MCP tools", () => {
     expect(text(denied)).toContain("FORBIDDEN");
     expect((await viewer.callTool({ name: "get_schedule", arguments: { id: rec.id } })).isError).toBeFalsy();
 
-    // 타 워크스페이스는 NOT_FOUND(존재 누출 금지)
+    // other workspace is NOT_FOUND (no existence leak)
     const beta = await connect(deps, ["member"], "beta");
     expect(text(await beta.callTool({ name: "get_schedule", arguments: { id: rec.id } }))).toContain("NOT_FOUND");
 
@@ -911,7 +911,7 @@ describe("MCP tools", () => {
     expect((await member.callTool({ name: "get_schedule", arguments: { id: rec.id } })).isError).toBe(true);
   });
 
-  it("judges: member 가 model/harness judge 등록·조회; viewer 는 write 권한오류", async () => {
+  it("judges: member registers·reads a model/harness judge; viewer's write is a permission error", async () => {
     const deps = harness();
     const member = await connect(deps, ["member"], "acme");
     const modelJudge = JSON.stringify({
@@ -938,7 +938,7 @@ describe("MCP tools", () => {
     expect(text(notFound)).toContain("NOT_FOUND");
   });
 
-  it("models: member 가 Model 등록·검증·조회; viewer 는 write 권한오류; 타 워크스페이스는 NOT_FOUND", async () => {
+  it("models: member registers·validates·reads a Model; viewer's write is a permission error; other workspace is NOT_FOUND", async () => {
     const deps = harness();
     const member = await connect(deps, ["member"], "acme");
     const modelSpec = JSON.stringify({
@@ -948,7 +948,7 @@ describe("MCP tools", () => {
       model: "claude-opus-4-8",
     });
 
-    // dry-run 검증: 스키마 통과 + 아직 등록 전이라 versionExists=false
+    // dry-run validate: schema passes + not yet registered so versionExists=false
     const validated = JSON.parse(
       text(await member.callTool({ name: "validate_model", arguments: { model: modelSpec } })),
     );
@@ -973,14 +973,14 @@ describe("MCP tools", () => {
     expect(text(notFound)).toContain("NOT_FOUND");
   });
 
-  it("diff_scorecards: 없는 스코어카드는 NOT_FOUND(워크스페이스 스코프)", async () => {
+  it("diff_scorecards: a missing scorecard is NOT_FOUND (workspace-scoped)", async () => {
     const client = await connect(harness(), ["member"]);
     const res = await client.callTool({ name: "diff_scorecards", arguments: { baseline: "x", candidate: "y" } });
     expect(res.isError).toBe(true);
     expect(text(res)).toContain("NOT_FOUND");
   });
 
-  it("ingest_scorecard: 업로드 트레이스로 scorecard(하니스 미실행) → 트레이스 그레이더 재도출", async () => {
+  it("ingest_scorecard: scorecard from uploaded traces (harness not run) → re-derive trace graders", async () => {
     const deps = harness();
     const client = await connect(deps, ["member"], "acme");
     await client.callTool({ name: "create_dataset", arguments: { dataset: DATASET } }); // caseId c1
@@ -1011,7 +1011,7 @@ describe("MCP tools", () => {
     );
   });
 
-  it("pull_scorecard: trace source 에서 트레이스를 당겨와 scorecard(하니스 미실행); authSecret→헤더 주입", async () => {
+  it("pull_scorecard: pull traces from a trace source into a scorecard (harness not run); authSecret→header injection", async () => {
     const base = harness();
     const datasetRegistry = base.datasetRegistry;
     let captured: { headers?: Record<string, string> } | undefined;
@@ -1051,7 +1051,7 @@ describe("MCP tools", () => {
     expect(captured?.headers?.authorization).toBe("Bearer secret-xyz");
   });
 
-  it("runtimes: 등록·조회는 role 무관 — viewer 도 create_runtime 가능", async () => {
+  it("runtimes: register·read is role-agnostic — even a viewer can create_runtime", async () => {
     const runtime = JSON.stringify({
       kind: "nomad",
       id: "seoul",
@@ -1069,14 +1069,14 @@ describe("MCP tools", () => {
     expect((await member.callTool({ name: "create_runtime", arguments: { runtime } })).isError).toBeFalsy();
   });
 
-  it("probe_runtime: 연결 테스트는 role 무관 — viewer 도 가능", async () => {
+  it("probe_runtime: the connection test is role-agnostic — a viewer can too", async () => {
     const runtime = JSON.stringify({ kind: "local", id: "rt", version: "1.0.0", tags: [] });
     const viewer = await connect(harness(), ["viewer"], "acme");
     const res = JSON.parse(text(await viewer.callTool({ name: "probe_runtime", arguments: { runtime } })));
     expect(res).toMatchObject({ kind: "local", reachable: true });
   });
 
-  it("workspace settings: admin get(빈)→{} / set 병합 반영; member 는 권한오류", async () => {
+  it("workspace settings: admin get (empty)→{} / set merges in; member is a permission error", async () => {
     const deps = { ...harness(), settingsStore: new InMemoryWorkspaceSettingsStore() };
     const admin = await connect(deps, ["admin"], "acme");
     expect(JSON.parse(text(await admin.callTool({ name: "get_workspace_settings", arguments: {} })))).toEqual({});
@@ -1093,7 +1093,7 @@ describe("MCP tools", () => {
     );
   });
 
-  it("api keys: 본인 키 셀프 발급(평문 1회)/목록(prefix 만)/취소 — member 도 self-serve", async () => {
+  it("api keys: self-issue your own key (plaintext once)/list (prefix only)/revoke — member is self-serve too", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"], "acme");
     const created = await admin.callTool({ name: "create_api_key", arguments: { label: "ci" } });
@@ -1106,20 +1106,20 @@ describe("MCP tools", () => {
       label?: string;
     }>;
     const row = list.find((r) => r.label === "ci");
-    expect(row?.prefix).toBe(apiKey.slice(0, 12)); // prefix 만(평문/해시 아님)
+    expect(row?.prefix).toBe(apiKey.slice(0, 12)); // prefix only (not plaintext/hash)
     const id = row?.id;
-    if (!id) throw new Error("발급된 키 메타를 찾지 못함");
+    if (!id) throw new Error("could not find the issued key's metadata");
 
     await admin.callTool({ name: "revoke_api_key", arguments: { id } });
-    expect(JSON.parse(text(await admin.callTool({ name: "list_api_keys", arguments: {} })))).toEqual([]); // 취소됨
+    expect(JSON.parse(text(await admin.callTool({ name: "list_api_keys", arguments: {} })))).toEqual([]); // revoked
 
-    // member 도 본인 키를 셀프 발급/조회할 수 있다(역할 게이트 없음 — 키는 발급자 권한으로 동작).
+    // A member can self-issue/read their own keys too (no role gate — a key acts with the issuer's privileges).
     const member = await connect(deps, ["member"], "acme");
     expect((await member.callTool({ name: "create_api_key", arguments: {} })).isError).toBeFalsy();
     expect((await member.callTool({ name: "list_api_keys", arguments: {} })).isError).toBeFalsy();
   });
 
-  it("api keys: scopes 로 발급하면 목록에 scopes 가 노출된다(미지정=Full Access); 빈 배열은 오류", async () => {
+  it("api keys: issuing with scopes exposes scopes in the list (unset=Full Access); an empty array is an error", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"], "acme");
     await admin.callTool({ name: "create_api_key", arguments: { label: "read-only", scopes: ["read"] } });
@@ -1130,11 +1130,11 @@ describe("MCP tools", () => {
     }>;
     expect(list.find((r) => r.label === "read-only")?.scopes).toEqual(["read"]);
 
-    // 빈 scopes 배열은 nonempty 위반 → 도구 오류
+    // An empty scopes array violates nonempty → tool error
     expect((await admin.callTool({ name: "create_api_key", arguments: { scopes: [] } })).isError).toBe(true);
   });
 
-  it("members: admin 목록/역할변경/제거; member 는 관리 권한오류, 조회는 가능", async () => {
+  it("members: admin lists/changes role/removes; member's management is a permission error, read is allowed", async () => {
     const deps = harness();
     await deps.workspaceStore.ensureMembership("acme", "bob", "member", "bob@corp.com");
     const admin = await connect(deps, ["admin"], "acme");
@@ -1150,26 +1150,26 @@ describe("MCP tools", () => {
     expect((await admin.callTool({ name: "remove_member", arguments: { subject: "bob" } })).isError).toBeFalsy();
 
     const member = await connect(deps, ["member"], "acme");
-    expect((await member.callTool({ name: "list_members", arguments: {} })).isError).toBeFalsy(); // 조회는 viewer+
+    expect((await member.callTool({ name: "list_members", arguments: {} })).isError).toBeFalsy(); // read is viewer+
     expect(
       (await member.callTool({ name: "set_member_role", arguments: { subject: "bob", role: "admin" } })).isError,
     ).toBe(true);
   });
 
-  it("invites: admin 발급(토큰 1회) → 다른 사람이 accept → list_members 에 등장; member 는 발급 불가", async () => {
+  it("invites: admin issues (token once) → someone else accepts → appears in list_members; member cannot issue", async () => {
     const deps = harness();
     const admin = await connect(deps, ["admin"], "acme");
     const created = JSON.parse(text(await admin.callTool({ name: "create_invite", arguments: { role: "member" } })));
     const token = created.token as string;
     expect(token.startsWith("inv_")).toBe(true);
 
-    // 다른 principal(피초대자)이 수락 — 워크스페이스 게이트 없음.
+    // A different principal (the invitee) accepts — no workspace gate.
     const invitee = await connect(deps, ["viewer"], "other-ws");
     const accepted = await invitee.callTool({ name: "accept_invite", arguments: { token } });
     expect(JSON.parse(text(accepted))).toEqual({ workspace: "acme", role: "member" });
-    // 재수락은 에러(단일 사용)
+    // re-accepting is an error (single use)
     expect((await invitee.callTool({ name: "accept_invite", arguments: { token } })).isError).toBe(true);
-    // admin 의 멤버 목록에 피초대자(subject "u")가 보인다
+    // The invitee (subject "u") appears in the admin's member list
     const members = JSON.parse(text(await admin.callTool({ name: "list_members", arguments: {} }))) as Array<{
       subject: string;
     }>;

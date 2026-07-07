@@ -60,7 +60,7 @@ describe("resolveHarnessSecrets", () => {
     }
   });
 
-  it("trace.authSecret(이름)을 workspace 시크릿 값으로 해석해 transient trace.auth 에 싣는다(잡 안 pull 인증)", () => {
+  it("resolves trace.authSecret(name) to the workspace secret value and loads it into transient trace.auth (in-job pull auth)", () => {
     const spec = CommandHarnessSpecSchema.parse({
       kind: "command",
       id: "cli",
@@ -70,12 +70,12 @@ describe("resolveHarnessSecrets", () => {
       trace: { kind: "mlflow", endpoint: "http://m", authSecret: "MLFLOW_AUTH" },
     });
     const resolved = resolveHarnessSecrets(spec, { workspace: { MLFLOW_AUTH: "Basic abc" } });
-    if (resolved.kind !== "command" || resolved.trace.kind !== "mlflow") throw new Error("command/mlflow 기대");
-    expect(resolved.trace.auth).toBe("Basic abc"); // 값은 잡 payload 에만(transient) — 레지스트리 스펙엔 이름만
+    if (resolved.kind !== "command" || resolved.trace.kind !== "mlflow") throw new Error("expected command/mlflow");
+    expect(resolved.trace.auth).toBe("Basic abc"); // value only in the job payload (transient) — the registry spec keeps only the name
     expect(resolved.trace.authSecret).toBe("MLFLOW_AUTH");
   });
 
-  it("trace.authSecret 이 미등록이면 env 시크릿과 동일하게 BadRequestError(명시 실패)", () => {
+  it("throws BadRequestError (explicit failure) when trace.authSecret is unregistered, same as an env secret", () => {
     const spec = CommandHarnessSpecSchema.parse({
       kind: "command",
       id: "cli",

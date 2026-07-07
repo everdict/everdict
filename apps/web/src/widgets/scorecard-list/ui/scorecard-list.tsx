@@ -26,7 +26,7 @@ import { StatusIcon } from '@/shared/ui/status-pill'
 type Sort = 'recent' | 'name'
 type Author = { name: string; avatarUrl?: string }
 
-// 스코어카드 목록 — 데이터셋 목록과 동일한 패턴(검색 + Combobox 필터 + 정렬 + 실행자 아바타).
+// Scorecard list — same pattern as the dataset list (search + Combobox filter + sort + runner avatar).
 export function ScorecardList({
   workspace,
   scorecards,
@@ -52,17 +52,17 @@ export function ScorecardList({
   ]
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('recent')
-  const [dataset, setDataset] = useState('') // 데이터셋 필터('' = 전체)
-  const [harness, setHarness] = useState('') // 하니스 필터('' = 전체)
-  const [status, setStatus] = useState('') // 상태 필터('' = 전체)
-  const [user, setUser] = useState('') // 실행자(createdBy) 필터('' = 전체)
+  const [dataset, setDataset] = useState('') // dataset filter ('' = all)
+  const [harness, setHarness] = useState('') // harness filter ('' = all)
+  const [status, setStatus] = useState('') // status filter ('' = all)
+  const [user, setUser] = useState('') // runner (createdBy) filter ('' = all)
 
   const total = scorecards.length
   const succeeded = scorecards.filter((s) => s.status === 'succeeded').length
   const running = scorecards.filter((s) => s.status === 'running' || s.status === 'queued').length
   const failed = scorecards.filter((s) => s.status === 'failed').length
 
-  // 실행자 정보 — createdBy(있으면 members 프로필) 있으면 표시. 없으면(과거 레코드/기계 발사) 숨김.
+  // Runner info — shown if createdBy exists (members profile if available). Hidden if absent (legacy records / machine-fired).
   function authorInfo(s: ScorecardRecord): { name: string; avatarUrl?: string; known: boolean } {
     if (s.createdBy) {
       const a = authors[s.createdBy]
@@ -75,7 +75,7 @@ export function ScorecardList({
     return { name: '—', known: false }
   }
 
-  // 필터 dropdown 옵션 — 데이터셋 · 하니스 · 실행자(전 스코어카드에서 도출).
+  // Filter dropdown options — dataset · harness · runner (derived from all scorecards).
   const datasetOptions = useMemo(() => {
     const s = new Set(scorecards.map((c) => c.dataset.id))
     return [
@@ -206,7 +206,7 @@ export function ScorecardList({
       ) : (
         <div className="space-y-4">
           {(sort === 'recent'
-            ? // recent 정렬: 날짜별 그룹(헤더=오늘/어제/M월 D일, 행에는 시간만)
+            ? // recent sort: grouped by date (header = today/yesterday/date, rows show time only)
               [
                 ...visible
                   .reduce((m, s) => {
@@ -229,17 +229,17 @@ export function ScorecardList({
               {items.map((s, i) => {
                 const author = authorInfo(s)
                 const metrics = s.summary ?? []
-                const shownMetrics = metrics.slice(0, 3) // 카드 규격 유지 — 상위 3개만, 나머지는 +N
+                const shownMetrics = metrics.slice(0, 3) // keep the card format — top 3 only, the rest as +N
                 const judges = s.judgeModels ?? []
                 return (
-                  // 고정 규격 카드 — 3줄(데이터셋/하니스/집계), 화살표·인라인 이름 없음. 상태는 색상 아이콘만.
+                  // Fixed-format card — 3 lines (dataset/harness/aggregate), no arrow·inline name. Status is a color icon only.
                   <Link
                     key={s.id}
                     href={`/${workspace}/scorecards/${encodeURIComponent(s.id)}`}
                     style={{ animationDelay: `${Math.min(i, 12) * 28}ms` }}
                     className="rise flex items-center gap-3 rounded-lg border bg-card px-3.5 py-2.5 shadow-raise transition-colors hover:border-border-strong hover:bg-elevated"
                   >
-                    {/* 좌: 3줄 — ① 데이터셋 ② 하니스(+모델·출처) ③ 집계 칩. 각 한 줄, 잘림 없이 truncate. */}
+                    {/* Left: 3 lines — ① dataset ② harness (+model·source) ③ aggregate chips. Each one line, truncated (no wrap). */}
                     <div className="min-w-0 flex-1 space-y-1">
                       <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[13px] font-[510]">
                         <span className="truncate">
@@ -296,7 +296,7 @@ export function ScorecardList({
                         )}
                       </div>
                     </div>
-                    {/* 우: 고정 슬롯 — 실행자(썸네일) · 시각(그룹=시간만) · 상태(색상 아이콘). */}
+                    {/* Right: fixed slots — runner (thumbnail) · time (grouped = time only) · status (color icon). */}
                     <div className="flex shrink-0 items-center gap-2.5">
                       <span className="flex w-6 justify-center">
                         {author.known && (

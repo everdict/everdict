@@ -23,7 +23,7 @@ export default async function RunsPage({ params }: { params: Promise<{ workspace
   let runs = runsSchema.parse([])
   let scorecards = scorecardsSchema.parse([])
   try {
-    // 통합 활동 피드: standalone run + 스코어카드 배치를 한 타임라인으로. 둘 다 워크스페이스 스코프.
+    // Unified activity feed: standalone runs + scorecard batches on one timeline. Both are workspace-scoped.
     ;[runs, scorecards] = await Promise.all([
       controlPlane.listRuns(ctx).then((r) => runsSchema.parse(r)),
       controlPlane.listScorecards(ctx).then((s) => scorecardsSchema.parse(s)),
@@ -32,7 +32,7 @@ export default async function RunsPage({ params }: { params: Promise<{ workspace
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 실행 중/대기 중인 run 이나 스코어카드가 있으면 라이브로 갱신(활동 콘솔).
+  // If there are running/pending runs or scorecards, refresh live (activity console).
   const active = [...runs, ...scorecards].some(
     (x) => x.status === 'queued' || x.status === 'running'
   )

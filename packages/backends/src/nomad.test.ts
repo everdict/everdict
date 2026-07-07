@@ -26,7 +26,7 @@ const RESULT: CaseResult = {
 };
 
 describe("buildNomadJob", () => {
-  it("이미지·격리 런타임·시크릿·잡 페이로드를 task spec 에 담는다", () => {
+  it("puts the image, isolation runtime, secrets, and job payload into the task spec", () => {
     const spec = buildNomadJob(JOB, {
       addr: "http://nomad:4646",
       image: "reg/everdict-agent:1",
@@ -42,7 +42,7 @@ describe("buildNomadJob", () => {
     expect(decoded.harness.id).toBe("claude-code");
   });
 
-  it("case.image 가 워크스페이스 레지스트리 것이면 docker auth 블록을 렌더한다(job.registryAuth)", () => {
+  it("renders a docker auth block when case.image is a workspace-registry one (job.registryAuth)", () => {
     const withAuth: AgentJob = {
       ...JOB,
       evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" },
@@ -50,7 +50,7 @@ describe("buildNomadJob", () => {
     };
     const spec = buildNomadJob(withAuth, { addr: "http://nomad:4646", image: "reg/everdict-agent:1" });
     expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Config.auth).toEqual([{ username: "bot", password: "pull-tok" }]);
-    // 호스트 불일치(기본 에이전트 이미지 등)면 auth 미렌더 — 무관 레지스트리에 자격증명을 보내지 않는다.
+    // On a host mismatch (e.g. the default agent image), auth isn't rendered — don't send credentials to an unrelated registry.
     const mismatch = buildNomadJob(
       { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },
       { addr: "http://nomad:4646", image: "reg/everdict-agent:1" },
@@ -58,7 +58,7 @@ describe("buildNomadJob", () => {
     expect(mismatch.Job.TaskGroups[0]?.Tasks[0]?.Config.auth).toBeUndefined();
   });
 
-  it("job.judge 가 있으면 judge 모델 env 를 alloc 에 주입한다(키는 secretEnv)", () => {
+  it("with job.judge, injects the judge model env into the alloc (keys via secretEnv)", () => {
     const spec = buildNomadJob(
       { ...JOB, judge: { provider: "openai", model: "gpt-5.4-mini" } },
       {
@@ -68,26 +68,26 @@ describe("buildNomadJob", () => {
       },
     );
     const env = spec.Job.TaskGroups[0]?.Tasks[0]?.Env;
-    expect(env?.EVERDICT_JUDGE_MODEL).toBe("gpt-5.4-mini"); // per-run 설정
+    expect(env?.EVERDICT_JUDGE_MODEL).toBe("gpt-5.4-mini"); // per-run config
     expect(env?.EVERDICT_JUDGE_PROVIDER).toBe("openai");
-    expect(env?.OPENAI_API_KEY).toBe("k"); // 프로바이더 키는 테넌트 시크릿
+    expect(env?.OPENAI_API_KEY).toBe("k"); // the provider key is a tenant secret
     expect(env?.OPENAI_BASE_URL).toBe("http://litellm");
   });
-  it("job.judge 가 없으면 judge env 를 넣지 않는다", () => {
+  it("with no job.judge, doesn't add judge env", () => {
     const spec = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "i" });
     expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Env.EVERDICT_JUDGE_MODEL).toBeUndefined();
   });
-  it("evalCase.image 가 있으면 per-case 이미지로 override(예: SWE-bench prebuilt)", () => {
+  it("with evalCase.image, override with the per-case image (e.g. SWE-bench prebuilt)", () => {
     const withImage = { ...JOB, evalCase: { ...JOB.evalCase, image: "swebench/sweb.eval.x86_64.x_1776_y-1:latest" } };
     const on = buildNomadJob(withImage, { addr: "http://nomad:4646", image: "reg/agent:1" });
     expect(on.Job.TaskGroups[0]?.Tasks[0]?.Config.image).toBe("swebench/sweb.eval.x86_64.x_1776_y-1:latest");
     const off = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "reg/agent:1" });
-    expect(off.Job.TaskGroups[0]?.Tasks[0]?.Config.image).toBe("reg/agent:1"); // 없으면 기본
+    expect(off.Job.TaskGroups[0]?.Tasks[0]?.Config.image).toBe("reg/agent:1"); // default when absent
   });
 });
 
-describe("fetchHttp (Nomad API 인증)", () => {
-  it("apiToken 이 있으면 X-Nomad-Token 헤더를 싣는다", async () => {
+describe("fetchHttp (Nomad API auth)", () => {
+  it("attaches the X-Nomad-Token header when apiToken is present", async () => {
     const fetchImpl = vi.fn((_u: string, _i?: RequestInit) => Promise.resolve(new Response("{}", { status: 200 })));
     const http = fetchHttp("http://nomad:4646", "secret-acl-token", fetchImpl as typeof fetch);
     await http.request("GET", "/v1/jobs");
@@ -96,7 +96,7 @@ describe("fetchHttp (Nomad API 인증)", () => {
     expect((init.headers as Record<string, string>)["x-nomad-token"]).toBe("secret-acl-token");
   });
 
-  it("apiToken 이 없으면 X-Nomad-Token 을 싣지 않는다", async () => {
+  it("doesn't attach X-Nomad-Token when apiToken is absent", async () => {
     const fetchImpl = vi.fn((_u: string, _i?: RequestInit) => Promise.resolve(new Response("{}", { status: 200 })));
     const http = fetchHttp("http://nomad:4646", undefined, fetchImpl as typeof fetch);
     await http.request("GET", "/v1/jobs");
@@ -106,7 +106,7 @@ describe("fetchHttp (Nomad API 인증)", () => {
 });
 
 describe("NomadBackend.dispatch", () => {
-  it("잡 제출 → alloc 완료 폴링 → stdout sentinel 에서 CaseResult 파싱", async () => {
+  it("submit job → poll alloc completion → parse CaseResult from the stdout sentinel", async () => {
     const calls: string[] = [];
     const http: NomadHttp = {
       async request(method, path) {
@@ -130,7 +130,7 @@ describe("NomadBackend.dispatch", () => {
     expect(calls.some((c) => c.includes("/logs/alloc1"))).toBe(true);
   });
 
-  it("trustZones: 테넌트 존을 잡마다 적용한다 (네임스페이스 + 강격리 런타임)", async () => {
+  it("trustZones: applies the tenant zone per job (namespace + strong-isolation runtime)", async () => {
     let posted: {
       Job?: { Namespace?: string; TaskGroups?: Array<{ Tasks: Array<{ Config: { runtime?: string } }> }> };
     } = {};
@@ -160,7 +160,7 @@ describe("NomadBackend.dispatch", () => {
     expect(posted.Job?.TaskGroups?.[0]?.Tasks[0]?.Config.runtime).toBe("runsc");
   });
 
-  it("trustZones: untrusted 테넌트에 runc 를 강제하면 디스패치를 거부한다", async () => {
+  it("trustZones: forcing runc on an untrusted tenant refuses the dispatch", async () => {
     const http: NomadHttp = {
       async request() {
         return { status: 200, text: "{}" };
@@ -175,7 +175,7 @@ describe("NomadBackend.dispatch", () => {
     await expect(backend.dispatch({ ...JOB, tenant: "x" })).rejects.toBeInstanceOf(BadRequestError);
   });
 
-  it("secrets: 잡마다 그 테넌트의 키만 alloc env 에 주입한다 (누출 없음)", async () => {
+  it("secrets: injects only that tenant's keys into the alloc env per job (no leakage)", async () => {
     const posted: Array<Record<string, string>> = [];
     const http: NomadHttp = {
       async request(method, path, body) {
@@ -203,12 +203,12 @@ describe("NomadBackend.dispatch", () => {
     await backend.dispatch({ ...JOB, tenant: "globex" });
 
     expect(posted[0]?.ANTHROPIC_API_KEY).toBe("sk-acme");
-    expect(posted[1]?.ANTHROPIC_API_KEY).toBe("sk-globex"); // globex 의 잡에 acme 키가 새지 않음
+    expect(posted[1]?.ANTHROPIC_API_KEY).toBe("sk-globex"); // acme's key doesn't leak into globex's job
   });
 });
 
 describe("NomadBackend.probe", () => {
-  it("/v1/agent/self 200 이면 reachable + member 이름", async () => {
+  it("with /v1/agent/self 200, reachable + member name", async () => {
     const http: NomadHttp = {
       async request(_m, path) {
         if (path === "/v1/agent/self") return { status: 200, text: JSON.stringify({ member: { Name: "nomad-1" } }) };
@@ -219,7 +219,7 @@ describe("NomadBackend.probe", () => {
     expect(await backend.probe()).toEqual({ reachable: true, detail: "Nomad agent: nomad-1" });
   });
 
-  it("401/403(ACL)이면 unreachable + 인증 안내", async () => {
+  it("with 401/403 (ACL), unreachable + auth guidance", async () => {
     const http: NomadHttp = {
       async request() {
         return { status: 403, text: "Permission denied" };
@@ -228,10 +228,10 @@ describe("NomadBackend.probe", () => {
     const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http });
     const r = await backend.probe();
     expect(r.reachable).toBe(false);
-    expect(r.detail).toContain("인증 실패(403)");
+    expect(r.detail).toContain("auth failed (403)");
   });
 
-  it("네트워크 에러면 unreachable + 메시지", async () => {
+  it("with a network error, unreachable + message", async () => {
     const http: NomadHttp = {
       async request() {
         throw new Error("ECONNREFUSED");

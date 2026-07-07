@@ -23,7 +23,7 @@ export default async function NewDatasetPage({
   const t = await getTranslations('datasetsPage')
   const allowed = can(principal?.roles, 'datasets:write')
 
-  // 시스템 관리 버저닝: 기존 데이터셋 id→versions 를 폼에 넘겨 다음 semver 를 제안한다.
+  // System-managed versioning: pass existing dataset id→versions to the form to suggest the next semver.
   let existingDatasets: { id: string; versions: string[] }[] = []
   if (allowed) {
     try {

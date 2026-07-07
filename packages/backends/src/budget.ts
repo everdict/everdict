@@ -1,19 +1,19 @@
 import { type CaseResult, PaymentRequiredError, type TraceEvent } from "@everdict/core";
 
-// 테넌트 예산. 어떤 차원이든 미지정이면 무제한.
+// Tenant budget. Any dimension left unset is unlimited.
 export interface BudgetLimit {
-  usd?: number; // 누적 비용 상한
-  tokens?: number; // 누적 토큰 상한
-  runs?: number; // 누적 실행 수 상한(레이트/볼륨)
+  usd?: number; // cumulative cost cap
+  tokens?: number; // cumulative token cap
+  runs?: number; // cumulative run-count cap (rate/volume)
 }
 
 export interface BudgetUsage {
   usd: number;
   tokens: number;
-  runs: number; // admit 된 실행 수(예약 포함)
+  runs: number; // number of admitted runs (incl. reservations)
 }
 
-// 트레이스의 llm_call cost 를 합산 → 한 run 의 비용.
+// Sum the trace's llm_call costs → the cost of one run.
 export function sumCost(trace: TraceEvent[]): { usd: number; tokens: number } {
   let usd = 0;
   let tokens = 0;
@@ -30,12 +30,12 @@ export function costOf(result: CaseResult): { usd: number; tokens: number } {
   return sumCost(result.trace);
 }
 
-// 이 run 의 비용을 누구 예산에 달 것인가(settle 대상 테넌트) — provenance 로 결정.
-//  - 관리형 백엔드(self-hosted 아님): 잡의 원래 테넌트가 결제(originalTenant).
-//  - 워크스페이스-공유 셀프호스티드 러너(provenance.by = "ws:<workspace>"): 그 워크스페이스가 결제(팀 자원).
-//    by 는 SelfHostedBackend 가 러너 owner 로 스탬프하고, 워크스페이스-공유 러너의 owner 는 "ws:<workspace>".
-//  - 개인 셀프호스티드 러너(by = subject): 유저 자기 로그인이 결제 주체 → 워크스페이스 버짓 미차감(undefined).
-// undefined = settle 하지 않음(own-pays). 설계: docs/architecture/self-hosted-runtime-and-runners.md.
+// Which tenant's budget this run's cost goes on (the settle target tenant) — decided by provenance.
+//  - Managed backend (not self-hosted): the job's original tenant pays (originalTenant).
+//  - Workspace-shared self-hosted runner (provenance.by = "ws:<workspace>"): that workspace pays (a team resource).
+//    by is stamped by SelfHostedBackend as the runner owner, and a workspace-shared runner's owner is "ws:<workspace>".
+//  - Personal self-hosted runner (by = subject): the user's own login is the payer → not drawn from the workspace budget (undefined).
+// undefined = don't settle (own-pays). Design: docs/architecture/self-hosted-runtime-and-runners.md.
 export function billingTenant(result: CaseResult, originalTenant: string): string | undefined {
   const prov = result.provenance;
   if (!prov || prov.ranOn !== "self-hosted") return originalTenant;
@@ -44,11 +44,11 @@ export function billingTenant(result: CaseResult, originalTenant: string): strin
   return undefined;
 }
 
-// 테넌트 예산 추적기.
-//  - admit: 실행을 받기 전(큐잉 전) 검사. 이미 commit 된 usd/tokens 가 상한이거나, runs(예약 포함)가
-//    상한이면 PaymentRequiredError(402). 통과하면 run 1건을 즉시 예약(버스트가 상한을 못 넘게).
-//  - settle: 실행 완료 후 실제 비용(usd/tokens)을 commit. (usd/tokens 는 실행 전 알 수 없으므로
-//    상한을 살짝 넘는 마지막 run 은 허용 — 비용 예산의 표준 동작.)
+// Tenant budget tracker.
+//  - admit: checked before accepting a run (before queuing). If already-committed usd/tokens are at the cap, or runs
+//    (incl. reservations) is at the cap, PaymentRequiredError (402). If it passes, immediately reserve one run (so a burst can't exceed the cap).
+//  - settle: commit the actual cost (usd/tokens) after the run completes. (usd/tokens aren't known before execution,
+//    so the last run that slightly exceeds the cap is allowed — the standard behavior of a cost budget.)
 export interface BudgetTracker {
   admit(tenant: string): void;
   settle(tenant: string, cost: { usd: number; tokens: number }): void;
@@ -73,24 +73,28 @@ export function inMemoryBudget(opts: InMemoryBudgetOptions): BudgetTracker {
     admit(tenant) {
       const limit = opts.limitFor(tenant);
       if (!limit) {
-        get(tenant).runs += 1; // 무제한이어도 실행 수는 집계
+        get(tenant).runs += 1; // count runs even when unlimited
         return;
       }
       const u = get(tenant);
       if (limit.usd !== undefined && u.usd >= limit.usd) {
-        throw new PaymentRequiredError("BUDGET_EXCEEDED", { tenant, usd: u.usd, limit: limit.usd }, "비용 예산 초과");
+        throw new PaymentRequiredError(
+          "BUDGET_EXCEEDED",
+          { tenant, usd: u.usd, limit: limit.usd },
+          "cost budget exceeded",
+        );
       }
       if (limit.tokens !== undefined && u.tokens >= limit.tokens) {
-        throw new PaymentRequiredError("BUDGET_EXCEEDED", { tenant, tokens: u.tokens }, "토큰 예산 초과");
+        throw new PaymentRequiredError("BUDGET_EXCEEDED", { tenant, tokens: u.tokens }, "token budget exceeded");
       }
       if (limit.runs !== undefined && u.runs >= limit.runs) {
         throw new PaymentRequiredError(
           "BUDGET_EXCEEDED",
           { tenant, runs: u.runs, limit: limit.runs },
-          "실행 수 예산 초과",
+          "run-count budget exceeded",
         );
       }
-      u.runs += 1; // 예약(버스트 동시제출이 상한을 못 넘게)
+      u.runs += 1; // reserve (so concurrent bursts can't exceed the cap)
     },
     settle(tenant, cost) {
       const u = get(tenant);

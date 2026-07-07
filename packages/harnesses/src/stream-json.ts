@@ -1,6 +1,6 @@
 import type { TraceEvent } from "@everdict/core";
 
-// --- 안전한 unknown 내로잉 헬퍼 (any 금지) ---
+// --- Safe unknown-narrowing helpers (no any) ---
 function rec(v: unknown): Record<string, unknown> | null {
   return typeof v === "object" && v !== null ? (v as Record<string, unknown>) : null;
 }
@@ -11,8 +11,8 @@ function num(v: unknown): number | undefined {
   return typeof v === "number" ? v : undefined;
 }
 
-// Claude Code `--output-format stream-json --verbose`의 한 줄(JSON 객체)을
-// 정규화 TraceEvent[]로 변환한다. 어떤 stream-json 하니스든 재사용 가능.
+// Converts one line (JSON object) of Claude Code `--output-format stream-json --verbose`
+// into normalized TraceEvent[]. Reusable by any stream-json harness.
 export function mapClaudeStreamJson(obj: unknown, nextT: () => number): TraceEvent[] {
   const o = rec(obj);
   if (!o) return [];

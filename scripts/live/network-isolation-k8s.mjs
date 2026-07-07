@@ -1,11 +1,11 @@
-// 라이브: NetworkPolicy enforce 검증(멀티테넌트 네트워크 격리). **정책-CNI(Calico) 클러스터**에서만 enforce 됨
-// (kindnet 은 정책을 무시 — 그래서 이 증명은 전용 calico 클러스터 kind-everdict-np 에서 돌린다).
-//   Part A (deny-cross-tenant): 테넌트 acme 파드 → 테넌트 globex 서비스 = 차단(globex ingress=같은-ns만),
-//                               같은 ns → 허용. cross-tenant pod-to-pod 도달 차단.
-//   Part B (공유 스토어 ingress): everdict-managed 네임스페이스(acme) → 공유 PG = 허용, 비-managed ns → 차단.
+// Live: NetworkPolicy enforce verification (multi-tenant network isolation). Only enforced on a **policy-CNI (Calico) cluster**
+// (kindnet ignores policies — so this proof runs on the dedicated calico cluster kind-everdict-np).
+//   Part A (deny-cross-tenant): tenant acme pod → tenant globex service = blocked (globex ingress = same-ns only),
+//                               same ns → allowed. cross-tenant pod-to-pod reachability blocked.
+//   Part B (shared-store ingress): everdict-managed namespace (acme) → shared PG = allowed, non-managed ns → blocked.
 //
-// 준비: calico kind 클러스터 'everdict-np' + echo/busybox/postgres 이미지 로드(scripts 주석/세션 참고).
-// 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/network-isolation-k8s.mjs
+// Setup: calico kind cluster 'everdict-np' + load echo/busybox/postgres images (see script comments/session).
+// Usage: PATH=$HOME/.local/bin:$PATH node scripts/live/network-isolation-k8s.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { K8sTopologyRuntime } from "../../packages/topology/dist/index.js";
@@ -14,7 +14,7 @@ const CTX = process.env.KIND_CONTEXT ?? "kind-everdict-np";
 const kc = (args, input) =>
   execFileSync("kubectl", ["--context", CTX, ...args], { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
 
-// busybox 일회용 파드로 대상 도달성 판정 → "REACHABLE"/"BLOCKED".
+// Decide target reachability with a throwaway busybox pod → "REACHABLE"/"BLOCKED".
 let n = 0;
 const probe = (ns, shCmd) => {
   n += 1;
@@ -37,7 +37,7 @@ const probe = (ns, shCmd) => {
     ]);
     return /REACHABLE/.test(out) ? "REACHABLE" : "BLOCKED";
   } catch {
-    return "BLOCKED"; // timeout/비정상 종료 = 차단으로 간주
+    return "BLOCKED"; // timeout/abnormal exit = treated as blocked
   }
 };
 
@@ -72,35 +72,35 @@ const rt = new K8sTopologyRuntime({
 let aPass = false;
 let bPass = false;
 try {
-  // ---- Part A: cross-tenant pod 차단 (deny-cross-tenant, external store) ----
-  console.log("Part A: deny-cross-tenant — 테넌트 간 pod 도달 차단 검증 …");
+  // ---- Part A: block cross-tenant pod (deny-cross-tenant, external store) ----
+  console.log("Part A: deny-cross-tenant — verify cross-tenant pod reachability is blocked …");
   const specA = specOf("np-a", []);
   await rt.ensureTopology(specA, zone("acme", "deny-cross-tenant", "external"));
   await rt.ensureTopology(specA, zone("globex", "deny-cross-tenant", "external"));
   const sameNs = probe("everdict-np-globex", `wget -T 6 -qO- ${echoSvc("np-a", "everdict-np-globex")} >/dev/null 2>&1`);
   const crossNs = probe("everdict-np-acme", `wget -T 6 -qO- ${echoSvc("np-a", "everdict-np-globex")} >/dev/null 2>&1`);
   console.log(`  globex→globex(same-ns) : ${sameNs}`);
-  console.log(`  acme→globex(cross)     : ${crossNs}   <-- 차단돼야 함`);
+  console.log(`  acme→globex(cross)     : ${crossNs}   <-- must be blocked`);
   aPass = sameNs === "REACHABLE" && crossNs === "BLOCKED";
 
-  // ---- Part B: 공유 스토어 ingress — managed ns 만 허용 ----
-  console.log("\nPart B: 공유 스토어 ingress — everdict-managed ns 만 도달 허용 …");
+  // ---- Part B: shared-store ingress — only managed ns allowed ----
+  console.log("\nPart B: shared-store ingress — only everdict-managed ns allowed to reach …");
   const specB = specOf("np-b", [{ store: "postgres", role: "checkpoints", isolateBy: "thread_id" }]);
-  await rt.ensureTopology(specB, zone("acme", "deny-cross-tenant", "pool")); // 공유 PG + ingress 정책 + acme(managed)
-  // 비-managed 네임스페이스(정책/라벨 없음) 생성.
+  await rt.ensureTopology(specB, zone("acme", "deny-cross-tenant", "pool")); // shared PG + ingress policy + acme (managed)
+  // Create a non-managed namespace (no policy/labels).
   kc(["create", "ns", "np-rogue"]);
   const fromManaged = probe("everdict-np-acme", "nc -z -w6 everdict-shared-postgres.everdict-shared 5432");
   const fromRogue = probe("np-rogue", "nc -z -w6 everdict-shared-postgres.everdict-shared 5432");
   console.log(`  acme(managed)→shared PG : ${fromManaged}`);
-  console.log(`  rogue(non-managed)→PG  : ${fromRogue}   <-- 차단돼야 함`);
+  console.log(`  rogue(non-managed)→PG  : ${fromRogue}   <-- must be blocked`);
   bPass = fromManaged === "REACHABLE" && fromRogue === "BLOCKED";
 
   const ok = aPass && bPass;
   console.log(`\nchecks: A.same-ns=${aPass} B.managed-only=${bPass}`);
   console.log(
     ok
-      ? "\n✅ NetworkPolicy enforce(Calico): cross-tenant pod 도달 차단 + 공유 스토어는 everdict-managed ns 에서만 도달. 트러스트존 네트워크 격리 라이브 확인."
-      : "\n⚠️ 일부 체크 실패",
+      ? "\n✅ NetworkPolicy enforce (Calico): cross-tenant pod reachability blocked + shared store reachable only from everdict-managed ns. Trust-zone network isolation confirmed live."
+      : "\n⚠️ some checks failed",
   );
   process.exitCode = ok ? 0 : 1;
 } finally {
@@ -108,5 +108,5 @@ try {
   await rt.teardown(specOf("np-a", []), zone("globex", "deny-cross-tenant", "external")).catch(() => {});
   await rt.teardown(specOf("np-b", []), zone("acme", "deny-cross-tenant", "pool")).catch(() => {});
   for (const ns of ["np-rogue", "everdict-shared"]) kc(["delete", "ns", ns, "--ignore-not-found", "--wait=false"]);
-  console.log("teardown: ns 삭제 요청됨");
+  console.log("teardown: ns deletion requested");
 }

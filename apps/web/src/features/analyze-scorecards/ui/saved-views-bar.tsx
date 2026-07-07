@@ -12,7 +12,7 @@ import { Input } from '@/shared/ui/input'
 import { createViewAction, deleteViewAction, updateViewAction } from '../api/view-actions'
 import { configToStored, storedToConfig, type AnalysisConfig } from '../model/analysis'
 
-// 저장된 분석 View 바 — 현재 분석을 이름 붙여 저장(비공개|공유), 저장된 뷰를 열어 라이브 재실행, 소유 뷰 공유/삭제.
+// Saved-analysis View bar — save the current analysis under a name (private|shared), open a saved view for a live re-run, share/delete owned views.
 export function SavedViewsBar({
   config,
   onLoad,
@@ -26,8 +26,8 @@ export function SavedViewsBar({
   onLoad: (config: AnalysisConfig) => void
   savedViews: View[]
   currentSubject: string
-  canManage: boolean // scorecards:run — 저장·수정·삭제(소유) 가능
-  isAdmin?: boolean // 워크스페이스 admin — 남의 공유 뷰도 관리
+  canManage: boolean // scorecards:run — can save/edit/delete (owned)
+  isAdmin?: boolean // workspace admin — can also manage others' shared views
   activeViewId?: string
 }) {
   const t = useTranslations('analyzeScorecards')
@@ -41,7 +41,7 @@ export function SavedViewsBar({
 
   const activeView = views.find((v) => v.id === activeId)
   const ownsActive = activeView?.createdBy === currentSubject
-  const canEditActive = canManage && (isAdmin || ownsActive) // 소유자 또는 admin(컨트롤플레인이 최종 강제)
+  const canEditActive = canManage && (isAdmin || ownsActive) // owner or admin (control plane enforces finally)
 
   const load = (v: View) => {
     onLoad(storedToConfig(v.config))
@@ -66,7 +66,7 @@ export function SavedViewsBar({
       setVisibility('private')
     })
 
-  // 활성 뷰를 현재 화면 설정으로 덮어쓰기.
+  // Overwrite the active view with the current screen settings.
   const updateCurrent = () =>
     activeView &&
     start(async () => {
@@ -103,7 +103,7 @@ export function SavedViewsBar({
       url.search = `?view=${encodeURIComponent(activeView.id)}`
       await navigator.clipboard.writeText(url.toString())
     } catch {
-      /* clipboard 불가 — 무시 */
+      /* clipboard unavailable — ignore */
     }
   }
 
@@ -154,7 +154,7 @@ export function SavedViewsBar({
         )}
       </div>
 
-      {/* 저장 폼 */}
+      {/* save form */}
       {saving && (
         <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2">
           <Input
@@ -204,7 +204,7 @@ export function SavedViewsBar({
         </div>
       )}
 
-      {/* 활성(소유) 뷰 관리 */}
+      {/* manage the active (owned) view */}
       {activeView && canEditActive && !saving && (
         <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2 text-[12px]">
           <span className="text-faint">

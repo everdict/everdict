@@ -1,8 +1,8 @@
-// 라이브 e2e: judge grader 가 "일반 dispatch 경로"(runAgentJob)로 흐르는지 — 별도 judge-runner 가 아니라
-// EvalCase.graders 의 judge 프리셋이 실제 평가 루프에서 실 모델 판정으로 채점된다.
-//   환경 O (EVERDICT_JUDGE_MODEL + OPENAI 키) → judge grader = 실 모델 판정(pass/score/reason)
-//   환경 X                                  → judge grader = skip 점수(일반 eval 안 죽음)
-// 하니스는 scripted(키 불필요): `echo hello > out.txt` 를 실제 실행 → 진짜 trace → judge 가 그 trace 를 판정.
+// live e2e: whether the judge grader flows through the "normal dispatch path" (runAgentJob) — not a separate judge-runner,
+// but the judge preset in EvalCase.graders is scored with a real model verdict in the actual eval loop.
+//   env set (EVERDICT_JUDGE_MODEL + OPENAI key) → judge grader = real model verdict (pass/score/reason)
+//   env unset                                   → judge grader = skip score (normal eval does not die)
+// The harness is scripted (no key needed): actually runs `echo hello > out.txt` → a real trace → the judge verdicts that trace.
 import process from "node:process";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 
@@ -37,15 +37,15 @@ function showJudge(label, result) {
   return j;
 }
 
-// 1) judge 모델 구성됨 → 실 모델 판정.
-console.log("=== runAgentJob (judge 환경 O) — 실 모델이 trace 를 판정 ===");
+// 1) judge model configured → real model verdict.
+console.log("=== runAgentJob (judge env set) — the real model verdicts the trace ===");
 const real = await runAgentJob(baseJob);
 const realJudge = showJudge("env O", real);
 
-// 2) judge 모델 미구성 → judge 만 skip(나머지 정상).
-// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(미구성 상태 재현)
+// 2) judge model not configured → only the judge is skipped (the rest is normal).
+// biome-ignore lint/performance/noDelete: removing the process.env key is intentional (reproduces the unconfigured state)
 delete process.env.EVERDICT_JUDGE_MODEL;
-console.log("\n=== runAgentJob (judge 환경 X) — judge 는 skip, eval 은 계속 ===");
+console.log("\n=== runAgentJob (judge env unset) — the judge is skipped, eval continues ===");
 const skipped = await runAgentJob(baseJob);
 const skipJudge = showJudge("env X", skipped);
 
@@ -60,7 +60,7 @@ const ok =
 
 console.log(
   ok
-    ? "\n✅ judge 가 일반 dispatch 경로(runAgentJob)로 스레딩됨: 환경 O 면 실 모델이 trace 를 판정(pass), 환경 X 면 judge 만 skip 점수(eval 지속). WebVoyager 류 judge 프리셋이 정상 eval 에서 자동 채점됨."
-    : "\n⚠️ 기대와 불일치",
+    ? "\n✅ the judge threads through the normal dispatch path (runAgentJob): with env set the real model verdicts the trace (pass), with env unset only the judge gets a skip score (eval continues). WebVoyager-style judge presets are scored automatically in a normal eval."
+    : "\n⚠️ does not match expectation",
 );
 process.exit(ok ? 0 : 1);

@@ -49,7 +49,7 @@ or run it. Two layers enforce it, both **derived** (no extra column): `reference
 + the instance's `createdBy`.
 - **Can't see** — `GET /harnesses` (+ `list_harnesses`) drops entries where `private && createdBy !== subject`
   (`enrichHarnessList` stamps `private` from the latest resolved instance); `GET /harnesses/:id[/:version]` 404s a
-  non-creator. The web list shows a **비공개** badge on your own private harnesses.
+  non-creator. The web list shows a **Private** badge on your own private harnesses.
 - **Can't run** — even if guessed, `resolveHarnessSecrets` for a non-owner fails: a `user` ref resolves against
   **that submitter's** `user` tier only, which lacks the creator's personal secret → `BadRequestError` (the case
   fails with a clear reason). So privacy is enforced by the secret resolution itself, not just the read filter.
@@ -63,10 +63,10 @@ or run it. Two layers enforce it, both **derived** (no extra column): `reference
 - **Consumers** (`CommandHarness`, topology runtimes) call `flattenEnv(env, lookup?)` to coerce to `Record<string,
   string>` — post-dispatch the values are already literals; any residual ref is dropped (never emitted as
   `[object Object]`).
-- **Web** — the harness-register env editor is a structured **`KEY + [값 | 시크릿]`** row list (not raw text): a
-  "시크릿" row picks a workspace secret name from a dropdown (loaded from `GET /secrets`, names-only) or creates one
+- **Web** — the harness-register env editor is a structured **`KEY + [value | secret]`** row list (not raw text): a
+  "Secret" row picks a workspace secret name from a dropdown (loaded from `GET /secrets`, names-only) or creates one
   **inline** (`createWorkspaceSecretAction` → `PUT /secrets/:name`). So a first-time user never pastes a raw key into
-  a spec. Detail views show a secret-backed var as `NAME · 시크릿` (`envValueText`), never the value.
+  a spec. Detail views show a secret-backed var as `NAME · secret` (`envValueText`), never the value.
 - Verified: `packages/core/src/harness-secrets.test.ts` (literal passthrough, ref resolution, missing-secret throw,
   per-service resolution, process no-op).
 

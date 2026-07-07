@@ -13,8 +13,8 @@ import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 
 import { updateProfileAction } from '../api/update-profile'
 
-// 프로필 사진 편집기 — Linear st. 작은 아바타가 곧 업로드 트리거(hover 시 연필 오버레이).
-// 이미지(http/https 또는 data URL)가 있으면 표시, 없거나 로드 실패면 이름 첫 글자 모노그램.
+// Profile photo editor — Linear-style. The small avatar is itself the upload trigger (pencil overlay on hover).
+// Shows the image if present (http/https or data URL); if absent or load fails, a monogram of the name's first letter.
 function AvatarEditor({
   url,
   seed,
@@ -40,7 +40,7 @@ function AvatarEditor({
         aria-label={t('choosePhotoFile')}
         onChange={(e) => {
           const f = e.target.files?.[0]
-          e.target.value = '' // 같은 파일 재선택도 change 가 발생하도록 초기화.
+          e.target.value = '' // reset so re-selecting the same file still fires change.
           if (f) onPick(f)
         }}
       />
@@ -51,7 +51,7 @@ function AvatarEditor({
         className="group relative size-9 shrink-0 overflow-hidden rounded-full outline-none ring-1 ring-inset ring-border transition focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         {hasImage ? (
-          // 임의의 외부 아바타 URL/업로드 data URL 이라 next/image(원격 도메인 화이트리스트)가 아닌 일반 img.
+          // Arbitrary external avatar URL / uploaded data URL, so a plain img rather than next/image (remote-domain allowlist).
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={url}
@@ -72,8 +72,8 @@ function AvatarEditor({
   )
 }
 
-// 내 프로필 수정 폼 — Linear settings-list 패턴(label 좌 · 컨트롤 우).
-// 사진(아바타 클릭 업로드)·이름은 수정 가능, email 은 SSO(읽기 전용·자물쇠).
+// My profile edit form — Linear settings-list pattern (label left · control right).
+// Photo (click avatar to upload) and name are editable; email is SSO (read-only · lock).
 export function ProfileForm({
   email,
   name,
@@ -94,7 +94,7 @@ export function ProfileForm({
 
   const dirty = n !== (name ?? '') || a !== (avatarUrl ?? '')
 
-  // 저장 직후 확인 표시는 잠깐만 — 변경이 없을 땐 푸터가 자연스럽게 비워지도록 자동 소멸.
+  // The just-saved confirmation shows only briefly — auto-dismisses so the footer clears naturally when there are no changes.
   useEffect(() => {
     if (!saved) return
     const t = setTimeout(() => setSaved(false), 2500)
@@ -176,7 +176,7 @@ export function ProfileForm({
 
       {error && <Callout tone="danger">{error}</Callout>}
 
-      {/* 변경이 있을 때만 저장 버튼이 자연스럽게 나타난다(미수정 시 숨김). 저장 직후엔 잠깐 '저장됨' 확인. */}
+      {/* The save button appears naturally only when there are changes (hidden when unmodified). Right after saving, a brief 'saved' confirmation. */}
       {busy || dirty || saved ? (
         <div className="flex items-center animate-in fade-in-0 slide-in-from-top-1 duration-150">
           {saved && !busy ? (

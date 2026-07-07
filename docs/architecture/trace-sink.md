@@ -109,7 +109,7 @@ export interface TraceSinkCaseResult { caseId: string; externalId?: string; url?
 export interface TraceSinkResult { url?: string; cases: TraceSinkCaseResult[] }
 
 export interface TraceSink {
-  // 케이스 배열을 한 번에 — 어댑터가 내부에서 배치/루프를 선택(Langfuse 는 배치 ingestion 1콜).
+  // The whole case array at once — the adapter picks batch/loop internally (Langfuse = 1 batch-ingestion call).
   export(ctx: TraceSinkContext, cases: TraceSinkCase[]): Promise<TraceSinkResult>;
 }
 
@@ -188,10 +188,10 @@ The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` 
 
 ## Web (apps/web)
 
-- **Settings → 통합**: the integrations tab is a **summary list** (row per integration:
-  연결됨/등록 개수 badge + 관리 진입점) — clicking 트레이스 싱크 opens the sink list manager
+- **Settings → Integrations**: the integrations tab is a **summary list** (row per integration:
+  connected/registered-count badge + management entry) — clicking Trace sinks opens the sink list manager
   (name-keyed add/edit/remove; kind select + endpoint + `authSecretName` SecretPicker + per-kind
-  project + webUrl; InfoTip guide). **Harness detail** gains a 싱크 선택 selector
+  project + webUrl; InfoTip guide). **Harness detail** gains a sink-select selector
   (`HarnessSinkSelect`, member+) — this is where export is turned on per harness.
 - **Scorecard detail**: an export strip — sink kind badge + status + top-level link + per-case
   external links in the cases table; failure shows the recorded message. No section when the

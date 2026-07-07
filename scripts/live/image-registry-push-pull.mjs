@@ -1,19 +1,19 @@
-// 라이브 e2e: 워크스페이스 이미지 레지스트리 — **발행(everdict image push) → 인증 pull** 전 과정 실검증.
-// docs/architecture/workspace-image-registry.md 의 S2(발행) + S4(pull 인증) 라이브 프루프.
+// Live e2e: workspace image registry — real verification of the full **publish (everdict image push) → authenticated pull** path.
+// Live proof of S2 (publish) + S4 (pull auth) from docs/architecture/workspace-image-registry.md.
 //
-// 구성(모두 로컬, 외부 자격증명 불필요):
-//   • registry:2 (docker, htpasswd basic auth, 127.0.0.1:5005) — BYO 워크스페이스 레지스트리 대역.
-//   • 컨트롤플레인(node, in-memory) — 레지스트리 등록 + push/pull 시크릿 + push-credentials 발급.
-//   • everdict CLI(image push) — 자격증명 발급 → docker tag → 임시 DOCKER_CONFIG push.
+// Setup (all local, no external credentials needed):
+//   • registry:2 (docker, htpasswd basic auth, 127.0.0.1:5005) — stand-in for a BYO workspace registry.
+//   • control plane (node, in-memory) — registry registration + push/pull secrets + push-credentials minting.
+//   • everdict CLI (image push) — mint credentials → docker tag → push with a temp DOCKER_CONFIG.
 //
-// 흐름:
-//   ① 인증 레지스트리 기동(무인증 401 확인) → ② 마커 이미지 빌드 → ③ CP 기동 + API 키 발급
-//   → ④ 시크릿(REG_PUSH/REG_PULL) + /workspace/image-registries 등록(복수 모델, name 지정) → ⑤ everdict image push
-//   → ⑥ 카탈로그에 리포 확인 + ~/.docker/config.json 불가침 확인 + 로컬 이미지 제거 후 무인증 pull 실패 확인
-//   → ⑦ pullWithRegistryAuth(임시 DOCKER_CONFIG) 로 인증 pull 성공 + 이미지 sha 일치 → ⑧ 정리.
+// Flow:
+//   ① start the auth registry (confirm 401 without auth) → ② build a marker image → ③ start the CP + mint an API key
+//   → ④ secrets (REG_PUSH/REG_PULL) + register /workspace/image-registries (multi model, name specified) → ⑤ everdict image push
+//   → ⑥ confirm the repo is in the catalog + ~/.docker/config.json untouched + local image removed then unauthenticated pull fails
+//   → ⑦ authenticated pull via pullWithRegistryAuth (temp DOCKER_CONFIG) succeeds + image sha matches → ⑧ clean up.
 //
-// 사용: 빌드(pnpm build --filter @everdict/cli --filter @everdict/api --filter @everdict/drivers) 후
-//   `node scripts/live/image-registry-push-pull.mjs` (docker 필요).
+// Usage: after build (pnpm build --filter @everdict/cli --filter @everdict/api --filter @everdict/drivers)
+//   `node scripts/live/image-registry-push-pull.mjs` (docker required).
 import { execFileSync, spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,7 +40,7 @@ const fail = (msg) => {
 
 let api;
 try {
-  // ① 인증 레지스트리(htpasswd) — httpd 이미지로 bcrypt 해시 생성.
+  // ① Auth registry (htpasswd) — generate a bcrypt hash with the httpd image.
   const dir = mkdtempSync(join(tmpdir(), "everdict-reg-e2e-"));
   const htpasswd = sh("docker", ["run", "--rm", "--entrypoint", "htpasswd", "httpd:2", "-Bbn", USER, PASS]);
   writeFileSync(join(dir, "htpasswd"), htpasswd);
@@ -64,16 +64,17 @@ try {
   ]);
   await sleep(2000);
   const unauth = await fetch(`http://127.0.0.1:${REG_PORT}/v2/`);
-  if (unauth.status !== 401) throw new Error(`레지스트리가 무인증을 거부해야 함(401) — got ${unauth.status}`);
-  console.log("① 인증 레지스트리 기동 — 무인증 401 확인");
+  if (unauth.status !== 401)
+    throw new Error(`registry must reject unauthenticated access (401) — got ${unauth.status}`);
+  console.log("① auth registry up — 401 without auth confirmed");
 
-  // ② 마커 이미지 빌드.
+  // ② Build the marker image.
   writeFileSync(join(dir, "Dockerfile"), "FROM alpine:3\nRUN echo everdict-e2e-marker > /opt/marker.txt\n");
   sh("docker", ["build", "-q", "-t", IMAGE, dir]);
   const builtId = sh("docker", ["image", "inspect", IMAGE, "--format", "{{.Id}}"]).trim();
-  console.log(`② 마커 이미지 빌드: ${IMAGE}`);
+  console.log(`② marker image built: ${IMAGE}`);
 
-  // ③ 컨트롤플레인(in-memory) + API 키.
+  // ③ Control plane (in-memory) + API key.
   api = spawn("node", [join(ROOT, "apps/api/dist/main.js")], {
     env: { ...process.env, PORT, EVERDICT_INTERNAL_TOKEN: INTERNAL, EVERDICT_LOG_LEVEL: "silent" },
     stdio: "ignore",
@@ -84,16 +85,16 @@ try {
       .then((r) => r.ok)
       .catch(() => false);
     if (ok) break;
-    if (i === 29) throw new Error("컨트롤플레인 기동 실패");
+    if (i === 29) throw new Error("control plane failed to start");
   }
   const { apiKey } = await fetch(`${BASE}/internal/tenant-keys`, {
     method: "POST",
     headers: { "content-type": "application/json", "x-internal-token": INTERNAL },
     body: JSON.stringify({ workspace: "acme" }),
   }).then((r) => r.json());
-  console.log("③ 컨트롤플레인 기동 + API 키 발급");
+  console.log("③ control plane up + API key minted");
 
-  // ④ 시크릿 + 레지스트리 등록.
+  // ④ Secrets + registry registration.
   for (const name of ["REG_PUSH", "REG_PULL"])
     await fetch(`${BASE}/secrets/${name}`, { method: "PUT", headers: H, body: JSON.stringify({ value: PASS }) });
   const reg = await fetch(`${BASE}/workspace/image-registries`, {
@@ -107,10 +108,11 @@ try {
       pushSecretName: "REG_PUSH",
     }),
   }).then((r) => r.json());
-  if (reg.config?.imagePrefix !== `${REG_HOST}/`) throw new Error(`레지스트리 등록 실패: ${JSON.stringify(reg)}`);
-  console.log(`④ 레지스트리 등록: ${reg.config.imagePrefix}`);
+  if (reg.config?.imagePrefix !== `${REG_HOST}/`)
+    throw new Error(`registry registration failed: ${JSON.stringify(reg)}`);
+  console.log(`④ registry registered: ${reg.config.imagePrefix}`);
 
-  // ⑤ everdict image push (임시 DOCKER_CONFIG — 유저 docker config 불가침).
+  // ⑤ everdict image push (temp DOCKER_CONFIG — the user's docker config is left untouched).
   const before = (() => {
     try {
       return readFileSync(join(process.env.HOME ?? "", ".docker/config.json"), "utf8");
@@ -129,15 +131,15 @@ try {
     apiKey,
   ]);
   const pushed = out.trim().split("\n").pop();
-  if (pushed !== `${REG_HOST}/${IMAGE}`) throw new Error(`발행 ref 불일치: ${pushed}`);
+  if (pushed !== `${REG_HOST}/${IMAGE}`) throw new Error(`published ref mismatch: ${pushed}`);
   console.log(`⑤ everdict image push → ${pushed}`);
 
-  // ⑥ 검증: 카탈로그 + 유저 config 불가침 + 무인증 pull 실패.
+  // ⑥ Verify: catalog + user config untouched + unauthenticated pull fails.
   const catalog = await fetch(`http://127.0.0.1:${REG_PORT}/v2/_catalog`, {
     headers: { authorization: `Basic ${Buffer.from(`${USER}:${PASS}`).toString("base64")}` },
   }).then((r) => r.json());
   if (!catalog.repositories?.includes("everdict-e2e-img"))
-    throw new Error(`카탈로그에 리포 없음: ${JSON.stringify(catalog)}`);
+    throw new Error(`repo not in catalog: ${JSON.stringify(catalog)}`);
   const after = (() => {
     try {
       return readFileSync(join(process.env.HOME ?? "", ".docker/config.json"), "utf8");
@@ -145,7 +147,7 @@ try {
       return "";
     }
   })();
-  if (before !== after) throw new Error("~/.docker/config.json 이 변경됨 — 임시 DOCKER_CONFIG 불가침 위반");
+  if (before !== after) throw new Error("~/.docker/config.json changed — temp DOCKER_CONFIG isolation violated");
   sh("docker", ["rmi", "-f", pushed, IMAGE], { stdio: "ignore" });
   let unauthPullFailed = false;
   try {
@@ -153,25 +155,25 @@ try {
   } catch {
     unauthPullFailed = true;
   }
-  if (!unauthPullFailed) throw new Error("무인증 docker pull 이 성공해버림 — 레지스트리 인증 미강제");
-  console.log("⑥ 카탈로그 확인 + 유저 docker config 불가침 + 무인증 pull 거부 확인");
+  if (!unauthPullFailed) throw new Error("unauthenticated docker pull succeeded — registry auth not enforced");
+  console.log("⑥ catalog confirmed + user docker config untouched + unauthenticated pull rejected");
 
-  // ⑦ 인증 pull(런타임 소비자와 같은 경로 — DockerDriver/러너 pre-pull 이 쓰는 pullWithRegistryAuth).
+  // ⑦ Authenticated pull (same path as the runtime consumer — pullWithRegistryAuth used by DockerDriver/runner pre-pull).
   const { pullWithRegistryAuth } = await import(join(ROOT, "packages/drivers/dist/index.js"));
   await pullWithRegistryAuth(pushed, { host: REG_HOST, username: USER, password: PASS });
   const pulledId = sh("docker", ["image", "inspect", pushed, "--format", "{{.Id}}"]).trim();
-  if (pulledId !== builtId) throw new Error(`pull 이미지 sha 불일치: ${pulledId} != ${builtId}`);
-  console.log("⑦ pullWithRegistryAuth 인증 pull 성공 + sha 일치");
-  console.log("✓ PASS — 발행→인증 pull 전 과정 라이브 검증 완료");
+  if (pulledId !== builtId) throw new Error(`pulled image sha mismatch: ${pulledId} != ${builtId}`);
+  console.log("⑦ pullWithRegistryAuth authenticated pull succeeded + sha matches");
+  console.log("✓ PASS — full publish → authenticated pull path live-verified");
 } catch (e) {
   fail(e instanceof Error ? e.message : String(e));
 } finally {
-  // ⑧ 정리 — 레지스트리/이미지/CP.
+  // ⑧ Clean up — registry/image/CP.
   api?.kill();
   try {
     sh("docker", ["rm", "-f", REG_NAME], { stdio: "ignore" });
     sh("docker", ["rmi", "-f", `${REG_HOST}/${IMAGE}`, IMAGE], { stdio: "ignore" });
   } catch {
-    // best-effort 정리
+    // best-effort cleanup
   }
 }

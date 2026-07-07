@@ -100,7 +100,7 @@ pretend the image applied: run host-native `LocalDriver` **and surface it** — 
 `"case declares image <x> but this runner has no Docker → running host-native; host must provide the toolchain"`,
 and (follow-up) the control plane can gate placement so an image-required dataset only leases to
 `docker`-capable runners (the `docker` capability is already advertised per-lease — the scheduler can match on
-it). This keeps the failure legible instead of a mysterious `output.xlsx 없음`.
+it). This keeps the failure legible instead of a mysterious `output.xlsx missing`.
 
 ### Layered dependency model (both declarative, pick per portability need)
 

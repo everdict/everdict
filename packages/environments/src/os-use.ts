@@ -9,9 +9,9 @@ import {
 const DEFAULT_DISPLAY = ":99";
 const DEFAULT_SHOT = "/tmp/everdict-screen.png";
 
-// 데스크탑(OS) 컴퓨터-유즈 환경 — 에이전트가 화면을 보고 GUI 앱을 조작(OSWorld 류, 예: hermes-desktop).
-// 데스크탑 컴퓨트 이미지(Xvfb + 앱) 안에서 동작: seed 가 setup(디스플레이/wm/앱 기동) 실행, snapshot 이 스크린샷 캡처.
-// snapshot(compute) 는 spec 을 못 받으므로 seed 에서 받은 display/screenshot 설정을 인스턴스에 보관해 사용.
+// Desktop (OS) computer-use environment — the agent looks at the screen and manipulates GUI apps (OSWorld-style, e.g. hermes-desktop).
+// Runs inside a desktop compute image (Xvfb + apps): seed runs setup (starting the display/wm/apps), snapshot captures a screenshot.
+// snapshot(compute) can't receive the spec, so it keeps the display/screenshot config received in seed on the instance and uses it.
 export class OsUseEnvironment implements Environment<OsUseSnapshot> {
   readonly kind = "os-use" as const;
   private display = DEFAULT_DISPLAY;
@@ -23,7 +23,7 @@ export class OsUseEnvironment implements Environment<OsUseSnapshot> {
     this.display = spec.display ?? DEFAULT_DISPLAY;
     this.shotPath = spec.screenshotPath ?? DEFAULT_SHOT;
     this.shotCmd = spec.screenshotCmd ?? `scrot -o ${this.shotPath}`;
-    // 디스플레이/윈도우매니저/데스크탑 앱 기동(백그라운드 데몬은 setup 명령에서 & 로). DISPLAY 주입.
+    // Start the display/window manager/desktop apps (background daemons via & in the setup commands). Inject DISPLAY.
     for (const cmd of spec.setup ?? []) {
       await compute.exec(cmd, { env: { DISPLAY: this.display }, timeoutSec: 180 });
     }
@@ -31,10 +31,10 @@ export class OsUseEnvironment implements Environment<OsUseSnapshot> {
 
   async snapshot(compute: ComputeHandle): Promise<OsUseSnapshot> {
     await compute.exec(this.shotCmd, { env: { DISPLAY: this.display }, timeoutSec: 60 });
-    // 스크린샷 PNG 를 base64 로 동봉(컴퓨트는 dispose → 결과 밖으로 운반). best-effort: 실패하면 빈 문자열.
+    // Embed the screenshot PNG as base64 (compute is disposed → carry it out of the result). best-effort: empty string on failure.
     const shot = await compute.exec(`base64 -w0 '${this.shotPath.replace(/'/g, "'\\''")}'`, { timeoutSec: 60 });
     const screenshot = shot.exitCode === 0 ? shot.stdout.trim() : "";
-    // 보이는 창 제목(best-effort: wmctrl 있으면). 없으면 빈 목록 — 1차 신호는 스크린샷.
+    // Visible window titles (best-effort: if wmctrl exists). Empty list otherwise — the primary signal is the screenshot.
     const w = await compute.exec("wmctrl -l 2>/dev/null | sed 's/^[^ ]* *[^ ]* *[^ ]* //' || true", {
       env: { DISPLAY: this.display },
     });

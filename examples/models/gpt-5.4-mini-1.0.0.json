@@ -1,7 +1,7 @@
 {
   "id": "gpt-5.4-mini",
   "version": "1.0.0",
-  "description": "first-party 공용 모델 — OpenAI-호환(예: LiteLLM 프록시) gpt-5.4-mini. baseUrl 미지정 시 OPENAI_BASE_URL 시크릿/기본을 사용. API 키는 테넌트 SecretStore(OPENAI_API_KEY).",
+  "description": "first-party shared model — OpenAI-compatible (e.g. a LiteLLM proxy) gpt-5.4-mini. When baseUrl is unset, uses the OPENAI_BASE_URL secret/default. The API key comes from the tenant SecretStore (OPENAI_API_KEY).",
   "provider": "openai",
   "model": "gpt-5.4-mini",
   "tags": ["shared", "openai"]

@@ -19,7 +19,7 @@ Only the **SHA-256 hash** of a key is stored (`everdict_tenant_keys`), never the
 curl -XPOST $API/internal/tenant-keys -H 'x-internal-token: <T>' -d '{"workspace":"acme"}'   # → { workspace, apiKey }
 ```
 
-## Workspaces (self-serve membership + 전환)
+## Workspaces (self-serve membership + switching)
 A user (subject) can belong to **multiple workspaces**, each with a role. Membership is the control plane's
 SSOT (`@everdict/db` `WorkspaceStore`: `everdict_workspaces` + `everdict_workspace_members(workspace, subject, role, email)`) —
 Keycloak supplies the **identity** (subject); the token's `workspace` claim is only a **bootstrap default**. The
@@ -52,7 +52,7 @@ row on each login (display only — for a human-readable member list, never an a
   joins as **member** — so a global Keycloak `admin` realm role can never grant admin in someone else's workspace.
 - One service core (`WorkspaceService`), two transports — HTTP routes **and** MCP tools (`list_workspaces` /
   `create_workspace` / `get_workspace` / `update_workspace` / `delete_workspace`). The web surfaces it as a
-  Linear-style sidebar **workspace switcher** + create flow, plus a Settings **일반(General)** card (logo/name +
+  Linear-style sidebar **workspace switcher** + create flow, plus a Settings **General** card (logo/name +
   read-only URL) and an owner-only **danger zone** (`docs/web.md`).
 
 ### Member management + invites (`MembershipService`)

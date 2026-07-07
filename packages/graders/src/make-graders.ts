@@ -15,16 +15,16 @@ function optStr(v: unknown): string | undefined {
   return typeof v === "string" ? v : undefined;
 }
 
-// GraderSpec[] → Grader[]. judge(LLM/VLM)는 Judge 주입이 필요하므로 opts.judge 로 받는다(없는데 judge 스펙이면 명시 에러).
-// 벤치마크별 채점 다양성은 EvalCase.graders 프리셋으로 표현된다(예: GAIA=answer-match exact, WebVoyager=judge,
-// SWE-bench=tests-pass). 그 스펙을 여기서 Grader 인스턴스로 재구성한다.
+// GraderSpec[] → Grader[]. A judge (LLM/VLM) needs an injected Judge, so it's received via opts.judge (explicit error if a judge spec has none).
+// Per-benchmark scoring variety is expressed as EvalCase.graders presets (e.g. GAIA=answer-match exact, WebVoyager=judge,
+// SWE-bench=tests-pass). That spec is reconstructed into a Grader instance here.
 export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): Grader[] {
   return specs.map((s) => {
     switch (s.id) {
       case "tests-pass":
         return new TestsPassGrader(String(s.config?.cmd ?? "true"));
       case "command":
-        // 제네릭 테스트-실행 grader(벤치마크 무관, 유저 설정 가능): cmd + 선택적 gold 패치/출력 패턴.
+        // Generic test-running grader (benchmark-agnostic, user-configurable): cmd + optional gold patch/output pattern.
         return new CommandGrader({
           cmd: String(s.config?.cmd ?? "true"),
           ...(optStr(s.config?.cwd) ? { cwd: optStr(s.config?.cwd) } : {}),
@@ -34,7 +34,7 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
           ...(optStr(s.config?.id) ? { id: optStr(s.config?.id) } : {}),
         });
       case "script-score":
-        // 제네릭 숫자-점수 grader(벤치마크 무관): 채점 스크립트가 stdout 에 낸 연속 점수를 그대로 방출.
+        // Generic numeric-score grader (benchmark-agnostic): emits the continuous score the scoring script wrote to stdout as-is.
         return new ScriptScoreGrader({
           cmd: String(s.config?.cmd ?? "true"),
           ...(optStr(s.config?.cwd) ? { cwd: optStr(s.config?.cwd) } : {}),
@@ -68,7 +68,7 @@ export function makeGraders(specs: GraderSpec[], opts: { judge?: Judge } = {}): 
           throw new BadRequestError(
             "BAD_REQUEST",
             { grader: "judge" },
-            "judge 그레이더는 Judge 주입이 필요합니다: makeGraders(specs, { judge }).",
+            "The judge grader requires Judge injection: makeGraders(specs, { judge }).",
           );
         }
         return new JudgeGrader(opts.judge, {

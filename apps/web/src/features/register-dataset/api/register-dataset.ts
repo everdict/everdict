@@ -23,7 +23,7 @@ export interface CreateDatasetResult {
   error?: string
 }
 
-// dry-run 검증: 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). authZ/검증은 컨트롤플레인이 강제.
+// dry-run validation: schema + this workspace's existing versions/conflicts (does not register). authZ/validation are enforced by the control plane.
 export async function validateDatasetAction(dataset: unknown): Promise<ValidateDatasetResult> {
   const ctx = await authContext()
   try {
@@ -33,7 +33,7 @@ export async function validateDatasetAction(dataset: unknown): Promise<ValidateD
   }
 }
 
-// 등록(커밋). 스키마 검증/불변성(409)/authZ(member+)은 컨트롤플레인이 강제한다.
+// Register (commit). Schema validation / immutability (409) / authZ (member+) are enforced by the control plane.
 export async function createDatasetAction(dataset: unknown): Promise<CreateDatasetResult> {
   const ctx = await authContext()
   try {

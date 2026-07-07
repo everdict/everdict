@@ -1,10 +1,10 @@
-// 라이브 검증: 하니스 버전 SSOT(@everdict/registry)가 실제 K8s 실행을 구동한다.
+// Live verification: the harness version SSOT (@everdict/registry) drives a real K8s run.
 //
-//  - 파일 SSOT(examples/harnesses/*.json)를 로드 → 버전 목록 + "latest" 해석(semver)
-//  - ServiceTopologyBackend.specFor 를 레지스트리로 연결 → job.harness.version="latest" 가
-//    레지스트리에서 1.1.0 으로 해석되어 그 스펙으로 kind 에서 실행된다.
+//  - Load the file SSOT (examples/harnesses/*.json) → version list + "latest" resolution (semver)
+//  - Wire ServiceTopologyBackend.specFor to the registry → job.harness.version="latest" resolves
+//    to 1.1.0 in the registry and runs on kind with that spec.
 //
-// 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/registry-k8s.mjs
+// Usage: PATH=$HOME/.local/bin:$PATH node scripts/live/registry-k8s.mjs
 
 import { perTenantTrustZones } from "../../packages/backends/dist/index.js";
 import { LATEST, loadHarnessTaxonomyDir } from "../../packages/registry/dist/index.js";
@@ -37,7 +37,7 @@ async function main() {
   const backend = new ServiceTopologyBackend({
     runtime,
     traceSource: new MlflowTraceSource({ endpoint: MLFLOW }),
-    specFor: (tenant, id, ref) => registry.getService(tenant, id, ref), // ← 레지스트리가 spec 의 SSOT
+    specFor: (tenant, id, ref) => registry.getService(tenant, id, ref), // ← the registry is the SSOT for the spec
     trustZones: perTenantTrustZones(),
     submit: async (url, payload) => {
       console.log(`  → POST ${url}`);
@@ -50,7 +50,7 @@ async function main() {
     },
   });
 
-  // job 은 "latest" 만 참조 — 레지스트리가 1.1.0 으로 해석한다.
+  // the job only references "latest" — the registry resolves it to 1.1.0.
   const job = {
     harness: { id: "bu", version: LATEST },
     tenant: "acme",

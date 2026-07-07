@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 컨트롤플레인 /runtimes/validate 응답(느슨 미러). ok=false 면 errors(스키마) 표시.
+// Control plane /runtimes/validate response (loose mirror). When ok=false, show errors (schema).
 export interface ValidateRuntimeResult {
   ok: boolean
   errors?: string[]
@@ -15,7 +15,7 @@ export interface ValidateRuntimeResult {
   error?: string
 }
 
-// 스키마 검증 + 버전 충돌/참조 시크릿 확인(잡 안 돌림). 실패해도 폼은 살아있게 {ok:false} 반환.
+// Schema validation + version-conflict / referenced-secret check (doesn't run a job). On failure returns {ok:false} so the form stays alive.
 export async function validateRuntimeAction(spec: unknown): Promise<ValidateRuntimeResult> {
   const ctx = await authContext()
   try {
@@ -25,7 +25,7 @@ export async function validateRuntimeAction(spec: unknown): Promise<ValidateRunt
   }
 }
 
-// 라이브 연결 테스트 — 실제 클러스터/데몬에 붙어 도달성·인증만 확인(잡 안 돌림).
+// Live connection test — connects to the real cluster/daemon to check only reachability and auth (doesn't run a job).
 export interface ProbeRuntimeResult {
   ok: boolean
   reachable?: boolean
@@ -50,7 +50,7 @@ export interface CreateRuntimeResult {
   error?: string
 }
 
-// 등록(POST /runtimes). authZ(runtimes:write)는 컨트롤플레인이 강제. 불변 버전이라 같은 버전 재등록은 서버가 막는다.
+// Register (POST /runtimes). authZ (runtimes:write) is enforced by the control plane. Versions are immutable, so the server blocks re-registering the same version.
 export async function createRuntimeAction(spec: unknown): Promise<CreateRuntimeResult> {
   const ctx = await authContext()
   try {

@@ -42,8 +42,8 @@ Migration: `packages/db/migrations/0008_create_judges.sql`.
 
 ## Web (`apps/web`)
 - **Judge `/dashboard/judges`** — owned vs `_shared` judges (kind + version chips; rows link to detail).
-- **상세 `/dashboard/judges/[id]`** — kind + fields (model: provider/model/inputs/threshold; harness: ref) + rubric.
-- **등록 `/dashboard/judges/new`** — a **kind-toggle form** (model | harness) with a **validate (dry-run)** step,
+- **Detail `/dashboard/judges/[id]`** — kind + fields (model: provider/model/inputs/threshold; harness: ref) + rubric.
+- **Register `/dashboard/judges/new`** — a **kind-toggle form** (model | harness) with a **validate (dry-run)** step,
   then register (`POST /judges`). Role-gated off `/me` (`judges:write` = member+).
 
 ## Execution (control plane, trace-based)

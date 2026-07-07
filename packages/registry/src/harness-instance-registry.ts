@@ -11,25 +11,25 @@ import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
 import { asService } from "./registry.js";
 import { type VersionMeta, VersionedStore } from "./versioned-store.js";
 
-// 목록 한 항목 — 버전 메타(등록 이력) + 최신 인스턴스에서 파생한 표시 필드(category/kind/subtitle).
-// GET /harnesses 와 MCP list_harnesses 가 이 모양을 낸다. 데이터셋 DatasetListEntry 와 같은 결.
+// One list entry — version meta (registration history) + display fields derived from the latest instance (category/kind/subtitle).
+// GET /harnesses and MCP list_harnesses produce this shape. Same grain as the dataset DatasetListEntry.
 export interface HarnessListEntry extends VersionMeta {
-  category?: string; // 최신 인스턴스의 템플릿 대분류(cli-agent 등)
+  category?: string; // template category of the latest instance (cli-agent, etc.)
   kind?: string; // command | service | process (resolved)
-  subtitle?: string; // 모델/커맨드/서비스 요약(하니스는 free-text description 이 없어 이걸 부제로 쓴다)
-  // 최신 인스턴스가 개인(user) 스코프 시크릿을 참조하면 true — 이 하니스는 createdBy 만 볼 수 있다(비공개).
-  // API 가 이 값 + createdBy 로 목록/상세에서 다른 유저에게 숨긴다(값 자체는 파생 — 별도 저장 없음).
+  subtitle?: string; // model/command/service summary (a harness has no free-text description, so this serves as the subtitle)
+  // true if the latest instance references a user-scoped secret — this harness is visible to createdBy only (private).
+  // The API uses this value + createdBy to hide it from other users in list/detail (the value itself is derived — not stored separately).
   private?: boolean;
 }
 
-// resolved HarnessSpec → 부제(목록 표시용). command=모델/커맨드, service=서비스 수. 없으면 undefined.
+// resolved HarnessSpec → subtitle (for list display). command = model/command, service = service count. undefined if none.
 export function harnessSubtitle(spec: HarnessSpec): string | undefined {
   if (spec.kind === "command") return spec.model ?? spec.command;
-  if (spec.kind === "service") return `${spec.services.length}개 서비스`;
+  if (spec.kind === "service") return `${spec.services.length} services`;
   return undefined;
 }
 
-// 목록 메타에 최신 인스턴스 파생(category/kind/subtitle)을 얹는다. 템플릿 누락 등은 조용히 생략(목록은 계속 뜬다).
+// Overlays the latest-instance derivation (category/kind/subtitle) onto the list meta. Missing templates etc. are silently skipped (the list still shows).
 export async function enrichHarnessList(
   metas: VersionMeta[],
   getInstance: (id: string, ref: string) => Promise<HarnessInstanceSpec>,
@@ -50,22 +50,22 @@ export async function enrichHarnessList(
         ...(sub !== undefined ? { subtitle: sub } : {}),
       };
     } catch {
-      // 템플릿 누락/해석 실패 — 파생 필드 생략(메타만 노출)
+      // Missing template / resolution failure — skip derived fields (expose meta only)
     }
     out.push({ ...meta, ...extra });
   }
   return out;
 }
 
-// 템플릿이 핀 가능한 슬롯 키 — service: slot(미지정이면 name), command: image/model, process: 없음.
+// Slot keys the template can pin — service: slot (name if unspecified), command: image/model, process: none.
 function templateSlots(template: HarnessTemplateSpec): string[] {
   if (template.kind === "service") return template.services.map((s) => s.slot ?? s.name);
   if (template.kind === "command") return ["image", "model"];
   return [];
 }
 
-// 제출 시점 임시 핀 오버라이드 — 인스턴스 pins 위에 병합해 resolve(레지스트리 무변경, PR 이미지 스왑용).
-// 알 수 없는 슬롯은 BadRequest — 오타를 조용히 무시하면 PR 이미지가 안 갈아끼워진 채 평가가 통과하는 사고가 된다.
+// Submit-time transient pin override — merged over the instance pins and resolved (registry unchanged, for PR image swaps).
+// Unknown slots are BadRequest — silently ignoring a typo causes the accident where the eval passes without the PR image being swapped in.
 export function resolveInstanceWithPins(
   template: HarnessTemplateSpec,
   instance: HarnessInstanceSpec,
@@ -74,21 +74,25 @@ export function resolveInstanceWithPins(
   const known = new Set(templateSlots(template));
   for (const slot of Object.keys(pins)) {
     if (!known.has(slot)) {
-      throw new BadRequestError("BAD_REQUEST", { slot, known: [...known] }, `핀 슬롯 '${slot}' 가 템플릿에 없습니다.`);
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { slot, known: [...known] },
+        `Pin slot '${slot}' is not in the template.`,
+      );
     }
   }
   return resolveHarnessInstance(template, { ...instance, pins: { ...instance.pins, ...pins } });
 }
 
-// 개별 하네스(Instance) 레지스트리 — (tenant, id, version) → HarnessInstanceSpec(template 참조 + pins).
-// get()/getService() 는 template 을 핀해 resolved HarnessSpec 을 돌려준다(기존 HarnessRegistry.get 과 drop-in 호환).
-// 인스턴스는 같은 id(=template.id) 아래 버전으로 쌓인다 → list 가 대분류(템플릿)별로 묶인다.
+// Individual harness (instance) registry — (tenant, id, version) → HarnessInstanceSpec (template reference + pins).
+// get()/getService() pin the template and return a resolved HarnessSpec (drop-in compatible with the existing HarnessRegistry.get).
+// Instances stack as versions under the same id (= template.id) → list groups them by category (template).
 export interface HarnessInstanceRegistry {
   register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string): Promise<void>;
   has(tenant: string, id: string, version: string): Promise<boolean>;
   getInstance(tenant: string, id: string, ref?: string): Promise<HarnessInstanceSpec>;
   get(tenant: string, id: string, ref?: string): Promise<HarnessSpec>; // resolved (template + pins)
-  // resolved + 제출 시점 임시 핀(레지스트리 무변경) — CI PR 발사가 한 서비스 이미지만 스왑해 평가할 때.
+  // resolved + submit-time transient pins (registry unchanged) — when a CI PR trigger swaps just one service image to evaluate.
   resolveWithPins(
     tenant: string,
     id: string,
@@ -98,23 +102,23 @@ export interface HarnessInstanceRegistry {
   getService(tenant: string, id: string, ref?: string): Promise<ServiceHarnessSpec>;
   versions(tenant: string, id: string): Promise<string[]>;
   list(tenant: string): Promise<HarnessListEntry[]>;
-  // 이 하니스 id 의 최초 등록자 subject(시드/공유는 없음) — 비공개(개인 시크릿 참조) 하니스의 소유자 확인용.
+  // The first-registrant subject of this harness id (no seed/shared) — for verifying the owner of a private (references a personal secret) harness.
   creatorOf(tenant: string, id: string): Promise<string | undefined>;
-  // 이 "버전"의 등록자 subject — 삭제 authz(생성자-또는-admin)용. 비소유/삭제/부재 → NotFound(데이터셋과 동일).
+  // The registrant subject of this "version" — for delete authz (creator-or-admin). Non-owned/deleted/absent → NotFound (same as datasets).
   creatorOfVersion(tenant: string, id: string, version: string): Promise<string | undefined>;
-  // 버전 소프트 삭제(tombstone) — 데이터는 보존(과거 스코어카드 재현성), 모든 read 에서 제외, 동일 내용 재등록은 부활.
+  // Version soft-delete (tombstone) — data is preserved (past scorecard reproducibility), excluded from every read, re-registering identical content revives it.
   softDelete(tenant: string, id: string, version: string): Promise<void>;
-  // 버전 태그(자유 라벨, 전체 교체) — 가변 레지스트리 메타(스펙 불변성 밖). 테넌트 소유 살아있는 버전만; _shared 는 NotFound.
+  // Version tags (free-form labels, full replacement) — mutable registry meta (outside spec immutability). Tenant-owned live versions only; _shared → NotFound.
   setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
-  // 버전 → 태그 맵(태그 있는 버전만). 읽기는 versions() 와 동일하게 owner 해석(_shared 폴백 포함).
+  // version → tags map (only versions with tags). Reads resolve owner like versions() (including _shared fallback).
   versionTags(tenant: string, id: string): Promise<Record<string, string[]>>;
 }
 
 export class InMemoryHarnessInstanceRegistry implements HarnessInstanceRegistry {
-  private readonly store = new VersionedStore<HarnessInstanceSpec>("하네스 인스턴스");
+  private readonly store = new VersionedStore<HarnessInstanceSpec>("harness instance");
   constructor(private readonly templates: HarnessTemplateRegistry) {}
 
-  // 등록 시 템플릿 존재 + pins 유효성을 resolve 로 검증(실패하면 등록 거부 — fail fast).
+  // On register, validate template existence + pin validity via resolve (reject on failure — fail fast).
   async register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
     resolveHarnessInstance(template, instance); // throws BadRequest on missing/mismatched pins

@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 알림 읽음 처리 프록시 — {ids:[…]} 또는 {all:true}. 컨트롤플레인 POST /notifications/read 미러.
+// Mark-notifications-read proxy — {ids:[…]} or {all:true}. Mirrors the control-plane POST /notifications/read.
 export async function POST(request: Request): Promise<Response> {
   const ctx = await authContext()
   const body: unknown = await request.json().catch(() => ({}))

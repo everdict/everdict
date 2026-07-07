@@ -4,19 +4,19 @@ import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 
-// 스코어카드 트리거 출처(provenance) — 컨트롤플레인 ScorecardOrigin 과 동형(구조적). shared 는 최하위 레이어라
-// entities 를 import 하지 않으므로 여기서 표시에 필요한 모양만 로컬로 미러한다.
+// Scorecard trigger provenance — isomorphic (structural) to the control plane's ScorecardOrigin. shared is the lowest layer,
+// so it doesn't import entities; here we mirror locally only the shape needed for display.
 export interface OriginLike {
   source: string // github-actions | schedule | api | web …
   repo?: string // "owner/name"
   sha?: string
   ref?: string // refs/heads/… | refs/pull/…
   prNumber?: number
-  runUrl?: string // CI run 링크
-  pinOverrides?: Record<string, string> // 제출 시점 임시 핀(슬롯→이미지)
+  runUrl?: string // CI run link
+  pinOverrides?: Record<string, string> // submit-time ephemeral pins (slot→image)
 }
 
-// source → 라벨 카탈로그 키 + 아이콘. 미지정 source 는 원문 그대로.
+// source → label catalog key + icon. An unmapped source is shown verbatim.
 const SOURCE_META: Record<
   string,
   { labelKey: string; icon: ComponentType<{ className?: string }> }
@@ -31,7 +31,7 @@ function shortSha(sha: string): string {
   return sha.length > 7 ? sha.slice(0, 7) : sha
 }
 
-// 컴팩트 출처 칩(목록용) — 링크 없음(행 전체가 이미 <a> 라 앵커 중첩 금지). 소스 라벨 + 커밋/PR 은 평문으로.
+// Compact provenance chip (for lists) — no links (the whole row is already an <a>, so no nested anchors). Source label + commit/PR as plain text.
 export function OriginChip({ origin, className }: { origin: OriginLike; className?: string }) {
   const t = useTranslations('ui')
   const meta = SOURCE_META[origin.source]
@@ -56,7 +56,7 @@ export function OriginChip({ origin, className }: { origin: OriginLike; classNam
   )
 }
 
-// 전체 출처 블록(상세용) — 커밋/PR/CI run 링크 + 임시 핀(pinOverrides) 표. 여기선 앵커를 써도 된다.
+// Full provenance block (for detail) — commit/PR/CI run links + ephemeral-pins (pinOverrides) table. Anchors are fine here.
 export function OriginBlock({ origin }: { origin: OriginLike }) {
   const t = useTranslations('ui')
   const meta = SOURCE_META[origin.source]

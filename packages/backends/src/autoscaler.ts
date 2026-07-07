@@ -1,34 +1,34 @@
-// 큐 깊이 기반 오토스케일러: 스케줄러의 부하(대기 + 진행중)를 보고 용량을 늘리고 줄인다.
-// 용량 인지 배치가 "자리 없으면 큐잉" 한다면, 오토스케일러는 그 backlog 를 보고 "자리를 늘린다".
-// 실제 작동은 ScalingTarget 이 추상화 — in-memory 슬롯/Nomad Autoscaler/cloud ASG/K8s replica patch.
+// A queue-depth-based autoscaler: reads the scheduler's load (queued + in-flight) to grow and shrink capacity.
+// If capacity-aware placement "queues when there's no room", the autoscaler reads that backlog and "adds room".
+// The actuation is abstracted by ScalingTarget — in-memory slots / Nomad Autoscaler / cloud ASG / K8s replica patch.
 
 export interface LoadSignal {
-  queued: number; // 대기 중인 잡 수
-  inFlight: number; // 진행 중인 잡 수
+  queued: number; // number of queued jobs
+  inFlight: number; // number of in-flight jobs
 }
 
 export interface AutoscalePolicy {
-  min: number; // 최소 용량 (0 = scale-to-zero 허용)
-  max: number; // 최대 용량 (실 인프라 상한)
-  // 부하→목표 용량(슬롯). 기본: demand = inFlight + queued (대기를 모두 흡수하도록).
+  min: number; // minimum capacity (0 = allow scale-to-zero)
+  max: number; // maximum capacity (the real infra ceiling)
+  // load→target capacity (slots). Default: demand = inFlight + queued (to absorb all waiting).
   targetSlots?: (load: LoadSignal, current: number) => number;
-  scaleDownAfterTicks?: number; // 다운스케일 히스테리시스(플래핑 방지). 기본 3
+  scaleDownAfterTicks?: number; // downscale hysteresis (anti-flapping). Default 3
 }
 
-// 스케일 대상 — 실제 용량 조정 메커니즘을 추상화.
+// Scale target — abstracts the actual capacity-adjustment mechanism.
 export interface ScalingTarget {
   readonly id: string;
   current(): number | Promise<number>;
   scaleTo(desired: number): void | Promise<void>;
 }
 
-// 목표 용량 계산 (순수/결정적). demand 를 [min,max] 로 클램프.
+// Compute target capacity (pure/deterministic). Clamp demand to [min,max].
 export function desiredCapacity(load: LoadSignal, current: number, policy: AutoscalePolicy): number {
   const demand = policy.targetSlots ? policy.targetSlots(load, current) : load.inFlight + load.queued;
   return Math.max(policy.min, Math.min(policy.max, Math.ceil(demand)));
 }
 
-// in-memory 슬롯 카운트 — 백엔드 maxConcurrent 에 fn 으로 주입해 닫힌 루프를 만든다.
+// An in-memory slot count — injected into a backend's maxConcurrent as a fn to form a closed loop.
 export class MutableSlots implements ScalingTarget {
   constructor(
     readonly id: string,
@@ -40,21 +40,21 @@ export class MutableSlots implements ScalingTarget {
   scaleTo(desired: number): void {
     this.slots = desired;
   }
-  // 백엔드 maxConcurrent 로 넘길 게터.
+  // The getter to pass as a backend's maxConcurrent.
   readonly get = (): number => this.slots;
 }
 
 export interface AutoscalerOptions {
-  signal: () => LoadSignal; // 예: () => aggregateStats(scheduler)
+  signal: () => LoadSignal; // e.g. () => aggregateStats(scheduler)
   targets: ScalingTarget[];
   policy: AutoscalePolicy;
-  intervalMs?: number; // start() 의 틱 주기 (기본 1000)
+  intervalMs?: number; // the tick interval of start() (default 1000)
   onScale?: (targetId: string, from: number, to: number) => void;
-  onChanged?: () => void; // 스케일 직후 호출 — 스케줄러 re-pump 훅 (sched.poke)
+  onChanged?: () => void; // called right after a scale — the scheduler re-pump hook (sched.poke)
 }
 
 export class Autoscaler {
-  private readonly downTicks = new Map<string, number>(); // 대상별 연속 다운 후보 틱
+  private readonly downTicks = new Map<string, number>(); // consecutive down-candidate ticks per target
   private timer: ReturnType<typeof setInterval> | undefined;
 
   constructor(private readonly opts: AutoscalerOptions) {}
@@ -68,14 +68,14 @@ export class Autoscaler {
       const desired = desiredCapacity(load, cur, this.opts.policy);
       if (desired > cur) {
         this.downTicks.set(target.id, 0);
-        await target.scaleTo(desired); // 업스케일은 즉시 (backlog 해소 우선)
+        await target.scaleTo(desired); // upscale immediately (clear the backlog first)
         this.opts.onScale?.(target.id, cur, desired);
         changed = true;
       } else if (desired < cur) {
         const d = (this.downTicks.get(target.id) ?? 0) + 1;
         this.downTicks.set(target.id, d);
         if (d >= threshold) {
-          // 다운스케일은 유휴/과프로비전이 충분히 지속될 때만 (플래핑 방지)
+          // downscale only when idle/over-provision persists long enough (anti-flapping)
           this.downTicks.set(target.id, 0);
           await target.scaleTo(desired);
           this.opts.onScale?.(target.id, cur, desired);
@@ -99,7 +99,7 @@ export class Autoscaler {
   }
 }
 
-// 스케줄러 stats() → LoadSignal (편의).
+// Scheduler stats() → LoadSignal (convenience).
 export function aggregateLoad(stats: { queued: number; inFlight: Record<string, number> }): LoadSignal {
   return { queued: stats.queued, inFlight: Object.values(stats.inFlight).reduce((a, b) => a + b, 0) };
 }

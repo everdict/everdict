@@ -43,14 +43,14 @@ function makeDeps(initialToken: string | null = null, initialMeta: RunnerMeta = 
 }
 
 describe("RunnerController", () => {
-  it("startFromStore — 토큰 없으면 미페어 브로드캐스트만, 호스트 안 만든다", async () => {
+  it("startFromStore — with no token, broadcasts unpaired only and creates no host", async () => {
     const { deps, broadcasts, hosts } = makeDeps();
     await new RunnerController(deps).startFromStore();
     expect(hosts).toHaveLength(0);
     expect(broadcasts.at(-1)).toMatchObject({ paired: false, state: "off" });
   });
 
-  it("startFromStore — 저장된 토큰으로 조용히 복원(메타 runnerId 유지)", async () => {
+  it("startFromStore — silently restores with the saved token (keeps the meta runnerId)", async () => {
     const { deps, broadcasts, hosts } = makeDeps("rnr_saved", { runnerId: "r9" });
     const c = new RunnerController(deps);
     await c.startFromStore();
@@ -59,7 +59,7 @@ describe("RunnerController", () => {
     expect(broadcasts.at(-1)).toMatchObject({ paired: true, runnerId: "r9", state: "idle" });
   });
 
-  it("pair — 토큰 저장 + 메타 저장 + 호스트 시작; 재페어 시 기존 호스트는 정리", async () => {
+  it("pair — saves the token + saves the meta + starts the host; a re-pair cleans up the existing host", async () => {
     const { deps, hosts, getToken, getMeta } = makeDeps();
     const c = new RunnerController(deps);
     await c.pair({ token: "rnr_a", runnerId: "r1", apiUrl: "http://cp:8787" });
@@ -71,10 +71,10 @@ describe("RunnerController", () => {
     expect(c.status()).toMatchObject({ paired: true, runnerId: "r2" });
   });
 
-  it("pair — saveToken 이 throw(safeStorage 불가)하면 페어 상태로 넘어가지 않는다", async () => {
+  it("pair — if saveToken throws (safeStorage unavailable), does not advance to the paired state", async () => {
     const { deps, hosts } = makeDeps();
     deps.saveToken = () => {
-      throw new Error("safeStorage 불가");
+      throw new Error("safeStorage unavailable");
     };
     const c = new RunnerController(deps);
     await expect(c.pair({ token: "rnr_x" })).rejects.toThrow(/safeStorage/);
@@ -82,7 +82,7 @@ describe("RunnerController", () => {
     expect(c.status().paired).toBe(false);
   });
 
-  it("unpair — 토큰/메타 폐기 + 즉시 off 브로드캐스트(호스트 정지는 백그라운드)", async () => {
+  it("unpair — discards the token/meta + immediately broadcasts off (host stop in the background)", async () => {
     const { deps, broadcasts, hosts, getToken } = makeDeps("rnr_saved", { runnerId: "r9" });
     const c = new RunnerController(deps);
     await c.startFromStore();
@@ -92,7 +92,7 @@ describe("RunnerController", () => {
     await vi.waitFor(() => expect(hosts[0]?.stopped).toBe(true));
   });
 
-  it("shutdown — 호스트 정지를 기다린다", async () => {
+  it("shutdown — waits for the host to stop", async () => {
     const { deps, hosts } = makeDeps("rnr_saved");
     const c = new RunnerController(deps);
     await c.startFromStore();

@@ -26,15 +26,16 @@ import {
   revokeWorkspaceRunnerAction,
 } from '../api/manage-workspace-runners'
 
-// 온라인 판정 — 러너는 long-poll lease(~25s)마다 lastSeenAt 을 갱신하므로 90s 안이면 접속 중으로 본다.
+// Online check — a runner refreshes lastSeenAt on every long-poll lease (~25s), so within 90s it counts as connected.
 const ONLINE_WINDOW_MS = 90_000
 function isOnline(lastSeenAt?: string): boolean {
   return lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
 }
 
-// 워크스페이스-공유 러너(팀 자원) — admin 이 headless 러너(팀 빌드서버/CI)를 등록하면 이 워크스페이스 멤버
-// 누구나 self:ws:<id> 로 타깃한다. 개인 러너(계정 페이지, 원클릭 데스크톱)와 달리 토큰을 1회 노출하고
-// 서버에서 `everdict runner --pair` 로 붙인다. 등록/해제는 admin(settings:write) — 컨트롤플레인이 강제.
+// Workspace-shared runner (team resource) — once an admin registers a headless runner (team build server/CI),
+// any member of this workspace can target it via self:ws:<id>. Unlike personal runners (account page, one-click
+// desktop), the token is shown once and attached on the server via `everdict runner --pair`. Register/revoke is
+// admin-only (settings:write) — the control plane enforces it.
 export function WorkspaceRunnersManager({
   runners,
   canWrite,
@@ -43,8 +44,8 @@ export function WorkspaceRunnersManager({
 }: {
   runners: RunnerMeta[]
   canWrite: boolean
-  githubApp: GithubAppView // GitHub Actions 러너 등록 picker 의 대상 목록(설치 + 허용 레포) — 통합 탭과 같은 스냅샷
-  onOpenIntegrations?: () => void // "GitHub App 설치/관리" CTA — 통합 탭으로 전환(같은 설정 페이지 안)
+  githubApp: GithubAppView // Target list for the GitHub Actions runner registration picker (installations + allowed repos) — same snapshot as the Integrations tab
+  onOpenIntegrations?: () => void // "Install/manage GitHub App" CTA — switch to the Integrations tab (same settings page)
 }) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
@@ -219,7 +220,7 @@ export function WorkspaceRunnersManager({
   )
 }
 
-// 등록 모달 — 이름 + OS(선택) + capability 선택 후 등록. 등록되면 같은 모달이 토큰 1회 노출 + 접속 명령 단계로 전환.
+// Register dialog — pick a name + OS (optional) + capabilities, then register. Once registered, the same dialog switches to a step that shows the token once + the attach command.
 function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
@@ -262,7 +263,7 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
     })
   }
 
-  // 서버에서 붙일 때 실행할 명령 — apiUrl 이 있으면 넣어 보여준다(비밀 아님).
+  // Command to run when attaching on the server — include apiUrl if present (not a secret).
   const command = issued
     ? `everdict runner --pair --token ${issued.token}${issued.apiUrl ? ` --api-url ${issued.apiUrl}` : ''}`
     : ''
@@ -388,19 +389,20 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
   )
 }
 
-// GHE host 표시는 URL 스킴을 뗀 호스트명만(github.com 은 무표기) — picker 행 배지용.
+// GHE host display strips the URL scheme to just the hostname (github.com is unlabeled) — for the picker row badge.
 const hostLabel = (host: string) => host.replace(/^https?:\/\//, '').replace(/\/$/, '')
 
-// picker 선택 좌표 — 같은 "owner/name"/org 가 github.com 과 GHE 양쪽에 있을 수 있어 host 까지가 식별자다.
+// Picker selection coordinate — the same "owner/name"/org can exist on both github.com and GHE, so the identifier includes the host.
 interface SelectedTarget {
-  name: string // repo 모드 = "owner/name", org 모드 = org(설치 account)
-  host?: string // GHE 베이스 URL — 미지정 = github.com
+  name: string // repo mode = "owner/name", org mode = org (installation account)
+  host?: string // GHE base URL — unset = github.com
 }
 const targetKey = (s: SelectedTarget) => `${s.host ?? 'github.com'}:${s.name}`
 
-// GitHub Actions 러너 자가등록 모달 — 워크스페이스 GitHub App 설치를 전제로, 설치가 허용한 레포/조직에서 대상을
-// 고른다(raw 입력 없음; App 미설치면 통합 탭 설치 CTA). 생성되면 빌드 서버에서 실행할 설치 스크립트(GitHub 러너 +
-// Everdict 러너)와 워크플로 힌트(runs-on 라벨 + run-eval runtime)를 1회 노출한다.
+// GitHub Actions runner self-registration dialog — assumes the workspace GitHub App is installed, and picks a
+// target from the repos/orgs the installation allows (no raw input; if the App isn't installed, an Integrations-tab
+// install CTA). Once generated, it shows once the install script to run on the build server (GitHub runner +
+// Everdict runner) and a workflow hint (runs-on label + run-eval runtime).
 function GithubInstallDialog({
   open,
   onClose,
@@ -437,7 +439,7 @@ function GithubInstallDialog({
   }, [open])
 
   const installed = installations.length > 0
-  // repo picker 행 — 각 설치의 허용 레포를 합친다(GHE 레포는 host 를 실어 옴). 조회 실패 설치는 경고로만.
+  // repo picker rows — merge each installation's allowed repos (GHE repos carry their host). Installations that failed to load show as a warning only.
   const repoRows = installations.flatMap((i) =>
     (i.repos ?? []).map((r) => ({
       fullName: r.fullName,
@@ -454,7 +456,7 @@ function GithubInstallDialog({
       .includes(repoQuery.trim().toLowerCase())
   )
 
-  // "App 설치/저장소 확장" — 통합 탭으로 전환(모달은 닫는다).
+  // "Install App / expand repos" — switch to the Integrations tab (closes the dialog).
   function goToIntegrations() {
     onClose()
     onOpenIntegrations?.()
@@ -555,7 +557,7 @@ function GithubInstallDialog({
           </footer>
         </>
       ) : !installed ? (
-        // App 미설치 — raw 입력으로 우회시키지 않고 설치를 요구한다(설치하면 레포/조직을 바로 고를 수 있다).
+        // App not installed — require installation instead of routing around it with raw input (once installed, repos/orgs can be picked directly).
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="gh-install-title" className="text-[15px] font-[560] text-foreground">
@@ -591,7 +593,7 @@ function GithubInstallDialog({
             </p>
           </header>
           <div className="max-h-[62vh] space-y-4 overflow-y-auto px-5 py-4">
-            {/* 대상: 레포 vs 조직(org — 그 org 의 모든 레포 공유) */}
+            {/* Target: repo vs org (org — all repos in that org share it) */}
             <div className="space-y-1.5">
               <Label>{t('targetLabel')}</Label>
               <div className="flex gap-1.5">
@@ -613,7 +615,7 @@ function GithubInstallDialog({
               </div>
             </div>
             {mode === 'repo' ? (
-              // 레포 picker — App 설치가 허용한 레포만(설치 시 고른 것). 검색은 레포명 + GHE 호스트명.
+              // repo picker — only repos the App installation allows (chosen at install time). Search matches repo name + GHE hostname.
               <div className="space-y-1.5">
                 <Label>{t('repo')}</Label>
                 {failedAccounts.length > 0 && (
@@ -669,7 +671,7 @@ function GithubInstallDialog({
                                 {r.fullName}
                               </span>
                               {r.host && (
-                                // GHE repo — 어느 인스턴스에서 온 것인지 호스트명으로 구분(github.com 은 무표기).
+                                // GHE repo — distinguish which instance it came from by hostname (github.com is unlabeled).
                                 <span className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
                                   {hostLabel(r.host)}
                                 </span>
@@ -686,7 +688,7 @@ function GithubInstallDialog({
                 )}
               </div>
             ) : (
-              // org picker — App 이 설치된 조직에서 고른다(그 org 의 모든 레포가 이 러너를 공유).
+              // org picker — pick from orgs where the App is installed (all repos in that org share this runner).
               <div className="space-y-1.5">
                 <Label>{t('org')}</Label>
                 <div className="max-h-48 divide-y divide-border/70 overflow-y-auto rounded-md border bg-card">
@@ -737,7 +739,7 @@ function GithubInstallDialog({
                 />
               </div>
             )}
-            {/* 원하는 레포/조직이 안 보이면 GitHub App 설치(허용 저장소)를 넓힌다 — 통합 탭에서. */}
+            {/* If the desired repo/org isn't listed, expand the GitHub App installation (allowed repos) — from the Integrations tab. */}
             {onOpenIntegrations && (
               <p className="text-[12px] text-faint">
                 {t('targetMissingHint')}{' '}

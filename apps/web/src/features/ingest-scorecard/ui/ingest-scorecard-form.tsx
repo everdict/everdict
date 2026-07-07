@@ -34,8 +34,8 @@ const SAMPLE_RUNS = `[
 
 type Mode = 'push' | 'pull'
 
-// 트레이스 인제스트 — push(업로드한 TraceEvent[]) | pull(테넌트 OTel/MLflow 에서 runId 로 당겨오기) 두 모드.
-// dataset/judge/harness 라벨은 공통. push 는 traces JSON, pull 은 source + runs JSON.
+// Trace ingest — two modes: push (uploaded TraceEvent[]) | pull (pull by runId from the tenant's OTel/MLflow).
+// The dataset/judge/harness labels are common. push takes traces JSON; pull takes source + runs JSON.
 export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
@@ -46,13 +46,13 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
   const [harnessId, setHarnessId] = useState('')
   const [harnessVersion, setHarnessVersion] = useState('external')
   const [tracesJson, setTracesJson] = useState(SAMPLE_TRACES)
-  // pull 모드 전용
+  // pull-mode only
   const [sourceKind, setSourceKind] = useState<
     'otel' | 'mlflow' | 'langfuse' | 'langsmith' | 'phoenix'
   >('otel')
   const [endpoint, setEndpoint] = useState('')
   const [authSecret, setAuthSecret] = useState('')
-  const [sourceProject, setSourceProject] = useState('') // phoenix 전용(스팬 조회 경로의 프로젝트)
+  const [sourceProject, setSourceProject] = useState('') // phoenix-only (the project in the span lookup path)
   const [runsJson, setRunsJson] = useState(SAMPLE_RUNS)
   const [serverError, setServerError] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -87,7 +87,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
 
   return (
     <div className="max-w-2xl space-y-4">
-      {/* 모드 토글 */}
+      {/* mode toggle */}
       <div className="inline-flex rounded-lg border border-border bg-secondary/40 p-1 text-[13px]">
         {(['push', 'pull'] as const).map((m) => (
           <button
@@ -214,7 +214,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
             </div>
           </div>
 
-          {/* phoenix 는 스팬 조회 경로에 프로젝트가 필수 — 그 외 kind 에선 숨김. */}
+          {/* phoenix requires a project in the span lookup path — hidden for other kinds. */}
           {sourceKind === 'phoenix' && (
             <div className="space-y-1.5">
               <Label htmlFor="sourceProject">{t('projectLabel')}</Label>

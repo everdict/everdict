@@ -38,7 +38,7 @@ Datasets reuse the **`HarnessRegistry` ownership model** (`packages/registry`):
   admin (the creator override lets the original author delete their own without being admin).
 
 ## Detail page = activity history + discussion (Linear-style)
-The dataset detail's main content is a **활동 timeline**, not a static case dump — "who did what, when". Items
+The dataset detail's main content is an **activity timeline**, not a static case dump — "who did what, when". Items
 are merged chronologically from three sources: the **created** event (`createdBy`+`createdAt`), every
 **scorecard run** against this dataset (runner + time + `harness@version` + status + pass rate, links to the
 scorecard — derived from the scorecards list, no new storage), and **comments**. Cases are secondary — the list
@@ -67,9 +67,9 @@ add, all member+ (`datasets:write`), all immutable-on-register:
 > as expressive as the first-party code catalog (no field is silently dropped at `.parse()`). An optional
 > **`taskTemplate`** composes the task from several fields via `{field}` interpolation (e.g. OfficeQA-style
 > `"{question}\n\nSource: {source_docs}"` so a doc-grounded QA case carries its source link); absent → the task
-> is `taskField` verbatim. The wizard exposes it as an optional "task 템플릿" textarea with a live first-row preview.
+> is `taskField` verbatim. The wizard exposes it as an optional "task template" textarea with a live first-row preview.
 - **Source wizard (primary)** — `POST /benchmarks/preview` fetches a few raw rows (no mapping) and returns the
-  detected **fields** + samples; the web `/dashboard/datasets/import` "소스에서 만들기" wizard shows those rows as a
+  detected **fields** + samples; the web `/dashboard/datasets/import` "create from source" wizard shows those rows as a
   **preview table you map by clicking a column header** (cycles task→id→answer→none; mapped columns are role-color
   coded and each mapping control shows a **sample value**, so you map by seeing the data, not guessing field names),
   then `POST /benchmarks/import` with an **inline `spec`** registers the dataset in **one action** — no separate
@@ -77,14 +77,15 @@ add, all member+ (`datasets:write`), all immutable-on-register:
   - **Inference-assertion UX (not a form of questions).** The consumer path exposes only what a benchmark *user*
     can answer: **source → preview → three roles (task/id/answer)**. Everything an *author* defines is either
     inferred or hidden: the env kind is **auto-inferred** (git field → repo · start-url → browser · answer →
-    prompt-QA · else browser) and shown back as a one-sentence **"이렇게 실행돼요"** assertion (e.g. "에이전트가
-    각 행의 `question`을 받아 답을 만들어요. 만든 답을 `answer`와 대조해 채점해요") with a warn tone when the env is
+    prompt-QA · else browser) and shown back as a one-sentence **"here's how it runs"** assertion (e.g. "The agent
+    takes each row's `question` and produces an answer. It scores by comparing the produced answer against `answer`.")
+    with a warn tone when the env is
     incomplete (repo without git, os-use without image). `category` is **derived from env** (no selector). The
     **version is system-managed** — hidden on first import (auto `1.0.0`), a patch/minor/major picker only on
     re-import of an existing id. There is **no import-time case cap** — import is always the full dataset (data is
     cheap; cost is at run time, controlled by the scorecard `cases` subset). The author knobs — **env-kind
     override, `startUrlField`/`gitField`+`refField`, `taskTemplate`, per-case `image`/`placement`** — live behind a
-    collapsed **"고급 · 다르게 실행해야 하나요?"** disclosure, each with an InfoTip. The full expressive power
+    collapsed **"Advanced · Need to run it differently?"** disclosure, each with an InfoTip. The full expressive power
     (env-kind isomorphism above) is unchanged — it's just no longer a mandatory quiz for the common QA case.
 - **Catalog** — `GET /benchmarks` lists the first-party code catalog (webvoyager/gaia/swe-bench/mind2web/gsm8k/
   osworld); `POST /benchmarks/import {benchmark}` pulls it.
@@ -99,7 +100,7 @@ detail), **where the raw rows came from** (`source`: `{kind, dataset, config?, s
 canonical `https://huggingface.co/datasets/{id}` link + the exact file/split, captured automatically from what
 the wizard already selected — zero extra input), and the benchmark's **official provenance** (`origin`:
 homepage/paper/code/data/leaderboard/authors/license/citation/taskType — populated when a recipe/catalog spec
-carries `BenchmarkOrigin`; the wizard doesn't collect it). The web dataset detail renders these as a **출처 · 리니지**
+carries `BenchmarkOrigin`; the wizard doesn't collect it). The web dataset detail renders these as a **Source · Lineage**
 card (source link + official links + license/authors + made-via path) so an official open benchmark keeps its
 origin visible. Lineage is captured **going forward** — pre-existing datasets (imported before this) have no
 `source`; re-importing (a new version) captures it. `producedBy` is dataset **content**, so it participates in
@@ -110,17 +111,17 @@ CSVs + a PDF corpus) are **not served by datasets-server**, so the viewer `/rows
 token. The `huggingface` source supports an optional **`file`** (repo path): rows are fetched via the Hub
 **resolve** API (`/datasets/{id}/resolve/main/{file}`, same `HF_TOKEN` auth) and parsed by extension
 (csv/jsonl/json-array). `GET /benchmarks/hf/files` (+ MCP `hf_dataset_files`) lists the repo's data files
-(root-first so benchmark CSVs aren't buried under corpus subdirs); the wizard falls back to a **데이터 파일**
+(root-first so benchmark CSVs aren't buried under corpus subdirs); the wizard falls back to a **data file**
 dropdown automatically when splits are unavailable. 401/403 from HF is surfaced with an actionable message
-(약관 동의 + 토큰 repo 읽기 권한 확인).
+(accept the terms + verify the token has repo-read permission).
 
 gated HF sources authenticate with the SecretStore `HF_TOKEN` — resolved **requester-first**: the caller's
 **personal** (user-scoped) secret wins over the workspace-shared one, and all four surfaces (`searchHf` /
 `hfSplits` / `previewSource` / `import`) pass the requesting subject. So a plain **member** — who cannot touch
-workspace secrets (admin-only) or env vars — registers `HF_TOKEN` themselves at 계정 → 시크릿 and imports a
+workspace secrets (admin-only) or env vars — registers `HF_TOKEN` themselves at Account → Secrets and imports a
 gated benchmark end-to-end from the web. The wizard is state-aware: gated + no token ⇒ warning + deep link to
-`account?tab=secrets`; token present ⇒ "내 시크릿/워크스페이스 시크릿의 HF_TOKEN 사용" (note: a member can't
-*see* workspace secret names, so the badge may say "필요" while the shared token still works at fetch time).
+`account?tab=secrets`; token present ⇒ "using the HF_TOKEN from my secrets / workspace secrets" (note: a member can't
+*see* workspace secret names, so the badge may say "required" while the shared token still works at fetch time).
 **BFF↔MCP parity**: MCP tools
 `preview_benchmark_source` + `import_benchmark` mirror the routes. See `docs/mcp.md`.
 
@@ -172,17 +173,17 @@ Because versions are immutable, two versions of the same dataset are a reproduci
 read is `404`/`NOT_FOUND`. Same core, two transports (`GET /datasets/:id/diff` + `diff_datasets`).
 
 ## Web (`apps/web`)
-- **데이터셋 `/dashboard/datasets`** — a searchable, metadata-rich list (not bare id + version chips). `GET
+- **Datasets `/dashboard/datasets`** — a searchable, metadata-rich list (not bare id + version chips). `GET
   /datasets` returns per-dataset **`DatasetListEntry`** metadata (`latestVersion` · `caseCount` · `tags` ·
   `description` · `producedBy` · `createdBy` original author · `createdAt`/`updatedAt`), and the page joins
   `GET /scorecards` to derive each dataset's **related harnesses** (+ scorecard count / last-run time) and
   `GET /members` to resolve `createdBy` → a human name. A client widget provides **search** (id/description/tags),
-  an **owner segment** filter (전체/소유/공유 — the 공유 segment shows only when shared datasets exist), and
+  an **owner segment** filter (All/Owned/Shared — the Shared segment shows only when shared datasets exist), and
   **sort** (name / recently-updated / case-count), over a compact stat strip. CTA role-gated off `/me`
   (`datasets:write`).
-- **데이터셋 등록 `/dashboard/datasets/new`** — id/version/description + cases-JSON with a **validate (dry-run)**
-  step, then register (`createDatasetAction` → `POST /datasets`). viewer sees a "권한이 없습니다" notice.
-- **상세 `/dashboard/datasets/[id]`** — a **version switcher** (`?version=`, defaults latest) shows that version's
-  cases (id · env · task · graders); a **버전 비교** link opens the diff when ≥2 versions exist.
-- **버전 diff `/dashboard/datasets/[id]/diff`** — pick base/candidate (defaults: latest ↔ previous) → added/removed
+- **Register dataset `/dashboard/datasets/new`** — id/version/description + cases-JSON with a **validate (dry-run)**
+  step, then register (`createDatasetAction` → `POST /datasets`). viewer sees a "You don't have permission" notice.
+- **Detail `/dashboard/datasets/[id]`** — a **version switcher** (`?version=`, defaults latest) shows that version's
+  cases (id · env · task · graders); a **Compare versions** link opens the diff when ≥2 versions exist.
+- **Version diff `/dashboard/datasets/[id]/diff`** — pick base/candidate (defaults: latest ↔ previous) → added/removed
   cases, per-case field changes (`before`/`after`), and dataset meta changes (`GET /datasets/:id/diff`).

@@ -1,13 +1,13 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 GET /comments 응답의 클라이언트 미러. 리소스(데이터셋 등)에 달린 협업 논의.
+// Client mirror of the control plane GET /comments response. Collaborative discussion attached to a resource (dataset, etc.).
 export const commentSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   resourceType: z.string(),
   resourceId: z.string(),
-  parentId: z.string().optional(), // 대댓글이면 부모 댓글 id(1단계 스레드)
-  author: z.string(), // 작성자 subject
+  parentId: z.string().optional(), // parent comment id if this is a reply (single-level thread)
+  author: z.string(), // author subject
   body: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),

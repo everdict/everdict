@@ -8,9 +8,9 @@ import { Combobox } from '@/shared/ui/combobox'
 
 import { assignHarnessTraceSinkAction } from '../api/manage-trace-sink'
 
-// 하니스별 트레이스 싱크 선택 — 이 하니스의 스코어카드 상세 결과(케이스별 trace+점수)를 어느 관측
-// 플랫폼에 적재할지 고른다. '' = 적재 안 함(assignment 해제 → sink: null).
-// authZ(harnesses:register=member+)는 컨트롤플레인이 강제 — canAssign 은 UI 게이트일 뿐.
+// Per-harness trace sink selection — choose which observability platform this harness's scorecard detail results
+// (per-case trace+scores) are exported to. '' = no export (clear the assignment → sink: null).
+// authZ (harnesses:register = member+) is enforced by the control plane — canAssign is just a UI gate.
 export function HarnessSinkSelect({
   harnessId,
   sinks,
@@ -27,7 +27,7 @@ export function HarnessSinkSelect({
   const [error, setError] = useState<string>()
   const [value, setValue] = useState(current ?? '')
 
-  // 읽기 전용(viewer 등) — 선택 컨트롤 대신 현재 선택만 텍스트로.
+  // Read-only (viewer, etc.) — show only the current selection as text instead of the select control.
   if (!canAssign) {
     return <span className="text-[13px] text-muted-foreground">{current ?? t('notExported')}</span>
   }
@@ -40,7 +40,7 @@ export function HarnessSinkSelect({
       const r = await assignHarnessTraceSinkAction(harnessId, next || null)
       if (!r.ok) {
         setError(r.error)
-        setValue(previous) // 실패 시 이전 선택으로 되돌린다(서버가 진실원천).
+        setValue(previous) // revert to the previous selection on failure (the server is the source of truth).
       }
     })
   }

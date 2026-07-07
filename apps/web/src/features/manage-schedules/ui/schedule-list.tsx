@@ -37,9 +37,9 @@ const VIEWS: { value: View; labelKey: string }[] = [
 const UPCOMING_HORIZON_DAYS = 7
 const UPCOMING_LIMIT = 24
 
-// 예약 목록 — 한 워크스페이스의 여러 사용자 크론잡을 소유자·런타임·벤치마크→하니스와 함께.
-// 뷰 전환(리스트 / 소유자별 / 캘린더) + 소유자·상태·런타임 필터 + '다가오는 실행' 타임라인.
-// 발사 자체는 컨트롤플레인(Temporal)이 하고, 여기 시각은 표시용 근사(shared/lib/cron).
+// Schedule list — a workspace's cron jobs across multiple users, shown with owner · runtime · benchmark→harness.
+// View switch (list / by owner / calendar) + owner · status · runtime filters + an 'upcoming runs' timeline.
+// The firing itself is done by the control plane (Temporal); the times here are display-only approximations (shared/lib/cron).
 export function ScheduleList({
   schedules,
   authors,
@@ -53,13 +53,13 @@ export function ScheduleList({
 }: {
   schedules: Schedule[]
   authors: Record<string, Author>
-  workspace: string // 데이터셋/하니스/수정 링크 prefix
-  fires: Record<string, string[]> // 예약 id → 다음 발사 시각(ISO, 서버 계산). 일시중지면 빈 배열.
-  nowIso: string // 서버 기준 now — 상대 날짜 라벨을 서버/클라 동일하게(hydration 안전).
-  me: string // 현재 사용자 subject — 소유자 표기 + 수정 권한(생성자).
-  canWrite: boolean // 일시중지/삭제(member+)
-  isAdmin: boolean // 워크스페이스 admin — 남의 예약도 수정 가능
-  initialView?: View // ?view= 로 초기 뷰 지정(딥링크). 이후 전환은 로컬 상태.
+  workspace: string // prefix for dataset/harness/edit links
+  fires: Record<string, string[]> // schedule id → next fire times (ISO, server-computed). Empty array if paused.
+  nowIso: string // server-side now — keeps relative date labels identical on server/client (hydration-safe).
+  me: string // current user subject — owner labeling + edit permission (creator).
+  canWrite: boolean // pause/delete (member+)
+  isAdmin: boolean // workspace admin — can edit others' schedules too
+  initialView?: View // initial view from ?view= (deep link). Later switches are local state.
 }) {
   const router = useRouter()
   const t = useTranslations('manageSchedules')
@@ -73,9 +73,9 @@ export function ScheduleList({
   const [error, setError] = useState<string>()
   const [view, setView] = useState<View>(initialView)
   const [query, setQuery] = useState('')
-  const [owner, setOwner] = useState('') // 소유자(createdBy) 필터
+  const [owner, setOwner] = useState('') // owner (createdBy) filter
   const [status, setStatus] = useState('') // '' | 'enabled' | 'paused'
-  const [runtime, setRuntime] = useState('') // 런타임 필터
+  const [runtime, setRuntime] = useState('') // runtime filter
 
   function act(fn: () => Promise<{ ok: boolean; error?: string }>): void {
     setError(undefined)
@@ -136,7 +136,7 @@ export function ScheduleList({
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [schedules, authors, query, owner, status, runtime, locale])
 
-  // 소유자별 그룹(소유자 이름순) — visible 을 createdBy 로 묶는다.
+  // Group by owner (sorted by owner name) — group visible by createdBy.
   const ownerGroups = useMemo(() => {
     const m = new Map<string, Schedule[]>()
     for (const s of visible) m.set(s.createdBy, [...(m.get(s.createdBy) ?? []), s])
@@ -145,7 +145,7 @@ export function ScheduleList({
     )
   }, [visible, authors])
 
-  // 다가오는 실행 — 보이는(필터 반영) 활성 예약들의 발사 시각을 병합·정렬. 7일 창, 상위 N건.
+  // Upcoming runs — merge and sort the fire times of the visible (filtered) active schedules. 7-day window, top N.
   const upcoming = useMemo(() => {
     const horizonMs = new Date(nowIso).getTime() + UPCOMING_HORIZON_DAYS * 86_400_000
     const rows: { iso: string; schedule: Schedule }[] = []

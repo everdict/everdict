@@ -1,12 +1,12 @@
-# SpreadsheetBench 를 codex 에이전트로 수행하는 이미지 = spreadsheetbench:v1(툴체인 + grader) + node + codex.
-# 에이전트(codex)와 채점 툴체인(libreoffice+openpyxl+sbench_grade+recalc)이 한 컨테이너에 있어야 하므로 결합한다.
-# codex 인증: 러너가 ~/.codex 를 /codex 로 바인드 마운트(머신 ChatGPT 로그인 = own-pays, API 키 불필요) → CODEX_HOME=/codex.
-# codex 자체 linux-sandbox 는 컨테이너 안에서 실패(중첩 seccomp/landlock) → 하니스 command 에서
-# `--dangerously-bypass-approvals-and-sandbox` 로 끈다(격리는 컨테이너가 제공).
-# 참조(빌드는 각자/CI): docker build -t spreadsheetbench-codex:v1 -f Dockerfile.codex examples/bundles/spreadsheetbench
+# Image that runs SpreadsheetBench with the codex agent = spreadsheetbench:v1 (toolchain + grader) + node + codex.
+# The agent (codex) and the scoring toolchain (libreoffice+openpyxl+sbench_grade+recalc) must be in one container, so they are combined.
+# codex auth: the runner bind-mounts ~/.codex at /codex (machine ChatGPT login = own-pays, no API key) → CODEX_HOME=/codex.
+# codex's own linux-sandbox fails inside a container (nested seccomp/landlock) → turn it off in the harness command with
+# `--dangerously-bypass-approvals-and-sandbox` (isolation is provided by the container).
+# For reference (build it yourself / in CI): docker build -t spreadsheetbench-codex:v1 -f Dockerfile.codex examples/bundles/spreadsheetbench
 FROM spreadsheetbench:v1
 
-# node 22 + codex CLI(네이티브 바이너리 동봉 npm 패키지).
+# node 22 + codex CLI (an npm package that bundles the native binary).
 RUN apt-get update \
   && apt-get install -y --no-install-recommends curl ca-certificates \
   && curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \

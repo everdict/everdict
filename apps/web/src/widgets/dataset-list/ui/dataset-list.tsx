@@ -27,7 +27,7 @@ const STATUS_KEY: Record<string, string> = {
   queued: 'statusQueued',
 }
 
-// 최근 실행 결과 — 성공이면 점수(통과율/평균), 아니면 상태 라벨. 실행 이력 없으면 dash.
+// Latest run result — score (pass rate/mean) if succeeded, otherwise the status label. Dash if there's no run history.
 function LatestResult({ rel }: { rel?: DatasetRelation }) {
   const t = useTranslations('datasetList')
   if (!rel || !rel.lastStatus) return <span className="text-faint">{t('noRun')}</span>
@@ -63,14 +63,14 @@ export function DatasetList({
   ]
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('name')
-  const [category, setCategory] = useState('') // 태그 필터('' = 전체)
-  const [user, setUser] = useState('') // 만든이(createdBy) 필터('' = 전체)
+  const [category, setCategory] = useState('') // tag filter ('' = all)
+  const [user, setUser] = useState('') // creator (createdBy) filter ('' = all)
 
   const totalCases = datasets.reduce((n, d) => n + (d.caseCount ?? 0), 0)
   const tagCount = useMemo(() => new Set(datasets.flatMap((d) => d.tags)).size, [datasets])
   const ranCount = datasets.filter((d) => relations[d.id]?.lastStatus).length
 
-  // 만든이 정보 — createdBy(있으면 members 프로필) 있으면 표시. 없으면(시드 등) '—'.
+  // Creator info — shown when createdBy is present (members profile if available). Otherwise (seed, etc.) '—'.
   function authorInfo(d: DatasetSummary): { name: string; avatarUrl?: string; known: boolean } {
     if (d.createdBy) {
       const a = authors[d.createdBy]
@@ -83,7 +83,7 @@ export function DatasetList({
     return { name: '—', known: false }
   }
 
-  // 필터 dropdown 옵션 — 카테고리(전 데이터셋 태그) · 사용자(등록자).
+  // Filter dropdown options — category (tags across all datasets) · user (registrant).
   const categoryOptions = useMemo(() => {
     const s = new Set<string>()
     for (const d of datasets) for (const t of d.tags) s.add(t)
@@ -232,7 +232,7 @@ export function DatasetList({
                       )}
                     </div>
                   </div>
-                  {/* 만든이 — 둥근 썸네일만, 이름은 호버(카드 표기 표준) */}
+                  {/* Creator — round thumbnail only, name on hover (card display standard) */}
                   {author.known && (
                     <UserAvatar
                       name={author.name}
@@ -243,7 +243,7 @@ export function DatasetList({
                   )}
                 </div>
 
-                {/* 메타 라인 — 케이스 · 관계 하니스 · 최근 실행(결과+시각) */}
+                {/* Meta line — cases · related harnesses · latest run (result+time) */}
                 <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 text-[11.5px] text-faint">
                   <span className="inline-flex items-center gap-1">
                     <Boxes className="size-3.5" />

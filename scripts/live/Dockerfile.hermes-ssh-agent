@@ -1,5 +1,5 @@
-# everdict os-use 디스패치 이미지 (SLICE 76/83): hermes-desktop + sshd + 레퍼런스 데스크탑 에이전트 2종(baked).
-# 빌드 컨텍스트 = hermes-desktop 클론. 빌드 전에 두 에이전트를 컨텍스트로 복사(agent.cjs, agent-settings.cjs).
+# everdict os-use dispatch image (SLICE 76/83): hermes-desktop + sshd + two reference desktop agents (baked in).
+# Build context = hermes-desktop clone. Before building, copy the two agents into the context (agent.cjs, agent-settings.cjs).
 #   git clone --depth 1 https://github.com/fathah/hermes-desktop /tmp/hermes-desktop
 #   cp examples/agents/desktop-ssh-agent.cjs /tmp/hermes-desktop/agent.cjs
 #   cp examples/agents/desktop-ssh-settings-agent.cjs /tmp/hermes-desktop/agent-settings.cjs
@@ -21,7 +21,7 @@ COPY package.json package-lock.json ./
 RUN npm install --no-audit --no-fund
 COPY . .
 RUN npm run build
-# 레퍼런스 데스크탑 에이전트 2종(command 하니스가 각각 `node /agent.cjs` / `node /agent-settings.cjs` 로 실행).
+# Two reference desktop agents (the command harness runs them as `node /agent.cjs` / `node /agent-settings.cjs` respectively).
 COPY agent.cjs /agent.cjs
 COPY agent-settings.cjs /agent-settings.cjs
 

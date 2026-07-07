@@ -16,7 +16,7 @@ const ROLES = ['viewer', 'member', 'admin'] as const
 
 function inviteLink(token: string): string {
   const origin = typeof window !== 'undefined' ? window.location.origin : ''
-  // 워크스페이스 가입 전 진입점이라 워크스페이스 슬러그가 없는 최상위 라우트.
+  // Top-level route with no workspace slug — this is the entry point before joining a workspace.
   return `${origin}/invite?token=${encodeURIComponent(token)}`
 }
 
@@ -24,8 +24,8 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
   const t = useTranslations('manageInvites')
   const locale = useLocale()
   const [role, setRole] = useState<string>('member')
-  const [open, setOpen] = useState(false) // 발급 폼 펼침 — 평소엔 접어 역할 선택 등 초대 UI 를 숨긴다.
-  const [link, setLink] = useState<string>() // 방금 발급된 초대 링크(1회)
+  const [open, setOpen] = useState(false) // expand the create form — collapsed by default to hide the invite UI (role picker, etc.)
+  const [link, setLink] = useState<string>() // the invite link just issued (once)
   const [copied, setCopied] = useState(false)
   const [error, setError] = useState<string>()
   const [confirmId, setConfirmId] = useState<string>()
@@ -39,7 +39,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
       const r = await createInviteAction(role)
       if (r.ok && r.token) {
         setLink(inviteLink(r.token))
-        setOpen(false) // 만들었으면 폼을 다시 접는다 — 링크는 위 콜아웃에 노출.
+        setOpen(false) // collapse the form again after creating — the link is shown in the callout above.
       } else {
         setError(r.error ?? t('createFailed'))
       }
@@ -70,7 +70,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         )}
       </div>
 
-      {/* 방금 발급된 링크 — 1회 노출 */}
+      {/* The link just issued — revealed once */}
       {link && (
         <Callout tone="warning" hint={t('linkOnceHint')}>
           <div className="flex items-center gap-2">
@@ -89,7 +89,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         </Callout>
       )}
 
-      {/* 대기중 초대 목록 */}
+      {/* Pending invites list */}
       {pending2.length === 0 ? (
         <p className="text-[13px] text-muted-foreground">{t('noPending')}</p>
       ) : (
@@ -138,7 +138,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         </ul>
       )}
 
-      {/* 발급 — 평소엔 버튼만. 누르면 역할 선택 + 만들기 폼을 편다(초대 안 할 땐 역할 UI 숨김). */}
+      {/* Create — just a button by default. Clicking it expands the role picker + create form (role UI hidden when not inviting). */}
       {canWrite ? (
         open ? (
           <div className="flex items-end gap-2.5">

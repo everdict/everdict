@@ -1,12 +1,18 @@
-# gitleaks 설정 — 기본 룰셋 + 오탐 허용목록.
-# i18n 카탈로그 키 참조(labelKey: 'presetDaily3am' 등)가 generic-api-key 룰에 걸리는 오탐 방지.
+# gitleaks config — default ruleset + false-positive allowlist.
+# Prevent i18n catalog key references (e.g. labelKey: 'presetDaily3am') from tripping the generic-api-key rule as false positives.
 [extend]
 useDefault = true
 
 [allowlist]
 description = "false positives"
 regexTarget = "line"
+paths = [
+  # Comments describing the secret-store ownership model (owner="" vs owner=subject), not secrets.
+  '''packages/db/src/secret-store\.ts''',
+]
 regexes = [
-  # next-intl 메시지 키 참조 — labelKey/descKey/hintKey: '<camelCaseKey>'
+  # next-intl message key references — labelKey/descKey/hintKey: '<camelCaseKey>'
   '''(label|desc|hint|title)Key:\s*'[a-zA-Z][a-zA-Z0-9]*'"?''',
+  # Documentation of the secret ownership sentinel in comments (owner=subject / owner="").
+  '''owner\s*=\s*("")|owner=subject''',
 ]

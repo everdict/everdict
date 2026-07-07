@@ -9,7 +9,7 @@ import { PgHarnessInstanceRegistry } from "./pg-harness-instance-registry.js";
 import { PgHarnessTemplateRegistry } from "./pg-harness-template-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 
-// 여러 everdict_harness_* 테이블을 흉내내는 가짜 SqlClient(테이블명은 쿼리에서 추출; tags = 버전 태그).
+// Fake SqlClient mimicking multiple everdict_harness_* tables (table name extracted from the query; tags = version tags).
 function fakePg(): SqlClient {
   const tables = new Map<
     string,
@@ -31,7 +31,7 @@ function fakePg(): SqlClient {
       const rows = rowsFor(table);
       if (t.startsWith("SELECT spec") && t.includes("version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
-        // register 의 충돌/부활 검사(spec, deleted_at)와 get(spec) 둘 다 — fake 는 삭제 없음(deleted_at null).
+        // Both register's conflict/revive check (spec, deleted_at) and get(spec) — the fake has no deletion (deleted_at null).
         return { rows: (r ? [{ spec: r.spec, deleted_at: null }] : []) as R[] };
       }
       if (t.startsWith("SELECT 1 FROM") && t.includes("version = $3")) {
@@ -70,7 +70,7 @@ function fakePg(): SqlClient {
           id: p[1] as string,
           version: p[2] as string,
           spec: JSON.parse(p[3] as string),
-          tags: [], // 마이그레이션 0047 기본값
+          tags: [], // migration 0047 default
         });
         return { rows: [] };
       }
@@ -100,25 +100,25 @@ const inst = (version: string, pins: Record<string, string>) => ({
 });
 
 describe("PgHarnessTemplateRegistry + PgHarnessInstanceRegistry (fake pg)", () => {
-  it("템플릿/인스턴스 등록 → resolve + _shared 폴백 + 불변성", async () => {
+  it("registers template/instance → resolve + _shared fallback + immutability", async () => {
     const pg = fakePg();
     const templates = new PgHarnessTemplateRegistry(pg);
     const instances = new PgHarnessInstanceRegistry(pg, templates);
 
-    await templates.register(SHARED_TENANT, buTemplate); // first-party 템플릿
+    await templates.register(SHARED_TENANT, buTemplate); // first-party template
     await instances.register("acme", inst("pr-1", { planner: "p:1", browser: "b:1" }));
 
-    const resolved = await instances.getService("acme", "bu", "latest"); // 폴백 템플릿으로 resolve
+    const resolved = await instances.getService("acme", "bu", "latest"); // resolve with the fallback template
     expect(resolved.services.map((s) => s.image)).toEqual(["p:1", "b:1"]);
     expect(resolved.version).toBe("pr-1");
 
-    // 버전 불변: 같은 인스턴스 버전, 다른 pins → Conflict
+    // Version immutable: same instance version, different pins → Conflict
     await expect(instances.register("acme", inst("pr-1", { planner: "p:2", browser: "b:1" }))).rejects.toBeInstanceOf(
       ConflictError,
     );
   });
 
-  it("템플릿 없이 인스턴스 등록 → NotFound, 핀 누락 → BadRequest(거부)", async () => {
+  it("instance register without a template → NotFound, missing pin → BadRequest (rejected)", async () => {
     const pg = fakePg();
     const templates = new PgHarnessTemplateRegistry(pg);
     const instances = new PgHarnessInstanceRegistry(pg, templates);
@@ -130,7 +130,7 @@ describe("PgHarnessTemplateRegistry + PgHarnessInstanceRegistry (fake pg)", () =
     expect(await instances.has("acme", "bu", "y")).toBe(false);
   });
 
-  it("setVersionTags(버전 태그) — versionTags 로 노출, 빈 배열 = 제거, 없는 버전은 NotFound", async () => {
+  it("setVersionTags (version tags) — exposed via versionTags, empty array = remove, missing version → NotFound", async () => {
     const pg = fakePg();
     const templates = new PgHarnessTemplateRegistry(pg);
     const instances = new PgHarnessInstanceRegistry(pg, templates);
@@ -145,7 +145,7 @@ describe("PgHarnessTemplateRegistry + PgHarnessInstanceRegistry (fake pg)", () =
 });
 
 describe("loadHarnessTaxonomyDir", () => {
-  it("*.template.json + *.instance.json 로드 → resolve", async () => {
+  it("loads *.template.json + *.instance.json → resolve", async () => {
     const dir = mkdtempSync(join(tmpdir(), "everdict-tax-"));
     try {
       writeFileSync(join(dir, "bu.template.json"), JSON.stringify(buTemplate));
@@ -154,7 +154,7 @@ describe("loadHarnessTaxonomyDir", () => {
         JSON.stringify(inst("pr-7", { planner: "p:7", browser: "b:7" })),
       );
       const { instances } = await loadHarnessTaxonomyDir(dir);
-      const resolved = await instances.getService("whoever", "bu", "latest"); // SHARED 로 로드 → 폴백
+      const resolved = await instances.getService("whoever", "bu", "latest"); // loaded as SHARED → fallback
       expect(resolved.services.map((s) => s.image)).toEqual(["p:7", "b:7"]);
     } finally {
       rmSync(dir, { recursive: true, force: true });

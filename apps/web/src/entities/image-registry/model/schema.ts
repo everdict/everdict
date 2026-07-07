@@ -1,10 +1,10 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 /workspace/image-registries 응답의 클라이언트 미러 — 워크스페이스 이미지 레지스트리(BYO, 복수).
-// 비밀 없음: pull/pushSecretName 은 값이 아닌 SecretStore 이름 참조. imagePrefix = "host[/namespace]/"
-// (분류 배지·everdict image push 대상 ref 조립용).
+// Client mirror of the control plane /workspace/image-registries response — workspace image registries (BYO, multiple).
+// No secrets: pull/pushSecretName are SecretStore name references, not values. imagePrefix = "host[/namespace]/"
+// (for classification badges and assembling the everdict image push target ref).
 export const imageRegistryConfigSchema = z.object({
-  name: z.string(), // 레지스트리 식별자 — upsert/삭제/everdict image push --registry 의 키
+  name: z.string(), // registry identifier — the key for upsert/delete/everdict image push --registry
   host: z.string(),
   namespace: z.string().optional(),
   username: z.string().optional(),
@@ -20,7 +20,7 @@ export const imageRegistriesResponseSchema = z.object({
 })
 export type ImageRegistriesResponse = z.infer<typeof imageRegistriesResponseSchema>
 
-// PUT /workspace/image-registries → { config, missingSecrets? }(참조 시크릿 부재 경고).
+// PUT /workspace/image-registries → { config, missingSecrets? } (warns of missing referenced secrets).
 export const imageRegistrySetResponseSchema = z.object({
   config: imageRegistryConfigSchema,
   missingSecrets: z.array(z.string()).optional(),

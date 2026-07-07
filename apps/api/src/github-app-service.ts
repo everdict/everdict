@@ -9,38 +9,38 @@ import { z } from "zod";
 import { getInstallation, mintInstallationToken } from "./oauth/github-app.js";
 import { oauthFetchJson } from "./oauth/provider.js";
 
-// 워크스페이스 소유 GitHub App 통합 서비스 — 개인 Connected accounts(OAuth 토큰) 대체.
-// 조직 설치→선택 repo→워크스페이스 소유 installation. github.com App = operator env(config.githubCom);
-// GHE App = 관리자가 워크스페이스에 host+slug+appId+privateKeySecretName 등록(개인키=SecretStore name-ref).
-// HTTP 라우트와 MCP 도구가 이 코어를 공유(BFF↔MCP 패리티). 개인키/토큰 값은 절대 브라우저로 안 나간다.
-// 설계: docs/architecture/workspace-scoped-integrations.md
+// Workspace-owned GitHub App integration service — replaces personal Connected accounts (OAuth tokens).
+// Org install → chosen repos → a workspace-owned installation. github.com App = operator env (config.githubCom);
+// GHE App = admin registers it on the workspace with host+slug+appId+privateKeySecretName (private key = SecretStore name-ref).
+// The HTTP route and the MCP tool share this core (BFF↔MCP parity). Private-key/token values never leave for the browser.
+// Design: docs/architecture/workspace-scoped-integrations.md
 
 type GithubAppSettings = NonNullable<WorkspaceSettings["githubApp"]>;
 type Registration = GithubAppSettings["registrations"][number];
 type Installation = GithubAppSettings["installations"][number];
 
-// operator github.com App 자격증명(env). 미설정이면 github.com App 비활성(GHE 는 워크스페이스 등록으로 가능).
+// Operator github.com App credentials (env). If unset, the github.com App is disabled (GHE is still available via workspace registration).
 export interface GithubComAppConfig {
   appId: string;
   privateKeyPem: string;
-  slug: string; // 설치 URL github.com/apps/{slug}/installations/new 에 사용
+  slug: string; // used in the install URL github.com/apps/{slug}/installations/new
 }
 
 export interface GithubAppServiceConfig {
-  webBaseUrl: string; // 콜백 후 브라우저 복귀 웹 베이스(예: http://localhost:3001)
-  apiPublicUrl?: string; // 설치 콜백(App Setup URL) 베이스. 미설정이면 요청 base 폴백.
-  stateTtlSec?: number; // pending state 만료(기본 600s)
-  githubCom?: GithubComAppConfig; // env 기본 github.com App(없으면 github.com 설치 비활성)
+  webBaseUrl: string; // web base the browser returns to after the callback (e.g. http://localhost:3001)
+  apiPublicUrl?: string; // install-callback (App Setup URL) base. Falls back to the request base if unset.
+  stateTtlSec?: number; // pending state expiry (default 600s)
+  githubCom?: GithubComAppConfig; // env default github.com App (absent → github.com install disabled)
 }
 
-// 워크스페이스 App 통합 현황(비밀 없음 — privateKeySecretName 은 값이 아닌 이름 참조라 반환 안전).
+// Workspace App integration status (no secrets — privateKeySecretName is a name reference, not a value, so it's safe to return).
 export interface GithubAppView {
   registrations: Registration[];
   installations: Installation[];
 }
 
-// 설치 현황 뷰의 installation — GitHub 이 이 설치에 허용한 저장소 목록(설치 시 고른 것)을 동봉.
-// repos 조회는 설치별 soft-fail: 한 설치의 자격증명/네트워크 문제로 나머지 설치·화면이 죽지 않는다.
+// installation in the status view — bundles the repos GitHub allows this install (the ones chosen at install time).
+// repos lookup is per-install soft-fail: one install's credential/network problem does not kill the other installs or the screen.
 export type InstallationWithRepos = Installation & { repos?: InstallationRepo[]; reposError?: string };
 export interface GithubAppDetailView {
   registrations: Registration[];
@@ -50,24 +50,24 @@ export interface GithubAppDetailView {
 export interface StartInstallInput {
   workspace: string;
   createdBy: string;
-  host?: string; // 미지정 = github.com(env App), 지정 = 그 GHE 등록
+  host?: string; // absent = github.com (env App), set = that GHE registration
 }
 
 function trimSlash(url: string): string {
   return url.endsWith("/") ? url.slice(0, -1) : url;
 }
 
-// GHE 베이스 URL 동등성 — 대소문자/트레일링 슬래시 차이를 무시. undefined = github.com.
+// GHE base URL equality — ignores case/trailing-slash differences. undefined = github.com.
 function sameHost(a: string | undefined, b: string | undefined): boolean {
   if (a === undefined || b === undefined) return a === b;
   return trimSlash(a).toLowerCase() === trimSlash(b).toLowerCase();
 }
 
-// GitHub API 베이스 — github.com 은 api.github.com, GHE 는 host/api/v3. installation.host 로 판별.
+// GitHub API base — github.com is api.github.com, GHE is host/api/v3. Determined by installation.host.
 function apiBase(host?: string): string {
   return host ? `${trimSlash(host)}/api/v3` : "https://api.github.com";
 }
-// installation 토큰으로 GitHub API 호출 헤더.
+// Headers for a GitHub API call with an installation token.
 function appTokenHeaders(token: string): Record<string, string> {
   return {
     authorization: `Bearer ${token}`,
@@ -77,10 +77,10 @@ function appTokenHeaders(token: string): Record<string, string> {
   };
 }
 
-// picker 한 행 — installation 이 접근 가능한 repo(GET /installation/repositories)를 얇게 정규화.
+// One picker row — a thin normalization of the repos the installation can access (GET /installation/repositories).
 export interface InstallationRepo {
   fullName: string; // "owner/name"
-  host?: string; // 이 repo 가 속한 installation 의 GHE 베이스 URL — 미지정 = github.com
+  host?: string; // GHE base URL of the installation this repo belongs to — absent = github.com
   private: boolean;
   defaultBranch: string;
   pushedAt?: string;
@@ -97,7 +97,7 @@ const InstallationReposResponse = z.object({
 });
 const RunnerTokenResponse = z.object({ token: z.string(), expires_at: z.string() });
 
-// git URL → { host?, owner, repo }. github.com 은 host 생략(=env App), 그 외는 GHE 베이스로 취급.
+// git URL → { host?, owner, repo }. github.com omits host (= env App); anything else is treated as a GHE base.
 function parseGitRepo(gitUrl: string): { host?: string; owner: string; repo: string } | undefined {
   let u: URL;
   try {
@@ -136,22 +136,22 @@ export class GithubAppService {
     this.now = deps.now ?? (() => new Date());
   }
 
-  // 워크스페이스 App 통합 현황(등록 + 설치). 비밀 값 없음.
+  // Workspace App integration status (registrations + installations). No secret values.
   async list(workspace: string): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
     return { registrations: g?.registrations ?? [], installations: g?.installations ?? [] };
   }
 
-  // GHE App 등록/갱신(관리자). host 기준 upsert. 개인키는 SecretStore 에 먼저 넣고 그 이름을 지정.
+  // Register/update a GHE App (admin). Upsert by host. Put the private key into SecretStore first, then name it here.
   async registerGheApp(workspace: string, input: Registration): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
-    // host 는 정규화 동등성(sameHost)으로 upsert — 트레일링 슬래시/대소문자만 다른 중복 등록을 막는다.
+    // Upsert host by normalized equality (sameHost) — prevents duplicate registrations differing only in trailing slash/case.
     const registrations = [...(g?.registrations ?? []).filter((r) => !sameHost(r.host, input.host)), input];
     await this.write(workspace, { registrations, installations: g?.installations ?? [] });
     return { registrations, installations: g?.installations ?? [] };
   }
 
-  // GHE App 등록 해제(관리자). 기존 installation 레코드는 남지만 자격증명이 없어 토큰 발급 불가.
+  // Unregister a GHE App (admin). Existing installation records remain but cannot mint tokens without credentials.
   async removeRegistration(workspace: string, host: string): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
     if (!g) return { registrations: [], installations: [] };
@@ -160,7 +160,7 @@ export class GithubAppService {
     return { registrations, installations: g.installations };
   }
 
-  // installation 링크 해제(관리자). 실제 uninstall 은 GitHub 쪽 — 여기선 레코드만 잊는다(멱등).
+  // Unlink an installation (admin). The actual uninstall is on GitHub's side — here we just forget the record (idempotent).
   async unlinkInstallation(workspace: string, installationId: number): Promise<GithubAppView> {
     const g = (await this.settings.get(workspace))?.githubApp;
     if (!g) return { registrations: [], installations: [] };
@@ -169,7 +169,7 @@ export class GithubAppService {
     return { registrations: g.registrations, installations };
   }
 
-  // 설치 시작 → GitHub App 설치 페이지 URL(state 포함). 관리자가 클릭 → GitHub 에서 repo 선택 → 콜백.
+  // Start install → GitHub App install-page URL (includes state). Admin clicks → picks repos on GitHub → callback.
   async startInstall(input: StartInstallInput): Promise<{ installUrl: string }> {
     const target = await this.resolveInstallTarget(input.workspace, input.host);
     const state = generateOAuthState();
@@ -189,11 +189,11 @@ export class GithubAppService {
     return { installUrl: u.toString() };
   }
 
-  // 설치 콜백 — installation_id + state → account 확정 후 워크스페이스에 installation 기록(upsert).
-  // GitHub 은 setup_action(install|update) 에 무관하게 installation_id 를 준다 → 항상 upsert.
+  // Install callback — installation_id + state → confirm the account, then record the installation on the workspace (upsert).
+  // GitHub gives an installation_id regardless of setup_action (install|update) → always upsert.
   async callback(input: { installationId?: number; state?: string }): Promise<{ redirectTo: string }> {
     if (!input.state) return { redirectTo: this.errorRedirect(undefined, "missing_state") };
-    const pending = await this.states.take(input.state); // 1회용 — 만료/재사용은 null
+    const pending = await this.states.take(input.state); // single-use — expired/reused is null
     if (!pending) return { redirectTo: this.errorRedirect(undefined, "invalid_state") };
     if (input.installationId === undefined)
       return { redirectTo: this.errorRedirect(pending.workspace, "missing_installation") };
@@ -221,20 +221,20 @@ export class GithubAppService {
       await this.write(pending.workspace, { registrations: g?.registrations ?? [], installations });
       return { redirectTo: this.successRedirect(pending.workspace) };
     } catch {
-      // 자격증명 resolve / installation 조회 실패 — 브라우저엔 에러 콜아웃으로(원시 에러 노출 금지).
+      // Credential resolve / installation lookup failed — show the browser an error callout (never expose the raw error).
       return { redirectTo: this.errorRedirect(pending.workspace, "install_failed") };
     }
   }
 
-  // App Setup URL 로 등록할 콜백 URL(관리자 표시용). apiPublicUrl 우선, 없으면 요청 base.
+  // The callback URL to register as the App Setup URL (shown to admins). apiPublicUrl first, else the request base.
   callbackUrl(requestBaseUrl?: string): string | undefined {
     const base = this.config.apiPublicUrl ?? requestBaseUrl;
     return base ? `${trimSlash(base)}/workspace/github-app/callback` : undefined;
   }
 
-  // 비공개 repo clone 토큰 — git URL 의 owner 가 워크스페이스 installation account 와 매칭되면 그 App 으로
-  // 그 repo 에 한정한 단기(~1h) installation 토큰을 발급(contents:read). 매칭 installation 없으면 undefined.
-  // 실행(execute-case)이 dispatch 시각에 부르고, 반환 토큰은 transient(AgentJob.repoToken)로만 실린다(저장 안 함).
+  // Private-repo clone token — if the git URL's owner matches a workspace installation account, mint via that App
+  // a short-lived (~1h) installation token scoped to that repo (contents:read). No matching installation → undefined.
+  // execute-case calls this at dispatch time; the returned token rides only as transient (AgentJob.repoToken), never stored.
   async tokenForRepo(workspace: string, gitUrl: string): Promise<string | undefined> {
     const parsed = parseGitRepo(gitUrl);
     if (!parsed) return undefined;
@@ -243,23 +243,23 @@ export class GithubAppService {
     return this.mintFor(workspace, install, { repositories: [parsed.repo], permissions: { contents: "read" } });
   }
 
-  // 한 installation 이 접근 가능한 repo 목록(설치 시 고른 것만) — GET /installation/repositories.
+  // The repos one installation can access (only the ones chosen at install time) — GET /installation/repositories.
   private async reposFor(workspace: string, install: Installation): Promise<InstallationRepo[]> {
-    const token = await this.mintFor(workspace, install, {}); // 제한 없음 → 설치된 repo 전부 조회
+    const token = await this.mintFor(workspace, install, {}); // no restriction → list every installed repo
     const body = await oauthFetchJson(`${apiBase(install.host)}/installation/repositories?per_page=100`, {
       headers: appTokenHeaders(token),
     });
     return InstallationReposResponse.parse(body).repositories.map((r) => ({
       fullName: r.full_name,
-      ...(install.host ? { host: install.host } : {}), // GHE repo 는 host 를 실어 picker/link 가 호스트를 보존
+      ...(install.host ? { host: install.host } : {}), // a GHE repo carries host so picker/link preserve the host
       private: r.private,
       defaultBranch: r.default_branch,
       ...(r.pushed_at ? { pushedAt: r.pushed_at } : {}),
     }));
   }
 
-  // picker — 워크스페이스 installation(들)이 접근 가능한 repo 목록(개인 연결 대체). 각 installation 의
-  // GET /installation/repositories 를 합친다. 설치 시 고른 repo 만 나온다(=팀이 명시 허용한 것만).
+  // picker — the repos the workspace installation(s) can access (replacing personal connections). Merges each
+  // installation's GET /installation/repositories. Only the repos chosen at install time appear (= only what the team explicitly allowed).
   async listRepos(workspace: string): Promise<InstallationRepo[]> {
     const g = (await this.settings.get(workspace))?.githubApp;
     const out: InstallationRepo[] = [];
@@ -267,8 +267,8 @@ export class GithubAppService {
     return out;
   }
 
-  // 설치 현황 + 각 설치의 허용 저장소 — 설정 화면/에이전트가 "무엇이 설치됐고 어떤 저장소가 허용됐나"를 본다.
-  // 저장소 조회는 설치별 soft-fail(reposError): 한 설치의 자격증명/네트워크 문제로 나머지 설치·화면이 죽지 않는다.
+  // Install status + each install's allowed repos — the settings screen/agent sees "what is installed and which repos are allowed".
+  // Repo lookup is per-install soft-fail (reposError): one install's credential/network problem does not kill the other installs or the screen.
   async viewWithRepos(workspace: string): Promise<GithubAppDetailView> {
     const g = (await this.settings.get(workspace))?.githubApp;
     const installations: InstallationWithRepos[] = [];
@@ -276,16 +276,16 @@ export class GithubAppService {
       try {
         installations.push({ ...install, repos: await this.reposFor(workspace, install) });
       } catch {
-        // 원시 GitHub 에러를 화면으로 흘리지 않는다 — "조회 실패" 상태만 표시(설치 레코드 자체는 보인다).
-        installations.push({ ...install, reposError: "저장소 목록을 불러오지 못했습니다." });
+        // Never leak a raw GitHub error to the screen — show only a "lookup failed" state (the install record itself is still visible).
+        installations.push({ ...install, reposError: "Failed to load the repository list." });
       }
     }
     return { registrations: g?.registrations ?? [], installations };
   }
 
-  // "owner/name" repo 에 대한 installation 토큰(지정 권한) + host. setup-PR 등 쓰기 작업용(예: contents/pull_requests write).
-  // 매칭 installation 없으면 NotFound(개인 연결과 달리 워크스페이스가 그 org 에 App 을 설치해야 함).
-  // host 미지정 = github.com — 같은 org 명이 github.com/GHE 양쪽에 있어도 정확한 installation 을 고른다.
+  // installation token (specified permissions) + host for an "owner/name" repo. For write work like setup-PR (e.g. contents/pull_requests write).
+  // No matching installation → NotFound (unlike a personal connection, the workspace must have the App installed on that org).
+  // host absent = github.com — picks the exact installation even if the same org name exists on both github.com/GHE.
   async tokenForRepository(
     workspace: string,
     repository: string,
@@ -294,28 +294,28 @@ export class GithubAppService {
   ): Promise<{ token: string; host?: string }> {
     const [owner, repo] = repository.split("/");
     if (!owner || !repo)
-      throw new BadRequestError("BAD_REQUEST", { repository }, `repository 는 "owner/name" 형식이어야 합니다.`);
+      throw new BadRequestError("BAD_REQUEST", { repository }, `repository must be in "owner/name" form.`);
     const install = await this.installationForOwner(workspace, owner, host);
     if (!install)
       throw new NotFoundError(
         "NOT_FOUND",
         { repository, ...(host ? { host } : {}) },
-        `'${repository}'${host ? `(${host})` : ""} 에 설치된 워크스페이스 GitHub App 이 없습니다.`,
+        `No workspace GitHub App is installed on '${repository}'${host ? `(${host})` : ""}.`,
       );
     const token = await this.mintFor(workspace, install, { repositories: [repo], permissions });
     return { token, ...(install.host ? { host: install.host } : {}) };
   }
 
-  // GitHub Actions 셀프호스티드 러너 등록 토큰 — 워크스페이스 App installation(administration:write)으로 그 대상(repo|org)에 대해 mint.
-  // 단기 토큰(≈1h). 개인 연결/admin:org 스코프 대신, App 이 그 org/repo 에 설치돼 있고 administration 권한을 가지면 발급된다.
+  // GitHub Actions self-hosted runner registration token — mint against the target (repo|org) via the workspace App installation (administration:write).
+  // Short-lived token (≈1h). Instead of a personal connection/admin:org scope, it's issued when the App is installed on that org/repo and has administration permission.
   async runnerRegistrationToken(
     workspace: string,
     target: { repo: string } | { org: string },
     host?: string,
   ): Promise<{ token: string; expiresAt: string; host?: string }> {
     const owner = "repo" in target ? (target.repo.split("/")[0] ?? "") : target.org;
-    // host 지정 = 그 호스트의 installation 만(host-strict — 웹 picker 가 고른 GHE 설치 그대로).
-    // 미지정 = github.com 우선, 없으면 아무 호스트(레거시 — GHE-only 워크스페이스가 host 없이도 동작).
+    // host set = only that host's installation (host-strict — exactly the GHE install the web picker chose).
+    // absent = github.com first, else any host (legacy — a GHE-only workspace works without host).
     const install =
       host !== undefined
         ? await this.installationForOwner(workspace, owner, host)
@@ -324,7 +324,7 @@ export class GithubAppService {
       throw new NotFoundError(
         "NOT_FOUND",
         { owner, ...(host !== undefined ? { host } : {}) },
-        `'${owner}'${host !== undefined ? `(${host})` : ""} 에 설치된 워크스페이스 GitHub App 이 없습니다.`,
+        `No workspace GitHub App is installed on '${owner}'${host !== undefined ? `(${host})` : ""}.`,
       );
     const appToken = await this.mintFor(workspace, install, { permissions: { administration: "write" } });
     const path = "repo" in target ? `/repos/${target.repo}` : `/orgs/${target.org}`;
@@ -336,8 +336,8 @@ export class GithubAppService {
     return { token: data.token, expiresAt: data.expires_at, ...(install.host ? { host: install.host } : {}) };
   }
 
-  // (owner, host) 로 워크스페이스 installation 을 찾는다. host 미지정 = github.com — 같은 org 명이
-  // github.com 과 GHE 양쪽에 설치돼 있어도 다른 호스트의 installation 으로 토큰을 발급하지 않는다.
+  // Find the workspace installation by (owner, host). host absent = github.com — even if the same org name is
+  // installed on both github.com and a GHE, it never mints a token via an installation on a different host.
   private async installationForOwner(
     workspace: string,
     owner: string,
@@ -347,15 +347,15 @@ export class GithubAppService {
     return g?.installations.find((i) => i.account.toLowerCase() === owner.toLowerCase() && sameHost(i.host, host));
   }
 
-  // host 입력이 없을 때의 owner 매칭 — github.com installation 우선(같은 owner 가 GHE 에도 있을 때 모호성 제거),
-  // 없으면 아무 호스트(레거시 — GHE-only 워크스페이스가 host 없이도 동작).
+  // Owner match when no host is given — prefer the github.com installation (removes ambiguity when the same owner is also on a GHE),
+  // else any host (legacy — a GHE-only workspace works without host).
   private async anyHostInstallationForOwner(workspace: string, owner: string): Promise<Installation | undefined> {
     const g = (await this.settings.get(workspace))?.githubApp;
     const mine = g?.installations.filter((i) => i.account.toLowerCase() === owner.toLowerCase()) ?? [];
     return mine.find((i) => sameHost(i.host, undefined)) ?? mine[0];
   }
 
-  // 한 installation 에 대해 installation 토큰 발급(repositories/permissions 로 좁힘). 자격증명은 env(github.com) 또는 GHE 등록.
+  // Mint an installation token for one installation (narrowed by repositories/permissions). Credentials from env (github.com) or the GHE registration.
   private async mintFor(
     workspace: string,
     install: Installation,
@@ -379,7 +379,7 @@ export class GithubAppService {
   }
 
   private async write(workspace: string, githubApp: GithubAppSettings): Promise<void> {
-    // settings.set 은 top-level 얕은 병합 → githubApp 전체(등록+설치)를 항상 함께 쓴다.
+    // settings.set is a top-level shallow merge → always write the whole githubApp (registrations + installations) together.
     await this.settings.set(workspace, { githubApp });
   }
 
@@ -389,28 +389,28 @@ export class GithubAppService {
   ): Promise<{ slug: string; webBase: string; installPath: string }> {
     if (!host) {
       const gc = this.config.githubCom;
-      if (!gc) throw new BadRequestError("BAD_REQUEST", {}, "github.com App 미설정입니다(GITHUB_APP_* env).");
+      if (!gc) throw new BadRequestError("BAD_REQUEST", {}, "github.com App is not configured (GITHUB_APP_* env).");
       return { slug: gc.slug, webBase: "https://github.com", installPath: "/apps" };
     }
     const reg = (await this.settings.get(workspace))?.githubApp?.registrations.find((r) => sameHost(r.host, host));
-    if (!reg) throw new BadRequestError("BAD_REQUEST", { host }, `등록되지 않은 GHE App host 입니다: ${host}`);
+    if (!reg) throw new BadRequestError("BAD_REQUEST", { host }, `Unregistered GHE App host: ${host}`);
     return { slug: reg.slug, webBase: trimSlash(host), installPath: "/github-apps" };
   }
 
   private async resolveAppCreds(workspace: string, host?: string): Promise<{ appId: string; privateKeyPem: string }> {
     if (!host) {
       const gc = this.config.githubCom;
-      if (!gc) throw new BadRequestError("BAD_REQUEST", {}, "github.com App 미설정입니다(GITHUB_APP_* env).");
+      if (!gc) throw new BadRequestError("BAD_REQUEST", {}, "github.com App is not configured (GITHUB_APP_* env).");
       return { appId: gc.appId, privateKeyPem: gc.privateKeyPem };
     }
     const reg = (await this.settings.get(workspace))?.githubApp?.registrations.find((r) => sameHost(r.host, host));
-    if (!reg) throw new BadRequestError("BAD_REQUEST", { host }, `등록되지 않은 GHE App host 입니다: ${host}`);
+    if (!reg) throw new BadRequestError("BAD_REQUEST", { host }, `Unregistered GHE App host: ${host}`);
     const pem = (await this.secretsFor(workspace))[reg.privateKeySecretName];
     if (!pem)
       throw new BadRequestError(
         "BAD_REQUEST",
         { name: reg.privateKeySecretName },
-        `SecretStore 에 App 개인키가 없습니다: ${reg.privateKeySecretName}`,
+        `App private key not found in SecretStore: ${reg.privateKeySecretName}`,
       );
     return { appId: reg.appId, privateKeyPem: pem };
   }

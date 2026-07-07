@@ -1,7 +1,7 @@
-# 셀프호스팅 Temporal 개발 서버 (start-dev: 내장 DB + UI). 개발/실험용.
+# Self-hosted Temporal dev server (start-dev: embedded DB + UI). For development/experimentation.
 #   docker compose -f deploy/temporal/docker-compose.yaml up -d
 #   gRPC: localhost:7233   UI: http://localhost:8233
-# 프로덕션은 영속 배포(auto-setup + Postgres/Cassandra)를 쓸 것 — start-dev 아님.
+# For production use a persistent deployment (auto-setup + Postgres/Cassandra) — not start-dev.
 services:
   temporal:
     image: temporalio/temporal:latest

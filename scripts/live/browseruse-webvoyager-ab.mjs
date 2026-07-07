@@ -1,9 +1,9 @@
-// 라이브 e2e: 실 WebVoyager 를 더 큰 N(다양한 사이트)으로 + 모델 A/B(gpt-5.4-mini vs chatgpt/gpt-5.4) judge 스코어카드.
-// 같은 태스크 집합(같은 caseId)을 두 모델(=두 하니스 버전)로 돌려 → 모델별 Scorecard + summarizeScorecard(judge 통과율)
-// + **사이트별 통과율 분해**(WebVoyager web_name 태그) + diffScorecards(모델 A/B: pass 전이 회귀/개선 + 메트릭 delta).
-// 채점=LiteLLM text judge(WEBVOYAGER_RUBRIC; VLM 은 JUDGE_VISION 으로 별도 검증). 실 사이트라 통과율=난이도 반영.
+// Live e2e: real WebVoyager at larger N (varied sites) + model A/B (gpt-5.4-mini vs chatgpt/gpt-5.4) judge scorecard.
+// Run the same task set (same caseId) on two models (= two harness versions) → per-model Scorecard + summarizeScorecard (judge pass rate)
+// + **per-site pass-rate breakdown** (WebVoyager web_name tag) + diffScorecards (model A/B: pass-transition regressions/improvements + metric delta).
+// Scoring = LiteLLM text judge (WEBVOYAGER_RUBRIC; VLM is verified separately via JUDGE_VISION). On real sites, pass rate reflects difficulty.
 //
-// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
+// Prereqs: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -36,7 +36,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음.");
+  console.error("No LLM key.");
   process.exit(2);
 }
 process.env.EVERDICT_JUDGE_MODEL = JUDGE_MODEL;
@@ -123,7 +123,7 @@ function makeBackend() {
 
 async function runModel(model, version, cases) {
   cleanup();
-  console.log(`\n### browseruse@${version} (model=${model}) — ${cases.length} 케이스 ###`);
+  console.log(`\n### browseruse@${version} (model=${model}) — ${cases.length} cases ###`);
   execFileSync(
     "docker",
     [
@@ -194,14 +194,14 @@ function perSite(sc) {
 let ok = false;
 try {
   const dataset = await buildDataset();
-  console.log(`=== WebVoyager(real) A/B — ${dataset.cases.length} 케이스 × {mini, gpt-5.4} | judge=${JUDGE_MODEL} ===`);
+  console.log(`=== WebVoyager(real) A/B — ${dataset.cases.length} cases × {mini, gpt-5.4} | judge=${JUDGE_MODEL} ===`);
   const A = await runModel("gpt-5.4-mini", "mini", dataset.cases);
   const B = await runModel("chatgpt/gpt-5.4", "gpt5.4", dataset.cases);
 
   for (const sc of [A, B]) {
     const j = summarizeScorecard(sc).find((m) => m.metric === "judge");
     console.log(`\n[${sc.harness}] judge passRate=${((j?.passRate ?? 0) * 100) | 0}% (n=${j?.count ?? 0})`);
-    console.log("  사이트별:");
+    console.log("  per-site:");
     for (const [site, e] of perSite(sc)) console.log(`    ${site}: ${e.pass}/${e.total}`);
   }
 
@@ -211,14 +211,14 @@ try {
     console.log(
       `  ${m.metric}: ${m.baselineMean.toFixed(3)} → ${m.candidateMean.toFixed(3)} (Δ ${m.delta.toFixed(3)})`,
     );
-  console.log(`  개선(fixed): ${JSON.stringify(diff.improvements.map((d) => d.caseId))}`);
-  console.log(`  회귀(broke): ${JSON.stringify(diff.regressions.map((d) => d.caseId))}`);
+  console.log(`  improvements(fixed): ${JSON.stringify(diff.improvements.map((d) => d.caseId))}`);
+  console.log(`  regressions(broke): ${JSON.stringify(diff.regressions.map((d) => d.caseId))}`);
 
   ok = A.results.length > 0 && B.results.length > 0;
   console.log(
     ok
-      ? `\n✅ ②: 실 WebVoyager ${dataset.cases.length}태스크(다양한 사이트)를 두 모델로 judge 채점 → 모델별 Scorecard + 사이트별 통과율 분해 + diffScorecards 로 mini vs gpt-5.4 A/B(pass 전이 + 메트릭 delta). 본격 벤치마크 규모의 스코어카드 파이프라인.`
-      : "\n⚠️ 결과 부족",
+      ? `\n✅ ②: judge-scored ${dataset.cases.length} real WebVoyager tasks (varied sites) on two models → per-model Scorecard + per-site pass-rate breakdown + diffScorecards for mini vs gpt-5.4 A/B (pass transitions + metric delta). A full benchmark-scale scorecard pipeline.`
+      : "\n⚠️ insufficient results",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

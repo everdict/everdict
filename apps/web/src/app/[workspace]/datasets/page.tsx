@@ -30,7 +30,7 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 관계 하니스(스코어카드에서 도출) + 만든이 이름(members 조인)은 부가 정보 — 실패해도 목록 자체는 보인다.
+  // Related harnesses (derived from scorecards) + creator name (members join) are supplementary info — the list itself renders even if it fails.
   const scorecards = await controlPlane
     .listScorecards(ctx)
     .then((r) => scorecardsSchema.parse(r))
@@ -41,7 +41,7 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
     .catch(() => [])
 
   const relations = buildDatasetRelations(scorecards)
-  // 만든이 표기용 — subject → 이름 + 아바타(있으면). 이름은 프로필 name > email 로컬파트 > subject 폴백.
+  // For displaying the creator — subject → name + avatar (if any). Name is profile name > email local part > subject fallback.
   const authors: Record<string, { name: string; avatarUrl?: string }> = {}
   for (const m of members)
     authors[m.subject] = {
@@ -50,7 +50,7 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
     }
 
   const currentWorkspace = principal?.workspace ?? workspace
-  // 이 워크스페이스가 소유한 데이터셋만 노출 — 공유(first-party) 벤치마크는 '벤치마크 추가'/레시피 흐름에서 다룬다.
+  // Only expose datasets owned by this workspace — shared (first-party) benchmarks are handled in the 'add benchmark'/recipe flow.
   const ownDatasets = datasets.filter((d) => d.owner === currentWorkspace)
 
   return (

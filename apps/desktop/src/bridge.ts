@@ -1,8 +1,8 @@
 import { z } from "zod";
 
-// window.everdictDesktop 브리지의 메인 프로세스 쪽 절반 — 채널 상수·페이로드 검증·origin 가드·핸들러 등록.
-// 채널 문자열은 preload.cts 와 수동 동기화(preload 는 CJS 라 이 모듈을 import 하지 못한다).
-// 스킬 desktop 불변식 3(메서드 4개가 전부)·4(권한 경계는 IPC origin 검사).
+// The main-process half of the window.everdictDesktop bridge — channel constants · payload validation · origin guard · handler registration.
+// The channel strings are manually kept in sync with preload.cts (preload is CJS and cannot import this module).
+// Skill desktop invariant 3 (the four methods are all there is) · 4 (the permission boundary is the IPC origin check).
 export const BRIDGE_CHANNELS = {
   appInfo: "everdict:app-info",
   pair: "everdict:pair-runner",
@@ -11,7 +11,7 @@ export const BRIDGE_CHANNELS = {
   statusEvent: "everdict:runner-status-event",
 } as const;
 
-// 웹(브리지 호출자)이 넘기는 페어링 페이로드 — 경계 Zod 검증. 토큰은 이 경로로 내려와 keychain 에만 저장된다.
+// The pairing payload the web (bridge caller) passes — boundary Zod validation. The token arrives via this path and is stored only in the keychain.
 export const PairPayloadSchema = z.object({
   token: z.string().startsWith("rnr_"),
   runnerId: z.string().min(1).optional(),
@@ -19,7 +19,7 @@ export const PairPayloadSchema = z.object({
 });
 export type PairPayload = z.infer<typeof PairPayloadSchema>;
 
-// 웹에 보여주는 러너 상태 — apps/web `shared/lib/desktop-bridge.ts` 미러와 수동 동기화(웹은 @everdict/* 미의존).
+// The runner status shown to the web — manually kept in sync with the apps/web `shared/lib/desktop-bridge.ts` mirror (the web does not depend on @everdict/*).
 export interface DesktopRunnerStatus {
   paired: boolean;
   runnerId?: string;
@@ -35,7 +35,7 @@ export interface DesktopAppInfo {
   capabilities: string[];
 }
 
-// IPC sender 프레임 origin 검증 — 브리지 권한의 실제 경계(네비게이션 정책이 아니라 여기서 지킨다).
+// Validate the IPC sender frame origin — the real boundary of bridge permission (enforced here, not by the navigation policy).
 export function senderAllowed(frameUrl: string | undefined, webOrigin: string): boolean {
   if (!frameUrl) return false;
   try {
@@ -45,7 +45,7 @@ export function senderAllowed(frameUrl: string | undefined, webOrigin: string): 
   }
 }
 
-// electron ipcMain 의 최소 표면 — 테스트는 가짜 주입(electron 값 import 없음).
+// The minimal surface of electron ipcMain — tests inject a fake (no electron value import).
 interface InvokeEventLike {
   senderFrame: { url: string } | null;
 }
@@ -54,7 +54,7 @@ export interface IpcMainLike {
 }
 
 export interface BridgeDeps {
-  // 현재 웹 origin 을 항상 새로 읽는다(D8: 서버 주소는 런타임에 바뀔 수 있음). null=서버 미구성 → 전부 차단.
+  // Always re-read the current web origin (D8: the server address can change at runtime). null = server not configured → block everything.
   webOrigin(): string | null;
   appInfo(): Promise<DesktopAppInfo>;
   pair(payload: PairPayload): Promise<void>;
@@ -68,7 +68,7 @@ export function registerBridge(ipc: IpcMainLike, deps: BridgeDeps): void {
     (event: InvokeEventLike, payload: unknown): unknown => {
       const origin = deps.webOrigin();
       if (origin === null || !senderAllowed(event.senderFrame?.url, origin))
-        throw new Error("허용되지 않은 origin 의 브리지 호출입니다.");
+        throw new Error("Bridge call from a disallowed origin.");
       return handler(payload);
     };
   ipc.handle(

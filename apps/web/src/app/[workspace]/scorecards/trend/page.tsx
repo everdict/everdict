@@ -27,7 +27,7 @@ function fmtDelta(n: number | null): string {
   return `${arrow} ${n > 0 ? '+' : ''}${n.toFixed(2)}`
 }
 
-// 의존성 없는 인라인 SVG 스파크라인 — score 시계열 + baseline 기준선 + 포인트 hover 툴팁(회귀는 빨강).
+// Dependency-free inline SVG sparkline — score time series + baseline reference line + point hover tooltip (regressions in red).
 function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
   const t = useTranslations('scorecardsPage')
   const pts = points
@@ -35,7 +35,7 @@ function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
     .filter((p): p is (typeof points)[number] & { score: number; i: number } => p.score !== null)
   if (pts.length < 2) return null
 
-  // baseline score = score − deltaVsBaseline (delta 있는 첫 포인트에서 역산). 기준선으로 그린다.
+  // baseline score = score − deltaVsBaseline (back-computed from the first point with a delta). Drawn as the reference line.
   const ref = points.find((p) => p.score !== null && p.deltaVsBaseline !== null)
   const baseScore =
     ref && ref.score !== null && ref.deltaVsBaseline !== null
@@ -137,7 +137,7 @@ export default async function TrendPage({
       .parse(await controlPlane.listDatasets(ctx))
       .map((d) => ({ id: d.id, label: `${d.id} (${d.versions.length}v)` }))
   } catch {
-    // 목록 실패해도 안내는 보여준다
+    // Even if the list fails, still show guidance
   }
 
   let trend: ScorecardTrend | undefined

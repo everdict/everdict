@@ -20,23 +20,23 @@ import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topolog
 
 export interface K8sTopologyRuntimeOptions {
   kubectl?: Kubectl;
-  context?: string; // kubeconfig context (예: "kind-everdict")
-  runtimeClass?: string; // 클러스터의 RuntimeClass (예: "gvisor") — 있으면 모든 파드에 적용
-  namespacePrefix?: string; // 존 네임스페이스 접두사 (기본 "everdict-")
+  context?: string; // kubeconfig context (e.g. "kind-everdict")
+  runtimeClass?: string; // the cluster's RuntimeClass (e.g. "gvisor") — applied to all pods when set
+  namespacePrefix?: string; // zone namespace prefix (default "everdict-")
   storeEnv?: Record<string, string>;
-  provisionDependencies?: boolean; // zone 없을 때의 기본 스토어 격리: true→silo(전용 배포), false→external
-  poolNamespace?: string; // pool 공유 스토어 네임스페이스 (기본 "everdict-shared")
-  storeSecret?: string; // pool 테넌트 비번 mint 시드 (프로덕션: KEK/Vault)
-  networkPolicies?: boolean; // zone.network 로 NetworkPolicy 생성/적용 (기본 true; enforce 엔 정책-CNI 필요)
-  egressAllowCIDRs?: string[]; // deny-egress 일 때 외부로 허용할 CIDR (모델 엔드포인트 등)
-  modelEndpoints?: string[]; // deny-egress: 이 호스트/URL 들을 DNS 해석해 egress 허용 CIDR 로 자동 추가(LiteLLM 등)
-  dnsLookup?: (host: string) => Promise<string[]>; // 테스트 주입용 resolver (기본 node:dns)
+  provisionDependencies?: boolean; // default store isolation when no zone: true→silo (dedicated deploy), false→external
+  poolNamespace?: string; // pool shared-store namespace (default "everdict-shared")
+  storeSecret?: string; // seed for minting pool tenant passwords (production: KEK/Vault)
+  networkPolicies?: boolean; // create/apply NetworkPolicy from zone.network (default true; enforcement needs a policy CNI)
+  egressAllowCIDRs?: string[]; // CIDRs allowed egress under deny-egress (model endpoints etc.)
+  modelEndpoints?: string[]; // deny-egress: DNS-resolve these hosts/URLs and auto-add them as egress-allow CIDRs (LiteLLM etc.)
+  dnsLookup?: (host: string) => Promise<string[]>; // resolver for test injection (default node:dns)
   browserImage?: string;
-  imagePullPolicy?: string; // kind 등 사전 로드 이미지: "IfNotPresent"
-  registryAuth?: RegistryAuth; // 워크스페이스 이미지 레지스트리 pull 자격증명 — dockerconfigjson Secret + imagePullSecrets 렌더
+  imagePullPolicy?: string; // pre-loaded images (kind etc.): "IfNotPresent"
+  registryAuth?: RegistryAuth; // workspace image-registry pull credentials — renders a dockerconfigjson Secret + imagePullSecrets
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
-  fetchImpl?: typeof fetch; // 엔드포인트 readiness/CDP 조회용 (테스트 주입)
+  fetchImpl?: typeof fetch; // for endpoint readiness/CDP lookups (test injection)
 }
 
 interface WarmEntry {
@@ -45,21 +45,21 @@ interface WarmEntry {
   ns: string;
 }
 
-// 라이브 K8sTopologyRuntime: 매니페스트 apply + rollout 대기 + port-forward 로 엔드포인트 발견.
-// NomadTopologyRuntime 과 동형 — ServiceTopologyBackend 는 둘을 교체만 한다(오케스트레이터-비종속).
+// Live K8sTopologyRuntime: apply manifests + wait for rollout + discover endpoints via port-forward.
+// Isomorphic to NomadTopologyRuntime — ServiceTopologyBackend only swaps between them (orchestrator-agnostic).
 export class K8sTopologyRuntime implements TopologyRuntime {
   readonly id = "k8s";
   private readonly kubectl: Kubectl;
   private readonly fetchImpl: typeof fetch;
   private readonly warm = new Map<string, WarmEntry>();
-  private readonly sharedStoresReady = new Set<string>(); // pool 공유 스토어 배포는 클러스터에 1회만(deploy-once)
+  private readonly sharedStoresReady = new Set<string>(); // pool shared-store deploy happens only once per cluster (deploy-once)
 
   constructor(private readonly opts: K8sTopologyRuntimeOptions = {}) {
     this.kubectl = opts.kubectl ?? kubectlCli({ context: opts.context });
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
-  // 존(테넌트)별 네임스페이스 — warm 풀 분리 + 격리 경계.
+  // Per-zone (tenant) namespace — warm-pool separation + isolation boundary.
   private nsFor(zone?: TrustZone): string {
     if (zone?.namespace) return zone.namespace;
     return `${this.opts.namespacePrefix ?? "everdict-"}${zone?.id ?? "default"}`;
@@ -74,9 +74,9 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     await this.kubectl.ensureNamespace(ns, { [MANAGED_LABEL.key]: MANAGED_LABEL.value });
     const readySec = Math.floor((this.opts.readyTimeoutMs ?? 120_000) / 1000);
 
-    // 네트워크 격리: zone.network 로 NetworkPolicy 적용(같은-ns ingress 만 → cross-tenant 차단; deny-egress 면 egress 제한).
+    // Network isolation: apply NetworkPolicy from zone.network (same-ns ingress only → cross-tenant block; deny-egress restricts egress).
     if (this.opts.networkPolicies !== false && zone) {
-      // deny-egress: 모델 엔드포인트(LiteLLM 등)를 DNS 해석해 egress 허용 CIDR 자동 추가.
+      // deny-egress: DNS-resolve model endpoints (LiteLLM etc.) to auto-add egress-allow CIDRs.
       const lookup =
         this.opts.dnsLookup ?? ((host: string) => dnsLookup(host, { all: true }).then((a) => a.map((x) => x.address)));
       const autoCidrs =
@@ -93,12 +93,12 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       if (policies.length > 0) await this.kubectl.apply(policies);
     }
 
-    // 스토어 격리 모델 결정: zone 이 있으면 plan(pool/silo/external), 없으면 provisionDependencies(silo/external).
+    // Decide the store isolation model: with a zone → plan (pool/silo/external), without → provisionDependencies (silo/external).
     const plan: StorePlan = zone
       ? planTenantStores(spec, zone, { poolNamespace: this.opts.poolNamespace, storeSecret: this.opts.storeSecret })
       : { isolation: this.opts.provisionDependencies ? "silo" : "external", serviceEnv: {}, tenants: [] };
 
-    // pool: 공유 스토어(클러스터 1회) → 테넌트별 DB/role/ACL mint(공유 스토어에 DDL) → scoped creds 를 서비스 env 로.
+    // pool: shared store (once per cluster) → mint per-tenant DB/role/ACL (DDL against the shared store) → scoped creds into the service env.
     if (plan.isolation === "pool") await this.provisionPool(spec, plan, readySec);
 
     const isSilo = plan.isolation === "silo";
@@ -108,12 +108,12 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       runtimeClass: this.opts.runtimeClass,
       storeEnv,
       imagePullPolicy: this.opts.imagePullPolicy,
-      provisionDependencies: isSilo, // silo 만 전용 스토어를 zone ns 에 배포(SLICE 39); pool/external 은 안 함.
+      provisionDependencies: isSilo, // only silo deploys a dedicated store into the zone ns (SLICE 39); pool/external do not.
       ...(this.opts.registryAuth ? { registryAuth: this.opts.registryAuth } : {}),
     });
     await this.kubectl.apply(manifests);
 
-    // silo: 전용 스토어를 서비스보다 먼저 Ready (서비스가 부팅 시 접속). in-cluster DNS 라 port-forward 불필요.
+    // silo: bring the dedicated store to Ready before the services (they connect on boot). No port-forward needed thanks to in-cluster DNS.
     if (isSilo) {
       for (const { name } of dependencyStores(spec)) await this.kubectl.rolloutStatus(name, ns, readySec);
     }
@@ -136,8 +136,8 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     return handle;
   }
 
-  // pool: 공유 스토어를 한 번 띄우고, 테넌트별 논리객체(전용 DB+role / Redis ACL)를 공유 스토어에 mint.
-  // 적대적 테넌트 코드여도 자기 DB creds 만 받으므로 교차 접근은 PG 인증/Redis ACL 에서 거부된다.
+  // pool: bring up the shared store once, and mint per-tenant logical objects (dedicated DB+role / Redis ACL) on it.
+  // Even hostile tenant code only receives its own DB creds, so cross-access is denied by PG auth / Redis ACL.
   private async provisionPool(spec: ServiceHarnessSpec, plan: StorePlan, readySec: number): Promise<void> {
     const poolNs = this.opts.poolNamespace ?? DEFAULT_POOL_NS;
     const stores = plan.tenants.map((t) => t.store);
@@ -147,7 +147,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       const sharedApp = `everdict-shared-${t.store}`;
       const pod = await this.kubectl.podFor(`app=${sharedApp}`, poolNs);
       if (t.store === "postgres" && t.postgresSetup) {
-        // psql 이 stdin 에서 명령을 읽음(\gexec 포함). 어드민 user = POSTGRES_USER(=everdict, superuser).
+        // psql reads commands from stdin (including \gexec). Admin user = POSTGRES_USER (=everdict, superuser).
         await this.kubectl.exec(
           pod,
           poolNs,
@@ -157,7 +157,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       } else if (t.store === "redis" && t.redisSetup) {
         for (const cmd of t.redisSetup) await this.kubectl.exec(pod, poolNs, ["redis-cli", ...cmd]);
       } else if (t.store === "minio" && t.minioSetup) {
-        // mc(루트, 이미지 내장)로 버킷/유저/버킷-한정 정책 생성.
+        // Via mc (root, bundled in the image): create bucket / user / bucket-scoped policy.
         await this.kubectl.exec(pod, poolNs, ["sh", "-c", t.minioSetup]);
       }
     }
@@ -168,20 +168,20 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     if (missing.length === 0) return;
     await this.kubectl.ensureNamespace(poolNs, { [MANAGED_LABEL.key]: MANAGED_LABEL.value });
     await this.kubectl.apply(buildSharedStoreManifests(missing, poolNs, this.opts.imagePullPolicy));
-    // 공유 스토어 ns: everdict-managed 네임스페이스에서만 스토어 포트로 ingress 허용(플랫폼 외부 도달 차단).
+    // Shared-store ns: allow ingress on the store ports only from an everdict-managed namespace (block reach from outside the platform).
     if (this.opts.networkPolicies !== false) {
       const ports = missing.map((s) => STORE_DEFS[s]?.port).filter((p): p is number => p !== undefined);
       await this.kubectl.apply([buildSharedStoreIngressPolicy(poolNs, ports)]);
     }
     for (const s of missing) {
       await this.kubectl.rolloutStatus(`everdict-shared-${s}`, poolNs, readySec);
-      // rollout Ready ≠ accepting connections (postgres initdb 등 — readiness probe 없음). 실접속까지 대기.
+      // rollout Ready ≠ accepting connections (postgres initdb etc. — no readiness probe). Wait until it actually accepts.
       await this.waitStoreAccepting(s, poolNs);
       this.sharedStoresReady.add(s);
     }
   }
 
-  // 스토어가 실제 연결을 받을 때까지 폴링(pg_isready / redis-cli ping). DDL/ACL 전에 호출.
+  // Poll until the store actually accepts connections (pg_isready / redis-cli ping). Called before DDL/ACL.
   private async waitStoreAccepting(store: string, poolNs: string): Promise<void> {
     const probe =
       store === "postgres"
@@ -200,11 +200,11 @@ export class K8sTopologyRuntime implements TopologyRuntime {
         await this.kubectl.exec(pod, poolNs, probe);
         return;
       } catch {
-        // 아직 안 받음 → 재시도
+        // not accepting yet → retry
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { store }, "공유 스토어 준비 대기 시간초과");
+    throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the shared store to become ready");
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {
@@ -223,7 +223,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       const pf = await this.kubectl.portForward(`svc/${name}`, ns, 9222);
       return await this.connectBrowser(runId, ns, browserTargets, pf);
     } catch (err) {
-      // 브라우저 리소스만 정리(warm 토폴로지가 같은 ns 에 있으므로 ns 는 건드리지 않는다).
+      // Clean up only the browser resources (leave the ns alone since the warm topology lives in the same ns).
       await this.kubectl.deleteResources(browserTargets, ns).catch(() => {});
       throw err;
     }
@@ -235,7 +235,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     browserTargets: string[],
     pf: PortForward,
   ): Promise<TargetEnvHandle> {
-    const fetchImpl = this.fetchImpl; // 반환 closure 에서 this 가 바뀌므로 로컬로 캡처
+    const fetchImpl = this.fetchImpl; // capture locally since `this` changes inside the returned closures
     const cdpHttp = `http://127.0.0.1:${pf.localPort}`;
     await this.waitForHttp(`${cdpHttp}/json/version`);
     let cdpUrl = cdpHttp;
@@ -243,12 +243,12 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       const ver = (await (await fetchImpl(`${cdpHttp}/json/version`)).json()) as { webSocketDebuggerUrl?: string };
       if (ver.webSocketDebuggerUrl) cdpUrl = ver.webSocketDebuggerUrl;
     } catch {
-      // 파싱 실패 → HTTP 엔드포인트를 cdpUrl 로
+      // parse failed → use the HTTP endpoint as cdpUrl
     }
     try {
       await fetchImpl(`${cdpHttp}/json/new?about:blank`, { method: "PUT" });
     } catch {
-      // 빈 탭 생성 실패는 치명적 아님
+      // failing to create a blank tab is not fatal
     }
     return {
       wiring: { target_cdp_url: cdpUrl },
@@ -269,7 +269,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
       },
       dispose: async () => {
         await pf.stop();
-        // per-case 브라우저만 제거 — warm 토폴로지(같은 ns)는 유지. ns 삭제는 teardown.
+        // Remove only the per-case browser — keep the warm topology (same ns). ns deletion is teardown.
         await this.kubectl.deleteResources(browserTargets, ns).catch(() => {});
       },
     };
@@ -292,10 +292,10 @@ export class K8sTopologyRuntime implements TopologyRuntime {
         const res = await this.fetchImpl(url);
         if (res.status < 500) return;
       } catch {
-        // 아직 안 뜸 → 재시도
+        // not up yet → retry
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { url }, "엔드포인트 준비 대기 시간초과");
+    throw new UpstreamError("UPSTREAM_ERROR", { url }, "Timed out waiting for the endpoint to become ready");
   }
 }

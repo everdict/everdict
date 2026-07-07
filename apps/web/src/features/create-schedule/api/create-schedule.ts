@@ -24,8 +24,8 @@ export interface CreateScheduleResult {
   error?: string
 }
 
-// 서버 액션: 예약(cron) 스코어카드 생성. authZ 는 컨트롤플레인이 강제(schedules:write — member+, 403 가능).
-// 발사 run 은 생성자 신원으로 실행(예산 → 워크스페이스). 버전 미입력은 latest.
+// Server action: create a scheduled (cron) scorecard. AuthZ is enforced by the control plane (schedules:write — member+, may 403).
+// The firing run executes as the creator's identity (budget → workspace). No version given = latest.
 export async function createScheduleAction(
   input: CreateScheduleInput
 ): Promise<CreateScheduleResult> {

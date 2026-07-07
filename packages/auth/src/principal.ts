@@ -1,29 +1,29 @@
-// 인증된 주체. 컨트롤플레인이 소유하는 인증의 결과물.
-// workspace = tenant = trust-zone 키 — 같은 워크스페이스 멤버는 같은 존(격리/warm 풀)에서 실행된다.
+// The authenticated subject. The result of authentication, owned by the control plane.
+// workspace = tenant = trust-zone key — members of the same workspace run in the same zone (isolation/warm pool).
 export interface Principal {
-  subject: string; // 유저 sub(OIDC) 또는 키 식별자 — identity 키(authz/스코프는 이 값으로만)
-  workspace: string; // = tenant (격리/공정/예산/스토어/레지스트리의 키)
+  subject: string; // user sub (OIDC) or key identifier — the identity key (authz/scope use only this value)
+  workspace: string; // = tenant (the key for isolation/fairness/budget/store/registry)
   roles: string[]; // ["admin"|"member"|"viewer"|"runner"|"ci"...]
-  // runner = 셀프호스티드 러너 페어링 토큰(rnr_) — 최소권한, 고정 워크스페이스.
-  // github-actions = GitHub Actions OIDC 페더레이션(repo link 신뢰) — ci 역할, 멤버십 아님.
+  // runner = self-hosted runner pairing token (rnr_) — least privilege, fixed workspace.
+  // github-actions = GitHub Actions OIDC federation (repo link trust) — ci role, not membership.
   via: "oidc" | "api-key" | "runner" | "github-actions";
-  email?: string; // OIDC email/preferred_username 클레임 — 멤버 목록 표시용(표시 전용, authz/identity 무관). api-key 는 없음.
-  scopes?: string[]; // api-key 별 권한 범위(read|write|admin). 있으면 role 권한과 교집합으로 좁힌다. 없으면(OIDC/레거시 키) 무제한. authz.ts can() 참고.
-  runnerId?: string; // 러너 토큰(via=runner)일 때만 — 어느 디바이스인지. lease/result 도구가 (workspace,subject,runnerId) 로 쓴다.
+  email?: string; // OIDC email/preferred_username claim — for the member list display (display only, unrelated to authz/identity). Absent for api-key.
+  scopes?: string[]; // per-api-key permission scope (read|write|admin). If present, narrowed by intersection with role permissions. If absent (OIDC/legacy key), unlimited. See authz.ts can().
+  runnerId?: string; // only for a runner token (via=runner) — which device. The lease/result tools use (workspace, subject, runnerId).
 }
 
-// 인증 요청 컨텍스트 — bearer 밖에서 오는 힌트. workspaceHint = x-everdict-workspace 헤더(요청이 지목한 워크스페이스).
-// GitHub Actions 페더레이션이 "그 워크스페이스의 repo link 만" 대조하는 데 쓴다(전역 repo 역인덱스 없음, 크로스테넌트 모호성 없음).
+// Authentication request context — hints from outside the bearer. workspaceHint = x-everdict-workspace header (the workspace the request targets).
+// Used by the GitHub Actions federation to match against "only that workspace's repo links" (no global repo reverse-index, no cross-tenant ambiguity).
 export interface AuthContext {
   workspaceHint?: string;
 }
 
-// Bearer 자격증명 → Principal. JWT(사람/Keycloak)와 API 키(에이전트/MCP/CI) 양쪽을 처리.
+// Bearer credential → Principal. Handles both JWT (human/Keycloak) and API key (agent/MCP/CI).
 export interface Authenticator {
   authenticate(bearer: string, ctx?: AuthContext): Promise<Principal | undefined>;
 }
 
-// 여러 인증기를 순서대로 시도, 첫 성공 반환.
+// Tries multiple authenticators in order, returns the first success.
 export function compositeAuthenticator(authenticators: Authenticator[]): Authenticator {
   return {
     async authenticate(bearer, ctx) {

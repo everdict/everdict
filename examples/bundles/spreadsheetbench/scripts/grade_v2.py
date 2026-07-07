@@ -1,18 +1,18 @@
-# SpreadsheetBench v2-샘플 채점(재계산식) — v2 의 핵심인 regression+modification 을 함께 검증.
-#   modification: 신규 D열 'Profit' = Revenue-Cost(행별) + 어딘가에 총이익 셀이 정확.
-#   regression:   원본 A/B/C 열(Product/Revenue/Cost)이 그대로 보존됐는가(불변 셀 훼손 금지).
-# 둘 다 100% 여야 PASS(v2 all-or-nothing). exit 0=PASS, 1=FAIL, 2=오류.
+# SpreadsheetBench v2-sample scoring (recalculation) — verifies both regression + modification, which are v2's core.
+#   modification: new column D 'Profit' = Revenue-Cost (per row) + a total-profit cell somewhere is correct.
+#   regression:   are the original A/B/C columns (Product/Revenue/Cost) preserved as-is (invariant cells not corrupted)?
+# Both must be 100% for PASS (v2 all-or-nothing). exit 0=PASS, 1=FAIL, 2=error.
 import os
 import sys
 
 try:
     import openpyxl
 except ImportError:
-    print("openpyxl 미설치 — setup 의 pip 설치 실패", file=sys.stderr)
+    print("openpyxl not installed — the pip install in setup failed", file=sys.stderr)
     sys.exit(2)
 
 if not os.path.exists("output.xlsx"):
-    print("output.xlsx 가 없습니다 — 에이전트가 산출물을 만들지 않았습니다.")
+    print("output.xlsx is missing — the agent did not produce an output.")
     sys.exit(1)
 
 src = openpyxl.load_workbook("model.xlsx")["Model"]
@@ -26,13 +26,13 @@ exp_total = sum(exp_profits)
 
 ws = openpyxl.load_workbook("output.xlsx", data_only=True).active
 
-# modification: 행별 Profit(D2..) 정확?
+# modification: is the per-row Profit (D2..) correct?
 got_profits = [ws[f"D{i}"].value for i in range(2, 2 + len(exp_profits))]
 mod_profit_ok = all(isinstance(g, (int, float)) and abs(g - e) < 1e-6 for g, e in zip(got_profits, exp_profits))
-# modification: 총이익 셀이 어딘가 존재?
+# modification: does a total-profit cell exist somewhere?
 all_nums = [c.value for row in ws.iter_rows() for c in row if isinstance(c.value, (int, float))]
 mod_total_ok = any(abs(v - exp_total) < 1e-6 for v in all_nums)
-# regression: 원본 Revenue/Cost 가 보존됐는가(B/C 열).
+# regression: are the original Revenue/Cost preserved (columns B/C)?
 reg_ok = all(
     ws[f"B{i}"].value == r and ws[f"C{i}"].value == co for i, (_, r, co) in enumerate(data, start=2)
 )

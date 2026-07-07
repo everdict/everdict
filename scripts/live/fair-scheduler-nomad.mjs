@@ -1,11 +1,11 @@
-// 라이브 검증: 테넌트 공정 스케줄링(WFQ)이 실제 Nomad 위에서 작동한다.
+// Live verification: tenant fair scheduling (WFQ) works on real Nomad.
 //
-// 테넌트 A 가 4건을 먼저, 테넌트 B 가 1건을 나중에 제출한다. 백엔드 cap=1(한 번에 하나).
-//  - FIFO 라면 B 는 맨 마지막(5번째)에야 실행된다.
-//  - WFQ 라면 B 는 A 한 건 뒤(2번째)에 끼어든다 → 한 테넌트의 대량 제출이 다른 테넌트를 굶기지 않음.
-// 디스패치 순서를 래퍼 백엔드로 기록해 증명한다.
+// Tenant A submits 4 first, tenant B submits 1 later. Backend cap=1 (one at a time).
+//  - Under FIFO, B runs only last (5th).
+//  - Under WFQ, B jumps in right after one A (2nd) → one tenant's bulk submit does not starve another.
+// Prove it by recording the dispatch order with a wrapper backend.
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/fair-scheduler-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/fair-scheduler-nomad.mjs
 
 import { BackendRegistry, NomadBackend, Scheduler } from "../../packages/backends/dist/index.js";
 
@@ -13,7 +13,7 @@ const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
 const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
 const STAMP = Date.now().toString(36);
 
-// 디스패치된 케이스 id 순서를 기록하는 래퍼.
+// Wrapper that records the order of dispatched case ids.
 class LoggingBackend {
   id = "nomad";
   order = [];
@@ -46,9 +46,9 @@ function jobFor(tenant, label) {
 
 async function main() {
   const backend = new LoggingBackend(new NomadBackend({ addr: NOMAD_ADDR, image: IMAGE, maxConcurrent: 1 }));
-  const sched = new Scheduler(new BackendRegistry().register("nomad", backend)); // 동일 weight, WFQ
+  const sched = new Scheduler(new BackendRegistry().register("nomad", backend)); // equal weight, WFQ
 
-  // A 4건 먼저, B 1건 나중 — 전부 한꺼번에 제출.
+  // A's 4 first, B's 1 later — all submitted at once.
   const submit = [
     jobFor("tenant-A", "A0"),
     jobFor("tenant-A", "A1"),

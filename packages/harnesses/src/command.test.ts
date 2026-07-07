@@ -40,13 +40,13 @@ async function collect(it: AsyncIterable<TraceEvent>): Promise<TraceEvent[]> {
 }
 
 describe("CommandHarness", () => {
-  it("install 은 setup 명령을 순서대로 실행한다", async () => {
+  it("install runs the setup commands in order", async () => {
     const { compute, execs } = fakeCompute();
     await new CommandHarness(spec({ setup: ["a", "b"] })).install(compute);
     expect(execs.map((e) => e.cmd)).toEqual(["a", "b"]);
   });
 
-  it("기본 cwd 는 'work', spec.workDir 가 있으면 setup/command 둘 다 그 디렉터리에서 실행(os-use 는 절대경로)", async () => {
+  it("default cwd is 'work'; when spec.workDir is set, both setup and command run in that directory (os-use uses an absolute path)", async () => {
     const def = fakeCompute();
     await new CommandHarness(spec({ setup: ["s"] })).install(def.compute);
     await collect(new CommandHarness(spec()).run(def.compute, "t", ctx));
@@ -55,22 +55,22 @@ describe("CommandHarness", () => {
     const wd = fakeCompute();
     await new CommandHarness(spec({ workDir: "/tmp", setup: ["s"] })).install(wd.compute);
     await collect(new CommandHarness(spec({ workDir: "/tmp" })).run(wd.compute, "t", ctx));
-    expect(wd.execs.every((e) => e.cwd === "/tmp")).toBe(true); // setup(install) + command(run) 모두 /tmp
+    expect(wd.execs.every((e) => e.cwd === "/tmp")).toBe(true); // both setup(install) + command(run) run in /tmp
   });
 
-  it("run 은 command 를 템플릿 치환(셸 안전)하고 env(EVERDICT_RUN_ID + spec.env)를 주입; trace none + 출력 없음 → 이벤트 없음", async () => {
+  it("run substitutes the command template (shell-safe) and injects env (EVERDICT_RUN_ID + spec.env); trace none + no output → no events", async () => {
     const { compute, execs } = fakeCompute();
     const events = await collect(new CommandHarness(spec(), { runId: () => "rid1" }).run(compute, "fix the bug", ctx));
-    expect(events).toEqual([]); // trace none + stdout 빈 값
+    expect(events).toEqual([]); // trace none + empty stdout
     const e = execs[0];
     expect(e?.cmd).toContain("--model sonnet");
-    expect(e?.cmd).toContain("--message 'fix the bug'"); // {{task}} 는 shq 처리
+    expect(e?.cmd).toContain("--message 'fix the bug'"); // {{task}} is shq-quoted
     expect(e?.env?.EVERDICT_RUN_ID).toBe("rid1");
     expect(e?.env?.FOO).toBe("bar");
   });
 
-  it("trace none 이면 stdout 이 최종 assistant message 가 된다(블랙박스 CLI 의 QA 채점 — answer-match 가 읽는 답)", async () => {
-    // 회귀: 이전엔 trace:none 이 아무 이벤트도 내지 않아 prompt QA 벤치마크가 무조건 0점이었다(OfficeQA 류).
+  it("with trace none, stdout becomes the final assistant message (QA scoring for a black-box CLI — the answer answer-match reads)", async () => {
+    // Regression: previously trace:none emitted no events, so prompt QA benchmarks always scored 0 (OfficeQA-style).
     const compute: ComputeHandle = {
       async exec() {
         return { exitCode: 0, stdout: "thinking...\nThe answer is 258.7 billion.\n", stderr: "" };
@@ -87,7 +87,7 @@ describe("CommandHarness", () => {
     ]);
   });
 
-  it("command 가 exit≠0 이면 error 이벤트로 가시화한다(조용한 삼킴 금지)", async () => {
+  it("when the command exits ≠0, surface it as an error event (no silent swallowing)", async () => {
     const compute: ComputeHandle = {
       async exec() {
         return { exitCode: 127, stdout: "", stderr: "sh: codex: command not found" };
@@ -104,7 +104,7 @@ describe("CommandHarness", () => {
     ]);
   });
 
-  it("trace 가 있으면 run() 은 stdout message 를 내지 않고(그쪽 트레이스가 답), 플랫폼 이벤트는 collectTrace 로 온다", async () => {
+  it("when a trace exists, run() emits no stdout message (that trace is the answer); platform events come via collectTrace", async () => {
     const sourceEvents: TraceEvent[] = [{ t: 1, kind: "message", role: "assistant", text: "from-otel" }];
     const source: TraceSource = { fetch: async () => sourceEvents };
     const compute: ComputeHandle = {
@@ -124,11 +124,11 @@ describe("CommandHarness", () => {
       },
     );
     const events = await collect(h.run(compute, "t", ctx));
-    expect(events).toEqual([]); // stdout message 없음 + run() 은 플랫폼 pull 안 함(수집은 compute 해제 후)
+    expect(events).toEqual([]); // no stdout message + run() doesn't pull the platform (collection happens after compute is released)
     expect(await h.collectTrace("rid")).toEqual(sourceEvents);
   });
 
-  it("일반 {{var}} 는 spec.params 로 치환되고 예약어({{model}})는 params 가 덮지 못한다", async () => {
+  it("ordinary {{var}} are substituted from spec.params, and params can't override reserved words ({{model}})", async () => {
     const { compute, execs } = fakeCompute();
     const h = new CommandHarness(
       spec({
@@ -141,10 +141,10 @@ describe("CommandHarness", () => {
     const cmd = execs[0]?.cmd ?? "";
     expect(cmd).toContain("--edit-format diff");
     expect(cmd).toContain("--map-tokens 2048");
-    expect(cmd).toContain("--model sonnet"); // 예약어가 먼저 치환됨 → params.model 무시
+    expect(cmd).toContain("--model sonnet"); // reserved word is substituted first → params.model ignored
   });
 
-  it("trace otel → collectTrace(runId) 가 주입된 소스에서 이벤트를 가져온다(run 과 같은 상관 키)", async () => {
+  it("trace otel → collectTrace(runId) fetches events from the injected source (same correlation key as run)", async () => {
     const { compute, execs } = fakeCompute();
     let fetched = "";
     const traceSourceFor = (kind: string, endpoint: string): TraceSource => ({
@@ -161,13 +161,13 @@ describe("CommandHarness", () => {
       },
     );
     await collect(h.run(compute, "t", ctx));
-    expect(execs[0]?.env?.EVERDICT_RUN_ID).toBe("rid2"); // 실행에 주입된 상관 키
-    const events = await h.collectTrace("rid2"); // 같은 키로 pull(runCase 가 compute 해제 후 호출)
+    expect(execs[0]?.env?.EVERDICT_RUN_ID).toBe("rid2"); // correlation key injected into execution
+    const events = await h.collectTrace("rid2"); // pull with the same key (runCase calls this after releasing compute)
     expect(fetched).toBe("otel:http://j:rid2");
     expect(events).toHaveLength(1);
   });
 
-  it("ctx.runId 가 오면 자체 mint 대신 그 값으로 상관하고, traceSource() 가 스펙 좌표(collect 포함)를 노출한다", async () => {
+  it("when ctx.runId is provided, correlate on that value instead of self-minting, and traceSource() exposes the spec coordinates (incl. collect)", async () => {
     const { compute, execs } = fakeCompute();
     const h = new CommandHarness(
       spec({
@@ -183,8 +183,8 @@ describe("CommandHarness", () => {
       { runId: () => "self-minted" },
     );
     await collect(h.run(compute, "t", { ...ctx, runId: "from-runcase" }));
-    expect(execs[0]?.env?.EVERDICT_RUN_ID).toBe("from-runcase"); // runCase 상관 키 우선
-    // authSecret 은 '이름'만(값 trace.auth 는 노출 금지), mlflow 는 correlate/experiment 도 좌표에 포함.
+    expect(execs[0]?.env?.EVERDICT_RUN_ID).toBe("from-runcase"); // runCase correlation key takes precedence
+    // authSecret exposes only the 'name' (the value trace.auth must not leak); for mlflow, correlate/experiment are also in the coordinates.
     expect(h.traceSource()).toEqual({
       kind: "mlflow",
       endpoint: "http://m",
@@ -196,7 +196,7 @@ describe("CommandHarness", () => {
     expect(new CommandHarness(spec()).traceSource()).toBeUndefined(); // trace:none
   });
 
-  it("collectTrace: 해석된 auth(값)·correlate·검색범위(project)를 소스에 전달하고, 0건이면 재시도한다(플러시 지연)", async () => {
+  it("collectTrace: passes the resolved auth (value), correlate, and search scope (project) to the source, and retries on 0 results (flush delay)", async () => {
     let seenOpts: { auth?: string; correlate?: "id" | "tag"; project?: string } | undefined;
     let fetches = 0;
     const traceSourceFor = (
@@ -208,7 +208,7 @@ describe("CommandHarness", () => {
       return {
         async fetch() {
           fetches += 1;
-          // 두 번은 플러시 전(0건), 세 번째에 도착 — 재시도가 없으면 빈 트레이스로 끝난다.
+          // Twice before the flush (0 results), arrives on the third — without retry it would end with an empty trace.
           return fetches < 3 ? [] : [{ t: 0, kind: "llm_call", model: "m" }];
         },
       };
@@ -222,7 +222,7 @@ describe("CommandHarness", () => {
           collect: "job",
           correlate: "tag",
           experiment: "7",
-          auth: "Basic abc", // resolveHarnessSecrets 가 디스패치 직전 채운 transient 값
+          auth: "Basic abc", // transient value filled in by resolveHarnessSecrets just before dispatch
         },
       }),
       { traceSourceFor, sleep: async (ms) => void slept.push(ms) },
@@ -230,13 +230,13 @@ describe("CommandHarness", () => {
 
     const events = await h.collectTrace("rid");
 
-    expect(seenOpts).toEqual({ auth: "Basic abc", correlate: "tag", project: "7" }); // experiment→project 수렴
-    expect(fetches).toBe(3); // 0건 → 재시도 → 도착
+    expect(seenOpts).toEqual({ auth: "Basic abc", correlate: "tag", project: "7" }); // experiment→project convergence
+    expect(fetches).toBe(3); // 0 results → retry → arrives
     expect(slept).toEqual([2000, 2000]);
     expect(events).toHaveLength(1);
   });
 
-  it("trace kind 5종: phoenix 는 project 를 좌표·소스 설정에 싣고, langfuse/langsmith 도 동일 계약으로 동작한다", async () => {
+  it("5 trace kinds: phoenix carries project into the coordinates and source config, and langfuse/langsmith behave under the same contract", async () => {
     const seen: Array<{ kind: string; project?: string; auth?: string }> = [];
     const sourceFor = (kind: string) => (opts?: { auth?: string; project?: string }) => {
       seen.push({
@@ -257,7 +257,7 @@ describe("CommandHarness", () => {
       { traceSourceFor: (k, _e, o) => sourceFor(k)(o) },
     );
     expect(await phoenix.collectTrace("tid")).toHaveLength(1);
-    // traceSource() 좌표에도 project 동봉 — control-plane 수집(traceRef)이 그대로 쓴다.
+    // traceSource() coordinates also carry project — control-plane collection (traceRef) uses it verbatim.
     expect(phoenix.traceSource()).toMatchObject({ kind: "phoenix", project: "everdict-e2e", collect: "job" });
 
     const langsmith = new CommandHarness(
@@ -273,7 +273,7 @@ describe("CommandHarness", () => {
     ]);
   });
 
-  // 사용량 계측: trace:none 하니스의 모델 호출을 usage-proxy 로 통과시켜 토큰을 합성 llm_call 로 회수.
+  // Usage metering: route a trace:none harness's model calls through a usage-proxy to recover tokens as a synthetic llm_call.
   function fakeMeter(usage = { promptTokens: 100, completionTokens: 20, totalTokens: 120, usd: 0.012, calls: 1 }) {
     const calls: { upstream: string; closed: boolean } = { upstream: "", closed: false };
     const start = async (opts: { upstreamBaseUrl: string; defaultRunId?: string }): Promise<StartedUsageProxy> => {
@@ -289,7 +289,7 @@ describe("CommandHarness", () => {
     return { start, calls };
   }
 
-  it("meterUsage: 베이스를 프록시로 바꾸고, 회수 토큰을 합성 llm_call 로 내보내고, 프록시를 닫는다", async () => {
+  it("meterUsage: swaps the base to the proxy, emits recovered tokens as a synthetic llm_call, and closes the proxy", async () => {
     const { compute, execs } = fakeCompute();
     const { start, calls } = fakeMeter();
     const h = new CommandHarness(spec({ env: { OPENAI_API_BASE: "http://litellm:4000" } }), {
@@ -298,20 +298,20 @@ describe("CommandHarness", () => {
       startUsageProxy: start,
     });
     const events = await collect(h.run(compute, "t", ctx));
-    expect(calls.upstream).toBe("http://litellm:4000"); // 원래 베이스가 업스트림
-    expect(execs[0]?.env?.OPENAI_API_BASE).toBe("http://127.0.0.1:9999"); // 자식은 프록시로
+    expect(calls.upstream).toBe("http://litellm:4000"); // the original base is the upstream
+    expect(execs[0]?.env?.OPENAI_API_BASE).toBe("http://127.0.0.1:9999"); // the child goes to the proxy
     expect(events).toEqual([
       {
         t: expect.any(Number),
         kind: "llm_call",
         model: "sonnet",
-        cost: { inputTokens: 100, outputTokens: 20, usd: 0.012 }, // $도 헤더에서 회수
+        cost: { inputTokens: 100, outputTokens: 20, usd: 0.012 }, // $ recovered from the header too
       },
     ]);
     expect(calls.closed).toBe(true);
   });
 
-  it("meterUsage 라도 trace 가 none 이 아니면 계측 안 함(자기 트레이스 사용 — 이중집계 방지)", async () => {
+  it("even with meterUsage, don't meter when trace isn't none (use its own trace — avoid double-counting)", async () => {
     const { compute, execs } = fakeCompute();
     const { start, calls } = fakeMeter();
     const h = new CommandHarness(
@@ -331,11 +331,11 @@ describe("CommandHarness", () => {
       },
     );
     await collect(h.run(compute, "t", ctx));
-    expect(calls.upstream).toBe(""); // 프록시 미시작
-    expect(execs[0]?.env?.OPENAI_API_BASE).toBe("http://litellm:4000"); // 베이스 그대로
+    expect(calls.upstream).toBe(""); // proxy not started
+    expect(execs[0]?.env?.OPENAI_API_BASE).toBe("http://litellm:4000"); // base unchanged
   });
 
-  it("setup 실패(exit≠0)는 에러", async () => {
+  it("a setup failure (exit≠0) is an error", async () => {
     const compute: ComputeHandle = {
       async exec() {
         return { exitCode: 1, stdout: "", stderr: "boom" };
@@ -346,6 +346,6 @@ describe("CommandHarness", () => {
       },
       async dispose() {},
     };
-    await expect(new CommandHarness(spec()).install(compute)).rejects.toThrow(/setup 실패/);
+    await expect(new CommandHarness(spec()).install(compute)).rejects.toThrow(/setup failed/);
   });
 });

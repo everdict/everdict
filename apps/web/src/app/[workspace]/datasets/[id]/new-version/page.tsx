@@ -14,8 +14,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 데이터셋 새 버전 — 버전은 불변이라 "수정 = 새 버전". 현재 버전의 메타(설명/태그)와
-// 케이스를 프리필하고, 값을 바꿔 다음 semver 로 배포한다(하니스 new-version 과 동일 패턴).
+// New dataset version — versions are immutable, so "edit = new version". Prefills the current version's
+// meta (description/tags) and cases; change the values and deploy at the next semver (same pattern as harness new-version).
 export default async function NewDatasetVersionPage({
   params,
   searchParams,
@@ -38,7 +38,7 @@ export default async function NewDatasetVersionPage({
     } catch (e) {
       error = e instanceof Error ? e.message : String(e)
     }
-    // 시스템 관리 버저닝: 기존 버전들에서 다음 semver(patch/minor/major)를 제안한다.
+    // System-managed versioning: suggest the next semver (patch/minor/major) from the existing versions.
     try {
       existingDatasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
     } catch {

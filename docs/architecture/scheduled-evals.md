@@ -136,20 +136,20 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
   omits the field). Non-persisted, attached at read time; internal reads (`update`/`remove`/`fire`/`finalize`)
   use a private `getRecord` that skips the Temporal round-trip. When Temporal is not deployed (no driver) the web
   falls back to a dependency-free cron computation (`apps/web/.../shared/lib/cron.ts`, Intl-based, IANA-tz/DST
-  safe) and marks those rows **(예상)**.
+  safe) and marks those rows **(estimated)**.
 - **Internal** — `POST /internal/schedules/:id/fire`, `GET /internal/schedules/:id/last-status` (`x-internal-token`).
 - **Roles** — new `schedules:read` (viewer+) / `schedules:write` (member+) in the authz matrix; gate mutating
   routes + workspace-scope; another workspace's schedule reads **404**. **Content edit** (name/cron/timezone/
   overlap/runTemplate) is further gated to **creator OR workspace admin** — enforced in `ScheduleService.update`
   (route/MCP inject `actor={subject,isAdmin}`; a patch touching only `enabled`, i.e. pause/resume, stays
   member+). Web mirrors this (edit button + edit page gated to creator/admin; the control plane is authoritative).
-- **Web** — a Schedules page with a **view switcher (리스트 / 소유자별 / 캘린더, `?view=` deep-link)** over shared
+- **Web** — a Schedules page with a **view switcher (list / by owner / calendar, `?view=` deep-link)** over shared
   owner·status·runtime filters: each row shows the **owner** (members-joined avatar), **runtime** chip,
   **benchmark→harness**, a human-readable **cadence** (`describeCron`), and the **next fire** (authoritative or
-  (예상)); a **다가오는 실행** timeline (next 7 days) merges upcoming fires across the visible schedules; the
+  (estimated)); an **Upcoming runs** timeline (next 7 days) merges upcoming fires across the visible schedules; the
   calendar marks each day's active schedules (`firesOnDate`, one chip per schedule/day so dense crons don't
-  smear). Plus enable/pause toggle, and a **"이 설정으로 예약"** button on the scorecard run form (reuse the form
-  values → `POST /schedules`). Cron picker (presets 매일/매주/매시 + raw expression).
+  smear). Plus an enable/pause toggle, and a **"Schedule with these settings"** button on the scorecard run form (reuse the form
+  values → `POST /schedules`). Cron picker (presets daily/weekly/hourly + raw expression).
 
 ### Reuse vs new
 
@@ -161,7 +161,7 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
 | `ScheduleService` + `ScheduleDriver` (`TemporalScheduleDriver`) | **new** |
 | `scheduledScorecardWorkflow` + activities (submit / status / notify) | **new** (`@everdict/orchestrator`) |
 | `/schedules` routes + MCP tools + `schedules:*` authz | **new** (`apps/api`) |
-| Schedules web page + "예약" button | **new** (`apps/web`) |
+| Schedules web page + "Schedule" button | **new** (`apps/web`) |
 
 ## Slices (pnpm gates green at each)
 
@@ -177,7 +177,7 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
 3. ✅ **Regression alert + UX** — `fire()` returns previous run id; `finalize()` (workflow calls it after
    poll-to-terminal, via `POST /internal/schedules/:id/finalize`) diffs vs the previous scheduled run and fires
    `NotificationService.notifyRegression` (Mattermost) on a regression + records final `lastStatus`; web cron
-   **preset picker** (매시간/매일/평일/매주 chips → cron string) + last-fire time on the list. *(diff-vs-previous +
+   **preset picker** (hourly/daily/weekday/weekly chips → cron string) + last-fire time on the list. *(diff-vs-previous +
    notify decision unit-tested; completion notify already free via scorecard `onComplete`.)* **Creator-left
    auto-disable** shipped: `ScheduleService.disableByCreator(tenant, createdBy)` (disable + Temporal pause + reason
    in `lastStatus`), wired via `MembershipService.onMemberRemoved` (single core → HTTP + MCP leave/remove both

@@ -1,16 +1,16 @@
-// 라이브 하니스: Nomad **데이터플레인 enforce**(Consul Connect/Envoy) 시도. Connect-enabled echo 서버(테넌트별) +
-// upstream 2개(같은/다른 테넌트)를 가진 probe + intention deny-default → 같은 테넌트 ALLOWED, 다른 테넌트 DENIED 를 노린다.
+// live harness: attempt Nomad **data-plane enforce** (Consul Connect/Envoy). Connect-enabled echo servers (per tenant) +
+// a probe with 2 upstreams (same/other tenant) + intention deny-default → aims for same-tenant ALLOWED, other-tenant DENIED.
 //
-// 상태(2026-06-20): **부분 검증 — 근본원인 규명 완료.** 메시는 정상 기동: root nomad(bridge/iptables) +
-//   self-contained Consul(gRPC/xDS) + Envoy 사이드카 healthy + 서비스 등록 + 앱 in-netns 도달(APP-OK). xDS 도 정상 —
-//   probe envoy /clusters 에 두 upstream 이 **healthy endpoint** 로 박혀있음(t-acme-echo, t-globex-echo). 그러나 양쪽
-//   upstream 다 reset. **근본원인: Nomad 가 Connect 사이드카를 ServiceAddress=127.0.0.1(루프백)로 등록** → probe 의
-//   bridge netns 안에서 127.0.0.1 은 *자기* 루프백이라 echo 사이드카에 도달 불가(NodeAddr 는 라우터블 192.168.x 로
-//   고쳐졌지만 ServiceAddress 는 Nomad 가 루프백으로 박음). 즉 단일노드 dev 의 **주소 광고 한계** — 교차-alloc Connect 는
-//   노드-라우터블 주소를 광고하는 제대로 된 Consul 클라이언트 에이전트가 필요(프로덕션 Nomad+Consul 은 충족).
-//   **모델/빌더/enforce 메커니즘 문제 아님**(xDS·intention 결정 모두 정상). 권위 있는 Nomad 네트워크 격리 증명은
-//   intention 결정(SLICE 43). FOLLOW-UP: 노드-라우터블 Consul 클라이언트 에이전트로 사이드카 주소를 라우터블하게.
-// 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/connect-enforce-nomad.mjs (root nomad + alt consul-dev 필요)
+// Status (2026-06-20): **partially verified — root cause identified.** The mesh boots fine: root nomad (bridge/iptables) +
+//   self-contained Consul (gRPC/xDS) + healthy Envoy sidecar + service registration + app reachable in-netns (APP-OK). xDS is fine too —
+//   the probe's envoy /clusters shows both upstreams as **healthy endpoints** (t-acme-echo, t-globex-echo). But both
+//   upstreams reset. **Root cause: Nomad registers the Connect sidecar with ServiceAddress=127.0.0.1 (loopback)** → inside the probe's
+//   bridge netns, 127.0.0.1 is *its own* loopback, so the echo sidecar is unreachable (NodeAddr was fixed to a routable 192.168.x
+//   but Nomad still pins ServiceAddress to loopback). In short, the **address-advertisement limit** of single-node dev — cross-alloc Connect
+//   needs a proper Consul client agent that advertises node-routable addresses (production Nomad+Consul satisfies this).
+//   **Not a model/builder/enforce-mechanism problem** (xDS and intention decisions are both fine). The authoritative proof of Nomad network isolation is
+//   the intention decision (SLICE 43). FOLLOW-UP: make sidecar addresses routable via a node-routable Consul client agent.
+// Usage: PATH=$HOME/.local/bin:$PATH node scripts/live/connect-enforce-nomad.mjs (needs root nomad + alt consul-dev)
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { buildConnectService, consulHttp } from "../../packages/topology/dist/index.js";
@@ -24,7 +24,7 @@ const submit = async (job) => {
   if (!r.ok) throw new Error(`submit ${job.ID}: ${r.status} ${(await r.text()).slice(0, 200)}`);
 };
 
-// Connect echo 서버 잡(메시 서비스 t-<zone>-echo + Envoy sidecar).
+// Connect echo server job (mesh service t-<zone>-echo + Envoy sidecar).
 const echoJob = (zone) => ({
   ID: `echo-${zone}`,
   Type: "service",
@@ -33,7 +33,7 @@ const echoJob = (zone) => ({
     {
       Name: "echo",
       Count: 1,
-      // Connect: bridge + 서비스 포트는 앱이 듣는 리터럴 포트(8080) — 사이드카가 netns 안 localhost:8080 으로 포워드.
+      // Connect: bridge + the service port is the literal port the app listens on (8080) — the sidecar forwards to localhost:8080 inside the netns.
       Networks: [{ Mode: "bridge" }],
       Services: [buildConnectService(`t-${zone}-echo`, "8080")],
       Tasks: [
@@ -47,7 +47,7 @@ const echoJob = (zone) => ({
     },
   ],
 });
-// probe 잡: 같은 테넌트(acme) echo + 다른 테넌트(globex) echo 로의 upstream 2개. busybox 로 도달성 테스트.
+// probe job: 2 upstreams — same-tenant (acme) echo + other-tenant (globex) echo. Reachability tested via busybox.
 const probeJob = {
   ID: "probe-acme",
   Type: "service",
@@ -56,19 +56,19 @@ const probeJob = {
     {
       Name: "probe",
       Count: 1,
-      // probe 도 실제 inbound 앱(echo:8080)을 둬 sidecar 서비스가 healthy → upstream xDS 가 정상 전달되게.
+      // the probe also runs a real inbound app (echo:8080) so its sidecar service is healthy → upstream xDS is delivered correctly.
       Networks: [{ Mode: "bridge" }],
       Services: [
         buildConnectService("t-probe-acme", "8080", [
-          { DestinationName: "t-acme-echo", LocalBindPort: 7001 }, // 같은 테넌트
-          { DestinationName: "t-globex-echo", LocalBindPort: 7002 }, // 다른 테넌트(차단돼야)
+          { DestinationName: "t-acme-echo", LocalBindPort: 7001 }, // same tenant
+          { DestinationName: "t-globex-echo", LocalBindPort: 7002 }, // other tenant (should be blocked)
         ]),
       ],
       Tasks: [
         {
           Name: "probe",
           Driver: "docker",
-          Config: { image: "mendhak/http-https-echo:latest" }, // alpine+node → wget 있음, 8080 listen
+          Config: { image: "mendhak/http-https-echo:latest" }, // alpine+node → has wget, listens on 8080
           Resources: { CPU: 150, MemoryMB: 128 },
         },
       ],
@@ -105,18 +105,18 @@ const reach = (allocId, port) => {
     ]);
     return out.length > 0 ? "ALLOWED" : "DENIED";
   } catch {
-    return "DENIED"; // 연결 거부/타임아웃 = 메시가 차단
+    return "DENIED"; // connection refused/timeout = blocked by the mesh
   }
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-console.log("Nomad 데이터플레인 enforce(Consul Connect/Envoy) — intention 을 메시가 실제 차단하는지 검증\n");
+console.log("Nomad data-plane enforce (Consul Connect/Envoy) — verify the mesh actually blocks per intention\n");
 let ok = false;
 try {
   await submit(echoJob("acme"));
   await submit(echoJob("globex"));
   await submit(probeJob);
-  // intentions: acme-echo 는 probe 허용, globex-echo 는 거부(교차).
+  // intentions: acme-echo allows the probe, globex-echo denies it (cross).
   await consul.applyIntention({
     Kind: "service-intentions",
     Name: "t-acme-echo",
@@ -131,12 +131,12 @@ try {
     Sources: [{ Name: "*", Action: "deny" }],
   });
 
-  // echo 서버들 + probe 의 Envoy sidecar 가 모두 뜰 때까지 대기(이미지 pull + xDS sync).
+  // wait until the echo servers + the probe's Envoy sidecar are all up (image pull + xDS sync).
   const eAcme = await waitRunning("echo-acme");
   const eGlobex = await waitRunning("echo-globex");
   const allocId = await waitRunning("probe-acme");
-  if (!allocId || !eAcme || !eGlobex) throw new Error("alloc 이 running 이 안 됨(Envoy/이미지 확인)");
-  console.log("allocs running (echo-acme, echo-globex, probe) — Envoy/xDS 안정화 대기 40s …");
+  if (!allocId || !eAcme || !eGlobex) throw new Error("allocs did not reach running (check Envoy/images)");
+  console.log("allocs running (echo-acme, echo-globex, probe) — waiting 40s for Envoy/xDS to stabilize …");
   await sleep(40000);
 
   let sameTenant = "DENIED";
@@ -144,22 +144,22 @@ try {
   for (let i = 0; i < 12; i++) {
     sameTenant = reach(allocId, 7001);
     crossTenant = reach(allocId, 7002);
-    if (sameTenant === "ALLOWED") break; // 같은 테넌트가 뚫리면 메시 준비된 것
+    if (sameTenant === "ALLOWED") break; // if the same tenant gets through, the mesh is ready
     await sleep(5000);
   }
   console.log(`\nsame-tenant  probe → t-acme-echo  : ${sameTenant}`);
-  console.log(`cross-tenant probe → t-globex-echo: ${crossTenant}   <-- Envoy 가 차단해야 함`);
+  console.log(`cross-tenant probe → t-globex-echo: ${crossTenant}   <-- Envoy should block this`);
 
   ok = sameTenant === "ALLOWED" && crossTenant === "DENIED";
   console.log(`\nchecks: same-allowed=${sameTenant === "ALLOWED"} cross-denied=${crossTenant === "DENIED"}`);
   console.log(
     ok
-      ? "\n✅ Nomad 데이터플레인 enforce: Consul Connect/Envoy 가 intention 을 실제로 적용 — 같은 테넌트 도달, 교차 테넌트 Envoy 차단. K8s NetworkPolicy(Calico)↔Nomad Consul-Connect enforce 패리티 완성."
-      : "\n⚠️ 일부 체크 실패(메시 미준비 가능 — Envoy/xDS 로그 확인)",
+      ? "\n✅ Nomad data-plane enforce: Consul Connect/Envoy actually applies the intention — same tenant reachable, cross tenant blocked by Envoy. K8s NetworkPolicy (Calico) ↔ Nomad Consul-Connect enforce parity complete."
+      : "\n⚠️ some checks failed (mesh may not be ready — check Envoy/xDS logs)",
   );
 } finally {
   if (process.env.KEEP === "1") {
-    console.log("KEEP=1 → teardown 생략(검사용)");
+    console.log("KEEP=1 → skip teardown (for inspection)");
     process.exit(ok ? 0 : 1);
   }
   for (const id of ["probe-acme", "echo-acme", "echo-globex"]) {
@@ -168,6 +168,6 @@ try {
     } catch {}
   }
   for (const n of ["t-acme-echo", "t-globex-echo"]) await consul.deleteIntention(n).catch(() => {});
-  console.log("teardown: 잡 purge + intentions 삭제");
+  console.log("teardown: purge jobs + delete intentions");
 }
 process.exit(ok ? 0 : 1);

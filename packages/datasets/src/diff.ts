@@ -1,6 +1,6 @@
 import type { Dataset, DatasetDiff, DatasetFieldChange, EvalCase } from "@everdict/core";
 
-// 키 정렬 정규화 — 객체 키 순서/배열 동등성을 안정적으로 비교(거짓 변경 방지). undefined 는 전용 센티넬.
+// Key-sorted canonicalization — compares object key order/array equality stably (avoids false changes). undefined has a dedicated sentinel.
 function canonical(v: unknown): string {
   if (v === undefined) return "@@undefined";
   if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
@@ -12,14 +12,14 @@ function canonical(v: unknown): string {
     .join(",")}}`;
 }
 
-// 표시용 문자열 — task 같은 문자열은 그대로, 그 외(객체/배열/수)는 JSON, 없으면 "(없음)".
+// Display string — strings like task as-is, others (objects/arrays/numbers) as JSON, "(none)" if absent.
 function repr(v: unknown): string {
-  if (v === undefined) return "(없음)";
+  if (v === undefined) return "(none)";
   if (typeof v === "string") return v;
   return JSON.stringify(v);
 }
 
-// EvalCase 의 비교 대상 필드(id 는 매칭 키라 제외). 변경 보고 순서이기도 하다.
+// EvalCase fields to compare (id is excluded as the matching key). Also the change-reporting order.
 function caseFields(c: EvalCase): Record<string, unknown> {
   return {
     task: c.task,
@@ -41,9 +41,9 @@ function fieldChanges(before: Record<string, unknown>, after: Record<string, unk
   return out;
 }
 
-// base ↔ candidate 데이터셋 버전 diff. 케이스는 id 로 매칭 — candidate 에만 있으면 added,
-// base 에만 있으면 removed, 둘 다 있으면 필드 비교(달라진 필드가 있으면 changed, 없으면 unchanged).
-// 데이터셋 메타(description/tags)도 같은 방식으로 보고한다. 결과는 id 사전순 정렬(안정적 출력).
+// base ↔ candidate dataset version diff. Cases are matched by id — added if only in candidate,
+// removed if only in base, field comparison if in both (changed if any field differs, unchanged otherwise).
+// Dataset meta (description/tags) is reported the same way. The result is sorted by id (stable output).
 export function diffDatasets(base: Dataset, candidate: Dataset): DatasetDiff {
   const baseById = new Map(base.cases.map((c) => [c.id, c] as const));
   const candById = new Map(candidate.cases.map((c) => [c.id, c] as const));

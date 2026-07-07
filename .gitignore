@@ -15,10 +15,14 @@ coverage/
 .DS_Store
 *.log
 
-# live e2e artifacts (scripts/live/*.mjs 가 리포 루트에 쓰는 스크린샷 등 — 커밋 대상 아님)
+# live e2e artifacts (screenshots etc. that scripts/live/*.mjs write to the repo root — not meant to be committed)
 /e2e-*.png
 
 # electron packaging artifacts (apps/desktop)
 apps/desktop/bundle/
 apps/desktop/release/
 apps/web/.next-dev/
+
+# python bytecode
+__pycache__/
+*.pyc

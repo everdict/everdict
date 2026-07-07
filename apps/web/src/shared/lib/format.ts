@@ -1,10 +1,10 @@
-// 대시보드 공통 포맷 — 점수/시각/건강도 표기를 한 곳으로(페이지마다 제각각이던 것을 통일).
+// Shared dashboard formatting — score/time/health rendering in one place (unifying what used to differ per page).
 
 export function fmtPct(n: number): string {
   return `${Math.round(n * 100)}%`
 }
 
-// 점수 = passRate 우선(%), 없으면 mean(2f), 둘 다 없으면 '–'. 리스트/리더보드/트렌드/상세 공통.
+// Score = passRate first (%), else mean (2f), else '–'. Shared across list/leaderboard/trend/detail.
 export function fmtScore(
   passRate: number | null | undefined,
   mean: number | null | undefined
@@ -14,7 +14,7 @@ export function fmtScore(
   return '–'
 }
 
-// 통과율 건강도 — 색 인코딩용. passRate(0~1)에만 의미(수치 메트릭은 'none'=중립).
+// Pass-rate health — for color encoding. Only meaningful for passRate (0~1); numeric metrics are 'none' = neutral.
 export type Health = 'good' | 'mid' | 'low' | 'none'
 export function rateHealth(passRate: number | null | undefined): Health {
   if (passRate == null) return 'none'
@@ -29,7 +29,7 @@ export const HEALTH_TEXT: Record<Health, string> = {
   none: 'text-foreground',
 }
 
-// 컴팩트 시각 'MM-DD HH:mm'(값은 UTC 기준 — 정밀/로컬은 title 로 보완). ISO 가 아니면 그대로.
+// Compact time 'MM-DD HH:mm' (value is UTC — precise/local supplemented via title). If not ISO, pass through.
 export function fmtDateTime(iso: string): string {
   if (!/^\d{4}-\d{2}-\d{2}T/.test(iso)) return iso
   return iso
@@ -37,7 +37,7 @@ export function fmtDateTime(iso: string): string {
     .replace(/\.\d+Z?$/, '')
     .slice(5, 16)
 }
-// title= 용 로컬 풀 표기(hover 시 정확한 시각).
+// Local full rendering for title= (exact time on hover).
 export function fmtDateTimeFull(iso: string): string {
   try {
     return new Date(iso).toLocaleString()
@@ -46,14 +46,14 @@ export function fmtDateTimeFull(iso: string): string {
   }
 }
 
-// opaque subject(예: Keycloak sub)는 사람이 못 읽으니 축약 표기. 가능하면 members 조인 이름으로 대체하고,
-// 이름이 없을 때의 폴백으로만 쓴다(만든이/생성자 표기 공통).
+// An opaque subject (e.g. Keycloak sub) isn't human-readable, so abbreviate it. Prefer the members-joined name where possible,
+// and use this only as the fallback when no name is available (shared creator/author rendering).
 export function fmtSubject(s: string): string {
   return s.length > 14 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s
 }
 
-// 상대 시각(알림 등 피드용) — Intl.RelativeTimeFormat 로케일 표기('3분 전'/'3 minutes ago'),
-// 7일 넘으면 절대 날짜로. locale 은 호출부(컴포넌트)가 useLocale()/getLocale() 로 넘긴다(기본 ko).
+// Relative time (for feeds like notifications) — Intl.RelativeTimeFormat locale rendering (e.g. '3 minutes ago'),
+// falling back to an absolute date past 7 days. locale is passed by the caller (component) via useLocale()/getLocale() (default ko).
 export function fmtTimeAgo(iso: string, locale: string = 'ko'): string {
   const ms = Date.now() - new Date(iso).getTime()
   if (!Number.isFinite(ms) || ms < 0) return fmtDateTime(iso)
@@ -68,7 +68,7 @@ export function fmtTimeAgo(iso: string, locale: string = 'ko'): string {
   return fmtDateTime(iso)
 }
 
-// 리스트 날짜 그룹 헤더 — 오늘/어제는 상대 표기(numeric:auto), 그 외 로케일 월·일(다른 해면 연도 포함).
+// List date-group header — today/yesterday as relative (numeric:auto), otherwise locale month·day (include the year in a different year).
 export function fmtDateHeading(iso: string, locale: string = 'ko'): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
@@ -84,14 +84,14 @@ export function fmtDateHeading(iso: string, locale: string = 'ko'): string {
   return new Intl.DateTimeFormat(locale, opts).format(d)
 }
 
-// 날짜 그룹 행의 시각 — HH:MM(로컬). 날짜는 그룹 헤더가 갖는다.
+// Time for a date-group row — HH:MM (local). The date lives in the group header.
 export function fmtTimeOnly(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-// 날짜 그룹 키(로컬 자정 기준) — 같은 날이면 같은 키.
+// Date-group key (based on local midnight) — the same day yields the same key.
 export function dayKeyOf(iso: string): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso

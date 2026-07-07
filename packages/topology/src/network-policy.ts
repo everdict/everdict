@@ -1,11 +1,11 @@
 import type { TrustZone } from "@everdict/core";
 
-// K8s NetworkPolicy 로 테넌트(존) 네트워크 격리를 enforce. zone.network 가 정책을 고른다:
-//   deny-cross-tenant = 같은 ns 외 ingress 차단(대칭 적용이라 egress 없이도 pod 간 교차 도달 차단) — 안전 기본.
-//   deny-egress       = 거기에 더해 egress 를 DNS+같은ns+공유스토어+허용CIDR 로만 제한(데이터 유출 차단).
-//   open              = 정책 없음.
-// 주의: kubectl port-forward(컨트롤플레인→kubelet→pod)는 CNI pod-network 를 우회하므로 엔드포인트 발견/구동은
-//       이 정책에 영향받지 않는다. enforce 에는 정책-CNI(Calico/Cilium)가 필요(kindnet 은 enforce 안 함).
+// Enforce tenant (zone) network isolation via K8s NetworkPolicy. zone.network picks the policy:
+//   deny-cross-tenant = block ingress from outside the same ns (applied symmetrically, so even without egress it blocks cross pod-to-pod reach) — the safe default.
+//   deny-egress       = additionally restrict egress to only DNS + same-ns + shared store + allowed CIDRs (block data exfiltration).
+//   open              = no policy.
+// Note: kubectl port-forward (control-plane→kubelet→pod) bypasses the CNI pod-network, so endpoint discovery/driving
+//       is unaffected by this policy. Enforcement needs a policy CNI (Calico/Cilium) (kindnet does not enforce).
 export interface NetworkPolicyManifest {
   apiVersion: "networking.k8s.io/v1";
   kind: "NetworkPolicy";
@@ -13,16 +13,16 @@ export interface NetworkPolicyManifest {
   spec: Record<string, unknown>;
 }
 
-// everdict 가 만든 네임스페이스 표식 — 공유 스토어 ingress 가 "플랫폼 네임스페이스에서만" 허용할 때 매칭.
+// Label marking an everdict-created namespace — matched when shared-store ingress allows "only platform namespaces".
 export const MANAGED_LABEL = { key: "everdict/managed", value: "true" } as const;
 
 export interface ZoneNetworkPolicyOptions {
   namespace: string;
   network: TrustZone["network"];
-  poolNamespace?: string; // pool 공유 스토어 ns (deny-egress 일 때 여기로의 egress 허용)
-  storePorts?: number[]; // 공유 스토어 포트(예: [5432, 6379])
-  dnsNamespace?: string; // 기본 kube-system
-  egressAllowCIDRs?: string[]; // 모델 엔드포인트 등 외부 허용 CIDR (deny-egress)
+  poolNamespace?: string; // pool shared-store ns (allow egress to it under deny-egress)
+  storePorts?: number[]; // shared-store ports (e.g. [5432, 6379])
+  dnsNamespace?: string; // default kube-system
+  egressAllowCIDRs?: string[]; // external allowed CIDRs such as model endpoints (deny-egress)
 }
 
 export function buildZoneNetworkPolicies(opts: ZoneNetworkPolicyOptions): NetworkPolicyManifest[] {
@@ -30,7 +30,7 @@ export function buildZoneNetworkPolicies(opts: ZoneNetworkPolicyOptions): Networ
   if (network === "open") return [];
   const out: NetworkPolicyManifest[] = [];
 
-  // ingress: 같은 ns 에서만. 다른 테넌트 ns 가 이 존의 pod 에 연결 개시하는 것을 차단(cross-tenant 차단의 핵심).
+  // ingress: same ns only. Blocks another tenant's ns from initiating a connection to this zone's pods (the core of cross-tenant blocking).
   out.push({
     apiVersion: "networking.k8s.io/v1",
     kind: "NetworkPolicy",
@@ -38,14 +38,14 @@ export function buildZoneNetworkPolicies(opts: ZoneNetworkPolicyOptions): Networ
     spec: {
       podSelector: {},
       policyTypes: ["Ingress"],
-      ingress: [{ from: [{ podSelector: {} }] }], // podSelector{} (namespaceSelector 없음) = 같은 ns
+      ingress: [{ from: [{ podSelector: {} }] }], // podSelector{} (no namespaceSelector) = same ns
     },
   });
 
   if (network === "deny-egress") {
     const dnsNs = opts.dnsNamespace ?? "kube-system";
     const egress: Array<Record<string, unknown>> = [
-      { to: [{ podSelector: {} }] }, // 같은 ns
+      { to: [{ podSelector: {} }] }, // same ns
       {
         to: [{ namespaceSelector: { matchLabels: { "kubernetes.io/metadata.name": dnsNs } } }],
         ports: [
@@ -71,12 +71,12 @@ export function buildZoneNetworkPolicies(opts: ZoneNetworkPolicyOptions): Networ
   return out;
 }
 
-// deny-egress 모드에서 모델 엔드포인트(외부, 예: LiteLLM) egress 를 허용할 /32 CIDR 로 해석.
-// IP 는 그대로 /32, 호스트명은 주입 resolver(기본 dns)로 IP 들을 찾아 /32. egressAllowCIDRs 에 자동 합쳐진다.
+// In deny-egress mode, resolve a model endpoint (external, e.g. LiteLLM) into /32 CIDRs that egress is allowed to.
+// An IP stays /32; a hostname is resolved to IPs via the injected resolver (default dns) → /32. Automatically merged into egressAllowCIDRs.
 function hostOf(endpoint: string): string {
-  let h = endpoint.replace(/^[a-z]+:\/\//i, ""); // scheme 제거
-  h = h.split("/")[0] ?? h; // path 제거
-  h = h.replace(/:\d+$/, ""); // port 제거
+  let h = endpoint.replace(/^[a-z]+:\/\//i, ""); // strip scheme
+  h = h.split("/")[0] ?? h; // strip path
+  h = h.replace(/:\d+$/, ""); // strip port
   return h;
 }
 function isIpv4(s: string): boolean {
@@ -99,9 +99,9 @@ export async function resolveEgressCidrs(
   return [...out];
 }
 
-// 공유 스토어 ns: everdict-managed 네임스페이스에서 스토어 포트로 오는 ingress 만 허용(플랫폼 외부 도달 차단).
-// pool 은 모든 테넌트가 스토어를 공유하므로 테넌트별 차단은 불가 — 대신 "플랫폼 밖" 을 막고, 테넌트별 격리는
-// DB/role/creds(+케이스 isolateBy)로 한다(SLICE 40).
+// Shared-store ns: allow only ingress from an everdict-managed namespace on the store ports (block reach from outside the platform).
+// In pool all tenants share the store, so per-tenant blocking is impossible here — instead block "outside the platform" and do
+// per-tenant isolation via DB/role/creds (+ per-case isolateBy) (SLICE 40).
 export function buildSharedStoreIngressPolicy(poolNs: string, storePorts: number[]): NetworkPolicyManifest {
   return {
     apiVersion: "networking.k8s.io/v1",

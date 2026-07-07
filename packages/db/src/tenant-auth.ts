@@ -1,13 +1,13 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { SqlClient } from "./client.js";
 
-// 테넌트 API 키 저장소 — 평문은 절대 저장하지 않고 SHA-256 해시만 보관한다.
-// self-serve 관리(목록/취소)를 위해 비-비밀 메타데이터(id/label/prefix/scopes)를 함께 보관:
-//  - id     = 안정적 식별자(취소 대상 지정용; key_hash 를 노출하지 않기 위함)
-//  - label  = 사람이 붙인 이름(선택)
-//  - prefix = ak_abcd… (평문 앞부분 식별 힌트 — 해시/평문이 아님; 목록에서 키를 구분하는 용도)
-//  - scopes = 키별 권한 범위(read|write|admin). 미지정(레거시 행/full access)이면 undefined = 무제한.
-//             권한 매트릭스(scope→action)는 @everdict/auth 가 소유한다(여기는 dumb 문자열 저장소; 순환 의존 방지).
+// Tenant API key store — never stores the plaintext, keeps only the SHA-256 hash.
+// For self-serve management (list/revoke), also keeps non-secret metadata (id/label/prefix/scopes):
+//  - id     = stable identifier (to target a revoke; so key_hash is never exposed)
+//  - label  = human-assigned name (optional)
+//  - prefix = ak_abcd… (a leading-plaintext identification hint — not a hash/plaintext; used to tell keys apart in a list)
+//  - scopes = per-key permission scope (read|write|admin). Unset (legacy row/full access) → undefined = unrestricted.
+//             The permission matrix (scope→action) is owned by @everdict/auth (this is a dumb string store; avoids a cyclic dependency).
 export interface TenantKeyMeta {
   id: string;
   label?: string;
@@ -16,25 +16,25 @@ export interface TenantKeyMeta {
   createdAt: string;
 }
 
-// auth 경로의 키 해석 결과 — 워크스페이스 + 발급자(owner) + 키별 스코프(있으면).
-// owner="" = 레거시 워크스페이스 머신 키(admin), owner=<subject> = 그 유저의 개인 키(발급자 역할로 해석).
+// Key-resolution result on the auth path — workspace + issuer (owner) + per-key scopes (if any).
+// owner="" = legacy workspace machine key (admin), owner=<subject> = that user's personal key (resolved to the issuer's role).
 export interface ResolvedKey {
   tenant: string;
   owner: string;
-  scopes?: string[]; // 미지정(레거시/full access) → undefined = 무제한
+  scopes?: string[]; // unset (legacy/full access) → undefined = unrestricted
 }
 
 export interface TenantKeyStore {
-  // meta 미지정(테스트/부트스트랩)이면 id 는 자동 생성, prefix 는 빈 문자열, scopes 는 무제한, owner 는 ""(머신 키). issueKey 가 정식 발급 경로다.
+  // If meta is unset (test/bootstrap), id is auto-generated, prefix is an empty string, scopes is unrestricted, owner is "" (machine key). issueKey is the formal issuance path.
   add(
     tenant: string,
     keyHash: string,
     meta?: { id?: string; label?: string; prefix?: string; scopes?: string[]; owner?: string },
   ): Promise<void>;
-  resolveByHash(keyHash: string): Promise<ResolvedKey | undefined>; // auth 경로(불변) — 해시로 워크스페이스+발급자+스코프 해석
-  // 메타만(key_hash/평문 없음). owner 주면 그 유저의 개인 키만(셀프 목록), 미지정이면 워크스페이스 전체(머신 키 관리).
+  resolveByHash(keyHash: string): Promise<ResolvedKey | undefined>; // auth path (invariant) — resolve workspace+issuer+scopes by hash
+  // Meta only (no key_hash/plaintext). With owner, only that user's personal keys (self list); unset means the whole workspace (machine-key management).
   list(tenant: string, owner?: string): Promise<TenantKeyMeta[]>;
-  // tenant 스코프 취소 — 다른 워크스페이스 id 는 no-op. owner 주면 그 owner 의 키만 취소(남의 키 취소 방지).
+  // Tenant-scoped revoke — a no-op for a different workspace id. With owner, revokes only that owner's key (prevents revoking someone else's key).
   revoke(tenant: string, id: string, owner?: string): Promise<void>;
 }
 
@@ -48,7 +48,7 @@ interface KeyRow {
   createdAt: string;
 }
 
-// 스코프 ↔ 저장 문자열(공백 구분). 빈 배열/미지정은 NULL(=무제한)로 저장한다.
+// Scopes ↔ stored string (space-delimited). An empty array/unset is stored as NULL (=unrestricted).
 function serializeScopes(scopes?: string[]): string | null {
   return scopes && scopes.length > 0 ? scopes.join(" ") : null;
 }
@@ -84,7 +84,7 @@ export class InMemoryTenantKeyStore implements TenantKeyStore {
     return [...this.byHash.values()]
       .filter((r) => r.tenant === tenant && (owner === undefined || r.owner === owner))
       .map((r) => ({ id: r.id, label: r.label, prefix: r.prefix, scopes: r.scopes, createdAt: r.createdAt }))
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // 최신순
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // newest first
   }
   async revoke(tenant: string, id: string, owner?: string): Promise<void> {
     for (const [hash, row] of this.byHash)
@@ -123,7 +123,7 @@ export class PgTenantKeyStore implements TenantKeyStore {
     return row ? { tenant: row.tenant, owner: row.owner, scopes: parseScopes(row.scopes) } : undefined;
   }
   async list(tenant: string, owner?: string): Promise<TenantKeyMeta[]> {
-    // key_hash 는 select 하지 않는다(절대 노출 금지). prefix 는 레거시 행 대비 COALESCE.
+    // Don't select key_hash (never expose it). prefix is COALESCE'd for legacy rows.
     const res = await this.client.query<{
       id: string;
       label: string | null;
@@ -154,24 +154,24 @@ export function hashKey(key: string): string {
   return createHash("sha256").update(key).digest("hex");
 }
 
-// ak_<랜덤> — 평문 키. 발급 시 한 번만 노출되고, 저장은 해시만.
+// ak_<random> — plaintext key. Shown once at issuance, stored only as a hash.
 export function generateKey(): string {
   return `ak_${randomBytes(24).toString("base64url")}`;
 }
 
-// 테넌트에 새 키 발급 → 해시 + 비-비밀 메타(id/label/prefix/scopes) 저장, 평문 반환(호출부가 한 번 보여주고 버린다).
-// scopes 미지정이면 무제한(full access)로 저장된다 — 스코프 기본값(예: ["admin"]) 결정은 호출부(API/MCP 경계)의 책임.
-// Bearer 키 → workspace/scopes 해석은 컨트롤플레인 인증 코어(`@everdict/auth`의 apiKeyAuthenticator)가
-// `resolveByHash(hashKey(...))` 로 직접 수행한다. 여기는 저장소 프리미티브만 제공한다.
+// Issue a new key for a tenant → store the hash + non-secret meta (id/label/prefix/scopes), return the plaintext (the caller shows it once and discards it).
+// If scopes is unset, it's stored as unrestricted (full access) — deciding the scope default (e.g. ["admin"]) is the caller's (API/MCP boundary) responsibility.
+// Bearer key → workspace/scopes resolution is done directly by the control-plane auth core (`@everdict/auth`'s apiKeyAuthenticator)
+// via `resolveByHash(hashKey(...))`. This only provides the store primitives.
 export async function issueKey(
   store: TenantKeyStore,
   tenant: string,
   label?: string,
   scopes?: string[],
-  owner?: string, // 발급자 subject(개인 키). 미지정=""(워크스페이스 머신 키, admin 해석).
+  owner?: string, // issuer subject (personal key). Unset="" (workspace machine key, resolved as admin).
 ): Promise<string> {
   const key = generateKey();
-  const prefix = key.slice(0, 12); // "ak_" + 처음 9자 — 목록 식별 힌트(해시/평문 아님)
+  const prefix = key.slice(0, 12); // "ak_" + first 9 chars — list identification hint (not a hash/plaintext)
   await store.add(tenant, hashKey(key), { id: randomUUID(), label, prefix, scopes, owner });
-  return key; // 평문 반환
+  return key; // return plaintext
 }

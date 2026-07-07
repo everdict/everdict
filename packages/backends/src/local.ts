@@ -2,15 +2,15 @@ import { runAgentJob } from "@everdict/agent";
 import type { AgentJob, CaseResult } from "@everdict/core";
 import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 
-// 개발/단일 호스트용 — 잡을 같은 프로세스에서 실행한다(격리 없음).
-// claude 는 이 머신의 구독 로그인을 사용.
+// For dev / single host — runs the job in the same process (no isolation).
+// claude uses this machine's subscription login.
 export class LocalBackend implements Backend {
   readonly id = "local";
-  // maxConcurrent 는 함수도 가능 — 오토스케일러가 동적으로 바꾸는 슬롯을 읽게 한다.
+  // maxConcurrent may also be a function — lets it read slots that the autoscaler changes dynamically.
   constructor(private readonly maxConcurrent: number | (() => number) = 4) {}
 
   async capacity(): Promise<BackendCapacity> {
-    // in-process 실행 — 슬롯은 설정값, 사용량은 스케줄러의 in-flight 로 게이팅.
+    // in-process execution — slots come from config, usage is gated by the scheduler's in-flight.
     const total = typeof this.maxConcurrent === "function" ? this.maxConcurrent() : this.maxConcurrent;
     return { total, used: 0 };
   }
@@ -19,7 +19,7 @@ export class LocalBackend implements Backend {
     return runAgentJob(job);
   }
 
-  // in-process — 클러스터가 없으니 항상 도달 가능(컨트롤플레인 호스트 자신).
+  // in-process — no cluster, so always reachable (the control-plane host itself).
   async probe(): Promise<ProbeResult> {
     return { reachable: true, detail: "in-process (control-plane host)" };
   }

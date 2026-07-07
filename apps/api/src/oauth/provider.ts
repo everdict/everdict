@@ -1,46 +1,50 @@
 import { UpstreamError } from "@everdict/core";
 
-// 아웃바운드 OAuth 클라이언트 추상화 — Everdict 가 외부 provider(GitHub/GHE/Mattermost)의 OAuth "클라이언트".
-// (인바운드 Keycloak 과 반대 방향: 우리가 외부 계정에 권한을 요청한다.)
-// provider 는 **stateless kind** — 자격증명/호스트는 호출 시 config 로 주입한다(github.com=env 기본,
-// self-hosted=워크스페이스 SecretStore name-ref). 한 impl 이 host 유무로 github.com↔GHE 를 모두 처리.
+// Outbound OAuth client abstraction — Everdict as the OAuth "client" of an external provider (GitHub/GHE/Mattermost).
+// (The opposite direction from inbound Keycloak: we request permission from an external account.)
+// A provider is a **stateless kind** — credentials/host are injected as config at call time (github.com=env default,
+// self-hosted=workspace SecretStore name-ref). One impl handles both github.com↔GHE via the presence of host.
 export interface OAuthProviderConfig {
   clientId: string;
   clientSecret: string;
-  host?: string; // self-hosted 베이스(GHE/Mattermost). github.com 은 생략.
+  host?: string; // self-hosted base (GHE/Mattermost). Omit for github.com.
 }
 
 export interface OAuthExchangeResult {
   accessToken: string;
   refreshToken?: string;
-  expiresAt?: string; // access token 만료(있으면) — 갱신 판단용
-  scopes: string[]; // 실제 승인된 scope
+  expiresAt?: string; // access token expiry (if any) — for deciding refresh
+  scopes: string[]; // the actually granted scopes
 }
 
 export interface OAuthAccount {
-  label: string; // 표시용 계정 식별자(예: github login)
+  label: string; // display account identifier (e.g. github login)
 }
 
 export interface OAuthProvider {
-  readonly defaultScopes: string[]; // 요청 scope
-  // 상향(옵트인) scope — 기본에 더해 요청할 수 있는 것(예: github 의 admin:org, org 러너 등록용). 없으면 상향 불가.
+  readonly defaultScopes: string[]; // requested scopes
+  // elevated (opt-in) scopes — what can be requested on top of the default (e.g. github's admin:org, for org runner registration). None means no elevation.
   readonly elevatedScopes?: string[];
-  // 사용자 브라우저를 보낼 authorize URL(state + redirect_uri 포함). scopes 미지정이면 defaultScopes.
+  // The authorize URL to send the user's browser to (includes state + redirect_uri). If scopes is unset, defaultScopes.
   authorizeUrl(input: { config: OAuthProviderConfig; state: string; redirectUri: string; scopes?: string[] }): string;
-  // 콜백 code → 토큰 교환(server-to-server, client_secret). 실패는 AppError(UpstreamError)로 remap.
+  // callback code → token exchange (server-to-server, client_secret). Failures remap to AppError (UpstreamError).
   exchange(input: { config: OAuthProviderConfig; code: string; redirectUri: string }): Promise<OAuthExchangeResult>;
-  // 토큰으로 계정 식별자 조회(표시용 라벨).
+  // Look up the account identifier by token (display label).
   whoami(input: { config: OAuthProviderConfig; accessToken: string }): Promise<OAuthAccount>;
 }
 
-// JSON fetch + 외부 실패를 UpstreamError 로 remap(원시 에러를 호출자에게 전파하지 않는다).
-// github/mattermost provider 가 공유. fetch 실패/파싱 실패/비-2xx 모두 UpstreamError.
+// JSON fetch + remap external failures to UpstreamError (don't propagate raw errors to the caller).
+// Shared by the github/mattermost providers. fetch failure / parse failure / non-2xx are all UpstreamError.
 export async function oauthFetchJson(url: string, init: Parameters<typeof fetch>[1]): Promise<unknown> {
   let res: Awaited<ReturnType<typeof fetch>>;
   try {
     res = await fetch(url, init);
   } catch (e) {
-    throw new UpstreamError("UPSTREAM_ERROR", { url }, `외부 요청 실패: ${e instanceof Error ? e.message : String(e)}`);
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { url },
+      `external request failed: ${e instanceof Error ? e.message : String(e)}`,
+    );
   }
   const text = await res.text();
   let json: unknown = {};
@@ -51,11 +55,15 @@ export async function oauthFetchJson(url: string, init: Parameters<typeof fetch>
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { url, status: res.status },
-        `외부 응답 파싱 실패(status ${res.status})`,
+        `failed to parse external response (status ${res.status})`,
       );
     }
   }
   if (!res.ok)
-    throw new UpstreamError("UPSTREAM_ERROR", { url, status: res.status }, `외부 요청 실패(status ${res.status})`);
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { url, status: res.status },
+      `external request failed (status ${res.status})`,
+    );
   return json;
 }

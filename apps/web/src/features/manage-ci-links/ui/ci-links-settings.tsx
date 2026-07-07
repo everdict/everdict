@@ -16,12 +16,12 @@ import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 import { deleteCiLinkAction } from '../api/manage-ci-links'
 import { hostLabel } from './connect-repo-dialog'
 
-// link 식별 키 — 같은 "owner/name" 이 github.com 과 GHE 양쪽에 링크될 수 있어 host 까지 포함한다.
+// Link identity key — the same "owner/name" can be linked on both github.com and GHE, so include the host.
 const linkKey = (l: Pick<CiLink, 'repository' | 'host'>) =>
   `${l.host ?? 'github.com'}:${l.repository}`
 
-// 워크스페이스 설정의 "CI 연동" 섹션 — 이 워크스페이스의 모든 레포 링크(레포↔하니스 슬롯 = OIDC trust) 목록 + 해제(admin).
-// 링크의 "존재"가 그 레포의 keyless CI(OIDC) 신뢰를 부여하므로, 여기 목록은 곧 신뢰 부여된 레포 목록이다.
+// Workspace-settings "CI integration" section — the list of all repo links in this workspace (repo↔harness slot = OIDC trust) + unlink (admin).
+// A link's "existence" grants that repo's keyless CI (OIDC) trust, so this list is exactly the list of trust-granted repos.
 export function CiLinksSettings({
   initialLinks,
   canWrite,
@@ -77,7 +77,7 @@ export function CiLinksSettings({
                     <GitBranch className="size-3.5 text-muted-foreground/70" />
                     {l.repository}
                     {l.host && (
-                      // GHE link — 어느 인스턴스인지 호스트명 배지(github.com 은 무표기).
+                      // GHE link — which instance, shown as a hostname badge (github.com is unmarked).
                       <span className="rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
                         {hostLabel(l.host)}
                       </span>

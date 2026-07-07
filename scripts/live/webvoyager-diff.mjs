@@ -1,9 +1,9 @@
-// 라이브 e2e: 버전 회귀 diff — 같은 tenant-owned 데이터셋을 두 하니스 버전으로 평가 → diffScorecards.
-// import → registry.register(tenant) → registry.get → runSuite(vA) + runSuite(vB) → ScorecardStore 저장 →
-// diffScorecards(vA, vB) → 회귀(pass→fail)/개선(fail→pass) 리포트. (회귀 검출은 객관적 `pass` 전이로.)
+// live e2e: version regression diff — evaluate the same tenant-owned dataset with two harness versions → diffScorecards.
+// import → registry.register(tenant) → registry.get → runSuite(vA) + runSuite(vB) → store in ScorecardStore →
+// diffScorecards(vA, vB) → regression (pass→fail)/improvement (fail→pass) report. (regression detection uses the objective `pass` transition.)
 //
-// 주의: 회귀를 재현 가능하게 보이려고 두 버전 dispatch 는 **결정적 stand-in**(실 LLM 은 비결정적+느림 — 회귀 데모엔
-// 부적합). diff(스코어카드 비교)는 실 @everdict/suite diffScorecards. 실 하니스 평가는 webvoyager-eval.mjs 참고.
+// Note: to make the regression reproducible, both versions' dispatch is a **deterministic stand-in** (a real LLM is nondeterministic + slow —
+// unsuitable for a regression demo). The diff (scorecard comparison) is the real @everdict/suite diffScorecards. For real harness evaluation see webvoyager-eval.mjs.
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { importWebVoyager } from "../../packages/datasets/dist/index.js";
@@ -24,9 +24,9 @@ await registry.register(TENANT, dataset);
 const loaded = await registry.get(TENANT, DS_ID, DS_VER);
 const suite = { id: loaded.id, harness: { id: "browser-use" }, cases: loaded.cases };
 
-// 케이스의 기대답(answer-match grader config) 추출.
+// extract the case's expected answer (answer-match grader config).
 const expectOf = (c) => String(c.graders.find((g) => g.id === "answer-match")?.config?.expect ?? "");
-// 결정적 dispatch: answerFn 이 만든 답을 trace 메시지로 → 케이스 graders 로 채점.
+// deterministic dispatch: put the answer answerFn produces into a trace message → score with the case graders.
 const dispatchFor = (version, answerFn) => async (job) => {
   const c = job.evalCase;
   const answer = answerFn(c);
@@ -37,8 +37,8 @@ const dispatchFor = (version, answerFn) => async (job) => {
   return { caseId: c.id, harness: `browser-use@${version}`, trace, snapshot, scores };
 };
 
-console.log("버전 회귀 diff — 같은 tenant-owned 데이터셋, 두 하니스 버전\n");
-// vA(baseline): 전 케이스 정답 → 전부 pass.  vB(candidate): wikipedia 케이스 회귀(빈 답) → fail.
+console.log("version regression diff — same tenant-owned dataset, two harness versions\n");
+// vA (baseline): correct answer on every case → all pass.  vB (candidate): regression on the wikipedia cases (empty answer) → fail.
 const scA = await runSuite(
   suite,
   "0.13.1",
@@ -50,7 +50,7 @@ const scB = await runSuite(
   dispatchFor("0.14.0-rc", (c) => (c.id.startsWith("wikipedia") ? "" : expectOf(c))),
 );
 
-// 두 스코어카드 저장(tenant-scoped) — 실제로 비교 가능한 영속 레코드.
+// store both scorecards (tenant-scoped) — persistent records that can actually be compared.
 const store = new InMemoryScorecardStore();
 const now = new Date().toISOString();
 for (const [sc, ver] of [
@@ -77,7 +77,7 @@ console.log(
   `  vB ${scB.harness} answer_match passRate=${(summarizeScorecard(scB).find((s) => s.metric === "answer_match")?.passRate * 100).toFixed(0)}%`,
 );
 
-// diff: 객관적 pass 전이.
+// diff: objective pass transition.
 const diff = diffScorecards(scA, scB);
 console.log(`\n=== diff ${diff.baseline} → ${diff.candidate} ===`);
 console.log(`regressions (pass→fail): ${diff.regressions.length}`);
@@ -92,7 +92,7 @@ console.log(
 const ok = diff.regressions.length === 2 && diff.regressions.every((r) => r.metric === "answer_match");
 console.log(
   ok
-    ? "\n✅ 버전 회귀 diff e2e: tenant-owned 데이터셋을 vA/vB 로 평가 → ScorecardStore 저장 → diffScorecards 가 wikipedia 2건 회귀(pass→fail) 검출. 멀티테넌트 회귀 추적 동작."
-    : "\n⚠️ 회귀 검출 불일치",
+    ? "\n✅ version regression diff e2e: evaluate a tenant-owned dataset with vA/vB → store in ScorecardStore → diffScorecards detects 2 wikipedia regressions (pass→fail). Multi-tenant regression tracking works."
+    : "\n⚠️ regression detection mismatch",
 );
 process.exit(ok ? 0 : 1);

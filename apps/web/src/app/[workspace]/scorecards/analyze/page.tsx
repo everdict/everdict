@@ -16,8 +16,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 스코어카드 분석 — 쉬운(질문 3개) · 커스텀(유연 피벗) 두 모드. 저장된 뷰는 1급 객체(/{ws}/views).
-// 설계: docs/architecture/scorecard-analysis-views.md.
+// Scorecard analysis — two modes: easy (3 questions) · custom (flexible pivot). Saved views are first-class objects (/{ws}/views).
+// Design: docs/architecture/scorecard-analysis-views.md.
 export default async function AnalyzePage({
   params,
   searchParams,
@@ -39,7 +39,7 @@ export default async function AnalyzePage({
   const { scorecards, authors, savedViews, subject, canManage, isAdmin, error } =
     await loadAnalysisData()
 
-  // ?view=<id> 딥링크 — 저장된 View 를 열면 그 config 로 커스텀 모드 진입(라이브 재실행).
+  // ?view=<id> deep link — opening a saved View enters custom mode with its config (live re-run).
   const linkedView = flat.view ? savedViews.find((v) => v.id === flat.view) : undefined
   const mode = flat.mode === 'custom' || linkedView ? 'custom' : 'easy'
 

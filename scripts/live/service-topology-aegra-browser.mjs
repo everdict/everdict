@@ -1,20 +1,20 @@
-// 라이브: ServiceTopologyBackend 가 **브라우저 환경 포함** service-topology 를 실 OSS 로 e2e — browser-use-langgraph 그대로.
-// 에이전트(aegra browser_agent 그래프)가 per-case Chromium(chromedp CDP)을 조작(navigate+extract)하고, Everdict 가
-// 같은 브라우저를 스냅샷(URL/DOM)해서 채점한다. 모델은 우리 LiteLLM gpt-5.4-mini.
+// Live: ServiceTopologyBackend runs a **browser-environment** service-topology e2e against real OSS — browser-use-langgraph as-is.
+// The agent (aegra browser_agent graph) drives a per-case Chromium (chromedp CDP) (navigate+extract), and Everdict
+// snapshots the same browser (URL/DOM) to grade. The model is our LiteLLM gpt-5.4-mini.
 //   dispatch → ensureTopology(aegra) → provisionBrowserEnv(per-case chromedp CDP) → submit(Agent Protocol +
-//   browser_cdp_url 주입) → 에이전트가 브라우저 조작 → traceSource(응답) + browser.snapshot(/json/list) → grade.
+//   inject browser_cdp_url) → agent drives the browser → traceSource(response) + browser.snapshot(/json/list) → grade.
 //
-// 준비: aegra(:2026, browser_agent 그래프 + playwright) + chromedp 컨테이너(everdict-cdp, CDP :9222) 가 떠 있어야 함.
+// Prereqs: aegra (:2026, browser_agent graph + playwright) + chromedp container (everdict-cdp, CDP :9222) must be up.
 //   docker run -d --name everdict-cdp -p 9222:9222 chromedp/headless-shell:latest
-//   (aegra 셋업은 docs/service-harness.md "browser env" 절 참고)
-// 사용: node scripts/live/service-topology-aegra-browser.mjs
+//   (for aegra setup, see the "browser env" section of docs/service-harness.md)
+// Usage: node scripts/live/service-topology-aegra-browser.mjs
 import { execSync } from "node:child_process";
 import process from "node:process";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 
 const AEGRA = (process.env.AEGRA_URL ?? "http://localhost:2026").replace(/\/$/, "");
-const CDP_HOST = process.env.CDP_HOST ?? "http://localhost:9222"; // 이 스크립트(호스트)의 스냅샷용 뷰
-// 에이전트(aegra 컨테이너)가 도달할 chromedp 주소 — 컨테이너 IP 자동 해석(없으면 기본 게이트웨이).
+const CDP_HOST = process.env.CDP_HOST ?? "http://localhost:9222"; // this script's (host) view for snapshots
+// The chromedp address the agent (aegra container) reaches — auto-resolve the container IP (fall back to the default gateway).
 const CDP_AGENT =
   process.env.CDP_AGENT ??
   (() => {
@@ -28,7 +28,7 @@ const CDP_AGENT =
     }
   })();
 
-// browser-use-langgraph 모양의 service 하니스(브라우저 타깃 포함).
+// A browser-use-langgraph-shaped service harness (with a browser target).
 const spec = {
   kind: "service",
   id: "browser-use-aegra",
@@ -57,7 +57,7 @@ const runtime = {
     return { endpoints: { "agent-server": AEGRA } };
   },
   async provisionBrowserEnv() {
-    // per-case 리셋: 기존 page 닫고 about:blank 로 시작.
+    // per-case reset: close existing pages and start at about:blank.
     try {
       for (const t of (await cdp("/json/list")).filter((x) => x.type === "page")) {
         await fetch(`${CDP_HOST}/json/close/${t.id}`);
@@ -65,7 +65,7 @@ const runtime = {
       await fetch(`${CDP_HOST}/json/new?about:blank`, { method: "PUT" });
     } catch {}
     return {
-      wiring: { target_cdp_url: CDP_AGENT }, // 에이전트가 조작할 브라우저 주소(backend 가 submit payload 로 전달)
+      wiring: { target_cdp_url: CDP_AGENT }, // the browser address the agent will drive (backend passes it in the submit payload)
       async snapshot() {
         try {
           const tgs = await cdp("/json/list");
@@ -100,7 +100,7 @@ const submit = async (_url, payload) => {
   const res = await ap(`/threads/${payload.thread_id}/runs/wait`, {
     assistant_id: assistantId,
     input: { messages: [{ role: "user", content: payload.task }] },
-    config: { configurable: { browser_cdp_url: payload.browser_cdp_url } }, // 에이전트가 조작할 브라우저
+    config: { configurable: { browser_cdp_url: payload.browser_cdp_url } }, // the browser the agent will drive
   });
   captured = res.messages ?? res.values?.messages ?? [];
 };
@@ -115,7 +115,7 @@ const traceSource = {
   },
 };
 
-// 브라우저 그레이더: 에이전트가 브라우저를 목표 URL 로 이동시켰나(Everdict 가 같은 브라우저를 스냅샷).
+// Browser grader: did the agent navigate the browser to the target URL (Everdict snapshots the same browser).
 const browserGrader = {
   id: "browser-url",
   async grade(ctx) {
@@ -165,7 +165,7 @@ console.log("scores  :", r.scores.map((s) => `${s.graderId}:${s.value}(${s.pass 
 const ok = r.scores.every((s) => s.pass);
 console.log(
   ok
-    ? "\n✅ 브라우저 환경 포함 service-topology e2e — 에이전트가 per-case Chromium(CDP) 조작 + Everdict 가 브라우저 스냅샷(URL/DOM) 채점 + 실 모델"
-    : "\n⚠️ 일부 grader fail",
+    ? "\n✅ browser-environment service-topology e2e — agent drives a per-case Chromium (CDP) + Everdict grades a browser snapshot (URL/DOM) + real model"
+    : "\n⚠️ some graders failed",
 );
 process.exit(ok ? 0 : 1);

@@ -1,8 +1,8 @@
 import { type TraceEvent, UpstreamError } from "@everdict/core";
 import { type Span, type TraceSource, spansToTraceEvents } from "./trace-source.js";
 
-// MLflow 3.x 트레이스 REST 의 스팬 속성은 OTLP-스타일 AnyValue(snake_case) 배열 — OTel(camelCase)과 별개 포맷.
-// 중첩 kvlist/array 도 지원(spanInputs/Outputs 등이 kvlist 로 온다).
+// Span attributes in the MLflow 3.x trace REST are an OTLP-style AnyValue (snake_case) array — a format distinct from OTel (camelCase).
+// Also supports nested kvlist/array (spanInputs/Outputs etc. arrive as a kvlist).
 interface MlflowAnyValue {
   string_value?: string;
   int_value?: string | number;
@@ -16,7 +16,7 @@ interface MlflowKeyValue {
   key: string;
   value?: MlflowAnyValue;
 }
-// MLflow 3.x span: 시간은 ns(number|string), attributes 는 OTLP keyvalue 배열.
+// MLflow 3.x span: times are ns (number|string), attributes are an OTLP keyvalue array.
 interface MlflowSpan {
   name?: string;
   start_time_unix_nano?: number | string;
@@ -63,20 +63,20 @@ export function parseMlflowTrace(trace: MlflowTrace): Span[] {
 
 export interface MlflowTraceSourceOptions {
   endpoint: string;
-  headers?: Record<string, string>; // 테넌트 자격증명 등(예: Authorization). SecretStore 에서 주입.
-  fetchImpl?: typeof fetch; // 테스트 주입
-  // 상관 방식: "id"(기본) = fetch(runId) 의 runId 가 곧 MLflow trace_id(pull-ingest 관례).
-  // "tag" = 계측 에이전트가 자기 trace 에 남긴 `everdict.run_id` 태그로 검색(id 는 서버가 mint 하므로
-  // everdict runId 와 같을 수 없는 실 에이전트 경로) — search 가 locations 를 요구해 experimentIds 필수.
+  headers?: Record<string, string>; // tenant credentials etc. (e.g. Authorization). Injected from the SecretStore.
+  fetchImpl?: typeof fetch; // test injection
+  // Correlation mode: "id" (default) = the runId in fetch(runId) is the MLflow trace_id (the pull-ingest convention).
+  // "tag" = search by the `everdict.run_id` tag the instrumented agent wrote to its own trace (the real-agent path,
+  // where the id is minted by the server and so can't equal the everdict runId) — search requires locations, so experimentIds is required.
   correlate?: "id" | "tag";
-  experimentIds?: string[]; // tag 상관의 검색 범위(MLflow 3.x traces/search 는 locations 필수)
+  experimentIds?: string[]; // search scope for tag correlation (MLflow 3.x traces/search requires locations)
 }
 
-const RUN_ID_TAG = "everdict.run_id"; // 계측 에이전트가 남기는 상관 태그(주입 env EVERDICT_RUN_ID 와 동일 값)
+const RUN_ID_TAG = "everdict.run_id"; // the correlation tag the instrumented agent writes (same value as the injected env EVERDICT_RUN_ID)
 
-// MLflow 3.x tracing REST(`GET /api/3.0/mlflow/traces/get?trace_id=`)에서 trace 를 가져와 TraceEvent 로 정규화.
-// correlate="tag" 면 `POST /api/3.0/mlflow/traces/search`(tags.`everdict.run_id` 필터, 실 3.14 검증)로
-// trace_id 를 먼저 찾는다 — 미발견은 0건 degrade(id 모드의 404 와 동일).
+// Fetch the trace from the MLflow 3.x tracing REST (`GET /api/3.0/mlflow/traces/get?trace_id=`) and normalize to TraceEvents.
+// With correlate="tag", first find the trace_id via `POST /api/3.0/mlflow/traces/search` (tags.`everdict.run_id` filter, verified on real 3.14)
+// — not found → degrade to 0 events (same as id mode's 404).
 export class MlflowTraceSource implements TraceSource {
   constructor(private readonly opts: MlflowTraceSourceOptions) {}
 
@@ -88,7 +88,7 @@ export class MlflowTraceSource implements TraceSource {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { correlate: "tag" },
-        "MLflow tag 상관에는 experiment 범위가 필요합니다(traces/search 의 locations 필수).",
+        "MLflow tag correlation requires an experiment scope (traces/search requires locations).",
       );
     }
     const res = await f(`${base}/api/3.0/mlflow/traces/search`, {
@@ -108,7 +108,7 @@ export class MlflowTraceSource implements TraceSource {
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { status: res.status },
-        `MLflow 트레이스 검색 ${res.status}: ${text.slice(0, 200)}`,
+        `MLflow trace search ${res.status}: ${text.slice(0, 200)}`,
       );
     }
     const body = (await res.json().catch(() => ({}))) as { traces?: Array<{ trace_id?: string }> };
@@ -121,19 +121,19 @@ export class MlflowTraceSource implements TraceSource {
     let traceId = runId;
     if (this.opts.correlate === "tag") {
       const found = await this.traceIdByTag(runId);
-      if (!found) return []; // 태그 미발견 — 아직 미도착/미태그(플러시 지연) → 0건 degrade
+      if (!found) return []; // tag not found — not arrived/tagged yet (flush lag) → degrade to 0 events
       traceId = found;
     }
     const res = await f(`${base}/api/3.0/mlflow/traces/get?trace_id=${encodeURIComponent(traceId)}`, {
       ...(this.opts.headers ? { headers: this.opts.headers } : {}),
     });
-    if (res.status === 404) return []; // 트레이스가 아직 없으면 0건으로 degrade(서비스 하니스 경로)
+    if (res.status === 404) return []; // if the trace isn't present yet, degrade to 0 events (the service-harness path)
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { status: res.status },
-        `MLflow 트레이스 조회 ${res.status}: ${text.slice(0, 200)}`,
+        `MLflow trace fetch ${res.status}: ${text.slice(0, 200)}`,
       );
     }
     let body: { trace?: MlflowTrace };

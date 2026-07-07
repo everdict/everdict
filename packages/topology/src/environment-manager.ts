@@ -1,21 +1,21 @@
 import { randomUUID } from "node:crypto";
 import type { TopologyDependency } from "@everdict/core";
 
-// per-run 키 — 공유 스토어를 케이스별로 논리격리하는 식별자들.
+// per-run keys — identifiers that logically isolate a shared store per case.
 export interface RunKeys {
   runId: string;
-  threadId: string; // LangGraph thread_id (Postgres 체크포인트 격리)
+  threadId: string; // LangGraph thread_id (Postgres checkpoint isolation)
   streamChannel: string; // Redis key-prefix
   minioPrefix: string; // MinIO object-prefix
 }
 
-// runId → 파생 키 (순수/결정적). 현행 browser-use 기본 본문(stream_channel/minio_prefix 이름)용.
+// runId → derived keys (pure/deterministic). For the current browser-use default body (stream_channel/minio_prefix names).
 export function keysFor(runId: string): RunKeys {
   return { runId, threadId: `run-${runId}`, streamChannel: `run-${runId}`, minioPrefix: `runs/${runId}/` };
 }
 
-// isolateBy 종류 → (템플릿 변수 이름, per-run 값). LangGraph 고정 이름 대신 isolateBy 분류에서 파생.
-// "external"(BYO 외부 스토어)은 케이스별 격리가 없으므로 호출 전에 걸러진다(wiringVars).
+// isolateBy kind → (template variable name, per-run value). Derived from the isolateBy category instead of fixed LangGraph names.
+// "external" (BYO external store) has no per-case isolation, so it is filtered out before the call (wiringVars).
 function isolationVar(
   isolateBy: Exclude<TopologyDependency["isolateBy"], "external">,
   runId: string,
@@ -32,8 +32,8 @@ function isolationVar(
   }
 }
 
-// per-run 와이어링 변수 — 선언된 의존 스토어의 isolateBy 에서 파생(+ run_id + 호출자 extra: task/target_cdp_url 등).
-// front-door 본문 템플릿({{thread_id}} 등) + poll statusPath({run_id} 등) 보간에 쓰이는 단일 어휘.
+// per-run wiring variables — derived from the declared dependency stores' isolateBy (+ run_id + caller extra: task/target_cdp_url etc.).
+// The single vocabulary used to interpolate the front-door body template ({{thread_id}} etc.) + poll statusPath ({run_id} etc.).
 export function wiringVars(
   runId: string,
   dependencies: TopologyDependency[],
@@ -41,7 +41,7 @@ export function wiringVars(
 ): Record<string, string> {
   const vars: Record<string, string> = { run_id: runId, ...extra };
   for (const dep of dependencies) {
-    if (dep.isolateBy === "external") continue; // 외부 스토어는 케이스별 격리 변수 없음
+    if (dep.isolateBy === "external") continue; // external stores have no per-case isolation variable
     const [name, value] = isolationVar(dep.isolateBy, runId);
     vars[name] = value;
   }
@@ -52,7 +52,7 @@ export function newRunId(): string {
   return randomUUID();
 }
 
-// (Phase 2 에서 warm 풀/리스 관리로 확장)
+// (Phase 2 extends this to warm-pool/lease management)
 export class EnvironmentManager {
   newRun(): RunKeys {
     return keysFor(newRunId());

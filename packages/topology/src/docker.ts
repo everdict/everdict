@@ -4,55 +4,55 @@ import { UpstreamError } from "@everdict/core";
 
 const execFileAsync = promisify(execFile);
 
-// DockerTopologyRuntime 가 쓰는 얇은 docker CLI 추상화 — kubectl.ts(Kubectl)·nomad exec 와 같은 주입형 패턴.
-// 단위 테스트는 가짜 Docker 를 주입(데몬 불필요). 기본 구현은 execFile("docker", …).
+// Thin docker CLI abstraction used by DockerTopologyRuntime — same injectable pattern as kubectl.ts (Kubectl) / nomad exec.
+// Unit tests inject a fake Docker (no daemon needed). The default impl is execFile("docker", …).
 export interface DockerRunSpec {
-  name: string; // 컨테이너 이름(호스트 전역 유일)
+  name: string; // container name (globally unique on the host)
   image: string;
   network: string;
-  alias?: string; // --network-alias — 네트워크 내부에서 서비스/스토어가 이 이름으로 서로 도달
+  alias?: string; // --network-alias — services/stores reach each other by this name inside the network
   env?: Record<string, string>;
-  volumes?: string[]; // -v 마운트 스펙(named volume / bind mount). 예: "vol:/data", "/host:/container:ro"
-  publish?: number; // 이 컨테이너 포트를 임의 호스트 포트로 게시(-p <port>) → hostPort 로 발견
-  cpus?: number; // --cpus (코어, 소수 가능). ServiceResources.cpu/1000.
+  volumes?: string[]; // -v mount specs (named volume / bind mount). e.g. "vol:/data", "/host:/container:ro"
+  publish?: number; // publish this container port to an arbitrary host port (-p <port>) → discovered via hostPort
+  cpus?: number; // --cpus (cores, fractional allowed). ServiceResources.cpu/1000.
   memoryMb?: number; // --memory (MB). ServiceResources.memoryMb.
-  args?: string[]; // 이미지 뒤 커맨드/인자(예: minio "server /data", chrome 플래그)
+  args?: string[]; // command/args after the image (e.g. minio "server /data", chrome flags)
 }
 
-// docker run 인자 조립(순수) — 결정적 테스트 대상.
+// Assemble docker run args (pure) — deterministically testable.
 export function dockerRunArgs(s: DockerRunSpec): string[] {
   const args = ["run", "-d", "--name", s.name, "--network", s.network];
   if (s.alias) args.push("--network-alias", s.alias);
   for (const [k, v] of Object.entries(s.env ?? {})) args.push("-e", `${k}=${v}`);
   for (const v of s.volumes ?? []) args.push("-v", v); // named volume / bind mount
-  if (s.publish !== undefined) args.push("-p", String(s.publish)); // 호스트 포트 미지정 → 임의 포트 게시
-  if (s.cpus !== undefined) args.push("--cpus", String(s.cpus)); // 리소스 요청(코어)
-  if (s.memoryMb !== undefined) args.push("--memory", `${s.memoryMb}m`); // 리소스 요청(MB)
+  if (s.publish !== undefined) args.push("-p", String(s.publish)); // host port unspecified → publish to an arbitrary port
+  if (s.cpus !== undefined) args.push("--cpus", String(s.cpus)); // resource request (cores)
+  if (s.memoryMb !== undefined) args.push("--memory", `${s.memoryMb}m`); // resource request (MB)
   args.push(s.image);
   if (s.args) args.push(...s.args);
   return args;
 }
 
-// "docker port <c> 9222" 출력("0.0.0.0:49153\n[::]:49153")에서 호스트 포트를 뽑는다.
+// Extract the host port from "docker port <c> 9222" output ("0.0.0.0:49153\n[::]:49153").
 export function parseHostPort(out: string): number {
   const m = out.match(/:(\d+)\s*$/m);
   const port = m ? Number(m[1]) : Number.NaN;
   if (!Number.isInteger(port)) {
-    throw new UpstreamError("UPSTREAM_ERROR", { out }, "docker port 출력에서 호스트 포트를 찾지 못했습니다.");
+    throw new UpstreamError("UPSTREAM_ERROR", { out }, "Could not find a host port in the docker port output.");
   }
   return port;
 }
 
 export interface Docker {
   ensureNetwork(name: string): Promise<void>;
-  run(spec: DockerRunSpec): Promise<string>; // 컨테이너 id
-  hostPort(container: string, containerPort: number): Promise<number>; // 게시된 호스트 포트 발견
+  run(spec: DockerRunSpec): Promise<string>; // container id
+  hostPort(container: string, containerPort: number): Promise<number>; // discover the published host port
   exec(container: string, cmd: string[]): Promise<void>;
-  rm(containers: string[]): Promise<void>; // best-effort 강제 제거
+  rm(containers: string[]): Promise<void>; // best-effort force removal
   removeNetwork(name: string): Promise<void>;
 }
 
-// 기본 구현 — execFile("docker", …). 데몬 미기동/권한없음은 execFile 가 reject → 런타임이 UpstreamError 로 매핑.
+// Default impl — execFile("docker", …). A stopped daemon / lack of permission makes execFile reject → the runtime maps it to UpstreamError.
 export function dockerCli(bin = "docker"): Docker {
   const sh = (args: string[]) => execFileAsync(bin, args);
   return {

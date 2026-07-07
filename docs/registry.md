@@ -55,7 +55,7 @@ surface (`POST/GET /harnesses`, authed) exposes this per-tenant — see `docs/te
 
 ## Version tags (mutable registry metadata)
 Version numbers alone are hard to tell apart, so every versioned entity (harness instance / dataset / judge /
-runtime) supports **per-version free-form tags** (e.g. `baseline`, `gpt-5 실험`). Tags are **registry metadata
+runtime) supports **per-version free-form tags** (e.g. `baseline`, `gpt-5 experiment`). Tags are **registry metadata
 outside the immutable spec** — same layer as `createdBy` — so they can be edited *after* registration (the whole
 point: label versions that already exist) and never participate in `specsEqual`/immutability. Contract on all four
 registries:

@@ -7,14 +7,14 @@ import {
 } from "@everdict/core";
 import type { WorkspaceSettings, WorkspaceSettingsStore } from "@everdict/db";
 
-// 워크스페이스 이미지 레지스트리(BYO, 복수) 서비스 — 하니스 이미지 분류 기준 + everdict image push 발행 대상.
-// 여러 개를 이름으로 등록하고, push 는 이름으로 선택(1개뿐이면 생략 가능), 분류/pull 인증은 전체를 host 매칭.
-// 등록은 관리자(settings:write), 조회는 viewer+(harnesses:read — 분류는 하니스 읽기 관심사),
-// push 자격증명 발급은 member+(images:push — 자격증명 '값' 유출은 별도 액션으로 정직하게 명명).
-// 비밀은 SecretStore name-ref 만 저장/반환; 값은 pushCredentials 가 발급 시점에 resolve(비영속).
-// HTTP 라우트와 MCP 도구가 이 코어를 공유. 설계: docs/architecture/workspace-image-registry.md
+// Workspace image registry (BYO, multiple) service — the harness-image classification baseline + target for everdict image push issuance.
+// Register several by name; push selects by name (omittable when there's only one), classification/pull auth matches by host across all.
+// Registration is admin (settings:write), read is viewer+ (harnesses:read — classification is a harness-read concern),
+// push-credential minting is member+ (images:push — leaking a credential 'value' is named honestly as a separate action).
+// Secrets are stored/returned only as SecretStore name-refs; the value is resolved by pushCredentials at mint time (non-persistent).
+// HTTP routes and MCP tools share this core. Design: docs/architecture/workspace-image-registry.md
 
-// 레지스트리 현황(비밀 없음 — 이름 참조/좌표만). imagePrefix = 클라이언트의 대상 ref 조립/분류용.
+// Registry state (no secrets — name references/coordinates only). imagePrefix = for the client to assemble/classify target refs.
 export interface ImageRegistryView {
   name: string;
   host: string;
@@ -25,19 +25,19 @@ export interface ImageRegistryView {
   imagePrefix: string; // "host[/namespace]/"
 }
 
-// push 자격증명 — 호출자(everdict image push / 에이전트)가 docker login+push 에 쓰고 버린다. 어디에도 영속 안 함.
+// push credentials — the caller (everdict image push / an agent) uses them for docker login+push and discards them. Never persisted anywhere.
 export interface ImagePushCredentials {
   name: string;
   host: string;
   namespace?: string;
   username?: string;
-  password: string; // pushSecretName 의 값(발급 시점 resolve)
+  password: string; // the value of pushSecretName (resolved at mint time)
   imagePrefix: string;
 }
 
 export interface ImageRegistryServiceDeps {
   settings: WorkspaceSettingsStore;
-  secretsFor: (workspace: string) => Promise<Record<string, string>>; // 공유(workspace) 시크릿 티어
+  secretsFor: (workspace: string) => Promise<Record<string, string>>; // shared (workspace) secret tier
 }
 
 type ImageRegistryEntry = NonNullable<WorkspaceSettings["imageRegistries"]>[number];
@@ -61,7 +61,7 @@ function toView(reg: ImageRegistryEntry): ImageRegistryView {
 export class ImageRegistryService {
   constructor(private readonly deps: ImageRegistryServiceDeps) {}
 
-  // 현재 목록 — imageRegistries(복수)가 없으면 레거시 단수(imageRegistry)를 name="default" 로 승계해 읽는다.
+  // Current list — if imageRegistries (plural) is absent, inherit the legacy singular (imageRegistry) as name="default" for reading.
   private async entries(workspace: string): Promise<ImageRegistryEntry[]> {
     const s = await this.deps.settings.get(workspace);
     if (s?.imageRegistries) return s.imageRegistries;
@@ -72,7 +72,7 @@ export class ImageRegistryService {
     return (await this.entries(workspace)).map(toView);
   }
 
-  // 분류용 좌표(비밀 없음) — 하니스 등록/검증의 imageWarnings 가 전체 레지스트리를 대상으로 host 매칭.
+  // Classification coordinates (no secrets) — harness register/validate imageWarnings match by host across all registries.
   async coordinates(workspace: string): Promise<ImageRegistryCoordinates[]> {
     return (await this.entries(workspace)).map((r) => ({
       host: r.host,
@@ -80,9 +80,9 @@ export class ImageRegistryService {
     }));
   }
 
-  // 등록/갱신(관리자, name 기준 upsert — 선언형 전체 교체: optional 필드 제거 가능해야 한다).
-  // 첫 쓰기에서 레거시 단수 필드를 목록으로 승계하고 null 청산한다(이후 읽기는 imageRegistries 만).
-  // 참조 시크릿 이름의 존재는 경고(missingSecrets)로만 드러낸다 — 시크릿은 나중에 넣을 수 있다.
+  // Register/update (admin, upsert by name — declarative full replace: optional fields must be removable).
+  // On the first write, inherit the legacy singular field into the list and null it out (subsequent reads use only imageRegistries).
+  // The existence of referenced secret names is surfaced only as a warning (missingSecrets) — secrets can be added later.
   async upsert(
     workspace: string,
     input: {
@@ -115,15 +115,15 @@ export class ImageRegistryService {
     return { config: toView(entry), ...(missingSecrets ? { missingSecrets } : {}) };
   }
 
-  // 해제(관리자, 이름 지정).
+  // Remove (admin, by name).
   async remove(workspace: string, name: string): Promise<void> {
     const next = (await this.entries(workspace)).filter((r) => r.name !== name);
     await this.deps.settings.set(workspace, { imageRegistries: next, imageRegistry: null });
   }
 
-  // pull 자격증명(디스패치 enrichment 용, best-effort) — pull 이 구성된 레지스트리 전부를 RegistryAuth 로.
-  // 소비자(executeCase/디스패처)가 잡 이미지의 host 와 매칭해 하나를 고른다. 시크릿 부재 항목은 조용히 제외
-  // (주입만 생략 — pull 이 정말 필요하면 다운스트림 docker 가 명확히 실패).
+  // pull credentials (for dispatch enrichment, best-effort) — every registry with pull configured, as RegistryAuth.
+  // The consumer (executeCase/dispatcher) matches the job image's host and picks one. Entries with a missing secret are silently excluded
+  // (injection is just skipped — if pull is truly needed, downstream docker fails clearly).
   async pullAuths(workspace: string): Promise<RegistryAuth[]> {
     const entries = await this.entries(workspace);
     const secrets = entries.some((r) => r.pullSecretName) ? await this.deps.secretsFor(workspace) : {};
@@ -137,31 +137,30 @@ export class ImageRegistryService {
     return auths;
   }
 
-  // push 자격증명 발급(member+, images:push) — name 으로 선택; 생략은 레지스트리가 정확히 1개일 때만 허용.
-  // 레지스트리 없음/이름 불일치=404 · 복수인데 이름 생략=400 · push 미구성=400 · 시크릿 부재=404.
+  // Mint push credentials (member+, images:push) — select by name; omission is allowed only when there's exactly one registry.
+  // No registry / name mismatch = 404 · multiple with name omitted = 400 · push not configured = 400 · missing secret = 404.
   async pushCredentials(workspace: string, name?: string): Promise<ImagePushCredentials> {
     const entries = await this.entries(workspace);
-    if (entries.length === 0)
-      throw new NotFoundError("NOT_FOUND", undefined, "이미지 레지스트리가 등록되지 않았습니다");
+    if (entries.length === 0) throw new NotFoundError("NOT_FOUND", undefined, "No image registry is registered");
     let reg: ImageRegistryEntry | undefined;
     if (name !== undefined) {
       reg = entries.find((r) => r.name === name);
-      if (!reg) throw new NotFoundError("NOT_FOUND", { name }, `등록되지 않은 레지스트리입니다: ${name}`);
+      if (!reg) throw new NotFoundError("NOT_FOUND", { name }, `Registry is not registered: ${name}`);
     } else if (entries.length === 1) {
       reg = entries[0];
     } else {
       throw new BadRequestError(
         "BAD_REQUEST",
         { registries: entries.map((r) => r.name) },
-        `레지스트리가 여러 개입니다 — 이름을 지정하세요: ${entries.map((r) => r.name).join(", ")}`,
+        `There are multiple registries — specify a name: ${entries.map((r) => r.name).join(", ")}`,
       );
     }
-    if (!reg) throw new NotFoundError("NOT_FOUND", undefined, "이미지 레지스트리가 등록되지 않았습니다");
+    if (!reg) throw new NotFoundError("NOT_FOUND", undefined, "No image registry is registered");
     if (!reg.pushSecretName)
       throw new BadRequestError(
         "BAD_REQUEST",
         { name: reg.name },
-        `레지스트리 "${reg.name}" 에 push 시크릿(pushSecretName)이 구성되지 않았습니다`,
+        `Registry "${reg.name}" has no push secret (pushSecretName) configured`,
       );
     const secrets = await this.deps.secretsFor(workspace);
     const password = secrets[reg.pushSecretName];
@@ -169,7 +168,7 @@ export class ImageRegistryService {
       throw new NotFoundError(
         "NOT_FOUND",
         { secretName: reg.pushSecretName },
-        `push 시크릿 "${reg.pushSecretName}" 이 워크스페이스 SecretStore 에 없습니다`,
+        `push secret "${reg.pushSecretName}" is not in the workspace SecretStore`,
       );
     const view = toView(reg);
     return {

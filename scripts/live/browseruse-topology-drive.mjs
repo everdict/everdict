@@ -1,14 +1,14 @@
-// 라이브 e2e (service-topology): *실제 browser-use* 를 everdict 의 ServiceTopologyBackend front-door 로 — 로컬 docker 런타임.
-// (오케스트레이터 deploy 는 kind+Nomad 로 이미 검증됐고, K8s deploy 버전은 browseruse-topology-k8s.mjs 참고.)
-// 여기서 닫는 것:
-//  ② 인터랙티브 멀티스텝 태스크 — 정적 example.com 이 아니라 컨테이너가 직접 서빙하는 /form 에서 navigate→input→click→
-//     결과확인. url-matches(q=everdict) + dom-contains(Results for everdict) 로 결정론적 채점.
-//  ③ 실 트레이스 — front-door 가 run 마다 *실제* 토큰사용량(TokenCost)+액션열(action_names)을 Jaeger(:4318)로 OTLP 배출,
-//     백엔드의 traceSource(OtelTraceSource, Jaeger query :16686)가 같은 trace_id 로 끌어와 steps/cost 채점.
-//     trace_id 매칭: newRunId 를 32-hex 로 오버라이드 → thread_id="run-<32hex>" → front-door 가 그 hex 를 trace_id 로 사용.
+// Live e2e (service-topology): drive *real browser-use* as everdict's ServiceTopologyBackend front-door — local docker runtime.
+// (Orchestrator deploy is already verified with kind+Nomad; for the K8s deploy version see browseruse-topology-k8s.mjs.)
+// What this closes:
+//  ② interactive multi-step task — not static example.com but /form served directly by the container: navigate→input→click→
+//     verify result. Deterministic scoring via url-matches(q=everdict) + dom-contains(Results for everdict).
+//  ③ real trace — per run the front-door emits *actual* token usage (TokenCost) + action list (action_names) to Jaeger(:4318) over OTLP,
+//     and the backend's traceSource (OtelTraceSource, Jaeger query :16686) pulls it by the same trace_id to score steps/cost.
+//     trace_id matching: override newRunId to 32-hex → thread_id="run-<32hex>" → front-door uses that hex as the trace_id.
 //
-// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686) 기동.
-// 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
+// Prereqs: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; start Jaeger(:4318/:16686).
+// Key: OPENAI_API_KEY env or infra/litellm/.env(LITELLM_MASTER_KEY) — runtime only, never committed.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -36,7 +36,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env).");
+  console.error("No LLM key (OPENAI_API_KEY or infra/litellm/.env).");
   process.exit(2);
 }
 
@@ -45,7 +45,7 @@ function cleanup() {
 }
 
 cleanup();
-console.log("=== 실 browser-use front-door 기동 (docker, --network=host) ===");
+console.log("=== start real browser-use front-door (docker, --network=host) ===");
 execFileSync(
   "docker",
   [
@@ -73,7 +73,7 @@ execFileSync(
 
 let ok = false;
 try {
-  process.stdout.write("health 대기");
+  process.stdout.write("waiting for health");
   let healthy = false;
   for (let i = 0; i < 60 && !healthy; i++) {
     await sleep(2000);
@@ -83,10 +83,10 @@ try {
       healthy = r.status === 200;
     } catch {}
   }
-  console.log(healthy ? " up" : " (health 응답 없음)");
+  console.log(healthy ? " up" : " (no health response)");
   if (!healthy) throw new Error("front-door health timeout");
 
-  // 실 ServiceTopologyBackend — 런타임은 로컬 docker front-door, traceSource 는 실 Jaeger(OtelTraceSource, 인제스트 랙 retry).
+  // Real ServiceTopologyBackend — runtime is the local docker front-door, traceSource is real Jaeger (OtelTraceSource, retry on ingest lag).
   const runtime = {
     id: "local-docker",
     async ensureTopology() {
@@ -129,7 +129,7 @@ try {
     runtime,
     traceSource,
     specFor: () => spec,
-    newRunId: () => randomUUID().replace(/-/g, ""), // 32-hex → Jaeger trace_id 로 매칭
+    newRunId: () => randomUUID().replace(/-/g, ""), // 32-hex → matched as Jaeger trace_id
   });
 
   const job = {
@@ -140,17 +140,19 @@ try {
       env: { kind: "browser", url: `${FRONT}/form` },
       task: `Go to ${FRONT}/form , type "everdict eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
       graders: [
-        { id: "url-matches", config: { pattern: "[?&]q=everdict" } }, // 제출 결과 URL
-        { id: "dom-contains", config: { text: "Results for everdict" } }, // 결과 페이지 텍스트
-        { id: "steps", config: {} }, // trace 기반: 실 browser-use 액션 수
-        { id: "cost", config: {} }, // trace 기반: 실 토큰사용량(usd 는 프록시 모델 가격 미상→0)
+        { id: "url-matches", config: { pattern: "[?&]q=everdict" } }, // submitted result URL
+        { id: "dom-contains", config: { text: "Results for everdict" } }, // result page text
+        { id: "steps", config: {} }, // trace-based: real browser-use action count
+        { id: "cost", config: {} }, // trace-based: real token usage (usd is 0 — proxy model price unknown)
       ],
       timeoutSec: 300,
       tags: ["browser-use", "service-topology", "interactive", "trace"],
     },
   };
 
-  console.log("\n=== ServiceTopologyBackend.dispatch — 실 browser-use 인터랙티브 구동 + 실 트레이스 채점 ===");
+  console.log(
+    "\n=== ServiceTopologyBackend.dispatch — drive real browser-use interactively + score from real trace ===",
+  );
   console.log("model:", MODEL, "| task:", job.evalCase.task);
   const result = await backend.dispatch(job);
 
@@ -163,7 +165,7 @@ try {
   const toolCalls = result.trace.filter((e) => e.kind === "tool_call");
   console.log("\n--- CaseResult ---");
   console.log("snapshot.kind =", result.snapshot.kind, "| url =", result.snapshot.url);
-  console.log("snapshot.dom(앞 100):", String(result.snapshot.dom).slice(0, 100).replace(/\s+/g, " "));
+  console.log("snapshot.dom(first 100):", String(result.snapshot.dom).slice(0, 100).replace(/\s+/g, " "));
   console.log("browser-use actions:", JSON.stringify(observed.actions));
   console.log("browser-use tokens :", JSON.stringify(observed.tokens), "| trace_id:", observed.trace_id);
   console.log(
@@ -180,21 +182,21 @@ try {
   const score = (id) => result.scores.find((s) => s.graderId === id);
   const urlOk = score("url-matches")?.pass === true;
   const domOk = score("dom-contains")?.pass === true;
-  const stepsOk = (score("steps")?.value ?? 0) > 0; // 실 액션이 trace 로 들어왔는가
-  const tracePulled = llmCalls.length > 0 && toolCalls.length > 0; // Jaeger 에서 끌어온 실 trace
+  const stepsOk = (score("steps")?.value ?? 0) > 0; // did real actions land in the trace
+  const tracePulled = llmCalls.length > 0 && toolCalls.length > 0; // real trace pulled from Jaeger
   ok = result.snapshot.kind === "browser" && urlOk && domOk && stepsOk && tracePulled;
   console.log(
     ok
-      ? "\n✅ ②+③: 실 browser-use 가 ServiceTopologyBackend front-door 로서 인터랙티브 폼을 멀티스텝(navigate→input→click)으로 " +
-          "구동해 결과 페이지 도달(url-matches q=everdict + dom-contains 'Results for everdict' PASS), 동시에 run 의 실제 토큰사용량/" +
-          "액션열을 Jaeger 로 OTLP 배출 → 백엔드가 OtelTraceSource 로 같은 trace_id 를 끌어와 steps(실 액션수)/cost 로 채점. " +
-          "정적 데모를 넘어 인터랙티브 driving + 실 trace pull 까지 백엔드 경로로 닫음."
-      : "\n⚠️ 기대와 불일치(위 actions/tokens/trace/scores 참고)",
+      ? "\n✅ ②+③: real browser-use, acting as the ServiceTopologyBackend front-door, drove the interactive form multi-step " +
+          "(navigate→input→click) to reach the result page (url-matches q=everdict + dom-contains 'Results for everdict' PASS), while " +
+          "emitting the run's actual token usage / action list to Jaeger over OTLP → the backend pulled the same trace_id via OtelTraceSource " +
+          "to score steps (real action count) / cost. Beyond a static demo — interactive driving + real trace pull, all through the backend path."
+      : "\n⚠️ mismatch vs expected (see actions/tokens/trace/scores above)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);
 } finally {
   cleanup();
-  console.log("cleanup done (front-door 컨테이너 제거)");
+  console.log("cleanup done (front-door container removed)");
 }
 process.exit(ok ? 0 : 1);

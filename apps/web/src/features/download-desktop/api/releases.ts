@@ -4,9 +4,9 @@ import { z } from 'zod'
 
 import { env } from '@/shared/config/env'
 
-// GitHub 릴리즈에서 데스크톱 설치파일 메타를 읽는다 — 서버 전용(토큰은 절대 클라이언트로 안 나감).
-// 리포는 private 유지: 브라우저는 GitHub 를 직접 치지 않고, 실제 다운로드는 /api/desktop/download 가
-// 세션 검사 후 GitHub 의 서명된 임시 URL 로 302 시켜준다. 설계: docs/architecture/desktop-app.md (D7 후속).
+// Reads desktop installer metadata from GitHub Releases — server-only (the token never reaches the client).
+// The repo stays private: the browser never hits GitHub directly; the actual download is done by /api/desktop/download,
+// which checks the session and then 302s to GitHub's signed temporary URL. Design: docs/architecture/desktop-app.md (D7 follow-up).
 
 const githubAssetSchema = z.object({ id: z.number(), name: z.string(), size: z.number() })
 const githubReleaseSchema = z.object({
@@ -32,7 +32,7 @@ export interface DesktopRelease {
   assets: DesktopAsset[]
 }
 
-// 파일명 규약(electron-builder artifactName): Everdict-<ver>-<os>-<arch>.<ext> — blockmap/yml 은 제외된다.
+// Filename convention (electron-builder artifactName): Everdict-<ver>-<os>-<arch>.<ext> — blockmap/yml are excluded.
 const ASSET_NAME_RE = /-(linux|mac|win)-([A-Za-z0-9_]+)\.(AppImage|deb|dmg|zip|exe)$/
 
 function classifyAsset(asset: z.infer<typeof githubAssetSchema>): DesktopAsset | null {
@@ -43,7 +43,7 @@ function classifyAsset(asset: z.infer<typeof githubAssetSchema>): DesktopAsset |
   return { id: asset.id, name: asset.name, size: asset.size, os: os as DesktopOs, arch, ext }
 }
 
-// 최신 desktop-v* 릴리즈의 설치파일 목록. 토큰 미설정/조회 실패/릴리즈 없음 → null(페이지가 폴백 안내).
+// Installer list for the latest desktop-v* release. Token unset / fetch failure / no release → null (the page shows a fallback).
 export async function fetchDesktopRelease(): Promise<DesktopRelease | null> {
   const token = env.DESKTOP_RELEASES_TOKEN
   if (!token) return null
@@ -56,7 +56,7 @@ export async function fetchDesktopRelease(): Promise<DesktopRelease | null> {
           accept: 'application/vnd.github+json',
           'x-github-api-version': '2022-11-28',
         },
-        next: { revalidate: 300 }, // 릴리즈 메타는 5분 캐시 — 다운로드 자체는 라우트에서 no-store
+        next: { revalidate: 300 }, // release metadata is cached for 5 min — the download itself is no-store in the route
       }
     )
     if (!res.ok) return null
@@ -74,11 +74,11 @@ export async function fetchDesktopRelease(): Promise<DesktopRelease | null> {
       assets,
     }
   } catch {
-    return null // 네트워크/스키마 오류 — 다운로드 페이지가 폴백을 보여준다
+    return null // network/schema error — the download page shows a fallback
   }
 }
 
-// 다운로드 라우트용 — 우리 데스크톱 릴리즈에 속한 에셋만 허용(임의 asset id 프록시 방지).
+// For the download route — allow only assets belonging to our desktop release (prevents proxying an arbitrary asset id).
 export async function findDesktopAsset(id: number): Promise<DesktopAsset | null> {
   const release = await fetchDesktopRelease()
   return release?.assets.find((a) => a.id === id) ?? null

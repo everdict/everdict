@@ -30,7 +30,7 @@ const rec = (over: Partial<ScorecardRecord> = {}): ScorecardRecord => ({
 });
 
 describe("InMemoryScorecardStore", () => {
-  it("create/get 는 전체(scorecard 포함), list 는 무거운 scorecard 를 생략하고 summary·models 만", async () => {
+  it("create/get returns the full record (incl. scorecard); list omits the heavy scorecard and keeps only summary·models", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec());
     await store.update("sc1", {
@@ -42,16 +42,16 @@ describe("InMemoryScorecardStore", () => {
     });
     const got = await store.get("sc1");
     expect(got?.status).toBe("succeeded");
-    expect(got?.scorecard?.results).toHaveLength(1); // 상세엔 전체 결과
+    expect(got?.scorecard?.results).toHaveLength(1); // detail has the full results
     const list = await store.list("acme");
     expect(list).toHaveLength(1);
-    expect(list[0]?.summary).toHaveLength(1); // 목록엔 summary
-    expect(list[0]?.models?.primary).toBe("m"); // model 축은 경량 → 목록에도 포함(리더보드용)
-    expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]); // judge 축도 경량 → 목록 포함
-    expect(list[0]?.scorecard).toBeUndefined(); // 목록엔 무거운 scorecard 없음
+    expect(list[0]?.summary).toHaveLength(1); // list has summary
+    expect(list[0]?.models?.primary).toBe("m"); // the model axis is lightweight → included in list too (for leaderboard)
+    expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]); // the judge axis is lightweight too → included in list
+    expect(list[0]?.scorecard).toBeUndefined(); // list has no heavy scorecard
   });
 
-  it("createdBy(실행자)·runtime(배치 런타임)은 경량 메타 — get 과 list 둘 다에 포함된다", async () => {
+  it("createdBy (runner)·runtime (placement runtime) are lightweight meta — included in both get and list", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec({ createdBy: "user-alice", runtime: "self:mac" }));
     expect((await store.get("sc1"))?.createdBy).toBe("user-alice");
@@ -60,7 +60,7 @@ describe("InMemoryScorecardStore", () => {
     expect((await store.list("acme"))[0]?.runtime).toBe("self:mac");
   });
 
-  it("트레이스 싱크 적재 결과(export)는 상세(get)에만 — 목록(list)에선 생략된다", async () => {
+  it("the trace-sink export result (export) is detail-only (get) — omitted from list", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec());
     await store.update("sc1", {
@@ -73,17 +73,17 @@ describe("InMemoryScorecardStore", () => {
       },
     });
     expect((await store.get("sc1"))?.export?.cases?.[0]?.externalId).toBe("tr-abc");
-    expect((await store.list("acme"))[0]?.export).toBeUndefined(); // 목록엔 없음(steps 와 동급 상세)
+    expect((await store.list("acme"))[0]?.export).toBeUndefined(); // absent from list (detail, on par with steps)
   });
 
-  it("list(filter) 로 dataset/harness/status 를 좁힌다(리더보드/트렌드가 전 워크스페이스 스캔 회피)", async () => {
+  it("list(filter) narrows dataset/harness/status (so leaderboard/trend avoid a full-workspace scan)", async () => {
     const store = new InMemoryScorecardStore();
     await store.create(rec({ id: "a", dataset: { id: "d1", version: "1" }, status: "succeeded" }));
     await store.create(rec({ id: "b", dataset: { id: "d2", version: "1" }, status: "succeeded" }));
     await store.create(rec({ id: "c", dataset: { id: "d1", version: "1" }, status: "failed" }));
     expect((await store.list("acme", { dataset: "d1" })).map((r) => r.id).sort()).toEqual(["a", "c"]);
     expect((await store.list("acme", { dataset: "d1", status: "succeeded" })).map((r) => r.id)).toEqual(["a"]);
-    expect(await store.list("acme")).toHaveLength(3); // 필터 없으면 전체(현행)
+    expect(await store.list("acme")).toHaveLength(3); // no filter → everything (current behavior)
   });
 });
 
@@ -121,18 +121,18 @@ const ROW = {
 };
 
 describe("PgScorecardStore", () => {
-  it("create → 파라미터화 INSERT (jsonb 문자열화 + created_by 컬럼)", async () => {
+  it("create → parameterized INSERT (jsonb stringify + created_by column)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgScorecardStore(client).create(rec({ createdBy: "user-alice" }));
     expect(calls[0]?.text).toMatch(/INSERT INTO everdict_scorecards/);
     expect(calls[0]?.params?.[0]).toBe("sc1");
-    expect(calls[0]?.params?.[8]).toBeNull(); // models 없음(rec 기본)
-    expect(calls[0]?.params?.[9]).toBeNull(); // judge_models 없음
-    expect(calls[0]?.params?.[11]).toBe("user-alice"); // created_by(실행자)
-    expect(calls[0]?.params?.[12]).toBeNull(); // scorecard 없음
+    expect(calls[0]?.params?.[8]).toBeNull(); // no models (rec default)
+    expect(calls[0]?.params?.[9]).toBeNull(); // no judge_models
+    expect(calls[0]?.params?.[11]).toBe("user-alice"); // created_by (runner)
+    expect(calls[0]?.params?.[12]).toBeNull(); // no scorecard
   });
 
-  it("get → row 를 ScorecardRecord 로 매핑(전체 scorecard + models + judgeModels + createdBy 포함)", async () => {
+  it("get → maps the row to a ScorecardRecord (incl. full scorecard + models + judgeModels + createdBy)", async () => {
     const { client } = fakeClient(() => ({ rows: [ROW] }));
     const got = await new PgScorecardStore(client).get("sc1");
     expect(got?.dataset).toEqual({ id: "repo-smoke", version: "1.0.0" });
@@ -140,49 +140,49 @@ describe("PgScorecardStore", () => {
     expect(got?.models?.primary).toBe("m");
     expect(got?.judgeModels).toEqual(["gpt-5.4-mini"]);
     expect(got?.createdBy).toBe("user-alice");
-    expect(got?.runtime).toBe("docker"); // 작업 큐 런타임 축
+    expect(got?.runtime).toBe("docker"); // work-queue runtime axis
   });
 
-  it("list → scorecard 컬럼 미선택(경량)하되 models·judge_models 는 SELECT + 테넌트 필터 + 정렬", async () => {
+  it("list → doesn't select the scorecard column (lightweight) but does SELECT models·judge_models + tenant filter + sort", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
     const list = await new PgScorecardStore(client).list("acme");
-    const selectClause = (calls[0]?.text ?? "").split("FROM")[0]; // FROM everdict_scorecards 의 테이블명은 제외
-    expect(selectClause).not.toMatch(/ scorecard/); // 무거운 컬럼은 SELECT 안 함(judge_models 의 _models 오탐 방지 위해 공백 앵커)
-    expect(selectClause).toMatch(/models/); // model 축은 경량 → 목록에 포함(리더보드용)
-    expect(selectClause).toMatch(/judge_models/); // judge 축도 경량 → 목록 포함
-    expect(selectClause).toMatch(/created_by/); // 실행자도 경량 → 목록 포함(표기/필터)
+    const selectClause = (calls[0]?.text ?? "").split("FROM")[0]; // exclude the FROM everdict_scorecards table name
+    expect(selectClause).not.toMatch(/ scorecard/); // don't SELECT the heavy column (leading space anchor to avoid a false hit on judge_models' _models)
+    expect(selectClause).toMatch(/models/); // the model axis is lightweight → included in list (for leaderboard)
+    expect(selectClause).toMatch(/judge_models/); // the judge axis is lightweight too → included in list
+    expect(selectClause).toMatch(/created_by/); // the runner is lightweight too → included in list (display/filter)
     expect(calls[0]?.text).toMatch(/ORDER BY created_at DESC, id DESC/);
     expect(list[0]?.scorecard).toBeUndefined();
     expect(list[0]?.summary).toHaveLength(1);
     expect(list[0]?.models?.primary).toBe("m");
     expect(list[0]?.judgeModels).toEqual(["gpt-5.4-mini"]);
     expect(list[0]?.createdBy).toBe("user-alice");
-    expect(list[0]?.runtime).toBe("docker"); // 경량 → 목록 포함(런타임 레인)
+    expect(list[0]?.runtime).toBe("docker"); // lightweight → included in list (runtime lane)
   });
 
-  it("export → update 는 sink_export 컬럼에 쓰고, get 은 export 필드로 되매핑한다(예약어 회피 컬럼명)", async () => {
+  it("export → update writes to the sink_export column, and get maps it back to the export field (reserved-word-avoiding column name)", async () => {
     const EXPORT = {
       sink: "mlflow",
       status: "partial",
       exportedAt: "2026-06-19T00:00:02.000Z",
       cases: [
         { caseId: "c1", externalId: "tr-abc" },
-        { caseId: "c2", error: "업스트림 500" },
+        { caseId: "c2", error: "upstream 500" },
       ],
     };
-    // When: update 패치에 export — SQL 은 sink_export 컬럼으로.
+    // When: export in the update patch — SQL goes to the sink_export column.
     const upd = fakeClient(() => ({ rows: [{ ...ROW, sink_export: EXPORT }] }));
     const updated = await new PgScorecardStore(upd.client).update("sc1", {
       export: EXPORT as ScorecardRecord["export"],
     });
     expect(upd.calls[0]?.text).toMatch(/sink_export = \$1/);
     expect(upd.calls[0]?.params?.[0]).toBe(JSON.stringify(EXPORT));
-    // Then: row 의 sink_export 가 record.export 로 돌아온다(get 경로 동일 매핑).
+    // Then: the row's sink_export comes back as record.export (get path, same mapping).
     expect(updated?.export?.status).toBe("partial");
-    expect(updated?.export?.cases?.[1]?.error).toBe("업스트림 500");
+    expect(updated?.export?.cases?.[1]?.error).toBe("upstream 500");
   });
 
-  it("list(filter) → SQL WHERE 에 dataset_id/status 절 + 파라미터화(전 스캔 회피)", async () => {
+  it("list(filter) → dataset_id/status clauses in the SQL WHERE + parameterization (avoids a full scan)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgScorecardStore(client).list("acme", { dataset: "d1", status: "succeeded" });
     expect(calls[0]?.text).toMatch(/dataset_id = \$2/);

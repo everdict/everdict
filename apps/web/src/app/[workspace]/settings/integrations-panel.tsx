@@ -18,9 +18,9 @@ import { SettingsList, SettingsRow } from '@/shared/ui/settings-list'
 
 export type IntegrationKey = 'github' | 'mattermost' | 'trace-sink' | 'image-registry'
 
-// 통합 탭 — 네 매니저를 전부 펼쳐 쌓던 스택 대신, 통합별 한 줄 요약(연결 상태 배지) 리스트에서
-// "관리"로 해당 통합만 드릴인한다. GitHub App 설치 콜백 직후(githubAppNotice)나 ?app= 딥링크가
-// 있으면 그 통합 상세를 바로 연다.
+// Integrations tab — instead of stacking all four managers expanded, a list of one-line per-integration summaries (connection-status badge)
+// drills into just that integration via "Manage". If there's a GitHub App installation callback just fired (githubAppNotice) or a ?app= deep link,
+// open that integration's detail directly.
 export function IntegrationsPanel({
   githubApp,
   githubAppNotice,
@@ -93,7 +93,7 @@ export function IntegrationsPanel({
     },
   ]
 
-  // 기본 뷰 — Linear settings-list 한 장에 통합별 요약 행.
+  // Default view — per-integration summary rows in a single Linear settings-list.
   if (!active) {
     return (
       <SettingsList>
@@ -117,7 +117,7 @@ export function IntegrationsPanel({
     )
   }
 
-  // 드릴인 뷰 — 뒤로가기 + 해당 통합의 매니저만.
+  // Drill-in view — back link + only that integration's manager.
   return (
     <div className="space-y-5">
       <button

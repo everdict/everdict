@@ -1,12 +1,12 @@
--- 0023_connections_owner — 외부 계정 연결(Connected accounts)을 개인 소유로 재키.
--- owner = principal.subject(연결을 소유한 사람). workspace 컬럼은 유지한다 — 연결이 "만들어진" 워크스페이스를 기록해
--- 워크스페이스 애플리케이션 로스터(설정>멤버 탭의 읽기 전용 뷰)를 보여주기 위함. 즉 연결은 개인 소유 + 워크스페이스 가시성.
--- ⚠ 기존 행: owner 를 workspace 값으로 best-effort backfill(실 subject 아님) → 해당 유저 재연결 전엔 소비(clone/notify) resolve 안 됨.
+-- 0023_connections_owner — re-key Connected accounts to personal ownership.
+-- owner = principal.subject (the person who owns the connection). The workspace column is kept — it records the workspace where the connection was "created"
+-- so we can show a workspace application roster (the read-only view in Settings > Members tab). That is, connections are personally owned + workspace-visible.
+-- ⚠ Existing rows: owner is best-effort backfilled with the workspace value (not the real subject) → until that user re-connects, consumers (clone/notify) won't resolve it.
 ALTER TABLE everdict_connections ADD COLUMN owner text NOT NULL DEFAULT '';
 UPDATE everdict_connections SET owner = workspace WHERE owner = '';
 ALTER TABLE everdict_connections ALTER COLUMN owner DROP DEFAULT;
--- PK (workspace,id) → (owner,id): 개인 소유 접근(list/remove/tokenFor by owner)의 1차 키.
+-- PK (workspace,id) → (owner,id): primary key for personal-ownership access (list/remove/tokenFor by owner).
 ALTER TABLE everdict_connections DROP CONSTRAINT everdict_connections_pkey;
 ALTER TABLE everdict_connections ADD PRIMARY KEY (owner, id);
--- 워크스페이스 로스터(listByWorkspace) 조회용 인덱스.
+-- Index for workspace-roster (listByWorkspace) lookups.
 CREATE INDEX IF NOT EXISTS everdict_connections_workspace_idx ON everdict_connections (workspace);

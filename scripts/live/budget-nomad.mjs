@@ -1,11 +1,11 @@
-// 라이브 검증: 테넌트 예산(admission) + 시크릿 스코핑이 실제 Nomad 위에서 작동한다.
+// Live verification: tenant budget (admission) + secret scoping work on real Nomad.
 //
-// (1) 시크릿 스코핑: tenant 마다 자기 모델 키만 alloc env 에 주입됨을 buildNomadJob 으로 확인(누출 없음).
-// (2) 예산: tenant "free" 를 runs=3 으로 제한하고 5건을 한꺼번에 제출 → 3건만 실행되고 2건은
-//     402(BUDGET_EXCEEDED)로 즉시 거절된다(버스트여도 admit 가 즉시 예약하므로 상한 보호).
-//     (scripted 하니스는 cost=0 이라 usd/토큰 예산은 트리거 안 됨 → runs 예산으로 시연; usd/토큰은 단위테스트로 검증)
+// (1) Secret scoping: verify via buildNomadJob that each tenant's job carries only its own model key in the alloc env (no leak).
+// (2) Budget: limit tenant "free" to runs=3 and submit 5 at once → only 3 run and the other 2 are
+//     rejected immediately with 402 (BUDGET_EXCEEDED) (even under burst, admit reserves synchronously so the cap holds).
+//     (the scripted harness has cost=0, so usd/token budgets don't trigger → demoed via the runs budget; usd/token verified by unit tests)
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/budget-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/budget-nomad.mjs
 
 import {
   BackendRegistry,

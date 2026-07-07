@@ -1,12 +1,12 @@
-# 라이브 e2e (service-topology 마지막 rung): 실제 browser-use 를 everdict 서비스-토폴로지 front-door 이미지로.
-# POST /runs {task, browser_cdp_url} → 진짜 LLM(LiteLLM)로 진짜 headless Chromium 구동 → 방문 URL/추출텍스트를
-# /observe 로 노출. everdict 의 ServiceTopologyBackend 가 이 front-door 를 deploy/drive/observe/grade 한다.
+# Live e2e (final service-topology rung): real browser-use as an everdict service-topology front-door image.
+# POST /runs {task, browser_cdp_url} → drive real headless Chromium via a real LLM (LiteLLM) → expose the
+# visited URL / extracted text via /observe. everdict's ServiceTopologyBackend deploys/drives/observes/grades this front-door.
 #   docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live
-# 키/베이스URL 은 런타임 env 로만 주입(OPENAI_API_KEY/OPENAI_BASE_URL) — 커밋 안 함.
+# The key / base URL are injected only via runtime env (OPENAI_API_KEY/OPENAI_BASE_URL) — never committed.
 FROM mcr.microsoft.com/playwright/python:v1.49.0-noble
 ENV PIP_NO_CACHE_DIR=1 DEBIAN_FRONTEND=noninteractive
-# browser-use 0.13.x + aiohttp. 브라우저 바이너리는 playwright 베이스 이미지의 /ms-playwright 를 그대로 쓴다
-# (0.13 은 playwright 모듈이 아니라 cdp_use 로 chromium 을 CDP 구동 — 서버가 executable_path 로 그 chromium 을 지정).
+# browser-use 0.13.x + aiohttp. Browser binaries reuse /ms-playwright from the playwright base image as-is
+# (0.13 drives chromium over CDP via cdp_use rather than the playwright module — the server points executable_path at that chromium).
 RUN pip install --no-cache-dir "browser-use>=0.13,<0.14" aiohttp
 RUN python -c "import importlib.metadata as m; print('INTROSPECT browser-use', m.version('browser-use'))"
 RUN python - <<'PY'

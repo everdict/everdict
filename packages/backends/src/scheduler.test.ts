@@ -15,12 +15,12 @@ function result(id: string): CaseResult {
   };
 }
 
-// dispatch 를 수동으로 풀어 동시성을 관찰할 수 있는 백엔드.
+// A backend that releases dispatch manually so concurrency can be observed.
 class ControlledBackend implements Backend {
   inFlight = 0;
   maxSeen = 0;
   handled = 0;
-  dispatchedIds: string[] = []; // 디스패치된 케이스 id 순서(공정성 검증용)
+  dispatchedIds: string[] = []; // order of dispatched case ids (for fairness verification)
   private pending: Array<() => void> = [];
   constructor(
     readonly id: string,
@@ -65,7 +65,7 @@ function job(target?: string): AgentJob {
   };
 }
 
-// 테넌트 + 케이스 id 를 가진 잡(공정성/쿼터 테스트용).
+// A job with a tenant + case id (for fairness/quota tests).
 function tjob(tenant: string, id: string): AgentJob {
   return {
     harness: { id: "scripted", version: "0" },
@@ -74,34 +74,34 @@ function tjob(tenant: string, id: string): AgentJob {
   };
 }
 
-// 마이크로/매크로태스크를 비워 비동기 pump 가 진행되게 한다.
+// Drain micro/macrotasks so the async pump can progress.
 const flush = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 describe("Scheduler", () => {
-  it("백엔드 동시 슬롯(total)을 넘겨 디스패치하지 않는다", async () => {
+  it("doesn't dispatch beyond a backend's concurrent slots (total)", async () => {
     const b = new ControlledBackend("a", 2);
     const sched = new Scheduler(new BackendRegistry().register("a", b));
 
     const promises = [job(), job(), job(), job(), job()].map((j) => sched.dispatch(j));
     await flush();
 
-    expect(b.maxSeen).toBe(2); // 슬롯 2개만 점유
-    expect(sched.stats().queued).toBe(3); // 나머지는 큐
+    expect(b.maxSeen).toBe(2); // only 2 slots occupied
+    expect(sched.stats().queued).toBe(3); // the rest queued
 
     b.releaseAll();
     await flush();
-    b.releaseAll(); // 펌프로 새로 들어온 것들 해제
+    b.releaseAll(); // release the ones newly pumped in
     await flush();
     b.releaseAll();
     await flush();
 
     await Promise.all(promises);
     expect(b.handled).toBe(5);
-    expect(b.maxSeen).toBe(2); // 끝까지 2를 넘지 않음
+    expect(b.maxSeen).toBe(2); // never exceeds 2 throughout
     expect(sched.stats().queued).toBe(0);
   });
 
-  it("자리가 없으면 큐잉했다가 슬롯이 비면 흘려보낸다", async () => {
+  it("queues when there's no room, then flushes as slots free", async () => {
     const b = new ControlledBackend("a", 1);
     const sched = new Scheduler(new BackendRegistry().register("a", b));
 
@@ -123,7 +123,7 @@ describe("Scheduler", () => {
     expect(b.handled).toBe(3);
   });
 
-  it("leastLoaded 로 여러 백엔드에 분산한다", async () => {
+  it("spreads across multiple backends with leastLoaded", async () => {
     const a = new ControlledBackend("a", 1);
     const b = new ControlledBackend("b", 1);
     const sched = new Scheduler(new BackendRegistry().register("a", a).register("b", b));
@@ -132,14 +132,14 @@ describe("Scheduler", () => {
     await flush();
 
     expect(a.handled).toBe(1);
-    expect(b.handled).toBe(1); // 각 백엔드에 하나씩
+    expect(b.handled).toBe(1); // one on each backend
 
     a.releaseAll();
     b.releaseAll();
     await Promise.all(p);
   });
 
-  it("placement.target pin 을 존중한다 (다른 곳이 비어도)", async () => {
+  it("respects the placement.target pin (even when others are free)", async () => {
     const a = new ControlledBackend("a", 5);
     const b = new ControlledBackend("b", 5);
     const sched = new Scheduler(new BackendRegistry().register("a", a).register("b", b));
@@ -153,30 +153,30 @@ describe("Scheduler", () => {
     await p;
   });
 
-  it("binPack 정책은 여유가 적은 곳부터 채운다", async () => {
+  it("the binPack policy fills the tightest backend first", async () => {
     const a = new ControlledBackend("a", 1);
     const b = new ControlledBackend("b", 3);
     const sched = new Scheduler(new BackendRegistry().register("a", a).register("b", b), { policy: binPackPolicy });
 
     const p = sched.dispatch(job());
     await flush();
-    expect(a.handled).toBe(1); // free 가 가장 적은 a 먼저
+    expect(a.handled).toBe(1); // a, which has the least free, first
     expect(b.handled).toBe(0);
 
     a.releaseAll();
     await p;
   });
 
-  it("미등록 pin 은 즉시 거절한다", async () => {
+  it("rejects an unregistered pin immediately", async () => {
     const sched = new Scheduler(new BackendRegistry().register("a", new ControlledBackend("a", 1)));
     await expect(sched.dispatch(job("missing"))).rejects.toThrow();
   });
 
-  it("테넌트 공정성(WFQ): 한 테넌트의 대량 제출이 다른 테넌트를 굶기지 않는다", async () => {
-    const b = new ControlledBackend("a", 1); // cap=1 → 한 번에 하나씩
+  it("tenant fairness (WFQ): one tenant's bulk submission doesn't starve another", async () => {
+    const b = new ControlledBackend("a", 1); // cap=1 → one at a time
     const sched = new Scheduler(new BackendRegistry().register("a", b));
 
-    // A 가 4건 먼저, B 가 1건 나중에 — FIFO 라면 B 는 마지막(5번째). WFQ 라면 A 한 건 뒤에 끼어든다.
+    // A submits 4 first, B submits 1 later — under FIFO, B would be last (5th). Under WFQ, B slips in after one A.
     const p = [
       sched.dispatch(tjob("A", "A0")),
       sched.dispatch(tjob("A", "A1")),
@@ -191,22 +191,22 @@ describe("Scheduler", () => {
     }
     await Promise.all(p);
 
-    expect(b.dispatchedIds).toEqual(["A0", "B0", "A1", "A2", "A3"]); // B 가 2번째로 끼어듦
+    expect(b.dispatchedIds).toEqual(["A0", "B0", "A1", "A2", "A3"]); // B slips in second
   });
 
-  it("테넌트 쿼터: 자리가 남아도 테넌트별 동시 실행 상한을 넘지 않는다", async () => {
-    const b = new ControlledBackend("a", 5); // 슬롯은 넉넉
+  it("tenant quota: doesn't exceed a tenant's concurrent-execution cap even when slots remain", async () => {
+    const b = new ControlledBackend("a", 5); // plenty of slots
     const sched = new Scheduler(new BackendRegistry().register("a", b), { tenantQuota: () => 1 });
 
     const p = [sched.dispatch(tjob("A", "A0")), sched.dispatch(tjob("A", "A1")), sched.dispatch(tjob("B", "B0"))];
     await flush();
 
-    // 슬롯 5개지만 테넌트당 1 → A0, B0 만 진행, A1 은 쿼터로 대기.
+    // 5 slots but 1 per tenant → only A0, B0 proceed; A1 waits on quota.
     expect(b.dispatchedIds.sort()).toEqual(["A0", "B0"]);
     expect(sched.stats().queued).toBe(1);
     expect(sched.stats().tenantInFlight).toEqual({ A: 1, B: 1 });
 
-    b.releaseAll(); // A0, B0 완료 → A1 의 쿼터가 풀림
+    b.releaseAll(); // A0, B0 complete → A1's quota frees up
     await flush();
     expect(b.dispatchedIds).toContain("A1");
 
@@ -215,22 +215,22 @@ describe("Scheduler", () => {
     await Promise.all(p);
   });
 
-  it("예산: runs 상한을 넘는 제출은 402 로 즉시 거절(버스트 포함)", async () => {
+  it("budget: a submission over the runs cap is rejected immediately with 402 (incl. bursts)", async () => {
     const b = new ControlledBackend("a", 5);
     const sched = new Scheduler(new BackendRegistry().register("a", b), {
       budget: inMemoryBudget({ limitFor: () => ({ runs: 2 }) }),
     });
     const p0 = sched.dispatch(tjob("free", "0"));
     const p1 = sched.dispatch(tjob("free", "1"));
-    await expect(sched.dispatch(tjob("free", "2"))).rejects.toBeInstanceOf(PaymentRequiredError); // 3번째 거절
+    await expect(sched.dispatch(tjob("free", "2"))).rejects.toBeInstanceOf(PaymentRequiredError); // 3rd rejected
     await flush();
-    expect(b.dispatchedIds.sort()).toEqual(["0", "1"]); // 2건만 실행
+    expect(b.dispatchedIds.sort()).toEqual(["0", "1"]); // only 2 run
     b.releaseAll();
     await Promise.all([p0, p1]);
   });
 
-  it("예산: 완료 시 cost 가 settle 되어 usd 상한을 넘기면 다음 제출 거절", async () => {
-    // cost 가 있는 결과를 주는 백엔드.
+  it("budget: cost is settled on completion, so once past the usd cap the next submission is rejected", async () => {
+    // A backend that returns a result with a cost.
     const costly: Backend = {
       id: "c",
       async capacity() {
@@ -257,7 +257,7 @@ describe("Scheduler", () => {
     await expect(sched.dispatch(tjob("free", "2"))).rejects.toBeInstanceOf(PaymentRequiredError); // 0.12 >= 0.1
   });
 
-  it("백프레셔: 큐가 maxQueueDepth 를 넘으면 RateLimitError", async () => {
+  it("backpressure: RateLimitError once the queue exceeds maxQueueDepth", async () => {
     const b = new ControlledBackend("a", 1);
     const sched = new Scheduler(new BackendRegistry().register("a", b), { maxQueueDepth: 2 });
 

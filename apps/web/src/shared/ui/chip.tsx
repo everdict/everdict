@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl'
 import { fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 
-// 메트릭 요약 칩 — 이름(faint) + 평균 + 선택적 통과율. 목록/하니스별에서 동일하게.
+// Metric summary chip — name (faint) + mean + optional pass rate. Same across lists/per-harness.
 export function MetricChip({
   metric,
   mean,
@@ -24,8 +24,8 @@ export function MetricChip({
   )
 }
 
-// 모델 칩 — 하니스가 쓴/선언한 LLM 식별자. 종류 식별용 아이콘(Cpu)을 앞에 붙인다(텍스트만으로는 구별 어려움).
-// primary=bg-secondary(강조), muted=관측/선언(옅음). 전역 통일.
+// Model chip — the LLM identifier the harness used/declared. Prefix a type-identifying icon (Cpu) (hard to tell apart from text alone).
+// primary=bg-secondary (emphasis), muted=observed/declared (faint). Uniform globally.
 export function ModelChip({ children, muted }: { children: ReactNode; muted?: boolean }) {
   return (
     <code
@@ -42,7 +42,7 @@ export function ModelChip({ children, muted }: { children: ReactNode; muted?: bo
   )
 }
 
-// 런타임 칩 — 워크로드가 도는 실행 인프라(등록 런타임 id | self:* 러너 | '기본 백엔드'). 아이콘(Server)으로 종류 구별.
+// Runtime chip — the execution infra the workload runs on (registered runtime id | self:* runner | 'default backend'). Type distinguished by the icon (Server).
 export function RuntimeChip({ label }: { label: string }) {
   return (
     <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground">
@@ -52,7 +52,7 @@ export function RuntimeChip({ label }: { label: string }) {
   )
 }
 
-// 부분 실행 칩 — 데이터셋의 subset 만 돌린 스코어카드 표식(selected/total). 전체 실행이면 렌더하지 않는다.
+// Partial-run chip — marks a scorecard that ran only a subset of the dataset (selected/total). Not rendered on a full run.
 export function SubsetChip({ selected, total }: { selected: number; total: number }) {
   const t = useTranslations('ui')
   return (
@@ -66,8 +66,8 @@ export function SubsetChip({ selected, total }: { selected: number; total: numbe
   )
 }
 
-// 버전 태그 칩 — 버전을 번호만으로 분간하기 어려울 때 붙이는 자유 라벨(스펙 밖 레지스트리 메타). 전역 통일.
-// trailing(삭제 ✕ 등)은 편집 표면이 주입한다 — 칩 자체는 표시 전용.
+// Version tag chip — a free-form label attached when versions are hard to tell apart by number alone (out-of-spec registry metadata). Uniform globally.
+// trailing (delete ✕, etc.) is injected by the editing surface — the chip itself is display-only.
 export function VersionTagChip({
   children,
   trailing,
@@ -84,8 +84,8 @@ export function VersionTagChip({
   )
 }
 
-// id@version 참조 — 데이터셋/하니스 식별을 동일 서식으로(@version 은 faint).
-// kind 를 주면 종류 아이콘을 앞에 붙여 눈으로 구별(데이터셋=Database 블루, 하니스=Boxes 인디고).
+// id@version reference — identifies datasets/harnesses in the same format (@version is faint).
+// If kind is given, prefix a type icon for visual distinction (dataset=Database blue, harness=Boxes indigo).
 const ENTITY_META = {
   dataset: { icon: Database, tint: 'text-[#7cc0ff]' },
   harness: { icon: Boxes, tint: 'text-[#9aa2ec]' },

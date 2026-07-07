@@ -5,25 +5,25 @@ import { anthropicComplete, harnessComplete, modelJudge, openaiComplete, traceTo
 const TRACE: TraceEvent[] = [{ t: 0, kind: "llm_call", model: "m" }];
 
 describe("modelJudge", () => {
-  it("JudgeCompletion 의 JSON 판정을 파싱한다(앞뒤 산문 허용)", async () => {
+  it("parses the JSON verdict from a JudgeCompletion (surrounding prose allowed)", async () => {
     const complete = async () => 'sure: {"pass": true, "score": 0.9, "reason": "looks correct"} done';
     const v = await modelJudge(complete).judge({ task: "t", trace: TRACE });
     expect(v).toEqual({ pass: true, score: 0.9, reason: "looks correct" });
   });
 
-  it("pass 누락 시 score 임계(0.5)로 도출, score 는 [0,1] 클램프", async () => {
+  it("derives pass from the score threshold (0.5) when missing, clamps score to [0,1]", async () => {
     const v = await modelJudge(async () => '{"score": 1.4, "reason": "great"}').judge({ task: "t" });
     expect(v).toEqual({ pass: true, score: 1, reason: "great" });
     const low = await modelJudge(async () => '{"score": 0.2, "reason": "no"}').judge({ task: "t" });
     expect(low.pass).toBe(false);
   });
 
-  it("JSON 이 없거나 형식 오류면 UpstreamError(502)", async () => {
+  it("UpstreamError (502) when JSON is missing or malformed", async () => {
     await expect(modelJudge(async () => "no json here").judge({ task: "t" })).rejects.toBeInstanceOf(AppError);
     await expect(modelJudge(async () => '{"reason":"x"}').judge({ task: "t" })).rejects.toBeInstanceOf(AppError);
   });
 
-  it("프롬프트에 task/rubric/trace 가 포함된다", async () => {
+  it("includes task/rubric/trace in the prompt", async () => {
     const complete = vi.fn((_prompt: string) => Promise.resolve('{"pass":true,"score":1,"reason":"ok"}'));
     await modelJudge(complete).judge({ task: "do X", rubric: "be correct", trace: TRACE });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
@@ -32,8 +32,8 @@ describe("modelJudge", () => {
     expect(prompt).toContain("llm_call");
   });
 
-  it("최종 답변이 트레이스 끝에 있고 트레이스 JSON 이 절단돼도, 전용 섹션으로 온전히 포함된다", async () => {
-    // 앞쪽을 6000자(MAX_CHARS) 넘게 채워 JSON.stringify(trace).slice(0, MAX) 가 맨 끝 최종 답변을 잘라내게 만든다.
+  it("includes the final answer fully via a dedicated section even when it's at the end of the trace and the trace JSON is truncated", async () => {
+    // Fill the front with more than 6000 chars (MAX_CHARS) so JSON.stringify(trace).slice(0, MAX) cuts off the final answer at the very end.
     const filler: TraceEvent[] = Array.from({ length: 200 }, (_, i) => ({
       t: i,
       kind: "message",
@@ -47,15 +47,15 @@ describe("modelJudge", () => {
     await modelJudge(complete).judge({ task: "do X", trace });
     const prompt = complete.mock.calls[0]?.[0] ?? "";
 
-    // 전용 AGENT FINAL ANSWER 섹션 덕에 프롬프트엔 최종 답변이 온전히 존재한다(절단 전이라면 유실됐다 — 회귀).
+    // Thanks to the dedicated AGENT FINAL ANSWER section, the final answer is fully present in the prompt (it would have been lost before the fix — regression).
     expect(prompt).toContain("AGENT FINAL ANSWER");
     expect(prompt).toContain(FINAL);
-    // 회귀 가드: 트레이스 JSON 자체는 여전히 절단돼 최종 답변을 담지 못한다(전용 섹션이 없었다면 유실됐음을 증명).
+    // Regression guard: the trace JSON itself is still truncated and doesn't contain the final answer (proving it would have been lost without the dedicated section).
     const traceSection = prompt.slice(prompt.indexOf("EXECUTION TRACE"));
     expect(traceSection).not.toContain("FINAL_ANSWER_SENTINEL_9f3a");
   });
 
-  it("최종 답변은 마지막 assistant message 다(중간 assistant 아님)", async () => {
+  it("the final answer is the last assistant message (not an intermediate assistant one)", async () => {
     const trace: TraceEvent[] = [
       { t: 0, kind: "message", role: "assistant", text: "interim-thought" },
       { t: 1, kind: "message", role: "user", text: "more" },
@@ -69,20 +69,20 @@ describe("modelJudge", () => {
     expect(section).not.toContain("interim-thought");
   });
 
-  it("스크린샷(VLM)이 있으면 complete 에 이미지를 넘기고 프롬프트에 명시한다", async () => {
+  it("with a screenshot (VLM), passes the image to complete and notes it in the prompt", async () => {
     const complete = vi.fn((_prompt: string, _image?: { base64: string; mediaType: string }) =>
       Promise.resolve('{"pass":true,"score":1,"reason":"goal state shown"}'),
     );
     const screenshot = { base64: "AAAA", mediaType: "image/png" };
     const v = await modelJudge(complete).judge({ task: "show the remote form", screenshot });
     expect(v.pass).toBe(true);
-    expect(complete.mock.calls[0]?.[1]).toEqual(screenshot); // 이미지가 전송으로 전달됨
-    expect(complete.mock.calls[0]?.[0]).toContain("SCREENSHOT"); // 프롬프트가 첨부 스크린샷을 명시
+    expect(complete.mock.calls[0]?.[1]).toEqual(screenshot); // image passed to transport
+    expect(complete.mock.calls[0]?.[0]).toContain("SCREENSHOT"); // prompt notes the attached screenshot
   });
 });
 
 describe("anthropicComplete", () => {
-  it("Messages API 를 호출하고 content[0].text 를 돌려준다", async () => {
+  it("calls the Messages API and returns content[0].text", async () => {
     const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(new Response(JSON.stringify({ content: [{ text: "hi" }] }), { status: 200 })),
     );
@@ -92,7 +92,7 @@ describe("anthropicComplete", () => {
     expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>)["x-api-key"]).toBe("k");
   });
 
-  it("non-2xx 는 UpstreamError 로 remap", async () => {
+  it("remaps non-2xx to UpstreamError", async () => {
     const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(new Response("nope", { status: 500 })),
     );
@@ -100,7 +100,7 @@ describe("anthropicComplete", () => {
     await expect(complete("p")).rejects.toBeInstanceOf(AppError);
   });
 
-  it("이미지가 있으면 멀티모달 content(base64 image 블록)로 전송", async () => {
+  it("with an image, sends multimodal content (base64 image block)", async () => {
     const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(new Response(JSON.stringify({ content: [{ text: "hi" }] }), { status: 200 })),
     );
@@ -116,7 +116,7 @@ describe("anthropicComplete", () => {
 });
 
 describe("openaiComplete", () => {
-  it("chat/completions 를 호출하고 choices[0].message.content 를 돌려준다(베이스 URL 적용)", async () => {
+  it("calls chat/completions and returns choices[0].message.content (base URL applied)", async () => {
     const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(
         new Response(JSON.stringify({ choices: [{ message: { content: "verdict" } }] }), { status: 200 }),
@@ -133,7 +133,7 @@ describe("openaiComplete", () => {
     expect((fetchImpl.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer k");
   });
 
-  it("이미지가 있으면 멀티모달 content(image_url data-URL)로 전송 — LiteLLM 비전 포함", async () => {
+  it("with an image, sends multimodal content (image_url data-URL) — incl. LiteLLM vision", async () => {
     const fetchImpl = vi.fn((_url: string, _init?: RequestInit) =>
       Promise.resolve(new Response(JSON.stringify({ choices: [{ message: { content: "v" } }] }), { status: 200 })),
     );
@@ -149,7 +149,7 @@ describe("openaiComplete", () => {
 });
 
 describe("traceToText", () => {
-  it("assistant 메시지를 모은다(없으면 전체 메시지)", () => {
+  it("gathers assistant messages (all messages if none)", () => {
     expect(
       traceToText([
         { t: 0, kind: "message", role: "user", text: "q" },
@@ -158,13 +158,13 @@ describe("traceToText", () => {
         { t: 3, kind: "message", role: "assistant", text: "a2" },
       ]),
     ).toBe("a1\na2");
-    // assistant 없으면 전체 메시지
+    // all messages when no assistant
     expect(traceToText([{ t: 0, kind: "message", role: "user", text: "only-user" }])).toBe("only-user");
   });
 });
 
 describe("harnessComplete", () => {
-  it("디스패치된 에이전트 트레이스의 출력 텍스트를 verdict 로(modelJudge 와 결합)", async () => {
+  it("takes the dispatched agent trace's output text as the verdict (combined with modelJudge)", async () => {
     const complete = harnessComplete({
       dispatch: async () => [
         { t: 0, kind: "message", role: "assistant", text: '{"pass":true,"score":1,"reason":"ok"}' },

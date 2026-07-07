@@ -1,19 +1,19 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 GET /queue(QueueSnapshot) 미러 — 작업 큐: 런타임 레인별 실행 중/대기/다음 예약.
-// 단위는 배치(스코어카드)=1작업(진행률 포함) + 단발 run=1작업. 자식 run 은 배치의 진행률로 접힌다.
+// Control plane GET /queue (QueueSnapshot) mirror — work queue: running/queued/next-scheduled per runtime lane.
+// The unit is a batch (scorecard)=1 job (with progress) + a single run=1 job. Child runs collapse into the batch's progress.
 
 export const queueItemSchema = z.object({
   type: z.enum(['scorecard', 'run']),
   id: z.string(),
   status: z.enum(['queued', 'running']),
-  dataset: z.object({ id: z.string(), version: z.string() }).optional(), // 스코어카드만
+  dataset: z.object({ id: z.string(), version: z.string() }).optional(), // scorecard only
   harness: z.object({ id: z.string(), version: z.string() }),
-  caseId: z.string().optional(), // 단발 run 만
-  trigger: z.string().optional(), // 어디서 발사됐나(web|api|schedule|github-actions…)
-  createdBy: z.string().optional(), // 실행자 subject
+  caseId: z.string().optional(), // single run only
+  trigger: z.string().optional(), // where it was fired from (web|api|schedule|github-actions…)
+  createdBy: z.string().optional(), // executor subject
   createdAt: z.string(),
-  // 배치 진행률(실행 중 스코어카드만). total 은 데이터셋 해석 실패 시 생략.
+  // batch progress (running scorecards only). total is omitted if dataset resolution fails.
   progress: z
     .object({ done: z.number(), active: z.number(), total: z.number().optional() })
     .optional(),
@@ -30,16 +30,16 @@ export const queueUpcomingSchema = z.object({
 export type QueueUpcoming = z.infer<typeof queueUpcomingSchema>
 
 export const queueLaneSchema = z.object({
-  runtime: z.string(), // '' = 기본 백엔드, 'self:<id>' = 셀프호스티드 러너
-  label: z.string().optional(), // 사람이 읽는 라벨(personal 레인 = 러너 호스트명)
+  runtime: z.string(), // '' = default backend, 'self:<id>' = self-hosted runner
+  label: z.string().optional(), // human-readable label (personal lane = runner hostname)
   registered: z.boolean(),
   running: z.array(queueItemSchema),
-  queued: z.array(queueItemSchema), // FIFO — 맨 앞이 다음 작업
+  queued: z.array(queueItemSchema), // FIFO — the front is the next job
   upcoming: z.array(queueUpcomingSchema),
 })
 export type QueueLane = z.infer<typeof queueLaneSchema>
 
-// 큐는 스코프가 둘 — workspace(공용 런타임: 기본 백엔드 + 등록 인프라) / personal(내 셀프호스티드 러너).
+// The queue has two scopes — workspace (shared runtimes: default backend + registered infra) / personal (my self-hosted runners).
 export const queueSnapshotSchema = z.object({
   generatedAt: z.string(),
   totals: z.object({ running: z.number(), queued: z.number(), upcoming: z.number() }),

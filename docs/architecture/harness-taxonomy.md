@@ -1,4 +1,4 @@
-# Harness taxonomy — Template (대분류) + Instance (design)
+# Harness taxonomy — Template (category) + Instance (design)
 
 > **Status: design / not yet implemented.** Track A of the harness rework. Track B (image-source
 > integrations: GHCR / generic Docker / artifact registry) is a separate, later effort — see the end.
@@ -21,19 +21,19 @@ grasp which belong together or how they differ.
 We split *authoring* into two levels but keep the *resolved* artifact (what backends consume) unchanged.
 
 ```
-Template (대분류)            "the shape"          versions unpinned, declares slots
+Template (category)         "the shape"          versions unpinned, declares slots
    └── Instance (harness)   "shape + pins"       pins each slot to a concrete version/image
             └── resolve()  →  HarnessSpec (existing process|service|command)  →  dispatch
 ```
 
-- **Template (대분류)** — the structural skeleton: for a topology, *which* services + dependencies + target +
+- **Template (category)** — the structural skeleton: for a topology, *which* services + dependencies + target +
   frontDoor + traceSource are involved, **without** image versions. Each versionable thing is a named **slot**.
   Example `bu` (browser-agent): services `{planner, browser, action-stream}` + dep `{redis}`, each service a
   slot. A template is itself **versioned** — changing the *shape* (add/remove a service, change wiring) is a new
   template version (e.g. `bu` structure `v1` → `v2`). Pinning a service version is **not** a template change.
-- **Instance (개별 하네스)** — a template reference + **pins** (the delta): the concrete image/version for each
+- **Instance (individual harness)** — a template reference + **pins** (the delta): the concrete image/version for each
   slot. Typically one per PR/SHA, created by CI. Stored as pins only, never a full copy of the structure. May
-  carry an optional free-text **`description`** — this version's changelog note ("무엇이 바뀌었는지"), entered when
+  carry an optional free-text **`description`** — this version's changelog note ("what changed"), entered when
   deploying a new version and shown on the harness detail. It is part of the version's immutable content
   (`specsEqual`), but runtime-irrelevant so `resolve()` does not carry it into the resolved `HarnessSpec`.
 - **Resolved `HarnessSpec`** — `template structure (at the referenced template version) + pins`. This is the
@@ -47,9 +47,9 @@ form only** — produced by `resolve()`, consumed by backends/runtime, and no lo
 input.
 
 ```jsonc
-// Template (대분류) — structure once, slots instead of versions. Versioned by SHAPE.
+// Template (category) — structure once, slots instead of versions. Versioned by SHAPE.
 {
-  "category": "topology",            // 대분류 type label (topology|claude-code|codex|command|os-use-app|custom)
+  "category": "topology",            // category type label (topology|claude-code|codex|command|os-use-app|custom)
   "kind": "service",                 // which resolved kind it compiles to
   "id": "bu", "version": "1",        // template id + STRUCTURE version
   "services": [
@@ -62,11 +62,11 @@ input.
   "traceSource": { "kind": "otel", "endpoint": "..." }
 }
 
-// Instance (개별 하네스) — template ref + pins (delta only). One per PR/SHA.
+// Instance (individual harness) — template ref + pins (delta only). One per PR/SHA.
 {
   "template": { "id": "bu", "version": "1" },
   "id": "bu", "version": "pr-123-sha-abc",
-  "description": "planner 프롬프트 개편 + browser 119 로 상향", // optional — 이 버전의 변경 내역(상세에 표시)
+  "description": "planner prompt rework + bump browser to 119", // optional — this version's changelog (shown on detail)
   "pins": {
     "planner":       "ghcr.io/acme/bu-planner:abc123",
     "browser":       "chromedp/headless-shell:119",
@@ -93,7 +93,7 @@ the same template+pins → resolved `CommandHarnessSpec`/`ProcessHarnessSpec`. T
   `resolveHarness`, `ServiceTopologyBackend.specFor`, and the In-memory/Pg registries are all converted to the
   template/instance shape in the same change set.
 
-## Permissions (`@everdict/auth`) — "그 대신 대분류" governance
+## Permissions (`@everdict/auth`) — "category, not role" governance
 
 | Action | Role | What |
 |---|---|---|
@@ -101,7 +101,7 @@ the same template+pins → resolved `CommandHarnessSpec`/`ProcessHarnessSpec`. T
 | `harnesses:register` (instances) | **viewer+ (no gate)** | register an **instance** (pins) under a template — CI/users |
 | `harnesses:read` | viewer | read |
 
-**No role gate (권한 상관없이 동등 사용).** Harnesses — both templates (대분류) and instances — are collaborative
+**No role gate (equal use regardless of role).** Harnesses — both templates (category) and instances — are collaborative
 eval content (like datasets/judges), not admin-gated infra. Every workspace member uses them equally: anyone can
 define a template and register instances; reads are open. (This matches `harnesses:register` already being
 viewer+ in `authz.ts`; `templates:write` joins it.) Isolation is still per-workspace — `templates:write` only
@@ -115,24 +115,24 @@ One service core, three transports (HTTP route + MCP tool + web), per the parity
   (member write, body = `{template, pins}`); validate (dry-run) mirrors. `GET /harnesses` returns instances
   **grouped by template** with the resolved diff. MCP: `register_template`/`list_templates` +
   `register_harness`(instance)/`list_harnesses`.
-  - **Raw config reads** (resolve 전 원본): `GET /harness-templates/:id/:version` → `HarnessTemplateSpec`
+  - **Raw config reads** (pre-resolve originals): `GET /harness-templates/:id/:version` → `HarnessTemplateSpec`
     (structure/slots) and `GET /harnesses/:id/:version/instance` → `HarnessInstanceSpec` (template ref + pins).
     Distinct from `GET /harnesses/:id/:version` (the **resolved** spec). MCP parity:
-    `get_harness_template` / `get_harness_instance` (`harnesses:read`). These power the web 구성 패널 + the
+    `get_harness_template` / `get_harness_instance` (`harnesses:read`). These power the web Config panel + the
     edit-and-new-version prefill below.
 - **Web** (fixes the flat-explosion pain directly):
-  - `/dashboard/harnesses` — top level lists **templates (대분류)** as cards: category, name, # instances,
+  - `/dashboard/harnesses` — top level lists **templates (category)** as cards: category, name, # instances,
     latest instance. The per-PR/SHA entries are **collapsed under their template**, not flat.
   - `/dashboard/harnesses/[template]` — the structure (services/deps) shown **once** + a table of instances
     (version, **pin diff**, created at, who).
-  - **인스턴스 등록** form (member): pick a template → fill the image/version per slot → register.
-  - **템플릿 등록** form (admin): define structure + slots.
-  - **하니스 상세 → 구성(Config) 패널 + 새 버전 만들기**: the detail page shows the active version's raw config
-    (template ref + slot→value pins) and a "새 버전 만들기" entry. Because versions are **immutable**, editing =
+  - **Instance registration** form (member): pick a template → fill the image/version per slot → register.
+  - **Template registration** form (admin): define structure + slots.
+  - **Harness detail → Config panel + Create new version**: the detail page shows the active version's raw config
+    (template ref + slot→value pins) and a "Create new version" entry. Because versions are **immutable**, editing =
     registering a new version: the register-wizard forms (`InstanceForm`/`TemplateForm`) are reused **prefilled**
     from the current config (`instanceStateFromSpec` / `templateStateFromSpec`), with `id`/`kind` locked. Two axes:
-    인스턴스 pins 재핀 → new instance tag (→ detail of the new version); 템플릿 구조 변경 → new template semver,
-    then the page returns to the 인스턴스 탭 (`?tplVersion=`) to re-pin an instance on the new structure.
+    re-pin instance pins → new instance tag (→ detail of the new version); template structure change → new template semver,
+    then the page returns to the instance tab (`?tplVersion=`) to re-pin an instance on the new structure.
 
 ## Scorecards / regression
 
@@ -321,10 +321,10 @@ isolation.
   docker driver `Config.volumes` and threads `svc.readiness` into the runtime's per-endpoint HTTP wait; docker as
   before.
 - **Web UI — structured override editors (implemented):** the instance register/new-version form has a collapsible
-  "변주(overrides)" disclosure with per-service rows (env/replicas/resources/volumes/readiness), a front-door block
+  "variations (overrides)" disclosure with per-service rows (env/replicas/resources/volumes/readiness), a front-door block
   (submit-body JSON + completion timeouts), a target-extension field, and command env/params — `buildOverrides`
   assembles the spec, `instanceStateFromSpec` round-trips existing overrides back into the fields for
-  edit→new-version; the 구성 panel renders the resolved overrides. MCP/HTTP parity is automatic (schema-driven JSON).
+  edit→new-version; the Config panel renders the resolved overrides. MCP/HTTP parity is automatic (schema-driven JSON).
 
 > Blast radius: `@everdict/core` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
 > `harness-template` `overrides` + resolve), `@everdict/harnesses` (`CommandHarness` `{{var}}`), `@everdict/topology`

@@ -1,22 +1,22 @@
 import { spawn } from "node:child_process";
 
-// 호스트(컨트롤플레인)에서 클러스터로 가는 포워드 핸들 — port-forward 프로세스 수명을 잡는다.
+// Forward handle from the host (control plane) to the cluster — owns the port-forward process lifetime.
 export interface PortForward {
   localPort: number;
   stop(): Promise<void>;
 }
 
-// kubectl 추상화 (테스트에서 모킹 가능; NomadHttp 패턴의 K8s 버전).
+// kubectl abstraction (mockable in tests; the K8s counterpart of the NomadHttp pattern).
 export interface Kubectl {
   apply(manifests: unknown[]): Promise<void>; // kubectl apply -f - (List)
   ensureNamespace(ns: string, labels?: Record<string, string>): Promise<void>;
   rolloutStatus(deployment: string, ns: string, timeoutSec?: number): Promise<void>;
-  portForward(target: string, ns: string, remotePort: number): Promise<PortForward>; // target 예: svc/x
-  deleteResources(targets: string[], ns: string): Promise<void>; // target 예: deployment/x, svc/x
+  portForward(target: string, ns: string, remotePort: number): Promise<PortForward>; // target e.g. svc/x
+  deleteResources(targets: string[], ns: string): Promise<void>; // target e.g. deployment/x, svc/x
   deleteNamespace(ns: string): Promise<void>;
-  // 파드 안에서 명령 실행(스토어 어드민 DDL/ACL 용). selector 로 파드명 해석 → exec.
+  // Run a command inside a pod (for store admin DDL/ACL). Resolve the pod name via a selector → exec.
   exec(pod: string, ns: string, command: string[], stdin?: string): Promise<string>;
-  podFor(selector: string, ns: string): Promise<string>; // label selector (예: app=x) → 첫 파드명
+  podFor(selector: string, ns: string): Promise<string>; // label selector (e.g. app=x) → first pod name
 }
 
 interface RunResult {
@@ -45,7 +45,7 @@ function run(bin: string, args: string[], stdin?: string): Promise<RunResult> {
   });
 }
 
-// kind/kubeconfig 컨텍스트로 동작하는 실 kubectl 구현.
+// Real kubectl implementation driven by a kind/kubeconfig context.
 export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubectl {
   const bin = opts.bin ?? "kubectl";
   const ctx = opts.context ? ["--context", opts.context] : [];
@@ -74,7 +74,7 @@ export function kubectlCli(opts: { context?: string; bin?: string } = {}): Kubec
       if (res.code !== 0) throw new Error(`rollout status ${deployment} failed: ${res.stderr || res.stdout}`);
     },
     portForward(target, ns, remotePort) {
-      // `port-forward target :<remotePort>` → kubectl 가 로컬 포트를 자동 선택하고 stdout 에 알린다.
+      // `port-forward target :<remotePort>` → kubectl auto-picks a local port and reports it on stdout.
       return new Promise<PortForward>((resolve, reject) => {
         const proc = spawn(bin, [...ctx, "-n", ns, "port-forward", target, `:${remotePort}`], {
           stdio: ["ignore", "pipe", "pipe"],

@@ -8,8 +8,8 @@ export interface DeleteWorkspaceResult {
   error?: string
 }
 
-// 활성 워크스페이스 삭제 → DELETE /workspace. owner(생성자)만 가능(컨트롤플레인이 owner 를 검증, 아니면 403).
-// 성공 시 모든 워크스페이스 데이터가 cascade 삭제된다. revalidate 없음 — 클라이언트가 홈으로 보내 재라우팅.
+// Delete the active workspace → DELETE /workspace. Owner (creator) only (the control plane verifies owner, else 403).
+// On success, all workspace data is cascade-deleted. No revalidate — the client redirects to home to re-route.
 export async function deleteWorkspaceAction(): Promise<DeleteWorkspaceResult> {
   const ctx = await authContext()
   try {

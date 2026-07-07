@@ -14,7 +14,7 @@ export interface Actor {
   avatarUrl?: string
   known: boolean
 }
-// 데이터셋 활동 이벤트(댓글은 별도 CommentThread) — 생성 + 스코어카드 실행.
+// Dataset activity events (comments are a separate CommentThread) — creation + scorecard runs.
 export type ActivityItem =
   | { kind: 'created'; at: string; actor: Actor }
   | {
@@ -40,7 +40,7 @@ const STATUS_TONE: Record<string, string> = {
 }
 const STATUS_KEYS = ['succeeded', 'failed', 'running', 'queued', 'superseded']
 
-// 데이터셋 활동 히스토리(이벤트) — 시간순, 최근 10개만 + '이전 이력 보기'. 댓글/논의는 별도 스레드.
+// Dataset activity history (events) — chronological, only the latest 10 + 'show earlier history'. Comments/discussion are a separate thread.
 export function ActivityTimeline({
   workspace,
   items,

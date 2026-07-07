@@ -7,8 +7,8 @@ import { useLocale, useTranslations } from 'next-intl'
 import { copyText } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
 
-// 구문강조 + 접기 가능한 JSON 트리. 코어 패키지 무의존(웹은 HTTP 미러만) — 임의 JSON 값을 그대로 도식 없이 검토.
-// 색은 디자인 토큰 기반(키=인디고, 문자열=success, 숫자=warning, bool=link, null=faint).
+// Syntax-highlighted + collapsible JSON tree. No core-package dependency (web is an HTTP mirror only) — inspect arbitrary JSON values as-is without a schema.
+// Colors are design-token based (key=indigo, string=success, number=warning, bool=link, null=faint).
 
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json }
 
@@ -42,7 +42,7 @@ function Node({
   depth: number
   trailingComma: boolean
 }) {
-  const [open, setOpen] = useState(depth < 2) // 상위 2단계는 펼침, 그 아래는 접힘 기본
+  const [open, setOpen] = useState(depth < 2) // top 2 levels expanded, deeper collapsed by default
   const comma = trailingComma ? <Punct>,</Punct> : null
 
   if (Array.isArray(value) || isObject(value)) {
@@ -127,7 +127,7 @@ export function JsonView({ value, className }: { value: unknown; className?: str
   const text = JSON.stringify(value, null, 2)
 
   async function copy() {
-    // http(비-secure) 컨텍스트에선 navigator.clipboard 가 없어 copyText 가 execCommand 로 폴백한다.
+    // In an http (non-secure) context navigator.clipboard is absent, so copyText falls back to execCommand.
     if (await copyText(text, undefined, locale)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)

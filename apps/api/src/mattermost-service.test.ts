@@ -10,11 +10,11 @@ describe("MattermostService", () => {
     svc = new MattermostService(settings);
   });
 
-  it("미설정이면 get 은 undefined", async () => {
+  it("get is undefined when unconfigured", async () => {
     expect(await svc.get("acme")).toBeUndefined();
   });
 
-  it("등록 후 get 은 host/botTokenSecretName/defaultChannelId 를 돌려준다(비밀 값 없음)", async () => {
+  it("after registration, get returns host/botTokenSecretName/defaultChannelId (no secret values)", async () => {
     await svc.set("acme", { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
     expect(await svc.get("acme")).toEqual({
       host: "https://mm.corp.io",
@@ -23,7 +23,7 @@ describe("MattermostService", () => {
     });
   });
 
-  it("defaultChannelId 없이 갱신하면 기존 채널을 보존한다", async () => {
+  it("updating without defaultChannelId preserves the existing channel", async () => {
     await svc.set("acme", { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT", defaultChannelId: "ch" });
     await svc.set("acme", { host: "https://mm2.corp.io", botTokenSecretName: "MM_BOT2" });
     expect(await svc.get("acme")).toEqual({
@@ -33,11 +33,11 @@ describe("MattermostService", () => {
     });
   });
 
-  it("clear 는 설정을 무효화한다(get → undefined, 멱등)", async () => {
+  it("clear voids the config (get → undefined, idempotent)", async () => {
     await svc.set("acme", { host: "https://mm.corp.io", botTokenSecretName: "MM_BOT" });
     await svc.clear("acme");
     expect(await svc.get("acme")).toBeUndefined();
-    await svc.clear("acme"); // 멱등
+    await svc.clear("acme"); // idempotent
     expect(await svc.get("acme")).toBeUndefined();
   });
 });

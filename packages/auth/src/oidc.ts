@@ -1,25 +1,25 @@
 import { type JWTVerifyGetKey, createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
 import type { Authenticator } from "./principal.js";
 
-// 검증 실패 진단 정보(상위 앱이 로그로 남긴다). 토큰을 신뢰하지 않고 사유 파악용으로만 디코드한 값.
+// Verification-failure diagnostics (the upper app logs these). Values decoded only to understand the reason, without trusting the token.
 export interface OidcVerifyErrorInfo {
-  code: string; // jose 에러 코드(ERR_JWT_EXPIRED 등) | "JWKS_FETCH_FAILED"(네트워크/DNS/TLS) | "UNKNOWN"
-  message: string; // 원본 에러 메시지(요약)
-  expectedIssuer: string; // 컨트롤플레인이 기대하는 issuer(=KEYCLOAK_ISSUER)
-  tokenIssuer?: string; // 토큰의 iss(검증 전 디코드) — issuer 불일치 진단용
-  tokenAudience?: unknown; // 토큰의 aud — audience 불일치 진단용
-  claimKeys?: string[]; // 토큰 최상위 claim 이름들 — workspaceClaim 존재 여부 진단용
+  code: string; // jose error code (ERR_JWT_EXPIRED, etc.) | "JWKS_FETCH_FAILED" (network/DNS/TLS) | "UNKNOWN"
+  message: string; // original error message (summary)
+  expectedIssuer: string; // the issuer the control plane expects (= KEYCLOAK_ISSUER)
+  tokenIssuer?: string; // the token's iss (decoded before verification) — for diagnosing issuer mismatch
+  tokenAudience?: unknown; // the token's aud — for diagnosing audience mismatch
+  claimKeys?: string[]; // the token's top-level claim names — for diagnosing whether workspaceClaim is present
 }
 
 export interface OidcAuthOptions {
-  issuer: string; // 예: http://localhost:8080/realms/everdict
+  issuer: string; // e.g. http://localhost:8080/realms/everdict
   audience?: string;
-  jwksUri?: string; // 기본 `${issuer}/protocol/openid-connect/certs`
-  workspaceClaim?: string; // 기본 "workspace"
-  groupPrefix?: string; // 폴백: groups 중 이 접두사 첫 그룹 → 워크스페이스. 기본 "/workspaces/"
-  keySet?: JWTVerifyGetKey; // 테스트 주입(로컬 키셋)
-  // JWT 검증 실패 사유를 상위(앱)가 로깅할 수 있게 알린다(401 원인 파악용). 정상적인 "내 자격증명 아님"
-  // (ak_ API 키/비-JWT)은 호출하지 않는다 — 검증을 시도했다가 실패한 경우만. 콜백 예외는 인증을 깨지 않는다.
+  jwksUri?: string; // default `${issuer}/protocol/openid-connect/certs`
+  workspaceClaim?: string; // default "workspace"
+  groupPrefix?: string; // fallback: the first group with this prefix → workspace. default "/workspaces/"
+  keySet?: JWTVerifyGetKey; // test injection (local key set)
+  // Notifies the upper (app) so it can log the JWT verification-failure reason (to diagnose a 401). The normal "not my credential"
+  // (ak_ API key / non-JWT) does not call this — only when verification was attempted and failed. A callback exception never breaks authentication.
   onError?: (info: OidcVerifyErrorInfo) => void;
 }
 
@@ -27,12 +27,12 @@ function looksLikeJwt(t: string): boolean {
   return !t.startsWith("ak_") && t.split(".").length === 3;
 }
 
-// jose/네트워크 에러 → 사람이 읽는 진단 정보. 검증 실패한 토큰이라도(신뢰하지 않고) iss/aud/claim 키를 디코드해 남긴다.
+// jose/network error → human-readable diagnostics. Even for a token that failed verification (without trusting it), decodes and records iss/aud/claim keys.
 function describeVerifyError(err: unknown, bearer: string, expectedIssuer: string): OidcVerifyErrorInfo {
   const code =
     typeof err === "object" && err !== null && "code" in err ? String((err as { code: unknown }).code) : "UNKNOWN";
   const message = err instanceof Error ? err.message : String(err);
-  // JWKS 미도달(컨트롤플레인이 Keycloak 에 못 닿음)은 jose 코드가 아니라 fetch 실패로 온다 — 따로 분류해 눈에 띄게.
+  // JWKS unreachable (the control plane can't reach Keycloak) arrives as a fetch failure, not a jose code — classify it separately so it stands out.
   const isFetchFail =
     code === "ERR_JWKS_TIMEOUT" || /fetch failed|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|getaddrinfo|socket/i.test(message);
   const info: OidcVerifyErrorInfo = { code: isFetchFail ? "JWKS_FETCH_FAILED" : code, message, expectedIssuer };
@@ -42,12 +42,12 @@ function describeVerifyError(err: unknown, bearer: string, expectedIssuer: strin
     if (payload.aud !== undefined) info.tokenAudience = payload.aud;
     info.claimKeys = Object.keys(payload);
   } catch {
-    // 디코드 불가(비정상 페이로드)는 무시 — 코드/메시지만으로도 사유 파악 가능.
+    // Ignore an undecodable (malformed payload) — the code/message alone is enough to understand the reason.
   }
   return info;
 }
 
-// 워크스페이스 = 토큰의 claim(기본 workspace) 또는 그룹(/workspaces/<ws>/…)에서 파생.
+// workspace = derived from the token's claim (default workspace) or a group (/workspaces/<ws>/…).
 function extractWorkspace(payload: Record<string, unknown>, claim: string, prefix: string): string | undefined {
   const direct = payload[claim];
   if (typeof direct === "string" && direct.length > 0) return direct;
@@ -62,7 +62,7 @@ function extractWorkspace(payload: Record<string, unknown>, claim: string, prefi
   return undefined;
 }
 
-// 사람이 읽을 식별자(멤버 목록 표시용) — email 우선, 없으면 preferred_username. 표시 전용(identity/authz 무관).
+// A human-readable identifier (for the member list display) — email first, else preferred_username. Display only (unrelated to identity/authz).
 function extractEmail(payload: Record<string, unknown>): string | undefined {
   const email = payload.email;
   if (typeof email === "string" && email.length > 0) return email;
@@ -71,7 +71,7 @@ function extractEmail(payload: Record<string, unknown>): string | undefined {
   return undefined;
 }
 
-// Keycloak(OIDC) JWT 검증 인증기 — JWKS 로 서명 검증, issuer/audience 확인, 워크스페이스/역할 추출.
+// Keycloak (OIDC) JWT verification authenticator — verify signature via JWKS, check issuer/audience, extract workspace/roles.
 export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
   const jwks =
     opts.keySet ??
@@ -87,29 +87,29 @@ export function oidcAuthenticator(opts: OidcAuthOptions): Authenticator {
           issuer: opts.issuer,
           ...(opts.audience ? { audience: opts.audience } : {}),
         });
-        // workspace 클레임/그룹이 없어도(예: 외부 Keycloak 에 workspace 매퍼가 없는 경우) 토큰이 유효하면 인증한다.
-        // 워크스페이스는 self-serve 멤버십이 SSOT 이므로, 클레임 없는 사용자는 workspace="" (아직 없음)로 두고
-        // apps/api 의 멤버십 해석(부트스트랩) + 웹 온보딩(첫 워크스페이스 생성)이 채운다.
-        // fail-closed 는 *검증 불가* 토큰(서명/issuer/audience/만료 실패)에만 적용 — 그건 아래 catch 가 undefined 로.
+        // Even without a workspace claim/group (e.g. an external Keycloak with no workspace mapper), a valid token authenticates.
+        // Since self-serve membership is the SSOT for workspaces, a user with no claim is left at workspace="" (none yet) and
+        // filled in by apps/api's membership resolution (bootstrap) + web onboarding (creating the first workspace).
+        // fail-closed applies only to an *unverifiable* token (signature/issuer/audience/expiry failure) — the catch below turns that into undefined.
         const workspace = extractWorkspace(payload as Record<string, unknown>, workspaceClaim, groupPrefix) ?? "";
         const email = extractEmail(payload as Record<string, unknown>);
         return {
           subject: String(payload.sub ?? ""),
           workspace,
-          // Keycloak 은 *인증 전용* — 인가(역할)에 절대 쓰지 않는다. 역할은 워크스페이스 멤버십이 SSOT
-          // (생성자=admin, 초대=지정 역할, 승격). realm_access.roles 같은 토큰 역할은 의도적으로 무시한다.
+          // Keycloak is *authentication only* — never used for authorization (roles). Roles have the workspace membership as SSOT
+          // (creator = admin, invite = assigned role, promotion). Token roles like realm_access.roles are deliberately ignored.
           roles: [],
           via: "oidc",
           ...(email ? { email } : {}),
         };
       } catch (err) {
-        // 검증 실패 사유를 상위가 로깅할 수 있게 알린다(로깅 실패가 인증 흐름을 깨지 않도록 격리).
+        // Notifies the upper so it can log the verification-failure reason (isolated so a logging failure doesn't break the authentication flow).
         try {
           opts.onError?.(describeVerifyError(err, bearer, opts.issuer));
         } catch {
-          // 콜백 예외 무시.
+          // Ignore a callback exception.
         }
-        return undefined; // 검증 실패 → 미인증
+        return undefined; // verification failed → unauthenticated
       }
     },
   };

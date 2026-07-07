@@ -9,11 +9,11 @@ import { controlPlane } from '@/shared/lib/control-plane'
 export interface ImageRegistryMutationResult {
   ok: boolean
   error?: string
-  missingSecrets?: string[] // 참조 시크릿 부재 경고(warn-not-block) — 저장은 됐고 시크릿만 나중에
+  missingSecrets?: string[] // referenced-secret-absent warning (warn-not-block) — the save succeeded, just add the secret later
 }
 
-// 이미지 레지스트리 등록/갱신(관리자, name 기준 upsert). pull/push 토큰(값)은 워크스페이스 시크릿에
-// 먼저 넣고 그 이름만 지정. authZ(admin=settings:write)는 컨트롤플레인이 강제.
+// Register/update image registry (admin, upsert keyed by name). Put the pull/push token (value) in a workspace secret
+// first and specify only its name. authZ (admin = settings:write) is enforced by the control plane.
 export async function upsertImageRegistryAction(input: {
   name: string
   host: string
@@ -34,7 +34,7 @@ export async function upsertImageRegistryAction(input: {
   }
 }
 
-// 이미지 레지스트리 삭제(관리자). 이후 분류에서 그 레지스트리의 workspace 클래스는 나오지 않는다.
+// Delete image registry (admin). Afterward, classification no longer yields that registry's workspace class.
 export async function removeImageRegistryAction(
   name: string
 ): Promise<ImageRegistryMutationResult> {

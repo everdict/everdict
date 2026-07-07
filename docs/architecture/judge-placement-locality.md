@@ -23,7 +23,7 @@ Three gaps that are really **one optimization** wearing three hats:
 1. **A harness judge cannot pick a runtime.** `JudgeSpec` has no `runtime`/`placement`. A harness judge always
    dispatches its judging agent onto the default backend, even when the tenant has a registered runtime that should
    run it.
-2. **Placement is store-blind.** When the thing a judge inspects (the **관측물** — a DOM/screenshot/artifact) lives
+2. **Placement is store-blind.** When the thing a judge inspects (the **observation** — a DOM/screenshot/artifact) lives
    in a store, nothing lets us run the judge *near that store*. Placement is capacity + trust-zone + tenant-fairness
    only.
 3. **On the topology path, the observation is delivered store-fetch-only.** The control plane always *pulls* the
@@ -38,7 +38,7 @@ decision, so they ship as one coherent design.
 
 ### Judge dispatch has no placement (but rides the same dispatcher as a run)
 `apps/api/src/judge-runner.ts:76-81` builds the harness judge's `AgentJob` with **no `evalCase.placement`**, then
-dispatches via `DefaultJudgeRunnerDeps.dispatch` — documented as *"단일 run 과 동일 경로"* (the same
+dispatches via `DefaultJudgeRunnerDeps.dispatch` — documented as *"same path as a single run"* (the same
 `RuntimeDispatcher` the scorecard run uses). So **threading `placement.target` is sufficient to route a judge** —
 no new dispatch path.
 

@@ -7,8 +7,8 @@ interface RuntimeRow {
   runtime: unknown;
 }
 
-// Postgres 기반 테넌트-소유 Runtime SSOT. (tenant, id, version) 키. 테넌트 소유 우선, 없으면 _shared 폴백.
-// 스키마: @everdict/db/migrations/0009_create_runtimes. PgJudgeRegistry 와 동일 구조.
+// Postgres-backed tenant-owned Runtime SSOT. Key (tenant, id, version). Tenant-owned first, else _shared fallback.
+// Schema: @everdict/db/migrations/0009_create_runtimes. Same structure as PgJudgeRegistry.
 export class PgRuntimeRegistry implements RuntimeRegistry {
   constructor(private readonly client: SqlClient) {}
 
@@ -43,7 +43,7 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
         throw new ConflictError(
           "CONFLICT",
           { tenant, id: spec.id, version: spec.version },
-          `runtime ${spec.id}@${spec.version} 가 다른 내용으로 이미 등록되어 있습니다(버전은 불변).`,
+          `runtime ${spec.id}@${spec.version} is already registered with different content (versions are immutable).`,
         );
       }
       return;
@@ -75,7 +75,7 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
 
   async get(tenant: string, id: string, ref = "latest"): Promise<RuntimeSpec> {
     const owner = await this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `runtime '${id}' 가 없습니다.`);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `runtime '${id}' not found.`);
     const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
     const res = await this.client.query<RuntimeRow>(
       "SELECT runtime FROM everdict_runtimes WHERE tenant = $1 AND id = $2 AND version = $3",
@@ -103,14 +103,14 @@ export class PgRuntimeRegistry implements RuntimeRegistry {
     return out;
   }
 
-  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 버전만(_shared 는 NotFound). 마이그레이션 0047.
+  // version tag replacement (full-array PUT semantics) — tenant directly-owned versions only (_shared → NotFound). migration 0047.
   async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
     const r = await this.client.query<{ version: string }>(
       "UPDATE everdict_runtimes SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
       [tenant, id, version, JSON.stringify(tags)],
     );
     if (r.rows.length === 0)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `runtime ${id}@${version} 가 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `runtime ${id}@${version} not found.`);
   }
 
   async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {

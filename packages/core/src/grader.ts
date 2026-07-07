@@ -17,18 +17,18 @@ export interface GradeContext {
   case: EvalCase;
   trace: TraceEvent[];
   snapshot: EnvSnapshot;
-  // 결과 그레이더는 환경에서 명령을 실행할 수 있다(process 하니스). service/browser 하니스엔 compute 가 없으므로 optional.
+  // Outcome graders can run commands in the environment (process harness). Optional because service/browser harnesses have no compute.
   compute?: ComputeHandle;
-  baseline?: Scorecard; // 회귀 비교용
+  baseline?: Scorecard; // for regression comparison
 }
 
-// 채점 — 하니스와 완전 분리. 같은 그레이더가 모든 하니스를 동일하게 채점 →
-// 하니스/버전 간 공정 비교가 가능해진다.
+// Scoring — fully separate from the harness. The same grader scores every harness identically →
+// enabling fair comparison across harnesses/versions.
 export interface Grader {
   readonly id: string;
-  // 채점 시 환경(compute)에서 명령을 실행하는 grader 는 true 로 선언(tests-pass/command 등 outcome 계열).
-  // 미선언 = 관측물(trace/snapshot) 전용 → runCase 가 compute 를 해제한 뒤에 채점해 샌드박스 점유를
-  // 실행 구간으로 최소화한다(judge LLM 대기 동안 미점유). docs/architecture/streaming-case-pipeline.md
+  // A grader that runs commands in the environment (compute) at scoring time declares true (outcome-family: tests-pass/command etc.).
+  // Undeclared = observation-only (trace/snapshot) → runCase scores it after releasing compute, minimizing sandbox occupancy to
+  // the execution window (not held while waiting on the judge LLM). docs/architecture/streaming-case-pipeline.md
   readonly needsCompute?: boolean;
   grade(ctx: GradeContext): Promise<Score>;
 }

@@ -1,9 +1,9 @@
 import type { SqlClient } from "./client.js";
 import type { EncryptedSecret, SecretCipher } from "./secret-cipher.js";
 
-// 워크스페이스 시크릿 저장소 — 모델/프로바이더 키(OPENAI_API_KEY 등)를 스코프별로 관리.
-// scope: "workspace"(owner='') = 공유(admin 관리) · "user"(owner=subject) = 그 유저 개인(셀프 관리, 타인 불가시).
-// 값은 AES-GCM at-rest 암호화, 절대 평문 반환 안 함(list 는 이름+스코프만). entries/scopedEntries 만 복호화(주입 전용).
+// Workspace secret store — manages model/provider keys (OPENAI_API_KEY etc.) per scope.
+// scope: "workspace" (owner='') = shared (admin-managed) · "user" (owner=subject) = that user's personal (self-managed, invisible to others).
+// Values are AES-GCM encrypted at rest and never returned as plaintext (list has only name+scope). Only entries/scopedEntries decrypt (injection-only).
 export type SecretScope = "user" | "workspace";
 
 export interface SecretMeta {
@@ -12,20 +12,20 @@ export interface SecretMeta {
   scope: SecretScope;
 }
 
-// 디스패치 해석용 두 티어 — 공유 + 제출자 개인. resolveHarnessSecrets 가 참조 scope 로 골라 쓴다.
+// The two tiers for dispatch resolution — shared + the submitter's personal. resolveHarnessSecrets picks by the referenced scope.
 export interface ScopedSecretEntries {
   workspace: Record<string, string>;
   user: Record<string, string>;
 }
 
 export interface SecretStore {
-  // owner="" = 워크스페이스(공유) 시크릿, owner=subject = 유저 개인 시크릿.
+  // owner="" = workspace (shared) secret, owner=subject = user personal secret.
   set(workspace: string, name: string, value: string, owner?: string): Promise<void>;
-  // subject 를 주면 그 유저의 개인 시크릿도 함께(스코프 태그) 반환. 미지정이면 공유 시크릿만.
+  // With subject, also returns that user's personal secrets (scope-tagged). Unset returns shared secrets only.
   list(workspace: string, subject?: string): Promise<SecretMeta[]>;
   remove(workspace: string, name: string, owner?: string): Promise<void>;
-  entries(workspace: string): Promise<Record<string, string>>; // 공유(owner='') 시크릿만 — 기존 소비자 호환
-  scopedEntries(workspace: string, subject: string): Promise<ScopedSecretEntries>; // 공유 + 그 유저 개인
+  entries(workspace: string): Promise<Record<string, string>>; // shared (owner='') secrets only — existing-consumer compat
+  scopedEntries(workspace: string, subject: string): Promise<ScopedSecretEntries>; // shared + that user's personal
 }
 
 interface MemRow {
@@ -61,7 +61,7 @@ export class InMemorySecretStore implements SecretStore {
       if (r.owner === "") metas.push({ name: r.name, updatedAt: r.updatedAt, scope: "workspace" });
       else if (subject && r.owner === subject) metas.push({ name: r.name, updatedAt: r.updatedAt, scope: "user" });
     }
-    // 공유 먼저, 그 다음 개인 — 각 스코프 안에서 이름순.
+    // Shared first, then personal — name-sorted within each scope.
     return metas.sort((a, b) =>
       a.scope === b.scope ? a.name.localeCompare(b.name) : a.scope === "workspace" ? -1 : 1,
     );
@@ -110,7 +110,7 @@ export class PgSecretStore implements SecretStore {
     );
   }
   async list(workspace: string, subject?: string): Promise<SecretMeta[]> {
-    // owner='' (공유) + owner=subject (개인). subject 없으면 공유만($2='').
+    // owner='' (shared) + owner=subject (personal). No subject → shared only ($2='').
     const r = await this.client.query<{ name: string; owner: string; updated_at: string }>(
       "SELECT name, owner, updated_at FROM everdict_secrets WHERE workspace = $1 AND (owner = '' OR owner = $2) ORDER BY owner, name",
       [workspace, subject ?? ""],

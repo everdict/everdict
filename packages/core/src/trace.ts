@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-// 비용/토큰 — 하니스가 자기 트레이스에 보고하는 값(예: Claude 의 total_cost_usd).
+// Cost/tokens — values the harness reports in its own trace (e.g. Claude's total_cost_usd).
 export const CostSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
@@ -8,8 +8,8 @@ export const CostSchema = z.object({
 });
 export type Cost = z.infer<typeof CostSchema>;
 
-// 정규화 트레이스 — 모든 하니스 어댑터가 native 출력을 "이것"으로 변환한다.
-// 모든 지표(과업성공/궤적/비용/지연)가 이 한 줄기에서 파생된다.
+// Normalized trace — every harness adapter converts its native output into "this".
+// Every metric (task success/trajectory/cost/latency) derives from this single stream.
 export const TraceEventSchema = z.discriminatedUnion("kind", [
   z.object({ t: z.number(), kind: z.literal("message"), role: z.enum(["user", "assistant"]), text: z.string() }),
   z.object({
@@ -26,17 +26,17 @@ export const TraceEventSchema = z.discriminatedUnion("kind", [
 ]);
 export type TraceEvent = z.infer<typeof TraceEventSchema>;
 
-// 한 run 의 사용량 요약 — 트레이스의 llm_call 비용을 합산한 것(클라이언트가 트레이스를 파싱하지 않게 명시 노출).
+// Usage summary for one run — the sum of the trace's llm_call costs (exposed explicitly so the client doesn't parse the trace).
 export const RunUsageSummarySchema = z.object({
   promptTokens: z.number().int().nonnegative(),
   completionTokens: z.number().int().nonnegative(),
   totalTokens: z.number().int().nonnegative(),
   usd: z.number().nonnegative(),
-  calls: z.number().int().nonnegative(), // llm_call 이벤트 수
+  calls: z.number().int().nonnegative(), // number of llm_call events
 });
 export type RunUsageSummary = z.infer<typeof RunUsageSummarySchema>;
 
-// 트레이스 → 사용량 요약(파생). calls 는 모든 llm_call, 토큰/비용은 cost 가 있는 것만 합산.
+// Trace → usage summary (derived). calls counts every llm_call; tokens/cost sum only those that have a cost.
 export function usageFromTrace(trace: TraceEvent[]): RunUsageSummary {
   let promptTokens = 0;
   let completionTokens = 0;

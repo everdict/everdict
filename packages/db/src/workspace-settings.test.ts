@@ -9,13 +9,13 @@ import {
 const MM = { host: "https://mm.example.com", botTokenSecretName: "MM_BOT", defaultChannelId: "ch1" };
 
 describe("WorkspaceSettings.mattermost", () => {
-  it("워크스페이스 Mattermost 설정을 라운드트립한다(값은 비밀 아님 — 이름 참조만)", async () => {
+  it("round-trips the workspace Mattermost settings (the values aren't secrets — name references only)", async () => {
     const store = new InMemoryWorkspaceSettingsStore();
     await store.set("acme", { mattermost: MM });
     expect((await store.get("acme"))?.mattermost).toEqual(MM);
   });
 
-  it("한 설정 키가 다른 키(meterUsage)를 덮어쓰지 않는다(부분 병합)", async () => {
+  it("one settings key doesn't overwrite another key (meterUsage) (partial merge)", async () => {
     const store = new InMemoryWorkspaceSettingsStore();
     await store.set("acme", { meterUsage: true });
     await store.set("acme", { mattermost: MM });
@@ -24,12 +24,12 @@ describe("WorkspaceSettings.mattermost", () => {
     expect(got?.mattermost?.host).toBe("https://mm.example.com");
   });
 
-  it("schema 는 host 가 URL 이 아니면 거부한다", () => {
+  it("the schema rejects a host that isn't a URL", () => {
     const bad = WorkspaceSettingsSchema.safeParse({ mattermost: { ...MM, host: "mm" } });
     expect(bad.success).toBe(false);
   });
 
-  it("PgWorkspaceSettingsStore.set 은 jsonb ||(병합) upsert 로 저장한다", async () => {
+  it("PgWorkspaceSettingsStore.set stores via a jsonb || (merge) upsert", async () => {
     const calls: Array<{ text: string; params?: unknown[] }> = [];
     const client: SqlClient = {
       async query(text, params) {

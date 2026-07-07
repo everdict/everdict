@@ -21,9 +21,9 @@ import { deleteSecretAction, setSecretAction } from '../api/manage-secrets'
 
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
-// workspace = 워크스페이스(공유) 시크릿 — 저장소가 카테고리 없는 단일 평면 네임스페이스라 UI 도 한 목록
-// (모델 키·클러스터 자격증명을 나누면 같은 시크릿이 양쪽에 중복 노출된다). personal = 내 개인 시크릿(계정 화면, 셀프 관리).
-// namePlaceholder 는 예약 이름 예시(번역 대상 아님) — 나머지 카피는 next-intl 메시지로.
+// workspace = workspace (shared) secrets — the store is a single flat namespace with no categories, so the UI is one list too
+// (splitting model keys vs cluster credentials would double-expose the same secret on both sides). personal = my personal secrets (account screen, self-managed).
+// namePlaceholder is a reserved-name example (not for translation) — the rest of the copy comes from next-intl messages.
 const COPY = {
   workspace: { namePlaceholder: 'OPENAI_API_KEY' },
   personal: { namePlaceholder: 'MY_OPENAI_API_KEY' },
@@ -40,11 +40,11 @@ export function SecretsManager({
 }) {
   const t = useTranslations('manageWorkspaceSecrets')
   const copy = COPY[variant]
-  // personal = 개인(user) 스코프(셀프 관리), workspace = 공유(admin).
+  // personal = personal (user) scope (self-managed), workspace = shared (admin).
   const scope: SecretScope = variant === 'personal' ? 'user' : 'workspace'
-  // 프로바이더 토큰(예약 이름, 플랫폼이 소비) — 스코프에서 소비되는 것만 큐레이션.
+  // Provider tokens (reserved names, consumed by the platform) — curate only the ones consumed in this scope.
   const providers = PROVIDER_TOKENS.filter((pt) => pt.scopes.includes(scope))
-  // raw 목록에선 프로바이더 토큰을 제외(이중 노출 방지 — 위 큐레이션 섹션이 그 자리).
+  // Exclude provider tokens from the raw list (avoid double exposure — the curated section above is their place).
   const rawSecrets = secrets.filter((s) => !(providerTokenNames.has(s.name) && s.scope === scope))
 
   return (
@@ -91,7 +91,7 @@ export function SecretsManager({
   )
 }
 
-// 프로바이더 토큰 — 예약 이름이 미리 정해진 큐레이션 목록. 유저는 이름을 몰라도 "어떤 서비스 토큰인지"로 등록한다.
+// Provider tokens — a curated list with predefined reserved names. Users register by "which service token it is" without knowing the name.
 function ProviderTokenRows({
   providers,
   secrets,
@@ -105,7 +105,7 @@ function ProviderTokenRows({
 }) {
   const t = useTranslations('manageWorkspaceSecrets')
   const locale = useLocale()
-  const [editing, setEditing] = useState<string>() // 등록/교체 폼이 열린 토큰 name
+  const [editing, setEditing] = useState<string>() // name of the token whose register/replace form is open
   const [confirmName, setConfirmName] = useState<string>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
@@ -239,7 +239,7 @@ function ProviderTokenRows({
   )
 }
 
-// 리스트(구분선 카드) + 상단 우측 "시크릿 추가" → 토글 인라인 폼. Linear settings-list 스타일.
+// List (divided card) + top-right "Add secret" → toggled inline form. Linear settings-list style.
 function SecretRows({
   secrets,
   canWrite,
@@ -251,7 +251,7 @@ function SecretRows({
   canWrite: boolean
   scope: SecretScope
   namePlaceholder: string
-  sectionLabel?: string // 프로바이더 토큰 섹션과 병렬일 때 구분 라벨
+  sectionLabel?: string // distinguishing label when shown alongside the provider tokens section
 }) {
   const t = useTranslations('manageWorkspaceSecrets')
   const locale = useLocale()
@@ -361,8 +361,8 @@ function SecretRows({
   )
 }
 
-// 토글되는 인라인 추가 폼 — 이름 + 값(한 줄 ↔ 여러 줄 전환, 한 줄은 보기 토글) + 저장/취소. 카드 안에 컴팩트하게.
-// fixedName = 프로바이더 토큰(예약 이름): 이름 입력을 숨기고 값만(한 줄) 받는다.
+// Toggled inline add form — name + value (single-line ↔ multi-line toggle; single-line has a show toggle) + save/cancel. Compact inside the card.
+// fixedName = provider token (reserved name): hide the name input and take only the value (single-line).
 function AddSecretForm({
   scope,
   namePlaceholder,
@@ -380,7 +380,7 @@ function AddSecretForm({
   const [name, setName] = useState(fixedName ?? '')
   const [value, setValue] = useState('')
   const [show, setShow] = useState(false)
-  const [multiline, setMultiline] = useState(false) // kubeconfig 같은 여러 줄 값 입력 전환
+  const [multiline, setMultiline] = useState(false) // toggle for multi-line value input like a kubeconfig
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
   const nameInvalid = name.length > 0 && !NAME_RE.test(name)

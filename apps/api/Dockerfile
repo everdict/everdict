@@ -1,13 +1,13 @@
 # syntax=docker/dockerfile:1.7
-# 컨트롤플레인 API 이미지 (@everdict/api, Fastify :8787).
-# 모노레포 컨텍스트(레포 루트)에서 빌드한다:
+# Control-plane API image (@everdict/api, Fastify :8787).
+# Build from the monorepo context (repo root):
 #   docker build -f apps/api/Dockerfile --target runtime -t everdict-api .
-# compose 가 target 으로 dev(바인드마운트·핫리로드) / runtime(빌드 산출물) 을 선택한다.
+# compose selects the target: dev (bind-mount · hot reload) / runtime (build output).
 
-# ---- base: 공통 런타임 도구 ----
+# ---- base: common runtime tools ----
 FROM node:22-bookworm-slim AS base
-# git: RepoEnvironment 시드 + git-diff 스냅샷. claude CLI: LocalBackend 가 in-process 로 돌리는
-# claude-code 하니스(피평가). ca-certificates: TLS. (scripted 하니스만 돌릴 거면 claude 없이도 동작)
+# git: RepoEnvironment seed + git-diff snapshot. claude CLI: the claude-code harness (under test)
+# that LocalBackend runs in-process. ca-certificates: TLS. (works without claude if you only run the scripted harness)
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/* \
@@ -15,23 +15,23 @@ RUN apt-get update \
   && corepack enable
 WORKDIR /app
 
-# ---- dev: 소스는 compose 가 바인드마운트, 여기선 도구만 ----
+# ---- dev: compose bind-mounts the source; here we only add tools ----
 FROM base AS dev
 ENV NODE_ENV=development
-# 핫리로드: api 패키지 tsc -w 로 dist 재생성 + node --watch 로 재시작(compose command 가 덮어쓸 수 있음).
+# Hot reload: the api package regenerates dist via tsc -w + restarts via node --watch (the compose command may override this).
 CMD ["sh","-lc","pnpm install --frozen-lockfile && pnpm --filter @everdict/api... build && (node_modules/.bin/tsc -p apps/api/tsconfig.json --watch --preserveWatchOutput & exec node --watch apps/api/dist/main.js)"]
 
-# ---- builder: 전체 워크스페이스 설치 + api(+의존 패키지) 빌드 ----
+# ---- builder: install the whole workspace + build api (+ its dependency packages) ----
 FROM base AS builder
 ENV NODE_ENV=development
 COPY . .
 RUN pnpm install --frozen-lockfile \
   && pnpm --filter "@everdict/api..." build
 
-# ---- runtime: 빌드 산출물 + node_modules 만 ----
+# ---- runtime: build output + node_modules only ----
 FROM base AS runtime
 ENV NODE_ENV=production PORT=8787
-# pnpm 의 가상 스토어(node_modules/.pnpm)는 /app 내부 상대 심링크라 통째 복사로 보존된다.
+# pnpm's virtual store (node_modules/.pnpm) uses relative symlinks inside /app, so a wholesale copy preserves it.
 COPY --from=builder /app /app
 EXPOSE 8787
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s --retries=5 \

@@ -9,7 +9,7 @@ import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { FieldError, Input, Label } from '@/shared/ui/input'
 
-// 표시 이름 → 미리보기 slug(서버 파생 규칙과 동일). id 를 비우면 이 값이 워크스페이스 id 가 된다.
+// Display name → preview slug (same as the server-side derivation rule). If id is left blank, this value becomes the workspace id.
 function previewSlug(name: string): string {
   return name
     .toLowerCase()
@@ -40,7 +40,7 @@ export function CreateWorkspaceForm() {
       ...(id.trim() ? { id: id.trim() } : {}),
     })
     if (result.ok && result.id) {
-      // 새로 만든 워크스페이스(/{id})로 진입(Linear 식). 미들웨어가 활성 워크스페이스를 동기화한다.
+      // Enter the newly created workspace (/{id}) (Linear-style). The middleware syncs the active workspace.
       router.push(`/${result.id}`)
       router.refresh()
       return

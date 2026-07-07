@@ -1,4 +1,4 @@
-// 시스템 관리 버저닝용 semver 유틸 — 데이터셋 등록 시 기존 버전 기반으로 다음 버전을 계산(raw 입력 회피).
+// semver utils for system-managed versioning — compute the next version from existing versions on dataset registration (avoiding raw input).
 export type BumpKind = 'patch' | 'minor' | 'major'
 
 const RE = /^(\d+)\.(\d+)\.(\d+)$/
@@ -16,7 +16,7 @@ function cmp(a: [number, number, number], b: [number, number, number]): number {
   return a[0] - b[0] || a[1] - b[1] || a[2] - b[2]
 }
 
-// 주어진 버전들 중 semver 최댓값(파싱 가능한 것만). 없으면 undefined.
+// The max semver among the given versions (parseable ones only). undefined if none.
 export function maxSemver(versions: readonly string[]): string | undefined {
   let best: { raw: string; t: [number, number, number] } | undefined
   for (const raw of versions) {
@@ -27,7 +27,7 @@ export function maxSemver(versions: readonly string[]): string | undefined {
   return best?.raw
 }
 
-// 다음 버전 계산(시스템 관리). 파싱 불가하면 원본 그대로.
+// Compute the next version (system-managed). If unparseable, return the original as-is.
 export function bumpSemver(version: string, kind: BumpKind): string {
   const t = parse(version)
   if (!t) return version
@@ -37,7 +37,7 @@ export function bumpSemver(version: string, kind: BumpKind): string {
   return `${maj}.${min}.${pat + 1}`
 }
 
-// semver 내림차순 정렬(최신 먼저) — 버전 선택기/diff 피커의 표시 순서. 파싱 불가 버전은 뒤로(상대순서 유지).
+// Sort semver descending (latest first) — the display order for the version selector / diff picker. Unparseable versions go last (relative order preserved).
 export function sortSemverDesc(versions: readonly string[]): string[] {
   return [...versions].sort((a, b) => {
     const pa = parse(a)
@@ -49,7 +49,7 @@ export function sortSemverDesc(versions: readonly string[]): string[] {
   })
 }
 
-// 데이터셋 목록에서 한 id 의 기존 버전(소유 + 공유 병합, 중복 제거).
+// Existing versions of one id from the dataset list (owned + shared merged, deduplicated).
 export function versionsForId(
   list: ReadonlyArray<{ id: string; versions: string[] }>,
   id: string

@@ -36,26 +36,26 @@ export default async function NewScorecardPage({
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
       harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
     } catch {
-      // 목록 실패해도 폼은 동작(선택지만 빔)
+      // Even if the list fails, the form still works (just empty choices)
     }
-    // 런타임 picker — 실행 위치는 필수(컨트롤플레인 호스트 폴백 금지 정책). 등록 런타임 + 러너 풀을 선택지로.
+    // Runtime picker — where it runs is required (control-plane-host fallback is forbidden by policy). Registered runtimes + runner pools as choices.
     try {
       runtimes = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
     } catch {
-      // 런타임 목록 실패해도 폼은 동작(선택지만 빔)
+      // Even if the runtime list fails, the form still works (just empty choices)
     }
-    // 내 로컬 러너 picker — 개인 소유 디바이스. 실패/없음이면 노출 안 함.
+    // My local runner picker — personally-owned device. Not shown if it fails/is empty.
     try {
       runners = runnersResponseSchema.parse(await controlPlane.listRunners(ctx)).runners
     } catch {
-      // 러너 목록 실패해도 폼은 동작
+      // Even if the runner list fails, the form still works
     }
-    // 워크스페이스에 팀 공유 러너가 있으면 self:ws 풀 옵션 노출(members:read 로스터). 실패/없음이면 미노출.
+    // If the workspace has team-shared runners, expose the self:ws pool option (members:read roster). Not shown if it fails/is empty.
     try {
       hasWorkspaceRunners =
         runnersResponseSchema.parse(await controlPlane.listWorkspaceRunners(ctx)).runners.length > 0
     } catch {
-      // 로스터 실패해도 폼은 동작(풀 옵션만 숨김)
+      // Even if the roster fails, the form still works (only the pool option is hidden)
     }
   }
 

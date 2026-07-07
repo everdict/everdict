@@ -2,7 +2,7 @@ import type { MenuItemConstructorOptions } from "electron";
 import type { DesktopRunnerStatus } from "./bridge.js";
 import type { UpdaterState } from "./updater.js";
 
-// 트레이 메뉴 템플릿 — 순수 빌더(electron 값 import 없음, 테스트 용이). 상태·액션은 main 이 주입한다.
+// Tray menu template — a pure builder (no electron value import, easy to test). State and actions are injected by main.
 export interface TrayMenuState {
   autostart: boolean;
   runner: DesktopRunnerStatus;
@@ -12,29 +12,29 @@ export interface TrayMenuState {
 export interface TrayMenuActions {
   openApp(): void;
   setAutostart(next: boolean): void;
-  changeServerUrl(): void; // 설정 창(setup.html) 열기 — D8
+  changeServerUrl(): void; // open the setup window (setup.html) — D8
   unpairRunner(): void;
-  applyUpdate(): void; // ready 상태에서만 노출 — 러너 정리 후 재시작·적용은 main 책임
+  applyUpdate(): void; // shown only in the ready state — cleaning up the runner then restarting/applying is main's responsibility
   quit(): void;
 }
 
-// 러너 상태 한 줄 요약 — 트레이 상태행/툴팁 공용.
+// One-line summary of the runner status — shared by the tray status row/tooltip.
 export function runnerStatusLabel(runner: DesktopRunnerStatus): string {
-  if (!runner.paired) return "러너: 미페어 (계정 페이지에서 연결)";
-  if (runner.state === "running") return `러너: 실행 중 (${runner.activeJobs})`;
-  if (runner.state === "idle") return "러너: 온라인 대기";
-  return "러너: 꺼짐";
+  if (!runner.paired) return "Runner: unpaired (connect from the account page)";
+  if (runner.state === "running") return `Runner: running (${runner.activeJobs})`;
+  if (runner.state === "idle") return "Runner: online, idle";
+  return "Runner: off";
 }
 
-// 업데이트 메뉴 행 — downloading 은 진행 표시(비활성), ready 는 적용 액션. 그 외 상태는 행 없음(메뉴 간결).
+// Update menu rows — downloading is a progress indicator (disabled), ready is the apply action. Other states show no row (keeps the menu concise).
 function updaterItems(updater: UpdaterState, actions: TrayMenuActions): MenuItemConstructorOptions[] {
   if (updater.kind === "downloading") {
     const pct = updater.percent !== undefined ? ` (${updater.percent}%)` : "";
-    return [{ label: `업데이트 다운로드 중…${pct}`, enabled: false }, { type: "separator" }];
+    return [{ label: `Downloading update…${pct}`, enabled: false }, { type: "separator" }];
   }
   if (updater.kind === "ready") {
     return [
-      { label: `v${updater.version} 업데이트 적용 (재시작)`, click: () => actions.applyUpdate() },
+      { label: `Apply update v${updater.version} (restart)`, click: () => actions.applyUpdate() },
       { type: "separator" },
     ];
   }
@@ -46,22 +46,22 @@ export function buildTrayMenuTemplate(state: TrayMenuState, actions: TrayMenuAct
     ...updaterItems(state.updater, actions),
     { label: runnerStatusLabel(state.runner), enabled: false },
     { type: "separator" },
-    { label: "Everdict 열기", click: () => actions.openApp() },
+    { label: "Open Everdict", click: () => actions.openApp() },
     { type: "separator" },
     {
-      label: "로그인 시 자동 시작",
+      label: "Start at login",
       type: "checkbox",
       checked: state.autostart,
       click: () => actions.setAutostart(!state.autostart),
     },
-    { label: "서버 주소 변경…", click: () => actions.changeServerUrl() },
-    // 로컬 해제 — 이 기기의 토큰 폐기+러너 정지. 서버 쪽 러너 레코드 revoke 는 웹 계정 페이지가 권위.
+    { label: "Change server address…", click: () => actions.changeServerUrl() },
+    // Local unpair — discard this device's token + stop the runner. The web account page is authoritative for revoking the server-side runner record.
     ...(state.runner.paired
       ? ([
-          { label: "이 기기 러너 연결 해제", click: () => actions.unpairRunner() },
+          { label: "Unpair this device's runner", click: () => actions.unpairRunner() },
         ] satisfies MenuItemConstructorOptions[])
       : []),
     { type: "separator" },
-    { label: "종료", click: () => actions.quit() },
+    { label: "Quit", click: () => actions.quit() },
   ];
 }

@@ -12,15 +12,15 @@ export interface SecretMutationResult {
   error?: string
 }
 
-// env 형식 이름(컨트롤플레인 SecretNameSchema 와 동일) — 폼 단에서 1차 검증, 최종 강제는 컨트롤플레인.
+// env-format name (same as the control plane's SecretNameSchema) — first-pass validation at the form; final enforcement is the control plane.
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
-// 스코프별 변경 후 재검증 — user(개인)=계정 화면, workspace(공유)=워크스페이스 설정.
+// Revalidate after a per-scope change — user (personal) = account screen, workspace (shared) = workspace settings.
 function revalidateFor(scope: SecretScope): void {
   revalidatePath(scope === 'user' ? '/[workspace]/account' : '/[workspace]/settings')
 }
 
-// 시크릿 설정/갱신(at-rest 암호화; 값은 다시 못 봄). scope=workspace(admin) | user(본인 셀프). authZ 는 컨트롤플레인이 강제.
+// Set/update a secret (encrypted at rest; the value is never shown again). scope = workspace (admin) | user (self). authZ is enforced by the control plane.
 export async function setSecretAction(
   name: string,
   value: string,
@@ -39,7 +39,7 @@ export async function setSecretAction(
   }
 }
 
-// 시크릿 삭제. scope 로 스코프(공유/개인) 지정. authZ 는 컨트롤플레인이 강제.
+// Delete a secret. scope selects the tier (shared/personal). authZ is enforced by the control plane.
 export async function deleteSecretAction(
   name: string,
   scope: SecretScope

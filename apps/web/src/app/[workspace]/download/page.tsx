@@ -7,8 +7,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 데스크톱 앱 다운로드 — private 릴리즈를 웹 로그인(멤버) 뒤에서 받는 페이지(설계 D7 후속).
-// 릴리즈 메타는 서버가 GitHub 에서 읽고(5분 캐시), 실제 다운로드는 /api/desktop/download 가 302 로 넘긴다.
+// Desktop app download — a page for getting private releases behind web login (members) (design D7 follow-up).
+// The server reads release metadata from GitHub (5-min cache); the actual download is handed off with a 302 by /api/desktop/download.
 export default async function DownloadPage() {
   const t = await getTranslations('downloadPage')
   const release = await fetchDesktopRelease()

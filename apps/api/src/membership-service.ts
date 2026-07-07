@@ -9,21 +9,21 @@ import type {
 } from "@everdict/db";
 import { generateInviteToken, hashKey } from "@everdict/db";
 
-// 멤버십 관리 서비스 — HTTP 라우트와 MCP 도구가 공유하는 단일 코어(패리티). 도메인 규칙(마지막 admin 보호 등)을 여기서 강제.
-// 멤버 = 워크스페이스 사용자 그래프. 초대 = 토큰/링크 redemption(가입). 워크스페이스 스코프는 호출부(principal.workspace)가 전달.
+// Membership management service — a single core (parity) shared by the HTTP routes and MCP tools. Domain rules (last-admin protection, etc.) are enforced here.
+// Member = the workspace user graph. Invite = token/link redemption (joining). The workspace scope is passed in by the caller (principal.workspace).
 export class MembershipService {
   constructor(
     private readonly members: WorkspaceStore,
     private readonly invites: WorkspaceInviteStore,
     private readonly profiles: UserProfileStore,
-    // 멤버가 워크스페이스에서 제거/이탈된 직후 호출(best-effort) — 예약(cron) 자동 비활성 등 정리 훅.
-    // 실패는 멤버 제거 결과에 영향 없음(스토어가 진실원천). HTTP·MCP 공통 코어라 양쪽에 동일 적용.
+    // Called right after a member is removed from / leaves the workspace (best-effort) — a cleanup hook, e.g. auto-disabling scheduled (cron) evals.
+    // Failure never affects the member-removal result (the store is the source of truth). Shared HTTP/MCP core, so it applies to both.
     private readonly onMemberRemoved?: (workspace: string, subject: string) => Promise<unknown>,
   ) {}
 
-  // --- 멤버 ---
-  // opaque subject 를 사람이 읽는 프로필(이름/아바타)로 보강한다 — 멤버십과 프로필은 별도 스토어라 여기서 합친다.
-  // BFF·MCP 공통 코어이므로 HTTP(GET /members)·MCP(list_members) 양쪽에 동일하게 이름/아바타가 실린다.
+  // --- Members ---
+  // Enrich the opaque subject with a human-readable profile (name/avatar) — membership and profile are separate stores, so we join them here.
+  // Shared BFF/MCP core, so both HTTP (GET /members) and MCP (list_members) carry the same name/avatar.
   async listMembers(workspace: string): Promise<MemberRecord[]> {
     const members = await this.members.listMembers(workspace);
     if (members.length === 0) return members;
@@ -40,46 +40,46 @@ export class MembershipService {
     });
   }
 
-  // 기존 멤버의 역할 변경. 멤버가 아니면 404. 마지막 admin 강등 금지(409).
-  // NOTE: listMembers→setRole 사이 race(동시 두 admin 강등 → 0 admin) 가능 — admin 수가 적어 v1 허용. 추후 원자적 가드로 강화.
+  // Change an existing member's role. 404 if not a member. Demoting the last admin is forbidden (409).
+  // NOTE: a race between listMembers→setRole (two concurrent admin demotions → 0 admins) is possible — admin counts are small, so allowed for v1. Harden with an atomic guard later.
   async setRole(workspace: string, subject: string, role: EverdictRole): Promise<void> {
     const all = await this.members.listMembers(workspace);
     const target = all.find((m) => m.subject === subject);
-    if (!target) throw new NotFoundError("NOT_FOUND", { subject }, "멤버를 찾을 수 없습니다.");
+    if (!target) throw new NotFoundError("NOT_FOUND", { subject }, "Member not found.");
     if (target.role === "admin" && role !== "admin" && adminCount(all) === 1)
-      throw new ConflictError("CONFLICT", { workspace }, "마지막 admin 은 강등할 수 없습니다.");
+      throw new ConflictError("CONFLICT", { workspace }, "The last admin cannot be demoted.");
     await this.members.setRole(workspace, subject, role);
   }
 
-  // 멤버 제거(멱등 — 없으면 no-op, 존재 누출 없음). 마지막 admin 제거 금지(409).
+  // Remove a member (idempotent — no-op if absent, no existence leak). Removing the last admin is forbidden (409).
   async removeMember(workspace: string, subject: string): Promise<void> {
     const all = await this.members.listMembers(workspace);
     const target = all.find((m) => m.subject === subject);
     if (!target) return;
     if (target.role === "admin" && adminCount(all) === 1)
-      throw new ConflictError("CONFLICT", { workspace }, "마지막 admin 은 제거할 수 없습니다.");
+      throw new ConflictError("CONFLICT", { workspace }, "The last admin cannot be removed.");
     await this.members.removeMember(workspace, subject);
-    await this.onMemberRemoved?.(workspace, subject).catch(() => {}); // 정리 훅(예약 자동 비활성) — best-effort
+    await this.onMemberRemoved?.(workspace, subject).catch(() => {}); // cleanup hook (auto-disable scheduled evals) — best-effort
   }
 
-  // 내가 이 워크스페이스에서 나간다(self-serve — 역할 게이트 없음, 자기 멤버십만 제거). 멱등.
-  // 마지막 admin 은 나갈 수 없다(409) — 먼저 다른 멤버에게 admin 을 위임하거나 워크스페이스를 삭제해야 한다.
+  // I leave this workspace (self-serve — no role gate, removes only my own membership). Idempotent.
+  // The last admin cannot leave (409) — you must first delegate admin to another member or delete the workspace.
   async leaveWorkspace(workspace: string, subject: string): Promise<void> {
     const all = await this.members.listMembers(workspace);
     const me = all.find((m) => m.subject === subject);
-    if (!me) return; // 멤버 아님 — 멱등
+    if (!me) return; // not a member — idempotent
     if (me.role === "admin" && adminCount(all) === 1)
       throw new ConflictError(
         "CONFLICT",
         { workspace },
-        "마지막 admin 은 나갈 수 없습니다. 다른 멤버에게 admin 을 위임하거나 워크스페이스를 삭제하세요.",
+        "The last admin cannot leave. Delegate admin to another member or delete the workspace.",
       );
     await this.members.removeMember(workspace, subject);
-    await this.onMemberRemoved?.(workspace, subject).catch(() => {}); // 정리 훅(예약 자동 비활성) — best-effort
+    await this.onMemberRemoved?.(workspace, subject).catch(() => {}); // cleanup hook (auto-disable scheduled evals) — best-effort
   }
 
-  // --- 초대 ---
-  // 초대 생성 — 평문 토큰을 1회만 반환(링크에 담음). 저장은 해시만(스토어).
+  // --- Invites ---
+  // Create an invite — returns the plaintext token exactly once (embedded in the link). Only the hash is stored (in the store).
   async createInvite(input: {
     workspace: string;
     role: EverdictRole;
@@ -110,27 +110,27 @@ export class MembershipService {
     return this.invites.revokeInvite(workspace, id);
   }
 
-  // 초대 수락 — 워크스페이스-역할 게이트 없음(가입 전이므로). 인증된 사람(OIDC) subject 만. 머신 키(via!=='oidc')는 거부.
+  // Accept an invite — no workspace-role gate (this precedes joining). Only an authenticated human (OIDC) subject; a machine key (via !== 'oidc') is rejected.
   async acceptInvite(
     principal: { subject: string; via: Principal["via"]; email?: string },
     token: string,
   ): Promise<{ workspace: string; role: string }> {
     if (principal.via !== "oidc")
-      throw new BadRequestError("BAD_REQUEST", undefined, "사람 계정(OIDC)으로 로그인해 초대를 수락하세요.");
+      throw new BadRequestError("BAD_REQUEST", undefined, "Sign in with a human account (OIDC) to accept the invite.");
     const r = await this.invites.consumeInvite(hashKey(token), principal.subject, principal.email);
     if (r.ok) return r.result;
-    if (r.reason === "accepted") throw new ConflictError("CONFLICT", undefined, "이미 사용된 초대입니다.");
-    if (r.reason === "expired") throw new BadRequestError("BAD_REQUEST", undefined, "만료된 초대입니다.");
-    throw new NotFoundError("NOT_FOUND", undefined, "유효하지 않은 초대입니다."); // unknown == 취소됨(존재 누출 없음)
+    if (r.reason === "accepted") throw new ConflictError("CONFLICT", undefined, "This invite has already been used.");
+    if (r.reason === "expired") throw new BadRequestError("BAD_REQUEST", undefined, "This invite has expired.");
+    throw new NotFoundError("NOT_FOUND", undefined, "This invite is invalid."); // unknown == revoked (no existence leak)
   }
 
-  // 초대 미리보기(비소비) — 링크 랜딩에서 "어느 워크스페이스인지"를 보이려 이름/로고/역할만 돌려준다.
-  // redeem 하지 않고 멤버십도 만들지 않는다. 만료/수락/취소/무효는 통합 404(존재 누출 없음). 토큰이 곧 비밀이라 인증 게이트 없음.
+  // Invite preview (non-consuming) — returns only name/logo/role so the link landing can show "which workspace" this is.
+  // Does not redeem and does not create a membership. Expired/accepted/revoked/invalid all fold into 404 (no existence leak). The token is itself the secret, so no auth gate.
   async previewInvite(token: string): Promise<{ workspace: string; name: string; logoUrl?: string; role: string }> {
     const found = await this.invites.previewInvite(hashKey(token));
-    if (!found) throw new NotFoundError("NOT_FOUND", undefined, "유효하지 않은 초대입니다.");
+    if (!found) throw new NotFoundError("NOT_FOUND", undefined, "This invite is invalid.");
     const ws = await this.members.get(found.workspace);
-    if (!ws) throw new NotFoundError("NOT_FOUND", undefined, "유효하지 않은 초대입니다.");
+    if (!ws) throw new NotFoundError("NOT_FOUND", undefined, "This invite is invalid.");
     return {
       workspace: found.workspace,
       name: ws.name,

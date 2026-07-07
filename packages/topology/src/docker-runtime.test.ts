@@ -27,7 +27,7 @@ const SPEC: ServiceHarnessSpec = {
   traceSource: { kind: "mlflow", endpoint: "http://mlflow:5000" },
 };
 
-// 가짜 Docker — 호출을 기록하고 게시 포트를 결정적으로 돌려준다(데몬 불필요).
+// Fake Docker — records calls and returns published ports deterministically (no daemon needed).
 function fakeDocker(): {
   docker: Docker;
   runs: DockerRunSpec[];
@@ -68,7 +68,7 @@ const okFetch: typeof fetch = (async (url: string) => {
 }) as unknown as typeof fetch;
 
 describe("dockerRunArgs / parseHostPort (pure)", () => {
-  it("docker run 인자를 조립한다(name/network/alias/env/publish/args)", () => {
+  it("assembles docker run args (name/network/alias/env/publish/args)", () => {
     expect(
       dockerRunArgs({
         name: "c",
@@ -97,7 +97,7 @@ describe("dockerRunArgs / parseHostPort (pure)", () => {
     ]);
   });
 
-  it("volumes 를 -v 인자로 펼친다(env 뒤, publish 앞)", () => {
+  it("expands volumes into -v args (after env, before publish)", () => {
     expect(
       dockerRunArgs({
         name: "c",
@@ -123,11 +123,11 @@ describe("dockerRunArgs / parseHostPort (pure)", () => {
     ]);
   });
 
-  it("volumes 미지정이면 -v 가 붙지 않는다", () => {
+  it("no -v when volumes are unspecified", () => {
     expect(dockerRunArgs({ name: "c", image: "img:1", network: "net" })).not.toContain("-v");
   });
 
-  it("cpus/memoryMb 를 --cpus/--memory 로 펼치고, 미지정이면 붙지 않는다", () => {
+  it("expands cpus/memoryMb into --cpus/--memory, and omits them when unspecified", () => {
     const args = dockerRunArgs({ name: "c", image: "img:1", network: "net", cpus: 2, memoryMb: 4096 });
     expect(args).toContain("--cpus");
     expect(args[args.indexOf("--cpus") + 1]).toBe("2");
@@ -138,30 +138,30 @@ describe("dockerRunArgs / parseHostPort (pure)", () => {
     expect(none).not.toContain("--memory");
   });
 
-  it("docker port 출력에서 호스트 포트를 뽑는다", () => {
+  it("extracts the host port from docker port output", () => {
     expect(parseHostPort("0.0.0.0:49153\n[::]:49153")).toBe(49153);
   });
 });
 
 describe("DockerTopologyRuntime", () => {
-  it("ensureTopology: 스토어 + 서비스를 네트워크에 띄우고 게시 호스트 포트로 엔드포인트를 발견한다", async () => {
+  it("ensureTopology: brings up stores + services on the network and discovers endpoints via published host ports", async () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     const handle = await rt.ensureTopology(SPEC);
 
     expect(f.networks).toEqual(["everdict-bu-1.0.0"]);
-    // 스토어 2(postgres/redis) + 서비스 1 = run 3회.
+    // 2 stores (postgres/redis) + 1 service = 3 runs.
     expect(f.runs.map((r) => r.alias)).toEqual(["bu-postgres", "bu-redis", "agent-server"]);
-    // 서비스는 DATABASE_URL/REDIS_URL 을 네트워크 alias(<id>-<store>:port)로 주입받는다.
+    // the service is injected with DATABASE_URL/REDIS_URL via the network alias (<id>-<store>:port).
     const agent = f.runs.find((r) => r.alias === "agent-server");
     expect(agent?.env?.DATABASE_URL).toBe("postgresql://everdict:everdict@bu-postgres:5432/everdict");
     expect(agent?.env?.REDIS_URL).toBe("redis://bu-redis:6379");
     expect(agent?.publish).toBe(8000);
-    // 엔드포인트 = http://127.0.0.1:<게시 호스트 포트>.
+    // endpoint = http://127.0.0.1:<published host port>.
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
-  it("ensureTopology: 서비스 정적 env(svc.env) 주입 + 우선순위(connEnv < svc.env < storeEnv)", async () => {
+  it("ensureTopology: injects the service static env (svc.env) + precedence (connEnv < svc.env < storeEnv)", async () => {
     const f = fakeDocker();
     const spec: ServiceHarnessSpec = {
       ...SPEC,
@@ -184,12 +184,12 @@ describe("DockerTopologyRuntime", () => {
     });
     await rt.ensureTopology(spec);
     const agent = f.runs.find((r) => r.alias === "agent-server");
-    expect(agent?.env?.LOG_LEVEL).toBe("info"); // svc.env 단독
-    expect(agent?.env?.DATABASE_URL).toBe("postgresql://store"); // storeEnv 가 svc.env(및 connEnv)를 이긴다
+    expect(agent?.env?.LOG_LEVEL).toBe("info"); // svc.env alone
+    expect(agent?.env?.DATABASE_URL).toBe("postgresql://store"); // storeEnv wins over svc.env (and connEnv)
   });
 
-  it("ensureTopology: 러너 재배포 — 남은 고정 이름 컨테이너가 있어도 rm 선제 제거로 충돌 없이 성공한다", async () => {
-    // 실 데몬처럼 docker run(--name)은 비멱등: 같은 이름이 살아 있으면 충돌(throw). 이전 배포의 잔존 컨테이너 재현.
+  it("ensureTopology: runner redeploy — succeeds without a collision by pre-removing leftover fixed-name containers via rm", async () => {
+    // Like a real daemon, docker run (--name) is non-idempotent: a live same-name container collides (throws). Reproduce a leftover container from a prior deploy.
     const live = new Set<string>(["everdict-bu-1.0.0-bu-postgres", "everdict-bu-1.0.0-agent-server"]);
     const docker: Docker = {
       async ensureNetwork() {},
@@ -208,32 +208,32 @@ describe("DockerTopologyRuntime", () => {
       async removeNetwork() {},
     };
     const rt = new DockerTopologyRuntime({ docker, fetchImpl: okFetch });
-    // 잔존 컨테이너를 run 전에 rm 하지 않으면 여기서 이름 충돌 cascade 로 throw 한다(회귀 가드).
+    // If a leftover container isn't rm'd before run, this throws on a name-collision cascade (regression guard).
     const handle = await rt.ensureTopology(SPEC);
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
-  it("ensureTopology: 같은 버전 재호출은 warm 캐시 — 재배포 없음", async () => {
+  it("ensureTopology: a re-call for the same version is a warm cache — no redeploy", async () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     await rt.ensureTopology(SPEC);
     const runsAfterFirst = f.runs.length;
     await rt.ensureTopology(SPEC);
-    expect(f.runs.length).toBe(runsAfterFirst); // 두 번째는 캐시
+    expect(f.runs.length).toBe(runsAfterFirst); // the second is cached
   });
 
-  it("ensureTopology: 동시 호출은 single-flight — 같은 토폴로지를 한 번만 배포(중복 docker run 없음)", async () => {
+  it("ensureTopology: concurrent calls are single-flight — deploys the same topology only once (no duplicate docker run)", async () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
-    // case-level 병렬에서 warm 이 아직 비었을 때 동시에 ensure → 둘이 배포하면 고정 이름 컨테이너가 충돌한다.
+    // Under case-level parallelism, concurrent ensures while warm is still empty → if two deploy, the fixed-name containers collide.
     const [a, b, c] = await Promise.all([rt.ensureTopology(SPEC), rt.ensureTopology(SPEC), rt.ensureTopology(SPEC)]);
-    expect(f.networks).toEqual(["everdict-bu-1.0.0"]); // 네트워크 1회
-    expect(f.runs.map((r) => r.alias)).toEqual(["bu-postgres", "bu-redis", "agent-server"]); // 배포 1회분만
-    expect(a).toEqual(b); // 셋 다 같은 핸들을 공유
+    expect(f.networks).toEqual(["everdict-bu-1.0.0"]); // network once
+    expect(f.runs.map((r) => r.alias)).toEqual(["bu-postgres", "bu-redis", "agent-server"]); // only one deploy's worth
+    expect(a).toEqual(b); // all three share the same handle
     expect(b).toEqual(c);
   });
 
-  it("ensureTopology: 배포 실패 후 재호출은 새로 시도한다(실패 토폴로지는 single-flight 에 캐싱 안 함)", async () => {
+  it("ensureTopology: a re-call after a failed deploy tries fresh (a failed topology isn't cached in single-flight)", async () => {
     const f = fakeDocker();
     let firstNetwork = true;
     f.docker.ensureNetwork = async (name: string) => {
@@ -245,32 +245,32 @@ describe("DockerTopologyRuntime", () => {
     };
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     await expect(rt.ensureTopology(SPEC)).rejects.toThrow("docker down");
-    // inFlight 가 비워졌어야 재시도가 동작한다(실패를 캐싱하면 영영 실패).
+    // inFlight must have been cleared for the retry to work (caching the failure would fail forever).
     const handle = await rt.ensureTopology(SPEC);
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
-  it("provisionBrowserEnv: 브라우저 컨테이너 + cdpUrl(내부 alias) + snapshot(호스트 포트 fetch)", async () => {
+  it("provisionBrowserEnv: browser container + cdpUrl (internal alias) + snapshot (fetch via host port)", async () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     await rt.ensureTopology(SPEC);
     const browser = await rt.provisionBrowserEnv(SPEC, "run-1");
-    // 에이전트(네트워크 내부)가 도달하는 주소 — 내부 alias.
+    // the address the agent (inside the network) reaches — the internal alias.
     expect(browser.wiring.target_cdp_url).toBe("http://browser-run-1:9222");
     const snap = await browser.snapshot();
-    if (snap.kind !== "browser") throw new Error("브라우저 스냅샷이어야 한다");
+    if (snap.kind !== "browser") throw new Error("expected a browser snapshot");
     expect(snap.url).toBe("https://x");
-    // dispose 는 브라우저 컨테이너만 제거(warm 토폴로지 유지).
+    // dispose removes only the browser container (keeps the warm topology).
     await browser.dispose();
     expect(f.removed).toContain("everdict-bu-1.0.0-browser-run-1");
   });
 
-  it("ensureTopology: 부분 실패 후 재시도가 컨테이너 이름 충돌 없이 성공한다(cascade 방지)", async () => {
-    // 실 데몬처럼 동작하는 fake — docker run(--name)은 비멱등이라 같은 이름이 살아 있으면 충돌(throw).
-    // 스토어는 첫 토폴로지 시도에서 readiness 실패(exec throw) → ensureTopology 가 중도 throw.
+  it("ensureTopology: a retry after partial failure succeeds without a container name collision (cascade prevention)", async () => {
+    // A fake that behaves like a real daemon — docker run (--name) is non-idempotent, so a live same-name container collides (throws).
+    // The store fails readiness on the first topology attempt (exec throws) → ensureTopology throws midway.
     const live = new Set<string>();
     const removed: string[] = [];
-    let storeReady = false; // 첫 시도엔 준비 안 됨 → 두 번째 시도 직전에 켠다.
+    let storeReady = false; // not ready on the first attempt → turned on just before the second.
     const docker: Docker = {
       async ensureNetwork() {},
       async run(spec) {
@@ -290,20 +290,20 @@ describe("DockerTopologyRuntime", () => {
       },
       async removeNetwork() {},
     };
-    // readyTimeoutMs/pollIntervalMs 를 1ms 로 — 실패 경로의 폴링이 즉시 끝나게.
+    // readyTimeoutMs/pollIntervalMs at 1ms — so the failure-path polling ends immediately.
     const rt = new DockerTopologyRuntime({ docker, fetchImpl: okFetch, readyTimeoutMs: 1, pollIntervalMs: 1 });
 
-    // 1차 시도: 스토어 readiness 실패 → throw. 정리되면 postgres 컨테이너가 live 에서 빠진다.
+    // First attempt: store readiness fails → throw. Once cleaned up, the postgres container leaves live.
     await expect(rt.ensureTopology(SPEC)).rejects.toThrow();
-    expect(removed).toContain("everdict-bu-1.0.0-bu-postgres"); // 부분 기동분 정리됨(픽스 전엔 비어 cascade)
+    expect(removed).toContain("everdict-bu-1.0.0-bu-postgres"); // the partial startup is cleaned up (before the fix, empty → cascade)
 
-    // 2차 시도: 이제 스토어 준비됨. 픽스 전이면 1차가 남긴 postgres 이름과 충돌(throw)했을 자리.
+    // Second attempt: the store is ready now. Before the fix, this is where it would collide (throw) with the postgres name left by the first.
     storeReady = true;
     const handle = await rt.ensureTopology(SPEC);
     expect(handle.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
   });
 
-  it("ensureTopology: 서비스 volumes 를 docker run 에 -v 로 전달한다", async () => {
+  it("ensureTopology: passes service volumes to docker run as -v", async () => {
     const f = fakeDocker();
     const spec: ServiceHarnessSpec = {
       ...SPEC,
@@ -326,9 +326,9 @@ describe("DockerTopologyRuntime", () => {
     expect(agent?.volumes).toEqual(["bu-cache:/cache", "/data:/data:ro"]);
   });
 
-  it("ensureTopology: 서비스가 선언한 readiness 상한을 적용한다(런타임 60s 기본이 아니라 빠르게 타임아웃)", async () => {
-    // 엔드포인트가 영원히 500 — 준비되지 않는다. per-service readiness(30/10ms)면 ~30ms 안에 타임아웃,
-    // 런타임 기본(60s)이 적용됐다면 vitest 5s 타임아웃에 걸려 실패했을 것 → per-service 적용을 증명.
+  it("ensureTopology: applies the service-declared readiness budget (times out fast, not the runtime 60s default)", async () => {
+    // The endpoint is 500 forever — never ready. With per-service readiness (30/10ms) it times out within ~30ms;
+    // had the runtime default (60s) applied, it would have hit vitest's 5s timeout and failed → proving per-service is applied.
     const never: typeof fetch = (async () => new Response("", { status: 503 })) as unknown as typeof fetch;
     const f = fakeDocker();
     const spec: ServiceHarnessSpec = {
@@ -347,14 +347,14 @@ describe("DockerTopologyRuntime", () => {
       ],
     };
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: never });
-    await expect(rt.ensureTopology(spec)).rejects.toThrow(/준비 대기 시간초과/);
+    await expect(rt.ensureTopology(spec)).rejects.toThrow(/Timed out waiting for the endpoint/);
   });
 
-  it("teardown: 토폴로지 컨테이너 + 네트워크 제거", async () => {
+  it("teardown: removes the topology containers + network", async () => {
     const f = fakeDocker();
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     await rt.ensureTopology(SPEC);
-    const beforeTeardown = f.removed.length; // ensure 중 멱등 rm(각 컨테이너 run 전) 이후부터 teardown 제거분만 확인
+    const beforeTeardown = f.removed.length; // check only teardown removals, after the idempotent rm during ensure (before each container run)
     await rt.teardown(SPEC);
     expect(f.removed.slice(beforeTeardown)).toEqual([
       "everdict-bu-1.0.0-bu-postgres",

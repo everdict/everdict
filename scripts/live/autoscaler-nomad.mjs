@@ -1,10 +1,10 @@
-// 라이브 검증: 큐 깊이 기반 오토스케일링이 실제 Nomad 위에서 용량을 탄력 조정한다.
+// Live verification: queue-depth-based autoscaling elastically adjusts capacity on a real Nomad.
 //
-// NomadBackend 는 maxConcurrent 를 동적(슬롯 게터)으로 읽는다. 시작 슬롯=1. N개를 한꺼번에 제출하면
-// 스케줄러가 1개만 띄우고 나머지는 큐에 쌓인다 → 오토스케일러가 backlog 를 보고 슬롯을 MAX 까지 올려
-// 동시 alloc 이 늘고, 큐가 빠지면 다시 MIN 으로 줄인다. 폴러가 실제 동시 alloc 수를 관측한다.
+// NomadBackend reads maxConcurrent dynamically (a slot getter). Start slots=1. Submit N at once and
+// the scheduler launches only 1, queuing the rest → the autoscaler sees the backlog and raises slots up to MAX,
+// concurrent allocs grow, and when the queue drains it scales back down to MIN. A poller observes the actual concurrent alloc count.
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/autoscaler-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/autoscaler-nomad.mjs
 
 import {
   Autoscaler,
@@ -49,7 +49,7 @@ async function runningCount() {
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function main() {
-  const slots = new MutableSlots("nomad", MIN); // 시작=MIN, 동적
+  const slots = new MutableSlots("nomad", MIN); // start=MIN, dynamic
   const backend = new NomadBackend({ addr: NOMAD_ADDR, image: IMAGE, maxConcurrent: slots.get });
   const sched = new Scheduler(new BackendRegistry().register("nomad", backend));
 
@@ -81,7 +81,7 @@ async function main() {
     ),
   );
 
-  // drain 이후 스케일-다운 관측 (몇 틱 더 돌린다)
+  // Observe scale-down after drain (run a few more ticks)
   console.log(`\nall ${results.filter(Boolean).length}/${N} done @ t+${el()}s — observing scale-down …`);
   for (let i = 0; i < 6 && slots.current() > MIN; i++) await sleep(700);
 

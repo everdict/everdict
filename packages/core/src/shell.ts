@@ -1,4 +1,4 @@
-// 셸 인자 안전 인용 — 사용자 task/경로를 셸 명령에 끼워넣을 때 사용.
+// Safe shell-argument quoting — use when embedding a user task/path into a shell command.
 export function shq(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }

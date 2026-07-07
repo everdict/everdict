@@ -1,6 +1,6 @@
 import type { Config } from 'tailwindcss'
 
-// Tailwind v4 — 토큰은 globals.css 의 @theme inline 에 있음. content 만 선언.
+// Tailwind v4 — tokens live in globals.css @theme inline. Only content is declared.
 const config: Config = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
   theme: { extend: {} },

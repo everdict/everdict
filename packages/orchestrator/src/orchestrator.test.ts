@@ -29,13 +29,13 @@ const job: AgentJob = {
 const router = new Router(new BackendRegistry().register("x", new FakeBackend("x")), "x");
 
 describe("DirectOrchestrator", () => {
-  it("Router 로 잡을 실행한다", async () => {
+  it("runs a job via the Router", async () => {
     expect((await new DirectOrchestrator(router).run(job)).harness).toBe("x");
   });
 });
 
 describe("createActivities", () => {
-  it("dispatchCase 가 Router 를 호출한다 (워커가 등록할 액티비티)", async () => {
+  it("dispatchCase calls the Router (the activity the worker registers)", async () => {
     const acts = createActivities(router);
     expect((await acts.dispatchCase(job)).harness).toBe("x");
   });

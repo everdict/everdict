@@ -17,7 +17,7 @@ function stubBackend(probe?: () => Promise<ProbeResult>): Backend {
 }
 
 describe("makeRuntimeProber", () => {
-  it("reachable 백엔드 → {kind,reachable,detail}", async () => {
+  it("reachable backend → {kind,reachable,detail}", async () => {
     const probe = makeRuntimeProber({
       secretsFor: async () => ({}),
       buildBackend: () => stubBackend(async () => ({ reachable: true, detail: "Nomad agent: n1" })),
@@ -25,14 +25,14 @@ describe("makeRuntimeProber", () => {
     expect(await probe("acme", SPEC)).toEqual({ kind: "local", reachable: true, detail: "Nomad agent: n1" });
   });
 
-  it("probe 미지원 백엔드 → reachable:false + 안내", async () => {
+  it("backend without probe support → reachable:false + guidance", async () => {
     const probe = makeRuntimeProber({ secretsFor: async () => ({}), buildBackend: () => stubBackend() });
     const r = await probe("acme", SPEC);
     expect(r.reachable).toBe(false);
-    expect(r.detail).toContain("연결 테스트를 지원하지 않습니다");
+    expect(r.detail).toContain("does not support connection testing");
   });
 
-  it("백엔드 빌드 실패 → reachable:false + 사유", async () => {
+  it("backend build failure → reachable:false + reason", async () => {
     const probe = makeRuntimeProber({
       secretsFor: async () => ({}),
       buildBackend: () => {
@@ -44,7 +44,7 @@ describe("makeRuntimeProber", () => {
     expect(r.detail).toContain("unsupported kind");
   });
 
-  it("시크릿을 그 워크스페이스로 resolve해 빌더 secretEnv 로 넘긴다", async () => {
+  it("resolves secrets for that workspace and passes them as the builder's secretEnv", async () => {
     let seen: Record<string, string> | undefined;
     const probe = makeRuntimeProber({
       secretsFor: async (ws): Promise<Record<string, string>> => (ws === "acme" ? { NOMAD_TOKEN: "t" } : {}),
@@ -57,14 +57,14 @@ describe("makeRuntimeProber", () => {
     expect(seen).toEqual({ NOMAD_TOKEN: "t" });
   });
 
-  it("probe 가 응답 없으면 타임아웃으로 reachable:false", async () => {
+  it("if probe never responds, reachable:false via timeout", async () => {
     const probe = makeRuntimeProber({
       secretsFor: async () => ({}),
-      buildBackend: () => stubBackend(() => new Promise<ProbeResult>(() => {})), // 영원히 pending
+      buildBackend: () => stubBackend(() => new Promise<ProbeResult>(() => {})), // pending forever
       timeoutMs: 20,
     });
     const r = await probe("acme", SPEC);
     expect(r.reachable).toBe(false);
-    expect(r.detail).toContain("시간초과");
+    expect(r.detail).toContain("timed out");
   });
 });

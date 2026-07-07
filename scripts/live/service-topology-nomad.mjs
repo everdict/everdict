@@ -1,20 +1,20 @@
-// 라이브 검증: service-topology 하니스를 실제 Nomad 클러스터에서 구동한다.
+// Live verification: run the service-topology harness on a real Nomad cluster.
 //
-// 무엇이 "실제"인가:
-//  - warm 토폴로지: front-door 서비스(stand-in)를 Nomad SERVICE 잡으로 배포 → alloc 에서 host:port 발견
-//  - per-case 타깃 환경: headless Chromium 을 Nomad 에 띄우고 실 CDP 엔드포인트를 발견(/json/version)
-//  - drive: 발견한 front-door 로 실제 네트워크 POST /runs (per-run wiring 주입) — alloc 로그로 검증
-//  - trace: 실제 MLflow(REST)에서 trace 조회(인증/미존재 시 빈 트레이스로 degrade)
-//  - grade: 실 브라우저 스냅샷 + trace 로 채점 → CaseResult → teardown
+// What is "real":
+//  - warm topology: deploy the front-door service (stand-in) as a Nomad SERVICE job → discover host:port from the alloc
+//  - per-case target env: launch headless Chromium on Nomad and discover the real CDP endpoint (/json/version)
+//  - drive: real network POST /runs to the discovered front-door (per-run wiring injected) — verified via alloc logs
+//  - trace: fetch the trace from real MLflow (REST) (degrades to an empty trace on auth failure / absence)
+//  - grade: score from the real browser snapshot + trace → CaseResult → teardown
 //
-// 무엇이 stand-in 인가(실 이미지가 필요한 Phase 2):
-//  - front-door = mendhak/http-https-echo (browser-use agent-server 대체; 요청을 stdout 에 로깅)
-//  - 브라우저 클라이언트 익스텐션(--load-extension; 헤드풀) 미적용
+// What is a stand-in (Phase 2 needs real images):
+//  - front-door = mendhak/http-https-echo (substitutes for the browser-use agent-server; logs requests to stdout)
+//  - browser client extension (--load-extension; headful) not applied
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 node scripts/live/service-topology-nomad.mjs
+// Usage: NOMAD_ADDR=http://127.0.0.1:4646 node scripts/live/service-topology-nomad.mjs
 
-// 워크스페이스 패키지명은 scripts/ 에서 해석되지 않으므로 빌드된 dist 를 직접 import
-// (각 패키지의 @everdict/* 의존성은 pnpm 심링크로 패키지 내부에서 해석된다).
+// Workspace package names don't resolve from scripts/, so import the built dist directly
+// (each package's @everdict/* deps resolve within the package via pnpm symlinks).
 import {
   NomadTopologyRuntime,
   ServiceTopologyBackend,
@@ -28,7 +28,7 @@ const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
 const MLFLOW_ENDPOINT = process.env.MLFLOW_ENDPOINT ?? "http://127.0.0.1:5501";
 const FRONTDOOR_IMAGE = process.env.FRONTDOOR_IMAGE ?? "mendhak/http-https-echo:latest";
 const BROWSER_IMAGE = process.env.BROWSER_IMAGE ?? "chromedp/headless-shell:latest";
-// docker bridge gateway: alloc 컨테이너에서 호스트의 공유 스토어로 가는 경로(주입 시연용).
+// docker bridge gateway: the route from an alloc container to the host's shared store (for injection demo).
 const HOST_GW = process.env.HOST_GW ?? "172.17.0.1";
 
 /** @type {import("@everdict/core").ServiceHarnessSpec} */
@@ -68,7 +68,7 @@ const JOB = {
     id: "svc-topo-live-1",
     env: { kind: "browser", startUrl: "about:blank" },
     task: "open the dashboard and confirm it loads",
-    // 실 브라우저 스냅샷 + trace 로 채점 (url-matches/dom-contains = 브라우저, steps = trace).
+    // Score from the real browser snapshot + trace (url-matches/dom-contains = browser, steps = trace).
     graders: [
       { id: "url-matches", config: { pattern: "about:blank" } },
       { id: "dom-contains", config: { text: "about:blank" } },
@@ -100,7 +100,7 @@ async function main() {
     readyTimeoutMs: 90_000,
   });
 
-  // per-run wiring 이 front-door 에 실제로 도달했는지 검증하려고 submit 을 감싼다.
+  // Wrap submit to verify the per-run wiring actually reached the front-door.
   const delivered = [];
   const backend = new ServiceTopologyBackend({
     runtime,

@@ -198,11 +198,11 @@ Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Qua
   (App JWT → installation token, host-aware, repo-restricted) + `WorkspaceSettings.githubApp` schema
   + unit tests (mocked GitHub). Proof: mint a repo-scoped installation token.
 - **S2 — install/link API + MCP + authz:** start/callback/list/unlink + GHE registration. Settings →
-  통합 deep-link target.
+  Integrations deep-link target.
 - **S3 — repo-source wiring:** `env.source` workspace-github-app source resolved by workspace in
   `execute-case.ts`; CI-link picker → `/installation/repositories`. **Live private-repo clone verify**
   (github.com + one GHE if reachable).
-- **S4 — Web UI:** Settings → 통합 "GitHub App(조직)" section (install / registrations / selected
+- **S4 — Web UI:** Settings → Integrations "GitHub App (org)" section (install / registrations / selected
   repos / unlink) + repo-source picker offering workspace installations.
 - **S5 — Mattermost M1 (outbound bot + registration):** workspace registration (`mattermost` block,
   host + bot token, self-serve web form) + switch the completion/regression notifier from
@@ -226,7 +226,7 @@ Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Qua
     between S6b↔S6c — the CI repo picker just 404s until S6c).
   - **S6c — Remove personal Connected accounts:** delete `ConnectionService`/`ConnectionStore`/
   OAuth `integrations`/routes (`/connections*`, `/workspace/applications`, `/workspace/integrations`)/
-  MCP tools/web `manage-connections` + `entities/connection` + account "연결된 계정" tab +
+  MCP tools/web `manage-connections` + `entities/connection` + account "Connected accounts" tab +
   applications roster + `GITHUB_OAUTH_CLIENT_ID/SECRET` env. Add `everdict_connections` **drop
   migration** (expand→contract; preflight note). Retire `docs/connections.md`. Keep
   `API_PUBLIC_URL`/`WEB_BASE_URL` (the App install callback + Mattermost inbound URLs use them).

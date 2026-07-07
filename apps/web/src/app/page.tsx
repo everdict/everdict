@@ -7,7 +7,7 @@ import { currentPrincipal } from '@/shared/auth/principal'
 import { buttonVariants } from '@/shared/ui/button'
 import { ThemeToggle } from '@/shared/ui/theme-toggle'
 
-// 컨트롤플레인 GET /me 로 현재 인증을 확인해야 하므로 정적 렌더가 아니다.
+// Not statically rendered, since it must verify the current auth via the control-plane GET /me.
 export const dynamic = 'force-dynamic'
 
 export default async function Home() {
@@ -17,23 +17,23 @@ export default async function Home() {
     { icon: ShieldCheck, title: t('featureSafeTitle'), body: t('featureSafeBody') },
     { icon: GitCompareArrows, title: t('featureCompareTitle'), body: t('featureCompareBody') },
   ] as const
-  // 컨트롤플레인에 접속되고 실제 로그인(OIDC)이 확인되면 랜딩이 아니라 내 워크스페이스(/{slug})로.
-  // 워크스페이스가 0개면 온보딩으로. via!=='oidc'(dev x-everdict-tenant 폴백)/principal=null 이면 랜딩을 보여준다.
+  // If the control plane is reachable and a real login (OIDC) is confirmed, go to my workspace (/{slug}) instead of the landing.
+  // If there are 0 workspaces, go to onboarding. If via!=='oidc' (dev x-everdict-tenant fallback) / principal=null, show the landing.
   const { principal } = await currentPrincipal()
-  // 활성 워크스페이스가 비어 있으면(예: keycloak 토큰에 workspace 클레임 없음) 내 첫 워크스페이스로 폴백.
-  // principal.workspace 가 "" 면 `/${""}` = "/" 가 되어 이 페이지로 다시 튕기는 무한 루프가 나므로 그대로 쓰지 않는다.
+  // If the active workspace is empty (e.g. no workspace claim in the keycloak token) fall back to my first workspace.
+  // If principal.workspace is "", `/${""}` = "/" bounces back to this page in an infinite loop, so don't use it as-is.
   const activeWorkspace = principal
     ? principal.workspace || principal.workspaces?.[0]?.id
     : undefined
   const workspaceHome = activeWorkspace ? `/${activeWorkspace}` : '/onboarding'
   if (principal?.via === 'oidc') redirect(workspaceHome)
 
-  // 랜딩의 진입 CTA: dev 폴백 등으로 principal 이 있으면 워크스페이스로, 없으면 로그인으로.
+  // Landing entry CTA: if a principal exists (e.g. via the dev fallback) go to the workspace, otherwise to login.
   const enterHref = principal ? workspaceHome : '/api/auth/signin'
 
   return (
     <main className="relative flex min-h-screen flex-col">
-      {/* 상단 바 — 절제된 워드마크 + 테마/로그인 */}
+      {/* Top bar — restrained wordmark + theme/login */}
       <header className="sticky top-0 z-10 border-b border-border/60 bg-background/80 backdrop-blur-md">
         <div className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-3.5">
           <div className="flex items-center gap-2.5">
@@ -54,7 +54,7 @@ export default async function Home() {
         </div>
       </header>
 
-      {/* 히어로 — 랜딩만 넉넉한 여백이 정답 */}
+      {/* Hero — only the landing calls for generous whitespace */}
       <section className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center justify-center gap-8 px-6 py-24 text-center sm:py-32">
         <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1 text-[12px] font-[510] text-muted-foreground shadow-raise">
           <span className="size-1.5 rounded-full bg-[var(--color-success)]" />
@@ -86,7 +86,7 @@ export default async function Home() {
         </div>
       </section>
 
-      {/* 피처 스트립 */}
+      {/* Feature strip */}
       <section className="mx-auto grid w-full max-w-5xl gap-4 px-6 pb-28 sm:grid-cols-3">
         {features.map((f) => {
           const Icon = f.icon

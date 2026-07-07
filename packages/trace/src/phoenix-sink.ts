@@ -8,26 +8,26 @@ import type {
   TraceSinkScore,
 } from "./trace-sink.js";
 
-// Arize Phoenix 싱크 — 스팬은 JSON 전용 REST(POST /v1/projects/{p}/spans, ≥10.12)로, 점수는 trace annotations.
-// 실 API 검증 요점: /v1/traces 는 protobuf 전용(OTLP/JSON 미수용 — JSON 어댑터는 projects/{p}/spans 를 쓴다),
-// id 는 OTel hex(trace 32/span 16, 0x 없이), 시간은 timezone-aware ISO, 배치는 케이스 단위로 쪼개 all-or-nothing
-// 실패를 케이스로 격리. 접수는 202(큐잉)라 annotation 은 sync=false(기본)로 enqueue 한다(직후 404 회피).
+// Arize Phoenix sink — spans go via JSON-only REST (POST /v1/projects/{p}/spans, ≥10.12), scores via trace annotations.
+// Real-API notes: /v1/traces is protobuf-only (doesn't accept OTLP/JSON — the JSON adapter uses projects/{p}/spans),
+// ids are OTel hex (trace 32 / span 16, no 0x), times are timezone-aware ISO, and batches are split per case to isolate
+// an all-or-nothing failure to that case. Ingest is 202 (queued), so annotations are enqueued with sync=false (default) (avoids an immediate 404).
 export interface PhoenixTraceSinkOptions {
   endpoint: string;
-  auth?: string; // Authorization 헤더 '값' 그대로("Bearer <key>")
-  project?: string; // 프로젝트 이름/ID — 스팬 생성(create 모드) 필수
+  auth?: string; // the Authorization header 'value' verbatim ("Bearer <key>")
+  project?: string; // project name/ID — required for span creation (create mode)
   webUrl?: string;
   fetchImpl?: typeof fetch;
   newId?: () => string;
   now?: () => string;
 }
 
-// uuid → OTel hex id(대시 제거). trace=32자, span=앞 16자.
+// uuid → OTel hex id (dashes removed). trace=32 chars, span=first 16.
 function hex32(newId: () => string): string {
   return newId().replace(/-/g, "").slice(0, 32).padEnd(32, "0");
 }
 
-// 케이스 1건 → Phoenix JSON 스팬 배열(순수). 루트 CHAIN 스팬 + llm_call→LLM · tool_call→TOOL 자식 스팬.
+// One case → a Phoenix JSON span array (pure). A root CHAIN span + child spans: llm_call→LLM, tool_call→TOOL.
 export function phoenixSpans(
   ctx: TraceSinkContext,
   c: TraceSinkCase,
@@ -96,7 +96,7 @@ export function phoenixSpans(
   return spans;
 }
 
-// 점수 1건 → trace annotation(순수). judge:<id> → LLM, 그 외 → CODE.
+// One score → a trace annotation (pure). judge:<id> → LLM, otherwise → CODE.
 export function phoenixAnnotation(traceId: string, score: TraceSinkScore): Record<string, unknown> {
   return {
     name: score.name,
@@ -135,7 +135,7 @@ export class PhoenixTraceSink implements TraceSink {
         let traceId = c.externalId;
         if (!traceId) {
           if (!this.opts.project) {
-            out.push({ caseId: c.caseId, error: "phoenix 스팬 생성엔 project 설정이 필요합니다." });
+            out.push({ caseId: c.caseId, error: "Phoenix span creation requires the project setting." });
             continue;
           }
           traceId = hex32(this.newId);
@@ -146,12 +146,12 @@ export class PhoenixTraceSink implements TraceSink {
           });
           if (!res.ok) {
             const text = await res.text().catch(() => "");
-            out.push({ caseId: c.caseId, error: `Phoenix 스팬 생성 ${res.status}: ${text.slice(0, 200)}` });
+            out.push({ caseId: c.caseId, error: `Phoenix span creation ${res.status}: ${text.slice(0, 200)}` });
             continue;
           }
         }
-        // 점수 부착 — 케이스당 1콜(배치). 스팬 접수(202)가 큐잉이라 sync=false 로 enqueue(직후 404 회피).
-        const tid = traceId; // let 좁힘은 클로저에 보존되지 않아 const 로 고정
+        // Attach scores — one call per case (batch). Span ingest (202) is queued, so enqueue with sync=false (avoids an immediate 404).
+        const tid = traceId; // a let narrowing isn't preserved in the closure, so pin it as a const
         let scoreError: string | undefined;
         if (c.scores.length > 0) {
           const res = await f(`${base}/v1/trace_annotations`, {
@@ -167,7 +167,7 @@ export class PhoenixTraceSink implements TraceSink {
         out.push({
           caseId: c.caseId,
           externalId: traceId,
-          // OTel trace id 만으로 도달하는 서버측 리다이렉트(프로젝트 GlobalID 불요, 2025+ 서버).
+          // A server-side redirect reachable by the OTel trace id alone (no project GlobalID needed, 2025+ servers).
           url: `${web}/redirects/traces/${traceId}`,
           ...(scoreError ? { error: scoreError } : {}),
         });
@@ -175,7 +175,7 @@ export class PhoenixTraceSink implements TraceSink {
         throw new UpstreamError(
           "UPSTREAM_ERROR",
           {},
-          `Phoenix 싱크 연결 실패: ${err instanceof Error ? err.message : String(err)}`,
+          `Phoenix sink connection failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }

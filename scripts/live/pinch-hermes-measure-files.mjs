@@ -1,8 +1,8 @@
-// 라이브 e2e (충실 버전): hermes-desktop 의 pinch 수행도를 *생성된 워크스페이스 파일* 기준으로 측정 — chat 메시지가 아니라
-// 에이전트가 실제로 쓴 출력 파일을, 태스크 .md 의 자기 루브릭(## LLM Judge Rubric / Grading Criteria)으로 채점한다(PinchBench
-// 본래 방식). pinch-hermes-measure.mjs(최종 메시지만 채점 → 파일로 쓴 결과 저평가)의 개선판.
-// 흐름: 컨트롤플레인(dev) → pinch 벤치마크/하니스 등록 → 태스크별로 [workspace 마운트 + 입력파일 seed → hermes -z(CWD=/work)
-//   → 생성된 출력파일 회수 → 태스크 루브릭으로 judge 채점] → POST /scorecards/ingest(이력) → GET 출력.
+// Live e2e (faithful version): measure hermes-desktop's pinch performance against the *produced workspace files* — grade
+// not the chat message but the output files the agent actually wrote, using the task .md's own rubric (## LLM Judge Rubric /
+// Grading Criteria) (PinchBench's original method). Improved over pinch-hermes-measure.mjs (grades only the final message → underrates results written to files).
+// Flow: control plane (dev) → register pinch benchmark/harness → per task [mount workspace + seed input files → hermes -z (CWD=/work)
+//   → collect produced output files → judge-grade with the task rubric] → POST /scorecards/ingest (history) → GET output.
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -29,7 +29,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음.");
+  console.error("No LLM key.");
   process.exit(2);
 }
 const post = async (p, b) => {
@@ -66,7 +66,7 @@ async function fetchTask(id) {
   return { id, prompt: prompt.replace(/^##+\s*Prompt\s*/i, "").trim(), rubric, inputs };
 }
 
-// hermes 를 워크스페이스(/work, host 마운트)에서 실행 → 생성된 출력파일 회수(입력 제외). 파일은 컨테이너로 읽어 perms 회피.
+// Run hermes in the workspace (/work, host mount) → collect produced output files (excluding inputs). Read files via a container to avoid perms issues.
 function runInWorkspace(t) {
   const ws = mkdtempSync(join(tmpdir(), "pinch-ws-"));
   for (const f of t.inputs) {
@@ -106,7 +106,7 @@ function runInWorkspace(t) {
   } catch (e) {
     chat = `(hermes error: ${e instanceof Error ? e.message.slice(0, 120) : e})`;
   }
-  // 생성 파일 회수(컨테이너로 cat — root 생성 파일 perms 회피). <<<F:name>>> 구분자.
+  // Collect produced files (cat via container — avoids perms on root-created files). <<<F:name>>> delimiter.
   let dump = "";
   try {
     dump = execFileSync(
@@ -124,7 +124,7 @@ function runInWorkspace(t) {
       { encoding: "utf8", maxBuffer: 10 * 1024 * 1024 },
     );
   } catch {}
-  // <<<F:name>>> 구분자로 파일별 분리 — 입력파일/숨김파일 제외 = 에이전트가 생성한 출력.
+  // Split per file by the <<<F:name>>> delimiter — excluding input/hidden files = the output the agent produced.
   const files = [];
   const parts = dump.split(/<<<F:(.+?)>>>\n/);
   for (let i = 1; i < parts.length; i += 2) {
@@ -135,7 +135,7 @@ function runInWorkspace(t) {
   return { chat, files, ws };
 }
 
-console.log("=== 컨트롤플레인 기동(dev) ===");
+console.log("=== control plane start (dev) ===");
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: new URL("../..", import.meta.url).pathname,
   env: {
@@ -169,7 +169,7 @@ try {
   )
     await sleep(1000);
 
-  console.log(`\n=== PinchBench core 태스크 ${TASK_IDS.length}개 로드 ===`);
+  console.log(`\n=== load ${TASK_IDS.length} PinchBench core tasks ===`);
   const tasks = [];
   for (const id of TASK_IDS) {
     try {
@@ -181,11 +181,12 @@ try {
     }
   }
 
-  console.log("\n=== pinch 벤치마크 + hermes-desktop 하니스 등록 ===");
+  console.log("\n=== register pinch benchmark + hermes-desktop harness ===");
   await post("/datasets", {
     id: "pinch-core-files",
     version: "1.0.0",
-    description: "PinchBench core — 파일-기반 채점(에이전트가 생성한 워크스페이스 파일을 태스크 루브릭으로).",
+    description:
+      "PinchBench core — file-based grading (the agent's produced workspace files, against the task rubric).",
     tags: ["pinchbench", "file-graded"],
     cases: tasks.map((t) => ({
       id: t.id,
@@ -207,7 +208,7 @@ try {
     trace: { kind: "none" },
   });
 
-  console.log(`\n=== hermes(${AGENT_MODEL}) 실행(워크스페이스) + 파일 채점(judge=${JUDGE_MODEL}, 태스크 루브릭) ===`);
+  console.log(`\n=== run hermes(${AGENT_MODEL}) (workspace) + file grading (judge=${JUDGE_MODEL}, task rubric) ===`);
   const traces = [];
   for (const t of tasks) {
     const { chat, files } = runInWorkspace(t);
@@ -256,7 +257,7 @@ try {
     });
   }
 
-  console.log("\n=== POST /scorecards/ingest (이력 기록) ===");
+  console.log("\n=== POST /scorecards/ingest (record history) ===");
   const ing = await post("/scorecards/ingest", {
     dataset: { id: "pinch-core-files", version: "1.0.0" },
     harness: { id: "hermes-desktop", version: "1.0.0" },
@@ -272,12 +273,12 @@ try {
     if (rec.status === "succeeded" || rec.status === "failed") break;
   }
   console.log(
-    `\n================ 기록된 평가 이력 (파일-기반, GET /scorecards/${String(scId).slice(0, 8)}…) ================`,
+    `\n================ recorded eval history (file-based, GET /scorecards/${String(scId).slice(0, 8)}…) ================`,
   );
   console.log(
-    `  벤치마크: ${rec.dataset?.id}@${rec.dataset?.version} | 하니스: ${rec.harness?.id}@${rec.harness?.version} | ${rec.status}`,
+    `  benchmark: ${rec.dataset?.id}@${rec.dataset?.version} | harness: ${rec.harness?.id}@${rec.harness?.version} | ${rec.status}`,
   );
-  console.log(`  성능(집계): ${JSON.stringify(rec.summary)}`);
+  console.log(`  performance (aggregate): ${JSON.stringify(rec.summary)}`);
   for (const r of rec.scorecard?.results ?? []) {
     const j = r.scores?.find((s) => s.metric === "judge");
     console.log(
@@ -286,18 +287,18 @@ try {
   }
   const j = (rec.summary ?? []).find((m) => m.metric === "judge");
   console.log(
-    `\n  → pinch 수행도(파일-기반): judge passRate=${((j?.passRate ?? 0) * 100) | 0}% mean=${(j?.mean ?? 0).toFixed(2)} (agent=${AGENT_MODEL})`,
+    `\n  → pinch performance (file-based): judge passRate=${((j?.passRate ?? 0) * 100) | 0}% mean=${(j?.mean ?? 0).toFixed(2)} (agent=${AGENT_MODEL})`,
   );
   ok = ing.status === 202 && rec.status === "succeeded";
   console.log(
     ok
-      ? "\n✅ 파일-기반 충실 채점: hermes 가 생성한 워크스페이스 출력파일을 태스크 자체 루브릭으로 채점 → 이력 기록."
-      : "\n⚠️ 기대와 불일치",
+      ? "\n✅ file-based faithful grading: graded hermes's produced workspace output files against the task's own rubric → history recorded."
+      : "\n⚠️ does not match expectations",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.stack : e);
 } finally {
   shutdown();
-  console.log("control plane 종료.");
+  console.log("control plane shut down.");
 }
 process.exit(ok ? 0 : 1);

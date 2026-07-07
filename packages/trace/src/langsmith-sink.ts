@@ -8,21 +8,21 @@ import type {
   TraceSinkScore,
 } from "./trace-sink.js";
 
-// LangSmith 싱크 — 케이스당 run 1건(POST /runs, 클라이언트 생성 uuid + outputs 동봉 원샷), 점수는 POST /feedback.
-// 실 API 검증 요점: 인증은 x-api-key 헤더(Authorization 아님), 경로는 bare(/runs·/feedback — SDK 와 동일),
-// 단건 POST 는 trace_id 불요(루트 run 은 자기 id), session_name=프로젝트 이름(자동 생성).
-// run 접수는 202(비동기) — 직후 feedback 이 404 날 수 있어 1회 짧게 재시도한다(SDK 도 재시도).
+// LangSmith sink — one run per case (POST /runs, a client-generated uuid + outputs in one shot), scores via POST /feedback.
+// Real-API notes: auth is the x-api-key header (not Authorization), paths are bare (/runs·/feedback — same as the SDK),
+// a single POST needs no trace_id (a root run is its own id), session_name = project name (auto-created).
+// Run ingest is 202 (async) — feedback right after can 404, so retry once briefly (the SDK also retries).
 export interface LangsmithTraceSinkOptions {
-  endpoint: string; // 예: https://api.smith.langchain.com (self-hosted 는 <host>/api/v1 일 수 있음)
-  auth?: string; // API 키 값 그대로 — x-api-key 헤더로 전송
-  project?: string; // session_name(프로젝트 이름). 미지정 = LangSmith 의 default 프로젝트
-  webUrl?: string; // UI 베이스(미지정 = https://smith.langchain.com)
+  endpoint: string; // e.g. https://api.smith.langchain.com (self-hosted may be <host>/api/v1)
+  auth?: string; // the API key value verbatim — sent as the x-api-key header
+  project?: string; // session_name (project name). Unset = LangSmith's default project
+  webUrl?: string; // UI base (unset = https://smith.langchain.com)
   fetchImpl?: typeof fetch;
   newId?: () => string;
   now?: () => string;
 }
 
-// 케이스 1건 → run 생성 바디(순수). 루트 run: trace_id = 자기 id, 원샷(end_time/outputs 동봉).
+// One case → a run-create body (pure). Root run: trace_id = its own id, one-shot (end_time/outputs included).
 export function langsmithRunBody(
   ctx: TraceSinkContext,
   c: TraceSinkCase,
@@ -56,7 +56,7 @@ export function langsmithRunBody(
   };
 }
 
-// 점수 1건 → feedback 바디(순수). judge:<id> 는 model(LLM 저지), 그 외는 api 소스로 분류.
+// One score → a feedback body (pure). judge:<id> → model (LLM judge), otherwise classified as the api source.
 export function langsmithFeedbackBody(runId: string, score: TraceSinkScore): Record<string, unknown> {
   return {
     run_id: runId,
@@ -97,7 +97,7 @@ export class LangsmithTraceSink implements TraceSink {
           });
           if (!res.ok) {
             const text = await res.text().catch(() => "");
-            out.push({ caseId: c.caseId, error: `LangSmith run 생성 ${res.status}: ${text.slice(0, 200)}` });
+            out.push({ caseId: c.caseId, error: `LangSmith run creation ${res.status}: ${text.slice(0, 200)}` });
             continue;
           }
         }
@@ -106,7 +106,7 @@ export class LangsmithTraceSink implements TraceSink {
           const body = JSON.stringify(langsmithFeedbackBody(runId, s));
           let res = await f(`${base}/feedback`, { method: "POST", headers: this.headers(), body });
           if (res.status === 404) {
-            // run 접수(202)가 비동기라 직후 feedback 이 404 날 수 있다 — 잠깐 대기 후 1회 재시도.
+            // run ingest (202) is async so feedback right after can 404 — wait briefly then retry once.
             await new Promise((r) => setTimeout(r, 300));
             res = await f(`${base}/feedback`, { method: "POST", headers: this.headers(), body });
           }
@@ -116,8 +116,8 @@ export class LangsmithTraceSink implements TraceSink {
             break;
           }
         }
-        // 케이스 딥링크 — GET /runs/{id} 응답의 app_path(UI 경로)를 웹 베이스에 조인(best-effort).
-        // 딥링크 생성에 tenant/project uuid 를 직접 조립하지 않는다(SDK 도 app_path 를 쓴다).
+        // Case deep link — join the app_path (UI path) from the GET /runs/{id} response onto the web base (best-effort).
+        // Don't hand-assemble tenant/project uuids for the deep link (the SDK also uses app_path).
         const url = await this.runAppUrl(f, base, runId);
         out.push({
           caseId: c.caseId,
@@ -129,7 +129,7 @@ export class LangsmithTraceSink implements TraceSink {
         throw new UpstreamError(
           "UPSTREAM_ERROR",
           {},
-          `LangSmith 싱크 연결 실패: ${err instanceof Error ? err.message : String(err)}`,
+          `LangSmith sink connection failed: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
     }
@@ -137,7 +137,7 @@ export class LangsmithTraceSink implements TraceSink {
     return { url, cases: out };
   }
 
-  // run 의 UI 경로(app_path) 조회 — run 접수(202)가 비동기라 404 는 1회 재시도, 그래도 없으면 링크 생략(best-effort).
+  // Fetch the run's UI path (app_path) — run ingest (202) is async so 404 retries once, and if still absent the link is omitted (best-effort).
   private async runAppUrl(f: typeof fetch, base: string, runId: string): Promise<string | undefined> {
     try {
       let res = await f(`${base}/runs/${encodeURIComponent(runId)}`, { headers: this.headers() });
@@ -151,7 +151,7 @@ export class LangsmithTraceSink implements TraceSink {
       const web = (this.opts.webUrl ?? "https://smith.langchain.com").replace(/\/$/, "");
       return `${web}${body.app_path.startsWith("/") ? "" : "/"}${body.app_path}`;
     } catch {
-      return undefined; // 링크는 부가 정보 — 실패해도 케이스 결과에 영향 없음
+      return undefined; // the link is supplementary — a failure doesn't affect the case result
     }
   }
 }

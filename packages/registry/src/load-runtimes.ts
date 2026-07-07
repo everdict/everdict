@@ -3,8 +3,8 @@ import { RuntimeSpecSchema } from "@everdict/core";
 import { SHARED_TENANT } from "./registry.js";
 import { InMemoryRuntimeRegistry, type RuntimeRegistry } from "./runtime-registry.js";
 
-// 디렉터리의 *.json Runtime 정의를 레지스트리에 로드. 버전 관리되는 파일 = SSOT(GitOps).
-// 기본 소유자는 SHARED_TENANT(first-party 공용 런타임 — 모든 테넌트가 폴백으로 봄). into 를 주면 거기에 등록(Pg 시드 등).
+// Load a directory's *.json Runtime definitions into the registry. Version-controlled files = SSOT (GitOps).
+// Default owner is SHARED_TENANT (first-party shared runtime — every tenant sees it as a fallback). Pass `into` to register there instead (e.g. Pg seed).
 export async function loadRuntimeDir(
   dir: string,
   opts: { into?: RuntimeRegistry; tenant?: string } = {},

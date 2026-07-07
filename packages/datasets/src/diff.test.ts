@@ -2,7 +2,7 @@ import { type Dataset, DatasetSchema } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { diffDatasets } from "./diff.js";
 
-// 최소 케이스 빌더 — repo env + steps grader. overrides 로 task/graders 등을 바꿔 변경 케이스를 만든다.
+// Minimal case builder — repo env + steps grader. Override task/graders etc. to make a changed case.
 function ds(version: string, cases: Array<Record<string, unknown>>, extra: Record<string, unknown> = {}): Dataset {
   return DatasetSchema.parse({
     id: "browser-llm",
@@ -17,8 +17,8 @@ function ds(version: string, cases: Array<Record<string, unknown>>, extra: Recor
   });
 }
 
-describe("diffDatasets (버전 간 데이터셋 diff)", () => {
-  it("candidate 에만 있는 케이스는 added, base 에만 있는 케이스는 removed 로 분류한다", () => {
+describe("diffDatasets (dataset diff across versions)", () => {
+  it("classifies cases only in candidate as added and cases only in base as removed", () => {
     const base = ds("1.0.0", [{ id: "a" }, { id: "b" }]);
     const cand = ds("1.1.0", [{ id: "a" }, { id: "c" }]);
 
@@ -32,7 +32,7 @@ describe("diffDatasets (버전 간 데이터셋 diff)", () => {
     expect(d.summary).toEqual({ added: 1, removed: 1, changed: 0, unchanged: 1 });
   });
 
-  it("같은 id 의 케이스가 task/graders 가 다르면 changed + 어떤 필드가 달라졌는지 보고한다", () => {
+  it("reports a case with the same id as changed + which fields differ when task/graders differ", () => {
     const base = ds("1.0.0", [{ id: "a", task: "old task", graders: [{ id: "steps" }] }]);
     const cand = ds("1.1.0", [{ id: "a", task: "new task", graders: [{ id: "steps" }, { id: "cost" }] }]);
 
@@ -50,7 +50,7 @@ describe("diffDatasets (버전 간 데이터셋 diff)", () => {
     expect(taskChange).toEqual({ field: "task", before: "old task", after: "new task" });
   });
 
-  it("내용이 동일한 케이스는 unchanged 로만 집계하고 changed 에 넣지 않는다(키 순서 무관)", () => {
+  it("counts identical-content cases only as unchanged and doesn't put them in changed (key order independent)", () => {
     const base = ds("1.0.0", [{ id: "a", graders: [{ id: "steps" }, { id: "cost" }] }]);
     const cand = ds("1.1.0", [{ id: "a", graders: [{ id: "steps" }, { id: "cost" }] }]);
 
@@ -60,7 +60,7 @@ describe("diffDatasets (버전 간 데이터셋 diff)", () => {
     expect(d.unchanged).toBe(1);
   });
 
-  it("데이터셋 메타(description/tags) 변경을 meta 로 보고한다", () => {
+  it("reports dataset meta (description/tags) changes as meta", () => {
     const base = ds("1.0.0", [{ id: "a" }], { description: "v1", tags: ["x"] });
     const cand = ds("1.1.0", [{ id: "a" }], { description: "v2", tags: ["x", "y"] });
 

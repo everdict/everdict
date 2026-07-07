@@ -3,12 +3,12 @@ import type { AgentJob, CaseResult } from "@everdict/core";
 import { Client, Connection } from "@temporalio/client";
 import { TASK_QUEUE } from "./constants.js";
 
-// 컨트롤플레인이 한 케이스를 실행하는 추상화. 직접(Direct) 또는 durable(Temporal).
+// Abstraction for how the control plane runs a single case. Direct or durable (Temporal).
 export interface Orchestrator {
   run(job: AgentJob): Promise<CaseResult>;
 }
 
-// 비-durable: 같은 프로세스에서 Dispatcher(Router/Scheduler) 직접 호출 (개발/단순).
+// Non-durable: call the Dispatcher (Router/Scheduler) directly in the same process (dev/simple).
 export class DirectOrchestrator implements Orchestrator {
   constructor(private readonly dispatcher: Dispatcher) {}
   run(job: AgentJob): Promise<CaseResult> {
@@ -21,8 +21,8 @@ export interface TemporalOrchestratorOptions {
   taskQueue?: string;
 }
 
-// durable: Temporal 워크플로로 실행(클라이언트 측). 워커가 실제 디스패치를 수행한다.
-// 워크플로는 이름(string)으로 시작 → 클라이언트가 워크플로 sandbox 코드를 import 하지 않는다.
+// Durable: runs as a Temporal workflow (client side). The worker performs the actual dispatch.
+// The workflow is started by name (string) → the client does not import the workflow sandbox code.
 export class TemporalOrchestrator implements Orchestrator {
   constructor(private readonly opts: TemporalOrchestratorOptions = {}) {}
 

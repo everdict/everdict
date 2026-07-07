@@ -10,7 +10,7 @@ export interface MemberMutationResult {
   error?: string
 }
 
-// 멤버 역할 변경. 마지막 admin 강등(409)·비멤버(404)·권한(403)은 컨트롤플레인이 강제.
+// Change a member's role. Last-admin demotion (409), non-member (404), and permission (403) are enforced by the control plane.
 export async function setMemberRoleAction(
   subject: string,
   role: string
@@ -25,7 +25,7 @@ export async function setMemberRoleAction(
   }
 }
 
-// 멤버 제거(멱등). 마지막 admin 제거(409)·권한(403)은 컨트롤플레인이 강제.
+// Remove a member (idempotent). Last-admin removal (409) and permission (403) are enforced by the control plane.
 export async function removeMemberAction(subject: string): Promise<MemberMutationResult> {
   const ctx = await authContext()
   try {

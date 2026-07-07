@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 import { cn } from '@/shared/lib/utils'
 
-// 지표 카드 — Linear st. 작은 라벨 + 큰 타뉴머 숫자. 밀도 높은 패딩.
+// Metric card — Linear st. small label + large tabular-nums number. Dense padding.
 export function StatCard({
   label,
   value,

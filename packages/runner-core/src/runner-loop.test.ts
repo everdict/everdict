@@ -16,7 +16,7 @@ const job = (id: string): AgentJob => ({
   harness: { id: "scripted", version: "1.0.0" },
 });
 
-// 가짜 MCP 표면 — lease_job 는 큐에서 동기 shift(원자적), submit/fail 은 기록. runJob 은 동시 in-flight 를 계측한다.
+// A fake MCP surface — lease_job does a synchronous shift from the queue (atomic), submit/fail record. runJob measures concurrent in-flight.
 function harness(jobs: AgentJob[]) {
   const queue = jobs.map((j, i) => ({ jobId: `j${i}`, job: j }));
   const submitted: string[] = [];
@@ -31,7 +31,7 @@ function harness(jobs: AgentJob[]) {
 
   const callJson = async (name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> => {
     if (name === "lease_job") {
-      const next = queue.shift(); // 동기 shift — JS 단일 스레드라 동시 lease 가 같은 잡을 두 번 못 가져간다
+      const next = queue.shift(); // synchronous shift — JS is single-threaded, so concurrent leases can't take the same job twice
       settle();
       return next ?? {};
     }
@@ -45,14 +45,14 @@ function harness(jobs: AgentJob[]) {
       settle();
       return {};
     }
-    return {}; // heartbeat_job 등
+    return {}; // heartbeat_job etc.
   };
 
   const runJob = async (j: AgentJob): Promise<CaseResult> => {
     runCalls++;
     inFlight++;
     peak = Math.max(peak, inFlight);
-    await new Promise((r) => setTimeout(r, 10)); // 잠깐 잡고 있어야 병렬이 쌓인다
+    await new Promise((r) => setTimeout(r, 10)); // hold briefly so parallelism accumulates
     inFlight--;
     return {
       caseId: j.evalCase.id,
@@ -83,8 +83,8 @@ const opts = (maxConcurrent: number, shouldStop: () => boolean) => ({
   shouldStop,
 });
 
-describe("runLeaseWorkers — case-level 병렬(maxConcurrent)", () => {
-  it("maxConcurrent 워커가 잡을 동시에 집어 병렬 실행한다(잡 3 + 워커 3 → 동시 3)", async () => {
+describe("runLeaseWorkers — case-level parallelism (maxConcurrent)", () => {
+  it("maxConcurrent workers pick up jobs concurrently and run them in parallel (3 jobs + 3 workers → 3 concurrent)", async () => {
     const h = harness([job("a"), job("b"), job("c")]);
     await runLeaseWorkers(
       {
@@ -95,13 +95,13 @@ describe("runLeaseWorkers — case-level 병렬(maxConcurrent)", () => {
       },
       opts(3, h.shouldStop),
     );
-    expect(h.peak()).toBe(3); // 셋이 동시에 in-flight
+    expect(h.peak()).toBe(3); // three in-flight at once
     expect(h.runCalls()).toBe(3);
-    expect([...h.submitted].sort()).toEqual(["j0", "j1", "j2"]); // 각 잡 정확히 1회(중복 lease 없음)
+    expect([...h.submitted].sort()).toEqual(["j0", "j1", "j2"]); // each job exactly once (no duplicate lease)
     expect(h.failed).toEqual([]);
   });
 
-  it("maxConcurrent=1 → 한 번에 하나씩 직렬 실행(동시도 1)", async () => {
+  it("maxConcurrent=1 → serial execution one at a time (concurrency 1)", async () => {
     const h = harness([job("a"), job("b"), job("c")]);
     await runLeaseWorkers(
       {
@@ -117,7 +117,7 @@ describe("runLeaseWorkers — case-level 병렬(maxConcurrent)", () => {
     expect([...h.submitted].sort()).toEqual(["j0", "j1", "j2"]);
   });
 
-  it("워커 수가 잡보다 많아도 각 잡은 정확히 1회만 실행된다(원자적 lease)", async () => {
+  it("even with more workers than jobs, each job runs exactly once (atomic lease)", async () => {
     const h = harness([job("a"), job("b")]);
     await runLeaseWorkers(
       {
@@ -132,7 +132,7 @@ describe("runLeaseWorkers — case-level 병렬(maxConcurrent)", () => {
     expect([...h.submitted].sort()).toEqual(["j0", "j1"]);
   });
 
-  it("잡 형식 오류 → fail_job 회신(실행 안 함)", async () => {
+  it("malformed job → reply fail_job (don't run)", async () => {
     const submitted: string[] = [];
     const failed: string[] = [];
     let leased = false;
@@ -141,7 +141,7 @@ describe("runLeaseWorkers — case-level 병렬(maxConcurrent)", () => {
       if (name === "lease_job") {
         if (leased) return {};
         leased = true;
-        return { jobId: "bad", job: { not: "an AgentJob" } }; // 스키마 위반
+        return { jobId: "bad", job: { not: "an AgentJob" } }; // schema violation
       }
       if (name === "submit_job_result") {
         submitted.push(String(args.jobId));
@@ -169,6 +169,6 @@ describe("runLeaseWorkers — case-level 병렬(maxConcurrent)", () => {
     );
     expect(failed).toEqual(["bad"]);
     expect(submitted).toEqual([]);
-    expect(ran).toBe(false); // 형식 오류는 실행하지 않는다
+    expect(ran).toBe(false); // a malformed job isn't run
   });
 });

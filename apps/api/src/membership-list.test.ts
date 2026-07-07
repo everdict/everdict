@@ -5,14 +5,14 @@ import { MembershipService } from "./membership-service.js";
 async function seed() {
   const store = new InMemoryWorkspaceStore();
   await store.create({ id: "acme", name: "Acme", owner: "alice" }); // alice = admin
-  await store.ensureMembership("acme", "bob", "member", "bob@acme.io"); // email 캡처
+  await store.ensureMembership("acme", "bob", "member", "bob@acme.io"); // capture email
   const profiles = new InMemoryUserProfileStore();
   const svc = new MembershipService(store, new InMemoryWorkspaceInviteStore(store), profiles);
   return { store, profiles, svc };
 }
 
-describe("MembershipService.listMembers (프로필 보강)", () => {
-  it("프로필이 있으면 opaque subject 를 이름/아바타로 보강한다", async () => {
+describe("MembershipService.listMembers (profile enrichment)", () => {
+  it("enriches an opaque subject with name/avatar when a profile exists", async () => {
     const { profiles, svc } = await seed();
     await profiles.upsert("alice", { name: "Alice Kim", avatarUrl: "https://cdn/a.png" });
 
@@ -22,7 +22,7 @@ describe("MembershipService.listMembers (프로필 보강)", () => {
     expect(alice).toMatchObject({ name: "Alice Kim", avatarUrl: "https://cdn/a.png", role: "admin" });
   });
 
-  it("프로필이 없는 멤버는 name/avatarUrl 없이 그대로 반환한다(email 만 표시)", async () => {
+  it("a member without a profile is returned as-is without name/avatarUrl (email only)", async () => {
     const { svc } = await seed();
 
     const members = await svc.listMembers("acme");

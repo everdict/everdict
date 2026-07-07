@@ -28,8 +28,8 @@ async function issueToken(invites: InMemoryWorkspaceInviteStore, workspace: stri
   return token;
 }
 
-describe("MembershipService.previewInvite — 링크 랜딩(비소비)", () => {
-  it("유효 토큰 → 워크스페이스 이름·로고·역할, 그리고 소비하지 않는다", async () => {
+describe("MembershipService.previewInvite — link landing (non-consuming)", () => {
+  it("valid token → workspace name/logo/role, and does not consume it", async () => {
     const { members, invites, svc } = setup();
     await members.create({ id: "acme", name: "Acme Inc", owner: "alice" });
     await members.update("acme", { logoUrl: "data:image/png;base64,AAAA" });
@@ -41,11 +41,11 @@ describe("MembershipService.previewInvite — 링크 랜딩(비소비)", () => {
       logoUrl: "data:image/png;base64,AAAA",
       role: "member",
     });
-    // 비소비: 미리보기 후에도 초대는 여전히 유효(수락 가능).
+    // non-consuming: after preview the invite is still valid (acceptable).
     expect(await invites.previewInvite(hashKey(token))).toBeDefined();
   });
 
-  it("로고가 없으면 logoUrl 을 생략한다", async () => {
+  it("omits logoUrl when there is no logo", async () => {
     const { members, invites, svc } = setup();
     await members.create({ id: "globex", name: "Globex", owner: "alice" });
     const token = await issueToken(invites, "globex", "viewer");
@@ -54,11 +54,11 @@ describe("MembershipService.previewInvite — 링크 랜딩(비소비)", () => {
     expect("logoUrl" in preview).toBe(false);
   });
 
-  it("무효/수락/취소 토큰 → NotFound(존재 누출 없음)", async () => {
+  it("invalid/accepted/revoked token → NotFound (no existence leak)", async () => {
     const { members, invites, svc } = setup();
     await members.create({ id: "acme", name: "Acme", owner: "alice" });
     await expect(svc.previewInvite("inv_nope")).rejects.toBeInstanceOf(NotFoundError);
-    // 이미 수락된 토큰도 미리보기 불가.
+    // an already-accepted token cannot be previewed either.
     const token = await issueToken(invites, "acme", "member");
     await invites.consumeInvite(hashKey(token), "bob");
     await expect(svc.previewInvite(token)).rejects.toBeInstanceOf(NotFoundError);

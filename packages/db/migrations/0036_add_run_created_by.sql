@@ -1,4 +1,4 @@
--- run 실행자(제출자 subject) — 알림 피드의 수신자(N2: "내가 시킨 작업이 끝났다") + 목록 "누가" 표기용.
--- submit 시 principal.subject 를 스탬프; 과거 레코드·기계 발사(subject 없음)는 NULL.
--- 스코어카드(0035)와 동일 additive 패턴(preflight 불필요).
+-- Run runner (submitter subject) — the notification-feed recipient (N2: "the job I asked for is done") + to show "who" in lists.
+-- Stamps principal.subject on submit; past records and machine-fired runs (no subject) are NULL.
+-- Same additive pattern as scorecards (0035) (no preflight needed).
 ALTER TABLE everdict_runs ADD COLUMN IF NOT EXISTS created_by text;

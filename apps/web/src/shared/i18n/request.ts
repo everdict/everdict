@@ -3,7 +3,7 @@ import { getRequestConfig } from 'next-intl/server'
 
 import { FALLBACK_LOCALE, isLocale, LOCALE_COOKIE, LOCALES, type Locale } from './config'
 
-// Accept-Language 에서 지원 로케일을 감지(q 값 순서는 브라우저가 이미 정렬해 보냄 — 앞에서부터 매칭).
+// Detect a supported locale from Accept-Language (the browser already sends q-values in order — match from the front).
 function detectLocale(acceptLanguage: string | null): Locale {
   if (!acceptLanguage) return FALLBACK_LOCALE
   for (const part of acceptLanguage.split(',')) {
@@ -15,8 +15,8 @@ function detectLocale(acceptLanguage: string | null): Locale {
   return FALLBACK_LOCALE
 }
 
-// 요청 로케일: 쿠키(명시 선택, features/switch-locale) > Accept-Language > en.
-// URL 라우팅은 쓰지 않는다 — /{workspace}/* 스킴(Linear 식)에 로케일 세그먼트를 끼워 넣지 않는다.
+// Request locale: cookie (explicit choice, features/switch-locale) > Accept-Language > en.
+// No URL routing — don't splice a locale segment into the /{workspace}/* scheme (Linear-style).
 export default getRequestConfig(async () => {
   const store = await cookies()
   const fromCookie = store.get(LOCALE_COOKIE)?.value

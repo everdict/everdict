@@ -1,5 +1,5 @@
-// 컨트롤플레인 authz 매트릭스(@everdict/auth)의 웹 미러 — UI 게이팅 전용.
-// 실제 강제는 항상 컨트롤플레인이 한다(403); 여기는 버튼/폼을 미리 숨기는 UX 용도다.
+// Web mirror of the control plane's authz matrix (@everdict/auth) — for UI gating only.
+// Actual enforcement is always the control plane's (403); this is for the UX of pre-hiding buttons/forms.
 export type WebAction =
   | 'runs:read'
   | 'runs:submit'
@@ -32,16 +32,16 @@ const PERMS: Record<string, WebAction[]> = {
   viewer: [
     'runs:read',
     'harnesses:read',
-    'harnesses:register', // 누구나 하니스 등록 가능(역할 게이트 없음)
+    'harnesses:register', // anyone can register a harness (no role gate)
     'datasets:read',
     'scorecards:read',
     'schedules:read',
     'judges:read',
     'models:read',
     'runtimes:read',
-    'runtimes:write', // 런타임 등록(+연결 테스트)은 role 무관 — harnesses:register 와 동일
-    'members:read', // 팀 조회는 viewer+
-    'comments:read', // 댓글 조회는 viewer+
+    'runtimes:write', // runtime registration (+connection test) is role-agnostic — same as harnesses:register
+    'members:read', // team read is viewer+
+    'comments:read', // comment read is viewer+
   ],
   member: [
     'runs:read',
@@ -59,10 +59,10 @@ const PERMS: Record<string, WebAction[]> = {
     'models:read',
     'models:write',
     'runtimes:read',
-    'runtimes:write', // 런타임 등록(+연결 테스트)은 role 무관
+    'runtimes:write', // runtime registration (+connection test) is role-agnostic
     'members:read',
     'comments:read',
-    'comments:write', // 댓글 작성은 member+ (삭제는 작성자-or-admin, 서버가 판정)
+    'comments:write', // comment creation is member+ (deletion is author-or-admin, the server decides)
   ],
   admin: [
     'runs:read',
@@ -80,14 +80,14 @@ const PERMS: Record<string, WebAction[]> = {
     'models:read',
     'models:write',
     'runtimes:read',
-    'runtimes:write', // 런타임 등록은 role 무관(자격증명 값은 secrets:write=admin 로 분리)
-    'secrets:read', // 시크릿 관리 = admin
+    'runtimes:write', // runtime registration is role-agnostic (credential values are split out to secrets:write=admin)
+    'secrets:read', // secret management = admin
     'secrets:write',
-    'keys:read', // API 키 발급/취소 = admin(키는 워크스페이스 admin 권한을 가짐)
+    'keys:read', // API key issue/revoke = admin (a key holds workspace admin permission)
     'keys:write',
     'members:read',
-    'members:write', // 멤버 역할변경/제거/초대 = admin
-    'settings:read', // 워크스페이스 정책(계측 등) = admin
+    'members:write', // member role change/remove/invite = admin
+    'settings:read', // workspace policy (instrumentation etc.) = admin
     'settings:write',
     'comments:read',
     'comments:write',

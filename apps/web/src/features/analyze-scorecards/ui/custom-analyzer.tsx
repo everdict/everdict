@@ -50,7 +50,7 @@ const VIZ: { value: Viz; labelKey: string }[] = [
   { value: 'line', labelKey: 'trend' },
 ]
 
-// 프리셋 — "이 대시보드 하나로 4렌즈를 만든다"를 원클릭으로.
+// Presets — "build all 4 lenses from this one dashboard" in a single click.
 const PRESETS: { labelKey: string; patch: Partial<AnalysisConfig> }[] = [
   {
     labelKey: 'presetLeaderboard',
@@ -96,7 +96,7 @@ function measureCell(value: number | undefined, measure: Measure) {
   )
 }
 
-// 다중 시리즈 라인 차트(추이). 값은 0~1(통과율) 가정 시 0~100% 스케일, 아니면 min~max 정규화.
+// Multi-series line chart (trend). Values are scaled 0~100% if assumed to be 0~1 (pass rate), otherwise min~max normalized.
 function LineChart({
   buckets,
   series,
@@ -173,8 +173,8 @@ function LineChart({
   )
 }
 
-// 스코어카드 유연 분석 대시보드 — 필터·그룹·측정·검색으로 리더보드/하니스별/추이/비교를 한 화면에서 구성.
-// 구성한 분석은 이름 붙여 View 로 저장(비공개|공유)하고, 저장된 뷰를 열면 현재 데이터로 재실행(라이브).
+// Flexible scorecard analysis dashboard — compose leaderboard/by-harness/trend/compare on one screen via filter/group/measure/search.
+// Save a composed analysis as a named View (private|shared); opening a saved view re-runs it against current data (live).
 export function CustomAnalyzer({
   scorecards,
   authors,
@@ -198,7 +198,7 @@ export function CustomAnalyzer({
   const [config, setConfig] = useState<AnalysisConfig>(initialConfig)
   const [copied, setCopied] = useState(false)
 
-  // config → URL(무네비게이션) — 딥링크/공유용. mode=custom 유지(새로고침 시 커스텀 모드 복원).
+  // config → URL (no navigation) — for deep-linking/sharing. Keep mode=custom (restore custom mode on refresh).
   useEffect(() => {
     const p = configToParams(config)
     p.set('mode', 'custom')
@@ -213,7 +213,7 @@ export function CustomAnalyzer({
       filters: { ...c.filters, [k]: v ? [v] : undefined },
     }))
 
-  // 옵션 목록(스코어카드에서 도출).
+  // Option lists (derived from the scorecards).
   const opts = useMemo(() => {
     const uniq = (fn: (sc: ScorecardRecord) => string) =>
       [...new Set(scorecards.map(fn))].filter((v) => v && v !== '—').sort()
@@ -282,7 +282,7 @@ export function CustomAnalyzer({
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } catch {
-      /* clipboard 불가 — 무시 */
+      /* clipboard unavailable — ignore */
     }
   }
 
@@ -305,7 +305,7 @@ export function CustomAnalyzer({
         <StatCard label={t('statModels')} value={opts.model.length} />
       </div>
 
-      {/* 프리셋 + 검색 + 시각화 + 링크 */}
+      {/* presets + search + visualization + link */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
           {t('presetLabel')}
@@ -340,7 +340,7 @@ export function CustomAnalyzer({
         </button>
       </div>
 
-      {/* 필터 */}
+      {/* filters */}
       <div className="flex flex-wrap items-center gap-2">
         {filterCombo(t('filterBenchmark'), 'dataset', opts.dataset)}
         {filterCombo(t('harness'), 'harness', opts.harness)}
@@ -371,7 +371,7 @@ export function CustomAnalyzer({
         />
       </div>
 
-      {/* 형태(그룹·피벗·측정·정렬·시각화) */}
+      {/* shape (group·pivot·measure·sort·visualization) */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card/60 p-2.5">
         <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
           {t('group')}
@@ -457,7 +457,7 @@ export function CustomAnalyzer({
         </div>
       </div>
 
-      {/* 결과 */}
+      {/* results */}
       {result.total === 0 ? (
         <EmptyState title={t('customEmptyTitle')} hint={t('customEmptyHint')} />
       ) : result.kind === 'line' ? (

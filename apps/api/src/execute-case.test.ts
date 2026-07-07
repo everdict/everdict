@@ -39,8 +39,8 @@ const capture = (): { dispatcher: Dispatcher; seen: () => AgentJob | undefined }
   };
 };
 
-describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", () => {
-  it("비공개 repo(git+connectionId) 케이스면 owner 의 토큰을 resolve 해 잡에 attach 한 뒤 dispatch 한다", async () => {
+describe("executeCase — pure execution (token resolve+attach → dispatch)", () => {
+  it("for a private-repo (git+connectionId) case, resolves the owner's token, attaches it to the job, then dispatches", async () => {
     const cap = capture();
     const gitJob: AgentJob = {
       ...JOB,
@@ -60,7 +60,7 @@ describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", ()
     expect(cap.seen()?.repoToken).toBe("tok");
   });
 
-  it("워크스페이스 GitHub App 토큰을 개인 연결보다 먼저 시도해 잡에 attach 한다", async () => {
+  it("tries the workspace GitHub App token before the personal connection and attaches it to the job", async () => {
     const cap = capture();
     const gitJob: AgentJob = {
       ...JOB,
@@ -79,10 +79,10 @@ describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", ()
       "alice",
       gitJob,
     );
-    expect(cap.seen()?.repoToken).toBe("app-tok"); // App 우선
+    expect(cap.seen()?.repoToken).toBe("app-tok"); // App first
   });
 
-  it("워크스페이스 App 매칭이 없으면 개인 연결(connectionId)로 폴백한다", async () => {
+  it("falls back to the personal connection (connectionId) when there's no workspace App match", async () => {
     const cap = capture();
     const gitJob: AgentJob = {
       ...JOB,
@@ -104,13 +104,13 @@ describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", ()
     expect(cap.seen()?.repoToken).toBe("personal-tok");
   });
 
-  it("public/비-repo 케이스는 토큰을 붙이지 않는다(repoTokenFor 있어도)", async () => {
+  it("public/non-repo cases attach no token (even when repoTokenFor exists)", async () => {
     const cap = capture();
     await executeCase({ dispatcher: cap.dispatcher, repoTokenFor: async () => "tok" }, "alice", JOB);
     expect(cap.seen()?.repoToken).toBeUndefined();
   });
 
-  it("결과를 그대로 돌려준다 — 정산/알림/오프로드는 하지 않는다(오케의 몫)", async () => {
+  it("returns the result as-is — no settlement/notification/offload (that's the orchestrator's job)", async () => {
     const cap = capture();
     const result = await executeCase({ dispatcher: cap.dispatcher }, "u", JOB);
     expect(result.caseId).toBe("c1");
@@ -118,10 +118,10 @@ describe("executeCase — 순수 실행(토큰 resolve+attach → dispatch)", ()
   });
 });
 
-describe("executeCase — 워크스페이스 레지스트리 pull 자격증명 attach(job.registryAuth)", () => {
+describe("executeCase — attach workspace-registry pull credentials (job.registryAuth)", () => {
   const AUTH = { host: "ghcr.io", username: "bot", password: "pull-tok" };
 
-  it("케이스 이미지가 워크스페이스 레지스트리 것이면 registryAuth 를 attach 한다", async () => {
+  it("when the case image belongs to a workspace registry, attaches registryAuth", async () => {
     const cap = capture();
     const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" } };
     await executeCase(
@@ -132,14 +132,14 @@ describe("executeCase — 워크스페이스 레지스트리 pull 자격증명 a
     expect(cap.seen()?.registryAuth).toEqual(AUTH);
   });
 
-  it("잡 이미지가 그 레지스트리 호스트가 아니면 자격증명을 붙이지 않는다(불필요 유출 방지)", async () => {
+  it("when the job image isn't on that registry's host, no credentials are attached (avoids needless leakage)", async () => {
     const cap = capture();
     const job: AgentJob = { ...JOB, evalCase: { ...JOB.evalCase, image: "spreadsheetbench:v1" } };
     await executeCase({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }, "u", job);
     expect(cap.seen()?.registryAuth).toBeUndefined();
   });
 
-  it("service 하니스는 서비스 이미지(+per-dispatch 핀 override)로 판정한다", async () => {
+  it("a service harness is judged by its service images (+ per-dispatch pin override)", async () => {
     const cap = capture();
     const serviceSpec: NonNullable<AgentJob["harnessSpec"]> = {
       kind: "service",
@@ -152,14 +152,14 @@ describe("executeCase — 워크스페이스 레지스트리 pull 자격증명 a
       frontDoor: { service: "agent", submit: "POST /runs" },
       traceSource: { kind: "mlflow", endpoint: "http://m:5000" },
     };
-    // spec 이미지는 외부지만 핀이 워크스페이스 레지스트리로 override → attach.
+    // the spec image is external, but the pin overrides to a workspace registry → attach.
     const job: AgentJob = { ...JOB, harnessSpec: serviceSpec, imagePins: { agent: "ghcr.io/acme/agent:pr-1" } };
     await executeCase({ dispatcher: cap.dispatcher, registryAuthsFor: async () => [AUTH] }, "u", job);
     expect(cap.seen()?.registryAuth).toEqual(AUTH);
   });
 });
 
-describe("executeCase — command 하니스 이미지 승격(evalCase.image ??= harnessSpec.image)", () => {
+describe("executeCase — command-harness image promotion (evalCase.image ??= harnessSpec.image)", () => {
   const commandSpec = (image?: string): NonNullable<AgentJob["harnessSpec"]> => ({
     kind: "command",
     id: "codex-sheets",
@@ -172,13 +172,13 @@ describe("executeCase — command 하니스 이미지 승격(evalCase.image ??= 
     trace: { kind: "none" },
   });
 
-  it("케이스가 이미지를 지정하지 않으면 command 하니스의 image(CI 재핀 대상)를 실행 컨테이너로 승격한다", async () => {
+  it("when a case specifies no image, promotes the command harness's image (the CI re-pin target) as the execution container", async () => {
     const cap = capture();
     await executeCase({ dispatcher: cap.dispatcher }, "u", { ...JOB, harnessSpec: commandSpec("codex:v2") });
     expect(cap.seen()?.evalCase.image).toBe("codex:v2");
   });
 
-  it("케이스가 이미지를 명시하면 하니스 이미지로 덮어쓰지 않는다(케이스 우선 — 데이터셋은 하니스-무관)", async () => {
+  it("when a case specifies an image, it isn't overwritten by the harness image (case wins — datasets are harness-agnostic)", async () => {
     const cap = capture();
     const jobWithImage: AgentJob = {
       ...JOB,
@@ -189,23 +189,23 @@ describe("executeCase — command 하니스 이미지 승격(evalCase.image ??= 
     expect(cap.seen()?.evalCase.image).toBe("case:v9");
   });
 
-  it("이미지 없는 하니스면 케이스 이미지는 승격 없이 그대로다(호스트-네이티브 유지)", async () => {
+  it("for a harness with no image, the case image stays as-is with no promotion (host-native preserved)", async () => {
     const cap = capture();
     await executeCase({ dispatcher: cap.dispatcher }, "u", { ...JOB, harnessSpec: commandSpec() });
     expect(cap.seen()?.evalCase.image).toBeUndefined();
   });
 });
 
-// ── 잡 밖 트레이스 수집(D4) — traceRef 결과의 완성 단계 ──
+// ── Out-of-job trace collection (D4) — the completion step for traceRef results ──
 // docs/architecture/streaming-case-pipeline.md
 
-describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
+describe("executeCase — out-of-job trace collection (traceRef completion)", () => {
   const deferredResult = (job: AgentJob): CaseResult => ({
     caseId: job.evalCase.id,
     harness: "cmd@1",
-    trace: [{ t: 0, kind: "error", message: "command exit 1: boom" }], // 잡이 남긴 실행 이벤트
+    trace: [{ t: 0, kind: "error", message: "command exit 1: boom" }], // execution event left by the job
     snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
-    scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }], // ground-truth 는 잡에서
+    scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }], // ground-truth from the job
     traceRef: { kind: "otel", endpoint: "http://collector", runId: "rid-9" },
   });
   const dispatcherOf = (result: (job: AgentJob) => CaseResult): Dispatcher => ({
@@ -213,13 +213,13 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
       return result(job);
     },
   });
-  // steps/cost 를 컨트롤플레인에서 재구성해 채점할 수 있도록 케이스에 관측물 grader 스펙을 단다.
+  // Attach observation-grader specs to the case so steps/cost can be reconstructed and scored in the control plane.
   const jobWithGraders: AgentJob = {
     ...JOB,
     evalCase: { ...JOB.evalCase, graders: [{ id: "tests-pass", config: { cmd: "true" } }, { id: "steps" }] },
   };
 
-  it("traceRef 가 있으면 플랫폼에서 pull 해 트레이스를 완성하고, 미뤄진 관측물 grader(steps)만 채점한다", async () => {
+  it("with a traceRef, pulls from the platform to complete the trace and scores only the deferred observation grader (steps)", async () => {
     let fetchedBy = "";
     const result = await executeCase(
       {
@@ -237,16 +237,16 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
       "u",
       jobWithGraders,
     );
-    expect(fetchedBy).toBe("otel:http://collector:rid-9"); // traceRef 좌표+상관 키로 pull
-    expect(result.trace).toHaveLength(3); // 잡 이벤트 1 + 플랫폼 2
-    // needsCompute(tests-pass)는 잡에서 이미 채점 — 여기선 미뤄진 steps 만 덧붙는다(이중 채점 없음).
+    expect(fetchedBy).toBe("otel:http://collector:rid-9"); // pull by traceRef coordinates + correlation key
+    expect(result.trace).toHaveLength(3); // 1 job event + 2 from the platform
+    // needsCompute (tests-pass) was already scored in the job — here only the deferred steps is appended (no double scoring).
     expect(result.scores.map((s) => s.graderId)).toEqual(["tests-pass", "steps"]);
     const steps = result.scores.find((s) => s.graderId === "steps");
-    expect(steps?.value).toBe(1); // tool_call 1건 — 수집된 트레이스 위에서 도출됐다는 증거
-    expect(result.traceRef?.runId).toBe("rid-9"); // provenance 로 유지
+    expect(steps?.value).toBe(1); // one tool_call — proof it was derived on the collected trace
+    expect(result.traceRef?.runId).toBe("rid-9"); // kept as provenance
   });
 
-  it("pull 실패는 soft — error 이벤트로 가시화하고 실행 산출물(ground-truth 점수)은 보존한다", async () => {
+  it("a pull failure is soft — surfaced as an error event while execution output (ground-truth scores) is preserved", async () => {
     const result = await executeCase(
       {
         dispatcher: dispatcherOf(deferredResult),
@@ -260,10 +260,10 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
       jobWithGraders,
     );
     expect(result.trace.some((e) => e.kind === "error" && e.message.includes("collector down"))).toBe(true);
-    expect(result.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // 보존
+    expect(result.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true); // preserved
   });
 
-  it("authSecret 은 테넌트 SecretStore 에서 재해석해 Authorization 으로, correlate/experiment 는 소스 설정으로 흐른다", async () => {
+  it("authSecret is re-resolved from the tenant SecretStore into Authorization, and correlate/experiment flow into the source config", async () => {
     const authedRef = (job: AgentJob): CaseResult => ({
       ...deferredResult(job),
       traceRef: {
@@ -293,13 +293,13 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
       "u",
       jobWithGraders,
     );
-    expect(seenCfg?.headers?.authorization).toBe("Basic abc"); // 이름 → 값 재해석(verbatim Authorization)
+    expect(seenCfg?.headers?.authorization).toBe("Basic abc"); // name → value re-resolution (verbatim Authorization)
     expect(seenCfg?.correlate).toBe("tag");
-    expect(seenCfg?.project).toBe("7"); // experiment → 소스의 검색 범위
+    expect(seenCfg?.project).toBe("7"); // experiment → the source's search scope
     expect(result.trace.some((e) => e.kind === "llm_call")).toBe(true);
   });
 
-  it("수집 0건이면 재시도(플러시 지연) 후 도착분을 싣고, 시크릿 미등록이면 soft 실패로 가시화한다", async () => {
+  it("on zero collected, retries (flush latency) and loads whatever arrives; if the secret is unregistered, surfaces a soft failure", async () => {
     let fetches = 0;
     const slept: number[] = [];
     const retried = await executeCase(
@@ -320,7 +320,7 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
     expect(slept).toEqual([2000, 2000]);
     expect(retried.trace.some((e) => e.kind === "llm_call")).toBe(true);
 
-    // authSecret 참조 + 시크릿 미등록 → 실행 산출물 보존 + error 이벤트(수집 불가 사유).
+    // authSecret reference + unregistered secret → execution output preserved + an error event (reason it couldn't collect).
     const missing = await executeCase(
       {
         dispatcher: dispatcherOf((job) => ({
@@ -330,7 +330,7 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
         secretsFor: async () => ({}),
         buildTraceSource: () => ({
           async fetch() {
-            throw new Error("호출되면 안 됨 — 인증 해석 실패가 먼저");
+            throw new Error("must not be called — auth resolution fails first");
           },
         }),
       },
@@ -341,9 +341,9 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
     expect(missing.scores.some((s) => s.graderId === "tests-pass" && s.pass === true)).toBe(true);
   });
 
-  it("traceRef 없는 결과(기본 job 수집)는 그대로 통과한다(무회귀) + buildTraceSource 미설정은 가시화", async () => {
+  it("a result with no traceRef (default job collection) passes through unchanged (no regression) + an unset buildTraceSource is surfaced", async () => {
     const plain = await executeCase({ dispatcher: dispatcherOf(resultFor) }, "u", jobWithGraders);
-    expect(plain.trace).toEqual([]); // 손대지 않음
+    expect(plain.trace).toEqual([]); // untouched
     const noSource = await executeCase({ dispatcher: dispatcherOf(deferredResult) }, "u", JOB);
     expect(noSource.trace.some((e) => e.kind === "error" && e.message.includes("buildTraceSource"))).toBe(true);
   });

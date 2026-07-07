@@ -1,8 +1,8 @@
 #!/bin/bash
-# Hermes Agent 의 LLM provider 를 *런타임 env* 로 구성한 뒤 명령을 exec — 키를 이미지에 굽지 않기 위함.
-# hermes 추론 경로는 ~/.hermes/config.yaml 의 model.api_key 를 쓴다(.env 의 OPENAI/CUSTOM_API_KEY 는 추론 호출에
-# 안 쓰임 — 없으면 'no-key-required' 가 전송돼 LiteLLM 401 → "no final response"). 그래서 여기서 config 에 직접 주입.
-#   env: HERMES_MODEL(기본 gpt-5.4-mini), HERMES_BASE_URL(기본 http://localhost:4000/v1), HERMES_API_KEY(LiteLLM 키)
+# Configure the Hermes Agent's LLM provider from the *runtime env*, then exec the command — so keys aren't baked into the image.
+# The hermes inference path uses model.api_key in ~/.hermes/config.yaml (.env's OPENAI/CUSTOM_API_KEY is not used for
+# inference calls — if absent, 'no-key-required' is sent, causing LiteLLM 401 → "no final response"). So inject into config directly here.
+#   env: HERMES_MODEL(default gpt-5.4-mini), HERMES_BASE_URL(default http://localhost:4000/v1), HERMES_API_KEY(LiteLLM key)
 set -e
 : "${HERMES_MODEL:=gpt-5.4-mini}"
 : "${HERMES_BASE_URL:=http://localhost:4000/v1}"

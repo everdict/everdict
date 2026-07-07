@@ -13,10 +13,10 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 import { removeImageRegistryAction, upsertImageRegistryAction } from '../api/manage-image-registry'
 
-// 워크스페이스 이미지 레지스트리(BYO, 복수) — 관리자가 등록하면 하니스 이미지의 출처 분류 기준이 되고,
-// 멤버는 everdict image push 로 로컬 빌드 이미지를 여기로 발행한다(여러 개면 --registry <이름> 으로 선택).
-// pull/push 토큰 값은 워크스페이스 시크릿 참조(이름)로만 저장. 두 피커가 목록을 공유하므로 인라인
-// 생성분은 created 로 합류시킨다.
+// Workspace image registries (BYO, multiple) — once an admin registers one it becomes the provenance-classification baseline for harness images,
+// and members publish locally built images here via everdict image push (with several, select via --registry <name>).
+// pull/push token values are stored only as workspace secret references (names). The two pickers share the list, so
+// inline-created ones are merged in via created.
 export function ImageRegistryManager({
   registries,
   canWrite,
@@ -30,7 +30,7 @@ export function ImageRegistryManager({
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [missingSecrets, setMissingSecrets] = useState<string[]>()
-  // 편집 대상 name — 행 클릭으로 폼에 프리필(저장은 name 기준 upsert). undefined = 새 레지스트리 추가.
+  // Edit target name — a row click prefills the form (save is an upsert keyed by name). undefined = add a new registry.
   const [editing, setEditing] = useState<string>()
   const [name, setName] = useState('')
   const [host, setHost] = useState('')
@@ -183,7 +183,7 @@ export function ImageRegistryManager({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label htmlFor="reg-name">{t('nameLabel')}</Label>
-              {/* 이름 = upsert 키 — 편집 중엔 잠가서 의도치 않은 별도 레지스트리 생성(rename≠upsert)을 막는다. */}
+              {/* name = upsert key — locked while editing to prevent unintentionally creating a separate registry (rename ≠ upsert). */}
               <Input
                 id="reg-name"
                 placeholder={t('namePlaceholder')}
@@ -219,7 +219,7 @@ export function ImageRegistryManager({
                 onChange={(e) => setUsername(e.target.value)}
               />
             </div>
-            {/* pull/push 토큰은 자유 텍스트가 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성. */}
+            {/* pull/push tokens are workspace secret references, not free text — pick one or create inline. */}
             <div className="space-y-1">
               <Label htmlFor="reg-pull">{t('pullTokenLabel')}</Label>
               <SecretPicker

@@ -1,23 +1,23 @@
-// 라이브 e2e: 워크스페이스-공유 셀프호스티드 러너(self:ws:<id>). admin 이 팀 자원 러너를 등록하면
-// 그 워크스페이스 멤버 누구나 "런타임만 바꿔"(self:ws:<runnerId>) 팀 러너에서 잡을 돌린다(팀 빌드서버/CI).
-// 개인 러너(self:<id>, own-pays)와 달리 비용은 워크스페이스에 귀속(provenance.by="ws:<workspace>").
-// 검증:
-//   1) POST /workspace/runners 로 팀 러너 페어링(owner=ws:<workspace>)
-//   2) everdict runner 기동(그 rnr_ 토큰 → principal.subject="ws:<workspace>")
-//   3) runtime=self:ws:<id> 로 run 제출 → succeeded + provenance.ranOn=self-hosted + by="ws:<workspace>"(=워크스페이스-결제)
-//   4) 크로스 워크스페이스 격리: 다른 워크스페이스가 self:ws:<id> 를 타깃하면 NOT_FOUND(dispatch 가 owner 를 잡 tenant 에서 파생)
-// 설계: docs/architecture/self-hosted-runtime-and-runners.md (슬라이스 3).
+// live e2e: workspace-shared self-hosted runner (self:ws:<id>). Once an admin registers a team-resource runner,
+// any member of that workspace runs jobs on the team runner by "just swapping the runtime" (self:ws:<runnerId>) (team build server/CI).
+// Unlike a personal runner (self:<id>, own-pays), the cost is billed to the workspace (provenance.by="ws:<workspace>").
+// Verify:
+//   1) pair a team runner via POST /workspace/runners (owner=ws:<workspace>)
+//   2) start the everdict runner (its rnr_ token → principal.subject="ws:<workspace>")
+//   3) submit a run with runtime=self:ws:<id> → succeeded + provenance.ranOn=self-hosted + by="ws:<workspace>" (= workspace-billed)
+//   4) cross-workspace isolation: if another workspace targets self:ws:<id>, NOT_FOUND (dispatch derives owner from the job tenant)
+// Design: docs/architecture/self-hosted-runtime-and-runners.md (slice 3).
 //
-// 준비:
+// Prereq:
 //   pnpm build
-//   node apps/api/dist/main.js            # 컨트롤플레인 API (:8787, in-memory, dev 폴백 인증)
-// 사용:
+//   node apps/api/dist/main.js            # control-plane API (:8787, in-memory, dev fallback auth)
+// Usage:
 //   node scripts/live/workspace-shared-runner.mjs
 import { spawn } from "node:child_process";
 import process from "node:process";
 
 const B = (process.env.EVERDICT_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
-const WS = "default"; // dev 폴백 → subject=dev, workspace=default, roles=[admin]
+const WS = "default"; // dev fallback → subject=dev, workspace=default, roles=[admin]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const api = async (path, init = {}) => {
@@ -29,14 +29,14 @@ const api = async (path, init = {}) => {
   return r.status === 204 ? null : r.json();
 };
 
-// 1) 워크스페이스-공유 러너 페어링(admin) → owner=ws:default, rnr_ 토큰(1회 노출).
+// 1) pair a workspace-shared runner (admin) → owner=ws:default, rnr_ token (shown once).
 const { runner, token } = await api("/workspace/runners", {
   method: "POST",
   body: JSON.stringify({ label: "team-ci", capabilities: ["git"] }),
 });
 console.log(`▶ paired WORKSPACE runner ${runner.id} (${runner.label}) — owner=ws:${WS}`);
 
-// 2) 이 머신을 팀 러너로 기동. 토큰의 subject=ws:<workspace> 라 self:ws 큐를 leasing 한다(러너 코어 무변경).
+// 2) start this machine as the team runner. The token's subject=ws:<workspace>, so it leases the self:ws queue (no change to the runner core).
 const runnerProc = spawn(
   process.execPath,
   ["apps/cli/dist/main.js", "runner", "--pair", token, "--api-url", B, "--poll-interval-ms", "1000"],
@@ -48,9 +48,9 @@ const cleanup = () => {
 process.on("exit", cleanup);
 
 try {
-  await sleep(2500); // 러너 MCP 연결 대기
+  await sleep(2500); // wait for the runner MCP connection
 
-  // 3) 멤버가 runtime=self:ws:<id> 로 run 제출 → 팀 러너에서 실행, 비용은 워크스페이스에 귀속.
+  // 3) a member submits a run with runtime=self:ws:<id> → runs on the team runner, cost billed to the workspace.
   const submitted = await api("/runs", {
     method: "POST",
     body: JSON.stringify({
@@ -62,7 +62,7 @@ try {
         graders: [{ id: "steps" }],
         timeoutSec: 120,
         tags: ["e2e"],
-        placement: { target: `self:ws:${runner.id}` }, // ← 워크스페이스-공유 러너
+        placement: { target: `self:ws:${runner.id}` }, // ← workspace-shared runner
       },
     }),
   });
@@ -76,13 +76,13 @@ try {
   if (rec.status !== "succeeded") throw new Error(`run ${rec.status}: ${JSON.stringify(rec.error)}`);
   const prov = rec.result?.provenance;
   if (prov?.ranOn !== "self-hosted" || prov.runner !== runner.id)
-    throw new Error(`✗ 프로비넌스 불일치: ${JSON.stringify(prov)}`);
+    throw new Error(`✗ provenance mismatch: ${JSON.stringify(prov)}`);
   if (prov.by !== `ws:${WS}`)
-    throw new Error(`✗ 워크스페이스-결제 아님(by=${prov.by}, 기대 ws:${WS}) — 팀 러너인데 own-pays 로 태그됨`);
-  console.log(`✓ run ${rec.id} ← 팀 러너(${prov.runner})에서 실행, 비용 귀속 by=${prov.by} (워크스페이스-결제)`);
+    throw new Error(`✗ not workspace-billed (by=${prov.by}, expected ws:${WS}) — a team runner tagged as own-pays`);
+  console.log(`✓ run ${rec.id} ← ran on the team runner (${prov.runner}), billed by=${prov.by} (workspace-billed)`);
 
-  // 4) 크로스 워크스페이스 격리: 다른 워크스페이스(team-b)가 같은 self:ws:<id> 를 타깃하면 그 워크스페이스의
-  //    공유 러너로 해석되어(owner=ws:team-b) 존재하지 않으므로 NOT_FOUND — 팀 러너는 소유 워크스페이스 전용.
+  // 4) cross-workspace isolation: if another workspace (team-b) targets the same self:ws:<id>, it resolves to that workspace's
+  //    shared runner (owner=ws:team-b), which does not exist → NOT_FOUND — a team runner is exclusive to its owning workspace.
   const crossSubmit = await api("/runs", {
     method: "POST",
     headers: { "x-everdict-tenant": "team-b" },
@@ -106,10 +106,16 @@ try {
     if (cross.status === "succeeded" || cross.status === "failed") break;
   }
   if (cross.status !== "failed")
-    throw new Error(`✗ 크로스 워크스페이스 격리 실패 — team-b 가 default 의 팀 러너를 탈취(status=${cross.status})`);
-  console.log(`✓ 크로스 워크스페이스 격리 — team-b 는 default 팀 러너를 타깃 못 함(run ${cross.status}: NOT_FOUND)`);
+    throw new Error(
+      `✗ cross-workspace isolation failed — team-b hijacked default's team runner (status=${cross.status})`,
+    );
+  console.log(
+    `✓ cross-workspace isolation — team-b cannot target default's team runner (run ${cross.status}: NOT_FOUND)`,
+  );
 
-  console.log(`✓ PASS — 워크스페이스-공유 러너 self:ws:${runner.id}: 팀 실행 + 워크스페이스-결제 + 크로스ws 격리`);
+  console.log(
+    `✓ PASS — workspace-shared runner self:ws:${runner.id}: team execution + workspace-billed + cross-ws isolation`,
+  );
 } finally {
   cleanup();
 }

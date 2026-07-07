@@ -1,11 +1,11 @@
 import { BadRequestError, type HarnessSpec, NotFoundError, type ServiceHarnessSpec } from "@everdict/core";
 
 export const LATEST = "latest";
-// first-party/공유 하니스의 소유자. 테넌트가 자기 것을 안 가졌으면 여기로 폴백한다.
+// Owner of first-party/shared harnesses. If a tenant doesn't have its own, resolution falls back here.
 export const SHARED_TENANT = "_shared";
 
-// 하네스 버전 공통 유틸(_shared 폴백 + semver/latest + 불변 비교 + service narrowing). taxonomy 레지스트리
-// (VersionedStore/PgVersionedStore + HarnessTemplate/Instance 레지스트리)가 공유한다. 평면 HarnessRegistry 는 제거됨.
+// Shared harness-version utilities (_shared fallback + semver/latest + immutable comparison + service narrowing).
+// Shared by the taxonomy registries (VersionedStore/PgVersionedStore + HarnessTemplate/Instance registries). The flat HarnessRegistry has been removed.
 
 function parseSemver(v: string): [number, number, number] | undefined {
   const m = /^(\d+)\.(\d+)\.(\d+)/.exec(v);
@@ -27,7 +27,7 @@ export function sortVersions(versions: string[]): string[] {
   return [...versions].sort(compareVersions);
 }
 
-// 키 순서 무관 비교 (Postgres jsonb 는 키 순서 미보존).
+// Key-order-independent comparison (Postgres jsonb does not preserve key order).
 function stableStringify(v: unknown): string {
   if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
   if (Array.isArray(v)) return `[${v.map(stableStringify).join(",")}]`;
@@ -41,22 +41,22 @@ export function specsEqual(a: unknown, b: unknown): boolean {
   return stableStringify(a) === stableStringify(b);
 }
 
-// Pg `tags jsonb` 컬럼 → string[] (버전 태그). jsonb 는 임의 값이 올 수 있으니 방어적으로 문자열만 취한다.
+// Pg `tags jsonb` column → string[] (version tags). jsonb can hold arbitrary values, so defensively keep only strings.
 export function parseVersionTags(v: unknown): string[] {
   return Array.isArray(v) ? v.filter((t): t is string => typeof t === "string") : [];
 }
 
 export function resolveRef(id: string, ref: string, sorted: string[]): string {
-  if (sorted.length === 0) throw new NotFoundError("NOT_FOUND", { id }, `하니스 '${id}' 가 없습니다.`);
+  if (sorted.length === 0) throw new NotFoundError("NOT_FOUND", { id }, `Harness '${id}' not found.`);
   if (ref === LATEST) return sorted[sorted.length - 1] as string;
   if (!sorted.includes(ref))
-    throw new NotFoundError("NOT_FOUND", { id, version: ref }, `하니스 ${id}@${ref} 가 없습니다.`);
+    throw new NotFoundError("NOT_FOUND", { id, version: ref }, `Harness ${id}@${ref} not found.`);
   return ref;
 }
 
 export function asService(spec: HarnessSpec, id: string): ServiceHarnessSpec {
   if (spec.kind !== "service") {
-    throw new BadRequestError("BAD_REQUEST", { id, version: spec.version }, `하니스 ${id} 는 service 가 아닙니다.`);
+    throw new BadRequestError("BAD_REQUEST", { id, version: spec.version }, `Harness ${id} is not a service.`);
   }
   return spec;
 }

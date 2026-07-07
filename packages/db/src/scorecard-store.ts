@@ -1,20 +1,20 @@
 import { ScorecardSchema } from "@everdict/core";
 import { z } from "zod";
 
-// 스코어카드 run 의 수명: 데이터셋×하니스 배치 평가 접수 → 실행 → 성공/실패.
-// superseded = 같은 (origin.repo, prNumber, harness, dataset) 의 더 새 발사가 이 배치를 회수(취소·대체)한 종결 —
-// 실패도 성공도 아니라 baseline/diff/리더보드(succeeded 만)에 안 잡힌다. 스토어가 이 레코드를 보관한다.
+// Scorecard run lifecycle: accept a dataset×harness batch eval → run → success/failure.
+// superseded = a terminal state where a newer fire of the same (origin.repo, prNumber, harness, dataset) reclaimed (cancelled·replaced) this batch —
+// neither failure nor success, so it's not counted in baseline/diff/leaderboard (succeeded only). The store keeps this record.
 export const ScorecardStatusSchema = z.enum(["queued", "running", "succeeded", "failed", "superseded"]);
 export type ScorecardStatus = z.infer<typeof ScorecardStatusSchema>;
 
-// phase = 실패한 파이프라인 구간(dispatch|judges|metrics|offload|persist) — "어떤 구간에서" 진단용(jsonb 라 마이그레이션 불요).
+// phase = the failed pipeline stage (dispatch|judges|metrics|offload|persist) — for "at which stage" diagnosis (jsonb, so no migration needed).
 export const ScorecardRunErrorSchema = z.object({
   code: z.string(),
   message: z.string(),
   phase: z.string().optional(),
 });
 
-// 메트릭별 집계(@everdict/suite summarizeScorecard 결과와 동형). db 는 core 만 의존 → 여기서 형태만 미러.
+// Per-metric aggregate (isomorphic to @everdict/suite summarizeScorecard's result). db depends only on core → mirror just the shape here.
 export const MetricSummarySchema = z.object({
   metric: z.string(),
   count: z.number(),
@@ -23,8 +23,8 @@ export const MetricSummarySchema = z.object({
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
-// 이 run 이 실제로 쓴 모델(리더보드 model 축, @everdict/suite scorecardModels 결과와 동형 — 형태만 미러).
-// observed = 트레이스 관측 · declared = spec 선언 · primary = 그룹 키(관측 우선, 없으면 선언). 경량이라 list 에도 포함.
+// The models this run actually used (leaderboard model axis, isomorphic to @everdict/suite scorecardModels's result — shape mirror only).
+// observed = observed from the trace · declared = declared in the spec · primary = group key (observed first, else declared). Lightweight, so included in list too.
 export const ScorecardModelsSchema = z.object({
   observed: z.array(z.string()).default([]),
   declared: z.string().optional(),
@@ -32,23 +32,23 @@ export const ScorecardModelsSchema = z.object({
 });
 export type ScorecardModels = z.infer<typeof ScorecardModelsSchema>;
 
-// 이 스코어카드 run 의 트리거 출처(provenance) — 어디서 발사됐나(schedule|github-actions|api|web…) + 커밋 좌표.
-// GitHub Actions PR 발사는 제출 시점 임시 핀(pinOverrides: 슬롯→이미지)을 여기 기록한다 — 레지스트리는 무변경이므로
-// "무엇으로 평가했나"의 재현 근거가 이 필드다. 경량 → 목록(list)에도 포함. Pg 는 origin jsonb(mig 0033, additive).
+// The trigger provenance of this scorecard run — where it was fired from (schedule|github-actions|api|web…) + commit coordinates.
+// A GitHub Actions PR fire records the submit-time ephemeral pins (pinOverrides: slot→image) here — the registry is unchanged, so
+// this field is the reproducibility basis for "what it was evaluated with". Lightweight → included in list too. Pg is origin jsonb (mig 0033, additive).
 export const ScorecardOriginSchema = z.object({
   source: z.string(), // schedule|github-actions|api|web…
   repo: z.string().optional(), // "owner/name"
   sha: z.string().optional(),
   ref: z.string().optional(), // refs/heads/… | refs/pull/…
   prNumber: z.number().int().optional(),
-  runUrl: z.string().optional(), // CI run 링크
-  pinOverrides: z.record(z.string()).optional(), // 제출 시점 임시 핀(슬롯→이미지) — PR 이미지 스왑 기록
+  runUrl: z.string().optional(), // CI run link
+  pinOverrides: z.record(z.string()).optional(), // submit-time ephemeral pins (slot→image) — records the PR image swap
 });
 export type ScorecardOrigin = z.infer<typeof ScorecardOriginSchema>;
 
-// 실행 과정 스텝(타임라인) — "진행 과정"을 보이기 위해 run 이 진행되며 append 된다(증분 저장).
+// Execution steps (timeline) — appended as the run progresses to show "progress" (incremental store).
 // phase = dispatch|judges|metrics|offload|persist|case, status = started|ok|failed|info.
-// Pg 는 steps jsonb 컬럼(mig 0026, additive). 무거운 detail 이라 목록(list)에선 생략하고 get 에서만 돌려준다.
+// Pg is a steps jsonb column (mig 0026, additive). Heavy detail, so it's omitted from list and returned only in get.
 export const ScorecardStepSchema = z.object({
   ts: z.string(),
   phase: z.string(),
@@ -58,35 +58,35 @@ export const ScorecardStepSchema = z.object({
 });
 export type ScorecardStep = z.infer<typeof ScorecardStepSchema>;
 
-// 부분 실행(subset) — 이 배치가 데이터셋의 어떤 부분집합을 돌렸나. 미설정 = 전체 실행.
-// 표식이 있어야 소비자(목록/상세/diff/리더보드)가 "전체 결과가 아니다"를 안다. 경량 → 목록에도 포함. mig 0043.
+// Partial run (subset) — which subset of the dataset this batch ran. Unset = full run.
+// The marker is what lets consumers (list/detail/diff/leaderboard) know "this is not the full result". Lightweight → included in list too. mig 0043.
 export const ScorecardSubsetSchema = z.object({
-  total: z.number().int().nonnegative(), // 제출 시점 데이터셋 전체 케이스 수
-  selected: z.number().int().nonnegative(), // 실제 실행한 케이스 수
-  ids: z.array(z.string()).optional(), // 명시 선택한 케이스 id
-  tags: z.array(z.string()).optional(), // 태그 필터(any-match)
-  limit: z.number().int().positive().optional(), // 필터 적용 후 앞에서 N개
+  total: z.number().int().nonnegative(), // total case count of the dataset at submit time
+  selected: z.number().int().nonnegative(), // number of cases actually run
+  ids: z.array(z.string()).optional(), // explicitly selected case ids
+  tags: z.array(z.string()).optional(), // tag filter (any-match)
+  limit: z.number().int().positive().optional(), // first N after applying the filter
 });
 export type ScorecardSubset = z.infer<typeof ScorecardSubsetSchema>;
 
-// 트레이스 싱크 적재 결과 — 채점 완료 후 케이스별 trace+점수를 워크스페이스 관측 플랫폼에 내보낸 기록.
-// 실패해도 스코어카드 상태에는 영향 없음(status 는 여기에만). 케이스별 외부 trace id/링크를 보존한다
-// (pull-ingest 의 runs 매핑이 사라지지 않도록). Pg 는 sink_export jsonb(mig 0048, additive).
-// 설계: docs/architecture/trace-sink.md
+// Trace-sink export result — the record of exporting per-case trace+scores to the workspace observability platform after scoring completes.
+// A failure does not affect the scorecard status (status lives only here). Preserves per-case external trace ids/links
+// (so the pull-ingest runs mapping doesn't get lost). Pg is sink_export jsonb (mig 0048, additive).
+// Design: docs/architecture/trace-sink.md
 export const ScorecardExportSchema = z.object({
   sink: z.enum(["mlflow", "langfuse", "langsmith", "phoenix"]),
-  name: z.string().optional(), // 사용한 싱크 이름(복수 싱크에서 어느 것이었나 — 과거 레코드는 미설정)
+  name: z.string().optional(), // the sink name used (which one among multiple sinks — unset for past records)
   status: z.enum(["succeeded", "partial", "failed"]),
-  url: z.string().optional(), // 상위(experiment/project) 딥링크
-  message: z.string().optional(), // 실패/부분 사유
+  url: z.string().optional(), // top-level (experiment/project) deep link
+  message: z.string().optional(), // failure/partial reason
   exportedAt: z.string(),
   cases: z
     .array(
       z.object({
         caseId: z.string(),
-        externalId: z.string().optional(), // 플랫폼 trace/run id(생성했거나 부착한 대상)
-        url: z.string().optional(), // 케이스 trace 딥링크
-        error: z.string().optional(), // 케이스별 실패(격리 — 다른 케이스는 계속 적재)
+        externalId: z.string().optional(), // platform trace/run id (the target created or attached)
+        url: z.string().optional(), // case trace deep link
+        error: z.string().optional(), // per-case failure (isolated — other cases keep exporting)
       }),
     )
     .optional(),
@@ -97,42 +97,42 @@ export const ScorecardRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   dataset: z.object({ id: z.string(), version: z.string() }),
-  harness: z.object({ id: z.string(), version: z.string() }), // 해석된 구체 버전(never "latest")
+  harness: z.object({ id: z.string(), version: z.string() }), // resolved concrete version (never "latest")
   status: ScorecardStatusSchema,
-  summary: z.array(MetricSummarySchema).optional(), // 경량 집계(목록용)
-  models: ScorecardModelsSchema.optional(), // 이 run 이 쓴 모델(리더보드 축, 경량 → 목록에도 포함). 과거 레코드는 미설정.
-  // 이 run 을 채점한 judge 모델(들) — model 축이 '하니스가 쓴 LLM'이라면 이건 '채점자'. 공정 비교(같은 judge)용
-  // 필터/표시. inline judge config.model + 등록 model-judge spec.model 의 distinct. 경량 → 목록에도 포함.
+  summary: z.array(MetricSummarySchema).optional(), // lightweight aggregate (for listing)
+  models: ScorecardModelsSchema.optional(), // the models this run used (leaderboard axis, lightweight → included in list too). Unset for past records.
+  // The judge model(s) that scored this run — if the model axis is 'the LLM the harness used', this is the 'grader'. Filter/display
+  // for fair comparison (same judge). Distinct of inline judge config.model + registered model-judge spec.model. Lightweight → included in list too.
   judgeModels: z.array(z.string()).optional(),
-  origin: ScorecardOriginSchema.optional(), // 트리거 출처(provenance) — 경량이라 목록에도 포함. 과거 레코드는 미설정.
-  // 실행자(제출자 subject) — "누가 실행시켰나"(아바타+이름) 표기/필터용. origin.source 가 '어디서'라면 이건 '누가'.
-  // 데이터셋/하니스의 created_by 와 동일 패턴. 과거 레코드·기계 발사(subject 없음)는 미설정. 경량 → 목록에도 포함.
+  origin: ScorecardOriginSchema.optional(), // trigger provenance — lightweight, so included in list too. Unset for past records.
+  // Runner (submitter subject) — to show/filter "who ran it" (avatar+name). If origin.source is 'where', this is 'who'.
+  // Same pattern as datasets/harnesses' created_by. Unset for past records and machine-fired runs (no subject). Lightweight → included in list too.
   createdBy: z.string().optional(),
-  // 배치된 런타임(placement.target) — 작업 큐의 "어디서 도는가" 축. 미설정 = 기본 백엔드. mig 0040.
+  // The runtime it was placed on (placement.target) — the work-queue's "where does it run" axis. Unset = default backend. mig 0040.
   runtime: z.string().optional(),
-  subset: ScorecardSubsetSchema.optional(), // 부분 실행 표식(전체 실행이면 미설정)
-  scorecard: ScorecardSchema.optional(), // 케이스별 전체 결과(상세용, 무거움)
-  export: ScorecardExportSchema.optional(), // 트레이스 싱크 적재 결과(상세용 — steps 처럼 get 에서만)
+  subset: ScorecardSubsetSchema.optional(), // partial-run marker (unset for a full run)
+  scorecard: ScorecardSchema.optional(), // full per-case results (for detail, heavy)
+  export: ScorecardExportSchema.optional(), // trace-sink export result (for detail — get only, like steps)
   error: ScorecardRunErrorSchema.optional(),
-  steps: z.array(ScorecardStepSchema).optional(), // 실행 과정 타임라인(진행 중에도 append)
-  // 이 배치가 팬아웃한 자식 run 들의 id(있으면). scorecard = run × N 을 참조로 표현 — 케이스별 addressable run 드릴다운.
-  // 무거운 scorecard(임베드 결과)와 별개의 경량 참조. get 에서만(steps 처럼) — 상세용. 과거 레코드/ingest 경로는 미설정.
+  steps: z.array(ScorecardStepSchema).optional(), // execution timeline (appended even while in progress)
+  // The ids of the child runs this batch fanned out (if any). scorecard = run × N expressed as references — a per-case addressable run drill-down.
+  // A lightweight reference separate from the heavy scorecard (embedded results). get only (like steps) — for detail. Unset for past records/ingest paths.
   runIds: z.array(z.string()).optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type ScorecardRecord = z.infer<typeof ScorecardRecordSchema>;
 
-// list 필터 — dataset/harness/status 를 스토어(SQL)에서 좁힌다(리더보드/트렌드가 전 워크스페이스를 훑지 않게).
-// 미지정이면 전체(현행). model/judgeModel 등 요약-파생 축은 서비스/suite 에서 계속 필터(SQL 로 못 좁힘).
+// list filter — narrows dataset/harness/status in the store (SQL) so leaderboard/trend don't scan the whole workspace.
+// If unset, everything (current behavior). Summary-derived axes like model/judgeModel are still filtered in the service/suite (can't narrow in SQL).
 export interface ScorecardListFilter {
   dataset?: string; // dataset.id
   harness?: string; // harness.id
   status?: ScorecardStatus;
 }
 
-// 스코어카드 스토어 계약. in-memory(개발/테스트) 또는 Postgres(운영) — 같은 인터페이스 뒤로 교체.
-// 주의: list 는 무거운 `scorecard`(트레이스 포함) 필드를 의도적으로 생략한다(summary 만). 전체는 get 으로.
+// Scorecard store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.
+// Note: list intentionally omits the heavy `scorecard` (trace-included) field (summary only). Get the full thing via get.
 export interface ScorecardStore {
   create(record: ScorecardRecord): Promise<void>;
   update(id: string, patch: Partial<ScorecardRecord>): Promise<ScorecardRecord | undefined>;
@@ -165,7 +165,7 @@ export class InMemoryScorecardStore implements ScorecardStore {
       .filter((c) => !filter?.dataset || c.dataset.id === filter.dataset)
       .filter((c) => !filter?.harness || c.harness.id === filter.harness)
       .filter((c) => !filter?.status || c.status === filter.status);
-    // 목록은 무거운 scorecard/steps + 상세용 runIds/export 생략(summary/models 만) — 상세는 get 으로.
+    // List omits the heavy scorecard/steps + detail-only runIds/export (summary/models only) — get the detail via get.
     return all.map(({ scorecard, steps, runIds, export: _export, ...rest }) => rest);
   }
 }

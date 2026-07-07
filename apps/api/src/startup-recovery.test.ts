@@ -24,17 +24,17 @@ const runRec = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
   ...over,
 });
 
-describe("recoverInterrupted (부팅 시 고아 작업 회수)", () => {
-  it("재시작으로 고아가 된 queued/running 배치·자식·standalone run 을 INTERRUPTED 로 종결한다", async () => {
+describe("recoverInterrupted (reclaim orphaned jobs at boot)", () => {
+  it("finalizes queued/running batches, children, and standalone runs orphaned by a restart as INTERRUPTED", async () => {
     const scorecards = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();
     await scorecards.create(card("zombie-running"));
     await scorecards.create(card("zombie-queued", { status: "queued" }));
     await scorecards.create(card("done", { status: "succeeded" }));
-    // zombie-running 의 자식: 종결 1 + 실행 중 1(고아)
+    // children of zombie-running: 1 finalized + 1 still running (orphan)
     await runs.create(runRec("child-done", { status: "succeeded", parentScorecardId: "zombie-running" }));
     await runs.create(runRec("child-stuck", { parentScorecardId: "zombie-running" }));
-    // standalone: 고아 1 + 종결 1
+    // standalone: 1 orphan + 1 finalized
     await runs.create(runRec("solo-stuck"));
     await runs.create(runRec("solo-done", { status: "failed" }));
 
@@ -44,14 +44,14 @@ describe("recoverInterrupted (부팅 시 고아 작업 회수)", () => {
     expect((await scorecards.get("zombie-running"))?.status).toBe("failed");
     expect((await scorecards.get("zombie-running"))?.error?.code).toBe("INTERRUPTED");
     expect((await scorecards.get("zombie-queued"))?.status).toBe("failed");
-    expect((await scorecards.get("done"))?.status).toBe("succeeded"); // 종결 상태는 무변경
+    expect((await scorecards.get("done"))?.status).toBe("succeeded"); // terminal status is left unchanged
     expect((await runs.get("child-stuck"))?.status).toBe("failed");
     expect((await runs.get("child-done"))?.status).toBe("succeeded");
     expect((await runs.get("solo-stuck"))?.status).toBe("failed");
-    expect((await runs.get("solo-done"))?.error).toBeUndefined(); // 기존 실패 레코드 덮어쓰지 않음
+    expect((await runs.get("solo-done"))?.error).toBeUndefined(); // does not overwrite the existing failed record
   });
 
-  it("고아가 없으면 아무것도 바꾸지 않는다", async () => {
+  it("changes nothing when there are no orphans", async () => {
     const scorecards = new InMemoryScorecardStore();
     const runs = new InMemoryRunStore();
     await scorecards.create(card("done", { status: "succeeded" }));

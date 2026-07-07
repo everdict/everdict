@@ -25,7 +25,7 @@ const okDispatcher: Dispatcher = {
 async function makeDeps(): Promise<{ deps: McpDeps; store: InMemoryWorkspaceStore }> {
   const store = new InMemoryWorkspaceStore();
   await store.create({ id: "acme", name: "Acme", owner: "alice" }); // alice = owner+admin
-  await store.ensureMembership("acme", "bob", "admin"); // bob = admin 이지만 owner 아님
+  await store.ensureMembership("acme", "bob", "admin"); // bob = admin but not the owner
   const deps: McpDeps = {
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore() }),
     workspaceService: new WorkspaceService(store),
@@ -48,14 +48,14 @@ function jsonOf(r: unknown): Record<string, unknown> {
   return c && c.type === "text" && c.text ? JSON.parse(c.text) : {};
 }
 
-describe("MCP workspace 메타/삭제 도구 (BFF↔MCP 패리티)", () => {
-  it("get_workspace 는 admin 에게 워크스페이스 레코드를 돌려준다", async () => {
+describe("MCP workspace meta/delete tools (BFF↔MCP parity)", () => {
+  it("get_workspace returns the workspace record to an admin", async () => {
     const me = await connect((await makeDeps()).deps, "alice", ["admin"]);
     const got = jsonOf(await me.callTool({ name: "get_workspace", arguments: {} }));
     expect(got).toMatchObject({ id: "acme", name: "Acme", owner: "alice" });
   });
 
-  it("update_workspace 는 admin 이 이름/로고(data URL)를 바꾼다", async () => {
+  it("update_workspace lets an admin change the name/logo (data URL)", async () => {
     const me = await connect((await makeDeps()).deps, "alice", ["admin"]);
     const updated = jsonOf(
       await me.callTool({
@@ -66,13 +66,13 @@ describe("MCP workspace 메타/삭제 도구 (BFF↔MCP 패리티)", () => {
     expect(updated).toMatchObject({ name: "Acme Inc", logoUrl: "data:image/png;base64,iVBORw0KGgo=" });
   });
 
-  it("update_workspace 는 viewer 면 도구 에러(settings:write 게이트)", async () => {
+  it("update_workspace is a tool error for a viewer (settings:write gate)", async () => {
     const me = await connect((await makeDeps()).deps, "eve", ["viewer"]);
     const res = await me.callTool({ name: "update_workspace", arguments: { name: "Nope" } });
     expect(res.isError).toBe(true);
   });
 
-  it("delete_workspace 는 owner 면 워크스페이스를 지운다", async () => {
+  it("delete_workspace deletes the workspace when called by the owner", async () => {
     const { deps, store } = await makeDeps();
     const me = await connect(deps, "alice", ["admin"]);
     const res = jsonOf(await me.callTool({ name: "delete_workspace", arguments: {} }));
@@ -80,7 +80,7 @@ describe("MCP workspace 메타/삭제 도구 (BFF↔MCP 패리티)", () => {
     expect(await store.get("acme")).toBeUndefined();
   });
 
-  it("delete_workspace 는 owner 가 아니면 도구 에러(다른 admin 도 불가)", async () => {
+  it("delete_workspace is a tool error for a non-owner (even another admin can't)", async () => {
     const { deps, store } = await makeDeps();
     const bob = await connect(deps, "bob", ["admin"]);
     const res = await bob.callTool({ name: "delete_workspace", arguments: {} });

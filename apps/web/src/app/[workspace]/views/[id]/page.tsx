@@ -12,8 +12,8 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// 저장된 뷰 열기 — 1급 URL(/{ws}/views/{id}). config 로 대시보드를 채우고 현재 데이터로 재실행(라이브).
-// 남의 비공개/없는 뷰는 목록(listVisible)에 안 잡히므로 notFound(404) — 존재 누출 금지.
+// Open a saved view — a first-class URL (/{ws}/views/{id}). Fills the dashboard from config and re-runs on current data (live).
+// Someone else's private/nonexistent view isn't in the list (listVisible), so notFound (404) — don't leak existence.
 export default async function ViewPage({
   params,
 }: {

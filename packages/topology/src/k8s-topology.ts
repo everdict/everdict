@@ -8,7 +8,7 @@ import {
 } from "@everdict/core";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 
-// ServiceResources → k8s container resources(requests=limits). cpu 1000=1코어(millicores), memoryMb→Mi. 정의된 것만 포함.
+// ServiceResources → k8s container resources (requests=limits). cpu 1000 = 1 core (millicores), memoryMb → Mi. Includes only what is defined.
 function k8sResources(r: ServiceResources): { requests: Record<string, string>; limits: Record<string, string> } {
   const q: Record<string, string> = {};
   if (r.cpu !== undefined) q.cpu = `${r.cpu}m`;
@@ -16,8 +16,8 @@ function k8sResources(r: ServiceResources): { requests: Record<string, string>; 
   return { requests: q, limits: q };
 }
 
-// docker -v 스타일 마운트 스펙 → k8s volumes(pod) + volumeMounts(container).
-// "/host:/c[:ro]" → hostPath, "named:/c[:ro]" → emptyDir(파드별 임시; 영속 PVC 는 후속). name 은 k8s 규격으로 새니타이즈.
+// docker -v style mount specs → k8s volumes (pod) + volumeMounts (container).
+// "/host:/c[:ro]" → hostPath, "named:/c[:ro]" → emptyDir (per-pod ephemeral; persistent PVC is a follow-up). name is sanitized to the k8s spec.
 function k8sVolumes(volumes: string[]): {
   volumes: Array<Record<string, unknown>>;
   mounts: Array<Record<string, unknown>>;
@@ -38,7 +38,7 @@ function k8sVolumes(volumes: string[]): {
   return { volumes: vols, mounts };
 }
 
-// ServiceReadiness + port → k8s readinessProbe(httpGet "/"). interval→periodSeconds, timeout/interval→failureThreshold.
+// ServiceReadiness + port → k8s readinessProbe (httpGet "/"). interval → periodSeconds, timeout/interval → failureThreshold.
 function k8sReadinessProbe(r: ServiceReadiness, port: number): Record<string, unknown> {
   const periodSeconds = Math.max(1, Math.round(r.intervalMs / 1000));
   return {
@@ -49,30 +49,30 @@ function k8sReadinessProbe(r: ServiceReadiness, port: number): Record<string, un
   };
 }
 
-// warm 토폴로지를 K8s Deployment/Service 로 렌더 (서비스당; runtimeClass 로 격리).
+// Render the warm topology as K8s Deployment/Service (one per service; isolated via runtimeClass).
 export interface K8sManifest {
   apiVersion: string;
   kind: string;
   metadata: { name: string; namespace?: string; labels?: Record<string, string> };
-  spec?: unknown; // Namespace 등은 spec 이 없다
+  spec?: unknown; // Namespace etc. have no spec
 }
 
 export interface K8sTopologyOptions {
   namespace?: string;
-  runtimeClass?: string; // 예: "gvisor"
+  runtimeClass?: string; // e.g. "gvisor"
   storeEnv?: Record<string, string>;
-  imagePullPolicy?: string; // 예: "IfNotPresent" (kind 처럼 사전 로드한 이미지를 쓸 때)
-  provisionDependencies?: boolean; // spec.dependencies[](postgres/redis)도 함께 배포 + 접속 env 자동 주입
-  // 워크스페이스 이미지 레지스트리 pull 자격증명(transient) — 서비스 이미지의 호스트가 일치하면
-  // dockerconfigjson Secret + imagePullSecrets 를 렌더한다. docs/architecture/workspace-image-registry.md
+  imagePullPolicy?: string; // e.g. "IfNotPresent" (when using pre-loaded images, as with kind)
+  provisionDependencies?: boolean; // also deploy spec.dependencies[] (postgres/redis) + auto-inject connection env
+  // Workspace image-registry pull credentials (transient) — if a service image host matches, render a
+  // dockerconfigjson Secret + imagePullSecrets. docs/architecture/workspace-image-registry.md
   registryAuth?: RegistryAuth;
 }
 
-// imagePullSecrets 가 참조하는 Secret 이름 — 네임스페이스당 하나, apply 가 멱등 upsert 한다.
+// Name of the Secret referenced by imagePullSecrets — one per namespace, apply upserts it idempotently.
 export const REGISTRY_AUTH_SECRET_NAME = "everdict-registry-auth";
 
-// 워크스페이스 레지스트리 자격증명 → kubernetes.io/dockerconfigjson Secret. 서비스 이미지 중 호스트가
-// 일치하는 게 있을 때만 buildK8sManifests 가 포함시킨다(무관 자격증명을 클러스터에 흩뿌리지 않는다).
+// Workspace registry credentials → a kubernetes.io/dockerconfigjson Secret. buildK8sManifests includes it only when
+// some service image's host matches (avoids scattering irrelevant credentials across the cluster).
 export function registryAuthSecretManifest(auth: RegistryAuth, ns: string): K8sManifest {
   return {
     apiVersion: "v1",
@@ -83,7 +83,7 @@ export function registryAuthSecretManifest(auth: RegistryAuth, ns: string): K8sM
   } as K8sManifest & { type: string; data: Record<string, string> };
 }
 
-// 공유 스토어(spec.dependencies[])를 Deployment+Service 로 렌더. (harness-version, ns) 당 한 번.
+// Render shared stores (spec.dependencies[]) as Deployment+Service. Once per (harness-version, ns).
 export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
   const ns = opts.namespace ?? "everdict-platform";
   const out: K8sManifest[] = [];
@@ -132,10 +132,10 @@ export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopo
 
 export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
   const ns = opts.namespace ?? "everdict-platform";
-  // 스토어를 함께 띄우면 접속 env 를 자동 주입 — 우선순위: connEnv(관례) < svc.env(서비스 정적) < storeEnv(운영 오버라이드).
+  // When stores are brought up too, auto-inject the connection env — precedence: connEnv (convention) < svc.env (service static) < storeEnv (operational override).
   const depEnv = opts.provisionDependencies ? dependencyConnEnv(spec) : {};
   const out: K8sManifest[] = [];
-  // 워크스페이스 레지스트리 이미지가 실제로 있을 때만 dockerconfigjson Secret + imagePullSecrets 렌더.
+  // Render the dockerconfigjson Secret + imagePullSecrets only when a workspace-registry image is actually present.
   const auth = opts.registryAuth;
   const needsAuth = Boolean(auth && spec.services.some((s) => imageUsesRegistryHost(s.image, auth.host)));
   if (auth && needsAuth) out.push(registryAuthSecretManifest(auth, ns));
@@ -158,7 +158,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
           metadata: { labels },
           spec: {
             runtimeClassName: opts.runtimeClass,
-            // 워크스페이스 레지스트리 이미지 인증 — 이 서비스 이미지의 호스트가 일치할 때만 참조(위 Secret).
+            // Workspace-registry image auth — reference it (the Secret above) only when this service image's host matches.
             ...(auth && imageUsesRegistryHost(svc.image, auth.host)
               ? { imagePullSecrets: [{ name: REGISTRY_AUTH_SECRET_NAME }] }
               : {}),
@@ -169,9 +169,9 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
                 imagePullPolicy: opts.imagePullPolicy,
                 ports: svc.port ? [{ containerPort: svc.port }] : [],
                 env,
-                // 서비스 리소스 요청(svc.resources) → requests=limits. cpu 1000=1코어(millicores), memoryMb→Mi. 미설정=무제한(생략).
+                // Service resource request (svc.resources) → requests=limits. cpu 1000 = 1 core (millicores), memoryMb → Mi. Unset = unlimited (omitted).
                 ...(svc.resources ? { resources: k8sResources(svc.resources) } : {}),
-                // 서비스 볼륨 마운트(svc.volumes). readinessProbe 는 svc.readiness + port 가 있을 때 httpGet "/".
+                // Service volume mounts (svc.volumes). readinessProbe = httpGet "/" when svc.readiness + port are present.
                 ...(vm.mounts.length > 0 ? { volumeMounts: vm.mounts } : {}),
                 ...(svc.readiness && svc.port !== undefined
                   ? { readinessProbe: k8sReadinessProbe(svc.readiness, svc.port) }
@@ -195,7 +195,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
   return out;
 }
 
-// 네임스페이스 = 테넌트(존) 격리 경계. warm 풀을 존별로 분리하는 1차 수단.
+// Namespace = the tenant (zone) isolation boundary. The primary means of separating the warm pool per zone.
 export function namespaceManifest(ns: string): K8sManifest {
   return { apiVersion: "v1", kind: "Namespace", metadata: { name: ns } };
 }
@@ -213,14 +213,14 @@ export interface K8sBrowserOptions {
   imagePullPolicy?: string;
 }
 
-// per-case 브라우저(타깃 환경 II): headless Chromium Deployment + Service. CDP 포트 노출.
+// per-case browser (target env II): a headless Chromium Deployment + Service. Exposes the CDP port.
 export function buildBrowserManifests(runId: string, opts: K8sBrowserOptions = {}): K8sManifest[] {
   const ns = opts.namespace ?? "default";
   const image = opts.image ?? "chromedp/headless-shell:latest";
   const cdpPort = opts.cdpPort ?? 9222;
   const name = browserDeployName(runId);
   const labels = { app: name, "everdict/runId": runId };
-  // headless-shell 은 CDP 를 스스로 9222(socat)로 노출 → allow-origins 만 추가(포트 덮어쓰기 금지).
+  // headless-shell exposes CDP itself on 9222 (socat) → add only allow-origins (do not override the port).
   const args = opts.args ?? ["--remote-allow-origins=*"];
   return [
     {

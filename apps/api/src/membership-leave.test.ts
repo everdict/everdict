@@ -11,25 +11,25 @@ async function seed() {
 }
 
 describe("MembershipService.leaveWorkspace", () => {
-  it("멤버가 아니면 멱등 no-op(에러 없음)", async () => {
+  it("no-op idempotent if not a member (no error)", async () => {
     const { svc } = await seed();
     await expect(svc.leaveWorkspace("acme", "stranger")).resolves.toBeUndefined();
   });
 
-  it("일반 멤버는 나갈 수 있다", async () => {
+  it("a regular member can leave", async () => {
     const { store, svc } = await seed();
     await store.ensureMembership("acme", "bob", "member");
     await svc.leaveWorkspace("acme", "bob");
     expect((await store.listMembers("acme")).map((m) => m.subject)).toEqual(["alice"]);
   });
 
-  it("마지막 admin 은 나갈 수 없다(409 CONFLICT)", async () => {
+  it("the last admin cannot leave (409 CONFLICT)", async () => {
     const { svc } = await seed();
     await expect(svc.leaveWorkspace("acme", "alice")).rejects.toMatchObject({ code: "CONFLICT" });
     await expect(svc.leaveWorkspace("acme", "alice")).rejects.toBeInstanceOf(AppError);
   });
 
-  it("admin 이 둘이면 한 명은 나갈 수 있다", async () => {
+  it("with two admins, one can leave", async () => {
     const { store, svc } = await seed();
     await store.ensureMembership("acme", "carol", "admin");
     await svc.leaveWorkspace("acme", "alice");
@@ -38,8 +38,8 @@ describe("MembershipService.leaveWorkspace", () => {
   });
 });
 
-describe("MembershipService — 멤버 제거 훅(onMemberRemoved, 예약 자동 비활성)", () => {
-  it("성공한 leave/remove 시 훅 호출; no-op(멤버 아님)·차단(마지막 admin) 시 미호출", async () => {
+describe("MembershipService — member-removal hook (onMemberRemoved, auto-disable scheduled evals)", () => {
+  it("calls the hook on a successful leave/remove; not called on no-op (not a member) or blocked (last admin)", async () => {
     const store = new InMemoryWorkspaceStore();
     await store.create({ id: "acme", name: "Acme", owner: "alice" });
     await store.ensureMembership("acme", "bob", "member");
@@ -52,15 +52,15 @@ describe("MembershipService — 멤버 제거 훅(onMemberRemoved, 예약 자동
         calls.push({ ws, sub });
       },
     );
-    await svc.leaveWorkspace("acme", "stranger"); // 멤버 아님 → no-op
+    await svc.leaveWorkspace("acme", "stranger"); // not a member → no-op
     expect(calls).toEqual([]);
-    await svc.leaveWorkspace("acme", "bob"); // 성공 → 훅
+    await svc.leaveWorkspace("acme", "bob"); // success → hook
     expect(calls).toEqual([{ ws: "acme", sub: "bob" }]);
-    await expect(svc.removeMember("acme", "alice")).rejects.toMatchObject({ code: "CONFLICT" }); // 마지막 admin
-    expect(calls).toEqual([{ ws: "acme", sub: "bob" }]); // 차단 시 미호출
+    await expect(svc.removeMember("acme", "alice")).rejects.toMatchObject({ code: "CONFLICT" }); // last admin
+    expect(calls).toEqual([{ ws: "acme", sub: "bob" }]); // not called when blocked
   });
 
-  it("훅이 throw 해도 멤버 제거는 성공한다(best-effort)", async () => {
+  it("member removal succeeds even if the hook throws (best-effort)", async () => {
     const store = new InMemoryWorkspaceStore();
     await store.create({ id: "acme", name: "Acme", owner: "alice" });
     await store.ensureMembership("acme", "bob", "member");

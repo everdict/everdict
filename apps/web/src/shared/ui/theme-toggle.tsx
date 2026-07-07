@@ -6,8 +6,8 @@ import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 
-// 라이트/다크 토글. next-themes 없이 html.dark 클래스 + localStorage 만으로 동작한다.
-// 초기 클래스는 layout 의 no-flash 스크립트가 페인트 전에 세팅한다.
+// Light/dark toggle. Works with just the html.dark class + localStorage, no next-themes.
+// The initial class is set before paint by layout's no-flash script.
 export function ThemeToggle({ className }: { className?: string }) {
   const t = useTranslations('ui')
   const [dark, setDark] = useState(false)
@@ -25,7 +25,7 @@ export function ThemeToggle({ className }: { className?: string }) {
     try {
       localStorage.setItem('theme', next ? 'dark' : 'light')
     } catch {
-      // localStorage 차단 환경: 메모리 상태로만 토글
+      // localStorage-blocked environment: toggle via in-memory state only
     }
     setDark(next)
   }

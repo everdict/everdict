@@ -1,14 +1,14 @@
-# 실제 browser-use 를 everdict 서비스-토폴로지의 front-door 로 노출하는 최소 HTTP 서버.
-# ServiceTopologyBackend 계약: POST /runs {task, browser_cdp_url, thread_id, ...} (완료까지 블록) → 200,
-# 그 뒤 토폴로지 런타임이 per-case 브라우저를 snapshot. browser-use 가 자기 브라우저를 띄워 LLM 으로 진짜 구동하고,
-# 마지막 방문 URL/추출 텍스트를 /observe 로 노출 → everdict 의 BrowserSnapshot(url/dom) 로 매핑 → url-matches/dom-contains.
+# Minimal HTTP server exposing real browser-use as the front-door of everdict's service topology.
+# ServiceTopologyBackend contract: POST /runs {task, browser_cdp_url, thread_id, ...} (blocks until done) → 200,
+# after which the topology runtime snapshots the per-case browser. browser-use spins up its own browser and truly drives it
+# with the LLM, exposing the last visited URL / extracted text via /observe → mapped to everdict's BrowserSnapshot(url/dom) → url-matches/dom-contains.
 #
-# 추가:
-#  - GET /form, GET /result?q= : 컨테이너가 직접 서빙하는 *인터랙티브* 페이지(navigate→input→click 멀티스텝 태스크용).
-#  - OTLP 배출: run 마다 실제 토큰사용량(TokenCost)+실제 액션열(action_names)을 Jaeger(:4318)로 스팬 전송. trace_id 는
-#    thread_id("run-<32hex>")에서 추출 → everdict 의 OtelTraceSource.fetch(runId=32hex) 가 그 trace 를 끌어와 steps/cost 채점.
+# Extras:
+#  - GET /form, GET /result?q= : *interactive* pages served directly by the container (for navigate→input→click multi-step tasks).
+#  - OTLP emit: per run, send real token usage (TokenCost) + real action list (action_names) as spans to Jaeger(:4318). The trace_id
+#    is extracted from thread_id ("run-<32hex>") → everdict's OtelTraceSource.fetch(runId=32hex) pulls that trace to score steps/cost.
 #
-# browser-use 0.13.1 API 에 맞춤(Agent/ChatOpenAI/BrowserProfile top-level, Agent(browser_profile=...), cdp_use 로 chromium).
+# Tuned for the browser-use 0.13.1 API (Agent/ChatOpenAI/BrowserProfile top-level, Agent(browser_profile=...), chromium via cdp_use).
 import asyncio
 import os
 import re
@@ -24,13 +24,13 @@ MAX_STEPS = int(os.environ.get("BROWSERUSE_MAX_STEPS", "6"))
 BASE_URL = os.environ.get("OPENAI_BASE_URL", "http://host.docker.internal:4000/v1")
 API_KEY = os.environ.get("OPENAI_API_KEY", "x")
 OTLP_URL = os.environ.get("OTLP_URL", "http://localhost:4318/v1/traces")
-VISION = os.environ.get("BROWSERUSE_VISION", "") in ("1", "true", "True")  # 켜면 최종 스크린샷 base64 동봉(VLM judge 용)
-RESTRICT_DOMAIN = os.environ.get("BROWSERUSE_RESTRICT_DOMAIN", "") in ("1", "true", "True")  # 켜면 태스크 사이트로 제한
+VISION = os.environ.get("BROWSERUSE_VISION", "") in ("1", "true", "True")  # when on: include final screenshot base64 (for VLM judge)
+RESTRICT_DOMAIN = os.environ.get("BROWSERUSE_RESTRICT_DOMAIN", "") in ("1", "true", "True")  # when on: restrict to the task site
 
 
 def domains_from_task(task):
-    # 태스크의 첫 http(s) URL 도메인 → allowed_domains(사이트 이탈 방지 — WebVoyager 에서 에이전트가 Bing 등으로
-    # 새지 않게). 루트 도메인 + 서브도메인 glob 까지 허용.
+    # Domain of the task's first http(s) URL → allowed_domains (prevents leaving the site — so the agent doesn't wander off to
+    # Bing etc. in WebVoyager). Allows the root domain + subdomain glob.
     m = re.search(r"https?://([^/\s]+)", task or "")
     if not m:
         return None
@@ -75,9 +75,9 @@ def chromium_path():
 
 
 def make_browser_kwargs(cdp_url, allowed_domains=None):
-    # browser-use 0.13: Agent(browser_profile=...). docker(root)에서 headless + no-sandbox 강제,
-    # executable_path 로 베이스 이미지의 chromium 사용(런타임 다운로드 회피). cdp_url 오면 외부 브라우저 attach.
-    # allowed_domains 가 오면 에이전트를 그 도메인들로 제한(사이트 이탈 방지).
+    # browser-use 0.13: Agent(browser_profile=...). Force headless + no-sandbox in docker (root),
+    # use the base image's chromium via executable_path (avoids a runtime download). If cdp_url is given, attach to an external browser.
+    # If allowed_domains is given, restrict the agent to those domains (prevents leaving the site).
     args = ["--no-sandbox", "--disable-dev-shm-usage"]
     try:
         from browser_use import BrowserProfile  # type: ignore
@@ -92,14 +92,14 @@ def make_browser_kwargs(cdp_url, allowed_domains=None):
             try:
                 return {"browser_profile": BrowserProfile(**kw, allowed_domains=allowed_domains)}
             except Exception:
-                pass  # 이 browser-use 버전이 allowed_domains 미지원 → 제한 없이 폴백
+                pass  # this browser-use version doesn't support allowed_domains → fall back without restriction
         return {"browser_profile": BrowserProfile(**kw)}
     except Exception:
         return {}
 
 
 def last_screenshot(history):
-    # browser-use 0.13: use_vision 이면 스텝마다 스크린샷 저장 → history.screenshots()(base64) 또는 screenshot_paths()(파일).
+    # browser-use 0.13: with use_vision, a screenshot is saved per step → history.screenshots() (base64) or screenshot_paths() (files).
     import base64 as _b64
 
     try:
@@ -143,8 +143,8 @@ def summarize(history):
 
 
 def model_price(model):
-    # USD cost 산정용 단가($/token). 1순위 LiteLLM /model/info(운영자가 프록시에 설정한 실가격),
-    # 폴백은 운영자 지정 env(BROWSERUSE_PRICE_IN/OUT — 프록시에 가격 미설정일 때 참조가격). 둘 다 없으면 0.
+    # Per-token unit price ($/token) for computing USD cost. First choice: LiteLLM /model/info (the real price the operator set on the proxy),
+    # fallback: operator-specified env (BROWSERUSE_PRICE_IN/OUT — reference price when the proxy has none set). If neither, 0.
     pin = float(os.environ.get("BROWSERUSE_PRICE_IN", "0") or 0)
     pout = float(os.environ.get("BROWSERUSE_PRICE_OUT", "0") or 0)
     try:
@@ -188,9 +188,9 @@ def _span(trace_hex, name, start_ns, end_ns, attrs):
 
 
 def emit_otlp(trace_hex, model, actions, ptok, ctok, cost, result=""):
-    # 실 토큰사용량 → llm_call 스팬 1개(gen_ai.*), 실 액션열 → 액션당 tool_call 스팬(gen_ai.tool.name),
-    # 최종 답 → message 스팬(output.value). spansToTraceEvents 가 각각 llm_call(costGrader)/tool_call(stepsGrader)/
-    # message(answer-match grader) 로 매핑 — WebVoyager 류 정답대조 채점이 trace 의 최종 답을 본다.
+    # Real token usage → one llm_call span (gen_ai.*), real action list → one tool_call span per action (gen_ai.tool.name),
+    # final answer → message span (output.value). spansToTraceEvents maps these to llm_call(costGrader)/tool_call(stepsGrader)/
+    # message(answer-match grader) respectively — WebVoyager-style answer-match scoring reads the final answer from the trace.
     now = time.time_ns()
     spans = [
         _span(
@@ -237,7 +237,7 @@ async def run_handler(request):
             from browser_use import Agent  # type: ignore
             from browser_use.tokens.service import TokenCost  # type: ignore
 
-            tc = TokenCost(include_cost=False)  # 실 토큰 카운트 추적(프록시 모델 가격 미상 → cost 계산은 생략).
+            tc = TokenCost(include_cost=False)  # track real token counts (proxy model price unknown → skip cost computation).
             llm = tc.register_llm(make_llm())
             allowed = domains_from_task(task) if RESTRICT_DOMAIN else None
             agent = Agent(task=task, llm=llm, use_vision=VISION, **make_browser_kwargs(cdp_url, allowed))
@@ -259,13 +259,13 @@ async def run_handler(request):
                 ptok, ctok = s.total_prompt_tokens, s.total_completion_tokens
             except Exception:
                 pass
-            pin, pout = model_price(MODEL)  # 실토큰 × 설정단가 = 실 USD(단가는 LiteLLM 또는 운영자 env)
+            pin, pout = model_price(MODEL)  # real tokens × configured unit price = real USD (price from LiteLLM or operator env)
             cost = ptok * pin + ctok * pout
 
             try:
                 emit_otlp(trace_hex, MODEL, actions, ptok, ctok, cost, result)
             except Exception as e:  # noqa: BLE001
-                _last["error"] = f"otlp emit 실패(채점은 진행): {e}"
+                _last["error"] = f"otlp emit failed (scoring continues): {e}"
 
             _last.update(
                 url=url, dom=dom, result=result, steps=len(actions), actions=actions,
@@ -291,7 +291,7 @@ async def health_handler(_request):
 
 
 async def form_handler(_request):
-    # 인터랙티브 멀티스텝 타깃(컨테이너가 직접 서빙) — navigate→input→click 를 강제.
+    # Interactive multi-step target (served directly by the container) — forces navigate→input→click.
     return web.Response(
         content_type="text/html",
         text="""<!doctype html><html><head><title>Everdict Search</title></head><body>

@@ -6,7 +6,7 @@ import { Card } from '@/shared/ui/card'
 
 import { Field } from './parts'
 
-// process 하니스 구성 — 단일 샌드박스 프로세스(Claude Code/Codex). 토폴로지/핀 대상 없음.
+// process harness config — a single sandboxed process (Claude Code/Codex). No topology/pin targets.
 export function ProcessView({ spec }: { spec: HarnessSpec }) {
   const t = useTranslations('inspectHarness')
   return (

@@ -1,5 +1,5 @@
--- 개인 소유 외부 계정 연결(Connected accounts) 기능 제거 — 워크스페이스 GitHub App + Mattermost 통합으로 대체.
--- contract 단계(expand→deploy→contract): 코드가 더 이상 everdict_connections 를 참조하지 않는다(S6c 에서 제거 완료).
--- ⚠️ everdict_oauth_states 는 DROP 하지 않는다 — 워크스페이스 GitHub App 설치(install→callback) state 로 재사용한다.
--- 설계: docs/architecture/workspace-scoped-integrations.md (S6c)
+-- Remove the personally-owned Connected accounts feature — replaced by workspace GitHub App + Mattermost integrations.
+-- Contract phase (expand→deploy→contract): the code no longer references everdict_connections (removed in S6c).
+-- ⚠️ Do NOT DROP everdict_oauth_states — it's reused as the state for workspace GitHub App installs (install→callback).
+-- Design: docs/architecture/workspace-scoped-integrations.md (S6c)
 DROP TABLE IF EXISTS everdict_connections;

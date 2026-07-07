@@ -1,7 +1,7 @@
-# 라이브 e2e 보조: 실 MLflow 3.x 백엔드에 browser-use 모양의 트레이스(에이전트→LLM→툴 스팬)를 만들고 trace_id 를 찍는다.
-# MLflow 가 gen_ai.* 를 mlflow.chat.tokenUsage/mlflow.llm.model/.cost 로 정규화해 저장 → MlflowTraceSource 로 끌어 채점.
-# 환경: MLFLOW_TRACKING_URI / MLFLOW_TRACKING_USERNAME / MLFLOW_TRACKING_PASSWORD (Basic auth).
-# 사용: <venv>/bin/python scripts/live/mlflow-emit-trace.py   (mlflow-skinny 필요)
+# live e2e helper: build a browser-use-shaped trace (agent→LLM→tool spans) on a real MLflow 3.x backend and print the trace_id.
+# MLflow normalizes gen_ai.* into mlflow.chat.tokenUsage/mlflow.llm.model/.cost and stores it → pulled via MlflowTraceSource for scoring.
+# Env: MLFLOW_TRACKING_URI / MLFLOW_TRACKING_USERNAME / MLFLOW_TRACKING_PASSWORD (Basic auth).
+# Usage: <venv>/bin/python scripts/live/mlflow-emit-trace.py   (needs mlflow-skinny)
 import os
 import mlflow
 
@@ -12,7 +12,7 @@ mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT", "everdict-browseruse-t
 @mlflow.trace(name="browser_agent_run", span_type="AGENT")
 def run():
     with mlflow.start_span(name="chat gpt-5.4-mini", span_type="LLM") as s:
-        # OTel GenAI conventions — MLflow 3.x 가 이를 mlflow.chat.tokenUsage / mlflow.llm.model / .cost 로 정규화.
+        # OTel GenAI conventions — MLflow 3.x normalizes these into mlflow.chat.tokenUsage / mlflow.llm.model / .cost.
         s.set_attributes(
             {
                 "gen_ai.request.model": "gpt-5.4-mini",

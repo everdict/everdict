@@ -10,7 +10,7 @@ import { SectionHeader } from '@/shared/ui/section-header'
 import { buildMentionables, buildThread } from '../lib/build'
 import { CommentThread } from './comment-thread'
 
-// 재사용 서버 컴포넌트 — 리소스의 댓글/멤버를 가져와 스레드로 렌더. 상세 페이지는 이 한 줄만 넣으면 된다.
+// Reusable server component — fetches a resource's comments/members and renders them as a thread. A detail page only needs this one line.
 // <CommentsSection workspace={ws} resourceType="harness" resourceId={id} />
 export async function CommentsSection({
   workspace,
@@ -34,7 +34,7 @@ export async function CommentsSection({
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
-  const isAdmin = can(principal?.roles, 'settings:write') // admin 전용 액션 → admin 판정 프록시
+  const isAdmin = can(principal?.roles, 'settings:write') // admin-only action → proxy for the admin determination
   const canComment = can(principal?.roles, 'comments:write')
 
   return (

@@ -1,19 +1,19 @@
-// 라이브 e2e (멀티테넌트·실인증판): **alice 워크스페이스(acme)에 예약을 직접 등록 → 실제 Temporal 이 발사** → 스코어카드 → 확인.
-// scheduled-pinch-temporal.mjs 의 acme/alice 변형 — in-memory·no-auth 대신 **실 Postgres + Keycloak(OIDC) + auth 필수** 로 구동.
-// "pinch 를 돌린 그 하니스" = acme 에 이미 등록된 codex 하니스 + pinch-dashboards 데이터셋(둘 다 acme 에 존재).
+// Live e2e (multi-tenant, real-auth variant): **register a schedule directly in alice's workspace (acme) → real Temporal fires it** → scorecard → verify.
+// The acme/alice variant of scheduled-pinch-temporal.mjs — runs on **real Postgres + Keycloak (OIDC) + auth required** instead of in-memory/no-auth.
+// "the harness that ran pinch" = the codex harness already registered in acme + the pinch-dashboards dataset (both exist in acme).
 //
-// 전제(외부 인프라 — 다른 live 스크립트가 nomad/k8s 를 전제하듯):
-//   • Postgres @ localhost:5433 (everdict/everdict), acme 워크스페이스 데이터(codex 하니스 + pinch-dashboards) 존재.
-//   • Keycloak @ KEYCLOAK_ISSUER, 사용자 alice/alice(workspace=acme, member), public client everdict-mcp(direct grants).
+// Assumptions (external infra — as other live scripts assume nomad/k8s):
+//   • Postgres @ localhost:5433 (everdict/everdict), with acme workspace data (codex harness + pinch-dashboards) present.
+//   • Keycloak @ KEYCLOAK_ISSUER, user alice/alice (workspace=acme, member), public client everdict-mcp (direct grants).
 //   • Temporal dev server @ 127.0.0.1:7233.
 //
-// 구성(스크립트가 기동): 컨트롤플레인(:8793, Postgres+auth+Temporal) + everdict worker + alice 소유 self-hosted 러너(codex on PATH).
-// 흐름: ① CP ② worker ③ alice 토큰(ROPC) → 러너 페어링+기동 ④ POST /schedules(as alice, cron "* * * * *",
-//   pinch-dashboards×codex×self:<id>) → TemporalScheduleDriver 가 Schedule 생성 ⑤ Temporal 매분 발사 → 워크플로 →
-//   internal fire → 스코어카드 submit(=alice 신원) → 러너가 codex 로 dashboard.json → tests-pass 채점
-//   ⑥ 예약(acme 스코프)·발사·판정 확인 ⑦ 예약 삭제(Temporal Schedule 제거).
+// Setup (started by the script): control plane (:8793, Postgres+auth+Temporal) + everdict worker + alice-owned self-hosted runner (codex on PATH).
+// Flow: ① CP ② worker ③ alice token (ROPC) → pair + start runner ④ POST /schedules (as alice, cron "* * * * *",
+//   pinch-dashboards×codex×self:<id>) → TemporalScheduleDriver creates the Schedule ⑤ Temporal fires every minute → workflow →
+//   internal fire → scorecard submit (= alice's identity) → runner produces dashboard.json via codex → tests-pass grading
+//   ⑥ verify the schedule (acme-scoped), the fire, and the verdict ⑦ delete the schedule (removes the Temporal Schedule).
 //
-// 사용: node scripts/live/scheduled-pinch-acme-temporal.mjs  (apps/api/dist + apps/cli/dist 빌드, codex 로그인 필요).
+// Usage: node scripts/live/scheduled-pinch-acme-temporal.mjs  (build apps/api/dist + apps/cli/dist, codex login required).
 import { spawn } from "node:child_process";
 import process from "node:process";
 
@@ -27,7 +27,7 @@ const SECRETS_KEY = process.env.EVERDICT_SECRETS_KEY ?? "JIMYnR3k6zSSI7juJhzVQrh
 const ROOT = new URL("../..", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// alice 액세스 토큰(ROPC, public client). 짧은 수명이므로 매 요청마다 새로 받는다.
+// alice access token (ROPC, public client). Short-lived, so fetch a fresh one per request.
 async function aliceToken() {
   const r = await fetch(`${KEYCLOAK_ISSUER}/protocol/openid-connect/token`, {
     method: "POST",
@@ -41,7 +41,7 @@ async function aliceToken() {
     }),
   });
   const j = await r.json();
-  if (!j.access_token) throw new Error(`alice 토큰 실패: ${JSON.stringify(j)}`);
+  if (!j.access_token) throw new Error(`alice token failed: ${JSON.stringify(j)}`);
   return j.access_token;
 }
 const authH = async () => ({ "content-type": "application/json", authorization: `Bearer ${await aliceToken()}` });
@@ -64,7 +64,7 @@ const cpEnv = {
   EVERDICT_TEMPORAL_ADDRESS: TEMPORAL,
 };
 
-console.log(`=== ① 컨트롤플레인 기동 (:${PORT}, Postgres+auth+temporal=${TEMPORAL}) ===`);
+console.log(`=== ① start control plane (:${PORT}, Postgres+auth+temporal=${TEMPORAL}) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], { cwd: ROOT, env: cpEnv, stdio: ["ignore", "pipe", "pipe"] });
 cp.stderr.on("data", (d) => process.stderr.write(`  [cp] ${d}`));
 
@@ -81,15 +81,15 @@ try {
         (await fetch(`${BASE}/health`).catch(() => ({ status: 0 }))).status === 200 || (await fetch(BASE)).status < 500;
     } catch {}
   }
-  // /me 로 인증까지 확인
+  // verify auth via /me too
   const me = await get("/me");
   console.log(
-    `  → 인증됨: subject=${me.subject} workspace=${me.workspace} roles=${JSON.stringify(me.roles)} via=${me.via}`,
+    `  → authenticated: subject=${me.subject} workspace=${me.workspace} roles=${JSON.stringify(me.roles)} via=${me.via}`,
   );
-  if (me.workspace !== "acme") throw new Error(`alice 워크스페이스가 acme 가 아님: ${me.workspace}`);
+  if (me.workspace !== "acme") throw new Error(`alice's workspace is not acme: ${me.workspace}`);
 
   // ② worker
-  console.log(`\n=== ② everdict worker 기동 (temporal=${TEMPORAL}, API 브리지=${BASE}) ===`);
+  console.log(`\n=== ② start everdict worker (temporal=${TEMPORAL}, API bridge=${BASE}) ===`);
   worker = spawn("node", ["apps/cli/dist/main.js", "worker", "--temporal-address", TEMPORAL], {
     cwd: ROOT,
     env: { PATH: process.env.PATH, HOME: process.env.HOME, EVERDICT_API_URL: BASE, EVERDICT_INTERNAL_TOKEN: INTERNAL },
@@ -99,13 +99,13 @@ try {
   worker.stdout.on("data", (d) => process.stdout.write(`  [worker] ${d}`));
   await sleep(3000);
 
-  // ③ alice 소유 self-hosted 러너 페어링 + 기동 (codex on PATH)
+  // ③ pair + start alice-owned self-hosted runner (codex on PATH)
   console.log("\n=== ③ POST /runners (as alice) + everdict runner --pair (codex on PATH) ===");
   const paired = await post("/runners", { label: "alice-codex-laptop", capabilities: ["repo"] });
   const token = paired.json.token;
   const runnerId = paired.json.runner?.id;
   console.log(`  → ${paired.status} runnerId=${runnerId}`);
-  if (!token || !runnerId) throw new Error(`페어링 실패: ${JSON.stringify(paired.json)}`);
+  if (!token || !runnerId) throw new Error(`pairing failed: ${JSON.stringify(paired.json)}`);
   runner = spawn(
     "node",
     ["apps/cli/dist/main.js", "runner", "--pair", token, "--api-url", BASE, "--poll-interval-ms", "1000"],
@@ -115,15 +115,15 @@ try {
   runner.stdout.on("data", (d) => process.stdout.write(`  [runner] ${d}`));
   await sleep(3000);
 
-  // ④ 예약 등록 (as alice) — acme 에 이미 있는 codex × pinch-dashboards. cron 매분.
+  // ④ register the schedule (as alice) — codex × pinch-dashboards, both already in acme. cron every minute.
   console.log(`\n=== ④ POST /schedules (as alice, cron "* * * * *", pinch-dashboards × codex × self:${runnerId}) ===`);
   const created = await post("/schedules", {
     name: "alice pinch nightly (codex)",
     cron: "* * * * *",
     runTemplate: {
       dataset: { id: "pinch-dashboards", version: "1.0.0" },
-      // codex@1.0.0 = 번들 원본 command(작업 디렉터리에 dashboard.json 작성). acme 의 codex@2.0.0 는 stdout 을
-      // `.grader/agent_stdout.txt` 로 리다이렉트하는 실험 변형이라 파일을 안 쓴다 → 예약과 무관한 하니스 버전 차이.
+      // codex@1.0.0 = the bundle's original command (writes dashboard.json to the work dir). acme's codex@2.0.0 is an
+      // experimental variant that redirects stdout to `.grader/agent_stdout.txt` and doesn't write the file → a harness version difference unrelated to scheduling.
       harness: { id: "codex", version: "1.0.0" },
       runtime: `self:${runnerId}`,
     },
@@ -132,22 +132,22 @@ try {
   console.log(
     `  → ${created.status} scheduleId=${scheduleId} tenant=${created.json.tenant} createdBy=${created.json.createdBy}`,
   );
-  if (!scheduleId) throw new Error(`예약 등록 실패: ${JSON.stringify(created.json)}`);
+  if (!scheduleId) throw new Error(`schedule registration failed: ${JSON.stringify(created.json)}`);
 
-  // 워크스페이스 스코프 확인 — alice 의 /schedules 목록에 뜬다.
+  // Verify workspace scope — it shows up in alice's /schedules list.
   const listed = await get("/schedules");
   const arr = Array.isArray(listed) ? listed : (listed.items ?? []);
-  console.log(`  acme /schedules 목록: ${arr.map((s) => `${s.name}(${s.id.slice(0, 8)})`).join(", ")}`);
+  console.log(`  acme /schedules list: ${arr.map((s) => `${s.name}(${s.id.slice(0, 8)})`).join(", ")}`);
 
-  // ⑤ Temporal 발사 대기 — 예약 레코드에 lastScorecardId 채워질 때까지.
-  console.log("\n=== ⑤ Temporal 발사 대기 (매분 top; 워크플로→internal fire→스코어카드 submit) ===");
+  // ⑤ Wait for Temporal to fire — until the schedule record's lastScorecardId is set.
+  console.log("\n=== ⑤ wait for Temporal fire (top of each minute; workflow→internal fire→scorecard submit) ===");
   let sched;
   let firedScId;
   for (let i = 0; i < 100; i++) {
     await sleep(3000);
     sched = await get(`/schedules/${scheduleId}`);
     process.stdout.write(
-      `  대기 ${i * 3}s — lastFiredAt=${sched.lastFiredAt ?? "-"} lastScorecardId=${sched.lastScorecardId ?? "-"}\r`,
+      `  waited ${i * 3}s — lastFiredAt=${sched.lastFiredAt ?? "-"} lastScorecardId=${sched.lastScorecardId ?? "-"}\r`,
     );
     if (sched.lastScorecardId) {
       firedScId = sched.lastScorecardId;
@@ -155,13 +155,13 @@ try {
     }
   }
   console.log("");
-  if (!firedScId) throw new Error("Temporal 이 예약을 발사하지 않음(lastScorecardId 미설정)");
+  if (!firedScId) throw new Error("Temporal did not fire the schedule (lastScorecardId not set)");
   console.log(
-    `  ✔ 발사됨! lastFiredAt=${sched.lastFiredAt} lastScorecardId=${firedScId} lastStatus=${sched.lastStatus}`,
+    `  ✔ fired! lastFiredAt=${sched.lastFiredAt} lastScorecardId=${firedScId} lastStatus=${sched.lastStatus}`,
   );
 
-  // ⑥ 발사된 스코어카드 종료까지 폴링
-  console.log("\n=== ⑥ 발사된 스코어카드 폴링 (codex 가 alice 러너에서 dashboard.json 작성 중…) ===");
+  // ⑥ poll the fired scorecard until it terminates
+  console.log("\n=== ⑥ poll the fired scorecard (codex writing dashboard.json on alice's runner…) ===");
   let rec;
   for (let i = 0; i < 200; i++) {
     await sleep(2000);
@@ -169,29 +169,29 @@ try {
     process.stdout.write(`  status=${rec.status}\r`);
     if (rec.status === "succeeded" || rec.status === "failed") break;
   }
-  console.log(`\n  최종 status=${rec.status}`);
+  console.log(`\n  final status=${rec.status}`);
   const c = rec.scorecard?.results?.[0];
   const prov = c?.provenance;
   const tp = c?.scores?.find((s) => s.metric === "tests_pass");
   console.log(`  provenance: ${JSON.stringify(prov)}`); // ranOn=self-hosted, by=alice sub
-  console.log(`  tests_pass: ${tp ? (tp.pass ? "PASS" : "FAIL") : "(없음)"}`);
+  console.log(`  tests_pass: ${tp ? (tp.pass ? "PASS" : "FAIL") : "(none)"}`);
   console.log(`  models: ${JSON.stringify(rec.models)}`);
 
-  // finalize(워크플로가 poll-to-terminal 후 30s 주기로 호출) 가 예약 레코드에 최종 status 를 기록할 때까지 대기.
-  console.log("\n  finalize 대기 (워크플로 30s 폴링 → lastStatus 종료 상태 기록)…");
+  // Wait until finalize (the workflow calls it every 30s after poll-to-terminal) records the final status on the schedule record.
+  console.log("\n  waiting for finalize (workflow 30s poll → records terminal lastStatus)…");
   let schedFinal = sched;
   for (let i = 0; i < 30; i++) {
     await sleep(3000);
     schedFinal = await get(`/schedules/${scheduleId}`);
     if (schedFinal.lastStatus === "succeeded" || schedFinal.lastStatus === "failed") break;
   }
-  console.log(`  예약 최종: lastStatus=${schedFinal.lastStatus} lastFiredAt=${schedFinal.lastFiredAt}`);
+  console.log(`  schedule final: lastStatus=${schedFinal.lastStatus} lastFiredAt=${schedFinal.lastFiredAt}`);
 
   ok = rec.status === "succeeded" && prov?.ranOn === "self-hosted" && !!tp?.pass;
   console.log(
     ok
-      ? "\n✅ alice 워크스페이스(acme) 예약 → 실제 Temporal 발사 → self-hosted codex 가 pinch 수행 → tests_pass PASS. 멀티테넌트 예약 실동작."
-      : "\n⚠️ 기대와 불일치(위 로그 참고).",
+      ? "\n✅ alice's workspace (acme) schedule → real Temporal fire → self-hosted codex runs pinch → tests_pass PASS. Multi-tenant scheduling works for real."
+      : "\n⚠️ does not match expectations (see logs above).",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);
@@ -199,7 +199,7 @@ try {
   if (scheduleId) {
     try {
       const s = await del(`/schedules/${scheduleId}`);
-      console.log(`\n=== ⑦ DELETE /schedules/${scheduleId} → ${s} (Temporal Schedule 제거) ===`);
+      console.log(`\n=== ⑦ DELETE /schedules/${scheduleId} → ${s} (removes the Temporal Schedule) ===`);
     } catch {}
   }
   try {

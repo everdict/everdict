@@ -130,7 +130,7 @@ tool twins in `mcp.ts`:
   `missingSecrets`, not a hard failure — same convention as runtime registration).
 - `push-credentials` resolves `pushSecretName` → value from the **workspace** secret tier and
   returns `{host, namespace?, username?, password, imagePrefix}`. Missing registry → 404;
-  registry without `pushSecretName` → 400 (푸시 미구성); referenced secret absent → 404 with
+  registry without `pushSecretName` → 400 (push not configured); referenced secret absent → 404 with
   the secret name. The value is returned to the caller and never persisted anywhere else.
 
 ## Push flow — `everdict image push`
@@ -140,7 +140,7 @@ everdict image push spreadsheetbench:v1 [--name spreadsheetbench] [--tag v1] \
   --api-url http://api.everdict.dev --api-key ak_…       (env: EVERDICT_API_URL / EVERDICT_API_KEY)
 ```
 
-1. `POST /workspace/image-registries/push-credentials?name=` (Bearer = API key → issuer's role; 이름 생략은 1개일 때만).
+1. `POST /workspace/image-registries/push-credentials?name=` (Bearer = API key → issuer's role; name may be omitted only when there is exactly one registry).
 2. Target ref = `host[/namespace]/<name>:<tag>` — `name`/`tag` default from the local ref.
 3. `docker tag <local> <target>`.
 4. Write `{auths: {host: {auth: base64(user:pass)}}}` to a **temp `DOCKER_CONFIG` dir**,
@@ -208,8 +208,8 @@ if a real footgun shows up that warnings don't catch.
   registration `imageWarnings`. Tests.
 - **S2 — publish:** `POST /workspace/image-registry/push-credentials` + MCP twin + `everdict image
   push` (isolated `DOCKER_CONFIG`, pure helpers tested).
-- **S3 — web:** Settings → 통합 "이미지 레지스트리" card (admin form, Linear settings-list) +
-  harness-detail image classification badges (서비스/커맨드 이미지) + push-command hint in the
+- **S3 — web:** Settings → Integrations "Image registries" card (admin form, Linear settings-list) +
+  harness-detail image classification badges (service/command images) + push-command hint in the
   register wizard.
 - **S4 — pull auth (shipped):** `AgentJob.registryAuth` transient + DockerDriver/runner pre-pull
   (temp `DOCKER_CONFIG`) + nomad docker `auth` + k8s `dockerconfigjson` Secret/`imagePullSecrets`

@@ -23,38 +23,38 @@ const zone = (over: Partial<TrustZone>): TrustZone => ({
 });
 
 describe("buildTenantIntentions", () => {
-  it("서비스마다 '같은 테넌트 allow + * deny' intention(목적지별 deny-by-default)", () => {
+  it("per service, an 'allow same-tenant + deny *' intention (deny-by-default per destination)", () => {
     const ints = buildTenantIntentions(SPEC, zone({}));
     expect(ints.map((i) => i.Name).sort()).toEqual(["t-acme-agent-server", "t-acme-browser-mcp"]);
     const agent = ints.find((i) => i.Name === "t-acme-agent-server");
-    // 같은 테넌트 두 서비스는 allow
+    // both same-tenant services are allowed
     expect(
       agent?.Sources.filter((s) => s.Action === "allow")
         .map((s) => s.Name)
         .sort(),
     ).toEqual(["t-acme-agent-server", "t-acme-browser-mcp"]);
-    // 그 외(다른 테넌트/비메시)는 * deny
+    // everything else (other tenants / non-mesh) is * deny
     expect(agent?.Sources.find((s) => s.Name === "*")?.Action).toBe("deny");
   });
 
-  it("다른 테넌트는 메시 이름이 달라 allow 목록에 없다(→ * deny 에 걸림)", () => {
+  it("another tenant has a different mesh name so it's not in the allow list (→ hits * deny)", () => {
     const globex = buildTenantIntentions(SPEC, zone({ id: "globex" }));
     const agent = globex.find((i) => i.Name === "t-globex-agent-server");
     expect(agent?.Sources.some((s) => s.Name.startsWith("t-acme-"))).toBe(false);
   });
 
-  it("network: open 이면 intention 없음", () => {
+  it("no intentions when network: open", () => {
     expect(buildTenantIntentions(SPEC, zone({ network: "open" }))).toEqual([]);
   });
 });
 
 describe("buildSharedStoreIntention / meshServiceName", () => {
-  it("공유 스토어는 메시 서비스(*) allow(테넌트 격리는 DB creds)", () => {
+  it("a shared store allows mesh services (*) (tenant isolation = DB creds)", () => {
     const i = buildSharedStoreIntention("postgres");
     expect(i.Name).toBe("everdict-shared-postgres");
     expect(i.Sources).toEqual([{ Name: "*", Action: "allow" }]);
   });
-  it("meshServiceName 은 zone 을 sanitize 한다", () => {
+  it("meshServiceName sanitizes the zone", () => {
     expect(meshServiceName("Acme Co", "agent-server")).toMatch(/^t-[a-z0-9_]+-agent-server$/);
   });
 });

@@ -1,8 +1,8 @@
-// 로케일 상수 — 클라이언트/서버 양쪽에서 임포트되므로 server-only 금지(워크스페이스-스코프 상수와 동일 패턴).
+// Locale constants — imported from both client and server, so no server-only (same pattern as the workspace-scope constants).
 export const LOCALES = ['ko', 'en'] as const
 export type Locale = (typeof LOCALES)[number]
 
-// 명시 선택(쿠키)이 없을 때 Accept-Language 로 감지하고, 그마저 없으면 en(공개 리포 기본).
+// When there is no explicit choice (cookie), detect from Accept-Language; failing that, en (public repo default).
 export const FALLBACK_LOCALE: Locale = 'en'
 export const LOCALE_COOKIE = 'everdict-locale'
 

@@ -6,15 +6,15 @@ import type {
   WorkspaceSettings,
 } from "@everdict/db";
 
-// 완료 알림 — 한 완료 이벤트가 [개인 피드, Mattermost] 두 채널로 팬아웃된다(docs/architecture/notifications.md N5).
-// 피드: 개인(recipient=레코드 createdBy) 인박스 — 웹 벨/데스크톱 네이티브 알림이 소비(N1/N2).
-// Mattermost: 워크스페이스 notify 설정이 있으면 채널 게시(기존 연결계정 소비 슬라이스).
-// 알림 실패는 run/scorecard 결과에 영향 없음(fire-and-forget — 스토어가 진실원천, 폴링으로도 조회 가능).
+// Completion notifications — one completion event fans out to two channels [personal feed, Mattermost] (docs/architecture/notifications.md N5).
+// Feed: the personal (recipient = record.createdBy) inbox — consumed by the web bell / desktop native notifications (N1/N2).
+// Mattermost: posts to a channel if the workspace has notify settings (the existing connected-account consumer slice).
+// Notification failure never affects the run/scorecard result (fire-and-forget — the store is the source of truth, and can also be polled).
 export interface NotificationServiceDeps {
   settingsFor: (tenant: string) => Promise<WorkspaceSettings | undefined>;
-  // 워크스페이스 Mattermost(bot 토큰) — settings.mattermost.botTokenSecretName 을 워크스페이스 SecretStore 에서 resolve.
+  // Workspace Mattermost (bot token) — resolves settings.mattermost.botTokenSecretName from the workspace SecretStore.
   secretsFor?: (tenant: string) => Promise<Record<string, string>>;
-  feed?: NotificationStore; // 개인 알림 피드 — 미설정이면 피드 채널만 조용히 생략
+  feed?: NotificationStore; // personal notification feed — if unset, only the feed channel is silently skipped
   fetch?: typeof fetch;
   newId?: () => string;
   now?: () => string;
@@ -31,13 +31,13 @@ export class NotificationService {
   }
 
   async notifyRun(tenant: string, record: RunRecord): Promise<void> {
-    // 피드(N2): 실행자가 알려진 최상위 run 만 — 스코어카드 자식 run 은 배치 1건으로 갈음(범람 방지).
+    // Feed (N2): only top-level runs with a known initiator — scorecard child runs are represented by the single batch entry (flood prevention).
     if (record.createdBy && !record.parentScorecardId && (record.status === "succeeded" || record.status === "failed"))
       await this.pushFeed({
         workspace: tenant,
         recipient: record.createdBy,
         kind: record.status === "succeeded" ? "run_completed" : "run_failed",
-        title: `Run ${record.status === "succeeded" ? "완료" : "실패"} — ${record.harness.id}@${record.harness.version}`,
+        title: `Run ${record.status === "succeeded" ? "completed" : "failed"} — ${record.harness.id}@${record.harness.version}`,
         body: `case ${record.caseId}`,
         link: { runId: record.id },
       });
@@ -63,7 +63,7 @@ export class NotificationService {
         workspace: tenant,
         recipient: record.createdBy,
         kind: record.status === "succeeded" ? "scorecard_completed" : "scorecard_failed",
-        title: `스코어카드 ${record.status === "succeeded" ? "완료" : "실패"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
+        title: `Scorecard ${record.status === "succeeded" ? "completed" : "failed"} — ${record.dataset.id}@${record.dataset.version} × ${record.harness.id}@${record.harness.version}`,
         link: { scorecardId: record.id },
       });
     const icon = record.status === "succeeded" ? "✅" : record.status === "failed" ? "❌" : "•";
@@ -73,7 +73,7 @@ export class NotificationService {
     );
   }
 
-  // --- 개인 피드(벨 인박스) — self-scoped(connections/runners 와 동일), 역할 게이트 없음 ---
+  // --- Personal feed (bell inbox) — self-scoped (same as connections/runners), no role gate ---
 
   listFeed(recipient: string, workspace: string, opts?: NotificationListOptions): Promise<NotificationRecord[]> {
     return this.deps.feed?.list(recipient, workspace, opts) ?? Promise.resolve([]);
@@ -83,17 +83,17 @@ export class NotificationService {
     return this.deps.feed?.markRead(recipient, workspace, ids, this.nowIso()) ?? Promise.resolve(0);
   }
 
-  // 댓글 @멘션 — 언급된 유저(들)에게 개인 피드 알림. 링크는 그 컨텍스트(데이터셋 댓글, commentId 앵커)로.
-  // recipients = 멘션된 subject 들(작성자 자기 자신은 호출부에서 제외). 채널 게시는 하지 않는다(피드 전용, 저소음).
+  // Comment @mention — a personal feed notification to the mentioned user(s). The link points at that context (dataset comment, commentId anchor).
+  // recipients = the mentioned subjects (the author themselves is excluded by the caller). Does not post to a channel (feed-only, low-noise).
   async notifyMention(
     tenant: string,
     input: {
       recipients: string[];
-      actorName: string; // 언급한 사람의 표시명(이름/유저네임)
-      resourceType: string; // "dataset" 등
+      actorName: string; // display name of the person who mentioned (name/username)
+      resourceType: string; // "dataset", etc.
       resourceId: string;
       commentId: string;
-      preview: string; // 댓글 본문 미리보기
+      preview: string; // comment body preview
     },
   ): Promise<void> {
     const preview = input.preview.trim().replace(/\s+/g, " ").slice(0, 140);
@@ -102,25 +102,25 @@ export class NotificationService {
         workspace: tenant,
         recipient,
         kind: "comment_mention",
-        title: `${input.actorName}님이 회원님을 언급했어요`,
+        title: `${input.actorName} mentioned you`,
         body: preview,
-        // 리소스 제네릭 링크 — 웹이 resourceType→경로 매핑 + commentId 앵커로 그 댓글까지 스크롤.
+        // Generic resource link — the web maps resourceType→path + scrolls to that comment via the commentId anchor.
         link: { resourceType: input.resourceType, resourceId: input.resourceId, commentId: input.commentId },
       });
     }
   }
 
-  // 피드 적재 — Mattermost 와 독립적으로 실패를 삼킨다(한 채널 장애가 다른 채널을 막지 않게).
+  // Feed write — swallows failures independently of Mattermost (so one channel's outage doesn't block the other).
   private async pushFeed(row: Omit<NotificationRecord, "id" | "createdAt">): Promise<void> {
     if (!this.deps.feed) return;
     try {
       await this.deps.feed.add({ ...row, id: this.newId(), createdAt: this.nowIso() });
     } catch {
-      // 피드 실패는 결과에 영향 없음.
+      // Feed failure never affects the result.
     }
   }
 
-  // 예약(cron) 회귀 알림 — 직전 스케줄 run 대비 회귀가 잡히면 채널에 고신호 경고를 게시(완료 알림과 별개).
+  // Scheduled (cron) regression alert — if a regression vs the previous scheduled run is detected, post a high-signal warning to the channel (separate from completion notifications).
   async notifyRegression(
     tenant: string,
     payload: {
@@ -128,7 +128,7 @@ export class NotificationService {
       scorecardId: string;
       previousScorecardId: string;
       regressions: Array<{ caseId: string; metric: string; baseline: number; candidate: number }>;
-      createdBy?: string; // 예약 생성자 — 개인 피드 수신자(N2)
+      createdBy?: string; // schedule creator — personal feed recipient (N2)
     },
   ): Promise<void> {
     if (payload.createdBy)
@@ -136,7 +136,7 @@ export class NotificationService {
         workspace: tenant,
         recipient: payload.createdBy,
         kind: "schedule_regression",
-        title: `예약 회귀 — ${payload.scheduleName} (${payload.regressions.length}건)`,
+        title: `Scheduled regression — ${payload.scheduleName} (${payload.regressions.length} regression(s))`,
         body: payload.regressions
           .slice(0, 3)
           .map((r) => `${r.caseId} ${r.metric}: ${r.baseline} → ${r.candidate}`)
@@ -147,19 +147,19 @@ export class NotificationService {
       .slice(0, 10)
       .map((r) => `• \`${r.caseId}\` ${r.metric}: ${r.baseline} → ${r.candidate}`)
       .join("\n");
-    const more = payload.regressions.length > 10 ? `\n…외 ${payload.regressions.length - 10}건` : "";
+    const more = payload.regressions.length > 10 ? `\n…and ${payload.regressions.length - 10} more` : "";
     await this.post(
       tenant,
-      `⚠️ **예약 회귀 \`${payload.scheduleName}\`** — ${payload.regressions.length}건 회귀 ` +
-        `(scorecard \`${payload.scorecardId}\` vs 직전 \`${payload.previousScorecardId}\`)\n${lines}${more}`,
+      `⚠️ **Scheduled regression \`${payload.scheduleName}\`** — ${payload.regressions.length} regression(s) ` +
+        `(scorecard \`${payload.scorecardId}\` vs previous \`${payload.previousScorecardId}\`)\n${lines}${more}`,
     );
   }
 
-  // 워크스페이스 등록 Mattermost(bot 토큰)로 채널에 게시. 미설정/토큰없음/실패는 조용히 무시(알림 실패는 결과에 영향 없음).
+  // Post to a channel via the workspace-registered Mattermost (bot token). Unset/no-token/failure are silently ignored (notification failure never affects the result).
   private async post(tenant: string, message: string): Promise<void> {
     try {
       const mm = (await this.deps.settingsFor(tenant))?.mattermost;
-      // defaultChannelId + SecretStore 의 bot 토큰이 있어야 게시.
+      // Only posts if there's a defaultChannelId + a bot token in the SecretStore.
       if (!mm?.defaultChannelId || !this.deps.secretsFor) return;
       const token = (await this.deps.secretsFor(tenant))[mm.botTokenSecretName];
       if (!token) return;
@@ -170,7 +170,7 @@ export class NotificationService {
         body: JSON.stringify({ channel_id: mm.defaultChannelId, message }),
       });
     } catch {
-      // 알림 실패는 run/scorecard 결과에 영향 없음.
+      // Notification failure never affects the run/scorecard result.
     }
   }
 }

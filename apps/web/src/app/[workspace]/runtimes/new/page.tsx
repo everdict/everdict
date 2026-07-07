@@ -3,8 +3,8 @@ import { getTranslations } from 'next-intl/server'
 import { RegisterRuntimeForm } from '@/features/register-runtime'
 import { PageHeader } from '@/shared/ui/page-header'
 
-// 런타임 등록 화면 — "런타임" 목록의 '런타임 등록' 버튼 대상. 워크스페이스 소유 인프라(docker/nomad/k8s/topology)를
-// 등록한다(push 런타임). "내 머신"은 러너로 연결(별도). 자격증명은 값이 아니라 SecretStore 키 이름으로 참조.
+// Runtime registration screen — the target of the 'Register runtime' button on the "Runtimes" list. Registers workspace-owned infra (docker/nomad/k8s/topology)
+// (push runtimes). "My machine" connects via a runner (separate). Credentials are referenced by SecretStore key name, not by value.
 export default async function NewRuntimePage({
   params,
 }: {

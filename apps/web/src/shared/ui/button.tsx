@@ -3,8 +3,8 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/shared/lib/utils'
 
-// Linear st. 컨트롤 — 낮은 높이(28~32px), 6px 라운드, weight 510, ease-out 트랜지션.
-// primary 는 인디고 + 상단 인셋 하이라이트, hover 시 밝기 상승. active 1px 눌림.
+// Linear st. control — low height (28~32px), 6px round, weight 510, ease-out transition.
+// primary is indigo + top inset highlight, brightening on hover. active 1px press.
 export const buttonVariants = cva(
   'inline-flex shrink-0 select-none items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-[13px] font-[510] leading-none transition-[background,box-shadow,border-color,color,filter,transform] duration-150 ease-[var(--ease-out-cubic)] outline-none focus-visible:ring-2 focus-visible:ring-ring/60 focus-visible:ring-offset-1 focus-visible:ring-offset-background active:translate-y-px disabled:pointer-events-none disabled:opacity-45 [&_svg]:shrink-0',
   {

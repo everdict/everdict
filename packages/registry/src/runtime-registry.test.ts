@@ -9,12 +9,12 @@ import { PgRuntimeRegistry } from "./pg-runtime-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 import { InMemoryRuntimeRegistry } from "./runtime-registry.js";
 
-// 최소 runtime — local 종류. extra 로 내용 변경(불변성 검증용).
+// minimal runtime — local kind. extra changes content (for immutability checks).
 const rt = (id: string, version: string, extra: Record<string, unknown> = {}): RuntimeSpec =>
   RuntimeSpecSchema.parse({ kind: "local", id, version, ...extra });
 
 describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
-  it("테넌트 소유 등록 + latest(semver) 조회", async () => {
+  it("registers tenant-owned + resolves latest (semver)", async () => {
     const r = new InMemoryRuntimeRegistry();
     await r.register("acme", rt("rt", "1.9.0"));
     await r.register("acme", rt("rt", "1.10.0"));
@@ -22,7 +22,7 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
     expect((await r.get("acme", "rt")).version).toBe("1.10.0");
   });
 
-  it("nomad/k8s 종류도 등록/조회된다", async () => {
+  it("registers/resolves nomad/k8s kinds too", async () => {
     const r = new InMemoryRuntimeRegistry();
     const nomad = RuntimeSpecSchema.parse({
       kind: "nomad",
@@ -35,27 +35,27 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
     expect((await r.get("acme", "seoul")).kind).toBe("nomad");
   });
 
-  it("테넌트 격리 + _shared 폴백 + 소유 우선", async () => {
+  it("tenant isolation + _shared fallback + ownership precedence", async () => {
     const r = new InMemoryRuntimeRegistry();
     await r.register("acme", rt("priv", "1.0.0"));
     expect(await r.has("beta", "priv", "1.0.0")).toBe(false);
     await expect(r.get("beta", "priv")).rejects.toBeInstanceOf(NotFoundError);
     await r.register(SHARED_TENANT, rt("shared", "1.0.0"));
     await r.register("acme", rt("shared", "2.0.0"));
-    expect((await r.get("acme", "shared")).version).toBe("2.0.0"); // 자기 것
-    expect((await r.get("beta", "shared")).version).toBe("1.0.0"); // 공유 폴백
+    expect((await r.get("acme", "shared")).version).toBe("2.0.0"); // own
+    expect((await r.get("beta", "shared")).version).toBe("1.0.0"); // shared fallback
   });
 
-  it("버전 불변: 같은 (tenant,id,version) 다른 내용은 충돌", async () => {
+  it("version immutability: same (tenant,id,version) with different content conflicts", async () => {
     const r = new InMemoryRuntimeRegistry();
     await r.register("acme", rt("rt", "1.0.0"));
-    await r.register("acme", rt("rt", "1.0.0")); // 동일 → 멱등
+    await r.register("acme", rt("rt", "1.0.0")); // identical → idempotent
     await expect(r.register("acme", rt("rt", "1.0.0", { description: "changed" }))).rejects.toBeInstanceOf(
       ConflictError,
     );
   });
 
-  it("list 는 소유 + 공유를 owner 와 함께", async () => {
+  it("list returns owned + shared with owner", async () => {
     const r = new InMemoryRuntimeRegistry();
     await r.register(SHARED_TENANT, rt("shared", "1.0.0"));
     await r.register("acme", rt("mine", "1.0.0"));
@@ -65,13 +65,13 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
     ]);
   });
 
-  it("setVersionTags(버전 태그) — versionTags/list 로 노출, 빈 배열 = 제거, _shared·없는 버전은 NotFound", async () => {
+  it("setVersionTags (version tags) — surfaced via versionTags/list, empty array = removal, _shared/missing version → NotFound", async () => {
     const r = new InMemoryRuntimeRegistry();
     await r.register("acme", rt("mine", "1.0.0"));
     await r.register("acme", rt("mine", "1.1.0"));
-    await r.setVersionTags("acme", "mine", "1.0.0", ["gpu 노드"]);
-    expect(await r.versionTags("acme", "mine")).toEqual({ "1.0.0": ["gpu 노드"] });
-    expect((await r.list("acme")).find((x) => x.id === "mine")?.versionTags).toEqual({ "1.0.0": ["gpu 노드"] });
+    await r.setVersionTags("acme", "mine", "1.0.0", ["gpu node"]);
+    expect(await r.versionTags("acme", "mine")).toEqual({ "1.0.0": ["gpu node"] });
+    expect((await r.list("acme")).find((x) => x.id === "mine")?.versionTags).toEqual({ "1.0.0": ["gpu node"] });
     await r.setVersionTags("acme", "mine", "1.0.0", []);
     expect(await r.versionTags("acme", "mine")).toEqual({});
     expect((await r.list("acme")).find((x) => x.id === "mine")?.versionTags).toBeUndefined();
@@ -82,7 +82,7 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
 });
 
 describe("loadRuntimeDir", () => {
-  it("기본 SHARED 로 로드(파일 SSOT)", async () => {
+  it("loads as SHARED by default (file SSOT)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "everdict-rt-"));
     try {
       writeFileSync(join(dir, "local-1.0.0.json"), JSON.stringify(rt("shared-local", "1.0.0")));
@@ -144,7 +144,7 @@ function fakePg(): SqlClient {
           id: p[1] as string,
           version: p[2] as string,
           runtime: JSON.parse(p[3] as string),
-          tags: [], // 마이그레이션 0047 기본값
+          tags: [], // migration 0047 default
         });
         return { rows: [] };
       }
@@ -154,7 +154,7 @@ function fakePg(): SqlClient {
 }
 
 describe("PgRuntimeRegistry (tenant-owned)", () => {
-  it("register/versions/latest + 폴백 + 격리 + 불변성", async () => {
+  it("register/versions/latest + fallback + isolation + immutability", async () => {
     const r = new PgRuntimeRegistry(fakePg());
     await r.register(SHARED_TENANT, rt("shared", "1.0.0"));
     await r.register(SHARED_TENANT, rt("shared", "1.10.0"));
@@ -165,12 +165,12 @@ describe("PgRuntimeRegistry (tenant-owned)", () => {
     await expect(r.register("acme", rt("mine", "1.0.0", { description: "x" }))).rejects.toBeInstanceOf(ConflictError);
   });
 
-  it("setVersionTags(버전 태그) — versionTags/list 로 노출, 없는 버전은 NotFound", async () => {
+  it("setVersionTags (version tags) — surfaced via versionTags/list, missing version → NotFound", async () => {
     const r = new PgRuntimeRegistry(fakePg());
     await r.register("acme", rt("mine", "1.0.0"));
-    await r.setVersionTags("acme", "mine", "1.0.0", ["gpu 노드"]);
-    expect(await r.versionTags("acme", "mine")).toEqual({ "1.0.0": ["gpu 노드"] });
-    expect((await r.list("acme")).find((x) => x.id === "mine")?.versionTags).toEqual({ "1.0.0": ["gpu 노드"] });
+    await r.setVersionTags("acme", "mine", "1.0.0", ["gpu node"]);
+    expect(await r.versionTags("acme", "mine")).toEqual({ "1.0.0": ["gpu node"] });
+    expect((await r.list("acme")).find((x) => x.id === "mine")?.versionTags).toEqual({ "1.0.0": ["gpu node"] });
     await r.setVersionTags("acme", "mine", "1.0.0", []);
     expect(await r.versionTags("acme", "mine")).toEqual({});
     await expect(r.setVersionTags("acme", "mine", "9.9.9", ["x"])).rejects.toBeInstanceOf(NotFoundError);

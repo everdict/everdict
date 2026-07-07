@@ -33,10 +33,10 @@ export default async function ImportBenchmarkPage({
 
   let benchmarks: BenchmarkCatalogItem[] = []
   let recipes: RecipeItem[] = []
-  // 시스템 관리 버저닝: 기존 데이터셋 id→versions 를 위저드/가져오기 폼에 넘겨 다음 semver 를 제안.
+  // System-managed versioning: pass existing dataset id→versions to the wizard/import form to suggest the next semver.
   let existingDatasets: { id: string; versions: string[] }[] = []
-  // gated HF 인증에 쓸 HF_TOKEN 의 스코프 — 내(개인) 시크릿 우선, 워크스페이스 공유 폴백(서버 해석과 동일 우선순위).
-  // 목록엔 이름/스코프만 온다(값 없음). 실패해도 위저드는 동작(표시만 미보유로).
+  // Scope of the HF_TOKEN used for gated HF authentication — my (personal) secret first, workspace-shared fallback (same precedence as server resolution).
+  // The list carries only name/scope (no value). The wizard works even if it fails (just displayed as not held).
   let hfTokenScope: 'user' | 'workspace' | undefined
   let error: string | undefined
   if (allowed) {

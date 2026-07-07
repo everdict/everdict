@@ -1,7 +1,7 @@
 import { cn } from '@/shared/lib/utils'
 import { Tooltip } from '@/shared/ui/tooltip'
 
-// 이름 → 결정적 색조(인디고 계열 팔레트). 워크스페이스/유저 모노그램 아바타에 사용.
+// Name → deterministic tone (indigo-family palette). Used for workspace/user monogram avatars.
 const TONES = [
   'bg-[#5e6ad2]/18 text-[#9aa2ec] ring-[#5e6ad2]/30',
   'bg-[#4cb782]/18 text-[#5fd29a] ring-[#4cb782]/30',
@@ -35,13 +35,13 @@ export function Avatar({
   className,
 }: {
   name: string
-  url?: string // 업로드/외부 아바타 이미지(있으면 모노그램 대신 표시)
+  url?: string // uploaded/external avatar image (if present, shown instead of the monogram)
   size?: keyof typeof SIZES
   className?: string
 }) {
   if (url) {
     return (
-      // 업로드 data URL/외부 URL 혼용이라 next/image(원격 도메인 화이트리스트)가 아닌 일반 img 를 쓴다.
+      // A mix of uploaded data URLs and external URLs, so use a plain img rather than next/image (remote-domain whitelist).
       // eslint-disable-next-line @next/next/no-img-element
       <img
         src={url}
@@ -69,8 +69,8 @@ export function Avatar({
   )
 }
 
-// 카드/목록의 작성자 표기 표준(일괄): **둥근 썸네일만** 노출하고 이름은 호버 툴팁으로.
-// 인라인 이름 병기 금지, 위치는 카드 우상단(타이틀 행 오른쪽)으로 통일한다.
+// Standard (uniform) creator display for cards/lists: show **only the round thumbnail** and put the name in a hover tooltip.
+// No inline name alongside it; the position is standardized to the card's top-right (right of the title row).
 export function UserAvatar({
   name,
   url,
@@ -80,9 +80,9 @@ export function UserAvatar({
 }: {
   name: string
   url?: string
-  label?: string // 툴팁 접두(만든이/실행자 등)
+  label?: string // tooltip prefix (creator/runner, etc.)
   size?: keyof typeof SIZES
-  className?: string // 래퍼(배치용 — shrink-0 등)
+  className?: string // wrapper (for layout — shrink-0, etc.)
 }) {
   return (
     <Tooltip content={label ? `${label} · ${name}` : name} align="end" className={className}>

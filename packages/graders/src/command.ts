@@ -1,26 +1,27 @@
 import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
 
 export interface CommandConfig {
-  cmd: string; // 환경에서 실행할 명령(예: "python -m pytest -q")
-  cwd?: string; // 작업 디렉터리(기본 "work")
-  applyPatch?: string; // 채점 시점에 git apply 할 패치(예: 에이전트가 못 본 gold 테스트). 실패 시 pass=false.
-  passPattern?: string; // stdout+stderr 정규식 매칭(없으면 종료코드 0 = pass)
+  cmd: string; // Command to run in the environment (e.g. "python -m pytest -q")
+  cwd?: string; // Working directory (default "work")
+  applyPatch?: string; // Patch to git apply at grading time (e.g. gold tests the agent never saw). pass=false on failure.
+  passPattern?: string; // stdout+stderr regex match (absent → exit code 0 = pass)
   timeoutSec?: number;
-  metric?: string; // 점수 메트릭 키(기본 "command")
-  id?: string; // grader id(기본 "command")
+  metric?: string; // Score metric key (default "command")
+  id?: string; // grader id (default "command")
 }
 
 function shArg(s: string): string {
   return `'${s.replace(/'/g, "'\\''")}'`;
 }
 
-// 제네릭 테스트-실행 grader — 벤치마크 무관. 유저가 데이터로 채점을 정의(코드 없이): 환경에서 명령 실행 →
-// 종료코드(또는 출력 패턴)로 pass. 선택적으로 채점 시점에 gold 패치를 적용(SWE-bench 류). 의존성 설치는 env.setup.
-// swe-bench grader 는 이 패턴(applyPatch + cmd)의 first-party 편의 프리셋이고, 새 벤치마크는 이 grader 로 충분하다.
+// Generic test-running grader — benchmark-agnostic. The user defines grading as data (no code): run a command in the
+// environment → pass by exit code (or output pattern). Optionally apply a gold patch at grading time (SWE-bench-style).
+// Dependency install is env.setup. The swe-bench grader is a first-party convenience preset of this pattern
+// (applyPatch + cmd), and this grader suffices for new benchmarks.
 export class CommandGrader implements Grader {
   readonly id: string;
   readonly metric: string;
-  readonly needsCompute = true; // 환경에서 채점 명령 실행 — compute 해제 전에 채점되어야 한다
+  readonly needsCompute = true; // Runs the grading command in the environment — must be graded before compute is released
   constructor(private readonly cfg: CommandConfig) {
     this.id = cfg.id ?? "command";
     this.metric = cfg.metric ?? "command";
@@ -28,7 +29,7 @@ export class CommandGrader implements Grader {
 
   async grade(ctx: GradeContext): Promise<Score> {
     if (!ctx.compute) {
-      throw new BadRequestError("BAD_REQUEST", undefined, "command 그레이더는 compute(환경)가 필요합니다.");
+      throw new BadRequestError("BAD_REQUEST", undefined, "The command grader requires compute (an environment).");
     }
     const cwd = this.cfg.cwd ?? "work";
     if (this.cfg.applyPatch?.trim()) {
@@ -40,7 +41,7 @@ export class CommandGrader implements Grader {
           metric: this.metric,
           value: 0,
           pass: false,
-          detail: `applyPatch 실패: ${applied.stderr.slice(0, 500)}`,
+          detail: `applyPatch failed: ${applied.stderr.slice(0, 500)}`,
         };
       }
     }

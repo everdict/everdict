@@ -1,5 +1,5 @@
--- 0001_create_runs — additive (expand): result-store 의 runs 테이블.
--- 파괴적 변경이 아니므로 deploy 와 함께 바로 적용 가능. preflight: docs/migration/preflight/0001_create_runs.md
+-- 0001_create_runs — additive (expand): the result-store runs table.
+-- Not a destructive change, so it can be applied directly with the deploy. preflight: docs/migration/preflight/0001_create_runs.md
 CREATE TABLE IF NOT EXISTS everdict_runs (
   id              text PRIMARY KEY,
   tenant          text NOT NULL,
@@ -13,5 +13,5 @@ CREATE TABLE IF NOT EXISTS everdict_runs (
   updated_at      timestamptz NOT NULL
 );
 
--- 테넌트별 목록 + 커서(created_at DESC, id DESC) 정렬용.
+-- For per-tenant listing + cursor (created_at DESC, id DESC) ordering.
 CREATE INDEX IF NOT EXISTS everdict_runs_tenant_created_idx ON everdict_runs (tenant, created_at DESC, id DESC);

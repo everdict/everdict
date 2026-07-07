@@ -1,7 +1,7 @@
-# everdict os-use 데스크탑 벤치마크 이미지 (SLICE 85): OSWorld 류 태스크 실행용 — 실제 GUI 앱(mousepad 텍스트 에디터) 동봉.
-# Xvfb(가상 디스플레이) + openbox(WM, 앱 포커스) + xdotool/scrot(입력/관측) + nodejs(에이전트) + 레퍼런스 에이전트(baked).
-# 이미지명 everdict-osworld:demo = osworld 어댑터(catalog)의 기본 image 필드와 일치 → import 한 케이스가 이 이미지로 돈다.
-#   빌드: 컨텍스트에 examples/agents/desktop-osworld-agent.cjs 를 agent-osworld.cjs 로 복사 후
+# everdict os-use desktop benchmark image (SLICE 85): for running OSWorld-style tasks — bundles a real GUI app (mousepad text editor).
+# Xvfb (virtual display) + openbox (WM, app focus) + xdotool/scrot (input/observation) + nodejs (agent) + reference agent (baked in).
+# The image name everdict-osworld:demo matches the default image field of the osworld adapter (catalog) → imported cases run on this image.
+#   Build: copy examples/agents/desktop-osworld-agent.cjs into the context as agent-osworld.cjs, then
 #   docker build -f Dockerfile.osworld -t everdict-osworld:demo <context>
 FROM debian:bookworm-slim
 
@@ -12,7 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       fonts-liberation ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# 레퍼런스 데스크탑 에이전트(command 하니스가 `node /agent-osworld.cjs {{task}}` 로 실행).
+# Reference desktop agent (the command harness runs it as `node /agent-osworld.cjs {{task}}`).
 COPY agent-osworld.cjs /agent-osworld.cjs
 
 ENTRYPOINT ["sleep", "infinity"]

@@ -1,15 +1,15 @@
 import { ConflictError, NotFoundError, type RuntimeSpec } from "@everdict/core";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
-// Runtime(실행 인프라) 버전 SSOT — (tenant, id, version) → RuntimeSpec. 버전 불변. "latest" 는 semver/등록순 최신.
-// 하니스·데이터셋·judge 와 동일한 소유 모델: 테넌트 소유 우선, 없으면 SHARED_TENANT(first-party 공용 런타임) 폴백.
-// 테넌트가 자기 실행 인프라(local/nomad/k8s)를 직접 등록·버전관리한다. async — Postgres 도 같은 계약.
-// list() 한 항목 — 버전 요약 + 버전 태그(태그 있는 버전만).
+// Runtime (execution infra) version SSOT — (tenant, id, version) → RuntimeSpec. Versions are immutable. "latest" = newest by semver/registration order.
+// Same ownership model as harness/dataset/judge: tenant-owned first, else SHARED_TENANT (first-party shared runtime) fallback.
+// A tenant registers and version-manages its own execution infra (local/nomad/k8s) directly. async — Postgres honors the same contract.
+// One list() entry — version summary + version tags (only versions that have tags).
 export interface RuntimeListEntry {
   id: string;
   versions: string[];
   owner: string;
-  versionTags?: Record<string, string[]>; // 버전 → 자유 라벨 — 가변 레지스트리 메타(스펙 밖)
+  versionTags?: Record<string, string[]>; // version → free-form label — mutable registry metadata (outside the spec)
 }
 
 export interface RuntimeRegistry {
@@ -19,16 +19,16 @@ export interface RuntimeRegistry {
   versions(tenant: string, id: string): Promise<string[]>;
   ownVersions(tenant: string, id: string): Promise<string[]>;
   list(tenant: string): Promise<RuntimeListEntry[]>;
-  // 버전 태그(자유 라벨, 전체 교체) — 가변 레지스트리 메타(스펙 불변성 밖). 테넌트 소유 버전만; _shared 는 NotFound.
+  // Version tags (free-form labels, full replacement) — mutable registry metadata (outside spec immutability). Tenant-owned versions only; _shared → NotFound.
   setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void>;
-  // 버전 → 태그 맵(태그 있는 버전만). 읽기는 versions() 와 동일하게 owner 해석(_shared 폴백 포함).
+  // version → tags map (only versions that have tags). Reads resolve owner like versions() (incl. _shared fallback).
   versionTags(tenant: string, id: string): Promise<Record<string, string[]>>;
 }
 
 interface Entry {
   spec: RuntimeSpec;
   seq: number;
-  tags?: string[]; // 버전 태그 — 가변 레지스트리 메타(스펙 불변성 밖)
+  tags?: string[]; // version tags — mutable registry metadata (outside spec immutability)
 }
 
 export class InMemoryRuntimeRegistry implements RuntimeRegistry {
@@ -65,7 +65,7 @@ export class InMemoryRuntimeRegistry implements RuntimeRegistry {
         throw new ConflictError(
           "CONFLICT",
           { tenant, id: spec.id, version: spec.version },
-          `runtime ${spec.id}@${spec.version} 가 다른 내용으로 이미 등록되어 있습니다(버전은 불변).`,
+          `runtime ${spec.id}@${spec.version} is already registered with different content (versions are immutable).`,
         );
       }
       return;
@@ -89,7 +89,7 @@ export class InMemoryRuntimeRegistry implements RuntimeRegistry {
 
   async get(tenant: string, id: string, ref = "latest"): Promise<RuntimeSpec> {
     const owner = this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `runtime '${id}' 가 없습니다.`);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `runtime '${id}' not found.`);
     const version = resolveRef(id, ref, this.ownerVersions(owner, id));
     return (this.byOwner.get(owner)?.get(id)?.get(version) as Entry).spec;
   }
@@ -112,9 +112,9 @@ export class InMemoryRuntimeRegistry implements RuntimeRegistry {
   }
 
   async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
-    const entry = this.byOwner.get(tenant)?.get(id)?.get(version); // 직접 소유만(폴백 없음 — _shared 는 못 태깅)
-    if (!entry) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `runtime ${id}@${version} 가 없습니다.`);
-    entry.tags = tags.length > 0 ? tags : undefined; // 빈 배열 = 제거(revive 의 deletedAt=undefined 와 동일 관용)
+    const entry = this.byOwner.get(tenant)?.get(id)?.get(version); // direct ownership only (no fallback — _shared can't be tagged)
+    if (!entry) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `runtime ${id}@${version} not found.`);
+    entry.tags = tags.length > 0 ? tags : undefined; // empty array = removal (same idiom as revive's deletedAt=undefined)
   }
 
   async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {

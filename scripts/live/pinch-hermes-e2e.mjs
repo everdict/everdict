@@ -1,15 +1,15 @@
-// 라이브 e2e: *유저 self-serve* — 컨트롤플레인 HTTP API 만으로 (1) 벤치마크 추가 → (2) 자기 하니스 등록 → (3) 측정.
-// 유저 시나리오:
-//   ① POST /datasets  : 외부 벤치마크 'pinch'(github.com/pinchbench/skill, PinchBench building-dashboards) 를 데이터셋으로 추가
-//      → 플랫폼이 임의 외부 벤치마크를 받아들임(extensibility). (pinch=코딩 에이전트 벤치마크라 GUI hermes 로는 측정 무의미 —
-//       추가/등록 자체가 self-serve 입증. 의미있는 측정은 hermes-적합 벤치마크로.)
-//   ② POST /harnesses : 유저의 'hermes-desktop'(os-use command 하니스) 등록
-//   ③ POST /datasets  : hermes-적합 벤치마크(SSH 연결) 추가  +  POST /scorecards : 그걸 hermes-desktop 으로 측정
-//      → 컨트롤플레인이 docker 런타임으로 hermes 이미지 컨테이너를 띄워 실 os-use 실행 → VLM judge 채점 → Scorecard.
-//   ④ GET /scorecards/:id 폴링 → 결과(케이스 pass + 집계).
-// 컨트롤플레인은 이 스크립트가 dev 모드(auth 미요구)로 기동. 유저=tenant default(x-everdict-tenant).
+// Live e2e: *user self-serve* — via the control-plane HTTP API alone: (1) add a benchmark → (2) register your own harness → (3) measure.
+// User scenario:
+//   ① POST /datasets  : add external benchmark 'pinch' (github.com/pinchbench/skill, PinchBench building-dashboards) as a dataset
+//      → the platform accepts an arbitrary external benchmark (extensibility). (pinch=coding-agent benchmark, so measuring with GUI hermes is meaningless —
+//       the add/register itself proves self-serve. Meaningful measurement uses a hermes-fit benchmark.)
+//   ② POST /harnesses : register the user's 'hermes-desktop' (os-use command harness)
+//   ③ POST /datasets  : add a hermes-fit benchmark (SSH connection)  +  POST /scorecards : measure it with hermes-desktop
+//      → the control plane brings up a hermes image container on the docker runtime, runs real os-use → VLM judge grade → Scorecard.
+//   ④ poll GET /scorecards/:id → result (case pass + aggregate).
+// This script starts the control plane in dev mode (no auth required). User=tenant default (x-everdict-tenant).
 //
-// 사전: hermes 이미지(everdict-hermes-dispatch:demo) 빌드됨. LiteLLM(:4000) 가동(VLM judge). apps/api/dist 빌드됨.
+// Prerequisites: hermes image (everdict-hermes-dispatch:demo) built. LiteLLM (:4000) running (VLM judge). apps/api/dist built.
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
@@ -30,7 +30,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음.");
+  console.error("no LLM key.");
   process.exit(2);
 }
 
@@ -39,8 +39,8 @@ const post = async (path, body) => {
   return { status: r.status, json: await r.json().catch(() => ({})) };
 };
 
-// ── 컨트롤플레인 기동(dev: auth 미요구, VLM judge env, docker 런타임 시드) ──
-console.log(`=== 컨트롤플레인 기동 (apps/api, dev 모드, :${PORT}) ===`);
+// ── start control plane (dev: no auth required, VLM judge env, docker runtime seed) ──
+console.log(`=== start control plane (apps/api, dev mode, :${PORT}) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: new URL("../..", import.meta.url).pathname,
   env: {
@@ -50,7 +50,7 @@ const cp = spawn("node", ["apps/api/dist/main.js"], {
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1",
     EVERDICT_JUDGE_MODEL: process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini",
     EVERDICT_REQUIRE_AUTH: "", // dev fallback (tenant=default)
-    KEYCLOAK_ISSUER: "", // OIDC 비활성(dev)
+    KEYCLOAK_ISSUER: "", // OIDC disabled (dev)
     DATABASE_URL: "", // in-memory store
   },
   stdio: ["ignore", "pipe", "pipe"],
@@ -65,7 +65,7 @@ const shutdown = () => {
 
 let ok = false;
 try {
-  // 기동 대기
+  // Wait for startup
   let up = false;
   for (let i = 0; i < 40 && !up; i++) {
     await sleep(1000);
@@ -73,16 +73,16 @@ try {
       up = (await fetch(`${BASE}/datasets`, { headers: H })).status === 200;
     } catch {}
   }
-  if (!up) throw new Error("control plane 기동 실패");
+  if (!up) throw new Error("control plane failed to start");
   console.log("control plane up.\n");
 
-  // ── ① 외부 벤치마크 'pinch' 추가 (PinchBench building-dashboards) ──
-  console.log("=== ① 유저가 외부 벤치마크 'pinch' 추가 (POST /datasets) ===");
+  // ── ① add external benchmark 'pinch' (PinchBench building-dashboards) ──
+  console.log("=== ① user adds external benchmark 'pinch' (POST /datasets) ===");
   const pinch = {
     id: "pinch-building-dashboards",
     version: "1.0.0",
     description:
-      "PinchBench(github.com/pinchbench/skill) building-dashboards — LLM 코딩 에이전트가 Axiom 대시보드를 설계/구축.",
+      "PinchBench(github.com/pinchbench/skill) building-dashboards — an LLM coding agent designs/builds an Axiom dashboard.",
     tags: ["pinchbench", "coding-agent", "external"],
     cases: [
       {
@@ -106,8 +106,8 @@ try {
   const r1 = await post("/datasets", pinch);
   console.log(`  → ${r1.status} ${JSON.stringify(r1.json)}`);
 
-  // ── ② 유저의 hermes-desktop 하니스 등록 ──
-  console.log("\n=== ② 유저가 hermes-desktop 하니스 등록 (POST /harnesses) ===");
+  // ── ② register the user's hermes-desktop harness ──
+  console.log("\n=== ② user registers the hermes-desktop harness (POST /harnesses) ===");
   const harness = {
     kind: "command",
     id: "hermes-desktop",
@@ -121,13 +121,13 @@ try {
   const r2 = await post("/harnesses", harness);
   console.log(`  → ${r2.status} ${JSON.stringify(r2.json)}`);
 
-  // ── ③ hermes-적합 벤치마크 추가 + 측정 ──
-  console.log("\n=== ③ hermes-적합 벤치마크(SSH 연결) 추가 + hermes-desktop 으로 측정 ===");
+  // ── ③ add a hermes-fit benchmark + measure ──
+  console.log("\n=== ③ add a hermes-fit benchmark (SSH connection) + measure it with hermes-desktop ===");
   const hermesBench = {
     id: "hermes-ssh-bench",
     version: "1.0.0",
     description:
-      "hermes-desktop os-use 벤치마크 — SSH 서버에 연결(에이전트가 SSH 폼을 실 OS 입력으로 채워 hermes 가 터널 오픈).",
+      "hermes-desktop os-use benchmark — connect to an SSH server (the agent fills the SSH form via real OS input so hermes opens the tunnel).",
     tags: ["os-use", "hermes", "ssh"],
     cases: [
       {
@@ -176,10 +176,10 @@ try {
   });
   console.log(`  → POST /scorecards: ${r4.status} ${JSON.stringify(r4.json)}`);
   const scId = r4.json.id;
-  if (!scId) throw new Error("scorecard id 없음");
+  if (!scId) throw new Error("no scorecard id");
 
-  // ── ④ 폴링 ──
-  console.log("\n=== ④ 스코어카드 폴링 (hermes os-use 실행 중 — Electron+VLM judge, 수 분) ===");
+  // ── ④ poll ──
+  console.log("\n=== ④ poll the scorecard (hermes os-use running — Electron + VLM judge, a few minutes) ===");
   let rec;
   for (let i = 0; i < 120; i++) {
     await sleep(3000);
@@ -188,29 +188,29 @@ try {
     process.stdout.write(`  status=${rec.status}\r`);
     if (rec.status === "succeeded" || rec.status === "failed") break;
   }
-  console.log(`\n  최종 status: ${rec.status}`);
-  if (rec.summary) console.log("  집계:", JSON.stringify(rec.summary));
+  console.log(`\n  final status: ${rec.status}`);
+  if (rec.summary) console.log("  aggregate:", JSON.stringify(rec.summary));
   const cases = rec.scorecard?.results ?? [];
   for (const c of cases) {
     const j = c.scores?.find((s) => s.metric === "judge");
     console.log(
-      `  케이스 ${c.caseId}: judge=${j?.pass ? "PASS" : "FAIL"} (${j?.value}) — ${String(j?.detail ?? "").slice(0, 120)}`,
+      `  case ${c.caseId}: judge=${j?.pass ? "PASS" : "FAIL"} (${j?.value}) — ${String(j?.detail ?? "").slice(0, 120)}`,
     );
   }
 
   ok = r1.status === 201 && r2.status === 201 && r3.status === 201 && r4.status === 202 && rec.status === "succeeded";
   console.log(
     ok
-      ? "\n✅ self-serve e2e: 유저가 HTTP API 만으로 ① 외부 벤치마크(pinch) 추가 → ② hermes-desktop 하니스 등록 → " +
-          "③ hermes-적합 벤치마크 추가 + 측정(컨트롤플레인이 docker 런타임으로 hermes 이미지를 띄워 실 os-use 실행 + VLM judge) → " +
-          "④ Scorecard 수신. 플랫폼이 벤치마크/하니스-비종속 self-serve 측정을 제공함을 입증."
-      : "\n⚠️ 기대와 불일치(위 상태/응답 참고)",
+      ? "\n✅ self-serve e2e: using only the HTTP API, the user ① adds an external benchmark (pinch) → ② registers the hermes-desktop harness → " +
+          "③ adds a hermes-fit benchmark + measures it (the control plane brings up the hermes image on the docker runtime, runs real os-use + VLM judge) → " +
+          "④ receives the Scorecard. Proves the platform offers benchmark/harness-agnostic self-serve measurement."
+      : "\n⚠️ does not match expectation (see status/response above)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);
 } finally {
   shutdown();
   spawnSync("docker", ["ps", "-aq", "--filter", "ancestor=everdict-hermes-dispatch:demo"], { encoding: "utf8" });
-  console.log("control plane 종료.");
+  console.log("control plane stopped.");
 }
 process.exit(ok ? 0 : 1);

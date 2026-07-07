@@ -7,9 +7,9 @@ interface DatasetRow {
   dataset: unknown;
 }
 
-// Postgres 기반 테넌트-소유 데이터셋 SSOT. (tenant, id, version) 키. 테넌트 소유 우선, 없으면 _shared 폴백.
-// 스키마: @everdict/db/migrations/0005_create_datasets (+ 0018: created_by/deleted_at). PgHarnessRegistry 와 동일 구조.
-// 소프트 삭제: deleted_at 이 set 된 행은 모든 read 에서 제외(WHERE deleted_at IS NULL) — 데이터는 보존(재현성).
+// Postgres-backed tenant-owned dataset SSOT. Key (tenant, id, version). Tenant-owned first, else _shared fallback.
+// Schema: @everdict/db/migrations/0005_create_datasets (+ 0018: created_by/deleted_at). Same structure as PgHarnessRegistry.
+// Soft delete: rows with deleted_at set are excluded from every read (WHERE deleted_at IS NULL) — data is preserved (reproducibility).
 export class PgDatasetRegistry implements DatasetRegistry {
   constructor(private readonly client: SqlClient) {}
 
@@ -34,7 +34,7 @@ export class PgDatasetRegistry implements DatasetRegistry {
   }
 
   async register(tenant: string, dataset: Dataset, createdBy?: string): Promise<void> {
-    // raw 조회 — tombstone 된 슬롯도 본다(버전 identity 는 불변; 같은 내용 재등록은 되살림).
+    // raw query — also sees tombstoned slots (version identity is immutable; re-registering identical content revives it).
     const existing = await this.client.query<DatasetRow & { deleted_at: string | null }>(
       "SELECT dataset, deleted_at FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3",
       [tenant, dataset.id, dataset.version],
@@ -45,14 +45,14 @@ export class PgDatasetRegistry implements DatasetRegistry {
         throw new ConflictError(
           "CONFLICT",
           { tenant, id: dataset.id, version: dataset.version },
-          `데이터셋 ${dataset.id}@${dataset.version} 가 다른 내용으로 이미 등록되어 있습니다(버전은 불변).`,
+          `Dataset ${dataset.id}@${dataset.version} is already registered with different content (versions are immutable).`,
         );
       }
       if (row.deleted_at !== null)
         await this.client.query(
           "UPDATE everdict_datasets SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3",
           [tenant, dataset.id, dataset.version],
-        ); // 같은 내용 재등록 → 되살림(revive)
+        ); // re-registering identical content → revive
       return;
     }
     await this.client.query(
@@ -77,12 +77,12 @@ export class PgDatasetRegistry implements DatasetRegistry {
   }
 
   async ownVersions(tenant: string, id: string): Promise<string[]> {
-    return this.ownerVersions(tenant, id); // 정확히 이 테넌트 소유만(폴백 없음), 살아있는 버전만
+    return this.ownerVersions(tenant, id); // exactly this tenant's owned only (no fallback), live versions only
   }
 
   async get(tenant: string, id: string, ref = "latest"): Promise<Dataset> {
     const owner = await this.ownerOf(tenant, id);
-    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `데이터셋 '${id}' 가 없습니다.`);
+    if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `Dataset '${id}' not found.`);
     const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
     const res = await this.client.query<DatasetRow>(
       "SELECT dataset FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
@@ -99,12 +99,12 @@ export class PgDatasetRegistry implements DatasetRegistry {
     const out: DatasetListEntry[] = [];
     for (const { id } of r.rows) {
       const owner = await this.ownerOf(tenant, id);
-      if (owner) out.push(await this.summarize(owner, id)); // owner 는 라이브 DISTINCT id 라 사실상 항상 있음
+      if (owner) out.push(await this.summarize(owner, id)); // owner is effectively always present since id came from a live DISTINCT id
     }
     return out;
   }
 
-  // 한 id 의 살아있는 버전들을 목록 메타(DatasetListEntry)로 요약. 최신 버전만 파싱해 내용을, created_at 로 생성/수정 시각을 뽑는다.
+  // Summarizes an id's live versions into list metadata (DatasetListEntry). Parses only the latest version for content, and uses created_at for creation/update times.
   private async summarize(owner: string, id: string): Promise<DatasetListEntry> {
     const r = await this.client.query<{
       version: string;
@@ -117,24 +117,23 @@ export class PgDatasetRegistry implements DatasetRegistry {
       [owner, id],
     );
     const rows = r.rows;
-    if (rows.length === 0) throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `데이터셋 '${id}' 가 없습니다.`);
+    if (rows.length === 0) throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `Dataset '${id}' not found.`);
     const versions = sortVersions(rows.map((x) => x.version));
     const latestVersion = versions.at(-1);
     if (latestVersion === undefined)
-      throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `데이터셋 '${id}' 가 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `Dataset '${id}' not found.`);
     const latestRow = rows.find((x) => x.version === latestVersion);
     if (!latestRow)
       throw new NotFoundError(
         "NOT_FOUND",
         { tenant: owner, id, version: latestVersion },
-        `데이터셋 ${id}@${latestVersion} 가 없습니다.`,
+        `Dataset ${id}@${latestVersion} not found.`,
       );
     const latest = DatasetSchema.parse(latestRow.dataset);
     const byTime = [...rows].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
-    const earliest = byTime[0]; // 최초 등록 버전(생성자·생성시각)
-    const newest = byTime[byTime.length - 1]; // 최근 등록 버전(수정시각)
-    if (!earliest || !newest)
-      throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `데이터셋 '${id}' 가 없습니다.`);
+    const earliest = byTime[0]; // first-registered version (creator, creation time)
+    const newest = byTime[byTime.length - 1]; // latest-registered version (update time)
+    if (!earliest || !newest) throw new NotFoundError("NOT_FOUND", { tenant: owner, id }, `Dataset '${id}' not found.`);
     const versionTags: Record<string, string[]> = {};
     for (const row of rows) {
       const rowTags = parseVersionTags(row.tags);
@@ -157,13 +156,13 @@ export class PgDatasetRegistry implements DatasetRegistry {
   }
 
   async creatorOf(tenant: string, id: string, version: string): Promise<string | undefined> {
-    // 이 테넌트 직접 소유 + 살아있는 버전만(폴백 없음 — _shared 는 못 지운다).
+    // tenant directly-owned + live versions only (no fallback — _shared can't be deleted).
     const r = await this.client.query<{ created_by: string | null }>(
       "SELECT created_by FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
       [tenant, id, version],
     );
     const row = r.rows[0];
-    if (!row) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `데이터셋 ${id}@${version} 가 없습니다.`);
+    if (!row) throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `Dataset ${id}@${version} not found.`);
     return row.created_by ?? undefined;
   }
 
@@ -173,17 +172,17 @@ export class PgDatasetRegistry implements DatasetRegistry {
       [tenant, id, version],
     );
     if (r.rows.length === 0)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `데이터셋 ${id}@${version} 가 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `Dataset ${id}@${version} not found.`);
   }
 
-  // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 + 살아있는 버전만(softDelete 와 동일 규율). 마이그레이션 0047.
+  // version tag replacement (full-array PUT semantics) — tenant directly-owned + live versions only (same discipline as softDelete). Migration 0047.
   async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
     const r = await this.client.query<{ version: string }>(
       "UPDATE everdict_datasets SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
       [tenant, id, version, JSON.stringify(tags)],
     );
     if (r.rows.length === 0)
-      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `데이터셋 ${id}@${version} 가 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { tenant, id, version }, `Dataset ${id}@${version} not found.`);
   }
 
   async versionTags(tenant: string, id: string): Promise<Record<string, string[]>> {

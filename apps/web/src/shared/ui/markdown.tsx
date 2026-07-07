@@ -2,11 +2,11 @@ import type { ReactNode } from 'react'
 
 import { cn } from '@/shared/lib/utils'
 
-// 의존성 없는 경량 마크다운 뷰어 — 텍스트를 React 요소로 파싱한다(dangerouslySetInnerHTML 없음 → XSS 안전).
-// 지원: 제목(#~######) · 코드펜스(```) · 인용(>) · 목록(-/*/+·1.) · 구분선 · 문단(줄바꿈 보존) /
-// 인라인: `코드` · **굵게** · *기울임* · [텍스트](url). 표·중첩목록 등 고급 문법은 원문 그대로 노출.
+// Dependency-free lightweight markdown viewer — parses text into React elements (no dangerouslySetInnerHTML → XSS-safe).
+// Supports: headings(#~######) · code fences(```) · blockquotes(>) · lists(-/*/+·1.) · horizontal rules · paragraphs (line breaks preserved) /
+// inline: `code` · **bold** · *italic* · [text](url). Advanced syntax like tables·nested lists is surfaced as raw source.
 
-// 인라인 파싱 — 우선순위(코드 > 굵게 > 링크 > 기울임)로 가장 앞선 토큰부터 치환, 재귀로 중첩 처리.
+// Inline parsing — by priority (code > bold > link > italic), substitute the earliest token first, handling nesting recursively.
 function parseInline(text: string, key: string): ReactNode[] {
   const rules: { re: RegExp; make: (m: RegExpExecArray, k: string) => ReactNode }[] = [
     {
@@ -49,8 +49,11 @@ function parseInline(text: string, key: string): ReactNode[] {
   let rest = text
   let n = 0
   while (rest.length > 0) {
-    let best: { idx: number; m: RegExpExecArray; make: (m: RegExpExecArray, k: string) => ReactNode } | null =
-      null
+    let best: {
+      idx: number
+      m: RegExpExecArray
+      make: (m: RegExpExecArray, k: string) => ReactNode
+    } | null = null
     for (const r of rules) {
       const m = r.re.exec(rest)
       if (m && (best === null || m.index < best.idx)) best = { idx: m.index, m, make: r.make }
@@ -102,7 +105,7 @@ export function Markdown({ content, className }: { content: string; className?: 
         buf.push(lines[i])
         i++
       }
-      i++ // 닫는 펜스
+      i++ // closing fence
       blocks.push(
         <pre
           key={key++}
@@ -182,7 +185,7 @@ export function Markdown({ content, className }: { content: string; className?: 
       continue
     }
 
-    // 문단 — 다음 빈 줄/블록 시작까지(문단 내 줄바꿈은 보존).
+    // Paragraph — up to the next blank line/block start (line breaks within the paragraph are preserved).
     const buf: string[] = [line]
     i++
     while (i < lines.length && lines[i].trim() !== '' && !isBlockStart(lines[i])) {

@@ -4,7 +4,7 @@ import { parseJaegerSpans, parseOtlpSpans } from "./otel.js";
 import { type Span, spansToTraceEvents } from "./trace-source.js";
 
 describe("spansToTraceEvents", () => {
-  it("llm/tool/message 스팬을 TraceEvent 로 매핑한다", () => {
+  it("maps llm/tool/message spans to TraceEvents", () => {
     const spans: Span[] = [
       {
         name: "chat",
@@ -29,11 +29,11 @@ describe("spansToTraceEvents", () => {
     expect(events.map((e) => e.kind)).toEqual(["llm_call", "tool_call", "tool_result", "message"]);
     const llm = events[0];
     expect(llm?.kind === "llm_call" && llm.cost?.usd).toBe(0.01);
-    expect(events[0]?.t).toBe(0); // 첫 스팬 기준 상대시간
+    expect(events[0]?.t).toBe(0); // relative time from the first span
   });
 
-  it("MLflow 네이티브 속성(gen_ai.* 없음)도 llm_call 로 매핑한다 — MLflow 3.x autolog 트레이스", () => {
-    // 실 MLflow 3.11 이 LLM 스팬에 싣는 형태(parseMlflowTrace 가 kvlist→객체로 풀어줌).
+  it("maps MLflow native attributes (no gen_ai.*) to llm_call too — MLflow 3.x autolog trace", () => {
+    // The shape real MLflow 3.11 puts on an LLM span (parseMlflowTrace unpacks kvlist → object).
     const spans: Span[] = [
       {
         name: "chat gpt-5.4-mini",
@@ -56,7 +56,7 @@ describe("spansToTraceEvents", () => {
 });
 
 describe("parseOtlpSpans", () => {
-  it("OTLP 속성 배열 + ns 시간을 정규화한다", () => {
+  it("normalizes the OTLP attribute array + ns times", () => {
     const spans = parseOtlpSpans([
       {
         name: "chat",
@@ -76,9 +76,9 @@ describe("parseOtlpSpans", () => {
   });
 });
 
-describe("parseJaegerSpans (Jaeger query 형식)", () => {
-  it("operationName/μs시간/타입드 태그를 정규화한다 → TraceEvent", () => {
-    // 실 Jaeger /api/traces/{id} 의 spans[] 형태(태그 value 가 이미 타입 디코딩됨).
+describe("parseJaegerSpans (Jaeger query shape)", () => {
+  it("normalizes operationName / μs times / typed tags → TraceEvent", () => {
+    // The spans[] shape of real Jaeger /api/traces/{id} (tag values already type-decoded).
     const spans = parseJaegerSpans([
       {
         operationName: "chat gpt-5.4-mini",
@@ -102,7 +102,7 @@ describe("parseJaegerSpans (Jaeger query 형식)", () => {
 });
 
 describe("parseMlflowTrace", () => {
-  it("MLflow 3.x OTLP 스팬(attributes 배열)을 정규화한다", () => {
+  it("normalizes MLflow 3.x OTLP spans (attributes array)", () => {
     const spans = parseMlflowTrace({
       spans: [
         {

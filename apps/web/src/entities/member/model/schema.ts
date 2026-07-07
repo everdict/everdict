@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 GET /members 응답 미러. subject 는 opaque Keycloak sub(표시하지 않음);
-// name/email/avatarUrl 은 프로필 보강(사람이 읽는 신원) — 있을 때만.
+// Mirror of the control plane GET /members response. subject is the opaque Keycloak sub (not displayed);
+// name/email/avatarUrl are profile enrichment (human-readable identity) — only when present.
 export const memberSchema = z.object({
   subject: z.string(),
   role: z.string(),
@@ -13,7 +13,7 @@ export const memberSchema = z.object({
 export type Member = z.infer<typeof memberSchema>
 export const membersSchema = z.array(memberSchema)
 
-// 대기중 초대(메타만 — 토큰/해시 없음). GET /invites 미러.
+// Pending invite (meta only — no token/hash). Mirror of GET /invites.
 export const inviteSchema = z.object({
   id: z.string(),
   workspace: z.string(),
@@ -27,15 +27,15 @@ export const inviteSchema = z.object({
 export type Invite = z.infer<typeof inviteSchema>
 export const invitesSchema = z.array(inviteSchema)
 
-// POST /invites 응답 — meta + 평문 토큰(inv_…, 1회 노출).
+// POST /invites response — meta + plaintext token (inv_…, exposed once).
 export const createdInviteSchema = inviteSchema.extend({ token: z.string() })
 export type CreatedInvite = z.infer<typeof createdInviteSchema>
 
-// POST /invites/accept 응답.
+// POST /invites/accept response.
 export const acceptedInviteSchema = z.object({ workspace: z.string(), role: z.string() })
 export type AcceptedInvite = z.infer<typeof acceptedInviteSchema>
 
-// GET /invites/preview 응답 — 링크 랜딩에서 "어느 워크스페이스인지"(이름·썸네일·역할). 비소비.
+// GET /invites/preview response — "which workspace" on the link landing (name·thumbnail·role). Non-consuming.
 export const invitePreviewSchema = z.object({
   workspace: z.string(),
   name: z.string(),

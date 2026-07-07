@@ -111,23 +111,23 @@ only from the shell. For local dev, put the vars in `apps/api/.env` and run from
 `pnpm api` (or `pnpm api:dev` for `--watch`, `pnpm api:start` to build first). These use
 `node --env-file-if-exists=apps/api/.env`, so the file fills in **unset** vars only — a real env var (k8s secret)
 always wins, and a missing file is a no-op (prod-safe). At boot the server logs whether the OIDC verifier was
-wired (`▶ auth: OIDC(JWT) 검증기 활성 issuer=…`) — if you see `KEYCLOAK_ISSUER 미설정` instead, the env didn't reach
+wired (`▶ auth: OIDC(JWT) verifier enabled issuer=…`) — if you see `KEYCLOAK_ISSUER unset` instead, the env didn't reach
 the process.
 
 ### Diagnosing 401s (control-plane logging)
 The control plane runs a structured (pino) request logger at `EVERDICT_LOG_LEVEL` (default `info`; set `silent` to
 disable). It is built to make a Keycloak-token 401 self-explanatory — the common failure when the **web** is wired
 to an SSO but the **control plane** isn't:
-- **Boot:** logs `▶ auth: OIDC(JWT) 검증기 활성 issuer=<X>` when `KEYCLOAK_ISSUER` is set, or a loud
-  `▶ auth: KEYCLOAK_ISSUER 미설정 — … 사내 SSO 액세스 토큰은 401 됩니다.` when it isn't (root cause #1: the JWT
+- **Boot:** logs `▶ auth: OIDC(JWT) verifier enabled issuer=<X>` when `KEYCLOAK_ISSUER` is set, or a loud
+  `▶ auth: KEYCLOAK_ISSUER unset — … Internal SSO access tokens will be 401'd.` when it isn't (root cause #1: the JWT
   verifier was never wired, so every SSO token is rejected).
-- **Per rejected token:** `oidcAuthenticator`'s `onError` hook logs `▶ auth: OIDC 토큰 검증 실패 [<code>] …` with the
+- **Per rejected token:** `oidcAuthenticator`'s `onError` hook logs `▶ auth: OIDC token verification failed [<code>] …` with the
   jose error code (`ERR_JWT_EXPIRED`, claim-validation, signature, **`JWKS_FETCH_FAILED`** = control plane can't
   reach the SSO's JWKS), the **expected issuer vs the token's actual `iss`** (issuer-mismatch is the #2 cause), the
   token `aud`, and the token's top-level claim names (so you can see whether the `WORKSPACE_CLAIM` is even present).
   The token is decoded **unverified**, for diagnostics only.
-- **Per request:** `auth: Bearer 자격증명 거부 → 401` / `auth: 자격증명 없음(requireAuth) → 401` / `auth: dev
-  폴백(x-everdict-tenant)` — distinguishes "token rejected" from "no token forwarded" from "dev fallback".
+- **Per request:** `auth: Bearer credential rejected → 401` / `auth: no credential (requireAuth) → 401` / `auth: dev
+  fallback (x-everdict-tenant)` — distinguishes "token rejected" from "no token forwarded" from "dev fallback".
 
 `@everdict/auth` itself stays logger-free: the reason is surfaced via the `onError(OidcVerifyErrorInfo)` callback and
 `apps/api` decides how to log it (layering: auth is a low-level package, logging is an app concern).

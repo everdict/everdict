@@ -13,7 +13,7 @@ export interface DatasetOption {
   label: string
 }
 
-// dataset/metric/window/judgeModel 을 골라 리더보드 URL 로 이동. 실제 랭킹은 서버가 계산.
+// Pick dataset/metric/window/judgeModel to navigate to the leaderboard URL. The actual ranking is computed by the server.
 export function LeaderboardPicker({
   datasets,
   dataset,

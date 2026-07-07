@@ -22,7 +22,7 @@ function versionOptions(versions: string[]): ComboboxOption[] {
   ]
 }
 
-// cron 프리셋 — raw 입력 대신 흔한 주기를 원클릭으로. 직접 편집도 가능(아래 입력).
+// cron presets — common cadences in one click instead of raw entry. Direct editing is also possible (input below).
 const CRON_PRESETS: { labelKey: string; value: string }[] = [
   { labelKey: 'presetHourly', value: '0 * * * *' },
   { labelKey: 'presetMidnight', value: '0 0 * * *' },
@@ -44,8 +44,8 @@ interface Values {
   concurrency: string
 }
 
-// 데이터셋×하니스를 cron 으로 주기 실행하는 예약 생성/수정. 발사·해석은 컨트롤플레인(Temporal Schedule)이 한다.
-// scheduleId 가 있으면 수정 모드(PATCH) — initial 로 프리필, initialJudges 로 기존 judge 보존.
+// Create/edit a schedule that runs dataset×harness periodically via cron. Firing/interpretation is done by the control plane (Temporal Schedule).
+// If scheduleId is present, it's edit mode (PATCH) — prefill from initial, preserve existing judges via initialJudges.
 export function CreateScheduleForm({
   datasets,
   harnesses,
@@ -290,7 +290,7 @@ export function CreateScheduleForm({
 
       <div className="space-y-1.5">
         <Label htmlFor="runtime">{t('runtimeLabel')}</Label>
-        {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 런타임 없는 예약은 발사 때마다 400 실패. */}
+        {/* Runtime is required — the control-plane host fallback is disallowed (requireRuntime), so a schedule with no runtime fails 400 on every firing. */}
         <Controller
           control={control}
           name="runtime"

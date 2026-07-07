@@ -3,16 +3,16 @@ import type { SqlClient } from "./client.js";
 import { hashKey } from "./tenant-auth.js";
 import type { WorkspaceStore } from "./workspace-store.js";
 
-// 워크스페이스 초대(토큰/링크 redemption) 저장소 — 평문 토큰은 절대 저장하지 않고 SHA-256 해시만 보관(tenant-keys 와 동일).
-// 초대 = 가입 비밀: 해시 전용 · 만료 · 단일 사용. consume 는 단일 CTE 로 원자적(SqlClient 에 트랜잭션이 없으므로).
-export { hashKey }; // 서비스가 평문 토큰을 해시해 넘길 때 재사용
+// Workspace invite (token/link redemption) store — never stores the plaintext token, keeps only the SHA-256 hash (same as tenant-keys).
+// Invite = join secret: hash-only · expiring · single-use. consume is atomic via a single CTE (since SqlClient has no transactions).
+export { hashKey }; // reused when the service hashes the plaintext token and passes it in
 
 export interface WorkspaceInviteMeta {
   id: string;
   workspace: string;
   role: string;
   createdBy: string;
-  prefix: string; // inv_abcd… 식별 힌트(해시/평문 아님)
+  prefix: string; // inv_abcd… identification hint (not a hash/plaintext)
   createdAt: string;
   expiresAt?: string;
   accepted: boolean;
@@ -25,7 +25,7 @@ export interface ConsumeResult {
   role: string;
 }
 
-// 수락 결과 — 실패 사유를 구분(서비스가 AppError 로 매핑). 클라이언트엔 사유를 그대로 노출하지 않는다(존재 누출 방지는 서비스 책임).
+// Acceptance result — distinguishes the failure reason (the service maps it to an AppError). The reason isn't exposed as-is to the client (preventing existence leaks is the service's job).
 export type ConsumeOutcome =
   | { ok: true; result: ConsumeResult }
   | { ok: false; reason: "unknown" | "expired" | "accepted" };
@@ -41,15 +41,15 @@ export interface CreateInviteInput {
 
 export interface WorkspaceInviteStore {
   createInvite(input: CreateInviteInput): Promise<WorkspaceInviteMeta>;
-  listInvites(workspace: string): Promise<WorkspaceInviteMeta[]>; // 메타만 — token_hash 절대 미반환
-  revokeInvite(workspace: string, id: string): Promise<void>; // tenant 스코프, 멱등(no-op)
-  // 원자적: 존재+미만료+미수락 확인 → 멤버십 생성/email 갱신 → invite accepted 마킹.
+  listInvites(workspace: string): Promise<WorkspaceInviteMeta[]>; // meta only — never returns token_hash
+  revokeInvite(workspace: string, id: string): Promise<void>; // tenant-scoped, idempotent (no-op)
+  // Atomic: verify exists+unexpired+unaccepted → create membership/refresh email → mark the invite accepted.
   consumeInvite(tokenHash: string, subject: string, email?: string): Promise<ConsumeOutcome>;
-  // 비소비 미리보기 — 토큰 해시로 워크스페이스/역할만(멤버십 생성·redeem 없음). 미존재/만료/수락 → undefined.
+  // Non-consuming preview — by token hash, only workspace/role (no membership creation·redeem). Nonexistent/expired/accepted → undefined.
   previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined>;
 }
 
-// inv_<랜덤> — 평문 초대 토큰(링크에 담김). 생성 시 한 번만 노출되고 저장은 해시만.
+// inv_<random> — plaintext invite token (embedded in the link). Shown once at creation and stored only as a hash.
 export function generateInviteToken(): string {
   return `inv_${randomBytes(24).toString("base64url")}`;
 }
@@ -84,7 +84,7 @@ function meta(r: InviteRow): WorkspaceInviteMeta {
 export class InMemoryWorkspaceInviteStore implements WorkspaceInviteStore {
   private readonly byHash = new Map<string, InviteRow>(); // tokenHash → row
   constructor(
-    private readonly members: WorkspaceStore, // consume 시 멤버십 생성/갱신에 사용
+    private readonly members: WorkspaceStore, // used to create/refresh membership on consume
     private readonly now: () => string = () => new Date().toISOString(),
   ) {}
 
@@ -106,7 +106,7 @@ export class InMemoryWorkspaceInviteStore implements WorkspaceInviteStore {
     return [...this.byHash.values()]
       .filter((r) => r.workspace === workspace)
       .map(meta)
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // 최신순
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // newest first
   }
 
   async revokeInvite(workspace: string, id: string): Promise<void> {
@@ -121,7 +121,7 @@ export class InMemoryWorkspaceInviteStore implements WorkspaceInviteStore {
     row.acceptedAt = this.now();
     row.acceptedBy = subject;
     await this.members.ensureMembership(row.workspace, subject, row.role, email);
-    // 기존 멤버였다면 role 은 유지되므로 실제 역할을 읽어 보고(공유 링크로 권한 변경 방지).
+    // If already a member, the role is kept, so read back the actual role (prevents a shared link from changing permissions).
     const finalRole = (await this.members.roleFor(row.workspace, subject)) ?? row.role;
     return { ok: true, result: { workspace: row.workspace, role: finalRole } };
   }
@@ -172,7 +172,7 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
       [input.tokenHash, id, input.workspace, input.role, input.createdBy, input.prefix, input.expiresAt ?? null],
     );
     const r = res.rows[0];
-    if (!r) throw new Error("invite insert 가 행을 돌려주지 않았습니다.");
+    if (!r) throw new Error("invite insert did not return a row.");
     return {
       id,
       workspace: input.workspace,
@@ -186,7 +186,7 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
   }
 
   async listInvites(workspace: string): Promise<WorkspaceInviteMeta[]> {
-    // token_hash 는 select 하지 않는다(절대 노출 금지).
+    // Don't select token_hash (never expose it).
     const res = await this.client.query<InviteMetaRow>(
       `SELECT id, workspace, role, created_by, prefix, created_at, expires_at, accepted_at, accepted_by
        FROM everdict_workspace_invites WHERE workspace = $1 ORDER BY created_at DESC`,
@@ -200,8 +200,8 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
   }
 
   async consumeInvite(tokenHash: string, subject: string, email?: string): Promise<ConsumeOutcome> {
-    // 단일 CTE = 원자적. accepted_at IS NULL 가 단일사용 락(동시 redeem 은 2번째가 0행).
-    // 기존 멤버는 role 유지(email 만 COALESCE 갱신) — 공유 링크로 권한이 바뀌지 않게.
+    // Single CTE = atomic. accepted_at IS NULL is the single-use lock (concurrent redeem: the second gets 0 rows).
+    // An existing member keeps their role (only email is COALESCE-refreshed) — so a shared link doesn't change permissions.
     const res = await this.client.query<{ workspace: string; role: string }>(
       `WITH claimed AS (
          UPDATE everdict_workspace_invites SET accepted_at = now(), accepted_by = $2
@@ -220,19 +220,19 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
     );
     const row = res.rows[0];
     if (row) return { ok: true, result: { workspace: row.workspace, role: row.role } };
-    // 실패 — 읽기전용 후속 분류(성공 경로 원자성 무관).
+    // Failure — a read-only follow-up classification (unrelated to the success-path atomicity).
     const why = await this.client.query<{ accepted_at: string | Date | null; expires_at: string | Date | null }>(
       "SELECT accepted_at, expires_at FROM everdict_workspace_invites WHERE token_hash = $1",
       [tokenHash],
     );
     const w = why.rows[0];
-    if (!w) return { ok: false, reason: "unknown" }; // 없음 == 취소됨(구분 안 함)
+    if (!w) return { ok: false, reason: "unknown" }; // absent == revoked (not distinguished)
     if (w.accepted_at !== null) return { ok: false, reason: "accepted" };
     return { ok: false, reason: "expired" };
   }
 
   async previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined> {
-    // token_hash 로만 조회하고 redeem 하지 않는다. 미수락·미만료 행만.
+    // Looks up by token_hash only and doesn't redeem. Unaccepted·unexpired rows only.
     const res = await this.client.query<{ workspace: string; role: string }>(
       `SELECT workspace, role FROM everdict_workspace_invites
         WHERE token_hash = $1 AND accepted_at IS NULL AND (expires_at IS NULL OR expires_at > now())`,

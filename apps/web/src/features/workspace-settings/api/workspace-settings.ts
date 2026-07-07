@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 워크스페이스 설정(컨트롤플레인 정책). 지금은 사용량 계측 on/off.
+// Workspace settings (control plane policy). Currently usage metering on/off.
 export interface WorkspaceSettings {
   meterUsage?: boolean
 }
@@ -16,7 +16,7 @@ export interface UpdateSettingsResult {
   error?: string
 }
 
-// 부분 패치 저장. authZ(admin=settings:write)는 컨트롤플레인이 강제한다.
+// Save a partial patch. authZ (admin=settings:write) is enforced by the control plane.
 export async function updateWorkspaceSettingsAction(
   patch: WorkspaceSettings
 ): Promise<UpdateSettingsResult> {

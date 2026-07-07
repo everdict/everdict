@@ -1,11 +1,11 @@
-// 라이브: K8sTopologyRuntime 가 spec.dependencies[](postgres/redis)를 토폴로지와 **함께 배포**하고
-// 서비스에 접속 env(DATABASE_URL/REDIS_URL)를 자동 주입하는지 실제 kind 클러스터에서 검증한다.
-//   ensureTopology(provisionDependencies) → PG+Redis Deployment Ready → front-door Ready + endpoint(HTTP 200)
-//   → front-door 파드 env 에 DATABASE_URL/REDIS_URL(스토어 DNS) 확인 → PG 를 그 DNS 로 접속(pg_isready) 확인.
+// Live: verify on a real kind cluster that K8sTopologyRuntime **deploys spec.dependencies[] (postgres/redis) together with**
+// the topology and auto-injects the connection env (DATABASE_URL/REDIS_URL) into the service.
+//   ensureTopology(provisionDependencies) → PG+Redis Deployment Ready → front-door Ready + endpoint (HTTP 200)
+//   → confirm DATABASE_URL/REDIS_URL (store DNS) in the front-door pod env → confirm PG reachable via that DNS (pg_isready).
 //
-// 준비: kind 클러스터 'everdict' + postgres:16-alpine/redis:7-alpine/mendhak/http-https-echo 가 노드에 로드돼 있어야 함.
+// Setup: kind cluster 'everdict' + postgres:16-alpine/redis:7-alpine/mendhak/http-https-echo loaded onto the node.
 //   kind load docker-image postgres:16-alpine redis:7-alpine mendhak/http-https-echo:latest --name everdict
-// 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/topology-deps-k8s.mjs
+// Usage: PATH=$HOME/.local/bin:$PATH node scripts/live/topology-deps-k8s.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { K8sTopologyRuntime } from "../../packages/topology/dist/index.js";
@@ -15,7 +15,7 @@ const NS = "everdict-deps-demo";
 const kc = (args, input) =>
   execFileSync("kubectl", ["--context", CTX, ...args], { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
 
-// 스토어 의존(postgres+redis) + HTTP front-door 1개인 service 토폴로지.
+// Service topology with store dependencies (postgres+redis) + one HTTP front-door.
 const spec = {
   kind: "service",
   id: "deps-demo",
@@ -31,7 +31,7 @@ const spec = {
   traceSource: { kind: "otel", endpoint: "http://unused" },
 };
 
-// kind: 사전 로드 이미지 → IfNotPresent. 존(테넌트) = 이 데모 네임스페이스.
+// kind: preloaded images → IfNotPresent. Zone (tenant) = this demo namespace.
 const runtime = new K8sTopologyRuntime({
   context: CTX,
   imagePullPolicy: "IfNotPresent",
@@ -46,13 +46,13 @@ try {
   const topo = await runtime.ensureTopology(spec, zone);
   console.log("endpoints :", JSON.stringify(topo.endpoints));
 
-  // 1) 스토어 Deployment 가 떴나.
+  // 1) Did the store Deployments come up?
   const deploys = kc(["-n", NS, "get", "deploy", "-o", "name"]).trim().split("\n").sort();
   console.log("deploys   :", deploys.join(", "));
   const hasPg = deploys.includes("deployment.apps/deps-demo-postgres");
   const hasRedis = deploys.includes("deployment.apps/deps-demo-redis");
 
-  // 2) front-door 파드 env 에 자동 와이어링된 접속 URL 이 들어갔나.
+  // 2) Did the auto-wired connection URLs make it into the front-door pod env?
   const pod = kc(["-n", NS, "get", "pod", "-l", "app=agent-server", "-o", "jsonpath={.items[0].metadata.name}"]).trim();
   const envDump = kc(["-n", NS, "exec", pod, "--", "env"]);
   const dbUrl = /DATABASE_URL=(.*)/.exec(envDump)?.[1]?.trim() ?? "";
@@ -60,7 +60,7 @@ try {
   console.log("DATABASE_URL:", dbUrl);
   console.log("REDIS_URL :", redisUrl);
 
-  // 3) 그 DNS 로 PG 가 실제 접속되나(in-cluster). pg_isready -h deps-demo-postgres.
+  // 3) Is PG actually reachable via that DNS (in-cluster)? pg_isready -h deps-demo-postgres.
   let pgReachable = false;
   try {
     const out = kc([
@@ -95,11 +95,11 @@ try {
   );
   console.log(
     ok
-      ? "\n✅ K8sTopologyRuntime 가 declared dependencies(PG+Redis)를 함께 배포 + 서비스에 접속 env 자동 주입 + 스토어 DNS 실접속 — 실 OSS 스테이트풀 하니스 배포 준비 완료"
-      : "\n⚠️ 일부 체크 실패",
+      ? "\n✅ K8sTopologyRuntime deploys declared dependencies (PG+Redis) together + auto-injects the connection env into the service + real store-DNS connectivity — ready to deploy real OSS stateful harnesses"
+      : "\n⚠️ Some checks failed",
   );
 } finally {
   await runtime.teardown(spec, zone).catch((e) => console.log("teardown warn:", e.message));
-  console.log("teardown  : ns 삭제 요청됨");
+  console.log("teardown  : ns delete requested");
 }
 process.exit(ok ? 0 : 1);

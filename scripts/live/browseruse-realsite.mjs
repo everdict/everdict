@@ -1,12 +1,12 @@
-// 라이브 e2e (service-topology): 실 browser-use 를 *외부 실사이트*에 멀티스텝으로 — 성공률 측정 + 실 cost(USD).
-// ②: 컨테이너 자체 폼이 아니라 https://en.wikipedia.org 에서 검색→기사 진입. 더 강한 모델(chatgpt/gpt-5.4)로 N 회
-//    반복해 통과율(url-matches+dom-contains)을 측정. 실 인터넷 사이트라 모델 driving 강도가 훨씬 높다.
-// ③: front-door 가 실 토큰사용량(TokenCost)에 단가(LiteLLM /model/info → 운영자 env BROWSERUSE_PRICE_*)를 곱해 USD
-//    를 산정 → OTLP llm_call.cost.usd 로 배출 → cost 그레이더가 실 USD 합산. (프록시 모델은 LiteLLM 가격이 0 이므로
-//    운영자 지정 *참조단가*를 env 로 준다 — 실제 cost 산정 방식과 동일. 토큰은 실값, 단가는 운영자 입력, USD 는 실산술.)
+// Live e2e (service-topology): drive real browser-use multi-step against an *external real site* — measure success rate + real cost (USD).
+// ②: not the container's own form but https://en.wikipedia.org — search→open article. Run N iterations with a stronger model
+//    (chatgpt/gpt-5.4) to measure the pass rate (url-matches+dom-contains). A real internet site drives the model much harder.
+// ③: the front-door computes USD by multiplying real token usage (TokenCost) by a unit price (LiteLLM /model/info → operator env
+//    BROWSERUSE_PRICE_*) → emits it as OTLP llm_call.cost.usd → the cost grader sums the real USD. (A proxy model has a LiteLLM
+//    price of 0, so an operator-specified *reference price* is supplied via env — same as the real cost method. Tokens are real, the unit price is operator input, USD is real arithmetic.)
 //
-// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686) 기동.
-// 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
+// Prereq: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; start Jaeger (:4318/:16686).
+// Key: OPENAI_API_KEY env or infra/litellm/.env (LITELLM_MASTER_KEY) — runtime only, never committed.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -16,11 +16,11 @@ import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
 const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
-const MODEL = process.env.BROWSERUSE_MODEL ?? "chatgpt/gpt-5.4"; // 더 강한 모델
-const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "10"; // 실사이트는 스텝 여유
+const MODEL = process.env.BROWSERUSE_MODEL ?? "chatgpt/gpt-5.4"; // stronger model
+const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "10"; // more step headroom for a real site
 const RUNS = Number(process.env.RUNS ?? "3");
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
-// 운영자 지정 참조단가($/token) — LiteLLM 에 가격 미설정 시 사용. 기본은 공개 mini 급 참조가격(IN $0.15/1M, OUT $0.60/1M).
+// Operator-specified reference price ($/token) — used when LiteLLM has no price set. Default is a public mini-tier reference price (IN $0.15/1M, OUT $0.60/1M).
 const PRICE_IN = process.env.BROWSERUSE_PRICE_IN ?? "0.00000015";
 const PRICE_OUT = process.env.BROWSERUSE_PRICE_OUT ?? "0.0000006";
 const NAME = "everdict-bu-realsite";
@@ -38,13 +38,13 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env).");
+  console.error("no LLM key (OPENAI_API_KEY or infra/litellm/.env).");
   process.exit(2);
 }
 const cleanup = () => spawnSync("docker", ["rm", "-f", NAME], { stdio: "ignore" });
 
 cleanup();
-console.log(`=== 실 browser-use front-door 기동 (docker, --network=host, model=${MODEL}) ===`);
+console.log(`=== start the real browser-use front-door (docker, --network=host, model=${MODEL}) ===`);
 execFileSync(
   "docker",
   [
@@ -77,7 +77,7 @@ execFileSync(
 let passes = 0;
 const rows = [];
 try {
-  process.stdout.write("health 대기");
+  process.stdout.write("waiting for health");
   let healthy = false;
   for (let i = 0; i < 60 && !healthy; i++) {
     await sleep(2000);
@@ -155,7 +155,7 @@ try {
     },
   });
 
-  console.log(`\n=== 외부 실사이트(Wikipedia) ${RUNS}회 — 성공률 + 실 cost 측정 ===`);
+  console.log(`\n=== external real site (Wikipedia) ×${RUNS} — measure success rate + real cost ===`);
   console.log("task:", task);
   for (let n = 1; n <= RUNS; n++) {
     let result;
@@ -193,18 +193,18 @@ try {
     );
   }
 
-  console.log("\n--- 요약 ---");
+  console.log("\n--- summary ---");
   console.table(rows);
   const rate = ((passes / RUNS) * 100).toFixed(0);
-  console.log(`성공률: ${passes}/${RUNS} (${rate}%) | model=${MODEL}`);
+  console.log(`success rate: ${passes}/${RUNS} (${rate}%) | model=${MODEL}`);
   console.log(
-    `cost: 실 토큰 × 단가(LiteLLM /model/info 또는 운영자 참조단가 IN=${PRICE_IN}/OUT=${PRICE_OUT} $/token) = 실 USD. 프록시 모델은 LiteLLM 가격이 0 이라 운영자 참조단가를 사용(토큰은 실값, USD 는 실산술).`,
+    `cost: real tokens × unit price (LiteLLM /model/info or operator reference price IN=${PRICE_IN}/OUT=${PRICE_OUT} $/token) = real USD. A proxy model has a LiteLLM price of 0, so the operator reference price is used (tokens are real, USD is real arithmetic).`,
   );
   console.log(
     passes > 0
-      ? "\n✅ ②③: 실 browser-use 가 외부 실사이트(Wikipedia)를 멀티스텝 구동(검색→기사) — 성공/실패를 백엔드가 결정론적으로 " +
-          "채점해 성공률 산출, 동시에 실 토큰사용량에 단가를 곱한 USD 를 trace 로 끌어와 cost 그레이더가 실값 합산."
-      : "\n⚠️ 전부 실패 — 위 run 로그/모델 확인",
+      ? "\n✅ ②③: real browser-use drove an external real site (Wikipedia) multi-step (search→article) — the backend grades " +
+          "pass/fail deterministically to compute the success rate, and simultaneously pulls USD (real token usage × unit price) from the trace so the cost grader sums the real values."
+      : "\n⚠️ all failed — check the run logs/model above",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

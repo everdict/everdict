@@ -1,9 +1,9 @@
-// 라이브 e2e (SLICE 92, service-topology Phase 2): NomadTopologyRuntime 를 *실제 Nomad*(로컬 dev agent)에 대고 구동.
-// K8sTopologyRuntime(SLICE 88/89)와 대칭 — 오케스트레이터-비종속 런타임이 Nomad 위에서도 warm 토폴로지를 배포(잡 등록
-// → alloc running 대기 → dynamic host:port 발견)하고 front-door 로 per-run 페이로드를 보내며, per-case 브라우저(실 headless
-// Chromium)를 띄워 CDP 연결·스냅샷한다는 라이브 검증.
+// Live e2e (SLICE 92, service-topology Phase 2): run NomadTopologyRuntime against *real Nomad* (local dev agent).
+// Symmetric to K8sTopologyRuntime (SLICE 88/89) — live verification that the orchestrator-agnostic runtime also deploys a warm
+// topology on Nomad (register the job → wait for alloc running → discover the dynamic host:port), sends a per-run payload to the
+// front-door, and brings up a per-case browser (real headless Chromium) to connect CDP + snapshot.
 //
-// 사전: nomad agent -dev (docker driver) 기동; 스텁 front-door 이미지 호스트 빌드.
+// Prereq: start nomad agent -dev (docker driver); build the stub front-door image on the host.
 //   nomad agent -dev & ; docker build -t everdict-topo-stub:demo scripts/live/topology-stub
 import process from "node:process";
 import { NomadTopologyRuntime } from "../../packages/topology/dist/index.js";
@@ -53,8 +53,8 @@ try {
   ok = health.status === 200 && drive.status === 200 && cdpLive;
   console.log(
     ok
-      ? "\n✅ SLICE 92: service-topology 런타임이 실제 Nomad(dev)에서 warm 토폴로지(잡 등록·alloc running·dynamic host:port 발견)를 배포·구동(front-door per-run 전송) + per-case 브라우저(실 headless Chromium)를 띄워 CDP 연결·스냅샷. K8s 와 대칭 — 오케스트레이터-비종속 런타임이 두 오케스트레이터에서 라이브 동작."
-      : "\n⚠️ 기대와 불일치",
+      ? "\n✅ SLICE 92: the service-topology runtime deploys/drives a warm topology on real Nomad (dev) (register the job, alloc running, discover the dynamic host:port; front-door per-run send) + brings up a per-case browser (real headless Chromium) to connect CDP + snapshot. Symmetric to K8s — the orchestrator-agnostic runtime runs live on both orchestrators."
+      : "\n⚠️ Mismatch vs expected",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

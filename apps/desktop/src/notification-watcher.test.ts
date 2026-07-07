@@ -6,7 +6,7 @@ const row = (id: string, createdAt: string): Record<string, unknown> => ({
   workspace: "acme",
   recipient: "alice",
   kind: "run_completed",
-  title: `Run 완료 — ${id}`,
+  title: `Run completed — ${id}`,
   createdAt,
 });
 
@@ -32,8 +32,8 @@ function build(responses: Array<Record<string, unknown>[]>) {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-describe("NotificationWatcher — 데스크톱 독립 알림(N6)", () => {
-  it("첫 폴링의 미읽음 백로그는 발화하지 않고 커서만 세팅한다", async () => {
+describe("NotificationWatcher — desktop independent notifications (N6)", () => {
+  it("does not fire the unread backlog on the first poll, only sets the cursor", async () => {
     const { watcher, fired, getCursor } = build([[row("a", "2026-01-01T00:00:00Z"), row("b", "2026-01-01T01:00:00Z")]]);
     watcher.start();
     await flush();
@@ -42,7 +42,7 @@ describe("NotificationWatcher — 데스크톱 독립 알림(N6)", () => {
     watcher.stop();
   });
 
-  it("커서 이후의 새 알림만 오래된 순으로 발화하고 커서를 전진시킨다", async () => {
+  it("fires only notifications after the cursor, oldest-first, and advances the cursor", async () => {
     const { watcher, fired, getCursor, tick } = build([
       [row("a", "2026-01-01T00:00:00Z")],
       [row("c", "2026-01-01T03:00:00Z"), row("b", "2026-01-01T02:00:00Z"), row("a", "2026-01-01T00:00:00Z")],
@@ -56,7 +56,7 @@ describe("NotificationWatcher — 데스크톱 독립 알림(N6)", () => {
     watcher.stop();
   });
 
-  it("빈 피드로 시작해도 이후 첫 알림은 발화된다(빈 첫 폴링 → 커서 확정)", async () => {
+  it("even starting from an empty feed, the first later notification fires (empty first poll → cursor pinned)", async () => {
     const { watcher, fired, tick } = build([[], [row("x", "2026-01-01T05:00:00Z")]]);
     watcher.start();
     await flush();
@@ -67,7 +67,7 @@ describe("NotificationWatcher — 데스크톱 독립 알림(N6)", () => {
     watcher.stop();
   });
 
-  it("재시작(저장된 커서)해도 이미 발화한 미읽음을 다시 쏘지 않는다", async () => {
+  it("on restart (with a saved cursor), does not re-fire already-fired unread items", async () => {
     let cursor: string | undefined = "2026-01-01T03:00:00Z";
     const fired: WatcherNotification[] = [];
     const watcher = new NotificationWatcher({
@@ -85,7 +85,7 @@ describe("NotificationWatcher — 데스크톱 독립 알림(N6)", () => {
     watcher.stop();
   });
 
-  it("폴링 실패는 삼키고(다음 주기 재시도) 발화 상한을 지킨다", async () => {
+  it("swallows a poll failure (retries next cycle) and honors the firing cap", async () => {
     const fired: WatcherNotification[] = [];
     let call = 0;
     const many = ["2026-01-02T01:00:00Z", "2026-01-02T02:00:00Z", "2026-01-02T03:00:00Z", "2026-01-02T04:00:00Z"];
@@ -110,10 +110,10 @@ describe("NotificationWatcher — 데스크톱 독립 알림(N6)", () => {
     });
     watcher.start();
     await flush();
-    tick?.(); // 실패 폴링
+    tick?.(); // failing poll
     await flush();
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("폴링 실패"));
-    tick?.(); // 4건 신규 → 상한 3건만
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("poll failed"));
+    tick?.(); // 4 new → only the cap of 3
     await flush();
     expect(fired).toHaveLength(3);
     watcher.stop();

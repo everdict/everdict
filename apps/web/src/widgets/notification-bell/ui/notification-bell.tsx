@@ -11,13 +11,13 @@ import { fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
 
-// 알림 벨(사이드바) — 개인 피드 인박스. docs/architecture/notifications.md:
-// 폴링(25s + 창 포커스)으로 /api/notifications(BFF 프록시)를 읽고, 새 미읽음은 표준 Web Notification 으로
-// 발화한다(N1 — 데스크톱 셸에서는 Electron 이 이를 OS 알림으로 라우팅; 창이 숨겨져 있을 때만 발화해 소음 방지).
+// Notification bell (sidebar) — personal feed inbox. docs/architecture/notifications.md:
+// Polls /api/notifications (BFF proxy) (25s + window focus), and fires new unread items as standard Web Notifications
+// (N1 — in the desktop shell Electron routes these to OS notifications; fires only when the window is hidden to avoid noise).
 const POLL_MS = 25_000
-const NATIVE_FIRE_CAP = 3 // 한 폴링에서 네이티브 알림 최대 발화 수(폭주 방지)
+const NATIVE_FIRE_CAP = 3 // max native notifications fired per poll (flood prevention)
 
-// 리소스 타입 → 상세 경로 세그먼트(예약은 상세가 없어 edit 로). 댓글 멘션 링크가 이 매핑으로 상세로 이동.
+// Resource type → detail path segment (a schedule has no detail, so → edit). Comment-mention links use this mapping to reach the detail.
 const RESOURCE_PATH: Record<string, (id: string) => string> = {
   dataset: (id) => `datasets/${id}`,
   harness: (id) => `harnesses/${id}`,
@@ -31,7 +31,7 @@ const RESOURCE_PATH: Record<string, (id: string) => string> = {
 function hrefOf(workspace: string, n: NotificationItem): string {
   if (n.link?.runId) return `/${workspace}/runs/${n.link.runId}`
   if (n.link?.scorecardId) return `/${workspace}/scorecards/${n.link.scorecardId}`
-  // 리소스 댓글 멘션 — resourceType→경로 매핑, commentId 앵커로 해당 댓글까지 스크롤.
+  // Resource comment mention — resourceType→path mapping, with a commentId anchor to scroll to that comment.
   if (n.link?.resourceType && n.link?.resourceId) {
     const seg = RESOURCE_PATH[n.link.resourceType]?.(encodeURIComponent(n.link.resourceId))
     if (seg) return `/${workspace}/${seg}${n.link.commentId ? `#comment-${n.link.commentId}` : ''}`
@@ -41,11 +41,11 @@ function hrefOf(workspace: string, n: NotificationItem): string {
 
 type Permission = NotificationPermission | 'unsupported'
 
-// 유저의 네이티브 알림 선호(끄기/켜기) — 브라우저 권한과 별개의 로컬 스위치. 기본 켜짐.
+// User's native-notification preference (off/on) — a local switch separate from the browser permission. Default on.
 const NATIVE_PREF_KEY = 'everdict:native-notifications'
 type NativePref = 'on' | 'off'
 
-// 권한 × 선호 → 상태 아이콘/드롭다운이 쓰는 파생 상태.
+// Permission × preference → the derived status used by the status icon/dropdown.
 type NativeStatus = 'on' | 'off' | 'needs-permission' | 'blocked'
 function nativeStatusOf(permission: Permission, pref: NativePref): NativeStatus {
   if (permission === 'denied') return 'blocked'
@@ -67,10 +67,10 @@ export function NotificationBell({ workspace }: { workspace: string }) {
   const [items, setItems] = useState<NotificationItem[]>([])
   const [permission, setPermission] = useState<Permission>('unsupported')
   const [pref, setPref] = useState<NativePref>('on')
-  const prefRef = useRef<NativePref>('on') // 폴링 클로저에서 최신 선호를 읽기 위한 ref
-  const seeded = useRef(false) // 첫 로드 배치는 네이티브 발화 대상이 아니다(앱 켜자마자 과거 알림 폭주 방지)
+  const prefRef = useRef<NativePref>('on') // ref to read the latest preference from the polling closure
+  const seeded = useRef(false) // the first-load batch is not a native-fire target (avoids a flood of past notifications right at app start)
   const seen = useRef<Set<string>>(new Set())
-  // 데스크톱 셸 + 러너 페어링이면 네이티브 발화를 메인 프로세스 워처(N6, 웹 세션 무관)에 양보 — 중복 방지.
+  // In the desktop shell + runner pairing, yield native firing to the main-process watcher (N6, web-session-independent) — dedup.
   const desktopHandlesNative = useRef(false)
   const cleanupBridge = useRef<(() => void) | null>(null)
 
@@ -84,7 +84,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
       const fresh = list.filter((n) => n.readAt === undefined && !seen.current.has(n.id))
       for (const n of list) seen.current.add(n.id)
       setItems(list)
-      // 네이티브 발화 — 창이 안 보일 때만(보이는 탭은 배지로 충분). 데스크톱(트레이 상주)의 핵심 경로.
+      // Native firing — only when the window is not visible (a visible tab is served by the badge). The core path for desktop (tray-resident).
       if (
         seeded.current &&
         document.hidden &&
@@ -103,7 +103,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
       }
       seeded.current = true
     } catch {
-      // 폴링 실패는 조용히 — 다음 주기에 재시도.
+      // Polling failure is silent — retry on the next cycle.
     }
   }, [router, workspace])
 
@@ -116,7 +116,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
           desktopHandlesNative.current = s.paired
         })
         .catch(() => {})
-      // 구독 해지는 아래 cleanup 에서 폴링 타이머와 함께.
+      // Unsubscription happens in the cleanup below, together with the polling timer.
       const off = bridge.onRunnerStatus((s) => {
         desktopHandlesNative.current = s.paired
       })
@@ -196,7 +196,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
 
       {open && (
         <>
-          {/* 바깥 클릭 닫기 */}
+          {/* Close on outside click */}
           <button
             type="button"
             aria-label={t('closeBell')}
@@ -204,7 +204,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
             onClick={() => setOpen(false)}
           />
           <div className="absolute left-0 top-full z-50 mt-1 w-[320px] rounded-lg border border-border bg-card shadow-pop">
-            {/* 헤더 — 타이틀 없이 컨트롤만: 네이티브 알림 상태 아이콘(클릭→상태 변경 드롭다운) + 모두 읽음. */}
+            {/* Header — controls only, no title: native-notification status icon (click → status-change dropdown) + mark all read. */}
             <div className="flex items-center justify-end gap-1 border-b border-border px-2 py-1.5">
               {unread > 0 && (
                 <button

@@ -8,8 +8,8 @@ import { Button } from '@/shared/ui/button'
 
 import { openSetupPrAction } from '../api/manage-ci-links'
 
-// 셋업 PR 열기 — link 의 워크플로 YAML 을 대상 레포에 PR(워크스페이스 GitHub App 토큰). 성공 시 새 탭으로 PR 을 연다.
-// App 이 그 레포에 설치돼 있지 않으면 컨트롤플레인이 404 → onError 로 안내.
+// Open setup PR — PRs the link's workflow YAML into the target repo (workspace GitHub App token). On success, opens the PR in a new tab.
+// If the App isn't installed on that repo, the control plane returns 404 → surfaced via onError.
 export function SetupPrButton({
   repository,
   host,
@@ -18,14 +18,14 @@ export function SetupPrButton({
   onError,
 }: {
   repository: string
-  host?: string // GHE 베이스 URL — 미지정 = github.com link
+  host?: string // GHE base URL — unset = github.com link
   size?: 'xs' | 'sm'
   variant?: 'secondary' | 'outline'
   onError?: (message: string) => void
 }) {
   const t = useTranslations('manageCiLinks')
   const [pending, startTransition] = useTransition()
-  const [opened, setOpened] = useState<string>() // 방금 연 PR url
+  const [opened, setOpened] = useState<string>() // the PR url just opened
 
   function onClick() {
     startTransition(async () => {

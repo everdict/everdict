@@ -1,13 +1,13 @@
 # Desktop app — full web parity + resident self-hosted runner
 
 > **Status: decisions D1–D5 LOCKED with the user (2026-07-03) — implementation in progress.**
-> Supersedes the "tray-only companion" idea: the user requirement is **데스크탑앱으로도 웹처럼 동일하게
-> 수행** — the desktop must do *everything the web does*, plus what only a native app can do (resident
+> Supersedes the "tray-only companion" idea: the user requirement is **perform identically to the web via
+> the desktop app too** — the desktop must do *everything the web does*, plus what only a native app can do (resident
 > runner, one-click pairing, tray/notifications/autostart).
 > Dev conventions for `apps/desktop` / `packages/runner-core` live in skill `.claude/skills/desktop/`.
 > - **D6 — auto-update: detect/download automatic, APPLY is user-consented (LOCKED); feed location PENDING.**
 >   `electron-updater` in main behind `UpdaterController` (DI): check on launch + every 6h,
->   `autoDownload`, `autoInstallOnAppQuit`; "적용" only via the tray restart item — never force-restart
+>   `autoDownload`, `autoInstallOnAppQuit`; "Apply" only via the tray restart item — never force-restart
 >   a runner mid-job (apply = graceful runner shutdown → `quitAndInstall`). Activation gate:
 >   `app.isPackaged` && (packaged `app-update.yml` [lands when a `publish` config is added] ||
 >   `EVERDICT_UPDATE_FEED_URL` env → generic feed via a userData config injected through
@@ -20,7 +20,7 @@
 > - **D7 — the desktop fully absorbs the pairing surface (LOCKED 2026-07-03).** The browser web no longer
 >   offers manual device pairing (the token-shown-once modal is removed): personal-machine pairing is the
 >   desktop's one-click only, and the browser account page becomes **manage-only** (list · live status ·
->   revoke) + a "데스크톱 앱 받기" CTA (`DESKTOP_DOWNLOAD_URL`). The server surface is unchanged —
+>   revoke) + a "Get the desktop app" CTA (`DESKTOP_DOWNLOAD_URL`). The server surface is unchanged —
 >   `POST /runners` (BFF+MCP `pair_runner`) stays, which is also the **headless path**: on a server/CI box,
 >   create the pairing with an API key (`curl -H "Authorization: Bearer ak_…" -X POST /runners`) and feed
 >   the returned `rnr_` token to `everdict runner --pair`.
@@ -28,7 +28,7 @@
 >   `EVERDICT_WEB_URL` env (dev/e2e) > `config.json webUrl` (user-saved) > CI-baked default
 >   (`EVERDICT_DESKTOP_DEFAULT_WEB_URL` repo Variable → esbuild `define` at package time). None → a local
 >   **first-run setup screen** (`assets/setup.html`) asks for the server address; also reachable from the
->   tray ("서버 주소 변경…"). The setup window gets its own 2-method bridge (`window.everdictSetup`:
+>   tray ("Change server address…"). The setup window gets its own 2-method bridge (`window.everdictSetup`:
 >   get/setServerUrl) behind a `--everdict-setup` argv flag, and the main-side IPC only accepts calls whose
 >   `senderFrame` is exactly the local setup.html `file://` URL. Changing the server rebuilds the app
 >   window (old preload origin args are stale) and the runner bridge origin-guard reads the *current*
@@ -53,7 +53,7 @@
 > - **D3 — the runner rides along, paired one-click from the logged-in session.** The desktop's native
 >   payload is the [self-hosted runner](./self-hosted-runner.md): the runner loop (extracted to
 >   `packages/runner-core`) runs in the Electron main process. Pairing needs **zero token copy-paste**:
->   the account page, when it detects the desktop bridge, offers "이 기기를 러너로 연결" → the web (already
+>   the account page, when it detects the desktop bridge, offers "Connect this device as a runner" → the web (already
 >   authenticated as the user) calls the existing pair API → hands the `rnr_` token to the bridge → main
 >   process stores it in the OS keychain and starts the runner. Ownership stays personal (self-hosted-runner
 >   D1) — the desktop just removes the friction.
@@ -139,19 +139,19 @@ Preload-exposed, only when `new URL(window.location).origin === configuredWebOri
   main stores it (keychain) and starts the runner. The token crosses the bridge once, is never persisted
   by the web, and never comes *back* up.
 - `runnerStatus(): Promise<{ state: "off"|"idle"|"running"; runnerId?, label?, capabilities?, activeJobs? }>`
-  + a `subscribe` event for live updates — lets the account page's 연결된 러너 roster show *this device*
+  + a `subscribe` event for live updates — lets the account page's connected-runners roster show *this device*
   truthfully instead of `lastSeenAt` guessing.
 - `unpairRunner(): Promise<void>` — stop + forget keychain entry (web still calls the revoke API — the
   authority stays server-side).
-- `appInfo(): { version, platform }` — for the account page to render "이 기기" affordances at all.
+- `appInfo(): { version, platform }` — for the account page to render "this device" affordances at all.
 
 That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
 
 ### One-click pairing flow (D3)
 
 1. Member opens the desktop app → logs into Keycloak in the webview (first run only; cookies persist).
-2. Account page (`/<ws>/account`) sees `window.everdictDesktop` → the 연결된 러너 section shows
-   **"이 기기를 러너로 연결"** (prefilled label = hostname from `appInfo`).
+2. Account page (`/<ws>/account`) sees `window.everdictDesktop` → the connected-runners section shows
+   **"Connect this device as a runner"** (prefilled label = hostname from `appInfo`).
 3. Click → web calls the **existing** pair endpoint (BFF, user session) → gets the shown-once `rnr_`
    token → `everdictDesktop.pairRunner({ token, apiUrl, label })` → main stores in keychain, starts
    `RunnerHost`, long-poll begins → presence dot goes green.
@@ -166,7 +166,7 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
   auto-advertise per self-hosted-service-runner); surfaced as a status row, not a log-line banner.
 - **OS notifications** — job/scorecard completion notifies locally (the local analog of the Mattermost
   notify path); click → deep-link the window to the run/scorecard page.
-- **Autostart** — OS login item (Electron `setLoginItemSettings`), so "부팅하면 떠 있는 러너" holds.
+- **Autostart** — OS login item (Electron `setLoginItemSettings`), so "a runner that's up at boot" holds.
 - **Updates** — electron-updater for the shell; **UI updates need no desktop release** (D1 payoff — the
   web deploys, the desktop just renders it).
 
@@ -189,27 +189,27 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
 2. ✅ (`e2b903a`) **Shell** — `apps/desktop` Electron app: BrowserWindow on the deployed web URL, persistent session
    (Keycloak login sticks), navigation policy (top-level http/https allowed — OIDC/OAuth redirect flows
    must leave and re-enter the web origin; `window.open` to non-web origins → system browser), tray
-   skeleton, autostart toggle. No runner yet — this alone already *is* "웹처럼 동일하게".
+   skeleton, autostart toggle. No runner yet — this alone already *is* "identical to the web".
    (electron-updater moves to slice 5 — it belongs with electron-builder packaging.)
 3. ✅ **Bridge + one-click pairing** — preload `window.everdictDesktop` (origin-gated: preload arg-origin gate +
    main-side `senderFrame` check), `safeStorage` keychain token store, `RunnerHost` (runner-core facade:
    start/stop/status events over `runLeaseWorkers`) embedded via `RunnerController` (pair/unpair/restore-on-boot);
-   web: desktop-aware "이 기기를 러너로 연결" one-click (label=hostname, token never shown — bridge-only) +
-   live "이 기기" status row (running(n)/온라인) replacing the `lastSeenAt` heuristic for this device.
-4. ✅ **Runner surface polish** — tray status row + tooltip (미페어/온라인 대기/실행 중 (n)) and
+   web: desktop-aware "Connect this device as a runner" one-click (label=hostname, token never shown — bridge-only) +
+   live "this device" status row (running(n)/online) replacing the `lastSeenAt` heuristic for this device.
+4. ✅ **Runner surface polish** — tray status row + tooltip (not paired / online idle / running (n)) and
    tray-local unpair (token discard + stop; server-side revoke stays the web's authority); OS
-   notification per **drain** (running→idle transition, 성공/실패 aggregate — per-case notify would
-   spam batches; click → focus window); web "이 기기" row prefers **live** capabilities from the
-   bridge (+ "docker 없음 → service 하니스 불가" hint), so a docker daemon stopped after pairing
+   notification per **drain** (running→idle transition, success/failure aggregate — per-case notify would
+   spam batches; click → focus window); web "this device" row prefers **live** capabilities from the
+   bridge (+ "no docker → service harnesses unavailable" hint), so a docker daemon stopped after pairing
    shows immediately.
 5. ✅ **Packaging + live e2e** — linux: esbuild single-file bundle (main ESM + preload CJS,
    `electron` external — avoids packing pnpm-symlinked `node_modules` into asar; `extraMetadata.main`
    swaps the entry only in the package) + electron-builder AppImage (`pnpm -F @everdict/desktop package`,
    NOT in turbo gates), packaged binary smoke-verified. **Download link**: `DESKTOP_DOWNLOAD_URL`
-   (web env, optional) → 계정 > 연결된 러너 shows a "데스크톱 앱을 설치" link to browser users only
+   (web env, optional) → Account > Connected runners shows an "Install the desktop app" link to browser users only
    (hidden inside the desktop). **Live e2e PASS** (`scripts/live/desktop-runner.mjs`, 2026-07-03):
    Playwright drives the real Electron shell (clean `XDG_CONFIG_HOME` = fresh machine) → account page
-   one-click "이 기기를 러너로 연결" → runner online with live "이 기기" row → run pinned to
+   one-click "Connect this device as a runner" → runner online with live "this device" row → run pinned to
    `self:<id>` executes on the desktop → `provenance{ranOn:self-hosted, runner, by}` verified.
    Keyring-less Linux needed one product fix: opt in to safeStorage `basic_text` with a logged warning
    (VSCode-style), else `isEncryptionAvailable()=false` blocks pairing.
@@ -230,12 +230,12 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    + an all-platforms list + post-install steps + unsigned caveats. Actual downloads go through
    `GET /api/desktop/download?id=…`: session-checked (`currentPrincipal`), asset id validated against **our**
    desktop release only, then GitHub's octet-stream 302 → **signed temporary URL** is passed to the browser
-   (big files never stream through the web server). The 러너 tab CTA links here (internal) instead of an
+   (big files never stream through the web server). The Runners tab CTA links here (internal) instead of an
    external URL; `DESKTOP_DOWNLOAD_URL` remains as the page's fallback when no token is configured.
    Live-verified: page renders v0.1.0 assets from the private repo; valid id → 302 to
    `release-assets.githubusercontent.com`; foreign id → 404.
 8. ✅ **Auto-update client** (D6) — `UpdaterController` (`updater.ts`, DI + vitest) + tray UX
-   (`업데이트 다운로드 중… (n%)` disabled row → `vX 업데이트 적용 (재시작)` action) + ready OS
+   (`Downloading update… (n%)` disabled row → `Apply vX update (restart)` action) + ready OS
    notification; apply = graceful runner shutdown → `quitAndInstall(false, true)` with the
    before-quit preventDefault path flagged off. **Live-verified** (2026-07-03, packaged AppImage vs
    local generic feed): idle → checking → found 0.2.0 → downloading (126MB fresh) → sha512 verify →

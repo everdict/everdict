@@ -37,7 +37,7 @@ export default async function SchedulesPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 소유자 표기(members 조인)는 부가 정보 — 실패해도 목록 자체는 보인다. (스코어카드 목록과 동일 패턴)
+  // The owner label (members join) is supplementary — the list still shows even if it fails. (Same pattern as the scorecard list.)
   const members = await controlPlane
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
@@ -49,9 +49,9 @@ export default async function SchedulesPage({
       ...(m.avatarUrl ? { avatarUrl: m.avatarUrl } : {}),
     }
 
-  // 다음 발사 시각: 컨트롤플레인이 Temporal 로 계산한 nextFireTimes 가 있으면 그걸(authoritative) 쓰고,
-  // 없으면(Temporal 미배포) cron 으로 근사한다. now 고정 → 상대 날짜 라벨이 서버/클라 동일(hydration 안전).
-  // 일시중지 예약은 발사하지 않으므로 빈 배열.
+  // Next fire time: if the control plane has nextFireTimes computed via Temporal, use those (authoritative),
+  // otherwise (Temporal not deployed) approximate with cron. Fixing now → relative date labels are identical on server/client (hydration-safe).
+  // A paused schedule doesn't fire, so an empty array.
   const now = new Date()
   const nowIso = now.toISOString()
   const fires: Record<string, string[]> = {}

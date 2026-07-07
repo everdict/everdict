@@ -1,20 +1,20 @@
-// 라이브 e2e (SLICE 56): per-run judge 모델 설정이 컨트롤플레인 → alloc/agent 로 주입되어 judge 가 작동.
-//   - 모델/프로바이더는 job.judge (시크릿 아님, 컨트롤플레인이 잡에 실음)
-//   - 프로바이더 '키'는 env(OPENAI_API_KEY/BASE_URL = 백엔드 secretEnv 가 alloc 에 주입하는 것을 모사)
-// process.env.EVERDICT_JUDGE_MODEL 은 일부러 비운다 → 모델은 오직 job.judge 에서 와야 한다.
+// Live e2e (SLICE 56): per-run judge model config is injected control plane → alloc/agent so the judge works.
+//   - model/provider come from job.judge (not a secret; the control plane puts it on the job)
+//   - the provider 'key' comes from env (OPENAI_API_KEY/BASE_URL = mimics what the backend secretEnv injects into the alloc)
+// process.env.EVERDICT_JUDGE_MODEL is intentionally cleared → the model must come only from job.judge.
 import process from "node:process";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { buildNomadJob } from "../../packages/backends/dist/index.js";
 
-// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(모델은 env 가 아니라 job.judge 로만 와야 함을 강제)
+// biome-ignore lint/performance/noDelete: clearing the process.env key is intentional (forces the model to come only from job.judge, not env)
 delete process.env.EVERDICT_JUDGE_MODEL;
-// biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(테스트 격리)
+// biome-ignore lint/performance/noDelete: clearing the process.env key is intentional (test isolation)
 delete process.env.EVERDICT_JUDGE_PROVIDER;
 
 const job = {
   harness: { id: "scripted", version: "1.0.0" },
   tenant: "acme",
-  judge: { provider: "openai", model: process.env.LLM_MODEL ?? "gpt-5.4-mini" }, // per-run 설정(컨트롤플레인이 결정)
+  judge: { provider: "openai", model: process.env.LLM_MODEL ?? "gpt-5.4-mini" }, // per-run config (the control plane decides)
   evalCase: {
     id: "create-file",
     env: { kind: "repo", source: { files: {} } },
@@ -34,14 +34,14 @@ const job = {
   },
 };
 
-// 1) 백엔드 주입 계약: buildNomadJob 이 job.judge → alloc env(EVERDICT_JUDGE_MODEL/PROVIDER), 키는 secretEnv.
+// 1) Backend injection contract: buildNomadJob maps job.judge → alloc env (EVERDICT_JUDGE_MODEL/PROVIDER), key via secretEnv.
 const spec = buildNomadJob(job, {
   addr: "http://nomad:4646",
   image: "reg/everdict-agent:1",
   secretEnv: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "", OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? "" },
 });
 const allocEnv = spec.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
-console.log("=== 컨트롤플레인 → Nomad alloc env 주입 ===");
+console.log("=== control plane → Nomad alloc env injection ===");
 console.log(
   `  EVERDICT_JUDGE_MODEL=${allocEnv.EVERDICT_JUDGE_MODEL}  EVERDICT_JUDGE_PROVIDER=${allocEnv.EVERDICT_JUDGE_PROVIDER}`,
 );
@@ -49,8 +49,8 @@ console.log(
   `  OPENAI_API_KEY=${allocEnv.OPENAI_API_KEY ? "<set via secretEnv>" : "<missing>"}  OPENAI_BASE_URL=${allocEnv.OPENAI_BASE_URL || "<unset>"}`,
 );
 
-// 2) 실제 dispatch(runAgentJob): 모델은 job.judge 에서, 키는 env(secretEnv 모사)에서 → 실 모델 판정.
-console.log("\n=== runAgentJob — 모델은 job.judge, 키는 env(secretEnv) → 실 judge ===");
+// 2) Real dispatch (runAgentJob): model from job.judge, key from env (mimicking secretEnv) → real model verdict.
+console.log("\n=== runAgentJob — model from job.judge, key from env(secretEnv) → real judge ===");
 const result = await runAgentJob(job);
 const j = result.scores.find((s) => s.metric === "judge");
 console.log(`  scores: ${result.scores.map((s) => s.graderId).join(", ")}`);
@@ -66,7 +66,7 @@ const ok =
 
 console.log(
   ok
-    ? "\n✅ SLICE 56: per-run judge 모델 설정(job.judge)이 컨트롤플레인 → alloc env 로 주입되고(키는 secretEnv 분리), agent 가 그 모델로 실 judge 채점. process.env 에 모델이 없어도 동작 = 잡-반송 설정이 원격 alloc 까지 도달."
-    : "\n⚠️ 기대와 불일치",
+    ? "\n✅ SLICE 56: the per-run judge model setting (job.judge) is injected from the control plane → alloc env (the key kept separate in secretEnv), and the agent does real judge scoring with that model. It works even with no model in process.env = the job-carried setting reaches the remote alloc."
+    : "\n⚠️ does not match expectation",
 );
 process.exit(ok ? 0 : 1);

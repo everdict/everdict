@@ -16,8 +16,8 @@ import {
 } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-// eval 케이스의 env(kind)/grader(id) 를 사람이 읽는 한글 라벨 + 아이콘 + 설명(툴팁)으로. 잡 jargon 을
-// 의미로 — env=에이전트가 조작하는 세계, grader=채점 방식. 데이터셋 상세/스코어카드 등에서 공통 사용.
+// Render an eval case's env(kind)/grader(id) as a human-readable label + icon + description (tooltip). Turn raw jargon
+// into meaning — env=the world the agent operates on, grader=the scoring method. Shared across dataset detail/scorecards, etc.
 
 type Meta = { labelKey: string; Icon: LucideIcon; hintKey: string }
 
@@ -39,7 +39,7 @@ const GRADER: Record<string, Meta> = {
   latency: { labelKey: 'graderLatency', Icon: Timer, hintKey: 'graderLatencyHint' },
 }
 
-// 환경 배지 — tint 배경 + inset ring(강조). 아이콘 + 한글 라벨, hover 로 설명.
+// Environment badge — tint background + inset ring (emphasis). Icon + label, description on hover.
 export function EnvBadge({ kind }: { kind: string }) {
   const t = useTranslations('ui')
   const m = ENV[kind]
@@ -57,7 +57,7 @@ export function EnvBadge({ kind }: { kind: string }) {
   )
 }
 
-// 채점 배지 — 옅은 muted(보조). 아이콘 + 한글 라벨, hover 로 설명.
+// Grading badge — faint muted (secondary). Icon + label, description on hover.
 export function GraderBadge({ id }: { id: string }) {
   const t = useTranslations('ui')
   const m = GRADER[id]

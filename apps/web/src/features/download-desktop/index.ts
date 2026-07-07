@@ -1,4 +1,4 @@
-// 배럴은 UI+타입만 — api/releases 는 'server-only'(토큰 사용)라 서버 소비자(page/route)가 깊은 경로로
-// 직접 import 한다(클라이언트 번들 오염 방지).
+// The barrel exposes UI+types only — api/releases is 'server-only' (uses the token), so server consumers (page/route) import it
+// directly via the deep path (avoids polluting the client bundle).
 export type { DesktopAsset, DesktopOs, DesktopRelease } from './api/releases'
 export { DownloadPanel } from './ui/download-panel'

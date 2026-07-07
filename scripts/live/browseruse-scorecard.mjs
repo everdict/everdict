@@ -1,10 +1,11 @@
-// 라이브 e2e (service-topology): browser-use 하니스로 *멀티-케이스 스코어카드* + 모델 A/B diff.
-// 데이터셋(여러 web 태스크)을 두 모델(gpt-5.4-mini vs chatgpt/gpt-5.4 = 두 하니스 버전)로 각각 돌려 CaseResult[] 를
-// Scorecard 로 모으고, summarizeScorecard(메트릭별 통과율/평균 cost·steps) + diffScorecards(pass 전이 회귀/개선 + 메트릭
-// delta)로 A/B 비교. = 컨트롤플레인의 ScorecardService(runSuite→summarize→diff) 가 하는 일을 실 browser-use 로.
+// Live e2e (service-topology): *multi-case scorecard* + model A/B diff with the browser-use harness.
+// Run a dataset (several web tasks) against two models (gpt-5.4-mini vs chatgpt/gpt-5.4 = two harness versions),
+// collect the CaseResult[] into a Scorecard, then compare A/B via summarizeScorecard (per-metric pass rate /
+// mean cost·steps) + diffScorecards (pass-transition regressions/improvements + metric delta). = what the
+// control plane's ScorecardService (runSuite→summarize→diff) does, driven by real browser-use.
 //
-// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
-// 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
+// Prereqs: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
+// Key: OPENAI_API_KEY env or infra/litellm/.env(LITELLM_MASTER_KEY) — runtime only, never committed.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -33,12 +34,12 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env).");
+  console.error("No LLM key (OPENAI_API_KEY or infra/litellm/.env).");
   process.exit(2);
 }
 const cleanup = () => spawnSync("docker", ["rm", "-f", NAME], { stdio: "ignore" });
 
-// 데이터셋 — 여러 web 태스크(컨테이너 폼 검색 2종 + 외부 Wikipedia 1종). caseId 는 모델 간 동일(diff 매칭용).
+// Dataset — several web tasks (2 container form searches + 1 external Wikipedia). caseId is shared across models (for diff matching).
 const DATASET = [
   {
     id: "form-everdict",
@@ -122,10 +123,10 @@ function makeBackend(version) {
   });
 }
 
-// 한 모델(=하니스 버전)로 데이터셋 전체 → Scorecard.
+// One model (= harness version) over the whole dataset → Scorecard.
 async function runModel(model, version) {
   cleanup();
-  console.log(`\n### 하니스 browseruse@${version} (model=${model}) — ${DATASET.length} 케이스 ###`);
+  console.log(`\n### harness browseruse@${version} (model=${model}) — ${DATASET.length} cases ###`);
   execFileSync(
     "docker",
     [
@@ -191,7 +192,7 @@ async function runModel(model, version) {
 }
 
 function printSummary(sc) {
-  console.log(`\n[${sc.harness}] 요약:`);
+  console.log(`\n[${sc.harness}] summary:`);
   for (const m of summarizeScorecard(sc)) {
     const pr = m.passRate !== undefined ? ` passRate=${(m.passRate * 100).toFixed(0)}%` : "";
     console.log(`  ${m.metric}: n=${m.count} mean=${m.mean.toFixed(6)}${pr}`);
@@ -207,14 +208,14 @@ try {
 
   const diff = diffScorecards(A, B);
   console.log(`\n=== diffScorecards(${diff.baseline} → ${diff.candidate}) ===`);
-  console.log("메트릭 delta:");
+  console.log("metric delta:");
   for (const m of diff.metrics) {
     console.log(
       `  ${m.metric}: ${m.baselineMean.toFixed(6)} → ${m.candidateMean.toFixed(6)} (Δ ${m.delta.toFixed(6)})`,
     );
   }
-  console.log(`개선(fixed): ${JSON.stringify(diff.improvements.map((d) => `${d.caseId}/${d.metric}`))}`);
-  console.log(`회귀(broke): ${JSON.stringify(diff.regressions.map((d) => `${d.caseId}/${d.metric}`))}`);
+  console.log(`improvements(fixed): ${JSON.stringify(diff.improvements.map((d) => `${d.caseId}/${d.metric}`))}`);
+  console.log(`regressions(broke): ${JSON.stringify(diff.regressions.map((d) => `${d.caseId}/${d.metric}`))}`);
 
   const passRate = (sc) => {
     const m = summarizeScorecard(sc).find((x) => x.metric === "url_matches");
@@ -223,10 +224,10 @@ try {
   ok = A.results.length === DATASET.length && B.results.length === DATASET.length;
   console.log(
     ok
-      ? `\n✅ ①: browser-use 하니스로 ${DATASET.length}-케이스 데이터셋을 두 모델(mini/gpt-5.4)로 돌려 Scorecard 2개 생성 — ` +
-          `summarizeScorecard 로 메트릭별 통과율/평균 cost·steps 집계(mini url_matches passRate=${(passRate(A) * 100).toFixed(0)}%, ` +
-          `gpt-5.4=${(passRate(B) * 100).toFixed(0)}%), diffScorecards 로 A/B(메트릭 delta + pass 전이) 비교. 실 browser-use 로 컨트롤플레인 스코어카드 경로 실증.`
-      : "\n⚠️ 일부 케이스 dispatch 실패(위 로그 참고)",
+      ? `\n✅ ①: ran a ${DATASET.length}-case dataset through the browser-use harness on two models (mini/gpt-5.4) to produce 2 Scorecards — ` +
+          `summarizeScorecard aggregates per-metric pass rate / mean cost·steps (mini url_matches passRate=${(passRate(A) * 100).toFixed(0)}%, ` +
+          `gpt-5.4=${(passRate(B) * 100).toFixed(0)}%), diffScorecards compares A/B (metric delta + pass transitions). Real browser-use proves out the control-plane scorecard path.`
+      : "\n⚠️ some cases failed to dispatch (see logs above)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

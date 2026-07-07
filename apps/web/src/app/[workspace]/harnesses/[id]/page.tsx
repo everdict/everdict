@@ -45,7 +45,7 @@ const KIND_TONE: Record<HarnessKind, 'info' | 'warning' | 'neutral'> = {
   process: 'neutral',
 }
 
-// 메타 항목 — 구성 값 리스트(DefRow)와 동일한 라벨(왼)·값(오) 행. divided Card 안에서 반복.
+// Meta item — a label(left)·value(right) row, same as the config value list (DefRow). Repeated inside a divided Card.
 function MetaItem({
   label,
   title,
@@ -104,13 +104,13 @@ export default async function HarnessDetailPage({
     versions = detail.versions
     versionTags = detail.versionTags ?? {}
     const requested = typeof v === 'string' && versions.includes(v) ? v : undefined
-    active = requested ?? versions[versions.length - 1] // latest = semver/등록순 최상위
+    active = requested ?? versions[versions.length - 1] // latest = semver/registration-order topmost
     if (active) spec = harnessSpecSchema.parse(await controlPlane.getHarnessSpec(ctx, id, active))
   } catch (e) {
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 목록 메타(분류·등록자·시각) + 만든이 이름(members 조인) — 부가 정보라 실패해도 상세는 보인다.
+  // List meta (classification·registrant·time) + creator name (members join) — supplementary info, so the detail view still renders even if it fails.
   const entry: Harness | undefined = await controlPlane
     .listHarnesses(ctx)
     .then((r) => harnessesSchema.parse(r).find((h) => h.id === id))
@@ -120,7 +120,7 @@ export default async function HarnessDetailPage({
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
   const currentWorkspace = principal?.workspace ?? workspace
-  // 만든이 — 프로필 이름+아바타(있으면). 시드/_shared(다른 소유·createdBy 없음)는 first-party 로 표기.
+  // Creator — profile name+avatar (if any). Seed/_shared (different owner·no createdBy) are shown as first-party.
   const author = (() => {
     if (!entry?.createdBy) {
       return {
@@ -136,8 +136,8 @@ export default async function HarnessDetailPage({
     }
   })()
 
-  // 원본 구성(템플릿 참조 + pins) + 이 버전의 변경 내역(description). 새 버전 편집의 출발점.
-  // resolve 와 별개라 실패해도 상세는 계속 표시. description 은 인스턴스에만 있어(템플릿 fetch 성패와 무관) 따로 뽑아둔다.
+  // Original config (template reference + pins) + this version's changelog (description). The starting point for editing a new version.
+  // Separate from resolve, so the detail keeps rendering even if it fails. description lives only on the instance (independent of template fetch success), so it's pulled out separately.
   let config: { instance: HarnessInstanceSpec; template: HarnessTemplateSpec } | undefined
   let versionNote: string | undefined
   if (active && spec) {
@@ -156,15 +156,15 @@ export default async function HarnessDetailPage({
     }
   }
 
-  // 버전 태그 편집 가능 여부 — 등록과 동일 게이트(harnesses:register) + 이 워크스페이스 소유일 때만
-  // (_shared/first-party 는 컨트롤플레인이 404 로 거부하므로 편집 UI 자체를 숨긴다).
+  // Whether version tags are editable — same gate as registration (harnesses:register) + only when owned by this workspace
+  // (_shared/first-party are rejected by the control plane with 404, so the edit UI itself is hidden).
   const canTagVersions =
     can(principal?.roles, 'harnesses:register') &&
     entry !== undefined &&
     entry.owner === currentWorkspace
 
-  // 워크스페이스 이미지 레지스트리 좌표(viewer+, 복수) — 서비스/커맨드 이미지의 출처 분류 배지용
-  // (어느 레지스트리든 매칭되면 workspace). 실패해도 상세는 렌더.
+  // Workspace image registry coordinates (viewer+, multiple) — for the provenance-classification badge of service/command images
+  // (matches any registry → workspace). The detail renders even if it fails.
   const imageRegistries = await controlPlane
     .listImageRegistries(ctx)
     .then((r) => imageRegistriesResponseSchema.parse(r).registries)
@@ -174,16 +174,16 @@ export default async function HarnessDetailPage({
     ...(r.namespace ? { namespace: r.namespace } : {}),
   }))
 
-  // 트레이스 싱크(복수) + 이 하니스의 선택(assignment) — 채점 상세를 어느 관측 플랫폼에 적재할지.
-  // 실패해도 상세는 렌더(선택 행만 숨김).
+  // Trace sinks (multiple) + this harness's selection (assignment) — which observability platform to load the grading detail into.
+  // The detail renders even if it fails (only the selection row is hidden).
   const traceSinks: TraceSinksResponse = await controlPlane
     .listTraceSinks(ctx)
     .then((r) => traceSinksResponseSchema.parse(r))
     .catch(() => ({ sinks: [], assignments: {} }))
   const assignedSink: string | undefined = traceSinks.assignments[id]
 
-  // CI 연동(레포 링크) — 이 하니스에 매칭된 링크 + 레포 picker 에 필요한 내 GitHub 연결 + 데이터셋 후보.
-  // 셋 다 실패해도 상세는 계속 렌더(패널만 빈 상태). 저장/해제는 admin(settings:write) — 컨트롤플레인이 최종 강제.
+  // CI integration (repo link) — links matched to this harness + my GitHub connection needed for the repo picker + dataset candidates.
+  // The detail keeps rendering even if all three fail (only the panel is empty). Save/unlink is admin (settings:write) — the control plane is the final enforcer.
   let ciLinks: CiLink[] = []
   let ciDatasets: string[] = []
   if (spec) {
@@ -211,7 +211,7 @@ export default async function HarnessDetailPage({
     )
   }
 
-  // kind 별 한 줄 요약 — 헤더 설명.
+  // One-line summary per kind — the header description.
   const summary =
     spec.kind === 'service'
       ? t('summaryService', {
@@ -258,7 +258,7 @@ export default async function HarnessDetailPage({
         />
       </div>
 
-      {/* 이 버전의 변경 내역(description) — 배포 때 입력한 자유 메모. 없으면 섹션 자체를 숨긴다(빈 섹션 노출 금지). */}
+      {/* This version's changelog (description) — a free-form note entered at deploy time. Hide the section itself if absent (don't render empty sections). */}
       {versionNote && (
         <Card className="p-5">
           <div className="mb-2 flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -271,7 +271,7 @@ export default async function HarnessDetailPage({
         </Card>
       )}
 
-      {/* 메타 — 라벨(왼)·값(오) 항목을 반응형 그리드로. 화면이 넓을수록 열을 늘려(2→3→4) 넉넉히 펼친다. */}
+      {/* Meta — label(left)·value(right) items in a responsive grid. The wider the screen, the more columns (2→3→4) to spread out generously. */}
       <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
         <MetaItem label={t('metaKind')}>
           <Badge tone={KIND_TONE[spec.kind]}>{spec.kind}</Badge>
@@ -288,8 +288,8 @@ export default async function HarnessDetailPage({
             {t('versionCountMeta', { count: versions.length || 1 })}
           </span>
         </MetaItem>
-        {/* 이 버전의 태그(자유 라벨) — 편집 불가 + 태그 없음이면 행 자체를 숨긴다(빈 섹션 노출 금지).
-            _shared(first-party) 하니스는 태깅 불가(레지스트리가 404) → 소유 워크스페이스일 때만 편집 노출. */}
+        {/* This version's tags (free-form labels) — hide the row itself if not editable + no tags (don't render empty sections).
+            _shared (first-party) harnesses can't be tagged (registry 404s) → show editing only when owned by the workspace. */}
         {active && (canTagVersions || (versionTags[active] ?? []).length > 0) && (
           <MetaItem label={t('metaTags')}>
             <VersionTagsEditor
@@ -321,7 +321,7 @@ export default async function HarnessDetailPage({
           {author.known && <Avatar name={author.name} url={author.avatarUrl} size="sm" />}
           <span>{author.name}</span>
         </MetaItem>
-        {/* 하니스별 트레이스 싱크 선택 — 워크스페이스에 싱크가 없고 선택도 없으면 행 자체를 숨긴다(빈 섹션 노출 금지). */}
+        {/* Per-harness trace sink selection — hide the row itself if the workspace has no sinks and no selection (don't render empty sections). */}
         {(traceSinks.sinks.length > 0 || assignedSink !== undefined) && (
           <MetaItem label={t('metaTraceSink')}>
             <HarnessSinkSelect
@@ -341,7 +341,7 @@ export default async function HarnessDetailPage({
         )}
       </Card>
 
-      {/* 구성 — 이 하니스가 실제로 실행되는 최종 설정을 깔끔한 값 뷰로. 원본(pins/overrides)·JSON 은 접이식. */}
+      {/* Config — the final settings this harness actually runs with, in a clean value view. The raw (pins/overrides)·JSON is collapsible. */}
       <section className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">

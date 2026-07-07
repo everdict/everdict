@@ -9,19 +9,19 @@ import { useTranslations } from 'next-intl'
 import type { Workspace } from '@/entities/workspace'
 import { cn } from '@/shared/lib/utils'
 
-// 이름의 첫 글자 모노그램(워크스페이스 아바타).
+// First-letter monogram of the name (workspace avatar).
 function monogram(name: string): string {
   const c = name.trim()[0]
   return (c ?? '?').toUpperCase()
 }
 
-// 사이드바 최상단 워크스페이스 스위처(Linear 컨벤션): 현재 워크스페이스 + 드롭다운으로 전환 + "새 워크스페이스".
-// 계정/설정/로그아웃은 사이드바 하단 푸터가 담당한다(스위처와 역할 분리 → 칩 중복 제거).
+// Workspace switcher at the top of the sidebar (Linear convention): current workspace + switch via dropdown + "new workspace".
+// Account/settings/logout are handled by the footer at the bottom of the sidebar (role split from the switcher → removes chip duplication).
 export function WorkspaceSwitcher({
   current,
   workspaces,
 }: {
-  current: string // 활성 워크스페이스 id
+  current: string // active workspace id
   workspaces: Workspace[]
 }) {
   const t = useTranslations('workspaceSwitcher')
@@ -31,8 +31,8 @@ export function WorkspaceSwitcher({
   const active = workspaces.find((w) => w.id === current)
   const label = active?.name ?? current
 
-  // 워크스페이스 전환 = 그 워크스페이스 홈으로 이동(URL 이 활성 워크스페이스의 권위; 미들웨어가 쿠키 동기화).
-  // 리소스 상세(/runs/[id] 등)는 대상 워크스페이스에 없을 수 있어 개요로 이동한다.
+  // Switching workspace = navigate to that workspace's home (the URL is the authority for the active workspace; the middleware syncs the cookie).
+  // A resource detail (/runs/[id], etc.) may not exist in the target workspace, so navigate to the overview.
   function select(id: string) {
     setOpen(false)
     if (id === current) return
@@ -64,7 +64,7 @@ export function WorkspaceSwitcher({
 
       {open && (
         <>
-          {/* 바깥 클릭 닫기 */}
+          {/* Close on outside click */}
           <button
             type="button"
             aria-label={t('close')}

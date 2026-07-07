@@ -1,6 +1,6 @@
--- 0005_create_datasets — additive (expand): 데이터셋 버전 SSOT 영속 테이블.
--- (tenant, id, version) 는 불변 — 코드(PgDatasetRegistry)가 다른 내용 재등록을 거부한다.
--- 하니스와 달리 처음부터 테넌트 소유권 포함(_shared = first-party 벤치마크 폴백).
+-- 0005_create_datasets — additive (expand): the dataset-version SSOT persistence table.
+-- (tenant, id, version) is immutable — the code (PgDatasetRegistry) rejects re-registering different content.
+-- Unlike harnesses, tenant ownership is included from the start (_shared = first-party benchmark fallback).
 CREATE TABLE IF NOT EXISTS everdict_datasets (
   tenant     text NOT NULL,
   id         text NOT NULL,

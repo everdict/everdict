@@ -5,9 +5,9 @@ import { useTranslations } from 'next-intl'
 
 import { Combobox } from '@/shared/ui/combobox'
 
-// 하니스 상세의 버전 선택 — ?v= 로 이동(서버가 해당 버전을 조회). 버전이 아무리 많아도 드롭다운 하나로
-// 축약한다(칩을 전부 나열하지 않음). 옵션이 많으면 Combobox 가 검색을 자동 활성(7개 초과). latest 를 위로.
-// 페이지 헤더 우측에 놓이는 컴팩트 컨트롤 — 라벨 없이 aria-label 로만(값 자체가 vX.Y.Z 라 자명).
+// Version selection on the harness detail — navigates via ?v= (the server fetches that version). However many versions there are,
+// it condenses to a single dropdown (no listing every chip). When there are many options, the Combobox auto-enables search (over 7). latest on top.
+// A compact control placed at the right of the page header — no label, aria-label only (the value itself is vX.Y.Z, so it's self-evident).
 export function HarnessVersionSwitcher({
   id,
   versions,
@@ -19,7 +19,7 @@ export function HarnessVersionSwitcher({
   versions: string[]
   current: string
   latest?: string
-  versionTags?: Record<string, string[]> // 버전 태그(자유 라벨) — 옵션 우측 hint 로 붙여 번호를 분간
+  versionTags?: Record<string, string[]> // version tags (free-form labels) — shown as a hint on the right of each option to tell numbers apart
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()

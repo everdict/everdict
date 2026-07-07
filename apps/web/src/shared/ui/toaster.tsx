@@ -2,8 +2,8 @@
 
 import { Toaster as SonnerToaster } from 'sonner'
 
-// Linear st. 토스트(sonner) — 앱 디자인 토큰(popover/border/foreground)으로 스타일해 .dark 클래스 토글에
-// 자동으로 라이트/다크 대응한다. 성공 아이콘(체크)만 sonner 기본을 쓰고 배경은 앱 톤으로.
+// Linear st. toast (sonner) — styled with the app's design tokens (popover/border/foreground) so it responds to the .dark
+// class toggle for light/dark automatically. Only the success icon (check) uses sonner's default; the background uses the app tone.
 export function Toaster() {
   return (
     <SonnerToaster

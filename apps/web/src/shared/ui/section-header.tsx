@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-// 섹션 제목 + 우측 액션(예: "전체 보기" 링크). Linear st. 14px 세미볼드.
+// Section title + right-side action (e.g. a "view all" link). Linear st. 14px semibold.
 export function SectionHeader({ title, action }: { title: ReactNode; action?: ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-3">

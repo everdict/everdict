@@ -1,33 +1,33 @@
 import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSpec } from "@everdict/core";
 
-// 데이터셋 인제스트(매핑 레이어): 외부 벤치마크 포맷(WebVoyager jsonl / 임의 jsonl / csv) → 테넌트-소유 Everdict
-// `Dataset`(EvalCase[]). 멀티테넌트 SaaS 에서 유저가 자기 데이터셋을 쉽게 워크스페이스에 추가하려면, 자기 포맷을
-// EvalCase 로 변환하는 매핑 레이어가 필요하다(레지스트리는 Everdict Dataset 스키마만 받으므로). 결과는 register(tenant).
+// Dataset ingest (mapping layer): external benchmark formats (WebVoyager jsonl / arbitrary jsonl / csv) → tenant-owned Everdict
+// `Dataset` (EvalCase[]). In a multi-tenant SaaS, for a user to easily add their dataset to the workspace, a mapping layer that converts
+// their format into EvalCase is needed (the registry only accepts the Everdict Dataset schema). The result is register(tenant).
 
-// 외부 행(레코드) → EvalCase 매핑 규칙. 데이터 주도(함수 없음 → JSON 직렬화 가능, "설정으로 새 벤치마크").
-// env: gitField 있으면 repo env(코딩 벤치마크 SWE-bench), 아니면 browser env(startUrl 유무).
-// 채점: answerField→answer-match(answerMode 로 contains|exact), testCmdField→tests-pass(행별 cmd), extraGraders 항상.
+// External row (record) → EvalCase mapping rules. Data-driven (no functions → JSON-serializable, "a new benchmark by config").
+// env: with gitField, a repo env (coding benchmark SWE-bench); otherwise a browser env (with/without startUrl).
+// Scoring: answerField→answer-match (contains|exact via answerMode), testCmdField→tests-pass (per-row cmd), extraGraders always.
 export interface CaseMapping {
   idField: string;
   taskField: string;
-  taskTemplate?: string; // 있으면 task = {field} 보간 결과(여러 필드 합성 — 예: 질문+근거 문서 URL). 없으면 taskField 그대로.
-  startUrlField?: string; // 있으면 browser env(startUrl); 없으면 startUrl 없는 browser env
-  promptEnv?: boolean; // true 면 환경 없는 prompt env(QA — gsm8k/GAIA). repo/browser 보다 우선순위 낮음(git/repoPath 가 이김).
-  answerField?: string; // 있으면 answer-match{expect} grader 자동 추가
-  answerMode?: "contains" | "exact"; // answer-match 모드(기본 contains). GAIA 류 정답대조는 exact.
-  gitField?: string; // 있으면 repo env(source.git) — clone 기반 코딩 벤치마크
-  refField?: string; // repo env ref(없으면 HEAD)
-  repoPath?: string; // 있으면 repo env(source.path = 이미지-내 repo, 예: SWE-bench "/testbed") — clone 안 함
-  osUseEnv?: boolean; // true 면 os-use(데스크탑/컴퓨터-유즈) env — OSWorld 류. repo/git 이 있으면 그게 이김.
-  osUseSetup?: string[]; // os-use env.setup(공유; 예: Xvfb 기동 + 앱). 데이터 주도(JSON 배열).
-  display?: string; // os-use display(기본 ":99")
-  screenshotPath?: string; // os-use 스냅샷 경로(VLM judge 가 읽음)
-  imageField?: string; // 있으면 EvalCase.image(per-case 컴퓨트 이미지) — 예: SWE-bench 공식 prebuilt(deps+repo)
-  image?: string; // 모든 케이스 공통 컴퓨트 이미지(imageField 가 행별로 이김) — 예: OSWorld 데스크탑 이미지
-  placement?: string; // 모든 케이스 placement.target(등록된 런타임 id) — 컨트롤플레인 라우팅. image 케이스는 docker capability 로 라우팅되니 보통 불필요.
-  testCmdField?: string; // 있으면 tests-pass{cmd} (행별 테스트 명령)
-  tagFields?: string[]; // 태그로 쓸 필드들
-  extraGraders?: GraderSpec[]; // 항상 추가(예: steps, judge{rubric})
+  taskTemplate?: string; // If present, task = the {field}-interpolated result (composing multiple fields — e.g. question + evidence document URL). Otherwise taskField as-is.
+  startUrlField?: string; // If present, a browser env (startUrl); otherwise a browser env with no startUrl
+  promptEnv?: boolean; // If true, an environment-less prompt env (QA — gsm8k/GAIA). Lower priority than repo/browser (git/repoPath wins).
+  answerField?: string; // If present, auto-adds an answer-match{expect} grader
+  answerMode?: "contains" | "exact"; // answer-match mode (default contains). GAIA-style answer matching is exact.
+  gitField?: string; // If present, a repo env (source.git) — clone-based coding benchmark
+  refField?: string; // repo env ref (HEAD if absent)
+  repoPath?: string; // If present, a repo env (source.path = in-image repo, e.g. SWE-bench "/testbed") — no clone
+  osUseEnv?: boolean; // If true, an os-use (desktop/computer-use) env — OSWorld-style. If repo/git exists, that wins.
+  osUseSetup?: string[]; // os-use env.setup (shared; e.g. start Xvfb + app). Data-driven (JSON array).
+  display?: string; // os-use display (default ":99")
+  screenshotPath?: string; // os-use snapshot path (read by the VLM judge)
+  imageField?: string; // If present, EvalCase.image (per-case compute image) — e.g. SWE-bench's official prebuilt (deps+repo)
+  image?: string; // compute image common to all cases (imageField wins per-row) — e.g. an OSWorld desktop image
+  placement?: string; // placement.target for all cases (registered runtime id) — control-plane routing. image cases route by docker capability, so usually unnecessary.
+  testCmdField?: string; // If present, tests-pass{cmd} (per-row test command)
+  tagFields?: string[]; // fields to use as tags
+  extraGraders?: GraderSpec[]; // always added (e.g. steps, judge{rubric})
 }
 export interface DatasetMeta {
   id: string;
@@ -40,29 +40,29 @@ function str(v: unknown): string {
   return v === undefined || v === null ? "" : String(v);
 }
 
-// {field} 보간 — 행에서 값 치환(없으면 빈 문자열). taskTemplate/graderTemplates 가 공유.
+// {field} interpolation — substitute values from the row (empty string if absent). Shared by taskTemplate/graderTemplates.
 export function interpolateFields(tpl: string, row: Record<string, unknown>): string {
   return tpl.replace(/\{(\w+)\}/g, (_, k) => str(row[k]));
 }
 
-// 외부 행 → EvalCase (env/task/graders/tags). 매핑 규칙으로 변환.
+// External row → EvalCase (env/task/graders/tags). Converts via the mapping rules.
 export function rowToCase(row: Record<string, unknown>, i: number, meta: DatasetMeta, m: CaseMapping): EvalCase {
   const git = m.gitField ? str(row[m.gitField]) : "";
   let env: EnvSpec;
   if (m.repoPath) {
-    env = { kind: "repo", source: { path: m.repoPath } }; // 이미지-내 repo(예: /testbed) — clone 안 함
+    env = { kind: "repo", source: { path: m.repoPath } }; // in-image repo (e.g. /testbed) — no clone
   } else if (git) {
     const ref = m.refField ? str(row[m.refField]) : "";
     env = { kind: "repo", source: { git, ref: ref || "HEAD" } };
   } else if (m.osUseEnv) {
     env = {
-      kind: "os-use", // 데스크탑 컴퓨터-유즈(OSWorld) — 에이전트가 GUI 를 실 OS 입력으로 조작, 스냅샷을 VLM 이 채점
+      kind: "os-use", // desktop computer-use (OSWorld) — the agent manipulates the GUI with real OS input, a VLM scores the snapshot
       ...(m.display ? { display: m.display } : {}),
       ...(m.osUseSetup ? { setup: m.osUseSetup } : {}),
       ...(m.screenshotPath ? { screenshotPath: m.screenshotPath } : {}),
     };
   } else if (m.promptEnv) {
-    env = { kind: "prompt" }; // 환경 없는 QA(gsm8k/GAIA)
+    env = { kind: "prompt" }; // environment-less QA (gsm8k/GAIA)
   } else {
     const url = m.startUrlField ? str(row[m.startUrlField]) : "";
     env = url ? { kind: "browser", startUrl: url } : { kind: "browser" };
@@ -78,7 +78,7 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   }
   for (const g of m.extraGraders ?? []) graders.push(g);
   const tags = (m.tagFields ?? []).map((f) => str(row[f])).filter(Boolean);
-  const image = m.imageField ? str(row[m.imageField]) || (m.image ?? "") : (m.image ?? ""); // 행별 imageField > 공통 image
+  const image = m.imageField ? str(row[m.imageField]) || (m.image ?? "") : (m.image ?? ""); // per-row imageField > common image
   return {
     id: str(row[m.idField]) || `${meta.id}-${i}`,
     env,
@@ -91,7 +91,7 @@ export function rowToCase(row: Record<string, unknown>, i: number, meta: Dataset
   };
 }
 
-// 행 배열 → 검증된 Dataset (DatasetSchema.parse 가 기본값/검증 적용).
+// Row array → a validated Dataset (DatasetSchema.parse applies defaults/validation).
 export function rowsToDataset(rows: Array<Record<string, unknown>>, meta: DatasetMeta, m: CaseMapping): Dataset {
   return DatasetSchema.parse({
     id: meta.id,
@@ -102,7 +102,7 @@ export function rowsToDataset(rows: Array<Record<string, unknown>>, meta: Datase
   });
 }
 
-// 임의 JSONL(한 줄 1레코드) → Dataset.
+// Arbitrary JSONL (one record per line) → Dataset.
 export function importJsonl(text: string, meta: DatasetMeta, m: CaseMapping): Dataset {
   const rows = text
     .split("\n")
@@ -112,12 +112,12 @@ export function importJsonl(text: string, meta: DatasetMeta, m: CaseMapping): Da
   return rowsToDataset(rows, meta, m);
 }
 
-// 임의 CSV(헤더행 + 데이터행) → Dataset.
+// Arbitrary CSV (header row + data rows) → Dataset.
 export function importCsv(text: string, meta: DatasetMeta, m: CaseMapping): Dataset {
   return rowsToDataset(parseCsv(text), meta, m);
 }
 
-// WebVoyager(github.com/MinorJerry/WebVoyager) 프리셋: web→startUrl, ques→task, answer→answer-match, +steps.
+// WebVoyager (github.com/MinorJerry/WebVoyager) preset: web→startUrl, ques→task, answer→answer-match, +steps.
 export const WEBVOYAGER_MAPPING: CaseMapping = {
   idField: "id",
   taskField: "ques",
@@ -130,7 +130,7 @@ export function importWebVoyager(jsonl: string, meta: DatasetMeta): Dataset {
   return importJsonl(jsonl, meta, WEBVOYAGER_MAPPING);
 }
 
-// --- 최소 CSV 파서(따옴표 안의 쉼표/개행, "" 이스케이프, CRLF 처리). 런타임 의존성 없음. ---
+// --- Minimal CSV parser (commas/newlines inside quotes, "" escaping, CRLF handling). No runtime dependency. ---
 function csvRows(text: string): string[][] {
   const out: string[][] = [];
   let row: string[] = [];

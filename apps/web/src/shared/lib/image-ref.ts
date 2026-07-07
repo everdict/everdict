@@ -1,6 +1,6 @@
-// @everdict/core classifyImageRef 의 느슨한 클라이언트 미러(web 은 @everdict/* 무의존 — harnessInstanceSpecSchema 미러와 동일 관례).
-// 워크스페이스 레지스트리 관점의 이미지 참조 4분류. 판정 규칙은 컨트롤플레인이 SSOT
-// (docs/architecture/workspace-image-registry.md) — 여기 미러는 배지 표시용.
+// A loose client mirror of @everdict/core classifyImageRef (web has no @everdict/* deps — same convention as the harnessInstanceSpecSchema mirror).
+// The 4-way image reference classification from the workspace registry's viewpoint. The decision rules are the control plane's SSOT
+// (docs/architecture/workspace-image-registry.md) — this mirror is for badge display.
 export type ImageRefClass = 'workspace' | 'external' | 'local' | 'unqualified'
 
 export interface ImageRegistryCoordinates {
@@ -8,7 +8,7 @@ export interface ImageRegistryCoordinates {
   namespace?: string
 }
 
-// docker reference 규칙: 첫 경로 컴포넌트에 '.'/':' 가 있거나 "localhost" 일 때만 레지스트리 호스트.
+// docker reference rule: the first path component is a registry host only when it contains '.'/':' or is "localhost".
 function splitRef(ref: string): { host?: string; path: string } {
   const atIndex = ref.indexOf('@')
   let rest = atIndex >= 0 ? ref.slice(0, atIndex) : ref
@@ -27,7 +27,7 @@ function isLoopbackHost(host: string): boolean {
   return name === 'localhost' || name === '127.0.0.1' || name === '[::1]'
 }
 
-// registry — 워크스페이스 레지스트리가 복수라 배열도 받는다(어느 하나에 매칭되면 workspace).
+// registry — since a workspace can have multiple registries, an array is also accepted (matching any one → workspace).
 export function classifyImageRef(
   ref: string,
   registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[]

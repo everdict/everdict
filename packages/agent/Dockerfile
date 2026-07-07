@@ -1,16 +1,17 @@
-# 러너 에이전트 이미지 — Nomad/K8s 가 이걸 잡으로 띄운다.
-# 빌드(레포 루트에서): docker build -f packages/agent/Dockerfile -t <registry>/everdict-agent:<tag> .
+# Runner-agent image — Nomad/K8s launch this as a job.
+# Build (from repo root): docker build -f packages/agent/Dockerfile -t <registry>/everdict-agent:<tag> .
 FROM node:22-bookworm-slim
 
-# git(환경 시드) + claude CLI(피평가 하니스) + python3/venv/pip(선언형 command 하니스의 setup —
-# 예: Python CLI 에이전트를 venv 에 설치) 사전설치
+# Preinstall git (environment seed) + claude CLI (harness under test) + python3/venv/pip (setup for
+# declarative command harnesses — e.g. installing a Python CLI agent into a venv)
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates python3 python3-venv python3-pip \
   && rm -rf /var/lib/apt/lists/* \
   && npm i -g @anthropic-ai/claude-code
 
-# batteries-included: 흔한 OSS CLI 에이전트(aider)를 전용 venv 에 사전설치 → 매 run pip 설치 없이 빠르고
-# 안정적. command 하니스 spec 은 setup 을 비우고 `aider …`(PATH) 만 쓰면 된다(원하면 setup 으로 다른 버전 설치).
+# batteries-included: preinstall a common OSS CLI agent (aider) into a dedicated venv → fast and
+# stable, no pip install per run. A command harness spec can leave setup empty and just call `aider …`
+# (on PATH); to pin a different version, install it via setup.
 RUN python3 -m venv /opt/aider \
   && /opt/aider/bin/pip install --no-cache-dir -q aider-chat \
   && ln -s /opt/aider/bin/aider /usr/local/bin/aider
@@ -22,5 +23,5 @@ RUN corepack enable \
   && pnpm install --frozen-lockfile \
   && pnpm --filter @everdict/agent... build
 
-# AgentJob 은 EVERDICT_AGENT_JOB(base64 JSON) env 로, 인증은 CLAUDE_CODE_OAUTH_TOKEN 등으로 주입
+# AgentJob is injected via the EVERDICT_AGENT_JOB env (base64 JSON); auth via CLAUDE_CODE_OAUTH_TOKEN etc.
 ENTRYPOINT ["node", "packages/agent/dist/main.js"]

@@ -1,15 +1,15 @@
 import type { RunStore, ScorecardStore } from "@everdict/db";
 
-// 부팅 시 고아 작업 회수 — 배치(scorecard)와 run 은 컨트롤플레인 프로세스 안에서 in-process 로 track 된다
-// (inFlight supersede/in-process 랑데부와 같은 단일 프로세스 전제). 따라서 프로세스가 재시작되면 이전
-// 프로세스가 돌리던 queued/running 레코드는 다시 이어받을 주체가 없는 유령이 된다 — 큐/현황이 영원히
-// "실행 중"을 보이는 원인. 부팅 시점에 이들을 failed(INTERRUPTED)로 종결해 상태를 사실과 일치시킨다.
-// 주의: 같은 스토어(DB)를 공유하는 컨트롤플레인이 둘 이상이면 남의 in-flight 도 회수한다 — 단일
-// 컨트롤플레인 전제(코드베이스 공통)를 그대로 따른다.
+// Reclaim orphaned work on boot — batches (scorecards) and runs are tracked in-process inside the control-plane process
+// (the single-process assumption, same as inFlight supersede / in-process rendezvous). So when the process restarts, the
+// queued/running records the previous process was driving become ghosts with no owner to resume them — the cause of the
+// queue/status showing "running" forever. At boot we finalize these as failed (INTERRUPTED) so the state matches reality.
+// Note: if more than one control plane shares the same store (DB), this also reclaims another's in-flight work — we simply
+// follow the single-control-plane assumption (common across the codebase).
 
 const INTERRUPTED = {
   code: "INTERRUPTED",
-  message: "컨트롤플레인 재시작으로 실행이 중단됐어요. 다시 실행해주세요.",
+  message: "The run was interrupted by a control-plane restart. Please run it again.",
 };
 
 const ACTIVE = new Set(["queued", "running"]);
@@ -25,7 +25,7 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{ scorecar
   let scorecardCount = 0;
   let runCount = 0;
 
-  // ① 고아 배치 + 그 배치의 실행 중 자식 run.
+  // ① Orphaned batches + the running child runs of those batches.
   const cards = (await deps.scorecards.list()).filter((c) => ACTIVE.has(c.status));
   for (const c of cards) {
     await deps.scorecards.update(c.id, { status: "failed", error: INTERRUPTED, updatedAt: now() });
@@ -39,7 +39,7 @@ export async function recoverInterrupted(deps: RecoveryDeps): Promise<{ scorecar
     }
   }
 
-  // ② 고아 standalone run(활동 리스트 기본 스코프 — 자식은 ①에서 부모 기준으로 회수).
+  // ② Orphaned standalone runs (the activity-list default scope — children are reclaimed via their parent in ①).
   if (deps.runs) {
     const runs = (await deps.runs.list()).filter((r) => ACTIVE.has(r.status));
     for (const r of runs) {

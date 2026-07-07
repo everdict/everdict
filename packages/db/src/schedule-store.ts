@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-// 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식 + 정책. 발사는 ScorecardService.submit 을 재사용한다.
-// 이 (mutable) 스토어가 SSOT(UI/API 의 진실); Temporal Schedule 은 실행 메커니즘(slice 2). 워크스페이스 스코프.
-// 설계: docs/architecture/scheduled-evals.md.
+// Scheduled (cron) scorecard — a stored RunScorecardInput + cron expression + policy. Firing reuses ScorecardService.submit.
+// This (mutable) store is the SSOT (the UI/API truth); the Temporal Schedule is the execution mechanism (slice 2). Workspace-scoped.
+// Design: docs/architecture/scheduled-evals.md.
 export const ScheduleOverlapPolicySchema = z.enum(["skip", "bufferOne", "allowAll"]);
 export type ScheduleOverlapPolicy = z.infer<typeof ScheduleOverlapPolicySchema>;
 
-// 발사 시 ScorecardService.submit 으로 흐를 eval 정의(tenant/submittedBy 는 발사 시점에 스케줄에서 채운다).
+// The eval definition that flows into ScorecardService.submit on firing (tenant/submittedBy are filled from the schedule at fire time).
 export const ScheduleRunTemplateSchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string() }),
   harness: z.object({ id: z.string(), version: z.string() }),
@@ -20,21 +20,21 @@ export const ScheduleRecordSchema = z.object({
   id: z.string(),
   tenant: z.string(),
   name: z.string(),
-  cron: z.string(), // 5-field cron(검증은 경계에서). timezone 과 함께 Temporal spec 으로 변환(slice 2).
-  timezone: z.string(), // IANA tz(예: "Asia/Seoul"). 기본 "UTC".
+  cron: z.string(), // 5-field cron (validated at the boundary). Converted with timezone into a Temporal spec (slice 2).
+  timezone: z.string(), // IANA tz (e.g. "Asia/Seoul"). Default "UTC".
   overlapPolicy: ScheduleOverlapPolicySchema,
   enabled: z.boolean(),
-  createdBy: z.string(), // 생성자 subject — 발사 run 의 submittedBy(예산 → tenant, 비공개-repo 연결 resolve).
+  createdBy: z.string(), // creator subject — the fired run's submittedBy (budget → tenant, resolves private-repo connections).
   runTemplate: ScheduleRunTemplateSchema,
   lastFiredAt: z.string().optional(),
-  lastStatus: z.string().optional(), // 직전 발사 결과(스코어카드 status 또는 에러 사유)
+  lastStatus: z.string().optional(), // the previous fire's result (scorecard status or error reason)
   lastScorecardId: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type ScheduleRecord = z.infer<typeof ScheduleRecordSchema>;
 
-// 스케줄 스토어 계약 — 워크스페이스(tenant) 스코프. in-memory(개발/테스트) 또는 Postgres(운영) 교체.
+// Schedule store contract — workspace (tenant) scoped. Swap in-memory (dev/test) or Postgres (production).
 export interface ScheduleStore {
   create(record: ScheduleRecord): Promise<void>;
   get(tenant: string, id: string): Promise<ScheduleRecord | undefined>;
@@ -52,19 +52,19 @@ export class InMemoryScheduleStore implements ScheduleStore {
 
   async get(tenant: string, id: string): Promise<ScheduleRecord | undefined> {
     const r = this.byId.get(id);
-    return r && r.tenant === tenant ? r : undefined; // 타 워크스페이스는 없는 것으로(존재 누출 금지)
+    return r && r.tenant === tenant ? r : undefined; // treat another workspace's as nonexistent (no existence leak)
   }
 
   async list(tenant: string): Promise<ScheduleRecord[]> {
     return [...this.byId.values()]
       .filter((r) => r.tenant === tenant)
-      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // 최신 먼저
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1)); // newest first
   }
 
   async update(tenant: string, id: string, patch: Partial<ScheduleRecord>): Promise<ScheduleRecord | undefined> {
     const cur = this.byId.get(id);
     if (!cur || cur.tenant !== tenant) return undefined;
-    const next = { ...cur, ...patch, id: cur.id, tenant: cur.tenant }; // id/tenant 는 불변
+    const next = { ...cur, ...patch, id: cur.id, tenant: cur.tenant }; // id/tenant are immutable
     this.byId.set(id, next);
     return next;
   }

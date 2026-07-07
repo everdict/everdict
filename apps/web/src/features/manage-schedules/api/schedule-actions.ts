@@ -10,7 +10,7 @@ export interface ScheduleActionResult {
   error?: string
 }
 
-// 예약 pause/resume — enabled 토글. authZ 는 컨트롤플레인(schedules:write).
+// Schedule pause/resume — toggles enabled. AuthZ is the control plane's (schedules:write).
 export async function setScheduleEnabledAction(
   id: string,
   enabled: boolean
@@ -25,7 +25,7 @@ export async function setScheduleEnabledAction(
   }
 }
 
-// 예약 삭제.
+// Delete a schedule.
 export async function deleteScheduleAction(id: string): Promise<ScheduleActionResult> {
   const ctx = await authContext()
   try {

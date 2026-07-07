@@ -28,17 +28,17 @@ interface SlotState {
   path: string
 }
 
-// picker 선택 좌표 — 같은 "owner/name" 이 github.com 과 GHE 양쪽에 있을 수 있어 host 까지가 식별자다.
+// Picker selection coordinate — the same "owner/name" can exist on both github.com and GHE, so the identifier includes the host.
 interface SelectedRepo {
   fullName: string
-  host?: string // GHE 베이스 URL — 미지정 = github.com
+  host?: string // GHE base URL — unset = github.com
 }
 
 const repoKey = (r: SelectedRepo) => `${r.host ?? 'github.com'}:${r.fullName}`
-// GHE host 표시는 URL 스킴을 뗀 호스트명만 — picker 행/패널 배지 공용.
+// GHE host display is just the hostname with the URL scheme stripped — shared by picker rows and panel badges.
 export const hostLabel = (host: string) => host.replace(/^https?:\/\//, '').replace(/\/$/, '')
 
-// 슬롯 초기값 — command 는 image 를 기본 선택, 서비스 슬롯이 하나뿐이면 자동 선택, 여럿이면 사용자가 고른다.
+// Slot initial values — command preselects image; a single service slot auto-selects; with several the user chooses.
 function initSlots(slotChoices: string[], kind: HarnessKind): Record<string, SlotState> {
   const preselect = kind === 'command' || slotChoices.length === 1
   return Object.fromEntries(
@@ -46,20 +46,20 @@ function initSlots(slotChoices: string[], kind: HarnessKind): Record<string, Slo
   ) as Record<string, SlotState>
 }
 
-// 공유 러너 준비 상태 — CI 워크플로는 항상 셀프호스티드 러너에서 실행(D6)되므로 연결 시점에 풀 상태를 보여준다.
-// unavailable = 조회 불가(비관리자/조회 실패) — 안내 문구만.
+// Shared runner readiness — CI workflows always run on self-hosted runners (D6), so we show pool status at connect time.
+// unavailable = can't query (non-admin / query failure) — informational text only.
 type RunnerCheck =
   | { state: 'loading' }
   | { state: 'ready'; runners: RunnerMeta[] }
   | { state: 'unavailable' }
 
-// 온라인 판정 — 러너는 long-poll lease(~25s)마다 lastSeenAt 을 갱신하므로 90s 안이면 접속 중(공유 러너 탭과 동일 관례).
+// Online determination — a runner refreshes lastSeenAt on each long-poll lease (~25s), so within 90s it's online (same convention as the shared-runners tab).
 const ONLINE_WINDOW_MS = 90_000
 const isOnline = (lastSeenAt?: string) =>
   lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
 
-// 레포↔하니스 연결 다이얼로그(zero-input) — 레포 고르기 → 슬롯 고르기 → 데이터셋 → 저장 → 셋업 PR.
-// 레포 목록은 워크스페이스 GitHub App installation 이 접근 가능한 것(설치 시 고른 것만). 저장은 admin 만.
+// Repo↔harness connect dialog (zero-input) — pick repo → pick slots → dataset → save → setup PR.
+// The repo list is what the workspace GitHub App installation can access (only those chosen at install time). Saving is admin only.
 export function ConnectRepoDialog({
   open,
   onClose,
@@ -75,8 +75,8 @@ export function ConnectRepoDialog({
   onClose: () => void
   harnessId: string
   kind: HarnessKind
-  slotChoices: string[] // service=서비스 이름들, command=['image'], process=[]
-  datasets: string[] // 데이터셋 id 목록
+  slotChoices: string[] // service = service names, command = ['image'], process = []
+  datasets: string[] // dataset id list
   workspace: string
   canWrite: boolean
   onSaved: (links: CiLink[]) => void
@@ -94,10 +94,10 @@ export function ConnectRepoDialog({
   const [runtime, setRuntime] = useState('')
   const [saveError, setSaveError] = useState<string>()
   const [saving, startSaving] = useTransition()
-  const [savedRepo, setSavedRepo] = useState<SelectedRepo>() // 저장 성공한 레포(셋업 PR 단계로 전환)
+  const [savedRepo, setSavedRepo] = useState<SelectedRepo>() // repo saved successfully (transition to the setup-PR step)
   const [runnerCheck, setRunnerCheck] = useState<RunnerCheck>({ state: 'loading' })
 
-  // 열릴 때마다 초기화 + 워크스페이스 App installation 의 레포 목록 로드.
+  // Reset on each open + load the workspace App installation's repo list.
   useEffect(() => {
     if (!open) return
     setReposError(undefined)
@@ -117,17 +117,17 @@ export function ConnectRepoDialog({
       if (r.ok && r.repos) setRepos(r.repos)
       else setReposError(r.error ?? t('reposLoadFailed'))
     })
-    // 공유 러너 준비 상태 — 조회 게이트가 admin(settings:write)이라 canWrite 일 때만. 실패는 안내 문구로 강등.
+    // Shared runner readiness — the query gate is admin (settings:write), so only when canWrite. Failure degrades to informational text.
     if (canWrite)
       void listSharedRunnersAction().then((r) =>
         setRunnerCheck(
           r.ok && r.runners ? { state: 'ready', runners: r.runners } : { state: 'unavailable' }
         )
       )
-    // 슬롯/레포 목록은 열리는 순간의 스냅샷으로 고정(open 토글에만 반응).
+    // Slots/repo list are pinned to the snapshot at open time (react only to the open toggle).
   }, [open])
 
-  // 검색은 레포명 + GHE 호스트명 모두에 매칭(호스트로 좁혀 찾을 수 있게).
+  // Search matches both the repo name and the GHE hostname (so you can narrow by host).
   const filteredRepos = (repos ?? []).filter((r) =>
     `${r.fullName} ${r.host ? hostLabel(r.host) : ''}`
       .toLowerCase()
@@ -161,7 +161,7 @@ export function ConnectRepoDialog({
         harness: harnessId,
         ...(dataset ? { dataset } : {}),
         slots: slotPayload,
-        ...(trigger !== 'both' ? { trigger } : {}), // 미지정 = both 가 계약 — 기본값은 저장하지 않는다
+        ...(trigger !== 'both' ? { trigger } : {}), // unset = both is the contract — don't persist the default
         ...(runsOn.trim() ? { runsOn: runsOn.trim() } : {}),
         ...(runtime.trim() ? { runtime: runtime.trim() } : {}),
       })
@@ -189,7 +189,7 @@ export function ConnectRepoDialog({
       </header>
 
       {noRepos ? (
-        // App 미설치/접근 레포 없음 — 설정 → 통합에서 GitHub App 설치 안내.
+        // App not installed / no accessible repos — guide to installing the GitHub App under Settings → Integrations.
         <div className="space-y-3 px-5 py-5">
           <Callout tone="info">
             {t('noReposCallout')}
@@ -209,7 +209,7 @@ export function ConnectRepoDialog({
           </div>
         </div>
       ) : savedRepo ? (
-        // 저장 완료 — 셋업 PR 단계.
+        // Save complete — setup-PR step.
         <div className="space-y-4 px-5 py-5">
           <Callout tone="info">
             {t.rich('connectedMessage', {
@@ -241,7 +241,7 @@ export function ConnectRepoDialog({
       ) : (
         <>
           <div className="max-h-[62vh] space-y-5 overflow-y-auto px-5 py-4">
-            {/* 1. 레포 picker — App installation 이 접근 가능한 레포, 클라이언트 검색. */}
+            {/* 1. Repo picker — repos the App installation can access, client-side search. */}
             <div className="space-y-1.5">
               <Label>{t('stepRepository')}</Label>
               {reposLoading || repos === undefined ? (
@@ -295,7 +295,7 @@ export function ConnectRepoDialog({
                               {r.fullName}
                             </span>
                             {r.host && (
-                              // GHE repo — 어느 인스턴스에서 온 것인지 호스트명으로 구분(github.com 은 무표기).
+                              // GHE repo — distinguish which instance it came from by hostname (github.com is unmarked).
                               <span className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
                                 {hostLabel(r.host)}
                               </span>
@@ -320,7 +320,7 @@ export function ConnectRepoDialog({
               )}
             </div>
 
-            {/* 2. 슬롯 — service=서비스 다중선택(+경로), command=image, process=없음. */}
+            {/* 2. Slots — service = multi-select services (+path), command = image, process = none. */}
             {repository && (
               <div className="space-y-2">
                 <Label>{t('stepBuildSlot')}</Label>
@@ -362,7 +362,7 @@ export function ConnectRepoDialog({
               </div>
             )}
 
-            {/* 3. 데이터셋 — CI 가 발사할 벤치마크(선택). */}
+            {/* 3. Dataset — the benchmark CI fires (optional). */}
             {repository && datasets.length > 0 && (
               <div className="space-y-1.5">
                 <Label>{t('stepDataset')}</Label>
@@ -379,7 +379,7 @@ export function ConnectRepoDialog({
               </div>
             )}
 
-            {/* 4. PR 평가 발화 방식 — 자동/코멘트(/evaluate)/둘 다. push(머지 재핀)는 방식과 무관하게 항상. */}
+            {/* 4. PR evaluation trigger mode — automatic / comment (/evaluate) / both. push (merge re-pin) always fires regardless of mode. */}
             {repository && (
               <div className="space-y-1.5">
                 <Label>{t('stepTrigger')}</Label>
@@ -405,14 +405,14 @@ export function ConnectRepoDialog({
               </div>
             )}
 
-            {/* 5. 실행 러너 — CI 워크플로는 항상 셀프호스티드 러너에서(D6, 사설망 컨트롤플레인 도달). 기본 = 공유 러너 풀. */}
+            {/* 5. Execution runner — CI workflows always run on self-hosted runners (D6, reaching a private-network control plane). Default = shared runner pool. */}
             {repository && (
               <div className="space-y-1.5">
                 <Label>{t('stepRunner')}</Label>
                 {runnerCheck.state === 'loading' ? (
                   <p className="text-[12px] text-muted-foreground">{t('runnersLoading')}</p>
                 ) : runnerCheck.state === 'ready' && runnerCheck.runners.length === 0 ? (
-                  // 러너 0대 — 셋업 PR 이 서버에서 차단되므로(fail-closed) 등록 경로를 먼저 안내한다.
+                  // Zero runners — the setup PR is blocked on the server (fail-closed), so guide the registration path first.
                   <Callout tone="warning" className="py-1.5">
                     {t('noRunnersCallout')}
                     <div className="mt-1.5">

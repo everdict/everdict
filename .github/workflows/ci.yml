@@ -1,4 +1,4 @@
-# 공개 CI — 5대 품질 게이트(lint/typecheck/test/build) + 빈-env 부팅 계약 + 웹(자체 완결) + 시크릿 스캔.
+# Public CI — 5 quality gates (lint/typecheck/test/build) + empty-env boot contract + web (self-contained) + secret scan.
 name: CI
 
 on:
@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4 # 버전은 package.json "packageManager" 에서 해석
+      - uses: pnpm/action-setup@v4 # version resolved from package.json "packageManager"
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -27,7 +27,7 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm build
-      # 셀프호스트 최소 프로필 계약 — 컨트롤플레인이 옵션 env 전무 상태로 부팅되어야 한다.
+      # Self-host minimal-profile contract — the control plane must boot with zero optional env.
       - run: node scripts/live/empty-env-boot.mjs
 
   web:
@@ -52,7 +52,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # 전체 히스토리 스캔
+          fetch-depth: 0 # full history scan
       - name: Run gitleaks
         run: |
           curl -sL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar xz gitleaks

@@ -1,11 +1,11 @@
 import { ForbiddenError } from "@everdict/core";
 import type { Principal } from "./principal.js";
 
-// 워크스페이스 내 역할 → 액션 권한. 컨트롤플레인이 엔드포인트마다 강제(authZ).
-// harnesses:register(인스턴스)·templates:write(템플릿 대분류)는 누구나(viewer+) — 하니스는 협업 eval
-// 콘텐츠라 역할 게이트 없음(권한 상관없이 동등 사용).
-// 외부 계정 연결(Connected accounts)은 이 매트릭스에 없다 — 프로필처럼 개인 소유(owner=subject)라 역할이 아니라
-// subject 로 self-scoped(라우트가 principal.subject 로 직접 스코프; connections:* 액션 없음).
+// Role within a workspace → action permission. The control plane enforces this per endpoint (authZ).
+// harnesses:register (instance) / templates:write (template category) are open to anyone (viewer+) — a harness is collaborative
+// eval content, so there's no role gate (equal use regardless of permission).
+// Connected accounts are not in this matrix — like a profile they're personally owned (owner=subject), so they're self-scoped
+// by subject, not by role (the route scopes directly by principal.subject; no connections:* action).
 export type Action =
   | "runs:read"
   | "runs:submit"
@@ -36,8 +36,8 @@ export type Action =
   | "settings:write"
   | "comments:read"
   | "comments:write"
-  // 워크스페이스 이미지 레지스트리 push 자격증명 발급 — 자격증명 '값'이 호출자에게 나가는 유일한 member 액션이라
-  // harnesses:register(viewer+) 재사용 대신 별도 액션으로 정직하게 명명(등록/해제는 settings:write, 조회는 harnesses:read).
+  // Minting workspace image-registry push credentials — the only member action where a credential 'value' leaves to the caller,
+  // so it's honestly named as a separate action instead of reusing harnesses:register (viewer+) (register/unregister = settings:write, read = harnesses:read).
   | "images:push";
 
 export const EVERDICT_ROLES = ["viewer", "member", "admin"] as const;
@@ -47,17 +47,17 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
   viewer: new Set<Action>([
     "runs:read",
     "harnesses:read",
-    "harnesses:register", // 누구나 등록 가능(역할 게이트 없음 — 협업 eval 콘텐츠)
-    "templates:write", // 템플릿(대분류) 정의도 동일 — 누구나(권한 상관없이 동등)
+    "harnesses:register", // anyone can register (no role gate — collaborative eval content)
+    "templates:write", // template (category) definition is the same — anyone (equal regardless of permission)
     "datasets:read",
     "scorecards:read",
-    "schedules:read", // 예약 조회는 양성(스코어카드 조회와 동일) → viewer+
+    "schedules:read", // reading schedules is benign (same as reading scorecards) → viewer+
     "judges:read",
     "models:read",
     "runtimes:read",
-    "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관 — 모든 멤버가 자기 워크스페이스 실행 인프라를 등록(harnesses:register 와 동일)
-    "members:read", // 팀(워크스페이스 멤버) 조회는 양성 → viewer+
-    "comments:read", // 댓글 조회 = 양성(협업 논의 열람) → viewer+
+    "runtimes:write", // runtime registration (+validate/probe) is role-independent — every member registers their own workspace's execution infra (same as harnesses:register)
+    "members:read", // reading the team (workspace members) is benign → viewer+
+    "comments:read", // reading comments = benign (viewing collaborative discussion) → viewer+
   ]),
   member: new Set<Action>([
     "runs:read",
@@ -70,20 +70,20 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "scorecards:read",
     "scorecards:run",
     "schedules:read",
-    "schedules:write", // 예약 생성 = 반복 실행 약속(예산 소비) → scorecards:run 과 동일하게 member+
+    "schedules:write", // creating a schedule = committing to recurring runs (budget spend) → member+ like scorecards:run
     "judges:read",
     "judges:write",
     "models:read",
-    "models:write", // 모델 정의 = eval 콘텐츠(누구로 돌렸나) → judges/datasets 와 동일하게 member 가능
+    "models:write", // model definition = eval content (which model was run) → member-allowed like judges/datasets
     "runtimes:read",
-    "runtimes:write", // 런타임 등록(+validate/probe)은 role 무관
+    "runtimes:write", // runtime registration (+validate/probe) is role-independent
     "members:read",
     "comments:read",
-    "comments:write", // 댓글 작성 = 협업 콘텐츠(누구로 돌렸나 논의) → member+ (삭제는 작성자-or-admin, 서비스 계층)
-    "images:push", // 워크스페이스 레지스트리 push 자격증명 — 하니스 저작(이미지 발행)은 member 의 일
+    "comments:write", // writing comments = collaborative content (discussing which model was run) → member+ (deletion = author-or-admin, service layer)
+    "images:push", // workspace registry push credential — harness authoring (image publishing) is a member's job
   ]),
-  // GitHub Actions OIDC 페더레이션(via=github-actions) 전용 — CI 가 필요한 최소만:
-  // 발사/폴링/diff(scorecards) + 재핀(harnesses:register)/기준 조회(harnesses:read). 거버넌스/시크릿/멤버는 없음.
+  // GitHub Actions OIDC federation (via=github-actions) only — the minimum CI needs:
+  // fire/poll/diff (scorecards) + re-pin (harnesses:register)/baseline read (harnesses:read). No governance/secrets/members.
   ci: new Set<Action>(["scorecards:read", "scorecards:run", "harnesses:read", "harnesses:register"]),
   admin: new Set<Action>([
     "runs:read",
@@ -93,8 +93,8 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "templates:write",
     "datasets:read",
     "datasets:write",
-    "datasets:delete", // 데이터셋 버전 소프트 삭제 — admin 전용(생성자 본인은 서비스에서 별도 override). member/viewer 는 미보유
-    "harnesses:delete", // 하니스 버전 소프트 삭제 — 동일 패턴(admin 전용 + 생성자 예외는 서비스 계층)
+    "datasets:delete", // dataset version soft-delete — admin-only (the creator is separately overridden in the service). member/viewer don't have it
+    "harnesses:delete", // harness version soft-delete — same pattern (admin-only + creator exception in the service layer)
     "scorecards:read",
     "scorecards:run",
     "schedules:read",
@@ -104,14 +104,14 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
     "models:read",
     "models:write",
     "runtimes:read",
-    "runtimes:write", // 런타임 등록은 role 무관(viewer/member 도 보유) — 자격증명 '값'은 secrets:write(admin)로 분리 보호
-    "secrets:read", // 시크릿(프로바이더 키)은 강력 → admin 전용
+    "runtimes:write", // runtime registration is role-independent (viewer/member have it too) — the credential 'value' is separately protected by secrets:write (admin)
+    "secrets:read", // secrets (provider keys) are powerful → admin-only
     "secrets:write",
-    "keys:read", // API 키는 발급 시 워크스페이스 admin 권한을 가짐 → 발급/취소는 admin 전용(secrets 와 동일 근거)
+    "keys:read", // an API key holds workspace admin permission at issuance → issue/revoke is admin-only (same rationale as secrets)
     "keys:write",
     "members:read",
-    "members:write", // 멤버 역할변경/제거/초대 발급 = 거버넌스(admin 초대 발급 포함) → admin 전용
-    "settings:read", // 워크스페이스 정책(계측 등) = admin 전용 설정
+    "members:write", // member role change/removal/invite issuance = governance (including issuing admin invites) → admin-only
+    "settings:read", // workspace policy (instrumentation, etc.) = admin-only settings
     "settings:write",
     "comments:read",
     "comments:write",
@@ -119,14 +119,14 @@ const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
   ]),
 };
 
-// --- API 키별 권한 범위(scope) — Linear 식 "Full Access vs 선택 권한" ---
-// 키는 발급 시 워크스페이스 admin role 을 갖지만, scope 로 그 키의 권한을 더 좁힐 수 있다.
-// scope 는 role 권한과 "교집합"으로 적용된다(can 참고) — scope 있는 키는 자기 role 을 절대 초과하지 못한다.
-// 누적(cumulative): admin ⊃ write ⊃ read. admin scope = Full Access. authz 매트릭스가 scope→action 의 SSOT.
+// --- Per-api-key permission scope — Linear-style "Full Access vs selected permissions" ---
+// A key holds the workspace admin role at issuance, but scope can further narrow that key's permissions.
+// Scope is applied as an "intersection" with the role permissions (see can) — a scoped key never exceeds its own role.
+// Cumulative: admin ⊃ write ⊃ read. admin scope = Full Access. The authz matrix is the SSOT for scope→action.
 export const API_KEY_SCOPES = ["read", "write", "admin"] as const;
 export type ApiKeyScope = (typeof API_KEY_SCOPES)[number];
 
-// read scope = "워크스페이스 데이터 조회" — 민감 조회(secrets/keys/settings)는 제외(admin scope 필요).
+// read scope = "reading workspace data" — excludes sensitive reads (secrets/keys/settings) (admin scope required).
 const SCOPE_READ_ACTIONS: readonly Action[] = [
   "runs:read",
   "harnesses:read",
@@ -139,7 +139,7 @@ const SCOPE_READ_ACTIONS: readonly Action[] = [
   "members:read",
   "comments:read",
 ];
-// write scope = read ∪ 콘텐츠 mutation(run 제출·등록·버전 생성·실행). 거버넌스(secrets/members/settings/keys write, datasets:delete)는 admin scope 전용.
+// write scope = read ∪ content mutation (submit runs, register, create versions, run). Governance (secrets/members/settings/keys write, datasets:delete) is admin-scope only.
 const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   ...SCOPE_READ_ACTIONS,
   "runs:submit",
@@ -152,9 +152,9 @@ const SCOPE_WRITE_ACTIONS: readonly Action[] = [
   "models:write",
   "runtimes:write",
   "comments:write",
-  "images:push", // 이미지 발행 = 하니스 저작의 일부(대상이 자기 워크스페이스 레지스트리로 한정된 자격증명)
+  "images:push", // image publishing = part of harness authoring (a credential scoped to one's own workspace registry)
 ];
-// admin scope(=Full Access) = 모든 action. role 매트릭스의 합집합(admin role 이 전체를 보유)에서 도출.
+// admin scope (= Full Access) = every action. Derived from the union of the role matrix (the admin role holds all).
 const ALL_ACTIONS = new Set<Action>(Object.values(ROLE_PERMISSIONS).flatMap((s) => [...s]));
 
 const SCOPE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
@@ -166,18 +166,18 @@ const SCOPE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
 export function can(principal: Principal, action: Action): boolean {
   const roleOk = principal.roles.some((r) => ROLE_PERMISSIONS[r]?.has(action) ?? false);
   if (!roleOk) return false;
-  // scope 없는 주체(OIDC 사용자 / 레거시 키)는 role 권한 그대로(무제한). scope 있으면 교집합으로 좁힌다.
+  // A subject with no scope (OIDC user / legacy key) keeps the role permissions as-is (unlimited). If scoped, narrowed by intersection.
   if (!principal.scopes || principal.scopes.length === 0) return true;
   return principal.scopes.some((s) => SCOPE_PERMISSIONS[s]?.has(action) ?? false);
 }
 
-// 권한 없으면 403. 호출부(API 라우트)가 핸들러 진입에서 호출한다.
+// 403 if not permitted. The caller (API route) invokes this at handler entry.
 export function authorize(principal: Principal, action: Action): void {
   if (!can(principal, action)) {
     throw new ForbiddenError(
       "FORBIDDEN",
       { workspace: principal.workspace, roles: principal.roles, action },
-      `이 작업(${action})에 대한 권한이 없습니다.`,
+      `You do not have permission for this action (${action}).`,
     );
   }
 }

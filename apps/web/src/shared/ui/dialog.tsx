@@ -5,7 +5,7 @@ import { createPortal } from 'react-dom'
 
 import { cn } from '@/shared/lib/utils'
 
-// 경량 모달 — backdrop blur + Esc 닫힘 + body 스크롤락. command 팔레트/확인 다이얼로그 공용 베이스.
+// Lightweight modal — backdrop blur + close on Esc + body scroll-lock. Shared base for the command palette/confirm dialogs.
 export function Dialog({
   open,
   onClose,
@@ -35,11 +35,11 @@ export function Dialog({
     }
   }, [open, onClose])
 
-  // 열려 있지 않거나(닫힘) SSR(document 없음)이면 렌더하지 않는다.
+  // If not open (closed) or SSR (no document), don't render.
   if (!open || typeof document === 'undefined') return null
 
-  // document.body 로 포탈 — 앱셸의 transform/filter(그레인·글로우) 조상이 fixed 의 컨테이닝 블록이 되어
-  // backdrop 이 뷰포트 전체를 못 덮던 문제를 피한다(fixed inset-0 이 항상 뷰포트 기준이 되도록).
+  // Portal into document.body — avoids the issue where the app shell's transform/filter (grain·glow) ancestor becomes
+  // the containing block for fixed and the backdrop can't cover the whole viewport (so fixed inset-0 is always viewport-relative).
   return createPortal(
     <div
       className={cn(

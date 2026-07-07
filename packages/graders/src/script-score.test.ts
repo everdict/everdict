@@ -23,27 +23,27 @@ const ctx = (compute?: ComputeHandle): GradeContext => ({
   ...(compute ? { compute } : {}),
 });
 
-describe("ScriptScoreGrader (제네릭 숫자-점수 grader)", () => {
-  it("stdout 의 연속 점수를 value 로 방출하고 임계값으로 pass 판정한다", async () => {
+describe("ScriptScoreGrader (generic numeric-score grader)", () => {
+  it("emits the continuous score from stdout as value and decides pass by the threshold", async () => {
     const s = await new ScriptScoreGrader({ cmd: "run" }).grade(ctx(mockCompute("blah\nSCORE=0.73\n")));
     expect(s.value).toBeCloseTo(0.73);
     expect(s.pass).toBe(true); // 0.73 >= 0.6
   });
 
-  it("점수가 임계값 미만이면 fail (종료코드 0이어도)", async () => {
+  it("fails when the score is below the threshold (even with exit code 0)", async () => {
     const s = await new ScriptScoreGrader({ cmd: "run" }).grade(ctx(mockCompute("SCORE=0.4", 0)));
     expect(s.value).toBeCloseTo(0.4);
     expect(s.pass).toBe(false);
   });
 
-  it("점수를 못 뽑으면 value=0·pass=false 이고 detail 에 명시한다(무성 기본값 아님)", async () => {
+  it("value=0·pass=false and noted in detail when no score can be extracted (not a silent default)", async () => {
     const s = await new ScriptScoreGrader({ cmd: "run" }).grade(ctx(mockCompute("no score here")));
     expect(s.value).toBe(0);
     expect(s.pass).toBe(false);
-    expect(String(s.detail)).toContain("점수 미출력");
+    expect(String(s.detail)).toContain("no score printed");
   });
 
-  it("scorePattern·passThreshold·metric 을 설정할 수 있다", async () => {
+  it("scorePattern·passThreshold·metric can be configured", async () => {
     const s = await new ScriptScoreGrader({
       cmd: "run",
       scorePattern: "pinch=([\\d.]+)",
@@ -55,7 +55,7 @@ describe("ScriptScoreGrader (제네릭 숫자-점수 grader)", () => {
     expect(s.metric).toBe("pinch");
   });
 
-  it("makeGraders 로 spec→grader (유저 데이터 경로)", async () => {
+  it("makeGraders spec→grader (user data path)", async () => {
     const [g] = makeGraders([{ id: "script-score", config: { cmd: "run", metric: "pinch" } }]);
     expect(g?.id).toBe("script-score");
     const s = await g?.grade(ctx(mockCompute("SCORE=1.0")));
@@ -63,7 +63,7 @@ describe("ScriptScoreGrader (제네릭 숫자-점수 grader)", () => {
     expect(s?.value).toBeCloseTo(1.0);
   });
 
-  it("compute 없으면 에러", async () => {
+  it("errors without compute", async () => {
     await expect(new ScriptScoreGrader({ cmd: "x" }).grade(ctx())).rejects.toThrow(/compute/);
   });
 });

@@ -1,10 +1,10 @@
-// 라이브 e2e: **SpreadsheetBench(v1+v2) 샘플을 self-hosted 러너에서 codex 로 수행 → 채점**.
-// spreadsheetbench 번들(examples/bundles/spreadsheetbench)을 적용하고, 자기완결 xlsx 샘플 2개(v1/v2)를 실제 codex 로 돌린다.
-// codex-pinch-selfhosted.mjs 와 동형 — 하니스/벤치마크만 SpreadsheetBench 로 교체.
-//   ① dev 컨트롤플레인(in-memory, no-auth) ② POST /runners 페어링 ③ everdict runner --pair(codex on PATH)
-//   ④ POST /bundles/apply(spreadsheetbench) ⑤ 각 샘플 데이터셋 × codex × self:<id> 실행 ⑥ 폴링 → tests_pass 판정.
-// 샘플은 setup 에서 openpyxl 을 설치하고 입력 xlsx 를 생성 → codex 가 output.xlsx 작성 → grader 가 셀 비교.
-// 사용: node scripts/live/spreadsheetbench-selfhosted.mjs (apps/api/dist + apps/cli/dist 빌드, codex 로그인 필요)
+// Live e2e: **run SpreadsheetBench (v1+v2) samples with codex on a self-hosted runner → grade**.
+// Applies the spreadsheetbench bundle (examples/bundles/spreadsheetbench) and runs the two self-contained xlsx samples (v1/v2) with real codex.
+// Isomorphic to codex-pinch-selfhosted.mjs — only the harness/benchmark is swapped to SpreadsheetBench.
+//   ① dev control plane (in-memory, no-auth) ② POST /runners pairing ③ everdict runner --pair (codex on PATH)
+//   ④ POST /bundles/apply (spreadsheetbench) ⑤ run each sample dataset × codex × self:<id> ⑥ poll → tests_pass verdict.
+// Each sample installs openpyxl in setup and generates the input xlsx → codex writes output.xlsx → the grader compares cells.
+// Usage: node scripts/live/spreadsheetbench-selfhosted.mjs (apps/api/dist + apps/cli/dist built, codex login required)
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
@@ -24,7 +24,7 @@ const bundle = JSON.parse(
   readFileSync(new URL("../../examples/bundles/spreadsheetbench/bundle.json", import.meta.url)),
 );
 
-console.log(`=== ① 컨트롤플레인 기동 (dev, :${PORT}) ===`);
+console.log(`=== ① start control plane (dev, :${PORT}) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: ROOT,
   env: { ...process.env, PORT, EVERDICT_REQUIRE_AUTH: "", KEYCLOAK_ISSUER: "", DATABASE_URL: "" },
@@ -41,14 +41,14 @@ try {
       up = (await fetch(`${BASE}/datasets`, { headers: H })).status === 200;
     } catch {}
   }
-  if (!up) throw new Error("control plane 기동 실패");
+  if (!up) throw new Error("control plane failed to start");
 
-  console.log("\n=== ② POST /runners (이 머신 페어링) ===");
+  console.log("\n=== ② POST /runners (pair this machine) ===");
   const paired = await post("/runners", { label: "sbench-laptop", capabilities: ["repo"] });
   const token = paired.json.token;
   const runnerId = paired.json.runner?.id;
   console.log(`  → ${paired.status} runnerId=${runnerId}`);
-  if (!token || !runnerId) throw new Error("페어링 실패");
+  if (!token || !runnerId) throw new Error("pairing failed");
 
   console.log("\n=== ③ everdict runner --pair (codex on PATH) ===");
   runner = spawn(
@@ -65,8 +65,8 @@ try {
   for (const r of inst.json.results ?? []) console.log(`  ${r.status.padEnd(8)} ${r.kind} ${r.id}@${r.version}`);
 
   const samples = [
-    { dataset: "spreadsheetbench-v1-sample", label: "v1(합계→D1)" },
-    { dataset: "spreadsheetbench-v2-sample", label: "v2(Profit열+총계, 원본보존)" },
+    { dataset: "spreadsheetbench-v1-sample", label: "v1(sum→D1)" },
+    { dataset: "spreadsheetbench-v2-sample", label: "v2(Profit column+total, preserve original)" },
   ];
   const outcomes = [];
   for (const s of samples) {
@@ -79,7 +79,7 @@ try {
     const scId = run.json.id;
     console.log(`  → ${run.status} id=${scId ?? "-"}`);
     if (!scId) {
-      console.log(`  ⚠️ 제출 실패: ${JSON.stringify(run.json)}`);
+      console.log(`  ⚠️ submit failed: ${JSON.stringify(run.json)}`);
       outcomes.push(false);
       continue;
     }
@@ -94,7 +94,7 @@ try {
     const prov = c?.provenance;
     const tp = c?.scores?.find((x) => x.metric === "tests_pass");
     console.log(
-      `\n  최종 status=${rec.status} · ranOn=${prov?.ranOn ?? "-"} · tests_pass=${tp ? (tp.pass ? "PASS" : "FAIL") : "(없음)"}`,
+      `\n  final status=${rec.status} · ranOn=${prov?.ranOn ?? "-"} · tests_pass=${tp ? (tp.pass ? "PASS" : "FAIL") : "(none)"}`,
     );
     if (tp && !tp.pass && typeof tp.detail === "string") console.log(`    detail: ${tp.detail.slice(0, 300)}`);
     outcomes.push(rec.status === "succeeded" && !!tp?.pass);
@@ -103,8 +103,8 @@ try {
   ok = outcomes.every(Boolean) && outcomes.length === samples.length;
   console.log(
     ok
-      ? "\n✅ SpreadsheetBench v1+v2 샘플 모두 self-hosted codex 로 수행 → tests_pass PASS. 번들 등록·실행 검증 완료."
-      : `\n⚠️ 일부 샘플 불일치: ${JSON.stringify(outcomes)} (위 로그 참고).`,
+      ? "\n✅ Both SpreadsheetBench v1+v2 samples ran with self-hosted codex → tests_pass PASS. Bundle registration + execution verified."
+      : `\n⚠️ Some samples mismatched: ${JSON.stringify(outcomes)} (see logs above).`,
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

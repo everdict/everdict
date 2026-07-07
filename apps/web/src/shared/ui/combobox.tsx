@@ -6,9 +6,9 @@ import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 
-// 옵션 — value 는 폼 값, label 은 표시(미지정=value), hint 는 우측 보조정보(소유자/별칭 해석 등),
-// description 은 옵션 아래 한 줄 설명(드롭다운 목록에만; 트리거는 간결하게 label 만),
-// keywords 는 검색 매칭에만 쓰는 추가 텍스트.
+// Option — value is the form value, label is the display (unset=value), hint is the secondary info on the right (owner/alias resolution, etc.),
+// description is a one-line description under the option (in the dropdown list only; the trigger stays concise, label only),
+// keywords is extra text used only for search matching.
 export interface ComboboxOption {
   value: string
   label?: ReactNode
@@ -17,9 +17,9 @@ export interface ComboboxOption {
   keywords?: string
 }
 
-// 정식 드롭다운 선택기(Linear st. popover) — native <select> 의 빈약함과 datalist 콤보박스를 대체.
-// 의존성 없는 경량 구현: 외부클릭/Esc 닫힘, 검색(옵션 많으면 자동), 키보드 내비(↑↓·Enter·Esc).
-// 기존 옵션에 없는 value 도 트리거에 그대로 노출(시스템 기본값 등 보존).
+// The canonical dropdown selector (Linear st. popover) — replaces the poverty of native <select> and datalist comboboxes.
+// Dependency-free lightweight implementation: close on outside-click/Esc, search (automatic when there are many options), keyboard nav (↑↓·Enter·Esc).
+// A value not in the existing options is still surfaced verbatim on the trigger (preserves system defaults, etc.).
 export function Combobox({
   options,
   value,
@@ -58,7 +58,7 @@ export function Combobox({
   const listId = useId()
   const t = useTranslations('ui')
 
-  // 미지정 시 카탈로그 기본값(선택…/항목 없음/검색…) — 호출부가 넘기면 그대로 쓴다.
+  // When unset, catalog defaults (select…/no items/search…) — if the caller passes them, use those verbatim.
   const placeholderText = placeholder ?? t('comboboxPlaceholder')
   const emptyLabel = emptyText ?? t('comboboxEmpty')
   const searchPlaceholderText = searchPlaceholder ?? t('comboboxSearch')
@@ -75,7 +75,7 @@ export function Combobox({
     })
   }, [options, query])
 
-  // 외부클릭으로 닫기.
+  // Close on outside-click.
   useEffect(() => {
     if (!open) return
     function onDown(e: MouseEvent) {
@@ -85,7 +85,7 @@ export function Combobox({
     return () => document.removeEventListener('mousedown', onDown)
   }, [open])
 
-  // 열릴 때: 검색 포커스 + 현재 선택 항목으로 하이라이트. 닫힐 때: 검색어 초기화.
+  // On open: focus the search + highlight the currently selected item. On close: reset the query.
   useEffect(() => {
     if (!open) {
       setQuery('')
@@ -94,15 +94,15 @@ export function Combobox({
     const idx = options.findIndex((o) => o.value === value)
     setActive(idx >= 0 ? idx : 0)
     if (showSearch) searchRef.current?.focus()
-    // open 토글에만 반응(value/options 는 의도적으로 제외 — 열리는 순간의 스냅샷).
+    // React only to the open toggle (value/options are intentionally excluded — a snapshot at the moment of opening).
   }, [open])
 
-  // 검색 결과가 바뀌면 하이라이트를 맨 위로.
+  // When the search results change, move the highlight back to the top.
   useEffect(() => {
     setActive(0)
   }, [query])
 
-  // 하이라이트가 항상 보이도록 스크롤.
+  // Scroll so the highlight is always visible.
   useEffect(() => {
     if (!open) return
     listRef.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`)?.scrollIntoView({
@@ -121,7 +121,7 @@ export function Combobox({
         e.preventDefault()
         setOpen(true)
       }
-      return // Enter/Space 는 native 버튼 토글에 맡긴다.
+      return // Leave Enter/Space to the native button toggle.
     }
     if (e.key === 'Escape') {
       e.preventDefault()

@@ -1,9 +1,9 @@
 <!doctype html>
-<!-- 첫 실행/서버 변경 설정 화면 — window.everdictSetup(setup 창 전용 브리지)으로만 통신. 설계 D8. -->
-<html lang="ko">
+<!-- First-run / server-change setup screen — communicates only via window.everdictSetup (the setup-window-only bridge). Design D8. -->
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>Everdict — 서버 연결</title>
+    <title>Everdict — Connect to server</title>
     <style>
       :root { color-scheme: dark; }
       * { box-sizing: border-box; margin: 0; }
@@ -34,13 +34,13 @@
   <body>
     <main>
       <div class="dot"></div>
-      <h1>Everdict 서버에 연결</h1>
-      <p>팀이 쓰는 Everdict 웹 주소를 입력하세요.<br />로그인과 모든 기능은 이 서버를 통해 동작합니다.</p>
-      <label for="url">서버 주소</label>
+      <h1>Connect to your Everdict server</h1>
+      <p>Enter the Everdict web address your team uses.<br />Login and every feature run through this server.</p>
+      <label for="url">Server address</label>
       <input id="url" type="url" placeholder="https://everdict.your-team.com" autofocus spellcheck="false" />
-      <button id="save" type="button">연결</button>
+      <button id="save" type="button">Connect</button>
       <div id="error" class="error"></div>
-      <p class="hint">나중에 트레이 메뉴의 &lsquo;서버 주소 변경&rsquo;에서 바꿀 수 있습니다.</p>
+      <p class="hint">You can change this later from &lsquo;Change server address&rsquo; in the tray menu.</p>
     </main>
     <script>
       const input = document.getElementById('url')
@@ -54,7 +54,7 @@
         button.disabled = true
         try {
           await window.everdictSetup.setServerUrl(input.value)
-          // 성공 시 메인 프로세스가 이 창을 닫고 앱 창을 연다.
+          // On success, the main process closes this window and opens the app window.
         } catch (e) {
           const msg = String(e && e.message ? e.message : e)
           error.textContent = msg.replace(/^Error invoking remote method '[^']+': Error: /, '')

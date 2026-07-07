@@ -18,7 +18,7 @@ import {
   type ValidateDatasetResult,
 } from '../api/register-dataset'
 
-// cases 입력 도움용 샘플(repo 빈 시드 케이스 1건).
+// Sample to help fill in cases (one repo empty-seed case).
 const SAMPLE_CASES = `[
   {
     "id": "case-1",
@@ -28,7 +28,7 @@ const SAMPLE_CASES = `[
   }
 ]`
 
-// 상세의 "새 버전 만들기"가 기존 버전 내용을 흘려넣는 프리필 — 버전 불변이라 수정 = 새 버전.
+// Prefill that the detail view's "create new version" feeds with the existing version's content — versions are immutable, so editing = a new version.
 export interface DatasetPrefill {
   id: string
   description?: string
@@ -58,7 +58,7 @@ export function RegisterDatasetForm({
   const [createError, setCreateError] = useState<string>()
   const [busy, setBusy] = useState(false)
 
-  // 폼 → 컨트롤플레인 Dataset 본문. cases 는 JSON 텍스트를 파싱(실패 시 호출부가 처리).
+  // Form → control plane Dataset body. cases parses the JSON text (the caller handles a parse failure).
   function buildDataset(): unknown {
     return {
       id,
@@ -83,7 +83,7 @@ export function RegisterDatasetForm({
       setResult({ ok: false, error: t('casesParseError') })
       return
     }
-    // 액션 전송 자체가 실패(본문 크기 초과 등)해도 busy 가 풀리도록 방어.
+    // Guard so busy clears even if the action send itself fails (body size exceeded, etc.).
     try {
       setResult(await validateDatasetAction(body))
     } catch (e) {
@@ -111,7 +111,7 @@ export function RegisterDatasetForm({
     }
     setBusy(false)
     if (res.ok) {
-      // 새 버전 배포(프리필 진입)면 그 데이터셋 상세로 복귀 — 방금 배포한 버전이 곧 latest.
+      // When publishing a new version (prefill entry), return to that dataset's detail — the just-published version is now latest.
       if (lockId) router.push(`/${workspace}/datasets/${encodeURIComponent(id)}`)
       else router.push(`/${workspace}/datasets`)
     } else setCreateError(res.error ?? t('createError'))

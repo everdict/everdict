@@ -9,7 +9,7 @@ build server, and a live GitHub connection, so it is a **manual runbook**, not a
 
 - A deployed Everdict control plane you can authenticate to (Keycloak login **or** an `ak_…` API key).
 - A **GitHub connection** on your account (Account → Connected accounts → GitHub). For **org-level** runners,
-  connect with elevated scope: Settings › 공유 러너 › "GitHub Actions 러너" › 조직(org) › "admin:org 권한으로 다시 연결".
+  connect with elevated scope: Settings › Shared runners › "GitHub Actions runner" › Organization (org) › "Reconnect with admin:org scope".
 - A build server (Linux x64) with `curl`, `tar`, and the `everdict` CLI available (or `npm i -g @everdict/cli`).
 - Admin (`settings:write`) in the target workspace.
 
@@ -27,7 +27,7 @@ build server, and a live GitHub connection, so it is a **manual runbook**, not a
 
    It pairs a workspace-shared Everdict runner, mints a **short-lived** GitHub registration token via your
    connection, and prints (a) the **install script** and (b) the **workflow hint** (`runs-on` label + run-eval
-   `runtime`). Equivalent UI path: Settings › 공유 러너 › "GitHub Actions 러너". Equivalent MCP tool:
+   `runtime`). Equivalent UI path: Settings › Shared runners › "GitHub Actions runner". Equivalent MCP tool:
    `github_install_workspace_runner`.
 
 2. **Run the install script on the build server (GitHub side — manual).** It configures `actions/runner`
@@ -35,7 +35,7 @@ build server, and a live GitHub connection, so it is a **manual runbook**, not a
    one host. The GitHub runner registers to the repo (or org); the Everdict runner joins the `self:ws:<id>` pool.
 
 3. **Wire the workflow (manual).** Either paste the printed `runs-on`/`runtime` hint into your workflow, or use
-   the zero-input path: Settings › CI 연동 › connect the repo, fill "5. 셀프호스티드 러너" with the same
+   the zero-input path: Settings › CI integration › connect the repo, fill "5. Self-hosted runner" with the same
    `runs-on` label and `runtime: self:ws:<id>`, then "Open setup PR" — Everdict generates the workflow file.
 
 4. **Fire and verify (manual).** Open/merge a PR. GitHub Actions runs on your self-hosted runner, builds the

@@ -1,4 +1,4 @@
-// 스텁 front-door 서비스: 모든 요청에 200(JSON). GET /health(rollout readiness) + POST /runs(front-door submit drive).
+// Stub front-door service: 200 (JSON) on every request. GET /health (rollout readiness) + POST /runs (front-door submit drive).
 const http = require("node:http");
 http
   .createServer((req, res) => {

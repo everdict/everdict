@@ -5,9 +5,9 @@ import { findDesktopAsset } from '@/features/download-desktop/api/releases'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { env } from '@/shared/config/env'
 
-// 데스크톱 설치파일 다운로드 프록시 — private 리포의 릴리즈 에셋을 웹 로그인(멤버) 뒤에서만 내려준다.
-// GitHub asset API 에 octet-stream 으로 요청하면 서명된 임시 URL 로 302 를 주므로 그대로 리다이렉트
-// (대용량이 웹 서버를 통과하지 않음). 토큰은 서버 env 에만 존재. 설계: docs/architecture/desktop-app.md.
+// Desktop installer download proxy — serves a private repo's release assets only behind web login (members).
+// Requesting the GitHub asset API as octet-stream returns a 302 to a signed temporary URL, so just redirect it through
+// (large files don't pass through the web server). The token exists only in the server env. Design: docs/architecture/desktop-app.md.
 export async function GET(request: Request): Promise<Response> {
   const t = await getTranslations('downloadPage')
   const { principal } = await currentPrincipal()
@@ -19,7 +19,7 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ error: t('errorInvalidAsset') }, { status: 400 })
 
   const token = env.DESKTOP_RELEASES_TOKEN
-  // 우리 데스크톱 릴리즈에 속한 에셋만 허용 — 임의 id 프록시 방지.
+  // Allow only assets belonging to our desktop releases — prevent proxying an arbitrary id.
   const asset = token ? await findDesktopAsset(id) : null
   if (!asset || !token)
     return NextResponse.json({ error: t('errorReleaseNotFound') }, { status: 404 })
@@ -32,13 +32,13 @@ export async function GET(request: Request): Promise<Response> {
         accept: 'application/octet-stream',
         'x-github-api-version': '2022-11-28',
       },
-      redirect: 'manual', // 302 의 서명 URL 을 그대로 브라우저에 넘긴다
+      redirect: 'manual', // pass the 302's signed URL straight to the browser
       cache: 'no-store',
     }
   )
   const location = gh.headers.get('location')
   if (gh.status >= 300 && gh.status < 400 && location) return NextResponse.redirect(location, 302)
-  // 일부 환경(GHE 등)은 리다이렉트 없이 본문을 준다 — 그대로 스트리밍.
+  // Some environments (GHE, etc.) return the body without a redirect — stream it through as-is.
   if (gh.ok && gh.body)
     return new Response(gh.body, {
       headers: {

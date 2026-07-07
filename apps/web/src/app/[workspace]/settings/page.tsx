@@ -20,11 +20,11 @@ import { SettingsTabs } from './settings-tabs'
 
 export const dynamic = 'force-dynamic'
 
-// 워크스페이스 설정 — 정책·시크릿·멤버(+ 이 워크스페이스에 연결된 애플리케이션 로스터, 읽기 전용).
-// 외부 계정 연결의 연결/해제(관리)는 개인 소유라 계정(account) 페이지에 있다. 여기 로스터는 만들어진 워크스페이스 기준(members:read).
-// searchParams.tab — 계정→연결 탭의 "통합 설정 →" 딥링크가 통합 탭으로 바로 안착하도록 받는다.
-// searchParams.app — 통합 탭 안의 특정 통합(github/mattermost/trace-sink/image-registry) 상세로 바로 드릴인.
-// searchParams.githubApp/error — GitHub App 설치 콜백 리다이렉트의 결과 안내(통합 탭에서 표시).
+// Workspace settings — policy · secrets · members (+ the roster of applications connected to this workspace, read-only).
+// Connecting/disconnecting (managing) external account connections is personally-owned, so it lives on the account page. This roster is by the workspace as created (members:read).
+// searchParams.tab — received so the account→connections tab's "Integration settings →" deep link lands straight on the integrations tab.
+// searchParams.app — drills straight into a specific integration's detail (github/mattermost/trace-sink/image-registry) within the integrations tab.
+// searchParams.githubApp/error — result notice from the GitHub App installation callback redirect (shown on the integrations tab).
 export default async function SettingsPage({
   searchParams,
 }: {
@@ -61,26 +61,26 @@ export default async function SettingsPage({
   try {
     if (canReadSettings) {
       workspace = workspaceRecordSchema.parse(await controlPlane.getWorkspace(ctx))
-      // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo). settings:read(admin).
+      // Workspace-owned GitHub App integration (org installation→selected repos). settings:read (admin).
       githubApp = githubAppViewSchema.parse(await controlPlane.getGithubApp(ctx))
-      // 워크스페이스 소유 Mattermost 통합(완료/회귀 알림). 개인 연결 알림 대체. settings:read(admin).
+      // Workspace-owned Mattermost integration (completion/regression notifications). Replaces personal-connection notifications. settings:read (admin).
       mattermost = mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
-      // 워크스페이스 트레이스 싱크(복수 — 하니스별 선택). 조회 자체는 viewer+ 지만 관리 UI 는 이 탭.
+      // Workspace trace sinks (multiple — selected per harness). The read itself is viewer+, but the management UI is this tab.
       traceSinks = traceSinksResponseSchema.parse(await controlPlane.listTraceSinks(ctx)).sinks
-      // 워크스페이스 이미지 레지스트리(복수 — 분류 기준 + everdict image push 대상). 조회 자체는 viewer+ 지만 관리 UI 는 이 탭.
+      // Workspace image registries (multiple — classification baseline + everdict image push target). The read itself is viewer+, but the management UI is this tab.
       imageRegistries = imageRegistriesResponseSchema.parse(
         await controlPlane.listImageRegistries(ctx)
       ).registries
-      // CI repo link(레포↔하니스 슬롯 = OIDC trust) — 링크의 존재가 그 레포의 keyless CI 신뢰. 해제는 admin.
+      // CI repo link (repo↔harness slot = OIDC trust) — the link's existence is that repo's keyless CI trust. Removal is admin.
       ciLinks = ciLinksResponseSchema.parse(await controlPlane.listCiLinks(ctx)).links
     }
-    // 워크스페이스-공유 러너(owner=ws:<workspace>) — 팀 빌드서버/CI. 등록/조회/해제 모두 admin(settings:write).
+    // Workspace-shared runners (owner=ws:<workspace>) — team build server/CI. Register/read/remove are all admin (settings:write).
     if (canWriteSettings) {
       workspaceRunners = runnersResponseSchema.parse(
         await controlPlane.listWorkspaceOwnedRunners(ctx)
       ).runners
     }
-    // 워크스페이스 설정엔 공유(workspace) 시크릿만 — GET /secrets 가 섞어주는 내 개인(user) 시크릿은 계정 화면에서 관리.
+    // Workspace settings show only shared (workspace) secrets — my personal (user) secrets that GET /secrets mixes in are managed on the account page.
     if (canReadSecrets)
       secrets = secretsSchema
         .parse(await controlPlane.listSecrets(ctx))
@@ -92,7 +92,7 @@ export default async function SettingsPage({
   }
 
   const canReadAny = canReadSettings || canReadSecrets || canReadMembers
-  // 삭제는 owner(생성자)만 — 컨트롤플레인이 최종 강제하고, UI 는 owner 일 때만 위험 구역을 노출한다.
+  // Deletion is owner (creator) only — the control plane enforces it ultimately, and the UI exposes the danger zone only when owner.
   const isOwner = workspace !== undefined && workspace.owner === principal?.subject
 
   return (

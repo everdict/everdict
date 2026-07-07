@@ -20,8 +20,8 @@ import { StatCard } from '@/shared/ui/stat-card'
 
 export const dynamic = 'force-dynamic'
 
-// 데스크탑 + 웹 통합 리포트: 같은 CaseResult→Scorecard 흐름으로 평가한 서로 다른 하니스/벤치마크를 트랙별로 묶어
-// 권위-기준(state > 객관 > judge) 케이스 통과율을 한 화면에. 하니스/인프라-비종속 평가 런타임의 단일 리포트.
+// Unified desktop + web report: groups different harnesses/benchmarks evaluated through the same CaseResult→Scorecard flow by track,
+// showing the authority-based (state > objective > judge) case pass rate on one screen. A single report for the harness/infra-agnostic eval runtime.
 const TRACK_ORDER = ['desktop', 'web', 'other'] as const
 
 function pct(pass: number, total: number): string {
@@ -40,7 +40,7 @@ export default async function ReportPage({ params }: { params: Promise<{ workspa
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 리스트는 summary 만 주므로(케이스 results 없음) 완료분은 full 레코드를 받아 권위-기준 case-pass 를 계산.
+  // The list gives only summaries (no case results), so for completed ones fetch the full record and compute the authority-based case-pass.
   const listed = records.filter((r) => r.status === 'succeeded')
   const succeeded = await Promise.all(
     listed.map(async (r) => {

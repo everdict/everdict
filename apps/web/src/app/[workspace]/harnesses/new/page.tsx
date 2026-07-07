@@ -23,7 +23,7 @@ export default async function NewHarnessPage({
   const t = await getTranslations('harnessesPage')
   const allowed = can(principal?.roles, 'harnesses:register')
 
-  // env 시크릿 참조 피커용 — 공유(workspace) + 내 개인(user) 시크릿 이름(값은 안 옴). 실패/무권한이면 빈 목록.
+  // For the env secret reference picker — shared (workspace) + my personal (user) secret names (no values). Empty list on failure/no permission.
   let secrets = { workspace: [] as string[], user: [] as string[] }
   if (allowed) {
     try {

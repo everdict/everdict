@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 GET /me.profile + PATCH /me/profile 응답(유저 프로필). email 은 여기 없다 — SSO 클레임이라
-// Principal.email(읽기전용)에서 온다. API 모양을 zod 로 미러.
+// Control plane GET /me.profile + PATCH /me/profile response (user profile). email is not here — being an SSO claim,
+// it comes from Principal.email (read-only). Mirrors the API shape with zod.
 export const profileSchema = z.object({
   subject: z.string(),
   name: z.string().optional(),

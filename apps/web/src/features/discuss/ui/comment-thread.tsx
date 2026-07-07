@@ -15,7 +15,7 @@ import { Textarea } from '@/shared/ui/input'
 import { createCommentAction, deleteCommentAction } from '../api/comments'
 import type { Mentionable, ThreadComment } from '../model/types'
 
-// 리소스 제네릭 댓글 스레드(1단계 대댓글, Linear 식) — 어느 상세 화면에서든 재사용.
+// Resource-generic comment thread (one-level replies, Linear-style) — reusable on any detail screen.
 export function CommentThread({
   workspace: _workspace,
   resourceType,
@@ -42,7 +42,7 @@ export function CommentThread({
     }
   }
 
-  // 알림 #comment-<id> 진입 시 스크롤 + 하이라이트.
+  // On arriving from a notification at #comment-<id>, scroll + highlight.
   useEffect(() => {
     const hash = window.location.hash
     if (!hash.startsWith('#comment-')) return
@@ -89,7 +89,7 @@ export function CommentThread({
   )
 }
 
-// 최상위 댓글 + 대댓글들 + '답글' 인라인 작성기.
+// Top-level comment + its replies + a 'reply' inline composer.
 function CommentNode({
   comment,
   replies,
@@ -141,7 +141,7 @@ function CommentNode({
   )
 }
 
-// 본문 내 @이름 하이라이트(긴 이름 우선).
+// Highlight @name mentions in the body (longer names first).
 function renderBody(body: string, mentionables: Mentionable[]): ReactNode {
   const names = [...new Set(mentionables.map((m) => m.name).filter(Boolean))].sort(
     (a, b) => b.length - a.length
@@ -155,7 +155,7 @@ function renderBody(body: string, mentionables: Mentionable[]): ReactNode {
   let last = 0
   let m: RegExpExecArray | null
   let k = 0
-  // biome-ignore lint/suspicious/noAssignInExpressions: 정규식 순회 표준 패턴
+  // biome-ignore lint/suspicious/noAssignInExpressions: standard regex-iteration pattern
   while ((m = re.exec(body)) !== null) {
     if (m.index > last) out.push(body.slice(last, m.index))
     out.push(
@@ -229,7 +229,7 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
   )
 }
 
-// @멘션 오토컴플리트 작성기 — 최상위/답글 공용. 제출 시 본문의 @이름 을 멤버로 해석해 mentions 전달.
+// @mention autocomplete composer — shared by top-level/reply. On submit, resolve @names in the body to members and pass mentions.
 function Composer({
   resourceType,
   resourceId,

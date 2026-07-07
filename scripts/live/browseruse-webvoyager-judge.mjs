@@ -1,12 +1,12 @@
-// 라이브 e2e (service-topology): WebVoyager 를 *공식 방식(judge 채점)*으로 — browser-use 하니스 + LiteLLM judge.
-// 공식 WebVoyager 는 GPT-4V 가 트라젝토리를 판정한다(정답 필드 없음). everdict 의 webvoyager 어댑터도 judge 그레이더를
-// 포함 → 여기선 EVERDICT_JUDGE_MODEL(LiteLLM) 을 켜서 makeGradersFromEnv 가 JudgeGrader 를 빌드하게 하고(trace+dom 을
-// WEBVOYAGER_RUBRIC 로 판정), browser-use 가 실 사이트를 구동한 결과를 judge 가 pass/fail + 사유로 채점한다.
-//   WV_SOURCE=sample  → examples/benchmarks/webvoyager-sample.jsonl (정답 있음 → judge + answer-match 비교) [②]
-//   WV_SOURCE=real    → github WebVoyager_data.jsonl 다운로드, benign 사이트에서 WV_N 개 샘플(정답 없음 → judge 만) [③]
+// Live e2e (service-topology): WebVoyager the *official way (judge-scored)* — browser-use harness + LiteLLM judge.
+// Official WebVoyager has GPT-4V judge the trajectory (no answer field). everdict's webvoyager adapter also includes a judge
+// grader → here we enable EVERDICT_JUDGE_MODEL (LiteLLM) so makeGradersFromEnv builds a JudgeGrader (judging trace+dom by
+// WEBVOYAGER_RUBRIC), and the judge scores browser-use's run of the real site as pass/fail + reason.
+//   WV_SOURCE=sample  → examples/benchmarks/webvoyager-sample.jsonl (has answers → judge + answer-match comparison) [②]
+//   WV_SOURCE=real    → download github WebVoyager_data.jsonl, sample WV_N tasks from benign sites (no answers → judge only) [③]
 //
-// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
-// 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
+// Prereqs: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
+// Key: OPENAI_API_KEY env or infra/litellm/.env(LITELLM_MASTER_KEY) — runtime only, never committed.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -23,13 +23,13 @@ const JUDGE_MODEL = process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini";
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 const WV_SOURCE = process.env.WV_SOURCE ?? "sample";
 const WV_N = Number(process.env.WV_N ?? "6");
-const JUDGE_VISION = process.env.JUDGE_VISION === "1"; // 켜면 use_vision + 최종 스크린샷 base64 → VLM judge(공식 GPT-4V 방식)
-const RESTRICT = process.env.RESTRICT_DOMAIN === "1"; // 켜면 에이전트를 태스크 사이트 도메인으로 제한(Bing 등 우회 방지)
-// CAPTCHA/human-verification/로그인 벽이 적은 *정보탐색형* 사이트로 큐레이션 — 통과율을 anti-bot 이 아니라 에이전트
-// 능력에 귀속시키기 위해. 라이브 관측으로 보정한 집합:
-//   포함(도달 가능, 실패해도 에이전트 능력 문제): ArXiv·BBC News·Cambridge Dictionary·Coursera·ESPN·GitHub·Wolfram Alpha.
-//   제외(anti-bot/verification 확인): Huggingface(human-verification), Allrecipes(access/verification — 8사이트 런에서
-//     확인), Amazon/Booking(CAPTCHA·로그인), Google Flights/Map/Search(동의·CAPTCHA), Apple. WV_SITES 로 오버라이드 가능.
+const JUDGE_VISION = process.env.JUDGE_VISION === "1"; // when on: use_vision + final screenshot base64 → VLM judge (official GPT-4V way)
+const RESTRICT = process.env.RESTRICT_DOMAIN === "1"; // when on: restrict the agent to the task site's domain (prevents detours via Bing etc.)
+// Curated to *information-seeking* sites with few CAPTCHA/human-verification/login walls — so pass rate reflects agent
+// capability, not anti-bot. Set calibrated from live observation:
+//   Included (reachable; failure is an agent-capability issue): ArXiv·BBC News·Cambridge Dictionary·Coursera·ESPN·GitHub·Wolfram Alpha.
+//   Excluded (confirmed anti-bot/verification): Huggingface (human-verification), Allrecipes (access/verification — confirmed
+//     in an 8-site run), Amazon/Booking (CAPTCHA·login), Google Flights/Map/Search (consent·CAPTCHA), Apple. Overridable via WV_SITES.
 const BENIGN = (process.env.WV_SITES ?? "ArXiv,BBC News,Cambridge Dictionary,Coursera,ESPN,GitHub,Wolfram Alpha").split(
   ",",
 );
@@ -48,10 +48,10 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env).");
+  console.error("No LLM key (OPENAI_API_KEY or infra/litellm/.env).");
   process.exit(2);
 }
-// judge 활성화 — 백엔드의 makeGradersFromEnv → judgeFromEnv(process.env) 가 이 env 로 JudgeGrader(LiteLLM) 빌드.
+// Enable the judge — the backend's makeGradersFromEnv → judgeFromEnv(process.env) builds a JudgeGrader(LiteLLM) from this env.
 process.env.EVERDICT_JUDGE_MODEL = JUDGE_MODEL;
 process.env.EVERDICT_JUDGE_PROVIDER = "openai";
 process.env.OPENAI_API_KEY = KEY;
@@ -66,7 +66,7 @@ async function buildDataset() {
       .split("\n")
       .filter(Boolean)
       .map((l) => JSON.parse(l));
-    // benign 사이트별로 1개씩 라운드로빈해 다양성 확보, WV_N 까지.
+    // Round-robin one per benign site for diversity, up to WV_N.
     const bySite = new Map();
     for (const r of rows) {
       if (!BENIGN.includes(r.web_name)) continue;
@@ -89,7 +89,7 @@ async function buildDataset() {
 }
 
 const dataset = await buildDataset();
-console.log(`=== WebVoyager(${WV_SOURCE}) → ${dataset.cases.length} 케이스 | judge=${JUDGE_MODEL} agent=${MODEL} ===`);
+console.log(`=== WebVoyager(${WV_SOURCE}) → ${dataset.cases.length} cases | judge=${JUDGE_MODEL} agent=${MODEL} ===`);
 
 cleanup();
 execFileSync(
@@ -128,7 +128,7 @@ execFileSync(
 let ok = false;
 try {
   let healthy = false;
-  process.stdout.write("health 대기");
+  process.stdout.write("waiting for health");
   for (let i = 0; i < 60 && !healthy; i++) {
     await sleep(2000);
     process.stdout.write(".");
@@ -184,8 +184,8 @@ try {
     newRunId: () => randomUUID().replace(/-/g, ""),
   });
 
-  // 공식 WebVoyager judge 루브릭(트라젝토리 기반 성공 판정). importWebVoyager 는 [answer-match, steps] 만 매핑하므로
-  // judge 그레이더를 명시적으로 추가(catalog 어댑터의 WEBVOYAGER judge 와 동일 취지) → judge env 로 실제 판정.
+  // Official WebVoyager judge rubric (trajectory-based success verdict). importWebVoyager maps only [answer-match, steps], so
+  // we add the judge grader explicitly (same intent as the catalog adapter's WEBVOYAGER judge) → actual verdict via judge env.
   const WV_RUBRIC =
     "You are evaluating a web-browsing agent on a WebVoyager task. Given the task instruction, the agent's " +
     "trajectory (trace: actions taken + final answer message) and the final page text (dom), decide PASS only if " +
@@ -201,7 +201,7 @@ try {
     ];
     let r;
     try {
-      // judge env 가 켜져 makeGradersFromEnv 가 JudgeGrader(LiteLLM) 빌드 → trace+dom 을 루브릭으로 판정.
+      // With judge env on, makeGradersFromEnv builds a JudgeGrader(LiteLLM) → judges trace+dom by the rubric.
       r = await backend.dispatch({
         tenant: "default",
         harness: { id: "browseruse", version: "webvoyager" },
@@ -231,23 +231,23 @@ try {
   }
 
   const sc = { suiteId: `webvoyager-${WV_SOURCE}`, harness: "browseruse@webvoyager", results };
-  console.log("\n=== Scorecard 요약 (judge 채점) ===");
+  console.log("\n=== Scorecard summary (judge-scored) ===");
   for (const m of summarizeScorecard(sc)) {
     const pr = m.passRate !== undefined ? ` passRate=${(m.passRate * 100).toFixed(0)}%` : "";
     console.log(`  ${m.metric}: n=${m.count} mean=${m.mean.toFixed(4)}${pr}`);
   }
   if (failures.length) {
-    console.log("\n=== 실패 분석 ===");
+    console.log("\n=== failure analysis ===");
     for (const f of failures) console.log(`  ${f.id}${f.url ? ` (${f.url})` : ""}: ${f.reason}`);
   }
   const judgeSummary = summarizeScorecard(sc).find((m) => m.metric === "judge");
-  ok = results.length > 0 && judgeSummary !== undefined; // judge 가 실제로 채점했는가(통과율 자체는 태스크 난이도에 좌우)
+  ok = results.length > 0 && judgeSummary !== undefined; // did the judge actually score (pass rate itself depends on task difficulty)
   console.log(
     ok
-      ? `\n✅ ${WV_SOURCE === "sample" ? "②" : "③"}: WebVoyager(${WV_SOURCE}, ${results.length}케이스)를 공식 방식(LiteLLM judge=${JUDGE_MODEL}, ` +
-          `WEBVOYAGER_RUBRIC 로 trace+dom 판정)으로 채점 — judge passRate=${((judgeSummary?.passRate ?? 0) * 100).toFixed(0)}%` +
-          `${WV_SOURCE === "real" ? " (실 사이트, 정답 없음 → judge 만; 실패는 위 분석)" : " + answer-match 비교"}. browser-use 가 실 사이트를 구동한 트라젝토리를 judge 가 평가.`
-      : "\n⚠️ judge 미채점(EVERDICT_JUDGE_MODEL/키 확인)",
+      ? `\n✅ ${WV_SOURCE === "sample" ? "②" : "③"}: scored WebVoyager(${WV_SOURCE}, ${results.length} cases) the official way (LiteLLM judge=${JUDGE_MODEL}, ` +
+          `judging trace+dom by WEBVOYAGER_RUBRIC) — judge passRate=${((judgeSummary?.passRate ?? 0) * 100).toFixed(0)}%` +
+          `${WV_SOURCE === "real" ? " (real sites, no answers → judge only; failures analyzed above)" : " + answer-match comparison"}. The judge evaluates the trajectory browser-use produced on the real site.`
+      : "\n⚠️ judge did not score (check EVERDICT_JUDGE_MODEL/key)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

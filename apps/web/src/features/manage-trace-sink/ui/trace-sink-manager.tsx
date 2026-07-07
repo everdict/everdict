@@ -15,8 +15,8 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 import { removeTraceSinkAction, upsertTraceSinkAction } from '../api/manage-trace-sink'
 
-// kind별 project 필드의 의미 — 라벨/플레이스홀더를 플랫폼 용어로 맞춘다(한 필드, kind별 좌표).
-// label 은 제품명(비번역), project/placeholder 는 메시지 키로 런타임에 해석한다.
+// Meaning of the project field per kind — align the label/placeholder to the platform's terminology (one field, per-kind coordinate).
+// label is the product name (not translated); project/placeholder are message keys resolved at runtime.
 const KIND_META: Record<
   TraceSinkKind,
   { label: string; projectKey: string; placeholderKey: string }
@@ -35,10 +35,10 @@ const KIND_META: Record<
   phoenix: { label: 'Phoenix', projectKey: 'projectPhoenix', placeholderKey: 'placeholderPhoenix' },
 }
 
-// 워크스페이스 트레이스 싱크(복수) — 관측 플랫폼(MLflow/Langfuse/LangSmith/Phoenix)을 여러 개 등록해두면,
-// 스코어카드 채점이 끝날 때 케이스별 trace+점수를 하니스별로 선택된 싱크에 적재하고 스코어카드에는
-// 요약과 외부 딥링크만 남긴다. 어느 싱크에 적재할지는 하니스 상세에서 하니스별로 고른다.
-// 인증 값은 워크스페이스 시크릿 참조(이름)로만 저장.
+// Workspace trace sinks (multiple) — register several observability platforms (MLflow/Langfuse/LangSmith/Phoenix), and
+// when scorecard grading finishes, each case's trace+scores are exported to the sink selected per harness, while the scorecard
+// keeps only a summary and external deep links. Which sink to export to is chosen per harness on the harness detail page.
+// Auth values are stored only as workspace secret references (names).
 export function TraceSinkManager({
   sinks,
   canWrite,
@@ -51,7 +51,7 @@ export function TraceSinkManager({
   const t = useTranslations('manageTraceSink')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
-  // 편집 대상 name — 행 클릭으로 폼에 프리필(저장은 name 기준 upsert). undefined = 새 싱크 추가.
+  // name being edited — clicking a row prefills the form (saving is an upsert keyed by name). undefined = add a new sink.
   const [editing, setEditing] = useState<string>()
   const [name, setName] = useState('')
   const [kind, setKind] = useState<TraceSinkKind>('mlflow')
@@ -175,7 +175,7 @@ export function TraceSinkManager({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
               <Label htmlFor="ts-name">{t('name')}</Label>
-              {/* 이름 = upsert 키 — 편집 중엔 잠가서 의도치 않은 별도 싱크 생성(rename≠upsert)을 막는다. */}
+              {/* name = upsert key — lock it while editing to prevent accidentally creating a separate sink (rename ≠ upsert). */}
               <Input
                 id="ts-name"
                 placeholder={t('namePlaceholder')}
@@ -210,7 +210,7 @@ export function TraceSinkManager({
                 onChange={(e) => setEndpoint(e.target.value)}
               />
             </div>
-            {/* 인증 값은 자유 텍스트가 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성. */}
+            {/* The auth value is a workspace secret reference, not free text — choose or create inline. */}
             <div className="space-y-1">
               <Label htmlFor="ts-auth" className="flex items-center gap-1.5">
                 {t('authSecret')}

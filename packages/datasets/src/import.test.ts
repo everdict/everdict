@@ -8,9 +8,9 @@ describe("importWebVoyager", () => {
     '{"web_name":"Wikipedia","id":"wiki--0","web":"https://en.wikipedia.org/wiki/Python","ques":"Release year?","answer":"1991"}',
   ].join("\n");
 
-  it("WebVoyager jsonl → 테넌트-소유 Dataset(EvalCase[] + answer-match + steps)", () => {
+  it("WebVoyager jsonl → tenant-owned Dataset (EvalCase[] + answer-match + steps)", () => {
     const ds = importWebVoyager(jsonl, { id: "webvoyager", version: "1.0.0", description: "wv" });
-    expect(DatasetSchema.safeParse(ds).success).toBe(true); // 유효한 Dataset
+    expect(DatasetSchema.safeParse(ds).success).toBe(true); // valid Dataset
     expect(ds.id).toBe("webvoyager");
     expect(ds.cases).toHaveLength(2);
     const c0 = ds.cases[0];
@@ -23,8 +23,8 @@ describe("importWebVoyager", () => {
   });
 });
 
-describe("importJsonl (제너릭 매핑)", () => {
-  it("임의 필드명을 매핑으로 EvalCase 에 연결", () => {
+describe("importJsonl (generic mapping)", () => {
+  it("connects arbitrary field names to EvalCase via the mapping", () => {
     const jsonl = '{"task_id":"t1","prompt":"do X","url":"https://x","gold":"yes"}';
     const ds = importJsonl(
       jsonl,
@@ -41,7 +41,7 @@ describe("importJsonl (제너릭 매핑)", () => {
     expect(ds.cases[0]?.env).toEqual({ kind: "browser", startUrl: "https://x" });
     expect(ds.cases[0]?.graders).toEqual([{ id: "answer-match", config: { expect: "yes" } }]);
   });
-  it("startUrl/answer 없으면 startUrl 없는 browser env + grader 없음", () => {
+  it("no startUrl/answer → a browser env with no startUrl + no graders", () => {
     const ds = importJsonl('{"id":"q1","q":"hi"}', { id: "d", version: "1" }, { idField: "id", taskField: "q" });
     expect(ds.cases[0]?.env).toEqual({ kind: "browser" });
     expect(ds.cases[0]?.graders).toEqual([]);
@@ -49,7 +49,7 @@ describe("importJsonl (제너릭 매핑)", () => {
 });
 
 describe("importCsv / parseCsv", () => {
-  it("따옴표 안 쉼표/이스케이프 처리", () => {
+  it("handles commas inside quotes / escaping", () => {
     const rows = parseCsv('id,q,ans\n1,"a, b","he said ""hi"""\n2,plain,x');
     expect(rows).toEqual([
       { id: "1", q: "a, b", ans: 'he said "hi"' },

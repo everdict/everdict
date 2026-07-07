@@ -13,8 +13,8 @@ import {
 } from '@/entities/runner'
 import {
   getEverdictDesktop,
-  type EverdictDesktopBridge,
   type DesktopRunnerStatus,
+  type EverdictDesktopBridge,
 } from '@/shared/lib/desktop-bridge'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
@@ -24,8 +24,8 @@ import { EmptyState } from '@/shared/ui/empty-state'
 
 import { pairRunnerAction, revokeRunnerAction } from '../api/manage-runners'
 
-// 온라인 판정 — 러너는 long-poll lease(~25s)마다 lastSeenAt 을 갱신하므로 90s 안이면 접속 중으로 본다.
-// (페이지 로드 시점 기준 — 실시간 갱신은 아님.)
+// Online check — a runner refreshes lastSeenAt on every long-poll lease (~25s), so within 90s it counts as connected.
+// (Evaluated at page-load time — not updated in real time.)
 const ONLINE_WINDOW_MS = 90_000
 function isOnline(lastSeenAt?: string): boolean {
   return lastSeenAt !== undefined && Date.now() - new Date(lastSeenAt).getTime() < ONLINE_WINDOW_MS
@@ -35,23 +35,23 @@ function isRunnerCapability(value: string): value is RunnerCapability {
   return runnerCapabilitySchema.safeParse(value).success
 }
 
-// 러너는 개인 소유(self-scoped by subject) — 역할 게이트 없음.
-// 페어링 표면은 데스크톱 앱이 전담한다(원클릭; 설계 D7): 브라우저에서는 수동 페어링(토큰 1회 노출)을
-// 제공하지 않고 목록/라이브 상태/해제만 — 대신 데스크톱 다운로드를 제안한다. headless 서버는 API 키로
-// `POST /runners` → `everdict runner --pair` (docs/architecture/self-hosted-runner.md).
+// Runners are personally owned (self-scoped by subject) — no role gate.
+// The desktop app owns the pairing surface (one-click; design D7): the browser doesn't offer manual pairing
+// (token shown once) and only lists/shows live status/revokes — instead it suggests the desktop download. A headless
+// server uses an API key to `POST /runners` → `everdict runner --pair` (docs/architecture/self-hosted-runner.md).
 export function RunnersManager({
   runners,
   downloadHref,
 }: {
   runners: RunnerMeta[]
-  downloadHref: string // /{workspace}/download — 브라우저 사용자용 데스크톱 다운로드 페이지
+  downloadHref: string // /{workspace}/download — desktop download page for browser users
 }) {
   const t = useTranslations('manageRunners')
   const locale = useLocale()
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
-  // 데스크톱 셸 감지 — 브리지가 있으면 원클릭 페어링 + 이 기기 라이브 상태(마운트 후에만; SSR 불일치 방지).
+  // Detect the desktop shell — if the bridge exists, enable one-click pairing + this device's live status (only after mount; avoids SSR mismatch).
   const [bridge, setBridge] = useState<EverdictDesktopBridge | null>(null)
   const [desktop, setDesktop] = useState<DesktopRunnerStatus | null>(null)
 
@@ -75,12 +75,12 @@ export function RunnersManager({
         setError(r.error)
         return
       }
-      // 이 기기를 해제했다면 데스크톱 쪽 토큰/러너도 정리(서버 revoke 가 권위 — 브리지 실패는 무시).
+      // If we revoked this device, also clean up the desktop-side token/runner (the server revoke is authoritative — ignore bridge failures).
       if (bridge && desktop?.runnerId === id) await bridge.unpairRunner().catch(() => {})
     })
   }
 
-  // 원클릭 — appInfo(호스트명/OS/capability)로 페어링하고, 토큰은 화면에 노출하지 않고 브리지로만 내려보낸다.
+  // One-click — pair using appInfo (hostname/OS/capability), and hand the token down via the bridge only, never showing it on screen.
   function onConnectThisDevice() {
     const b = bridge
     if (!b) return
@@ -115,7 +115,7 @@ export function RunnersManager({
       <div className="flex items-center justify-between gap-4">
         <p className="text-[13px] text-muted-foreground">{t('ownedByYou')}</p>
         <span className="flex shrink-0 items-center gap-2">
-          {/* 페어링 표면은 데스크톱 전담(D7) — 브라우저에는 다운로드 CTA 만 노출. */}
+          {/* The desktop owns the pairing surface (D7) — the browser shows only a download CTA. */}
           {bridge && !desktop?.paired && (
             <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
               <Laptop />
@@ -137,8 +137,8 @@ export function RunnersManager({
         </Callout>
       )}
 
-      {/* 계정 전환/해제 불일치: 이 데스크톱이 내 목록에 없는 러너로 페어돼 있다 — 다른 계정의 페어링이거나
-          서버에서 해제된 페어링. 재연결로 로컬 페어링을 이 계정 소유의 새 러너로 대체한다. */}
+      {/* Account-switch/revoke mismatch: this desktop is paired to a runner not in my list — either another account's
+          pairing or a pairing revoked on the server. Reconnecting replaces the local pairing with a new runner owned by this account. */}
       {bridge &&
         desktop?.paired === true &&
         desktop.runnerId !== undefined &&
@@ -184,10 +184,10 @@ export function RunnersManager({
       ) : (
         <ul className="divide-y divide-border rounded-lg border bg-card shadow-raise">
           {runners.map((r) => {
-            // 이 기기(데스크톱 셸에 페어된 러너)는 lastSeenAt 추정 대신 브리지의 라이브 상태를 쓴다.
+            // For this device (the runner paired to the desktop shell), use the bridge's live status instead of the lastSeenAt estimate.
             const thisDevice = desktop?.paired === true && desktop.runnerId === r.id
             const online = thisDevice ? desktop.state !== 'off' : isOnline(r.lastSeenAt)
-            // capability 도 라이브 우선 — 페어 후 docker 데몬이 꺼졌다면 즉시 반영된다.
+            // Capabilities also prefer live — if the docker daemon stopped after pairing, it's reflected immediately.
             const caps =
               thisDevice && desktop.capabilities.length > 0 ? desktop.capabilities : r.capabilities
             const statusText = thisDevice
@@ -203,7 +203,7 @@ export function RunnersManager({
               <li key={r.id} className="flex items-center gap-3 px-3.5 py-3">
                 <span className="relative grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground">
                   <Laptop className="size-4" strokeWidth={1.75} />
-                  {/* 접속 상태 점 — 우하단 */}
+                  {/* Connection status dot — bottom-right */}
                   <span
                     className={cn(
                       'absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card',
@@ -228,7 +228,7 @@ export function RunnersManager({
                     </span>
                     {r.os && <Badge tone="outline">{r.os}</Badge>}
                   </div>
-                  {/* capability 자가-라벨 — green(가능)/grey(불가). 러너가 자기 머신을 프로브해 광고한다. */}
+                  {/* Capability self-labels — green (supported)/grey (unsupported). The runner probes its own machine and advertises them. */}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     {capabilityMeta.map(({ name, label }) => {
                       const has = caps.includes(name)

@@ -1,7 +1,7 @@
-// 라이브 e2e (SLICE 90): OtelTraceSource 를 *실제 Jaeger*(everdict-jaeger, OTLP in :4318 / query :16686)에 대고 검증.
-// 지금까지 trace 매퍼는 mock fetch 로만 단위테스트됐다. 여기선 실 OTLP 스팬을 Jaeger 로 보내고, OtelTraceSource 가
-// Jaeger query API(/api/traces/{id})에서 끌어와 정규화 TraceEvent[](llm_call 토큰/모델)로 매핑하는지 라이브로 확인한다.
-// = scorecard pull-ingest(POST /scorecards/ingest/pull) + command 하니스 trace 추출 경로의 실 backend 검증.
+// live e2e (SLICE 90): OtelTraceSource verified against a *real Jaeger* (everdict-jaeger, OTLP in :4318 / query :16686).
+// Until now the trace mapper was only unit-tested with a mock fetch. Here we send real OTLP spans to Jaeger and verify, live,
+// that OtelTraceSource pulls from the Jaeger query API (/api/traces/{id}) and maps to a normalized TraceEvent[] (llm_call tokens/model).
+// = real-backend verification of the scorecard pull-ingest (POST /scorecards/ingest/pull) + command harness trace extraction path.
 import { randomBytes } from "node:crypto";
 import process from "node:process";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
@@ -38,20 +38,20 @@ const otlp = {
 
 let ok = false;
 try {
-  console.log("=== OTLP 스팬 전송 → 실 Jaeger ===");
+  console.log("=== send OTLP spans → real Jaeger ===");
   console.log("traceId:", traceId);
   const post = await fetch(OTLP, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(otlp),
   });
-  console.log("OTLP POST →", post.status); // 200(빈 partialSuccess)
+  console.log("OTLP POST →", post.status); // 200 (empty partialSuccess)
 
-  console.log("\n=== OtelTraceSource.fetch(traceId) — Jaeger query 에서 끌어와 정규화 ===");
+  console.log("\n=== OtelTraceSource.fetch(traceId) — pull from Jaeger query and normalize ===");
   const src = new OtelTraceSource({ endpoint: QUERY });
   let events = [];
   for (let i = 0; i < 20; i++) {
-    await sleep(1000); // Jaeger 인제스트 랙
+    await sleep(1000); // Jaeger ingest lag
     try {
       events = await src.fetch(traceId);
     } catch {
@@ -69,8 +69,8 @@ try {
     Math.abs((llm.cost?.usd ?? 0) - 0.0012) < 1e-9;
   console.log(
     ok
-      ? "\n✅ SLICE 90: OtelTraceSource 가 실제 Jaeger 에서 OTLP 스팬을 끌어와 정규화 TraceEvent(llm_call: model=gpt-5.4-mini, in=100/out=42 tokens, usd=0.0012)로 매핑. trace pull 경로(pull-ingest/command 하니스)를 실 backend 로 검증."
-      : "\n⚠️ 기대와 불일치(매핑/인제스트)",
+      ? "\n✅ SLICE 90: OtelTraceSource pulls OTLP spans from real Jaeger and maps them to a normalized TraceEvent (llm_call: model=gpt-5.4-mini, in=100/out=42 tokens, usd=0.0012). Verifies the trace pull path (pull-ingest/command harness) against a real backend."
+      : "\n⚠️ mismatch with expected (mapping/ingest)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

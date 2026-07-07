@@ -11,7 +11,7 @@ import { SectionHeader } from '@/shared/ui/section-header'
 import { StatCard } from '@/shared/ui/stat-card'
 import { StatusPill } from '@/shared/ui/status-pill'
 
-// 대표 메트릭 — 통과율이 있는 첫 메트릭, 없으면 첫 메트릭. 벤치마크 점수의 기준.
+// Representative metric — the first metric with a pass rate, else the first metric. The basis for the benchmark score.
 function primary(s: ScorecardRecord): MetricSummary | undefined {
   return s.summary?.find((m) => m.passRate != null) ?? s.summary?.[0]
 }
@@ -20,7 +20,7 @@ function scoreOf(s: ScorecardRecord): number {
   return m?.passRate ?? m?.mean ?? -1
 }
 
-// 순위 메달 — 1위 금·2위 은·3위 동(리더보드와 동일 인코딩).
+// Rank medal — 1st gold · 2nd silver · 3rd bronze (same encoding as the leaderboard).
 function Rank({ rank }: { rank: number }) {
   const base =
     'inline-flex size-5 shrink-0 items-center justify-center rounded-full text-[11px] font-[560] tabular-nums ring-1 ring-inset'
@@ -43,7 +43,7 @@ function Rank({ rank }: { rank: number }) {
   )
 }
 
-// 평가 대시보드 — 배치 스코어카드(벤치마크 × 하니스)를 개요 루트에 요약. 상단 지표 + 벤치마크별 리더보드.
+// Eval dashboard — summarizes batch scorecards (benchmark × harness) on the overview root. Top-line metrics + per-benchmark leaderboard.
 export function EvalDashboard({
   scorecards,
   workspace,
@@ -77,7 +77,7 @@ export function EvalDashboard({
     )
   }
 
-  // 벤치마크(데이터셋 id)별 그룹 — 케이스 많은 순, 각 그룹은 점수 내림차순.
+  // Group per benchmark (dataset id) — ordered by most cases, each group by descending score.
   const groups = new Map<string, ScorecardRecord[]>()
   for (const s of scorecards) {
     const arr = groups.get(s.dataset.id) ?? []

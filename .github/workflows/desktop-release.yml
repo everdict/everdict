@@ -1,7 +1,7 @@
-# 데스크톱 앱 3-OS 릴리즈 — tag `desktop-vX.Y.Z` 푸시(또는 수동 dispatch=draft) 시
-# ubuntu/macos/windows 러너에서 electron-builder 로 설치파일을 빌드해 GitHub Release 하나로 발행한다.
-# 산출물: linux AppImage+deb · mac dmg+zip(x64/arm64) · win nsis. 전부 unsigned(인증서 확보 후 서명 추가).
-# 설계: docs/architecture/desktop-app.md (슬라이스 5 CI).
+# Desktop app 3-OS release — on tag `desktop-vX.Y.Z` push (or manual dispatch=draft),
+# build installers with electron-builder on ubuntu/macos/windows runners and publish them as a single GitHub Release.
+# Artifacts: linux AppImage+deb · mac dmg+zip(x64/arm64) · win nsis. All unsigned (add signing once a certificate is obtained).
+# Design: docs/architecture/desktop-app.md (slice 5 CI).
 name: desktop-release
 
 on:
@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "버전 (예: 0.1.0) — 파일명/릴리즈 이름에 사용, draft 로 발행"
+        description: "Version (e.g. 0.1.0) — used in filenames/release name, published as draft"
         required: true
 
 permissions:
@@ -34,18 +34,18 @@ jobs:
             args: --win
     runs-on: ${{ matrix.os }}
     env:
-      # 서명 인증서 미보유 — 자동 서명 탐색 비활성(특히 macOS keychain 탐색이 빌드를 깨지 않게).
+      # No signing certificate — disable automatic signing discovery (so macOS keychain lookup in particular doesn't break the build).
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
     steps:
       - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4 # 버전은 루트 package.json 의 packageManager 필드에서
+      - uses: pnpm/action-setup@v4 # version from the root package.json packageManager field
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: 버전 주입 (tag desktop-vX.Y.Z → X.Y.Z, dispatch 는 입력값)
+      - name: Inject version (tag desktop-vX.Y.Z → X.Y.Z, dispatch uses the input)
         run: |
           if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
             VERSION="${GITHUB_REF_NAME#desktop-v}"
@@ -55,13 +55,13 @@ jobs:
           echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
           (cd apps/desktop && npm pkg set version="${VERSION}")
 
-      - name: 디펜던시 빌드 (turbo — desktop 의존 체인만)
+      - name: Build dependencies (turbo — desktop dependency chain only)
         run: pnpm turbo run build --filter=@everdict/desktop
 
-      - name: 패키징 (esbuild 단일 번들 → electron-builder, unsigned)
+      - name: Package (esbuild single bundle → electron-builder, unsigned)
         working-directory: apps/desktop
         env:
-          # 릴리즈 빌드에 굽는 기본 서버 URL(D8) — repo Variables 에 설정(미설정 시 앱이 첫 실행 설정 화면을 띄움).
+          # Default server URL baked into the release build (D8) — set in repo Variables (if unset, the app shows a first-run setup screen).
           EVERDICT_DESKTOP_DEFAULT_WEB_URL: ${{ vars.EVERDICT_DESKTOP_DEFAULT_WEB_URL }}
         run: |
           node esbuild.mjs
@@ -88,7 +88,7 @@ jobs:
         with:
           path: dist
           merge-multiple: true
-      - name: GitHub Release 발행 (tag 트리거=정식, dispatch=draft)
+      - name: Publish GitHub Release (tag trigger = final, dispatch = draft)
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v{0}', inputs.version) }}

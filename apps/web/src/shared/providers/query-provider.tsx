@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from 'react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
-// 클라이언트 쿼리(상호작용) 용. 서버 컴포넌트는 control-plane 을 직접 호출한다.
+// For client queries (interactions). Server components call the control plane directly.
 export function QueryProvider({ children }: { children: ReactNode }) {
   const [client] = useState(
     () =>

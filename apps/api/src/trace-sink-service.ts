@@ -3,13 +3,13 @@ import type { ScorecardExport, WorkspaceSettings, WorkspaceSettingsStore } from 
 import type { TraceSink, TraceSinkCase, TraceSinkConfig } from "@everdict/trace";
 import { createLimiter } from "./concurrency.js";
 
-// 워크스페이스 트레이스 싱크 통합 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow/Langfuse/LangSmith/Phoenix)에
-// 적재하는 아웃바운드 설정. 싱크는 '복수'를 이름으로 등록하고(팀마다 플랫폼이 여러 개), 어느 싱크로 보낼지는
-// '하니스별로' 선택한다(traceSinkByHarness: harness id → sink name; 선택 없는 하니스는 적재 안 함 — 옵트인).
-// 비밀 없음: authSecretName 은 값이 아닌 SecretStore 이름 참조라 반환 안전. HTTP 라우트와 MCP 도구가 이 코어를 공유.
-// 설계: docs/architecture/trace-sink.md
+// Workspace trace-sink integration — outbound config to export judged scorecard detail results to the team's observability
+// platform (MLflow/Langfuse/LangSmith/Phoenix). Sinks are registered as a plural roster keyed by name (a team may have several
+// platforms), and which sink to export to is chosen per-harness (traceSinkByHarness: harness id → sink name; a harness with no
+// selection is not exported — opt-in). No secrets: authSecretName is a SecretStore name reference, not a value, so it is safe to return. The HTTP route and MCP tool share this core.
+// Design: docs/architecture/trace-sink.md
 
-// 싱크 1건 현황(비밀 없음 — 전부 이름 참조/URL).
+// A single sink's status (no secrets — all name references/URLs).
 export interface TraceSinkConfigView {
   name: string;
   kind: "mlflow" | "langfuse" | "langsmith" | "phoenix";
@@ -22,15 +22,15 @@ export interface TraceSinkConfigView {
 type TraceSinkEntry = NonNullable<WorkspaceSettings["traceSinks"]>[number];
 
 export interface TraceSinkServiceDeps {
-  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // authSecretName → 값 resolve(워크스페이스 SecretStore)
-  buildSink?: (cfg: TraceSinkConfig) => TraceSink; // 설정 → 어댑터(@everdict/trace buildTraceSink). 미주입이면 적재 비활성
-  exportConcurrency?: number; // 케이스 축 export 동시 실행 상한(기본 2) — 싱크 rate-limit 보호
+  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // authSecretName → value resolve (workspace SecretStore)
+  buildSink?: (cfg: TraceSinkConfig) => TraceSink; // config → adapter (@everdict/trace buildTraceSink). If not injected, export is disabled
+  exportConcurrency?: number; // concurrency cap for the case-axis export (default 2) — protects the sink's rate limit
   now?: () => string;
 }
 
-// 케이스 스트리밍 export 핸들 — 배치가 케이스 완성(judge 후) 즉시 push, settle 이 전 태스크 합류 후
-// 기존 exportScorecard 와 동일한 ScorecardExport 형태로 합산(레코드 스키마·웹 표시 무변경).
-// push 태스크는 절대 throw 하지 않는다 — export 실패는 outcome 에만 남는다(스코어카드와 격리).
+// Case streaming export handle — the batch pushes each case as soon as it completes (after judging), and settle, after joining
+// all tasks, aggregates into the same ScorecardExport shape as the existing exportScorecard (record schema/web display unchanged).
+// A push task never throws — an export failure lands only in the outcome (isolated from the scorecard).
 export interface CaseExportStream {
   push(result: CaseResult): void;
   settle(): Promise<ScorecardExport>;
@@ -53,7 +53,7 @@ export class TraceSinkService {
     private readonly deps: TraceSinkServiceDeps = {},
   ) {}
 
-  // 등록된 싱크 목록 + 하니스별 선택 현황.
+  // The list of registered sinks + the per-harness selection state.
   async list(workspace: string): Promise<{ sinks: TraceSinkConfigView[]; assignments: Record<string, string> }> {
     const s = await this.settings.get(workspace);
     return {
@@ -62,7 +62,7 @@ export class TraceSinkService {
     };
   }
 
-  // 등록/갱신(관리자, 이름 기준 upsert — 선언형 전체 교체). 인증 토큰(값)은 SecretStore 에 먼저 넣고 이름만 지정.
+  // Register/update (admin, name-keyed upsert — declarative full replace). Put the auth token (value) in the SecretStore first and specify only its name.
   async upsert(
     workspace: string,
     input: {
@@ -88,7 +88,7 @@ export class TraceSinkService {
     return toView(entry);
   }
 
-  // 해제(관리자). 그 싱크를 가리키던 하니스 선택도 함께 정리한다(dangling 참조 방지).
+  // Remove (admin). Also cleans up harness selections that pointed at that sink (prevents dangling references).
   async remove(workspace: string, name: string): Promise<void> {
     const s = await this.settings.get(workspace);
     const next = (s?.traceSinks ?? []).filter((e) => e.name !== name);
@@ -98,13 +98,13 @@ export class TraceSinkService {
     await this.settings.set(workspace, { traceSinks: next, traceSinkByHarness: assignments });
   }
 
-  // 하니스별 싱크 선택(member+ — 하니스 구성의 일부). sink=null 은 선택 해제(적재 끔).
-  // 없는 싱크 이름은 400 — dangling 참조를 조용히 만들지 않는다.
+  // Per-harness sink selection (member+ — part of the harness config). sink=null clears the selection (turns export off).
+  // An unknown sink name is 400 — never silently create a dangling reference.
   async assign(workspace: string, harnessId: string, sink: string | null): Promise<Record<string, string>> {
     const s = await this.settings.get(workspace);
     const known = new Set((s?.traceSinks ?? []).map((e) => e.name));
     if (sink !== null && !known.has(sink))
-      throw new BadRequestError("BAD_REQUEST", { sink }, `등록되지 않은 싱크입니다: ${sink}`);
+      throw new BadRequestError("BAD_REQUEST", { sink }, `Unregistered sink: ${sink}`);
     const assignments = { ...(s?.traceSinkByHarness ?? {}) };
     if (sink === null) delete assignments[harnessId];
     else assignments[harnessId] = sink;
@@ -112,11 +112,11 @@ export class TraceSinkService {
     return assignments;
   }
 
-  // 케이스 스트리밍 export — 배치가 케이스 완성(judge 후) 즉시 push 해 팀 플랫폼에 케이스 단위로 나타나게
-  // 한다(배치 전체 완료 대기 없음 — 라이브 가시성 + 실패 시 부분 보존). 준비(설정/선택/시크릿/빌더)는 스트림
-  // 생성 시 1회. 선택 없음/빌더 미주입 → undefined(no-op, 현행 옵트인 시맨틱). 절대 throw 하지 않는다.
-  // attach: pull 인제스트의 (source.kind, caseId→외부 runId) — 소스와 싱크가 같은 플랫폼일 때만 기존 trace 에
-  // 점수를 부착(흐름②, 복제 없음)하고, 다르면 create 모드로 폴백(흐름①과 동일).
+  // Case streaming export — the batch pushes each case as soon as it completes (after judging) so cases appear on the team's
+  // platform one at a time (no waiting for the whole batch — live visibility + partial preservation on failure). Setup
+  // (config/selection/secret/builder) happens once at stream creation. No selection / no builder → undefined (no-op, the current opt-in semantics). Never throws.
+  // attach: the pull ingest's (source.kind, caseId→external runId) — only when source and sink are the same platform, attach
+  // scores to the original trace (flow ②, no duplication); otherwise fall back to create mode (same as flow ①).
   // docs/architecture/streaming-case-pipeline.md D5 + docs/architecture/trace-sink.md
   async exportStream(
     tenant: string,
@@ -124,7 +124,7 @@ export class TraceSinkService {
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ): Promise<CaseExportStream | undefined> {
     const s = await this.settings.get(tenant);
-    // ctx.harness = "id@version" — 싱크 선택은 하니스 id 단위(버전 무관).
+    // ctx.harness = "id@version" — sink selection is per harness id (version-independent).
     const harnessId = ctx.harness.split("@")[0] ?? ctx.harness;
     const sinkName = s?.traceSinkByHarness?.[harnessId];
     const sink = sinkName ? (s?.traceSinks ?? []).find((e) => e.name === sinkName) : undefined;
@@ -132,7 +132,7 @@ export class TraceSinkService {
     if (!sink || !buildSink) return undefined;
     const exportedAt = (this.deps.now ?? (() => new Date().toISOString()))();
 
-    // 준비 실패(시크릿 미등록 등)는 스트림을 "실패 outcome 전용"으로 — push 는 무시되고 settle 이 사유를 반환.
+    // A setup failure (e.g. secret not registered) makes the stream "failure-outcome-only" — pushes are ignored and settle returns the reason.
     let impl: TraceSink | undefined;
     let initError: string | undefined;
     try {
@@ -140,7 +140,7 @@ export class TraceSinkService {
       if (sink.authSecretName) {
         const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
         auth = secrets[sink.authSecretName];
-        if (!auth) initError = `SecretStore 에 '${sink.authSecretName}' 값이 없습니다 — 시크릿을 먼저 등록하세요.`;
+        if (!auth) initError = `No value for '${sink.authSecretName}' in the SecretStore — register the secret first.`;
       }
       if (!initError) {
         impl = buildSink({
@@ -172,22 +172,22 @@ export class TraceSinkService {
 
     const limit = createLimiter(this.deps.exportConcurrency ?? 2);
     const tasks: Array<Promise<void>> = [];
-    const outcomes: SinkCaseOutcome[] = []; // push 순서 보존(슬롯 선점 후 비동기 기록)
+    const outcomes: SinkCaseOutcome[] = []; // preserve push order (reserve a slot, then record asynchronously)
     let url: string | undefined;
     return {
       push: (result) => {
         const sinkImpl = impl;
-        if (!sinkImpl) return; // 준비 실패 — settle 이 사유 반환(케이스 발사 없음)
+        if (!sinkImpl) return; // prep failed — settle returns the reason (no case fired)
         const slot = outcomes.length;
-        outcomes.push({ caseId: result.caseId, error: "미완료" }); // 슬롯 선점 — 태스크가 덮어쓴다
+        outcomes.push({ caseId: result.caseId, error: "incomplete" }); // reserve the slot — the task overwrites it
         tasks.push(
           limit(async () => {
             try {
               const out = await sinkImpl.export(ctx, [toSinkCase(result)]);
               url ??= out.url;
-              outcomes[slot] = out.cases[0] ?? { caseId: result.caseId, error: "싱크가 결과를 돌려주지 않음" };
+              outcomes[slot] = out.cases[0] ?? { caseId: result.caseId, error: "sink returned no result" };
             } catch (err) {
-              // 케이스별 격리 — 한 케이스의 업스트림 실패가 다른 케이스/스코어카드를 막지 않는다.
+              // Per-case isolation — one case's upstream failure doesn't block other cases / the scorecard.
               outcomes[slot] = { caseId: result.caseId, error: err instanceof Error ? err.message : String(err) };
             }
           }),
@@ -198,13 +198,13 @@ export class TraceSinkService {
         if (initError) return { sink: sink.kind, name: sink.name, status: "failed", message: initError, exportedAt };
         const failed = outcomes.filter((c) => c.error).length;
         const status = failed === 0 ? "succeeded" : failed === outcomes.length && failed > 0 ? "failed" : "partial";
-        // 전면 실패면 첫 에러 사유를 최상위로(케이스별 호출이라 wholesale 장애도 케이스에 격리됨 — 사유 승격),
-        // 부분 실패면 개수 요약(케이스별 사유는 cases[].error 에).
+        // On a total failure, promote the first error reason to the top (per-case calls mean even a wholesale outage is isolated to cases — reason promotion),
+        // on a partial failure, a count summary (per-case reasons live in cases[].error).
         const message =
           status === "failed"
             ? outcomes.find((c) => c.error)?.error
             : failed > 0
-              ? `${failed}/${outcomes.length}개 케이스 적재 실패`
+              ? `${failed}/${outcomes.length} cases failed to export`
               : undefined;
         return {
           sink: sink.kind,
@@ -219,8 +219,8 @@ export class TraceSinkService {
     };
   }
 
-  // 채점 완료된 케이스 결과(trace+점수)를 '그 하니스가 선택한' 싱크로 적재 — 일괄 소비형(ingest 등 결과가
-  // 이미 다 있는 경로). 내부적으로 스트림에 전부 push 후 합류(코어는 exportStream 하나).
+  // Export scored case results (trace+scores) to the sink 'the harness selected' — the batch-consumer form (paths where
+  // the results already exist, e.g. ingest). Internally pushes everything to the stream, then joins (the core is a single exportStream).
   async exportScorecard(
     tenant: string,
     ctx: { scorecardId: string; dataset: string; harness: string },

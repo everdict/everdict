@@ -16,22 +16,22 @@ import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
 import { PgVersionedStore } from "./pg-versioned-store.js";
 import { asService } from "./registry.js";
 
-// Postgres 기반 개별 하네스(Instance) SSOT. 저장은 HarnessInstanceSpec(template 참조+pins), get 은 resolve.
-// 스키마: @everdict/db/migrations/0016_create_harness_taxonomy. 템플릿 해석은 주입된 HarnessTemplateRegistry.
+// Postgres-backed individual harness (instance) SSOT. Stores HarnessInstanceSpec (template reference + pins), get resolves.
+// Schema: @everdict/db/migrations/0016_create_harness_taxonomy. Template resolution via the injected HarnessTemplateRegistry.
 export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
   private readonly store: PgVersionedStore<HarnessInstanceSpec>;
   constructor(
     client: SqlClient,
     private readonly templates: HarnessTemplateRegistry,
   ) {
-    this.store = new PgVersionedStore(client, "everdict_harness_instances", "하네스 인스턴스", (v) =>
+    this.store = new PgVersionedStore(client, "everdict_harness_instances", "harness instance", (v) =>
       HarnessInstanceSpecSchema.parse(v),
     );
   }
 
   async register(tenant: string, instance: HarnessInstanceSpec, createdBy?: string): Promise<void> {
     const template = await this.templates.get(tenant, instance.template.id, instance.template.version);
-    resolveHarnessInstance(template, instance); // 등록 전 pins 유효성 검증(실패 시 거부)
+    resolveHarnessInstance(template, instance); // validate pin validity before register (reject on failure)
     await this.store.register(tenant, instance, createdBy);
   }
   has(tenant: string, id: string, version: string): Promise<boolean> {

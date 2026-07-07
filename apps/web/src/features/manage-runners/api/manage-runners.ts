@@ -14,9 +14,9 @@ import { controlPlane } from '@/shared/lib/control-plane'
 
 export interface PairRunnerResult {
   ok: boolean
-  token?: string // 평문(rnr_…) — 1회만. 모달에 보여주고 버리거나, 데스크톱 브리지로만 내려보낸다.
-  runner?: RunnerMeta // 방금 페어된 러너 메타 — 데스크톱 원클릭이 runnerId 를 브리지에 넘길 때 사용
-  apiUrl?: string // 러너가 접속할 컨트롤플레인 base(비밀 아님) — 데스크톱 브리지 전달용
+  token?: string // plaintext (rnr_…) — once only. Shown in the dialog then discarded, or handed down via the desktop bridge only.
+  runner?: RunnerMeta // metadata for the just-paired runner — used when the desktop one-click passes runnerId to the bridge
+  apiUrl?: string // control-plane base the runner connects to (not a secret) — for handing to the desktop bridge
   error?: string
 }
 export interface RunnerMutationResult {
@@ -24,11 +24,11 @@ export interface RunnerMutationResult {
   error?: string
 }
 
-// 디바이스 페어링 — 컨트롤플레인이 rnr_… 평문을 1회 돌려준다(저장은 해시). 러너는 개인 소유(self-scoped by subject) — 역할 게이트 없음.
+// Device pairing — the control plane returns the rnr_… plaintext once (stored as a hash). Runners are personally owned (self-scoped by subject) — no role gate.
 export async function pairRunnerAction(input: PairRunnerInput): Promise<PairRunnerResult> {
   const ctx = await authContext()
   try {
-    // 경계 검증(컨트롤플레인이 다시 강제하지만 잘못된 입력은 여기서 거른다).
+    // Boundary validation (the control plane re-enforces it, but bad input is filtered out here).
     const body = pairRunnerInputSchema.parse({
       label: input.label,
       ...(input.os && input.os.length > 0 ? { os: input.os } : {}),
@@ -44,7 +44,7 @@ export async function pairRunnerAction(input: PairRunnerInput): Promise<PairRunn
   }
 }
 
-// 러너 해제(삭제). 러너는 개인 소유 — 본인 러너만 해제(컨트롤플레인이 subject 로 스코프).
+// Revoke (delete) a runner. Runners are personally owned — you can only revoke your own (the control plane scopes by subject).
 export async function revokeRunnerAction(id: string): Promise<RunnerMutationResult> {
   const ctx = await authContext()
   try {

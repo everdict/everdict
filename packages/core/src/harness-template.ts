@@ -16,16 +16,16 @@ import {
   TraceSourceSpecSchema,
 } from "./harness-spec.js";
 
-// 하니스 분류(taxonomy): Template(대분류) + Instance(개별 하네스).
-// Template = 구조 골격(버전 미고정, 버전 대상 = slot). Instance = template 참조 + pins(슬롯→구체 버전/이미지, 델타).
-// resolveHarnessInstance(template, instance) → HarnessSpec(resolved) — 백엔드/런타임이 소비하는 기존 형식.
-// 설계: docs/architecture/harness-taxonomy.md.
+// Harness taxonomy: Template (category) + Instance (individual harness).
+// Template = the structural skeleton (versions not pinned, version target = slot). Instance = a template reference + pins (slot→concrete version/image, delta).
+// resolveHarnessInstance(template, instance) → HarnessSpec (resolved) — the existing form consumed by backends/runtimes.
+// Design: docs/architecture/harness-taxonomy.md.
 
-// 대분류 라벨 — 웹 그룹핑/온보딩 폼 선택용. 시드 몇 개 + custom 자유.
+// Category label — for web grouping / onboarding form selection. A few seeds + free custom.
 export const HarnessCategorySchema = z.string().min(1);
 
-// --- service(topology) 템플릿 ---
-// 서비스 구조만(이미지 없음). slot = 인스턴스가 핀하는 키 이름(미지정이면 name).
+// --- service(topology) template ---
+// Service structure only (no images). slot = the key name the instance pins (name if unspecified).
 export const TemplateServiceSchema = TopologyServiceSchema.omit({ image: true }).extend({
   slot: z.string().optional(),
 });
@@ -34,7 +34,7 @@ export type TemplateService = z.infer<typeof TemplateServiceSchema>;
 const templateBase = {
   category: HarnessCategorySchema,
   id: z.string(),
-  version: z.string(), // 구조(shape) 버전 — 서비스 추가/제거 등 모양이 바뀔 때만 올린다(핀 변경은 인스턴스).
+  version: z.string(), // shape version — bumped only when the shape changes (services added/removed etc.); pin changes are the instance.
 };
 
 export const ServiceTemplateSpecSchema = z.object({
@@ -47,21 +47,21 @@ export const ServiceTemplateSpecSchema = z.object({
   traceSource: TraceSourceSpecSchema,
 });
 
-// --- command 템플릿 --- setup/command/env/trace 가 구조, image/model 은 pins("image"/"model")로 핀 가능.
+// --- command template --- setup/command/env/trace are the structure; image/model can be pinned via pins ("image"/"model").
 export const CommandTemplateSpecSchema = z.object({
   kind: z.literal("command"),
   ...templateBase,
-  image: z.string().optional(), // pins.image 없을 때의 기본
+  image: z.string().optional(), // default when pins.image is absent
   workDir: z.string().optional(),
   setup: z.array(z.string()).default([]),
   command: z.string(),
-  env: z.record(EnvValueSchema).default({}), // 리터럴 또는 { secretRef }
-  model: z.string().optional(), // pins.model 없을 때의 기본
-  params: z.record(z.string()).default({}), // {{var}} 기본값(인스턴스 overrides.params 가 덮어쓴다)
+  env: z.record(EnvValueSchema).default({}), // literal or { secretRef }
+  model: z.string().optional(), // default when pins.model is absent
+  params: z.record(z.string()).default({}), // {{var}} defaults (an instance's overrides.params overrides them)
   trace: CommandTraceSpecSchema.default({ kind: "none" }),
 });
 
-// --- process 템플릿 --- 단일 프로세스(Claude Code/Codex). 핀 대상 없음(템플릿 버전 = 구조).
+// --- process template --- a single process (Claude Code/Codex). Nothing to pin (template version = structure).
 export const ProcessTemplateSpecSchema = z.object({
   kind: z.literal("process"),
   ...templateBase,
@@ -74,23 +74,23 @@ export const HarnessTemplateSpecSchema = z.discriminatedUnion("kind", [
 ]);
 export type HarnessTemplateSpec = z.infer<typeof HarnessTemplateSpecSchema>;
 
-// 인스턴스 변주(overrides) — 구조(템플릿)는 그대로 두고 "동작 노브"만 델타로 얹는다. resolve 시 deep-merge.
-// Phase 1(런타임 무관, resolve 시점만): 서비스별 env 오버레이 · front-door 본문 값 · command env/params.
-// 이미지 교체는 기존 pins 로(흔한 경우). overrides 는 같은 템플릿 안에서 모델/온도/플래그/페이로드 변주를 표현하는 통로.
-// 설계: docs/architecture/harness-taxonomy.md "Instance variation".
+// Instance variation (overrides) — leave the structure (template) alone and layer only "behavior knobs" as a delta. deep-merge at resolve.
+// Phase 1 (runtime-agnostic, resolve time only): per-service env overlay · front-door body values · command env/params.
+// Image replacement goes through the existing pins (the common case). overrides is the channel for expressing model/temperature/flag/payload variations within the same template.
+// Design: docs/architecture/harness-taxonomy.md "Instance variation".
 export const InstanceServiceOverrideSchema = z.object({
-  env: z.record(EnvValueSchema).optional(), // 서비스 정적 env 오버레이(템플릿 env 위에 병합; storeEnv 아래) — Phase 1
-  replicas: z.number().int().positive().optional(), // Phase 2 — nomad/k8s 존중(docker 단일호스트=1)
-  resources: ServiceResourcesSchema.optional(), // Phase 2 — cpu/memory (scalar 치환)
-  volumes: z.array(z.string()).optional(), // Phase 3 — docker 존중(nomad/k8s 후속) (scalar 치환)
-  readiness: ServiceReadinessSchema.optional(), // Phase 3 — readiness 폴링 상한 (scalar 치환)
+  env: z.record(EnvValueSchema).optional(), // static service env overlay (merged on top of the template env; below storeEnv) — Phase 1
+  replicas: z.number().int().positive().optional(), // Phase 2 — honored by nomad/k8s (docker single-host = 1)
+  resources: ServiceResourcesSchema.optional(), // Phase 2 — cpu/memory (scalar substitution)
+  volumes: z.array(z.string()).optional(), // Phase 3 — honored by docker (nomad/k8s follow-up) (scalar substitution)
+  readiness: ServiceReadinessSchema.optional(), // Phase 3 — readiness polling bound (scalar substitution)
 });
 export type InstanceServiceOverride = z.infer<typeof InstanceServiceOverrideSchema>;
 
 export const InstanceOverridesSchema = z.object({
-  // service 템플릿: 서비스명 → 오버라이드. 템플릿에 없는 서비스명이면 resolve 가 BadRequest.
+  // service template: service name → override. If a service name is not in the template, resolve throws BadRequest.
   services: z.record(InstanceServiceOverrideSchema).optional(),
-  // service 템플릿: front-door submit 본문 값(shallow-merge) + 완료 타이밍 튜닝(completion 위에 spread; 무효 키는 재파싱이 제거).
+  // service template: front-door submit body values (shallow-merge) + completion timing tuning (spread on top of completion; invalid keys are dropped by re-parse).
   frontDoor: z
     .object({
       request: z.object({ bodyTemplate: z.record(z.unknown()).optional() }).optional(),
@@ -102,29 +102,29 @@ export const InstanceOverridesSchema = z.object({
         .optional(),
     })
     .optional(),
-  // service 템플릿: 브라우저 타깃 익스텐션 ref 핀(Phase 3). 템플릿에 target 이 없으면 resolve 가 BadRequest.
+  // service template: pin the browser target extension ref (Phase 3). If the template has no target, resolve throws BadRequest.
   target: z.object({ extension: z.object({ ref: z.string() }) }).optional(),
-  // command 템플릿: env 오버레이 + {{var}} 값. 각각 템플릿 위에 병합.
+  // command template: env overlay + {{var}} values. Each merged on top of the template.
   env: z.record(EnvValueSchema).optional(),
   params: z.record(z.string()).optional(),
 });
 export type InstanceOverrides = z.infer<typeof InstanceOverridesSchema>;
 
-// 개별 하네스(인스턴스) — template 참조 + pins(슬롯→값, 델타) + overrides(구조 불변 동작 델타). 보통 PR/SHA 마다 하나.
-// version 은 자유 문자열(예: "pr-123-sha-abc") — 레지스트리가 비-semver 를 등록순으로 처리한다.
+// Individual harness (instance) — a template reference + pins (slot→value, delta) + overrides (structure-invariant behavior delta). Usually one per PR/SHA.
+// version is a free string (e.g. "pr-123-sha-abc") — the registry handles non-semver in registration order.
 export const HarnessInstanceSpecSchema = z.object({
   template: z.object({ id: z.string(), version: z.string() }),
-  id: z.string(), // resolved 하네스 id (관례상 template.id 와 동일)
-  version: z.string(), // 인스턴스 태그
-  // 이 버전의 변경 내역(자유 텍스트 changelog) — 새 버전 배포 시 사용자가 입력, 하니스 상세에 표시. 미설정 = 없음.
-  // 버전 스펙의 일부라 불변(specsEqual 대상): 같은 버전을 다른 내역으로 재등록하면 409. 런타임 무관 메타라 resolve 는 실지 않는다.
+  id: z.string(), // resolved harness id (conventionally the same as template.id)
+  version: z.string(), // instance tag
+  // This version's changelog (free-text) — entered by the user on deploying a new version, shown on the harness detail. Unset = none.
+  // Part of the version spec so immutable (subject to specsEqual): re-registering the same version with different notes → 409. Runtime-agnostic meta, so not carried into resolve.
   description: z.string().optional(),
-  pins: z.record(z.string()).default({}), // slot → 값(이미지 ref; command 는 "image"/"model")
-  overrides: InstanceOverridesSchema.optional(), // 구조 불변 동작 변주(env/본문/params) — 미설정 = 이미지만(현행)
+  pins: z.record(z.string()).default({}), // slot → value (image ref; command uses "image"/"model")
+  overrides: InstanceOverridesSchema.optional(), // structure-invariant behavior variation (env/body/params) — unset = image only (current)
 });
 export type HarnessInstanceSpec = z.infer<typeof HarnessInstanceSpecSchema>;
 
-// Template(구조) + Instance(pins) → resolved HarnessSpec. 슬롯 누락/불일치는 BadRequestError.
+// Template (structure) + Instance (pins) → resolved HarnessSpec. Missing/mismatched slots throw BadRequestError.
 export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: HarnessInstanceSpec): HarnessSpec {
   if (template.id !== instance.template.id || template.version !== instance.template.version) {
     throw new BadRequestError(
@@ -133,21 +133,21 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         template: `${template.id}@${template.version}`,
         instanceTemplate: `${instance.template.id}@${instance.template.version}`,
       },
-      "인스턴스의 template 참조가 주어진 템플릿과 일치하지 않습니다.",
+      "The instance's template reference does not match the given template.",
     );
   }
   const pins = instance.pins;
   const overrides = instance.overrides;
   switch (template.kind) {
     case "service": {
-      // overrides.services 의 대상 서비스는 반드시 템플릿에 존재해야 한다(이미지 핀과 같은 규율).
+      // The target service of overrides.services must exist in the template (same discipline as image pins).
       const serviceNames = new Set(template.services.map((s) => s.name));
       for (const name of Object.keys(overrides?.services ?? {})) {
         if (!serviceNames.has(name)) {
           throw new BadRequestError(
             "BAD_REQUEST",
             { service: name, known: [...serviceNames] },
-            `overrides 대상 서비스 '${name}' 가 템플릿에 없습니다.`,
+            `Override target service '${name}' is not in the template.`,
           );
         }
       }
@@ -158,11 +158,11 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
           throw new BadRequestError(
             "BAD_REQUEST",
             { service: s.name, slot },
-            `서비스 '${s.name}' 의 slot '${slot}' 에 대한 pin(이미지)이 없습니다.`,
+            `No pin (image) for slot '${slot}' of service '${s.name}'.`,
           );
         }
         const ov = overrides?.services?.[s.name];
-        // env 는 병합(인스턴스가 이김; 런타임은 connEnv < 이 env < storeEnv). 나머지 노브는 scalar 치환(있으면 인스턴스, 없으면 템플릿).
+        // env is merged (instance wins; the runtime does connEnv < this env < storeEnv). The other knobs are scalar-substituted (instance if present, else template).
         const env = ov?.env ? { ...s.env, ...ov.env } : s.env;
         const volumes = ov?.volumes ?? s.volumes;
         const readiness = ov?.readiness ?? s.readiness;
@@ -180,7 +180,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
           ...(resources !== undefined ? { resources } : {}),
         };
       });
-      // front-door: submit 본문 값(shallow-merge) + 완료 타이밍(completion 위에 spread; 모드 불일치 키는 재파싱이 제거).
+      // front-door: submit body values (shallow-merge) + completion timing (spread on top of completion; keys that don't match the mode are dropped by re-parse).
       const bodyOverride = overrides?.frontDoor?.request?.bodyTemplate;
       const completionOverride = overrides?.frontDoor?.completion;
       let frontDoor = template.frontDoor;
@@ -203,14 +203,14 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
           },
         };
       }
-      // 타깃 익스텐션 ref 핀(Phase 3) — 템플릿에 target 이 있어야 한다(없으면 명확히 실패).
+      // Target extension ref pin (Phase 3) — the template must have a target (fail clearly otherwise).
       let target = template.target;
       if (overrides?.target) {
         if (!target) {
           throw new BadRequestError(
             "BAD_REQUEST",
             {},
-            "overrides.target 가 있으나 템플릿에 target(browser)이 없습니다.",
+            "overrides.target is present but the template has no target (browser).",
           );
         }
         target = { ...target, extension: { ...(target.extension ?? {}), ref: overrides.target.extension.ref } };
@@ -229,7 +229,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
     case "command": {
       const image = pins.image ?? template.image;
       const model = pins.model ?? template.model;
-      // env/params 오버레이: 템플릿 위에 병합(인스턴스가 이김). params 는 command 의 {{var}} 를 채운다.
+      // env/params overlay: merged on top of the template (instance wins). params fills command's {{var}}.
       const env = overrides?.env ? { ...template.env, ...overrides.env } : template.env;
       const params = overrides?.params ? { ...template.params, ...overrides.params } : template.params;
       return CommandHarnessSpecSchema.parse({

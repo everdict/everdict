@@ -3,7 +3,7 @@ import { useTranslations } from 'next-intl'
 import type { Run } from '@/entities/run'
 import { StatCard } from '@/shared/ui/stat-card'
 
-// 테넌트 스코어 요약 카드들. per-tenant 대시보드의 핵심.
+// Tenant score summary cards. The heart of the per-tenant dashboard.
 export function ScorecardSummary({ runs }: { runs: Run[] }) {
   const t = useTranslations('scorecardSummary')
   const total = runs.length

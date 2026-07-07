@@ -13,7 +13,7 @@ export interface DatasetOption {
   label: string
 }
 
-// dataset/metric/baseline 을 골라 트렌드 URL 로 이동. 실제 시계열은 서버가 계산.
+// Pick dataset/metric/baseline and navigate to the trend URL. The server computes the actual time series.
 export function TrendPicker({
   datasets,
   dataset,

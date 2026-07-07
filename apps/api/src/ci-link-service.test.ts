@@ -9,7 +9,7 @@ import {
   renderCiWorkflow,
 } from "./ci-link-service.js";
 
-// fetch fake — URL 패턴별 응답 시나리오(setup-PR 의 GitHub API dance 검증용).
+// fetch fake — per-URL-pattern response scenarios (to verify setup-PR's GitHub API dance).
 type Handler = (url: string, init?: RequestInit) => Response | undefined;
 function fakeFetch(handlers: Handler[], calls: Array<{ url: string; method: string; body?: unknown }>) {
   return (async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
@@ -29,7 +29,7 @@ function fakeFetch(handlers: Handler[], calls: Array<{ url: string; method: stri
 const json = (data: unknown, status = 200) =>
   new Response(JSON.stringify(data), { status, headers: { "content-type": "application/json" } });
 
-// 워크스페이스 GitHub App 능력의 fake — picker/쓰기토큰/러너토큰(개인 연결 대체). GithubAppService 자체는 별도 테스트.
+// Fake of the workspace GitHub App capabilities — picker/write-token/runner-token (replacing personal connections). GithubAppService itself is tested separately.
 function fakeGithubApp(over: Partial<GithubAppRepoAccess> = {}): GithubAppRepoAccess {
   return {
     listRepos: async () => [],
@@ -39,12 +39,12 @@ function fakeGithubApp(over: Partial<GithubAppRepoAccess> = {}): GithubAppRepoAc
   };
 }
 
-// 워크스페이스-공유 러너 로스터 fake — 기본 1대(r1). setup-PR 의 self:ws 풀 fail-closed 검사(D6)용.
+// Fake workspace-shared runner roster — default 1 runner (r1). For setup-PR's self:ws pool fail-closed check (D6).
 function fakeRunners(ids: string[] = ["r1"]): WorkspaceRunnerRoster {
   return { listWorkspaceOwned: async () => ids.map((id) => ({ id })) };
 }
 
-describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)", () => {
+describe("CiLinkService — link CRUD (one record per repository, case-insensitive)", () => {
   let settings: InMemoryWorkspaceSettingsStore;
   let svc: CiLinkService;
   beforeEach(() => {
@@ -52,38 +52,38 @@ describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)"
     svc = new CiLinkService({ settings, githubApp: fakeGithubApp(), runners: fakeRunners() });
   });
 
-  it("upsert 는 같은 repository 를 교체하고(createdBy 스탬프), remove 는 신뢰까지 끊는다", async () => {
+  it("upsert replaces the same repository (stamps createdBy), and remove severs the trust too", async () => {
     await svc.upsert("acme", "alice", { repository: "Acme/App", harness: "bu", slots: { planner: {} } });
     await svc.upsert("acme", "bob", { repository: "acme/app", harness: "bu", dataset: "pinch", slots: {} });
     const links = await svc.list("acme");
-    expect(links).toHaveLength(1); // 대소문자 무시 교체
+    expect(links).toHaveLength(1); // case-insensitive replace
     expect(links[0]).toMatchObject({ repository: "acme/app", harness: "bu", dataset: "pinch", createdBy: "bob" });
     expect(await svc.remove("acme", "ACME/APP")).toEqual([]);
   });
 
-  it("trigger 노브(auto|comment|both)가 link 에 저장된다 — setup-PR 워크플로의 PR 발화 방식", async () => {
+  it("the trigger knob (auto|comment|both) is stored on the link — how the setup-PR workflow's PR fires", async () => {
     await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {}, trigger: "comment" });
     expect((await svc.list("acme"))[0]?.trigger).toBe("comment");
   });
 
-  it("개인 러너 runtime(self / self:<id>)은 BadRequest — CI principal 은 개인 러너를 리스할 수 없다(발사 시점 실패를 저장에서 차단)", async () => {
+  it("personal-runner runtime (self / self:<id>) is BadRequest — a CI principal cannot lease a personal runner (block the fire-time failure at save)", async () => {
     for (const runtime of ["self", "self:r9"])
       await expect(
         svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {}, runtime }),
       ).rejects.toBeInstanceOf(BadRequestError);
-    // 워크스페이스-공유 계열과 관리형 런타임 id 는 허용된다("self" 로 시작하는 일반 id 포함).
+    // The workspace-shared family and managed runtime ids are allowed (including generic ids starting with "self").
     for (const runtime of ["self:ws", "self:ws:r1", "k8s-prod", "selfhosted-k8s"])
       await expect(
         svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {}, runtime }),
       ).resolves.toBeDefined();
   });
 
-  it("다른 워크스페이스 설정을 건드리지 않는다(워크스페이스 스코프)", async () => {
+  it("does not touch another workspace's settings (workspace scope)", async () => {
     await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {} });
     expect(await svc.list("beta")).toEqual([]);
   });
 
-  it("link 키는 (host, repository) — 같은 owner/name 이라도 github.com 과 GHE 는 별개 link 로 공존한다", async () => {
+  it("link key is (host, repository) — the same owner/name coexists as separate links on github.com and a GHE", async () => {
     await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {} });
     await svc.upsert("acme", "alice", {
       repository: "acme/app",
@@ -93,7 +93,7 @@ describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)"
     });
     expect(await svc.list("acme")).toHaveLength(2);
 
-    // 같은 host 의 upsert 만 교체된다(host 비교는 대소문자/트레일링 슬래시 무시).
+    // Only an upsert on the same host replaces (host comparison ignores case/trailing slash).
     await svc.upsert("acme", "bob", {
       repository: "ACME/APP",
       host: "https://GHE.acme.io/",
@@ -105,15 +105,15 @@ describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)"
     expect(links.find((l) => l.host !== undefined)?.harness).toBe("bu-ghe-v2");
     expect(links.find((l) => l.host === undefined)?.harness).toBe("bu");
 
-    // remove 도 host 로 좁힌다 — GHE link 만 지워지고 github.com link 는 남는다.
+    // remove also narrows by host — only the GHE link is deleted, the github.com link remains.
     const after = await svc.remove("acme", "acme/app", "https://ghe.acme.io");
     expect(after).toHaveLength(1);
     expect(after[0]?.host).toBeUndefined();
   });
 });
 
-describe("CiLinkService.listRepos — 워크스페이스 App installation repos picker (위임)", () => {
-  it("githubApp.listRepos(workspace) 를 그대로 노출한다", async () => {
+describe("CiLinkService.listRepos — workspace App installation repos picker (delegation)", () => {
+  it("exposes githubApp.listRepos(workspace) verbatim", async () => {
     const repos: RepoInfo[] = [{ fullName: "acme-org/api", private: true, defaultBranch: "main" }];
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
@@ -124,18 +124,18 @@ describe("CiLinkService.listRepos — 워크스페이스 App installation repos 
   });
 });
 
-describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커밋/PR (App 토큰)", () => {
+describe("CiLinkService.openSetupPr — workflow YAML synthesis + branch/commit/PR (App token)", () => {
   function build(handlers: Handler[], calls: Array<{ url: string; method: string; body?: { content?: string } }>) {
     return new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(), // token=app_tok
-      runners: fakeRunners(), // self:ws 풀 러너 1대(r1) — 기본 배치 검사 통과
+      runners: fakeRunners(), // 1 runner in the self:ws pool (r1) — passes the default placement check
       apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch(handlers, calls),
     });
   }
 
-  it("link 로부터 YAML 을 만들고 branch→file→PR 순서로 생성해 prUrl 을 돌려준다", async () => {
+  it("builds the YAML from the link, creates it in branch→file→PR order, and returns prUrl", async () => {
     const calls: Array<{ url: string; method: string; body?: { content?: string; ref?: string } }> = [];
     const svc = build(
       [
@@ -163,27 +163,27 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
     const result = await svc.openSetupPr("acme", "acme/app");
     expect(result).toEqual({ prUrl: "https://github.com/acme/app/pull/42", branch: "everdict/eval-setup" });
 
-    // 커밋된 워크플로 내용 검증 — zero-input 의 실체: 워크스페이스/하니스/데이터셋/슬롯 빌드가 전부 박혀 있다.
+    // Verify the committed workflow content — the substance of zero-input: workspace/harness/dataset/slot builds are all baked in.
     const put = calls.find((c) => c.method === "PUT");
     const yaml = Buffer.from(put?.body?.content ?? "", "base64").toString("utf8");
     expect(yaml).toContain("workspace: acme");
     expect(yaml).toContain("harness: my-topology");
     expect(yaml).toContain("dataset: pinch-bench");
     expect(yaml).toContain("id-token: write"); // OIDC keyless
-    expect(yaml).toContain("context: services/x"); // 모노레포 path
-    expect(yaml).toContain("build-svc-x"); // 슬롯 빌드 스텝 + digest 출력 참조
+    expect(yaml).toContain("context: services/x"); // monorepo path
+    expect(yaml).toContain("build-svc-x"); // slot build step + digest output reference
     expect(yaml).toContain("api-url: https://everdict.example.com");
     expect(yaml).toContain("concurrency:"); // superseding
   });
 
-  it("link 가 없으면 NotFound(신뢰 부여 전 PR 금지), GitHub 실패는 UpstreamError 로 remap", async () => {
+  it("no link → NotFound (no PR before trust is granted); a GitHub failure remaps to UpstreamError", async () => {
     const svc = build([(url) => (url.endsWith("/repos/acme/app") ? json({ message: "boom" }, 500) : undefined)], []);
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(UpstreamError);
   });
 
-  it("GHE link 는 link.host 로 토큰을 발급하고 GHE API(/api/v3)로 dance 한다", async () => {
+  it("a GHE link mints the token by link.host and dances against the GHE API (/api/v3)", async () => {
     const calls: Array<{ url: string; method: string; body?: { content?: string } }> = [];
     const tokenHosts: Array<string | undefined> = [];
     const svc = new CiLinkService({
@@ -200,7 +200,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
         [
           (url, init) => {
             const m = init?.method ?? "GET";
-            if (!url.startsWith("https://ghe.acme.io/api/v3/")) return undefined; // GHE 베이스 이외는 500
+            if (!url.startsWith("https://ghe.acme.io/api/v3/")) return undefined; // anything but the GHE base → 500
             if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
             if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
             if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
@@ -223,16 +223,16 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
     });
     const result = await svc.openSetupPr("acme", "acme/app", { host: "https://ghe.acme.io" });
     expect(result.prUrl).toBe("https://ghe.acme.io/acme/app/pull/3");
-    expect(tokenHosts).toEqual(["https://ghe.acme.io"]); // link.host 가 installation 선택으로 전달
+    expect(tokenHosts).toEqual(["https://ghe.acme.io"]); // link.host is passed through as the installation selector
     expect(calls.every((c) => c.url.startsWith("https://ghe.acme.io/api/v3/"))).toBe(true);
   });
 
-  it("App 이 그 repo 에 설치돼 있지 않으면 NotFound(tokenForRepository 가 던짐)", async () => {
+  it("if the App is not installed on that repo → NotFound (tokenForRepository throws)", async () => {
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp({
         tokenForRepository: async () => {
-          throw new NotFoundError("NOT_FOUND", {}, "설치된 App 없음");
+          throw new NotFoundError("NOT_FOUND", {}, "no installed App");
         },
       }),
       runners: fakeRunners(),
@@ -243,22 +243,22 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  // D6 — CI 배치는 항상 셀프호스티드: 기본 runtime(self:ws 풀)이 비어 있으면 PR 을 열기 전에 fail-closed.
-  it("공유 러너가 0대면 setup-PR 을 열지 않는다(BadRequest) — 머지 후 GitHub 큐 무한대기가 가장 늦은 실패라서", async () => {
+  // D6 — CI placement is always self-hosted: if the default runtime (self:ws pool) is empty, fail-closed before opening the PR.
+  it("does not open setup-PR when there are zero shared runners (BadRequest) — post-merge infinite queueing on GitHub is the latest failure", async () => {
     const calls: Array<{ url: string; method: string }> = [];
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(),
-      runners: fakeRunners([]), // 워크스페이스 공유 러너 없음
+      runners: fakeRunners([]), // no workspace-shared runner
       apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch([], calls),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(BadRequestError);
-    expect(calls).toHaveLength(0); // GitHub 에 브랜치/커밋/PR 어느 것도 만들지 않았다
+    expect(calls).toHaveLength(0); // created no branch/commit/PR on GitHub whatsoever
   });
 
-  it("runtime 이 특정 러너(self:ws:<id>)인데 로스터에 없으면 NotFound — 재등록하거나 풀(self:ws)로 비우라고 안내", async () => {
+  it("runtime is a specific runner (self:ws:<id>) not in the roster → NotFound — advises re-register or clear runtime to the pool (self:ws)", async () => {
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(),
@@ -270,11 +270,11 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
     await expect(svc.openSetupPr("acme", "acme/app")).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("관리형 런타임 오버라이드(runtime 이 self:ws 계열이 아님)는 러너 로스터 없이도 PR 을 연다", async () => {
+  it("a managed-runtime override (runtime not in the self:ws family) opens the PR even with no runner roster", async () => {
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(),
-      runners: fakeRunners([]), // 공유 러너 없음 — 그래도 관리형 런타임이면 무관
+      runners: fakeRunners([]), // no shared runner — irrelevant for a managed runtime
       apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch(
         [
@@ -302,7 +302,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
 });
 
 describe("renderCiWorkflow", () => {
-  it("dataset 미지정이면 TODO 주석을 남긴다(조용한 누락 금지)", () => {
+  it("leaves a TODO comment when dataset is unset (no silent omission)", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
       "acme",
@@ -311,7 +311,7 @@ describe("renderCiWorkflow", () => {
     expect(yaml).toContain("TODO");
   });
 
-  it("runsOn/runtime 미지정이면 셀프호스티드 기본([self-hosted] + self:ws 풀) — GitHub-호스티드 경로 없음(D6)", () => {
+  it("with runsOn/runtime unset, defaults to self-hosted ([self-hosted] + self:ws pool) — no GitHub-hosted path (D6)", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
       "acme",
@@ -322,7 +322,7 @@ describe("renderCiWorkflow", () => {
     expect(yaml).not.toContain("ubuntu-latest");
   });
 
-  it("runsOn/runtime 지정 시 셀프호스티드 배치(runs-on 라벨 + run-eval runtime 입력)", () => {
+  it("with runsOn/runtime set, self-hosted placement (runs-on label + run-eval runtime input)", () => {
     const yaml = renderCiWorkflow(
       {
         repository: "acme/app",
@@ -339,18 +339,18 @@ describe("renderCiWorkflow", () => {
     expect(yaml).toContain("runtime: self:ws:r1");
   });
 
-  it("github.com link 는 GHCR 로 빌드/푸시한다(레지스트리 기본값)", () => {
+  it("a github.com link builds/pushes to GHCR (the default registry)", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: { web: {} }, createdBy: "a" },
       "acme",
       "https://everdict.example.com",
     );
     expect(yaml).toContain("registry: ghcr.io");
-    // 이미지 태그는 체크아웃된 head 의 sha — 코멘트 발화(기본 브랜치 컨텍스트)에서 GITHUB_SHA 는 main 을 가리킨다.
+    // Image tag is the checked-out head's sha — on a comment fire (default-branch context) GITHUB_SHA points at main.
     expect(yaml).toContain("tags: ghcr.io/${{ github.repository }}/web:${{ steps.head.outputs.sha }}");
   });
 
-  it("GHE link 는 그 인스턴스의 컨테이너 레지스트리(containers.<hostname>)로 빌드/푸시한다 — GHES 의 GITHUB_TOKEN 은 ghcr.io 로그인 불가", () => {
+  it("a GHE link builds/pushes to that instance's container registry (containers.<hostname>) — GHES's GITHUB_TOKEN cannot log in to ghcr.io", () => {
     const yaml = renderCiWorkflow(
       {
         repository: "acme/app",
@@ -368,7 +368,7 @@ describe("renderCiWorkflow", () => {
     expect(yaml).not.toContain("ghcr.io");
   });
 
-  it("기본(trigger 미지정=both)은 PR 자동 + /evaluate 코멘트 둘 다 발화한다 — issue_comment 함정 3개 흡수", () => {
+  it("default (trigger unset = both) fires both PR auto + /evaluate comment — absorbs the 3 issue_comment pitfalls", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
       "acme",
@@ -376,20 +376,20 @@ describe("renderCiWorkflow", () => {
     );
     expect(yaml).toContain("\n  pull_request:");
     expect(yaml).toContain("\n  issue_comment:");
-    // ① 게이트 — PR 대화의 /evaluate 이고 작성자가 협력자 이상일 때만(포크 PR 방어).
+    // ① gate — only /evaluate on a PR conversation when the author is a collaborator or above (fork-PR defense).
     expect(yaml).toContain("startsWith(github.event.comment.body, '/evaluate')");
     expect(yaml).toContain("github.event.comment.author_association");
-    // ② 기본 브랜치 컨텍스트 함정 — PR head 명시 체크아웃 + sha 는 git 으로 해석.
+    // ② default-branch context pitfall — explicit PR head checkout + resolve the sha via git.
     expect(yaml).toContain("format('refs/pull/{0}/head', github.event.issue.number)");
     expect(yaml).toContain("git rev-parse HEAD");
-    // ③ concurrency 를 PR 번호로 묶어 코멘트 발화 ↔ 같은 PR 의 자동 발화가 서로 supersede.
+    // ③ group concurrency by PR number so a comment fire ↔ the same PR's auto fire supersede each other.
     expect(yaml).toContain("github.event.pull_request.number || github.event.issue.number || github.ref");
-    // 대화 회신(유일한 피드백 표면)용 쓰기 권한 + 토큰.
+    // Write permission + token for conversation replies (the only feedback surface).
     expect(yaml).toContain("pull-requests: write");
     expect(yaml).toContain("github-token: ${{ github.token }}");
   });
 
-  it("trigger=auto 는 코멘트 트리거/게이트/피드백 권한을 내보내지 않는다(자동 발화만 — 최소 권한)", () => {
+  it("trigger=auto does not emit the comment trigger/gate/feedback permissions (auto fire only — least privilege)", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a", trigger: "auto" },
       "acme",
@@ -401,7 +401,7 @@ describe("renderCiWorkflow", () => {
     expect(yaml).not.toContain("github-token");
   });
 
-  it("trigger=comment 는 PR 자동 트리거 없이 /evaluate 코멘트만 발화한다(온디맨드) — push 재핀은 유지", () => {
+  it("trigger=comment fires only the /evaluate comment without the PR auto trigger (on demand) — push re-pin stays", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a", trigger: "comment" },
       "acme",
@@ -413,8 +413,8 @@ describe("renderCiWorkflow", () => {
   });
 });
 
-describe("CiLinkService.mintRunnerToken — 워크스페이스 App 으로 러너 등록 토큰(위임)", () => {
-  it("githubApp.runnerRegistrationToken(workspace, target, host) 을 그대로 노출한다", async () => {
+describe("CiLinkService.mintRunnerToken — runner registration token via the workspace App (delegation)", () => {
+  it("exposes githubApp.runnerRegistrationToken(workspace, target, host) verbatim", async () => {
     const svc = new CiLinkService({
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp({
@@ -428,7 +428,7 @@ describe("CiLinkService.mintRunnerToken — 워크스페이스 App 으로 러너
     });
     expect((await svc.mintRunnerToken("acme", { repo: "acme/app" })).token).toBe("REPOTOK");
     expect((await svc.mintRunnerToken("acme", { org: "acme-org" })).token).toBe("ORGTOK");
-    // host 스레딩 — picker 가 고른 GHE installation 이 그대로 전달된다.
+    // host threading — the GHE installation the picker chose is passed through verbatim.
     expect((await svc.mintRunnerToken("acme", { org: "acme-org" }, "https://ghe.acme.io")).host).toBe(
       "https://ghe.acme.io",
     );

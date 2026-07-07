@@ -14,8 +14,8 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
    (explicit; unknown id ⇒ `400`, never a silent partial) → `tags` (any-match) → `limit` (first N), applied in
    that order; empty selection ⇒ `400`. The record stamps **`subset {total, selected, ids?, tags?, limit?}`**
    (mig 0043, returned in list too) so every consumer (list/detail/diff/leaderboard) can see it's not a full
-   run — the web shows a "일부 n/N" chip (list) and a 케이스 선택 prop (detail), and the run form exposes
-   케이스 수 제한 + 태그 필터. Omitted ⇒ full dataset, no stamp.
+   run — the web shows a "partial n/N" chip (list) and a case-selection prop (detail), and the run form exposes
+   a case-count limit + tag filter. Omitted ⇒ full dataset, no stamp.
 2. Resolve the **harness version** (`latest → concrete`) via the registry; embed the `HarnessSpec` for
    declarative harnesses (builtins fall back to id). The record stores the **resolved** `harness@version`.
 3. Build a `Suite` on the fly (`{ id: dataset.id, harness: { id }, cases }`) and run it with `@everdict/suite`'s
@@ -41,7 +41,7 @@ old records keep the embed. See `docs/architecture/run-as-primitive.md`.
 Runs are **async**: submit returns a `queued` record; poll until terminal. Normal eval failures produce
 `CaseResult`s (the batch still succeeds); only infra/budget errors fail the whole run.
 
-**Failure visibility** (diagnose "어떤 구간에서 어떻게"): a per-case dispatch failure is isolated to a failed
+**Failure visibility** (diagnose "at which stage and how"): a per-case dispatch failure is isolated to a failed
 `CaseResult` carrying `trace:[{kind:"error",message}]` + a `pass:false` score whose **`detail` = the reason**
 (so the web/CLI shows *why* per case). A pipeline-level failure tags the record's `error.phase`
 (`dispatch | judges | offload | persist`) so you see *which stage* broke, and the **partial
@@ -80,7 +80,7 @@ the LLM-bound judge phase with dispatch; the `judges` step after dispatch is jus
 See `docs/judges.md` + `docs/architecture/streaming-case-pipeline.md`.
 
 ### Trace ingestion (`POST /scorecards/ingest`)
-The "이미 수행한 트레이스" path: produce a scorecard from **externally-run traces without dispatching a harness**.
+The "already-executed traces" path: produce a scorecard from **externally-run traces without dispatching a harness**.
 The seam is the normalized `TraceEvent` (`@everdict/core`) — per-harness trace variance is absorbed at the **edge**
 (the harness/SDK uploads already-normalized `TraceEvent[]`; the control plane only validates via `TraceEventSchema`).
 `ScorecardService.ingest` resolves the referenced **dataset** (for `caseId`→task alignment + diff alignment),
@@ -125,15 +125,15 @@ All workspace-scoped (other-workspace `get` → `404`/`NOT_FOUND`), one service 
 `docs/api.md`, `docs/mcp.md`, `docs/web.md`, `docs/datasets.md`, `docs/suites.md`.
 
 ## Web (`apps/web`)
-- **스코어카드 `/dashboard/scorecards`** — runs list (dataset@v → harness@v, status, per-metric summary chips).
-- **상세 `/dashboard/scorecards/[id]`** — status, meta, per-metric **stat cards** (mean + pass-rate), per-case
+- **Scorecards `/dashboard/scorecards`** — runs list (dataset@v → harness@v, status, per-metric summary chips).
+- **Detail `/dashboard/scorecards/[id]`** — status, meta, per-metric **stat cards** (mean + pass-rate), per-case
   scores, error.
-- **실행 `/dashboard/scorecards/new`** — pick dataset + harness (datalist) + optional judges → `runScorecardAction`
+- **Run `/dashboard/scorecards/new`** — pick dataset + harness (datalist) + optional judges → `runScorecardAction`
   → `POST /scorecards`. Role-gated off `/me` (`scorecards:run` = member+).
-- **비교 `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
+- **Compare `/dashboard/scorecards/compare?baseline=&candidate=`** — pick two succeeded scorecards → per-metric
   mean Δ table + **regressions (pass→fail) / improvements (fail→pass)** via `diffScorecards`. This is the
   baseline-vs-candidate payoff. `scorecards:read`.
-- **인제스트 `/dashboard/scorecards/ingest`** — a push|pull mode toggle. **push**: upload `TraceEvent[]` →
+- **Ingest `/dashboard/scorecards/ingest`** — a push|pull mode toggle. **push**: upload `TraceEvent[]` →
   `POST /scorecards/ingest`. **pull**: pick a `source` (OTel/MLflow endpoint + optional auth-secret name) + a
   `runs:[{caseId, runId}]` mapping → `POST /scorecards/ingest/pull`. Both add dataset + harness label + judges.
   `scorecards:run` (member+).

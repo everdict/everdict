@@ -22,7 +22,7 @@ import { PageHeader } from '@/shared/ui/page-header'
 
 export const dynamic = 'force-dynamic'
 
-// RuntimeSpec 의 kind별 설정 필드 → 표시용 라벨/값 행(값 있는 것만).
+// RuntimeSpec's per-kind config fields → display label/value rows (only those with a value).
 function specRows(
   spec: RuntimeSpec,
   labels: {
@@ -64,7 +64,7 @@ export default async function RuntimeDetailPage({
   const t = await getTranslations('runtimesPage')
   const { principal, ctx } = await currentPrincipal()
 
-  // 목록에서 이 런타임의 요약(버전/소유자) 확보 — 없거나 연결 실패면 목록으로.
+  // Get this runtime's summary (version/owner) from the list — go back to the list if absent or the connection fails.
   let summary: RuntimeSummary | undefined
   try {
     summary = runtimesSchema.parse(await controlPlane.listRuntimes(ctx)).find((r) => r.id === id)
@@ -95,7 +95,7 @@ export default async function RuntimeDetailPage({
       })
     : []
 
-  // 이 버전(표시본=latest)의 태그(자유 라벨) — 등록과 동일 게이트(runtimes:write) + 소유 워크스페이스일 때만 편집.
+  // This version's tags (shown = latest) (free-form labels) — same gate as registration (runtimes:write) + editable only in the owning workspace.
   const currentWorkspace = principal?.workspace ?? workspace
   const canEditTags = can(principal?.roles, 'runtimes:write') && summary.owner === currentWorkspace
   const latestTags = summary.versionTags?.[latest] ?? []
@@ -138,8 +138,8 @@ export default async function RuntimeDetailPage({
               {t('noExtraConfig')}
             </p>
           )}
-          {/* 이 버전(표시본=latest)의 태그 — placement 태그(위 rows 의 '태그')와 별개인 버전 분간용 자유 라벨.
-              편집 불가 + 태그 없음이면 블록 자체를 숨긴다(빈 섹션 노출 금지). */}
+          {/* This version's tags (shown = latest) — free-form labels for distinguishing versions, separate from the placement tags (the 'tag' in the rows above).
+              If not editable and there are no tags, hide the block entirely (don't render empty sections). */}
           {(canEditTags || latestTags.length > 0) && (
             <div className="border-t border-border pt-4">
               <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">

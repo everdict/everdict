@@ -3,8 +3,8 @@ import { JudgeSpecSchema } from "@everdict/core";
 import { InMemoryJudgeRegistry, type JudgeRegistry } from "./judge-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 
-// 디렉터리의 *.json judge 들을 레지스트리에 로드. 버전 관리되는 파일 = SSOT(GitOps).
-// 기본 소유자는 SHARED_TENANT(first-party 기본 judge — 모든 테넌트가 폴백으로 봄). into 를 주면 거기에 등록(Pg 시드 등).
+// Load a directory's *.json judges into the registry. Version-controlled files = SSOT (GitOps).
+// Default owner is SHARED_TENANT (first-party default judge — every tenant sees it via fallback). Pass into to register there (e.g. Pg seed).
 export async function loadJudgeDir(
   dir: string,
   opts: { into?: JudgeRegistry; tenant?: string } = {},

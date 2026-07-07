@@ -11,14 +11,14 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 import type { EnvRow, SecretRefScope } from '../lib/build-spec'
 
-// 워크스페이스가 로드한 시크릿 이름 — 공유(workspace) + 내 개인(user) 두 티어.
+// Secret names loaded by the workspace — two tiers: shared (workspace) + my personal (user).
 export interface ScopedSecretNames {
   workspace: string[]
   user: string[]
 }
 
-// env 편집기 — KEY + [값(리터럴) | 시크릿(참조)] 행. 시크릿 행은 스펙에 {secretRef,scope} 로 나가 평문이 안 남고,
-// 공유/개인 시크릿 목록에서 고르거나 인라인으로 새로 만든다. raw 텍스트 대신 이 구조화 편집기로 env 를 넣는다.
+// env editor — KEY + [value (literal) | secret (reference)] rows. Secret rows go to the spec as {secretRef,scope} so no plaintext remains,
+// picked from the shared/personal secret lists or created inline. env is entered through this structured editor instead of raw text.
 export function EnvEditor({
   rows,
   onChange,
@@ -33,7 +33,7 @@ export function EnvEditor({
   tip: React.ReactNode
 }) {
   const t = useTranslations('registerHarness')
-  // 인라인으로 만든 시크릿은 스코프별로 더해 즉시 선택 가능하게 한다(서버 프리로드 + 신규).
+  // Inline-created secrets are added per scope so they're immediately selectable (server preload + new).
   const [created, setCreated] = useState<{ name: string; scope: SecretRefScope }[]>([])
   const names = useMemo<ScopedSecretNames>(
     () => ({
@@ -87,7 +87,7 @@ export function EnvEditor({
                 />
                 <SourceToggle
                   secret={r.secret}
-                  // 소스를 바꾸면 값은 초기화(리터럴 ↔ 시크릿 이름은 서로 다른 의미). 시크릿 기본 스코프=workspace.
+                  // Changing the source resets the value (literal ↔ secret name mean different things). Default secret scope=workspace.
                   onChange={(secret) => set(i, { secret, value: '', scope: 'workspace' })}
                 />
                 <button
@@ -128,7 +128,7 @@ export function EnvEditor({
   )
 }
 
-// 값(리터럴) | 시크릿(참조) 세그먼트 토글.
+// value (literal) | secret (reference) segment toggle.
 function SourceToggle({
   secret,
   onChange,
@@ -168,7 +168,7 @@ function SourceToggle({
   )
 }
 
-// 개인(user) | 워크스페이스(workspace) 스코프 세그먼트.
+// personal (user) | workspace scope segment.
 function ScopeToggle({
   scope,
   onChange,
@@ -204,7 +204,7 @@ function ScopeToggle({
   )
 }
 
-// 시크릿 참조 값 — 스코프(개인/워크스페이스) 선택 + 그 티어 시크릿에서 고르거나 인라인 생성(SecretPicker 공용).
+// Secret reference value — pick a scope (personal/workspace) + choose from that tier's secrets or create inline (shared SecretPicker).
 function SecretValue({
   scope,
   names,
@@ -230,7 +230,7 @@ function SecretValue({
         onChange={onChange}
         names={list}
         scope={scope}
-        // 생성을 상위(EnvEditor)로 올려 다른 env 행에서도 바로 선택 가능하게 한다.
+        // Lift creation up to the parent (EnvEditor) so other env rows can select it right away.
         onCreated={(name) => onCreated(name, scope)}
         hint={
           <p className="text-[11px] text-muted-foreground">

@@ -79,32 +79,32 @@ import { VersionTagsBodySchema, setVersionTags } from "./version-tag-service.js"
 import type { ViewService } from "./view-service.js";
 import type { WorkspaceService } from "./workspace-service.js";
 
-// 알림 읽음 처리 요청 — ids 또는 all:true 중 하나(비면 no-op → read:0).
+// Mark-notifications-read request — one of ids or all:true (empty = no-op → read:0).
 const ReadNotificationsBodySchema = z.object({
   ids: z.array(z.string()).optional(),
   all: z.boolean().optional(),
 });
 
-// 댓글 작성 본문 — 대상(resourceType/resourceId) + 본문 + 선택적 parentId(대댓글) + @멘션 subject 들.
+// Create-comment body — target (resourceType/resourceId) + body + optional parentId (reply) + @mention subjects.
 const CreateCommentBodySchema = z.object({
   resourceType: z.enum(COMMENT_RESOURCE_TYPES),
   resourceId: z.string().min(1),
-  parentId: z.string().min(1).optional(), // 대댓글이면 부모 댓글 id(1단계 스레드)
+  parentId: z.string().min(1).optional(), // parent comment id if this is a reply (one-level thread)
   body: z.string().min(1),
-  mentions: z.array(z.string().min(1)).max(50).optional(), // @언급된 멤버 subject 들(클라이언트 picker 가 채움)
+  mentions: z.array(z.string().min(1)).max(50).optional(), // @mentioned member subjects (filled by the client picker)
 });
 
 export const SubmitBodySchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   case: EvalCaseSchema,
-  runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드(scorecard 와 동일 대칭).
-  trigger: z.string().optional(), // 이 run 의 출처(활동 뷰 source 축): web|api… (미지정=직접 API). 클라이언트 메타.
+  runtime: z.string().optional(), // tenant Runtime id to execute on (placement.target). Absent = default backend (symmetric with scorecard).
+  trigger: z.string().optional(), // origin of this run (activity-view source axis): web|api… (unset = direct API). Client metadata.
   webhookUrl: z.string().url().optional(),
-  meterUsage: z.boolean().optional(), // 이 요청만 사용량 계측 override(미지정이면 워크스페이스 정책)
-  judge: JudgeRunConfigSchema.optional(), // 이 요청만 judge 모델 override(미지정이면 워크스페이스 기본)
+  meterUsage: z.boolean().optional(), // per-request usage-metering override (unset = workspace policy)
+  judge: JudgeRunConfigSchema.optional(), // per-request judge-model override (unset = workspace default)
 });
 
-// 제출자가 첨부하는 출처 좌표(커밋/PR/CI run) — origin.source 는 서버가 principal.via 로 결정(클라이언트가 위조 불가).
+// Origin coordinates the submitter attaches (commit/PR/CI run) — origin.source is decided server-side from principal.via (client can't forge it).
 export const ScorecardOriginBodySchema = z.object({
   repo: z.string().optional(), // "owner/name"
   sha: z.string().optional(),
@@ -113,8 +113,8 @@ export const ScorecardOriginBodySchema = z.object({
   runUrl: z.string().optional(),
 });
 
-// 스코어카드 실행 본문 — 데이터셋×하니스(버전 기본 latest, 서비스가 구체 버전으로 해석) + 선택한 judge 들.
-// harness.pins = 제출 시점 임시 핀(슬롯→이미지, 레지스트리 무변경) — CI PR 발사가 한 서비스 이미지만 스왑해 평가.
+// Run-scorecard body — dataset×harness (version defaults to latest, the service resolves a concrete version) + selected judges.
+// harness.pins = submit-time ephemeral pins (slot→image, registry unchanged) — a CI PR trigger swaps just one service image for the eval.
 export const RunScorecardBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({
@@ -124,11 +124,11 @@ export const RunScorecardBodySchema = z.object({
   }),
   origin: ScorecardOriginBodySchema.optional(),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
-  runtime: z.string().optional(), // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
-  judge: JudgeRunConfigSchema.optional(), // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
-  // 배치 내 동시 디스패치 케이스 수(runSuite 병렬도). 미지정이면 서비스 기본(=4). 상한으로 과도한 fan-out 차단.
+  runtime: z.string().optional(), // tenant Runtime id to execute on (placement.target). Absent = default backend.
+  judge: JudgeRunConfigSchema.optional(), // inline judge-grader scoring-model override (unset = workspace default)
+  // concurrent case dispatches within a batch (runSuite parallelism). Unset = service default (=4). Cap prevents excessive fan-out.
   concurrency: z.number().int().min(1).max(64).optional(),
-  // 부분 실행 — 전체 데이터셋의 subset 만(비용/스모크). ids(명시) → tags(any-match) → limit(앞 N개) 순 적용.
+  // partial run — only a subset of the full dataset (cost/smoke). Applied in order: ids (explicit) → tags (any-match) → limit (first N).
   cases: z
     .object({
       ids: z.array(z.string().min(1)).min(1).optional(),
@@ -138,7 +138,7 @@ export const RunScorecardBodySchema = z.object({
     .optional(),
 });
 
-// 예약(cron) 스코어카드 요청 — 발사 시 ScorecardService.submit 으로 흐를 정의(= RunScorecardBody 에서 judge override 제외).
+// Scheduled (cron) scorecard request — the definition that flows into ScorecardService.submit on fire (= RunScorecardBody minus the judge override).
 const ScheduleRunTemplateBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
@@ -146,12 +146,12 @@ const ScheduleRunTemplateBodySchema = z.object({
   runtime: z.string().optional(),
   concurrency: z.number().int().min(1).max(64).optional(),
 });
-const cronExpr = z.string().refine(isValidCron, "cron 식이 올바르지 않습니다(5필드: 분 시 일 월 요일).");
+const cronExpr = z.string().refine(isValidCron, "invalid cron expression (5 fields: minute hour day month weekday).");
 const overlapPolicy = z.enum(["skip", "bufferOne", "allowAll"]);
 export const CreateScheduleBodySchema = z.object({
   name: z.string().min(1),
   cron: cronExpr,
-  timezone: z.string().default("UTC"), // IANA tz(예: "Asia/Seoul")
+  timezone: z.string().default("UTC"), // IANA tz (e.g. "Asia/Seoul")
   overlapPolicy: overlapPolicy.default("skip"),
   enabled: z.boolean().default(true),
   runTemplate: ScheduleRunTemplateBodySchema,
@@ -165,11 +165,11 @@ export const UpdateScheduleBodySchema = z.object({
   runTemplate: ScheduleRunTemplateBodySchema.optional(),
 });
 
-// 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명 config: 웹이 형태 검증) + 가시성(비공개|공유).
+// Saved scorecard-analysis View — a named AnalysisConfig (opaque config: the web validates its shape) + visibility (private|workspace).
 const ViewVisibilityBody = z.enum(["private", "workspace"]);
 export const CreateViewBodySchema = z.object({
   name: z.string().min(1),
-  config: z.unknown(), // 웹 AnalysisConfig(recipe). 컨트롤플레인은 형태를 강제하지 않는다.
+  config: z.unknown(), // web AnalysisConfig (recipe). The control plane does not enforce its shape.
   visibility: ViewVisibilityBody.default("private"),
 });
 export const UpdateViewBodySchema = z.object({
@@ -178,61 +178,61 @@ export const UpdateViewBodySchema = z.object({
   visibility: ViewVisibilityBody.optional(),
 });
 
-// 시크릿 이름 = env 변수 형식(잡 env 로 주입되므로).
+// Secret name = env-variable format (since it's injected as job env).
 export const SecretNameSchema = z.string().regex(/^[A-Z_][A-Z0-9_]*$/);
 
-// 워크스페이스 설정 패치(부분). 계측 on/off + 기본 judge 모델 + 완료 알림 대상.
+// Workspace settings patch (partial). Metering on/off + default judge model + completion-notification target.
 export const WorkspaceSettingsBodySchema = z.object({
   meterUsage: z.boolean().optional(),
-  judge: JudgeRunConfigSchema.optional(), // 워크스페이스 기본 judge 모델(컨트롤플레인이 잡에 자동 주입)
-  // run/scorecard 완료 알림 대상(Mattermost 연결 + 채널). 토큰/채널 값이 아니라 연결 id 참조 + channel id.
+  judge: JudgeRunConfigSchema.optional(), // workspace default judge model (the control plane auto-injects it into the job)
+  // run/scorecard completion-notification target (Mattermost connection + channel). A connection-id reference + channel id, not the token/channel values.
   notify: z.object({ connectionId: z.string().min(1), channelId: z.string().min(1) }).optional(),
 });
 
 export interface ServerDeps {
   service: RunService;
-  scorecardService?: ScorecardService; // 데이터셋×하니스 배치 평가 (없으면 해당 라우트 비활성)
-  scheduleService?: ScheduleService; // 예약(cron) 스코어카드 CRUD (없으면 해당 라우트 비활성)
-  queueService?: QueueService; // 작업 큐 스냅샷(런타임 레인별 실행 중/대기/다음 예약) (없으면 라우트 비활성)
-  viewService?: ViewService; // 저장된 스코어카드 분석 View CRUD (없으면 해당 라우트 비활성)
-  benchmarkService?: BenchmarkService; // 벤치마크 카탈로그 + 인입 (없으면 해당 라우트 비활성)
-  bundleService?: BundleService; // 번들 적용(하니스+벤치마크+런타임 원샷 등록; 없으면 라우트 비활성)
-  harnessTemplates?: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조) CRUD
-  harnessInstances?: HarnessInstanceRegistry; // 개별 하네스(template+pins) CRUD + resolve
+  scorecardService?: ScorecardService; // dataset×harness batch eval (route disabled if absent)
+  scheduleService?: ScheduleService; // scheduled (cron) scorecard CRUD (route disabled if absent)
+  queueService?: QueueService; // work-queue snapshot (running/waiting/next-scheduled per runtime lane) (route disabled if absent)
+  viewService?: ViewService; // saved scorecard-analysis View CRUD (route disabled if absent)
+  benchmarkService?: BenchmarkService; // benchmark catalog + ingest (route disabled if absent)
+  bundleService?: BundleService; // bundle apply (one-shot register of harness+benchmark+runtime; route disabled if absent)
+  harnessTemplates?: HarnessTemplateRegistry; // harness category (template structure) CRUD
+  harnessInstances?: HarnessInstanceRegistry; // individual harness (template+pins) CRUD + resolve
 
-  datasetRegistry?: DatasetRegistry; // 데이터셋 CRUD (없으면 해당 라우트 비활성)
-  judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (없으면 해당 라우트 비활성)
-  modelRegistry?: ModelRegistry; // Model(추론/판정 모델) CRUD (없으면 해당 라우트 비활성)
-  runtimeRegistry?: RuntimeRegistry; // Runtime(실행 인프라) CRUD (없으면 해당 라우트 비활성)
-  // 런타임 연결 테스트 — RuntimeSpec → 라이브 백엔드 빌드 후 probe()(잡 없이 도달성/인증). main 이 시크릿+빌더로 주입.
+  datasetRegistry?: DatasetRegistry; // dataset CRUD (route disabled if absent)
+  judgeRegistry?: JudgeRegistry; // Agent Judge CRUD (route disabled if absent)
+  modelRegistry?: ModelRegistry; // Model (inference/judging model) CRUD (route disabled if absent)
+  runtimeRegistry?: RuntimeRegistry; // Runtime (execution infra) CRUD (route disabled if absent)
+  // Runtime connection test — RuntimeSpec → build a live backend, then probe() (reachability/auth without a job). main injects it with secrets + a builder.
   probeRuntime?: (workspace: string, spec: RuntimeSpec) => Promise<RuntimeProbeResult>;
-  secretStore?: SecretStore; // 워크스페이스 시크릿 관리 — main 이 항상 주입(기본 ON; KEK 없으면 임시 키 자동생성). 미주입 시에만 비활성
-  githubAppService?: GithubAppService; // 워크스페이스 소유 GitHub App 통합(조직 설치→선택 repo) (없으면 해당 라우트 비활성)
-  mattermostService?: MattermostService; // 워크스페이스 소유 Mattermost 통합(등록→bot 알림) (없으면 해당 라우트 비활성)
-  mattermostCommandService?: MattermostCommandService; // Mattermost 인바운드(슬래시커맨드/버튼) (없으면 해당 라우트 비활성)
-  traceSinkService?: TraceSinkService; // 워크스페이스 트레이스 싱크(관측 플랫폼 적재) (없으면 해당 라우트 비활성)
-  imageRegistryService?: ImageRegistryService; // 워크스페이스 이미지 레지스트리(분류 기준 + push 발행) (없으면 해당 라우트 비활성)
-  ciLinkService?: CiLinkService; // CI repo link(레포↔하니스 슬롯 + OIDC trust) + picker/setup-PR (없으면 라우트 비활성)
-  runnerService?: RunnerService; // 셀프호스티드 러너(개인 디바이스 페어링) (없으면 해당 라우트 비활성)
-  notificationService?: NotificationService; // 개인 알림 피드(벨 인박스) — self-scoped (없으면 해당 라우트 비활성)
-  commentService?: CommentService; // 리소스 댓글(데이터셋 등) — 협업 논의 (없으면 해당 라우트 비활성)
-  runnerHub?: RunnerHub; // 셀프호스티드 러너 lease 허브 — MCP lease/result/heartbeat 도구가 쓴다 (없으면 비활성)
-  settingsStore?: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) (없으면 해당 라우트 비활성)
-  workspaceStore?: WorkspaceStore; // 워크스페이스 멤버십 — 활성 워크스페이스 해석/부트스트랩 (없으면 단일 워크스페이스 동작)
-  workspaceService?: WorkspaceService; // 워크스페이스 self-serve 목록/생성 (없으면 /workspaces 라우트 비활성)
-  membershipService?: MembershipService; // 멤버 관리(목록/역할/제거/나가기) + 초대(발급/수락) (없으면 해당 라우트 비활성)
-  profileService?: ProfileService; // 유저 프로필(이름/유저네임/아바타) 조회·수정 (없으면 /me.profile + PATCH /me/profile 비활성)
-  authenticator?: Authenticator; // 컨트롤플레인이 소유하는 인증(OIDC + API 키)
-  keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
-  internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
-  requireAuth?: boolean; // true 면 인증 필수(dev 폴백 금지)
-  devTenantHeader?: string; // 미인증 dev 폴백 헤더 (기본 x-everdict-tenant)
-  authorizationServers?: string[]; // MCP OAuth: protected-resource 메타데이터의 인가서버(Keycloak issuer)
-  logLevel?: string; // pino 로그 레벨(info/debug/warn/…). 없으면 로깅 비활성(테스트 무소음). main 은 EVERDICT_LOG_LEVEL 로 주입.
-  callbackSink?: CallbackSink; // front-door callback 완료 모델의 inbound 수신(없으면 /frontdoor-callback 비활성)
+  secretStore?: SecretStore; // workspace secret management — main always injects it (ON by default; auto-generates an ephemeral key if no KEK). Disabled only when not injected
+  githubAppService?: GithubAppService; // workspace-owned GitHub App integration (org install→selected repos) (route disabled if absent)
+  mattermostService?: MattermostService; // workspace-owned Mattermost integration (register→bot notifications) (route disabled if absent)
+  mattermostCommandService?: MattermostCommandService; // Mattermost inbound (slash commands/buttons) (route disabled if absent)
+  traceSinkService?: TraceSinkService; // workspace trace sinks (export to observability platform) (route disabled if absent)
+  imageRegistryService?: ImageRegistryService; // workspace image registries (classification baseline + push mint) (route disabled if absent)
+  ciLinkService?: CiLinkService; // CI repo links (repo↔harness slot + OIDC trust) + picker/setup-PR (route disabled if absent)
+  runnerService?: RunnerService; // self-hosted runners (personal device pairing) (route disabled if absent)
+  notificationService?: NotificationService; // personal notification feed (bell inbox) — self-scoped (route disabled if absent)
+  commentService?: CommentService; // resource comments (datasets, etc.) — collaborative discussion (route disabled if absent)
+  runnerHub?: RunnerHub; // self-hosted runner lease hub — used by the MCP lease/result/heartbeat tools (disabled if absent)
+  settingsStore?: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) (route disabled if absent)
+  workspaceStore?: WorkspaceStore; // workspace membership — active-workspace resolution/bootstrap (single-workspace behavior if absent)
+  workspaceService?: WorkspaceService; // workspace self-serve list/create (/workspaces route disabled if absent)
+  membershipService?: MembershipService; // member management (list/role/remove/leave) + invites (issue/accept) (route disabled if absent)
+  profileService?: ProfileService; // user profile (name/username/avatar) read·update (/me.profile + PATCH /me/profile disabled if absent)
+  authenticator?: Authenticator; // authentication owned by the control plane (OIDC + API keys)
+  keyStore?: TenantKeyStore; // for /internal/tenant-keys issuance
+  internalToken?: string; // /internal/** guard (fail-closed if absent)
+  requireAuth?: boolean; // if true, auth is required (no dev fallback)
+  devTenantHeader?: string; // unauthenticated dev-fallback header (default x-everdict-tenant)
+  authorizationServers?: string[]; // MCP OAuth: authorization servers in the protected-resource metadata (Keycloak issuer)
+  logLevel?: string; // pino log level (info/debug/warn/…). Absent = logging disabled (silent tests). main injects it via EVERDICT_LOG_LEVEL.
+  callbackSink?: CallbackSink; // inbound receiver for the front-door callback completion model (/frontdoor-callback disabled if absent)
 }
 
-// 신원(subject + 기본 workspace + roles) 해석: Bearer(JWT 또는 ak_) → Authenticator. 미인증 dev 는 헤더 워크스페이스 + admin.
+// Resolve identity (subject + default workspace + roles): Bearer (JWT or ak_) → Authenticator. Unauthenticated dev = header workspace + admin.
 async function resolveIdentity(
   req: FastifyRequest,
   reply: FastifyReply,
@@ -240,61 +240,64 @@ async function resolveIdentity(
 ): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
-    // workspaceHint(x-everdict-workspace) — GitHub Actions 페더레이션이 그 워크스페이스의 repo link 와 대조하는 데 쓴다.
+    // workspaceHint (x-everdict-workspace) — used by GitHub Actions federation to match against that workspace's repo links.
     const principal = await deps.authenticator.authenticate(authz.slice(7).trim(), {
       workspaceHint: workspaceHintOf(req),
     });
     if (!principal) {
-      // 검증 실패 — 구체 사유(issuer 불일치/JWKS 미도달/만료/서명/비-JWT)는 'auth: OIDC 토큰 검증 실패' 로그 참고.
-      req.log.warn({ path: req.url }, "auth: Bearer 자격증명 거부 → 401");
-      reply.code(401).send({ code: "UNAUTHENTICATED", message: "유효하지 않은 자격증명입니다." });
+      // Verification failed — for the specific reason (issuer mismatch/JWKS unreachable/expired/signature/non-JWT) see the 'auth: OIDC token verification failed' log.
+      req.log.warn({ path: req.url }, "auth: Bearer credential rejected → 401");
+      reply.code(401).send({ code: "UNAUTHENTICATED", message: "Invalid credentials." });
       return undefined;
     }
     req.log.debug(
       { subject: principal.subject, workspace: principal.workspace, via: principal.via },
-      "auth: 인증 성공",
+      "auth: authenticated",
     );
     return principal;
   }
   if (deps.requireAuth) {
-    req.log.warn({ path: req.url, hasAuthHeader: typeof authz === "string" }, "auth: 자격증명 없음(requireAuth) → 401");
-    reply.code(401).send({ code: "UNAUTHENTICATED", message: "Authorization: Bearer <token|api-key> 가 필요합니다." });
+    req.log.warn(
+      { path: req.url, hasAuthHeader: typeof authz === "string" },
+      "auth: no credential (requireAuth) → 401",
+    );
+    reply.code(401).send({ code: "UNAUTHENTICATED", message: "Authorization: Bearer <token|api-key> is required." });
     return undefined;
   }
-  // dev 폴백: 헤더 워크스페이스, 풀 권한.
+  // dev fallback: header workspace, full permissions.
   const header = (req.headers as Record<string, unknown>)[deps.devTenantHeader ?? "x-everdict-tenant"];
   const workspace = typeof header === "string" && header.length > 0 ? header : "default";
-  req.log.debug({ workspace }, "auth: dev 폴백(x-everdict-tenant) — requireAuth 미설정");
+  req.log.debug({ workspace }, "auth: dev fallback (x-everdict-tenant) — requireAuth unset");
   return { subject: "dev", workspace, roles: ["admin"], via: "api-key" };
 }
 
-// 활성 워크스페이스 해석: 멤버십 스토어가 있으면 토큰/dev 기본 워크스페이스를 멤버십으로 부트스트랩하고,
-// x-everdict-workspace 헤더가 가리키는 워크스페이스의 멤버이면 그곳으로 전환(roles 도 멤버십 역할로 재해석).
-// 비멤버 워크스페이스 요청은 403 이 아니라 기본 워크스페이스로 폴백한다(스테일 선택에도 격리 안전 + UX 견고).
-// base.workspace 가 빈 문자열(외부 Keycloak: workspace 클레임 없음)이면 — 쿠키가 가리키는 멤버 워크스페이스로
-// 전환하고, 없으면 workspace="" 그대로 둔다(아직 멤버십 없음 → /me.workspaces=[] → 웹 온보딩). 401 아님.
-// 스토어가 없으면 기존 단일-워크스페이스 동작 그대로(하위호환).
-// 요청이 지목한 활성 워크스페이스 헤더(웹 쿠키/CI 워크플로가 보낸다). 없으면 undefined.
+// Resolve the active workspace: if a membership store exists, bootstrap the token/dev default workspace into a membership,
+// and if the subject is a member of the workspace named by the x-everdict-workspace header, switch to it (roles are also reinterpreted as the membership role).
+// A request for a non-member workspace falls back to the default workspace rather than 403 (isolation-safe even on a stale selection + robust UX).
+// If base.workspace is empty (external Keycloak: no workspace claim) — switch to the member workspace the cookie points at,
+// or leave workspace="" if there is none (no membership yet → /me.workspaces=[] → web onboarding). Not a 401.
+// With no store, keep the original single-workspace behavior (backward compatible).
+// The active-workspace header the request names (sent by the web cookie / CI workflow). Absent → undefined.
 function workspaceHintOf(req: FastifyRequest): string | undefined {
   const header = (req.headers as Record<string, unknown>)["x-everdict-workspace"];
   return typeof header === "string" && header.length > 0 ? header : undefined;
 }
 
 async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: ServerDeps): Promise<Principal> {
-  // 러너 토큰(via=runner)은 고정 워크스페이스 + 최소권한(roles:["runner"]) — 멤버십 부트스트랩/역할 승격에서 제외한다.
-  // (제외하지 않으면 owner 의 멤버십 역할로 승격돼 디바이스 자격이 admin 을 얻는다.)
-  // GitHub Actions 페더레이션(via=github-actions)도 동일 — repo link 신뢰로 고정된 워크스페이스 + ci 역할이며
-  // 멤버가 아니다(부트스트랩하면 CI 레포가 멤버 행을 얻는다).
+  // A runner token (via=runner) has a fixed workspace + minimal perms (roles:["runner"]) — exclude it from membership bootstrap / role promotion.
+  // (Without the exclusion it would be promoted to the owner's membership role and the device credential would gain admin.)
+  // GitHub Actions federation (via=github-actions) is the same — a workspace fixed by repo-link trust + the ci role, and it is not
+  // a member (bootstrapping would give the CI repo a member row).
   if (base.via === "runner" || base.via === "github-actions") return base;
   const store = deps.workspaceStore;
   if (!store) return base;
   const subject = base.subject;
 
-  // 토큰/dev 기본 워크스페이스가 있으면 멤버십으로 (없을 때만) 부트스트랩.
-  // email 클레임(있으면)은 로그인마다 멤버 행에 캡처/백필 — role 은 유지(ensureMembership 가 COALESCE/role 불변).
-  // ⚠️ 역할은 워크스페이스 기준: 새 워크스페이스(사실상 생성자) 또는 머신 키(발급이 admin-gated)는 토큰 역할을 쓰지만,
-  // 기존 워크스페이스에 사람(OIDC)이 부트스트랩으로 합류하면 member 로 캡 — Keycloak realm 역할로 남의 워크스페이스
-  // admin 을 얻을 수 없다(admin 은 생성[POST /workspaces]·초대·승격으로만). 이미 멤버면 그 멤버십 역할이 우선.
+  // If there's a token/dev default workspace, bootstrap it into a membership (only when one doesn't exist).
+  // The email claim (if present) is captured/backfilled into the member row on every login — role is preserved (ensureMembership COALESCEs / leaves role unchanged).
+  // ⚠️ Role is per-workspace: a new workspace (effectively the creator) or a machine key (issuance is admin-gated) uses the token role, but
+  // when a human (OIDC) joins an existing workspace via bootstrap they are capped to member — a Keycloak realm role can't grant
+  // admin on someone else's workspace (admin only via creation [POST /workspaces] · invite · promotion). If already a member, that membership role wins.
   let baseRole: string | undefined;
   if (base.workspace) {
     baseRole = await store.roleFor(base.workspace, subject);
@@ -303,22 +306,22 @@ async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: 
       baseRole = fresh || base.via === "api-key" ? (base.roles[0] ?? "member") : "member";
       await store.ensureMembership(base.workspace, subject, baseRole, base.email);
     } else if (base.email !== undefined) {
-      await store.ensureMembership(base.workspace, subject, baseRole, base.email); // 기존 멤버 — email 만 갱신
+      await store.ensureMembership(base.workspace, subject, baseRole, base.email); // existing member — only refresh email
     }
   }
 
-  // x-everdict-workspace 헤더(웹의 활성 워크스페이스 쿠키)가 다른 워크스페이스를 가리키고 그 멤버면 전환.
+  // If the x-everdict-workspace header (the web's active-workspace cookie) points at a different workspace and the subject is a member, switch.
   const requested = workspaceHintOf(req) ?? base.workspace;
   if (requested && requested !== base.workspace) {
     const role = await store.roleFor(requested, subject);
     if (role) return { ...base, workspace: requested, roles: [role] };
   }
 
-  // 기본 워크스페이스로(있으면 멤버십 역할). 없으면 workspace="" 그대로(온보딩 대상).
+  // Fall back to the default workspace (membership role if present). Otherwise keep workspace="" (onboarding target).
   return base.workspace ? { ...base, roles: [baseRole as string] } : base;
 }
 
-// 인증 + 활성 워크스페이스까지 해석한 최종 Principal(모든 휴먼/HTTP 라우트가 사용).
+// Final Principal with both authentication and active workspace resolved (used by every human/HTTP route).
 async function resolvePrincipal(
   req: FastifyRequest,
   reply: FastifyReply,
@@ -335,24 +338,24 @@ function constantTimeEq(a: string, b: string): boolean {
   return ab.length === bb.length && timingSafeEqual(ab, bb);
 }
 
-// Zod 이슈 → 사람이 읽는 "path: message" 목록 (검증 응답용).
+// Zod issues → human-readable "path: message" list (for validation responses).
 function zodIssues(err: z.ZodError): string[] {
   return err.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`);
 }
 
-// MCP 전용 Principal 해석: 반드시 Bearer(JWT/ak_)만 — dev 헤더 폴백 없음(미인증이면 401+로그인 챌린지).
-// 활성 워크스페이스/멤버십 부트스트랩은 동일하게 적용(list_workspaces 등이 일관되게 동작).
+// MCP-only Principal resolution: Bearer (JWT/ak_) only — no dev header fallback (unauthenticated → 401 + login challenge).
+// Active-workspace / membership bootstrap applies the same way (so list_workspaces etc. behave consistently).
 async function resolveBearerPrincipal(req: FastifyRequest, deps: ServerDeps): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
     const base = await deps.authenticator.authenticate(authz.slice(7).trim(), { workspaceHint: workspaceHintOf(req) });
     if (!base) {
-      req.log.warn({ path: req.url }, "auth(mcp): Bearer 자격증명 거부 → 401 챌린지");
+      req.log.warn({ path: req.url }, "auth(mcp): Bearer credential rejected → 401 challenge");
       return undefined;
     }
     return applyActiveWorkspace(base, req, deps);
   }
-  req.log.warn({ path: req.url, hasAuthHeader: typeof authz === "string" }, "auth(mcp): Bearer 없음 → 401 챌린지");
+  req.log.warn({ path: req.url, hasAuthHeader: typeof authz === "string" }, "auth(mcp): no Bearer → 401 challenge");
   return undefined;
 }
 
@@ -361,7 +364,7 @@ function baseUrl(req: FastifyRequest): string {
   return `${proto}://${req.headers.host}`;
 }
 
-// RFC 9728 — MCP 클라이언트가 OAuth 로그인(Linear MCP 처럼)을 시작하도록 인가서버를 가리킨다.
+// RFC 9728 — point MCP clients at the authorization server so they start an OAuth login (like the Linear MCP).
 function protectedResourceMetadata(req: FastifyRequest, deps: ServerDeps): Record<string, unknown> {
   const base = baseUrl(req);
   return {
@@ -373,36 +376,36 @@ function protectedResourceMetadata(req: FastifyRequest, deps: ServerDeps): Recor
   };
 }
 
-// 미인증 → 401 + WWW-Authenticate(resource_metadata). 클라이언트는 이걸 보고 OAuth 디스커버리/로그인 시작.
+// Unauthenticated → 401 + WWW-Authenticate (resource_metadata). The client uses this to start OAuth discovery/login.
 function mcpChallenge(req: FastifyRequest, reply: FastifyReply): FastifyReply {
   const metaUrl = `${baseUrl(req)}/.well-known/oauth-protected-resource`;
   return reply
     .code(401)
     .header("WWW-Authenticate", `Bearer resource_metadata="${metaUrl}"`)
-    .send({ code: "UNAUTHENTICATED", message: "MCP 는 OAuth 인증이 필요합니다(resource_metadata 참고)." });
+    .send({ code: "UNAUTHENTICATED", message: "MCP requires OAuth authentication (see resource_metadata)." });
 }
 
-// 컨트롤플레인 HTTP 표면. 인증은 컨트롤플레인이 소유(OIDC/JWT + API 키), workspace=tenant, authZ 강제.
+// Control-plane HTTP surface. Auth is owned by the control plane (OIDC/JWT + API keys), workspace=tenant, authZ enforced.
 export function buildServer(deps: ServerDeps): FastifyInstance {
-  // logLevel 이 있으면 요청 단위 구조화 로그(pino) 활성 — 인증 거부/요청을 컨트롤플레인 로그로 진단.
-  // 없으면(테스트) 비활성 — req.log 는 no-op 이라 아래 로깅 호출은 안전하다.
-  // bodyLimit 을 16MB 로 — 데이터셋/번들(케이스 인라인 파일·채점 스크립트 다수)이 Fastify 기본 1MB 를 넘길 수 있다.
+  // If logLevel is set, per-request structured logging (pino) is enabled — diagnose auth rejections/requests from the control-plane log.
+  // If unset (tests) it's disabled — req.log is a no-op, so the logging calls below are safe.
+  // bodyLimit set to 16MB — datasets/bundles (many inline case files · scoring scripts) can exceed Fastify's default 1MB.
   const app = Fastify({
     logger: deps.logLevel ? { level: deps.logLevel } : false,
     bodyLimit: 16 * 1024 * 1024,
   });
 
-  // 본문 없는 변경 요청(주로 DELETE)에 클라이언트가 content-type: application/json 만 붙여 보내면
-  // (브라우저 fetch·undici 의 흔한 동작) Fastify 기본 JSON 파서가 FST_ERR_CTP_EMPTY_JSON_BODY 로 400 을
-  // 던진다("body cannot be empty when content-type is set to application/json"). 빈 본문은 undefined 로
-  // 관대하게 통과시키고(라우트는 req.body ?? {} 로 받음), 비어 있지 않으면 기본 secure 파서(getDefaultJsonParser)
-  // 로 위임해 프로토타입 오염 방어를 보존한다. 기본 파서를 덮어쓰는 것이라 ALREADY_PRESENT 는 나지 않는다.
+  // When a body-less mutating request (usually DELETE) is sent with only content-type: application/json attached
+  // (a common browser fetch·undici behavior), Fastify's default JSON parser throws 400 with FST_ERR_CTP_EMPTY_JSON_BODY
+  // ("body cannot be empty when content-type is set to application/json"). Pass an empty body through leniently as
+  // undefined (routes read req.body ?? {}), and delegate a non-empty body to the default secure parser (getDefaultJsonParser)
+  // to preserve prototype-pollution defense. Since this overrides the default parser, ALREADY_PRESENT is not raised.
   const defaultJsonParser = app.getDefaultJsonParser("error", "error");
   app.addContentTypeParser<string>("application/json", { parseAs: "string" }, (req, body, done) => {
     if (body.length === 0) return done(null, undefined);
     return defaultJsonParser(req, body, done);
   });
-  // Mattermost 슬래시커맨드는 application/x-www-form-urlencoded 로 온다(JSON 아님). URLSearchParams 로 평면 객체화.
+  // Mattermost slash commands arrive as application/x-www-form-urlencoded (not JSON). Flatten into an object via URLSearchParams.
   app.addContentTypeParser<string>("application/x-www-form-urlencoded", { parseAs: "string" }, (_req, body, done) => {
     const out: Record<string, string> = {};
     for (const [k, v] of new URLSearchParams(body)) out[k] = v;
@@ -411,25 +414,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.get("/healthz", async () => ({ ok: true }));
 
-  // front-door callback 완료 모델의 inbound 수신(C2b) — 에이전트가 종단 결과를 {{callback_url}}=/frontdoor-callback/:runId 로 POST.
-  // 공개 라우트: runId(UUID)가 추측 불가한 capability — 별도 인증 없이 소유=권한(웹훅 관례). 랑데부에 전달하면 대기 중 dispatch 가 깨어난다.
+  // Inbound receiver for the front-door callback completion model (C2b) — the agent POSTs its terminal result to {{callback_url}}=/frontdoor-callback/:runId.
+  // Public route: the runId (UUID) is an unguessable capability — no separate auth, possession = permission (webhook convention). Delivering to the rendezvous wakes the waiting dispatch.
   app.post("/frontdoor-callback/:runId", async (req, reply) => {
-    if (!deps.callbackSink) return reply.code(404).send({ code: "NOT_FOUND", message: "callback 수신 비활성" });
+    if (!deps.callbackSink) return reply.code(404).send({ code: "NOT_FOUND", message: "callback receiver disabled" });
     const params = z.object({ runId: z.string().min(1) }).safeParse(req.params);
     if (!params.success) return reply.code(400).send({ code: "BAD_REQUEST", message: params.error.message });
     deps.callbackSink.deliver(params.data.runId, req.body);
     return reply.send({ ok: true });
   });
 
-  // 현재 Principal — 웹/에이전트가 워크스페이스·역할을 확인(UI 게이팅 등).
-  // 멤버십 스토어가 있으면 내가 속한 워크스페이스 목록(workspaces)을 동봉(사이드바 스위처용).
+  // Current Principal — the web/agent checks workspace·roles (UI gating, etc.).
+  // If a membership store exists, include the list of workspaces I belong to (for the sidebar switcher).
   app.get("/me", async (req, reply) => {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const workspaces = deps.workspaceService
       ? await deps.workspaceService.listForSubject(principal.subject)
       : undefined;
-    // 프로필(이름/유저네임/아바타)은 컨트롤플레인 소유 가변 정보 — Principal(email 등 SSO 클레임) 위에 덧입힌다.
+    // Profile (name/username/avatar) is control-plane-owned mutable info — layered on top of the Principal (email and other SSO claims).
     const profile = deps.profileService ? await deps.profileService.get(principal.subject) : undefined;
     return reply.send({
       ...principal,
@@ -438,9 +441,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
   });
 
-  // 내 프로필 수정(self-serve — 역할 게이트 없음, subject = 본인). email 은 SSO 라 불변(여기서 안 받음).
+  // Edit my profile (self-serve — no role gate, subject = self). email is immutable since it's SSO (not accepted here).
   app.patch("/me/profile", async (req, reply) => {
-    if (!deps.profileService) return reply.code(404).send({ code: "NOT_FOUND", message: "프로필 서비스 미설정" });
+    if (!deps.profileService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "profile service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
@@ -454,17 +458,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- workspaces (self-serve 멤버십: 내 워크스페이스 목록 + 생성) ---
-  // 생성은 누구나 가능한 self-serve(워크스페이스 내부 역할 게이트 없음) — 생성자는 그 워크스페이스의 admin.
+  // --- workspaces (self-serve membership: my workspace list + create) ---
+  // Create is self-serve for anyone (no in-workspace role gate) — the creator is the admin of that workspace.
   app.get("/workspaces", async (req, reply) => {
-    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    if (!deps.workspaceService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     return reply.send(await deps.workspaceService.listForSubject(principal.subject));
   });
 
   app.post("/workspaces", async (req, reply) => {
-    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    if (!deps.workspaceService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z.object({ name: z.string().min(1), id: z.string().optional() }).safeParse(req.body);
@@ -476,9 +482,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 워크스페이스 멤버 (조회=viewer+, 역할변경/제거=admin) ---
+  // --- workspace members (read = viewer+, role change/remove = admin) ---
   app.get("/members", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -490,7 +497,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.patch<{ Params: { subject: string } }>("/members/:subject", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z.object({ role: z.enum(EVERDICT_ROLES) }).safeParse(req.body);
@@ -504,10 +512,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 내가 이 워크스페이스에서 나간다(self-serve — 역할 게이트 없음, 자기 멤버십만). 정적 라우트라 /members/:subject 보다 우선.
-  // 마지막 admin 은 나갈 수 없다(409). 클라이언트는 성공 후 다른 워크스페이스(또는 온보딩)로 이동.
+  // Leave this workspace myself (self-serve — no role gate, only my own membership). A static route, so it takes precedence over /members/:subject.
+  // The last admin cannot leave (409). On success the client moves to another workspace (or onboarding).
   app.delete("/members/me", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -519,7 +528,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.delete<{ Params: { subject: string } }>("/members/:subject", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -531,13 +541,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 초대 (토큰/링크 redemption; 발급/목록/취소=admin, 수락=인증만) ---
+  // --- invites (token/link redemption; issue/list/revoke = admin, accept = authenticated only) ---
   app.get("/invites", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      gate(principal, "members:write"); // 초대는 가입 비밀 → 목록도 admin
+      gate(principal, "members:write"); // an invite is a join secret → listing is admin too
       return reply.send(await deps.membershipService.listInvites(principal.workspace));
     } catch (err) {
       return sendError(reply, err);
@@ -545,7 +556,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.post("/invites", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
@@ -560,14 +572,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         createdBy: principal.subject,
         ...(body.data.expiresInHours !== undefined ? { expiresInHours: body.data.expiresInHours } : {}),
       });
-      return reply.code(201).send({ ...meta, token }); // 평문 토큰은 여기서 한 번만(링크에 담는다)
+      return reply.code(201).send({ ...meta, token }); // the plaintext token is returned only once here (embedded in the link)
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   app.delete<{ Params: { id: string } }>("/invites/:id", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -579,9 +592,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 수락 — 워크스페이스-역할 게이트 없음(가입 전). 인증된 subject 만(POST /workspaces 와 동일 self-serve). 활성 워크스페이스 무관.
+  // Accept — no workspace-role gate (pre-join). Authenticated subject only (self-serve like POST /workspaces). Independent of the active workspace.
   app.post("/invites/accept", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z.object({ token: z.string().min(1) }).safeParse(req.body);
@@ -593,11 +607,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 미리보기 — 비인증(토큰이 곧 비밀). redeem 하지 않고 워크스페이스 이름/로고/역할만(링크 랜딩용). 무효/만료/수락=404.
+  // Preview — unauthenticated (the token is the secret). Returns only workspace name/logo/role without redeeming (for the link landing). Invalid/expired/accepted = 404.
   app.get<{ Querystring: { token?: string } }>("/invites/preview", async (req, reply) => {
-    if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
+    if (!deps.membershipService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "membership service not configured" });
     const token = req.query.token;
-    if (!token) return reply.code(400).send({ code: "BAD_REQUEST", message: "token 이 필요해요." });
+    if (!token) return reply.code(400).send({ code: "BAD_REQUEST", message: "token is required." });
     try {
       return reply.send(await deps.membershipService.previewInvite(token));
     } catch (err) {
@@ -617,7 +632,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
     try {
       gate(principal, "runs:submit");
-      // submittedBy=subject → 비공개 repo 시드를 제출자의 개인 연결로 clone("내 연결로 clone").
+      // submittedBy=subject → clone a private-repo seed with the submitter's personal connection ("clone with my connection").
       return reply
         .code(202)
         .send(await deps.service.submit({ tenant: principal.workspace, submittedBy: principal.subject, ...body }));
@@ -633,7 +648,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       gate(principal, "runs:read");
       const record = await deps.service.get(req.params.id);
       if (!record || record.tenant !== principal.workspace)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "run 을 찾을 수 없습니다." });
+        return reply.code(404).send({ code: "NOT_FOUND", message: "run not found." });
       return reply.send(record);
     } catch (err) {
       return sendError(reply, err);
@@ -645,7 +660,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return reply;
     try {
       gate(principal, "runs:read");
-      // scorecardId 지정 시 그 배치의 자식 run(케이스 드릴다운); 아니면 standalone 활동 리스트(자식 숨김).
+      // When scorecardId is given, the child runs of that batch (case drill-down); otherwise the standalone activity list (children hidden).
       const scorecardId = req.query.scorecardId;
       return reply.send(await deps.service.list(principal.workspace, scorecardId ? { scorecardId } : undefined));
     } catch (err) {
@@ -653,25 +668,25 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 작업 큐(워크로드 가시성) — 런타임 레인별 실행 중/대기(FIFO)/다음 예약 발사 스냅샷. viewer+ 읽기 전용. ---
+  // --- work queue (workload visibility) — snapshot of running/waiting (FIFO)/next-scheduled fire per runtime lane. viewer+ read-only. ---
   app.get("/queue", async (req, reply) => {
-    if (!deps.queueService) return reply.code(404).send({ code: "NOT_FOUND", message: "queue 서비스 미설정" });
+    if (!deps.queueService) return reply.code(404).send({ code: "NOT_FOUND", message: "queue service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "runs:read");
-      // personal 큐(내 셀프호스티드 러너) 스코프 판정에 요청자 subject 필요.
+      // The requester subject is needed to scope the personal queue (my self-hosted runners).
       return reply.send(await deps.queueService.snapshot(principal.workspace, principal.subject));
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // --- harness templates (대분류: 구조/슬롯, 버전 미고정) + instances (template+pins → resolved) ---
-  // 하네스는 협업 콘텐츠 → 정의/등록 모두 무게이트(viewer+, 권한 상관없이 동등). 읽기도 viewer+.
+  // --- harness templates (category: structure/slots, versions unpinned) + instances (template+pins → resolved) ---
+  // Harnesses are collaborative content → both define and register are ungated (viewer+, equal regardless of role). Reads are viewer+ too.
   app.post("/harness-templates", async (req, reply) => {
     if (!deps.harnessTemplates)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const parsed = HarnessTemplateSpecSchema.safeParse(req.body);
@@ -687,7 +702,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.post("/harness-templates/validate", async (req, reply) => {
     if (!deps.harnessTemplates)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -711,7 +726,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.get("/harness-templates", async (req, reply) => {
     if (!deps.harnessTemplates)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -724,39 +739,38 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.get<{ Params: { id: string } }>("/harness-templates/:id", async (req, reply) => {
     if (!deps.harnessTemplates)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
       const versions = await deps.harnessTemplates.versions(principal.workspace, req.params.id);
-      if (versions.length === 0)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "템플릿을 찾을 수 없습니다." });
+      if (versions.length === 0) return reply.code(404).send({ code: "NOT_FOUND", message: "template not found." });
       return reply.send({ id: req.params.id, versions });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // 템플릿(대분류) 구조 스펙 1건 — 상세 화면의 구성 보기 + 새 버전 편집 프리필용.
+  // A single template (category) structure spec — for the detail-view config panel + new-version edit prefill.
   app.get<{ Params: { id: string; version: string } }>("/harness-templates/:id/:version", async (req, reply) => {
     if (!deps.harnessTemplates)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
       return reply.send(await deps.harnessTemplates.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
-      return sendError(reply, err); // 없는 id/version → 404
+      return sendError(reply, err); // missing id/version → 404
     }
   });
 
-  // 개별 하네스(인스턴스) — /harnesses 가 인스턴스 표면(대분류 = /harness-templates). template 참조 + pins.
-  // 무게이트(viewer+). 등록/검증은 resolve 로 확인(템플릿 없음 404 / 핀 누락 400 거부).
+  // Individual harnesses (instances) — /harnesses is the instance surface (category = /harness-templates). template reference + pins.
+  // Ungated (viewer+). Register/validate confirm via resolve (missing template → 404 / missing pin → 400 rejection).
   app.post("/harnesses", async (req, reply) => {
     if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const parsed = HarnessInstanceSpecSchema.safeParse(req.body);
@@ -764,7 +778,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "harnesses:register");
       await deps.harnessInstances.register(principal.workspace, parsed.data, principal.subject);
-      // 이미지 분류 경고(warn-not-block) — local/unqualified 이미지는 pull 보장이 없다(빌드 머신 밖 실행 위험).
+      // Image-classification warnings (warn-not-block) — local/unqualified images have no pull guarantee (risky to run off the build machine).
       const warnings = await harnessImageWarnings(deps, principal.workspace, parsed.data.id, parsed.data.version);
       return reply.code(201).send({
         workspace: principal.workspace,
@@ -773,14 +787,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ...(warnings.length > 0 ? { imageWarnings: warnings } : {}),
       });
     } catch (err) {
-      return sendError(reply, err); // 템플릿 없음 404 / 핀 누락 400 / 불변 409
+      return sendError(reply, err); // missing template 404 / missing pin 400 / immutable 409
     }
   });
 
-  // dry-run 검증 — 스키마 + 템플릿 존재 + pins resolve(등록하지 않음). 등록 플로우 사전 점검.
+  // dry-run validate — schema + template existence + pins resolve (does not register). Pre-check for the register flow.
   app.post("/harnesses/validate", async (req, reply) => {
     if (!deps.harnessTemplates)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness template registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -796,9 +810,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         parsed.data.template.id,
         parsed.data.template.version,
       );
-      const resolved = resolveHarnessInstance(template, parsed.data); // 핀 누락/불일치/템플릿 없음이면 throw
-      // 이미지 분류 경고(warn-not-block) — 등록 전 사전 점검에서 local/unqualified 이미지를 드러낸다.
-      // 분류는 등록된 레지스트리 '전부'를 대상으로 — 어느 하나에 속하면 workspace 클래스.
+      const resolved = resolveHarnessInstance(template, parsed.data); // throws on missing/mismatched pin or missing template
+      // Image-classification warnings (warn-not-block) — the pre-registration check surfaces local/unqualified images.
+      // Classification runs against *all* registered registries — belonging to any one makes it the workspace class.
       const coords = await deps.imageRegistryService?.coordinates(principal.workspace);
       const warnings = imageWarnings(collectHarnessImages(resolved), coords);
       return reply.send({
@@ -815,13 +829,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.get("/harnesses", async (req, reply) => {
     if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
-      const entries = await deps.harnessInstances.list(principal.workspace); // 템플릿 id 별로 묶인 인스턴스
-      // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 — 다른 유저의 목록에서 숨긴다.
+      const entries = await deps.harnessInstances.list(principal.workspace); // instances grouped by template id
+      // A private harness (references a personal secret) is createdBy-only — hidden from other users' lists.
       return reply.send(entries.filter((e) => !e.private || e.createdBy === principal.subject));
     } catch (err) {
       return sendError(reply, err);
@@ -830,17 +844,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.get<{ Params: { id: string } }>("/harnesses/:id", async (req, reply) => {
     if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
       const versions = await deps.harnessInstances.versions(principal.workspace, req.params.id);
-      if (versions.length === 0)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
+      if (versions.length === 0) return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
       if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
-        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
-      // versionTags: 버전 → 자유 라벨(태그 있는 버전만) — 버전 스위처/목록에서 번호를 분간하는 표시용.
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
+      // versionTags: version → free label (only versions that have tags) — a display aid to tell versions apart in the switcher/list.
       const versionTags = await deps.harnessInstances.versionTags(principal.workspace, req.params.id);
       return reply.send({
         id: req.params.id,
@@ -854,29 +867,29 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.get<{ Params: { id: string; version: string } }>("/harnesses/:id/:version", async (req, reply) => {
     if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "harnesses:read");
-      // resolved HarnessSpec (template + pins) — 웹 pin diff/미리보기용.
+      // resolved HarnessSpec (template + pins) — for the web pin diff/preview.
       const resolved = await deps.harnessInstances.get(principal.workspace, req.params.id, req.params.version);
-      // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 열람 가능 → 타인은 404(존재 은닉).
+      // A private harness (references a personal secret) is viewable only by createdBy → others get 404 (existence hidden).
       if (
         referencesUserSecret(resolved) &&
         (await deps.harnessInstances.creatorOf(principal.workspace, req.params.id)) !== principal.subject
       )
-        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
       return reply.send(resolved);
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // raw 인스턴스(template 참조 + pins) — resolve 전 원본. 상세 화면 구성 보기 + 새 버전 re-pin 프리필용.
+  // Raw instance (template reference + pins) — the original before resolve. For the detail-view config panel + new-version re-pin prefill.
   app.get<{ Params: { id: string; version: string } }>("/harnesses/:id/:version/instance", async (req, reply) => {
     if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -885,16 +898,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         await deps.harnessInstances.getInstance(principal.workspace, req.params.id, req.params.version),
       );
     } catch (err) {
-      return sendError(reply, err); // 없는 id/version → 404
+      return sendError(reply, err); // missing id/version → 404
     }
   });
 
-  // 하니스 버전 소프트 삭제 — 그 버전의 생성자 본인 또는 워크스페이스 admin 만(deleteHarnessVersion 가 게이트).
-  // 삭제는 tombstone(데이터 보존, read 제외) → 과거 스코어카드 이력·집계는 무영향(하니스 좌표는 레코드에 스냅샷).
-  // 그 하니스를 참조하는 "미래" 실행(재실행/예약/CI)은 해석 실패한다. 없는/이미 삭제/비소유 버전은 404.
+  // Soft-delete a harness version — only that version's own creator or a workspace admin (deleteHarnessVersion gates it).
+  // Deletion is a tombstone (data preserved, excluded from reads) → past scorecard history·aggregates are unaffected (the harness coordinates are snapshotted in the record).
+  // "Future" runs referencing that harness (re-run/schedule/CI) fail to resolve. Missing/already-deleted/non-owned version = 404.
   app.delete<{ Params: { id: string; version: string } }>("/harnesses/:id/versions/:version", async (req, reply) => {
     if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -902,23 +915,23 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         await deleteHarnessVersion(deps.harnessInstances, principal, req.params.id, req.params.version),
       );
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 / 없음 404
+      return sendError(reply, err); // no permission 403 / not found 404
     }
   });
 
-  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 가변 메타(자유 라벨, 버전 분간용).
-  // 등록과 동일 게이트(harnesses:register, viewer+) — 협업 eval 콘텐츠 큐레이션. _shared/타 워크스페이스 버전은 404.
+  // Replace version tags (whole-array PUT; empty array = clear) — mutable metadata outside the spec (free labels, to tell versions apart).
+  // Same gate as register (harnesses:register, viewer+) — curating collaborative eval content. _shared / other-workspace versions = 404.
   app.put<{ Params: { id: string; version: string } }>("/harnesses/:id/versions/:version/tags", async (req, reply) => {
     if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const parsed = VersionTagsBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 — 타인에게는 존재 은닉(404, 읽기와 동일).
+      // A private harness (references a personal secret) is createdBy-only — existence hidden from others (404, same as read).
       if (!(await harnessVisibleTo(deps.harnessInstances, principal, req.params.id)))
-        return reply.code(404).send({ code: "NOT_FOUND", message: "하니스를 찾을 수 없습니다." });
+        return reply.code(404).send({ code: "NOT_FOUND", message: "harness not found." });
       return reply.send(
         await setVersionTags(
           deps.harnessInstances,
@@ -930,21 +943,21 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ),
       );
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 / 없음·비소유 404
+      return sendError(reply, err); // no permission 403 / not found·non-owned 404
     }
   });
 
-  // durable 재핀(headless re-pin) — 기준 인스턴스 pins 에 병합해 새 버전 등록(웹 "새 버전 만들기"와 동일 의미).
-  // CI(dev/main 머지)가 자기 서비스 슬롯만 갈아끼우는 경로. digest 핀 강제(기본), 멱등(동일 핀 → unchanged).
+  // Durable re-pin (headless re-pin) — merge into the base instance's pins and register a new version (same meaning as the web "Create new version").
+  // The path where CI (dev/main merge) swaps only its own service slot. Enforces digest pins (default), idempotent (identical pins → unchanged).
   app.post<{ Params: { id: string } }>("/harnesses/:id/pins", async (req, reply) => {
     if (!deps.harnessInstances)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "harness instance registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const parsed = RepinBodySchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      gate(principal, "harnesses:register"); // 인스턴스 등록과 동일 게이트(무게이트 viewer+; CI role 도 보유)
+      gate(principal, "harnesses:register"); // same gate as instance register (ungated viewer+; the CI role has it too)
       const result = await repinHarnessImages(
         deps.harnessInstances,
         principal.workspace,
@@ -954,33 +967,35 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       );
       return reply.code(result.unchanged ? 200 : 201).send(result);
     } catch (err) {
-      return sendError(reply, err); // 기준 없음 404 / tag 핀·미지 슬롯 400 / 버전 불변 409
+      return sendError(reply, err); // missing base 404 / tag pin·unknown slot 400 / version immutable 409
     }
   });
 
-  // --- datasets (workspace-owned SSOT, 하니스 무관 eval 케이스 묶음) ---
+  // --- datasets (workspace-owned SSOT, harness-agnostic eval-case bundles) ---
   app.post("/datasets", async (req, reply) => {
-    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "datasets:write");
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 (검증 전에 게이트 — 미인가에 검증 정보 노출 안 함)
+      return sendError(reply, err); // no permission 403 (gate before validation — don't leak validation info to the unauthorized)
     }
     const parsed = DatasetSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      await deps.datasetRegistry.register(principal.workspace, parsed.data, principal.subject); // 생성자 = subject(삭제 권한)
+      await deps.datasetRegistry.register(principal.workspace, parsed.data, principal.subject); // creator = subject (delete rights)
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
-      return sendError(reply, err); // 불변성 409
+      return sendError(reply, err); // immutable 409
     }
   });
 
-  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). 등록 플로우의 사전 점검.
+  // dry-run validate — schema + this workspace's existing versions/conflict (does not register). Pre-check for the register flow.
   app.post("/datasets/validate", async (req, reply) => {
-    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1003,7 +1018,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get("/datasets", async (req, reply) => {
-    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1014,36 +1030,39 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 특정 버전의 전체 데이터셋(케이스 포함). version 은 "latest" 가능. 다른 워크스페이스 → NOT_FOUND.
+  // Full dataset for a specific version (cases included). version may be "latest". Other workspace → NOT_FOUND.
   app.get<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version", async (req, reply) => {
-    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "datasets:read");
       return reply.send(await deps.datasetRegistry.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
-      return sendError(reply, err); // 없으면 NotFoundError → 404
+      return sendError(reply, err); // not found → NotFoundError → 404
     }
   });
 
-  // 데이터셋 버전 소프트 삭제 — 그 버전의 생성자 본인 또는 워크스페이스 admin 만(deleteDatasetVersion 가 게이트).
-  // 삭제는 tombstone(데이터 보존, read 제외) → 과거 스코어카드 재현성 유지. 없는/이미 삭제/비소유 버전은 404.
+  // Soft-delete a dataset version — only that version's own creator or a workspace admin (deleteDatasetVersion gates it).
+  // Deletion is a tombstone (data preserved, excluded from reads) → past scorecards stay reproducible. Missing/already-deleted/non-owned version = 404.
   app.delete<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version", async (req, reply) => {
-    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       return reply.send(await deleteDatasetVersion(deps.datasetRegistry, principal, req.params.id, req.params.version));
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 / 없음 404
+      return sendError(reply, err); // no permission 403 / not found 404
     }
   });
 
-  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 가변 메타(자유 라벨, 버전 분간용).
-  // 내용의 tags(엔티티 분류)와 별개. 게이트는 datasets:write 재사용. _shared/타 워크스페이스 버전은 404.
+  // Replace version tags (whole-array PUT; empty array = clear) — mutable metadata outside the spec (free labels, to tell versions apart).
+  // Distinct from the content's tags (entity classification). Reuses the datasets:write gate. _shared / other-workspace versions = 404.
   app.put<{ Params: { id: string; version: string } }>("/datasets/:id/versions/:version/tags", async (req, reply) => {
-    if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+    if (!deps.datasetRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const parsed = VersionTagsBodySchema.safeParse(req.body);
@@ -1060,21 +1079,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ),
       );
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 / 없음·비소유 404
+      return sendError(reply, err); // no permission 403 / not found·non-owned 404
     }
   });
 
-  // 버전 간 diff — base↔candidate 의 케이스 추가/삭제/변경 + 메타 변경. 둘 다 "latest" 가능.
-  // 불변 버전 전제(레지스트리 강제) → 같은 (id, version) 은 항상 같은 내용이라 비교가 재현 가능.
+  // Diff between versions — case additions/removals/changes + metadata changes between base↔candidate. Both may be "latest".
+  // Immutable-version premise (registry-enforced) → the same (id, version) always has the same content, so the comparison is reproducible.
   app.get<{ Params: { id: string }; Querystring: { base?: string; candidate?: string } }>(
     "/datasets/:id/diff",
     async (req, reply) => {
-      if (!deps.datasetRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry 미설정" });
+      if (!deps.datasetRegistry)
+        return reply.code(404).send({ code: "NOT_FOUND", message: "dataset registry not configured" });
       const principal = await resolvePrincipal(req, reply, deps);
       if (!principal) return reply;
       const { base, candidate } = req.query;
       if (!base || !candidate)
-        return reply.code(400).send({ code: "BAD_REQUEST", message: "base 와 candidate 쿼리 파라미터가 필요합니다." });
+        return reply
+          .code(400)
+          .send({ code: "BAD_REQUEST", message: "base and candidate query parameters are required." });
       try {
         gate(principal, "datasets:read");
         const [baseDs, candidateDs] = await Promise.all([
@@ -1083,14 +1105,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ]);
         return reply.send(diffDatasets(baseDs, candidateDs));
       } catch (err) {
-        return sendError(reply, err); // 버전 없으면 404
+        return sendError(reply, err); // version not found → 404
       }
     },
   );
 
-  // --- benchmarks (first-party 카탈로그 → 테넌트-소유 데이터셋 인입; 유저 셀프서비스) ---
+  // --- benchmarks (first-party catalog → ingest into tenant-owned datasets; user self-serve) ---
   app.get("/benchmarks", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1101,33 +1124,35 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // HF Hub 데이터셋 검색 — 위저드가 검색어로 후보를 고른다(정확한 id 직접 입력 회피). discovery → viewer+.
+  // HF Hub dataset search — the wizard picks candidates by query (avoids typing an exact id). Discovery → viewer+.
   app.get("/benchmarks/hf/datasets", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const q = (req.query as Record<string, unknown>).q;
     if (typeof q !== "string" || !q.trim())
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "검색어 q 가 필요합니다." });
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "search query q is required." });
     const limitRaw = (req.query as Record<string, unknown>).limit;
     const limit = typeof limitRaw === "string" && Number.isFinite(Number(limitRaw)) ? Number(limitRaw) : undefined;
     try {
       gate(principal, "datasets:read");
-      // subject → 요청자 개인 시크릿(HF_TOKEN)까지 gated 인증에 사용(멤버 셀프서비스)
+      // subject → also used for gated auth via the requester's personal secret (HF_TOKEN) (member self-serve)
       return reply.send(await deps.benchmarkService.searchHf(principal.workspace, q.trim(), limit, principal.subject));
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // 선택한 HF 데이터셋의 config/split 조합 — 위저드 드롭다운(split 직접 타이핑 회피).
+  // config/split combinations for the selected HF dataset — for the wizard dropdown (avoids typing a split by hand).
   app.get("/benchmarks/hf/splits", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const dataset = (req.query as Record<string, unknown>).dataset;
     if (typeof dataset !== "string" || !dataset.trim())
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset 이 필요합니다." });
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset is required." });
     try {
       gate(principal, "datasets:read");
       return reply.send(await deps.benchmarkService.hfSplits(principal.workspace, dataset.trim(), principal.subject));
@@ -1136,14 +1161,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 뷰어(datasets-server) 미서빙 데이터셋 폴백 — repo 데이터 파일(csv/jsonl/json) 목록. 위저드 파일 드롭다운용.
+  // Fallback for datasets not served by the viewer (datasets-server) — a list of repo data files (csv/jsonl/json). For the wizard file dropdown.
   app.get("/benchmarks/hf/files", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const dataset = (req.query as Record<string, unknown>).dataset;
     if (typeof dataset !== "string" || !dataset.trim())
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset 이 필요합니다." });
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset is required." });
     try {
       gate(principal, "datasets:read");
       return reply.send(await deps.benchmarkService.hfFiles(principal.workspace, dataset.trim(), principal.subject));
@@ -1152,9 +1178,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 소스 미리보기 — 매핑 전 원본 행 N개 + 감지된 필드("벤치마크 추가" 위저드: 필드 자동감지 → 매핑). 등록 없음.
+  // Source preview — N raw rows before mapping + detected fields (the "Add benchmark" wizard: field auto-detect → mapping). No registration.
   app.post("/benchmarks/preview", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1173,13 +1200,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         }),
       );
     } catch (err) {
-      return sendError(reply, err); // HF 인출 실패/잘못된 jsonl 등
+      return sendError(reply, err); // HF fetch failure / bad jsonl, etc.
     }
   });
 
-  // 카탈로그/레시피/인라인 spec 을 당겨 이 워크스페이스의 데이터셋으로 등록(HF 소스는 네트워크 인출, gated 면 HF_TOKEN 시크릿).
+  // Pull a catalog/recipe/inline spec and register it as this workspace's dataset (HF sources fetch over the network, using the HF_TOKEN secret if gated).
   app.post("/benchmarks/import", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1197,13 +1225,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       });
       return reply.code(201).send(rec);
     } catch (err) {
-      return sendError(reply, err); // BadRequest(미지원 id)/불변성 409/HF 인출 실패
+      return sendError(reply, err); // BadRequest (unsupported id) / immutable 409 / HF fetch failure
     }
   });
 
-  // 테넌트 벤치마크 레시피(BenchmarkAdapterSpec, 데이터) 등록 — 재사용 가능한 자기 워크스페이스 정의.
+  // Register a tenant benchmark recipe (BenchmarkAdapterSpec, data) — a reusable definition owned by your own workspace.
   app.post("/benchmark-recipes", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1217,13 +1246,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       const rec = await deps.benchmarkService.registerRecipe(principal.workspace, parsed.data);
       return reply.code(201).send(rec);
     } catch (err) {
-      return sendError(reply, err); // 불변성 409
+      return sendError(reply, err); // immutable 409
     }
   });
 
-  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음). 레시피 등록 전 사전 점검.
+  // dry-run validate — schema + this workspace's existing versions/conflict (does not register). Pre-check before registering a recipe.
   app.post("/benchmark-recipes/validate", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1246,9 +1276,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
   });
 
-  // 테넌트 + _shared 레시피 목록.
+  // List tenant + _shared recipes.
   app.get("/benchmark-recipes", async (req, reply) => {
-    if (!deps.benchmarkService) return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+    if (!deps.benchmarkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1263,7 +1294,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     "/benchmark-recipes/:id/versions/:version",
     async (req, reply) => {
       if (!deps.benchmarkService)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog 미설정" });
+        return reply.code(404).send({ code: "NOT_FOUND", message: "benchmark catalog not configured" });
       const principal = await resolvePrincipal(req, reply, deps);
       if (!principal) return reply;
       try {
@@ -1272,21 +1303,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           await deps.benchmarkService.getRecipe(principal.workspace, req.params.id, req.params.version),
         );
       } catch (err) {
-        return sendError(reply, err); // 없으면 404
+        return sendError(reply, err); // 404 if not found
       }
     },
   );
 
-  // --- bundles (번들 원샷 적용: 하니스+벤치마크+데이터셋+런타임+judge/model 를 한 매니페스트로 등록) ---
-  // authZ = 새 액션 없이 번들 내용으로부터 필요한 per-type 게이트를 조합해 각각 강제(requiredActionsForBundle).
+  // --- bundles (one-shot bundle apply: register harness+benchmark+dataset+runtime+judge/model from a single manifest) ---
+  // authZ = compose and enforce the required per-type gates derived from the bundle contents, with no new action (requiredActionsForBundle).
   app.post("/bundles/apply", async (req, reply) => {
-    if (!deps.bundleService) return reply.code(404).send({ code: "NOT_FOUND", message: "번들 서비스 미설정" });
+    if (!deps.bundleService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "bundle service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const parsed = BundleSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
     try {
-      for (const action of requiredActionsForBundle(parsed.data)) gate(principal, action); // 섹션별 게이트
+      for (const action of requiredActionsForBundle(parsed.data)) gate(principal, action); // per-section gate
       return reply.send(await deps.bundleService.apply(principal.workspace, principal.subject, parsed.data));
     } catch (err) {
       return sendError(reply, err);
@@ -1295,13 +1327,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   // --- judges (workspace-owned SSOT, Agent Judge: model | harness) ---
   app.post("/judges", async (req, reply) => {
-    if (!deps.judgeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry 미설정" });
+    if (!deps.judgeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "judges:write");
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 (검증 전에 게이트)
+      return sendError(reply, err); // no permission 403 (gate before validation)
     }
     const parsed = JudgeSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
@@ -1309,13 +1342,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await deps.judgeRegistry.register(principal.workspace, parsed.data, principal.subject);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
-      return sendError(reply, err); // 불변성 409
+      return sendError(reply, err); // immutable 409
     }
   });
 
-  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음).
+  // dry-run validate — schema + this workspace's existing versions/conflict (does not register).
   app.post("/judges/validate", async (req, reply) => {
-    if (!deps.judgeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry 미설정" });
+    if (!deps.judgeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1338,7 +1372,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get("/judges", async (req, reply) => {
-    if (!deps.judgeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry 미설정" });
+    if (!deps.judgeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1349,22 +1384,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 특정 버전의 전체 JudgeSpec. version 은 "latest" 가능. 다른 워크스페이스 → NOT_FOUND.
+  // Full JudgeSpec for a specific version. version may be "latest". Other workspace → NOT_FOUND.
   app.get<{ Params: { id: string; version: string } }>("/judges/:id/versions/:version", async (req, reply) => {
-    if (!deps.judgeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry 미설정" });
+    if (!deps.judgeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "judges:read");
       return reply.send(await deps.judgeRegistry.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
-      return sendError(reply, err); // 없으면 NotFoundError → 404
+      return sendError(reply, err); // not found → NotFoundError → 404
     }
   });
 
-  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 가변 메타(자유 라벨, 버전 분간용). judges:write 재사용.
+  // Replace version tags (whole-array PUT; empty array = clear) — mutable metadata outside the spec (free labels, to tell versions apart). Reuses judges:write.
   app.put<{ Params: { id: string; version: string } }>("/judges/:id/versions/:version/tags", async (req, reply) => {
-    if (!deps.judgeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry 미설정" });
+    if (!deps.judgeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "judge registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const parsed = VersionTagsBodySchema.safeParse(req.body);
@@ -1381,19 +1418,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ),
       );
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 / 없음·비소유 404
+      return sendError(reply, err); // no permission 403 / not found·non-owned 404
     }
   });
 
-  // --- models (workspace-owned SSOT, 추론/판정 모델: provider + 하부 모델 + baseUrl) ---
+  // --- models (workspace-owned SSOT, inference/judging model: provider + underlying model + baseUrl) ---
   app.post("/models", async (req, reply) => {
-    if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
+    if (!deps.modelRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "models:write");
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 (검증 전에 게이트)
+      return sendError(reply, err); // no permission 403 (gate before validation)
     }
     const parsed = ModelSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
@@ -1401,13 +1439,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await deps.modelRegistry.register(principal.workspace, parsed.data);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
-      return sendError(reply, err); // 불변성 409
+      return sendError(reply, err); // immutable 409
     }
   });
 
-  // dry-run 검증 — 스키마 + 이 워크스페이스의 기존 버전/충돌(등록하지 않음).
+  // dry-run validate — schema + this workspace's existing versions/conflict (does not register).
   app.post("/models/validate", async (req, reply) => {
-    if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
+    if (!deps.modelRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1430,7 +1469,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get("/models", async (req, reply) => {
-    if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
+    if (!deps.modelRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1441,28 +1481,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 특정 버전의 전체 ModelSpec. version 은 "latest" 가능. 다른 워크스페이스 → NOT_FOUND.
+  // Full ModelSpec for a specific version. version may be "latest". Other workspace → NOT_FOUND.
   app.get<{ Params: { id: string; version: string } }>("/models/:id/versions/:version", async (req, reply) => {
-    if (!deps.modelRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "model registry 미설정" });
+    if (!deps.modelRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "model registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "models:read");
       return reply.send(await deps.modelRegistry.get(principal.workspace, req.params.id, req.params.version));
     } catch (err) {
-      return sendError(reply, err); // 없으면 NotFoundError → 404
+      return sendError(reply, err); // not found → NotFoundError → 404
     }
   });
 
-  // --- runtimes (workspace-owned SSOT, 실행 인프라: local | nomad | k8s) ---
+  // --- runtimes (workspace-owned SSOT, execution infra: local | nomad | k8s) ---
   app.post("/runtimes", async (req, reply) => {
-    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    if (!deps.runtimeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "runtimes:write");
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 (실행 인프라 = admin)
+      return sendError(reply, err); // no permission 403 (execution infra = admin)
     }
     const parsed = RuntimeSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
@@ -1470,12 +1512,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await deps.runtimeRegistry.register(principal.workspace, parsed.data);
       return reply.code(201).send({ workspace: principal.workspace, id: parsed.data.id, version: parsed.data.version });
     } catch (err) {
-      return sendError(reply, err); // 불변성 409
+      return sendError(reply, err); // immutable 409
     }
   });
 
   app.post("/runtimes/validate", async (req, reply) => {
-    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    if (!deps.runtimeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1487,8 +1530,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!parsed.success)
       return reply.send({ ok: false, errors: zodIssues(parsed.error), existingVersions: [], versionExists: false });
     const existingVersions = await deps.runtimeRegistry.ownVersions(principal.workspace, parsed.data.id);
-    // 참조 시크릿 존재 확인(경고): spec 의 authSecret/kubeconfigSecret(이름)이 이 워크스페이스 SecretStore 에 있는지.
-    // 디스패치 시점에야 조용히 실패하던 것을 등록 전에 드러낸다(하드 실패 아님 — 시크릿은 나중에 추가 가능).
+    // Referenced-secret existence check (warning): whether the spec's authSecret/kubeconfigSecret (names) exist in this workspace's SecretStore.
+    // Surfaces before registration what previously failed silently only at dispatch time (not a hard failure — the secret can be added later).
     const referenced: string[] = [];
     if ("authSecret" in parsed.data && parsed.data.authSecret) referenced.push(parsed.data.authSecret);
     if (parsed.data.kind === "k8s" && parsed.data.kubeconfigSecret) referenced.push(parsed.data.kubeconfigSecret);
@@ -1508,16 +1551,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     });
   });
 
-  // 연결 테스트(라이브) — validate(스키마)와 달리 실제 클러스터에 붙어 도달성/인증을 확인(잡은 안 돌린다).
-  // 자격증명(authSecret/kubeconfigSecret)은 컨트롤플레인이 시크릿에서 resolve해 인증 헤더로만 쓰고 에이전트엔 노출 안 함.
+  // Connection test (live) — unlike validate (schema), actually connects to the cluster to confirm reachability/auth (does not run a job).
+  // The control plane resolves the credentials (authSecret/kubeconfigSecret) from secrets and uses them only as auth headers, never exposing them to the agent.
   app.post("/runtimes/probe", async (req, reply) => {
-    if (!deps.probeRuntime) return reply.code(404).send({ code: "NOT_FOUND", message: "probe 미설정" });
+    if (!deps.probeRuntime) return reply.code(404).send({ code: "NOT_FOUND", message: "probe not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "runtimes:write");
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 (라이브 I/O 전에 게이트)
+      return sendError(reply, err); // no permission 403 (gate before live I/O)
     }
     const parsed = RuntimeSpecSchema.safeParse(req.body);
     if (!parsed.success) return reply.code(400).send({ code: "BAD_REQUEST", message: parsed.error.message });
@@ -1529,7 +1572,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get("/runtimes", async (req, reply) => {
-    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    if (!deps.runtimeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1541,7 +1585,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get<{ Params: { id: string; version: string } }>("/runtimes/:id/versions/:version", async (req, reply) => {
-    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    if (!deps.runtimeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1552,9 +1597,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 버전 태그 교체(전체 배열 PUT; 빈 배열 = 제거) — 스펙 밖 가변 메타(자유 라벨, 버전 분간용). runtimes:write 재사용.
+  // Replace version tags (whole-array PUT; empty array = clear) — mutable metadata outside the spec (free labels, to tell versions apart). Reuses runtimes:write.
   app.put<{ Params: { id: string; version: string } }>("/runtimes/:id/versions/:version/tags", async (req, reply) => {
-    if (!deps.runtimeRegistry) return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry 미설정" });
+    if (!deps.runtimeRegistry)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runtime registry not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const parsed = VersionTagsBodySchema.safeParse(req.body);
@@ -1571,13 +1617,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ),
       );
     } catch (err) {
-      return sendError(reply, err); // 권한 없음 403 / 없음·비소유 404
+      return sendError(reply, err); // no permission 403 / not found·non-owned 404
     }
   });
 
-  // --- scorecards (데이터셋×하니스 배치 평가 → 집계 결과) ---
+  // --- scorecards (dataset×harness batch eval → aggregated result) ---
   app.post("/scorecards", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1592,9 +1639,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(400).send({ code: "BAD_REQUEST", message: (err as Error).message });
     }
     try {
-      // 데이터셋 없으면 NotFoundError → 404. 통과하면 202 + queued 레코드(배치는 백그라운드).
-      // submittedBy=subject → 비공개 repo 케이스를 제출자의 개인 연결로 clone.
-      // origin.source 는 서버가 결정(via 매핑) — 클라이언트 좌표(repo/sha/…)만 body 에서 받는다.
+      // Dataset not found → NotFoundError → 404. On pass, 202 + a queued record (the batch runs in the background).
+      // submittedBy=subject → clone private-repo cases with the submitter's personal connection.
+      // origin.source is decided server-side (via mapping) — only the client coordinates (repo/sha/…) come from the body.
       return reply.code(202).send(
         await deps.scorecardService.submit({
           tenant: principal.workspace,
@@ -1608,10 +1655,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식 + 정책. 발사(Temporal Schedule)는 slice 2. ---
-  // 발사 run 의 submittedBy = 생성자(principal.subject): 예산 → tenant, 비공개-repo 연결 resolve.
+  // --- scheduled (cron) scorecards — stored RunScorecardInput + cron expression + policy. Firing (Temporal Schedule) is slice 2. ---
+  // The fired run's submittedBy = the creator (principal.subject): budget → tenant, private-repo connection resolution.
   app.post("/schedules", async (req, reply) => {
-    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    if (!deps.scheduleService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1637,7 +1685,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get("/schedules", async (req, reply) => {
-    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    if (!deps.scheduleService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1649,7 +1698,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
-    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    if (!deps.scheduleService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1658,14 +1708,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return sendError(reply, err);
     }
     try {
-      return reply.send(await deps.scheduleService.get(principal.workspace, req.params.id)); // 없으면 404
+      return reply.send(await deps.scheduleService.get(principal.workspace, req.params.id)); // 404 if not found
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   app.patch<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
-    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    if (!deps.scheduleService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1685,14 +1736,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           subject: principal.subject,
           isAdmin: principal.roles.includes("admin"),
         }),
-      ); // 없으면 404(내용 편집은 생성자·admin 만 → 403)
+      ); // 404 if not found (content edits are creator·admin only → 403)
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   app.delete<{ Params: { id: string } }>("/schedules/:id", async (req, reply) => {
-    if (!deps.scheduleService) return reply.code(404).send({ code: "NOT_FOUND", message: "schedule 서비스 미설정" });
+    if (!deps.scheduleService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "schedule service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1701,17 +1753,17 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return sendError(reply, err);
     }
     try {
-      await deps.scheduleService.remove(principal.workspace, req.params.id); // 없으면 404
+      await deps.scheduleService.remove(principal.workspace, req.params.id); // 404 if not found
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // --- 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명). 읽기=공유+내 비공개, 수정·삭제=소유자·admin. ---
-  // 스코어카드 읽기/실행 권한을 재사용(새 authz 액션 없음): 읽기 scorecards:read, 쓰기 scorecards:run.
+  // --- saved scorecard-analysis Views — a named AnalysisConfig (opaque). Read = shared + my private, edit·delete = owner·admin. ---
+  // Reuses scorecard read/run permissions (no new authz action): read = scorecards:read, write = scorecards:run.
   app.post("/views", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1741,7 +1793,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get("/views", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1753,7 +1805,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1762,14 +1814,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return sendError(reply, err);
     }
     try {
-      return reply.send(await deps.viewService.get(principal.workspace, req.params.id, principal.subject)); // 비공개 남의 것/없으면 404
+      return reply.send(await deps.viewService.get(principal.workspace, req.params.id, principal.subject)); // 404 if it's someone else's private view / not found
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   app.patch<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1789,14 +1841,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           subject: principal.subject,
           isAdmin: principal.roles.includes("admin"),
         }),
-      ); // 없으면 404(수정은 생성자·admin 만 → 403)
+      ); // 404 if not found (edit is creator·admin only → 403)
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   app.delete<{ Params: { id: string } }>("/views/:id", async (req, reply) => {
-    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view 서비스 미설정" });
+    if (!deps.viewService) return reply.code(404).send({ code: "NOT_FOUND", message: "view service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1808,16 +1860,17 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       await deps.viewService.remove(principal.workspace, req.params.id, {
         subject: principal.subject,
         isAdmin: principal.roles.includes("admin"),
-      }); // 없으면 404(삭제는 생성자·admin 만 → 403)
+      }); // 404 if not found (delete is creator·admin only → 403)
       return reply.code(204).send();
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // 트레이스 인제스트 — 외부에서 이미 수행한 트레이스(TraceEvent[])를 올려 scorecard 로(하니스 미실행). 경계에서 검증.
+  // Trace ingest — upload traces already produced externally (TraceEvent[]) and turn them into a scorecard (no harness run). Validated at the boundary.
   app.post("/scorecards/ingest", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1831,19 +1884,20 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(202).send(
         await deps.scorecardService.ingest({
           tenant: principal.workspace,
-          submittedBy: principal.subject, // 실행자 표기/필터(createdBy)
+          submittedBy: principal.subject, // executor label/filter (createdBy)
           ...parsed.data,
           origin: { source: originSource(principal.via) },
         }),
       );
     } catch (err) {
-      return sendError(reply, err); // 데이터셋 없으면 404
+      return sendError(reply, err); // dataset not found → 404
     }
   });
 
-  // pull 인제스트 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 채점(하니스 미실행). source 자격증명은 authSecret(SecretStore).
+  // Pull ingest — pull per-runId traces from the tenant's OTel/MLflow and score them (no harness run). Source credentials are authSecret (SecretStore).
   app.post("/scorecards/ingest/pull", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1857,18 +1911,19 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       return reply.code(202).send(
         await deps.scorecardService.ingestPull({
           tenant: principal.workspace,
-          submittedBy: principal.subject, // 실행자 표기/필터(createdBy)
+          submittedBy: principal.subject, // executor label/filter (createdBy)
           ...parsed.data,
           origin: { source: originSource(principal.via) },
         }),
       );
     } catch (err) {
-      return sendError(reply, err); // 데이터셋 없으면 404
+      return sendError(reply, err); // dataset not found → 404
     }
   });
 
   app.get("/scorecards", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1879,33 +1934,35 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // baseline vs candidate 비교(회귀/개선). 정적 경로 → :id 보다 먼저 매칭. 둘 다 이 워크스페이스 소유 + 완료여야.
+  // baseline vs candidate comparison (regressions/improvements). Static path → matched before :id. Both must be this workspace's and completed.
   app.get<{ Querystring: { baseline?: string; candidate?: string } }>("/scorecards/diff", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const { baseline, candidate } = req.query;
     if (!baseline || !candidate)
       return reply
         .code(400)
-        .send({ code: "BAD_REQUEST", message: "baseline 과 candidate 쿼리 파라미터가 필요합니다." });
+        .send({ code: "BAD_REQUEST", message: "baseline and candidate query parameters are required." });
     try {
       gate(principal, "scorecards:read");
       return reply.send(await deps.scorecardService.diff(principal.workspace, baseline, candidate));
     } catch (err) {
-      return sendError(reply, err); // 없으면 404, 미완료면 400
+      return sendError(reply, err); // 404 if not found, 400 if incomplete
     }
   });
 
-  // 기간 트렌드 / 회귀-오버-타임 — 한 (dataset, metric) 의 스코어카드를 시간순 + baseline 대비 회귀. 정적 경로 → :id 보다 먼저.
+  // Period trend / regression-over-time — one (dataset, metric)'s scorecards in time order + regression vs baseline. Static path → before :id.
   app.get<{
     Querystring: { dataset?: string; metric?: string; harness?: string; from?: string; to?: string; baseline?: string };
   }>("/scorecards/trend", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const { dataset, metric, harness, from, to, baseline } = req.query;
-    if (!dataset) return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset 쿼리 파라미터가 필요합니다." });
+    if (!dataset) return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset query parameter is required." });
     try {
       gate(principal, "scorecards:read");
       return reply.send(
@@ -1923,7 +1980,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 벤치마크별 리더보드 — 한 (dataset) 위 (harness × model) 랭킹(metric 내림차순). 정적 경로 → :id 보다 먼저.
+  // Per-benchmark leaderboard — (harness × model) ranking over one (dataset) (metric descending). Static path → before :id.
   app.get<{
     Querystring: {
       dataset?: string;
@@ -1934,11 +1991,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       window?: string;
     };
   }>("/scorecards/leaderboard", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const { dataset, metric, harness, model, judgeModel, window } = req.query;
-    if (!dataset) return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset 쿼리 파라미터가 필요합니다." });
+    if (!dataset) return reply.code(400).send({ code: "BAD_REQUEST", message: "dataset query parameter is required." });
     try {
       gate(principal, "scorecards:read");
       return reply.send(
@@ -1948,7 +2006,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           ...(harness ? { harnessId: harness } : {}),
           ...(model ? { model } : {}),
           ...(judgeModel ? { judgeModel } : {}),
-          window: window === "best" ? "best" : "latest", // 그 외/미지정 = latest
+          window: window === "best" ? "best" : "latest", // anything else/unset = latest
         }),
       );
     } catch (err) {
@@ -1956,9 +2014,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // model 축 백필 — models 가 없는 과거 succeeded 스코어카드를 저장 트레이스로 채운다(멱등). 정적 경로 → :id 보다 먼저.
+  // model-axis backfill — fill past succeeded scorecards that lack models from stored traces (idempotent). Static path → before :id.
   app.post("/scorecards/backfill-models", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -1970,30 +2029,31 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.get<{ Params: { id: string } }>("/scorecards/:id", async (req, reply) => {
-    if (!deps.scorecardService) return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 서비스 미설정" });
+    if (!deps.scorecardService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "scorecards:read");
       const record = await deps.scorecardService.get(req.params.id);
       if (!record || record.tenant !== principal.workspace)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard 를 찾을 수 없습니다." });
+        return reply.code(404).send({ code: "NOT_FOUND", message: "scorecard not found." });
       return reply.send(record);
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // --- secrets (워크스페이스 모델/프로바이더 키 관리; 값은 at-rest 암호화 + 절대 read-back 안 함) ---
-  // 시크릿 스코프: workspace(공유, admin 관리) + user(개인, 본인 셀프 관리). GET 은 멤버 누구나 접근하되
-  // 워크스페이스 시크릿 이름은 admin(secrets:read)만, 개인 시크릿은 항상 본인 것만 본다.
+  // --- secrets (workspace model/provider key management; values are encrypted at rest + never read back) ---
+  // Secret scopes: workspace (shared, admin-managed) + user (personal, self-managed). GET is accessible to any member, but
+  // workspace secret names are admin-only (secrets:read), and personal secrets always show only your own.
   app.get("/secrets", async (req, reply) => {
-    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
+    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      const metas = await deps.secretStore.list(principal.workspace, principal.subject); // 이름+스코프만(값 없음)
-      // 워크스페이스(공유) 시크릿 이름은 admin 만 열람. 개인(user) 시크릿은 항상 본인 것만 포함돼 있어 그대로.
+      const metas = await deps.secretStore.list(principal.workspace, principal.subject); // names + scopes only (no values)
+      // Only admins see workspace (shared) secret names. Personal (user) secrets always contain only your own, so pass them through.
       const visible = can(principal, "secrets:read") ? metas : metas.filter((m) => m.scope === "user");
       return reply.send(visible);
     } catch (err) {
@@ -2001,35 +2061,37 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 워크스페이스 스코프 set 은 admin(secrets:write), 유저 스코프 set 은 본인 셀프(게이트 없음, owner=subject).
+  // A workspace-scope set is admin (secrets:write); a user-scope set is self-serve (no gate, owner=subject).
   app.put<{ Params: { name: string } }>("/secrets/:name", async (req, reply) => {
-    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
+    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const name = SecretNameSchema.safeParse(req.params.name);
     if (!name.success)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "시크릿 이름은 env 형식(^[A-Z_][A-Z0-9_]*$)" });
+      return reply
+        .code(400)
+        .send({ code: "BAD_REQUEST", message: "secret name must be env format (^[A-Z_][A-Z0-9_]*$)" });
     const body = z
       .object({ value: z.string().min(1), scope: z.enum(["user", "workspace"]).default("workspace") })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       const owner = body.data.scope === "user" ? principal.subject : "";
-      if (body.data.scope === "workspace") gate(principal, "secrets:write"); // 공유 시크릿만 admin
+      if (body.data.scope === "workspace") gate(principal, "secrets:write"); // only shared secrets are admin
       await deps.secretStore.set(principal.workspace, name.data, body.data.value, owner);
-      return reply.code(204).send(); // 값은 다시 돌려주지 않는다
+      return reply.code(204).send(); // the value is never returned again
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   app.delete<{ Params: { name: string }; Querystring: { scope?: string } }>("/secrets/:name", async (req, reply) => {
-    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret 저장소 미설정" });
+    if (!deps.secretStore) return reply.code(404).send({ code: "NOT_FOUND", message: "secret store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       const owner = req.query.scope === "user" ? principal.subject : "";
-      if (req.query.scope !== "user") gate(principal, "secrets:write"); // 공유 시크릿만 admin
+      if (req.query.scope !== "user") gate(principal, "secrets:write"); // only shared secrets are admin
       await deps.secretStore.remove(principal.workspace, req.params.name, owner);
       return reply.code(204).send();
     } catch (err) {
@@ -2037,28 +2099,30 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- runners (셀프호스티드 러너; 개인 소유 디바이스 페어링 — 프로필/연결과 동일 self-scoped, 역할 게이트 없음) ---
+  // --- runners (self-hosted runners; personal device pairing — self-scoped like profile/connections, no role gate) ---
   app.get("/runners", async (req, reply) => {
-    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    if (!deps.runnerService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      // 개인 소유 — 역할 게이트 없이 본인(subject)의 러너만 조회.
+      // Personal-owned — list only the subject's own runners, no role gate.
       return reply.send({ runners: await deps.runnerService.list(principal.subject) });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // 디바이스 페어링 — 평문 토큰(rnr_…)은 응답에 한 번만 노출되고 다시 못 본다(저장은 해시). everdict runner 가 이 토큰으로 인증.
+  // Device pairing — the plaintext token (rnr_…) is exposed in the response only once and never again (stored as a hash). The everdict runner authenticates with it.
   app.post("/runners", async (req, reply) => {
-    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    if (!deps.runnerService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = PairRunnerBodySchema.safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
-      // 개인 소유: owner=subject. workspace 는 페어링된 워크스페이스(로스터/가시성) 기록용.
+      // Personal-owned: owner=subject. workspace records the paired workspace (for the roster/visibility).
       const paired = await deps.runnerService.pair({
         owner: principal.subject,
         workspace: principal.workspace,
@@ -2073,11 +2137,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.delete<{ Params: { id: string } }>("/runners/:id", async (req, reply) => {
-    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    if (!deps.runnerService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      // 개인 소유 — 역할 게이트 없이 본인(subject)의 러너만 해제.
+      // Personal-owned — revoke only the subject's own runners, no role gate.
       await deps.runnerService.revoke(principal.subject, req.params.id);
       return reply.code(204).send();
     } catch (err) {
@@ -2085,17 +2150,17 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- notifications (개인 알림 피드 — 벨 인박스; connections/runners 와 동일 self-scoped, 역할 게이트 없음.
-  //     docs/architecture/notifications.md — 웹이 폴링으로 소비, 새 항목은 브라우저/데스크톱 네이티브 알림으로 발화) ---
+  // --- notifications (personal notification feed — bell inbox; self-scoped like connections/runners, no role gate.
+  //     docs/architecture/notifications.md — the web consumes it by polling, new items fire as browser/desktop native notifications) ---
   app.get("/notifications", async (req, reply) => {
     if (!deps.notificationService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "notification 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "notification service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const q = req.query as { unread?: string; limit?: string };
     const limit = q.limit !== undefined ? Number(q.limit) : Number.NaN;
     try {
-      // 개인 소유 — 본인(subject)+활성 워크스페이스의 피드만.
+      // Personal-owned — only the feed for the subject + active workspace.
       const notifications = await deps.notificationService.listFeed(principal.subject, principal.workspace, {
         ...(q.unread === "1" || q.unread === "true" ? { unreadOnly: true } : {}),
         ...(Number.isInteger(limit) && limit > 0 ? { limit: Math.min(limit, 200) } : {}),
@@ -2106,10 +2171,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 읽음 처리 — {ids:[…]} 또는 {all:true}. 처리 건수 반환(멱등 — 이미 읽은 건 건드리지 않음).
+  // Mark read — {ids:[…]} or {all:true}. Returns the count processed (idempotent — already-read items are left alone).
   app.post("/notifications/read", async (req, reply) => {
     if (!deps.notificationService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "notification 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "notification service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = ReadNotificationsBodySchema.safeParse(req.body ?? {});
@@ -2126,14 +2191,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- comments (리소스 댓글 — 데이터셋 등의 협업 논의; 조회=viewer+, 작성=member+, 삭제=작성자-or-admin) ---
+  // --- comments (resource comments — collaborative discussion on datasets, etc.; read = viewer+, write = member+, delete = author-or-admin) ---
   app.get("/comments", async (req, reply) => {
-    if (!deps.commentService) return reply.code(404).send({ code: "NOT_FOUND", message: "comment 서비스 미설정" });
+    if (!deps.commentService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const q = req.query as { resourceType?: string; resourceId?: string };
     if (!q.resourceType || !q.resourceId)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "resourceType 과 resourceId 가 필요합니다." });
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "resourceType and resourceId are required." });
     try {
       gate(principal, "comments:read");
       const comments = await deps.commentService.list(principal.workspace, q.resourceType, q.resourceId);
@@ -2144,7 +2210,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.post("/comments", async (req, reply) => {
-    if (!deps.commentService) return reply.code(404).send({ code: "NOT_FOUND", message: "comment 서비스 미설정" });
+    if (!deps.commentService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = CreateCommentBodySchema.safeParse(req.body);
@@ -2167,11 +2234,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.delete<{ Params: { id: string } }>("/comments/:id", async (req, reply) => {
-    if (!deps.commentService) return reply.code(404).send({ code: "NOT_FOUND", message: "comment 서비스 미설정" });
+    if (!deps.commentService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "comment service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      // 작성자-or-admin 은 서비스가 판정(라우트는 인증만) — datasets:delete 와 동일한 창작자 override 패턴.
+      // Author-or-admin is decided by the service (the route only authenticates) — the same creator-override pattern as datasets:delete.
       await deps.commentService.delete({
         tenant: principal.workspace,
         id: req.params.id,
@@ -2184,10 +2252,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 워크스페이스 러너 로스터 — 이 워크스페이스에서 페어링된 러너(메타만, 토큰 없음). 읽기 전용(members:read).
-  // 페어/해제 관리는 개인 소유라 account 페이지(GET /runners)에서; 여기는 워크스페이스가 멤버 러너를 한눈에 보는 뷰.
+  // Workspace runner roster — runners paired in this workspace (metadata only, no tokens). Read-only (members:read).
+  // Pair/revoke management is personal-owned, done on the account page (GET /runners); this is the workspace's at-a-glance view of member runners.
   app.get("/workspace/runners", async (req, reply) => {
-    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    if (!deps.runnerService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2198,16 +2267,17 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 워크스페이스-공유 러너 등록(팀 자원) — admin 이 owner="ws:<workspace>" 로 페어링. 개인 러너(POST /runners,
-  // self-scoped)와 달리 이 워크스페이스 멤버 누구나 self:ws:<id> 로 타깃한다(팀 빌드서버/CI 러너). 평문 토큰은 한 번만.
+  // Register a workspace-shared runner (team resource) — an admin pairs it with owner="ws:<workspace>". Unlike a personal runner (POST /runners,
+  // self-scoped), any member of this workspace can target it via self:ws:<id> (a team build server/CI runner). Plaintext token only once.
   app.post("/workspace/runners", async (req, reply) => {
-    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    if (!deps.runnerService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = PairRunnerBodySchema.safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
-      gate(principal, "settings:write"); // 팀 자원 등록 = admin
+      gate(principal, "settings:write"); // registering a team resource = admin
       const paired = await deps.runnerService.pairWorkspace({
         workspace: principal.workspace,
         label: body.data.label,
@@ -2220,9 +2290,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 워크스페이스-공유 러너 목록(owner=ws:<workspace> 만 — 로스터[GET /workspace/runners]는 개인 러너 포함, 이건 팀 소유만).
+  // List workspace-shared runners (owner=ws:<workspace> only — the roster [GET /workspace/runners] includes personal runners, this is team-owned only).
   app.get("/workspace/runners/owned", async (req, reply) => {
-    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    if (!deps.runnerService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2233,9 +2304,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 워크스페이스-공유 러너 해제 — admin 만(owner=ws:<workspace> 스코프; 개인 러너는 건드리지 못한다).
+  // Revoke a workspace-shared runner — admin only (owner=ws:<workspace> scope; can't touch personal runners).
   app.delete<{ Params: { id: string } }>("/workspace/runners/:id", async (req, reply) => {
-    if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
+    if (!deps.runnerService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2247,9 +2319,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- workspace settings (계측 정책 등; admin 전용) ---
+  // --- workspace settings (metering policy, etc.; admin only) ---
   app.get("/workspace/settings", async (req, reply) => {
-    if (!deps.settingsStore) return reply.code(404).send({ code: "NOT_FOUND", message: "설정 저장소 미설정" });
+    if (!deps.settingsStore)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "settings store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2261,43 +2334,46 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.put("/workspace/settings", async (req, reply) => {
-    if (!deps.settingsStore) return reply.code(404).send({ code: "NOT_FOUND", message: "설정 저장소 미설정" });
+    if (!deps.settingsStore)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "settings store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = WorkspaceSettingsBodySchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       gate(principal, "settings:write");
-      // notify 대상은 개인 소유 연결을 가리키므로, 설정한 사람(subject)을 ownerSubject 로 서버에서 박는다(클라이언트가 못 보냄 → 스푸핑 방지).
+      // The notify target points at a personal-owned connection, so the server stamps the setter (subject) as ownerSubject (the client can't send it → anti-spoofing).
       const patch = body.data.notify
         ? { ...body.data, notify: { ...body.data.notify, ownerSubject: principal.subject } }
         : body.data;
-      return reply.send(await deps.settingsStore.set(principal.workspace, patch)); // 병합된 설정 반환
+      return reply.send(await deps.settingsStore.set(principal.workspace, patch)); // return the merged settings
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // --- 워크스페이스 소유 GitHub App 통합(개인 연결 대체) — 조직 설치→선택 repo→워크스페이스 소유 installation ---
-  // 읽기 settings:read / 설치·등록·해제 settings:write. 콜백은 GitHub 이 부르는 공개 라우트(인증 없음, state 로 검증).
+  // --- workspace-owned GitHub App integration (replaces personal connections) — org install→selected repos→workspace-owned installation ---
+  // Read settings:read / install·register·unlink settings:write. The callback is a public route GitHub calls (no auth, verified via state).
   app.get("/workspace/github-app", async (req, reply) => {
-    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    if (!deps.githubAppService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
       gate(principal, "settings:read");
-      // 설치 현황 + 각 설치의 허용 저장소(soft-fail) — 설정 화면이 "설치됨 + 무엇이 허용됐나"를 보여준다.
+      // Install status + each installation's allowed repos (soft-fail) — the settings screen shows "installed + what's allowed".
       const view = await deps.githubAppService.viewWithRepos(principal.workspace);
-      const callbackUrl = deps.githubAppService.callbackUrl(baseUrl(req)); // App Setup URL 로 등록할 값(표시용)
+      const callbackUrl = deps.githubAppService.callbackUrl(baseUrl(req)); // the value to register as the App Setup URL (for display)
       return reply.send({ ...view, ...(callbackUrl !== undefined ? { callbackUrl } : {}) });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // repo picker — 워크스페이스 App installation 이 접근 가능한 레포 목록(설치 시 고른 것만). CI repo link 연결 UX 용. settings:read.
+  // repo picker — the repos the workspace App installation can access (only those chosen at install). For the CI repo-link UX. settings:read.
   app.get("/workspace/github-app/repos", async (req, reply) => {
-    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    if (!deps.githubAppService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2309,7 +2385,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.post("/workspace/github-app/install/start", async (req, reply) => {
-    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    if (!deps.githubAppService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z.object({ host: z.string().url().optional() }).safeParse(req.body ?? {});
@@ -2327,9 +2404,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 공개 콜백 — GitHub App 설치 후 Setup URL 로 리다이렉트(installation_id + setup_action + state).
+  // Public callback — GitHub redirects to the Setup URL after App install (installation_id + setup_action + state).
   app.get("/workspace/github-app/callback", async (req, reply) => {
-    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    if (!deps.githubAppService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const q = z
       .object({ installation_id: z.coerce.number().int().optional(), state: z.string().optional() })
       .parse(req.query ?? {});
@@ -2341,7 +2419,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.post("/workspace/github-app/registrations", async (req, reply) => {
-    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    if (!deps.githubAppService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
@@ -2362,7 +2441,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.delete("/workspace/github-app/registrations", async (req, reply) => {
-    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    if (!deps.githubAppService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const q = z.object({ host: z.string().url() }).safeParse(req.query ?? {});
@@ -2376,12 +2456,12 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.delete<{ Params: { id: string } }>("/workspace/github-app/installations/:id", async (req, reply) => {
-    if (!deps.githubAppService) return reply.code(404).send({ code: "NOT_FOUND", message: "github app 서비스 미설정" });
+    if (!deps.githubAppService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "github app service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const id = z.coerce.number().int().safeParse(req.params.id);
-    if (!id.success)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "installation id 가 숫자가 아닙니다" });
+    if (!id.success) return reply.code(400).send({ code: "BAD_REQUEST", message: "installation id is not a number" });
     try {
       gate(principal, "settings:write");
       return reply.send(await deps.githubAppService.unlinkInstallation(principal.workspace, id.data));
@@ -2390,11 +2470,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 워크스페이스 소유 Mattermost 통합(개인 연결 알림 대체) — 완료/회귀 알림을 bot 토큰으로 채널에 게시 ---
-  // 조회 settings:read / 등록·해제 settings:write. bot 토큰 값은 SecretStore 에만(여기선 이름 참조만).
+  // --- workspace-owned Mattermost integration (replaces personal-connection notifications) — post completion/regression notifications to a channel via a bot token ---
+  // Read settings:read / register·unregister settings:write. The bot token value lives only in the SecretStore (here it's a name reference only).
   app.get("/workspace/mattermost", async (req, reply) => {
     if (!deps.mattermostService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2408,7 +2488,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.put("/workspace/mattermost", async (req, reply) => {
     if (!deps.mattermostService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
@@ -2416,7 +2496,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         host: z.string().url(),
         botTokenSecretName: z.string().min(1),
         defaultChannelId: z.string().min(1).optional(),
-        commandTokenSecretName: z.string().min(1).optional(), // 인바운드(슬래시커맨드/버튼) 검증 토큰의 SecretStore 이름
+        commandTokenSecretName: z.string().min(1).optional(), // SecretStore name of the inbound (slash command/button) verification token
       })
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
@@ -2438,7 +2518,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.delete("/workspace/mattermost", async (req, reply) => {
     if (!deps.mattermostService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2450,13 +2530,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 워크스페이스 트레이스 싱크(복수) — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow 등)에 적재 ---
-  // 여러 싱크를 이름으로 등록하고 '하니스별로' 선택한다(선택 없는 하니스는 적재 안 함 — 옵트인).
-  // 조회 harnesses:read(viewer+ — 하니스 상세의 싱크 표시용, 뷰는 이름 참조/URL 만) / 등록·해제 settings:write /
-  // 하니스별 선택 harnesses:register(member+ — 하니스 구성의 일부). 설계: docs/architecture/trace-sink.md
+  // --- workspace trace sinks (multiple) — export judged scorecard detail to the team observability platform (MLflow, etc.) ---
+  // Register multiple sinks by name and select them per-harness (a harness with no selection isn't exported — opt-in).
+  // Read harnesses:read (viewer+ — to show the sink on the harness detail, the view is a name reference/URL only) / register·unregister settings:write /
+  // per-harness selection harnesses:register (member+ — part of the harness config). Design: docs/architecture/trace-sink.md
   app.get("/workspace/trace-sinks", async (req, reply) => {
     if (!deps.traceSinkService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2469,7 +2549,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.put("/workspace/trace-sinks", async (req, reply) => {
     if (!deps.traceSinkService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
@@ -2494,7 +2574,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.delete("/workspace/trace-sinks/:name", async (req, reply) => {
     if (!deps.traceSinkService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const { name } = req.params as { name: string };
@@ -2507,10 +2587,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 하니스별 싱크 선택 — 그 하니스의 스코어카드 완료 시 어느 싱크로 적재할지. sink:null = 선택 해제(적재 끔).
+  // Per-harness sink selection — which sink to export to when that harness's scorecard completes. sink:null = deselect (export off).
   app.put("/harnesses/:id/trace-sink", async (req, reply) => {
     if (!deps.traceSinkService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "트레이스 싱크 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "trace sink service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const { id } = req.params as { id: string };
@@ -2525,13 +2605,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + everdict image push 발행 대상 ---
-  // 여러 개를 이름으로 등록하고 push 시 선택한다(분류/pull 인증은 전체 host 매칭). 조회 harnesses:read(viewer+ —
-  // 분류 배지는 하니스 읽기 관심사, 뷰는 이름 참조/좌표만) / 등록·해제 settings:write / push 자격증명
-  // images:push(member+ — 값 유출을 별도 액션으로 명명). 설계: docs/architecture/workspace-image-registry.md
+  // --- workspace image registries (BYO, multiple) — the harness image-classification baseline + the target for everdict image push ---
+  // Register multiple by name and select one at push time (classification/pull-auth match across all hosts). Read harnesses:read (viewer+ —
+  // the classification badge is a harness-read concern, the view is a name reference/coordinates only) / register·unregister settings:write / push credentials
+  // images:push (member+ — value disclosure named as its own action). Design: docs/architecture/workspace-image-registry.md
   app.get("/workspace/image-registries", async (req, reply) => {
     if (!deps.imageRegistryService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2544,13 +2624,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.put("/workspace/image-registries", async (req, reply) => {
     if (!deps.imageRegistryService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
       .object({
-        name: z.string().min(1), // 레지스트리 이름(참조 키)
-        host: z.string().min(1), // 레지스트리 host[:port] — URL 아님(스킴 없음)
+        name: z.string().min(1), // registry name (reference key)
+        host: z.string().min(1), // registry host[:port] — not a URL (no scheme)
         namespace: z.string().min(1).optional(),
         username: z.string().min(1).optional(),
         pullSecretName: z.string().min(1).optional(),
@@ -2569,7 +2649,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
 
   app.delete("/workspace/image-registries/:name", async (req, reply) => {
     if (!deps.imageRegistryService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const { name } = req.params as { name: string };
@@ -2582,11 +2662,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // push 자격증명 발급 — pushSecretName 의 '값'이 응답으로 나간다(비영속, 호출자가 docker login+push 후 폐기).
-  // ?name= 으로 레지스트리 선택 — 생략은 정확히 1개일 때만(복수인데 생략이면 400, 이름 나열).
+  // Mint push credentials — the 'value' of pushSecretName goes out in the response (non-persistent, the caller discards it after docker login+push).
+  // Select the registry via ?name= — omitting it is allowed only when there's exactly one (omitting it with multiple → 400, listing the names).
   app.post<{ Querystring: { name?: string } }>("/workspace/image-registries/push-credentials", async (req, reply) => {
     if (!deps.imageRegistryService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "이미지 레지스트리 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "image registry service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2598,13 +2678,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- Mattermost 인바운드(슬래시커맨드 + 인터랙티브 버튼) — 공개 라우트. 워크스페이스=?ws=, 진위=commandToken 상수시간 검증(fail-closed) ---
-  // MM 이 직접 호출(사용자 세션 아님). 검증 실패는 ForbiddenError→403. 슬래시커맨드는 form-urlencoded, 버튼 액션은 JSON.
+  // --- Mattermost inbound (slash commands + interactive buttons) — public route. Workspace = ?ws=, authenticity = constant-time commandToken check (fail-closed) ---
+  // MM calls this directly (not a user session). Verification failure is ForbiddenError→403. Slash commands are form-urlencoded, button actions are JSON.
   app.post<{ Querystring: { ws?: string } }>("/integrations/mattermost/command", async (req, reply) => {
     if (!deps.mattermostCommandService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 인바운드 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost inbound not configured" });
     const ws = req.query.ws;
-    if (!ws) return reply.code(400).send({ code: "BAD_REQUEST", message: "ws query 가 필요합니다" });
+    if (!ws) return reply.code(400).send({ code: "BAD_REQUEST", message: "ws query is required" });
     const body = z
       .object({ token: z.string().optional(), text: z.string().optional(), user_name: z.string().optional() })
       .safeParse(req.body ?? {});
@@ -2615,18 +2695,18 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ...(body.data.text !== undefined ? { text: body.data.text } : {}),
         ...(body.data.user_name !== undefined ? { userName: body.data.user_name } : {}),
       });
-      return reply.send(out); // Mattermost 가 렌더하는 { response_type, text }
+      return reply.send(out); // { response_type, text } rendered by Mattermost
     } catch (err) {
-      return sendError(reply, err); // 검증 실패 → 403
+      return sendError(reply, err); // verification failure → 403
     }
   });
 
   app.post<{ Querystring: { ws?: string } }>("/integrations/mattermost/action", async (req, reply) => {
     if (!deps.mattermostCommandService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost 인바운드 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "mattermost inbound not configured" });
     const ws = req.query.ws;
-    if (!ws) return reply.code(400).send({ code: "BAD_REQUEST", message: "ws query 가 필요합니다" });
-    // MM 인터랙티브 액션은 우리가 심은 context 를 그대로 돌려준다(token/action/dataset/harness). 검증 토큰은 context.token.
+    if (!ws) return reply.code(400).send({ code: "BAD_REQUEST", message: "ws query is required" });
+    // An MM interactive action echoes back the context we embedded (token/action/dataset/harness). The verification token is context.token.
     const body = z
       .object({
         context: z
@@ -2658,10 +2738,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- CI repo links (repository ↔ 하니스 슬롯 매핑 = GitHub Actions OIDC trust policy) ---
-  // 읽기는 harnesses:read(하니스 상세에 노출되는 양성 메타), 생성/삭제는 settings:write(link=신뢰 부여 — admin).
+  // --- CI repo links (repository ↔ harness slot mapping = GitHub Actions OIDC trust policy) ---
+  // Read is harnesses:read (benign metadata exposed on the harness detail), create/delete is settings:write (link = granting trust — admin).
   app.get("/workspace/ci/links", async (req, reply) => {
-    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    if (!deps.ciLinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2673,26 +2754,28 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.put("/workspace/ci/links", async (req, reply) => {
-    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    if (!deps.ciLinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = UpsertCiLinkBodySchema.safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
     try {
-      gate(principal, "settings:write"); // link 존재 = 그 레포 OIDC 토큰 신뢰(trust grant) → admin
+      gate(principal, "settings:write"); // a link's existence = trusting that repo's OIDC token (trust grant) → admin
       return reply.send({ links: await deps.ciLinkService.upsert(principal.workspace, principal.subject, body.data) });
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
-  // repository 는 "owner/name"(슬래시 포함) — 경로 파라미터 대신 쿼리로 받는다. host 미지정 = github.com link.
+  // repository is "owner/name" (contains a slash) — taken as a query rather than a path parameter. host unset = github.com link.
   app.delete<{ Querystring: { repository?: string; host?: string } }>("/workspace/ci/links", async (req, reply) => {
-    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    if (!deps.ciLinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     if (!req.query.repository)
-      return reply.code(400).send({ code: "BAD_REQUEST", message: "repository 쿼리 파라미터가 필요합니다." });
+      return reply.code(400).send({ code: "BAD_REQUEST", message: "repository query parameter is required." });
     try {
       gate(principal, "settings:write");
       return reply.send({
@@ -2703,10 +2786,11 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // setup-PR — link 의 워크플로 YAML 을 합성해 대상 레포에 브랜치+커밋+PR(워크스페이스 GitHub App 토큰).
-  // link 가 이미 신뢰를 부여했으므로 여기는 harnesses:read (PR 은 GitHub 쪽에서 머지 승인 필요 — 실행 권한 아님).
+  // setup-PR — synthesize the link's workflow YAML and open a branch+commit+PR on the target repo (workspace GitHub App token).
+  // Since the link already granted trust, this is harnesses:read (the PR still needs merge approval on GitHub — not a run permission).
   app.post("/workspace/ci/links/setup-pr", async (req, reply) => {
-    if (!deps.ciLinkService) return reply.code(404).send({ code: "NOT_FOUND", message: "ci link 서비스 미설정" });
+    if (!deps.ciLinkService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
@@ -2722,24 +2806,24 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         }),
       );
     } catch (err) {
-      return sendError(reply, err); // link 없음 404 / 공유 러너 0대 400(D6 fail-closed) / App 미설치 404 / GitHub 실패 502
+      return sendError(reply, err); // missing link 404 / zero shared runners 400 (D6 fail-closed) / App not installed 404 / GitHub failure 502
     }
   });
 
-  // GitHub Actions 러너 자가등록 — 한 번의 admin 액션으로 빌드 서버에 GitHub 러너 + Everdict 워크스페이스-공유 러너를
-  // 함께 세우는 설치 스크립트를 생성(설계 doc §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 1회) + 워크스페이스 GitHub App
-  // 으로 등록 토큰 mint. settings:write(팀 자원 + repo 신뢰 조작이므로 admin). 응답의 토큰들은 저장하지 않는다.
+  // GitHub Actions runner self-registration — in one admin action, generate an install script that stands up both a GitHub runner and an
+  // Everdict workspace-shared runner on the build server (design doc §4). Newly pairs a workspace-shared runner (rnr_ once) + mints a registration
+  // token via the workspace GitHub App. settings:write (admin, since it touches a team resource + repo trust). The tokens in the response are not stored.
   app.post("/workspace/runners/github-install", async (req, reply) => {
     if (!deps.runnerService || !deps.ciLinkService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "runner/ci link 서비스 미설정" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "runner/ci link service not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
       .object({
-        repository: z.string().min(1).optional(), // repo 레벨 대상 "owner/name"
-        org: z.string().min(1).optional(), // org 레벨 대상. repository 와 정확히 하나. App 이 그 org/repo 에 설치돼 있어야 함.
-        host: z.string().url().optional(), // GHE 베이스 URL — 미지정 = github.com 우선. 그 호스트의 installation 으로 mint.
-        runnerGroup: z.string().min(1).optional(), // org 러너 그룹(org 레벨 전용, 선택)
+        repository: z.string().min(1).optional(), // repo-level target "owner/name"
+        org: z.string().min(1).optional(), // org-level target. Exactly one of this and repository. The App must be installed on that org/repo.
+        host: z.string().url().optional(), // GHE base URL — unset = prefer github.com. Mint via that host's installation.
+        runnerGroup: z.string().min(1).optional(), // org runner group (org-level only, optional)
         label: z.string().min(1).max(80).optional(),
         githubLabels: z.array(z.string().min(1)).optional(),
         capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
@@ -2766,13 +2850,14 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
         ),
       );
     } catch (err) {
-      return sendError(reply, err); // App 미설치 404 / repo·org 형식 400 / GitHub 실패 502
+      return sendError(reply, err); // App not installed 404 / repo·org format 400 / GitHub failure 502
     }
   });
 
-  // --- workspace 메타(이름/로고/소유자) — 단수 /workspace = 활성 워크스페이스 레코드(복수 /workspaces 와 구분) ---
+  // --- workspace metadata (name/logo/owner) — singular /workspace = the active workspace record (distinct from plural /workspaces) ---
   app.get("/workspace", async (req, reply) => {
-    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    if (!deps.workspaceService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2784,7 +2869,8 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   });
 
   app.patch("/workspace", async (req, reply) => {
-    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    if (!deps.workspaceService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z.object({ name: z.string().optional(), logoUrl: z.string().optional() }).safeParse(req.body);
@@ -2797,9 +2883,10 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 삭제는 owner(생성자)만 — 역할 게이트 없음. 서비스가 principal.subject 와 레코드 owner 를 비교해 ForbiddenError(403).
+  // Delete is owner (creator) only — no role gate. The service compares principal.subject to the record owner and throws ForbiddenError (403).
   app.delete("/workspace", async (req, reply) => {
-    if (!deps.workspaceService) return reply.code(404).send({ code: "NOT_FOUND", message: "workspace 저장소 미설정" });
+    if (!deps.workspaceService)
+      return reply.code(404).send({ code: "NOT_FOUND", message: "workspace store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
@@ -2810,44 +2897,44 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- internal: 키 발급 (x-internal-token 가드, 미설정 시 fail-closed) ---
+  // --- internal: key issuance (x-internal-token guard, fail-closed if unset) ---
   app.post("/internal/tenant-keys", async (req, reply) => {
     if (!deps.internalToken || !deps.keyStore)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "internal 비활성" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
     const provided = req.headers["x-internal-token"];
     if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token 불일치" });
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
     const body = z.object({ workspace: z.string().min(1) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     const apiKey = await issueKey(deps.keyStore, body.data.workspace);
-    return reply.code(201).send({ workspace: body.data.workspace, apiKey }); // 평문은 여기서 한 번만
+    return reply.code(201).send({ workspace: body.data.workspace, apiKey }); // the plaintext is returned only once here
   });
 
-  // --- internal: 예약 발사(Temporal 워크플로가 호출, x-internal-token 가드) ---
-  // 워커는 ScorecardService 를 들고 있지 않으므로, 스케줄 발사는 워크플로→액티비티→이 라우트→ScheduleService.fire.
-  // tenant 는 스케줄 생성 시 워크플로 인자로 박혀 신뢰된 본문으로 들어온다(internal 토큰으로 이미 신뢰).
+  // --- internal: schedule fire (called by the Temporal workflow, x-internal-token guard) ---
+  // The worker doesn't hold a ScorecardService, so a schedule fire goes workflow→activity→this route→ScheduleService.fire.
+  // tenant is baked in as a workflow argument at schedule creation and arrives in a trusted body (already trusted via the internal token).
   app.post<{ Params: { id: string } }>("/internal/schedules/:id/fire", async (req, reply) => {
     if (!deps.internalToken || !deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "internal 비활성" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
     const provided = req.headers["x-internal-token"];
     if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token 불일치" });
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
     const body = z.object({ tenant: z.string().min(1) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       return reply.send(await deps.scheduleService.fire(body.data.tenant, req.params.id)); // { scorecardId, previousScorecardId? }
     } catch (err) {
-      return sendError(reply, err); // 없는 스케줄 404, 발사기 미설정 400
+      return sendError(reply, err); // missing schedule 404, firer not configured 400
     }
   });
 
-  // 발사 종료 처리 — 워크플로가 poll-to-terminal 후 호출. 최종 status 기록 + 직전 run 대비 회귀 알림.
+  // Fire finalization — the workflow calls this after poll-to-terminal. Records the final status + a regression notification vs the previous run.
   app.post<{ Params: { id: string } }>("/internal/schedules/:id/finalize", async (req, reply) => {
     if (!deps.internalToken || !deps.scheduleService)
-      return reply.code(404).send({ code: "NOT_FOUND", message: "internal 비활성" });
+      return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
     const provided = req.headers["x-internal-token"];
     if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token 불일치" });
+      return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
     const body = z
       .object({ tenant: z.string().min(1), scorecardId: z.string().min(1), previousScorecardId: z.string().optional() })
       .safeParse(req.body);
@@ -2861,39 +2948,39 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       );
       return reply.send({ ok: true });
     } catch (err) {
-      return sendError(reply, err); // 없는 스케줄 404
+      return sendError(reply, err); // missing schedule 404
     }
   });
 
-  // 발사한 스코어카드 status(워크플로 poll-to-terminal). 내부 전용.
+  // Status of the fired scorecard (workflow poll-to-terminal). Internal only.
   app.get<{ Params: { scorecardId: string } }>(
     "/internal/schedules/scorecard-status/:scorecardId",
     async (req, reply) => {
       if (!deps.internalToken || !deps.scheduleService)
-        return reply.code(404).send({ code: "NOT_FOUND", message: "internal 비활성" });
+        return reply.code(404).send({ code: "NOT_FOUND", message: "internal endpoints disabled" });
       const provided = req.headers["x-internal-token"];
       if (typeof provided !== "string" || !constantTimeEq(provided, deps.internalToken))
-        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token 불일치" });
+        return reply.code(403).send({ code: "FORBIDDEN", message: "internal token mismatch" });
       const status = await deps.scheduleService.scorecardStatus(req.params.scorecardId);
       return reply.send({ status: status ?? null });
     },
   );
 
-  // --- 개인 API 키 self-serve (역할 게이트 없음 — 개인 소유. 키는 발급자의 신원·권한으로 동작한다) ---
-  // 연결(connections)·개인 시크릿과 같은 self-scoped: 각 유저가 본인(subject) 키만 보고/발급/취소한다.
+  // --- personal API key self-serve (no role gate — personal-owned. A key acts with the issuer's identity·permissions) ---
+  // Self-scoped like connections·personal secrets: each user sees/issues/revokes only their own (subject) keys.
   app.get("/keys", async (req, reply) => {
-    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });
+    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "key store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      return reply.send(await deps.keyStore.list(principal.workspace, principal.subject)); // 내 키 메타만(평문/해시 없음)
+      return reply.send(await deps.keyStore.list(principal.workspace, principal.subject)); // only my key metadata (no plaintext/hash)
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   app.post("/keys", async (req, reply) => {
-    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });
+    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "key store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
@@ -2901,22 +2988,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
-      // scope 미지정=발급자 역할 그대로(Full Access within role). 지정하면 그 범위로 더 좁힌다(역할을 넘지 못함).
+      // scope unset = the issuer's role as-is (Full Access within role). If specified, narrow to that scope (never exceeds the role).
       const scopes = body.data.scopes ?? ["admin"];
-      // owner=발급자 subject → 이 키는 발급자 권한으로 동작(멤버 키=멤버 권한).
+      // owner = the issuer subject → this key acts with the issuer's permissions (a member key = member perms).
       const apiKey = await issueKey(deps.keyStore, principal.workspace, body.data.label, scopes, principal.subject);
-      return reply.code(201).send({ apiKey }); // 평문은 여기서 한 번만
+      return reply.code(201).send({ apiKey }); // the plaintext is returned only once here
     } catch (err) {
       return sendError(reply, err);
     }
   });
 
   app.delete<{ Params: { id: string } }>("/keys/:id", async (req, reply) => {
-    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "키 저장소 미설정" });
+    if (!deps.keyStore) return reply.code(404).send({ code: "NOT_FOUND", message: "key store not configured" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     try {
-      // 내(subject) 키만 취소 — 남의 키/머신 키(owner="")는 no-op(항상 204, 존재 누출 없음).
+      // Revoke only my (subject) keys — someone else's key / a machine key (owner="") is a no-op (always 204, no existence leak).
       await deps.keyStore.revoke(principal.workspace, req.params.id, principal.subject);
       return reply.code(204).send();
     } catch (err) {
@@ -2924,15 +3011,15 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- MCP (에이전트용 표면, OAuth 보호) ---
-  // OAuth Protected Resource Metadata (RFC 9728) — 인증 불필요(디스커버리). path-suffix 변형도 동일.
+  // --- MCP (agent-facing surface, OAuth-protected) ---
+  // OAuth Protected Resource Metadata (RFC 9728) — no auth required (discovery). The path-suffix variant is the same.
   const metaHandler = async (req: FastifyRequest, reply: FastifyReply) =>
     reply.send(protectedResourceMetadata(req, deps));
   app.get("/.well-known/oauth-protected-resource", metaHandler);
   app.get("/.well-known/oauth-protected-resource/mcp", metaHandler);
 
-  // Streamable HTTP MCP 엔드포인트(stateful 세션). 모든 메서드는 유효한 Bearer 필요(없으면 401 로그인 챌린지).
-  // initialize 시 Principal 에 묶인 서버 + 세션 생성, 이후 요청은 mcp-session-id 로 그 세션에 라우팅.
+  // Streamable HTTP MCP endpoint (stateful session). Every method needs a valid Bearer (none → 401 login challenge).
+  // On initialize, create a server bound to the Principal + a session; subsequent requests route to that session by mcp-session-id.
   const sessions = new Map<string, StreamableHTTPServerTransport>();
   app.post("/mcp", async (req, reply) => {
     const principal = await resolveBearerPrincipal(req, deps);
@@ -2943,7 +3030,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       if (sid || !isInitializeRequest(req.body))
         return reply
           .code(400)
-          .send({ code: "BAD_REQUEST", message: "initialize 요청 또는 유효한 mcp-session-id 필요." });
+          .send({ code: "BAD_REQUEST", message: "initialize request or a valid mcp-session-id is required." });
       transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         onsessioninitialized: (id) => {
@@ -2984,22 +3071,22 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           membershipService: deps.membershipService,
           profileService: deps.profileService,
           keyStore: deps.keyStore,
-          apiPublicUrl: baseUrl(req), // github_install_workspace_runner 의 everdict runner --api-url
+          apiPublicUrl: baseUrl(req), // the everdict runner --api-url for github_install_workspace_runner
         },
         principal,
       ).connect(transport);
     }
-    reply.hijack(); // 트랜스포트가 raw 응답을 직접 소유한다.
+    reply.hijack(); // the transport owns the raw response directly.
     await transport.handleRequest(req.raw, reply.raw, req.body);
   });
 
-  // GET(SSE 알림 스트림) / DELETE(세션 종료) — 기존 세션으로 라우팅.
+  // GET (SSE notification stream) / DELETE (end session) — routed to the existing session.
   const bySession = async (req: FastifyRequest, reply: FastifyReply) => {
     const principal = await resolveBearerPrincipal(req, deps);
     if (!principal) return mcpChallenge(req, reply);
     const sid = req.headers["mcp-session-id"] as string | undefined;
     const transport = sid ? sessions.get(sid) : undefined;
-    if (!transport) return reply.code(400).send({ code: "BAD_REQUEST", message: "알 수 없는 mcp-session-id." });
+    if (!transport) return reply.code(400).send({ code: "BAD_REQUEST", message: "unknown mcp-session-id." });
     reply.hijack();
     await transport.handleRequest(req.raw, reply.raw);
   };
@@ -3009,13 +3096,13 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
   return app;
 }
 
-// authorize 래퍼 — ForbiddenError 를 그대로 던져 sendError 가 403 으로 매핑.
+// authorize wrapper — throws ForbiddenError as-is so sendError maps it to 403.
 function gate(principal: Principal, action: Action): void {
   authorize(principal, action);
 }
 
-// 등록 직후 이미지 분류 경고 — resolve 된 스펙의 이미지들을 워크스페이스 레지스트리 기준으로 분류해
-// local/unqualified(pull 보장 없음)만 추린다. 경고 계산 실패는 등록을 막지 않는다(warn-not-block).
+// Image-classification warnings right after registration — classify the resolved spec's images against the workspace registries
+// and keep only local/unqualified (no pull guarantee). A failure to compute warnings does not block registration (warn-not-block).
 async function harnessImageWarnings(
   deps: ServerDeps,
   workspace: string,
@@ -3025,7 +3112,7 @@ async function harnessImageWarnings(
   if (!deps.harnessInstances) return [];
   try {
     const resolved = await deps.harnessInstances.get(workspace, id, version);
-    // 분류는 등록된 레지스트리 '전부'를 대상으로 — 어느 하나에 속하면 workspace 클래스.
+    // Classification runs against *all* registered registries — belonging to any one makes it the workspace class.
     const coords = await deps.imageRegistryService?.coordinates(workspace);
     return imageWarnings(collectHarnessImages(resolved), coords);
   } catch {

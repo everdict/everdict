@@ -6,17 +6,17 @@ import {
   type PromptSnapshot,
 } from "@everdict/core";
 
-// 환경 없는 QA(프롬프트→답). 무대가 없어 seed/snapshot 은 no-op 에 가깝다 — 채점은 trace 의 답을 본다(answer-match/judge).
-// gsm8k/GAIA 류를 repo/browser 로 우회하지 않고 1급으로 표현. (에이전트가 task 를 받아 답만 만든다.)
+// Environment-less QA (prompt→answer). With no stage, seed/snapshot are near no-ops — scoring looks at the answer in the trace (answer-match/judge).
+// Expresses gsm8k/GAIA-style as first-class rather than routing through repo/browser. (The agent takes the task and produces only an answer.)
 export class PromptEnvironment implements Environment<PromptSnapshot> {
   readonly kind = "prompt" as const;
 
   async seed(_compute: ComputeHandle, spec: EnvSpec): Promise<void> {
     if (spec.kind !== "prompt") throw new BadRequestError("BAD_REQUEST", { kind: spec.kind });
-    // 시드할 환경이 없다(프롬프트만). context 는 케이스 task 에 이미 반영되거나 하니스가 참고.
+    // There's no environment to seed (prompt only). Context is already reflected in the case task or referenced by the harness.
   }
 
   async snapshot(_compute: ComputeHandle): Promise<PromptSnapshot> {
-    return { kind: "prompt", output: "" }; // 결과 세계 없음 — 답은 trace 에.
+    return { kind: "prompt", output: "" }; // no result world — the answer is in the trace.
   }
 }

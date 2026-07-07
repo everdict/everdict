@@ -20,7 +20,7 @@ interface ScheduleRow {
 
 const iso = (v: string | Date): string => (typeof v === "string" ? v : v.toISOString());
 
-// row → ScheduleRecord. run_template 은 jsonb(pg 가 파싱); timestamptz 는 Date → ISO. 계약은 Zod 로 한 번 검증.
+// row → ScheduleRecord. run_template is jsonb (parsed by pg); timestamptz is Date → ISO. The contract is validated once with Zod.
 function rowToRecord(row: ScheduleRow): ScheduleRecord {
   return ScheduleRecordSchema.parse({
     id: row.id,
@@ -40,7 +40,7 @@ function rowToRecord(row: ScheduleRow): ScheduleRecord {
   });
 }
 
-// Postgres 기반 스케줄 스토어. 인메모리와 동일한 계약 — apps/api 는 둘을 교체만 한다(워크스페이스 스코프).
+// Postgres-backed schedule store. Same contract as in-memory — apps/api just swaps the two (workspace-scoped).
 export class PgScheduleStore implements ScheduleStore {
   constructor(private readonly client: SqlClient) {}
 
@@ -86,7 +86,7 @@ export class PgScheduleStore implements ScheduleStore {
   }
 
   async update(tenant: string, id: string, patch: Partial<ScheduleRecord>): Promise<ScheduleRecord | undefined> {
-    // 변경 가능한 필드만 갱신(id/tenant/createdBy/createdAt 는 불변).
+    // Update only mutable fields (id/tenant/createdBy/createdAt are immutable).
     const sets: string[] = [];
     const vals: unknown[] = [];
     let i = 1;

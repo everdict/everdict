@@ -14,7 +14,7 @@ const NOW = new Date("2026-07-05T00:00:00Z");
 
 afterEach(() => vi.unstubAllGlobals());
 
-// GET /app/installations/{id} 응답만 스텁(설치 account 확정).
+// Stub only the GET /app/installations/{id} response (confirm the install account).
 function stubInstallation(login: string): void {
   vi.stubGlobal(
     "fetch",
@@ -22,7 +22,7 @@ function stubInstallation(login: string): void {
   );
 }
 
-// installation 조회 + access token 발급을 URL 로 분기 스텁(tokenForRepo 용).
+// Branch by URL to stub installation lookup + access-token minting (for tokenForRepo).
 function stubGithub(login: string, token: string): void {
   vi.stubGlobal(
     "fetch",
@@ -35,7 +35,7 @@ function stubGithub(login: string, token: string): void {
   );
 }
 
-// App 능력용 종합 스텁 — access_tokens / installation 조회 / installation repos / 러너 등록토큰을 URL 로 분기.
+// Composite stub for App capabilities — branch by URL over access_tokens / installation lookup / installation repos / runner registration token.
 function stubApi(repos: string[], runnerTok = "RUNNERTOK"): void {
   vi.stubGlobal(
     "fetch",
@@ -83,20 +83,20 @@ describe("GithubAppService", () => {
     });
   });
 
-  it("github.com 설치 시작은 /apps/{slug}/installations/new URL + state 를 만든다", async () => {
+  it("starting a github.com install makes a /apps/{slug}/installations/new URL + state", async () => {
     const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u-admin" });
     const u = new URL(installUrl);
     expect(u.origin + u.pathname).toBe("https://github.com/apps/everdict-eval/installations/new");
     expect(u.searchParams.get("state")).toBeTruthy();
   });
 
-  it("등록 안 된 GHE host 로 설치 시작하면 BadRequestError", async () => {
+  it("starting an install for an unregistered GHE host → BadRequestError", async () => {
     await expect(
       svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io" }),
     ).rejects.toBeInstanceOf(BadRequestError);
   });
 
-  it("GHE App 등록 후 설치 시작은 {host}/github-apps/{slug}/installations/new URL", async () => {
+  it("after registering a GHE App, starting an install → {host}/github-apps/{slug}/installations/new URL", async () => {
     await svc.registerGheApp("acme", {
       host: "https://ghe.acme.io",
       slug: "everdict-ghe",
@@ -109,34 +109,34 @@ describe("GithubAppService", () => {
     );
   });
 
-  it("GHE host 는 정규화 동등성 — 트레일링 슬래시/대소문자만 다른 재등록은 upsert(중복 행 금지), 해제·설치 URL 도 동일 취급", async () => {
-    // Given: 트레일링 슬래시 붙은 host 로 등록.
+  it("GHE host uses normalized equality — a re-registration differing only in trailing slash/case is an upsert (no duplicate row), and unlink/install URLs treat it the same", async () => {
+    // Given: registered with a trailing-slash host.
     await svc.registerGheApp("acme", {
       host: "https://ghe.acme.io/",
       slug: "app-v1",
       appId: "111",
       privateKeySecretName: "k1",
     });
-    // When: 슬래시 없이 + 대문자 섞어 재등록 — 같은 서버다.
+    // When: re-registered without the slash + mixed case — it's the same server.
     await svc.registerGheApp("acme", {
       host: "https://GHE.Acme.io",
       slug: "app-v2",
       appId: "222",
       privateKeySecretName: "k2",
     });
-    // Then: 중복 행이 아니라 갱신 1건(수정 전엔 문자열 불일치로 2건이 됐다 — '미설치' 오인의 뿌리).
+    // Then: not a duplicate row but a single updated record (before the fix, a string mismatch made it 2 — the root of the 'not installed' misread).
     const view = await svc.list("acme");
     expect(view.registrations).toHaveLength(1);
     expect(view.registrations[0]?.slug).toBe("app-v2");
-    // 설치 URL 해석도 표기가 달라도 통과.
+    // Install URL resolution also passes despite the differing notation.
     const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io/" });
     expect(installUrl).toContain("/github-apps/app-v2/");
-    // 해제도 표기가 달라도 지워진다.
+    // Unlink also removes it despite the differing notation.
     await svc.removeRegistration("acme", "HTTPS://ghe.acme.io");
     expect((await svc.list("acme")).registrations).toEqual([]);
   });
 
-  it("콜백은 installation_id+state → account 확정 후 워크스페이스에 설치를 기록한다", async () => {
+  it("the callback: installation_id+state → confirm account, then record the install on the workspace", async () => {
     stubInstallation("acme-org");
     const future = new Date(NOW.getTime() + 60_000).toISOString();
     await states.put("st-1", { workspace: "acme", provider: "github-app", createdBy: "u-admin" }, future);
@@ -151,13 +151,13 @@ describe("GithubAppService", () => {
     ]);
   });
 
-  it("잘못된/만료 state 콜백은 에러 리다이렉트(설치 기록 안 함)", async () => {
+  it("a bad/expired state callback → error redirect (no install recorded)", async () => {
     const { redirectTo } = await svc.callback({ installationId: 42, state: "nope" });
     expect(redirectTo).toContain("error=invalid_state");
     expect((await svc.list("acme")).installations).toEqual([]);
   });
 
-  it("GHE 콜백은 SecretStore 의 App 개인키로 account 를 확정한다", async () => {
+  it("a GHE callback confirms the account with the App private key from SecretStore", async () => {
     stubInstallation("ghe-team");
     secrets.acme = { "ghe-app-key": privateKey };
     await svc.registerGheApp("acme", {
@@ -182,7 +182,7 @@ describe("GithubAppService", () => {
     });
   });
 
-  it("installation 링크 해제는 멱등하게 레코드를 지운다", async () => {
+  it("unlinking an installation removes the record idempotently", async () => {
     stubInstallation("acme-org");
     const future = new Date(NOW.getTime() + 60_000).toISOString();
     await states.put("st-2", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
@@ -190,32 +190,32 @@ describe("GithubAppService", () => {
 
     const after = await svc.unlinkInstallation("acme", 42);
     expect(after.installations).toEqual([]);
-    expect((await svc.unlinkInstallation("acme", 42)).installations).toEqual([]); // 멱등
+    expect((await svc.unlinkInstallation("acme", 42)).installations).toEqual([]); // idempotent
   });
 
-  it("tokenForRepo: git URL owner 가 워크스페이스 installation 과 매칭되면 그 repo 스코프 토큰을 발급한다", async () => {
+  it("tokenForRepo: when the git URL owner matches a workspace installation, mints a repo-scoped token", async () => {
     stubGithub("acme-org", "ghs_repo");
     const future = new Date(NOW.getTime() + 60_000).toISOString();
     await states.put("st-t", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
-    await svc.callback({ installationId: 42, state: "st-t" }); // account=acme-org 로 설치 기록
+    await svc.callback({ installationId: 42, state: "st-t" }); // records install with account=acme-org
 
     const tok = await svc.tokenForRepo("acme", "https://github.com/acme-org/api.git");
     expect(tok).toBe("ghs_repo");
   });
 
-  it("tokenForRepo: 매칭 installation 이 없으면 undefined(폴백은 호출부 몫)", async () => {
+  it("tokenForRepo: no matching installation → undefined (fallback is the caller's job)", async () => {
     stubGithub("acme-org", "ghs_repo");
     expect(await svc.tokenForRepo("acme", "https://github.com/other-org/api")).toBeUndefined();
   });
 
-  // App 능력(S6a) — 개인 연결 대체: picker / 쓰기 토큰 / 러너 등록 토큰.
+  // App capabilities (S6a) — replacing personal connections: picker / write token / runner registration token.
   async function installOrg(): Promise<void> {
     const future = new Date(NOW.getTime() + 60_000).toISOString();
     await states.put("st-x", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
-    await svc.callback({ installationId: 42, state: "st-x" }); // account=acme-org 설치
+    await svc.callback({ installationId: 42, state: "st-x" }); // install with account=acme-org
   }
 
-  it("listRepos 는 installation 이 접근 가능한 repo 를 정규화해 돌려준다(설치 시 고른 것만)", async () => {
+  it("listRepos normalizes and returns the repos the installation can access (only the ones chosen at install time)", async () => {
     stubApi(["acme-org/api", "acme-org/web"]);
     await installOrg();
     const repos = await svc.listRepos("acme");
@@ -223,7 +223,7 @@ describe("GithubAppService", () => {
     expect(repos[0]).toMatchObject({ private: true, defaultBranch: "main" });
   });
 
-  it("tokenForRepository 는 지정 권한으로 그 repo 의 installation 토큰을 발급한다", async () => {
+  it("tokenForRepository mints that repo's installation token with the specified permissions", async () => {
     stubApi([]);
     await installOrg();
     const out = await svc.tokenForRepository("acme", "acme-org/api", {
@@ -233,22 +233,22 @@ describe("GithubAppService", () => {
     expect(out.token).toBe("ghs_inst");
   });
 
-  it("tokenForRepository 는 매칭 installation 이 없으면 NotFound", async () => {
+  it("tokenForRepository → NotFound when there is no matching installation", async () => {
     stubApi([]);
     await installOrg();
     await expect(svc.tokenForRepository("acme", "other-org/api", {})).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("runnerRegistrationToken 는 App(administration)으로 러너 등록 토큰을 발급한다", async () => {
+  it("runnerRegistrationToken mints a runner registration token via the App (administration)", async () => {
     stubApi([]);
     await installOrg();
     const out = await svc.runnerRegistrationToken("acme", { org: "acme-org" });
     expect(out.token).toBe("RUNNERTOK");
   });
 
-  // GHE host 스레딩 — 같은 org 명이 github.com/GHE 양쪽에 있어도 host 로 정확한 installation 을 고른다.
-  describe("GHE host 스레딩", () => {
-    // stubApi + 호출 URL 기록(어느 호스트의 installation 으로 토큰을 발급했는지 관찰).
+  // GHE host threading — even if the same org name is on both github.com/GHE, picks the exact installation by host.
+  describe("GHE host threading", () => {
+    // stubApi + record the call URLs (observe which host's installation minted the token).
     function stubApiRecording(repos: string[]): string[] {
       const urls: string[] = [];
       vi.stubGlobal(
@@ -276,7 +276,7 @@ describe("GithubAppService", () => {
       return urls;
     }
 
-    // github.com(id 42) + GHE(id 7, 같은 account) 를 함께 설치 — 모호성 시나리오.
+    // Install both github.com (id 42) + GHE (id 7, same account) — the ambiguity scenario.
     async function installBothHosts(): Promise<void> {
       secrets.acme = { "ghe-app-key": privateKey };
       await svc.registerGheApp("acme", {
@@ -296,17 +296,17 @@ describe("GithubAppService", () => {
       await svc.callback({ installationId: 7, state: "st-ghe2" });
     }
 
-    it("listRepos 는 GHE installation 의 repo 에 host 를 실어준다(github.com 은 무표기)", async () => {
+    it("listRepos carries host on the GHE installation's repos (github.com is unmarked)", async () => {
       stubApiRecording([]);
       await installBothHosts();
       stubApiRecording(["acme-org/api"]);
       const repos = await svc.listRepos("acme");
-      expect(repos).toHaveLength(2); // 두 installation 각각에서 1건
+      expect(repos).toHaveLength(2); // one from each of the two installations
       expect(repos.find((r) => r.host === undefined)?.fullName).toBe("acme-org/api");
       expect(repos.find((r) => r.host === "https://ghe.acme.io")?.fullName).toBe("acme-org/api");
     });
 
-    it("tokenForRepository 는 host 로 installation 을 고른다 — GHE host 지정 시 GHE(id 7), 미지정 시 github.com(id 42)", async () => {
+    it("tokenForRepository picks the installation by host — GHE (id 7) when the GHE host is given, github.com (id 42) when absent", async () => {
       stubApiRecording([]);
       await installBothHosts();
 
@@ -321,25 +321,25 @@ describe("GithubAppService", () => {
       expect(urls.some((u) => u.startsWith("https://api.github.com/app/installations/42/access_tokens"))).toBe(true);
     });
 
-    it("runnerRegistrationToken 은 host 로 installation 을 고른다 — GHE host 지정 시 GHE(id 7), 미지정 시 github.com(id 42) 우선", async () => {
+    it("runnerRegistrationToken picks the installation by host — GHE (id 7) when a GHE host is given, github.com (id 42) preferred when unset", async () => {
       stubApiRecording([]);
       await installBothHosts();
 
-      // host 지정 → 그 GHE installation 으로만 mint(host-strict).
+      // host given → mint only from that GHE installation (host-strict).
       let urls = stubApiRecording([]);
       const ghe = await svc.runnerRegistrationToken("acme", { org: "acme-org" }, "https://ghe.acme.io");
       expect(ghe.host).toBe("https://ghe.acme.io");
       expect(urls.some((u) => u.startsWith("https://ghe.acme.io/api/v3/app/installations/7/access_tokens"))).toBe(true);
       expect(urls.some((u) => u.includes("/orgs/acme-org/actions/runners/registration-token"))).toBe(true);
 
-      // host 미지정 → 같은 owner 가 양쪽에 있어도 github.com installation 우선(모호성 제거).
+      // host unset → github.com installation wins even when the same owner is on both (removes ambiguity).
       urls = stubApiRecording([]);
       const com = await svc.runnerRegistrationToken("acme", { org: "acme-org" });
       expect(com.host).toBeUndefined();
       expect(urls.some((u) => u.startsWith("https://api.github.com/app/installations/42/access_tokens"))).toBe(true);
     });
 
-    it("runnerRegistrationToken 은 지정 host 에 installation 이 없으면 NotFound(다른 호스트로 대체 발급하지 않는다)", async () => {
+    it("runnerRegistrationToken is NotFound when the given host has no installation (won't fall back to mint from another host)", async () => {
       stubApiRecording([]);
       await installBothHosts();
       await expect(
@@ -347,25 +347,25 @@ describe("GithubAppService", () => {
       ).rejects.toBeInstanceOf(NotFoundError);
     });
 
-    it("viewWithRepos 는 각 설치에 허용 저장소를 동봉하고, 실패한 설치만 reposError 로 soft-fail 한다", async () => {
+    it("viewWithRepos bundles the allowed repos into each installation and soft-fails only the failed installation with reposError", async () => {
       stubApiRecording([]);
-      await installBothHosts(); // github.com(42) + GHE(7) — 둘 다 account=acme-org
+      await installBothHosts(); // github.com(42) + GHE(7) — both account=acme-org
       stubApiRecording(["acme-org/api"]);
-      secrets.acme = {}; // GHE App 개인키 소실 → GHE 설치의 저장소 조회만 실패해야 한다
+      secrets.acme = {}; // GHE App private key lost → only the GHE installation's repo lookup should fail
       const view = await svc.viewWithRepos("acme");
       const com = view.installations.find((i) => i.host === undefined);
       const ghe = view.installations.find((i) => i.host === "https://ghe.acme.io");
       expect(com?.repos?.map((r) => r.fullName)).toEqual(["acme-org/api"]);
       expect(com?.reposError).toBeUndefined();
       expect(ghe?.repos).toBeUndefined();
-      expect(ghe?.reposError).toBeTruthy(); // 원시 GitHub/자격증명 에러 대신 사람이 읽을 상태만
+      expect(ghe?.reposError).toBeTruthy(); // a human-readable status only, not a raw GitHub/credential error
     });
 
-    it("tokenForRepo 회귀: GHE git URL 은 github.com installation 으로 토큰을 발급하지 않는다(host-strict)", async () => {
+    it("tokenForRepo regression: a GHE git URL does not mint a token from a github.com installation (host-strict)", async () => {
       stubGithub("acme-org", "ghs_repo");
       const future = new Date(NOW.getTime() + 60_000).toISOString();
       await states.put("st-y", { workspace: "acme", provider: "github-app", createdBy: "u" }, future);
-      await svc.callback({ installationId: 42, state: "st-y" }); // github.com 설치만 존재
+      await svc.callback({ installationId: 42, state: "st-y" }); // only the github.com installation exists
       expect(await svc.tokenForRepo("acme", "https://ghe.acme.io/acme-org/api.git")).toBeUndefined();
     });
   });

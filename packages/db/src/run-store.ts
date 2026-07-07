@@ -1,7 +1,7 @@
 import { CaseResultSchema, RunUsageSummarySchema, usageFromTrace } from "@everdict/core";
 import { z } from "zod";
 
-// 한 run 의 수명: 접수 → (스케줄러 큐/디스패치) → 성공/실패. 결과 스토어가 이 레코드를 보관한다.
+// A run's lifecycle: accept → (scheduler queue/dispatch) → success/failure. The result store keeps this record.
 export const RunStatusSchema = z.enum(["queued", "running", "succeeded", "failed"]);
 export type RunStatus = z.infer<typeof RunStatusSchema>;
 
@@ -14,37 +14,37 @@ export const RunRecordSchema = z.object({
   caseId: z.string(),
   status: RunStatusSchema,
   result: CaseResultSchema.optional(),
-  // 사용량 요약 — 저장하지 않고 result.trace 에서 파생(읽을 때 채움). 클라이언트가 트레이스 파싱 없이 토큰/비용 확인.
+  // Usage summary — not stored, derived from result.trace (filled on read). Lets the client see tokens/cost without parsing the trace.
   usage: RunUsageSummarySchema.optional(),
   error: RunErrorSchema.optional(),
-  // 이 run 이 어느 스코어카드 배치의 자식인지(있으면). scorecard 가 케이스마다 자식 run 을 팬아웃하며 채운다.
-  // 미설정 = standalone(단발) run. 활동 리스트는 기본적으로 자식을 숨긴다(범람 방지) → list 옵션 참고.
+  // Which scorecard batch this run is a child of (if any). Filled by the scorecard as it fans out a child run per case.
+  // Unset = standalone (one-off) run. The activity list hides children by default (prevents flooding) → see the list option.
   parentScorecardId: z.string().optional(),
-  // 이 run 이 왜 생겼는지(출처). standalone|scorecard|schedule|mcp|front-door 등 — 활동 뷰의 source 축.
-  // dumb 스토어라 값 자체는 검증하지 않는다(자유 문자열). 미설정 = standalone.
+  // Why this run was created (source). standalone|scorecard|schedule|mcp|front-door etc. — the activity-view source axis.
+  // A dumb store, so the value itself isn't validated (free string). Unset = standalone.
   trigger: z.string().optional(),
-  // 실행자(제출자 subject) — 알림 피드 수신자(notifications N2) + "누가" 표기. 기계 발사는 미설정. mig 0036.
+  // Runner (submitter subject) — the notification-feed recipient (notifications N2) + shows "who". Machine-fired is unset. mig 0036.
   createdBy: z.string().optional(),
-  // 배치된 런타임(placement.target: 등록 런타임 id | self:<runnerId>) — 작업 큐의 "어디서 도는가" 축. mig 0040.
-  // 미설정 = 기본 백엔드. 과거 레코드는 미설정.
+  // The runtime it was placed on (placement.target: registered runtime id | self:<runnerId>) — the work-queue's "where does it run" axis. mig 0040.
+  // Unset = default backend. Past records are unset.
   runtime: z.string().optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
 export type RunRecord = z.infer<typeof RunRecordSchema>;
 
-// 읽기 시 result.trace 로부터 usage 요약을 채운다(저장 컬럼 없음 → 항상 트레이스와 일치, 마이그레이션 불필요).
+// On read, fills the usage summary from result.trace (no stored column → always matches the trace, no migration needed).
 export function withRunUsage(r: RunRecord): RunRecord {
   return r.result ? { ...r, usage: usageFromTrace(r.result.trace) } : r;
 }
 
-// list 옵션. 기본(미지정)은 standalone run 만 반환한다 — scorecard 자식 run 을 숨겨 활동 리스트 범람을 막는다.
-// scorecardId 지정 시 그 배치의 자식 run 만 반환한다(스코어카드 상세의 케이스 드릴다운용).
+// list options. The default (unset) returns only standalone runs — hides scorecard child runs to prevent activity-list flooding.
+// With scorecardId, returns only that batch's child runs (for the case drill-down in scorecard detail).
 export interface RunListOptions {
   scorecardId?: string;
 }
 
-// 결과 스토어 계약. in-memory(개발/테스트) 또는 Postgres(운영) — 같은 인터페이스 뒤로 교체.
+// Result store contract. in-memory (dev/test) or Postgres (production) — swapped behind the same interface.
 export interface RunStore {
   create(record: RunRecord): Promise<void>;
   update(id: string, patch: Partial<RunRecord>): Promise<RunRecord | undefined>;
@@ -75,7 +75,7 @@ export class InMemoryRunStore implements RunStore {
   async list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]> {
     const all = [...this.runs.values()];
     const scoped = tenant ? all.filter((r) => r.tenant === tenant) : all;
-    // scorecardId 지정 → 그 배치 자식만; 아니면 standalone(부모 없는) run 만(자식 숨김).
+    // scorecardId given → that batch's children only; otherwise standalone (parentless) runs only (children hidden).
     const filtered = opts?.scorecardId
       ? scoped.filter((r) => r.parentScorecardId === opts.scorecardId)
       : scoped.filter((r) => r.parentScorecardId == null);

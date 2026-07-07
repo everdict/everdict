@@ -26,7 +26,7 @@ const STATUS_KEY: Record<string, string> = {
   queued: 'statusQueued',
 }
 
-// 최근 실행 결과 — 성공이면 점수, 아니면 상태 라벨. 실행 이력 없으면 dash.
+// Latest run result — score if succeeded, otherwise the status label. Dash if there's no run history.
 function LatestResult({ rel }: { rel?: HarnessRelation }) {
   const t = useTranslations('harnessList')
   if (!rel || !rel.lastStatus) return <span className="text-faint">{t('noRun')}</span>
@@ -62,8 +62,8 @@ export function HarnessList({
   ]
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('name')
-  const [category, setCategory] = useState('') // 대분류 필터
-  const [user, setUser] = useState('') // 등록자(createdBy) 필터
+  const [category, setCategory] = useState('') // category filter
+  const [user, setUser] = useState('') // registrant (createdBy) filter
 
   const catCount = useMemo(
     () => new Set(harnesses.map((h) => h.category).filter(Boolean)).size,
@@ -245,7 +245,7 @@ export function HarnessList({
                   )}
                 </div>
 
-                {/* 메타 라인 — 버전 · 실행 벤치마크 · 최근 결과(+시각) */}
+                {/* Meta line — versions · benchmarks run · latest result (+time) */}
                 <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 text-[11.5px] text-faint">
                   <span className="inline-flex items-center gap-1">
                     <Layers className="size-3.5" />

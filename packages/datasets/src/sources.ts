@@ -1,30 +1,30 @@
 import { UpstreamError } from "@everdict/core";
 import { parseCsv } from "./mapping.js";
 
-// 벤치마크 소스 커넥터: 벤치마크가 "사는 곳"에서 참조만으로 행을 인출한다(로컬 파일에 의존하지 않음).
-// 신규 벤치마크는 대부분 HuggingFace Hub 에 올라오므로 HF datasets-server REST(/rows)를 1차 소스로 지원.
-// 네트워크 호출은 주입 가능한 FetchLike 로 추상화 → 매핑/페이징 로직은 결정적으로 테스트, 실인출은 글로벌 fetch.
+// Benchmark source connectors: fetch rows by reference from where the benchmark "lives" (no dependency on local files).
+// Most new benchmarks land on HuggingFace Hub, so the HF datasets-server REST (/rows) is supported as the primary source.
+// Network calls are abstracted behind an injectable FetchLike → mapping/paging logic is tested deterministically, real fetching uses the global fetch.
 
 export interface HfRowsParams {
-  dataset: string; // 예: "openai/gsm8k"
-  config?: string; // 기본 "default"
-  split?: string; // 기본 "train"
-  limit?: number; // 총 인출 상한 (기본 100)
-  token?: string; // gated 데이터셋용 (Authorization: Bearer) — 테넌트 SecretStore 에서 주입
+  dataset: string; // e.g. "openai/gsm8k"
+  config?: string; // default "default"
+  split?: string; // default "train"
+  limit?: number; // total fetch cap (default 100)
+  token?: string; // for gated datasets (Authorization: Bearer) — injected from the tenant SecretStore
 }
 
-// 테스트 주입용 최소 fetch 시그니처(글로벌 fetch 호환). 본문은 text()로 받아 JSON.parse(견고/단순).
+// Minimal fetch signature for test injection (compatible with the global fetch). The body is taken via text() then JSON.parse (robust/simple).
 export type FetchLike = (
   url: string,
   init?: { headers?: Record<string, string>; signal?: AbortSignal },
 ) => Promise<{ ok: boolean; status: number; text(): Promise<string> }>;
 
 const HF_ROWS = "https://datasets-server.huggingface.co/rows";
-const HF_PAGE = 100; // datasets-server 의 한 번 호출 최대 length.
-const HF_TIMEOUT_MS = 8000; // HF 응답 대기 상한 — 접속 불가 시 무한 대기 대신 깔끔히 실패.
+const HF_PAGE = 100; // max length per datasets-server call.
+const HF_TIMEOUT_MS = 8000; // upper bound on waiting for an HF response — fail cleanly instead of hanging forever when unreachable.
 
-// HF 호출 공통: 타임아웃 + 실패를 우리 UpstreamError(502)로 remap. 원시 fetch 에러("fetch failed"/AbortError)나
-// non-2xx 를 그대로 노출하지 않고, 위저드가 "자연스럽게" 보여줄 사람 친화 메시지로 바꾼다(접속 불가 케이스 대응).
+// Shared HF call: timeout + remap failures to our UpstreamError (502). Instead of exposing a raw fetch error ("fetch failed"/AbortError) or
+// a non-2xx as-is, turn it into a human-friendly message the wizard can show "naturally" (handling the unreachable case).
 async function hfGet(
   f: FetchLike,
   url: string,
@@ -36,20 +36,20 @@ async function hfGet(
   try {
     res = await f(url, { headers, signal: AbortSignal.timeout(timeoutMs) });
   } catch {
-    // 네트워크 실패/타임아웃/abort — HF 에 도달 불가.
+    // network failure/timeout/abort — HF is unreachable.
     throw new UpstreamError(
       "UPSTREAM_ERROR",
       { source: "huggingface", reason: "unreachable" },
-      "HuggingFace 에 접속할 수 없습니다. 네트워크를 확인하거나 잠시 후 다시 시도하세요.",
+      "Cannot reach HuggingFace. Check your network or try again shortly.",
     );
   }
   const body = await res.text().catch(() => "");
   if (!res.ok) {
-    // 401/403 은 gated 접근 문제일 가능성이 커서 행동 가능한 안내로(약관 동의 + 토큰 권한 두 가지 확인점).
+    // 401/403 is likely a gated-access issue, so give actionable guidance (two checkpoints: terms acceptance + token permission).
     const denied =
       res.status === 401 || res.status === 403
-        ? `HuggingFace 접근이 거부되었습니다 (${res.status}). gated 데이터셋이면 ① HF 계정으로 해당 데이터셋의 약관 동의(access 요청)를 했는지 ② 토큰에 이 저장소 읽기 권한이 있는지 확인하세요.`
-        : `HuggingFace 응답 오류 (${res.status}).`;
+        ? `HuggingFace access was denied (${res.status}). For a gated dataset, check ① whether your HF account accepted the dataset's terms (requested access) and ② whether the token has read permission for this repository.`
+        : `HuggingFace response error (${res.status}).`;
     throw new UpstreamError("UPSTREAM_ERROR", { source: "huggingface", status: res.status }, denied);
   }
   return body;
@@ -62,7 +62,7 @@ function hfParse<T>(body: string, label: string): T {
     throw new UpstreamError(
       "UPSTREAM_ERROR",
       { source: "huggingface" },
-      `HuggingFace 응답을 해석할 수 없습니다 (${label}).`,
+      `Could not parse the HuggingFace response (${label}).`,
     );
   }
 }
@@ -72,7 +72,7 @@ interface HfRowsResponse {
   num_rows_total?: number;
 }
 
-// HF datasets-server /rows 로 행을 인출(필요 시 100개씩 페이징). gated 면 token 으로 인증.
+// Fetch rows via HF datasets-server /rows (paging 100 at a time as needed). Authenticate with token if gated.
 export async function fetchHfRows(p: HfRowsParams, fetchImpl?: FetchLike): Promise<Array<Record<string, unknown>>> {
   const f = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
   if (!f) throw new Error("fetchHfRows: no fetch implementation (pass fetchImpl or run on Node 18+)");
@@ -102,14 +102,14 @@ export async function fetchHfRows(p: HfRowsParams, fetchImpl?: FetchLike): Promi
 const HF_HUB = "https://huggingface.co/api/datasets";
 const HF_SPLITS = "https://datasets-server.huggingface.co/splits";
 
-// HF Hub 데이터셋 검색 결과 1건(선택용 최소 메타). gated 면 인출에 HF_TOKEN 필요.
+// A single HF Hub dataset search result (minimal meta for selection). Fetching a gated one needs HF_TOKEN.
 export interface HfDatasetHit {
   id: string;
   likes: number;
   gated: boolean;
 }
 
-// HF Hub 데이터셋 검색 — 사용자가 정확한 id 를 몰라도 검색어로 후보를 고른다(raw 입력 회피). 공개 검색은 토큰 불필요.
+// HF Hub dataset search — pick a candidate by query even without knowing the exact id (avoids raw input). Public search needs no token.
 export async function searchHfDatasets(
   query: string,
   opts: { limit?: number; token?: string; fetchImpl?: FetchLike } = {},
@@ -127,12 +127,12 @@ export async function searchHfDatasets(
     .map((d) => ({
       id: String(d.id),
       likes: typeof d.likes === "number" ? d.likes : 0,
-      // HF 의 gated 는 false | "auto" | "manual".
+      // HF's gated is false | "auto" | "manual".
       gated: Boolean(d.gated) && d.gated !== "false",
     }));
 }
 
-// HF datasets-server 의 config/split 조합 — 사용자가 split 을 직접 타이핑하지 않고 드롭다운에서 고른다.
+// config/split combinations from HF datasets-server — the user picks the split from a dropdown instead of typing it.
 export interface HfSplit {
   config: string;
   split: string;
@@ -153,13 +153,13 @@ export async function fetchHfSplits(
     .map((s) => ({ config: String(s.config), split: String(s.split) }));
 }
 
-// --- 파일 직접 인출 폴백 — datasets-server(뷰어)가 서빙하지 않는 데이터셋(officeqa 류: 뷰어 없는 gated repo) ---
-// 뷰어가 없으면 /rows 가 404 라 유효한 토큰으로도 인출 불가. repo 의 데이터 파일(csv/jsonl/json)을
-// Hub resolve API 로 직접 받아 파싱한다(gated 는 동일 HF_TOKEN 인증).
+// --- Direct file-fetch fallback — for datasets the datasets-server (viewer) doesn't serve (officeqa-style: a gated repo with no viewer) ---
+// Without a viewer, /rows 404s so even a valid token can't fetch. Download the repo's data file (csv/jsonl/json)
+// directly via the Hub resolve API and parse it (gated uses the same HF_TOKEN auth).
 
 const DATA_FILE_RE = /\.(csv|jsonl|json)$/i;
 
-// repo 의 데이터 파일 목록 — 파일 폴백 드롭다운용. 파일 목록(siblings)은 공개 메타데이터(gated 여도 조회 가능).
+// List of the repo's data files — for the file-fallback dropdown. The file list (siblings) is public metadata (queryable even when gated).
 export async function fetchHfDataFiles(
   dataset: string,
   opts: { token?: string; fetchImpl?: FetchLike } = {},
@@ -175,19 +175,19 @@ export async function fetchHfDataFiles(
     (json.siblings ?? [])
       .map((s) => (typeof s.rfilename === "string" ? s.rfilename : ""))
       .filter((p) => DATA_FILE_RE.test(p))
-      // 루트 파일 우선 — 벤치마크 CSV 가 대형 코퍼스 하위 파일들(예: officeqa 의 파싱 json 1천여 개)에 묻히지 않게.
+      // Root files first — so the benchmark CSV isn't buried under a large corpus's sub-files (e.g. officeqa's ~1000 parsed json files).
       .sort((a, b) => depth(a) - depth(b) || a.localeCompare(b))
   );
 }
 
 export interface HfFileRowsParams {
   dataset: string;
-  file: string; // repo 내 경로(예: "officeqa_pro.csv")
-  limit?: number; // 미지정 = 파일 전체(파일은 어차피 통으로 받는다)
+  file: string; // path within the repo (e.g. "officeqa_pro.csv")
+  limit?: number; // unset = the whole file (files are downloaded wholesale anyway)
   token?: string;
 }
 
-// 데이터 파일 → 행. 확장자로 파싱(csv/jsonl/json 배열). 파일은 뷰어 페이징이 없어 통으로 받아 slice.
+// Data file → rows. Parse by extension (csv/jsonl/json array). Files have no viewer paging, so download wholesale and slice.
 export async function fetchHfFileRows(
   p: HfFileRowsParams,
   fetchImpl?: FetchLike,
@@ -197,7 +197,7 @@ export async function fetchHfFileRows(
   const headers: Record<string, string> = {};
   if (p.token) headers.Authorization = `Bearer ${p.token}`;
   const url = `https://huggingface.co/datasets/${p.dataset}/resolve/main/${encodeURI(p.file)}`;
-  const body = await hfGet(f, url, headers, "file", 30_000); // 파일은 뷰어 API 보다 클 수 있어 여유 타임아웃
+  const body = await hfGet(f, url, headers, "file", 30_000); // files can be larger than the viewer API, so a generous timeout
   let rows: Array<Record<string, unknown>>;
   if (/\.csv$/i.test(p.file)) {
     rows = parseCsv(body);
@@ -213,7 +213,7 @@ export async function fetchHfFileRows(
       throw new UpstreamError(
         "UPSTREAM_ERROR",
         { source: "huggingface", file: p.file },
-        "JSON 데이터 파일은 배열(행 목록)이어야 합니다.",
+        "A JSON data file must be an array (a list of rows).",
       );
     rows = parsed as Array<Record<string, unknown>>;
   }

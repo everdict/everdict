@@ -4,7 +4,7 @@ import { createContext, useContext, useState, type ReactNode } from 'react'
 
 import { cn } from '@/shared/lib/utils'
 
-// 경량 탭 — Linear st. 언더라인 탭(설정/계정 등 섹션 전환용). 제어/비제어 모두 지원.
+// Lightweight tabs — Linear st. underline tabs (for switching sections like settings/account). Supports both controlled and uncontrolled.
 const Ctx = createContext<{ value: string; setValue: (v: string) => void } | null>(null)
 
 export function Tabs({

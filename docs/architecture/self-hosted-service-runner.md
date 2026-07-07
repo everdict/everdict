@@ -27,7 +27,7 @@ aider but **not** for a service topology.
 
 - **Runner unit of work is process-only.** `runAgentJob` (`packages/agent/src/run.ts:13`) picks the environment by
   `evalCase.env.kind` (prompt / os-use / repo) and runs over `LocalDriver`. `run.ts:25` is explicit:
-  *"browser 토폴로지는 ServiceTopologyBackend 가 담당 — 이 로컬 경로 밖"* (topology is **outside** this local path).
+  *"browser topology is handled by ServiceTopologyBackend — outside this local path"* (topology is **outside** this local path).
 - **The CLI runner never branches.** `runnerCommand` (`apps/cli/src/main.ts:204`) leases a job, `AgentJobSchema`-
   parses it, and unconditionally calls `runAgentJob(parsed.data)` (`main.ts:272`). A service job would be mis-run.
 - **No local topology runtime exists.** `TopologyRuntime` has exactly two impls — `NomadTopologyRuntime`

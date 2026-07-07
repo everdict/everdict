@@ -22,17 +22,17 @@ function svc(): ScheduleService {
 const base = { tenant: "acme", createdBy: "u-1", name: "nightly", cron: "0 3 * * *", runTemplate };
 
 describe("isValidCron", () => {
-  it("5필드 cron 을 허용하고 오형식을 거부한다", () => {
+  it("allows a 5-field cron and rejects malformed input", () => {
     expect(isValidCron("0 3 * * *")).toBe(true);
     expect(isValidCron("*/15 * * * 1-5")).toBe(true);
-    expect(isValidCron("0 3 * *")).toBe(false); // 4필드
-    expect(isValidCron("0 3 * * * *")).toBe(false); // 6필드
+    expect(isValidCron("0 3 * *")).toBe(false); // 4 fields
+    expect(isValidCron("0 3 * * * *")).toBe(false); // 6 fields
     expect(isValidCron("nope")).toBe(false);
   });
 });
 
 describe("ScheduleService", () => {
-  it("스케줄을 생성하면 기본값(UTC·skip·enabled)이 채워지고 조회된다", async () => {
+  it("creating a schedule fills defaults (UTC/skip/enabled) and is retrievable", async () => {
     const s = svc();
     const created = await s.create(base);
     expect(created).toMatchObject({
@@ -48,11 +48,11 @@ describe("ScheduleService", () => {
     expect(await s.get("acme", "sch-1")).toEqual(created);
   });
 
-  it("잘못된 cron 은 BadRequestError(400)", async () => {
+  it("an invalid cron is a BadRequestError (400)", async () => {
     await expect(svc().create({ ...base, cron: "every minute" })).rejects.toBeInstanceOf(BadRequestError);
   });
 
-  it("다른 워크스페이스의 스케줄은 NotFound(404) — 존재 누출 금지", async () => {
+  it("another workspace's schedule is NotFound (404) — no existence leak", async () => {
     const s = svc();
     await s.create(base);
     await expect(s.get("beta", "sch-1")).rejects.toBeInstanceOf(NotFoundError);
@@ -60,7 +60,7 @@ describe("ScheduleService", () => {
     expect(await s.list("acme")).toHaveLength(1);
   });
 
-  it("update 로 pause(enabled=false) + 재예약(cron) 한다", async () => {
+  it("update pauses (enabled=false) and reschedules (cron)", async () => {
     const s = svc();
     await s.create(base);
     const updated = await s.update("acme", "sch-1", { enabled: false, cron: "0 6 * * 1" });
@@ -68,14 +68,14 @@ describe("ScheduleService", () => {
     expect(updated.cron).toBe("0 6 * * 1");
   });
 
-  it("update 의 잘못된 cron 은 400, 없는 id 는 404", async () => {
+  it("update with an invalid cron is 400, a missing id is 404", async () => {
     const s = svc();
     await s.create(base);
     await expect(s.update("acme", "sch-1", { cron: "bad" })).rejects.toBeInstanceOf(BadRequestError);
     await expect(s.update("acme", "nope", { enabled: false })).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("remove 후 조회는 404, 없는 id remove 도 404", async () => {
+  it("after remove a fetch is 404, and removing a missing id is 404", async () => {
     const s = svc();
     await s.create(base);
     await s.remove("acme", "sch-1");
@@ -84,7 +84,7 @@ describe("ScheduleService", () => {
   });
 });
 
-describe("ScheduleService — Temporal 드라이버 동기화 (slice 2)", () => {
+describe("ScheduleService — Temporal driver sync (slice 2)", () => {
   function fakeDriver() {
     const ensured: ScheduleSpec[] = [];
     const removed: string[] = [];
@@ -99,7 +99,7 @@ describe("ScheduleService — Temporal 드라이버 동기화 (slice 2)", () => 
     return { driver, ensured, removed };
   }
 
-  it("create/update/remove 시 드라이버 ensure/remove 를 호출(paused = !enabled 반영)", async () => {
+  it("calls driver ensure/remove on create/update/remove (reflects paused = !enabled)", async () => {
     const d = fakeDriver();
     const s = new ScheduleService({
       store: new InMemoryScheduleStore(),
@@ -110,12 +110,12 @@ describe("ScheduleService — Temporal 드라이버 동기화 (slice 2)", () => 
     await s.create(base);
     expect(d.ensured.at(-1)).toMatchObject({ id: "sch-1", cron: "0 3 * * *", paused: false });
     await s.update("acme", "sch-1", { enabled: false });
-    expect(d.ensured.at(-1)).toMatchObject({ id: "sch-1", paused: true }); // pause 동기화
+    expect(d.ensured.at(-1)).toMatchObject({ id: "sch-1", paused: true }); // pause synced
     await s.remove("acme", "sch-1");
     expect(d.removed).toEqual(["sch-1"]);
   });
 
-  it("create 시 드라이버 ensure 실패 → DB 레코드 롤백(스케줄이 떴는데 발사 안 되는 상태 방지)", async () => {
+  it("driver ensure failure on create → roll back the DB record (avoid a schedule that exists but never fires)", async () => {
     const store = new InMemoryScheduleStore();
     const driver: ScheduleDriver = {
       async ensure() {
@@ -125,12 +125,12 @@ describe("ScheduleService — Temporal 드라이버 동기화 (slice 2)", () => 
     };
     const s = new ScheduleService({ store, driver, newId: () => "sch-1", now: () => "t" });
     await expect(s.create(base)).rejects.toThrow("temporal down");
-    expect(await store.list("acme")).toEqual([]); // 롤백됨
+    expect(await store.list("acme")).toEqual([]); // rolled back
   });
 });
 
-describe("ScheduleService.fire — 발사(internal 라우트가 호출)", () => {
-  it("runTemplate 을 생성자 신원으로 submit 하고 last* 를 기록한다", async () => {
+describe("ScheduleService.fire — firing (called by the internal route)", () => {
+  it("submits the runTemplate under the creator's identity and records last*", async () => {
     const store = new InMemoryScheduleStore();
     const seen: RunScorecardInput[] = [];
     const s = new ScheduleService({
@@ -145,7 +145,7 @@ describe("ScheduleService.fire — 발사(internal 라우트가 호출)", () => 
     await s.create({ ...base, runTemplate: { ...runTemplate, concurrency: 8, runtime: "rt-1" } });
     const res = await s.fire("acme", "sch-1");
     expect(res).toEqual({ scorecardId: "sc-fired" });
-    // 생성자 신원 + 템플릿이 그대로 submit 됐다
+    // submitted with the creator's identity + the template verbatim
     expect(seen[0]).toMatchObject({
       tenant: "acme",
       submittedBy: "u-1",
@@ -154,7 +154,7 @@ describe("ScheduleService.fire — 발사(internal 라우트가 호출)", () => 
       concurrency: 8,
       runtime: "rt-1",
     });
-    // last* 기록
+    // last* recorded
     const rec = await s.get("acme", "sch-1");
     expect(rec).toMatchObject({
       lastScorecardId: "sc-fired",
@@ -163,13 +163,13 @@ describe("ScheduleService.fire — 발사(internal 라우트가 호출)", () => 
     });
   });
 
-  it("submitScorecard 미설정(Temporal 미배포)이면 fire 는 BadRequest", async () => {
+  it("with no submitScorecard (Temporal-less), fire is a BadRequest", async () => {
     const s = new ScheduleService({ store: new InMemoryScheduleStore(), newId: () => "sch-1", now: () => "t" });
     await s.create(base);
     await expect(s.fire("acme", "sch-1")).rejects.toBeInstanceOf(BadRequestError);
   });
 
-  it("없는 스케줄 fire 는 404", async () => {
+  it("firing a missing schedule is 404", async () => {
     const s = new ScheduleService({
       store: new InMemoryScheduleStore(),
       submitScorecard: async () => ({ id: "x", status: "queued" }),
@@ -177,7 +177,7 @@ describe("ScheduleService.fire — 발사(internal 라우트가 호출)", () => 
     await expect(s.fire("acme", "nope")).rejects.toBeInstanceOf(NotFoundError);
   });
 
-  it("연속 발사: 두 번째 fire 는 첫 번째 run id 를 previousScorecardId 로 돌려준다(회귀 baseline)", async () => {
+  it("consecutive fires: the second fire returns the first run id as previousScorecardId (regression baseline)", async () => {
     let i = 0;
     const s = new ScheduleService({
       store: new InMemoryScheduleStore(),
@@ -187,13 +187,13 @@ describe("ScheduleService.fire — 발사(internal 라우트가 호출)", () => 
     });
     await s.create(base);
     const first = await s.fire("acme", "sch-1");
-    expect(first).toEqual({ scorecardId: "sc-1" }); // 첫 발사 — 직전 없음
+    expect(first).toEqual({ scorecardId: "sc-1" }); // first fire — no previous
     const second = await s.fire("acme", "sch-1");
     expect(second).toEqual({ scorecardId: "sc-2", previousScorecardId: "sc-1" });
   });
 });
 
-describe("ScheduleService.finalize — 회귀 알림", () => {
+describe("ScheduleService.finalize — regression alert", () => {
   function svcWith(over: {
     diff?: (
       t: string,
@@ -220,7 +220,7 @@ describe("ScheduleService.finalize — 회귀 알림", () => {
     return { s, store, notified };
   }
 
-  it("직전 run 대비 회귀가 있으면 알림 + lastStatus 갱신", async () => {
+  it("alerts and updates lastStatus when there are regressions vs the previous run", async () => {
     const { s, notified } = svcWith({
       diff: async () => ({ regressions: [{ caseId: "c1", metric: "tests-pass", baseline: 1, candidate: 0 }] }),
     });
@@ -234,7 +234,7 @@ describe("ScheduleService.finalize — 회귀 알림", () => {
     expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
   });
 
-  it("회귀가 없으면 알림 안 함(lastStatus 는 갱신)", async () => {
+  it("no alert when there are no regressions (but lastStatus is updated)", async () => {
     const { s, notified } = svcWith({ diff: async () => ({ regressions: [] }) });
     await s.create(base);
     await s.finalize("acme", "sch-1", "sc-new", "sc-prev");
@@ -242,7 +242,7 @@ describe("ScheduleService.finalize — 회귀 알림", () => {
     expect((await s.get("acme", "sch-1")).lastStatus).toBe("succeeded");
   });
 
-  it("직전 run 이 없으면(첫 발사) diff/알림을 건너뛴다", async () => {
+  it("with no previous run (first fire) skips diff/alert", async () => {
     let diffCalls = 0;
     const { s, notified } = svcWith({
       diff: async () => {
@@ -251,12 +251,12 @@ describe("ScheduleService.finalize — 회귀 알림", () => {
       },
     });
     await s.create(base);
-    await s.finalize("acme", "sch-1", "sc-new"); // previousScorecardId 없음
+    await s.finalize("acme", "sch-1", "sc-new"); // no previousScorecardId
     expect(diffCalls).toBe(0);
     expect(notified).toEqual([]);
   });
 
-  it("diff 가 throw(한쪽 미완료)하면 swallow — 회귀 알림만 건너뛴다", async () => {
+  it("if diff throws (one side incomplete) it is swallowed — only the regression alert is skipped", async () => {
     const { s, notified } = svcWith({
       diff: async () => {
         throw new Error("not completed");
@@ -269,8 +269,8 @@ describe("ScheduleService.finalize — 회귀 알림", () => {
   });
 });
 
-describe("ScheduleService.disableByCreator — 생성자 이탈 자동 비활성", () => {
-  it("해당 생성자의 활성 예약만 비활성(이유 기록 + Temporal pause); 다른 생성자/이미 비활성은 그대로", async () => {
+describe("ScheduleService.disableByCreator — auto-disable on creator departure", () => {
+  it("disables only that creator's active schedules (records reason + Temporal pause); other creators / already-disabled stay as-is", async () => {
     const ensured: ScheduleSpec[] = [];
     const driver: ScheduleDriver = {
       async ensure(s) {
@@ -287,20 +287,20 @@ describe("ScheduleService.disableByCreator — 생성자 이탈 자동 비활성
     });
     await s.create({ ...base, createdBy: "u-1" }); // sch-1 enabled
     await s.create({ ...base, createdBy: "u-1", enabled: false }); // sch-2 already disabled
-    await s.create({ ...base, createdBy: "u-2" }); // sch-3 다른 생성자
-    ensured.length = 0; // create 시점의 ensure 는 무시
+    await s.create({ ...base, createdBy: "u-2" }); // sch-3 different creator
+    ensured.length = 0; // ignore the ensure from create time
 
     const count = await s.disableByCreator("acme", "u-1");
-    expect(count).toBe(1); // 활성인 sch-1 만 대상
+    expect(count).toBe(1); // only the active sch-1 is a target
     expect((await s.get("acme", "sch-1")).enabled).toBe(false);
-    expect((await s.get("acme", "sch-1")).lastStatus).toContain("자동 비활성");
-    expect((await s.get("acme", "sch-3")).enabled).toBe(true); // 다른 생성자는 그대로
-    expect(ensured.map((e) => e.id)).toEqual(["sch-1"]); // Temporal pause 1건
+    expect((await s.get("acme", "sch-1")).lastStatus).toContain("Auto-disabled");
+    expect((await s.get("acme", "sch-3")).enabled).toBe(true); // a different creator stays as-is
+    expect(ensured.map((e) => e.id)).toEqual(["sch-1"]); // one Temporal pause
     expect(ensured[0]?.paused).toBe(true);
   });
 });
 
-describe("ScheduleService — Temporal authoritative 다음 발사(nextFireTimes) 부착", () => {
+describe("ScheduleService — attaching Temporal-authoritative next fire times (nextFireTimes)", () => {
   function svcWithDescribe(next: Record<string, string[]>, seen: string[][]): ScheduleService {
     let n = 0;
     const driver: ScheduleDriver = {
@@ -319,28 +319,28 @@ describe("ScheduleService — Temporal authoritative 다음 발사(nextFireTimes
     });
   }
 
-  it("드라이버가 있으면 list/get 에 nextFireTimes 를 부착한다(활성만 조회)", async () => {
+  it("with a driver, attaches nextFireTimes to list/get (queries only enabled)", async () => {
     const seen: string[][] = [];
     const s = svcWithDescribe({ "sch-1": ["2026-07-04T03:00:00.000Z", "2026-07-05T03:00:00.000Z"] }, seen);
     await s.create({ ...base }); // sch-1 enabled
-    await s.create({ ...base, enabled: false }); // sch-2 paused → describe 제외
+    await s.create({ ...base, enabled: false }); // sch-2 paused → excluded from describe
 
     const list = await s.list("acme");
     expect(list.find((r) => r.id === "sch-1")?.nextFireTimes).toEqual([
       "2026-07-04T03:00:00.000Z",
       "2026-07-05T03:00:00.000Z",
     ]);
-    expect(list.find((r) => r.id === "sch-2")?.nextFireTimes).toBeUndefined(); // 일시중지는 미부착
-    expect(seen.at(-1)).toEqual(["sch-1"]); // 활성 id 만 describe
+    expect(list.find((r) => r.id === "sch-2")?.nextFireTimes).toBeUndefined(); // paused ones are not attached
+    expect(seen.at(-1)).toEqual(["sch-1"]); // describe only enabled ids
 
     expect((await s.get("acme", "sch-1")).nextFireTimes).toHaveLength(2);
   });
 
-  it("드라이버가 describeMany 를 안 하면(dev/Direct) nextFireTimes 없이 그대로 — 웹이 cron 근사로 폴백", async () => {
+  it("if the driver has no describeMany (dev/Direct), returns as-is without nextFireTimes — the web falls back to a cron approximation", async () => {
     let n = 0;
     const s = new ScheduleService({
       store: new InMemoryScheduleStore(),
-      driver: { async ensure() {}, async remove() {} }, // describeMany 미구현
+      driver: { async ensure() {}, async remove() {} }, // describeMany unimplemented
       newId: () => `sch-${++n}`,
       now: () => "t",
     });
@@ -349,7 +349,7 @@ describe("ScheduleService — Temporal authoritative 다음 발사(nextFireTimes
     expect((await s.get("acme", "sch-1")).nextFireTimes).toBeUndefined();
   });
 
-  it("describeMany 가 실패해도 목록은 그대로 반환한다(부착만 생략)", async () => {
+  it("even if describeMany fails, the list is returned as-is (only attachment is skipped)", async () => {
     let n = 0;
     const s = new ScheduleService({
       store: new InMemoryScheduleStore(),
@@ -370,8 +370,8 @@ describe("ScheduleService — Temporal authoritative 다음 발사(nextFireTimes
   });
 });
 
-describe("ScheduleService.update — 내용 편집 소유권(생성자·admin) 게이트", () => {
-  it("생성자/admin 이 아닌 사람의 내용 편집은 ForbiddenError(403)", async () => {
+describe("ScheduleService.update — content-edit ownership (creator/admin) gate", () => {
+  it("a content edit by a non-creator/non-admin is a ForbiddenError (403)", async () => {
     const s = svc();
     await s.create({ ...base, createdBy: "owner" }); // sch-1
     await expect(
@@ -379,7 +379,7 @@ describe("ScheduleService.update — 내용 편집 소유권(생성자·admin) �
     ).rejects.toBeInstanceOf(ForbiddenError);
   });
 
-  it("생성자 본인·워크스페이스 admin 은 내용 편집 가능", async () => {
+  it("the creator and a workspace admin can edit content", async () => {
     const s = svc();
     await s.create({ ...base, createdBy: "owner" }); // sch-1
     await expect(
@@ -390,7 +390,7 @@ describe("ScheduleService.update — 내용 편집 소유권(생성자·admin) �
     ).resolves.toMatchObject({ cron: "0 7 * * *" });
   });
 
-  it("pause/resume(enabled-only)는 소유권 무관 — 내용 편집이 아니므로 게이트 안 함", async () => {
+  it("pause/resume (enabled-only) is ownership-independent — not a content edit, so not gated", async () => {
     const s = svc();
     await s.create({ ...base, createdBy: "owner" }); // sch-1
     await expect(
@@ -398,7 +398,7 @@ describe("ScheduleService.update — 내용 편집 소유권(생성자·admin) �
     ).resolves.toMatchObject({ enabled: false });
   });
 
-  it("actor 미주입(내부 호출)이면 소유권 검사를 건너뛴다", async () => {
+  it("with no actor (internal call) the ownership check is skipped", async () => {
     const s = svc();
     await s.create({ ...base, createdBy: "owner" });
     await expect(s.update("acme", "sch-1", { cron: "0 8 * * *" })).resolves.toMatchObject({

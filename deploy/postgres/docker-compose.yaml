@@ -1,13 +1,13 @@
-# 로컬 Postgres (컨트롤플레인 영속 스토어) — apps/api 가 DATABASE_URL 로 붙어 마이그레이션을 자동 적용한다.
-# 이게 없으면(=DATABASE_URL 미설정) API 는 in-memory 로 동작하고 워크스페이스/데이터셋이 재기동 시 휘발된다.
+# Local Postgres (the control-plane persistent store) — apps/api connects via DATABASE_URL and applies migrations automatically.
+# Without this (= DATABASE_URL unset) the API runs in-memory and workspaces/datasets are lost on restart.
 #
-# 기동: docker compose -f deploy/postgres/docker-compose.yaml up -d --wait   (healthcheck 통과까지 대기)
-#   (scripts/dev/up.sh 가 Keycloak 과 함께 자동으로 띄운다)
+# Start: docker compose -f deploy/postgres/docker-compose.yaml up -d --wait   (waits until the healthcheck passes)
+#   (scripts/dev/up.sh brings it up automatically alongside Keycloak)
 #
-# apps/api 측: DATABASE_URL=postgresql://everdict:everdict@localhost:${POSTGRES_PORT:-5433}/everdict
+# apps/api side: DATABASE_URL=postgresql://everdict:everdict@localhost:${POSTGRES_PORT:-5433}/everdict
 #
-# 기본 호스트 포트는 5433(흔한 5432 점유 회피 — Keycloak 8080→8081 과 같은 관례).
-# 5433 도 점유돼 있으면 POSTGRES_PORT 로 바꾸고 DATABASE_URL 의 포트도 맞춘다.
+# The default host port is 5433 (avoids the common 5432 being taken — the same convention as Keycloak 8080→8081).
+# If 5433 is also taken, change POSTGRES_PORT and match the port in DATABASE_URL.
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,7 +16,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-everdict}
       POSTGRES_DB: ${POSTGRES_DB:-everdict}
     ports:
-      # 네이티브 API(node --env-file)가 localhost 로 붙으므로 호스트에 게시한다.
+      # Published on the host because the native API (node --env-file) connects via localhost.
       - "${POSTGRES_PORT:-5433}:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-everdict} -d ${POSTGRES_DB:-everdict}"]
@@ -24,8 +24,8 @@ services:
       timeout: 3s
       retries: 20
     volumes:
-      # 영속화: 워크스페이스/데이터셋/스코어카드가 재기동해도 유지된다.
-      # 완전 초기화는: docker compose -f deploy/postgres/docker-compose.yaml down -v
+      # Persistence: workspaces/datasets/scorecards survive restarts.
+      # For a full reset: docker compose -f deploy/postgres/docker-compose.yaml down -v
       - postgres-data:/var/lib/postgresql/data
 
 volumes:

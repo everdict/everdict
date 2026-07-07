@@ -30,13 +30,13 @@ export default async function ScorecardsPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 실행자 이름(members 조인)은 부가 정보 — 실패해도 목록 자체는 보인다. (데이터셋 목록과 동일 패턴)
+  // Run-by name (members join) is supplementary info — the list itself shows even if it fails. (Same pattern as the dataset list)
   const members = await controlPlane
     .listMembers(ctx)
     .then((r) => membersSchema.parse(r))
     .catch(() => [])
 
-  // 실행자 표기용 — subject → 이름 + 아바타(있으면). 이름은 프로필 name > email 로컬파트 > subject 폴백.
+  // For run-by display — subject → name + avatar (if any). Name is profile name > email local part > subject fallback.
   const authors: Record<string, { name: string; avatarUrl?: string }> = {}
   for (const m of members)
     authors[m.subject] = {

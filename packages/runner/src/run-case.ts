@@ -20,15 +20,15 @@ export interface RunCaseDeps {
   runCtx: RunContext;
 }
 
-// 트레이스 상관 키 — 하니스가 EVERDICT_RUN_ID/everdict.run_id 로 주입하고, 수집(collectTrace/컨트롤플레인 pull)이
-// 같은 값으로 플랫폼에서 찾는다. 호출부(runCtx.runId)가 안 주면 여기서 mint.
+// Trace correlation key — the harness injects it as EVERDICT_RUN_ID/everdict.run_id, and collection
+// (collectTrace/control-plane pull) finds it on the platform by the same value. Minted here if the caller (runCtx.runId) doesn't provide one.
 function newRunId(): string {
   return `everdict-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-// os-use 스냅샷의 스크린샷이 참조(ref)로만 있으면 compute 해제 전에 base64 로 물질화한다 —
-// 해제 후(또는 컨트롤플레인에서) 채점되는 judge(VLM)가 환경 접근 없이 스크린샷을 쓰게 하기 위함.
-// 캡처 실패는 soft — 원본 스냅샷 그대로(현행 judge 의 "스크린샷 없음" 동작과 동일).
+// If an os-use snapshot's screenshot is only a reference (ref), materialize it as base64 before releasing compute —
+// so a judge (VLM) scored after release (or on the control plane) can use the screenshot without environment access.
+// A capture failure is soft — the original snapshot is kept (same as the current judge's "no screenshot" behavior).
 async function materializeScreenshot(
   snapshot: EnvSnapshot,
   compute: ComputeHandle,
@@ -42,16 +42,16 @@ async function materializeScreenshot(
   return { ...snapshot, screenshot: base64 };
 }
 
-// 한 EvalCase를 끝까지 실행한다:
-// provision → seed → install → run(하니스) → snapshot → grade → (트레이스 수집).
-// 채점은 두 단계 — compute-바운드(환경에서 명령 실행: tests-pass 등 needsCompute 선언)는 해제 전에,
-// 관측물(trace/snapshot) 전용(steps/cost/judge 등)은 compute 를 해제한 뒤에 채점해 샌드박스 점유를
-// 실행 구간으로 최소화한다(judge LLM 대기 동안 미점유).
-// 플랫폼 트레이스(하니스 traceSource) 수집도 해제 후: collect="job"(기본)이면 여기서 collectTrace(runId) pull,
-// "control-plane" 이면 수집+관측물 채점을 통째로 잡 밖으로 미루고 CaseResult.traceRef 만 실어 보낸다
-// (executeCase 가 완성). docs/architecture/streaming-case-pipeline.md D3+D4
-// compute 는 무슨 일이 있어도 finally 에서 해제(조기 해제 후엔 no-op — 플래그로 멱등화).
-// (나중에 이 함수가 Temporal activity가 된다)
+// Runs one EvalCase end to end:
+// provision → seed → install → run (harness) → snapshot → grade → (trace collection).
+// Scoring is two-phase — compute-bound graders (run commands in the environment: tests-pass etc., declared via needsCompute)
+// score before release, and observation-only graders (trace/snapshot: steps/cost/judge etc.) score after releasing compute,
+// so the sandbox is held only for the execution window (not held while waiting on the judge LLM).
+// Platform-trace (harness traceSource) collection also happens after release: with collect="job" (default) pull collectTrace(runId) here,
+// with "control-plane" defer collection + observation scoring entirely out of the job and just carry CaseResult.traceRef
+// (completed by executeCase). docs/architecture/streaming-case-pipeline.md D3+D4
+// compute is released in finally no matter what (no-op after early release — made idempotent via a flag).
+// (this function later becomes a Temporal activity)
 export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<CaseResult> {
   const compute = await deps.driver.provision({ os: "linux", needs: ["shell"], image: evalCase.image });
   let released = false;
@@ -73,10 +73,10 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
 
     let snapshot = await deps.environment.snapshot(compute);
     const source = deps.harness.traceSource?.();
-    // 수집을 잡 밖으로 미루는 모드 — 트레이스가 필요한 관측물 채점도 함께 미뤄진다(컨트롤플레인이 완성).
+    // The mode that defers collection out of the job — observation scoring that needs the trace is deferred with it (completed by the control plane).
     const defer = source?.collect === "control-plane";
 
-    // 점수 슬롯은 graders 배열 순서 — 두 단계로 나눠 채점해도 순서 불변. defer 로 미뤄진 슬롯만 비운다.
+    // Score slots follow the graders array order — the order is invariant even across the two phases. Only defer-deferred slots are left empty.
     const observes = deps.graders.some((g) => g.needsCompute !== true);
     const slots: Array<Score | undefined> = new Array(deps.graders.length);
     for (const [i, grader] of deps.graders.entries()) {
@@ -85,9 +85,9 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       }
     }
     const materialized = await materializeScreenshot(snapshot, compute, observes || defer);
-    // defer 면 관측물 채점이 컨트롤플레인에서 일어난다 — 스크린샷을 결과 스냅샷에 실어 보낸다(오프로드가 슬림화).
+    // With defer, observation scoring happens on the control plane — carry the screenshot in the result snapshot (slims the offload).
     if (defer) snapshot = materialized;
-    await release(); // 남은 일(플랫폼 pull·관측물 채점)은 환경이 필요 없다 — 샌드박스는 여기서 반납
+    await release(); // The remaining work (platform pull · observation scoring) doesn't need the environment — release the sandbox here
 
     if (!defer) {
       if (deps.harness.collectTrace && source) trace.push(...(await deps.harness.collectTrace(runId)));
@@ -110,7 +110,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
               kind: source.kind,
               endpoint: source.endpoint,
               runId,
-              // 인증은 시크릿 '이름'만 — 값은 컨트롤플레인이 collect 시 재해석(CaseResult 는 영속된다).
+              // Auth carries only the secret 'name' — the value is re-resolved by the control plane at collect time (CaseResult is persisted).
               ...(source.authSecret ? { authSecret: source.authSecret } : {}),
               ...(source.correlate ? { correlate: source.correlate } : {}),
               ...(source.experiment ? { experiment: source.experiment } : {}),

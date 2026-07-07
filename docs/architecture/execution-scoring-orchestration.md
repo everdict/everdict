@@ -80,7 +80,7 @@ Ingest is the existence proof for Concern 3.
      = executeCase + record       BatchDriver (scorecard):          @everdict/suite (pure):
        (create→exec→update)         admit/settle per case              summarize · diff · leaderboard
        returns RunRecord            → fan-out materializeRun          @everdict/graders (pure): grade
-       "뒤는 신경 안 씀"             → collect → steps
+       "ignores the rest"            → collect → steps
                                     → hand results to ScoringService
         ▲                                   │        ▲                        ▲
         └──────── orchestrator drives runs ─┘        └── results → scorer ────┘
@@ -127,7 +127,7 @@ Ingest is the existence proof for Concern 3.
 
 - **Do NOT route the batch through `RunService.submit`.** That bundles single-run *delivery* (202/webhook/per-run
   notify/submit-admit) which must not fire per case. The shared unit is `executeCase` (pure execution), not the
-  single-run orchestrator. (See [run-as-primitive](./run-as-primitive.md) §"왜 RunService 를 안 거치나".)
+  single-run orchestrator. (See [run-as-primitive](./run-as-primitive.md) §"Why not go through RunService".)
 - **In-sandbox `@everdict/runner` untouched.** This is a control-plane decomposition only.
 - **No API/MCP/web shape changes.** `GET /scorecards/:id` still returns a hydrated scorecard; `POST /runs` etc.
   unchanged. This is an internal seam refactor.

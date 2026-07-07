@@ -8,14 +8,14 @@ import { Card } from '@/shared/ui/card'
 
 import { Field, ImageClassBadge, Mono, SubSection } from './parts'
 
-// service(토폴로지) 하니스 구성 — 다이어그램의 텍스트 대응판. 프론트도어/서비스/의존/타깃/트레이스.
-// registry = 워크스페이스 레지스트리 좌표 — 서비스 이미지의 출처 분류 배지(로컬 전용/미지정/워크스페이스).
+// service (topology) harness config — the text counterpart of the diagram. front-door/services/dependencies/target/trace.
+// registry = workspace registry coordinates — the provenance-classification badge for service images (local-only/unqualified/workspace).
 export function ServiceView({
   spec,
   registry,
 }: {
   spec: HarnessSpec
-  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 지원
+  registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // supports multiple registries
 }) {
   const t = useTranslations('inspectHarness')
   const services = spec.services ?? []

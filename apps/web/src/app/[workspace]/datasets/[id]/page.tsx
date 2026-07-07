@@ -78,7 +78,7 @@ export default async function DatasetDetailPage({
   const { principal, ctx } = await currentPrincipal()
   const t = await getTranslations('datasetsPage')
 
-  // 이 데이터셋이 가진 모든 버전(최신순) + 목록 메타(만든이·생성/수정 시각) — 버전 선택기/diff/헤더에 사용.
+  // All versions this dataset has (newest first) + list meta (creator·created/updated time) — used by the version switcher/diff/header.
   let versions: string[] = []
   let summary: DatasetSummary | undefined
   try {
@@ -88,7 +88,7 @@ export default async function DatasetDetailPage({
     versions = []
   }
 
-  // 관계 하니스(스코어카드 도출) + 만든이 이름(members 조인) — 부가 정보, 실패해도 상세는 보인다.
+  // Related harnesses (derived from scorecards) + creator name (members join) — supplementary info; the detail view still renders even if it fails.
   const scorecards = await controlPlane
     .listScorecards(ctx)
     .then((r) => scorecardsSchema.parse(r))
@@ -99,7 +99,7 @@ export default async function DatasetDetailPage({
     .catch(() => [])
   const relation = buildDatasetRelations(scorecards)[id]
   const currentWorkspace = principal?.workspace ?? workspace
-  // 만든이 — 프로필 이름+아바타(있으면). 시드/_shared 는 first-party 로 표기(아바타 없음).
+  // Creator — profile name+avatar (if any). Seed/_shared are shown as first-party (no avatar).
   const author = (() => {
     if (!summary?.createdBy) {
       return {
@@ -114,7 +114,7 @@ export default async function DatasetDetailPage({
       known: true,
     }
   })()
-  // 수정 = 새 버전 배포 — 이 워크스페이스 소유 데이터셋에서만(공유/first-party 는 제외).
+  // Edit = deploy a new version — only for datasets owned by this workspace (shared/first-party excluded).
   const canPublish = can(principal?.roles, 'datasets:write') && summary?.owner === currentWorkspace
 
   let dataset: Dataset | undefined
@@ -135,10 +135,10 @@ export default async function DatasetDetailPage({
     )
   }
 
-  // 이 버전의 태그(자유 라벨) — 콘텐츠 태그(분류)와 별개인 버전 분간용 가변 메타. 버전 불변성과 무관.
+  // This version's tags (free-form labels) — mutable meta for distinguishing versions, separate from content tags (classification). Unrelated to version immutability.
   const versionTags = summary?.versionTags?.[dataset.version] ?? []
 
-  // 케이스 구성 요약 — 환경(env.kind)·채점(grader.id) 분포(빈도순). 벤치마크 성격을 한눈에.
+  // Case composition summary — distribution of environment (env.kind)·grading (grader.id) (by frequency). The benchmark's character at a glance.
   const envSummary = [
     ...dataset.cases.reduce((m, c) => {
       const k = c.env?.kind
@@ -153,8 +153,8 @@ export default async function DatasetDetailPage({
     }, new Map<string, number>()),
   ].sort((a, b) => b[1] - a[1])
 
-  // 활동 타임라인 — "누가 언제 무엇을"(생성 · 스코어카드 실행 · 댓글)을 시간순으로. actor 는 여기서 표시-준비.
-  // 표시명 — 프로필 이름 우선, 없으면 이메일 로컬파트(전체 이메일 노출 금지), 그래도 없으면 subject 축약.
+  // Activity timeline — "who did what when" (created · scorecard run · comment) in chronological order. actor is display-prepared here.
+  // Display name — profile name first, else email local part (don't expose the full email), else abbreviated subject.
   const resolveActor = (subject?: string): Actor => {
     if (!subject) return { name: t('systemActor'), known: false }
     const m = members.find((x) => x.subject === subject)
@@ -229,7 +229,7 @@ export default async function DatasetDetailPage({
         />
       </div>
 
-      {/* 메타 패널 — 정의 그리드 대신 읽히는 메타 스트립 + 태그 칩. 버전 불변이라 수정은 '새 버전 만들기'로 배포. */}
+      {/* Meta panel — a readable meta strip + tag chips instead of a definition grid. Versions are immutable, so edits deploy via 'create new version'. */}
       <Card className="space-y-3 p-4">
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
@@ -298,13 +298,13 @@ export default async function DatasetDetailPage({
           ) : (
             <span className="text-[12px] text-faint">{t('noTags')}</span>
           )}
-          {/* 안내 문구는 인라인 노출 금지 — info 아이콘 호버 툴팁으로만. */}
+          {/* Don't render guidance text inline — only via the info icon hover tooltip. */}
           {canPublish && (
             <InfoTip className="ml-auto" align="end" content={t('versionImmutableTip')} />
           )}
         </div>
 
-        {/* 이 버전의 태그 — 위 콘텐츠 태그(분류)와 별개인 버전 분간용 자유 라벨. 편집 불가 + 태그 없음이면 행 숨김. */}
+        {/* This version's tags — free-form labels for distinguishing versions, separate from the content tags (classification) above. Hide the row if not editable + no tags. */}
         {(canPublish || versionTags.length > 0) && (
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -321,12 +321,12 @@ export default async function DatasetDetailPage({
         )}
       </Card>
 
-      {/* 리니지(출처) — 이 데이터가 어디서 왔는지. 원본 소스(HF 링크) · 공식 provenance · 만든 경로. */}
+      {/* Lineage/provenance — where this data came from. Original source (HF link) · official provenance · production path. */}
       {dataset.producedBy && (
         <DatasetLineage workspace={workspace} provenance={dataset.producedBy} />
       )}
 
-      {/* 관계된 하니스 — 이 데이터셋으로 평가된 하니스(스코어카드에서 도출). 아래 활동 타임라인의 요약. */}
+      {/* Related harnesses — harnesses evaluated with this dataset (derived from scorecards). A summary of the activity timeline below. */}
       {relation && relation.harnesses.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
           <span className="inline-flex items-center gap-1 text-faint">
@@ -345,13 +345,13 @@ export default async function DatasetDetailPage({
         </div>
       )}
 
-      {/* 활동(이벤트) — 생성 · 스코어카드 실행을 시간순으로. 논의(댓글/대댓글)는 아래 CommentsSection. */}
+      {/* Activity (events) — created · scorecard runs in chronological order. Discussion (comments/replies) is in the CommentsSection below. */}
       <section className="space-y-3">
         <SectionHeader title={t('activityTitle')} />
         <ActivityTimeline workspace={workspace} items={activity} />
       </section>
 
-      {/* 논의 — 댓글 + 대댓글(스레드) + @멘션. 모든 상세 화면 공통 컴포넌트. */}
+      {/* Discussion — comments + replies (threads) + @mentions. A shared component across all detail views. */}
       <CommentsSection
         workspace={workspace}
         resourceType="dataset"
@@ -365,7 +365,7 @@ export default async function DatasetDetailPage({
           <EmptyState title={t('noCases')} />
         ) : (
           <>
-            {/* 구성 요약 — 이 벤치마크가 어떤 환경에서 무엇으로 채점되는지 한눈에 */}
+            {/* Composition summary — in what environment and with what this benchmark is graded, at a glance */}
             <div className="space-y-2 rounded-lg border bg-card/60 p-3.5">
               <div className="flex gap-3">
                 <span className="w-9 shrink-0 pt-1 text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -403,7 +403,7 @@ export default async function DatasetDetailPage({
               </div>
             </div>
 
-            {/* 케이스별 카드 — 기본 5개만, 확장 가능(상세의 주는 활동 히스토리라 케이스는 부차적). */}
+            {/* Per-case cards — 5 by default, expandable (the detail's focus is the activity history, so cases are secondary). */}
             <CaseList cases={dataset.cases} />
           </>
         )}
@@ -412,7 +412,7 @@ export default async function DatasetDetailPage({
   )
 }
 
-// 외부 링크 칩 — 리니지의 공식 provenance 링크(홈페이지/논문/코드/데이터/리더보드).
+// External link chip — lineage's official provenance links (homepage/paper/code/data/leaderboard).
 function LinkChip({
   href,
   icon: Icon,
@@ -436,8 +436,8 @@ function LinkChip({
   )
 }
 
-// 리니지(출처) 카드 — "이 데이터가 어디서 왔는지". 원본 소스(HF 링크) · 공식 provenance · 만든 경로.
-// 데이터셋은 리니지가 핵심(오피셜 오픈 벤치마크의 출처 보존) — 정의그리드 대신 라벨-값 행으로 읽히게.
+// Lineage/provenance card — "where this data came from". Original source (HF link) · official provenance · production path.
+// For datasets, lineage is central (preserving the provenance of official open benchmarks) — label-value rows instead of a definition grid, for readability.
 function DatasetLineage({
   workspace,
   provenance,
@@ -458,7 +458,7 @@ function DatasetLineage({
         <Waypoints className="size-3.5" /> {t('lineageTitle')}
       </div>
 
-      {/* 원본 소스 — 데이터 행이 어디서 왔나(HF 데이터셋/파일 링크 or 붙여넣기). */}
+      {/* Original source — where the data rows came from (HF dataset/file link or pasted). */}
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[12.5px]">
         <span className="w-14 shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint">
           {t('lineageSource')}
@@ -510,7 +510,7 @@ function DatasetLineage({
         )}
       </div>
 
-      {/* 공식 provenance — 발표 벤치마크의 홈페이지/논문/코드/리더보드 + 라이선스/저자(있으면). */}
+      {/* Official provenance — a published benchmark's homepage/paper/code/leaderboard + license/authors (if any). */}
       {origin &&
         (origin.homepage ||
           origin.paper ||
@@ -553,7 +553,7 @@ function DatasetLineage({
           </div>
         )}
 
-      {/* 만든 경로 — 레시피(역링크)/카탈로그/인라인 정의. */}
+      {/* Production path — recipe (backlink)/catalog/inline definition. */}
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t pt-3 text-[12.5px]">
         <span className="w-14 shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint">
           {t('lineagePath')}

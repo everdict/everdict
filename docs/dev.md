@@ -24,15 +24,15 @@ How to run the full stack locally and develop against it in the browser, with **
 bash scripts/dev/up.sh        # Keycloak (:8081, persistent) + control-plane API (:8787)
 pnpm -C apps/web dev          # web with hot reload → http://localhost:3001
 ```
-Open http://localhost:3001 → **로그인** → Keycloak → sign in. Stop with `bash scripts/dev/down.sh`.
+Open http://localhost:3001 → **Log in** → Keycloak → sign in. Stop with `bash scripts/dev/down.sh`.
 
 Desktop shell against the dev web (renders the same web + embeds the self-hosted runner):
 ```bash
 EVERDICT_WEB_URL=http://localhost:3001 pnpm -F @everdict/desktop dev
 ```
 Desktop live e2e (Playwright drives the real shell — one-click pair → `self:` run → provenance):
-`node scripts/live/desktop-runner.mjs` (준비 커맨드는 스크립트 헤더 참고 — dev 폴백용으로 Keycloak 을 끈
-웹 인스턴스를 씀). See `docs/architecture/desktop-app.md`.
+`node scripts/live/desktop-runner.mjs` (see the script header for the prep commands — uses a web instance with
+Keycloak turned off as a dev fallback). See `docs/architecture/desktop-app.md`.
 
 ## Accounts (imported into the realm)
 | user | password | workspace | role |

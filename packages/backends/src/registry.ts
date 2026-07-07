@@ -5,8 +5,8 @@ import { K8sBackend, type K8sBackendOptions } from "./k8s.js";
 import { LocalBackend } from "./local.js";
 import { NomadBackend, type NomadBackendOptions } from "./nomad.js";
 
-// 이름 → Backend 인스턴스. 1 인스턴스 = 1 타깃(클러스터/풀).
-// 여러 Nomad/K8s/Windows 타깃은 각각 별개 인스턴스로 등록한다.
+// name → Backend instance. 1 instance = 1 target (cluster/pool).
+// Multiple Nomad/K8s/Windows targets are each registered as a separate instance.
 export class BackendRegistry {
   private readonly map = new Map<string, Backend>();
 
@@ -17,8 +17,7 @@ export class BackendRegistry {
 
   get(name: string): Backend {
     const backend = this.map.get(name);
-    if (!backend)
-      throw new NotFoundError("NOT_FOUND", { backend: name }, `백엔드 '${name}' 가 등록되어 있지 않습니다.`);
+    if (!backend) throw new NotFoundError("NOT_FOUND", { backend: name }, `backend '${name}' is not registered.`);
     return backend;
   }
 
@@ -31,24 +30,24 @@ export class BackendRegistry {
   }
 }
 
-// 컨트롤플레인: 잡의 placement.target(없으면 default)으로 백엔드를 골라 dispatch.
+// Control plane: pick a backend by the job's placement.target (or default) and dispatch.
 export class Router {
   constructor(
     private readonly registry: BackendRegistry,
     private readonly defaultTarget?: string,
   ) {}
 
-  // async: 동기 throw 를 rejection 으로 일관되게 만든다(호출부는 await/.catch 로 처리).
+  // async: makes a synchronous throw consistently a rejection (the caller handles it with await/.catch).
   async dispatch(job: AgentJob): Promise<CaseResult> {
     const target = job.evalCase.placement?.target ?? this.defaultTarget;
     if (!target) {
-      throw new BadRequestError("BAD_REQUEST", undefined, "placement.target 또는 default 백엔드가 필요합니다.");
+      throw new BadRequestError("BAD_REQUEST", undefined, "placement.target or a default backend is required.");
     }
     return this.registry.get(target).dispatch(job);
   }
 }
 
-// --- 설정에서 레지스트리 구성 (여러 클러스터/풀 선언; 외부 입력이라 Zod 검증) ---
+// --- Build the registry from config (declares multiple clusters/pools; Zod-validated as external input) ---
 export const BackendConfigSchema = z.discriminatedUnion("kind", [
   z.object({ name: z.string(), kind: z.literal("local") }),
   z.object({
@@ -63,9 +62,9 @@ export const BackendConfigSchema = z.discriminatedUnion("kind", [
     name: z.string(),
     kind: z.literal("k8s"),
     image: z.string(),
-    context: z.string().optional(), // kubeconfig 컨텍스트(예: kind-everdict)
+    context: z.string().optional(), // kubeconfig context (e.g. kind-everdict)
     namespace: z.string().optional(),
-    runtimeClass: z.string().optional(), // gVisor=gvisor 등
+    runtimeClass: z.string().optional(), // gVisor=gvisor etc.
   }),
 ]);
 export type BackendConfig = z.infer<typeof BackendConfigSchema>;
@@ -76,7 +75,7 @@ export const BackendsConfigSchema = z.object({
 });
 export type BackendsConfig = z.infer<typeof BackendsConfigSchema>;
 
-// 시크릿맵에서 한 키를 제외한 새 맵(없으면 그대로). 클러스터 API 토큰을 alloc env 에서 분리할 때 쓴다.
+// A new map with one key removed from the secret map (unchanged if absent). Used to separate the cluster API token from the alloc env.
 function withoutKey(
   env: Record<string, string> | undefined,
   key: string | undefined,
@@ -86,7 +85,7 @@ function withoutKey(
   return rest;
 }
 
-// 여러 키를 한 번에 제외. 클러스터 API 토큰 + kubeconfig 를 동시에 alloc env 에서 분리할 때.
+// Remove several keys at once. For separating the cluster API token + kubeconfig from the alloc env together.
 function withoutKeys(
   env: Record<string, string> | undefined,
   ...keys: (string | undefined)[]
@@ -96,8 +95,8 @@ function withoutKeys(
   return out;
 }
 
-// RuntimeSpec(nomad) + 테넌트 시크릿맵 → NomadBackendOptions.
-// authSecret(이름)은 Nomad API(ACL) 토큰으로 풀려 X-Nomad-Token 으로 쓰이고, alloc env 에서는 제외(에이전트에 노출 금지).
+// RuntimeSpec(nomad) + tenant secret map → NomadBackendOptions.
+// authSecret (a name) resolves to a Nomad API (ACL) token used as X-Nomad-Token, and is excluded from the alloc env (never exposed to the agent).
 export function nomadRuntimeOptions(
   spec: Extract<RuntimeSpec, { kind: "nomad" }>,
   secretEnv?: Record<string, string>,
@@ -115,8 +114,8 @@ export function nomadRuntimeOptions(
   };
 }
 
-// RuntimeSpec(k8s) + 테넌트 시크릿맵 → K8sBackendOptions. authSecret(bearer 토큰)/kubeconfigSecret(전체 kubeconfig)은
-// 클러스터 API 인증으로 풀려 쓰이고 둘 다 alloc env 에서 제외(untrusted eval 코드에 클러스터 자격증명 노출 금지).
+// RuntimeSpec(k8s) + tenant secret map → K8sBackendOptions. authSecret (bearer token) / kubeconfigSecret (full kubeconfig)
+// resolve to cluster-API auth, and both are excluded from the alloc env (never expose cluster credentials to untrusted eval code).
 export function k8sRuntimeOptions(
   spec: Extract<RuntimeSpec, { kind: "k8s" }>,
   secretEnv?: Record<string, string>,
@@ -136,16 +135,16 @@ export function k8sRuntimeOptions(
   };
 }
 
-// 테넌트가 등록한 RuntimeSpec(@everdict/core) → 라이브 Backend. 모델/클러스터 자격증명은 secretEnv 로 주입(스펙엔 비밀 없음).
-// 클러스터 API 토큰(authSecret)은 인증 헤더로 쓰이고 alloc env 에서는 분리된다(위 옵션 빌더).
-// 컨트롤플레인이 디스패치 시 이걸로 테넌트 런타임을 만들어 Scheduler 레지스트리에 올린다.
+// A tenant-registered RuntimeSpec (@everdict/core) → a live Backend. Model/cluster credentials are injected via secretEnv (the spec holds no secrets).
+// The cluster API token (authSecret) is used as an auth header and separated from the alloc env (the option builders above).
+// The control plane uses this at dispatch time to build a tenant runtime and register it in the Scheduler registry.
 export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> } = {}): Backend {
   if (spec.kind === "local") return new LocalBackend();
   if (spec.kind === "k8s") return new K8sBackend(k8sRuntimeOptions(spec, opts.secretEnv));
   if (spec.kind === "nomad") return new NomadBackend(nomadRuntimeOptions(spec, opts.secretEnv));
-  // union(local|nomad|k8s) 소진 — 컴파일타임 도달 불가. topology-capable(nomad/k8s + traceSource)은
-  // @everdict/topology ServiceTopologyBackend 가 필요(순환 의존 불가) → apps/api 의 buildBackend 가 처리한다.
-  // 런타임 방어: 경계에서 미검증 kind 가 들어오면 명시적으로 거절(never 캐스트로만 kind 문자열 확보).
+  // The union (local|nomad|k8s) is exhausted — unreachable at compile time. topology-capable (nomad/k8s + traceSource)
+  // needs @everdict/topology ServiceTopologyBackend (no circular dep allowed) → handled by apps/api's buildBackend.
+  // Runtime defense: explicitly reject an unvalidated kind arriving at the boundary (get the kind string only via a never cast).
   return assertNeverRuntimeKind(spec);
 }
 
@@ -154,7 +153,7 @@ function assertNeverRuntimeKind(spec: never): never {
   throw new BadRequestError(
     "BAD_REQUEST",
     { kind },
-    `buildRuntimeBackend 는 '${kind}' 를 직접 빌드하지 않습니다(topology-capable 런타임은 apps/api buildBackend 경유).`,
+    `buildRuntimeBackend does not build '${kind}' directly (topology-capable runtimes go through apps/api buildBackend).`,
   );
 }
 

@@ -1,10 +1,10 @@
-// 라이브: 실 Jaeger 에서 OTel trace ingestion — browser-use Phase 2 의 "real OTel/Jaeger span ingestion".
-// emitter 가 OTel SDK 로 browser-use 모양 trace 를 Jaeger(OTLP)에 내보내고, 우리 **OtelTraceSource** 가 Jaeger
-// query API(GET /api/traces/{id} → {data:[{spans}]})로 끌어와 정규화 TraceEvent[] 로 변환 → steps/cost 채점.
+// Live: OTel trace ingestion from real Jaeger — browser-use Phase 2's "real OTel/Jaeger span ingestion".
+// The emitter uses the OTel SDK to export a browser-use-shaped trace to Jaeger (OTLP), and our **OtelTraceSource** pulls it via the Jaeger
+// query API (GET /api/traces/{id} → {data:[{spans}]}) and normalizes it to TraceEvent[] → steps/cost grading.
 //   emit(OTLP→Jaeger) → OtelTraceSource.fetch(trace_id) → parseJaegerSpans → spansToTraceEvents → grade.
 //
-// 준비: Jaeger all-in-one(query :16686, OTLP :4318) + opentelemetry venv. 환경: JAEGER_ENDPOINT, OTEL_PY.
-// 사용: OTEL_PY=/tmp/mlf-venv/bin/python node scripts/live/otel-trace-ingest.mjs
+// Setup: Jaeger all-in-one (query :16686, OTLP :4318) + opentelemetry venv. Env: JAEGER_ENDPOINT, OTEL_PY.
+// Usage: OTEL_PY=/tmp/mlf-venv/bin/python node scripts/live/otel-trace-ingest.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { costGrader, stepsGrader } from "../../packages/graders/dist/index.js";
@@ -16,17 +16,17 @@ const PY = process.env.OTEL_PY ?? "python3";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 console.log("real OTel/Jaeger span ingestion — emit(OTLP→Jaeger) → OtelTraceSource → TraceEvent[] → grade\n");
-// 1) OTel SDK 로 Jaeger 에 trace 내보내기.
+// 1) Export a trace to Jaeger with the OTel SDK.
 const out = execFileSync(PY, ["scripts/live/otel-emit-trace.py"], {
   encoding: "utf8",
   env: { ...process.env, OTEL_EXPORTER_OTLP_ENDPOINT: OTLP },
 });
 const traceId = /TRACE_ID=(\S+)/.exec(out)?.[1];
-if (!traceId) throw new Error(`emitter 에서 TRACE_ID 못 찾음:\n${out}`);
-console.log("emitted trace_id:", traceId, "— Jaeger 인덱싱 대기 …");
+if (!traceId) throw new Error(`no TRACE_ID found in emitter output:\n${out}`);
+console.log("emitted trace_id:", traceId, "— waiting for Jaeger indexing …");
 await sleep(4000);
 
-// 2) 우리 OtelTraceSource 로 Jaeger 에서 ingest(자동 Jaeger-형식 감지).
+// 2) Ingest from Jaeger with our OtelTraceSource (auto-detects the Jaeger format).
 const source = new OtelTraceSource({ endpoint: JAEGER });
 let trace = await source.fetch(traceId);
 for (let i = 0; i < 6 && trace.length === 0; i++) {
@@ -44,7 +44,7 @@ for (const e of trace) {
   else console.log(`  ${e.kind}`);
 }
 
-// 3) 채점: 실 trace 위에서 steps/cost.
+// 3) Grade: steps/cost over the real trace.
 const evalCase = {
   id: "otel-ingest-1",
   env: { kind: "repo", source: { files: {} } },
@@ -71,7 +71,7 @@ const ok =
   steps.value >= 1;
 console.log(
   ok
-    ? "\n✅ real OTel/Jaeger span ingestion: OtelTraceSource 가 실 Jaeger query 형식을 끌어와 llm_call(모델/토큰)+tool_call 로 정규화하고 채점. browser-use Phase 2 — OTel 인제스트 동작(MLflow 와 동형)."
-    : "\n⚠️ ingestion/매핑 불일치",
+    ? "\n✅ real OTel/Jaeger span ingestion: OtelTraceSource pulls the real Jaeger query format, normalizes to llm_call (model/tokens) + tool_call, and grades. browser-use Phase 2 — OTel ingest works (isomorphic to MLflow)."
+    : "\n⚠️ ingestion/mapping mismatch",
 );
 process.exit(ok ? 0 : 1);

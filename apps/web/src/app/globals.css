@@ -1,11 +1,11 @@
 @import 'tailwindcss';
 @plugin 'tailwindcss-animate';
 
-/* 폰트 self-host(public/fonts) — 외부 CDN 무의존(오프라인·무FOUC·프라이버시·속도). variable woff2.
-   · 본문·디스플레이 = Pretendard(Latin+한글) — 앱 전면 기본 폰트.
-     음수 자간 letter-spacing:-0.02em 을 body 에 적용(한글 타이트닝 컨벤션).
-   · Inter Variable / Bricolage @font-face 는 보존하되 폰트 체인에서 빠져 미다운로드(과거 자산 —
-     이전엔 Latin=Inter[Linear 레터폼]였으나 Pretendard 전면 전환으로 대체). 코드/id 는 여전히 --font-mono. */
+/* Self-hosted fonts (public/fonts) — no external CDN dependency (offline·no-FOUC·privacy·speed). variable woff2.
+   · Body·display = Pretendard (Latin + Hangul) — the app-wide default font.
+     Applies negative letter-spacing:-0.02em to body (Korean tightening convention).
+   · Inter Variable / Bricolage @font-face are kept but dropped from the font chain so they aren't downloaded (legacy assets —
+     previously Latin=Inter [Linear letterforms], replaced by the full switch to Pretendard). Code/id still uses --font-mono. */
 @font-face {
   font-family: 'Inter Variable';
   font-style: normal;
@@ -43,9 +43,9 @@
 
 @custom-variant dark (&:is(.dark *));
 
-/* Linear 디자인 시스템 — linear.app 라이브 토큰에서 직접 추출(2026-06).
-   다크 퍼스트, near-black #08090a 캔버스, 정밀한 그레이 4단계, 인디고 #5e6ad2 / 액센트 #7170ff,
-   타이트한 라운드(4/6/8/12), translucent 보더, 13px 본문 + weight 510. */
+/* Linear design system — extracted directly from linear.app live tokens (2026-06).
+   Dark-first, near-black #08090a canvas, precise 4-step gray, indigo #5e6ad2 / accent #7170ff,
+   tight radii (4/6/8/12), translucent borders, 13px body + weight 510. */
 body {
   font-family:
     'Pretendard',
@@ -53,13 +53,13 @@ body {
     -apple-system,
     'Segoe UI',
     sans-serif;
-  letter-spacing: -0.02em; /* 한글 음수 자간 컨벤션 */
+  letter-spacing: -0.02em; /* Korean negative letter-spacing convention */
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
 }
 
-/* 코드·식별자는 모노 그대로 — 음수 자간 상속을 끊어 가독성 유지(id/코드/코드블록). */
+/* Code·identifiers stay mono — break the negative letter-spacing inheritance to keep readability (id/code/code blocks). */
 code,
 pre,
 kbd,
@@ -67,7 +67,7 @@ samp {
   letter-spacing: normal;
 }
 
-/* 디스플레이(워드마크/대형 헤딩) — Pretendard 를 타이트 트래킹으로. .font-display 로 적용. */
+/* Display (wordmark/large headings) — Pretendard with tight tracking. Applied via .font-display. */
 :root {
   --font-display: 'Pretendard', system-ui, sans-serif;
 }
@@ -76,7 +76,7 @@ samp {
   letter-spacing: -0.022em;
 }
 
-/* page-load staggered reveal — 절제된 8px rise(정제 미학). reduced-motion 이면 비활성. */
+/* page-load staggered reveal — a restrained 8px rise (refined aesthetic). Disabled under reduced-motion. */
 @keyframes everdict-rise {
   from {
     opacity: 0;
@@ -132,7 +132,7 @@ samp {
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ── 공통 모션 토큰(테마 무관) ─────────────────────────────────────────────── */
+/* ── Shared motion tokens (theme-agnostic) ────────────────────────────────── */
 :root {
   --ease-out-quart: cubic-bezier(0.165, 0.84, 0.44, 1);
   --ease-out-expo: cubic-bezier(0.19, 1, 0.22, 1);
@@ -140,7 +140,7 @@ samp {
   --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-/* ── Light (Linear light: 깨끗한 화이트 + 인디고) ──────────────────────────── */
+/* ── Light (Linear light: clean white + indigo) ──────────────────────────── */
 :root {
   --radius: 0.5rem;
   --background: #fcfcfd;
@@ -175,7 +175,7 @@ samp {
   --raise-shadow: 0 1px 2px rgba(13, 14, 16, 0.05), 0 1px 1px rgba(13, 14, 16, 0.04);
 }
 
-/* ── Dark (Linear signature: near-black #08090a + 인디고) ──────────────────── */
+/* ── Dark (Linear signature: near-black #08090a + indigo) ──────────────────── */
 .dark {
   --background: #08090a;
   --foreground: #f7f8f8;
@@ -213,8 +213,8 @@ samp {
   border-color: var(--color-border);
 }
 
-/* 클릭 가능한 컨트롤은 포인터 커서 — 브라우저/Tailwind preflight 기본은 화살표라 버튼이
-   '안 눌리는 것처럼' 보인다. Linear 처럼 버튼/role=button 에 명시적으로 pointer 를 준다. */
+/* Clickable controls get the pointer cursor — the browser/Tailwind preflight default is an arrow, so buttons
+   look "unclickable". Like Linear, give buttons/role=button an explicit pointer. */
 button:not(:disabled),
 [role='button']:not([aria-disabled='true']),
 label[for],
@@ -226,7 +226,7 @@ html {
   scroll-behavior: smooth;
 }
 
-/* 상단 글로우 — 콘텐츠 뒤에 고정 */
+/* Top glow — fixed behind the content */
 body {
   position: relative;
   background-image: var(--glow);
@@ -234,7 +234,7 @@ body {
   background-attachment: fixed;
 }
 
-/* 미세 그레인 오버레이 — 분위기/깊이(아주 옅게, Linear 의 crisp 한 느낌 유지) */
+/* Subtle grain overlay — mood/depth (very faint, keeping Linear's crisp feel) */
 body::before {
   content: '';
   position: fixed;
@@ -245,16 +245,16 @@ body::before {
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
-/* 본문 콘텐츠는 오버레이 위로. 단 body 로 포털된 고정 오버레이는 제외해야 한다 —
-   ① 모달 backdrop(.fixed) ② 토스트(sonner 는 body > section > ol[data-sonner-toaster] 구조라
-   body 직속 자식은 그 section — :has() 로 잡는다). 이들에 z-index:1 스택킹 컨텍스트가 걸리면 내부의
-   높은 z(모달 100·토스트 999999999)가 갇혀 서로 뒤에 깔린다. 오버레이는 자기 fixed·z 를 유지해야 한다. */
+/* Body content goes above the overlay. But fixed overlays portaled to body must be excluded —
+   ① the modal backdrop (.fixed) ② toasts (sonner's structure is body > section > ol[data-sonner-toaster], so
+   body's direct child is that section — caught via :has()). If a z-index:1 stacking context is applied to these, their inner
+   high z (modal 100·toast 999999999) gets trapped and they stack behind each other. The overlay must keep its own fixed·z. */
 body > *:not(.fixed):not(:has([data-sonner-toaster])) {
   position: relative;
   z-index: 1;
 }
 
-/* Linear st. 얇은 커스텀 스크롤바 */
+/* Linear st. thin custom scrollbar */
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--color-border) transparent;
@@ -279,7 +279,7 @@ body > *:not(.fixed):not(:has([data-sonner-toaster])) {
   color: var(--foreground);
 }
 
-/* 키보드 포커스 링 — Linear st. 인디고 ring + offset(마우스 클릭엔 안 뜨게 :focus-visible) */
+/* Keyboard focus ring — Linear st. indigo ring + offset (:focus-visible so it doesn't show on a mouse click) */
 :focus-visible {
   outline: none;
 }

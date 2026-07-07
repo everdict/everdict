@@ -1,10 +1,10 @@
-// 라이브: Nomad 에서 pool 스토어 격리(멀티테넌트). NomadTopologyRuntime 이 **공유 PG 1개**(Nomad service 잡)를
-// 띄우고 host:port 를 발견 → 테넌트별 전용 DB+role 을 `nomad alloc exec` 로 mint → 서비스에 scoped creds 주입.
-// 핵심 증명(K8s SLICE 40 과 동일): 테넌트 A creds 로 테넌트 B DB 접속 → 거부(DENIED), 자기 DB → 허용.
-// (Nomad 는 Consul 없이 DNS 가 없어 K8s 와 달리 런타임이 alloc host:port 를 발견해 주입한다.)
+// Live: pool store isolation on Nomad (multi-tenant). NomadTopologyRuntime brings up **one shared PG** (a Nomad service job)
+// and discovers its host:port → mints a per-tenant dedicated DB+role via `nomad alloc exec` → injects scoped creds into the service.
+// Core proof (same as K8s SLICE 40): tenant A's creds connecting to tenant B's DB → refused (DENIED), its own DB → allowed.
+// (Nomad has no DNS without Consul, so unlike K8s the runtime discovers the alloc host:port and injects it.)
 //
-// 준비: `nomad agent -dev`(docker driver) + postgres:16-alpine 가 호스트 docker 에 있어야 함.
-// 사용: PATH=$HOME/.local/bin:$PATH NOMAD_ADDR=http://127.0.0.1:4646 node scripts/live/pool-isolation-nomad.mjs
+// Prereqs: `nomad agent -dev` (docker driver) + postgres:16-alpine present in the host docker.
+// Usage: PATH=$HOME/.local/bin:$PATH NOMAD_ADDR=http://127.0.0.1:4646 node scripts/live/pool-isolation-nomad.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { NomadTopologyRuntime, SHARED_STORE_JOB_ID, planTenantStores } from "../../packages/topology/dist/index.js";
@@ -13,7 +13,7 @@ const ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
 const nomad = (args, input) =>
   execFileSync("nomad", args, { input, encoding: "utf8", env: { ...process.env, NOMAD_ADDR: ADDR } });
 
-// 포트 없는 서비스 → 엔드포인트 발견 루프 skip(여기선 pool 스토어 격리만 검증). postgres 의존.
+// Service with no port → skip the endpoint-discovery loop (here we only verify pool store isolation). Depends on postgres.
 const spec = {
   kind: "service",
   id: "pool-nomad",
@@ -33,13 +33,13 @@ const zone = (id) => ({
 
 const rt = new NomadTopologyRuntime({ addr: ADDR, datacenters: ["dc1"], pollIntervalMs: 2000, maxPolls: 60 });
 
-// 공유 PG alloc id 발견(테넌트 검증 psql 을 alloc 안에서 돌리기 위함).
+// Discover the shared PG alloc id (to run the tenant-verification psql inside the alloc).
 const sharedPgAlloc = async () => {
   const res = await fetch(`${ADDR}/v1/job/${SHARED_STORE_JOB_ID}/allocations`);
   const allocs = await res.json();
   return allocs.find((a) => a.TaskGroup === "everdict-shared-postgres" && a.ClientStatus === "running")?.ID;
 };
-// alloc 안에서 psql URL 로 접속 시도 → OK/DENIED.
+// Attempt to connect via the psql URL inside the alloc → OK/DENIED.
 const tryConnect = (allocId, url) => {
   try {
     nomad(["alloc", "exec", "-task", "everdict-shared-postgres", allocId, "psql", url, "-tAc", "select 1"]);
@@ -52,22 +52,22 @@ const tryConnect = (allocId, url) => {
   }
 };
 
-console.log("Nomad pool 멀티테넌트 스토어 격리 — 공유 PG + 테넌트별 DB/role, 교차접속 거부 검증\n");
+console.log("Nomad pool multi-tenant store isolation — shared PG + per-tenant DB/role, verify cross-connect refusal\n");
 let ok = false;
 try {
-  await rt.ensureTopology(spec, zone("acme")); // 공유 PG 배포 + tenant_acme/r_acme mint
-  await rt.ensureTopology(spec, zone("globex")); // tenant_globex/r_globex mint(공유 PG 재사용)
+  await rt.ensureTopology(spec, zone("acme")); // deploy shared PG + mint tenant_acme/r_acme
+  await rt.ensureTopology(spec, zone("globex")); // mint tenant_globex/r_globex (reuse shared PG)
 
   const allocId = await sharedPgAlloc();
-  if (!allocId) throw new Error("공유 PG alloc 을 찾지 못함");
-  // alloc 안에서 접속하므로 localhost:5432. DB/role/비번만 검증 대상(=런타임이 주입한 것과 동일 plan).
+  if (!allocId) throw new Error("could not find the shared PG alloc");
+  // Since we connect from inside the alloc, use localhost:5432. Only DB/role/password are under test (= same plan the runtime injects).
   const creds = (id) =>
     planTenantStores(spec, zone(id), { storeEndpoint: () => "127.0.0.1:5432" }).serviceEnv.DATABASE_URL;
   const acme = creds("acme");
   const globex = creds("globex");
   const acmeToGlobex = acme.replace("/tenant_acme", "/tenant_globex"); // acme creds → globex DB
 
-  // 공유 PG 에 두 테넌트 DB 가 생겼나.
+  // Did both tenant DBs get created on the shared PG?
   const dbs = nomad([
     "alloc",
     "exec",
@@ -94,7 +94,7 @@ try {
   const cross = tryConnect(allocId, acmeToGlobex);
   console.log(`\nacme creds → tenant_acme   : ${ownAcme}`);
   console.log(`globex creds → tenant_globex: ${ownGlobex}`);
-  console.log(`acme creds → tenant_globex : ${cross}   <-- 교차접속(거부돼야 함)`);
+  console.log(`acme creds → tenant_globex : ${cross}   <-- cross-connect (must be refused)`);
 
   ok =
     /tenant_acme/.test(dbs) &&
@@ -107,8 +107,8 @@ try {
   );
   console.log(
     ok
-      ? "\n✅ Nomad pool 멀티테넌트: 공유 PG 1개 + 테넌트별 DB/role/creds — 테넌트 A creds 로 B DB 접속 거부, 자기 DB 만 허용. K8s↔Nomad pool 격리 패리티."
-      : "\n⚠️ 일부 체크 실패",
+      ? "\n✅ Nomad pool multi-tenant: one shared PG + per-tenant DB/role/creds — tenant A's creds refused on tenant B's DB, only its own DB allowed. K8s↔Nomad pool isolation parity."
+      : "\n⚠️ some checks failed",
   );
 } finally {
   await rt.teardown(spec, zone("acme")).catch(() => {});
@@ -116,6 +116,6 @@ try {
   try {
     nomad(["job", "stop", "-purge", SHARED_STORE_JOB_ID]);
   } catch {}
-  console.log("teardown: 토폴로지/공유스토어 잡 purge 요청됨");
+  console.log("teardown: requested purge of topology/shared-store jobs");
 }
 process.exit(ok ? 0 : 1);

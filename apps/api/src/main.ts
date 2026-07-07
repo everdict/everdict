@@ -126,8 +126,8 @@ import { TraceSinkService } from "./trace-sink-service.js";
 import { ViewService } from "./view-service.js";
 import { WorkspaceService } from "./workspace-service.js";
 
-// 멀티테넌트 컨트롤플레인 서버. tenant 는 Bearer API 키에서 파생(없으면 dev 헤더 폴백).
-// DATABASE_URL 이 있으면 Postgres(스토어/키/레지스트리), 아니면 in-memory. NOMAD_ADDR 면 Nomad 백엔드.
+// Multi-tenant control-plane server. tenant is derived from the Bearer API key (dev header fallback if absent).
+// DATABASE_URL → Postgres (stores/keys/registries), else in-memory. NOMAD_ADDR → Nomad backend.
 async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? "8787");
   const nomadAddr = process.env.NOMAD_ADDR;
@@ -158,9 +158,9 @@ async function main(): Promise<void> {
     viewStore,
   } = await makePersistence();
   const workspaceService = new WorkspaceService(workspaceStore);
-  // scheduleService 는 아래에서 생성되지만(scorecardService 의존), 멤버 제거 훅은 클로저로 늦바인딩한다
-  // — 훅은 런타임(멤버 이탈 시)에만 호출되고 그때는 이미 할당돼 있다.
-  // biome-ignore lint/style/useConst: 선언↔할당 분리가 필요(순환 생성 순서) — 멤버 제거 훅 클로저가 이 바인딩을 캡처한다.
+  // scheduleService is created below (it depends on scorecardService), but the member-removal hook late-binds it via a closure
+  // — the hook is only called at runtime (when a member leaves), by which point it is already assigned.
+  // biome-ignore lint/style/useConst: declaration↔assignment must be split (circular creation order) — the member-removal hook closure captures this binding.
   let scheduleService: ScheduleService;
   const membershipService = new MembershipService(workspaceStore, inviteStore, userProfileStore, (ws, sub) =>
     scheduleService.disableByCreator(ws, sub),
@@ -168,20 +168,22 @@ async function main(): Promise<void> {
   const profileService = new ProfileService(userProfileStore);
   const runnerService = new RunnerService(runnerStore);
   await seedSharedHarnessTaxonomy(harnessTemplateRegistry, harnessInstanceRegistry);
-  // 데이터셋은 자동 시드하지 않는다 — first-party 예제(examples/datasets/*.json)는 워크스페이스 목록을 채우는
-  // 노이즈였다. _shared 폴백 메커니즘 자체는 유지(향후 진짜 공유 벤치마크를 등록하면 그대로 보인다).
+  // Datasets are not auto-seeded — the first-party examples (examples/datasets/*.json) were noise that cluttered
+  // the workspace list. The _shared fallback mechanism itself stays (a real shared benchmark registered later shows through).
   await seedSharedJudges(judgeRegistry);
   await seedSharedModels(modelRegistry);
-  // 런타임도 자동 시드하지 않는다 — 기본 _shared docker/local 은 "누구의 인프라인지" 모호한 노이즈였다.
-  // 런타임은 워크스페이스가 자기 인프라를 직접 등록하는 개념(examples/runtimes/*.json 은 참고용으로만 유지).
+  // Runtimes are not auto-seeded either — the default _shared docker/local were noise ("whose infra is this?" ambiguity).
+  // A runtime is meant to be a workspace registering its own infra (examples/runtimes/*.json kept for reference only).
 
-  // 부팅 시 고아 작업 회수 — 배치/run 은 이 프로세스 안에서 in-process 로 track 되므로, 재시작 시점에
-  // queued/running 인 레코드는 이어받을 주체가 없는 유령이다(작업 큐가 영원히 '실행 중'을 보이는 원인).
+  // Recover orphaned jobs at boot — batches/runs are tracked in-process within this process, so at restart any
+  // queued/running record is a ghost with no one to resume it (why the work queue would show 'running' forever).
   const recovered = await recoverInterrupted({ scorecards: scorecardStore, runs: store });
   if (recovered.scorecards + recovered.runs > 0)
-    console.error(`▶ 중단된 작업 회수: 배치 ${recovered.scorecards} · run ${recovered.runs} → failed(INTERRUPTED)`);
+    console.error(
+      `▶ recovered interrupted jobs: batches ${recovered.scorecards} · runs ${recovered.runs} → failed(INTERRUPTED)`,
+    );
 
-  // 워크스페이스 시크릿(모델/프로바이더 키)을 그 테넌트의 잡 env 에만 주입(누출 금지). 저장소는 항상 활성.
+  // Inject workspace secrets (model/provider keys) only into that tenant's job env (no leakage). The store is always active.
   const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
 
   const backends = new BackendRegistry();
@@ -190,41 +192,41 @@ async function main(): Promise<void> {
   } else if (k8sContext && image) {
     backends.register("k8s", new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv(), secrets }));
   }
-  // 정책(기본): LocalBackend(격리 없는 컨트롤플레인 호스트 in-process)는 절대 등록하지 않는다 — 모든 실행은 등록된
-  // 테넌트 런타임 또는 self-hosted 러너(self:<id>/self:ws)를 target 으로 지정해야 한다. 옵트인 env 없이 이게 기본 동작.
-  // (dev/단일-호스트 in-process 실행이 필요하면 apps/cli 의 everdict run 을 쓴다 — API 는 관리형/원격 실행만.)
+  // Policy (default): never register LocalBackend (unisolated in-process on the control-plane host) — every run must
+  // target a registered tenant runtime or a self-hosted runner (self:<id>/self:ws). This is the default with no opt-in env.
+  // (For dev/single-host in-process runs use apps/cli's `everdict run` — the API only does managed/remote execution.)
   const scheduler = new Scheduler(backends);
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
-  // 셀프호스티드 러너 lease 허브 — self:<runnerId> 잡을 파킹하고, 러너 프로토콜(MCP, slice 4)이 가져가/회신한다.
-  // 디스패처(파킹)와 MCP lease/result 도구(가져가기/완료)가 공유하는 단일 인스턴스.
+  // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
+  // A single instance shared by the dispatcher (park) and the MCP lease/result tools (lease/complete).
   const runnerHub = new RunnerHub(
     process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
       ? { queueTimeoutMs: Number(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
       : {},
   );
 
-  // front-door callback 완료 모델: 공개 베이스 URL 이 설정되면 in-process 랑데부를 하나 만들어 토폴로지 백엔드(outbound:
-  // {{callback_url}}/wait)와 /frontdoor-callback 라우트(inbound: deliver)가 공유한다. 미설정이면 callback 모델은 드라이버에서
-  // 명확히 실패(랑데부 없음). 단일 control-plane 프로세스(in-process dispatch) 전제 — 분산은 store-backed 랑데부가 후속.
+  // Front-door callback completion model: when a public base URL is set, build one in-process rendezvous shared by the topology
+  // backend (outbound: {{callback_url}}/wait) and the /frontdoor-callback route (inbound: deliver). If unset, the callback model
+  // fails clearly in the driver (no rendezvous). Assumes a single control-plane process (in-process dispatch) — distribution via a store-backed rendezvous is a follow-up.
   const callbackRendezvous = process.env.EVERDICT_CALLBACK_BASE_URL
     ? new InProcessCallbackRendezvous(process.env.EVERDICT_CALLBACK_BASE_URL)
     : undefined;
   if (callbackRendezvous) console.log("▶ front-door callback rendezvous:", process.env.EVERDICT_CALLBACK_BASE_URL);
 
-  // 테넌트 런타임 라우팅: placement.target 이 테넌트 등록 Runtime 이면 그 백엔드를 빌드/등록해 라우팅(아니면 글로벌 백엔드 그대로).
+  // Tenant runtime routing: if placement.target is a tenant-registered Runtime, build/register that backend and route to it (else the global backend as-is).
   const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
-  // harness env {secretRef} 해석용 두 티어 — 공유(owner='') + 제출자 개인(owner=subject). run/scorecard 가 제출자로 호출.
+  // Two tiers for resolving harness env {secretRef} — shared (owner='') + submitter's personal (owner=subject). run/scorecard call as the submitter.
   const scopedSecretsFor = (tenant: string, subject?: string) => secretStore.scopedEntries(tenant, subject ?? "");
-  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + everdict image push 발행 대상 + pull 자격증명 주입.
-  // 런타임 빌더/디스패치 enrichment 가 pullAuth 를 쓰므로 그 앞에서 생성한다.
+  // Workspace image registry (BYO) — the harness image classification baseline + `everdict image push` publish target + pull-credential injection.
+  // The runtime builder / dispatch enrichment uses pullAuth, so create it beforehand.
   const imageRegistryService = new ImageRegistryService({
     settings: settingsStore,
-    secretsFor: runtimeSecretsFor, // push/pull 자격증명·등록 경고는 공유(workspace) 시크릿 티어에서 resolve
+    secretsFor: runtimeSecretsFor, // push/pull credentials + registration warnings resolve from the shared (workspace) secret tier
   });
-  // RuntimeSpec → 라이브 백엔드. traceSource 를 가진 nomad/k8s(= topology-capable) → ServiceTopologyBackend,
-  // 나머지는 buildRuntimeBackend(local/nomad/k8s). (옛 topology kind 는 slice 5b-2 에서 nomad/k8s + traceSource 로 접힘.)
-  // 디스패치와 연결 테스트(probe)가 같은 빌더/인증 경로를 쓰도록 한 곳에서 정의.
+  // RuntimeSpec → live backend. nomad/k8s with a traceSource (= topology-capable) → ServiceTopologyBackend,
+  // everything else → buildRuntimeBackend (local/nomad/k8s). (The old topology kind was folded into nomad/k8s + traceSource in slice 5b-2.)
+  // Defined in one place so dispatch and the connection test (probe) share the same builder/auth path.
   const runtimeBuildBackend = (
     spec: RuntimeSpec,
     opts: { secretEnv?: Record<string, string>; registryAuth?: RegistryAuth },
@@ -233,12 +235,12 @@ async function main(): Promise<void> {
       ? buildTopologyBackend(spec, {
           harnesses: harnessInstanceRegistry,
           ...(callbackRendezvous ? { callbackRendezvous } : {}),
-          // 워크스페이스 레지스트리 pull 자격증명 — 토폴로지 런타임이 서비스 이미지를 인증 pull(nomad auth/k8s imagePullSecrets).
+          // Workspace registry pull credentials — the topology runtime authenticates when pulling service images (nomad auth / k8s imagePullSecrets).
           ...(opts.registryAuth ? { registryAuth: opts.registryAuth } : {}),
         })
       : buildRuntimeBackend(spec, opts);
-  // command 하니스의 {{model}} 을 등록 Model id 로 해석(아니면 raw)한 뒤 RuntimeDispatcher(placement)로 위임.
-  // run/judge/scorecard 가 이 한 디스패처를 공유하므로 모든 경로가 동일하게 해석된 모델로 실행된다.
+  // Resolve a command harness's {{model}} to a registered Model id (else raw), then delegate to RuntimeDispatcher (placement).
+  // run/judge/scorecard share this one dispatcher, so every path runs with the identically-resolved model.
   const dispatcher = new ModelResolvingDispatcher(
     modelRegistry,
     new RuntimeDispatcher({
@@ -247,50 +249,50 @@ async function main(): Promise<void> {
       runtimes: runtimeRegistry,
       secretsFor: runtimeSecretsFor,
       buildBackend: runtimeBuildBackend,
-      // 워크스페이스 레지스트리 pull 자격증명 — topology 백엔드 빌드에 실어 서비스 이미지 인증 pull.
+      // Workspace registry pull credentials — carried into the topology backend build to authenticate service-image pulls.
       registryAuthsFor: (tenant) => imageRegistryService.pullAuths(tenant),
-      // self:<runnerId> — 개인 소유 러너. 소유 확인(미소유=undefined) + 그 러너의 capabilities 반환(service 게이트용).
+      // self:<runnerId> — personally-owned runner. Confirm ownership (not owned = undefined) + return that runner's capabilities (for the service gate).
       resolveSelfRunner: async (owner, runnerId) => (await runnerStore.get(owner, runnerId))?.capabilities,
-      // self:ws — 워크스페이스 풀. 그 owner(=ws:<tenant>)가 러너를 하나라도 가졌는지(아무 러너나 lease).
+      // self:ws — workspace pool. Whether that owner (=ws:<tenant>) has any runner at all (lease any runner).
       poolHasRunners: async (owner) => (await runnerStore.list(owner)).length > 0,
       buildSelfHostedBackend: (key) => new SelfHostedBackend(key, runnerHub),
     }),
   );
-  // 연결 테스트: 같은 빌더+테넌트 시크릿으로 백엔드를 만들어 probe()(잡 없이 도달성/인증). server/MCP 가 공유.
+  // Connection test: build a backend with the same builder + tenant secrets and probe() (reachability/auth with no job). Shared by server/MCP.
   const probeRuntime = makeRuntimeProber({ secretsFor: runtimeSecretsFor, buildBackend: runtimeBuildBackend });
 
-  // 아티팩트 스토어(env 설정 시): os-use 스크린샷을 S3/MinIO 로 오프로드 → 결과 레코드엔 presigned URL 만(base64 인라인 안 함).
-  // 미설정이면 undefined → 서비스가 base64 인라인 폴백(dev). 자격증명은 env 시크릿(커밋 금지).
+  // Artifact store (when env-configured): offload os-use screenshots to S3/MinIO → result records carry only a presigned URL (no base64 inline).
+  // Unset → undefined → the service falls back to base64 inline (dev). Credentials are env secrets (never committed).
   const artifacts = await artifactStoreFromEnv();
   if (artifacts) console.log("▶ artifact store: S3/MinIO offload enabled (os-use screenshots)");
 
-  const envMeterPolicy = meterUsagePolicyFromEnv(); // 워크스페이스 DB 설정이 없을 때의 기본 정책
-  // 완료 알림: 워크스페이스 설정 notify(Mattermost 연결+채널)가 있으면 run/scorecard 완료를 채널에 게시(소비 슬라이스).
+  const envMeterPolicy = meterUsagePolicyFromEnv(); // default policy when the workspace has no DB setting
+  // Completion notifications: when workspace notify settings exist (Mattermost connection + channel), post run/scorecard completion to the channel (consumer slice).
   const notificationService = new NotificationService({
     settingsFor: (tenant) => settingsStore.get(tenant),
-    // 워크스페이스 Mattermost(bot 토큰) — settings.mattermost.botTokenSecretName 을 공유 시크릿에서 resolve.
+    // Workspace Mattermost (bot token) — resolve settings.mattermost.botTokenSecretName from shared secrets.
     secretsFor: runtimeSecretsFor,
-    feed: notificationStore, // 개인 알림 피드(벨 인박스) — docs/architecture/notifications.md
+    feed: notificationStore, // personal notification feed (bell inbox) — docs/architecture/notifications.md
   });
-  // 워크스페이스 소유 Mattermost 통합(등록→bot 알림 + 인바운드 슬래시커맨드/버튼). apiPublicUrl 로 인바운드 URL 노출.
+  // Workspace-owned Mattermost integration (register → bot notifications + inbound slash commands/buttons). apiPublicUrl exposes the inbound URL.
   const mattermostService = new MattermostService(settingsStore, {
     ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}),
   });
-  // 워크스페이스 트레이스 싱크 — 스코어카드 상세 결과를 팀 관측 플랫폼에 적재. docs/architecture/trace-sink.md
+  // Workspace trace sinks — export scorecard detail results to the team's observability platform. docs/architecture/trace-sink.md
   const traceSinkService = new TraceSinkService(settingsStore, {
-    secretsFor: runtimeSecretsFor, // authSecretName → 공유(workspace) 시크릿 값
+    secretsFor: runtimeSecretsFor, // authSecretName → shared (workspace) secret value
     buildSink: buildTraceSink,
   });
-  // 리소스 댓글(데이터셋 등) 협업 논의 + @멘션 알림. 멘션되면 언급자 이름을 프로필/멤버에서 해석해 개인 피드로.
+  // Resource comments (datasets, etc.) for collaborative discussion + @mention notifications. On a mention, resolve the mentioner's name from profile/membership into the personal feed.
   const commentService = new CommentService({
     store: commentStore,
     notifyMention: async ({ tenant, comment, recipients }) => {
-      // listMembers 가 프로필 이름을 이미 병합해 준다 — 언급자의 표시명(이름>이메일 로컬파트>기본).
+      // listMembers already merges in profile names — the mentioner's display name (name > email local-part > default).
       const member = await membershipService
         .listMembers(tenant)
         .then((ms) => ms.find((m) => m.subject === comment.author))
         .catch(() => undefined);
-      const actorName = member?.name ?? member?.email?.split("@")[0] ?? "누군가";
+      const actorName = member?.name ?? member?.email?.split("@")[0] ?? "someone";
       await notificationService.notifyMention(tenant, {
         recipients,
         actorName,
@@ -301,9 +303,9 @@ async function main(): Promise<void> {
       });
     },
   });
-  // 워크스페이스 소유 GitHub App 통합 — 조직 설치→선택 repo→워크스페이스 소유 installation(개인 연결 대체).
-  // github.com App = operator env(GITHUB_APP_*); GHE App = 관리자가 워크스페이스에 등록(개인키=SecretStore name-ref).
-  // RunService/ScorecardService 의 installationTokenFor 가 이걸 부르므로 그 앞에서 생성한다.
+  // Workspace-owned GitHub App integration — org install → selected repos → workspace-owned installation (replaces personal connections).
+  // github.com App = operator env (GITHUB_APP_*); GHE App = admin registers it on the workspace (private key = SecretStore name-ref).
+  // RunService/ScorecardService's installationTokenFor calls this, so create it beforehand.
   const githubComApp = githubComAppConfig();
   const githubAppService = new GithubAppService({
     states: oauthStateStore,
@@ -315,53 +317,54 @@ async function main(): Promise<void> {
       ...(githubComApp ? { githubCom: githubComApp } : {}),
     },
   });
-  if (githubComApp) console.error("▶ github-app: github.com App 활성(GITHUB_APP_ID/SLUG) — 조직 설치→선택 repo 원클릭");
+  if (githubComApp)
+    console.error("▶ github-app: github.com App enabled (GITHUB_APP_ID/SLUG) — org install → selected-repo one-click");
   else
     console.warn(
-      "▶ github-app: GITHUB_APP_* 미설정 — github.com App 설치 비활성(GHE 는 관리자가 워크스페이스에 등록 시 가능).",
+      "▶ github-app: GITHUB_APP_* unset — github.com App install disabled (GHE still works when an admin registers it on the workspace).",
     );
 
   const service = new RunService({
     dispatcher,
     store,
     budget,
-    requireRuntime: true, // 정책(기본): runtime/self 타깃 없는 run 은 제출 시 400 — API 는 local 을 등록하지 않는다
+    requireRuntime: true, // policy (default): a run with no runtime/self target is 400 at submit — the API does not register local
     ...(artifacts ? { artifacts } : {}),
-    // 선언형 하니스: 인스턴스 레지스트리에서 template+pins 를 resolve 해 spec 을 잡에 임베드(없으면 빌트인 폴백).
+    // Declarative harness: resolve template+pins from the instance registry and embed the spec in the job (built-in fallback if absent).
     resolveHarness: (tenant, id, version) => harnessInstanceRegistry.get(tenant, id, version),
-    // harness env 의 {secretRef}(공유+개인 시크릿) 를 디스패치 직전 해석(레지스트리엔 평문 미저장). scorecard 와 동일.
+    // Resolve harness env {secretRef} (shared + personal secrets) just before dispatch (no plaintext stored in the registry). Same as scorecard.
     scopedSecretsFor,
-    // 워크스페이스 단위 계측 정책(요청별 override 가 우선): DB 설정 스토어 우선, 미설정이면 env 정책 폴백.
+    // Per-workspace metering policy (a per-request override wins): the DB settings store first, else the env policy fallback.
     meterUsageFor: async (tenant) => (await settingsStore.get(tenant))?.meterUsage ?? envMeterPolicy(tenant),
-    // 워크스페이스 기본 judge 모델(요청별 override 가 우선): inline judge grader 가 이 모델로 채점되도록 잡에 주입.
+    // Workspace default judge model (a per-request override wins): injected into the job so an inline judge grader scores with this model.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
-    // 비공개 repo 시드(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(팀 공용).
+    // Private-repo seed (preferred): if the case git URL owner matches the workspace GitHub App installation, use that App token (team-shared).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
-    // 워크스페이스 레지스트리 이미지 pull 자격증명 — 잡 이미지가 그 레지스트리 것이면 job.registryAuth 로 attach.
+    // Workspace registry image pull credentials — if the job image belongs to that registry, attach via job.registryAuth.
     registryAuthsFor: (workspace) => imageRegistryService.pullAuths(workspace),
-    // 잡 밖 트레이스 수집(하니스 trace.collect="control-plane") — executeCase 가 traceRef 결과를 완성.
+    // Out-of-job trace collection (harness trace.collect="control-plane") — executeCase finalizes the traceRef result.
     buildTraceSource,
-    secretsFor: runtimeSecretsFor, // 수집 pull 인증(traceRef.authSecret 재해석)
-    // 완료 알림(Mattermost) — 워크스페이스 notify 설정이 있으면 채널 게시. 실패는 run 결과 무관.
+    secretsFor: runtimeSecretsFor, // pull auth for collection (re-resolve traceRef.authSecret)
+    // Completion notification (Mattermost) — post to the channel when workspace notify settings exist. Failure is independent of the run result.
     onComplete: (tenant, record) => notificationService.notifyRun(tenant, record),
   });
-  // judge 실행기: model(anthropic/openai)은 테넌트 시크릿 키로 실제 호출, harness 는 참조 에이전트를 디스패치해 판정.
-  // 키/시크릿 없으면 skip(사유 명시). openai 베이스(LiteLLM 등)는 OPENAI_BASE_URL 시크릿 또는 env.
+  // Judge runner: a model judge (anthropic/openai) makes a real call with the tenant secret key; a harness judge dispatches a reference agent to render the verdict.
+  // Skip (with a stated reason) if the key/secret is missing. An openai base (LiteLLM etc.) comes from the OPENAI_BASE_URL secret or env.
   const judgeRunner = defaultJudgeRunner({
     secretsFor: runtimeSecretsFor,
-    dispatch: (job) => dispatcher.dispatch(job), // harness judge 도 테넌트 런타임 라우팅 경유
+    dispatch: (job) => dispatcher.dispatch(job), // a harness judge also goes through tenant runtime routing
     harnesses: harnessInstanceRegistry,
-    models: modelRegistry, // judge.model 이 등록된 model id 면 provider/baseUrl/하부모델을 해석(아니면 raw 문자열)
+    models: modelRegistry, // if judge.model is a registered model id, resolve provider/baseUrl/underlying-model (else a raw string)
     ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL
       ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
       : {}),
   });
-  // 배치 평가: 데이터셋(케이스 묶음)을 하니스@버전으로 돌려 스코어카드 집계 + 선택한 judge 를 트레이스에 적용.
+  // Batch eval: run a dataset (bundle of cases) against a harness@version, aggregate into a scorecard + apply the selected judges to each trace.
   const scorecardService = new ScorecardService({
     dispatcher,
     store: scorecardStore,
-    requireRuntime: true, // 정책(기본): runtime 없는 배치는 제출 시 400 — API 는 local 을 등록하지 않는다
-    // 케이스마다 자식 run 을 팬아웃(단일 run 과 같은 RunStore 공유) — 각 케이스가 addressable run 이 되고 활동 리스트엔 기본 숨김.
+    requireRuntime: true, // policy (default): a batch with no runtime is 400 at submit — the API does not register local
+    // Fan out a child run per case (sharing the same RunStore as a single run) — each case becomes an addressable run, hidden by default in the activity list.
     runStore: store,
     datasets: datasetRegistry,
     harnesses: harnessInstanceRegistry,
@@ -369,27 +372,27 @@ async function main(): Promise<void> {
     judgeRunner,
     budget,
     ...(artifacts ? { artifacts } : {}),
-    // 워크스페이스 기본 judge 모델(요청별 override 우선): 배치 eval 의 inline judge grader 가 이 모델로 채점.
+    // Workspace default judge model (a per-request override wins): the batch eval's inline judge grader scores with this model.
     judgeFor: async (tenant) => (await settingsStore.get(tenant))?.judge,
-    // pull 인제스트: 테넌트 OTel/MLflow 에서 트레이스를 당겨 채점. 자격증명은 테넌트 SecretStore(authSecret 이름).
+    // Pull ingest: pull traces from the tenant's OTel/MLflow and score them. Credentials come from the tenant SecretStore (authSecret name).
     buildTraceSource,
-    secretsFor: runtimeSecretsFor, // judge 모델 키(공유 시크릿)
-    scopedSecretsFor, // harness env {secretRef} 해석(공유+제출자 개인)
-    // 비공개-repo 데이터셋(우선): 케이스 git URL owner 가 워크스페이스 GitHub App installation 과 매칭되면 그 App 토큰(단일 run 과 동일).
+    secretsFor: runtimeSecretsFor, // judge model key (shared secret)
+    scopedSecretsFor, // resolve harness env {secretRef} (shared + submitter's personal)
+    // Private-repo dataset (preferred): if the case git URL owner matches the workspace GitHub App installation, use that App token (same as a single run).
     installationTokenFor: (workspace, gitUrl) => githubAppService.tokenForRepo(workspace, gitUrl),
-    // 워크스페이스 레지스트리 이미지 pull 자격증명 — 배치 케이스도 단일 run 과 동일하게 attach.
+    // Workspace registry image pull credentials — batch cases attach the same way as a single run.
     registryAuthsFor: (workspace) => imageRegistryService.pullAuths(workspace),
-    // 완료 알림(Mattermost) — 배치 평가 완료도 run 과 동일하게 채널 게시.
+    // Completion notification (Mattermost) — batch-eval completion posts to the channel just like a run.
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
-    // 트레이스 싱크 적재 — 채점 완료된 상세 결과를 워크스페이스 관측 플랫폼으로(record.export 에 outcome 기록).
+    // Trace sink export — export judged detail results to the workspace observability platform (outcome recorded on record.export).
     exportResults: (tenant, ctx, results, attach) => traceSinkService.exportScorecard(tenant, ctx, results, attach),
-    // 라이브 배치는 케이스 완성(judge 후) 즉시 스트리밍 export(D5) — ingest 는 위 exportResults(일괄) 유지.
+    // A live batch streams the export the moment a case completes (after judging) (D5) — ingest keeps the batched exportResults above.
     exportStreamFor: (tenant, ctx) => traceSinkService.exportStream(tenant, ctx),
   });
-  // Mattermost 인바운드(슬래시커맨드/버튼) — commandToken 검증 후 채팅에서 스코어카드 실행/리더보드 조회.
+  // Mattermost inbound (slash commands/buttons) — after commandToken verification, run a scorecard / view the leaderboard from chat.
   const mattermostCommandService = new MattermostCommandService({
     settings: settingsStore,
-    secretsFor: runtimeSecretsFor, // commandTokenSecretName 값 resolve(검증) — 워크스페이스 공유 시크릿
+    secretsFor: runtimeSecretsFor, // resolve (verify) the commandTokenSecretName value — a workspace shared secret
     submitScorecard: async (workspace, { dataset, harness, submittedBy }) => {
       const rec = await scorecardService.submit({
         tenant: workspace,
@@ -409,18 +412,18 @@ async function main(): Promise<void> {
     },
     webBaseUrl: process.env.WEB_BASE_URL ?? "http://localhost:3001",
   });
-  // 벤치마크 카탈로그 인입: first-party 벤치마크를 ID 만으로 당겨 테넌트 데이터셋으로 등록. gated 는 HF_TOKEN 시크릿.
+  // Benchmark catalog import: pull a first-party benchmark by ID alone and register it as a tenant dataset. Gated ones use the HF_TOKEN secret.
   const benchmarkService = new BenchmarkService({
     datasets: datasetRegistry,
     benchmarks: benchmarkRegistry,
-    // gated HF 인증 — 요청자 "개인" 시크릿 우선, 워크스페이스 공유 폴백. 멤버는 admin 없이도
-    // 계정 시크릿에 HF_TOKEN 만 넣으면 웹에서 스스로 gated 벤치마크를 인입할 수 있다(셀프서비스).
+    // Gated HF auth — the requester's "personal" secret first, workspace-shared fallback. A member can, without an admin,
+    // just put HF_TOKEN in their account secrets and self-serve import a gated benchmark from the web.
     secretsFor: async (tenant, subject) => {
       const scoped = await secretStore.scopedEntries(tenant, subject ?? "");
       return { ...scoped.workspace, ...scoped.user };
     },
   });
-  // 번들 원샷 설치 — 기존 레지스트리들로 팬아웃(하니스+벤치마크+데이터셋+런타임+judge/model). 새 스토어 없음.
+  // Bundle one-shot install — fan out over the existing registries (harness + benchmark + dataset + runtime + judge/model). No new store.
   const bundleService = new BundleService({
     harnessTemplates: harnessTemplateRegistry,
     harnessInstances: harnessInstanceRegistry,
@@ -430,41 +433,41 @@ async function main(): Promise<void> {
     models: modelRegistry,
     runtimes: runtimeRegistry,
   });
-  // CI repo link — 레포↔하니스 슬롯 매핑(= GitHub Actions OIDC trust) CRUD + 레포 picker + setup-PR 생성기.
-  // picker/setup-PR 은 멤버 개인 GitHub 연결 토큰(tokenFor)을 서버 안에서만 사용한다.
+  // CI repo link — repo↔harness-slot mapping (= GitHub Actions OIDC trust) CRUD + repo picker + setup-PR generator.
+  // The picker/setup-PR use the member's personal GitHub connection token (tokenFor) only server-side.
   const ciLinkService = new CiLinkService({
     settings: settingsStore,
-    githubApp: githubAppService, // repo picker + setup-PR + 러너 등록 토큰 = 워크스페이스 GitHub App(개인 연결 대체)
-    runners: runnerService, // setup-PR 의 self:ws 풀 존재 검사(D6 — CI 배치는 항상 셀프호스티드, fail-closed)
-    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // 생성 워크플로의 api-url
+    githubApp: githubAppService, // repo picker + setup-PR + runner registration token = the workspace GitHub App (replaces personal connections)
+    runners: runnerService, // setup-PR checks the self:ws pool exists (D6 — CI placement is always self-hosted, fail-closed)
+    ...(process.env.API_PUBLIC_URL ? { apiPublicUrl: process.env.API_PUBLIC_URL } : {}), // api-url of the generated workflow
   });
 
-  // 예약(cron) 스코어카드. SSOT = scheduleStore; Temporal 주소가 설정되면 TemporalScheduleDriver 로 Schedule 동기화
-  // (발사 활성화). 발사는 워크플로→internal 라우트→여기 submitScorecard. 미설정이면 CRUD 만(발사 비활성, dev).
+  // Scheduled (cron) scorecards. SSOT = scheduleStore; when a Temporal address is set, sync the Schedule via TemporalScheduleDriver
+  // (firing enabled). Firing goes workflow → internal route → submitScorecard here. Unset → CRUD only (firing disabled, dev).
   const temporalAddress = process.env.EVERDICT_TEMPORAL_ADDRESS;
   scheduleService = new ScheduleService({
     store: scheduleStore,
     ...(temporalAddress ? { driver: new TemporalScheduleDriver({ address: temporalAddress }) } : {}),
     submitScorecard: (sc) => scorecardService.submit(sc),
     scorecardStatus: async (id) => (await scorecardService.get(id))?.status,
-    // 회귀 알림: 직전↔이번 스케줄 run diff(완료여야 가능) → 회귀 시 Mattermost(완료 알림은 스코어카드 onComplete 가 별도).
+    // Regression alert: diff previous↔this schedule run (both must be complete) → Mattermost on regression (completion notification is separate, via the scorecard onComplete).
     diffScorecards: (tenant, baselineId, candidateId) => scorecardService.diff(tenant, baselineId, candidateId),
     notifyRegression: (tenant, payload) => notificationService.notifyRegression(tenant, payload),
   });
 
-  // 작업 큐 스냅샷 — 지금 무엇이 어디(런타임 레인)에서 돌고/기다리고, 다음 예약 발사는 무엇인지(읽기 전용 가시성).
+  // Work queue snapshot — what is running/waiting where (runtime lane) right now, and what the next scheduled fire is (read-only visibility).
   const queueService = new QueueService({
     scorecards: scorecardStore,
     runs: store,
     schedules: scheduleService,
     runtimes: runtimeRegistry,
-    // personal 큐 스코프 — 요청자 본인 러너(self:<id>)만 개인 큐로 노출(다른 멤버 것은 비노출). label = 호스트명.
+    // Personal queue scope — expose only the requester's own runners (self:<id>) as a personal queue (other members' are hidden). label = hostname.
     myRunners: async (subject) => (await runnerService.list(subject)).map((r) => ({ id: r.id, label: r.label })),
-    // 배치 진행률의 total = 데이터셋 케이스 수(해석 실패 시 생략 — 진행률은 자식 run 카운트로만).
+    // A batch's progress total = number of dataset cases (omitted if resolution fails — progress then relies only on the child-run count).
     caseCountFor: async (tenant, id, version) => (await datasetRegistry.get(tenant, id, version)).cases.length,
   });
 
-  // 저장된 스코어카드 분석 View — 이름 붙인 AnalysisConfig(불투명 config)을 워크스페이스에 저장/공유. 라이브 재실행이라 스냅샷 없음.
+  // Saved scorecard-analysis Views — store/share a named AnalysisConfig (opaque config) on the workspace. Live re-run, so no snapshot.
   const viewService = new ViewService({ store: viewStore });
 
   const app = buildServer({
@@ -495,17 +498,17 @@ async function main(): Promise<void> {
     imageRegistryService,
     ciLinkService,
     runnerService,
-    notificationService, // 알림 피드(벨 인박스) 라우트 — self-scoped
-    commentService, // 리소스 댓글 라우트 + MCP
+    notificationService, // notification feed (bell inbox) route — self-scoped
+    commentService, // resource comments route + MCP
     runnerHub,
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,
     internalToken: process.env.EVERDICT_INTERNAL_TOKEN,
     requireAuth: process.env.EVERDICT_REQUIRE_AUTH === "1",
-    ...(callbackRendezvous ? { callbackSink: callbackRendezvous } : {}), // /frontdoor-callback inbound 수신(같은 랑데부 인스턴스)
-    // 요청/인증 구조화 로그(pino). 기본 info — 인증 거부(401)와 그 사유를 컨트롤플레인 로그로 진단. silent 로 끌 수 있음.
+    ...(callbackRendezvous ? { callbackSink: callbackRendezvous } : {}), // receive /frontdoor-callback inbound (the same rendezvous instance)
+    // Structured request/auth logs (pino). Default info — diagnose auth denials (401) and their reason from the control-plane log. Turn off with silent.
     logLevel: process.env.EVERDICT_LOG_LEVEL ?? "info",
-    // MCP OAuth: Keycloak 을 인가서버로 광고(클라이언트가 로그인 시작). 미설정이면 API 키만.
+    // MCP OAuth: advertise Keycloak as the authorization server (the client starts login). Unset → API keys only.
     ...(process.env.KEYCLOAK_ISSUER ? { authorizationServers: [process.env.KEYCLOAK_ISSUER] } : {}),
   });
 
@@ -519,41 +522,41 @@ interface Persistence {
   store: RunStore;
   scorecardStore: ScorecardStore;
   keyStore: TenantKeyStore;
-  harnessTemplateRegistry: HarnessTemplateRegistry; // 하네스 대분류(템플릿 구조)
-  harnessInstanceRegistry: HarnessInstanceRegistry; // 개별 하네스(template+pins → resolved)
+  harnessTemplateRegistry: HarnessTemplateRegistry; // harness category (template structure)
+  harnessInstanceRegistry: HarnessInstanceRegistry; // individual harness (template+pins → resolved)
   datasetRegistry: DatasetRegistry;
   benchmarkRegistry: BenchmarkRegistry;
   judgeRegistry: JudgeRegistry;
   modelRegistry: ModelRegistry;
   runtimeRegistry: RuntimeRegistry;
-  settingsStore: WorkspaceSettingsStore; // 워크스페이스 설정(계측 정책 등) — 항상 사용 가능
-  workspaceStore: WorkspaceStore; // 워크스페이스 멤버십(생성/전환) — 항상 사용 가능
-  userProfileStore: UserProfileStore; // 유저 프로필(이름/유저네임/아바타) — 항상 사용 가능
-  inviteStore: WorkspaceInviteStore; // 멤버 초대(토큰/링크 redemption) — 항상 사용 가능
-  secretStore: SecretStore; // 항상 사용 가능(기본 ON) — KEK 는 EVERDICT_SECRETS_KEY, 없으면 임시 키 자동생성
-  oauthStateStore: OAuthStateStore; // OAuth authorize→callback 1회용 pending state
-  runnerStore: RunnerStore; // 셀프호스티드 러너(개인 디바이스 페어링) — 페어링 토큰은 SHA-256 해시만 보관
-  scheduleStore: ScheduleStore; // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식(SSOT, mutable)
-  notificationStore: NotificationStore; // 개인 알림 피드(벨 인박스) — run/scorecard 완료를 recipient=subject 로 적재
-  commentStore: CommentStore; // 리소스 댓글(데이터셋 등) — 협업 논의
-  viewStore: ViewStore; // 저장된 스코어카드 분석 View(이름 붙인 AnalysisConfig, 비공개|공유) — 라이브 재실행
+  settingsStore: WorkspaceSettingsStore; // workspace settings (metering policy, etc.) — always available
+  workspaceStore: WorkspaceStore; // workspace membership (create/switch) — always available
+  userProfileStore: UserProfileStore; // user profile (name/username/avatar) — always available
+  inviteStore: WorkspaceInviteStore; // member invites (token/link redemption) — always available
+  secretStore: SecretStore; // always available (on by default) — KEK is EVERDICT_SECRETS_KEY, else an ephemeral key is auto-generated
+  oauthStateStore: OAuthStateStore; // one-shot pending state for OAuth authorize→callback
+  runnerStore: RunnerStore; // self-hosted runners (personal device pairing) — only the SHA-256 hash of the pairing token is stored
+  scheduleStore: ScheduleStore; // scheduled (cron) scorecards — stored RunScorecardInput + cron expression (SSOT, mutable)
+  notificationStore: NotificationStore; // personal notification feed (bell inbox) — records run/scorecard completion with recipient=subject
+  commentStore: CommentStore; // resource comments (datasets, etc.) — collaborative discussion
+  viewStore: ViewStore; // saved scorecard-analysis Views (named AnalysisConfig, private|workspace) — live re-run
 }
 
-// at-rest 암호화 KEK: EVERDICT_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
-// 시크릿 기능을 "기본 ON" 으로 유지한다(분기/fail-closed 제거). 자동생성 시 Pg 영속 주의를 한 번 경고한다.
+// At-rest encryption KEK: use EVERDICT_SECRETS_KEY (base64 32B) if present, otherwise auto-generate an ephemeral key
+// to keep the secrets feature "on by default" (no branch / no fail-closed). On auto-generation, warn once about Pg persistence.
 function resolveSecretCipher(): SecretCipher {
   const fromEnv = cipherFromEnv();
   if (fromEnv) return fromEnv;
   console.error(
-    "▶ EVERDICT_SECRETS_KEY 미설정 — 임시 KEK 를 자동생성해 시크릿 기능을 활성화합니다(기본 ON). " +
-      "영속(Postgres) 운영은 EVERDICT_SECRETS_KEY(base64 32B)를 고정하세요 — 임시 키는 재기동마다 달라져 기존 시크릿을 복호화할 수 없습니다.",
+    "▶ EVERDICT_SECRETS_KEY unset — auto-generating an ephemeral KEK to enable the secrets feature (on by default). " +
+      "For persistent (Postgres) operation, pin EVERDICT_SECRETS_KEY (base64 32B) — an ephemeral key changes every restart and cannot decrypt existing secrets.",
   );
   return generatedCipher();
 }
 
-// DATABASE_URL 이 있으면 Postgres(기동 시 마이그레이션 적용), 없으면 in-memory.
-// 시크릿 저장소는 항상 활성(기본 ON). at-rest 암호화 KEK 는 EVERDICT_SECRETS_KEY(base64 32B), 미설정이면 임시 키를
-// 자동생성한다 — in-memory 에선 휘발이라 안전하고, Pg 영속 운영은 EVERDICT_SECRETS_KEY 로 키를 고정해야 한다(재기동 복호).
+// DATABASE_URL → Postgres (migrations applied at startup), else in-memory.
+// The secret store is always active (on by default). The at-rest encryption KEK is EVERDICT_SECRETS_KEY (base64 32B); if unset, an ephemeral key is
+// auto-generated — safe in-memory since it's volatile, but persistent Pg operation must pin the key via EVERDICT_SECRETS_KEY (restart decryption).
 async function makePersistence(): Promise<Persistence> {
   const cipher = resolveSecretCipher();
   const url = process.env.DATABASE_URL;
@@ -613,8 +616,8 @@ async function makePersistence(): Promise<Persistence> {
   };
 }
 
-// _shared 하네스 taxonomy(템플릿 대분류 + 인스턴스)를 파일 SSOT 에서 시드. EVERDICT_HARNESS_TEMPLATES_DIR
-// (없으면 cwd/examples/harness-templates). *.template.json → 템플릿, *.instance.json → 인스턴스. best-effort/멱등.
+// Seed the _shared harness taxonomy (template categories + instances) from the file SSOT. EVERDICT_HARNESS_TEMPLATES_DIR
+// (else cwd/examples/harness-templates). *.template.json → template, *.instance.json → instance. Best-effort/idempotent.
 async function seedSharedHarnessTaxonomy(
   templates: HarnessTemplateRegistry,
   instances: HarnessInstanceRegistry,
@@ -624,39 +627,39 @@ async function seedSharedHarnessTaxonomy(
     await loadHarnessTaxonomyDir(dir, { templates, instances });
     console.error(`▶ shared harness taxonomy seeded from ${dir}`);
   } catch {
-    // 디렉터리 없음/비어있음은 정상.
+    // A missing/empty directory is normal.
   }
 }
 
-// _shared(first-party 기본 judge)를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 기본 judge 사용 가능. best-effort/멱등.
+// Seed _shared (first-party default judges) from the file SSOT — a new tenant can use the default judges immediately. Best-effort/idempotent.
 async function seedSharedJudges(registry: JudgeRegistry): Promise<void> {
   const dir = process.env.EVERDICT_JUDGES_DIR ?? `${process.cwd()}/examples/judges`;
   try {
     await loadJudgeDir(dir, { into: registry });
     console.error(`▶ shared judges seeded from ${dir}`);
   } catch {
-    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+    // A missing/empty directory is normal (boot with no seed).
   }
 }
 
-// _shared(first-party 기본 모델)를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 등록된 모델을 judge/harness 에서 참조 가능. best-effort/멱등.
+// Seed _shared (first-party default models) from the file SSOT — a new tenant can reference the registered models from a judge/harness immediately. Best-effort/idempotent.
 async function seedSharedModels(registry: ModelRegistry): Promise<void> {
   const dir = process.env.EVERDICT_MODELS_DIR ?? `${process.cwd()}/examples/models`;
   try {
     await loadModelDir(dir, { into: registry });
     console.error(`▶ shared models seeded from ${dir}`);
   } catch {
-    // 디렉터리 없음/비어있음은 정상(시드 없이 부팅).
+    // A missing/empty directory is normal (boot with no seed).
   }
 }
 
-// 외부 계정 연결 provider 레지스트리.
-//  - github (github.com): env 기본 OAuth App 이 있으면 원클릭(default). 없으면 등록은 되나 connectable 목록엔 안 뜸.
-//  - github-enterprise: 같은 github impl + self-hosted(연결 시 host + clientId + clientSecretName 입력).
-//  - mattermost: self-hosted 전용.
-// self-hosted 의 client_secret 값은 워크스페이스 SecretStore 에서 NAME 으로 resolve(값은 spec/state 에 저장 안 함).
-// github.com operator App 자격증명(env) — 셋 다 있어야 활성. 개인키(PEM)는 env-file 단일행 안전성 위해
-// base64(PEM) 권장; "BEGIN" 포함이면 raw PEM(\n 이스케이프 복원)도 허용. 미설정이면 github.com App 설치 비활성.
+// External account-connection provider registry.
+//  - github (github.com): one-click (default) if the env default OAuth App exists. Otherwise it registers but doesn't appear in the connectable list.
+//  - github-enterprise: same github impl + self-hosted (on connect, enter host + clientId + clientSecretName).
+//  - mattermost: self-hosted only.
+// A self-hosted client_secret value is resolved by NAME from the workspace SecretStore (the value is never stored in the spec/state).
+// github.com operator App credentials (env) — all three required to enable. For the private key (PEM), for single-line env-file safety,
+// base64(PEM) is recommended; if it contains "BEGIN", raw PEM (with \n escape restoration) is also accepted. Unset → github.com App install disabled.
 function githubComAppConfig(): GithubComAppConfig | undefined {
   const appId = process.env.GITHUB_APP_ID;
   const key = process.env.GITHUB_APP_PRIVATE_KEY;
@@ -666,18 +669,18 @@ function githubComAppConfig(): GithubComAppConfig | undefined {
   return { appId, slug, privateKeyPem };
 }
 
-// 컨트롤플레인이 소유하는 인증: KEYCLOAK_ISSUER 면 OIDC(JWT) + 항상 API 키. 둘 다 workspace 로 해석.
+// Auth owned by the control plane: KEYCLOAK_ISSUER → OIDC(JWT) + always API keys. Both resolve to a workspace.
 function buildAuthenticator(
   keyStore: TenantKeyStore,
   runnerStore: RunnerStore,
   settingsStore: WorkspaceSettingsStore,
 ): Authenticator {
   const authers: Authenticator[] = [];
-  // GitHub Actions OIDC 페더레이션 — keyless CI. issuer 프리체크가 있어 Keycloak/기타 JWT 는 조용히 패스하므로
-  // OIDC(Keycloak) 인증기보다 앞에 둔다(반대로 두면 CI 토큰이 Keycloak 검증 실패 warn 로그를 남긴다).
-  // 신뢰 = 지목된 워크스페이스(x-everdict-workspace)의 repo link(WorkspaceSettings.ci.links) 매칭 → roles=["ci"].
-  // GHES 도 지원: GHE link 가 있는 host 의 issuer(https://<host>/_services/token)만 동적으로 신뢰(fail-closed),
-  // link 매칭은 (host, repository) — github.com 토큰이 같은 이름의 GHE link 를(또는 그 반대로) 통과하지 못한다.
+  // GitHub Actions OIDC federation — keyless CI. It pre-checks the issuer and silently passes Keycloak/other JWTs, so
+  // put it before the OIDC(Keycloak) authenticator (reversed, a CI token would leave a Keycloak-verification-failed warn log).
+  // Trust = a repo-link match (WorkspaceSettings.ci.links) in the named workspace (x-everdict-workspace) → roles=["ci"].
+  // GHES supported too: only dynamically trust the issuer (https://<host>/_services/token) of a host that has a GHE link (fail-closed);
+  // link matching is (host, repository) — a github.com token cannot pass a same-named GHE link (or vice versa).
   const normHost = (h?: string): string | undefined => h?.replace(/\/$/, "").toLowerCase();
   authers.push(
     githubActionsAuthenticator({
@@ -692,7 +695,7 @@ function buildAuthenticator(
         return link ? { workspace: workspaceHint, roles: ["ci"] } : undefined;
       },
       enterprise: {
-        // 이 워크스페이스가 GHE link 로 신뢰를 부여한 host 들 — 그 issuer 의 GHES 토큰만 검증 대상이 된다.
+        // Hosts this workspace has trusted via a GHE link — only GHES tokens from those issuers become verification candidates.
         hostsFor: async (workspaceHint) => {
           const settings = await settingsStore.get(workspaceHint);
           const hosts = new Set<string>();
@@ -703,35 +706,35 @@ function buildAuthenticator(
     }),
   );
   if (process.env.KEYCLOAK_ISSUER) {
-    console.error(`▶ auth: OIDC(JWT) 검증기 활성 issuer=${process.env.KEYCLOAK_ISSUER}`);
+    console.error(`▶ auth: OIDC(JWT) verifier enabled issuer=${process.env.KEYCLOAK_ISSUER}`);
     authers.push(
       oidcAuthenticator({
         issuer: process.env.KEYCLOAK_ISSUER,
         ...(process.env.OIDC_AUDIENCE ? { audience: process.env.OIDC_AUDIENCE } : {}),
         ...(process.env.WORKSPACE_CLAIM ? { workspaceClaim: process.env.WORKSPACE_CLAIM } : {}),
-        // JWT 검증 실패 사유를 컨트롤플레인 로그로 남긴다(401 원인: issuer 불일치 / JWKS 미도달 / 만료 / 서명 / aud).
+        // Log the reason a JWT failed verification to the control-plane log (401 causes: issuer mismatch / JWKS unreachable / expired / signature / aud).
         onError: (info) =>
           console.warn(
-            `▶ auth: OIDC 토큰 검증 실패 [${info.code}] ${info.message} ` +
+            `▶ auth: OIDC token verification failed [${info.code}] ${info.message} ` +
               `| expectedIssuer=${info.expectedIssuer} tokenIssuer=${info.tokenIssuer ?? "(none)"} ` +
               `tokenAud=${JSON.stringify(info.tokenAudience ?? null)} claims=[${(info.claimKeys ?? []).join(",")}]`,
           ),
       }),
     );
   } else {
-    // 사내 SSO 토큰을 401 시키는 가장 흔한 원인 — 부팅 시 크게 경고(웹만 SSO 연결하고 컨트롤플레인엔 미설정한 경우).
+    // The most common cause of internal SSO tokens getting 401'd — warn loudly at boot (case: only the web wired SSO, the control plane left unset).
     console.warn(
-      "▶ auth: KEYCLOAK_ISSUER 미설정 — OIDC(JWT) 검증기 비활성(API 키만). 사내 SSO 액세스 토큰은 401 됩니다.",
+      "▶ auth: KEYCLOAK_ISSUER unset — OIDC(JWT) verifier disabled (API keys only). Internal SSO access tokens will be 401'd.",
     );
   }
   authers.push(apiKeyAuthenticator({ keyStore }));
-  // 셀프호스티드 러너 페어링 토큰(rnr_) — `everdict runner` 가 MCP 에 인증. owner/workspace/runnerId 로 해석, 최소권한.
+  // Self-hosted runner pairing token (rnr_) — `everdict runner` authenticates to MCP. Resolves to owner/workspace/runnerId, least-privilege.
   authers.push(runnerAuthenticator({ runnerStore }));
   return compositeAuthenticator(authers);
 }
 
-// 워크스페이스 단위 계측 정책: EVERDICT_METER_TENANTS(콤마 목록)이 있으면 그 테넌트만, 없으면 EVERDICT_METER_USAGE=1 이
-// 전 테넌트 기본값. 요청별 override(POST /runs body.meterUsage)가 항상 우선한다.
+// Per-workspace metering policy: if EVERDICT_METER_TENANTS (comma list) is set, only those tenants; otherwise EVERDICT_METER_USAGE=1
+// is the all-tenant default. A per-request override (POST /runs body.meterUsage) always wins.
 function meterUsagePolicyFromEnv(): (tenant: string) => boolean {
   const list = process.env.EVERDICT_METER_TENANTS;
   if (list) {
@@ -755,8 +758,8 @@ function budgetFromEnv(): (tenant: string) => BudgetLimit | undefined {
   return () => limit;
 }
 
-// 아티팩트(스크린샷) object storage: env 4개(endpoint/bucket/access/secret)가 모두 있으면 S3/MinIO 스토어 구성 + 버킷 보장.
-// 미설정이면 undefined → os-use 스크린샷은 base64 인라인 폴백(dev). 비밀은 env(시크릿) — 스펙/커밋 금지.
+// Artifact (screenshot) object storage: if all 4 env vars (endpoint/bucket/access/secret) are present, configure the S3/MinIO store + ensure the bucket.
+// Unset → undefined → os-use screenshots fall back to base64 inline (dev). Secrets are env (secrets) — never in the spec/committed.
 async function artifactStoreFromEnv(): Promise<S3ArtifactStore | undefined> {
   const endpoint = process.env.EVERDICT_S3_ENDPOINT;
   const bucket = process.env.EVERDICT_S3_BUCKET;

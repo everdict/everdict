@@ -8,8 +8,8 @@ export interface LeaveWorkspaceResult {
   error?: string
 }
 
-// 활성 워크스페이스에서 나가기(self-serve) → DELETE /members/me. 마지막 admin 이면 컨트롤플레인이 409 로 막는다.
-// 성공 시 클라이언트는 홈(/)으로 보내고, 홈이 남은 워크스페이스(또는 온보딩)로 다시 라우팅한다.
+// Leave the active workspace (self-serve) → DELETE /members/me. If you're the last admin, the control plane blocks it with 409.
+// On success, the client redirects to home (/), and home re-routes to a remaining workspace (or onboarding).
 export async function leaveWorkspaceAction(): Promise<LeaveWorkspaceResult> {
   const ctx = await authContext()
   try {

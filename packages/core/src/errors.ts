@@ -1,27 +1,27 @@
-// Everdict 도메인 에러 — AppException/ErrorType 이디엄의 TS 재해석.
-// 핵심: HTTP 상태는 ErrorCode(enum)에 넣지 않고, 에러 "서브타입"에서 파생한다.
+// Everdict domain errors — a TS reinterpretation of the AppException/ErrorType idiom.
+// Key: HTTP status is not stored on ErrorCode(enum); it derives from the error "subtype".
 
 export const ErrorCode = {
   // generic
-  BAD_REQUEST: "요청이 올바르지 않습니다.",
-  NOT_FOUND: "대상을 찾을 수 없습니다.",
-  CONFLICT: "현재 상태와 충돌합니다.",
+  BAD_REQUEST: "The request is invalid.",
+  NOT_FOUND: "The requested resource was not found.",
+  CONFLICT: "Conflicts with the current state.",
   // driver / compute
-  DRIVER_PROVISION_FAILED: "샌드박스 프로비저닝에 실패했습니다.",
-  COMPUTE_EXEC_FAILED: "샌드박스 명령 실행에 실패했습니다.",
+  DRIVER_PROVISION_FAILED: "Failed to provision the sandbox.",
+  COMPUTE_EXEC_FAILED: "Failed to execute the sandbox command.",
   // harness
-  HARNESS_INSTALL_FAILED: "하니스 설치에 실패했습니다.",
-  HARNESS_RUN_FAILED: "하니스 실행에 실패했습니다.",
+  HARNESS_INSTALL_FAILED: "Failed to install the harness.",
+  HARNESS_RUN_FAILED: "Failed to run the harness.",
   // grader
-  GRADER_FAILED: "채점에 실패했습니다.",
-  // upstream — 외부 의존성 실패는 우리 에러로 remap (모니터링이 우리를 탓하게)
-  UPSTREAM_MISCONFIGURED: "외부 서비스 설정 오류입니다.",
-  UPSTREAM_ERROR: "외부 서비스 오류입니다.",
-  RATE_LIMITED: "요청이 너무 많습니다.",
-  BUDGET_EXCEEDED: "테넌트 예산을 초과했습니다.",
+  GRADER_FAILED: "Grading failed.",
+  // upstream — remap external dependency failures to our errors (so monitoring blames us)
+  UPSTREAM_MISCONFIGURED: "The external service is misconfigured.",
+  UPSTREAM_ERROR: "The external service returned an error.",
+  RATE_LIMITED: "Too many requests.",
+  BUDGET_EXCEEDED: "The tenant budget has been exceeded.",
   // auth
-  UNAUTHENTICATED: "인증이 필요합니다.",
-  FORBIDDEN: "권한이 없습니다.",
+  UNAUTHENTICATED: "Authentication is required.",
+  FORBIDDEN: "You do not have permission.",
 } as const;
 
 export type ErrorCode = keyof typeof ErrorCode;

@@ -1,6 +1,6 @@
 # Run as the core primitive — scorecard = orchestration over runs
 
-> **Status: Steps 0–2 SHIPPED.** Doc-first SSOT for the "run 을 진짜 primitive 로 승격" 리팩터.
+> **Status: Steps 0–2 SHIPPED.** Doc-first SSOT for the "promote run to a real primitive" refactor.
 > Decided direction with the user: **run is the execution primitive; scorecard is a thin orchestration/aggregation
 > layer composed OVER runs.** Like [scheduled-evals](./scheduled-evals.md) / [self-hosted-runner](./self-hosted-runner.md):
 > **strict generalization, additive** — Step 0 changes no existing behavior; Steps 1–2 dedup a real duplication and
@@ -15,8 +15,8 @@
 >
 > **Follow-up SHIPPED — web activity-console reframe** (`f4dcbae` API trigger + `bff4992` web): standalone runs now
 > carry `trigger` (web/mcp/api; scorecard children = `"scorecard"`), and the run list is reframed from an
-> eval-results table into an **activity console** — dropped the noise-y per-run score column, added **출처(trigger)**
-> + **비용(usage)** columns, live `AutoRefresh` while any run is active, children hidden (server-side default).
+> eval-results table into an **activity console** — dropped the noise-y per-run score column, added **source (trigger)**
+> + **cost (usage)** columns, live `AutoRefresh` while any run is active, children hidden (server-side default).
 >
 > **Follow-ups SHIPPED:**
 > - **#1 case→child-run drill-down** (`2f7aac2`): `RunService.list(tenant,{scorecardId})` + `GET /runs?scorecardId=`
@@ -70,7 +70,7 @@ const cases = runtime
 
 `RuntimeDispatcher` then routes on `placement.target`. Both `RunService` and `ScorecardService` are injected the
 **same** dispatcher — `ModelResolvingDispatcher(RuntimeDispatcher(scheduler, …))` (`main.ts` ~line 211, comment:
-*"run/judge/scorecard 가 이 한 디스패처를 공유"*). `EvalCase.placement.target` is already in the core schema
+*"run/judge/scorecard share this one dispatcher"*). `EvalCase.placement.target` is already in the core schema
 (`PlacementSchema`, `packages/core/src/eval-case.ts`).
 
 **So run can already hit any runtime today** — the caller just has to set `case.placement.target`. The gap is
@@ -209,9 +209,9 @@ can hydrate the full `Scorecard` by joining the referenced runs; `list` stays ch
 
 ## Commit plan (Conventional Commits, scoped; each `fix`/`feat` ships its regression test)
 
-1. `feat(api): POST /runs·submit_run 에 runtime 노브 추가 (placement.target 주입, scorecard 와 대칭)` — Step 0.
-2. `refactor(api): per-case 실행 수명을 execute-case 코어로 추출 (run/scorecard 중복 제거)` — Step 1.
-3. `feat(api): scorecard 가 자식 RunRecord 로 팬아웃 + runIds 참조 (mig 0029, 활동 리스트 자식 숨김)` — Step 2.
+1. `feat(api): add a runtime knob to POST /runs·submit_run (inject placement.target, symmetric with scorecard)` — Step 0.
+2. `refactor(api): extract the per-case execution lifecycle into an execute-case core (dedup run/scorecard)` — Step 1.
+3. `feat(api): scorecard fans out into child RunRecords + runIds references (mig 0029, hide children in the activity list)` — Step 2.
 
 ## Open questions / decisions to confirm
 

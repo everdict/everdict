@@ -1,37 +1,37 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 CI repo link(레포↔하니스 슬롯 매핑 = GitHub Actions OIDC trust policy)의 클라이언트 미러.
-// 웹은 HTTP 로만 결합 — 백엔드 패키지 비의존. 원본: packages/db WorkspaceCiLinkSchema.
+// Client mirror of the control plane CI repo link (repo↔harness slot mapping = GitHub Actions OIDC trust policy).
+// The web couples over HTTP only — no backend package dependency. Source: packages/db WorkspaceCiLinkSchema.
 
-// 슬롯 → 모노레포 path filter(선택). 이 레포의 CI 가 갈아끼우는 서비스 슬롯들.
+// slot → monorepo path filter (optional). The service slots this repo's CI swaps.
 export const ciLinkSlotSchema = z.object({ path: z.string().optional() })
 export type CiLinkSlot = z.infer<typeof ciLinkSlotSchema>
 
-// 한 레포 링크 — link 의 "존재"가 그 레포의 OIDC 토큰을 이 워크스페이스로 신뢰(keyless CI trust).
+// A single repo link — the "existence" of the link trusts that repo's OIDC token into this workspace (keyless CI trust).
 export const ciLinkSchema = z.object({
   repository: z.string(), // "owner/name"
-  host: z.string().optional(), // 미지정 = github.com
-  harness: z.string(), // 하니스 인스턴스 id
-  dataset: z.string().optional(), // CI 가 발사할 데이터셋 id (setup-PR 워크플로 생성에 사용)
+  host: z.string().optional(), // unset = github.com
+  harness: z.string(), // harness instance id
+  dataset: z.string().optional(), // dataset id the CI fires (used to generate the setup-PR workflow)
   slots: z.record(z.string(), ciLinkSlotSchema).default({}),
-  createdBy: z.string(), // 감사용(발사 인증과 무관)
+  createdBy: z.string(), // for audit (unrelated to fire authentication)
   disabled: z.boolean().optional(),
-  runsOn: z.string().optional(), // 좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, everdict-<id>]")
-  runtime: z.string().optional(), // 좁히기 오버라이드 — run-eval runtime(기본 "self:ws" 풀, 예: "self:ws:<id>")
-  // PR 평가 발화 방식 — auto=PR 이벤트 자동만 · comment=PR 코멘트 /evaluate 만(온디맨드) · 미지정=both(둘 다)
+  runsOn: z.string().optional(), // narrowing override — workflow runs-on (default "[self-hosted]", e.g. "[self-hosted, everdict-<id>]")
+  runtime: z.string().optional(), // narrowing override — run-eval runtime (default "self:ws" pool, e.g. "self:ws:<id>")
+  // PR eval fire mode — auto=PR-event automatic only · comment=PR comment /evaluate only (on-demand) · unset=both
   trigger: z.enum(['auto', 'comment', 'both']).optional(),
 })
 export type CiLink = z.infer<typeof ciLinkSchema>
 export type CiTrigger = NonNullable<CiLink['trigger']>
 
-// GET/PUT/DELETE /workspace/ci/links 응답 — 항상 현재 링크 전체를 돌려준다.
+// GET/PUT/DELETE /workspace/ci/links response — always returns the full current set of links.
 export const ciLinksResponseSchema = z.object({ links: z.array(ciLinkSchema) })
 export type CiLinksResponse = z.infer<typeof ciLinksResponseSchema>
 
-// GET /workspace/github-app/repos 한 행 — GitHub 레포 목록(picker)을 얇게 정규화한 형태(bare array).
+// A single GET /workspace/github-app/repos row — a thinly normalized form of the GitHub repo list (picker) (bare array).
 export const repoInfoSchema = z.object({
   fullName: z.string(), // "owner/name"
-  host: z.string().optional(), // 이 repo 가 속한 installation 의 GHE 베이스 URL — 미지정 = github.com
+  host: z.string().optional(), // GHE base URL of the installation this repo belongs to — unset = github.com
   private: z.boolean(),
   defaultBranch: z.string(),
   pushedAt: z.string().optional(),
@@ -39,6 +39,6 @@ export const repoInfoSchema = z.object({
 export type RepoInfo = z.infer<typeof repoInfoSchema>
 export const reposSchema = z.array(repoInfoSchema)
 
-// POST /workspace/ci/links/setup-pr 응답 — 대상 레포에 연 워크플로 셋업 PR.
+// POST /workspace/ci/links/setup-pr response — the workflow setup PR opened on the target repo.
 export const setupPrResultSchema = z.object({ prUrl: z.string(), branch: z.string() })
 export type SetupPrResult = z.infer<typeof setupPrResultSchema>

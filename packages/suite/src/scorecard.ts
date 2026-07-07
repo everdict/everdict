@@ -1,25 +1,25 @@
 import type { CaseResult, Score, Scorecard } from "@everdict/core";
 
-// 케이스 합격 판정 — 권위 기준 우선. ground-truth(실제 상태 검증) > 객관 대조 > 모델 의견 순으로 결정한다.
-// VLM/LLM judge 는 *보조* 다: 객관/ground-truth 그레이더가 있으면 judge 가 그것을 뒤집지 못한다(예: OSWorld 파일저장 —
-// state grader 가 파일을 확인했으면 judge 가 스크린샷만 보고 FAIL 해도 케이스는 PASS). 통합/스코어카드 통과율의 기준.
-const AUTHORITATIVE_METRICS = ["state", "tests_pass"]; // 실제 상태/테스트 검증(ground-truth)
-const OBJECTIVE_METRICS = ["answer_match", "url_matches", "dom_contains"]; // 결정적 대조
+// Case pass verdict — authority-first. Decided in the order ground-truth (real-state verification) > objective comparison > model opinion.
+// The VLM/LLM judge is *auxiliary*: if an objective/ground-truth grader exists, the judge cannot override it (e.g. OSWorld file save —
+// if the state grader confirmed the file, the case is PASS even if the judge FAILs it from the screenshot alone). The basis for the integrated/scorecard pass rate.
+const AUTHORITATIVE_METRICS = ["state", "tests_pass"]; // real state/test verification (ground-truth)
+const OBJECTIVE_METRICS = ["answer_match", "url_matches", "dom_contains"]; // deterministic comparison
 export function caseVerdict(result: Pick<CaseResult, "scores">): boolean | undefined {
   const byMetric = new Map(result.scores.map((s) => [s.metric, s] as const));
   for (const m of AUTHORITATIVE_METRICS) {
     const s = byMetric.get(m);
-    if (s?.pass !== undefined) return s.pass; // ground-truth 가 있으면 그것이 권위
+    if (s?.pass !== undefined) return s.pass; // if ground-truth exists, it is authoritative
   }
   const objs = OBJECTIVE_METRICS.map((m) => byMetric.get(m)).filter((s): s is Score => s?.pass !== undefined);
-  if (objs.length > 0) return objs.every((s) => s.pass); // 객관 그레이더(들)가 모두 pass
+  if (objs.length > 0) return objs.every((s) => s.pass); // all objective grader(s) pass
   const judge = byMetric.get("judge");
-  if (judge?.pass !== undefined) return judge.pass; // 객관 그레이더가 없을 때만 judge 가 결정
+  if (judge?.pass !== undefined) return judge.pass; // the judge decides only when there is no objective grader
   const withPass = result.scores.filter((s) => s.pass !== undefined);
   return withPass.length > 0 ? withPass.every((s) => s.pass) : undefined;
 }
 
-// 스코어카드의 케이스 단위 통과율(권위 기준 caseVerdict 로 집계). pass 판정 그레이더가 하나도 없는 케이스는 제외.
+// Per-case pass rate of a scorecard (aggregated via the authority-based caseVerdict). Cases with no pass-deciding grader are excluded.
 export function scorecardPassRate(sc: Scorecard): { pass: number; total: number; rate: number } {
   let pass = 0;
   let total = 0;
@@ -39,7 +39,7 @@ export interface MetricSummary {
   passRate?: number;
 }
 
-// 메트릭별 집계 (개수/평균/통과율).
+// Per-metric aggregation (count/mean/pass rate).
 export function summarizeScorecard(sc: Scorecard): MetricSummary[] {
   const byMetric = new Map<string, { values: number[]; passes: boolean[] }>();
   for (const result of sc.results) {
@@ -84,8 +84,8 @@ function scoreMap(sc: Scorecard): Map<string, Map<string, Score>> {
   return m;
 }
 
-// baseline(vA) vs candidate(vB). 회귀/개선은 객관적인 `pass` 전이로 판정한다 —
-// 수치 메트릭(cost/steps 등)은 방향을 가정하지 않고 delta 만 보고한다.
+// baseline(vA) vs candidate(vB). Regressions/improvements are decided by objective `pass` transitions —
+// numeric metrics (cost/steps etc.) assume no direction and only report the delta.
 export function diffScorecards(baseline: Scorecard, candidate: Scorecard): ScorecardDiff {
   const b = scoreMap(baseline);
   const c = scoreMap(candidate);

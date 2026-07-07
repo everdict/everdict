@@ -1,7 +1,7 @@
-# 라이브 e2e 보조: 실 OTel SDK 로 browser-use 모양 trace(agent→LLM→tool, gen_ai conventions)를 OTLP/HTTP 로
-# Jaeger 에 내보내고 trace_id(32-hex)를 찍는다. OtelTraceSource 가 Jaeger query API 로 끌어가 채점.
-# 환경: OTEL_EXPORTER_OTLP_ENDPOINT(기본 http://127.0.0.1:4318/v1/traces).
-# 사용: <venv>/bin/python scripts/live/otel-emit-trace.py  (opentelemetry-sdk + exporter-otlp-proto-http 필요)
+# Live e2e helper: use the real OTel SDK to export a browser-use-shaped trace (agent→LLM→tool, gen_ai conventions) over OTLP/HTTP
+# to Jaeger and print the trace_id (32-hex). OtelTraceSource pulls it via the Jaeger query API and grades.
+# Env: OTEL_EXPORTER_OTLP_ENDPOINT (default http://127.0.0.1:4318/v1/traces).
+# Usage: <venv>/bin/python scripts/live/otel-emit-trace.py  (requires opentelemetry-sdk + exporter-otlp-proto-http)
 import os
 from opentelemetry import trace
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter

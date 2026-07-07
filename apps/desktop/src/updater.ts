@@ -1,7 +1,7 @@
-// 자동 업데이트 컨트롤러 — electron-updater 를 DI 로 감싼다(테스트는 가짜 emitter 주입).
-// 정책(설계 D6, docs/architecture/desktop-app.md): 감지·다운로드는 자동, "적용"은 사용자 동의(트레이
-// 재시작 항목) — 러너가 잡을 돌리는 중 강제 재시작하지 않는다. 피드 미구성(disabled)이면 전부 no-op:
-// 피드 목적지(공개 releases 리포 vs 리포 public 전환)는 사용자 결정 대기 — main.ts 의 게이트 참고.
+// Auto-update controller — wraps electron-updater via DI (tests inject a fake emitter).
+// Policy (design D6, docs/architecture/desktop-app.md): detection and download are automatic, "apply" needs the user's consent (the tray
+// restart item) — never force-restart while the runner is running a job. If no feed is configured (disabled), everything is a no-op:
+// the feed destination (a public releases repo vs making the repo public) awaits the user's decision — see the gate in main.ts.
 export interface AutoUpdaterLike {
   autoDownload: boolean;
   autoInstallOnAppQuit: boolean;
@@ -11,19 +11,19 @@ export interface AutoUpdaterLike {
 }
 
 export type UpdaterState =
-  | { kind: "disabled" } // 피드 미구성 또는 미패키징(dev)
-  | { kind: "idle" } // 활성 — 최신 상태(또는 아직 체크 전)
+  | { kind: "disabled" } // no feed configured or unpackaged (dev)
+  | { kind: "idle" } // active — up to date (or not yet checked)
   | { kind: "checking" }
   | { kind: "downloading"; version: string; percent?: number }
-  | { kind: "ready"; version: string } // 다운로드 완료 — 재시작하면 적용
+  | { kind: "ready"; version: string } // download complete — applied on restart
   | { kind: "error"; message: string };
 
 export interface UpdaterControllerOpts {
   updater: AutoUpdaterLike | null; // null → disabled
-  intervalMs?: number; // 재체크 주기(기본 6시간)
+  intervalMs?: number; // re-check interval (default 6 hours)
   onStatus?: (state: UpdaterState) => void;
   log?: (msg: string) => void;
-  // 테스트 주입점 — 기본 setInterval(+unref). 해제 함수를 돌려준다.
+  // Test injection point — defaults to setInterval (+unref). Returns a stop function.
   schedule?: (fn: () => void, ms: number) => () => void;
 }
 
@@ -40,7 +40,7 @@ export class UpdaterController {
     return this.current;
   }
 
-  // 이벤트 배선 + 최초 체크 + 주기 재체크. 피드 미구성이면 no-op(상태 disabled 유지).
+  // Wire up events + initial check + periodic re-check. No-op if no feed is configured (stays disabled).
   start(): void {
     const u = this.opts.updater;
     if (!u || this.started) {
@@ -48,8 +48,8 @@ export class UpdaterController {
       return;
     }
     this.started = true;
-    u.autoDownload = true; // 감지 즉시 백그라운드 다운로드
-    u.autoInstallOnAppQuit = true; // 사용자가 그냥 종료해도 다음 실행은 새 버전
+    u.autoDownload = true; // background download the moment one is detected
+    u.autoInstallOnAppQuit = true; // even if the user just quits, the next launch is the new version
     u.on("checking-for-update", () => this.set({ kind: "checking" }));
     u.on("update-available", (info: { version: string }) => this.set({ kind: "downloading", version: info.version }));
     u.on("download-progress", (progress: { percent: number }) => {
@@ -58,7 +58,7 @@ export class UpdaterController {
     u.on("update-downloaded", (info: { version: string }) => this.set({ kind: "ready", version: info.version }));
     u.on("update-not-available", () => this.set({ kind: "idle" }));
     u.on("error", (err: Error) => {
-      // 오프라인/피드 일시 장애는 정상 상황 — 상태만 남기고 다음 주기에 재시도한다.
+      // Offline / a transient feed failure is a normal condition — just record the state and retry on the next cycle.
       this.set({ kind: "error", message: err.message });
     });
 
@@ -84,10 +84,10 @@ export class UpdaterController {
     this.stopSchedule = null;
   }
 
-  // ready 상태에서만 유효 — 종료 후 새 버전으로 재실행. 호출 전에 러너 정리는 호출자(main) 책임.
+  // Valid only in the ready state — quit and relaunch into the new version. Cleaning up the runner beforehand is the caller's (main's) responsibility.
   quitAndInstall(): void {
     if (this.current.kind !== "ready") {
-      this.opts.log?.("업데이트가 준비되지 않아 quitAndInstall 을 무시합니다.");
+      this.opts.log?.("Update is not ready, ignoring quitAndInstall.");
       return;
     }
     this.opts.updater?.quitAndInstall(false, true);

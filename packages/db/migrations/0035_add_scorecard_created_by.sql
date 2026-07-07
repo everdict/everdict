@@ -1,5 +1,5 @@
--- 스코어카드 실행자(제출자 subject) — 목록/상세에서 "누가 실행시켰나"(아바타+이름) 표기 + 필터용.
--- submit/ingest 시 principal.subject 를 스탬프; 과거 레코드·기계 발사(subject 없음)는 NULL.
--- origin(어디서 발사됐나)과 짝을 이루는 '누가'. 추가 컬럼이라 additive(preflight 불필요) —
--- 데이터셋(everdict_datasets.created_by)·하니스(0031)와 동일 패턴.
+-- Scorecard runner (submitter subject) — to show + filter "who ran it" (avatar+name) in lists/detail.
+-- Stamps principal.subject on submit/ingest; past records and machine-fired runs (no subject) are NULL.
+-- The 'who' that pairs with origin (where it was fired from). Just an added column, so additive (no preflight needed) —
+-- same pattern as datasets (everdict_datasets.created_by) and harnesses (0031).
 ALTER TABLE everdict_scorecards ADD COLUMN IF NOT EXISTS created_by text;

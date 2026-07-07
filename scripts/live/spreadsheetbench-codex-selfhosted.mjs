@@ -1,10 +1,10 @@
-// 라이브 e2e: **codex-in-image 하니스로 SpreadsheetBench 수행**. codex 가 이미지(spreadsheetbench-codex:v1) 안에서
-// 머신 ChatGPT 로그인(러너가 ~/.codex 를 마운트, own-pays)으로 풀고, 수식 산출을 이미지 안 LibreOffice 로 recalc 후 채점.
-// 포터블 하니스(portable-harness-runtime) slice 1(러너 case.image→로컬 Docker) + 마운트(codex 로그인)를 실증.
-//   ① dev 컨트롤플레인(in-memory) ② POST /runners ③ everdict runner --pair --mount-codex-login (codex on PATH)
-//   ④ POST /bundles/apply(spreadsheetbench: sbench-codex 하니스 + codex 샘플) ⑤ 샘플 × sbench-codex × self:<id> ⑥ tests_pass.
-// 전제: docker + `docker build -t spreadsheetbench-codex:v1 -f examples/bundles/spreadsheetbench/Dockerfile.codex ...`,
-//       머신 codex 로그인(~/.codex), apps/api/dist + apps/cli/dist 빌드.
+// Live e2e: **run SpreadsheetBench with the codex-in-image harness**. codex solves it inside the image (spreadsheetbench-codex:v1)
+// using the machine ChatGPT login (the runner mounts ~/.codex, own-pays), and formula outputs are recalc'd with in-image LibreOffice before grading.
+// Demonstrates portable-harness-runtime slice 1 (runner case.image → local Docker) + mount (codex login).
+//   ① dev control plane (in-memory) ② POST /runners ③ everdict runner --pair --mount-codex-login (codex on PATH)
+//   ④ POST /bundles/apply (spreadsheetbench: sbench-codex harness + codex sample) ⑤ sample × sbench-codex × self:<id> ⑥ tests_pass.
+// Prereqs: docker + `docker build -t spreadsheetbench-codex:v1 -f examples/bundles/spreadsheetbench/Dockerfile.codex ...`,
+//       machine codex login (~/.codex), apps/api/dist + apps/cli/dist built.
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
@@ -39,13 +39,13 @@ try {
       up = (await fetch(`${BASE}/datasets`, { headers: H })).status === 200;
     } catch {}
   }
-  if (!up) throw new Error("control plane 기동 실패");
+  if (!up) throw new Error("control plane failed to start");
 
   console.log("\n=== ② POST /runners ===");
   const paired = await post("/runners", { label: "codex-image", capabilities: ["repo"] });
   const runnerId = paired.json.runner?.id;
   console.log(`  → ${paired.status} runnerId=${runnerId}`);
-  if (!paired.json.token || !runnerId) throw new Error("페어링 실패");
+  if (!paired.json.token || !runnerId) throw new Error("pairing failed");
 
   console.log("\n=== ③ everdict runner --pair --mount-codex-login (codex on PATH) ===");
   runner = spawn(
@@ -67,11 +67,11 @@ try {
   runner.stdout.on("data", (d) => process.stdout.write(`  [runner] ${d}`));
   await sleep(3000);
 
-  console.log("\n=== ④ POST /bundles/apply (spreadsheetbench: sbench-codex + codex 샘플) ===");
+  console.log("\n=== ④ POST /bundles/apply (spreadsheetbench: sbench-codex + codex sample) ===");
   const inst = await post("/bundles/apply", bundle);
   for (const r of inst.json.results ?? []) console.log(`  ${r.status.padEnd(8)} ${r.kind} ${r.id}@${r.version}`);
 
-  console.log(`\n=== ⑤ POST /scorecards (codex 샘플 × sbench-codex × self:${runnerId}) ===`);
+  console.log(`\n=== ⑤ POST /scorecards (codex sample × sbench-codex × self:${runnerId}) ===`);
   const run = await post("/scorecards", {
     dataset: { id: "spreadsheetbench-v1-codex-sample", version: "1.0.0" },
     harness: { id: "sbench-codex", version: "1.0.0" },
@@ -79,9 +79,9 @@ try {
   });
   const scId = run.json.id;
   console.log(`  → ${run.status} id=${scId ?? "-"}`);
-  if (!scId) throw new Error(`제출 실패: ${JSON.stringify(run.json)}`);
+  if (!scId) throw new Error(`submit failed: ${JSON.stringify(run.json)}`);
 
-  console.log("\n=== ⑥ 폴링 (codex 가 이미지 안에서 머신 로그인으로 풀고 recalc 채점) ===");
+  console.log("\n=== ⑥ polling (codex solves inside the image with the machine login, then recalc grading) ===");
   let rec;
   for (let i = 0; i < 200; i++) {
     await sleep(2000);
@@ -93,14 +93,14 @@ try {
   const prov = c?.provenance;
   const tp = c?.scores?.find((s) => s.metric === "tests_pass");
   console.log(
-    `\n  최종 status=${rec.status} · ranOn=${prov?.ranOn ?? "-"} · tests_pass=${tp ? (tp.pass ? "PASS" : "FAIL") : "(없음)"}`,
+    `\n  final status=${rec.status} · ranOn=${prov?.ranOn ?? "-"} · tests_pass=${tp ? (tp.pass ? "PASS" : "FAIL") : "(none)"}`,
   );
   if (tp && !tp.pass && typeof tp.detail === "string") console.log(`    detail: ${tp.detail.slice(0, 300)}`);
   ok = rec.status === "succeeded" && !!tp?.pass;
   console.log(
     ok
-      ? "\n✅ codex-in-image 하니스로 SpreadsheetBench 수행 → tests_pass PASS. 이미지 안 codex(머신 로그인 마운트) + LibreOffice recalc 채점."
-      : "\n⚠️ 기대와 불일치(위 로그 참고 — codex 로그인/이미지/docker 확인).",
+      ? "\n✅ Ran SpreadsheetBench with the codex-in-image harness → tests_pass PASS. In-image codex (machine login mounted) + LibreOffice recalc grading."
+      : "\n⚠️ Mismatch vs expected (see logs above — check codex login / image / docker).",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

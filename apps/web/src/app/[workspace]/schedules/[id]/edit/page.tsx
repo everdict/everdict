@@ -29,11 +29,11 @@ export default async function EditSchedulePage({
   try {
     schedule = scheduleSchema.parse(await controlPlane.getSchedule(ctx, id))
   } catch {
-    schedule = null // 없음/타 워크스페이스(404) → 목록으로
+    schedule = null // missing / other workspace (404) → go to the list
   }
   if (!schedule) redirect(`/${workspace}/schedules`)
 
-  // 수정은 생성자 또는 워크스페이스 admin 만(컨트롤플레인도 강제 — 여기는 UI 게이팅). 그 외엔 목록으로.
+  // Editing is for the creator or a workspace admin only (the control plane also enforces it — this is UI gating). Otherwise go to the list.
   const isAdmin = principal?.roles.includes('admin') ?? false
   const isCreator = principal?.subject === schedule.createdBy
   if (!isCreator && !isAdmin) redirect(`/${workspace}/schedules`)
@@ -46,7 +46,7 @@ export default async function EditSchedulePage({
     harnesses = harnessesSchema.parse(await controlPlane.listHarnesses(ctx))
     runtimes = runtimesSchema.parse(await controlPlane.listRuntimes(ctx))
   } catch {
-    // 목록 실패해도 폼은 동작(현재 값 유지)
+    // Even if the list fails, the form still works (keeps the current values)
   }
 
   const tmpl = schedule.runTemplate

@@ -1,24 +1,24 @@
-# Docker Compose — 웹 + API 풀스택
+# Docker Compose — web + API full stack
 
-`apps/web`(Next.js, `:3001`)과 `apps/api`(Fastify 컨트롤플레인, `:8787`)를 한 번에 띄운다. dev/prod 분리.
+Brings up `apps/web` (Next.js, `:3001`) and `apps/api` (the Fastify control plane, `:8787`) at once. dev/prod are separate.
 
-이미지 정의: `apps/api/Dockerfile`, `apps/web/Dockerfile` (둘 다 멀티스테이지 — `dev` / `runtime` 타깃).
-모든 빌드 컨텍스트는 **레포 루트**(`../..`) — pnpm 모노레포라서 워크스페이스 전체가 필요하다.
+Image definitions: `apps/api/Dockerfile`, `apps/web/Dockerfile` (both multi-stage — `dev` / `runtime` targets).
+Every build context is the **repo root** (`../..`) — since this is a pnpm monorepo, the whole workspace is needed.
 
-## dev — 빠른 풀스택 기동(핫리로드, 인증 OFF)
+## dev — fast full-stack startup (hot reload, auth OFF)
 
 ```bash
 docker compose -f deploy/compose/docker-compose.dev.yaml up --build
 ```
 
-- 웹 http://localhost:3001 · API http://localhost:8787
-- 인증 없음: 웹은 dev 모드, API 는 dev-fallback(`x-everdict-tenant`) → 바로 클릭 가능. 테넌트는 `default`.
-- 저장소 **in-memory** → 재시작 시 초기화. 백엔드 **local**(이 머신 in-process).
-- 소스를 컨테이너에 바인드마운트(리눅스 호스트 → node_modules 호환): 웹=`next dev`, API=`tsc -w`+`node --watch`.
-- `claude-code` 하니스를 실제로 돌리려면 셸/`.env` 에 `ANTHROPIC_API_KEY` 또는 `CLAUDE_CODE_OAUTH_TOKEN`.
-  (`scripted` 하니스는 토큰 없이 동작 — 스모크 테스트에 적합)
+- web http://localhost:3001 · API http://localhost:8787
+- No auth: the web runs in dev mode, the API uses the dev fallback (`x-everdict-tenant`) → clickable right away. Tenant is `default`.
+- Stores are **in-memory** → reset on restart. Backend is **local** (in-process on this machine).
+- Source is bind-mounted into the containers (Linux host → node_modules compatible): web=`next dev`, API=`tsc -w`+`node --watch`.
+- To actually run the `claude-code` harness, set `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` in the shell/`.env`.
+  (the `scripted` harness works without a token — suitable for smoke tests)
 
-동작 확인:
+Sanity check:
 ```bash
 curl localhost:8787/healthz
 curl -XPOST localhost:8787/runs -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
@@ -26,36 +26,36 @@ curl -XPOST localhost:8787/runs -H 'x-everdict-tenant: default' -H 'content-type
   "case":{"id":"c1","env":{"kind":"repo","source":{"files":{}}},"task":"...","graders":[{"id":"steps"}],"timeoutSec":120,"tags":[]}}'
 ```
 
-> 컨테이너 없이 네이티브 핫리로드(Keycloak+API 도커, 웹은 호스트)는 `bash scripts/dev/up.sh` 도 있다.
+> For native hot reload without containers (Keycloak+API in Docker, web on the host), there is also `bash scripts/dev/up.sh`.
 
-## prod — 하드닝 풀스택(Postgres, Keycloak 없음)
+## prod — hardened full stack (Postgres, no Keycloak)
 
 ```bash
-cp deploy/compose/.env.example deploy/compose/.env   # 최소 POSTGRES_PASSWORD
+cp deploy/compose/.env.example deploy/compose/.env   # at minimum POSTGRES_PASSWORD
 docker compose -f deploy/compose/docker-compose.prod.yaml --env-file deploy/compose/.env up -d --build
 ```
 
-차이점:
-- **Postgres**(영속 볼륨, 기동 시 마이그레이션 자동 적용).
-- 시크릿 at-rest 암호화(`EVERDICT_SECRETS_KEY`) + 내부 토큰(`EVERDICT_INTERNAL_TOKEN`) + 테넌트 run 예산(선택).
-- `restart: unless-stopped` + 헬스체크 + `depends_on(healthy)`. 바인드마운트 없음(runtime 산출물 구동).
+Differences:
+- **Postgres** (persistent volume, migrations applied automatically at startup).
+- Secret at-rest encryption (`EVERDICT_SECRETS_KEY`) + an internal token (`EVERDICT_INTERNAL_TOKEN`) + per-tenant run budgets (optional).
+- `restart: unless-stopped` + health checks + `depends_on(healthy)`. No bind mounts (runs the built runtime artifacts).
 
-### ⚠️ 인증 (Keycloak 제거됨)
-웹은 정적 API 키 경로가 없어 Keycloak 없이는 `x-everdict-tenant=default` 로 동작한다. 그래서 API 도 인증을 강제하지
-않는다(`EVERDICT_REQUIRE_AUTH` 미설정) — 즉 **단일 테넌트 `default`, 인증 미강제**다. 이 스택은 **신뢰된 네트워크 /
-리버스 프록시 뒤**를 전제로 한다(공개 인터넷에 그대로 노출하지 말 것).
+### ⚠️ Auth (Keycloak removed)
+The web has no static API-key path, so without Keycloak it operates as `x-everdict-tenant=default`. The API therefore does not
+enforce auth either (`EVERDICT_REQUIRE_AUTH` unset) — that is, **a single tenant `default`, auth not enforced**. This stack assumes
+it sits **on a trusted network / behind a reverse proxy** (do not expose it directly to the public internet).
 
-실제 인증이 필요하면:
-- **프로그램/MCP 접근만** → API env 에 `EVERDICT_REQUIRE_AUTH=1` + `EVERDICT_INTERNAL_TOKEN` 으로 `/internal/tenant-keys`
-  에서 API 키(`ak_…`) 발급. 단 이 경우 웹 UI 는 인증 수단이 없어 동작하지 않는다.
-- **사람 SSO** → 앞단에 oauth2-proxy 등 리버스 프록시를 두거나, Keycloak 을 다시 추가(`deploy/keycloak/` 참고).
+If you need real auth:
+- **Programmatic/MCP access only** → set `EVERDICT_REQUIRE_AUTH=1` + `EVERDICT_INTERNAL_TOKEN` in the API env and mint API keys
+  (`ak_…`) from `/internal/tenant-keys`. Note that in this case the web UI has no means of authentication and will not work.
+- **Human SSO** → put a reverse proxy such as oauth2-proxy in front, or add Keycloak back (see `deploy/keycloak/`).
 
-## 이미지만 따로 빌드
+## Build just the images
 
 ```bash
-docker build -f apps/api/Dockerfile --target runtime -t everdict-api .   # 레포 루트에서
+docker build -f apps/api/Dockerfile --target runtime -t everdict-api .   # from the repo root
 docker build -f apps/web/Dockerfile --target runtime -t everdict-web .
 ```
 
-> 참고: runtime 이미지는 신뢰성 우선으로 `/app` 전체(node_modules 포함)를 복사한다. 이미지 슬림화는
-> `pnpm deploy --filter <pkg> --prod` 또는 Next standalone(`output: 'standalone'`) 으로 후속 최적화 가능.
+> Note: the runtime image copies all of `/app` (including node_modules) for reliability first. Slimming the image can be a
+> follow-up optimization via `pnpm deploy --filter <pkg> --prod` or Next standalone (`output: 'standalone'`).

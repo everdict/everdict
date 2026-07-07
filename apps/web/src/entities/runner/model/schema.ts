@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// 셀프호스티드 러너가 지원할 수 있는 것 — 컨트롤플레인 core 어휘(CAPABILITY_DEFS) 미러. 러너가 자가-프로브해 광고.
+// What a self-hosted runner can support — mirror of the control plane core vocabulary (CAPABILITY_DEFS). The runner self-probes and advertises.
 export const runnerCapabilities = [
   'git',
   'docker',
@@ -13,10 +13,10 @@ export const runnerCapabilities = [
 export const runnerCapabilitySchema = z.enum(runnerCapabilities)
 export type RunnerCapability = z.infer<typeof runnerCapabilitySchema>
 
-// capability kind — 배지 의미(강제 레이어가 다름). core CapabilityKind 미러.
+// capability kind — badge meaning (the enforcement layer differs). Mirror of core CapabilityKind.
 export type CapabilityKind = 'functional' | 'security' | 'auth'
 
-// 표시 메타(이름·kind·라벨) — 러너 카드의 green(가능)/grey(불가) 배지에 쓴다. core 어휘 순서.
+// display meta (name·kind·label) — used for the runner card's green (supported)/grey (unsupported) badges. Core vocabulary order.
 export const capabilityMeta: { name: RunnerCapability; kind: CapabilityKind; label: string }[] = [
   { name: 'git', kind: 'functional', label: 'Git' },
   { name: 'docker', kind: 'functional', label: 'Docker' },
@@ -27,7 +27,7 @@ export const capabilityMeta: { name: RunnerCapability; kind: CapabilityKind; lab
   { name: 'claude-login', kind: 'auth', label: 'Claude login' },
 ]
 
-// GET /runners 의 러너 메타 미러 — 토큰 없음(페어링 토큰은 페어 시 한 번만, 저장은 해시).
+// Mirror of GET /runners runner meta — no token (the pairing token is shown once at pairing, stored as a hash).
 export const runnerMetaSchema = z.object({
   id: z.string(),
   label: z.string(),
@@ -38,11 +38,11 @@ export const runnerMetaSchema = z.object({
 })
 export type RunnerMeta = z.infer<typeof runnerMetaSchema>
 
-// GET /runners — 내 러너 목록(개인 소유; account 페이지).
+// GET /runners — my runner list (personally owned; account page).
 export const runnersResponseSchema = z.object({ runners: z.array(runnerMetaSchema) })
 export type RunnersResponse = z.infer<typeof runnersResponseSchema>
 
-// POST /runners 요청 미러 — owner/workspace 는 컨트롤플레인이 Principal 에서 채운다.
+// Mirror of POST /runners request — owner/workspace are filled by the control plane from the Principal.
 export const pairRunnerInputSchema = z.object({
   label: z.string().min(1).max(80),
   os: z.string().min(1).max(40).optional(),
@@ -50,16 +50,16 @@ export const pairRunnerInputSchema = z.object({
 })
 export type PairRunnerInput = z.infer<typeof pairRunnerInputSchema>
 
-// POST /runners 응답 — 평문 토큰(rnr_…)은 여기서 한 번만 노출된다(다시 못 봄).
+// POST /runners response — the plaintext token (rnr_…) is exposed here only once (never shown again).
 export const pairedRunnerSchema = z.object({ runner: runnerMetaSchema, token: z.string() })
 export type PairedRunner = z.infer<typeof pairedRunnerSchema>
 
-// POST /workspace/runners/github-install 응답 — 빌드 서버에 GitHub 러너 + Everdict 러너를 함께 세우는 설치 스크립트.
-// installScript 에 평문 토큰(rnr_ + GitHub 등록토큰)이 포함되어 1회만 노출된다.
+// POST /workspace/runners/github-install response — an install script that stands up a GitHub runner + Everdict runner together on the build server.
+// installScript contains plaintext tokens (rnr_ + GitHub registration token), exposed only once.
 export const githubRunnerInstallSchema = z.object({
   runner: runnerMetaSchema,
-  runtimeTarget: z.string(), // self:ws:<id> — 워크플로 runtime 입력값
-  githubRunnerLabel: z.string(), // everdict-<id> — 워크플로 runs-on 라벨
+  runtimeTarget: z.string(), // self:ws:<id> — workflow runtime input value
+  githubRunnerLabel: z.string(), // everdict-<id> — workflow runs-on label
   installScript: z.string(),
   workflowHint: z.string(),
   registrationExpiresAt: z.string(),

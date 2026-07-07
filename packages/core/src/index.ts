@@ -1,5 +1,5 @@
 // @everdict/core — contracts only. The dependency root.
-// 모든 계약은 Zod 스키마와 짝을 이룬다(스키마가 진실원천, 타입은 z.infer).
+// Every contract is paired with a Zod schema (the schema is the source of truth; the type is z.infer).
 export * from "./errors.js";
 export * from "./trace.js";
 export * from "./compute.js";

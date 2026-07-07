@@ -148,8 +148,8 @@ leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, mod
 3. ✅ **Web** — `scorecards/leaderboard` page (dataset+metric+window picker → ranked table, rank badge, model
    chip, `unknown` fallback) + `LeaderboardPicker` feature + `controlPlane.leaderboardScorecards` client +
    `models`/leaderboard mirror schemas. Model surfaced on **list** (row chip), **detail** (model card: primary +
-   observed chips + `선언≠실제` drift badge), **compare** (model per side, from the already-loaded records).
-   "리더보드" button added to the scorecards list header (next to 추이/비교).
+   observed chips + `declared≠actual` drift badge), **compare** (model per side, from the already-loaded records).
+   "Leaderboard" button added to the scorecards list header (next to Trend/Compare).
 
 ## Decisions / non-goals
 

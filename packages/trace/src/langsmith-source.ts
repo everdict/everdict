@@ -1,10 +1,10 @@
 import { type TraceEvent, UpstreamError } from "@everdict/core";
 import type { TraceSource } from "./trace-source.js";
 
-// LangSmith run — POST /runs/query {trace:<trace_id>} 응답의 RunSchema(선택 필드만).
-// 실 API 검증 요점: 인증은 X-API-Key 헤더(bare 경로 = SDK 와 동일), 트레이스 전체 조회는 v1 /runs/query 의
-// `trace` 필터(v2 는 project_ids 필수+기본 1일 시간창이라 부적합), 페이지네이션은 cursors.next 를 body.cursor 로
-// 되돌리는 루프, total_cost 는 JSON 숫자가 아니라 '십진 문자열'(Number() 파싱 필요).
+// LangSmith run — RunSchema (selected fields only) from the POST /runs/query {trace:<trace_id>} response.
+// Real-API notes: auth is the X-API-Key header (bare path = same as the SDK), full-trace fetch is v1 /runs/query's
+// `trace` filter (v2 requires project_ids + defaults to a 1-day window, so it's unsuitable), pagination is a loop
+// feeding cursors.next back as body.cursor, and total_cost is a 'decimal string', not a JSON number (needs Number() parsing).
 interface LangsmithRun {
   id?: string;
   name?: string;
@@ -15,14 +15,14 @@ interface LangsmithRun {
   error?: string | null;
   prompt_tokens?: number | null;
   completion_tokens?: number | null;
-  total_cost?: string | null; // 십진 문자열
+  total_cost?: string | null; // decimal string
   extra?: { metadata?: Record<string, unknown> | null } | null;
 }
 
 const ms = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 0);
 
-// run 배열 → TraceEvent[] (순수). llm run → llm_call(모델은 ls_model_name 메타 → run name 폴백),
-// tool run → tool_call/result 쌍(ok = error 없음), 그 외(chain 등 구조 run)는 스킵.
+// run array → TraceEvent[] (pure). llm run → llm_call (model from ls_model_name metadata → run name fallback),
+// tool run → a tool_call/result pair (ok = no error), other (structural runs like chain) are skipped.
 export function langsmithRunsToTraceEvents(runs: LangsmithRun[]): TraceEvent[] {
   const sorted = [...runs].sort((a, b) => ms(a.start_time) - ms(b.start_time));
   const base = ms(sorted[0]?.start_time);
@@ -40,7 +40,7 @@ export function langsmithRunsToTraceEvents(runs: LangsmithRun[]): TraceEvent[] {
         cost: {
           inputTokens: r.prompt_tokens ?? 0,
           outputTokens: r.completion_tokens ?? 0,
-          usd: r.total_cost ? Number(r.total_cost) : 0, // 십진 문자열 → 숫자
+          usd: r.total_cost ? Number(r.total_cost) : 0, // decimal string → number
         },
         latencyMs: Math.max(0, ms(r.end_time) - ms(r.start_time)),
       });
@@ -60,12 +60,12 @@ export function langsmithRunsToTraceEvents(runs: LangsmithRun[]): TraceEvent[] {
 }
 
 export interface LangsmithTraceSourceOptions {
-  endpoint: string; // 예: https://api.smith.langchain.com
-  auth?: string; // API 키 값 그대로 — x-api-key 헤더로 전송(Authorization 아님)
-  fetchImpl?: typeof fetch; // 테스트 주입
+  endpoint: string; // e.g. https://api.smith.langchain.com
+  auth?: string; // the API key value verbatim — sent as the x-api-key header (not Authorization)
+  fetchImpl?: typeof fetch; // test injection
 }
 
-// LangSmith 에서 runId(=trace_id uuid)로 그 트레이스의 run 전체를 커서 루프로 가져와 TraceEvent 로 정규화.
+// Fetch all runs of the trace from LangSmith by runId (=trace_id uuid) via a cursor loop and normalize to TraceEvents.
 export class LangsmithTraceSource implements TraceSource {
   constructor(private readonly opts: LangsmithTraceSourceOptions) {}
   async fetch(runId: string): Promise<TraceEvent[]> {
@@ -99,13 +99,13 @@ export class LangsmithTraceSource implements TraceSource {
           ...(cursor ? { cursor } : {}),
         }),
       });
-      if (res.status === 404) return []; // 트레이스가 아직 없으면 0건으로 degrade(소스 공통 규칙)
+      if (res.status === 404) return []; // if the trace isn't present yet, degrade to 0 events (the shared source rule)
       if (!res.ok) {
         const text = await res.text().catch(() => "");
         throw new UpstreamError(
           "UPSTREAM_ERROR",
           { status: res.status },
-          `LangSmith 트레이스 조회 ${res.status}: ${text.slice(0, 200)}`,
+          `LangSmith trace fetch ${res.status}: ${text.slice(0, 200)}`,
         );
       }
       let body: { runs?: LangsmithRun[]; cursors?: { next?: string | null } };

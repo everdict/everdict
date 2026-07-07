@@ -12,13 +12,13 @@ import {
 } from 'lucide-react'
 
 export interface NavItem {
-  // 워크스페이스-상대 경로 suffix(예: '' = 개요, '/scorecards'). 렌더 시 활성 워크스페이스로 prefix → /{workspace}{suffix}.
-  // nav-config 는 요청 컨텍스트가 없으므로(모듈 로드 시 워크스페이스·로케일 미상) suffix + 메시지 키만 보관한다.
+  // Workspace-relative path suffix (e.g. '' = overview, '/scorecards'). Prefixed with the active workspace at render → /{workspace}{suffix}.
+  // nav-config has no request context (workspace·locale unknown at module load), so it holds only the suffix + message key.
   href: string
-  labelKey: string // messages/*.json 의 nav.* 키 — 렌더 시 useTranslations 로 해석
+  labelKey: string // nav.* key in messages/*.json — resolved via useTranslations at render
   icon: LucideIcon
   exact?: boolean
-  keywords?: string // command 팔레트 퍼지 매칭 보조어(한/영 병기)
+  keywords?: string // command palette fuzzy-match aid words (Korean/English side by side)
 }
 
 export interface NavSection {
@@ -26,9 +26,9 @@ export interface NavSection {
   items: NavItem[]
 }
 
-// SaaS 표면의 1급 개념: 하니스(무엇을) · 벤치마크(무엇으로) · 스코어카드(결과) · 런타임(어디서, 워크스페이스가
-// 직접 등록하는 실행 인프라 — 기본 시드 없음) + 흐름(뷰/예약/작업) + 홈(개요).
-// judge/metric/model/recipe/bundle 은 엔진 부품/고급 옵션 — 내비에서 제외(라우트는 남아 URL 로 접근 가능).
+// First-class concepts of the SaaS surface: harness (what) · benchmark (with what) · scorecard (result) · runtime (where — execution
+// infra the workspace registers itself, no default seed) + flows (views/schedules/queue) + home (overview).
+// judge/metric/model/recipe/bundle are engine parts/advanced options — excluded from the nav (routes remain, reachable via URL).
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
@@ -37,55 +37,55 @@ export const NAV_SECTIONS: NavSection[] = [
         labelKey: 'overview',
         icon: LayoutDashboard,
         exact: true,
-        keywords: 'overview home 홈 개요',
+        keywords: 'overview home',
       },
       {
         href: '/harnesses',
         labelKey: 'harnesses',
         icon: Boxes,
-        keywords: 'harness 하니스 에이전트 agent codex claude',
+        keywords: 'harness agent codex claude',
       },
       {
         href: '/datasets',
         labelKey: 'benchmarks',
         icon: Database,
-        keywords: 'benchmark 벤치마크 dataset 데이터셋 케이스 case pinch',
+        keywords: 'benchmark dataset case pinch',
       },
       {
         href: '/scorecards',
         labelKey: 'scorecards',
         icon: BarChart3,
-        keywords: 'scorecard 스코어카드 배치 평가 비교 리더보드 leaderboard 추이',
+        keywords: 'scorecard batch evaluate compare leaderboard trend',
       },
       {
         href: '/views',
         labelKey: 'views',
         icon: Bookmark,
-        keywords: 'view 뷰 분석 저장 대시보드 리더보드 추이 비교 피벗 pivot',
+        keywords: 'view analysis saved dashboard leaderboard trend compare pivot',
       },
       {
         href: '/schedules',
         labelKey: 'schedules',
         icon: CalendarClock,
-        keywords: 'schedule cron 예약 주기 회귀 regression',
+        keywords: 'schedule cron recurring regression',
       },
       {
         href: '/queue',
         labelKey: 'queue',
         icon: Activity,
-        keywords: 'queue 큐 작업 워크로드 진행 대기 런타임 workload',
+        keywords: 'queue job workload running waiting runtime',
       },
       {
         href: '/runtimes',
         labelKey: 'runtimes',
         icon: Server,
-        keywords: 'runtime 런타임 실행 인프라 docker k8s nomad 러너 runner',
+        keywords: 'runtime execution infra docker k8s nomad runner',
       },
       {
         href: '/report',
         labelKey: 'report',
         icon: FileText,
-        keywords: 'report 리포트 회귀 추세 trend',
+        keywords: 'report regression trend',
       },
     ],
   },

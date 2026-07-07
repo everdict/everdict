@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 리소스 제네릭 댓글 작성 — resourceType/resourceId, 선택적 parentId(대댓글), mentions(알림). authZ 는 컨트롤플레인.
+// Resource-generic comment creation — resourceType/resourceId, optional parentId (reply), mentions (notifications). AuthZ is the control plane's.
 export async function createCommentAction(input: {
   resourceType: string
   resourceId: string
@@ -22,7 +22,7 @@ export async function createCommentAction(input: {
       ...(input.parentId ? { parentId: input.parentId } : {}),
       ...(input.mentions && input.mentions.length > 0 ? { mentions: input.mentions } : {}),
     })
-    // 모든 상세 페이지에서 재검증(경로별 세그먼트가 달라 광범위하게 갱신).
+    // Revalidate across all detail pages (per-route segments differ, so refresh broadly).
     revalidatePath('/[workspace]', 'layout')
     return { ok: true }
   } catch (e) {

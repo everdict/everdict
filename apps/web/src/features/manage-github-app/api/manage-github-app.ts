@@ -15,8 +15,8 @@ export interface GithubAppInstallResult extends GithubAppMutationResult {
   installUrl?: string
 }
 
-// GitHub App 설치 시작(관리자) → GitHub 설치 페이지 URL 반환(클라이언트가 이동). host 미지정=github.com.
-// authZ(admin=settings:write)는 컨트롤플레인이 강제.
+// Start GitHub App install (admin) → returns the GitHub install-page URL (the client navigates). host unset = github.com.
+// authZ (admin = settings:write) is enforced by the control plane.
 export async function startGithubAppInstallAction(host?: string): Promise<GithubAppInstallResult> {
   const ctx = await authContext()
   try {
@@ -29,7 +29,7 @@ export async function startGithubAppInstallAction(host?: string): Promise<Github
   }
 }
 
-// GHE App 등록/갱신(관리자). App 개인키(PEM)는 SecretStore 에 먼저 넣고 그 이름만 지정.
+// Register/update GHE App (admin). Put the App private key (PEM) in the SecretStore first and specify only its name.
 export async function registerGithubAppAction(input: {
   host: string
   slug: string
@@ -46,7 +46,7 @@ export async function registerGithubAppAction(input: {
   }
 }
 
-// GHE App 등록 해제(관리자).
+// Deregister GHE App (admin).
 export async function removeGithubAppRegistrationAction(
   host: string
 ): Promise<GithubAppMutationResult> {
@@ -60,7 +60,7 @@ export async function removeGithubAppRegistrationAction(
   }
 }
 
-// installation 링크 해제(관리자). 실제 uninstall 은 GitHub 쪽.
+// Unlink installation (admin). The actual uninstall happens on the GitHub side.
 export async function unlinkGithubAppInstallationAction(
   installationId: number
 ): Promise<GithubAppMutationResult> {

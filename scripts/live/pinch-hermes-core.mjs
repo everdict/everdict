@@ -1,10 +1,10 @@
-// 라이브 e2e: hermes-desktop 의 PinchBench **core ~21 태스크 전체** 수행도를 *채점 타입별로 충실히* 측정 + 이력 기록.
-// 채점은 PinchBench 본래 방식: automated/hybrid → 태스크 .md 의 `## Automated Checks` grade(transcript, workspace_path)
-// 함수를 그대로 실행(pinch-grade.py, 네트워크 없는 python 컨테이너); llm_judge/hybrid → 태스크의 루브릭으로 산출 파일 채점.
+// Live e2e: measure hermes-desktop's performance on the **entire PinchBench core (~21 tasks)** *faithfully per grading type* + record history.
+// Grading uses PinchBench's native approach: automated/hybrid → run the task .md's `## Automated Checks` grade(transcript, workspace_path)
+// function as-is (pinch-grade.py, network-less python container); llm_judge/hybrid → grade the output files with the task's rubric.
 //   automated: score=grade().mean | llm_judge: score=judge | hybrid: score=avg(grade().mean, judge)
-// 흐름(태스크별): 워크스페이스 mkdtemp + 입력 seed → hermes -z(CWD=/work, --network=host) → 산출파일/transcript 회수
-//   → automated grade() 실행 → (필요시) 루브릭 judge → 결합 → POST /scorecards/ingest → GET 이력 출력.
-// 사전: everdict-hermes-agent:demo, LiteLLM(:4000), apps/api/dist, python:3.12-slim(자동 pull), alpine.
+// Flow (per task): mkdtemp workspace + seed inputs → hermes -z (CWD=/work, --network=host) → collect output files/transcript
+//   → run automated grade() → (if needed) rubric judge → combine → POST /scorecards/ingest → print GET history.
+// Prerequisites: everdict-hermes-agent:demo, LiteLLM (:4000), apps/api/dist, python:3.12-slim (auto pull), alpine.
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -17,10 +17,10 @@ const H = { "content-type": "application/json", "x-everdict-tenant": "default" }
 const AGENT_MODEL = process.env.HERMES_MODEL ?? "gpt-5.4-mini";
 const JUDGE_MODEL = process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini";
 const LLM_BASE = "http://localhost:4000/v1";
-const SCRIPTS = new URL(".", import.meta.url).pathname; // scripts/live (pinch-grade.py 위치)
+const SCRIPTS = new URL(".", import.meta.url).pathname; // scripts/live (location of pinch-grade.py)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// PinchBench manifest 의 core 목록(~21) + 카테고리.
+// PinchBench manifest core list (~21) + categories.
 const CORE = [
   ["task_sanity", "productivity"],
   ["task_calendar", "productivity"],
@@ -57,7 +57,7 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음.");
+  console.error("no LLM key.");
   process.exit(2);
 }
 const post = async (p, b) => {
@@ -89,7 +89,7 @@ async function fetchTask([id, category]) {
   const rubric =
     `${section("Grading Criteria")}\n\n${section("LLM Judge Rubric")}`.trim() ||
     "Grade if the task is fully and correctly completed.";
-  // workspace_files: source/dest(repo의 assets/<source> 참조, 바이너리 포함) 또는 path/content(인라인) 둘 다 지원.
+  // workspace_files: supports both source/dest (references repo assets/<source>, incl. binaries) and path/content (inline).
   const inputs = [];
   const wfm = front.match(/workspace_files:\s*\n([\s\S]*?)(?=\n[a-z_]+:\s|$)/i);
   if (wfm?.[1].includes("-")) {
@@ -114,13 +114,13 @@ async function fetchTask([id, category]) {
       }
     }
   }
-  // hybrid 결합 가중치(태스크 명시 grading_weights, 기본 0.5/0.5)
+  // hybrid combination weights (task-specified grading_weights, default 0.5/0.5)
   const wm = front.match(/grading_weights:\s*\n\s*automated:\s*([\d.]+)\s*\n\s*llm_judge:\s*([\d.]+)/);
   const weights = wm ? { auto: Number(wm[1]), judge: Number(wm[2]) } : { auto: 0.5, judge: 0.5 };
   return { id, category, grading, prompt, rubric, inputs, md, timeout, weights };
 }
 
-// hermes 를 워크스페이스(/work)에서 실행 → 산출 파일 회수(입력/숨김 제외).
+// Run hermes in the workspace (/work) → collect output files (excluding inputs/hidden).
 function runHermes(t) {
   const ws = mkdtempSync(join(tmpdir(), "pinch-ws-"));
   for (const f of t.inputs) {
@@ -186,7 +186,7 @@ function runHermes(t) {
   return { chat, files, ws };
 }
 
-// 태스크 .md 의 grade(transcript, workspace_path) 실행(네트워크 없는 python 컨테이너).
+// Run the task .md's grade(transcript, workspace_path) (network-less python container).
 function gradeAutomated(t, ws, chat) {
   const gdir = mkdtempSync(join(tmpdir(), "pinch-grade-"));
   writeFileSync(join(gdir, "task.md"), t.md);
@@ -249,7 +249,7 @@ async function gradeJudge(t, files) {
   }
 }
 
-console.log("=== 컨트롤플레인 기동(dev) ===");
+console.log("=== start control plane (dev) ===");
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: new URL("../..", import.meta.url).pathname,
   env: {
@@ -282,12 +282,12 @@ try {
     i++
   )
     await sleep(1000);
-  // python:3.12-slim 미리 pull(첫 채점 지연 방지)
+  // Pre-pull python:3.12-slim (avoid first-grade delay)
   try {
     execFileSync("docker", ["pull", "-q", "python:3.12-slim"], { stdio: "ignore", timeout: 120000 });
   } catch {}
 
-  console.log(`\n=== PinchBench core ${TASK_IDS.length}개 로드 ===`);
+  console.log(`\n=== load ${TASK_IDS.length} PinchBench core tasks ===`);
   const tasks = [];
   for (const pair of TASK_IDS) {
     try {
@@ -300,14 +300,16 @@ try {
   const byType = {};
   for (const t of tasks) byType[t.grading] = (byType[t.grading] || 0) + 1;
   const seeded = tasks.filter((t) => t.inputs.length).length;
-  console.log(`  로드됨 ${tasks.length} — 채점타입: ${JSON.stringify(byType)} — 입력파일 seed된 태스크: ${seeded}`);
+  console.log(
+    `  loaded ${tasks.length} — grading types: ${JSON.stringify(byType)} — tasks with seeded input files: ${seeded}`,
+  );
 
-  console.log("\n=== pinch core 벤치마크 + hermes-desktop 하니스 등록 ===");
+  console.log("\n=== register pinch core benchmark + hermes-desktop harness ===");
   await post("/datasets", {
     id: "pinch-core-21",
     version: "1.0.0",
     description:
-      "PinchBench core (~21) — 채점 타입별 충실 채점(automated=태스크 grade() 실행, llm_judge=루브릭, hybrid=둘 다).",
+      "PinchBench core (~21) — faithful grading per grading type (automated=run task grade(), llm_judge=rubric, hybrid=both).",
     tags: ["pinchbench", "core", "faithful"],
     cases: tasks.map((t) => ({
       id: t.id,
@@ -329,7 +331,7 @@ try {
     trace: { kind: "none" },
   });
 
-  console.log(`\n=== hermes(${AGENT_MODEL}) 실행 + 채점타입별 채점 (${tasks.length}태스크, 수십 분) ===`);
+  console.log(`\n=== run hermes(${AGENT_MODEL}) + grade per grading type (${tasks.length} tasks, tens of minutes) ===`);
   const traces = [];
   let n = 0;
   for (const t of tasks) {
@@ -343,7 +345,7 @@ try {
     let score = 0;
     if (t.grading === "automated") score = autoMean ?? 0;
     else if (t.grading === "llm_judge") score = judge?.score ?? 0;
-    // hybrid: 태스크 명시 가중치(grading_weights)로 결합
+    // hybrid: combine using task-specified weights (grading_weights)
     else
       score =
         autoMean != null && judge
@@ -398,7 +400,7 @@ try {
     });
   }
 
-  console.log("\n=== POST /scorecards/ingest (이력 기록) ===");
+  console.log("\n=== POST /scorecards/ingest (record history) ===");
   const ing = await post("/scorecards/ingest", {
     dataset: { id: "pinch-core-21", version: "1.0.0" },
     harness: { id: "hermes-desktop", version: "1.0.0" },
@@ -414,10 +416,10 @@ try {
     if (rec.status === "succeeded" || rec.status === "failed") break;
   }
   console.log(
-    `\n================ 기록된 평가 이력 (PinchBench core, GET /scorecards/${String(scId).slice(0, 8)}…) ================`,
+    `\n================ recorded evaluation history (PinchBench core, GET /scorecards/${String(scId).slice(0, 8)}…) ================`,
   );
   console.log(
-    `  벤치마크: ${rec.dataset?.id}@${rec.dataset?.version} | 하니스: ${rec.harness?.id}@${rec.harness?.version} | ${rec.status}`,
+    `  benchmark: ${rec.dataset?.id}@${rec.dataset?.version} | harness: ${rec.harness?.id}@${rec.harness?.version} | ${rec.status}`,
   );
   const results = rec.scorecard?.results ?? [];
   const cat = {};
@@ -430,20 +432,24 @@ try {
       `   - ${t.id} (${t.category}/${t.grading}): ${((s?.value ?? 0) * 100) | 0}% ${s?.pass ? "PASS" : "FAIL"}`,
     );
   }
-  console.log("\n  카테고리별 평균:");
+  console.log("\n  average per category:");
   for (const [c, arr] of Object.entries(cat))
     console.log(`   ${c}: ${((arr.reduce((a, b) => a + b, 0) / arr.length) * 100) | 0}% (n=${arr.length})`);
   const all = results.map((r) => r.scores?.find((x) => x.metric === "score")?.value ?? 0);
   const passN = all.filter((v) => v >= 0.6).length;
   console.log(
-    `\n  → PinchBench core 수행도: passRate ${((passN / all.length) * 100) | 0}% (${passN}/${all.length}), mean ${((all.reduce((a, b) => a + b, 0) / all.length) * 100) | 0}% (agent=${AGENT_MODEL})`,
+    `\n  → PinchBench core performance: passRate ${((passN / all.length) * 100) | 0}% (${passN}/${all.length}), mean ${((all.reduce((a, b) => a + b, 0) / all.length) * 100) | 0}% (agent=${AGENT_MODEL})`,
   );
   ok = ing.status === 202 && rec.status === "succeeded";
-  console.log(ok ? "\n✅ PinchBench core 전체를 채점 타입별로 충실히 측정 → 이력 기록." : "\n⚠️ 기대와 불일치");
+  console.log(
+    ok
+      ? "\n✅ measured the entire PinchBench core faithfully per grading type → recorded history."
+      : "\n⚠️ does not match expectation",
+  );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.stack : e);
 } finally {
   shutdown();
-  console.log("control plane 종료.");
+  console.log("control plane shut down.");
 }
 process.exit(ok ? 0 : 1);

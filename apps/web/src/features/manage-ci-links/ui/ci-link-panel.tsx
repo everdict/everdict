@@ -15,19 +15,19 @@ import { deleteCiLinkAction } from '../api/manage-ci-links'
 import { ConnectRepoDialog, hostLabel } from './connect-repo-dialog'
 import { SetupPrButton } from './setup-pr-button'
 
-// kind → 이 하니스가 CI 에 노출할 빌드 슬롯 후보. service=서비스 이름, command=image, process=없음.
+// kind → the build slot candidates this harness exposes to CI. service = service names, command = image, process = none.
 function slotChoicesFor(kind: HarnessKind, serviceNames: string[]): string[] {
   if (kind === 'service') return serviceNames
   if (kind === 'command') return ['image']
   return []
 }
 
-// link 식별 키 — 같은 "owner/name" 이 github.com 과 GHE 양쪽에 링크될 수 있어 host 까지 포함한다.
+// Link identity key — the same "owner/name" can be linked on both github.com and GHE, so include the host.
 const linkKey = (l: Pick<CiLink, 'repository' | 'host'>) =>
   `${l.host ?? 'github.com'}:${l.repository}`
 
-// 하니스 상세의 "CI 연동" 패널 — 이 하니스에 연결된 레포 링크 목록 + "GitHub 레포 연결"(zero-input) + 셋업 PR/해제.
-// 조회는 viewer+, 저장/해제는 admin(컨트롤플레인 강제). 링크의 존재가 그 레포의 keyless CI 신뢰를 부여한다.
+// Harness detail "CI integration" panel — the repo links connected to this harness + "Connect GitHub repo" (zero-input) + setup PR/unlink.
+// Read is viewer+, save/unlink is admin (enforced by the control plane). A link's existence grants that repo's keyless CI trust.
 export function CiLinkPanel({
   harnessId,
   kind,
@@ -41,7 +41,7 @@ export function CiLinkPanel({
   kind: HarnessKind
   serviceNames: string[]
   datasets: string[]
-  initialLinks: CiLink[] // 이 하니스에 매칭된 링크(서버에서 필터)
+  initialLinks: CiLink[] // links matched to this harness (filtered on the server)
   canWrite: boolean
   workspace: string
 }) {
@@ -54,7 +54,7 @@ export function CiLinkPanel({
 
   const slotChoices = useMemo(() => slotChoicesFor(kind, serviceNames), [kind, serviceNames])
 
-  // 다이얼로그/삭제는 워크스페이스 전체 링크를 돌려준다 — 이 하니스 것만 골라 로컬 상태로.
+  // Dialog/delete return the workspace's full link set — pick just this harness's into local state.
   function applyLinks(all: CiLink[]) {
     setLinks(all.filter((l) => l.harness === harnessId))
   }
@@ -117,7 +117,7 @@ export function CiLinkPanel({
                       {l.repository}
                     </span>
                     {l.host && (
-                      // GHE link — 어느 인스턴스인지 호스트명 배지(github.com 은 무표기).
+                      // GHE link — which instance, shown as a hostname badge (github.com is unmarked).
                       <span className="rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
                         {hostLabel(l.host)}
                       </span>
@@ -129,7 +129,7 @@ export function CiLinkPanel({
                         <span className="font-mono text-foreground/85">{l.dataset}</span>
                       </span>
                     )}
-                    {/* PR 평가 발화 방식 — 기본(both)은 무표기, 좁힌 경우만 표시. */}
+                    {/* PR evaluation trigger mode — the default (both) is unmarked, shown only when narrowed. */}
                     {l.trigger === 'auto' && (
                       <span className="text-[11px] text-muted-foreground">
                         {t('triggerAutoLabel')}

@@ -12,7 +12,7 @@ import type { SecretMeta } from '@/entities/secret'
 import { Callout } from '@/shared/ui/callout'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/shared/ui/tabs'
 
-// principal.ts(server-only) 를 클라이언트로 끌어오지 않으려 필요한 모양만 로컬로 미러.
+// Mirror just the needed shape locally to avoid pulling principal.ts (server-only) into the client.
 interface AccountWorkspace {
   name: string
   role: string
@@ -31,8 +31,8 @@ interface AccountPrincipal {
   profile?: AccountProfile
 }
 
-// 유저 설정 섹션 전환 — 프로필(수정) + 워크스페이스 나가기 · 개인 시크릿 · API 키.
-// (외부 계정 연결은 워크스페이스 소유 GitHub App/Mattermost 로 대체 — 설정 › 통합에서 관리)
+// User settings section switch — profile (edit) + leave workspace · personal secrets · API keys.
+// (External account connections are replaced by the workspace-owned GitHub App/Mattermost — managed in Settings › Integrations)
 export function AccountTabs({
   principal,
   personalSecrets,
@@ -47,11 +47,11 @@ export function AccountTabs({
   initialTab?: string // ?tab=…
 }) {
   const t = useTranslations('accountPage')
-  // 러너는 계정이 아니라 런타임 페이지(실행 대상 표면)로 이동 — 실행 인프라와 한 화면에서 관리.
+  // Runners move to the runtimes page (execution-target surface) rather than the account — managed on one screen with the execution infra.
   const tabKeys = ['profile', 'secrets', 'keys']
   const defaultTab = initialTab && tabKeys.includes(initialTab) ? initialTab : 'profile'
 
-  // 보고 있던 탭이 새로고침에도 유지되도록 ?tab= 에 동기화한다(서버 재요청 없이 history.replaceState 로만 URL 갱신).
+  // Sync the current tab to ?tab= so it survives a refresh (update the URL via history.replaceState only, without re-requesting the server).
   const [tab, setTab] = useState(defaultTab)
   const onTabChange = (v: string) => {
     setTab(v)
@@ -76,18 +76,18 @@ export function AccountTabs({
             avatarUrl={principal.profile?.avatarUrl}
           />
 
-          {/* 워크스페이스 나가기 — 활성 워크스페이스 기준(api-key 세션은 숨김) */}
+          {/* Leave workspace — based on the active workspace (hidden for api-key sessions) */}
           {principal.via === 'oidc' && principal.workspace && <LeaveWorkspaceButton />}
         </div>
       </TabsContent>
 
       <TabsContent value="secrets">
-        {/* 개인 시크릿 — 셀프 관리(admin 불필요). 다른 멤버는 못 봄. 하니스 env 에서 "내 개인" 참조. */}
+        {/* Personal secrets — self-managed (no admin needed). Other members can't see them. Referenced as "my personal" in the harness env. */}
         <SecretsManager variant="personal" secrets={personalSecrets} canWrite />
       </TabsContent>
 
       <TabsContent value="keys">
-        {/* 개인 API 키 — 셀프 관리(admin 불필요). 키는 내 권한으로 동작한다. */}
+        {/* Personal API keys — self-managed (no admin needed). A key operates with my permissions. */}
         {keysError ? (
           <Callout tone="danger">{t('keysLoadError', { error: keysError })}</Callout>
         ) : (

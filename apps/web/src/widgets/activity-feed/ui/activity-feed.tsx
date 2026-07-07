@@ -10,8 +10,8 @@ import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 type Translate = ReturnType<typeof useTranslations<'activityFeed'>>
 
-// standalone run + 스코어카드 배치를 한 타임라인으로 합친 통합 활동 피드.
-// run 은 개별 실행(출처/비용), 스코어카드는 배치 평가(통과율) — 각자 상세로 링크. /scorecards 목록은 그대로 유지(중복 아님, 다른 관점).
+// Unified activity feed merging standalone runs + scorecard batches into one timeline.
+// run = individual execution (source/cost), scorecard = batch eval (pass rate) — each links to its own detail. The /scorecards list stays as-is (not a duplicate, a different view).
 type Item =
   | { kind: 'run'; id: string; updatedAt: string; run: Run }
   | { kind: 'scorecard'; id: string; updatedAt: string; sc: ScorecardRecord }
@@ -37,7 +37,7 @@ function cost(usage?: Usage): string | undefined {
   return `$${usage.usd.toFixed(2)} · ${tok} tok`
 }
 
-// 스코어카드 요약 한 줄 — passRate 가 있는 메트릭이면 통과율, 아니면 메트릭 수.
+// One-line scorecard summary — pass rate if a metric has passRate, otherwise the metric count.
 function scorecardSummary(t: Translate, sc: ScorecardRecord): string {
   const withRate = (sc.summary ?? []).find((m) => m.passRate != null)
   if (withRate?.passRate != null)

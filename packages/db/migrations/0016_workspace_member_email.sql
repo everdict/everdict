@@ -1,4 +1,4 @@
--- 0016_workspace_member_email — additive (expand): 멤버 목록 가독성용 email/preferred_username 클레임.
--- subject 는 opaque Keycloak sub UUID → 사람이 읽을 식별자(email)를 로그인/초대수락 시 캡처(표시 전용, authz 무관).
--- 레거시 행은 NULL(다음 로그인 시 COALESCE 백필). PK(workspace,subject) 불변.
+-- 0016_workspace_member_email — additive (expand): email/preferred_username claim for readable member lists.
+-- subject is an opaque Keycloak sub UUID → capture a human-readable identifier (email) at login/invite-acceptance (display only, no authz bearing).
+-- Legacy rows are NULL (COALESCE backfill on next login). The PK(workspace,subject) is unchanged.
 ALTER TABLE everdict_workspace_members ADD COLUMN IF NOT EXISTS email text;

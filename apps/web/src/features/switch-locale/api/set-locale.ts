@@ -5,8 +5,8 @@ import { cookies } from 'next/headers'
 
 import { isLocale, LOCALE_COOKIE } from '@/shared/i18n/config'
 
-// 로케일 쿠키 저장 — 명시 선택은 Accept-Language 감지보다 우선한다(shared/i18n/request.ts).
-// 레이아웃 전체 재검증으로 서버 컴포넌트 문자열까지 즉시 갱신.
+// Store the locale cookie — an explicit choice takes precedence over Accept-Language detection (shared/i18n/request.ts).
+// Full-layout revalidation refreshes server component strings immediately too.
 export async function setLocale(locale: string): Promise<void> {
   if (!isLocale(locale)) return
   const store = await cookies()

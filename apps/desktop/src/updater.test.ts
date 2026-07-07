@@ -2,7 +2,7 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
 
-// electron-updater 의 최소 표면을 흉내내는 가짜 — 이벤트로 시나리오를 스크립트한다.
+// A fake that mimics the minimal surface of electron-updater — scripts scenarios via events.
 function fakeUpdater() {
   const emitter = new EventEmitter();
   const checkForUpdates = vi.fn(async () => ({}));
@@ -24,7 +24,7 @@ function collect(): { states: UpdaterState[]; onStatus: (s: UpdaterState) => voi
 }
 
 describe("UpdaterController", () => {
-  it("피드 미구성(null)이면 disabled 로 시작하고 전부 no-op", () => {
+  it("with no feed configured (null), starts disabled and everything is a no-op", () => {
     const { states, onStatus } = collect();
     const c = new UpdaterController({ updater: null, onStatus });
     c.start();
@@ -33,7 +33,7 @@ describe("UpdaterController", () => {
     expect(states.at(-1)).toEqual({ kind: "disabled" });
   });
 
-  it("start — autoDownload/autoInstallOnAppQuit 활성 + 즉시 1회 체크 + 주기 재체크 등록", () => {
+  it("start — enables autoDownload/autoInstallOnAppQuit + one immediate check + registers a periodic re-check", () => {
     const { u, checkForUpdates } = fakeUpdater();
     const scheduled: Array<{ ms: number }> = [];
     let tick: (() => void) | undefined;
@@ -51,11 +51,11 @@ describe("UpdaterController", () => {
     expect(u.autoInstallOnAppQuit).toBe(true);
     expect(checkForUpdates).toHaveBeenCalledTimes(1);
     expect(scheduled).toEqual([{ ms: 1234 }]);
-    tick?.(); // 주기 도래 → 재체크
+    tick?.(); // interval elapsed → re-check
     expect(checkForUpdates).toHaveBeenCalledTimes(2);
   });
 
-  it("checking→available(다운로드)→progress→downloaded(ready) 상태 전이", () => {
+  it("state transitions checking→available(downloading)→progress→downloaded(ready)", () => {
     const { u } = fakeUpdater();
     const { states, onStatus } = collect();
     const c = new UpdaterController({ updater: u, onStatus, schedule: () => () => {} });
@@ -69,7 +69,7 @@ describe("UpdaterController", () => {
     expect(c.state()).toEqual({ kind: "ready", version: "9.9.9" });
   });
 
-  it("not-available→idle, error→error(다음 주기에 재시도)", () => {
+  it("not-available→idle, error→error (retries on the next cycle)", () => {
     const { u, checkForUpdates } = fakeUpdater();
     let tick: (() => void) | undefined;
     const c = new UpdaterController({
@@ -88,11 +88,11 @@ describe("UpdaterController", () => {
     expect(checkForUpdates).toHaveBeenCalledTimes(2);
   });
 
-  it("quitAndInstall — ready 에서만 위임(재실행 플래그 포함)", () => {
+  it("quitAndInstall — delegates only from ready (with the relaunch flag)", () => {
     const { u, quitAndInstall } = fakeUpdater();
     const c = new UpdaterController({ updater: u, schedule: () => () => {} });
     c.start();
-    c.quitAndInstall(); // idle — 무시
+    c.quitAndInstall(); // idle — ignored
     expect(quitAndInstall).not.toHaveBeenCalled();
     u.emit("update-downloaded", { version: "1.2.3" });
     c.quitAndInstall();

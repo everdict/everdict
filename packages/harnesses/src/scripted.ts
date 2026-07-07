@@ -5,8 +5,8 @@ export interface ScriptedStep {
   cmd: string;
 }
 
-// 결정적(deterministic) 하니스 — task를 받아 정해진 명령들을 compute에서 "실제로 실행"하고
-// 그 결과로 진짜 TraceEvent를 emit한다. LLM/API 키 없이 전체 평가 루프를 증명하기 위한 하니스.
+// A deterministic harness — takes a task, "actually runs" a fixed set of commands on compute,
+// and emits real TraceEvents from the results. A harness for proving the full eval loop with no LLM/API key.
 export class ScriptedHarness implements EvaluableHarness {
   readonly id = "scripted";
   constructor(

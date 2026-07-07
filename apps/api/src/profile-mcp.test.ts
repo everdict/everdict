@@ -32,8 +32,8 @@ async function makeDeps(): Promise<McpDeps> {
   const store = new InMemoryWorkspaceStore();
   await store.create({ id: "acme", name: "Acme", owner: "alice" }); // alice admin
   await store.ensureMembership("acme", "bob", "admin"); // acme = 2 admins
-  await store.create({ id: "solo", name: "Solo", owner: "carol" }); // carol = 단독 admin
-  const profileStore = new InMemoryUserProfileStore(); // 프로필 ↔ 멤버 목록 보강이 같은 스토어를 보도록 공유
+  await store.create({ id: "solo", name: "Solo", owner: "carol" }); // carol = sole admin
+  const profileStore = new InMemoryUserProfileStore(); // share so profile ↔ member-list enrichment see the same store
   return {
     service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore() }),
     profileService: new ProfileService(profileStore),
@@ -56,8 +56,8 @@ function jsonOf(r: unknown): Record<string, unknown> {
   return c && c.type === "text" && c.text ? JSON.parse(c.text) : {};
 }
 
-describe("MCP profile + leave 도구 (BFF↔MCP 패리티)", () => {
-  it("update_profile/get_profile 는 self-serve — 내 프로필을 수정·조회", async () => {
+describe("MCP profile + leave tools (BFF↔MCP parity)", () => {
+  it("update_profile/get_profile are self-serve — edit·read my profile", async () => {
     const me = await connect(await makeDeps(), "dave", "acme");
     const updated = jsonOf(
       await me.callTool({ name: "update_profile", arguments: { name: "Dave", username: "dave" } }),
@@ -67,19 +67,19 @@ describe("MCP profile + leave 도구 (BFF↔MCP 패리티)", () => {
     expect(got).toMatchObject({ name: "Dave", username: "dave" });
   });
 
-  it("update_profile 는 형식이 틀리면 도구 에러", async () => {
+  it("update_profile is a tool error on invalid input", async () => {
     const me = await connect(await makeDeps(), "dave", "acme");
     const bad = await me.callTool({ name: "update_profile", arguments: { avatarUrl: "not a url" } });
     expect(bad.isError).toBe(true);
   });
 
-  it("leave_workspace: admin 이 둘이면 나갈 수 있다", async () => {
+  it("leave_workspace: can leave when there are two admins", async () => {
     const bob = await connect(await makeDeps(), "bob", "acme");
     const left = jsonOf(await bob.callTool({ name: "leave_workspace", arguments: {} }));
     expect(left).toMatchObject({ workspace: "acme", left: true });
   });
 
-  it("leave_workspace: 마지막 admin 은 나갈 수 없다(도구 에러)", async () => {
+  it("leave_workspace: the last admin cannot leave (tool error)", async () => {
     const carol = await connect(await makeDeps(), "carol", "solo");
     const res = await carol.callTool({ name: "leave_workspace", arguments: {} });
     expect(res.isError).toBe(true);

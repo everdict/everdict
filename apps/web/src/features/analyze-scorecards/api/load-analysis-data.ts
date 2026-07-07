@@ -14,13 +14,13 @@ export interface AnalysisData {
   authors: Record<string, Author>
   savedViews: View[]
   subject: string
-  canManage: boolean // scorecards:run — View 저장·수정·삭제(소유) 가능
-  isAdmin: boolean // 워크스페이스 admin — 남의 공유 View 도 관리 가능(컨트롤플레인이 최종 강제)
+  canManage: boolean // scorecards:run — can save/edit/delete (owned) Views
+  isAdmin: boolean // workspace admin — can also manage others' shared Views (control plane enforces finally)
   error?: string
 }
 
-// 분석/뷰 화면들이 공유하는 서버 로더 — 스코어카드 + 실행자 이름 + 저장된 View + 현재 신원/권한을 한 번에.
-// 스코어카드 목록은 요약(summary)만 실려 가벼움. 부가 데이터(members/views)는 실패해도 화면은 뜬다.
+// Server loader shared by the analysis/view screens — scorecards + runner names + saved Views + current identity/permissions in one shot.
+// The scorecard list carries only the summary, so it's light. Auxiliary data (members/views) can fail without breaking the screen.
 export async function loadAnalysisData(): Promise<AnalysisData> {
   const { ctx, principal } = await currentPrincipal()
 

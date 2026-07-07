@@ -1,8 +1,8 @@
-// 라이브 e2e: 벤치마크 생태계 소싱 — HuggingFace Hub 에서 "벤치마크 ID 만으로" 당겨와 테넌트-소유 데이터셋으로 평가.
-// 유저 흐름: 카탈로그에서 벤치마크 고름 → @everdict/datasets importBenchmark(HF 소스 커넥터, 네트워크) → Dataset →
-// DatasetRegistry.register(tenant) → registry.get → runSuite → Scorecard. 새 벤치마크 = 어댑터 한 개(코드 아님).
+// Live e2e: benchmark-ecosystem sourcing — pull from HuggingFace Hub "by benchmark ID alone" and eval as a tenant-owned dataset.
+// User flow: pick a benchmark from the catalog → @everdict/datasets importBenchmark (HF source connector, network) → Dataset →
+// DatasetRegistry.register(tenant) → registry.get → runSuite → Scorecard. A new benchmark = one adapter (not code).
 //
-// 실제 HF 데이터셋(네트워크): openai/gsm8k(QA, open), osunlp/Mind2Web(web-agent, open). GAIA 는 gated(토큰 필요).
+// Real HF datasets (network): openai/gsm8k(QA, open), osunlp/Mind2Web(web-agent, open). GAIA is gated (needs a token).
 import process from "node:process";
 import {
   BENCHMARK_CATALOG,
@@ -20,12 +20,12 @@ const registry = new InMemoryDatasetRegistry();
 const store = new InMemoryScorecardStore();
 const now = new Date().toISOString();
 
-// 0) 카탈로그(유저가 고를 수 있는 first-party 벤치마크).
-console.log("=== 벤치마크 카탈로그 (first-party 어댑터) ===");
+// 0) Catalog (first-party benchmarks the user can choose from).
+console.log("=== benchmark catalog (first-party adapters) ===");
 for (const b of listBenchmarks())
   console.log(`  • ${b.id.padEnd(11)} [${b.category}]${b.gated ? " (gated)" : ""}  ${b.description}`);
 
-// 공통: import(HF) → tenant 등록 → 로드.
+// Common: import (HF) → register for tenant → load.
 async function pull(adapter, id, version, limit, token) {
   const ds = await importBenchmark(adapter, { id, version, description: adapter.description }, { limit, token });
   await registry.register(TENANT, ds);
@@ -36,7 +36,7 @@ async function pull(adapter, id, version, limit, token) {
   return loaded;
 }
 
-// 1) gsm8k(QA) — HF 에서 5건 당겨와 oracle dispatch 로 answer-match 평가(실 gold 정답 채점).
+// 1) gsm8k(QA) — pull 5 from HF and eval answer-match via oracle dispatch (score against real gold answers).
 const gsm8k = await pull(getBenchmark("gsm8k"), "gsm8k-mini", "main", 5);
 for (const c of gsm8k.cases.slice(0, 2))
   console.log(`    q: ${c.task.slice(0, 70)}… → expect ${JSON.stringify(c.graders[0]?.config?.expect)}`);
@@ -44,7 +44,7 @@ for (const c of gsm8k.cases.slice(0, 2))
 const oracle = async (job) => {
   const c = job.evalCase;
   const expect = c.graders.find((g) => g.id === "answer-match")?.config?.expect ?? "";
-  const answer = `After working it out, the answer is ${expect}.`; // 오라클(플러밍 검증용; 채점 판별은 graders 유닛테스트)
+  const answer = `After working it out, the answer is ${expect}.`; // oracle (plumbing check; grading correctness is covered by grader unit tests)
   const trace = [{ t: 0, kind: "message", role: "assistant", text: answer }];
   const snapshot = { kind: "browser", url: "", dom: answer, console: [] };
   const scores = [];
@@ -71,28 +71,30 @@ console.log(
   `    eval → answer_match passRate=${am ? `${(am.passRate * 100).toFixed(0)}%` : "-"} (n=${am?.count}) — Scorecard stored`,
 );
 
-// 2) mind2web(web-agent) — HF 에서 3건 당겨와 테넌트 데이터셋으로 등록(실 agentic 벤치마크 인입 증명).
+// 2) mind2web(web-agent) — pull 3 from HF and register as a tenant dataset (proves ingest of a real agentic benchmark).
 const m2w = await pull(getBenchmark("mind2web"), "mind2web-mini", "default", 3);
 for (const c of m2w.cases)
   console.log(
     `    task: ${c.task.slice(0, 64)}…  tags=${JSON.stringify(c.tags)} graders=${c.graders.map((g) => g.id).join(",")}`,
   );
 
-// 3) gaia(gated) — 토큰 있으면 인입 시도(없으면 스킵). 멀티테넌트: 토큰은 SecretStore 에서.
+// 3) gaia(gated) — attempt ingest if a token is present (else skip). Multi-tenant: token comes from the SecretStore.
 const hfToken = process.env.HF_TOKEN;
 if (hfToken) {
   try {
     const gaia = await pull(getBenchmark("gaia"), "gaia-mini", "2023_all", 3, hfToken);
-    console.log(`    gaia gated 인입 성공: ${gaia.cases.length} cases`);
+    console.log(`    gaia gated ingest succeeded: ${gaia.cases.length} cases`);
   } catch (e) {
-    console.log(`    gaia gated 인입 실패: ${(e.message ?? "").slice(0, 90)}`);
+    console.log(`    gaia gated ingest failed: ${(e.message ?? "").slice(0, 90)}`);
   }
 } else {
-  console.log("\n▶ gaia (gated) — HF_TOKEN 미설정 → 스킵 (멀티테넌트에선 테넌트 SecretStore 의 HF 토큰 주입)");
+  console.log(
+    "\n▶ gaia (gated) — HF_TOKEN unset → skip (multi-tenant injects the HF token from the tenant SecretStore)",
+  );
 }
 
 console.log(`\nstored scorecards for ${TENANT}: ${(await store.list(TENANT)).length}`);
 console.log(
-  `\n✅ 벤치마크 생태계 e2e: HF Hub 에서 벤치마크 ID 만으로 당겨(gsm8k QA + mind2web web-agent) → 테넌트-소유 Dataset 등록 → eval → Scorecard. 새 벤치마크 추가 = 어댑터 1개(${Object.keys(BENCHMARK_CATALOG).length}개 카탈로그). gated 는 토큰 경로 확인.`,
+  `\n✅ benchmark-ecosystem e2e: pull from HF Hub by benchmark ID alone (gsm8k QA + mind2web web-agent) → register a tenant-owned Dataset → eval → Scorecard. Adding a new benchmark = 1 adapter (${Object.keys(BENCHMARK_CATALOG).length} in the catalog). gated verified via the token path.`,
 );
 process.exit(0);

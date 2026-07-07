@@ -1,22 +1,22 @@
-// 준(半)-라이브 헬퍼: 실제 GitHub 조직/레포에 셀프호스티드 러너를 세우기 위한 Everdict 쪽 자동화.
-// 이 스크립트는 컨트롤플레인 API 를 호출해 (1) 워크스페이스-공유 Everdict 러너를 페어링하고 (2) 내 GitHub 연결로
-// GitHub Actions 러너 등록 토큰을 발급받아 (3) 빌드 서버에서 실행할 **설치 스크립트**와 워크플로 힌트를 출력한다.
-// GitHub 쪽(빌드 서버에서 스크립트 실행, 워크플로 머지, Actions 발화)은 실제 인프라가 필요하므로 사람이 수행한다.
-// → CI 가 도는 완전한 종단 검증은 아래 출력의 "다음 단계"를 따라 사용자가 자기 환경에서 마무리한다.
+// Semi-live helper: the Everdict-side automation for standing up a self-hosted runner on a real GitHub org/repo.
+// This script calls the control-plane API to (1) pair a workspace-shared Everdict runner and (2) use your GitHub connection
+// to mint a GitHub Actions runner registration token, then (3) print the **install script** to run on the build server plus a workflow hint.
+// The GitHub side (run the script on the build server, merge the workflow, fire Actions) needs real infrastructure, so a human does it.
+// → Full end-to-end verification with CI running is finished by the user in their own environment, following "Next steps" in the output below.
 //
-// 전제: 실제 배포된 컨트롤플레인 + 로그인(또는 API 키) + admin:org 를 원하면 상향 GitHub 연결.
-// 인증:
-//   EVERDICT_TOKEN=<Keycloak JWT 또는 ak_… API 키>   (권장, 실제 배포)
-//   또는 dev 폴백: 아무것도 없으면 x-everdict-tenant:default (로컬 dev 전용 — 실 GitHub 연결은 없음)
-// 입력(env):
-//   EVERDICT_API_URL   컨트롤플레인 base (기본 http://localhost:8787)
-//   CONNECTION_ID   쓸 GitHub 연결 id (없으면 첫 github 연결 자동 선택; 없으면 안내 후 종료)
-//   REPO            "owner/name" (repo 레벨) — ORG 와 정확히 하나
-//   ORG             org 이름 (org 레벨, admin:org 연결 필요) — REPO 와 정확히 하나
-//   RUNNER_GROUP    (선택) org 러너 그룹
-//   LABEL           (선택) Everdict 러너 표시 이름
+// Prerequisites: a really-deployed control plane + login (or API key) + an elevated GitHub connection if you want admin:org.
+// Auth:
+//   EVERDICT_TOKEN=<Keycloak JWT or ak_… API key>   (recommended, real deployment)
+//   or dev fallback: with nothing set, x-everdict-tenant:default (local dev only — no real GitHub connection)
+// Input (env):
+//   EVERDICT_API_URL   control-plane base (default http://localhost:8787)
+//   CONNECTION_ID   GitHub connection id to use (if unset, auto-selects the first github connection; if none, prints guidance and exits)
+//   REPO            "owner/name" (repo level) — exactly one of REPO/ORG
+//   ORG             org name (org level, needs an admin:org connection) — exactly one of REPO/ORG
+//   RUNNER_GROUP    (optional) org runner group
+//   LABEL           (optional) Everdict runner display name
 //
-// 사용: EVERDICT_TOKEN=… REPO=acme/app node scripts/live/github-self-hosted-runner.mjs
+// Usage: EVERDICT_TOKEN=… REPO=acme/app node scripts/live/github-self-hosted-runner.mjs
 import process from "node:process";
 
 const B = (process.env.EVERDICT_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
@@ -34,36 +34,38 @@ const api = async (path, init = {}) => {
 const repo = process.env.REPO;
 const org = process.env.ORG;
 if ((repo === undefined) === (org === undefined)) {
-  console.error("✗ REPO('owner/name') 또는 ORG(org 이름) 중 정확히 하나를 지정하세요.");
+  console.error("✗ Specify exactly one of REPO('owner/name') or ORG(org name).");
   process.exit(2);
 }
 
-// 1) GitHub 연결 선택.
+// 1) Select the GitHub connection.
 const { connections } = await api("/connections");
 const githubConns = connections.filter((c) => c.provider === "github" || c.provider === "github-enterprise");
 if (githubConns.length === 0) {
-  console.error("✗ GitHub 연결이 없습니다. 먼저 계정 → 연결된 계정에서 GitHub 를 연결하세요.");
+  console.error("✗ No GitHub connection. First connect GitHub under Account → Connected accounts.");
   console.error(
-    "  org 레벨을 쓰려면 admin:org 상향 권한으로 연결해야 합니다(설정 › 공유 러너 › GitHub Actions 러너 › '조직').",
+    "  To use org level, connect with elevated admin:org permission (Settings › Shared runners › GitHub Actions runner › 'Organization').",
   );
   process.exit(1);
 }
 const conn = process.env.CONNECTION_ID ? githubConns.find((c) => c.id === process.env.CONNECTION_ID) : githubConns[0];
 if (!conn) {
-  console.error(`✗ CONNECTION_ID=${process.env.CONNECTION_ID} 인 GitHub 연결을 찾지 못했습니다.`);
-  console.error(`  가능한 연결: ${githubConns.map((c) => `${c.id}(${c.accountLabel})`).join(", ")}`);
+  console.error(`✗ No GitHub connection found with CONNECTION_ID=${process.env.CONNECTION_ID}.`);
+  console.error(`  Available connections: ${githubConns.map((c) => `${c.id}(${c.accountLabel})`).join(", ")}`);
   process.exit(1);
 }
 if (org && !conn.scopes.includes("admin:org")) {
   console.error(
-    `✗ org 레벨은 admin:org 권한 연결이 필요합니다. 이 연결(${conn.accountLabel}) scope: ${conn.scopes.join(",")}`,
+    `✗ org level needs an admin:org-scoped connection. This connection (${conn.accountLabel}) scope: ${conn.scopes.join(",")}`,
   );
-  console.error("  설정 › 공유 러너 › GitHub Actions 러너 › '조직' 에서 'admin:org 권한으로 다시 연결' 하세요.");
+  console.error(
+    "  In Settings › Shared runners › GitHub Actions runner › 'Organization', choose 'Reconnect with admin:org permission'.",
+  );
   process.exit(1);
 }
-console.log(`▶ GitHub 연결: ${conn.accountLabel}${conn.host ? ` (${conn.host})` : ""} [${conn.id}]`);
+console.log(`▶ GitHub connection: ${conn.accountLabel}${conn.host ? ` (${conn.host})` : ""} [${conn.id}]`);
 
-// 2) github-install — Everdict 워크스페이스-공유 러너 페어 + GitHub 등록 토큰 mint + 설치 스크립트 생성.
+// 2) github-install — pair an Everdict workspace-shared runner + mint a GitHub registration token + generate the install script.
 const body = {
   connectionId: conn.id,
   ...(repo ? { repository: repo } : {}),
@@ -72,20 +74,28 @@ const body = {
   ...(process.env.LABEL ? { label: process.env.LABEL } : {}),
 };
 const install = await api("/workspace/runners/github-install", { method: "POST", body: JSON.stringify(body) });
-console.log(`▶ Everdict 러너 페어링: ${install.runner.id}  (runtime=${install.runtimeTarget})`);
-console.log(`▶ GitHub 등록 토큰 만료: ${install.registrationExpiresAt} (단기 — 곧 실행하세요)`);
+console.log(`▶ Everdict runner paired: ${install.runner.id}  (runtime=${install.runtimeTarget})`);
+console.log(`▶ GitHub registration token expires: ${install.registrationExpiresAt} (short-lived — run it soon)`);
 
-console.log("\n================= 빌드 서버에서 실행할 설치 스크립트 =================");
+console.log("\n================= install script to run on the build server =================");
 console.log(install.installScript);
-console.log("================= 워크플로에 추가(runs-on + runtime) =================");
+console.log("================= add to the workflow (runs-on + runtime) =================");
 console.log(install.workflowHint);
 
-console.log("\n다음 단계(사람 — 실제 GitHub 인프라):");
-console.log("  1. 위 설치 스크립트를 빌드 서버에서 실행 → GitHub Actions 러너 + Everdict 러너가 함께 뜬다.");
-console.log(`  2. 대상 레포 워크플로의 runs-on 을 [self-hosted, ${install.githubRunnerLabel}] 로,`);
-console.log(`     run-eval 액션 runtime 입력을 ${install.runtimeTarget} 로 설정(위 힌트).`);
-console.log("     (설정 › CI 연동 › 레포 연결에서 '5. 셀프호스티드 러너' 에 같은 값을 넣으면 setup-PR 이 자동 생성.)");
-console.log("  3. PR/머지 → GitHub Actions 발화 → CI 가 이미지 빌드 → 나란히 붙은 Everdict 러너가 self:ws 평가 실행.");
-console.log("  4. 스코어카드 origin 에 repo/sha 가 남고, 평가 결과가 PR 체크로 회신된다.");
-console.log("\n✓ Everdict 쪽 준비 완료. GitHub 쪽 종단 발화는 위 단계로 사용자 환경에서 검증하세요.");
+console.log("\nNext steps (human — real GitHub infrastructure):");
+console.log(
+  "  1. Run the install script above on the build server → the GitHub Actions runner + Everdict runner come up together.",
+);
+console.log(`  2. Set the target repo workflow's runs-on to [self-hosted, ${install.githubRunnerLabel}],`);
+console.log(`     and the run-eval action runtime input to ${install.runtimeTarget} (hint above).`);
+console.log(
+  "     (In Settings › CI integration › Repo link, put the same values in '5. Self-hosted runner' to auto-generate the setup-PR.)",
+);
+console.log(
+  "  3. PR/merge → GitHub Actions fires → CI builds the image → the co-located Everdict runner runs the self:ws eval.",
+);
+console.log("  4. repo/sha is recorded on the scorecard origin, and the eval result is reported back as a PR check.");
+console.log(
+  "\n✓ Everdict side ready. Verify the GitHub-side end-to-end firing in your own environment via the steps above.",
+);
 process.exit(0);

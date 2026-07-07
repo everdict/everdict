@@ -3,7 +3,7 @@ import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '@/shared/lib/utils'
 
-// 에러/안내 박스 — Linear st. 8px 라운드, tint 배경 + 본문 색 상속, hint 는 muted 분리.
+// Error/notice box — Linear st. 8px round, tint background + body color inherited, hint separated as muted.
 const calloutVariants = cva('rounded-lg border px-3.5 py-3 text-[13px] leading-relaxed', {
   variants: {
     tone: {

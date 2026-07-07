@@ -1,29 +1,29 @@
 import { z } from "zod";
 
-// Agent Judge — 등록 가능한 1급 엔티티(소유/버전/lifecycle 은 하니스·데이터셋과 동일 패턴).
-// 두 형태: model(LLM/VLM 직접 호출 함수) | harness(등록된 하니스 에이전트에 판정 위임).
-// 실행은 컨트롤플레인이 트레이스 기반으로 한다(다음 증분) — 이 계약은 "무엇으로 판정하나"만 선언한다.
+// Agent Judge — a registrable first-class entity (ownership/version/lifecycle follow the same pattern as harnesses/datasets).
+// Two forms: model (a function that calls an LLM/VLM directly) | harness (delegate the verdict to a registered harness agent).
+// Execution is done by the control plane over a trace (next increment) — this contract only declares "what renders the verdict".
 
-// 판정 입력 모달리티 — 무엇을 보고 판정하는가(trace=실행기록, dom/screenshot=브라우저 결과 → VLM).
+// Verdict input modality — what the verdict is based on (trace=execution record, dom/screenshot=browser result → VLM).
 export const JudgeInputSchema = z.enum(["trace", "dom", "screenshot"]);
 export type JudgeInput = z.infer<typeof JudgeInputSchema>;
 
-// model judge: LLM/VLM 를 직접 호출. rubric(기준) + 입력 모달리티로 판정 → {pass, score, reason}.
+// model judge: calls an LLM/VLM directly. Renders a verdict from the rubric (criteria) + input modality → {pass, score, reason}.
 export const ModelJudgeSpecSchema = z.object({
   kind: z.literal("model"),
   id: z.string(),
   version: z.string(),
   description: z.string().optional(),
   provider: z.enum(["anthropic", "openai"]).default("anthropic"),
-  model: z.string(), // 예: "claude-opus-4-8"
-  rubric: z.string(), // 판정 기준(프롬프트)
+  model: z.string(), // e.g. "claude-opus-4-8"
+  rubric: z.string(), // the verdict criteria (prompt)
   inputs: z.array(JudgeInputSchema).default(["trace"]),
-  passThreshold: z.number().min(0).max(1).optional(), // score→pass 임계값(없으면 모델이 pass 직접 판정)
+  passThreshold: z.number().min(0).max(1).optional(), // score→pass threshold (if absent, the model decides pass directly)
   tags: z.array(z.string()).default([]),
 });
 export type ModelJudgeSpec = z.infer<typeof ModelJudgeSpecSchema>;
 
-// harness judge: 등록된 하니스(에이전트)에 판정을 위임. version 은 실행 시 해석(latest 가능).
+// harness judge: delegates the verdict to a registered harness (agent). version is resolved at run time (latest allowed).
 export const HarnessJudgeSpecSchema = z.object({
   kind: z.literal("harness"),
   id: z.string(),
@@ -31,8 +31,8 @@ export const HarnessJudgeSpecSchema = z.object({
   description: z.string().optional(),
   harness: z.object({ id: z.string(), version: z.string() }),
   rubric: z.string().optional(),
-  // 판정 에이전트를 띄울 테넌트 Runtime id(placement.target 으로 라우팅). 없으면 산출 run 과 co-locate
-  // (관측물을 만든 run 의 placement 를 상속). 미등록 런타임이면 디스패치가 visible skip 으로 떨어진다.
+  // Tenant Runtime id to launch the judge agent on (routed via placement.target). If absent, co-locate with the produced run
+  // (inherit the placement of the run that created the observation). An unregistered runtime drops the dispatch to a visible skip.
   runtime: z.string().optional(),
   tags: z.array(z.string()).default([]),
 });

@@ -1,14 +1,15 @@
-// 라이브 e2e (service-topology 마지막 rung, K8s): *실제 browser-use* 를 **K8sTopologyRuntime 으로 kind 에 배포**해서
-// ServiceTopologyBackend 로 구동. browseruse-topology-drive.mjs(로컬 docker)와 동일한 인터랙티브+트레이스 경로를,
-// 이번엔 *실 오케스트레이터 deploy* 로: K8sTopologyRuntime.ensureTopology 가 browser-use front-door 를 Deployment+Service
-// 로 apply → rollout 대기 → port-forward 로 발견. front-door 파드 안에서 실 LLM(host LiteLLM)+실 chromium 이 폼을
-// 멀티스텝 구동하고, run 의 실 토큰/액션을 Jaeger(브리지)로 OTLP 배출 → 백엔드가 OtelTraceSource 로 끌어와 채점.
+// Live e2e (service-topology final rung, K8s): **deploy *real browser-use* to kind via K8sTopologyRuntime** and
+// drive it with ServiceTopologyBackend. Same interactive+trace path as browseruse-topology-drive.mjs (local docker),
+// but this time via *real orchestrator deploy*: K8sTopologyRuntime.ensureTopology applies the browser-use front-door as
+// a Deployment+Service → waits for rollout → discovers it via port-forward. Inside the front-door pod, real LLM (host LiteLLM)
+// + real chromium drive the form multi-step, and the run's real tokens/actions are emitted to Jaeger (bridge) over OTLP →
+// the backend pulls them via OtelTraceSource to score.
 //
-// 사전(dev kind 호스트 도달 레시피, aider-k8s 와 동일):
-//   - kind 노드를 기본 도커 브리지에 연결 → 파드가 호스트 LiteLLM(172.17.0.1:4000) 도달(이 스크립트가 idempotent 하게 수행).
-//   - Jaeger(everdict-jaeger)는 기본 브리지 컨테이너 → 파드는 그 브리지 IP:4318 로 OTLP 배출, 호스트는 :16686 으로 pull.
-//   - 이미지 kind 로드: 이 스크립트가 `kind load docker-image everdict-browseruse:demo --name everdict` 수행.
-// 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
+// Prereqs (dev kind host-reachability recipe, same as aider-k8s):
+//   - Connect the kind node to the default docker bridge → pods reach host LiteLLM(172.17.0.1:4000) (this script does it idempotently).
+//   - Jaeger(everdict-jaeger) is a default-bridge container → pods emit OTLP to that bridge IP:4318, host pulls at :16686.
+//   - Load the image into kind: this script runs `kind load docker-image everdict-browseruse:demo --name everdict`.
+// Key: OPENAI_API_KEY env or infra/litellm/.env(LITELLM_MASTER_KEY) — runtime only, never committed.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -20,11 +21,11 @@ const CONTEXT = process.env.K8S_CONTEXT ?? "kind-everdict";
 const CLUSTER = process.env.KIND_CLUSTER ?? "everdict";
 const NODE = process.env.KIND_NODE ?? "everdict-control-plane";
 const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
-const POD_PORT = 18080; // front-door 컨테이너 내부 포트(파드 localhost). chromium 이 같은 파드에서 이 포트로 폼 접근.
+const POD_PORT = 18080; // front-door container-internal port (pod localhost). chromium reaches the form on this port from the same pod.
 const MODEL = process.env.BROWSERUSE_MODEL ?? "gpt-5.4-mini";
 const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "6";
-const LITELLM_HOST = process.env.LITELLM_HOST ?? "172.17.0.1"; // 기본 브리지 게이트웨이 = 호스트
-const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686"; // 호스트(127.0.0.1 published)에서 pull
+const LITELLM_HOST = process.env.LITELLM_HOST ?? "172.17.0.1"; // default bridge gateway = host
+const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686"; // pull from host (127.0.0.1 published)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function masterKey() {
@@ -38,11 +39,11 @@ function masterKey() {
 }
 const KEY = masterKey();
 if (!KEY) {
-  console.error("LLM 키 없음(OPENAI_API_KEY 또는 infra/litellm/.env).");
+  console.error("No LLM key (OPENAI_API_KEY or infra/litellm/.env).");
   process.exit(2);
 }
 
-// Jaeger 의 기본 브리지 IP(파드가 OTLP 배출할 대상). everdict-jaeger 컨테이너에서 동적 조회.
+// Jaeger's default-bridge IP (where pods emit OTLP). Looked up dynamically from the everdict-jaeger container.
 function jaegerBridgeIp() {
   if (process.env.JAEGER_IP) return process.env.JAEGER_IP;
   try {
@@ -66,10 +67,10 @@ function jaegerBridgeIp() {
 const JAEGER_IP = jaegerBridgeIp();
 const OTLP_URL = JAEGER_IP ? `http://${JAEGER_IP}:4318/v1/traces` : "http://172.17.0.5:4318/v1/traces";
 
-console.log("=== dev 호스트 도달 셋업(노드↔기본 브리지) + kind 이미지 로드 ===");
-spawnSync("docker", ["network", "connect", "bridge", NODE], { stdio: "ignore" }); // idempotent (이미 연결이면 무해)
+console.log("=== dev host-reachability setup (node↔default bridge) + kind image load ===");
+spawnSync("docker", ["network", "connect", "bridge", NODE], { stdio: "ignore" }); // idempotent (harmless if already connected)
 console.log(`LiteLLM=http://${LITELLM_HOST}:4000/v1 | OTLP=${OTLP_URL}`);
-console.log(`kind load ${IMAGE} → cluster ${CLUSTER} (수 분 소요 가능) …`);
+console.log(`kind load ${IMAGE} → cluster ${CLUSTER} (may take a few minutes) …`);
 execFileSync("kind", ["load", "docker-image", IMAGE, "--name", CLUSTER], { stdio: "ignore" });
 console.log("loaded.");
 
@@ -98,12 +99,12 @@ const k8s = new K8sTopologyRuntime({
   },
 });
 
-let frontDoor = ""; // ensureTopology 가 발견한 port-forward 엔드포인트(호스트). provisionBrowserEnv 의 /observe 에서 사용.
+let frontDoor = ""; // port-forward endpoint (host) discovered by ensureTopology. Used by provisionBrowserEnv's /observe.
 let ok = false;
 try {
-  console.log(`\n=== K8sTopologyRuntime.ensureTopology — kind(${CONTEXT})에 browser-use front-door 배포 ===`);
-  // 어댑터 런타임: deploy/discover 는 실 K8sTopologyRuntime, per-case 관측은 front-door /observe(browser-use 가 자기
-  // 브라우저를 띄우므로 별도 chromedp 파드 대신 front-door 관측을 쓴다 — local docker 경로와 동일).
+  console.log(`\n=== K8sTopologyRuntime.ensureTopology — deploy browser-use front-door to kind(${CONTEXT}) ===`);
+  // Adapter runtime: deploy/discover via the real K8sTopologyRuntime, per-case observation via front-door /observe (browser-use spins up
+  // its own browser, so we use front-door observation instead of a separate chromedp pod — same as the local docker path).
   const runtime = {
     id: "k8s-browseruse",
     async ensureTopology(s, zone) {
@@ -162,12 +163,12 @@ try {
   };
 
   console.log(
-    "\n=== ServiceTopologyBackend.dispatch — kind 파드의 실 browser-use 인터랙티브 구동 + 실 트레이스 채점 ===",
+    "\n=== ServiceTopologyBackend.dispatch — drive real browser-use in the kind pod interactively + score from real trace ===",
   );
   console.log("model:", MODEL, "| task:", job.evalCase.task);
-  const result = await backend.dispatch(job); // ← ensureTopology 가 ns+Deployment 를 만들고 구동까지
+  const result = await backend.dispatch(job); // ← ensureTopology creates the ns+Deployment and drives it
 
-  // 실 클러스터 배포 증거(dispatch 가 만든 뒤, teardown 전에 조회).
+  // Evidence of the real cluster deploy (queried after dispatch created it, before teardown).
   const k = (args) => execFileSync("kubectl", ["--context", CONTEXT, ...args], { encoding: "utf8" });
   let ready = "";
   try {
@@ -191,7 +192,7 @@ try {
   const toolCalls = result.trace.filter((e) => e.kind === "tool_call");
   console.log("\n--- CaseResult ---");
   console.log("snapshot.kind =", result.snapshot.kind, "| url =", result.snapshot.url);
-  console.log("snapshot.dom(앞 100):", String(result.snapshot.dom).slice(0, 100).replace(/\s+/g, " "));
+  console.log("snapshot.dom(first 100):", String(result.snapshot.dom).slice(0, 100).replace(/\s+/g, " "));
   console.log("browser-use actions:", JSON.stringify(observed.actions), "| tokens:", JSON.stringify(observed.tokens));
   console.log(
     "trace(pulled from Jaeger):",
@@ -212,11 +213,11 @@ try {
   ok = ready.startsWith("1") && result.snapshot.kind === "browser" && urlOk && domOk && stepsOk && tracePulled;
   console.log(
     ok
-      ? "\n✅ ①: 실 browser-use 이미지를 **K8sTopologyRuntime 으로 kind 에 배포**(Deployment+Service apply→rollout→port-forward) " +
-          "하고 ServiceTopologyBackend 로 구동 — 파드 안 실 LLM(host LiteLLM)+실 chromium 이 인터랙티브 폼을 멀티스텝 구동해 " +
-          "결과 도달(url/dom PASS), run 의 실 토큰/액션을 Jaeger(브리지)로 OTLP 배출 → OtelTraceSource 로 끌어와 steps/cost 채점. " +
-          "오케스트레이터 deploy 까지 실 K8s 경로로 닫음."
-      : "\n⚠️ 기대와 불일치(위 ready/actions/trace/scores 참고)",
+      ? "\n✅ ①: **deployed the real browser-use image to kind via K8sTopologyRuntime** (Deployment+Service apply→rollout→port-forward) " +
+          "and drove it with ServiceTopologyBackend — inside the pod, real LLM (host LiteLLM) + real chromium drove the interactive form " +
+          "multi-step to reach the result (url/dom PASS), and the run's real tokens/actions were emitted to Jaeger (bridge) over OTLP → " +
+          "pulled via OtelTraceSource to score steps/cost. Closes the orchestrator deploy over the real K8s path too."
+      : "\n⚠️ mismatch vs expected (see ready/actions/trace/scores above)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

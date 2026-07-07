@@ -1,35 +1,35 @@
-// 마법사 폼 상태 → HarnessTemplateSpec / HarnessInstanceSpec 조립(순수). 컨트롤플레인이 스키마/충돌을 최종 검증한다.
-// 대분류(Template) = 구조/슬롯(버전 미고정), Instance = template 참조 + pins(슬롯→이미지/값).
+// Assemble wizard form state → HarnessTemplateSpec / HarnessInstanceSpec (pure). The control plane does the final schema/conflict validation.
+// Template (top-level category) = shape/slots (version not pinned); Instance = template reference + pins (slot→image/value).
 import type { HarnessTemplateSpec } from '@/entities/harness'
 
 export type Kind = 'process' | 'service' | 'command'
 
 export interface ServiceRow {
   name: string
-  slot: string // 인스턴스가 핀하는 슬롯 이름(비우면 name)
+  slot: string // slot name the instance pins (if left empty, name)
   port: string
-  needs: string // 콤마 구분
-  perRun: string // 콤마 구분
+  needs: string // comma-separated
+  perRun: string // comma-separated
   replicas: string
-  env: EnvRow[] // 정적 env(비-스토어 설정) — 리터럴 또는 시크릿 참조
-  volumes: string // docker -v 마운트, 줄바꿈 구분("vol:/data" · "/host:/c:ro")
-  readinessTimeout: string // readiness 폴링 상한(ms) — 비우면 미설정
-  readinessInterval: string // readiness 폴링 간격(ms)
+  env: EnvRow[] // static env (non-store config) — literal or secret reference
+  volumes: string // docker -v mounts, newline-separated ("vol:/data" · "/host:/c:ro")
+  readinessTimeout: string // readiness polling ceiling (ms) — if left empty, unset
+  readinessInterval: string // readiness polling interval (ms)
 }
 export interface DepRow {
   store: string
   role: string
-  isolateBy: string // …/schema | external(BYO 외부 스토어 — Everdict 미배포, 연결은 배포 시 env)
-  service: string // 이 스토어를 쓰는 서비스(선택; 비우면 토폴로지 공용)
+  isolateBy: string // …/schema | external (BYO external store — not deployed by Everdict; connection is env at deploy time)
+  service: string // service that uses this store (optional; if left empty, shared across the topology)
 }
 
-// 템플릿(대분류) 폼 상태.
+// Template (top-level category) form state.
 export interface TemplateState {
   kind: Kind
   category: string
   id: string
-  version: string // 구조(shape) 버전
-  // service(토폴로지)
+  version: string // shape version
+  // service (topology)
   services: ServiceRow[]
   deps: DepRow[]
   frontDoorService: string
@@ -41,13 +41,13 @@ export interface TemplateState {
   targetLifecycle: string
   targetObserve: string[]
   targetExtensionRef: string
-  // command(선언형 CLI)
+  // command (declarative CLI)
   image: string
   workDir: string
-  setup: string // 줄바꿈 구분
+  setup: string // newline-separated
   command: string
   model: string
-  envRows: EnvRow[] // command env — 리터럴 또는 시크릿 참조
+  envRows: EnvRow[] // command env — literal or secret reference
   cmdTraceKind: string // none | otel | mlflow
   cmdTraceEndpoint: string
 }
@@ -71,19 +71,19 @@ const kvLines = (s: string): Record<string, string> => {
   return out
 }
 
-// env 한 줄 — 이름(key) + [리터럴 값 | 시크릿 이름 참조]. secret=true 면 스펙에 {secretRef,scope} 로 나가
-// 평문이 레지스트리에 남지 않는다(값은 실행 직전 컨트롤플레인이 SecretStore 에서 주입).
-// scope: "workspace"(공유) | "user"(내 개인) — secret=true 일 때만 의미. user 참조 하니스는 그 개인만 볼 수 있다.
+// A single env line — key + [literal value | secret name reference]. When secret=true it goes to the spec as {secretRef,scope}
+// so plaintext never stays in the registry (the value is injected by the control plane from the SecretStore just before execution).
+// scope: "workspace" (shared) | "user" (my personal) — only meaningful when secret=true. A harness that references a user secret is visible only to that person.
 export type SecretRefScope = 'user' | 'workspace'
 export interface EnvRow {
   key: string
   secret: boolean
-  value: string // secret=false → 리터럴 값 · secret=true → 시크릿 이름
-  scope?: SecretRefScope // secret=true 일 때 참조 티어(미지정=workspace)
+  value: string // secret=false → literal value · secret=true → secret name
+  scope?: SecretRefScope // reference tier when secret=true (unspecified=workspace)
 }
 export type EnvValue = string | { secretRef: string; scope?: SecretRefScope }
 
-// env 행들 → 스펙 env 맵(빈 key 제외). 리터럴=문자열, 시크릿=참조 객체(+scope; workspace 는 기본이라 생략).
+// env rows → spec env map (excluding empty keys). Literal=string, secret=reference object (+scope; workspace is the default so it's omitted).
 export function envRowsToSpec(rows: EnvRow[]): Record<string, EnvValue> {
   const out: Record<string, EnvValue> = {}
   for (const r of rows) {
@@ -96,7 +96,7 @@ export function envRowsToSpec(rows: EnvRow[]): Record<string, EnvValue> {
   return out
 }
 
-// 스펙 env 맵 → env 행들(프리필 역변환). {secretRef} 는 시크릿 행(+scope), 그 외 문자열은 리터럴 행.
+// spec env map → env rows (prefill inverse transform). {secretRef} becomes a secret row (+scope); any other string becomes a literal row.
 export function envRowsFromSpec(env: unknown): EnvRow[] {
   if (typeof env !== 'object' || env === null || Array.isArray(env)) return []
   return Object.entries(env as Record<string, unknown>).map(([key, v]) => {
@@ -122,7 +122,7 @@ export function envRowsFromSpec(env: unknown): EnvRow[] {
   })
 }
 
-// 템플릿(대분류) 스펙 조립.
+// Assemble the template (top-level category) spec.
 export function buildTemplate(s: TemplateState): Record<string, unknown> {
   const base = { category: s.category || 'custom', id: s.id, version: s.version }
   if (s.kind === 'process') return { kind: 'process', ...base }
@@ -151,7 +151,7 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
       const hasReadiness = sv.readinessTimeout.trim() !== '' || sv.readinessInterval.trim() !== ''
       return {
         name: sv.name,
-        ...(sv.slot.trim() ? { slot: sv.slot } : {}), // 비우면 컨트롤플레인이 name 을 슬롯으로
+        ...(sv.slot.trim() ? { slot: sv.slot } : {}), // if left empty, the control plane uses name as the slot
         ...(sv.port.trim() ? { port: Number(sv.port) } : {}),
         needs: csv(sv.needs),
         perRun: csv(sv.perRun),
@@ -193,8 +193,8 @@ export function buildTemplate(s: TemplateState): Record<string, unknown> {
   return spec
 }
 
-// 템플릿 스펙 → 템플릿 폼 상태(구조 새 버전 편집 프리필). buildTemplate 의 역변환.
-// 폼 필드는 문자열/배열 기반이라 미설정은 빈 문자열로 둔다(도메인 값이 아닌 UI 상태).
+// template spec → template form state (prefill for editing a new shape version). Inverse of buildTemplate.
+// Form fields are string/array based, so unset is left as an empty string (UI state, not a domain value).
 export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
   const env = t.env ?? {}
   return {
@@ -241,7 +241,7 @@ export function templateStateFromSpec(t: HarnessTemplateSpec): TemplateState {
   }
 }
 
-// 슬롯 이름들(인스턴스 폼이 pins 입력을 그려줄 때 참조). service=서비스 슬롯, command=image/model.
+// Slot names (referenced when the instance form renders pin inputs). service=service slots, command=image/model.
 export function templateSlots(s: TemplateState): string[] {
   if (s.kind === 'service') return s.services.map((sv) => sv.slot.trim() || sv.name).filter(Boolean)
   if (s.kind === 'command') return ['image', 'model']
@@ -253,14 +253,14 @@ export interface PinRow {
   value: string
 }
 
-// 서비스별 변주 행(overrides.services[name]) — 구조(템플릿)는 그대로, 동작 노브만 델타.
+// Per-service override row (overrides.services[name]) — the shape (template) stays; only behavior knobs are a delta.
 export interface ServiceOverrideRow {
-  service: string // 대상 서비스명(템플릿에 존재해야 함)
-  env: EnvRow[] // 서비스 env 오버레이 — 리터럴 또는 시크릿 참조
-  replicas: string // 숫자 또는 빈값
-  cpu: string // resources.cpu (millicores, 1000=1코어)
+  service: string // target service name (must exist in the template)
+  env: EnvRow[] // service env overlay — literal or secret reference
+  replicas: string // number or empty
+  cpu: string // resources.cpu (millicores, 1000=1 core)
   memoryMb: string // resources.memoryMb
-  volumes: string // 줄바꿈("vol:/data" · "/host:/c:ro")
+  volumes: string // newline-separated ("vol:/data" · "/host:/c:ro")
   readinessTimeout: string // ms
   readinessInterval: string // ms
 }
@@ -268,17 +268,17 @@ export interface ServiceOverrideRow {
 export interface InstanceState {
   templateId: string
   templateVersion: string
-  version: string // 인스턴스 태그(예: pr-123-sha-abc)
-  description: string // 이 버전의 변경 내역(자유 텍스트) — 배포 시 입력, 상세에 표시
+  version: string // instance tag (e.g. pr-123-sha-abc)
+  description: string // this version's changelog (free text) — entered at deploy time, shown in detail
   pins: PinRow[]
-  // 변주(overrides) — 구조 불변 동작 델타(구조적 편집). 컨트롤플레인이 스키마를 최종 검증.
-  serviceOverrides: ServiceOverrideRow[] // service 템플릿: 서비스별 env/replicas/resources/volumes/readiness
-  bodyTemplate: string // service: front-door submit 본문 값(JSON 객체; 자유 형식)
-  completionTimeout: string // service: front-door 완료 timeoutMs
-  completionInterval: string // service: front-door 완료(poll) intervalMs
-  targetExtensionRef: string // service: 브라우저 타깃 익스텐션 ref 핀
-  cmdEnvRows: EnvRow[] // command: env 오버레이 — 리터럴 또는 시크릿 참조
-  cmdParams: string // command: {{var}} 값(KEY=VALUE 줄바꿈)
+  // overrides — shape-invariant behavior delta (structured edit). The control plane does the final schema validation.
+  serviceOverrides: ServiceOverrideRow[] // service template: per-service env/replicas/resources/volumes/readiness
+  bodyTemplate: string // service: front-door submit body value (JSON object; free form)
+  completionTimeout: string // service: front-door completion timeoutMs
+  completionInterval: string // service: front-door completion (poll) intervalMs
+  targetExtensionRef: string // service: browser target extension ref pin
+  cmdEnvRows: EnvRow[] // command: env overlay — literal or secret reference
+  cmdParams: string // command: {{var}} values (KEY=VALUE, newline-separated)
 }
 
 const EMPTY_SERVICE_OVERRIDE: ServiceOverrideRow = {
@@ -292,7 +292,7 @@ const EMPTY_SERVICE_OVERRIDE: ServiceOverrideRow = {
   readinessInterval: '',
 }
 
-// JSON 객체 텍스트 파싱(front-door 본문용) — 빈값=미설정(ok). 객체 아님/JSON 오류면 error(폼이 등록 차단).
+// Parse JSON object text (for the front-door body) — empty=unset (ok). Not an object / JSON error → error (the form blocks registration).
 export function parseJsonObject(
   text: string
 ): { ok: true; value?: Record<string, unknown> } | { ok: false; error: string } {
@@ -302,7 +302,7 @@ export function parseJsonObject(
   try {
     parsed = JSON.parse(t)
   } catch (e) {
-    // 에러 코드 반환 — 소비 측(register-harness-wizard)이 t() 로 번역해 표시. e.message 는 엔진이 주는 원문(영문) 그대로.
+    // Return an error code — the consumer (register-harness-wizard) translates it with t() for display. e.message is the engine's original (English) text as-is.
     return { ok: false, error: e instanceof Error ? e.message : 'invalidJson' }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
@@ -311,10 +311,10 @@ export function parseJsonObject(
   return { ok: true, value: parsed as Record<string, unknown> }
 }
 
-// 구조적 변주 폼 상태 → overrides 객체(빈 노브는 생략). bodyTemplate 파싱 오류는 폼이 차단(여기선 무시).
+// Structured override form state → overrides object (empty knobs omitted). bodyTemplate parse errors are blocked by the form (ignored here).
 export function buildOverrides(s: InstanceState): Record<string, unknown> | undefined {
   const overrides: Record<string, unknown> = {}
-  // 서비스별 변주
+  // per-service overrides
   const services: Record<string, unknown> = {}
   for (const r of s.serviceOverrides) {
     const name = r.service.trim()
@@ -338,7 +338,7 @@ export function buildOverrides(s: InstanceState): Record<string, unknown> | unde
     if (Object.keys(o).length) services[name] = o
   }
   if (Object.keys(services).length) overrides.services = services
-  // front-door: 본문 값 + 완료 타이밍
+  // front-door: body value + completion timing
   const frontDoor: Record<string, unknown> = {}
   const body = parseJsonObject(s.bodyTemplate)
   if (body.ok && body.value) frontDoor.request = { bodyTemplate: body.value }
@@ -347,7 +347,7 @@ export function buildOverrides(s: InstanceState): Record<string, unknown> | unde
   if (s.completionInterval.trim()) completion.intervalMs = Number(s.completionInterval)
   if (Object.keys(completion).length) frontDoor.completion = completion
   if (Object.keys(frontDoor).length) overrides.frontDoor = frontDoor
-  // target 익스텐션 ref
+  // target extension ref
   if (s.targetExtensionRef.trim())
     overrides.target = { extension: { ref: s.targetExtensionRef.trim() } }
   // command env/params
@@ -358,14 +358,14 @@ export function buildOverrides(s: InstanceState): Record<string, unknown> | unde
   return Object.keys(overrides).length ? overrides : undefined
 }
 
-// 인스턴스 스펙 조립(template 참조 + pins + overrides). overrides 는 비어있지 않을 때만 포함.
+// Assemble the instance spec (template reference + pins + overrides). overrides is included only when non-empty.
 export function buildInstance(s: InstanceState): Record<string, unknown> {
   const pins: Record<string, string> = {}
   for (const p of s.pins) if (p.slot.trim() && p.value.trim()) pins[p.slot.trim()] = p.value.trim()
   const overrides = buildOverrides(s)
   return {
     template: { id: s.templateId, version: s.templateVersion },
-    id: s.templateId, // 인스턴스 id = 템플릿 id(관례)
+    id: s.templateId, // instance id = template id (convention)
     version: s.version,
     ...(s.description.trim() ? { description: s.description.trim() } : {}),
     pins,
@@ -427,9 +427,9 @@ export const INITIAL_INSTANCE: InstanceState = {
   cmdParams: '',
 }
 
-// raw 인스턴스 스펙 → 인스턴스 폼 상태(새 버전 편집 프리필). version 은 빈 값으로 둬 새 태그를 강제한다
-// (같은 태그 재등록은 불변성 위반 409). slots 가 주어지면 그 슬롯 전부를 행으로 펼쳐(누락 없이) 기존 값을 병합한다.
-// overrides(느슨 JSON) 안전 추출 헬퍼 — 폼은 문자열 기반이라 숫자/맵을 문자열/줄바꿈으로 환원한다.
+// raw instance spec → instance form state (prefill for editing a new version). version is left empty to force a new tag
+// (re-registering the same tag is an immutability violation, 409). If slots is given, expand all of them into rows (nothing dropped) and merge existing values.
+// overrides (loose JSON) safe-extraction helpers — the form is string based, so numbers/maps are reduced to strings/newlines.
 const asObj = (v: unknown): Record<string, unknown> | undefined =>
   typeof v === 'object' && v !== null && !Array.isArray(v)
     ? (v as Record<string, unknown>)
@@ -446,7 +446,7 @@ const kvToLines = (v: unknown): string => {
     : ''
 }
 
-// 기존 overrides → 구조적 폼 상태(새 버전 편집 프리필의 출발점). buildOverrides 의 역변환.
+// existing overrides → structured form state (starting point for editing a new version). Inverse of buildOverrides.
 function serviceOverridesFromSpec(ov: Record<string, unknown>): ServiceOverrideRow[] {
   const services = asObj(ov.services)
   if (!services) return []
@@ -490,7 +490,7 @@ export function instanceStateFromSpec(
     templateId: inst.template.id,
     templateVersion: inst.template.version,
     version: '',
-    description: '', // 새 버전은 새 변경 내역 — 이전 버전 설명을 물려받지 않는다(버전 태그와 동일 정신)
+    description: '', // a new version gets a new changelog — it does not inherit the previous version's description (same spirit as version tags)
     pins: rows.length > 0 ? rows : [{ slot: '', value: '' }],
     serviceOverrides: serviceOverridesFromSpec(ov),
     bodyTemplate: body ? JSON.stringify(body, null, 2) : '',

@@ -15,14 +15,14 @@ import { Tooltip } from '@/shared/ui/tooltip'
 
 export type Author = { name: string; avatarUrl?: string }
 
-// 런타임 미지정 시의 식별용 센티널 — 검색/필터 identity 로 쓰이므로 값은 고정. 표시는 runtimeChipLabel 이 로케일화.
+// Identity sentinel for when runtime is unset — used as search/filter identity, so the value is fixed. Display is localized by runtimeChipLabel.
 export const RUNTIME_DEFAULT = '기본 백엔드'
 
 export function runtimeLabelOf(s: Schedule): string {
   return s.runTemplate.runtime ?? RUNTIME_DEFAULT
 }
 
-// 런타임 칩 표시 라벨 — 센티널이면 로케일화, 실제 런타임 id 는 그대로.
+// Runtime chip display label — localize the sentinel, leave a real runtime id as-is.
 export function runtimeChipLabel(label: string, t: ReturnType<typeof useTranslations>): string {
   return label === RUNTIME_DEFAULT ? t('runtimeDefault') : label
 }
@@ -31,8 +31,8 @@ export function ownerNameOf(authors: Record<string, Author>, subject: string): s
   return authors[subject]?.name ?? fmtSubject(subject)
 }
 
-// 상태 — 텍스트 배지 대신 색 있는 아이콘(활성=초록 재생, 일시중지=주황 일시정지) + 호버 툴팁.
-// 클릭하면 상태별 작업 드롭다운(재개/일시중지·수정·삭제) — 상태 컨트롤 컨벤션(아이콘+드롭다운).
+// State — a colored icon instead of a text badge (active = green play, paused = amber pause) + hover tooltip.
+// Clicking opens a state-specific action dropdown (resume/pause · edit · delete) — the state-control convention (icon + dropdown).
 function StateIcon({ enabled }: { enabled: boolean }) {
   return enabled ? (
     <CirclePlay className="size-[18px] text-[var(--color-success)]" />
@@ -44,7 +44,7 @@ function StateIcon({ enabled }: { enabled: boolean }) {
 const stateTip = (enabled: boolean, t: ReturnType<typeof useTranslations>): string =>
   enabled ? t('stateTipActive') : t('stateTipPaused')
 
-// 예약 한 건 — 소유자·상태·주기(사람이 읽는)·벤치마크→하니스·런타임·다음 실행 + pause/삭제.
+// A single schedule — owner · state · cadence (human-readable) · benchmark→harness · runtime · next run + pause/delete.
 export function ScheduleCard({
   schedule: s,
   authors,
@@ -61,13 +61,13 @@ export function ScheduleCard({
 }: {
   schedule: Schedule
   authors: Record<string, Author>
-  workspace: string // 데이터셋/하니스/수정 링크 prefix
-  next: string | undefined // 다음 발사 시각(ISO) — 없거나 일시중지면 undefined
-  approx: boolean // 다음 발사가 cron 근사(Temporal authoritative 아님)면 '(예상)' 표기
+  workspace: string // prefix for dataset/harness/edit links
+  next: string | undefined // next fire time (ISO) — undefined if none or paused
+  approx: boolean // if the next fire is a cron approximation (not Temporal-authoritative), mark it '(estimated)'
   nowIso: string
   me: string
-  canWrite: boolean // 일시중지/삭제(member+)
-  canEdit: boolean // 수정 = 생성자 또는 워크스페이스 admin
+  canWrite: boolean // pause/delete (member+)
+  canEdit: boolean // edit = creator or workspace admin
   pending: boolean
   onToggle: (s: Schedule) => void
   onDelete: (s: Schedule) => void
@@ -76,15 +76,15 @@ export function ScheduleCard({
   const t = useTranslations('manageSchedules')
   const locale = useLocale()
   return (
-    // 고정 규격 카드 — 모든 카드가 같은 3줄 구조(이름 / 대상 / 주기·다음 실행) + 우측 고정 슬롯.
+    // Fixed-format card — every card has the same 3-line structure (name / target / cadence · next run) + a fixed right-side slot.
     <div className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-3 shadow-raise">
       <div className="min-w-0 flex-1 space-y-1.5">
-        {/* ① 이름 */}
+        {/* ① Name */}
         <div className="flex items-center overflow-hidden whitespace-nowrap text-[13px] font-[560]">
           <span className="truncate">{s.name}</span>
         </div>
-        {/* ② 대상 — 아이콘으로 종류 구별(벤치마크=Database·하니스=Boxes·런타임=Server). 잘림 방지:
-            좁은 화면은 벤치마크/하니스 각 한 줄(두 줄), md+ 는 한 줄. 화살표는 아이콘이 대신한다(스코어카드와 동일). */}
+        {/* ② Target — icons distinguish the kind (benchmark=Database · harness=Boxes · runtime=Server). Avoid clipping:
+            on narrow screens benchmark/harness each get their own line (two lines), md+ is one line. Icons stand in for arrows (same as scorecards). */}
         <div className="flex flex-col gap-y-1 text-[12.5px] md:flex-row md:items-center md:gap-x-2.5">
           <Link
             href={`/${workspace}/datasets/${encodeURIComponent(s.runTemplate.dataset.id)}`}
@@ -124,7 +124,7 @@ export function ScheduleCard({
             </span>
           </span>
         </div>
-        {/* ③ 주기 · 다음 실행 · 최근 상태 */}
+        {/* ③ Cadence · next run · latest status */}
         <div className="flex items-center gap-x-2 overflow-hidden whitespace-nowrap text-[12px] text-muted-foreground">
           <span className="shrink-0 font-[510] text-foreground/90">
             {describeCron(s.cron, locale)}
@@ -151,7 +151,7 @@ export function ScheduleCard({
           ) : null}
         </div>
       </div>
-      {/* 우: 고정 슬롯 — 소유자 썸네일 · 상태 아이콘(툴팁 + 클릭=작업 드롭다운). 카드마다 같은 위치. */}
+      {/* Right: fixed slot — owner thumbnail · state icon (tooltip + click = action dropdown). Same position on every card. */}
       <div className="flex shrink-0 items-center gap-1.5">
         <span className="flex w-7 justify-center">
           <UserAvatar

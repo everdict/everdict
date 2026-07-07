@@ -51,14 +51,14 @@ import { assertRuntimeTarget } from "./require-runtime.js";
 import { ScoringService } from "./scoring-service.js";
 import type { CaseExportStream } from "./trace-sink-service.js";
 
-// 트레이스 싱크 적재 결과 한 줄 — 진행 스텝 메시지용(성공/부분/실패 + 사유).
+// One-line trace-sink export result — for progress-step messages (success/partial/failure + reason).
 function exportStepMessage(e: ScorecardExport): string {
-  if (e.status === "succeeded") return `트레이스 싱크(${e.sink}) 적재 완료 — ${e.cases?.length ?? 0}건`;
-  const label = e.status === "partial" ? "부분 적재" : "적재 실패";
-  return `트레이스 싱크(${e.sink}) ${label}${e.message ? ` — ${e.message}` : ""}`;
+  if (e.status === "succeeded") return `Trace sink (${e.sink}) export complete — ${e.cases?.length ?? 0} case(s)`;
+  const label = e.status === "partial" ? "partial export" : "export failed";
+  return `Trace sink (${e.sink}) ${label}${e.message ? ` — ${e.message}` : ""}`;
 }
 
-// 케이스 실패/판정 사유 한 줄 — 진행 스텝 메시지용. trace 의 error 이벤트 > pass:false 인 score.detail 순. 길면 자른다.
+// One-line case failure/verdict reason — for progress-step messages. Prefer trace error events over a pass:false score.detail. Truncate if long.
 function caseReason(r: CaseResult): string | undefined {
   const errEvent = r.trace.find((e) => e.kind === "error");
   const raw =
@@ -69,8 +69,8 @@ function caseReason(r: CaseResult): string | undefined {
   return raw.length > 140 ? `${raw.slice(0, 140)}…` : raw;
 }
 
-// 트레이스 인제스트 본문 — 하니스를 안 돌리고 외부에서 이미 수행한 트레이스를 올린다(엣지 정규화: TraceEvent[] 업로드).
-// dataset/harness 는 라벨 겸 ref(caseId↔task 정렬, diff 정렬). 경계에서 TraceEventSchema 로 검증.
+// Trace-ingest body — upload traces already produced externally without running the harness (edge-normalized: TraceEvent[] upload).
+// dataset/harness serve as labels and refs (caseId↔task alignment, diff alignment). Validated at the boundary with TraceEventSchema.
 export const IngestScorecardBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
@@ -89,22 +89,22 @@ export const IngestScorecardBodySchema = z.object({
 export type IngestScorecardBody = z.infer<typeof IngestScorecardBodySchema>;
 export type IngestScorecardInput = IngestScorecardBody & {
   tenant: string;
-  submittedBy?: string; // 제출자 subject → 레코드 createdBy(실행자 표기/필터)
+  submittedBy?: string; // submitter subject → record createdBy (runner attribution/filter)
   origin?: ScorecardOrigin;
 };
 
-// pull 인제스트 본문 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 채점(하니스 미실행).
-// source 자격증명은 authSecret 이름(SecretStore)으로만 — spec 에 평문 토큰 금지.
+// pull-ingest body — pull per-runId traces from the tenant's OTel/MLflow and score them (harness not run).
+// source credentials come only via the authSecret name (SecretStore) — no plaintext token in the spec.
 export const PullIngestBodySchema = z.object({
   dataset: z.object({ id: z.string(), version: z.string().default("latest") }),
   harness: z.object({ id: z.string(), version: z.string().default("latest") }),
   source: z.object({
     kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]),
     endpoint: z.string().url(),
-    // SecretStore 키 이름 → 그 값을 자격증명으로. otel/mlflow 는 Authorization 헤더 그대로(스킴 포함:
-    // "Bearer …"|"Basic …"), langfuse/langsmith/phoenix 는 어댑터가 플랫폼 관례 헤더에 배치(langsmith=x-api-key).
+    // SecretStore key name → its value used as the credential. otel/mlflow use the Authorization header verbatim (scheme included:
+    // "Bearer …"|"Basic …"); for langfuse/langsmith/phoenix the adapter places it in the platform's conventional header (langsmith=x-api-key).
     authSecret: z.string().optional(),
-    project: z.string().optional(), // phoenix 스팬 조회 경로에 필수(프로젝트 이름/ID). 그 외 kind 는 무시.
+    project: z.string().optional(), // required for phoenix span-lookup path (project name/ID). Ignored for other kinds.
   }),
   runs: z.array(z.object({ caseId: z.string(), runId: z.string() })).min(1),
   judges: z.array(z.object({ id: z.string(), version: z.string().default("latest") })).default([]),
@@ -112,20 +112,20 @@ export const PullIngestBodySchema = z.object({
 export type PullIngestBody = z.infer<typeof PullIngestBodySchema>;
 export type PullIngestInput = PullIngestBody & {
   tenant: string;
-  submittedBy?: string; // 제출자 subject → 레코드 createdBy(실행자 표기/필터)
+  submittedBy?: string; // submitter subject → record createdBy (runner attribution/filter)
   origin?: ScorecardOrigin;
 };
 
-// principal.via → origin.source 매핑 — 제출 경로 provenance(어디서 발사됐나).
-// oidc=사람(web UI 토큰), github-actions=CI OIDC 페더레이션, 그 외(api-key/runner)=api. 스케줄 발사는 "schedule" 을 직접 스탬프.
+// principal.via → origin.source mapping — submission-path provenance (where it was fired from).
+// oidc=human (web UI token), github-actions=CI OIDC federation, else (api-key/runner)=api. Scheduled fires stamp "schedule" directly.
 export function originSource(via: string): string {
   if (via === "oidc") return "web";
   if (via === "github-actions") return "github-actions";
   return "api";
 }
 
-// 부분 실행 선택 — ids(명시) → tags(any-match) → limit(앞 N개) 순 적용. 순수 함수(테스트 용이).
-// 존재하지 않는 id 는 조용히 빈 결과가 되면 "일부만 돌았는데 전체처럼 보이는" 사고라 400 으로 즉시 거절.
+// Partial-run selection — apply ids (explicit) → tags (any-match) → limit (first N) in order. Pure function (easy to test).
+// A nonexistent id silently yielding an empty result would be a "ran a subset but looks like the whole thing" hazard, so reject immediately with 400.
 export function selectSubsetCases(
   dataset: Dataset,
   sel?: { ids?: string[]; tags?: string[]; limit?: number },
@@ -140,7 +140,7 @@ export function selectSubsetCases(
       throw new BadRequestError(
         "BAD_REQUEST",
         { dataset: dataset.id, missing },
-        `데이터셋에 없는 케이스 id 입니다: ${missing.join(", ")}`,
+        `Case ids not in the dataset: ${missing.join(", ")}`,
       );
     cases = cases.filter((c) => want.has(c.id));
   }
@@ -153,7 +153,7 @@ export function selectSubsetCases(
     throw new BadRequestError(
       "BAD_REQUEST",
       { dataset: dataset.id, ...sel },
-      "선택 조건에 맞는 케이스가 없습니다(태그/limit 확인).",
+      "No cases match the selection (check tags/limit).",
     );
   return {
     cases,
@@ -169,85 +169,85 @@ export function selectSubsetCases(
 
 export interface RunScorecardInput {
   tenant: string;
-  // 제출자(principal.subject) — 비공개 repo 케이스의 개인 소유 연결을 resolve 할 owner("내 연결로 clone").
-  // 결과적으로 비공개-repo 데이터셋은 사실상 단일 소유(케이스의 connectionId 는 그 소유자가 제출할 때만 resolve).
+  // submitter (principal.subject) — the owner used to resolve a private-repo case's personally-owned connection ("clone via my connection").
+  // Consequently a private-repo dataset is effectively single-owner (a case's connectionId only resolves when that owner submits).
   submittedBy?: string;
   dataset: { id: string; version: string };
-  // pins = 제출 시점 임시 핀 오버라이드(슬롯→이미지, 레지스트리 무변경) — CI PR 발사가 한 서비스 이미지만 스왑해 평가.
-  // 기록은 origin.pinOverrides 로(재현 근거). durable 한 변경은 POST /harnesses/:id/pins(새 인스턴스 버전)로.
+  // pins = submit-time ephemeral pin overrides (slot→image, registry unchanged) — a CI PR fire swaps one service image for evaluation.
+  // Recorded in origin.pinOverrides (reproducibility evidence). Durable changes go through POST /harnesses/:id/pins (a new instance version).
   harness: { id: string; version: string; pins?: Record<string, string> };
-  origin?: ScorecardOrigin; // 트리거 출처(provenance) — 라우트/스케줄이 source 를 스탬프
-  judges?: Array<{ id: string; version: string }>; // 선택한 Agent Judge 들 — 트레이스에 적용
-  runtime?: string; // 실행할 테넌트 Runtime id(placement.target). 없으면 기본 백엔드.
-  judge?: JudgeRunConfig; // inline judge grader 채점 모델 override(미지정이면 워크스페이스 기본)
-  // 한 배치 안에서 동시에 디스패치할 케이스 수(runSuite 병렬도). 미지정이면 서비스 기본.
-  // 셀프호스티드 런타임은 이만큼 잡이 lease 큐에 파킹되고, 러너가 그만큼 동시에 lease 해야 실제 case-level 병렬이 된다.
+  origin?: ScorecardOrigin; // trigger origin (provenance) — the route/schedule stamps source
+  judges?: Array<{ id: string; version: string }>; // selected Agent Judges — applied to the trace
+  runtime?: string; // tenant Runtime id to run on (placement.target). Absent = default backend.
+  judge?: JudgeRunConfig; // inline judge-grader scoring-model override (defaults to the workspace default if unset)
+  // Number of cases to dispatch concurrently within one batch (runSuite parallelism). Defaults to the service default if unset.
+  // On self-hosted runtimes this many jobs park in the lease queue, and the runner must lease that many concurrently for real case-level parallelism.
   concurrency?: number;
-  // 부분 실행 — 전체 데이터셋의 subset 만 돌린다(비용/스모크). ids(명시 선택) → tags(any-match) → limit(앞 N개)
-  // 순으로 적용. 결과 레코드에 subset{total,selected,…} 이 스탬프되어 "전체가 아니다"가 표식된다.
+  // Partial run — run only a subset of the full dataset (cost/smoke). Applied in order: ids (explicit selection) → tags (any-match) → limit (first N).
+  // The result record is stamped with subset{total,selected,…} to mark that it is "not the whole thing".
   cases?: { ids?: string[]; tags?: string[]; limit?: number };
 }
 
 export interface ScorecardServiceDeps {
-  dispatcher: Dispatcher; // 케이스를 잡으로 디스패치(단일 run 과 동일 경로)
+  dispatcher: Dispatcher; // dispatch a case as a job (same path as a single run)
   store: ScorecardStore;
-  datasets: DatasetRegistry; // 데이터셋 해석(소유/_shared 폴백) + 케이스 로드
-  harnesses?: HarnessInstanceRegistry; // 인스턴스 해석(template+pins→resolved HarnessSpec). 빌트인은 폴백.
-  judges?: JudgeRegistry; // judge 해석(소유/_shared 폴백)
-  judgeRunner?: JudgeRunner; // 트레이스 기반 judge 실행(model 호출 / skip)
-  // 워크스페이스 기본 judge 모델(inline judge grader 채점용). 요청별 override(RunScorecardInput.judge)가 우선.
+  datasets: DatasetRegistry; // dataset resolution (owner/_shared fallback) + case loading
+  harnesses?: HarnessInstanceRegistry; // instance resolution (template+pins→resolved HarnessSpec). Built-ins fall back.
+  judges?: JudgeRegistry; // judge resolution (owner/_shared fallback)
+  judgeRunner?: JudgeRunner; // trace-based judge execution (model call / skip)
+  // Workspace default judge model (for inline judge-grader scoring). A per-request override (RunScorecardInput.judge) takes precedence.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
-  budget?: BudgetTracker; // 케이스마다 admission/settle
-  buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@everdict/trace)
-  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(judge 모델 키 주입)
-  // harness env 의 {secretRef} 해석용 — 공유 + 제출자(owner) 개인 시크릿 두 티어. scope 로 골라 주입.
+  budget?: BudgetTracker; // admit/settle per case
+  buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
+  secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
+  // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
   scopedSecretsFor?: (tenant: string, subject?: string) => Promise<HarnessSecretMaps>;
-  // 비공개 repo 시드용 토큰 resolve — 케이스 env.source.connectionId → 외부 계정 연결 토큰. 단일 run 과 동일(RunService.repoTokenFor).
-  // 연결은 개인 소유라 owner(=제출자 subject)로 resolve. 데이터셋의 케이스마다 적용 → 비공개-repo 데이터셋 배치 eval. 토큰은 잡(repoToken)에만 transient.
+  // Resolve a token for seeding a private repo — case env.source.connectionId → external-account connection token. Same as a single run (RunService.repoTokenFor).
+  // The connection is personally owned, so resolve by owner (=submitter subject). Applied to every case in the dataset → private-repo dataset batch eval. The token is transient, only on the job (repoToken).
   repoTokenFor?: (owner: string, connectionId: string) => Promise<string | undefined>;
-  // 워크스페이스 소유 GitHub App 토큰(우선) — 케이스 git URL owner 가 워크스페이스 installation 과 매칭되면 그 App 으로 발급(단일 run 과 동일).
+  // Workspace-owned GitHub App token (preferred) — if the case git URL owner matches the workspace installation, issue via that App (same as a single run).
   installationTokenFor?: (workspace: string, gitUrl: string) => Promise<string | undefined>;
-  // 워크스페이스 이미지 레지스트리 pull 자격증명 — 잡 이미지가 그 레지스트리 것이면 job.registryAuth 로 attach(executeCase, 단일 run 과 동일).
+  // Workspace image-registry pull credentials — if the job image belongs to that registry, attach via job.registryAuth (executeCase, same as a single run).
   registryAuthsFor?: (workspace: string) => Promise<RegistryAuth[]>;
-  // 완료 콜백(succeeded/failed) — 완료 알림(Mattermost 등). 실패는 스코어카드 결과 무관(서비스가 swallow).
+  // Completion callback (succeeded/failed) — completion notification (Mattermost etc.). A failure here is independent of the scorecard result (the service swallows it).
   onComplete?: (tenant: string, record: ScorecardRecord) => Promise<void>;
-  // 트레이스 싱크 적재(설정 시) — 채점 완료된 결과(trace+점수)를 워크스페이스 관측 플랫폼으로(TraceSinkService).
-  // 반환 outcome 은 record.export 에 기록; 실패는 스코어카드 결과와 격리(outcome.status 로만). docs/architecture/trace-sink.md
-  // attach: pull 인제스트의 (source.kind, caseId→외부 runId) — 소스=싱크 플랫폼이면 기존 trace 에 점수만 부착.
+  // Trace-sink export (when configured) — send scored results (trace+scores) to the workspace observability platform (TraceSinkService).
+  // The returned outcome is recorded in record.export; a failure is isolated from the scorecard result (surfaced via outcome.status only). docs/architecture/trace-sink.md
+  // attach: the pull-ingest (source.kind, caseId→external runId) — if source=sink platform, attach scores to the existing trace instead of duplicating.
   exportResults?: (
     tenant: string,
     ctx: { scorecardId: string; dataset: string; harness: string },
     results: CaseResult[],
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ) => Promise<ScorecardExport | undefined>;
-  // 케이스 스트리밍 싱크 export(D5) — 라이브 배치가 케이스 완성(judge 후) 즉시 push 하도록 스트림을 만든다.
-  // 미설정이면 라이브 배치는 exportResults(일괄, 배치 후)로 폴백(무회귀). ingest 는 항상 exportResults(일괄).
+  // Case-streaming sink export (D5) — build a stream so a live batch pushes each case the moment it completes (after judging).
+  // If unset, a live batch falls back to exportResults (batched, after the run) (no regression). ingest always uses exportResults (batched).
   exportStreamFor?: (
     tenant: string,
     ctx: { scorecardId: string; dataset: string; harness: string },
   ) => Promise<CaseExportStream | undefined>;
-  artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)
-  // 설정 시 케이스마다 자식 run(RunRecord)을 팬아웃 생성해 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
-  // 미설정이면 현행대로 자식 run 없이 임베드 scorecard 만(단일 run 과 같은 RunStore 를 공유). 자식은 활동 리스트에서 기본 숨김.
+  artifacts?: ArtifactStore; // when set, offload os-use screenshots to object storage (record keeps only the URL)
+  // When set, fan out a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
+  // When unset, keep the current behavior: an embedded scorecard only, no child runs (shares the same RunStore as a single run). Children are hidden from the activity list by default.
   runStore?: RunStore;
   concurrency?: number;
-  // 정책 게이트: true 면 runtime 없는 배치를 제출 시 400(local 폴백 금지). API(main.ts)는 항상 true.
-  // 미지정(테스트: mock dispatcher 직접 주입)=게이트 없음. env 토글 아님 — 배포의 고정 정책.
+  // Policy gate: if true, a batch without a runtime is rejected 400 at submit (no local fallback). The API (main.ts) always sets true.
+  // Unset (tests: inject a mock dispatcher directly) = no gate. Not an env toggle — a deployment's fixed policy.
   requireRuntime?: boolean;
   newId?: () => string;
   now?: () => string;
 }
 
-// 스코어카드 run 의 비동기 수명: 데이터셋 해석(없으면 404) → 레코드 생성(202) → 배치 실행(runSuite) → 집계 저장.
-// HTTP 와 무관하게 단위 테스트 가능. AppError 는 그대로 던져 호출부(서버)가 상태코드로 매핑한다.
+// A scorecard run's async lifecycle: dataset resolution (404 if missing) → create record (202) → batch run (runSuite) → aggregate and persist.
+// Unit-testable independently of HTTP. AppError is thrown as-is so the caller (server) maps it to a status code.
 export class ScorecardService {
   private readonly newId: () => string;
   private readonly now: () => string;
   private readonly concurrency: number;
-  // 채점 관심사는 별도 서비스로 분리 — 라이브 배치와 ingest 가 동일 채점 로직을 공유(실행과 독립).
+  // Scoring concern is split into a separate service — live batch and ingest share the same scoring logic (independent of execution).
   private readonly scoring: ScoringService;
-  // in-flight 배치의 협조적 취소 핸들(supersede 용) — 단일 control-plane 프로세스 전제(in-process 랑데부와 동일).
-  // abort 는 "남은 케이스 미발사"까지만: 이미 발사된 백엔드 잡의 강제 kill 은 별개 문제(후속).
+  // Cooperative-cancellation handles for in-flight batches (for supersede) — assumes a single control-plane process (same as the in-process rendezvous).
+  // abort only goes as far as "don't fire the remaining cases": force-killing already-fired backend jobs is a separate problem (follow-up).
   private readonly inFlight = new Map<string, AbortController>();
 
   constructor(private readonly deps: ScorecardServiceDeps) {
@@ -260,17 +260,17 @@ export class ScorecardService {
     });
   }
 
-  // 데이터셋을 동기 해석(NotFound→404), 하니스 버전/spec 해석 후 레코드 생성, 비동기 배치 실행.
+  // Resolve the dataset synchronously (NotFound→404), resolve the harness version/spec, create the record, then run the batch asynchronously.
   async submit(input: RunScorecardInput): Promise<ScorecardRecord> {
-    // 배포 정책: 배치 실행 위치(등록 런타임 또는 self:<러너>)를 반드시 명시 — 없으면 400(조용한 local 폴백 차단).
+    // Deployment policy: the batch's execution target (a registered runtime or self:<runner>) must be specified — 400 if absent (blocks a silent local fallback).
     assertRuntimeTarget(this.deps.requireRuntime, input.runtime);
     const resolved = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
-    // 부분 실행 — 선택된 케이스만 담은 데이터셋으로 이후 전 구간(배치/judge/집계)이 동작. 표식은 record.subset.
+    // Partial run — the rest of the pipeline (batch/judge/aggregate) operates on a dataset containing only the selected cases. Marked via record.subset.
     const { cases: selectedCases, subset } = selectSubsetCases(resolved, input.cases);
     const dataset: Dataset = subset ? { ...resolved, cases: selectedCases } : resolved;
 
-    // 하니스 버전 해석(latest→구체) + 선언형 spec 임베드. 빌트인(scripted/claude-code)은 레지스트리에 없음 → as-given.
-    // 제출 시점 임시 핀(pins)이 있으면 폴백 없이 resolveWithPins — 핀을 조용히 무시한 채 평가가 통과하면 안 된다.
+    // Resolve the harness version (latest→concrete) + embed the declarative spec. Built-ins (scripted/claude-code) aren't in the registry → as-given.
+    // If submit-time ephemeral pins are present, use resolveWithPins with no fallback — evaluation must not pass while silently ignoring the pins.
     const pins = input.harness.pins && Object.keys(input.harness.pins).length > 0 ? input.harness.pins : undefined;
     let harnessVersion = input.harness.version || "latest";
     let harnessSpec: HarnessSpec | undefined;
@@ -279,10 +279,10 @@ export class ScorecardService {
         throw new BadRequestError(
           "BAD_REQUEST",
           { harness: input.harness.id },
-          "핀 오버라이드(pins)는 레지스트리에 등록된 하니스에서만 가능합니다.",
+          "Pin overrides (pins) are only allowed on harnesses registered in the registry.",
         );
       const spec = await this.deps.harnesses.resolveWithPins(input.tenant, input.harness.id, harnessVersion, pins);
-      harnessVersion = spec.version; // 기반 인스턴스의 구체 버전(임시 핀은 버전을 만들지 않는다)
+      harnessVersion = spec.version; // the base instance's concrete version (an ephemeral pin does not create a version)
       harnessSpec = spec;
     } else if (this.deps.harnesses) {
       try {
@@ -290,11 +290,11 @@ export class ScorecardService {
         harnessVersion = spec.version;
         harnessSpec = spec;
       } catch {
-        // 미등록/빌트인 → as-given, spec 임베드 없음
+        // unregistered/built-in → as-given, no spec embedded
       }
     }
 
-    // provenance: 호출부가 준 origin 에 임시 핀 기록을 얹는다. 핀만 있고 origin 이 없어도 기록은 남긴다(재현 근거).
+    // provenance: overlay the ephemeral-pin record onto the caller-provided origin. Even if only pins exist (no origin), still record them (reproducibility evidence).
     const origin: ScorecardOrigin | undefined =
       input.origin || pins
         ? { source: input.origin?.source ?? "api", ...(input.origin ?? {}), ...(pins ? { pinOverrides: pins } : {}) }
@@ -305,29 +305,29 @@ export class ScorecardService {
       id: this.newId(),
       tenant: input.tenant,
       dataset: { id: dataset.id, version: dataset.version },
-      harness: { id: input.harness.id, version: harnessVersion }, // 해석된 구체 버전(never "latest")
+      harness: { id: input.harness.id, version: harnessVersion }, // resolved concrete version (never "latest")
       status: "queued",
       ...(origin ? { origin } : {}),
-      ...(input.submittedBy ? { createdBy: input.submittedBy } : {}), // 실행자 — origin(어디서)과 짝인 '누가'
-      ...(input.runtime ? { runtime: input.runtime } : {}), // 배치된 런타임(작업 큐 축) — 미설정=기본 백엔드
-      ...(subset ? { subset } : {}), // 부분 실행 표식 — 소비자가 "전체가 아니다"를 안다
+      ...(input.submittedBy ? { createdBy: input.submittedBy } : {}), // the runner — the "who" paired with origin (the "where")
+      ...(input.runtime ? { runtime: input.runtime } : {}), // placed runtime (work-queue axis) — unset = default backend
+      ...(subset ? { subset } : {}), // partial-run marker — consumers know it's "not the whole thing"
       createdAt: ts,
       updatedAt: ts,
     };
-    // judge 모델: 요청 override → 워크스페이스 기본(DB) → 없음(inline judge grader 는 agent 에서 skip).
+    // judge model: request override → workspace default (DB) → none (the inline judge grader is skipped in the agent).
     const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
 
     await this.deps.store.create(record);
-    // 서버측 supersede — 같은 PR(origin.repo+prNumber) × 같은 (harness, dataset) 의 in-flight 배치를 회수하고
-    // 이번 발사로 대체한다. GH쪽 concurrency 는 "워크플로"만 취소하고 이미 제출된 배치는 서버에서 계속 돌기
-    // 때문(고아 평가의 환경/예산/러너 큐 점유 방지). merge/dev 발사(prNumber 없음)는 대상 아님.
+    // Server-side supersede — reclaim any in-flight batch for the same PR (origin.repo+prNumber) × same (harness, dataset) and
+    // replace it with this fire. GitHub-side concurrency only cancels the "workflow" while an already-submitted batch keeps running on the server
+    // (preventing an orphaned eval from tying up environments/budget/runner queue). merge/dev fires (no prNumber) are out of scope.
     if (origin?.repo && origin.prNumber !== undefined) {
       await this.supersedeInFlight(input.tenant, origin.repo, origin.prNumber, input.harness.id, dataset.id, record.id);
     }
     void this.track(
       record.id,
       input.tenant,
-      input.submittedBy ?? input.tenant, // owner — 비공개 repo 케이스를 제출자의 개인 연결로 clone
+      input.submittedBy ?? input.tenant, // owner — clone a private-repo case via the submitter's personal connection
       dataset,
       input.harness.id,
       harnessVersion,
@@ -335,15 +335,15 @@ export class ScorecardService {
       input.judges ?? [],
       input.runtime,
       judge,
-      // 요청 병렬도가 우선, 없으면 서비스 기본. 양수 정수만(경계는 라우트/MCP 가 Zod 로 강제).
+      // Request parallelism takes precedence, else the service default. Positive integers only (the boundary is enforced by the route/MCP via Zod).
       input.concurrency ?? this.concurrency,
     );
     return record;
   }
 
-  // 같은 (repo, PR, harness, dataset) 키의 queued/running 배치를 superseded 로 종결하고 abort 시그널을 보낸다.
-  // status/error 를 먼저 마킹(track 종결이 aborted 가드로 존중) + 남은 케이스 발사 중단. 이미 발사된 케이스는
-  // 자연 완료돼 자식 run 에 기록된다(강제 kill 아님). superseded 는 succeeded 가 아니므로 baseline/리더보드 무오염.
+  // Terminate any queued/running batch under the same (repo, PR, harness, dataset) key as superseded and send an abort signal.
+  // Mark status/error first (track's termination respects the aborted guard) + stop firing remaining cases. Already-fired cases
+  // complete naturally and are recorded on their child run (not a force-kill). superseded is not succeeded, so baseline/leaderboard stay clean.
   private async supersedeInFlight(
     tenant: string,
     repo: string,
@@ -361,16 +361,16 @@ export class ScorecardService {
       if (r.origin?.repo?.toLowerCase() !== repo.toLowerCase() || r.origin?.prNumber !== prNumber) continue;
       await this.deps.store.update(r.id, {
         status: "superseded",
-        error: { code: "SUPERSEDED", message: `같은 PR 의 더 새 발사(${newId})로 대체됨` },
+        error: { code: "SUPERSEDED", message: `Replaced by a newer fire of the same PR (${newId})` },
         updatedAt: this.now(),
       });
-      this.inFlight.get(r.id)?.abort(); // 남은 케이스 미발사(협조적) — track 이 부분 결과를 붙여 종결
+      this.inFlight.get(r.id)?.abort(); // don't fire remaining cases (cooperative) — track attaches partial results and terminates
     }
   }
 
-  // dispatched 스코어카드는 무거운 scorecard(케이스 결과)를 embed 하지 않고 runIds 만 저장(저장 dedup) →
-  // get 에서 자식 run 의 최종 결과로 scorecard 를 hydrate 한다(응답 형태·웹·diff 는 embed 시절과 동일).
-  // embed 가 이미 있으면(no-runStore / ingest / 구 레코드) 그대로 반환. runStore 미설정이면 hydrate 불가 → 그대로.
+  // A dispatched scorecard doesn't embed the heavy scorecard (case results), storing only runIds (storage dedup) →
+  // get hydrates the scorecard from the child runs' final results (response shape/web/diff identical to the embed era).
+  // If an embed already exists (no-runStore / ingest / old record), return it as-is. Without a runStore, hydration is impossible → as-is.
   async get(id: string): Promise<ScorecardRecord | undefined> {
     const record = await this.deps.store.get(id);
     if (!record || record.scorecard || !record.runIds?.length || !this.deps.runStore) return record;
@@ -385,7 +385,7 @@ export class ScorecardService {
     return this.deps.store.list(tenant);
   }
 
-  // 트레이스 인제스트 — 외부에서 이미 수행한 트레이스로 scorecard 생성(하니스 미실행). dataset 해석(없으면 404) → queued → 비동기 채점.
+  // Trace ingest — create a scorecard from traces already produced externally (harness not run). Resolve dataset (404 if missing) → queued → async scoring.
   async ingest(input: IngestScorecardInput): Promise<ScorecardRecord> {
     const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
     const harnessVersion = input.harness.version || "latest";
@@ -394,7 +394,7 @@ export class ScorecardService {
       id: this.newId(),
       tenant: input.tenant,
       dataset: { id: dataset.id, version: dataset.version },
-      harness: { id: input.harness.id, version: harnessVersion }, // 트레이스를 만든 하니스(라벨)
+      harness: { id: input.harness.id, version: harnessVersion }, // the harness that produced the trace (label)
       status: "queued",
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
@@ -413,7 +413,7 @@ export class ScorecardService {
     return record;
   }
 
-  // pull 인제스트 — 테넌트 OTel/MLflow 에서 runId 별 트레이스를 당겨와 scorecard 생성. dataset 해석(없으면 404) → queued → 비동기.
+  // pull ingest — pull per-runId traces from the tenant's OTel/MLflow and create a scorecard. Resolve dataset (404 if missing) → queued → async.
   async ingestPull(input: PullIngestInput): Promise<ScorecardRecord> {
     const dataset = await this.deps.datasets.get(input.tenant, input.dataset.id, input.dataset.version || "latest");
     const harnessVersion = input.harness.version || "latest";
@@ -422,7 +422,7 @@ export class ScorecardService {
       id: this.newId(),
       tenant: input.tenant,
       dataset: { id: dataset.id, version: dataset.version },
-      harness: { id: input.harness.id, version: harnessVersion }, // 트레이스를 만든 하니스(라벨)
+      harness: { id: input.harness.id, version: harnessVersion }, // the harness that produced the trace (label)
       status: "queued",
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.submittedBy ? { createdBy: input.submittedBy } : {}),
@@ -442,20 +442,20 @@ export class ScorecardService {
     return record;
   }
 
-  // baseline vs candidate 비교 — 같은 케이스 위 메트릭 delta + pass 전이(회귀/개선). 둘 다 이 워크스페이스 소유 + 완료여야.
+  // baseline vs candidate comparison — metric deltas over the same cases + pass transitions (regression/improvement). Both must be owned by this workspace and complete.
   async diff(tenant: string, baselineId: string, candidateId: string): Promise<ScorecardDiff> {
     const baseline = await this.requireSucceeded(tenant, baselineId);
     const candidate = await this.requireSucceeded(tenant, candidateId);
     return diffScorecards(baseline, candidate);
   }
 
-  // 기간 트렌드 / 회귀-오버-타임 — 한 (dataset, metric) 의 스코어카드들을 시간순으로 늘어놓고 baseline 대비 회귀를 표시.
-  // 목록(경량 summary)만으로 계산 — 무거운 트레이스 불필요. ScorecardRecord 가 TrendCard 를 구조적으로 만족.
+  // Time-range trend / regression-over-time — line up a (dataset, metric)'s scorecards chronologically and flag regressions vs the baseline.
+  // Computed from the list (lightweight summary) alone — no heavy traces needed. ScorecardRecord structurally satisfies TrendCard.
   async trend(
     tenant: string,
     opts: { datasetId: string; metric: string; harnessId?: string; from?: string; to?: string; baseline?: string },
   ): Promise<ScorecardTrend> {
-    // SQL 레벨에서 dataset(+선택 harness)·succeeded 로 좁힌다 — 전 워크스페이스 스캔 회피(suite 가 방어적으로 재필터).
+    // Narrow at the SQL level by dataset (+optional harness)·succeeded — avoid a full workspace scan (suite defensively re-filters).
     const records = await this.deps.store.list(tenant, {
       dataset: opts.datasetId,
       status: "succeeded",
@@ -464,8 +464,8 @@ export class ScorecardService {
     return trendSeries(records, opts);
   }
 
-  // 벤치마크(dataset)별 리더보드 — 한 데이터셋의 스코어카드들을 (harness × model) 로 그룹핑해 metric 기준 랭킹.
-  // 목록(경량 summary+models)만으로 계산 — 무거운 트레이스 불필요. ScorecardRecord 가 LeaderboardCard 를 구조적으로 만족.
+  // Per-benchmark (dataset) leaderboard — group a dataset's scorecards by (harness × model) and rank by metric.
+  // Computed from the list (lightweight summary+models) alone — no heavy traces needed. ScorecardRecord structurally satisfies LeaderboardCard.
   async leaderboard(
     tenant: string,
     opts: {
@@ -477,7 +477,7 @@ export class ScorecardService {
       window?: "latest" | "best";
     },
   ): Promise<Leaderboard> {
-    // SQL 레벨에서 dataset(+선택 harness)·succeeded 로 좁힌다 — model/judgeModel/window 등 요약-파생 축은 suite 가 필터.
+    // Narrow at the SQL level by dataset (+optional harness)·succeeded — summary-derived axes like model/judgeModel/window are filtered by suite.
     const records = await this.deps.store.list(tenant, {
       dataset: opts.datasetId,
       status: "succeeded",
@@ -486,14 +486,14 @@ export class ScorecardService {
     return leaderboard(records, opts);
   }
 
-  // model 축 백필 — models 가 아직 없는(구) succeeded 스코어카드의 저장 트레이스에서 관측 모델을 도출해 채운다.
-  // 멱등: 이미 models 가 있으면 스킵. 트레이스가 진실이라 관측만(선언 폴백 없음). 대량이므로 get 은 필요한 것만.
+  // model-axis backfill — derive the observed model from the stored trace of (old) succeeded scorecards that lack models yet, and fill it in.
+  // idempotent: skip if models already present. The trace is the source of truth, so observation only (no declared fallback). It's bulk, so get only what's needed.
   async backfillModels(tenant: string): Promise<{ scanned: number; updated: number }> {
-    const records = await this.deps.store.list(tenant); // list 는 models 를 포함(경량) → 이미 있는지 판별 가능
+    const records = await this.deps.store.list(tenant); // list includes models (lightweight) → can tell whether they already exist
     let updated = 0;
     for (const r of records) {
-      if (r.models || r.status !== "succeeded") continue; // 이미 채워졌거나 산출물 없음
-      const full = await this.deps.store.get(r.id); // 트레이스는 무거운 scorecard 안에만
+      if (r.models || r.status !== "succeeded") continue; // already filled, or no output
+      const full = await this.deps.store.get(r.id); // the trace lives only inside the heavy scorecard
       if (!full?.scorecard) continue;
       await this.deps.store.update(r.id, { models: scorecardModels(full.scorecard), updatedAt: this.now() });
       updated += 1;
@@ -501,22 +501,22 @@ export class ScorecardService {
     return { scanned: records.length, updated };
   }
 
-  // 워크스페이스 스코프 + 완료(scorecard 존재) 보장. 없으면 404(존재 누출 금지), 미완료면 400.
+  // Ensure workspace scope + completion (scorecard exists). 404 if missing (no existence leak), 400 if incomplete.
   private async requireSucceeded(tenant: string, id: string): Promise<Scorecard> {
-    const record = await this.get(id); // get 이 dedup 저장을 자식 run 으로 hydrate — diff 는 embed/reference 무관하게 동작
+    const record = await this.get(id); // get hydrates dedup storage from child runs — diff works regardless of embed/reference
     if (!record || record.tenant !== tenant)
-      throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' 를 찾을 수 없습니다.`);
+      throw new NotFoundError("NOT_FOUND", { id }, `scorecard '${id}' not found.`);
     if (!record.scorecard)
       throw new BadRequestError(
         "BAD_REQUEST",
         { id, status: record.status },
-        `scorecard '${id}' 가 아직 완료되지 않았습니다(status=${record.status}).`,
+        `scorecard '${id}' is not complete yet (status=${record.status}).`,
       );
     return record.scorecard;
   }
 
-  // 배치 judge/offload 로 최종화된 케이스 결과를 각 자식 run 에 반영한다(embed 를 저장하지 않으므로 get 이
-  // hydrate 할 원천이 최신이어야 한다). caseId → childId 매핑으로 결과를 해당 run 에 update.
+  // Reflect the case results finalized by batch judge/offload into each child run (since we don't store the embed, get's hydration source must be current).
+  // Update each result onto its run via the caseId → childId mapping.
   private async writeBackResults(caseToChild: Map<string, string>, results: CaseResult[]): Promise<void> {
     const store = this.deps.runStore;
     if (!store) return;
@@ -529,7 +529,7 @@ export class ScorecardService {
   private async track(
     id: string,
     tenant: string,
-    owner: string, // 제출자 subject — 비공개 repo 케이스 토큰 resolve 용(개인 소유 연결)
+    owner: string, // submitter subject — for resolving private-repo case tokens (personally-owned connection)
     dataset: Dataset,
     harnessId: string,
     harnessVersion: string,
@@ -537,41 +537,41 @@ export class ScorecardService {
     judges: Array<{ id: string; version: string }>,
     runtime: string | undefined,
     judge: JudgeRunConfig | undefined,
-    concurrency: number, // 동시 디스패치할 케이스 수(요청 override→서비스 기본은 submit 에서 resolve).
+    concurrency: number, // number of cases to dispatch concurrently (request override→service default is resolved in submit).
   ): Promise<void> {
-    // supersede 가 이 배치를 이미 회수했으면 시작하지 않는다(queued→superseded 를 running 으로 되살리는 역행 방지).
+    // If supersede already reclaimed this batch, don't start (prevents reviving queued→superseded back to running).
     if ((await this.deps.store.get(id))?.status === "superseded") return;
-    // 협조적 취소 핸들 등록 — supersedeInFlight 가 abort 하면 runSuite 가 남은 케이스를 발사하지 않는다.
+    // Register the cooperative-cancellation handle — when supersedeInFlight aborts, runSuite stops firing remaining cases.
     const controller = new AbortController();
     this.inFlight.set(id, controller);
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
-    // 진행 과정(스텝) 타임라인 — run 이 진행되며 append + 증분 저장해 웹에서 "어디까지/무엇을" 하는지 보인다.
+    // Progress (step) timeline — append as the run proceeds + persist incrementally so the web shows "how far / what" it's doing.
     const steps: ScorecardStep[] = [];
     const pushStep = (p: string, status: ScorecardStep["status"], message: string, caseId?: string): void => {
       steps.push({ ts: this.now(), phase: p, status, message, ...(caseId ? { caseId } : {}) });
     };
     const flushSteps = (): Promise<unknown> => this.deps.store.update(id, { steps: [...steps], updatedAt: this.now() });
-    // 이 배치가 팬아웃한 자식 run: caseId → childId(runStore 설정 시). 완료 후 최종 결과 write-back + runIds 참조 저장에 쓴다.
+    // Child runs this batch fanned out: caseId → childId (when runStore is set). Used after completion for the final write-back + storing runIds references.
     const caseToChild = new Map<string, string>();
-    // 배치 1회: 공유 + 제출자(owner) 개인 시크릿 맵(있으면). 케이스 디스패치 직전 harness env 의 {secretRef} 를 scope 로 해석한다
-    // — 레지스트리 스펙엔 평문이 남지 않고 실행 시에만 주입된다. 참조한 시크릿이 없으면 그 케이스가 명확한 사유로 실패한다.
+    // Once per batch: shared + submitter (owner) personal secret maps (if any). Just before dispatching a case, resolve {secretRef} in the harness env by scope
+    // — no plaintext remains in the registry spec; it's injected only at run time. If a referenced secret is missing, that case fails with a clear reason.
     const secretMap =
       harnessSpec && this.deps.scopedSecretsFor ? await this.deps.scopedSecretsFor(tenant, owner) : undefined;
-    // 각 케이스 디스패치(오케 per-case): admit(배치라 per-case) → 잡 enrich → 순수 executeCase → settle.
-    // 순수 실행(토큰 resolve+attach → dispatch)은 단일 run 과 공유하는 executeCase 가, 정산/자식-run 수명은 오케인 여기가 담당.
-    // runStore 설정 시 케이스마다 자식 run(RunRecord)을 만들어 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
+    // Per-case dispatch (orchestration per case): admit (per-case since it's a batch) → enrich the job → pure executeCase → settle.
+    // The pure execution (token resolve+attach → dispatch) is handled by executeCase (shared with a single run); settlement/child-run lifecycle is handled by the orchestration here.
+    // When runStore is set, create a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
     const dispatch: Dispatch = async (job) => {
-      this.deps.budget?.admit(tenant); // 초과 시 throw → 배치 실패
+      this.deps.budget?.admit(tenant); // throws if over budget → batch fails
       const enriched: AgentJob = {
         ...job,
         tenant,
-        // owner(제출자 subject) — self-hosted 러너 디스패치 소유자 확인 + lease 큐 키(단일 run 과 동일).
+        // owner (submitter subject) — self-hosted runner dispatch-ownership check + lease-queue key (same as a single run).
         ...(owner ? { submittedBy: owner } : {}),
         ...(harnessSpec ? { harnessSpec } : {}),
         ...(judge ? { judge } : {}),
       };
       const runStore = this.deps.runStore;
-      // 자식 run(있으면): running 으로 생성. parentScorecardId 태그로 활동 리스트에선 기본 숨김.
+      // Child run (if any): create as running. Tagged with parentScorecardId, hidden from the activity list by default.
       let childId: string | undefined;
       if (runStore) {
         childId = this.newId();
@@ -584,20 +584,20 @@ export class ScorecardService {
           status: "running",
           parentScorecardId: id,
           trigger: "scorecard",
-          ...(runtime ? { runtime } : {}), // 배치의 런타임을 자식에도 — 큐의 런타임 레인 축
+          ...(runtime ? { runtime } : {}), // propagate the batch's runtime to the child too — the queue's runtime-lane axis
           createdAt: ts,
           updatedAt: ts,
         });
         caseToChild.set(job.evalCase.id, childId);
       }
       try {
-        // env 시크릿 참조 해석(디스패치 직전). 참조한 시크릿이 없으면 resolveHarnessSecrets 가 throw → 이 케이스가 실패로 격리된다.
+        // Resolve env secret references (just before dispatch). If a referenced secret is missing, resolveHarnessSecrets throws → this case is isolated as a failure.
         const jobToRun =
           secretMap && enriched.harnessSpec
             ? { ...enriched, harnessSpec: resolveHarnessSecrets(enriched.harnessSpec, secretMap) }
             : enriched;
         const result = await executeCase(this.deps, owner, jobToRun);
-        // 비용 귀속: 관리형=배치 테넌트 · 워크스페이스-공유 러너=그 워크스페이스(팀 자원) · 개인 러너=own-pays. 단일 run 과 동일.
+        // Cost attribution: managed=batch tenant · workspace-shared runner=that workspace (team resource) · personal runner=own-pays. Same as a single run.
         const bill = billingTenant(result, tenant);
         if (bill) this.deps.budget?.settle(bill, costOf(result));
         if (runStore && childId) await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
@@ -610,25 +610,25 @@ export class ScorecardService {
               : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
           await runStore.update(childId, { status: "failed", error, updatedAt: this.now() });
         }
-        throw err; // runSuite 가 케이스 격리(실패 CaseResult 로 박제)하도록 다시 던진다
+        throw err; // rethrow so runSuite isolates the case (freezing it into a failed CaseResult)
       }
     };
-    // 실패 시 "어떤 구간에서" 진단 — 파이프라인 구간을 따라가며 catch 가 그 구간을 error.phase 로 기록한다.
+    // On failure, diagnose "in which phase" — track the pipeline phase so catch records it as error.phase.
     let phase = "dispatch";
     let scorecard: Scorecard | undefined;
     try {
-      // runtime 선택 시 각 케이스 placement.target 으로 주입 → RuntimeDispatcher 가 테넌트 런타임으로 라우팅.
+      // When a runtime is selected, inject it as each case's placement.target → RuntimeDispatcher routes to the tenant runtime.
       const cases = runtime
         ? dataset.cases.map((c) => ({ ...c, placement: { ...c.placement, target: runtime } }))
         : dataset.cases;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
-      // judge 스트리밍 — 배치 전체 완료를 기다리지 않고 케이스가 끝나는 즉시 그 케이스의 judge 를 발사한다
-      // (케이스 축 병렬·bounded). 가장 느린 케이스가 나머지 judging 을 막던 배리어 제거.
+      // judge streaming — fire a case's judge the moment it finishes, without waiting for the whole batch to complete
+      // (case-axis parallel·bounded). Removes the barrier where the slowest case blocked judging of the rest.
       // docs/architecture/streaming-case-pipeline.md
       const judgeStream = await this.scoring.createJudgeStream(tenant, dataset, judges, runtime);
-      // 싱크 export 스트리밍(D5) — 하니스가 싱크를 선택했으면 케이스 완성(judge 후) 즉시 그 케이스만
-      // 팀 플랫폼으로 내보낸다(라이브 가시성 + 배치가 도중에 죽어도 나간 것은 남는다). 미배선이면
-      // 아래 성공 경로에서 exportResults(일괄)로 폴백(무회귀).
+      // sink-export streaming (D5) — if the harness selected a sink, export each case to the team platform the moment it completes (after judging)
+      // (live visibility + whatever went out survives even if the batch dies midway). If not wired,
+      // the success path below falls back to exportResults (batched) (no regression).
       const exportCtx = {
         scorecardId: id,
         dataset: `${dataset.id}@${dataset.version}`,
@@ -637,16 +637,16 @@ export class ScorecardService {
       const exportStream = this.deps.exportStreamFor
         ? await this.deps.exportStreamFor(tenant, exportCtx).catch(() => undefined)
         : undefined;
-      pushStep("dispatch", "started", `${cases.length}개 케이스 실행 시작`);
+      pushStep("dispatch", "started", `Running ${cases.length} case(s)`);
       await flushSteps();
-      // onResult: 케이스가 끝날 때마다(완료 순서) PASS/FAIL + 사유를 스텝으로 — "진행 과정"의 핵심.
+      // onResult: as each case finishes (completion order), record PASS/FAIL + reason as a step — the heart of "progress".
       scorecard = await runSuite(suite, harnessVersion, dispatch, {
         concurrency,
-        signal: controller.signal, // supersede 시 남은 케이스 미발사(이미 발사된 케이스는 자연 완료)
+        signal: controller.signal, // on supersede, don't fire remaining cases (already-fired cases complete naturally)
         onResult: (r) => {
           const v = caseVerdict(r);
           const reason = caseReason(r);
-          const verdict = v == null ? "결과없음" : v ? "PASS" : "FAIL";
+          const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
           pushStep(
             "case",
             v === false ? "failed" : "ok",
@@ -654,11 +654,11 @@ export class ScorecardService {
             r.caseId,
           );
           void flushSteps();
-          // supersede 이후엔 judge 발사도 생략(회수된 배치에 LLM 비용을 더 쓰지 않는다).
+          // After supersede, skip firing judges too (don't spend more LLM cost on a reclaimed batch).
           if (!controller.signal.aborted) {
             const judged = judgeStream.push(r);
-            // 케이스 완성 체이닝: judge 점수가 붙은 '뒤에' 그 케이스만 export — abort 후엔 신규 발사 생략
-            // (이미 발사된 export 는 자연 완료, supersede 경로가 합류 후 partial outcome 으로 기록).
+            // Case-completion chaining: export the case only 'after' its judge score is attached — skip new fires after abort
+            // (already-fired exports complete naturally; the supersede path joins them and records a partial outcome).
             if (exportStream) {
               void judged.then(() => {
                 if (!controller.signal.aborted) exportStream.push(r);
@@ -667,18 +667,22 @@ export class ScorecardService {
           }
         },
       });
-      pushStep("dispatch", "ok", `디스패치 완료 — ${scorecard.results.length}개 케이스`);
+      pushStep("dispatch", "ok", `Dispatch complete — ${scorecard.results.length} case(s)`);
       await flushSteps();
-      // supersede 됨 — 더 새 발사가 이 배치를 회수. 남은 파이프라인(judge/offload/알림)을 생략하고
-      // 부분 결과만 붙여 superseded 로 종결한다(succeeded 가 아니므로 baseline/리더보드 무오염).
+      // Superseded — a newer fire reclaimed this batch. Skip the remaining pipeline (judge/offload/notify) and
+      // terminate as superseded with only partial results attached (not succeeded, so baseline/leaderboard stay clean).
       if (controller.signal.aborted) {
-        // 이미 발사된 judge 태스크는 합류 후 저장(진행 중 scores 변이와 write-back 레이스 방지).
-        // 회수된 배치의 judge 에러는 소음 — swallow.
+        // Join already-fired judge tasks before persisting (prevents a race between in-progress scores mutation and write-back).
+        // A judge error on a reclaimed batch is noise — swallow it.
         await judgeStream.settle().catch(() => {});
-        // 스트리밍으로 이미 나간 export 는 합류 후 partial outcome 으로 기록(추적용 — superseded ≠ succeeded
-        // 라 baseline/리더보드 무오염). 나간 케이스가 없으면 기록 생략(빈 outcome 은 소음).
+        // Exports already sent via streaming are joined and recorded as a partial outcome (for tracking — superseded ≠ succeeded,
+        // so baseline/leaderboard stay clean). If no cases went out, skip recording (an empty outcome is noise).
         const exportedPartial = exportStream ? await exportStream.settle().catch(() => undefined) : undefined;
-        pushStep("supersede", "info", "같은 PR 의 더 새 발사로 대체됨 — 남은 케이스 미발사, 부분 결과만 보존");
+        pushStep(
+          "supersede",
+          "info",
+          "Replaced by a newer fire of the same PR — remaining cases not fired, only partial results kept",
+        );
         const hasChildren = caseToChild.size > 0;
         if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
         await this.deps.store.update(id, {
@@ -690,26 +694,26 @@ export class ScorecardService {
           updatedAt: this.now(),
         });
         this.inFlight.delete(id);
-        return; // 대체된 배치의 완료 알림은 소음 — 생략
+        return; // completion notification for a replaced batch is noise — skip
       }
-      // runtime = 산출 run 의 배치 → judge 를 같은 런타임에 co-locate(관측물 옆에서 판정). ingest 경로엔 산출 run 없음.
-      // 스트리밍이라 대부분 디스패치와 겹쳐 이미 끝나 있다 — 여기는 잔여 태스크 합류(join)만.
-      // 태스크 에러는 여기서 rethrow → 현행과 동일하게 error.phase="judges" 로 귀속된다.
+      // runtime = the placement of the producing run → co-locate the judge on the same runtime (judge next to the artifacts). The ingest path has no producing run.
+      // Since it's streaming, most overlap with dispatch and are already done — this is just joining the remaining tasks.
+      // Task errors rethrow here → attributed to error.phase="judges" as before.
       phase = "judges";
       if (judges.length > 0) {
-        pushStep("judges", "started", `judge ${judges.length}종 — 스트리밍 적용 잔여 태스크 합류`);
+        pushStep("judges", "started", `${judges.length} judge kind(s) — joining remaining streaming tasks`);
         await flushSteps();
       }
-      await judgeStream.settle(); // 트레이스 → judge 점수(컨트롤플레인, 케이스 완료 즉시 스트리밍)
+      await judgeStream.settle(); // trace → judge scores (control plane, streamed the moment each case completes)
       if (judges.length > 0) {
-        pushStep("judges", "ok", "judge 적용 완료");
+        pushStep("judges", "ok", "judges applied");
         await flushSteps();
       }
       phase = "offload";
-      await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
-      // 트레이스 싱크 적재(설정 시) — 실패해도 스코어카드는 성공(outcome.status 로만 기록, error.phase 미사용).
-      // 스트리밍(exportStream)이면 케이스는 이미 judge 직후 나갔다 — 여기는 잔여 태스크 합류(join)+outcome 합산만.
-      // 미배선이면 현행 일괄 export 폴백. TraceSinkService 가 이미 throw 하지 않지만, 만약을 위해 여기서도 격리.
+      await this.offloadResults(id, scorecard.results); // os-use screenshots → object storage (slim record)
+      // Trace-sink export (when configured) — even if it fails, the scorecard succeeds (recorded via outcome.status only, no error.phase).
+      // With streaming (exportStream), cases already went out right after judging — here it's just joining remaining tasks + summing the outcome.
+      // If not wired, fall back to the current batched export. TraceSinkService already doesn't throw, but isolate here too just in case.
       const exported = exportStream
         ? await exportStream.settle().catch(() => undefined)
         : this.deps.exportResults
@@ -718,19 +722,19 @@ export class ScorecardService {
       if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
       phase = "persist";
       const summary = summarizeScorecard(scorecard);
-      // 리더보드 model 축: 트레이스 관측 우선 + spec 선언(command 하니스만) 폴백.
+      // leaderboard model axis: trace observation preferred + spec declaration (command harness only) fallback.
       const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
       const models = scorecardModels(scorecard, declared);
-      // 리더보드 judge 축: 이 run 을 채점한 judge 모델(들) — inline config + 등록 model-judge spec.
+      // leaderboard judge axis: the judge model(s) that scored this run — inline config + registered model-judge spec.
       const judgeModels = await this.scoring.collectJudgeModels(tenant, judges, judge);
-      pushStep("persist", "ok", "집계·저장 완료");
-      // 자식 run 이 있으면: judge/offload 로 최종화된 결과를 자식에 write-back 후 무거운 embed 대신 runIds 만 저장
-      //  → get 이 자식에서 hydrate(저장 dedup, 응답 형태 불변). 자식이 없으면(no runStore) 현행대로 embed 저장.
+      pushStep("persist", "ok", "aggregated and persisted");
+      // If there are child runs: write back the judge/offload-finalized results to the children, then store only runIds instead of the heavy embed
+      //  → get hydrates from the children (storage dedup, response shape unchanged). Without children (no runStore), embed as before.
       const hasChildren = caseToChild.size > 0;
       if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
       await this.deps.store.update(id, {
-        // 파이프라인 도중(judge/offload) supersede 가 도착했으면 succeeded 로 되살리지 않는다 — 결과는 전부 붙지만
-        // 더 새 발사가 이 PR 의 정답이므로 superseded 로 종결(리더보드/baseline 은 새 것만 본다).
+        // If supersede arrived mid-pipeline (judge/offload), don't revive to succeeded — all results attach, but
+        // the newer fire is the answer for this PR, so terminate as superseded (leaderboard/baseline see only the new one).
         status: controller.signal.aborted ? "superseded" : "succeeded",
         summary,
         models,
@@ -746,13 +750,13 @@ export class ScorecardService {
           ? { code: err.code, message: err.message }
           : { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) };
       pushStep(phase, "failed", base.message);
-      // 부분 결과 보존 — dispatch 이후(judge/offload) 실패면 이미 모인 케이스 결과를 같이 저장해 가시성을 남긴다.
-      // 자식 run 이 있으면 success 경로와 동일하게 embed 대신 runIds 참조(부분) + 자식에 결과 write-back.
+      // Preserve partial results — on a post-dispatch (judge/offload) failure, persist the case results already gathered for visibility.
+      // With child runs, mirror the success path: runIds references (partial) instead of embed + write back results to the children.
       const hasChildren = caseToChild.size > 0;
       if (scorecard && hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
       const declared = harnessSpec?.kind === "command" ? harnessSpec.model : undefined;
       await this.deps.store.update(id, {
-        // supersede 이후의 실패는 실패로 보고하지 않는다(회수된 배치의 잔여 에러는 소음) — superseded 유지.
+        // A failure after supersede isn't reported as a failure (a reclaimed batch's leftover errors are noise) — keep superseded.
         status: controller.signal.aborted ? "superseded" : "failed",
         error: { ...base, phase },
         steps: [...steps],
@@ -761,21 +765,21 @@ export class ScorecardService {
           ? {
               summary: summarizeScorecard(scorecard),
               models: scorecardModels(scorecard, declared),
-              ...(hasChildren ? {} : { scorecard }), // 자식 있으면 embed 생략(get 이 hydrate)
+              ...(hasChildren ? {} : { scorecard }), // with children, skip embed (get hydrates)
             }
           : {}),
         updatedAt: this.now(),
       });
     }
     this.inFlight.delete(id);
-    // 완료 알림(Mattermost 등) — 최신 레코드로. 실패는 스코어카드 결과 무관(swallow). 대체된 배치는 알림 생략.
+    // Completion notification (Mattermost etc.) — using the latest record. A failure is independent of the scorecard result (swallow). Replaced batches skip the notification.
     if (this.deps.onComplete && !controller.signal.aborted) {
       const rec = await this.deps.store.get(id);
       if (rec) await this.deps.onComplete(tenant, rec).catch(() => {});
     }
   }
 
-  // push 인제스트: 업로드된 트레이스를 그대로 finishIngest 로.
+  // push ingest: pass the uploaded traces straight to finishIngest.
   private async trackIngest(
     id: string,
     tenant: string,
@@ -792,7 +796,7 @@ export class ScorecardService {
     }
   }
 
-  // pull 인제스트: 테넌트 trace source(OTel/MLflow)에서 runId 별로 트레이스를 당겨와 finishIngest 로.
+  // pull ingest: pull per-runId traces from the tenant's trace source (OTel/MLflow) and pass to finishIngest.
   private async trackPull(
     id: string,
     tenant: string,
@@ -805,9 +809,9 @@ export class ScorecardService {
     await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
     try {
       if (!this.deps.buildTraceSource)
-        throw new BadRequestError("BAD_REQUEST", {}, "trace source 빌더가 설정되지 않았습니다(pull 비활성).");
-      // 자격증명: source.authSecret 이름 → 테넌트 SecretStore 값을 Authorization 헤더로 그대로 주입.
-      // 값에 스킴을 포함한다(예: "Bearer <token>" [OTel/Jaeger] 또는 "Basic <base64>" [MLflow]) — 스킴 하드코딩 금지.
+        throw new BadRequestError("BAD_REQUEST", {}, "trace source builder is not configured (pull disabled).");
+      // credential: source.authSecret name → inject the tenant SecretStore value verbatim as the Authorization header.
+      // The value includes the scheme (e.g. "Bearer <token>" [OTel/Jaeger] or "Basic <base64>" [MLflow]) — don't hardcode the scheme.
       let headers: Record<string, string> | undefined;
       if (source.authSecret) {
         const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
@@ -818,16 +822,16 @@ export class ScorecardService {
         kind: source.kind,
         endpoint: source.endpoint,
         ...(headers ? { headers } : {}),
-        // 신형 소스(langfuse/langsmith/phoenix)용 자격증명 '값' — 어댑터가 헤더 이름을 소유한다.
+        // credential 'value' for the newer sources (langfuse/langsmith/phoenix) — the adapter owns the header name.
         ...(headers?.authorization ? { auth: headers.authorization } : {}),
         ...(source.project ? { project: source.project } : {}),
       });
       const perCase: IngestScorecardBody["traces"] = [];
       for (const r of runs) {
-        const trace = await src.fetch(r.runId); // 외부 실패는 UpstreamError → catch → failed
+        const trace = await src.fetch(r.runId); // an external failure is UpstreamError → catch → failed
         perCase.push({ caseId: r.caseId, trace });
       }
-      // attach 힌트: 원본 trace 가 이미 소스 플랫폼에 있다 — 싱크가 같은 플랫폼이면 복제 대신 점수만 부착(흐름②).
+      // attach hint: the original trace already lives on the source platform — if the sink is the same platform, attach scores only instead of duplicating (flow ②).
       await this.finishIngest(id, tenant, dataset, harnessLabel, perCase, judges, {
         sourceKind: source.kind,
         externalIdByCase: Object.fromEntries(runs.map((r) => [r.caseId, r.runId])),
@@ -837,8 +841,8 @@ export class ScorecardService {
     }
   }
 
-  // 공유: perCase 트레이스 → CaseResult(트레이스 그레이더 재도출 + 업로드 점수) → judge → 집계 저장(succeeded). 실패는 throw.
-  // attach = pull 경로의 원본 좌표(소스 kind + caseId→외부 runId) — 트레이스 싱크가 같은 플랫폼이면 점수만 부착.
+  // Shared: perCase traces → CaseResult (re-derive trace graders + uploaded scores) → judge → aggregate and persist (succeeded). Failures throw.
+  // attach = the pull path's original coordinates (source kind + caseId→external runId) — if the trace sink is the same platform, attach scores only.
   private async finishIngest(
     id: string,
     tenant: string,
@@ -852,10 +856,10 @@ export class ScorecardService {
     const results: CaseResult[] = [];
     for (const up of perCase) {
       const evalCase = caseById.get(up.caseId);
-      if (!evalCase) continue; // 데이터셋에 없는 caseId 는 스킵(정렬 불가)
+      if (!evalCase) continue; // skip caseIds not in the dataset (can't align)
       const snapshot = up.snapshot ?? { kind: "repo", diff: "", changedFiles: [], headSha: "ingested" };
       const ctx: GradeContext = { case: evalCase, trace: up.trace, snapshot };
-      // 트레이스 전용 그레이더 재도출(steps/cost/latency) — 라이브 run 과 같은 메트릭으로 diff 정렬.
+      // Re-derive trace-only graders (steps/cost/latency) — same metrics as a live run for diff alignment.
       const derived = await Promise.all([stepsGrader, costGrader, latencyGrader].map((g) => g.grade(ctx)));
       results.push({
         caseId: up.caseId,
@@ -866,9 +870,9 @@ export class ScorecardService {
       });
     }
     const scorecard: Scorecard = { suiteId: dataset.id, harness: harnessLabel, results };
-    await this.scoring.applyJudges(tenant, dataset, results, judges); // 트레이스 → judge 점수(컨트롤플레인)
-    await this.offloadResults(id, results); // os-use 스크린샷 → object storage(레코드 슬림)
-    // 트레이스 싱크 적재(설정 시) — 라이브 배치와 동일 위치(채점 후). pull 은 attach 로 원본 trace 에 점수만 부착.
+    await this.scoring.applyJudges(tenant, dataset, results, judges); // trace → judge scores (control plane)
+    await this.offloadResults(id, results); // os-use screenshots → object storage (slim record)
+    // Trace-sink export (when configured) — same place as the live batch (after scoring). pull attaches scores only to the original trace via attach.
     const exported = this.deps.exportResults
       ? await this.deps
           .exportResults(
@@ -880,9 +884,9 @@ export class ScorecardService {
           .catch(() => undefined)
       : undefined;
     const summary = summarizeScorecard(scorecard);
-    // 인제스트는 하니스 spec 을 해석하지 않음 → 관측(트레이스)만으로 model 축.
+    // ingest doesn't resolve the harness spec → the model axis comes from observation (trace) only.
     const models = scorecardModels(scorecard);
-    // judge 축: 인제스트엔 inline judge 가 없으므로 적용된 등록 judge 들의 model 만.
+    // judge axis: ingest has no inline judge, so only the models of the applied registered judges.
     const judgeModels = await this.scoring.collectJudgeModels(tenant, judges, undefined);
     await this.deps.store.update(id, {
       status: "succeeded",
@@ -903,8 +907,8 @@ export class ScorecardService {
     await this.deps.store.update(id, { status: "failed", error, updatedAt: this.now() });
   }
 
-  // os-use 스크린샷(동봉 base64)을 object storage 로 오프로드 → 각 결과 snapshot.screenshotRef=URL, screenshot 비움(레코드
-  // 슬림). best-effort: 실패하면 base64 유지(스코어카드 자체엔 영향 없음). applyJudges 후에 호출(registry judge 가 이미지 사용 후).
+  // Offload os-use screenshots (inline base64) to object storage → each result snapshot.screenshotRef=URL, screenshot cleared (slim
+  // record). best-effort: on failure keep the base64 (no effect on the scorecard itself). Called after applyJudges (once registry judges have used the image).
   private async offloadResults(id: string, results: CaseResult[]): Promise<void> {
     if (!this.deps.artifacts) return;
     for (const r of results) {

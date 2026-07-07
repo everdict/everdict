@@ -18,7 +18,7 @@ class FakeBackend implements Backend {
   async dispatch(_job: AgentJob): Promise<CaseResult> {
     return {
       caseId: "c",
-      harness: this.id, // 어느 백엔드가 처리했는지 표시
+      harness: this.id, // marks which backend handled it
       trace: [],
       snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
       scores: [],
@@ -44,25 +44,25 @@ function job(target?: string): AgentJob {
 describe("Router", () => {
   const registry = new BackendRegistry().register("a", new FakeBackend("a")).register("b", new FakeBackend("b"));
 
-  it("placement.target 으로 라우팅한다", async () => {
+  it("routes by placement.target", async () => {
     expect((await new Router(registry, "a").dispatch(job("b"))).harness).toBe("b");
   });
 
-  it("placement 가 없으면 default 백엔드로 간다", async () => {
+  it("goes to the default backend when there's no placement", async () => {
     expect((await new Router(registry, "a").dispatch(job())).harness).toBe("a");
   });
 
-  it("미등록 타깃은 에러", async () => {
+  it("an unregistered target is an error", async () => {
     await expect(new Router(registry, "a").dispatch(job("missing"))).rejects.toThrow();
   });
 
-  it("target 도 default 도 없으면 에러", async () => {
+  it("no target and no default is an error", async () => {
     await expect(new Router(registry).dispatch(job())).rejects.toThrow();
   });
 });
 
 describe("buildRegistry", () => {
-  it("설정에서 여러 백엔드를 등록하고 default 를 돌려준다", () => {
+  it("registers multiple backends from config and returns the default", () => {
     const { registry, defaultTarget } = buildRegistry({
       default: "nomad-a",
       backends: [
@@ -75,8 +75,8 @@ describe("buildRegistry", () => {
   });
 });
 
-describe("buildRuntimeBackend (kind 소진 후 런타임 방어)", () => {
-  it("local/nomad/k8s 는 백엔드를 빌드한다", () => {
+describe("buildRuntimeBackend (runtime defense after kind exhaustion)", () => {
+  it("local/nomad/k8s build a backend", () => {
     expect(buildRuntimeBackend({ kind: "local", id: "a", version: "1.0.0", tags: [] })).toBeDefined();
     expect(
       buildRuntimeBackend({ kind: "nomad", id: "a", version: "1.0.0", tags: [], addr: "http://x:4646", image: "i" }),
@@ -84,14 +84,14 @@ describe("buildRuntimeBackend (kind 소진 후 런타임 방어)", () => {
     expect(buildRuntimeBackend({ kind: "k8s", id: "a", version: "1.0.0", tags: [], image: "i" })).toBeDefined();
   });
 
-  it("union 밖 kind(경계 미검증 값)는 BAD_REQUEST 로 거절 — dead branch 아님", () => {
-    // docker/topology 제거 후 union 은 local|nomad|k8s. 경계에서 미검증 kind 가 새면 명시적 거절(never 방어).
+  it("a kind outside the union (an unvalidated boundary value) is rejected as BAD_REQUEST — not a dead branch", () => {
+    // After removing docker/topology, the union is local|nomad|k8s. If an unvalidated kind slips through the boundary, reject explicitly (never defense).
     const bogus = { kind: "topology", id: "a", version: "1.0.0", tags: [] } as unknown as RuntimeSpec;
     expect(() => buildRuntimeBackend(bogus)).toThrow(/BAD_REQUEST|topology/);
   });
 });
 
-describe("nomadRuntimeOptions (외부 클러스터 API 인증)", () => {
+describe("nomadRuntimeOptions (external cluster API auth)", () => {
   const spec = (authSecret?: string): Extract<RuntimeSpec, { kind: "nomad" }> => ({
     kind: "nomad",
     id: "rt",
@@ -102,24 +102,24 @@ describe("nomadRuntimeOptions (외부 클러스터 API 인증)", () => {
     ...(authSecret ? { authSecret } : {}),
   });
 
-  it("authSecret 을 API 토큰으로 풀고, alloc env 에서는 제외한다(클러스터 토큰 노출 금지)", () => {
+  it("resolves authSecret to an API token and excludes it from the alloc env (no cluster-token exposure)", () => {
     const opts = nomadRuntimeOptions(spec("NOMAD_TOKEN"), {
       NOMAD_TOKEN: "acl-xyz",
       ANTHROPIC_API_KEY: "sk-model",
     });
     expect(opts.apiToken).toBe("acl-xyz");
-    expect(opts.secretEnv).toEqual({ ANTHROPIC_API_KEY: "sk-model" }); // 토큰은 빠지고 모델 키만 alloc 으로
+    expect(opts.secretEnv).toEqual({ ANTHROPIC_API_KEY: "sk-model" }); // the token drops out; only the model key goes to the alloc
   });
 
-  it("authSecret 미지정이면 apiToken 없음 + secretEnv 그대로", () => {
+  it("with no authSecret, no apiToken + secretEnv unchanged", () => {
     const opts = nomadRuntimeOptions(spec(), { ANTHROPIC_API_KEY: "sk-model" });
     expect(opts.apiToken).toBeUndefined();
     expect(opts.secretEnv).toEqual({ ANTHROPIC_API_KEY: "sk-model" });
   });
 });
 
-describe("k8sRuntimeOptions (외부 클러스터 API 인증)", () => {
-  it("authSecret→bearer 토큰 + server 전달, alloc env 에서 토큰 제외", () => {
+describe("k8sRuntimeOptions (external cluster API auth)", () => {
+  it("authSecret→bearer token + passes server, excludes the token from the alloc env", () => {
     const spec: Extract<RuntimeSpec, { kind: "k8s" }> = {
       kind: "k8s",
       id: "rt",
@@ -135,7 +135,7 @@ describe("k8sRuntimeOptions (외부 클러스터 API 인증)", () => {
     expect(opts.secretEnv).toEqual({ OPENAI_API_KEY: "sk-model" });
   });
 
-  it("kubeconfigSecret→전체 kubeconfig YAML 로 풀고, authSecret 과 함께 둘 다 alloc env 에서 제외", () => {
+  it("kubeconfigSecret→resolves to the full kubeconfig YAML, and both it and authSecret are excluded from the alloc env", () => {
     const spec: Extract<RuntimeSpec, { kind: "k8s" }> = {
       kind: "k8s",
       id: "rt",
@@ -152,7 +152,7 @@ describe("k8sRuntimeOptions (외부 클러스터 API 인증)", () => {
     });
     expect(opts.kubeconfig).toBe("apiVersion: v1\nkind: Config\n");
     expect(opts.apiToken).toBe("bearer-xyz");
-    // 클러스터 자격증명(토큰 + kubeconfig) 둘 다 제거 — 모델 키만 남는다(untrusted 에이전트에 클러스터 자격증명 노출 금지).
+    // Both cluster credentials (token + kubeconfig) removed — only the model key remains (never expose cluster credentials to an untrusted agent).
     expect(opts.secretEnv).toEqual({ OPENAI_API_KEY: "sk-model" });
   });
 });

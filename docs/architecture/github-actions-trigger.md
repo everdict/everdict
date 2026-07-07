@@ -8,8 +8,8 @@
 > S2 `3be9c3e` — `githubActionsAuthenticator` (issuer pre-check, fail-closed, `AuthContext.workspaceHint`) +
 > `ci` role (scorecards:run/read + harnesses:register/read only) + membership-bootstrap exclusion.
 > S3 `2cc8b7f` (backend) + web slice — `CiLinkService` (links CRUD = trust, repos picker proxy, setup-PR
-> generator `renderCiWorkflow`) + routes/MCP ×5 + web: harness-detail "CI 연동" panel + connect-repo dialog
-> (connection→repo picker→slots→dataset→save→setup-PR), settings "CI 연동" tab, scorecard origin chips.
+> generator `renderCiWorkflow`) + routes/MCP ×5 + web: harness-detail "CI integration" panel + connect-repo dialog
+> (connection→repo picker→slots→dataset→save→setup-PR), settings "CI integration" tab, scorecard origin chips.
 > **Server-side supersede — SHIPPED.** A new submit with the same `(origin.repo, prNumber, harness, dataset)`
 > key reclaims in-flight (queued/running) batches: marks them `superseded` (new scorecard status; neither
 > succeeded nor failed — invisible to baseline/diff/leaderboard) with `error.code=SUPERSEDED`, and aborts them
@@ -88,7 +88,7 @@ repo↔service wiring. Competing products call this an "integration" and make it
   `packages/registry/src/harness-{template,instance}-registry.ts`): `HarnessInstanceSpec = { template: {id,version},
   id, version, pins: Record<slot, image>, overrides? }`; `resolveHarnessInstance(template, instance)` fills service
   images from pins and throws `BadRequestError` on missing/mismatched pins. `POST /harnesses` registers instance
-  versions; `GET /harnesses/:id/:version/instance` returns the raw instance (pins) — the web "수정→새 버전" flow
+  versions; `GET /harnesses/:id/:version/instance` returns the raw instance (pins) — the web "edit → new version" flow
   already re-pins through this. A CI re-pin is the **headless version of an existing flow**, not a new concept.
 - **Submit-time seam exists** (`apps/api/src/scorecard-service.ts` ~154–168): `submit()` resolves the harness via
   `deps.harnesses.get(tenant, id, version)` before dispatch — the single point to apply an ephemeral pin override.

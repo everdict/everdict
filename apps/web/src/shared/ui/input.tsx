@@ -2,7 +2,7 @@ import type { InputHTMLAttributes, TextareaHTMLAttributes } from 'react'
 
 import { cn } from '@/shared/lib/utils'
 
-// Linear st. 필드 — 32px 높이, 6px 라운드, 13px, 차분한 surface + 인디고 포커스 ring.
+// Linear st. field — 32px height, 6px round, 13px, calm surface + indigo focus ring.
 const base =
   'w-full rounded-md border bg-card px-2.5 text-[13px] text-foreground shadow-raise transition-[border-color,box-shadow] placeholder:text-muted-foreground/60 focus-visible:border-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25 disabled:opacity-50'
 
@@ -24,7 +24,7 @@ export function Textarea({
   )
 }
 
-// 드롭다운은 native <select>/<datalist> 대신 shared/ui/combobox 의 Combobox 를 쓴다(전역 일관 — Select 아톰 제거됨).
+// For dropdowns, use the Combobox from shared/ui/combobox instead of native <select>/<datalist> (global consistency — the Select atom was removed).
 
 export function Label({ className, ...props }: React.LabelHTMLAttributes<HTMLLabelElement>) {
   return <label className={cn('text-[13px] font-[510] text-foreground', className)} {...props} />

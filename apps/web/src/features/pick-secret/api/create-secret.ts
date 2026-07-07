@@ -5,7 +5,7 @@ import { getTranslations } from 'next-intl/server'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
-// 컨트롤플레인 SecretNameSchema 와 동일(env 형식) — 폼 1차 검증, 최종 강제는 컨트롤플레인.
+// Same as the control plane's SecretNameSchema (env format) — first-pass form validation; final enforcement is the control plane.
 const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
 export interface CreateSecretResult {
@@ -13,9 +13,9 @@ export interface CreateSecretResult {
   error?: string
 }
 
-// 시크릿 참조 입력(하니스 env·GHE App 개인키·Mattermost 토큰 등)에서 인라인으로 생성/갱신한다
-// (값은 at-rest 암호화, 다시 못 봄). scope: "user"(내 개인, 셀프) | "workspace"(공유, admin).
-// authZ 는 컨트롤플레인이 강제 — 권한 없으면 error.
+// Create/update inline from a secret-reference input (harness env · GHE App private key · Mattermost token, etc.)
+// (encrypted at rest, never shown again). scope: "user" (my personal, self) | "workspace" (shared, admin).
+// authZ is enforced by the control plane — error if unauthorized.
 export async function createSecretAction(
   name: string,
   value: string,

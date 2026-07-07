@@ -2,7 +2,7 @@ import type { HTMLAttributes } from 'react'
 
 import { cn } from '@/shared/lib/utils'
 
-// Linear st. surface — 8px 라운드, hairline 보더, 아주 옅은 raise 섀도. 밀도 높은 패딩.
+// Linear st. surface — 8px round, hairline border, very faint raise shadow. Dense padding.
 export function Card({ className, ...props }: HTMLAttributes<HTMLDivElement>) {
   return (
     <div

@@ -10,8 +10,8 @@ export interface TraceSinkMutationResult {
   error?: string
 }
 
-// 트레이스 싱크 등록/갱신(관리자, name 기준 upsert). 인증 토큰(값)은 워크스페이스 시크릿에 먼저 넣고 그 이름만 지정.
-// authZ(admin=settings:write)는 컨트롤플레인이 강제.
+// Register/update a trace sink (admin, upsert keyed by name). Put the auth token (value) into a workspace secret first and specify only its name.
+// authZ (admin = settings:write) is enforced by the control plane.
 export async function upsertTraceSinkAction(input: {
   name: string
   kind: 'mlflow' | 'langfuse' | 'langsmith' | 'phoenix'
@@ -30,7 +30,7 @@ export async function upsertTraceSinkAction(input: {
   }
 }
 
-// 트레이스 싱크 삭제(관리자). 그 싱크를 선택했던 하니스의 상세 결과는 이후 외부 적재 없이 Everdict 에만 남는다.
+// Delete a trace sink (admin). Detail results of harnesses that had selected that sink stay only in Everdict afterward, with no external export.
 export async function removeTraceSinkAction(name: string): Promise<TraceSinkMutationResult> {
   const ctx = await authContext()
   try {
@@ -42,7 +42,7 @@ export async function removeTraceSinkAction(name: string): Promise<TraceSinkMuta
   }
 }
 
-// 하니스별 싱크 선택(멤버, harnesses:register). sink=null 이면 선택 해제(적재 안 함).
+// Per-harness sink selection (member, harnesses:register). sink=null clears the selection (no export).
 export async function assignHarnessTraceSinkAction(
   harnessId: string,
   sink: string | null

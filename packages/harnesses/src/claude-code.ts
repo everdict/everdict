@@ -2,12 +2,12 @@ import { type ComputeHandle, type EvaluableHarness, type RunContext, type TraceE
 import { mapClaudeStreamJson } from "./stream-json.js";
 
 export interface ClaudeCodeOptions {
-  install?: boolean; // true면 compute에 CLI를 npm 설치 (샌드박스 잡 등). LocalDriver는 PATH의 claude 사용.
+  install?: boolean; // If true, npm-install the CLI into compute (e.g. a sandbox job). LocalDriver uses claude from PATH.
   workDir?: string;
 }
 
-// 실제 Claude Code 어댑터. compute(샌드박스) 안에서 `claude -p ... --output-format stream-json`을
-// 구동하고 출력을 정규화 TraceEvent로 변환한다. claude 는 머신의 구독 로그인을 사용한다.
+// The real Claude Code adapter. Runs `claude -p ... --output-format stream-json` inside compute (the sandbox)
+// and converts the output into normalized TraceEvents. claude uses the machine's subscription login.
 export class ClaudeCodeHarness implements EvaluableHarness {
   readonly id = "claude-code";
   constructor(
@@ -22,7 +22,7 @@ export class ClaudeCodeHarness implements EvaluableHarness {
   }
 
   async *run(compute: ComputeHandle, task: string, ctx: RunContext): AsyncIterable<TraceEvent> {
-    // claude CLI 는 머신의 구독 로그인으로 동작 — apiKeyEnv 는 보통 비어있다(샌드박스에서만 키 주입).
+    // The claude CLI runs on the machine's subscription login — apiKeyEnv is usually empty (keys are injected only in a sandbox).
     const env: Record<string, string> = { ...ctx.apiKeyEnv };
     const cwd = this.opts.workDir ?? "work";
     const cmd = `claude -p ${shq(task)} --output-format stream-json --verbose --dangerously-skip-permissions`;

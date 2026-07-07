@@ -34,7 +34,7 @@ export default async function HarnessesPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  // 실행 벤치마크(스코어카드에서 도출) + 등록자(members 조인)는 부가 정보 — 실패해도 목록은 뜬다.
+  // Run benchmarks (derived from scorecards) + registrant (members join) are supplementary info — the list shows up even if it fails.
   const scorecards = await controlPlane
     .listScorecards(ctx)
     .then((r) => scorecardsSchema.parse(r))
@@ -53,7 +53,7 @@ export default async function HarnessesPage({
     }
 
   const currentWorkspace = principal?.workspace ?? workspace
-  // 이 워크스페이스가 등록한 하니스만 노출 — 공유(first-party) 하니스는 목록에서 제외.
+  // Only expose harnesses registered by this workspace — shared (first-party) harnesses are excluded from the list.
   const ownHarnesses = harnesses.filter((h) => h.owner === currentWorkspace)
 
   return (

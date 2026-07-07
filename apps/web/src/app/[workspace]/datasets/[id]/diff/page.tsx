@@ -44,7 +44,7 @@ export default async function DatasetDiffPage({
     versions = []
   }
 
-  // 기본값: candidate=최신, base=직전. 쿼리로 덮어쓸 수 있다.
+  // Defaults: candidate=latest, base=previous. Can be overridden by query.
   const candidate = sp.candidate ?? versions[0]
   const base = sp.base ?? versions[1]
 
@@ -165,7 +165,7 @@ function DiffBody({ diff }: { diff: DatasetDiff }) {
   )
 }
 
-// 한 필드의 before → after(표시용 문자열). before 는 빨강/취소, after 는 초록.
+// A field's before → after (display string). before is red/struck through, after is green.
 function FieldChangeRow({ change }: { change: DatasetFieldChange }) {
   return (
     <div className="grid grid-cols-[88px_1fr] gap-3 px-3 py-2 text-[12px]">

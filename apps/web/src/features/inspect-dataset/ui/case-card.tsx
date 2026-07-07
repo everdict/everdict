@@ -10,7 +10,7 @@ import { Dialog } from '@/shared/ui/dialog'
 import { JsonView } from '@/shared/ui/json-view'
 import { Markdown } from '@/shared/ui/markdown'
 
-// env/grader 배지 + 채점 라벨 + 타임아웃 — 카드와 다이얼로그가 공유하는 메타 줄.
+// env/grader badges + grading label + timeout — the meta line shared by the card and the dialog.
 function CaseMeta({ c }: { c: DatasetCase }) {
   const tr = useTranslations('inspectDataset')
   return (
@@ -32,7 +32,7 @@ function CaseMeta({ c }: { c: DatasetCase }) {
   )
 }
 
-// eval 케이스 카드 — 축약 표시, 클릭 시 다이얼로그로 전문(태스크 마크다운 + 환경/채점 + 원본 JSON).
+// eval case card — abbreviated display; clicking opens a dialog with the full text (task markdown + environment/grading + raw JSON).
 export function CaseCard({ item: c }: { item: DatasetCase }) {
   const tr = useTranslations('inspectDataset')
   const [open, setOpen] = useState(false)

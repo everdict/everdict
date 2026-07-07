@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type CapabilityProbes, detectCapabilities } from "./capabilities.js";
 
-// 주입 프로브 — on 에 든 capability 만 지원하는 것으로 모사(실 OS 접근 없이 결정적 테스트).
+// Injected probes — simulate supporting only the capabilities listed in `on` (deterministic test without real OS access).
 const probes = (on: string[]): CapabilityProbes => ({
   git: async () => on.includes("git"),
   docker: async () => on.includes("docker"),
@@ -12,28 +12,28 @@ const probes = (on: string[]): CapabilityProbes => ({
   "claude-login": async () => on.includes("claude-login"),
 });
 
-describe("detectCapabilities — 어휘 프로브 실측 → 지원 capability 만 자가-광고", () => {
-  it("프로브가 통과한 capability 만 반환한다", async () => {
+describe("detectCapabilities — measure vocabulary probes → self-advertise only supported capabilities", () => {
+  it("returns only the capabilities whose probe passed", async () => {
     expect(await detectCapabilities(probes(["git", "docker"]))).toEqual(["git", "docker"]);
     expect(await detectCapabilities(probes([]))).toEqual([]);
   });
 
-  it("docker 배치 게이트 호환 — docker 있으면 반환에 docker 포함(runner-hub requiredRunnerCapabilities)", async () => {
+  it("docker placement-gate compatible — if docker is present, docker is in the return (runner-hub requiredRunnerCapabilities)", async () => {
     expect(await detectCapabilities(probes(["docker"]))).toContain("docker");
   });
 
-  it("보안(sandbox)/인증(codex-login)도 실측 프로브로 라벨된다(강제는 별도 레이어)", async () => {
+  it("security (sandbox) / auth (codex-login) are also labeled by measured probes (enforcement is a separate layer)", async () => {
     const caps = await detectCapabilities(probes(["sandbox", "codex-login"]));
     expect([...caps].sort()).toEqual(["codex-login", "sandbox"]);
   });
 
-  it("반환 순서는 어휘(CAPABILITY_DEFS) 순서다", async () => {
-    // git 이 codex-login 보다 어휘에서 앞 → 입력 순서와 무관하게 어휘 순으로.
+  it("the return order is the vocabulary (CAPABILITY_DEFS) order", async () => {
+    // git comes before codex-login in the vocabulary → vocabulary order regardless of input order.
     expect(await detectCapabilities(probes(["codex-login", "git"]))).toEqual(["git", "codex-login"]);
   });
 
-  it("프로브 없는 capability(예: topology)는 광고하지 않는다 — probes 는 Partial(로컬 미프로브 허용)", async () => {
-    // 어휘엔 topology 가 있지만 로컬 프로브가 없다(오케스트레이터 파생) → 부분 probes 로도 안전, topology 미노출.
+  it("a capability with no probe (e.g. topology) isn't advertised — probes is Partial (local non-probe allowed)", async () => {
+    // The vocabulary has topology but there's no local probe (orchestrator-derived) → safe even with partial probes, topology not exposed.
     const caps = await detectCapabilities({ git: async () => true, docker: async () => true });
     expect(caps).toEqual(["git", "docker"]);
     expect(caps).not.toContain("topology");

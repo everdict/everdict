@@ -20,7 +20,7 @@ const RESULT: CaseResult = {
   scores: [],
 };
 
-// 호출 스크립트형 가짜 세션 — 첫 lease 에 잡 1개, 이후 빈 응답.
+// A call-scripted fake session — one job on the first lease, empty responses after.
 function fakeClient(calls: Array<{ name: string; args: Record<string, unknown> }>): RunnerClient {
   let leased = false;
   return {
@@ -38,7 +38,7 @@ function fakeClient(calls: Array<{ name: string; args: Record<string, unknown> }
 }
 
 describe("RunnerHost", () => {
-  it("start→잡 실행(running)→회신→idle→stop(off) 의 상태 전이를 이벤트로 낸다", async () => {
+  it("emits the state transitions start→job running→reply→idle→stop(off) as events", async () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const statuses: RunnerHostStatus[] = [];
     const done: RunnerJobDone[] = [];
@@ -69,16 +69,16 @@ describe("RunnerHost", () => {
 
     expect(statuses.map((s) => s.state)).toContain("running");
     expect(statuses.at(-1)?.state).toBe("off");
-    // 잡 결과가 회신됐다 — submit_job_result(j1, RESULT).
+    // The job result was replied — submit_job_result(j1, RESULT).
     const submit = calls.find((c) => c.name === "submit_job_result");
     expect(submit?.args).toMatchObject({ jobId: "j1", result: RESULT });
-    // 종료 통지(성공)가 났다 — OS 알림의 근거.
+    // A completion notice (success) fired — the basis for the OS notification.
     expect(done).toHaveLength(1);
     expect(done[0]).toMatchObject({ result: RESULT });
     expect(done[0]?.error).toBeUndefined();
   });
 
-  it("start 는 멱등(중복 루프 없음), capabilities 는 상태에 실린다", async () => {
+  it("start is idempotent (no duplicate loop), and capabilities are carried in the status", async () => {
     const calls: Array<{ name: string; args: Record<string, unknown> }> = [];
     const host = new RunnerHost({
       apiUrl: "http://localhost:8787",
@@ -91,7 +91,7 @@ describe("RunnerHost", () => {
       pollMs: 1,
     });
     await host.start();
-    await host.start(); // 멱등
+    await host.start(); // idempotent
     expect(host.status().capabilities).toEqual(["repo", "docker"]);
     await host.stop();
     expect(host.status().state).toBe("off");

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { type CipherLike, type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
 
-// XOR 수준의 가짜 암호기 — 실제 safeStorage 대체(암호 강도가 아니라 경로를 검증).
+// A fake cipher at the XOR level — substitutes the real safeStorage (verifies the path, not cryptographic strength).
 function fakeCipher(available = true): CipherLike {
   return {
     isEncryptionAvailable: () => available,
@@ -29,22 +29,22 @@ function memoryIo(): TokenIo & { data: Buffer | null } {
 }
 
 describe("token-store", () => {
-  it("저장 → 로드 라운드트립 — 저장물은 cipher 를 통과한 암호문이다", () => {
+  it("save → load round-trip — what is stored is ciphertext that went through the cipher", () => {
     const io = memoryIo();
     saveToken(fakeCipher(), io, "rnr_abc");
-    expect(io.data?.toString().startsWith("enc:")).toBe(true); // encryptString 경유(평문 직저장 아님)
+    expect(io.data?.toString().startsWith("enc:")).toBe(true); // via encryptString (not a plaintext direct write)
     expect(loadToken(fakeCipher(), io)).toBe("rnr_abc");
   });
 
-  it("rnr_ 가 아니면 저장 거부", () => {
+  it("rejects saving a non-rnr_ token", () => {
     expect(() => saveToken(fakeCipher(), memoryIo(), "ak_notrunner")).toThrow(/rnr_/);
   });
 
-  it("safeStorage 불가 시 저장 거부(평문 폴백 금지)", () => {
+  it("rejects saving when safeStorage is unavailable (no plaintext fallback)", () => {
     expect(() => saveToken(fakeCipher(false), memoryIo(), "rnr_abc")).toThrow(/safeStorage/);
   });
 
-  it("복호 실패/파일 없음/불가 환경은 null(미페어 취급, 기동은 막지 않음)", () => {
+  it("returns null on decryption failure / missing file / unavailable environment (treated as unpaired, does not block startup)", () => {
     const io = memoryIo();
     expect(loadToken(fakeCipher(), io)).toBeNull();
     io.write(Buffer.from("garbage"));
@@ -53,7 +53,7 @@ describe("token-store", () => {
     expect(loadToken(fakeCipher(false), io)).toBeNull();
   });
 
-  it("clearToken 은 저장분을 제거한다", () => {
+  it("clearToken removes the stored token", () => {
     const io = memoryIo();
     saveToken(fakeCipher(), io, "rnr_abc");
     clearToken(io);

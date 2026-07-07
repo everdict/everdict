@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 ScorecardRecord 의 클라이언트 미러. 웹은 HTTP 로만 결합 — 백엔드 패키지 비의존.
+// Client mirror of the control plane ScorecardRecord. The web couples over HTTP only — no backend package dependency.
 export const scorecardStatusSchema = z.enum([
   'queued',
   'running',
@@ -10,7 +10,7 @@ export const scorecardStatusSchema = z.enum([
 ])
 export type ScorecardStatus = z.infer<typeof scorecardStatusSchema>
 
-// 메트릭별 집계(목록/상세 공통).
+// per-metric aggregation (shared by list/detail).
 export const metricSummarySchema = z.object({
   metric: z.string(),
   count: z.number(),
@@ -19,7 +19,7 @@ export const metricSummarySchema = z.object({
 })
 export type MetricSummary = z.infer<typeof metricSummarySchema>
 
-// 케이스별 점수(느슨 — 표시 필드만, 나머지 passthrough). detail = grader/judge 의 판정 사유(VLM 루브릭 reasoning 등).
+// per-case scores (loose — display fields only, the rest passthrough). detail = the grader/judge's verdict rationale (VLM rubric reasoning, etc.).
 export const caseScoreSchema = z
   .object({
     graderId: z.string(),
@@ -30,7 +30,7 @@ export const caseScoreSchema = z
   })
   .passthrough()
 
-// 트레이스 이벤트(느슨) — 표시는 error 이벤트(케이스 실패 사유)만 본다. 나머지는 passthrough.
+// trace events (loose) — display only looks at error events (case failure reasons). The rest passthrough.
 export const traceEventSchema = z
   .object({ kind: z.string(), message: z.string().optional() })
   .passthrough()
@@ -40,9 +40,9 @@ export const caseResultSchema = z
     caseId: z.string(),
     harness: z.string().optional(),
     scores: z.array(caseScoreSchema).default([]),
-    trace: z.array(traceEventSchema).default([]), // 케이스 실행 트레이스 — error 이벤트로 실패 구간 노출
+    trace: z.array(traceEventSchema).default([]), // case execution trace — error events expose the failure spans
 
-    // os-use=데스크탑 스냅샷(screenshot/screenshotRef → <img>). browser=서비스-토폴로지 스냅샷(url=최종 URL, dom=발췌).
+    // os-use=desktop snapshot (screenshot/screenshotRef → <img>). browser=service-topology snapshot (url=final URL, dom=excerpt).
     snapshot: z
       .object({
         kind: z.string(),
@@ -56,7 +56,7 @@ export const caseResultSchema = z
   })
   .passthrough()
 
-// GET /scorecards/:id 의 전체 scorecard(케이스별 결과 포함).
+// the full scorecard for GET /scorecards/:id (including per-case results).
 export const fullScorecardSchema = z
   .object({
     suiteId: z.string(),
@@ -65,7 +65,7 @@ export const fullScorecardSchema = z
   })
   .passthrough()
 
-// 실행 과정 스텝(타임라인) — run 이 진행되며 append. 웹은 이 순서대로 "진행 과정"을 보여준다.
+// execution process steps (timeline) — appended as the run progresses. The web shows the "progress" in this order.
 export const scorecardStepSchema = z.object({
   ts: z.string(),
   phase: z.string(), // dispatch | judges | offload | persist | case
@@ -75,7 +75,7 @@ export const scorecardStepSchema = z.object({
 })
 export type ScorecardStep = z.infer<typeof scorecardStepSchema>
 
-// 이 run 이 실제로 쓴 모델(리더보드 model 축). observed=트레이스 관측, declared=spec 선언, primary=대표(관측 우선).
+// the models this run actually used (leaderboard model axis). observed=trace-observed, declared=spec-declared, primary=representative (observed first).
 export const scorecardModelsSchema = z.object({
   observed: z.array(z.string()).default([]),
   declared: z.string().optional(),
@@ -83,34 +83,34 @@ export const scorecardModelsSchema = z.object({
 })
 export type ScorecardModels = z.infer<typeof scorecardModelsSchema>
 
-// 이 run 의 트리거 출처(provenance) — 어디서 발사됐나(github-actions|schedule|api|web) + 커밋 좌표.
-// GitHub Actions PR 발사는 제출 시점 임시 핀(pinOverrides: 슬롯→이미지)을 여기 기록한다(레지스트리 무변경). 경량 → 목록에도 포함.
+// this run's trigger provenance — where it was fired from (github-actions|schedule|api|web) + commit coordinates.
+// A GitHub Actions PR fire records a submit-time ephemeral pin (pinOverrides: slot→image) here (registry unchanged). Lightweight → also included in the list.
 export const scorecardOriginSchema = z.object({
   source: z.string(),
   repo: z.string().optional(), // "owner/name"
   sha: z.string().optional(),
   ref: z.string().optional(), // refs/heads/… | refs/pull/…
   prNumber: z.number().optional(),
-  runUrl: z.string().optional(), // CI run 링크
-  pinOverrides: z.record(z.string(), z.string()).optional(), // 제출 시점 임시 핀(슬롯→이미지)
+  runUrl: z.string().optional(), // CI run link
+  pinOverrides: z.record(z.string(), z.string()).optional(), // submit-time ephemeral pin (slot→image)
 })
 export type ScorecardOrigin = z.infer<typeof scorecardOriginSchema>
 
-// 트레이스 싱크 적재 결과 — 채점 완료 후 케이스별 trace+점수를 워크스페이스 관측 플랫폼에 내보낸 기록.
-// 실패해도 스코어카드 상태와 무관(여기 status 로만 표시). 상세(get) 전용 — 목록엔 안 온다.
+// Trace-sink export result — a record of exporting per-case trace+scores to the workspace observability platform after grading.
+// A failure is independent of the scorecard status (shown only via this status). Detail (get) only — not included in the list.
 export const scorecardExportSchema = z.object({
-  name: z.string().optional(), // 적재된 싱크의 등록 이름(복수 싱크 — 어느 싱크였는지)
+  name: z.string().optional(), // registered name of the exported sink (multiple sinks — which sink it was)
   sink: z.enum(['mlflow', 'langfuse', 'langsmith', 'phoenix']),
   status: z.enum(['succeeded', 'partial', 'failed']),
-  url: z.string().optional(), // 상위(experiment/project) 딥링크
-  message: z.string().optional(), // 실패/부분 사유
+  url: z.string().optional(), // deep link to the parent (experiment/project)
+  message: z.string().optional(), // failure/partial reason
   exportedAt: z.string(),
   cases: z
     .array(
       z.object({
         caseId: z.string(),
-        externalId: z.string().optional(), // 플랫폼 trace/run id
-        url: z.string().optional(), // 케이스 trace 딥링크
+        externalId: z.string().optional(), // platform trace/run id
+        url: z.string().optional(), // deep link to the case trace
         error: z.string().optional(),
       })
     )
@@ -125,12 +125,12 @@ export const scorecardRecordSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }),
   status: scorecardStatusSchema,
   summary: z.array(metricSummarySchema).optional(),
-  models: scorecardModelsSchema.optional(), // 과거 레코드는 미설정(unknown)
-  judgeModels: z.array(z.string()).optional(), // 이 run 을 채점한 judge 모델(들) — model 축과 별개(채점자)
-  origin: scorecardOriginSchema.optional(), // 트리거 출처(provenance) — 경량이라 목록에도 포함. 과거 레코드는 미설정.
-  createdBy: z.string().optional(), // 실행자(제출자 subject) — origin(어디서)과 짝인 '누가'. 과거 레코드는 미설정.
-  runtime: z.string().optional(), // 배치가 실행된 런타임(placement.target: 등록 런타임 id | self:* 러너). 미설정 = 과거·ingest 레코드. 경량 → 목록에도 포함.
-  // 부분 실행(subset) 표식 — 이 배치가 데이터셋의 부분집합만 돌렸다({selected}/{total}). 미설정 = 전체 실행.
+  models: scorecardModelsSchema.optional(), // unset on legacy records (unknown)
+  judgeModels: z.array(z.string()).optional(), // the judge model(s) that graded this run — separate from the model axis (the grader)
+  origin: scorecardOriginSchema.optional(), // trigger provenance — lightweight, so also included in the list. Unset on legacy records.
+  createdBy: z.string().optional(), // the runner (submitter subject) — the 'who' paired with origin (the 'where'). Unset on legacy records.
+  runtime: z.string().optional(), // the runtime the batch ran on (placement.target: registered runtime id | self:* runner). Unset = legacy·ingest records. Lightweight → also included in the list.
+  // Partial-run (subset) marker — this batch ran only a subset of the dataset ({selected}/{total}). Unset = full run.
   subset: z
     .object({
       total: z.number().int(),
@@ -141,18 +141,18 @@ export const scorecardRecordSchema = z.object({
     })
     .optional(),
   scorecard: fullScorecardSchema.optional(),
-  export: scorecardExportSchema.optional(), // 트레이스 싱크 적재 결과(상세 전용)
+  export: scorecardExportSchema.optional(), // trace-sink export result (detail only)
   error: z
     .object({ code: z.string(), message: z.string(), phase: z.string().optional() })
     .optional(),
-  steps: z.array(scorecardStepSchema).default([]), // 진행 과정 타임라인(진행 중에도 갱신)
+  steps: z.array(scorecardStepSchema).default([]), // progress timeline (updated even while in progress)
   createdAt: z.string(),
   updatedAt: z.string(),
 })
 export type ScorecardRecord = z.infer<typeof scorecardRecordSchema>
 export const scorecardsSchema = z.array(scorecardRecordSchema)
 
-// GET /scorecards/diff 응답: baseline vs candidate (메트릭 mean delta + 케이스 회귀/개선).
+// GET /scorecards/diff response: baseline vs candidate (metric mean delta + case regressions/improvements).
 export const caseDeltaSchema = z.object({
   caseId: z.string(),
   metric: z.string(),
@@ -179,7 +179,7 @@ export const scorecardDiffSchema = z.object({
 })
 export type ScorecardDiff = z.infer<typeof scorecardDiffSchema>
 
-// GET /scorecards/trend 응답: 한 (dataset, metric) 의 시간순 스코어카드 + baseline 대비 회귀.
+// GET /scorecards/trend response: time-ordered scorecards for one (dataset, metric) + regression vs baseline.
 export const trendPointSchema = z.object({
   scorecardId: z.string(),
   harness: z.string(),
@@ -200,12 +200,12 @@ export const scorecardTrendSchema = z.object({
 })
 export type ScorecardTrend = z.infer<typeof scorecardTrendSchema>
 
-// GET /scorecards/leaderboard 응답: 한 데이터셋(벤치마크)의 (harness × model) 랭킹(metric 내림차순).
+// GET /scorecards/leaderboard response: (harness × model) ranking for one dataset (benchmark) (metric descending).
 export const leaderboardRowSchema = z.object({
   rank: z.number(),
   harness: z.object({ id: z.string(), version: z.string() }),
   model: z.string().optional(),
-  judgeModels: z.array(z.string()).optional(), // 대표 run 을 채점한 judge 모델(들)
+  judgeModels: z.array(z.string()).optional(), // the judge model(s) that graded the representative run
   scorecardId: z.string(),
   createdAt: z.string(),
   score: z.number().nullable(),

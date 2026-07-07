@@ -1,8 +1,8 @@
-// 라이브 연결: workclaw/infra 의 LiteLLM 이 서빙하는 chatgpt/gpt-5.4-mini 를 Everdict 평가 루프로 구동한다.
-// 선언형 command 하니스(코드 0)가 케이스에 시드된 solve.py 로 LiteLLM /v1/chat/completions 를 호출 →
-// 모델 답을 answer.md 에 기록 → RepoEnvironment 가 git-diff 스냅샷으로 캡처. (LocalBackend, 호스트 python3/네트워크)
+// live connection: drive chatgpt/gpt-5.4-mini served by workclaw/infra's LiteLLM through the Everdict eval loop.
+// A declarative command harness (zero code) calls LiteLLM /v1/chat/completions via solve.py seeded into the case →
+// writes the model answer to answer.md → RepoEnvironment captures it as a git-diff snapshot. (LocalBackend, host python3/network)
 //
-// 사용(키는 인자/환경으로만 — 커밋 금지):
+// Usage (the key via args/env only — do not commit):
 //   OPENAI_API_KEY=<litellm master key> OPENAI_API_BASE=http://localhost:4000 \
 //   EVERDICT_MODEL=chatgpt/gpt-5.4-mini node scripts/live/litellm-gpt54mini.mjs
 import process from "node:process";
@@ -12,11 +12,11 @@ const BASE = process.env.OPENAI_API_BASE ?? "http://localhost:4000";
 const KEY = process.env.OPENAI_API_KEY;
 const MODEL = process.env.EVERDICT_MODEL ?? "chatgpt/gpt-5.4-mini";
 if (!KEY) {
-  console.error("✗ OPENAI_API_KEY (LiteLLM key) 가 필요합니다.");
+  console.error("✗ OPENAI_API_KEY (LiteLLM key) is required.");
   process.exit(1);
 }
 
-// 케이스에 시드되는 호출기 — OPENAI_API_BASE/KEY/EVERDICT_MODEL(env) + task(arg)로 LiteLLM 호출 → answer.md.
+// caller seeded into the case — calls LiteLLM with OPENAI_API_BASE/KEY/EVERDICT_MODEL (env) + task (arg) → answer.md.
 const solve = `import os, sys, json, urllib.request
 task = sys.argv[1] if len(sys.argv) > 1 else "hello"
 base = os.environ["OPENAI_API_BASE"].rstrip("/")
@@ -37,7 +37,7 @@ const job = {
     version: "1.0.0",
     setup: [],
     command: "python3 solve.py {{task}}",
-    env: { OPENAI_API_BASE: BASE, OPENAI_API_KEY: KEY, EVERDICT_MODEL: MODEL }, // 라이브용(키는 시크릿 스토어가 정석)
+    env: { OPENAI_API_BASE: BASE, OPENAI_API_KEY: KEY, EVERDICT_MODEL: MODEL }, // for the live run (properly the key belongs in the secret store)
     trace: { kind: "none" },
   },
   evalCase: {
@@ -57,6 +57,8 @@ console.log("changed :", r.snapshot.changedFiles);
 console.log("answer  :", JSON.stringify(r.snapshot.diff).slice(0, 200));
 const ok = (r.snapshot.changedFiles ?? []).includes("answer.md") && r.snapshot.diff.length > 0;
 console.log(
-  ok ? "\n✅ Everdict → LiteLLM gpt-5.4-mini 연결 OK (실제 모델 응답을 평가 루프가 캡처)" : "\n❌ answer.md 없음",
+  ok
+    ? "\n✅ Everdict → LiteLLM gpt-5.4-mini connection OK (the eval loop captured a real model response)"
+    : "\n❌ no answer.md",
 );
 process.exit(ok ? 0 : 1);

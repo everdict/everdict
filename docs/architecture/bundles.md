@@ -4,7 +4,7 @@
 > verified locally: apply → run pinch → leaderboard).** Generalization, not a special case. The platform ALREADY lets a
 > tenant register each piece (harness / benchmark recipe / dataset / judge / runtime / model) at runtime
 > via per-type HTTP+MCP endpoints, tenant-owned + immutable. What's missing for the SaaS story
-> ("유저가 쉽게 벤치마크·어댑터·하니스를 등록 → 자기 하니스로 수행 → 대시보드") is a **cohesive one-shot apply**:
+> ("a user easily registers a benchmark/adapter/harness → runs it with their own harness → dashboard") is a **cohesive one-shot apply**:
 > a single manifest that registers a whole bundle. This doc adds that — **harness-agnostic** — and ships
 > **codex + pinch as the first bundle, as pure data (zero core change)**, proving the "specifics live in a bundle,
 > not core" principle.
@@ -80,7 +80,7 @@ dataset-bearing bundle → 403 (exactly as the per-type routes already behave). 
 
 - **HTTP** — `POST /bundles/apply` `{ ...Bundle }` → `{ id, version, results }`. Per-piece gate.
 - **MCP** — `apply_bundle { bundle: <JSON string> }` (same `BundleService.apply`; per-piece authorize).
-- **Web** (Slice 2) — a "번들 적용" page: paste/upload a bundle JSON → apply → per-piece result table.
+- **Web** (Slice 2) — a "Apply bundle" page: paste/upload a bundle JSON → apply → per-piece result table.
 
 ### The first bundle: `examples/bundles/codex-pinch/` (pure data)
 
@@ -108,7 +108,7 @@ Applied via `POST /bundles/apply` (tenant self-serve) OR seeded to `_shared` via
    (tool-list + functional member/viewer). Zero core/package change — codex+pinch is pure data.
 2. ✅ **Web** — `/{workspace}/bundles` page (`ApplyBundleForm`: paste bundle JSON → apply → per-item result
    table with status badges) + `apply-bundle` server action + `entities/bundle` mirror schema +
-   `controlPlane.applyBundle` + "번들" nav entry. Prettier/eslint/tsc green.
+   `controlPlane.applyBundle` + "Bundles" nav entry. Prettier/eslint/tsc green.
 3. ✅ **Guarded live E2E** — `scripts/live/codex-pinch-leaderboard.mjs`: spawns a dev control plane → applies the
    codex+pinch bundle → runs the real `pinch-building-dashboards` benchmark → prints the `(harness × model)`
    leaderboard row. **Verified locally (exit 0)**: 4/4 bundle items apply `ok`; pinch runs to `succeeded`;

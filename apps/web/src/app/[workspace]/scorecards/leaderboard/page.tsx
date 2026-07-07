@@ -19,7 +19,7 @@ import { Table, TBody, TD, TH, THead, TR } from '@/shared/ui/table'
 
 export const dynamic = 'force-dynamic'
 
-// 순위 메달 — 1위 금(앰버)·2위 은(중립)·3위 동(브론즈)·그 외 평문. 상위권을 한눈에.
+// Rank medal — 1st gold (amber) · 2nd silver (neutral) · 3rd bronze · otherwise plain. Top ranks at a glance.
 function RankBadge({ rank }: { rank: number }) {
   const base =
     'inline-flex size-5 items-center justify-center rounded-full text-[11px] font-[560] tabular-nums ring-1 ring-inset'
@@ -56,7 +56,7 @@ export default async function LeaderboardPage({
       .parse(await controlPlane.listDatasets(ctx))
       .map((d) => ({ id: d.id, label: `${d.id} (${d.versions.length}v)` }))
   } catch {
-    // 목록 실패해도 안내는 보여준다
+    // Even if the list fails, still show guidance
   }
 
   let board: Leaderboard | undefined

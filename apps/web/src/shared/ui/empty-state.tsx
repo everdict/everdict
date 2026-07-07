@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-// 빈 상태 — Linear st. 8px 라운드 대시 보더, 절제된 아이콘 + 13px 타이틀 + 보조 힌트.
+// Empty state — Linear st. 8px round dashed border, understated icon + 13px title + secondary hint.
 export function EmptyState({
   title,
   hint,

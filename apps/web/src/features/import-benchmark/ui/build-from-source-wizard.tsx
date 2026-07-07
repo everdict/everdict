@@ -29,10 +29,10 @@ import {
 
 type SourceKind = 'huggingface' | 'jsonl'
 type Category = 'qa' | 'browser' | 'coding' | 'tool'
-// 케이스가 실행될 환경 — 매핑이 정하는 env 종류. browser(startUrl) | prompt(QA, 무환경) | repo(git clone) | os-use(데스크탑).
+// The environment a case runs in — the env kind the mapping decides. browser(startUrl) | prompt(QA, no env) | repo(git clone) | os-use(desktop).
 type EnvKind = 'browser' | 'prompt' | 'repo' | 'os-use'
 
-// 필드→역할 시각화. task/id/answer 는 표 머리글 클릭으로 지정(주요 색), 나머지(git/ref/url)는 env 섹션에서 지정(연한 배지).
+// Field→role visualization. task/id/answer are assigned by clicking a table header (primary color); the rest (git/ref/url) are assigned in the env section (light badge).
 const ROLE_META: Record<string, { label: string; color: string }> = {
   task: { label: 'task', color: '#5e6ad2' },
   id: { label: 'id', color: '#3fb6c9' },
@@ -43,7 +43,7 @@ const ROLE_META: Record<string, { label: string; color: string }> = {
 }
 const cellText = (v: unknown) => (v == null ? '' : typeof v === 'string' ? v : JSON.stringify(v))
 
-// 실행 환경 → 데이터셋 category(표시·필터용 메타). 유저가 고르지 않고 env 에서 파생한다.
+// Execution env → dataset category (display/filter metadata). Not chosen by the user; derived from the env.
 const ENV_TO_CATEGORY: Record<EnvKind, Category> = {
   prompt: 'qa',
   browser: 'browser',
@@ -51,8 +51,8 @@ const ENV_TO_CATEGORY: Record<EnvKind, Category> = {
   'os-use': 'tool',
 }
 
-// 매핑 상태 → "이 벤치마크가 실제로 어떻게 실행/채점되는지"를 한 문장으로 서술한다(선택이 아니라 결과 확인).
-// tone=warn 이면 env 설정이 불완전(고급 설정에서 보완 필요). 문장은 언어별 어순이 달라 t.rich 로 조립.
+// Mapping state → describes "how this benchmark actually runs/scores" in one sentence (a confirmation of the outcome, not a choice).
+// tone=warn means the env config is incomplete (needs completion in advanced settings). Word order differs by language, so the sentence is assembled with t.rich.
 function describeRun(
   a: {
     envKind: EnvKind
@@ -136,7 +136,7 @@ function describeRun(
   }
 }
 
-// 감지된 필드명에서 매핑을 추측 — 사용자가 스키마를 몰라도 합리적 기본값을 채워준다.
+// Guess a mapping from the detected field names — fills in sensible defaults even if the user doesn't know the schema.
 function guess(fields: string[], patterns: RegExp[]): string {
   for (const p of patterns) {
     const hit = fields.find((f) => p.test(f))
@@ -158,31 +158,31 @@ function slug(s: string): string {
 
 const splitKey = (s: HfSplit) => `${s.config} / ${s.split}`
 
-// "소스에서 만들기" 위저드: HF 는 검색→선택→config/split 드롭다운(raw id 입력 회피), jsonl 은 붙여넣기.
-// 그 뒤 미리보기로 필드를 감지하고 드롭다운 매핑 → 한 번에 데이터셋 생성(인라인 spec, 레시피 등록 생략).
+// "Build from source" wizard: HF is search→select→config/split dropdown (avoids raw id entry); jsonl is paste.
+// Then preview detects the fields and dropdown mapping → create a dataset in one shot (inline spec, skipping recipe registration).
 export function BuildFromSourceWizard({
   existingDatasets = [],
   hfTokenScope,
 }: {
   existingDatasets?: { id: string; versions: string[] }[]
-  hfTokenScope?: 'user' | 'workspace' // 사용 가능한 HF_TOKEN 의 스코프 — gated 표시를 상태 인지형으로
+  hfTokenScope?: 'user' | 'workspace' // scope of the available HF_TOKEN — makes the gated indicator state-aware
 }) {
   const t = useTranslations('importBenchmark')
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const [sourceKind, setSourceKind] = useState<SourceKind>('huggingface')
 
-  // HF 검색/선택
+  // HF search/select
   const [query, setQuery] = useState('')
   const [searchBusy, setSearchBusy] = useState(false)
   const [searchError, setSearchError] = useState<string | undefined>(undefined)
   const [hits, setHits] = useState<HfDatasetHit[]>([])
-  const [hfDataset, setHfDataset] = useState('') // 선택된 데이터셋 id
+  const [hfDataset, setHfDataset] = useState('') // selected dataset id
   const [hfGated, setHfGated] = useState(false)
   const [splits, setSplits] = useState<HfSplit[]>([])
   const [splitSel, setSplitSel] = useState('') // splitKey
   const [splitsNote, setSplitsNote] = useState<string | undefined>(undefined)
-  // 뷰어(datasets-server) 미서빙 데이터셋 폴백 — repo 데이터 파일을 골라 직접 인출.
+  // Fallback for datasets not served by the viewer (datasets-server) — pick a repo data file and fetch it directly.
   const [files, setFiles] = useState<string[]>([])
   const [fileSel, setFileSel] = useState('')
 
@@ -190,7 +190,7 @@ export function BuildFromSourceWizard({
 
   const [datasetId, setDatasetId] = useState('')
   const [version, setVersion] = useState('1.0.0')
-  const [advanced, setAdvanced] = useState(false) // 고급(작성자) 설정 — 실행 환경/템플릿/이미지/placement
+  const [advanced, setAdvanced] = useState(false) // advanced (author) settings — execution env/template/image/placement
 
   const [fields, setFields] = useState<string[]>([])
   const [rows, setRows] = useState<Record<string, unknown>[]>([])
@@ -199,7 +199,7 @@ export function BuildFromSourceWizard({
   const [taskTemplate, setTaskTemplate] = useState('')
   const [answerField, setAnswerField] = useState('')
   const [startUrlField, setStartUrlField] = useState('')
-  // env 종류 + repo/이미지/placement 매핑(first-party 카탈로그와 동등한 표현력).
+  // env kind + repo/image/placement mapping (expressiveness on par with the first-party catalog).
   const [envKind, setEnvKind] = useState<EnvKind>('browser')
   const [gitField, setGitField] = useState('')
   const [refField, setRefField] = useState('')
@@ -244,16 +244,16 @@ export function BuildFromSourceWizard({
     setFileSel('')
     resetPreview()
     if (!datasetId) setDatasetId(slug(hit.id))
-    // config/split 후보 인출 → 드롭다운.
+    // Fetch config/split candidates → dropdown.
     const r = await hfSplitsAction(hit.id)
     if (r.ok && r.splits && r.splits.length > 0) {
       setSplits(r.splits)
-      // test 우선, 없으면 첫 번째.
+      // test first, else the first one.
       const pick = r.splits.find((s) => s.split === 'test') ?? r.splits[0]
       if (pick) setSplitSel(splitKey(pick))
       return
     }
-    // 뷰어가 이 데이터셋을 서빙하지 않음(officeqa 류) → repo 데이터 파일 직접 인출 폴백.
+    // The viewer doesn't serve this dataset (officeqa-type) → fall back to fetching a repo data file directly.
     const fr = await hfFilesAction(hit.id)
     if (fr.ok && fr.files && fr.files.length > 0) {
       setFiles(fr.files)
@@ -269,7 +269,7 @@ export function BuildFromSourceWizard({
 
   function buildSource(): Record<string, unknown> {
     if (sourceKind !== 'huggingface') return { kind: 'jsonl' }
-    // 파일 폴백 모드(뷰어 미서빙)면 file 로 직접 인출 — config/split 은 뷰어 전용이라 생략.
+    // In file-fallback mode (not served by the viewer), fetch directly by file — config/split are viewer-only, so omit them.
     if (fileSel) return { kind: 'huggingface', dataset: hfDataset, file: fileSel }
     return {
       kind: 'huggingface',
@@ -301,11 +301,11 @@ export function BuildFromSourceWizard({
     setStartUrlField(url)
     setGitField(git)
     setRefField(guess(r.fields, [/^ref$|base.?commit|commit|revision|sha/i]))
-    // env 기본값 추측: git 필드 있으면 repo, URL 있으면 browser, 정답 있으면 prompt(QA), 아니면 browser.
+    // Guess the default env: git field → repo, URL → browser, answer → prompt(QA), else browser.
     setEnvKind(git ? 'repo' : url ? 'browser' : ans ? 'prompt' : 'browser')
   }
 
-  // 시스템 관리 버전 — 첫 인입이면 1.0.0(필드 숨김), 같은 id 재인입이면 VersionField 가 다음 버전을 계산.
+  // System-managed version — first import is 1.0.0 (field hidden); re-importing the same id lets VersionField compute the next version.
   const existingVersions = versionsForId(existingDatasets, datasetId)
   const effectiveVersion = existingVersions.length > 0 ? version : '1.0.0'
 
@@ -317,14 +317,14 @@ export function BuildFromSourceWizard({
     const spec: Record<string, unknown> = {
       id,
       version: effectiveVersion,
-      category: ENV_TO_CATEGORY[envKind], // env 에서 파생(유저가 고르지 않음)
+      category: ENV_TO_CATEGORY[envKind], // derived from the env (not chosen by the user)
       source: buildSource(),
       mapping: {
         idField,
         taskField,
         ...(taskTemplate.trim() ? { taskTemplate } : {}),
         ...(answerField ? { answerField } : {}),
-        // env 종류별 매핑 — first-party 카탈로그와 동등한 표현력(prompt/repo/os-use/browser).
+        // Per-env-kind mapping — expressiveness on par with the first-party catalog (prompt/repo/os-use/browser).
         ...(envKind === 'browser' && startUrlField ? { startUrlField } : {}),
         ...(envKind === 'prompt' ? { promptEnv: true } : {}),
         ...(envKind === 'os-use' ? { osUseEnv: true } : {}),
@@ -359,7 +359,7 @@ export function BuildFromSourceWizard({
     t
   )
 
-  // 현재 매핑 상태에서 필드의 역할을 역산(표 머리글/셀 강조에 사용).
+  // Back out a field's role from the current mapping state (used to highlight table headers/cells).
   const roleOf = (f: string): string =>
     f === taskField
       ? 'task'
@@ -374,12 +374,12 @@ export function BuildFromSourceWizard({
               : f === startUrlField
                 ? 'url'
                 : ''
-  // 표 머리글 클릭 → task→id→answer→없음 순환. 단일 상태값이라 역할은 자동으로 유일해진다(같은 역할은 한 열만).
+  // Click a table header → cycle task→id→answer→none. Since it's a single state value, roles stay automatically unique (one column per role).
   function cycleRole(f: string) {
     const order = ['task', 'id', 'answer', ''] as const
     const cur = (['task', 'id', 'answer'] as string[]).includes(roleOf(f)) ? roleOf(f) : ''
     const next = order[(order.indexOf(cur as (typeof order)[number]) + 1) % order.length]
-    // 이 필드를 기존 모든 역할에서 해제한 뒤 새 역할 지정.
+    // Clear this field from all existing roles, then assign the new role.
     if (idField === f) setIdField('')
     if (taskField === f) setTaskField('')
     if (answerField === f) setAnswerField('')
@@ -390,12 +390,12 @@ export function BuildFromSourceWizard({
     else if (next === 'id') setIdField(f)
     else if (next === 'answer') setAnswerField(f)
   }
-  // 매핑 컨트롤 아래에 보여줄 샘플 값(첫 행).
+  // Sample value to show under the mapping control (the first row).
   const sampleOf = (f: string): string => (f && rows[0] ? cellText(rows[0][f]) : '')
 
   return (
     <div className="space-y-6">
-      {/* 1. 소스 */}
+      {/* 1. source */}
       <section className="space-y-3">
         <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">
           {t('step1Source')}
@@ -420,7 +420,7 @@ export function BuildFromSourceWizard({
 
         {sourceKind === 'huggingface' ? (
           <div className="space-y-3">
-            {/* 검색 */}
+            {/* search */}
             <div className="flex gap-2">
               <Input
                 value={query}
@@ -454,7 +454,7 @@ export function BuildFromSourceWizard({
               </Callout>
             )}
 
-            {/* 검색 결과 */}
+            {/* search results */}
             {hits.length > 0 && (
               <div className="max-h-64 divide-y divide-border/60 overflow-auto rounded-lg border bg-card shadow-raise">
                 {hits.map((h) => (
@@ -480,7 +480,7 @@ export function BuildFromSourceWizard({
               </div>
             )}
 
-            {/* 선택됨 + split */}
+            {/* selected + split */}
             {hfDataset && (
               <div className="space-y-2 rounded-lg border bg-card p-3 shadow-raise">
                 <div className="flex flex-wrap items-center gap-2 text-[13px]">
@@ -521,7 +521,7 @@ export function BuildFromSourceWizard({
                     />
                   </div>
                 ) : files.length > 0 ? (
-                  // 뷰어 미서빙 → repo 데이터 파일 직접 선택(csv/jsonl/json).
+                  // Not served by the viewer → pick a repo data file directly (csv/jsonl/json).
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1">
                       <Label htmlFor="hfFile">{t('dataFile')}</Label>
@@ -570,7 +570,7 @@ export function BuildFromSourceWizard({
             tone="warning"
             {...(sourceKind === 'huggingface'
               ? {
-                  // gated + 토큰 미보유가 가장 흔한 실패 — 셀프서비스 경로(계정 시크릿)를 바로 안내.
+                  // gated + no token is the most common failure — point straight to the self-serve path (account secret).
                   hint: hfGated && !hfTokenScope ? t('previewHintGated') : t('hfConnectHint'),
                 }
               : {})}
@@ -655,7 +655,7 @@ export function BuildFromSourceWizard({
         )}
       </section>
 
-      {/* 2. 매핑 (미리보기 후) — 역할 3개만. 나머지(실행 환경/템플릿/이미지)는 자동 추론 + 고급 설정. */}
+      {/* 2. mapping (after preview) — only 3 roles. The rest (execution env/template/image) are auto-inferred + advanced settings. */}
       {previewed && (
         <section className="space-y-3">
           <div className="flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -692,7 +692,7 @@ export function BuildFromSourceWizard({
             />
           </div>
 
-          {/* 결과 서술 — "이 벤치마크가 실제로 어떻게 실행/채점되는지"를 한 문장으로(선택이 아니라 확인). */}
+          {/* outcome description — "how this benchmark actually runs/scores" in one sentence (a confirmation, not a choice). */}
           <div
             className={cn(
               'rounded-lg border px-3.5 py-3 text-[12.5px] leading-relaxed',
@@ -712,7 +712,7 @@ export function BuildFromSourceWizard({
             <p className="text-muted-foreground">{run.body}</p>
           </div>
 
-          {/* 고급(작성자) 설정 — 실행 환경 변경 · task 템플릿 · 케이스 이미지/placement. 기본 접힘. */}
+          {/* advanced (author) settings — change execution env · task template · case image/placement. Collapsed by default. */}
           <div className="rounded-lg border bg-card/40">
             <button
               type="button"
@@ -838,7 +838,7 @@ export function BuildFromSourceWizard({
         </section>
       )}
 
-      {/* 3. 만들기 (미리보기 후) — id + (재인입 시에만 버전). 전량 인입이 기본, 실행에서 subset 조절. */}
+      {/* 3. create (after preview) — id + (version only on re-import). Importing everything is the default; adjust the subset at run time. */}
       {previewed && (
         <section className="space-y-3">
           <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">
@@ -853,7 +853,7 @@ export function BuildFromSourceWizard({
               placeholder="my-bench"
             />
           </div>
-          {/* 버전은 첫 인입이면 자동 1.0.0(숨김) — 같은 이름 재인입일 때만 다음 버전 선택 노출. */}
+          {/* Version is auto 1.0.0 on first import (hidden) — the next-version picker is shown only when re-importing the same name. */}
           {existingVersions.length > 0 && (
             <VersionField existing={existingVersions} value={version} onChange={setVersion} />
           )}
@@ -890,7 +890,7 @@ function MapField({
   sample,
 }: {
   label: string
-  hint?: string // label 옆 회색 보조 설명(역할 의미)
+  hint?: string // gray auxiliary note next to the label (the role's meaning)
   value: string
   onChange: (v: string) => void
   fields: string[]
@@ -904,7 +904,7 @@ function MapField({
         {label}
         {hint ? <span className="ml-1 font-normal text-faint">· {hint}</span> : null}
       </Label>
-      {/* optional=빈 값 '(없음)' 옵션 노출, 필수=빈 값이면 placeholder 로 선택 유도(기존 native 동작 유지) */}
+      {/* optional=show an empty '(none)' option; required=empty value prompts selection via the placeholder (preserves the original native behavior) */}
       <Combobox
         value={value}
         onChange={onChange}
@@ -916,7 +916,7 @@ function MapField({
         className="w-full"
         aria-label={label}
       />
-      {/* 선택한 필드의 실제 값(첫 행) — "무엇을 매핑하는지" 확인용. */}
+      {/* the selected field's actual value (first row) — to confirm "what is being mapped". */}
       {sample ? (
         <p className="truncate font-mono text-[11px] text-muted-foreground/80" title={sample}>
           {t('examplePrefix')} {sample}

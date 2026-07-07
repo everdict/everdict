@@ -1,20 +1,20 @@
-// 라이브 e2e: **pinch 를 돌린 그 하니스(codex)를 Everdict 예약(cron)으로 등록 → 실제 Temporal 이 발사** → 스코어카드 → 리더보드.
-// scheduled-evals 설계문(docs/architecture/scheduled-evals.md)의 "live Temporal e2e" 후속을 실증한다.
+// Live e2e: **register the harness that ran pinch (codex) as an Everdict schedule (cron) → real Temporal fires it** → scorecard → leaderboard.
+// Demonstrates the "live Temporal e2e" follow-up from the scheduled-evals design doc (docs/architecture/scheduled-evals.md).
 //
-// 구성(모두 로컬):
-//   • Temporal dev server (docker; 이 스크립트 밖에서 기동, 127.0.0.1:7233) — cron 엔진.
-//   • 컨트롤플레인(node, in-memory, no-auth) — EVERDICT_TEMPORAL_ADDRESS 로 예약을 Temporal Schedule 로 동기화 +
-//     self-hosted lease 허브로 codex 케이스 실행. EVERDICT_INTERNAL_TOKEN 으로 internal 발사 라우트 가드.
-//   • everdict worker(node) — scheduledScorecardWorkflow 실행(fire/poll/finalize 를 internal 라우트로 브리지).
-//   • everdict runner(node, codex on PATH) — 페어링된 self-hosted 러너. 발사된 스코어카드의 codex 케이스를 로컬 실행.
+// Setup (all local):
+//   • Temporal dev server (docker; started outside this script, 127.0.0.1:7233) — the cron engine.
+//   • control plane (node, in-memory, no-auth) — syncs the schedule to a Temporal Schedule via EVERDICT_TEMPORAL_ADDRESS +
+//     runs codex cases as the self-hosted lease hub. EVERDICT_INTERNAL_TOKEN guards the internal fire route.
+//   • everdict worker (node) — runs scheduledScorecardWorkflow (bridges fire/poll/finalize to internal routes).
+//   • everdict runner (node, codex on PATH) — a paired self-hosted runner. Runs the fired scorecard's codex case locally.
 //
-// 흐름:
-//   ① CP 기동 → ② worker 기동 → ③ 러너 페어링+기동 → ④ codex+pinch 번들 적용
-//   → ⑤ POST /schedules {cron:"* * * * *", pinch-dashboards × codex × self:<id>}  (→ TemporalScheduleDriver 가 Schedule 생성)
-//   → ⑥ Temporal 이 매분 발사 → 워크플로 → internal fire → 스코어카드 submit → 러너가 codex 로 dashboard.json → tests-pass 채점
-//   → ⑦ 예약 레코드(lastFiredAt/lastScorecardId/lastStatus) + 스코어카드 판정 + 리더보드 확인 → ⑧ 예약 삭제(Temporal Schedule 제거).
+// Flow:
+//   ① start CP → ② start worker → ③ pair + start runner → ④ apply codex+pinch bundle
+//   → ⑤ POST /schedules {cron:"* * * * *", pinch-dashboards × codex × self:<id>}  (→ TemporalScheduleDriver creates the Schedule)
+//   → ⑥ Temporal fires every minute → workflow → internal fire → scorecard submit → runner produces dashboard.json via codex → tests-pass grading
+//   → ⑦ verify the schedule record (lastFiredAt/lastScorecardId/lastStatus) + scorecard verdict + leaderboard → ⑧ delete the schedule (removes the Temporal Schedule).
 //
-// 사용: docker 로 Temporal 기동 후 `node scripts/live/scheduled-pinch-temporal.mjs` (apps/api/dist + apps/cli/dist 빌드, codex 로그인 필요).
+// Usage: after starting Temporal via docker, `node scripts/live/scheduled-pinch-temporal.mjs` (build apps/api/dist + apps/cli/dist, codex login required).
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
@@ -44,11 +44,11 @@ const cpEnv = {
   EVERDICT_REQUIRE_AUTH: "",
   KEYCLOAK_ISSUER: "",
   DATABASE_URL: "",
-  EVERDICT_TEMPORAL_ADDRESS: TEMPORAL, // ← 예약을 Temporal Schedule 로 동기화(발사 활성)
+  EVERDICT_TEMPORAL_ADDRESS: TEMPORAL, // ← sync the schedule to a Temporal Schedule (enables firing)
   EVERDICT_INTERNAL_TOKEN: INTERNAL,
 };
 
-console.log(`=== ① 컨트롤플레인 기동 (dev, :${PORT}, temporal=${TEMPORAL}) ===`);
+console.log(`=== ① start control plane (dev, :${PORT}, temporal=${TEMPORAL}) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], { cwd: ROOT, env: cpEnv, stdio: ["ignore", "pipe", "pipe"] });
 cp.stderr.on("data", (d) => process.stderr.write(`  [cp] ${d}`));
 
@@ -64,10 +64,10 @@ try {
       up = (await fetch(`${BASE}/datasets`, { headers: H })).status === 200;
     } catch {}
   }
-  if (!up) throw new Error("control plane 기동 실패");
+  if (!up) throw new Error("control plane failed to start");
 
-  // ② worker — scheduledScorecardWorkflow 실행 + internal 라우트로 브리지
-  console.log(`\n=== ② everdict worker 기동 (temporal=${TEMPORAL}, API 브리지=${BASE}) ===`);
+  // ② worker — runs scheduledScorecardWorkflow + bridges to internal routes
+  console.log(`\n=== ② start everdict worker (temporal=${TEMPORAL}, API bridge=${BASE}) ===`);
   worker = spawn("node", ["apps/cli/dist/main.js", "worker", "--temporal-address", TEMPORAL], {
     cwd: ROOT,
     env: { ...process.env, EVERDICT_API_URL: BASE, EVERDICT_INTERNAL_TOKEN: INTERNAL },
@@ -77,13 +77,13 @@ try {
   worker.stdout.on("data", (d) => process.stdout.write(`  [worker] ${d}`));
   await sleep(3000);
 
-  // ③ 러너 페어링 + 기동 (codex on PATH — pinch 를 돌린 그 하니스)
+  // ③ pair + start runner (codex on PATH — the harness that ran pinch)
   console.log("\n=== ③ POST /runners + everdict runner --pair (codex on PATH) ===");
   const paired = await post("/runners", { label: "codex-laptop", capabilities: ["repo"] });
   const token = paired.json.token;
   const runnerId = paired.json.runner?.id;
   console.log(`  → ${paired.status} runnerId=${runnerId}`);
-  if (!token || !runnerId) throw new Error("페어링 실패");
+  if (!token || !runnerId) throw new Error("pairing failed");
   runner = spawn(
     "node",
     ["apps/cli/dist/main.js", "runner", "--pair", token, "--api-url", BASE, "--poll-interval-ms", "1000"],
@@ -93,12 +93,12 @@ try {
   runner.stdout.on("data", (d) => process.stdout.write(`  [runner] ${d}`));
   await sleep(3000);
 
-  // ④ 번들 적용(codex + pinch)
+  // ④ apply the bundle (codex + pinch)
   console.log("\n=== ④ POST /bundles/apply (codex + pinch) ===");
   const inst = await post("/bundles/apply", bundle);
   for (const r of inst.json.results ?? []) console.log(`  ${r.status.padEnd(8)} ${r.kind} ${r.id}@${r.version}`);
 
-  // ⑤ 예약 등록 — pinch 를 돌린 그 하니스(codex)를 그대로. cron 매분(데모: 곧 발사되도록).
+  // ⑤ register the schedule — reusing the harness that ran pinch (codex) as-is. cron every minute (demo: fires soon).
   console.log(`\n=== ⑤ POST /schedules (cron "* * * * *", pinch-dashboards × codex × self:${runnerId}) ===`);
   const created = await post("/schedules", {
     name: "pinch nightly (codex)",
@@ -113,17 +113,17 @@ try {
   console.log(
     `  → ${created.status} scheduleId=${scheduleId} enabled=${created.json.enabled} cron=${created.json.cron}`,
   );
-  if (!scheduleId) throw new Error(`예약 등록 실패: ${JSON.stringify(created.json)}`);
+  if (!scheduleId) throw new Error(`schedule registration failed: ${JSON.stringify(created.json)}`);
 
-  // ⑥ Temporal 이 매분(top-of-minute) 발사 — 예약 레코드에 lastScorecardId 가 채워질 때까지 대기(=발사 성공 증거).
-  console.log("\n=== ⑥ Temporal 발사 대기 (매분 top; 워크플로→internal fire→스코어카드 submit) ===");
+  // ⑥ Temporal fires top-of-minute — wait until the schedule record's lastScorecardId is set (= proof of a successful fire).
+  console.log("\n=== ⑥ wait for Temporal fire (top of each minute; workflow→internal fire→scorecard submit) ===");
   let sched;
   let firedScId;
   for (let i = 0; i < 100; i++) {
     await sleep(3000);
     sched = await get(`/schedules/${scheduleId}`);
     process.stdout.write(
-      `  대기 ${i * 3}s — lastFiredAt=${sched.lastFiredAt ?? "-"} lastScorecardId=${sched.lastScorecardId ?? "-"}\r`,
+      `  waited ${i * 3}s — lastFiredAt=${sched.lastFiredAt ?? "-"} lastScorecardId=${sched.lastScorecardId ?? "-"}\r`,
     );
     if (sched.lastScorecardId) {
       firedScId = sched.lastScorecardId;
@@ -131,13 +131,13 @@ try {
     }
   }
   console.log("");
-  if (!firedScId) throw new Error("Temporal 이 예약을 발사하지 않음(lastScorecardId 미설정)");
+  if (!firedScId) throw new Error("Temporal did not fire the schedule (lastScorecardId not set)");
   console.log(
-    `  ✔ 발사됨! lastFiredAt=${sched.lastFiredAt} lastScorecardId=${firedScId} lastStatus=${sched.lastStatus}`,
+    `  ✔ fired! lastFiredAt=${sched.lastFiredAt} lastScorecardId=${firedScId} lastStatus=${sched.lastStatus}`,
   );
 
-  // ⑦ 발사된 스코어카드 종료까지 폴링(codex ~1-2분) → 판정
-  console.log("\n=== ⑦ 발사된 스코어카드 폴링 (codex 가 self-hosted 러너에서 dashboard.json 작성 중…) ===");
+  // ⑦ poll the fired scorecard until it terminates (codex ~1-2 min) → verdict
+  console.log("\n=== ⑦ poll the fired scorecard (codex writing dashboard.json on the self-hosted runner…) ===");
   let rec;
   for (let i = 0; i < 200; i++) {
     await sleep(2000);
@@ -145,19 +145,19 @@ try {
     process.stdout.write(`  status=${rec.status}\r`);
     if (rec.status === "succeeded" || rec.status === "failed") break;
   }
-  console.log(`\n  최종 status=${rec.status}`);
+  console.log(`\n  final status=${rec.status}`);
   const c = rec.scorecard?.results?.[0];
   const prov = c?.provenance;
   const tp = c?.scores?.find((s) => s.metric === "tests_pass");
-  console.log(`  provenance: ${JSON.stringify(prov)}`); // ranOn=self-hosted 기대
-  console.log(`  tests_pass: ${tp ? (tp.pass ? "PASS" : "FAIL") : "(없음)"}`);
+  console.log(`  provenance: ${JSON.stringify(prov)}`); // expect ranOn=self-hosted
+  console.log(`  tests_pass: ${tp ? (tp.pass ? "PASS" : "FAIL") : "(none)"}`);
 
-  // 예약 레코드 최종 상태(finalize 가 lastStatus 를 종료 상태로 기록)
+  // Schedule record final state (finalize records lastStatus as the terminal state)
   const schedFinal = await get(`/schedules/${scheduleId}`);
-  console.log(`\n  예약 최종: lastStatus=${schedFinal.lastStatus} lastFiredAt=${schedFinal.lastFiredAt}`);
+  console.log(`\n  schedule final: lastStatus=${schedFinal.lastStatus} lastFiredAt=${schedFinal.lastFiredAt}`);
 
   const lb = await get("/scorecards/leaderboard?dataset=pinch-dashboards&metric=tests_pass");
-  console.log("\n=== 리더보드 (pinch-dashboards × harness×model) ===");
+  console.log("\n=== leaderboard (pinch-dashboards × harness×model) ===");
   for (const row of lb.rows ?? [])
     console.log(
       `  #${row.rank} ${row.harness.id}@${row.harness.version} × ${row.model ?? "unknown"} — score=${row.score ?? "–"} (runs=${row.runs})`,
@@ -166,17 +166,17 @@ try {
   ok = rec.status === "succeeded" && prov?.ranOn === "self-hosted" && !!tp?.pass && (lb.rows ?? []).length > 0;
   console.log(
     ok
-      ? "\n✅ 예약(cron) → 실제 Temporal 발사 → self-hosted codex 가 pinch 수행 → tests_pass PASS → 리더보드. 예약이 실동작함."
-      : "\n⚠️ 기대와 불일치(위 로그 참고).",
+      ? "\n✅ schedule (cron) → real Temporal fire → self-hosted codex runs pinch → tests_pass PASS → leaderboard. Scheduling works for real."
+      : "\n⚠️ does not match expectations (see logs above).",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);
 } finally {
-  // ⑧ 예약 삭제 → Temporal Schedule 제거(매분 재발사 중단)
+  // ⑧ delete the schedule → removes the Temporal Schedule (stops re-firing every minute)
   if (scheduleId) {
     try {
       const d = await del(`/schedules/${scheduleId}`);
-      console.log(`\n=== ⑧ DELETE /schedules/${scheduleId} → ${d.status} (Temporal Schedule 제거) ===`);
+      console.log(`\n=== ⑧ DELETE /schedules/${scheduleId} → ${d.status} (removes the Temporal Schedule) ===`);
     } catch {}
   }
   try {

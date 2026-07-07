@@ -1,8 +1,8 @@
-// 라이브 (웹 풀스택 시각 검증): 실 컨트롤플레인 HTTP 표면(buildServer)에 *대표 browser-use run/scorecard 레코드*를
-// 시드하고 :8787 로 서빙 → 웹 대시보드(next, CONTROL_PLANE_URL 기본 127.0.0.1:8787, KEYCLOAK 미설정=dev tenant)가
-// browser 스냅샷(최종 URL+DOM)+스코어(steps/cost)+trace 를 실제로 렌더하는지 확인하기 위한 시드 서버.
-// 레코드 값은 이 세션의 실제 browser-use 런(Wikipedia 'Web scraping', tokens 35872/1074, usd 0.006025, navigate→
-// input→click→done)에서 가져온 대표값 — POST 디스패치 대신 store 에 직접 시드(요청 취지: run 레코드 시드).
+// live (web full-stack visual check): seed *representative browser-use run/scorecard records* into the real control-plane HTTP surface (buildServer)
+// and serve on :8787 → a seed server for confirming that the web dashboard (next, CONTROL_PLANE_URL defaults to 127.0.0.1:8787, KEYCLOAK unset = dev tenant)
+// actually renders the browser snapshot (final URL + DOM) + scores (steps/cost) + trace.
+// The record values are representative values taken from this session's real browser-use run (Wikipedia 'Web scraping', tokens 35872/1074, usd 0.006025, navigate →
+// input → click → done) — seeded directly into the store instead of a POST dispatch (intent of the request: seed a run record).
 import process from "node:process";
 import { RunService } from "../../apps/api/dist/run-service.js";
 import { ScorecardService } from "../../apps/api/dist/scorecard-service.js";
@@ -102,8 +102,8 @@ await scorecardStore.create({
   updatedAt: now,
 });
 
-// 비교(diff)용 두 스코어카드 — 같은 케이스(form-everdict, hard-task), gpt5.4 가 hard-task 를 fix(개선) + cost delta.
-// (대표값: 강한 모델이 어려운 케이스를 통과시키는 흔한 A/B 패턴 — compare 뷰의 회귀/개선·메트릭 delta 렌더 확인용.)
+// two scorecards for the comparison (diff) — same cases (form-everdict, hard-task), gpt5.4 fixes (improves) hard-task + a cost delta.
+// (representative values: the common A/B pattern of a stronger model passing a harder case — for checking the compare view's regression/improvement and metric-delta rendering.)
 const browserSnap = (url, dom) => ({ kind: "browser", url, dom, console: [] });
 const caseResult = (caseId, pass, usd) => ({
   caseId,
@@ -149,8 +149,8 @@ await scorecardStore.create(
   ),
 );
 
-// 데스크탑(OSWorld) 스코어카드 — 통합 리포트의 데스크탑 트랙. state(파일생성 검증)=PASS / judge(스크린샷)=FAIL →
-// 권위-기준 caseVerdict 가 state 를 따라 케이스 PASS(VLM 이 디스크저장을 확신 못 해도 ground-truth 가 우선).
+// desktop (OSWorld) scorecard — the desktop track of the unified report. state (file-creation check)=PASS / judge (screenshot)=FAIL →
+// the authoritative caseVerdict follows state, so the case is PASS (ground-truth wins even if the VLM cannot be sure the file was saved to disk).
 await scorecardStore.create({
   id: "bu-sc-osworld",
   tenant: "default",
@@ -176,14 +176,14 @@ await scorecardStore.create({
             metric: "judge",
             value: 0.78,
             pass: false,
-            detail: "스크린샷만으론 디스크 저장 확신 불가.",
+            detail: "cannot be sure of disk save from the screenshot alone.",
           },
           {
             graderId: "command",
             metric: "state",
             value: 1,
             pass: true,
-            detail: "test -f /root/note.txt && grep → 파일 존재 확인",
+            detail: "test -f /root/note.txt && grep → file existence confirmed",
           },
         ],
       },

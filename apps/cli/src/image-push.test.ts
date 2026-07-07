@@ -9,20 +9,20 @@ const CREDS = {
   imagePrefix: "ghcr.io/acme/",
 };
 
-describe("buildImageTargetRef — 로컬 ref → 워크스페이스 레지스트리 대상 ref", () => {
-  it("name/tag 기본값은 로컬 ref 에서 얻는다", () => {
+describe("buildImageTargetRef — local ref → workspace registry target ref", () => {
+  it("defaults name/tag from the local ref", () => {
     expect(buildImageTargetRef("ghcr.io/acme/", "spreadsheetbench:v1")).toBe("ghcr.io/acme/spreadsheetbench:v1");
     expect(buildImageTargetRef("ghcr.io/acme/", "localhost:5000/team/agent:dev")).toBe("ghcr.io/acme/agent:dev");
   });
 
-  it("--name/--tag 로 덮어쓸 수 있고, 태그 없는 로컬 ref 는 latest", () => {
+  it("can be overridden with --name/--tag, and an untagged local ref defaults to latest", () => {
     expect(buildImageTargetRef("ghcr.io/acme/", "spreadsheetbench:v1", "sbench", "v2")).toBe("ghcr.io/acme/sbench:v2");
     expect(buildImageTargetRef("registry.acme.dev:5000/", "myimg")).toBe("registry.acme.dev:5000/myimg:latest");
   });
 });
 
-describe("buildDockerAuthConfig — 임시 DOCKER_CONFIG 내용", () => {
-  it("auths[host].auth = base64(user:pass); username 미지정이면 토큰 단독 관례로 everdict", () => {
+describe("buildDockerAuthConfig — temporary DOCKER_CONFIG contents", () => {
+  it("auths[host].auth = base64(user:pass); without a username, the token-only convention uses everdict", () => {
     const config = JSON.parse(buildDockerAuthConfig(CREDS));
     expect(Buffer.from(config.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:tok-123");
     const tokenOnly = JSON.parse(buildDockerAuthConfig({ host: "r.io", password: "p" }));
@@ -30,8 +30,8 @@ describe("buildDockerAuthConfig — 임시 DOCKER_CONFIG 내용", () => {
   });
 });
 
-describe("pushImage — tag → 임시 config 로 push → 정리", () => {
-  it("docker tag 후 --config <임시디렉터리> push 를 호출하고 발행 ref 를 돌려준다", async () => {
+describe("pushImage — tag → push with a temporary config → cleanup", () => {
+  it("calls docker tag then --config <tempdir> push and returns the published ref", async () => {
     const calls: string[][] = [];
     const target = await pushImage(CREDS, "spreadsheetbench:v1", {
       io: { log: () => {}, docker: async (args) => void calls.push(args) },
@@ -42,7 +42,7 @@ describe("pushImage — tag → 임시 config 로 push → 정리", () => {
     expect(calls[1]?.slice(2)).toEqual(["push", "ghcr.io/acme/spreadsheetbench:v1"]);
   });
 
-  it("push 가 실패해도 임시 DOCKER_CONFIG 는 정리된다(finally) — 에러는 전파", async () => {
+  it("cleans up the temporary DOCKER_CONFIG even when push fails (finally) — the error propagates", async () => {
     let configDir: string | undefined;
     await expect(
       pushImage(CREDS, "img:1", {
@@ -51,12 +51,12 @@ describe("pushImage — tag → 임시 config 로 push → 정리", () => {
           docker: async (args) => {
             if (args[0] === "--config") {
               configDir = args[1];
-              throw new Error("push 거부");
+              throw new Error("push rejected");
             }
           },
         },
       }),
-    ).rejects.toThrow("push 거부");
+    ).rejects.toThrow("push rejected");
     const { existsSync } = await import("node:fs");
     expect(configDir).toBeDefined();
     expect(configDir && existsSync(configDir)).toBe(false);

@@ -17,48 +17,48 @@ import { runnerAuthenticator } from "./runner.js";
 const p = (roles: string[]): Principal => ({ subject: "u", workspace: "acme", roles, via: "oidc" });
 
 describe("authz", () => {
-  it("역할별 권한 매트릭스", () => {
+  it("permission matrix by role", () => {
     expect(can(p(["viewer"]), "runs:read")).toBe(true);
     expect(can(p(["viewer"]), "runs:submit")).toBe(false);
     expect(can(p(["member"]), "runs:submit")).toBe(true);
-    // 하니스 등록(인스턴스)·템플릿(대분류) 정의는 누구나(viewer+) — 협업 eval 콘텐츠, 역할 게이트 없음.
+    // harness register (instance) / template (category) definition is open to anyone (viewer+) — collaborative eval content, no role gate.
     expect(can(p(["viewer"]), "harnesses:register")).toBe(true);
     expect(can(p(["member"]), "harnesses:register")).toBe(true);
     expect(can(p(["admin"]), "harnesses:register")).toBe(true);
     expect(can(p(["viewer"]), "templates:write")).toBe(true);
     expect(can(p(["member"]), "templates:write")).toBe(true);
     expect(can(p(["admin"]), "templates:write")).toBe(true);
-    // datasets: 읽기는 viewer+, 쓰기는 member+
+    // datasets: read is viewer+, write is member+
     expect(can(p(["viewer"]), "datasets:read")).toBe(true);
     expect(can(p(["viewer"]), "datasets:write")).toBe(false);
     expect(can(p(["member"]), "datasets:write")).toBe(true);
-    // scorecards: 읽기는 viewer+, 실행(배치 평가)은 member+
+    // scorecards: read is viewer+, run (batch eval) is member+
     expect(can(p(["viewer"]), "scorecards:read")).toBe(true);
     expect(can(p(["viewer"]), "scorecards:run")).toBe(false);
     expect(can(p(["member"]), "scorecards:run")).toBe(true);
-    // judges: 읽기는 viewer+, 등록은 member+(유저가 자기 judge 를 직접 등록)
+    // judges: read is viewer+, register is member+ (a user registers their own judge)
     expect(can(p(["viewer"]), "judges:read")).toBe(true);
     expect(can(p(["viewer"]), "judges:write")).toBe(false);
     expect(can(p(["member"]), "judges:write")).toBe(true);
-    // runtimes: 읽기·쓰기 모두 role 무관(등록은 누구나 — 자격증명 '값'은 secrets:write 로 분리 보호)
+    // runtimes: read and write are both role-independent (anyone can register — the credential 'value' is separately protected by secrets:write)
     expect(can(p(["viewer"]), "runtimes:read")).toBe(true);
     expect(can(p(["viewer"]), "runtimes:write")).toBe(true);
     expect(can(p(["member"]), "runtimes:write")).toBe(true);
     expect(can(p(["admin"]), "runtimes:write")).toBe(true);
 
-    // 외부 계정 연결(Connected accounts)은 개인 소유 — authz 매트릭스에 없다(subject 로 self-scoped, 라우트가 직접 스코프).
+    // Connected accounts are personally owned — not in the authz matrix (self-scoped by subject, the route scopes directly).
 
-    // 멤버 조회는 viewer+, 멤버 관리(역할변경/제거/초대)는 admin 전용.
+    // reading members is viewer+, member management (role change/removal/invite) is admin-only.
     expect(can(p(["viewer"]), "members:read")).toBe(true);
     expect(can(p(["viewer"]), "members:write")).toBe(false);
     expect(can(p(["member"]), "members:write")).toBe(false);
     expect(can(p(["admin"]), "members:write")).toBe(true);
   });
-  it("ci 역할(GitHub Actions 페더레이션)은 발사/폴링/diff + 재핀만 — 거버넌스/시크릿/멤버는 없다", () => {
+  it("the ci role (GitHub Actions federation) can only fire/poll/diff + re-pin — no governance/secrets/members", () => {
     expect(can(p(["ci"]), "scorecards:run")).toBe(true);
-    expect(can(p(["ci"]), "scorecards:read")).toBe(true); // 폴링 + diff
-    expect(can(p(["ci"]), "harnesses:register")).toBe(true); // durable 재핀(POST /harnesses/:id/pins)
-    expect(can(p(["ci"]), "harnesses:read")).toBe(true); // 기준 인스턴스 조회
+    expect(can(p(["ci"]), "scorecards:read")).toBe(true); // poll + diff
+    expect(can(p(["ci"]), "harnesses:register")).toBe(true); // durable re-pin (POST /harnesses/:id/pins)
+    expect(can(p(["ci"]), "harnesses:read")).toBe(true); // read the baseline instance
     expect(can(p(["ci"]), "datasets:write")).toBe(false);
     expect(can(p(["ci"]), "runs:submit")).toBe(false);
     expect(can(p(["ci"]), "secrets:read")).toBe(false);
@@ -67,37 +67,37 @@ describe("authz", () => {
     expect(can(p(["ci"]), "keys:write")).toBe(false);
   });
 
-  it("authorize 는 권한 없으면 403", () => {
-    expect(() => authorize(p(["viewer"]), "secrets:write")).toThrow(ForbiddenError); // 시크릿 값 = admin 전용
-    expect(() => authorize(p(["member"]), "runtimes:write")).not.toThrow(); // 런타임 등록 = role 무관
+  it("authorize throws 403 when not permitted", () => {
+    expect(() => authorize(p(["viewer"]), "secrets:write")).toThrow(ForbiddenError); // secret value = admin-only
+    expect(() => authorize(p(["member"]), "runtimes:write")).not.toThrow(); // runtime registration = role-independent
     expect(() => authorize(p(["admin"]), "runtimes:write")).not.toThrow();
   });
 
-  it("api-key scope 는 role 권한과 교집합으로 키를 좁힌다(read⊂write⊂admin, admin=Full Access)", () => {
+  it("api-key scope narrows the key by intersecting with role permissions (read⊂write⊂admin, admin=Full Access)", () => {
     const key = (scopes: string[]): Principal => ({
       subject: "key:acme",
       workspace: "acme",
-      roles: ["admin"], // 키는 admin role 로 발급되지만 scope 가 더 좁힌다
+      roles: ["admin"], // the key is issued with the admin role but scope narrows it further
       via: "api-key",
       scopes,
     });
-    // read scope: 데이터 조회만, 쓰기·민감 조회 불가
+    // read scope: data reads only, no writes or sensitive reads
     expect(can(key(["read"]), "datasets:read")).toBe(true);
     expect(can(key(["read"]), "datasets:write")).toBe(false);
-    expect(can(key(["read"]), "secrets:read")).toBe(false); // 민감 조회는 admin scope 필요
+    expect(can(key(["read"]), "secrets:read")).toBe(false); // a sensitive read needs admin scope
     expect(can(key(["read"]), "keys:read")).toBe(false);
-    // write scope: read ∪ 콘텐츠 mutation, 거버넌스(secrets/members/keys)는 불가
+    // write scope: read ∪ content mutation, no governance (secrets/members/keys)
     expect(can(key(["write"]), "datasets:read")).toBe(true);
     expect(can(key(["write"]), "datasets:write")).toBe(true);
     expect(can(key(["write"]), "runs:submit")).toBe(true);
     expect(can(key(["write"]), "secrets:write")).toBe(false);
     expect(can(key(["write"]), "members:write")).toBe(false);
     expect(can(key(["write"]), "keys:write")).toBe(false);
-    // admin scope(=Full Access): 전부
+    // admin scope (= Full Access): everything
     expect(can(key(["admin"]), "datasets:write")).toBe(true);
     expect(can(key(["admin"]), "secrets:write")).toBe(true);
     expect(can(key(["admin"]), "keys:write")).toBe(true);
-    // 교집합: scope 가 admin 이어도 role 이 viewer 면 viewer 권한을 넘지 못한다
+    // intersection: even with admin scope, a viewer role can't exceed viewer permissions
     const viewerKey: Principal = {
       subject: "key:acme",
       workspace: "acme",
@@ -107,23 +107,23 @@ describe("authz", () => {
     };
     expect(can(viewerKey, "datasets:read")).toBe(true);
     expect(can(viewerKey, "datasets:write")).toBe(false);
-    // scope 없는(레거시/full) 키는 무제한(role 그대로)
+    // a key with no scope (legacy/full) is unlimited (role as-is)
     const legacy: Principal = { subject: "key:acme", workspace: "acme", roles: ["admin"], via: "api-key" };
     expect(can(legacy, "secrets:write")).toBe(true);
   });
 });
 
 describe("apiKeyAuthenticator", () => {
-  it("키 해시 → 워크스페이스(기본 admin 역할)", async () => {
+  it("key hash → workspace (default admin role)", async () => {
     const store = new InMemoryTenantKeyStore();
     await store.add("acme", hashKey("ak_secret"));
     const auth = apiKeyAuthenticator({ keyStore: store });
     expect(await auth.authenticate("ak_secret")).toMatchObject({ workspace: "acme", roles: ["admin"], via: "api-key" });
     expect(await auth.authenticate("ak_wrong")).toBeUndefined();
-    expect(await auth.authenticate("eyJ.a.b")).toBeUndefined(); // JWT 는 무시
+    expect(await auth.authenticate("eyJ.a.b")).toBeUndefined(); // JWT is ignored
   });
 
-  it("scope 있는 키는 Principal.scopes 로 흐른다(없으면 무제한)", async () => {
+  it("a scoped key flows through to Principal.scopes (unlimited when absent)", async () => {
     const store = new InMemoryTenantKeyStore();
     await store.add("acme", hashKey("ak_scoped"), { scopes: ["read"] });
     await store.add("acme", hashKey("ak_full"));
@@ -133,8 +133,8 @@ describe("apiKeyAuthenticator", () => {
   });
 });
 
-describe("runnerAuthenticator (셀프호스티드 러너 페어링 토큰)", () => {
-  it("rnr_ 토큰 → {owner, workspace, runnerId} + roles=['runner'], via='runner'", async () => {
+describe("runnerAuthenticator (self-hosted runner pairing token)", () => {
+  it("rnr_ token → {owner, workspace, runnerId} + roles=['runner'], via='runner'", async () => {
     const store = new InMemoryRunnerStore();
     const paired = await store.pair({ owner: "u-alice", workspace: "acme", label: "laptop" });
     const auth = runnerAuthenticator({ runnerStore: store });
@@ -146,7 +146,7 @@ describe("runnerAuthenticator (셀프호스티드 러너 페어링 토큰)", () 
       runnerId: paired.meta.id,
     });
     expect(await auth.authenticate("rnr_wrong")).toBeUndefined();
-    expect(await auth.authenticate("ak_x")).toBeUndefined(); // 비-rnr 은 무시(다음 인증기로)
+    expect(await auth.authenticate("ak_x")).toBeUndefined(); // non-rnr is ignored (falls through to the next authenticator)
   });
 });
 
@@ -172,26 +172,26 @@ describe("oidcAuthenticator (Keycloak JWT)", () => {
       .setExpirationTime("5m")
       .sign(priv);
 
-  it("Keycloak 은 인증 전용 — realm_access.roles 는 무시한다(roles=[]; 인가는 멤버십 SSOT)", async () => {
+  it("Keycloak is authentication-only — realm_access.roles is ignored (roles=[]; authorization SSOT is membership)", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
     const token = await mint({ workspace: "acme", realm_access: { roles: ["admin", "uma_authorization"] } });
     expect(await auth.authenticate(token)).toMatchObject({
       subject: "user-1",
       workspace: "acme",
-      roles: [], // 토큰 역할은 인가에 쓰지 않는다 — realm 'admin' 도 무시
+      roles: [], // token roles are not used for authorization — even realm 'admin' is ignored
       via: "oidc",
     });
   });
 
-  it("workspace 가 그룹(/workspaces/<ws>)에서 폴백된다 (역할은 토큰과 무관)", async () => {
+  it("workspace falls back from a group (/workspaces/<ws>) (roles are independent of the token)", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
     const token = await mint({ groups: ["/workspaces/globex/eng"], realm_access: { roles: ["admin"] } });
     const principal = await auth.authenticate(token);
     expect(principal?.workspace).toBe("globex");
-    expect(principal?.roles).toEqual([]); // Keycloak 역할 무시 — 멤버십이 SSOT
+    expect(principal?.roles).toEqual([]); // Keycloak roles ignored — membership is the SSOT
   });
 
-  it("email 클레임을 캡처(멤버 목록 표시용); 없으면 preferred_username 폴백, 둘 다 없으면 미설정", async () => {
+  it("captures the email claim (for the member list display); falls back to preferred_username, unset when neither exists", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
     expect((await auth.authenticate(await mint({ workspace: "acme", email: "alice@corp.com" })))?.email).toBe(
       "alice@corp.com",
@@ -202,50 +202,50 @@ describe("oidcAuthenticator (Keycloak JWT)", () => {
     expect((await auth.authenticate(await mint({ workspace: "acme" })))?.email).toBeUndefined();
   });
 
-  it("issuer 불일치/위조 토큰은 거절(undefined)", async () => {
+  it("rejects an issuer-mismatched/forged token (undefined)", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
     const wrong = await mint({ workspace: "acme" }, "https://evil/realms/x");
     expect(await auth.authenticate(wrong)).toBeUndefined();
-    expect(await auth.authenticate("ak_key")).toBeUndefined(); // 키는 무시
+    expect(await auth.authenticate("ak_key")).toBeUndefined(); // key is ignored
   });
 
-  it("검증 실패 시 onError 로 사유(코드/기대 issuer/토큰 iss/claim 키)를 알린다 — 401 원인 진단용", async () => {
+  it("on verification failure, reports the reason via onError (code/expected issuer/token iss/claim keys) — to diagnose a 401", async () => {
     const calls: Array<{ code: string; expectedIssuer: string; tokenIssuer?: string; claimKeys?: string[] }> = [];
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet, onError: (info) => calls.push(info) });
-    // issuer 불일치 토큰: 거절되며, onError 에 기대 issuer 와 토큰의 실제 iss(검증 전 디코드)·claim 키가 담긴다.
+    // issuer-mismatched token: rejected, and onError carries the expected issuer, the token's actual iss (decoded before verification), and the claim keys.
     const wrong = await mint({ workspace: "acme", realm_access: { roles: ["member"] } }, "https://evil/realms/x");
     expect(await auth.authenticate(wrong)).toBeUndefined();
     expect(calls).toHaveLength(1);
     const info = calls[0];
     expect(info).toBeDefined();
-    if (!info) return; // 타입 가드(non-null ! 금지)
+    if (!info) return; // type guard (no non-null !)
     expect(info.expectedIssuer).toBe(ISSUER);
     expect(info.tokenIssuer).toBe("https://evil/realms/x");
     expect(info.claimKeys).toEqual(expect.arrayContaining(["workspace", "iss", "sub"]));
     expect(typeof info.code).toBe("string");
   });
 
-  it("비-JWT(API 키 등)는 검증을 시도하지 않으므로 onError 를 호출하지 않는다", async () => {
+  it("a non-JWT (API key, etc.) is not verified, so onError is not called", async () => {
     const calls: unknown[] = [];
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet, onError: () => calls.push(1) });
     expect(await auth.authenticate("ak_some_key")).toBeUndefined();
-    expect(calls).toHaveLength(0); // "내 자격증명 아님"은 정상 — 잡음 로그 금지
+    expect(calls).toHaveLength(0); // "not my credential" is normal — no noise logs
   });
 
-  it("workspace 클레임/그룹이 없어도 유효한 토큰은 인증한다(workspace=''; 멤버십이 SSOT)", async () => {
+  it("a valid token authenticates even without a workspace claim/group (workspace=''; membership is the SSOT)", async () => {
     const auth = oidcAuthenticator({ issuer: ISSUER, keySet });
-    const token = await mint({ realm_access: { roles: ["member"] } }); // workspace 클레임 없음
+    const token = await mint({ realm_access: { roles: ["member"] } }); // no workspace claim
     expect(await auth.authenticate(token)).toMatchObject({
       subject: "user-1",
-      workspace: "", // 아직 워크스페이스 없음 → 온보딩(워크스페이스 생성) 대상(401 아님)
-      roles: [], // Keycloak 역할 무시 — 생성 후 멤버십(생성자=admin)이 역할을 부여
+      workspace: "", // no workspace yet → subject to onboarding (workspace creation) (not a 401)
+      roles: [], // Keycloak roles ignored — after creation, membership (creator=admin) grants the role
       via: "oidc",
     });
   });
 });
 
 describe("compositeAuthenticator", () => {
-  it("JWT 와 API 키를 모두 처리", async () => {
+  it("handles both JWT and API key", async () => {
     const store = new InMemoryTenantKeyStore();
     await store.add("acme", hashKey("ak_k"));
     const composite = compositeAuthenticator([apiKeyAuthenticator({ keyStore: store })]);
@@ -254,7 +254,7 @@ describe("compositeAuthenticator", () => {
   });
 });
 
-describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () => {
+describe("githubActionsAuthenticator (GitHub Actions OIDC federation)", () => {
   let keySet: ReturnType<typeof createLocalJWKSet>;
   let priv: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
 
@@ -276,13 +276,13 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
       .setExpirationTime("5m")
       .sign(priv);
 
-  // 신뢰: 워크스페이스 acme 의 repo link 가 acme/app 만 신뢰(대소문자 무시).
+  // Trust: workspace acme's repo link trusts only acme/app (case-insensitive).
   const trustAcmeApp = async (claims: { repository: string }, hint: string) =>
     hint === "acme" && claims.repository.toLowerCase() === "acme/app"
       ? { workspace: "acme", roles: ["ci"] }
       : undefined;
 
-  it("신뢰된 레포의 유효 토큰 + workspaceHint → Principal(via=github-actions, roles=[ci])", async () => {
+  it("a valid token from a trusted repo + workspaceHint → Principal(via=github-actions, roles=[ci])", async () => {
     const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
     const token = await mint({ repository: "acme/app", ref: "refs/pull/7/merge", event_name: "pull_request" });
     expect(await auth.authenticate(token, { workspaceHint: "acme" })).toEqual({
@@ -293,25 +293,25 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
     });
   });
 
-  it("workspaceHint 없음 → 미인증(fail-closed) — 어느 워크스페이스의 link 와 대조할지 없다", async () => {
+  it("no workspaceHint → unauthenticated (fail-closed) — nothing to match against any workspace's link", async () => {
     const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
     const token = await mint({ repository: "acme/app" });
     expect(await auth.authenticate(token)).toBeUndefined();
   });
 
-  it("link 에 없는 레포 → 미인증(401 — 존재 누출 없음)", async () => {
+  it("a repo not in a link → unauthenticated (401 — no existence leak)", async () => {
     const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
     const token = await mint({ repository: "evil/other" });
     expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
   });
 
-  it("audience 불일치(aud≠everdict) → 미인증", async () => {
+  it("audience mismatch (aud≠everdict) → unauthenticated", async () => {
     const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
     const token = await mint({ repository: "acme/app" }, GITHUB_ACTIONS_ISSUER, "sts.amazonaws.com");
     expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
   });
 
-  it("다른 issuer(Keycloak 등)의 JWT 는 검증 시도 없이 패스 — resolveTrust 미호출(composite 소음 방지)", async () => {
+  it("a JWT from another issuer (Keycloak, etc.) passes without a verification attempt — resolveTrust not called (avoids composite noise)", async () => {
     const calls: unknown[] = [];
     const auth = githubActionsAuthenticator({
       keySet,
@@ -322,15 +322,15 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
     });
     const keycloak = await mint({ repository: "acme/app" }, "https://kc.example/realms/everdict");
     expect(await auth.authenticate(keycloak, { workspaceHint: "acme" })).toBeUndefined();
-    expect(await auth.authenticate("ak_key", { workspaceHint: "acme" })).toBeUndefined(); // 비-JWT 도 패스
+    expect(await auth.authenticate("ak_key", { workspaceHint: "acme" })).toBeUndefined(); // non-JWT passes too
     expect(calls).toHaveLength(0);
   });
 
-  describe("GHES 페더레이션(enterprise) — 워크스페이스가 신뢰하는 GHE host 의 issuer 만 동적으로 검증", () => {
+  describe("GHES federation (enterprise) — dynamically verify only the issuer of a GHE host the workspace trusts", () => {
     const GHE_HOST = "https://ghe.acme.io";
     const GHE_ISSUER = githubEnterpriseIssuer(GHE_HOST); // https://ghe.acme.io/_services/token
 
-    it("신뢰 host 의 GHES 토큰 → claims.host 가 실려 resolveTrust 로 전달되고 Principal 발급", async () => {
+    it("a GHES token from a trusted host → claims.host is carried and passed to resolveTrust, and a Principal is issued", async () => {
       const seen: GithubActionsClaims[] = [];
       const auth = githubActionsAuthenticator({
         keySet,
@@ -352,7 +352,7 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
       expect(seen[0]?.host).toBe(GHE_HOST);
     });
 
-    it("hostsFor 에 없는 GHE issuer 는 검증 시도 없이 미인증(fail-closed) — resolveTrust 미호출", async () => {
+    it("a GHE issuer not in hostsFor is unauthenticated without a verification attempt (fail-closed) — resolveTrust not called", async () => {
       const calls: unknown[] = [];
       const auth = githubActionsAuthenticator({
         keySet,
@@ -367,13 +367,13 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
       expect(calls).toHaveLength(0);
     });
 
-    it("enterprise 미설정이면 GHES 토큰은 종전대로 조용히 패스한다", async () => {
+    it("with enterprise unset, a GHES token silently passes as before", async () => {
       const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
       const token = await mint({ repository: "acme/app" }, GHE_ISSUER);
       expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
     });
 
-    it("github.com issuer 토큰의 claims.host 는 undefined — GHE link 와 구분된다", async () => {
+    it("claims.host is undefined for a github.com issuer token — distinguished from a GHE link", async () => {
       const seen: GithubActionsClaims[] = [];
       const auth = githubActionsAuthenticator({
         keySet,

@@ -13,7 +13,7 @@ export interface CompareOption {
   label: string
 }
 
-// baseline/candidate 스코어카드를 골라 비교 URL 로 이동. 실제 diff 는 서버가 계산.
+// Pick baseline/candidate scorecards to navigate to the compare URL. The actual diff is computed by the server.
 export function ComparePicker({
   options,
   baseline,

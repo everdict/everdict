@@ -28,7 +28,7 @@ export default async function IngestScorecardPage({
     try {
       datasets = datasetsSchema.parse(await controlPlane.listDatasets(ctx))
     } catch {
-      // 목록 실패해도 폼은 텍스트 입력으로 동작
+      // Even if the list fails, the form still works with text input
     }
   }
 

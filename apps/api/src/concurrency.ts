@@ -1,5 +1,5 @@
-// 동시성 유틸 — 케이스 축 병렬화(judge 스트리밍/병렬 적용)용 최소 세마포어.
-// 스트리밍(도착 순서대로 push)과 일괄(mapLimit) 둘 다 이 하나로 구성한다.
+// Concurrency util — a minimal semaphore for case-axis parallelism (streaming/parallel judge application).
+// Both streaming (push in arrival order) and batch (mapLimit) are built from this one primitive.
 export type Limiter = <T>(fn: () => Promise<T>) => Promise<T>;
 
 export function createLimiter(max: number): Limiter {
