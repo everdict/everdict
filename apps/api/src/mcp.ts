@@ -791,6 +791,12 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .array(z.object({ id: z.string(), version: z.string().optional() }))
             .optional()
             .describe("Agent Judges to apply to the trace (version defaults to latest)"),
+          judge: z
+            .object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() })
+            .optional()
+            .describe(
+              "inline judge-grader scoring model override for this batch (unset = workspace default) — HTTP parity",
+            ),
           concurrency: z
             .number()
             .int()
@@ -830,6 +836,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         harness_pins,
         runtime,
         judges,
+        judge,
         concurrency,
         cases,
         origin,
@@ -847,6 +854,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               },
               origin: { source: originSource(principal.via), ...(origin ?? {}) },
               judges: (judges ?? []).map((j) => ({ id: j.id, version: j.version ?? "latest" })),
+              ...(judge ? { judge } : {}),
               ...(runtime ? { runtime } : {}),
               ...(concurrency !== undefined ? { concurrency } : {}),
               ...(cases ? { cases } : {}),
@@ -2222,17 +2230,26 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_workspace_settings",
       {
         description:
-          "Partially update (merge) workspace settings. meterUsage: turn usage metering for this workspace's runs on/off.",
+          "Partially update (merge) workspace settings. meterUsage: turn usage metering for this workspace's runs on/off. judge: the workspace default model that scores inline judge graders (HTTP parity).",
         inputSchema: {
           meterUsage: z
             .boolean()
             .optional()
             .describe("default for usage metering (per-request override takes precedence)"),
+          judge: z
+            .object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() })
+            .optional()
+            .describe("workspace default judge model for inline judge graders (per-request override wins)"),
         },
       },
-      ({ meterUsage }) =>
+      ({ meterUsage, judge }) =>
         run(principal, "settings:write", async () =>
-          ok(await settings.set(ws, meterUsage === undefined ? {} : { meterUsage })),
+          ok(
+            await settings.set(ws, {
+              ...(meterUsage === undefined ? {} : { meterUsage }),
+              ...(judge ? { judge } : {}),
+            }),
+          ),
         ),
     );
   }

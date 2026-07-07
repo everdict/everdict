@@ -833,6 +833,50 @@ describe("MCP tools", () => {
     expect(seen?.evalCase.placement?.target).toBe("nomad-seoul");
   });
 
+  it("run_scorecard: an inline judge-model override reaches the dispatched job (HTTP parity)", async () => {
+    let seen: AgentJob | undefined;
+    const capture: Dispatcher = {
+      async dispatch(job) {
+        seen = job;
+        return result;
+      },
+    };
+    const datasetRegistry = new InMemoryDatasetRegistry();
+    const deps = {
+      service: new RunService({ dispatcher: okDispatcher, store: new InMemoryRunStore(), newId: () => `run-${n++}` }),
+      datasetRegistry,
+      scorecardService: new ScorecardService({
+        dispatcher: capture,
+        store: new InMemoryScorecardStore(),
+        datasets: datasetRegistry,
+        newId: () => `sc-${n++}`,
+      }),
+    };
+    const principal: Principal = { subject: "u", workspace: "acme", roles: ["member"], via: "oidc" };
+    const server = buildMcpServer(deps, principal);
+    const [clientT, serverT] = InMemoryTransport.createLinkedPair();
+    const client = new Client({ name: "test", version: "0" });
+    await server.connect(serverT);
+    await client.connect(clientT);
+    await client.callTool({ name: "create_dataset", arguments: { dataset: DATASET } });
+
+    const sub = await client.callTool({
+      name: "run_scorecard",
+      arguments: { dataset_id: "smoke", harness_id: "scripted", judge: { model: "gpt-5.4-mini" } },
+    });
+    expect(sub.isError).toBeFalsy();
+    const id = JSON.parse(text(sub)).id as string;
+
+    let rec: { status: string } = { status: "queued" };
+    for (let i = 0; i < 50; i++) {
+      rec = JSON.parse(text(await client.callTool({ name: "get_scorecard", arguments: { id } })));
+      if (rec.status === "succeeded" || rec.status === "failed") break;
+      await new Promise((r) => setTimeout(r, 5));
+    }
+    expect(rec.status).toBe("succeeded");
+    expect(seen?.judge?.model).toBe("gpt-5.4-mini");
+  });
+
   it("apply_bundle: member installs a bundle (dataset) ok; viewer lacks datasets:write → FORBIDDEN", async () => {
     const deps = harness();
     const bundle = JSON.stringify({
