@@ -16,6 +16,7 @@ import {
 import { STORE_DEFS, dependencyStores } from "./dependencies.js";
 import {
   type AllocLike,
+  SERVICE_GROUP_NAME,
   SHARED_STORE_JOB_ID,
   browserJobId,
   buildBrowserJob,
@@ -25,17 +26,18 @@ import {
   dedicatedStoreGroup,
   dedicatedStoreJobId,
   resolvePort,
+  servicePortLabel,
   topologyJobId,
 } from "./nomad-topology.js";
 import { type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
-// Nomad HTTP 추상화 (테스트에서 모킹 가능; @everdict/backends 의 NomadHttp 와 동일 형태).
+// Nomad HTTP abstraction (mockable in tests; same shape as NomadHttp in @everdict/backends).
 export interface NomadHttp {
   request(method: string, path: string, body?: unknown): Promise<{ status: number; text: string }>;
 }
 
-// alloc 안에서 명령 실행(공유 스토어 DDL/ACL 용). 기본 impl 은 `nomad alloc exec` CLI 로 셸아웃(K8s 의 kubectl exec 대응).
+// Run a command inside an alloc (for shared-store DDL/ACL). The default impl shells out to `nomad alloc exec` (the counterpart of K8s kubectl exec).
 export interface NomadExec {
   exec(
     allocId: string,
@@ -97,29 +99,29 @@ function fetchNomadHttp(addr: string): NomadHttp {
 export interface NomadTopologyRuntimeOptions {
   addr: string; // Nomad HTTP endpoint
   http?: NomadHttp;
-  exec?: NomadExec; // alloc exec (pool DDL/ACL); 기본 = nomad CLI
-  consul?: ConsulClient; // 설정 시 zone.network 로 Consul Connect intentions 생성(네트워크 격리)
+  exec?: NomadExec; // alloc exec (pool DDL/ACL); default = nomad CLI
+  consul?: ConsulClient; // when set, create Consul Connect intentions from zone.network (network isolation)
   datacenters?: string[];
-  runtime?: string; // docker 격리 런타임 (예: "runsc" = gVisor)
+  runtime?: string; // docker isolation runtime (e.g. "runsc" = gVisor)
   namespace?: string;
-  storeEnv?: Record<string, string>; // 공유 스토어 엔드포인트 주입 (postgres/redis/minio)
-  poolNamespace?: string; // pool 공유 스토어 Nomad 네임스페이스(미설정=default)
-  storeSecret?: string; // pool 테넌트 비번 mint 시드(프로덕션: KEK/Vault)
+  storeEnv?: Record<string, string>; // inject shared-store endpoints (postgres/redis/minio)
+  poolNamespace?: string; // pool shared-store Nomad namespace (unset = default)
+  storeSecret?: string; // seed for minting pool tenant passwords (production: KEK/Vault)
   browserImage?: string;
   pollIntervalMs?: number;
   maxPolls?: number;
   readyTimeoutMs?: number;
-  registryAuth?: RegistryAuth; // 워크스페이스 이미지 레지스트리 pull 자격증명 — 빌더가 docker auth 로 렌더
+  registryAuth?: RegistryAuth; // workspace image-registry pull credentials — the builder renders them as docker auth
 }
 
-// 라이브 NomadTopologyRuntime: warm 서비스 잡 등록 + 엔드포인트 발견 + per-case 브라우저(실 CDP).
-// 오케스트레이터-비종속 ServiceTopologyBackend 가 이걸 통해 Nomad 위에서 토폴로지를 구동한다.
+// Live NomadTopologyRuntime: register the warm service job + discover endpoints + per-case browser (real CDP).
+// The orchestrator-agnostic ServiceTopologyBackend drives topologies on Nomad through this.
 export class NomadTopologyRuntime implements TopologyRuntime {
   readonly id = "nomad";
   private readonly http: NomadHttp;
   private readonly execImpl: NomadExec;
   private readonly warm = new Map<string, TopologyHandle>(); // key: id@version
-  // pool 공유 스토어: 클러스터 1회 배포 → host:port + allocId 발견(테넌트 scoped creds 엔드포인트로 사용).
+  // pool shared store: deployed once per cluster → discover host:port + allocId (used as the endpoint for the tenant's scoped creds).
   private readonly sharedStores = new Map<string, { hostPort: string; allocId: string; task: string }>();
 
   constructor(private readonly opts: NomadTopologyRuntimeOptions) {
@@ -128,23 +130,26 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   }
 
   async ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle> {
-    // warm 풀을 테넌트(존)별로 분리 — 임의 코드 실행을 같은 프로세스에서 공유하지 않게.
+    // Separate the warm pool per tenant (zone) — don't share arbitrary code execution within the same process.
     const key = `${spec.id}@${spec.version}@${zone?.id ?? "default"}`;
     const cached = this.warm.get(key);
-    if (cached) return cached; // warm: (버전,존)당 한 번만 배포
+    if (cached) return cached; // warm: deployed only once per (version, zone)
 
     const ns = zone?.namespace ?? this.opts.namespace;
-    // pool: 공유 스토어(클러스터 1회) → 테넌트별 DB/role/ACL mint(alloc exec) → scoped creds 를 서비스 env 로.
-    // (Nomad 는 Consul 없이 DNS 가 없어 K8s 와 달리 런타임에 host:port 를 발견해 주입한다.)
+    // pool: shared store (once per cluster) → mint per-tenant DB/role/ACL (alloc exec) → scoped creds into the service env.
+    // (Nomad has no DNS without Consul, so unlike K8s it discovers host:port at runtime and injects it.)
     let storeEnv = this.opts.storeEnv;
     if (zone) {
       const isolation = resolveStoreIsolation(zone);
-      // pool=공유 스토어+테넌트 DDL, silo=테넌트 전용 스토어 인스턴스(둘 다 host:port 발견 후 주입), external=storeEnv.
+      // pool = shared store + tenant DDL, silo = a dedicated store instance per tenant (both discover host:port then inject), external = storeEnv.
       if (isolation === "pool") storeEnv = { ...(await this.provisionPool(spec, zone)), ...this.opts.storeEnv };
       else if (isolation === "silo") storeEnv = { ...(await this.provisionSilo(spec, zone)), ...this.opts.storeEnv };
     }
 
-    // 네트워크 격리: Consul Connect intentions(같은 테넌트만 allow + 그 외 deny). enforce 엔 Connect-enabled 잡 필요.
+    // Cross-tenant network isolation is the per-(spec,version,zone) job/namespace/netns separation below — a co-located
+    // topology is one alloc/netns with no route to another tenant's. Consul intentions (allow same-tenant + deny the
+    // rest) stay as the cross-tenant authorization DECISION (defense-in-depth; also governs a Connect-enabled external
+    // front-door gateway if operated). They no longer gate inter-service traffic — co-located peers talk over loopback.
     if (zone && this.opts.consul && zone.network !== "open") {
       for (const intent of buildTenantIntentions(spec, zone)) await this.opts.consul.applyIntention(intent);
     }
@@ -161,16 +166,26 @@ export class NomadTopologyRuntime implements TopologyRuntime {
 
     const jobId = topologyJobId(spec, zone?.id);
     const endpoints: Record<string, string> = {};
-    for (const svc of spec.services) {
-      if (svc.port === undefined) continue; // 포트 없는 서비스는 발견 대상 아님
-      const alloc = await this.waitForGroupRunning(jobId, svc.name, ns);
-      const p = resolvePort(alloc, "http");
-      if (!p) {
-        throw new UpstreamError("UPSTREAM_ERROR", { service: svc.name }, "서비스 포트를 alloc 에서 찾지 못했습니다.");
+    // All services share ONE co-located group ⇒ one alloc whose shared ports carry every service's port (labeled per
+    // service). Wait for it once, then resolve each ported service's host:port by its label. (Peers reach each other
+    // over loopback, so only the front-door / target services actually need a host endpoint — but discovering all
+    // keeps handle.endpoints complete for the control plane.)
+    const portedServices = spec.services.filter((svc) => svc.port !== undefined);
+    if (portedServices.length > 0) {
+      const alloc = await this.waitForGroupRunning(jobId, SERVICE_GROUP_NAME, ns);
+      for (const svc of portedServices) {
+        const p = resolvePort(alloc, servicePortLabel(svc.name));
+        if (!p) {
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { service: svc.name },
+            "Could not find the service port in the alloc.",
+          );
+        }
+        const url = `http://${p.hostIp}:${p.port}`;
+        await this.waitForHttp(url, svc.readiness); // use the service's readiness budget if declared, otherwise the runtime default
+        endpoints[svc.name] = url;
       }
-      const url = `http://${p.hostIp}:${p.port}`;
-      await this.waitForHttp(url, svc.readiness); // 서비스가 readiness 상한을 선언하면 그걸, 아니면 런타임 기본
-      endpoints[svc.name] = url;
     }
 
     const handle: TopologyHandle = { endpoints };
@@ -178,8 +193,8 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     return handle;
   }
 
-  // pool: 공유 스토어를 한 번 띄우고(host:port 발견), 테넌트별 논리객체(전용 DB+role / Redis ACL)를 alloc exec 로 mint.
-  // 적대적 테넌트 코드여도 자기 DB creds 만 받으므로 교차 접근은 PG 인증/Redis ACL 에서 거부된다(K8s pool 과 동일 보장).
+  // pool: bring up the shared store once (discover host:port), and mint per-tenant logical objects (dedicated DB+role / Redis ACL) via alloc exec.
+  // Even hostile tenant code only receives its own DB creds, so cross-access is denied by PG auth / Redis ACL (same guarantee as K8s pool).
   private async provisionPool(spec: ServiceHarnessSpec, zone: TrustZone): Promise<Record<string, string>> {
     const ns = this.opts.poolNamespace;
     const stores = dependencyStores(spec).map((s) => s.store);
@@ -212,7 +227,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     return plan.serviceEnv;
   }
 
-  // silo: 테넌트 전용 스토어 잡을 띄우고 host:port 를 발견해 서비스 connEnv 로 주입(DDL 불필요 — 인스턴스 전체가 테넌트 것).
+  // silo: bring up the tenant's dedicated store job, discover host:port, and inject it into the service connEnv (no DDL — the whole instance belongs to the tenant).
   private async provisionSilo(spec: ServiceHarnessSpec, zone: TrustZone): Promise<Record<string, string>> {
     const ns = zone.namespace ?? this.opts.namespace;
     const stores = [...new Set(dependencyStores(spec).map((s) => s.store))];
@@ -229,7 +244,8 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         ns,
       );
       const p = resolvePort(alloc, "store");
-      if (!p) throw new UpstreamError("UPSTREAM_ERROR", { store }, "전용 스토어 포트를 alloc 에서 찾지 못했습니다.");
+      if (!p)
+        throw new UpstreamError("UPSTREAM_ERROR", { store }, "Could not find the dedicated store port in the alloc.");
       Object.assign(env, STORE_DEFS[store]?.connEnv(`${p.hostIp}:${p.port}`) ?? {});
     }
     return env;
@@ -245,17 +261,17 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       const alloc = await this.waitForGroupRunning(SHARED_STORE_JOB_ID, task, ns);
       const p = resolvePort(alloc, "store");
       if (!p || !alloc.ID) {
-        throw new UpstreamError("UPSTREAM_ERROR", { store: s }, "공유 스토어 포트를 alloc 에서 찾지 못했습니다.");
+        throw new UpstreamError("UPSTREAM_ERROR", { store: s }, "Could not find the shared store port in the alloc.");
       }
       const rec = { hostPort: `${p.hostIp}:${p.port}`, allocId: alloc.ID, task };
       await this.waitStoreAccepting(s, rec);
       this.sharedStores.set(s, rec);
-      // 공유 스토어 intention: 메시 서비스만 도달(테넌트 격리는 DB creds). enforce 엔 Connect-enabled 잡 필요.
+      // Shared-store intention: only mesh services can reach it (tenant isolation = DB creds). Enforcement needs a Connect-enabled job.
       if (this.opts.consul) await this.opts.consul.applyIntention(buildSharedStoreIntention(s));
     }
   }
 
-  // 스토어가 실제 연결을 받을 때까지 폴링(rollout running ≠ accepting; postgres initdb 등). DDL 전에 호출.
+  // Poll until the store actually accepts connections (rollout running ≠ accepting; postgres initdb etc.). Called before DDL.
   private async waitStoreAccepting(store: string, rec: { allocId: string; task: string }): Promise<void> {
     const probe =
       store === "postgres"
@@ -273,11 +289,11 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         await this.execImpl.exec(rec.allocId, rec.task, probe, { namespace: this.opts.poolNamespace });
         return;
       } catch {
-        // 아직 안 받음 → 재시도
+        // not accepting yet → retry
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { store }, "공유 스토어 준비 대기 시간초과");
+    throw new UpstreamError("UPSTREAM_ERROR", { store }, "Timed out waiting for the shared store to become ready");
   }
 
   async provisionBrowserEnv(spec: ServiceHarnessSpec, runId: string, zone?: TrustZone): Promise<TargetEnvHandle> {
@@ -289,7 +305,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       image: this.opts.browserImage,
     });
     await this.register(job, ns);
-    // register 이후 어디서든 실패하면 alloc 이 새므로(핸들 미반환 → dispose 불가) 즉시 정리한다.
+    // Any failure after register would leak the alloc (handle not returned → cannot dispose), so clean up immediately.
     try {
       return await this.connectBrowser(runId, ns);
     } catch (err) {
@@ -302,7 +318,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     const alloc = await this.waitForGroupRunning(browserJobId(runId), "browser", ns);
     const p = resolvePort(alloc, "cdp");
     if (!p) {
-      throw new UpstreamError("UPSTREAM_ERROR", { runId }, "브라우저 CDP 포트를 alloc 에서 찾지 못했습니다.");
+      throw new UpstreamError("UPSTREAM_ERROR", { runId }, "Could not find the browser CDP port in the alloc.");
     }
     const cdpHttp = `http://${p.hostIp}:${p.port}`;
     await this.waitForHttp(`${cdpHttp}/json/version`);
@@ -312,20 +328,20 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       const ver = (await (await fetch(`${cdpHttp}/json/version`)).json()) as { webSocketDebuggerUrl?: string };
       if (ver.webSocketDebuggerUrl) cdpUrl = ver.webSocketDebuggerUrl;
     } catch {
-      // /json/version 파싱 실패 시 HTTP 엔드포인트를 cdpUrl 로 사용 (라이브 디버깅용).
+      // if /json/version parsing fails, use the HTTP endpoint as cdpUrl (for live debugging).
     }
-    // 신선한 세션: 빈 탭 하나를 연다(실 하니스/익스텐션이 이후 여기서 네비게이션). best-effort.
+    // Fresh session: open a single blank tab (the real harness/extension navigates from here later). best-effort.
     try {
       await fetch(`${cdpHttp}/json/new?about:blank`, { method: "PUT" });
     } catch {
-      // 탭 생성 실패는 치명적 아님 — 스냅샷은 빈 타깃 목록을 그대로 관측.
+      // failing to create a tab is not fatal — the snapshot just observes an empty target list.
     }
 
     const deregister = () => this.deregister(browserJobId(runId), ns);
     return {
       wiring: { target_cdp_url: cdpUrl },
       async snapshot(): Promise<BrowserSnapshot> {
-        // 실 브라우저 관측: 열린 타깃 목록(현재 URL). 익스텐션 주도 네비게이션은 Phase 2.
+        // Real browser observation: the open target list (current URLs). Extension-driven navigation is Phase 2.
         let targets: Array<{ url?: string; title?: string }> = [];
         try {
           targets = (await (await fetch(`${cdpHttp}/json/list`)).json()) as typeof targets;
@@ -346,7 +362,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     };
   }
 
-  // warm 토폴로지 정리 (라이브 실행 후 teardown 용). 존을 주면 그 존의 warm 만 정리한다.
+  // Tear down the warm topology (for teardown after a live run). Given a zone, tear down only that zone's warm entry.
   async teardown(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<void> {
     this.warm.delete(`${spec.id}@${spec.version}@${zone?.id ?? "default"}`);
     if (zone && this.opts.consul) {
@@ -355,7 +371,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       }
     }
     const ns = zone?.namespace ?? this.opts.namespace;
-    // silo 전용 스토어 잡도 정리(존이 있으면; 없으면 no-op).
+    // Also clean up the silo dedicated-store job (if there's a zone; otherwise a no-op).
     if (zone) await this.deregister(dedicatedStoreJobId(spec, zone.id), ns);
     await this.deregister(topologyJobId(spec, zone?.id), ns);
   }
@@ -367,7 +383,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   private async register(job: { Job: { ID: string } }, namespace?: string): Promise<void> {
     const res = await this.http.request("POST", `/v1/jobs${this.nsq(namespace, "?")}`, job);
     if (res.status >= 300) {
-      throw new UpstreamError("UPSTREAM_ERROR", { status: res.status, job: job.Job.ID }, "Nomad 잡 제출 실패");
+      throw new UpstreamError("UPSTREAM_ERROR", { status: res.status, job: job.Job.ID }, "Nomad job submission failed");
     }
   }
 
@@ -375,7 +391,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     await this.http.request("DELETE", `/v1/job/${jobId}?purge=true${this.nsq(namespace, "&")}`);
   }
 
-  // 그룹의 alloc 이 running 이 될 때까지 폴링하고, 전체 alloc(포트 포함)을 돌려준다.
+  // Poll until the group's alloc is running, then return the full alloc (including ports).
   private async waitForGroupRunning(jobId: string, group: string, namespace?: string): Promise<AllocLike> {
     const interval = this.opts.pollIntervalMs ?? 2000;
     const maxPolls = this.opts.maxPolls ?? 150;
@@ -386,7 +402,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         const mine = allocs.filter((a) => a.TaskGroup === group);
         const failed = mine.find((a) => a.ClientStatus === "failed" || a.ClientStatus === "lost");
         if (failed) {
-          throw new UpstreamError("UPSTREAM_ERROR", { group, status: failed.ClientStatus }, "토폴로지 alloc 실패");
+          throw new UpstreamError("UPSTREAM_ERROR", { group, status: failed.ClientStatus }, "Topology alloc failed");
         }
         const running = mine.find((a) => a.ClientStatus === "running");
         if (running?.ID) {
@@ -396,12 +412,16 @@ export class NomadTopologyRuntime implements TopologyRuntime {
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { jobId, group }, "토폴로지 alloc running 대기 시간초과");
+    throw new UpstreamError(
+      "UPSTREAM_ERROR",
+      { jobId, group },
+      "Timed out waiting for the topology alloc to become running",
+    );
   }
 
-  // 엔드포인트가 HTTP 응답을 줄 때까지 폴링 (5xx/연결거부는 재시도).
+  // Poll until the endpoint returns an HTTP response (5xx / connection refused are retried).
   private async waitForHttp(url: string, readiness?: ServiceReadiness): Promise<void> {
-    // 서비스가 readiness 상한을 선언하면 그 timeout/interval 을, 아니면 런타임 기본을 쓴다(docker 런타임과 동형).
+    // Use the service's readiness timeout/interval if declared, otherwise the runtime default (isomorphic to the docker runtime).
     const deadline = readiness?.timeoutMs ?? this.opts.readyTimeoutMs ?? 60_000;
     const interval = readiness?.intervalMs ?? this.opts.pollIntervalMs ?? 2000;
     const steps = Math.max(1, Math.floor(deadline / interval));
@@ -410,10 +430,10 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         const res = await fetch(url);
         if (res.status < 500) return;
       } catch {
-        // 아직 안 떴음 → 재시도
+        // not up yet → retry
       }
       await new Promise((r) => setTimeout(r, interval));
     }
-    throw new UpstreamError("UPSTREAM_ERROR", { url }, "엔드포인트 준비 대기 시간초과");
+    throw new UpstreamError("UPSTREAM_ERROR", { url }, "Timed out waiting for the endpoint to become ready");
   }
 }

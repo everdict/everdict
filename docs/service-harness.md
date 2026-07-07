@@ -27,21 +27,29 @@ Service env precedence: store `connEnv` (conventional) < `service.env` (author) 
 
 ## Orchestrator-agnostic (Nomad AND K8s)
 `ServiceTopologyBackend` (a `Backend`) is orchestrator-agnostic; only `TopologyRuntime` differs:
-- `buildNomadTopologyJob(spec)` → Nomad **service** job (task groups, docker + `runsc`, dynamic ports)
+- `buildNomadTopologyJob(spec)` → Nomad **service** job: **one co-located task group** (all services share a
+  `bridge` netns → loopback comms), docker + `runsc`, a group dynamic host port per service (see below)
 - `buildK8sManifests(spec)` → Deployments/Services (+ `runtimeClassName` gVisor)
 Register one `ServiceTopologyBackend` per target cluster in the `BackendRegistry`; Router/orchestrator unchanged.
 
 ### `NomadTopologyRuntime` (live)
 The live Nomad runtime (`@everdict/topology`) implements `TopologyRuntime` against the Nomad HTTP API:
-- `ensureTopology(spec)` → register the warm **service** job, poll each group's alloc to `running`, and
-  **discover endpoints** from the alloc (`resolvePort` reads `AllocatedResources.Shared.Ports`, falling back
-  to `Resources.Networks`); cache per `id@version` so a version deploys once.
+- `ensureTopology(spec)` → register the warm **service** job, poll the one co-located group's alloc to `running`,
+  and **discover every service's endpoint** from that single alloc (`resolvePort(alloc, servicePortLabel(name))`
+  reads `AllocatedResources.Shared.Ports`, falling back to `Resources.Networks`); cache per `id@version` so a
+  version deploys once.
 - `provisionBrowserEnv(spec, runId)` → register a per-case browser **service** job (headless Chromium), discover
   its CDP port, return a `TargetEnvHandle` whose `wiring.target_cdp_url` comes from `/json/version` and whose
   `snapshot()` reads `/json/list`. Registration failures are cleaned up (no leaked allocs); `dispose()`/`teardown()`
   purge. (The handle is a **bag of named coordinates** now, not a single `cdpUrl` — see `target.acquire` below.)
-- Services declare a `port` → the builder attaches a group `network` dynamic port (label `http`, browser `cdp`)
-  and maps it into the container, so endpoints are reachable from the control plane without Consul.
+- **Co-located, loopback comms (Nomad only).** All services are **one task group** sharing a `bridge` netns, so
+  peers talk over `localhost:<svc.port>` (fixed, never stale on reschedule — the whole topology reschedules
+  atomically); `extra_hosts` also maps each service **name** → `127.0.0.1` for `<svc.name>:<port>` docker/k8s
+  parity. Each ported service still gets a group dynamic host port (label = its sanitized name) so the control
+  plane can reach it, no Consul. Shared netns ⇒ **ports must be unique** (`BadRequestError` on a collision);
+  per-service `replicas` is ignored. This ports the Docker runtime's fixed internal-address model to Nomad and
+  fixes the old per-service-group model's stale-address `fetch failed`. See
+  `docs/architecture/nomad-colocated-topology.md`.
 
 ### `K8sTopologyRuntime` (live)
 The live K8s runtime is the same shape against the Kubernetes API (via an injectable `Kubectl`, default shells
@@ -181,6 +189,14 @@ per-destination deny-by-default without touching global Consul config. The share
 (mesh-only; tenant isolation is the DB creds). Mesh service names are `t-<zone>-<svc>`; `NomadTopologyRuntime`
 (given a `consul` client) applies the intentions in `ensureTopology` + the store intention in `ensureSharedStores`,
 and cleans them up in `teardown`.
+
+> **Co-location note.** Since the co-located-topology change, a tenant's services share **one netns** and reach
+> each other over **loopback** — there is no inter-service mesh hop for intentions to govern, so
+> `buildNomadTopologyJob` no longer wires per-service Connect sidecars/upstreams. Cross-tenant isolation is the
+> per-`(spec,version,zone)` job/namespace/netns separation; the intentions above remain as the cross-tenant
+> **authorization decision** (defense-in-depth, and the policy for a Connect-enabled external front-door gateway if
+> operated). `buildConnectService` stays as the standalone building block for the live enforcement proof. See
+> `docs/architecture/nomad-colocated-topology.md`.
 
 Verified live against a **real Consul** (Connect CA on; `scripts/live/consul-intentions-nomad.mjs`) using Consul's
 `/v1/connect/intentions/check` API — the authoritative allow/deny **decision the Envoy mesh enforces**: same-tenant
@@ -375,7 +391,7 @@ tenant-owned `Dataset` ready to evaluate — the ingestion side of "bring any/ne
 The catalog + import are exposed so users self-serve (no live script): the control plane has a `BenchmarkService`
 (catalog list + `importBenchmark` → `DatasetRegistry.register(tenant)`; gated benchmarks read `HF_TOKEN` from the
 tenant `SecretStore`) behind **`GET /benchmarks`** (gated `datasets:read`) and **`POST /benchmarks/import`** (gated
-`datasets:write`). The web dashboard adds a **벤치마크 추가** action (`/dashboard/datasets/import`): pick a catalog
+`datasets:write`). The web dashboard adds an **Add benchmark** action (`/dashboard/datasets/import`): pick a catalog
 benchmark (with `source`/`gated`/category shown), set version + a row `limit` for HF benchmarks, paste jsonl for
 `source: jsonl` benchmarks (e.g. WebVoyager), import → it lands as a tenant-owned dataset. Versions are immutable
 (re-import of a differing `(id, version)` → 409).
@@ -463,9 +479,9 @@ The recipe registry is now durable + first-class in the control plane: `PgBenchm
 HTTP: `POST /benchmark-recipes` (`datasets:write`), `GET /benchmark-recipes` + `GET /benchmark-recipes/:id/versions/
 :version` (`datasets:read`), `POST /benchmark-recipes/validate` (dry-run — schema + this workspace's existing
 versions/conflict, no registration, mirroring `/datasets/validate`), and `POST /benchmarks/import` accepts either
-source. Web: a **벤치마크 레시피** page (`/dashboard/datasets/recipes`) lists recipes + registers one from a JSON
-`BenchmarkAdapterSpec` (with a **검증 (dry-run)** button surfacing schema errors / existing versions before commit), and
-the **벤치마크 추가** page now offers catalog benchmarks *and* the workspace's own recipes in one picker. Verified at
+source. Web: a **Benchmark recipes** page (`/dashboard/datasets/recipes`) lists recipes + registers one from a JSON
+`BenchmarkAdapterSpec` (with a **Validate (dry-run)** button surfacing schema errors / existing versions before commit), and
+the **Add benchmark** page now offers catalog benchmarks *and* the workspace's own recipes in one picker. Verified at
 the HTTP layer by `server.test.ts` (register → list/get with tenant isolation [`globex` gets 404 on `acme`'s recipe] →
 import from recipe; validate ok/conflict/schema-error without registering) and live (real API: `validate` of a good
 spec → `{ok:true, source:"huggingface", versionExists:false}`, a bad one → `{ok:false, errors:["source: Required",
@@ -473,10 +489,10 @@ spec → `{ok:true, source:"huggingface", versionExists:false}`, a bad one → `
 
 ##### Verified in a real browser (chrome-devtools) ✅
 The recipe/import UX was driven end-to-end in a **real headless Chrome** against the running web (`next dev`) + API
-(in-memory, dev fallback): the **벤치마크 레시피** page rendered the dev-fallback principal (`workspace default / admin`)
-and a seeded recipe; **검증 (dry-run)** posted to the API and rendered the banner (`✓ 스키마 정상 · …@1.0.0 · source=
-huggingface · 새 버전`); **레시피 등록** registered it and `router.refresh` re-fetched so the new recipe appeared in the
-list; and the **벤치마크 추가** page showed the unified picker with the first-party catalog (mind2web/gsm8k/gaia/
+(in-memory, dev fallback): the **Benchmark recipes** page rendered the dev-fallback principal (`workspace default / admin`)
+and a seeded recipe; **Validate (dry-run)** posted to the API and rendered the banner (`✓ schema OK · …@1.0.0 · source=
+huggingface · new version`); **Register recipe** registered it and `router.refresh` re-fetched so the new recipe appeared in the
+list; and the **Add benchmark** page showed the unified picker with the first-party catalog (mind2web/gsm8k/gaia/
 webvoyager/swe-bench-lite) *and* the workspace's own recipes (the just-registered one + the seed) in one dropdown. So
 the browser → server-action(BFF) → control-plane round-trip works against a real browser, not just at the HTTP layer.
 

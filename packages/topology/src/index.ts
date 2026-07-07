@@ -26,6 +26,8 @@ export {
   buildConnectService,
   type NomadConnectService,
   type NomadConnectUpstream,
+  SERVICE_GROUP_NAME,
+  servicePortLabel,
   dedicatedStoreJobId,
   dedicatedStoreGroup,
   SHARED_STORE_JOB_ID,

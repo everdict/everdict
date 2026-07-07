@@ -16,4 +16,8 @@ Service-topology harnesses (multi-service + a target env). See docs/service-harn
   drop-in `TopologyRuntime`s; keep them isomorphic so `ServiceTopologyBackend` stays orchestrator-agnostic.
 - **Warm pools are NOT shared across tenants** — key the warm pool by `(spec, version, TrustZone.id)` and carry
   the zone in the job ID/namespace. `ensureTopology`/`provisionBrowserEnv` take an optional `TrustZone`.
+- **Nomad topology = ONE co-located task group** (`SERVICE_GROUP_NAME`), all services on a `bridge` netns →
+  inter-service comms over `localhost:<svc.port>` (never a dynamic host port; stable across reschedule). Ports must
+  be unique (shared netns); don't reintroduce a per-service group or per-service Connect sidecars. K8s (Service
+  DNS) and Docker are unchanged. See `docs/architecture/nomad-colocated-topology.md`.
 - Map failures to `AppError`.

@@ -25,12 +25,25 @@ stateless services = per-version warm; stores = shared + per-case logical isolat
 
 ## Live Nomad runtime
 `NomadTopologyRuntime` implements `TopologyRuntime` against the Nomad API: `ensureTopology` registers the
-warm service job, polls each group to running, and discovers endpoints from the alloc via pure `resolvePort`
+warm service job, polls it to running, and discovers endpoints from the alloc via pure `resolvePort`
 (`AllocatedResources.Shared.Ports` → `Resources.Networks`); `provisionBrowserEnv` runs a per-case headless
-Chromium and discovers its CDP from `/json/version`. Services with a `port` get a group dynamic-port (no Consul).
+Chromium and discovers its CDP from `/json/version`.
+**Co-located topology (Nomad only — see `docs/architecture/nomad-colocated-topology.md`).** `buildNomadTopologyJob`
+renders **one task group** (`SERVICE_GROUP_NAME`) with **one task per service** on a **bridge** netns — every
+service shares one network namespace, so peers talk over **loopback** (`localhost:<svc.port>`; `extra_hosts` also
+maps each service **name** → `127.0.0.1` for `<svc.name>:<port>` docker/k8s parity). This ports the docker
+runtime's fixed internal-address model: an inter-service address never depends on a dynamically-assigned host
+port, so it never goes **stale** on reschedule (the whole topology reschedules atomically as one alloc — the fix
+for the old per-service-group model's `fetch failed`). Each ported service still gets a group dynamic host port
+(label = its sanitized name) for control-plane reach; `ensureTopology` waits for the one group's alloc **once**
+and resolves each service by `servicePortLabel(svc.name)`. Shared netns ⇒ **ports must be unique** (throws
+`BadRequestError` on a collision); per-service `replicas` is ignored (`Count 1`).
 **Tenant isolation:** `ensureTopology`/`provisionBrowserEnv` take an optional `TrustZone`; the warm pool is keyed
 by `(spec, version, zone.id)` and the job ID/namespace carry the zone — warm topologies are **never shared across
-tenants** (a shared agent/LangGraph process would leak state/secrets). Verified live on Nomad.
+tenants** (a shared agent/LangGraph process would leak state/secrets). A tenant's co-located alloc has no route to
+another tenant's; intra-tenant netns sharing is not a cross-tenant concern. **Consul Connect** inter-service mesh
+(sidecars/upstreams) is obviated by co-location and removed from the builder; `buildTenantIntentions` stays as the
+cross-tenant authorization decision (defense-in-depth / external gateway policy). Verified live on Nomad.
 
 ## Live K8s runtime
 `K8sTopologyRuntime` is the same shape via an injectable `Kubectl` (default shells to `kubectl`):

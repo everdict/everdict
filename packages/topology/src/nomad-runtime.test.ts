@@ -1,10 +1,10 @@
 import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ConsulClient, ServiceIntention } from "./consul-intentions.js";
 import { type NomadExec, type NomadHttp, NomadTopologyRuntime } from "./nomad-runtime.js";
-import { topologyJobId } from "./nomad-topology.js";
+import { SERVICE_GROUP_NAME, topologyJobId } from "./nomad-topology.js";
 
-// 포트 없는 서비스 → ensureTopology 의 엔드포인트 발견(실 fetch) 루프를 건너뛴다(pool 와이어링만 단위검증).
+// A portless service → skips ensureTopology's endpoint-discovery (real fetch) loop (unit-test only the pool wiring).
 const SPEC: ServiceHarnessSpec = {
   kind: "service",
   id: "aegra",
@@ -61,24 +61,24 @@ function fakes() {
   return { registered, execCalls, http, exec };
 }
 
-describe("NomadTopologyRuntime — pool 스토어 격리", () => {
-  it("공유 스토어 1회 배포 + alloc exec 로 테넌트 DB/role mint + 서비스에 발견된 host:port scoped creds 주입", async () => {
+describe("NomadTopologyRuntime — pool store isolation", () => {
+  it("deploys the shared store once + mints the tenant DB/role via alloc exec + injects scoped creds with the discovered host:port into the service", async () => {
     const { registered, execCalls, http, exec } = fakes();
     const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
     await rt.ensureTopology(SPEC, POOL_ZONE);
 
-    // 공유 스토어 잡(클러스터 1개) 등록.
+    // registers the shared-store job (one per cluster).
     expect(registered.some((j) => j.Job.ID === "everdict-shared-stores")).toBe(true);
-    // pg_isready 준비 폴링 + DDL(psql, stdin) 실행.
+    // pg_isready readiness poll + DDL (psql, stdin) execution.
     expect(execCalls.some((c) => c.cmd === "pg_isready")).toBe(true);
     expect(execCalls.some((c) => c.cmd === "psql" && c.stdin?.includes("CREATE ROLE r_acme"))).toBe(true);
-    // 토폴로지 잡 서비스 env 에 발견된 host:port(10.0.0.7:35432) 로 scoped DATABASE_URL 주입.
+    // injects a scoped DATABASE_URL with the discovered host:port (10.0.0.7:35432) into the topology job's service env.
     const topo = registered.find((j) => j.Job.ID === topologyJobId(SPEC, "acme"));
     const env = topo?.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
     expect(env.DATABASE_URL).toMatch(/^postgresql:\/\/r_acme:.+@10\.0\.0\.7:35432\/tenant_acme$/);
   });
 
-  it("consul 주입 시 네트워크 격리 intention 적용(테넌트 서비스 + 공유 스토어)", async () => {
+  it("applies network-isolation intentions when consul is injected (tenant services + shared store)", async () => {
     const { http, exec } = fakes();
     const applied: ServiceIntention[] = [];
     const consul: ConsulClient = {
@@ -89,19 +89,19 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
     };
     const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, consul, pollIntervalMs: 1, maxPolls: 5 });
     await rt.ensureTopology(SPEC, POOL_ZONE);
-    // 테넌트 서비스 intention(같은 테넌트 allow + * deny) + 공유 스토어 intention.
+    // tenant-service intention (allow same-tenant + deny *) + shared-store intention.
     const agent = applied.find((i) => i.Name === "t-acme-agent-server");
     expect(agent?.Sources.find((s) => s.Name === "*")?.Action).toBe("deny");
     expect(applied.some((i) => i.Name === "everdict-shared-postgres")).toBe(true);
   });
 
-  it("consul 미주입 시 intention 미적용(기본)", async () => {
+  it("applies no intentions when consul is not injected (default)", async () => {
     const { http, exec } = fakes();
     const rt = new NomadTopologyRuntime({ addr: "http://nomad", http, exec, pollIntervalMs: 1, maxPolls: 5 });
-    await expect(rt.ensureTopology(SPEC, POOL_ZONE)).resolves.toBeDefined(); // consul 없이도 정상
+    await expect(rt.ensureTopology(SPEC, POOL_ZONE)).resolves.toBeDefined(); // fine without consul
   });
 
-  it("silo: 전용 스토어 잡 배포 + 발견된 host:port 로 서비스에 connEnv 주입(DDL 없음)", async () => {
+  it("silo: deploys the dedicated store job + injects connEnv into the service with the discovered host:port (no DDL)", async () => {
     const { registered, execCalls, http } = fakes();
     const SILO_ZONE: TrustZone = {
       id: "acme",
@@ -110,7 +110,7 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
       trusted: false,
       storeIsolation: "silo",
     };
-    // 전용 스토어 그룹 alloc 을 돌려주도록 http 를 보강(allocations 가 dedicated 그룹도 매칭).
+    // Augment http to return the dedicated-store group alloc (allocations also matches the dedicated group).
     const http2: NomadHttp = {
       async request(method, path, body) {
         if (path.includes("/allocations")) {
@@ -136,13 +136,87 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
     };
     const rt = new NomadTopologyRuntime({ addr: "http://nomad", http: http2, pollIntervalMs: 1, maxPolls: 5 });
     await rt.ensureTopology(SPEC, SILO_ZONE);
-    // 전용 스토어 잡(zone-suffixed) 배포.
+    // deploys the dedicated store job (zone-suffixed).
     expect(registered.some((j) => j.Job.ID === "everdict-store-aegra-acme")).toBe(true);
-    // silo 는 per-tenant DDL 없음(pool 과 차이).
+    // silo has no per-tenant DDL (the difference from pool).
     expect(execCalls.some((c) => c.cmd === "psql")).toBe(false);
-    // 서비스 env 에 발견된 host:port(10.1.2.3:41999) 로 DATABASE_URL(전용 인스턴스, 기본 creds).
+    // DATABASE_URL in the service env uses the discovered host:port (10.1.2.3:41999) (dedicated instance, default creds).
     const topo = registered.find((j) => j.Job.ID === topologyJobId(SPEC, "acme"));
     const env = topo?.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
     expect(env.DATABASE_URL).toBe("postgresql://everdict:everdict@10.1.2.3:41999/everdict");
+  });
+});
+
+describe("NomadTopologyRuntime — co-located endpoint discovery", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  // Regression: services are now co-located in ONE group, so its ONE alloc carries every service's port (labeled per
+  // service). Discovery must wait for that single group once and resolve each service by servicePortLabel(name) — not
+  // poll a per-service group (the pre-co-location model, which broke because an independently-rescheduled peer's host
+  // port drifted while a baked address stayed stale).
+  it("resolves every ported service's endpoint by its label from the single co-located alloc", async () => {
+    vi.stubGlobal("fetch", async () => ({ status: 200 }) as unknown as Response); // readiness probe passes immediately
+    const groupsPolled: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        if (method === "POST" && path.startsWith("/v1/jobs")) return { status: 200, text: "{}" };
+        if (path.includes("/allocations")) {
+          // one alloc for the single co-located group.
+          return {
+            status: 200,
+            text: JSON.stringify([{ TaskGroup: SERVICE_GROUP_NAME, ClientStatus: "running", ID: "alloc-svc" }]),
+          };
+        }
+        if (path.startsWith("/v1/allocation/")) {
+          groupsPolled.push("alloc-svc");
+          // the one alloc's shared ports carry BOTH services, labeled by (sanitized) service name.
+          return {
+            status: 200,
+            text: JSON.stringify({
+              ID: "alloc-svc",
+              TaskGroup: SERVICE_GROUP_NAME,
+              AllocatedResources: {
+                Shared: {
+                  Ports: [
+                    { Label: "agent_server", Value: 21000, HostIP: "127.0.0.1" },
+                    { Label: "browser_mcp", Value: 21001, HostIP: "127.0.0.1" },
+                  ],
+                },
+              },
+            }),
+          };
+        }
+        return { status: 200, text: "[]" };
+      },
+    };
+    const spec: ServiceHarnessSpec = {
+      kind: "service",
+      id: "bu",
+      version: "1.0.0",
+      services: [
+        { name: "agent-server", image: "a:1", port: 8000, needs: [], perRun: [], replicas: 1, env: {} },
+        { name: "browser-mcp", image: "b:1", port: 9000, needs: ["agent-server"], perRun: [], replicas: 1, env: {} },
+      ],
+      dependencies: [],
+      frontDoor: { service: "agent-server", submit: "POST /runs" },
+      traceSource: { kind: "otel", endpoint: "http://unused" },
+    };
+    const rt = new NomadTopologyRuntime({
+      addr: "http://nomad",
+      http,
+      pollIntervalMs: 1,
+      maxPolls: 5,
+      readyTimeoutMs: 10,
+    });
+
+    const handle = await rt.ensureTopology(spec);
+
+    // both endpoints resolved from the ONE shared alloc, keyed by service name.
+    expect(handle.endpoints).toEqual({
+      "agent-server": "http://127.0.0.1:21000",
+      "browser-mcp": "http://127.0.0.1:21001",
+    });
+    // the single co-located alloc was read once (not a separate group alloc per service).
+    expect(new Set(groupsPolled)).toEqual(new Set(["alloc-svc"]));
   });
 });
