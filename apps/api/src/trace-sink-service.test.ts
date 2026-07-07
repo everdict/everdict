@@ -74,7 +74,13 @@ async function exportHarness(over: {
             caseId: c.caseId,
             ...(c.externalId ? { externalId: c.externalId } : {}),
           }));
-          return over.sinkResult ?? { cases: cases.map((c) => ({ caseId: c.caseId, externalId: `ext-${c.caseId}` })) };
+          // 서비스는 케이스별로 호출한다(스트리밍) — 고정 sinkResult 는 이 호출의 케이스 몫만 잘라 돌려준다.
+          if (over.sinkResult)
+            return {
+              ...(over.sinkResult.url ? { url: over.sinkResult.url } : {}),
+              cases: over.sinkResult.cases.filter((rc) => cases.some((c) => c.caseId === rc.caseId)),
+            };
+          return { cases: cases.map((c) => ({ caseId: c.caseId, externalId: `ext-${c.caseId}` })) };
         },
       };
     },
@@ -153,5 +159,67 @@ describe("TraceSinkService.exportScorecard — 하니스별 선택 해석", () =
     const failed = await svc2.exportScorecard("acme", CTX, [RESULT]);
     expect(failed?.status).toBe("failed");
     expect(failed?.message).toContain("업스트림 연결 실패");
+  });
+});
+
+describe("TraceSinkService.exportStream — 케이스 스트리밍(D5)", () => {
+  it("push 는 settle 을 기다리지 않고 케이스별로 즉시 발사되고, settle 이 기존 outcome 형태로 합산한다", async () => {
+    const store = new InMemoryWorkspaceSettingsStore();
+    const calls: string[][] = []; // 호출 단위의 케이스 구성 — 케이스별 개별 호출이어야 한다
+    const svc = new TraceSinkService(store, {
+      buildSink: () => ({
+        async export(_ctx, cases) {
+          calls.push(cases.map((c) => c.caseId));
+          return {
+            url: "http://mlflow/#/experiments/7",
+            cases: cases.map((c) => ({ caseId: c.caseId, externalId: `ext-${c.caseId}` })),
+          };
+        },
+      }),
+      now: () => "2026-07-07T00:00:00.000Z",
+    });
+    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000" });
+    await svc.assign("acme", "h", "mlf");
+
+    const stream = await svc.exportStream("acme", CTX);
+    if (!stream) throw new Error("싱크가 선택됐으니 스트림이 있어야 한다");
+    stream.push(RESULT);
+    await new Promise((r) => setTimeout(r, 0)); // 태스크 발사 tick
+    expect(calls).toEqual([["c1"]]); // settle 전에 이미 나갔다 — 스트리밍의 핵심
+    stream.push({ ...RESULT, caseId: "c2" });
+
+    const out = await stream.settle();
+
+    expect(calls).toEqual([["c1"], ["c2"]]); // 케이스별 개별 호출
+    expect(out.status).toBe("succeeded");
+    expect(out.url).toBe("http://mlflow/#/experiments/7");
+    expect(out.cases?.map((c) => c.caseId)).toEqual(["c1", "c2"]);
+  });
+
+  it("케이스별 실패는 격리 — 한 케이스의 업스트림 에러가 다른 케이스를 막지 않고 partial 로 합산된다", async () => {
+    const store = new InMemoryWorkspaceSettingsStore();
+    const svc = new TraceSinkService(store, {
+      buildSink: () => ({
+        async export(_ctx, cases) {
+          const id = cases[0]?.caseId ?? "?";
+          if (id === "c1") throw new Error("c1 만 업스트림 500");
+          return { cases: cases.map((c) => ({ caseId: c.caseId, externalId: `ext-${c.caseId}` })) };
+        },
+      }),
+      now: () => "2026-07-07T00:00:00.000Z",
+    });
+    await svc.upsert("acme", { name: "mlf", kind: "mlflow", endpoint: "http://mlflow:5000" });
+    await svc.assign("acme", "h", "mlf");
+
+    const stream = await svc.exportStream("acme", CTX);
+    if (!stream) throw new Error("스트림 기대");
+    stream.push(RESULT); // c1 — 실패
+    stream.push({ ...RESULT, caseId: "c2" }); // c2 — 성공
+    const out = await stream.settle();
+
+    expect(out.status).toBe("partial");
+    expect(out.message).toContain("1/2");
+    expect(out.cases?.find((c) => c.caseId === "c1")?.error).toContain("업스트림 500");
+    expect(out.cases?.find((c) => c.caseId === "c2")?.externalId).toBe("ext-c2");
   });
 });

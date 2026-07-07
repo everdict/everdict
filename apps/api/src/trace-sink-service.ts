@@ -1,6 +1,7 @@
 import { BadRequestError, type CaseResult } from "@assay/core";
 import type { ScorecardExport, WorkspaceSettings, WorkspaceSettingsStore } from "@assay/db";
 import type { TraceSink, TraceSinkCase, TraceSinkConfig } from "@assay/trace";
+import { createLimiter } from "./concurrency.js";
 
 // 워크스페이스 트레이스 싱크 통합 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow/Langfuse/LangSmith/Phoenix)에
 // 적재하는 아웃바운드 설정. 싱크는 '복수'를 이름으로 등록하고(팀마다 플랫폼이 여러 개), 어느 싱크로 보낼지는
@@ -23,8 +24,19 @@ type TraceSinkEntry = NonNullable<WorkspaceSettings["traceSinks"]>[number];
 export interface TraceSinkServiceDeps {
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // authSecretName → 값 resolve(워크스페이스 SecretStore)
   buildSink?: (cfg: TraceSinkConfig) => TraceSink; // 설정 → 어댑터(@assay/trace buildTraceSink). 미주입이면 적재 비활성
+  exportConcurrency?: number; // 케이스 축 export 동시 실행 상한(기본 2) — 싱크 rate-limit 보호
   now?: () => string;
 }
+
+// 케이스 스트리밍 export 핸들 — 배치가 케이스 완성(judge 후) 즉시 push, settle 이 전 태스크 합류 후
+// 기존 exportScorecard 와 동일한 ScorecardExport 형태로 합산(레코드 스키마·웹 표시 무변경).
+// push 태스크는 절대 throw 하지 않는다 — export 실패는 outcome 에만 남는다(스코어카드와 격리).
+export interface CaseExportStream {
+  push(result: CaseResult): void;
+  settle(): Promise<ScorecardExport>;
+}
+
+type SinkCaseOutcome = NonNullable<ScorecardExport["cases"]>[number];
 
 const toView = (s: TraceSinkEntry): TraceSinkConfigView => ({
   name: s.name,
@@ -100,80 +112,124 @@ export class TraceSinkService {
     return assignments;
   }
 
-  // 채점 완료된 케이스 결과(trace+점수)를 '그 하니스가 선택한' 싱크로 적재. 선택 없음/빌더 미주입 → undefined(no-op).
-  // 절대 throw 하지 않는다 — 어떤 실패든 {status:"failed", message} 로 기록해 스코어카드 결과와 격리한다.
+  // 케이스 스트리밍 export — 배치가 케이스 완성(judge 후) 즉시 push 해 팀 플랫폼에 케이스 단위로 나타나게
+  // 한다(배치 전체 완료 대기 없음 — 라이브 가시성 + 실패 시 부분 보존). 준비(설정/선택/시크릿/빌더)는 스트림
+  // 생성 시 1회. 선택 없음/빌더 미주입 → undefined(no-op, 현행 옵트인 시맨틱). 절대 throw 하지 않는다.
   // attach: pull 인제스트의 (source.kind, caseId→외부 runId) — 소스와 싱크가 같은 플랫폼일 때만 기존 trace 에
   // 점수를 부착(흐름②, 복제 없음)하고, 다르면 create 모드로 폴백(흐름①과 동일).
+  // docs/architecture/streaming-case-pipeline.md D5 + docs/architecture/trace-sink.md
+  async exportStream(
+    tenant: string,
+    ctx: { scorecardId: string; dataset: string; harness: string },
+    attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
+  ): Promise<CaseExportStream | undefined> {
+    const s = await this.settings.get(tenant);
+    // ctx.harness = "id@version" — 싱크 선택은 하니스 id 단위(버전 무관).
+    const harnessId = ctx.harness.split("@")[0] ?? ctx.harness;
+    const sinkName = s?.traceSinkByHarness?.[harnessId];
+    const sink = sinkName ? (s?.traceSinks ?? []).find((e) => e.name === sinkName) : undefined;
+    const buildSink = this.deps.buildSink;
+    if (!sink || !buildSink) return undefined;
+    const exportedAt = (this.deps.now ?? (() => new Date().toISOString()))();
+
+    // 준비 실패(시크릿 미등록 등)는 스트림을 "실패 outcome 전용"으로 — push 는 무시되고 settle 이 사유를 반환.
+    let impl: TraceSink | undefined;
+    let initError: string | undefined;
+    try {
+      let auth: string | undefined;
+      if (sink.authSecretName) {
+        const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
+        auth = secrets[sink.authSecretName];
+        if (!auth) initError = `SecretStore 에 '${sink.authSecretName}' 값이 없습니다 — 시크릿을 먼저 등록하세요.`;
+      }
+      if (!initError) {
+        impl = buildSink({
+          kind: sink.kind,
+          endpoint: sink.endpoint,
+          ...(auth ? { auth } : {}),
+          ...(sink.project ? { project: sink.project } : {}),
+          ...(sink.webUrl ? { webUrl: sink.webUrl } : {}),
+        });
+      }
+    } catch (err) {
+      initError = err instanceof Error ? err.message : String(err);
+    }
+    const ids = attach && attach.sourceKind === sink.kind ? attach.externalIdByCase : undefined;
+    const toSinkCase = (r: CaseResult): TraceSinkCase => {
+      const externalId = ids?.[r.caseId];
+      return {
+        caseId: r.caseId,
+        trace: r.trace,
+        scores: r.scores.map((sc) => ({
+          name: sc.metric,
+          value: sc.value,
+          ...(sc.pass !== undefined ? { pass: sc.pass } : {}),
+          ...(typeof sc.detail === "string" && sc.detail !== "" ? { comment: sc.detail } : {}),
+        })),
+        ...(externalId ? { externalId } : {}),
+      };
+    };
+
+    const limit = createLimiter(this.deps.exportConcurrency ?? 2);
+    const tasks: Array<Promise<void>> = [];
+    const outcomes: SinkCaseOutcome[] = []; // push 순서 보존(슬롯 선점 후 비동기 기록)
+    let url: string | undefined;
+    return {
+      push: (result) => {
+        const sinkImpl = impl;
+        if (!sinkImpl) return; // 준비 실패 — settle 이 사유 반환(케이스 발사 없음)
+        const slot = outcomes.length;
+        outcomes.push({ caseId: result.caseId, error: "미완료" }); // 슬롯 선점 — 태스크가 덮어쓴다
+        tasks.push(
+          limit(async () => {
+            try {
+              const out = await sinkImpl.export(ctx, [toSinkCase(result)]);
+              url ??= out.url;
+              outcomes[slot] = out.cases[0] ?? { caseId: result.caseId, error: "싱크가 결과를 돌려주지 않음" };
+            } catch (err) {
+              // 케이스별 격리 — 한 케이스의 업스트림 실패가 다른 케이스/스코어카드를 막지 않는다.
+              outcomes[slot] = { caseId: result.caseId, error: err instanceof Error ? err.message : String(err) };
+            }
+          }),
+        );
+      },
+      settle: async () => {
+        await Promise.all(tasks);
+        if (initError) return { sink: sink.kind, name: sink.name, status: "failed", message: initError, exportedAt };
+        const failed = outcomes.filter((c) => c.error).length;
+        const status = failed === 0 ? "succeeded" : failed === outcomes.length && failed > 0 ? "failed" : "partial";
+        // 전면 실패면 첫 에러 사유를 최상위로(케이스별 호출이라 wholesale 장애도 케이스에 격리됨 — 사유 승격),
+        // 부분 실패면 개수 요약(케이스별 사유는 cases[].error 에).
+        const message =
+          status === "failed"
+            ? outcomes.find((c) => c.error)?.error
+            : failed > 0
+              ? `${failed}/${outcomes.length}개 케이스 적재 실패`
+              : undefined;
+        return {
+          sink: sink.kind,
+          name: sink.name,
+          status,
+          ...(url ? { url } : {}),
+          ...(message ? { message } : {}),
+          exportedAt,
+          cases: outcomes,
+        };
+      },
+    };
+  }
+
+  // 채점 완료된 케이스 결과(trace+점수)를 '그 하니스가 선택한' 싱크로 적재 — 일괄 소비형(ingest 등 결과가
+  // 이미 다 있는 경로). 내부적으로 스트림에 전부 push 후 합류(코어는 exportStream 하나).
   async exportScorecard(
     tenant: string,
     ctx: { scorecardId: string; dataset: string; harness: string },
     results: CaseResult[],
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ): Promise<ScorecardExport | undefined> {
-    const s = await this.settings.get(tenant);
-    // ctx.harness = "id@version" — 싱크 선택은 하니스 id 단위(버전 무관).
-    const harnessId = ctx.harness.split("@")[0] ?? ctx.harness;
-    const sinkName = s?.traceSinkByHarness?.[harnessId];
-    const sink = sinkName ? (s?.traceSinks ?? []).find((e) => e.name === sinkName) : undefined;
-    if (!sink || !this.deps.buildSink) return undefined;
-    const exportedAt = (this.deps.now ?? (() => new Date().toISOString()))();
-    try {
-      let auth: string | undefined;
-      if (sink.authSecretName) {
-        const secrets = await (this.deps.secretsFor?.(tenant) ?? Promise.resolve<Record<string, string>>({}));
-        auth = secrets[sink.authSecretName];
-        if (!auth)
-          return {
-            sink: sink.kind,
-            name: sink.name,
-            status: "failed",
-            message: `SecretStore 에 '${sink.authSecretName}' 값이 없습니다 — 시크릿을 먼저 등록하세요.`,
-            exportedAt,
-          };
-      }
-      const impl = this.deps.buildSink({
-        kind: sink.kind,
-        endpoint: sink.endpoint,
-        ...(auth ? { auth } : {}),
-        ...(sink.project ? { project: sink.project } : {}),
-        ...(sink.webUrl ? { webUrl: sink.webUrl } : {}),
-      });
-      const ids = attach && attach.sourceKind === sink.kind ? attach.externalIdByCase : undefined;
-      const cases: TraceSinkCase[] = results.map((r) => {
-        const externalId = ids?.[r.caseId];
-        return {
-          caseId: r.caseId,
-          trace: r.trace,
-          scores: r.scores.map((sc) => ({
-            name: sc.metric,
-            value: sc.value,
-            ...(sc.pass !== undefined ? { pass: sc.pass } : {}),
-            ...(typeof sc.detail === "string" && sc.detail !== "" ? { comment: sc.detail } : {}),
-          })),
-          ...(externalId ? { externalId } : {}),
-        };
-      });
-      const out = await impl.export(ctx, cases);
-      const failed = out.cases.filter((c) => c.error).length;
-      const status = failed === 0 ? "succeeded" : failed === out.cases.length ? "failed" : "partial";
-      return {
-        sink: sink.kind,
-        name: sink.name,
-        status,
-        ...(out.url ? { url: out.url } : {}),
-        ...(failed > 0 ? { message: `${failed}/${out.cases.length}개 케이스 적재 실패` } : {}),
-        exportedAt,
-        cases: out.cases,
-      };
-    } catch (err) {
-      // UpstreamError 포함 전면 실패 — 스코어카드에 영향 없이 사유만 기록.
-      return {
-        sink: sink.kind,
-        name: sink.name,
-        status: "failed",
-        message: err instanceof Error ? err.message : String(err),
-        exportedAt,
-      };
-    }
+    const stream = await this.exportStream(tenant, ctx, attach);
+    if (!stream) return undefined;
+    for (const r of results) stream.push(r);
+    return stream.settle();
   }
 }

@@ -152,9 +152,29 @@ zero id coordination**: no seeding, no injected runId — `runCase` mints the ke
 OTLP-exporting script) mints its *own* trace id and sets only the `assay.run_id` resource attribute, and both
 collect modes (O1 job / O2 control-plane) resolve it by tag search. PASS 2026-07-07.
 
+### D5 — per-case sink export streaming (shipped)
+
+The trace-sink export (the last remaining batch barrier) now streams: each case is exported to the
+harness-selected platform **the moment its judging completes**, so the team sees traces/scores appear in
+their MLflow/Langfuse case-by-case *while the batch runs*, and a batch that dies mid-way has already
+exported its finished cases. Shape:
+
+- `TraceSinkService.exportStream(tenant, ctx, attach?)` → `{push, settle}` — setup (sink roster →
+  per-harness selection → secret resolve → `buildTraceSink`) happens **once at stream creation**; `push`
+  fires a bounded per-case `sink.export(ctx, [case])` (default concurrency 2 — sink rate-limit guard);
+  `settle` joins and aggregates into the **same `ScorecardRecord.export` shape** (status/url/per-case ids —
+  no schema or web change). Export tasks never throw (unchanged isolation contract); a wholesale failure
+  surfaces as the first case error promoted to the top-level message. `exportScorecard` (ingest + fallback)
+  is reimplemented as push-all + settle over the same core.
+- **Chaining**: `JudgeStream.push` now returns a per-case completion promise; `ScorecardService.track`
+  chains `judged.then(() => exportStream.push(case))` — exports always carry judge scores, and the
+  case-completion pipeline is now executed → judged → exported with only aggregate/persist as the barrier.
+  Wired via `ScorecardServiceDeps.exportStreamFor`; without it the live batch falls back to the old
+  post-batch `exportResults` (no regression), and ingest stays batch-shaped.
+- **Supersede**: no new exports are launched after abort; already-launched ones are joined and recorded as a
+  partial `export` outcome on the superseded record (traceability — `superseded ≠ succeeded`, no pollution).
+
 ## Follow-ups (deliberately not in this pass)
-- **Per-case sink export streaming** — export after each case's judging instead of post-batch; today's export
-  is one fast HTTP pass, low value until sinks dominate the tail.
 - **Durable batch orchestration on Temporal** — per-case activities give restart resilience + horizontal
   control-plane scale; extend the existing runs pattern when batch sizes demand it.
 - **Capacity-derived dispatch concurrency** — `runSuite` default 4 is static; derive from

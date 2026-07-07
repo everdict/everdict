@@ -19,6 +19,7 @@ import {
 import type { TraceSource, TraceSourceConfig } from "@assay/trace";
 import { describe, expect, it } from "vitest";
 import { ScorecardService } from "./scorecard-service.js";
+import type { CaseExportStream } from "./trace-sink-service.js";
 
 const dispatcher: Dispatcher = {
   async dispatch() {
@@ -506,6 +507,63 @@ describe("ScorecardService — 트레이스 싱크 적재(export)", () => {
       };
     },
   };
+
+  it("싱크 export 는 케이스 스트리밍(D5) — 케이스 완성 즉시 발사된다(배치 후 일괄이면 이 테스트는 행)", async () => {
+    // rendezvous: c2 디스패치는 c1 의 export push 를 기다린다 — export 가 배치 뒤 일괄이면 영원히 못 만난다.
+    let c1Exported: () => void = () => {};
+    const exportedC1 = new Promise<void>((resolve) => {
+      c1Exported = resolve;
+    });
+    const gatedDispatch: Dispatcher = {
+      async dispatch(job) {
+        if (job.evalCase.id === "c2") await exportedC1;
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tests-pass", metric: "tests-pass", value: 1, pass: true }],
+        };
+      },
+    };
+    const datasets = new InMemoryDatasetRegistry();
+    const one = datasetWithCase();
+    const c1 = one.cases[0];
+    if (!c1) throw new Error("datasetWithCase 는 케이스 1개를 보장한다");
+    await datasets.register("acme", { ...one, cases: [c1, { ...c1, id: "c2" }] });
+    const store = new InMemoryScorecardStore();
+    const pushed: string[] = [];
+    const exportStreamFor = async (): Promise<CaseExportStream> => ({
+      push: (r) => {
+        pushed.push(r.caseId);
+        if (r.caseId === "c1") c1Exported(); // c1 이 나가는 순간 c2 가 풀린다(스트리밍 증명)
+      },
+      settle: async () => ({
+        sink: "mlflow",
+        name: "mlf",
+        status: "succeeded",
+        exportedAt: "2026-07-07T00:00:00.000Z",
+        cases: pushed.map((caseId) => ({ caseId, externalId: `ext-${caseId}` })),
+      }),
+    });
+    const service = new ScorecardService({
+      dispatcher: gatedDispatch,
+      store,
+      datasets,
+      exportStreamFor,
+      newId: () => "sc-export-stream",
+    });
+    await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+    });
+    const rec = await waitTerminal(store, "sc-export-stream");
+    expect(rec.status).toBe("succeeded");
+    expect(pushed).toEqual(["c1", "c2"]); // 완성 순서대로 케이스별 발사
+    expect(rec.export?.cases?.map((c) => c.caseId)).toEqual(["c1", "c2"]); // settle 합산이 record.export 로
+    expect(rec.steps?.some((s) => s.phase === "export" && s.status === "ok")).toBe(true);
+  }, 5000);
 
   it("라이브 배치: 채점 후 exportResults outcome 이 record.export 와 steps(export)로 기록된다", async () => {
     const datasets = new InMemoryDatasetRegistry();

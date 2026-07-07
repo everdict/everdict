@@ -14,13 +14,15 @@ export interface ScoringServiceDeps {
   caseConcurrency?: number; // 케이스 축 judge 동시 실행 상한(기본 4) — 프로바이더 rate-limit 보호
 }
 
-// 케이스 스트리밍 채점 핸들 — push 는 즉시 반환(bounded 태스크 발사), settle 이 전 태스크 합류 + 첫 에러 rethrow.
+// 케이스 스트리밍 채점 핸들 — push 는 bounded 태스크를 발사하고 '그 케이스'의 judge 완료 시 resolve 되는
+// Promise 를 돌려준다(후속 스테이지 체이닝용 — 예: 케이스 완성 즉시 싱크 export). 태스크 에러는 push 의
+// Promise 로는 새지 않고 settle 이 첫 에러를 rethrow 한다(전 태스크 합류).
 export interface JudgeStream {
-  push(result: CaseResult): void;
+  push(result: CaseResult): Promise<void>;
   settle(): Promise<void>;
 }
 
-const NOOP_STREAM: JudgeStream = { push: () => {}, settle: async () => {} };
+const NOOP_STREAM: JudgeStream = { push: async () => {}, settle: async () => {} };
 
 export class ScoringService {
   constructor(private readonly deps: ScoringServiceDeps) {}
@@ -77,13 +79,13 @@ export class ScoringService {
     return {
       push: (result) => {
         const evalCase = caseById.get(result.caseId);
-        if (!evalCase) return; // 데이터셋에 없는 caseId 는 스킵(정렬 불가)
-        tasks.push(
-          limit(() => this.applyJudgesToCase(tenant, evalCase, specs, result, runtime)).catch((err) => {
-            // 태스크는 발사 시점에 잡아둔다(unhandled rejection 방지) — settle 에서 첫 에러를 다시 던진다.
-            firstError ??= err;
-          }),
-        );
+        if (!evalCase) return Promise.resolve(); // 데이터셋에 없는 caseId 는 스킵(정렬 불가)
+        const task = limit(() => this.applyJudgesToCase(tenant, evalCase, specs, result, runtime)).catch((err) => {
+          // 태스크는 발사 시점에 잡아둔다(unhandled rejection 방지) — settle 에서 첫 에러를 다시 던진다.
+          firstError ??= err;
+        });
+        tasks.push(task);
+        return task; // 이 케이스의 judge 완료 신호(에러는 삼켜짐 — 체이닝 스테이지는 완료만 기다린다)
       },
       settle: async () => {
         await Promise.all(tasks);

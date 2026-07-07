@@ -70,8 +70,10 @@ langsmith `x-api-key`; phoenix needs `source.project`), then score.
 The workspace registers **named sinks** (`WorkspaceSettings.traceSinks[]`: MLflow/Langfuse/LangSmith/Phoenix,
 routes `/workspace/trace-sinks*`), and each **harness opts in** by selecting one
 (`traceSinkByHarness`, `PUT /harnesses/:id/trace-sink`, member+). The pipeline exports the selecting
-harness's case trace+scores to that platform after judging
-(`TraceSinkService.exportScorecard` → `@assay/trace` `buildTraceSink`), records the outcome on
+harness's case trace+scores to that platform — **streaming, per case as its judging completes** (D5:
+`TraceSinkService.exportStream` `{push,settle}`; the orchestrator chains `JudgeStream.push`'s per-case
+completion promise → `export push`; `exportScorecard` = push-all+settle, used by ingest + fallback) —
+records the outcome on
 `ScorecardRecord.export` (mig 0048 `sink_export` jsonb, detail-only like `steps`), and the web shows summary +
 deep links. **Export failure NEVER fails the scorecard** (outcome-only; `error.phase` untouched). Pull-ingest
 whose `source.kind` equals the sink kind **attaches scores to the original trace** (no duplication) — the

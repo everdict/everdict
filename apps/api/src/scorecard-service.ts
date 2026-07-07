@@ -49,6 +49,7 @@ import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
 import { ScoringService } from "./scoring-service.js";
+import type { CaseExportStream } from "./trace-sink-service.js";
 
 // 트레이스 싱크 적재 결과 한 줄 — 진행 스텝 메시지용(성공/부분/실패 + 사유).
 function exportStepMessage(e: ScorecardExport): string {
@@ -219,6 +220,12 @@ export interface ScorecardServiceDeps {
     results: CaseResult[],
     attach?: { sourceKind: string; externalIdByCase: Record<string, string> },
   ) => Promise<ScorecardExport | undefined>;
+  // 케이스 스트리밍 싱크 export(D5) — 라이브 배치가 케이스 완성(judge 후) 즉시 push 하도록 스트림을 만든다.
+  // 미설정이면 라이브 배치는 exportResults(일괄, 배치 후)로 폴백(무회귀). ingest 는 항상 exportResults(일괄).
+  exportStreamFor?: (
+    tenant: string,
+    ctx: { scorecardId: string; dataset: string; harness: string },
+  ) => Promise<CaseExportStream | undefined>;
   artifacts?: ArtifactStore; // 설정 시 os-use 스크린샷을 object storage 로 오프로드(레코드엔 URL 만)
   // 설정 시 케이스마다 자식 run(RunRecord)을 팬아웃 생성해 각 케이스가 addressable run(트레이스/usage/provenance)이 되게 한다.
   // 미설정이면 현행대로 자식 run 없이 임베드 scorecard 만(단일 run 과 같은 RunStore 를 공유). 자식은 활동 리스트에서 기본 숨김.
@@ -619,6 +626,17 @@ export class ScorecardService {
       // (케이스 축 병렬·bounded). 가장 느린 케이스가 나머지 judging 을 막던 배리어 제거.
       // docs/architecture/streaming-case-pipeline.md
       const judgeStream = await this.scoring.createJudgeStream(tenant, dataset, judges, runtime);
+      // 싱크 export 스트리밍(D5) — 하니스가 싱크를 선택했으면 케이스 완성(judge 후) 즉시 그 케이스만
+      // 팀 플랫폼으로 내보낸다(라이브 가시성 + 배치가 도중에 죽어도 나간 것은 남는다). 미배선이면
+      // 아래 성공 경로에서 exportResults(일괄)로 폴백(무회귀).
+      const exportCtx = {
+        scorecardId: id,
+        dataset: `${dataset.id}@${dataset.version}`,
+        harness: `${harnessId}@${harnessVersion}`,
+      };
+      const exportStream = this.deps.exportStreamFor
+        ? await this.deps.exportStreamFor(tenant, exportCtx).catch(() => undefined)
+        : undefined;
       pushStep("dispatch", "started", `${cases.length}개 케이스 실행 시작`);
       await flushSteps();
       // onResult: 케이스가 끝날 때마다(완료 순서) PASS/FAIL + 사유를 스텝으로 — "진행 과정"의 핵심.
@@ -637,7 +655,16 @@ export class ScorecardService {
           );
           void flushSteps();
           // supersede 이후엔 judge 발사도 생략(회수된 배치에 LLM 비용을 더 쓰지 않는다).
-          if (!controller.signal.aborted) judgeStream.push(r);
+          if (!controller.signal.aborted) {
+            const judged = judgeStream.push(r);
+            // 케이스 완성 체이닝: judge 점수가 붙은 '뒤에' 그 케이스만 export — abort 후엔 신규 발사 생략
+            // (이미 발사된 export 는 자연 완료, supersede 경로가 합류 후 partial outcome 으로 기록).
+            if (exportStream) {
+              void judged.then(() => {
+                if (!controller.signal.aborted) exportStream.push(r);
+              });
+            }
+          }
         },
       });
       pushStep("dispatch", "ok", `디스패치 완료 — ${scorecard.results.length}개 케이스`);
@@ -648,12 +675,16 @@ export class ScorecardService {
         // 이미 발사된 judge 태스크는 합류 후 저장(진행 중 scores 변이와 write-back 레이스 방지).
         // 회수된 배치의 judge 에러는 소음 — swallow.
         await judgeStream.settle().catch(() => {});
+        // 스트리밍으로 이미 나간 export 는 합류 후 partial outcome 으로 기록(추적용 — superseded ≠ succeeded
+        // 라 baseline/리더보드 무오염). 나간 케이스가 없으면 기록 생략(빈 outcome 은 소음).
+        const exportedPartial = exportStream ? await exportStream.settle().catch(() => undefined) : undefined;
         pushStep("supersede", "info", "같은 PR 의 더 새 발사로 대체됨 — 남은 케이스 미발사, 부분 결과만 보존");
         const hasChildren = caseToChild.size > 0;
         if (hasChildren) await this.writeBackResults(caseToChild, scorecard.results);
         await this.deps.store.update(id, {
           status: "superseded",
           ...(scorecard.results.length > 0 ? { summary: summarizeScorecard(scorecard) } : {}),
+          ...(exportedPartial?.cases?.length ? { export: exportedPartial } : {}),
           steps: [...steps],
           ...(hasChildren ? { runIds: [...caseToChild.values()] } : { scorecard }),
           updatedAt: this.now(),
@@ -677,20 +708,13 @@ export class ScorecardService {
       phase = "offload";
       await this.offloadResults(id, scorecard.results); // os-use 스크린샷 → object storage(레코드 슬림)
       // 트레이스 싱크 적재(설정 시) — 실패해도 스코어카드는 성공(outcome.status 로만 기록, error.phase 미사용).
-      // TraceSinkService 가 이미 throw 하지 않지만, 만약을 위해 여기서도 격리(catch → 미기록).
-      const exported = this.deps.exportResults
-        ? await this.deps
-            .exportResults(
-              tenant,
-              {
-                scorecardId: id,
-                dataset: `${dataset.id}@${dataset.version}`,
-                harness: `${harnessId}@${harnessVersion}`,
-              },
-              scorecard.results,
-            )
-            .catch(() => undefined)
-        : undefined;
+      // 스트리밍(exportStream)이면 케이스는 이미 judge 직후 나갔다 — 여기는 잔여 태스크 합류(join)+outcome 합산만.
+      // 미배선이면 현행 일괄 export 폴백. TraceSinkService 가 이미 throw 하지 않지만, 만약을 위해 여기서도 격리.
+      const exported = exportStream
+        ? await exportStream.settle().catch(() => undefined)
+        : this.deps.exportResults
+          ? await this.deps.exportResults(tenant, exportCtx, scorecard.results).catch(() => undefined)
+          : undefined;
       if (exported) pushStep("export", exported.status === "failed" ? "failed" : "ok", exportStepMessage(exported));
       phase = "persist";
       const summary = summarizeScorecard(scorecard);

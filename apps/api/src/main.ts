@@ -381,6 +381,8 @@ async function main(): Promise<void> {
     onComplete: (tenant, record) => notificationService.notifyScorecard(tenant, record),
     // 트레이스 싱크 적재 — 채점 완료된 상세 결과를 워크스페이스 관측 플랫폼으로(record.export 에 outcome 기록).
     exportResults: (tenant, ctx, results, attach) => traceSinkService.exportScorecard(tenant, ctx, results, attach),
+    // 라이브 배치는 케이스 완성(judge 후) 즉시 스트리밍 export(D5) — ingest 는 위 exportResults(일괄) 유지.
+    exportStreamFor: (tenant, ctx) => traceSinkService.exportStream(tenant, ctx),
   });
   // Mattermost 인바운드(슬래시커맨드/버튼) — commandToken 검증 후 채팅에서 스코어카드 실행/리더보드 조회.
   const mattermostCommandService = new MattermostCommandService({

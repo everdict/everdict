@@ -151,17 +151,24 @@ One service core, `TraceSinkService` (`apps/api/src/trace-sink-service.ts`):
 
 - **Settings CRUD** — `get/set/clear(workspace)`, mirror of `MattermostService` (view = name-refs
   only, safe to expose).
-- **Export** — `exportScorecard(tenant, ctx, results, externalIdByCase?)`: read settings → no sink
-  configured = no-op (undefined) → resolve `authSecretName` via `secretsFor` → `buildTraceSink` →
-  map `CaseResult[]` to `TraceSinkCase[]` (scores → `{name: metric, value, pass, comment: detail}`)
-  → `sink.export` → derive `succeeded | partial | failed` → return the record `export` payload.
-  Never throws (catches → `{status: "failed", message}`).
+- **Export core** — `exportStream(tenant, ctx, attach?)` → `{push, settle}` (**streaming, D5** —
+  `docs/architecture/streaming-case-pipeline.md`): setup once at creation (read settings → no sink
+  configured = no-op (undefined) → resolve `authSecretName` via `secretsFor` → `buildTraceSink`);
+  `push(case)` fires a bounded per-case `sink.export(ctx, [case])` (scores → `{name: metric, value,
+  pass, comment: detail}`); `settle()` joins and aggregates `succeeded | partial | failed` into the
+  same record `export` payload. Never throws (per-case errors isolate into `cases[].error`; a
+  wholesale failure promotes the first case error to the top-level message).
+  `exportScorecard(tenant, ctx, results, attach?)` = push-all + settle over the same core (batch
+  consumption for ingest + fallback).
 
 Call sites (both share it — same seam as `ScoringService`):
 
-- **Live batch** — `ScorecardService.track()`: after judges + offload, **before** the final
-  persist; the outcome lands in the same terminal `store.update`. Steps timeline gains an
-  `export` phase (`started → ok/failed`) so the detail page shows the stage. `error.phase` is
+- **Live batch** — `ScorecardService.track()` **streams**: each case is pushed the moment its judging
+  completes (`JudgeStream.push` returns the per-case completion promise; the orchestrator chains
+  `judged.then(push)`), so cases appear on the team's platform while the batch runs and a mid-batch
+  death keeps what already exported. After offload, `settle()` joins and the outcome lands in the same
+  terminal `store.update`; a superseded batch records a partial outcome for already-exported cases.
+  Steps timeline gains an `export` phase (`ok/failed`) so the detail page shows the stage. `error.phase` is
   never set by export.
 - **Ingest (push + pull)** — `finishIngest()`: same position. The pull path passes
   `externalIdByCase` (from the request's `runs` mapping) **when `source.kind === sink.kind`** →
