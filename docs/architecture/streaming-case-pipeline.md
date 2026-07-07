@@ -140,9 +140,19 @@ header conventions: otel/mlflow verbatim `Authorization`, langsmith `x-api-key`)
 real Arize Phoenix (`scripts/live/trace-collect-phoenix.mjs`, docker-booted): P1 `collect="job"` post-release
 pull round trip + P2 `collect="control-plane"` completion, both PASS 2026-07-07.
 
+### D4 — OTel tag correlation (shipped; Jaeger live-verified, the full real-agent round trip)
+
+`CommandTraceSpec` otel gains **`correlate:"id"|"tag"` + `service`** (mirroring mlflow's tag mode).
+`OtelTraceSource` in tag mode searches the **Jaeger query API**
+(`GET /api/traces?service=…&tags={"assay.run_id":…}&limit=1` — verified vs real Jaeger 1.62: the `tags`
+filter matches **resource/process tags**, `service` is required, and the search response embeds full spans →
+one request, reusing the existing `{data:[{spans}]}` parser). OTLP-native backends without a search API stay
+id-correlated. Live e2e (`scripts/live/trace-collect-otel.mjs`) proves the **full real-agent contract with
+zero id coordination**: no seeding, no injected runId — `runCase` mints the key, the command (a real
+OTLP-exporting script) mints its *own* trace id and sets only the `assay.run_id` resource attribute, and both
+collect modes (O1 job / O2 control-plane) resolve it by tag search. PASS 2026-07-07.
+
 ## Follow-ups (deliberately not in this pass)
-- **Tag correlation for OTel** — the Jaeger-style query is also id-addressed; a resource-attribute search
-  mode (mirroring the mlflow tag mode) needs a per-backend query shape survey first.
 - **Per-case sink export streaming** — export after each case's judging instead of post-batch; today's export
   is one fast HTTP pass, low value until sinks dominate the tail.
 - **Durable batch orchestration on Temporal** — per-case activities give restart resilience + horizontal

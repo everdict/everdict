@@ -47,9 +47,12 @@ path → runs on **Local / Nomad / K8s** backends with the existing isolation.
   `traceRef {kind, endpoint, runId}`, and `executeCase` pulls + grades the deferred observation graders on the
   control plane (only if the endpoint is reachable from there). **Auth**: `authSecret` (SecretStore name →
   verbatim `Authorization`; resolved into transient `trace.auth` for in-job pulls, re-resolved by name for
-  control-plane pulls). **Correlation** (mlflow): `correlate:"id"` (default — runId IS the platform trace id,
-  pull-ingest convention) or `"tag"` — the agent tags its trace `assay.run_id=$ASSAY_RUN_ID` and Assay
-  resolves it via `traces/search` (requires `experiment` scope). Empty pulls retry (3×, flush lag).
+  control-plane pulls). **Correlation** (mlflow + otel): `correlate:"id"` (default — runId IS the platform
+  trace id, pull-ingest convention) or `"tag"` — the agent tags its trace with `assay.run_id=$ASSAY_RUN_ID`
+  (mlflow: trace tag, resolved via `traces/search`, requires `experiment` scope; otel: resource attribute —
+  `OTEL_RESOURCE_ATTRIBUTES` is already injected — resolved via the Jaeger search API, requires `service`
+  scope). Tag mode needs zero id coordination: the agent keeps its own trace ids. Empty pulls retry (3×,
+  flush lag).
 
 ## Security
 `setup`/`command` are **arbitrary user code** → they run only inside a **trust zone** (gVisor/Kata + per-tenant

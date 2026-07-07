@@ -115,6 +115,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
               ...(source.correlate ? { correlate: source.correlate } : {}),
               ...(source.experiment ? { experiment: source.experiment } : {}),
               ...(source.project ? { project: source.project } : {}),
+              ...(source.service ? { service: source.service } : {}),
             },
           }
         : {}),

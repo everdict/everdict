@@ -29,6 +29,10 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
   `correlate:"tag"` resolves an assay `runId` via `POST /api/3.0/mlflow/traces/search` — `locations` is
   REQUIRED (`experimentIds`), the filter is `` tags.`assay.run_id` = '…' `` (backtick-quoted), and the agent-side
   tag write is `PATCH /api/3.0/mlflow/traces/{id}/tags`. Verified live against MLflow 3.14.0.
+  `OtelTraceSource` `correlate:"tag"` uses the **Jaeger query API**: `GET /api/traces?service=…&tags=<JSON
+  {"assay.run_id":…}>&limit=1` — `service` is REQUIRED (400 without), the `tags` filter matches
+  **resource(process) tags**, and the search response embeds full spans (same `{data:[{spans}]}` parser, one
+  request). OTLP-native backends (no search API) stay id-correlated. Verified live against Jaeger 1.62.0.
 - Remap upstream failures to our error model: a non-2xx → `UpstreamError` (so a pull run fails honestly), EXCEPT
   `404` → `[]` (trace not present yet; service-harness path scores 0 events).
 - **Sinks (`*-sink.ts`, `buildTraceSink`)** mirror the source discipline with three deltas: ① auth is a single

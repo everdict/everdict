@@ -19,9 +19,10 @@ export interface HarnessTraceSource {
   endpoint: string;
   collect: "job" | "control-plane";
   authSecret?: string; // 인증 시크릿 '이름'(컨트롤플레인이 collect 시 재해석) — 값은 traceRef 에 싣지 않는다
-  correlate?: "id" | "tag"; // mlflow 전용 — tag 면 assay.run_id 태그 검색으로 상관
+  correlate?: "id" | "tag"; // mlflow/otel — tag 면 assay.run_id 태그(리소스 속성) 검색으로 상관
   experiment?: string; // mlflow tag 상관의 검색 범위(experiment id)
   project?: string; // phoenix 전용 — 스팬 조회 경로의 프로젝트(필수 API 형태)
+  service?: string; // otel tag 상관의 검색 범위(Jaeger service 파라미터 — 에이전트의 service.name)
 }
 
 // 피평가 대상. ComputeHandle(샌드박스) 안에서 구동되며, native 출력을

@@ -117,9 +117,12 @@ describe("CommandHarness", () => {
       },
       async dispose() {},
     };
-    const h = new CommandHarness(spec({ trace: { kind: "otel", endpoint: "http://j", collect: "job" } }), {
-      traceSourceFor: () => source,
-    });
+    const h = new CommandHarness(
+      spec({ trace: { kind: "otel", endpoint: "http://j", collect: "job", correlate: "id" } }),
+      {
+        traceSourceFor: () => source,
+      },
+    );
     const events = await collect(h.run(compute, "t", ctx));
     expect(events).toEqual([]); // stdout message 없음 + run() 은 플랫폼 pull 안 함(수집은 compute 해제 후)
     expect(await h.collectTrace("rid")).toEqual(sourceEvents);
@@ -150,10 +153,13 @@ describe("CommandHarness", () => {
         return [{ t: 0, kind: "tool_call", id: "x", name: "n", args: {} }];
       },
     });
-    const h = new CommandHarness(spec({ trace: { kind: "otel", endpoint: "http://j", collect: "job" } }), {
-      runId: () => "rid2",
-      traceSourceFor,
-    });
+    const h = new CommandHarness(
+      spec({ trace: { kind: "otel", endpoint: "http://j", collect: "job", correlate: "id" } }),
+      {
+        runId: () => "rid2",
+        traceSourceFor,
+      },
+    );
     await collect(h.run(compute, "t", ctx));
     expect(execs[0]?.env?.ASSAY_RUN_ID).toBe("rid2"); // 실행에 주입된 상관 키
     const events = await h.collectTrace("rid2"); // 같은 키로 pull(runCase 가 compute 해제 후 호출)
@@ -310,7 +316,7 @@ describe("CommandHarness", () => {
     const { start, calls } = fakeMeter();
     const h = new CommandHarness(
       spec({
-        trace: { kind: "otel", endpoint: "http://j", collect: "job" },
+        trace: { kind: "otel", endpoint: "http://j", collect: "job", correlate: "id" },
         env: { OPENAI_API_BASE: "http://litellm:4000" },
       }),
       {

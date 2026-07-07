@@ -47,6 +47,7 @@ export async function collectDeferredTrace(
         headers = { authorization: auth };
       }
       // 검색 범위: mlflow tag 상관의 experiment | phoenix 의 project — TraceSourceConfig.project 로 수렴.
+      // otel tag 상관의 service 는 별도 파라미터(Jaeger service).
       const project = ref.experiment ?? ref.project;
       const source = deps.buildTraceSource({
         kind: ref.kind,
@@ -54,6 +55,7 @@ export async function collectDeferredTrace(
         ...(headers ? { headers } : {}),
         ...(ref.correlate ? { correlate: ref.correlate } : {}),
         ...(project ? { project } : {}),
+        ...(ref.service ? { service: ref.service } : {}),
       });
       const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
       let events: Awaited<ReturnType<TraceSource["fetch"]>> = [];

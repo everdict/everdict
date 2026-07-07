@@ -17,7 +17,7 @@ export interface CommandHarnessOptions {
   traceSourceFor?: (
     kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix",
     endpoint: string,
-    opts?: { auth?: string; correlate?: "id" | "tag"; project?: string },
+    opts?: { auth?: string; correlate?: "id" | "tag"; project?: string; service?: string },
   ) => TraceSource;
   runId?: () => string;
   sleep?: (ms: number) => Promise<void>; // collectTrace 재시도 백오프(기본 setTimeout)
@@ -64,14 +64,16 @@ export class CommandHarness implements EvaluableHarness {
   traceSource(): HarnessTraceSource | undefined {
     const trace = this.spec.trace;
     if (trace.kind === "none") return undefined;
+    const correlatable = trace.kind === "mlflow" || trace.kind === "otel";
     return {
       kind: trace.kind,
       endpoint: trace.endpoint,
       collect: trace.collect,
       ...(trace.authSecret ? { authSecret: trace.authSecret } : {}),
-      ...(trace.kind === "mlflow" && trace.correlate !== "id" ? { correlate: trace.correlate } : {}),
+      ...(correlatable && trace.correlate !== "id" ? { correlate: trace.correlate } : {}),
       ...(trace.kind === "mlflow" && trace.experiment ? { experiment: trace.experiment } : {}),
       ...(trace.kind === "phoenix" ? { project: trace.project } : {}),
+      ...(trace.kind === "otel" && trace.service ? { service: trace.service } : {}),
     };
   }
 
@@ -83,14 +85,18 @@ export class CommandHarness implements EvaluableHarness {
   async collectTrace(runId: string): Promise<TraceEvent[]> {
     const trace = this.spec.trace;
     if (trace.kind === "none") return [];
-    const correlate = trace.kind === "mlflow" && trace.correlate === "tag" ? ("tag" as const) : undefined;
+    const correlate =
+      (trace.kind === "mlflow" || trace.kind === "otel") && trace.correlate === "tag" ? ("tag" as const) : undefined;
     // 검색 범위: mlflow tag 상관의 experiment | phoenix 의 project — TraceSourceConfig.project 로 수렴.
+    // otel tag 상관의 service 는 별도 파라미터(Jaeger service).
     const project = trace.kind === "mlflow" ? trace.experiment : trace.kind === "phoenix" ? trace.project : undefined;
+    const service = trace.kind === "otel" ? trace.service : undefined;
     const source =
       this.opts.traceSourceFor?.(trace.kind, trace.endpoint, {
         ...(trace.auth ? { auth: trace.auth } : {}),
         ...(correlate ? { correlate } : {}),
         ...(project ? { project } : {}),
+        ...(service ? { service } : {}),
       }) ??
       buildTraceSource({
         kind: trace.kind,
@@ -98,6 +104,7 @@ export class CommandHarness implements EvaluableHarness {
         ...(trace.auth ? { headers: { authorization: trace.auth } } : {}),
         ...(correlate ? { correlate } : {}),
         ...(project ? { project } : {}),
+        ...(service ? { service } : {}),
       });
     const sleep = this.opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     for (let attempt = 0; ; attempt++) {

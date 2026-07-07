@@ -224,7 +224,15 @@ const commandTraceAuth = {
 };
 export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("none") }),
-  z.object({ kind: z.literal("otel"), endpoint: z.string(), ...commandTraceAuth }),
+  z.object({
+    kind: z.literal("otel"),
+    endpoint: z.string(),
+    ...commandTraceAuth,
+    // 상관 방식: "id"(기본) = runId 가 곧 trace id | "tag" = 에이전트 리소스 속성 assay.run_id 로 검색
+    // (주입 env OTEL_RESOURCE_ATTRIBUTES 그대로 — Jaeger query API 전용, service 필수).
+    correlate: z.enum(["id", "tag"]).default("id"),
+    service: z.string().optional(), // tag 상관의 검색 범위(에이전트의 service.name)
+  }),
   z.object({
     kind: z.literal("mlflow"),
     endpoint: z.string(),

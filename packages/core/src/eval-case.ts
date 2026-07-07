@@ -51,9 +51,10 @@ export const TraceRefSchema = z.object({
   // 인증 시크릿 '이름'(SecretStore) — 컨트롤플레인이 collect 시 값으로 재해석해 어댑터 관례 헤더로
   // (otel/mlflow=verbatim Authorization, langsmith=x-api-key 등). 값은 절대 싣지 않는다(CaseResult 는 영속된다).
   authSecret: z.string().optional(),
-  correlate: z.enum(["id", "tag"]).optional(), // mlflow 전용 — tag 면 assay.run_id 태그 검색으로 상관
+  correlate: z.enum(["id", "tag"]).optional(), // mlflow/otel — tag 면 assay.run_id 태그(리소스 속성) 검색으로 상관
   experiment: z.string().optional(), // mlflow tag 상관의 검색 범위(experiment id)
   project: z.string().optional(), // phoenix 전용 — 스팬 조회 경로의 프로젝트
+  service: z.string().optional(), // otel tag 상관의 검색 범위(Jaeger service — 에이전트의 service.name)
 });
 export type TraceRef = z.infer<typeof TraceRefSchema>;
 
