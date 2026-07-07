@@ -56,4 +56,4 @@ jobs:
       - name: Run gitleaks
         run: |
           curl -sL https://github.com/gitleaks/gitleaks/releases/download/v8.24.3/gitleaks_8.24.3_linux_x64.tar.gz | tar xz gitleaks
-          ./gitleaks git . --log-opts="--all" --no-banner
+          ./gitleaks git . --config .gitleaks.toml --log-opts="--all" --no-banner
