@@ -5,7 +5,7 @@
 //  3) versions/getService(latest) + 불변성(다른 스펙 재등록 → 409 Conflict)
 //  4) 새 풀(프로세스 재기동 모사)로 같은 스펙 조회 → 영속 증명
 //
-// 사용: DATABASE_URL=postgresql://ho2eny:PASS@127.0.0.1:55433/postgres node scripts/live/pg-harness-registry.mjs
+// 사용: DATABASE_URL=postgresql://USER:PASS@127.0.0.1:5432/postgres node scripts/live/pg-harness-registry.mjs
 
 import { makePool, migrate, sqlClient } from "../../packages/db/dist/index.js";
 import {
@@ -14,7 +14,8 @@ import {
   loadHarnessTaxonomyDir,
 } from "../../packages/registry/dist/index.js";
 
-const DB_URL = process.env.DATABASE_URL ?? "postgresql://ho2eny:zBQzo4rXyTKHXcdfu9Dc@127.0.0.1:55433/postgres";
+const DB_URL = process.env.DATABASE_URL;
+if (!DB_URL) throw new Error("DATABASE_URL 필요 — 크리덴셜은 env 로만 (git 에 기본값 금지)");
 const DIR = new URL("../../examples/harness-templates", import.meta.url).pathname;
 const T = "_shared";
 

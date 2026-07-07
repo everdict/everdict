@@ -22,8 +22,8 @@
       "publicClient": false,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
-      "redirectUris": ["http://localhost:3001/*", "http://100.69.164.81:3001/*"],
-      "webOrigins": ["http://localhost:3001", "http://100.69.164.81:3001"],
+      "redirectUris": ["http://localhost:3001/*"],
+      "webOrigins": ["http://localhost:3001"],
       "protocolMappers": [
         {
           "name": "workspace",

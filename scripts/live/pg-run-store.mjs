@@ -4,11 +4,12 @@
 //  2) PgRunStore: create(queued) → get → update(succeeded,result) → get → list(tenant)
 //  3) 새 풀(= 프로세스 재기동 모사)로 같은 id 조회 → 영속 증명
 //
-// 사용: DATABASE_URL=postgresql://ho2eny:PASS@127.0.0.1:55433/postgres node scripts/live/pg-run-store.mjs
+// 사용: DATABASE_URL=postgresql://USER:PASS@127.0.0.1:5432/postgres node scripts/live/pg-run-store.mjs
 
 import { PgRunStore, makePool, migrate, preflight, sqlClient } from "../../packages/db/dist/index.js";
 
-const URL = process.env.DATABASE_URL ?? "postgresql://ho2eny:zBQzo4rXyTKHXcdfu9Dc@127.0.0.1:55433/postgres";
+const URL = process.env.DATABASE_URL;
+if (!URL) throw new Error("DATABASE_URL 필요 — 크리덴셜은 env 로만 (git 에 기본값 금지)");
 const ID = `pglive-${Date.now().toString(36)}`;
 
 function rec(status) {

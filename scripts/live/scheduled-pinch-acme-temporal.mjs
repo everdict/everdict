@@ -22,7 +22,7 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const TEMPORAL = process.env.ASSAY_TEMPORAL_ADDRESS ?? "127.0.0.1:7233";
 const INTERNAL = "dev-internal-token";
 const DATABASE_URL = process.env.DATABASE_URL ?? "postgresql://assay:assay@localhost:5433/assay";
-const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ?? "http://100.69.164.81:8081/realms/assay";
+const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ?? "http://localhost:8081/realms/assay";
 const SECRETS_KEY = process.env.ASSAY_SECRETS_KEY ?? "JIMYnR3k6zSSI7juJhzVQrhgpjnWXeCfBvakUMV2bQY=";
 const ROOT = new URL("../..", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));

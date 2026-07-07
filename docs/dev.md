@@ -58,8 +58,9 @@ redirects and the token `iss` break. Pick **one canonical externally-reachable h
 4. **Realm** — `assay-web` `redirectUris`/`webOrigins` must include `http://<host>:3001` (see `realm-assay.json`;
    re-import with `down -v` after editing, or add via the admin console).
 
-This repo is wired for **Tailscale `100.69.164.81`** → open `http://100.69.164.81:3001` from any tailnet device.
-To switch hosts, change `ASSAY_PUBLIC_HOST` + the two `.env` files + the realm `redirectUris` to the new host.
+Example: with Tailscale, set `ASSAY_PUBLIC_HOST=<your-tailnet-ip>` → open `http://<your-tailnet-ip>:3001`
+from any tailnet device. To switch hosts, change `ASSAY_PUBLIC_HOST` + the two `.env` files + the realm
+`redirectUris` to the new host (+ `ASSAY_DEV_ORIGIN=<host>` in `apps/web/.env.local` for dev-server HMR).
 
 > **HTTP on non-private hosts:** Keycloak's realm `sslRequired` defaults to `external`, which **refuses plain HTTP**
 > on any non-RFC1918 address (Tailscale `100.64.0.0/10`, public IPs) → `403 "HTTPS required"`. The dev realm sets

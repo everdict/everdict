@@ -7,7 +7,7 @@
 //   pnpm -C apps/web dev            # 웹(:3001, Keycloak 구성)
 // 사용:
 //   node scripts/live/desktop-keycloak.mjs
-//   (env: ASSAY_E2E_WEB=http://100.69.164.81:3001 · ASSAY_E2E_USER/PASS=alice/alice · ASSAY_E2E_WS=acme)
+//   (env: ASSAY_E2E_WEB=http://<host>:3001 · ASSAY_E2E_USER/PASS=alice/alice · ASSAY_E2E_WS=acme)
 import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -18,7 +18,7 @@ const require = createRequire(new URL("../../apps/desktop/package.json", import.
 const { _electron } = require("playwright-core");
 const electronPath = require("electron");
 
-const WEB = (process.env.ASSAY_E2E_WEB ?? "http://100.69.164.81:3001").replace(/\/$/, "");
+const WEB = (process.env.ASSAY_E2E_WEB ?? "http://localhost:3001").replace(/\/$/, "");
 const USER = process.env.ASSAY_E2E_USER ?? "alice";
 const PASS = process.env.ASSAY_E2E_PASS ?? "alice";
 const WS = process.env.ASSAY_E2E_WS ?? "acme";
