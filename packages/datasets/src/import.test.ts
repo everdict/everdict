@@ -1,6 +1,6 @@
 import { DatasetSchema } from "@everdict/core";
 import { describe, expect, it } from "vitest";
-import { importCsv, importJsonl, importWebVoyager, parseCsv } from "./index.js";
+import { importBenchmark, importCsv, importJsonl, importWebVoyager, parseCsv } from "./index.js";
 
 describe("importWebVoyager", () => {
   const jsonl = [
@@ -68,5 +68,34 @@ describe("importCsv / parseCsv", () => {
     );
     expect(ds.cases[0]?.id).toBe("c1");
     expect(ds.cases[0]?.graders).toEqual([{ id: "answer-match", config: { expect: "42" } }]);
+  });
+});
+
+// Import truncation regression (import level) — importBenchmark with no explicit limit must map the FULL
+// HF dataset; the old importBenchmark default silently capped the viewer path at 100 rows.
+describe("importBenchmark full-dataset import", () => {
+  it("imports every row when no limit is given (no silent 100-row cap)", async () => {
+    const total = 250;
+    const fetchImpl = async (url: string) => {
+      const offset = Number(new URL(url).searchParams.get("offset"));
+      const length = Number(new URL(url).searchParams.get("length"));
+      const count = Math.max(0, Math.min(length, total - offset));
+      const rows = Array.from({ length: count }, (_, i) => ({ row: { id: `t-${offset + i}`, q: "do it" } }));
+      return { ok: true, status: 200, text: async () => JSON.stringify({ rows, num_rows_total: total }) };
+    };
+    const ds = await importBenchmark(
+      {
+        id: "bench",
+        description: "d",
+        category: "browser",
+        defaultVersion: "1.0.0",
+        source: { kind: "huggingface", dataset: "osunlp/Online-Mind2Web" },
+        mapping: { idField: "id", taskField: "q", promptEnv: true },
+      },
+      { id: "bench", version: "1.0.0" },
+      { fetchImpl },
+    );
+    expect(ds.cases).toHaveLength(250);
+    expect(ds.cases[249]?.id).toBe("t-249");
   });
 });

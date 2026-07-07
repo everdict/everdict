@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type FetchLike, fetchHfDataFiles, fetchHfFileRows } from "./sources.js";
+import { type FetchLike, fetchHfDataFiles, fetchHfFileRows, fetchHfRows } from "./sources.js";
 
 // Fallback for datasets the viewer (datasets-server) doesn't serve — direct repo file fetch (officeqa 404 regression).
 describe("HF direct file-fetch fallback", () => {
@@ -48,5 +48,30 @@ describe("HF direct file-fetch fallback", () => {
     await expect(fetchHfFileRows({ dataset: "d/x", file: "a.json" }, fetchOf('{"id":"nope"}'))).rejects.toThrow(
       /array/,
     );
+  });
+});
+
+// Import truncation regression — an import with no explicit limit must fetch the FULL dataset
+// (docs/datasets.md: "import is always the full dataset"); the old default silently capped at one page (100 rows).
+describe("fetchHfRows full-dataset paging", () => {
+  const pagedFetch =
+    (total: number): FetchLike =>
+    async (url) => {
+      const offset = Number(new URL(url).searchParams.get("offset"));
+      const length = Number(new URL(url).searchParams.get("length"));
+      const count = Math.max(0, Math.min(length, total - offset));
+      const rows = Array.from({ length: count }, (_, i) => ({ row: { id: offset + i } }));
+      return { ok: true, status: 200, text: async () => JSON.stringify({ rows, num_rows_total: total }) };
+    };
+
+  it("fetches every page when no limit is given (no silent 100-row cap)", async () => {
+    const rows = await fetchHfRows({ dataset: "osunlp/Online-Mind2Web" }, pagedFetch(250));
+    expect(rows).toHaveLength(250);
+    expect(rows[249]).toEqual({ id: 249 });
+  });
+
+  it("an explicit limit still caps the fetch", async () => {
+    const rows = await fetchHfRows({ dataset: "osunlp/Online-Mind2Web", limit: 30 }, pagedFetch(250));
+    expect(rows).toHaveLength(30);
   });
 });

@@ -60,7 +60,8 @@ export async function importBenchmark(
   opts: ImportBenchmarkOpts = {},
 ): Promise<Dataset> {
   if (adapter.source.kind === "huggingface") {
-    // file specified = fallback for datasets the viewer doesn't serve (fetch the repo file directly). If limit is unset, the whole file (the viewer path defaults to 100).
+    // If limit is unset, import the WHOLE dataset on both paths (repo file and viewer) — an import must never
+    // silently truncate (docs/datasets.md: "import is always the full dataset"); explicit limit still caps.
     const rows = adapter.source.file
       ? await fetchHfFileRows(
           {
@@ -76,7 +77,7 @@ export async function importBenchmark(
             dataset: adapter.source.dataset,
             config: adapter.source.config,
             split: adapter.source.split,
-            limit: opts.limit ?? 100,
+            ...(opts.limit !== undefined ? { limit: opts.limit } : {}),
             token: opts.token,
           },
           opts.fetchImpl,

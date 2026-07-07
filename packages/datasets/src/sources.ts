@@ -9,7 +9,7 @@ export interface HfRowsParams {
   dataset: string; // e.g. "openai/gsm8k"
   config?: string; // default "default"
   split?: string; // default "train"
-  limit?: number; // total fetch cap (default 100)
+  limit?: number; // total fetch cap — absent = the FULL dataset (paged; imports must not silently truncate)
   token?: string; // for gated datasets (Authorization: Bearer) — injected from the tenant SecretStore
 }
 
@@ -73,12 +73,14 @@ interface HfRowsResponse {
 }
 
 // Fetch rows via HF datasets-server /rows (paging 100 at a time as needed). Authenticate with token if gated.
+// No limit = the FULL dataset (paged to num_rows_total) — an import must never silently truncate
+// (docs/datasets.md: "import is always the full dataset"); callers cap explicitly (e.g. preview's limit 5).
 export async function fetchHfRows(p: HfRowsParams, fetchImpl?: FetchLike): Promise<Array<Record<string, unknown>>> {
   const f = fetchImpl ?? (globalThis.fetch as unknown as FetchLike);
   if (!f) throw new Error("fetchHfRows: no fetch implementation (pass fetchImpl or run on Node 18+)");
   const config = p.config ?? "default";
   const split = p.split ?? "train";
-  const limit = Math.max(1, p.limit ?? HF_PAGE);
+  const limit = p.limit === undefined ? Number.POSITIVE_INFINITY : Math.max(1, p.limit);
   const headers: Record<string, string> = {};
   if (p.token) headers.Authorization = `Bearer ${p.token}`;
 
