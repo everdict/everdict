@@ -1,5 +1,7 @@
 # Assay
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 Harness-agnostic, infra-agnostic **agent evaluation runtime**. Register & version any agent harness —
 a CLI (Claude Code, Codex, or any binary via the declarative `command` harness) or a multi-service
 topology (browser-use LangGraph) — run it across environments (repo / browser / os-use) and runtimes
@@ -48,6 +50,15 @@ control plane on top: apps/api (HTTP+MCP) · apps/web (SaaS web) — see CLAUDE.
 - **Service-topology harness** (browser-use-langgraph): a deployed topology (agent / MCP / action-stream
   + Postgres/Redis/MinIO) that acts on a target env (browser + extension). Efficient: warm per-version
   services + shared ID-keyed stores + per-case browser. See `docs/service-harness.md`.
+
+## Run (Docker Compose quickstart)
+```bash
+git clone https://github.com/Ho2eny/assay && cd assay
+docker compose -f deploy/compose/docker-compose.dev.yaml up --build
+# web http://localhost:3001 · API http://localhost:8787 — auth off, single tenant, in-memory stores
+```
+Hardened profile (Postgres persistence, secrets-at-rest, healthchecks): `deploy/compose/README.md`.
+Human SSO (Keycloak OIDC): `deploy/keycloak/` (realm auto-import) + `docs/dev.md`.
 
 ## Run (CLI quickstart)
 ```bash
@@ -100,15 +111,15 @@ See `docs/architecture/self-hosted-runner.md` (+ service harnesses on your Docke
 ## Connect an agent (MCP)
 The agent-facing surface is an OAuth-protected MCP server at `POST /mcp` — same tools as the HTTP API,
 role-gated + workspace-scoped. Connect with **OAuth browser login (like Linear)** or a headless **API key**.
-Endpoint: `http://<host>:8787/mcp` (set `<host>` to where `apps/api` runs; examples use the tailnet IP).
+Endpoint: `http://<host>:8787/mcp` (set `<host>` to where `apps/api` runs).
 
 ### Claude Code
 ```bash
 # OAuth — "login like Linear": opens the browser, log in via Keycloak, done.
-claude mcp add --transport http assay http://100.69.164.81:8787/mcp
+claude mcp add --transport http assay http://<host>:8787/mcp
 
 # headless with an API key (CI / no browser):
-claude mcp add --transport http assay http://100.69.164.81:8787/mcp \
+claude mcp add --transport http assay http://<host>:8787/mcp \
   --header "Authorization: Bearer ak_..."
 ```
 
@@ -117,9 +128,9 @@ Codex reaches a remote MCP via `mcp-remote` (runs the OAuth + PKCE flow). Add to
 ```toml
 [mcp_servers.assay]
 command = "npx"
-args = ["-y", "mcp-remote", "http://100.69.164.81:8787/mcp"]
+args = ["-y", "mcp-remote", "http://<host>:8787/mcp"]
 # headless instead — drop the browser, use an API key:
-# args = ["-y", "mcp-remote", "http://100.69.164.81:8787/mcp", "--header", "Authorization: Bearer ak_..."]
+# args = ["-y", "mcp-remote", "http://<host>:8787/mcp", "--header", "Authorization: Bearer ak_..."]
 ```
 
 On first OAuth connect you log in to Keycloak and **approve a one-time consent** ("allow"), then the
@@ -139,13 +150,13 @@ claude mcp remove assay 2>/dev/null    # clear a half-finished add
 rm -rf ~/.mcp-auth                      # clear stale mcp-remote OAuth cache
 
 # A) open the printed URL yourself, or force the browser:
-BROWSER=google-chrome claude mcp add --transport http assay http://100.69.164.81:8787/mcp
+BROWSER=google-chrome claude mcp add --transport http assay http://<host>:8787/mcp
 
 # B) mcp-remote prints the auth URL explicitly (same client Codex uses):
-claude mcp add assay -- npx -y mcp-remote http://100.69.164.81:8787/mcp
+claude mcp add assay -- npx -y mcp-remote http://<host>:8787/mcp
 
 # C) skip the browser entirely with an API key:
-claude mcp add --transport http assay http://100.69.164.81:8787/mcp \
+claude mcp add --transport http assay http://<host>:8787/mcp \
   --header "Authorization: Bearer ak_..."
 ```
 A remote/SSH shell can't open a browser **and** receive the loopback callback — use the API key (C) there.
@@ -184,3 +195,6 @@ control-plane-owned auth (real Keycloak OIDC + API keys), Postgres persistence, 
 courier, and the agent-facing MCP server (full BFF↔MCP parity). Shipped but awaiting a live external
 e2e: GitHub Actions CI triggers (PR pins / merge re-pin, OIDC federation). Still needing your
 infra/images: real browser+extension images, ClickHouse analytics, code-signing certs (desktop).
+
+## License
+[Apache-2.0](LICENSE).

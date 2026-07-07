@@ -1,6 +1,7 @@
 {
   "name": "@assay/desktop",
   "version": "0.0.0",
+  "license": "Apache-2.0",
   "private": true,
   "description": "Assay desktop — web parity shell + resident self-hosted runner",
   "author": "Ho2eny <heoin122@gmail.com>",
