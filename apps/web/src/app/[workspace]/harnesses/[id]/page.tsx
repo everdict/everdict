@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import Link from 'next/link'
 import { ChevronLeft, FileText, GitBranchPlus, Lock } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
 import { HarnessVersionSwitcher } from '@/features/harness-versions'
@@ -44,22 +45,6 @@ const KIND_TONE: Record<HarnessKind, 'info' | 'warning' | 'neutral'> = {
   process: 'neutral',
 }
 
-// kind 별 한 줄 요약 — 헤더 설명.
-function summarize(spec: HarnessSpec): string {
-  if (spec.kind === 'service') {
-    const svc = spec.services?.length ?? 0
-    const dep = spec.dependencies?.length ?? 0
-    const target = spec.target ? ' · 타깃 환경' : ''
-    return `여러 서비스로 구성 · 서비스 ${svc} · 스토어 ${dep}${target}`
-  }
-  if (spec.kind === 'command') {
-    const tool = spec.command?.split(' ')[0] ?? 'cli'
-    const setup = spec.setup?.length ?? 0
-    return `CLI 에이전트 · ${tool} · 설치 ${setup}`
-  }
-  return '단일 프로세스로 실행 (Claude Code · Codex)'
-}
-
 // 메타 항목 — 구성 값 리스트(DefRow)와 동일한 라벨(왼)·값(오) 행. divided Card 안에서 반복.
 function MetaItem({
   label,
@@ -85,14 +70,14 @@ function MetaItem({
   )
 }
 
-function BackLink({ workspace }: { workspace: string }) {
+function BackLink({ workspace, label }: { workspace: string; label: string }) {
   return (
     <Link
       href={`/${workspace}/harnesses`}
       className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
     >
       <ChevronLeft className="size-3.5" />
-      하니스
+      {label}
     </Link>
   )
 }
@@ -107,6 +92,7 @@ export default async function HarnessDetailPage({
   const { workspace, id } = await params
   const { v } = await searchParams
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('harnessesPage')
 
   let versions: string[] = []
   let versionTags: Record<string, string[]> = {}
@@ -218,20 +204,35 @@ export default async function HarnessDetailPage({
   if (!spec) {
     return (
       <div className="space-y-5">
-        <BackLink workspace={workspace} />
+        <BackLink workspace={workspace} label={t('backToList')} />
         <PageHeader title={id} />
-        <Callout tone="danger">하니스를 불러오지 못했어요: {error ?? '알 수 없는 오류'}</Callout>
+        <Callout tone="danger">{t('loadError', { error: error ?? t('unknownError') })}</Callout>
       </div>
     )
   }
 
+  // kind 별 한 줄 요약 — 헤더 설명.
+  const summary =
+    spec.kind === 'service'
+      ? t('summaryService', {
+          svc: spec.services?.length ?? 0,
+          dep: spec.dependencies?.length ?? 0,
+          target: spec.target ? t('summaryTargetSuffix') : '',
+        })
+      : spec.kind === 'command'
+        ? t('summaryCommand', {
+            tool: spec.command?.split(' ')[0] ?? 'cli',
+            setup: spec.setup?.length ?? 0,
+          })
+        : t('summaryProcess')
+
   return (
     <div className="space-y-7">
       <div className="space-y-3">
-        <BackLink workspace={workspace} />
+        <BackLink workspace={workspace} label={t('backToList')} />
         <PageHeader
           title={spec.id}
-          description={summarize(spec)}
+          description={summary}
           actions={
             <div className="flex flex-wrap items-center justify-end gap-2">
               {versions.length > 1 ? (
@@ -249,7 +250,8 @@ export default async function HarnessDetailPage({
                 href={`/${workspace}/harnesses/${encodeURIComponent(id)}/new-version?v=${encodeURIComponent(active ?? '')}`}
                 className={buttonVariants({ variant: 'secondary', size: 'sm' })}
               >
-                <GitBranchPlus className="size-3.5" />새 버전 만들기
+                <GitBranchPlus className="size-3.5" />
+                {t('newVersion')}
               </Link>
             </div>
           }
@@ -260,7 +262,8 @@ export default async function HarnessDetailPage({
       {versionNote && (
         <Card className="p-5">
           <div className="mb-2 flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
-            <FileText className="size-3.5" />이 버전의 변경 내역
+            <FileText className="size-3.5" />
+            {t('versionChangeNote')}
           </div>
           <p className="whitespace-pre-wrap text-[13.5px] leading-relaxed text-foreground">
             {versionNote}
@@ -270,23 +273,25 @@ export default async function HarnessDetailPage({
 
       {/* 메타 — 라벨(왼)·값(오) 항목을 반응형 그리드로. 화면이 넓을수록 열을 늘려(2→3→4) 넉넉히 펼친다. */}
       <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-4">
-        <MetaItem label="종류">
+        <MetaItem label={t('metaKind')}>
           <Badge tone={KIND_TONE[spec.kind]}>{spec.kind}</Badge>
         </MetaItem>
-        {entry?.category && <MetaItem label="분류">{entry.category}</MetaItem>}
-        <MetaItem label="버전">
+        {entry?.category && <MetaItem label={t('metaCategory')}>{entry.category}</MetaItem>}
+        <MetaItem label={t('metaVersion')}>
           <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11.5px] text-secondary-foreground">
             v{active}
           </code>
           {active === versions[versions.length - 1] && (
             <span className="text-[11px] text-faint">latest</span>
           )}
-          <span className="text-[11px] text-faint">· {versions.length || 1}개</span>
+          <span className="text-[11px] text-faint">
+            {t('versionCountMeta', { count: versions.length || 1 })}
+          </span>
         </MetaItem>
         {/* 이 버전의 태그(자유 라벨) — 편집 불가 + 태그 없음이면 행 자체를 숨긴다(빈 섹션 노출 금지).
             _shared(first-party) 하니스는 태깅 불가(레지스트리가 404) → 소유 워크스페이스일 때만 편집 노출. */}
         {active && (canTagVersions || (versionTags[active] ?? []).length > 0) && (
-          <MetaItem label="태그">
+          <MetaItem label={t('metaTags')}>
             <VersionTagsEditor
               entity="harness"
               id={id}
@@ -297,22 +302,28 @@ export default async function HarnessDetailPage({
           </MetaItem>
         )}
         {entry?.createdAt && (
-          <MetaItem label="생성" title={`생성 ${fmtDateTimeFull(entry.createdAt)}`}>
+          <MetaItem
+            label={t('metaCreated')}
+            title={t('createdTitle', { time: fmtDateTimeFull(entry.createdAt) })}
+          >
             {fmtDateTime(entry.createdAt)}
           </MetaItem>
         )}
         {entry?.updatedAt && entry.updatedAt !== entry.createdAt && (
-          <MetaItem label="수정" title={`수정 ${fmtDateTimeFull(entry.updatedAt)}`}>
+          <MetaItem
+            label={t('metaUpdated')}
+            title={t('updatedTitle', { time: fmtDateTimeFull(entry.updatedAt) })}
+          >
             {fmtDateTime(entry.updatedAt)}
           </MetaItem>
         )}
-        <MetaItem label="만든이">
+        <MetaItem label={t('metaAuthor')}>
           {author.known && <Avatar name={author.name} url={author.avatarUrl} size="sm" />}
           <span>{author.name}</span>
         </MetaItem>
         {/* 하니스별 트레이스 싱크 선택 — 워크스페이스에 싱크가 없고 선택도 없으면 행 자체를 숨긴다(빈 섹션 노출 금지). */}
         {(traceSinks.sinks.length > 0 || assignedSink !== undefined) && (
-          <MetaItem label="트레이스 싱크">
+          <MetaItem label={t('metaTraceSink')}>
             <HarnessSinkSelect
               harnessId={id}
               sinks={traceSinks.sinks.map((s) => ({ name: s.name, kind: s.kind }))}
@@ -322,9 +333,9 @@ export default async function HarnessDetailPage({
           </MetaItem>
         )}
         {entry?.private && (
-          <MetaItem label="공개 범위">
+          <MetaItem label={t('metaVisibility')}>
             <span className="inline-flex items-center gap-1 text-[var(--color-warning)]">
-              <Lock className="size-3" /> 비공개
+              <Lock className="size-3" /> {t('visibilityPrivate')}
             </span>
           </MetaItem>
         )}
@@ -333,10 +344,10 @@ export default async function HarnessDetailPage({
       {/* 구성 — 이 하니스가 실제로 실행되는 최종 설정을 깔끔한 값 뷰로. 원본(pins/overrides)·JSON 은 접이식. */}
       <section className="space-y-4">
         <div className="space-y-1">
-          <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">구성</h2>
-          <p className="text-[12px] text-muted-foreground">
-            이 하니스가 실제로 실행되는 설정이에요.
-          </p>
+          <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">
+            {t('configHeading')}
+          </h2>
+          <p className="text-[12px] text-muted-foreground">{t('configDescription')}</p>
         </div>
         <HarnessDetail
           spec={spec}
@@ -359,7 +370,7 @@ export default async function HarnessDetailPage({
         workspace={workspace}
         resourceType="harness"
         resourceId={spec.id}
-        title="논의"
+        title={t('discussTitle')}
       />
     </div>
   )

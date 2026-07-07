@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Globe, Lock, MoreHorizontal, Trash2 } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import type { View } from '@/entities/view'
 import { fmtTimeAgo } from '@/shared/lib/format'
@@ -31,19 +32,21 @@ export function ViewList({
   isAdmin: boolean
   workspace: string
 }) {
+  const t = useTranslations('analyzeScorecards')
+  const locale = useLocale()
   const router = useRouter()
   const [pending, start] = useTransition()
   const [error, setError] = useState<string | undefined>()
 
   const ownerName = (subject: string) =>
-    `${authors[subject]?.name ?? subject}${subject === currentSubject ? ' (나)' : ''}`
+    `${authors[subject]?.name ?? subject}${subject === currentSubject ? t('meSuffix') : ''}`
 
   const toggleVisibility = (v: View) =>
     start(async () => {
       setError(undefined)
       const next = v.visibility === 'workspace' ? 'private' : 'workspace'
       const r = await updateViewAction(v.id, { visibility: next })
-      if (!r.ok) return setError(r.error ?? '변경하지 못했어요.')
+      if (!r.ok) return setError(r.error ?? t('changeFailed'))
       router.refresh()
     })
 
@@ -51,7 +54,7 @@ export function ViewList({
     start(async () => {
       setError(undefined)
       const r = await deleteViewAction(v.id)
-      if (!r.ok) return setError(r.error ?? '삭제하지 못했어요.')
+      if (!r.ok) return setError(r.error ?? t('deleteFailed'))
       router.refresh()
     })
 
@@ -59,7 +62,7 @@ export function ViewList({
     <div className="space-y-2">
       {error && <p className="text-[12px] text-destructive">{error}</p>}
       {views.map((v) => {
-        const chips = describeConfig(storedToConfig(v.config))
+        const chips = describeConfig(storedToConfig(v.config), t)
         const canEdit = isAdmin || v.createdBy === currentSubject
         return (
           <div
@@ -75,11 +78,11 @@ export function ViewList({
                 <Badge tone={v.visibility === 'workspace' ? 'info' : 'neutral'}>
                   {v.visibility === 'workspace' ? (
                     <>
-                      <Globe className="size-3" /> 공유
+                      <Globe className="size-3" /> {t('shared')}
                     </>
                   ) : (
                     <>
-                      <Lock className="size-3" /> 비공개
+                      <Lock className="size-3" /> {t('private')}
                     </>
                   )}
                 </Badge>
@@ -98,13 +101,13 @@ export function ViewList({
 
             <div className="flex shrink-0 items-center gap-2">
               <span className="hidden text-[11px] text-faint sm:inline">
-                {fmtTimeAgo(v.updatedAt)} 수정
+                {t('updatedAgo', { time: fmtTimeAgo(v.updatedAt, locale) })}
               </span>
               <span className="flex w-7 justify-center">
                 <UserAvatar
                   name={ownerName(v.createdBy)}
                   url={authors[v.createdBy]?.avatarUrl}
-                  label="소유자"
+                  label={t('owner')}
                 />
               </span>
               <span className="flex w-8 justify-center">
@@ -116,7 +119,7 @@ export function ViewList({
                         type="button"
                         onClick={toggle}
                         disabled={pending}
-                        aria-label="뷰 메뉴"
+                        aria-label={t('viewMenu')}
                         aria-expanded={open}
                         className="grid size-8 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
                       >
@@ -128,15 +131,15 @@ export function ViewList({
                       icon={v.visibility === 'workspace' ? <Lock /> : <Globe />}
                       onSelect={() => toggleVisibility(v)}
                     >
-                      {v.visibility === 'workspace' ? '비공개로 전환' : '워크스페이스 공유'}
+                      {v.visibility === 'workspace' ? t('switchToPrivate') : t('shareWorkspace')}
                     </DropdownItem>
                     <DropdownSeparator />
                     <DropdownItem icon={<Trash2 />} tone="danger" onSelect={() => remove(v)}>
-                      삭제
+                      {t('delete')}
                     </DropdownItem>
                   </DropdownMenu>
                 ) : (
-                  <Tooltip content="공유 뷰 — 소유자만 관리" align="end">
+                  <Tooltip content={t('sharedOwnerOnly')} align="end">
                     <span className="grid size-8 place-items-center text-faint">
                       <Globe className="size-4" />
                     </span>

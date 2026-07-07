@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { Link2, Search } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { ScorecardRecord } from '@/entities/scorecard'
 import type { View } from '@/entities/view'
@@ -15,9 +16,9 @@ import { StatCard } from '@/shared/ui/stat-card'
 import {
   computeAnalysis,
   configToParams,
-  DIMENSION_LABEL,
+  DIMENSION_KEY,
   dimValue,
-  MEASURE_LABEL,
+  MEASURE_KEY,
   metricsOf,
   type AnalysisConfig,
   type Dimension,
@@ -43,16 +44,16 @@ const GROUP_DIMS: Dimension[] = [
   'month',
 ]
 
-const VIZ: { value: Viz; label: string }[] = [
-  { value: 'table', label: '표' },
-  { value: 'bars', label: '막대' },
-  { value: 'line', label: '추이' },
+const VIZ: { value: Viz; labelKey: string }[] = [
+  { value: 'table', labelKey: 'vizTable' },
+  { value: 'bars', labelKey: 'vizBars' },
+  { value: 'line', labelKey: 'trend' },
 ]
 
 // 프리셋 — "이 대시보드 하나로 4렌즈를 만든다"를 원클릭으로.
-const PRESETS: { label: string; patch: Partial<AnalysisConfig> }[] = [
+const PRESETS: { labelKey: string; patch: Partial<AnalysisConfig> }[] = [
   {
-    label: '리더보드',
+    labelKey: 'presetLeaderboard',
     patch: {
       groupBy: ['harness', 'model'],
       measure: 'passRate',
@@ -61,11 +62,11 @@ const PRESETS: { label: string; patch: Partial<AnalysisConfig> }[] = [
     },
   },
   {
-    label: '하니스별',
+    labelKey: 'presetByHarness',
     patch: { groupBy: ['harness'], pivotBy: 'dataset', measure: 'passRate', viz: 'table' },
   },
   {
-    label: '추이',
+    labelKey: 'trend',
     patch: {
       groupBy: ['day', 'harness'],
       measure: 'passRate',
@@ -74,7 +75,7 @@ const PRESETS: { label: string; patch: Partial<AnalysisConfig> }[] = [
     },
   },
   {
-    label: '버전 비교',
+    labelKey: 'presetVersionCompare',
     patch: {
       groupBy: ['harnessVersion'],
       measure: 'passRate',
@@ -103,6 +104,7 @@ function LineChart({
   buckets: string[]
   series: { label: string; points: (number | undefined)[] }[]
 }) {
+  const t = useTranslations('analyzeScorecards')
   const W = 720
   const H = 200
   const pad = { l: 8, r: 8, t: 10, b: 22 }
@@ -126,7 +128,7 @@ function LineChart({
         viewBox={`0 0 ${W} ${H}`}
         className="h-52 w-full min-w-[520px]"
         role="img"
-        aria-label="점수 추이"
+        aria-label={t('scoreTrend')}
       >
         {series.map((s, si) => {
           const pts = s.points
@@ -192,6 +194,7 @@ export function CustomAnalyzer({
   isAdmin?: boolean
   activeViewId?: string
 }) {
+  const t = useTranslations('analyzeScorecards')
   const [config, setConfig] = useState<AnalysisConfig>(initialConfig)
   const [copied, setCopied] = useState(false)
 
@@ -226,8 +229,8 @@ export function CustomAnalyzer({
   const metrics = useMemo(() => metricsOf(scorecards), [scorecards])
 
   const result = useMemo(
-    () => computeAnalysis(scorecards, config, resolveOwner),
-    [scorecards, config, authors]
+    () => computeAnalysis(scorecards, config, resolveOwner, t('all')),
+    [scorecards, config, authors, t]
   )
 
   const filterCombo = (
@@ -237,7 +240,7 @@ export function CustomAnalyzer({
     render?: (v: string) => string
   ) => {
     const options: ComboboxOption[] = [
-      { value: '', label: `전체 ${label}` },
+      { value: '', label: t('filterAll', { label }) },
       ...values.map((v) => ({ value: v, label: render ? render(v) : v })),
     ]
     return (
@@ -262,7 +265,7 @@ export function CustomAnalyzer({
         { value: '', label: placeholder },
         ...GROUP_DIMS.filter((d) => !exclude.includes(d)).map((d) => ({
           value: d,
-          label: DIMENSION_LABEL[d],
+          label: t(DIMENSION_KEY[d]),
         })),
       ]}
       value={value}
@@ -296,23 +299,25 @@ export function CustomAnalyzer({
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="스코어카드" value={result.total} hint="필터 적용" />
-        <StatCard label="벤치마크" value={opts.dataset.length} />
-        <StatCard label="하니스" value={opts.harness.length} />
-        <StatCard label="모델" value={opts.model.length} />
+        <StatCard label={t('statScorecards')} value={result.total} hint={t('filterApplied')} />
+        <StatCard label={t('statBenchmarks')} value={opts.dataset.length} />
+        <StatCard label={t('statHarnesses')} value={opts.harness.length} />
+        <StatCard label={t('statModels')} value={opts.model.length} />
       </div>
 
       {/* 프리셋 + 검색 + 시각화 + 링크 */}
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">프리셋</span>
+        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+          {t('presetLabel')}
+        </span>
         {PRESETS.map((p) => (
           <button
-            key={p.label}
+            key={p.labelKey}
             type="button"
             onClick={() => patch(p.patch)}
             className="rounded-md border border-border bg-card px-2.5 py-1 text-[12px] font-[510] text-muted-foreground transition-colors hover:border-border-strong hover:text-foreground"
           >
-            {p.label}
+            {t(p.labelKey)}
           </button>
         ))}
         <div className="relative ml-auto min-w-[160px] flex-1 sm:flex-none">
@@ -320,9 +325,9 @@ export function CustomAnalyzer({
           <Input
             value={config.search ?? ''}
             onChange={(e) => patch({ search: e.target.value || undefined })}
-            placeholder="검색"
+            placeholder={t('searchPlaceholder')}
             className="pl-8"
-            aria-label="분석 검색"
+            aria-label={t('searchAria')}
           />
         </div>
         <button
@@ -331,18 +336,18 @@ export function CustomAnalyzer({
           className="inline-flex items-center gap-1 rounded-md border border-border bg-card px-2.5 py-1.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
         >
           <Link2 className="size-3.5" />
-          {copied ? '복사됨' : '링크'}
+          {copied ? t('copied') : t('link')}
         </button>
       </div>
 
       {/* 필터 */}
       <div className="flex flex-wrap items-center gap-2">
-        {filterCombo('벤치마크', 'dataset', opts.dataset)}
-        {filterCombo('하니스', 'harness', opts.harness)}
-        {filterCombo('모델', 'model', opts.model)}
-        {filterCombo('상태', 'status', opts.status)}
-        {opts.owner.length > 0 && filterCombo('실행자', 'owner', opts.owner, resolveOwner)}
-        {opts.origin.length > 0 && filterCombo('출처', 'originSource', opts.origin)}
+        {filterCombo(t('filterBenchmark'), 'dataset', opts.dataset)}
+        {filterCombo(t('harness'), 'harness', opts.harness)}
+        {filterCombo(t('filterModel'), 'model', opts.model)}
+        {filterCombo(t('filterStatus'), 'status', opts.status)}
+        {opts.owner.length > 0 && filterCombo(t('filterOwner'), 'owner', opts.owner, resolveOwner)}
+        {opts.origin.length > 0 && filterCombo(t('filterOrigin'), 'originSource', opts.origin)}
         <Input
           type="date"
           value={config.filters.from ?? ''}
@@ -353,7 +358,7 @@ export function CustomAnalyzer({
             }))
           }
           className="w-[140px]"
-          aria-label="시작일"
+          aria-label={t('dateFrom')}
         />
         <Input
           type="date"
@@ -362,13 +367,15 @@ export function CustomAnalyzer({
             setConfig((c) => ({ ...c, filters: { ...c.filters, to: e.target.value || undefined } }))
           }
           className="w-[140px]"
-          aria-label="종료일"
+          aria-label={t('dateTo')}
         />
       </div>
 
       {/* 형태(그룹·피벗·측정·정렬·시각화) */}
       <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-card/60 p-2.5">
-        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">그룹</span>
+        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+          {t('group')}
+        </span>
         {dimCombo(
           config.groupBy[0] ?? '',
           (v) =>
@@ -377,27 +384,31 @@ export function CustomAnalyzer({
                 ? [v, ...(config.groupBy[1] ? [config.groupBy[1]] : [])]
                 : config.groupBy.slice(1),
             }),
-          '그룹 1',
+          t('group1'),
           [config.groupBy[1]]
         )}
         {dimCombo(
           config.groupBy[1] ?? '',
           (v) => patch({ groupBy: [config.groupBy[0] ?? 'harness', ...(v ? [v] : [])] }),
-          '그룹 2',
+          t('group2'),
           [config.groupBy[0]]
         )}
-        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">열</span>
+        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+          {t('column')}
+        </span>
         {dimCombo(
           config.pivotBy ?? '',
           (v) => patch({ pivotBy: v || undefined }),
-          '피벗(선택)',
+          t('pivotOptional'),
           config.groupBy
         )}
-        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">측정</span>
+        <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+          {t('measure')}
+        </span>
         <Combobox
-          options={(Object.keys(MEASURE_LABEL) as Measure[]).map((m) => ({
+          options={(Object.keys(MEASURE_KEY) as Measure[]).map((m) => ({
             value: m,
-            label: MEASURE_LABEL[m],
+            label: t(MEASURE_KEY[m]),
           }))}
           value={config.measure}
           onChange={(v) => patch({ measure: v as Measure })}
@@ -407,7 +418,7 @@ export function CustomAnalyzer({
         {metrics.length > 1 && (
           <Combobox
             options={[
-              { value: '', label: '기본 metric' },
+              { value: '', label: t('defaultMetric') },
               ...metrics.map((m) => ({ value: m, label: m })),
             ]}
             value={config.metric ?? ''}
@@ -424,7 +435,7 @@ export function CustomAnalyzer({
           }
           className="rounded-md border border-border bg-card px-2 py-1.5 text-[12px] text-muted-foreground hover:text-foreground"
         >
-          정렬 {config.sort.dir === 'desc' ? '↓' : '↑'}
+          {t('sort')} {config.sort.dir === 'desc' ? '↓' : '↑'}
         </button>
         <div className="ml-auto inline-flex overflow-hidden rounded-lg border bg-card">
           {VIZ.map((v, i) => (
@@ -440,7 +451,7 @@ export function CustomAnalyzer({
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              {v.label}
+              {t(v.labelKey)}
             </button>
           ))}
         </div>
@@ -448,7 +459,7 @@ export function CustomAnalyzer({
 
       {/* 결과 */}
       {result.total === 0 ? (
-        <EmptyState title="조건에 맞는 스코어카드가 없어요." hint="필터를 바꿔보세요." />
+        <EmptyState title={t('customEmptyTitle')} hint={t('customEmptyHint')} />
       ) : result.kind === 'line' ? (
         <LineChart buckets={result.buckets} series={result.series} />
       ) : config.viz === 'bars' ? (
@@ -462,7 +473,7 @@ export function CustomAnalyzer({
                   className="w-48 shrink-0 truncate text-[13px] font-[510]"
                   title={r.labels.join(' · ')}
                 >
-                  {r.labels.join(' · ') || '전체'}
+                  {r.labels.join(' · ') || t('all')}
                 </span>
                 <div className="relative h-5 flex-1 overflow-hidden rounded bg-secondary/50">
                   <div
@@ -473,7 +484,9 @@ export function CustomAnalyzer({
                 <span className="w-16 shrink-0 text-right">
                   {measureCell(r.value, config.measure)}
                 </span>
-                <span className="w-10 shrink-0 text-right text-[11px] text-faint">{r.count}건</span>
+                <span className="w-10 shrink-0 text-right text-[11px] text-faint">
+                  {t('countUnit', { count: r.count })}
+                </span>
               </div>
             )
           })}
@@ -485,7 +498,7 @@ export function CustomAnalyzer({
               <tr className="border-b border-border text-left text-[11px] uppercase tracking-wide text-faint">
                 {config.groupBy.map((d) => (
                   <th key={d} className="px-3 py-2 font-[510]">
-                    {DIMENSION_LABEL[d]}
+                    {t(DIMENSION_KEY[d])}
                   </th>
                 ))}
                 {result.pivotKeys.length > 0 ? (
@@ -496,10 +509,10 @@ export function CustomAnalyzer({
                   ))
                 ) : (
                   <th className="px-3 py-2 text-right font-[510]">
-                    {MEASURE_LABEL[config.measure]}
+                    {t(MEASURE_KEY[config.measure])}
                   </th>
                 )}
-                <th className="px-3 py-2 text-right font-[510]">건수</th>
+                <th className="px-3 py-2 text-right font-[510]">{t('countHeader')}</th>
               </tr>
             </thead>
             <tbody>
@@ -531,8 +544,8 @@ export function CustomAnalyzer({
       )}
 
       <p className="text-[11px] text-faint">
-        {result.total}개 스코어카드 기준 · 현재 데이터로 실시간 집계
-        {config.measure === 'passRate' ? ` · 통과율 ${fmtPct(1)} 만점` : ''}
+        {t('customSummary', { total: result.total })}
+        {config.measure === 'passRate' ? t('customSummaryPassRate', { pct: fmtPct(1) }) : ''}
       </p>
     </div>
   )

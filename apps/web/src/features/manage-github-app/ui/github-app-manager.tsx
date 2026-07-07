@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
 import type { GithubAppInstallation, GithubAppView } from '@/entities/github-app'
@@ -23,12 +24,12 @@ export interface GithubAppNotice {
   installed?: boolean
   error?: string
 }
-const INSTALL_ERROR_TEXT: Record<string, string> = {
-  missing_state: '설치 확인에 필요한 요청 정보가 없어요. 설치를 다시 시작해주세요.',
-  invalid_state: '설치 요청이 만료됐거나 이미 사용됐어요. 설치를 다시 시작해주세요.',
-  missing_installation: 'GitHub 이 설치 정보를 주지 않았어요. 설치를 다시 시작해주세요.',
-  install_failed:
-    '설치 확인에 실패했어요. App 자격증명(GHE 는 등록한 App ID·개인키)을 확인해주세요.',
+// 설치 콜백 오류 코드 → 메시지 키(카탈로그에서 사람이 읽을 안내를 해석).
+const INSTALL_ERROR_KEYS: Record<string, string> = {
+  missing_state: 'installErrorMissingState',
+  invalid_state: 'installErrorInvalidState',
+  missing_installation: 'installErrorMissingInstallation',
+  install_failed: 'installErrorInstallFailed',
 }
 
 // 워크스페이스 소유 GitHub App 통합 — 조직 설치→선택 repo→워크스페이스 소유 installation(개인 연결 대체).
@@ -46,9 +47,11 @@ export function GithubAppManager({
   secretNames: string[]
   notice?: GithubAppNotice
 }) {
+  const t = useTranslations('manageGithubApp')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [showGhe, setShowGhe] = useState(view.registrations.length > 0)
+  const noticeErrorKey = notice?.error ? INSTALL_ERROR_KEYS[notice.error] : undefined
 
   function onInstall(host?: string) {
     setError(undefined)
@@ -56,7 +59,7 @@ export function GithubAppManager({
       const r = await startGithubAppInstallAction(host)
       // 설치는 새 탭에서 — 설정 화면을 떠나지 않고 GitHub 설치 플로우를 진행.
       if (r.ok && r.installUrl) window.open(r.installUrl, '_blank', 'noopener,noreferrer')
-      else setError(r.error ?? '설치를 시작하지 못했어요.')
+      else setError(r.error ?? t('installStartFailed'))
     })
   }
   function onUnlink(installationId: number) {
@@ -71,41 +74,29 @@ export function GithubAppManager({
     <div className="space-y-3">
       <div className="space-y-1">
         <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-          GitHub App (조직)
-          <InfoTip
-            content={
-              <>
-                조직에 Assay GitHub App 을 설치하고 저장소를 선택하면, 그 저장소를 워크스페이스가 팀
-                공용으로 clone 해요(멤버 개인 로그인과 무관). 접근은 GitHub 이 선택한 저장소로만
-                제한돼요. github.com 과 GitHub Enterprise 둘 다 같은 방식이에요.
-              </>
-            }
-          />
+          {t('title')}
+          <InfoTip content={t('titleTip')} />
         </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          비공개 저장소를 워크스페이스 단위로 연결해요. 설치할 때 고른 저장소만 접근할 수 있어요.
-        </p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
       </div>
 
       {/* 설치 콜백 직후 피드백 — GitHub 에서 돌아온 순간 "됐다/안 됐다"를 명시적으로 알린다. */}
       {notice?.installed && (
         <Callout tone="info" className="py-1.5">
-          GitHub App 설치가 연결됐어요. 아래 설치 목록에서 허용된 저장소를 확인하세요.
+          {t('installedNotice')}
         </Callout>
       )}
       {notice?.error && (
         <Callout tone="danger" className="py-1.5">
-          {INSTALL_ERROR_TEXT[notice.error] ?? `설치에 실패했어요 (${notice.error})`}
+          {noticeErrorKey ? t(noticeErrorKey) : t('installFailedGeneric', { code: notice.error })}
         </Callout>
       )}
 
       {view.installations.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-card/40 px-4 py-5">
-          <p className="text-[13px] text-muted-foreground">아직 설치된 GitHub App 이 없어요.</p>
+          <p className="text-[13px] text-muted-foreground">{t('emptyTitle')}</p>
           <p className="mt-1 text-[12px] text-faint">
-            {canWrite
-              ? '‘GitHub App 설치’로 조직에 설치하고 저장소를 고르면, 여기에 설치 상태와 허용 저장소가 보여요.'
-              : 'GitHub App 설치는 관리자가 해요.'}
+            {canWrite ? t('emptyHintCanWrite') : t('emptyHintReadOnly')}
           </p>
         </div>
       ) : (
@@ -125,14 +116,14 @@ export function GithubAppManager({
       {canWrite && (
         <div className="flex items-center gap-3">
           <Button variant="secondary" size="sm" disabled={pending} onClick={() => onInstall()}>
-            GitHub App 설치
+            {t('installButton')}
           </Button>
           <button
             type="button"
             className="text-[12px] font-[510] text-primary hover:underline"
             onClick={() => setShowGhe((v) => !v)}
           >
-            GitHub Enterprise…
+            {t('gheToggle')}
           </button>
         </div>
       )}
@@ -171,6 +162,8 @@ function InstallationRow({
   pending: boolean
   onUnlink: (installationId: number) => void
 }) {
+  const t = useTranslations('manageGithubApp')
+  const locale = useLocale()
   const [expanded, setExpanded] = useState(false)
   const repos = install.repos ?? []
   const shown = expanded ? repos : repos.slice(0, REPO_PREVIEW_COUNT)
@@ -186,15 +179,19 @@ function InstallationRow({
       }
       hint={
         <span className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span>설치 {new Date(install.connectedAt).toLocaleDateString('ko-KR')}</span>
+          <span>
+            {t('installedOn', {
+              date: new Date(install.connectedAt).toLocaleDateString(locale),
+            })}
+          </span>
           <span>·</span>
           {install.reposError ? (
             <span className="text-[var(--color-warning)]">{install.reposError}</span>
           ) : repos.length === 0 ? (
-            <span>허용된 저장소가 없어요 — GitHub 의 설치 설정에서 저장소를 선택해주세요.</span>
+            <span>{t('noReposHint')}</span>
           ) : (
             <>
-              <span>허용 저장소 {repos.length}개</span>
+              <span>{t('allowedRepos', { count: repos.length })}</span>
               {shown.map((r) => (
                 <code
                   key={r.fullName}
@@ -209,7 +206,9 @@ function InstallationRow({
                   className="text-[12px] font-[510] text-link hover:text-foreground"
                   onClick={() => setExpanded((v) => !v)}
                 >
-                  {expanded ? '접기' : `+${repos.length - REPO_PREVIEW_COUNT}개 더`}
+                  {expanded
+                    ? t('collapse')
+                    : t('moreRepos', { count: repos.length - REPO_PREVIEW_COUNT })}
                 </button>
               )}
             </>
@@ -217,7 +216,7 @@ function InstallationRow({
         </span>
       }
     >
-      <Badge tone="success">설치됨</Badge>
+      <Badge tone="success">{t('installedBadge')}</Badge>
       {canWrite && (
         <button
           type="button"
@@ -225,7 +224,7 @@ function InstallationRow({
           disabled={pending}
           onClick={() => onUnlink(install.installationId)}
         >
-          연결 해제
+          {t('unlink')}
         </button>
       )}
     </SettingsRow>
@@ -247,6 +246,7 @@ function GheSection({
   onInstall: (host: string) => void
   onError: (msg?: string) => void
 }) {
+  const t = useTranslations('manageGithubApp')
   const [saving, startSaving] = useTransition()
   const [host, setHost] = useState('')
   const [slug, setSlug] = useState('')
@@ -256,7 +256,7 @@ function GheSection({
   function onRegister() {
     onError(undefined)
     if (!host.trim() || !slug.trim() || !appId.trim() || !keyName.trim()) {
-      onError('모든 필드를 입력해주세요.')
+      onError(t('allFieldsRequired'))
       return
     }
     startSaving(async () => {
@@ -285,17 +285,15 @@ function GheSection({
   return (
     <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
       <h4 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-        GitHub Enterprise 서버
+        {t('gheServerTitle')}
         <InfoTip
           content={
             <>
-              GHE 는 서버마다 App 을 직접 만들어 등록해야 해요. App 개인키(PEM)는 워크스페이스
-              시크릿에서 고르거나 “새로”로 바로 저장해요 — 등록엔 그 이름만 남아요. 설치가 끝나면 위
-              설치 목록에 github.com 과 똑같이 보여요.
+              {t('gheTip')}
               {view.callbackUrl && (
                 <>
                   <br />
-                  App Setup URL: <code>{view.callbackUrl}</code>
+                  {t('gheSetupUrl')} <code>{view.callbackUrl}</code>
                 </>
               )}
             </>
@@ -317,14 +315,16 @@ function GheSection({
                     {hostLabel(r.host)}
                     {installedOrgs.length > 0 ? (
                       <Badge tone="success">
-                        설치됨 · {installedOrgs.map((i) => i.account).join(', ')}
+                        {t('installedOrgsBadge', {
+                          orgs: installedOrgs.map((i) => i.account).join(', '),
+                        })}
                       </Badge>
                     ) : (
-                      <Badge tone="outline">미설치</Badge>
+                      <Badge tone="outline">{t('notInstalledBadge')}</Badge>
                     )}
                   </span>
                 }
-                hint={`App ${r.appId} · ${r.slug}`}
+                hint={t('gheRegHint', { appId: r.appId, slug: r.slug })}
               >
                 <Button
                   variant="secondary"
@@ -332,7 +332,7 @@ function GheSection({
                   disabled={pending}
                   onClick={() => onInstall(r.host)}
                 >
-                  설치
+                  {t('installShort')}
                 </Button>
                 <button
                   type="button"
@@ -340,7 +340,7 @@ function GheSection({
                   disabled={saving}
                   onClick={() => onRemove(r.host)}
                 >
-                  삭제
+                  {t('delete')}
                 </button>
               </SettingsRow>
             )
@@ -350,7 +350,7 @@ function GheSection({
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
-          <Label htmlFor="ghe-host">서버 URL</Label>
+          <Label htmlFor="ghe-host">{t('serverUrl')}</Label>
           <Input
             id="ghe-host"
             placeholder="https://ghe.example.com"
@@ -378,7 +378,7 @@ function GheSection({
         </div>
         {/* 개인키(PEM)는 자유 텍스트 입력이 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성(여러 줄 기본). */}
         <div className="space-y-1 sm:col-span-2">
-          <Label htmlFor="ghe-key">개인키 시크릿</Label>
+          <Label htmlFor="ghe-key">{t('privateKeySecret')}</Label>
           <SecretPicker
             id="ghe-key"
             value={keyName}
@@ -386,13 +386,13 @@ function GheSection({
             names={secretNames}
             scope="workspace"
             defaultMultiline
-            createValuePlaceholder="-----BEGIN RSA PRIVATE KEY----- (PEM 붙여넣기)"
-            aria-label="개인키 시크릿 선택"
+            createValuePlaceholder={t('privateKeyPlaceholder')}
+            aria-label={t('privateKeyAria')}
           />
         </div>
       </div>
       <Button size="sm" disabled={saving} onClick={onRegister}>
-        {saving ? '저장 중…' : 'App 등록'}
+        {saving ? t('saving') : t('registerApp')}
       </Button>
     </div>
   )

@@ -2,6 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, ChevronsUpDown, Search } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 
@@ -23,9 +24,9 @@ export function Combobox({
   options,
   value,
   onChange,
-  placeholder = '선택…',
-  emptyText = '항목이 없습니다',
-  searchPlaceholder = '검색…',
+  placeholder,
+  emptyText,
+  searchPlaceholder,
   searchable,
   disabled,
   id,
@@ -55,6 +56,12 @@ export function Combobox({
   const searchRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
   const listId = useId()
+  const t = useTranslations('ui')
+
+  // 미지정 시 카탈로그 기본값(선택…/항목 없음/검색…) — 호출부가 넘기면 그대로 쓴다.
+  const placeholderText = placeholder ?? t('comboboxPlaceholder')
+  const emptyLabel = emptyText ?? t('comboboxEmpty')
+  const searchPlaceholderText = searchPlaceholder ?? t('comboboxSearch')
 
   const showSearch = searchable ?? options.length > 7
   const selected = options.find((o) => o.value === value)
@@ -153,7 +160,7 @@ export function Combobox({
         )}
       >
         <span className={cn('truncate', !value && 'text-muted-foreground/60')}>
-          {selected ? (selected.label ?? selected.value) : value || placeholder}
+          {selected ? (selected.label ?? selected.value) : value || placeholderText}
         </span>
         <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground/70" />
       </button>
@@ -175,14 +182,16 @@ export function Combobox({
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 onKeyDown={onKeyDown}
-                placeholder={searchPlaceholder}
+                placeholder={searchPlaceholderText}
                 className="h-6 w-full bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
               />
             </div>
           )}
           <div ref={listRef} role="listbox" id={listId} className="max-h-60 overflow-y-auto">
             {filtered.length === 0 ? (
-              <p className="px-2 py-3 text-center text-[12px] text-muted-foreground">{emptyText}</p>
+              <p className="px-2 py-3 text-center text-[12px] text-muted-foreground">
+                {emptyLabel}
+              </p>
             ) : (
               filtered.map((opt, idx) => {
                 const isSelected = opt.value === value

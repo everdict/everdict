@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react'
 import { ChevronLeft } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { GithubAppManager, type GithubAppNotice } from '@/features/manage-github-app'
 import { ImageRegistryManager } from '@/features/manage-image-registry'
@@ -39,6 +40,7 @@ export function IntegrationsPanel({
   secretNames: string[]
   initialActive?: IntegrationKey
 }) {
+  const t = useTranslations('settingsPage')
   const [active, setActive] = useState<IntegrationKey | undefined>(
     initialActive ?? (githubAppNotice ? 'github' : undefined)
   )
@@ -47,44 +49,46 @@ export function IntegrationsPanel({
     {
       key: 'github',
       label: 'GitHub',
-      hint: '조직 설치·선택 저장소로 비공개 클론/CI 를 연동해요.',
+      hint: t('githubHint'),
       status:
         githubApp.installations.length > 0 ? (
-          <Badge tone="success">연결됨 · {githubApp.installations.length}개 조직</Badge>
+          <Badge tone="success">
+            {t('githubConnected', { count: githubApp.installations.length })}
+          </Badge>
         ) : (
-          <Badge tone="outline">연결 안 됨</Badge>
+          <Badge tone="outline">{t('notConnected')}</Badge>
         ),
     },
     {
       key: 'mattermost',
       label: 'Mattermost',
-      hint: '완료·회귀 알림과 /assay 슬래시커맨드를 보내요.',
+      hint: t('mattermostHint'),
       status: mattermost ? (
-        <Badge tone="success">연결됨 · {mattermost.host}</Badge>
+        <Badge tone="success">{t('mattermostConnected', { host: mattermost.host })}</Badge>
       ) : (
-        <Badge tone="outline">연결 안 됨</Badge>
+        <Badge tone="outline">{t('notConnected')}</Badge>
       ),
     },
     {
       key: 'trace-sink',
-      label: '트레이스 싱크',
-      hint: '채점 상세를 관측 플랫폼에 적재해요(하니스별 선택).',
+      label: t('traceSinkLabel'),
+      hint: t('traceSinkHint'),
       status:
         traceSinks.length > 0 ? (
-          <Badge tone="success">{traceSinks.length}개 등록</Badge>
+          <Badge tone="success">{t('registeredCount', { count: traceSinks.length })}</Badge>
         ) : (
-          <Badge tone="outline">등록 안 됨</Badge>
+          <Badge tone="outline">{t('notRegistered')}</Badge>
         ),
     },
     {
       key: 'image-registry',
-      label: '이미지 레지스트리',
-      hint: '이미지 분류 기준이자 assay image push 대상이에요.',
+      label: t('imageRegistryLabel'),
+      hint: t('imageRegistryHint'),
       status:
         imageRegistries.length > 0 ? (
-          <Badge tone="success">{imageRegistries.length}개 등록</Badge>
+          <Badge tone="success">{t('registeredCount', { count: imageRegistries.length })}</Badge>
         ) : (
-          <Badge tone="outline">등록 안 됨</Badge>
+          <Badge tone="outline">{t('notRegistered')}</Badge>
         ),
     },
   ]
@@ -105,7 +109,7 @@ export function IntegrationsPanel({
             hint={r.hint}
           >
             <Button variant="secondary" size="xs" onClick={() => setActive(r.key)}>
-              관리
+              {t('manage')}
             </Button>
           </SettingsRow>
         ))}
@@ -122,7 +126,7 @@ export function IntegrationsPanel({
         className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
-        통합
+        {t('tabIntegrations')}
       </button>
       {active === 'github' && (
         <GithubAppManager

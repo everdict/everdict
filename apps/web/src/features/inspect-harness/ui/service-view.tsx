@@ -1,4 +1,5 @@
 import { Boxes, Database, DoorOpen, Globe, Radio } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { envValueText, type HarnessSpec } from '@/entities/harness'
 import type { ImageRegistryCoordinates } from '@/shared/lib/image-ref'
@@ -16,6 +17,7 @@ export function ServiceView({
   spec: HarnessSpec
   registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 지원
 }) {
+  const t = useTranslations('inspectHarness')
   const services = spec.services ?? []
   const deps = spec.dependencies ?? []
   const target = spec.target
@@ -28,9 +30,9 @@ export function ServiceView({
         <SubSection title="Front door" icon={<DoorOpen className="size-4" />}>
           <Card>
             <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3">
-              <Field label="서비스" value={frontDoor.service} />
-              <Field label="제출" value={<Mono>{frontDoor.submit}</Mono>} mono={false} />
-              {frontDoor.trace && <Field label="트레이스" value={frontDoor.trace} />}
+              <Field label={t('service')} value={frontDoor.service} />
+              <Field label={t('submit')} value={<Mono>{frontDoor.submit}</Mono>} mono={false} />
+              {frontDoor.trace && <Field label={t('trace')} value={frontDoor.trace} />}
             </dl>
           </Card>
         </SubSection>
@@ -74,10 +76,13 @@ export function ServiceView({
                     {Object.entries(s.env).map(([k, val]) => (
                       <code
                         key={k}
-                        title={`${k}=${envValueText(val)}`}
+                        title={`${k}=${envValueText(val, t('secretLabel'))}`}
                         className="max-w-full truncate rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-muted-foreground ring-1 ring-inset ring-border"
                       >
-                        {k}=<span className="text-foreground/80">{envValueText(val)}</span>
+                        {k}=
+                        <span className="text-foreground/80">
+                          {envValueText(val, t('secretLabel'))}
+                        </span>
                       </code>
                     ))}
                   </div>
@@ -101,14 +106,14 @@ export function ServiceView({
             </Card>
           ))}
           {services.length === 0 && (
-            <p className="text-[13px] text-muted-foreground">서비스 없음</p>
+            <p className="text-[13px] text-muted-foreground">{t('noServices')}</p>
           )}
         </div>
       </SubSection>
 
       <SubSection title="Dependencies" icon={<Database className="size-4" />} count={deps.length}>
         {deps.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">공유 스토어 없음.</p>
+          <p className="text-[13px] text-muted-foreground">{t('noSharedStores')}</p>
         ) : (
           <Card className="divide-y divide-border">
             {deps.map((d, i) => {
@@ -127,7 +132,7 @@ export function ServiceView({
                   </div>
                   {external ? (
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-faint">연결은 배포 시 env</span>
+                      <span className="text-[11px] text-faint">{t('connEnvAtDeploy')}</span>
                       <Badge tone="warning">external (BYO)</Badge>
                     </div>
                   ) : (
@@ -144,12 +149,12 @@ export function ServiceView({
         <SubSection title="Target env" icon={<Globe className="size-4" />}>
           <Card>
             <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-4">
-              <Field label="종류" value={target.kind} />
-              {target.engine && <Field label="엔진" value={target.engine} />}
-              {target.lifecycle && <Field label="수명주기" value={target.lifecycle} />}
-              {target.extension && <Field label="익스텐션" value={target.extension.ref} />}
+              <Field label={t('kind')} value={target.kind} />
+              {target.engine && <Field label={t('engine')} value={target.engine} />}
+              {target.lifecycle && <Field label={t('lifecycle')} value={target.lifecycle} />}
+              {target.extension && <Field label={t('extension')} value={target.extension.ref} />}
               <Field
-                label="관측물 전달"
+                label={t('deliveryLabel')}
                 value={
                   target.delivery
                     ? target.delivery.mode +
@@ -177,8 +182,8 @@ export function ServiceView({
         <SubSection title="Trace source" icon={<Radio className="size-4" />}>
           <Card>
             <dl className="grid grid-cols-2 gap-4 p-4">
-              <Field label="종류" value={traceSource.kind} />
-              <Field label="엔드포인트" value={traceSource.endpoint} />
+              <Field label={t('kind')} value={traceSource.kind} />
+              <Field label={t('endpoint')} value={traceSource.endpoint} />
             </dl>
           </Card>
         </SubSection>

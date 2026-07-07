@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { RegisterDatasetForm } from '@/features/register-dataset'
 import { datasetSchema, datasetsSchema, type Dataset } from '@/entities/dataset'
@@ -25,6 +26,7 @@ export default async function NewDatasetVersionPage({
   const { workspace, id } = await params
   const { v } = await searchParams
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('datasetsPage')
   const allowed = can(principal?.roles, 'datasets:write')
 
   let dataset: Dataset | undefined
@@ -54,16 +56,17 @@ export default async function NewDatasetVersionPage({
         {id}
       </Link>
       <PageHeader
-        title="새 버전 만들기"
-        description={`${id} 의 ${dataset ? `v${dataset.version} 내용을 불러왔어요` : '내용을 불러왔어요'}. 바꿔서 새 버전으로 올려보세요.`}
+        title={t('newVersion')}
+        description={
+          dataset
+            ? t('newVersionDescWithVersion', { id, version: dataset.version })
+            : t('newVersionDescNoVersion', { id })
+        }
       />
       {!allowed ? (
-        <EmptyState
-          title="등록 권한이 없어요."
-          hint="워크스페이스 관리자에게 권한을 요청해보세요."
-        />
+        <EmptyState title={t('noPermTitle')} hint={t('noPermHint')} />
       ) : !dataset ? (
-        <Callout tone="danger">데이터셋을 불러오지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('loadError', { error: error ?? '' })}</Callout>
       ) : (
         <Card className="p-5">
           <RegisterDatasetForm

@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { Eye, EyeOff, KeyRound } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -40,6 +41,7 @@ export function SecretPicker({
   id?: string
   'aria-label'?: string
 }) {
+  const t = useTranslations('pickSecret')
   const [creating, setCreating] = useState(false)
   // 인라인으로 만든 시크릿은 즉시 선택지에 더한다(서버 프리로드 + 신규).
   const [created, setCreated] = useState<string[]>([])
@@ -52,10 +54,10 @@ export function SecretPicker({
           value={value}
           onChange={onChange}
           options={options.map((n) => ({ value: n }))}
-          placeholder={options.length > 0 ? '시크릿 선택' : '등록된 시크릿 없음'}
-          emptyText="시크릿이 없어요 — 새로 만들어요"
+          placeholder={options.length > 0 ? t('selectSecret') : t('noSecrets')}
+          emptyText={t('emptyText')}
           className="flex-1"
-          aria-label={ariaLabel ?? '시크릿 선택'}
+          aria-label={ariaLabel ?? t('selectSecret')}
         />
         <Button
           type="button"
@@ -64,7 +66,7 @@ export function SecretPicker({
           className="shrink-0 gap-1"
           onClick={() => setCreating((c) => !c)}
         >
-          <KeyRound className="size-3.5" /> 새로
+          <KeyRound className="size-3.5" /> {t('new')}
         </Button>
       </div>
       {value && !creating && hint}
@@ -72,7 +74,7 @@ export function SecretPicker({
         <CreateSecretInline
           scope={scope}
           defaultMultiline={defaultMultiline ?? false}
-          valuePlaceholder={createValuePlaceholder ?? '시크릿 값'}
+          valuePlaceholder={createValuePlaceholder ?? t('secretValue')}
           onDone={(name) => {
             setCreated((c) => [...c, name])
             onCreated?.(name)
@@ -101,6 +103,7 @@ function CreateSecretInline({
   onDone: (name: string) => void
   onCancel: () => void
 }) {
+  const t = useTranslations('pickSecret')
   const [name, setName] = useState('')
   const [val, setVal] = useState('')
   const [show, setShow] = useState(false)
@@ -114,19 +117,17 @@ function CreateSecretInline({
     start(async () => {
       const r = await createSecretAction(name, val, scope)
       if (r.ok) onDone(name)
-      else setError(r.error ?? '저장 실패')
+      else setError(r.error ?? t('saveFailed'))
     })
   }
 
   return (
     <div className="space-y-2 rounded-lg border border-dashed bg-muted/30 p-2.5">
       <p className="text-[11px] text-muted-foreground">
-        {scope === 'user'
-          ? '내 개인 시크릿 — 나만 쓰고 다른 멤버는 못 봐요.'
-          : '워크스페이스 공유 시크릿 — 멤버가 함께 써요(관리자만 등록).'}
+        {scope === 'user' ? t('scopeUser') : t('scopeWorkspace')}
       </p>
       <div className="space-y-1">
-        <span className="text-[11px] text-muted-foreground">이름 (env 형식)</span>
+        <span className="text-[11px] text-muted-foreground">{t('nameEnvFormat')}</span>
         <Input
           value={name}
           onChange={(e) => setName(e.target.value.toUpperCase())}
@@ -138,13 +139,13 @@ function CreateSecretInline({
       </div>
       <div className="space-y-1">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[11px] text-muted-foreground">값</span>
+          <span className="text-[11px] text-muted-foreground">{t('value')}</span>
           <button
             type="button"
             className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
             onClick={() => setMultiline((v) => !v)}
           >
-            {multiline ? '한 줄 값으로' : '여러 줄 값으로 (PEM 등)'}
+            {multiline ? t('toSingleLine') : t('toMultiline')}
           </button>
         </div>
         {multiline ? (
@@ -170,7 +171,7 @@ function CreateSecretInline({
             <button
               type="button"
               onClick={() => setShow((v) => !v)}
-              aria-label={show ? '값 숨기기' : '값 보기'}
+              aria-label={show ? t('hideValue') : t('showValue')}
               className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
             >
               {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
@@ -178,11 +179,7 @@ function CreateSecretInline({
           </div>
         )}
       </div>
-      {nameInvalid && (
-        <p className="text-[11px] text-destructive">
-          대문자로 시작하고 대문자·숫자·밑줄만 쓸 수 있어요.
-        </p>
-      )}
+      {nameInvalid && <p className="text-[11px] text-destructive">{t('nameInvalid')}</p>}
       {error && (
         <Callout tone="danger" className="py-1.5">
           {error}
@@ -195,16 +192,16 @@ function CreateSecretInline({
           disabled={pending || name.length === 0 || val.length === 0 || nameInvalid}
           onClick={save}
         >
-          {pending ? '저장 중…' : '시크릿 저장'}
+          {pending ? t('saving') : t('saveSecret')}
         </Button>
         <button
           type="button"
           className="text-[12px] text-muted-foreground hover:text-foreground"
           onClick={onCancel}
         >
-          취소
+          {t('cancel')}
         </button>
-        <span className="text-[11px] text-faint">저장하면 값은 다시 볼 수 없어요.</span>
+        <span className="text-[11px] text-faint">{t('valueOnce')}</span>
       </div>
     </div>
   )

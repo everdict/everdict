@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
 import type { TraceSinkConfig, TraceSinkKind } from '@/entities/trace-sink'
@@ -15,15 +16,23 @@ import { InfoTip } from '@/shared/ui/tooltip'
 import { removeTraceSinkAction, upsertTraceSinkAction } from '../api/manage-trace-sink'
 
 // kind별 project 필드의 의미 — 라벨/플레이스홀더를 플랫폼 용어로 맞춘다(한 필드, kind별 좌표).
-const KIND_META: Record<TraceSinkKind, { label: string; project: string; placeholder: string }> = {
-  mlflow: { label: 'MLflow', project: 'experiment id', placeholder: '예: 7' },
-  langfuse: { label: 'Langfuse', project: 'project id (딥링크용, 선택)', placeholder: '예: cm3…' },
+// label 은 제품명(비번역), project/placeholder 는 메시지 키로 런타임에 해석한다.
+const KIND_META: Record<
+  TraceSinkKind,
+  { label: string; projectKey: string; placeholderKey: string }
+> = {
+  mlflow: { label: 'MLflow', projectKey: 'projectMlflow', placeholderKey: 'placeholderMlflow' },
+  langfuse: {
+    label: 'Langfuse',
+    projectKey: 'projectLangfuse',
+    placeholderKey: 'placeholderLangfuse',
+  },
   langsmith: {
     label: 'LangSmith',
-    project: '프로젝트 이름 (선택)',
-    placeholder: '예: assay-evals',
+    projectKey: 'projectLangsmith',
+    placeholderKey: 'placeholderLangsmith',
   },
-  phoenix: { label: 'Phoenix', project: '프로젝트 이름', placeholder: '예: assay' },
+  phoenix: { label: 'Phoenix', projectKey: 'projectPhoenix', placeholderKey: 'placeholderPhoenix' },
 }
 
 // 워크스페이스 트레이스 싱크(복수) — 관측 플랫폼(MLflow/Langfuse/LangSmith/Phoenix)을 여러 개 등록해두면,
@@ -39,6 +48,7 @@ export function TraceSinkManager({
   canWrite: boolean
   secretNames: string[]
 }) {
+  const t = useTranslations('manageTraceSink')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   // 편집 대상 name — 행 클릭으로 폼에 프리필(저장은 name 기준 upsert). undefined = 새 싱크 추가.
@@ -77,11 +87,11 @@ export function TraceSinkManager({
   function onSave() {
     setError(undefined)
     if (!name.trim()) {
-      setError('싱크 이름을 입력해주세요.')
+      setError(t('nameRequired'))
       return
     }
     if (!endpoint.trim()) {
-      setError('플랫폼 API 베이스 URL 을 입력해주세요.')
+      setError(t('endpointRequired'))
       return
     }
     startTransition(async () => {
@@ -111,28 +121,14 @@ export function TraceSinkManager({
     <div className="space-y-3">
       <div className="space-y-1">
         <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-          트레이스 싱크
-          <InfoTip
-            content={
-              <>
-                팀이 쓰는 관측 플랫폼을 등록해두면 스코어카드 채점이 끝날 때 케이스별 trace 와
-                점수를 그쪽에 적재하고, 스코어카드에는 요약과 바로가기 링크만 남아요. 싱크는 여러 개
-                등록할 수 있고, 어느 싱크에 적재할지는 하니스별로 골라요(하니스 상세에서 선택). 이미
-                그 플랫폼에 있는 trace 를 pull 로 가져와 채점한 경우엔 복제하지 않고 원본 trace 에
-                점수만 붙여요. 인증 값은 워크스페이스 시크릿에서 고르거나 “새로”로 바로 저장해요 —
-                여기엔 그 이름만 남아요.
-              </>
-            }
-          />
+          {t('heading')}
+          <InfoTip content={t('sinkInfoTip')} />
         </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          상세 결과의 진실원천을 팀 데이터레이크(MLflow·Langfuse·LangSmith·Phoenix)로 둬요. 적재할
-          싱크는 하니스 상세에서 하니스별로 골라요.
-        </p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
       </div>
 
       {sinks.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">아직 등록된 트레이스 싱크가 없어요.</p>
+        <p className="text-[13px] text-muted-foreground">{t('empty')}</p>
       ) : (
         <SettingsList>
           {sinks.map((s) => (
@@ -154,7 +150,7 @@ export function TraceSinkManager({
                     disabled={pending}
                     onClick={() => startEdit(s)}
                   >
-                    편집
+                    {t('edit')}
                   </button>
                   <button
                     type="button"
@@ -162,7 +158,7 @@ export function TraceSinkManager({
                     disabled={pending}
                     onClick={() => onRemove(s.name)}
                   >
-                    삭제
+                    {t('delete')}
                   </button>
                 </>
               )}
@@ -174,22 +170,22 @@ export function TraceSinkManager({
       {canWrite && (
         <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
           <p className="text-[12px] font-[560] text-foreground">
-            {editing ? `${editing} 수정` : '새 싱크 추가'}
+            {editing ? t('editTitle', { name: editing }) : t('newSink')}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label htmlFor="ts-name">이름</Label>
+              <Label htmlFor="ts-name">{t('name')}</Label>
               {/* 이름 = upsert 키 — 편집 중엔 잠가서 의도치 않은 별도 싱크 생성(rename≠upsert)을 막는다. */}
               <Input
                 id="ts-name"
-                placeholder="예: team-mlflow"
+                placeholder={t('namePlaceholder')}
                 value={name}
                 disabled={editing !== undefined}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="ts-kind">플랫폼</Label>
+              <Label htmlFor="ts-kind">{t('platform')}</Label>
               <Combobox
                 id="ts-kind"
                 options={(Object.keys(KIND_META) as TraceSinkKind[]).map((k) => ({
@@ -198,11 +194,11 @@ export function TraceSinkManager({
                 }))}
                 value={kind}
                 onChange={(v) => setKind(v as TraceSinkKind)}
-                aria-label="관측 플랫폼 선택"
+                aria-label={t('platformSelectLabel')}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="ts-endpoint">API 베이스 URL</Label>
+              <Label htmlFor="ts-endpoint">{t('apiBaseUrl')}</Label>
               <Input
                 id="ts-endpoint"
                 placeholder={
@@ -217,16 +213,11 @@ export function TraceSinkManager({
             {/* 인증 값은 자유 텍스트가 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성. */}
             <div className="space-y-1">
               <Label htmlFor="ts-auth" className="flex items-center gap-1.5">
-                인증 시크릿 (선택)
+                {t('authSecret')}
                 <InfoTip
-                  content={
-                    <>
-                      플랫폼이 기대하는 인증 헤더의 값 그대로예요 — MLflow/Langfuse 는{' '}
-                      <span className="font-mono">Basic …</span>, Phoenix 는{' '}
-                      <span className="font-mono">Bearer …</span>, LangSmith 는 API 키 원문. 무인증
-                      dev 서버면 비워둬요.
-                    </>
-                  }
+                  content={t.rich('authInfoTip', {
+                    code: (c) => <span className="font-mono">{c}</span>,
+                  })}
                 />
               </Label>
               <SecretPicker
@@ -236,30 +227,23 @@ export function TraceSinkManager({
                 names={names}
                 scope="workspace"
                 onCreated={(n) => setCreated((c) => [...c, n])}
-                createValuePlaceholder="인증 헤더 값 붙여넣기"
-                aria-label="인증 시크릿 선택"
+                createValuePlaceholder={t('authValuePlaceholder')}
+                aria-label={t('authSecretSelectLabel')}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="ts-project">{meta.project}</Label>
+              <Label htmlFor="ts-project">{t(meta.projectKey)}</Label>
               <Input
                 id="ts-project"
-                placeholder={meta.placeholder}
+                placeholder={t(meta.placeholderKey)}
                 value={project}
                 onChange={(e) => setProject(e.target.value)}
               />
             </div>
             <div className="space-y-1">
               <Label htmlFor="ts-web" className="flex items-center gap-1.5">
-                UI 링크 베이스 (선택)
-                <InfoTip
-                  content={
-                    <>
-                      바로가기 링크를 만들 때 쓸 웹 UI 주소예요. API 주소와 다를 때만 입력해요 — 예:
-                      LangSmith 는 API 가 api.smith.langchain.com, UI 는 smith.langchain.com.
-                    </>
-                  }
-                />
+                {t('webUrlBase')}
+                <InfoTip content={t('webUrlInfoTip')} />
               </Label>
               <Input
                 id="ts-web"
@@ -272,7 +256,7 @@ export function TraceSinkManager({
 
           <div className="flex items-center gap-3">
             <Button size="sm" disabled={pending} onClick={onSave}>
-              {pending ? '저장 중…' : editing ? '갱신' : '등록'}
+              {pending ? t('saving') : editing ? t('update') : t('register')}
             </Button>
             {editing && (
               <button
@@ -281,7 +265,7 @@ export function TraceSinkManager({
                 disabled={pending}
                 onClick={resetForm}
               >
-                취소
+                {t('cancel')}
               </button>
             )}
           </div>

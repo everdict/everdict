@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Boxes, ChevronRight } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { EvalDashboard } from '@/widgets/eval-dashboard'
 import { RunsTable } from '@/widgets/runs-table'
@@ -15,13 +16,13 @@ import { SectionHeader } from '@/shared/ui/section-header'
 
 export const dynamic = 'force-dynamic'
 
-function ViewAll({ href }: { href: string }) {
+function ViewAll({ href, label }: { href: string; label: string }) {
   return (
     <Link
       href={href}
       className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
     >
-      전체 보기
+      {label}
       <ChevronRight className="size-3.5" />
     </Link>
   )
@@ -29,6 +30,7 @@ function ViewAll({ href }: { href: string }) {
 
 export default async function OverviewPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
+  const t = await getTranslations('overviewPage')
   const ctx = await authContext()
   let error: string | undefined
   let runs = runsSchema.parse([])
@@ -49,28 +51,34 @@ export default async function OverviewPage({ params }: { params: Promise<{ works
 
   return (
     <div className="space-y-7">
-      <PageHeader title="개요" description="이 워크스페이스의 평가 현황" />
+      <PageHeader title={t('title')} description={t('description')} />
 
       {error ? (
-        <Callout tone="danger" hint="`CONTROL_PLANE_URL` 과 `assay-api` 가동 여부를 확인하세요.">
-          서버에 연결하지 못했어요: {error}
+        <Callout tone="danger" hint={t('connectErrorHint')}>
+          {t('connectError', { error })}
         </Callout>
       ) : (
         <EvalDashboard scorecards={scorecards} workspace={workspace} />
       )}
 
       <section className="space-y-2.5">
-        <SectionHeader title="최근 Runs" action={<ViewAll href={`/${workspace}/runs`} />} />
+        <SectionHeader
+          title={t('recentRuns')}
+          action={<ViewAll href={`/${workspace}/runs`} label={t('viewAll')} />}
+        />
         <RunsTable runs={runs} workspace={workspace} limit={5} />
       </section>
 
       <section className="space-y-2.5">
-        <SectionHeader title="하니스" action={<ViewAll href={`/${workspace}/harnesses`} />} />
+        <SectionHeader
+          title={t('harnesses')}
+          action={<ViewAll href={`/${workspace}/harnesses`} label={t('viewAll')} />}
+        />
         {harnesses.length === 0 ? (
           <EmptyState
             icon={<Boxes />}
-            title="아직 하니스가 없어요."
-            hint="하니스를 등록하면 여기에 표시돼요."
+            title={t('emptyHarnessesTitle')}
+            hint={t('emptyHarnessesHint')}
           />
         ) : (
           <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2 lg:grid-cols-3">

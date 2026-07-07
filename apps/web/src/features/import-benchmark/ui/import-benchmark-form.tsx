@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { versionsForId } from '@/shared/lib/semver'
 import { Button } from '@/shared/ui/button'
@@ -50,6 +51,7 @@ export function ImportBenchmarkForm({
   existingDatasets?: { id: string; versions: string[] }[]
   preselect?: string // "recipe:<id>" — 레시피 상세에서 진입 시 초기 선택.
 }) {
+  const t = useTranslations('importBenchmark')
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const entries: Entry[] = useMemo(
@@ -58,7 +60,7 @@ export function ImportBenchmarkForm({
         value: `catalog:${b.id}`,
         kind: 'catalog' as const,
         id: b.id,
-        label: `${b.id} · ${b.category}${b.gated ? ' · gated' : ''}${b.source === 'jsonl' ? ' · 파일 업로드' : ''}`,
+        label: `${b.id} · ${b.category}${b.gated ? ' · gated' : ''}${b.source === 'jsonl' ? ` · ${t('fileUpload')}` : ''}`,
         source: b.source,
         gated: b.gated,
         description: b.description,
@@ -67,10 +69,10 @@ export function ImportBenchmarkForm({
         value: `recipe:${r.id}`,
         kind: 'recipe' as const,
         id: r.id,
-        label: `${r.id} · 레시피${r.owner === '_shared' ? ' (공용)' : ''}`,
+        label: `${r.id} · ${t('recipe')}${r.owner === '_shared' ? ` (${t('sharedSuffix')})` : ''}`,
       })),
     ],
-    [benchmarks, recipes]
+    [benchmarks, recipes, t]
   )
 
   const [sel, setSel] = useState(
@@ -97,7 +99,7 @@ export function ImportBenchmarkForm({
     if (limit && Number.isFinite(Number(limit))) body.limit = Number(limit)
     if (catalogJsonl && !text.trim()) {
       setBusy(false)
-      setResult({ ok: false, error: '이 벤치마크는 jsonl 파일 내용이 필요합니다.' })
+      setResult({ ok: false, error: t('jsonlRequired') })
       return
     }
     if (text.trim()) body.text = text
@@ -108,15 +110,13 @@ export function ImportBenchmarkForm({
   }
 
   if (entries.length === 0) {
-    return (
-      <p className="text-[13px] text-muted-foreground">가져올 수 있는 벤치마크나 레시피가 없어요.</p>
-    )
+    return <p className="text-[13px] text-muted-foreground">{t('nothingToImport')}</p>
   }
 
   return (
     <div className="max-w-2xl space-y-6">
       <div className="space-y-1.5">
-        <Label htmlFor="benchmark">벤치마크 / 레시피</Label>
+        <Label htmlFor="benchmark">{t('benchmarkOrRecipe')}</Label>
         {/* optgroup 대응 — 카탈로그/레시피 구분은 우측 hint 로(그룹 헤더 없는 flat 리스트) */}
         <Combobox
           id="benchmark"
@@ -125,7 +125,7 @@ export function ImportBenchmarkForm({
           options={entries.map((e) => ({
             value: e.value,
             label: e.label,
-            hint: e.kind === 'catalog' ? '카탈로그' : '내 레시피',
+            hint: e.kind === 'catalog' ? t('catalog') : t('myRecipe'),
             keywords: e.kind === 'catalog' ? 'catalog first-party' : 'recipe workspace',
           }))}
           className="w-full"
@@ -139,12 +139,12 @@ export function ImportBenchmarkForm({
 
       {selected?.gated && (
         <Callout tone="warning">
-          gated 벤치마크예요. 워크스페이스 시크릿 <code>HF_TOKEN</code> 이 있어야 가져올 수 있어요.
+          {t.rich('gatedNotice', { code: (chunks) => <code>{chunks}</code> })}
         </Callout>
       )}
 
       <div className="space-y-1.5">
-        <Label htmlFor="datasetId">데이터셋 id (선택)</Label>
+        <Label htmlFor="datasetId">{t('datasetIdOptional')}</Label>
         <Input
           id="datasetId"
           value={datasetId}
@@ -160,12 +160,12 @@ export function ImportBenchmarkForm({
 
       {!catalogJsonl && (
         <div className="space-y-1.5">
-          <Label htmlFor="limit">최대 케이스 수 (선택)</Label>
+          <Label htmlFor="limit">{t('maxCasesOptional')}</Label>
           <Input
             id="limit"
             value={limit}
             onChange={(e) => setLimit(e.target.value)}
-            placeholder="예: 50 (HF 소스일 때만 의미)"
+            placeholder={t('maxCasesPlaceholder')}
             inputMode="numeric"
           />
         </div>
@@ -173,7 +173,7 @@ export function ImportBenchmarkForm({
 
       <div className="space-y-1.5">
         <Label htmlFor="text">
-          jsonl 내용 {catalogJsonl ? '(필수)' : '(jsonl 소스 레시피일 때만)'}
+          {t('jsonlContent')} {catalogJsonl ? t('required') : t('jsonlOnlyRecipes')}
         </Label>
         <Textarea
           id="text"
@@ -185,19 +185,23 @@ export function ImportBenchmarkForm({
         />
       </div>
 
-      {result && !result.ok && <Callout tone="danger">가져오지 못했어요: {result.error}</Callout>}
+      {result && !result.ok && (
+        <Callout tone="danger">{t('importFailed', { error: result.error ?? '' })}</Callout>
+      )}
       {result?.ok && (
         <Callout tone="info">
-          ✓ {result.id}@{result.version} · 케이스 {result.cases}건 등록했어요
+          {t('importSuccess', {
+            id: result.id ?? '',
+            version: result.version ?? '',
+            cases: result.cases ?? 0,
+          })}
         </Callout>
       )}
 
-      <p className="text-[12px] leading-relaxed text-muted-foreground">
-        버전은 바꿀 수 없어요. 같은 버전을 다른 내용으로 다시 가져오면 등록되지 않아요.
-      </p>
+      <p className="text-[12px] leading-relaxed text-muted-foreground">{t('versionNote')}</p>
 
       <Button type="button" onClick={onImport} disabled={busy || !selected}>
-        {busy ? '가져오는 중…' : '워크스페이스에 추가'}
+        {busy ? t('importing') : t('addToWorkspace')}
       </Button>
     </div>
   )

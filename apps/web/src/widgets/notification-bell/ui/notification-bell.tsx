@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Bell, BellOff, BellRing, Check } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { notificationsResponseSchema, type NotificationItem } from '@/entities/notification'
 import { getAssayDesktop } from '@/shared/lib/desktop-bridge'
@@ -33,8 +34,7 @@ function hrefOf(workspace: string, n: NotificationItem): string {
   // 리소스 댓글 멘션 — resourceType→경로 매핑, commentId 앵커로 해당 댓글까지 스크롤.
   if (n.link?.resourceType && n.link?.resourceId) {
     const seg = RESOURCE_PATH[n.link.resourceType]?.(encodeURIComponent(n.link.resourceId))
-    if (seg)
-      return `/${workspace}/${seg}${n.link.commentId ? `#comment-${n.link.commentId}` : ''}`
+    if (seg) return `/${workspace}/${seg}${n.link.commentId ? `#comment-${n.link.commentId}` : ''}`
   }
   return `/${workspace}`
 }
@@ -52,14 +52,16 @@ function nativeStatusOf(permission: Permission, pref: NativePref): NativeStatus 
   if (permission === 'default') return 'needs-permission'
   return pref === 'on' ? 'on' : 'off'
 }
-const NATIVE_STATUS_LABEL: Record<NativeStatus, string> = {
-  on: '켜짐',
-  off: '꺼짐',
-  'needs-permission': '권한 필요',
-  blocked: '브라우저에서 차단됨',
+const NATIVE_STATUS_KEY: Record<NativeStatus, string> = {
+  on: 'statusOn',
+  off: 'statusOff',
+  'needs-permission': 'statusNeedsPermission',
+  blocked: 'statusBlocked',
 }
 
 export function NotificationBell({ workspace }: { workspace: string }) {
+  const t = useTranslations('notificationBell')
+  const locale = useLocale()
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [items, setItems] = useState<NotificationItem[]>([])
@@ -171,7 +173,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        aria-label={`알림${unread > 0 ? ` (미읽음 ${unread})` : ''}`}
+        aria-label={t('bellAria', { unread })}
         className={cn(
           'flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-[13px] transition-colors',
           open
@@ -184,7 +186,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
         ) : (
           <Bell className="size-4" strokeWidth={1.75} />
         )}
-        <span className="flex-1 text-left">알림</span>
+        <span className="flex-1 text-left">{t('bell')}</span>
         {unread > 0 && (
           <span className="grid min-w-5 place-items-center rounded-full bg-primary px-1 text-[11px] font-[560] leading-4 text-primary-foreground">
             {unread > 9 ? '9+' : unread}
@@ -197,7 +199,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
           {/* 바깥 클릭 닫기 */}
           <button
             type="button"
-            aria-label="알림 닫기"
+            aria-label={t('closeBell')}
             className="fixed inset-0 z-40 cursor-default"
             onClick={() => setOpen(false)}
           />
@@ -211,12 +213,13 @@ export function NotificationBell({ workspace }: { workspace: string }) {
                   className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[12px] text-muted-foreground hover:bg-accent hover:text-foreground"
                 >
                   <Check className="size-3.5" />
-                  모두 읽음
+                  {t('markAllRead')}
                 </button>
               )}
               {permission !== 'unsupported' &&
                 (() => {
                   const status = nativeStatusOf(permission, pref)
+                  const statusLabel = t(NATIVE_STATUS_KEY[status])
                   return (
                     <DropdownMenu
                       align="end"
@@ -225,8 +228,8 @@ export function NotificationBell({ workspace }: { workspace: string }) {
                         <button
                           type="button"
                           onClick={toggle}
-                          title={`네이티브 알림: ${NATIVE_STATUS_LABEL[status]}`}
-                          aria-label={`네이티브 알림 설정 (${NATIVE_STATUS_LABEL[status]})`}
+                          title={t('nativeTitle', { status: statusLabel })}
+                          aria-label={t('nativeAria', { status: statusLabel })}
                           className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
                         >
                           {status === 'on' ? (
@@ -243,26 +246,25 @@ export function NotificationBell({ workspace }: { workspace: string }) {
                         </button>
                       )}
                     >
-                      <DropdownLabel>네이티브 알림 — {NATIVE_STATUS_LABEL[status]}</DropdownLabel>
+                      <DropdownLabel>{t('nativeLabel', { status: statusLabel })}</DropdownLabel>
                       {status === 'on' && (
                         <DropdownItem icon={<BellOff />} onSelect={() => applyPref('off')}>
-                          알림 끄기
+                          {t('turnOff')}
                         </DropdownItem>
                       )}
                       {status === 'off' && (
                         <DropdownItem icon={<Bell />} onSelect={() => applyPref('on')}>
-                          알림 켜기
+                          {t('turnOn')}
                         </DropdownItem>
                       )}
                       {status === 'needs-permission' && (
                         <DropdownItem icon={<Bell />} onSelect={() => void enableNative()}>
-                          권한 허용하기
+                          {t('allowPermission')}
                         </DropdownItem>
                       )}
                       {status === 'blocked' && (
                         <p className="px-2 py-1.5 text-[12px] leading-relaxed text-faint">
-                          브라우저가 이 사이트의 알림을 차단했습니다. 주소창의 사이트 설정에서
-                          허용한 뒤 아래로 다시 확인하세요.
+                          {t('blockedHelp')}
                         </p>
                       )}
                       {status === 'blocked' && (
@@ -276,7 +278,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
                             )
                           }
                         >
-                          다시 확인
+                          {t('recheck')}
                         </DropdownItem>
                       )}
                     </DropdownMenu>
@@ -285,7 +287,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
             </div>
             {items.length === 0 ? (
               <p className="px-3 py-6 text-center text-[13px] text-muted-foreground">
-                아직 알림이 없습니다 — 작업이 끝나면 여기로 옵니다.
+                {t('empty')}
               </p>
             ) : (
               <ul className="max-h-[360px] divide-y divide-border overflow-y-auto">
@@ -317,7 +319,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
                           <span className="block truncate text-[12px] text-faint">{n.body}</span>
                         )}
                         <span className="block text-[11px] text-faint">
-                          {fmtTimeAgo(n.createdAt)}
+                          {fmtTimeAgo(n.createdAt, locale)}
                         </span>
                       </span>
                     </button>

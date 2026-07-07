@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { Bookmark, BookmarkPlus, Check, Globe, Link2, Lock, Trash2, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { View, ViewVisibility } from '@/entities/view'
 import { cn } from '@/shared/lib/utils'
@@ -29,6 +30,7 @@ export function SavedViewsBar({
   isAdmin?: boolean // 워크스페이스 admin — 남의 공유 뷰도 관리
   activeViewId?: string
 }) {
+  const t = useTranslations('analyzeScorecards')
   const [views, setViews] = useState<View[]>(savedViews)
   const [activeId, setActiveId] = useState<string | undefined>(activeViewId)
   const [saving, setSaving] = useState(false)
@@ -56,7 +58,7 @@ export function SavedViewsBar({
         config: configToStored(config),
         visibility,
       })
-      if (!r.ok || !r.view) return setError(r.error ?? '저장하지 못했어요.')
+      if (!r.ok || !r.view) return setError(r.error ?? t('saveFailed'))
       setViews((prev) => [r.view as View, ...prev])
       setActiveId(r.view.id)
       setSaving(false)
@@ -70,7 +72,7 @@ export function SavedViewsBar({
     start(async () => {
       setError(undefined)
       const r = await updateViewAction(activeView.id, { config: configToStored(config) })
-      if (!r.ok || !r.view) return setError(r.error ?? '수정하지 못했어요.')
+      if (!r.ok || !r.view) return setError(r.error ?? t('updateFailed'))
       setViews((prev) => prev.map((v) => (v.id === r.view?.id ? (r.view as View) : v)))
     })
 
@@ -80,7 +82,7 @@ export function SavedViewsBar({
       setError(undefined)
       const next: ViewVisibility = activeView.visibility === 'workspace' ? 'private' : 'workspace'
       const r = await updateViewAction(activeView.id, { visibility: next })
-      if (!r.ok || !r.view) return setError(r.error ?? '변경하지 못했어요.')
+      if (!r.ok || !r.view) return setError(r.error ?? t('changeFailed'))
       setViews((prev) => prev.map((v) => (v.id === r.view?.id ? (r.view as View) : v)))
     })
 
@@ -89,7 +91,7 @@ export function SavedViewsBar({
     start(async () => {
       setError(undefined)
       const r = await deleteViewAction(activeView.id)
-      if (!r.ok) return setError(r.error ?? '삭제하지 못했어요.')
+      if (!r.ok) return setError(r.error ?? t('deleteFailed'))
       setViews((prev) => prev.filter((v) => v.id !== activeView.id))
       setActiveId(undefined)
     })
@@ -109,9 +111,9 @@ export function SavedViewsBar({
     <div className="space-y-2 rounded-lg border bg-card/60 p-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <span className="inline-flex items-center gap-1 text-[11px] font-[510] uppercase tracking-wide text-faint">
-          <Bookmark className="size-3.5" /> 저장된 뷰
+          <Bookmark className="size-3.5" /> {t('savedViews')}
         </span>
-        {views.length === 0 && <span className="text-[12px] text-faint">아직 없어요</span>}
+        {views.length === 0 && <span className="text-[12px] text-faint">{t('noneYet')}</span>}
         {views.map((v) => {
           const mine = v.createdBy === currentSubject
           return (
@@ -125,7 +127,7 @@ export function SavedViewsBar({
                   ? 'border-primary/60 bg-primary/10 text-foreground'
                   : 'border-border bg-card text-muted-foreground hover:border-border-strong hover:text-foreground'
               )}
-              title={mine ? '내 뷰' : '워크스페이스 공유 뷰'}
+              title={mine ? t('myView') : t('sharedView')}
             >
               {v.visibility === 'workspace' ? (
                 <Globe className="size-3 text-faint" />
@@ -147,7 +149,7 @@ export function SavedViewsBar({
               setError(undefined)
             }}
           >
-            <BookmarkPlus className="size-3.5" /> 현재 분석 저장
+            <BookmarkPlus className="size-3.5" /> {t('saveCurrent')}
           </Button>
         )}
       </div>
@@ -158,9 +160,9 @@ export function SavedViewsBar({
           <Input
             value={name}
             onChange={(e) => setName(e.target.value)}
-            placeholder="뷰 이름 (예: 나이트 회귀 추이)"
+            placeholder={t('viewNamePlaceholder')}
             className="w-[220px]"
-            aria-label="뷰 이름"
+            aria-label={t('viewNameAria')}
             autoFocus
           />
           <div className="inline-flex overflow-hidden rounded-md border bg-card">
@@ -178,7 +180,7 @@ export function SavedViewsBar({
                 )}
               >
                 {vis === 'private' ? <Lock className="size-3" /> : <Globe className="size-3" />}
-                {vis === 'private' ? '비공개' : '공유'}
+                {vis === 'private' ? t('private') : t('shared')}
               </button>
             ))}
           </div>
@@ -188,7 +190,7 @@ export function SavedViewsBar({
             onClick={save}
             disabled={pending || name.trim().length === 0}
           >
-            <Check className="size-3.5" /> 저장
+            <Check className="size-3.5" /> {t('save')}
           </Button>
           <Button
             type="button"
@@ -197,7 +199,7 @@ export function SavedViewsBar({
             onClick={() => setSaving(false)}
             disabled={pending}
           >
-            취소
+            {t('cancel')}
           </Button>
         </div>
       )}
@@ -206,7 +208,8 @@ export function SavedViewsBar({
       {activeView && canEditActive && !saving && (
         <div className="flex flex-wrap items-center gap-2 border-t border-border/60 pt-2 text-[12px]">
           <span className="text-faint">
-            <span className="font-[510] text-muted-foreground">{activeView.name}</span> 관리
+            <span className="font-[510] text-muted-foreground">{activeView.name}</span>{' '}
+            {t('manageSuffix')}
           </span>
           <Button
             type="button"
@@ -215,7 +218,7 @@ export function SavedViewsBar({
             onClick={updateCurrent}
             disabled={pending}
           >
-            현재 상태로 업데이트
+            {t('updateToCurrent')}
           </Button>
           <Button
             type="button"
@@ -226,17 +229,17 @@ export function SavedViewsBar({
           >
             {activeView.visibility === 'workspace' ? (
               <>
-                <Lock className="size-3.5" /> 비공개로
+                <Lock className="size-3.5" /> {t('makePrivate')}
               </>
             ) : (
               <>
-                <Globe className="size-3.5" /> 워크스페이스 공유
+                <Globe className="size-3.5" /> {t('shareWorkspace')}
               </>
             )}
           </Button>
           {activeView.visibility === 'workspace' && (
             <Button type="button" variant="ghost" size="xs" onClick={copyLink}>
-              <Link2 className="size-3.5" /> 링크
+              <Link2 className="size-3.5" /> {t('link')}
             </Button>
           )}
           <Button
@@ -247,7 +250,7 @@ export function SavedViewsBar({
             onClick={remove}
             disabled={pending}
           >
-            <Trash2 className="size-3.5" /> 삭제
+            <Trash2 className="size-3.5" /> {t('delete')}
           </Button>
         </div>
       )}

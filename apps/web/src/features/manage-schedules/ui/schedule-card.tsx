@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { CirclePause, CirclePlay, Pause, Pencil, Play, Trash2 } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
@@ -14,10 +15,16 @@ import { Tooltip } from '@/shared/ui/tooltip'
 
 export type Author = { name: string; avatarUrl?: string }
 
+// 런타임 미지정 시의 식별용 센티널 — 검색/필터 identity 로 쓰이므로 값은 고정. 표시는 runtimeChipLabel 이 로케일화.
 export const RUNTIME_DEFAULT = '기본 백엔드'
 
 export function runtimeLabelOf(s: Schedule): string {
   return s.runTemplate.runtime ?? RUNTIME_DEFAULT
+}
+
+// 런타임 칩 표시 라벨 — 센티널이면 로케일화, 실제 런타임 id 는 그대로.
+export function runtimeChipLabel(label: string, t: ReturnType<typeof useTranslations>): string {
+  return label === RUNTIME_DEFAULT ? t('runtimeDefault') : label
 }
 
 export function ownerNameOf(authors: Record<string, Author>, subject: string): string {
@@ -34,8 +41,8 @@ function StateIcon({ enabled }: { enabled: boolean }) {
   )
 }
 
-const stateTip = (enabled: boolean): string =>
-  enabled ? '활성 — 주기대로 발사돼요' : '일시중지 — 발사하지 않아요'
+const stateTip = (enabled: boolean, t: ReturnType<typeof useTranslations>): string =>
+  enabled ? t('stateTipActive') : t('stateTipPaused')
 
 // 예약 한 건 — 소유자·상태·주기(사람이 읽는)·벤치마크→하니스·런타임·다음 실행 + pause/삭제.
 export function ScheduleCard({
@@ -66,6 +73,8 @@ export function ScheduleCard({
   onDelete: (s: Schedule) => void
 }) {
   const router = useRouter()
+  const t = useTranslations('manageSchedules')
+  const locale = useLocale()
   return (
     // 고정 규격 카드 — 모든 카드가 같은 3줄 구조(이름 / 대상 / 주기·다음 실행) + 우측 고정 슬롯.
     <div className="flex items-center gap-3 rounded-lg border bg-card px-3.5 py-3 shadow-raise">
@@ -80,7 +89,7 @@ export function ScheduleCard({
           <Link
             href={`/${workspace}/datasets/${encodeURIComponent(s.runTemplate.dataset.id)}`}
             className="min-w-0 overflow-hidden whitespace-nowrap rounded-sm hover:text-foreground hover:underline"
-            title="데이터셋(벤치마크) 상세"
+            title={t('datasetDetail')}
           >
             <EntityRef
               id={s.runTemplate.dataset.id}
@@ -92,7 +101,7 @@ export function ScheduleCard({
             <Link
               href={`/${workspace}/harnesses/${encodeURIComponent(s.runTemplate.harness.id)}`}
               className="min-w-0 truncate rounded-sm hover:text-foreground hover:underline"
-              title="하니스 상세"
+              title={t('harnessDetail')}
             >
               <EntityRef
                 id={s.runTemplate.harness.id}
@@ -105,35 +114,38 @@ export function ScheduleCard({
                 <Link
                   href={`/${workspace}/runtimes/${encodeURIComponent(s.runTemplate.runtime)}`}
                   className="rounded-sm hover:underline"
-                  title="런타임 상세"
+                  title={t('runtimeDetail')}
                 >
-                  <RuntimeChip label={runtimeLabelOf(s)} />
+                  <RuntimeChip label={runtimeChipLabel(runtimeLabelOf(s), t)} />
                 </Link>
               ) : (
-                <RuntimeChip label={runtimeLabelOf(s)} />
+                <RuntimeChip label={runtimeChipLabel(runtimeLabelOf(s), t)} />
               )}
             </span>
           </span>
         </div>
         {/* ③ 주기 · 다음 실행 · 최근 상태 */}
         <div className="flex items-center gap-x-2 overflow-hidden whitespace-nowrap text-[12px] text-muted-foreground">
-          <span className="shrink-0 font-[510] text-foreground/90">{describeCron(s.cron)}</span>
+          <span className="shrink-0 font-[510] text-foreground/90">
+            {describeCron(s.cron, locale)}
+          </span>
           <span className="hidden shrink-0 text-faint sm:inline">{s.timezone}</span>
           {s.enabled ? (
             next ? (
               <span className="truncate" title={fmtDateTimeFull(next)}>
-                다음 실행 {fireDayLabel(next, nowIso, s.timezone)} {fireTimeLabel(next, s.timezone)}
-                {approx ? <span className="text-faint"> (예상)</span> : null}
+                {t('nextRunLabel')} {fireDayLabel(next, nowIso, s.timezone, locale)}{' '}
+                {fireTimeLabel(next, s.timezone)}
+                {approx ? <span className="text-faint"> {t('approxNote')}</span> : null}
               </span>
             ) : (
-              <span className="truncate text-faint">다음 실행 시각 계산 불가</span>
+              <span className="truncate text-faint">{t('nextRunUnknown')}</span>
             )
           ) : (
-            <span className="truncate text-faint">일시중지됨 — 발사 안 함</span>
+            <span className="truncate text-faint">{t('pausedNoFire')}</span>
           )}
           {s.lastStatus ? (
             <span className="hidden truncate text-faint lg:inline">
-              · 최근 {s.lastStatus}
+              · {t('lastRun')} {s.lastStatus}
               {s.lastFiredAt ? ` (${fmtDateTime(s.lastFiredAt)})` : ''}
             </span>
           ) : null}
@@ -143,9 +155,9 @@ export function ScheduleCard({
       <div className="flex shrink-0 items-center gap-1.5">
         <span className="flex w-7 justify-center">
           <UserAvatar
-            name={`${ownerNameOf(authors, s.createdBy)}${s.createdBy === me ? ' (나)' : ''}`}
+            name={`${ownerNameOf(authors, s.createdBy)}${s.createdBy === me ? ` (${t('me')})` : ''}`}
             url={authors[s.createdBy]?.avatarUrl}
-            label="소유자"
+            label={t('ownerLabel')}
           />
         </span>
         <span className="flex w-8 justify-center">
@@ -153,12 +165,12 @@ export function ScheduleCard({
             <DropdownMenu
               align="end"
               trigger={({ open, toggle }) => (
-                <Tooltip content={stateTip(s.enabled)} align="end">
+                <Tooltip content={stateTip(s.enabled, t)} align="end">
                   <button
                     type="button"
                     onClick={toggle}
                     disabled={pending}
-                    aria-label={`상태: ${s.enabled ? '활성' : '일시중지'} — 작업 메뉴`}
+                    aria-label={t('stateAria', { state: s.enabled ? t('active') : t('paused') })}
                     aria-expanded={open}
                     className="grid size-8 place-items-center rounded-md transition-colors hover:bg-accent disabled:opacity-50"
                   >
@@ -168,7 +180,7 @@ export function ScheduleCard({
               )}
             >
               <DropdownItem icon={s.enabled ? <Pause /> : <Play />} onSelect={() => onToggle(s)}>
-                {s.enabled ? '일시중지' : '재개'}
+                {s.enabled ? t('pause') : t('resume')}
               </DropdownItem>
               {canEdit ? (
                 <DropdownItem
@@ -177,16 +189,16 @@ export function ScheduleCard({
                     router.push(`/${workspace}/schedules/${encodeURIComponent(s.id)}/edit`)
                   }
                 >
-                  수정
+                  {t('edit')}
                 </DropdownItem>
               ) : null}
               <DropdownSeparator />
               <DropdownItem icon={<Trash2 />} tone="danger" onSelect={() => onDelete(s)}>
-                삭제
+                {t('delete')}
               </DropdownItem>
             </DropdownMenu>
           ) : (
-            <Tooltip content={stateTip(s.enabled)} align="end">
+            <Tooltip content={stateTip(s.enabled, t)} align="end">
               <span className="grid size-8 place-items-center">
                 <StateIcon enabled={s.enabled} />
               </span>

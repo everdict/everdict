@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { HarnessPicker, type HarnessOption } from '@/features/by-harness-scorecards'
 import { scorecardsSchema, type ScorecardRecord } from '@/entities/scorecard'
@@ -27,6 +28,7 @@ export default async function ByHarnessPage({
   const { workspace } = await params
   const { harness } = await searchParams
   const ctx = await authContext()
+  const t = await getTranslations('scorecardsPage')
 
   let error: string | undefined
   let scorecards: ScorecardRecord[] = []
@@ -64,21 +66,15 @@ export default async function ByHarnessPage({
           className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronLeft className="size-3.5" />
-          스코어카드
+          {t('backToList')}
         </Link>
-        <PageHeader
-          title="하니스별"
-          description="하니스가 벤치마크마다 낸 점수와 사용한 모델을 봐요."
-        />
+        <PageHeader title={t('byHarnessTitle')} description={t('byHarnessDescription')} />
       </div>
 
-      {error && <Callout tone="danger">스코어카드 조회 실패: {error}</Callout>}
+      {error && <Callout tone="danger">{t('listError', { error })}</Callout>}
 
       {options.length === 0 ? (
-        <EmptyState
-          title="아직 스코어카드가 없어요."
-          hint="하니스로 벤치마크를 평가하면 여기에 쌓여요."
-        />
+        <EmptyState title={t('emptyTitle')} hint={t('byHarnessEmptyHint')} />
       ) : (
         <>
           <Card className="p-4">
@@ -86,22 +82,26 @@ export default async function ByHarnessPage({
           </Card>
 
           {groups.length === 0 ? (
-            <EmptyState title="이 하니스로 만든 스코어카드가 없어요." />
+            <EmptyState title={t('noScorecardsForHarness')} />
           ) : (
             groups.map(([datasetId, cards]) => (
               <section key={datasetId} className="space-y-2.5">
                 <SectionHeader
                   title={datasetId}
-                  action={<span className="text-[11px] text-faint">{cards.length}건</span>}
+                  action={
+                    <span className="text-[11px] text-faint">
+                      {t('countItems', { count: cards.length })}
+                    </span>
+                  }
                 />
                 <Table>
                   <THead>
                     <tr>
-                      <TH>하니스 버전</TH>
+                      <TH>{t('thHarnessVersion')}</TH>
                       <TH>model</TH>
                       <TH>metrics</TH>
-                      <TH className="text-right">상태</TH>
-                      <TH className="text-right">시각</TH>
+                      <TH className="text-right">{t('thStatus')}</TH>
+                      <TH className="text-right">{t('thTime')}</TH>
                     </tr>
                   </THead>
                   <TBody>

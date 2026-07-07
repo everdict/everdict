@@ -39,8 +39,9 @@ export const envValueSchema = z.union([z.string(), z.object({ secretRef: z.strin
 export type EnvValue = z.infer<typeof envValueSchema>
 
 // env 값 표시 텍스트 — 리터럴은 그대로, 시크릿 참조는 "이름 · 시크릿"으로(값은 노출 안 됨).
-export const envValueText = (v: EnvValue): string =>
-  typeof v === 'string' ? v : `${v.secretRef} · 시크릿`
+// secretLabel = 시크릿 접미사(로케일화 — 호출부가 t('secretLabel') 을 넘김, 기본은 한국어).
+export const envValueText = (v: EnvValue, secretLabel: string = '시크릿'): string =>
+  typeof v === 'string' ? v : `${v.secretRef} · ${secretLabel}`
 
 // 트레이스 출처 — 하니스가 OTel/MLflow 로 내보낸 트레이스를 평가가 끌어온다.
 export const traceSourceSchema = z.object({

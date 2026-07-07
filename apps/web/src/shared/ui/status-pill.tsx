@@ -1,4 +1,5 @@
 import { CheckCircle2, CircleSlash, Clock3, Loader2, XCircle } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { RunStatus } from '@/entities/run'
 import { cn } from '@/shared/lib/utils'
@@ -10,17 +11,18 @@ type PillStatus = RunStatus | 'superseded'
 
 const MAP: Record<
   PillStatus,
-  { tone: 'success' | 'danger' | 'info' | 'neutral'; label: string; pulse?: boolean }
+  { tone: 'success' | 'danger' | 'info' | 'neutral'; labelKey: string; pulse?: boolean }
 > = {
-  succeeded: { tone: 'success', label: '성공' },
-  failed: { tone: 'danger', label: '실패' },
-  running: { tone: 'info', label: '실행중', pulse: true },
-  queued: { tone: 'neutral', label: '대기' },
-  superseded: { tone: 'neutral', label: '대체됨' },
+  succeeded: { tone: 'success', labelKey: 'statusSucceeded' },
+  failed: { tone: 'danger', labelKey: 'statusFailed' },
+  running: { tone: 'info', labelKey: 'statusRunning', pulse: true },
+  queued: { tone: 'neutral', labelKey: 'statusQueued' },
+  superseded: { tone: 'neutral', labelKey: 'statusSuperseded' },
 }
 
 export function StatusPill({ status }: { status: PillStatus }) {
-  const { tone, label, pulse } = MAP[status]
+  const t = useTranslations('ui')
+  const { tone, labelKey, pulse } = MAP[status]
   return (
     <Badge tone={tone}>
       <span className="relative flex size-1.5">
@@ -29,7 +31,7 @@ export function StatusPill({ status }: { status: PillStatus }) {
         )}
         <span className={cn('relative inline-flex size-1.5 rounded-full bg-current')} />
       </span>
-      {label}
+      {t(labelKey)}
     </Badge>
   )
 }
@@ -44,7 +46,8 @@ const ICON_CLASS: Record<PillStatus, string> = {
 }
 
 export function StatusIcon({ status, className }: { status: PillStatus; className?: string }) {
-  const { label } = MAP[status]
+  const t = useTranslations('ui')
+  const label = t(MAP[status].labelKey)
   const Icon =
     status === 'succeeded'
       ? CheckCircle2

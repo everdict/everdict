@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Download, Laptop, Trash2 } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import {
   capabilityMeta,
@@ -45,6 +46,8 @@ export function RunnersManager({
   runners: RunnerMeta[]
   downloadHref: string // /{workspace}/download — 브라우저 사용자용 데스크톱 다운로드 페이지
 }) {
+  const t = useTranslations('manageRunners')
+  const locale = useLocale()
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
@@ -92,7 +95,7 @@ export function RunnersManager({
           ...(caps.length > 0 ? { capabilities: caps } : {}),
         })
         if (!r.ok || !r.token) {
-          setError(r.error ?? '연결에 실패했어요.')
+          setError(r.error ?? t('connectFailed'))
           return
         }
         await b.pairRunner({
@@ -110,19 +113,19 @@ export function RunnersManager({
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between gap-4">
-        <p className="text-[13px] text-muted-foreground">러너는 내 계정 소유예요.</p>
+        <p className="text-[13px] text-muted-foreground">{t('ownedByYou')}</p>
         <span className="flex shrink-0 items-center gap-2">
           {/* 페어링 표면은 데스크톱 전담(D7) — 브라우저에는 다운로드 CTA 만 노출. */}
           {bridge && !desktop?.paired && (
             <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
               <Laptop />
-              {pending ? '연결 중…' : '이 기기를 러너로 연결'}
+              {pending ? t('connecting') : t('connectThisDevice')}
             </Button>
           )}
           {!bridge && (
             <Link href={downloadHref} className={buttonVariants({ size: 'sm' })}>
               <Download />
-              데스크톱 앱 받기
+              {t('getDesktopApp')}
             </Link>
           )}
         </span>
@@ -142,9 +145,7 @@ export function RunnersManager({
         !runners.some((r) => r.id === desktop.runnerId) && (
           <Callout tone="warning">
             <span className="flex flex-wrap items-center justify-between gap-2">
-              <span>
-                이 기기는 다른 계정에 연결되어 있어요. 다시 연결하면 이 계정의 러너로 바뀌어요.
-              </span>
+              <span>{t('otherAccountWarning')}</span>
               <Button
                 size="xs"
                 variant="secondary"
@@ -152,7 +153,7 @@ export function RunnersManager({
                 disabled={pending}
               >
                 <Laptop />
-                {pending ? '연결 중…' : '이 계정으로 다시 연결'}
+                {pending ? t('connecting') : t('reconnectThisAccount')}
               </Button>
             </span>
           </Callout>
@@ -161,17 +162,13 @@ export function RunnersManager({
       {runners.length === 0 ? (
         <EmptyState
           icon={<Laptop strokeWidth={1.75} />}
-          title="아직 연결한 러너가 없어요."
-          hint={
-            bridge
-              ? '버튼 한 번으로 이 기기를 러너로 연결할 수 있어요.'
-              : '데스크톱 앱을 설치하면 버튼 한 번으로 연결할 수 있어요.'
-          }
+          title={t('emptyTitle')}
+          hint={bridge ? t('emptyHintBridge') : t('emptyHintDownload')}
           action={
             bridge ? (
               <Button size="sm" onClick={onConnectThisDevice} disabled={pending}>
                 <Laptop />
-                {pending ? '연결 중…' : '이 기기를 러너로 연결'}
+                {pending ? t('connecting') : t('connectThisDevice')}
               </Button>
             ) : (
               <Link
@@ -179,7 +176,7 @@ export function RunnersManager({
                 className={buttonVariants({ size: 'sm', variant: 'secondary' })}
               >
                 <Download />
-                데스크톱 앱 받기
+                {t('getDesktopApp')}
               </Link>
             )
           }
@@ -195,13 +192,13 @@ export function RunnersManager({
               thisDevice && desktop.capabilities.length > 0 ? desktop.capabilities : r.capabilities
             const statusText = thisDevice
               ? desktop.state === 'running'
-                ? `실행 중 (${desktop.activeJobs})`
+                ? t('running', { count: desktop.activeJobs })
                 : desktop.state === 'idle'
-                  ? '온라인'
-                  : '오프라인'
+                  ? t('online')
+                  : t('offline')
               : online
-                ? '온라인'
-                : '오프라인'
+                ? t('online')
+                : t('offline')
             return (
               <li key={r.id} className="flex items-center gap-3 px-3.5 py-3">
                 <span className="relative grid size-8 shrink-0 place-items-center rounded-md bg-elevated text-muted-foreground">
@@ -212,7 +209,7 @@ export function RunnersManager({
                       'absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card',
                       online ? 'bg-[var(--color-success)]' : 'bg-muted-foreground/40'
                     )}
-                    title={online ? '온라인' : '오프라인'}
+                    title={online ? t('online') : t('offline')}
                   />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -220,7 +217,7 @@ export function RunnersManager({
                     <span className="truncate text-[13px] font-[510] text-foreground">
                       {r.label}
                     </span>
-                    {thisDevice && <Badge>이 기기</Badge>}
+                    {thisDevice && <Badge>{t('thisDevice')}</Badge>}
                     <span
                       className={cn(
                         'text-[12px]',
@@ -240,7 +237,7 @@ export function RunnersManager({
                           key={name}
                           tone={has ? 'success' : 'outline'}
                           className={has ? undefined : 'opacity-55'}
-                          title={has ? '이 머신이 지원' : '이 머신에서 불가'}
+                          title={has ? t('capSupported') : t('capUnsupported')}
                         >
                           {has ? '✓ ' : ''}
                           {label}
@@ -249,11 +246,17 @@ export function RunnersManager({
                     })}
                   </div>
                   <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
-                    <span>연결 {new Date(r.pairedAt).toLocaleString('ko-KR')}</span>
+                    <span>
+                      {t('pairedAt', { date: new Date(r.pairedAt).toLocaleString(locale) })}
+                    </span>
                     {r.lastSeenAt && (
                       <>
                         <span>·</span>
-                        <span>최근 접속 {new Date(r.lastSeenAt).toLocaleString('ko-KR')}</span>
+                        <span>
+                          {t('lastSeenAt', {
+                            date: new Date(r.lastSeenAt).toLocaleString(locale),
+                          })}
+                        </span>
                       </>
                     )}
                   </div>
@@ -266,14 +269,14 @@ export function RunnersManager({
                       disabled={pending}
                       onClick={() => onRevoke(r.id)}
                     >
-                      해제 확인
+                      {t('revokeConfirm')}
                     </Button>
                     <button
                       type="button"
                       className="text-[12px] text-muted-foreground hover:text-foreground"
                       onClick={() => setConfirmId(undefined)}
                     >
-                      닫기
+                      {t('close')}
                     </button>
                   </span>
                 ) : (
@@ -281,7 +284,7 @@ export function RunnersManager({
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0 text-muted-foreground hover:text-destructive"
-                    aria-label={`${r.label} 러너 해제`}
+                    aria-label={t('revokeRunnerAria', { name: r.label })}
                     onClick={() => setConfirmId(r.id)}
                   >
                     <Trash2 />

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Braces, ChevronDown } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { HarnessInstanceSpec, HarnessSpec, HarnessTemplateSpec } from '@/entities/harness'
 import { cn } from '@/shared/lib/utils'
@@ -18,6 +19,7 @@ export function RawConfigDisclosure({
   config?: { instance: HarnessInstanceSpec; template: HarnessTemplateSpec }
   spec: HarnessSpec
 }) {
+  const t = useTranslations('inspectHarness')
   const [open, setOpen] = useState(false)
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-secondary/30">
@@ -29,9 +31,9 @@ export function RawConfigDisclosure({
       >
         <span className="inline-flex items-center gap-2 text-[13px] font-[560] text-foreground">
           <Braces className="size-3.5 text-muted-foreground" />
-          원본 구성 · JSON
+          {t('rawConfigTitle')}
           <span className="text-[12px] font-normal text-muted-foreground">
-            새 버전 편집·디버깅용
+            {t('rawConfigHint')}
           </span>
         </span>
         <ChevronDown

@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react'
 import { Check, Copy, Github, Server, Trash2 } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import {
   capabilityMeta,
@@ -40,6 +41,8 @@ export function WorkspaceRunnersManager({
   runners: RunnerMeta[]
   canWrite: boolean
 }) {
+  const t = useTranslations('manageWorkspaceRunners')
+  const locale = useLocale()
   const [registerOpen, setRegisterOpen] = useState(false)
   const [githubOpen, setGithubOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
@@ -59,21 +62,23 @@ export function WorkspaceRunnersManager({
     <div className="space-y-5">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h3 className="text-[13px] font-[560] text-foreground">공유 러너</h3>
+          <h3 className="text-[13px] font-[560] text-foreground">{t('title')}</h3>
           <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-            팀이 함께 쓰는 러너예요(빌드 서버·CI). 등록하면 이 워크스페이스 멤버 누구나 런타임을{' '}
-            <span className="font-mono">self:ws:&lt;id&gt;</span> 로 지정해 실행할 수 있어요. 등록
-            토큰은 한 번만 보여요.
+            {t.rich('description', {
+              target: 'self:ws:<id>',
+              mono: (chunks) => <span className="font-mono">{chunks}</span>,
+            })}
           </p>
         </div>
         {canWrite && (
           <span className="flex shrink-0 items-center gap-2">
             <Button size="sm" variant="secondary" onClick={() => setGithubOpen(true)}>
               <Github />
-              GitHub Actions 러너
+              {t('githubRunner')}
             </Button>
             <Button size="sm" onClick={() => setRegisterOpen(true)}>
-              <Server />새 공유 러너 등록
+              <Server />
+              {t('registerRunner')}
             </Button>
           </span>
         )}
@@ -88,16 +93,13 @@ export function WorkspaceRunnersManager({
       {runners.length === 0 ? (
         <EmptyState
           icon={<Server strokeWidth={1.75} />}
-          title="아직 등록된 공유 러너가 없어요."
-          hint={
-            canWrite
-              ? '팀 빌드 서버나 CI 머신을 공유 러너로 등록해 함께 쓸 수 있어요.'
-              : '공유 러너를 등록하려면 관리자 권한이 필요해요.'
-          }
+          title={t('emptyTitle')}
+          hint={canWrite ? t('emptyHintCanWrite') : t('emptyHintReadOnly')}
           action={
             canWrite ? (
               <Button size="sm" variant="secondary" onClick={() => setRegisterOpen(true)}>
-                <Server />새 공유 러너 등록
+                <Server />
+                {t('registerRunner')}
               </Button>
             ) : undefined
           }
@@ -115,7 +117,7 @@ export function WorkspaceRunnersManager({
                       'absolute -bottom-0.5 -right-0.5 size-2.5 rounded-full border-2 border-card',
                       online ? 'bg-[var(--color-success)]' : 'bg-muted-foreground/40'
                     )}
-                    title={online ? '온라인' : '오프라인'}
+                    title={online ? t('online') : t('offline')}
                   />
                 </span>
                 <div className="min-w-0 flex-1">
@@ -129,7 +131,7 @@ export function WorkspaceRunnersManager({
                         online ? 'text-[var(--color-success)]' : 'text-faint'
                       )}
                     >
-                      {online ? '온라인' : '오프라인'}
+                      {online ? t('online') : t('offline')}
                     </span>
                     {r.os && <Badge tone="outline">{r.os}</Badge>}
                   </div>
@@ -141,7 +143,7 @@ export function WorkspaceRunnersManager({
                           key={name}
                           tone={has ? 'success' : 'outline'}
                           className={has ? undefined : 'opacity-55'}
-                          title={has ? '이 러너가 지원' : '이 러너에서 불가'}
+                          title={has ? t('capSupported') : t('capUnsupported')}
                         >
                           {has ? '✓ ' : ''}
                           {label}
@@ -152,7 +154,9 @@ export function WorkspaceRunnersManager({
                   <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
                     <code className="font-mono text-muted-foreground">self:ws:{r.id}</code>
                     <span>·</span>
-                    <span>등록 {new Date(r.pairedAt).toLocaleString('ko-KR')}</span>
+                    <span>
+                      {t('pairedAt', { date: new Date(r.pairedAt).toLocaleString(locale) })}
+                    </span>
                   </div>
                 </div>
                 {canWrite &&
@@ -164,14 +168,14 @@ export function WorkspaceRunnersManager({
                         disabled={pending}
                         onClick={() => onRevoke(r.id)}
                       >
-                        해제 확인
+                        {t('revokeConfirm')}
                       </Button>
                       <button
                         type="button"
                         className="text-[12px] text-muted-foreground hover:text-foreground"
                         onClick={() => setConfirmId(undefined)}
                       >
-                        닫기
+                        {t('close')}
                       </button>
                     </span>
                   ) : (
@@ -179,7 +183,7 @@ export function WorkspaceRunnersManager({
                       variant="ghost"
                       size="icon-sm"
                       className="shrink-0 text-muted-foreground hover:text-destructive"
-                      aria-label={`${r.label} 공유 러너 해제`}
+                      aria-label={t('revokeAria', { label: r.label })}
                       onClick={() => setConfirmId(r.id)}
                     >
                       <Trash2 />
@@ -192,9 +196,7 @@ export function WorkspaceRunnersManager({
       )}
 
       {!canWrite && runners.length > 0 && (
-        <p className="text-[12px] text-muted-foreground">
-          공유 러너를 등록하거나 해제하려면 관리자 권한이 필요해요.
-        </p>
+        <p className="text-[12px] text-muted-foreground">{t('adminRequired')}</p>
       )}
 
       {canWrite && (
@@ -207,6 +209,8 @@ export function WorkspaceRunnersManager({
 
 // 등록 모달 — 이름 + OS(선택) + capability 선택 후 등록. 등록되면 같은 모달이 토큰 1회 노출 + 접속 명령 단계로 전환.
 function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useTranslations('manageWorkspaceRunners')
+  const locale = useLocale()
   const [label, setLabel] = useState('')
   const [os, setOs] = useState('')
   const [caps, setCaps] = useState<RunnerCapability[]>([])
@@ -232,7 +236,7 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
   function onRegister() {
     setError(undefined)
     if (label.trim().length === 0) {
-      setError('러너 이름을 입력해주세요.')
+      setError(t('nameRequired'))
       return
     }
     startTransition(async () => {
@@ -242,7 +246,7 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
         ...(caps.length > 0 ? { capabilities: caps } : {}),
       })
       if (r.ok && r.token) setIssued({ token: r.token, ...(r.apiUrl ? { apiUrl: r.apiUrl } : {}) })
-      else setError(r.error ?? '등록에 실패했어요.')
+      else setError(r.error ?? t('registerFailed'))
     })
   }
 
@@ -262,17 +266,14 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="register-runner-title" className="text-[15px] font-[560] text-foreground">
-              공유 러너가 등록됐어요
+              {t('registeredTitle')}
             </h2>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              러너로 쓸 머신에서 아래 명령을 실행해 붙이세요. 토큰은 다시 볼 수 없어요.
+              {t('registeredDesc')}
             </p>
           </header>
           <div className="px-5 py-4">
-            <Callout
-              tone="warning"
-              hint="이 토큰은 다시 볼 수 없어요. 지금 복사해 안전하게 보관하세요."
-            >
+            <Callout tone="warning" hint={t('tokenOnceHint')}>
               <div className="flex items-center gap-2">
                 <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
                   {command}
@@ -283,18 +284,18 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
                   size="sm"
                   className="shrink-0"
                   onClick={() => {
-                    void copyText(command).then((ok) => ok && setCopied(true))
+                    void copyText(command, undefined, locale).then((ok) => ok && setCopied(true))
                   }}
                 >
                   {copied ? <Check /> : <Copy />}
-                  {copied ? '복사됨' : '복사'}
+                  {copied ? t('copied') : t('copy')}
                 </Button>
               </div>
             </Callout>
           </div>
           <footer className="flex justify-end border-t border-border px-5 py-3.5">
             <Button size="sm" onClick={onClose}>
-              완료
+              {t('done')}
             </Button>
           </footer>
         </>
@@ -302,26 +303,26 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="register-runner-title" className="text-[15px] font-[560] text-foreground">
-              새 공유 러너 등록
+              {t('registerRunner')}
             </h2>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              팀이 함께 쓸 헤드리스 러너(빌드 서버·CI)를 등록해요.
+              {t('registerDesc')}
             </p>
           </header>
           <div className="space-y-4 px-5 py-4">
             <div className="space-y-1.5">
-              <Label htmlFor="runner-label">이름</Label>
+              <Label htmlFor="runner-label">{t('nameLabel')}</Label>
               <Input
                 id="runner-label"
                 value={label}
                 onChange={(e) => setLabel(e.target.value)}
-                placeholder="예: acme-ci-runner"
+                placeholder={t('namePlaceholder')}
                 maxLength={80}
                 autoFocus
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="runner-os">OS (선택)</Label>
+              <Label htmlFor="runner-os">{t('osLabel')}</Label>
               <Input
                 id="runner-os"
                 value={os}
@@ -331,10 +332,8 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
               />
             </div>
             <div className="space-y-1.5">
-              <Label>지원 기능 (선택)</Label>
-              <p className="text-[12px] text-muted-foreground">
-                러너가 붙을 때 실제로 프로브해 다시 광고해요 — 여기 선택은 초기 라벨이에요.
-              </p>
+              <Label>{t('capsLabel')}</Label>
+              <p className="text-[12px] text-muted-foreground">{t('capsHint')}</p>
               <div className="flex flex-wrap gap-1.5 pt-0.5">
                 {capabilityMeta.map(({ name, label: capLabel }) => {
                   const on = caps.includes(name)
@@ -365,10 +364,10 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
           </div>
           <footer className="flex justify-end gap-2 border-t border-border px-5 py-3.5">
             <Button size="sm" variant="secondary" onClick={onClose} disabled={pending}>
-              취소
+              {t('cancel')}
             </Button>
             <Button size="sm" onClick={onRegister} disabled={pending}>
-              {pending ? '등록 중…' : '등록'}
+              {pending ? t('registering') : t('register')}
             </Button>
           </footer>
         </>
@@ -380,6 +379,8 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
 // GitHub Actions 러너 자가등록 모달 — 내 GitHub 연결 + repo 선택 후 생성. 생성되면 빌드 서버에서 실행할 설치
 // 스크립트(GitHub 러너 + Assay 러너)와 워크플로 힌트(runs-on 라벨 + run-eval runtime)를 1회 노출한다.
 function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useTranslations('manageWorkspaceRunners')
+  const locale = useLocale()
   const [mode, setMode] = useState<'repo' | 'org'>('repo')
   const [repository, setRepository] = useState('')
   const [org, setOrg] = useState('')
@@ -403,11 +404,11 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
   function onGenerate() {
     setError(undefined)
     if (mode === 'repo' && !/^[^/\s]+\/[^/\s]+$/.test(repository.trim())) {
-      setError('레포지토리는 owner/name 형식으로 입력해주세요.')
+      setError(t('repoInvalid'))
       return
     }
     if (mode === 'org' && !/^[^/\s]+$/.test(org.trim())) {
-      setError('조직(org) 이름을 입력해주세요(슬래시 없이).')
+      setError(t('orgInvalid'))
       return
     }
     startTransition(async () => {
@@ -415,7 +416,7 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
         mode === 'org' ? { org, ...(runnerGroup.trim() ? { runnerGroup } : {}) } : { repository }
       )
       if (r.ok && r.install) setResult(r.install)
-      else setError(r.error ?? '생성에 실패했어요.')
+      else setError(r.error ?? t('generateFailed'))
     })
   }
 
@@ -425,28 +426,31 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="gh-install-title" className="text-[15px] font-[560] text-foreground">
-              GitHub Actions 러너가 준비됐어요
+              {t('githubReadyTitle')}
             </h2>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              빌드 서버에서 아래 스크립트를 실행하면 GitHub 러너와 Assay 러너(
-              <span className="font-mono">{result.runtimeTarget}</span>)가 함께 떠요. 스크립트에
-              토큰이 들어 있으니 다시 볼 수 없어요.
+              {t.rich('githubReadyDesc', {
+                target: result.runtimeTarget,
+                mono: (chunks) => <span className="font-mono">{chunks}</span>,
+              })}
             </p>
           </header>
           <div className="space-y-4 px-5 py-4">
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label>설치 스크립트</Label>
+                <Label>{t('installScriptLabel')}</Label>
                 <Button
                   type="button"
                   variant="secondary"
                   size="xs"
                   onClick={() => {
-                    void copyText(result.installScript).then((ok) => ok && setCopied('script'))
+                    void copyText(result.installScript, undefined, locale).then(
+                      (ok) => ok && setCopied('script')
+                    )
                   }}
                 >
                   {copied === 'script' ? <Check /> : <Copy />}
-                  {copied === 'script' ? '복사됨' : '복사'}
+                  {copied === 'script' ? t('copied') : t('copy')}
                 </Button>
               </div>
               <pre className="max-h-52 overflow-auto rounded-md border bg-elevated px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
@@ -455,17 +459,19 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
             </div>
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <Label>워크플로에 추가</Label>
+                <Label>{t('workflowLabel')}</Label>
                 <Button
                   type="button"
                   variant="secondary"
                   size="xs"
                   onClick={() => {
-                    void copyText(result.workflowHint).then((ok) => ok && setCopied('hint'))
+                    void copyText(result.workflowHint, undefined, locale).then(
+                      (ok) => ok && setCopied('hint')
+                    )
                   }}
                 >
                   {copied === 'hint' ? <Check /> : <Copy />}
-                  {copied === 'hint' ? '복사됨' : '복사'}
+                  {copied === 'hint' ? t('copied') : t('copy')}
                 </Button>
               </div>
               <pre className="max-h-40 overflow-auto rounded-md border bg-elevated px-3 py-2 font-mono text-[11px] leading-relaxed text-muted-foreground">
@@ -473,13 +479,14 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
               </pre>
             </div>
             <Callout tone="warning" className="py-1.5">
-              GitHub 등록 토큰은 단기예요 — 스크립트를 곧 실행하세요. 등록 만료:{' '}
-              {new Date(result.registrationExpiresAt).toLocaleString('ko-KR')}
+              {t('registrationExpires', {
+                date: new Date(result.registrationExpiresAt).toLocaleString(locale),
+              })}
             </Callout>
           </div>
           <footer className="flex justify-end border-t border-border px-5 py-3.5">
             <Button size="sm" onClick={onClose}>
-              완료
+              {t('done')}
             </Button>
           </footer>
         </>
@@ -487,20 +494,17 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="gh-install-title" className="text-[15px] font-[560] text-foreground">
-              GitHub Actions 러너 등록
+              {t('githubRegisterTitle')}
             </h2>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              빌드 서버 한 대에 GitHub Actions 러너와 Assay 공유 러너를 함께 세워요. CI 가 이미지를
-              빌드하고, 나란히 붙은 Assay 러너가 평가를 실행해요.
+              {t('githubRegisterDesc')}
             </p>
           </header>
           <div className="space-y-4 px-5 py-4">
-            <p className="text-[12px] text-faint">
-              워크스페이스 GitHub App 이 그 레포/조직에 설치돼 있어야 해요(설정 › 통합에서 설치).
-            </p>
+            <p className="text-[12px] text-faint">{t('githubAppHint')}</p>
             {/* 대상: 레포 vs 조직(org — 그 org 의 모든 레포 공유) */}
             <div className="space-y-1.5">
-              <Label>대상</Label>
+              <Label>{t('targetLabel')}</Label>
               <div className="flex gap-1.5">
                 {(['repo', 'org'] as const).map((m) => (
                   <button
@@ -514,37 +518,37 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
                         : 'border-border text-muted-foreground hover:bg-elevated'
                     )}
                   >
-                    {m === 'repo' ? '레포지토리' : '조직 (org)'}
+                    {m === 'repo' ? t('repo') : t('org')}
                   </button>
                 ))}
               </div>
             </div>
             {mode === 'repo' ? (
               <div className="space-y-1.5">
-                <Label htmlFor="gh-repo">레포지토리</Label>
+                <Label htmlFor="gh-repo">{t('repo')}</Label>
                 <Input
                   id="gh-repo"
                   value={repository}
                   onChange={(e) => setRepository(e.target.value)}
-                  placeholder="owner/name (예: acme/app)"
+                  placeholder={t('repoPlaceholder')}
                   autoFocus
                 />
               </div>
             ) : (
               <div className="space-y-1.5">
-                <Label htmlFor="gh-org">조직 (org)</Label>
+                <Label htmlFor="gh-org">{t('org')}</Label>
                 <Input
                   id="gh-org"
                   value={org}
                   onChange={(e) => setOrg(e.target.value)}
-                  placeholder="org 이름 (예: acme-inc)"
+                  placeholder={t('orgPlaceholder')}
                   autoFocus
                 />
-                <p className="text-[12px] text-faint">org 러너는 그 조직의 모든 레포가 공유해요.</p>
+                <p className="text-[12px] text-faint">{t('orgShared')}</p>
                 <Input
                   value={runnerGroup}
                   onChange={(e) => setRunnerGroup(e.target.value)}
-                  placeholder="러너 그룹 (선택 — 그룹 접근정책 적용)"
+                  placeholder={t('runnerGroupPlaceholder')}
                 />
               </div>
             )}
@@ -556,10 +560,10 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
           </div>
           <footer className="flex justify-end gap-2 border-t border-border px-5 py-3.5">
             <Button size="sm" variant="secondary" onClick={onClose} disabled={pending}>
-              취소
+              {t('cancel')}
             </Button>
             <Button size="sm" onClick={onGenerate} disabled={pending}>
-              {pending ? '생성 중…' : '설치 스크립트 생성'}
+              {pending ? t('generating') : t('generateScript')}
             </Button>
           </footer>
         </>

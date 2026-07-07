@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 
@@ -27,6 +28,7 @@ export function AddBenchmark({
   preselectRecipe?: string
   hfTokenScope?: 'user' | 'workspace' // 사용 가능한 HF_TOKEN 시크릿의 스코프(없으면 미보유 — gated 안내)
 }) {
+  const t = useTranslations('importBenchmark')
   // 레시피 상세에서 "데이터셋으로 만들기"로 진입하면(?recipe=) 가져오기 모드로 시작 + 해당 레시피 프리셀렉트.
   const [mode, setMode] = useState<'build' | 'import'>(preselectRecipe ? 'import' : 'build')
   return (
@@ -34,8 +36,8 @@ export function AddBenchmark({
       <div className="inline-flex rounded-lg border bg-secondary/40 p-0.5">
         {(
           [
-            ['build', '소스에서 만들기'],
-            ['import', '카탈로그 · 레시피'],
+            ['build', t('modeBuild')],
+            ['import', t('modeImport')],
           ] as const
         ).map(([m, label]) => (
           <button

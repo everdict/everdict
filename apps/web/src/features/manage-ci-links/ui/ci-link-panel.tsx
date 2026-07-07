@@ -2,6 +2,7 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import { GitBranch, Plus } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { CiLink } from '@/entities/ci-link'
 import type { HarnessKind } from '@/entities/harness'
@@ -44,6 +45,7 @@ export function CiLinkPanel({
   canWrite: boolean
   workspace: string
 }) {
+  const t = useTranslations('manageCiLinks')
   const [links, setLinks] = useState<CiLink[]>(initialLinks)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [confirmRepo, setConfirmRepo] = useState<string>()
@@ -63,7 +65,7 @@ export function CiLinkPanel({
       const r = await deleteCiLinkAction(link.repository, link.host)
       setConfirmRepo(undefined)
       if (r.ok && r.links) applyLinks(r.links)
-      else setError(r.error ?? '링크 해제에 실패했습니다.')
+      else setError(r.error ?? t('unlinkFailed'))
     })
   }
 
@@ -71,10 +73,11 @@ export function CiLinkPanel({
     <section className="space-y-4">
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">CI 연동</h2>
+          <h2 className="text-[15px] font-[560] tracking-[-0.01em] text-foreground">
+            {t('panelTitle')}
+          </h2>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
-            GitHub 레포를 이 하니스에 연결하면, PR·머지마다 CI가 이미지를 만들어 자동으로 평가해요.
-            따로 키를 넣지 않아도 돼요.
+            {t('panelDescription')}
           </p>
         </div>
         <Button
@@ -84,7 +87,7 @@ export function CiLinkPanel({
           onClick={() => setDialogOpen(true)}
         >
           <Plus />
-          GitHub 레포 연결
+          {t('connectRepo')}
         </Button>
       </div>
 
@@ -96,11 +99,9 @@ export function CiLinkPanel({
 
       {links.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-card/40 px-4 py-6 text-center">
-          <p className="text-[13px] text-muted-foreground">아직 연결된 레포가 없어요.</p>
+          <p className="text-[13px] text-muted-foreground">{t('emptyTitle')}</p>
           <p className="mt-1 text-[12px] text-faint">
-            {canWrite
-              ? '‘GitHub 레포 연결’을 눌러 레포를 붙여보세요.'
-              : '레포 연결은 관리자가 설정해요.'}
+            {canWrite ? t('emptyHintWrite') : t('emptyHintRead')}
           </p>
         </div>
       ) : (
@@ -121,19 +122,23 @@ export function CiLinkPanel({
                         {hostLabel(l.host)}
                       </span>
                     )}
-                    {l.disabled && <Badge tone="warning">비활성</Badge>}
+                    {l.disabled && <Badge tone="warning">{t('disabled')}</Badge>}
                     {l.dataset && (
                       <span className="text-[11px] text-muted-foreground">
-                        데이터셋 <span className="font-mono text-foreground/85">{l.dataset}</span>
+                        {t('datasetLabel')}{' '}
+                        <span className="font-mono text-foreground/85">{l.dataset}</span>
                       </span>
                     )}
                     {/* PR 평가 발화 방식 — 기본(both)은 무표기, 좁힌 경우만 표시. */}
                     {l.trigger === 'auto' && (
-                      <span className="text-[11px] text-muted-foreground">PR 자동만</span>
+                      <span className="text-[11px] text-muted-foreground">
+                        {t('triggerAutoLabel')}
+                      </span>
                     )}
                     {l.trigger === 'comment' && (
                       <span className="text-[11px] text-muted-foreground">
-                        <span className="font-mono text-foreground/85">/evaluate</span> 코멘트만
+                        <span className="font-mono text-foreground/85">/evaluate</span>{' '}
+                        {t('triggerCommentSuffix')}
                       </span>
                     )}
                   </div>
@@ -148,14 +153,14 @@ export function CiLinkPanel({
                             disabled={pending}
                             onClick={() => onDelete(l)}
                           >
-                            해제 확인
+                            {t('unlinkConfirm')}
                           </Button>
                           <button
                             type="button"
                             className="text-[12px] text-muted-foreground hover:text-foreground"
                             onClick={() => setConfirmRepo(undefined)}
                           >
-                            취소
+                            {t('cancel')}
                           </button>
                         </span>
                       ) : (
@@ -164,7 +169,7 @@ export function CiLinkPanel({
                           className="text-[12px] font-[510] text-destructive hover:underline"
                           onClick={() => setConfirmRepo(linkKey(l))}
                         >
-                          해제
+                          {t('unlink')}
                         </button>
                       ))}
                   </div>
@@ -184,10 +189,10 @@ export function CiLinkPanel({
                       )
                     })
                   ) : (
-                    <span className="text-[11px] text-faint">슬롯 없음 (트리거만)</span>
+                    <span className="text-[11px] text-faint">{t('noSlots')}</span>
                   )}
                   <span className="ml-1 text-[11px] text-faint">
-                    등록 {fmtSubject(l.createdBy)}
+                    {t('registeredBy', { who: fmtSubject(l.createdBy) })}
                   </span>
                 </div>
               </li>

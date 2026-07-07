@@ -1,13 +1,14 @@
-import { redirect } from 'next/navigation'
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { CreateScheduleForm } from '@/features/create-schedule'
 import { CommentsSection } from '@/features/discuss'
 import { datasetsSchema } from '@/entities/dataset'
 import { harnessesSchema } from '@/entities/harness'
 import { runtimesSchema } from '@/entities/runtime'
-import { type Schedule, scheduleSchema } from '@/entities/schedule'
+import { scheduleSchema, type Schedule } from '@/entities/schedule'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 import { Card } from '@/shared/ui/card'
@@ -21,6 +22,7 @@ export default async function EditSchedulePage({
   params: Promise<{ workspace: string; id: string }>
 }) {
   const { workspace, id } = await params
+  const t = await getTranslations('schedulesPage')
   const { principal, ctx } = await currentPrincipal()
 
   let schedule: Schedule | null = null
@@ -47,18 +49,18 @@ export default async function EditSchedulePage({
     // 목록 실패해도 폼은 동작(현재 값 유지)
   }
 
-  const t = schedule.runTemplate
+  const tmpl = schedule.runTemplate
   const initial = {
     name: schedule.name,
     cron: schedule.cron,
     timezone: schedule.timezone,
     overlapPolicy: schedule.overlapPolicy,
-    datasetId: t.dataset.id,
-    datasetVersion: t.dataset.version,
-    harnessId: t.harness.id,
-    harnessVersion: t.harness.version,
-    runtime: t.runtime ?? '',
-    concurrency: t.concurrency != null ? String(t.concurrency) : '',
+    datasetId: tmpl.dataset.id,
+    datasetVersion: tmpl.dataset.version,
+    harnessId: tmpl.harness.id,
+    harnessVersion: tmpl.harness.version,
+    runtime: tmpl.runtime ?? '',
+    concurrency: tmpl.concurrency != null ? String(tmpl.concurrency) : '',
   }
 
   return (
@@ -68,12 +70,9 @@ export default async function EditSchedulePage({
         className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
-        예약
+        {t('title')}
       </Link>
-      <PageHeader
-        title="예약 수정"
-        description={`${schedule.name} — 주기와 실행 설정을 바꿔요`}
-      />
+      <PageHeader title={t('edit')} description={t('editDescription', { name: schedule.name })} />
       <Card className="p-5">
         <CreateScheduleForm
           datasets={datasets}
@@ -81,11 +80,16 @@ export default async function EditSchedulePage({
           runtimes={runtimes}
           initial={initial}
           scheduleId={schedule.id}
-          initialJudges={t.judges}
+          initialJudges={tmpl.judges}
         />
       </Card>
 
-      <CommentsSection workspace={workspace} resourceType="schedule" resourceId={id} title="논의" />
+      <CommentsSection
+        workspace={workspace}
+        resourceType="schedule"
+        resourceId={id}
+        title={t('discuss')}
+      />
     </div>
   )
 }

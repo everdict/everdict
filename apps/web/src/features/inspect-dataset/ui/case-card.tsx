@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { Timer, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { DatasetCase } from '@/entities/dataset'
 import { EnvBadge, GraderBadge } from '@/shared/ui/case-badges'
@@ -11,10 +12,11 @@ import { Markdown } from '@/shared/ui/markdown'
 
 // env/grader 배지 + 채점 라벨 + 타임아웃 — 카드와 다이얼로그가 공유하는 메타 줄.
 function CaseMeta({ c }: { c: DatasetCase }) {
+  const tr = useTranslations('inspectDataset')
   return (
     <div className="flex flex-wrap items-center gap-1.5">
       {c.env?.kind && <EnvBadge kind={c.env.kind} />}
-      <span className="ml-0.5 text-[11px] text-faint">채점</span>
+      <span className="ml-0.5 text-[11px] text-faint">{tr('grading')}</span>
       {c.graders.length === 0 ? (
         <span className="text-[11px] text-faint">—</span>
       ) : (
@@ -32,6 +34,7 @@ function CaseMeta({ c }: { c: DatasetCase }) {
 
 // eval 케이스 카드 — 축약 표시, 클릭 시 다이얼로그로 전문(태스크 마크다운 + 환경/채점 + 원본 JSON).
 export function CaseCard({ item: c }: { item: DatasetCase }) {
+  const tr = useTranslations('inspectDataset')
   const [open, setOpen] = useState(false)
   const openDialog = () => setOpen(true)
   return (
@@ -78,7 +81,7 @@ export function CaseCard({ item: c }: { item: DatasetCase }) {
           <button
             type="button"
             onClick={() => setOpen(false)}
-            aria-label="닫기"
+            aria-label={tr('close')}
             className="inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <X className="size-4" />
@@ -99,12 +102,14 @@ export function CaseCard({ item: c }: { item: DatasetCase }) {
             </div>
           )}
           <div>
-            <p className="mb-2 text-[11px] font-[510] uppercase tracking-wide text-faint">태스크</p>
+            <p className="mb-2 text-[11px] font-[510] uppercase tracking-wide text-faint">
+              {tr('task')}
+            </p>
             <Markdown content={c.task} />
           </div>
           <details className="group">
             <summary className="cursor-pointer text-[11px] font-[510] uppercase tracking-wide text-faint transition-colors hover:text-muted-foreground">
-              원본 (JSON)
+              {tr('rawJson')}
             </summary>
             <div className="mt-2 overflow-x-auto rounded-md border border-border bg-muted/30 p-3">
               <JsonView value={c} />

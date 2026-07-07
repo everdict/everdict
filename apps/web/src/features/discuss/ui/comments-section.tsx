@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 import { commentsResponseSchema } from '@/entities/comment'
 import { membersSchema } from '@/entities/member'
 import { can } from '@/shared/auth/can'
@@ -14,13 +16,15 @@ export async function CommentsSection({
   workspace,
   resourceType,
   resourceId,
-  title = '댓글',
+  title,
 }: {
   workspace: string
   resourceType: string
   resourceId: string
   title?: string
 }) {
+  const t = await getTranslations('discuss')
+  const resolvedTitle = title ?? t('title')
   const { principal, ctx } = await currentPrincipal()
   const comments = await controlPlane
     .listComments(ctx, resourceType, resourceId)
@@ -35,7 +39,9 @@ export async function CommentsSection({
 
   return (
     <section className="space-y-3">
-      <SectionHeader title={comments.length > 0 ? `${title} (${comments.length})` : title} />
+      <SectionHeader
+        title={comments.length > 0 ? `${resolvedTitle} (${comments.length})` : resolvedTitle}
+      />
       <CommentThread
         workspace={workspace}
         resourceType={resourceType}

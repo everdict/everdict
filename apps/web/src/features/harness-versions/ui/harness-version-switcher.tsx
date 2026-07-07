@@ -1,6 +1,7 @@
 'use client'
 
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { Combobox } from '@/shared/ui/combobox'
 
@@ -22,11 +23,12 @@ export function HarnessVersionSwitcher({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('harnessVersions')
   if (versions.length === 0) return null
   return (
     <Combobox
       id="harness-version-switch"
-      aria-label={`버전 (${versions.length})`}
+      aria-label={t('versionsAria', { count: versions.length })}
       value={current}
       onChange={(v) =>
         router.push(`/${workspace}/harnesses/${encodeURIComponent(id)}?v=${encodeURIComponent(v)}`)

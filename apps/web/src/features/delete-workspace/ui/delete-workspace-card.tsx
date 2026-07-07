@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Trash2 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -14,6 +15,7 @@ import { deleteWorkspaceAction } from '../api/delete-workspace'
 // 위험 구역 — owner 에게만 렌더된다(상위에서 isOwner 게이트). 카드에는 삭제 버튼만 노출하고, 누르면 팝업에서
 // 워크스페이스 이름을 정확히 입력해야 삭제가 활성(실수 방지). 성공 시 홈(/)으로 보내 남은 워크스페이스/온보딩으로 재라우팅.
 export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }) {
+  const t = useTranslations('deleteWorkspace')
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [confirm, setConfirm] = useState('')
@@ -37,7 +39,7 @@ export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }
         router.push('/')
         router.refresh()
       } else {
-        setError(r.error ?? '삭제하지 못했어요.')
+        setError(r.error ?? t('deleteFailed'))
       }
     })
   }
@@ -45,31 +47,33 @@ export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }
   return (
     <div className="flex items-center justify-between gap-4 rounded-lg border border-destructive/30 bg-destructive/[0.03] p-4">
       <div className="space-y-1">
-        <h3 className="text-[13px] font-[560] text-foreground">워크스페이스 삭제</h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          워크스페이스와 모든 데이터가 사라져요. 되돌릴 수 없어요.
-        </p>
+        <h3 className="text-[13px] font-[560] text-foreground">{t('title')}</h3>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('cardDescription')}</p>
       </div>
       <Button variant="destructive" onClick={() => setOpen(true)} className="shrink-0 gap-1.5">
         <Trash2 className="size-4" />
-        워크스페이스 삭제
+        {t('title')}
       </Button>
 
       <Dialog open={open} onClose={close} className="max-w-md" labelledBy="ws-delete-title">
         <div className="space-y-4 p-5">
           <div className="space-y-1.5">
             <h2 id="ws-delete-title" className="text-[15px] font-[560] text-foreground">
-              워크스페이스 삭제
+              {t('title')}
             </h2>
             <p className="text-[13px] leading-relaxed text-muted-foreground">
-              <span className="font-[510] text-foreground">{workspaceName}</span> 와(과) 모든
-              런·데이터셋·하네스·멤버·시크릿이 영구히 삭제돼요. 되돌릴 수 없어요.
+              {t.rich('dialogWarning', {
+                name: workspaceName,
+                b: (chunks) => <span className="font-[510] text-foreground">{chunks}</span>,
+              })}
             </p>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="ws-delete-confirm">
-              계속하려면 <span className="font-mono text-foreground">{workspaceName}</span> 을(를)
-              입력해주세요.
+              {t.rich('confirmPrompt', {
+                name: workspaceName,
+                code: (chunks) => <span className="font-mono text-foreground">{chunks}</span>,
+              })}
             </Label>
             <Input
               id="ws-delete-confirm"
@@ -82,7 +86,7 @@ export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }
           {error && <Callout tone="danger">{error}</Callout>}
           <div className="flex items-center justify-end gap-2.5 pt-1">
             <Button variant="secondary" onClick={close} disabled={pending}>
-              취소
+              {t('cancel')}
             </Button>
             <Button
               variant="destructive"
@@ -91,7 +95,7 @@ export function DeleteWorkspaceCard({ workspaceName }: { workspaceName: string }
               className="gap-1.5"
             >
               <Trash2 className="size-4" />
-              {pending ? '삭제 중…' : '영구 삭제'}
+              {pending ? t('deleting') : t('permanentDelete')}
             </Button>
           </div>
         </div>

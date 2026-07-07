@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { IngestScorecardForm } from '@/features/ingest-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
@@ -19,6 +20,7 @@ export default async function IngestScorecardPage({
 }) {
   const { workspace } = await params
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('scorecardsPage')
   const allowed = can(principal?.roles, 'scorecards:run')
 
   let datasets: { id: string }[] = []
@@ -37,21 +39,15 @@ export default async function IngestScorecardPage({
         className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
-        스코어카드
+        {t('backToList')}
       </Link>
-      <PageHeader
-        title="트레이스 올리기"
-        description="다른 곳에서 실행한 결과를 올려 스코어카드로 만들어요. 비교와 리더보드에 바로 쓸 수 있어요."
-      />
+      <PageHeader title={t('ingest')} description={t('ingestDescription')} />
       {allowed ? (
         <Card className="p-5">
           <IngestScorecardForm datasets={datasets} />
         </Card>
       ) : (
-        <EmptyState
-          title="올릴 권한이 없어요."
-          hint="워크스페이스 관리자에게 권한을 요청해보세요."
-        />
+        <EmptyState title={t('noIngestPermTitle')} hint={t('noPermHint')} />
       )}
     </div>
   )

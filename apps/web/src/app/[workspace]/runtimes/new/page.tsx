@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 import { RegisterRuntimeForm } from '@/features/register-runtime'
 import { PageHeader } from '@/shared/ui/page-header'
 
@@ -9,12 +11,10 @@ export default async function NewRuntimePage({
   params: Promise<{ workspace: string }>
 }) {
   const { workspace } = await params
+  const t = await getTranslations('runtimesPage')
   return (
     <div className="space-y-8">
-      <PageHeader
-        title="런타임 등록"
-        description="워크스페이스가 접속해 평가를 배치할 실행 인프라를 등록해요. 자격증명(토큰·kubeconfig)은 값이 아니라 시크릿 이름으로 참조합니다."
-      />
+      <PageHeader title={t('register')} description={t('registerDescription')} />
       <RegisterRuntimeForm workspace={workspace} />
     </div>
   )

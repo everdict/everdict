@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowRight, Loader2 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -19,6 +20,7 @@ function previewSlug(name: string): string {
 }
 
 export function CreateWorkspaceForm() {
+  const t = useTranslations('createWorkspace')
   const router = useRouter()
   const [name, setName] = useState('')
   const [id, setId] = useState('')
@@ -26,7 +28,7 @@ export function CreateWorkspaceForm() {
   const [error, setError] = useState<string | undefined>(undefined)
 
   const slug = id.trim() || previewSlug(name)
-  const nameError = name.trim().length === 0 ? '이름을 입력해주세요.' : undefined
+  const nameError = name.trim().length === 0 ? t('nameRequired') : undefined
 
   async function onSubmit() {
     if (nameError) return
@@ -50,25 +52,23 @@ export function CreateWorkspaceForm() {
   return (
     <div className="space-y-5">
       <div className="space-y-1.5">
-        <Label htmlFor="ws-name">워크스페이스 이름</Label>
+        <Label htmlFor="ws-name">{t('nameLabel')}</Label>
         <Input
           id="ws-name"
           autoFocus
-          placeholder="예: Acme 팀"
+          placeholder={t('namePlaceholder')}
           value={name}
           onChange={(e) => setName(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') onSubmit()
           }}
         />
-        <p className="text-[12px] text-faint">
-          팀이나 조직 이름을 적어주세요. 평가 데이터가 여기에 따로 담겨요.
-        </p>
+        <p className="text-[12px] text-faint">{t('nameHint')}</p>
       </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="ws-id">
-          워크스페이스 ID <span className="text-muted-foreground">(선택)</span>
+          {t('idLabel')} <span className="text-muted-foreground">{t('idOptional')}</span>
         </Label>
         <Input
           id="ws-id"
@@ -78,8 +78,7 @@ export function CreateWorkspaceForm() {
           className="font-mono"
         />
         <p className="text-[12px] text-faint">
-          비워두면 이름에서 자동으로 만들어져요:{' '}
-          <span className="font-mono text-foreground">{slug || '—'}</span>
+          {t('idHint')} <span className="font-mono text-foreground">{slug || '—'}</span>
         </p>
       </div>
 
@@ -87,7 +86,7 @@ export function CreateWorkspaceForm() {
 
       <Button onClick={onSubmit} disabled={busy || Boolean(nameError)} className="w-full gap-1.5">
         {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-        워크스페이스 만들기
+        {t('createWorkspace')}
         {!busy ? <ArrowRight className="size-4" /> : null}
       </Button>
       <FieldError message={name.length > 0 ? nameError : undefined} />

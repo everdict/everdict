@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { getTranslations } from 'next-intl/server'
 
 import {
   CustomAnalyzer,
@@ -25,6 +26,7 @@ export default async function AnalyzePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { workspace } = await params
+  const t = await getTranslations('scorecardsPage')
   const sp = await searchParams
   const flat: Record<string, string | undefined> = {}
   for (const [k, v] of Object.entries(sp)) flat[k] = Array.isArray(v) ? v[0] : v
@@ -50,36 +52,29 @@ export default async function AnalyzePage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="분석"
-        description={
-          mode === 'custom'
-            ? '필터·그룹·측정을 직접 짜서 원하는 표를 만들어요.'
-            : '성능 추이·모델 비교·하니스 비교를 골라 바로 봐요.'
-        }
+        title={t('analyze')}
+        description={mode === 'custom' ? t('analyzeCustomDesc') : t('analyzeEasyDesc')}
         actions={
           <div className="inline-flex overflow-hidden rounded-lg border bg-card shadow-raise">
             <Link
               href={`/${workspace}/scorecards/analyze?mode=easy`}
               className={seg(mode === 'easy')}
             >
-              쉬운 분석
+              {t('analyzeEasy')}
             </Link>
             <Link
               href={`/${workspace}/scorecards/analyze?mode=custom`}
               className={cn(seg(mode === 'custom'), 'border-l border-border')}
             >
-              커스텀 분석
+              {t('analyzeCustom')}
             </Link>
           </div>
         }
       />
       {error ? (
-        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : scorecards.length === 0 ? (
-        <EmptyState
-          title="아직 스코어카드가 없어요."
-          hint="스코어카드를 실행하면 여기서 분석할 수 있어요."
-        />
+        <EmptyState title={t('emptyTitle')} hint={t('analyzeEmptyHint')} />
       ) : mode === 'custom' ? (
         <CustomAnalyzer
           scorecards={scorecards}

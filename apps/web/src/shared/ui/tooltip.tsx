@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { Info } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { createPortal } from 'react-dom'
 
 import { cn } from '@/shared/lib/utils'
@@ -94,7 +95,7 @@ export function InfoTip({
   side,
   align,
   className,
-  'aria-label': ariaLabel = '도움말',
+  'aria-label': ariaLabel,
 }: {
   content: ReactNode
   side?: 'top' | 'bottom'
@@ -102,6 +103,7 @@ export function InfoTip({
   className?: string
   'aria-label'?: string
 }) {
+  const t = useTranslations('ui')
   return (
     <Tooltip
       content={content}
@@ -111,7 +113,7 @@ export function InfoTip({
     >
       <button
         type="button"
-        aria-label={ariaLabel}
+        aria-label={ariaLabel ?? t('infoTipAria')}
         className="grid size-4.5 place-items-center rounded text-faint transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/25"
       >
         <Info className="size-3.5" />

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import {
   AddBenchmark,
@@ -27,6 +28,7 @@ export default async function ImportBenchmarkPage({
   const { workspace } = await params
   const { recipe: preselectRecipe } = await searchParams
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('datasetsPage')
   const allowed = can(principal?.roles, 'datasets:write')
 
   let benchmarks: BenchmarkCatalogItem[] = []
@@ -66,19 +68,13 @@ export default async function ImportBenchmarkPage({
         className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
-        데이터셋
+        {t('backToList')}
       </Link>
-      <PageHeader
-        title="벤치마크 가져오기"
-        description="HuggingFace나 JSONL에서 바로 벤치마크를 만들어요. 공개 카탈로그에서 가져올 수도 있어요."
-      />
+      <PageHeader title={t('importTitle')} description={t('importDescription')} />
       {!allowed ? (
-        <EmptyState
-          title="추가 권한이 없어요."
-          hint="워크스페이스 관리자에게 권한을 요청해보세요."
-        />
+        <EmptyState title={t('importNoPermTitle')} hint={t('noPermHint')} />
       ) : error ? (
-        <Callout tone="danger">카탈로그를 불러오지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('catalogLoadError', { error })}</Callout>
       ) : (
         <Card className="p-5">
           <AddBenchmark

@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { getTranslations } from 'next-intl/server'
 
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -25,11 +26,12 @@ export async function ingestScorecardAction(
   input: IngestScorecardInput
 ): Promise<IngestScorecardResult> {
   const ctx = await authContext()
+  const t = await getTranslations('ingestScorecard')
   let traces: unknown
   try {
     traces = JSON.parse(input.tracesJson)
   } catch {
-    return { ok: false, error: 'traces JSON 파싱 실패' }
+    return { ok: false, error: t('tracesParseError') }
   }
   const body = {
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },
@@ -63,11 +65,12 @@ export async function pullScorecardAction(
   input: PullScorecardInput
 ): Promise<IngestScorecardResult> {
   const ctx = await authContext()
+  const t = await getTranslations('ingestScorecard')
   let runs: unknown
   try {
     runs = JSON.parse(input.runsJson)
   } catch {
-    return { ok: false, error: 'runs JSON 파싱 실패' }
+    return { ok: false, error: t('runsParseError') }
   }
   const body = {
     dataset: { id: input.datasetId, version: input.datasetVersion || 'latest' },

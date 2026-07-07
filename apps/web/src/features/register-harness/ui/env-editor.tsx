@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { Building2, Lock, Plus, Trash2, User } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
 import { cn } from '@/shared/lib/utils'
@@ -31,6 +32,7 @@ export function EnvEditor({
   label: string
   tip: React.ReactNode
 }) {
+  const t = useTranslations('registerHarness')
   // 인라인으로 만든 시크릿은 스코프별로 더해 즉시 선택 가능하게 한다(서버 프리로드 + 신규).
   const [created, setCreated] = useState<{ name: string; scope: SecretRefScope }[]>([])
   const names = useMemo<ScopedSecretNames>(
@@ -65,18 +67,18 @@ export function EnvEditor({
           onClick={() => onChange([...rows, { key: '', secret: false, value: '' }])}
           className="flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
         >
-          <Plus className="size-3.5" /> 변수 추가
+          <Plus className="size-3.5" /> {t('addVariable')}
         </button>
       </div>
       {rows.length === 0 ? (
-        <p className="text-[12px] text-faint">없음 — “변수 추가”로 넣어요.</p>
+        <p className="text-[12px] text-faint">{t('envEmpty')}</p>
       ) : (
         <div className="space-y-2">
           {rows.map((r, i) => (
             <div key={i} className="space-y-2 rounded-lg border bg-card p-2.5">
               <div className="flex items-center gap-2">
                 <Input
-                  aria-label="이름"
+                  aria-label={t('name')}
                   value={r.key}
                   onChange={(e) => set(i, { key: e.target.value })}
                   placeholder="NAME"
@@ -90,7 +92,7 @@ export function EnvEditor({
                 />
                 <button
                   type="button"
-                  aria-label="삭제"
+                  aria-label={t('remove')}
                   onClick={() => onChange(rows.filter((_, j) => j !== i))}
                   className="text-muted-foreground transition-colors hover:text-destructive"
                 >
@@ -111,10 +113,10 @@ export function EnvEditor({
                 />
               ) : (
                 <Input
-                  aria-label="값"
+                  aria-label={t('sourceValue')}
                   value={r.value}
                   onChange={(e) => set(i, { value: e.target.value })}
-                  placeholder="값 (예: debug)"
+                  placeholder={t('valuePlaceholder')}
                   className="text-[12px]"
                 />
               )}
@@ -134,11 +136,12 @@ function SourceToggle({
   secret: boolean
   onChange: (secret: boolean) => void
 }) {
+  const t = useTranslations('registerHarness')
   return (
     <div className="inline-flex shrink-0 rounded-md border bg-secondary/40 p-0.5 text-[12px]">
       {[
-        { v: false, label: '값' },
-        { v: true, label: '시크릿' },
+        { v: false, label: t('sourceValue') },
+        { v: true, label: t('sourceSecret') },
       ].map((o) => (
         <button
           key={o.label}
@@ -173,12 +176,13 @@ function ScopeToggle({
   scope: SecretRefScope
   onChange: (scope: SecretRefScope) => void
 }) {
+  const t = useTranslations('registerHarness')
   return (
     <div className="inline-flex shrink-0 rounded-md border bg-secondary/40 p-0.5 text-[12px]">
       {(
         [
-          { v: 'user', label: '내 개인', Icon: User },
-          { v: 'workspace', label: '워크스페이스', Icon: Building2 },
+          { v: 'user', label: t('scopeUser'), Icon: User },
+          { v: 'workspace', label: t('scopeWorkspace'), Icon: Building2 },
         ] as const
       ).map((o) => (
         <button
@@ -216,6 +220,7 @@ function SecretValue({
   onChange: (v: string) => void
   onCreated: (name: string, scope: SecretRefScope) => void
 }) {
+  const t = useTranslations('registerHarness')
   const list = scope === 'user' ? names.user : names.workspace
   return (
     <div className="space-y-2">
@@ -229,10 +234,11 @@ function SecretValue({
         onCreated={(name) => onCreated(name, scope)}
         hint={
           <p className="text-[11px] text-muted-foreground">
-            실행할 때 {scope === 'user' ? '내 개인' : '워크스페이스'} 시크릿{' '}
-            <code className="font-mono text-foreground">{value}</code> 값이 주입돼요. 스펙엔 이름만
-            저장돼요.
-            {scope === 'user' && ' 개인 시크릿을 쓰면 이 하니스는 나만 볼 수 있어요.'}
+            {t('secretHintPrefix', {
+              scope: scope === 'user' ? t('scopeUser') : t('scopeWorkspace'),
+            })}{' '}
+            <code className="font-mono text-foreground">{value}</code> {t('secretHintSuffix')}
+            {scope === 'user' && ` ${t('secretHintUserOnly')}`}
           </p>
         }
       />

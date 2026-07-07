@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
 import type { MattermostConfig } from '@/entities/mattermost'
@@ -24,6 +25,7 @@ export function MattermostManager({
   canWrite: boolean
   secretNames: string[]
 }) {
+  const t = useTranslations('manageMattermost')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [host, setHost] = useState(config?.host ?? '')
@@ -36,7 +38,7 @@ export function MattermostManager({
   function onSave() {
     setError(undefined)
     if (!host.trim() || !tokenName.trim()) {
-      setError('서버 URL 을 입력하고 bot 토큰 시크릿을 선택해주세요.')
+      setError(t('validationServerToken'))
       return
     }
     startTransition(async () => {
@@ -65,27 +67,17 @@ export function MattermostManager({
     <div className="space-y-3">
       <div className="space-y-1">
         <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-          Mattermost 알림
-          <InfoTip
-            content={
-              <>
-                사내 Mattermost 를 등록하면 실행·스코어카드 완료와 회귀를 채널에 자동으로 알려요.
-                bot 토큰은 워크스페이스 시크릿에서 고르거나 “새로”로 바로 저장해요 — 여기엔 그
-                이름만 남아요.
-              </>
-            }
-          />
+          {t('title')}
+          <InfoTip content={t('titleTip')} />
         </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          워크스페이스 단위로 한 번 등록하면 팀 전체 알림에 쓰여요.
-        </p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
       </div>
 
       {canWrite ? (
         <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label htmlFor="mm-host">서버 URL</Label>
+              <Label htmlFor="mm-host">{t('serverUrl')}</Label>
               <Input
                 id="mm-host"
                 placeholder="https://mattermost.corp.io"
@@ -95,7 +87,7 @@ export function MattermostManager({
             </div>
             {/* bot 토큰은 자유 텍스트가 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성. */}
             <div className="space-y-1">
-              <Label htmlFor="mm-token">bot 토큰 시크릿</Label>
+              <Label htmlFor="mm-token">{t('botTokenSecret')}</Label>
               <SecretPicker
                 id="mm-token"
                 value={tokenName}
@@ -103,31 +95,26 @@ export function MattermostManager({
                 names={names}
                 scope="workspace"
                 onCreated={(n) => setCreated((c) => [...c, n])}
-                createValuePlaceholder="bot 토큰 붙여넣기"
-                aria-label="bot 토큰 시크릿 선택"
+                createValuePlaceholder={t('botTokenPlaceholder')}
+                aria-label={t('botTokenAria')}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="mm-channel">알림 채널 id</Label>
+              <Label htmlFor="mm-channel">{t('channelId')}</Label>
               <Input
                 id="mm-channel"
-                placeholder="채널 id (완료/회귀 알림 대상)"
+                placeholder={t('channelPlaceholder')}
                 value={channel}
                 onChange={(e) => setChannel(e.target.value)}
               />
             </div>
             <div className="space-y-1">
               <Label htmlFor="mm-cmd" className="flex items-center gap-1.5">
-                채팅 명령 토큰 시크릿 (선택)
+                {t('commandTokenSecret')}
                 <InfoTip
-                  content={
-                    <>
-                      Mattermost 에서 <span className="font-mono">/assay</span> 슬래시커맨드를 만들
-                      때 발급되는 토큰이에요. 워크스페이스 시크릿에서 고르거나 바로 저장해요.
-                      설정하면 채팅에서 실행·조회가 가능해지고, 아래 인바운드 URL 을 커맨드에
-                      등록해요.
-                    </>
-                  }
+                  content={t.rich('commandTokenTip', {
+                    mono: (chunks) => <span className="font-mono">{chunks}</span>,
+                  })}
                 />
               </Label>
               <SecretPicker
@@ -137,22 +124,22 @@ export function MattermostManager({
                 names={names}
                 scope="workspace"
                 onCreated={(n) => setCreated((c) => [...c, n])}
-                createValuePlaceholder="슬래시커맨드 토큰 붙여넣기"
-                aria-label="채팅 명령 토큰 시크릿 선택"
+                createValuePlaceholder={t('commandTokenPlaceholder')}
+                aria-label={t('commandTokenAria')}
               />
             </div>
           </div>
 
           {config?.commandUrl && (
             <div className="space-y-1 rounded-md border bg-elevated px-3 py-2 text-[12px]">
-              <p className="font-[510] text-foreground">Mattermost 에 등록할 인바운드 URL</p>
+              <p className="font-[510] text-foreground">{t('inboundUrlTitle')}</p>
               <p className="text-muted-foreground">
-                슬래시커맨드 요청 URL:{' '}
+                {t('commandRequestUrl')}{' '}
                 <code className="break-all text-foreground">{config.commandUrl}</code>
               </p>
               {config.actionUrl && (
                 <p className="text-muted-foreground">
-                  버튼 액션 URL:{' '}
+                  {t('buttonActionUrl')}{' '}
                   <code className="break-all text-foreground">{config.actionUrl}</code>
                 </p>
               )}
@@ -161,7 +148,7 @@ export function MattermostManager({
 
           <div className="flex items-center gap-3">
             <Button size="sm" disabled={pending} onClick={onSave}>
-              {pending ? '저장 중…' : config ? '갱신' : '등록'}
+              {pending ? t('saving') : config ? t('update') : t('register')}
             </Button>
             {config && (
               <button
@@ -170,17 +157,17 @@ export function MattermostManager({
                 disabled={pending}
                 onClick={onRemove}
               >
-                해제
+                {t('remove')}
               </button>
             )}
           </div>
         </div>
       ) : config ? (
-        <p className="text-[13px] text-muted-foreground">{config.host} 에 알림이 연결돼 있어요.</p>
-      ) : (
         <p className="text-[13px] text-muted-foreground">
-          아직 Mattermost 알림이 설정되지 않았어요.
+          {t('connectedTo', { host: config.host })}
         </p>
+      ) : (
+        <p className="text-[13px] text-muted-foreground">{t('notConfigured')}</p>
       )}
 
       {error && (

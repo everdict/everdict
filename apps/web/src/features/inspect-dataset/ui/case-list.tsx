@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { DatasetCase } from '@/entities/dataset'
 import { Button } from '@/shared/ui/button'
@@ -12,6 +13,7 @@ const INITIAL = 5
 
 // 케이스 목록 — 기본 5개만 보이고 나머지는 접힘(상세의 주는 활동 히스토리라 케이스는 부차적). 확장/접기.
 export function CaseList({ cases }: { cases: DatasetCase[] }) {
+  const t = useTranslations('inspectDataset')
   const [expanded, setExpanded] = useState(false)
   const shown = expanded ? cases : cases.slice(0, INITIAL)
   const hidden = cases.length - INITIAL
@@ -31,11 +33,11 @@ export function CaseList({ cases }: { cases: DatasetCase[] }) {
         >
           {expanded ? (
             <>
-              <ChevronUp className="size-3.5" /> 접기
+              <ChevronUp className="size-3.5" /> {t('collapse')}
             </>
           ) : (
             <>
-              <ChevronDown className="size-3.5" /> 케이스 {hidden}개 더 보기
+              <ChevronDown className="size-3.5" /> {t('showMore', { count: hidden })}
             </>
           )}
         </Button>

@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Check, ChevronsUpDown, Loader2, Plus } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { Workspace } from '@/entities/workspace'
 import { cn } from '@/shared/lib/utils'
@@ -23,6 +24,7 @@ export function WorkspaceSwitcher({
   current: string // 활성 워크스페이스 id
   workspaces: Workspace[]
 }) {
+  const t = useTranslations('workspaceSwitcher')
   const router = useRouter()
   const [open, setOpen] = useState(false)
   const [pending, startTransition] = useTransition()
@@ -54,7 +56,7 @@ export function WorkspaceSwitcher({
         <span className="min-w-0 flex-1">
           <span className="block truncate text-[14px] font-[600] tracking-tight">{label}</span>
           <span className="block truncate text-[11px] text-muted-foreground">
-            {active?.role ?? '워크스페이스'}
+            {active?.role ?? t('roleFallback')}
           </span>
         </span>
         <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
@@ -65,7 +67,7 @@ export function WorkspaceSwitcher({
           {/* 바깥 클릭 닫기 */}
           <button
             type="button"
-            aria-label="닫기"
+            aria-label={t('close')}
             tabIndex={-1}
             className="fixed inset-0 z-30 cursor-default"
             onClick={() => setOpen(false)}
@@ -75,13 +77,11 @@ export function WorkspaceSwitcher({
             className="absolute left-0 right-0 top-full z-40 mt-1.5 overflow-hidden rounded-lg border border-border bg-popover p-1 shadow-pop"
           >
             <p className="px-2 py-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
-              워크스페이스 전환
+              {t('switchHeading')}
             </p>
             <div className="max-h-64 overflow-auto">
               {workspaces.length === 0 ? (
-                <p className="px-2 py-1.5 text-[12px] text-muted-foreground">
-                  아직 워크스페이스가 없습니다.
-                </p>
+                <p className="px-2 py-1.5 text-[12px] text-muted-foreground">{t('empty')}</p>
               ) : (
                 workspaces.map((w) => {
                   const isActive = w.id === current
@@ -121,7 +121,7 @@ export function WorkspaceSwitcher({
               <span className="grid size-6 shrink-0 place-items-center rounded-md border border-dashed border-border">
                 <Plus className="size-3.5" />
               </span>
-              새 워크스페이스
+              {t('newWorkspace')}
             </Link>
           </div>
         </>

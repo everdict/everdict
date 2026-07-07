@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Loader2, Lock, Pencil, Trash2 } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { fileToImageDataUrl, MAX_IMAGE_UPLOAD_BYTES } from '@/shared/lib/image-resize'
 import { Button } from '@/shared/ui/button'
@@ -23,6 +24,7 @@ function AvatarEditor({
   seed: string
   onPick: (file: File) => void
 }) {
+  const t = useTranslations('updateProfile')
   const fileRef = useRef<HTMLInputElement>(null)
   const [broken, setBroken] = useState(false)
   const initial = (seed.trim()[0] ?? '?').toUpperCase()
@@ -35,7 +37,7 @@ function AvatarEditor({
         type="file"
         accept="image/*"
         className="hidden"
-        aria-label="프로필 사진 파일 선택"
+        aria-label={t('choosePhotoFile')}
         onChange={(e) => {
           const f = e.target.files?.[0]
           e.target.value = '' // 같은 파일 재선택도 change 가 발생하도록 초기화.
@@ -45,7 +47,7 @@ function AvatarEditor({
       <button
         type="button"
         onClick={() => fileRef.current?.click()}
-        aria-label="프로필 사진 변경"
+        aria-label={t('changePhoto')}
         className="group relative size-9 shrink-0 overflow-hidden rounded-full outline-none ring-1 ring-inset ring-border transition focus-visible:ring-2 focus-visible:ring-ring/60"
       >
         {hasImage ? (
@@ -53,7 +55,7 @@ function AvatarEditor({
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={url}
-            alt="프로필 사진"
+            alt={t('photoAlt')}
             className="size-full object-cover"
             onError={() => setBroken(true)}
           />
@@ -81,6 +83,8 @@ export function ProfileForm({
   name?: string
   avatarUrl?: string
 }) {
+  const t = useTranslations('updateProfile')
+  const locale = useLocale()
   const router = useRouter()
   const [n, setN] = useState(name ?? '')
   const [a, setA] = useState(avatarUrl ?? '')
@@ -101,17 +105,17 @@ export function ProfileForm({
     setError(undefined)
     setSaved(false)
     if (!file.type.startsWith('image/')) {
-      setError('이미지 파일만 올릴 수 있어요.')
+      setError(t('imageOnly'))
       return
     }
     if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
-      setError('이미지가 너무 커요. 최대 8MB까지 올릴 수 있어요.')
+      setError(t('imageTooLarge'))
       return
     }
     try {
-      setA(await fileToImageDataUrl(file))
+      setA(await fileToImageDataUrl(file, undefined, locale))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '이미지를 처리하지 못했어요.')
+      setError(err instanceof Error ? err.message : t('imageProcessFailed'))
     }
   }
 
@@ -132,13 +136,13 @@ export function ProfileForm({
   return (
     <div className="space-y-4">
       <SettingsList>
-        <SettingsRow label="프로필 사진">
+        <SettingsRow label={t('profilePhoto')}>
           {a.trim() && (
             <Button
               type="button"
               variant="ghost"
               size="icon-sm"
-              aria-label="사진 제거"
+              aria-label={t('removePhoto')}
               onClick={() => {
                 setA('')
                 setSaved(false)
@@ -151,12 +155,12 @@ export function ProfileForm({
           <AvatarEditor url={a} seed={n || email || '?'} onPick={onPick} />
         </SettingsRow>
 
-        <SettingsRow label="이메일">
+        <SettingsRow label={t('email')}>
           <span className="truncate text-[13px] text-muted-foreground">{email ?? '—'}</span>
-          <Lock className="size-3.5 shrink-0 text-faint" aria-label="SSO 계정에서 관리됨" />
+          <Lock className="size-3.5 shrink-0 text-faint" aria-label={t('managedBySso')} />
         </SettingsRow>
 
-        <SettingsRow label="이름" htmlFor="pf-name">
+        <SettingsRow label={t('name')} htmlFor="pf-name">
           <Input
             id="pf-name"
             value={n}
@@ -164,7 +168,7 @@ export function ProfileForm({
               setN(e.target.value)
               setSaved(false)
             }}
-            placeholder="예: 김앨리스"
+            placeholder={t('namePlaceholder')}
             className="w-full sm:w-60"
           />
         </SettingsRow>
@@ -178,12 +182,12 @@ export function ProfileForm({
           {saved && !busy ? (
             <span className="inline-flex items-center gap-1.5 text-[13px] font-[510] text-muted-foreground">
               <Check className="size-4 text-primary" />
-              저장됨
+              {t('saved')}
             </span>
           ) : (
             <Button onClick={onSave} disabled={busy} className="gap-1.5">
               {busy ? <Loader2 className="size-4 animate-spin" /> : null}
-              프로필 저장
+              {t('saveProfile')}
             </Button>
           )}
         </div>

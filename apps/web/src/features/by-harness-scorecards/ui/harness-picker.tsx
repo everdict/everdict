@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { Combobox } from '@/shared/ui/combobox'
 import { Label } from '@/shared/ui/input'
@@ -21,6 +22,7 @@ export function HarnessPicker({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('byHarnessScorecards')
   const [h, setH] = useState(harness ?? harnesses[0]?.id ?? '')
 
   function go(next: string) {
@@ -32,7 +34,7 @@ export function HarnessPicker({
 
   return (
     <div className="min-w-56 space-y-1.5">
-      <Label htmlFor="harness">Harness</Label>
+      <Label htmlFor="harness">{t('harnessLabel')}</Label>
       <Combobox
         id="harness"
         value={h}

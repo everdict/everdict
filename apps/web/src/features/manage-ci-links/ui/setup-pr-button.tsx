@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { ExternalLink, GitPullRequest } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 
@@ -22,6 +23,7 @@ export function SetupPrButton({
   variant?: 'secondary' | 'outline'
   onError?: (message: string) => void
 }) {
+  const t = useTranslations('manageCiLinks')
   const [pending, startTransition] = useTransition()
   const [opened, setOpened] = useState<string>() // 방금 연 PR url
 
@@ -31,7 +33,7 @@ export function SetupPrButton({
       if (r.ok && r.prUrl) {
         setOpened(r.prUrl)
         window.open(r.prUrl, '_blank', 'noopener,noreferrer')
-      } else onError?.(r.error ?? '셋업 PR 생성에 실패했습니다.')
+      } else onError?.(r.error ?? t('setupPrFailed'))
     })
   }
 
@@ -44,7 +46,7 @@ export function SetupPrButton({
         className="inline-flex items-center gap-1 text-[12px] font-[510] text-link transition-colors hover:text-foreground"
       >
         <ExternalLink className="size-3.5" />
-        열린 PR 보기
+        {t('viewOpenedPr')}
       </a>
     )
   }
@@ -52,7 +54,7 @@ export function SetupPrButton({
   return (
     <Button size={size} variant={variant} disabled={pending} onClick={onClick}>
       <GitPullRequest />
-      {pending ? '여는 중…' : '셋업 PR'}
+      {pending ? t('opening') : t('setupPr')}
     </Button>
   )
 }

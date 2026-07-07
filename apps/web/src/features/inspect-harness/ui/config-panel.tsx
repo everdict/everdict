@@ -1,4 +1,5 @@
 import { Layers, Pin, SlidersHorizontal } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import {
   templateSlotNames,
@@ -19,6 +20,7 @@ export function ConfigPanel({
   instance: HarnessInstanceSpec
   template: HarnessTemplateSpec
 }) {
+  const t = useTranslations('inspectHarness')
   const slots = templateSlotNames(template)
   // command 템플릿은 image/model 슬롯에 템플릿 기본값이 있을 수 있다(인스턴스가 override).
   const defaultFor = (slot: string): string | undefined =>
@@ -35,9 +37,9 @@ export function ConfigPanel({
   return (
     <div className="space-y-7">
       {/* kind·category·버전은 상단 메타 스트립에 있으니 여기선 이 인스턴스가 올라탄 템플릿 참조만. */}
-      <SubSection title="템플릿 (대분류)" icon={<Layers className="size-4" />}>
+      <SubSection title={t('templateCategory')} icon={<Layers className="size-4" />}>
         <Card className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-3 text-[13px]">
-          <span className="text-muted-foreground">참조</span>
+          <span className="text-muted-foreground">{t('reference')}</span>
           <Mono>
             {template.id}@{template.version}
           </Mono>
@@ -45,7 +47,11 @@ export function ConfigPanel({
       </SubSection>
 
       {slots.length > 0 && anyPinned && (
-        <SubSection title="Pins (슬롯 → 값)" icon={<Pin className="size-4" />} count={slots.length}>
+        <SubSection
+          title={t('pinsSlotValue')}
+          icon={<Pin className="size-4" />}
+          count={slots.length}
+        >
           <Card className="divide-y divide-border">
             {slots.map((slot) => {
               const pinned = instance.pins[slot]
@@ -66,9 +72,9 @@ export function ConfigPanel({
                         {value}
                       </span>
                     ) : (
-                      <span className="text-[12px] text-muted-foreground">미설정</span>
+                      <span className="text-[12px] text-muted-foreground">{t('unset')}</span>
                     )}
-                    {!pinned && fallback && <Badge tone="outline">템플릿 기본</Badge>}
+                    {!pinned && fallback && <Badge tone="outline">{t('templateDefault')}</Badge>}
                   </div>
                 </div>
               )
@@ -78,15 +84,13 @@ export function ConfigPanel({
       )}
 
       {instance.overrides && Object.keys(instance.overrides).length > 0 && (
-        <SubSection title="변주 (overrides)" icon={<SlidersHorizontal className="size-4" />}>
+        <SubSection title={t('overrides')} icon={<SlidersHorizontal className="size-4" />}>
           <Card>
             <pre className="overflow-x-auto p-4 font-mono text-[12px] leading-relaxed text-muted-foreground">
               {JSON.stringify(instance.overrides, null, 2)}
             </pre>
           </Card>
-          <p className="mt-2 text-[12px] text-muted-foreground">
-            구조(템플릿)는 그대로 두고 동작만 바꾸는 델타 — resolve 시 템플릿 위에 병합됩니다.
-          </p>
+          <p className="mt-2 text-[12px] text-muted-foreground">{t('overridesNote')}</p>
         </SubSection>
       )}
     </div>

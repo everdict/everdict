@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { CheckCircle2, Loader2, Plug } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 import { toast } from 'sonner'
 
 import { Button } from '@/shared/ui/button'
@@ -16,17 +17,9 @@ type Kind = 'nomad' | 'k8s'
 
 // 등록 인프라 종류 — local(dev 전용) 과 docker(단일 호스트, slice 5b 에서 self-hosted 러너로 흡수)는 등록 UI 에서
 // 제외. "내 머신/단일 docker 호스트"는 러너로 연결하고, 컨테이너 실행은 런타임 kind 가 아니라 docker capability 다.
-const KINDS: { value: Kind; label: string; description: string }[] = [
-  {
-    value: 'nomad',
-    label: 'Nomad',
-    description: 'Nomad 클러스터 — alloc 으로 러너 에이전트 배치 (runsc 등 격리).',
-  },
-  {
-    value: 'k8s',
-    label: 'Kubernetes',
-    description: 'K8s 클러스터 — Job 으로 배치 (runtimeClassName 격리).',
-  },
+const KINDS: { value: Kind; label: string; descriptionKey: string }[] = [
+  { value: 'nomad', label: 'Nomad', descriptionKey: 'kindNomadDescription' },
+  { value: 'k8s', label: 'Kubernetes', descriptionKey: 'kindK8sDescription' },
 ]
 
 interface Fields {
@@ -136,15 +129,13 @@ function buildSpec(f: Fields): Record<string, unknown> {
   }
 }
 
-// 클라이언트 필수값 점검(서버도 강제하지만 즉시 피드백). null=통과.
-function requiredError(f: Fields): string | null {
-  if (!f.id.trim()) return 'ID를 입력하세요.'
-  if (!f.version.trim()) return '버전을 입력하세요.'
-  if (f.kind === 'nomad' && (!f.addr.trim() || !f.image.trim()))
-    return 'Nomad 는 주소(addr)와 이미지가 필요해요.'
-  if (f.kind === 'k8s' && !f.image.trim()) return 'K8s 는 러너 이미지가 필요해요.'
-  if (f.supportsTopology && !f.traceEndpoint.trim())
-    return '토폴로지 지원은 트레이스 엔드포인트가 필요해요.'
+// 클라이언트 필수값 점검(서버도 강제하지만 즉시 피드백). null=통과. 반환값은 메시지 카탈로그 키.
+function requiredErrorKey(f: Fields): string | null {
+  if (!f.id.trim()) return 'errorIdRequired'
+  if (!f.version.trim()) return 'errorVersionRequired'
+  if (f.kind === 'nomad' && (!f.addr.trim() || !f.image.trim())) return 'errorNomadRequired'
+  if (f.kind === 'k8s' && !f.image.trim()) return 'errorK8sImageRequired'
+  if (f.supportsTopology && !f.traceEndpoint.trim()) return 'errorTopologyEndpointRequired'
   return null
 }
 
@@ -169,6 +160,7 @@ function Field({
 // 워크스페이스 인프라 런타임 등록 폼(nomad/k8s/topology). 자격증명은 여기 넣지 않고 SecretStore 키 이름으로 참조.
 export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
   const router = useRouter()
+  const t = useTranslations('registerRuntime')
   const [f, setF] = useState<Fields>(INITIAL)
   const [error, setError] = useState<string>()
   const [probe, setProbe] = useState<{ reachable?: boolean; detail?: string; error?: string }>()
@@ -177,14 +169,14 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
 
   const set = <K extends keyof Fields>(k: K, v: Fields[K]) => setF((p) => ({ ...p, [k]: v }))
   const kindMeta = useMemo(() => KINDS.find((k) => k.value === f.kind), [f.kind])
-  const secretHint = '워크스페이스 시크릿 "이름" (값 아님). 설정 → 시크릿에서 먼저 등록하세요.'
+  const secretHint = t('secretHint')
 
   function onProbe() {
     setError(undefined)
     setProbe(undefined)
-    const err = requiredError(f)
-    if (err) {
-      setError(err)
+    const errKey = requiredErrorKey(f)
+    if (errKey) {
+      setError(t(errKey))
       return
     }
     startProbe(async () => {
@@ -196,19 +188,19 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
 
   function onSubmit() {
     setError(undefined)
-    const err = requiredError(f)
-    if (err) {
-      setError(err)
+    const errKey = requiredErrorKey(f)
+    if (errKey) {
+      setError(t(errKey))
       return
     }
     startSave(async () => {
       const r = await createRuntimeAction(buildSpec(f))
       if (r.ok) {
-        toast.success(`런타임 ${r.id}@${r.version} 등록됨`)
+        toast.success(t('registered', { id: r.id ?? '', version: r.version ?? '' }))
         router.push(`/${workspace}/runtimes`)
         router.refresh()
       } else {
-        setError(r.error ?? '등록하지 못했어요.')
+        setError(r.error ?? t('errorGeneric'))
       }
     })
   }
@@ -219,22 +211,24 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
     <div className="max-w-2xl space-y-6">
       {/* 종류 */}
       <div className="space-y-1.5">
-        <Label>종류</Label>
+        <Label>{t('kindLabel')}</Label>
         <Combobox
           value={f.kind}
           onChange={(v) => set('kind', v as Kind)}
           options={KINDS.map((k) => ({
             value: k.value,
             label: k.label,
-            description: k.description,
+            description: t(k.descriptionKey),
           }))}
         />
-        {kindMeta && <p className="text-[12px] text-muted-foreground">{kindMeta.description}</p>}
+        {kindMeta && (
+          <p className="text-[12px] text-muted-foreground">{t(kindMeta.descriptionKey)}</p>
+        )}
       </div>
 
       {/* 공통 */}
       <div className="grid grid-cols-2 gap-4">
-        <Field label="ID" hint="이 워크스페이스에서 런타임을 부르는 이름 (예: prod-k8s).">
+        <Field label={t('idLabel')} hint={t('idHint')}>
           <Input
             value={f.id}
             onChange={(e) => set('id', e.target.value)}
@@ -242,7 +236,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
             autoComplete="off"
           />
         </Field>
-        <Field label="버전" hint="불변. 바꾸면 새 버전으로 등록돼요.">
+        <Field label={t('versionLabel')} hint={t('versionHint')}>
           <Input
             value={f.version}
             onChange={(e) => set('version', e.target.value)}
@@ -256,7 +250,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
       {f.kind === 'nomad' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="주소 (addr)" hint="Nomad HTTP 엔드포인트.">
+            <Field label={t('addrLabel')} hint={t('addrHint')}>
               <Input
                 value={f.addr}
                 onChange={(e) => set('addr', e.target.value)}
@@ -264,7 +258,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
                 autoComplete="off"
               />
             </Field>
-            <Field label="러너 이미지" hint="에이전트 이미지(테넌트 레지스트리).">
+            <Field label={t('runnerImageLabel')} hint={t('nomadImageHint')}>
               <Input
                 value={f.image}
                 onChange={(e) => set('image', e.target.value)}
@@ -274,7 +268,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="네임스페이스 (선택)">
+            <Field label={t('namespaceLabel')}>
               <Input
                 value={f.namespace}
                 onChange={(e) => set('namespace', e.target.value)}
@@ -282,7 +276,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
                 autoComplete="off"
               />
             </Field>
-            <Field label="격리 런타임 (선택)" hint="docker 격리 런타임 (예: runsc = gVisor).">
+            <Field label={t('isolationRuntimeLabel')} hint={t('isolationRuntimeHint')}>
               <Input
                 value={f.runtime}
                 onChange={(e) => set('runtime', e.target.value)}
@@ -291,7 +285,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
               />
             </Field>
           </div>
-          <Field label="데이터센터 (선택)" hint="쉼표로 구분.">
+          <Field label={t('datacentersLabel')} hint={t('commaSeparatedHint')}>
             <Input
               value={f.datacenters}
               onChange={(e) => set('datacenters', e.target.value)}
@@ -299,7 +293,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
               autoComplete="off"
             />
           </Field>
-          <Field label="ACL 토큰 시크릿 (선택)" hint={secretHint}>
+          <Field label={t('nomadAclSecretLabel')} hint={secretHint}>
             <Input
               value={f.authSecret}
               onChange={(e) => set('authSecret', e.target.value)}
@@ -314,7 +308,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
       {f.kind === 'k8s' && (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-4">
-            <Field label="러너 이미지" hint="Job 컨테이너 이미지.">
+            <Field label={t('runnerImageLabel')} hint={t('k8sImageHint')}>
               <Input
                 value={f.image}
                 onChange={(e) => set('image', e.target.value)}
@@ -322,7 +316,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
                 autoComplete="off"
               />
             </Field>
-            <Field label="네임스페이스 (선택)">
+            <Field label={t('namespaceLabel')}>
               <Input
                 value={f.namespace}
                 onChange={(e) => set('namespace', e.target.value)}
@@ -332,7 +326,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
             </Field>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="컨텍스트 (선택)" hint="로컬 kubeconfig 컨텍스트로 인증할 때.">
+            <Field label={t('contextLabel')} hint={t('contextHint')}>
               <Input
                 value={f.context}
                 onChange={(e) => set('context', e.target.value)}
@@ -340,7 +334,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
                 autoComplete="off"
               />
             </Field>
-            <Field label="runtimeClass (선택)" hint="격리 런타임클래스 (예: gvisor).">
+            <Field label={t('runtimeClassLabel')} hint={t('runtimeClassHint')}>
               <Input
                 value={f.runtimeClass}
                 onChange={(e) => set('runtimeClass', e.target.value)}
@@ -349,7 +343,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
               />
             </Field>
           </div>
-          <Field label="API 서버 URL (선택)" hint="context 대신 bearer 토큰으로 인증할 때.">
+          <Field label={t('apiServerLabel')} hint={t('apiServerHint')}>
             <Input
               value={f.server}
               onChange={(e) => set('server', e.target.value)}
@@ -358,7 +352,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
             />
           </Field>
           <div className="grid grid-cols-2 gap-4">
-            <Field label="Bearer 토큰 시크릿 (선택)" hint={secretHint}>
+            <Field label={t('k8sAuthSecretLabel')} hint={secretHint}>
               <Input
                 value={f.authSecret}
                 onChange={(e) => set('authSecret', e.target.value)}
@@ -366,10 +360,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
                 autoComplete="off"
               />
             </Field>
-            <Field
-              label="kubeconfig 시크릿 (선택)"
-              hint="EKS/GKE 등 exec-plugin 인증용 전체 kubeconfig 시크릿 이름."
-            >
+            <Field label={t('kubeconfigSecretLabel')} hint={t('kubeconfigSecretHint')}>
               <Input
                 value={f.kubeconfigSecret}
                 onChange={(e) => set('kubeconfigSecret', e.target.value)}
@@ -390,14 +381,12 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
             checked={f.supportsTopology}
             onChange={(e) => set('supportsTopology', e.target.checked)}
           />
-          <span className="text-[13px] font-[510] text-foreground">
-            서비스 토폴로지 하니스도 이 런타임으로 (topology)
-          </span>
+          <span className="text-[13px] font-[510] text-foreground">{t('topologyToggle')}</span>
         </label>
         {f.supportsTopology && (
           <div className="space-y-4 pl-[26px]">
             <div className="grid grid-cols-2 gap-4">
-              <Field label="트레이스 소스">
+              <Field label={t('traceSourceLabel')}>
                 <Combobox
                   value={f.traceKind}
                   onChange={(v) => set('traceKind', v as 'otel' | 'mlflow')}
@@ -407,7 +396,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
                   ]}
                 />
               </Field>
-              <Field label="트레이스 엔드포인트" hint="채점용 트레이스를 당겨올 소스.">
+              <Field label={t('traceEndpointLabel')} hint={t('traceEndpointHint')}>
                 <Input
                   value={f.traceEndpoint}
                   onChange={(e) => set('traceEndpoint', e.target.value)}
@@ -416,7 +405,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
                 />
               </Field>
             </div>
-            <Field label="브라우저 이미지 (선택)" hint="per-case 브라우저 이미지(browser-use 등).">
+            <Field label={t('browserImageLabel')} hint={t('browserImageHint')}>
               <Input
                 value={f.browserImage}
                 onChange={(e) => set('browserImage', e.target.value)}
@@ -430,15 +419,15 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
 
       {/* 공통: 설명·태그 */}
       <div className="grid grid-cols-2 gap-4">
-        <Field label="설명 (선택)">
+        <Field label={t('descriptionLabel')}>
           <Input
             value={f.description}
             onChange={(e) => set('description', e.target.value)}
-            placeholder="프로덕션 클러스터"
+            placeholder={t('descriptionPlaceholder')}
             autoComplete="off"
           />
         </Field>
-        <Field label="태그 (선택)" hint="쉼표로 구분.">
+        <Field label={t('tagsLabel')} hint={t('commaSeparatedHint')}>
           <Input
             value={f.tags}
             onChange={(e) => set('tags', e.target.value)}
@@ -450,13 +439,13 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
 
       {probe?.reachable !== undefined && (
         <Callout tone={probe.reachable ? 'info' : 'warning'}>
-          {probe.reachable ? '✓ 연결 성공' : '도달 실패'}
+          {probe.reachable ? t('probeReachable') : t('probeUnreachable')}
           {probe.detail ? ` — ${probe.detail}` : ''}
         </Callout>
       )}
       {probe?.error && (
         <Callout tone="danger" className="py-1.5">
-          연결 테스트 실패: {probe.error}
+          {t('probeFailed', { error: probe.error })}
         </Callout>
       )}
       {error && (
@@ -472,16 +461,16 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
           ) : (
             <CheckCircle2 className="size-4" />
           )}
-          {saving ? '등록 중…' : '런타임 등록'}
+          {saving ? t('submitting') : t('submit')}
         </Button>
         {cluster && (
           <Button variant="secondary" onClick={onProbe} disabled={probing} className="gap-1.5">
             {probing ? <Loader2 className="size-4 animate-spin" /> : <Plug className="size-4" />}
-            연결 테스트
+            {t('probe')}
           </Button>
         )}
         <Button variant="ghost" onClick={() => router.push(`/${workspace}/runtimes`)}>
-          취소
+          {t('cancel')}
         </Button>
       </div>
     </div>

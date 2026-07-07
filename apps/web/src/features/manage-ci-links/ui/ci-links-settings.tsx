@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { GitBranch } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { CiLink } from '@/entities/ci-link'
 import { fmtSubject } from '@/shared/lib/format'
@@ -28,6 +29,7 @@ export function CiLinksSettings({
   initialLinks: CiLink[]
   canWrite: boolean
 }) {
+  const t = useTranslations('manageCiLinks')
   const { workspace } = useParams<{ workspace: string }>()
   const [links, setLinks] = useState<CiLink[]>(initialLinks)
   const [confirmRepo, setConfirmRepo] = useState<string>()
@@ -40,19 +42,18 @@ export function CiLinksSettings({
       const r = await deleteCiLinkAction(link.repository, link.host)
       setConfirmRepo(undefined)
       if (r.ok && r.links) setLinks(r.links)
-      else setError(r.error ?? '링크 해제에 실패했습니다.')
+      else setError(r.error ?? t('unlinkFailed'))
     })
   }
 
   return (
     <div className="space-y-6">
       <div className="space-y-1">
-        <h3 className="text-[13px] font-[560] text-foreground">CI 연동</h3>
+        <h3 className="text-[13px] font-[560] text-foreground">{t('panelTitle')}</h3>
         <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-          GitHub 레포와 하니스를 잇는 링크예요. 링크가 <span className="font-[510]">있으면</span> 그
-          레포의 CI를 이 워크스페이스가 신뢰한다는 뜻이라, 따로 키 없이 CI가 평가를 보내요. 레포
-          연결과 셋업 PR은 각 하니스 상세의 <span className="font-[510]">CI 연동</span> 패널에서
-          해요.
+          {t.rich('settingsDescription', {
+            strong: (c) => <span className="font-[510]">{c}</span>,
+          })}
         </p>
       </div>
 
@@ -63,9 +64,7 @@ export function CiLinksSettings({
       )}
 
       {links.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">
-          아직 연결된 레포가 없어요. 하니스 상세의 CI 연동 패널에서 레포를 연결해보세요.
-        </p>
+        <p className="text-[13px] text-muted-foreground">{t('settingsEmpty')}</p>
       ) : (
         <SettingsList>
           {links.map((l) => {
@@ -83,21 +82,27 @@ export function CiLinksSettings({
                         {hostLabel(l.host)}
                       </span>
                     )}
-                    {l.disabled && <Badge tone="warning">비활성</Badge>}
+                    {l.disabled && <Badge tone="warning">{t('disabled')}</Badge>}
                   </span>
                 }
                 hint={
                   <span className="flex flex-wrap items-center gap-x-1.5">
                     <span>
-                      하니스 <span className="font-mono text-foreground/80">{l.harness}</span>
+                      {t('harnessLabel')}{' '}
+                      <span className="font-mono text-foreground/80">{l.harness}</span>
                     </span>
                     {l.dataset && (
                       <span>
-                        · 데이터셋 <span className="font-mono text-foreground/80">{l.dataset}</span>
+                        {t('datasetHint')}{' '}
+                        <span className="font-mono text-foreground/80">{l.dataset}</span>
                       </span>
                     )}
-                    <span>· 슬롯 {slotNames.length > 0 ? slotNames.join(', ') : '없음'}</span>
-                    <span>· 등록 {fmtSubject(l.createdBy)}</span>
+                    <span>
+                      {t('slotsHint', {
+                        slots: slotNames.length > 0 ? slotNames.join(', ') : t('none'),
+                      })}
+                    </span>
+                    <span>{t('registeredHint', { who: fmtSubject(l.createdBy) })}</span>
                   </span>
                 }
               >
@@ -105,7 +110,7 @@ export function CiLinksSettings({
                   href={`/${encodeURIComponent(workspace)}/harnesses/${encodeURIComponent(l.harness)}`}
                   className="text-[12px] font-[510] text-link hover:text-foreground"
                 >
-                  하니스 →
+                  {t('harnessLink')}
                 </Link>
                 {canWrite &&
                   (confirmRepo === linkKey(l) ? (
@@ -116,14 +121,14 @@ export function CiLinksSettings({
                         disabled={pending}
                         onClick={() => onDelete(l)}
                       >
-                        해제 확인
+                        {t('unlinkConfirm')}
                       </Button>
                       <button
                         type="button"
                         className="text-[12px] text-muted-foreground hover:text-foreground"
                         onClick={() => setConfirmRepo(undefined)}
                       >
-                        취소
+                        {t('cancel')}
                       </button>
                     </span>
                   ) : (
@@ -132,7 +137,7 @@ export function CiLinksSettings({
                       className="text-[12px] font-[510] text-destructive hover:underline"
                       onClick={() => setConfirmRepo(linkKey(l))}
                     >
-                      해제
+                      {t('unlink')}
                     </button>
                   ))}
               </SettingsRow>
@@ -142,9 +147,7 @@ export function CiLinksSettings({
       )}
 
       {!canWrite && links.length > 0 && (
-        <p className="text-[12px] text-muted-foreground">
-          링크를 해제하려면 관리자 권한이 필요해요.
-        </p>
+        <p className="text-[12px] text-muted-foreground">{t('unlinkAdminRequired')}</p>
       )}
     </div>
   )

@@ -1,5 +1,7 @@
 'use server'
 
+import { getTranslations } from 'next-intl/server'
+
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
 
@@ -19,9 +21,9 @@ export async function createSecretAction(
   value: string,
   scope: 'user' | 'workspace'
 ): Promise<CreateSecretResult> {
-  if (!NAME_RE.test(name))
-    return { ok: false, error: '이름은 대문자로 시작하고 대문자·숫자·밑줄만 쓸 수 있어요.' }
-  if (value.length === 0) return { ok: false, error: '값이 비어 있어요.' }
+  const t = await getTranslations('pickSecret')
+  if (!NAME_RE.test(name)) return { ok: false, error: t('nameInvalidServer') }
+  if (value.length === 0) return { ok: false, error: t('valueEmpty') }
   const ctx = await authContext()
   try {
     await controlPlane.setSecret(ctx, name, value, scope)

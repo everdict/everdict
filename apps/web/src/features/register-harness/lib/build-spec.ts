@@ -302,10 +302,11 @@ export function parseJsonObject(
   try {
     parsed = JSON.parse(t)
   } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : '유효한 JSON 이 아닙니다.' }
+    // 에러 코드 반환 — 소비 측(register-harness-wizard)이 t() 로 번역해 표시. e.message 는 엔진이 주는 원문(영문) 그대로.
+    return { ok: false, error: e instanceof Error ? e.message : 'invalidJson' }
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-    return { ok: false, error: 'JSON 객체여야 합니다.' }
+    return { ok: false, error: 'notObject' }
   }
   return { ok: true, value: parsed as Record<string, unknown> }
 }

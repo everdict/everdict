@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Plus } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { ActivityFeed } from '@/widgets/activity-feed'
 import { runsSchema } from '@/entities/run'
@@ -16,6 +17,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function RunsPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
+  const t = await getTranslations('runsPage')
   const { principal, ctx } = await currentPrincipal()
   let error: string | undefined
   let runs = runsSchema.parse([])
@@ -39,18 +41,19 @@ export default async function RunsPage({ params }: { params: Promise<{ workspace
     <div className="space-y-6">
       <AutoRefresh enabled={active} />
       <PageHeader
-        title="활동"
-        description={`실행 ${runs.length}건 · 스코어카드 ${scorecards.length}건`}
+        title={t('title')}
+        description={t('description', { runs: runs.length, scorecards: scorecards.length })}
         actions={
           can(principal?.roles, 'runs:submit') ? (
             <Link href={`/${workspace}/runs/new`} className={buttonVariants({ size: 'sm' })}>
-              <Plus className="size-4" />새 실행
+              <Plus className="size-4" />
+              {t('newRun')}
             </Link>
           ) : null
         }
       />
       {error ? (
-        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : (
         <ActivityFeed runs={runs} scorecards={scorecards} workspace={workspace} />
       )}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { Callout } from '@/shared/ui/callout'
 import { Combobox } from '@/shared/ui/combobox'
@@ -21,13 +22,14 @@ export function HarnessSinkSelect({
   current?: string
   canAssign: boolean
 }) {
+  const t = useTranslations('manageTraceSink')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [value, setValue] = useState(current ?? '')
 
   // 읽기 전용(viewer 등) — 선택 컨트롤 대신 현재 선택만 텍스트로.
   if (!canAssign) {
-    return <span className="text-[13px] text-muted-foreground">{current ?? '적재 안 함'}</span>
+    return <span className="text-[13px] text-muted-foreground">{current ?? t('notExported')}</span>
   }
 
   function onChange(next: string) {
@@ -47,13 +49,13 @@ export function HarnessSinkSelect({
     <div className="w-full max-w-60 space-y-1.5">
       <Combobox
         options={[
-          { value: '', label: '적재 안 함' },
+          { value: '', label: t('notExported') },
           ...sinks.map((s) => ({ value: s.name, label: `${s.name} (${s.kind})` })),
         ]}
         value={value}
         onChange={onChange}
         disabled={pending}
-        aria-label="트레이스 싱크 선택"
+        aria-label={t('sinkSelectLabel')}
       />
       {error && (
         <Callout tone="danger" className="py-1">

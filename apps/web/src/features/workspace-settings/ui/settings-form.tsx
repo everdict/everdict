@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -15,6 +16,7 @@ export function SettingsForm({
   initial: WorkspaceSettings
   canWrite: boolean
 }) {
+  const t = useTranslations('workspaceSettings')
   const [meterUsage, setMeterUsage] = useState(initial.meterUsage ?? false)
   const [busy, setBusy] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -48,18 +50,18 @@ export function SettingsForm({
           className="mt-0.5 h-4 w-4 accent-primary"
         />
         <span className="text-[13px]">
-          <span className="font-[510] text-foreground">사용량 계측</span>
+          <span className="font-[510] text-foreground">{t('meterUsage')}</span>
           <span className="mt-0.5 block leading-relaxed text-muted-foreground">
-            이 워크스페이스의 실행에서 쓴 토큰과 비용을 예산에 반영해요.
+            {t('meterUsageHint')}
           </span>
         </span>
       </label>
       {canWrite ? (
         <div className="flex items-center gap-3">
           <Button onClick={onSave} disabled={busy}>
-            {busy ? '저장 중…' : '저장'}
+            {busy ? t('saving') : t('save')}
           </Button>
-          {saved && <span className="text-[13px] text-[var(--color-success)]">저장됨</span>}
+          {saved && <span className="text-[13px] text-[var(--color-success)]">{t('saved')}</span>}
           {error && (
             <Callout tone="danger" className="py-1.5">
               {error}
@@ -67,7 +69,7 @@ export function SettingsForm({
           )}
         </div>
       ) : (
-        <p className="text-[13px] text-muted-foreground">변경하려면 관리자 권한이 필요해요.</p>
+        <p className="text-[13px] text-muted-foreground">{t('adminRequired')}</p>
       )}
     </div>
   )

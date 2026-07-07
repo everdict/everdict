@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Download, ExternalLink, Laptop } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { getAssayDesktop } from '@/shared/lib/desktop-bridge'
 import { Badge } from '@/shared/ui/badge'
@@ -27,10 +28,10 @@ function formatSize(bytes: number): string {
 }
 
 // 사람이 고르기 쉬운 라벨 — 파일 확장자/arch 를 풀어서 쓴다.
-function assetLabel(a: DesktopAsset): string {
+function assetLabel(a: DesktopAsset, t: ReturnType<typeof useTranslations>): string {
   if (a.ext === 'AppImage') return 'Linux AppImage (x86_64)'
   if (a.ext === 'deb') return 'Ubuntu/Debian .deb (amd64)'
-  if (a.ext === 'exe') return 'Windows 설치 파일 (x64)'
+  if (a.ext === 'exe') return t('winInstaller')
   const macArch = a.arch === 'arm64' ? 'Apple Silicon (arm64)' : 'Intel (x64)'
   return a.ext === 'dmg' ? `macOS .dmg — ${macArch}` : `macOS .zip — ${macArch}`
 }
@@ -53,6 +54,7 @@ export function DownloadPanel({
   release: DesktopRelease | null
   fallbackUrl?: string // DESKTOP_DOWNLOAD_URL — 릴리즈 토큰 미설정 환경의 외부 링크 폴백
 }) {
+  const t = useTranslations('downloadDesktop')
   const [os, setOs] = useState<DesktopOs | null>(null)
   const [inDesktop, setInDesktop] = useState(false)
 
@@ -65,8 +67,8 @@ export function DownloadPanel({
     return fallbackUrl ? (
       <EmptyState
         icon={<Download strokeWidth={1.75} />}
-        title="다운로드 목록을 불러오지 못했어요."
-        hint="지금은 여기서 바로 받을 수 없어요. 릴리즈 페이지에서 받아주세요."
+        title={t('loadFailedTitle')}
+        hint={t('loadFailedHint')}
         action={
           <a
             href={fallbackUrl}
@@ -75,15 +77,15 @@ export function DownloadPanel({
             className={buttonVariants({ size: 'sm' })}
           >
             <ExternalLink />
-            릴리즈 페이지 열기
+            {t('openReleasePage')}
           </a>
         }
       />
     ) : (
       <EmptyState
         icon={<Download strokeWidth={1.75} />}
-        title="다운로드를 준비하고 있어요."
-        hint="관리자가 설정하면 이 페이지에서 바로 받을 수 있어요."
+        title={t('preparingTitle')}
+        hint={t('preparingHint')}
       />
     )
   }
@@ -96,17 +98,14 @@ export function DownloadPanel({
 
   return (
     <div className="space-y-6">
-      {inDesktop && (
-        <Callout tone="info">
-          이미 데스크톱 앱에서 보고 있어요. 계정 &gt; 연결된 러너에서 바로 이 기기를 연결하세요.
-        </Callout>
-      )}
+      {inDesktop && <Callout tone="info">{t('inDesktopNote')}</Callout>}
 
       {/* 감지된 OS 의 권장 다운로드 */}
       {os && recommended.length > 0 && (
         <section className="space-y-2.5">
           <h3 className="text-[13px] font-[560] text-foreground">
-            내 컴퓨터용 다운로드 — {OS_LABEL[os]} <Badge tone="outline">v{release.version}</Badge>
+            {t('recommendedFor', { os: OS_LABEL[os] })}{' '}
+            <Badge tone="outline">v{release.version}</Badge>
           </h3>
           <div className="flex flex-wrap gap-2">
             {recommended.map((a, i) => (
@@ -119,27 +118,23 @@ export function DownloadPanel({
                 })}
               >
                 <Download />
-                {assetLabel(a)}
+                {assetLabel(a, t)}
               </a>
             ))}
           </div>
-          {os === 'mac' && (
-            <p className="text-[12px] text-faint">
-              애플 실리콘(M1 이후)은 arm64, 인텔 맥은 x64 를 받으세요.
-            </p>
-          )}
+          {os === 'mac' && <p className="text-[12px] text-faint">{t('macNote')}</p>}
         </section>
       )}
 
       {/* 전체 플랫폼 목록 */}
       <section className="space-y-2.5">
-        <h3 className="text-[13px] font-[560] text-foreground">모든 플랫폼</h3>
+        <h3 className="text-[13px] font-[560] text-foreground">{t('allPlatforms')}</h3>
         <ul className="divide-y divide-border rounded-lg border bg-card shadow-raise">
           {release.assets.map((a) => (
             <li key={a.id} className="flex items-center gap-3 px-3.5 py-2.5">
               <Laptop className="size-4 shrink-0 text-muted-foreground" strokeWidth={1.75} />
               <div className="min-w-0 flex-1">
-                <span className="text-[13px] font-[510] text-foreground">{assetLabel(a)}</span>
+                <span className="text-[13px] font-[510] text-foreground">{assetLabel(a, t)}</span>
                 <span className="ml-2 text-[12px] text-faint">
                   {a.name} · {formatSize(a.size)}
                 </span>
@@ -149,7 +144,7 @@ export function DownloadPanel({
                 className={buttonVariants({ size: 'xs', variant: 'secondary' })}
               >
                 <Download />
-                받기
+                {t('download')}
               </a>
             </li>
           ))}
@@ -158,19 +153,18 @@ export function DownloadPanel({
 
       {/* 설치 후 안내 + unsigned 주의 */}
       <section className="space-y-2.5">
-        <h3 className="text-[13px] font-[560] text-foreground">설치 후</h3>
+        <h3 className="text-[13px] font-[560] text-foreground">{t('afterInstall')}</h3>
         <ol className="list-decimal space-y-1 pl-5 text-[13px] leading-relaxed text-muted-foreground">
-          <li>앱을 실행하고 웹과 같은 계정으로 로그인해요.</li>
+          <li>{t('step1')}</li>
           <li>
-            계정 &gt; <span className="font-[510]">연결된 러너</span>에서{' '}
-            <span className="font-[510]">이 기기를 러너로 연결</span> 버튼 한 번이면 끝이에요.
+            {t.rich('step2', { b: (chunks) => <span className="font-[510]">{chunks}</span> })}
           </li>
-          <li>스코어카드를 실행할 때 런타임에서 내 컴퓨터를 고를 수 있어요.</li>
+          <li>{t('step3')}</li>
         </ol>
         <Callout tone="warning" className="text-[13px]">
-          설치 파일은 아직 서명 전이에요. macOS 는 우클릭 → 열기, Windows 는 SmartScreen
-          &lsquo;추가 정보 → 실행&rsquo;, Linux AppImage 는{' '}
-          <code className="font-mono text-xs">chmod +x</code> 후 실행하세요.
+          {t.rich('unsignedWarning', {
+            code: (chunks) => <code className="font-mono text-xs">{chunks}</code>,
+          })}
         </Callout>
       </section>
     </div>

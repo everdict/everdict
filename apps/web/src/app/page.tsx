@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ArrowRight, FlaskConical, GitCompareArrows, Layers, ShieldCheck } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { currentPrincipal } from '@/shared/auth/principal'
 import { buttonVariants } from '@/shared/ui/button'
@@ -9,25 +10,13 @@ import { ThemeToggle } from '@/shared/ui/theme-toggle'
 // 컨트롤플레인 GET /me 로 현재 인증을 확인해야 하므로 정적 렌더가 아니다.
 export const dynamic = 'force-dynamic'
 
-const FEATURES = [
-  {
-    icon: Layers,
-    title: '어떤 에이전트든',
-    body: 'Claude Code, Codex, LangGraph… 어떤 에이전트든 같은 방식으로 평가해요.',
-  },
-  {
-    icon: ShieldCheck,
-    title: '안전하고 공정하게',
-    body: '팀마다 격리하고 예산 안에서 안전하게 실행돼요.',
-  },
-  {
-    icon: GitCompareArrows,
-    title: '버전별 비교',
-    body: '버전이 좋아졌는지 나빠졌는지 한눈에 봐요.',
-  },
-] as const
-
 export default async function Home() {
+  const t = await getTranslations('landingPage')
+  const features = [
+    { icon: Layers, title: t('featureAnyAgentTitle'), body: t('featureAnyAgentBody') },
+    { icon: ShieldCheck, title: t('featureSafeTitle'), body: t('featureSafeBody') },
+    { icon: GitCompareArrows, title: t('featureCompareTitle'), body: t('featureCompareBody') },
+  ] as const
   // 컨트롤플레인에 접속되고 실제 로그인(OIDC)이 확인되면 랜딩이 아니라 내 워크스페이스(/{slug})로.
   // 워크스페이스가 0개면 온보딩으로. via!=='oidc'(dev x-assay-tenant 폴백)/principal=null 이면 랜딩을 보여준다.
   const { principal } = await currentPrincipal()
@@ -59,7 +48,7 @@ export default async function Home() {
               href="/api/auth/signin"
               className={buttonVariants({ variant: 'ghost', size: 'sm' })}
             >
-              로그인
+              {t('login')}
             </Link>
           </div>
         </div>
@@ -73,32 +62,33 @@ export default async function Home() {
         </span>
 
         <h1 className="font-display text-5xl font-[560] leading-[1.06] tracking-[-0.025em] text-balance break-keep sm:text-6xl">
-          하니스를 등록하고, 평가하고,
-          <br className="hidden sm:block" /> <span className="text-primary">점수로 비교</span>해요.
+          {t.rich('heroTitle', {
+            br: () => <br className="hidden sm:block" />,
+            highlight: (chunks) => <span className="text-primary">{chunks}</span>,
+          })}
         </h1>
 
         <p className="max-w-xl text-[15px] leading-relaxed text-balance text-muted-foreground">
-          Assay 는 어떤 에이전트든 공정하고 안전하게 평가해요. 사람은 웹으로, 에이전트는 MCP 로
-          같은 플랫폼을 써요.
+          {t('heroSubtitle')}
         </p>
 
         <div className="flex flex-wrap items-center justify-center gap-2.5 pt-1">
           <Link href={enterHref} className={buttonVariants({ size: 'lg' })}>
-            대시보드 열기
+            {t('openDashboard')}
             <ArrowRight className="size-4" />
           </Link>
           <Link
             href="/api/auth/signin"
             className={buttonVariants({ variant: 'secondary', size: 'lg' })}
           >
-            로그인
+            {t('login')}
           </Link>
         </div>
       </section>
 
       {/* 피처 스트립 */}
       <section className="mx-auto grid w-full max-w-5xl gap-4 px-6 pb-28 sm:grid-cols-3">
-        {FEATURES.map((f) => {
+        {features.map((f) => {
           const Icon = f.icon
           return (
             <div

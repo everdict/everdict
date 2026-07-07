@@ -1,4 +1,5 @@
 import { ListOrdered, Variable } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { envValueText, type HarnessSpec } from '@/entities/harness'
 import type { ImageRegistryCoordinates } from '@/shared/lib/image-ref'
@@ -16,6 +17,7 @@ export function CommandView({
   spec: HarnessSpec
   registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 지원
 }) {
+  const t = useTranslations('inspectHarness')
   const setup = spec.setup ?? []
   const env = spec.env ?? {}
   const envKeys = Object.keys(env)
@@ -26,31 +28,31 @@ export function CommandView({
       {/* 화면이 넓을수록 열을 늘려 값을 넉넉히 펼친다. 명령은 길어서 전체 폭(col-span-full). */}
       <Card className="grid grid-cols-1 gap-x-10 gap-y-4 p-5 sm:grid-cols-2 lg:grid-cols-3">
         {spec.command && (
-          <DefRow label="명령" wide>
+          <DefRow label={t('command')} wide>
             <pre className="overflow-x-auto whitespace-pre-wrap break-all font-mono text-[12.5px] leading-relaxed text-foreground">
               <span className="select-none text-faint">$ </span>
               {highlightTemplate(spec.command)}
             </pre>
           </DefRow>
         )}
-        <DefRow label="모델" mono>
+        <DefRow label={t('model')} mono>
           {spec.model ?? '—'}
         </DefRow>
-        <DefRow label="이미지" mono>
+        <DefRow label={t('image')} mono>
           {spec.image ? (
             <span className="inline-flex min-w-0 items-center gap-2">
               <span className="truncate">{spec.image}</span>
               <ImageClassBadge image={spec.image} {...(registry ? { registry } : {})} />
             </span>
           ) : (
-            '기본 에이전트 이미지'
+            t('defaultAgentImage')
           )}
         </DefRow>
-        <DefRow label="작업 경로" mono>
+        <DefRow label={t('workDir')} mono>
           {spec.workDir ?? 'work'}
         </DefRow>
         {trace && trace.kind !== 'none' && (
-          <DefRow label="트레이스" mono>
+          <DefRow label={t('trace')} mono>
             {trace.kind} · pull{trace.endpoint ? ` · ${trace.endpoint}` : ''}
           </DefRow>
         )}
@@ -77,12 +79,16 @@ export function CommandView({
       )}
 
       {envKeys.length > 0 && (
-        <SubSection title="환경변수" icon={<Variable className="size-4" />} count={envKeys.length}>
+        <SubSection
+          title={t('envVars')}
+          icon={<Variable className="size-4" />}
+          count={envKeys.length}
+        >
           <Card className="divide-y divide-border">
             {envKeys.map((k) => (
               <div key={k} className="flex items-center justify-between gap-3 px-3.5 py-2.5">
                 <code className="font-mono text-[12px] text-foreground">{k}</code>
-                <Mono>{envValueText(env[k])}</Mono>
+                <Mono>{envValueText(env[k], t('secretLabel'))}</Mono>
               </div>
             ))}
           </Card>

@@ -3,6 +3,10 @@ import type { ScorecardRecord } from '@/entities/scorecard'
 // 스코어카드 유연 분석 엔진 — listScorecards 배열 위의 순수 피벗(필터·그룹·측정·정렬·검색).
 // 리더보드/하니스별/추이/비교는 전부 이 config 의 구성으로 재현된다. 설계: docs/architecture/scorecard-analysis-views.md.
 
+// 라벨 해석용 최소 translator 시그니처 — next-intl useTranslations/getTranslations 반환과 구조적으로 호환.
+// 모델은 프레임워크 무의존을 유지하고, 호출부(analyzeScorecards 네임스페이스 바인딩)가 t 를 주입한다.
+type Translate = (key: string, values?: Record<string, string | number>) => string
+
 export type Dimension =
   | 'dataset'
   | 'datasetVersion'
@@ -20,28 +24,29 @@ export type Dimension =
 
 export const TIME_DIMENSIONS: Dimension[] = ['day', 'week', 'month']
 
-export const DIMENSION_LABEL: Record<Dimension, string> = {
-  dataset: '벤치마크',
-  datasetVersion: '벤치마크 버전',
-  harness: '하니스',
-  harnessVersion: '하니스 버전',
-  model: '모델',
-  judgeModel: 'Judge 모델',
-  status: '상태',
-  originSource: '실행 출처',
-  repo: '레포',
-  owner: '실행자',
-  day: '일',
-  week: '주',
-  month: '월',
+// 차원 → 카탈로그 키(analyzeScorecards 네임스페이스). 표시 문자열은 렌더에서 t() 로 해석.
+export const DIMENSION_KEY: Record<Dimension, string> = {
+  dataset: 'dimDataset',
+  datasetVersion: 'dimDatasetVersion',
+  harness: 'dimHarness',
+  harnessVersion: 'dimHarnessVersion',
+  model: 'dimModel',
+  judgeModel: 'dimJudgeModel',
+  status: 'dimStatus',
+  originSource: 'dimOriginSource',
+  repo: 'dimRepo',
+  owner: 'dimOwner',
+  day: 'dimDay',
+  week: 'dimWeek',
+  month: 'dimMonth',
 }
 
 export type Measure = 'passRate' | 'mean' | 'count' | 'latest'
-export const MEASURE_LABEL: Record<Measure, string> = {
-  passRate: '통과율',
-  mean: '평균',
-  count: '건수',
-  latest: '최신 점수',
+export const MEASURE_KEY: Record<Measure, string> = {
+  passRate: 'measurePassRate',
+  mean: 'measureMean',
+  count: 'measureCount',
+  latest: 'measureLatest',
 }
 
 export type Viz = 'table' | 'bars' | 'line'
@@ -234,7 +239,8 @@ function groupKey(sc: ScorecardRecord, dims: Dimension[]): string {
 export function computeAnalysis(
   scorecards: ScorecardRecord[],
   config: AnalysisConfig,
-  resolveOwner: (s: string) => string = (s) => s
+  resolveOwner: (s: string) => string = (s) => s,
+  allLabel: string = '전체' // series 차원이 없을 때의 단일 시리즈 라벨(호출부가 t('all') 주입)
 ): AnalysisResult {
   const filtered = scorecards.filter((sc) => passesFilters(sc, config, resolveOwner))
   const metric = config.metric
@@ -247,9 +253,9 @@ export function computeAnalysis(
     const buckets = [...new Set(filtered.map((sc) => dimValue(sc, timeDim)))].sort()
     const seriesKeys = seriesDim
       ? [...new Set(filtered.map((sc) => dimValue(sc, seriesDim)))].sort()
-      : ['전체']
+      : [allLabel]
     const series = seriesKeys.map((sk) => ({
-      label: seriesDim ? labelOf(seriesDim, sk) : '전체',
+      label: seriesDim ? labelOf(seriesDim, sk) : allLabel,
       points: buckets.map((b) =>
         aggregate(
           filtered.filter(
@@ -307,19 +313,21 @@ export function computeAnalysis(
   return { kind: 'grid', rows, pivotKeys, metric, total: filtered.length }
 }
 
-const VIZ_LABEL: Record<Viz, string> = { table: '표', bars: '막대', line: '추이' }
+const VIZ_KEY: Record<Viz, string> = { table: 'vizTable', bars: 'vizBars', line: 'trend' }
 
 // config 를 사람이 읽는 짧은 칩 목록으로 — View 카드가 스스로를 설명하게(그룹·열·측정·형태·필터 수).
-export function describeConfig(c: AnalysisConfig): string[] {
+// t = analyzeScorecards 네임스페이스 translator(호출부 주입; 서버는 getTranslations, 클라는 useTranslations).
+export function describeConfig(c: AnalysisConfig, t: Translate): string[] {
   const chips: string[] = []
-  if (c.groupBy.length) chips.push(`그룹 ${c.groupBy.map((d) => DIMENSION_LABEL[d]).join('·')}`)
-  if (c.pivotBy) chips.push(`열 ${DIMENSION_LABEL[c.pivotBy]}`)
-  chips.push(MEASURE_LABEL[c.measure])
-  chips.push(VIZ_LABEL[c.viz])
+  if (c.groupBy.length)
+    chips.push(t('descGroup', { dims: c.groupBy.map((d) => t(DIMENSION_KEY[d])).join('·') }))
+  if (c.pivotBy) chips.push(t('descPivot', { dim: t(DIMENSION_KEY[c.pivotBy]) }))
+  chips.push(t(MEASURE_KEY[c.measure]))
+  chips.push(t(VIZ_KEY[c.viz]))
   const activeFilters = Object.values(c.filters).filter((v) =>
     Array.isArray(v) ? v.length > 0 : Boolean(v)
   ).length
-  if (activeFilters > 0) chips.push(`필터 ${activeFilters}`)
+  if (activeFilters > 0) chips.push(t('descFilters', { count: activeFilters }))
   return chips
 }
 
@@ -360,7 +368,7 @@ export function storedToConfig(raw: unknown): AnalysisConfig {
   return paramsToConfig(rec)
 }
 
-const DIMS = new Set<string>(Object.keys(DIMENSION_LABEL))
+const DIMS = new Set<string>(Object.keys(DIMENSION_KEY))
 const isDim = (v: string): v is Dimension => DIMS.has(v)
 
 export function paramsToConfig(params: Record<string, string | undefined>): AnalysisConfig {

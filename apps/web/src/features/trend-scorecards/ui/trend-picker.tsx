@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
@@ -26,6 +27,7 @@ export function TrendPicker({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('trendScorecards')
   const [d, setD] = useState(dataset ?? datasets[0]?.id ?? '')
   const [m, setM] = useState(metric ?? 'judge')
   const [b, setB] = useState(baseline ?? 'first')
@@ -41,7 +43,7 @@ export function TrendPicker({
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="min-w-56 space-y-1.5">
-        <Label htmlFor="dataset">Dataset</Label>
+        <Label htmlFor="dataset">{t('datasetLabel')}</Label>
         <Combobox
           id="dataset"
           value={d}
@@ -51,24 +53,24 @@ export function TrendPicker({
         />
       </div>
       <div className="min-w-36 space-y-1.5">
-        <Label htmlFor="metric">Metric</Label>
+        <Label htmlFor="metric">{t('metricLabel')}</Label>
         <Input id="metric" value={m} onChange={(e) => setM(e.target.value)} placeholder="judge" />
       </div>
       <div className="min-w-44 space-y-1.5">
-        <Label htmlFor="baseline">Baseline</Label>
+        <Label htmlFor="baseline">{t('baselineLabel')}</Label>
         <Combobox
           id="baseline"
           value={b}
           onChange={setB}
           options={[
-            { value: 'first', label: 'first (첫 실행)' },
-            { value: 'previous', label: 'previous (직전 실행)' },
+            { value: 'first', label: t('baselineFirst') },
+            { value: 'previous', label: t('baselinePrevious') },
           ]}
           className="w-full"
         />
       </div>
       <Button type="button" onClick={go} disabled={!d}>
-        추이 보기
+        {t('submit')}
       </Button>
     </div>
   )

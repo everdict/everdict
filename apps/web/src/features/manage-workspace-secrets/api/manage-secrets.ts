@@ -1,6 +1,7 @@
 'use server'
 
 import { revalidatePath } from 'next/cache'
+import { getTranslations } from 'next-intl/server'
 
 import type { SecretScope } from '@/entities/secret'
 import { authContext } from '@/shared/auth/principal'
@@ -25,9 +26,9 @@ export async function setSecretAction(
   value: string,
   scope: SecretScope
 ): Promise<SecretMutationResult> {
-  if (!NAME_RE.test(name))
-    return { ok: false, error: '이름은 ^[A-Z_][A-Z0-9_]*$ 형식이어야 합니다.' }
-  if (value.length === 0) return { ok: false, error: '값이 비어 있습니다.' }
+  const t = await getTranslations('manageWorkspaceSecrets')
+  if (!NAME_RE.test(name)) return { ok: false, error: t('nameFormat') }
+  if (value.length === 0) return { ok: false, error: t('valueEmpty') }
   const ctx = await authContext()
   try {
     await controlPlane.setSecret(ctx, name, value, scope)

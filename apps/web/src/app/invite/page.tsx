@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 import { AcceptInviteCard } from '@/features/accept-invite'
 import { invitePreviewSchema, type InvitePreview } from '@/entities/member'
 import { authContext } from '@/shared/auth/principal'
@@ -17,6 +19,7 @@ export default async function InvitePage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const sp = await searchParams
+  const t = await getTranslations('invitePage')
   const token = typeof sp.token === 'string' ? sp.token : undefined
 
   // 비소비 미리보기 — 로그인 전에도 "어느 워크스페이스인지"(이름/썸네일)를 보여준다(서버가 토큰만 검증).
@@ -35,24 +38,15 @@ export default async function InvitePage({
     <main className="mx-auto flex min-h-screen w-full max-w-lg flex-col justify-center gap-6 px-6 py-16">
       {!token ? (
         <>
-          <PageHeader
-            title="워크스페이스 초대"
-            description="초대 링크로 워크스페이스에 참여해요."
-          />
-          <EmptyState
-            title="초대 링크가 올바르지 않아요."
-            hint="초대한 분에게 새 링크를 받아보세요."
-          />
+          <PageHeader title={t('title')} description={t('description')} />
+          <EmptyState title={t('invalidTitle')} hint={t('invalidHint')} />
         </>
       ) : (
         <>
           {preview ? (
             <WorkspaceInviteHeader preview={preview} />
           ) : (
-            <PageHeader
-              title="워크스페이스 초대"
-              description="초대 링크로 워크스페이스에 참여해요."
-            />
+            <PageHeader title={t('title')} description={t('description')} />
           )}
           <Card className="p-4">
             <AcceptInviteCard token={token} />
@@ -64,7 +58,8 @@ export default async function InvitePage({
 }
 
 // 초대 랜딩 헤더 — 워크스페이스 썸네일(로고, 없으면 이니셜) + 이름 + 초대 역할. 어느 워크스페이스인지 한눈에.
-function WorkspaceInviteHeader({ preview }: { preview: InvitePreview }) {
+async function WorkspaceInviteHeader({ preview }: { preview: InvitePreview }) {
+  const t = await getTranslations('invitePage')
   return (
     <div className="flex flex-col items-center gap-4 text-center">
       {preview.logoUrl ? (
@@ -83,8 +78,10 @@ function WorkspaceInviteHeader({ preview }: { preview: InvitePreview }) {
       <div className="space-y-1">
         <h1 className="text-xl font-[560] text-foreground">{preview.name}</h1>
         <p className="text-[13px] text-muted-foreground">
-          이 워크스페이스에 <span className="font-[510] text-foreground">{preview.role}</span> 로
-          초대받았어요.
+          {t.rich('invitedAs', {
+            role: preview.role,
+            strong: (chunks) => <span className="font-[510] text-foreground">{chunks}</span>,
+          })}
         </p>
       </div>
     </div>

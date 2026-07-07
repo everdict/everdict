@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { bumpSemver, maxSemver, type BumpKind } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
@@ -19,6 +20,7 @@ export function VersionField({
   value: string
   onChange: (v: string) => void
 }) {
+  const t = useTranslations('ui')
   const latest = maxSemver(existing)
   const [kind, setKind] = useState<BumpKind>('patch')
 
@@ -33,7 +35,7 @@ export function VersionField({
   return (
     <div className="space-y-1.5">
       <Label>
-        version <span className="font-normal text-faint">· 시스템 관리</span>
+        version <span className="font-normal text-faint">· {t('versionSystemManaged')}</span>
       </Label>
       {latest ? (
         <div className="space-y-1.5">
@@ -56,12 +58,19 @@ export function VersionField({
             ))}
           </div>
           <p className="text-[12px] leading-relaxed text-muted-foreground">
-            기존 {existing.join(', ')} · 최신{' '}
-            <code className="rounded bg-secondary px-1 font-mono text-[11px]">{latest}</code> → 새
-            버전{' '}
-            <code className="rounded bg-secondary px-1 font-mono text-[11px] text-foreground">
-              {value}
-            </code>
+            {t.rich('versionBump', {
+              existing: existing.join(', '),
+              latest,
+              value,
+              code: (chunks) => (
+                <code className="rounded bg-secondary px-1 font-mono text-[11px]">{chunks}</code>
+              ),
+              codeNew: (chunks) => (
+                <code className="rounded bg-secondary px-1 font-mono text-[11px] text-foreground">
+                  {chunks}
+                </code>
+              ),
+            })}
           </p>
         </div>
       ) : (
@@ -69,9 +78,7 @@ export function VersionField({
           <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[12px] text-foreground">
             1.0.0
           </code>
-          <span className="text-[12px] text-muted-foreground">
-            첫 버전 — 다음부터 patch/minor/major 로 올립니다.
-          </span>
+          <span className="text-[12px] text-muted-foreground">{t('versionFirstHint')}</span>
         </div>
       )}
     </div>

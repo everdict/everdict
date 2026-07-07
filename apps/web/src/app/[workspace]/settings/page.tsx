@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 import { ciLinksResponseSchema, type CiLink } from '@/entities/ci-link'
 import { githubAppViewSchema, type GithubAppView } from '@/entities/github-app'
 import { imageRegistriesResponseSchema, type ImageRegistryConfig } from '@/entities/image-registry'
@@ -29,6 +31,7 @@ export default async function SettingsPage({
   searchParams: Promise<{ tab?: string; app?: string; githubApp?: string; error?: string }>
 }) {
   const sp = await searchParams
+  const t = await getTranslations('settingsPage')
   const githubAppNotice =
     sp.githubApp === 'installed' || sp.error !== undefined
       ? {
@@ -94,11 +97,11 @@ export default async function SettingsPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="워크스페이스 설정" description="정책, 키, 멤버를 관리해요." />
+      <PageHeader title={t('title')} description={t('description')} />
       {!canReadAny ? (
-        <EmptyState title="설정을 볼 권한이 없어요." hint="워크스페이스 관리자에게 문의해보세요." />
+        <EmptyState title={t('noPermissionTitle')} hint={t('noPermissionHint')} />
       ) : error ? (
-        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : (
         <SettingsTabs
           isOwner={isOwner}

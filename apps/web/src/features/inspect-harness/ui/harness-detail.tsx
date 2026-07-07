@@ -1,6 +1,7 @@
 'use client'
 
 import { LayoutPanelLeft, Workflow } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { HarnessSpec } from '@/entities/harness'
 import type { ImageRegistryCoordinates } from '@/shared/lib/image-ref'
@@ -21,18 +22,19 @@ export function HarnessDetail({
   spec: HarnessSpec
   registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[]
 }) {
+  const t = useTranslations('inspectHarness')
   if (spec.kind === 'service') {
     return (
       <Tabs defaultValue="diagram">
         <TabsList>
           <TabsTrigger value="diagram">
             <span className="inline-flex items-center gap-1.5">
-              <Workflow className="size-3.5" /> 다이어그램
+              <Workflow className="size-3.5" /> {t('diagram')}
             </span>
           </TabsTrigger>
           <TabsTrigger value="structure">
             <span className="inline-flex items-center gap-1.5">
-              <LayoutPanelLeft className="size-3.5" /> 구성
+              <LayoutPanelLeft className="size-3.5" /> {t('structure')}
             </span>
           </TabsTrigger>
         </TabsList>

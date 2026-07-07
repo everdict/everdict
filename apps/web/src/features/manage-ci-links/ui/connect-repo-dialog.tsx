@@ -3,6 +3,7 @@
 import { useEffect, useState, useTransition } from 'react'
 import Link from 'next/link'
 import { Check, GitBranch, Lock, Search } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { CiLink, CiTrigger, RepoInfo } from '@/entities/ci-link'
 import type { HarnessKind } from '@/entities/harness'
@@ -80,6 +81,7 @@ export function ConnectRepoDialog({
   canWrite: boolean
   onSaved: (links: CiLink[]) => void
 }) {
+  const t = useTranslations('manageCiLinks')
   const [repos, setRepos] = useState<RepoInfo[]>()
   const [reposError, setReposError] = useState<string>()
   const [reposLoading, startReposLoad] = useTransition()
@@ -113,7 +115,7 @@ export function ConnectRepoDialog({
     startReposLoad(async () => {
       const r = await listGithubAppReposAction()
       if (r.ok && r.repos) setRepos(r.repos)
-      else setReposError(r.error ?? '레포 목록을 불러오지 못했습니다.')
+      else setReposError(r.error ?? t('reposLoadFailed'))
     })
     // 공유 러너 준비 상태 — 조회 게이트가 admin(settings:write)이라 canWrite 일 때만. 실패는 안내 문구로 강등.
     if (canWrite)
@@ -166,7 +168,7 @@ export function ConnectRepoDialog({
       if (r.ok && r.links) {
         onSaved(r.links)
         setSavedRepo(repository)
-      } else setSaveError(r.error ?? '링크 저장에 실패했습니다.')
+      } else setSaveError(r.error ?? t('linkSaveFailed'))
     })
   }
 
@@ -176,11 +178,13 @@ export function ConnectRepoDialog({
     <Dialog open={open} onClose={onClose} className="max-w-[560px]" labelledBy="ci-connect-title">
       <header className="border-b border-border px-5 py-4">
         <h2 id="ci-connect-title" className="text-[15px] font-[560] text-foreground">
-          GitHub 레포 연결
+          {t('connectRepo')}
         </h2>
         <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-          레포를 <span className="font-mono">{harnessId}</span> 하니스에 연결하면, PR·머지마다 CI가
-          이미지를 만들어 자동으로 평가해요. 워크플로 파일은 셋업 PR로 자동 만들어져요.
+          {t.rich('dialogDescription', {
+            id: harnessId,
+            code: (c) => <span className="font-mono">{c}</span>,
+          })}
         </p>
       </header>
 
@@ -188,20 +192,19 @@ export function ConnectRepoDialog({
         // App 미설치/접근 레포 없음 — 설정 → 통합에서 GitHub App 설치 안내.
         <div className="space-y-3 px-5 py-5">
           <Callout tone="info">
-            연결할 수 있는 레포가 없어요. 관리자가 워크스페이스에 GitHub App 을 설치하고 저장소를
-            선택해야 여기에 보여요.
+            {t('noReposCallout')}
             <div className="mt-2">
               <Link
                 href={`/${encodeURIComponent(workspace)}/settings?tab=integrations`}
                 className="text-[12px] font-[510] text-primary hover:underline"
               >
-                설정 → 통합에서 GitHub App 설치하기 →
+                {t('installGithubAppLink')}
               </Link>
             </div>
           </Callout>
           <div className="flex justify-end">
             <Button size="sm" variant="ghost" onClick={onClose}>
-              닫기
+              {t('close')}
             </Button>
           </div>
         </div>
@@ -209,15 +212,14 @@ export function ConnectRepoDialog({
         // 저장 완료 — 셋업 PR 단계.
         <div className="space-y-4 px-5 py-5">
           <Callout tone="info">
-            <span className="font-mono text-foreground">{savedRepo.fullName}</span>
-            {savedRepo.host && (
-              <span className="font-mono text-muted-foreground">
-                {' '}
-                ({hostLabel(savedRepo.host)})
-              </span>
-            )}{' '}
-            를 <span className="font-mono text-foreground">{harnessId}</span> 에 연결했어요. 셋업
-            PR을 열면 워크플로 파일이 레포에 추가돼요. 머지하면 CI 평가가 시작돼요.
+            {t.rich('connectedMessage', {
+              repo: savedRepo.fullName,
+              host: savedRepo.host ? ` (${hostLabel(savedRepo.host)})` : '',
+              harness: harnessId,
+              repoTag: (c) => <span className="font-mono text-foreground">{c}</span>,
+              hostTag: (c) => <span className="font-mono text-muted-foreground">{c}</span>,
+              harnessTag: (c) => <span className="font-mono text-foreground">{c}</span>,
+            })}
           </Callout>
           <div className="flex items-center justify-between gap-3">
             <SetupPrButton
@@ -227,7 +229,7 @@ export function ConnectRepoDialog({
               onError={setSaveError}
             />
             <Button size="sm" onClick={onClose}>
-              완료
+              {t('done')}
             </Button>
           </div>
           {saveError && (
@@ -241,9 +243,9 @@ export function ConnectRepoDialog({
           <div className="max-h-[62vh] space-y-5 overflow-y-auto px-5 py-4">
             {/* 1. 레포 picker — App installation 이 접근 가능한 레포, 클라이언트 검색. */}
             <div className="space-y-1.5">
-              <Label>1. 레포지토리</Label>
+              <Label>{t('stepRepository')}</Label>
               {reposLoading || repos === undefined ? (
-                <p className="text-[12px] text-muted-foreground">레포 목록을 불러오는 중…</p>
+                <p className="text-[12px] text-muted-foreground">{t('reposLoading')}</p>
               ) : reposError ? (
                 <Callout tone="danger" className="py-1.5">
                   {reposError}
@@ -255,14 +257,14 @@ export function ConnectRepoDialog({
                     <input
                       value={repoQuery}
                       onChange={(e) => setRepoQuery(e.target.value)}
-                      placeholder="레포 검색…"
+                      placeholder={t('repoSearchPlaceholder')}
                       className="h-8 w-full bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
                     />
                   </div>
                   <div className="max-h-52 divide-y divide-border/70 overflow-y-auto rounded-md border bg-card">
                     {filteredRepos.length === 0 ? (
                       <p className="px-3 py-4 text-center text-[12px] text-muted-foreground">
-                        검색 결과가 없어요.
+                        {t('noSearchResults')}
                       </p>
                     ) : (
                       filteredRepos.map((r) => {
@@ -321,11 +323,9 @@ export function ConnectRepoDialog({
             {/* 2. 슬롯 — service=서비스 다중선택(+경로), command=image, process=없음. */}
             {repository && (
               <div className="space-y-2">
-                <Label>2. 빌드 슬롯</Label>
+                <Label>{t('stepBuildSlot')}</Label>
                 {slotChoices.length === 0 ? (
-                  <p className="text-[12px] text-muted-foreground">
-                    이 하니스는 CI가 바꿔 끼울 이미지 슬롯이 없어요(process). 링크는 트리거만 해요.
-                  </p>
+                  <p className="text-[12px] text-muted-foreground">{t('noSlotsProcess')}</p>
                 ) : (
                   <div className="space-y-1.5">
                     {slotChoices.map((name) => {
@@ -347,7 +347,7 @@ export function ConnectRepoDialog({
                             <div className="mt-2 pl-[26px]">
                               <Input
                                 value={s.path}
-                                placeholder="모노레포 경로 (선택, 예: services/api)"
+                                placeholder={t('monorepoPathPlaceholder')}
                                 onChange={(e) => setSlotPath(name, e.target.value)}
                                 autoComplete="off"
                                 spellCheck={false}
@@ -365,39 +365,42 @@ export function ConnectRepoDialog({
             {/* 3. 데이터셋 — CI 가 발사할 벤치마크(선택). */}
             {repository && datasets.length > 0 && (
               <div className="space-y-1.5">
-                <Label>3. 데이터셋 (선택)</Label>
+                <Label>{t('stepDataset')}</Label>
                 <Combobox
                   options={[
-                    { value: '', label: '지정 안 함', hint: '나중에' },
+                    { value: '', label: t('datasetNone'), hint: t('datasetNoneHint') },
                     ...datasets.map((d) => ({ value: d })),
                   ]}
                   value={dataset}
                   onChange={setDataset}
-                  placeholder="데이터셋 선택"
+                  placeholder={t('datasetSelectPlaceholder')}
                 />
-                <p className="text-[12px] text-faint">
-                  지금 안 정하면 셋업 PR에 TODO로 남아요. 나중에 채워도 돼요.
-                </p>
+                <p className="text-[12px] text-faint">{t('datasetHelp')}</p>
               </div>
             )}
 
             {/* 4. PR 평가 발화 방식 — 자동/코멘트(/evaluate)/둘 다. push(머지 재핀)는 방식과 무관하게 항상. */}
             {repository && (
               <div className="space-y-1.5">
-                <Label>4. PR 평가 방식</Label>
+                <Label>{t('stepTrigger')}</Label>
                 <Combobox
                   options={[
-                    { value: 'both', label: '자동 + /evaluate 코멘트', hint: '기본' },
-                    { value: 'auto', label: '자동만', hint: 'PR 푸시마다' },
-                    { value: 'comment', label: '/evaluate 코멘트만', hint: '온디맨드' },
+                    { value: 'both', label: t('triggerBothLabel'), hint: t('triggerBothHint') },
+                    { value: 'auto', label: t('triggerAutoOption'), hint: t('triggerAutoHint') },
+                    {
+                      value: 'comment',
+                      label: t('triggerCommentLabel'),
+                      hint: t('triggerCommentHint'),
+                    },
                   ]}
                   value={trigger}
                   onChange={(v) => setTrigger(v === 'auto' || v === 'comment' ? v : 'both')}
-                  placeholder="발화 방식"
+                  placeholder={t('triggerPlaceholder')}
                 />
                 <p className="text-[12px] text-faint">
-                  코멘트 방식은 PR 대화에 <span className="font-mono">/evaluate</span> 를 남기면
-                  평가가 돌고 결과가 대화로 회신돼요. 협력자 이상만 발화할 수 있어요.
+                  {t.rich('triggerHelp', {
+                    code: (c) => <span className="font-mono">{c}</span>,
+                  })}
                 </p>
               </div>
             )}
@@ -405,20 +408,19 @@ export function ConnectRepoDialog({
             {/* 5. 실행 러너 — CI 워크플로는 항상 셀프호스티드 러너에서(D6, 사설망 컨트롤플레인 도달). 기본 = 공유 러너 풀. */}
             {repository && (
               <div className="space-y-1.5">
-                <Label>5. 실행 러너</Label>
+                <Label>{t('stepRunner')}</Label>
                 {runnerCheck.state === 'loading' ? (
-                  <p className="text-[12px] text-muted-foreground">공유 러너를 확인하는 중…</p>
+                  <p className="text-[12px] text-muted-foreground">{t('runnersLoading')}</p>
                 ) : runnerCheck.state === 'ready' && runnerCheck.runners.length === 0 ? (
                   // 러너 0대 — 셋업 PR 이 서버에서 차단되므로(fail-closed) 등록 경로를 먼저 안내한다.
                   <Callout tone="warning" className="py-1.5">
-                    공유 러너가 없어요. CI 워크플로는 셀프호스티드 러너에서 실행돼서, 러너를 먼저
-                    등록해야 셋업 PR을 열 수 있어요.
+                    {t('noRunnersCallout')}
                     <div className="mt-1.5">
                       <Link
                         href={`/${encodeURIComponent(workspace)}/settings?tab=runners`}
                         className="text-[12px] font-[510] text-primary hover:underline"
                       >
-                        설정 → 공유 러너에서 GitHub Actions 러너 등록하기 →
+                        {t('registerRunnerLink')}
                       </Link>
                     </div>
                   </Callout>
@@ -428,40 +430,38 @@ export function ConnectRepoDialog({
                       className="inline-block size-1.5 shrink-0 rounded-full bg-[var(--color-success)]"
                       aria-hidden
                     />
-                    공유 러너 {runnerCheck.runners.length}대 (온라인{' '}
-                    {runnerCheck.runners.filter((r) => isOnline(r.lastSeenAt)).length}대) — 팀 러너
-                    풀(<span className="font-mono">self:ws</span>)에서 빌드·평가가 실행돼요.
+                    {t.rich('runnersReady', {
+                      total: runnerCheck.runners.length,
+                      online: runnerCheck.runners.filter((r) => isOnline(r.lastSeenAt)).length,
+                      code: (c) => <span className="font-mono">{c}</span>,
+                    })}
                   </p>
                 ) : (
-                  <p className="text-[12px] text-muted-foreground">
-                    CI 워크플로는 워크스페이스 공유 러너(셀프호스티드)에서 실행돼요. 러너
-                    등록·관리는 관리자가 해요.
-                  </p>
+                  <p className="text-[12px] text-muted-foreground">{t('runnersUnavailable')}</p>
                 )}
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                   <Input
                     value={runsOn}
                     onChange={(e) => setRunsOn(e.target.value)}
-                    placeholder="runs-on 오버라이드 (기본 [self-hosted])"
+                    placeholder={t('runsOnPlaceholder')}
                   />
                   <Input
                     value={runtime}
                     onChange={(e) => setRuntime(e.target.value)}
-                    placeholder="runtime 오버라이드 (기본 self:ws)"
+                    placeholder={t('runtimePlaceholder')}
                   />
                 </div>
                 <p className="text-[12px] text-faint">
-                  특정 러너로 좁히려면 라벨(예:{' '}
-                  <span className="font-mono">[self-hosted, assay-…]</span>)과 런타임(예:{' '}
-                  <span className="font-mono">self:ws:…</span>)을 지정해요. 비우면 풀에서 아무
-                  러너나 잡아요.
+                  {t.rich('runnerHelp', {
+                    code: (c) => <span className="font-mono">{c}</span>,
+                  })}
                 </p>
               </div>
             )}
 
             {!canWrite && (
               <Callout tone="warning" className="py-1.5">
-                링크 저장은 관리자 권한이 필요해요. 워크스페이스 관리자에게 요청해보세요.
+                {t('saveAdminRequired')}
               </Callout>
             )}
             {saveError && (
@@ -476,20 +476,20 @@ export function ConnectRepoDialog({
               {repository ? (
                 <>
                   <span className="font-mono text-muted-foreground">{repository.fullName}</span>
-                  {repository.host && <> ({hostLabel(repository.host)})</>} · {enabledSlots.length}
-                  개 슬롯
+                  {repository.host && <> ({hostLabel(repository.host)})</>} ·{' '}
+                  {t('slotCount', { count: enabledSlots.length })}
                 </>
               ) : (
-                '레포를 선택하세요'
+                t('selectRepoHint')
               )}
             </span>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="sm" onClick={onClose}>
-                취소
+                {t('cancel')}
               </Button>
               <Button size="sm" disabled={!canWrite || !repository || saving} onClick={onSave}>
                 <GitBranch />
-                {saving ? '저장 중…' : '연결 저장'}
+                {saving ? t('saving') : t('saveLink')}
               </Button>
             </div>
           </footer>

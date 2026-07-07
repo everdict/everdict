@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
@@ -24,6 +25,7 @@ export function ComparePicker({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('compareScorecards')
   const [b, setB] = useState(baseline ?? options[0]?.id ?? '')
   const [c, setC] = useState(candidate ?? options[1]?.id ?? options[0]?.id ?? '')
 
@@ -40,7 +42,7 @@ export function ComparePicker({
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="min-w-56 space-y-1.5">
-        <Label htmlFor="baseline">Baseline</Label>
+        <Label htmlFor="baseline">{t('baselineLabel')}</Label>
         <Combobox
           id="baseline"
           value={b}
@@ -50,7 +52,7 @@ export function ComparePicker({
         />
       </div>
       <div className="min-w-56 space-y-1.5">
-        <Label htmlFor="candidate">Candidate</Label>
+        <Label htmlFor="candidate">{t('candidateLabel')}</Label>
         <Combobox
           id="candidate"
           value={c}
@@ -60,7 +62,7 @@ export function ComparePicker({
         />
       </div>
       <Button type="button" onClick={compare} disabled={!b || !c}>
-        비교
+        {t('submit')}
       </Button>
     </div>
   )

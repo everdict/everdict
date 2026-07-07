@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft, Lock } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { RegisterHarnessWizard } from '@/features/register-harness'
 import { secretsSchema } from '@/entities/secret'
@@ -19,6 +20,7 @@ export default async function NewHarnessPage({
 }) {
   const { workspace } = await params
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('harnessesPage')
   const allowed = can(principal?.roles, 'harnesses:register')
 
   // env 시크릿 참조 피커용 — 공유(workspace) + 내 개인(user) 시크릿 이름(값은 안 옴). 실패/무권한이면 빈 목록.
@@ -42,19 +44,15 @@ export default async function NewHarnessPage({
         className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
-        하니스
+        {t('backToList')}
       </Link>
-      <PageHeader title="하니스 등록" description="이 워크스페이스에 새 하니스를 등록해요." />
+      <PageHeader title={t('registerTitle')} description={t('registerDescription')} />
       {allowed ? (
         <Card className="p-5">
           <RegisterHarnessWizard secrets={secrets} />
         </Card>
       ) : (
-        <EmptyState
-          icon={<Lock />}
-          title="하니스를 등록할 권한이 없어요."
-          hint="관리자만 하니스를 등록할 수 있어요. 워크스페이스 관리자에게 문의해보세요."
-        />
+        <EmptyState icon={<Lock />} title={t('noPermTitle')} hint={t('noPermHint')} />
       )}
     </div>
   )

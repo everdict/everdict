@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+import { getTranslations } from 'next-intl/server'
 
 import { DiffPicker } from '@/features/dataset-versions'
 import {
@@ -30,6 +32,7 @@ export default async function DatasetDiffPage({
   const { workspace, id } = await params
   const sp = await searchParams
   const ctx = await authContext()
+  const t = await getTranslations('datasetsPage')
 
   let versions: string[] = []
   try {
@@ -65,24 +68,18 @@ export default async function DatasetDiffPage({
           <ChevronLeft className="size-3.5" />
           {id}
         </Link>
-        <PageHeader
-          title="버전 비교"
-          description="두 버전의 케이스와 메타가 어떻게 달라졌는지 봐요."
-        />
+        <PageHeader title={t('compareVersions')} description={t('compareDescription')} />
       </div>
 
       {versions.length < 2 ? (
-        <EmptyState
-          title="버전이 2개 이상 있어야 비교할 수 있어요."
-          hint="새 버전을 만들면 버전끼리 비교할 수 있어요."
-        />
+        <EmptyState title={t('needTwoVersionsTitle')} hint={t('needTwoVersionsHint')} />
       ) : (
         <Card className="p-4">
           <DiffPicker id={id} versions={versions} base={base} candidate={candidate} />
         </Card>
       )}
 
-      {error && <Callout tone="danger">비교하지 못했어요: {error}</Callout>}
+      {error && <Callout tone="danger">{t('compareError', { error })}</Callout>}
 
       {diff && <DiffBody diff={diff} />}
     </div>
@@ -90,6 +87,7 @@ export default async function DatasetDiffPage({
 }
 
 function DiffBody({ diff }: { diff: DatasetDiff }) {
+  const t = useTranslations('datasetsPage')
   return (
     <div className="space-y-7">
       <p className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
@@ -104,15 +102,15 @@ function DiffBody({ diff }: { diff: DatasetDiff }) {
       </p>
 
       <div className="flex flex-wrap gap-2">
-        <Badge tone="success">+{diff.summary.added} 추가</Badge>
-        <Badge tone="danger">−{diff.summary.removed} 삭제</Badge>
-        <Badge tone="warning">~{diff.summary.changed} 변경</Badge>
-        <Badge tone="neutral">{diff.summary.unchanged} 동일</Badge>
+        <Badge tone="success">{t('diffAddedBadge', { count: diff.summary.added })}</Badge>
+        <Badge tone="danger">{t('diffRemovedBadge', { count: diff.summary.removed })}</Badge>
+        <Badge tone="warning">{t('diffChangedBadge', { count: diff.summary.changed })}</Badge>
+        <Badge tone="neutral">{t('diffUnchangedBadge', { count: diff.summary.unchanged })}</Badge>
       </div>
 
       {diff.meta.length > 0 && (
         <section className="space-y-2.5">
-          <SectionHeader title="데이터셋 메타 변경" />
+          <SectionHeader title={t('metaChangesTitle')} />
           <Card className="divide-y divide-border p-0">
             {diff.meta.map((c) => (
               <FieldChangeRow key={c.field} change={c} />
@@ -122,17 +120,27 @@ function DiffBody({ diff }: { diff: DatasetDiff }) {
       )}
 
       <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <CaseRefList title="추가된 케이스" tone="success" items={diff.added} empty="추가 없음" />
-        <CaseRefList title="삭제된 케이스" tone="danger" items={diff.removed} empty="삭제 없음" />
+        <CaseRefList
+          title={t('addedCasesTitle')}
+          tone="success"
+          items={diff.added}
+          empty={t('noneAdded')}
+        />
+        <CaseRefList
+          title={t('removedCasesTitle')}
+          tone="danger"
+          items={diff.removed}
+          empty={t('noneRemoved')}
+        />
       </section>
 
       <section className="space-y-2.5">
         <div className="flex items-center gap-2">
-          <SectionHeader title="변경된 케이스" />
+          <SectionHeader title={t('changedCasesTitle')} />
           <Badge tone="warning">{diff.changed.length}</Badge>
         </div>
         {diff.changed.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">변경된 케이스가 없어요.</p>
+          <p className="text-[13px] text-muted-foreground">{t('noChangedCases')}</p>
         ) : (
           <div className="space-y-3">
             {diff.changed.map((c) => (

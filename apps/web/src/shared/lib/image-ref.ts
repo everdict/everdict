@@ -48,19 +48,3 @@ export function classifyImageRef(
   }
   return path.includes('/') ? 'external' : 'unqualified'
 }
-
-// 배지 문구 — external 은 배지 없음(기본 상태, 소음 방지). local/unqualified = pull 보장 없음 경고.
-export const IMAGE_CLASS_LABEL: Record<ImageRefClass, string> = {
-  workspace: '워크스페이스',
-  external: '외부',
-  local: '로컬 전용',
-  unqualified: '레지스트리 미지정',
-}
-
-export const IMAGE_CLASS_HINT: Record<ImageRefClass, string> = {
-  workspace: '워크스페이스 레지스트리 이미지 — 자격만 있으면 어디서든 pull 돼요.',
-  external: '외부 레지스트리 이미지예요.',
-  local: '루프백 호스트 참조 — 빌드된 머신 밖에선 pull 할 수 없어요.',
-  unqualified:
-    '레지스트리 없는 이름 — 로컬 빌드면 다른 런타임에서 pull 이 안 돼요. assay image push 로 워크스페이스 레지스트리에 발행해보세요.',
-}

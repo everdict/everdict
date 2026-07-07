@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from 'react'
 import { Check, ChevronRight, Copy } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { copyText } from '@/shared/lib/clipboard'
 import { cn } from '@/shared/lib/utils'
@@ -120,12 +121,14 @@ function Node({
 }
 
 export function JsonView({ value, className }: { value: unknown; className?: string }) {
+  const t = useTranslations('ui')
+  const locale = useLocale()
   const [copied, setCopied] = useState(false)
   const text = JSON.stringify(value, null, 2)
 
   async function copy() {
     // http(비-secure) 컨텍스트에선 navigator.clipboard 가 없어 copyText 가 execCommand 로 폴백한다.
-    if (await copyText(text)) {
+    if (await copyText(text, undefined, locale)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1400)
     }
@@ -145,11 +148,11 @@ export function JsonView({ value, className }: { value: unknown; className?: str
       >
         {copied ? (
           <>
-            <Check className="size-3 text-[var(--color-success)]" /> 복사됨
+            <Check className="size-3 text-[var(--color-success)]" /> {t('copied')}
           </>
         ) : (
           <>
-            <Copy className="size-3" /> 복사
+            <Copy className="size-3" /> {t('copy')}
           </>
         )}
       </button>

@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Check, Copy, Loader2, Trash2, Upload } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { workspaceUrlBase } from '@/entities/workspace'
 import { copyText } from '@/shared/lib/clipboard'
@@ -16,6 +17,7 @@ import { updateWorkspaceAction } from '../api/workspace-meta'
 
 // 워크스페이스 로고 미리보기 — 라운드 사각(유저 아바타의 원형과 구분). 없거나 로드 실패면 이름 첫 글자 모노그램.
 function LogoPreview({ url, seed }: { url: string; seed: string }) {
+  const t = useTranslations('workspaceSettings')
   const [broken, setBroken] = useState(false)
   const initial = (seed.trim()[0] ?? '?').toUpperCase()
   if (!url.trim() || broken) {
@@ -30,7 +32,7 @@ function LogoPreview({ url, seed }: { url: string; seed: string }) {
     // eslint-disable-next-line @next/next/no-img-element
     <img
       src={url}
-      alt="워크스페이스 로고 미리보기"
+      alt={t('logoPreviewAlt')}
       className="size-14 shrink-0 rounded-lg object-cover ring-1 ring-inset ring-border"
       onError={() => setBroken(true)}
     />
@@ -50,6 +52,8 @@ export function WorkspaceInfoCard({
   logoUrl?: string
   canWrite: boolean
 }) {
+  const t = useTranslations('workspaceSettings')
+  const locale = useLocale()
   const router = useRouter()
   const fileRef = useRef<HTMLInputElement>(null)
   const [n, setN] = useState(name)
@@ -69,17 +73,17 @@ export function WorkspaceInfoCard({
     setError(undefined)
     setSaved(false)
     if (!file.type.startsWith('image/')) {
-      setError('이미지 파일만 올릴 수 있어요.')
+      setError(t('imageOnly'))
       return
     }
     if (file.size > MAX_IMAGE_UPLOAD_BYTES) {
-      setError('이미지가 너무 커요. 최대 8MB까지 올릴 수 있어요.')
+      setError(t('imageTooLarge'))
       return
     }
     try {
-      setLogo(await fileToImageDataUrl(file))
+      setLogo(await fileToImageDataUrl(file, undefined, locale))
     } catch (err) {
-      setError(err instanceof Error ? err.message : '이미지를 처리하지 못했어요.')
+      setError(err instanceof Error ? err.message : t('imageProcessFailed'))
     }
   }
 
@@ -99,11 +103,11 @@ export function WorkspaceInfoCard({
 
   async function onCopy() {
     // http(비-secure) 컨텍스트 폴백 포함 — navigator.clipboard 미존재 시 execCommand.
-    if (await copyText(url)) {
+    if (await copyText(url, undefined, locale)) {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
     } else {
-      setError('복사하지 못했어요.')
+      setError(t('copyFailed'))
     }
   }
 
@@ -119,7 +123,7 @@ export function WorkspaceInfoCard({
               accept="image/*"
               className="hidden"
               onChange={onPickFile}
-              aria-label="워크스페이스 로고 파일 선택"
+              aria-label={t('logoFileSelectLabel')}
             />
             <button
               type="button"
@@ -127,7 +131,7 @@ export function WorkspaceInfoCard({
               className={cn(buttonVariants({ variant: 'secondary', size: 'sm' }), 'gap-1.5')}
             >
               <Upload className="size-4" />
-              {logo.trim() ? '로고 변경' : '로고 업로드'}
+              {logo.trim() ? t('changeLogo') : t('uploadLogo')}
             </button>
             {logo.trim() && (
               <Button
@@ -138,7 +142,7 @@ export function WorkspaceInfoCard({
                 className="gap-1.5"
               >
                 <Trash2 className="size-4" />
-                제거
+                {t('remove')}
               </Button>
             )}
           </div>
@@ -148,7 +152,7 @@ export function WorkspaceInfoCard({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="ws-name">워크스페이스 이름</Label>
+        <Label htmlFor="ws-name">{t('workspaceName')}</Label>
         <Input
           id="ws-name"
           value={n}
@@ -156,7 +160,7 @@ export function WorkspaceInfoCard({
             setN(e.target.value)
             setSaved(false)
           }}
-          placeholder="예: Acme Inc"
+          placeholder={t('workspaceNamePlaceholder')}
           readOnly={!canWrite}
           disabled={!canWrite}
         />
@@ -168,12 +172,10 @@ export function WorkspaceInfoCard({
           <Input id="ws-url" value={url} readOnly className="font-mono text-muted-foreground" />
           <Button type="button" variant="secondary" size="sm" onClick={onCopy} className="gap-1.5">
             {copied ? <Check className="size-4" /> : <Copy className="size-4" />}
-            {copied ? '복사됨' : '복사'}
+            {copied ? t('copied') : t('copy')}
           </Button>
         </div>
-        <p className="text-[12px] text-faint">
-          URL은 워크스페이스를 만들 때 정해지고, 나중에 바꿀 수 없어요.
-        </p>
+        <p className="text-[12px] text-faint">{t('urlImmutable')}</p>
       </div>
 
       {error && <Callout tone="danger">{error}</Callout>}
@@ -186,7 +188,7 @@ export function WorkspaceInfoCard({
             ) : saved ? (
               <Check className="size-4" />
             ) : null}
-            {saved ? '저장됨' : '변경사항 저장'}
+            {saved ? t('saved') : t('saveChanges')}
           </Button>
         </div>
       )}

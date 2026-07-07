@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Boxes, Clock, Database, Search, Waypoints } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { DatasetSummary } from '@/entities/dataset'
 import type { DatasetRelation } from '@/shared/lib/dataset-relations'
@@ -19,30 +20,26 @@ import { StatCard } from '@/shared/ui/stat-card'
 type Sort = 'name' | 'updated' | 'cases'
 type Author = { name: string; avatarUrl?: string }
 
-const SORTS: { value: Sort; label: string }[] = [
-  { value: 'name', label: '이름순' },
-  { value: 'updated', label: '최근 수정순' },
-  { value: 'cases', label: '케이스 많은순' },
-]
-
-const STATUS_LABEL: Record<string, string> = {
-  succeeded: '성공',
-  failed: '실패',
-  running: '실행중',
-  queued: '대기',
+const STATUS_KEY: Record<string, string> = {
+  succeeded: 'statusSucceeded',
+  failed: 'statusFailed',
+  running: 'statusRunning',
+  queued: 'statusQueued',
 }
 
 // 최근 실행 결과 — 성공이면 점수(통과율/평균), 아니면 상태 라벨. 실행 이력 없으면 dash.
 function LatestResult({ rel }: { rel?: DatasetRelation }) {
-  if (!rel || !rel.lastStatus) return <span className="text-faint">실행 이력 없음</span>
+  const t = useTranslations('datasetList')
+  if (!rel || !rel.lastStatus) return <span className="text-faint">{t('noRun')}</span>
   if (rel.lastStatus === 'succeeded') {
     return <Score passRate={rel.lastPassRate} mean={rel.lastMean} />
   }
+  const key = STATUS_KEY[rel.lastStatus]
   return (
     <span
       className={cn(rel.lastStatus === 'failed' ? 'text-destructive' : 'text-muted-foreground')}
     >
-      {STATUS_LABEL[rel.lastStatus] ?? rel.lastStatus}
+      {key ? t(key) : rel.lastStatus}
     </span>
   )
 }
@@ -58,6 +55,12 @@ export function DatasetList({
   relations: Record<string, DatasetRelation>
   authors: Record<string, Author>
 }) {
+  const t = useTranslations('datasetList')
+  const sorts: { value: Sort; label: string }[] = [
+    { value: 'name', label: t('sortName') },
+    { value: 'updated', label: t('sortUpdated') },
+    { value: 'cases', label: t('sortCases') },
+  ]
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('name')
   const [category, setCategory] = useState('') // 태그 필터('' = 전체)
@@ -85,10 +88,10 @@ export function DatasetList({
     const s = new Set<string>()
     for (const d of datasets) for (const t of d.tags) s.add(t)
     return [
-      { value: '', label: '전체 카테고리' },
-      ...[...s].sort().map((t) => ({ value: t, label: t })),
+      { value: '', label: t('allCategories') },
+      ...[...s].sort().map((tag) => ({ value: tag, label: tag })),
     ]
-  }, [datasets])
+  }, [datasets, t])
 
   const userOptions = useMemo(() => {
     const m = new Map<string, string>()
@@ -96,12 +99,12 @@ export function DatasetList({
       if (d.createdBy) m.set(d.createdBy, authors[d.createdBy]?.name ?? fmtSubject(d.createdBy))
     }
     return [
-      { value: '', label: '전체 사용자' },
+      { value: '', label: t('allUsers') },
       ...[...m.entries()]
         .sort((a, b) => a[1].localeCompare(b[1]))
         .map(([sub, name]) => ({ value: sub, label: name })),
     ]
-  }, [datasets, authors])
+  }, [datasets, authors, t])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -125,10 +128,14 @@ export function DatasetList({
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="데이터셋" value={datasets.length} />
-        <StatCard label="케이스 합계" value={totalCases} />
-        <StatCard label="카테고리" value={tagCount} />
-        <StatCard label="실행됨" value={ranCount} tone={ranCount > 0 ? 'primary' : 'default'} />
+        <StatCard label={t('statDatasets')} value={datasets.length} />
+        <StatCard label={t('statTotalCases')} value={totalCases} />
+        <StatCard label={t('statCategories')} value={tagCount} />
+        <StatCard
+          label={t('statRan')}
+          value={ranCount}
+          tone={ranCount > 0 ? 'primary' : 'default'}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5">
@@ -137,16 +144,16 @@ export function DatasetList({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="id · 설명 · 태그 · 하니스로 검색"
+            placeholder={t('searchPlaceholder')}
             className="pl-8"
-            aria-label="데이터셋 검색"
+            aria-label={t('searchAria')}
           />
         </div>
         <Combobox
           options={categoryOptions}
           value={category}
           onChange={setCategory}
-          placeholder="카테고리"
+          placeholder={t('categoryPlaceholder')}
           className="w-[150px]"
         />
         {userOptions.length > 1 && (
@@ -154,26 +161,22 @@ export function DatasetList({
             options={userOptions}
             value={user}
             onChange={setUser}
-            placeholder="사용자"
+            placeholder={t('userPlaceholder')}
             className="w-[150px]"
           />
         )}
         <Combobox
-          options={SORTS.map((s) => ({ value: s.value, label: s.label }))}
+          options={sorts.map((s) => ({ value: s.value, label: s.label }))}
           value={sort}
           onChange={(v) => setSort(v as Sort)}
           className="w-[130px]"
           align="end"
-          aria-label="정렬"
+          aria-label={t('sortAria')}
         />
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState
-          icon={<Search />}
-          title="조건에 맞는 데이터셋이 없어요."
-          hint="검색어나 필터를 바꿔보세요."
-        />
+        <EmptyState icon={<Search />} title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <div className="space-y-2">
           {visible.map((d) => {
@@ -203,7 +206,7 @@ export function DatasetList({
                         )}
                         {d.versions.length > 1 && (
                           <span className="text-[11px] text-faint">
-                            +{d.versions.length - 1}개 버전
+                            {t('moreVersions', { n: d.versions.length - 1 })}
                           </span>
                         )}
                       </div>
@@ -214,12 +217,12 @@ export function DatasetList({
                       )}
                       {d.tags.length > 0 && (
                         <div className="flex flex-wrap gap-1">
-                          {d.tags.slice(0, 4).map((t) => (
+                          {d.tags.slice(0, 4).map((tag) => (
                             <span
-                              key={t}
+                              key={tag}
                               className="rounded bg-muted/40 px-1.5 py-0.5 text-[10.5px] text-muted-foreground ring-1 ring-inset ring-border"
                             >
-                              {t}
+                              {tag}
                             </span>
                           ))}
                           {d.tags.length > 4 && (
@@ -234,7 +237,7 @@ export function DatasetList({
                     <UserAvatar
                       name={author.name}
                       url={author.avatarUrl}
-                      label="만든이"
+                      label={t('creator')}
                       className="shrink-0"
                     />
                   )}
@@ -244,7 +247,7 @@ export function DatasetList({
                 <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 text-[11.5px] text-faint">
                   <span className="inline-flex items-center gap-1">
                     <Boxes className="size-3.5" />
-                    케이스{' '}
+                    {t('cases')}{' '}
                     <span className="tabular-nums text-muted-foreground">{d.caseCount ?? 0}</span>
                   </span>
                   <span className="inline-flex items-center gap-1">
@@ -264,17 +267,17 @@ export function DatasetList({
                         )}
                       </span>
                     ) : (
-                      <span>하니스 없음</span>
+                      <span>{t('noHarness')}</span>
                     )}
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="text-faint">최근 결과</span>
+                    <span className="text-faint">{t('latestResult')}</span>
                     <LatestResult rel={rel} />
                   </span>
                   {rel?.lastRunAt && (
                     <span
                       className="inline-flex items-center gap-1"
-                      title={`최근 실행 ${fmtDateTimeFull(rel.lastRunAt)}`}
+                      title={t('lastRunAt', { at: fmtDateTimeFull(rel.lastRunAt) })}
                     >
                       <Clock className="size-3.5" />
                       {fmtDateTime(rel.lastRunAt)}

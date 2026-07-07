@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { Boxes, Cpu, Database, ListFilter, Server, Tag } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { fmtPct } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -53,20 +54,27 @@ export function RuntimeChip({ label }: { label: string }) {
 
 // 부분 실행 칩 — 데이터셋의 subset 만 돌린 스코어카드 표식(selected/total). 전체 실행이면 렌더하지 않는다.
 export function SubsetChip({ selected, total }: { selected: number; total: number }) {
+  const t = useTranslations('ui')
   return (
     <span
       className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px] tabular-nums text-muted-foreground"
-      title={`부분 실행 — 전체 ${total}개 중 ${selected}개만 평가`}
+      title={t('subsetTitle', { total, selected })}
     >
       <ListFilter className="size-3 shrink-0 text-[#e2b96b]" />
-      일부 {selected}/{total}
+      {t('subsetLabel', { selected, total })}
     </span>
   )
 }
 
 // 버전 태그 칩 — 버전을 번호만으로 분간하기 어려울 때 붙이는 자유 라벨(스펙 밖 레지스트리 메타). 전역 통일.
 // trailing(삭제 ✕ 등)은 편집 표면이 주입한다 — 칩 자체는 표시 전용.
-export function VersionTagChip({ children, trailing }: { children: ReactNode; trailing?: ReactNode }) {
+export function VersionTagChip({
+  children,
+  trailing,
+}: {
+  children: ReactNode
+  trailing?: ReactNode
+}) {
   return (
     <span className="inline-flex items-center gap-1 rounded border border-border bg-muted/40 px-1.5 py-0.5 text-[11px] text-muted-foreground">
       <Tag className="size-3 shrink-0 text-[#b78de8]" />

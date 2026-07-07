@@ -1,11 +1,7 @@
 import type { ReactNode } from 'react'
+import { useTranslations } from 'next-intl'
 
-import {
-  classifyImageRef,
-  IMAGE_CLASS_HINT,
-  IMAGE_CLASS_LABEL,
-  type ImageRegistryCoordinates,
-} from '@/shared/lib/image-ref'
+import { classifyImageRef, type ImageRegistryCoordinates } from '@/shared/lib/image-ref'
 import { cn } from '@/shared/lib/utils'
 import { Badge } from '@/shared/ui/badge'
 
@@ -20,11 +16,14 @@ export function ImageClassBadge({
   image: string
   registry?: ImageRegistryCoordinates | ImageRegistryCoordinates[] // 복수 레지스트리 — 어느 하나 매칭이면 workspace
 }) {
+  const t = useTranslations('lib')
   const cls = classifyImageRef(image, registry)
   if (cls === 'external') return null
+  // 분류값(workspace/local/unqualified)을 카탈로그 키 접미사로: imageClass*/imageHint*.
+  const suffix = cls.charAt(0).toUpperCase() + cls.slice(1)
   return (
-    <Badge tone={cls === 'workspace' ? 'info' : 'warning'} title={IMAGE_CLASS_HINT[cls]}>
-      {IMAGE_CLASS_LABEL[cls]}
+    <Badge tone={cls === 'workspace' ? 'info' : 'warning'} title={t(`imageHint${suffix}`)}>
+      {t(`imageClass${suffix}`)}
     </Badge>
   )
 }

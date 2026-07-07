@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Search } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import type { ScorecardRecord } from '@/entities/scorecard'
 import {
@@ -25,20 +26,6 @@ import { StatusIcon } from '@/shared/ui/status-pill'
 type Sort = 'recent' | 'name'
 type Author = { name: string; avatarUrl?: string }
 
-const SORTS: { value: Sort; label: string }[] = [
-  { value: 'recent', label: '최신순' },
-  { value: 'name', label: '이름순' },
-]
-
-const STATUS_OPTIONS = [
-  { value: '', label: '전체 상태' },
-  { value: 'succeeded', label: '성공' },
-  { value: 'running', label: '실행중' },
-  { value: 'queued', label: '대기' },
-  { value: 'failed', label: '실패' },
-  { value: 'superseded', label: '대체됨' },
-]
-
 // 스코어카드 목록 — 데이터셋 목록과 동일한 패턴(검색 + Combobox 필터 + 정렬 + 실행자 아바타).
 export function ScorecardList({
   workspace,
@@ -49,6 +36,20 @@ export function ScorecardList({
   scorecards: ScorecardRecord[]
   authors: Record<string, Author>
 }) {
+  const t = useTranslations('scorecardList')
+  const locale = useLocale()
+  const sorts: { value: Sort; label: string }[] = [
+    { value: 'recent', label: t('sortRecent') },
+    { value: 'name', label: t('sortName') },
+  ]
+  const statusOptions = [
+    { value: '', label: t('allStatuses') },
+    { value: 'succeeded', label: t('statusSucceeded') },
+    { value: 'running', label: t('statusRunning') },
+    { value: 'queued', label: t('statusQueued') },
+    { value: 'failed', label: t('statusFailed') },
+    { value: 'superseded', label: t('statusSuperseded') },
+  ]
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('recent')
   const [dataset, setDataset] = useState('') // 데이터셋 필터('' = 전체)
@@ -78,18 +79,18 @@ export function ScorecardList({
   const datasetOptions = useMemo(() => {
     const s = new Set(scorecards.map((c) => c.dataset.id))
     return [
-      { value: '', label: '전체 데이터셋' },
+      { value: '', label: t('allDatasets') },
       ...[...s].sort().map((d) => ({ value: d, label: d })),
     ]
-  }, [scorecards])
+  }, [scorecards, t])
 
   const harnessOptions = useMemo(() => {
     const s = new Set(scorecards.map((c) => c.harness.id))
     return [
-      { value: '', label: '전체 하니스' },
+      { value: '', label: t('allHarnesses') },
       ...[...s].sort().map((h) => ({ value: h, label: h })),
     ]
-  }, [scorecards])
+  }, [scorecards, t])
 
   const userOptions = useMemo(() => {
     const m = new Map<string, string>()
@@ -97,12 +98,12 @@ export function ScorecardList({
       if (c.createdBy) m.set(c.createdBy, authors[c.createdBy]?.name ?? fmtSubject(c.createdBy))
     }
     return [
-      { value: '', label: '전체 사용자' },
+      { value: '', label: t('allUsers') },
       ...[...m.entries()]
         .sort((a, b) => a[1].localeCompare(b[1]))
         .map(([sub, name]) => ({ value: sub, label: name })),
     ]
-  }, [scorecards, authors])
+  }, [scorecards, authors, t])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -135,10 +136,18 @@ export function ScorecardList({
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="전체" value={total} />
-        <StatCard label="성공" value={succeeded} tone={succeeded > 0 ? 'success' : 'default'} />
-        <StatCard label="진행중" value={running} tone={running > 0 ? 'primary' : 'default'} />
-        <StatCard label="실패" value={failed} tone={failed > 0 ? 'danger' : 'default'} />
+        <StatCard label={t('statTotal')} value={total} />
+        <StatCard
+          label={t('statSucceeded')}
+          value={succeeded}
+          tone={succeeded > 0 ? 'success' : 'default'}
+        />
+        <StatCard
+          label={t('statRunning')}
+          value={running}
+          tone={running > 0 ? 'primary' : 'default'}
+        />
+        <StatCard label={t('statFailed')} value={failed} tone={failed > 0 ? 'danger' : 'default'} />
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5">
@@ -147,30 +156,30 @@ export function ScorecardList({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="데이터셋 · 하니스 · 모델 · 실행자로 검색"
+            placeholder={t('searchPlaceholder')}
             className="pl-8"
-            aria-label="스코어카드 검색"
+            aria-label={t('searchAria')}
           />
         </div>
         <Combobox
           options={datasetOptions}
           value={dataset}
           onChange={setDataset}
-          placeholder="데이터셋"
+          placeholder={t('datasetPlaceholder')}
           className="w-[150px]"
         />
         <Combobox
           options={harnessOptions}
           value={harness}
           onChange={setHarness}
-          placeholder="하니스"
+          placeholder={t('harnessPlaceholder')}
           className="w-[150px]"
         />
         <Combobox
-          options={STATUS_OPTIONS}
+          options={statusOptions}
           value={status}
           onChange={setStatus}
-          placeholder="상태"
+          placeholder={t('statusPlaceholder')}
           className="w-[130px]"
         />
         {userOptions.length > 1 && (
@@ -178,26 +187,22 @@ export function ScorecardList({
             options={userOptions}
             value={user}
             onChange={setUser}
-            placeholder="사용자"
+            placeholder={t('userPlaceholder')}
             className="w-[150px]"
           />
         )}
         <Combobox
-          options={SORTS.map((s) => ({ value: s.value, label: s.label }))}
+          options={sorts.map((s) => ({ value: s.value, label: s.label }))}
           value={sort}
           onChange={(v) => setSort(v as Sort)}
           className="w-[130px]"
           align="end"
-          aria-label="정렬"
+          aria-label={t('sortAria')}
         />
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState
-          icon={<Search />}
-          title="조건에 맞는 스코어카드가 없어요."
-          hint="검색어나 필터를 바꿔보세요."
-        />
+        <EmptyState icon={<Search />} title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <div className="space-y-4">
           {(sort === 'recent'
@@ -218,7 +223,7 @@ export function ScorecardList({
             <section key={day || 'all'} className="space-y-2">
               {day && items[0] && (
                 <h4 className="px-0.5 text-[11.5px] font-[560] uppercase tracking-wide text-faint">
-                  {fmtDateHeading(items[0].createdAt)}
+                  {fmtDateHeading(items[0].createdAt, locale)}
                 </h4>
               )}
               {items.map((s, i) => {
@@ -270,7 +275,7 @@ export function ScorecardList({
                           ))
                         ) : (
                           <span className="text-[11px] text-faint">
-                            {s.status === 'failed' ? '집계 없음' : '집계 대기'}
+                            {s.status === 'failed' ? t('noAggregate') : t('pendingAggregate')}
                           </span>
                         )}
                         {metrics.length > shownMetrics.length && (
@@ -295,7 +300,11 @@ export function ScorecardList({
                     <div className="flex shrink-0 items-center gap-2.5">
                       <span className="flex w-6 justify-center">
                         {author.known && (
-                          <UserAvatar name={author.name} url={author.avatarUrl} label="실행자" />
+                          <UserAvatar
+                            name={author.name}
+                            url={author.avatarUrl}
+                            label={t('runnerLabel')}
+                          />
                         )}
                       </span>
                       <time

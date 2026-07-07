@@ -2,6 +2,7 @@
 // 컨트롤플레인/Temporal 이 실제 발사의 SSOT — 여기 계산은 예약 목록의 '다음 실행/다가오는 실행' 표시용 근사다.
 
 const DOW_KO = ['일', '월', '화', '수', '목', '금', '토'] as const
+const DOW_EN = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
 
 interface CronMatcher {
   minute: Set<number>
@@ -177,32 +178,45 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0')
 }
 
-// cron 식을 사람이 읽는 한국어 주기로. 흔한 형태만 매핑하고, 복잡한 식은 원본 그대로(코드 칩으로도 노출됨).
-export function describeCron(expr: string): string {
+// cron 식을 사람이 읽는 주기 설명으로. 흔한 형태만 매핑하고, 복잡한 식은 원본 그대로(코드 칩으로도 노출됨).
+// locale 은 호출부(컴포넌트)가 useLocale()/getLocale() 로 넘긴다(기본 ko) — format.ts 관례.
+export function describeCron(expr: string, locale: string = 'ko'): string {
   const parts = expr.trim().split(/\s+/)
   if (parts.length !== 5) return expr
   const [mi, ho, dom, mo, dow] = parts
+  const ko = locale.startsWith('ko')
+  const dowNames = ko ? DOW_KO : DOW_EN
   const isNum = (s: string) => /^\d+$/.test(s)
   const at = (h: string, m: string) => `${pad2(Number(h))}:${pad2(Number(m))}`
   const stepMin = /^\*\/(\d+)$/.exec(mi)
-  if (stepMin && ho === '*' && dom === '*' && mo === '*' && dow === '*') return `${stepMin[1]}분마다`
-  if (isNum(mi) && ho === '*' && dom === '*' && mo === '*' && dow === '*')
-    return mi === '0' ? '매시간' : `매시간 ${Number(mi)}분`
-  if (isNum(mi) && isNum(ho) && dom === '*' && mo === '*' && dow === '*') return `매일 ${at(ho, mi)}`
+  if (stepMin && ho === '*' && dom === '*' && mo === '*' && dow === '*')
+    return ko ? `${stepMin[1]}분마다` : `every ${stepMin[1]} min`
+  if (isNum(mi) && ho === '*' && dom === '*' && mo === '*' && dow === '*') {
+    if (mi === '0') return ko ? '매시간' : 'hourly'
+    return ko ? `매시간 ${Number(mi)}분` : `hourly at :${pad2(Number(mi))}`
+  }
+  if (isNum(mi) && isNum(ho) && dom === '*' && mo === '*' && dow === '*')
+    return ko ? `매일 ${at(ho, mi)}` : `daily at ${at(ho, mi)}`
   if (isNum(mi) && isNum(ho) && dom === '*' && mo === '*') {
-    if (dow === '1-5') return `평일 ${at(ho, mi)}`
-    if (dow === '0,6' || dow === '6,0' || dow === '6,7' || dow === '0,7') return `주말 ${at(ho, mi)}`
-    if (isNum(dow)) return `매주 ${DOW_KO[Number(dow) % 7]} ${at(ho, mi)}`
+    if (dow === '1-5') return ko ? `평일 ${at(ho, mi)}` : `weekdays at ${at(ho, mi)}`
+    if (dow === '0,6' || dow === '6,0' || dow === '6,7' || dow === '0,7')
+      return ko ? `주말 ${at(ho, mi)}` : `weekends at ${at(ho, mi)}`
+    if (isNum(dow)) {
+      const day = dowNames[Number(dow) % 7]
+      return ko ? `매주 ${day} ${at(ho, mi)}` : `every ${day} at ${at(ho, mi)}`
+    }
     if (/^[0-7](,[0-7])*$/.test(dow)) {
       const days = dow
         .split(',')
-        .map((d) => DOW_KO[Number(d) % 7])
-        .join('·')
-      return `매주 ${days} ${at(ho, mi)}`
+        .map((d) => dowNames[Number(d) % 7])
+        .join(ko ? '·' : ', ')
+      return ko ? `매주 ${days} ${at(ho, mi)}` : `every ${days} at ${at(ho, mi)}`
     }
   }
   if (isNum(mi) && isNum(ho) && isNum(dom) && mo === '*' && dow === '*')
-    return `매월 ${Number(dom)}일 ${at(ho, mi)}`
+    return ko
+      ? `매월 ${Number(dom)}일 ${at(ho, mi)}`
+      : `day ${Number(dom)} monthly at ${at(ho, mi)}`
   return expr
 }
 
@@ -213,13 +227,20 @@ export function fireTimeLabel(iso: string, timeZone: string): string {
 }
 
 // 발사 순간을 now 대비 상대 날짜 라벨로(오늘/내일/MM-DD). 모두 예약 tz 기준으로 캘린더 일자를 비교.
-export function fireDayLabel(iso: string, nowIso: string, timeZone: string): string {
+// locale 은 호출부가 넘긴다(기본 ko) — format.ts 관례.
+export function fireDayLabel(
+  iso: string,
+  nowIso: string,
+  timeZone: string,
+  locale: string = 'ko'
+): string {
   const f = wallClock(new Date(iso), timeZone)
   const n = wallClock(new Date(nowIso), timeZone)
   const diff = Math.round(
     (Date.UTC(f.year, f.month - 1, f.day) - Date.UTC(n.year, n.month - 1, n.day)) / 86_400_000
   )
-  if (diff <= 0) return '오늘'
-  if (diff === 1) return '내일'
+  const ko = locale.startsWith('ko')
+  if (diff <= 0) return ko ? '오늘' : 'today'
+  if (diff === 1) return ko ? '내일' : 'tomorrow'
   return `${pad2(f.month)}-${pad2(f.day)}`
 }

@@ -1,6 +1,7 @@
 'use client'
 
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { Combobox } from '@/shared/ui/combobox'
 
@@ -21,11 +22,12 @@ export function VersionSwitcher({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('datasetVersions')
   if (versions.length === 0) return null
   return (
     <Combobox
       id="version-switch"
-      aria-label="버전"
+      aria-label={t('versionAria')}
       value={current}
       onChange={(v) =>
         router.push(

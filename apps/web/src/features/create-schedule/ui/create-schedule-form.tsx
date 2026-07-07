@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
 import { sortSemverDesc } from '@/shared/lib/semver'
@@ -22,12 +23,12 @@ function versionOptions(versions: string[]): ComboboxOption[] {
 }
 
 // cron 프리셋 — raw 입력 대신 흔한 주기를 원클릭으로. 직접 편집도 가능(아래 입력).
-const CRON_PRESETS: { label: string; value: string }[] = [
-  { label: '매시간', value: '0 * * * *' },
-  { label: '매일 자정', value: '0 0 * * *' },
-  { label: '매일 새벽 3시', value: '0 3 * * *' },
-  { label: '평일 오전 9시', value: '0 9 * * 1-5' },
-  { label: '매주 월요일 9시', value: '0 9 * * 1' },
+const CRON_PRESETS: { labelKey: string; value: string }[] = [
+  { labelKey: 'presetHourly', value: '0 * * * *' },
+  { labelKey: 'presetMidnight', value: '0 0 * * *' },
+  { labelKey: 'presetDaily3am', value: '0 3 * * *' },
+  { labelKey: 'presetWeekdays9am', value: '0 9 * * 1-5' },
+  { labelKey: 'presetMonday9', value: '0 9 * * 1' },
 ]
 
 interface Values {
@@ -60,6 +61,7 @@ export function CreateScheduleForm({
   scheduleId?: string
   initialJudges?: { id: string; version: string }[]
 }) {
+  const t = useTranslations('createSchedule')
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const [serverError, setServerError] = useState<string>()
@@ -91,11 +93,11 @@ export function CreateScheduleForm({
   const cron = watch('cron')
   const datasetIdOptions: ComboboxOption[] = datasets.map((d) => ({
     value: d.id,
-    hint: `${d.versions.length}개 버전`,
+    hint: t('versionsCount', { count: d.versions.length }),
   }))
   const harnessIdOptions: ComboboxOption[] = harnesses.map((h) => ({
     value: h.id,
-    hint: `${h.versions.length}개 버전`,
+    hint: t('versionsCount', { count: h.versions.length }),
   }))
   const datasetVersionOptions = versionOptions(
     datasets.find((d) => d.id === datasetId)?.versions ?? []
@@ -113,20 +115,17 @@ export function CreateScheduleForm({
       ? await updateScheduleAction(scheduleId, input, initialJudges)
       : await createScheduleAction(input)
     if (res.ok) router.push(`/${workspace}/schedules`)
-    else
-      setServerError(
-        res.error ?? (scheduleId ? '예약을 수정하지 못했어요' : '예약을 만들지 못했어요')
-      )
+    else setServerError(res.error ?? (scheduleId ? t('updateFailed') : t('createFailed')))
   }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-4">
       <div className="space-y-1.5">
-        <Label htmlFor="name">이름</Label>
+        <Label htmlFor="name">{t('nameLabel')}</Label>
         <Input
           id="name"
           placeholder="nightly-regression"
-          {...register('name', { required: '이름을 입력하세요' })}
+          {...register('name', { required: t('nameRequired') })}
         />
         <FieldError message={errors.name?.message} />
       </div>
@@ -143,46 +142,44 @@ export function CreateScheduleForm({
                 : 'border-border bg-card text-muted-foreground hover:border-border-strong hover:text-foreground'
             }`}
           >
-            {p.label}
+            {t(p.labelKey)}
           </button>
         ))}
       </div>
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="cron">cron (분 시 일 월 요일)</Label>
+          <Label htmlFor="cron">{t('cronLabel')}</Label>
           <Input
             id="cron"
             placeholder="0 3 * * *"
             className="font-mono"
             {...register('cron', {
-              required: 'cron 식을 입력하세요',
+              required: t('cronRequired'),
               pattern: {
                 value:
                   /^(\*|\d+(-\d+)?)(\/\d+)?(,(\*|\d+(-\d+)?)(\/\d+)?)*(\s+(\*|\d+(-\d+)?)(\/\d+)?(,(\*|\d+(-\d+)?)(\/\d+)?)*){4}$/,
-                message: '5필드 cron 식이어야 합니다 (예: 0 3 * * *)',
+                message: t('cronPattern'),
               },
             })}
           />
           <FieldError message={errors.cron?.message} />
-          <p className="text-[12px] text-muted-foreground">
-            예: 매일 03:00 = 0 3 * * *, 평일 15분마다 = */15 * * * 1-5
-          </p>
+          <p className="text-[12px] text-muted-foreground">{t('cronHint')}</p>
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="timezone">타임존</Label>
+          <Label htmlFor="timezone">{t('timezoneLabel')}</Label>
           <Input id="timezone" placeholder="UTC" {...register('timezone')} />
-          <p className="text-[12px] text-muted-foreground">IANA tz (예: Asia/Seoul). 기본 UTC.</p>
+          <p className="text-[12px] text-muted-foreground">{t('timezoneHint')}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="datasetId">데이터셋</Label>
+          <Label htmlFor="datasetId">{t('datasetLabel')}</Label>
           <Controller
             control={control}
             name="datasetId"
-            rules={{ required: '데이터셋을 선택하세요' }}
+            rules={{ required: t('datasetRequired') }}
             render={({ field }) => (
               <Combobox
                 id="datasetId"
@@ -192,15 +189,15 @@ export function CreateScheduleForm({
                   field.onChange(v)
                   setValue('datasetVersion', 'latest')
                 }}
-                placeholder="데이터셋 선택"
-                emptyText="데이터셋이 없어요"
+                placeholder={t('datasetPlaceholder')}
+                emptyText={t('datasetEmpty')}
               />
             )}
           />
           <FieldError message={errors.datasetId?.message} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="datasetVersion">버전</Label>
+          <Label htmlFor="datasetVersion">{t('versionLabel')}</Label>
           <Controller
             control={control}
             name="datasetVersion"
@@ -219,11 +216,11 @@ export function CreateScheduleForm({
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="harnessId">하니스</Label>
+          <Label htmlFor="harnessId">{t('harnessLabel')}</Label>
           <Controller
             control={control}
             name="harnessId"
-            rules={{ required: '하니스를 선택하세요' }}
+            rules={{ required: t('harnessRequired') }}
             render={({ field }) => (
               <Combobox
                 id="harnessId"
@@ -233,15 +230,15 @@ export function CreateScheduleForm({
                   field.onChange(v)
                   setValue('harnessVersion', 'latest')
                 }}
-                placeholder="하니스 선택"
-                emptyText="하니스가 없어요"
+                placeholder={t('harnessPlaceholder')}
+                emptyText={t('harnessEmpty')}
               />
             )}
           />
           <FieldError message={errors.harnessId?.message} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="harnessVersion">버전</Label>
+          <Label htmlFor="harnessVersion">{t('versionLabel')}</Label>
           <Controller
             control={control}
             name="harnessVersion"
@@ -260,7 +257,7 @@ export function CreateScheduleForm({
 
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
-          <Label htmlFor="overlapPolicy">겹침 정책</Label>
+          <Label htmlFor="overlapPolicy">{t('overlapLabel')}</Label>
           <Controller
             control={control}
             name="overlapPolicy"
@@ -268,9 +265,9 @@ export function CreateScheduleForm({
               <Combobox
                 id="overlapPolicy"
                 options={[
-                  { value: 'skip', label: 'skip (이전 실행 중이면 건너뜀)' },
-                  { value: 'bufferOne', label: 'bufferOne (1건 대기)' },
-                  { value: 'allowAll', label: 'allowAll (동시 허용)' },
+                  { value: 'skip', label: t('overlapSkip') },
+                  { value: 'bufferOne', label: t('overlapBufferOne') },
+                  { value: 'allowAll', label: t('overlapAllowAll') },
                 ]}
                 value={field.value}
                 onChange={field.onChange}
@@ -279,57 +276,52 @@ export function CreateScheduleForm({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="concurrency">병렬도 (선택)</Label>
+          <Label htmlFor="concurrency">{t('concurrencyLabel')}</Label>
           <Input
             id="concurrency"
             type="number"
             min={1}
             max={64}
-            placeholder="기본 4"
+            placeholder={t('concurrencyPlaceholder')}
             {...register('concurrency')}
           />
         </div>
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="runtime">런타임</Label>
+        <Label htmlFor="runtime">{t('runtimeLabel')}</Label>
         {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 런타임 없는 예약은 발사 때마다 400 실패. */}
         <Controller
           control={control}
           name="runtime"
-          rules={{ required: '런타임을 선택하세요' }}
+          rules={{ required: t('runtimeRequired') }}
           render={({ field }) => (
             <Combobox
               id="runtime"
               options={runtimes.map((r) => ({ value: r.id }))}
               value={field.value}
               onChange={field.onChange}
-              placeholder="런타임 선택"
-              emptyText="등록된 런타임이 없어요"
+              placeholder={t('runtimePlaceholder')}
+              emptyText={t('runtimeEmpty')}
             />
           )}
         />
         <FieldError message={errors.runtime?.message} />
-        <p className="text-[12px] text-muted-foreground">
-          셀프호스티드(self:) 런타임은 실행 시점에 러너가 켜져 있어야 해요.
-        </p>
+        <p className="text-[12px] text-muted-foreground">{t('runtimeHint')}</p>
       </div>
 
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
-      <p className="text-[12px] text-muted-foreground">
-        정해둔 주기마다 이 데이터셋과 하니스로 스코어카드를 실행해요. 내 계정으로 실행되고, 결과는
-        워크스페이스에 기록돼요.
-      </p>
+      <p className="text-[12px] text-muted-foreground">{t('footerNote')}</p>
 
       <Button type="submit" disabled={isSubmitting}>
         {isSubmitting
           ? scheduleId
-            ? '저장 중…'
-            : '만드는 중…'
+            ? t('saving')
+            : t('creating')
           : scheduleId
-            ? '변경 저장'
-            : '예약 만들기'}
+            ? t('saveChanges')
+            : t('createSchedule')}
       </Button>
     </form>
   )

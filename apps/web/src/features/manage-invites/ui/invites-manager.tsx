@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import type { Invite } from '@/entities/member'
 import { copyText } from '@/shared/lib/clipboard'
@@ -20,6 +21,8 @@ function inviteLink(token: string): string {
 }
 
 export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWrite: boolean }) {
+  const t = useTranslations('manageInvites')
+  const locale = useLocale()
   const [role, setRole] = useState<string>('member')
   const [open, setOpen] = useState(false) // 발급 폼 펼침 — 평소엔 접어 역할 선택 등 초대 UI 를 숨긴다.
   const [link, setLink] = useState<string>() // 방금 발급된 초대 링크(1회)
@@ -38,7 +41,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         setLink(inviteLink(r.token))
         setOpen(false) // 만들었으면 폼을 다시 접는다 — 링크는 위 콜아웃에 노출.
       } else {
-        setError(r.error ?? '발급하지 못했어요')
+        setError(r.error ?? t('createFailed'))
       }
     })
   }
@@ -57,18 +60,19 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
   return (
     <div className="space-y-5">
       <div className="space-y-1">
-        <h3 className="text-[13px] font-[560] text-foreground">초대</h3>
+        <h3 className="text-[13px] font-[560] text-foreground">{t('title')}</h3>
         {open && (
           <p className="text-[13px] leading-relaxed text-muted-foreground">
-            초대 링크를 만들어 보내면, 받은 사람이 로그인하고 수락해 이 워크스페이스에 참여해요.
-            링크는 <span className="font-[510] text-foreground">한 번만</span> 쓸 수 있어요.
+            {t.rich('introRich', {
+              strong: (chunks) => <span className="font-[510] text-foreground">{chunks}</span>,
+            })}
           </p>
         )}
       </div>
 
       {/* 방금 발급된 링크 — 1회 노출 */}
       {link && (
-        <Callout tone="warning" hint="이 링크는 한 번만 보여요. 지금 복사해서 전달하세요.">
+        <Callout tone="warning" hint={t('linkOnceHint')}>
           <div className="flex items-center gap-2">
             <code className="min-w-0 flex-1 truncate font-mono text-xs">{link}</code>
             <Button
@@ -76,10 +80,10 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
               variant="secondary"
               size="sm"
               onClick={() => {
-                void copyText(link).then((ok) => ok && setCopied(true))
+                void copyText(link, undefined, locale).then((ok) => ok && setCopied(true))
               }}
             >
-              {copied ? '복사됨' : '링크 복사'}
+              {copied ? t('copied') : t('copyLink')}
             </Button>
           </div>
         </Callout>
@@ -87,7 +91,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
 
       {/* 대기중 초대 목록 */}
       {pending2.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">대기 중인 초대가 없어요.</p>
+        <p className="text-[13px] text-muted-foreground">{t('noPending')}</p>
       ) : (
         <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {pending2.map((i) => (
@@ -96,7 +100,9 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
                 <span className="font-mono text-[13px]">{i.prefix}…</span>
                 <span className="ml-2 text-[12px] text-faint">{i.role}</span>
                 <span className="ml-2 text-[12px] text-faint">
-                  {i.expiresAt ? `만료 ${new Date(i.expiresAt).toLocaleString('ko-KR')}` : '무기한'}
+                  {i.expiresAt
+                    ? t('expiresAt', { date: new Date(i.expiresAt).toLocaleString(locale) })
+                    : t('noExpiry')}
                 </span>
               </div>
               {canWrite &&
@@ -108,14 +114,14 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
                       disabled={pending}
                       onClick={() => onRevoke(i.id)}
                     >
-                      취소 확인
+                      {t('revokeConfirm')}
                     </Button>
                     <button
                       type="button"
                       className="text-[12px] text-muted-foreground hover:text-foreground"
                       onClick={() => setConfirmId(undefined)}
                     >
-                      닫기
+                      {t('close')}
                     </button>
                   </span>
                 ) : (
@@ -124,7 +130,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
                     className="text-[12px] font-[510] text-destructive hover:underline"
                     onClick={() => setConfirmId(i.id)}
                   >
-                    취소
+                    {t('revoke')}
                   </button>
                 ))}
             </li>
@@ -137,7 +143,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
         open ? (
           <div className="flex items-end gap-2.5">
             <div className="space-y-1.5">
-              <Label htmlFor="invite-role">역할</Label>
+              <Label htmlFor="invite-role">{t('role')}</Label>
               <Combobox
                 id="invite-role"
                 value={role}
@@ -147,7 +153,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
               />
             </div>
             <Button onClick={onCreate} disabled={pending}>
-              {pending ? '만드는 중…' : '링크 만들기'}
+              {pending ? t('creating') : t('createLink')}
             </Button>
             <button
               type="button"
@@ -155,7 +161,7 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
               onClick={() => setOpen(false)}
               disabled={pending}
             >
-              닫기
+              {t('close')}
             </button>
           </div>
         ) : (
@@ -167,13 +173,11 @@ export function InvitesManager({ invites, canWrite }: { invites: Invite[]; canWr
               setError(undefined)
             }}
           >
-            초대 링크 만들기
+            {t('createInvite')}
           </Button>
         )
       ) : (
-        <p className="text-[13px] text-muted-foreground">
-          초대를 만들거나 취소하려면 관리자 권한이 필요해요.
-        </p>
+        <p className="text-[13px] text-muted-foreground">{t('adminRequired')}</p>
       )}
 
       {error && (

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { Boxes, Cloud, Database, DoorOpen, Globe, Layers, Radio } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { HarnessSpec, TopologyDependency, TopologyService } from '@/entities/harness'
 import { cn } from '@/shared/lib/utils'
@@ -134,6 +135,7 @@ function buildEdges(
 }
 
 export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
+  const t = useTranslations('inspectHarness')
   const services = spec.services ?? []
   const deps = spec.dependencies ?? []
   const target = spec.target
@@ -305,7 +307,7 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
                       <span
                         key={k}
                         className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[9.5px] leading-none text-muted-foreground ring-1 ring-inset ring-border"
-                        title="per-run 주입 키"
+                        title={t('perRunKeyTip')}
                       >
                         {k}
                       </span>
@@ -315,7 +317,7 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
               </Node>
             ))}
             {services.length === 0 && (
-              <p className="text-[12px] text-muted-foreground">서비스 없음</p>
+              <p className="text-[12px] text-muted-foreground">{t('noServices')}</p>
             )}
           </Lane>
 
@@ -350,7 +352,9 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
                     {d.service ? ` · ${d.service}` : ''}
                   </div>
                   {external && (
-                    <div className="mt-0.5 text-[9.5px] text-faint">BYO · 연결은 배포 시 env</div>
+                    <div className="mt-0.5 text-[9.5px] text-faint">
+                      BYO · {t('connEnvAtDeploy')}
+                    </div>
                   )}
                 </Node>
               )
@@ -404,7 +408,7 @@ export function TopologyGraph({ spec }: { spec: HarnessSpec }) {
               </Node>
             )}
             {deps.length === 0 && !target && !traceSource && (
-              <p className="text-[12px] text-muted-foreground">의존 인프라 없음</p>
+              <p className="text-[12px] text-muted-foreground">{t('noDependencyInfra')}</p>
             )}
           </Lane>
         </div>
@@ -497,13 +501,14 @@ function NodeBadge({ children }: { children: React.ReactNode }) {
 }
 
 function Legend() {
+  const t = useTranslations('inspectHarness')
   const items: Array<{ kind: EdgeKind; label: string }> = [
-    { kind: 'submit', label: '제출' },
+    { kind: 'submit', label: t('submit') },
     { kind: 'needs', label: 'needs' },
-    { kind: 'store', label: '스토어' },
+    { kind: 'store', label: t('legendStore') },
     { kind: 'external', label: 'external(BYO)' },
-    { kind: 'target', label: '타깃' },
-    { kind: 'trace', label: '트레이스(pull)' },
+    { kind: 'target', label: t('legendTarget') },
+    { kind: 'trace', label: t('legendTrace') },
   ]
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t border-border px-6 py-2.5">

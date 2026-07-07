@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
 import { sortSemverDesc } from '@/shared/lib/semver'
@@ -64,6 +65,7 @@ export function RunScorecardForm({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('runScorecard')
   const [serverError, setServerError] = useState<string>()
   const {
     control,
@@ -90,11 +92,11 @@ export function RunScorecardForm({
   const harnessId = watch('harnessId')
   const datasetIdOptions: ComboboxOption[] = datasets.map((d) => ({
     value: d.id,
-    hint: `${d.versions.length}개 버전`,
+    hint: t('versionCountHint', { count: d.versions.length }),
   }))
   const harnessIdOptions: ComboboxOption[] = harnesses.map((h) => ({
     value: h.id,
-    hint: `${h.versions.length}개 버전`,
+    hint: t('versionCountHint', { count: h.versions.length }),
   }))
   const datasetEntry = datasets.find((d) => d.id === datasetId)
   const harnessEntry = harnesses.find((h) => h.id === harnessId)
@@ -127,18 +129,18 @@ export function RunScorecardForm({
       ...(Object.keys(cases).length > 0 ? { cases } : {}),
     })
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
-    else setServerError(res.error ?? '실행하지 못했어요')
+    else setServerError(res.error ?? t('submitError'))
   }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-4">
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="datasetId">벤치마크</Label>
+          <Label htmlFor="datasetId">{t('datasetLabel')}</Label>
           <Controller
             control={control}
             name="datasetId"
-            rules={{ required: '벤치마크를 선택하세요' }}
+            rules={{ required: t('datasetRequired') }}
             render={({ field }) => (
               <Combobox
                 id="datasetId"
@@ -148,15 +150,15 @@ export function RunScorecardForm({
                   field.onChange(v)
                   setValue('datasetVersion', 'latest') // id 바뀌면 버전은 latest 로 리셋(이전 버전이 새 id 엔 없을 수 있음).
                 }}
-                placeholder="벤치마크 선택"
-                emptyText="벤치마크가 없어요"
+                placeholder={t('datasetPlaceholder')}
+                emptyText={t('datasetEmpty')}
               />
             )}
           />
           <FieldError message={errors.datasetId?.message} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="datasetVersion">버전</Label>
+          <Label htmlFor="datasetVersion">{t('versionLabel')}</Label>
           <Controller
             control={control}
             name="datasetVersion"
@@ -175,11 +177,11 @@ export function RunScorecardForm({
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="harnessId">하니스</Label>
+          <Label htmlFor="harnessId">{t('harnessLabel')}</Label>
           <Controller
             control={control}
             name="harnessId"
-            rules={{ required: '하니스를 선택하세요' }}
+            rules={{ required: t('harnessRequired') }}
             render={({ field }) => (
               <Combobox
                 id="harnessId"
@@ -189,15 +191,15 @@ export function RunScorecardForm({
                   field.onChange(v)
                   setValue('harnessVersion', 'latest')
                 }}
-                placeholder="하니스 선택"
-                emptyText="하니스가 없어요"
+                placeholder={t('harnessPlaceholder')}
+                emptyText={t('harnessEmpty')}
               />
             )}
           />
           <FieldError message={errors.harnessId?.message} />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="harnessVersion">버전</Label>
+          <Label htmlFor="harnessVersion">{t('versionLabel')}</Label>
           <Controller
             control={control}
             name="harnessVersion"
@@ -215,12 +217,12 @@ export function RunScorecardForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="runtime">런타임</Label>
+        <Label htmlFor="runtime">{t('runtimeLabel')}</Label>
         {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 미지정 배치는 400. run 폼과 동일 선택지. */}
         <Controller
           control={control}
           name="runtime"
-          rules={{ required: '런타임을 선택하세요' }}
+          rules={{ required: t('runtimeRequired') }}
           render={({ field }) => (
             <Combobox
               id="runtime"
@@ -228,79 +230,78 @@ export function RunScorecardForm({
                 ...runtimes.map((r) => ({ value: r.id })),
                 // 팀 공유 러너 풀 — 등록된 팀 러너 중 아무거나(capability 충족) 가져간다(멀티러너=동시성).
                 ...(hasWorkspaceRunners
-                  ? [{ value: 'self:ws', label: '팀 공유 러너 (아무거나)', hint: '팀' }]
+                  ? [
+                      {
+                        value: 'self:ws',
+                        label: t('poolWorkspaceLabel'),
+                        hint: t('poolWorkspaceHint'),
+                      },
+                    ]
                   : []),
                 // 내 러너 풀 — 내 러너(여러 대일 수 있음) 중 아무거나. 특정 러너는 아래 개별 항목.
                 ...(runners.length > 0
-                  ? [{ value: 'self', label: '내 러너 (아무거나)', hint: '내 컴퓨터' }]
+                  ? [{ value: 'self', label: t('poolSelfLabel'), hint: t('poolSelfHint') }]
                   : []),
                 ...runners.map((r) => ({
                   value: `self:${r.id}`,
                   label: r.label,
-                  hint: '내 컴퓨터',
+                  hint: t('poolSelfHint'),
                 })),
               ]}
               value={field.value}
               onChange={field.onChange}
-              placeholder="런타임 선택"
-              emptyText="등록된 런타임이나 러너가 없어요"
+              placeholder={t('runtimePlaceholder')}
+              emptyText={t('runtimeEmpty')}
             />
           )}
         />
         <FieldError message={errors.runtime?.message} />
-        <p className="text-[12px] text-muted-foreground">
-          케이스를 어디서 실행할지 골라요. 등록한 런타임이나 러너가 없다면 먼저 등록해주세요.
-        </p>
+        <p className="text-[12px] text-muted-foreground">{t('runtimeHelp')}</p>
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="concurrency">한 번에 실행할 케이스 수 (선택)</Label>
+        <Label htmlFor="concurrency">{t('concurrencyLabel')}</Label>
         <Input
           id="concurrency"
           type="number"
           min={1}
           max={64}
-          placeholder="기본 4"
+          placeholder={t('concurrencyPlaceholder')}
           {...register('concurrency')}
         />
-        <p className="text-[12px] text-muted-foreground">
-          한 번에 몇 개를 돌릴지 정해요. 비워두면 기본값으로 실행해요.
-        </p>
+        <p className="text-[12px] text-muted-foreground">{t('concurrencyHelp')}</p>
       </div>
 
       {/* 부분 실행 — 전체 대신 케이스 일부만(비용/스모크). 결과엔 "일부 n/N" 표식이 남는다. */}
       <div className="grid grid-cols-2 gap-3">
         <div className="space-y-1.5">
           <div className="flex items-center gap-1">
-            <Label htmlFor="caseLimit">케이스 수 제한 (선택)</Label>
-            <InfoTip content="전체 대신 앞에서 N개만 평가해요. 비워두면 전체를 실행해요. 결과에 '일부 n/N' 표식이 남아요." />
+            <Label htmlFor="caseLimit">{t('caseLimitLabel')}</Label>
+            <InfoTip content={t('caseLimitTip')} />
           </div>
           <Input
             id="caseLimit"
             type="number"
             min={1}
-            placeholder="예: 10"
+            placeholder={t('caseLimitPlaceholder')}
             {...register('caseLimit')}
           />
         </div>
         <div className="space-y-1.5">
           <div className="flex items-center gap-1">
-            <Label htmlFor="caseTags">태그 필터 (선택)</Label>
-            <InfoTip content="이 태그가 있는 케이스만 평가해요(쉼표로 여러 개, 하나라도 일치하면 포함)." />
+            <Label htmlFor="caseTags">{t('caseTagsLabel')}</Label>
+            <InfoTip content={t('caseTagsTip')} />
           </div>
-          <Input id="caseTags" placeholder="예: easy, smoke" {...register('caseTags')} />
+          <Input id="caseTags" placeholder={t('caseTagsPlaceholder')} {...register('caseTags')} />
         </div>
       </div>
 
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
-      <p className="text-[12px] text-muted-foreground">
-        벤치마크의 모든 케이스를 이 하니스로 평가해 점수를 모아요. 실행이 끝나면 상세 화면에서
-        결과를 확인해요.
-      </p>
+      <p className="text-[12px] text-muted-foreground">{t('help')}</p>
 
       <Button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? '실행 중…' : '스코어카드 실행'}
+        {isSubmitting ? t('submitting') : t('submit')}
       </Button>
     </form>
   )

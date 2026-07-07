@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Boxes } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { HarnessList } from '@/widgets/harness-list'
 import { harnessesSchema } from '@/entities/harness'
@@ -23,6 +24,7 @@ export default async function HarnessesPage({
 }) {
   const { workspace } = await params
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('harnessesPage')
 
   let error: string | undefined
   let harnesses = harnessesSchema.parse([])
@@ -57,24 +59,20 @@ export default async function HarnessesPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="하니스"
-        description="평가할 에이전트예요. 어떤 벤치마크로든 돌려봐요."
+        title={t('title')}
+        description={t('description')}
         actions={
           can(principal?.roles, 'harnesses:register') ? (
             <Link href={`/${workspace}/harnesses/new`} className={buttonVariants({ size: 'sm' })}>
-              하니스 등록
+              {t('register')}
             </Link>
           ) : null
         }
       />
       {error ? (
-        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : ownHarnesses.length === 0 ? (
-        <EmptyState
-          icon={<Boxes />}
-          title="아직 하니스가 없어요."
-          hint="첫 하니스를 등록해보세요."
-        />
+        <EmptyState icon={<Boxes />} title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <HarnessList
           workspace={workspace}

@@ -1,5 +1,6 @@
 import type { ComponentType } from 'react'
 import { Cog, ExternalLink, Globe, Terminal, Timer } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 
@@ -15,16 +16,15 @@ export interface OriginLike {
   pinOverrides?: Record<string, string> // 제출 시점 임시 핀(슬롯→이미지)
 }
 
-// source → 한국어 라벨 + 아이콘. 미지정 source 는 원문 그대로.
-const SOURCE_META: Record<string, { label: string; icon: ComponentType<{ className?: string }> }> =
-  {
-    'github-actions': { label: 'CI', icon: Cog },
-    schedule: { label: '예약', icon: Timer },
-    web: { label: '웹', icon: Globe },
-    api: { label: 'API', icon: Terminal },
-  }
-function sourceMeta(source: string) {
-  return SOURCE_META[source] ?? { label: source, icon: Cog }
+// source → 라벨 카탈로그 키 + 아이콘. 미지정 source 는 원문 그대로.
+const SOURCE_META: Record<
+  string,
+  { labelKey: string; icon: ComponentType<{ className?: string }> }
+> = {
+  'github-actions': { labelKey: 'originCi', icon: Cog },
+  schedule: { labelKey: 'originSchedule', icon: Timer },
+  web: { labelKey: 'originWeb', icon: Globe },
+  api: { labelKey: 'originApi', icon: Terminal },
 }
 
 function shortSha(sha: string): string {
@@ -33,8 +33,10 @@ function shortSha(sha: string): string {
 
 // 컴팩트 출처 칩(목록용) — 링크 없음(행 전체가 이미 <a> 라 앵커 중첩 금지). 소스 라벨 + 커밋/PR 은 평문으로.
 export function OriginChip({ origin, className }: { origin: OriginLike; className?: string }) {
-  const meta = sourceMeta(origin.source)
-  const Icon = meta.icon
+  const t = useTranslations('ui')
+  const meta = SOURCE_META[origin.source]
+  const Icon = meta?.icon ?? Cog
+  const label = meta ? t(meta.labelKey) : origin.source
   return (
     <span
       className={cn(
@@ -43,7 +45,7 @@ export function OriginChip({ origin, className }: { origin: OriginLike; classNam
       )}
     >
       <Icon className="size-3 text-muted-foreground/70" />
-      <span className="font-[560] text-foreground/85">{meta.label}</span>
+      <span className="font-[560] text-foreground/85">{label}</span>
       {origin.repo && origin.sha && (
         <span className="truncate text-faint">
           · {origin.repo}@{shortSha(origin.sha)}
@@ -56,8 +58,10 @@ export function OriginChip({ origin, className }: { origin: OriginLike; classNam
 
 // 전체 출처 블록(상세용) — 커밋/PR/CI run 링크 + 임시 핀(pinOverrides) 표. 여기선 앵커를 써도 된다.
 export function OriginBlock({ origin }: { origin: OriginLike }) {
-  const meta = sourceMeta(origin.source)
-  const Icon = meta.icon
+  const t = useTranslations('ui')
+  const meta = SOURCE_META[origin.source]
+  const Icon = meta?.icon ?? Cog
+  const label = meta ? t(meta.labelKey) : origin.source
   const commitUrl =
     origin.repo && origin.sha ? `https://github.com/${origin.repo}/commit/${origin.sha}` : undefined
   const prUrl =
@@ -71,8 +75,10 @@ export function OriginBlock({ origin }: { origin: OriginLike }) {
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
         <span className="inline-flex items-center gap-1.5">
           <Icon className="size-3.5 text-muted-foreground/70" />
-          <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">출처</span>
-          <span className="text-[13px] font-[510] text-foreground">{meta.label}</span>
+          <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
+            {t('originHeading')}
+          </span>
+          <span className="text-[13px] font-[510] text-foreground">{label}</span>
         </span>
         {commitUrl ? (
           <a
@@ -117,7 +123,7 @@ export function OriginBlock({ origin }: { origin: OriginLike }) {
       {pins.length > 0 && (
         <div className="space-y-1.5">
           <p className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-            임시 핀 (슬롯 → 이미지)
+            {t('pinOverridesLabel')}
           </p>
           <div className="divide-y divide-border/70 overflow-hidden rounded-md border">
             {pins.map(([slot, image]) => (

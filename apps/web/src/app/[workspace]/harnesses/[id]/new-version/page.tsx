@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft, Lock } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import {
   instanceStateFromSpec,
@@ -39,6 +40,7 @@ export default async function NewHarnessVersionPage({
   const { v, tab, tplVersion } = await searchParams
   const ctx = await authContext()
   const { principal } = await currentPrincipal()
+  const t = await getTranslations('harnessesPage')
   const allowed = can(principal?.roles, 'harnesses:register')
 
   // env 시크릿 참조 피커용 — 공유(workspace) + 내 개인(user) 시크릿 이름(값은 안 옴). 실패/무권한이면 빈 목록.
@@ -65,7 +67,7 @@ export default async function NewHarnessVersionPage({
     const active =
       (typeof v === 'string' && versions.includes(v) ? v : undefined) ??
       versions[versions.length - 1]
-    if (!active) throw new Error('등록된 버전이 없어요.')
+    if (!active) throw new Error(t('noVersions'))
     const instance = harnessInstanceSpecSchema.parse(
       await controlPlane.getHarnessInstance(ctx, id, active)
     )
@@ -81,7 +83,7 @@ export default async function NewHarnessVersionPage({
       )
       initialTemplate = templateStateFromSpec(newTemplate)
       startTab = 'instance'
-      notice = `템플릿 ${id}@${tplVersion} 을 등록했어요. 이제 이 버전으로 새 인스턴스를 만들어보세요.`
+      notice = t('templateRegisteredNotice', { template: `${id}@${tplVersion}` })
     } else {
       const template = harnessTemplateSpecSchema.parse(
         await controlPlane.getHarnessTemplateSpec(
@@ -106,19 +108,12 @@ export default async function NewHarnessVersionPage({
         <ChevronLeft className="size-3.5" />
         {id}
       </Link>
-      <PageHeader
-        title="새 버전 만들기"
-        description={`${id} 의 구성을 그대로 채워뒀어요. 값을 바꿔 새 버전으로 등록해요.`}
-      />
+      <PageHeader title={t('newVersion')} description={t('newVersionDescription', { id })} />
       {!allowed ? (
-        <EmptyState
-          icon={<Lock />}
-          title="하니스를 등록할 권한이 없어요."
-          hint="관리자 권한이 필요해요."
-        />
+        <EmptyState icon={<Lock />} title={t('noPermTitle')} hint={t('adminRequired')} />
       ) : loadError || !initialInstance || !initialTemplate ? (
         <Callout tone="danger">
-          기존 구성을 불러오지 못했어요: {loadError ?? '알 수 없는 오류'}
+          {t('configLoadError', { error: loadError ?? t('unknownError') })}
         </Callout>
       ) : (
         <Card className="p-5">

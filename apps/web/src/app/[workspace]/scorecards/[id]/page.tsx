@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
 import { membersSchema } from '@/entities/member'
@@ -43,14 +44,14 @@ function Prop({ label, value }: { label: string; value: string }) {
   )
 }
 
-function BackLink({ workspace }: { workspace: string }) {
+function BackLink({ workspace, label }: { workspace: string; label: string }) {
   return (
     <Link
       href={`/${workspace}/scorecards`}
       className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
     >
       <ChevronLeft className="size-3.5" />
-      스코어카드
+      {label}
     </Link>
   )
 }
@@ -94,6 +95,7 @@ export default async function ScorecardDetailPage({
   const { workspace, id } = await params
   const { cases } = await searchParams
   const ctx = await authContext()
+  const t = await getTranslations('scorecardsPage')
 
   let record: ScorecardRecord | undefined
   let error: string | undefined
@@ -106,9 +108,9 @@ export default async function ScorecardDetailPage({
   if (!record) {
     return (
       <div className="space-y-5">
-        <BackLink workspace={workspace} />
-        <PageHeader title="스코어카드" />
-        <Callout tone="danger">스코어카드를 불러오지 못했어요: {error}</Callout>
+        <BackLink workspace={workspace} label={t('backToList')} />
+        <PageHeader title={t('scorecardLabel')} />
+        <Callout tone="danger">{t('loadError', { error: error ?? '' })}</Callout>
       </div>
     )
   }
@@ -163,7 +165,7 @@ export default async function ScorecardDetailPage({
       {/* 진행 중이면 서버 컴포넌트를 주기 재실행해 스텝을 라이브 갱신(종단되면 멈춤). */}
       <AutoRefresh enabled={live} />
       <div className="space-y-3">
-        <BackLink workspace={workspace} />
+        <BackLink workspace={workspace} label={t('backToList')} />
         <PageHeader
           title={<span className="font-mono">scorecard {record.id.slice(0, 8)}</span>}
           description={`${record.dataset.id}@${record.dataset.version} → ${record.harness.id}@${record.harness.version}`}
@@ -175,24 +177,28 @@ export default async function ScorecardDetailPage({
       {results.length > 0 && (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <StatCard
-            label="케이스"
+            label={t('statCases')}
             value={results.length}
             hint={
               record.subset
-                ? `전체 ${record.subset.total}개 중 일부${skipped > 0 ? ` · 스킵 ${skipped}` : ''}`
+                ? `${t('subsetPartial', { total: record.subset.total })}${skipped > 0 ? ` · ${t('subsetSkipped', { n: skipped })}` : ''}`
                 : skipped > 0
-                  ? `스킵 ${skipped}`
+                  ? t('subsetSkipped', { n: skipped })
                   : undefined
             }
           />
-          <StatCard label="통과" value={passed} tone={passed > 0 ? 'success' : 'default'} />
           <StatCard
-            label="실패"
+            label={t('statPassed')}
+            value={passed}
+            tone={passed > 0 ? 'success' : 'default'}
+          />
+          <StatCard
+            label={t('statFailed')}
             value={failedCount}
             tone={failedCount > 0 ? 'danger' : 'default'}
           />
           <StatCard
-            label="통과율"
+            label={t('statPassRate')}
             value={passRate == null ? '–' : fmtPct(passRate)}
             tone={
               passRate == null
@@ -212,11 +218,13 @@ export default async function ScorecardDetailPage({
         <Prop label="harness" value={`${record.harness.id}@${record.harness.version}`} />
         <Prop label="created" value={new Date(record.createdAt).toLocaleString()} />
         <Prop label="updated" value={new Date(record.updatedAt).toLocaleString()} />
-        {authorName && <Prop label="실행자" value={authorName} />}
+        {authorName && <Prop label={t('metaRunBy')} value={authorName} />}
         {/* 이 배치가 실행된 런타임 — 등록 런타임이면 상세로 링크, self:* 러너는 칩만(러너엔 런타임 상세 페이지 없음). 미설정(과거·ingest)이면 숨김. */}
         {record.runtime && (
           <div className="min-w-0">
-            <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">런타임</dt>
+            <dt className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+              {t('metaRuntime')}
+            </dt>
             <dd className="mt-1">
               {record.runtime.startsWith('self:') ? (
                 <RuntimeChip label={record.runtime} />
@@ -224,7 +232,7 @@ export default async function ScorecardDetailPage({
                 <Link
                   href={`/${workspace}/runtimes/${encodeURIComponent(record.runtime)}`}
                   className="rounded-sm hover:underline"
-                  title="런타임 상세"
+                  title={t('runtimeDetailTitle')}
                 >
                   <RuntimeChip label={record.runtime} />
                 </Link>
@@ -234,11 +242,13 @@ export default async function ScorecardDetailPage({
         )}
         {record.subset && (
           <Prop
-            label="케이스 선택 (부분 실행)"
+            label={t('metaSubset')}
             value={`${record.subset.selected}/${record.subset.total}${(() => {
               const parts = [
-                record.subset.ids ? `지정 ${record.subset.ids.length}개` : undefined,
-                record.subset.tags ? `태그 ${record.subset.tags.join(', ')}` : undefined,
+                record.subset.ids ? t('subsetIds', { n: record.subset.ids.length }) : undefined,
+                record.subset.tags
+                  ? t('subsetTags', { tags: record.subset.tags.join(', ') })
+                  : undefined,
                 record.subset.limit !== undefined ? `limit ${record.subset.limit}` : undefined,
               ].filter(Boolean)
               return parts.length > 0 ? ` — ${parts.join(' · ')}` : ''
@@ -255,7 +265,7 @@ export default async function ScorecardDetailPage({
         <Card className="flex flex-wrap items-center gap-x-4 gap-y-2 p-4">
           <div className="flex items-center gap-2">
             <span className="text-[10.5px] font-[560] uppercase tracking-wide text-faint">
-              트레이스 싱크
+              {t('traceSinkLabel')}
             </span>
             {/* 싱크 등록 이름(있으면) 먼저, kind 는 보조 배지로 — 이름이 없으면 kind 하나만. */}
             <Badge tone="neutral">{record.export.name ?? record.export.sink}</Badge>
@@ -270,10 +280,10 @@ export default async function ScorecardDetailPage({
               }
             >
               {record.export.status === 'succeeded'
-                ? '적재 완료'
+                ? t('exportSucceeded')
                 : record.export.status === 'partial'
-                  ? '부분 적재'
-                  : '적재 실패'}
+                  ? t('exportPartial')
+                  : t('exportFailed')}
             </Badge>
           </div>
           {record.export.url && (
@@ -283,7 +293,7 @@ export default async function ScorecardDetailPage({
               rel="noreferrer"
               className="text-[12px] font-[510] text-link transition-colors hover:text-foreground"
             >
-              플랫폼에서 상세 보기 ↗
+              {t('exportViewOnPlatform')}
             </a>
           )}
           {record.export.message && (
@@ -306,7 +316,7 @@ export default async function ScorecardDetailPage({
           )}
           {record.models && record.models.observed.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">관측</span>
+              <span className="text-[11px] text-muted-foreground">{t('modelsObserved')}</span>
               {record.models.observed.map((m) => (
                 <ModelChip key={m} muted>
                   {m}
@@ -316,10 +326,10 @@ export default async function ScorecardDetailPage({
           )}
           {record.models?.declared && (
             <div className="flex items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">선언</span>
+              <span className="text-[11px] text-muted-foreground">{t('modelsDeclared')}</span>
               <ModelChip muted>{record.models.declared}</ModelChip>
               {record.models.primary && record.models.declared !== record.models.primary && (
-                <Badge tone="danger">선언≠실제</Badge>
+                <Badge tone="danger">{t('modelsMismatch')}</Badge>
               )}
             </div>
           )}
@@ -339,7 +349,7 @@ export default async function ScorecardDetailPage({
       {record.error && (
         <Callout tone="danger" hint={record.error.message}>
           {record.error.phase
-            ? `${record.error.code} · ${record.error.phase} 구간에서 실패`
+            ? t('phaseFailure', { code: record.error.code, phase: record.error.phase })
             : record.error.code}
         </Callout>
       )}
@@ -347,11 +357,11 @@ export default async function ScorecardDetailPage({
       {(steps.length > 0 || live) && (
         <section className="space-y-2.5">
           <SectionHeader
-            title="진행 과정"
-            action={live ? <Badge tone="neutral">진행 중 · 자동 갱신</Badge> : undefined}
+            title={t('stepsTitle')}
+            action={live ? <Badge tone="neutral">{t('liveRefreshing')}</Badge> : undefined}
           />
           {steps.length === 0 ? (
-            <p className="text-[13px] text-muted-foreground">실행을 준비하고 있어요…</p>
+            <p className="text-[13px] text-muted-foreground">{t('preparingRun')}</p>
           ) : (
             <Card className="divide-y divide-border">
               {steps.map((s, i) => (
@@ -392,9 +402,9 @@ export default async function ScorecardDetailPage({
       )}
 
       <section className="space-y-2.5">
-        <SectionHeader title="메트릭별 집계" />
+        <SectionHeader title={t('metricsSummaryTitle')} />
         {summary.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">집계가 없어요.</p>
+          <p className="text-[13px] text-muted-foreground">{t('noSummary')}</p>
         ) : (
           <Table>
             <THead>
@@ -433,33 +443,33 @@ export default async function ScorecardDetailPage({
 
       <section id="cases" className="scroll-mt-6 space-y-2.5">
         <SectionHeader
-          title={`케이스별 (${results.length})`}
+          title={t('casesTitle', { count: results.length })}
           action={
             failedCount > 0 ? (
               <div className="inline-flex overflow-hidden rounded-md border">
                 <CaseFilterTab href={`${base}#cases`} active={filter === 'all'}>
-                  전체 {results.length}
+                  {t('filterAll', { n: results.length })}
                 </CaseFilterTab>
                 <CaseFilterTab
                   href={`${base}?cases=failed#cases`}
                   active={filter === 'failed'}
                   danger
                 >
-                  실패 {failedCount}
+                  {t('filterFailed', { n: failedCount })}
                 </CaseFilterTab>
               </div>
             ) : results.length > 0 ? (
-              <Badge tone="success">전부 통과</Badge>
+              <Badge tone="success">{t('allPassed')}</Badge>
             ) : undefined
           }
         />
         {results.length === 0 ? (
           <p className="text-[13px] text-muted-foreground">
             {record.status === 'failed'
-              ? '케이스 결과가 없어요. 위 오류를 확인해보세요.'
+              ? t('noCasesFailed')
               : record.status === 'running' || record.status === 'queued'
-                ? '아직 실행 중이에요. 끝나면 케이스별 결과가 보여요.'
-                : '케이스 결과가 없어요.'}
+                ? t('noCasesRunning')
+                : t('noCasesGeneric')}
           </p>
         ) : (
           <div className="space-y-2">
@@ -505,7 +515,7 @@ export default async function ScorecardDetailPage({
                   <div className="flex flex-wrap items-center gap-1.5">
                     {r.snapshot?.kind && <Badge tone="neutral">{String(r.snapshot.kind)}</Badge>}
                     {r.scores.length === 0 ? (
-                      <span className="text-[12px] text-muted-foreground">점수 없음</span>
+                      <span className="text-[12px] text-muted-foreground">{t('noScores')}</span>
                     ) : (
                       r.scores.map((s) => (
                         <Badge
@@ -565,7 +575,7 @@ export default async function ScorecardDetailPage({
         workspace={workspace}
         resourceType="scorecard"
         resourceId={id}
-        title="논의"
+        title={t('discussTitle')}
       />
     </div>
   )

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Server } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { RunnersManager } from '@/features/manage-runners'
 import { runnersResponseSchema, type RunnerMeta } from '@/entities/runner'
@@ -40,6 +41,7 @@ function Section({
 // ② 내 머신(pull: 셀프호스티드 러너 — 개인 소유 디바이스가 잡을 lease 로 당겨감).
 export default async function RuntimesPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
+  const t = await getTranslations('runtimesPage')
   const { ctx } = await currentPrincipal()
   let error: string | undefined
   let runtimes = runtimesSchema.parse([])
@@ -60,26 +62,26 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
   return (
     <div className="space-y-8">
       <PageHeader
-        title="런타임"
-        description="평가가 실행되는 곳 — 등록한 인프라와 내 머신(셀프호스티드 러너)을 한곳에서 관리해요."
+        title={t('title')}
+        description={t('description')}
         actions={
           <Link href={`/${workspace}/runtimes/new`} className={buttonVariants({ size: 'sm' })}>
-            런타임 등록
+            {t('register')}
           </Link>
         }
       />
 
       <Section
-        title={`등록 인프라 (${runtimes.length})`}
-        description="워크스페이스가 등록한 docker/nomad/k8s/topology — 컨트롤플레인이 접속해 평가를 배치해요."
+        title={t('registeredInfra', { count: runtimes.length })}
+        description={t('registeredInfraDescription')}
       >
         {error ? (
-          <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+          <Callout tone="danger">{t('connectError', { error })}</Callout>
         ) : runtimes.length === 0 ? (
           <EmptyState
             icon={<Server strokeWidth={1.75} />}
-            title="아직 등록한 인프라가 없어요."
-            hint="'런타임 등록'으로 워크스페이스 인프라를 연결하거나, 아래에서 내 머신을 러너로 연결해보세요."
+            title={t('emptyInfraTitle')}
+            hint={t('emptyInfraHint')}
           />
         ) : (
           <div className="space-y-2">
@@ -94,10 +96,10 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
                   {r.id}
                 </span>
                 <Badge tone={r.owner === '_shared' ? 'info' : 'neutral'}>
-                  {r.owner === '_shared' ? '공용' : '워크스페이스'}
+                  {r.owner === '_shared' ? t('sharedBadge') : t('workspaceBadge')}
                 </Badge>
                 <span className="w-[76px] text-right text-[12px] text-muted-foreground">
-                  {r.versions.length}개 버전
+                  {t('versionCount', { count: r.versions.length })}
                 </span>
               </Link>
             ))}
@@ -105,10 +107,7 @@ export default async function RuntimesPage({ params }: { params: Promise<{ works
         )}
       </Section>
 
-      <Section
-        title="내 머신 연결 (셀프호스티드 러너)"
-        description="내 컴퓨터가 서버로 먼저 접속해 잡을 받아가요."
-      >
+      <Section title={t('myMachine')} description={t('myMachineDescription')}>
         <RunnersManager runners={runners} downloadHref={`/${workspace}/download`} />
       </Section>
     </div>

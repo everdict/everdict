@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { CustomAnalyzer, loadAnalysisData, storedToConfig } from '@/features/analyze-scorecards'
 import { CommentsSection } from '@/features/discuss'
@@ -19,6 +20,7 @@ export default async function ViewPage({
   params: Promise<{ workspace: string; id: string }>
 }) {
   const { workspace, id } = await params
+  const t = await getTranslations('viewsPage')
   const { scorecards, authors, savedViews, subject, canManage, isAdmin, error } =
     await loadAnalysisData()
   const view = savedViews.find((v) => v.id === id)
@@ -30,25 +32,22 @@ export default async function ViewPage({
         title={view.name}
         description={
           view.visibility === 'workspace'
-            ? '워크스페이스 공유 뷰 · 현재 데이터로 실시간 집계'
-            : '비공개 뷰 · 현재 데이터로 실시간 집계'
+            ? t('detailDescriptionWorkspace')
+            : t('detailDescriptionPrivate')
         }
         actions={
           <Link
             href={`/${workspace}/views`}
             className={buttonVariants({ size: 'sm', variant: 'secondary' })}
           >
-            <ArrowLeft className="size-4" /> 뷰 목록
+            <ArrowLeft className="size-4" /> {t('backToList')}
           </Link>
         }
       />
       {error ? (
-        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : scorecards.length === 0 ? (
-        <EmptyState
-          title="아직 스코어카드가 없어요."
-          hint="스코어카드를 실행하면 이 뷰가 채워져요."
-        />
+        <EmptyState title={t('emptyScorecardsTitle')} hint={t('emptyScorecardsHint')} />
       ) : (
         <CustomAnalyzer
           scorecards={scorecards}
@@ -62,7 +61,12 @@ export default async function ViewPage({
         />
       )}
 
-      <CommentsSection workspace={workspace} resourceType="view" resourceId={id} title="논의" />
+      <CommentsSection
+        workspace={workspace}
+        resourceType="view"
+        resourceId={id}
+        title={t('discuss')}
+      />
     </div>
   )
 }

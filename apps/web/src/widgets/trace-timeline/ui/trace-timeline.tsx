@@ -1,3 +1,5 @@
+import { useTranslations } from 'next-intl'
+
 import type { TraceEvent } from '@/entities/run'
 import { cn } from '@/shared/lib/utils'
 
@@ -31,8 +33,9 @@ function summarize(e: TraceEvent): string {
 }
 
 export function TraceTimeline({ trace }: { trace: TraceEvent[] }) {
+  const t = useTranslations('traceTimeline')
   if (trace.length === 0) {
-    return <p className="text-[13px] text-muted-foreground">트레이스 이벤트가 없습니다.</p>
+    return <p className="text-[13px] text-muted-foreground">{t('empty')}</p>
   }
   return (
     <ol className="relative space-y-3.5 border-l border-border/70 pl-6">

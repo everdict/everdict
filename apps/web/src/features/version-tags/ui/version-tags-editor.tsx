@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { Plus, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 import { VersionTagChip } from '@/shared/ui/chip'
@@ -26,6 +27,7 @@ export function VersionTagsEditor({
   canEdit: boolean
 }) {
   const router = useRouter()
+  const tr = useTranslations('versionTags')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [adding, setAdding] = useState(false)
@@ -35,7 +37,7 @@ export function VersionTagsEditor({
     startTransition(async () => {
       const res = await setVersionTagsAction({ entity, id, version, tags: next })
       if (!res.ok) {
-        setError(res.error ?? '태그를 저장하지 못했어요.')
+        setError(res.error ?? tr('saveFailed'))
         return
       }
       setError(undefined)
@@ -68,7 +70,7 @@ export function VersionTagsEditor({
             canEdit ? (
               <button
                 type="button"
-                aria-label={`태그 ${t} 삭제`}
+                aria-label={tr('deleteTag', { tag: t })}
                 disabled={pending}
                 onClick={() => apply(tags.filter((x) => x !== t))}
                 className="ml-0.5 rounded text-faint transition-colors hover:text-foreground disabled:opacity-50"
@@ -97,8 +99,8 @@ export function VersionTagsEditor({
             }}
             onBlur={addDraft}
             maxLength={60}
-            placeholder="태그 입력 후 Enter"
-            aria-label="새 태그"
+            placeholder={tr('placeholder')}
+            aria-label={tr('newTag')}
             className="h-6 w-32 rounded border border-border bg-transparent px-1.5 text-[11px] text-foreground outline-none placeholder:text-faint focus:border-ring"
           />
         ) : (
@@ -112,7 +114,7 @@ export function VersionTagsEditor({
             )}
           >
             <Plus className="size-3" />
-            태그
+            {tr('tag')}
           </button>
         ))}
       {error && <span className="text-[11px] text-[var(--color-danger)]">{error}</span>}

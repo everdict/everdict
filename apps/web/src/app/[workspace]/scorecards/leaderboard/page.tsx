@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { LeaderboardPicker, type DatasetOption } from '@/features/leaderboard-scorecards'
 import { datasetsSchema } from '@/entities/dataset'
@@ -47,6 +48,7 @@ export default async function LeaderboardPage({
   const { workspace } = await params
   const { dataset, metric, window, judgeModel } = await searchParams
   const ctx = await authContext()
+  const t = await getTranslations('scorecardsPage')
 
   let options: DatasetOption[] = []
   try {
@@ -82,19 +84,13 @@ export default async function LeaderboardPage({
           className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronLeft className="size-3.5" />
-          스코어카드
+          {t('backToList')}
         </Link>
-        <PageHeader
-          title="리더보드"
-          description="한 벤치마크에서 하니스와 모델을 점수로 순위 매겨요."
-        />
+        <PageHeader title={t('leaderboardTitle')} description={t('leaderboardDescription')} />
       </div>
 
       {options.length === 0 ? (
-        <EmptyState
-          title="아직 데이터셋이 없어요."
-          hint="벤치마크를 등록하고 여러 하니스로 평가하면 순위가 채워져요."
-        />
+        <EmptyState title={t('noDatasetsTitle')} hint={t('leaderboardEmptyHint')} />
       ) : (
         <Card className="p-4">
           <LeaderboardPicker
@@ -107,7 +103,7 @@ export default async function LeaderboardPage({
         </Card>
       )}
 
-      {error && <Callout tone="danger">리더보드를 불러오지 못했어요: {error}</Callout>}
+      {error && <Callout tone="danger">{t('leaderboardLoadError', { error })}</Callout>}
 
       {board && (
         <div className="space-y-4">
@@ -119,20 +115,17 @@ export default async function LeaderboardPage({
             <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
               {board.metric}
             </code>
-            · 집계
+            · {t('aggregationLabel')}
             <code className="rounded-md border border-border bg-muted/40 px-1.5 py-0.5 font-mono text-[11px]">
               {board.window}
             </code>
           </p>
 
           {board.rows.length === 0 ? (
-            <EmptyState
-              title="이 조건에 맞는 스코어카드가 없어요."
-              hint="선택한 벤치마크를 하니스로 평가하면 순위에 올라와요."
-            />
+            <EmptyState title={t('noMatchTitle')} hint={t('leaderboardNoMatchHint')} />
           ) : (
             <section className="space-y-2.5">
-              <SectionHeader title={`랭킹 (${board.rows.length})`} />
+              <SectionHeader title={t('rankingTitle', { count: board.rows.length })} />
               <Table>
                 <THead>
                   <tr>
@@ -142,7 +135,7 @@ export default async function LeaderboardPage({
                     <TH>judge</TH>
                     <TH className="text-right">{board.metric}</TH>
                     <TH className="text-right">runs</TH>
-                    <TH className="text-right">생성</TH>
+                    <TH className="text-right">{t('thCreated')}</TH>
                   </tr>
                 </THead>
                 <TBody>

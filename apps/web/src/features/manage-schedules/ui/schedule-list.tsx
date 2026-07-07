@@ -3,6 +3,7 @@
 import { useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { CalendarClock, Search } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import type { Schedule } from '@/entities/schedule'
 import { describeCron, fireDayLabel, fireTimeLabel } from '@/shared/lib/cron'
@@ -16,21 +17,21 @@ import { Input } from '@/shared/ui/input'
 import { StatCard } from '@/shared/ui/stat-card'
 
 import { deleteScheduleAction, setScheduleEnabledAction } from '../api/schedule-actions'
-import { type Author, ScheduleCard, ownerNameOf, runtimeLabelOf } from './schedule-card'
 import { ScheduleCalendar } from './schedule-calendar'
+import {
+  ownerNameOf,
+  runtimeChipLabel,
+  runtimeLabelOf,
+  ScheduleCard,
+  type Author,
+} from './schedule-card'
 
 type View = 'list' | 'owner' | 'calendar'
 
-const VIEWS: { value: View; label: string }[] = [
-  { value: 'list', label: '리스트' },
-  { value: 'owner', label: '소유자별' },
-  { value: 'calendar', label: '캘린더' },
-]
-
-const STATUS_OPTIONS = [
-  { value: '', label: '전체 상태' },
-  { value: 'enabled', label: '활성' },
-  { value: 'paused', label: '일시중지' },
+const VIEWS: { value: View; labelKey: string }[] = [
+  { value: 'list', labelKey: 'viewList' },
+  { value: 'owner', labelKey: 'viewOwner' },
+  { value: 'calendar', labelKey: 'viewCalendar' },
 ]
 
 const UPCOMING_HORIZON_DAYS = 7
@@ -61,6 +62,13 @@ export function ScheduleList({
   initialView?: View // ?view= 로 초기 뷰 지정(딥링크). 이후 전환은 로컬 상태.
 }) {
   const router = useRouter()
+  const t = useTranslations('manageSchedules')
+  const locale = useLocale()
+  const statusOptions = [
+    { value: '', label: t('statusAll') },
+    { value: 'enabled', label: t('active') },
+    { value: 'paused', label: t('paused') },
+  ]
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [view, setView] = useState<View>(initialView)
@@ -74,7 +82,7 @@ export function ScheduleList({
     startTransition(async () => {
       const res = await fn()
       if (res.ok) router.refresh()
-      else setError(res.error ?? '작업 실패')
+      else setError(res.error ?? t('actionFailed'))
     })
   }
   const onToggle = (s: Schedule) => act(() => setScheduleEnabledAction(s.id, !s.enabled))
@@ -88,17 +96,20 @@ export function ScheduleList({
     const m = new Map<string, string>()
     for (const s of schedules) m.set(s.createdBy, ownerNameOf(authors, s.createdBy))
     return [
-      { value: '', label: '전체 소유자' },
+      { value: '', label: t('ownerAll') },
       ...[...m.entries()]
         .sort((a, b) => a[1].localeCompare(b[1]))
-        .map(([sub, name]) => ({ value: sub, label: sub === me ? `${name} (나)` : name })),
+        .map(([sub, name]) => ({ value: sub, label: sub === me ? `${name} (${t('me')})` : name })),
     ]
-  }, [schedules, authors, me])
+  }, [schedules, authors, me, t])
 
   const runtimeOptions = useMemo(() => {
     const s = new Set(schedules.map(runtimeLabelOf))
-    return [{ value: '', label: '전체 런타임' }, ...[...s].sort().map((r) => ({ value: r, label: r }))]
-  }, [schedules])
+    return [
+      { value: '', label: t('runtimeAll') },
+      ...[...s].sort().map((r) => ({ value: r, label: runtimeChipLabel(r, t) })),
+    ]
+  }, [schedules, t])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -112,7 +123,7 @@ export function ScheduleList({
         const hay = [
           s.name,
           s.cron,
-          describeCron(s.cron),
+          describeCron(s.cron, locale),
           s.runTemplate.dataset.id,
           s.runTemplate.harness.id,
           runtimeLabelOf(s),
@@ -123,7 +134,7 @@ export function ScheduleList({
         return hay.includes(q)
       })
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [schedules, authors, query, owner, status, runtime])
+  }, [schedules, authors, query, owner, status, runtime, locale])
 
   // 소유자별 그룹(소유자 이름순) — visible 을 createdBy 로 묶는다.
   const ownerGroups = useMemo(() => {
@@ -171,10 +182,18 @@ export function ScheduleList({
       {error && <Callout tone="danger">{error}</Callout>}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="전체" value={total} />
-        <StatCard label="활성" value={enabledCount} tone={enabledCount > 0 ? 'success' : 'default'} />
-        <StatCard label="일시중지" value={total - enabledCount} />
-        <StatCard label="소유자" value={ownerCount} hint={`${ownerCount}명이 등록`} />
+        <StatCard label={t('statTotal')} value={total} />
+        <StatCard
+          label={t('active')}
+          value={enabledCount}
+          tone={enabledCount > 0 ? 'success' : 'default'}
+        />
+        <StatCard label={t('paused')} value={total - enabledCount} />
+        <StatCard
+          label={t('statOwners')}
+          value={ownerCount}
+          hint={t('ownersHint', { count: ownerCount })}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5">
@@ -192,7 +211,7 @@ export function ScheduleList({
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              {v.label}
+              {t(v.labelKey)}
             </button>
           ))}
         </div>
@@ -201,9 +220,9 @@ export function ScheduleList({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="이름·하니스로 검색"
+            placeholder={t('searchPlaceholder')}
             className="pl-8"
-            aria-label="예약 검색"
+            aria-label={t('searchAria')}
           />
         </div>
         {ownerOptions.length > 2 && (
@@ -211,15 +230,15 @@ export function ScheduleList({
             options={ownerOptions}
             value={owner}
             onChange={setOwner}
-            placeholder="소유자"
+            placeholder={t('ownerPlaceholder')}
             className="w-[160px]"
           />
         )}
         <Combobox
-          options={STATUS_OPTIONS}
+          options={statusOptions}
           value={status}
           onChange={setStatus}
-          placeholder="상태"
+          placeholder={t('statusPlaceholder')}
           className="w-[130px]"
           searchable={false}
         />
@@ -228,18 +247,14 @@ export function ScheduleList({
             options={runtimeOptions}
             value={runtime}
             onChange={setRuntime}
-            placeholder="런타임"
+            placeholder={t('runtimePlaceholder')}
             className="w-[150px]"
           />
         )}
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState
-          icon={<Search />}
-          title="조건에 맞는 예약이 없어요."
-          hint="검색어나 필터를 바꿔보세요."
-        />
+        <EmptyState icon={<Search />} title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : view === 'calendar' ? (
         <ScheduleCalendar schedules={visible} authors={authors} nowIso={nowIso} />
       ) : view === 'owner' ? (
@@ -254,9 +269,11 @@ export function ScheduleList({
                 />
                 <span className="text-[13px] font-[560]">
                   {ownerNameOf(authors, subject)}
-                  {subject === me ? ' (나)' : ''}
+                  {subject === me ? ` (${t('me')})` : ''}
                 </span>
-                <span className="text-[12px] text-faint">{list.length}건</span>
+                <span className="text-[12px] text-faint">
+                  {t('countUnit', { count: list.length })}
+                </span>
               </div>
               <div className="space-y-2">{list.map(card)}</div>
             </div>
@@ -270,12 +287,10 @@ export function ScheduleList({
         <section className="space-y-2.5 rounded-lg border bg-card/60 p-4">
           <div className="flex items-center gap-2 text-[12px] font-[510] uppercase tracking-wide text-faint">
             <CalendarClock className="size-3.5" />
-            다가오는 실행 · 이후 {UPCOMING_HORIZON_DAYS}일
+            {t('upcomingTitle', { days: UPCOMING_HORIZON_DAYS })}
           </div>
           {upcoming.length === 0 ? (
-            <p className="text-[12px] text-muted-foreground">
-              예정된 실행이 없어요.
-            </p>
+            <p className="text-[12px] text-muted-foreground">{t('upcomingEmpty')}</p>
           ) : (
             <div className="space-y-0.5">
               {upcoming.map(({ iso, schedule }, i) => (
@@ -287,7 +302,7 @@ export function ScheduleList({
                     className="w-[112px] shrink-0 font-mono tabular-nums text-muted-foreground"
                     title={fmtDateTimeFull(iso)}
                   >
-                    {fireDayLabel(iso, nowIso, schedule.timezone)}{' '}
+                    {fireDayLabel(iso, nowIso, schedule.timezone, locale)}{' '}
                     <span className="text-foreground">{fireTimeLabel(iso, schedule.timezone)}</span>
                   </span>
                   <span className="min-w-0 flex-1 truncate font-[510]">{schedule.name}</span>

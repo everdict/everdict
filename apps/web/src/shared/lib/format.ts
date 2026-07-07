@@ -52,31 +52,36 @@ export function fmtSubject(s: string): string {
   return s.length > 14 ? `${s.slice(0, 8)}…${s.slice(-4)}` : s
 }
 
-// 상대 시각(알림 등 피드용) — '방금 전 / n분 전 / n시간 전 / n일 전', 7일 넘으면 절대 날짜로.
-export function fmtTimeAgo(iso: string): string {
+// 상대 시각(알림 등 피드용) — Intl.RelativeTimeFormat 로케일 표기('3분 전'/'3 minutes ago'),
+// 7일 넘으면 절대 날짜로. locale 은 호출부(컴포넌트)가 useLocale()/getLocale() 로 넘긴다(기본 ko).
+export function fmtTimeAgo(iso: string, locale: string = 'ko'): string {
   const ms = Date.now() - new Date(iso).getTime()
   if (!Number.isFinite(ms) || ms < 0) return fmtDateTime(iso)
   const min = Math.floor(ms / 60_000)
-  if (min < 1) return '방금 전'
-  if (min < 60) return `${min}분 전`
+  if (min < 1) return locale.startsWith('ko') ? '방금 전' : 'just now'
+  const rtf = new Intl.RelativeTimeFormat(locale, { numeric: 'always' })
+  if (min < 60) return rtf.format(-min, 'minute')
   const hours = Math.floor(min / 60)
-  if (hours < 24) return `${hours}시간 전`
+  if (hours < 24) return rtf.format(-hours, 'hour')
   const days = Math.floor(hours / 24)
-  if (days <= 7) return `${days}일 전`
+  if (days <= 7) return rtf.format(-days, 'day')
   return fmtDateTime(iso)
 }
 
-// 리스트 날짜 그룹 헤더 — 오늘/어제는 상대 표기, 그 외 'M월 D일'(다른 해면 연도 포함).
-export function fmtDateHeading(iso: string): string {
+// 리스트 날짜 그룹 헤더 — 오늘/어제는 상대 표기(numeric:auto), 그 외 로케일 월·일(다른 해면 연도 포함).
+export function fmtDateHeading(iso: string, locale: string = 'ko'): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
   const now = new Date()
   const startOf = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime()
   const diffDays = Math.round((startOf(now) - startOf(d)) / 86_400_000)
-  if (diffDays === 0) return '오늘'
-  if (diffDays === 1) return '어제'
-  const md = `${d.getMonth() + 1}월 ${d.getDate()}일`
-  return d.getFullYear() === now.getFullYear() ? md : `${d.getFullYear()}년 ${md}`
+  if (diffDays === 0 || diffDays === 1)
+    return new Intl.RelativeTimeFormat(locale, { numeric: 'auto' }).format(-diffDays, 'day')
+  const opts: Intl.DateTimeFormatOptions =
+    d.getFullYear() === now.getFullYear()
+      ? { month: 'long', day: 'numeric' }
+      : { year: 'numeric', month: 'long', day: 'numeric' }
+  return new Intl.DateTimeFormat(locale, opts).format(d)
 }
 
 // 날짜 그룹 행의 시각 — HH:MM(로컬). 날짜는 그룹 헤더가 갖는다.

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 
 import type { Member } from '@/entities/member'
 import { Avatar } from '@/shared/ui/avatar'
@@ -18,6 +19,7 @@ function memberLabel(m: Member): string {
 }
 
 export function MembersManager({ members, canWrite }: { members: Member[]; canWrite: boolean }) {
+  const t = useTranslations('manageMembers')
   const [error, setError] = useState<string>()
   const [confirmSubject, setConfirmSubject] = useState<string>()
   const [pending, startTransition] = useTransition()
@@ -43,17 +45,14 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
     <div className="space-y-5">
       <div className="space-y-1">
         <h3 className="flex items-center gap-2 text-[13px] font-[560] text-foreground">
-          사람
+          {t('title')}
           <span className="text-[12px] font-normal text-faint">{members.length}</span>
         </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          이 워크스페이스에 참여한 사람들이에요. 역할 변경과 제거는 관리자만 할 수 있고, 마지막
-          관리자는 내보내거나 강등할 수 없어요. 새 멤버는 초대 링크로 추가하세요.
-        </p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
       </div>
 
       {members.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">멤버가 없어요.</p>
+        <p className="text-[13px] text-muted-foreground">{t('empty')}</p>
       ) : (
         <ul className="divide-y rounded-lg border bg-card shadow-raise">
           {members.map((m) => (
@@ -81,7 +80,7 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
                     onChange={(v) => onRole(m.subject, v)}
                     options={ROLES.map((r) => ({ value: r }))}
                     className="w-28"
-                    aria-label="역할"
+                    aria-label={t('roleAria')}
                   />
                   {confirmSubject === m.subject ? (
                     <>
@@ -91,14 +90,14 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
                         disabled={pending}
                         onClick={() => onRemove(m.subject)}
                       >
-                        제거 확인
+                        {t('removeConfirm')}
                       </Button>
                       <button
                         type="button"
                         className="text-[12px] text-muted-foreground hover:text-foreground"
                         onClick={() => setConfirmSubject(undefined)}
                       >
-                        닫기
+                        {t('close')}
                       </button>
                     </>
                   ) : (
@@ -107,7 +106,7 @@ export function MembersManager({ members, canWrite }: { members: Member[]; canWr
                       className="text-[12px] font-[510] text-destructive hover:underline"
                       onClick={() => setConfirmSubject(m.subject)}
                     >
-                      제거
+                      {t('remove')}
                     </button>
                   )}
                 </span>

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { versionsForId } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
@@ -46,6 +47,7 @@ export function RegisterDatasetForm({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('registerDataset')
   const [id, setId] = useState(prefill?.id ?? '')
   const [version, setVersion] = useState('1.0.0')
   const existing = versionsForId(existingDatasets, id)
@@ -78,7 +80,7 @@ export function RegisterDatasetForm({
       body = buildDataset()
     } catch {
       setBusy(false)
-      setResult({ ok: false, error: 'cases JSON 파싱 실패' })
+      setResult({ ok: false, error: t('casesParseError') })
       return
     }
     // 액션 전송 자체가 실패(본문 크기 초과 등)해도 busy 가 풀리도록 방어.
@@ -98,7 +100,7 @@ export function RegisterDatasetForm({
       body = buildDataset()
     } catch {
       setBusy(false)
-      setCreateError('cases JSON 파싱 실패')
+      setCreateError(t('casesParseError'))
       return
     }
     let res: CreateDatasetResult
@@ -112,13 +114,13 @@ export function RegisterDatasetForm({
       // 새 버전 배포(프리필 진입)면 그 데이터셋 상세로 복귀 — 방금 배포한 버전이 곧 latest.
       if (lockId) router.push(`/${workspace}/datasets/${encodeURIComponent(id)}`)
       else router.push(`/${workspace}/datasets`)
-    } else setCreateError(res.error ?? '등록 실패')
+    } else setCreateError(res.error ?? t('createError'))
   }
 
   return (
     <div className="max-w-2xl space-y-5">
       <div className="space-y-1.5">
-        <Label htmlFor="id">id</Label>
+        <Label htmlFor="id">{t('idLabel')}</Label>
         <Input
           id="id"
           value={id}
@@ -131,30 +133,28 @@ export function RegisterDatasetForm({
       <VersionField existing={existing} value={version} onChange={setVersion} />
 
       <div className="space-y-1.5">
-        <Label htmlFor="description">설명 (선택)</Label>
+        <Label htmlFor="description">{t('descriptionLabel')}</Label>
         <Input
           id="description"
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="repo 평가용 스모크 케이스"
+          placeholder={t('descriptionPlaceholder')}
         />
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="tags">태그 (선택 — 콤마 구분)</Label>
+        <Label htmlFor="tags">{t('tagsLabel')}</Label>
         <Input
           id="tags"
           value={tagsText}
           onChange={(e) => setTagsText(e.target.value)}
           placeholder="coding, smoke"
         />
-        <p className="text-[12px] text-muted-foreground">
-          목록에서 카테고리 필터로 써요 (예: coding, browser, qa).
-        </p>
+        <p className="text-[12px] text-muted-foreground">{t('tagsHelp')}</p>
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="cases">케이스 (EvalCase[] JSON)</Label>
+        <Label htmlFor="cases">{t('casesLabel')}</Label>
         <Textarea
           id="cases"
           className="min-h-72 text-[12px]"
@@ -162,24 +162,20 @@ export function RegisterDatasetForm({
           onChange={(e) => setCasesText(e.target.value)}
           spellCheck={false}
         />
-        <p className="text-[12px] leading-relaxed text-muted-foreground">
-          각 케이스는 id · env · task · graders 로 이뤄져요. 어떤 하니스든 같은 케이스로 평가해요.
-        </p>
+        <p className="text-[12px] leading-relaxed text-muted-foreground">{t('casesHelp')}</p>
       </div>
 
       {result && <ValidateBanner result={result} />}
       {createError && <Callout tone="danger">{createError}</Callout>}
 
-      <p className="text-[12px] leading-relaxed text-muted-foreground">
-        버전은 바꿀 수 없어요. 같은 버전을 다른 내용으로 다시 올리면 등록되지 않아요.
-      </p>
+      <p className="text-[12px] leading-relaxed text-muted-foreground">{t('immutableNote')}</p>
 
       <div className="flex gap-2">
         <Button type="button" variant="secondary" onClick={onValidate} disabled={busy}>
-          {busy ? '…' : '검증하기'}
+          {busy ? '…' : t('validate')}
         </Button>
         <Button type="button" onClick={onCreate} disabled={busy}>
-          {busy ? '처리 중…' : lockId ? '새 버전 올리기' : '데이터셋 등록'}
+          {busy ? t('processing') : lockId ? t('submitNewVersion') : t('submit')}
         </Button>
       </div>
     </div>
@@ -187,11 +183,13 @@ export function RegisterDatasetForm({
 }
 
 function ValidateBanner({ result }: { result: ValidateDatasetResult }) {
-  if (result.error) return <Callout tone="danger">검증하지 못했어요: {result.error}</Callout>
+  const t = useTranslations('registerDataset')
+  if (result.error)
+    return <Callout tone="danger">{t('validateFailed', { error: result.error })}</Callout>
   if (!result.ok)
     return (
       <Callout tone="danger">
-        <div className="font-[510]">형식 오류</div>
+        <div className="font-[510]">{t('formatError')}</div>
         <ul className="mt-1 list-disc pl-5">
           {result.errors?.map((e) => (
             <li key={e}>{e}</li>
@@ -202,15 +200,19 @@ function ValidateBanner({ result }: { result: ValidateDatasetResult }) {
   return (
     <Callout tone="info">
       <div className="font-[510]">
-        ✓ 형식 정상 · {result.id}@{result.version} · 케이스 {result.cases ?? 0}건{' '}
-        {result.versionExists ? '(이미 존재)' : '(새 버전)'}
+        {t('formatOk', {
+          id: result.id ?? '',
+          version: result.version ?? '',
+          cases: result.cases ?? 0,
+        })}{' '}
+        {result.versionExists ? t('versionExistsMarker') : t('versionNewMarker')}
       </div>
       <div className="mt-1 text-muted-foreground">
-        기존 버전:{' '}
+        {t('existingVersionsLabel')}{' '}
         {result.existingVersions && result.existingVersions.length > 0
           ? result.existingVersions.join(', ')
-          : '없음'}
-        {result.versionExists && ' — 내용이 같으면 그대로 두고, 다르면 등록되지 않아요.'}
+          : t('none')}
+        {result.versionExists && t('versionExistsNote')}
       </div>
     </Callout>
   )

@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
@@ -21,6 +22,7 @@ export function DiffPicker({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('datasetVersions')
   // 기본값: candidate=최신, base=직전(versions 는 최신순 정렬되어 전달됨).
   const [b, setB] = useState(base ?? versions[1] ?? versions[0] ?? '')
   const [c, setC] = useState(candidate ?? versions[0] ?? '')
@@ -57,7 +59,7 @@ export function DiffPicker({
         />
       </div>
       <Button type="button" onClick={compare} disabled={!b || !c || b === c}>
-        비교
+        {t('compare')}
       </Button>
     </div>
   )

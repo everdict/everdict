@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Boxes, Clock, Layers, Lock, Waypoints } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { Harness } from '@/entities/harness'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
@@ -18,30 +19,26 @@ import { StatCard } from '@/shared/ui/stat-card'
 type Sort = 'name' | 'updated' | 'versions'
 type Author = { name: string; avatarUrl?: string }
 
-const SORTS: { value: Sort; label: string }[] = [
-  { value: 'name', label: '이름순' },
-  { value: 'updated', label: '최근 등록순' },
-  { value: 'versions', label: '버전 많은순' },
-]
-
-const STATUS_LABEL: Record<string, string> = {
-  succeeded: '성공',
-  failed: '실패',
-  running: '실행중',
-  queued: '대기',
+const STATUS_KEY: Record<string, string> = {
+  succeeded: 'statusSucceeded',
+  failed: 'statusFailed',
+  running: 'statusRunning',
+  queued: 'statusQueued',
 }
 
 // 최근 실행 결과 — 성공이면 점수, 아니면 상태 라벨. 실행 이력 없으면 dash.
 function LatestResult({ rel }: { rel?: HarnessRelation }) {
-  if (!rel || !rel.lastStatus) return <span className="text-faint">실행 이력 없음</span>
+  const t = useTranslations('harnessList')
+  if (!rel || !rel.lastStatus) return <span className="text-faint">{t('noRun')}</span>
   if (rel.lastStatus === 'succeeded') {
     return <Score passRate={rel.lastPassRate} mean={rel.lastMean} />
   }
+  const key = STATUS_KEY[rel.lastStatus]
   return (
     <span
       className={cn(rel.lastStatus === 'failed' ? 'text-destructive' : 'text-muted-foreground')}
     >
-      {STATUS_LABEL[rel.lastStatus] ?? rel.lastStatus}
+      {key ? t(key) : rel.lastStatus}
     </span>
   )
 }
@@ -57,6 +54,12 @@ export function HarnessList({
   relations: Record<string, HarnessRelation>
   authors: Record<string, Author>
 }) {
+  const t = useTranslations('harnessList')
+  const sorts: { value: Sort; label: string }[] = [
+    { value: 'name', label: t('sortName') },
+    { value: 'updated', label: t('sortUpdated') },
+    { value: 'versions', label: t('sortVersions') },
+  ]
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('name')
   const [category, setCategory] = useState('') // 대분류 필터
@@ -84,10 +87,10 @@ export function HarnessList({
     const s = new Set<string>()
     for (const h of harnesses) if (h.category) s.add(h.category)
     return [
-      { value: '', label: '전체 대분류' },
+      { value: '', label: t('allCategories') },
       ...[...s].sort().map((c) => ({ value: c, label: c })),
     ]
-  }, [harnesses])
+  }, [harnesses, t])
 
   const userOptions = useMemo(() => {
     const m = new Map<string, string>()
@@ -95,12 +98,12 @@ export function HarnessList({
       if (h.createdBy) m.set(h.createdBy, authors[h.createdBy]?.name ?? fmtSubject(h.createdBy))
     }
     return [
-      { value: '', label: '전체 사용자' },
+      { value: '', label: t('allUsers') },
       ...[...m.entries()]
         .sort((a, b) => a[1].localeCompare(b[1]))
         .map(([sub, name]) => ({ value: sub, label: name })),
     ]
-  }, [harnesses, authors])
+  }, [harnesses, authors, t])
 
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
@@ -123,9 +126,13 @@ export function HarnessList({
   return (
     <div className="space-y-5">
       <div className="grid grid-cols-3 gap-3">
-        <StatCard label="하니스" value={harnesses.length} />
-        <StatCard label="대분류" value={catCount} />
-        <StatCard label="실행됨" value={ranCount} tone={ranCount > 0 ? 'primary' : 'default'} />
+        <StatCard label={t('statHarnesses')} value={harnesses.length} />
+        <StatCard label={t('statCategories')} value={catCount} />
+        <StatCard
+          label={t('statRan')}
+          value={ranCount}
+          tone={ranCount > 0 ? 'primary' : 'default'}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-2.5">
@@ -134,16 +141,16 @@ export function HarnessList({
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="id · 대분류 · kind · 모델로 검색"
+            placeholder={t('searchPlaceholder')}
             className="pl-8"
-            aria-label="하니스 검색"
+            aria-label={t('searchAria')}
           />
         </div>
         <Combobox
           options={categoryOptions}
           value={category}
           onChange={setCategory}
-          placeholder="대분류"
+          placeholder={t('categoryPlaceholder')}
           className="w-[150px]"
         />
         {userOptions.length > 1 && (
@@ -151,26 +158,22 @@ export function HarnessList({
             options={userOptions}
             value={user}
             onChange={setUser}
-            placeholder="사용자"
+            placeholder={t('userPlaceholder')}
             className="w-[150px]"
           />
         )}
         <Combobox
-          options={SORTS.map((s) => ({ value: s.value, label: s.label }))}
+          options={sorts.map((s) => ({ value: s.value, label: s.label }))}
           value={sort}
           onChange={(v) => setSort(v as Sort)}
           className="w-[130px]"
           align="end"
-          aria-label="정렬"
+          aria-label={t('sortAria')}
         />
       </div>
 
       {visible.length === 0 ? (
-        <EmptyState
-          icon={<Boxes />}
-          title="조건에 맞는 하니스가 없어요."
-          hint="검색어나 필터를 바꿔보세요."
-        />
+        <EmptyState icon={<Boxes />} title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <div className="space-y-2">
           {visible.map((h) => {
@@ -200,14 +203,16 @@ export function HarnessList({
                           </code>
                         )}
                         {nver > 1 && (
-                          <span className="text-[11px] text-faint">+{nver - 1}개 버전</span>
+                          <span className="text-[11px] text-faint">
+                            {t('moreVersions', { n: nver - 1 })}
+                          </span>
                         )}
                         {h.private && (
                           <span
-                            title="개인 시크릿을 참조 — 나만 볼 수 있어요"
+                            title={t('privateTitle')}
                             className="inline-flex items-center gap-0.5 rounded bg-[var(--color-warning)]/10 px-1.5 py-0.5 text-[10.5px] font-[510] text-[var(--color-warning)] ring-1 ring-inset ring-[var(--color-warning)]/30"
                           >
-                            <Lock className="size-2.5" /> 비공개
+                            <Lock className="size-2.5" /> {t('privateBadge')}
                           </span>
                         )}
                       </div>
@@ -234,7 +239,7 @@ export function HarnessList({
                     <UserAvatar
                       name={author.name}
                       url={author.avatarUrl}
-                      label="만든이"
+                      label={t('creator')}
                       className="shrink-0"
                     />
                   )}
@@ -244,7 +249,8 @@ export function HarnessList({
                 <div className="mt-2.5 flex flex-wrap items-center gap-x-3 gap-y-1.5 pl-11 text-[11.5px] text-faint">
                   <span className="inline-flex items-center gap-1">
                     <Layers className="size-3.5" />
-                    버전 <span className="tabular-nums text-muted-foreground">{nver}</span>
+                    {t('versions')}{' '}
+                    <span className="tabular-nums text-muted-foreground">{nver}</span>
                   </span>
                   <span className="inline-flex items-center gap-1">
                     <Waypoints className="size-3.5" />
@@ -263,17 +269,17 @@ export function HarnessList({
                         )}
                       </span>
                     ) : (
-                      <span>실행 벤치마크 없음</span>
+                      <span>{t('noBenchmark')}</span>
                     )}
                   </span>
                   <span className="inline-flex items-center gap-1">
-                    <span className="text-faint">최근 결과</span>
+                    <span className="text-faint">{t('latestResult')}</span>
                     <LatestResult rel={rel} />
                   </span>
                   {rel?.lastRunAt && (
                     <span
                       className="inline-flex items-center gap-1"
-                      title={`최근 실행 ${fmtDateTimeFull(rel.lastRunAt)}`}
+                      title={t('lastRunAt', { at: fmtDateTimeFull(rel.lastRunAt) })}
                     >
                       <Clock className="size-3.5" />
                       {fmtDateTime(rel.lastRunAt)}

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { SecretPicker } from '@/features/pick-secret'
 import type { ImageRegistryConfig } from '@/entities/image-registry'
@@ -25,6 +26,7 @@ export function ImageRegistryManager({
   canWrite: boolean
   secretNames: string[]
 }) {
+  const t = useTranslations('manageImageRegistry')
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
   const [missingSecrets, setMissingSecrets] = useState<string[]>()
@@ -65,11 +67,11 @@ export function ImageRegistryManager({
     setError(undefined)
     setMissingSecrets(undefined)
     if (!name.trim()) {
-      setError('레지스트리 이름을 입력해주세요.')
+      setError(t('validationName'))
       return
     }
     if (!host.trim()) {
-      setError('레지스트리 호스트를 입력해주세요.')
+      setError(t('validationHost'))
       return
     }
     startTransition(async () => {
@@ -103,27 +105,18 @@ export function ImageRegistryManager({
     <div className="space-y-3">
       <div className="space-y-1">
         <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-          이미지 레지스트리
+          {t('title')}
           <InfoTip
-            content={
-              <>
-                팀 이미지 레지스트리(GHCR·Harbor 등)를 등록하면 하니스 이미지가 로컬 빌드인지
-                워크스페이스 이미지인지 구분돼요. 멤버는{' '}
-                <span className="font-mono">assay image push</span> 로 로컬 빌드 이미지를 여기로
-                발행해요 — 여러 개면 <span className="font-mono">--registry &lt;이름&gt;</span> 으로
-                고르고, 1개뿐이면 생략해도 돼요. 토큰은 워크스페이스 시크릿에서 고르거나 “새로”로
-                바로 저장해요 — 여기엔 그 이름만 남아요.
-              </>
-            }
+            content={t.rich('titleTip', {
+              mono: (chunks) => <span className="font-mono">{chunks}</span>,
+            })}
           />
         </h3>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          워크스페이스 단위로 등록하면 이미지 출처 분류와 발행에 쓰여요.
-        </p>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
       </div>
 
       {registries.length === 0 ? (
-        <p className="text-[13px] text-muted-foreground">아직 등록된 이미지 레지스트리가 없어요.</p>
+        <p className="text-[13px] text-muted-foreground">{t('empty')}</p>
       ) : (
         <SettingsList>
           {registries.map((r) => (
@@ -140,7 +133,8 @@ export function ImageRegistryManager({
               }
               hint={
                 <span className="break-all font-mono text-[11.5px]">
-                  {r.imagePrefix}&lt;이미지&gt;:&lt;태그&gt;
+                  {r.imagePrefix}
+                  {t('imageRefSuffix')}
                 </span>
               }
             >
@@ -152,7 +146,7 @@ export function ImageRegistryManager({
                     disabled={pending}
                     onClick={() => startEdit(r)}
                   >
-                    편집
+                    {t('edit')}
                   </button>
                   <button
                     type="button"
@@ -160,7 +154,7 @@ export function ImageRegistryManager({
                     disabled={pending}
                     onClick={() => onRemove(r.name)}
                   >
-                    삭제
+                    {t('delete')}
                   </button>
                 </>
               )}
@@ -171,13 +165,12 @@ export function ImageRegistryManager({
 
       {registries.length > 0 && (
         <div className="space-y-1 rounded-md border bg-elevated px-3 py-2 text-[12px]">
-          <p className="font-[510] text-foreground">발행(push) 방법</p>
+          <p className="font-[510] text-foreground">{t('pushMethodTitle')}</p>
           <p className="text-muted-foreground">
-            <code className="break-all text-foreground">
-              assay image push &lt;로컬 이미지&gt; --registry &lt;이름&gt;
-            </code>{' '}
-            — 그 레지스트리의 프리픽스 아래로 발행해요. 레지스트리가 1개뿐이면{' '}
-            <code className="break-all">--registry</code> 는 생략 가능해요.
+            {t.rich('pushHint', {
+              cmd: (chunks) => <code className="break-all text-foreground">{chunks}</code>,
+              flag: (chunks) => <code className="break-all">{chunks}</code>,
+            })}
           </p>
         </div>
       )}
@@ -185,22 +178,22 @@ export function ImageRegistryManager({
       {canWrite && (
         <div className="space-y-3 rounded-lg border bg-card p-4 shadow-raise">
           <p className="text-[12px] font-[560] text-foreground">
-            {editing ? `${editing} 수정` : '새 레지스트리 추가'}
+            {editing ? t('editTitle', { name: editing }) : t('addTitle')}
           </p>
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1">
-              <Label htmlFor="reg-name">이름</Label>
+              <Label htmlFor="reg-name">{t('nameLabel')}</Label>
               {/* 이름 = upsert 키 — 편집 중엔 잠가서 의도치 않은 별도 레지스트리 생성(rename≠upsert)을 막는다. */}
               <Input
                 id="reg-name"
-                placeholder="예: team-ghcr"
+                placeholder={t('namePlaceholder')}
                 value={name}
                 disabled={editing !== undefined}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="reg-host">레지스트리 호스트</Label>
+              <Label htmlFor="reg-host">{t('hostLabel')}</Label>
               <Input
                 id="reg-host"
                 placeholder="ghcr.io · registry.acme.dev:5000"
@@ -209,26 +202,26 @@ export function ImageRegistryManager({
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="reg-namespace">네임스페이스 (선택)</Label>
+              <Label htmlFor="reg-namespace">{t('namespaceLabel')}</Label>
               <Input
                 id="reg-namespace"
-                placeholder="acme → ghcr.io/acme/<이미지>"
+                placeholder={t('namespacePlaceholder')}
                 value={namespace}
                 onChange={(e) => setNamespace(e.target.value)}
               />
             </div>
             <div className="space-y-1">
-              <Label htmlFor="reg-username">사용자명 (선택)</Label>
+              <Label htmlFor="reg-username">{t('usernameLabel')}</Label>
               <Input
                 id="reg-username"
-                placeholder="docker login 사용자명 — 토큰 단독 레지스트리는 비워둬요"
+                placeholder={t('usernamePlaceholder')}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
               />
             </div>
             {/* pull/push 토큰은 자유 텍스트가 아니라 워크스페이스 시크릿 참조 — 고르거나 인라인 생성. */}
             <div className="space-y-1">
-              <Label htmlFor="reg-pull">pull 토큰 시크릿 (선택)</Label>
+              <Label htmlFor="reg-pull">{t('pullTokenLabel')}</Label>
               <SecretPicker
                 id="reg-pull"
                 value={pullName}
@@ -236,20 +229,17 @@ export function ImageRegistryManager({
                 names={names}
                 scope="workspace"
                 onCreated={(n) => setCreated((c) => [...c, n])}
-                createValuePlaceholder="pull 토큰 붙여넣기"
-                aria-label="pull 토큰 시크릿 선택"
+                createValuePlaceholder={t('pullTokenPlaceholder')}
+                aria-label={t('pullTokenAria')}
               />
             </div>
             <div className="space-y-1">
               <Label htmlFor="reg-push" className="flex items-center gap-1.5">
-                push 토큰 시크릿 (선택)
+                {t('pushTokenLabel')}
                 <InfoTip
-                  content={
-                    <>
-                      멤버가 <span className="font-mono">assay image push</span> 로 발행할 때 쓰는
-                      토큰이에요. 설정하지 않으면 발행은 막히고 분류만 동작해요.
-                    </>
-                  }
+                  content={t.rich('pushTokenTip', {
+                    mono: (chunks) => <span className="font-mono">{chunks}</span>,
+                  })}
                 />
               </Label>
               <SecretPicker
@@ -259,15 +249,15 @@ export function ImageRegistryManager({
                 names={names}
                 scope="workspace"
                 onCreated={(n) => setCreated((c) => [...c, n])}
-                createValuePlaceholder="push 토큰 붙여넣기"
-                aria-label="push 토큰 시크릿 선택"
+                createValuePlaceholder={t('pushTokenPlaceholder')}
+                aria-label={t('pushTokenAria')}
               />
             </div>
           </div>
 
           <div className="flex items-center gap-3">
             <Button size="sm" disabled={pending} onClick={onSave}>
-              {pending ? '저장 중…' : editing ? '갱신' : '등록'}
+              {pending ? t('saving') : editing ? t('update') : t('register')}
             </Button>
             {editing && (
               <button
@@ -276,7 +266,7 @@ export function ImageRegistryManager({
                 disabled={pending}
                 onClick={resetForm}
               >
-                취소
+                {t('cancel')}
               </button>
             )}
           </div>
@@ -285,8 +275,7 @@ export function ImageRegistryManager({
 
       {missingSecrets && missingSecrets.length > 0 && (
         <Callout tone="warning" className="py-1.5">
-          참조한 시크릿이 아직 없어요: {missingSecrets.join(', ')} — 시크릿 탭에서 저장하면 바로
-          동작해요.
+          {t('missingSecrets', { names: missingSecrets.join(', ') })}
         </Callout>
       )}
       {error && (

@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { Database } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { DatasetList } from '@/widgets/dataset-list'
 import { datasetsSchema } from '@/entities/dataset'
@@ -19,6 +20,7 @@ export const dynamic = 'force-dynamic'
 export default async function DatasetsPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('datasetsPage')
 
   let error: string | undefined
   let datasets = datasetsSchema.parse([])
@@ -54,8 +56,8 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
   return (
     <div className="space-y-6">
       <PageHeader
-        title="벤치마크"
-        description="어떤 하니스든 같은 문제로 공정하게 비교해요."
+        title={t('title')}
+        description={t('description')}
         actions={
           can(principal?.roles, 'datasets:write') ? (
             <div className="flex gap-2">
@@ -63,23 +65,19 @@ export default async function DatasetsPage({ params }: { params: Promise<{ works
                 href={`/${workspace}/datasets/import`}
                 className={buttonVariants({ size: 'sm', variant: 'secondary' })}
               >
-                소스에서 가져오기
+                {t('importFromSource')}
               </Link>
               <Link href={`/${workspace}/datasets/new`} className={buttonVariants({ size: 'sm' })}>
-                벤치마크 등록
+                {t('register')}
               </Link>
             </div>
           ) : null
         }
       />
       {error ? (
-        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : ownDatasets.length === 0 ? (
-        <EmptyState
-          icon={<Database />}
-          title="아직 벤치마크가 없어요."
-          hint="첫 벤치마크를 만들어보세요. 직접 올리거나 소스에서 가져올 수 있어요."
-        />
+        <EmptyState icon={<Database />} title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <DatasetList
           workspace={workspace}

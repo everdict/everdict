@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { Button } from '@/shared/ui/button'
 import { Combobox } from '@/shared/ui/combobox'
@@ -28,6 +29,7 @@ export function LeaderboardPicker({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('leaderboardScorecards')
   const [d, setD] = useState(dataset ?? datasets[0]?.id ?? '')
   const [m, setM] = useState(metric ?? 'judge')
   const [w, setW] = useState(window === 'best' ? 'best' : 'latest')
@@ -45,7 +47,7 @@ export function LeaderboardPicker({
   return (
     <div className="flex flex-wrap items-end gap-3">
       <div className="min-w-56 space-y-1.5">
-        <Label htmlFor="dataset">Dataset (벤치마크)</Label>
+        <Label htmlFor="dataset">{t('datasetLabel')}</Label>
         <Combobox
           id="dataset"
           value={d}
@@ -55,33 +57,33 @@ export function LeaderboardPicker({
         />
       </div>
       <div className="min-w-36 space-y-1.5">
-        <Label htmlFor="metric">Metric</Label>
+        <Label htmlFor="metric">{t('metricLabel')}</Label>
         <Input id="metric" value={m} onChange={(e) => setM(e.target.value)} placeholder="judge" />
       </div>
       <div className="min-w-44 space-y-1.5">
-        <Label htmlFor="window">집계</Label>
+        <Label htmlFor="window">{t('windowLabel')}</Label>
         <Combobox
           id="window"
           value={w}
           onChange={setW}
           options={[
-            { value: 'latest', label: 'latest (최신 실행)' },
-            { value: 'best', label: 'best (최고 점수)' },
+            { value: 'latest', label: t('windowLatest') },
+            { value: 'best', label: t('windowBest') },
           ]}
           className="w-full"
         />
       </div>
       <div className="min-w-40 space-y-1.5">
-        <Label htmlFor="judgeModel">Judge 모델 (선택)</Label>
+        <Label htmlFor="judgeModel">{t('judgeModelLabel')}</Label>
         <Input
           id="judgeModel"
           value={jm}
           onChange={(e) => setJm(e.target.value)}
-          placeholder="같은 채점자만"
+          placeholder={t('judgeModelPlaceholder')}
         />
       </div>
       <Button type="button" onClick={go} disabled={!d}>
-        리더보드 보기
+        {t('submit')}
       </Button>
     </div>
   )

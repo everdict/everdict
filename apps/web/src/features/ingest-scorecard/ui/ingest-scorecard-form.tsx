@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 import { Button } from '@/shared/ui/button'
@@ -38,6 +39,7 @@ type Mode = 'push' | 'pull'
 export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('ingestScorecard')
   const [mode, setMode] = useState<Mode>('push')
   const [datasetId, setDatasetId] = useState(datasets[0]?.id ?? '')
   const [datasetVersion, setDatasetVersion] = useState('latest')
@@ -80,7 +82,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
           })
     setBusy(false)
     if (res.ok && res.id) router.push(`/${workspace}/scorecards/${res.id}`)
-    else setServerError(res.error ?? '가져오지 못했어요')
+    else setServerError(res.error ?? t('submitError'))
   }
 
   return (
@@ -99,31 +101,29 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
                 : 'text-muted-foreground hover:text-foreground'
             )}
           >
-            {m === 'push' ? '업로드' : '소스에서 가져오기'}
+            {m === 'push' ? t('modePush') : t('modePull')}
           </button>
         ))}
       </div>
       <p className="text-[12px] text-muted-foreground">
-        {mode === 'push'
-          ? '이미 가진 트레이스를 직접 올려요.'
-          : 'OTel·MLflow·Langfuse·LangSmith·Phoenix에서 트레이스를 가져와요. 인증 정보는 값을 직접 적지 말고 워크스페이스 시크릿 이름으로 넣어주세요.'}
+        {mode === 'push' ? t('pushDescription') : t('pullDescription')}
       </p>
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="datasetId">데이터셋</Label>
+          <Label htmlFor="datasetId">{t('datasetLabel')}</Label>
           <Combobox
             id="datasetId"
             value={datasetId}
             onChange={setDatasetId}
             options={datasets.map((d) => ({ value: d.id }))}
-            placeholder="데이터셋 선택"
-            emptyText="데이터셋이 없어요"
+            placeholder={t('datasetPlaceholder')}
+            emptyText={t('datasetEmpty')}
             className="w-full"
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="datasetVersion">버전</Label>
+          <Label htmlFor="datasetVersion">{t('versionLabel')}</Label>
           <Input
             id="datasetVersion"
             value={datasetVersion}
@@ -135,7 +135,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
 
       <div className="grid grid-cols-3 gap-3">
         <div className="col-span-2 space-y-1.5">
-          <Label htmlFor="harnessId">하니스 (트레이스를 만든 곳)</Label>
+          <Label htmlFor="harnessId">{t('harnessLabel')}</Label>
           <Input
             id="harnessId"
             value={harnessId}
@@ -144,7 +144,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="harnessVersion">버전</Label>
+          <Label htmlFor="harnessVersion">{t('versionLabel')}</Label>
           <Input
             id="harnessVersion"
             value={harnessVersion}
@@ -157,7 +157,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
       {mode === 'push' ? (
         <div className="space-y-1.5">
           <Label htmlFor="traces">
-            트레이스 (`[{'{'} caseId, trace: TraceEvent[] {'}'}]` JSON)
+            {t('tracesLabel', { sample: '[{ caseId, trace: TraceEvent[] }]' })}
           </Label>
           <Textarea
             id="traces"
@@ -166,16 +166,13 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
             onChange={(e) => setTracesJson(e.target.value)}
             spellCheck={false}
           />
-          <p className="text-[12px] text-muted-foreground">
-            caseId는 데이터셋의 케이스와 맞춰주세요. 없는 caseId는 건너뛰어요. 도구 호출·비용 같은
-            정보는 트레이스에서 자동으로 계산돼요.
-          </p>
+          <p className="text-[12px] text-muted-foreground">{t('pushTracesHelp')}</p>
         </div>
       ) : (
         <>
           <div className="grid grid-cols-3 gap-3">
             <div className="space-y-1.5">
-              <Label htmlFor="sourceKind">소스 종류</Label>
+              <Label htmlFor="sourceKind">{t('sourceKindLabel')}</Label>
               <Combobox
                 id="sourceKind"
                 value={sourceKind}
@@ -197,7 +194,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
               />
             </div>
             <div className="col-span-2 space-y-1.5">
-              <Label htmlFor="endpoint">주소</Label>
+              <Label htmlFor="endpoint">{t('endpointLabel')}</Label>
               <Input
                 id="endpoint"
                 value={endpoint}
@@ -220,34 +217,29 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
           {/* phoenix 는 스팬 조회 경로에 프로젝트가 필수 — 그 외 kind 에선 숨김. */}
           {sourceKind === 'phoenix' && (
             <div className="space-y-1.5">
-              <Label htmlFor="sourceProject">프로젝트</Label>
+              <Label htmlFor="sourceProject">{t('projectLabel')}</Label>
               <Input
                 id="sourceProject"
                 value={sourceProject}
                 onChange={(e) => setSourceProject(e.target.value)}
-                placeholder="프로젝트 이름 또는 ID"
+                placeholder={t('projectPlaceholder')}
               />
             </div>
           )}
 
           <div className="space-y-1.5">
-            <Label htmlFor="authSecret">인증 시크릿 이름 (선택)</Label>
+            <Label htmlFor="authSecret">{t('authSecretLabel')}</Label>
             <Input
               id="authSecret"
               value={authSecret}
               onChange={(e) => setAuthSecret(e.target.value)}
               placeholder="OTEL_TOKEN"
             />
-            <p className="text-[12px] text-muted-foreground">
-              시크릿 값이 인증 헤더에 그대로 쓰여요. 토큰을 직접 적지 말고, 워크스페이스 시크릿
-              이름만 입력해주세요.
-            </p>
+            <p className="text-[12px] text-muted-foreground">{t('authSecretHelp')}</p>
           </div>
 
           <div className="space-y-1.5">
-            <Label htmlFor="runs">
-              실행 매핑 (`[{'{'} caseId, runId {'}'}]` JSON)
-            </Label>
+            <Label htmlFor="runs">{t('runsLabel', { sample: '[{ caseId, runId }]' })}</Label>
             <Textarea
               id="runs"
               className="min-h-48 font-mono text-[12px]"
@@ -255,10 +247,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
               onChange={(e) => setRunsJson(e.target.value)}
               spellCheck={false}
             />
-            <p className="text-[12px] text-muted-foreground">
-              각 runId의 트레이스를 가져와 caseId에 맞춰요. 도구 호출·비용 같은 정보는 자동으로
-              계산돼요.
-            </p>
+            <p className="text-[12px] text-muted-foreground">{t('pullRunsHelp')}</p>
           </div>
         </>
       )}
@@ -266,7 +255,7 @@ export function IngestScorecardForm({ datasets }: { datasets: { id: string }[] }
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <Button type="button" onClick={onSubmit} disabled={busy}>
-        {busy ? '가져오는 중…' : mode === 'push' ? '트레이스 가져오기' : '소스에서 가져오기'}
+        {busy ? t('submitting') : mode === 'push' ? t('submitPush') : t('submitPull')}
       </Button>
     </div>
   )

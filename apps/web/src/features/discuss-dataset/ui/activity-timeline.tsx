@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { BarChart3, History, Sparkles } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -37,13 +38,7 @@ const STATUS_TONE: Record<string, string> = {
   queued: 'text-muted-foreground',
   superseded: 'text-faint',
 }
-const STATUS_LABEL: Record<string, string> = {
-  succeeded: '성공',
-  failed: '실패',
-  running: '실행 중',
-  queued: '대기',
-  superseded: '대체됨',
-}
+const STATUS_KEYS = ['succeeded', 'failed', 'running', 'queued', 'superseded']
 
 // 데이터셋 활동 히스토리(이벤트) — 시간순, 최근 10개만 + '이전 이력 보기'. 댓글/논의는 별도 스레드.
 export function ActivityTimeline({
@@ -53,6 +48,7 @@ export function ActivityTimeline({
   workspace: string
   items: ActivityItem[]
 }) {
+  const t = useTranslations('discussDataset')
   const [shown, setShown] = useState(INITIAL)
   const start = Math.max(0, items.length - shown)
   const visible = items.slice(start)
@@ -67,7 +63,7 @@ export function ActivityTimeline({
           className="inline-flex items-center gap-1.5 rounded-md border bg-card px-2.5 py-1.5 text-[12px] font-[510] text-muted-foreground shadow-raise transition-colors hover:border-border-strong hover:text-foreground"
         >
           <History className="size-3.5" />
-          이전 이력 {hidden}개 더 보기
+          {t('showPrevious', { count: hidden })}
         </button>
       )}
       <ol className="space-y-3">
@@ -89,7 +85,11 @@ function TimelineRail({ item, last }: { item: ActivityItem; last: boolean }) {
     <Avatar name={item.actor.name} url={item.actor.avatarUrl} size="sm" className="rounded-full" />
   ) : (
     <span className="grid size-6 place-items-center rounded-full bg-secondary text-faint ring-1 ring-inset ring-border">
-      {item.kind === 'scorecard' ? <BarChart3 className="size-3" /> : <Sparkles className="size-3" />}
+      {item.kind === 'scorecard' ? (
+        <BarChart3 className="size-3" />
+      ) : (
+        <Sparkles className="size-3" />
+      )}
     </span>
   )
   return (
@@ -101,44 +101,55 @@ function TimelineRail({ item, last }: { item: ActivityItem; last: boolean }) {
 }
 
 function When({ at }: { at: string }) {
+  const locale = useLocale()
   return (
     <time className="shrink-0 text-[11px] text-faint" title={fmtDateTimeFull(at)}>
-      {fmtTimeAgo(at)}
+      {fmtTimeAgo(at, locale)}
     </time>
   )
 }
 
 function EventItem({ workspace, item }: { workspace: string; item: ActivityItem }) {
+  const t = useTranslations('discussDataset')
   if (item.kind === 'created') {
     return (
       <div className="flex min-h-5 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12.5px] text-muted-foreground">
         <span className="font-[560] text-foreground">{item.actor.name}</span>
-        님이 이 데이터셋을 만들었어요
+        {t('createdSuffix')}
         <When at={item.at} />
       </div>
     )
   }
   const tone = STATUS_TONE[item.status] ?? 'text-muted-foreground'
+  const statusLabel = STATUS_KEYS.includes(item.status) ? t(`status.${item.status}`) : item.status
   return (
     <div className="flex min-h-5 flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[12.5px] text-muted-foreground">
-      <span className="font-[560] text-foreground">{item.actor.name}</span>
-      님이
-      <Link
-        href={`/${workspace}/harnesses/${encodeURIComponent(item.harnessId)}`}
-        className="underline-offset-2 hover:text-foreground hover:underline"
-      >
-        <code className="font-mono text-foreground">{item.harness}</code>
-      </Link>
-      <Link
-        href={`/${workspace}/scorecards/${encodeURIComponent(item.scorecardId)}`}
-        className="font-[510] text-foreground underline-offset-2 hover:text-primary hover:underline"
-      >
-        스코어카드
-      </Link>
-      를 실행 ·
-      <span className={cn('font-[560]', tone)}>{STATUS_LABEL[item.status] ?? item.status}</span>
+      {t.rich('scorecardRan', {
+        actor: item.actor.name,
+        harness: item.harness,
+        name: (chunks) => <span className="font-[560] text-foreground">{chunks}</span>,
+        harnessLink: (chunks) => (
+          <Link
+            href={`/${workspace}/harnesses/${encodeURIComponent(item.harnessId)}`}
+            className="underline-offset-2 hover:text-foreground hover:underline"
+          >
+            <code className="font-mono text-foreground">{chunks}</code>
+          </Link>
+        ),
+        cardLink: (chunks) => (
+          <Link
+            href={`/${workspace}/scorecards/${encodeURIComponent(item.scorecardId)}`}
+            className="font-[510] text-foreground underline-offset-2 hover:text-primary hover:underline"
+          >
+            {chunks}
+          </Link>
+        ),
+      })}
+      <span className={cn('font-[560]', tone)}>{statusLabel}</span>
       {item.passRate != null && (
-        <span className="tabular-nums text-faint">통과율 {Math.round(item.passRate * 100)}%</span>
+        <span className="tabular-nums text-faint">
+          {t('passRate', { pct: Math.round(item.passRate * 100) })}
+        </span>
       )}
       <When at={item.at} />
     </div>

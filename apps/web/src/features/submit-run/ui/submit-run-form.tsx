@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 import { Controller, useForm } from 'react-hook-form'
 
 import type { Harness } from '@/entities/harness'
@@ -35,6 +36,7 @@ export function SubmitRunForm({
 }) {
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
+  const t = useTranslations('submitRun')
   const [serverError, setServerError] = useState<string>()
   const {
     control,
@@ -59,25 +61,25 @@ export function SubmitRunForm({
     setServerError(undefined)
     const res = await submitRunAction(values)
     if (res.ok && res.id) router.push(`/${workspace}/runs/${res.id}`)
-    else setServerError(res.error ?? '실행하지 못했어요')
+    else setServerError(res.error ?? t('submitError'))
   }
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="max-w-xl space-y-5">
       <div className="space-y-1.5">
-        <Label htmlFor="harnessId">하니스</Label>
+        <Label htmlFor="harnessId">{t('harnessLabel')}</Label>
         <Controller
           control={control}
           name="harnessId"
-          rules={{ required: '하니스를 골라주세요' }}
+          rules={{ required: t('harnessRequired') }}
           render={({ field }) => (
             <Combobox
               id="harnessId"
               options={harnesses.map((h) => ({ value: h.id }))}
               value={field.value}
               onChange={field.onChange}
-              placeholder="하니스 선택"
-              emptyText="하니스가 없어요"
+              placeholder={t('harnessPlaceholder')}
+              emptyText={t('harnessEmpty')}
             />
           )}
         />
@@ -85,28 +87,28 @@ export function SubmitRunForm({
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="version">버전</Label>
+        <Label htmlFor="version">{t('versionLabel')}</Label>
         <Input id="version" placeholder="latest" {...register('version')} />
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="task">작업</Label>
+        <Label htmlFor="task">{t('taskLabel')}</Label>
         <Textarea
           id="task"
-          placeholder="예: create ok.txt with the text done"
-          {...register('task', { required: '작업을 입력해주세요' })}
+          placeholder={t('taskPlaceholder')}
+          {...register('task', { required: t('taskRequired') })}
         />
         <FieldError message={errors.task?.message} />
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="runtime">런타임</Label>
+        <Label htmlFor="runtime">{t('runtimeLabel')}</Label>
         {/* optgroup 대응 — 내 로컬 러너는 우측 hint 로 구분(flat 리스트) */}
         {/* 실행 위치는 필수 — 컨트롤플레인 호스트 폴백이 금지돼(requireRuntime) 미지정 run 은 400. */}
         <Controller
           control={control}
           name="runtime"
-          rules={{ required: '런타임을 선택하세요' }}
+          rules={{ required: t('runtimeRequired') }}
           render={({ field }) => (
             <Combobox
               id="runtime"
@@ -114,33 +116,37 @@ export function SubmitRunForm({
                 ...runtimes.map((r) => ({ value: r.id })),
                 // 팀 공유 러너 풀 — 등록된 팀 러너 중 아무거나(capability 충족) 가져간다(멀티러너=동시성).
                 ...(hasWorkspaceRunners
-                  ? [{ value: 'self:ws', label: '팀 공유 러너 (아무거나)', hint: '팀' }]
+                  ? [
+                      {
+                        value: 'self:ws',
+                        label: t('poolWorkspaceLabel'),
+                        hint: t('poolWorkspaceHint'),
+                      },
+                    ]
                   : []),
                 // 내 러너 풀 — 내 러너(여러 대일 수 있음) 중 아무거나. 특정 러너는 아래 개별 항목.
                 ...(runners.length > 0
-                  ? [{ value: 'self', label: '내 러너 (아무거나)', hint: '내 컴퓨터' }]
+                  ? [{ value: 'self', label: t('poolSelfLabel'), hint: t('poolSelfHint') }]
                   : []),
                 ...runners.map((r) => ({
                   value: `self:${r.id}`,
                   label: r.label,
-                  hint: '내 컴퓨터',
+                  hint: t('poolSelfHint'),
                 })),
               ]}
               value={field.value}
               onChange={field.onChange}
-              placeholder="런타임 선택"
-              emptyText="등록된 런타임이나 러너가 없어요"
+              placeholder={t('runtimePlaceholder')}
+              emptyText={t('runtimeEmpty')}
             />
           )}
         />
         <FieldError message={errors.runtime?.message} />
-        <p className="text-[12px] text-faint">
-          어디서 실행할지 골라요. 등록한 런타임이나 러너가 없다면 먼저 등록해주세요.
-        </p>
+        <p className="text-[12px] text-faint">{t('runtimeHelp')}</p>
       </div>
 
       <div className="space-y-1.5">
-        <Label htmlFor="sourceKind">작업 폴더</Label>
+        <Label htmlFor="sourceKind">{t('sourceLabel')}</Label>
         <Controller
           control={control}
           name="sourceKind"
@@ -148,8 +154,8 @@ export function SubmitRunForm({
             <Combobox
               id="sourceKind"
               options={[
-                { value: 'files', label: '빈 폴더' },
-                { value: 'git', label: 'Git 저장소' },
+                { value: 'files', label: t('sourceFiles') },
+                { value: 'git', label: t('sourceGit') },
               ]}
               value={field.value}
               onChange={field.onChange}
@@ -161,32 +167,28 @@ export function SubmitRunForm({
       {sourceKind === 'git' && (
         <div className="space-y-4 rounded-lg border bg-muted/30 p-4">
           <div className="space-y-1.5">
-            <Label htmlFor="gitUrl">Git URL</Label>
+            <Label htmlFor="gitUrl">{t('gitUrlLabel')}</Label>
             <Input
               id="gitUrl"
               placeholder="https://github.com/acme/repo.git"
               {...register('gitUrl', {
-                validate: (v) =>
-                  sourceKind !== 'git' || v.trim().length > 0 || 'Git 주소를 입력해주세요',
+                validate: (v) => sourceKind !== 'git' || v.trim().length > 0 || t('gitUrlRequired'),
               })}
             />
             <FieldError message={errors.gitUrl?.message} />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="gitRef">브랜치</Label>
+            <Label htmlFor="gitRef">{t('branchLabel')}</Label>
             <Input id="gitRef" placeholder="main" {...register('gitRef')} />
           </div>
-          <p className="text-[12px] text-faint">
-            비공개 저장소는 워크스페이스 GitHub App 이 그 저장소에 설치돼 있으면 자동으로 인증해
-            내려받아요(설정 › 통합). 공개 저장소는 바로 실행할 수 있어요.
-          </p>
+          <p className="text-[12px] text-faint">{t('gitHelp')}</p>
         </div>
       )}
 
       {serverError && <Callout tone="danger">{serverError}</Callout>}
 
       <Button type="submit" disabled={isSubmitting}>
-        {isSubmitting ? '실행하는 중…' : '실행하기'}
+        {isSubmitting ? t('submitting') : t('submit')}
       </Button>
     </form>
   )

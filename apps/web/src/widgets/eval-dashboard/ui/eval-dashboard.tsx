@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronRight, FlaskConical } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { MetricSummary, ScorecardRecord } from '@/entities/scorecard'
 import { fmtDateTime, fmtPct } from '@/shared/lib/format'
@@ -50,6 +51,7 @@ export function EvalDashboard({
   scorecards: ScorecardRecord[]
   workspace: string
 }) {
+  const t = useTranslations('evalDashboard')
   const done = scorecards.filter((s) => s.status === 'succeeded')
   const benchmarks = new Set(scorecards.map((s) => s.dataset.id))
   const harnesses = new Set(scorecards.map((s) => s.harness.id))
@@ -61,7 +63,7 @@ export function EvalDashboard({
       href={`/${workspace}/scorecards`}
       className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
     >
-      전체 보기
+      {t('viewAll')}
       <ChevronRight className="size-3.5" />
     </Link>
   )
@@ -69,12 +71,8 @@ export function EvalDashboard({
   if (scorecards.length === 0) {
     return (
       <section className="space-y-2.5">
-        <SectionHeader title="평가 대시보드" />
-        <EmptyState
-          icon={<FlaskConical />}
-          title="아직 평가를 실행하지 않았어요."
-          hint="스코어카드를 실행하면 벤치마크 결과가 모여요."
-        />
+        <SectionHeader title={t('title')} />
+        <EmptyState icon={<FlaskConical />} title={t('emptyTitle')} hint={t('emptyHint')} />
       </section>
     )
   }
@@ -97,14 +95,14 @@ export function EvalDashboard({
 
   return (
     <section className="space-y-3">
-      <SectionHeader title="평가 대시보드" action={viewAll} />
+      <SectionHeader title={t('title')} action={viewAll} />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard label="평가 실행" value={scorecards.length} />
-        <StatCard label="벤치마크" value={benchmarks.size} />
-        <StatCard label="하니스" value={harnesses.size} />
+        <StatCard label={t('statRuns')} value={scorecards.length} />
+        <StatCard label={t('statBenchmarks')} value={benchmarks.size} />
+        <StatCard label={t('statHarnesses')} value={harnesses.size} />
         <StatCard
-          label="평균 통과율"
+          label={t('statAvgPass')}
           value={avgPass != null ? fmtPct(avgPass) : '–'}
           tone="primary"
         />
@@ -121,7 +119,7 @@ export function EvalDashboard({
                 <EntityRef id={b.id} kind="dataset" />
               </span>
               <span className="shrink-0 text-[11px] tabular-nums text-faint">
-                {b.cases} 케이스 · {b.runs.length}회 실행
+                {t('benchMeta', { cases: b.cases, runs: b.runs.length })}
               </span>
             </div>
             <ul className="divide-y divide-border/60">

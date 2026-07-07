@@ -1,5 +1,7 @@
 'use client'
 
+import { useTranslations } from 'next-intl'
+
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
 import { CiLinksSettings } from '@/features/manage-ci-links'
 import type { GithubAppNotice } from '@/features/manage-github-app'
@@ -51,20 +53,21 @@ export function SettingsTabs(props: {
   initialTab?: string // ?tab=… (예: 계정→연결 탭의 "통합 설정 →" 딥링크가 integrations 탭으로 바로 안착)
   initialIntegration?: string // ?app=… — 통합 탭 안에서 특정 통합 상세로 바로 드릴인
 }) {
+  const t = useTranslations('settingsPage')
   const tabs: { key: TabKey; label: string; show: boolean }[] = [
-    { key: 'general', label: '일반', show: props.canReadSettings },
-    { key: 'secrets', label: '시크릿', show: props.canReadSecrets },
-    { key: 'integrations', label: '통합', show: props.canReadSettings },
-    { key: 'ci', label: 'CI 연동', show: props.canReadSettings },
-    { key: 'runners', label: '공유 러너', show: props.canWriteSettings },
-    { key: 'members', label: '멤버', show: props.canReadMembers },
+    { key: 'general', label: t('tabGeneral'), show: props.canReadSettings },
+    { key: 'secrets', label: t('tabSecrets'), show: props.canReadSecrets },
+    { key: 'integrations', label: t('tabIntegrations'), show: props.canReadSettings },
+    { key: 'ci', label: t('tabCi'), show: props.canReadSettings },
+    { key: 'runners', label: t('tabRunners'), show: props.canWriteSettings },
+    { key: 'members', label: t('tabMembers'), show: props.canReadMembers },
   ]
-  const visible = tabs.filter((t) => t.show)
+  const visible = tabs.filter((tab) => tab.show)
   // ?tab= 가 보이는 탭 중 하나면 그 탭으로, 아니면 첫 표시 탭.
   // model/cluster = 시크릿이 두 탭이던 시절의 구 딥링크 — 병합 탭으로 흡수.
   const wantedTab =
     props.initialTab === 'model' || props.initialTab === 'cluster' ? 'secrets' : props.initialTab
-  const requestedTab = visible.find((t) => t.key === wantedTab)?.key
+  const requestedTab = visible.find((tab) => tab.key === wantedTab)?.key
   const defaultTab = requestedTab ?? visible[0]?.key ?? 'general'
   // ?app= 은 네 키 중 하나일 때만 통합 패널의 초기 드릴인으로 넘긴다.
   const initialIntegration = INTEGRATION_KEYS.find((k) => k === props.initialIntegration)
@@ -72,9 +75,9 @@ export function SettingsTabs(props: {
   return (
     <Tabs defaultValue={defaultTab} className="space-y-5">
       <TabsList>
-        {visible.map((t) => (
-          <TabsTrigger key={t.key} value={t.key}>
-            {t.label}
+        {visible.map((tab) => (
+          <TabsTrigger key={tab.key} value={tab.key}>
+            {tab.label}
           </TabsTrigger>
         ))}
       </TabsList>

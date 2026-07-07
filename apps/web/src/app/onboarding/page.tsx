@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation'
 import { FlaskConical } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { CreateWorkspaceForm } from '@/features/create-workspace'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -10,6 +11,7 @@ export const dynamic = 'force-dynamic'
 // 첫 로그인 온보딩 — 워크스페이스가 0개인 사용자가 첫 워크스페이스를 만든다(Linear 식). 슬러그가 아직 없어
 // [workspace] 밑이 아니라 최상위 라우트로 둔다. 만들면 그 워크스페이스(/{id})로 들어간다.
 export default async function OnboardingPage() {
+  const t = await getTranslations('onboardingPage')
   const { principal } = await currentPrincipal()
   // 미인증/인증 교환 실패 → 랜딩(/)이 아니라 곧장 로그인으로. `/` 로 보내면 미들웨어·페이지가 다시 튕겨 루프.
   if (!principal) redirect('/api/auth/signin')
@@ -25,12 +27,8 @@ export default async function OnboardingPage() {
         <span className="font-display text-[16px] font-[560] tracking-tight">Assay</span>
       </div>
       <div className="space-y-2">
-        <h1 className="font-display text-[22px] font-[560] tracking-[-0.02em]">
-          워크스페이스를 만들어 시작하세요
-        </h1>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          평가를 담을 워크스페이스를 하나 만들어보세요. 만들면 바로 시작할 수 있어요.
-        </p>
+        <h1 className="font-display text-[22px] font-[560] tracking-[-0.02em]">{t('title')}</h1>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">{t('description')}</p>
       </div>
       <Card className="p-5">
         <CreateWorkspaceForm />

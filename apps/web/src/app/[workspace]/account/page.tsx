@@ -1,3 +1,5 @@
+import { getTranslations } from 'next-intl/server'
+
 import { apiKeysSchema, type ApiKeyMeta } from '@/entities/api-key'
 import { secretsSchema, type SecretMeta } from '@/entities/secret'
 import { currentPrincipal } from '@/shared/auth/principal'
@@ -17,15 +19,13 @@ export default async function AccountPage({
   searchParams: Promise<{ tab?: string }>
 }) {
   const sp = await searchParams
+  const t = await getTranslations('accountPage')
   const { principal, ctx } = await currentPrincipal()
   if (!principal) {
     return (
       <div className="space-y-6">
-        <PageHeader title="계정" description="내 프로필과 API 키." />
-        <EmptyState
-          title="로그인이 필요해요."
-          hint="로그인 정보를 확인할 수 없어요. 다시 로그인해주세요."
-        />
+        <PageHeader title={t('title')} description={t('descriptionSignedOut')} />
+        <EmptyState title={t('signedOutTitle')} hint={t('signedOutHint')} />
       </div>
     )
   }
@@ -51,7 +51,7 @@ export default async function AccountPage({
 
   return (
     <div className="space-y-6">
-      <PageHeader title="계정" description="내 프로필 · 워크스페이스 · API 키." />
+      <PageHeader title={t('title')} description={t('description')} />
       <AccountTabs
         principal={principal}
         personalSecrets={personalSecrets}

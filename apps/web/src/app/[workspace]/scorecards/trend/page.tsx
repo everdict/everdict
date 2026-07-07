@@ -1,5 +1,7 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+import { getTranslations } from 'next-intl/server'
 
 import { TrendPicker, type DatasetOption } from '@/features/trend-scorecards'
 import { datasetsSchema } from '@/entities/dataset'
@@ -27,6 +29,7 @@ function fmtDelta(n: number | null): string {
 
 // 의존성 없는 인라인 SVG 스파크라인 — score 시계열 + baseline 기준선 + 포인트 hover 툴팁(회귀는 빨강).
 function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
+  const t = useTranslations('scorecardsPage')
   const pts = points
     .map((p, i) => ({ ...p, i }))
     .filter((p): p is (typeof points)[number] & { score: number; i: number } => p.score !== null)
@@ -57,7 +60,12 @@ function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
   const last = pts[pts.length - 1]
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="h-36 w-full" role="img" aria-label="score 추이">
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      className="h-36 w-full"
+      role="img"
+      aria-label={t('sparklineLabel')}
+    >
       <defs>
         <linearGradient id="trend-fill" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor="var(--color-primary)" stopOpacity="0.18" />
@@ -96,7 +104,7 @@ function Sparkline({ points }: { points: ScorecardTrend['points'] }) {
           r={4}
           fill={p.regressed ? 'var(--color-destructive)' : 'var(--color-success)'}
         >
-          <title>{`${fmtDateTime(p.createdAt)} · ${fmtScore(p.passRate, p.mean)}${p.regressed ? ' · 나빠짐' : ''}`}</title>
+          <title>{`${fmtDateTime(p.createdAt)} · ${fmtScore(p.passRate, p.mean)}${p.regressed ? ` · ${t('regressed')}` : ''}`}</title>
         </circle>
       ))}
       <text
@@ -121,6 +129,7 @@ export default async function TrendPage({
   const { workspace } = await params
   const { dataset, metric, baseline } = await searchParams
   const ctx = await authContext()
+  const t = await getTranslations('scorecardsPage')
 
   let options: DatasetOption[] = []
   try {
@@ -157,26 +166,20 @@ export default async function TrendPage({
           className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronLeft className="size-3.5" />
-          스코어카드
+          {t('backToList')}
         </Link>
-        <PageHeader
-          title="추이"
-          description="같은 벤치마크의 점수가 시간에 따라 어떻게 변했는지 봐요."
-        />
+        <PageHeader title={t('trendTitle')} description={t('trendDescription')} />
       </div>
 
       {options.length === 0 ? (
-        <EmptyState
-          title="아직 데이터셋이 없어요."
-          hint="같은 벤치마크를 여러 번 평가하면 추이가 쌓여요."
-        />
+        <EmptyState title={t('noDatasetsTitle')} hint={t('trendEmptyHint')} />
       ) : (
         <Card className="p-4">
           <TrendPicker datasets={options} dataset={dataset} metric={metric} baseline={baseline} />
         </Card>
       )}
 
-      {error && <Callout tone="danger">추이를 불러오지 못했어요: {error}</Callout>}
+      {error && <Callout tone="danger">{t('trendLoadError', { error })}</Callout>}
 
       {trend && (
         <div className="space-y-7">
@@ -196,13 +199,14 @@ export default async function TrendPage({
                 </code>
               </p>
               <Badge tone={regressions.length > 0 ? 'danger' : 'success'}>
-                {regressions.length > 0 ? `나빠짐 ${regressions.length}건` : '이상 없음'}
+                {regressions.length > 0
+                  ? t('regressedCount', { count: regressions.length })
+                  : t('noRegression')}
               </Badge>
             </div>
             {trend.points.length < 2 ? (
               <p className="text-[13px] text-muted-foreground">
-                추이를 그리려면 완료된 스코어카드가 2건 이상 필요해요 (지금 {trend.points.length}
-                건).
+                {t('needTwoPoints', { count: trend.points.length })}
               </p>
             ) : (
               <Sparkline points={trend.points} />
@@ -211,15 +215,15 @@ export default async function TrendPage({
 
           {trend.points.length > 0 && (
             <section className="space-y-2.5">
-              <SectionHeader title="실행 이력" />
+              <SectionHeader title={t('runHistoryTitle')} />
               <Table>
                 <THead>
                   <tr>
-                    <TH>시각</TH>
+                    <TH>{t('thTime')}</TH>
                     <TH>harness</TH>
                     <TH className="text-right">{trend.metric}</TH>
                     <TH className="text-right">Δ vs baseline</TH>
-                    <TH className="text-right">상태</TH>
+                    <TH className="text-right">{t('thStatus')}</TH>
                   </tr>
                 </THead>
                 <TBody>
@@ -255,7 +259,7 @@ export default async function TrendPage({
                       </TD>
                       <TD className="text-right">
                         {p.regressed ? (
-                          <Badge tone="danger">나빠짐</Badge>
+                          <Badge tone="danger">{t('regressed')}</Badge>
                         ) : (
                           <span className="text-faint">–</span>
                         )}

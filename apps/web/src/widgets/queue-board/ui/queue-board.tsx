@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { CalendarClock, ChevronsRight, CircleDashed, Laptop, Loader2, Server } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import type { QueueItem, QueueLane, QueueSnapshot } from '@/entities/queue'
 import { fmtDateTime, fmtDateTimeFull, fmtSubject } from '@/shared/lib/format'
@@ -10,17 +11,19 @@ import { EntityRef } from '@/shared/ui/chip'
 import { StatCard } from '@/shared/ui/stat-card'
 
 type Author = { name: string; avatarUrl?: string }
+type Translate = ReturnType<typeof useTranslations<'queueBoard'>>
 
 // 레인 라벨 — 서버가 준 label(러너 호스트명) 우선, '' = 기본 백엔드.
-function laneLabel(lane: QueueLane): string {
+function laneLabel(lane: QueueLane, t: Translate): string {
   if (lane.label) return lane.label
-  if (lane.runtime === '') return '기본 백엔드'
+  if (lane.runtime === '') return t('defaultBackend')
   if (lane.runtime.startsWith('self:')) return lane.runtime.slice('self:'.length)
   return lane.runtime
 }
 
 // 배치 진행률 — total 있으면 바+n/total, 없으면 완료/실행 카운트 텍스트.
 function Progress({ progress }: { progress: NonNullable<QueueItem['progress']> }) {
+  const t = useTranslations('queueBoard')
   const { done, active, total } = progress
   if (total && total > 0) {
     const pct = Math.min(100, Math.round((done / total) * 100))
@@ -32,13 +35,17 @@ function Progress({ progress }: { progress: NonNullable<QueueItem['progress']> }
         <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">
           {done}/{total}
         </span>
-        {active > 0 && <span className="shrink-0 text-[10.5px] text-faint">· 실행 {active}</span>}
+        {active > 0 && (
+          <span className="shrink-0 text-[10.5px] text-faint">
+            {t('runningSuffix', { active })}
+          </span>
+        )}
       </span>
     )
   }
   return (
     <span className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground">
-      완료 {done} · 실행 {active}
+      {t('doneRunning', { done, active })}
     </span>
   )
 }
@@ -55,6 +62,7 @@ function ItemRow({
   authors: Record<string, Author>
   next?: boolean // 대기 큐 맨 앞(다음 작업) 표시
 }) {
+  const t = useTranslations('queueBoard')
   const href =
     item.type === 'scorecard'
       ? `/${workspace}/scorecards/${encodeURIComponent(item.id)}`
@@ -71,7 +79,7 @@ function ItemRow({
         <div className="flex items-center gap-1.5 overflow-hidden whitespace-nowrap text-[12.5px] font-[510]">
           {next && (
             <Badge tone="info" className="shrink-0">
-              다음
+              {t('nextBadge')}
             </Badge>
           )}
           {item.dataset ? (
@@ -97,12 +105,12 @@ function ItemRow({
               <Progress progress={item.progress} />
             ) : (
               <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground">
-                <Loader2 className="size-3 animate-spin" /> 실행 중
+                <Loader2 className="size-3 animate-spin" /> {t('running')}
               </span>
             )
           ) : (
             <span className="inline-flex items-center gap-1 text-[10.5px] text-faint">
-              <CircleDashed className="size-3" /> 대기
+              <CircleDashed className="size-3" /> {t('queued')}
             </span>
           )}
           {item.trigger && (
@@ -112,7 +120,9 @@ function ItemRow({
       </div>
       <div className="flex shrink-0 items-center gap-2">
         <span className="flex w-5 justify-center">
-          {author && <UserAvatar name={author.name} url={author.avatarUrl} label="실행자" />}
+          {author && (
+            <UserAvatar name={author.name} url={author.avatarUrl} label={t('runnerLabel')} />
+          )}
         </span>
         <time
           className="hidden w-[76px] text-right font-mono text-[10.5px] text-muted-foreground sm:block"
@@ -159,6 +169,7 @@ function Lane({
   authors: Record<string, Author>
   personal?: boolean
 }) {
+  const t = useTranslations('queueBoard')
   const idle = lane.running.length === 0 && lane.queued.length === 0 && lane.upcoming.length === 0
   const Icon = personal ? Laptop : Server
   return (
@@ -170,17 +181,17 @@ function Lane({
             href={`/${workspace}/runtimes/${encodeURIComponent(lane.runtime)}`}
             className="truncate text-[13.5px] font-[560] hover:underline"
           >
-            {laneLabel(lane)}
+            {laneLabel(lane, t)}
           </Link>
         ) : (
-          <span className="truncate text-[13.5px] font-[560]">{laneLabel(lane)}</span>
+          <span className="truncate text-[13.5px] font-[560]">{laneLabel(lane, t)}</span>
         )}
         <span className="shrink-0 text-[11.5px] text-faint">
-          실행 {lane.running.length} · 대기 {lane.queued.length}
+          {t('laneStats', { running: lane.running.length, queued: lane.queued.length })}
         </span>
         {idle && (
           <Badge tone="neutral" className="ml-auto shrink-0">
-            유휴
+            {t('idle')}
           </Badge>
         )}
       </div>
@@ -188,9 +199,9 @@ function Lane({
       {!idle && (
         <div className="grid gap-4 lg:grid-cols-[1fr_auto_1fr_auto_1fr]">
           <div className="space-y-1.5">
-            <ColumnHeader title="다음 예약" count={lane.upcoming.length} />
+            <ColumnHeader title={t('colUpcoming')} count={lane.upcoming.length} />
             {lane.upcoming.length === 0 ? (
-              <EmptyColumn label="예정된 발사 없음" />
+              <EmptyColumn label={t('emptyUpcoming')} />
             ) : (
               lane.upcoming.map((u) => (
                 <Link
@@ -217,9 +228,9 @@ function Lane({
           </div>
           <FlowConnector />
           <div className="space-y-1.5">
-            <ColumnHeader title="대기 (선입선출)" count={lane.queued.length} />
+            <ColumnHeader title={t('colQueued')} count={lane.queued.length} />
             {lane.queued.length === 0 ? (
-              <EmptyColumn label="대기 중인 작업 없음" />
+              <EmptyColumn label={t('emptyQueued')} />
             ) : (
               lane.queued.map((i, idx) => (
                 <ItemRow
@@ -234,9 +245,9 @@ function Lane({
           </div>
           <FlowConnector />
           <div className="space-y-1.5">
-            <ColumnHeader title="실행 중" count={lane.running.length} />
+            <ColumnHeader title={t('running')} count={lane.running.length} />
             {lane.running.length === 0 ? (
-              <EmptyColumn label="실행 중인 작업 없음" />
+              <EmptyColumn label={t('emptyRunning')} />
             ) : (
               lane.running.map((i) => (
                 <ItemRow key={i.id} item={i} workspace={workspace} authors={authors} />
@@ -309,42 +320,45 @@ export function QueueBoard({
   workspace: string
   authors: Record<string, Author>
 }) {
+  const t = useTranslations('queueBoard')
   return (
     <div className="space-y-7">
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         <StatCard
-          label="실행 중"
+          label={t('running')}
           value={snapshot.totals.running}
           tone={snapshot.totals.running > 0 ? 'primary' : 'default'}
         />
-        <StatCard label="대기" value={snapshot.totals.queued} />
-        <StatCard label="예정 발사" value={snapshot.totals.upcoming} />
+        <StatCard label={t('queued')} value={snapshot.totals.queued} />
+        <StatCard label={t('upcomingLaunches')} value={snapshot.totals.upcoming} />
         <StatCard
-          label="런타임 레인"
+          label={t('runtimeLanes')}
           value={snapshot.workspace.length + snapshot.personal.length}
         />
       </div>
 
       <LaneGroup
-        title="워크스페이스 큐"
+        title={t('workspaceQueue')}
         lanes={snapshot.workspace}
         workspace={workspace}
         authors={authors}
       />
 
       <LaneGroup
-        title="내 개인 큐 (셀프호스티드)"
+        title={t('personalQueue')}
         lanes={snapshot.personal}
         workspace={workspace}
         authors={authors}
         personal
         emptyHint={
           <p className="text-[12px] text-faint">
-            연결된 내 러너가 없어요 —{' '}
-            <Link href={`/${workspace}/runtimes`} className="text-link hover:underline">
-              런타임에서 내 머신을 연결
-            </Link>
-            해보세요.
+            {t.rich('personalEmpty', {
+              link: (chunks) => (
+                <Link href={`/${workspace}/runtimes`} className="text-link hover:underline">
+                  {chunks}
+                </Link>
+              ),
+            })}
           </p>
         }
       />

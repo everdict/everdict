@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { getTranslations } from 'next-intl/server'
 
 import { SubmitRunForm } from '@/features/submit-run'
 import { harnessesSchema, type Harness } from '@/entities/harness'
@@ -15,6 +16,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function NewRunPage({ params }: { params: Promise<{ workspace: string }> }) {
   const { workspace } = await params
+  const t = await getTranslations('runsPage')
   const { principal, ctx } = await currentPrincipal()
   const allowed = can(principal?.roles, 'runs:submit')
 
@@ -55,9 +57,9 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
         href={`/${workspace}/runs`}
         className="text-sm text-muted-foreground transition-colors hover:text-foreground"
       >
-        ← 활동
+        ← {t('title')}
       </Link>
-      <PageHeader title="새 실행" description="하니스를 골라 한 번 실행해보세요." />
+      <PageHeader title={t('newRun')} description={t('newRunDescription')} />
       {allowed ? (
         <Card className="p-6">
           <SubmitRunForm
@@ -68,10 +70,7 @@ export default async function NewRunPage({ params }: { params: Promise<{ workspa
           />
         </Card>
       ) : (
-        <EmptyState
-          title="실행을 시작할 권한이 없어요."
-          hint="워크스페이스 관리자에게 권한을 요청해보세요."
-        />
+        <EmptyState title={t('noPermissionTitle')} hint={t('noPermissionHint')} />
       )}
     </div>
   )

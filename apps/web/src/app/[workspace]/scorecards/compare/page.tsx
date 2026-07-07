@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { ComparePicker, type CompareOption } from '@/features/compare-scorecards'
 import { scorecardDiffSchema, scorecardsSchema, type ScorecardDiff } from '@/entities/scorecard'
@@ -59,6 +60,7 @@ export default async function CompareScorecardsPage({
   const { workspace } = await params
   const { baseline, candidate } = await searchParams
   const ctx = await authContext()
+  const t = await getTranslations('scorecardsPage')
 
   // 비교는 완료된 스코어카드만(미완료는 diff 불가).
   let options: CompareOption[] = []
@@ -98,31 +100,25 @@ export default async function CompareScorecardsPage({
           className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
         >
           <ChevronLeft className="size-3.5" />
-          스코어카드
+          {t('backToList')}
         </Link>
-        <PageHeader
-          title="스코어카드 비교"
-          description="두 스코어카드를 비교해 점수가 어떻게 달라졌는지 봐요."
-        />
+        <PageHeader title={t('compareTitle')} description={t('compareDescription')} />
       </div>
 
       {options.length < 2 ? (
-        <EmptyState
-          title="비교하려면 완료된 스코어카드가 2개 이상 필요해요."
-          hint="같은 벤치마크를 두 번 평가하면 비교할 수 있어요."
-        />
+        <EmptyState title={t('needTwoTitle')} hint={t('needTwoHint')} />
       ) : (
         <Card className="p-4">
           <ComparePicker options={options} baseline={baseline} candidate={candidate} />
         </Card>
       )}
 
-      {error && <Callout tone="danger">비교하지 못했어요: {error}</Callout>}
+      {error && <Callout tone="danger">{t('compareError', { error })}</Callout>}
 
       {diff && (
         <div className="space-y-7">
           <section className="space-y-2.5">
-            <SectionHeader title="메트릭 변화" />
+            <SectionHeader title={t('metricChangesTitle')} />
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
               <SideRef
                 workspace={workspace}
@@ -177,16 +173,16 @@ export default async function CompareScorecardsPage({
 
           <section className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <DeltaList
-              title="나빠진 케이스 (통과→실패)"
+              title={t('regressionsTitle')}
               tone="danger"
               items={diff.regressions}
-              empty="나빠진 케이스가 없어요."
+              empty={t('noRegressions')}
             />
             <DeltaList
-              title="좋아진 케이스 (실패→통과)"
+              title={t('improvementsTitle')}
               tone="success"
               items={diff.improvements}
-              empty="좋아진 케이스가 없어요."
+              empty={t('noImprovements')}
             />
           </section>
         </div>

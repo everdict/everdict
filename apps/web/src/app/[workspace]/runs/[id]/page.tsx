@@ -1,7 +1,9 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { TraceTimeline } from '@/widgets/trace-timeline'
+import { CommentsSection } from '@/features/discuss'
 import { runSchema, type Run } from '@/entities/run'
 import { authContext } from '@/shared/auth/principal'
 import { controlPlane } from '@/shared/lib/control-plane'
@@ -11,7 +13,6 @@ import { Card } from '@/shared/ui/card'
 import { PageHeader } from '@/shared/ui/page-header'
 import { SectionHeader } from '@/shared/ui/section-header'
 import { StatusPill } from '@/shared/ui/status-pill'
-import { CommentsSection } from '@/features/discuss'
 
 export const dynamic = 'force-dynamic'
 
@@ -35,14 +36,14 @@ function Prop({ label, value }: { label: string; value: string }) {
   )
 }
 
-function BackLink({ workspace }: { workspace: string }) {
+function BackLink({ workspace, label }: { workspace: string; label: string }) {
   return (
     <Link
       href={`/${workspace}/runs`}
       className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
     >
       <ChevronLeft className="size-3.5" />
-      활동
+      {label}
     </Link>
   )
 }
@@ -53,6 +54,7 @@ export default async function RunDetailPage({
   params: Promise<{ workspace: string; id: string }>
 }) {
   const { workspace, id } = await params
+  const t = await getTranslations('runsPage')
   const ctx = await authContext()
 
   let run: Run | undefined
@@ -66,9 +68,9 @@ export default async function RunDetailPage({
   if (!run) {
     return (
       <div className="space-y-5">
-        <BackLink workspace={workspace} />
-        <PageHeader title="실행" />
-        <Callout tone="danger">실행을 불러오지 못했어요: {error}</Callout>
+        <BackLink workspace={workspace} label={t('title')} />
+        <PageHeader title={t('runLabel')} />
+        <Callout tone="danger">{t('runLoadError', { error: error ?? '' })}</Callout>
       </div>
     )
   }
@@ -80,10 +82,13 @@ export default async function RunDetailPage({
   return (
     <div className="space-y-7">
       <div className="space-y-3">
-        <BackLink workspace={workspace} />
+        <BackLink workspace={workspace} label={t('title')} />
         <PageHeader
           title={<span className="font-mono">run {run.id.slice(0, 8)}</span>}
-          description={`${run.harness.id}@${run.harness.version} · 케이스 ${run.caseId}`}
+          description={t('runDescription', {
+            harness: `${run.harness.id}@${run.harness.version}`,
+            caseId: run.caseId,
+          })}
           actions={<StatusPill status={run.status} />}
         />
       </div>
@@ -102,9 +107,9 @@ export default async function RunDetailPage({
       )}
 
       <section className="space-y-2.5">
-        <SectionHeader title="점수" />
+        <SectionHeader title={t('scores')} />
         {scores.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">아직 점수가 없어요.</p>
+          <p className="text-[13px] text-muted-foreground">{t('noScores')}</p>
         ) : (
           <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3">
             {scores.map((s) => (
@@ -132,7 +137,7 @@ export default async function RunDetailPage({
       </section>
 
       <section className="space-y-2.5">
-        <SectionHeader title="트레이스" />
+        <SectionHeader title={t('trace')} />
         <Card className="p-4">
           <TraceTimeline trace={trace} />
         </Card>
@@ -140,7 +145,7 @@ export default async function RunDetailPage({
 
       {snapshot && (
         <section className="space-y-2.5">
-          <SectionHeader title={`스냅샷 (${String(snapshot.kind)})`} />
+          <SectionHeader title={t('snapshot', { kind: String(snapshot.kind) })} />
           <Card className="space-y-3 p-4">
             {/* os-use 스크린샷 — base64 동봉(dev) 또는 object storage URL(오프로드). 에이전트가 본 최종 화면. */}
             {osUseShotSrc(snapshot) && (
@@ -185,7 +190,12 @@ export default async function RunDetailPage({
         </section>
       )}
 
-      <CommentsSection workspace={workspace} resourceType="run" resourceId={id} title="논의" />
+      <CommentsSection
+        workspace={workspace}
+        resourceType="run"
+        resourceId={id}
+        title={t('discuss')}
+      />
     </div>
   )
 }

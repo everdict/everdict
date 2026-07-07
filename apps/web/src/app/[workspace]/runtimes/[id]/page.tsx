@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { CommentsSection } from '@/features/discuss'
 import { VersionTagsEditor } from '@/features/version-tags'
@@ -22,7 +23,18 @@ import { PageHeader } from '@/shared/ui/page-header'
 export const dynamic = 'force-dynamic'
 
 // RuntimeSpec 의 kind별 설정 필드 → 표시용 라벨/값 행(값 있는 것만).
-function specRows(spec: RuntimeSpec): { label: string; value: string }[] {
+function specRows(
+  spec: RuntimeSpec,
+  labels: {
+    addr: string
+    datacenters: string
+    nomadRuntime: string
+    k8sContext: string
+    image: string
+    namespace: string
+    tags: string
+  }
+): { label: string; value: string }[] {
   const rows: { label: string; value: string }[] = []
   const add = (label: string, v: string | string[] | undefined) => {
     if (v === undefined) return
@@ -32,14 +44,14 @@ function specRows(spec: RuntimeSpec): { label: string; value: string }[] {
       rows.push({ label, value: v })
     }
   }
-  add('주소', spec.addr)
-  add('데이터센터', spec.datacenters)
-  add('Nomad 런타임', spec.runtime)
-  add('K8s 컨텍스트', spec.context)
+  add(labels.addr, spec.addr)
+  add(labels.datacenters, spec.datacenters)
+  add(labels.nomadRuntime, spec.runtime)
+  add(labels.k8sContext, spec.context)
   add('RuntimeClass', spec.runtimeClass)
-  add('이미지', spec.image)
-  add('네임스페이스', spec.namespace)
-  add('태그', spec.tags)
+  add(labels.image, spec.image)
+  add(labels.namespace, spec.namespace)
+  add(labels.tags, spec.tags)
   return rows
 }
 
@@ -49,6 +61,7 @@ export default async function RuntimeDetailPage({
   params: Promise<{ workspace: string; id: string }>
 }) {
   const { workspace, id } = await params
+  const t = await getTranslations('runtimesPage')
   const { principal, ctx } = await currentPrincipal()
 
   // 목록에서 이 런타임의 요약(버전/소유자) 확보 — 없거나 연결 실패면 목록으로.
@@ -70,7 +83,17 @@ export default async function RuntimeDetailPage({
     error = e instanceof Error ? e.message : String(e)
   }
 
-  const rows = spec ? specRows(spec) : []
+  const rows = spec
+    ? specRows(spec, {
+        addr: t('specAddr'),
+        datacenters: t('specDatacenters'),
+        nomadRuntime: t('specNomadRuntime'),
+        k8sContext: t('specK8sContext'),
+        image: t('specImage'),
+        namespace: t('specNamespace'),
+        tags: t('specTags'),
+      })
+    : []
 
   // 이 버전(표시본=latest)의 태그(자유 라벨) — 등록과 동일 게이트(runtimes:write) + 소유 워크스페이스일 때만 편집.
   const currentWorkspace = principal?.workspace ?? workspace
@@ -84,17 +107,17 @@ export default async function RuntimeDetailPage({
         className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
-        런타임
+        {t('title')}
       </Link>
-      <PageHeader title={id} description="평가를 실행하는 인프라예요." />
+      <PageHeader title={id} description={t('detailDescription')} />
       {error || !spec ? (
-        <Callout tone="danger">런타임을 불러오지 못했어요{error ? `: ${error}` : ''}.</Callout>
+        <Callout tone="danger">{t('loadError', { detail: error ? `: ${error}` : '' })}</Callout>
       ) : (
         <Card className="space-y-4 p-5">
           <div className="flex flex-wrap items-center gap-2">
             <Badge tone="info">{spec.kind}</Badge>
             <Badge tone={summary.owner === '_shared' ? 'info' : 'neutral'}>
-              {summary.owner === '_shared' ? '공용' : '워크스페이스'}
+              {summary.owner === '_shared' ? t('sharedBadge') : t('workspaceBadge')}
             </Badge>
             <span className="font-mono text-[12px] text-faint">v{spec.version}</span>
           </div>
@@ -112,7 +135,7 @@ export default async function RuntimeDetailPage({
             </div>
           ) : (
             <p className="border-t border-border pt-4 text-[12px] text-faint">
-              추가 설정이 없어요.
+              {t('noExtraConfig')}
             </p>
           )}
           {/* 이 버전(표시본=latest)의 태그 — placement 태그(위 rows 의 '태그')와 별개인 버전 분간용 자유 라벨.
@@ -120,7 +143,7 @@ export default async function RuntimeDetailPage({
           {(canEditTags || latestTags.length > 0) && (
             <div className="border-t border-border pt-4">
               <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
-                버전 태그
+                {t('versionTags')}
               </p>
               <VersionTagsEditor
                 entity="runtime"
@@ -132,7 +155,9 @@ export default async function RuntimeDetailPage({
             </div>
           )}
           <div className="border-t border-border pt-4">
-            <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">버전</p>
+            <p className="mb-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
+              {t('versions')}
+            </p>
             <div className="flex flex-wrap gap-1.5">
               {versions.map((v) => (
                 <code
@@ -147,7 +172,12 @@ export default async function RuntimeDetailPage({
         </Card>
       )}
 
-      <CommentsSection workspace={workspace} resourceType="runtime" resourceId={id} title="논의" />
+      <CommentsSection
+        workspace={workspace}
+        resourceType="runtime"
+        resourceId={id}
+        title={t('discuss')}
+      />
     </div>
   )
 }

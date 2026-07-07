@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { getTranslations } from 'next-intl/server'
 
 import { ScorecardList } from '@/widgets/scorecard-list'
 import { membersSchema } from '@/entities/member'
@@ -20,6 +21,7 @@ export default async function ScorecardsPage({
 }) {
   const { workspace } = await params
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('scorecardsPage')
   let error: string | undefined
   let scorecards = scorecardsSchema.parse([])
   try {
@@ -47,15 +49,15 @@ export default async function ScorecardsPage({
   return (
     <div className="space-y-6">
       <PageHeader
-        title="스코어카드"
-        description="벤치마크로 하니스를 한 번에 평가하고 점수를 모아 봐요."
+        title={t('title')}
+        description={t('description')}
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <Link
               href={`/${workspace}/scorecards/analyze`}
               className={buttonVariants({ size: 'sm', variant: 'secondary' })}
             >
-              분석
+              {t('analyze')}
             </Link>
             {canRun ? (
               <>
@@ -63,13 +65,13 @@ export default async function ScorecardsPage({
                   href={`/${workspace}/scorecards/ingest`}
                   className={buttonVariants({ size: 'sm', variant: 'secondary' })}
                 >
-                  트레이스 올리기
+                  {t('ingest')}
                 </Link>
                 <Link
                   href={`/${workspace}/scorecards/new`}
                   className={buttonVariants({ size: 'sm' })}
                 >
-                  스코어카드 실행
+                  {t('run')}
                 </Link>
               </>
             ) : null}
@@ -78,12 +80,9 @@ export default async function ScorecardsPage({
       />
 
       {error ? (
-        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : scorecards.length === 0 ? (
-        <EmptyState
-          title="아직 스코어카드가 없어요."
-          hint="'스코어카드 실행'으로 하니스를 평가해보세요."
-        />
+        <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <ScorecardList workspace={workspace} scorecards={scorecards} authors={authors} />
       )}

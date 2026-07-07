@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { Eye, EyeOff, KeyRound, Plus } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import {
   PROVIDER_TOKENS,
@@ -22,20 +23,10 @@ const NAME_RE = /^[A-Z_][A-Z0-9_]*$/
 
 // workspace = 워크스페이스(공유) 시크릿 — 저장소가 카테고리 없는 단일 평면 네임스페이스라 UI 도 한 목록
 // (모델 키·클러스터 자격증명을 나누면 같은 시크릿이 양쪽에 중복 노출된다). personal = 내 개인 시크릿(계정 화면, 셀프 관리).
-// desc = 헤더 한 줄, help = info 툴팁 상세(가이드는 인라인 금지 — 아이콘 툴팁으로).
+// namePlaceholder 는 예약 이름 예시(번역 대상 아님) — 나머지 카피는 next-intl 메시지로.
 const COPY = {
-  workspace: {
-    title: '워크스페이스 시크릿',
-    desc: '실행·채점과 런타임 연결에 쓰는 공유 키 — 모델 키·NOMAD_TOKEN·kubeconfig 등.',
-    help: '하니스 env 의 “워크스페이스” 시크릿 참조, 런타임 등록의 자격증명 이름으로 소비돼요. 각 용도엔 참조된 값만 쓰여요.',
-    namePlaceholder: 'OPENAI_API_KEY',
-  },
-  personal: {
-    title: '내 개인 시크릿',
-    desc: '나만 쓰는 개인 키 — 다른 멤버는 볼 수 없어요.',
-    help: '하니스 env 에서 “내 개인” 스코프로 참조하면 그 하니스는 나만 실행·열람할 수 있어요.',
-    namePlaceholder: 'MY_OPENAI_API_KEY',
-  },
+  workspace: { namePlaceholder: 'OPENAI_API_KEY' },
+  personal: { namePlaceholder: 'MY_OPENAI_API_KEY' },
 } as const
 
 export function SecretsManager({
@@ -47,11 +38,12 @@ export function SecretsManager({
   secrets: SecretMeta[]
   canWrite: boolean
 }) {
+  const t = useTranslations('manageWorkspaceSecrets')
   const copy = COPY[variant]
   // personal = 개인(user) 스코프(셀프 관리), workspace = 공유(admin).
   const scope: SecretScope = variant === 'personal' ? 'user' : 'workspace'
   // 프로바이더 토큰(예약 이름, 플랫폼이 소비) — 스코프에서 소비되는 것만 큐레이션.
-  const providers = PROVIDER_TOKENS.filter((t) => t.scopes.includes(scope))
+  const providers = PROVIDER_TOKENS.filter((pt) => pt.scopes.includes(scope))
   // raw 목록에선 프로바이더 토큰을 제외(이중 노출 방지 — 위 큐레이션 섹션이 그 자리).
   const rawSecrets = secrets.filter((s) => !(providerTokenNames.has(s.name) && s.scope === scope))
 
@@ -60,18 +52,20 @@ export function SecretsManager({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 space-y-0.5">
           <h3 className="flex items-center gap-1.5 text-[13px] font-[560] text-foreground">
-            {copy.title}
+            {t(`${variant}.title`)}
             <InfoTip
               content={
                 <>
-                  {copy.help}
+                  {t(`${variant}.help`)}
                   <br />
-                  값은 at-rest 암호화되고, 저장 후에는 다시 볼 수 없어요(목록엔 이름만).
+                  {t('encryptedNote')}
                 </>
               }
             />
           </h3>
-          <p className="text-[12.5px] leading-relaxed text-muted-foreground">{copy.desc}</p>
+          <p className="text-[12.5px] leading-relaxed text-muted-foreground">
+            {t(`${variant}.desc`)}
+          </p>
         </div>
       </div>
 
@@ -89,12 +83,10 @@ export function SecretsManager({
         canWrite={canWrite}
         scope={scope}
         namePlaceholder={copy.namePlaceholder}
-        {...(providers.length > 0 ? { sectionLabel: '직접 추가한 시크릿' } : {})}
+        {...(providers.length > 0 ? { sectionLabel: t('customSecretsLabel') } : {})}
       />
 
-      {!canWrite && (
-        <p className="text-[12.5px] text-muted-foreground">변경하려면 관리자 권한이 필요해요.</p>
-      )}
+      {!canWrite && <p className="text-[12.5px] text-muted-foreground">{t('adminRequired')}</p>}
     </div>
   )
 }
@@ -111,6 +103,8 @@ function ProviderTokenRows({
   scope: SecretScope
   canWrite: boolean
 }) {
+  const t = useTranslations('manageWorkspaceSecrets')
+  const locale = useLocale()
   const [editing, setEditing] = useState<string>() // 등록/교체 폼이 열린 토큰 name
   const [confirmName, setConfirmName] = useState<string>()
   const [error, setError] = useState<string>()
@@ -128,23 +122,28 @@ function ProviderTokenRows({
   return (
     <div className="space-y-2.5">
       <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-        프로바이더 토큰
+        {t('providerTokensLabel')}
       </span>
       <SettingsList>
-        {providers.map((t) => {
-          const registered = secrets.find((s) => s.name === t.name && s.scope === scope)
+        {providers.map((pt) => {
+          const registered = secrets.find((s) => s.name === pt.name && s.scope === scope)
           return (
             <SettingsRow
-              key={t.name}
+              key={pt.name}
               label={
                 <span className="flex items-center gap-1.5">
-                  <span className="text-[13px] font-[560] text-foreground">{t.provider}</span>
+                  <span className="text-[13px] font-[560] text-foreground">
+                    {t(`providerTokens.${pt.name}.provider`)}
+                  </span>
                   <InfoTip
                     content={
                       <>
-                        {t.help}
+                        {t(`providerTokens.${pt.name}.help`)}
                         <br />
-                        시크릿 이름 <code className="font-mono">{t.name}</code> 으로 저장돼요.
+                        {t.rich('savedAsName', {
+                          name: pt.name,
+                          code: (chunks) => <code className="font-mono">{chunks}</code>,
+                        })}
                       </>
                     }
                   />
@@ -152,29 +151,32 @@ function ProviderTokenRows({
               }
               hint={
                 registered
-                  ? `${t.usedFor} · 등록됨 (갱신 ${new Date(registered.updatedAt).toLocaleDateString('ko-KR')})`
-                  : t.usedFor
+                  ? t('registeredHint', {
+                      usedFor: t(`providerTokens.${pt.name}.usedFor`),
+                      date: new Date(registered.updatedAt).toLocaleDateString(locale),
+                    })
+                  : t(`providerTokens.${pt.name}.usedFor`)
               }
             >
               {canWrite && (
                 <span className="flex items-center gap-2.5">
                   {registered ? (
-                    confirmName === t.name ? (
+                    confirmName === pt.name ? (
                       <>
                         <Button
                           variant="destructive"
                           size="sm"
                           disabled={pending}
-                          onClick={() => onDelete(t.name)}
+                          onClick={() => onDelete(pt.name)}
                         >
-                          삭제 확인
+                          {t('deleteConfirm')}
                         </Button>
                         <button
                           type="button"
                           className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
                           onClick={() => setConfirmName(undefined)}
                         >
-                          취소
+                          {t('cancel')}
                         </button>
                       </>
                     ) : (
@@ -182,16 +184,16 @@ function ProviderTokenRows({
                         <button
                           type="button"
                           className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
-                          onClick={() => setEditing(editing === t.name ? undefined : t.name)}
+                          onClick={() => setEditing(editing === pt.name ? undefined : pt.name)}
                         >
-                          교체
+                          {t('replace')}
                         </button>
                         <button
                           type="button"
                           className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-destructive"
-                          onClick={() => setConfirmName(t.name)}
+                          onClick={() => setConfirmName(pt.name)}
                         >
-                          삭제
+                          {t('delete')}
                         </button>
                       </>
                     )
@@ -200,18 +202,18 @@ function ProviderTokenRows({
                       type="button"
                       variant="secondary"
                       size="sm"
-                      onClick={() => setEditing(editing === t.name ? undefined : t.name)}
+                      onClick={() => setEditing(editing === pt.name ? undefined : pt.name)}
                     >
-                      등록
+                      {t('register')}
                     </Button>
                   )}
                   <a
-                    href={t.helpUrl}
+                    href={pt.helpUrl}
                     target="_blank"
                     rel="noreferrer"
                     className="text-[12px] text-muted-foreground underline-offset-2 transition-colors hover:text-foreground hover:underline"
                   >
-                    발급 ↗
+                    {t('issue')}
                   </a>
                 </span>
               )}
@@ -251,6 +253,8 @@ function SecretRows({
   namePlaceholder: string
   sectionLabel?: string // 프로바이더 토큰 섹션과 병렬일 때 구분 라벨
 }) {
+  const t = useTranslations('manageWorkspaceSecrets')
+  const locale = useLocale()
   const [adding, setAdding] = useState(false)
   const [confirmName, setConfirmName] = useState<string>()
   const [error, setError] = useState<string>()
@@ -272,7 +276,7 @@ function SecretRows({
           {sectionLabel ? (
             <span className="text-[11px] uppercase tracking-wide">{sectionLabel}</span>
           ) : secrets.length > 0 ? (
-            `등록됨 ${secrets.length}개`
+            t('registeredCount', { count: secrets.length })
           ) : (
             ''
           )}
@@ -288,7 +292,7 @@ function SecretRows({
               setError(undefined)
             }}
           >
-            <Plus className="size-3.5" /> 시크릿 추가
+            <Plus className="size-3.5" /> {t('addSecret')}
           </Button>
         )}
       </div>
@@ -304,7 +308,8 @@ function SecretRows({
 
       {secrets.length === 0 ? (
         <p className="rounded-lg border border-dashed bg-muted/20 px-4 py-6 text-center text-[13px] text-muted-foreground">
-          아직 등록한 시크릿이 없어요.{canWrite && ' “시크릿 추가”로 넣어요.'}
+          {t('emptyTitle')}
+          {canWrite && t('emptyHint')}
         </p>
       ) : (
         <SettingsList>
@@ -312,7 +317,7 @@ function SecretRows({
             <SettingsRow
               key={s.name}
               label={<code className="font-mono text-[13px] text-foreground">{s.name}</code>}
-              hint={`갱신 ${new Date(s.updatedAt).toLocaleString('ko-KR')}`}
+              hint={t('updatedHint', { date: new Date(s.updatedAt).toLocaleString(locale) })}
             >
               {canWrite &&
                 (confirmName === s.name ? (
@@ -323,14 +328,14 @@ function SecretRows({
                       disabled={pending}
                       onClick={() => onDelete(s.name)}
                     >
-                      삭제 확인
+                      {t('deleteConfirm')}
                     </Button>
                     <button
                       type="button"
                       className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
                       onClick={() => setConfirmName(undefined)}
                     >
-                      취소
+                      {t('cancel')}
                     </button>
                   </span>
                 ) : (
@@ -339,7 +344,7 @@ function SecretRows({
                     className="text-[12px] font-[510] text-muted-foreground transition-colors hover:text-destructive"
                     onClick={() => setConfirmName(s.name)}
                   >
-                    삭제
+                    {t('delete')}
                   </button>
                 ))}
             </SettingsRow>
@@ -371,6 +376,7 @@ function AddSecretForm({
   onDone: () => void
   onCancel: () => void
 }) {
+  const t = useTranslations('manageWorkspaceSecrets')
   const [name, setName] = useState(fixedName ?? '')
   const [value, setValue] = useState('')
   const [show, setShow] = useState(false)
@@ -393,7 +399,7 @@ function AddSecretForm({
       <div className={fixedName ? 'grid gap-3' : 'grid gap-3 sm:grid-cols-2'}>
         {!fixedName && (
           <div className="space-y-1.5">
-            <Label htmlFor="secret-name">이름 (env 형식)</Label>
+            <Label htmlFor="secret-name">{t('nameLabel')}</Label>
             <Input
               id="secret-name"
               value={name}
@@ -403,21 +409,19 @@ function AddSecretForm({
               spellCheck={false}
               className="font-mono text-[12px]"
             />
-            {nameInvalid && (
-              <FieldError message="대문자로 시작하고 대문자·숫자·밑줄만 쓸 수 있어요." />
-            )}
+            {nameInvalid && <FieldError message={t('nameInvalid')} />}
           </div>
         )}
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
-            <Label htmlFor="secret-value">값</Label>
+            <Label htmlFor="secret-value">{t('valueLabel')}</Label>
             {!fixedName && (
               <button
                 type="button"
                 className="text-[11px] text-muted-foreground transition-colors hover:text-foreground"
                 onClick={() => setMultiline((v) => !v)}
               >
-                {multiline ? '한 줄 값으로' : '여러 줄 값으로 (kubeconfig 등)'}
+                {multiline ? t('singleLine') : t('multiLine')}
               </button>
             )}
           </div>
@@ -425,7 +429,7 @@ function AddSecretForm({
             <Textarea
               id="secret-value"
               value={value}
-              placeholder="토큰이나 kubeconfig 붙여넣기"
+              placeholder={t('multilinePlaceholder')}
               onChange={(e) => setValue(e.target.value)}
               rows={4}
               spellCheck={false}
@@ -437,7 +441,7 @@ function AddSecretForm({
                 id="secret-value"
                 type={show ? 'text' : 'password'}
                 value={value}
-                placeholder="시크릿 값"
+                placeholder={t('valuePlaceholder')}
                 onChange={(e) => setValue(e.target.value)}
                 autoComplete="off"
                 spellCheck={false}
@@ -446,7 +450,7 @@ function AddSecretForm({
               <button
                 type="button"
                 onClick={() => setShow((v) => !v)}
-                aria-label={show ? '값 숨기기' : '값 보기'}
+                aria-label={show ? t('hideValue') : t('showValue')}
                 className="absolute right-1.5 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
               >
                 {show ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}
@@ -467,16 +471,16 @@ function AddSecretForm({
           disabled={pending || name.length === 0 || value.length === 0 || nameInvalid}
           onClick={onSave}
         >
-          <KeyRound className="size-3.5" /> {pending ? '저장 중…' : '저장'}
+          <KeyRound className="size-3.5" /> {pending ? t('saving') : t('save')}
         </Button>
         <button
           type="button"
           className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
           onClick={onCancel}
         >
-          취소
+          {t('cancel')}
         </button>
-        <span className="text-[11px] text-faint">저장하면 값은 다시 볼 수 없어요.</span>
+        <span className="text-[11px] text-faint">{t('saveNote')}</span>
       </div>
     </div>
   )

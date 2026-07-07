@@ -18,6 +18,8 @@ import {
   Users,
   Waypoints,
 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
+import { getTranslations } from 'next-intl/server'
 
 import { VersionSwitcher } from '@/features/dataset-versions'
 import { CommentsSection } from '@/features/discuss'
@@ -52,14 +54,14 @@ import { InfoTip } from '@/shared/ui/tooltip'
 
 export const dynamic = 'force-dynamic'
 
-function BackLink({ workspace }: { workspace: string }) {
+function BackLink({ workspace, label }: { workspace: string; label: string }) {
   return (
     <Link
       href={`/${workspace}/datasets`}
       className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
     >
       <ChevronLeft className="size-3.5" />
-      데이터셋
+      {label}
     </Link>
   )
 }
@@ -74,6 +76,7 @@ export default async function DatasetDetailPage({
   const { workspace, id } = await params
   const { version } = await searchParams
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('datasetsPage')
 
   // 이 데이터셋이 가진 모든 버전(최신순) + 목록 메타(만든이·생성/수정 시각) — 버전 선택기/diff/헤더에 사용.
   let versions: string[] = []
@@ -125,9 +128,9 @@ export default async function DatasetDetailPage({
   if (!dataset) {
     return (
       <div className="space-y-5">
-        <BackLink workspace={workspace} />
-        <PageHeader title="데이터셋" />
-        <Callout tone="danger">데이터셋을 불러오지 못했어요: {error}</Callout>
+        <BackLink workspace={workspace} label={t('backToList')} />
+        <PageHeader title={t('detailFallbackTitle')} />
+        <Callout tone="danger">{t('loadError', { error: error ?? '' })}</Callout>
       </div>
     )
   }
@@ -153,7 +156,7 @@ export default async function DatasetDetailPage({
   // 활동 타임라인 — "누가 언제 무엇을"(생성 · 스코어카드 실행 · 댓글)을 시간순으로. actor 는 여기서 표시-준비.
   // 표시명 — 프로필 이름 우선, 없으면 이메일 로컬파트(전체 이메일 노출 금지), 그래도 없으면 subject 축약.
   const resolveActor = (subject?: string): Actor => {
-    if (!subject) return { name: '시스템', known: false }
+    if (!subject) return { name: t('systemActor'), known: false }
     const m = members.find((x) => x.subject === subject)
     return {
       name: m?.name ?? m?.email?.split('@')[0] ?? fmtSubject(subject),
@@ -186,10 +189,10 @@ export default async function DatasetDetailPage({
   return (
     <div className="space-y-7">
       <div className="space-y-3">
-        <BackLink workspace={workspace} />
+        <BackLink workspace={workspace} label={t('backToList')} />
         <PageHeader
           title={dataset.id}
-          description={dataset.description ?? '어떤 하니스든 같은 문제로 평가해요.'}
+          description={dataset.description ?? t('defaultDescription')}
           actions={
             <div className="flex items-center gap-2">
               {versions.length > 1 ? (
@@ -209,7 +212,7 @@ export default async function DatasetDetailPage({
                   className={buttonVariants({ variant: 'secondary', size: 'sm' })}
                 >
                   <GitCompare className="size-3.5" />
-                  버전 비교
+                  {t('compareVersions')}
                 </Link>
               )}
               {canPublish && (
@@ -217,7 +220,8 @@ export default async function DatasetDetailPage({
                   href={`/${workspace}/datasets/${encodeURIComponent(dataset.id)}/new-version?v=${encodeURIComponent(dataset.version)}`}
                   className={buttonVariants({ variant: 'secondary', size: 'sm' })}
                 >
-                  <GitBranchPlus className="size-3.5" />새 버전 만들기
+                  <GitBranchPlus className="size-3.5" />
+                  {t('newVersion')}
                 </Link>
               )}
             </div>
@@ -230,14 +234,14 @@ export default async function DatasetDetailPage({
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[12.5px] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <Boxes className="size-3.5 text-faint" />
-            케이스{' '}
+            {t('metaCases')}{' '}
             <span className="font-[560] tabular-nums text-foreground">{dataset.cases.length}</span>
           </span>
           <span className="inline-flex items-center gap-1.5">
             <History className="size-3.5 text-faint" />
-            버전{' '}
+            {t('metaVersions')}{' '}
             <span className="font-[560] tabular-nums text-foreground">{versions.length || 1}</span>
-            개
+            {t('metaVersionsSuffix')}
             <code className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] text-secondary-foreground">
               v{dataset.version}
               {versions.length === 0 || dataset.version === versions[0] ? ' · latest' : ''}
@@ -245,7 +249,7 @@ export default async function DatasetDetailPage({
           </span>
           <span className="inline-flex items-center gap-1.5">
             <BarChart3 className="size-3.5 text-faint" />
-            스코어카드{' '}
+            {t('metaScorecards')}{' '}
             <span className="font-[560] tabular-nums text-foreground">
               {relation?.scorecards ?? 0}
             </span>
@@ -253,16 +257,19 @@ export default async function DatasetDetailPage({
           {summary?.createdAt && (
             <span
               className="inline-flex items-center gap-1.5"
-              title={`생성 ${fmtDateTimeFull(summary.createdAt)}${summary.updatedAt ? ` · 수정 ${fmtDateTimeFull(summary.updatedAt)}` : ''}`}
+              title={`${t('metaCreatedPrefix')} ${fmtDateTimeFull(summary.createdAt)}${summary.updatedAt ? ` · ${t('metaUpdatedPrefix')} ${fmtDateTimeFull(summary.updatedAt)}` : ''}`}
             >
               <Clock className="size-3.5 text-faint" />
-              생성 {fmtDateTime(summary.createdAt)}
+              {t('metaCreatedPrefix')} {fmtDateTime(summary.createdAt)}
               {summary.updatedAt && summary.updatedAt !== summary.createdAt
-                ? ` · 수정 ${fmtDateTime(summary.updatedAt)}`
+                ? ` · ${t('metaUpdatedPrefix')} ${fmtDateTime(summary.updatedAt)}`
                 : ''}
             </span>
           )}
-          <span className="inline-flex items-center gap-1.5" title={`만든이 ${author.name}`}>
+          <span
+            className="inline-flex items-center gap-1.5"
+            title={t('metaAuthorTitle', { name: author.name })}
+          >
             {author.known ? (
               <Avatar
                 name={author.name}
@@ -271,7 +278,7 @@ export default async function DatasetDetailPage({
                 className="rounded-full"
               />
             ) : (
-              <span className="text-faint">만든이</span>
+              <span className="text-faint">{t('metaAuthorLabel')}</span>
             )}
             {author.name}
           </span>
@@ -289,15 +296,11 @@ export default async function DatasetDetailPage({
               </span>
             ))
           ) : (
-            <span className="text-[12px] text-faint">태그 없음</span>
+            <span className="text-[12px] text-faint">{t('noTags')}</span>
           )}
           {/* 안내 문구는 인라인 노출 금지 — info 아이콘 호버 툴팁으로만. */}
           {canPublish && (
-            <InfoTip
-              className="ml-auto"
-              align="end"
-              content="버전은 바꿀 수 없어요. 수정하려면 새 버전을 만들어요."
-            />
+            <InfoTip className="ml-auto" align="end" content={t('versionImmutableTip')} />
           )}
         </div>
 
@@ -305,7 +308,7 @@ export default async function DatasetDetailPage({
         {(canPublish || versionTags.length > 0) && (
           <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             <span className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-              버전 태그
+              {t('versionTagsLabel')}
             </span>
             <VersionTagsEditor
               entity="dataset"
@@ -327,7 +330,8 @@ export default async function DatasetDetailPage({
       {relation && relation.harnesses.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">
           <span className="inline-flex items-center gap-1 text-faint">
-            <Waypoints className="size-3.5" />이 데이터셋으로 평가한 하니스
+            <Waypoints className="size-3.5" />
+            {t('evaluatedHarnesses')}
           </span>
           {relation.harnesses.map((h) => (
             <Link
@@ -343,7 +347,7 @@ export default async function DatasetDetailPage({
 
       {/* 활동(이벤트) — 생성 · 스코어카드 실행을 시간순으로. 논의(댓글/대댓글)는 아래 CommentsSection. */}
       <section className="space-y-3">
-        <SectionHeader title="활동" />
+        <SectionHeader title={t('activityTitle')} />
         <ActivityTimeline workspace={workspace} items={activity} />
       </section>
 
@@ -352,20 +356,20 @@ export default async function DatasetDetailPage({
         workspace={workspace}
         resourceType="dataset"
         resourceId={dataset.id}
-        title="논의"
+        title={t('discussTitle')}
       />
 
       <section className="space-y-3">
-        <SectionHeader title={`케이스 (${dataset.cases.length})`} />
+        <SectionHeader title={t('casesTitle', { count: dataset.cases.length })} />
         {dataset.cases.length === 0 ? (
-          <EmptyState title="케이스가 없어요." />
+          <EmptyState title={t('noCases')} />
         ) : (
           <>
             {/* 구성 요약 — 이 벤치마크가 어떤 환경에서 무엇으로 채점되는지 한눈에 */}
             <div className="space-y-2 rounded-lg border bg-card/60 p-3.5">
               <div className="flex gap-3">
                 <span className="w-9 shrink-0 pt-1 text-[11px] font-[510] uppercase tracking-wide text-faint">
-                  환경
+                  {t('caseEnvLabel')}
                 </span>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   {envSummary.length === 0 ? (
@@ -382,7 +386,7 @@ export default async function DatasetDetailPage({
               </div>
               <div className="flex gap-3">
                 <span className="w-9 shrink-0 pt-1 text-[11px] font-[510] uppercase tracking-wide text-faint">
-                  채점
+                  {t('caseGraderLabel')}
                 </span>
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
                   {graderSummary.length === 0 ? (
@@ -441,6 +445,7 @@ function DatasetLineage({
   workspace: string
   provenance: DatasetProvenance
 }) {
+  const t = useTranslations('datasetsPage')
   const { source, origin } = provenance
   const hfFileUrl =
     source?.kind === 'huggingface' && source.url && source.file
@@ -450,13 +455,13 @@ function DatasetLineage({
   return (
     <Card className="space-y-3 p-4">
       <div className="flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
-        <Waypoints className="size-3.5" /> 출처 · 리니지
+        <Waypoints className="size-3.5" /> {t('lineageTitle')}
       </div>
 
       {/* 원본 소스 — 데이터 행이 어디서 왔나(HF 데이터셋/파일 링크 or 붙여넣기). */}
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[12.5px]">
         <span className="w-14 shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint">
-          소스
+          {t('lineageSource')}
         </span>
         {source?.kind === 'huggingface' && source.dataset ? (
           <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -499,9 +504,9 @@ function DatasetLineage({
             ) : null}
           </span>
         ) : source?.kind === 'jsonl' ? (
-          <span className="text-muted-foreground">직접 붙여넣기 (JSONL)</span>
+          <span className="text-muted-foreground">{t('lineagePastedJsonl')}</span>
         ) : (
-          <span className="text-faint">알 수 없음</span>
+          <span className="text-faint">{t('lineageUnknown')}</span>
         )}
       </div>
 
@@ -516,17 +521,21 @@ function DatasetLineage({
           origin.authors) && (
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1.5 border-t pt-3 text-[12.5px]">
             <span className="w-14 shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint">
-              공식
+              {t('lineageOfficial')}
             </span>
             <span className="flex flex-wrap items-center gap-1.5">
               {origin.homepage && (
-                <LinkChip href={origin.homepage} icon={ExternalLink} label="홈페이지" />
+                <LinkChip href={origin.homepage} icon={ExternalLink} label={t('linkHomepage')} />
               )}
-              {origin.paper && <LinkChip href={origin.paper} icon={BookText} label="논문" />}
-              {origin.code && <LinkChip href={origin.code} icon={ScrollText} label="코드" />}
-              {origin.data && <LinkChip href={origin.data} icon={Database} label="데이터" />}
+              {origin.paper && (
+                <LinkChip href={origin.paper} icon={BookText} label={t('linkPaper')} />
+              )}
+              {origin.code && (
+                <LinkChip href={origin.code} icon={ScrollText} label={t('linkCode')} />
+              )}
+              {origin.data && <LinkChip href={origin.data} icon={Database} label={t('linkData')} />}
               {origin.leaderboard && (
-                <LinkChip href={origin.leaderboard} icon={Trophy} label="리더보드" />
+                <LinkChip href={origin.leaderboard} icon={Trophy} label={t('linkLeaderboard')} />
               )}
               {origin.license && (
                 <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
@@ -547,7 +556,7 @@ function DatasetLineage({
       {/* 만든 경로 — 레시피(역링크)/카탈로그/인라인 정의. */}
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 border-t pt-3 text-[12.5px]">
         <span className="w-14 shrink-0 text-[11px] font-[510] uppercase tracking-wide text-faint">
-          경로
+          {t('lineagePath')}
         </span>
         {provenance.via === 'recipe' ? (
           <Link
@@ -557,11 +566,11 @@ function DatasetLineage({
             <ScrollText className="size-3.5" />
             {provenance.id}
             {provenance.version ? <span className="text-faint">@{provenance.version}</span> : null}
-            <span className="text-faint">레시피</span>
+            <span className="text-faint">{t('lineageRecipe')}</span>
           </Link>
         ) : (
           <span className="font-mono text-muted-foreground">
-            {provenance.via === 'catalog' ? '카탈로그' : '위저드 · 인라인 정의'}
+            {provenance.via === 'catalog' ? t('lineageCatalog') : t('lineageInline')}
             {provenance.id ? <span className="text-faint"> · {provenance.id}</span> : null}
           </span>
         )}

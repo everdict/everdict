@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { useTranslations } from 'next-intl'
 
 import { LeaveWorkspaceButton } from '@/features/leave-workspace'
 import { ApiKeysManager } from '@/features/manage-api-keys'
@@ -45,6 +46,7 @@ export function AccountTabs({
   keysError?: string
   initialTab?: string // ?tab=…
 }) {
+  const t = useTranslations('accountPage')
   // 러너는 계정이 아니라 런타임 페이지(실행 대상 표면)로 이동 — 실행 인프라와 한 화면에서 관리.
   const tabKeys = ['profile', 'secrets', 'keys']
   const defaultTab = initialTab && tabKeys.includes(initialTab) ? initialTab : 'profile'
@@ -61,9 +63,9 @@ export function AccountTabs({
   return (
     <Tabs value={tab} onValueChange={onTabChange} className="space-y-5">
       <TabsList>
-        <TabsTrigger value="profile">프로필</TabsTrigger>
-        <TabsTrigger value="secrets">시크릿</TabsTrigger>
-        <TabsTrigger value="keys">API 키</TabsTrigger>
+        <TabsTrigger value="profile">{t('tabProfile')}</TabsTrigger>
+        <TabsTrigger value="secrets">{t('tabSecrets')}</TabsTrigger>
+        <TabsTrigger value="keys">{t('tabKeys')}</TabsTrigger>
       </TabsList>
 
       <TabsContent value="profile">
@@ -87,7 +89,7 @@ export function AccountTabs({
       <TabsContent value="keys">
         {/* 개인 API 키 — 셀프 관리(admin 불필요). 키는 내 권한으로 동작한다. */}
         {keysError ? (
-          <Callout tone="danger">키를 불러오지 못했어요: {keysError}</Callout>
+          <Callout tone="danger">{t('keysLoadError', { error: keysError })}</Callout>
         ) : (
           <ApiKeysManager keys={keys} canWrite />
         )}

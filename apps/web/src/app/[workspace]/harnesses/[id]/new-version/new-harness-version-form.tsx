@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { useTranslations } from 'next-intl'
 
 import {
   InstanceForm,
@@ -35,6 +36,7 @@ export function NewHarnessVersionForm({
   secrets: ScopedSecretNames
 }) {
   const router = useRouter()
+  const t = useTranslations('harnessesPage')
   const [tab, setTab] = useState<Tab>(startTab)
 
   return (
@@ -43,17 +45,15 @@ export function NewHarnessVersionForm({
 
       <div className="inline-flex rounded-md border border-border bg-secondary/50 p-0.5 text-[13px]">
         <TabBtn active={tab === 'instance'} onClick={() => setTab('instance')}>
-          인스턴스 (핀 교체)
+          {t('tabInstance')}
         </TabBtn>
         <TabBtn active={tab === 'template'} onClick={() => setTab('template')}>
-          템플릿 (구조)
+          {t('tabTemplate')}
         </TabBtn>
       </div>
 
       <p className="text-[12px] text-muted-foreground">
-        {tab === 'instance'
-          ? '슬롯 값(이미지·모델)만 바꿔 새 인스턴스 버전으로 등록해요. 템플릿 구조는 그대로예요.'
-          : '구조를 바꿔 새 템플릿 버전을 만들어요. 그다음 이 버전으로 인스턴스를 만들면 돼요.'}
+        {tab === 'instance' ? t('instanceHint') : t('templateHint')}
       </p>
 
       {tab === 'instance' ? (

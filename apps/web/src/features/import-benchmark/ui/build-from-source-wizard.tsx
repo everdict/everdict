@@ -4,6 +4,7 @@ import { useState, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { ChevronRight, Eye, Heart, Loader2, Lock, Search, Settings2, Sparkles } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { versionsForId } from '@/shared/lib/semver'
 import { cn } from '@/shared/lib/utils'
@@ -51,47 +52,59 @@ const ENV_TO_CATEGORY: Record<EnvKind, Category> = {
 }
 
 // 매핑 상태 → "이 벤치마크가 실제로 어떻게 실행/채점되는지"를 한 문장으로 서술한다(선택이 아니라 결과 확인).
-// tone=warn 이면 env 설정이 불완전(고급 설정에서 보완 필요).
-function describeRun(a: {
-  envKind: EnvKind
-  taskField: string
-  answerField: string
-  startUrlField: string
-  gitField: string
-  hasImage: boolean
-}): { title: string; body: ReactNode; tone: 'ok' | 'warn' } {
-  const code = (f: string) => (
-    <code className="rounded bg-secondary/70 px-1 font-mono text-[11px] text-foreground">{f}</code>
+// tone=warn 이면 env 설정이 불완전(고급 설정에서 보완 필요). 문장은 언어별 어순이 달라 t.rich 로 조립.
+function describeRun(
+  a: {
+    envKind: EnvKind
+    taskField: string
+    answerField: string
+    startUrlField: string
+    gitField: string
+    hasImage: boolean
+  },
+  t: ReturnType<typeof useTranslations>
+): { title: string; body: ReactNode; tone: 'ok' | 'warn' } {
+  const codeTag = (chunks: ReactNode) => (
+    <code className="rounded bg-secondary/70 px-1 font-mono text-[11px] text-foreground">
+      {chunks}
+    </code>
   )
-  const task = a.taskField ? (
-    code(a.taskField)
+  const taskNode = a.taskField ? (
+    <code className="rounded bg-secondary/70 px-1 font-mono text-[11px] text-foreground">
+      {a.taskField}
+    </code>
   ) : (
-    <span className="text-[var(--color-warning)]">(task 미지정)</span>
+    <span className="text-[var(--color-warning)]">{t('taskUnset')}</span>
   )
-  const grade = a.answerField ? (
-    <> 만든 답을 {code(a.answerField)} 값과 대조해 채점해요.</>
-  ) : (
-    <> 정답 대조 채점은 없어요 — 나중에 judge나 별도 grader로 채점하면 돼요.</>
-  )
+  const taskTag = () => taskNode
+  const grade = a.answerField
+    ? t.rich('gradeWithAnswer', { field: a.answerField, code: codeTag })
+    : t('gradeNoAnswer')
   switch (a.envKind) {
     case 'prompt':
       return {
-        title: 'QA · 환경 없음',
+        title: t('runPromptTitle'),
         body: (
           <>
-            에이전트가 각 행의 {task}를 받아 답을 만들어요.{grade}
+            {t.rich('promptBody', { task: taskTag })}
+            {grade}
           </>
         ),
         tone: 'ok',
       }
     case 'browser':
       return {
-        title: '브라우저',
+        title: t('runBrowserTitle'),
         body: (
           <>
-            에이전트가{' '}
-            {a.startUrlField ? <>{code(a.startUrlField)}에서 시작해 </> : '브라우저에서 '}
-            {task}를 수행해요.{a.answerField ? grade : null}
+            {a.startUrlField
+              ? t.rich('browserBodyWithUrl', {
+                  url: a.startUrlField,
+                  task: taskTag,
+                  code: codeTag,
+                })
+              : t.rich('browserBodyNoUrl', { task: taskTag })}
+            {a.answerField ? grade : null}
           </>
         ),
         tone: 'ok',
@@ -99,29 +112,25 @@ function describeRun(a: {
     case 'repo':
       return a.gitField
         ? {
-            title: '코드 저장소',
-            body: (
-              <>
-                {code(a.gitField)}를 클론한 뒤 에이전트가 {task}를 수행해요.
-              </>
-            ),
+            title: t('runRepoTitle'),
+            body: t.rich('repoBody', { git: a.gitField, task: taskTag, code: codeTag }),
             tone: 'ok',
           }
         : {
-            title: '코드 저장소',
-            body: <>repo 환경인데 클론할 git 필드가 없어요 — 고급 설정에서 지정하세요.</>,
+            title: t('runRepoTitle'),
+            body: t('repoBodyNoGit'),
             tone: 'warn',
           }
     case 'os-use':
       return a.hasImage
         ? {
-            title: '데스크탑',
-            body: <>데스크탑 이미지 안에서 에이전트가 {task}를 수행해요.</>,
+            title: t('runOsUseTitle'),
+            body: t.rich('osUseBody', { task: taskTag }),
             tone: 'ok',
           }
         : {
-            title: '데스크탑',
-            body: <>데스크탑 환경인데 케이스 이미지가 없어요 — 고급 설정에서 지정하세요.</>,
+            title: t('runOsUseTitle'),
+            body: t('osUseBodyNoImage'),
             tone: 'warn',
           }
   }
@@ -158,6 +167,7 @@ export function BuildFromSourceWizard({
   existingDatasets?: { id: string; versions: string[] }[]
   hfTokenScope?: 'user' | 'workspace' // 사용 가능한 HF_TOKEN 의 스코프 — gated 표시를 상태 인지형으로
 }) {
+  const t = useTranslations('importBenchmark')
   const router = useRouter()
   const { workspace } = useParams<{ workspace: string }>()
   const [sourceKind, setSourceKind] = useState<SourceKind>('huggingface')
@@ -216,7 +226,7 @@ export function BuildFromSourceWizard({
     setSearchBusy(false)
     if (!r.ok || !r.hits) {
       setHits([])
-      setSearchError(r.error ?? '검색 실패')
+      setSearchError(r.error ?? t('searchFailed'))
       return
     }
     setHits(r.hits)
@@ -251,7 +261,7 @@ export function BuildFromSourceWizard({
       if (first) setFileSel(first)
       setSplitsNote(undefined)
     } else {
-      setSplitsNote('config/split 정보를 가져오지 못했습니다 — 기본값(train)으로 미리보기됩니다.')
+      setSplitsNote(t('splitsNote'))
     }
   }
 
@@ -277,7 +287,7 @@ export function BuildFromSourceWizard({
     const r: PreviewSourceResult = await previewSourceAction(body)
     setPreviewBusy(false)
     if (!r.ok || !r.fields) {
-      setPreviewError(r.error ?? '미리보기 실패')
+      setPreviewError(r.error ?? t('previewFailed'))
       return
     }
     setFields(r.fields)
@@ -337,14 +347,17 @@ export function BuildFromSourceWizard({
   const previewed = fields.length > 0
   const canPreview =
     sourceKind === 'huggingface' ? hfDataset.length > 0 : jsonlText.trim().length > 0
-  const run = describeRun({
-    envKind,
-    taskField,
-    answerField,
-    startUrlField,
-    gitField,
-    hasImage: image.trim().length > 0,
-  })
+  const run = describeRun(
+    {
+      envKind,
+      taskField,
+      answerField,
+      startUrlField,
+      gitField,
+      hasImage: image.trim().length > 0,
+    },
+    t
+  )
 
   // 현재 매핑 상태에서 필드의 역할을 역산(표 머리글/셀 강조에 사용).
   const roleOf = (f: string): string =>
@@ -384,7 +397,9 @@ export function BuildFromSourceWizard({
     <div className="space-y-6">
       {/* 1. 소스 */}
       <section className="space-y-3">
-        <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">1 · 소스</div>
+        <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">
+          {t('step1Source')}
+        </div>
         <div className="inline-flex rounded-lg border bg-secondary/40 p-0.5">
           {(['huggingface', 'jsonl'] as const).map((k) => (
             <button
@@ -398,7 +413,7 @@ export function BuildFromSourceWizard({
                   : 'text-muted-foreground hover:text-foreground'
               )}
             >
-              {k === 'huggingface' ? 'HuggingFace' : 'JSONL 붙여넣기'}
+              {k === 'huggingface' ? 'HuggingFace' : t('pasteJsonl')}
             </button>
           ))}
         </div>
@@ -416,7 +431,7 @@ export function BuildFromSourceWizard({
                     onSearch()
                   }
                 }}
-                placeholder="데이터셋 검색 (예: gsm8k, webvoyager, mmlu …)"
+                placeholder={t('hfSearchPlaceholder')}
               />
               <Button
                 type="button"
@@ -430,14 +445,11 @@ export function BuildFromSourceWizard({
                 ) : (
                   <Search className="size-4" />
                 )}
-                검색
+                {t('search')}
               </Button>
             </div>
             {searchError && (
-              <Callout
-                tone="warning"
-                hint="HuggingFace에 연결되지 않으면 'JSONL 붙여넣기'로 직접 넣어보세요."
-              >
+              <Callout tone="warning" hint={t('hfConnectHint')}>
                 {searchError}
               </Callout>
             )}
@@ -472,22 +484,24 @@ export function BuildFromSourceWizard({
             {hfDataset && (
               <div className="space-y-2 rounded-lg border bg-card p-3 shadow-raise">
                 <div className="flex flex-wrap items-center gap-2 text-[13px]">
-                  <span className="text-muted-foreground">선택됨:</span>
+                  <span className="text-muted-foreground">{t('selected')}</span>
                   <code className="font-mono text-foreground">{hfDataset}</code>
                   {hfGated &&
                     (hfTokenScope ? (
                       <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-success)]">
                         <Lock className="size-3" /> gated ·{' '}
-                        {hfTokenScope === 'user' ? '내' : '워크스페이스'} HuggingFace 토큰 사용
+                        {t('gatedTokenUsing', {
+                          scope: hfTokenScope === 'user' ? t('scopeMine') : t('scopeWorkspace'),
+                        })}
                       </span>
                     ) : (
                       <span className="inline-flex items-center gap-1 text-[12px] text-[var(--color-warning)]">
-                        <Lock className="size-3" /> gated · HuggingFace 토큰 필요
+                        <Lock className="size-3" /> gated · {t('gatedTokenNeeded')}
                         <Link
                           href={`/${workspace}/account?tab=secrets`}
                           className="font-[510] text-primary underline-offset-2 hover:underline"
                         >
-                          계정에서 등록 →
+                          {t('registerInAccount')}
                         </Link>
                       </span>
                     ))}
@@ -510,8 +524,8 @@ export function BuildFromSourceWizard({
                   // 뷰어 미서빙 → repo 데이터 파일 직접 선택(csv/jsonl/json).
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1">
-                      <Label htmlFor="hfFile">데이터 파일</Label>
-                      <InfoTip content="이 데이터셋은 HuggingFace 미리보기 서버(뷰어)가 없어서 저장소의 데이터 파일을 직접 읽어요." />
+                      <Label htmlFor="hfFile">{t('dataFile')}</Label>
+                      <InfoTip content={t('dataFileTip')} />
                     </div>
                     <Combobox
                       id="hfFile"
@@ -529,7 +543,7 @@ export function BuildFromSourceWizard({
           </div>
         ) : (
           <div className="space-y-1.5">
-            <Label htmlFor="jsonl">JSONL (한 줄 = 한 JSON 객체)</Label>
+            <Label htmlFor="jsonl">{t('jsonlLabel')}</Label>
             <Textarea
               id="jsonl"
               className="min-h-40 text-[12px]"
@@ -549,7 +563,7 @@ export function BuildFromSourceWizard({
           className="gap-1.5"
         >
           {previewBusy ? <Loader2 className="size-4 animate-spin" /> : <Eye className="size-4" />}
-          미리보기
+          {t('preview')}
         </Button>
         {previewError && (
           <Callout
@@ -557,10 +571,7 @@ export function BuildFromSourceWizard({
             {...(sourceKind === 'huggingface'
               ? {
                   // gated + 토큰 미보유가 가장 흔한 실패 — 셀프서비스 경로(계정 시크릿)를 바로 안내.
-                  hint:
-                    hfGated && !hfTokenScope
-                      ? 'gated 데이터셋이에요 — 계정 → 시크릿에서 HuggingFace 토큰을 등록하면 바로 가져올 수 있어요. (HuggingFace 에서 이 데이터셋의 약관 동의도 필요해요)'
-                      : "HuggingFace에 연결되지 않으면 'JSONL 붙여넣기'로 직접 넣어보세요.",
+                  hint: hfGated && !hfTokenScope ? t('previewHintGated') : t('hfConnectHint'),
                 }
               : {})}
           >
@@ -570,8 +581,10 @@ export function BuildFromSourceWizard({
         {previewed && (
           <div className="space-y-2">
             <p className="text-[12.5px] text-muted-foreground">
-              필드 <b className="text-foreground">{fields.length}</b>개를 찾았어요.{' '}
-              <b className="text-foreground">열 머리글을 눌러</b> 역할(task·id·answer)을 정해요.
+              {t.rich('fieldsFound', {
+                count: fields.length,
+                b: (chunks) => <b className="text-foreground">{chunks}</b>,
+              })}
             </p>
             <div className="overflow-x-auto rounded-lg border bg-card shadow-raise">
               <table className="w-full border-collapse text-[12px]">
@@ -587,7 +600,7 @@ export function BuildFromSourceWizard({
                           <button
                             type="button"
                             onClick={() => cycleRole(f)}
-                            title="눌러서 역할 지정 (task → id → answer → 없음)"
+                            title={t('cycleRoleTip')}
                             className="w-full cursor-pointer border-t-2 px-3 py-2 text-left transition-colors hover:bg-foreground/[0.04] focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-primary"
                             style={{ borderTopColor: meta ? meta.color : 'transparent' }}
                           >
@@ -610,7 +623,7 @@ export function BuildFromSourceWizard({
                                 {meta.label}
                               </span>
                             ) : (
-                              <span className="text-[11px] text-faint">역할 없음</span>
+                              <span className="text-[11px] text-faint">{t('noRole')}</span>
                             )}
                           </button>
                         </th>
@@ -646,31 +659,31 @@ export function BuildFromSourceWizard({
       {previewed && (
         <section className="space-y-3">
           <div className="flex items-center gap-1.5 text-[11px] font-[510] uppercase tracking-wide text-faint">
-            2 · 매핑 <Sparkles className="size-3.5 text-primary" />
+            {t('step2Mapping')} <Sparkles className="size-3.5 text-primary" />
             <span className="normal-case tracking-normal text-muted-foreground/70">
-              자동으로 채웠어요 — 필요하면 바꿔요
+              {t('autoFilled')}
             </span>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <MapField
-              label="task (필수)"
-              hint="에이전트가 받을 지시"
+              label={t('taskFieldLabel')}
+              hint={t('taskFieldHint')}
               value={taskField}
               onChange={setTaskField}
               fields={fields}
               sample={sampleOf(taskField)}
             />
             <MapField
-              label="id (필수)"
-              hint="케이스 식별자"
+              label={t('idFieldLabel')}
+              hint={t('idFieldHint')}
               value={idField}
               onChange={setIdField}
               fields={fields}
               sample={sampleOf(idField)}
             />
             <MapField
-              label="answer (선택)"
-              hint="채점 기준"
+              label={t('answerFieldLabel')}
+              hint={t('answerFieldHint')}
               value={answerField}
               onChange={setAnswerField}
               fields={fields}
@@ -690,7 +703,7 @@ export function BuildFromSourceWizard({
           >
             <div className="mb-0.5 flex items-center gap-1.5">
               <span className="text-[11px] font-[560] uppercase tracking-wide text-faint">
-                이렇게 실행돼요
+                {t('runsLikeThis')}
               </span>
               <span className="rounded bg-secondary px-1.5 py-0.5 font-mono text-[11px] font-[560] text-foreground">
                 {run.title}
@@ -710,27 +723,27 @@ export function BuildFromSourceWizard({
                 className={cn('size-3.5 transition-transform', advanced && 'rotate-90')}
               />
               <Settings2 className="size-3.5" />
-              고급 · 다르게 실행해야 하나요?
+              {t('advancedToggle')}
               <span className="ml-auto text-[11px] font-normal text-faint">
-                실행 환경 · task 합성 · 이미지
+                {t('advancedSummary')}
               </span>
             </button>
             {advanced && (
               <div className="space-y-3 border-t border-border/60 px-3.5 py-3.5">
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1">
-                    <Label htmlFor="envKind">실행 환경</Label>
-                    <InfoTip content="이 벤치마크의 각 케이스가 도는 세계예요. 대부분 자동 추론이 맞아요 — 실제 벤치마크가 웹(browser)·코드(repo)·데스크탑(os-use)을 요구할 때만 바꾸세요." />
+                    <Label htmlFor="envKind">{t('envKindLabel')}</Label>
+                    <InfoTip content={t('envKindTip')} />
                   </div>
                   <Combobox
                     id="envKind"
                     value={envKind}
                     onChange={(v) => setEnvKind(v as EnvKind)}
                     options={[
-                      { value: 'prompt', label: 'prompt · QA (환경 없음)' },
-                      { value: 'browser', label: 'browser · 웹 (startUrl)' },
-                      { value: 'repo', label: 'repo · 코드 (git clone)' },
-                      { value: 'os-use', label: 'os-use · 데스크탑 (이미지)' },
+                      { value: 'prompt', label: t('envPrompt') },
+                      { value: 'browser', label: t('envBrowser') },
+                      { value: 'repo', label: t('envRepo') },
+                      { value: 'os-use', label: t('envOsUse') },
                     ]}
                     className="w-full"
                   />
@@ -738,8 +751,8 @@ export function BuildFromSourceWizard({
 
                 {envKind === 'browser' && (
                   <MapField
-                    label="start URL"
-                    hint="선택 · 케이스별 시작 주소"
+                    label={t('startUrlLabel')}
+                    hint={t('startUrlHint')}
                     value={startUrlField}
                     onChange={setStartUrlField}
                     fields={fields}
@@ -750,16 +763,16 @@ export function BuildFromSourceWizard({
                 {envKind === 'repo' && (
                   <div className="grid grid-cols-2 gap-3">
                     <MapField
-                      label="git repo (필수)"
-                      hint="클론할 저장소 URL"
+                      label={t('gitRepoLabel')}
+                      hint={t('gitRepoHint')}
                       value={gitField}
                       onChange={setGitField}
                       fields={fields}
                       sample={sampleOf(gitField)}
                     />
                     <MapField
-                      label="ref/commit"
-                      hint="선택 · 체크아웃 지점"
+                      label={t('refLabel')}
+                      hint={t('refHint')}
                       value={refField}
                       onChange={setRefField}
                       fields={fields}
@@ -771,8 +784,8 @@ export function BuildFromSourceWizard({
 
                 <div className="space-y-1.5">
                   <div className="flex items-center gap-1">
-                    <Label htmlFor="taskTpl">task 합성 템플릿</Label>
-                    <InfoTip content="여러 필드를 합쳐 task 를 만들어요. {필드명} 이 각 행의 값으로 치환돼요. 비우면 task 필드 값을 그대로 써요. 예: 질문에 근거 문서 위치를 함께 실어줄 때." />
+                    <Label htmlFor="taskTpl">{t('taskTemplateLabel')}</Label>
+                    <InfoTip content={t('taskTemplateTip')} />
                   </div>
                   <Textarea
                     id="taskTpl"
@@ -780,14 +793,15 @@ export function BuildFromSourceWizard({
                     value={taskTemplate}
                     onChange={(e) => setTaskTemplate(e.target.value)}
                     spellCheck={false}
-                    placeholder={'{question}\n\n근거 문서: {source_docs}'}
+                    placeholder={t('taskTemplatePlaceholder')}
                   />
                   {taskTemplate.trim() && rows[0] ? (
                     <p
                       className="truncate font-mono text-[11px] text-muted-foreground/80"
                       title={taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
                     >
-                      예: {taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
+                      {t('examplePrefix')}{' '}
+                      {taskTemplate.replace(/\{(\w+)\}/g, (_, k) => cellText(rows[0]?.[k]))}
                     </p>
                   ) : null}
                 </div>
@@ -795,26 +809,26 @@ export function BuildFromSourceWizard({
                 <div className="grid grid-cols-2 gap-3">
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1">
-                      <Label htmlFor="img">케이스 이미지</Label>
-                      <InfoTip content="케이스가 특정 컨테이너 이미지 안에서 돌아야 할 때만 지정해요(prebuilt 저장소·데스크탑 등). 순수 QA 는 필요 없어요." />
+                      <Label htmlFor="img">{t('caseImageLabel')}</Label>
+                      <InfoTip content={t('caseImageTip')} />
                     </div>
                     <Input
                       id="img"
                       value={image}
                       onChange={(e) => setImage(e.target.value)}
-                      placeholder="예: my-osworld:latest"
+                      placeholder={t('caseImagePlaceholder')}
                     />
                   </div>
                   <div className="space-y-1.5">
                     <div className="flex items-center gap-1">
                       <Label htmlFor="place">placement</Label>
-                      <InfoTip content="이 케이스들을 특정 실행 인프라(런타임)로만 보낼 때만 지정해요. 비우면 기본 백엔드예요." />
+                      <InfoTip content={t('placementTip')} />
                     </div>
                     <Input
                       id="place"
                       value={placement}
                       onChange={(e) => setPlacement(e.target.value)}
-                      placeholder="예: docker"
+                      placeholder={t('placementPlaceholder')}
                     />
                   </div>
                 </div>
@@ -828,10 +842,10 @@ export function BuildFromSourceWizard({
       {previewed && (
         <section className="space-y-3">
           <div className="text-[11px] font-[510] uppercase tracking-wide text-faint">
-            3 · 만들기
+            {t('step3Create')}
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="dsid">데이터셋 이름</Label>
+            <Label htmlFor="dsid">{t('datasetName')}</Label>
             <Input
               id="dsid"
               value={datasetId}
@@ -845,7 +859,9 @@ export function BuildFromSourceWizard({
           )}
 
           {createResult && !createResult.ok && (
-            <Callout tone="danger">만들지 못했어요: {createResult.error}</Callout>
+            <Callout tone="danger">
+              {t('createFailed', { error: createResult.error ?? '' })}
+            </Callout>
           )}
 
           <Button
@@ -855,11 +871,9 @@ export function BuildFromSourceWizard({
             className="gap-1.5"
           >
             {createBusy ? <Loader2 className="size-4 animate-spin" /> : null}
-            벤치마크 만들기
+            {t('createBenchmark')}
           </Button>
-          <p className="text-[12px] leading-relaxed text-muted-foreground">
-            전체 케이스를 가져와요. 실행할 때 스코어카드에서 일부만 돌릴 수 있어요.
-          </p>
+          <p className="text-[12px] leading-relaxed text-muted-foreground">{t('createNote')}</p>
         </section>
       )}
     </div>
@@ -883,6 +897,7 @@ function MapField({
   optional?: boolean
   sample?: string
 }) {
+  const t = useTranslations('importBenchmark')
   return (
     <div className="space-y-1.5">
       <Label>
@@ -894,17 +909,17 @@ function MapField({
         value={value}
         onChange={onChange}
         options={[
-          ...(optional ? [{ value: '', label: '(없음)' }] : []),
+          ...(optional ? [{ value: '', label: t('noneOption') }] : []),
           ...fields.map((f) => ({ value: f })),
         ]}
-        placeholder="— 선택 —"
+        placeholder={t('selectDash')}
         className="w-full"
         aria-label={label}
       />
       {/* 선택한 필드의 실제 값(첫 행) — "무엇을 매핑하는지" 확인용. */}
       {sample ? (
         <p className="truncate font-mono text-[11px] text-muted-foreground/80" title={sample}>
-          예: {sample}
+          {t('examplePrefix')} {sample}
         </p>
       ) : null}
     </div>

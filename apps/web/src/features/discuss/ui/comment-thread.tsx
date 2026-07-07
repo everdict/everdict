@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useTransition, type ReactNode } from 'react'
 import { useRouter } from 'next/navigation'
 import { CornerDownRight, Loader2, MessageSquare, Trash2 } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import { fmtDateTimeFull, fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
@@ -11,9 +12,8 @@ import { Button } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { Textarea } from '@/shared/ui/input'
 
-import type { Mentionable, ThreadComment } from '../model/types'
-
 import { createCommentAction, deleteCommentAction } from '../api/comments'
+import type { Mentionable, ThreadComment } from '../model/types'
 
 // 리소스 제네릭 댓글 스레드(1단계 대댓글, Linear 식) — 어느 상세 화면에서든 재사용.
 export function CommentThread({
@@ -31,6 +31,7 @@ export function CommentThread({
   mentionables: Mentionable[]
   canComment: boolean
 }) {
+  const t = useTranslations('discuss')
   const tops = comments.filter((c) => !c.parentId)
   const repliesByParent = new Map<string, ThreadComment[]>()
   for (const c of comments) {
@@ -57,7 +58,8 @@ export function CommentThread({
     <div className="space-y-3">
       {tops.length === 0 && (
         <p className="text-[12.5px] text-muted-foreground">
-          아직 댓글이 없어요.{canComment ? ' 첫 논의를 남겨보세요.' : ''}
+          {t('emptyTitle')}
+          {canComment ? ` ${t('emptyPrompt')}` : ''}
         </p>
       )}
       {tops.map((c) => (
@@ -77,11 +79,11 @@ export function CommentThread({
             resourceType={resourceType}
             resourceId={resourceId}
             mentionables={mentionables}
-            placeholder="이 항목에 대한 논의를 남겨요… @로 멤버를 언급하면 알림이 가요"
+            placeholder={t('composerPlaceholder')}
           />
         </div>
       ) : (
-        <p className="text-[12px] text-muted-foreground">댓글을 남기려면 멤버 권한이 필요해요.</p>
+        <p className="text-[12px] text-muted-foreground">{t('memberOnly')}</p>
       )}
     </div>
   )
@@ -103,6 +105,7 @@ function CommentNode({
   resourceId: string
   canComment: boolean
 }) {
+  const t = useTranslations('discuss')
   const [replying, setReplying] = useState(false)
   return (
     <div className="space-y-2">
@@ -118,7 +121,7 @@ function CommentNode({
               resourceId={resourceId}
               parentId={comment.id}
               mentionables={mentionables}
-              placeholder="답글 남기기… @로 멤버 언급"
+              placeholder={t('replyPlaceholder')}
               autoFocus
               onDone={() => setReplying(false)}
             />
@@ -131,7 +134,7 @@ function CommentNode({
           onClick={() => setReplying(true)}
           className="ml-5 inline-flex items-center gap-1 text-[11.5px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
         >
-          <CornerDownRight className="size-3" /> 답글
+          <CornerDownRight className="size-3" /> {t('reply')}
         </button>
       )}
     </div>
@@ -144,7 +147,10 @@ function renderBody(body: string, mentionables: Mentionable[]): ReactNode {
     (a, b) => b.length - a.length
   )
   if (names.length === 0) return body
-  const re = new RegExp(`@(${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`, 'g')
+  const re = new RegExp(
+    `@(${names.map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})`,
+    'g'
+  )
   const out: ReactNode[] = []
   let last = 0
   let m: RegExpExecArray | null
@@ -164,6 +170,8 @@ function renderBody(body: string, mentionables: Mentionable[]): ReactNode {
 }
 
 function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables: Mentionable[] }) {
+  const t = useTranslations('discuss')
+  const locale = useLocale()
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [error, setError] = useState<string>()
@@ -182,21 +190,30 @@ function CommentCard({ item, mentionables }: { item: ThreadComment; mentionables
     >
       <div className="mb-1 flex items-center gap-2">
         {item.actor.known && (
-          <Avatar name={item.actor.name} url={item.actor.avatarUrl} size="sm" className="rounded-full" />
+          <Avatar
+            name={item.actor.name}
+            url={item.actor.avatarUrl}
+            size="sm"
+            className="rounded-full"
+          />
         )}
         <span className="text-[12.5px] font-[560] text-foreground">{item.actor.name}</span>
         <time className="text-[11px] text-faint" title={fmtDateTimeFull(item.at)}>
-          {fmtTimeAgo(item.at)}
+          {fmtTimeAgo(item.at, locale)}
         </time>
         {item.canDelete && (
           <button
             type="button"
             onClick={onDelete}
             disabled={pending}
-            aria-label="댓글 삭제"
+            aria-label={t('deleteComment')}
             className="ml-auto text-faint transition-colors hover:text-destructive disabled:opacity-50"
           >
-            {pending ? <Loader2 className="size-3.5 animate-spin" /> : <Trash2 className="size-3.5" />}
+            {pending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <Trash2 className="size-3.5" />
+            )}
           </button>
         )}
       </div>
@@ -230,6 +247,7 @@ function Composer({
   autoFocus?: boolean
   onDone?: () => void
 }) {
+  const t = useTranslations('discuss')
   const router = useRouter()
   const taRef = useRef<HTMLTextAreaElement>(null)
   const [value, setValue] = useState('')
@@ -252,7 +270,9 @@ function Composer({
     setActive(0)
   }
   const matches = menu
-    ? mentionables.filter((mn) => mn.name.toLowerCase().includes(menu.query.toLowerCase())).slice(0, 6)
+    ? mentionables
+        .filter((mn) => mn.name.toLowerCase().includes(menu.query.toLowerCase()))
+        .slice(0, 6)
     : []
   function pick(mn: Mentionable) {
     if (!menu) return
@@ -270,7 +290,9 @@ function Composer({
   function extractMentions(text: string): string[] {
     return mentionables
       .filter((mn) =>
-        new RegExp(`(^|\\s)@${mn.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|[.,!?])`).test(text)
+        new RegExp(`(^|\\s)@${mn.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(\\s|$|[.,!?])`).test(
+          text
+        )
       )
       .map((mn) => mn.subject)
   }
@@ -365,7 +387,7 @@ function Composer({
         </Callout>
       )}
       <div className="flex items-center justify-between gap-2">
-        <span className="text-[11px] text-faint">@ 멘션 · ⌘/Ctrl + Enter 로 등록</span>
+        <span className="text-[11px] text-faint">{t('mentionHint')}</span>
         <div className="flex items-center gap-2">
           {onDone && (
             <button
@@ -373,7 +395,7 @@ function Composer({
               onClick={onDone}
               className="text-[12px] text-muted-foreground transition-colors hover:text-foreground"
             >
-              취소
+              {t('cancel')}
             </button>
           )}
           <Button
@@ -383,8 +405,12 @@ function Composer({
             disabled={pending || value.trim().length === 0}
             onClick={onSubmit}
           >
-            {pending ? <Loader2 className="size-3.5 animate-spin" /> : <MessageSquare className="size-3.5" />}
-            {parentId ? '답글' : '댓글 남기기'}
+            {pending ? (
+              <Loader2 className="size-3.5 animate-spin" />
+            ) : (
+              <MessageSquare className="size-3.5" />
+            )}
+            {parentId ? t('reply') : t('submit')}
           </Button>
         </div>
       </div>

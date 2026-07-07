@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react'
 import { Check, Copy, KeyRound, Plus, Trash2 } from 'lucide-react'
+import { useLocale, useTranslations } from 'next-intl'
 
 import type { ApiKeyMeta, ApiKeyScope } from '@/entities/api-key'
 import { copyText } from '@/shared/lib/clipboard'
@@ -22,6 +23,8 @@ function scopeLabel(scopes?: ApiKeyScope[]): string {
 }
 
 export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrite: boolean }) {
+  const t = useTranslations('manageApiKeys')
+  const locale = useLocale()
   const [createOpen, setCreateOpen] = useState(false)
   const [confirmId, setConfirmId] = useState<string>()
   const [error, setError] = useState<string>()
@@ -41,16 +44,17 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
       {/* 헤더 — 설명 + 발급 액션(목록과 같은 화면, 발급은 모달로) */}
       <div className="flex items-start justify-between gap-4">
         <div className="space-y-1">
-          <h3 className="text-[13px] font-[560] text-foreground">API 키</h3>
+          <h3 className="text-[13px] font-[560] text-foreground">{t('title')}</h3>
           <p className="max-w-prose text-[13px] leading-relaxed text-muted-foreground">
-            에이전트가 Assay 에 접근할 때 쓰는 키예요(
-            <span className="font-mono">ak_…</span>). 발급할 때 권한을 정할 수 있고, 키는 한 번만
-            보여요.
+            {t.rich('introRich', {
+              code: (chunks) => <span className="font-mono">{chunks}</span>,
+            })}
           </p>
         </div>
         {canWrite && (
           <Button size="sm" className="shrink-0" onClick={() => setCreateOpen(true)}>
-            <Plus />새 키 발급
+            <Plus />
+            {t('newKey')}
           </Button>
         )}
       </div>
@@ -65,16 +69,13 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
       {keys.length === 0 ? (
         <EmptyState
           icon={<KeyRound strokeWidth={1.75} />}
-          title="아직 발급한 키가 없어요."
-          hint={
-            canWrite
-              ? '새 키를 발급해 에이전트나 CI 에 접근 권한을 줄 수 있어요.'
-              : '키를 발급하려면 관리자 권한이 필요해요.'
-          }
+          title={t('emptyTitle')}
+          hint={canWrite ? t('emptyHintWrite') : t('emptyHintRead')}
           action={
             canWrite ? (
               <Button size="sm" variant="secondary" onClick={() => setCreateOpen(true)}>
-                <Plus />새 키 발급
+                <Plus />
+                {t('newKey')}
               </Button>
             ) : undefined
           }
@@ -89,14 +90,14 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="truncate text-[13px] font-[510] text-foreground">
-                    {k.label || '이름 없는 키'}
+                    {k.label || t('unnamedKey')}
                   </span>
                   <Badge tone="outline">{scopeLabel(k.scopes)}</Badge>
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-faint">
                   <code className="font-mono text-muted-foreground">{k.prefix}…</code>
                   <span>·</span>
-                  <span>{new Date(k.createdAt).toLocaleString('ko-KR')}</span>
+                  <span>{new Date(k.createdAt).toLocaleString(locale)}</span>
                 </div>
               </div>
               {canWrite &&
@@ -108,14 +109,14 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
                       disabled={pending}
                       onClick={() => onRevoke(k.id)}
                     >
-                      취소 확인
+                      {t('revokeConfirm')}
                     </Button>
                     <button
                       type="button"
                       className="text-[12px] text-muted-foreground hover:text-foreground"
                       onClick={() => setConfirmId(undefined)}
                     >
-                      닫기
+                      {t('close')}
                     </button>
                   </span>
                 ) : (
@@ -123,7 +124,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0 text-muted-foreground hover:text-destructive"
-                    aria-label={`${k.label || k.prefix} 키 취소`}
+                    aria-label={t('revokeKeyAria', { name: k.label || k.prefix })}
                     onClick={() => setConfirmId(k.id)}
                   >
                     <Trash2 />
@@ -135,9 +136,7 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
       )}
 
       {!canWrite && keys.length > 0 && (
-        <p className="text-[12px] text-muted-foreground">
-          키를 발급하거나 취소하려면 관리자 권한이 필요해요.
-        </p>
+        <p className="text-[12px] text-muted-foreground">{t('adminRequired')}</p>
       )}
 
       {canWrite && <CreateKeyDialog open={createOpen} onClose={() => setCreateOpen(false)} />}
@@ -147,6 +146,8 @@ export function ApiKeysManager({ keys, canWrite }: { keys: ApiKeyMeta[]; canWrit
 
 // 발급 모달 — 레이블 + 권한 선택 후 발급. 발급되면 같은 모달이 평문 1회 노출 단계로 전환된다.
 function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const t = useTranslations('manageApiKeys')
+  const locale = useLocale()
   const [label, setLabel] = useState('')
   const [mode, setMode] = useState<'full' | 'custom'>('full') // 전체 액세스 vs 범위 지정
   const [scopeRead, setScopeRead] = useState(true)
@@ -177,7 +178,7 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
       if (scopeRead) scopes.push('read')
       if (scopeWrite) scopes.push('write')
       if (scopes.length === 0) {
-        setError('권한을 하나 이상 선택해주세요.')
+        setError(t('selectScope'))
         return
       }
     }
@@ -195,17 +196,14 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="create-key-title" className="text-[15px] font-[560] text-foreground">
-              키가 발급됐어요
+              {t('issuedTitle')}
             </h2>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              아래 키를 지금 복사해 안전한 곳에 보관하세요.
+              {t('issuedDesc')}
             </p>
           </header>
           <div className="px-5 py-4">
-            <Callout
-              tone="warning"
-              hint="이 키는 다시 볼 수 없어요. 이후에는 앞부분으로만 표시돼요."
-            >
+            <Callout tone="warning" hint={t('issuedHint')}>
               <div className="flex items-center gap-2">
                 <code className="min-w-0 flex-1 select-all break-all font-mono text-xs">
                   {issued}
@@ -217,18 +215,18 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
                   className="shrink-0"
                   onClick={() => {
                     // http(비-secure) 컨텍스트 폴백 포함 — navigator.clipboard 미존재 시 execCommand.
-                    void copyText(issued).then((ok) => ok && setCopied(true))
+                    void copyText(issued, undefined, locale).then((ok) => ok && setCopied(true))
                   }}
                 >
                   {copied ? <Check /> : <Copy />}
-                  {copied ? '복사됨' : '복사'}
+                  {copied ? t('copied') : t('copy')}
                 </Button>
               </div>
             </Callout>
           </div>
           <footer className="flex justify-end border-t border-border px-5 py-3.5">
             <Button size="sm" onClick={onClose}>
-              완료
+              {t('done')}
             </Button>
           </footer>
         </>
@@ -237,16 +235,16 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
         <>
           <header className="border-b border-border px-5 py-4">
             <h2 id="create-key-title" className="text-[15px] font-[560] text-foreground">
-              새 API 키 발급
+              {t('createTitle')}
             </h2>
             <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
-              레이블로 용도를 구분하고, 이 키의 권한을 정해보세요.
+              {t('createDesc')}
             </p>
           </header>
 
           <div className="space-y-4 px-5 py-4">
             <div className="space-y-1.5">
-              <Label htmlFor="key-label">레이블 (선택)</Label>
+              <Label htmlFor="key-label">{t('labelOptional')}</Label>
               <Input
                 id="key-label"
                 value={label}
@@ -258,34 +256,34 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
             </div>
 
             <div className="space-y-2">
-              <Label>권한</Label>
+              <Label>{t('scope')}</Label>
               <div className="space-y-2">
                 <ScopeOption
                   selected={mode === 'full'}
                   onSelect={() => setMode('full')}
                   name="key-access"
-                  title="전체 권한"
-                  description="모든 작업을 할 수 있어요."
+                  title={t('fullTitle')}
+                  description={t('fullDesc')}
                 />
                 <ScopeOption
                   selected={mode === 'custom'}
                   onSelect={() => setMode('custom')}
                   name="key-access"
-                  title="직접 지정"
-                  description="선택한 권한만 줘요."
+                  title={t('customTitle')}
+                  description={t('customDesc')}
                 >
                   <div className="mt-3 space-y-2 border-t border-border/70 pt-3">
                     <ScopeCheck
                       checked={scopeRead}
                       onChange={setScopeRead}
-                      title="읽기"
-                      description="데이터를 조회할 수 있어요."
+                      title={t('readTitle')}
+                      description={t('readDesc')}
                     />
                     <ScopeCheck
                       checked={scopeWrite}
                       onChange={setScopeWrite}
-                      title="쓰기"
-                      description="실행하고 등록할 수 있어요. 시크릿·멤버 관리는 빼고요."
+                      title={t('writeTitle')}
+                      description={t('writeDesc')}
                     />
                   </div>
                 </ScopeOption>
@@ -301,10 +299,10 @@ function CreateKeyDialog({ open, onClose }: { open: boolean; onClose: () => void
 
           <footer className="flex justify-end gap-2 border-t border-border px-5 py-3.5">
             <Button variant="ghost" size="sm" onClick={onClose}>
-              취소
+              {t('cancel')}
             </Button>
             <Button size="sm" onClick={onCreate} disabled={pending}>
-              {pending ? '발급 중…' : '키 발급'}
+              {pending ? t('issuing') : t('issue')}
             </Button>
           </footer>
         </>

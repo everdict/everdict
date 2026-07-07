@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { ChevronLeft } from 'lucide-react'
+import { getTranslations } from 'next-intl/server'
 
 import { RunScorecardForm } from '@/features/run-scorecard'
 import { datasetsSchema } from '@/entities/dataset'
@@ -22,6 +23,7 @@ export default async function NewScorecardPage({
 }) {
   const { workspace } = await params
   const { principal, ctx } = await currentPrincipal()
+  const t = await getTranslations('scorecardsPage')
   const allowed = can(principal?.roles, 'scorecards:run')
 
   let datasets: { id: string; versions: string[]; versionTags?: Record<string, string[]> }[] = []
@@ -64,12 +66,9 @@ export default async function NewScorecardPage({
         className="inline-flex items-center gap-0.5 text-[12px] font-[510] text-muted-foreground transition-colors hover:text-foreground"
       >
         <ChevronLeft className="size-3.5" />
-        스코어카드
+        {t('backToList')}
       </Link>
-      <PageHeader
-        title="스코어카드 실행"
-        description="벤치마크로 하니스를 평가하고 점수를 모아요."
-      />
+      <PageHeader title={t('run')} description={t('runDescription')} />
       {allowed ? (
         <Card className="p-5">
           <RunScorecardForm
@@ -81,10 +80,7 @@ export default async function NewScorecardPage({
           />
         </Card>
       ) : (
-        <EmptyState
-          title="실행 권한이 없어요."
-          hint="워크스페이스 관리자에게 권한을 요청해보세요."
-        />
+        <EmptyState title={t('noRunPermTitle')} hint={t('noPermHint')} />
       )}
     </div>
   )

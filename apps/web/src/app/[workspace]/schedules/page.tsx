@@ -1,12 +1,13 @@
 import Link from 'next/link'
+import { getTranslations } from 'next-intl/server'
 
 import { ScheduleList } from '@/features/manage-schedules'
 import { membersSchema } from '@/entities/member'
 import { schedulesSchema } from '@/entities/schedule'
 import { can } from '@/shared/auth/can'
 import { currentPrincipal } from '@/shared/auth/principal'
-import { nextFires } from '@/shared/lib/cron'
 import { controlPlane } from '@/shared/lib/control-plane'
+import { nextFires } from '@/shared/lib/cron'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
 import { EmptyState } from '@/shared/ui/empty-state'
@@ -22,6 +23,7 @@ export default async function SchedulesPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>
 }) {
   const { workspace } = await params
+  const t = await getTranslations('schedulesPage')
   const rawView = (await searchParams).view
   const viewParam = Array.isArray(rawView) ? rawView[0] : rawView
   const initialView = viewParam === 'owner' || viewParam === 'calendar' ? viewParam : 'list'
@@ -58,28 +60,27 @@ export default async function SchedulesPage({
       ? []
       : s.nextFireTimes && s.nextFireTimes.length > 0
         ? s.nextFireTimes
-        : nextFires(s.cron, s.timezone, now, { count: 8, horizonDays: 45 }).map((d) => d.toISOString())
+        : nextFires(s.cron, s.timezone, now, { count: 8, horizonDays: 45 }).map((d) =>
+            d.toISOString()
+          )
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="예약"
-        description={`${schedules.length}건 · 정해둔 주기마다 자동으로 실행해요`}
+        title={t('title')}
+        description={t('description', { count: schedules.length })}
         actions={
           canWrite ? (
             <Link href={`/${workspace}/schedules/new`} className={buttonVariants({ size: 'sm' })}>
-              예약 만들기
+              {t('create')}
             </Link>
           ) : null
         }
       />
       {error ? (
-        <Callout tone="danger">서버에 연결하지 못했어요: {error}</Callout>
+        <Callout tone="danger">{t('connectError', { error })}</Callout>
       ) : schedules.length === 0 ? (
-        <EmptyState
-          title="아직 예약이 없어요."
-          hint="예약을 만들면 정해둔 주기마다 자동으로 실행돼요."
-        />
+        <EmptyState title={t('emptyTitle')} hint={t('emptyHint')} />
       ) : (
         <ScheduleList
           schedules={schedules}
