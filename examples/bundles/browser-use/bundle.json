@@ -1,0 +1,92 @@
+{
+  "id": "browser-use",
+  "version": "1.0.0",
+  "description": "browser-use (web browsing agent) harness + two open web-agent benchmarks (WebVoyager 2025 / Online-Mind2Web) as reusable recipes. The agent drives its own headless Chromium inside a BYO image (build ./Dockerfile) and reports its final answer on stdout; grading is judge-over-final-answer. Pure data — no core changes.",
+  "harnessTemplates": [
+    {
+      "kind": "command",
+      "category": "browser-agent",
+      "id": "browser-use",
+      "version": "2",
+      "workDir": "/work",
+      "setup": [],
+      "command": "python /app/run_bu.py {{task}} --model {{model}} --max-steps {{max_steps}}",
+      "model": "gpt-5.4-mini",
+      "env": {
+        "OPENAI_API_BASE": "http://172.17.0.1:4000/v1",
+        "OPENAI_API_KEY": { "secretRef": "OPENAI_API_KEY", "scope": "user" },
+        "BU_USE_VISION": "false"
+      },
+      "params": { "max_steps": "15" },
+      "trace": { "kind": "none" }
+    }
+  ],
+  "harnesses": [
+    {
+      "template": { "id": "browser-use", "version": "2" },
+      "id": "browser-use",
+      "version": "0.13.3",
+      "description": "browser-use 0.13.3 — BYO image (build ./Dockerfile as browseruse-eval:0.13.3) + an OpenAI-compatible model endpoint (LiteLLM). Swap pins.model / env.OPENAI_API_BASE for your deployment.",
+      "pins": { "image": "browseruse-eval:0.13.3", "model": "gpt-5.4-mini" }
+    }
+  ],
+  "benchmarkRecipes": [
+    {
+      "id": "webvoyager-2025",
+      "version": "1.0.0",
+      "description": "WebVoyager 2025 revalidated live-web tasks (start URL embedded in the task text) mapped for self-browsing agents: prompt env + judge-over-final-answer + steps.",
+      "category": "browser",
+      "origin": {
+        "paper": "https://arxiv.org/abs/2401.13919",
+        "code": "https://github.com/MinorJerry/WebVoyager",
+        "data": "https://huggingface.co/datasets/convergence-ai/WebVoyager2025Valid",
+        "taskType": "live-web navigation + information extraction"
+      },
+      "source": { "kind": "huggingface", "dataset": "convergence-ai/WebVoyager2025Valid", "split": "test" },
+      "mapping": {
+        "idField": "id",
+        "taskField": "task",
+        "promptEnv": true,
+        "extraGraders": [
+          {
+            "id": "judge",
+            "config": {
+              "rubric": "PASS only if the agent's reported final result concretely and specifically accomplishes the task as stated (correct site, the requested item/fact/action, plausible and grounded in the run log). FAIL if the result is missing, generic, self-reports failure, reports an error/blocker (e.g. CAPTCHA, page unreachable), or contradicts any explicit task constraint (rating, count, date, price, etc.)."
+            }
+          },
+          { "id": "steps" }
+        ]
+      }
+    },
+    {
+      "id": "online-mind2web",
+      "version": "1.0.0",
+      "description": "Online-Mind2Web (OSU NLP) — 300 live-website tasks, difficulty-labelled — mapped for self-browsing agents: prompt env (start URL appended to the task), per-case difficulty-aware judge rubric + steps.",
+      "category": "browser",
+      "origin": {
+        "paper": "https://arxiv.org/abs/2504.01382",
+        "code": "https://github.com/OSU-NLP-Group/Online-Mind2Web",
+        "data": "https://huggingface.co/datasets/osunlp/Online-Mind2Web",
+        "authors": "OSU NLP Group",
+        "taskType": "live-web task completion on real websites"
+      },
+      "source": { "kind": "huggingface", "dataset": "XueyingJia/online-mind2web-sorted" },
+      "mapping": {
+        "idField": "task_id",
+        "taskField": "confirmed_task",
+        "taskTemplate": "{confirmed_task}\n\nStart at: {website}",
+        "promptEnv": true,
+        "tagFields": ["level"],
+        "extraGraders": [{ "id": "steps" }]
+      },
+      "graderTemplates": [
+        {
+          "id": "judge",
+          "config": {
+            "rubric": "Task difficulty: {level}. Reference human trajectory length: {reference_length} steps. PASS only if the agent's reported final result shows the task on {website} was concretely completed as stated (the requested navigation/filter/extraction actually happened, grounded in the run log — not just intent). FAIL if the result is missing, generic, self-reports failure, hits a blocker (CAPTCHA/login wall/unreachable page), or violates an explicit constraint in the task."
+          }
+        }
+      ]
+    }
+  ]
+}
