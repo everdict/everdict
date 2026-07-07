@@ -1,5 +1,5 @@
-import { ForbiddenError } from "@assay/core";
-import { InMemoryRunnerStore, InMemoryTenantKeyStore, hashKey } from "@assay/db";
+import { ForbiddenError } from "@everdict/core";
+import { InMemoryRunnerStore, InMemoryTenantKeyStore, hashKey } from "@everdict/db";
 import { SignJWT, createLocalJWKSet, exportJWK, generateKeyPair } from "jose";
 import { beforeAll, describe, expect, it } from "vitest";
 import { apiKeyAuthenticator } from "./api-key.js";
@@ -151,7 +151,7 @@ describe("runnerAuthenticator (셀프호스티드 러너 페어링 토큰)", () 
 });
 
 describe("oidcAuthenticator (Keycloak JWT)", () => {
-  const ISSUER = "https://kc.example/realms/assay";
+  const ISSUER = "https://kc.example/realms/everdict";
   let keySet: ReturnType<typeof createLocalJWKSet>;
   let priv: Awaited<ReturnType<typeof generateKeyPair>>["privateKey"];
 
@@ -267,7 +267,7 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
     keySet = createLocalJWKSet({ keys: [jwk] });
   });
 
-  const mint = (claims: Record<string, unknown>, issuer = GITHUB_ACTIONS_ISSUER, audience = "assay") =>
+  const mint = (claims: Record<string, unknown>, issuer = GITHUB_ACTIONS_ISSUER, audience = "everdict") =>
     new SignJWT(claims)
       .setProtectedHeader({ alg: "RS256", kid: "gha" })
       .setIssuer(issuer)
@@ -305,7 +305,7 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
     expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
   });
 
-  it("audience 불일치(aud≠assay) → 미인증", async () => {
+  it("audience 불일치(aud≠everdict) → 미인증", async () => {
     const auth = githubActionsAuthenticator({ keySet, resolveTrust: trustAcmeApp });
     const token = await mint({ repository: "acme/app" }, GITHUB_ACTIONS_ISSUER, "sts.amazonaws.com");
     expect(await auth.authenticate(token, { workspaceHint: "acme" })).toBeUndefined();
@@ -320,7 +320,7 @@ describe("githubActionsAuthenticator (GitHub Actions OIDC 페더레이션)", () 
         return undefined;
       },
     });
-    const keycloak = await mint({ repository: "acme/app" }, "https://kc.example/realms/assay");
+    const keycloak = await mint({ repository: "acme/app" }, "https://kc.example/realms/everdict");
     expect(await auth.authenticate(keycloak, { workspaceHint: "acme" })).toBeUndefined();
     expect(await auth.authenticate("ak_key", { workspaceHint: "acme" })).toBeUndefined(); // 비-JWT 도 패스
     expect(calls).toHaveLength(0);

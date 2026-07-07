@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult, Scorecard, Suite } from "@assay/core";
+import type { AgentJob, CaseResult, Scorecard, Suite } from "@everdict/core";
 
 // Backend/Router/Orchestrator 의 (job)→CaseResult 시그니처와 동일.
 export type Dispatch = (job: AgentJob) => Promise<CaseResult>;

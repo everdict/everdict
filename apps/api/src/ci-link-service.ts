@@ -1,5 +1,5 @@
-import { BadRequestError, NotFoundError, UpstreamError } from "@assay/core";
-import type { WorkspaceCiLink, WorkspaceSettingsStore } from "@assay/db";
+import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/core";
+import type { WorkspaceCiLink, WorkspaceSettingsStore } from "@everdict/db";
 import { z } from "zod";
 
 // CI repo link 서비스 — repository ↔ 하니스 서비스 슬롯 매핑(= GitHub Actions OIDC trust policy) CRUD +
@@ -13,7 +13,7 @@ export const UpsertCiLinkBodySchema = z.object({
   harness: z.string().min(1), // 하니스 인스턴스 id
   dataset: z.string().optional(), // 발사할 데이터셋 id — setup-PR 워크플로 생성에 필요(없으면 YAML 에 TODO)
   slots: z.record(z.object({ path: z.string().optional() })).default({}), // 서비스 슬롯 → 모노레포 path(선택)
-  runsOn: z.string().min(1).optional(), // 좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, assay-<id>]")
+  runsOn: z.string().min(1).optional(), // 좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, everdict-<id>]")
   runtime: z.string().min(1).optional(), // 좁히기 오버라이드 — run-eval runtime(기본 "self:ws" 풀, 예: "self:ws:<id>")
   trigger: z.enum(["auto", "comment", "both"]).optional(), // PR 평가 발화 방식(미지정=both) — WorkspaceCiLinkSchema 참고
 });
@@ -162,8 +162,8 @@ export class CiLinkService {
     if (!apiUrl)
       throw new BadRequestError("BAD_REQUEST", {}, "API_PUBLIC_URL 미설정 — 워크플로의 api-url 을 결정할 수 없습니다.");
     const yaml = renderCiWorkflow(link, workspace, apiUrl.replace(/\/$/, ""));
-    const branch = "assay/eval-setup";
-    const path = ".github/workflows/assay-eval.yml";
+    const branch = "everdict/eval-setup";
+    const path = ".github/workflows/everdict-eval.yml";
 
     const repo = z
       .object({ default_branch: z.string() })
@@ -191,7 +191,7 @@ export class CiLinkService {
       method: "PUT",
       headers: this.headers(token),
       body: JSON.stringify({
-        message: "ci: add Assay eval workflow",
+        message: "ci: add Everdict eval workflow",
         content: Buffer.from(yaml, "utf8").toString("base64"),
         branch,
         ...(existingSha ? { sha: existingSha } : {}),
@@ -204,10 +204,10 @@ export class CiLinkService {
       method: "POST",
       headers: this.headers(token),
       body: JSON.stringify({
-        title: "Assay eval 워크플로 추가",
+        title: "Everdict eval 워크플로 추가",
         head: branch,
         base: repo.default_branch,
-        body: `Assay 가 생성한 CI eval 셋업입니다. 머지하면 PR/머지마다 \`${link.harness}\` 평가가 발사됩니다.\n\n- workspace: \`${workspace}\`\n- 인증: GitHub OIDC 페더레이션(keyless — repo link 가 신뢰를 부여)`,
+        body: `Everdict 가 생성한 CI eval 셋업입니다. 머지하면 PR/머지마다 \`${link.harness}\` 평가가 발사됩니다.\n\n- workspace: \`${workspace}\`\n- 인증: GitHub OIDC 페더레이션(keyless — repo link 가 신뢰를 부여)`,
       }),
     });
     if (mkPr.ok) {
@@ -227,7 +227,7 @@ export class CiLinkService {
   }
 
   // GitHub Actions 셀프호스티드 러너 등록 토큰 발급 — 워크스페이스 GitHub App(administration)으로 대상(repo|org)에 mint.
-  // 단기 토큰(≈1시간). Assay 는 장기 러너 토큰을 저장하지 않는다(필요 시마다 발급). App 이 그 org/repo 에 설치돼 있어야 한다.
+  // 단기 토큰(≈1시간). Everdict 는 장기 러너 토큰을 저장하지 않는다(필요 시마다 발급). App 이 그 org/repo 에 설치돼 있어야 한다.
   async mintRunnerToken(
     workspace: string,
     target: { repo: string } | { org: string },
@@ -241,7 +241,7 @@ export class CiLinkService {
       authorization: `Bearer ${token}`,
       accept: "application/vnd.github+json",
       "content-type": "application/json",
-      "user-agent": "assay-control-plane",
+      "user-agent": "everdict-control-plane",
     };
   }
 
@@ -276,7 +276,7 @@ function registryFor(host?: string): string {
 
 // link → 워크플로 YAML 합성 — 사용자는 YAML 을 만지지 않는다(zero-input 의 핵심).
 // PR/push/PR-코멘트(/evaluate) 겸용 한 파일: 슬롯별 이미지 빌드(레지스트리는 link.host 에 따라 GHCR/GHE, digest 출력) →
-// assay run-eval 액션(모드 자동, OIDC keyless — GHES issuer 도 컨트롤플레인이 신뢰).
+// everdict run-eval 액션(모드 자동, OIDC keyless — GHES issuer 도 컨트롤플레인이 신뢰).
 // trigger 노브: auto=PR 이벤트 자동만 · comment=/evaluate 코멘트만(비싼 스위트 온디맨드) · both(기본)=둘 다.
 // push(기본 브랜치 재핀)는 항상. issue_comment 의 함정 3개를 이 템플릿이 흡수한다(사용자 YAML 지식 불요):
 //  ① 기본 브랜치 컨텍스트로 돌므로 PR head 를 명시 체크아웃(refs/pull/N/head)하고 sha 는 git 으로 해석,
@@ -337,18 +337,18 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
         with:
           ref: \${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}`
       : "";
-  return `# Assay 가 생성한 CI eval 워크플로 — PR 은 임시 핀 평가, PR 코멘트 /evaluate 는 온디맨드 재평가, 기본 브랜치 push 는 재핀(새 버전)+평가.
-# 셀프호스티드 러너 전용 — Assay 컨트롤플레인이 사설망이어도 러너가 도달할 수 있어야 합니다(GitHub-호스티드 미지원).
+  return `# Everdict 가 생성한 CI eval 워크플로 — PR 은 임시 핀 평가, PR 코멘트 /evaluate 는 온디맨드 재평가, 기본 브랜치 push 는 재핀(새 버전)+평가.
+# 셀프호스티드 러너 전용 — Everdict 컨트롤플레인이 사설망이어도 러너가 도달할 수 있어야 합니다(GitHub-호스티드 미지원).
 # 주의: 퍼블릭 레포의 fork PR 은 셀프호스티드 러너에서 임의 코드를 실행할 수 있습니다(프라이빗 팀 레포 전제).
-name: assay-eval
+name: everdict-eval
 on:
 ${onBlock}
 permissions:
   contents: read
   packages: write
-  id-token: write # Assay OIDC 페더레이션(keyless)${commentPermissions}
+  id-token: write # Everdict OIDC 페더레이션(keyless)${commentPermissions}
 concurrency:
-  group: assay-eval-\${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
+  group: everdict-eval-\${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
   cancel-in-progress: true
 jobs:
   eval:
@@ -364,8 +364,8 @@ jobs:
           username: \${{ github.actor }}
           password: \${{ secrets.GITHUB_TOKEN }}
 ${buildSteps}
-      - name: Assay eval
-        uses: assay-ai/run-eval@v1
+      - name: Everdict eval
+        uses: everdict-ai/run-eval@v1
         with:
           api-url: ${apiUrl}
           workspace: ${workspace}

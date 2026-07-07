@@ -8,7 +8,7 @@ then at high zoom (one diagram per module). Companion to
 
 - **Arrow = "uses / depends on / calls"**, pointing from the consumer to the provider — the same
   direction as the `import`. Reverse imports are bugs (one-way dependency rule).
-- `<<interface>>` = a contract from `@assay/core` (the dependency root). Concrete classes live in
+- `<<interface>>` = a contract from `@everdict/core` (the dependency root). Concrete classes live in
   outer packages and **realize** those contracts (`..|>`).
 - Two cooperating planes share the same `(job) → CaseResult` seam:
   - **in-sandbox eval loop** — `runCase` drives Driver · Environment · Harness · Grader.
@@ -29,39 +29,39 @@ hanging off it (many Drivers / Harnesses / Graders / Backends / Registries).
 ```mermaid
 flowchart TD
   subgraph L0["contracts (root)"]
-    core["@assay/core<br/><i>interfaces + Zod + errors</i>"]
+    core["@everdict/core<br/><i>interfaces + Zod + errors</i>"]
   end
 
   subgraph L1["in-sandbox adapters + trace"]
-    drivers["@assay/drivers"]
-    environments["@assay/environments"]
-    harnesses["@assay/harnesses"]
-    graders["@assay/graders"]
-    trace["@assay/trace"]
+    drivers["@everdict/drivers"]
+    environments["@everdict/environments"]
+    harnesses["@everdict/harnesses"]
+    graders["@everdict/graders"]
+    trace["@everdict/trace"]
   end
 
   subgraph L2["eval loop"]
-    runner["@assay/runner"]
+    runner["@everdict/runner"]
   end
 
   subgraph L3["dispatched unit (model B)"]
-    agent["@assay/agent"]
+    agent["@everdict/agent"]
   end
 
   subgraph L4["placement"]
-    backends["@assay/backends"]
+    backends["@everdict/backends"]
   end
 
   subgraph L5["control / execution"]
-    orchestrator["@assay/orchestrator"]
-    topology["@assay/topology"]
-    suite["@assay/suite"]
+    orchestrator["@everdict/orchestrator"]
+    topology["@everdict/topology"]
+    suite["@everdict/suite"]
   end
 
   subgraph CP["control-plane stores"]
-    db["@assay/db"]
-    registry["@assay/registry"]
-    auth["@assay/auth"]
+    db["@everdict/db"]
+    registry["@everdict/registry"]
+    auth["@everdict/auth"]
   end
 
   subgraph APPS["apps"]
@@ -133,8 +133,8 @@ locally, to Nomad/K8s, or durably via Temporal — only the *placement* layer ch
 sequenceDiagram
   participant Caller as Orchestrator / Router / Scheduler
   participant Backend
-  participant Agent as @assay/agent
-  participant Runner as @assay/runner
+  participant Agent as @everdict/agent
+  participant Runner as @everdict/runner
   participant Driver as LocalDriver
   participant Compute as ComputeHandle
   participant Env as RepoEnvironment
@@ -142,7 +142,7 @@ sequenceDiagram
   participant Grader as Grader[]
 
   Caller->>Backend: dispatch(AgentJob)
-  Note over Backend: LocalBackend runs in-process.<br/>Nomad/K8s submit a Job, then parse<br/>the ASSAY_RESULT stdout sentinel
+  Note over Backend: LocalBackend runs in-process.<br/>Nomad/K8s submit a Job, then parse<br/>the EVERDICT_RESULT stdout sentinel
   Backend->>Agent: runAgentJob(job)
   Agent->>Agent: makeHarness(id, ver, spec?) and makeGraders(specs)
   Agent->>Runner: runCase(evalCase, deps)
@@ -203,7 +203,7 @@ flowchart TD
   jr --> SecretStore["SecretStore (model-judge keys)"]
   authn --> TenantKeyStore
 
-  Backend --> agentjob["@assay/agent → runCase loop (see 1.2)"]
+  Backend --> agentjob["@everdict/agent → runCase loop (see 1.2)"]
 ```
 
 ---
@@ -215,7 +215,7 @@ in/out edges that matter.
 
 ---
 
-## `@assay/core` — contracts (the dependency root)
+## `@everdict/core` — contracts (the dependency root)
 
 **Role.** Interfaces + Zod schemas + the `AppError` hierarchy. No I/O, no SDKs. Every other module
 realizes or consumes these. Schema is the source of truth; types are `z.infer`.
@@ -303,7 +303,7 @@ classDiagram
 
 ---
 
-## `@assay/drivers` — in-sandbox compute
+## `@everdict/drivers` — in-sandbox compute
 
 **Role.** `LocalDriver` realizes `Driver`: a `ComputeHandle` backed by a tmp dir + `child_process`.
 Used by the agent *inside* an already-isolated job (isolation is the Backend's job, not the Driver's).
@@ -332,13 +332,13 @@ classDiagram
   LocalDriver ..> LocalComputeHandle : creates
 ```
 
-- **`provision`** → `mkdtemp(/tmp/assay-…)` → `LocalComputeHandle(root)`.
+- **`provision`** → `mkdtemp(/tmp/everdict-…)` → `LocalComputeHandle(root)`.
 - **`exec`** runs via `child_process` (non-zero exit ≠ throw); **`dispose`** = `rm -rf root`.
-- **Called by:** `@assay/runner` (`runCase`) and therefore `@assay/agent`.
+- **Called by:** `@everdict/runner` (`runCase`) and therefore `@everdict/agent`.
 
 ---
 
-## `@assay/environments` — the world acted on
+## `@everdict/environments` — the world acted on
 
 **Role.** `RepoEnvironment` realizes `Environment<RepoSnapshot>`: seed a repo, capture the git diff.
 
@@ -360,11 +360,11 @@ classDiagram
 
 - **`seed`** — inline `files` map (`git init` + commit a baseline) **or** `git clone --depth 1` + `checkout ref` + run `setup[]`.
 - **`snapshot`** — `git add -A` → `git diff --cached HEAD` (+ `--name-only`, + `rev-parse HEAD`) → `RepoSnapshot{diff, changedFiles, headSha}`.
-- **Called by:** `@assay/runner`; instantiated by `@assay/agent`. Browser/os-use add a new `Environment` variant, no core rewrite.
+- **Called by:** `@everdict/runner`; instantiated by `@everdict/agent`. Browser/os-use add a new `Environment` variant, no core rewrite.
 
 ---
 
-## `@assay/trace` — trace ingestion + usage metering
+## `@everdict/trace` — trace ingestion + usage metering
 
 **Role.** Pull a service harness's native trace from OTel/MLflow and normalize to `TraceEvent[]`; plus a
 **usage-proxy** sidecar that recovers token usage from black-box harnesses.
@@ -397,13 +397,13 @@ classDiagram
   conventions (`gen_ai.usage.*`, cost, latency). MLflow source degrades to `[]` on 404 (graders see 0 events).
 - **usage-proxy** (`startUsageProxy`, `extractUsage`, `costFromHeaders`, `inMemoryUsageTally`): a reverse
   proxy in front of a BYO model gateway; reads `usage` from the response + `x-litellm-response-cost`, keyed
-  by an `x-assay-run` header → per-run `RunUsage`.
-- **Consumed by:** `@assay/harnesses` (`CommandHarness` for trace pull + metering) and `@assay/topology`
+  by an `x-everdict-run` header → per-run `RunUsage`.
+- **Consumed by:** `@everdict/harnesses` (`CommandHarness` for trace pull + metering) and `@everdict/topology`
   (`ServiceTopologyBackend` for trace pull). See `docs/usage-metering.md`, `docs/service-harness.md`.
 
 ---
 
-## `@assay/harnesses` — the agent under test
+## `@everdict/harnesses` — the agent under test
 
 **Role.** Realize `EvaluableHarness` over a process boundary. Three adapters; the declarative
 `CommandHarness` brings *any* CLI agent with no code.
@@ -437,15 +437,15 @@ classDiagram
 - **ClaudeCodeHarness** — runs `claude -p … --output-format stream-json`; `mapClaudeStreamJson` normalizes
   each line; cost captured from the final `result.total_cost_usd`.
 - **CommandHarness** — interprets a `CommandHarnessSpec`: `setup[]` (install) → `command` template
-  (`{{task}}`/`{{model}}`/`{{run_id}}`) → trace extraction (`none` · `otel` · `mlflow` via `@assay/trace`).
+  (`{{task}}`/`{{model}}`/`{{run_id}}`) → trace extraction (`none` · `otel` · `mlflow` via `@everdict/trace`).
   When `meterUsage` and `trace.kind="none"`, it spins a usage-proxy and emits a synthetic `llm_call`
   carrying the recovered tokens/USD.
 - **ScriptedHarness** — deterministic steps; lets the whole eval loop run with no LLM/key.
-- **Selected by:** `@assay/agent`'s `makeHarness(id, version, spec?)`.
+- **Selected by:** `@everdict/agent`'s `makeHarness(id, version, spec?)`.
 
 ---
 
-## `@assay/graders` — scoring (fully separate from the harness)
+## `@everdict/graders` — scoring (fully separate from the harness)
 
 **Role.** Realize `Grader`. The same grader scores every harness identically → fair cross-harness/version
 comparison. Includes the Agent Judge family. Edge labels show *what each grader reads* from `GradeContext`.
@@ -488,7 +488,7 @@ classDiagram
 
 ---
 
-## `@assay/runner` — the eval loop
+## `@everdict/runner` — the eval loop
 
 **Role.** `runCase(evalCase, deps) → CaseResult`. The orchestration of the four in-sandbox concerns, with
 guaranteed `compute.dispose()` in `finally`. No placement, no tenancy.
@@ -505,25 +505,25 @@ flowchart LR
   runCase -->|"provision → seed → install → run → snapshot → grade → dispose"| out[CaseResult]
 ```
 
-- **Imports** the `@assay/core` interfaces plus the concrete adapter *types*; the *instances* are injected
-  by the caller (`@assay/agent`). This keeps the runner adapter-agnostic.
+- **Imports** the `@everdict/core` interfaces plus the concrete adapter *types*; the *instances* are injected
+  by the caller (`@everdict/agent`). This keeps the runner adapter-agnostic.
 - **Becomes** a Temporal activity unchanged later (pure async, no shared state).
 
 ---
 
-## `@assay/agent` — the dispatched unit (model B)
+## `@everdict/agent` — the dispatched unit (model B)
 
 **Role.** `runAgentJob(AgentJob) → CaseResult`: assemble concrete adapters from the job, run `runCase`,
-emit the result behind the `ASSAY_RESULT` stdout sentinel.
+emit the result behind the `EVERDICT_RESULT` stdout sentinel.
 
 ```mermaid
 flowchart TD
   job[AgentJob] --> runAgentJob
   runAgentJob --> makeHarness["makeHarness(id, ver, spec?)"]
   runAgentJob --> makeGraders["makeGraders(specs)"]
-  makeHarness --> H["@assay/harnesses<br/>Claude / Command / Scripted"]
-  makeGraders --> G["@assay/graders"]
-  runAgentJob --> runCase["@assay/runner.runCase"]
+  makeHarness --> H["@everdict/harnesses<br/>Claude / Command / Scripted"]
+  makeGraders --> G["@everdict/graders"]
+  runAgentJob --> runCase["@everdict/runner.runCase"]
   runCase --> LD["new LocalDriver()"]
   runCase --> RE["new RepoEnvironment()"]
   runCase --> H
@@ -534,14 +534,14 @@ flowchart TD
 
 - **Registry:** `makeHarness` returns `CommandHarness` when an embedded `harnessSpec.kind==="command"`,
   else branches on built-in `id` (`claude-code`/`scripted`). `meterUsage` flows from `job.meterUsage`
-  (control-plane policy) with an `ASSAY_METER_USAGE` env dev-fallback.
+  (control-plane policy) with an `EVERDICT_METER_USAGE` env dev-fallback.
 - **Auth env:** `collectAuthEnv` / `hasClaudeAuth` gather the machine's existing `claude` login (no API key
   for `LocalDriver`); `RESULT_SENTINEL` is the contract every non-local Backend parses.
 - **Called by:** `LocalBackend` (in-process) and the Nomad/K8s images (as the job entrypoint).
 
 ---
 
-## `@assay/backends` — placement
+## `@everdict/backends` — placement
 
 **Role.** Dispatch the agent job to an execution target and return `CaseResult`. Backends *never run the
 harness themselves* (except `LocalBackend`, in-process) — they submit a Job and parse the sentinel.
@@ -617,11 +617,11 @@ sequenceDiagram
   pools are keyed by zone and never shared across tenants.
 - **`buildRuntimeBackend(RuntimeSpec, {secretEnv})`** turns a tenant-registered runtime into a live Backend
   (credentials injected via `secretEnv`, never in the spec). `buildRegistry(BackendsConfig)` builds the static set.
-- **Calls:** `@assay/agent` (`LocalBackend`). **Called by:** `@assay/orchestrator`, `apps/api`, `apps/cli`.
+- **Calls:** `@everdict/agent` (`LocalBackend`). **Called by:** `@everdict/orchestrator`, `apps/api`, `apps/cli`.
 
 ---
 
-## `@assay/orchestrator` — durable control plane (Temporal)
+## `@everdict/orchestrator` — durable control plane (Temporal)
 
 **Role.** `Orchestrator.run(job)` abstracts direct vs durable execution. The worker holds the `Dispatcher`
 (usually the capacity-aware `Scheduler`) and runs the `dispatchCase` activity.
@@ -662,14 +662,14 @@ flowchart LR
 - **`TemporalOrchestrator`** — client side; starts `evalCaseWorkflow` *by name* so the client never imports
   workflow sandbox code. **Workflow code must stay deterministic** — all I/O lives in the activity.
 - **`runWorker(opts)`** — long-running; builds the `Scheduler` from `BackendsConfig` (auth env via
-  `collectAuthEnv`), registers the workflow + `dispatchCase`. **Called by:** `apps/cli` (`assay worker`).
+  `collectAuthEnv`), registers the workflow + `dispatchCase`. **Called by:** `apps/cli` (`everdict worker`).
 
 ---
 
-## `@assay/suite` — suites & version regression
+## `@everdict/suite` — suites & version regression
 
 **Role.** Fan a `Suite` out over its cases at a given harness version → `Scorecard`; summarize and diff
-scorecards for regression. Depends on `@assay/core` *only* — `Dispatch` is just `(job) → CaseResult`, so any
+scorecards for regression. Depends on `@everdict/core` *only* — `Dispatch` is just `(job) → CaseResult`, so any
 Backend/Router/Scheduler/Orchestrator plugs in.
 
 ```mermaid
@@ -685,15 +685,15 @@ flowchart LR
 ```
 
 - **`runSuite(suite, version, dispatch, {concurrency})`** — bounded fan-out (`mapLimit`).
-- **Called by:** `apps/cli` (`assay suite`) and `apps/api` (`ScorecardService` batch eval, with the
+- **Called by:** `apps/cli` (`everdict suite`) and `apps/api` (`ScorecardService` batch eval, with the
   Scheduler as `dispatch`).
 
 ---
 
-## `@assay/topology` — service-topology harnesses
+## `@everdict/topology` — service-topology harnesses
 
 **Role.** `ServiceTopologyBackend` realizes `Backend` for multi-service harnesses + a browser/OS target env.
-Orchestrator-agnostic: a `TopologyRuntime` (Nomad or K8s) deploys the topology; trace comes from `@assay/trace`.
+Orchestrator-agnostic: a `TopologyRuntime` (Nomad or K8s) deploys the topology; trace comes from `@everdict/trace`.
 
 ```mermaid
 classDiagram
@@ -753,7 +753,7 @@ sequenceDiagram
 
 ---
 
-## `@assay/db` — result & secret stores
+## `@everdict/db` — result & secret stores
 
 **Role.** Persistence behind interfaces: `RunStore`, `ScorecardStore`, `TenantKeyStore`, `SecretStore`.
 Each has an `InMemory*` (dev/test) and a `Pg*` (Postgres) variant over a shared `SqlClient`.
@@ -812,14 +812,14 @@ classDiagram
 - **`RunRecord`** carries `status` (queued/running/succeeded/failed), the `CaseResult`, and a derived
   `RunUsageSummary`. **`ScorecardStore.list`** omits the heavy per-case `scorecard` column.
 - **`TenantKeyStore`** stores only `hashKey(ak_…)`; `issueKey` returns plaintext once → backs API-key auth.
-- **`SecretStore`** encrypts at rest (`aesGcmCipher`, `cipherFromEnv(ASSAY_SECRETS_KEY)`); `entries(tenant)`
+- **`SecretStore`** encrypts at rest (`aesGcmCipher`, `cipherFromEnv(EVERDICT_SECRETS_KEY)`); `entries(tenant)`
   returns decrypted env for model-judge keys / runtime credentials.
 - **`migrate` / `preflight`** — idempotent numbered SQL migrations (expand→contract). See `docs/migration/`.
-- **Consumed by:** `@assay/registry` (Pg registries reuse `SqlClient`), `@assay/auth` (`TenantKeyStore`), `apps/api`.
+- **Consumed by:** `@everdict/registry` (Pg registries reuse `SqlClient`), `@everdict/auth` (`TenantKeyStore`), `apps/api`.
 
 ---
 
-## `@assay/registry` — versioned SSOT
+## `@everdict/registry` — versioned SSOT
 
 **Role.** `(tenant, id, version) → spec` for four first-class entity families, immutable versions, semver
 `latest`, tenant-owned with `_shared` fallback. The same shape four times.
@@ -859,12 +859,12 @@ classDiagram
 - **Version resolution** — `compareVersions` / `sortVersions`; `latest` = highest semver; `specsEqual`
   guards immutability (re-registering a version with a different spec → conflict).
 - **GitOps source** — `loadHarnessDir` / `loadDatasetDir` / `loadJudgeDir` / `loadRuntimeDir` seed from files.
-- **Consumed by:** `apps/api` (route + service resolution), `@assay/topology` (`ServiceTopologyBackend.specFor`
+- **Consumed by:** `apps/api` (route + service resolution), `@everdict/topology` (`ServiceTopologyBackend.specFor`
   wires to the harness registry). See `docs/registry.md`, `docs/datasets.md`, `docs/judges.md`, `docs/runtimes.md`.
 
 ---
 
-## `@assay/auth` — control-plane auth core
+## `@everdict/auth` — control-plane auth core
 
 **Role.** Resolve any credential to a `Principal{subject, workspace, roles, via}`, then gate actions by role.
 `workspace = tenant = trust-zone`. Owned by `apps/api`; the web is a courier, not an authority.
@@ -896,8 +896,8 @@ classDiagram
 ```
 
 - **`oidcAuthenticator`** — verifies Keycloak JWT via `jose` JWKS, extracts `workspace` + roles (fail-closed → `undefined`).
-- **`apiKeyAuthenticator`** — `ak_…` → `TenantKeyStore.resolveByHash(hashKey(...))` (`@assay/db`) → `{ workspace, scopes? }`.
-- **`authz`** — `ASSAY_ROLES = viewer ⊂ member ⊂ admin`; `authorize` throws `ForbiddenError` (403); per-key `scopes` (`read|write|admin`) intersect the role matrix. See `docs/auth.md`.
+- **`apiKeyAuthenticator`** — `ak_…` → `TenantKeyStore.resolveByHash(hashKey(...))` (`@everdict/db`) → `{ workspace, scopes? }`.
+- **`authz`** — `EVERDICT_ROLES = viewer ⊂ member ⊂ admin`; `authorize` throws `ForbiddenError` (403); per-key `scopes` (`read|write|admin`) intersect the role matrix. See `docs/auth.md`.
 - **Consumed by:** `apps/api` (every route guard + `/me` + MCP). See `docs/tenancy.md`.
 
 ---
@@ -928,7 +928,7 @@ flowchart TD
 
   server -->|"POST /runs"| runsvc
   server -->|"POST /scorecards · /scorecards/ingest"| scoresvc
-  server -->|"GET/POST harnesses · datasets · judges · runtimes"| registry["@assay/registry"]
+  server -->|"GET/POST harnesses · datasets · judges · runtimes"| registry["@everdict/registry"]
   jr -->|"model judge key"| secrets["SecretStore"]
   jr -->|"harness judge"| dispatch2["dispatch (Scheduler)"]
 ```
@@ -954,27 +954,27 @@ flowchart TD
 
 ```mermaid
 flowchart LR
-  run["assay run"] --> orch{orchestrator?}
+  run["everdict run"] --> orch{orchestrator?}
   orch -->|direct| DO["DirectOrchestrator(Router)"]
   orch -->|temporal| TO["TemporalOrchestrator"]
   DO --> Router["Router(buildRegistry(config))"]
   Router --> B["LocalBackend / NomadBackend"]
   run --> job[AgentJob] --> DO
 
-  worker["assay worker"] --> runWorker["@assay/orchestrator.runWorker"]
-  suite["assay suite"] --> runSuite["@assay/suite.runSuite"]
+  worker["everdict worker"] --> runWorker["@everdict/orchestrator.runWorker"]
+  suite["everdict suite"] --> runSuite["@everdict/suite.runSuite"]
   suite --> diff["diffScorecards (--baseline)"]
 ```
 
-- **`assay run`** builds an `AgentJob` and an `Orchestrator` (Direct over `Router`, or Temporal), calls `run(job)`.
-- **`assay worker`** → `runWorker` (the durable side). **`assay suite`** → `runSuite` (+ regression diff).
-- **Depends on:** `@assay/orchestrator`, `@assay/backends`, `@assay/agent`, `@assay/suite`, `@assay/core`.
+- **`everdict run`** builds an `AgentJob` and an `Orchestrator` (Direct over `Router`, or Temporal), calls `run(job)`.
+- **`everdict worker`** → `runWorker` (the durable side). **`everdict suite`** → `runSuite` (+ regression diff).
+- **Depends on:** `@everdict/orchestrator`, `@everdict/backends`, `@everdict/agent`, `@everdict/suite`, `@everdict/core`.
 
 ---
 
 ## `apps/web` — SaaS dashboard (pure HTTP client)
 
-**Role.** Next.js dashboard. **No `@assay/*` dependencies** — it talks to `apps/api` over HTTP only. A
+**Role.** Next.js dashboard. **No `@everdict/*` dependencies** — it talks to `apps/api` over HTTP only. A
 token courier: Auth.js (Keycloak) puts the access token in a server-only cookie and forwards it as `Bearer`;
 `GET /me` returns workspace + roles (UI gating mirrors the control plane, which enforces).
 

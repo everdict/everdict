@@ -1,4 +1,4 @@
-import { JudgeRunConfigSchema } from "@assay/core";
+import { JudgeRunConfigSchema } from "@everdict/core";
 import { z } from "zod";
 import type { SqlClient } from "./client.js";
 
@@ -16,7 +16,7 @@ export const WorkspaceCiLinkSchema = z.object({
   createdBy: z.string(), // 감사용(발사 인증과 무관)
   disabled: z.boolean().optional(),
   // 배치는 항상 셀프호스티드(설계 D6) — 두 필드는 좁히기 오버라이드. 미지정 = runs-on "[self-hosted]" + runtime "self:ws" 풀.
-  runsOn: z.string().optional(), // 워크플로 runs-on 값(예: "[self-hosted, assay-<id>]"). github-install 의 러너 라벨.
+  runsOn: z.string().optional(), // 워크플로 runs-on 값(예: "[self-hosted, everdict-<id>]"). github-install 의 러너 라벨.
   runtime: z.string().optional(), // run-eval runtime 입력(예: "self:ws:<id>"). 개인 러너(self…)는 upsert 에서 400.
   // PR 평가 발화 방식 — auto=PR 이벤트 자동만 · comment=PR 코멘트 /evaluate 만(비싼 스위트 온디맨드) · both(기본).
   // push(기본 브랜치 재핀)는 항상 발화. 워크플로 YAML 생성(renderCiWorkflow)에만 쓰인다 — 발화 인증(trust)과 무관.
@@ -27,7 +27,7 @@ export type WorkspaceCiLink = z.infer<typeof WorkspaceCiLinkSchema>;
 // 워크스페이스 단위 설정(컨트롤플레인 정책). JSONB 로 저장해 추후 확장 용이.
 // 요청별 override(POST /runs·/scorecards body.*)가 이보다 우선; 이 값은 env 기본 정책을 덮어쓴다.
 export const WorkspaceSettingsSchema = z.object({
-  meterUsage: z.boolean().optional(), // 미지정이면 env 정책(ASSAY_METER_TENANTS/ASSAY_METER_USAGE) 폴백
+  meterUsage: z.boolean().optional(), // 미지정이면 env 정책(EVERDICT_METER_TENANTS/EVERDICT_METER_USAGE) 폴백
   // inline judge grader(예: WebVoyager 프리셋) 채점에 쓸 기본 모델. 컨트롤플레인이 잡(job.judge)으로 자동 주입.
   // 키는 시크릿(SecretStore)에서 별도 주입, 여기엔 모델/프로바이더만(시크릿 아님). 요청별 override 가 우선.
   judge: JudgeRunConfigSchema.optional(),
@@ -57,7 +57,7 @@ export const WorkspaceSettingsSchema = z.object({
     })
     .nullable()
     .optional(),
-  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지의 분류 기준 + assay image push 발행 대상.
+  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지의 분류 기준 + everdict image push 발행 대상.
   // 여러 개를 이름으로 등록하고 push 시 선택한다(분류/pull 인증은 전체를 대상으로 host 매칭).
   // 시크릿은 전부 SecretStore name-ref(값 저장/반환 안 함). 설계: docs/architecture/workspace-image-registry.md
   imageRegistries: z
@@ -147,7 +147,7 @@ export class PgWorkspaceSettingsStore implements WorkspaceSettingsStore {
   constructor(private readonly client: SqlClient) {}
   async get(workspace: string): Promise<WorkspaceSettings | undefined> {
     const r = await this.client.query<{ settings: unknown }>(
-      "SELECT settings FROM assay_workspace_settings WHERE workspace = $1",
+      "SELECT settings FROM everdict_workspace_settings WHERE workspace = $1",
       [workspace],
     );
     return r.rows[0] ? WorkspaceSettingsSchema.parse(r.rows[0].settings) : undefined;
@@ -155,8 +155,8 @@ export class PgWorkspaceSettingsStore implements WorkspaceSettingsStore {
   async set(workspace: string, patch: WorkspaceSettings): Promise<WorkspaceSettings> {
     // jsonb 병합(||)으로 원자적 upsert — 다른 설정 키를 덮어쓰지 않는다.
     const r = await this.client.query<{ settings: unknown }>(
-      `INSERT INTO assay_workspace_settings (workspace, settings, updated_at) VALUES ($1, $2::jsonb, now())
-       ON CONFLICT (workspace) DO UPDATE SET settings = assay_workspace_settings.settings || $2::jsonb, updated_at = now()
+      `INSERT INTO everdict_workspace_settings (workspace, settings, updated_at) VALUES ($1, $2::jsonb, now())
+       ON CONFLICT (workspace) DO UPDATE SET settings = everdict_workspace_settings.settings || $2::jsonb, updated_at = now()
        RETURNING settings`,
       [workspace, JSON.stringify(patch)],
     );

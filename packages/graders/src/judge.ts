@@ -1,4 +1,4 @@
-import type { ComputeHandle, EnvSnapshot, GradeContext, Grader, Score, TraceEvent } from "@assay/core";
+import type { ComputeHandle, EnvSnapshot, GradeContext, Grader, Score, TraceEvent } from "@everdict/core";
 
 export interface JudgeVerdict {
   pass: boolean;

@@ -6,7 +6,7 @@ import os
 import mlflow
 
 mlflow.set_tracking_uri(os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5501"))
-mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT", "assay-browseruse-trace"))
+mlflow.set_experiment(os.environ.get("MLFLOW_EXPERIMENT", "everdict-browseruse-trace"))
 
 
 @mlflow.trace(name="browser_agent_run", span_type="AGENT")

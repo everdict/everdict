@@ -12,14 +12,14 @@ Two concepts, one axis each. **There is no "device" layer** — the machine *is*
 | Layer | What it is | Scales by | Examples |
 |---|---|---|---|
 | **Runtime** | **Where** execution happens — the environment / placement a job targets. | (fixed per environment) | `self-hosted` (localhost / your own infra), `docker`, `nomad`, `k8s`, `topology` |
-| **Runner** | **Who** executes — a **worker process**, the execution subject. Joins a runtime, leases one job at a time, runs it, reports back. | **more runners = more concurrent jobs** | an `assay runner` worker · a GitHub Actions runner |
+| **Runner** | **Who** executes — a **worker process**, the execution subject. Joins a runtime, leases one job at a time, runs it, reports back. | **more runners = more concurrent jobs** | an `everdict runner` worker · a GitHub Actions runner |
 
 - A **runtime** is the *pool / placement*. A job's `runtime` field (→ `placement.target`) picks it.
 - A **runner** is a *worker* that joins a runtime and drains its queue. **One machine can host many runners; many machines can join one runtime.** Want to pull 2 jobs at once on a beefy host → run 2 runners.
-- **A machine is not a first-class thing.** "My laptop with plenty of resources" = a `self-hosted` runtime that I've joined N runners to. Both a **GitHub Actions runner** and an **Assay runner** are just workers that happen to live on that same self-hosted host, side by side.
+- **A machine is not a first-class thing.** "My laptop with plenty of resources" = a `self-hosted` runtime that I've joined N runners to. Both a **GitHub Actions runner** and an **Everdict runner** are just workers that happen to live on that same self-hosted host, side by side.
 
 > **Naming migration.** The shipped code calls the *pairing* a "runner" (`POST /runners`, `self:<runnerId>`) **and**
-> the *worker process* a "runner" (`assay runner`). That collision is the confusion. Corrected: the pairing/pool
+> the *worker process* a "runner" (`everdict runner`). That collision is the confusion. Corrected: the pairing/pool
 > becomes a **self-hosted runtime**; the worker stays the **runner**. `self:<runnerId>` (target one specific worker)
 > generalizes to **`runtime = <self-hosted-runtime>`** (target the pool; any of its runners leases).
 
@@ -46,7 +46,7 @@ The shipped self-hosted runner nailed pull/lease/provenance/budget, but under th
 - **Pull/lease** — `SelfHostedBackend` + `RunnerHub` (`apps/api/src/runner-hub.ts`): lease queue keyed
   `(owner, runnerId)` = `self:<owner>:<runnerId>` (cross-workspace). `RunnerHub.lease` is single-thread-atomic
   (concurrent `lease_job` never double-hands a job → the basis for many workers/runners sharing a queue).
-- **Worker** — `assay runner --pair <rnr_…>` (`apps/cli` → `@assay/runner-core` `runLeaseWorkers`): one process,
+- **Worker** — `everdict runner --pair <rnr_…>` (`apps/cli` → `@everdict/runner-core` `runLeaseWorkers`): one process,
   `--max-concurrent N` lease workers over one MCP session. `runnerAuthenticator` maps `rnr_` → `Principal{via:"runner"}`.
 - **Ownership precedent** — personal (`owner=subject`, account page, no role gate) mirrors Connected accounts
   (since removed in S6c — see [workspace-scoped-integrations.md](./workspace-scoped-integrations.md)).
@@ -76,14 +76,14 @@ no double-hand.
 
 ### 2. Runner = a worker that **joins** a runtime
 
-`assay runner` gains `--join <runtime-ref>` (a join token scopes it to one runtime). Run it **N times** (N
+`everdict runner` gains `--join <runtime-ref>` (a join token scopes it to one runtime). Run it **N times** (N
 processes, or on N machines) to put N runners on a pool → N concurrent jobs. `--max-concurrent` stays as a
 per-runner convenience (workers within one process); effective concurrency = `Σ runners × their workers`.
 Presence/heartbeat is per-runner, so the roster shows *the pool and each runner in it*.
 
 - **Personal** join: pair on the account page (or desktop one-click) → `rnr_` token bound to the personal runtime.
 - **Workspace** join: an admin creates a workspace self-hosted runtime, gets a **join token** (or an install
-  script); each build server runs `assay runner --join ws:<ws>:<id> --token …`. Multiple servers = multiple
+  script); each build server runs `everdict runner --join ws:<ws>:<id> --token …`. Multiple servers = multiple
   runners on the pool.
 
 ### 3. Placement & dispatch (reuse the seam)
@@ -98,20 +98,20 @@ Everything downstream (`Scheduler` fairness/budget/capacity, `RunStore`/`Scoreca
 ### 4. GitHub Actions runner = a co-resident worker on a self-hosted host (repo-level first)
 
 A machine in a **workspace self-hosted runtime** is exactly where a GitHub Actions self-hosted runner belongs
-(it builds the image and calls Assay; the Assay runner next to it executes the eval). Self-serve flow, reusing
+(it builds the image and calls Everdict; the Everdict runner next to it executes the eval). Self-serve flow, reusing
 the workspace GitHub App + CI links:
 
 1. Admin picks a **GitHub repo** (workspace GitHub App repo picker, `GET /workspace/github-app/repos`) for the workspace runtime.
-2. Assay mints a **registration token** via the workspace GitHub App installation: `POST /repos/{owner}/{repo}/actions/runners/registration-token`
+2. Everdict mints a **registration token** via the workspace GitHub App installation: `POST /repos/{owner}/{repo}/actions/runners/registration-token`
    (`ci-link-service` calls the GitHub API with the workspace installation token — same seam). *Org-level
    (`/orgs/{org}/…`, needs `admin:org` opt-in) is supported; **repo-level** works with the App's default repo install.*
-3. Assay emits a **one-liner / install script** the build server runs: it (a) configures `actions/runner`
-   (`config.sh --url … --token <reg> --labels …`) **and** (b) `assay runner --join ws:<ws>:<id>` — one command
+3. Everdict emits a **one-liner / install script** the build server runs: it (a) configures `actions/runner`
+   (`config.sh --url … --token <reg> --labels …`) **and** (b) `everdict runner --join ws:<ws>:<id>` — one command
    stands up *both* workers on that host.
 4. The generated workflow (`renderCiWorkflow`) targets `runs-on: [self-hosted, <label>]` and passes
    `runtime: ws:<ws>:<id>` to the eval action, so the CI build and the eval both land on that pool.
 
-Registration tokens are **short-lived** and fetched on demand; Assay never stores a long-lived runner token. The
+Registration tokens are **short-lived** and fetched on demand; Everdict never stores a long-lived runner token. The
 runner, once configured, holds its own GitHub credential — a company resource, not tied to the admin's identity.
 
 ### Reuse vs new
@@ -123,7 +123,7 @@ runner, once configured, holds its own GitHub credential — a company resource,
 | `RuntimeDispatcher` `self:` branch | **widened** to `self:<subj>:<id>` + `ws:<ws>:<id>` |
 | Personal self-hosted runtime (today's `RunnerStore` pairing) | **reused** (renamed concept: pairing = a personal runtime) |
 | **Workspace self-hosted runtime** (owner=workspace, admin-managed, tenant-isolated) | **new** |
-| `assay runner --join <runtime>` (worker joins a pool; N per pool) | **new** (extends `--pair`) |
+| `everdict runner --join <runtime>` (worker joins a pool; N per pool) | **new** (extends `--pair`) |
 | GitHub Actions registration-token mint + install-script generator | **new** (`ci-link-service` seam) |
 | Workspace "Runners" settings UI (pools + runners + join/install + GitHub register) | **new** (web) |
 
@@ -154,18 +154,18 @@ runner, once configured, holds its own GitHub credential — a company resource,
    the **job's tenant** (`ws:<tenant>`), so membership *is* access and cross-workspace is structurally impossible
    (always looks up `ws:<tenant>`); personal `self:<id>` stays owner-only (D3). Full BFF↔MCP parity
    (`pair_workspace_runner`/`list_workspace_owned_runners`/`revoke_workspace_runner`) + web settings **공유 러너** tab
-   (register → token-once + `assay runner --pair` command; list with online/capability badges; revoke).
-   **Workspace-pays — SHIPPED.** `billingTenant(result, tenant)` (`@assay/backends` budget): a run whose
+   (register → token-once + `everdict runner --pair` command; list with online/capability badges; revoke).
+   **Workspace-pays — SHIPPED.** `billingTenant(result, tenant)` (`@everdict/backends` budget): a run whose
    `provenance.by` starts `ws:` settles to that workspace (team pays); personal self-hosted stays own-pays
    (`undefined`); managed = the job tenant. `RunService`/`ScorecardService` settle through it. `provenance.by` =
    the runner owner stamped by `SelfHostedBackend`, and a workspace runner's owner is `ws:<workspace>` — no new
-   signal. **Live e2e:** `scripts/live/workspace-shared-runner.mjs` (pair → `assay runner` → `self:ws:<id>` run →
+   signal. **Live e2e:** `scripts/live/workspace-shared-runner.mjs` (pair → `everdict runner` → `self:ws:<id>` run →
    `provenance.by="ws:default"` + cross-workspace `NOT_FOUND`); verified PASS.
 4. **GitHub Actions runner co-registration (repo-level). ✅ SHIPPED (backend + MCP).** `CiLinkService.mintRunnerToken`
    (workspace GitHub App, `administration:write` → `POST /repos/{repo}/actions/runners/registration-token`, short-lived,
    never stored) + `installGithubWorkspaceRunner` (`github-runner-install.ts`): pairs a workspace runner (fresh
-   `rnr_`) + mints the GitHub token + renders a one-shot install script (`config.sh` **and** `assay runner --pair`)
-   + a workflow hint (`runs-on: [self-hosted, assay-<id>]` + run-eval `runtime: self:ws:<id>`). Route
+   `rnr_`) + mints the GitHub token + renders a one-shot install script (`config.sh` **and** `everdict runner --pair`)
+   + a workflow hint (`runs-on: [self-hosted, everdict-<id>]` + run-eval `runtime: self:ws:<id>`). Route
    `POST /workspace/runners/github-install` + MCP `github_install_workspace_runner` (`settings:write`). This is the
    resolution of the github-actions-trigger open item "CI can't lease a personal runner — needs `allowCi` **or a
    workspace-shared runner tier**": a `via:"github-actions"` principal targeting `self:ws:<id>` works because the
@@ -195,7 +195,7 @@ runner, once configured, holds its own GitHub credential — a company resource,
    pool's lease gate skips runners lacking a job's required capabilities, so `self:ws` routes each job to a suitable
    runner. **Real-GitHub self-hosted registration — ✅ LIVE-VERIFIED (repo-level, 2026-07-05):** a genuine GitHub
    Actions self-hosted runner (registered via the exact `mintRunnerToken` API call, `--ephemeral`) picked up a
-   `workflow_dispatch` job that drove an Assay run on `self:ws` → `succeeded`, `provenance.ranOn=self-hosted`,
+   `workflow_dispatch` job that drove an Everdict run on `self:ws` → `succeeded`, `provenance.ranOn=self-hosted`,
    `by=ws:default` (workspace-pays), workflow conclusion **success**. Runbook + evidence:
    `docs/runbooks/github-self-hosted-runner.md`; turnkey helper `scripts/live/github-self-hosted-runner.mjs`.
    Org-level (`admin:org`) still runbook-only (test token lacked the scope). Personal multi-runner is SHIPPED as

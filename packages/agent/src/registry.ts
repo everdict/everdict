@@ -1,9 +1,9 @@
-import { BadRequestError, type EvaluableHarness, type HarnessSpec } from "@assay/core";
-import { ClaudeCodeHarness, CommandHarness, ScriptedHarness } from "@assay/harnesses";
+import { BadRequestError, type EvaluableHarness, type HarnessSpec } from "@everdict/core";
+import { ClaudeCodeHarness, CommandHarness, ScriptedHarness } from "@everdict/harnesses";
 
-// 그레이더 spec→인스턴스 매핑은 @assay/graders 가 소유한다(여기선 재노출).
+// 그레이더 spec→인스턴스 매핑은 @everdict/graders 가 소유한다(여기선 재노출).
 // makeGradersFromEnv: judge grader 까지 포함(env 의 Judge 주입; 미구성이면 judge 만 skip). dispatch 경로에서 사용.
-export { makeGraders, makeGradersFromEnv } from "@assay/graders";
+export { makeGraders, makeGradersFromEnv } from "@everdict/graders";
 
 // id → 하니스. 선언형 command 스펙(컨트롤플레인이 레지스트리에서 풀어 임베드)이 오면 제너릭
 // CommandHarness 로 해석한다 — SaaS 유저가 코드 어댑터 없이 CLI 에이전트를 등록할 수 있다.

@@ -16,7 +16,7 @@ import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { JudgeGrader, judgeFromEnv } from "../../packages/graders/dist/index.js";
 
 // --- judge env 구성(LiteLLM OpenAI-호환 프록시) ---
-// assay/scripts/live → workclaw/infra/litellm/.env 는 4 단계 상위.
+// everdict/scripts/live → workclaw/infra/litellm/.env 는 4 단계 상위.
 const ENV_PATH = process.env.LITELLM_ENV ?? "../../../../infra/litellm/.env";
 function masterKey() {
   if (process.env.OPENAI_API_KEY) return process.env.OPENAI_API_KEY;
@@ -33,8 +33,8 @@ if (!key) {
   process.exit(2);
 }
 const env = {
-  ASSAY_JUDGE_MODEL: process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini",
-  ASSAY_JUDGE_PROVIDER: "openai",
+  EVERDICT_JUDGE_MODEL: process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini",
+  EVERDICT_JUDGE_PROVIDER: "openai",
   OPENAI_API_KEY: key,
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1",
 };
@@ -62,7 +62,7 @@ const shots = [
 const driver = new LocalDriver();
 const compute = await driver.provision({ os: "linux", needs: ["shell"] });
 
-console.log(`=== VLM judge 로 os-use 스크린샷 자동 채점 (model=${env.ASSAY_JUDGE_MODEL}) ===\n`);
+console.log(`=== VLM judge 로 os-use 스크린샷 자동 채점 (model=${env.EVERDICT_JUDGE_MODEL}) ===\n`);
 let allOk = true;
 try {
   for (const s of shots) {

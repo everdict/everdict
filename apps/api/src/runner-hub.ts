@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { type AgentJob, type CaseResult, UpstreamError, capabilityKind, requiredCapabilities } from "@assay/core";
+import { type AgentJob, type CaseResult, UpstreamError, capabilityKind, requiredCapabilities } from "@everdict/core";
 
 // 셀프호스티드 러너 디스패치 키 — 잡이 흘러갈 러너의 정체성. lease 큐는 (owner, runnerId)로 키된다(D3).
 // ⚠️ 워크스페이스(tenant)는 키에 넣지 않는다 — 러너는 소유자가 속한 여러 워크스페이스의 잡을 한 큐에서 받는다
@@ -22,7 +22,7 @@ export function selfHostedBackendName(key: SelfHostedKey): string {
 }
 
 // 배치 게이트가 보는 것 = 잡이 요구하는 **functional** capability(러너가 광고 못 하면 거부).
-// 케이스에서 파생(@assay/core requiredCapabilities): image→docker · repo-git→git · browser→browser · os-use→computer-use.
+// 케이스에서 파생(@everdict/core requiredCapabilities): image→docker · repo-git→git · browser→browser · os-use→computer-use.
 // security(sandbox)/auth(login)는 placement 가 아니라 각자 레이어(trust-zone/budget)가 강제하므로 여기선 functional 만 본다.
 // image-필수 잡을 Docker 없는 러너에 leasing 하면 호스트-네이티브 폴백으로 잘못된 환경에서 돌아버린다 → 명확히 거부.
 // 설계: docs/architecture/self-hosted-runtime-and-runners.md · portable-harness-runtime.md (placement 게이트).

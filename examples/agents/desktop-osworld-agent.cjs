@@ -1,8 +1,8 @@
-// 레퍼런스 데스크탑 에이전트 — OSWorld 류 텍스트 태스크용(멀티스텝). assay command 하니스가 os-use env-container 안에서
+// 레퍼런스 데스크탑 에이전트 — OSWorld 류 텍스트 태스크용(멀티스텝). everdict command 하니스가 os-use env-container 안에서
 // `node /agent-osworld.cjs {{task}}` 로 실행(workDir=/tmp, DISPLAY=:99). env(OsUseEnvironment.seed)가 Xvfb+openbox 를
 // 띄우고, 에이전트는 실제 앱(mousepad)을 열어 instruction 의 따옴표 텍스트를 실 OS 키보드(xdotool)로 입력한다.
 // instruction 에 파일명(예: note.txt)이 있으면 멀티스텝으로: 입력 → Ctrl+S(저장 다이얼로그) → 절대경로 입력 → Enter 저장.
-// 채점은 assay: VLM judge(스크린샷) + (row.verify 있으면) command grader 가 실제 파일 상태 검증.
+// 채점은 everdict: VLM judge(스크린샷) + (row.verify 있으면) command grader 가 실제 파일 상태 검증.
 const { execFileSync, spawn } = require("node:child_process");
 const DISPLAY = process.env.DISPLAY || ":99";
 const sh = (c) => execFileSync("bash", ["-lc", c], { encoding: "utf8" }).trim();

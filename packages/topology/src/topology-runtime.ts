@@ -1,4 +1,4 @@
-import type { EnvSnapshot, ServiceHarnessSpec, TrustZone } from "@assay/core";
+import type { EnvSnapshot, ServiceHarnessSpec, TrustZone } from "@everdict/core";
 
 // warm 토폴로지 핸들: 서비스 이름 → 베이스 URL (front-door 등).
 export interface TopologyHandle {

@@ -1,18 +1,18 @@
 ---
 name: backends
-description: How Assay dispatches eval runs to execution backends (Nomad/K8s/Windows) — model B runner-agent, the AgentJob contract, isolation, secret injection. Use when adding or editing a Backend.
+description: How Everdict dispatches eval runs to execution backends (Nomad/K8s/Windows) — model B runner-agent, the AgentJob contract, isolation, secret injection. Use when adding or editing a Backend.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Backends (placement layer)
 
 Model B: control plane (outside clusters) → `Backend.dispatch(AgentJob)` → runner-agent runs the
-whole `runCase` inside an isolated unit → emits CaseResult (`__ASSAY_RESULT__` sentinel on stdout).
+whole `runCase` inside an isolated unit → emits CaseResult (`__EVERDICT_RESULT__` sentinel on stdout).
 
 ## Checklist
 1. Implement `Backend` (`packages/backends/src/backend.ts`).
-2. Dispatch the `@assay/agent` image with the job as `ASSAY_AGENT_JOB` (base64 JSON) env.
+2. Dispatch the `@everdict/agent` image with the job as `EVERDICT_AGENT_JOB` (base64 JSON) env.
 3. Isolation = orchestrator runtime (Nomad `runtime`, K8s `runtimeClassName`) — config, not code.
-4. Inject auth (`collectAuthEnv()` from `@assay/agent`) into the job env; never log it.
+4. Inject auth (`collectAuthEnv()` from `@everdict/agent`) into the job env; never log it.
 5. Parse the CaseResult from the sentinel line; map failures to `UpstreamError`.
 
 ## Reference impl
@@ -21,18 +21,18 @@ alloc → read logs → parse). `LocalBackend` runs in-process (dev). K8s/Window
 
 Every `Backend` also implements `capacity(): Promise<{total, used}>` — what the `Scheduler` gates on.
 Report a configured `maxConcurrent` as `total` (it may be `number | (() => number)` so the autoscaler
-can move it); live-probe the cluster for `used` where cheap (Nomad counts running `assay-*` jobs), else 0.
+can move it); live-probe the cluster for `used` where cheap (Nomad counts running `everdict-*` jobs), else 0.
 
 ## Contracts
-`AgentJob` (`@assay/core`) = `{ evalCase, harness:{id,version}, tenant? }`. The agent reconstructs the
-harness + graders from a registry (`@assay/agent` `makeHarness`/`makeGraders`); graders carry
+`AgentJob` (`@everdict/core`) = `{ evalCase, harness:{id,version}, tenant? }`. The agent reconstructs the
+harness + graders from a registry (`@everdict/agent` `makeHarness`/`makeGraders`); graders carry
 their config via `GraderSpec` (`{id, config?}`), e.g. tests-pass `{ cmd }`. `tenant` keys all the
 multi-tenant machinery below (the agent ignores it).
 
 ## Placement & the SaaS operational layer
 Two dispatchers (both satisfy `Dispatcher` — `dispatch(job)→CaseResult`; depend on the interface):
 - `Router(registry, defaultTarget)` — static (pin via `evalCase.placement.target`, else default). Dev.
-- `Scheduler(registry, opts)` — the SaaS path; the `assay worker` and `apps/api` use it. It composes:
+- `Scheduler(registry, opts)` — the SaaS path; the `everdict worker` and `apps/api` use it. It composes:
   - **capacity-aware placement**: `free = total − max(used, in-flight)` per backend; `PlacementPolicy`
     (`leastLoadedPolicy` spread default / `binPackPolicy` consolidate); honors `placement.target` as a hard pin.
   - **tenant fairness**: `FairQueue` (WFQ by virtual-finish time, keyed by `tenant`; `weightFor`) so one
@@ -44,7 +44,7 @@ Two dispatchers (both satisfy `Dispatcher` — `dispatch(job)→CaseResult`; dep
 
 ## Tenant isolation, secrets, autoscaling
 - **Trust zones** (`TrustZonePolicy`, `perTenantTrustZones` default): eval = untrusted code, so each tenant
-  gets its own `TrustZone` (hardened `runsc`, `assay-<tenant>` namespace, deny-cross-tenant). The backend
+  gets its own `TrustZone` (hardened `runsc`, `everdict-<tenant>` namespace, deny-cross-tenant). The backend
   applies it per dispatch (docker `runtime` + Nomad `Namespace`) and calls `assertHardenedIsolation`
   (untrusted ⇒ never shared-kernel runc). **Never share warm pools across tenants** (topology keys by zone).
 - **Secrets** (`SecretProvider`, `staticSecrets`): inject `secretsFor(tenant)` into ONLY that tenant's

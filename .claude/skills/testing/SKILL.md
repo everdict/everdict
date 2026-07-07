@@ -1,6 +1,6 @@
 ---
 name: testing
-description: How Assay tests — Vitest only, Korean BDD descriptions, in-memory stores + fake Dispatcher for units, buildServer+inject for the API surface, fake SqlClient for Postgres logic, env-gated *.scenario.test.ts for live E2E. Use when writing or editing tests (Vitest unit + scenario E2E).
+description: How Everdict tests — Vitest only, Korean BDD descriptions, in-memory stores + fake Dispatcher for units, buildServer+inject for the API surface, fake SqlClient for Postgres logic, env-gated *.scenario.test.ts for live E2E. Use when writing or editing tests (Vitest unit + scenario E2E).
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Testing (Vitest test idioms)
@@ -43,7 +43,7 @@ helper — do not hand-wire routes ad-hoc. Auth is stubbed two ways: `roleAuth([
 ## Postgres — fake SqlClient, not a live DB
 Pg store logic is unit-tested against a fake `SqlClient` (`fakeClient` in
 `packages/db/src/scorecard-store.test.ts` / `db.test.ts`): assert the parameterized SQL text + params
-(`INSERT INTO assay_scorecards`, `$1`, `ORDER BY created_at DESC, id DESC`) and the row→record mapping. Behavior
+(`INSERT INTO everdict_scorecards`, `$1`, `ORDER BY created_at DESC, id DESC`) and the row→record mapping. Behavior
 is covered against `InMemory*` in the same file — the two impls must stay interchangeable. **No Testcontainers**;
 real-Postgres verification is an env-gated live script (`scripts/live/pg-run-store.mjs`, boots via `DATABASE_URL`
 + `migrate()`), not a CI test.

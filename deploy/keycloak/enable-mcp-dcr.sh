@@ -7,17 +7,17 @@
 # This relaxes it to trust loopback redirect URIs only (localhost / 127.0.0.1), keeping client-URI
 # validation ON (so DCR still can't register arbitrary external redirect hosts). Idempotent.
 #
-# The realm export (realm-assay.json) is intentionally minimal and does NOT carry Keycloak's
+# The realm export (realm-everdict.json) is intentionally minimal and does NOT carry Keycloak's
 # default policy components, so this runs once after the realm exists. Re-running is safe.
 #
 # Usage:
 #   deploy/keycloak/enable-mcp-dcr.sh
-#   KC_URL=http://localhost:8081 KC_REALM=assay KC_ADMIN=admin KC_ADMIN_PASSWORD=admin \
+#   KC_URL=http://localhost:8081 KC_REALM=everdict KC_ADMIN=admin KC_ADMIN_PASSWORD=admin \
 #     deploy/keycloak/enable-mcp-dcr.sh
 set -euo pipefail
 
 KC_URL="${KC_URL:-http://localhost:8081}"
-KC_REALM="${KC_REALM:-assay}"
+KC_REALM="${KC_REALM:-everdict}"
 KC_ADMIN="${KC_ADMIN:-admin}"
 KC_ADMIN_PASSWORD="${KC_ADMIN_PASSWORD:-admin}"
 POLICY_TYPE="org.keycloak.services.clientregistration.policy.ClientRegistrationPolicy"

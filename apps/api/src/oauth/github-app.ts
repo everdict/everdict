@@ -54,7 +54,7 @@ export async function mintInstallationToken(input: {
     headers: {
       authorization: `Bearer ${jwt}`,
       accept: "application/vnd.github+json",
-      "user-agent": "assay", // GitHub API 는 User-Agent 필수
+      "user-agent": "everdict", // GitHub API 는 User-Agent 필수
       "content-type": "application/json",
     },
     body: JSON.stringify({
@@ -83,7 +83,7 @@ export async function getInstallation(input: {
     headers: {
       authorization: `Bearer ${jwt}`,
       accept: "application/vnd.github+json",
-      "user-agent": "assay",
+      "user-agent": "everdict",
     },
   });
   return { account: InstallationInfo.parse(body).account.login };

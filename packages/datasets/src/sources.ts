@@ -1,4 +1,4 @@
-import { UpstreamError } from "@assay/core";
+import { UpstreamError } from "@everdict/core";
 import { parseCsv } from "./mapping.js";
 
 // 벤치마크 소스 커넥터: 벤치마크가 "사는 곳"에서 참조만으로 행을 인출한다(로컬 파일에 의존하지 않음).

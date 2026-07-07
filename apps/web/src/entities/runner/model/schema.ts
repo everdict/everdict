@@ -54,12 +54,12 @@ export type PairRunnerInput = z.infer<typeof pairRunnerInputSchema>
 export const pairedRunnerSchema = z.object({ runner: runnerMetaSchema, token: z.string() })
 export type PairedRunner = z.infer<typeof pairedRunnerSchema>
 
-// POST /workspace/runners/github-install 응답 — 빌드 서버에 GitHub 러너 + Assay 러너를 함께 세우는 설치 스크립트.
+// POST /workspace/runners/github-install 응답 — 빌드 서버에 GitHub 러너 + Everdict 러너를 함께 세우는 설치 스크립트.
 // installScript 에 평문 토큰(rnr_ + GitHub 등록토큰)이 포함되어 1회만 노출된다.
 export const githubRunnerInstallSchema = z.object({
   runner: runnerMetaSchema,
   runtimeTarget: z.string(), // self:ws:<id> — 워크플로 runtime 입력값
-  githubRunnerLabel: z.string(), // assay-<id> — 워크플로 runs-on 라벨
+  githubRunnerLabel: z.string(), // everdict-<id> — 워크플로 runs-on 라벨
   installScript: z.string(),
   workflowHint: z.string(),
   registrationExpiresAt: z.string(),

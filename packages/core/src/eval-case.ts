@@ -47,11 +47,11 @@ export type CaseProvenance = z.infer<typeof CaseProvenanceSchema>;
 export const TraceRefSchema = z.object({
   kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]), // buildTraceSource 5종과 동일
   endpoint: z.string(),
-  runId: z.string(), // 상관 키(assay.run_id) — 이 값으로 플랫폼에서 트레이스를 찾는다
+  runId: z.string(), // 상관 키(everdict.run_id) — 이 값으로 플랫폼에서 트레이스를 찾는다
   // 인증 시크릿 '이름'(SecretStore) — 컨트롤플레인이 collect 시 값으로 재해석해 어댑터 관례 헤더로
   // (otel/mlflow=verbatim Authorization, langsmith=x-api-key 등). 값은 절대 싣지 않는다(CaseResult 는 영속된다).
   authSecret: z.string().optional(),
-  correlate: z.enum(["id", "tag"]).optional(), // mlflow/otel — tag 면 assay.run_id 태그(리소스 속성) 검색으로 상관
+  correlate: z.enum(["id", "tag"]).optional(), // mlflow/otel — tag 면 everdict.run_id 태그(리소스 속성) 검색으로 상관
   experiment: z.string().optional(), // mlflow tag 상관의 검색 범위(experiment id)
   project: z.string().optional(), // phoenix 전용 — 스팬 조회 경로의 프로젝트
   service: z.string().optional(), // otel tag 상관의 검색 범위(Jaeger service — 에이전트의 service.name)

@@ -67,7 +67,7 @@ export default async function SettingsPage({
       mattermost = mattermostResponseSchema.parse(await controlPlane.getMattermost(ctx)).config
       // 워크스페이스 트레이스 싱크(복수 — 하니스별 선택). 조회 자체는 viewer+ 지만 관리 UI 는 이 탭.
       traceSinks = traceSinksResponseSchema.parse(await controlPlane.listTraceSinks(ctx)).sinks
-      // 워크스페이스 이미지 레지스트리(복수 — 분류 기준 + assay image push 대상). 조회 자체는 viewer+ 지만 관리 UI 는 이 탭.
+      // 워크스페이스 이미지 레지스트리(복수 — 분류 기준 + everdict image push 대상). 조회 자체는 viewer+ 지만 관리 UI 는 이 탭.
       imageRegistries = imageRegistriesResponseSchema.parse(
         await controlPlane.listImageRegistries(ctx)
       ).registries

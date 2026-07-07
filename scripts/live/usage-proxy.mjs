@@ -1,4 +1,4 @@
-// 라이브: LLM 사용량 프록시(@assay/trace createUsageProxy)를 실제 게이트웨이(workclaw LiteLLM) 앞에 두고,
+// 라이브: LLM 사용량 프록시(@everdict/trace createUsageProxy)를 실제 게이트웨이(workclaw LiteLLM) 앞에 두고,
 // 통과시키며 run 단위 토큰 usage 를 회수한다. 구독 모델(gpt-5.4-mini, $0 비과금)도 토큰은 응답 usage 에 있으므로
 // 계측된다. 블랙박스 하니스(aider 등)는 OPENAI_API_BASE 만 이 프록시로 향하면 코드 수정 없이 계측됨.
 // (라이프사이클 e2e 는 usage-proxy-run.mjs — command 하니스가 자동으로 이걸 꽂는다.)
@@ -9,7 +9,7 @@ import { createUsageProxy } from "../../packages/trace/dist/index.js";
 
 const KEY = process.env.OPENAI_API_KEY;
 const UPSTREAM = process.env.UPSTREAM ?? "http://127.0.0.1:4000";
-const MODEL = process.env.ASSAY_MODEL ?? "chatgpt/gpt-5.4-mini";
+const MODEL = process.env.EVERDICT_MODEL ?? "chatgpt/gpt-5.4-mini";
 if (!KEY) {
   console.error("✗ OPENAI_API_KEY (LiteLLM key) 가 필요합니다.");
   process.exit(1);
@@ -23,7 +23,7 @@ console.log(`usage-proxy :${port} → ${UPSTREAM}  (model ${MODEL})`);
 async function call(run, msg) {
   const r = await fetch(`http://127.0.0.1:${port}/v1/chat/completions`, {
     method: "POST",
-    headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, "x-assay-run": run },
+    headers: { "content-type": "application/json", authorization: `Bearer ${KEY}`, "x-everdict-run": run },
     body: JSON.stringify({ model: MODEL, messages: [{ role: "user", content: msg }] }),
   });
   const j = await r.json();

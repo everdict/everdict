@@ -26,11 +26,11 @@ docs/service-harness.md + docs/architecture/trace-sink.md.
 - **Match the real upstream API, not a guess.** `MlflowTraceSource` hits MLflow 3.x `GET /api/3.0/mlflow/traces/get?trace_id=`
   and parses **OTLP-style spans** (`attributes` = `{key,value:{string_value|int_value|bool_value|kvlist_value…}}`
   array, snake_case — distinct from OTel's camelCase `stringValue`). Verified live against MLflow 3.11.1.
-  `correlate:"tag"` resolves an assay `runId` via `POST /api/3.0/mlflow/traces/search` — `locations` is
-  REQUIRED (`experimentIds`), the filter is `` tags.`assay.run_id` = '…' `` (backtick-quoted), and the agent-side
+  `correlate:"tag"` resolves an everdict `runId` via `POST /api/3.0/mlflow/traces/search` — `locations` is
+  REQUIRED (`experimentIds`), the filter is `` tags.`everdict.run_id` = '…' `` (backtick-quoted), and the agent-side
   tag write is `PATCH /api/3.0/mlflow/traces/{id}/tags`. Verified live against MLflow 3.14.0.
   `OtelTraceSource` `correlate:"tag"` uses the **Jaeger query API**: `GET /api/traces?service=…&tags=<JSON
-  {"assay.run_id":…}>&limit=1` — `service` is REQUIRED (400 without), the `tags` filter matches
+  {"everdict.run_id":…}>&limit=1` — `service` is REQUIRED (400 without), the `tags` filter matches
   **resource(process) tags**, and the search response embeds full spans (same `{data:[{spans}]}` parser, one
   request). OTLP-native backends (no search API) stay id-correlated. Verified live against Jaeger 1.62.0.
 - Remap upstream failures to our error model: a non-2xx → `UpstreamError` (so a pull run fails honestly), EXCEPT

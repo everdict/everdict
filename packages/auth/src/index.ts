@@ -1,9 +1,9 @@
 export { type Principal, type Authenticator, type AuthContext, compositeAuthenticator } from "./principal.js";
 export {
   type Action,
-  type AssayRole,
+  type EverdictRole,
   type ApiKeyScope,
-  ASSAY_ROLES,
+  EVERDICT_ROLES,
   API_KEY_SCOPES,
   can,
   authorize,

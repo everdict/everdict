@@ -1,5 +1,5 @@
 // 라이브 e2e: 벤치마크 생태계 소싱 — HuggingFace Hub 에서 "벤치마크 ID 만으로" 당겨와 테넌트-소유 데이터셋으로 평가.
-// 유저 흐름: 카탈로그에서 벤치마크 고름 → @assay/datasets importBenchmark(HF 소스 커넥터, 네트워크) → Dataset →
+// 유저 흐름: 카탈로그에서 벤치마크 고름 → @everdict/datasets importBenchmark(HF 소스 커넥터, 네트워크) → Dataset →
 // DatasetRegistry.register(tenant) → registry.get → runSuite → Scorecard. 새 벤치마크 = 어댑터 한 개(코드 아님).
 //
 // 실제 HF 데이터셋(네트워크): openai/gsm8k(QA, open), osunlp/Mind2Web(web-agent, open). GAIA 는 gated(토큰 필요).

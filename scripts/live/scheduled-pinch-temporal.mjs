@@ -1,12 +1,12 @@
-// 라이브 e2e: **pinch 를 돌린 그 하니스(codex)를 Assay 예약(cron)으로 등록 → 실제 Temporal 이 발사** → 스코어카드 → 리더보드.
+// 라이브 e2e: **pinch 를 돌린 그 하니스(codex)를 Everdict 예약(cron)으로 등록 → 실제 Temporal 이 발사** → 스코어카드 → 리더보드.
 // scheduled-evals 설계문(docs/architecture/scheduled-evals.md)의 "live Temporal e2e" 후속을 실증한다.
 //
 // 구성(모두 로컬):
 //   • Temporal dev server (docker; 이 스크립트 밖에서 기동, 127.0.0.1:7233) — cron 엔진.
-//   • 컨트롤플레인(node, in-memory, no-auth) — ASSAY_TEMPORAL_ADDRESS 로 예약을 Temporal Schedule 로 동기화 +
-//     self-hosted lease 허브로 codex 케이스 실행. ASSAY_INTERNAL_TOKEN 으로 internal 발사 라우트 가드.
-//   • assay worker(node) — scheduledScorecardWorkflow 실행(fire/poll/finalize 를 internal 라우트로 브리지).
-//   • assay runner(node, codex on PATH) — 페어링된 self-hosted 러너. 발사된 스코어카드의 codex 케이스를 로컬 실행.
+//   • 컨트롤플레인(node, in-memory, no-auth) — EVERDICT_TEMPORAL_ADDRESS 로 예약을 Temporal Schedule 로 동기화 +
+//     self-hosted lease 허브로 codex 케이스 실행. EVERDICT_INTERNAL_TOKEN 으로 internal 발사 라우트 가드.
+//   • everdict worker(node) — scheduledScorecardWorkflow 실행(fire/poll/finalize 를 internal 라우트로 브리지).
+//   • everdict runner(node, codex on PATH) — 페어링된 self-hosted 러너. 발사된 스코어카드의 codex 케이스를 로컬 실행.
 //
 // 흐름:
 //   ① CP 기동 → ② worker 기동 → ③ 러너 페어링+기동 → ④ codex+pinch 번들 적용
@@ -21,9 +21,9 @@ import process from "node:process";
 
 const PORT = process.env.CP_PORT ?? "8791";
 const BASE = `http://127.0.0.1:${PORT}`;
-const TEMPORAL = process.env.ASSAY_TEMPORAL_ADDRESS ?? "127.0.0.1:7233";
+const TEMPORAL = process.env.EVERDICT_TEMPORAL_ADDRESS ?? "127.0.0.1:7233";
 const INTERNAL = "dev-internal-token";
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const ROOT = new URL("../..", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = async (p, b) => {
@@ -41,11 +41,11 @@ const bundle = JSON.parse(readFileSync(new URL("../../examples/bundles/codex-pin
 const cpEnv = {
   ...process.env,
   PORT,
-  ASSAY_REQUIRE_AUTH: "",
+  EVERDICT_REQUIRE_AUTH: "",
   KEYCLOAK_ISSUER: "",
   DATABASE_URL: "",
-  ASSAY_TEMPORAL_ADDRESS: TEMPORAL, // ← 예약을 Temporal Schedule 로 동기화(발사 활성)
-  ASSAY_INTERNAL_TOKEN: INTERNAL,
+  EVERDICT_TEMPORAL_ADDRESS: TEMPORAL, // ← 예약을 Temporal Schedule 로 동기화(발사 활성)
+  EVERDICT_INTERNAL_TOKEN: INTERNAL,
 };
 
 console.log(`=== ① 컨트롤플레인 기동 (dev, :${PORT}, temporal=${TEMPORAL}) ===`);
@@ -67,10 +67,10 @@ try {
   if (!up) throw new Error("control plane 기동 실패");
 
   // ② worker — scheduledScorecardWorkflow 실행 + internal 라우트로 브리지
-  console.log(`\n=== ② assay worker 기동 (temporal=${TEMPORAL}, API 브리지=${BASE}) ===`);
+  console.log(`\n=== ② everdict worker 기동 (temporal=${TEMPORAL}, API 브리지=${BASE}) ===`);
   worker = spawn("node", ["apps/cli/dist/main.js", "worker", "--temporal-address", TEMPORAL], {
     cwd: ROOT,
-    env: { ...process.env, ASSAY_API_URL: BASE, ASSAY_INTERNAL_TOKEN: INTERNAL },
+    env: { ...process.env, EVERDICT_API_URL: BASE, EVERDICT_INTERNAL_TOKEN: INTERNAL },
     stdio: ["ignore", "pipe", "pipe"],
   });
   worker.stderr.on("data", (d) => process.stderr.write(`  [worker] ${d}`));
@@ -78,7 +78,7 @@ try {
   await sleep(3000);
 
   // ③ 러너 페어링 + 기동 (codex on PATH — pinch 를 돌린 그 하니스)
-  console.log("\n=== ③ POST /runners + assay runner --pair (codex on PATH) ===");
+  console.log("\n=== ③ POST /runners + everdict runner --pair (codex on PATH) ===");
   const paired = await post("/runners", { label: "codex-laptop", capabilities: ["repo"] });
   const token = paired.json.token;
   const runnerId = paired.json.runner?.id;

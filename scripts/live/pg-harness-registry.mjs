@@ -1,6 +1,6 @@
 // 라이브 검증: 하니스 버전 SSOT 를 실제 Postgres 에 영속한다.
 //
-//  1) migrate (assay_harnesses 생성, 0001+0002 멱등)
+//  1) migrate (everdict_harnesses 생성, 0001+0002 멱등)
 //  2) 파일 SSOT(examples/harnesses) → PgHarnessRegistry 로 시드(loadHarnessDir(into=pg))
 //  3) versions/getService(latest) + 불변성(다른 스펙 재등록 → 409 Conflict)
 //  4) 새 풀(프로세스 재기동 모사)로 같은 스펙 조회 → 영속 증명
@@ -59,8 +59,8 @@ async function main() {
   console.log(ok ? "✅ harness taxonomy persisted in Postgres (immutable, survives reconnect)" : "❌ unexpected");
 
   // 정리: 데모 row 삭제(테이블/마이그레이션 유지).
-  await client2.query("DELETE FROM assay_harness_instances WHERE id = $1", ["bu"]);
-  await client2.query("DELETE FROM assay_harness_templates WHERE id = $1", ["bu"]);
+  await client2.query("DELETE FROM everdict_harness_instances WHERE id = $1", ["bu"]);
+  await client2.query("DELETE FROM everdict_harness_templates WHERE id = $1", ["bu"]);
   await pool2.end();
 }
 

@@ -1,4 +1,4 @@
-# Agent Judges (`@assay/registry` + control plane)
+# Agent Judges (`@everdict/registry` + control plane)
 
 An **Agent Judge** scores a run/scorecard's trace — it's a **first-class, user-registerable entity** with the
 same ownership/lifecycle as harnesses and datasets. A judge is one of two kinds:
@@ -21,11 +21,11 @@ Judges reuse the `HarnessRegistry`/`DatasetRegistry` model (`packages/registry`)
   version. So a scorecard graded by `judge@1.0.0` stays reproducible.
 - **Role-gating** — `judges:read` = viewer+, `judges:write` = **member+** (users self-register their judges).
 
-## Contract (`@assay/core`)
+## Contract (`@everdict/core`)
 `JudgeSpec` = `discriminatedUnion("kind", [ModelJudgeSpec, HarnessJudgeSpec])` (`JudgeSpecSchema`). Both share
 `id, version, description?, tags`.
 
-## Registry (`@assay/registry`)
+## Registry (`@everdict/registry`)
 `JudgeRegistry` — `register / get / has / versions / ownVersions / list`, mirroring the other registries.
 `InMemoryJudgeRegistry` (dev/test) + `PgJudgeRegistry` (Postgres, `judge` jsonb, PK `(tenant,id,version)`).
 Migration: `packages/db/migrations/0008_create_judges.sql`.
@@ -58,10 +58,10 @@ selected judge never silently vanishes, and `UpstreamError`s become skip scores 
 
 - **`model` · anthropic** → `anthropicComplete` (Messages API), keyed by the tenant's **`ANTHROPIC_API_KEY`**.
 - **`model` · openai** → `openaiComplete` (Chat Completions), keyed by **`OPENAI_API_KEY`**; OpenAI-compatible so
-  a **LiteLLM** proxy works via the **`OPENAI_BASE_URL`** secret (or `ASSAY_JUDGE_OPENAI_BASE_URL`). Live-verified
+  a **LiteLLM** proxy works via the **`OPENAI_BASE_URL`** secret (or `EVERDICT_JUDGE_OPENAI_BASE_URL`). Live-verified
   end-to-end against a real LiteLLM proxy (`chatgpt/gpt-5.4-mini`): `openaiComplete`→`modelJudge`→`JudgeRunner`
   produced a `judge:<id>` score from a real model. Reproduce via the guarded scenario test
-  `packages/graders/src/model-judge.scenario.test.ts` (`ASSAY_E2E_OPENAI_{BASE_URL,KEY,MODEL}`; skips if unset).
+  `packages/graders/src/model-judge.scenario.test.ts` (`EVERDICT_E2E_OPENAI_{BASE_URL,KEY,MODEL}`; skips if unset).
 - **`harness`** → `harnessComplete`: dispatches the referenced harness (same path as a run) with the judge prompt
   as its task, then extracts the verdict from that agent's own trace (`traceToText` → tolerant JSON parse). The
   judge-agent must emit a JSON verdict as its output; otherwise it's a skip. (One agent run per case × judge.)

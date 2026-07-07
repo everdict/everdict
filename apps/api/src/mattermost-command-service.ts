@@ -1,8 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
-import { ForbiddenError } from "@assay/core";
-import type { WorkspaceSettingsStore } from "@assay/db";
+import { ForbiddenError } from "@everdict/core";
+import type { WorkspaceSettingsStore } from "@everdict/db";
 
-// Mattermost 인바운드(슬래시커맨드 + 인터랙티브 버튼) 처리 — Assay 의 첫 인바운드 표면.
+// Mattermost 인바운드(슬래시커맨드 + 인터랙티브 버튼) 처리 — Everdict 의 첫 인바운드 표면.
 // 워크스페이스는 URL(?ws=)로 라우팅하고, 진위는 commandTokenSecretName 값과 요청 token 을 **상수시간 비교**로 검증한다(fail-closed).
 // 설계: docs/architecture/workspace-scoped-integrations.md (S7/S8)
 
@@ -51,7 +51,7 @@ export class MattermostCommandService {
       throw new ForbiddenError("FORBIDDEN", { workspace }, "Mattermost 요청 토큰 검증 실패.");
   }
 
-  // 슬래시커맨드 `/assay <sub> …` — 검증 후 파싱·디스패치. token/text/user_name 은 MM 폼 필드.
+  // 슬래시커맨드 `/everdict <sub> …` — 검증 후 파싱·디스패치. token/text/user_name 은 MM 폼 필드.
   async handleCommand(
     workspace: string,
     input: { token?: string; text?: string; userName?: string },
@@ -63,7 +63,7 @@ export class MattermostCommandService {
     if (sub === "status")
       return {
         response_type: "ephemeral",
-        text: `Assay 워크스페이스 **${workspace}** 연결됨. \`run\` · \`leaderboard\` · \`help\` 사용 가능.`,
+        text: `Everdict 워크스페이스 **${workspace}** 연결됨. \`run\` · \`leaderboard\` · \`help\` 사용 가능.`,
       };
 
     if (sub === "run") {
@@ -71,7 +71,8 @@ export class MattermostCommandService {
         return { response_type: "ephemeral", text: "이 배포에서는 채팅 실행이 비활성입니다." };
       const harness = parts[1];
       const dataset = parts[2];
-      if (!harness || !dataset) return { response_type: "ephemeral", text: "사용법: `/assay run <harness> <dataset>`" };
+      if (!harness || !dataset)
+        return { response_type: "ephemeral", text: "사용법: `/everdict run <harness> <dataset>`" };
       const sc = await this.deps.submitScorecard(workspace, {
         dataset,
         harness,
@@ -89,7 +90,7 @@ export class MattermostCommandService {
     if (sub === "leaderboard") {
       if (!this.deps.leaderboard) return { response_type: "ephemeral", text: "리더보드가 비활성입니다." };
       const dataset = parts[1];
-      if (!dataset) return { response_type: "ephemeral", text: "사용법: `/assay leaderboard <dataset>`" };
+      if (!dataset) return { response_type: "ephemeral", text: "사용법: `/everdict leaderboard <dataset>`" };
       const rows = await this.deps.leaderboard(workspace, dataset);
       if (rows.length === 0) return { response_type: "ephemeral", text: `\`${dataset}\` 리더보드가 비어 있어요.` };
       const body = rows
@@ -106,10 +107,10 @@ export class MattermostCommandService {
     return {
       response_type: "ephemeral",
       text: [
-        "**Assay** 명령어:",
-        "• `/assay run <harness> <dataset>` — 스코어카드 실행",
-        "• `/assay leaderboard <dataset>` — 리더보드",
-        "• `/assay status` — 연결 확인",
+        "**Everdict** 명령어:",
+        "• `/everdict run <harness> <dataset>` — 스코어카드 실행",
+        "• `/everdict leaderboard <dataset>` — 리더보드",
+        "• `/everdict status` — 연결 확인",
       ].join("\n"),
     };
   }

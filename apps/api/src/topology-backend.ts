@@ -1,16 +1,16 @@
-import type { Backend } from "@assay/backends";
-import { BadRequestError, type RegistryAuth, type RuntimeSpec } from "@assay/core";
-import type { HarnessInstanceRegistry } from "@assay/registry";
+import type { Backend } from "@everdict/backends";
+import { BadRequestError, type RegistryAuth, type RuntimeSpec } from "@everdict/core";
+import type { HarnessInstanceRegistry } from "@everdict/registry";
 import {
   type CallbackRendezvous,
   K8sTopologyRuntime,
   NomadTopologyRuntime,
   ServiceTopologyBackend,
   type TopologyRuntime,
-} from "@assay/topology";
-import { buildTraceSource } from "@assay/trace";
+} from "@everdict/topology";
+import { buildTraceSource } from "@everdict/trace";
 
-// topology-capable nomad/k8s RuntimeSpec → ServiceTopologyBackend(Backend). @assay/backends 는 @assay/topology 를
+// topology-capable nomad/k8s RuntimeSpec → ServiceTopologyBackend(Backend). @everdict/backends 는 @everdict/topology 를
 // 의존할 수 없어서(순환) 이 와이어링은 둘 다 의존하는 apps/api 에 둔다. traceSource 를 가진 nomad/k8s 런타임을
 // 만나면(옛 topology kind 대신 — slice 5b-2) 이걸로 백엔드를 빌드해 Scheduler 레지스트리에 올린다.
 // orchestrator 는 이제 런타임 kind(nomad|k8s) 에서 암시. 클러스터 구동은 라이브(테넌트 Nomad/K8s + browser-use 이미지).

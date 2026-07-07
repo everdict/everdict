@@ -1,12 +1,12 @@
-# 실제 browser-use 를 assay 서비스-토폴로지의 front-door 로 노출하는 최소 HTTP 서버.
+# 실제 browser-use 를 everdict 서비스-토폴로지의 front-door 로 노출하는 최소 HTTP 서버.
 # ServiceTopologyBackend 계약: POST /runs {task, browser_cdp_url, thread_id, ...} (완료까지 블록) → 200,
 # 그 뒤 토폴로지 런타임이 per-case 브라우저를 snapshot. browser-use 가 자기 브라우저를 띄워 LLM 으로 진짜 구동하고,
-# 마지막 방문 URL/추출 텍스트를 /observe 로 노출 → assay 의 BrowserSnapshot(url/dom) 로 매핑 → url-matches/dom-contains.
+# 마지막 방문 URL/추출 텍스트를 /observe 로 노출 → everdict 의 BrowserSnapshot(url/dom) 로 매핑 → url-matches/dom-contains.
 #
 # 추가:
 #  - GET /form, GET /result?q= : 컨테이너가 직접 서빙하는 *인터랙티브* 페이지(navigate→input→click 멀티스텝 태스크용).
 #  - OTLP 배출: run 마다 실제 토큰사용량(TokenCost)+실제 액션열(action_names)을 Jaeger(:4318)로 스팬 전송. trace_id 는
-#    thread_id("run-<32hex>")에서 추출 → assay 의 OtelTraceSource.fetch(runId=32hex) 가 그 trace 를 끌어와 steps/cost 채점.
+#    thread_id("run-<32hex>")에서 추출 → everdict 의 OtelTraceSource.fetch(runId=32hex) 가 그 trace 를 끌어와 steps/cost 채점.
 #
 # browser-use 0.13.1 API 에 맞춤(Agent/ChatOpenAI/BrowserProfile top-level, Agent(browser_profile=...), cdp_use 로 chromium).
 import asyncio
@@ -212,7 +212,7 @@ def emit_otlp(trace_hex, model, actions, ptok, ctok, cost, result=""):
     payload = {
         "resourceSpans": [
             {
-                "resource": {"attributes": [_attr("service.name", "assay-browseruse")]},
+                "resource": {"attributes": [_attr("service.name", "everdict-browseruse")]},
                 "scopeSpans": [{"scope": {"name": "browseruse"}, "spans": spans}],
             }
         ]
@@ -294,8 +294,8 @@ async def form_handler(_request):
     # 인터랙티브 멀티스텝 타깃(컨테이너가 직접 서빙) — navigate→input→click 를 강제.
     return web.Response(
         content_type="text/html",
-        text="""<!doctype html><html><head><title>Assay Search</title></head><body>
-<h1>Assay Search</h1>
+        text="""<!doctype html><html><head><title>Everdict Search</title></head><body>
+<h1>Everdict Search</h1>
 <form action="/result" method="get">
   <input id="q" name="q" placeholder="search query">
   <button id="go" type="submit">Search</button>

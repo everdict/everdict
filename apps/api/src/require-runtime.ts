@@ -1,4 +1,4 @@
-import { BadRequestError } from "@assay/core";
+import { BadRequestError } from "@everdict/core";
 
 // 배포 정책(기본): 실행은 반드시 "어디서 돌지"를 명시해야 한다 — 등록된 테넌트 런타임 id 또는 self-hosted 러너
 // (self:<id> / self:ws[:<id>]). control-plane 호스트 in-process(LocalBackend)로의 조용한 폴백을 금지한다(격리 없는

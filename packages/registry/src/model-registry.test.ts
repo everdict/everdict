@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConflictError, type ModelSpec, ModelSpecSchema, NotFoundError } from "@assay/core";
-import type { SqlClient } from "@assay/db";
+import { ConflictError, type ModelSpec, ModelSpecSchema, NotFoundError } from "@everdict/core";
+import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { loadModelDir } from "./load-models.js";
 import { InMemoryModelRegistry } from "./model-registry.js";
@@ -75,7 +75,7 @@ describe("InMemoryModelRegistry (tenant-owned)", () => {
 
 describe("loadModelDir", () => {
   it("기본 SHARED 로 로드(파일 SSOT) → 모든 테넌트가 폴백으로 봄", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "assay-model-"));
+    const dir = mkdtempSync(join(tmpdir(), "everdict-model-"));
     try {
       writeFileSync(join(dir, "opus-1.0.0.json"), JSON.stringify(model("opus", "1.0.0")));
       const r = await loadModelDir(dir);
@@ -86,35 +86,35 @@ describe("loadModelDir", () => {
   });
 });
 
-// 가짜 SqlClient — tenant-aware assay_models 흉내.
+// 가짜 SqlClient — tenant-aware everdict_models 흉내.
 function fakePg(): SqlClient {
   const rows: Array<{ tenant: string; id: string; version: string; model: unknown }> = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
-      if (t.startsWith("SELECT model FROM assay_models WHERE tenant = $1 AND id = $2 AND version = $3")) {
+      if (t.startsWith("SELECT model FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{ model: r.model }] : []) as R[] };
       }
-      if (t.startsWith("SELECT 1 FROM assay_models WHERE tenant = $1 AND id = $2 AND version = $3")) {
+      if (t.startsWith("SELECT 1 FROM everdict_models WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{}] : []) as R[] };
       }
-      if (t.startsWith("SELECT 1 FROM assay_models WHERE tenant = $1 AND id = $2 LIMIT 1")) {
+      if (t.startsWith("SELECT 1 FROM everdict_models WHERE tenant = $1 AND id = $2 LIMIT 1")) {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1]);
         return { rows: (r ? [{}] : []) as R[] };
       }
-      if (t.startsWith("SELECT version FROM assay_models WHERE tenant = $1 AND id = $2")) {
+      if (t.startsWith("SELECT version FROM everdict_models WHERE tenant = $1 AND id = $2")) {
         return {
           rows: rows.filter((x) => x.tenant === p[0] && x.id === p[1]).map((x) => ({ version: x.version })) as R[],
         };
       }
-      if (t.startsWith("SELECT DISTINCT id FROM assay_models WHERE tenant = $1 OR tenant = $2")) {
+      if (t.startsWith("SELECT DISTINCT id FROM everdict_models WHERE tenant = $1 OR tenant = $2")) {
         const ids = [...new Set(rows.filter((x) => x.tenant === p[0] || x.tenant === p[1]).map((x) => x.id))].sort();
         return { rows: ids.map((id) => ({ id })) as R[] };
       }
-      if (t.startsWith("INSERT INTO assay_models")) {
+      if (t.startsWith("INSERT INTO everdict_models")) {
         rows.push({
           tenant: p[0] as string,
           id: p[1] as string,

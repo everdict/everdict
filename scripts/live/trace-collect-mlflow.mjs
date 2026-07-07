@@ -1,14 +1,14 @@
 // 라이브 e2e: 2-페이즈 트레이스 수집(D4)을 *실제 MLflow 3.14*에 대고 검증 — docs/architecture/streaming-case-pipeline.md
 //   S1 collect="job":          runCase 가 compute 해제 후 collectTrace(runId) 로 실 MLflow 에서 pull —
-//                              같은 runId 가 커맨드 env(ASSAY_RUN_ID)와 pull 양쪽에 흐르는 왕복을 확인.
+//                              같은 runId 가 커맨드 env(EVERDICT_RUN_ID)와 pull 양쪽에 흐르는 왕복을 확인.
 //   S2 collect="control-plane": 잡(runCase)은 traceRef 만 들고 실행에서 끝 → executeCase 가 실 MLflow pull +
 //                              미뤄진 관측물 채점(steps/cost)으로 결과를 완성.
 //   S3 soft-degrade:           죽은 엔드포인트 → error 이벤트 가시화 + 잡의 ground-truth 점수 보존.
 //
-// 상관 참고: 실 MLflow 는 trace id 를 서버가 mint 하므로(assay 가 지정 불가) runId = 플랫폼 trace id 로
+// 상관 참고: 실 MLflow 는 trace id 를 서버가 mint 하므로(everdict 가 지정 불가) runId = 플랫폼 trace id 로
 // 주입한다(pull-ingest 의 runs[{caseId,runId}] 관례와 동일). "계측된 에이전트가 적재한 트레이스"는
 // MlflowTraceSink(create+OTLP 스팬, ≥3.12)로 시드 — 싱크 e2e(trace-sink-mlflow.mjs)에서 이미 검증된 경로.
-// 태그(assay.run_id) 검색 상관은 설계 문서의 follow-up.
+// 태그(everdict.run_id) 검색 상관은 설계 문서의 follow-up.
 //
 // 준비: docker (ghcr.io/mlflow/mlflow:v3.14.0 을 스크립트가 부팅/정리). 기존 서버를 쓰려면 MLFLOW_ENDPOINT.
 // 사용: node scripts/live/trace-collect-mlflow.mjs
@@ -23,7 +23,7 @@ import { runCase } from "../../packages/runner/dist/index.js";
 import { buildTraceSink, buildTraceSource } from "../../packages/trace/dist/index.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const CONTAINER = "assay-trace-collect-e2e";
+const CONTAINER = "everdict-trace-collect-e2e";
 let bootedDocker = false;
 let ENDPOINT = process.env.MLFLOW_ENDPOINT ?? "";
 
@@ -82,7 +82,7 @@ try {
   // 1) 시드 — "계측된 에이전트가 플랫폼에 적재한 트레이스" 2건(S1/S2 용). 스팬에 llm/tool 이 실린다(≥3.12).
   const { experiment_id: experimentId } = await api("/api/2.0/mlflow/experiments/create", {
     method: "POST",
-    body: JSON.stringify({ name: `assay-trace-collect-e2e-${Date.now()}` }),
+    body: JSON.stringify({ name: `everdict-trace-collect-e2e-${Date.now()}` }),
   });
   const sink = buildTraceSink({ kind: "mlflow", endpoint: ENDPOINT, project: experimentId });
   const seedTrace = [
@@ -117,13 +117,13 @@ try {
     `시드 스팬 왕복 준비(llm_call ${seedEvents.length}개 이벤트)`,
   );
 
-  // 공용 — 선언형 command 하니스(계측 CLI 흉내: 주입된 ASSAY_RUN_ID 를 marker 로 남긴다) + 케이스.
+  // 공용 — 선언형 command 하니스(계측 CLI 흉내: 주입된 EVERDICT_RUN_ID 를 marker 로 남긴다) + 케이스.
   const specFor = (collect) => ({
     kind: "command",
     id: "instrumented-cli",
     version: "1.0.0",
     setup: [],
-    command: "sh -c 'echo \"run_id=$ASSAY_RUN_ID\" > marker.txt'",
+    command: "sh -c 'echo \"run_id=$EVERDICT_RUN_ID\" > marker.txt'",
     env: {},
     params: {},
     trace: { kind: "mlflow", endpoint: ENDPOINT, collect },
@@ -151,7 +151,7 @@ try {
   const r1 = await runCase(caseFor("c-job"), depsFor("job", tidJob));
   assert(
     r1.snapshot.diff.includes(`run_id=${tidJob}`),
-    "S1 상관 키 왕복 — 커맨드가 본 ASSAY_RUN_ID = pull 에 쓴 runId",
+    "S1 상관 키 왕복 — 커맨드가 본 EVERDICT_RUN_ID = pull 에 쓴 runId",
   );
   const llm1 = r1.trace.find((e) => e.kind === "llm_call");
   assert(
@@ -194,14 +194,14 @@ try {
   );
   assert(score(degraded, "tests-pass")?.pass === true, "S3 ground-truth 점수 보존(soft-degrade)");
 
-  // 5) S4 — correlate="tag": 실 계측 에이전트 관례. 에이전트는 자기 trace 에 assay.run_id 태그만 남기고
-  //    (실 SDK 의 set_trace_tag = PATCH /traces/{id}/tags), assay 는 자기가 mint 한 runId(트레이스 id 가
+  // 5) S4 — correlate="tag": 실 계측 에이전트 관례. 에이전트는 자기 trace 에 everdict.run_id 태그만 남기고
+  //    (실 SDK 의 set_trace_tag = PATCH /traces/{id}/tags), everdict 는 자기가 mint 한 runId(트레이스 id 가
   //    아님!)로 태그 검색 상관 — runId=trace_id 관례 없이 실 MLflow 에서 수집이 도는지 검증.
-  console.log("\n=== S4: correlate=tag — assay.run_id 태그 검색 상관(잡 밖 수집) ===");
-  const tagRunId = `assay-e2e-${Date.now().toString(36)}`;
+  console.log("\n=== S4: correlate=tag — everdict.run_id 태그 검색 상관(잡 밖 수집) ===");
+  const tagRunId = `everdict-e2e-${Date.now().toString(36)}`;
   await api(`/api/3.0/mlflow/traces/${tidTag}/tags`, {
     method: "PATCH",
-    body: JSON.stringify({ key: "assay.run_id", value: tagRunId }),
+    body: JSON.stringify({ key: "everdict.run_id", value: tagRunId }),
   });
   const specTag = {
     ...specFor("control-plane"),
@@ -221,7 +221,10 @@ try {
     preTag.traceRef?.correlate === "tag" && preTag.traceRef?.experiment === String(experimentId),
     "S4 traceRef 에 tag 상관 좌표(correlate/experiment) 동봉",
   );
-  assert(preTag.snapshot.diff.includes(`run_id=${tagRunId}`), "S4 커맨드가 본 ASSAY_RUN_ID = 태그 값(에이전트 계약)");
+  assert(
+    preTag.snapshot.diff.includes(`run_id=${tagRunId}`),
+    "S4 커맨드가 본 EVERDICT_RUN_ID = 태그 값(에이전트 계약)",
+  );
   const jobTag = { evalCase: caseFor("c-tag"), harness: { id: "instrumented-cli", version: "1.0.0" }, tenant: "e2e" };
   const doneTag = await executeCase({ dispatcher: { dispatch: async () => preTag }, buildTraceSource }, "e2e", jobTag);
   const llmTag = doneTag.trace.find((e) => e.kind === "llm_call");
@@ -229,7 +232,7 @@ try {
   assert((score(doneTag, "steps")?.value ?? 0) > 0, "S4 미뤄진 관측물 채점 완성");
 
   console.log(
-    "\n✅ trace-collect live e2e PASS — 실 MLflow 3.14 상대로 D4 검증: 해제 후 in-job pull 왕복(S1) · 잡 밖 수집 완성(S2) · soft-degrade(S3) · assay.run_id 태그 상관(S4).",
+    "\n✅ trace-collect live e2e PASS — 실 MLflow 3.14 상대로 D4 검증: 해제 후 in-job pull 왕복(S1) · 잡 밖 수집 완성(S2) · soft-degrade(S3) · everdict.run_id 태그 상관(S4).",
   );
 } finally {
   if (bootedDocker) {

@@ -1,5 +1,5 @@
-import { BadRequestError, ForbiddenError, NotFoundError } from "@assay/core";
-import type { CommentRecord, CommentStore } from "@assay/db";
+import { BadRequestError, ForbiddenError, NotFoundError } from "@everdict/core";
+import type { CommentRecord, CommentStore } from "@everdict/db";
 
 // 댓글 서비스 — 리소스(하니스/데이터셋/스코어카드/뷰/예약/작업/런타임)에 대한 협업 논의 + 1단계 대댓글.
 // HTTP 라우트와 MCP 툴이 공유(BFF↔MCP 패리티). authZ: 조회=comments:read, 작성=comments:write, 삭제=작성자-or-admin.

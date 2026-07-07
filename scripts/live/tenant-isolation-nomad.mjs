@@ -2,7 +2,7 @@
 //
 // 같은 하니스 spec + 같은 version 을 두 테넌트(alpha, beta)로 ensureTopology 하면,
 // 하나의 warm 풀을 공유하는 게 아니라 존별로 별개의 Nomad service 잡이 뜬다
-// (assay-harness-...-alpha, ...-beta 가 동시에 running). 평가는 임의 코드 실행이므로
+// (everdict-harness-...-alpha, ...-beta 가 동시에 running). 평가는 임의 코드 실행이므로
 // warm 프로세스를 테넌트 간 공유하면 안 된다.
 //
 // 사용: NOMAD_ADDR=http://127.0.0.1:4646 node scripts/live/tenant-isolation-nomad.mjs
@@ -33,7 +33,7 @@ const SPEC = {
 const zone = (id) => ({ id, isolationRuntime: "runc", network: "open", trusted: true });
 
 async function harnessJobs() {
-  const r = await fetch(`${NOMAD_ADDR}/v1/jobs?prefix=assay-harness-bu-${VERSION}&namespace=*`);
+  const r = await fetch(`${NOMAD_ADDR}/v1/jobs?prefix=everdict-harness-bu-${VERSION}&namespace=*`);
   const jobs = await r.json();
   return jobs.map((j) => ({ id: j.ID, status: j.Status }));
 }

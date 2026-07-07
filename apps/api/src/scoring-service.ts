@@ -1,11 +1,11 @@
-import type { CaseResult, Dataset, EvalCase, GradeContext, JudgeRunConfig, JudgeSpec, Placement } from "@assay/core";
-import type { JudgeRegistry } from "@assay/registry";
+import type { CaseResult, Dataset, EvalCase, GradeContext, JudgeRunConfig, JudgeSpec, Placement } from "@everdict/core";
+import type { JudgeRegistry } from "@everdict/registry";
 import { createLimiter } from "./concurrency.js";
 import type { JudgeRunner } from "./judge-runner.js";
 
 // 채점(Scoring) 관심사 — 결과(트레이스) 위의 순수한 평가: judge 적용 · judge 모델 수집.
 // 실행과 독립적이다: 라이브 배치의 산출 결과든, ingest 로 외부에서 당겨온 트레이스든 동일하게 채점한다.
-// (집계 summary/diff/leaderboard 는 이미 @assay/suite 의 순수 함수 — 여기선 judge '적용'만 담당.)
+// (집계 summary/diff/leaderboard 는 이미 @everdict/suite 의 순수 함수 — 여기선 judge '적용'만 담당.)
 // judge 적용은 케이스 단위로 스트리밍한다(케이스 완료 즉시 발사, 케이스 축 병렬·케이스 내 순서 결정적)
 // — docs/architecture/streaming-case-pipeline.md + execution-scoring-orchestration.md
 export interface ScoringServiceDeps {

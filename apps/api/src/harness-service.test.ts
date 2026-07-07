@@ -1,12 +1,12 @@
-import type { Principal } from "@assay/auth";
+import type { Principal } from "@everdict/auth";
 import {
   ConflictError,
   ForbiddenError,
   type HarnessInstanceSpec,
   type HarnessTemplateSpec,
   NotFoundError,
-} from "@assay/core";
-import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@assay/registry";
+} from "@everdict/core";
+import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@everdict/registry";
 import { beforeEach, describe, expect, it } from "vitest";
 import { deleteHarnessVersion } from "./harness-service.js";
 

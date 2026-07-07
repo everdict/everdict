@@ -1,12 +1,12 @@
 import { readFileSync } from "node:fs";
-import { DatasetSchema } from "@assay/core";
+import { DatasetSchema } from "@everdict/core";
 import {
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
-} from "@assay/registry";
+} from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleSchema, BundleService, requiredActionsForBundle } from "./bundle-service.js";

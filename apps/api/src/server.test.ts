@@ -1,7 +1,7 @@
-import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@assay/auth";
-import type { Dispatcher } from "@assay/backends";
-import { inMemoryBudget } from "@assay/backends";
-import { type CaseResult, DatasetSchema } from "@assay/core";
+import { type Authenticator, apiKeyAuthenticator, compositeAuthenticator } from "@everdict/auth";
+import type { Dispatcher } from "@everdict/backends";
+import { inMemoryBudget } from "@everdict/backends";
+import { type CaseResult, DatasetSchema } from "@everdict/core";
 import {
   InMemoryOAuthStateStore,
   InMemoryRunStore,
@@ -16,7 +16,7 @@ import {
   InMemoryWorkspaceStore,
   aesGcmCipher,
   issueKey,
-} from "@assay/db";
+} from "@everdict/db";
 import {
   InMemoryBenchmarkRegistry,
   InMemoryDatasetRegistry,
@@ -24,7 +24,7 @@ import {
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
   InMemoryRuntimeRegistry,
-} from "@assay/registry";
+} from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
@@ -183,7 +183,7 @@ function server(
     config: {
       webBaseUrl: "http://web.test",
       apiPublicUrl: "http://api.test",
-      githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST KEY-----", slug: "assay-eval" },
+      githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST KEY-----", slug: "everdict-eval" },
     },
   });
   const mattermostService = new MattermostService(settingsStore);
@@ -302,24 +302,24 @@ describe("API — bundles (번들 원샷 설치)", () => {
 });
 
 describe("API — dev fallback (no auth required)", () => {
-  it("x-assay-tenant 헤더로 동작; 다른 tenant 는 남의 run 못 봄", async () => {
+  it("x-everdict-tenant 헤더로 동작; 다른 tenant 는 남의 run 못 봄", async () => {
     const { app } = server();
     const post = await app.inject({
       method: "POST",
       url: "/runs",
-      headers: { "x-assay-tenant": "acme" },
+      headers: { "x-everdict-tenant": "acme" },
       payload: BODY,
     });
     expect(post.statusCode).toBe(202);
     const rec = post.json();
-    const beta = await app.inject({ method: "GET", url: `/runs/${rec.id}`, headers: { "x-assay-tenant": "beta" } });
+    const beta = await app.inject({ method: "GET", url: `/runs/${rec.id}`, headers: { "x-everdict-tenant": "beta" } });
     expect(beta.statusCode).toBe(404);
     await app.close();
   });
 
   it("예산 초과 → 402", async () => {
     const { app } = server({ budget: inMemoryBudget({ limitFor: () => ({ runs: 1 }) }) });
-    const h = { "x-assay-tenant": "free" };
+    const h = { "x-everdict-tenant": "free" };
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(202);
     expect((await app.inject({ method: "POST", url: "/runs", headers: h, payload: BODY })).statusCode).toBe(402);
     await app.close();
@@ -351,7 +351,7 @@ describe("API — front-door callback 수신 (/frontdoor-callback/:runId, C2b)",
 describe("API — workspaces (멤버십: 생성/전환/목록)", () => {
   it("워크스페이스를 생성하면 생성자가 admin 멤버가 되고 /workspaces·/me 에 나타난다", async () => {
     const { app } = server();
-    const h = { "x-assay-tenant": "acme" }; // dev subject + 기본 워크스페이스 acme
+    const h = { "x-everdict-tenant": "acme" }; // dev subject + 기본 워크스페이스 acme
     const post = await app.inject({ method: "POST", url: "/workspaces", headers: h, payload: { name: "My Team" } });
     expect(post.statusCode).toBe(201);
     const created = post.json();
@@ -368,15 +368,15 @@ describe("API — workspaces (멤버십: 생성/전환/목록)", () => {
     await app.close();
   });
 
-  it("x-assay-workspace 헤더로 전환하면 데이터가 그 워크스페이스로 스코프된다(기존 워크스페이스에선 안 보임)", async () => {
+  it("x-everdict-workspace 헤더로 전환하면 데이터가 그 워크스페이스로 스코프된다(기존 워크스페이스에선 안 보임)", async () => {
     const { app } = server();
-    const base = { "x-assay-tenant": "acme" };
+    const base = { "x-everdict-tenant": "acme" };
     const created = (
       await app.inject({ method: "POST", url: "/workspaces", headers: base, payload: { name: "Team B" } })
     ).json();
 
     // 전환해서 제출한 run 은 전환 워크스페이스 소속.
-    const switched = { "x-assay-tenant": "acme", "x-assay-workspace": created.id };
+    const switched = { "x-everdict-tenant": "acme", "x-everdict-workspace": created.id };
     const run = (await app.inject({ method: "POST", url: "/runs", headers: switched, payload: BODY })).json();
     expect((await app.inject({ method: "GET", url: `/runs/${run.id}`, headers: switched })).statusCode).toBe(200);
     // 기본 워크스페이스(acme)에선 그 run 이 보이지 않는다(격리).
@@ -386,7 +386,7 @@ describe("API — workspaces (멤버십: 생성/전환/목록)", () => {
 
   it("멤버가 아닌 워크스페이스를 헤더로 요청하면 403 이 아니라 기본 워크스페이스로 폴백한다(스테일 선택 안전)", async () => {
     const { app } = server();
-    const stale = { "x-assay-tenant": "acme", "x-assay-workspace": "someoneelse" };
+    const stale = { "x-everdict-tenant": "acme", "x-everdict-workspace": "someoneelse" };
     const me = await app.inject({ method: "GET", url: "/me", headers: stale });
     expect(me.statusCode).toBe(200);
     expect(me.json().workspace).toBe("acme"); // 비멤버 → base 로 폴백
@@ -413,7 +413,7 @@ describe("API — workspaces (멤버십: 생성/전환/목록)", () => {
 
   it("명시한 id 가 이미 있으면 409", async () => {
     const { app } = server();
-    const h = { "x-assay-tenant": "acme" };
+    const h = { "x-everdict-tenant": "acme" };
     expect(
       (await app.inject({ method: "POST", url: "/workspaces", headers: h, payload: { name: "X", id: "team-x" } }))
         .statusCode,
@@ -611,7 +611,7 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
       payload: {},
     });
     expect(start.statusCode).toBe(200);
-    expect(start.json().installUrl).toContain("https://github.com/apps/assay-eval/installations/new");
+    expect(start.json().installUrl).toContain("https://github.com/apps/everdict-eval/installations/new");
     // 목록 — 비었고 App Setup URL 로 등록할 callbackUrl 노출.
     const list = await app.inject({ method: "GET", url: "/workspace/github-app", headers: h });
     expect(list.statusCode).toBe(200);
@@ -622,7 +622,7 @@ describe("API — workspace integrations (GitHub App / Mattermost)", () => {
       method: "POST",
       url: "/workspace/github-app/registrations",
       headers: h,
-      payload: { host: "https://ghe.acme.io", slug: "assay-ghe", appId: "222", privateKeySecretName: "ghe-key" },
+      payload: { host: "https://ghe.acme.io", slug: "everdict-ghe", appId: "222", privateKeySecretName: "ghe-key" },
     });
     expect(reg.statusCode).toBe(200);
     expect(reg.json().registrations).toHaveLength(1);
@@ -1086,12 +1086,12 @@ describe("API — MCP OAuth (login like Linear)", () => {
   });
 
   it("protected-resource 메타데이터가 Keycloak 을 인가서버로 가리킨다", async () => {
-    const { app } = server({ authorizationServers: ["http://kc/realms/assay"] });
+    const { app } = server({ authorizationServers: ["http://kc/realms/everdict"] });
     const res = await app.inject({ method: "GET", url: "/.well-known/oauth-protected-resource" });
     expect(res.statusCode).toBe(200);
     const meta = res.json();
     expect(meta.resource).toMatch(/\/mcp$/);
-    expect(meta.authorization_servers).toEqual(["http://kc/realms/assay"]);
+    expect(meta.authorization_servers).toEqual(["http://kc/realms/everdict"]);
     expect(meta.bearer_methods_supported).toContain("header");
     await app.close();
   });
@@ -2301,7 +2301,7 @@ describe("API — runtimes (실행 인프라, workspace-owned, role 무관 write
 });
 
 describe("API — schedules (예약 cron 스코어카드)", () => {
-  const h = { "x-assay-tenant": "acme" };
+  const h = { "x-everdict-tenant": "acme" };
   const body = {
     name: "nightly",
     cron: "0 3 * * *",
@@ -2326,7 +2326,7 @@ describe("API — schedules (예약 cron 스코어카드)", () => {
     const list = await app.inject({ method: "GET", url: "/schedules", headers: h });
     expect(list.json().map((s: { id: string }) => s.id)).toContain(rec.id);
 
-    const betaH = { "x-assay-tenant": "beta" };
+    const betaH = { "x-everdict-tenant": "beta" };
     expect((await app.inject({ method: "GET", url: `/schedules/${rec.id}`, headers: betaH })).statusCode).toBe(404);
     expect((await app.inject({ method: "GET", url: "/schedules", headers: betaH })).json()).toEqual([]);
     await app.close();
@@ -2392,7 +2392,7 @@ describe("API — schedules (예약 cron 스코어카드)", () => {
 });
 
 describe("API — GitHub Actions CI principal (via=github-actions, roles=[ci])", () => {
-  // 페더레이션 인증기 자체는 @assay/auth 테스트가 커버 — 여기선 서버 레벨: ci 게이트 + 멤버십 비부트스트랩 + origin 스탬프.
+  // 페더레이션 인증기 자체는 @everdict/auth 테스트가 커버 — 여기선 서버 레벨: ci 게이트 + 멤버십 비부트스트랩 + origin 스탬프.
   const ciAuth: Authenticator = {
     async authenticate() {
       return { subject: "gha:acme/app", workspace: "acme", roles: ["ci"], via: "github-actions" };

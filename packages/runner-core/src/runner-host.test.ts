@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { RunnerHost, type RunnerHostStatus, type RunnerJobDone } from "./runner-host.js";
 import type { RunnerClient } from "./runner-session.js";

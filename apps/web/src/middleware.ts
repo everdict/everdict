@@ -10,7 +10,7 @@ import {
 import { keycloakConfigured } from '@/shared/config/env'
 
 // URL 첫 세그먼트(= 활성 워크스페이스 slug, Linear 식 /{workspace}/...)를 요청 헤더로 주입하고
-// most-recent 쿠키를 동기화한다. authContext 가 이 헤더를 읽어 컨트롤플레인 스코프(x-assay-workspace)로 전달한다.
+// most-recent 쿠키를 동기화한다. authContext 가 이 헤더를 읽어 컨트롤플레인 스코프(x-everdict-workspace)로 전달한다.
 // 예약어/비-slug 첫 세그먼트(루트·onboarding·invite·new-workspace 등)는 워크스페이스 컨텍스트가 없으니 그대로 통과.
 function injectWorkspace(req: NextRequest): NextResponse {
   const slug = workspaceSlugFromPath(req.nextUrl.pathname)

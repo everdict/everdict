@@ -1,4 +1,4 @@
-import type { AgentJob } from "@assay/core";
+import type { AgentJob } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { runAgentJob } from "./run.js";
 

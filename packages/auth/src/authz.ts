@@ -1,4 +1,4 @@
-import { ForbiddenError } from "@assay/core";
+import { ForbiddenError } from "@everdict/core";
 import type { Principal } from "./principal.js";
 
 // 워크스페이스 내 역할 → 액션 권한. 컨트롤플레인이 엔드포인트마다 강제(authZ).
@@ -40,8 +40,8 @@ export type Action =
   // harnesses:register(viewer+) 재사용 대신 별도 액션으로 정직하게 명명(등록/해제는 settings:write, 조회는 harnesses:read).
   | "images:push";
 
-export const ASSAY_ROLES = ["viewer", "member", "admin"] as const;
-export type AssayRole = (typeof ASSAY_ROLES)[number];
+export const EVERDICT_ROLES = ["viewer", "member", "admin"] as const;
+export type EverdictRole = (typeof EVERDICT_ROLES)[number];
 
 const ROLE_PERMISSIONS: Record<string, ReadonlySet<Action>> = {
   viewer: new Set<Action>([

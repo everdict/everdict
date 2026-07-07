@@ -1,16 +1,16 @@
 // 라이브 e2e (SLICE 57): 워크스페이스 기본 judge 모델 → 컨트롤플레인(RunService)이 job.judge 를 자동으로 채움.
 // 유저는 케이스에 judge grader 만 두고(모델 미지정), 워크스페이스 설정에 기본 judge 모델만 등록하면
 // 모든 run 이 그 모델로 inline judge 채점된다. 요청별 override 가 워크스페이스 기본을 이긴다.
-// process.env.ASSAY_JUDGE_MODEL 은 일부러 비운다 → 모델은 오직 워크스페이스 설정 → job.judge 에서 와야 한다.
+// process.env.EVERDICT_JUDGE_MODEL 은 일부러 비운다 → 모델은 오직 워크스페이스 설정 → job.judge 에서 와야 한다.
 import process from "node:process";
 import { RunService } from "../../apps/api/dist/run-service.js";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { InMemoryRunStore, InMemoryWorkspaceSettingsStore } from "../../packages/db/dist/index.js";
 
 // biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(워크스페이스 기본값만 적용됨을 검증)
-delete process.env.ASSAY_JUDGE_MODEL;
+delete process.env.EVERDICT_JUDGE_MODEL;
 // biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(테스트 격리)
-delete process.env.ASSAY_JUDGE_PROVIDER;
+delete process.env.EVERDICT_JUDGE_PROVIDER;
 
 const settings = new InMemoryWorkspaceSettingsStore();
 // 워크스페이스 기본 judge 모델 등록(키는 시크릿/ env, 여기엔 모델/프로바이더만).

@@ -125,8 +125,8 @@ export function imageUsesRegistryHost(image: string, host: string): boolean {
 
 // docker config.json 내용(auths[host].auth = base64("user:pass")) — 임시 DOCKER_CONFIG 디렉터리에 써서
 // docker --config <dir> pull/push 로 쓴다(유저 ~/.docker/config.json 불가침). username 미지정 레지스트리는
-// 대부분 토큰 단독(아무 사용자명 허용) → "assay" 를 쓴다.
+// 대부분 토큰 단독(아무 사용자명 허용) → "everdict" 를 쓴다.
 export function dockerAuthConfigJson(auth: RegistryAuth): string {
-  const encoded = Buffer.from(`${auth.username ?? "assay"}:${auth.password}`).toString("base64");
+  const encoded = Buffer.from(`${auth.username ?? "everdict"}:${auth.password}`).toString("base64");
   return JSON.stringify({ auths: { [auth.host]: { auth: encoded } } });
 }

@@ -84,7 +84,7 @@ export function inMemoryUsageTally(): UsageTally {
 
 export interface UsageProxyOptions {
   upstreamBaseUrl: string; // BYO 업스트림(예: http://litellm.internal:4000). /v1/... 경로 그대로 전달.
-  runHeader?: string; // 요청을 run 에 귀속시키는 헤더(기본 x-assay-run). 헤더 없으면 defaultRunId.
+  runHeader?: string; // 요청을 run 에 귀속시키는 헤더(기본 x-everdict-run). 헤더 없으면 defaultRunId.
   defaultRunId?: string; // 헤더 없을 때 귀속할 run(기본 "default"). per-run 프록시 인스턴스용.
   tally?: UsageTally;
 }
@@ -120,7 +120,7 @@ function omitHeaders(src: http.IncomingHttpHeaders, drop: string[]): http.Outgoi
 // 통과(reverse-proxy)하면서 응답 usage 를 회수하는 사이드카. 응답/요청은 버퍼링 후 그대로 전달(본문 변형 없음).
 export function createUsageProxy(opts: UsageProxyOptions): UsageProxy {
   const tally = opts.tally ?? inMemoryUsageTally();
-  const runHeader = (opts.runHeader ?? "x-assay-run").toLowerCase();
+  const runHeader = (opts.runHeader ?? "x-everdict-run").toLowerCase();
   const defaultRunId = opts.defaultRunId ?? "default";
   const upstream = new URL(opts.upstreamBaseUrl);
   const client = upstream.protocol === "https:" ? https : http;

@@ -1,10 +1,10 @@
-// 라이브 e2e: *데스크탑 + 웹 통합 리포트* — 하니스-비종속 입증. 같은 assay 채점/스코어카드 흐름으로 두 트랙을 한 리포트에:
+// 라이브 e2e: *데스크탑 + 웹 통합 리포트* — 하니스-비종속 입증. 같은 everdict 채점/스코어카드 흐름으로 두 트랙을 한 리포트에:
 //   • 데스크탑(os-use/OSWorld): runAgentJob(command 하니스 + OsUseEnvironment) → mousepad 로 파일 생성 → VLM judge(스크린샷)
 //     + command/state grader(verify 로 실제 파일 검증).  [packages/agent runAgentJob + DockerDriver]
 //   • 웹(browser-use/WebVoyager): ServiceTopologyBackend(service 하니스) → 실 사이트 구동 → answer-match + judge.
 // 두 트랙의 CaseResult 를 각각 Scorecard 로 모아 summarizeScorecard + 통합 요약(트랙별 + 전체 통과율)을 출력.
 //
-// 사전: docker. 이미지(assay-osworld:demo / assay-browseruse:demo)는 이 스크립트가 없으면 빌드. Jaeger/LiteLLM 가동.
+// 사전: docker. 이미지(everdict-osworld:demo / everdict-browseruse:demo)는 이 스크립트가 없으면 빌드. Jaeger/LiteLLM 가동.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { copyFileSync, readFileSync } from "node:fs";
@@ -16,11 +16,11 @@ import { scorecardPassRate, summarizeScorecard } from "../../packages/suite/dist
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const OSWORLD_IMAGE = "assay-osworld:demo";
-const BU_IMAGE = "assay-browseruse:demo";
+const OSWORLD_IMAGE = "everdict-osworld:demo";
+const BU_IMAGE = "everdict-browseruse:demo";
 const PORT = "18080";
 const JAEGER_QUERY = "http://localhost:16686";
-const NAME = "assay-unified-bu";
+const NAME = "everdict-unified-bu";
 const FRONT = `http://127.0.0.1:${PORT}`;
 const here = (p) => new URL(p, import.meta.url);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -41,9 +41,9 @@ if (!KEY) {
 }
 process.env.OPENAI_API_KEY = KEY;
 process.env.OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1";
-process.env.ASSAY_JUDGE_MODEL = process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini";
-process.env.ASSAY_JUDGE_PROVIDER = "openai";
-const JUDGE = { provider: "openai", model: process.env.ASSAY_JUDGE_MODEL };
+process.env.EVERDICT_JUDGE_MODEL = process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini";
+process.env.EVERDICT_JUDGE_PROVIDER = "openai";
+const JUDGE = { provider: "openai", model: process.env.EVERDICT_JUDGE_MODEL };
 
 function ensureImage(image, build) {
   const have = spawnSync("docker", ["image", "inspect", image], { stdio: "ignore" }).status === 0;
@@ -275,7 +275,7 @@ try {
   console.log(
     ok
       ? "\n✅ ③: 하나의 통합 리포트가 *데스크탑(os-use/OSWorld, runAgentJob)* 과 *웹(browser-use/WebVoyager, " +
-          "ServiceTopologyBackend)* 두 트랙을 같은 assay CaseResult→Scorecard→summarize 흐름으로 묶음 — 하니스/인프라-비종속 " +
+          "ServiceTopologyBackend)* 두 트랙을 같은 everdict CaseResult→Scorecard→summarize 흐름으로 묶음 — 하니스/인프라-비종속 " +
           "평가 런타임이 데스크탑+웹 벤치마크를 하나의 리포트로 산출."
       : "\n⚠️ 한 트랙 결과 없음(위 로그 참고)",
   );

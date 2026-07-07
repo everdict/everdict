@@ -4,7 +4,7 @@
 //   automated: score=grade().mean | llm_judge: score=judge | hybrid: score=avg(grade().mean, judge)
 // 흐름(태스크별): 워크스페이스 mkdtemp + 입력 seed → hermes -z(CWD=/work, --network=host) → 산출파일/transcript 회수
 //   → automated grade() 실행 → (필요시) 루브릭 judge → 결합 → POST /scorecards/ingest → GET 이력 출력.
-// 사전: assay-hermes-agent:demo, LiteLLM(:4000), apps/api/dist, python:3.12-slim(자동 pull), alpine.
+// 사전: everdict-hermes-agent:demo, LiteLLM(:4000), apps/api/dist, python:3.12-slim(자동 pull), alpine.
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,9 +13,9 @@ import process from "node:process";
 
 const CP_PORT = process.env.CP_PORT ?? "8791";
 const BASE = `http://127.0.0.1:${CP_PORT}`;
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const AGENT_MODEL = process.env.HERMES_MODEL ?? "gpt-5.4-mini";
-const JUDGE_MODEL = process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini";
+const JUDGE_MODEL = process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini";
 const LLM_BASE = "http://localhost:4000/v1";
 const SCRIPTS = new URL(".", import.meta.url).pathname; // scripts/live (pinch-grade.py 위치)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -147,7 +147,7 @@ function runHermes(t) {
         `HERMES_BASE_URL=${LLM_BASE}`,
         "-e",
         `HERMES_MODEL=${AGENT_MODEL}`,
-        "assay-hermes-agent:demo",
+        "everdict-hermes-agent:demo",
         "timeout",
         String(t.timeout),
         "hermes",
@@ -257,14 +257,14 @@ const cp = spawn("node", ["apps/api/dist/main.js"], {
     PORT: CP_PORT,
     OPENAI_API_KEY: KEY,
     OPENAI_BASE_URL: LLM_BASE,
-    ASSAY_JUDGE_MODEL: JUDGE_MODEL,
-    ASSAY_REQUIRE_AUTH: "",
+    EVERDICT_JUDGE_MODEL: JUDGE_MODEL,
+    EVERDICT_REQUIRE_AUTH: "",
     KEYCLOAK_ISSUER: "",
     DATABASE_URL: "",
   },
   stdio: ["ignore", "ignore", "pipe"],
 });
-cp.stderr.on("data", (d) => /assay-api on/.test(String(d)) && process.stdout.write("  [cp] up\n"));
+cp.stderr.on("data", (d) => /everdict-api on/.test(String(d)) && process.stdout.write("  [cp] up\n"));
 const shutdown = () => {
   try {
     cp.kill("SIGKILL");

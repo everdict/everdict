@@ -10,9 +10,9 @@ own runtimes ("bring your own compute") and select one per scorecard run; the co
 > page; lease/pull transport) **supersedes** `local` for the "single machine" use case — the machine becomes the
 > *user's*, with the user's login and isolation. Cluster runtimes below stay workspace-shared as today.
 > Easiest path: the [desktop app](architecture/desktop-app.md) — one-click "이 기기를 러너로 연결" on the
-> account page (no token copy); headless boxes use `assay runner --pair <rnr_…>`.
+> account page (no token copy); headless boxes use `everdict runner --pair <rnr_…>`.
 
-## Contract (`@assay/core`)
+## Contract (`@everdict/core`)
 `RuntimeSpec` = `discriminatedUnion("kind", [...])` (`RuntimeSpecSchema`) with `id, version, description?, tags`:
 - **local** — in-process on the **control-plane host** (**dev only**; *not* the user's machine — see the
   self-hosted runner callout above).
@@ -38,7 +38,7 @@ which ARE injected into the job env). **k8s auth precedence: `kubeconfigSecret` 
 kubeconfigs are self-contained.
 
 ## Ownership & lifecycle
-`RuntimeRegistry` (`@assay/registry`, `InMemory`/`Pg`, migration `0009_create_runtimes.sql`) — workspace-owned +
+`RuntimeRegistry` (`@everdict/registry`, `InMemory`/`Pg`, migration `0009_create_runtimes.sql`) — workspace-owned +
 `_shared` fallback, immutable versions, mirroring the other registries. Runtimes are **not auto-seeded** —
 a workspace registers its own execution infra (`examples/runtimes/*.json` are reference specs only; the old
 default `_shared` `local`/`docker` seeds were removed — for "run on my own machine" register a self-hosted
@@ -52,7 +52,7 @@ registration doesn't expose cluster tokens.
 The `RuntimeDispatcher` wraps the global `Scheduler` (a `Dispatcher`):
 1. If a job's `placement.target` names a **tenant runtime** (not an existing global backend), resolve the
    `RuntimeSpec` via the registry.
-2. `buildRuntimeBackend(spec, { secretEnv })` (`@assay/backends`) constructs the live `Backend`
+2. `buildRuntimeBackend(spec, { secretEnv })` (`@everdict/backends`) constructs the live `Backend`
    (`LocalBackend`/`NomadBackend`/`K8sBackend`); `secretEnv` = the tenant's SecretStore entries.
 3. Register it in the Scheduler's `BackendRegistry` under `rt:<tenant>:<id>@<version>` (built once, reused),
    rewrite `placement.target` to that name, and dispatch via the Scheduler — so **fairness, budget, capacity,

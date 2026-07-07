@@ -12,8 +12,8 @@ export const JudgeRunConfigSchema = z.object({
 export type JudgeRunConfig = z.infer<typeof JudgeRunConfigSchema>;
 
 // judge 모델 설정 ↔ env 의 계약(에이전트 judgeFromEnv 가 읽고, 컨트롤플레인/백엔드가 alloc 에 주입하는 키 이름).
-export const JUDGE_MODEL_ENV = "ASSAY_JUDGE_MODEL";
-export const JUDGE_PROVIDER_ENV = "ASSAY_JUDGE_PROVIDER";
+export const JUDGE_MODEL_ENV = "EVERDICT_JUDGE_MODEL";
+export const JUDGE_PROVIDER_ENV = "EVERDICT_JUDGE_PROVIDER";
 
 // JudgeRunConfig → env 맵. 미설정이면 빈 맵(judge 비활성). 키 자체는 secretEnv 가 별도로 주입.
 export function judgeEnv(j?: JudgeRunConfig): Record<string, string> {
@@ -36,10 +36,10 @@ export const AgentJobSchema = z.object({
   // 컨트롤플레인이 채우고(없으면 미설정) 에이전트는 무시한다(tenant 와 동일 — 비공개 repo clone owner 와도 일치).
   submittedBy: z.string().optional(),
   // 사용량 계측 여부 — 컨트롤플레인이 워크스페이스/요청 정책으로 결정해 잡에 실어 보낸다(글로벌 플래그 대체).
-  // 에이전트는 이 값을 우선한다(미지정이면 dev 폴백으로 ASSAY_METER_USAGE env). command 하니스에서만 의미.
+  // 에이전트는 이 값을 우선한다(미지정이면 dev 폴백으로 EVERDICT_METER_USAGE env). command 하니스에서만 의미.
   meterUsage: z.boolean().optional(),
   // per-run judge 모델 설정 — evalCase 에 inline judge grader 가 있을 때 어떤 모델로 판정할지(시크릿 아님).
-  // 백엔드가 alloc env(ASSAY_JUDGE_MODEL/PROVIDER)로 주입, 프로바이더 키는 secretEnv. 미설정이면 judge 는 skip.
+  // 백엔드가 alloc env(EVERDICT_JUDGE_MODEL/PROVIDER)로 주입, 프로바이더 키는 secretEnv. 미설정이면 judge 는 skip.
   judge: JudgeRunConfigSchema.optional(),
   // 비공개 repo clone 용 transient 자격증명 — 컨트롤플레인이 evalCase.env.source.connectionId 를 외부 계정 연결
   // (Connected accounts)의 토큰으로 resolve 해 실어 보낸다. RepoEnvironment 가 인증 clone(http.extraheader)에만 쓰고,

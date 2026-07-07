@@ -1,6 +1,6 @@
 // 라이브 e2e: 셀프호스티드 러너. 멤버가 자기 머신(이 프로세스)에서 워크스페이스의 잡을 받아(pull) 돌리고
 // 결과를 회신한다(push→pull). 워크스페이스의 공유 하니스/데이터셋을 "런타임만 바꿔"(self:<runnerId>) 내 호스트에서.
-// 검증: 페어링 → assay runner 기동 → runtime=self:<id> 로 run 제출 → succeeded + result.provenance.ranOn=self-hosted.
+// 검증: 페어링 → everdict runner 기동 → runtime=self:<id> 로 run 제출 → succeeded + result.provenance.ranOn=self-hosted.
 // 설계: docs/architecture/self-hosted-runner.md.
 //
 // 준비:
@@ -11,9 +11,9 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
-const B = (process.env.ASSAY_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
+const B = (process.env.EVERDICT_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
 // dev 폴백(미인증) → subject=dev, workspace=default. 러너도 같은 dev 소유로 페어링되어 self: 라우팅이 맞물린다.
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const api = async (path, init = {}) => {
@@ -29,7 +29,7 @@ const { runner, token } = await api("/runners", {
 });
 console.log(`▶ paired runner ${runner.id} (${runner.label})`);
 
-// 2) 이 머신을 러너로 기동(assay runner). 페어링 토큰으로 /mcp 에 인증.
+// 2) 이 머신을 러너로 기동(everdict runner). 페어링 토큰으로 /mcp 에 인증.
 const runnerProc = spawn(
   process.execPath,
   ["apps/cli/dist/main.js", "runner", "--pair", token, "--api-url", B, "--poll-interval-ms", "1000"],
@@ -43,10 +43,10 @@ process.on("exit", cleanup);
 try {
   await sleep(2500); // 러너 MCP 연결 대기
 
-  // 한 워크스페이스(x-assay-tenant 헤더)에서 runtime=self:<id> 로 run 을 돌리고 결과를 검증한다.
+  // 한 워크스페이스(x-everdict-tenant 헤더)에서 runtime=self:<id> 로 run 을 돌리고 결과를 검증한다.
   // scripted 하니스 — 로컬, 외부 의존 없음(이 머신에서 실행). dev 폴백 subject="dev" 라 워크스페이스가 달라도 owner 동일.
   const runOnSelf = async (workspace) => {
-    const wsHeaders = { "x-assay-tenant": workspace };
+    const wsHeaders = { "x-everdict-tenant": workspace };
     const submitted = await api("/runs", {
       method: "POST",
       headers: wsHeaders,

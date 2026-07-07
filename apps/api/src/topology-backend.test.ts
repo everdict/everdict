@@ -1,5 +1,5 @@
-import { type AgentJob, AppError, type RuntimeSpec, RuntimeSpecSchema } from "@assay/core";
-import type { HarnessInstanceRegistry } from "@assay/registry";
+import { type AgentJob, AppError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/core";
+import type { HarnessInstanceRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { buildTopologyBackend } from "./topology-backend.js";
 
@@ -18,7 +18,7 @@ const k8sSpec: Extract<RuntimeSpec, { kind: "nomad" | "k8s" }> = {
   id: "topo-k8s",
   version: "1.0.0",
   image: "ghcr.io/acme/agent:v1",
-  context: "kind-assay",
+  context: "kind-everdict",
   traceSource: { kind: "mlflow", endpoint: "http://mlflow:5000" },
   tags: [],
 };

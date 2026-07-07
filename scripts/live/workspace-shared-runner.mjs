@@ -3,7 +3,7 @@
 // 개인 러너(self:<id>, own-pays)와 달리 비용은 워크스페이스에 귀속(provenance.by="ws:<workspace>").
 // 검증:
 //   1) POST /workspace/runners 로 팀 러너 페어링(owner=ws:<workspace>)
-//   2) assay runner 기동(그 rnr_ 토큰 → principal.subject="ws:<workspace>")
+//   2) everdict runner 기동(그 rnr_ 토큰 → principal.subject="ws:<workspace>")
 //   3) runtime=self:ws:<id> 로 run 제출 → succeeded + provenance.ranOn=self-hosted + by="ws:<workspace>"(=워크스페이스-결제)
 //   4) 크로스 워크스페이스 격리: 다른 워크스페이스가 self:ws:<id> 를 타깃하면 NOT_FOUND(dispatch 가 owner 를 잡 tenant 에서 파생)
 // 설계: docs/architecture/self-hosted-runtime-and-runners.md (슬라이스 3).
@@ -16,14 +16,14 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
-const B = (process.env.ASSAY_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
+const B = (process.env.EVERDICT_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
 const WS = "default"; // dev 폴백 → subject=dev, workspace=default, roles=[admin]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const api = async (path, init = {}) => {
   const r = await fetch(`${B}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", "x-assay-tenant": WS, ...(init.headers ?? {}) },
+    headers: { "content-type": "application/json", "x-everdict-tenant": WS, ...(init.headers ?? {}) },
   });
   if (!r.ok) throw new Error(`${path} → ${r.status}: ${(await r.text()).slice(0, 300)}`);
   return r.status === 204 ? null : r.json();
@@ -85,7 +85,7 @@ try {
   //    공유 러너로 해석되어(owner=ws:team-b) 존재하지 않으므로 NOT_FOUND — 팀 러너는 소유 워크스페이스 전용.
   const crossSubmit = await api("/runs", {
     method: "POST",
-    headers: { "x-assay-tenant": "team-b" },
+    headers: { "x-everdict-tenant": "team-b" },
     body: JSON.stringify({
       harness: { id: "scripted", version: "0" },
       case: {
@@ -102,7 +102,7 @@ try {
   let cross;
   for (let i = 0; i < 20; i++) {
     await sleep(500);
-    cross = await api(`/runs/${crossSubmit.id}`, { headers: { "x-assay-tenant": "team-b" } });
+    cross = await api(`/runs/${crossSubmit.id}`, { headers: { "x-everdict-tenant": "team-b" } });
     if (cross.status === "succeeded" || cross.status === "failed") break;
   }
   if (cross.status !== "failed")

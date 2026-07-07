@@ -2,21 +2,21 @@
 # 로컬/외부 풀스택 개발 환경: Postgres(영속) + Keycloak(영속) + 컨트롤플레인 API. 그다음 웹은 핫리로드로 직접 실행.
 #   bash scripts/dev/up.sh   →   pnpm -C apps/web dev   →   http://<host>:3001
 #
-# 외부 접속: scripts/dev/.env (git-ignored)에 ASSAY_PUBLIC_HOST=<Tailscale/LAN IP 또는 도메인> 설정.
+# 외부 접속: scripts/dev/.env (git-ignored)에 EVERDICT_PUBLIC_HOST=<Tailscale/LAN IP 또는 도메인> 설정.
 # 그러면 Keycloak issuer·리다이렉트·웹 URL 이 그 호스트로 통일된다(localhost 면 외부에서 깨짐).
 # 단, apps/web/.env.local 과 apps/api/.env 의 KEYCLOAK_ISSUER/AUTH_URL 도 같은 호스트여야 한다.
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
-# 선택적 dev 설정(ASSAY_PUBLIC_HOST, KEYCLOAK_PORT)을 로드.
+# 선택적 dev 설정(EVERDICT_PUBLIC_HOST, KEYCLOAK_PORT)을 로드.
 [ -f scripts/dev/.env ] && set -a && . scripts/dev/.env && set +a
 
-PUBLIC_HOST="${ASSAY_PUBLIC_HOST:-localhost}"   # 외부 접속이면 Tailscale/LAN IP 또는 도메인
+PUBLIC_HOST="${EVERDICT_PUBLIC_HOST:-localhost}"   # 외부 접속이면 Tailscale/LAN IP 또는 도메인
 KC_PORT="${KEYCLOAK_PORT:-8081}"                # 8080 은 흔히 점유됨 → 기본 8081
 export KC_HOSTNAME="http://${PUBLIC_HOST}:${KC_PORT}"   # Keycloak 정규 호스트(브라우저·토큰 issuer)
 export KEYCLOAK_PORT="$KC_PORT"
-KC_ISSUER="${KC_HOSTNAME}/realms/assay"
+KC_ISSUER="${KC_HOSTNAME}/realms/everdict"
 
 echo "▶ Postgres (persistent) — 영속 스토어. healthcheck 통과까지 대기"
 export POSTGRES_PORT="${POSTGRES_PORT:-5433}"   # 5432 는 흔히 점유됨 → 기본 5433
@@ -31,23 +31,23 @@ for _ in $(seq 1 60); do
 done
 
 echo "▶ build control-plane API"
-pnpm --filter "@assay/api..." build >/dev/null
+pnpm --filter "@everdict/api..." build >/dev/null
 
 echo "▶ control-plane API on :8787"
 [ -f apps/api/.env ] || { echo "  ✗ apps/api/.env 가 없습니다"; exit 1; }
 grep -qE '^DATABASE_URL=.+' apps/api/.env \
   || echo "  ⚠ apps/api/.env 에 DATABASE_URL 이 없습니다 → API 가 in-memory 로 떠 데이터가 휘발됩니다." \
-          "(예: DATABASE_URL=postgresql://assay:assay@localhost:${POSTGRES_PORT}/assay)"
+          "(예: DATABASE_URL=postgresql://everdict:everdict@localhost:${POSTGRES_PORT}/everdict)"
 fuser -k 8787/tcp >/dev/null 2>&1 || true; sleep 1
-nohup node --env-file=apps/api/.env apps/api/dist/main.js >/tmp/assay-api.log 2>&1 & disown
+nohup node --env-file=apps/api/.env apps/api/dist/main.js >/tmp/everdict-api.log 2>&1 & disown
 for _ in $(seq 1 30); do curl -sf -m2 http://127.0.0.1:8787/healthz >/dev/null 2>&1 && break; sleep 0.5; done
 
 cat <<EOF
 
 ✔ 준비 완료 (public host: ${PUBLIC_HOST})
-  Postgres       : localhost:${POSTGRES_PORT}                (assay/assay/assay · 영속)
+  Postgres       : localhost:${POSTGRES_PORT}                (everdict/everdict/everdict · 영속)
   Keycloak admin : ${KC_HOSTNAME}            (admin / admin)
-  Control plane  : http://127.0.0.1:8787     (log: /tmp/assay-api.log)
+  Control plane  : http://127.0.0.1:8787     (log: /tmp/everdict-api.log)
 
   웹 실행(핫리로드):  pnpm -C apps/web dev   →  http://${PUBLIC_HOST}:3001
 

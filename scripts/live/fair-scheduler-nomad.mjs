@@ -5,12 +5,12 @@
 //  - WFQ 라면 B 는 A 한 건 뒤(2번째)에 끼어든다 → 한 테넌트의 대량 제출이 다른 테넌트를 굶기지 않음.
 // 디스패치 순서를 래퍼 백엔드로 기록해 증명한다.
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 ASSAY_AGENT_IMAGE=assay-agent:local node scripts/live/fair-scheduler-nomad.mjs
+// 사용: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/fair-scheduler-nomad.mjs
 
 import { BackendRegistry, NomadBackend, Scheduler } from "../../packages/backends/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.ASSAY_AGENT_IMAGE ?? "assay-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
 const STAMP = Date.now().toString(36);
 
 // 디스패치된 케이스 id 순서를 기록하는 래퍼.

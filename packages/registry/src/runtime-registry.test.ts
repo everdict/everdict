@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConflictError, NotFoundError, type RuntimeSpec, RuntimeSpecSchema } from "@assay/core";
-import type { SqlClient } from "@assay/db";
+import { ConflictError, NotFoundError, type RuntimeSpec, RuntimeSpecSchema } from "@everdict/core";
+import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { loadRuntimeDir } from "./load-runtimes.js";
 import { PgRuntimeRegistry } from "./pg-runtime-registry.js";
@@ -83,7 +83,7 @@ describe("InMemoryRuntimeRegistry (tenant-owned)", () => {
 
 describe("loadRuntimeDir", () => {
   it("기본 SHARED 로 로드(파일 SSOT)", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "assay-rt-"));
+    const dir = mkdtempSync(join(tmpdir(), "everdict-rt-"));
     try {
       writeFileSync(join(dir, "local-1.0.0.json"), JSON.stringify(rt("shared-local", "1.0.0")));
       const r = await loadRuntimeDir(dir);
@@ -100,7 +100,7 @@ function fakePg(): SqlClient {
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
-      if (t.startsWith("SELECT version, tags FROM assay_runtimes WHERE tenant = $1 AND id = $2")) {
+      if (t.startsWith("SELECT version, tags FROM everdict_runtimes WHERE tenant = $1 AND id = $2")) {
         return {
           rows: rows
             .filter((x) => x.tenant === p[0] && x.id === p[1])
@@ -109,7 +109,7 @@ function fakePg(): SqlClient {
       }
       if (
         t.startsWith(
-          "UPDATE assay_runtimes SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+          "UPDATE everdict_runtimes SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
         )
       ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
@@ -117,28 +117,28 @@ function fakePg(): SqlClient {
         r.tags = JSON.parse(p[3] as string);
         return { rows: [{ version: r.version }] as R[] };
       }
-      if (t.startsWith("SELECT runtime FROM assay_runtimes WHERE tenant = $1 AND id = $2 AND version = $3")) {
+      if (t.startsWith("SELECT runtime FROM everdict_runtimes WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{ runtime: r.runtime }] : []) as R[] };
       }
-      if (t.startsWith("SELECT 1 FROM assay_runtimes WHERE tenant = $1 AND id = $2 AND version = $3")) {
+      if (t.startsWith("SELECT 1 FROM everdict_runtimes WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{}] : []) as R[] };
       }
-      if (t.startsWith("SELECT 1 FROM assay_runtimes WHERE tenant = $1 AND id = $2 LIMIT 1")) {
+      if (t.startsWith("SELECT 1 FROM everdict_runtimes WHERE tenant = $1 AND id = $2 LIMIT 1")) {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1]);
         return { rows: (r ? [{}] : []) as R[] };
       }
-      if (t.startsWith("SELECT version FROM assay_runtimes WHERE tenant = $1 AND id = $2")) {
+      if (t.startsWith("SELECT version FROM everdict_runtimes WHERE tenant = $1 AND id = $2")) {
         return {
           rows: rows.filter((x) => x.tenant === p[0] && x.id === p[1]).map((x) => ({ version: x.version })) as R[],
         };
       }
-      if (t.startsWith("SELECT DISTINCT id FROM assay_runtimes WHERE tenant = $1 OR tenant = $2")) {
+      if (t.startsWith("SELECT DISTINCT id FROM everdict_runtimes WHERE tenant = $1 OR tenant = $2")) {
         const ids = [...new Set(rows.filter((x) => x.tenant === p[0] || x.tenant === p[1]).map((x) => x.id))].sort();
         return { rows: ids.map((id) => ({ id })) as R[] };
       }
-      if (t.startsWith("INSERT INTO assay_runtimes")) {
+      if (t.startsWith("INSERT INTO everdict_runtimes")) {
         rows.push({
           tenant: p[0] as string,
           id: p[1] as string,

@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@assay/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
 
 // 최종 DOM 에 특정 텍스트가 있는지 (browser 스냅샷 대상).
 export class DomContainsGrader implements Grader {

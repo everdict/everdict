@@ -1,4 +1,4 @@
-import { AppError } from "@assay/core";
+import { AppError } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildTraceSource } from "./build-source.js";
 

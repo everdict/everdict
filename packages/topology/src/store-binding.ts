@@ -1,5 +1,5 @@
 import { createHmac } from "node:crypto";
-import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
 import { STORE_DEFS, dependencyConnEnv, dependencyStores } from "./dependencies.js";
 
 // 공유 스토어의 테넌트 격리 모델.
@@ -18,19 +18,19 @@ export function resolveStoreIsolation(zone?: TrustZone): StoreIsolation {
 }
 
 export interface StoreBindingOptions {
-  poolNamespace?: string; // 공유 스토어가 사는 네임스페이스 (기본 "assay-shared")
+  poolNamespace?: string; // 공유 스토어가 사는 네임스페이스 (기본 "everdict-shared")
   storeSecret?: string; // 테넌트별 비밀번호 mint 시드(프로덕션: KEK/Vault). 동일 시드→idempotent.
   // 스토어 접속 엔드포인트("host:port") 해석 — orchestrator 별로 다름:
   //   K8s = 안정적 Service DNS(빌드타임 확정, 기본값), Nomad = 런타임에 발견한 alloc host:port(주입).
   storeEndpoint?: (store: string) => string;
 }
 
-const DEFAULT_POOL_NS = "assay-shared";
-const DEFAULT_SECRET = "assay-dev-store-secret";
+const DEFAULT_POOL_NS = "everdict-shared";
+const DEFAULT_SECRET = "everdict-dev-store-secret";
 
 // 공유 스토어 배포명(= Service DNS). pool 은 (harness/zone 무관) 클러스터에 1대만.
 export function sharedStoreName(store: string): string {
-  return `assay-shared-${store}`;
+  return `everdict-shared-${store}`;
 }
 function sharedStoreHost(store: string, poolNs: string): string {
   return `${sharedStoreName(store)}.${poolNs}.svc.cluster.local`;
@@ -165,7 +165,7 @@ export function planTenantStores(
         // mc(루트)로 버킷+유저+버킷-한정 정책 생성/연결. 이미 있으면 무시(idempotent). 어드민 alias=local(localhost).
         minioSetup: [
           "set -e",
-          "mc alias set local http://localhost:9000 assay assaysecret",
+          "mc alias set local http://localhost:9000 everdict everdictsecret",
           `mc mb -p local/${bucket} || true`,
           `mc admin user add local ${accessKey} '${pw}' || true`,
           `printf '%s' '${policy}' > /tmp/${accessKey}.json`,

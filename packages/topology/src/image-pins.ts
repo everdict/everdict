@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { BadRequestError, type ServiceHarnessSpec } from "@assay/core";
+import { BadRequestError, type ServiceHarnessSpec } from "@everdict/core";
 
 // 핀 맵을 결정적 문자열로(키 정렬) — 같은 핀이면 같은 해시, 다른 핀이면 다른 해시.
 function stableStringify(pins: Record<string, string>): string {

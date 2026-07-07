@@ -1,5 +1,5 @@
 // 라이브 e2e: 멀티테넌트 SaaS 데이터셋 평가 — import → tenant-owned registry → load → runSuite → Scorecard store.
-// 유저 흐름 그대로: 외부 벤치마크(WebVoyager jsonl)를 @assay/datasets 로 import → DatasetRegistry.register(tenant)
+// 유저 흐름 그대로: 외부 벤치마크(WebVoyager jsonl)를 @everdict/datasets 로 import → DatasetRegistry.register(tenant)
 // (유저-소유) → registry.get(tenant) 로 로드 → 실 browser-use 하니스로 per-case 평가 → Scorecard → ScorecardStore.
 //
 // 벤치마크: WebVoyager(github.com/MinorJerry/WebVoyager). 전체는 15개 상용사이트+VLM 채점 → 여기선 접근가능 서브셋
@@ -22,7 +22,7 @@ const DS_ID = "webvoyager-mini";
 const DS_VER = "1.0.0";
 const HV = "0.13.1";
 
-// 1) import(외부 포맷 → Assay Dataset) → tenant-owned 레지스트리 등록(유저가 자기 워크스페이스에 추가).
+// 1) import(외부 포맷 → Everdict Dataset) → tenant-owned 레지스트리 등록(유저가 자기 워크스페이스에 추가).
 const dataset = importWebVoyager(readFileSync(DATASET, "utf8"), {
   id: DS_ID,
   version: DS_VER,

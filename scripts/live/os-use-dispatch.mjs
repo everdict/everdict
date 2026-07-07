@@ -9,14 +9,14 @@
 //   runAgentJob 가: env.kind=os-use → OsUseEnvironment, command 하니스 → 에이전트 실행, snapshot → 스크린샷,
 //   makeGradersFromEnv → VLM JudgeGrader. CaseResult.scores 에 judge 판정.
 //
-// 이미지 빌드(사전): scripts/live/Dockerfile.hermes-ssh-agent 헤더 참고 → assay-hermes-dispatch:demo
+// 이미지 빌드(사전): scripts/live/Dockerfile.hermes-ssh-agent 헤더 참고 → everdict-hermes-dispatch:demo
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env (런타임에만, 커밋 안 함).
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
 
-const IMAGE = process.env.HERMES_IMAGE ?? "assay-hermes-dispatch:demo";
+const IMAGE = process.env.HERMES_IMAGE ?? "everdict-hermes-dispatch:demo";
 
 // VLM judge 키: 컨트롤플레인이 secretEnv 로 주입하는 자리(여기선 .env/env 에서). 모델/프로바이더는 job.judge 로 온다.
 function masterKey() {
@@ -83,7 +83,7 @@ const job = {
     timeoutSec: 300,
     tags: ["os-use", "ssh"],
   },
-  judge: { provider: "openai", model: process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini" },
+  judge: { provider: "openai", model: process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini" },
 };
 
 console.log("=== runAgentJob(AgentJob) — os-use 풀 루프 단일 디스패치 ===");

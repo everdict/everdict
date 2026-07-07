@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { buildSharedStoreIntention, buildTenantIntentions, meshServiceName } from "./consul-intentions.js";
 
@@ -51,7 +51,7 @@ describe("buildTenantIntentions", () => {
 describe("buildSharedStoreIntention / meshServiceName", () => {
   it("공유 스토어는 메시 서비스(*) allow(테넌트 격리는 DB creds)", () => {
     const i = buildSharedStoreIntention("postgres");
-    expect(i.Name).toBe("assay-shared-postgres");
+    expect(i.Name).toBe("everdict-shared-postgres");
     expect(i.Sources).toEqual([{ Name: "*", Action: "allow" }]);
   });
   it("meshServiceName 은 zone 을 sanitize 한다", () => {

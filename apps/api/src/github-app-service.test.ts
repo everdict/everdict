@@ -1,6 +1,6 @@
 import { generateKeyPairSync } from "node:crypto";
-import { BadRequestError, NotFoundError } from "@assay/core";
-import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@assay/db";
+import { BadRequestError, NotFoundError } from "@everdict/core";
+import { InMemoryOAuthStateStore, InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GithubAppService } from "./github-app-service.js";
 
@@ -77,7 +77,7 @@ describe("GithubAppService", () => {
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",
-        githubCom: { appId: "111", privateKeyPem: privateKey, slug: "assay-eval" },
+        githubCom: { appId: "111", privateKeyPem: privateKey, slug: "everdict-eval" },
       },
       now: () => NOW,
     });
@@ -86,7 +86,7 @@ describe("GithubAppService", () => {
   it("github.com 설치 시작은 /apps/{slug}/installations/new URL + state 를 만든다", async () => {
     const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u-admin" });
     const u = new URL(installUrl);
-    expect(u.origin + u.pathname).toBe("https://github.com/apps/assay-eval/installations/new");
+    expect(u.origin + u.pathname).toBe("https://github.com/apps/everdict-eval/installations/new");
     expect(u.searchParams.get("state")).toBeTruthy();
   });
 
@@ -99,13 +99,13 @@ describe("GithubAppService", () => {
   it("GHE App 등록 후 설치 시작은 {host}/github-apps/{slug}/installations/new URL", async () => {
     await svc.registerGheApp("acme", {
       host: "https://ghe.acme.io",
-      slug: "assay-ghe",
+      slug: "everdict-ghe",
       appId: "222",
       privateKeySecretName: "ghe-app-key",
     });
     const { installUrl } = await svc.startInstall({ workspace: "acme", createdBy: "u", host: "https://ghe.acme.io" });
     expect(new URL(installUrl).origin + new URL(installUrl).pathname).toBe(
-      "https://ghe.acme.io/github-apps/assay-ghe/installations/new",
+      "https://ghe.acme.io/github-apps/everdict-ghe/installations/new",
     );
   });
 
@@ -162,7 +162,7 @@ describe("GithubAppService", () => {
     secrets.acme = { "ghe-app-key": privateKey };
     await svc.registerGheApp("acme", {
       host: "https://ghe.acme.io",
-      slug: "assay-ghe",
+      slug: "everdict-ghe",
       appId: "222",
       privateKeySecretName: "ghe-app-key",
     });
@@ -281,7 +281,7 @@ describe("GithubAppService", () => {
       secrets.acme = { "ghe-app-key": privateKey };
       await svc.registerGheApp("acme", {
         host: "https://ghe.acme.io",
-        slug: "assay-ghe",
+        slug: "everdict-ghe",
         appId: "222",
         privateKeySecretName: "ghe-app-key",
       });

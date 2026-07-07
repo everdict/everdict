@@ -1,4 +1,4 @@
-import { type AgentJob, AgentJobSchema, type CaseResult } from "@assay/core";
+import { type AgentJob, AgentJobSchema, type CaseResult } from "@everdict/core";
 
 // 러너 lease 워커 풀의 의존성 — 전송/세션은 호출자(main.ts)가 ResilientMcpSession 으로 흡수하고,
 // 여기서는 callJson(이미 JSON 파싱·재시도됨)과 잡 실행만 주입받아 순수한 lease 루프 로직만 담는다(테스트 용이).

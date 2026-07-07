@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { buildRuntimeBackend } from "../../packages/backends/dist/index.js";
 
-const IMAGE = "assay-dockerbe:demo";
+const IMAGE = "everdict-dockerbe:demo";
 
 // env 이미지(git+sh; RepoEnvironment 인라인 시드가 git init 필요). 에이전트 미포함 — 케이스가 이 이미지에서 돈다.
 const dockerfile =

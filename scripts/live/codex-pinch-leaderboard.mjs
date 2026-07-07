@@ -3,7 +3,7 @@
 //   ① POST /bundles/apply : codex(하니스) + pinch(벤치마크) 번들을 한 번에 등록 — 일반화된 self-serve 등록.
 //   ② POST /scorecards      : pinch 를 하니스로 실행(judge 채점). codex 는 그 CLI+런타임이 필요하므로,
 //      기본은 builtin 'scripted' 로 실행해 apply→run→leaderboard 루프 전체를 무-외부의존으로 실증한다.
-//      실제 codex 실행은 ASSAY_HARNESS=codex + docker 런타임(코덱스 적용 이미지)로 스왑(아래 주석).
+//      실제 codex 실행은 EVERDICT_HARNESS=codex + docker 런타임(코덱스 적용 이미지)로 스왑(아래 주석).
 //   ③ GET /scorecards/leaderboard : 한 벤치마크의 (harness × model) 랭킹 행을 출력.
 // judge 채점에는 모델이 필요 → LiteLLM(:4000) 키를 CP judge env 로 주입(pinch-hermes-e2e 와 동일).
 //
@@ -14,9 +14,9 @@ import process from "node:process";
 
 const PORT = process.env.CP_PORT ?? "8789";
 const BASE = `http://127.0.0.1:${PORT}`;
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
-const HARNESS = process.env.ASSAY_HARNESS ?? "scripted"; // 실제 codex 실행은 ASSAY_HARNESS=codex + ASSAY_RUNTIME=<codex 이미지 docker 런타임>
-const RUNTIME = process.env.ASSAY_RUNTIME; // 미설정이면 기본 백엔드(scripted 는 호스트 in-process)
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
+const HARNESS = process.env.EVERDICT_HARNESS ?? "scripted"; // 실제 codex 실행은 EVERDICT_HARNESS=codex + EVERDICT_RUNTIME=<codex 이미지 docker 런타임>
+const RUNTIME = process.env.EVERDICT_RUNTIME; // 미설정이면 기본 백엔드(scripted 는 호스트 in-process)
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function litellmKey() {
@@ -44,7 +44,7 @@ const cp = spawn("node", ["apps/api/dist/main.js"], {
   env: {
     ...process.env,
     PORT,
-    ASSAY_REQUIRE_AUTH: "",
+    EVERDICT_REQUIRE_AUTH: "",
     KEYCLOAK_ISSUER: "",
     DATABASE_URL: "",
     ...(KEY ? { OPENAI_API_KEY: KEY, OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1" } : {}),
@@ -72,13 +72,13 @@ try {
   const installOk =
     inst.status === 200 && (inst.json.results ?? []).every((r) => r.status === "ok" || r.status === "conflict");
 
-  // ② pinch 실행(judge 채점). 기본 scripted(무-외부의존), 실 codex 는 ASSAY_HARNESS=codex + ASSAY_RUNTIME 로 스왑.
+  // ② pinch 실행(judge 채점). 기본 scripted(무-외부의존), 실 codex 는 EVERDICT_HARNESS=codex + EVERDICT_RUNTIME 로 스왑.
   console.log(`\n=== ② POST /scorecards (pinch-building-dashboards × ${HARNESS}) ===`);
   const run = await post("/scorecards", {
     dataset: { id: "pinch-building-dashboards", version: "1.0.0" },
     harness: { id: HARNESS },
     ...(RUNTIME ? { runtime: RUNTIME } : {}),
-    ...(KEY ? { judge: { provider: "openai", model: process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini" } } : {}),
+    ...(KEY ? { judge: { provider: "openai", model: process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini" } } : {}),
   });
   console.log(`  → ${run.status} id=${run.json.id ?? "-"}`);
   let rec = run.json;
@@ -105,7 +105,7 @@ try {
   ok = installOk && (lb.rows ?? []).length > 0;
   console.log(
     ok
-      ? "\n✅ apply(번들 원샷) → run(pinch) → leaderboard(harness×model) 루프 실증. codex 는 ASSAY_HARNESS=codex + ASSAY_RUNTIME=<codex docker 런타임> 로 스왑."
+      ? "\n✅ apply(번들 원샷) → run(pinch) → leaderboard(harness×model) 루프 실증. codex 는 EVERDICT_HARNESS=codex + EVERDICT_RUNTIME=<codex docker 런타임> 로 스왑."
       : "\n⚠️ 일부 단계 불일치(위 로그 참고). judge 실채점엔 LiteLLM(:4000) 필요; codex 실행엔 codex 적용 런타임 필요.",
   );
 } catch (e) {

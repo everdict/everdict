@@ -114,7 +114,7 @@ export class PgNotificationStore implements NotificationStore {
 
   async add(record: NotificationRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_notifications (id, workspace, recipient, kind, title, body, link, created_at, read_at)
+      `INSERT INTO everdict_notifications (id, workspace, recipient, kind, title, body, link, created_at, read_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
         record.id,
@@ -134,7 +134,7 @@ export class PgNotificationStore implements NotificationStore {
     const unread = opts?.unreadOnly === true ? " AND read_at IS NULL" : "";
     const res = await this.client.query<NotificationRow>(
       `SELECT id, workspace, recipient, kind, title, body, link, created_at, read_at
-       FROM assay_notifications WHERE recipient = $1 AND workspace = $2${unread}
+       FROM everdict_notifications WHERE recipient = $1 AND workspace = $2${unread}
        ORDER BY created_at DESC, id DESC LIMIT $3`,
       [recipient, workspace, opts?.limit ?? DEFAULT_LIMIT],
     );
@@ -148,7 +148,7 @@ export class PgNotificationStore implements NotificationStore {
     if (ids !== "all") params.push(ids);
     // SqlClient 는 rows 만 노출 — RETURNING 으로 처리 건수를 센다.
     const res = await this.client.query<{ id: string }>(
-      `UPDATE assay_notifications SET read_at = $3
+      `UPDATE everdict_notifications SET read_at = $3
        WHERE recipient = $1 AND workspace = $2 AND read_at IS NULL${idFilter}
        RETURNING id`,
       params,

@@ -2,7 +2,7 @@
 // self:ws 로 여러 잡을 제출하면 두 러너가 풀을 나눠 드레인한다(N 러너 = N 동시성). 러너를 더 붙이면 처리량이 는다.
 // 검증:
 //   1) POST /workspace/runners 2회 → 러너 r1, r2 페어링(owner=ws:default)
-//   2) assay runner 2개 기동(각자 토큰)
+//   2) everdict runner 2개 기동(각자 토큰)
 //   3) runtime=self:ws 로 잡 여러 개 제출 → 전부 succeeded, provenance.runner 에 r1·r2 둘 다 등장(분배 증명)
 // 설계: docs/architecture/self-hosted-runtime-and-runners.md (슬라이스 2/5, 멀티러너 풀).
 //
@@ -14,14 +14,14 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
-const B = (process.env.ASSAY_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
+const B = (process.env.EVERDICT_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
 const WS = "default"; // dev 폴백 → subject=dev, workspace=default, roles=[admin]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const api = async (path, init = {}) => {
   const r = await fetch(`${B}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", "x-assay-tenant": WS, ...(init.headers ?? {}) },
+    headers: { "content-type": "application/json", "x-everdict-tenant": WS, ...(init.headers ?? {}) },
   });
   if (!r.ok) throw new Error(`${path} → ${r.status}: ${(await r.text()).slice(0, 300)}`);
   return r.status === 204 ? null : r.json();

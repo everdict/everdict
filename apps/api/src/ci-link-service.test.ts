@@ -1,5 +1,5 @@
-import { BadRequestError, NotFoundError, UpstreamError } from "@assay/core";
-import { InMemoryWorkspaceSettingsStore } from "@assay/db";
+import { BadRequestError, NotFoundError, UpstreamError } from "@everdict/core";
+import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   CiLinkService,
@@ -130,7 +130,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(), // token=app_tok
       runners: fakeRunners(), // self:ws 풀 러너 1대(r1) — 기본 배치 검사 통과
-      apiPublicUrl: "https://assay.example.com",
+      apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch(handlers, calls),
     });
   }
@@ -144,9 +144,9 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
           if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
           if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
           if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
-          if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "GET")
+          if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "GET")
             return json({ message: "Not Found" }, 404);
-          if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "PUT") return json({}, 201);
+          if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "PUT") return json({}, 201);
           if (url.endsWith("/pulls") && m === "POST")
             return json({ html_url: "https://github.com/acme/app/pull/42" }, 201);
           return undefined;
@@ -161,7 +161,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
       slots: { "svc-x": { path: "services/x" } },
     });
     const result = await svc.openSetupPr("acme", "acme/app");
-    expect(result).toEqual({ prUrl: "https://github.com/acme/app/pull/42", branch: "assay/eval-setup" });
+    expect(result).toEqual({ prUrl: "https://github.com/acme/app/pull/42", branch: "everdict/eval-setup" });
 
     // 커밋된 워크플로 내용 검증 — zero-input 의 실체: 워크스페이스/하니스/데이터셋/슬롯 빌드가 전부 박혀 있다.
     const put = calls.find((c) => c.method === "PUT");
@@ -172,7 +172,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
     expect(yaml).toContain("id-token: write"); // OIDC keyless
     expect(yaml).toContain("context: services/x"); // 모노레포 path
     expect(yaml).toContain("build-svc-x"); // 슬롯 빌드 스텝 + digest 출력 참조
-    expect(yaml).toContain("api-url: https://assay.example.com");
+    expect(yaml).toContain("api-url: https://everdict.example.com");
     expect(yaml).toContain("concurrency:"); // superseding
   });
 
@@ -195,7 +195,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
         },
       }),
       runners: fakeRunners(),
-      apiPublicUrl: "https://assay.example.com",
+      apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch(
         [
           (url, init) => {
@@ -204,9 +204,9 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
             if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
             if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
             if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
-            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "GET")
+            if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "GET")
               return json({ message: "Not Found" }, 404);
-            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "PUT") return json({}, 201);
+            if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "PUT") return json({}, 201);
             if (url.endsWith("/pulls") && m === "POST")
               return json({ html_url: "https://ghe.acme.io/acme/app/pull/3" }, 201);
             return undefined;
@@ -236,7 +236,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
         },
       }),
       runners: fakeRunners(),
-      apiPublicUrl: "https://assay.example.com",
+      apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch([], []),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
@@ -250,7 +250,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(),
       runners: fakeRunners([]), // 워크스페이스 공유 러너 없음
-      apiPublicUrl: "https://assay.example.com",
+      apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch([], calls),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {} });
@@ -263,7 +263,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(),
       runners: fakeRunners(["r1"]),
-      apiPublicUrl: "https://assay.example.com",
+      apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch([], []),
     });
     await svc.upsert("acme", "admin", { repository: "acme/app", harness: "bu", slots: {}, runtime: "self:ws:gone" });
@@ -275,7 +275,7 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
       settings: new InMemoryWorkspaceSettingsStore(),
       githubApp: fakeGithubApp(),
       runners: fakeRunners([]), // 공유 러너 없음 — 그래도 관리형 런타임이면 무관
-      apiPublicUrl: "https://assay.example.com",
+      apiPublicUrl: "https://everdict.example.com",
       fetchImpl: fakeFetch(
         [
           (url, init) => {
@@ -283,9 +283,9 @@ describe("CiLinkService.openSetupPr — 워크플로 YAML 합성 + 브랜치/커
             if (url.endsWith("/repos/acme/app") && m === "GET") return json({ default_branch: "main" });
             if (url.endsWith("/git/ref/heads/main")) return json({ object: { sha: "base-sha" } });
             if (url.endsWith("/git/refs") && m === "POST") return json({}, 201);
-            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "GET")
+            if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "GET")
               return json({ message: "Not Found" }, 404);
-            if (url.includes("/contents/.github/workflows/assay-eval.yml") && m === "PUT") return json({}, 201);
+            if (url.includes("/contents/.github/workflows/everdict-eval.yml") && m === "PUT") return json({}, 201);
             if (url.endsWith("/pulls") && m === "POST")
               return json({ html_url: "https://github.com/acme/app/pull/7" }, 201);
             return undefined;
@@ -306,7 +306,7 @@ describe("renderCiWorkflow", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
       "acme",
-      "https://assay.example.com",
+      "https://everdict.example.com",
     );
     expect(yaml).toContain("TODO");
   });
@@ -315,7 +315,7 @@ describe("renderCiWorkflow", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
       "acme",
-      "https://assay.example.com",
+      "https://everdict.example.com",
     );
     expect(yaml).toContain("runs-on: [self-hosted]");
     expect(yaml).toContain("runtime: self:ws");
@@ -329,13 +329,13 @@ describe("renderCiWorkflow", () => {
         harness: "bu",
         slots: {},
         createdBy: "a",
-        runsOn: "[self-hosted, assay-r1]",
+        runsOn: "[self-hosted, everdict-r1]",
         runtime: "self:ws:r1",
       },
       "acme",
-      "https://assay.example.com",
+      "https://everdict.example.com",
     );
-    expect(yaml).toContain("runs-on: [self-hosted, assay-r1]");
+    expect(yaml).toContain("runs-on: [self-hosted, everdict-r1]");
     expect(yaml).toContain("runtime: self:ws:r1");
   });
 
@@ -343,7 +343,7 @@ describe("renderCiWorkflow", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: { web: {} }, createdBy: "a" },
       "acme",
-      "https://assay.example.com",
+      "https://everdict.example.com",
     );
     expect(yaml).toContain("registry: ghcr.io");
     // 이미지 태그는 체크아웃된 head 의 sha — 코멘트 발화(기본 브랜치 컨텍스트)에서 GITHUB_SHA 는 main 을 가리킨다.
@@ -360,7 +360,7 @@ describe("renderCiWorkflow", () => {
         createdBy: "a",
       },
       "acme",
-      "https://assay.example.com",
+      "https://everdict.example.com",
     );
     expect(yaml).toContain("registry: containers.ghe.acme.io");
     expect(yaml).toContain("tags: containers.ghe.acme.io/${{ github.repository }}/web:${{ steps.head.outputs.sha }}");
@@ -372,7 +372,7 @@ describe("renderCiWorkflow", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
       "acme",
-      "https://assay.example.com",
+      "https://everdict.example.com",
     );
     expect(yaml).toContain("\n  pull_request:");
     expect(yaml).toContain("\n  issue_comment:");
@@ -393,7 +393,7 @@ describe("renderCiWorkflow", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a", trigger: "auto" },
       "acme",
-      "https://assay.example.com",
+      "https://everdict.example.com",
     );
     expect(yaml).toContain("\n  pull_request:");
     expect(yaml).not.toContain("issue_comment");
@@ -405,7 +405,7 @@ describe("renderCiWorkflow", () => {
     const yaml = renderCiWorkflow(
       { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a", trigger: "comment" },
       "acme",
-      "https://assay.example.com",
+      "https://everdict.example.com",
     );
     expect(yaml).not.toContain("\n  pull_request:");
     expect(yaml).toContain("\n  issue_comment:");

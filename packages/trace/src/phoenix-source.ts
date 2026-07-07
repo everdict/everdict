@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@assay/core";
+import { type TraceEvent, UpstreamError } from "@everdict/core";
 import type { TraceSource } from "./trace-source.js";
 
 // Arize Phoenix 스팬 — GET /v1/projects/{p}/spans?trace_id=<hex> 응답(Span 스키마, 읽기 쪽).

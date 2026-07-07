@@ -1,4 +1,4 @@
-import type { GradeContext, TraceEvent } from "@assay/core";
+import type { GradeContext, TraceEvent } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { judgeFromEnv, makeGradersFromEnv } from "./judge-env.js";
 
@@ -9,17 +9,17 @@ const ctx = (text: string): GradeContext => ({
 });
 
 describe("judgeFromEnv", () => {
-  it("ASSAY_JUDGE_MODEL 없으면 undefined(judge 비활성)", () => {
+  it("EVERDICT_JUDGE_MODEL 없으면 undefined(judge 비활성)", () => {
     expect(judgeFromEnv({})).toBeUndefined();
     expect(judgeFromEnv({ OPENAI_API_KEY: "k" })).toBeUndefined(); // 모델 없음
   });
   it("openai 키+모델 있으면 Judge 구성", () => {
-    expect(judgeFromEnv({ ASSAY_JUDGE_MODEL: "m", OPENAI_API_KEY: "k" })).toBeDefined();
+    expect(judgeFromEnv({ EVERDICT_JUDGE_MODEL: "m", OPENAI_API_KEY: "k" })).toBeDefined();
   });
   it("anthropic provider 는 ANTHROPIC_API_KEY 필요", () => {
-    expect(judgeFromEnv({ ASSAY_JUDGE_MODEL: "m", ASSAY_JUDGE_PROVIDER: "anthropic" })).toBeUndefined();
+    expect(judgeFromEnv({ EVERDICT_JUDGE_MODEL: "m", EVERDICT_JUDGE_PROVIDER: "anthropic" })).toBeUndefined();
     expect(
-      judgeFromEnv({ ASSAY_JUDGE_MODEL: "m", ASSAY_JUDGE_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "k" }),
+      judgeFromEnv({ EVERDICT_JUDGE_MODEL: "m", EVERDICT_JUDGE_PROVIDER: "anthropic", ANTHROPIC_API_KEY: "k" }),
     ).toBeDefined();
   });
 });
@@ -48,7 +48,7 @@ describe("makeGradersFromEnv", () => {
     // 실제 판정은 judge-grading 라이브에서 검증. (env 로 judge 가 구성되면 judge 스펙이 JudgeGrader 가 된다.)
     void fetchImpl;
     const graders = makeGradersFromEnv([{ id: "judge", config: { id: "wv-judge", rubric: "r" } }], {
-      ASSAY_JUDGE_MODEL: "m",
+      EVERDICT_JUDGE_MODEL: "m",
       OPENAI_API_KEY: "k",
     });
     expect(graders[0]?.id).toBe("wv-judge"); // skip 이 아니라 실제 JudgeGrader(config.id)

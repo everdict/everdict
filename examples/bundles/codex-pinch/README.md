@@ -20,7 +20,7 @@ One command drives the whole flow (dev control plane + pair + apply + run + lead
 
 ```bash
 node scripts/live/codex-pinch-selfhosted.mjs
-# ① dev control plane  ② POST /runners (pair this machine)  ③ assay runner --pair (codex on PATH)
+# ① dev control plane  ② POST /runners (pair this machine)  ③ everdict runner --pair (codex on PATH)
 # ④ POST /bundles/apply  ⑤ POST /scorecards {dataset: pinch-dashboards, harness: codex, runtime: self:<id>}
 # ⑥ → provenance.ranOn=self-hosted · tests_pass PASS · leaderboard: #1 codex@1.0.0 × gpt-5-codex (score=1)
 ```

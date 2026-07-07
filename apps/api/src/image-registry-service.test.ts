@@ -1,5 +1,5 @@
-import { BadRequestError, NotFoundError } from "@assay/core";
-import { InMemoryWorkspaceSettingsStore } from "@assay/db";
+import { BadRequestError, NotFoundError } from "@everdict/core";
+import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { ImageRegistryService } from "./image-registry-service.js";
 

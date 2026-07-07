@@ -3,17 +3,17 @@
 //  - warm 토폴로지: front-door 를 Deployment+Service 로 apply → rollout 대기 → port-forward 로 엔드포인트 발견
 //  - per-case 타깃: headless Chromium Deployment 를 띄우고 port-forward 로 실 CDP 발견
 //  - drive: 발견한 front-door 로 실제 POST /runs (per-run wiring) — 응답 200 으로 검증
-//  - 테넌트 격리: trust-zone(perTenantTrustZones) → 테넌트별 네임스페이스 assay-<tenant> (K8s 네이티브 격리)
+//  - 테넌트 격리: trust-zone(perTenantTrustZones) → 테넌트별 네임스페이스 everdict-<tenant> (K8s 네이티브 격리)
 //  - grade: 실 브라우저 스냅샷 + trace → CaseResult → teardown(네임스페이스 삭제)
 //
-// 사용: KUBECONFIG 컨텍스트 kind-assay, PATH 에 kubectl 필요.
+// 사용: KUBECONFIG 컨텍스트 kind-everdict, PATH 에 kubectl 필요.
 //   PATH=$HOME/.local/bin:$PATH node scripts/live/service-topology-k8s.mjs
 
 import { perTenantTrustZones } from "../../packages/backends/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { MlflowTraceSource } from "../../packages/trace/dist/index.js";
 
-const CONTEXT = process.env.KUBE_CONTEXT ?? "kind-assay";
+const CONTEXT = process.env.KUBE_CONTEXT ?? "kind-everdict";
 const MLFLOW = process.env.MLFLOW_ENDPOINT ?? "http://127.0.0.1:5501";
 
 const SPEC = {
@@ -85,7 +85,7 @@ async function main() {
     await runtime
       .teardown(SPEC, perTenantTrustZones().resolve("acme"))
       .catch((e) => console.log("  teardown:", e.message));
-    console.log("  namespace assay-acme deleted");
+    console.log("  namespace everdict-acme deleted");
   }
 
   banner("RESULT");

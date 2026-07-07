@@ -1,4 +1,4 @@
-import { API_KEY_SCOPES, ASSAY_ROLES, type Action, type Principal, authorize } from "@assay/auth";
+import { API_KEY_SCOPES, type Action, EVERDICT_ROLES, type Principal, authorize } from "@everdict/auth";
 import {
   AppError,
   CaseResultSchema,
@@ -10,9 +10,9 @@ import {
   ModelSpecSchema,
   type RuntimeSpec,
   RuntimeSpecSchema,
-} from "@assay/core";
-import { diffDatasets } from "@assay/datasets";
-import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@assay/db";
+} from "@everdict/core";
+import { diffDatasets } from "@everdict/datasets";
+import { type SecretStore, type TenantKeyStore, type WorkspaceSettingsStore, issueKey } from "@everdict/db";
 import type {
   DatasetRegistry,
   HarnessInstanceRegistry,
@@ -20,7 +20,7 @@ import type {
   JudgeRegistry,
   ModelRegistry,
   RuntimeRegistry,
-} from "@assay/registry";
+} from "@everdict/registry";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -87,7 +87,7 @@ export interface McpDeps {
   membershipService?: MembershipService; // 멤버 관리(목록/역할/제거/나가기) + 초대(발급/수락)
   profileService?: ProfileService; // 내 프로필(이름/유저네임/아바타) 조회·수정(self-serve)
   keyStore?: TenantKeyStore; // API 키 self-serve 발급/목록/취소(admin)
-  apiPublicUrl?: string; // 컨트롤플레인 public base — github_install_workspace_runner 의 assay runner --api-url (요청 base 폴백)
+  apiPublicUrl?: string; // 컨트롤플레인 public base — github_install_workspace_runner 의 everdict runner --api-url (요청 base 폴백)
 }
 
 function ok(data: unknown): CallToolResult {
@@ -121,8 +121,8 @@ async function plain(fn: () => Promise<CallToolResult>): Promise<CallToolResult>
 // 해당 Principal 에 묶인 MCP 서버(상태 없는 요청당 인스턴스). tools = runs/harnesses CRUD.
 export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
   const server = new McpServer(
-    { name: "assay", version: "0.1.0" },
-    { instructions: "Assay 평가 컨트롤플레인. 워크스페이스 스코프 run/harness 도구." },
+    { name: "everdict", version: "0.1.0" },
+    { instructions: "Everdict 평가 컨트롤플레인. 워크스페이스 스코프 run/harness 도구." },
   );
   const ws = principal.workspace;
 
@@ -1366,7 +1366,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .string()
             .min(1)
             .optional()
-            .describe("인바운드(슬래시커맨드/버튼) 검증 토큰의 SecretStore 이름 — 설정하면 /assay 커맨드 활성"),
+            .describe("인바운드(슬래시커맨드/버튼) 검증 토큰의 SecretStore 이름 — 설정하면 /everdict 커맨드 활성"),
         },
       },
       ({ host, botTokenSecretName, defaultChannelId, commandTokenSecretName }) =>
@@ -1461,7 +1461,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     );
   }
 
-  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
+  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + everdict image push 발행 대상.
   // 여러 개를 이름으로 등록하고 push 시 선택. 조회 harnesses:read / 등록·해제 settings:write / push 자격증명 images:push(member+).
   if (deps.imageRegistryService) {
     const registry = deps.imageRegistryService;
@@ -1541,7 +1541,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           runsOn: z
             .string()
             .optional()
-            .describe('좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, assay-<id>]")'),
+            .describe('좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, everdict-<id>]")'),
           runtime: z
             .string()
             .optional()
@@ -1597,7 +1597,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "open_ci_setup_pr",
       {
         description:
-          "link 된 레포에 Assay eval 워크플로 YAML 을 합성해 setup-PR 을 연다(워크스페이스 GitHub App 토큰). 머지하면 CI eval 활성. 워크플로는 항상 셀프호스티드 러너 대상 — self:ws 풀에 공유 러너가 없으면 400(github_install_workspace_runner 로 먼저 등록).",
+          "link 된 레포에 Everdict eval 워크플로 YAML 을 합성해 setup-PR 을 연다(워크스페이스 GitHub App 토큰). 머지하면 CI eval 활성. 워크플로는 항상 셀프호스티드 러너 대상 — self:ws 풀에 공유 러너가 없으면 400(github_install_workspace_runner 로 먼저 등록).",
         inputSchema: {
           repository: z.string().describe('"owner/name"'),
           host: z.string().url().optional().describe("GHE 베이스 URL — 미지정 = github.com link"),
@@ -1722,7 +1722,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "pair_runner",
       {
         description:
-          "새 디바이스를 셀프호스티드 러너로 페어링. 평문 토큰(rnr_…)이 응답에 한 번만 노출되며 다시 못 본다 — assay runner 가 이 토큰으로 인증한다.",
+          "새 디바이스를 셀프호스티드 러너로 페어링. 평문 토큰(rnr_…)이 응답에 한 번만 노출되며 다시 못 본다 — everdict runner 가 이 토큰으로 인증한다.",
         inputSchema: {
           label: z.string().min(1).max(80).describe("표시용 디바이스 이름(예: ho-macbook)"),
           os: z.string().min(1).max(40).optional().describe("linux | darwin | win32 등"),
@@ -1808,7 +1808,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           return ok({ id, revoked: true });
         }),
     );
-    // GitHub Actions 러너 자가등록 — 빌드 서버에 GitHub 러너 + Assay 워크스페이스-공유 러너를 함께 세우는 설치
+    // GitHub Actions 러너 자가등록 — 빌드 서버에 GitHub 러너 + Everdict 워크스페이스-공유 러너를 함께 세우는 설치
     // 스크립트 생성(설계 doc §4). 워크스페이스 GitHub App 으로 등록 토큰 mint → ciLinkService 있을 때만. admin 전용.
     if (deps.ciLinkService) {
       const ciForRunner = deps.ciLinkService;
@@ -1816,7 +1816,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         "github_install_workspace_runner",
         {
           description:
-            "GitHub Actions 셀프호스티드 러너 + Assay 워크스페이스-공유 러너를 한 빌드 서버에 함께 세우는 설치 스크립트를 생성한다(설계 §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 토큰 1회) + 워크스페이스 GitHub App 으로 등록 토큰 mint. repository(repo 레벨) 또는 org(org 레벨) 정확히 하나 — App 이 그 org/repo 에 설치돼 있어야 함. 반환 스크립트를 빌드 서버에서 실행. admin 전용.",
+            "GitHub Actions 셀프호스티드 러너 + Everdict 워크스페이스-공유 러너를 한 빌드 서버에 함께 세우는 설치 스크립트를 생성한다(설계 §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 토큰 1회) + 워크스페이스 GitHub App 으로 등록 토큰 mint. repository(repo 레벨) 또는 org(org 레벨) 정확히 하나 — App 이 그 org/repo 에 설치돼 있어야 함. 반환 스크립트를 빌드 서버에서 실행. admin 전용.",
           inputSchema: {
             repository: z.string().optional().describe('repo 레벨 대상 "owner/name"'),
             org: z.string().optional().describe("org 레벨 대상(그 org 의 모든 레포 공유)"),
@@ -1825,7 +1825,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               .string()
               .optional()
               .describe("org 러너 그룹(org 레벨 전용, 선택) — 그 그룹의 접근 정책 적용"),
-            label: z.string().max(80).optional().describe("Assay 러너 표시 이름(기본: repo/org 이름)"),
+            label: z.string().max(80).optional().describe("Everdict 러너 표시 이름(기본: repo/org 이름)"),
             githubLabels: z.array(z.string()).optional().describe("GH 러너 추가 라벨"),
             capabilities: z.array(z.enum(RUNNER_CAPABILITIES)).optional(),
           },
@@ -1837,7 +1837,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
                 { runnerService: runners, ciLinkService: ciForRunner },
                 {
                   workspace: ws,
-                  label: label ?? org ?? repository?.split("/")[1] ?? "assay-ci",
+                  label: label ?? org ?? repository?.split("/")[1] ?? "everdict-ci",
                   apiUrl: deps.apiPublicUrl ?? "http://localhost:8787",
                   ...(repository !== undefined ? { repository } : {}),
                   ...(org !== undefined ? { org } : {}),
@@ -1853,7 +1853,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
     }
   }
 
-  // 러너 프로토콜 — `assay runner` 가 자기 머신에서 호출(러너 토큰 rnr_ → via=runner, principal.runnerId).
+  // 러너 프로토콜 — `everdict runner` 가 자기 머신에서 호출(러너 토큰 rnr_ → via=runner, principal.runnerId).
   // 잡을 가져가(lease) 로컬 실행 후 결과를 회신(submit/fail)한다. 러너 토큰만 — 일반 자격증명은 거부.
   if (deps.runnerHub) {
     const hub = deps.runnerHub;
@@ -1978,7 +1978,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "set_member_role",
       {
         description: "멤버 역할 변경(viewer|member|admin). 멤버 아니면 NOT_FOUND, 마지막 admin 강등은 CONFLICT.",
-        inputSchema: { subject: z.string(), role: z.enum(ASSAY_ROLES) },
+        inputSchema: { subject: z.string(), role: z.enum(EVERDICT_ROLES) },
       },
       ({ subject, role }) =>
         run(principal, "members:write", async () => {
@@ -2004,7 +2004,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       "create_invite",
       {
         description: "초대 토큰 발급. 응답의 token(inv_…)은 한 번만 노출 — 링크로 공유하면 수락 시 그 role 로 가입.",
-        inputSchema: { role: z.enum(ASSAY_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() },
+        inputSchema: { role: z.enum(EVERDICT_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() },
       },
       ({ role, expiresInHours }) =>
         run(principal, "members:write", async () => {

@@ -46,7 +46,7 @@ export class PgScheduleStore implements ScheduleStore {
 
   async create(record: ScheduleRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_schedules
+      `INSERT INTO everdict_schedules
          (id, tenant, name, cron, timezone, overlap_policy, enabled, created_by, run_template,
           last_fired_at, last_status, last_scorecard_id, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
@@ -70,7 +70,7 @@ export class PgScheduleStore implements ScheduleStore {
   }
 
   async get(tenant: string, id: string): Promise<ScheduleRecord | undefined> {
-    const res = await this.client.query<ScheduleRow>("SELECT * FROM assay_schedules WHERE tenant = $1 AND id = $2", [
+    const res = await this.client.query<ScheduleRow>("SELECT * FROM everdict_schedules WHERE tenant = $1 AND id = $2", [
       tenant,
       id,
     ]);
@@ -79,7 +79,7 @@ export class PgScheduleStore implements ScheduleStore {
 
   async list(tenant: string): Promise<ScheduleRecord[]> {
     const res = await this.client.query<ScheduleRow>(
-      "SELECT * FROM assay_schedules WHERE tenant = $1 ORDER BY created_at DESC, id DESC",
+      "SELECT * FROM everdict_schedules WHERE tenant = $1 ORDER BY created_at DESC, id DESC",
       [tenant],
     );
     return res.rows.map(rowToRecord);
@@ -107,13 +107,13 @@ export class PgScheduleStore implements ScheduleStore {
     if (sets.length === 0) return this.get(tenant, id);
     vals.push(tenant, id);
     const res = await this.client.query<ScheduleRow>(
-      `UPDATE assay_schedules SET ${sets.join(", ")} WHERE tenant = $${i++} AND id = $${i} RETURNING *`,
+      `UPDATE everdict_schedules SET ${sets.join(", ")} WHERE tenant = $${i++} AND id = $${i} RETURNING *`,
       vals,
     );
     return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
   }
 
   async remove(tenant: string, id: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_schedules WHERE tenant = $1 AND id = $2", [tenant, id]);
+    await this.client.query("DELETE FROM everdict_schedules WHERE tenant = $1 AND id = $2", [tenant, id]);
   }
 }

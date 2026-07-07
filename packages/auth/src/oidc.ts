@@ -12,7 +12,7 @@ export interface OidcVerifyErrorInfo {
 }
 
 export interface OidcAuthOptions {
-  issuer: string; // 예: http://localhost:8080/realms/assay
+  issuer: string; // 예: http://localhost:8080/realms/everdict
   audience?: string;
   jwksUri?: string; // 기본 `${issuer}/protocol/openid-connect/certs`
   workspaceClaim?: string; // 기본 "workspace"

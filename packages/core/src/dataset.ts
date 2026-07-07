@@ -17,7 +17,7 @@ export const DatasetSourceRefSchema = z.object({
 export type DatasetSourceRef = z.infer<typeof DatasetSourceRefSchema>;
 
 // 발표 벤치마크의 공식 출처(있으면) — 홈페이지/논문/코드/데이터/리더보드/저자/라이선스/인용/과제유형.
-// BenchmarkOrigin(@assay/datasets)에서 옴(레시피/카탈로그가 채운 경우). 표시·인용용 메타.
+// BenchmarkOrigin(@everdict/datasets)에서 옴(레시피/카탈로그가 채운 경우). 표시·인용용 메타.
 export const DatasetOriginSchema = z.object({
   homepage: z.string().optional(),
   paper: z.string().optional(),

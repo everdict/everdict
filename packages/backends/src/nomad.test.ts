@@ -1,5 +1,5 @@
-import { RESULT_SENTINEL } from "@assay/agent";
-import { type AgentJob, BadRequestError, type CaseResult } from "@assay/core";
+import { RESULT_SENTINEL } from "@everdict/agent";
+import { type AgentJob, BadRequestError, type CaseResult } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { NomadBackend, type NomadHttp, buildNomadJob, fetchHttp } from "./nomad.js";
 import { staticSecrets } from "./secrets.js";
@@ -29,15 +29,15 @@ describe("buildNomadJob", () => {
   it("이미지·격리 런타임·시크릿·잡 페이로드를 task spec 에 담는다", () => {
     const spec = buildNomadJob(JOB, {
       addr: "http://nomad:4646",
-      image: "reg/assay-agent:1",
+      image: "reg/everdict-agent:1",
       secretEnv: { CLAUDE_CODE_OAUTH_TOKEN: "tok" },
       runtime: "runsc",
     });
     const task = spec.Job.TaskGroups[0]?.Tasks[0];
-    expect(task?.Config.image).toBe("reg/assay-agent:1");
+    expect(task?.Config.image).toBe("reg/everdict-agent:1");
     expect(task?.Config.runtime).toBe("runsc");
     expect(task?.Env.CLAUDE_CODE_OAUTH_TOKEN).toBe("tok");
-    const decoded = JSON.parse(Buffer.from(task?.Env.ASSAY_AGENT_JOB ?? "", "base64").toString("utf8"));
+    const decoded = JSON.parse(Buffer.from(task?.Env.EVERDICT_AGENT_JOB ?? "", "base64").toString("utf8"));
     expect(decoded.evalCase.id).toBe("c1");
     expect(decoded.harness.id).toBe("claude-code");
   });
@@ -48,12 +48,12 @@ describe("buildNomadJob", () => {
       evalCase: { ...JOB.evalCase, image: "ghcr.io/acme/sbench:v1" },
       registryAuth: { host: "ghcr.io", username: "bot", password: "pull-tok" },
     };
-    const spec = buildNomadJob(withAuth, { addr: "http://nomad:4646", image: "reg/assay-agent:1" });
+    const spec = buildNomadJob(withAuth, { addr: "http://nomad:4646", image: "reg/everdict-agent:1" });
     expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Config.auth).toEqual([{ username: "bot", password: "pull-tok" }]);
     // 호스트 불일치(기본 에이전트 이미지 등)면 auth 미렌더 — 무관 레지스트리에 자격증명을 보내지 않는다.
     const mismatch = buildNomadJob(
       { ...JOB, registryAuth: { host: "ghcr.io", password: "p" } },
-      { addr: "http://nomad:4646", image: "reg/assay-agent:1" },
+      { addr: "http://nomad:4646", image: "reg/everdict-agent:1" },
     );
     expect(mismatch.Job.TaskGroups[0]?.Tasks[0]?.Config.auth).toBeUndefined();
   });
@@ -63,19 +63,19 @@ describe("buildNomadJob", () => {
       { ...JOB, judge: { provider: "openai", model: "gpt-5.4-mini" } },
       {
         addr: "http://nomad:4646",
-        image: "reg/assay-agent:1",
+        image: "reg/everdict-agent:1",
         secretEnv: { OPENAI_API_KEY: "k", OPENAI_BASE_URL: "http://litellm" },
       },
     );
     const env = spec.Job.TaskGroups[0]?.Tasks[0]?.Env;
-    expect(env?.ASSAY_JUDGE_MODEL).toBe("gpt-5.4-mini"); // per-run 설정
-    expect(env?.ASSAY_JUDGE_PROVIDER).toBe("openai");
+    expect(env?.EVERDICT_JUDGE_MODEL).toBe("gpt-5.4-mini"); // per-run 설정
+    expect(env?.EVERDICT_JUDGE_PROVIDER).toBe("openai");
     expect(env?.OPENAI_API_KEY).toBe("k"); // 프로바이더 키는 테넌트 시크릿
     expect(env?.OPENAI_BASE_URL).toBe("http://litellm");
   });
   it("job.judge 가 없으면 judge env 를 넣지 않는다", () => {
     const spec = buildNomadJob(JOB, { addr: "http://nomad:4646", image: "i" });
-    expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Env.ASSAY_JUDGE_MODEL).toBeUndefined();
+    expect(spec.Job.TaskGroups[0]?.Tasks[0]?.Env.EVERDICT_JUDGE_MODEL).toBeUndefined();
   });
   it("evalCase.image 가 있으면 per-case 이미지로 override(예: SWE-bench prebuilt)", () => {
     const withImage = { ...JOB, evalCase: { ...JOB.evalCase, image: "swebench/sweb.eval.x86_64.x_1776_y-1:latest" } };
@@ -156,7 +156,7 @@ describe("NomadBackend.dispatch", () => {
 
     await backend.dispatch({ ...JOB, tenant: "acme" });
 
-    expect(posted.Job?.Namespace).toBe("assay-acme");
+    expect(posted.Job?.Namespace).toBe("everdict-acme");
     expect(posted.Job?.TaskGroups?.[0]?.Tasks[0]?.Config.runtime).toBe("runsc");
   });
 

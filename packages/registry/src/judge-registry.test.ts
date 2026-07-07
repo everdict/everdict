@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@assay/core";
-import type { SqlClient } from "@assay/db";
+import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@everdict/core";
+import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { InMemoryJudgeRegistry } from "./judge-registry.js";
 import { loadJudgeDir } from "./load-judges.js";
@@ -100,7 +100,7 @@ describe("InMemoryJudgeRegistry (tenant-owned)", () => {
 
 describe("loadJudgeDir", () => {
   it("기본 SHARED 로 로드(파일 SSOT) → 모든 테넌트가 폴백으로 봄", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "assay-judge-"));
+    const dir = mkdtempSync(join(tmpdir(), "everdict-judge-"));
     try {
       writeFileSync(join(dir, "correctness-1.0.0.json"), JSON.stringify(judge("correctness", "1.0.0")));
       const r = await loadJudgeDir(dir);
@@ -111,14 +111,14 @@ describe("loadJudgeDir", () => {
   });
 });
 
-// 가짜 SqlClient — tenant-aware assay_judges 흉내(tags[버전 태그] 포함).
+// 가짜 SqlClient — tenant-aware everdict_judges 흉내(tags[버전 태그] 포함).
 function fakePg(): SqlClient {
   const rows: Array<{ tenant: string; id: string; version: string; judge: unknown; tags: unknown }> = [];
   const norm = (t: string) => t.replace(/\s+/g, " ").trim();
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
-      if (t.startsWith("SELECT version, tags FROM assay_judges WHERE tenant = $1 AND id = $2")) {
+      if (t.startsWith("SELECT version, tags FROM everdict_judges WHERE tenant = $1 AND id = $2")) {
         return {
           rows: rows
             .filter((x) => x.tenant === p[0] && x.id === p[1])
@@ -127,7 +127,7 @@ function fakePg(): SqlClient {
       }
       if (
         t.startsWith(
-          "UPDATE assay_judges SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+          "UPDATE everdict_judges SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
         )
       ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
@@ -135,28 +135,28 @@ function fakePg(): SqlClient {
         r.tags = JSON.parse(p[3] as string);
         return { rows: [{ version: r.version }] as R[] };
       }
-      if (t.startsWith("SELECT judge FROM assay_judges WHERE tenant = $1 AND id = $2 AND version = $3")) {
+      if (t.startsWith("SELECT judge FROM everdict_judges WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{ judge: r.judge }] : []) as R[] };
       }
-      if (t.startsWith("SELECT 1 FROM assay_judges WHERE tenant = $1 AND id = $2 AND version = $3")) {
+      if (t.startsWith("SELECT 1 FROM everdict_judges WHERE tenant = $1 AND id = $2 AND version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{}] : []) as R[] };
       }
-      if (t.startsWith("SELECT 1 FROM assay_judges WHERE tenant = $1 AND id = $2 LIMIT 1")) {
+      if (t.startsWith("SELECT 1 FROM everdict_judges WHERE tenant = $1 AND id = $2 LIMIT 1")) {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1]);
         return { rows: (r ? [{}] : []) as R[] };
       }
-      if (t.startsWith("SELECT version FROM assay_judges WHERE tenant = $1 AND id = $2")) {
+      if (t.startsWith("SELECT version FROM everdict_judges WHERE tenant = $1 AND id = $2")) {
         return {
           rows: rows.filter((x) => x.tenant === p[0] && x.id === p[1]).map((x) => ({ version: x.version })) as R[],
         };
       }
-      if (t.startsWith("SELECT DISTINCT id FROM assay_judges WHERE tenant = $1 OR tenant = $2")) {
+      if (t.startsWith("SELECT DISTINCT id FROM everdict_judges WHERE tenant = $1 OR tenant = $2")) {
         const ids = [...new Set(rows.filter((x) => x.tenant === p[0] || x.tenant === p[1]).map((x) => x.id))].sort();
         return { rows: ids.map((id) => ({ id })) as R[] };
       }
-      if (t.startsWith("INSERT INTO assay_judges")) {
+      if (t.startsWith("INSERT INTO everdict_judges")) {
         rows.push({
           tenant: p[0] as string,
           id: p[1] as string,

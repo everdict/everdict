@@ -1,6 +1,6 @@
-import { ConflictError, NotFoundError } from "@assay/core";
-import { type BenchmarkAdapterSpec, BenchmarkAdapterSpecSchema } from "@assay/datasets";
-import type { SqlClient } from "@assay/db";
+import { ConflictError, NotFoundError } from "@everdict/core";
+import { type BenchmarkAdapterSpec, BenchmarkAdapterSpecSchema } from "@everdict/datasets";
+import type { SqlClient } from "@everdict/db";
 import type { BenchmarkRegistry } from "./benchmark-registry.js";
 import { SHARED_TENANT, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
@@ -9,12 +9,12 @@ interface SpecRow {
 }
 
 // Postgres 기반 테넌트-소유 벤치마크 레시피 SSOT. (tenant, id, version) 키. 테넌트 소유 우선, 없으면 _shared 폴백.
-// 스키마: @assay/db/migrations/0011_create_benchmarks. PgDatasetRegistry 와 동일 구조.
+// 스키마: @everdict/db/migrations/0011_create_benchmarks. PgDatasetRegistry 와 동일 구조.
 export class PgBenchmarkRegistry implements BenchmarkRegistry {
   constructor(private readonly client: SqlClient) {}
 
   private async ownsId(tenant: string, id: string): Promise<boolean> {
-    const r = await this.client.query("SELECT 1 FROM assay_benchmarks WHERE tenant = $1 AND id = $2 LIMIT 1", [
+    const r = await this.client.query("SELECT 1 FROM everdict_benchmarks WHERE tenant = $1 AND id = $2 LIMIT 1", [
       tenant,
       id,
     ]);
@@ -27,7 +27,7 @@ export class PgBenchmarkRegistry implements BenchmarkRegistry {
   }
   private async ownerVersions(owner: string, id: string): Promise<string[]> {
     const r = await this.client.query<{ version: string }>(
-      "SELECT version FROM assay_benchmarks WHERE tenant = $1 AND id = $2",
+      "SELECT version FROM everdict_benchmarks WHERE tenant = $1 AND id = $2",
       [owner, id],
     );
     return sortVersions(r.rows.map((x) => x.version));
@@ -35,7 +35,7 @@ export class PgBenchmarkRegistry implements BenchmarkRegistry {
 
   async register(tenant: string, spec: BenchmarkAdapterSpec): Promise<void> {
     const existing = await this.client.query<SpecRow>(
-      "SELECT spec FROM assay_benchmarks WHERE tenant = $1 AND id = $2 AND version = $3",
+      "SELECT spec FROM everdict_benchmarks WHERE tenant = $1 AND id = $2 AND version = $3",
       [tenant, spec.id, spec.version],
     );
     const row = existing.rows[0];
@@ -50,7 +50,7 @@ export class PgBenchmarkRegistry implements BenchmarkRegistry {
       return;
     }
     await this.client.query(
-      "INSERT INTO assay_benchmarks (tenant, id, version, spec, created_at) VALUES ($1, $2, $3, $4, now())",
+      "INSERT INTO everdict_benchmarks (tenant, id, version, spec, created_at) VALUES ($1, $2, $3, $4, now())",
       [tenant, spec.id, spec.version, JSON.stringify(spec)],
     );
   }
@@ -69,7 +69,7 @@ export class PgBenchmarkRegistry implements BenchmarkRegistry {
     if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `벤치마크 '${id}' 가 없습니다.`);
     const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
     const res = await this.client.query<SpecRow>(
-      "SELECT spec FROM assay_benchmarks WHERE tenant = $1 AND id = $2 AND version = $3",
+      "SELECT spec FROM everdict_benchmarks WHERE tenant = $1 AND id = $2 AND version = $3",
       [owner, id, version],
     );
     return BenchmarkAdapterSpecSchema.parse((res.rows[0] as SpecRow).spec);
@@ -77,7 +77,7 @@ export class PgBenchmarkRegistry implements BenchmarkRegistry {
 
   async list(tenant: string): Promise<Array<{ id: string; versions: string[]; owner: string }>> {
     const r = await this.client.query<{ id: string }>(
-      "SELECT DISTINCT id FROM assay_benchmarks WHERE tenant = $1 OR tenant = $2 ORDER BY id",
+      "SELECT DISTINCT id FROM everdict_benchmarks WHERE tenant = $1 OR tenant = $2 ORDER BY id",
       [tenant, SHARED_TENANT],
     );
     const out: Array<{ id: string; versions: string[]; owner: string }> = [];

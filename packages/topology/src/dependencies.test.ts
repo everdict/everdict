@@ -1,9 +1,9 @@
-import type { ServiceHarnessSpec } from "@assay/core";
+import type { ServiceHarnessSpec } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { wiringVars } from "./environment-manager.js";
 
-// external(BYO) dependency 는 Assay 가 배포/격리하지 않는다 — 프로비저닝·connEnv·케이스 격리에서 제외.
+// external(BYO) dependency 는 Everdict 가 배포/격리하지 않는다 — 프로비저닝·connEnv·케이스 격리에서 제외.
 function spec(dependencies: ServiceHarnessSpec["dependencies"]): ServiceHarnessSpec {
   return {
     kind: "service",

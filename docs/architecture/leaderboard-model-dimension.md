@@ -18,7 +18,7 @@
 ## Problem
 
 A public leaderboard (SWE-bench, GAIA, …) shows: *for this benchmark, here are the harnesses/models ranked by
-score.* Assay wants the same, self-serve, plus experiment tracking and cross-harness comparison — over **three
+score.* Everdict wants the same, self-serve, plus experiment tracking and cross-harness comparison — over **three
 axes**:
 
 - **benchmark (dataset)** — "how does harness A score on the benchmarks it ran?"
@@ -62,7 +62,7 @@ At **finalize** (`ScorecardService.track` for live runs, `finishIngest` for push
 `models` object from the completed `Scorecard` + the resolved harness spec, and store it on the record:
 
 ```ts
-// @assay/suite (pure; core-only dep)
+// @everdict/suite (pure; core-only dep)
 scorecardModels(sc: Scorecard, declared?: string): {
   observed: string[]   // distinct llm_call.model across all cases, sorted
   declared?: string    // spec-declared model (CommandHarnessSpec.model), else undefined
@@ -76,7 +76,7 @@ scorecardModels(sc: Scorecard, declared?: string): {
   fallback covers harnesses whose traces omit model; both absent ⇒ `undefined` ⇒ grouped as **unknown** (honest,
   e.g. a Claude Code run with no model in its trace).
 
-Stored as an additive `models jsonb` column on `assay_scorecards` (**mig 0028**), mirrored on
+Stored as an additive `models jsonb` column on `everdict_scorecards` (**mig 0028**), mirrored on
 `ScorecardRecordSchema` and **kept in `list`** (it is light — the leaderboard needs it without the heavy
 `scorecard`). Historical rows have `models = null` (⇒ primary unknown); backfill is a follow-up (derivable from
 the stored `scorecard.results[].trace`).
@@ -88,7 +88,7 @@ the stored `scorecard.results[].trace`).
 ### 2. Rank view — `leaderboard` (Slice 2)
 
 ```ts
-// @assay/suite (pure; consumes the same lightweight card as trendSeries)
+// @everdict/suite (pure; consumes the same lightweight card as trendSeries)
 leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, model?, window?: "latest"|"best" })
   : { dataset, metric, rows: LeaderboardRow[] /* ranked desc by score */ }
 // row: { harness:{id,version}, model?, scorecardId, createdAt, score, passRate, mean, runs }
@@ -127,9 +127,9 @@ leaderboard(cards: LeaderboardCard[], opts: { datasetId, metric, harnessId?, mod
 |---|---|
 | `ScorecardRecord` / `summary` / `list` / `trendSeries` / `diffScorecards` / `caseVerdict` | **reused verbatim** |
 | `ScorecardService.submit` + `track` + `finishIngest` pipeline | **reused** (add one finalize step) |
-| `scorecardModels` (`@assay/suite`) + `ScorecardModelsSchema` (`@assay/db`) | **new** (Slice 1) |
+| `scorecardModels` (`@everdict/suite`) + `ScorecardModelsSchema` (`@everdict/db`) | **new** (Slice 1) |
 | `models jsonb` column + mig 0028 + Pg read/write/list | **new** (Slice 1) |
-| `leaderboard` (`@assay/suite`) + `ScorecardService.leaderboard` | **new** (Slice 2) |
+| `leaderboard` (`@everdict/suite`) + `ScorecardService.leaderboard` | **new** (Slice 2) |
 | `GET /scorecards/leaderboard` + `leaderboard_scorecards` MCP + `scorecards:read` gate | **new** (Slice 2) |
 | Leaderboard web page + model column on list/detail/compare | **new** (Slice 3) |
 

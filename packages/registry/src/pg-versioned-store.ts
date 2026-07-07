@@ -1,5 +1,5 @@
-import { ConflictError, NotFoundError } from "@assay/core";
-import type { SqlClient } from "@assay/db";
+import { ConflictError, NotFoundError } from "@everdict/core";
+import type { SqlClient } from "@everdict/db";
 import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 import type { VersionMeta } from "./versioned-store.js";
 

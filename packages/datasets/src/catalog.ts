@@ -1,4 +1,4 @@
-import { type Dataset, DatasetSchema, type GraderSpec } from "@assay/core";
+import { type Dataset, DatasetSchema, type GraderSpec } from "@everdict/core";
 // 벤치마크 어댑터 + 카탈로그: "새 벤치마크 추가 = 코드가 아니라 어댑터(서술자) 한 개".
 // 어댑터 = {소스(어디서 당기나), 매핑(필드→EvalCase), 채점(graders), 선택적 행 정규화}. first-party 어댑터는
 // 카탈로그로 배포(_shared 시드용), 유저는 자기 어댑터를 추가해 사설/신규 벤치마크를 워크스페이스에 등록.
@@ -128,7 +128,7 @@ function jsonStrArray(v: unknown): string[] {
   }
 }
 
-// OSWorld 채점: 공식은 태스크별 파이썬 evaluator(파일/상태 검사)라 하니스/런타임-무관 이식이 어렵다. assay 는 최종
+// OSWorld 채점: 공식은 태스크별 파이썬 evaluator(파일/상태 검사)라 하니스/런타임-무관 이식이 어렵다. everdict 는 최종
 // 데스크탑 스크린샷을 VLM judge 가 instruction 기준으로 채점(useScreenshot). 행별 instruction 을 루브릭에 박는다.
 function osworldRubric(row: Record<string, unknown>): string {
   const instruction = String(row.instruction ?? row.task ?? "");
@@ -226,7 +226,7 @@ export const BENCHMARK_CATALOG = {
     ],
   },
   // 데스크탑(OS/앱) 컴퓨터-유즈 벤치마크 — OSWorld. os-use env + VLM judge(스크린샷). 공식은 VM + 태스크별 파이썬
-  // evaluator 지만, assay 는 os-use docker 로 어댑트(에이전트=command 하니스, 채점=judge). 소스=jsonl(OSWorld task
+  // evaluator 지만, everdict 는 os-use docker 로 어댑트(에이전트=command 하니스, 채점=judge). 소스=jsonl(OSWorld task
   // JSON 을 jsonl 로 업로드). 데스크탑 이미지(앱 포함)는 유저가 빌드/등록 — SWE-bench prebuilt 와 동일 패턴.
   osworld: {
     id: "osworld",
@@ -245,7 +245,7 @@ export const BENCHMARK_CATALOG = {
       ],
       display: ":99",
       screenshotPath: "/tmp/osuse.png",
-      image: "assay-osworld:demo", // OSWorld 데스크탑 이미지(앱 동봉) — 유저가 빌드/등록. image 가 컨테이너 라우팅(docker capability)을 구동하므로 별도 placement 핀 불필요.
+      image: "everdict-osworld:demo", // OSWorld 데스크탑 이미지(앱 동봉) — 유저가 빌드/등록. image 가 컨테이너 라우팅(docker capability)을 구동하므로 별도 placement 핀 불필요.
       tagFields: ["snapshot", "source"],
     },
     // 채점: VLM judge(스크린샷) + 선택적 상태검사. row.verify(셸 명령, OSWorld evaluator 의 이식형 대응)가 있으면

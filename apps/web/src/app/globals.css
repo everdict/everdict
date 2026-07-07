@@ -77,7 +77,7 @@ samp {
 }
 
 /* page-load staggered reveal — 절제된 8px rise(정제 미학). reduced-motion 이면 비활성. */
-@keyframes assay-rise {
+@keyframes everdict-rise {
   from {
     opacity: 0;
     transform: translateY(8px);
@@ -89,7 +89,7 @@ samp {
 }
 @media (prefers-reduced-motion: no-preference) {
   .rise {
-    animation: assay-rise 0.42s var(--ease-out-quart) both;
+    animation: everdict-rise 0.42s var(--ease-out-quart) both;
   }
 }
 

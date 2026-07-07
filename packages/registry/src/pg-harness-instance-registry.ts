@@ -4,8 +4,8 @@ import {
   type HarnessSpec,
   type ServiceHarnessSpec,
   resolveHarnessInstance,
-} from "@assay/core";
-import type { SqlClient } from "@assay/db";
+} from "@everdict/core";
+import type { SqlClient } from "@everdict/db";
 import {
   type HarnessInstanceRegistry,
   type HarnessListEntry,
@@ -17,14 +17,14 @@ import { PgVersionedStore } from "./pg-versioned-store.js";
 import { asService } from "./registry.js";
 
 // Postgres 기반 개별 하네스(Instance) SSOT. 저장은 HarnessInstanceSpec(template 참조+pins), get 은 resolve.
-// 스키마: @assay/db/migrations/0016_create_harness_taxonomy. 템플릿 해석은 주입된 HarnessTemplateRegistry.
+// 스키마: @everdict/db/migrations/0016_create_harness_taxonomy. 템플릿 해석은 주입된 HarnessTemplateRegistry.
 export class PgHarnessInstanceRegistry implements HarnessInstanceRegistry {
   private readonly store: PgVersionedStore<HarnessInstanceSpec>;
   constructor(
     client: SqlClient,
     private readonly templates: HarnessTemplateRegistry,
   ) {
-    this.store = new PgVersionedStore(client, "assay_harness_instances", "하네스 인스턴스", (v) =>
+    this.store = new PgVersionedStore(client, "everdict_harness_instances", "하네스 인스턴스", (v) =>
       HarnessInstanceSpecSchema.parse(v),
     );
   }

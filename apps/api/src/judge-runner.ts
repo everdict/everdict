@@ -8,7 +8,7 @@ import type {
   JudgeSpec,
   Placement,
   Score,
-} from "@assay/core";
+} from "@everdict/core";
 import {
   type JudgeCompletion,
   JudgeGrader,
@@ -16,8 +16,8 @@ import {
   harnessComplete,
   modelJudge,
   openaiComplete,
-} from "@assay/graders";
-import type { HarnessInstanceRegistry, ModelRegistry } from "@assay/registry";
+} from "@everdict/graders";
+import type { HarnessInstanceRegistry, ModelRegistry } from "@everdict/registry";
 
 // judge 실행기 — JudgeSpec + tenant + GradeContext(트레이스) → Score. 컨트롤플레인이 트레이스 기반으로 판정.
 // model(anthropic/openai)·harness 모두 modelJudge(전송)로 통일 — 전송만 다르다(API 호출 / 에이전트 디스패치).
@@ -98,7 +98,7 @@ export function defaultJudgeRunner(deps: DefaultJudgeRunnerDeps): JudgeRunner {
           },
         });
       } else {
-        // 시크릿 복호화 실패(예: ASSAY_SECRETS_KEY / 암호화 키 불일치)를 빈 맵으로 삼키면, 시크릿이
+        // 시크릿 복호화 실패(예: EVERDICT_SECRETS_KEY / 암호화 키 불일치)를 빈 맵으로 삼키면, 시크릿이
         // 실제로 있는데도 아래 `secrets[KEY]` 가 undefined 라 "미설정"으로 오판돼 judge 가 조용히 skip 된다.
         // throw 를 잡되 빈 맵 폴백 없이 실제 복호화 사유를 그대로 노출해 skip.
         let secrets: Record<string, string>;

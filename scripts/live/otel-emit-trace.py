@@ -13,7 +13,7 @@ endpoint = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://127.0.0.1:4318/
 prov = TracerProvider(resource=Resource.create({"service.name": "browser-use-agent"}))
 prov.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint=endpoint)))
 trace.set_tracer_provider(prov)
-tr = trace.get_tracer("assay")
+tr = trace.get_tracer("everdict")
 
 with tr.start_as_current_span("browser_agent_run") as root:
     tid = format(root.get_span_context().trace_id, "032x")

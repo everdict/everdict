@@ -1,4 +1,4 @@
-import { type RegistryAuth, type ServiceHarnessSpec, flattenEnv, imageUsesRegistryHost } from "@assay/core";
+import { type RegistryAuth, type ServiceHarnessSpec, flattenEnv, imageUsesRegistryHost } from "@everdict/core";
 import { meshServiceName } from "./consul-intentions.js";
 import { dependencyStores } from "./dependencies.js";
 import { sanitizeIdent } from "./store-binding.js";
@@ -83,7 +83,7 @@ export function buildConnectService(
 }
 
 export function topologyJobId(spec: ServiceHarnessSpec, zoneId?: string): string {
-  const base = `assay-harness-${spec.id}-${spec.version}`;
+  const base = `everdict-harness-${spec.id}-${spec.version}`;
   return zoneId ? `${base}-${zoneId}` : base;
 }
 
@@ -111,12 +111,12 @@ export function buildDependencyGroups(spec: ServiceHarnessSpec, opts: NomadTopol
   });
 }
 
-// pool 공유 스토어 잡 — 클러스터에 1개(테넌트 무관). 그룹명 = assay-shared-<store>, dynamic port "store".
+// pool 공유 스토어 잡 — 클러스터에 1개(테넌트 무관). 그룹명 = everdict-shared-<store>, dynamic port "store".
 // 런타임이 이 잡을 deploy-once 하고 host:port 를 발견 → 테넌트별 scoped creds 의 엔드포인트로 쓴다.
-export const SHARED_STORE_JOB_ID = "assay-shared-stores";
+export const SHARED_STORE_JOB_ID = "everdict-shared-stores";
 export function buildSharedStoreJob(stores: string[], opts: NomadTopologyOptions = {}): NomadTopologyJobSpec {
   const spec = {
-    id: "assay-shared",
+    id: "everdict-shared",
     dependencies: [...new Set(stores)].map((store) => ({ store, role: "shared", isolateBy: "schema" })),
     services: [],
   } as unknown as ServiceHarnessSpec;
@@ -131,13 +131,13 @@ export function buildSharedStoreJob(stores: string[], opts: NomadTopologyOptions
   };
 }
 
-// silo 전용 스토어 잡 — 테넌트(존)마다 별도 스토어 인스턴스(전용). 그룹명 = assay-store-<zone>-<store>.
+// silo 전용 스토어 잡 — 테넌트(존)마다 별도 스토어 인스턴스(전용). 그룹명 = everdict-store-<zone>-<store>.
 // 런타임이 이걸 띄우고 host:port 를 발견해 서비스 connEnv 로 와이어링(pool 과 같은 discover-then-inject, DDL 없음).
 export function dedicatedStoreJobId(spec: ServiceHarnessSpec, zoneId: string): string {
-  return `assay-store-${spec.id}-${sanitizeIdent(zoneId)}`;
+  return `everdict-store-${spec.id}-${sanitizeIdent(zoneId)}`;
 }
 export function dedicatedStoreGroup(zoneId: string, store: string): string {
-  return `assay-store-${sanitizeIdent(zoneId)}-${store}`;
+  return `everdict-store-${sanitizeIdent(zoneId)}-${store}`;
 }
 export function buildDedicatedStoreJob(
   spec: ServiceHarnessSpec,
@@ -146,7 +146,7 @@ export function buildDedicatedStoreJob(
   opts: NomadTopologyOptions = {},
 ): NomadTopologyJobSpec {
   const synth = {
-    id: `assay-store-${sanitizeIdent(zoneId)}`,
+    id: `everdict-store-${sanitizeIdent(zoneId)}`,
     dependencies: [...new Set(stores)].map((store) => ({ store, role: "dedicated", isolateBy: "schema" })),
     services: [],
   } as unknown as ServiceHarnessSpec;
@@ -156,7 +156,7 @@ export function buildDedicatedStoreJob(
       Type: "service",
       Namespace: opts.namespace,
       Datacenters: opts.datacenters ?? ["dc1"],
-      TaskGroups: buildDependencyGroups(synth, opts), // 그룹명 = assay-store-<zone>-<store>
+      TaskGroups: buildDependencyGroups(synth, opts), // 그룹명 = everdict-store-<zone>-<store>
     },
   };
 }
@@ -169,7 +169,7 @@ export function buildNomadTopologyJob(spec: ServiceHarnessSpec, opts: NomadTopol
     // 워크스페이스 레지스트리 이미지면 docker auth(레지스트리 자격증명) — 호스트가 일치하는 task 에만.
     const auth = opts.registryAuth;
     if (auth && imageUsesRegistryHost(svc.image, auth.host))
-      config.auth = [{ username: auth.username ?? "assay", password: auth.password }];
+      config.auth = [{ username: auth.username ?? "everdict", password: auth.password }];
     const group: NomadTopoGroup = {
       Name: svc.name,
       Count: svc.replicas,
@@ -229,7 +229,7 @@ export interface BrowserJobOptions {
 }
 
 export function browserJobId(runId: string): string {
-  return `assay-browser-${runId}`;
+  return `everdict-browser-${runId}`;
 }
 
 export function buildBrowserJob(
@@ -260,7 +260,7 @@ export function buildBrowserJob(
               Name: "browser",
               Driver: "docker",
               Config: config,
-              Env: { ASSAY_RUN_ID: runId, ASSAY_TARGET: spec.target?.engine ?? "chromium" },
+              Env: { EVERDICT_RUN_ID: runId, EVERDICT_TARGET: spec.target?.engine ?? "chromium" },
               Resources: { CPU: 1000, MemoryMB: 1024 },
             },
           ],

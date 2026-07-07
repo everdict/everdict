@@ -1,4 +1,4 @@
-import { BadRequestError, type DatasetOrigin, type DatasetProvenance, type DatasetSourceRef } from "@assay/core";
+import { BadRequestError, type DatasetOrigin, type DatasetProvenance, type DatasetSourceRef } from "@everdict/core";
 import {
   type BenchmarkAdapterSpec,
   BenchmarkAdapterSpecSchema,
@@ -16,8 +16,8 @@ import {
   importFromSpec,
   listBenchmarks,
   searchHfDatasets,
-} from "@assay/datasets";
-import type { BenchmarkRegistry, DatasetRegistry } from "@assay/registry";
+} from "@everdict/datasets";
+import type { BenchmarkRegistry, DatasetRegistry } from "@everdict/registry";
 import { z } from "zod";
 
 // 벤치마크 인입 본문 — spec(인라인 정의/위저드) · benchmark(카탈로그) · recipe(등록된 레시피) 중 하나로 데이터셋 등록.

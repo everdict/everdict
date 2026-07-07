@@ -1,4 +1,4 @@
-import type { Backend, BackendCapacity, TrustZonePolicy } from "@assay/backends";
+import type { Backend, BackendCapacity, TrustZonePolicy } from "@everdict/backends";
 import {
   type AgentJob,
   type CaseResult,
@@ -10,9 +10,9 @@ import {
   type TraceEvent,
   type TrustZone,
   assertHardenedIsolation,
-} from "@assay/core";
-import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@assay/graders";
-import type { TraceSource } from "@assay/trace";
+} from "@everdict/core";
+import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
+import type { TraceSource } from "@everdict/trace";
 import { keysFor, newRunId, wiringVars } from "./environment-manager.js";
 import {
   type CallbackRendezvous,

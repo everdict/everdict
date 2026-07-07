@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@assay/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
 
 // ⓐ 과업 성공(객관적) — 환경에서 테스트 명령을 실행하고 종료코드로 판정. compute(환경) 필요.
 export class TestsPassGrader implements Grader {

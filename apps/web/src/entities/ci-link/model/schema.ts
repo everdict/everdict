@@ -16,7 +16,7 @@ export const ciLinkSchema = z.object({
   slots: z.record(z.string(), ciLinkSlotSchema).default({}),
   createdBy: z.string(), // 감사용(발사 인증과 무관)
   disabled: z.boolean().optional(),
-  runsOn: z.string().optional(), // 좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, assay-<id>]")
+  runsOn: z.string().optional(), // 좁히기 오버라이드 — 워크플로 runs-on(기본 "[self-hosted]", 예: "[self-hosted, everdict-<id>]")
   runtime: z.string().optional(), // 좁히기 오버라이드 — run-eval runtime(기본 "self:ws" 풀, 예: "self:ws:<id>")
   // PR 평가 발화 방식 — auto=PR 이벤트 자동만 · comment=PR 코멘트 /evaluate 만(온디맨드) · 미지정=both(둘 다)
   trigger: z.enum(['auto', 'comment', 'both']).optional(),

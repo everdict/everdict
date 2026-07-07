@@ -13,14 +13,14 @@ logged-in web session over a minimal preload bridge.
 ## Process model
 - **main** (Node, ESM, `type: module`) — window/tray/autostart/updater, keychain (`safeStorage`),
   `RunnerHost` (runner-core), IPC handlers. All Electron access lives here.
-- **preload** (compiled to `.cjs`, sandboxed) — `contextBridge.exposeInMainWorld("assayDesktop", …)`
+- **preload** (compiled to `.cjs`, sandboxed) — `contextBridge.exposeInMainWorld("everdictDesktop", …)`
   wrapping `ipcRenderer.invoke`. Nothing else.
 - **renderer** — the *remote* web app. We ship **zero renderer code**; desktop-aware UI is a
-  `window.assayDesktop`-conditional branch inside `apps/web` (type it via a local `.d.ts` in web's
-  `shared/` — the web must NOT gain `@assay/*` deps).
+  `window.everdictDesktop`-conditional branch inside `apps/web` (type it via a local `.d.ts` in web's
+  `shared/` — the web must NOT gain `@everdict/*` deps).
 
 ## Security invariants (non-negotiable; changing any = update the SSOT doc + this skill in the same PR)
-1. The window is pinned to the configured web app (`ASSAY_WEB_URL`). Top-level navigation is allowed
+1. The window is pinned to the configured web app (`EVERDICT_WEB_URL`). Top-level navigation is allowed
    for http/https only — OIDC (Keycloak) login is a redirect flow that leaves and
    re-enters the web origin; blocking it breaks login. All other schemes are `preventDefault()`ed.
    `window.open`: web origin → in-app child window (same webPreferences); other http/https →
@@ -29,9 +29,9 @@ logged-in web session over a minimal preload bridge.
 2. `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` — always.
 3. The bridge is **exactly** `pairRunner` / `runnerStatus` (+ status events) / `unpairRunner` /
    `appInfo`. No generic `invoke`, no fs/shell exposure. New methods need a locked design decision.
-   One separate surface exists (D8): `window.assaySetup` (`getServerUrl`/`setServerUrl`) — exposed only
-   with the `--assay-setup` argv flag (setup window), and main-side IPC accepts only the local
-   `setup.html` `file://` senderFrame. Never merge it into `assayDesktop`.
+   One separate surface exists (D8): `window.everdictSetup` (`getServerUrl`/`setServerUrl`) — exposed only
+   with the `--everdict-setup` argv flag (setup window), and main-side IPC accepts only the local
+   `setup.html` `file://` senderFrame. Never merge it into `everdictDesktop`.
 4. Preload is attached only when loading the configured web origin; IPC handlers verify
    `senderFrame` origin before acting.
 5. The `rnr_` pairing token is persisted **only** `safeStorage`-encrypted under `app.getPath("userData")`;
@@ -42,11 +42,11 @@ logged-in web session over a minimal preload bridge.
 
 ## Layering
 - `packages/runner-core` — extracted runner loop (`runLeaseWorkers`, `ResilientMcpSession`,
-  `mcpConnect`, `runLeasedJob`, `RunnerHost`). Deps: `@assay/core` + `@assay/agent` +
-  `@assay/topology` + `@assay/trace` + MCP SDK. Consumers: `apps/cli` (thin flags wrapper),
+  `mcpConnect`, `runLeasedJob`, `RunnerHost`). Deps: `@everdict/core` + `@everdict/agent` +
+  `@everdict/topology` + `@everdict/trace` + MCP SDK. Consumers: `apps/cli` (thin flags wrapper),
   `apps/desktop`. It must stay GUI-free and transport-injectable (DI like `RunnerLoopDeps`).
-- `apps/desktop` — deps: `@assay/runner-core` + `electron` (+ `electron-builder` dev). It must NOT
-  import `@assay/api`, `@assay/db`, or web code. Reverse imports are bugs.
+- `apps/desktop` — deps: `@everdict/runner-core` + `electron` (+ `electron-builder` dev). It must NOT
+  import `@everdict/api`, `@everdict/db`, or web code. Reverse imports are bugs.
 
 ## Tooling
 - Root **Biome applies** (unlike `apps/web` — no Next/eslint ecosystem here). Plain `tsc` build:
@@ -57,8 +57,8 @@ logged-in web session over a minimal preload bridge.
   (gates must not download OS artifacts). It bundles main/preload to single files first
   (`esbuild.mjs`, `electron` external) so pnpm's symlinked `node_modules` never enters the asar;
   the packaged entry is swapped via `extraMetadata.main` (dev keeps `dist/main.js`). Keep
-  `linux.executableName` path-safe (the package name `@assay/desktop` is not). Local dev:
-  `pnpm -F @assay/desktop dev` (`ASSAY_WEB_URL=http://localhost:3000` against a dev web).
+  `linux.executableName` path-safe (the package name `@everdict/desktop` is not). Local dev:
+  `pnpm -F @everdict/desktop dev` (`EVERDICT_WEB_URL=http://localhost:3000` against a dev web).
 - Releases ship from CI only: push tag `desktop-vX.Y.Z` → `.github/workflows/desktop-release.yml`
   builds the 3-OS matrix and publishes one GitHub Release (manual dispatch → draft). The version in
   `apps/desktop/package.json` stays `0.0.0` — CI injects the tag version at build time; do NOT bump
@@ -67,7 +67,7 @@ logged-in web session over a minimal preload bridge.
   electron-updater). Detect/download automatic; APPLY only via tray (graceful runner shutdown first —
   set `quitting`+`shuttingDown` before `quitAndInstall` or before-quit's preventDefault cancels the
   install). Activation gate lives in `resolveAutoUpdater()` (main.ts): packaged app-update.yml (future
-  `publish` config) or `ASSAY_UPDATE_FEED_URL` → userData config via `updateConfigPath` (`setFeedURL`
+  `publish` config) or `EVERDICT_UPDATE_FEED_URL` → userData config via `updateConfigPath` (`setFeedURL`
   alone breaks at download). Do NOT add a `publish` block to electron-builder.yml until the public
   feed location is decided (repo is private — apps can't read its releases).
 

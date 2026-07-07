@@ -1,5 +1,5 @@
 {
-  "name": "@assay/environments",
+  "name": "@everdict/environments",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -13,6 +13,6 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@assay/core": "workspace:*"
+    "@everdict/core": "workspace:*"
   }
 }

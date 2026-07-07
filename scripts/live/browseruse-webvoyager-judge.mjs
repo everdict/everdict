@@ -1,11 +1,11 @@
 // 라이브 e2e (service-topology): WebVoyager 를 *공식 방식(judge 채점)*으로 — browser-use 하니스 + LiteLLM judge.
-// 공식 WebVoyager 는 GPT-4V 가 트라젝토리를 판정한다(정답 필드 없음). assay 의 webvoyager 어댑터도 judge 그레이더를
-// 포함 → 여기선 ASSAY_JUDGE_MODEL(LiteLLM) 을 켜서 makeGradersFromEnv 가 JudgeGrader 를 빌드하게 하고(trace+dom 을
+// 공식 WebVoyager 는 GPT-4V 가 트라젝토리를 판정한다(정답 필드 없음). everdict 의 webvoyager 어댑터도 judge 그레이더를
+// 포함 → 여기선 EVERDICT_JUDGE_MODEL(LiteLLM) 을 켜서 makeGradersFromEnv 가 JudgeGrader 를 빌드하게 하고(trace+dom 을
 // WEBVOYAGER_RUBRIC 로 판정), browser-use 가 실 사이트를 구동한 결과를 judge 가 pass/fail + 사유로 채점한다.
 //   WV_SOURCE=sample  → examples/benchmarks/webvoyager-sample.jsonl (정답 있음 → judge + answer-match 비교) [②]
 //   WV_SOURCE=real    → github WebVoyager_data.jsonl 다운로드, benign 사이트에서 WV_N 개 샘플(정답 없음 → judge 만) [③]
 //
-// 사전: docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
+// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -16,10 +16,10 @@ import { summarizeScorecard } from "../../packages/suite/dist/index.js";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
 const MODEL = process.env.BROWSERUSE_MODEL ?? "chatgpt/gpt-5.4";
-const JUDGE_MODEL = process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini";
+const JUDGE_MODEL = process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini";
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 const WV_SOURCE = process.env.WV_SOURCE ?? "sample";
 const WV_N = Number(process.env.WV_N ?? "6");
@@ -33,7 +33,7 @@ const RESTRICT = process.env.RESTRICT_DOMAIN === "1"; // 켜면 에이전트를 
 const BENIGN = (process.env.WV_SITES ?? "ArXiv,BBC News,Cambridge Dictionary,Coursera,ESPN,GitHub,Wolfram Alpha").split(
   ",",
 );
-const NAME = "assay-bu-wvjudge";
+const NAME = "everdict-bu-wvjudge";
 const FRONT = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -52,8 +52,8 @@ if (!KEY) {
   process.exit(2);
 }
 // judge 활성화 — 백엔드의 makeGradersFromEnv → judgeFromEnv(process.env) 가 이 env 로 JudgeGrader(LiteLLM) 빌드.
-process.env.ASSAY_JUDGE_MODEL = JUDGE_MODEL;
-process.env.ASSAY_JUDGE_PROVIDER = "openai";
+process.env.EVERDICT_JUDGE_MODEL = JUDGE_MODEL;
+process.env.EVERDICT_JUDGE_PROVIDER = "openai";
 process.env.OPENAI_API_KEY = KEY;
 process.env.OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1";
 const cleanup = () => spawnSync("docker", ["rm", "-f", NAME], { stdio: "ignore" });
@@ -247,7 +247,7 @@ try {
       ? `\n✅ ${WV_SOURCE === "sample" ? "②" : "③"}: WebVoyager(${WV_SOURCE}, ${results.length}케이스)를 공식 방식(LiteLLM judge=${JUDGE_MODEL}, ` +
           `WEBVOYAGER_RUBRIC 로 trace+dom 판정)으로 채점 — judge passRate=${((judgeSummary?.passRate ?? 0) * 100).toFixed(0)}%` +
           `${WV_SOURCE === "real" ? " (실 사이트, 정답 없음 → judge 만; 실패는 위 분석)" : " + answer-match 비교"}. browser-use 가 실 사이트를 구동한 트라젝토리를 judge 가 평가.`
-      : "\n⚠️ judge 미채점(ASSAY_JUDGE_MODEL/키 확인)",
+      : "\n⚠️ judge 미채점(EVERDICT_JUDGE_MODEL/키 확인)",
   );
 } catch (e) {
   console.error("error:", e instanceof Error ? e.message : e);

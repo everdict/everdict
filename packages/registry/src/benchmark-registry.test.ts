@@ -1,4 +1,4 @@
-import type { BenchmarkAdapterSpec } from "@assay/datasets";
+import type { BenchmarkAdapterSpec } from "@everdict/datasets";
 import { describe, expect, it } from "vitest";
 import { InMemoryBenchmarkRegistry } from "./benchmark-registry.js";
 

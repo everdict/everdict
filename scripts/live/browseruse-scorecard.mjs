@@ -3,7 +3,7 @@
 // Scorecard 로 모으고, summarizeScorecard(메트릭별 통과율/평균 cost·steps) + diffScorecards(pass 전이 회귀/개선 + 메트릭
 // delta)로 A/B 비교. = 컨트롤플레인의 ScorecardService(runSuite→summarize→diff) 가 하는 일을 실 browser-use 로.
 //
-// 사전: docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
+// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -13,12 +13,12 @@ import { diffScorecards, summarizeScorecard } from "../../packages/suite/dist/in
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 const PRICE_IN = process.env.BROWSERUSE_PRICE_IN ?? "0.00000015";
 const PRICE_OUT = process.env.BROWSERUSE_PRICE_OUT ?? "0.0000006";
-const NAME = "assay-bu-scorecard";
+const NAME = "everdict-bu-scorecard";
 const FRONT = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -41,12 +41,12 @@ const cleanup = () => spawnSync("docker", ["rm", "-f", NAME], { stdio: "ignore" 
 // 데이터셋 — 여러 web 태스크(컨테이너 폼 검색 2종 + 외부 Wikipedia 1종). caseId 는 모델 간 동일(diff 매칭용).
 const DATASET = [
   {
-    id: "form-assay",
+    id: "form-everdict",
     env: { kind: "browser", url: `${FRONT}/form` },
-    task: `Go to ${FRONT}/form , type "assay eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
+    task: `Go to ${FRONT}/form , type "everdict eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
     graders: [
-      { id: "url-matches", config: { pattern: "[?&]q=assay" } },
-      { id: "dom-contains", config: { text: "Results for assay" } },
+      { id: "url-matches", config: { pattern: "[?&]q=everdict" } },
+      { id: "dom-contains", config: { text: "Results for everdict" } },
       { id: "steps", config: {} },
       { id: "cost", config: {} },
     ],

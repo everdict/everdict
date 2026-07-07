@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import { detectCapabilities } from "./capabilities.js";
 import { runLeasedJob } from "./run-leased-job.js";
 import { runLeaseWorkers } from "./runner-loop.js";

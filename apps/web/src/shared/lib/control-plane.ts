@@ -2,18 +2,18 @@ import 'server-only'
 
 import { env } from '@/shared/config/env'
 
-// 컨트롤플레인(@assay/api) HTTP 클라이언트 — 서버에서만 호출.
+// 컨트롤플레인(@everdict/api) HTTP 클라이언트 — 서버에서만 호출.
 // 인증 컨텍스트: 로그인 사용자는 Keycloak 액세스 토큰을 Authorization: Bearer 로 그대로 전달하고
-// (인증/인가 판단은 컨트롤플레인이 한다), Keycloak 미설정(dev)에선 x-assay-tenant 로 폴백한다.
-// workspace 가 있으면(=사이드바에서 전환한 활성 워크스페이스 쿠키) x-assay-workspace 로 전달해 그 워크스페이스로 스코프한다.
+// (인증/인가 판단은 컨트롤플레인이 한다), Keycloak 미설정(dev)에선 x-everdict-tenant 로 폴백한다.
+// workspace 가 있으면(=사이드바에서 전환한 활성 워크스페이스 쿠키) x-everdict-workspace 로 전달해 그 워크스페이스로 스코프한다.
 export type AuthContext = ({ bearer: string } | { devTenant: string }) & { workspace?: string }
 
 function authHeaders(auth: AuthContext): Record<string, string> {
   const headers: Record<string, string> =
     'bearer' in auth
       ? { authorization: `Bearer ${auth.bearer}` }
-      : { 'x-assay-tenant': auth.devTenant }
-  if (auth.workspace) headers['x-assay-workspace'] = auth.workspace
+      : { 'x-everdict-tenant': auth.devTenant }
+  if (auth.workspace) headers['x-everdict-workspace'] = auth.workspace
   return headers
 }
 
@@ -331,7 +331,7 @@ export const controlPlane = {
       method: 'PUT',
       body: JSON.stringify(body),
     }),
-  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + assay image push 발행 대상.
+  // 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + everdict image push 발행 대상.
   // 조회 harnesses:read(viewer+ — 분류 배지용) / 등록(name 기준 upsert)·삭제 settings:write. 시크릿은 이름 참조만 오간다.
   listImageRegistries: <T>(auth: AuthContext) => call<T>(auth, '/workspace/image-registries'),
   upsertImageRegistry: <T>(auth: AuthContext, body: unknown) =>
@@ -371,7 +371,7 @@ export const controlPlane = {
     call<T>(auth, '/workspace/runners', { method: 'POST', body: JSON.stringify(body) }),
   revokeWorkspaceRunner: (auth: AuthContext, id: string) =>
     callVoid(auth, `/workspace/runners/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  // GitHub Actions 러너 자가등록 — 빌드 서버에 GitHub 러너 + Assay 워크스페이스-공유 러너를 함께 세우는 설치 스크립트 생성.
+  // GitHub Actions 러너 자가등록 — 빌드 서버에 GitHub 러너 + Everdict 워크스페이스-공유 러너를 함께 세우는 설치 스크립트 생성.
   githubInstallWorkspaceRunner: <T>(auth: AuthContext, body: unknown) =>
     call<T>(auth, '/workspace/runners/github-install', {
       method: 'POST',

@@ -10,7 +10,7 @@
 //     5) scrot 로 클릭 전/후 스크린샷(os-use 관측) → host 로 회수해 육안 확인.
 //   grader(command) 가 컨테이너 안에서 drive-result.json 을 읽어 ok && transitioned 를 pass 로 판정.
 //
-// 이미지는 scripts/live/Dockerfile.hermes(=/tmp/hermes-desktop/Dockerfile.assay) 로 미리 빌드: assay-hermes-drive:demo
+// 이미지는 scripts/live/Dockerfile.hermes(=/tmp/hermes-desktop/Dockerfile.everdict) 로 미리 빌드: everdict-hermes-drive:demo
 import { execFileSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import process from "node:process";
@@ -18,7 +18,7 @@ import { DockerDriver } from "../../packages/drivers/dist/index.js";
 import { OsUseEnvironment } from "../../packages/environments/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 
-const IMAGE = process.env.HERMES_IMAGE ?? "assay-hermes-drive:demo";
+const IMAGE = process.env.HERMES_IMAGE ?? "everdict-hermes-drive:demo";
 
 // 컨테이너 안에서 도는 "에이전트" 드라이버(CommonJS — hermes 의 playwright 를 require). 실 OS 입력(xdotool)으로 GUI 구동.
 const DRIVER = String.raw`
@@ -115,7 +115,7 @@ try {
       "Xvfb :99 -screen 0 1280x900x24 -nolisten tcp >/tmp/xvfb.log 2>&1 & sleep 2",
       "cd /app && ENABLE_CDP=1 CDP_PORT=9222 DISPLAY=:99 ./node_modules/.bin/electron . --no-sandbox --disable-gpu --disable-dev-shm-usage >/tmp/electron.log 2>&1 & sleep 10",
     ],
-    screenshotPath: "/tmp/assay-screen.png",
+    screenshotPath: "/tmp/everdict-screen.png",
   });
 
   console.log("=== 에이전트 구동: CDP attach → 실 OS 클릭(xdotool) → 상태전이 검증 ===");

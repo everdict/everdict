@@ -1,17 +1,17 @@
-name: "Assay Run Eval"
+name: "Everdict Run Eval"
 description: >-
-  Fire an Assay evaluation from CI. Pull requests run the topology with this build's image
+  Fire an Everdict evaluation from CI. Pull requests run the topology with this build's image
   swapped in (ephemeral pins — registry untouched); /evaluate PR comments (issue_comment)
   do the same on demand, replying to the PR conversation; pushes to dev/main re-pin the
   harness to a new immutable version (the "dev channel") and evaluate it.
-author: "assay"
+author: "everdict"
 
 inputs:
   api-url:
-    description: "Assay control-plane base URL (e.g. https://assay.example.com)"
+    description: "Everdict control-plane base URL (e.g. https://everdict.example.com)"
     required: true
   workspace:
-    description: "Workspace slug (x-assay-workspace)"
+    description: "Workspace slug (x-everdict-workspace)"
     required: true
   api-key:
     description: "Workspace API key (ak_…). Omit to use GitHub OIDC federation (keyless; requires a repo link in the workspace)"

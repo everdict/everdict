@@ -11,7 +11,7 @@ import { LocalDriver } from "../../packages/drivers/dist/index.js";
 import { SweBenchGrader } from "../../packages/graders/dist/index.js";
 
 const TESTCMD = "python3 -m pytest -q --no-header";
-const GIT = "git -c user.email=a@b.c -c user.name=assay";
+const GIT = "git -c user.email=a@b.c -c user.name=everdict";
 
 const BUGGY = "def add(a, b):\n    return a - b  # BUG\n\ndef mul(a, b):\n    return a * b\n";
 const FIXED = "def add(a, b):\n    return a + b\n\ndef mul(a, b):\n    return a * b\n";
@@ -67,7 +67,7 @@ try {
   console.log(`\n[no fix]   resolved=${a.pass} value=${a.value}  ${String(a.detail).split("\\n")[0]}`);
 
   // baseline 복귀(test_patch 적용분 되돌림) 후 gold 패치(=에이전트 예측) 적용 → 다시 채점.
-  await sh("git checkout -- . && rm -f .assay_test.patch");
+  await sh("git checkout -- . && rm -f .everdict_test.patch");
   await compute.writeFile("work/gold.patch", GOLD_PATCH);
   const applied = await sh("git apply gold.patch && rm -f gold.patch");
   console.log(`[gold apply] exit=${applied.exitCode}`);

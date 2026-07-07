@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecResult, GradeContext } from "@assay/core";
+import type { ComputeHandle, ExecResult, GradeContext } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { SweBenchGrader } from "./swe-bench.js";
 

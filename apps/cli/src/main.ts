@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type DriverMount, collectAuthEnv, hasClaudeAuth } from "@assay/agent";
+import { type DriverMount, collectAuthEnv, hasClaudeAuth } from "@everdict/agent";
 import {
   BackendRegistry,
   BackendsConfigSchema,
@@ -9,12 +9,18 @@ import {
   NomadBackend,
   Router,
   buildRegistry,
-} from "@assay/backends";
-import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@assay/core";
-import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@assay/orchestrator";
-import { ResilientMcpSession, detectCapabilities, mcpConnect, runLeaseWorkers, runLeasedJob } from "@assay/runner-core";
-import { diffScorecards, runSuite, summarizeScorecard } from "@assay/suite";
-import type { DockerTopologyRuntimeOptions } from "@assay/topology";
+} from "@everdict/backends";
+import { type AgentJob, AppError, type GraderSpec, ScorecardSchema, SuiteSchema } from "@everdict/core";
+import { DirectOrchestrator, type Orchestrator, TemporalOrchestrator, runWorker } from "@everdict/orchestrator";
+import {
+  ResilientMcpSession,
+  detectCapabilities,
+  mcpConnect,
+  runLeaseWorkers,
+  runLeasedJob,
+} from "@everdict/runner-core";
+import { diffScorecards, runSuite, summarizeScorecard } from "@everdict/suite";
+import type { DockerTopologyRuntimeOptions } from "@everdict/topology";
 import { imagePushCommand } from "./image-push.js";
 
 function parseFlags(argv: string[]): Map<string, string> {
@@ -37,7 +43,7 @@ function parseFlags(argv: string[]): Map<string, string> {
 function usage(): void {
   console.error(
     [
-      "assay run --task <text> [options]",
+      "everdict run --task <text> [options]",
       "  --orchestrator direct | temporal       (default: direct)",
       "  --harness      claude-code | scripted   (default: claude-code)",
       "  --backend      local | nomad            (direct mode; default: local)",
@@ -46,17 +52,17 @@ function usage(): void {
       "  routing:  --backends-config <file> [--target <name>]",
       "  temporal: --temporal-address <addr> [--task-queue <q>]",
       "",
-      "assay worker [--backends-config <file>] [--temporal-address <addr>] [--task-queue <q>]",
+      "everdict worker [--backends-config <file>] [--temporal-address <addr>] [--task-queue <q>]",
       "  long-running control-plane worker (runs activities = backend dispatch)",
       "",
-      "assay suite --suite <file.json> [--harness-version <v>] [--baseline <scorecard.json>] [--concurrency N]",
+      "everdict suite --suite <file.json> [--harness-version <v>] [--baseline <scorecard.json>] [--concurrency N]",
       "  run a suite (cases × a version) → Scorecard + summary; --baseline diffs two versions (regression)",
       "",
-      "assay image push <local-ref> [--name <n>] [--tag <t>] [--api-url <url>] [--api-key <ak_…>]",
+      "everdict image push <local-ref> [--name <n>] [--tag <t>] [--api-url <url>] [--api-key <ak_…>]",
       "  publish a locally built image to the workspace image registry (docker tag+push,",
       "  credentials minted by the control plane, isolated temp DOCKER_CONFIG) → prints the ref to pin",
       "",
-      "assay runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N] [--max-concurrent N]",
+      "everdict runner --pair <rnr_…> [--api-url <url>] [--wait-ms N] [--heartbeat-ms N] [--max-concurrent N]",
       "  self-hosted runner: pull workspace jobs to THIS machine, run locally (your login), report back",
       "  --max-concurrent N: run N lease workers at once (case-level parallelism; default 1)",
       "  --mount-codex-login: bind ~/.codex into containerized (case.image) jobs → codex runs in-image with your login",
@@ -84,7 +90,7 @@ function buildJob(flags: Map<string, string>, task: string): AgentJob {
         : { kind: "repo", source: { files: {} } },
       task,
       graders,
-      timeoutSec: Number(process.env.ASSAY_TIMEOUT_SEC ?? "300"),
+      timeoutSec: Number(process.env.EVERDICT_TIMEOUT_SEC ?? "300"),
       tags: ["cli"],
       ...(explicitTarget ? { placement: { target: explicitTarget } } : {}),
     },
@@ -95,7 +101,7 @@ function buildJob(flags: Map<string, string>, task: string): AgentJob {
 function buildDirectRouter(flags: Map<string, string>): Router | undefined {
   const harnessName = flags.get("harness") ?? "claude-code";
   const backendName = flags.get("backend") ?? "local";
-  const configPath = flags.get("backends-config") ?? process.env.ASSAY_BACKENDS_CONFIG;
+  const configPath = flags.get("backends-config") ?? process.env.EVERDICT_BACKENDS_CONFIG;
 
   if (configPath) {
     const cfg = BackendsConfigSchema.parse(JSON.parse(readFileSync(configPath, "utf8")));
@@ -104,9 +110,9 @@ function buildDirectRouter(flags: Map<string, string>): Router | undefined {
   }
   if (backendName === "nomad") {
     const addr = flags.get("nomad-addr") ?? process.env.NOMAD_ADDR;
-    const image = flags.get("image") ?? process.env.ASSAY_AGENT_IMAGE;
+    const image = flags.get("image") ?? process.env.EVERDICT_AGENT_IMAGE;
     if (!addr || !image) {
-      console.error("✗ nomad 백엔드엔 --nomad-addr 와 --image (또는 NOMAD_ADDR / ASSAY_AGENT_IMAGE) 가 필요합니다.");
+      console.error("✗ nomad 백엔드엔 --nomad-addr 와 --image (또는 NOMAD_ADDR / EVERDICT_AGENT_IMAGE) 가 필요합니다.");
       process.exitCode = 1;
       return undefined;
     }
@@ -171,13 +177,13 @@ async function runCommand(flags: Map<string, string>): Promise<void> {
 }
 
 async function workerCommand(flags: Map<string, string>): Promise<void> {
-  const configPath = flags.get("backends-config") ?? process.env.ASSAY_BACKENDS_CONFIG;
+  const configPath = flags.get("backends-config") ?? process.env.EVERDICT_BACKENDS_CONFIG;
   const config = configPath ? BackendsConfigSchema.parse(JSON.parse(readFileSync(configPath, "utf8"))) : undefined;
   if (!hasClaudeAuth()) {
     console.error("ℹ worker env 에 claude 인증이 없습니다 — claude-code 잡이 샌드박스 백엔드에서 실패할 수 있습니다.");
   }
   console.error(
-    `▶ assay worker — task queue '${flags.get("task-queue") ?? "assay-eval"}' @ ${flags.get("temporal-address") ?? "localhost:7233"} (Ctrl-C 종료) …`,
+    `▶ everdict worker — task queue '${flags.get("task-queue") ?? "everdict-eval"}' @ ${flags.get("temporal-address") ?? "localhost:7233"} (Ctrl-C 종료) …`,
   );
   await runWorker({ address: flags.get("temporal-address"), taskQueue: flags.get("task-queue"), config });
 }
@@ -213,15 +219,15 @@ async function suiteCommand(flags: Map<string, string>): Promise<void> {
 // docker 데몬 도달성 — 있으면 러너가 docker/browser capability 를 광고(service 하니스를 로컬 Docker 토폴로지로 구동).
 // 설계: docs/architecture/self-hosted-runner.md (+ self-hosted-service-runner.md).
 async function runnerCommand(flags: Map<string, string>): Promise<void> {
-  const token = flags.get("pair") ?? process.env.ASSAY_RUNNER_TOKEN;
+  const token = flags.get("pair") ?? process.env.EVERDICT_RUNNER_TOKEN;
   if (!token || !token.startsWith("rnr_")) {
     console.error(
-      "✗ --pair <rnr_…> (또는 ASSAY_RUNNER_TOKEN) 가 필요합니다 — 계정 페이지에서 디바이스를 페어링하세요.",
+      "✗ --pair <rnr_…> (또는 EVERDICT_RUNNER_TOKEN) 가 필요합니다 — 계정 페이지에서 디바이스를 페어링하세요.",
     );
     process.exitCode = 1;
     return;
   }
-  const apiUrl = flags.get("api-url") ?? process.env.ASSAY_API_URL ?? "http://localhost:8787";
+  const apiUrl = flags.get("api-url") ?? process.env.EVERDICT_API_URL ?? "http://localhost:8787";
   const mcpUrl = new URL("/mcp", apiUrl);
   const pollMs = Number(flags.get("poll-interval-ms") ?? "2000"); // 에러 재시도 backoff
   const waitMs = Number(flags.get("wait-ms") ?? "25000"); // lease long-poll 대기(서버가 잡 생길 때까지 잡아둠)
@@ -261,12 +267,12 @@ async function runnerCommand(flags: Map<string, string>): Promise<void> {
     }
   }
 
-  // wedge 방지: API 재시작/단절 시 세션을 자동 재초기화하는 회복형 MCP 세션(@assay/runner-core). 지연 연결.
+  // wedge 방지: API 재시작/단절 시 세션을 자동 재초기화하는 회복형 MCP 세션(@everdict/runner-core). 지연 연결.
   const session = new ResilientMcpSession(mcpConnect(mcpUrl, token));
   try {
     await session.ensureConnected();
     console.error(
-      `▶ assay runner — ${mcpUrl} 연결됨. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (docker 없음 → service 하니스 불가)"}. 동시 ${maxConcurrent} 워커로 잡 폴링 중(Ctrl-C 종료) …`,
+      `▶ everdict runner — ${mcpUrl} 연결됨. capabilities: ${capabilities.join(", ")}${dockerOk ? "" : " (docker 없음 → service 하니스 불가)"}. 동시 ${maxConcurrent} 워커로 잡 폴링 중(Ctrl-C 종료) …`,
     );
   } catch (e) {
     console.error(`⚠ 초기 연결 실패(${errMsg(e)}) — 폴링하며 재시도합니다 …`);

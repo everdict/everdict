@@ -1,6 +1,6 @@
-import { BadRequestError, type CaseResult } from "@assay/core";
-import { InMemoryWorkspaceSettingsStore } from "@assay/db";
-import type { TraceSinkConfig } from "@assay/trace";
+import { BadRequestError, type CaseResult } from "@everdict/core";
+import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
+import type { TraceSinkConfig } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
 import { TraceSinkService } from "./trace-sink-service.js";
 

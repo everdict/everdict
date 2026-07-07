@@ -54,7 +54,7 @@ export const TopologyServiceSchema = z.object({
 export type TopologyService = z.infer<typeof TopologyServiceSchema>;
 
 // 의존 스토어 (공유 + 케이스별 논리격리). isolateBy = 격리 키 종류.
-// isolateBy="external" = BYO 외부/공유 스토어(다른 클러스터 등) — Assay 가 배포/격리하지 않고 서비스가 그냥 붙는다.
+// isolateBy="external" = BYO 외부/공유 스토어(다른 클러스터 등) — Everdict 가 배포/격리하지 않고 서비스가 그냥 붙는다.
 //   연결은 스펙 밖, 배포 시 env(storeEnv)/service.env 로 주입(StoreIsolation 의 external 모델과 일관).
 //   런타임은 external dep 를 프로비저닝/와이어링에서 제외하고, 다이어그램/구조는 first-class 로 노출만 한다.
 // service = 이 스토어를 쓰는 서비스(미지정 = 토폴로지 공용) — 다이어그램의 서비스→스토어 엣지용.
@@ -81,7 +81,7 @@ export type ObservationDelivery = z.infer<typeof ObservationDeliverySchema>;
 
 // 타깃 획득 전략(B2) — 타깃 환경을 어떻게 손에 넣는가. 미설정 = provision(현행: 런타임이 per-case 브라우저 컨테이너를 띄움).
 // service = 선언된 토폴로지 서비스의 세션 API 를 열고(open) 응답 필드를 wiring 좌표로 매핑(coordinates), dispose 시 close.
-// → 자체 세션 브라우저(playwright-server/Browserbase 류)를 가진 하니스를 Assay 컨테이너 없이 표현.
+// → 자체 세션 브라우저(playwright-server/Browserbase 류)를 가진 하니스를 Everdict 컨테이너 없이 표현.
 // open 요청 본문/헤더 템플릿은 후속(front-door request.headers 와 함께). 설계: docs/architecture/target-acquisition-generalization.md.
 export const TargetAcquireSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("provision") }),
@@ -160,7 +160,7 @@ export const FrontDoorCompletionSchema = z.discriminatedUnion("mode", [
 export type FrontDoorCompletion = z.infer<typeof FrontDoorCompletionSchema>;
 
 // 트레이스 상관(#3): 어떤 id 로 traceSource 에서 이 run 의 트레이스를 끌어오는가.
-// injected = assay 가 주입한 run_id 로 상관(미지정 시 기본, 현행 — CommandHarness {{run_id}} 와 같은 가정).
+// injected = everdict 가 주입한 run_id 로 상관(미지정 시 기본, 현행 — CommandHarness {{run_id}} 와 같은 가정).
 // returned = 에이전트가 자기 id 를 mint 해 submit 응답으로 돌려줌 → 그 id 로 상관(+ poll statusPath 도 그 id 로 보간).
 export const FrontDoorCorrelateSchema = z.discriminatedUnion("mode", [
   z.object({ mode: z.literal("injected") }),
@@ -210,7 +210,7 @@ export const ServiceHarnessSpecSchema = z.object({
 export type ServiceHarnessSpec = z.infer<typeof ServiceHarnessSpecSchema>;
 
 // command 하니스의 트레이스 추출: 없음(결과만) | 플랫폼 pull(otel/mlflow/langfuse/langsmith/phoenix —
-// @assay/trace buildTraceSource 5종과 동일, runId 로 상관).
+// @everdict/trace buildTraceSource 5종과 동일, runId 로 상관).
 // collect: 수집 위치 — "job"(기본, 잡 안에서 compute 해제 후 pull; 클러스터 내부 엔드포인트도 동작) |
 // "control-plane"(잡은 실행에서 끝, 컨트롤플레인이 pull+관측물 채점 — 엔드포인트가 컨트롤플레인에서 닿을 때만).
 // authSecret: 엔드포인트 인증(SecretStore 이름 — 값의 헤더 배치는 어댑터 관례: otel/mlflow=verbatim
@@ -228,7 +228,7 @@ export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
     kind: z.literal("otel"),
     endpoint: z.string(),
     ...commandTraceAuth,
-    // 상관 방식: "id"(기본) = runId 가 곧 trace id | "tag" = 에이전트 리소스 속성 assay.run_id 로 검색
+    // 상관 방식: "id"(기본) = runId 가 곧 trace id | "tag" = 에이전트 리소스 속성 everdict.run_id 로 검색
     // (주입 env OTEL_RESOURCE_ATTRIBUTES 그대로 — Jaeger query API 전용, service 필수).
     correlate: z.enum(["id", "tag"]).default("id"),
     service: z.string().optional(), // tag 상관의 검색 범위(에이전트의 service.name)
@@ -238,7 +238,7 @@ export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
     endpoint: z.string(),
     ...commandTraceAuth,
     // 상관 방식: "id"(기본) = runId 가 곧 MLflow trace_id(pull-ingest 관례) | "tag" = 계측 에이전트가
-    // 자기 trace 에 남긴 assay.run_id 태그로 검색(id 는 서버 mint — 실 에이전트 경로). tag 는 experiment 필수.
+    // 자기 trace 에 남긴 everdict.run_id 태그로 검색(id 는 서버 mint — 실 에이전트 경로). tag 는 experiment 필수.
     correlate: z.enum(["id", "tag"]).default("id"),
     experiment: z.string().optional(), // tag 상관의 검색 범위(MLflow traces/search 는 locations 필수)
   }),
@@ -256,7 +256,7 @@ export type CommandTraceSpec = z.infer<typeof CommandTraceSpecSchema>;
 
 // command 하니스: 선언형 프로세스 — 어떤 CLI 에이전트(aider 등)든 코드 어댑터 없이 스펙만으로 등록.
 // setup(설치) → command(템플릿 {{task}}/{{model}}/{{run_id}}) 실행 → trace(none/otel/mlflow) 추출.
-// 제너릭 CommandHarness(@assay/harnesses) 가 해석한다. 임의 코드 실행이므로 trust-zone 격리가 강제된다.
+// 제너릭 CommandHarness(@everdict/harnesses) 가 해석한다. 임의 코드 실행이므로 trust-zone 격리가 강제된다.
 export const CommandHarnessSpecSchema = z.object({
   kind: z.literal("command"),
   id: z.string(),

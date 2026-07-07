@@ -1,4 +1,4 @@
-import { type EnvSnapshot, EnvSnapshotSchema, InternalError, type ObservationDelivery } from "@assay/core";
+import { type EnvSnapshot, EnvSnapshotSchema, InternalError, type ObservationDelivery } from "@everdict/core";
 import { getField, interpolatePath } from "./front-door-driver.js";
 
 // 관측물(observation/관측물) 회수 추상화 — TopologyRuntime(WHERE)/FrontDoorDriver(HOW-drive) 의 형제(HOW-observe).
@@ -56,7 +56,7 @@ export function sentinelObservationSource(path: string | undefined): Observation
 }
 
 // egress(push-to-sink): 에이전트가 관측물을 sink 로 밀어넣고, 평가는 그 sink 에서 회수한다. sink 는 {run_id} 보간 URL
-// — getJson 으로 GET 후 EnvSnapshot 검증. (Assay 가 프로비저닝한 타깃 pull 이 아니라 에이전트가 보낸 위치에서 읽음.)
+// — getJson 으로 GET 후 EnvSnapshot 검증. (Everdict 가 프로비저닝한 타깃 pull 이 아니라 에이전트가 보낸 위치에서 읽음.)
 export function egressObservationSource(sink: string): ObservationSource {
   return {
     async observe({ getJson, wiring }) {

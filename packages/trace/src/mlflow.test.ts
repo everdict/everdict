@@ -1,4 +1,4 @@
-import { AppError } from "@assay/core";
+import { AppError } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { MlflowTraceSource, parseMlflowTrace } from "./mlflow.js";
 
@@ -80,9 +80,9 @@ describe("MlflowTraceSource.fetch", () => {
   });
 });
 
-// correlate="tag" — 계측 에이전트가 자기 trace 에 남긴 assay.run_id 태그로 검색(실 MLflow 3.14 API 형태 고정).
+// correlate="tag" — 계측 에이전트가 자기 trace 에 남긴 everdict.run_id 태그로 검색(실 MLflow 3.14 API 형태 고정).
 describe("MlflowTraceSource — tag 상관", () => {
-  it("traces/search(locations+tags.`assay.run_id` 필터)로 trace_id 를 찾은 뒤 그 id 로 스팬을 가져온다", async () => {
+  it("traces/search(locations+tags.`everdict.run_id` 필터)로 trace_id 를 찾은 뒤 그 id 로 스팬을 가져온다", async () => {
     const calls: Array<{ url: string; body?: string }> = [];
     const fetchImpl = vi.fn((...args: Parameters<typeof fetch>) => {
       const url = String(args[0]);
@@ -98,12 +98,12 @@ describe("MlflowTraceSource — tag 상관", () => {
       fetchImpl: fetchImpl as typeof fetch,
     });
 
-    const events = await src.fetch("assay-run-1");
+    const events = await src.fetch("everdict-run-1");
 
     const search = JSON.parse(calls[0]?.body ?? "{}");
     // 실 3.14 검증 형태: locations 필수 + 백틱 태그 필터.
     expect(search.locations).toEqual([{ type: "MLFLOW_EXPERIMENT", mlflow_experiment: { experiment_id: "7" } }]);
-    expect(search.filter).toBe("tags.`assay.run_id` = 'assay-run-1'");
+    expect(search.filter).toBe("tags.`everdict.run_id` = 'everdict-run-1'");
     expect(calls[1]?.url).toContain("trace_id=tr-found");
     expect(events.some((e) => e.kind === "llm_call")).toBe(true);
   });

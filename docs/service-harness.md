@@ -12,7 +12,7 @@ Chromium loading a client browser extension (the extension drives the browser).
 Service env precedence: store `connEnv` (conventional) < `service.env` (author) < runtime `storeEnv` (operator override).
 
 > **Planned — front-door generalization (design).** Today `ServiceTopologyBackend.dispatch` is hardcoded to one
-> protocol (browser-use-langgraph) in five places (fixed payload, fire-and-forget submit, trace-by-Assay-runId,
+> protocol (browser-use-langgraph) in five places (fixed payload, fire-and-forget submit, trace-by-Everdict-runId,
 > always-provisioned browser, fixed image). The direction to make the front-door **harness-agnostic** — a
 > declarative `FrontDoorProtocol` + a thin `FrontDoorDriver` (the sibling of the infra-agnostic `TopologyRuntime`),
 > with each hardcode becoming an optional knob defaulting to today's behavior — is captured in
@@ -32,7 +32,7 @@ Service env precedence: store `connEnv` (conventional) < `service.env` (author) 
 Register one `ServiceTopologyBackend` per target cluster in the `BackendRegistry`; Router/orchestrator unchanged.
 
 ### `NomadTopologyRuntime` (live)
-The live Nomad runtime (`@assay/topology`) implements `TopologyRuntime` against the Nomad HTTP API:
+The live Nomad runtime (`@everdict/topology`) implements `TopologyRuntime` against the Nomad HTTP API:
 - `ensureTopology(spec)` → register the warm **service** job, poll each group's alloc to `running`, and
   **discover endpoints** from the alloc (`resolvePort` reads `AllocatedResources.Shared.Ports`, falling back
   to `Resources.Networks`); cache per `id@version` so a version deploys once.
@@ -72,7 +72,7 @@ So there are three isolation layers, nested: **physical store fleet** → **per-
 **per-case isolateBy**. `TrustZone.storeIsolation` selects the model (the AWS SaaS-lens silo/pool framing):
 
 - **`pool`** (default for `trusted` zones) — one platform-managed **shared** PG/Redis (deployed once per cluster
-  in `assay-shared`), with per-tenant **logical** isolation: Postgres gets a dedicated `tenant_<zone>` **database**
+  in `everdict-shared`), with per-tenant **logical** isolation: Postgres gets a dedicated `tenant_<zone>` **database**
   + a non-superuser `r_<zone>` **role** (and `REVOKE CONNECT … FROM PUBLIC`, so other tenants' roles are refused);
   Redis gets an **ACL user** scoped to `~t:<zone>:*`. **MinIO** (object store / snapshots) gets a per-tenant
   **access key** + a `tenant-<zone>` **bucket** + an IAM **policy** scoping that key to only its bucket (minted via
@@ -83,12 +83,12 @@ So there are three isolation layers, nested: **physical store fleet** → **per-
 - **`silo`** (default for `untrusted`/compliance zones) — a **dedicated** store instance per zone (SLICE 39's
   `provisionDependencies` in the zone namespace). Strong blast-radius containment for hostile arbitrary code;
   higher cost. Use when logical isolation isn't enough.
-- **`external`** — BYO endpoint via `storeEnv`; Assay deploys no store.
+- **`external`** — BYO endpoint via `storeEnv`; Everdict deploys no store.
 
 ### Per-dependency `isolateBy: "external"` (spec-level BYO declaration)
 The deploy-time `storeIsolation: "external"` above is **zone-wide**. A single dependency can ALSO be declared
 external in the **HarnessSpec** itself: `{ store, role, isolateBy: "external", service? }`. This declares a store
-the harness just **connects to** (a different cluster's shared redis/minio/postgres) — Assay does **not** deploy
+the harness just **connects to** (a different cluster's shared redis/minio/postgres) — Everdict does **not** deploy
 or per-case-isolate it, and the connection comes from deploy-time `env`/`storeEnv`, not the spec
 (provisioning-agnostic). The runtime **excludes** external deps from provisioning + wiring (`dependencyStores`
 skips them → no container, no `connEnv`; `wiringVars` makes no isolation variable). The point is **visibility**:
@@ -99,7 +99,7 @@ diagram's service→store edge; unset = topology-wide).
 Default when a zone doesn't set it: `trusted → pool`, `untrusted → silo`; an explicit `storeIsolation` overrides.
 Password minting is HMAC(secret, `zone:store`) — deterministic (idempotent re-provision); production sources the
 secret from a KEK/Vault and would store minted creds. The pure planner is `planTenantStores(spec, zone)`
-(`@assay/topology`); `K8sTopologyRuntime` executes it (shared-store deploy-once → tenant DDL/ACL via
+(`@everdict/topology`); `K8sTopologyRuntime` executes it (shared-store deploy-once → tenant DDL/ACL via
 `kubectl exec` into the admin pod → scoped env into services).
 
 Verified live on **kind** (`scripts/live/pool-isolation-k8s.mjs`): one shared PG, zones `acme`+`globex` each got
@@ -111,14 +111,14 @@ store reach is a complementary hardening layer, not yet wired; the proof here is
 **Orchestrator-agnostic (K8s + Nomad parity).** `planTenantStores` is orchestrator-neutral — the only difference
 is the store endpoint: K8s uses a stable **Service DNS** (build-time), Nomad has no DNS without Consul so the
 runtime **discovers the alloc `host:port`** and injects it (`opts.storeEndpoint`). `NomadTopologyRuntime` mirrors
-the K8s pool path: deploy a shared-store **Nomad service job** (`assay-shared-stores`, deploy-once) → discover
+the K8s pool path: deploy a shared-store **Nomad service job** (`everdict-shared-stores`, deploy-once) → discover
 `host:port` via `resolvePort` → mint per-tenant DB/role/ACL via **`nomad alloc exec`** (the kubectl-exec analog) →
 inject scoped creds into the topology job's service env. Verified live on `nomad agent -dev`
 (`scripts/live/pool-isolation-nomad.mjs`): same result — one shared PG, `acme` creds → `tenant_globex` = **DENIED**,
 own DB = OK. So pool multi-tenant store isolation holds identically on **both** orchestrators.
 
 **Silo on Nomad** uses the same discover-then-inject path minus the DDL: `buildDedicatedStoreJob` renders a
-**per-zone dedicated** store job (`assay-store-<harness>-<zone>`), the runtime discovers its `host:port` and injects
+**per-zone dedicated** store job (`everdict-store-<harness>-<zone>`), the runtime discovers its `host:port` and injects
 the default-creds connection env into the services (the whole instance is the tenant's — no per-tenant DB needed).
 Verified live (`scripts/live/silo-isolation-nomad.mjs`): zones `acme`+`globex` each got a **distinct** dedicated PG
 instance (different host:ports), services wired to the discovered endpoint, both reachable — physical isolation.
@@ -134,7 +134,7 @@ PG/Redis pool.
 Per-tenant DB credentials (pool) stop a tenant from *reading* another tenant's data, but a hostile harness pod
 could still reach other tenants' **pods** or scan the shared store at the network layer. `TrustZone.network`
 (declared since the trust-zone slice, now **enforced**) drives K8s NetworkPolicies, generated by
-`buildZoneNetworkPolicies` / `buildSharedStoreIngressPolicy` (`@assay/topology`) and applied by
+`buildZoneNetworkPolicies` / `buildSharedStoreIngressPolicy` (`@everdict/topology`) and applied by
 `K8sTopologyRuntime`:
 
 - **`deny-cross-tenant`** (default) — a zone-namespace ingress policy allowing **only same-namespace** sources.
@@ -145,13 +145,13 @@ could still reach other tenants' **pods** or scan the shared store at the networ
   data exfiltration to the internet.
 - **`open`** — no policies.
 
-The shared store namespace (pool) gets an ingress policy allowing only **assay-managed** namespaces (label
-`assay/managed=true`, set on every namespace the runtime creates) on the store ports — so nothing outside the
+The shared store namespace (pool) gets an ingress policy allowing only **everdict-managed** namespaces (label
+`everdict/managed=true`, set on every namespace the runtime creates) on the store ports — so nothing outside the
 platform can reach the store. `kubectl port-forward` (endpoint discovery / front-door submit) is unaffected: it
 goes control-plane → kubelet → pod-netns localhost, bypassing the CNI policy.
 
 **Enforcement needs a policy-CNI** — kindnet (the default kind CNI) *ignores* NetworkPolicy, so the policies are
-unit-tested for correctness and verified live on a dedicated **Calico** kind cluster (`assay-np`). Verified
+unit-tested for correctness and verified live on a dedicated **Calico** kind cluster (`everdict-np`). Verified
 (`scripts/live/network-isolation-k8s.mjs`): (A) `acme` pod → `globex` echo service = **BLOCKED**, same-namespace
 = reachable; (B) `acme` (managed) → shared PG = reachable, a `rogue` non-managed namespace → shared PG =
 **BLOCKED**. So with a policy-CNI the tenant network boundary holds end-to-end; on a non-enforcing CNI the
@@ -174,7 +174,7 @@ advertisement limitation** — cross-alloc Connect needs a node-routable Consul 
 supplies this); it is **not** a flaw in the model, the builder, or the enforcement mechanism (xDS + intentions both
 work). **So the authoritative network-isolation proof remains the Consul-intention decision** —
 
-**Consul Connect intentions** (service-identity authz) are the Nomad analog of NetworkPolicy. `buildTenantIntentions` (`@assay/topology`) emits a
+**Consul Connect intentions** (service-identity authz) are the Nomad analog of NetworkPolicy. `buildTenantIntentions` (`@everdict/topology`) emits a
 `service-intentions` config entry per tenant service: `Sources = [allow each same-tenant mesh service, deny *]`.
 Consul evaluates by **precedence** (exact name > `*`), so a service in another tenant matches only the `*` deny —
 per-destination deny-by-default without touching global Consul config. The shared store gets an `allow *` intention
@@ -191,8 +191,8 @@ enforcement additionally needs the service jobs to be Connect-enabled** (Envoy s
 both store-level and network-level isolation are now at parity on K8s (NetworkPolicy) and Nomad (Connect
 intentions), each verified at the decision/enforcement layer their platform exposes.
 
-## Trace (`@assay/trace`)
-The harness emits a trace to OTel/MLflow; Assay **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →
+## Trace (`@everdict/trace`)
+The harness emits a trace to OTel/MLflow; Everdict **pulls** it: `OtelTraceSource` / `MlflowTraceSource` →
 `spansToTraceEvents` → normalized `TraceEvent[]` (OTel GenAI semantic conventions). `spansToTraceEvents` reads OTel
 GenAI keys (`gen_ai.request.model`, `gen_ai.usage.input_tokens`/`output_tokens`/`cost`) **and** MLflow-native
 fallbacks (`mlflow.llm.model`, `mlflow.chat.tokenUsage`, `mlflow.llm.cost`) — so both OTel-instrumented and
@@ -228,13 +228,13 @@ end-to-end even when the stand-in front-door emits no GenAI spans and MLflow rej
 
 ### Target acquisition (`target.acquire`) — pluggable (round 2)
 *How* the per-case target env is acquired is the `WHAT-target` seam (`TargetAcquirer`, the fourth sibling of
-`TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`). `TopologyTarget.acquire` (`@assay/core`) selects it; absent
+`TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`). `TopologyTarget.acquire` (`@everdict/core`) selects it; absent
 = **`provision`** (today). The per-case handle is a `TargetEnvHandle { wiring: Record<string,string>; snapshot; dispose }`
 — a **bag of named coordinates** (not one `cdpUrl`), merged into the per-run wiring so a `bodyTemplate` can reference
 any of them (`{{playwright_server_url}}`, `{{session_id}}`, …).
 - **`provision`** (default) — the runtime spins a per-case browser container and returns `wiring:{ target_cdp_url }`
   (today's behavior, byte-identical).
-- **`service`** — the target is provided by a **declared topology service**'s session API; no Assay-owned container.
+- **`service`** — the target is provided by a **declared topology service**'s session API; no Everdict-owned container.
   `targetAcquirerFor` routes to `serviceAcquirer`: `open` (e.g. `POST /sessions`) opens a session, `coordinates`
   (wiring-name → response dot-path) maps fields into the wiring bag, and `close` (e.g. `DELETE /sessions/{session_id}`)
   tears it down on `dispose()` ({var}-interpolated with the coordinates). Observation comes via `delivery`
@@ -245,16 +245,16 @@ See `docs/architecture/target-acquisition-generalization.md`.
 
 ### Observation delivery (`target.delivery`) — pluggable
 *How* the observation reaches the grader/judge is a seam (`ObservationSource`, the `HOW-observe` sibling of
-`TopologyRuntime`/`FrontDoorDriver`). `TopologyTarget.delivery` (`@assay/core`) selects the mode; absent =
+`TopologyRuntime`/`FrontDoorDriver`). `TopologyTarget.delivery` (`@everdict/core`) selects the mode; absent =
 **`reference`** (today). `dispatch` calls `observationSourceFor(spec.target?.delivery?.mode ?? "reference")`:
 - **`reference`** (store-fetch) — pull the provisioned target's `snapshot()` (or a `{kind:"prompt"}` snapshot when
   there's no target). The locality-sensitive mode — pairs with judge **co-location** (run the judge near the store).
 - **`sentinel`** — the run returns the observation inline via the **result channel** (the front-door HTTP response;
-  topology analog of the `__ASSAY_RESULT__` sentinel) — no store hop. `DriveOutcome.response` carries the completion
+  topology analog of the `__EVERDICT_RESULT__` sentinel) — no store hop. `DriveOutcome.response` carries the completion
   body (`sync` = submit response, `poll` = the `done` status body); `delivery.path?` is a dot-path into it (absent =
   whole body), validated as an `EnvSnapshot` (malformed → explicit run failure). Best for small observations.
-- **`egress`** — the agent pushes the observation to a named `sink` (out of band) and Assay **retrieves** it from
-  there (vs `reference` pulling Assay's own provisioned target). The `sink` is a `{run_id}`-interpolated URL GET'd via
+- **`egress`** — the agent pushes the observation to a named `sink` (out of band) and Everdict **retrieves** it from
+  there (vs `reference` pulling Everdict's own provisioned target). The `sink` is a `{run_id}`-interpolated URL GET'd via
   the backend's `getJson` (keyed by `outcome.traceRef`, matching the trace correlation), validated as an
   `EnvSnapshot`. For a harness that produces+ships its own result and exposes no CDP.
 
@@ -275,7 +275,7 @@ NOMAD_ADDR=http://127.0.0.1:4646 MLFLOW_ENDPOINT=http://127.0.0.1:5501 \
 
 ## Live validation (Kubernetes / kind)
 `scripts/live/service-topology-k8s.mjs` runs the same case on a real K8s cluster via `K8sTopologyRuntime`:
-namespace-per-tenant (`assay-acme`) → Deployment+Service applied → rollout → endpoint via `port-forward` →
+namespace-per-tenant (`everdict-acme`) → Deployment+Service applied → rollout → endpoint via `port-forward` →
 per-case headless-Chromium with a real CDP endpoint → real `POST /runs` (HTTP 200) → MLflow trace → `dom`/`url`
 graded over the real browser snapshot → namespace deleted on teardown. Confirmed end-to-end (~3s) on a local
 **kind** cluster — proving Nomad↔K8s parity through the orchestrator-agnostic `ServiceTopologyBackend`.
@@ -283,12 +283,12 @@ graded over the real browser snapshot → namespace deleted on teardown. Confirm
 ### Local kind cluster (persistent, for experiments)
 ```bash
 # one-time: kubectl + kind to ~/.local/bin, then
-kind create cluster --name assay
+kind create cluster --name everdict
 # load the stand-in images into the kind node (its own containerd; no registry needed)
-kind load docker-image mendhak/http-https-echo:latest chromedp/headless-shell:latest --name assay
+kind load docker-image mendhak/http-https-echo:latest chromedp/headless-shell:latest --name everdict
 PATH=$HOME/.local/bin:$PATH node scripts/live/service-topology-k8s.mjs
 ```
-The cluster persists across runs (`kind get clusters`); `kind delete cluster --name assay` to remove. gVisor
+The cluster persists across runs (`kind get clusters`); `kind delete cluster --name everdict` to remove. gVisor
 (`runtimeClass`) is not installed on kind, so the demo uses the default runtime; namespace isolation is real.
 
 ## Status
@@ -303,7 +303,7 @@ The cluster persists across runs (`kind get clusters`); `kind delete cluster --n
   (now-live) ingestion pipeline.
 
 ### Real browser-use library — live ✅ (`scripts/live/browser-use-agent.py` + `browser-use-grade.mjs`)
-The actual OSS **browser-use 0.13.1** (autonomous multi-step browser agent) runs against Assay's infra: it connects
+The actual OSS **browser-use 0.13.1** (autonomous multi-step browser agent) runs against Everdict's infra: it connects
 to our per-case **CDP browser** (`chromedp/headless-shell`, `BrowserSession(cdp_url=…)`) and uses our model
 (`gpt-5.4-mini` via LiteLLM, OpenAI-compatible, `ChatOpenAI(base_url, api_key)`), DOM-only (`use_vision=False`).
 **Verified live (4/4 runs, ~15s each):** the agent autonomously navigates to `https://example.com`, extracts the
@@ -320,15 +320,15 @@ to our per-case **CDP browser** (`chromedp/headless-shell`, `BrowserSession(cdp_
 The full eval loop on a **real browser benchmark**, through the **multi-tenant, user-owned dataset path** — since
 in a SaaS the user creates + owns datasets in their workspace.
 
-**Tenant-owned dataset model (already in place):** `Dataset` (`@assay/core`: id, version, `cases: EvalCase[]`,
-harness-independent, version-immutable) → `DatasetRegistry` (`@assay/registry`, InMemory + `PgDatasetRegistry`,
-**tenant-scoped** with `_shared` fallback for first-party benchmarks, version-immutable) → `assay_datasets(tenant,
+**Tenant-owned dataset model (already in place):** `Dataset` (`@everdict/core`: id, version, `cases: EvalCase[]`,
+harness-independent, version-immutable) → `DatasetRegistry` (`@everdict/registry`, InMemory + `PgDatasetRegistry`,
+**tenant-scoped** with `_shared` fallback for first-party benchmarks, version-immutable) → `everdict_datasets(tenant,
 id, version, dataset jsonb)` (migration 0005) → API `POST/GET /datasets` (gated `datasets:write/read`,
 `principal.workspace`-scoped) → web `register-dataset` feature. So a user registers + owns + versions datasets in
 their workspace, isolated per tenant.
 
-**The gap that was missing — format ingestion** (`@assay/datasets`, new): users have benchmarks in *external*
-formats (WebVoyager JSONL, CSV, HF), not the Assay `Dataset(EvalCase[])` schema. `@assay/datasets` converts them:
+**The gap that was missing — format ingestion** (`@everdict/datasets`, new): users have benchmarks in *external*
+formats (WebVoyager JSONL, CSV, HF), not the Everdict `Dataset(EvalCase[])` schema. `@everdict/datasets` converts them:
 `importWebVoyager` (preset: `web→env.startUrl`, `ques→task`, `answer→answer-match{expect}`, `+steps`),
 `importJsonl`/`importCsv` (a generic `CaseMapping` for arbitrary field names). Output is a validated `Dataset` →
 `DatasetRegistry.register(tenant, …)`. This is how a user *easily adds their own dataset*.
@@ -352,7 +352,7 @@ A SaaS user doesn't just want to upload *one* file — they want to keep up with
 benchmark ecosystem** (WebVoyager, GAIA, SWE-bench, WebArena, Mind2Web, OSWorld, …, plus whatever ships next month).
 A single hard-coded importer can't scale to that, because benchmarks vary on four axes: **source** (HF Hub / GitHub /
 URL), **format** (HF rows/parquet, jsonl, csv), **task/env** (browser, QA, coding, tool), and **grading** (exact /
-VLM-judge / test-execution / state-checker). `@assay/datasets` now covers the first three with two pieces:
+VLM-judge / test-execution / state-checker). `@everdict/datasets` now covers the first three with two pieces:
 
 - **Source connector — HuggingFace Hub** (`fetchHfRows`): pull a benchmark *by reference only* (`dataset + config +
   split`) via the HF datasets-server REST `/rows` (paginated; no Python). gated benchmarks (e.g. GAIA) take an
@@ -444,7 +444,7 @@ A one-off import is already tenant-scoped (the resulting `Dataset` is tenant-own
 (`BENCHMARK_CATALOG`), so a tenant couldn't register/version their own. Closed by making the definition **pure data**:
 `BenchmarkAdapterSpec` (Zod, JSON-serializable — `source`, `mapping`, and `graderTemplates` with `{field}`
 interpolation, so even per-row SWE-bench-style patches become data, no `graderBuilder` code), `importFromSpec(spec)`
-(→ tenant-owned `Dataset`), and a tenant-scoped **`BenchmarkRegistry`** (`@assay/registry`, InMemory; tenant +
+(→ tenant-owned `Dataset`), and a tenant-scoped **`BenchmarkRegistry`** (`@everdict/registry`, InMemory; tenant +
 `_shared` fallback, version-immutable — the exact `DatasetRegistry`/`JudgeRegistry` model). So each tenant registers
 their own benchmark recipes in their workspace, with first-party recipes seeded into `_shared`.
 
@@ -495,10 +495,10 @@ capability, not SWE-bench-specific).
 (not the default agent image). So dependency provisioning is now a data seed pointing at a real image.
 
 #### Env-container execution — running a case inside its image (`DockerDriver`) ✅
-The SWE-bench prebuilt image is an *environment* image (repo + deps, no Assay agent). Rather than bake the agent into
+The SWE-bench prebuilt image is an *environment* image (repo + deps, no Everdict agent). Rather than bake the agent into
 every multi-GB image, the case runs inside the image as a **container compute** and the grading executes there — the
 official SWE-bench shape ("the agent produces a patch; apply prediction + test_patch + run tests in the prebuilt
-image"). `DockerDriver` (`@assay/drivers`) provides this: `provision({image})` starts the container
+image"). `DockerDriver` (`@everdict/drivers`) provides this: `provision({image})` starts the container
 (`docker run -d --entrypoint sleep <image> infinity`) and returns a `ComputeHandle` whose `exec`/`writeFile`/`readFile`
 go through `docker exec`/stdin — so `SweBenchGrader` (or any grader needing `compute`) runs *in the image*, with its
 deps, no agent baked in.
@@ -521,7 +521,7 @@ runnable end-to-end on real dependencies.
 `DockerDriver` runs a case's harness *and* grading inside a container from the case's `EvalCase.image` via
 `runAgentJob(job, { driver: DockerDriver })`. `runAgentJob` gained an optional `{ driver }` so the same agent loop
 (harness + `makeGradersFromEnv` + `RepoEnvironment`) runs over any compute; `DockerDriver` keeps a base workdir
-(`/assay`) so relative paths (`RepoEnvironment`'s `work`) and absolute ones (SWE-bench's `/testbed`) both resolve.
+(`/everdict`) so relative paths (`RepoEnvironment`'s `work`) and absolute ones (SWE-bench's `/testbed`) both resolve.
 
 **Verified live** (`scripts/live/docker-runtime-backend.mjs`, real Docker — historical, when `kind:"docker"` was still
 registerable): a `DockerBackend`'s `dispatch` of a case (`image` = a git-bearing env image, a `scripted` harness, a
@@ -664,7 +664,7 @@ snapshot → VLM judge → `CaseResult`), no bespoke orchestration. The job is p
   secret env, `makeGradersFromEnv` builds the VLM `JudgeGrader` over the os-use snapshot (SLICE 74 path).
 
 **Enabling core change:** `CommandHarnessSpec` gained an optional **`workDir`** — the command harness ran in `"work"`
-(→ `/assay/work`), which os-use containers don't create, so a desktop command-agent couldn't even `chdir`. With
+(→ `/everdict/work`), which os-use containers don't create, so a desktop command-agent couldn't even `chdir`. With
 `workDir:"/tmp"` (an existing dir) the agent runs. `CommandHarness` now uses `spec.workDir ?? opts.workDir ?? "work"` for
 both `setup` and the command (+2 tests; default stays `"work"`).
 
@@ -724,7 +724,7 @@ same HTTP control plane. (Seed-guard test asserts the multi-case dataset parses 
 
 ### OSWorld imported as os-use cases — the desktop benchmark ecosystem ✅
 The hand-authored `hermes-desktop-ssh` dataset proves the runtime; this connects the *ecosystem* — **OSWorld**
-(xlang-ai/OSWorld, real OS/app computer-use tasks) imported into assay's os-use runtime via the same data-driven
+(xlang-ai/OSWorld, real OS/app computer-use tasks) imported into everdict's os-use runtime via the same data-driven
 `BenchmarkAdapter` path that already carries GSM8K/GAIA/SWE-bench/WebVoyager. "New benchmark = one adapter, not code."
 - `CaseMapping` (+ `rowToCase`) gained an **os-use branch** plus constant `image`/`placement` (data-driven, so it's
   JSON-serializable for tenant `BenchmarkAdapterSpec` too): `osUseEnv` → `{kind:"os-use", display, setup, screenshotPath}`,
@@ -734,14 +734,14 @@ The hand-authored `hermes-desktop-ssh` dataset proves the runtime; this connects
 - The `osworld` catalog adapter maps `id`/`instruction` → an os-use case; grading is a **per-row VLM judge**
   (`graderBuilder` interpolates each task's `instruction` into the rubric — "PASS only if the final desktop screenshot
   shows this task completed: …"). OSWorld's upstream per-task Python evaluators don't port across runtimes, so the
-  screenshot judge is the harness-agnostic grader (same adaptation GSM8K/GAIA make: map to assay's env + grader, not the
+  screenshot judge is the harness-agnostic grader (same adaptation GSM8K/GAIA make: map to everdict's env + grader, not the
   upstream harness). Source is `jsonl` (OSWorld ships task JSON; a tenant uploads it); the desktop image with the apps is
   the tenant's to build (the SWE-bench-prebuilt pattern). New `category: "desktop"`.
 
 **Verified live** over the HTTP API (jsonl import is pure — no container): `GET /benchmarks` lists
 `{ id:"osworld", category:"desktop" }`; `POST /benchmarks/import { benchmark:"osworld", text:<OSWorld jsonl> }` → `201`,
 and `GET /datasets/osworld-mini/versions/1.0.0` → os-use `EvalCase`s — `placement.target:"docker"`,
-`image:"assay-osworld:demo"`, snapshot/source tags, and a `judge useScreenshot` grader whose rubric carries that row's
+`image:"everdict-osworld:demo"`, snapshot/source tags, and a `judge useScreenshot` grader whose rubric carries that row's
 instruction. These are the *same os-use case shape* SLICES 76–78 proved runnable (`runAgentJob`/`POST /runs`/scorecards),
 so once a tenant supplies an OSWorld desktop image + a computer-use agent, OSWorld runs and scores through the existing
 control plane. (Deterministic adapter tests cover the mapping + per-row rubric; no docker this slice.)
@@ -787,23 +787,23 @@ judge verdict and `os-use` kind. So a tenant sees, per case, **the exact screen 
 storage with a presigned URL in `screenshotRef` — same field, swappable. Image removed afterward; disk to prior level.)
 
 ### Object-storage offload — screenshot to MinIO, presigned URL in a slim record ✅
-SLICE 81's base64-in-the-record is the dev posture; this is the production swap promised there. New **`@assay/storage`**:
+SLICE 81's base64-in-the-record is the dev posture; this is the production swap promised there. New **`@everdict/storage`**:
 an `ArtifactStore` interface (`put(key, bytes, contentType) → ref`), an **`S3ArtifactStore`** (MinIO/S3 via the AWS SDK —
 `PutObject` + a presigned `GetObject` URL, path-style, optional `publicBaseUrl` host rewrite + `ensureBucket`), an
 `InMemoryArtifactStore` for tests, and `offloadSnapshot(snapshot, store, key)` — for an os-use snapshot it uploads the
 embedded base64, sets `screenshotRef` to the returned URL, and **clears `screenshot`** so the record stays small. The
 control plane wires it: `RunService`/`ScorecardService` take an optional `artifacts` store and offload each os-use
 snapshot after dispatch (best-effort — a storage failure keeps the base64 fallback, the run still succeeds);
-`main.ts` builds the store from env (`ASSAY_S3_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY`, optional region/public URL) or
+`main.ts` builds the store from env (`EVERDICT_S3_ENDPOINT/BUCKET/ACCESS_KEY/SECRET_KEY`, optional region/public URL) or
 leaves it unset (→ base64 dev fallback). The web `osUseShotSrc` helper renders the URL when `screenshotRef` is `http(s)`,
 else the base64 data URL — same `<img>`, either source. +4 storage tests.
 
 **Verified live against the running `infra-minio`** (docker-free via ingest): with the API configured for MinIO,
 `POST /scorecards/ingest` of an os-use case carrying a base64 screenshot → the stored record's snapshot has **no base64**
 (`screenshot` empty) and `screenshotRef` is a MinIO **presigned URL**
-(`http://localhost:9100/assay-artifacts/scorecards/<id>/<case>.png?X-Amz-…`); the record is ~1.4 KB (was ~90 KB inline).
+(`http://localhost:9100/everdict-artifacts/scorecards/<id>/<case>.png?X-Amz-…`); the record is ~1.4 KB (was ~90 KB inline).
 `curl`-ing that URL returns the actual object — `HTTP 200`, `content-type: image/png`, `file` confirms a PNG — so the
-bytes really live in object storage. The web `scorecards/:id` page server-renders `<img src="http://…/assay-artifacts/…
+bytes really live in object storage. The web `scorecards/:id` page server-renders `<img src="http://…/everdict-artifacts/…
 ?X-Amz-…">` (page slim, no inline base64) — the browser fetches the image straight from MinIO. So the result record is a
 small pointer and the screenshot lives in object storage with a presigned URL: the production-correct shape, and a one-line
 config swap from the dev base64 path.
@@ -828,12 +828,12 @@ whole pipeline, end-to-end over the HTTP control plane. (Image with both agents 
 
 ### Service-topology backend wired into control-plane dispatch ✅
 Phase 1 of this design (contracts, Nomad **and** K8s topology builders, `EnvironmentManager`, trace mappers, and
-`ServiceTopologyBackend` over a mock `TopologyRuntime` → `CaseResult`) is built and unit-tested in `@assay/topology` /
-`@assay/trace` (57 + trace tests). The one deferred piece was the **wire-in**: making a `service` harness (e.g. `bu`,
+`ServiceTopologyBackend` over a mock `TopologyRuntime` → `CaseResult`) is built and unit-tested in `@everdict/topology` /
+`@everdict/trace` (57 + trace tests). The one deferred piece was the **wire-in**: making a `service` harness (e.g. `bu`,
 browser-use) reachable from `POST /runs` like the other backends. Done:
 - core: a `topology` **`RuntimeSpec`** kind (`orchestrator: nomad|k8s` + cluster connection + a `traceSource` for the
   OTel/MLflow pull; cluster tokens stay `authSecret` names, not values).
-- `@assay/backends` can't construct `ServiceTopologyBackend` (it would cycle — `@assay/topology` depends on `backends`
+- `@everdict/backends` can't construct `ServiceTopologyBackend` (it would cycle — `@everdict/topology` depends on `backends`
   for the `Backend` interface), so `buildRuntimeBackend` now explicitly throws for `topology`, and the wiring lives in
   **apps/api `buildTopologyBackend`** (depends on both): it builds a `NomadTopologyRuntime`/`K8sTopologyRuntime` +
   `buildTraceSource` + a `ServiceTopologyBackend` whose `specFor` resolves the service harness from the registry (rejects
@@ -850,7 +850,7 @@ cluster call. So the service-topology track is now dispatchable through the prod
 
 ### OSWorld actually run — a real GUI app task, end-to-end ✅
 SLICE 79 *imported* OSWorld tasks; this *runs* one for real on a real desktop app. A lightweight OSWorld desktop image
-(`scripts/live/Dockerfile.osworld` → `assay-osworld:demo`, 565 MB: Debian + Xvfb + **openbox** WM + xdotool/scrot +
+(`scripts/live/Dockerfile.osworld` → `everdict-osworld:demo`, 565 MB: Debian + Xvfb + **openbox** WM + xdotool/scrot +
 **mousepad** text editor + nodejs + the agent) — the image name matches the `osworld` adapter's default `image`, so an
 imported task lands on it. The `osworld` adapter's `osUseSetup` now brings up Xvfb **+ openbox** so launched apps get
 focus. A reference agent (`examples/agents/desktop-osworld-agent.cjs`, a `command` harness) opens the editor and types
@@ -886,7 +886,7 @@ imported → `POST /runs` → the agent typed the text and drove the Save-As dia
 
 The decoded screenshot shows the title bar `/root/note.txt - Mousepad` (no unsaved-`*`) with the text — the multi-step
 save worked. This is exactly why OSWorld grades on **state**: the state grader is decisive (task done), the VLM is a
-complementary signal, and assay runs **both** over the same os-use result. (Image removed afterward; key from env.)
+complementary signal, and everdict runs **both** over the same os-use result. (Image removed afterward; key from env.)
 
 ### OSWorld multi-task scorecard — batch + per-metric aggregate ✅
 One OSWorld task is a run; a *suite* is a scorecard. `examples/benchmarks/osworld-sample.jsonl` is a committed 3-task
@@ -911,11 +911,11 @@ gap a more capable agent would close (cf. the harness-A/B diff). repo lint, type
 ### Service-topology Phase 2 — `K8sTopologyRuntime` run on a real cluster (kind) ✅
 The topology builders/runtimes were only ever unit-tested with a *mock* kubectl. This runs `K8sTopologyRuntime` against a
 **real Kubernetes cluster** (a local `kind`), the core Phase-2 claim ("apply against a real K8s cluster"). A minimal
-service-topology harness (one stub front-door service `assay-topo-stub:demo` — `scripts/live/topology-stub/`, kind-loaded;
+service-topology harness (one stub front-door service `everdict-topo-stub:demo` — `scripts/live/topology-stub/`, kind-loaded;
 a browser target; no stores) drives the real orchestration path.
 
-**Verified live** (`scripts/live/topology-k8s.mjs`, context `kind-assay`): `ensureTopology(spec)` →
-`kubectl apply` of the generated Deployment+Service into namespace `assay-default` → `rolloutStatus` waited for the real
+**Verified live** (`scripts/live/topology-k8s.mjs`, context `kind-everdict`): `ensureTopology(spec)` →
+`kubectl apply` of the generated Deployment+Service into namespace `everdict-default` → `rolloutStatus` waited for the real
 pod (`topo-demo-agent` ready **1/1**, confirmed by `kubectl get deploy`) → `kubectl port-forward` discovered the endpoint
 (`http://127.0.0.1:<port>`). Then the per-run **front-door drive**: `GET /health` → `200`, `POST /runs` with the
 `{task, thread_id, stream_channel}` wiring → `200`. `teardown(spec)` stopped the forwards and deleted the namespace (clean,
@@ -923,7 +923,7 @@ exit 0). So the orchestrator-agnostic runtime genuinely deploys a warm topology,
 cluster — not a mock.
 
 **Per-case browser, also live** (same script, extended): after the warm topology + drive, `provisionBrowserEnv(spec, runId)`
-launched a **real headless Chromium** pod (`chromedp/headless-shell`, kind-loaded → `assay-browser-<runId>` Deployment
+launched a **real headless Chromium** pod (`chromedp/headless-shell`, kind-loaded → `everdict-browser-<runId>` Deployment
 alongside the warm `topo-demo-agent`), port-forwarded `:9222`, and `connectBrowser` got a real CDP **`webSocketDebuggerUrl`**
 (`ws://127.0.0.1:<port>/devtools/browser/…`). `browser.snapshot()` hit CDP `/json/list` → a real `browser` snapshot
 (`url:"about:blank"`, `dom` = the live target list); `browser.dispose()` removed the per-case browser (warm topology
@@ -936,7 +936,7 @@ containerd; host stub image removed; namespace deleted.)
 ### Trace pull verified against a real backend — OTel/Jaeger ✅
 The trace mappers (`OtelTraceSource`/`MlflowTraceSource` → `TraceEvent[]`, used by scorecard pull-ingest
 `POST /scorecards/ingest/pull` and the `command` harness's trace extraction) were only mock-fetch unit-tested. This runs
-`OtelTraceSource` against a **real Jaeger** (`assay-jaeger`: OTLP-in `:4318`, query `:16686`).
+`OtelTraceSource` against a **real Jaeger** (`everdict-jaeger`: OTLP-in `:4318`, query `:16686`).
 
 **Verified live** (`scripts/live/trace-otel.mjs`): a real OTLP span (OTel GenAI conventions —
 `gen_ai.request.model=gpt-5.4-mini`, `gen_ai.usage.input_tokens=100`, `output_tokens=42`, `cost=0.0012`) was POSTed to
@@ -977,7 +977,7 @@ and tenants register any CLI agent declaratively as a `command` `HarnessSpec` (s
 {{run_id}}` command + trace none/otel/mlflow) — no code adapter. But the first-party presets in `examples/harnesses`
 (aider, aider-litellm, the `bu` service topology) were **not seeded** at startup (unlike datasets/judges/runtimes),
 so they weren't available to tenants out of the box. `main.ts` now calls `seedSharedHarnesses` (`loadHarnessDir` from
-`ASSAY_HARNESSES_DIR`, default `examples/harnesses`) alongside the other seeders, so first-party harnesses load into
+`EVERDICT_HARNESSES_DIR`, default `examples/harnesses`) alongside the other seeders, so first-party harnesses load into
 `_shared` and every tenant can evaluate with them immediately (or register their own, which coexist).
 
 **Verified live** (real API): startup logs `▶ shared harnesses seeded from …/examples/harnesses`, and
@@ -990,7 +990,7 @@ can't regress the catalog. (Adding a new first-party agent is now just dropping 
 #### Judge threaded through the normal dispatch path ✅
 A `judge` grader preset (e.g. WebVoyager) must run in a *normal* eval, not only via the control-plane judge-runner
 (which evaluates registered `JudgeSpec` entities post-hoc). So the per-case grader path now builds the `Judge` from
-the agent's environment: `judgeFromEnv(env)` (`ASSAY_JUDGE_MODEL` + provider key — OpenAI/LiteLLM or Anthropic — the
+the agent's environment: `judgeFromEnv(env)` (`EVERDICT_JUDGE_MODEL` + provider key — OpenAI/LiteLLM or Anthropic — the
 control plane injects these from tenant secrets into the alloc, same channel as harness model keys), and
 `makeGradersFromEnv(specs, env)` is used by **both** dispatch paths (`runAgentJob` and the topology
 `ServiceTopologyBackend`). When the judge model is configured, a `judge` spec becomes a real `JudgeGrader`; when it
@@ -1008,13 +1008,13 @@ automatically in a normal eval.
 The judge needs a **model** (which model judges) and a **key** (provider credential) — different concerns, different
 channels. The model is per-run *config*, not a secret, so it travels on the job: `AgentJob.judge: {provider?, model}`
 (set by the control plane from workspace/suite policy, like the existing `meterUsage`). `core.judgeEnv(job.judge)`
-maps it to the env contract (`ASSAY_JUDGE_MODEL` / `ASSAY_JUDGE_PROVIDER`, the same names `judgeFromEnv` reads), and
+maps it to the env contract (`EVERDICT_JUDGE_MODEL` / `EVERDICT_JUDGE_PROVIDER`, the same names `judgeFromEnv` reads), and
 **both backends merge it into the alloc env** (`buildNomadJob` / `buildK8sJob`), alongside — but separate from — the
 tenant secret keys (`OPENAI_API_KEY` etc.) injected via the `SecretProvider` channel (which was already a no-whitelist
 passthrough). `runAgentJob` merges the same `judgeEnv(job.judge)` so local and remote behave identically.
 
-**Verified live** (`scripts/live/judge-config-injection.mjs`, real LiteLLM): with `process.env.ASSAY_JUDGE_MODEL`
-deliberately unset, `buildNomadJob` puts `ASSAY_JUDGE_MODEL`/`ASSAY_JUDGE_PROVIDER` in the alloc env (key arriving
+**Verified live** (`scripts/live/judge-config-injection.mjs`, real LiteLLM): with `process.env.EVERDICT_JUDGE_MODEL`
+deliberately unset, `buildNomadJob` puts `EVERDICT_JUDGE_MODEL`/`EVERDICT_JUDGE_PROVIDER` in the alloc env (key arriving
 separately via `secretEnv`), and `runAgentJob` — taking the model **only from `job.judge`** — runs the real model
 judge (`pass=true`, 1.00, "A tool call executed `echo hello > out.txt`…"). So a per-run judge config reaches a remote
 alloc end-to-end, with the credential kept on the separate secret channel.
@@ -1028,7 +1028,7 @@ via a `judgeFor(tenant)` resolver (wired in `main.ts` from the `WorkspaceSetting
 over HTTP: `PUT /workspace/settings {judge}` to set the default, and a per-request `judge` override on `POST /runs`
 and `POST /scorecards`.
 
-**Verified live** (`scripts/live/workspace-judge-default.mjs`, real LiteLLM, `process.env.ASSAY_JUDGE_MODEL` unset):
+**Verified live** (`scripts/live/workspace-judge-default.mjs`, real LiteLLM, `process.env.EVERDICT_JUDGE_MODEL` unset):
 with a workspace default judge set, `RunService.submit` for that tenant auto-fills `job.judge` and the run is graded
 by the **real model judge** (`pass=true`, 1.00, "ran `echo hello > out.txt`…"); a tenant with no default gets a skip
 score and the run still succeeds. So a user only puts a `judge` grader on the case (no model), sets the model once on
@@ -1075,13 +1075,13 @@ the already-running aegra instead of deploying it via `NomadTopologyRuntime`/`K8
 `scripts/live/service-topology-aegra-browser.mjs` adds the **per-case browser target** — the missing piece that
 makes this an actual browser-use harness. A real **`chromedp/headless-shell`** (Chromium, CDP `:9222`) is the
 per-case browser; a LangGraph **`browser_agent`** graph in aegra (`scripts/live/aegra-browser-agent/graph.py`,
-Playwright `connect_over_cdp`) **drives** it; Assay **observes** the same browser and grades it. Full path:
+Playwright `connect_over_cdp`) **drives** it; Everdict **observes** the same browser and grades it. Full path:
 `dispatch` → `ensureTopology`(aegra) → **`provisionBrowserEnv`(per-case chromedp CDP)** → `submit` (Agent-Protocol
 + the backend's **`browser_cdp_url`** in `config.configurable`) → the agent navigates/extracts via CDP →
 `traceSource`(response) + **`browser.snapshot()`** (the chromedp `/json/list` → `{url, dom}`) → grade.
 
 Verified (`gpt-5.4-mini`): the agent navigated to `https://example.com`, answered "...Example Domain...DONE", and
-Assay's browser snapshot was `{url: "https://example.com/", dom: "Example Domain"}` → **`browser-url: pass`**
+Everdict's browser snapshot was `{url: "https://example.com/", dom: "Example Domain"}` → **`browser-url: pass`**
 (agent moved the shared browser) **+ `answer-ok: pass`**. So the topology now exercises a real browser target +
 DOM/URL grading, on the same orchestrator-agnostic `ServiceTopologyBackend`.
 
@@ -1097,7 +1097,7 @@ exist. The topology builders previously deployed only `spec.services` and assume
 `dependencies[]` itself — see the `provisionDependencies` bullet above. Verified live on **kind**
 (`scripts/live/topology-deps-k8s.mjs`): `ensureTopology` deployed `deps-demo-postgres` + `deps-demo-redis`
 alongside the front-door, the front-door pod's env carried the auto-wired
-`DATABASE_URL=postgresql://assay:assay@deps-demo-postgres:5432/assay` + `REDIS_URL=redis://deps-demo-redis:6379`,
+`DATABASE_URL=postgresql://everdict:everdict@deps-demo-postgres:5432/everdict` + `REDIS_URL=redis://deps-demo-redis:6379`,
 and a `pg_isready -h deps-demo-postgres` probe confirmed the store is reachable **by its Service DNS** in-cluster
 (`accepting connections`) — i.e. the same URL the services get actually connects. `buildNomadTopologyJob`
 renders matching dependency task groups (dynamic `store` port) for parity; the Nomad runtime's service→store
@@ -1131,10 +1131,10 @@ with a genuine `browser-use` image — the last "is it a real agent driving a re
 Three follow-ups then hardened it (`browseruse-topology-drive.mjs` local-docker, `browseruse-topology-k8s.mjs`
 on kind):
 - **Interactive multi-step.** The front-door also serves `GET /form` (a search input + Submit button) and
-  `GET /result?q=…`. The task — "go to /form, type 'assay eval', click Search, report the heading" — forces a
+  `GET /result?q=…`. The task — "go to /form, type 'everdict eval', click Search, report the heading" — forces a
   real `navigate → input_text → click` sequence. Verified: `action_names() = [navigate, input, click, done]`,
-  final `snapshot.url = …/result?q=assay+eval`, so url-matches (`[?&]q=assay`) + dom-contains (`Results for
-  assay`) PASS. Real DOM interaction, not just a navigation.
+  final `snapshot.url = …/result?q=everdict+eval`, so url-matches (`[?&]q=everdict`) + dom-contains (`Results for
+  everdict`) PASS. Real DOM interaction, not just a navigation.
 - **Real trace pull + steps/cost.** `browseruse_server.py` wraps the LLM in browser-use's `TokenCost`
   (`register_llm` → `get_usage_summary`) and, after each run, emits OTLP spans to Jaeger keyed by the run's
   trace id: one `llm_call` span carrying the **real** token counts and one `tool_call` span per **real**
@@ -1187,9 +1187,9 @@ Then product-shaped it across three more axes (all live):
 - **Per-tenant isolation (`browseruse-isolation-k8s.mjs`).** The backend resolves `tenant → TrustZone`
   (`staticTrustZones`), asserts hardened isolation, and `K8sTopologyRuntime.ensureTopology(spec, zone)` deploys
   each tenant's warm topology into a **dedicated namespace** with a per-zone `NetworkPolicy`. Live with two
-  tenants: `acme` → `assay-acme`, `globex` → `assay-globex`, each with its **own** `browseruse-agent`
+  tenants: `acme` → `everdict-acme`, `globex` → `everdict-globex`, each with its **own** `browseruse-agent`
   Deployment and a **distinct** front-door endpoint (warm pools are never shared across tenants), each with
-  `networkpolicy/assay-zone-ingress` applied; both drove the interactive form under their own zone and PASS.
+  `networkpolicy/everdict-zone-ingress` applied; both drove the interactive form under their own zone and PASS.
   (On kind the default `kindnet` *applies* but doesn't *enforce* NetworkPolicy — enforcement needs
   Calico/Cilium; the namespace boundary is real either way.)
 - **Web dashboard rendering.** The run + scorecard case views now render `browser` snapshots: the run page
@@ -1208,11 +1208,11 @@ Then closed the loop on three fronts (all live):
   (per-metric aggregate + per-case `browser` badge + final URL). The render consumes exactly the shape the
   live `CaseResult`s produce.
 - **NetworkPolicy *enforcement* (Calico).** `browseruse-isolation-np.mjs` runs the two-tenant deploy on the
-  Calico cluster `kind-assay-np` (vs `kindnet` which only *applies* policy). Live: `acme`/`globex` each in
+  Calico cluster `kind-everdict-np` (vs `kindnet` which only *applies* policy). Live: `acme`/`globex` each in
   their own namespace and driving PASS, then a curl pod proves enforcement — `acme → acme` (same-ns) =
   **REACHABLE**, `acme → globex` `browseruse-agent` service (cross-tenant) = **BLOCKED**. The tenant boundary
   is real at the network layer, not just declared.
-- **WebVoyager benchmark adapter, live.** `importWebVoyager` (already in `@assay/datasets`) maps a
+- **WebVoyager benchmark adapter, live.** `importWebVoyager` (already in `@everdict/datasets`) maps a
   WebVoyager-format sample (`examples/benchmarks/webvoyager-sample.jsonl`: `web_name/ques/web/answer`) into
   `browser` cases (`task=ques`, `env.startUrl=web`, graders `answer-match`/`steps`/`judge`).
   `browseruse-webvoyager.mjs` runs them through the real `browser-use` harness → `Scorecard`. To grade the
@@ -1230,7 +1230,7 @@ Three more, all live:
   answer_match 0 → 1`). The objective-`pass`-transition diff, on real browser-use scorecards.
 - **WebVoyager *judge* grading (official method).** Real WebVoyager has no answer field — the official
   benchmark judges the *trajectory* (GPT-4V). `browseruse-webvoyager-judge.mjs` turns on the LiteLLM judge
-  (`ASSAY_JUDGE_MODEL` → `makeGradersFromEnv`/`judgeFromEnv` builds a `JudgeGrader` that scores `trace + dom`
+  (`EVERDICT_JUDGE_MODEL` → `makeGradersFromEnv`/`judgeFromEnv` builds a `JudgeGrader` that scores `trace + dom`
   against a WebVoyager rubric) — `browseruse_server.py`'s message span (the agent's final answer) feeds the
   judge. On the sample (`WV_SOURCE=sample`): 3/3 judge pass *with reasoning*, agreeing with answer-match.
 - **Real WebVoyager at scale + failure analysis.** `WV_SOURCE=real` downloads the actual
@@ -1267,7 +1267,7 @@ Three more, all live:
   harness/infra-agnostic runtime emits a single report over desktop *and* web benchmarks.
 
 Three more, all live:
-- **Authoritative case-pass (`caseVerdict`/`scorecardPassRate`, `@assay/suite`).** A case's pass shouldn't let
+- **Authoritative case-pass (`caseVerdict`/`scorecardPassRate`, `@everdict/suite`).** A case's pass shouldn't let
   an advisory VLM judge override a ground-truth grader. `caseVerdict` decides by priority — `state`/`tests_pass`
   (ground-truth) > `answer_match`/`url_matches`/`dom_contains` (objective) > `judge` (only when no objective
   grader). `scorecardPassRate` aggregates it. The unified report re-ran with this: the OSWorld case (state PASS

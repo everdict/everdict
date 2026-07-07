@@ -110,10 +110,10 @@ describe("imageUsesRegistryHost — 인증 주입 대상 판정(명시 호스트
 });
 
 describe("dockerAuthConfigJson — 임시 DOCKER_CONFIG 내용(pull/push 공용)", () => {
-  it("auths[host].auth = base64(user:pass); username 미지정은 토큰 단독 관례로 assay", () => {
+  it("auths[host].auth = base64(user:pass); username 미지정은 토큰 단독 관례로 everdict", () => {
     const parsed = JSON.parse(dockerAuthConfigJson({ host: "ghcr.io", username: "bot", password: "p" }));
     expect(Buffer.from(parsed.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:p");
     const tokenOnly = JSON.parse(dockerAuthConfigJson({ host: "r.io", password: "t" }));
-    expect(Buffer.from(tokenOnly.auths["r.io"].auth, "base64").toString()).toBe("assay:t");
+    expect(Buffer.from(tokenOnly.auths["r.io"].auth, "base64").toString()).toBe("everdict:t");
   });
 });

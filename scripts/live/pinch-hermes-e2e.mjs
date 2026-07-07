@@ -7,16 +7,16 @@
 //   ③ POST /datasets  : hermes-적합 벤치마크(SSH 연결) 추가  +  POST /scorecards : 그걸 hermes-desktop 으로 측정
 //      → 컨트롤플레인이 docker 런타임으로 hermes 이미지 컨테이너를 띄워 실 os-use 실행 → VLM judge 채점 → Scorecard.
 //   ④ GET /scorecards/:id 폴링 → 결과(케이스 pass + 집계).
-// 컨트롤플레인은 이 스크립트가 dev 모드(auth 미요구)로 기동. 유저=tenant default(x-assay-tenant).
+// 컨트롤플레인은 이 스크립트가 dev 모드(auth 미요구)로 기동. 유저=tenant default(x-everdict-tenant).
 //
-// 사전: hermes 이미지(assay-hermes-dispatch:demo) 빌드됨. LiteLLM(:4000) 가동(VLM judge). apps/api/dist 빌드됨.
+// 사전: hermes 이미지(everdict-hermes-dispatch:demo) 빌드됨. LiteLLM(:4000) 가동(VLM judge). apps/api/dist 빌드됨.
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 
 const PORT = process.env.CP_PORT ?? "8788";
 const BASE = `http://127.0.0.1:${PORT}`;
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 function masterKey() {
@@ -48,8 +48,8 @@ const cp = spawn("node", ["apps/api/dist/main.js"], {
     PORT,
     OPENAI_API_KEY: KEY,
     OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1",
-    ASSAY_JUDGE_MODEL: process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini",
-    ASSAY_REQUIRE_AUTH: "", // dev fallback (tenant=default)
+    EVERDICT_JUDGE_MODEL: process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini",
+    EVERDICT_REQUIRE_AUTH: "", // dev fallback (tenant=default)
     KEYCLOAK_ISSUER: "", // OIDC 비활성(dev)
     DATABASE_URL: "", // in-memory store
   },
@@ -148,7 +148,7 @@ try {
           ],
           screenshotPath: "/tmp/osuse.png",
         },
-        image: "assay-hermes-dispatch:demo",
+        image: "everdict-hermes-dispatch:demo",
         task: "Connect Hermes to the SSH server at 127.0.0.1 as user root (key /root/.ssh/id_rsa).",
         graders: [
           {
@@ -172,7 +172,7 @@ try {
     dataset: { id: "hermes-ssh-bench", version: "1.0.0" },
     harness: { id: "hermes-desktop", version: "1.0.0" },
     runtime: "docker",
-    judge: { provider: "openai", model: process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini" },
+    judge: { provider: "openai", model: process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini" },
   });
   console.log(`  → POST /scorecards: ${r4.status} ${JSON.stringify(r4.json)}`);
   const scId = r4.json.id;
@@ -210,7 +210,7 @@ try {
   console.error("error:", e instanceof Error ? e.message : e);
 } finally {
   shutdown();
-  spawnSync("docker", ["ps", "-aq", "--filter", "ancestor=assay-hermes-dispatch:demo"], { encoding: "utf8" });
+  spawnSync("docker", ["ps", "-aq", "--filter", "ancestor=everdict-hermes-dispatch:demo"], { encoding: "utf8" });
   console.log("control plane 종료.");
 }
 process.exit(ok ? 0 : 1);

@@ -4,7 +4,7 @@ import type {
   NotificationStore,
   RunRecord,
   WorkspaceSettings,
-} from "@assay/db";
+} from "@everdict/db";
 
 // 완료 알림 — 한 완료 이벤트가 [개인 피드, Mattermost] 두 채널로 팬아웃된다(docs/architecture/notifications.md N5).
 // 피드: 개인(recipient=레코드 createdBy) 인박스 — 웹 벨/데스크톱 네이티브 알림이 소비(N1/N2).

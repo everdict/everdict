@@ -1,19 +1,19 @@
 # Workspace-scoped image registry — classify + publish harness images
 
 > **Status:** ALL SLICES SHIPPED + LIVE-VERIFIED — S1 registration+classification `bd979a4` ·
-> S2 `assay image push` `921f93a` · S3 web `79ad895` · S4 pull auth at dispatch `9d14595`.
+> S2 `everdict image push` `921f93a` · S3 web `79ad895` · S4 pull auth at dispatch `9d14595`.
 > Live e2e `scripts/live/image-registry-push-pull.mjs` (local authenticated `registry:2`):
-> registry registration → `assay image push` (temp `DOCKER_CONFIG`, user config untouched) →
+> registry registration → `everdict image push` (temp `DOCKER_CONFIG`, user config untouched) →
 > unauthenticated pull rejected → `pullWithRegistryAuth` succeeds, sha-identical. SSOT
-> for the workspace image registry: where a harness's images *live*, how Assay tells a
+> for the workspace image registry: where a harness's images *live*, how Everdict tells a
 > **local-only** image from a **workspace-registry** image from an **external** one, and how a
-> user **publishes** a locally built image to the workspace registry through Assay. Concretizes
+> user **publishes** a locally built image to the workspace registry through Everdict. Concretizes
 > "Track B — image-source integrations" from `docs/architecture/harness-taxonomy.md`
 > (reference-not-build stays true).
 
 ## Why
 
-Every image reference in Assay today is a raw string with no provenance:
+Every image reference in Everdict today is a raw string with no provenance:
 
 - `TopologyService.image` (service harnesses), `EvalCase.image` (portable env contract,
   `docs/architecture/portable-harness-runtime.md`), `CommandHarnessSpec.image` (dispatch image),
@@ -25,7 +25,7 @@ Every image reference in Assay today is a raw string with no provenance:
   everywhere") silently breaks when a pin references an image only the author's machine has:
   managed nomad/k8s pulls fail, or a different same-named image runs.
 - There is no supported way to *get* a locally built image into a place every runtime can pull
-  from. Users side-channel (`docker save`/manual pushes) outside Assay.
+  from. Users side-channel (`docker save`/manual pushes) outside Everdict.
 
 So two features, one axis:
 
@@ -33,7 +33,7 @@ So two features, one axis:
    deterministically classifiable: `workspace` / `external` / `local` / `unqualified`. Surfaces
    as badges in the web (harness detail), warnings at instance registration, and later as a
    placement input.
-2. **Publish** — `assay image push` takes a local image, gets workspace-scoped push credentials
+2. **Publish** — `everdict image push` takes a local image, gets workspace-scoped push credentials
    from the control plane, and pushes it into the workspace registry — the returned ref is what
    you pin. Building stays on the user's machine (**reference, not build** — no build infra).
 
@@ -47,15 +47,15 @@ So two features, one axis:
   `imageRegistry` field is read as a `name: "default"` entry and cleared on the first write.
   External public images still need no registration to be classified `external`.
 - **The registry is BYO** (GHCR, Harbor, a plain `registry:2`, cloud artifact registries…).
-  Assay stores coordinates + SecretStore **name-refs**; it never operates a registry.
+  Everdict stores coordinates + SecretStore **name-refs**; it never operates a registry.
 - **Secrets are NAME references** (`pullSecretName` / `pushSecretName`), values live in the
   workspace SecretStore — same discipline as `botTokenSecretName` / runtime `authSecret`
   (rule `workspace-integrations`).
-- **Classification is pure and lives in `@assay/core`** (`classifyImageRef`) — no I/O, callers
+- **Classification is pure and lives in `@everdict/core`** (`classifyImageRef`) — no I/O, callers
   pass the workspace registry coordinates. The web mirrors it with a loose client-side copy
   (web is a pure HTTP client; precedent: `harnessInstanceSpecSchema` loose mirror).
 - **Push happens on the user's machine, credentials minted by the control plane.** The control
-  plane has no Docker; the image exists where it was built. `assay image push` asks
+  plane has no Docker; the image exists where it was built. `everdict image push` asks
   `POST /workspace/image-registries/push-credentials[?name=]` for `{name, host, namespace, username, password}`,
   then `docker tag` + `docker push` locally using an **isolated temp `DOCKER_CONFIG`** (never
   touches `~/.docker/config.json`).
@@ -85,8 +85,8 @@ imageRegistries: z.array(z.object({
 // legacy single `imageRegistry` — read as name:"default", cleared on first write
 ```
 
-No new table, no migration: additive JSONB on `assay_workspace_settings` + values in
-`assay_secrets` — identical shape to the Mattermost/GHE-App registrations.
+No new table, no migration: additive JSONB on `everdict_workspace_settings` + values in
+`everdict_secrets` — identical shape to the Mattermost/GHE-App registrations.
 
 ## Classification — `classifyImageRef`
 
@@ -133,11 +133,11 @@ tool twins in `mcp.ts`:
   registry without `pushSecretName` → 400 (푸시 미구성); referenced secret absent → 404 with
   the secret name. The value is returned to the caller and never persisted anywhere else.
 
-## Push flow — `assay image push`
+## Push flow — `everdict image push`
 
 ```
-assay image push spreadsheetbench:v1 [--name spreadsheetbench] [--tag v1] \
-  --api-url http://api.assay.dev --api-key ak_…       (env: ASSAY_API_URL / ASSAY_API_KEY)
+everdict image push spreadsheetbench:v1 [--name spreadsheetbench] [--tag v1] \
+  --api-url http://api.everdict.dev --api-key ak_…       (env: EVERDICT_API_URL / EVERDICT_API_KEY)
 ```
 
 1. `POST /workspace/image-registries/push-credentials?name=` (Bearer = API key → issuer's role; 이름 생략은 1개일 때만).
@@ -176,7 +176,7 @@ Consumers (auth is always rendered **only** for host-matching images — no cred
   in JSON-API array form) — `buildNomadTopologyJob` (via `NomadTopologyRuntimeOptions.registryAuth`)
   and `buildNomadJob` (from `job.registryAuth`).
 - **K8s (topology + backend):** a `kubernetes.io/dockerconfigjson` Secret named
-  `assay-registry-auth` (per namespace, idempotent apply) + `imagePullSecrets` on matching pod
+  `everdict-registry-auth` (per namespace, idempotent apply) + `imagePullSecrets` on matching pod
   specs — `buildK8sManifests` (via `K8sTopologyRuntimeOptions.registryAuth`) and `buildK8sJob`
   (the backend applies a `List` of Secret+Job).
 - **Wiring:** `RuntimeDispatcher.registryAuthFor(tenant)` resolves pull auth when building a
@@ -192,7 +192,7 @@ if a real footgun shows up that warnings don't catch.
 
 ## Non-goals
 
-- **Building images** — Assay references images, never builds them (locked in
+- **Building images** — Everdict references images, never builds them (locked in
   `portable-harness-runtime.md`).
 - **Operating a registry** — BYO only.
 - (retired non-goal) ~~Multiple registries per workspace~~ — shipped: name-keyed roster,
@@ -206,7 +206,7 @@ if a real footgun shows up that warnings don't catch.
 - **S1 — classify + registration core:** `classifyImageRef` (core) + `WorkspaceSettings.imageRegistry`
   + `ImageRegistryService` + GET/PUT/DELETE routes + MCP twins + `images:push` action +
   registration `imageWarnings`. Tests.
-- **S2 — publish:** `POST /workspace/image-registry/push-credentials` + MCP twin + `assay image
+- **S2 — publish:** `POST /workspace/image-registry/push-credentials` + MCP twin + `everdict image
   push` (isolated `DOCKER_CONFIG`, pure helpers tested).
 - **S3 — web:** Settings → 통합 "이미지 레지스트리" card (admin form, Linear settings-list) +
   harness-detail image classification badges (서비스/커맨드 이미지) + push-command hint in the

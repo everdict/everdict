@@ -1,4 +1,4 @@
-import type { ComputeHandle } from "@assay/core";
+import type { ComputeHandle } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { PromptEnvironment } from "./prompt.js";
 

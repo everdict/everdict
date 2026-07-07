@@ -5,7 +5,7 @@ export interface RunContext {
   // 보통 비어있음 — claude CLI 는 머신의 구독 로그인으로 동작. 로그인 없는 샌드박스에서만 키 주입.
   apiKeyEnv: Record<string, string>;
   timeoutSec: number;
-  // 트레이스 상관 키 — runCase 가 채워 run(하니스가 ASSAY_RUN_ID/assay.run_id 로 주입)과
+  // 트레이스 상관 키 — runCase 가 채워 run(하니스가 EVERDICT_RUN_ID/everdict.run_id 로 주입)과
   // collectTrace(플랫폼 pull) 양쪽에 같은 값이 흐르게 한다. 미지정이면 하니스가 자체 mint(하위호환).
   runId?: string;
 }
@@ -15,11 +15,11 @@ export interface RunContext {
 // 컨트롤플레인이 CaseResult.traceRef 로 pull(엔드포인트가 컨트롤플레인에서 닿을 때만 —
 // 클러스터 내부 엔드포인트는 job 유지). docs/architecture/streaming-case-pipeline.md D4
 export interface HarnessTraceSource {
-  kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix"; // @assay/trace buildTraceSource 5종과 동일
+  kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix"; // @everdict/trace buildTraceSource 5종과 동일
   endpoint: string;
   collect: "job" | "control-plane";
   authSecret?: string; // 인증 시크릿 '이름'(컨트롤플레인이 collect 시 재해석) — 값은 traceRef 에 싣지 않는다
-  correlate?: "id" | "tag"; // mlflow/otel — tag 면 assay.run_id 태그(리소스 속성) 검색으로 상관
+  correlate?: "id" | "tag"; // mlflow/otel — tag 면 everdict.run_id 태그(리소스 속성) 검색으로 상관
   experiment?: string; // mlflow tag 상관의 검색 범위(experiment id)
   project?: string; // phoenix 전용 — 스팬 조회 경로의 프로젝트(필수 API 형태)
   service?: string; // otel tag 상관의 검색 범위(Jaeger service 파라미터 — 에이전트의 service.name)

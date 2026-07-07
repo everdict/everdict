@@ -1,5 +1,5 @@
-import { AppError } from "@assay/core";
-import { InMemoryUserProfileStore } from "@assay/db";
+import { AppError } from "@everdict/core";
+import { InMemoryUserProfileStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { ProfileService } from "./profile-service.js";
 

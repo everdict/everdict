@@ -9,15 +9,15 @@ How to run the full stack locally and develop against it in the browser, with **
    CONTROL_PLANE_URL=http://127.0.0.1:8787
    AUTH_URL=http://localhost:3001
    AUTH_SECRET=$(openssl rand -base64 32)
-   KEYCLOAK_ISSUER=http://localhost:8081/realms/assay
-   KEYCLOAK_CLIENT_ID=assay-web
-   KEYCLOAK_CLIENT_SECRET=assay-web-secret
+   KEYCLOAK_ISSUER=http://localhost:8081/realms/everdict
+   KEYCLOAK_CLIENT_ID=everdict-web
+   KEYCLOAK_CLIENT_SECRET=everdict-web-secret
    EOF
    ```
-   `AUTH_SECRET` must be **stable** (don't regenerate per run, or sessions reset). `assay-web-secret` is the dev
-   client secret from `deploy/keycloak/realm-assay.json`.
+   `AUTH_SECRET` must be **stable** (don't regenerate per run, or sessions reset). `everdict-web-secret` is the dev
+   client secret from `deploy/keycloak/realm-everdict.json`.
 2. **API env** — `apps/api/.env` ships with working defaults (git-ignored; `KEYCLOAK_ISSUER`,
-   `ASSAY_REQUIRE_AUTH=1`, `ASSAY_INTERNAL_TOKEN`). Edit if needed.
+   `EVERDICT_REQUIRE_AUTH=1`, `EVERDICT_INTERNAL_TOKEN`). Edit if needed.
 
 ## Run
 ```bash
@@ -28,7 +28,7 @@ Open http://localhost:3001 → **로그인** → Keycloak → sign in. Stop with
 
 Desktop shell against the dev web (renders the same web + embeds the self-hosted runner):
 ```bash
-ASSAY_WEB_URL=http://localhost:3001 pnpm -F @assay/desktop dev
+EVERDICT_WEB_URL=http://localhost:3001 pnpm -F @everdict/desktop dev
 ```
 Desktop live e2e (Playwright drives the real shell — one-click pair → `self:` run → provenance):
 `node scripts/live/desktop-runner.mjs` (준비 커맨드는 스크립트 헤더 참고 — dev 폴백용으로 Keycloak 을 끈
@@ -51,16 +51,16 @@ volume). To re-import the realm fixtures from scratch: `docker compose -f deploy
 redirects and the token `iss` break. Pick **one canonical externally-reachable host** and make these agree:
 
 1. **Keycloak** — `KC_HOSTNAME` = `http://<host>:8081` (so issuer + browser redirects use that host).
-   `scripts/dev/.env` (git-ignored) drives it: set `ASSAY_PUBLIC_HOST=<host>`, and `up.sh` exports `KC_HOSTNAME`.
-2. **Web** — `apps/web/.env.local`: `AUTH_URL=http://<host>:3001`, `KEYCLOAK_ISSUER=http://<host>:8081/realms/assay`
+   `scripts/dev/.env` (git-ignored) drives it: set `EVERDICT_PUBLIC_HOST=<host>`, and `up.sh` exports `KC_HOSTNAME`.
+2. **Web** — `apps/web/.env.local`: `AUTH_URL=http://<host>:3001`, `KEYCLOAK_ISSUER=http://<host>:8081/realms/everdict`
    (`CONTROL_PLANE_URL` stays `127.0.0.1:8787` — the browser never calls the API directly).
-3. **API** — `apps/api/.env`: `KEYCLOAK_ISSUER=http://<host>:8081/realms/assay` (must equal the token `iss`).
-4. **Realm** — `assay-web` `redirectUris`/`webOrigins` must include `http://<host>:3001` (see `realm-assay.json`;
+3. **API** — `apps/api/.env`: `KEYCLOAK_ISSUER=http://<host>:8081/realms/everdict` (must equal the token `iss`).
+4. **Realm** — `everdict-web` `redirectUris`/`webOrigins` must include `http://<host>:3001` (see `realm-everdict.json`;
    re-import with `down -v` after editing, or add via the admin console).
 
-Example: with Tailscale, set `ASSAY_PUBLIC_HOST=<your-tailnet-ip>` → open `http://<your-tailnet-ip>:3001`
-from any tailnet device. To switch hosts, change `ASSAY_PUBLIC_HOST` + the two `.env` files + the realm
-`redirectUris` to the new host (+ `ASSAY_DEV_ORIGIN=<host>` in `apps/web/.env.local` for dev-server HMR).
+Example: with Tailscale, set `EVERDICT_PUBLIC_HOST=<your-tailnet-ip>` → open `http://<your-tailnet-ip>:3001`
+from any tailnet device. To switch hosts, change `EVERDICT_PUBLIC_HOST` + the two `.env` files + the realm
+`redirectUris` to the new host (+ `EVERDICT_DEV_ORIGIN=<host>` in `apps/web/.env.local` for dev-server HMR).
 
 > **HTTP on non-private hosts:** Keycloak's realm `sslRequired` defaults to `external`, which **refuses plain HTTP**
 > on any non-RFC1918 address (Tailscale `100.64.0.0/10`, public IPs) → `403 "HTTPS required"`. The dev realm sets

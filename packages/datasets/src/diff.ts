@@ -1,4 +1,4 @@
-import type { Dataset, DatasetDiff, DatasetFieldChange, EvalCase } from "@assay/core";
+import type { Dataset, DatasetDiff, DatasetFieldChange, EvalCase } from "@everdict/core";
 
 // 키 정렬 정규화 — 객체 키 순서/배열 동등성을 안정적으로 비교(거짓 변경 방지). undefined 는 전용 센티넬.
 function canonical(v: unknown): string {

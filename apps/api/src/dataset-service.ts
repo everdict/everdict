@@ -1,6 +1,6 @@
-import { type Principal, can } from "@assay/auth";
-import { ForbiddenError } from "@assay/core";
-import type { DatasetRegistry } from "@assay/registry";
+import { type Principal, can } from "@everdict/auth";
+import { ForbiddenError } from "@everdict/core";
+import type { DatasetRegistry } from "@everdict/registry";
 
 // 데이터셋 버전 소프트 삭제의 공유 코어 — HTTP 라우트(server.ts)와 MCP 도구(mcp.ts)가 같은 로직을 쓴다(BFF↔MCP parity).
 // 권한: 그 버전을 등록한 생성자 본인(createdBy === subject) 또는 워크스페이스 admin(datasets:delete) 만.

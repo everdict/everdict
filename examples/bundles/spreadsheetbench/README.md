@@ -1,11 +1,11 @@
 # SpreadsheetBench (v1 + v2) — a bundle
 
 Registers the **[SpreadsheetBench](https://spreadsheetbench.github.io/)** spreadsheet-manipulation benchmark
-(both **v1** and **v2**) into Assay as pure data, applied through `POST /bundles/apply` — **zero core/package
+(both **v1** and **v2**) into Everdict as pure data, applied through `POST /bundles/apply` — **zero core/package
 changes** (the "specifics live in a bundle, not core" principle; see `docs/architecture/bundles.md`). Ships:
 
 - **Two benchmark recipes** (`spreadsheetbench-v1`, `spreadsheetbench-v2`) — adapters describing how to map the
-  real SpreadsheetBench data → Assay cases, plus the official-style grader wiring.
+  real SpreadsheetBench data → Everdict cases, plus the official-style grader wiring.
 - **Two runnable, self-contained samples** (`spreadsheetbench-v1-sample`, `spreadsheetbench-v2-sample`) — real
   `.xlsx` cases that run **immediately** with any `command` agent (e.g. codex), no external data needed.
 - **The faithful scorer** `scripts/sbench_grade.py` — an openpyxl port of the official V1/V2 comparison, reusable
@@ -46,7 +46,7 @@ The samples are `repo`-env cases: `setup` ensures `openpyxl` and generates the i
 
 ```bash
 node scripts/live/spreadsheetbench-selfhosted.mjs
-# ① dev control plane ② pair this machine ③ assay runner (codex on PATH)
+# ① dev control plane ② pair this machine ③ everdict runner (codex on PATH)
 # ④ POST /bundles/apply ⑤ run v1-sample + v2-sample × codex × self:<id> ⑥ tests_pass PASS
 ```
 
@@ -95,7 +95,7 @@ deterministic samples).
 `Dockerfile.codex` builds `spreadsheetbench-codex:v1` = the grader toolchain **+ node + codex**. The `sbench-codex`
 harness runs `codex exec --dangerously-bypass-approvals-and-sandbox …` **inside** that image (codex's own nested
 linux-sandbox fails in Docker, so the container provides isolation). Auth is the runner's **machine ChatGPT
-login**: start the self-hosted runner with `assay runner --pair … --mount-codex-login`, which bind-mounts
+login**: start the self-hosted runner with `everdict runner --pair … --mount-codex-login`, which bind-mounts
 `~/.codex → /codex` (`CODEX_HOME=/codex`) into containerized jobs — **own login pays, no API key** (see
 `docs/architecture/portable-harness-runtime.md` slice 4). Verified:
 

@@ -1,4 +1,4 @@
-# Control-plane API (`@assay/api`)
+# Control-plane API (`@everdict/api`)
 
 The external SaaS surface — a Fastify HTTP server that accepts eval runs and exposes results, on top of
 everything the runtime provides (capacity-aware + tenant-fair `Scheduler`, trust-zone isolation, per-tenant
@@ -47,9 +47,9 @@ arrives by polling or webhook.
 Scorecards are **batch evals** (a dataset × a `harness@version` → aggregated `Scorecard` + per-metric summary),
 async like runs. See [scorecards.md](scorecards.md).
 
-Identity is resolved by the **auth core** (`@assay/auth`): `Authorization: Bearer <jwt|ak_…>` → a
-`Principal{subject, workspace, roles, via}` (OIDC/Keycloak JWT or API key). With `ASSAY_REQUIRE_AUTH=1` a
-missing/invalid credential is **401**, otherwise dev falls back to the `x-assay-tenant` header (admin). The
+Identity is resolved by the **auth core** (`@everdict/auth`): `Authorization: Bearer <jwt|ak_…>` → a
+`Principal{subject, workspace, roles, via}` (OIDC/Keycloak JWT or API key). With `EVERDICT_REQUIRE_AUTH=1` a
+missing/invalid credential is **401**, otherwise dev falls back to the `x-everdict-tenant` header (admin). The
 resolved `workspace` (= tenant = trust-zone) keys fairness, quotas, isolation, secret scoping, budgets — and
 scopes every read; roles gate every route (`viewer/member/admin`). See [auth.md](auth.md). Harness registration
 (`POST/GET /harnesses` instances + `POST/GET /harness-templates` 대분류; raw config reads
@@ -75,7 +75,7 @@ POST /runs ──▶ RunService.submit
 GET /runs/:id ◀── poll until status is terminal     (or receive the webhook)
 ```
 
-## Result store (`@assay/db`)
+## Result store (`@everdict/db`)
 `RunStore` (create/update/get/list). Default `InMemoryRunStore`; set `DATABASE_URL` and the API uses
 **`PgRunStore`** (real Postgres) — it runs migrations at boot (`migrate()` over `packages/db/migrations/`,
 idempotent) and persists `RunRecord`s (`result`/`error` as `jsonb`). Same interface, so the service +
@@ -88,20 +88,20 @@ pnpm build
 # local backend (this machine's claude subscription):
 PORT=8787 node apps/api/dist/main.js
 # distributed backend + per-tenant run cap + Postgres result store:
-PORT=8787 NOMAD_ADDR=http://127.0.0.1:4646 ASSAY_AGENT_IMAGE=<img> ASSAY_TENANT_RUNS=3 \
+PORT=8787 NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=<img> EVERDICT_TENANT_RUNS=3 \
   DATABASE_URL=postgresql://user:pass@host:5432/db node apps/api/dist/main.js   # migrations run at boot
 
-curl -XPOST localhost:8787/runs -H 'x-assay-tenant: acme' -H 'content-type: application/json' -d '{
+curl -XPOST localhost:8787/runs -H 'x-everdict-tenant: acme' -H 'content-type: application/json' -d '{
   "harness": {"id":"scripted","version":"latest"},
   "case": {"id":"c1","env":{"kind":"repo","source":{"files":{}}},"task":"...","graders":[{"id":"steps"}],"timeoutSec":120,"tags":[]}
 }'
 curl localhost:8787/runs/<runId>   # poll until "succeeded"
 ```
 Live-verified end-to-end against real Nomad: `POST /runs` → `202` → poll → `succeeded` with trace + snapshot +
-scores; a 4th submit past `ASSAY_TENANT_RUNS=3` returns `402 BUDGET_EXCEEDED`. With `DATABASE_URL` set, the
-succeeded run is confirmed persisted in the `assay_runs` Postgres table (survives a server restart).
+scores; a 4th submit past `EVERDICT_TENANT_RUNS=3` returns `402 BUDGET_EXCEEDED`. With `DATABASE_URL` set, the
+succeeded run is confirmed persisted in the `everdict_runs` Postgres table (survives a server restart).
 
-> The CLI (`assay run`) is the dev/single-run path; this API is the multi-tenant control-plane surface.
+> The CLI (`everdict run`) is the dev/single-run path; this API is the multi-tenant control-plane surface.
 > Durable orchestration (Temporal) and the API can be combined: point the service's dispatcher at the Temporal
 > orchestrator instead of an in-process Scheduler. See `docs/orchestration.md`.
 

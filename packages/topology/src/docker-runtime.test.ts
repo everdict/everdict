@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec } from "@assay/core";
+import type { ServiceHarnessSpec } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { DockerTopologyRuntime } from "./docker-runtime.js";
 import { type Docker, type DockerRunSpec, dockerRunArgs, parseHostPort } from "./docker.js";
@@ -149,12 +149,12 @@ describe("DockerTopologyRuntime", () => {
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     const handle = await rt.ensureTopology(SPEC);
 
-    expect(f.networks).toEqual(["assay-bu-1.0.0"]);
+    expect(f.networks).toEqual(["everdict-bu-1.0.0"]);
     // 스토어 2(postgres/redis) + 서비스 1 = run 3회.
     expect(f.runs.map((r) => r.alias)).toEqual(["bu-postgres", "bu-redis", "agent-server"]);
     // 서비스는 DATABASE_URL/REDIS_URL 을 네트워크 alias(<id>-<store>:port)로 주입받는다.
     const agent = f.runs.find((r) => r.alias === "agent-server");
-    expect(agent?.env?.DATABASE_URL).toBe("postgresql://assay:assay@bu-postgres:5432/assay");
+    expect(agent?.env?.DATABASE_URL).toBe("postgresql://everdict:everdict@bu-postgres:5432/everdict");
     expect(agent?.env?.REDIS_URL).toBe("redis://bu-redis:6379");
     expect(agent?.publish).toBe(8000);
     // 엔드포인트 = http://127.0.0.1:<게시 호스트 포트>.
@@ -190,7 +190,7 @@ describe("DockerTopologyRuntime", () => {
 
   it("ensureTopology: 러너 재배포 — 남은 고정 이름 컨테이너가 있어도 rm 선제 제거로 충돌 없이 성공한다", async () => {
     // 실 데몬처럼 docker run(--name)은 비멱등: 같은 이름이 살아 있으면 충돌(throw). 이전 배포의 잔존 컨테이너 재현.
-    const live = new Set<string>(["assay-bu-1.0.0-bu-postgres", "assay-bu-1.0.0-agent-server"]);
+    const live = new Set<string>(["everdict-bu-1.0.0-bu-postgres", "everdict-bu-1.0.0-agent-server"]);
     const docker: Docker = {
       async ensureNetwork() {},
       async run(spec) {
@@ -227,7 +227,7 @@ describe("DockerTopologyRuntime", () => {
     const rt = new DockerTopologyRuntime({ docker: f.docker, fetchImpl: okFetch });
     // case-level 병렬에서 warm 이 아직 비었을 때 동시에 ensure → 둘이 배포하면 고정 이름 컨테이너가 충돌한다.
     const [a, b, c] = await Promise.all([rt.ensureTopology(SPEC), rt.ensureTopology(SPEC), rt.ensureTopology(SPEC)]);
-    expect(f.networks).toEqual(["assay-bu-1.0.0"]); // 네트워크 1회
+    expect(f.networks).toEqual(["everdict-bu-1.0.0"]); // 네트워크 1회
     expect(f.runs.map((r) => r.alias)).toEqual(["bu-postgres", "bu-redis", "agent-server"]); // 배포 1회분만
     expect(a).toEqual(b); // 셋 다 같은 핸들을 공유
     expect(b).toEqual(c);
@@ -262,7 +262,7 @@ describe("DockerTopologyRuntime", () => {
     expect(snap.url).toBe("https://x");
     // dispose 는 브라우저 컨테이너만 제거(warm 토폴로지 유지).
     await browser.dispose();
-    expect(f.removed).toContain("assay-bu-1.0.0-browser-run-1");
+    expect(f.removed).toContain("everdict-bu-1.0.0-browser-run-1");
   });
 
   it("ensureTopology: 부분 실패 후 재시도가 컨테이너 이름 충돌 없이 성공한다(cascade 방지)", async () => {
@@ -295,7 +295,7 @@ describe("DockerTopologyRuntime", () => {
 
     // 1차 시도: 스토어 readiness 실패 → throw. 정리되면 postgres 컨테이너가 live 에서 빠진다.
     await expect(rt.ensureTopology(SPEC)).rejects.toThrow();
-    expect(removed).toContain("assay-bu-1.0.0-bu-postgres"); // 부분 기동분 정리됨(픽스 전엔 비어 cascade)
+    expect(removed).toContain("everdict-bu-1.0.0-bu-postgres"); // 부분 기동분 정리됨(픽스 전엔 비어 cascade)
 
     // 2차 시도: 이제 스토어 준비됨. 픽스 전이면 1차가 남긴 postgres 이름과 충돌(throw)했을 자리.
     storeReady = true;
@@ -357,10 +357,10 @@ describe("DockerTopologyRuntime", () => {
     const beforeTeardown = f.removed.length; // ensure 중 멱등 rm(각 컨테이너 run 전) 이후부터 teardown 제거분만 확인
     await rt.teardown(SPEC);
     expect(f.removed.slice(beforeTeardown)).toEqual([
-      "assay-bu-1.0.0-bu-postgres",
-      "assay-bu-1.0.0-bu-redis",
-      "assay-bu-1.0.0-agent-server",
+      "everdict-bu-1.0.0-bu-postgres",
+      "everdict-bu-1.0.0-bu-redis",
+      "everdict-bu-1.0.0-agent-server",
     ]);
-    expect(f.rmNets).toEqual(["assay-bu-1.0.0"]);
+    expect(f.rmNets).toEqual(["everdict-bu-1.0.0"]);
   });
 });

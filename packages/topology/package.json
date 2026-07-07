@@ -1,5 +1,5 @@
 {
-  "name": "@assay/topology",
+  "name": "@everdict/topology",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -13,9 +13,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@assay/backends": "workspace:*",
-    "@assay/core": "workspace:*",
-    "@assay/graders": "workspace:*",
-    "@assay/trace": "workspace:*"
+    "@everdict/backends": "workspace:*",
+    "@everdict/core": "workspace:*",
+    "@everdict/graders": "workspace:*",
+    "@everdict/trace": "workspace:*"
   }
 }

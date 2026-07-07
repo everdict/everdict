@@ -46,7 +46,7 @@ export function buildTrayMenuTemplate(state: TrayMenuState, actions: TrayMenuAct
     ...updaterItems(state.updater, actions),
     { label: runnerStatusLabel(state.runner), enabled: false },
     { type: "separator" },
-    { label: "Assay 열기", click: () => actions.openApp() },
+    { label: "Everdict 열기", click: () => actions.openApp() },
     { type: "separator" },
     {
       label: "로그인 시 자동 시작",

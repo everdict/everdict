@@ -64,14 +64,14 @@ to `JudgeSpec.runtime` or the default backend.)
 `Scheduler` (`packages/backends/src/scheduler.ts`) chooses by capacity (`free = total − max(used, in-flight)`) +
 tenant WFQ + `tenantQuota`, honoring `placement.target` as a hard pin. `TrustZonePolicy` decides isolation, not
 affinity. `RuntimeSpec` carries coarse location (`datacenters`/`namespace`/`context`) but the scheduler never
-reasons about store proximity, and topology stores (`assay-shared` namespace / runtime-discovered) have no
+reasons about store proximity, and topology stores (`everdict-shared` namespace / runtime-discovered) have no
 co-location guarantee with jobs. **No locality concept exists to build affinity-scoring on** — which is why D2
 takes the cheap, correct path (co-locate by *inheriting the producing run's placement*) instead.
 
 ### Observation delivery is store-fetch-only on the topology path
 `packages/topology/src/service-backend.ts:132` always does `const snapshot = target ? await target.snapshot() :
 {kind:"prompt"}` — a **pull** from the per-case browser CDP (`reference`). `TopologyTarget.observe[]`
-(`dom/screenshot/url`, `packages/core/src/harness-spec.ts:35`) is **declared but unused**. The `__ASSAY_RESULT__`
+(`dom/screenshot/url`, `packages/core/src/harness-spec.ts:35`) is **declared but unused**. The `__EVERDICT_RESULT__`
 sentinel (`packages/agent/src/run.ts:9`, parsed in `packages/backends/src/*.ts`) returns the whole `CaseResult` for
 **process** backends, but topology observations never ride it. There is no egress path. Graders/judges consume the
 result via `GradeContext.snapshot` (`packages/core/src/grader.ts`).
@@ -93,7 +93,7 @@ behind a small `ObservationSource` seam, the sibling of those two.
 | mode | who moves the observation | snapshot source | natural locality | topology status |
 | --- | --- | --- | --- | --- |
 | `reference` (default) | judge/grader **pulls** | `target.snapshot()` (CDP today; a store handle generally) | judge **co-located** with the store (D2) | ✅ exists (the only path today) |
-| `sentinel` | the run **returns it inline** | embedded in the drive outcome / result channel (`__ASSAY_RESULT__`-style) | locality irrelevant (no store hop) — best for small observations | ❌ **missing — the gap the user named** |
+| `sentinel` | the run **returns it inline** | embedded in the drive outcome / result channel (`__EVERDICT_RESULT__`-style) | locality irrelevant (no store hop) — best for small observations | ❌ **missing — the gap the user named** |
 | `egress` | the run **pushes it out** | written to a sink (object store / the judge's locality) before grading | judge anywhere; push beats pull when the judge is far | ❌ missing |
 
 `reference` is the locality-sensitive one (co-location pays off); `sentinel` sidesteps locality entirely;
@@ -102,21 +102,21 @@ behind a small `ObservationSource` seam, the sibling of those two.
 ## Contract sketch
 
 ```ts
-// @assay/core — judge-spec.ts (D1): harness judge gains an optional runtime (tenant RuntimeSpec id).
+// @everdict/core — judge-spec.ts (D1): harness judge gains an optional runtime (tenant RuntimeSpec id).
 HarnessJudgeSpecSchema.runtime?: string;   // → placement.target; model judge ignores it (in-process)
 
-// @assay/core — harness-spec.ts (D3): the target declares how its observation is delivered.
+// @everdict/core — harness-spec.ts (D3): the target declares how its observation is delivered.
 TopologyTargetSchema.delivery?:
   | { mode: "reference" }                                   // default = today's snapshot() pull
   | { mode: "sentinel" }                                    // returned inline with the result
   | { mode: "egress"; sink: string };                       // pushed to a named sink (object store, …)
 // Mirror in ServiceTemplateSpecSchema.target (harness-template.ts) — templates carry the same target.
 
-// @assay/topology — observation-source.ts (D3): the seam, sibling of TopologyRuntime / FrontDoorDriver.
+// @everdict/topology — observation-source.ts (D3): the seam, sibling of TopologyRuntime / FrontDoorDriver.
 interface ObservationSource { observe(req): Promise<EnvSnapshot>; }   // reference|sentinel|egress impls
 // service-backend.ts §132 refactors its inline `target.snapshot()` into the `reference` impl (no behavior change).
 
-// @assay/api — judge-runner.ts (D1/D2): co-locate + override.
+// @everdict/api — judge-runner.ts (D1/D2): co-locate + override.
 //   placement = judgeSpec.runtime ? { target: judgeSpec.runtime } : producingRunPlacement
 //   (producingRunPlacement threaded into applyJudges from scorecard-service track; undefined on ingest).
 ```
@@ -134,7 +134,7 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
    immediate value. Tests: runner co-locates vs overrides; ingest path falls back; viewer/member gates unchanged.
 2. ✅ **Delivery-mode contract + `ObservationSource` seam (D3 scaffolding) — DONE.** `core` `ObservationDelivery`
    (`reference`|`sentinel`|`egress`) + `TopologyTarget.delivery?` (template mirrors via the shared
-   `TopologyTargetSchema`). `@assay/topology` `observation-source.ts`: `ObservationSource` seam +
+   `TopologyTargetSchema`). `@everdict/topology` `observation-source.ts`: `ObservationSource` seam +
    `referenceObservationSource` (= today's `target.snapshot()`/prompt) + `observationSourceFor(mode)` (reference
    wired; `sentinel`/`egress` **throw explicitly** — no silent fallback). `service-backend.ts:133` now delegates to
    `observationSourceFor(spec.target?.delivery?.mode ?? "reference").observe({target})` — default `reference` =
@@ -142,7 +142,7 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
    delivery mode. `delivery` is `.optional()` (not `.default`) so the resolved-spec output type stays
    backward-compatible (no fixture churn).
 3. ✅ **Sentinel delivery on topology (the named gap) — DONE.** The observation rides the **result channel** (the
-   front-door HTTP response — the topology analog of the `__ASSAY_RESULT__` stdout sentinel). `DriveOutcome.response`
+   front-door HTTP response — the topology analog of the `__EVERDICT_RESULT__` stdout sentinel). `DriveOutcome.response`
    carries the completion body (`sync` = submit response, `poll` = the `done` status body); `delivery.sentinel.path?`
    is a dot-path into it (absent = the whole body) extracted via the existing eval-free `getField`, then validated
    with `EnvSnapshotSchema` (malformed → explicit run failure, no silent fallback). `service-backend` passes
@@ -151,8 +151,8 @@ dispatcher already resolves it. D3 is the only new core surface (one optional `J
    `response` (sync=submit, poll=done body), topology integration (browser provisioned but observation read from the
    response, not the pull).
 4. ✅ **Egress delivery — DONE** (cross-runtime locality tags deliberately deferred). `egress` = the agent pushes
-   the observation to a named `sink` (out of band) and Assay **retrieves** it from there — distinct from `reference`
-   (Assay pulls its *own* provisioned target) and `sentinel` (inline). `egressObservationSource(sink)` GETs the
+   the observation to a named `sink` (out of band) and Everdict **retrieves** it from there — distinct from `reference`
+   (Everdict pulls its *own* provisioned target) and `sentinel` (inline). `egressObservationSource(sink)` GETs the
    `{run_id}`-interpolated sink URL (via the backend's `getJson`, defaulted to `fetchJson`; keyed by
    `outcome.traceRef` so it matches the trace correlation) and validates as `EnvSnapshot`. Tests: observation-source
    egress (interpolated fetch / missing-getJson throws / malformed throws), topology integration (browser

@@ -1,10 +1,10 @@
-import { BadRequestError, NotFoundError } from "@assay/core";
+import { BadRequestError, NotFoundError } from "@everdict/core";
 import {
   type OAuthStateStore,
   type WorkspaceSettings,
   type WorkspaceSettingsStore,
   generateOAuthState,
-} from "@assay/db";
+} from "@everdict/db";
 import { z } from "zod";
 import { getInstallation, mintInstallationToken } from "./oauth/github-app.js";
 import { oauthFetchJson } from "./oauth/provider.js";
@@ -72,7 +72,7 @@ function appTokenHeaders(token: string): Record<string, string> {
   return {
     authorization: `Bearer ${token}`,
     accept: "application/vnd.github+json",
-    "user-agent": "assay",
+    "user-agent": "everdict",
     "content-type": "application/json",
   };
 }

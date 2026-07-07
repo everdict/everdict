@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { TopologyDependency } from "@assay/core";
+import type { TopologyDependency } from "@everdict/core";
 
 // per-run 키 — 공유 스토어를 케이스별로 논리격리하는 식별자들.
 export interface RunKeys {

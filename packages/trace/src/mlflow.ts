@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@assay/core";
+import { type TraceEvent, UpstreamError } from "@everdict/core";
 import { type Span, type TraceSource, spansToTraceEvents } from "./trace-source.js";
 
 // MLflow 3.x 트레이스 REST 의 스팬 속성은 OTLP-스타일 AnyValue(snake_case) 배열 — OTel(camelCase)과 별개 포맷.
@@ -66,16 +66,16 @@ export interface MlflowTraceSourceOptions {
   headers?: Record<string, string>; // 테넌트 자격증명 등(예: Authorization). SecretStore 에서 주입.
   fetchImpl?: typeof fetch; // 테스트 주입
   // 상관 방식: "id"(기본) = fetch(runId) 의 runId 가 곧 MLflow trace_id(pull-ingest 관례).
-  // "tag" = 계측 에이전트가 자기 trace 에 남긴 `assay.run_id` 태그로 검색(id 는 서버가 mint 하므로
-  // assay runId 와 같을 수 없는 실 에이전트 경로) — search 가 locations 를 요구해 experimentIds 필수.
+  // "tag" = 계측 에이전트가 자기 trace 에 남긴 `everdict.run_id` 태그로 검색(id 는 서버가 mint 하므로
+  // everdict runId 와 같을 수 없는 실 에이전트 경로) — search 가 locations 를 요구해 experimentIds 필수.
   correlate?: "id" | "tag";
   experimentIds?: string[]; // tag 상관의 검색 범위(MLflow 3.x traces/search 는 locations 필수)
 }
 
-const RUN_ID_TAG = "assay.run_id"; // 계측 에이전트가 남기는 상관 태그(주입 env ASSAY_RUN_ID 와 동일 값)
+const RUN_ID_TAG = "everdict.run_id"; // 계측 에이전트가 남기는 상관 태그(주입 env EVERDICT_RUN_ID 와 동일 값)
 
 // MLflow 3.x tracing REST(`GET /api/3.0/mlflow/traces/get?trace_id=`)에서 trace 를 가져와 TraceEvent 로 정규화.
-// correlate="tag" 면 `POST /api/3.0/mlflow/traces/search`(tags.`assay.run_id` 필터, 실 3.14 검증)로
+// correlate="tag" 면 `POST /api/3.0/mlflow/traces/search`(tags.`everdict.run_id` 필터, 실 3.14 검증)로
 // trace_id 를 먼저 찾는다 — 미발견은 0건 degrade(id 모드의 404 와 동일).
 export class MlflowTraceSource implements TraceSource {
   constructor(private readonly opts: MlflowTraceSourceOptions) {}

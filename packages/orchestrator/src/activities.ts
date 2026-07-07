@@ -1,5 +1,5 @@
-import type { Dispatcher } from "@assay/backends";
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { Dispatcher } from "@everdict/backends";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import type { Activities } from "./types.js";
 
 // 예약 발사 액티비티가 컨트롤플레인 internal 라우트를 호출할 설정(워커→API HTTP 브리지). 없으면 발사 액티비티 비활성.
@@ -20,7 +20,8 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       scheduleId: string;
       tenant: string;
     }): Promise<{ scorecardId: string; previousScorecardId?: string }> {
-      if (!schedule) throw new Error("schedule 액티비티가 설정되지 않았습니다(ASSAY_API_URL/ASSAY_INTERNAL_TOKEN).");
+      if (!schedule)
+        throw new Error("schedule 액티비티가 설정되지 않았습니다(EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
         `${schedule.apiUrl.replace(/\/$/, "")}/internal/schedules/${encodeURIComponent(input.scheduleId)}/fire`,
         {
@@ -38,7 +39,8 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       };
     },
     async scheduledScorecardStatus(scorecardId: string): Promise<string | null> {
-      if (!schedule) throw new Error("schedule 액티비티가 설정되지 않았습니다(ASSAY_API_URL/ASSAY_INTERNAL_TOKEN).");
+      if (!schedule)
+        throw new Error("schedule 액티비티가 설정되지 않았습니다(EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
         `${schedule.apiUrl.replace(/\/$/, "")}/internal/schedules/scorecard-status/${encodeURIComponent(scorecardId)}`,
         { headers: { "x-internal-token": schedule.internalToken } },
@@ -53,7 +55,8 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       scorecardId: string;
       previousScorecardId?: string;
     }): Promise<void> {
-      if (!schedule) throw new Error("schedule 액티비티가 설정되지 않았습니다(ASSAY_API_URL/ASSAY_INTERNAL_TOKEN).");
+      if (!schedule)
+        throw new Error("schedule 액티비티가 설정되지 않았습니다(EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
       const res = await fetch(
         `${schedule.apiUrl.replace(/\/$/, "")}/internal/schedules/${encodeURIComponent(input.scheduleId)}/finalize`,
         {

@@ -1,4 +1,4 @@
-import { RESULT_SENTINEL } from "@assay/agent";
+import { RESULT_SENTINEL } from "@everdict/agent";
 import {
   type AgentJob,
   type CaseResult,
@@ -7,7 +7,7 @@ import {
   assertHardenedIsolation,
   imageUsesRegistryHost,
   judgeEnv,
-} from "@assay/core";
+} from "@everdict/core";
 import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
@@ -80,13 +80,13 @@ export interface NomadJobSpec {
 }
 
 export function nomadJobId(job: AgentJob): string {
-  return `assay-${job.evalCase.id}`;
+  return `everdict-${job.evalCase.id}`;
 }
 
-// AgentJob → Nomad batch 잡 스펙. 잡 페이로드는 ASSAY_AGENT_JOB(base64) env 로 싣는다.
+// AgentJob → Nomad batch 잡 스펙. 잡 페이로드는 EVERDICT_AGENT_JOB(base64) env 로 싣는다.
 export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJobSpec {
   const env: Record<string, string> = {
-    ASSAY_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
+    EVERDICT_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
     ...judgeEnv(job.judge), // per-run judge 모델 설정(키는 secretEnv). inline judge grader 가 이 모델로 판정.
     ...opts.secretEnv,
   };
@@ -96,7 +96,7 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions): NomadJo
   const registryAuth = job.registryAuth;
   const auth =
     registryAuth && imageUsesRegistryHost(image, registryAuth.host)
-      ? [{ username: registryAuth.username ?? "assay", password: registryAuth.password }]
+      ? [{ username: registryAuth.username ?? "everdict", password: registryAuth.password }]
       : undefined;
   return {
     Job: {
@@ -145,13 +145,13 @@ export class NomadBackend implements Backend {
     this.http = opts.http ?? fetchHttp(opts.addr, opts.apiToken);
   }
 
-  // 용량: total=설정 상한, used=클러스터에서 관측된 진행중 assay 잡 수(라이브 프로브, 전 네임스페이스).
+  // 용량: total=설정 상한, used=클러스터에서 관측된 진행중 everdict 잡 수(라이브 프로브, 전 네임스페이스).
   // 프로브가 실패하면 used=0 으로 두고 스케줄러의 in-flight 로만 게이팅한다.
   async capacity(): Promise<BackendCapacity> {
     const mc = this.opts.maxConcurrent;
     const total = (typeof mc === "function" ? mc() : mc) ?? 20;
     try {
-      const res = await this.http.request("GET", "/v1/jobs?prefix=assay-&namespace=*");
+      const res = await this.http.request("GET", "/v1/jobs?prefix=everdict-&namespace=*");
       if (res.status < 300) {
         const jobs = JSON.parse(res.text) as Array<{ Status?: string }>;
         const used = jobs.filter((j) => j.Status === "running" || j.Status === "pending").length;

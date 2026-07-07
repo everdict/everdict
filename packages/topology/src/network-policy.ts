@@ -1,4 +1,4 @@
-import type { TrustZone } from "@assay/core";
+import type { TrustZone } from "@everdict/core";
 
 // K8s NetworkPolicy 로 테넌트(존) 네트워크 격리를 enforce. zone.network 가 정책을 고른다:
 //   deny-cross-tenant = 같은 ns 외 ingress 차단(대칭 적용이라 egress 없이도 pod 간 교차 도달 차단) — 안전 기본.
@@ -13,8 +13,8 @@ export interface NetworkPolicyManifest {
   spec: Record<string, unknown>;
 }
 
-// assay 가 만든 네임스페이스 표식 — 공유 스토어 ingress 가 "플랫폼 네임스페이스에서만" 허용할 때 매칭.
-export const MANAGED_LABEL = { key: "assay/managed", value: "true" } as const;
+// everdict 가 만든 네임스페이스 표식 — 공유 스토어 ingress 가 "플랫폼 네임스페이스에서만" 허용할 때 매칭.
+export const MANAGED_LABEL = { key: "everdict/managed", value: "true" } as const;
 
 export interface ZoneNetworkPolicyOptions {
   namespace: string;
@@ -34,7 +34,7 @@ export function buildZoneNetworkPolicies(opts: ZoneNetworkPolicyOptions): Networ
   out.push({
     apiVersion: "networking.k8s.io/v1",
     kind: "NetworkPolicy",
-    metadata: { name: "assay-zone-ingress", namespace },
+    metadata: { name: "everdict-zone-ingress", namespace },
     spec: {
       podSelector: {},
       policyTypes: ["Ingress"],
@@ -64,7 +64,7 @@ export function buildZoneNetworkPolicies(opts: ZoneNetworkPolicyOptions): Networ
     out.push({
       apiVersion: "networking.k8s.io/v1",
       kind: "NetworkPolicy",
-      metadata: { name: "assay-zone-egress", namespace },
+      metadata: { name: "everdict-zone-egress", namespace },
       spec: { podSelector: {}, policyTypes: ["Egress"], egress },
     });
   }
@@ -99,14 +99,14 @@ export async function resolveEgressCidrs(
   return [...out];
 }
 
-// 공유 스토어 ns: assay-managed 네임스페이스에서 스토어 포트로 오는 ingress 만 허용(플랫폼 외부 도달 차단).
+// 공유 스토어 ns: everdict-managed 네임스페이스에서 스토어 포트로 오는 ingress 만 허용(플랫폼 외부 도달 차단).
 // pool 은 모든 테넌트가 스토어를 공유하므로 테넌트별 차단은 불가 — 대신 "플랫폼 밖" 을 막고, 테넌트별 격리는
 // DB/role/creds(+케이스 isolateBy)로 한다(SLICE 40).
 export function buildSharedStoreIngressPolicy(poolNs: string, storePorts: number[]): NetworkPolicyManifest {
   return {
     apiVersion: "networking.k8s.io/v1",
     kind: "NetworkPolicy",
-    metadata: { name: "assay-shared-store-ingress", namespace: poolNs },
+    metadata: { name: "everdict-shared-store-ingress", namespace: poolNs },
     spec: {
       podSelector: {},
       policyTypes: ["Ingress"],

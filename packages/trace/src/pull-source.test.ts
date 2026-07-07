@@ -1,4 +1,4 @@
-import { AppError } from "@assay/core";
+import { AppError } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildTraceSource } from "./build-source.js";
 import { LangfuseTraceSource } from "./langfuse-source.js";
@@ -178,11 +178,11 @@ describe("PhoenixTraceSource", () => {
     const src = new PhoenixTraceSource({
       endpoint: "http://phoenix:6006",
       auth: "Bearer px",
-      project: "assay",
+      project: "everdict",
       fetchImpl: ff.impl,
     });
     const trace = await src.fetch("a".repeat(32));
-    expect(ff.call(0).url).toBe(`http://phoenix:6006/v1/projects/assay/spans?trace_id=${"a".repeat(32)}&limit=1000`);
+    expect(ff.call(0).url).toBe(`http://phoenix:6006/v1/projects/everdict/spans?trace_id=${"a".repeat(32)}&limit=1000`);
     expect((ff.call(0).init.headers as Record<string, string>).authorization).toBe("Bearer px");
     const llm = trace.find((e) => e.kind === "llm_call");
     expect(llm?.kind === "llm_call" && llm.model).toBe("gpt-4o");

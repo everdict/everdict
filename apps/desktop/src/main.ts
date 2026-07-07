@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { hostname } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { ResilientMcpSession, RunnerHost, detectCapabilities, mcpConnect } from "@assay/runner-core";
+import { ResilientMcpSession, RunnerHost, detectCapabilities, mcpConnect } from "@everdict/runner-core";
 import { BrowserWindow, Menu, Notification, Tray, app, ipcMain, nativeImage, safeStorage, shell } from "electron";
 import electronUpdater from "electron-updater";
 import {
@@ -22,11 +22,11 @@ import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./up
 import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window-policy.js";
 
 // 데스크톱 셸 — 배포된 웹을 그대로 렌더링(D1: UI SSOT = apps/web)하고, 트레이에 상주하며,
-// 셀프호스티드 러너(@assay/runner-core)를 메인 프로세스에 내장한다(D3: 원클릭 페어링).
+// 셀프호스티드 러너(@everdict/runner-core)를 메인 프로세스에 내장한다(D3: 원클릭 페어링).
 // 설계: docs/architecture/desktop-app.md · 규약: .claude/skills/desktop/SKILL.md.
 
 // CI 가 릴리즈 빌드에 굽는 기본 서버 URL(esbuild define) — dev(tsc)에는 정의돼 있지 않다(D8).
-declare const __ASSAY_DEFAULT_WEB_URL__: string | undefined;
+declare const __EVERDICT_DEFAULT_WEB_URL__: string | undefined;
 
 // 웹(서버) URL 은 가변(D8) — env(개발/e2e) > config(사용자 저장) > CI 주입 기본값. 없으면 설정 화면.
 let webUrl: string | null = null;
@@ -37,7 +37,7 @@ function applyWebUrl(url: string | null): void {
 }
 
 // 러너의 컨트롤플레인 기본값 — 페어링 페이로드의 apiUrl 이 우선한다(웹 서버가 아는 CONTROL_PLANE_URL).
-const defaultApiUrl = process.env.ASSAY_API_URL ?? "http://localhost:8787";
+const defaultApiUrl = process.env.EVERDICT_API_URL ?? "http://localhost:8787";
 
 // 스킬 desktop 보안 불변식 2 — 모든 창에 항상 이 webPreferences. preload 는 origin 게이트(preload.cts)를 위해
 // 웹 origin 을 인자로 받는다.
@@ -47,7 +47,7 @@ function securePreferences(origin: string): Electron.WebPreferences {
     nodeIntegration: false,
     sandbox: true,
     preload: path.join(import.meta.dirname, "preload.cjs"),
-    additionalArguments: [`--assay-web-origin=${origin}`],
+    additionalArguments: [`--everdict-web-origin=${origin}`],
   };
 }
 
@@ -107,7 +107,7 @@ function notifyDrainIfNeeded(prev: DesktopRunnerStatus, next: DesktopRunnerStatu
   failedSinceIdle = 0;
   try {
     if (!Notification.isSupported()) return;
-    const n = new Notification({ title: "Assay 러너 — 잡 처리 완료", body });
+    const n = new Notification({ title: "Everdict 러너 — 잡 처리 완료", body });
     n.on("click", () => createOrFocusWindow());
     n.show();
   } catch {
@@ -225,11 +225,11 @@ const controller = new RunnerController({
 
 // 자동 업데이트(설계 D6) — 활성 게이트: 패키징된 앱 && 피드 구성. 피드 목적지(공개 releases 리포 vs
 // 리포 public 전환)는 사용자 결정 대기 — 확정되면 electron-builder.yml 에 publish 블록을 추가하면
-// app-update.yml 이 패키지에 실려 자동 활성된다. 그 전엔 ASSAY_UPDATE_FEED_URL(generic 디렉터리 URL)로
+// app-update.yml 이 패키지에 실려 자동 활성된다. 그 전엔 EVERDICT_UPDATE_FEED_URL(generic 디렉터리 URL)로
 // 수동/검증 활성만 가능. dev(미패키징)는 항상 비활성.
 function resolveAutoUpdater(): AutoUpdaterLike | null {
   if (!app.isPackaged) return null;
-  const feedUrl = process.env.ASSAY_UPDATE_FEED_URL;
+  const feedUrl = process.env.EVERDICT_UPDATE_FEED_URL;
   if (feedUrl) {
     // setFeedURL 만으로는 부족 — AppImageUpdater 등이 다운로드 단계에서 app-update.yml(디스크 설정)을
     // 읽는다. env 활성화 시 userData 에 설정 파일을 써서 updateConfigPath 로 주입한다.
@@ -257,7 +257,7 @@ const updater = new UpdaterController({
       try {
         if (Notification.isSupported()) {
           const n = new Notification({
-            title: "Assay 업데이트 준비됨",
+            title: "Everdict 업데이트 준비됨",
             body: `재시작하면 v${state.version} 로 업데이트됩니다. 트레이 메뉴에서 적용하세요.`,
           });
           n.on("click", () => createOrFocusWindow());
@@ -314,7 +314,7 @@ function openSetupWindow(): void {
       nodeIntegration: false,
       sandbox: true,
       preload: path.join(import.meta.dirname, "preload.cjs"),
-      additionalArguments: ["--assay-setup"],
+      additionalArguments: ["--everdict-setup"],
     },
   });
   win.setMenuBarVisibility(false);
@@ -369,7 +369,7 @@ function createOrFocusWindow(): void {
 
 function refreshTrayMenu(): void {
   if (!tray) return;
-  tray.setToolTip(`Assay — ${runnerStatusLabel(latestRunnerStatus)}`);
+  tray.setToolTip(`Everdict — ${runnerStatusLabel(latestRunnerStatus)}`);
   tray.setContextMenu(
     Menu.buildFromTemplate(
       buildTrayMenuTemplate(
@@ -416,20 +416,20 @@ if (!app.requestSingleInstanceLock()) {
     // 서버 URL 결정(D8): env(개발/e2e) > 사용자 설정 > CI 주입 기본값. 없으면 설정 화면이 뜬다.
     applyWebUrl(
       resolveWebUrl({
-        envUrl: process.env.ASSAY_WEB_URL,
+        envUrl: process.env.EVERDICT_WEB_URL,
         configUrl: config.webUrl,
-        bakedUrl: typeof __ASSAY_DEFAULT_WEB_URL__ === "undefined" ? undefined : __ASSAY_DEFAULT_WEB_URL__,
+        bakedUrl: typeof __EVERDICT_DEFAULT_WEB_URL__ === "undefined" ? undefined : __EVERDICT_DEFAULT_WEB_URL__,
       }),
     );
 
     // 설정 창 전용 IPC(D8) — setup.html 의 file:// URL 에서만 허용(웹/외부 페이지 차단).
     const fromSetupPage = (event: { senderFrame: { url: string } | null }): boolean =>
       event.senderFrame?.url === setupPageUrl();
-    ipcMain.handle("assay:get-server-url", (event) => {
+    ipcMain.handle("everdict:get-server-url", (event) => {
       if (!fromSetupPage(event)) throw new Error("허용되지 않은 호출입니다.");
       return webUrl ?? "";
     });
-    ipcMain.handle("assay:set-server-url", (event, raw: unknown) => {
+    ipcMain.handle("everdict:set-server-url", (event, raw: unknown) => {
       if (!fromSetupPage(event)) throw new Error("허용되지 않은 호출입니다.");
       const url = normalizeWebUrl(typeof raw === "string" ? raw : null);
       if (url === null) throw new Error("올바른 http/https 서버 주소가 아닙니다.");

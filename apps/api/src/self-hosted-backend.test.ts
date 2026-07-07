@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { RunnerHub, type SelfHostedKey } from "./runner-hub.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";

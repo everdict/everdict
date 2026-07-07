@@ -1,6 +1,6 @@
-import { UpstreamError } from "@assay/core";
+import { UpstreamError } from "@everdict/core";
 
-// 아웃바운드 OAuth 클라이언트 추상화 — Assay 가 외부 provider(GitHub/GHE/Mattermost)의 OAuth "클라이언트".
+// 아웃바운드 OAuth 클라이언트 추상화 — Everdict 가 외부 provider(GitHub/GHE/Mattermost)의 OAuth "클라이언트".
 // (인바운드 Keycloak 과 반대 방향: 우리가 외부 계정에 권한을 요청한다.)
 // provider 는 **stateless kind** — 자격증명/호스트는 호출 시 config 로 주입한다(github.com=env 기본,
 // self-hosted=워크스페이스 SecretStore name-ref). 한 impl 이 host 유무로 github.com↔GHE 를 모두 처리.

@@ -1,11 +1,11 @@
 {
-  "name": "@assay/desktop",
+  "name": "@everdict/desktop",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
-  "description": "Assay desktop — web parity shell + resident self-hosted runner",
+  "description": "Everdict desktop — web parity shell + resident self-hosted runner",
   "author": "Ho2eny <heoin122@gmail.com>",
-  "homepage": "https://github.com/Ho2eny/assay",
+  "homepage": "https://github.com/Ho2eny/everdict",
   "type": "module",
   "main": "./dist/main.js",
   "scripts": {
@@ -16,7 +16,7 @@
     "package": "node esbuild.mjs && electron-builder --publish never"
   },
   "dependencies": {
-    "@assay/runner-core": "workspace:*",
+    "@everdict/runner-core": "workspace:*",
     "electron-updater": "^6.8.9",
     "zod": "^3.24.1"
   },

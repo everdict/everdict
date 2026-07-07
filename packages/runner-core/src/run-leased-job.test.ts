@@ -1,5 +1,5 @@
-import type { AgentJob, CaseResult } from "@assay/core";
-import type { TopologyRuntime } from "@assay/topology";
+import type { AgentJob, CaseResult } from "@everdict/core";
+import type { TopologyRuntime } from "@everdict/topology";
 import { describe, expect, it, vi } from "vitest";
 import {
   resetSharedTopologyRuntime,

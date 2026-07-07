@@ -1,4 +1,4 @@
-import { ConflictError, type ModelSpec, NotFoundError } from "@assay/core";
+import { ConflictError, type ModelSpec, NotFoundError } from "@everdict/core";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 // Model 버전 SSOT — (tenant, id, version) → ModelSpec. 버전 불변. "latest" 는 semver/등록순 최신.

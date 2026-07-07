@@ -1,8 +1,8 @@
-import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSpec } from "@assay/core";
+import { type Dataset, DatasetSchema, type EnvSpec, type EvalCase, type GraderSpec } from "@everdict/core";
 
-// 데이터셋 인제스트(매핑 레이어): 외부 벤치마크 포맷(WebVoyager jsonl / 임의 jsonl / csv) → 테넌트-소유 Assay
+// 데이터셋 인제스트(매핑 레이어): 외부 벤치마크 포맷(WebVoyager jsonl / 임의 jsonl / csv) → 테넌트-소유 Everdict
 // `Dataset`(EvalCase[]). 멀티테넌트 SaaS 에서 유저가 자기 데이터셋을 쉽게 워크스페이스에 추가하려면, 자기 포맷을
-// EvalCase 로 변환하는 매핑 레이어가 필요하다(레지스트리는 Assay Dataset 스키마만 받으므로). 결과는 register(tenant).
+// EvalCase 로 변환하는 매핑 레이어가 필요하다(레지스트리는 Everdict Dataset 스키마만 받으므로). 결과는 register(tenant).
 
 // 외부 행(레코드) → EvalCase 매핑 규칙. 데이터 주도(함수 없음 → JSON 직렬화 가능, "설정으로 새 벤치마크").
 // env: gitField 있으면 repo env(코딩 벤치마크 SWE-bench), 아니면 browser env(startUrl 유무).

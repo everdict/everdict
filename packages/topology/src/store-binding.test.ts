@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { planTenantStores, resolveStoreIsolation, sanitizeIdent } from "./store-binding.js";
 
@@ -19,7 +19,7 @@ const SPEC: ServiceHarnessSpec = {
 const zone = (over: Partial<TrustZone>): TrustZone => ({
   id: "acme",
   isolationRuntime: "runsc",
-  namespace: "assay-acme",
+  namespace: "everdict-acme",
   network: "deny-cross-tenant",
   trusted: false,
   ...over,
@@ -54,7 +54,7 @@ describe("planTenantStores — pool", () => {
 
   it("postgres: 전용 DB+role 로 scoped DATABASE_URL(공유 스토어 DNS)", () => {
     expect(plan.serviceEnv.DATABASE_URL).toMatch(
-      /^postgresql:\/\/r_acme:.+@assay-shared-postgres\.assay-shared\.svc\.cluster\.local:5432\/tenant_acme$/,
+      /^postgresql:\/\/r_acme:.+@everdict-shared-postgres\.everdict-shared\.svc\.cluster\.local:5432\/tenant_acme$/,
     );
     const pg = plan.tenants.find((t) => t.store === "postgres");
     expect(pg?.database).toBe("tenant_acme");
@@ -66,7 +66,7 @@ describe("planTenantStores — pool", () => {
   });
 
   it("redis: ACL user + key-prefix 네임스페이스 + scoped REDIS_URL", () => {
-    expect(plan.serviceEnv.REDIS_URL).toMatch(/^redis:\/\/acme:.+@assay-shared-redis\.assay-shared\..+:6379$/);
+    expect(plan.serviceEnv.REDIS_URL).toMatch(/^redis:\/\/acme:.+@everdict-shared-redis\.everdict-shared\..+:6379$/);
     expect(plan.serviceEnv.REDIS_KEY_PREFIX).toBe("t:acme:");
     const redis = plan.tenants.find((t) => t.store === "redis");
     expect(redis?.redisSetup?.[0]).toEqual(
@@ -101,7 +101,7 @@ describe("planTenantStores — minio pool", () => {
   it("테넌트 전용 access key + 버킷 + 버킷-한정 정책(scoped creds)", () => {
     expect(plan.serviceEnv.AWS_ACCESS_KEY_ID).toBe("t-acme");
     expect(plan.serviceEnv.S3_BUCKET).toBe("tenant-acme");
-    expect(plan.serviceEnv.AWS_S3_ENDPOINT).toMatch(/^http:\/\/assay-shared-minio\.assay-shared\..+:9000$/);
+    expect(plan.serviceEnv.AWS_S3_ENDPOINT).toMatch(/^http:\/\/everdict-shared-minio\.everdict-shared\..+:9000$/);
     const minio = plan.tenants.find((t) => t.store === "minio");
     expect(minio?.minioSetup).toContain("mc mb -p local/tenant-acme");
     expect(minio?.minioSetup).toContain("mc admin user add local t-acme");
@@ -115,7 +115,7 @@ describe("planTenantStores — silo / external", () => {
   it("silo: 전용 스토어 connEnv(케이스별 격리는 builder), provisioning 없음", () => {
     const plan = planTenantStores(SPEC, zone({ storeIsolation: "silo" }));
     expect(plan.tenants).toHaveLength(0);
-    expect(plan.serviceEnv.DATABASE_URL).toBe("postgresql://assay:assay@aegra-postgres:5432/assay");
+    expect(plan.serviceEnv.DATABASE_URL).toBe("postgresql://everdict:everdict@aegra-postgres:5432/everdict");
   });
   it("external: 스토어 env 없음(BYO storeEnv 가 담당)", () => {
     const plan = planTenantStores(SPEC, zone({ storeIsolation: "external" }));

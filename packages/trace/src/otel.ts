@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@assay/core";
+import { type TraceEvent, UpstreamError } from "@everdict/core";
 import { type Span, type TraceSource, spansToTraceEvents } from "./trace-source.js";
 
 // OTLP 스팬(속성은 {key,value} 배열) → 정규화 Span.
@@ -67,14 +67,14 @@ export interface OtelTraceSourceOptions {
   headers?: Record<string, string>; // 테넌트 자격증명 등(예: Authorization). SecretStore 에서 주입.
   fetchImpl?: typeof fetch; // 테스트 주입
   // 상관 방식: "id"(기본) = fetch(runId) 의 runId 가 곧 trace id(pull-ingest 관례).
-  // "tag" = 계측 에이전트의 리소스 속성 `assay.run_id`(주입 env OTEL_RESOURCE_ATTRIBUTES 그대로)로 검색 —
+  // "tag" = 계측 에이전트의 리소스 속성 `everdict.run_id`(주입 env OTEL_RESOURCE_ATTRIBUTES 그대로)로 검색 —
   // Jaeger query API 전용(`GET /api/traces?service=…&tags=…`, 실 1.62 검증: 리소스 속성=process 태그 매칭,
   // service 필수). OTLP-네이티브 백엔드(검색 API 없음)는 id 상관 유지.
   correlate?: "id" | "tag";
   service?: string; // tag 상관의 검색 범위(Jaeger 는 service 파라미터 필수) — 에이전트의 service.name
 }
 
-const RUN_ID_ATTR = "assay.run_id"; // 계측 에이전트가 남기는 상관 리소스 속성(주입 env 와 동일 값)
+const RUN_ID_ATTR = "everdict.run_id"; // 계측 에이전트가 남기는 상관 리소스 속성(주입 env 와 동일 값)
 
 // OTLP/Jaeger 호환 HTTP 에서 runId(=trace id)로 스팬을 가져와 TraceEvent 로 정규화.
 // correlate="tag" 면 Jaeger 검색(service+tags)으로 찾는다 — 검색 응답이 스팬을 동봉하므로 요청 1회.

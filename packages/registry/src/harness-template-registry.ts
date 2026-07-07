@@ -1,4 +1,4 @@
-import type { HarnessTemplateSpec } from "@assay/core";
+import type { HarnessTemplateSpec } from "@everdict/core";
 import { VersionedStore } from "./versioned-store.js";
 
 // 하네스 Template(대분류) 버전 SSOT — (tenant, id, version) → HarnessTemplateSpec. 버전 불변, _shared 폴백.

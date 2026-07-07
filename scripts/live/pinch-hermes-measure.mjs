@@ -1,20 +1,20 @@
 // 라이브 e2e: hermes-desktop 하니스가 *pinch(PinchBench) 벤치마크* 태스크를 얼마나 수행하는지 측정 + 이력 기록.
 // ① 컨트롤플레인(dev) 기동 → POST /datasets(pinch 벤치마크 추가) + POST /harnesses(hermes-desktop 등록)
 // ② PinchBench core task_*.md 를 github 에서 받아 instruction(+workspace_files) 추출
-// ③ 각 태스크를 hermes(assay-hermes-agent:demo, provider=LiteLLM)로 `hermes -z` 실행 → 답 캡처
+// ③ 각 태스크를 hermes(everdict-hermes-agent:demo, provider=LiteLLM)로 `hermes -z` 실행 → 답 캡처
 // ④ LiteLLM judge 로 채점(태스크 충족 여부 pass + score)
 // ⑤ POST /scorecards/ingest → Scorecard 레코드로 *이력* 기록(벤치마크 dataset id/ver + 하니스 id/ver + 점수 + 트레이스의
 //    모델 llm_call). ⑥ GET /scorecards/:id 로 기록된 이력(하니스·모델·성능·벤치마크) 출력.
-// 사전: assay-hermes-agent:demo 빌드됨, LiteLLM(:4000), apps/api/dist.
+// 사전: everdict-hermes-agent:demo 빌드됨, LiteLLM(:4000), apps/api/dist.
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import process from "node:process";
 
 const CP_PORT = process.env.CP_PORT ?? "8789";
 const BASE = `http://127.0.0.1:${CP_PORT}`;
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const AGENT_MODEL = process.env.HERMES_MODEL ?? "gpt-5.4-mini";
-const JUDGE_MODEL = process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini";
+const JUDGE_MODEL = process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini";
 const LLM_BASE = "http://localhost:4000/v1";
 const TASK_IDS = (process.env.PINCH_TASKS ?? "task_email,task_summary,task_commit_message_writer").split(",");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -74,14 +74,14 @@ const cp = spawn("node", ["apps/api/dist/main.js"], {
     PORT: CP_PORT,
     OPENAI_API_KEY: KEY,
     OPENAI_BASE_URL: LLM_BASE,
-    ASSAY_JUDGE_MODEL: JUDGE_MODEL,
-    ASSAY_REQUIRE_AUTH: "",
+    EVERDICT_JUDGE_MODEL: JUDGE_MODEL,
+    EVERDICT_REQUIRE_AUTH: "",
     KEYCLOAK_ISSUER: "",
     DATABASE_URL: "",
   },
   stdio: ["ignore", "ignore", "pipe"],
 });
-cp.stderr.on("data", (d) => /assay-api on/.test(String(d)) && process.stdout.write("  [cp] up\n"));
+cp.stderr.on("data", (d) => /everdict-api on/.test(String(d)) && process.stdout.write("  [cp] up\n"));
 const shutdown = () => {
   try {
     cp.kill("SIGKILL");
@@ -163,7 +163,7 @@ try {
           `HERMES_BASE_URL=${LLM_BASE}`,
           "-e",
           `HERMES_MODEL=${AGENT_MODEL}`,
-          "assay-hermes-agent:demo",
+          "everdict-hermes-agent:demo",
           "timeout",
           "200",
           "hermes",

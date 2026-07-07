@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TargetAcquire, TopologyTarget } from "@assay/core";
+import type { ServiceHarnessSpec, TargetAcquire, TopologyTarget } from "@everdict/core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type AcquireRequestFn,
@@ -56,7 +56,7 @@ describe("serviceAcquirer", () => {
 
     // 단일 cdpUrl 이 아니라 좌표 bag — 세션형 좌표가 모두 wiring 으로.
     expect(handle.wiring).toEqual({ session_id: "sess-7", target_cdp_url: "ws://x/7" });
-    // Assay 소유 무대 없음 → snapshot 은 prompt(실 관측은 delivery 로).
+    // Everdict 소유 무대 없음 → snapshot 은 prompt(실 관측은 delivery 로).
     expect((await handle.snapshot()).kind).toBe("prompt");
 
     await handle.dispose();

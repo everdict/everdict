@@ -45,7 +45,7 @@ describe("buildTrayMenuTemplate", () => {
     expect(t.map((i) => i.label ?? i.type)).toEqual([
       runnerStatusLabel(OFF),
       "separator",
-      "Assay 열기",
+      "Everdict 열기",
       "separator",
       "로그인 시 자동 시작",
       "서버 주소 변경…",
@@ -100,7 +100,7 @@ describe("buildTrayMenuTemplate", () => {
   it("열기/종료 클릭이 액션을 호출한다", () => {
     const a = actions();
     const t = buildTrayMenuTemplate({ autostart: false, runner: OFF, updater: NO_UPDATE }, a);
-    click(t.find((i) => i.label === "Assay 열기") ?? {});
+    click(t.find((i) => i.label === "Everdict 열기") ?? {});
     click(t.find((i) => i.label === "종료") ?? {});
     expect(a.openApp).toHaveBeenCalledOnce();
     expect(a.quit).toHaveBeenCalledOnce();

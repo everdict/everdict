@@ -14,7 +14,7 @@ import { InfoTip } from '@/shared/ui/tooltip'
 import { removeImageRegistryAction, upsertImageRegistryAction } from '../api/manage-image-registry'
 
 // 워크스페이스 이미지 레지스트리(BYO, 복수) — 관리자가 등록하면 하니스 이미지의 출처 분류 기준이 되고,
-// 멤버는 assay image push 로 로컬 빌드 이미지를 여기로 발행한다(여러 개면 --registry <이름> 으로 선택).
+// 멤버는 everdict image push 로 로컬 빌드 이미지를 여기로 발행한다(여러 개면 --registry <이름> 으로 선택).
 // pull/push 토큰 값은 워크스페이스 시크릿 참조(이름)로만 저장. 두 피커가 목록을 공유하므로 인라인
 // 생성분은 created 로 합류시킨다.
 export function ImageRegistryManager({

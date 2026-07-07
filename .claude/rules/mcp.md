@@ -15,7 +15,7 @@ second transport. See `docs/mcp.md` + rule `auth`.
 - **OAuth = MCP Authorization spec ("login like Linear").** No token → `401` + `WWW-Authenticate:
   resource_metadata=…`; serve `/.well-known/oauth-protected-resource` (RFC 9728) naming **Keycloak** as the
   authorization server (`authorizationServers` from `KEYCLOAK_ISSUER`). Never invent a bespoke MCP login.
-- **No dev fallback on `/mcp`** — it must `401` (not silently allow `x-assay-tenant`) so the client starts the
+- **No dev fallback on `/mcp`** — it must `401` (not silently allow `x-everdict-tenant`) so the client starts the
   OAuth flow. (Dev fallback stays on the human/HTTP routes only.)
 - **Stateful sessions**: create the MCP server + transport on `initialize`, store by `mcp-session-id`, route
   later POST/GET/DELETE to it, clean up on `onclose`. `reply.hijack()` before handing the raw stream to the

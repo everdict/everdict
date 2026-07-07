@@ -1,7 +1,7 @@
 # Trace sink — export judged results to the team's observability platform
 
 > **Status:** design (S0) → implementation. SSOT for the **outbound** half of the eval pipeline:
-> after Assay judges a scorecard's traces, the detailed per-case results are **exported to the
+> after Everdict judges a scorecard's traces, the detailed per-case results are **exported to the
 > tenant's own observability platform** (MLflow / Langfuse / LangSmith / Phoenix), and the
 > scorecard becomes the **summary + deep links** surface. Mirror of the inbound `TraceSource`
 > (`docs/scorecards.md` pull-ingest).
@@ -11,11 +11,11 @@
 Teams already run an observability stack (MLflow, Langfuse, LangSmith, Phoenix) as their data
 lake for LLM traces. Two evaluation flows converge on it:
 
-1. **Live batch (flow ①)** — Assay runs the harness over a dataset (`POST /scorecards`), produces
+1. **Live batch (flow ①)** — Everdict runs the harness over a dataset (`POST /scorecards`), produces
    traces, judges them. The *detailed* judged results (trace + scores) belong in the team's
-   platform, next to everything else they observe; the Assay scorecard shows the aggregate and
+   platform, next to everything else they observe; the Everdict scorecard shows the aggregate and
    links out.
-2. **Ingest (flow ②)** — traces already exist in the team's platform (produced in prod). Assay
+2. **Ingest (flow ②)** — traces already exist in the team's platform (produced in prod). Everdict
    pulls them (`POST /scorecards/ingest/pull`), judges them — and the verdicts should land **back
    on the original traces** (as assessments/scores/feedback/annotations), not in a copy.
 
@@ -35,7 +35,7 @@ integration that configures it and the pipeline step that drives it.
   (no dangling refs). Reads are `harnesses:read` (viewer+ — the harness detail shows the
   selection; views carry name-refs only). A per-scorecard override remains a non-goal.
 - **Two modes, decided per case:**
-  - **create** (flow ①): the trace was born in Assay → create the trace in the platform, then
+  - **create** (flow ①): the trace was born in Everdict → create the trace in the platform, then
     attach the scores. Used by live batch and push-ingest.
   - **attach** (flow ②): the trace already lives in the platform → attach scores to the existing
     trace id, never duplicate it. Used by pull-ingest **when the pull source kind matches the sink
@@ -229,5 +229,5 @@ The export outcome rides the existing scorecard surfaces (`GET /scorecards/:id` 
 ## Non-goals
 
 - Streaming/incremental export (per-case as it completes) — v1 exports once at finalize.
-- Assay as a *proxy* for the platform UI (we link out; we don't re-render their trace viewer).
+- Everdict as a *proxy* for the platform UI (we link out; we don't re-render their trace viewer).
 - Multi-sink fan-out (one workspace = one sink).

@@ -10,11 +10,11 @@
 >   `autoDownload`, `autoInstallOnAppQuit`; "적용" only via the tray restart item — never force-restart
 >   a runner mid-job (apply = graceful runner shutdown → `quitAndInstall`). Activation gate:
 >   `app.isPackaged` && (packaged `app-update.yml` [lands when a `publish` config is added] ||
->   `ASSAY_UPDATE_FEED_URL` env → generic feed via a userData config injected through
+>   `EVERDICT_UPDATE_FEED_URL` env → generic feed via a userData config injected through
 >   `autoUpdater.updateConfigPath` — `setFeedURL` alone is insufficient: AppImageUpdater reads the
 >   on-disk config during download). **The feed's public location is the user's pending decision**:
->   (a) public `assay-releases` repo (code stays private; needs a cross-repo PAT secret in CI) vs
->   (b) make `Ho2eny/assay` public (current CI works as-is). Until then the updater is cleanly
+>   (a) public `everdict-releases` repo (code stays private; needs a cross-repo PAT secret in CI) vs
+>   (b) make `Ho2eny/everdict` public (current CI works as-is). Until then the updater is cleanly
 >   disabled. mac auto-update stays inert until code signing exists; deb installs don't auto-update
 >   (AppImage/NSIS/mac-zip do).
 > - **D7 — the desktop fully absorbs the pairing surface (LOCKED 2026-07-03).** The browser web no longer
@@ -23,13 +23,13 @@
 >   revoke) + a "데스크톱 앱 받기" CTA (`DESKTOP_DOWNLOAD_URL`). The server surface is unchanged —
 >   `POST /runners` (BFF+MCP `pair_runner`) stays, which is also the **headless path**: on a server/CI box,
 >   create the pairing with an API key (`curl -H "Authorization: Bearer ak_…" -X POST /runners`) and feed
->   the returned `rnr_` token to `assay runner --pair`.
+>   the returned `rnr_` token to `everdict runner --pair`.
 > - **D8 — the packaged app must know its server (LOCKED 2026-07-03).** Web URL resolution:
->   `ASSAY_WEB_URL` env (dev/e2e) > `config.json webUrl` (user-saved) > CI-baked default
->   (`ASSAY_DESKTOP_DEFAULT_WEB_URL` repo Variable → esbuild `define` at package time). None → a local
+>   `EVERDICT_WEB_URL` env (dev/e2e) > `config.json webUrl` (user-saved) > CI-baked default
+>   (`EVERDICT_DESKTOP_DEFAULT_WEB_URL` repo Variable → esbuild `define` at package time). None → a local
 >   **first-run setup screen** (`assets/setup.html`) asks for the server address; also reachable from the
->   tray ("서버 주소 변경…"). The setup window gets its own 2-method bridge (`window.assaySetup`:
->   get/setServerUrl) behind a `--assay-setup` argv flag, and the main-side IPC only accepts calls whose
+>   tray ("서버 주소 변경…"). The setup window gets its own 2-method bridge (`window.everdictSetup`:
+>   get/setServerUrl) behind a `--everdict-setup` argv flag, and the main-side IPC only accepts calls whose
 >   `senderFrame` is exactly the local setup.html `file://` URL. Changing the server rebuilds the app
 >   window (old preload origin args are stale) and the runner bridge origin-guard reads the *current*
 >   origin (getter, not a captured value). **Login/auth status**: with D8 in place the auth story is
@@ -44,7 +44,7 @@
 >   stays the **single UI SSOT**; the desktop has feature parity *by construction* (every web deploy
 >   lands in the desktop instantly, no app release). We never fork or re-implement screens in the shell.
 > - **D2 — shell is Electron (LOCKED).** Rationale: the monorepo is all-TS and the runner
->   core needs Node (`@assay/agent`'s `runAgentJob`), which Electron's main process runs **in-process** —
+>   core needs Node (`@everdict/agent`'s `runAgentJob`), which Electron's main process runs **in-process** —
 >   no sidecar binary; bundled Chromium renders the Next 16 / Tailwind v4 app identically on every OS;
 >   tray / auto-update / deep-link / keychain (`safeStorage`) are mature. The Tauri alternative is
 >   smaller (~10MB vs ~100MB) but needs a Node sidecar for the runner, adds a Rust toolchain to a
@@ -57,7 +57,7 @@
 >   authenticated as the user) calls the existing pair API → hands the `rnr_` token to the bridge → main
 >   process stores it in the OS keychain and starts the runner. Ownership stays personal (self-hosted-runner
 >   D1) — the desktop just removes the friction.
-> - **D4 — the bridge is minimal and origin-gated.** One preload API (`window.assayDesktop`) with a
+> - **D4 — the bridge is minimal and origin-gated.** One preload API (`window.everdictDesktop`) with a
 >   handful of IPC methods; `contextIsolation: true`, `nodeIntegration: false`; the preload is attached
 >   **only** for the configured web origin. The renderer is the *remote web app* — it must never get
 >   ambient Node/Electron power.
@@ -70,15 +70,15 @@
 
 Like [self-hosted-runner](./self-hosted-runner.md): **strict generalization, not a clean break.** The web,
 the control plane, the MCP runner protocol (`lease_job`/`submit_job_result`/`heartbeat_job`), and the
-`assay runner` CLI are all untouched; the desktop is additive. The CLI remains the headless/CI answer.
+`everdict runner` CLI are all untouched; the desktop is additive. The CLI remains the headless/CI answer.
 
 ## Problem
 
 Two gaps, one product answer:
 
-1. **Runner UX friction.** `assay runner` lives in `apps/cli`, so a member must clone + `pnpm` build the
+1. **Runner UX friction.** `everdict runner` lives in `apps/cli`, so a member must clone + `pnpm` build the
    monorepo, copy a shown-once `rnr_` token from the account page into `--pair <rnr_…> --api-url <url>`,
-   and keep a terminal open forever (Ctrl-C kills it). The persona — "workspace member, not an assay
+   and keep a terminal open forever (Ctrl-C kills it). The persona — "workspace member, not an everdict
    developer" — is exactly who this excludes.
 2. **The requirement is web parity, not a companion.** A tray-only runner app would leave members
    juggling two surfaces (browser for evals, tray for the runner). The requirement: one desktop app that
@@ -92,12 +92,12 @@ requirement structurally: parity is not a feature to build, it's a property of r
 ## Current state — verified
 
 - **Web = BFF token courier** (`docs/web.md`) — Next.js 16 App Router; Auth.js keeps the Keycloak access
-  token in a server-only httpOnly cookie; `control-plane.ts` forwards `Bearer` to `@assay/api`; identity
-  from `GET /me`. Pure HTTP client, **no `@assay/*` deps**. Nothing about it assumes a browser tab — a
+  token in a server-only httpOnly cookie; `control-plane.ts` forwards `Bearer` to `@everdict/api`; identity
+  from `GET /me`. Pure HTTP client, **no `@everdict/*` deps**. Nothing about it assumes a browser tab — a
   webview holding the same cookies behaves identically.
 - **Runner loop is already transport-clean** — `apps/cli/src/runner-loop.ts` (`runLeaseWorkers`, N lease
   workers over one MCP session) + `runner-session.ts` (`ResilientMcpSession` — reconnect-on-stale-session)
-  + `run-leased-job.ts`, driving `runAgentJob` (`@assay/agent`). It depends on flags + a token, not on
+  + `run-leased-job.ts`, driving `runAgentJob` (`@everdict/agent`). It depends on flags + a token, not on
   being a CLI — extraction to a package is mechanical.
 - **Pairing is a personal API** — `rnr_` token minted from the account page (BFF + MCP parity,
   self-hosted-runner slice 1), SHA-256-hashed at rest, owner = `principal.subject`, no role gate. A
@@ -110,28 +110,28 @@ requirement structurally: parity is not a feature to build, it's a property of r
 ```
 ┌─ apps/desktop (Electron) ─────────────────────────────────────────────┐
 │ main process                        renderer (BrowserWindow)          │
-│  ├─ runner host: @assay/runner-core  │  loads deployed apps/web URL   │
+│  ├─ runner host: @everdict/runner-core  │  loads deployed apps/web URL   │
 │  │   (lease → runAgentJob → submit)  │  (Keycloak login, all screens, │
 │  ├─ keychain (safeStorage): rnr_     │   session cookies live here)   │
 │  ├─ tray: status / start·stop / quit │                                │
-│  ├─ autostart · auto-update · notify │  preload: window.assayDesktop  │
+│  ├─ autostart · auto-update · notify │  preload: window.everdictDesktop  │
 │  └─ IPC ⇅ ─────────────────────────────  (origin-gated, minimal)     │
 └───────────────────────────────────────────────────────────────────────┘
         │ MCP /mcp (rnr_ token: lease/submit/heartbeat)      │ HTTPS (web origin)
         ▼                                                    ▼
-   control plane (@assay/api) ◄──── Bearer (web BFF) ──── deployed apps/web
+   control plane (@everdict/api) ◄──── Bearer (web BFF) ──── deployed apps/web
 ```
 
 ### `packages/runner-core` — one runner, three consumers
 
 Move `runner-loop.ts` / `runner-session.ts` / `run-leased-job.ts` (+ their tests) from `apps/cli` into
-`packages/runner-core` (depends on `@assay/agent`, `@modelcontextprotocol/sdk`; sits at the same layer as
+`packages/runner-core` (depends on `@everdict/agent`, `@modelcontextprotocol/sdk`; sits at the same layer as
 `apps/*` consumers of `agent`). Exports: `runLeaseWorkers(opts)`, `ResilientMcpSession`, `mcpConnect`,
 plus a small `RunnerHost` facade (start/stop/status events) for GUI embedding. `apps/cli` re-imports and
 behaves identically (pure refactor slice); `apps/desktop` main process embeds `RunnerHost`. (A future CI
 runner would be the third consumer.)
 
-### The bridge (`window.assayDesktop`) — smallest possible surface
+### The bridge (`window.everdictDesktop`) — smallest possible surface
 
 Preload-exposed, only when `new URL(window.location).origin === configuredWebOrigin`:
 
@@ -150,10 +150,10 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
 ### One-click pairing flow (D3)
 
 1. Member opens the desktop app → logs into Keycloak in the webview (first run only; cookies persist).
-2. Account page (`/<ws>/account`) sees `window.assayDesktop` → the 연결된 러너 section shows
+2. Account page (`/<ws>/account`) sees `window.everdictDesktop` → the 연결된 러너 section shows
    **"이 기기를 러너로 연결"** (prefilled label = hostname from `appInfo`).
 3. Click → web calls the **existing** pair endpoint (BFF, user session) → gets the shown-once `rnr_`
-   token → `assayDesktop.pairRunner({ token, apiUrl, label })` → main stores in keychain, starts
+   token → `everdictDesktop.pairRunner({ token, apiUrl, label })` → main stores in keychain, starts
    `RunnerHost`, long-poll begins → presence dot goes green.
 4. Web-side change is one small desktop-aware branch in the existing account/runner feature — no new
    endpoints, no new auth path.
@@ -177,9 +177,9 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
 | Entire UI (`apps/web` deployed) — all screens, auth, role-gating | **reused verbatim** — the whole point (D1) |
 | Runner protocol (MCP `lease_job`/`submit_job_result`/`heartbeat_job`) + pairing API | **reused, untouched** |
 | Runner loop (`runLeaseWorkers`, `ResilientMcpSession`, `runAgentJob` path) | **extracted** → `packages/runner-core` (pure refactor) |
-| `assay runner` CLI | **kept** — thin wrapper over `runner-core`, headless/CI answer |
+| `everdict runner` CLI | **kept** — thin wrapper over `runner-core`, headless/CI answer |
 | `apps/desktop` (Electron shell: window, tray, keychain, autostart, updater, IPC) | **new** |
-| `window.assayDesktop` preload bridge + web desktop-aware pairing branch | **new** (bridge) + **small web edit** |
+| `window.everdictDesktop` preload bridge + web desktop-aware pairing branch | **new** (bridge) + **small web edit** |
 | Packaging/signing (linux AppImage/deb · mac dmg+notarize · win nsis) + download links on the account page | **new** |
 
 ## Slices (each lands green: format/lint/typecheck/test/build)
@@ -191,7 +191,7 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    must leave and re-enter the web origin; `window.open` to non-web origins → system browser), tray
    skeleton, autostart toggle. No runner yet — this alone already *is* "웹처럼 동일하게".
    (electron-updater moves to slice 5 — it belongs with electron-builder packaging.)
-3. ✅ **Bridge + one-click pairing** — preload `window.assayDesktop` (origin-gated: preload arg-origin gate +
+3. ✅ **Bridge + one-click pairing** — preload `window.everdictDesktop` (origin-gated: preload arg-origin gate +
    main-side `senderFrame` check), `safeStorage` keychain token store, `RunnerHost` (runner-core facade:
    start/stop/status events over `runLeaseWorkers`) embedded via `RunnerController` (pair/unpair/restore-on-boot);
    web: desktop-aware "이 기기를 러너로 연결" one-click (label=hostname, token never shown — bridge-only) +
@@ -204,7 +204,7 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    shows immediately.
 5. ✅ **Packaging + live e2e** — linux: esbuild single-file bundle (main ESM + preload CJS,
    `electron` external — avoids packing pnpm-symlinked `node_modules` into asar; `extraMetadata.main`
-   swaps the entry only in the package) + electron-builder AppImage (`pnpm -F @assay/desktop package`,
+   swaps the entry only in the package) + electron-builder AppImage (`pnpm -F @everdict/desktop package`,
    NOT in turbo gates), packaged binary smoke-verified. **Download link**: `DESKTOP_DOWNLOAD_URL`
    (web env, optional) → 계정 > 연결된 러너 shows a "데스크톱 앱을 설치" link to browser users only
    (hidden inside the desktop). **Live e2e PASS** (`scripts/live/desktop-runner.mjs`, 2026-07-03):
@@ -215,12 +215,12 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    (VSCode-style), else `isEncryptionAvailable()=false` blocks pairing.
 6. ✅ **Release CI** (`.github/workflows/desktop-release.yml`) — tag `desktop-vX.Y.Z` (or manual
    dispatch → draft) fans out a 3-OS matrix (ubuntu/macos/windows runners): version injected from the
-   tag, `turbo build --filter=@assay/desktop` (dep chain only), esbuild bundle → electron-builder
+   tag, `turbo build --filter=@everdict/desktop` (dep chain only), esbuild bundle → electron-builder
    per-OS (`--linux` AppImage+deb · `--mac` dmg+zip×[x64,arm64] · `--win` nsis), then one job collects
    artifacts into a single **GitHub Release** (`softprops/action-gh-release`, auto release notes).
-   Deterministic artifact names (`Assay-<ver>-<os>-<arch>.<ext>`). All targets **unsigned** until certs
+   Deterministic artifact names (`Everdict-<ver>-<os>-<arch>.<ext>`). All targets **unsigned** until certs
    exist (`CSC_IDENTITY_AUTO_DISCOVERY=false`); `latest*.yml` uploaded for a future electron-updater.
-   Point the web's `DESKTOP_DOWNLOAD_URL` at `https://github.com/Ho2eny/assay/releases/latest`.
+   Point the web's `DESKTOP_DOWNLOAD_URL` at `https://github.com/Ho2eny/everdict/releases/latest`.
    **Remaining**: signing certs (mac notarize / win Authenticode) — config hooks noted in
    `electron-builder.yml`.
 7. ✅ **Download page** (D7 follow-up — repo stays private, no public releases repo) —
@@ -241,16 +241,16 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    local generic feed): idle → checking → found 0.2.0 → downloading (126MB fresh) → sha512 verify →
    ready. Finding: `setFeedURL` alone breaks at download (AppImageUpdater reads on-disk config) —
    env activation writes `userData/app-update.yml` and injects it via `updateConfigPath`.
-   **Open**: flip the feed on — user decision (a) public `assay-releases` + CI PAT vs (b) repo
+   **Open**: flip the feed on — user decision (a) public `everdict-releases` + CI PAT vs (b) repo
    public; then add the `publish` block to `electron-builder.yml` (nothing else changes).
 
 ## Decisions / non-goals
 
 - **No UI re-implementation in the shell — ever.** If a screen needs desktop awareness, it's a
-  `window.assayDesktop`-conditional branch in `apps/web`, not a desktop-side screen.
+  `window.everdictDesktop`-conditional branch in `apps/web`, not a desktop-side screen.
 - **No offline/local control plane.** The desktop is online like the web; the control plane stays remote.
   (A run *executes* locally via the runner — that part already works offline-ish by nature of pull.)
-- **CLI stays first-class.** Headless boxes, CI, and servers keep `assay runner`; the desktop is the
+- **CLI stays first-class.** Headless boxes, CI, and servers keep `everdict runner`; the desktop is the
   human-machine answer, not a replacement.
 - **Renderer gets no Node.** `contextIsolation` on, `nodeIntegration` off, bridge origin-gated —
   the remote web app must never gain local power beyond the four bridge methods.

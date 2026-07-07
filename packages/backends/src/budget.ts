@@ -1,4 +1,4 @@
-import { type CaseResult, PaymentRequiredError, type TraceEvent } from "@assay/core";
+import { type CaseResult, PaymentRequiredError, type TraceEvent } from "@everdict/core";
 
 // 테넌트 예산. 어떤 차원이든 미지정이면 무제한.
 export interface BudgetLimit {

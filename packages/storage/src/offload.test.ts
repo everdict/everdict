@@ -1,4 +1,4 @@
-import type { EnvSnapshot } from "@assay/core";
+import type { EnvSnapshot } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { type ArtifactStore, InMemoryArtifactStore, offloadSnapshot } from "./artifact-store.js";
 

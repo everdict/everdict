@@ -1,6 +1,6 @@
 ---
 name: api-layer
-description: The control-plane HTTP API (apps/api, Fastify) — async POST /runs + poll/webhook, RunStore, multi-tenant via x-assay-tenant, flat error envelopes. Use when adding or editing API routes/services/the result store.
+description: The control-plane HTTP API (apps/api, Fastify) — async POST /runs + poll/webhook, RunStore, multi-tenant via x-everdict-tenant, flat error envelopes. Use when adding or editing API routes/services/the result store.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # API layer (`apps/api`)
@@ -18,7 +18,7 @@ autoscaling). Runs are **async**: submit returns a `runId`; the result arrives b
 
 ## Endpoints
 `POST /runs` → **202** `RunRecord(queued)` · `GET /runs/:id` (poll) · `GET /runs` (per-tenant) · `GET /healthz`.
-Tenant from the `x-assay-tenant` header (default `default`) — keys fairness, quotas, isolation, secrets, budgets.
+Tenant from the `x-everdict-tenant` header (default `default`) — keys fairness, quotas, isolation, secrets, budgets.
 
 ## Run lifecycle (`RunService`)
 `submit`: `budget.admit(tenant)` (over-limit → 402, no run created) → `store.create(queued)` → return 202 →
@@ -32,11 +32,11 @@ Control-plane runs/scorecards are split by concern — see `docs/architecture/ex
   No settle/offload/notify. `RunService` and `ScorecardService` both call it; the shared unit is execution, NOT the
   single-run orchestrator (never route the batch through `RunService.submit`).
 - **Scoring** = `scoring-service.ts` `ScoringService` — judge application over results, independent of how
-  they were produced. Live batch **and** ingest share it; aggregation (passRate/mean summary) stays pure in `@assay/suite`.
+  they were produced. Live batch **and** ingest share it; aggregation (passRate/mean summary) stays pure in `@everdict/suite`.
 - **Orchestration** = the services drive execution (single/batch) and own admit/settle, delivery (202/webhook),
   notify, progress. `run` is just execution — the "after" belongs to the orchestrator.
 
-## Result store (`@assay/db`)
+## Result store (`@everdict/db`)
 `RunStore` (create/update/get/list). Default `InMemoryRunStore`; with `DATABASE_URL` the API uses `PgRunStore`
 (Postgres, `result`/`error` as jsonb) and runs idempotent SQL migrations at boot — service/routes/lifecycle
 unchanged. Migrations: `packages/db/migrations/` + discipline in `docs/migration/`. The store + migrator share an

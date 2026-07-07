@@ -1,5 +1,5 @@
 {
-  "projectName": "assay",
+  "projectName": "everdict",
   "permissions": {
     "allow": [
       "Bash(pnpm:*)",

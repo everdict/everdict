@@ -30,7 +30,7 @@ export async function upsertTraceSinkAction(input: {
   }
 }
 
-// 트레이스 싱크 삭제(관리자). 그 싱크를 선택했던 하니스의 상세 결과는 이후 외부 적재 없이 Assay 에만 남는다.
+// 트레이스 싱크 삭제(관리자). 그 싱크를 선택했던 하니스의 상세 결과는 이후 외부 적재 없이 Everdict 에만 남는다.
 export async function removeTraceSinkAction(name: string): Promise<TraceSinkMutationResult> {
   const ctx = await authContext()
   try {

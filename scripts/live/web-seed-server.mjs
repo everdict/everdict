@@ -102,7 +102,7 @@ await scorecardStore.create({
   updatedAt: now,
 });
 
-// 비교(diff)용 두 스코어카드 — 같은 케이스(form-assay, hard-task), gpt5.4 가 hard-task 를 fix(개선) + cost delta.
+// 비교(diff)용 두 스코어카드 — 같은 케이스(form-everdict, hard-task), gpt5.4 가 hard-task 를 fix(개선) + cost delta.
 // (대표값: 강한 모델이 어려운 케이스를 통과시키는 흔한 A/B 패턴 — compare 뷰의 회귀/개선·메트릭 delta 렌더 확인용.)
 const browserSnap = (url, dom) => ({ kind: "browser", url, dom, console: [] });
 const caseResult = (caseId, pass, usd) => ({
@@ -134,7 +134,7 @@ await scorecardStore.create(
       { metric: "answer_match", count: 2, mean: 0.5, passRate: 0.5 },
       { metric: "usd", count: 2, mean: 0.0035 },
     ],
-    [caseResult("form-assay", true, 0.003), caseResult("hard-task", false, 0.004)],
+    [caseResult("form-everdict", true, 0.003), caseResult("hard-task", false, 0.004)],
   ),
 );
 await scorecardStore.create(
@@ -145,7 +145,7 @@ await scorecardStore.create(
       { metric: "answer_match", count: 2, mean: 1, passRate: 1 },
       { metric: "usd", count: 2, mean: 0.00575 },
     ],
-    [caseResult("form-assay", true, 0.0035), caseResult("hard-task", true, 0.008)],
+    [caseResult("form-everdict", true, 0.0035), caseResult("hard-task", true, 0.008)],
   ),
 );
 

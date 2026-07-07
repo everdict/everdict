@@ -1,6 +1,6 @@
 import type { ScorecardRecord } from './schema'
 
-// 케이스 합격 판정 — 권위 기준(컨트롤플레인 @assay/suite caseVerdict 미러): ground-truth(state/tests_pass) >
+// 케이스 합격 판정 — 권위 기준(컨트롤플레인 @everdict/suite caseVerdict 미러): ground-truth(state/tests_pass) >
 // 객관(answer_match/url_matches/dom_contains) > 모델 의견(judge). judge 는 객관/ground-truth 가 없을 때만 결정한다
 // (VLM judge 가 state 를 뒤집지 못함 — OSWorld 파일저장처럼).
 const AUTHORITATIVE = ['state', 'tests_pass']

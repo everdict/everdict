@@ -6,12 +6,12 @@ How `claude` (Claude Code) authenticates depends on where the run lands.
 The run executes in-process on this host, so `claude` uses **this machine's existing login**
 (Pro/Max subscription). Nothing to inject. Just:
 ```bash
-pnpm assay run --task "..."
+pnpm everdict run --task "..."
 ```
 
 ## Sandbox backends (Nomad / K8s / Windows) — no host login present
 A dispatched job runs in a fresh isolated unit with **no** `claude` login. Inject a credential as
-an env var — Assay forwards `RunContext.apiKeyEnv` into the harness command env, and the Backend
+an env var — Everdict forwards `RunContext.apiKeyEnv` into the harness command env, and the Backend
 injects it into the job (Nomad alloc env / K8s Secret / Windows secure env):
 
 | Mode | Env var | How to get it |
@@ -19,10 +19,10 @@ injects it into the job (Nomad alloc env / K8s Secret / Windows secure env):
 | **Subscription** (recommended) | `CLAUDE_CODE_OAUTH_TOKEN` | on the host run `claude setup-token` (requires a Claude subscription) → copy the token |
 | API billing | `ANTHROPIC_API_KEY` | Anthropic console |
 
-Put it in `assay/.env` (gitignored), then run against a sandbox backend, e.g. Nomad:
+Put it in `everdict/.env` (gitignored), then run against a sandbox backend, e.g. Nomad:
 ```bash
-pnpm assay run --backend nomad --nomad-addr http://<nomad>:4646 \
-  --image <registry>/assay-agent:<tag> --runtime runsc --task "..."
+pnpm everdict run --backend nomad --nomad-addr http://<nomad>:4646 \
+  --image <registry>/everdict-agent:<tag> --runtime runsc --task "..."
 ```
 
 ### Sandbox requirements

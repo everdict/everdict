@@ -1,5 +1,5 @@
-import { InMemoryNotificationStore } from "@assay/db";
-import type { RunRecord, WorkspaceSettings } from "@assay/db";
+import { InMemoryNotificationStore } from "@everdict/db";
+import type { RunRecord, WorkspaceSettings } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { NotificationService } from "./notification-service.js";
 

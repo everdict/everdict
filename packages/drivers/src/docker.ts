@@ -14,14 +14,14 @@ import {
   type RegistryAuth,
   dockerAuthConfigJson,
   imageUsesRegistryHost,
-} from "@assay/core";
+} from "@everdict/core";
 
 const pexecFile = promisify(execFile);
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 // 이미지로 띄운 docker 컨테이너를 compute 로 — 케이스를 자기 env 이미지(예: SWE-bench 공식 prebuilt = repo+deps 동봉)
 // 안에서 실행한다. 에이전트를 이미지에 굽지 않고 "환경 컨테이너"에서 명령을 돌린다(공식 SWE-bench 평가 방식).
-// 상대 경로(cwd/path)는 base(기본 /assay) 하위로, 절대 경로는 그대로 — RepoEnvironment 의 "work" 와 SWE-bench 의
+// 상대 경로(cwd/path)는 base(기본 /everdict) 하위로, 절대 경로는 그대로 — RepoEnvironment 의 "work" 와 SWE-bench 의
 // "/testbed" 둘 다 자연히 동작.
 class DockerComputeHandle implements ComputeHandle {
   constructor(
@@ -95,10 +95,10 @@ export interface DriverMount {
 }
 
 // 워크스페이스 레지스트리 이미지의 인증 pull — 자격증명을 임시 DOCKER_CONFIG 디렉터리에만 쓰고(0600) 끝나면
-// 지운다(호스트 ~/.docker/config.json 불가침, assay image push 와 동일 규율). 이미지 호스트가 auth.host 와
+// 지운다(호스트 ~/.docker/config.json 불가침, everdict image push 와 동일 규율). 이미지 호스트가 auth.host 와
 // 일치할 때만 호출된다. pull 이 끝나면 이어지는 docker run 은 로컬 이미지를 쓴다.
 export async function pullWithRegistryAuth(image: string, auth: RegistryAuth): Promise<void> {
-  const configDir = await mkdtemp(join(tmpdir(), "assay-pull-"));
+  const configDir = await mkdtemp(join(tmpdir(), "everdict-pull-"));
   try {
     await writeFile(join(configDir, "config.json"), dockerAuthConfigJson(auth), { mode: 0o600 });
     await pexecFile("docker", ["--config", configDir, "pull", image], { maxBuffer: MAX_BUFFER }).catch((err) => {
@@ -128,7 +128,7 @@ export class DockerDriver implements Driver {
       registryAuth?: RegistryAuth;
     } = {},
   ) {
-    this.base = opts.base ?? "/assay";
+    this.base = opts.base ?? "/everdict";
     this.mounts = opts.mounts ?? [];
   }
 

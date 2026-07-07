@@ -18,11 +18,11 @@ Dataset → [scorecard run] → trace → agent-judge → scorecard → dashboar
    케이스 수 제한 + 태그 필터. Omitted ⇒ full dataset, no stamp.
 2. Resolve the **harness version** (`latest → concrete`) via the registry; embed the `HarnessSpec` for
    declarative harnesses (builtins fall back to id). The record stores the **resolved** `harness@version`.
-3. Build a `Suite` on the fly (`{ id: dataset.id, harness: { id }, cases }`) and run it with `@assay/suite`'s
+3. Build a `Suite` on the fly (`{ id: dataset.id, harness: { id }, cases }`) and run it with `@everdict/suite`'s
    `runSuite` over the **same dispatcher** single runs use — each case becomes one job (tenant + budget
    admit/settle per case, concurrency-limited). The request's optional **`concurrency`** (1–64) sets how many
    cases dispatch at once (`runSuite` fan-out); omitted ⇒ service default (4). For a **self-hosted** runtime
-   the parked jobs only run as fast as the runner leases them — match it with `assay runner --max-concurrent N`
+   the parked jobs only run as fast as the runner leases them — match it with `everdict runner --max-concurrent N`
    (effective case-level parallel = `min(concurrency, runner workers)`).
 4. Aggregate with `summarizeScorecard` → store `{ status, summary, scorecard }`.
 
@@ -54,7 +54,7 @@ persist. The detail page renders this as a timeline and **auto-refreshes** (`rou
 `queued`/`running`. `steps` is heavy detail → returned by `get`, **omitted from `list`** (like `scorecard`);
 Pg column `steps jsonb` (migration `0026`).
 
-## Storage (`@assay/db`)
+## Storage (`@everdict/db`)
 `ScorecardStore` (`InMemoryScorecardStore` / `PgScorecardStore`), mirror of `RunStore`. `ScorecardRecord` =
 `{ id, tenant, dataset:{id,version}, harness:{id,version}, status, summary?, createdBy?, scorecard?, error?, …}`.
 **`list` omits the heavy `scorecard`** (traces) — only `summary` — so the list is cheap; `get` returns the full
@@ -81,7 +81,7 @@ See `docs/judges.md` + `docs/architecture/streaming-case-pipeline.md`.
 
 ### Trace ingestion (`POST /scorecards/ingest`)
 The "이미 수행한 트레이스" path: produce a scorecard from **externally-run traces without dispatching a harness**.
-The seam is the normalized `TraceEvent` (`@assay/core`) — per-harness trace variance is absorbed at the **edge**
+The seam is the normalized `TraceEvent` (`@everdict/core`) — per-harness trace variance is absorbed at the **edge**
 (the harness/SDK uploads already-normalized `TraceEvent[]`; the control plane only validates via `TraceEventSchema`).
 `ScorecardService.ingest` resolves the referenced **dataset** (for `caseId`→task alignment + diff alignment),
 wraps each uploaded trace as a `CaseResult`, **re-derives the trace-only graders** (`steps`/`cost`/`latency` →

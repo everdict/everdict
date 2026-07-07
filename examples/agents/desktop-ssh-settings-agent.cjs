@@ -1,7 +1,7 @@
 // 레퍼런스 데스크탑 에이전트 #2 — desktop-ssh-agent 보다 유능(task-aware). SSH 로 연결한 뒤, 태스크가 Settings 를
 // 요구하면 사이드바 Settings 로 내비게이션까지 한다. 같은 데이터셋을 agent #1(SSH 만) vs #2 로 돌려 diffScorecards 로
 // 하니스 A/B 비교를 실증하기 위한 두 번째 하니스. command 하니스가 `node /agent-settings.cjs {{task}}` 로 실행.
-// 행동만 — 관측/채점은 assay(OsUseEnvironment.snapshot + VLM JudgeGrader).
+// 행동만 — 관측/채점은 everdict(OsUseEnvironment.snapshot + VLM JudgeGrader).
 const { chromium } = require("/app/node_modules/playwright");
 const { execFileSync } = require("node:child_process");
 const sh = (c) => execFileSync("bash", ["-lc", c], { encoding: "utf8" }).trim();

@@ -163,10 +163,10 @@ export function CommandPalette({ workspace }: { workspace: string }) {
       setOpen(true)
     }
     window.addEventListener('keydown', onKey)
-    window.addEventListener('assay:command', onCustom)
+    window.addEventListener('everdict:command', onCustom)
     return () => {
       window.removeEventListener('keydown', onKey)
-      window.removeEventListener('assay:command', onCustom)
+      window.removeEventListener('everdict:command', onCustom)
     }
   }, [])
 

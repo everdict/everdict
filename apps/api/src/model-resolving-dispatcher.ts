@@ -1,6 +1,6 @@
-import type { Dispatcher } from "@assay/backends";
-import type { AgentJob, CaseResult } from "@assay/core";
-import type { ModelRegistry } from "@assay/registry";
+import type { Dispatcher } from "@everdict/backends";
+import type { AgentJob, CaseResult } from "@everdict/core";
+import type { ModelRegistry } from "@everdict/registry";
 
 // command 하니스의 {{model}} 슬롯(CommandHarnessSpec.model)이 등록된 Model id 면 그 하부 모델 식별자로 해석한다.
 // judge.model 해석과 같은 규율 — 등록 Model 을 1급 참조로 쓰되, 매칭되는 id 가 없으면 raw 모델 문자열로 폴백.

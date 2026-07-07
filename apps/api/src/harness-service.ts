@@ -1,6 +1,6 @@
-import { type Principal, can } from "@assay/auth";
-import { ForbiddenError, referencesUserSecret } from "@assay/core";
-import type { HarnessInstanceRegistry } from "@assay/registry";
+import { type Principal, can } from "@everdict/auth";
+import { ForbiddenError, referencesUserSecret } from "@everdict/core";
+import type { HarnessInstanceRegistry } from "@everdict/registry";
 
 // 비공개(개인 시크릿 참조) 하니스는 createdBy 만 볼 수 있다 — 최신 버전을 resolve 해 판정.
 // resolve 실패는 가시성 판단 불가로 보고 막지 않는다(호출부의 다른 404 경로가 처리).

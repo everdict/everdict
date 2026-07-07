@@ -34,7 +34,7 @@ function isOnline(lastSeenAt?: string): boolean {
 
 // 워크스페이스-공유 러너(팀 자원) — admin 이 headless 러너(팀 빌드서버/CI)를 등록하면 이 워크스페이스 멤버
 // 누구나 self:ws:<id> 로 타깃한다. 개인 러너(계정 페이지, 원클릭 데스크톱)와 달리 토큰을 1회 노출하고
-// 서버에서 `assay runner --pair` 로 붙인다. 등록/해제는 admin(settings:write) — 컨트롤플레인이 강제.
+// 서버에서 `everdict runner --pair` 로 붙인다. 등록/해제는 admin(settings:write) — 컨트롤플레인이 강제.
 export function WorkspaceRunnersManager({
   runners,
   canWrite,
@@ -264,7 +264,7 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
 
   // 서버에서 붙일 때 실행할 명령 — apiUrl 이 있으면 넣어 보여준다(비밀 아님).
   const command = issued
-    ? `assay runner --pair --token ${issued.token}${issued.apiUrl ? ` --api-url ${issued.apiUrl}` : ''}`
+    ? `everdict runner --pair --token ${issued.token}${issued.apiUrl ? ` --api-url ${issued.apiUrl}` : ''}`
     : ''
 
   return (
@@ -400,7 +400,7 @@ const targetKey = (s: SelectedTarget) => `${s.host ?? 'github.com'}:${s.name}`
 
 // GitHub Actions 러너 자가등록 모달 — 워크스페이스 GitHub App 설치를 전제로, 설치가 허용한 레포/조직에서 대상을
 // 고른다(raw 입력 없음; App 미설치면 통합 탭 설치 CTA). 생성되면 빌드 서버에서 실행할 설치 스크립트(GitHub 러너 +
-// Assay 러너)와 워크플로 힌트(runs-on 라벨 + run-eval runtime)를 1회 노출한다.
+// Everdict 러너)와 워크플로 힌트(runs-on 라벨 + run-eval runtime)를 1회 노출한다.
 function GithubInstallDialog({
   open,
   onClose,

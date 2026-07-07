@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@assay/core";
+import { type TraceEvent, UpstreamError } from "@everdict/core";
 import type { Judge, JudgeImage, JudgeVerdict } from "./judge.js";
 
 // 모델 호출 프리미티브 — (프롬프트[, 이미지]) → 원문 텍스트. 전송(transport)을 판정 로직과 분리(테스트 시 주입).

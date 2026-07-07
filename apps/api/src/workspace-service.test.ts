@@ -1,5 +1,5 @@
-import { AppError } from "@assay/core";
-import { InMemoryWorkspaceStore } from "@assay/db";
+import { AppError } from "@everdict/core";
+import { InMemoryWorkspaceStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { WorkspaceService } from "./workspace-service.js";
 

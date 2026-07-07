@@ -1,4 +1,4 @@
-import { InMemoryWorkspaceSettingsStore } from "@assay/db";
+import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it } from "vitest";
 import { MattermostService } from "./mattermost-service.js";
 

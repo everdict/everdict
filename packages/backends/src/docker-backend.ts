@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { runAgentJob } from "@assay/agent";
-import type { AgentJob, CaseResult } from "@assay/core";
-import { DockerDriver } from "@assay/drivers";
+import { runAgentJob } from "@everdict/agent";
+import type { AgentJob, CaseResult } from "@everdict/core";
+import { DockerDriver } from "@everdict/drivers";
 import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 
 const execFileAsync = promisify(execFile);

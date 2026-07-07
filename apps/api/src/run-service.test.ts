@@ -1,7 +1,7 @@
-import type { Dispatcher } from "@assay/backends";
-import { inMemoryBudget } from "@assay/backends";
-import { type AgentJob, BadRequestError, type CaseResult, type EvalCase } from "@assay/core";
-import { InMemoryRunStore } from "@assay/db";
+import type { Dispatcher } from "@everdict/backends";
+import { inMemoryBudget } from "@everdict/backends";
+import { type AgentJob, BadRequestError, type CaseResult, type EvalCase } from "@everdict/core";
+import { InMemoryRunStore } from "@everdict/db";
 import { describe, expect, it, vi } from "vitest";
 import { RunService } from "./run-service.js";
 

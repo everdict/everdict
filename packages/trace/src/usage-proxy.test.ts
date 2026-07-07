@@ -53,7 +53,7 @@ describe("createUsageProxy", () => {
   beforeAll(async () => {
     // 가짜 업스트림: usage 가 든 chat/completions 를 돌려주고, 받은 귀속 헤더를 기록.
     upstream = http.createServer((req, res) => {
-      seenRunHeader = req.headers["x-assay-run"] as string | undefined;
+      seenRunHeader = req.headers["x-everdict-run"] as string | undefined;
       const body = JSON.stringify({
         id: "x",
         choices: [{ message: { role: "assistant", content: "hi" } }],
@@ -76,7 +76,7 @@ describe("createUsageProxy", () => {
   const callThrough = (runId?: string) =>
     fetch(`http://127.0.0.1:${proxyPort}/v1/chat/completions`, {
       method: "POST",
-      headers: { "content-type": "application/json", ...(runId ? { "x-assay-run": runId } : {}) },
+      headers: { "content-type": "application/json", ...(runId ? { "x-everdict-run": runId } : {}) },
       body: JSON.stringify({ model: "m", messages: [{ role: "user", content: "u" }] }),
     });
 

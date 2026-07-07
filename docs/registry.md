@@ -1,4 +1,4 @@
-# Harness version registry (`@assay/registry`)
+# Harness version registry (`@everdict/registry`)
 
 The **single source of truth for harness versions**: resolve `(id, version) → HarnessSpec`. An `AgentJob`
 carries only `harness: {id, version}` — a *reference*; the registry turns that reference into the concrete spec
@@ -39,7 +39,7 @@ Live-verified on the local kind cluster (`scripts/live/registry-k8s.mjs`): load 
 
 ## Persistence (`PgHarnessRegistry`)
 `HarnessRegistry` is async, so a Postgres-backed impl is a drop-in: `PgHarnessRegistry` stores each version as a
-row in `assay_harnesses` (`spec` as `jsonb`, PK `(id, version)`), shares the `@assay/db` `SqlClient` + migrator
+row in `everdict_harnesses` (`spec` as `jsonb`, PK `(id, version)`), shares the `@everdict/db` `SqlClient` + migrator
 (migration `0002_create_harnesses`), and enforces the same immutability (re-register with a different spec →
 `ConflictError`, using an order-independent compare since `jsonb` doesn't preserve key order). Seed it from the
 file SSOT with `loadHarnessDir(dir, pgRegistry)`. `latest`/semver resolution is identical to in-memory.

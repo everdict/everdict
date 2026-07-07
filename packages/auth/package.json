@@ -1,5 +1,5 @@
 {
-  "name": "@assay/auth",
+  "name": "@everdict/auth",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -13,8 +13,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@assay/core": "workspace:*",
-    "@assay/db": "workspace:*",
+    "@everdict/core": "workspace:*",
+    "@everdict/db": "workspace:*",
     "jose": "^5.9.6"
   }
 }

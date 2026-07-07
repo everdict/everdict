@@ -6,7 +6,7 @@
 // 준비:
 //   pnpm build
 //   PORT=8799 node apps/api/dist/main.js                                  # 컨트롤플레인 (in-memory, dev 폴백 인증)
-//   CONTROL_PLANE_URL=http://localhost:8799 pnpm -F @assay/web dev -- -p 3131   # 웹 (Keycloak 미설정 → dev 폴백)
+//   CONTROL_PLANE_URL=http://localhost:8799 pnpm -F @everdict/web dev -- -p 3131   # 웹 (Keycloak 미설정 → dev 폴백)
 // 사용:
 //   node scripts/live/desktop-runner.mjs
 //   (헤드리스/샌드박스 환경은 electron 에 --no-sandbox 가 필요해 스크립트가 기본으로 붙인다)
@@ -20,9 +20,9 @@ const require = createRequire(new URL("../../apps/desktop/package.json", import.
 const { _electron } = require("playwright-core");
 const electronPath = require("electron"); // node 컨텍스트에선 바이너리 경로 문자열
 
-const API = (process.env.ASSAY_API_URL ?? "http://localhost:8799").replace(/\/$/, "");
-const WEB = (process.env.ASSAY_WEB_URL ?? "http://localhost:3131").replace(/\/$/, "");
-const H = { "content-type": "application/json", "x-assay-tenant": "default" }; // dev 폴백 → subject=dev
+const API = (process.env.EVERDICT_API_URL ?? "http://localhost:8799").replace(/\/$/, "");
+const WEB = (process.env.EVERDICT_WEB_URL ?? "http://localhost:3131").replace(/\/$/, "");
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" }; // dev 폴백 → subject=dev
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const api = async (p, init = {}) => {
@@ -51,12 +51,12 @@ console.log(`▶ api=${API} web=${WEB}`);
 const before = new Set((await api("/runners")).runners.map((r) => r.id));
 
 // 2) 실제 데스크톱 앱 기동 — 새 머신처럼 깨끗한 userData(XDG_CONFIG_HOME=임시 디렉터리).
-const configHome = mkdtempSync(path.join(tmpdir(), "assay-desktop-e2e-"));
+const configHome = mkdtempSync(path.join(tmpdir(), "everdict-desktop-e2e-"));
 const appDir = new URL("../../apps/desktop", import.meta.url).pathname;
 const electronApp = await _electron.launch({
   executablePath: electronPath,
   args: [appDir, "--no-sandbox", "--password-store=basic"], // e2e: setuid 샌드박스 부재 + 키링 없는 환경 대비
-  env: { ...process.env, ASSAY_WEB_URL: WEB, ASSAY_API_URL: API, XDG_CONFIG_HOME: configHome },
+  env: { ...process.env, EVERDICT_WEB_URL: WEB, EVERDICT_API_URL: API, XDG_CONFIG_HOME: configHome },
 });
 const cleanup = async () => {
   await electronApp.close().catch(() => {});

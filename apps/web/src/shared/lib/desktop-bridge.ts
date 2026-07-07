@@ -1,5 +1,5 @@
-// 데스크톱 셸(apps/desktop preload)이 주입하는 window.assayDesktop 의 로컬 미러 타입.
-// 웹은 @assay/* 패키지를 의존하지 않으므로(웹 룰) apps/desktop/src/bridge.ts 와 수동 동기화한다.
+// 데스크톱 셸(apps/desktop preload)이 주입하는 window.everdictDesktop 의 로컬 미러 타입.
+// 웹은 @everdict/* 패키지를 의존하지 않으므로(웹 룰) apps/desktop/src/bridge.ts 와 수동 동기화한다.
 export interface DesktopRunnerStatus {
   paired: boolean
   runnerId?: string
@@ -15,7 +15,7 @@ export interface DesktopAppInfo {
   capabilities: string[]
 }
 
-export interface AssayDesktopBridge {
+export interface EverdictDesktopBridge {
   appInfo(): Promise<DesktopAppInfo>
   // 원클릭 페어링 — 토큰은 이 호출로만 내려가 OS keychain 에 저장된다(화면 노출·되읽기 없음).
   pairRunner(payload: { token: string; runnerId?: string; apiUrl?: string }): Promise<void>
@@ -26,7 +26,7 @@ export interface AssayDesktopBridge {
 }
 
 // 데스크톱 셸 안에서 렌더링 중일 때만 존재 — 일반 브라우저에선 null.
-export function getAssayDesktop(): AssayDesktopBridge | null {
+export function getEverdictDesktop(): EverdictDesktopBridge | null {
   if (typeof window === 'undefined') return null
-  return (window as Window & { assayDesktop?: AssayDesktopBridge }).assayDesktop ?? null
+  return (window as Window & { everdictDesktop?: EverdictDesktopBridge }).everdictDesktop ?? null
 }

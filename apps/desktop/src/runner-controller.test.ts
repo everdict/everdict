@@ -1,4 +1,4 @@
-import type { RunnerHostStatus } from "@assay/runner-core";
+import type { RunnerHostStatus } from "@everdict/runner-core";
 import { describe, expect, it, vi } from "vitest";
 import type { DesktopRunnerStatus } from "./bridge.js";
 import { RunnerController, type RunnerControllerDeps, type RunnerMeta } from "./runner-controller.js";

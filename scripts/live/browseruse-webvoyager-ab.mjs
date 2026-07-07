@@ -3,7 +3,7 @@
 // + **사이트별 통과율 분해**(WebVoyager web_name 태그) + diffScorecards(모델 A/B: pass 전이 회귀/개선 + 메트릭 delta).
 // 채점=LiteLLM text judge(WEBVOYAGER_RUBRIC; VLM 은 JUDGE_VISION 으로 별도 검증). 실 사이트라 통과율=난이도 반영.
 //
-// 사전: docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
+// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -13,15 +13,15 @@ import { diffScorecards, summarizeScorecard } from "../../packages/suite/dist/in
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
-const JUDGE_MODEL = process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini";
+const JUDGE_MODEL = process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini";
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 const WV_N = Number(process.env.WV_N ?? "6");
 const BENIGN = (process.env.WV_SITES ?? "ArXiv,Cambridge Dictionary,Wolfram Alpha,BBC News,GitHub,Huggingface").split(
   ",",
 );
-const NAME = "assay-bu-ab";
+const NAME = "everdict-bu-ab";
 const FRONT = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -39,8 +39,8 @@ if (!KEY) {
   console.error("LLM 키 없음.");
   process.exit(2);
 }
-process.env.ASSAY_JUDGE_MODEL = JUDGE_MODEL;
-process.env.ASSAY_JUDGE_PROVIDER = "openai";
+process.env.EVERDICT_JUDGE_MODEL = JUDGE_MODEL;
+process.env.EVERDICT_JUDGE_PROVIDER = "openai";
 process.env.OPENAI_API_KEY = KEY;
 process.env.OPENAI_BASE_URL = process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1";
 const cleanup = () => spawnSync("docker", ["rm", "-f", NAME], { stdio: "ignore" });

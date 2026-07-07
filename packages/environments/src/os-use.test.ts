@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecOpts, ExecResult } from "@assay/core";
+import type { ComputeHandle, ExecOpts, ExecResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { OsUseEnvironment } from "./os-use.js";
 

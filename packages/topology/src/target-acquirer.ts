@@ -5,7 +5,7 @@ import {
   type TopologyTarget,
   type TrustZone,
   UpstreamError,
-} from "@assay/core";
+} from "@everdict/core";
 import { getField, interpolatePath, joinUrl, methodPath } from "./front-door-driver.js";
 import type { TargetEnvHandle, TopologyRuntime } from "./topology-runtime.js";
 
@@ -78,7 +78,7 @@ export function provisionAcquirer(runtime: TopologyRuntime): TargetAcquirer {
   };
 }
 
-// service: 선언된 서비스의 세션 API 를 열어 좌표 bag 을 받는다. Assay 가 무대를 소유하지 않으므로(컨테이너 없음)
+// service: 선언된 서비스의 세션 API 를 열어 좌표 bag 을 받는다. Everdict 가 무대를 소유하지 않으므로(컨테이너 없음)
 // 관측은 delivery(sentinel/egress)로 — 자체 snapshot 은 prompt(무대 없음) fallback. front-door driver 의 미러(타깃판):
 // open=submit, coordinates=correlate(단일 id 가 아닌 좌표 bag), close=lifecycle teardown.
 export function serviceAcquirer(
@@ -167,7 +167,7 @@ export function serviceAcquirer(
       return {
         wiring: coords,
         async snapshot() {
-          return { kind: "prompt", output: "" }; // Assay 소유 무대 없음 — 실 관측은 delivery(sentinel/egress)로 전달.
+          return { kind: "prompt", output: "" }; // Everdict 소유 무대 없음 — 실 관측은 delivery(sentinel/egress)로 전달.
         },
         async dispose() {
           await closeSession(request, base, acquire.close, closeWiring).catch(() => {});

@@ -31,7 +31,7 @@ feature entirely.
 - **Mattermost (full two-way):** workspace-registered corporate Mattermost (host + **bot token** +
   slash-command token, all SecretStore name-refs) → **outbound** notifications *and* **inbound**
   slash commands + interactive buttons. An admin registers it once per workspace (self-serve web
-  form); every member's runs/notifications in that workspace use it. This adds Assay's **first
+  form); every member's runs/notifications in that workspace use it. This adds Everdict's **first
   inbound integration surface** (verified, workspace-scoped) — a deliberate, contained exception to
   the "no inbound webhooks" stance (which still holds for GitHub App push triggers).
 - **Remove personal Connected accounts entirely** (github, github-enterprise, mattermost personal
@@ -86,13 +86,13 @@ mattermost: z.object({
   botTokenSecretName: z.string().min(1),         // SecretStore key — bot access token (outbound posts, threads, DMs, interactive)
   commandTokenSecretName: z.string().optional(), // SecretStore key — slash-command/action token (inbound verification)
   defaultChannelId: z.string().optional(),       // default notify channel
-  inboundToken: z.string().optional(),           // Assay-minted opaque token embedded in the registered command/action URL → routes inbound to this workspace
+  inboundToken: z.string().optional(),           // Everdict-minted opaque token embedded in the registered command/action URL → routes inbound to this workspace
 }).optional(),
 ```
 
 Installation records hold **no long-lived token** — installation tokens are minted on demand from the
 App private key (env for github.com, SecretStore for GHE) and are short-lived (~1h). So no new
-encrypted store is needed; JSONB + SecretStore name-refs suffice. `assay_connections` is **dropped**
+encrypted store is needed; JSONB + SecretStore name-refs suffice. `everdict_connections` is **dropped**
 in S6.
 
 ## Token minting (the core)
@@ -137,7 +137,7 @@ picker (`ci-link-service.ts listRepos`) switches from the personal token to the 
   `github-actions-trigger.md` stays as-is.)
 - **Mattermost registration = admin (`settings:write`).** "Self-serve from the web" is satisfied by
   admin-in-web (no operator/ops ticket). Full two-way inherently requires MM-side admin actions
-  (create bot, register the `/assay` slash command), so a lighter member-level gate wouldn't help —
+  (create bot, register the `/everdict` slash command), so a lighter member-level gate wouldn't help —
   resolved to admin.
 
 ## Install / link flow (S2) — mirrors the connections callback
@@ -161,22 +161,22 @@ up once, all members use it. Difference: Mattermost is bidirectional, so it need
 calls and **inbound endpoints**.
 
 **Registration (admin, `settings:write`, self-serve web form).** The admin pastes: MM `host`, a
-**bot access token**, and (for inbound) a **slash-command token**. Assay stores the tokens as
+**bot access token**, and (for inbound) a **slash-command token**. Everdict stores the tokens as
 SecretStore name-refs and, in return, **shows the admin the URLs/commands to register on the MM
 side** (same pattern as showing the OAuth callback URL today):
-- Slash command `/assay` → `POST {API_PUBLIC_URL}/integrations/mattermost/command?t={inboundToken}`
+- Slash command `/everdict` → `POST {API_PUBLIC_URL}/integrations/mattermost/command?t={inboundToken}`
 - Interactive actions → `{API_PUBLIC_URL}/integrations/mattermost/action?t={inboundToken}`
 
-`inboundToken` is an opaque Assay-minted value embedded in those URLs; every inbound request carries
+`inboundToken` is an opaque Everdict-minted value embedded in those URLs; every inbound request carries
 it → **routes the request to the right workspace** (multi-tenant inbound with no user session).
 
-**Outbound (Assay → MM), bot token + REST API** (`/api/v4/posts`):
+**Outbound (Everdict → MM), bot token + REST API** (`/api/v4/posts`):
 - Completion / regression / CI / digest notifications (thread-aware).
 - Interactive messages: message `attachments[].actions` buttons (Re-run / View scorecard / Compare /
   Acknowledge).
 
-**Inbound (MM → Assay), two verified public endpoints:**
-- `POST /integrations/mattermost/command` — `/assay run|leaderboard|status …` → parse → dispatch →
+**Inbound (MM → Everdict), two verified public endpoints:**
+- `POST /integrations/mattermost/command` — `/everdict run|leaderboard|status …` → parse → dispatch →
   respond (ephemeral or in-channel/threaded).
 - `POST /integrations/mattermost/action` — button click → perform action → update the message.
 - **Verification:** each request carries MM's `token` field → constant-time compare against the
@@ -185,7 +185,7 @@ it → **routes the request to the right workspace** (multi-tenant inbound with 
 **AuthZ for chat-triggered actions.** Inbound requests have no OIDC user. Model it like CI: a
 workspace-scoped **`chat` principal** (`via: mattermost`, roles limited to `scorecards:run/read` +
 reads — never admin), added as a composed `Authenticator` branch keyed off the verified inbound
-token. **Optional later:** map the MM user (by email) → an Assay identity so runs are attributed to
+token. **Optional later:** map the MM user (by email) → an Everdict identity so runs are attributed to
 the real person; v1 uses the service principal.
 
 ## Slice plan (replace-first, remove-last)
@@ -227,28 +227,28 @@ Each slice: doc touch if it changes a convention + BFF↔MCP parity + tests. Qua
   - **S6c — Remove personal Connected accounts:** delete `ConnectionService`/`ConnectionStore`/
   OAuth `integrations`/routes (`/connections*`, `/workspace/applications`, `/workspace/integrations`)/
   MCP tools/web `manage-connections` + `entities/connection` + account "연결된 계정" tab +
-  applications roster + `GITHUB_OAUTH_CLIENT_ID/SECRET` env. Add `assay_connections` **drop
+  applications roster + `GITHUB_OAUTH_CLIENT_ID/SECRET` env. Add `everdict_connections` **drop
   migration** (expand→contract; preflight note). Retire `docs/connections.md`. Keep
   `API_PUBLIC_URL`/`WEB_BASE_URL` (the App install callback + Mattermost inbound URLs use them).
 - **S7–S8 — Mattermost inbound (slash commands + button actions) — SHIPPED.** Public routes
   `POST /integrations/mattermost/{command,action}` — workspace routed by `?ws=<slug>` (slug not
   secret), authenticated by **constant-time compare** of the request `token` against the workspace's
   `commandTokenSecretName` value (fail-closed: missing config / missing token / mismatch → 403).
-  `MattermostCommandService` parses `/assay run <harness> <dataset>` (submits a scorecard,
-  `submittedBy=mattermost:<user>`) · `/assay leaderboard <dataset>` · `/assay status` · `help`; the
+  `MattermostCommandService` parses `/everdict run <harness> <dataset>` (submits a scorecard,
+  `submittedBy=mattermost:<user>`) · `/everdict leaderboard <dataset>` · `/everdict status` · `help`; the
   action endpoint handles a `rerun` button context. Registration gains `commandTokenSecretName`
   (API + MCP `set_workspace_mattermost` + web form); the view exposes the inbound URLs for the admin
   to register on the MM side. form-urlencoded body parser added for MM slash commands.
   - Chose ws-in-URL routing over a separate `inboundToken` (simpler, still token-verified); the schema
     `inboundToken` field is now vestigial (harmless, unused).
   - Follow-up: **auto-attach** the `rerun` button to outbound completion posts (the action endpoint
-    already handles clicks; only the outbound attachment is unwired) + MM-user→Assay-identity mapping.
+    already handles clicks; only the outbound attachment is unwired) + MM-user→Everdict-identity mapping.
 
 ## Rollout / safety
 
 - **Order guarantees no broken window:** repo access (S1–S4) and notifications (S5) are fully live
   before the personal feature is removed (S6).
-- **DB:** additive JSONB in S1–S5 (ships normally); the `assay_connections` DROP in S6 is
+- **DB:** additive JSONB in S1–S5 (ships normally); the `everdict_connections` DROP in S6 is
   contract-phase with a `docs/migration/preflight/` note (verify no code references the table first).
 - **Secrets:** GHE App private key + Mattermost webhook URL are SecretStore name-refs — never in git,
   never returned by any surface. App private key (github.com) is operator env, treated like the KEK.

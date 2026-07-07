@@ -26,4 +26,4 @@ RUN mkdir -p /root/.config/libreoffice/4/user \
 COPY scripts/sbench_grade.py scripts/recalc.sh /opt/
 RUN chmod +x /opt/recalc.sh
 
-WORKDIR /assay
+WORKDIR /everdict

@@ -9,7 +9,7 @@ export interface Migration {
 
 export type PreflightVerdict = "OK_TO_APPLY" | "ALREADY_APPLIED" | "BLOCKED";
 
-const TRACK = "assay_schema_migrations";
+const TRACK = "everdict_schema_migrations";
 
 // migrations 디렉터리에서 정렬된 .sql 파일을 읽는다. 기본 경로는 packages/db/migrations.
 export function readMigrations(dir?: string): Migration[] {

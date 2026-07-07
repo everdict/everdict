@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import type { ConsulClient, ServiceIntention } from "./consul-intentions.js";
 import { type NomadExec, type NomadHttp, NomadTopologyRuntime } from "./nomad-runtime.js";
@@ -36,7 +36,7 @@ function fakes() {
       if (path.includes("/allocations")) {
         return {
           status: 200,
-          text: JSON.stringify([{ TaskGroup: "assay-shared-postgres", ClientStatus: "running", ID: "alloc-pg" }]),
+          text: JSON.stringify([{ TaskGroup: "everdict-shared-postgres", ClientStatus: "running", ID: "alloc-pg" }]),
         };
       }
       if (path.startsWith("/v1/allocation/")) {
@@ -44,7 +44,7 @@ function fakes() {
           status: 200,
           text: JSON.stringify({
             ID: "alloc-pg",
-            TaskGroup: "assay-shared-postgres",
+            TaskGroup: "everdict-shared-postgres",
             AllocatedResources: { Shared: { Ports: [{ Label: "store", Value: 35432, HostIP: "10.0.0.7" }] } },
           }),
         };
@@ -68,7 +68,7 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
     await rt.ensureTopology(SPEC, POOL_ZONE);
 
     // 공유 스토어 잡(클러스터 1개) 등록.
-    expect(registered.some((j) => j.Job.ID === "assay-shared-stores")).toBe(true);
+    expect(registered.some((j) => j.Job.ID === "everdict-shared-stores")).toBe(true);
     // pg_isready 준비 폴링 + DDL(psql, stdin) 실행.
     expect(execCalls.some((c) => c.cmd === "pg_isready")).toBe(true);
     expect(execCalls.some((c) => c.cmd === "psql" && c.stdin?.includes("CREATE ROLE r_acme"))).toBe(true);
@@ -92,7 +92,7 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
     // 테넌트 서비스 intention(같은 테넌트 allow + * deny) + 공유 스토어 intention.
     const agent = applied.find((i) => i.Name === "t-acme-agent-server");
     expect(agent?.Sources.find((s) => s.Name === "*")?.Action).toBe("deny");
-    expect(applied.some((i) => i.Name === "assay-shared-postgres")).toBe(true);
+    expect(applied.some((i) => i.Name === "everdict-shared-postgres")).toBe(true);
   });
 
   it("consul 미주입 시 intention 미적용(기본)", async () => {
@@ -117,7 +117,7 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
           return {
             status: 200,
             text: JSON.stringify([
-              { TaskGroup: "assay-store-acme-postgres", ClientStatus: "running", ID: "alloc-silo-pg" },
+              { TaskGroup: "everdict-store-acme-postgres", ClientStatus: "running", ID: "alloc-silo-pg" },
             ]),
           };
         }
@@ -126,7 +126,7 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
             status: 200,
             text: JSON.stringify({
               ID: "alloc-silo-pg",
-              TaskGroup: "assay-store-acme-postgres",
+              TaskGroup: "everdict-store-acme-postgres",
               AllocatedResources: { Shared: { Ports: [{ Label: "store", Value: 41999, HostIP: "10.1.2.3" }] } },
             }),
           };
@@ -137,12 +137,12 @@ describe("NomadTopologyRuntime — pool 스토어 격리", () => {
     const rt = new NomadTopologyRuntime({ addr: "http://nomad", http: http2, pollIntervalMs: 1, maxPolls: 5 });
     await rt.ensureTopology(SPEC, SILO_ZONE);
     // 전용 스토어 잡(zone-suffixed) 배포.
-    expect(registered.some((j) => j.Job.ID === "assay-store-aegra-acme")).toBe(true);
+    expect(registered.some((j) => j.Job.ID === "everdict-store-aegra-acme")).toBe(true);
     // silo 는 per-tenant DDL 없음(pool 과 차이).
     expect(execCalls.some((c) => c.cmd === "psql")).toBe(false);
     // 서비스 env 에 발견된 host:port(10.1.2.3:41999) 로 DATABASE_URL(전용 인스턴스, 기본 creds).
     const topo = registered.find((j) => j.Job.ID === topologyJobId(SPEC, "acme"));
     const env = topo?.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
-    expect(env.DATABASE_URL).toBe("postgresql://assay:assay@10.1.2.3:41999/assay");
+    expect(env.DATABASE_URL).toBe("postgresql://everdict:everdict@10.1.2.3:41999/everdict");
   });
 });

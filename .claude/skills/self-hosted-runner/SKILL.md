@@ -8,7 +8,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 Design SSOT: `docs/architecture/self-hosted-runtime-and-runners.md`. **Runtime = WHERE** (an
 environment/pool a job targets; self-hosted included — "my machine" IS a self-hosted runtime, no
 separate "device" layer). **Runner = the worker process** that joins a runtime, leases one job at a
-time, runs it, reports back — **N runners = N concurrent jobs**. Both Assay runners and GitHub Actions
+time, runs it, reports back — **N runners = N concurrent jobs**. Both Everdict runners and GitHub Actions
 runners are workers co-resident on one self-hosted host. `packages/runner-core` is the GUI-free,
 transport-injectable core shared by `apps/cli` + `apps/desktop` (desktop shell = skill `desktop`).
 
@@ -46,7 +46,7 @@ Registered `RuntimeSpec` kinds are **`local | nomad | k8s`** only. The `docker` 
 - `RunnerHub` (`apps/api/src/runner-hub.ts`) — the lease queue; `POOL_RUNNER="*"` sentinel + `poolKeyFor(owner)` route pool jobs (a capability mismatch on the pool is **skipped**, not rejected, so a capable runner takes it); `requiredRunnerCapabilities(job)` adds `docker` for service harnesses. `SelfHostedBackend` (`apps/api/src/self-hosted-backend.ts`) stamps `provenance`.
 - **Ownership precedent**: personal ownership (`owner=subject`, no role gate) — originally mirrored the now-removed Connected accounts; the pattern persists for personal runners + personal API keys.
 
-## `assay runner` (`apps/cli/src/main.ts` `runnerCommand`)
+## `everdict runner` (`apps/cli/src/main.ts` `runnerCommand`)
 `--pair <rnr_…> --api-url … [--max-concurrent N] [--mount-codex-login] [--ready-timeout-ms/--ready-interval-ms]`. Self-advertises `detectCapabilities()` each lease; `--mount-codex-login` opt-in binds `~/.codex` into containerized (`case.image`) jobs so codex runs in-image with the machine login (own-pays; explicit, since the credential is exposed to the job container).
 
 See `docs/architecture/self-hosted-runner.md` (shipped personal tier) · `docs/architecture/self-hosted-service-runner.md` (DockerTopologyRuntime) · `docs/architecture/portable-harness-runtime.md` (case.image local↔managed) · `docs/runtimes.md`. Skills: `desktop` (Electron shell), `backends` (push placement + budget), `topology` (service harnesses).

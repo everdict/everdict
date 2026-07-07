@@ -4,7 +4,7 @@ import {
   type ServiceReadiness,
   UpstreamError,
   flattenEnv,
-} from "@assay/core";
+} from "@everdict/core";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 import { type Docker, dockerCli } from "./docker.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
@@ -29,7 +29,7 @@ function sanitize(s: string): string {
   return s.replace(/[^a-zA-Z0-9_.-]/g, "-");
 }
 function netName(spec: ServiceHarnessSpec): string {
-  return `assay-${sanitize(spec.id)}-${sanitize(spec.version)}`;
+  return `everdict-${sanitize(spec.id)}-${sanitize(spec.version)}`;
 }
 
 // 라이브 DockerTopologyRuntime: 사용자 Docker 데몬에 토폴로지(스토어+서비스) + per-case 브라우저를 띄운다.
@@ -225,7 +225,7 @@ export class DockerTopologyRuntime implements TopologyRuntime {
   // 스토어가 실제 연결을 받을 때까지 폴링(docker exec pg_isready / redis-cli ping). minio 는 스킵.
   private async waitStoreAccepting(store: string, container: string): Promise<void> {
     const probe =
-      store === "postgres" ? ["pg_isready", "-U", "assay"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
+      store === "postgres" ? ["pg_isready", "-U", "everdict"] : store === "redis" ? ["redis-cli", "ping"] : undefined;
     if (!probe) return;
     await this.pollReady(
       this.defaultReadyTimeoutMs,

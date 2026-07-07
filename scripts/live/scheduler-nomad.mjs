@@ -2,14 +2,14 @@
 //
 // N개의 케이스를 동시에 제출하지만, NomadBackend 의 maxConcurrent=CAP 때문에
 // 스케줄러는 한 번에 CAP개만 실제 alloc 으로 띄우고 나머지는 큐잉한다. 슬롯이 비면 다음을 흘려보낸다.
-// 별도 폴러가 Nomad 의 진행중 assay-sched-* 잡 수를 관측해 동시 alloc 이 CAP 을 넘지 않음을 증명한다.
+// 별도 폴러가 Nomad 의 진행중 everdict-sched-* 잡 수를 관측해 동시 alloc 이 CAP 을 넘지 않음을 증명한다.
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 ASSAY_AGENT_IMAGE=assay-agent:local node scripts/live/scheduler-nomad.mjs
+// 사용: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/scheduler-nomad.mjs
 
 import { BackendRegistry, NomadBackend, Scheduler } from "../../packages/backends/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.ASSAY_AGENT_IMAGE ?? "assay-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
 const N = Number(process.env.N ?? "5");
 const CAP = Number(process.env.CAP ?? "2");
 const STAMP = Date.now().toString(36);
@@ -30,7 +30,7 @@ function jobFor(i) {
 
 async function runningCount() {
   try {
-    const r = await fetch(`${NOMAD_ADDR}/v1/jobs?prefix=assay-sched-${STAMP}`);
+    const r = await fetch(`${NOMAD_ADDR}/v1/jobs?prefix=everdict-sched-${STAMP}`);
     const jobs = await r.json();
     return jobs.filter((j) => j.Status === "running" || j.Status === "pending").length;
   } catch {

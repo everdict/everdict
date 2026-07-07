@@ -1,4 +1,4 @@
-import { type AgentJob, type CaseResult, NotFoundError, RateLimitError } from "@assay/core";
+import { type AgentJob, type CaseResult, NotFoundError, RateLimitError } from "@everdict/core";
 import { type BudgetTracker, costOf } from "./budget.js";
 import { FairQueue } from "./fair-queue.js";
 import type { BackendRegistry } from "./registry.js";

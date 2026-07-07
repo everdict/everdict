@@ -6,7 +6,7 @@
 //
 // 사전: nomad agent -dev (docker driver) 기동. browser-use 이미지는 호스트 docker 에 빌드돼 있어야(레지스트리 불필요,
 //   Nomad docker 드라이버가 로컬 이미지 사용 — SLICE 92 stub 와 동일):
-//   docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live
+//   docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live
 // 호스트 도달: Nomad docker task 는 기본 브리지 → 파드가 LiteLLM(172.17.0.1:4000)/Jaeger(172.17.0.5:4318) 도달.
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync } from "node:child_process";
@@ -17,7 +17,7 @@ import { NomadTopologyRuntime, ServiceTopologyBackend } from "../../packages/top
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
 const ADDR = process.env.NOMAD_ADDR ?? "http://localhost:4646";
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const POD_PORT = 18080;
 const MODEL = process.env.BROWSERUSE_MODEL ?? "gpt-5.4-mini";
 const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "6";
@@ -47,7 +47,7 @@ function jaegerBridgeIp() {
   try {
     const out = execFileSync(
       "docker",
-      ["inspect", "assay-jaeger", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"],
+      ["inspect", "everdict-jaeger", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"],
       { encoding: "utf8" },
     );
     return (
@@ -138,10 +138,10 @@ try {
     evalCase: {
       id: "search-form-nomad",
       env: { kind: "browser", url: `http://localhost:${POD_PORT}/form` },
-      task: `Go to http://localhost:${POD_PORT}/form , type "assay eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
+      task: `Go to http://localhost:${POD_PORT}/form , type "everdict eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
       graders: [
-        { id: "url-matches", config: { pattern: "[?&]q=assay" } },
-        { id: "dom-contains", config: { text: "Results for assay" } },
+        { id: "url-matches", config: { pattern: "[?&]q=everdict" } },
+        { id: "dom-contains", config: { text: "Results for everdict" } },
         { id: "steps", config: {} },
         { id: "cost", config: {} },
       ],

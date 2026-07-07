@@ -1,7 +1,7 @@
 import type { MetricSummary } from "./scorecard.js";
 
 // 기간 트렌드 / 회귀-오버-타임 — 한 (dataset, metric) 의 스코어카드들을 시간순으로 늘어놓고 baseline 대비 변화·회귀를 본다.
-// 입력은 스코어카드의 *경량* 형태(목록 summary 로 충분) — @assay/db 의 ScorecardRecord 가 구조적으로 이걸 만족한다
+// 입력은 스코어카드의 *경량* 형태(목록 summary 로 충분) — @everdict/db 의 ScorecardRecord 가 구조적으로 이걸 만족한다
 // (suite 는 db 에 의존하지 않음). diffScorecards 가 2개 ad-hoc 비교라면, 이건 N개를 기간 위에 늘어놓은 시계열이다.
 export interface TrendCard {
   id: string;

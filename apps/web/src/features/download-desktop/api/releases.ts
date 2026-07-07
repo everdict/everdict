@@ -32,7 +32,7 @@ export interface DesktopRelease {
   assets: DesktopAsset[]
 }
 
-// 파일명 규약(electron-builder artifactName): Assay-<ver>-<os>-<arch>.<ext> — blockmap/yml 은 제외된다.
+// 파일명 규약(electron-builder artifactName): Everdict-<ver>-<os>-<arch>.<ext> — blockmap/yml 은 제외된다.
 const ASSET_NAME_RE = /-(linux|mac|win)-([A-Za-z0-9_]+)\.(AppImage|deb|dmg|zip|exe)$/
 
 function classifyAsset(asset: z.infer<typeof githubAssetSchema>): DesktopAsset | null {

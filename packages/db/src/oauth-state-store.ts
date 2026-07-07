@@ -63,7 +63,7 @@ export class PgOAuthStateStore implements OAuthStateStore {
   constructor(private readonly client: SqlClient) {}
   async put(state: string, p: OAuthStatePending, expiresAt: string): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_oauth_states
+      `INSERT INTO everdict_oauth_states
          (state, workspace, provider, host, client_id, client_secret_name, created_by, expires_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
@@ -81,7 +81,7 @@ export class PgOAuthStateStore implements OAuthStateStore {
   async take(state: string): Promise<OAuthStatePending | null> {
     // DELETE … RETURNING = 원자적 1회용 소비(만료 건도 삭제 → 자가 청소). 만료는 앱에서 판정.
     const res = await this.client.query<StateRow>(
-      `DELETE FROM assay_oauth_states WHERE state = $1
+      `DELETE FROM everdict_oauth_states WHERE state = $1
        RETURNING workspace, provider, host, client_id, client_secret_name, created_by, expires_at`,
       [state],
     );

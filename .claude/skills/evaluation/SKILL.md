@@ -1,18 +1,18 @@
 ---
 name: evaluation
-description: Assay's scoring/eval domain — graders, judges, scorecards, regression/leaderboard, saved views — the eval-first product core. Use when editing scoring, graders, judges, scorecards, suites, or views.
+description: Everdict's scoring/eval domain — graders, judges, scorecards, regression/leaderboard, saved views — the eval-first product core. Use when editing scoring, graders, judges, scorecards, suites, or views.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Evaluation (the eval-first core)
 
-Assay *is* an eval runtime. One case: `runCase` → per-case `Score[]` from graders. A batch:
+Everdict *is* an eval runtime. One case: `runCase` → per-case `Score[]` from graders. A batch:
 dataset×harness → `Scorecard` + summary via `runSuite`. Regression = `diffScorecards`; ranking =
 `leaderboard`. Cost/tokens come from the **harness's own trace** (Claude `total_cost_usd`), never measured by us.
 
 ## Checklist
-1. Score = `{graderId, metric, value, pass?, detail?}` (`@assay/core`). A grader reads trace + snapshot, never mutates.
+1. Score = `{graderId, metric, value, pass?, detail?}` (`@everdict/core`). A grader reads trace + snapshot, never mutates.
 2. Batch always through `runSuite` (`packages/suite/src/run-suite.ts`) — per-case isolation: a thrown dispatch becomes a `pass:false` failed `CaseResult`, the batch keeps going. Never route a batch via `RunService.submit`.
-3. Aggregate/compare only via `@assay/suite` pure fns (`summarizeScorecard`/`diffScorecards`/`leaderboard`/`trendSeries`) — they take the light `ScorecardRecord` shape, no `@assay/db` dep.
+3. Aggregate/compare only via `@everdict/suite` pure fns (`summarizeScorecard`/`diffScorecards`/`leaderboard`/`trendSeries`) — they take the light `ScorecardRecord` shape, no `@everdict/db` dep.
 4. Judge = a **model grader** (`JudgeGrader`), constructed where a `Judge` is injected — NOT in `makeGraders`. Scores land under metric `judge:<id>`.
 5. External model/HTTP failure in a transport → `UpstreamError` (never raw).
 
@@ -27,7 +27,7 @@ used by ingest)/`collectJudgeModels`). See `docs/architecture/streaming-case-pip
 
 ## Scoring model — Grader-only (recently consolidated — IMPORTANT)
 Scoring is unified to **Graders**. There is no separate "scorer", and the **Metric(threshold) entity is
-removed from the engine** (mig `packages/db/migrations/0034_drop_metrics.sql` dropped `assay_metrics`; 0 real usage).
+removed from the engine** (mig `packages/db/migrations/0034_drop_metrics.sql` dropped `everdict_metrics`; 0 real usage).
 KEEP: `Score.metric` as a free **label**, `MetricSummary`, and `metric` as a trend/leaderboard **axis**.
 Grader families (`packages/graders/src/index.ts`): outcome `tests-pass`/`command`/`swe-bench`/`script-score`
 (need `ctx.compute` — guard, it's optional); trace `steps`/`cost`/`latency` (`trace-graders.ts`, read ONLY
@@ -43,7 +43,7 @@ A judge splits pure **prompt-build + verdict-parse** (`modelJudge`, `packages/gr
 testable) from an injected **transport** `JudgeCompletion`: `anthropicComplete` / `openaiComplete`
 (OpenAI-compatible → LiteLLM via `baseUrl`) / `harnessComplete` (dispatch an agent harness, verdict from its
 trace via `traceToText`). `JudgeGrader` (`packages/graders/src/judge.ts`) wraps it; `useScreenshot` feeds the
-snapshot to a VLM. Judges are user-registered `model`|`harness` `JudgeSpec`s (`@assay/registry`). The control
+snapshot to a VLM. Judges are user-registered `model`|`harness` `JudgeSpec`s (`@everdict/registry`). The control
 plane builds the right transport from the spec + the tenant's SecretStore key/dispatcher:
 `apps/api/src/judge-runner.ts` `defaultJudgeRunner` (`ANTHROPIC_API_KEY`/`OPENAI_API_KEY`, model-registry
 resolve, missing key ⇒ explicit `skip` score, never silent). Score metric = `judge:<id>`.
@@ -61,7 +61,7 @@ resolve, missing key ⇒ explicit `skip` score, never silent). Score metric = `j
 ## Trace ingest (no harness run)
 `POST /scorecards/ingest` (push): upload externally-run `TraceEvent[]`; re-derive trace graders
 (steps/cost/latency) + keep uploaded scores, then judge + aggregate (`ScorecardService.ingest`).
-`POST /scorecards/ingest/pull`: pull per-run traces from the tenant's platform via `@assay/trace`
+`POST /scorecards/ingest/pull`: pull per-run traces from the tenant's platform via `@everdict/trace`
 `buildTraceSource` — kinds `otel|mlflow|langfuse|langsmith|phoenix` (`source.authSecret` → SecretStore value;
 otel/mlflow = verbatim `Authorization` header, the newer three place the value in their platform's header —
 langsmith `x-api-key`; phoenix needs `source.project`), then score.

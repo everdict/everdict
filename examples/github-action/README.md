@@ -1,6 +1,6 @@
-# Assay GitHub Action — CI-fired evals
+# Everdict GitHub Action — CI-fired evals
 
-Reference implementation of the `assay run-eval` action (design:
+Reference implementation of the `everdict run-eval` action (design:
 [`docs/architecture/github-actions-trigger.md`](../../docs/architecture/github-actions-trigger.md)).
 Zero-dependency node20 action — copy `run-eval/` into your repo (or reference it once published)
 and wire the workflow below.
@@ -15,7 +15,7 @@ Two firing semantics, picked automatically from the GitHub event:
 ## Example workflow
 
 ```yaml
-name: assay-eval
+name: everdict-eval
 on:
   pull_request:
   push:
@@ -26,7 +26,7 @@ permissions:
   id-token: write   # GitHub OIDC federation (keyless) — omit when using an API key secret
 
 concurrency:
-  group: assay-eval-${{ github.ref }}
+  group: everdict-eval-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -42,12 +42,12 @@ jobs:
           push: true
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
 
-      - name: Assay eval
-        uses: ./.github/actions/assay-run-eval   # or assay-ai/run-eval@v1 once published
+      - name: Everdict eval
+        uses: ./.github/actions/everdict-run-eval   # or everdict-ai/run-eval@v1 once published
         with:
-          api-url: https://assay.example.com
+          api-url: https://everdict.example.com
           workspace: acme
-          api-key: ${{ secrets.ASSAY_API_KEY }}  # omit when the workspace has a repo link (OIDC)
+          api-key: ${{ secrets.EVERDICT_API_KEY }}  # omit when the workspace has a repo link (OIDC)
           harness: my-topology
           dataset: pinch-bench
           images: '{"svc-x":"ghcr.io/${{ github.repository }}@${{ steps.build.outputs.digest }}"}'
@@ -62,12 +62,12 @@ new version.
 
 - **API key** (`ak_…`, works today): store as a repo secret; the key's workspace must match `workspace`.
 - **GitHub OIDC (keyless)**: give the job `id-token: write`; the action exchanges the GitHub-signed
-  token (aud `assay`) directly. Requires the workspace to trust this repository via a repo link
+  token (aud `everdict`) directly. Requires the workspace to trust this repository via a repo link
   (`WorkspaceSettings.ci.links`).
 
 ## Notes
 
 - Pin by **digest** (`@sha256:…`) — the re-pin route rejects moving tags by default (`allowTags` opt-out).
 - `origin` (repo/sha/ref/PR/run URL) is stamped on the scorecard by the control plane; the PR comment /
-  check feedback is done here with the ambient `GITHUB_TOKEN` — Assay holds no GitHub credential.
+  check feedback is done here with the ambient `GITHUB_TOKEN` — Everdict holds no GitHub credential.
 - Private GHCR images need pull credentials on the topology runtime (Track B; interim: cluster pull secret).

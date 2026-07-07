@@ -1,4 +1,4 @@
-import { InMemoryCommentStore } from "@assay/db";
+import { InMemoryCommentStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { CommentService } from "./comment-service.js";
 

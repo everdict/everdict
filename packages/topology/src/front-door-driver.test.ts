@@ -1,5 +1,5 @@
 import { type IncomingMessage, type ServerResponse, createServer } from "node:http";
-import type { FrontDoorCompletion } from "@assay/core";
+import type { FrontDoorCompletion } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import {
   type CallbackRendezvous,

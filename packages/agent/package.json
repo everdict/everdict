@@ -1,5 +1,5 @@
 {
-  "name": "@assay/agent",
+  "name": "@everdict/agent",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -13,11 +13,11 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@assay/core": "workspace:*",
-    "@assay/drivers": "workspace:*",
-    "@assay/environments": "workspace:*",
-    "@assay/graders": "workspace:*",
-    "@assay/harnesses": "workspace:*",
-    "@assay/runner": "workspace:*"
+    "@everdict/core": "workspace:*",
+    "@everdict/drivers": "workspace:*",
+    "@everdict/environments": "workspace:*",
+    "@everdict/graders": "workspace:*",
+    "@everdict/harnesses": "workspace:*",
+    "@everdict/runner": "workspace:*"
   }
 }

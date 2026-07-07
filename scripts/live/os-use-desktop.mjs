@@ -8,7 +8,7 @@ import { OsUseEnvironment } from "../../packages/environments/dist/index.js";
 import { makeGraders } from "../../packages/graders/dist/index.js";
 import { runCase } from "../../packages/runner/dist/index.js";
 
-const IMAGE = "assay-osdesk:demo";
+const IMAGE = "everdict-osdesk:demo";
 
 // 데스크탑 컴퓨트 이미지: Xvfb(가상 디스플레이) + scrot(스크린샷) + wmctrl(창목록) + x11-apps(xclock GUI).
 const dockerfile =
@@ -23,7 +23,7 @@ const osCase = {
     kind: "os-use",
     display: ":99",
     setup: ["Xvfb :99 -screen 0 1024x768x24 -nolisten tcp & sleep 1.5", "xclock -digital -update 1 & sleep 1.5"],
-    screenshotPath: "/tmp/assay-screen.png",
+    screenshotPath: "/tmp/everdict-screen.png",
   },
   image: IMAGE,
   task: "Observe the desktop.",
@@ -47,7 +47,7 @@ const grader = makeGraders([
   {
     id: "command",
     config: {
-      cmd: 's=$(wc -c < /tmp/assay-screen.png); echo "screenshot bytes=$s"; test "$s" -gt 1000',
+      cmd: 's=$(wc -c < /tmp/everdict-screen.png); echo "screenshot bytes=$s"; test "$s" -gt 1000',
       cwd: "/tmp", // os-use env 은 RepoEnvironment 처럼 work 디렉터리를 만들지 않음 → 존재하는 절대경로 사용
       metric: "screenshot",
     },

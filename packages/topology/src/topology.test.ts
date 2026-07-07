@@ -1,6 +1,6 @@
-import { perTenantTrustZones } from "@assay/backends";
-import type { AgentJob, BrowserSnapshot, Grader, ServiceHarnessSpec, TraceEvent, TrustZone } from "@assay/core";
-import type { TraceSource } from "@assay/trace";
+import { perTenantTrustZones } from "@everdict/backends";
+import type { AgentJob, BrowserSnapshot, Grader, ServiceHarnessSpec, TraceEvent, TrustZone } from "@everdict/core";
+import type { TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
 import { InProcessCallbackRendezvous } from "./callback-rendezvous.js";
 import { buildSharedStoreManifests } from "./dependencies.js";
@@ -202,14 +202,14 @@ describe("buildBrowserJob", () => {
     expect(task?.Config.ports).toEqual(["cdp"]);
     // headless-shell 은 CDP 를 스스로 9222 로 노출 → 포트 덮어쓰기 금지, allow-origins 만 추가.
     expect(task?.Config.args).toEqual(["--remote-allow-origins=*"]);
-    expect(task?.Env.ASSAY_RUN_ID).toBe("abc");
+    expect(task?.Env.EVERDICT_RUN_ID).toBe("abc");
   });
 });
 
 describe("topologyJobId (trust-zone keying)", () => {
   it("zoneId 가 있으면 warm 잡 ID 에 섞어 테넌트 간 공유를 막는다", () => {
-    expect(topologyJobId(SPEC)).toBe("assay-harness-browser-use-langgraph-1.0.0");
-    expect(topologyJobId(SPEC, "acme")).toBe("assay-harness-browser-use-langgraph-1.0.0-acme");
+    expect(topologyJobId(SPEC)).toBe("everdict-harness-browser-use-langgraph-1.0.0");
+    expect(topologyJobId(SPEC, "acme")).toBe("everdict-harness-browser-use-langgraph-1.0.0-acme");
     expect(topologyJobId(SPEC, "a")).not.toBe(topologyJobId(SPEC, "b"));
   });
 });
@@ -234,7 +234,7 @@ describe("resolvePort", () => {
 
 describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와이어링)", () => {
   it("K8s: provisionDependencies 면 PG/Redis Deployment+Service 를 렌더한다(타입별 1개)", () => {
-    const manifests = buildK8sManifests(SPEC, { namespace: "assay-acme", provisionDependencies: true });
+    const manifests = buildK8sManifests(SPEC, { namespace: "everdict-acme", provisionDependencies: true });
     const names = manifests
       .filter((m) => m.kind === "Deployment")
       .map((m) => m.metadata.name)
@@ -273,7 +273,7 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
       traceSource: { kind: "otel", endpoint: "http://o:4318" },
     };
     const manifests = buildK8sManifests(spec, {
-      namespace: "assay-e",
+      namespace: "everdict-e",
       provisionDependencies: true,
       storeEnv: { DATABASE_URL: "postgresql://store" },
     });
@@ -304,7 +304,7 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
       ],
       dependencies: [],
     };
-    const manifests = buildK8sManifests(spec, { namespace: "assay-r" });
+    const manifests = buildK8sManifests(spec, { namespace: "everdict-r" });
     const big = manifests.find((m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-big") as {
       spec: { template: { spec: { containers: Array<{ resources?: unknown }> } } };
     };
@@ -336,7 +336,7 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
       ],
       dependencies: [],
     };
-    const m = buildK8sManifests(spec, { namespace: "assay-v" });
+    const m = buildK8sManifests(spec, { namespace: "everdict-v" });
     const dep = m.find((x) => x.kind === "Deployment" && x.metadata.name === "browser-use-langgraph-app") as {
       spec: {
         template: {
@@ -366,12 +366,12 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
   });
 
   it("K8s: 서비스 env 에 DATABASE_URL/REDIS_URL 을 스토어 DNS 로 자동 주입한다", () => {
-    const manifests = buildK8sManifests(SPEC, { namespace: "assay-acme", provisionDependencies: true });
+    const manifests = buildK8sManifests(SPEC, { namespace: "everdict-acme", provisionDependencies: true });
     const agent = manifests.find(
       (m) => m.kind === "Deployment" && m.metadata.name === "browser-use-langgraph-agent-server",
     ) as { spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } } };
     const env = Object.fromEntries(agent.spec.template.spec.containers[0]?.env.map((e) => [e.name, e.value]) ?? []);
-    expect(env.DATABASE_URL).toBe("postgresql://assay:assay@browser-use-langgraph-postgres:5432/assay");
+    expect(env.DATABASE_URL).toBe("postgresql://everdict:everdict@browser-use-langgraph-postgres:5432/everdict");
     expect(env.REDIS_URL).toBe("redis://browser-use-langgraph-redis:6379");
   });
 
@@ -405,13 +405,13 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
   it("Nomad pool: buildSharedStoreJob 은 공유 스토어 잡(클러스터 1개)을 렌더한다", () => {
     const job = buildSharedStoreJob(["postgres", "redis"]);
     expect(job.Job.ID).toBe(SHARED_STORE_JOB_ID);
-    expect(job.Job.TaskGroups.map((g) => g.Name).sort()).toEqual(["assay-shared-postgres", "assay-shared-redis"]);
-    const pg = job.Job.TaskGroups.find((g) => g.Name === "assay-shared-postgres");
+    expect(job.Job.TaskGroups.map((g) => g.Name).sort()).toEqual(["everdict-shared-postgres", "everdict-shared-redis"]);
+    const pg = job.Job.TaskGroups.find((g) => g.Name === "everdict-shared-postgres");
     expect(pg?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "store", To: 5432 });
   });
 
   it("minio: 스토어 args(server /data)를 K8s/Nomad 빌더에 모두 렌더한다", () => {
-    const k8s = buildSharedStoreManifests(["minio"], "assay-shared") as Array<{
+    const k8s = buildSharedStoreManifests(["minio"], "everdict-shared") as Array<{
       kind: string;
       spec?: { template?: { spec: { containers: Array<{ image: string; args?: string[] }> } } };
     }>;
@@ -424,8 +424,8 @@ describe("provisionDependencies (스토어 공동 배포 + 접속 env 자동 와
 
   it("Nomad silo: buildDedicatedStoreJob 은 존별 전용 스토어 잡(zone-suffixed)을 렌더한다", () => {
     const job = buildDedicatedStoreJob(SPEC, ["postgres"], "acme");
-    expect(job.Job.ID).toBe("assay-store-browser-use-langgraph-acme");
-    expect(job.Job.TaskGroups.map((g) => g.Name)).toEqual(["assay-store-acme-postgres"]);
+    expect(job.Job.ID).toBe("everdict-store-browser-use-langgraph-acme");
+    expect(job.Job.TaskGroups.map((g) => g.Name)).toEqual(["everdict-store-acme-postgres"]);
     expect(job.Job.TaskGroups[0]?.Networks?.[0]?.DynamicPorts?.[0]).toEqual({ Label: "store", To: 5432 });
   });
 });
@@ -747,7 +747,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     await backend.dispatch(mk("beta"));
 
     expect(zonesSeen.map((z) => z?.id)).toEqual(["alpha", "beta"]);
-    expect(zonesSeen.map((z) => z?.namespace)).toEqual(["assay-alpha", "assay-beta"]); // 존별 분리
+    expect(zonesSeen.map((z) => z?.namespace)).toEqual(["everdict-alpha", "everdict-beta"]); // 존별 분리
     expect(zonesSeen.every((z) => z?.isolationRuntime === "runsc")).toBe(true); // 강격리 강제
   });
 
@@ -935,7 +935,7 @@ describe("ServiceTopologyBackend (orchestrator-agnostic, mock runtime)", () => {
     const result = await backend.dispatch(job);
 
     expect(result.caseId).toBe("c1");
-    expect(fetchedWith).toBe("agent-xyz"); // assay runId(fixed)가 아니라 에이전트가 돌려준 id 로 상관
+    expect(fetchedWith).toBe("agent-xyz"); // everdict runId(fixed)가 아니라 에이전트가 돌려준 id 로 상관
   });
 
   // --- #1 본문 템플릿(request.bodyTemplate) ---

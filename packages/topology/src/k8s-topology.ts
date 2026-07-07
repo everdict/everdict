@@ -5,7 +5,7 @@ import {
   type ServiceResources,
   dockerAuthConfigJson,
   imageUsesRegistryHost,
-} from "@assay/core";
+} from "@everdict/core";
 import { dependencyConnEnv, dependencyStores } from "./dependencies.js";
 
 // ServiceResources → k8s container resources(requests=limits). cpu 1000=1코어(millicores), memoryMb→Mi. 정의된 것만 포함.
@@ -69,7 +69,7 @@ export interface K8sTopologyOptions {
 }
 
 // imagePullSecrets 가 참조하는 Secret 이름 — 네임스페이스당 하나, apply 가 멱등 upsert 한다.
-export const REGISTRY_AUTH_SECRET_NAME = "assay-registry-auth";
+export const REGISTRY_AUTH_SECRET_NAME = "everdict-registry-auth";
 
 // 워크스페이스 레지스트리 자격증명 → kubernetes.io/dockerconfigjson Secret. 서비스 이미지 중 호스트가
 // 일치하는 게 있을 때만 buildK8sManifests 가 포함시킨다(무관 자격증명을 클러스터에 흩뿌리지 않는다).
@@ -77,7 +77,7 @@ export function registryAuthSecretManifest(auth: RegistryAuth, ns: string): K8sM
   return {
     apiVersion: "v1",
     kind: "Secret",
-    metadata: { name: REGISTRY_AUTH_SECRET_NAME, namespace: ns, labels: { app: "assay" } },
+    metadata: { name: REGISTRY_AUTH_SECRET_NAME, namespace: ns, labels: { app: "everdict" } },
     type: "kubernetes.io/dockerconfigjson",
     data: { ".dockerconfigjson": Buffer.from(dockerAuthConfigJson(auth)).toString("base64") },
   } as K8sManifest & { type: string; data: Record<string, string> };
@@ -85,10 +85,15 @@ export function registryAuthSecretManifest(auth: RegistryAuth, ns: string): K8sM
 
 // 공유 스토어(spec.dependencies[])를 Deployment+Service 로 렌더. (harness-version, ns) 당 한 번.
 export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
-  const ns = opts.namespace ?? "assay-platform";
+  const ns = opts.namespace ?? "everdict-platform";
   const out: K8sManifest[] = [];
   for (const { store, name, def } of dependencyStores(spec)) {
-    const labels = { app: name, "assay/harness": spec.id, "assay/version": spec.version, "assay/store": store };
+    const labels = {
+      app: name,
+      "everdict/harness": spec.id,
+      "everdict/version": spec.version,
+      "everdict/store": store,
+    };
     const env = Object.entries(def.env ?? {}).map(([n, value]) => ({ name: n, value }));
     out.push({
       apiVersion: "apps/v1",
@@ -126,7 +131,7 @@ export function buildDependencyManifests(spec: ServiceHarnessSpec, opts: K8sTopo
 }
 
 export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOptions = {}): K8sManifest[] {
-  const ns = opts.namespace ?? "assay-platform";
+  const ns = opts.namespace ?? "everdict-platform";
   // 스토어를 함께 띄우면 접속 env 를 자동 주입 — 우선순위: connEnv(관례) < svc.env(서비스 정적) < storeEnv(운영 오버라이드).
   const depEnv = opts.provisionDependencies ? dependencyConnEnv(spec) : {};
   const out: K8sManifest[] = [];
@@ -136,7 +141,7 @@ export function buildK8sManifests(spec: ServiceHarnessSpec, opts: K8sTopologyOpt
   if (auth && needsAuth) out.push(registryAuthSecretManifest(auth, ns));
   if (opts.provisionDependencies) out.push(...buildDependencyManifests(spec, opts));
   for (const svc of spec.services) {
-    const labels = { app: svc.name, "assay/harness": spec.id, "assay/version": spec.version };
+    const labels = { app: svc.name, "everdict/harness": spec.id, "everdict/version": spec.version };
     const env = Object.entries({ ...depEnv, ...svc.env, ...(opts.storeEnv ?? {}) }).map(([name, value]) => ({
       name,
       value,
@@ -196,7 +201,7 @@ export function namespaceManifest(ns: string): K8sManifest {
 }
 
 export function browserDeployName(runId: string): string {
-  return `assay-browser-${runId}`;
+  return `everdict-browser-${runId}`;
 }
 
 export interface K8sBrowserOptions {
@@ -214,7 +219,7 @@ export function buildBrowserManifests(runId: string, opts: K8sBrowserOptions = {
   const image = opts.image ?? "chromedp/headless-shell:latest";
   const cdpPort = opts.cdpPort ?? 9222;
   const name = browserDeployName(runId);
-  const labels = { app: name, "assay/runId": runId };
+  const labels = { app: name, "everdict/runId": runId };
   // headless-shell 은 CDP 를 스스로 9222(socat)로 노출 → allow-origins 만 추가(포트 덮어쓰기 금지).
   const args = opts.args ?? ["--remote-allow-origins=*"];
   return [

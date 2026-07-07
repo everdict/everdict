@@ -35,7 +35,7 @@
 
 ## Problem — the primitive is weaker than the composite (inverted)
 
-An agent (Claude Code) reaching for Assay via MCP thinks in one verb: **"run this harness on this runtime."**
+An agent (Claude Code) reaching for Everdict via MCP thinks in one verb: **"run this harness on this runtime."**
 That is a `run`. A scorecard is just that verb applied over a dataset (`run × N`). So the natural dependency is
 `run ⊂ scorecard`. Today it is inverted in two ways:
 

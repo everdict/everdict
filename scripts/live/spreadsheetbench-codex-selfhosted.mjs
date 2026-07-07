@@ -1,7 +1,7 @@
 // 라이브 e2e: **codex-in-image 하니스로 SpreadsheetBench 수행**. codex 가 이미지(spreadsheetbench-codex:v1) 안에서
 // 머신 ChatGPT 로그인(러너가 ~/.codex 를 마운트, own-pays)으로 풀고, 수식 산출을 이미지 안 LibreOffice 로 recalc 후 채점.
 // 포터블 하니스(portable-harness-runtime) slice 1(러너 case.image→로컬 Docker) + 마운트(codex 로그인)를 실증.
-//   ① dev 컨트롤플레인(in-memory) ② POST /runners ③ assay runner --pair --mount-codex-login (codex on PATH)
+//   ① dev 컨트롤플레인(in-memory) ② POST /runners ③ everdict runner --pair --mount-codex-login (codex on PATH)
 //   ④ POST /bundles/apply(spreadsheetbench: sbench-codex 하니스 + codex 샘플) ⑤ 샘플 × sbench-codex × self:<id> ⑥ tests_pass.
 // 전제: docker + `docker build -t spreadsheetbench-codex:v1 -f examples/bundles/spreadsheetbench/Dockerfile.codex ...`,
 //       머신 codex 로그인(~/.codex), apps/api/dist + apps/cli/dist 빌드.
@@ -11,7 +11,7 @@ import process from "node:process";
 
 const PORT = process.env.CP_PORT ?? "8804";
 const BASE = `http://127.0.0.1:${PORT}`;
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const ROOT = new URL("../..", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = async (p, b) => {
@@ -25,7 +25,7 @@ const bundle = JSON.parse(
 
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: ROOT,
-  env: { ...process.env, PORT, ASSAY_REQUIRE_AUTH: "", KEYCLOAK_ISSUER: "", DATABASE_URL: "" },
+  env: { ...process.env, PORT, EVERDICT_REQUIRE_AUTH: "", KEYCLOAK_ISSUER: "", DATABASE_URL: "" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 cp.stderr.on("data", (d) => process.stderr.write(`  [cp] ${d}`));
@@ -47,7 +47,7 @@ try {
   console.log(`  → ${paired.status} runnerId=${runnerId}`);
   if (!paired.json.token || !runnerId) throw new Error("페어링 실패");
 
-  console.log("\n=== ③ assay runner --pair --mount-codex-login (codex on PATH) ===");
+  console.log("\n=== ③ everdict runner --pair --mount-codex-login (codex on PATH) ===");
   runner = spawn(
     "node",
     [

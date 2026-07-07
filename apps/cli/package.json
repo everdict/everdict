@@ -1,23 +1,23 @@
 {
-  "name": "@assay/cli",
+  "name": "@everdict/cli",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
-  "bin": { "assay": "./dist/main.js" },
+  "bin": { "everdict": "./dist/main.js" },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@assay/agent": "workspace:*",
-    "@assay/backends": "workspace:*",
-    "@assay/core": "workspace:*",
-    "@assay/orchestrator": "workspace:*",
-    "@assay/runner-core": "workspace:*",
-    "@assay/suite": "workspace:*",
-    "@assay/topology": "workspace:*",
+    "@everdict/agent": "workspace:*",
+    "@everdict/backends": "workspace:*",
+    "@everdict/core": "workspace:*",
+    "@everdict/orchestrator": "workspace:*",
+    "@everdict/runner-core": "workspace:*",
+    "@everdict/suite": "workspace:*",
+    "@everdict/topology": "workspace:*",
     "zod": "^3.24.1"
   }
 }

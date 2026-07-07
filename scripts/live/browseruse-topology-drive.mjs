@@ -1,13 +1,13 @@
-// 라이브 e2e (service-topology): *실제 browser-use* 를 assay 의 ServiceTopologyBackend front-door 로 — 로컬 docker 런타임.
+// 라이브 e2e (service-topology): *실제 browser-use* 를 everdict 의 ServiceTopologyBackend front-door 로 — 로컬 docker 런타임.
 // (오케스트레이터 deploy 는 kind+Nomad 로 이미 검증됐고, K8s deploy 버전은 browseruse-topology-k8s.mjs 참고.)
 // 여기서 닫는 것:
 //  ② 인터랙티브 멀티스텝 태스크 — 정적 example.com 이 아니라 컨테이너가 직접 서빙하는 /form 에서 navigate→input→click→
-//     결과확인. url-matches(q=assay) + dom-contains(Results for assay) 로 결정론적 채점.
+//     결과확인. url-matches(q=everdict) + dom-contains(Results for everdict) 로 결정론적 채점.
 //  ③ 실 트레이스 — front-door 가 run 마다 *실제* 토큰사용량(TokenCost)+액션열(action_names)을 Jaeger(:4318)로 OTLP 배출,
 //     백엔드의 traceSource(OtelTraceSource, Jaeger query :16686)가 같은 trace_id 로 끌어와 steps/cost 채점.
 //     trace_id 매칭: newRunId 를 32-hex 로 오버라이드 → thread_id="run-<32hex>" → front-door 가 그 hex 를 trace_id 로 사용.
 //
-// 사전: docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686) 기동.
+// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686) 기동.
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -16,12 +16,12 @@ import process from "node:process";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
 const MODEL = process.env.BROWSERUSE_MODEL ?? "gpt-5.4-mini";
 const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "6";
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
-const NAME = "assay-bu-live";
+const NAME = "everdict-bu-live";
 const FRONT = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -138,10 +138,10 @@ try {
     evalCase: {
       id: "search-form",
       env: { kind: "browser", url: `${FRONT}/form` },
-      task: `Go to ${FRONT}/form , type "assay eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
+      task: `Go to ${FRONT}/form , type "everdict eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
       graders: [
-        { id: "url-matches", config: { pattern: "[?&]q=assay" } }, // 제출 결과 URL
-        { id: "dom-contains", config: { text: "Results for assay" } }, // 결과 페이지 텍스트
+        { id: "url-matches", config: { pattern: "[?&]q=everdict" } }, // 제출 결과 URL
+        { id: "dom-contains", config: { text: "Results for everdict" } }, // 결과 페이지 텍스트
         { id: "steps", config: {} }, // trace 기반: 실 browser-use 액션 수
         { id: "cost", config: {} }, // trace 기반: 실 토큰사용량(usd 는 프록시 모델 가격 미상→0)
       ],
@@ -186,7 +186,7 @@ try {
   console.log(
     ok
       ? "\n✅ ②+③: 실 browser-use 가 ServiceTopologyBackend front-door 로서 인터랙티브 폼을 멀티스텝(navigate→input→click)으로 " +
-          "구동해 결과 페이지 도달(url-matches q=assay + dom-contains 'Results for assay' PASS), 동시에 run 의 실제 토큰사용량/" +
+          "구동해 결과 페이지 도달(url-matches q=everdict + dom-contains 'Results for everdict' PASS), 동시에 run 의 실제 토큰사용량/" +
           "액션열을 Jaeger 로 OTLP 배출 → 백엔드가 OtelTraceSource 로 같은 trace_id 를 끌어와 steps(실 액션수)/cost 로 채점. " +
           "정적 데모를 넘어 인터랙티브 driving + 실 trace pull 까지 백엔드 경로로 닫음."
       : "\n⚠️ 기대와 불일치(위 actions/tokens/trace/scores 참고)",

@@ -1,11 +1,11 @@
 // 셀프호스트 최소 프로필 계약: 컨트롤플레인이 "빈 env" 로도 부팅되는지 실제 프로세스로 증명한다.
 //   — DATABASE_URL/KEYCLOAK_*/GITHUB_APP_*/NOMAD/K8S/시크릿 키 전부 없음 → in-memory 스토어,
-//     dev-fallback 인증(x-assay-tenant), 통합 전부 비활성. 이게 깨지면 원커맨드 셀프호스트가 깨진다.
+//     dev-fallback 인증(x-everdict-tenant), 통합 전부 비활성. 이게 깨지면 원커맨드 셀프호스트가 깨진다.
 // 사용(빌드 후): node scripts/live/empty-env-boot.mjs
 import { spawn } from "node:child_process";
 import process from "node:process";
 
-const PORT = process.env.ASSAY_BOOT_TEST_PORT ?? "18787";
+const PORT = process.env.EVERDICT_BOOT_TEST_PORT ?? "18787";
 const BASE = `http://127.0.0.1:${PORT}`;
 const ROOT = new URL("../..", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -49,7 +49,7 @@ async function main() {
   console.log("✓ /healthz ok (빈 env, in-memory)");
 
   // 2) dev-fallback 테넌트로 기본 읽기 라우트가 동작하는지(인증 미강제 = 셀프호스트 최소 프로필)
-  const res = await fetch(`${BASE}/harnesses`, { headers: { "x-assay-tenant": "default" } });
+  const res = await fetch(`${BASE}/harnesses`, { headers: { "x-everdict-tenant": "default" } });
   if (!res.ok) throw new Error(`/harnesses ${res.status} — dev-fallback 경로 실패`);
   await res.json();
   console.log("✓ GET /harnesses ok (dev-fallback 테넌트)");

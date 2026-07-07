@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult, GradeContext, JudgeSpec } from "@assay/core";
+import type { AgentJob, CaseResult, GradeContext, JudgeSpec } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { defaultJudgeRunner } from "./judge-runner.js";
 
@@ -75,11 +75,11 @@ describe("defaultJudgeRunner", () => {
   });
 
   it("시크릿 복호화 실패(secretsFor throw): '미설정'이 아니라 실제 복호화 사유로 skip", async () => {
-    // 시크릿이 실제로 있는데 복호화(ASSAY_SECRETS_KEY 불일치 등)가 throw 나는 상황.
+    // 시크릿이 실제로 있는데 복호화(EVERDICT_SECRETS_KEY 불일치 등)가 throw 나는 상황.
     const fetchImpl = vi.fn();
     const runner = defaultJudgeRunner({
       secretsFor: async () => {
-        throw new Error("ASSAY_SECRETS_KEY mismatch");
+        throw new Error("EVERDICT_SECRETS_KEY mismatch");
       },
       fetchImpl: fetchImpl as unknown as typeof fetch,
     });
@@ -87,7 +87,7 @@ describe("defaultJudgeRunner", () => {
     expect(score.metric).toBe("judge:correctness");
     // 빈 맵 폴백으로 삼키면 "미설정"으로 오판됐었다 — 이제 실제 사유가 드러난다.
     expect(score.detail).toContain("복호화 실패");
-    expect(score.detail).toContain("ASSAY_SECRETS_KEY mismatch");
+    expect(score.detail).toContain("EVERDICT_SECRETS_KEY mismatch");
     expect(score.detail).not.toContain("미설정");
     expect(fetchImpl).not.toHaveBeenCalled(); // 복호화 실패면 프로바이더 호출 없음
   });

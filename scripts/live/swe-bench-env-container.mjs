@@ -10,7 +10,7 @@ import process from "node:process";
 import { DockerDriver } from "../../packages/drivers/dist/index.js";
 import { SweBenchGrader } from "../../packages/graders/dist/index.js";
 
-const IMAGE = "assay-sweenv:demo";
+const IMAGE = "everdict-sweenv:demo";
 const BUGGY = "def add(a, b):\n    return a - b  # BUG\n\ndef mul(a, b):\n    return a * b\n";
 const FIXED = "def add(a, b):\n    return a + b\n\ndef mul(a, b):\n    return a * b\n";
 const TEST_BASE = "from calc import mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n";
@@ -23,8 +23,8 @@ const git = (args) => execFileSync("git", ["-C", wd, ...args], { encoding: "utf8
 writeFileSync(join(wd, "calc.py"), BUGGY);
 writeFileSync(join(wd, "test_calc.py"), TEST_BASE);
 git(["init", "-q"]);
-git(["-c", "user.email=a@b.c", "-c", "user.name=assay", "add", "-A"]);
-git(["-c", "user.email=a@b.c", "-c", "user.name=assay", "commit", "-q", "-m", "base"]);
+git(["-c", "user.email=a@b.c", "-c", "user.name=everdict", "add", "-A"]);
+git(["-c", "user.email=a@b.c", "-c", "user.name=everdict", "commit", "-q", "-m", "base"]);
 writeFileSync(join(wd, "calc.py"), FIXED);
 const GOLD = git(["diff", "--", "calc.py"]);
 git(["checkout", "--", "calc.py"]);

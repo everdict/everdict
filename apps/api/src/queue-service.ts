@@ -1,4 +1,4 @@
-import type { RunStore, ScorecardStore } from "@assay/db";
+import type { RunStore, ScorecardStore } from "@everdict/db";
 import type { ScheduleRecordWithNext } from "./schedule-service.js";
 
 // 작업 큐 스냅샷 — "지금 무엇이 어디(런타임)에서 돌고/기다리고, 다음은 무엇인가"를 한 화면으로.

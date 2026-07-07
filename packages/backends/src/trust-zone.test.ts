@@ -7,7 +7,7 @@ describe("perTenantTrustZones", () => {
     const z = policy.resolve("acme");
     expect(z.id).toBe("acme");
     expect(z.isolationRuntime).toBe("runsc");
-    expect(z.namespace).toBe("assay-acme");
+    expect(z.namespace).toBe("everdict-acme");
     expect(z.network).toBe("deny-cross-tenant");
     expect(z.trusted).toBe(false);
   });

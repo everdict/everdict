@@ -1,4 +1,4 @@
-import { type ComputeHandle, type EvaluableHarness, type RunContext, type TraceEvent, shq } from "@assay/core";
+import { type ComputeHandle, type EvaluableHarness, type RunContext, type TraceEvent, shq } from "@everdict/core";
 import { mapClaudeStreamJson } from "./stream-json.js";
 
 export interface ClaudeCodeOptions {

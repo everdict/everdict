@@ -1,4 +1,4 @@
-import type { CaseResult } from "@assay/core";
+import type { CaseResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "./client.js";
 import { migrate, preflight } from "./migrate.js";
@@ -56,7 +56,7 @@ describe("PgRunStore", () => {
       updatedAt: "2026-06-18T00:00:00.000Z",
     };
     await store.create(rec);
-    expect(calls[0]?.text).toMatch(/INSERT INTO assay_runs/);
+    expect(calls[0]?.text).toMatch(/INSERT INTO everdict_runs/);
     expect(calls[0]?.params?.[0]).toBe("r1");
     expect(calls[0]?.params?.[6]).toBeNull(); // result 없음
   });
@@ -75,7 +75,9 @@ describe("PgRunStore", () => {
   it("update → 패치 필드만 동적 SET + RETURNING", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [{ ...ROW, status: "succeeded" }] }));
     const rec = await new PgRunStore(client).update("r1", { status: "succeeded", result: RESULT, updatedAt: "x" });
-    expect(calls[0]?.text).toMatch(/UPDATE assay_runs SET status = \$1, result = \$2, updated_at = \$3 WHERE id = \$4/);
+    expect(calls[0]?.text).toMatch(
+      /UPDATE everdict_runs SET status = \$1, result = \$2, updated_at = \$3 WHERE id = \$4/,
+    );
     expect(rec?.status).toBe("succeeded");
   });
 
@@ -174,7 +176,7 @@ describe("migrate", () => {
         const name = String(params?.[0]);
         return { rows: appliedNames.has(name) ? [{ name }] : [] };
       }
-      if (text.startsWith("INSERT INTO assay_schema_migrations")) {
+      if (text.startsWith("INSERT INTO everdict_schema_migrations")) {
         appliedNames.add(String(params?.[0]));
       }
       return { rows: [] };
@@ -187,7 +189,7 @@ describe("migrate", () => {
     expect(first.applied).toEqual(["0001_a.sql", "0002_b.sql"]);
     const second = await migrate(client, { migrations });
     expect(second.applied).toEqual([]); // 재실행은 멱등
-    expect(calls.some((c) => c.text.includes("CREATE TABLE IF NOT EXISTS assay_schema_migrations"))).toBe(true);
+    expect(calls.some((c) => c.text.includes("CREATE TABLE IF NOT EXISTS everdict_schema_migrations"))).toBe(true);
   });
 
   it("preflight: 미적용 OK_TO_APPLY / 적용됨 ALREADY_APPLIED", async () => {

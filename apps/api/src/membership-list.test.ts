@@ -1,4 +1,4 @@
-import { InMemoryUserProfileStore, InMemoryWorkspaceInviteStore, InMemoryWorkspaceStore } from "@assay/db";
+import { InMemoryUserProfileStore, InMemoryWorkspaceInviteStore, InMemoryWorkspaceStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { MembershipService } from "./membership-service.js";
 

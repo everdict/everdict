@@ -5,13 +5,13 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Web (apps/web) — Next.js FSD BFF
 
-The multi-tenant frontend. A **pure HTTP client** of `@assay/api` (no `@assay/*` deps) and a **token
+The multi-tenant frontend. A **pure HTTP client** of `@everdict/api` (no `@everdict/*` deps) and a **token
 courier, not an auth authority**: it forwards the user's Keycloak token and trusts the control plane.
 
 ## Checklist
 1. **Layer down only**: `app → widgets → features → entities → shared` (`src/`). Never import upward.
    Cross-slice imports go through a slice's barrel `index.ts`, never deep paths.
-2. **Mirror API shapes with local zod** in `entities/<name>/model/schema.ts` (no `@assay/*` import);
+2. **Mirror API shapes with local zod** in `entities/<name>/model/schema.ts` (no `@everdict/*` import);
    `.parse()` every control-plane response. Re-export via the entity's `index.ts`.
 3. **All control-plane calls are `server-only`** via `shared/lib/control-plane.ts` (`controlPlane.*`) —
    never fetch from the browser. Pass `AuthContext` from `authContext()` / `currentPrincipal()`.
@@ -20,7 +20,7 @@ courier, not an auth authority**: it forwards the user's Keycloak token and trus
 5. **Role-gate UI** with the `shared/auth/can.ts` mirror (`can(roles, action)`) — enforcement is still the
    control plane's (403). Hide the CTA; don't rely on it for security.
 6. Web is SELF-CONTAINED (own eslint/prettier, excluded from root Biome/turbo). Tooling:
-   `pnpm --filter @assay/web {dev,build,lint}` (dev = port 3001). **Never run repo-wide formatters** in
+   `pnpm --filter @everdict/web {dev,build,lint}` (dev = port 3001). **Never run repo-wide formatters** in
    this shared WIP tree — format only files you changed.
 
 ## Reference impl
@@ -33,14 +33,14 @@ A full slice: `features/submit-run/` — `ui/submit-run-form.tsx` (`'use client'
   `session` (no `/api/auth/session` leak). Read it server-side via `getAccessToken()`
   (`shared/auth/access-token.ts`); `control-plane.ts` forwards `Authorization: Bearer <jwt>`.
 - `workspace` + roles come ONLY from `GET /me` (`currentPrincipal()` in `shared/auth/principal.ts`) —
-  NEVER decode the token. Dev (no Keycloak) falls back to `x-assay-tenant=default` (`via !== 'oidc'`).
+  NEVER decode the token. Dev (no Keycloak) falls back to `x-everdict-tenant=default` (`via !== 'oidc'`).
 - Actions/pages: `authContext()` for a mutation, `currentPrincipal()` when you also need `principal`.
 
 ## `[workspace]` URL scoping (Linear-style)
 The URL's first path segment **is** the active workspace. `middleware.ts` injects it as the
-`x-assay-active-workspace` header (constants in `shared/auth/workspace-scope.ts`, non-`server-only` so
-middleware can import it) + syncs the `assay-workspace` cookie; `authContext()` reads the header and
-forwards `x-assay-workspace`. So there is NO per-page `params` threading for scope — don't reintroduce a
+`x-everdict-active-workspace` header (constants in `shared/auth/workspace-scope.ts`, non-`server-only` so
+middleware can import it) + syncs the `everdict-workspace` cookie; `authContext()` reads the header and
+forwards `x-everdict-workspace`. So there is NO per-page `params` threading for scope — don't reintroduce a
 cookie-only path. `app/[workspace]/layout.tsx` is the authoritative validator (redirect on null principal
 / 0 workspaces / non-member). Nav hrefs are workspace-relative **suffixes** (`widgets/app-shell/ui/nav-config.ts`),
 prefixed at render; switching workspace = `router.push('/'+id)`. Slug-less entry points stay top-level

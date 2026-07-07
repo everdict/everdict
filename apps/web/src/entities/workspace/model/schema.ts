@@ -21,4 +21,4 @@ export const workspaceRecordSchema = z.object({
 })
 export type WorkspaceRecord = z.infer<typeof workspaceRecordSchema>
 
-export const workspaceUrlBase = 'workspace.assay.io' // 읽기 전용 URL 표시용(slug = id)
+export const workspaceUrlBase = 'workspace.everdict.io' // 읽기 전용 URL 표시용(slug = id)

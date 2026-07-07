@@ -1,13 +1,13 @@
-import type { AssayRole, Principal } from "@assay/auth";
-import { BadRequestError, ConflictError, NotFoundError } from "@assay/core";
+import type { EverdictRole, Principal } from "@everdict/auth";
+import { BadRequestError, ConflictError, NotFoundError } from "@everdict/core";
 import type {
   MemberRecord,
   UserProfileStore,
   WorkspaceInviteMeta,
   WorkspaceInviteStore,
   WorkspaceStore,
-} from "@assay/db";
-import { generateInviteToken, hashKey } from "@assay/db";
+} from "@everdict/db";
+import { generateInviteToken, hashKey } from "@everdict/db";
 
 // 멤버십 관리 서비스 — HTTP 라우트와 MCP 도구가 공유하는 단일 코어(패리티). 도메인 규칙(마지막 admin 보호 등)을 여기서 강제.
 // 멤버 = 워크스페이스 사용자 그래프. 초대 = 토큰/링크 redemption(가입). 워크스페이스 스코프는 호출부(principal.workspace)가 전달.
@@ -42,7 +42,7 @@ export class MembershipService {
 
   // 기존 멤버의 역할 변경. 멤버가 아니면 404. 마지막 admin 강등 금지(409).
   // NOTE: listMembers→setRole 사이 race(동시 두 admin 강등 → 0 admin) 가능 — admin 수가 적어 v1 허용. 추후 원자적 가드로 강화.
-  async setRole(workspace: string, subject: string, role: AssayRole): Promise<void> {
+  async setRole(workspace: string, subject: string, role: EverdictRole): Promise<void> {
     const all = await this.members.listMembers(workspace);
     const target = all.find((m) => m.subject === subject);
     if (!target) throw new NotFoundError("NOT_FOUND", { subject }, "멤버를 찾을 수 없습니다.");
@@ -82,7 +82,7 @@ export class MembershipService {
   // 초대 생성 — 평문 토큰을 1회만 반환(링크에 담음). 저장은 해시만(스토어).
   async createInvite(input: {
     workspace: string;
-    role: AssayRole;
+    role: EverdictRole;
     createdBy: string;
     expiresInHours?: number;
   }): Promise<{ token: string; meta: WorkspaceInviteMeta }> {

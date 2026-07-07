@@ -5,7 +5,7 @@ import {
   type ServiceHarnessSpec,
   type TrustZone,
   UpstreamError,
-} from "@assay/core";
+} from "@everdict/core";
 import { STORE_DEFS, buildSharedStoreManifests, dependencyStores } from "./dependencies.js";
 import { browserDeployName, buildBrowserManifests, buildK8sManifests } from "./k8s-topology.js";
 import { type Kubectl, type PortForward, kubectlCli } from "./kubectl.js";
@@ -20,12 +20,12 @@ import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topolog
 
 export interface K8sTopologyRuntimeOptions {
   kubectl?: Kubectl;
-  context?: string; // kubeconfig context (예: "kind-assay")
+  context?: string; // kubeconfig context (예: "kind-everdict")
   runtimeClass?: string; // 클러스터의 RuntimeClass (예: "gvisor") — 있으면 모든 파드에 적용
-  namespacePrefix?: string; // 존 네임스페이스 접두사 (기본 "assay-")
+  namespacePrefix?: string; // 존 네임스페이스 접두사 (기본 "everdict-")
   storeEnv?: Record<string, string>;
   provisionDependencies?: boolean; // zone 없을 때의 기본 스토어 격리: true→silo(전용 배포), false→external
-  poolNamespace?: string; // pool 공유 스토어 네임스페이스 (기본 "assay-shared")
+  poolNamespace?: string; // pool 공유 스토어 네임스페이스 (기본 "everdict-shared")
   storeSecret?: string; // pool 테넌트 비번 mint 시드 (프로덕션: KEK/Vault)
   networkPolicies?: boolean; // zone.network 로 NetworkPolicy 생성/적용 (기본 true; enforce 엔 정책-CNI 필요)
   egressAllowCIDRs?: string[]; // deny-egress 일 때 외부로 허용할 CIDR (모델 엔드포인트 등)
@@ -62,7 +62,7 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   // 존(테넌트)별 네임스페이스 — warm 풀 분리 + 격리 경계.
   private nsFor(zone?: TrustZone): string {
     if (zone?.namespace) return zone.namespace;
-    return `${this.opts.namespacePrefix ?? "assay-"}${zone?.id ?? "default"}`;
+    return `${this.opts.namespacePrefix ?? "everdict-"}${zone?.id ?? "default"}`;
   }
 
   async ensureTopology(spec: ServiceHarnessSpec, zone?: TrustZone): Promise<TopologyHandle> {
@@ -144,14 +144,14 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     await this.ensureSharedStores(stores, poolNs, readySec);
 
     for (const t of plan.tenants) {
-      const sharedApp = `assay-shared-${t.store}`;
+      const sharedApp = `everdict-shared-${t.store}`;
       const pod = await this.kubectl.podFor(`app=${sharedApp}`, poolNs);
       if (t.store === "postgres" && t.postgresSetup) {
-        // psql 이 stdin 에서 명령을 읽음(\gexec 포함). 어드민 user = POSTGRES_USER(=assay, superuser).
+        // psql 이 stdin 에서 명령을 읽음(\gexec 포함). 어드민 user = POSTGRES_USER(=everdict, superuser).
         await this.kubectl.exec(
           pod,
           poolNs,
-          ["psql", "-U", "assay", "-d", "assay", "-v", "ON_ERROR_STOP=1"],
+          ["psql", "-U", "everdict", "-d", "everdict", "-v", "ON_ERROR_STOP=1"],
           t.postgresSetup,
         );
       } else if (t.store === "redis" && t.redisSetup) {
@@ -168,13 +168,13 @@ export class K8sTopologyRuntime implements TopologyRuntime {
     if (missing.length === 0) return;
     await this.kubectl.ensureNamespace(poolNs, { [MANAGED_LABEL.key]: MANAGED_LABEL.value });
     await this.kubectl.apply(buildSharedStoreManifests(missing, poolNs, this.opts.imagePullPolicy));
-    // 공유 스토어 ns: assay-managed 네임스페이스에서만 스토어 포트로 ingress 허용(플랫폼 외부 도달 차단).
+    // 공유 스토어 ns: everdict-managed 네임스페이스에서만 스토어 포트로 ingress 허용(플랫폼 외부 도달 차단).
     if (this.opts.networkPolicies !== false) {
       const ports = missing.map((s) => STORE_DEFS[s]?.port).filter((p): p is number => p !== undefined);
       await this.kubectl.apply([buildSharedStoreIngressPolicy(poolNs, ports)]);
     }
     for (const s of missing) {
-      await this.kubectl.rolloutStatus(`assay-shared-${s}`, poolNs, readySec);
+      await this.kubectl.rolloutStatus(`everdict-shared-${s}`, poolNs, readySec);
       // rollout Ready ≠ accepting connections (postgres initdb 등 — readiness probe 없음). 실접속까지 대기.
       await this.waitStoreAccepting(s, poolNs);
       this.sharedStoresReady.add(s);
@@ -185,18 +185,18 @@ export class K8sTopologyRuntime implements TopologyRuntime {
   private async waitStoreAccepting(store: string, poolNs: string): Promise<void> {
     const probe =
       store === "postgres"
-        ? ["pg_isready", "-U", "assay"]
+        ? ["pg_isready", "-U", "everdict"]
         : store === "redis"
           ? ["redis-cli", "ping"]
           : store === "minio"
-            ? ["sh", "-c", "mc alias set local http://localhost:9000 assay assaysecret"]
+            ? ["sh", "-c", "mc alias set local http://localhost:9000 everdict everdictsecret"]
             : undefined;
     if (!probe) return;
     const interval = this.opts.pollIntervalMs ?? 1000;
     const steps = Math.max(1, Math.floor((this.opts.readyTimeoutMs ?? 60_000) / interval));
     for (let i = 0; i < steps; i++) {
       try {
-        const pod = await this.kubectl.podFor(`app=assay-shared-${store}`, poolNs);
+        const pod = await this.kubectl.podFor(`app=everdict-shared-${store}`, poolNs);
         await this.kubectl.exec(pod, poolNs, probe);
         return;
       } catch {

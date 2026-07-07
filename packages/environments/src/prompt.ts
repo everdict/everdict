@@ -1,4 +1,10 @@
-import { BadRequestError, type ComputeHandle, type EnvSpec, type Environment, type PromptSnapshot } from "@assay/core";
+import {
+  BadRequestError,
+  type ComputeHandle,
+  type EnvSpec,
+  type Environment,
+  type PromptSnapshot,
+} from "@everdict/core";
 
 // 환경 없는 QA(프롬프트→답). 무대가 없어 seed/snapshot 은 no-op 에 가깝다 — 채점은 trace 의 답을 본다(answer-match/judge).
 // gsm8k/GAIA 류를 repo/browser 로 우회하지 않고 1급으로 표현. (에이전트가 task 를 받아 답만 만든다.)

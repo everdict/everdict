@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1.7
-# 컨트롤플레인 API 이미지 (@assay/api, Fastify :8787).
+# 컨트롤플레인 API 이미지 (@everdict/api, Fastify :8787).
 # 모노레포 컨텍스트(레포 루트)에서 빌드한다:
-#   docker build -f apps/api/Dockerfile --target runtime -t assay-api .
+#   docker build -f apps/api/Dockerfile --target runtime -t everdict-api .
 # compose 가 target 으로 dev(바인드마운트·핫리로드) / runtime(빌드 산출물) 을 선택한다.
 
 # ---- base: 공통 런타임 도구 ----
@@ -19,14 +19,14 @@ WORKDIR /app
 FROM base AS dev
 ENV NODE_ENV=development
 # 핫리로드: api 패키지 tsc -w 로 dist 재생성 + node --watch 로 재시작(compose command 가 덮어쓸 수 있음).
-CMD ["sh","-lc","pnpm install --frozen-lockfile && pnpm --filter @assay/api... build && (node_modules/.bin/tsc -p apps/api/tsconfig.json --watch --preserveWatchOutput & exec node --watch apps/api/dist/main.js)"]
+CMD ["sh","-lc","pnpm install --frozen-lockfile && pnpm --filter @everdict/api... build && (node_modules/.bin/tsc -p apps/api/tsconfig.json --watch --preserveWatchOutput & exec node --watch apps/api/dist/main.js)"]
 
 # ---- builder: 전체 워크스페이스 설치 + api(+의존 패키지) 빌드 ----
 FROM base AS builder
 ENV NODE_ENV=development
 COPY . .
 RUN pnpm install --frozen-lockfile \
-  && pnpm --filter "@assay/api..." build
+  && pnpm --filter "@everdict/api..." build
 
 # ---- runtime: 빌드 산출물 + node_modules 만 ----
 FROM base AS runtime

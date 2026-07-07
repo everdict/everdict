@@ -1,4 +1,4 @@
-import { InMemoryRunStore, InMemoryScorecardStore, type RunRecord, type ScorecardRecord } from "@assay/db";
+import { InMemoryRunStore, InMemoryScorecardStore, type RunRecord, type ScorecardRecord } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { QueueService } from "./queue-service.js";
 import type { ScheduleRecordWithNext } from "./schedule-service.js";

@@ -1,11 +1,11 @@
 // 라이브: ServiceTopologyBackend 가 **브라우저 환경 포함** service-topology 를 실 OSS 로 e2e — browser-use-langgraph 그대로.
-// 에이전트(aegra browser_agent 그래프)가 per-case Chromium(chromedp CDP)을 조작(navigate+extract)하고, Assay 가
+// 에이전트(aegra browser_agent 그래프)가 per-case Chromium(chromedp CDP)을 조작(navigate+extract)하고, Everdict 가
 // 같은 브라우저를 스냅샷(URL/DOM)해서 채점한다. 모델은 우리 LiteLLM gpt-5.4-mini.
 //   dispatch → ensureTopology(aegra) → provisionBrowserEnv(per-case chromedp CDP) → submit(Agent Protocol +
 //   browser_cdp_url 주입) → 에이전트가 브라우저 조작 → traceSource(응답) + browser.snapshot(/json/list) → grade.
 //
-// 준비: aegra(:2026, browser_agent 그래프 + playwright) + chromedp 컨테이너(assay-cdp, CDP :9222) 가 떠 있어야 함.
-//   docker run -d --name assay-cdp -p 9222:9222 chromedp/headless-shell:latest
+// 준비: aegra(:2026, browser_agent 그래프 + playwright) + chromedp 컨테이너(everdict-cdp, CDP :9222) 가 떠 있어야 함.
+//   docker run -d --name everdict-cdp -p 9222:9222 chromedp/headless-shell:latest
 //   (aegra 셋업은 docs/service-harness.md "browser env" 절 참고)
 // 사용: node scripts/live/service-topology-aegra-browser.mjs
 import { execSync } from "node:child_process";
@@ -19,7 +19,7 @@ const CDP_AGENT =
   process.env.CDP_AGENT ??
   (() => {
     try {
-      const ip = execSync("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' assay-cdp")
+      const ip = execSync("docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' everdict-cdp")
         .toString()
         .trim();
       return ip ? `http://${ip}:9222` : "http://172.17.0.1:9222";
@@ -115,7 +115,7 @@ const traceSource = {
   },
 };
 
-// 브라우저 그레이더: 에이전트가 브라우저를 목표 URL 로 이동시켰나(Assay 가 같은 브라우저를 스냅샷).
+// 브라우저 그레이더: 에이전트가 브라우저를 목표 URL 로 이동시켰나(Everdict 가 같은 브라우저를 스냅샷).
 const browserGrader = {
   id: "browser-url",
   async grade(ctx) {
@@ -165,7 +165,7 @@ console.log("scores  :", r.scores.map((s) => `${s.graderId}:${s.value}(${s.pass 
 const ok = r.scores.every((s) => s.pass);
 console.log(
   ok
-    ? "\n✅ 브라우저 환경 포함 service-topology e2e — 에이전트가 per-case Chromium(CDP) 조작 + Assay 가 브라우저 스냅샷(URL/DOM) 채점 + 실 모델"
+    ? "\n✅ 브라우저 환경 포함 service-topology e2e — 에이전트가 per-case Chromium(CDP) 조작 + Everdict 가 브라우저 스냅샷(URL/DOM) 채점 + 실 모델"
     : "\n⚠️ 일부 grader fail",
 );
 process.exit(ok ? 0 : 1);

@@ -1,4 +1,4 @@
-import type { ComputeHandle, EvaluableHarness, RunContext, TraceEvent } from "@assay/core";
+import type { ComputeHandle, EvaluableHarness, RunContext, TraceEvent } from "@everdict/core";
 
 export interface ScriptedStep {
   tool: string;

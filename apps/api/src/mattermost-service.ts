@@ -1,4 +1,4 @@
-import type { WorkspaceSettings, WorkspaceSettingsStore } from "@assay/db";
+import type { WorkspaceSettings, WorkspaceSettingsStore } from "@everdict/db";
 
 // 워크스페이스 소유 Mattermost 통합 서비스 — 사내 Mattermost 를 관리자가 워크스페이스에 1회 등록(개인 연결 알림 대체).
 // 아웃바운드 알림은 NotificationService 가 settings.mattermost 를 읽어 bot 토큰으로 게시한다.
@@ -10,7 +10,7 @@ export interface MattermostConfigView {
   host: string;
   botTokenSecretName: string;
   defaultChannelId?: string;
-  // 인바운드(슬래시커맨드/버튼) 검증 토큰의 SecretStore 이름. 설정하면 /assay 커맨드·버튼이 활성.
+  // 인바운드(슬래시커맨드/버튼) 검증 토큰의 SecretStore 이름. 설정하면 /everdict 커맨드·버튼이 활성.
   commandTokenSecretName?: string;
   // 관리자가 MM 쪽에 등록할 인바운드 URL(apiPublicUrl 기반). commandTokenSecretName 설정 시에만 의미 있음.
   commandUrl?: string;

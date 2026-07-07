@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-Assay is pre-1.0: only the latest `main` (and the most recent release, once releases begin) receives
+Everdict is pre-1.0: only the latest `main` (and the most recent release, once releases begin) receives
 security fixes.
 
 ## Reporting a vulnerability
@@ -21,7 +21,7 @@ allow us a reasonable disclosure window to ship a fix before any public write-up
 - The hardened compose profile (`deploy/compose/docker-compose.prod.yaml`) intentionally runs
   **without human auth** (single tenant, trusted network) — it must sit behind a reverse proxy /
   private network. Reports that this stack is open when deliberately exposed as documented are not
-  vulnerabilities; bypasses of `ASSAY_REQUIRE_AUTH=1`, API-key scoping, workspace isolation, or
+  vulnerabilities; bypasses of `EVERDICT_REQUIRE_AUTH=1`, API-key scoping, workspace isolation, or
   secret-at-rest encryption very much are.
 - Harness runs execute untrusted agent workloads. Isolation is delegated to your orchestrator
   runtime (gVisor/Kata, network policies, trust zones) — sandbox escapes from a properly configured

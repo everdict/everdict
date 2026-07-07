@@ -5,10 +5,10 @@ import {
   type Environment,
   type RepoSnapshot,
   shq,
-} from "@assay/core";
+} from "@everdict/core";
 
 const WORK = "work";
-const GIT_ID = "git -c user.email=assay@local -c user.name=assay";
+const GIT_ID = "git -c user.email=everdict@local -c user.name=everdict";
 
 // 비공개 repo clone 인증 — 토큰을 argv 가 아니라 env(git 2.31+ GIT_CONFIG_*)로 http.extraheader 에 실어
 // `ps`/로그/.git/config 노출을 피한다. 컨트롤플레인이 외부 계정 연결(Connected accounts)에서 resolve 한 토큰.

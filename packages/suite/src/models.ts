@@ -1,4 +1,4 @@
-import type { Scorecard } from "@assay/core";
+import type { Scorecard } from "@everdict/core";
 
 // 스코어카드가 실제로 쓴 모델 — 리더보드의 model 축. 관측(트레이스) 우선 + 선언(spec) 폴백, 둘 다 보존.
 // observed = 트레이스 llm_call.model 의 distinct(정렬); declared = spec 선언(CommandHarnessSpec.model);

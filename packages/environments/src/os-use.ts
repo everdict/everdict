@@ -1,7 +1,13 @@
-import { BadRequestError, type ComputeHandle, type EnvSpec, type Environment, type OsUseSnapshot } from "@assay/core";
+import {
+  BadRequestError,
+  type ComputeHandle,
+  type EnvSpec,
+  type Environment,
+  type OsUseSnapshot,
+} from "@everdict/core";
 
 const DEFAULT_DISPLAY = ":99";
-const DEFAULT_SHOT = "/tmp/assay-screen.png";
+const DEFAULT_SHOT = "/tmp/everdict-screen.png";
 
 // 데스크탑(OS) 컴퓨터-유즈 환경 — 에이전트가 화면을 보고 GUI 앱을 조작(OSWorld 류, 예: hermes-desktop).
 // 데스크탑 컴퓨트 이미지(Xvfb + 앱) 안에서 동작: seed 가 setup(디스플레이/wm/앱 기동) 실행, snapshot 이 스크린샷 캡처.

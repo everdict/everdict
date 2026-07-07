@@ -4,7 +4,7 @@
 # 기동: docker compose -f deploy/postgres/docker-compose.yaml up -d --wait   (healthcheck 통과까지 대기)
 #   (scripts/dev/up.sh 가 Keycloak 과 함께 자동으로 띄운다)
 #
-# apps/api 측: DATABASE_URL=postgresql://assay:assay@localhost:${POSTGRES_PORT:-5433}/assay
+# apps/api 측: DATABASE_URL=postgresql://everdict:everdict@localhost:${POSTGRES_PORT:-5433}/everdict
 #
 # 기본 호스트 포트는 5433(흔한 5432 점유 회피 — Keycloak 8080→8081 과 같은 관례).
 # 5433 도 점유돼 있으면 POSTGRES_PORT 로 바꾸고 DATABASE_URL 의 포트도 맞춘다.
@@ -12,14 +12,14 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-assay}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-assay}
-      POSTGRES_DB: ${POSTGRES_DB:-assay}
+      POSTGRES_USER: ${POSTGRES_USER:-everdict}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-everdict}
+      POSTGRES_DB: ${POSTGRES_DB:-everdict}
     ports:
       # 네이티브 API(node --env-file)가 localhost 로 붙으므로 호스트에 게시한다.
       - "${POSTGRES_PORT:-5433}:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-assay} -d ${POSTGRES_DB:-assay}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-everdict} -d ${POSTGRES_DB:-everdict}"]
       interval: 5s
       timeout: 3s
       retries: 20

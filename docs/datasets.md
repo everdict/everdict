@@ -1,4 +1,4 @@
-# Datasets (`@assay/registry` + control plane)
+# Datasets (`@everdict/registry` + control plane)
 
 A **dataset** is a versioned, **harness-agnostic** bundle of eval cases — the thing a harness gets evaluated
 *against*. It is the foundational entity of the eval pipeline:
@@ -44,7 +44,7 @@ are merged chronologically from three sources: the **created** event (`createdBy
 scorecard — derived from the scorecards list, no new storage), and **comments**. Cases are secondary — the list
 shows the **first 5** with an expander (`CaseList`).
 
-**Comments** are a small full-stack entity: `assay_comments` (mig 0044) + `CommentStore` (in-memory / `Pg`) +
+**Comments** are a small full-stack entity: `everdict_comments` (mig 0044) + `CommentStore` (in-memory / `Pg`) +
 `CommentService` (`list`/`create`/`delete`) behind `GET/POST/DELETE /comments` (+ MCP `list/create/delete_comment`,
 parity). `resourceType` is generic (`"dataset"` today, extensible). Role-gating: `comments:read` = viewer+,
 `comments:write` = member+; **delete = author-or-admin** (service-layer creator override, like `datasets:delete`).
@@ -53,7 +53,7 @@ delete control. Author display names/avatars are resolved server-side (members j
 display-ready items.
 
 ## Adding benchmarks (source → dataset)
-A benchmark = a `BenchmarkAdapterSpec` (`@assay/datasets`): `source` (HuggingFace dataset or jsonl) + `mapping`
+A benchmark = a `BenchmarkAdapterSpec` (`@everdict/datasets`): `source` (HuggingFace dataset or jsonl) + `mapping`
 (which fields become a case's id/task/answer/…) + optional `graderTemplates` + optional **`origin`** (provenance
 of a published benchmark — `homepage` / `paper` / `code` / `data` / `leaderboard` / `authors` / `license` /
 `citation` / `taskType`; URL fields are validated). `origin` is **content** (part of the immutable spec, returned
@@ -124,14 +124,14 @@ gated benchmark end-to-end from the web. The wizard is state-aware: gated + no t
 **BFF↔MCP parity**: MCP tools
 `preview_benchmark_source` + `import_benchmark` mirror the routes. See `docs/mcp.md`.
 
-## Contract (`@assay/core`)
+## Contract (`@everdict/core`)
 `Dataset = { id, version, description?, cases: EvalCase[], tags: string[], producedBy? }` (`DatasetSchema`).
 `producedBy` (`{ via: recipe|catalog|spec, id, version? }`) is **content** stamped at import (it *is* part of
 `specsEqual`) — the intrinsic "how it was made", powering the dataset→recipe reverse link. `createdBy` and the
 tombstone are **registry metadata** (not on the Dataset content) — so immutability stays content-only and a
 delete never touches a version's bytes.
 
-## Registry (`@assay/registry`)
+## Registry (`@everdict/registry`)
 `DatasetRegistry` — `register(…, createdBy?) / get / has / versions / ownVersions / list / creatorOf / softDelete`,
 mirroring `HarnessRegistry` plus the soft-delete pair. All reads exclude tombstoned versions; `creatorOf` /
 `softDelete` act on **tenant-owned, live** versions only (no `_shared` fallback) and `404` otherwise. Impls:
@@ -159,9 +159,9 @@ fork): `creatorOf` → `404` if not owned/live, then creator-or-admin gate → `
 Other-workspace reads → `404`/`NOT_FOUND` (no existence leak). See `docs/api.md`, `docs/mcp.md`,
 `docs/web.md`, `docs/tenancy.md`.
 
-## Version diff (`diffDatasets`, `@assay/datasets`)
+## Version diff (`diffDatasets`, `@everdict/datasets`)
 Because versions are immutable, two versions of the same dataset are a reproducible pair to compare.
-`diffDatasets(base, candidate)` (pure, `@assay/core` `DatasetDiff` shape) matches cases **by case id** and reports:
+`diffDatasets(base, candidate)` (pure, `@everdict/core` `DatasetDiff` shape) matches cases **by case id** and reports:
 - **added** / **removed** — cases present only in candidate / only in base (`{ id, task }`).
 - **changed** — same case id, different content; each lists *which* fields differ (`task` / `env` / `graders` /
   `image` / `timeoutSec` / `tags` / `placement`) with a `before`/`after` string (key-order-stable comparison, so

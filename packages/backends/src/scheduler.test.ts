@@ -1,4 +1,4 @@
-import { type AgentJob, type CaseResult, PaymentRequiredError } from "@assay/core";
+import { type AgentJob, type CaseResult, PaymentRequiredError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "./backend.js";
 import { inMemoryBudget } from "./budget.js";

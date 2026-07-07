@@ -1,12 +1,12 @@
-import type { CaseResult, EvalCase, GradeContext, Grader, Score } from "@assay/core";
-import { makeGraders } from "@assay/graders";
-import type { TraceSource, TraceSourceConfig } from "@assay/trace";
+import type { CaseResult, EvalCase, GradeContext, Grader, Score } from "@everdict/core";
+import { makeGraders } from "@everdict/graders";
+import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 
 // 잡 밖 트레이스 수집(2-페이즈의 수집 페이즈, D4) — spec.trace.collect="control-plane" 케이스의 완성 단계.
 // 잡은 실행에서 끝났고(CaseResult.traceRef 만 들고 옴), 여기서: 플랫폼 pull(runId 상관, 플러시 지연은
 // 짧은 재시도로 흡수) → 잡이 미룬 관측물 채점(case.graders 중 needsCompute 아닌 것 — 에이전트와 같은
 // 분리 규칙) → 완성된 CaseResult. 인증은 traceRef.authSecret(이름)을 테넌트 SecretStore 에서 재해석해
-// verbatim Authorization 헤더로(pull-ingest 와 동일 관례). mlflow correlate="tag" 면 assay.run_id 태그 검색.
+// verbatim Authorization 헤더로(pull-ingest 와 동일 관례). mlflow correlate="tag" 면 everdict.run_id 태그 검색.
 // executeCase 가 dispatch 직후 호출하므로 정산(costOf)·judge 스트림은 수집된 트레이스를 그대로 본다.
 // docs/architecture/streaming-case-pipeline.md D4
 export interface CollectTraceDeps {

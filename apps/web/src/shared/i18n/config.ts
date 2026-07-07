@@ -4,7 +4,7 @@ export type Locale = (typeof LOCALES)[number]
 
 // 명시 선택(쿠키)이 없을 때 Accept-Language 로 감지하고, 그마저 없으면 en(공개 리포 기본).
 export const FALLBACK_LOCALE: Locale = 'en'
-export const LOCALE_COOKIE = 'assay-locale'
+export const LOCALE_COOKIE = 'everdict-locale'
 
 export function isLocale(value: string | undefined): value is Locale {
   return value !== undefined && (LOCALES as readonly string[]).includes(value)

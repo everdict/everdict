@@ -1,5 +1,5 @@
-import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@assay/core";
-import type { SqlClient } from "@assay/db";
+import { ConflictError, type JudgeSpec, JudgeSpecSchema, NotFoundError } from "@everdict/core";
+import type { SqlClient } from "@everdict/db";
 import { type JudgeListEntry, type JudgeRegistry, judgeDerived } from "./judge-registry.js";
 import { SHARED_TENANT, parseVersionTags, resolveRef, sortVersions, specsEqual } from "./registry.js";
 
@@ -8,12 +8,15 @@ interface JudgeRow {
 }
 
 // Postgres 기반 테넌트-소유 judge SSOT. (tenant, id, version) 키. 테넌트 소유 우선, 없으면 _shared 폴백.
-// 스키마: @assay/db/migrations/0008_create_judges. PgDatasetRegistry 와 동일 구조.
+// 스키마: @everdict/db/migrations/0008_create_judges. PgDatasetRegistry 와 동일 구조.
 export class PgJudgeRegistry implements JudgeRegistry {
   constructor(private readonly client: SqlClient) {}
 
   private async ownsId(tenant: string, id: string): Promise<boolean> {
-    const r = await this.client.query("SELECT 1 FROM assay_judges WHERE tenant = $1 AND id = $2 LIMIT 1", [tenant, id]);
+    const r = await this.client.query("SELECT 1 FROM everdict_judges WHERE tenant = $1 AND id = $2 LIMIT 1", [
+      tenant,
+      id,
+    ]);
     return r.rows.length > 0;
   }
   private async ownerOf(tenant: string, id: string): Promise<string | undefined> {
@@ -23,7 +26,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
   }
   private async ownerVersions(owner: string, id: string): Promise<string[]> {
     const r = await this.client.query<{ version: string }>(
-      "SELECT version FROM assay_judges WHERE tenant = $1 AND id = $2",
+      "SELECT version FROM everdict_judges WHERE tenant = $1 AND id = $2",
       [owner, id],
     );
     return sortVersions(r.rows.map((x) => x.version));
@@ -31,7 +34,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
 
   async register(tenant: string, spec: JudgeSpec, createdBy?: string): Promise<void> {
     const existing = await this.client.query<JudgeRow>(
-      "SELECT judge FROM assay_judges WHERE tenant = $1 AND id = $2 AND version = $3",
+      "SELECT judge FROM everdict_judges WHERE tenant = $1 AND id = $2 AND version = $3",
       [tenant, spec.id, spec.version],
     );
     const row = existing.rows[0];
@@ -46,7 +49,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
       return;
     }
     await this.client.query(
-      "INSERT INTO assay_judges (tenant, id, version, judge, created_at, created_by) VALUES ($1, $2, $3, $4, now(), $5)",
+      "INSERT INTO everdict_judges (tenant, id, version, judge, created_at, created_by) VALUES ($1, $2, $3, $4, now(), $5)",
       [tenant, spec.id, spec.version, JSON.stringify(spec), createdBy ?? null],
     );
   }
@@ -54,7 +57,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
   async has(tenant: string, id: string, version: string): Promise<boolean> {
     const owner = await this.ownerOf(tenant, id);
     if (!owner) return false;
-    const r = await this.client.query("SELECT 1 FROM assay_judges WHERE tenant = $1 AND id = $2 AND version = $3", [
+    const r = await this.client.query("SELECT 1 FROM everdict_judges WHERE tenant = $1 AND id = $2 AND version = $3", [
       owner,
       id,
       version,
@@ -76,7 +79,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
     if (!owner) throw new NotFoundError("NOT_FOUND", { tenant, id }, `judge '${id}' 가 없습니다.`);
     const version = resolveRef(id, ref, await this.ownerVersions(owner, id));
     const res = await this.client.query<JudgeRow>(
-      "SELECT judge FROM assay_judges WHERE tenant = $1 AND id = $2 AND version = $3",
+      "SELECT judge FROM everdict_judges WHERE tenant = $1 AND id = $2 AND version = $3",
       [owner, id, version],
     );
     return JudgeSpecSchema.parse((res.rows[0] as JudgeRow).judge);
@@ -84,7 +87,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
 
   async list(tenant: string): Promise<JudgeListEntry[]> {
     const r = await this.client.query<{ id: string }>(
-      "SELECT DISTINCT id FROM assay_judges WHERE tenant = $1 OR tenant = $2 ORDER BY id",
+      "SELECT DISTINCT id FROM everdict_judges WHERE tenant = $1 OR tenant = $2 ORDER BY id",
       [tenant, SHARED_TENANT],
     );
     const out: JudgeListEntry[] = [];
@@ -97,7 +100,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
           created_by: string | null;
           judge: unknown;
           tags: unknown;
-        }>("SELECT version, created_at, created_by, judge, tags FROM assay_judges WHERE tenant = $1 AND id = $2", [
+        }>("SELECT version, created_at, created_by, judge, tags FROM everdict_judges WHERE tenant = $1 AND id = $2", [
           owner,
           id,
         ])
@@ -133,7 +136,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
   // 버전 태그 교체(전체 배열 PUT 의미) — 테넌트 직접 소유 버전만(_shared 는 NotFound). 마이그레이션 0047.
   async setVersionTags(tenant: string, id: string, version: string, tags: string[]): Promise<void> {
     const r = await this.client.query<{ version: string }>(
-      "UPDATE assay_judges SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
+      "UPDATE everdict_judges SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 RETURNING version",
       [tenant, id, version, JSON.stringify(tags)],
     );
     if (r.rows.length === 0)
@@ -144,7 +147,7 @@ export class PgJudgeRegistry implements JudgeRegistry {
     const owner = await this.ownerOf(tenant, id);
     if (!owner) return {};
     const r = await this.client.query<{ version: string; tags: unknown }>(
-      "SELECT version, tags FROM assay_judges WHERE tenant = $1 AND id = $2",
+      "SELECT version, tags FROM everdict_judges WHERE tenant = $1 AND id = $2",
       [owner, id],
     );
     const out: Record<string, string[]> = {};

@@ -42,8 +42,8 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm -F @assay/web lint
-      - run: pnpm -F @assay/web build
+      - run: pnpm -F @everdict/web lint
+      - run: pnpm -F @everdict/web build
 
   gitleaks:
     name: secret scan (gitleaks)

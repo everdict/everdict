@@ -59,13 +59,13 @@
 > cases; `/evaluate` argument parsing (`dataset=… runtime=…` → action inputs).
 >
 > Direction locked with the user (2026-07-03):
-> **(1) Action-as-client, not webhook-receiver** — a first-party GitHub Action calls the Assay API outbound;
+> **(1) Action-as-client, not webhook-receiver** — a first-party GitHub Action calls the Everdict API outbound;
 > a GitHub App (inbound webhooks) is deferred until "no workflow-file change" demand is real.
 > **(2) Two firing semantics** — PR = *ephemeral* pin override at scorecard submit (registry untouched);
 > merge to dev/main = *durable* registry re-pin → new harness-instance version (the "dev channel").
 > **(3) Zero-input integration** — a workspace-owned **RepoLink** connects `repository ↔ harness service slot(s)`
 > via the existing repo picker UX (member's GitHub connection); the link doubles as the OIDC **trust policy**, and
-> Assay generates the workflow file as a setup PR, so the user types nothing.
+> Everdict generates the workflow file as a setup PR, so the user types nothing.
 >
 > Like [scheduled-evals](./scheduled-evals.md): **strict generalization, additive.** The unit of work —
 > `ScorecardService.submit(RunScorecardInput)` — is reused verbatim; GitHub Actions is just a second trigger
@@ -74,7 +74,7 @@
 ## Problem
 
 Teams building **service-topology harnesses** manage each service in its own repo (or several in a monorepo).
-They want: *"on every PR — and on every merge to dev/main — CI builds the service image, then Assay evaluates
+They want: *"on every PR — and on every merge to dev/main — CI builds the service image, then Everdict evaluates
 the topology with that image, and blocks the PR on regression."* Today every scorecard is a manual
 `POST /scorecards`; there is no CI trigger, no way to swap one service's image for a PR build, and no
 repo↔service wiring. Competing products call this an "integration" and make it one-click — ours must be too:
@@ -110,9 +110,9 @@ repo↔service wiring. Competing products call this an "integration" and make it
 
 ### D1 — Action-as-client (outbound), GitHub App deferred
 
-A published first-party Action (`assay-ai/run-eval@v1`) calls the Assay API from the GH runner. Outbound calls
+A published first-party Action (`everdict-ai/run-eval@v1`) calls the Everdict API from the GH runner. Outbound calls
 need no inbound webhook surface, no HMAC verification, no App installation, and work behind NAT. GitHub-side
-writes (PR comment, failing the check) use the workflow's ambient `${{ github.token }}` — **Assay never holds a
+writes (PR comment, failing the check) use the workflow's ambient `${{ github.token }}` — **Everdict never holds a
 GitHub credential for CI feedback.** The generated workflow file (D3) makes this invisible to the user.
 
 ### D2 — PR vs merge: ephemeral override vs durable re-pin
@@ -164,10 +164,10 @@ ci?: {
 **Connect UX (no typing):** harness detail → topology diagram → click a service node → "Connect repository" →
 repo picker (thin proxy `GET /workspace/github-app/repos` over the workspace GitHub App installation → the repos
 GitHub scoped to the install) → select repo (monorepo: multi-select services, optional path) → link saved. Then one button:
-**"Open setup PR"** — Assay uses the workspace installation token (scoped to the linked repos) to push a branch
-adding `.github/workflows/assay-eval.yml` and open a PR. The generated file embeds everything (workspace slug,
+**"Open setup PR"** — Everdict uses the workspace installation token (scoped to the linked repos) to push a branch
+adding `.github/workflows/everdict-eval.yml` and open a PR. The generated file embeds everything (workspace slug,
 `permissions: id-token: write`, build steps with GHCR digest outputs per linked service, path filters for
-monorepos, `concurrency: assay-eval-${{ github.ref }}` for GH-side superseding). Merge it — done. The Action
+monorepos, `concurrency: everdict-eval-${{ github.ref }}` for GH-side superseding). Merge it — done. The Action
 itself takes **no user-provided inputs**; the only runtime data it forwards is the image digest map emitted by
 its own build step.
 
@@ -180,7 +180,7 @@ used only at setup time (picker + setup PR).
 
 4th authenticator in the composite chain (`packages/auth/src/github-actions.ts`):
 issuer `https://token.actions.githubusercontent.com`, verified with the same jose `createRemoteJWKSet` pattern as
-`oidc.ts`, `aud: "assay"`. Claims carry `repository`, `ref`, `sha`, `workflow`, `run_id`, `event_name`.
+`oidc.ts`, `aud: "everdict"`. Claims carry `repository`, `ref`, `sha`, `workflow`, `run_id`, `event_name`.
 
 Fire-time resolution: the generated workflow pins the **workspace slug** (zero user input — we wrote the file),
 so the server verifies `claims.repository` against **that workspace's** `ci.links` — no cross-tenant global
@@ -203,12 +203,12 @@ preferred.
 
 ### D6 — Placement: CI always runs on self-hosted runners (decided 2026-07-07)
 
-The generated workflow **never targets GitHub-hosted runners**. An Assay control plane is frequently deployed on
+The generated workflow **never targets GitHub-hosted runners**. An Everdict control plane is frequently deployed on
 a private network; a GitHub-hosted runner cannot reach `api-url`, so a `runs-on: ubuntu-latest` workflow fails
 late (merged, then a CI network timeout — the most confusing failure mode). Rather than modeling reachability
 (operator env + heuristics + a conditional generator), we removed the branch: **every generated workflow is
 self-hosted**, which is fail-closed by construction and matches the shipped one-command dual-worker install
-(`POST /workspace/runners/github-install` = GitHub Actions runner + Assay `self:ws` runner on one build server).
+(`POST /workspace/runners/github-install` = GitHub Actions runner + Everdict `self:ws` runner on one build server).
 
 - **Defaults (zero-input):** `runs-on: [self-hosted]` (any self-hosted runner registered on the repo/org) +
   `runtime: self:ws` (the workspace runner pool — any capable shared runner drains it). `link.runsOn` /
@@ -227,7 +227,7 @@ self-hosted**, which is fail-closed by construction and matches the shipped one-
   one runner before CI evals; acceptable — evals need compute anyway). If a hosted-runner story is ever wanted
   again it returns as an explicit `runsOn: ubuntu-latest`-style opt-in (fields already exist, no migration).
   **Public-repo caveat:** fork PRs on self-hosted runners execute untrusted code — GitHub advises against
-  self-hosted runners for public repos; Assay's target is private team repos, documented here.
+  self-hosted runners for public repos; Everdict's target is private team repos, documented here.
 
 ## Slices
 
@@ -253,7 +253,7 @@ self-hosted**, which is fail-closed by construction and matches the shipped one-
   *member's personal* runner). But a **workspace-shared** runner (`self:ws:<id>`) is targetable by any principal
   scoped to that workspace — including `via:"github-actions"` — because the dispatcher derives the owner from the
   job's tenant (`ws:<tenant>`), so workspace membership *is* access. `POST /workspace/runners/github-install` /
-  MCP `github_install_workspace_runner` stand up a GitHub Actions runner + an Assay `self:ws:<id>` runner on one
+  MCP `github_install_workspace_runner` stand up a GitHub Actions runner + an Everdict `self:ws:<id>` runner on one
   build server in a single command. See `docs/architecture/self-hosted-runtime-and-runners.md` §3–4. (A per-runner
   `allowCi` opt-in for *personal* runners is no longer needed for the CI use case.) As of D6 this is not just
   *supported* but the **only** placement the generator emits.

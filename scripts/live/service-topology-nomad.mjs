@@ -14,7 +14,7 @@
 // 사용: NOMAD_ADDR=http://127.0.0.1:4646 node scripts/live/service-topology-nomad.mjs
 
 // 워크스페이스 패키지명은 scripts/ 에서 해석되지 않으므로 빌드된 dist 를 직접 import
-// (각 패키지의 @assay/* 의존성은 pnpm 심링크로 패키지 내부에서 해석된다).
+// (각 패키지의 @everdict/* 의존성은 pnpm 심링크로 패키지 내부에서 해석된다).
 import {
   NomadTopologyRuntime,
   ServiceTopologyBackend,
@@ -31,7 +31,7 @@ const BROWSER_IMAGE = process.env.BROWSER_IMAGE ?? "chromedp/headless-shell:late
 // docker bridge gateway: alloc 컨테이너에서 호스트의 공유 스토어로 가는 경로(주입 시연용).
 const HOST_GW = process.env.HOST_GW ?? "172.17.0.1";
 
-/** @type {import("@assay/core").ServiceHarnessSpec} */
+/** @type {import("@everdict/core").ServiceHarnessSpec} */
 const SPEC = {
   kind: "service",
   id: "browser-use-langgraph",
@@ -61,7 +61,7 @@ const SPEC = {
   traceSource: { kind: "mlflow", endpoint: MLFLOW_ENDPOINT },
 };
 
-/** @type {import("@assay/core").AgentJob} */
+/** @type {import("@everdict/core").AgentJob} */
 const JOB = {
   harness: { id: SPEC.id, version: SPEC.version },
   evalCase: {
@@ -153,7 +153,7 @@ async function main() {
 
 function storeEnv() {
   return {
-    PG_URL: `postgresql://assay@${HOST_GW}:55433/assay`,
+    PG_URL: `postgresql://everdict@${HOST_GW}:55433/everdict`,
     REDIS_URL: `redis://${HOST_GW}:6379`,
     MINIO_ENDPOINT: `http://${HOST_GW}:9100`,
   };

@@ -1,6 +1,6 @@
 ---
 name: graders
-description: How to write and wire a single Grader in Assay — the Grader/GradeContext/Score contract, optional compute guard, GraderSpec reconstruction, the outcome/trace/browser/model families. Use when implementing a new Grader. For the scoring domain (scorecards/judges/leaderboard) see the evaluation skill.
+description: How to write and wire a single Grader in Everdict — the Grader/GradeContext/Score contract, optional compute guard, GraderSpec reconstruction, the outcome/trace/browser/model families. Use when implementing a new Grader. For the scoring domain (scorecards/judges/leaderboard) see the evaluation skill.
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Graders (the scoring adapter)

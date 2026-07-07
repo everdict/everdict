@@ -104,7 +104,7 @@ export class PgSecretStore implements SecretStore {
   async set(workspace: string, name: string, value: string, owner = ""): Promise<void> {
     const { ciphertext, iv, tag } = this.cipher.encrypt(value);
     await this.client.query(
-      `INSERT INTO assay_secrets (workspace, owner, name, ciphertext, iv, tag, updated_at) VALUES ($1,$2,$3,$4,$5,$6, now())
+      `INSERT INTO everdict_secrets (workspace, owner, name, ciphertext, iv, tag, updated_at) VALUES ($1,$2,$3,$4,$5,$6, now())
        ON CONFLICT (workspace, owner, name) DO UPDATE SET ciphertext = $4, iv = $5, tag = $6, updated_at = now()`,
       [workspace, owner, name, ciphertext, iv, tag],
     );
@@ -112,7 +112,7 @@ export class PgSecretStore implements SecretStore {
   async list(workspace: string, subject?: string): Promise<SecretMeta[]> {
     // owner='' (공유) + owner=subject (개인). subject 없으면 공유만($2='').
     const r = await this.client.query<{ name: string; owner: string; updated_at: string }>(
-      "SELECT name, owner, updated_at FROM assay_secrets WHERE workspace = $1 AND (owner = '' OR owner = $2) ORDER BY owner, name",
+      "SELECT name, owner, updated_at FROM everdict_secrets WHERE workspace = $1 AND (owner = '' OR owner = $2) ORDER BY owner, name",
       [workspace, subject ?? ""],
     );
     return r.rows.map((x) => ({
@@ -122,7 +122,7 @@ export class PgSecretStore implements SecretStore {
     }));
   }
   async remove(workspace: string, name: string, owner = ""): Promise<void> {
-    await this.client.query("DELETE FROM assay_secrets WHERE workspace = $1 AND owner = $2 AND name = $3", [
+    await this.client.query("DELETE FROM everdict_secrets WHERE workspace = $1 AND owner = $2 AND name = $3", [
       workspace,
       owner,
       name,
@@ -130,7 +130,7 @@ export class PgSecretStore implements SecretStore {
   }
   async entries(workspace: string): Promise<Record<string, string>> {
     const r = await this.client.query<SecretRow>(
-      "SELECT name, ciphertext, iv, tag FROM assay_secrets WHERE workspace = $1 AND owner = ''",
+      "SELECT name, ciphertext, iv, tag FROM everdict_secrets WHERE workspace = $1 AND owner = ''",
       [workspace],
     );
     const out: Record<string, string> = {};
@@ -140,7 +140,7 @@ export class PgSecretStore implements SecretStore {
   }
   async scopedEntries(workspace: string, subject: string): Promise<ScopedSecretEntries> {
     const r = await this.client.query<SecretRow>(
-      "SELECT name, owner, ciphertext, iv, tag FROM assay_secrets WHERE workspace = $1 AND (owner = '' OR owner = $2)",
+      "SELECT name, owner, ciphertext, iv, tag FROM everdict_secrets WHERE workspace = $1 AND (owner = '' OR owner = $2)",
       [workspace, subject],
     );
     const workspaceEntries: Record<string, string> = {};

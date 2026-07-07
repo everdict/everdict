@@ -1,4 +1,4 @@
-import type { GradeContext, Grader, Score } from "@assay/core";
+import type { GradeContext, Grader, Score } from "@everdict/core";
 
 // ⓑ 궤적 — 트레이스에서 공짜로 (툴 호출 수).
 export const stepsGrader: Grader = {

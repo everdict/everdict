@@ -4,7 +4,7 @@
 // 스케줄러가 1개만 띄우고 나머지는 큐에 쌓인다 → 오토스케일러가 backlog 를 보고 슬롯을 MAX 까지 올려
 // 동시 alloc 이 늘고, 큐가 빠지면 다시 MIN 으로 줄인다. 폴러가 실제 동시 alloc 수를 관측한다.
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 ASSAY_AGENT_IMAGE=assay-agent:local node scripts/live/autoscaler-nomad.mjs
+// 사용: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/autoscaler-nomad.mjs
 
 import {
   Autoscaler,
@@ -16,7 +16,7 @@ import {
 } from "../../packages/backends/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.ASSAY_AGENT_IMAGE ?? "assay-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
 const N = Number(process.env.N ?? "8");
 const MIN = Number(process.env.MIN ?? "1");
 const MAX = Number(process.env.MAX ?? "4");
@@ -38,7 +38,7 @@ function jobFor(i) {
 
 async function runningCount() {
   try {
-    const r = await fetch(`${NOMAD_ADDR}/v1/jobs?prefix=assay-as-${STAMP}&namespace=*`);
+    const r = await fetch(`${NOMAD_ADDR}/v1/jobs?prefix=everdict-as-${STAMP}&namespace=*`);
     const jobs = await r.json();
     return jobs.filter((j) => j.Status === "running" || j.Status === "pending").length;
   } catch {

@@ -2,7 +2,7 @@ import type { SqlClient } from "./client.js";
 
 // 워크스페이스 멤버십 저장소 — subject(유저 sub/키)가 어떤 workspace 에 어떤 role 로 속하는지.
 // workspace === tenant === trust-zone 키. 컨트롤플레인이 멤버십의 SSOT(토큰 클레임은 부트스트랩 기본값일 뿐).
-// 평문/비밀 없음 — 순수 멤버십 그래프. role → action 매핑은 @assay/auth 의 authz 가 담당한다.
+// 평문/비밀 없음 — 순수 멤버십 그래프. role → action 매핑은 @everdict/auth 의 authz 가 담당한다.
 // email 은 OIDC 클레임(email/preferred_username) 캐시 — opaque subject 보완 표시 전용, authz 무관.
 export interface WorkspaceRecord {
   id: string; // = tenant 키(모든 데이터 스코프)
@@ -21,7 +21,7 @@ export interface WorkspaceWithRole {
 }
 
 // 워크스페이스 멤버(역할 + 표시용 email + 가입시각). 멤버 관리 UI 표시용.
-// name/avatarUrl 은 멤버십 스토어가 아니라 프로필(assay_user_profiles)을 합쳐 보강하는 필드 —
+// name/avatarUrl 은 멤버십 스토어가 아니라 프로필(everdict_user_profiles)을 합쳐 보강하는 필드 —
 // WorkspaceStore 는 비워 두고 MembershipService 가 채운다(opaque subject 대신 사람이 읽는 신원 표시용).
 export interface MemberRecord {
   subject: string;
@@ -195,26 +195,26 @@ function toRecord(row: WorkspaceRow): WorkspaceRecord {
   };
 }
 
-// 워크스페이스 + 그 모든 스코프 데이터를 지우기 위한 (테이블, 스코프컬럼) 목록. assay_workspaces 는 별도로 마지막에.
-// 모든 마이그레이션이 @assay/db 소유라 테이블명 인지는 레이어 위반이 아니다. _shared 는 실제 id 와 절대 같지 않다.
+// 워크스페이스 + 그 모든 스코프 데이터를 지우기 위한 (테이블, 스코프컬럼) 목록. everdict_workspaces 는 별도로 마지막에.
+// 모든 마이그레이션이 @everdict/db 소유라 테이블명 인지는 레이어 위반이 아니다. _shared 는 실제 id 와 절대 같지 않다.
 const WORKSPACE_SCOPED_TABLES: ReadonlyArray<readonly [table: string, column: string]> = [
-  ["assay_oauth_states", "workspace"],
-  ["assay_workspace_invites", "workspace"],
-  ["assay_connections", "workspace"],
-  ["assay_secrets", "workspace"],
-  ["assay_runs", "tenant"],
-  ["assay_scorecards", "tenant"],
-  ["assay_harnesses", "tenant"],
-  ["assay_datasets", "tenant"],
-  ["assay_judges", "tenant"],
-  ["assay_runtimes", "tenant"],
-  ["assay_benchmarks", "tenant"],
-  ["assay_models", "tenant"],
-  ["assay_harness_templates", "tenant"],
-  ["assay_harness_instances", "tenant"],
-  ["assay_tenant_keys", "tenant"],
-  ["assay_workspace_settings", "workspace"],
-  ["assay_workspace_members", "workspace"],
+  ["everdict_oauth_states", "workspace"],
+  ["everdict_workspace_invites", "workspace"],
+  ["everdict_connections", "workspace"],
+  ["everdict_secrets", "workspace"],
+  ["everdict_runs", "tenant"],
+  ["everdict_scorecards", "tenant"],
+  ["everdict_harnesses", "tenant"],
+  ["everdict_datasets", "tenant"],
+  ["everdict_judges", "tenant"],
+  ["everdict_runtimes", "tenant"],
+  ["everdict_benchmarks", "tenant"],
+  ["everdict_models", "tenant"],
+  ["everdict_harness_templates", "tenant"],
+  ["everdict_harness_instances", "tenant"],
+  ["everdict_tenant_keys", "tenant"],
+  ["everdict_workspace_settings", "workspace"],
+  ["everdict_workspace_members", "workspace"],
 ];
 
 export class PgWorkspaceStore implements WorkspaceStore {
@@ -222,13 +222,13 @@ export class PgWorkspaceStore implements WorkspaceStore {
 
   async create(rec: { id: string; name: string; owner: string }): Promise<WorkspaceRecord | undefined> {
     const res = await this.client.query<WorkspaceRow>(
-      "INSERT INTO assay_workspaces (id, name, owner) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING RETURNING id, name, owner, logo_url, created_at",
+      "INSERT INTO everdict_workspaces (id, name, owner) VALUES ($1, $2, $3) ON CONFLICT (id) DO NOTHING RETURNING id, name, owner, logo_url, created_at",
       [rec.id, rec.name, rec.owner],
     );
     const row = res.rows[0];
     if (!row) return undefined; // id 충돌
     await this.client.query(
-      "INSERT INTO assay_workspace_members (workspace, subject, role) VALUES ($1, $2, 'admin') ON CONFLICT (workspace, subject) DO NOTHING",
+      "INSERT INTO everdict_workspace_members (workspace, subject, role) VALUES ($1, $2, 'admin') ON CONFLICT (workspace, subject) DO NOTHING",
       [rec.id, rec.owner],
     );
     return toRecord(row);
@@ -236,7 +236,7 @@ export class PgWorkspaceStore implements WorkspaceStore {
 
   async get(id: string): Promise<WorkspaceRecord | undefined> {
     const res = await this.client.query<WorkspaceRow>(
-      "SELECT id, name, owner, logo_url, created_at FROM assay_workspaces WHERE id = $1",
+      "SELECT id, name, owner, logo_url, created_at FROM everdict_workspaces WHERE id = $1",
       [id],
     );
     return res.rows[0] ? toRecord(res.rows[0]) : undefined;
@@ -244,7 +244,7 @@ export class PgWorkspaceStore implements WorkspaceStore {
 
   async listForSubject(subject: string): Promise<WorkspaceWithRole[]> {
     const res = await this.client.query<{ id: string; name: string; role: string; logo_url: string | null }>(
-      "SELECT w.id, w.name, m.role, w.logo_url FROM assay_workspace_members m JOIN assay_workspaces w ON w.id = m.workspace WHERE m.subject = $1 ORDER BY w.created_at ASC, w.id ASC",
+      "SELECT w.id, w.name, m.role, w.logo_url FROM everdict_workspace_members m JOIN everdict_workspaces w ON w.id = m.workspace WHERE m.subject = $1 ORDER BY w.created_at ASC, w.id ASC",
       [subject],
     );
     return res.rows.map((r) => ({
@@ -259,7 +259,7 @@ export class PgWorkspaceStore implements WorkspaceStore {
     // name=COALESCE(유지), logo_url 은 명시 패치만 반영($3 sentinel 없이 3-상태): undefined=유지, null=지움, 값=설정.
     const setLogo = patch.logoUrl !== undefined; // undefined 면 logo_url 컬럼을 건드리지 않는다.
     const res = await this.client.query<WorkspaceRow>(
-      `UPDATE assay_workspaces
+      `UPDATE everdict_workspaces
          SET name = COALESCE($2, name)${setLogo ? ", logo_url = $3" : ""}
        WHERE id = $1
        RETURNING id, name, owner, logo_url, created_at`,
@@ -268,18 +268,18 @@ export class PgWorkspaceStore implements WorkspaceStore {
     return res.rows[0] ? toRecord(res.rows[0]) : undefined;
   }
 
-  // 순차·멱등 cascade. assay_workspaces 를 마지막에 지워(그 전까진 재시도 가능) 부분 실패에도 안전.
+  // 순차·멱등 cascade. everdict_workspaces 를 마지막에 지워(그 전까진 재시도 가능) 부분 실패에도 안전.
   // SqlClient 는 트랜잭션 추상화가 없어 단일 BEGIN/COMMIT 을 보장할 수 없으므로 멱등 DELETE 로 처리한다.
   async delete(id: string): Promise<void> {
     for (const [table, column] of WORKSPACE_SCOPED_TABLES) {
       await this.client.query(`DELETE FROM ${table} WHERE ${column} = $1`, [id]);
     }
-    await this.client.query("DELETE FROM assay_workspaces WHERE id = $1", [id]);
+    await this.client.query("DELETE FROM everdict_workspaces WHERE id = $1", [id]);
   }
 
   async roleFor(workspace: string, subject: string): Promise<string | undefined> {
     const res = await this.client.query<{ role: string }>(
-      "SELECT role FROM assay_workspace_members WHERE workspace = $1 AND subject = $2",
+      "SELECT role FROM everdict_workspace_members WHERE workspace = $1 AND subject = $2",
       [workspace, subject],
     );
     return res.rows[0]?.role;
@@ -287,13 +287,13 @@ export class PgWorkspaceStore implements WorkspaceStore {
 
   async ensureMembership(workspace: string, subject: string, role: string, email?: string): Promise<void> {
     await this.client.query(
-      "INSERT INTO assay_workspaces (id, name, owner) VALUES ($1, $1, $2) ON CONFLICT (id) DO NOTHING",
+      "INSERT INTO everdict_workspaces (id, name, owner) VALUES ($1, $1, $2) ON CONFLICT (id) DO NOTHING",
       [workspace, subject],
     );
     // role 은 신규일 때만 적용(ON CONFLICT 시 유지 — admin 강등 금지). email 은 COALESCE 로 갱신/백필(null clobber 금지).
     await this.client.query(
-      `INSERT INTO assay_workspace_members (workspace, subject, role, email) VALUES ($1, $2, $3, $4)
-       ON CONFLICT (workspace, subject) DO UPDATE SET email = COALESCE(EXCLUDED.email, assay_workspace_members.email)`,
+      `INSERT INTO everdict_workspace_members (workspace, subject, role, email) VALUES ($1, $2, $3, $4)
+       ON CONFLICT (workspace, subject) DO UPDATE SET email = COALESCE(EXCLUDED.email, everdict_workspace_members.email)`,
       [workspace, subject, role, email ?? null],
     );
   }
@@ -305,7 +305,7 @@ export class PgWorkspaceStore implements WorkspaceStore {
       email: string | null;
       created_at: string | Date;
     }>(
-      "SELECT subject, role, email, created_at FROM assay_workspace_members WHERE workspace = $1 ORDER BY created_at ASC, subject ASC",
+      "SELECT subject, role, email, created_at FROM everdict_workspace_members WHERE workspace = $1 ORDER BY created_at ASC, subject ASC",
       [workspace],
     );
     return res.rows.map((r) => ({
@@ -318,14 +318,14 @@ export class PgWorkspaceStore implements WorkspaceStore {
 
   async setRole(workspace: string, subject: string, role: string): Promise<boolean> {
     const res = await this.client.query<{ subject: string }>(
-      "UPDATE assay_workspace_members SET role = $3 WHERE workspace = $1 AND subject = $2 RETURNING subject",
+      "UPDATE everdict_workspace_members SET role = $3 WHERE workspace = $1 AND subject = $2 RETURNING subject",
       [workspace, subject, role],
     );
     return res.rows.length > 0; // 멤버가 아니면 0행 → false
   }
 
   async removeMember(workspace: string, subject: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_workspace_members WHERE workspace = $1 AND subject = $2", [
+    await this.client.query("DELETE FROM everdict_workspace_members WHERE workspace = $1 AND subject = $2", [
       workspace,
       subject,
     ]);

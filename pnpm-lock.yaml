@@ -26,40 +26,40 @@ importers:
 
   apps/api:
     dependencies:
-      '@assay/agent':
+      '@everdict/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@assay/auth':
+      '@everdict/auth':
         specifier: workspace:*
         version: link:../../packages/auth
-      '@assay/backends':
+      '@everdict/backends':
         specifier: workspace:*
         version: link:../../packages/backends
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@assay/datasets':
+      '@everdict/datasets':
         specifier: workspace:*
         version: link:../../packages/datasets
-      '@assay/db':
+      '@everdict/db':
         specifier: workspace:*
         version: link:../../packages/db
-      '@assay/graders':
+      '@everdict/graders':
         specifier: workspace:*
         version: link:../../packages/graders
-      '@assay/registry':
+      '@everdict/registry':
         specifier: workspace:*
         version: link:../../packages/registry
-      '@assay/storage':
+      '@everdict/storage':
         specifier: workspace:*
         version: link:../../packages/storage
-      '@assay/suite':
+      '@everdict/suite':
         specifier: workspace:*
         version: link:../../packages/suite
-      '@assay/topology':
+      '@everdict/topology':
         specifier: workspace:*
         version: link:../../packages/topology
-      '@assay/trace':
+      '@everdict/trace':
         specifier: workspace:*
         version: link:../../packages/trace
       '@modelcontextprotocol/sdk':
@@ -77,25 +77,25 @@ importers:
 
   apps/cli:
     dependencies:
-      '@assay/agent':
+      '@everdict/agent':
         specifier: workspace:*
         version: link:../../packages/agent
-      '@assay/backends':
+      '@everdict/backends':
         specifier: workspace:*
         version: link:../../packages/backends
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../../packages/core
-      '@assay/orchestrator':
+      '@everdict/orchestrator':
         specifier: workspace:*
         version: link:../../packages/orchestrator
-      '@assay/runner-core':
+      '@everdict/runner-core':
         specifier: workspace:*
         version: link:../../packages/runner-core
-      '@assay/suite':
+      '@everdict/suite':
         specifier: workspace:*
         version: link:../../packages/suite
-      '@assay/topology':
+      '@everdict/topology':
         specifier: workspace:*
         version: link:../../packages/topology
       zod:
@@ -104,7 +104,7 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@assay/runner-core':
+      '@everdict/runner-core':
         specifier: workspace:*
         version: link:../../packages/runner-core
       electron-updater:
@@ -211,31 +211,31 @@ importers:
 
   packages/agent:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
-      '@assay/drivers':
+      '@everdict/drivers':
         specifier: workspace:*
         version: link:../drivers
-      '@assay/environments':
+      '@everdict/environments':
         specifier: workspace:*
         version: link:../environments
-      '@assay/graders':
+      '@everdict/graders':
         specifier: workspace:*
         version: link:../graders
-      '@assay/harnesses':
+      '@everdict/harnesses':
         specifier: workspace:*
         version: link:../harnesses
-      '@assay/runner':
+      '@everdict/runner':
         specifier: workspace:*
         version: link:../runner
 
   packages/auth:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
-      '@assay/db':
+      '@everdict/db':
         specifier: workspace:*
         version: link:../db
       jose:
@@ -244,13 +244,13 @@ importers:
 
   packages/backends:
     dependencies:
-      '@assay/agent':
+      '@everdict/agent':
         specifier: workspace:*
         version: link:../agent
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
-      '@assay/drivers':
+      '@everdict/drivers':
         specifier: workspace:*
         version: link:../drivers
       zod:
@@ -265,7 +265,7 @@ importers:
 
   packages/datasets:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
       zod:
@@ -274,7 +274,7 @@ importers:
 
   packages/db:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
       pg:
@@ -290,40 +290,40 @@ importers:
 
   packages/drivers:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
 
   packages/environments:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
 
   packages/graders:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
 
   packages/harnesses:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
-      '@assay/trace':
+      '@everdict/trace':
         specifier: workspace:*
         version: link:../trace
 
   packages/orchestrator:
     dependencies:
-      '@assay/agent':
+      '@everdict/agent':
         specifier: workspace:*
         version: link:../agent
-      '@assay/backends':
+      '@everdict/backends':
         specifier: workspace:*
         version: link:../backends
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
       '@temporalio/activity':
@@ -341,46 +341,46 @@ importers:
 
   packages/registry:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
-      '@assay/datasets':
+      '@everdict/datasets':
         specifier: workspace:*
         version: link:../datasets
-      '@assay/db':
+      '@everdict/db':
         specifier: workspace:*
         version: link:../db
 
   packages/runner:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
-      '@assay/drivers':
+      '@everdict/drivers':
         specifier: workspace:*
         version: link:../drivers
-      '@assay/environments':
+      '@everdict/environments':
         specifier: workspace:*
         version: link:../environments
-      '@assay/graders':
+      '@everdict/graders':
         specifier: workspace:*
         version: link:../graders
-      '@assay/harnesses':
+      '@everdict/harnesses':
         specifier: workspace:*
         version: link:../harnesses
 
   packages/runner-core:
     dependencies:
-      '@assay/agent':
+      '@everdict/agent':
         specifier: workspace:*
         version: link:../agent
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
-      '@assay/topology':
+      '@everdict/topology':
         specifier: workspace:*
         version: link:../topology
-      '@assay/trace':
+      '@everdict/trace':
         specifier: workspace:*
         version: link:../trace
       '@modelcontextprotocol/sdk':
@@ -389,40 +389,40 @@ importers:
 
   packages/storage:
     dependencies:
-      '@assay/core':
-        specifier: workspace:*
-        version: link:../core
       '@aws-sdk/client-s3':
         specifier: ^3.700.0
         version: 3.1073.0
       '@aws-sdk/s3-request-presigner':
         specifier: ^3.700.0
         version: 3.1073.0
+      '@everdict/core':
+        specifier: workspace:*
+        version: link:../core
 
   packages/suite:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
 
   packages/topology:
     dependencies:
-      '@assay/backends':
+      '@everdict/backends':
         specifier: workspace:*
         version: link:../backends
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
-      '@assay/graders':
+      '@everdict/graders':
         specifier: workspace:*
         version: link:../graders
-      '@assay/trace':
+      '@everdict/trace':
         specifier: workspace:*
         version: link:../trace
 
   packages/trace:
     dependencies:
-      '@assay/core':
+      '@everdict/core':
         specifier: workspace:*
         version: link:../core
 

@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@assay/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
 
 export interface CommandConfig {
   cmd: string; // 환경에서 실행할 명령(예: "python -m pytest -q")
@@ -32,8 +32,8 @@ export class CommandGrader implements Grader {
     }
     const cwd = this.cfg.cwd ?? "work";
     if (this.cfg.applyPatch?.trim()) {
-      await ctx.compute.writeFile(`${cwd}/.assay_grade.patch`, this.cfg.applyPatch);
-      const applied = await ctx.compute.exec(`git apply ${shArg(".assay_grade.patch")}`, { cwd, timeoutSec: 120 });
+      await ctx.compute.writeFile(`${cwd}/.everdict_grade.patch`, this.cfg.applyPatch);
+      const applied = await ctx.compute.exec(`git apply ${shArg(".everdict_grade.patch")}`, { cwd, timeoutSec: 120 });
       if (applied.exitCode !== 0) {
         return {
           graderId: this.id,

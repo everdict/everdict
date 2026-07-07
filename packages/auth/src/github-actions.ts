@@ -1,13 +1,13 @@
 import { type JWTVerifyGetKey, createRemoteJWKSet, decodeJwt, jwtVerify } from "jose";
 import type { AuthContext, Authenticator, Principal } from "./principal.js";
 
-// GitHub Actions OIDC 페더레이션 — 워크플로가 발급받는 GitHub 서명 JWT(aud=assay)를 keyless 자격증명으로 받는다.
+// GitHub Actions OIDC 페더레이션 — 워크플로가 발급받는 GitHub 서명 JWT(aud=everdict)를 keyless 자격증명으로 받는다.
 // 신뢰는 워크스페이스의 repo link(WorkspaceSettings.ci.links)가 결정: 요청이 지목한 워크스페이스(workspaceHint)의
 // link 에 토큰의 repository 클레임이 매칭될 때만 Principal(roles=["ci"]) 발급 — 레포 시크릿에 장기 키가 필요 없다.
 // 설계: docs/architecture/github-actions-trigger.md (D4). AWS/GCP 의 GH OIDC 페더레이션과 동일 패턴.
 
 export const GITHUB_ACTIONS_ISSUER = "https://token.actions.githubusercontent.com";
-export const GITHUB_ACTIONS_AUDIENCE = "assay";
+export const GITHUB_ACTIONS_AUDIENCE = "everdict";
 
 // GHES(Actions) OIDC issuer — GHE 베이스 URL 로부터. github.com 과 달리 인스턴스별 issuer 를 쓴다.
 export function githubEnterpriseIssuer(host: string): string {
@@ -33,7 +33,7 @@ export interface GithubActionsEnterpriseOptions {
 
 export interface GithubActionsAuthOptions {
   issuer?: string; // 기본 github.com 공용 issuer(GHES 는 enterprise 옵션으로)
-  audience?: string; // 기본 "assay" — 워크플로가 이 audience 로 토큰을 요청해야 한다
+  audience?: string; // 기본 "everdict" — 워크플로가 이 audience 로 토큰을 요청해야 한다
   jwksUri?: string; // 기본 `${issuer}/.well-known/jwks`
   keySet?: JWTVerifyGetKey; // 테스트 주입(로컬 키셋)
   enterprise?: GithubActionsEnterpriseOptions; // GHES issuer(https://<host>/_services/token) 신뢰

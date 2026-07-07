@@ -58,7 +58,7 @@ bundle = {
     "id": "spreadsheetbench",
     "version": "1.0.0",
     "description": (
-        "SpreadsheetBench(v1 + v2) 벤치마크 번들 — 실제 스프레드시트 조작 벤치마크를 Assay 에 등록. "
+        "SpreadsheetBench(v1 + v2) 벤치마크 번들 — 실제 스프레드시트 조작 벤치마크를 Everdict 에 등록. "
         "v1(912 instructions, online-judge 셀 비교) + v2(4 카테고리, regression/modification 채점)의 "
         "레시피(실데이터 인입 템플릿) + 바로 돌아가는 자기완결 xlsx 샘플. codex 등 command 하니스로 수행."
     ),
@@ -76,7 +76,7 @@ bundle = {
             "trace": {"kind": "none"},
         },
         # codex-in-image 하니스 — codex 를 이미지 안에서 실행(SpreadsheetBench 처럼 채점 툴체인이 필요할 때). 인증은
-        # self-hosted 러너가 ~/.codex 를 /codex 로 마운트(머신 로그인=own-pays; `assay runner --mount-codex-login`).
+        # self-hosted 러너가 ~/.codex 를 /codex 로 마운트(머신 로그인=own-pays; `everdict runner --mount-codex-login`).
         # 컨테이너 안에선 codex 자체 sandbox 가 중첩 실패 → --dangerously-bypass-approvals-and-sandbox(격리는 컨테이너).
         {
             "kind": "command",

@@ -1,9 +1,9 @@
-// Assay run-eval GitHub Action — 의존성 0 의 node20 스크립트(fetch 내장).
+// Everdict run-eval GitHub Action — 의존성 0 의 node20 스크립트(fetch 내장).
 // PR: 제출 시점 임시 핀(pins)으로 이 빌드 이미지를 스왑해 평가(레지스트리 무변경).
 // PR 코멘트 /evaluate(issue_comment): PR 과 동일한 임시 핀 평가 — 이 이벤트는 PR 체크가 안 달리므로
 // 결과를 PR 대화 코멘트로 회신한다(github-token 입력, best-effort).
 // push(dev/main): POST /harnesses/:id/pins 로 durable 재핀(새 인스턴스 버전) 후 그 버전을 평가.
-// 인증: api-key 입력 → 없으면 GitHub OIDC 토큰(aud=assay) 페더레이션(워크스페이스에 repo link 필요).
+// 인증: api-key 입력 → 없으면 GitHub OIDC 토큰(aud=everdict) 페더레이션(워크스페이스에 repo link 필요).
 // 설계: docs/architecture/github-actions-trigger.md
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -50,7 +50,7 @@ async function githubApi(path, body) {
         authorization: `Bearer ${token}`,
         accept: "application/vnd.github+json",
         "content-type": "application/json",
-        "user-agent": "assay-run-eval",
+        "user-agent": "everdict-run-eval",
       },
       body: JSON.stringify(body),
     });
@@ -62,12 +62,12 @@ async function githubApi(path, body) {
 // 코멘트 발화의 결과 회신이 성공 경로에서 이미 나갔는지 — catch 핸들러의 이중 코멘트 방지.
 let conversationNotified = false;
 
-// GitHub OIDC 토큰(aud=assay) — 워크플로에 permissions: id-token: write 필요.
+// GitHub OIDC 토큰(aud=everdict) — 워크플로에 permissions: id-token: write 필요.
 async function githubOidcToken() {
   const url = process.env.ACTIONS_ID_TOKEN_REQUEST_URL;
   const token = process.env.ACTIONS_ID_TOKEN_REQUEST_TOKEN;
   if (!url || !token) throw new Error("api-key 도 OIDC(id-token: write 권한)도 없습니다 — 인증 수단이 필요합니다.");
-  const res = await fetch(`${url}&audience=assay`, { headers: { authorization: `Bearer ${token}` } });
+  const res = await fetch(`${url}&audience=everdict`, { headers: { authorization: `Bearer ${token}` } });
   if (!res.ok) throw new Error(`GitHub OIDC 토큰 발급 실패: ${res.status}`);
   const body = await res.json();
   return body.value;
@@ -98,7 +98,7 @@ async function main() {
   const bearer = input("api-key") ?? (await githubOidcToken());
   const headers = {
     authorization: `Bearer ${bearer}`,
-    "x-assay-workspace": workspace,
+    "x-everdict-workspace": workspace,
     "content-type": "application/json",
   };
   const api = async (method, path, body) => {
@@ -147,7 +147,7 @@ async function main() {
     });
     harnessVersion = repin.version;
     summary(
-      `### Assay re-pin\n\n\`${harness}@${repin.version}\` (base \`${repin.base}\`${repin.unchanged ? ", unchanged" : ""})`,
+      `### Everdict re-pin\n\n\`${harness}@${repin.version}\` (base \`${repin.base}\`${repin.unchanged ? ", unchanged" : ""})`,
     );
   }
 
@@ -186,7 +186,7 @@ async function main() {
   }
   setOutput("status", record.status);
 
-  const lines = [`### Assay eval — \`${dataset}\` × \`${harness}@${record.harness.version}\``, ""];
+  const lines = [`### Everdict eval — \`${dataset}\` × \`${harness}@${record.harness.version}\``, ""];
   lines.push(`- scorecard: \`${record.id}\` → **${record.status}**`);
   for (const m of record.summary ?? []) {
     lines.push(
@@ -224,7 +224,7 @@ main().catch(async (err) => {
     const pr = Number(payload.issue?.number);
     if (Number.isFinite(pr) && process.env.GITHUB_REPOSITORY)
       await githubApi(`/repos/${process.env.GITHUB_REPOSITORY}/issues/${pr}/comments`, {
-        body: `### Assay eval 실패\n\n\`\`\`\n${err.message ?? err}\n\`\`\``,
+        body: `### Everdict eval 실패\n\n\`\`\`\n${err.message ?? err}\n\`\`\``,
       });
   }
   process.exit(1);

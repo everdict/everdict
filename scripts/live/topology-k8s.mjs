@@ -3,16 +3,16 @@
 // 띄우고(Deployment+Service apply → rollout 대기 → port-forward 로 엔드포인트 발견) front-door 로 per-run 페이로드를
 // 실제로 전송한다. = "K8sTopologyRuntime apply against a real K8s cluster"(플랜 Phase 2)의 핵심 오케스트레이션 검증.
 //
-// 사전: 스텁 front-door 이미지(assay-topo-stub:demo, scripts/live/topology-stub/)를 kind 로드. 컨텍스트 kind-assay.
-//   docker build -t assay-topo-stub:demo scripts/live/topology-stub
-//   kind load docker-image assay-topo-stub:demo --name assay
+// 사전: 스텁 front-door 이미지(everdict-topo-stub:demo, scripts/live/topology-stub/)를 kind 로드. 컨텍스트 kind-everdict.
+//   docker build -t everdict-topo-stub:demo scripts/live/topology-stub
+//   kind load docker-image everdict-topo-stub:demo --name everdict
 // 풀 per-case 브라우저(CDP)+채점은 실 browser-use 이미지/agent-server 가 필요(Phase 2+) — 여기선 토폴로지 구동까지.
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { K8sTopologyRuntime } from "../../packages/topology/dist/index.js";
 
-const CONTEXT = process.env.K8S_CONTEXT ?? "kind-assay";
-const NS = "assay-default"; // K8sTopologyRuntime 의 nsFor(undefined) = namespacePrefix("assay-") + "default"
+const CONTEXT = process.env.K8S_CONTEXT ?? "kind-everdict";
+const NS = "everdict-default"; // K8sTopologyRuntime 의 nsFor(undefined) = namespacePrefix("everdict-") + "default"
 const k = (args) => execFileSync("kubectl", ["--context", CONTEXT, ...args], { encoding: "utf8" });
 
 // 최소 service-topology 하니스(browser-use 형태의 축소판): 스텁 front-door 1개 + 브라우저 타깃.
@@ -20,7 +20,7 @@ const spec = {
   kind: "service",
   id: "topo-demo",
   version: "1.0.0",
-  services: [{ name: "agent", image: "assay-topo-stub:demo", port: 8080, needs: [], perRun: [], replicas: 1 }],
+  services: [{ name: "agent", image: "everdict-topo-stub:demo", port: 8080, needs: [], perRun: [], replicas: 1 }],
   dependencies: [], // PG/Redis/MinIO 없이 — 순수 오케스트레이션 검증
   target: { kind: "browser", engine: "chromium", lifecycle: "per-case-instance", observe: ["screenshot"] },
   frontDoor: { service: "agent", submit: "POST /runs" },

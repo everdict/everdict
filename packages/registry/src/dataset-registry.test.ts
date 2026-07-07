@@ -1,8 +1,8 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@assay/core";
-import type { SqlClient } from "@assay/db";
+import { ConflictError, type Dataset, DatasetSchema, NotFoundError } from "@everdict/core";
+import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { InMemoryDatasetRegistry } from "./dataset-registry.js";
 import { loadDatasetDir } from "./load-datasets.js";
@@ -199,7 +199,7 @@ describe("InMemoryDatasetRegistry (tenant-owned)", () => {
 
 describe("loadDatasetDir", () => {
   it("기본 SHARED 로 로드(파일 SSOT) → 모든 테넌트가 폴백으로 봄", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "assay-ds-"));
+    const dir = mkdtempSync(join(tmpdir(), "everdict-ds-"));
     try {
       writeFileSync(join(dir, "bench-1.0.0.json"), JSON.stringify(ds("bench", "1.0.0")));
       writeFileSync(join(dir, "bench-1.1.0.json"), JSON.stringify(ds("bench", "1.1.0")));
@@ -211,7 +211,7 @@ describe("loadDatasetDir", () => {
   });
 });
 
-// 가짜 SqlClient — tenant-aware assay_datasets 흉내(created_by + deleted_at tombstone + tags[버전 태그] 포함).
+// 가짜 SqlClient — tenant-aware everdict_datasets 흉내(created_by + deleted_at tombstone + tags[버전 태그] 포함).
 interface FakeRow {
   tenant: string;
   id: string;
@@ -234,7 +234,7 @@ function fakePg(): SqlClient {
       const t = norm(text);
       // register 의 raw 조회 — tombstone 된 행도 본다.
       if (
-        t.startsWith("SELECT dataset, deleted_at FROM assay_datasets WHERE tenant = $1 AND id = $2 AND version = $3")
+        t.startsWith("SELECT dataset, deleted_at FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3")
       ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         return { rows: (r ? [{ dataset: r.dataset, deleted_at: r.deleted_at }] : []) as R[] };
@@ -242,7 +242,7 @@ function fakePg(): SqlClient {
       // get — 살아있는 버전만.
       if (
         t.startsWith(
-          "SELECT dataset FROM assay_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
+          "SELECT dataset FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
         )
       ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
@@ -251,7 +251,7 @@ function fakePg(): SqlClient {
       // creatorOf — 살아있는 버전만.
       if (
         t.startsWith(
-          "SELECT created_by FROM assay_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
+          "SELECT created_by FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
         )
       ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
@@ -260,21 +260,23 @@ function fakePg(): SqlClient {
       // has — 살아있는 버전만.
       if (
         t.startsWith(
-          "SELECT 1 FROM assay_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
+          "SELECT 1 FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL",
         )
       ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
         return { rows: (r ? [{}] : []) as R[] };
       }
       // ownsId — 살아있는 버전만.
-      if (t.startsWith("SELECT 1 FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1")) {
+      if (
+        t.startsWith("SELECT 1 FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL LIMIT 1")
+      ) {
         const r = rows.some((x) => x.tenant === p[0] && x.id === p[1] && live(x));
         return { rows: (r ? [{}] : []) as R[] };
       }
       // summarize — 살아있는 버전의 version/dataset/created_at/created_by/tags(list 메타 요약용).
       if (
         t.startsWith(
-          "SELECT version, dataset, created_at, created_by, tags FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
+          "SELECT version, dataset, created_at, created_by, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL",
         )
       ) {
         return {
@@ -291,7 +293,7 @@ function fakePg(): SqlClient {
       }
       // versionTags — 살아있는 버전의 (version, tags) 맵 소스.
       if (
-        t.startsWith("SELECT version, tags FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL")
+        t.startsWith("SELECT version, tags FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL")
       ) {
         return {
           rows: rows
@@ -302,7 +304,7 @@ function fakePg(): SqlClient {
       // setVersionTags — 살아있는 직접 소유 버전만, RETURNING 으로 적중 여부 판정.
       if (
         t.startsWith(
-          "UPDATE assay_datasets SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
+          "UPDATE everdict_datasets SET tags = $4::jsonb WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
         )
       ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
@@ -311,7 +313,7 @@ function fakePg(): SqlClient {
         return { rows: [{ version: r.version }] as R[] };
       }
       // ownerVersions — 살아있는 버전만.
-      if (t.startsWith("SELECT version FROM assay_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL")) {
+      if (t.startsWith("SELECT version FROM everdict_datasets WHERE tenant = $1 AND id = $2 AND deleted_at IS NULL")) {
         return {
           rows: rows
             .filter((x) => x.tenant === p[0] && x.id === p[1] && live(x))
@@ -320,7 +322,9 @@ function fakePg(): SqlClient {
       }
       // list — 살아있는 버전이 있는 id 만.
       if (
-        t.startsWith("SELECT DISTINCT id FROM assay_datasets WHERE (tenant = $1 OR tenant = $2) AND deleted_at IS NULL")
+        t.startsWith(
+          "SELECT DISTINCT id FROM everdict_datasets WHERE (tenant = $1 OR tenant = $2) AND deleted_at IS NULL",
+        )
       ) {
         const ids = [
           ...new Set(rows.filter((x) => (x.tenant === p[0] || x.tenant === p[1]) && live(x)).map((x) => x.id)),
@@ -328,7 +332,9 @@ function fakePg(): SqlClient {
         return { rows: ids.map((id) => ({ id })) as R[] };
       }
       // revive — 같은 내용 재등록 시 tombstone 해제.
-      if (t.startsWith("UPDATE assay_datasets SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3")) {
+      if (
+        t.startsWith("UPDATE everdict_datasets SET deleted_at = NULL WHERE tenant = $1 AND id = $2 AND version = $3")
+      ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
         if (r) r.deleted_at = null;
         return { rows: [] };
@@ -336,7 +342,7 @@ function fakePg(): SqlClient {
       // softDelete — 살아있는 버전만, RETURNING 으로 적중 여부 판정.
       if (
         t.startsWith(
-          "UPDATE assay_datasets SET deleted_at = now() WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
+          "UPDATE everdict_datasets SET deleted_at = now() WHERE tenant = $1 AND id = $2 AND version = $3 AND deleted_at IS NULL RETURNING version",
         )
       ) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2] && live(x));
@@ -344,7 +350,7 @@ function fakePg(): SqlClient {
         r.deleted_at = Date.now();
         return { rows: [{ version: r.version }] as R[] };
       }
-      if (t.startsWith("INSERT INTO assay_datasets")) {
+      if (t.startsWith("INSERT INTO everdict_datasets")) {
         rows.push({
           tenant: p[0] as string,
           id: p[1] as string,

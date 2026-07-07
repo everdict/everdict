@@ -1,5 +1,5 @@
-import type { Dispatcher } from "@assay/backends";
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { Dispatcher } from "@everdict/backends";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import { Client, Connection } from "@temporalio/client";
 import { TASK_QUEUE } from "./constants.js";
 
@@ -32,7 +32,7 @@ export class TemporalOrchestrator implements Orchestrator {
       const client = new Client({ connection });
       const handle = await client.workflow.start<(j: AgentJob) => Promise<CaseResult>>("evalCaseWorkflow", {
         taskQueue: this.opts.taskQueue ?? TASK_QUEUE,
-        workflowId: `assay-${job.evalCase.id}-${process.pid}`,
+        workflowId: `everdict-${job.evalCase.id}-${process.pid}`,
         args: [job],
       });
       return await handle.result();

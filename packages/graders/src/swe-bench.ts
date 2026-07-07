@@ -1,4 +1,4 @@
-import { BadRequestError, type GradeContext, type Grader, type Score } from "@assay/core";
+import { BadRequestError, type GradeContext, type Grader, type Score } from "@everdict/core";
 
 export interface SweBenchConfig {
   testPatch: string; // gold test diff(unified) — FAIL_TO_PASS 테스트를 추가/변경
@@ -30,8 +30,8 @@ export class SweBenchGrader implements Grader {
 
     // 1) gold test_patch 적용. 깨지면 채점 불가 → resolved=false.
     if (this.cfg.testPatch.trim()) {
-      await ctx.compute.writeFile(`${cwd}/.assay_test.patch`, this.cfg.testPatch);
-      const applied = await ctx.compute.exec("git apply --verbose .assay_test.patch", { cwd, timeoutSec: 120 });
+      await ctx.compute.writeFile(`${cwd}/.everdict_test.patch`, this.cfg.testPatch);
+      const applied = await ctx.compute.exec("git apply --verbose .everdict_test.patch", { cwd, timeoutSec: 120 });
       if (applied.exitCode !== 0) {
         return {
           graderId: this.id,

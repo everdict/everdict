@@ -73,7 +73,7 @@ export const topologyServiceSchema = z.object({
 export type TopologyService = z.infer<typeof topologyServiceSchema>
 
 // 의존 스토어 — 공유 + 케이스별 논리격리(isolateBy = 격리 키 종류).
-// isolateBy="external" = BYO 외부/공유 스토어(다른 클러스터 등; Assay 미배포, 연결은 배포 시 env). service = 사용 서비스.
+// isolateBy="external" = BYO 외부/공유 스토어(다른 클러스터 등; Everdict 미배포, 연결은 배포 시 env). service = 사용 서비스.
 export const topologyDependencySchema = z.object({
   store: z.string(), // postgres | redis | minio
   role: z.string(),

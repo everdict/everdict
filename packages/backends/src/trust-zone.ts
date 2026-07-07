@@ -1,4 +1,4 @@
-import { type TrustZone, TrustZoneSchema } from "@assay/core";
+import { type TrustZone, TrustZoneSchema } from "@everdict/core";
 
 // tenant → TrustZone 해석. 컨트롤플레인이 백엔드/토폴로지에 주입한다.
 export interface TrustZonePolicy {
@@ -7,7 +7,7 @@ export interface TrustZonePolicy {
 
 export interface PerTenantTrustZoneOptions {
   isolationRuntime?: string; // 기본 강격리 런타임 (기본 "runsc")
-  namespacePrefix?: string; // 기본 "assay-" → 네임스페이스 = assay-<tenant>
+  namespacePrefix?: string; // 기본 "everdict-" → 네임스페이스 = everdict-<tenant>
   network?: TrustZone["network"]; // 기본 deny-cross-tenant
   overrides?: Record<string, TrustZone>; // 특정 테넌트 명시 존(예: first-party trusted = runc 공유 허용)
 }
@@ -16,7 +16,7 @@ export interface PerTenantTrustZoneOptions {
 // → 임의 코드 실행을 테넌트 경계 안에 가둔다. overrides 로 first-party(trusted)만 완화.
 export function perTenantTrustZones(opts: PerTenantTrustZoneOptions = {}): TrustZonePolicy {
   const isolationRuntime = opts.isolationRuntime ?? "runsc";
-  const prefix = opts.namespacePrefix ?? "assay-";
+  const prefix = opts.namespacePrefix ?? "everdict-";
   const network = opts.network ?? "deny-cross-tenant";
   return {
     resolve(tenant) {

@@ -25,7 +25,7 @@ export interface PairRunnerInput {
   capabilities?: string[];
 }
 
-// 페어링 결과 — token 은 평문(한 번만 반환, 저장은 해시). assay runner 가 이 토큰으로 MCP 에 인증한다(이후 슬라이스).
+// 페어링 결과 — token 은 평문(한 번만 반환, 저장은 해시). everdict runner 가 이 토큰으로 MCP 에 인증한다(이후 슬라이스).
 export interface PairedRunner {
   meta: RunnerMeta;
   token: string;
@@ -154,7 +154,7 @@ export class PgRunnerStore implements RunnerStore {
     const id = randomUUID();
     const token = generateRunnerToken();
     const res = await this.client.query<{ paired_at: string | Date }>(
-      `INSERT INTO assay_runners (owner, id, workspace, label, os, capabilities, token_hash)
+      `INSERT INTO everdict_runners (owner, id, workspace, label, os, capabilities, token_hash)
        VALUES ($1,$2,$3,$4,$5,$6,$7)
        RETURNING paired_at`,
       [
@@ -175,7 +175,7 @@ export class PgRunnerStore implements RunnerStore {
     // token_hash 는 절대 select 하지 않는다.
     const res = await this.client.query<RunnerRow>(
       `SELECT id, label, os, capabilities, paired_at, last_seen_at
-       FROM assay_runners WHERE owner = $1 ORDER BY paired_at DESC`,
+       FROM everdict_runners WHERE owner = $1 ORDER BY paired_at DESC`,
       [owner],
     );
     return res.rows.map(rowToMeta);
@@ -183,7 +183,7 @@ export class PgRunnerStore implements RunnerStore {
   async get(owner: string, id: string): Promise<RunnerMeta | null> {
     const res = await this.client.query<RunnerRow>(
       `SELECT id, label, os, capabilities, paired_at, last_seen_at
-       FROM assay_runners WHERE owner = $1 AND id = $2`,
+       FROM everdict_runners WHERE owner = $1 AND id = $2`,
       [owner, id],
     );
     const r = res.rows[0];
@@ -192,19 +192,22 @@ export class PgRunnerStore implements RunnerStore {
   async listByWorkspace(workspace: string): Promise<RunnerMeta[]> {
     const res = await this.client.query<RunnerRow>(
       `SELECT id, label, os, capabilities, paired_at, last_seen_at
-       FROM assay_runners WHERE workspace = $1 ORDER BY paired_at DESC`,
+       FROM everdict_runners WHERE workspace = $1 ORDER BY paired_at DESC`,
       [workspace],
     );
     return res.rows.map(rowToMeta);
   }
   async remove(owner: string, id: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_runners WHERE owner = $1 AND id = $2", [owner, id]);
+    await this.client.query("DELETE FROM everdict_runners WHERE owner = $1 AND id = $2", [owner, id]);
   }
   async touch(owner: string, id: string): Promise<void> {
-    await this.client.query("UPDATE assay_runners SET last_seen_at = now() WHERE owner = $1 AND id = $2", [owner, id]);
+    await this.client.query("UPDATE everdict_runners SET last_seen_at = now() WHERE owner = $1 AND id = $2", [
+      owner,
+      id,
+    ]);
   }
   async setCapabilities(owner: string, id: string, capabilities: string[]): Promise<void> {
-    await this.client.query("UPDATE assay_runners SET capabilities = $3 WHERE owner = $1 AND id = $2", [
+    await this.client.query("UPDATE everdict_runners SET capabilities = $3 WHERE owner = $1 AND id = $2", [
       owner,
       id,
       capabilities.join(" "),
@@ -212,7 +215,7 @@ export class PgRunnerStore implements RunnerStore {
   }
   async resolveByToken(token: string): Promise<ResolvedRunner | null> {
     const res = await this.client.query<{ owner: string; workspace: string; id: string }>(
-      "SELECT owner, workspace, id FROM assay_runners WHERE token_hash = $1",
+      "SELECT owner, workspace, id FROM everdict_runners WHERE token_hash = $1",
       [hashKey(token)],
     );
     const r = res.rows[0];

@@ -1,5 +1,5 @@
-import { BadRequestError, type HarnessInstanceSpec } from "@assay/core";
-import type { HarnessInstanceRegistry } from "@assay/registry";
+import { BadRequestError, type HarnessInstanceSpec } from "@everdict/core";
+import type { HarnessInstanceRegistry } from "@everdict/registry";
 import { z } from "zod";
 
 // durable 재핀(re-pin) — 기준 인스턴스의 pins 위에 요청 핀을 병합해 "새 인스턴스 버전"으로 등록한다.

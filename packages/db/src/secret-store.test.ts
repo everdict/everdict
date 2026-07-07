@@ -15,7 +15,7 @@ describe("SecretCipher (AES-256-GCM)", () => {
   });
 });
 
-// 기본 ON 보장: ASSAY_SECRETS_KEY 없이도 동작하는 임시 KEK cipher.
+// 기본 ON 보장: EVERDICT_SECRETS_KEY 없이도 동작하는 임시 KEK cipher.
 describe("generatedCipher (기본 ON 폴백 KEK)", () => {
   it("키 설정 없이도 동작하는 cipher 를 만든다(왕복)", () => {
     const c = generatedCipher();

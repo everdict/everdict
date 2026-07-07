@@ -37,7 +37,7 @@ console.log(`Docker Hub 발행됨: ${published}  tags=${JSON.stringify(tags)}`);
 
 // 백엔드가 per-case 이미지로 사용하는지(기본 에이전트 이미지 대신).
 const job = { evalCase: c, harness: { id: "swe", version: "1.0.0" }, tenant: "acme" };
-const spec = buildNomadJob(job, { addr: "http://nomad:4646", image: "reg/assay-agent:1" });
+const spec = buildNomadJob(job, { addr: "http://nomad:4646", image: "reg/everdict-agent:1" });
 const jobImage = spec.Job.TaskGroups[0]?.Tasks[0]?.Config.image;
 console.log(`\nbuildNomadJob 컨테이너 이미지: ${jobImage}`);
 const usesCaseImage = jobImage === c.image;

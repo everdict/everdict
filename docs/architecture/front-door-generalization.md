@@ -7,18 +7,18 @@
 > `request.headers`/`method` knob (`frontDoor.request.headers` + the method honored from `submit`'s verb — landed).
 > No core front-door follow-ups remain.
 > - **#2 completion model — DONE.** `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`) +
->   `HttpFrontDoorDriver` landed in `@assay/topology`; `frontDoor.completion` (`sync` | `poll`) in `@assay/core`;
+>   `HttpFrontDoorDriver` landed in `@everdict/topology`; `frontDoor.completion` (`sync` | `poll`) in `@everdict/core`;
 >   `ServiceTopologyBackend.dispatch` now delegates driving to the driver and fails a run on completion timeout.
 >   Default (no `completion`) = `sync` = today. (`stream`/`callback` modes deferred — see #2 below.)
 > - **#3 correlation — DONE.** `frontDoor.correlate` (`injected` | `returned`). `returned` extracts the agent's
 >   own trace-id from the submit response via a dot-path (`correlate.path`) and uses it for **both** the trace
 >   fetch **and** the poll `statusPath` (`{run_id}` is overridden with the agent id). `injected` (default) =
->   correlate by the Assay runId = today. `SubmitFn` now returns the response body for this.
+>   correlate by the Everdict runId = today. `SubmitFn` now returns the response body for this.
 > - **#1 payload template — DONE.** `frontDoor.request.bodyTemplate` — a JSON body whose string `{{var}}` tokens
 >   are interpolated over the per-run wiring (CommandHarness convention). The wiring variable **names** now derive
 >   from `dependencies[].isolateBy` (`thread_id`/`key_prefix`/`object_prefix`/`schema`) via `wiringVars`, not the
 >   hardcoded LangGraph names. Absent `request` = today's 5-field body (no regression).
-> - **#4 target observation — DONE (none/assay).** Browser provisioning is now gated on `spec.target` (already
+> - **#4 target observation — DONE (none/everdict).** Browser provisioning is now gated on `spec.target` (already
 >   optional in the schema, previously ignored): present → provision + observe (today); **absent → no browser, a
 >   trace-only run with a `{kind:"prompt"}` (no-stage) snapshot** — no core-contract change (reuses the prompt-env
 >   snapshot; `CaseResult.snapshot` stays required). The `harness`-provided target (observe a declared service's own
@@ -42,8 +42,8 @@ five hardcoded places. A different agent (different request shape, async multi-s
 its own browser, a per-dispatch image) does not fit.
 
 The goal is to **absorb what an external orchestrator does** (build the request, hold the connection until the
-agent finishes, correlate the trace, manage the target env, pick the per-service image) into Assay as declarative
-spec data — not to attach Assay to an external control-plane.
+agent finishes, correlate the trace, manage the target env, pick the per-service image) into Everdict as declarative
+spec data — not to attach Everdict to an external control-plane.
 
 ### The five hardcodes (current code)
 
@@ -54,8 +54,8 @@ spec data — not to attach Assay to an external control-plane.
 2. **Submit is fire-and-forget.** `SubmitFn = (url, payload) => Promise<void>` (`service-backend.ts:19`); dispatch
    submits then immediately fetches the trace. An async N-step agent needs **holding until completion**; there is
    no abstraction for it.
-3. **Trace is fetched by Assay's runId.** `traceSource.fetch(runId)` (`service-backend.ts:94`). An external agent
-   records under **its own** id in MLflow/OTel, so Assay's runId does not match. The `frontDoor.trace` field exists
+3. **Trace is fetched by Everdict's runId.** `traceSource.fetch(runId)` (`service-backend.ts:94`). An external agent
+   records under **its own** id in MLflow/OTel, so Everdict's runId does not match. The `frontDoor.trace` field exists
    in the schema (`harness-spec.ts:54`) but is **never read** (grep: 0 usages).
 4. **The per-case browser is unconditionally provisioned.** `provisionBrowserEnv` is always called
    (`service-backend.ts:71`), even though `spec.target` is already optional (`harness-spec.ts:53`). A harness that
@@ -87,7 +87,7 @@ interprets a declarative **`FrontDoorProtocol`** carried by the spec. `dispatch`
 
 ```
 ensureTopology(spec, zone)                        // WHERE — infra (unchanged)
-target   = acquireTarget(spec, runId, zone)       // strategy: none | assay-browser | harness-service
+target   = acquireTarget(spec, runId, zone)       // strategy: none | everdict-browser | harness-service
 outcome  = frontDoorDriver.drive(spec, wiring)    // HOW  — build → submit → await-done → return agent trace-ref
 trace    = traceSource.fetch(correlate(outcome))  // correlate: injected vs returned id  (wakes frontDoor.trace)
 snapshot = target?.observe()                      // optional
@@ -106,7 +106,7 @@ Every knob is optional; its default reproduces today's behavior.
 | 1 ✅ | `frontDoor.request.bodyTemplate` — `{{task}}/{{run_id}}/{{thread_id}}/{{target_cdp_url}}…` interpolation (recursive over the JSON body) | the current 5-field body | CommandHarness substitution (`command.ts:81`) — `interpolateTemplate` |
 | 1b ✅ | per-run wiring variables derived from `spec.dependencies[].isolateBy` (not hardcoded `keysFor`) | pg→`thread_id`, redis→`key_prefix`, minio→`object_prefix`, +`schema` | the existing `isolateBy` enum (`harness-spec.ts:25`) — `wiringVars` |
 | 2 ✅ | `frontDoor.completion.mode`: `sync` \| `poll` (+ `statusPath`, `done`/`failed` `StatusMatch`, `intervalMs`, `timeoutMs`) — `stream`/`callback` deferred | `sync` (current echo behavior) | — (the genuinely missing piece) |
-| 3 ✅ | `frontDoor.correlate.mode`: `injected` (Assay's `run_id`) \| `returned` (extract agent id from the submit response via `correlate.path` dot-path) | `injected` | `getField` dot-path reader; `SubmitFn` widened to return the response (the dormant `frontDoor.trace` *endpoint* stays a separate future capability) |
+| 3 ✅ | `frontDoor.correlate.mode`: `injected` (Everdict's `run_id`) \| `returned` (extract agent id from the submit response via `correlate.path` dot-path) | `injected` | `getField` dot-path reader; `SubmitFn` widened to return the response (the dormant `frontDoor.trace` *endpoint* stays a separate future capability) |
 | 4 ✅ | gate browser provisioning on `spec.target` (present→provision/observe; absent→trace-only `{kind:"prompt"}` snapshot). `harness`-provided target observation = follow-up | provision when `spec.target` set | the already-optional `target` + the `prompt` (no-stage) snapshot — no contract change |
 | 5 ✅ | `AgentJob.imagePins` (service name → image) overrides registered images at dispatch; `applyImagePins` folds pins into a deterministic `-pin-<hash>` effective version so warm pools separate variants (no runtime change) | `spec.image` (no pins) | `HarnessTemplate` slot/pins (`harness-template.ts:97-115`); `node:crypto` hash for the version suffix |
 
@@ -117,7 +117,7 @@ Knob 5 is ~80% built: `resolveHarnessInstance` already maps `pins[slot] → imag
 ## Proposed contract (sketch)
 
 ```ts
-// @assay/core — harness-spec.ts: frontDoor extension (all optional; absence = today)
+// @everdict/core — harness-spec.ts: frontDoor extension (all optional; absence = today)
 frontDoor: {
   service: string; submit: string; trace?: string;
   // #2 DONE — completion is a discriminated union; poll uses a *data* matcher (StatusMatch), not a string
@@ -128,7 +128,7 @@ frontDoor: {
         done: StatusMatch; failed?: StatusMatch;          // StatusMatch = { field: dot-path; equals? | oneOf? }
         intervalMs?: number; timeoutMs?: number };
   // #3 DONE — correlate the trace id. returned extracts from the submit response (dot-path) and also drives the
-  // poll statusPath; injected (default) = the Assay runId. (Distinct from frontDoor.trace, an unused agent-side
+  // poll statusPath; injected (default) = the Everdict runId. (Distinct from frontDoor.trace, an unused agent-side
   // trace *endpoint*.)
   correlate?:
     | { mode: "injected" }
@@ -142,16 +142,16 @@ frontDoor: {
   // service's own CDP) is the follow-up (needs a TopologyRuntime.observe method).
 };
 
-// @assay/topology — front-door-driver.ts: the HOW abstraction (sibling of TopologyRuntime) — LANDED in #2
+// @everdict/topology — front-door-driver.ts: the HOW abstraction (sibling of TopologyRuntime) — LANDED in #2
 interface FrontDoorDriver {
   drive(req: FrontDoorDriveRequest): Promise<DriveOutcome>;   // submit → await-completion (build/correlate grow in #1/#3)
 }
 type DriveOutcome = { traceRef: string; status: "done" | "failed" | "timeout" };
 // HttpFrontDoorDriver is the default impl (injectable submit/getJson/sleep/now for deterministic tests).
 
-// @assay/core — agent-job.ts (#5): per-dispatch image override (NOT on the spec — it's a run input)
+// @everdict/core — agent-job.ts (#5): per-dispatch image override (NOT on the spec — it's a run input)
 AgentJob.imagePins?: Record<string /* service name */, string /* image */>;
-// @assay/topology — image-pins.ts: applyImagePins(spec, pins) overrides images + appends a deterministic
+// @everdict/topology — image-pins.ts: applyImagePins(spec, pins) overrides images + appends a deterministic
 // `-pin-<hash>` to the effective version, so the warm pool (keyed by id@version) separates pinned variants.
 ```
 
@@ -164,7 +164,7 @@ with the deferred completion modes.)
 ## "Absorbing the control-plane" — concretely
 
 browser-use's own LangGraph loop did: (a) build the request, (b) hold the connection until the run finishes,
-(c) correlate the trace, (d) manage the browser, (e) pick the image. Knobs 1–5 take each of those into Assay as
+(c) correlate the trace, (d) manage the browser, (e) pick the image. Knobs 1–5 take each of those into Everdict as
 spec data. That is absorption, not attachment.
 
 ## Sequencing (keep the live e2e green)

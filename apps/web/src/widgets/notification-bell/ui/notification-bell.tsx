@@ -6,7 +6,7 @@ import { Bell, BellOff, BellRing, Check } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
 import { notificationsResponseSchema, type NotificationItem } from '@/entities/notification'
-import { getAssayDesktop } from '@/shared/lib/desktop-bridge'
+import { getEverdictDesktop } from '@/shared/lib/desktop-bridge'
 import { fmtTimeAgo } from '@/shared/lib/format'
 import { cn } from '@/shared/lib/utils'
 import { DropdownItem, DropdownLabel, DropdownMenu } from '@/shared/ui/dropdown-menu'
@@ -42,7 +42,7 @@ function hrefOf(workspace: string, n: NotificationItem): string {
 type Permission = NotificationPermission | 'unsupported'
 
 // 유저의 네이티브 알림 선호(끄기/켜기) — 브라우저 권한과 별개의 로컬 스위치. 기본 켜짐.
-const NATIVE_PREF_KEY = 'assay:native-notifications'
+const NATIVE_PREF_KEY = 'everdict:native-notifications'
 type NativePref = 'on' | 'off'
 
 // 권한 × 선호 → 상태 아이콘/드롭다운이 쓰는 파생 상태.
@@ -108,7 +108,7 @@ export function NotificationBell({ workspace }: { workspace: string }) {
   }, [router, workspace])
 
   useEffect(() => {
-    const bridge = getAssayDesktop()
+    const bridge = getEverdictDesktop()
     if (bridge) {
       void bridge
         .runnerStatus()

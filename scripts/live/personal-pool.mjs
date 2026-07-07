@@ -1,6 +1,6 @@
 // 라이브 e2e: 개인 러너 풀(self). 내 러너 2개를 붙이고 러너 id 없이 self 로 제출하면 내 러너 아무거나 가져간다
 // (여러 프로세스/머신을 한 개인 풀에). 워크스페이스 풀(self:ws)의 개인 버전 — owner=제출자, own-pays.
-// 검증: POST /runners ×2 → assay runner ×2 → runtime=self 로 N잡 → 전부 succeeded, ranBy 는 내 러너 중 하나, by=제출자.
+// 검증: POST /runners ×2 → everdict runner ×2 → runtime=self 로 N잡 → 전부 succeeded, ranBy 는 내 러너 중 하나, by=제출자.
 // 설계: docs/architecture/self-hosted-runtime-and-runners.md (슬라이스 2).
 //
 // 준비: pnpm build && node apps/api/dist/main.js
@@ -8,12 +8,12 @@
 import { spawn } from "node:child_process";
 import process from "node:process";
 
-const B = (process.env.ASSAY_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
+const B = (process.env.EVERDICT_API_URL ?? "http://localhost:8787").replace(/\/$/, "");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const api = async (path, init = {}) => {
   const r = await fetch(`${B}${path}`, {
     ...init,
-    headers: { "content-type": "application/json", "x-assay-tenant": "default", ...(init.headers ?? {}) },
+    headers: { "content-type": "application/json", "x-everdict-tenant": "default", ...(init.headers ?? {}) },
   });
   if (!r.ok) throw new Error(`${path} → ${r.status}: ${(await r.text()).slice(0, 300)}`);
   return r.status === 204 ? null : r.json();

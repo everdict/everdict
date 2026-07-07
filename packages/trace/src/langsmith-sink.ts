@@ -1,4 +1,4 @@
-import { UpstreamError } from "@assay/core";
+import { UpstreamError } from "@everdict/core";
 import type {
   TraceSink,
   TraceSinkCase,

@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { DatasetSchema } from "@assay/core";
+import { DatasetSchema } from "@everdict/core";
 import { type DatasetRegistry, InMemoryDatasetRegistry } from "./dataset-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 

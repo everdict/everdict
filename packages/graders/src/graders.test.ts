@@ -1,4 +1,4 @@
-import type { GradeContext, TraceEvent } from "@assay/core";
+import type { GradeContext, TraceEvent } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { type Judge, JudgeGrader } from "./judge.js";
@@ -99,13 +99,13 @@ describe("JudgeGrader", () => {
     const ctx: GradeContext = {
       case: { id: "c", env: { kind: "os-use" }, task: "open the remote form", graders: [], timeoutSec: 1, tags: [] },
       trace: [] as TraceEvent[],
-      snapshot: { kind: "os-use", screenshotRef: "/tmp/assay-screen.png", screenshot: "", windows: [] }, // 동봉 없음 → 컴퓨트 폴백
+      snapshot: { kind: "os-use", screenshotRef: "/tmp/everdict-screen.png", screenshot: "", windows: [] }, // 동봉 없음 → 컴퓨트 폴백
       compute,
     };
     const score = await new JudgeGrader(spy, { id: "vlm", useScreenshot: true }).grade(ctx);
     expect(score.pass).toBe(true);
     expect(calls[0]).toContain("base64 -w0");
-    expect(calls[0]).toContain("/tmp/assay-screen.png");
+    expect(calls[0]).toContain("/tmp/everdict-screen.png");
     expect(received?.screenshot).toEqual({ base64: "QkFTRTY0", mediaType: "image/png" }); // 개행 trim + png
   });
 

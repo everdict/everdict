@@ -54,7 +54,7 @@ a laptop — a single-user host, so **no `TrustZone`/gVisor/pool-silo** (those s
   (`{timeoutMs,intervalMs}` → the HTTP endpoint readiness-poll budget; absent = the runtime default 60s/1s, also
   overridable globally via `DockerTopologyRuntimeOptions.readyTimeoutMs`/`pollIntervalMs` ↔ runner
   `--ready-timeout-ms`/`--ready-interval-ms`). All readiness polling routes through one `pollReady` helper.
-- **Runner robustness — session re-init (`@assay/runner-core` `runner-session.ts`).** The control plane holds MCP sessions
+- **Runner robustness — session re-init (`@everdict/runner-core` `runner-session.ts`).** The control plane holds MCP sessions
   in-memory, so an API restart orphans the runner's `mcp-session-id` (every call → 400/404 → the old loop wedged
   retrying a dead transport forever). `ResilientMcpSession` wraps every tool call: a `callTool` throw (transport/
   session error — app errors come back as `isError` results, no throw) drops the session and re-connects (fresh
@@ -62,7 +62,7 @@ a laptop — a single-user host, so **no `TrustZone`/gVisor/pool-silo** (those s
 
 ## Front-door generalization — making driving harness-agnostic (in progress)
 `ServiceTopologyBackend.dispatch` was hardcoded to one protocol (browser-use-langgraph): fixed payload,
-fire-and-forget submit, trace-by-Assay-runId, always-provisioned browser, fixed image. The direction — a declarative
+fire-and-forget submit, trace-by-Everdict-runId, always-provisioned browser, fixed image. The direction — a declarative
 `FrontDoorProtocol` + a thin `FrontDoorDriver` (the harness-agnostic sibling of `TopologyRuntime`), each hardcode →
 an optional knob defaulting to today — is in `docs/architecture/front-door-generalization.md`. Read it before
 touching `service-backend.ts`'s driving logic.
@@ -72,23 +72,23 @@ touching `service-backend.ts`'s driving logic.
   **socket idle timeout**: while the server holds the response no data flows, so idle-time *is* the completion deadline.
   Socket errors remap to `UpstreamError`.
 - **#2 completion — DONE (4 modes).** `FrontDoorDriver`/`HttpFrontDoorDriver` (`front-door-driver.ts`) own submit +
-  await; `frontDoor.completion` in `@assay/core`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
+  await; `frontDoor.completion` in `@everdict/core`: `sync` (default) | `poll` (`StatusMatch` done/failed) | `stream`
   (SSE submit; `OpenStreamFn`/`fetchStream`; terminal event via `StatusMatch`; first-event correlate) | `callback`
   (fire-and-forget → `CallbackRendezvous` awaits the agent's POST to `{{callback_url}}`; in-process rendezvous +
   control-plane `POST /frontdoor-callback/:runId`). dispatch fails a run on completion timeout. See
   `docs/architecture/completion-stream-callback.md`.
-- **#3 correlate — DONE.** `frontDoor.correlate` (`injected` default = Assay runId | `returned` = extract the
+- **#3 correlate — DONE.** `frontDoor.correlate` (`injected` default = Everdict runId | `returned` = extract the
   agent's own id from the submit response via `correlate.path` dot-path, used for both trace fetch and the poll
   `statusPath`). `SubmitFn` now returns the response body. Distinct from the still-dormant `frontDoor.trace` endpoint.
 - **#1 payload template — DONE.** `frontDoor.request.bodyTemplate` (`interpolateTemplate` — recursive `{{var}}`
   over the JSON body); per-run wiring variable NAMES derive from `dependencies[].isolateBy` via `wiringVars`
   (`thread_id`/`key_prefix`/`object_prefix`/`schema`), not hardcoded LangGraph names. Absent `request` = today's body.
 - **external (BYO) deps.** `dependencies[].isolateBy: "external"` declares a store the harness only **connects to**
-  (other-cluster shared redis/minio/postgres). Assay deploys/isolates nothing — `dependencyStores` skips it (no
+  (other-cluster shared redis/minio/postgres). Everdict deploys/isolates nothing — `dependencyStores` skips it (no
   container, no `connEnv`) and `wiringVars` makes no isolation var; the connection comes from `storeEnv`/`service.env`.
   It exists for **visibility** (first-class node in the diagram/spec instead of a hidden env URL); optional `service`
   names the using service (diagram service→store edge). See docs/service-harness.md.
-- **#4 target observation — DONE (none/assay).** Browser provisioning is gated on `spec.target` (already optional,
+- **#4 target observation — DONE (none/everdict).** Browser provisioning is gated on `spec.target` (already optional,
   was ignored): absent → no browser, trace-only run with a `{kind:"prompt"}` snapshot (no core-contract change).
   A `harness`-provided target (a service's own session) is now the **target axis** (round 2) below — not a
   `TopologyRuntime.observe` method.
@@ -100,7 +100,7 @@ touching `service-backend.ts`'s driving logic.
   callback rendezvous (multi-process), live A2A stream/callback e2e — see `docs/architecture/front-door-generalization.md`.
 
 ## Target axis (round 2) — `TargetAcquirer` (B1+B2 DONE)
-Round 1 left the **target** assumed to be "a CDP browser Assay provisions." Round 2 generalizes it — the WHAT-target
+Round 1 left the **target** assumed to be "a CDP browser Everdict provisions." Round 2 generalizes it — the WHAT-target
 seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`. Read
 `docs/architecture/target-acquisition-generalization.md` before touching `target-acquirer.ts`/the dispatch target step.
 - **B1 — handle is a coordinate bag.** `BrowserEnvHandle{cdpUrl}` → `TargetEnvHandle{ wiring: Record<string,string> }`
@@ -110,7 +110,7 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
 - **B2 — `target.acquire` (`provision` | `service`).** `targetAcquirerFor(target, runtime, request)`: `provision`
   (default) delegates to `runtime.provisionBrowserEnv` (today); `service` = `serviceAcquirer` opens a declared
   service's session (`open` → `coordinates` dot-path map → wiring bag, `close` on dispose; HTTP only, lives by the
-  `FrontDoorDriver`). No Assay container → observation via `delivery` (`sentinel`/`egress`) or a `prompt` snapshot.
+  `FrontDoorDriver`). No Everdict container → observation via `delivery` (`sentinel`/`egress`) or a `prompt` snapshot.
   Coordinate-mapping failure best-effort-closes the half-open session (no leak). Absent `acquire` = `provision`.
 - **`acquire.ready` — session readiness gate.** A `service` session can exist before its client (the browser that
   back-connects) has self-registered — front-door commands then 404. Optional `acquire.ready`
@@ -121,7 +121,7 @@ seam, fourth sibling of `TopologyRuntime`/`FrontDoorDriver`/`ObservationSource`.
 ## Observation delivery (`HOW-observe`) — pluggable seam
 *How* the observation reaches the grader/judge is now a third axis (sibling of `TopologyRuntime`=WHERE,
 `FrontDoorDriver`=HOW-drive): `ObservationSource` (`observation-source.ts`). `TopologyTarget.delivery`
-(`@assay/core`, `.optional()`) selects `reference` (store-fetch, default = today's `snapshot()`/prompt) |
+(`@everdict/core`, `.optional()`) selects `reference` (store-fetch, default = today's `snapshot()`/prompt) |
 `sentinel` (inline via result channel) | `egress` (push to a `sink`). `dispatch` delegates to
 `observationSourceFor(spec.target?.delivery)` — all three modes wired. **`sentinel`** reads the observation from the
 **result channel** (`DriveOutcome.response` — `sync` = submit response, `poll` = the `done` status body) via

@@ -3,7 +3,7 @@
 // diffScorecards(vA, vB) → 회귀(pass→fail)/개선(fail→pass) 리포트. (회귀 검출은 객관적 `pass` 전이로.)
 //
 // 주의: 회귀를 재현 가능하게 보이려고 두 버전 dispatch 는 **결정적 stand-in**(실 LLM 은 비결정적+느림 — 회귀 데모엔
-// 부적합). diff(스코어카드 비교)는 실 @assay/suite diffScorecards. 실 하니스 평가는 webvoyager-eval.mjs 참고.
+// 부적합). diff(스코어카드 비교)는 실 @everdict/suite diffScorecards. 실 하니스 평가는 webvoyager-eval.mjs 참고.
 import { readFileSync } from "node:fs";
 import process from "node:process";
 import { importWebVoyager } from "../../packages/datasets/dist/index.js";

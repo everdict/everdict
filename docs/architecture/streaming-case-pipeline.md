@@ -74,7 +74,7 @@ The user-facing model: **phase 1 = run the harness against the dataset; phase 2 
 harness exported to an observability platform near the runtime.** Two modes, one knob:
 
 - **Contract.** `RunContext.runId` — `runCase` mints (or receives) the correlation id and hands the *same*
-  value to `run()` (harness injects it as `ASSAY_RUN_ID`/`assay.run_id`) and to collection.
+  value to `run()` (harness injects it as `EVERDICT_RUN_ID`/`everdict.run_id`) and to collection.
   `EvaluableHarness` gains two optional hooks: `traceSource()` (the platform coordinates + collect mode,
   from the harness spec) and `collectTrace(runId)` (the actual pull). `CommandHarnessSpec.trace` gains
   **`collect: "job" | "control-plane"` (default `"job"`)**.
@@ -111,8 +111,8 @@ harness exported to an observability platform near the runtime.** Two modes, one
   the flush-lag shape; hard errors stay conclusive). A still-empty control-plane collect appends an `error`
   event naming the correlation key instead of silently scoring 0.
 - **Tag correlation (`correlate:"tag"`, mlflow).** Real platforms mint their own trace ids, so an
-  assay-minted `runId` can never equal one. A real instrumented agent instead tags its trace with
-  `assay.run_id` = `$ASSAY_RUN_ID` (SDK `set_trace_tag` = `PATCH /api/3.0/mlflow/traces/{id}/tags`), and
+  everdict-minted `runId` can never equal one. A real instrumented agent instead tags its trace with
+  `everdict.run_id` = `$EVERDICT_RUN_ID` (SDK `set_trace_tag` = `PATCH /api/3.0/mlflow/traces/{id}/tags`), and
   `MlflowTraceSource` resolves it via `POST /api/3.0/mlflow/traces/search` (backtick tag filter;
   `locations` is required → `trace.experiment` must scope the search). Default `"id"` keeps the
   runId=trace-id (pull-ingest) convention. Live-verified as S4 (below).
@@ -122,11 +122,11 @@ harness exported to an observability platform near the runtime.** Two modes, one
 The script boots `ghcr.io/mlflow/mlflow:v3.14.0` (docker, auto-cleaned; or `MLFLOW_ENDPOINT`), seeds
 "instrumented-agent" traces via `MlflowTraceSink` (create + OTLP spans — the sink-e2e-verified path), then:
 **S1** `collect="job"` — real `runCase`+`CommandHarness`+`LocalDriver`; the command sees the injected
-`ASSAY_RUN_ID` (round-trips into the git-diff snapshot) and `collectTrace(runId)` pulls the real spans
+`EVERDICT_RUN_ID` (round-trips into the git-diff snapshot) and `collectTrace(runId)` pulls the real spans
 post-release (llm_call 42/7 tokens → steps/cost derived). **S2** `collect="control-plane"` — the job returns
 only `traceRef` + ground-truth scores; `executeCase` pulls from real MLflow and grades the deferred
 steps/cost (no double-scoring). **S3** dead endpoint → soft-degrade (`error` event, ground-truth preserved). **S4** `correlate:"tag"` —
-the seeded trace is tagged `assay.run_id` (the real-SDK contract) and an assay-minted `runId` (≠ trace id)
+the seeded trace is tagged `everdict.run_id` (the real-SDK contract) and an everdict-minted `runId` (≠ trace id)
 resolves through `traces/search` to the real spans, completing the deferred grading.
 All PASS 2026-07-06.
 
@@ -144,12 +144,12 @@ pull round trip + P2 `collect="control-plane"` completion, both PASS 2026-07-07.
 
 `CommandTraceSpec` otel gains **`correlate:"id"|"tag"` + `service`** (mirroring mlflow's tag mode).
 `OtelTraceSource` in tag mode searches the **Jaeger query API**
-(`GET /api/traces?service=…&tags={"assay.run_id":…}&limit=1` — verified vs real Jaeger 1.62: the `tags`
+(`GET /api/traces?service=…&tags={"everdict.run_id":…}&limit=1` — verified vs real Jaeger 1.62: the `tags`
 filter matches **resource/process tags**, `service` is required, and the search response embeds full spans →
 one request, reusing the existing `{data:[{spans}]}` parser). OTLP-native backends without a search API stay
 id-correlated. Live e2e (`scripts/live/trace-collect-otel.mjs`) proves the **full real-agent contract with
 zero id coordination**: no seeding, no injected runId — `runCase` mints the key, the command (a real
-OTLP-exporting script) mints its *own* trace id and sets only the `assay.run_id` resource attribute, and both
+OTLP-exporting script) mints its *own* trace id and sets only the `everdict.run_id` resource attribute, and both
 collect modes (O1 job / O2 control-plane) resolve it by tag search. PASS 2026-07-07.
 
 ### D5 — per-case sink export streaming (shipped)

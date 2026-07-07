@@ -10,7 +10,7 @@ import type {
   RunContext,
   Score,
   TraceEvent,
-} from "@assay/core";
+} from "@everdict/core";
 
 export interface RunCaseDeps {
   driver: Driver;
@@ -20,10 +20,10 @@ export interface RunCaseDeps {
   runCtx: RunContext;
 }
 
-// 트레이스 상관 키 — 하니스가 ASSAY_RUN_ID/assay.run_id 로 주입하고, 수집(collectTrace/컨트롤플레인 pull)이
+// 트레이스 상관 키 — 하니스가 EVERDICT_RUN_ID/everdict.run_id 로 주입하고, 수집(collectTrace/컨트롤플레인 pull)이
 // 같은 값으로 플랫폼에서 찾는다. 호출부(runCtx.runId)가 안 주면 여기서 mint.
 function newRunId(): string {
-  return `assay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `everdict-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // os-use 스냅샷의 스크린샷이 참조(ref)로만 있으면 compute 해제 전에 base64 로 물질화한다 —

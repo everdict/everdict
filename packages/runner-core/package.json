@@ -1,5 +1,5 @@
 {
-  "name": "@assay/runner-core",
+  "name": "@everdict/runner-core",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -13,10 +13,10 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@assay/agent": "workspace:*",
-    "@assay/core": "workspace:*",
-    "@assay/topology": "workspace:*",
-    "@assay/trace": "workspace:*",
+    "@everdict/agent": "workspace:*",
+    "@everdict/core": "workspace:*",
+    "@everdict/topology": "workspace:*",
+    "@everdict/trace": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

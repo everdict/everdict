@@ -3,12 +3,12 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { BadRequestError, UpstreamError, dockerAuthConfigJson, parseImageRef } from "@assay/core";
+import { BadRequestError, UpstreamError, dockerAuthConfigJson, parseImageRef } from "@everdict/core";
 import { z } from "zod";
 
 const pexecFile = promisify(execFile);
 
-// assay image push — 로컬 빌드 이미지를 워크스페이스 레지스트리로 발행한다.
+// everdict image push — 로컬 빌드 이미지를 워크스페이스 레지스트리로 발행한다.
 // 컨트롤플레인에서 push 자격증명을 발급받아(POST /workspace/image-registries/push-credentials[?name=], images:push)
 // 이 머신의 docker 로 tag+push. 레지스트리가 여러 개면 --registry <name> 으로 선택(1개뿐이면 생략 가능). 자격증명은 임시 DOCKER_CONFIG 디렉터리에만 쓰고 끝나면 지운다
 // (~/.docker/config.json 을 읽지도 쓰지도 않음). 설계: docs/architecture/workspace-image-registry.md
@@ -99,7 +99,7 @@ export async function pushImage(
   const target = buildImageTargetRef(credentials.imagePrefix, localRef, opts.name, opts.tag);
   io.log(`▶ docker tag ${localRef} ${target}`);
   await io.docker(["tag", localRef, target]);
-  const configDir = await mkdtemp(join(tmpdir(), "assay-docker-"));
+  const configDir = await mkdtemp(join(tmpdir(), "everdict-docker-"));
   try {
     await writeFile(join(configDir, "config.json"), buildDockerAuthConfig(credentials), { mode: 0o600 });
     io.log(`▶ docker push ${target} (자격증명: 임시 DOCKER_CONFIG, 종료 후 삭제)`);
@@ -110,18 +110,18 @@ export async function pushImage(
   return target;
 }
 
-// assay image push <local-ref> [--registry R] [--name N] [--tag T] [--api-url URL] [--api-key ak_…]
+// everdict image push <local-ref> [--registry R] [--name N] [--tag T] [--api-url URL] [--api-key ak_…]
 export async function imagePushCommand(localRef: string | undefined, flags: Map<string, string>): Promise<void> {
   if (!localRef)
     throw new BadRequestError(
       "BAD_REQUEST",
       undefined,
-      "발행할 로컬 이미지 참조가 필요합니다 — assay image push <ref>",
+      "발행할 로컬 이미지 참조가 필요합니다 — everdict image push <ref>",
     );
-  const apiUrl = flags.get("api-url") ?? process.env.ASSAY_API_URL ?? "http://localhost:8787";
-  const apiKey = flags.get("api-key") ?? process.env.ASSAY_API_KEY;
+  const apiUrl = flags.get("api-url") ?? process.env.EVERDICT_API_URL ?? "http://localhost:8787";
+  const apiKey = flags.get("api-key") ?? process.env.EVERDICT_API_KEY;
   if (!apiKey)
-    throw new BadRequestError("BAD_REQUEST", undefined, "--api-key <ak_…> (또는 ASSAY_API_KEY) 가 필요합니다");
+    throw new BadRequestError("BAD_REQUEST", undefined, "--api-key <ak_…> (또는 EVERDICT_API_KEY) 가 필요합니다");
   const credentials = await fetchPushCredentials(apiUrl, apiKey, flags.get("registry"));
   const target = await pushImage(credentials, localRef, { name: flags.get("name"), tag: flags.get("tag") });
   console.error("✓ 발행 완료 — 하니스 핀/서비스 이미지로 이 참조를 쓰세요:");

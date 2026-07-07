@@ -19,7 +19,7 @@ export interface ServiceRow {
 export interface DepRow {
   store: string
   role: string
-  isolateBy: string // …/schema | external(BYO 외부 스토어 — Assay 미배포, 연결은 배포 시 env)
+  isolateBy: string // …/schema | external(BYO 외부 스토어 — Everdict 미배포, 연결은 배포 시 env)
   service: string // 이 스토어를 쓰는 서비스(선택; 비우면 토폴로지 공용)
 }
 

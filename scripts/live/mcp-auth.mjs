@@ -5,8 +5,8 @@
 import process from "node:process";
 
 const API = process.env.API ?? "http://127.0.0.1:8787";
-const KC = process.env.KC ?? "http://localhost:8081/realms/assay";
-const INTERNAL = process.env.ASSAY_INTERNAL_TOKEN ?? "mcp-secret";
+const KC = process.env.KC ?? "http://localhost:8081/realms/everdict";
+const INTERNAL = process.env.EVERDICT_INTERNAL_TOKEN ?? "mcp-secret";
 const SDK = `${process.cwd()}/apps/api/node_modules/@modelcontextprotocol/sdk/dist/esm`;
 const { Client } = await import(`${SDK}/client/index.js`);
 const { StreamableHTTPClientTransport } = await import(`${SDK}/client/streamableHttp.js`);
@@ -17,7 +17,7 @@ const fails = [];
 async function ropc(user, pass) {
   const body = new URLSearchParams({
     grant_type: "password",
-    client_id: "assay-mcp",
+    client_id: "everdict-mcp",
     username: user,
     password: pass,
     scope: "openid",
@@ -36,7 +36,7 @@ async function connect(token) {
   const transport = new StreamableHTTPClientTransport(new URL(`${API}/mcp`), {
     requestInit: { headers: { authorization: `Bearer ${token}` } },
   });
-  const client = new Client({ name: "assay-live", version: "0" });
+  const client = new Client({ name: "everdict-live", version: "0" });
   await client.connect(transport);
   return { client, transport };
 }
@@ -45,7 +45,7 @@ async function connect(token) {
 const meta = await (await fetch(`${API}/.well-known/oauth-protected-resource`)).json();
 console.log("PRM:", meta.resource, "| AS:", JSON.stringify(meta.authorization_servers));
 if (!String(meta.resource).endsWith("/mcp")) fails.push("PRM.resource");
-if (!(meta.authorization_servers ?? []).some((a) => a.includes("/realms/assay")))
+if (!(meta.authorization_servers ?? []).some((a) => a.includes("/realms/everdict")))
   fails.push("PRM.authorization_servers");
 
 // 2) unauthenticated → 401 + WWW-Authenticate(resource_metadata)

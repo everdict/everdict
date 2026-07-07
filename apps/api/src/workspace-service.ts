@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
-import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "@assay/core";
-import type { WorkspaceRecord, WorkspaceStore, WorkspaceWithRole } from "@assay/db";
+import { BadRequestError, ConflictError, ForbiddenError, NotFoundError } from "@everdict/core";
+import type { WorkspaceRecord, WorkspaceStore, WorkspaceWithRole } from "@everdict/db";
 import { validateImageRef } from "./image-ref.js";
 
 // 워크스페이스 self-serve 멤버십의 서비스 코어 — HTTP 라우트와 MCP 툴이 공유한다(패리티: 로직 1개, 트랜스포트 2개).

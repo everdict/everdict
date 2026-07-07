@@ -167,7 +167,7 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
   async createInvite(input: CreateInviteInput): Promise<WorkspaceInviteMeta> {
     const id = randomUUID();
     const res = await this.client.query<{ created_at: string | Date }>(
-      `INSERT INTO assay_workspace_invites (token_hash, id, workspace, role, created_by, prefix, expires_at)
+      `INSERT INTO everdict_workspace_invites (token_hash, id, workspace, role, created_by, prefix, expires_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING created_at`,
       [input.tokenHash, id, input.workspace, input.role, input.createdBy, input.prefix, input.expiresAt ?? null],
     );
@@ -189,14 +189,14 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
     // token_hash 는 select 하지 않는다(절대 노출 금지).
     const res = await this.client.query<InviteMetaRow>(
       `SELECT id, workspace, role, created_by, prefix, created_at, expires_at, accepted_at, accepted_by
-       FROM assay_workspace_invites WHERE workspace = $1 ORDER BY created_at DESC`,
+       FROM everdict_workspace_invites WHERE workspace = $1 ORDER BY created_at DESC`,
       [workspace],
     );
     return res.rows.map(rowToMeta);
   }
 
   async revokeInvite(workspace: string, id: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_workspace_invites WHERE workspace = $1 AND id = $2", [workspace, id]);
+    await this.client.query("DELETE FROM everdict_workspace_invites WHERE workspace = $1 AND id = $2", [workspace, id]);
   }
 
   async consumeInvite(tokenHash: string, subject: string, email?: string): Promise<ConsumeOutcome> {
@@ -204,15 +204,15 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
     // 기존 멤버는 role 유지(email 만 COALESCE 갱신) — 공유 링크로 권한이 바뀌지 않게.
     const res = await this.client.query<{ workspace: string; role: string }>(
       `WITH claimed AS (
-         UPDATE assay_workspace_invites SET accepted_at = now(), accepted_by = $2
+         UPDATE everdict_workspace_invites SET accepted_at = now(), accepted_by = $2
           WHERE token_hash = $1 AND accepted_at IS NULL AND (expires_at IS NULL OR expires_at > now())
          RETURNING workspace, role
        ),
        member AS (
-         INSERT INTO assay_workspace_members (workspace, subject, role, email)
+         INSERT INTO everdict_workspace_members (workspace, subject, role, email)
          SELECT workspace, $2, role, $3 FROM claimed
          ON CONFLICT (workspace, subject)
-         DO UPDATE SET email = COALESCE(EXCLUDED.email, assay_workspace_members.email)
+         DO UPDATE SET email = COALESCE(EXCLUDED.email, everdict_workspace_members.email)
          RETURNING workspace, role
        )
        SELECT workspace, role FROM member`,
@@ -222,7 +222,7 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
     if (row) return { ok: true, result: { workspace: row.workspace, role: row.role } };
     // 실패 — 읽기전용 후속 분류(성공 경로 원자성 무관).
     const why = await this.client.query<{ accepted_at: string | Date | null; expires_at: string | Date | null }>(
-      "SELECT accepted_at, expires_at FROM assay_workspace_invites WHERE token_hash = $1",
+      "SELECT accepted_at, expires_at FROM everdict_workspace_invites WHERE token_hash = $1",
       [tokenHash],
     );
     const w = why.rows[0];
@@ -234,7 +234,7 @@ export class PgWorkspaceInviteStore implements WorkspaceInviteStore {
   async previewInvite(tokenHash: string): Promise<{ workspace: string; role: string } | undefined> {
     // token_hash 로만 조회하고 redeem 하지 않는다. 미수락·미만료 행만.
     const res = await this.client.query<{ workspace: string; role: string }>(
-      `SELECT workspace, role FROM assay_workspace_invites
+      `SELECT workspace, role FROM everdict_workspace_invites
         WHERE token_hash = $1 AND accepted_at IS NULL AND (expires_at IS NULL OR expires_at > now())`,
       [tokenHash],
     );

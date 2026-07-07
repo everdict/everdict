@@ -18,9 +18,9 @@ const require = createRequire(new URL("../../apps/desktop/package.json", import.
 const { _electron } = require("playwright-core");
 const electronPath = require("electron");
 
-const API = (process.env.ASSAY_API_URL ?? "http://localhost:8799").replace(/\/$/, "");
-const WEB = (process.env.ASSAY_WEB_URL ?? "http://localhost:3131").replace(/\/$/, "");
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const API = (process.env.EVERDICT_API_URL ?? "http://localhost:8799").replace(/\/$/, "");
+const WEB = (process.env.EVERDICT_WEB_URL ?? "http://localhost:3131").replace(/\/$/, "");
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const api = async (p, init = {}) => {
   const r = await fetch(`${API}${p}`, { ...init, headers: { ...H, ...(init.headers ?? {}) } });
@@ -28,12 +28,12 @@ const api = async (p, init = {}) => {
   return r.json();
 };
 
-const configHome = mkdtempSync(path.join(tmpdir(), "assay-notify-"));
+const configHome = mkdtempSync(path.join(tmpdir(), "everdict-notify-"));
 const appDir = new URL("../../apps/desktop", import.meta.url).pathname;
 const app = await _electron.launch({
   executablePath: electronPath,
   args: [appDir, "--no-sandbox", "--password-store=basic"],
-  env: { ...process.env, ASSAY_WEB_URL: WEB, ASSAY_API_URL: API, XDG_CONFIG_HOME: configHome },
+  env: { ...process.env, EVERDICT_WEB_URL: WEB, EVERDICT_API_URL: API, XDG_CONFIG_HOME: configHome },
 });
 const mainLogs = [];
 app.process().stderr?.on("data", (d) => mainLogs.push(String(d)));

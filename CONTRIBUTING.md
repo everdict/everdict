@@ -1,6 +1,6 @@
-# Contributing to Assay
+# Contributing to Everdict
 
-Thanks for your interest! Assay is a harness-agnostic agent evaluation runtime — contributions of
+Thanks for your interest! Everdict is a harness-agnostic agent evaluation runtime — contributions of
 harness adapters, graders, runtime backends, docs, and bug fixes are all welcome.
 
 ## Dev setup
@@ -26,7 +26,7 @@ The short version:
 
 - One-way dependencies: `core` is the root; adapter packages implement its interfaces. Reverse imports are bugs.
 - No `any`, no non-null `!`, no silent nullable defaults; validate every boundary with Zod.
-- Errors: throw an `AppError` subclass from `@assay/core`; never propagate a raw SDK/HTTP error.
+- Errors: throw an `AppError` subclass from `@everdict/core`; never propagate a raw SDK/HTTP error.
 - Language policy: docs/rules in English, code comments in Korean (this is intentional — match the
   surrounding code; don't "fix" existing comments' language).
 
@@ -36,7 +36,7 @@ The short version:
 pnpm format && pnpm lint && pnpm typecheck && pnpm test && pnpm build
 ```
 
-`apps/web` is self-contained: `pnpm -F @assay/web lint` + `pnpm -F @assay/web build`.
+`apps/web` is self-contained: `pnpm -F @everdict/web lint` + `pnpm -F @everdict/web build`.
 
 ## Tests
 

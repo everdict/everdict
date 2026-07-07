@@ -1,5 +1,5 @@
-import { ForbiddenError } from "@assay/core";
-import { InMemoryWorkspaceSettingsStore } from "@assay/db";
+import { ForbiddenError } from "@everdict/core";
+import { InMemoryWorkspaceSettingsStore } from "@everdict/db";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { MattermostCommandService } from "./mattermost-command-service.js";
 
@@ -24,7 +24,7 @@ describe("MattermostCommandService — 인바운드 검증 + 디스패치", () =
         { label: "codex@1", value: "0.900" },
         { label: "claude@2", value: "0.850" },
       ],
-      webBaseUrl: "https://assay.example.com",
+      webBaseUrl: "https://everdict.example.com",
     });
   });
 
@@ -62,7 +62,7 @@ describe("MattermostCommandService — 인바운드 검증 + 디스패치", () =
     });
     expect(r.response_type).toBe("in_channel");
     expect(r.text).toContain("sc-1");
-    expect(r.text).toContain("https://assay.example.com/acme/scorecards/sc-1");
+    expect(r.text).toContain("https://everdict.example.com/acme/scorecards/sc-1");
   });
 
   it("run 인자 부족 → 사용법 안내(발사 안 함)", async () => {

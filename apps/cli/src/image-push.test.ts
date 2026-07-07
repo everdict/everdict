@@ -22,11 +22,11 @@ describe("buildImageTargetRef — 로컬 ref → 워크스페이스 레지스트
 });
 
 describe("buildDockerAuthConfig — 임시 DOCKER_CONFIG 내용", () => {
-  it("auths[host].auth = base64(user:pass); username 미지정이면 토큰 단독 관례로 assay", () => {
+  it("auths[host].auth = base64(user:pass); username 미지정이면 토큰 단독 관례로 everdict", () => {
     const config = JSON.parse(buildDockerAuthConfig(CREDS));
     expect(Buffer.from(config.auths["ghcr.io"].auth, "base64").toString()).toBe("bot:tok-123");
     const tokenOnly = JSON.parse(buildDockerAuthConfig({ host: "r.io", password: "p" }));
-    expect(Buffer.from(tokenOnly.auths["r.io"].auth, "base64").toString()).toBe("assay:p");
+    expect(Buffer.from(tokenOnly.auths["r.io"].auth, "base64").toString()).toBe("everdict:p");
   });
 });
 

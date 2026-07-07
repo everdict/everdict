@@ -1,7 +1,7 @@
 {
   "id": "spreadsheetbench",
   "version": "1.0.0",
-  "description": "SpreadsheetBench(v1 + v2) 벤치마크 번들 — 실제 스프레드시트 조작 벤치마크를 Assay 에 등록. v1(912 instructions, online-judge 셀 비교) + v2(4 카테고리, regression/modification 채점)의 레시피(실데이터 인입 템플릿) + 바로 돌아가는 자기완결 xlsx 샘플. codex 등 command 하니스로 수행.",
+  "description": "SpreadsheetBench(v1 + v2) 벤치마크 번들 — 실제 스프레드시트 조작 벤치마크를 Everdict 에 등록. v1(912 instructions, online-judge 셀 비교) + v2(4 카테고리, regression/modification 채점)의 레시피(실데이터 인입 템플릿) + 바로 돌아가는 자기완결 xlsx 샘플. codex 등 command 하니스로 수행.",
   "harnessTemplates": [
     {
       "kind": "command",

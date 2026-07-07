@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { DatasetSchema } from "@assay/core";
+import { DatasetSchema } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { BENCHMARK_CATALOG, adapterToDataset, importBenchmark, listBenchmarks, sweBenchImage } from "./catalog.js";
 import { type FetchLike, fetchHfRows } from "./sources.js";
@@ -107,7 +107,7 @@ describe("BenchmarkAdapter 카탈로그", () => {
     expect(c?.id).toBe("chrome-001");
     expect(c?.env).toMatchObject({ kind: "os-use", display: ":99", screenshotPath: "/tmp/osuse.png" }); // 데스크탑 env
     expect(c?.placement).toBeUndefined(); // 컨테이너 라우팅은 image 가 구동 — 전용 docker 런타임 핀 없음
-    expect(c?.image).toBe("assay-osworld:demo"); // 공통 데스크탑 이미지(docker capability 로 라우팅)
+    expect(c?.image).toBe("everdict-osworld:demo"); // 공통 데스크탑 이미지(docker capability 로 라우팅)
     expect(c?.tags).toEqual(["chrome", "test"]);
     const judge = c?.graders.find((g) => g.id === "judge");
     expect(judge?.config?.useScreenshot).toBe(true);

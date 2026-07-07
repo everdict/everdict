@@ -1,5 +1,5 @@
 import process from "node:process";
-import { type Grader, type GraderSpec, JUDGE_MODEL_ENV, JUDGE_PROVIDER_ENV, type Score } from "@assay/core";
+import { type Grader, type GraderSpec, JUDGE_MODEL_ENV, JUDGE_PROVIDER_ENV, type Score } from "@everdict/core";
 import type { Judge } from "./judge.js";
 import { makeGraders } from "./make-graders.js";
 import { anthropicComplete, modelJudge, openaiComplete } from "./model-judge.js";
@@ -8,8 +8,8 @@ type Env = Record<string, string | undefined>;
 
 // dispatch 경로(agent/run, service-backend)에서 per-case judge grader 를 실행하기 위한 Judge 를 env 로 구성.
 // 모델 전송은 harness/judge 와 동일(OpenAI-호환 LiteLLM 포함). 컨트롤플레인이 테넌트 시크릿을 alloc env 로 주입:
-//   ASSAY_JUDGE_MODEL    = 판정 모델 (필수 — 없으면 judge 비활성)
-//   ASSAY_JUDGE_PROVIDER = openai(기본) | anthropic
+//   EVERDICT_JUDGE_MODEL    = 판정 모델 (필수 — 없으면 judge 비활성)
+//   EVERDICT_JUDGE_PROVIDER = openai(기본) | anthropic
 //   OPENAI_API_KEY / OPENAI_BASE_URL   또는   ANTHROPIC_API_KEY / ANTHROPIC_BASE_URL
 export function judgeFromEnv(env: Env = process.env): Judge | undefined {
   const model = env[JUDGE_MODEL_ENV];
@@ -47,7 +47,7 @@ export function makeGradersFromEnv(specs: GraderSpec[], env: Env = process.env):
   for (const s of specs) {
     if (s.id === "judge") {
       const id = typeof s.config?.id === "string" ? s.config.id : "judge";
-      out.push(skipGrader(id, "judge", "judge 모델 미설정(ASSAY_JUDGE_MODEL + 키)"));
+      out.push(skipGrader(id, "judge", "judge 모델 미설정(EVERDICT_JUDGE_MODEL + 키)"));
     } else {
       out.push(...makeGraders([s]));
     }

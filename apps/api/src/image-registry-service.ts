@@ -4,10 +4,10 @@ import {
   NotFoundError,
   type RegistryAuth,
   imageRegistryPrefix,
-} from "@assay/core";
-import type { WorkspaceSettings, WorkspaceSettingsStore } from "@assay/db";
+} from "@everdict/core";
+import type { WorkspaceSettings, WorkspaceSettingsStore } from "@everdict/db";
 
-// 워크스페이스 이미지 레지스트리(BYO, 복수) 서비스 — 하니스 이미지 분류 기준 + assay image push 발행 대상.
+// 워크스페이스 이미지 레지스트리(BYO, 복수) 서비스 — 하니스 이미지 분류 기준 + everdict image push 발행 대상.
 // 여러 개를 이름으로 등록하고, push 는 이름으로 선택(1개뿐이면 생략 가능), 분류/pull 인증은 전체를 host 매칭.
 // 등록은 관리자(settings:write), 조회는 viewer+(harnesses:read — 분류는 하니스 읽기 관심사),
 // push 자격증명 발급은 member+(images:push — 자격증명 '값' 유출은 별도 액션으로 정직하게 명명).
@@ -25,7 +25,7 @@ export interface ImageRegistryView {
   imagePrefix: string; // "host[/namespace]/"
 }
 
-// push 자격증명 — 호출자(assay image push / 에이전트)가 docker login+push 에 쓰고 버린다. 어디에도 영속 안 함.
+// push 자격증명 — 호출자(everdict image push / 에이전트)가 docker login+push 에 쓰고 버린다. 어디에도 영속 안 함.
 export interface ImagePushCredentials {
   name: string;
   host: string;

@@ -3,12 +3,12 @@ import { modelJudge, openaiComplete } from "./model-judge.js";
 
 // 라이브 E2E — OpenAI-호환 엔드포인트(LiteLLM 등)로 실제 모델을 호출해 judge 전 경로(전송→파싱)를 검증한다.
 // 실 인프라가 필요하므로 env 미설정이면 skip(CI 안전). 로컬에서:
-//   ASSAY_E2E_OPENAI_BASE_URL=http://localhost:4000/v1 \
-//   ASSAY_E2E_OPENAI_KEY=sk-... ASSAY_E2E_OPENAI_MODEL=chatgpt/gpt-5.4-mini \
-//   pnpm --filter @assay/graders test model-judge.scenario
-const BASE = process.env.ASSAY_E2E_OPENAI_BASE_URL;
-const KEY = process.env.ASSAY_E2E_OPENAI_KEY;
-const MODEL = process.env.ASSAY_E2E_OPENAI_MODEL;
+//   EVERDICT_E2E_OPENAI_BASE_URL=http://localhost:4000/v1 \
+//   EVERDICT_E2E_OPENAI_KEY=sk-... EVERDICT_E2E_OPENAI_MODEL=chatgpt/gpt-5.4-mini \
+//   pnpm --filter @everdict/graders test model-judge.scenario
+const BASE = process.env.EVERDICT_E2E_OPENAI_BASE_URL;
+const KEY = process.env.EVERDICT_E2E_OPENAI_KEY;
+const MODEL = process.env.EVERDICT_E2E_OPENAI_MODEL;
 
 describe.skipIf(!BASE || !KEY || !MODEL)("model judge — live OpenAI-compatible (LiteLLM)", () => {
   if (!BASE || !KEY || !MODEL) return; // 타입 내로잉(skipIf 와 별개)

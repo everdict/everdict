@@ -1,5 +1,5 @@
 {
-  "realm": "assay",
+  "realm": "everdict",
   "enabled": true,
   "sslRequired": "none",
   "roles": {
@@ -16,9 +16,9 @@
   ],
   "clients": [
     {
-      "clientId": "assay-web",
+      "clientId": "everdict-web",
       "enabled": true,
-      "secret": "assay-web-secret",
+      "secret": "everdict-web-secret",
       "publicClient": false,
       "standardFlowEnabled": true,
       "directAccessGrantsEnabled": true,
@@ -41,7 +41,7 @@
       ]
     },
     {
-      "clientId": "assay-mcp",
+      "clientId": "everdict-mcp",
       "enabled": true,
       "publicClient": true,
       "standardFlowEnabled": true,

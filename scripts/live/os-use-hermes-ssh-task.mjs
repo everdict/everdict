@@ -10,7 +10,7 @@
 //   2중 증명: (a) 결정론 — hermes 가 폼을 떠났고(Host 입력 사라짐, sshError 없음) + `ssh -N -L` 터널 프로세스 생존;
 //             (b) VLM — after(진입 후)=pass, before(SSH 폼)=fail (SLICE74 실 프로덕션 judge 경로 재사용).
 //
-// 이미지: /tmp/hermes-desktop/Dockerfile.ssh → assay-hermes-ssh:demo. 키: OPENAI_API_KEY env 또는 infra/litellm/.env.
+// 이미지: /tmp/hermes-desktop/Dockerfile.ssh → everdict-hermes-ssh:demo. 키: OPENAI_API_KEY env 또는 infra/litellm/.env.
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import process from "node:process";
@@ -18,7 +18,7 @@ import { DockerDriver } from "../../packages/drivers/dist/index.js";
 import { OsUseEnvironment } from "../../packages/environments/dist/index.js";
 import { JudgeGrader, judgeFromEnv } from "../../packages/graders/dist/index.js";
 
-const IMAGE = process.env.HERMES_IMAGE ?? "assay-hermes-ssh:demo";
+const IMAGE = process.env.HERMES_IMAGE ?? "everdict-hermes-ssh:demo";
 
 // --- VLM judge env(LiteLLM OpenAI-호환 프록시) ---
 function masterKey() {
@@ -31,8 +31,8 @@ function masterKey() {
   }
 }
 const judge = judgeFromEnv({
-  ASSAY_JUDGE_MODEL: process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini",
-  ASSAY_JUDGE_PROVIDER: "openai",
+  EVERDICT_JUDGE_MODEL: process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini",
+  EVERDICT_JUDGE_PROVIDER: "openai",
   OPENAI_API_KEY: masterKey() ?? "",
   OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? "http://localhost:4000/v1",
 });

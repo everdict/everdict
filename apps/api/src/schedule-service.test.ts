@@ -1,5 +1,5 @@
-import { BadRequestError, ForbiddenError, NotFoundError } from "@assay/core";
-import { InMemoryScheduleStore, type ScheduleRunTemplate } from "@assay/db";
+import { BadRequestError, ForbiddenError, NotFoundError } from "@everdict/core";
+import { InMemoryScheduleStore, type ScheduleRunTemplate } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { type ScheduleDriver, ScheduleService, type ScheduleSpec, isValidCron } from "./schedule-service.js";
 import type { RunScorecardInput } from "./scorecard-service.js";

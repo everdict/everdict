@@ -1,4 +1,4 @@
-import type { RunStore, ScorecardStore } from "@assay/db";
+import type { RunStore, ScorecardStore } from "@everdict/db";
 
 // 부팅 시 고아 작업 회수 — 배치(scorecard)와 run 은 컨트롤플레인 프로세스 안에서 in-process 로 track 된다
 // (inFlight supersede/in-process 랑데부와 같은 단일 프로세스 전제). 따라서 프로세스가 재시작되면 이전

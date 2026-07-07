@@ -1,4 +1,4 @@
-import { BadRequestError, ConflictError, type HarnessTemplateSpec, NotFoundError } from "@assay/core";
+import { BadRequestError, ConflictError, type HarnessTemplateSpec, NotFoundError } from "@everdict/core";
 import { beforeEach, describe, expect, it } from "vitest";
 import { InMemoryHarnessInstanceRegistry } from "./harness-instance-registry.js";
 import { InMemoryHarnessTemplateRegistry } from "./harness-template-registry.js";

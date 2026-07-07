@@ -1,4 +1,4 @@
-import type { TraceEvent } from "@assay/core";
+import type { TraceEvent } from "@everdict/core";
 
 // --- 안전한 unknown 내로잉 헬퍼 (any 금지) ---
 function rec(v: unknown): Record<string, unknown> | null {

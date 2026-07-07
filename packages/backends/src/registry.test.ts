@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult, RuntimeSpec } from "@assay/core";
+import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import type { Backend } from "./backend.js";
 import {

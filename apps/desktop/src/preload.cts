@@ -1,4 +1,4 @@
-// 프리로드 — window.assayDesktop 브리지의 렌더러 쪽 절반(스킬 desktop 불변식 3: 이 4개+구독이 전부).
+// 프리로드 — window.everdictDesktop 브리지의 렌더러 쪽 절반(스킬 desktop 불변식 3: 이 4개+구독이 전부).
 // 채널 문자열은 bridge.ts BRIDGE_CHANNELS 와 수동 동기화(이 파일은 sandbox CJS 라 ESM 모듈을 import 못 한다).
 // 1차 게이트: main 이 additionalArguments 로 넘긴 웹 origin 과 문서 origin 이 일치할 때만 노출 —
 // 탑레벨 네비게이션이 Keycloak/GitHub 로 나가 있는 동안엔 브리지 자체가 없다. (실제 권한 경계는
@@ -8,28 +8,28 @@ import electron = require("electron");
 // sandbox preload 는 렌더러 문서 컨텍스트라 location 이 존재한다 — DOM lib 없는 tsconfig 라 최소 선언만.
 declare const location: { origin: string };
 
-const ORIGIN_FLAG = "--assay-web-origin=";
+const ORIGIN_FLAG = "--everdict-web-origin=";
 const expectedOrigin = process.argv.find((a) => a.startsWith(ORIGIN_FLAG))?.slice(ORIGIN_FLAG.length);
 
 // 설정(setup) 창 전용 브리지 — 서버 주소 조회/저장 2메서드(D8). 메인 쪽 IPC 가 setup.html 의
 // file:// URL 만 허용하므로(main.ts), 웹/외부 페이지에는 이 표면이 닿지 않는다.
-if (process.argv.includes("--assay-setup")) {
-  electron.contextBridge.exposeInMainWorld("assaySetup", {
-    getServerUrl: () => electron.ipcRenderer.invoke("assay:get-server-url"),
-    setServerUrl: (url: string) => electron.ipcRenderer.invoke("assay:set-server-url", url),
+if (process.argv.includes("--everdict-setup")) {
+  electron.contextBridge.exposeInMainWorld("everdictSetup", {
+    getServerUrl: () => electron.ipcRenderer.invoke("everdict:get-server-url"),
+    setServerUrl: (url: string) => electron.ipcRenderer.invoke("everdict:set-server-url", url),
   });
 }
 
 if (expectedOrigin !== undefined && location.origin === expectedOrigin) {
-  electron.contextBridge.exposeInMainWorld("assayDesktop", {
-    appInfo: () => electron.ipcRenderer.invoke("assay:app-info"),
-    pairRunner: (payload: unknown) => electron.ipcRenderer.invoke("assay:pair-runner", payload),
-    unpairRunner: () => electron.ipcRenderer.invoke("assay:unpair-runner"),
-    runnerStatus: () => electron.ipcRenderer.invoke("assay:runner-status"),
+  electron.contextBridge.exposeInMainWorld("everdictDesktop", {
+    appInfo: () => electron.ipcRenderer.invoke("everdict:app-info"),
+    pairRunner: (payload: unknown) => electron.ipcRenderer.invoke("everdict:pair-runner", payload),
+    unpairRunner: () => electron.ipcRenderer.invoke("everdict:unpair-runner"),
+    runnerStatus: () => electron.ipcRenderer.invoke("everdict:runner-status"),
     onRunnerStatus: (callback: (status: unknown) => void) => {
       const listener = (_event: electron.IpcRendererEvent, status: unknown) => callback(status);
-      electron.ipcRenderer.on("assay:runner-status-event", listener);
-      return () => electron.ipcRenderer.removeListener("assay:runner-status-event", listener);
+      electron.ipcRenderer.on("everdict:runner-status-event", listener);
+      return () => electron.ipcRenderer.removeListener("everdict:runner-status-event", listener);
     },
   });
 }

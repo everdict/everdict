@@ -1,5 +1,5 @@
-import type { CommandHarnessSpec, ComputeHandle, RunContext, TraceEvent } from "@assay/core";
-import type { StartedUsageProxy, TraceSource } from "@assay/trace";
+import type { CommandHarnessSpec, ComputeHandle, RunContext, TraceEvent } from "@everdict/core";
+import type { StartedUsageProxy, TraceSource } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
 import { CommandHarness } from "./command.js";
 
@@ -58,14 +58,14 @@ describe("CommandHarness", () => {
     expect(wd.execs.every((e) => e.cwd === "/tmp")).toBe(true); // setup(install) + command(run) 모두 /tmp
   });
 
-  it("run 은 command 를 템플릿 치환(셸 안전)하고 env(ASSAY_RUN_ID + spec.env)를 주입; trace none + 출력 없음 → 이벤트 없음", async () => {
+  it("run 은 command 를 템플릿 치환(셸 안전)하고 env(EVERDICT_RUN_ID + spec.env)를 주입; trace none + 출력 없음 → 이벤트 없음", async () => {
     const { compute, execs } = fakeCompute();
     const events = await collect(new CommandHarness(spec(), { runId: () => "rid1" }).run(compute, "fix the bug", ctx));
     expect(events).toEqual([]); // trace none + stdout 빈 값
     const e = execs[0];
     expect(e?.cmd).toContain("--model sonnet");
     expect(e?.cmd).toContain("--message 'fix the bug'"); // {{task}} 는 shq 처리
-    expect(e?.env?.ASSAY_RUN_ID).toBe("rid1");
+    expect(e?.env?.EVERDICT_RUN_ID).toBe("rid1");
     expect(e?.env?.FOO).toBe("bar");
   });
 
@@ -161,7 +161,7 @@ describe("CommandHarness", () => {
       },
     );
     await collect(h.run(compute, "t", ctx));
-    expect(execs[0]?.env?.ASSAY_RUN_ID).toBe("rid2"); // 실행에 주입된 상관 키
+    expect(execs[0]?.env?.EVERDICT_RUN_ID).toBe("rid2"); // 실행에 주입된 상관 키
     const events = await h.collectTrace("rid2"); // 같은 키로 pull(runCase 가 compute 해제 후 호출)
     expect(fetched).toBe("otel:http://j:rid2");
     expect(events).toHaveLength(1);
@@ -183,7 +183,7 @@ describe("CommandHarness", () => {
       { runId: () => "self-minted" },
     );
     await collect(h.run(compute, "t", { ...ctx, runId: "from-runcase" }));
-    expect(execs[0]?.env?.ASSAY_RUN_ID).toBe("from-runcase"); // runCase 상관 키 우선
+    expect(execs[0]?.env?.EVERDICT_RUN_ID).toBe("from-runcase"); // runCase 상관 키 우선
     // authSecret 은 '이름'만(값 trace.auth 는 노출 금지), mlflow 는 correlate/experiment 도 좌표에 포함.
     expect(h.traceSource()).toEqual({
       kind: "mlflow",
@@ -252,13 +252,13 @@ describe("CommandHarness", () => {
     };
     const phoenix = new CommandHarness(
       spec({
-        trace: { kind: "phoenix", endpoint: "http://p", project: "assay-e2e", collect: "job", auth: "Bearer k" },
+        trace: { kind: "phoenix", endpoint: "http://p", project: "everdict-e2e", collect: "job", auth: "Bearer k" },
       }),
       { traceSourceFor: (k, _e, o) => sourceFor(k)(o) },
     );
     expect(await phoenix.collectTrace("tid")).toHaveLength(1);
     // traceSource() 좌표에도 project 동봉 — control-plane 수집(traceRef)이 그대로 쓴다.
-    expect(phoenix.traceSource()).toMatchObject({ kind: "phoenix", project: "assay-e2e", collect: "job" });
+    expect(phoenix.traceSource()).toMatchObject({ kind: "phoenix", project: "everdict-e2e", collect: "job" });
 
     const langsmith = new CommandHarness(
       spec({ trace: { kind: "langsmith", endpoint: "http://ls", collect: "job", auth: "lsv2_key" } }),
@@ -268,7 +268,7 @@ describe("CommandHarness", () => {
     expect(langsmith.traceSource()).toMatchObject({ kind: "langsmith", collect: "job" });
 
     expect(seen).toEqual([
-      { kind: "phoenix", project: "assay-e2e", auth: "Bearer k" },
+      { kind: "phoenix", project: "everdict-e2e", auth: "Bearer k" },
       { kind: "langsmith", auth: "lsv2_key" },
     ]);
   });

@@ -37,12 +37,12 @@ const rt = new NomadTopologyRuntime({ addr: ADDR, datacenters: ["dc1"], pollInte
 const sharedPgAlloc = async () => {
   const res = await fetch(`${ADDR}/v1/job/${SHARED_STORE_JOB_ID}/allocations`);
   const allocs = await res.json();
-  return allocs.find((a) => a.TaskGroup === "assay-shared-postgres" && a.ClientStatus === "running")?.ID;
+  return allocs.find((a) => a.TaskGroup === "everdict-shared-postgres" && a.ClientStatus === "running")?.ID;
 };
 // alloc 안에서 psql URL 로 접속 시도 → OK/DENIED.
 const tryConnect = (allocId, url) => {
   try {
-    nomad(["alloc", "exec", "-task", "assay-shared-postgres", allocId, "psql", url, "-tAc", "select 1"]);
+    nomad(["alloc", "exec", "-task", "everdict-shared-postgres", allocId, "psql", url, "-tAc", "select 1"]);
     return "OK";
   } catch (e) {
     const msg = (e.stderr ?? e.stdout ?? e.message ?? "").toString();
@@ -72,11 +72,11 @@ try {
     "alloc",
     "exec",
     "-task",
-    "assay-shared-postgres",
+    "everdict-shared-postgres",
     allocId,
     "psql",
     "-U",
-    "assay",
+    "everdict",
     "-tAc",
     "SELECT datname FROM pg_database",
   ]);

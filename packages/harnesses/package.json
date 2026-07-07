@@ -1,5 +1,5 @@
 {
-  "name": "@assay/harnesses",
+  "name": "@everdict/harnesses",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -13,7 +13,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@assay/core": "workspace:*",
-    "@assay/trace": "workspace:*"
+    "@everdict/core": "workspace:*",
+    "@everdict/trace": "workspace:*"
   }
 }

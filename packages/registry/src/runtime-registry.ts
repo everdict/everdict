@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError, type RuntimeSpec } from "@assay/core";
+import { ConflictError, NotFoundError, type RuntimeSpec } from "@everdict/core";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 // Runtime(실행 인프라) 버전 SSOT — (tenant, id, version) → RuntimeSpec. 버전 불변. "latest" 는 semver/등록순 최신.

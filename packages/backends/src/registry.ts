@@ -1,4 +1,4 @@
-import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@assay/core";
+import { type AgentJob, BadRequestError, type CaseResult, NotFoundError, type RuntimeSpec } from "@everdict/core";
 import { z } from "zod";
 import type { Backend } from "./backend.js";
 import { K8sBackend, type K8sBackendOptions } from "./k8s.js";
@@ -63,7 +63,7 @@ export const BackendConfigSchema = z.discriminatedUnion("kind", [
     name: z.string(),
     kind: z.literal("k8s"),
     image: z.string(),
-    context: z.string().optional(), // kubeconfig 컨텍스트(예: kind-assay)
+    context: z.string().optional(), // kubeconfig 컨텍스트(예: kind-everdict)
     namespace: z.string().optional(),
     runtimeClass: z.string().optional(), // gVisor=gvisor 등
   }),
@@ -136,7 +136,7 @@ export function k8sRuntimeOptions(
   };
 }
 
-// 테넌트가 등록한 RuntimeSpec(@assay/core) → 라이브 Backend. 모델/클러스터 자격증명은 secretEnv 로 주입(스펙엔 비밀 없음).
+// 테넌트가 등록한 RuntimeSpec(@everdict/core) → 라이브 Backend. 모델/클러스터 자격증명은 secretEnv 로 주입(스펙엔 비밀 없음).
 // 클러스터 API 토큰(authSecret)은 인증 헤더로 쓰이고 alloc env 에서는 분리된다(위 옵션 빌더).
 // 컨트롤플레인이 디스패치 시 이걸로 테넌트 런타임을 만들어 Scheduler 레지스트리에 올린다.
 export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Record<string, string> } = {}): Backend {
@@ -144,7 +144,7 @@ export function buildRuntimeBackend(spec: RuntimeSpec, opts: { secretEnv?: Recor
   if (spec.kind === "k8s") return new K8sBackend(k8sRuntimeOptions(spec, opts.secretEnv));
   if (spec.kind === "nomad") return new NomadBackend(nomadRuntimeOptions(spec, opts.secretEnv));
   // union(local|nomad|k8s) 소진 — 컴파일타임 도달 불가. topology-capable(nomad/k8s + traceSource)은
-  // @assay/topology ServiceTopologyBackend 가 필요(순환 의존 불가) → apps/api 의 buildBackend 가 처리한다.
+  // @everdict/topology ServiceTopologyBackend 가 필요(순환 의존 불가) → apps/api 의 buildBackend 가 처리한다.
   // 런타임 방어: 경계에서 미검증 kind 가 들어오면 명시적으로 거절(never 캐스트로만 kind 문자열 확보).
   return assertNeverRuntimeKind(spec);
 }

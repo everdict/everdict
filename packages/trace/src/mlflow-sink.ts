@@ -1,4 +1,4 @@
-import { UpstreamError } from "@assay/core";
+import { UpstreamError } from "@everdict/core";
 import type {
   TraceSink,
   TraceSinkCase,
@@ -64,10 +64,10 @@ export function mlflowTraceBody(
         ...(firstUser?.kind === "message" ? { request_preview: firstUser.text.slice(0, 1000) } : {}),
         ...(lastAssistant?.kind === "message" ? { response_preview: lastAssistant.text.slice(0, 1000) } : {}),
         trace_metadata: {
-          "assay.scorecardId": ctx.scorecardId,
-          "assay.dataset": ctx.dataset,
-          "assay.harness": ctx.harness,
-          "assay.caseId": c.caseId,
+          "everdict.scorecardId": ctx.scorecardId,
+          "everdict.dataset": ctx.dataset,
+          "everdict.harness": ctx.harness,
+          "everdict.caseId": c.caseId,
         },
         tags: {},
       },
@@ -113,7 +113,7 @@ export function mlflowOtlpSpans(
       kind: 1, // SPAN_KIND_INTERNAL
       startTimeUnixNano: baseNs(0),
       endTimeUnixNano: baseNs(maxT),
-      attributes: otlpAttrs({ "assay.scorecard_id": ctx.scorecardId, "assay.harness": ctx.harness }),
+      attributes: otlpAttrs({ "everdict.scorecard_id": ctx.scorecardId, "everdict.harness": ctx.harness }),
       status: {},
     },
   ];
@@ -171,8 +171,8 @@ export function mlflowOtlpSpans(
   return {
     resourceSpans: [
       {
-        resource: { attributes: otlpAttrs({ "service.name": "assay" }) },
-        scopeSpans: [{ scope: { name: "assay" }, spans }],
+        resource: { attributes: otlpAttrs({ "service.name": "everdict" }) },
+        scopeSpans: [{ scope: { name: "everdict" }, spans }],
       },
     ],
   };
@@ -244,7 +244,7 @@ export class MlflowTraceSink implements TraceSink {
           const res = await f(`${this.base}/api/3.0/mlflow/traces/${encodeURIComponent(traceId)}/assessments`, {
             method: "POST",
             headers: this.headers(),
-            body: JSON.stringify(mlflowAssessmentBody(s, `assay:${ctx.scorecardId}`)),
+            body: JSON.stringify(mlflowAssessmentBody(s, `everdict:${ctx.scorecardId}`)),
           });
           if (!res.ok) {
             const text = await res.text().catch(() => "");

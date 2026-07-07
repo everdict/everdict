@@ -11,9 +11,9 @@ import process from "node:process";
 
 const CP_PORT = process.env.CP_PORT ?? "8790";
 const BASE = `http://127.0.0.1:${CP_PORT}`;
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const AGENT_MODEL = process.env.HERMES_MODEL ?? "gpt-5.4-mini";
-const JUDGE_MODEL = process.env.ASSAY_JUDGE_MODEL ?? "gpt-5.4-mini";
+const JUDGE_MODEL = process.env.EVERDICT_JUDGE_MODEL ?? "gpt-5.4-mini";
 const LLM_BASE = "http://localhost:4000/v1";
 const TASK_IDS = (process.env.PINCH_TASKS ?? "task_email,task_summary,task_commit_message_writer").split(",");
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -93,7 +93,7 @@ function runInWorkspace(t) {
         `HERMES_BASE_URL=${LLM_BASE}`,
         "-e",
         `HERMES_MODEL=${AGENT_MODEL}`,
-        "assay-hermes-agent:demo",
+        "everdict-hermes-agent:demo",
         "timeout",
         "220",
         "hermes",
@@ -143,14 +143,14 @@ const cp = spawn("node", ["apps/api/dist/main.js"], {
     PORT: CP_PORT,
     OPENAI_API_KEY: KEY,
     OPENAI_BASE_URL: LLM_BASE,
-    ASSAY_JUDGE_MODEL: JUDGE_MODEL,
-    ASSAY_REQUIRE_AUTH: "",
+    EVERDICT_JUDGE_MODEL: JUDGE_MODEL,
+    EVERDICT_REQUIRE_AUTH: "",
     KEYCLOAK_ISSUER: "",
     DATABASE_URL: "",
   },
   stdio: ["ignore", "ignore", "pipe"],
 });
-cp.stderr.on("data", (d) => /assay-api on/.test(String(d)) && process.stdout.write("  [cp] up\n"));
+cp.stderr.on("data", (d) => /everdict-api on/.test(String(d)) && process.stdout.write("  [cp] up\n"));
 const shutdown = () => {
   try {
     cp.kill("SIGKILL");

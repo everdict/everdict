@@ -1,15 +1,15 @@
 // 라이브 검증: K8sBackend(process) 가 실제 K8s(kind) 에 러너 에이전트를 Job 으로 띄우고
 // 완료를 폴링한 뒤 파드 로그의 sentinel 에서 CaseResult 를 파싱한다(= NomadBackend 의 K8s 짝).
 //
-// 준비: kind 클러스터 `assay` + assay-agent:local 이미지를 kind 노드에 로드해야 한다.
-//   docker build -f packages/agent/Dockerfile -t assay-agent:local .
-//   kind load docker-image assay-agent:local --name assay
-// 사용: node scripts/live/k8s-backend.mjs   (CONTEXT=kind-assay IMAGE=assay-agent:local NS=assay-ci)
+// 준비: kind 클러스터 `everdict` + everdict-agent:local 이미지를 kind 노드에 로드해야 한다.
+//   docker build -f packages/agent/Dockerfile -t everdict-agent:local .
+//   kind load docker-image everdict-agent:local --name everdict
+// 사용: node scripts/live/k8s-backend.mjs   (CONTEXT=kind-everdict IMAGE=everdict-agent:local NS=everdict-ci)
 import { K8sBackend } from "../../packages/backends/dist/index.js";
 
-const CONTEXT = process.env.CONTEXT ?? "kind-assay";
-const IMAGE = process.env.IMAGE ?? "assay-agent:local";
-const NS = process.env.NS ?? "assay-ci";
+const CONTEXT = process.env.CONTEXT ?? "kind-everdict";
+const IMAGE = process.env.IMAGE ?? "everdict-agent:local";
+const NS = process.env.NS ?? "everdict-ci";
 const STAMP = Date.now().toString(36);
 
 function jobFor(i) {

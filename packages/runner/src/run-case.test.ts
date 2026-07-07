@@ -8,11 +8,11 @@ import type {
   GradeContext,
   Grader,
   Score,
-} from "@assay/core";
-import { LocalDriver } from "@assay/drivers";
-import { RepoEnvironment } from "@assay/environments";
-import { TestsPassGrader, costGrader, stepsGrader } from "@assay/graders";
-import { ScriptedHarness } from "@assay/harnesses";
+} from "@everdict/core";
+import { LocalDriver } from "@everdict/drivers";
+import { RepoEnvironment } from "@everdict/environments";
+import { TestsPassGrader, costGrader, stepsGrader } from "@everdict/graders";
+import { ScriptedHarness } from "@everdict/harnesses";
 import { describe, expect, it } from "vitest";
 import { runCase } from "./run-case.js";
 

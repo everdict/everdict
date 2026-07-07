@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// API 키 권한 범위(read|write|admin) — 컨트롤플레인 @assay/auth 의 API_KEY_SCOPES 미러. 누적(admin=Full Access).
+// API 키 권한 범위(read|write|admin) — 컨트롤플레인 @everdict/auth 의 API_KEY_SCOPES 미러. 누적(admin=Full Access).
 export const apiKeyScopes = ['read', 'write', 'admin'] as const
 export const apiKeyScopeSchema = z.enum(apiKeyScopes)
 export type ApiKeyScope = z.infer<typeof apiKeyScopeSchema>

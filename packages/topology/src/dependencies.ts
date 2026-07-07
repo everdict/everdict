@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec } from "@assay/core";
+import type { ServiceHarnessSpec } from "@everdict/core";
 
 // 공유 스토어(spec.dependencies[])의 표준 이미지/포트/부트env. 토폴로지를 통째로 띄울 때
 // (provisionDependencies) 런타임이 이 정의로 PG/Redis 를 서비스와 함께 배포하고, 서비스에는
@@ -17,8 +17,8 @@ export const STORE_DEFS: Record<string, StoreDef> = {
   postgres: {
     image: "postgres:16-alpine",
     port: 5432,
-    env: { POSTGRES_USER: "assay", POSTGRES_PASSWORD: "assay", POSTGRES_DB: "assay" },
-    connEnv: (ep) => ({ DATABASE_URL: `postgresql://assay:assay@${ep}/assay` }),
+    env: { POSTGRES_USER: "everdict", POSTGRES_PASSWORD: "everdict", POSTGRES_DB: "everdict" },
+    connEnv: (ep) => ({ DATABASE_URL: `postgresql://everdict:everdict@${ep}/everdict` }),
   },
   redis: {
     image: "redis:7-alpine",
@@ -31,13 +31,13 @@ export const STORE_DEFS: Record<string, StoreDef> = {
     image: "quay.io/minio/minio:latest",
     port: 9000,
     args: ["server", "/data"],
-    env: { MINIO_ROOT_USER: "assay", MINIO_ROOT_PASSWORD: "assaysecret" },
+    env: { MINIO_ROOT_USER: "everdict", MINIO_ROOT_PASSWORD: "everdictsecret" },
     // 기본/silo(전용 인스턴스) = 루트 creds. pool 은 planner 가 테넌트별 scoped 키/버킷으로 덮어쓴다.
     connEnv: (ep) => ({
       AWS_S3_ENDPOINT: `http://${ep}`,
       MINIO_ENDPOINT: `http://${ep}`,
-      AWS_ACCESS_KEY_ID: "assay",
-      AWS_SECRET_ACCESS_KEY: "assaysecret",
+      AWS_ACCESS_KEY_ID: "everdict",
+      AWS_SECRET_ACCESS_KEY: "everdictsecret",
     }),
   },
 };
@@ -47,7 +47,7 @@ export function dependencyStores(spec: ServiceHarnessSpec): Array<{ store: strin
   const seen = new Set<string>();
   const out: Array<{ store: string; name: string; def: StoreDef }> = [];
   for (const dep of spec.dependencies ?? []) {
-    if (dep.isolateBy === "external") continue; // BYO 외부 스토어 — Assay 가 배포/connEnv 주입하지 않음(연결=storeEnv)
+    if (dep.isolateBy === "external") continue; // BYO 외부 스토어 — Everdict 가 배포/connEnv 주입하지 않음(연결=storeEnv)
     if (seen.has(dep.store)) continue;
     const def = STORE_DEFS[dep.store];
     if (!def) continue;
@@ -70,7 +70,7 @@ export function storeName(spec: ServiceHarnessSpec, store: string): string {
   return `${spec.id}-${store}`;
 }
 
-// pool 모델용 공유 스토어 Deployment+Service (클러스터에 1대; 이름 고정 assay-shared-<store>).
+// pool 모델용 공유 스토어 Deployment+Service (클러스터에 1대; 이름 고정 everdict-shared-<store>).
 // 빌더는 순수 — K8s manifest object 만 반환(런타임이 apply/rollout).
 export function buildSharedStoreManifests(
   stores: string[],
@@ -81,8 +81,8 @@ export function buildSharedStoreManifests(
   for (const store of [...new Set(stores)]) {
     const def = STORE_DEFS[store];
     if (!def) continue;
-    const name = `assay-shared-${store}`;
-    const labels = { app: name, "assay/shared-store": store };
+    const name = `everdict-shared-${store}`;
+    const labels = { app: name, "everdict/shared-store": store };
     const env = Object.entries(def.env ?? {}).map(([n, value]) => ({ name: n, value }));
     out.push({
       apiVersion: "apps/v1",

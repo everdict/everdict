@@ -6,7 +6,7 @@ import {
   type ServiceReadiness,
   type TrustZone,
   UpstreamError,
-} from "@assay/core";
+} from "@everdict/core";
 import {
   type ConsulClient,
   buildSharedStoreIntention,
@@ -30,7 +30,7 @@ import {
 import { type StorePlan, planTenantStores, resolveStoreIsolation } from "./store-binding.js";
 import type { TargetEnvHandle, TopologyHandle, TopologyRuntime } from "./topology-runtime.js";
 
-// Nomad HTTP 추상화 (테스트에서 모킹 가능; @assay/backends 의 NomadHttp 와 동일 형태).
+// Nomad HTTP 추상화 (테스트에서 모킹 가능; @everdict/backends 의 NomadHttp 와 동일 형태).
 export interface NomadHttp {
   request(method: string, path: string, body?: unknown): Promise<{ status: number; text: string }>;
 }
@@ -196,7 +196,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
         await this.execImpl.exec(
           rec.allocId,
           rec.task,
-          ["psql", "-U", "assay", "-d", "assay", "-v", "ON_ERROR_STOP=1"],
+          ["psql", "-U", "everdict", "-d", "everdict", "-v", "ON_ERROR_STOP=1"],
           {
             namespace: ns,
             stdin: t.postgresSetup,
@@ -241,7 +241,7 @@ export class NomadTopologyRuntime implements TopologyRuntime {
     if (missing.length === 0) return;
     await this.register(buildSharedStoreJob(missing, { datacenters: this.opts.datacenters, namespace: ns }), ns);
     for (const s of missing) {
-      const task = `assay-shared-${s}`;
+      const task = `everdict-shared-${s}`;
       const alloc = await this.waitForGroupRunning(SHARED_STORE_JOB_ID, task, ns);
       const p = resolvePort(alloc, "store");
       if (!p || !alloc.ID) {
@@ -259,11 +259,11 @@ export class NomadTopologyRuntime implements TopologyRuntime {
   private async waitStoreAccepting(store: string, rec: { allocId: string; task: string }): Promise<void> {
     const probe =
       store === "postgres"
-        ? ["pg_isready", "-U", "assay"]
+        ? ["pg_isready", "-U", "everdict"]
         : store === "redis"
           ? ["redis-cli", "ping"]
           : store === "minio"
-            ? ["sh", "-c", "mc alias set local http://localhost:9000 assay assaysecret"]
+            ? ["sh", "-c", "mc alias set local http://localhost:9000 everdict everdictsecret"]
             : undefined;
     if (!probe) return;
     const interval = this.opts.pollIntervalMs ?? 2000;

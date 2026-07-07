@@ -1,5 +1,5 @@
 {
-  "name": "@assay/registry",
+  "name": "@everdict/registry",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -18,8 +18,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@assay/core": "workspace:*",
-    "@assay/db": "workspace:*",
-    "@assay/datasets": "workspace:*"
+    "@everdict/core": "workspace:*",
+    "@everdict/db": "workspace:*",
+    "@everdict/datasets": "workspace:*"
   }
 }

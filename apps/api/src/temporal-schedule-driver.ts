@@ -4,8 +4,8 @@ import type { ScheduleDriver, ScheduleSpec } from "./schedule-service.js";
 // 컨트롤플레인이 예약을 Temporal Schedule 로 동기화한다(DB 가 SSOT, 이 드라이버가 Temporal 을 맞춘다).
 // @temporalio/client 만 사용(워커의 네이티브 바인딩 @temporalio/worker 를 API 프로세스로 끌어오지 않음).
 // 발사 시 워커의 scheduledScorecardWorkflow(scheduleId, tenant) 를 시작한다. 설계: docs/architecture/scheduled-evals.md.
-// TASK_QUEUE 는 워커(@assay/orchestrator constants.TASK_QUEUE="assay-eval")와 일치해야 한다.
-const TASK_QUEUE = "assay-eval";
+// TASK_QUEUE 는 워커(@everdict/orchestrator constants.TASK_QUEUE="everdict-eval")와 일치해야 한다.
+const TASK_QUEUE = "everdict-eval";
 
 const OVERLAP: Record<ScheduleSpec["overlapPolicy"], "SKIP" | "BUFFER_ONE" | "ALLOW_ALL"> = {
   skip: "SKIP",
@@ -13,7 +13,7 @@ const OVERLAP: Record<ScheduleSpec["overlapPolicy"], "SKIP" | "BUFFER_ONE" | "AL
   allowAll: "ALLOW_ALL",
 };
 
-const scheduleIdOf = (id: string): string => `assay-sched-${id}`;
+const scheduleIdOf = (id: string): string => `everdict-sched-${id}`;
 
 export class TemporalScheduleDriver implements ScheduleDriver {
   private readonly address: string;
@@ -48,7 +48,7 @@ export class TemporalScheduleDriver implements ScheduleDriver {
         spec: { cronExpressions: [spec.cron], timezone: spec.timezone },
         action: {
           type: "startWorkflow",
-          workflowId: `assay-sched-run-${spec.id}`,
+          workflowId: `everdict-sched-run-${spec.id}`,
           workflowType: "scheduledScorecardWorkflow",
           taskQueue: this.taskQueue,
           args: [{ scheduleId: spec.id, tenant: spec.tenant }],

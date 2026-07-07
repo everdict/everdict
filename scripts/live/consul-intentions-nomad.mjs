@@ -55,7 +55,7 @@ try {
   // 결정 검증(=Envoy 가 enforce 할 allow/deny):
   const sameTenant = await check(A("browser-mcp"), A("agent-server")); // 같은 테넌트 → 허용
   const crossTenant = await check(A("agent-server"), G("agent-server")); // 교차 테넌트 → 거부
-  const tenantToStore = await check(A("agent-server"), "assay-shared-postgres"); // 테넌트→공유스토어 → 허용
+  const tenantToStore = await check(A("agent-server"), "everdict-shared-postgres"); // 테넌트→공유스토어 → 허용
   const rogueToTenant = await check("rogue-svc", G("agent-server")); // 비메시/비테넌트 → 거부
 
   console.log(`same-tenant  acme-mcp → acme-agent     : ${sameTenant ? "ALLOWED" : "DENIED"}`);
@@ -75,7 +75,7 @@ try {
 } finally {
   for (const t of tenants)
     for (const s of spec.services) await consul.deleteIntention(meshServiceName(t, s.name)).catch(() => {});
-  await consul.deleteIntention("assay-shared-postgres").catch(() => {});
+  await consul.deleteIntention("everdict-shared-postgres").catch(() => {});
   console.log("teardown: intentions 삭제 요청됨");
 }
 process.exit(ok ? 0 : 1);

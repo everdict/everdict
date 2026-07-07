@@ -1,11 +1,11 @@
 # Convention system — two layers
 
-We split "how to build Assay" knowledge by **how the knowledge fails**:
+We split "how to build Everdict" knowledge by **how the knowledge fails**:
 
 ## PUSH layer — `.claude/rules/*.md`
 - Frontmatter `paths:` glob → auto-injected when a matching file is read/edited.
 - Owns **short rules that conflict with ecosystem defaults** — things the model would
-  otherwise "do the standard TS way" and get wrong for Assay.
+  otherwise "do the standard TS way" and get wrong for Everdict.
 - Keep each file thin (~20 lines): inlined critical rules + a pointer to the matching skill.
 - Current rules: `typescript`, `core-contracts`, `drivers`, `harnesses`, `graders`, `agent`,
   `backends`, `orchestrator`, `trace`, `topology`, `api-layer`, `mcp`, `auth`, `db`, `registry`,

@@ -34,9 +34,9 @@ export interface WebPrincipal {
   profile?: WebProfile // 가변 표시 정보(이름/유저네임/아바타)
 }
 
-// 현재 요청의 컨트롤플레인 인증 컨텍스트. 로그인 사용자 → Keycloak Bearer, dev(미설정) → x-assay-tenant=default.
-// 활성 워크스페이스의 권위는 URL 첫 세그먼트 — 미들웨어가 x-assay-active-workspace 헤더로 주입한다(Linear 식 /{workspace}/...).
-// 미들웨어가 못 탄 경로(루트 등)에선 most-recent 쿠키로 폴백. 동봉(x-assay-workspace)된 워크스페이스가 비멤버면 컨트롤플레인이 기본으로 폴백.
+// 현재 요청의 컨트롤플레인 인증 컨텍스트. 로그인 사용자 → Keycloak Bearer, dev(미설정) → x-everdict-tenant=default.
+// 활성 워크스페이스의 권위는 URL 첫 세그먼트 — 미들웨어가 x-everdict-active-workspace 헤더로 주입한다(Linear 식 /{workspace}/...).
+// 미들웨어가 못 탄 경로(루트 등)에선 most-recent 쿠키로 폴백. 동봉(x-everdict-workspace)된 워크스페이스가 비멤버면 컨트롤플레인이 기본으로 폴백.
 export async function authContext(): Promise<AuthContext> {
   const fromHeader = (await headers()).get(ACTIVE_WORKSPACE_HEADER) ?? undefined
   const workspace = fromHeader ?? (await getActiveWorkspace())

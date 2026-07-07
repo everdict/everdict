@@ -1,9 +1,9 @@
-import type { Backend, BackendCapacity, ProbeResult } from "@assay/backends";
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { Backend, BackendCapacity, ProbeResult } from "@everdict/backends";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import { type RunnerHub, type SelfHostedKey, selfHostedBackendName } from "./runner-hub.js";
 
 // 개인 소유 셀프호스티드 러너 백엔드 — push 가 아니라 pull. dispatch(job)는 RunnerHub 에 잡을 파킹하고
-// promise 를 돌려준다. 러너 클라이언트(assay runner)가 MCP lease 로 가져가 자기 머신에서 돌리고 결과를
+// promise 를 돌려준다. 러너 클라이언트(everdict runner)가 MCP lease 로 가져가 자기 머신에서 돌리고 결과를
 // 회신하면 그 promise 가 resolve 된다. 백엔드 인스턴스는 러너별(=key)로 RuntimeDispatcher 가 등록한다.
 // 설계: docs/architecture/self-hosted-runner.md.
 export class SelfHostedBackend implements Backend {

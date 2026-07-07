@@ -18,7 +18,7 @@ export default async function Home() {
     { icon: GitCompareArrows, title: t('featureCompareTitle'), body: t('featureCompareBody') },
   ] as const
   // 컨트롤플레인에 접속되고 실제 로그인(OIDC)이 확인되면 랜딩이 아니라 내 워크스페이스(/{slug})로.
-  // 워크스페이스가 0개면 온보딩으로. via!=='oidc'(dev x-assay-tenant 폴백)/principal=null 이면 랜딩을 보여준다.
+  // 워크스페이스가 0개면 온보딩으로. via!=='oidc'(dev x-everdict-tenant 폴백)/principal=null 이면 랜딩을 보여준다.
   const { principal } = await currentPrincipal()
   // 활성 워크스페이스가 비어 있으면(예: keycloak 토큰에 workspace 클레임 없음) 내 첫 워크스페이스로 폴백.
   // principal.workspace 가 "" 면 `/${""}` = "/" 가 되어 이 페이지로 다시 튕기는 무한 루프가 나므로 그대로 쓰지 않는다.
@@ -40,7 +40,7 @@ export default async function Home() {
             <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
               <FlaskConical className="size-4" />
             </span>
-            <span className="font-display text-[15px] font-[560] tracking-tight">Assay</span>
+            <span className="font-display text-[15px] font-[560] tracking-tight">Everdict</span>
           </div>
           <div className="flex items-center gap-1.5">
             <ThemeToggle />

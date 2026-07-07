@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { BRIDGE_CHANNELS, type BridgeDeps, type IpcMainLike, registerBridge, senderAllowed } from "./bridge.js";
 
-const WEB = "https://app.assay.dev";
+const WEB = "https://app.everdict.dev";
 
 function fakeIpc(): IpcMainLike & {
   invoke: (channel: string, frameUrl: string | undefined, payload?: unknown) => unknown;
@@ -32,7 +32,7 @@ function deps(): BridgeDeps & { pair: ReturnType<typeof vi.fn> } {
 describe("senderAllowed", () => {
   it("웹 origin 프레임만 허용", () => {
     expect(senderAllowed(`${WEB}/acme/account`, WEB)).toBe(true);
-    expect(senderAllowed("https://keycloak.assay.dev/auth", WEB)).toBe(false);
+    expect(senderAllowed("https://keycloak.everdict.dev/auth", WEB)).toBe(false);
     expect(senderAllowed(undefined, WEB)).toBe(false);
     expect(senderAllowed("not-a-url", WEB)).toBe(false);
   });

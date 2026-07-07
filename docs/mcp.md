@@ -67,7 +67,7 @@ Two credential kinds work on `/mcp`:
 - **API key `ak_…`** (headless agents / CI) — `Authorization: Bearer ak_…`, no browser.
 
 ## Keycloak client
-`deploy/keycloak/realm-assay.json` ships a public PKCE client **`assay-mcp`** (standard flow + loopback redirect
+`deploy/keycloak/realm-everdict.json` ships a public PKCE client **`everdict-mcp`** (standard flow + loopback redirect
 URIs + `pkce.code.challenge.method=S256` + the `workspace` claim mapper) for MCP clients that use a fixed
 `client_id`. Clients that self-register can use Keycloak's **Dynamic Client Registration**
 (`{issuer}/clients-registrations/openid-connect`) — enable anonymous DCR (or pre-register) per your realm policy.
@@ -76,14 +76,14 @@ with API keys.
 
 ## Run / connect
 ```bash
-KEYCLOAK_ISSUER=http://localhost:8081/realms/assay ASSAY_REQUIRE_AUTH=1 node apps/api/dist/main.js
+KEYCLOAK_ISSUER=http://localhost:8081/realms/everdict EVERDICT_REQUIRE_AUTH=1 node apps/api/dist/main.js
 # MCP endpoint: http://localhost:8787/mcp  (an MCP client discovers Keycloak and prompts login)
 ```
 
 Client install (see `README.md`):
-- **Claude Code** — `claude mcp add --transport http assay http://<host>:8787/mcp` (OAuth browser login),
+- **Claude Code** — `claude mcp add --transport http everdict http://<host>:8787/mcp` (OAuth browser login),
   or append `--header "Authorization: Bearer ak_…"` for a headless API key.
-- **Codex** — `~/.codex/config.toml` → `[mcp_servers.assay]` running `npx -y mcp-remote http://<host>:8787/mcp`
+- **Codex** — `~/.codex/config.toml` → `[mcp_servers.everdict]` running `npx -y mcp-remote http://<host>:8787/mcp`
   (mcp-remote runs the OAuth/PKCE flow; add `--header "Authorization: Bearer ak_…"` to go headless).
 
 The OAuth "login like Linear" path needs **anonymous Dynamic Client Registration** (RFC 7591): an MCP client

@@ -1,16 +1,16 @@
 // 라이브: 실제 OSS 코딩 에이전트 aider 가 gpt-5.4-mini(workclaw LiteLLM)로 시드된 버그를 고치고,
-// Assay 가 tests-pass 로 객관 채점한다. 선언형 command 하니스(코드 0): setup 으로 aider 설치(/tmp venv) →
+// Everdict 가 tests-pass 로 객관 채점한다. 선언형 command 하니스(코드 0): setup 으로 aider 설치(/tmp venv) →
 // command 로 aider 실행 → RepoEnvironment git-diff 스냅샷 + tests-pass 그레이더. (LocalBackend, 호스트 실행)
 //
 // 사용: OPENAI_API_KEY=<litellm key> OPENAI_API_BASE=http://localhost:4000 \
-//       ASSAY_MODEL=chatgpt/gpt-5.4-mini node scripts/live/aider-litellm-live.mjs
+//       EVERDICT_MODEL=chatgpt/gpt-5.4-mini node scripts/live/aider-litellm-live.mjs
 import process from "node:process";
 import { LocalBackend } from "../../packages/backends/dist/index.js";
 
 const BASE = process.env.OPENAI_API_BASE ?? "http://localhost:4000";
 const KEY = process.env.OPENAI_API_KEY;
-const MODEL = process.env.ASSAY_MODEL ?? "chatgpt/gpt-5.4-mini";
-const VENV = "/tmp/assay-aider";
+const MODEL = process.env.EVERDICT_MODEL ?? "chatgpt/gpt-5.4-mini";
+const VENV = "/tmp/everdict-aider";
 if (!KEY) {
   console.error("✗ OPENAI_API_KEY (LiteLLM key) 가 필요합니다.");
   process.exit(1);

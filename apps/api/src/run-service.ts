@@ -1,4 +1,4 @@
-import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@assay/backends";
+import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@everdict/backends";
 import {
   type AgentJob,
   AppError,
@@ -8,10 +8,10 @@ import {
   type JudgeRunConfig,
   type RegistryAuth,
   resolveHarnessSecrets,
-} from "@assay/core";
-import type { RunRecord, RunStore } from "@assay/db";
-import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
-import type { TraceSource, TraceSourceConfig } from "@assay/trace";
+} from "@everdict/core";
+import type { RunRecord, RunStore } from "@everdict/db";
+import { type ArtifactStore, offloadSnapshot } from "@everdict/storage";
+import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { executeCase } from "./execute-case.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
 

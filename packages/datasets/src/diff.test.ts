@@ -1,4 +1,4 @@
-import { type Dataset, DatasetSchema } from "@assay/core";
+import { type Dataset, DatasetSchema } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { diffDatasets } from "./diff.js";
 

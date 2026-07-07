@@ -1,6 +1,6 @@
-import type { Principal } from "@assay/auth";
-import { BadRequestError, DatasetSchema, ForbiddenError, NotFoundError } from "@assay/core";
-import { InMemoryDatasetRegistry } from "@assay/registry";
+import type { Principal } from "@everdict/auth";
+import { BadRequestError, DatasetSchema, ForbiddenError, NotFoundError } from "@everdict/core";
+import { InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { VersionTagsBodySchema, normalizeVersionTags, setVersionTags } from "./version-tag-service.js";
 

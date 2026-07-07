@@ -1,11 +1,11 @@
 {
-  "name": "@assay/api",
+  "name": "@everdict/api",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
   "type": "module",
   "bin": {
-    "assay-api": "./dist/main.js"
+    "everdict-api": "./dist/main.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -13,18 +13,18 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@assay/agent": "workspace:*",
-    "@assay/auth": "workspace:*",
-    "@assay/backends": "workspace:*",
-    "@assay/core": "workspace:*",
-    "@assay/datasets": "workspace:*",
-    "@assay/db": "workspace:*",
-    "@assay/graders": "workspace:*",
-    "@assay/registry": "workspace:*",
-    "@assay/storage": "workspace:*",
-    "@assay/suite": "workspace:*",
-    "@assay/topology": "workspace:*",
-    "@assay/trace": "workspace:*",
+    "@everdict/agent": "workspace:*",
+    "@everdict/auth": "workspace:*",
+    "@everdict/backends": "workspace:*",
+    "@everdict/core": "workspace:*",
+    "@everdict/datasets": "workspace:*",
+    "@everdict/db": "workspace:*",
+    "@everdict/graders": "workspace:*",
+    "@everdict/registry": "workspace:*",
+    "@everdict/storage": "workspace:*",
+    "@everdict/suite": "workspace:*",
+    "@everdict/topology": "workspace:*",
+    "@everdict/trace": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@temporalio/client": "^1.18.1",
     "fastify": "^5.2.0",

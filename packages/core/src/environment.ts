@@ -83,7 +83,7 @@ export const EnvSpecSchema = z.discriminatedUnion("kind", [
     display: z.string().optional(), // X DISPLAY (기본 ":99")
     setup: z.array(z.string()).optional(), // 디스플레이/윈도우매니저/앱 기동 명령(Xvfb, wm, 데스크탑 앱)
     screenshotCmd: z.string().optional(), // 스크린샷 캡처 명령(기본 scrot). 산출물 경로 = screenshotPath
-    screenshotPath: z.string().optional(), // 스크린샷 저장 경로(기본 /tmp/assay-screen.png)
+    screenshotPath: z.string().optional(), // 스크린샷 저장 경로(기본 /tmp/everdict-screen.png)
   }),
 ]);
 export type EnvSpec = z.infer<typeof EnvSpecSchema>;

@@ -362,7 +362,7 @@ function GheSection({
           <Label htmlFor="ghe-slug">App slug</Label>
           <Input
             id="ghe-slug"
-            placeholder="assay-eval"
+            placeholder="everdict-eval"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
           />

@@ -1,4 +1,4 @@
-import { AppError, type TraceEvent } from "@assay/core";
+import { AppError, type TraceEvent } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { buildTraceSink } from "./build-sink.js";
 import { LangfuseTraceSink, chunkLangfuseEvents, langfuseBatch } from "./langfuse-sink.js";
@@ -77,9 +77,9 @@ describe("MlflowTraceSink", () => {
     expect(ff.call(2).url).toMatch(/\/api\/3\.0\/mlflow\/traces\/tr-[0-9a-f]{32}\/assessments$/);
     const a1 = ff.body(2).assessment as Record<string, unknown>;
     expect(a1.assessment_name).toBe("tests_pass");
-    expect(a1.source).toEqual({ source_type: "CODE", source_id: "assay:sc-1" });
+    expect(a1.source).toEqual({ source_type: "CODE", source_id: "everdict:sc-1" });
     const a2 = ff.body(3).assessment as Record<string, unknown>;
-    expect(a2.source).toEqual({ source_type: "LLM_JUDGE", source_id: "assay:sc-1" });
+    expect(a2.source).toEqual({ source_type: "LLM_JUDGE", source_id: "everdict:sc-1" });
     expect(a2.rationale).toBe("근거 충분");
     // 인증 헤더는 값 그대로(Basic …) + 케이스 결과에 외부 id/딥링크.
     expect((ff.call(0).init.headers as Record<string, string>).authorization).toBe("Basic c2s=");
@@ -229,7 +229,7 @@ describe("LangsmithTraceSink", () => {
     const sink = new LangsmithTraceSink({
       endpoint: "https://api.smith.langchain.com",
       auth: "lsv2_key",
-      project: "assay-evals",
+      project: "everdict-evals",
       fetchImpl: ff.impl,
       newId: seq("eeee"),
       now: () => "2026-07-06T00:00:00.000Z",
@@ -241,7 +241,7 @@ describe("LangsmithTraceSink", () => {
     const run = ff.body(0);
     expect(run.id).toBe(run.trace_id); // 루트 run: trace_id = 자기 id
     expect(run.run_type).toBe("chain");
-    expect(run.session_name).toBe("assay-evals");
+    expect(run.session_name).toBe("everdict-evals");
     expect((run.outputs as Record<string, unknown>).output).toBe("완료");
     const fb = ff.body(1);
     expect(fb.key).toBe("tests_pass");
@@ -291,13 +291,13 @@ describe("PhoenixTraceSink", () => {
     const sink = new PhoenixTraceSink({
       endpoint: "http://phoenix:6006",
       auth: "Bearer px-key",
-      project: "assay",
+      project: "everdict",
       fetchImpl: ff.impl,
       newId: seq("ffff"),
       now: () => "2026-07-06T00:00:00.000Z",
     });
     const out = await sink.export(CTX, [CASE]);
-    expect(ff.call(0).url).toBe("http://phoenix:6006/v1/projects/assay/spans");
+    expect(ff.call(0).url).toBe("http://phoenix:6006/v1/projects/everdict/spans");
     const spans = ff.body(0).data as Array<Record<string, unknown>>;
     // 루트 CHAIN + LLM + TOOL 스팬, id 는 OTel hex(trace 32/span 16).
     expect(spans.map((s) => s.span_kind)).toEqual(["CHAIN", "LLM", "TOOL"]);
@@ -341,7 +341,7 @@ describe("buildTraceSink · 순수 빌더", () => {
   });
 
   it("mlflowAssessmentBody: pass 는 문자열 metadata 로(맵 값은 string 만), 값은 feedback.value 로", () => {
-    const body = mlflowAssessmentBody({ name: "tests_pass", value: 1, pass: true }, "assay:sc-1");
+    const body = mlflowAssessmentBody({ name: "tests_pass", value: 1, pass: true }, "everdict:sc-1");
     const a = body.assessment as Record<string, unknown>;
     expect(a.feedback).toEqual({ value: 1 });
     expect(a.metadata).toEqual({ pass: "true" });

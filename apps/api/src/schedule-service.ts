@@ -1,5 +1,5 @@
-import { BadRequestError, ForbiddenError, NotFoundError } from "@assay/core";
-import type { ScheduleOverlapPolicy, ScheduleRecord, ScheduleRunTemplate, ScheduleStore } from "@assay/db";
+import { BadRequestError, ForbiddenError, NotFoundError } from "@everdict/core";
+import type { ScheduleOverlapPolicy, ScheduleRecord, ScheduleRunTemplate, ScheduleStore } from "@everdict/db";
 import type { RunScorecardInput } from "./scorecard-service.js";
 
 // 5-field cron 의 경량 구조 검증 — 발사(Temporal Schedule, slice 2)가 정밀 파싱을 하므로 여기선 명백한 오형식만 거른다.
@@ -40,7 +40,7 @@ export interface ScheduleSpec {
   paused: boolean; // = !enabled
 }
 
-// DB↔Temporal 동기화 드라이버(구현=@assay/orchestrator TemporalScheduleDriver). 미주입이면 DB-only(발사 안 함 — dev/Direct).
+// DB↔Temporal 동기화 드라이버(구현=@everdict/orchestrator TemporalScheduleDriver). 미주입이면 DB-only(발사 안 함 — dev/Direct).
 export interface ScheduleDriver {
   ensure(spec: ScheduleSpec): Promise<void>; // create-or-update(멱등), paused 반영
   remove(id: string): Promise<void>;

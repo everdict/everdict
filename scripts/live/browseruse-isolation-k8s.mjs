@@ -4,7 +4,7 @@
 // 공유 금지) + zone.network 로 NetworkPolicy 적용. 두 테넌트(acme/globex)를 띄워 ns/Deployment 분리 + netpol 적용을
 // 증거로 확인하고, 각 테넌트의 front-door 를 인터랙티브 구동해 둘 다 자기 존에서 동작함을 보인다.
 //
-// 사전: kind(컨텍스트 kind-assay). 노드↔기본 브리지(파드→host LiteLLM 172.17.0.1) + 이미지 kind 로드는 이 스크립트가 수행.
+// 사전: kind(컨텍스트 kind-everdict). 노드↔기본 브리지(파드→host LiteLLM 172.17.0.1) + 이미지 kind 로드는 이 스크립트가 수행.
 // 주의: kind 기본 CNI(kindnet)는 NetworkPolicy 를 *적용*만 하고 강제(enforce)는 안 함 — 강제엔 Calico/Cilium 필요.
 //   여기선 정책 매니페스트가 존별로 생성·적용되는 것까지 검증(네임스페이스 경계는 실효).
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
@@ -16,10 +16,10 @@ import { staticTrustZones } from "../../packages/backends/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const CONTEXT = process.env.K8S_CONTEXT ?? "kind-assay";
-const CLUSTER = process.env.KIND_CLUSTER ?? "assay";
-const NODE = process.env.KIND_NODE ?? "assay-control-plane";
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const CONTEXT = process.env.K8S_CONTEXT ?? "kind-everdict";
+const CLUSTER = process.env.KIND_CLUSTER ?? "everdict";
+const NODE = process.env.KIND_NODE ?? "everdict-control-plane";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const POD_PORT = 18080;
 const MODEL = process.env.BROWSERUSE_MODEL ?? "gpt-5.4-mini";
 const LITELLM_HOST = process.env.LITELLM_HOST ?? "172.17.0.1";
@@ -46,7 +46,7 @@ function jaegerBridgeIp() {
   try {
     const out = execFileSync(
       "docker",
-      ["inspect", "assay-jaeger", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"],
+      ["inspect", "everdict-jaeger", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"],
       { encoding: "utf8" },
     );
     return (
@@ -69,7 +69,7 @@ console.log("loaded.");
 const zoneFor = (id) => ({
   id,
   isolationRuntime: "runc",
-  namespace: `assay-${id}`,
+  namespace: `everdict-${id}`,
   network: "deny-cross-tenant",
   trusted: true,
 });
@@ -164,7 +164,7 @@ let ok = false;
 try {
   const perTenant = {};
   for (const tenant of TENANTS) {
-    console.log(`\n=== tenant=${tenant} (zone ns=assay-${tenant}) — ensureTopology + dispatch ===`);
+    console.log(`\n=== tenant=${tenant} (zone ns=everdict-${tenant}) — ensureTopology + dispatch ===`);
     try {
       const result = await backend.dispatch(mkJob(tenant));
       const score = (id) => result.scores.find((s) => s.graderId === id);
@@ -175,9 +175,9 @@ try {
       perTenant[tenant] = { pass: false, endpoint: frontDoor, error: e instanceof Error ? e.message : String(e) };
       console.log(`  ${tenant}: ERROR ${perTenant[tenant].error}`);
       try {
-        console.log(k(["get", "pods", "-n", `assay-${tenant}`, "-o", "wide"]));
+        console.log(k(["get", "pods", "-n", `everdict-${tenant}`, "-o", "wide"]));
         console.log(
-          k(["get", "events", "-n", `assay-${tenant}`, "--sort-by=.lastTimestamp"])
+          k(["get", "events", "-n", `everdict-${tenant}`, "--sort-by=.lastTimestamp"])
             .split("\n")
             .slice(-8)
             .join("\n"),
@@ -191,22 +191,22 @@ try {
   const ns = k(["get", "ns", "-o", "name"]).trim().split("\n");
   const evidence = {};
   for (const tenant of TENANTS) {
-    const n = `namespace/assay-${tenant}`;
+    const n = `namespace/everdict-${tenant}`;
     const hasNs = ns.includes(n);
     let deploys = "";
     let netpol = "";
     try {
-      deploys = k(["get", "deploy", "-n", `assay-${tenant}`, "-o", "name"])
+      deploys = k(["get", "deploy", "-n", `everdict-${tenant}`, "-o", "name"])
         .trim()
         .replace(/\n/g, " ");
     } catch {}
     try {
-      netpol = k(["get", "netpol", "-n", `assay-${tenant}`, "-o", "name"])
+      netpol = k(["get", "netpol", "-n", `everdict-${tenant}`, "-o", "name"])
         .trim()
         .replace(/\n/g, " ");
     } catch {}
     evidence[tenant] = { hasNs, deploys, netpol };
-    console.log(`  assay-${tenant}: ns=${hasNs} deploy=[${deploys}] netpol=[${netpol || "none"}]`);
+    console.log(`  everdict-${tenant}: ns=${hasNs} deploy=[${deploys}] netpol=[${netpol || "none"}]`);
   }
 
   const bothPass = TENANTS.every((t) => perTenant[t]?.pass);
@@ -215,8 +215,8 @@ try {
   ok = bothPass && separateNs && distinctEndpoints;
   console.log(
     ok
-      ? "\n✅ ②: browser-use 하니스가 테넌트별 trustZone 으로 격리 배포됨 — 각 테넌트가 *전용 네임스페이스*(assay-acme / " +
-          "assay-globex)에 자기 warm 토폴로지(browseruse-agent Deployment)를 갖고(테넌트 간 풀 공유 없음, 서로 다른 front-door " +
+      ? "\n✅ ②: browser-use 하니스가 테넌트별 trustZone 으로 격리 배포됨 — 각 테넌트가 *전용 네임스페이스*(everdict-acme / " +
+          "everdict-globex)에 자기 warm 토폴로지(browseruse-agent Deployment)를 갖고(테넌트 간 풀 공유 없음, 서로 다른 front-door " +
           "엔드포인트), zone.network 로 NetworkPolicy 가 ns 별 적용됨. 두 테넌트 모두 자기 존에서 인터랙티브 구동 PASS. " +
           "(kindnet 은 netpol 미강제 — 강제엔 Calico/Cilium; 네임스페이스 경계는 실효.)"
       : "\n⚠️ 기대와 불일치(위 perTenant/evidence 참고)",

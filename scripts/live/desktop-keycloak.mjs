@@ -7,7 +7,7 @@
 //   pnpm -C apps/web dev            # 웹(:3001, Keycloak 구성)
 // 사용:
 //   node scripts/live/desktop-keycloak.mjs
-//   (env: ASSAY_E2E_WEB=http://<host>:3001 · ASSAY_E2E_USER/PASS=alice/alice · ASSAY_E2E_WS=acme)
+//   (env: EVERDICT_E2E_WEB=http://<host>:3001 · EVERDICT_E2E_USER/PASS=alice/alice · EVERDICT_E2E_WS=acme)
 import { mkdtempSync, rmSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
@@ -18,10 +18,10 @@ const require = createRequire(new URL("../../apps/desktop/package.json", import.
 const { _electron } = require("playwright-core");
 const electronPath = require("electron");
 
-const WEB = (process.env.ASSAY_E2E_WEB ?? "http://localhost:3001").replace(/\/$/, "");
-const USER = process.env.ASSAY_E2E_USER ?? "alice";
-const PASS = process.env.ASSAY_E2E_PASS ?? "alice";
-const WS = process.env.ASSAY_E2E_WS ?? "acme";
+const WEB = (process.env.EVERDICT_E2E_WEB ?? "http://localhost:3001").replace(/\/$/, "");
+const USER = process.env.EVERDICT_E2E_USER ?? "alice";
+const PASS = process.env.EVERDICT_E2E_PASS ?? "alice";
+const WS = process.env.EVERDICT_E2E_WS ?? "acme";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // 0) 웹 기동 확인.
@@ -31,11 +31,11 @@ try {
   throw new Error(`${WEB} 이 응답하지 않습니다 — 준비 섹션대로 dev 스택을 먼저 띄우세요.`);
 }
 
-// 1) 신규 머신처럼: 깨끗한 userData + ASSAY_WEB_URL 없이 기동 → 설정 화면이 떠야 한다(D8).
-const configHome = mkdtempSync(path.join(tmpdir(), "assay-desktop-kc-"));
+// 1) 신규 머신처럼: 깨끗한 userData + EVERDICT_WEB_URL 없이 기동 → 설정 화면이 떠야 한다(D8).
+const configHome = mkdtempSync(path.join(tmpdir(), "everdict-desktop-kc-"));
 const appDir = new URL("../../apps/desktop", import.meta.url).pathname;
-// ASSAY_WEB_URL 은 구조분해로 제외(신규 머신 시뮬레이션) — delete 는 성능 린트 대상이라 스프레드 제외 패턴 사용.
-const { ASSAY_WEB_URL: _webUrl, ...inheritedEnv } = process.env;
+// EVERDICT_WEB_URL 은 구조분해로 제외(신규 머신 시뮬레이션) — delete 는 성능 린트 대상이라 스프레드 제외 패턴 사용.
+const { EVERDICT_WEB_URL: _webUrl, ...inheritedEnv } = process.env;
 const env = { ...inheritedEnv, XDG_CONFIG_HOME: configHome };
 const app = await _electron.launch({
   executablePath: electronPath,
@@ -54,7 +54,7 @@ try {
     throw new Error(`✗ 첫 창이 설정 화면이 아님: ${setup.url()}`);
   console.log("✓ 서버 미구성 → 첫 실행 설정 화면 표시");
 
-  // 2) 서버 주소 입력 → 저장(assaySetup 브리지) → 앱 창 전환.
+  // 2) 서버 주소 입력 → 저장(everdictSetup 브리지) → 앱 창 전환.
   await setup.fill("#url", WEB);
   await setup.click("#save");
   let main;

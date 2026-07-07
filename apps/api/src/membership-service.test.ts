@@ -1,11 +1,11 @@
-import { NotFoundError } from "@assay/core";
+import { NotFoundError } from "@everdict/core";
 import {
   InMemoryUserProfileStore,
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceStore,
   generateInviteToken,
   hashKey,
-} from "@assay/db";
+} from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { MembershipService } from "./membership-service.js";
 

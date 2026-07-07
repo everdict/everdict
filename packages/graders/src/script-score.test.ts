@@ -1,4 +1,4 @@
-import type { ComputeHandle, ExecResult, GradeContext } from "@assay/core";
+import type { ComputeHandle, ExecResult, GradeContext } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { makeGraders } from "./make-graders.js";
 import { ScriptScoreGrader } from "./script-score.js";

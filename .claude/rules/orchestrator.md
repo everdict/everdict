@@ -6,7 +6,7 @@ paths: "packages/orchestrator/**"
 Durable control plane on Temporal. See `docs/orchestration.md`.
 
 - **Workflow code (`workflows.ts`) MUST be deterministic** — no I/O, no `Date.now`/`Math.random`,
-  no Node APIs. Import only `@temporalio/workflow` + **type-only** `@assay/*`. All side effects go in activities.
+  no Node APIs. Import only `@temporalio/workflow` + **type-only** `@everdict/*`. All side effects go in activities.
 - `suiteWorkflow` fans out with a **bounded** lane count (no unbounded `Promise.all`) — a large suite
   must not flood activity slots; the worker's `Scheduler` does fine-grained cluster capacity gating on top.
 - Activities (`dispatchCase`) hold a `Dispatcher` and do the real backend dispatch; configure retry +

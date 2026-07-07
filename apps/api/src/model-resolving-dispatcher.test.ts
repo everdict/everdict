@@ -1,5 +1,5 @@
-import type { AgentJob, CaseResult, CommandHarnessSpec } from "@assay/core";
-import { InMemoryModelRegistry } from "@assay/registry";
+import type { AgentJob, CaseResult, CommandHarnessSpec } from "@everdict/core";
+import { InMemoryModelRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { ModelResolvingDispatcher, resolveJobModel } from "./model-resolving-dispatcher.js";
 

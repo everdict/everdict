@@ -1,4 +1,4 @@
-import type { Scorecard } from "@assay/core";
+import type { Scorecard } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import type { SqlClient } from "./client.js";
 import { PgScorecardStore } from "./pg-scorecard-store.js";
@@ -124,7 +124,7 @@ describe("PgScorecardStore", () => {
   it("create → 파라미터화 INSERT (jsonb 문자열화 + created_by 컬럼)", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [] }));
     await new PgScorecardStore(client).create(rec({ createdBy: "user-alice" }));
-    expect(calls[0]?.text).toMatch(/INSERT INTO assay_scorecards/);
+    expect(calls[0]?.text).toMatch(/INSERT INTO everdict_scorecards/);
     expect(calls[0]?.params?.[0]).toBe("sc1");
     expect(calls[0]?.params?.[8]).toBeNull(); // models 없음(rec 기본)
     expect(calls[0]?.params?.[9]).toBeNull(); // judge_models 없음
@@ -146,7 +146,7 @@ describe("PgScorecardStore", () => {
   it("list → scorecard 컬럼 미선택(경량)하되 models·judge_models 는 SELECT + 테넌트 필터 + 정렬", async () => {
     const { client, calls } = fakeClient(() => ({ rows: [ROW] }));
     const list = await new PgScorecardStore(client).list("acme");
-    const selectClause = (calls[0]?.text ?? "").split("FROM")[0]; // FROM assay_scorecards 의 테이블명은 제외
+    const selectClause = (calls[0]?.text ?? "").split("FROM")[0]; // FROM everdict_scorecards 의 테이블명은 제외
     expect(selectClause).not.toMatch(/ scorecard/); // 무거운 컬럼은 SELECT 안 함(judge_models 의 _models 오탐 방지 위해 공백 앵커)
     expect(selectClause).toMatch(/models/); // model 축은 경량 → 목록에 포함(리더보드용)
     expect(selectClause).toMatch(/judge_models/); // judge 축도 경량 → 목록 포함

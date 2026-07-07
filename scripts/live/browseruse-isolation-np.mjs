@@ -1,9 +1,9 @@
-// 라이브 e2e (service-topology, NetworkPolicy 강제): browser-use 두 테넌트를 *Calico 클러스터(kind-assay-np)*에 띄워
+// 라이브 e2e (service-topology, NetworkPolicy 강제): browser-use 두 테넌트를 *Calico 클러스터(kind-everdict-np)*에 띄워
 // deny-cross-tenant NetworkPolicy 가 실제로 교차 테넌트 트래픽을 *차단*함을 검증. browseruse-isolation-k8s.mjs(kindnet,
 // 정책 미강제)와 달리 여기선 Calico 가 정책을 enforce → acme 파드 → globex 의 browseruse-agent 서비스 = BLOCKED,
 // 같은 ns = REACHABLE. (network-isolation-k8s.mjs 가 echo 서비스로 증명한 enforce 를 browser-use front-door 로.)
 //
-// 사전: kind-assay-np (Calico CNI). 이미지 kind 로드 + 노드↔기본 브리지(파드→host LiteLLM)는 이 스크립트가 수행.
+// 사전: kind-everdict-np (Calico CNI). 이미지 kind 로드 + 노드↔기본 브리지(파드→host LiteLLM)는 이 스크립트가 수행.
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -13,10 +13,10 @@ import { staticTrustZones } from "../../packages/backends/dist/index.js";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const CONTEXT = process.env.K8S_CONTEXT ?? "kind-assay-np";
-const CLUSTER = process.env.KIND_CLUSTER ?? "assay-np";
-const NODE = process.env.KIND_NODE ?? "assay-np-control-plane";
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const CONTEXT = process.env.K8S_CONTEXT ?? "kind-everdict-np";
+const CLUSTER = process.env.KIND_CLUSTER ?? "everdict-np";
+const NODE = process.env.KIND_NODE ?? "everdict-np-control-plane";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const POD_PORT = 18080;
 const MODEL = process.env.BROWSERUSE_MODEL ?? "gpt-5.4-mini";
 const LITELLM_HOST = process.env.LITELLM_HOST ?? "172.17.0.1";
@@ -43,7 +43,7 @@ function jaegerBridgeIp() {
   try {
     const out = execFileSync(
       "docker",
-      ["inspect", "assay-jaeger", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"],
+      ["inspect", "everdict-jaeger", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"],
       { encoding: "utf8" },
     );
     return (
@@ -88,7 +88,7 @@ function probe(ns, url) {
   }
 }
 
-console.log("=== dev 호스트 도달 + kind 이미지 로드 (kind-assay-np, Calico) ===");
+console.log("=== dev 호스트 도달 + kind 이미지 로드 (kind-everdict-np, Calico) ===");
 spawnSync("docker", ["network", "connect", "bridge", NODE], { stdio: "ignore" });
 execFileSync("kind", ["load", "docker-image", IMAGE, "--name", CLUSTER], { stdio: "ignore" });
 console.log("loaded.");
@@ -96,7 +96,7 @@ console.log("loaded.");
 const zoneFor = (id) => ({
   id,
   isolationRuntime: "runc",
-  namespace: `assay-np-${id}`,
+  namespace: `everdict-np-${id}`,
   network: "deny-cross-tenant",
   trusted: true,
 });
@@ -191,7 +191,7 @@ try {
   // 두 테넌트 배포 + 각자 자기 존에서 인터랙티브 구동(둘 다 동작).
   const drive = {};
   for (const tenant of TENANTS) {
-    console.log(`\n=== tenant=${tenant} (ns=assay-np-${tenant}) — deploy + drive ===`);
+    console.log(`\n=== tenant=${tenant} (ns=everdict-np-${tenant}) — deploy + drive ===`);
     try {
       const r = await backend.dispatch(mkJob(tenant));
       const score = (id) => r.scores.find((s) => s.graderId === id);
@@ -205,9 +205,9 @@ try {
 
   // === NetworkPolicy 강제 검증(Calico): 같은-ns 도달 vs 교차-테넌트 차단 ===
   console.log("\n=== NetworkPolicy 강제 검증 (Calico) ===");
-  const svc = (t) => `http://browseruse-agent.assay-np-${t}:${POD_PORT}/health`;
-  const sameNs = probe("assay-np-acme", svc("acme")); // acme 파드 → acme 서비스(같은 ns) → 허용돼야
-  const crossNs = probe("assay-np-acme", svc("globex")); // acme 파드 → globex 서비스(교차) → 차단돼야
+  const svc = (t) => `http://browseruse-agent.everdict-np-${t}:${POD_PORT}/health`;
+  const sameNs = probe("everdict-np-acme", svc("acme")); // acme 파드 → acme 서비스(같은 ns) → 허용돼야
+  const crossNs = probe("everdict-np-acme", svc("globex")); // acme 파드 → globex 서비스(교차) → 차단돼야
   console.log(`  acme→acme   (same-ns) : ${sameNs}   <-- 허용돼야 함`);
   console.log(`  acme→globex (cross)   : ${crossNs}   <-- 차단돼야 함`);
 
@@ -215,7 +215,7 @@ try {
   ok = drive.acme && drive.globex && enforce;
   console.log(
     ok
-      ? "\n✅ ②: browser-use 두 테넌트를 Calico 클러스터(kind-assay-np)에 전용 네임스페이스로 배포(둘 다 자기 존에서 구동 PASS), " +
+      ? "\n✅ ②: browser-use 두 테넌트를 Calico 클러스터(kind-everdict-np)에 전용 네임스페이스로 배포(둘 다 자기 존에서 구동 PASS), " +
           "deny-cross-tenant NetworkPolicy 가 **실제로 강제**됨 — 같은-ns 파드는 browseruse-agent 서비스 도달(REACHABLE), " +
           "교차-테넌트 파드는 차단(BLOCKED). kindnet(미강제)과 달리 Calico 가 정책을 enforce 하여 테넌트 경계가 네트워크 레벨로 실효."
       : `\n⚠️ 기대와 불일치 (drive acme=${drive.acme} globex=${drive.globex}, same=${sameNs}, cross=${crossNs})`,

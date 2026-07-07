@@ -1,7 +1,7 @@
 // 라이브 e2e: **SpreadsheetBench(v1+v2) 샘플을 self-hosted 러너에서 codex 로 수행 → 채점**.
 // spreadsheetbench 번들(examples/bundles/spreadsheetbench)을 적용하고, 자기완결 xlsx 샘플 2개(v1/v2)를 실제 codex 로 돌린다.
 // codex-pinch-selfhosted.mjs 와 동형 — 하니스/벤치마크만 SpreadsheetBench 로 교체.
-//   ① dev 컨트롤플레인(in-memory, no-auth) ② POST /runners 페어링 ③ assay runner --pair(codex on PATH)
+//   ① dev 컨트롤플레인(in-memory, no-auth) ② POST /runners 페어링 ③ everdict runner --pair(codex on PATH)
 //   ④ POST /bundles/apply(spreadsheetbench) ⑤ 각 샘플 데이터셋 × codex × self:<id> 실행 ⑥ 폴링 → tests_pass 판정.
 // 샘플은 setup 에서 openpyxl 을 설치하고 입력 xlsx 를 생성 → codex 가 output.xlsx 작성 → grader 가 셀 비교.
 // 사용: node scripts/live/spreadsheetbench-selfhosted.mjs (apps/api/dist + apps/cli/dist 빌드, codex 로그인 필요)
@@ -11,7 +11,7 @@ import process from "node:process";
 
 const PORT = process.env.CP_PORT ?? "8795";
 const BASE = `http://127.0.0.1:${PORT}`;
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const ROOT = new URL("../..", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = async (p, b) => {
@@ -27,7 +27,7 @@ const bundle = JSON.parse(
 console.log(`=== ① 컨트롤플레인 기동 (dev, :${PORT}) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: ROOT,
-  env: { ...process.env, PORT, ASSAY_REQUIRE_AUTH: "", KEYCLOAK_ISSUER: "", DATABASE_URL: "" },
+  env: { ...process.env, PORT, EVERDICT_REQUIRE_AUTH: "", KEYCLOAK_ISSUER: "", DATABASE_URL: "" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 cp.stderr.on("data", (d) => process.stderr.write(`  [cp] ${d}`));
@@ -50,7 +50,7 @@ try {
   console.log(`  → ${paired.status} runnerId=${runnerId}`);
   if (!token || !runnerId) throw new Error("페어링 실패");
 
-  console.log("\n=== ③ assay runner --pair (codex on PATH) ===");
+  console.log("\n=== ③ everdict runner --pair (codex on PATH) ===");
   runner = spawn(
     "node",
     ["apps/cli/dist/main.js", "runner", "--pair", token, "--api-url", BASE, "--poll-interval-ms", "1000"],

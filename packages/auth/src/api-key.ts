@@ -1,4 +1,4 @@
-import { type TenantKeyStore, hashKey } from "@assay/db";
+import { type TenantKeyStore, hashKey } from "@everdict/db";
 import type { Authenticator } from "./principal.js";
 
 export interface ApiKeyAuthOptions {

@@ -1,5 +1,5 @@
 import { readFileSync, readdirSync } from "node:fs";
-import { RuntimeSpecSchema } from "@assay/core";
+import { RuntimeSpecSchema } from "@everdict/core";
 import { SHARED_TENANT } from "./registry.js";
 import { InMemoryRuntimeRegistry, type RuntimeRegistry } from "./runtime-registry.js";
 

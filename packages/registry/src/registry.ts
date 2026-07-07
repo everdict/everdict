@@ -1,4 +1,4 @@
-import { BadRequestError, type HarnessSpec, NotFoundError, type ServiceHarnessSpec } from "@assay/core";
+import { BadRequestError, type HarnessSpec, NotFoundError, type ServiceHarnessSpec } from "@everdict/core";
 
 export const LATEST = "latest";
 // first-party/공유 하니스의 소유자. 테넌트가 자기 것을 안 가졌으면 여기로 폴백한다.

@@ -56,13 +56,13 @@ jobs:
           (cd apps/desktop && npm pkg set version="${VERSION}")
 
       - name: 디펜던시 빌드 (turbo — desktop 의존 체인만)
-        run: pnpm turbo run build --filter=@assay/desktop
+        run: pnpm turbo run build --filter=@everdict/desktop
 
       - name: 패키징 (esbuild 단일 번들 → electron-builder, unsigned)
         working-directory: apps/desktop
         env:
           # 릴리즈 빌드에 굽는 기본 서버 URL(D8) — repo Variables 에 설정(미설정 시 앱이 첫 실행 설정 화면을 띄움).
-          ASSAY_DESKTOP_DEFAULT_WEB_URL: ${{ vars.ASSAY_DESKTOP_DEFAULT_WEB_URL }}
+          EVERDICT_DESKTOP_DEFAULT_WEB_URL: ${{ vars.EVERDICT_DESKTOP_DEFAULT_WEB_URL }}
         run: |
           node esbuild.mjs
           pnpm exec electron-builder ${{ matrix.args }} --publish never
@@ -92,7 +92,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v{0}', inputs.version) }}
-          name: Assay Desktop ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v{0}', inputs.version) }}
+          name: Everdict Desktop ${{ github.ref_type == 'tag' && github.ref_name || format('desktop-v{0}', inputs.version) }}
           draft: ${{ github.event_name == 'workflow_dispatch' }}
           generate_release_notes: true
           files: dist/**

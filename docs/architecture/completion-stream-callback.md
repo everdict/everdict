@@ -8,7 +8,7 @@
 
 ## Problem
 
-`FrontDoorCompletion` (`@assay/core`, `harness-spec.ts`) is `sync | poll`. Both assume a **request/response**
+`FrontDoorCompletion` (`@everdict/core`, `harness-spec.ts`) is `sync | poll`. Both assume a **request/response**
 shape: `sync` = the submit response IS the result; `poll` = GET a status endpoint until a terminal `StatusMatch`.
 `HttpFrontDoorDriver` (`front-door-driver.ts`) encodes this — `fetchSubmit` does `res.json()` (one parse), and
 `awaitCompletion` is a GET-poll loop.
@@ -20,7 +20,7 @@ Two real agent protocols don't fit:
    `final: true` / `status.state ∈ {completed, failed, canceled}`). `res.json()` cannot read this — the body is a
    stream, not one JSON document. There is no abstraction to consume it.
 2. **Fire-and-forget + callback (A2A push-notification / webhook).** Submit returns an immediate ack; the agent runs
-   asynchronously and later **POSTs its terminal result to a callback URL** that the caller supplied. Assay neither
+   asynchronously and later **POSTs its terminal result to a callback URL** that the caller supplied. Everdict neither
    exposes a callback URL (no `{{callback_url}}` wiring var) nor has any way to *await an inbound* request.
 
 `poll` can sometimes stand in for (1)/(2) if the agent also exposes a status endpoint — but a stream-only or
@@ -34,7 +34,7 @@ trace correlation (`correlate`) and observation (`delivery` sentinel/egress) are
 surface is *how the terminal signal arrives*.
 
 ```ts
-// @assay/core — harness-spec.ts: FrontDoorCompletionSchema gains two variants (discriminatedUnion "mode")
+// @everdict/core — harness-spec.ts: FrontDoorCompletionSchema gains two variants (discriminatedUnion "mode")
 completion?:
   | { mode: "sync" }                                                              // today (default)
   | { mode: "poll";   statusPath; done; failed?; intervalMs?; timeoutMs? }        // today
@@ -42,7 +42,7 @@ completion?:
   | { mode: "stream";
       done: StatusMatch; failed?: StatusMatch;     // matched against each PARSED stream event (getField dot-path)
       timeoutMs?: number }                          // wall-clock cap on the whole stream
-  // NEW — fire-and-forget; the agent POSTs its terminal result to {{callback_url}} (Assay-provided rendezvous).
+  // NEW — fire-and-forget; the agent POSTs its terminal result to {{callback_url}} (Everdict-provided rendezvous).
   | { mode: "callback";
       done?: StatusMatch; failed?: StatusMatch;     // optional match on the posted body (absent = any POST = done)
       timeoutMs?: number };
@@ -61,7 +61,7 @@ completion?:
   `openStream` instead (chosen by `completion.mode`), so the `res.json()` assumption is never hit for streams.
 
 ### `callback` — await an inbound terminal POST
-- Assay exposes a **rendezvous URL** per run and injects it into the wiring as **`{{callback_url}}`** (so a
+- Everdict exposes a **rendezvous URL** per run and injects it into the wiring as **`{{callback_url}}`** (so a
   `bodyTemplate` or A2A `pushNotificationConfig` can hand it to the agent). Submit is fire-and-forget (the response is
   ignored except for `correlate: returned`). The driver then **awaits the inbound POST** to that URL, matches the
   posted body with `done`/`failed` (absent `done` = any inbound POST counts as done), and uses the posted body as the
@@ -97,7 +97,7 @@ uses `sync`/provisioned-browser → untouched.
      for the inbound side); `service-backend` injects it + adds `callback_url` to the wiring. Unit-tested.
    - **C2b** — control-plane endpoint: public `POST /frontdoor-callback/:runId` (capability-URL auth via the
      unguessable UUID runId — **not** `/internal/**`), wired in `main.ts` to **one shared** `InProcessCallbackRendezvous`
-     (outbound `url`/`wait` → topology backend; inbound `deliver` → the route) gated on `ASSAY_CALLBACK_BASE_URL`.
+     (outbound `url`/`wait` → topology backend; inbound `deliver` → the route) gated on `EVERDICT_CALLBACK_BASE_URL`.
      No MCP parity — a webhook receiver has no tenant-facing BFF analog. (A store-backed rendezvous for multi-process
      dispatch is the remaining follow-up.)
 

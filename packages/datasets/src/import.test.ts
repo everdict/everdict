@@ -1,4 +1,4 @@
-import { DatasetSchema } from "@assay/core";
+import { DatasetSchema } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { importCsv, importJsonl, importWebVoyager, parseCsv } from "./index.js";
 

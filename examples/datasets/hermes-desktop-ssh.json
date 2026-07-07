@@ -22,7 +22,7 @@
         ],
         "screenshotPath": "/tmp/osuse.png"
       },
-      "image": "assay-hermes-dispatch:demo",
+      "image": "everdict-hermes-dispatch:demo",
       "task": "Connect Hermes to the SSH server at 127.0.0.1 as user root (key /root/.ssh/id_rsa).",
       "graders": [
         {
@@ -54,7 +54,7 @@
         ],
         "screenshotPath": "/tmp/osuse.png"
       },
-      "image": "assay-hermes-dispatch:demo",
+      "image": "everdict-hermes-dispatch:demo",
       "task": "After connecting, open the application Settings screen and show its configuration options.",
       "graders": [
         {

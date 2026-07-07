@@ -5,7 +5,7 @@
 //    를 산정 → OTLP llm_call.cost.usd 로 배출 → cost 그레이더가 실 USD 합산. (프록시 모델은 LiteLLM 가격이 0 이므로
 //    운영자 지정 *참조단가*를 env 로 준다 — 실제 cost 산정 방식과 동일. 토큰은 실값, 단가는 운영자 입력, USD 는 실산술.)
 //
-// 사전: docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686) 기동.
+// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686) 기동.
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -14,7 +14,7 @@ import process from "node:process";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
 const MODEL = process.env.BROWSERUSE_MODEL ?? "chatgpt/gpt-5.4"; // 더 강한 모델
 const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "10"; // 실사이트는 스텝 여유
@@ -23,7 +23,7 @@ const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
 // 운영자 지정 참조단가($/token) — LiteLLM 에 가격 미설정 시 사용. 기본은 공개 mini 급 참조가격(IN $0.15/1M, OUT $0.60/1M).
 const PRICE_IN = process.env.BROWSERUSE_PRICE_IN ?? "0.00000015";
 const PRICE_OUT = process.env.BROWSERUSE_PRICE_OUT ?? "0.0000006";
-const NAME = "assay-bu-realsite";
+const NAME = "everdict-bu-realsite";
 const FRONT = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

@@ -1,4 +1,4 @@
-import { BadRequestError } from "@assay/core";
+import { BadRequestError } from "@everdict/core";
 
 // 이미지 ref 공통 검증 — 외부 호스팅 http(s) URL 또는 웹에서 리사이즈해 올린 data:image base64 둘 다 허용.
 // (스토리지 인프라 없이 자기완결 — 256px 로 줄인 작은 이미지가 프로필/워크스페이스 TEXT 컬럼에 그대로 담긴다.)

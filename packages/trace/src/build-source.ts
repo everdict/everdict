@@ -13,7 +13,7 @@ export interface TraceSourceConfig {
   // (langfuse/phoenix: Authorization 그대로, langsmith: x-api-key). otel/mlflow 는 기존 headers 경로 유지.
   auth?: string;
   project?: string; // phoenix 스팬 조회 경로에 필수(프로젝트 이름/ID) · mlflow tag 상관의 experiment id. 그 외 kind 는 무시.
-  correlate?: "id" | "tag"; // mlflow/otel — "tag" 면 assay.run_id 태그(리소스 속성) 검색으로 trace 를 찾는다(기본 "id").
+  correlate?: "id" | "tag"; // mlflow/otel — "tag" 면 everdict.run_id 태그(리소스 속성) 검색으로 trace 를 찾는다(기본 "id").
   service?: string; // otel tag 상관의 검색 범위(Jaeger service 파라미터). 그 외 kind 는 무시.
   fetchImpl?: typeof fetch;
 }

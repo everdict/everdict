@@ -1,4 +1,4 @@
-import { ConflictError, type JudgeSpec, NotFoundError } from "@assay/core";
+import { ConflictError, type JudgeSpec, NotFoundError } from "@everdict/core";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 // 목록 한 항목 — 버전 메타(등록 이력) + 최신 judge 스펙에서 파생한 표시 필드(kind/provider/model/description).

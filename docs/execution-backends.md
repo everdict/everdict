@@ -2,15 +2,15 @@
 
 Two layers decide *where a harness run executes*:
 
-- **Driver** (`@assay/core`, in-sandbox compute): runs the harness as a subprocess INSIDE an
+- **Driver** (`@everdict/core`, in-sandbox compute): runs the harness as a subprocess INSIDE an
   already-isolated unit. The runner-agent uses `LocalDriver`.
-- **Backend** (`@assay/backends`, placement): dispatches a runner-agent job to an orchestrator
-  and returns the `CaseResult`. Isolation is the orchestrator's job, not Assay's.
+- **Backend** (`@everdict/backends`, placement): dispatches a runner-agent job to an orchestrator
+  and returns the `CaseResult`. Isolation is the orchestrator's job, not Everdict's.
 
 ## Model B (runner-agent)
 The control plane (outside the clusters) builds an `AgentJob` and hands it to a `Backend`:
-`dispatch(job)` → runs `@assay/agent` (`runAgentJob`) inside an isolated unit → the agent does
-the whole `runCase` and prints the `CaseResult` on stdout behind the `__ASSAY_RESULT__`
+`dispatch(job)` → runs `@everdict/agent` (`runAgentJob`) inside an isolated unit → the agent does
+the whole `runCase` and prints the `CaseResult` on stdout behind the `__EVERDICT_RESULT__`
 sentinel → the Backend parses it.
 
 | Backend | Target | Isolation | Status |
@@ -37,7 +37,7 @@ API enforces this **by default — there is no opt-in env flag**:
   gate is the API's fixed policy (`main.ts` wires it on unconditionally), **not** a configurable toggle — the
   service exposes an internal boolean only so mock-dispatcher unit tests, which bypass the backend layer, stay valid.
 
-Need in-process single-host execution for dev? Use `apps/cli` (`assay run`), which owns `LocalBackend` — the
+Need in-process single-host execution for dev? Use `apps/cli` (`everdict run`), which owns `LocalBackend` — the
 API is for managed / remote (runtime / self-hosted) execution only.
 
 ## Routing across many clusters (control plane)
@@ -59,13 +59,13 @@ Multiplicity lives in the control plane, not the Backend:
   "default": "nomad-seoul",
   "backends": [
     { "name": "dev",         "kind": "local" },
-    { "name": "nomad-seoul", "kind": "nomad", "addr": "http://nomad-seoul:4646", "image": "reg/assay-agent:1", "runtime": "runsc" },
-    { "name": "nomad-onprem","kind": "nomad", "addr": "http://nomad-b:4646",     "image": "reg/assay-agent:1" }
+    { "name": "nomad-seoul", "kind": "nomad", "addr": "http://nomad-seoul:4646", "image": "reg/everdict-agent:1", "runtime": "runsc" },
+    { "name": "nomad-onprem","kind": "nomad", "addr": "http://nomad-b:4646",     "image": "reg/everdict-agent:1" }
   ]
 }
 ```
 ```bash
-pnpm assay run --backends-config backends.config.json --target nomad-onprem --task "..."
+pnpm everdict run --backends-config backends.config.json --target nomad-onprem --task "..."
 ```
 `EvalCase.placement` ({target, os?, isolation?}) is a control-plane hint — the **agent ignores it**.
 (K8s/Windows backends register into the same registry once built; capability-based matching —
@@ -77,7 +77,7 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
 
 - **`Backend.capacity()` → `{total, used}`** — each backend reports its concurrent-slot budget.
   `LocalBackend`/`ServiceTopologyBackend` report a configured `maxConcurrent`; `NomadBackend`
-  reports `maxConcurrent` and **live-probes** the cluster (`/v1/jobs?prefix=assay-`) for observed load.
+  reports `maxConcurrent` and **live-probes** the cluster (`/v1/jobs?prefix=everdict-`) for observed load.
 - **placement** — for each queued job the scheduler computes `free = total − max(used, in-flight)`
   per eligible backend and picks one via a `PlacementPolicy`: `leastLoadedPolicy` (spread, default) or
   `binPackPolicy` (consolidate → enables scale-to-zero). `placement.target` is honored as a hard pin.
@@ -91,7 +91,7 @@ At SaaS scale many users submit many cases against finite/elastic infra, so plac
   is dispatched the moment a slot frees (a dispatch settling re-pumps the queue). `maxQueueDepth` rejects
   with `RateLimitError` (429) when the queue is saturated. The scheduler avoids head-of-line blocking by
   scanning the fair-ordered queue for the first placeable job.
-- **wiring** — the Temporal `assay worker` builds a `Scheduler` over its registry (replacing `Router`),
+- **wiring** — the Temporal `everdict worker` builds a `Scheduler` over its registry (replacing `Router`),
   and `suiteWorkflow` fans out with a bounded lane count so a large suite can't flood activity slots;
   the scheduler then does fine-grained per-cluster capacity gating + tenant fairness on top.
 
@@ -108,10 +108,10 @@ Live proof:
 
 ## Tenant isolation (trust zones)
 Eval runs **untrusted code** — a tenant uploads its own harness image/code, which executes arbitrarily.
-So multi-tenancy is a *security* boundary, not just fairness. A `TrustZone` (`@assay/core`) maps a tenant
+So multi-tenancy is a *security* boundary, not just fairness. A `TrustZone` (`@everdict/core`) maps a tenant
 to enforced isolation: `{isolationRuntime, namespace, network, trusted}`. A `TrustZonePolicy`
-(`@assay/backends`) resolves `tenant → TrustZone`; `perTenantTrustZones()` is the safe default — **every
-tenant gets its own zone** (hardened `runsc`, dedicated `assay-<tenant>` namespace, `deny-cross-tenant`,
+(`@everdict/backends`) resolves `tenant → TrustZone`; `perTenantTrustZones()` is the safe default — **every
+tenant gets its own zone** (hardened `runsc`, dedicated `everdict-<tenant>` namespace, `deny-cross-tenant`,
 `trusted:false`); `overrides`/`staticTrustZones` relax only declared first-party (`trusted`) tenants.
 
 - **enforcement** — `assertHardenedIsolation(zone)` rejects an untrusted tenant on a shared-kernel runtime
@@ -123,7 +123,7 @@ tenant gets its own zone** (hardened `runsc`, dedicated `assay-<tenant>` namespa
   deployments (a shared LangGraph/agent process would leak state/secrets across tenants).
 
 Live proof: `scripts/live/tenant-isolation-nomad.mjs` — the same `spec@version` for tenants `alpha` and
-`beta` yields two distinct warm jobs (`assay-harness-…-alpha`, `…-beta`) on different endpoints, not a
+`beta` yields two distinct warm jobs (`everdict-harness-…-alpha`, `…-beta`) on different endpoints, not a
 shared pool. (gVisor `runsc` + Nomad namespaces are enforced in code + unit-tested; the dev cluster ships
 only `runc`/no namespaces, so that live demo uses `trusted` zones — a real deployment needs runsc/namespaces.)
 
@@ -165,7 +165,7 @@ Live proof: `scripts/live/budget-nomad.mjs` — tenant `free` capped at `runs=3`
 
 Shipped since: async control-plane API + result store (`apps/api` Fastify: run-id + webhook/polling, `PgRunStore`
 on Postgres via `DATABASE_URL` — see `docs/api.md`); live `K8sTopologyRuntime` (Nomad↔K8s parity — see
-`docs/service-harness.md`); the harness version SSOT (`@assay/registry` + `PgHarnessRegistry`); the tenant access
+`docs/service-harness.md`); the harness version SSOT (`@everdict/registry` + `PgHarnessRegistry`); the tenant access
 layer (API-key auth + tenant-owned harnesses — `docs/tenancy.md`); the SaaS web dashboard (`apps/web` —
 `docs/web.md`).
 Next slices: ClickHouse analytics store behind `RunStore`, MCP toolization of the platform, and the model-B
@@ -174,15 +174,15 @@ Next slices: ClickHouse analytics store behind `RunStore`, MCP toolization of th
 ## Nomad (phase 1)
 ```bash
 # 1) build + push the agent image to your internal registry
-docker build -f packages/agent/Dockerfile -t <registry>/assay-agent:<tag> .
+docker build -f packages/agent/Dockerfile -t <registry>/everdict-agent:<tag> .
 
-# 2) host: mint a subscription token, put it in assay/.env
+# 2) host: mint a subscription token, put it in everdict/.env
 claude setup-token            # → CLAUDE_CODE_OAUTH_TOKEN=...
 
 # 3) run against your Nomad
-pnpm assay run --backend nomad \
+pnpm everdict run --backend nomad \
   --nomad-addr http://<nomad>:4646 \
-  --image <registry>/assay-agent:<tag> --runtime runsc \
+  --image <registry>/everdict-agent:<tag> --runtime runsc \
   --task "..." --test "..."
 ```
 The control plane submits a batch job, polls the alloc to completion, and parses the

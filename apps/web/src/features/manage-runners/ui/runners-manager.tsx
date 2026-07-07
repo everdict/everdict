@@ -12,8 +12,8 @@ import {
   type RunnerMeta,
 } from '@/entities/runner'
 import {
-  getAssayDesktop,
-  type AssayDesktopBridge,
+  getEverdictDesktop,
+  type EverdictDesktopBridge,
   type DesktopRunnerStatus,
 } from '@/shared/lib/desktop-bridge'
 import { cn } from '@/shared/lib/utils'
@@ -38,7 +38,7 @@ function isRunnerCapability(value: string): value is RunnerCapability {
 // 러너는 개인 소유(self-scoped by subject) — 역할 게이트 없음.
 // 페어링 표면은 데스크톱 앱이 전담한다(원클릭; 설계 D7): 브라우저에서는 수동 페어링(토큰 1회 노출)을
 // 제공하지 않고 목록/라이브 상태/해제만 — 대신 데스크톱 다운로드를 제안한다. headless 서버는 API 키로
-// `POST /runners` → `assay runner --pair` (docs/architecture/self-hosted-runner.md).
+// `POST /runners` → `everdict runner --pair` (docs/architecture/self-hosted-runner.md).
 export function RunnersManager({
   runners,
   downloadHref,
@@ -52,11 +52,11 @@ export function RunnersManager({
   const [error, setError] = useState<string>()
   const [pending, startTransition] = useTransition()
   // 데스크톱 셸 감지 — 브리지가 있으면 원클릭 페어링 + 이 기기 라이브 상태(마운트 후에만; SSR 불일치 방지).
-  const [bridge, setBridge] = useState<AssayDesktopBridge | null>(null)
+  const [bridge, setBridge] = useState<EverdictDesktopBridge | null>(null)
   const [desktop, setDesktop] = useState<DesktopRunnerStatus | null>(null)
 
   useEffect(() => {
-    const b = getAssayDesktop()
+    const b = getEverdictDesktop()
     if (!b) return
     setBridge(b)
     void b

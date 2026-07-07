@@ -8,7 +8,7 @@ import { Toaster } from '@/shared/ui/toaster'
 import './globals.css'
 
 export const metadata: Metadata = {
-  title: 'Assay',
+  title: 'Everdict',
   description: 'Harness-agnostic agent evaluation runtime — multi-tenant control plane',
 }
 

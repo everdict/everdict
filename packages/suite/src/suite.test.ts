@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult, Scorecard, Suite } from "@assay/core";
+import type { AgentJob, CaseResult, Scorecard, Suite } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { runSuite } from "./run-suite.js";
 import { caseVerdict, diffScorecards, scorecardPassRate, summarizeScorecard } from "./scorecard.js";

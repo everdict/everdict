@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@assay/core";
+import { type TraceEvent, UpstreamError } from "@everdict/core";
 import type { TraceSource } from "./trace-source.js";
 
 // Langfuse 관측(observation) — GET /api/public/traces/{traceId} 응답의 TraceWithFullDetails.observations[].

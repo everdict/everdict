@@ -1,13 +1,13 @@
 # Preflight — 0023_connections_owner
 
-**Change:** expand — re-key `assay_connections` from **workspace-owned** to **user(subject)-owned** (personal
+**Change:** expand — re-key `everdict_connections` from **workspace-owned** to **user(subject)-owned** (personal
 Connected accounts), *keeping* a `workspace` column for the workspace-applications roster. Adds an `owner` column
 (= `principal.subject`, backfilled from `workspace`), repoints the primary key `(workspace, id)` → `(owner, id)`,
 and keeps `workspace` (now a non-key column) + a `workspace` index. So a connection is **personally owned** AND
 **visible in the workspace it was created in** (read-only roster).
 
 **Why two-phase-safe:** additive column with a default (old reads keep working), then a one-shot PK repoint by the
-tracked migrator (`assay_schema_migrations`). No data is dropped. The `assay_oauth_states` table is unchanged (it
+tracked migrator (`everdict_schema_migrations`). No data is dropped. The `everdict_oauth_states` table is unchanged (it
 already carries both `workspace` — kept for self-hosted SecretStore resolution + the browser redirect URL — and
 `created_by`, which is the connection owner at callback time).
 

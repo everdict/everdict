@@ -1,4 +1,4 @@
-# Assay
+# Everdict
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
@@ -24,23 +24,23 @@ control plane on top: apps/api (HTTP+MCP) · apps/web (SaaS web) — see CLAUDE.
 ## Packages
 | Package | Role |
 |---|---|
-| `@assay/core` | contracts (interfaces + Zod + errors). Dependency root. |
-| `@assay/drivers` | in-sandbox compute (`LocalDriver`, `DockerDriver` for image-pinned cases). |
-| `@assay/environments` | the world a run acts on (`RepoEnvironment`). |
-| `@assay/harnesses` | the agent under test: `ClaudeCodeHarness`, `ScriptedHarness`, declarative `CommandHarness` (any CLI, no code — `docs/command-harness.md`). |
-| `@assay/graders` | scoring (tests-pass / cost / steps / latency) + **Agent Judge** (`JudgeGrader`: LLM/VLM/agent verdict — `docs/judges.md`). |
-| `@assay/runner` | the eval loop (`runCase`). |
-| `@assay/agent` | the dispatched unit (model B): runs `runCase` in an isolated job. |
-| `@assay/backends` | placement: `Backend` (Local/Nomad/K8s) + `Router`/`Scheduler` (tenant-fair WFQ, quotas, budgets) + trust zones + autoscaler + tenant `RuntimeSpec`→live backend (`docs/runtimes.md`). |
-| `@assay/orchestrator` | durable control plane on Temporal (Direct / Temporal + worker; powers scheduled evals). |
-| `@assay/trace` | pull a harness trace from OTel/MLflow → `TraceEvent`; usage-proxy metering. |
-| `@assay/topology` | service-topology harnesses (multi-service + target env), Nomad/K8s/Docker runtimes. |
-| `@assay/suite` | suites + version regression: `runSuite`, scorecard summary/diff, **leaderboard** (`docs/suites.md`, `docs/scorecards.md`). |
-| `@assay/db` | result stores: `RunStore` + `ScorecardStore` (in-memory / Postgres) + SQL migrations. |
-| `@assay/registry` | versioned SSOT for **harnesses · datasets · judges · runtimes**: `(tenant, id, version)`, immutable versions, `_shared` fallback (`docs/registry.md`). |
-| `@assay/auth` | control-plane auth core: OIDC (Keycloak) + API keys → `Principal{workspace,roles}` + role authZ. |
-| `@assay/runner-core` | **self-hosted runner core** shared by CLI + desktop: MCP lease loop, resilient session, kind-branch execution, `RunnerHost` facade. |
-| `apps/cli` | dev control plane: `assay run` / `worker` / `suite` / **`assay runner`** (self-hosted, headless). |
+| `@everdict/core` | contracts (interfaces + Zod + errors). Dependency root. |
+| `@everdict/drivers` | in-sandbox compute (`LocalDriver`, `DockerDriver` for image-pinned cases). |
+| `@everdict/environments` | the world a run acts on (`RepoEnvironment`). |
+| `@everdict/harnesses` | the agent under test: `ClaudeCodeHarness`, `ScriptedHarness`, declarative `CommandHarness` (any CLI, no code — `docs/command-harness.md`). |
+| `@everdict/graders` | scoring (tests-pass / cost / steps / latency) + **Agent Judge** (`JudgeGrader`: LLM/VLM/agent verdict — `docs/judges.md`). |
+| `@everdict/runner` | the eval loop (`runCase`). |
+| `@everdict/agent` | the dispatched unit (model B): runs `runCase` in an isolated job. |
+| `@everdict/backends` | placement: `Backend` (Local/Nomad/K8s) + `Router`/`Scheduler` (tenant-fair WFQ, quotas, budgets) + trust zones + autoscaler + tenant `RuntimeSpec`→live backend (`docs/runtimes.md`). |
+| `@everdict/orchestrator` | durable control plane on Temporal (Direct / Temporal + worker; powers scheduled evals). |
+| `@everdict/trace` | pull a harness trace from OTel/MLflow → `TraceEvent`; usage-proxy metering. |
+| `@everdict/topology` | service-topology harnesses (multi-service + target env), Nomad/K8s/Docker runtimes. |
+| `@everdict/suite` | suites + version regression: `runSuite`, scorecard summary/diff, **leaderboard** (`docs/suites.md`, `docs/scorecards.md`). |
+| `@everdict/db` | result stores: `RunStore` + `ScorecardStore` (in-memory / Postgres) + SQL migrations. |
+| `@everdict/registry` | versioned SSOT for **harnesses · datasets · judges · runtimes**: `(tenant, id, version)`, immutable versions, `_shared` fallback (`docs/registry.md`). |
+| `@everdict/auth` | control-plane auth core: OIDC (Keycloak) + API keys → `Principal{workspace,roles}` + role authZ. |
+| `@everdict/runner-core` | **self-hosted runner core** shared by CLI + desktop: MCP lease loop, resilient session, kind-branch execution, `RunnerHost` facade. |
+| `apps/cli` | dev control plane: `everdict run` / `worker` / `suite` / **`everdict runner`** (self-hosted, headless). |
 | `apps/api` | multi-tenant control-plane HTTP API (Fastify) + agent-facing **MCP server** (`/mcp`): runs, scorecards (+diff/ingest/leaderboard), datasets, judges, runtimes, schedules, bundles, connections, runners, CI triggers — full BFF↔MCP parity (`docs/api.md`, `docs/mcp.md`). |
 | `apps/web` | SaaS web (Next.js FSD, Linear-style): Keycloak login, per-workspace dashboard (runs/harnesses/datasets/scorecards/leaderboard/judges/runtimes/schedules/bundles), workspace settings, personal account (connected accounts · runners · API keys) (`docs/web.md`). |
 | `apps/desktop` | **Electron desktop**: renders the deployed web (full parity by construction) + resident self-hosted runner with one-click pairing + auto-update client (`docs/architecture/desktop-app.md`). |
@@ -53,7 +53,7 @@ control plane on top: apps/api (HTTP+MCP) · apps/web (SaaS web) — see CLAUDE.
 
 ## Run (Docker Compose quickstart)
 ```bash
-git clone https://github.com/Ho2eny/assay && cd assay
+git clone https://github.com/Ho2eny/everdict && cd everdict
 docker compose -f deploy/compose/docker-compose.dev.yaml up --build
 # web http://localhost:3001 · API http://localhost:8787 — auth off, single tenant, in-memory stores
 ```
@@ -64,7 +64,7 @@ Human SSO (Keycloak OIDC): `deploy/keycloak/` (realm auto-import) + `docs/dev.md
 ```bash
 pnpm install && pnpm build
 # local — uses THIS machine's claude subscription (no API key):
-pnpm assay run --task "Create ok.txt with the text done" --test "grep -q done ok.txt"
+pnpm everdict run --task "Create ok.txt with the text done" --test "grep -q done ok.txt"
 # distributed (Nomad/K8s) and/or durable (Temporal): see docs/execution-backends.md + docs/orchestration.md
 # control plane + web: node apps/api/dist/main.js (+ docs/dev.md for Keycloak + web hot-reload)
 ```
@@ -77,14 +77,14 @@ pnpm assay run --task "Create ok.txt with the text done" --test "grep -q done ok
 ```bash
 # 설치파일 다운로드: 웹의 /{workspace}/download — OS 자동 감지 + 로그인 뒤 302 프록시(리포 private 유지).
 #   (서버 env: DESKTOP_RELEASES_TOKEN=fine-grained PAT[contents:read]; GitHub 직접 접근은 콜라보레이터만
-#    가능 — https://github.com/Ho2eny/assay/releases/latest)
+#    가능 — https://github.com/Ho2eny/everdict/releases/latest)
 # (unsigned — mac Gatekeeper/win SmartScreen 경고는 우회 실행. 서명은 인증서 확보 후)
 
 # dev 실행 (웹 :3000 + 컨트롤플레인 :8787 이 떠 있어야 함):
-ASSAY_WEB_URL=http://localhost:3000 pnpm -F @assay/desktop dev
+EVERDICT_WEB_URL=http://localhost:3000 pnpm -F @everdict/desktop dev
 
 # 로컬 패키징 (이 OS 타깃, turbo 게이트 밖):
-pnpm -F @assay/desktop package        # → apps/desktop/release/
+pnpm -F @everdict/desktop package        # → apps/desktop/release/
 
 # 3-OS 릴리즈 (CI): 태그 하나로 GitHub Release 발행
 git tag desktop-v0.2.0 && git push origin desktop-v0.2.0
@@ -103,7 +103,7 @@ headless 서버/CI 박스는 API 키로 페어링 토큰을 만들어 CLI 로:
 ```bash
 curl -X POST <control-plane>/runners -H "Authorization: Bearer ak_…" \
   -H "content-type: application/json" -d '{"label":"ci-linux-01"}'   # → { runner, token: "rnr_…" }
-assay runner --pair <rnr_…> --api-url <control-plane> [--max-concurrent N]
+everdict runner --pair <rnr_…> --api-url <control-plane> [--max-concurrent N]
 ```
 See `docs/architecture/self-hosted-runner.md` (+ service harnesses on your Docker:
 `self-hosted-service-runner.md`).
@@ -116,17 +116,17 @@ Endpoint: `http://<host>:8787/mcp` (set `<host>` to where `apps/api` runs).
 ### Claude Code
 ```bash
 # OAuth — "login like Linear": opens the browser, log in via Keycloak, done.
-claude mcp add --transport http assay http://<host>:8787/mcp
+claude mcp add --transport http everdict http://<host>:8787/mcp
 
 # headless with an API key (CI / no browser):
-claude mcp add --transport http assay http://<host>:8787/mcp \
+claude mcp add --transport http everdict http://<host>:8787/mcp \
   --header "Authorization: Bearer ak_..."
 ```
 
 ### Codex
 Codex reaches a remote MCP via `mcp-remote` (runs the OAuth + PKCE flow). Add to `~/.codex/config.toml`:
 ```toml
-[mcp_servers.assay]
+[mcp_servers.everdict]
 command = "npx"
 args = ["-y", "mcp-remote", "http://<host>:8787/mcp"]
 # headless instead — drop the browser, use an API key:
@@ -146,17 +146,17 @@ See `docs/mcp.md`.
 "A browser window will open for authentication" means discovery + client registration already succeeded
 (server side is fine) — only the local browser launch failed. Fixes:
 ```bash
-claude mcp remove assay 2>/dev/null    # clear a half-finished add
+claude mcp remove everdict 2>/dev/null    # clear a half-finished add
 rm -rf ~/.mcp-auth                      # clear stale mcp-remote OAuth cache
 
 # A) open the printed URL yourself, or force the browser:
-BROWSER=google-chrome claude mcp add --transport http assay http://<host>:8787/mcp
+BROWSER=google-chrome claude mcp add --transport http everdict http://<host>:8787/mcp
 
 # B) mcp-remote prints the auth URL explicitly (same client Codex uses):
-claude mcp add assay -- npx -y mcp-remote http://<host>:8787/mcp
+claude mcp add everdict -- npx -y mcp-remote http://<host>:8787/mcp
 
 # C) skip the browser entirely with an API key:
-claude mcp add --transport http assay http://<host>:8787/mcp \
+claude mcp add --transport http everdict http://<host>:8787/mcp \
   --header "Authorization: Bearer ak_..."
 ```
 A remote/SSH shell can't open a browser **and** receive the loopback callback — use the API key (C) there.
@@ -190,7 +190,7 @@ harness-agnostic **datasets**, user-registered **judges** (model judge live vs L
 invites + per-key API scopes, personal **connected accounts** (GitHub one-click, Mattermost notify),
 **self-hosted runner** (pair → `self:<id>` runs with provenance, cross-workspace, service harnesses on
 local Docker) and the **desktop app** (web-parity Electron shell, one-click pairing, 3-OS release CI →
-[GitHub Releases](https://github.com/Ho2eny/assay/releases), auto-update client) — all with
+[GitHub Releases](https://github.com/Ho2eny/everdict/releases), auto-update client) — all with
 control-plane-owned auth (real Keycloak OIDC + API keys), Postgres persistence, the web as a BFF token
 courier, and the agent-facing MCP server (full BFF↔MCP parity). Shipped but awaiting a live external
 e2e: GitHub Actions CI triggers (PR pins / merge re-pin, OIDC federation). Still needing your

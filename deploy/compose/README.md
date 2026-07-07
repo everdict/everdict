@@ -12,7 +12,7 @@ docker compose -f deploy/compose/docker-compose.dev.yaml up --build
 ```
 
 - 웹 http://localhost:3001 · API http://localhost:8787
-- 인증 없음: 웹은 dev 모드, API 는 dev-fallback(`x-assay-tenant`) → 바로 클릭 가능. 테넌트는 `default`.
+- 인증 없음: 웹은 dev 모드, API 는 dev-fallback(`x-everdict-tenant`) → 바로 클릭 가능. 테넌트는 `default`.
 - 저장소 **in-memory** → 재시작 시 초기화. 백엔드 **local**(이 머신 in-process).
 - 소스를 컨테이너에 바인드마운트(리눅스 호스트 → node_modules 호환): 웹=`next dev`, API=`tsc -w`+`node --watch`.
 - `claude-code` 하니스를 실제로 돌리려면 셸/`.env` 에 `ANTHROPIC_API_KEY` 또는 `CLAUDE_CODE_OAUTH_TOKEN`.
@@ -21,7 +21,7 @@ docker compose -f deploy/compose/docker-compose.dev.yaml up --build
 동작 확인:
 ```bash
 curl localhost:8787/healthz
-curl -XPOST localhost:8787/runs -H 'x-assay-tenant: default' -H 'content-type: application/json' -d '{
+curl -XPOST localhost:8787/runs -H 'x-everdict-tenant: default' -H 'content-type: application/json' -d '{
   "harness":{"id":"scripted","version":"latest"},
   "case":{"id":"c1","env":{"kind":"repo","source":{"files":{}}},"task":"...","graders":[{"id":"steps"}],"timeoutSec":120,"tags":[]}}'
 ```
@@ -37,24 +37,24 @@ docker compose -f deploy/compose/docker-compose.prod.yaml --env-file deploy/comp
 
 차이점:
 - **Postgres**(영속 볼륨, 기동 시 마이그레이션 자동 적용).
-- 시크릿 at-rest 암호화(`ASSAY_SECRETS_KEY`) + 내부 토큰(`ASSAY_INTERNAL_TOKEN`) + 테넌트 run 예산(선택).
+- 시크릿 at-rest 암호화(`EVERDICT_SECRETS_KEY`) + 내부 토큰(`EVERDICT_INTERNAL_TOKEN`) + 테넌트 run 예산(선택).
 - `restart: unless-stopped` + 헬스체크 + `depends_on(healthy)`. 바인드마운트 없음(runtime 산출물 구동).
 
 ### ⚠️ 인증 (Keycloak 제거됨)
-웹은 정적 API 키 경로가 없어 Keycloak 없이는 `x-assay-tenant=default` 로 동작한다. 그래서 API 도 인증을 강제하지
-않는다(`ASSAY_REQUIRE_AUTH` 미설정) — 즉 **단일 테넌트 `default`, 인증 미강제**다. 이 스택은 **신뢰된 네트워크 /
+웹은 정적 API 키 경로가 없어 Keycloak 없이는 `x-everdict-tenant=default` 로 동작한다. 그래서 API 도 인증을 강제하지
+않는다(`EVERDICT_REQUIRE_AUTH` 미설정) — 즉 **단일 테넌트 `default`, 인증 미강제**다. 이 스택은 **신뢰된 네트워크 /
 리버스 프록시 뒤**를 전제로 한다(공개 인터넷에 그대로 노출하지 말 것).
 
 실제 인증이 필요하면:
-- **프로그램/MCP 접근만** → API env 에 `ASSAY_REQUIRE_AUTH=1` + `ASSAY_INTERNAL_TOKEN` 으로 `/internal/tenant-keys`
+- **프로그램/MCP 접근만** → API env 에 `EVERDICT_REQUIRE_AUTH=1` + `EVERDICT_INTERNAL_TOKEN` 으로 `/internal/tenant-keys`
   에서 API 키(`ak_…`) 발급. 단 이 경우 웹 UI 는 인증 수단이 없어 동작하지 않는다.
 - **사람 SSO** → 앞단에 oauth2-proxy 등 리버스 프록시를 두거나, Keycloak 을 다시 추가(`deploy/keycloak/` 참고).
 
 ## 이미지만 따로 빌드
 
 ```bash
-docker build -f apps/api/Dockerfile --target runtime -t assay-api .   # 레포 루트에서
-docker build -f apps/web/Dockerfile --target runtime -t assay-web .
+docker build -f apps/api/Dockerfile --target runtime -t everdict-api .   # 레포 루트에서
+docker build -f apps/web/Dockerfile --target runtime -t everdict-web .
 ```
 
 > 참고: runtime 이미지는 신뢰성 우선으로 `/app` 전체(node_modules 포함)를 복사한다. 이미지 슬림화는

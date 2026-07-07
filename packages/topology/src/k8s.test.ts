@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { K8sTopologyRuntime } from "./k8s-runtime.js";
 import {
@@ -65,7 +65,7 @@ const okFetch = (async () =>
 const ZONE = (id: string): TrustZone => ({
   id,
   isolationRuntime: "runsc",
-  namespace: `assay-${id}`,
+  namespace: `everdict-${id}`,
   network: "deny-cross-tenant",
   trusted: false,
 });
@@ -106,19 +106,19 @@ describe("buildK8sManifests — 워크스페이스 레지스트리 pull 인증(r
 
 describe("buildBrowserManifests (K8s)", () => {
   it("headless Chromium Deployment + Service 를 네임스페이스에 렌더한다", () => {
-    const m = buildBrowserManifests("r1", { namespace: "assay-acme" });
+    const m = buildBrowserManifests("r1", { namespace: "everdict-acme" });
     expect(m.map((x) => x.kind)).toEqual(["Deployment", "Service"]);
     expect(m[0]?.metadata.name).toBe(browserDeployName("r1"));
-    expect(m[0]?.metadata.namespace).toBe("assay-acme");
+    expect(m[0]?.metadata.namespace).toBe("everdict-acme");
     const dep = m[0]?.spec as { template: { spec: { containers: Array<{ image: string; args: string[] }> } } };
     expect(dep.template.spec.containers[0]?.image).toBe("chromedp/headless-shell:latest");
     expect(dep.template.spec.containers[0]?.args).toEqual(["--remote-allow-origins=*"]);
   });
   it("namespaceManifest", () => {
-    expect(namespaceManifest("assay-x")).toEqual({
+    expect(namespaceManifest("everdict-x")).toEqual({
       apiVersion: "v1",
       kind: "Namespace",
-      metadata: { name: "assay-x" },
+      metadata: { name: "everdict-x" },
     });
   });
 });
@@ -129,9 +129,9 @@ describe("K8sTopologyRuntime", () => {
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     const topo = await rt.ensureTopology(SPEC, ZONE("acme"));
     expect(topo.endpoints["agent-server"]).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
-    expect(calls).toContain("ns:assay-acme");
-    expect(calls).toContain("rollout:assay-acme/bu-agent-server");
-    expect(calls).toContain("pf:assay-acme/svc/bu-agent-server");
+    expect(calls).toContain("ns:everdict-acme");
+    expect(calls).toContain("rollout:everdict-acme/bu-agent-server");
+    expect(calls).toContain("pf:everdict-acme/svc/bu-agent-server");
   });
 
   it("멀티테넌트: 존마다 다른 네임스페이스로 warm 토폴로지를 분리한다", async () => {
@@ -139,8 +139,8 @@ describe("K8sTopologyRuntime", () => {
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC, ZONE("alpha"));
     await rt.ensureTopology(SPEC, ZONE("beta"));
-    expect(calls).toContain("ns:assay-alpha");
-    expect(calls).toContain("ns:assay-beta"); // 공유 아님 — 존별 네임스페이스
+    expect(calls).toContain("ns:everdict-alpha");
+    expect(calls).toContain("ns:everdict-beta"); // 공유 아님 — 존별 네임스페이스
   });
 
   it("warm 풀은 (spec,version,zone) 당 한 번만 배포한다(캐시)", async () => {
@@ -148,13 +148,13 @@ describe("K8sTopologyRuntime", () => {
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC, ZONE("acme"));
     await rt.ensureTopology(SPEC, ZONE("acme")); // 두 번째는 캐시
-    expect(calls.filter((c) => c === "ns:assay-acme")).toHaveLength(1);
+    expect(calls.filter((c) => c === "ns:everdict-acme")).toHaveLength(1);
   });
 
   const POOL_ZONE = (id: string): TrustZone => ({
     id,
     isolationRuntime: "runc",
-    namespace: `assay-${id}`,
+    namespace: `everdict-${id}`,
     network: "deny-cross-tenant",
     trusted: true,
     storeIsolation: "pool",
@@ -169,10 +169,10 @@ describe("K8sTopologyRuntime", () => {
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
     // 공유 스토어를 pool 네임스페이스에 배포 + rollout.
-    expect(calls).toContain("ns:assay-shared");
-    expect(calls).toContain("rollout:assay-shared/assay-shared-postgres");
+    expect(calls).toContain("ns:everdict-shared");
+    expect(calls).toContain("rollout:everdict-shared/everdict-shared-postgres");
     // 어드민 psql 로 테넌트 DB/role mint(stdin 으로 DDL).
-    expect(calls.some((c) => c.startsWith("exec:assay-shared/") && c.includes("psql") && c.includes("stdin"))).toBe(
+    expect(calls.some((c) => c.startsWith("exec:everdict-shared/") && c.includes("psql") && c.includes("stdin"))).toBe(
       true,
     );
     // 서비스에 scoped DATABASE_URL(tenant_acme/r_acme, 공유 스토어 DNS) 주입.
@@ -181,7 +181,7 @@ describe("K8sTopologyRuntime", () => {
     ) as { spec: { template: { spec: { containers: Array<{ env: Array<{ name: string; value: string }> }> } } } };
     const env = Object.fromEntries(agent.spec.template.spec.containers[0]?.env.map((e) => [e.name, e.value]) ?? []);
     expect(env.DATABASE_URL).toMatch(
-      /^postgresql:\/\/r_acme:.+@assay-shared-postgres\.assay-shared\.svc\.cluster\.local:5432\/tenant_acme$/,
+      /^postgresql:\/\/r_acme:.+@everdict-shared-postgres\.everdict-shared\.svc\.cluster\.local:5432\/tenant_acme$/,
     );
     // pool 은 전용 스토어를 zone ns 에 띄우지 않는다(공유만).
     expect(applied.some((m) => (m.metadata as { name?: string })?.name === "bu-postgres")).toBe(false);
@@ -193,8 +193,8 @@ describe("K8sTopologyRuntime", () => {
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
     const policies = applied.filter((m) => m.kind === "NetworkPolicy");
     const names = policies.map((m) => (m.metadata as { name: string }).name);
-    expect(names).toContain("assay-zone-ingress"); // 존 ns: 같은-ns ingress 만
-    expect(names).toContain("assay-shared-store-ingress"); // 공유스토어: managed ns 만
+    expect(names).toContain("everdict-zone-ingress"); // 존 ns: 같은-ns ingress 만
+    expect(names).toContain("everdict-shared-store-ingress"); // 공유스토어: managed ns 만
   });
 
   it("network: networkPolicies:false 면 정책을 적용하지 않는다", async () => {
@@ -209,9 +209,9 @@ describe("K8sTopologyRuntime", () => {
     const rt = new K8sTopologyRuntime({ kubectl, fetchImpl: okFetch, pollIntervalMs: 1 });
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("acme"));
     await rt.ensureTopology(SPEC_PG, POOL_ZONE("globex"));
-    expect(calls.filter((c) => c === "rollout:assay-shared/assay-shared-postgres")).toHaveLength(1);
+    expect(calls.filter((c) => c === "rollout:everdict-shared/everdict-shared-postgres")).toHaveLength(1);
     // 그래도 테넌트별 mint 는 각각 실행(2회).
-    expect(calls.filter((c) => c.startsWith("exec:assay-shared/") && c.includes("psql"))).toHaveLength(2);
+    expect(calls.filter((c) => c.startsWith("exec:everdict-shared/") && c.includes("psql"))).toHaveLength(2);
   });
 
   it("per-case 브라우저 dispose 는 브라우저 리소스만 지운다(네임스페이스 유지)", async () => {
@@ -220,7 +220,7 @@ describe("K8sTopologyRuntime", () => {
     const env = await rt.provisionBrowserEnv(SPEC, "run1", ZONE("acme"));
     await env.dispose();
     expect(calls).toContain(
-      `del:assay-acme/deployment/${browserDeployName("run1")}+service/${browserDeployName("run1")}`,
+      `del:everdict-acme/deployment/${browserDeployName("run1")}+service/${browserDeployName("run1")}`,
     );
     expect(calls.some((c) => c.startsWith("delns:"))).toBe(false); // ns 는 안 지움
   });

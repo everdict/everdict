@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Download, ExternalLink, Laptop } from 'lucide-react'
 import { useTranslations } from 'next-intl'
 
-import { getAssayDesktop } from '@/shared/lib/desktop-bridge'
+import { getEverdictDesktop } from '@/shared/lib/desktop-bridge'
 import { Badge } from '@/shared/ui/badge'
 import { buttonVariants } from '@/shared/ui/button'
 import { Callout } from '@/shared/ui/callout'
@@ -60,7 +60,7 @@ export function DownloadPanel({
 
   useEffect(() => {
     setOs(detectOs())
-    setInDesktop(getAssayDesktop() !== null)
+    setInDesktop(getEverdictDesktop() !== null)
   }, [])
 
   if (release === null) {

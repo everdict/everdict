@@ -14,9 +14,9 @@ Carried discipline (reinterpreted for Postgres + plain numbered SQL — Flyway-s
 - Deploy ordering for breaking changes goes in the **PR body**, and is coordinated across
   repos if a contract spans services.
 
-## Implementation (`@assay/db`)
+## Implementation (`@everdict/db`)
 - Migrations are **numbered SQL files** in `packages/db/migrations/` (`0001_create_runs.sql`, …).
-- `migrate(client)` ensures an `assay_schema_migrations` tracking table, applies only un-applied files in
+- `migrate(client)` ensures an `everdict_schema_migrations` tracking table, applies only un-applied files in
   order, and records each — **idempotent** (re-runs are no-ops). `apps/api` runs it at boot when
   `DATABASE_URL` is set.
 - `preflight(client, name)` is the read-only check → `OK_TO_APPLY` / `ALREADY_APPLIED` (extend with

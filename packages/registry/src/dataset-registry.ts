@@ -1,4 +1,4 @@
-import { ConflictError, type Dataset, type DatasetProvenance, NotFoundError } from "@assay/core";
+import { ConflictError, type Dataset, type DatasetProvenance, NotFoundError } from "@everdict/core";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 // list() 한 항목 — 하나의 id(여러 불변 버전)를 목록 화면용 메타로 요약한다. 내용(케이스수/설명/태그/출처)은

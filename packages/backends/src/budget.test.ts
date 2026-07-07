@@ -1,5 +1,5 @@
-import type { CaseResult } from "@assay/core";
-import { PaymentRequiredError } from "@assay/core";
+import type { CaseResult } from "@everdict/core";
+import { PaymentRequiredError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { billingTenant, inMemoryBudget, sumCost } from "./budget.js";
 

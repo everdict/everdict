@@ -92,7 +92,7 @@ export class PgUserProfileStore implements UserProfileStore {
 
   async get(subject: string): Promise<UserProfile | undefined> {
     const res = await this.client.query<ProfileRow>(
-      "SELECT subject, name, username, avatar_url, updated_at FROM assay_user_profiles WHERE subject = $1",
+      "SELECT subject, name, username, avatar_url, updated_at FROM everdict_user_profiles WHERE subject = $1",
       [subject],
     );
     const row = res.rows[0];
@@ -102,7 +102,7 @@ export class PgUserProfileStore implements UserProfileStore {
   async getMany(subjects: string[]): Promise<UserProfile[]> {
     if (subjects.length === 0) return [];
     const res = await this.client.query<ProfileRow>(
-      "SELECT subject, name, username, avatar_url, updated_at FROM assay_user_profiles WHERE subject = ANY($1)",
+      "SELECT subject, name, username, avatar_url, updated_at FROM everdict_user_profiles WHERE subject = ANY($1)",
       [subjects],
     );
     return res.rows.map(toProfile);
@@ -115,7 +115,7 @@ export class PgUserProfileStore implements UserProfileStore {
     const username = applyField(cur?.username, patch.username) ?? null;
     const avatarUrl = applyField(cur?.avatarUrl, patch.avatarUrl) ?? null;
     await this.client.query(
-      `INSERT INTO assay_user_profiles (subject, name, username, avatar_url) VALUES ($1, $2, $3, $4)
+      `INSERT INTO everdict_user_profiles (subject, name, username, avatar_url) VALUES ($1, $2, $3, $4)
        ON CONFLICT (subject) DO UPDATE SET name = EXCLUDED.name, username = EXCLUDED.username,
          avatar_url = EXCLUDED.avatar_url, updated_at = now()`,
       [subject, name, username, avatarUrl],

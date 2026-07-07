@@ -1,6 +1,6 @@
 import { stat } from "node:fs/promises";
-import { RESULT_SENTINEL } from "@assay/agent";
-import { type AgentJob, BadRequestError, type CaseResult, UpstreamError } from "@assay/core";
+import { RESULT_SENTINEL } from "@everdict/agent";
+import { type AgentJob, BadRequestError, type CaseResult, UpstreamError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import {
   K8S_REGISTRY_AUTH_SECRET,
@@ -82,13 +82,18 @@ function mockApi(
 }
 
 describe("buildK8sJob / k8sJobName", () => {
-  it("이미지·풀폴리시·잡 페이로드(ASSAY_AGENT_JOB)·네임스페이스를 담는다", () => {
-    const m = buildK8sJob(JOB, { image: "reg/assay-agent:1" }, "assay-c1", "assay-acme") as unknown as JobManifest;
-    expect(m.metadata.namespace).toBe("assay-acme");
-    expect(m.spec.template.spec.containers[0]?.image).toBe("reg/assay-agent:1");
+  it("이미지·풀폴리시·잡 페이로드(EVERDICT_AGENT_JOB)·네임스페이스를 담는다", () => {
+    const m = buildK8sJob(
+      JOB,
+      { image: "reg/everdict-agent:1" },
+      "everdict-c1",
+      "everdict-acme",
+    ) as unknown as JobManifest;
+    expect(m.metadata.namespace).toBe("everdict-acme");
+    expect(m.spec.template.spec.containers[0]?.image).toBe("reg/everdict-agent:1");
     expect(m.spec.template.spec.containers[0]?.imagePullPolicy).toBe("IfNotPresent");
     expect(m.spec.template.spec.runtimeClassName).toBeUndefined();
-    const decoded = JSON.parse(Buffer.from(envOf(m, "ASSAY_AGENT_JOB") ?? "", "base64").toString("utf8"));
+    const decoded = JSON.parse(Buffer.from(envOf(m, "EVERDICT_AGENT_JOB") ?? "", "base64").toString("utf8"));
     expect(decoded.harness.id).toBe("aider");
   });
 
@@ -133,10 +138,10 @@ describe("buildK8sJob / k8sJobName", () => {
       "n",
       "ns",
     ) as unknown as JobManifest;
-    expect(envOf(m, "ASSAY_JUDGE_MODEL")).toBe("gpt-5.4-mini");
+    expect(envOf(m, "EVERDICT_JUDGE_MODEL")).toBe("gpt-5.4-mini");
     expect(envOf(m, "OPENAI_API_KEY")).toBe("k");
     const off = buildK8sJob(JOB, { image: "img" }, "n", "ns") as unknown as JobManifest;
-    expect(envOf(off, "ASSAY_JUDGE_MODEL")).toBeUndefined();
+    expect(envOf(off, "EVERDICT_JUDGE_MODEL")).toBeUndefined();
   });
 
   it("runtimeClassName 이 주어지면 파드 스펙에 실린다", () => {
@@ -156,7 +161,7 @@ describe("buildK8sJob / k8sJobName", () => {
   });
 
   it("k8sJobName 은 DNS-1123 으로 정규화한다", () => {
-    expect(k8sJobName({ ...JOB, evalCase: { ...JOB.evalCase, id: "Web_Case#1" } })).toBe("assay-web-case-1");
+    expect(k8sJobName({ ...JOB, evalCase: { ...JOB.evalCase, id: "Web_Case#1" } })).toBe("everdict-web-case-1");
   });
 });
 
@@ -168,21 +173,21 @@ describe("K8sBackend.dispatch", () => {
     expect(result.caseId).toBe("c1");
     expect(result.harness).toBe("aider@latest");
     expect(applied).toHaveLength(1);
-    expect(deleted).toEqual(["assay-c1"]); // finally 정리
+    expect(deleted).toEqual(["everdict-c1"]); // finally 정리
   });
 
   it("Job 실패 → UpstreamError 이지만 정리는 수행", async () => {
     const { api, deleted } = mockApi({ failed: true });
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
     await expect(backend.dispatch(JOB)).rejects.toBeInstanceOf(UpstreamError);
-    expect(deleted).toEqual(["assay-c1"]);
+    expect(deleted).toEqual(["everdict-c1"]);
   });
 
   it("trustZones: 테넌트 존을 잡마다 적용(네임스페이스 + runtimeClassName=gvisor)", async () => {
     const { api, applied } = mockApi();
     const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1, trustZones: perTenantTrustZones() });
     await backend.dispatch({ ...JOB, tenant: "acme" });
-    expect(applied[0]?.metadata.namespace).toBe("assay-acme");
+    expect(applied[0]?.metadata.namespace).toBe("everdict-acme");
     expect(applied[0]?.spec.template.spec.runtimeClassName).toBe("gvisor"); // runsc → gvisor 매핑
   });
 
@@ -219,11 +224,11 @@ describe("K8sBackend.dispatch", () => {
 
 describe("kubectlArgs (인증 선택자)", () => {
   it("kubeconfig(파일 경로)가 있으면 --kubeconfig 를 맨 앞에 둔다", () => {
-    expect(kubectlArgs({ kubeconfig: "/tmp/kc", context: "kind-assay" })).toEqual([
+    expect(kubectlArgs({ kubeconfig: "/tmp/kc", context: "kind-everdict" })).toEqual([
       "--kubeconfig",
       "/tmp/kc",
       "--context",
-      "kind-assay",
+      "kind-everdict",
     ]);
   });
 

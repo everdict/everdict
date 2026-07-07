@@ -126,8 +126,8 @@ mem/Pg stores, Zod at every boundary, web is a pure HTTP mirror.
 - Reuse: by-harness grouping logic, trend SVG sparkline, `shared/lib/format`, `shared/ui/{score,chip,stat-card}`.
 
 ### S2 — `View` entity (persist & load) — **SHIPPED**
-- `@assay/db`: `ViewStore` interface + `InMemoryViewStore` + `PgViewStore` + migration `0038_create_views.sql`
-  (`assay_views`: id, tenant, name, config `jsonb`, visibility, created_by, created_at, updated_at; single index
+- `@everdict/db`: `ViewStore` interface + `InMemoryViewStore` + `PgViewStore` + migration `0038_create_views.sql`
+  (`everdict_views`: id, tenant, name, config `jsonb`, visibility, created_by, created_at, updated_at; single index
   `(tenant, visibility, created_at DESC)` — the one read path is "workspace-shared + my-private, newest first").
   `listVisible(tenant, subject)` = `visibility='workspace' OR created_by=subject`.
 - `apps/api`: `ViewService` (CRUD + ownership gate — edit/delete = creator **or** workspace admin, via injected

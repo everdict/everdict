@@ -1,4 +1,4 @@
-import { CaseResultSchema, RunUsageSummarySchema, usageFromTrace } from "@assay/core";
+import { CaseResultSchema, RunUsageSummarySchema, usageFromTrace } from "@everdict/core";
 import { z } from "zod";
 
 // 한 run 의 수명: 접수 → (스케줄러 큐/디스패치) → 성공/실패. 결과 스토어가 이 레코드를 보관한다.

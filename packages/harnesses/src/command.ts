@@ -7,8 +7,8 @@ import {
   type TraceEvent,
   flattenEnv,
   shq,
-} from "@assay/core";
-import { type StartedUsageProxy, type TraceSource, buildTraceSource, startUsageProxy } from "@assay/trace";
+} from "@everdict/core";
+import { type StartedUsageProxy, type TraceSource, buildTraceSource, startUsageProxy } from "@everdict/trace";
 
 export interface CommandHarnessOptions {
   workDir?: string;
@@ -22,7 +22,7 @@ export interface CommandHarnessOptions {
   runId?: () => string;
   sleep?: (ms: number) => Promise<void>; // collectTrace 재시도 백오프(기본 setTimeout)
   // 사용량 계측(opt-in): trace:none 인 블랙박스 하니스의 모델 호출을 로컬 usage-proxy 로 통과시켜 토큰을 회수,
-  // 합성 llm_call 트레이스 이벤트로 내보낸다(→ budget/cost 그레이더가 기존 경로로 집계). BYO + Assay 소유 버짓.
+  // 합성 llm_call 트레이스 이벤트로 내보낸다(→ budget/cost 그레이더가 기존 경로로 집계). BYO + Everdict 소유 버짓.
   meterUsage?: boolean;
   meterEnvVar?: string; // 모델 베이스 URL env 변수(기본 OPENAI_API_BASE). 이 값이 프록시 업스트림이 된다.
   // 테스트 주입: 실제 소켓 대신 프록시 시작기를 교체.
@@ -30,7 +30,7 @@ export interface CommandHarnessOptions {
 }
 
 function defaultRunId(): string {
-  return `assay-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+  return `everdict-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
 // 선언형 CLI 하네스 — 스펙의 setup/command/trace 를 해석한다(코드 어댑터 불필요).
@@ -121,8 +121,8 @@ export class CommandHarness implements EvaluableHarness {
       ...ctx.apiKeyEnv,
       // env 의 {secretRef} 는 컨트롤플레인이 디스패치 직전 이미 값으로 해석한다. 미해석분은 flattenEnv 가 제외(안전).
       ...flattenEnv(this.spec.env),
-      ASSAY_RUN_ID: runId, // 에이전트가 trace 를 상관(correlate)하도록 주입
-      ...(this.spec.trace.kind !== "none" ? { OTEL_RESOURCE_ATTRIBUTES: `assay.run_id=${runId}` } : {}),
+      EVERDICT_RUN_ID: runId, // 에이전트가 trace 를 상관(correlate)하도록 주입
+      ...(this.spec.trace.kind !== "none" ? { OTEL_RESOURCE_ATTRIBUTES: `everdict.run_id=${runId}` } : {}),
     };
     const trace = this.spec.trace;
     // 사용량 계측은 자기 트레이스가 없는(trace:none) 하니스에만 — 비용 이중집계 방지. 베이스 env 가 있어야 의미.

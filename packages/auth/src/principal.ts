@@ -12,7 +12,7 @@ export interface Principal {
   runnerId?: string; // 러너 토큰(via=runner)일 때만 — 어느 디바이스인지. lease/result 도구가 (workspace,subject,runnerId) 로 쓴다.
 }
 
-// 인증 요청 컨텍스트 — bearer 밖에서 오는 힌트. workspaceHint = x-assay-workspace 헤더(요청이 지목한 워크스페이스).
+// 인증 요청 컨텍스트 — bearer 밖에서 오는 힌트. workspaceHint = x-everdict-workspace 헤더(요청이 지목한 워크스페이스).
 // GitHub Actions 페더레이션이 "그 워크스페이스의 repo link 만" 대조하는 데 쓴다(전역 repo 역인덱스 없음, 크로스테넌트 모호성 없음).
 export interface AuthContext {
   workspaceHint?: string;

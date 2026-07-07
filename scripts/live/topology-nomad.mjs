@@ -4,7 +4,7 @@
 // Chromium)를 띄워 CDP 연결·스냅샷한다는 라이브 검증.
 //
 // 사전: nomad agent -dev (docker driver) 기동; 스텁 front-door 이미지 호스트 빌드.
-//   nomad agent -dev & ; docker build -t assay-topo-stub:demo scripts/live/topology-stub
+//   nomad agent -dev & ; docker build -t everdict-topo-stub:demo scripts/live/topology-stub
 import process from "node:process";
 import { NomadTopologyRuntime } from "../../packages/topology/dist/index.js";
 
@@ -14,7 +14,7 @@ const spec = {
   kind: "service",
   id: "topo-demo",
   version: "1.0.0",
-  services: [{ name: "agent", image: "assay-topo-stub:demo", port: 8080, needs: [], perRun: [], replicas: 1 }],
+  services: [{ name: "agent", image: "everdict-topo-stub:demo", port: 8080, needs: [], perRun: [], replicas: 1 }],
   dependencies: [],
   target: { kind: "browser", engine: "chromium", lifecycle: "per-case-instance", observe: ["screenshot"] },
   frontDoor: { service: "agent", submit: "POST /runs" },

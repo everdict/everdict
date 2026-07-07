@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { UpstreamError } from "@assay/core";
+import { UpstreamError } from "@everdict/core";
 
 const execFileAsync = promisify(execFile);
 

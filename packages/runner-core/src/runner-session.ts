@@ -20,7 +20,7 @@ export type ConnectClient = () => Promise<RunnerClient>;
 // connect() 가 initialize 를 보내 새 mcp-session-id 를 발급받는다 → 매 재연결마다 신선한 세션.
 export function mcpConnect(mcpUrl: URL, token: string): ConnectClient {
   return async () => {
-    const client = new Client({ name: "assay-runner", version: "0.1.0" });
+    const client = new Client({ name: "everdict-runner", version: "0.1.0" });
     const transport = new StreamableHTTPClientTransport(mcpUrl, {
       requestInit: { headers: { Authorization: `Bearer ${token}` } },
     });

@@ -81,7 +81,7 @@ export class PgCommentStore implements CommentStore {
 
   async add(record: CommentRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_comments (id, tenant, resource_type, resource_id, parent_id, author, body, created_at, updated_at)
+      `INSERT INTO everdict_comments (id, tenant, resource_type, resource_id, parent_id, author, body, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
       [
         record.id,
@@ -100,7 +100,7 @@ export class PgCommentStore implements CommentStore {
   async list(tenant: string, resourceType: string, resourceId: string): Promise<CommentRecord[]> {
     const res = await this.client.query<CommentRow>(
       `SELECT id, tenant, resource_type, resource_id, parent_id, author, body, created_at, updated_at
-       FROM assay_comments WHERE tenant = $1 AND resource_type = $2 AND resource_id = $3
+       FROM everdict_comments WHERE tenant = $1 AND resource_type = $2 AND resource_id = $3
        ORDER BY created_at ASC, id ASC`,
       [tenant, resourceType, resourceId],
     );
@@ -110,7 +110,7 @@ export class PgCommentStore implements CommentStore {
   async get(tenant: string, id: string): Promise<CommentRecord | undefined> {
     const res = await this.client.query<CommentRow>(
       `SELECT id, tenant, resource_type, resource_id, parent_id, author, body, created_at, updated_at
-       FROM assay_comments WHERE tenant = $1 AND id = $2`,
+       FROM everdict_comments WHERE tenant = $1 AND id = $2`,
       [tenant, id],
     );
     return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
@@ -118,7 +118,7 @@ export class PgCommentStore implements CommentStore {
 
   async remove(tenant: string, id: string): Promise<void> {
     // 자기 자신 + 대댓글(parent_id = id)까지 함께 삭제(고아 방지).
-    await this.client.query("DELETE FROM assay_comments WHERE tenant = $1 AND (id = $2 OR parent_id = $2)", [
+    await this.client.query("DELETE FROM everdict_comments WHERE tenant = $1 AND (id = $2 OR parent_id = $2)", [
       tenant,
       id,
     ]);

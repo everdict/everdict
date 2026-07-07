@@ -64,7 +64,7 @@ export class PgScorecardStore implements ScorecardStore {
 
   async create(r: ScorecardRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_scorecards
+      `INSERT INTO everdict_scorecards
         (id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, scorecard, sink_export, error, steps, run_ids, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)`,
       [
@@ -145,14 +145,14 @@ export class PgScorecardStore implements ScorecardStore {
     if (sets.length === 0) return this.get(id);
     vals.push(id);
     const res = await this.client.query<ScorecardRow>(
-      `UPDATE assay_scorecards SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+      `UPDATE everdict_scorecards SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
       vals,
     );
     return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
   }
 
   async get(id: string): Promise<ScorecardRecord | undefined> {
-    const res = await this.client.query<ScorecardRow>("SELECT * FROM assay_scorecards WHERE id = $1", [id]);
+    const res = await this.client.query<ScorecardRow>("SELECT * FROM everdict_scorecards WHERE id = $1", [id]);
     return res.rows[0] ? rowToRecord(res.rows[0], true) : undefined;
   }
 
@@ -175,7 +175,7 @@ export class PgScorecardStore implements ScorecardStore {
     }
     const res = await this.client.query<ScorecardRow>(
       `SELECT id, tenant, dataset_id, dataset_version, harness_id, harness_version, status, summary, models, judge_models, origin, created_by, runtime, subset, error, created_at, updated_at
-       FROM assay_scorecards
+       FROM everdict_scorecards
        WHERE ${conds.join(" AND ")}
        ORDER BY created_at DESC, id DESC`,
       vals,

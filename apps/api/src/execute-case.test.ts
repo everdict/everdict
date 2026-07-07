@@ -1,5 +1,5 @@
-import type { Dispatcher } from "@assay/backends";
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { Dispatcher } from "@everdict/backends";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { executeCase } from "./execute-case.js";
 
@@ -269,7 +269,7 @@ describe("executeCase — 잡 밖 트레이스 수집(traceRef 완성)", () => {
       traceRef: {
         kind: "mlflow",
         endpoint: "http://m",
-        runId: "assay-r1",
+        runId: "everdict-r1",
         authSecret: "MLFLOW_AUTH",
         correlate: "tag",
         experiment: "7",

@@ -1,5 +1,5 @@
-import { runAgentJob } from "@assay/agent";
-import type { AgentJob, CaseResult } from "@assay/core";
+import { runAgentJob } from "@everdict/agent";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 
 // 개발/단일 호스트용 — 잡을 같은 프로세스에서 실행한다(격리 없음).

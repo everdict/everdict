@@ -1,5 +1,5 @@
 {
-  "name": "@assay/orchestrator",
+  "name": "@everdict/orchestrator",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -13,9 +13,9 @@
     "test": "vitest run --passWithNoTests"
   },
   "dependencies": {
-    "@assay/agent": "workspace:*",
-    "@assay/backends": "workspace:*",
-    "@assay/core": "workspace:*",
+    "@everdict/agent": "workspace:*",
+    "@everdict/backends": "workspace:*",
+    "@everdict/core": "workspace:*",
     "@temporalio/activity": "^1.18.1",
     "@temporalio/client": "^1.18.1",
     "@temporalio/worker": "^1.18.1",

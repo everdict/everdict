@@ -93,7 +93,7 @@ export class PgViewStore implements ViewStore {
 
   async create(record: ViewRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_views (id, tenant, name, config, visibility, created_by, created_at, updated_at)
+      `INSERT INTO everdict_views (id, tenant, name, config, visibility, created_by, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8)`,
       [
         record.id,
@@ -109,7 +109,7 @@ export class PgViewStore implements ViewStore {
   }
 
   async get(tenant: string, id: string): Promise<ViewRecord | undefined> {
-    const { rows } = await this.client.query<ViewRow>("SELECT * FROM assay_views WHERE tenant=$1 AND id=$2", [
+    const { rows } = await this.client.query<ViewRow>("SELECT * FROM everdict_views WHERE tenant=$1 AND id=$2", [
       tenant,
       id,
     ]);
@@ -118,7 +118,7 @@ export class PgViewStore implements ViewStore {
 
   async listVisible(tenant: string, subject: string): Promise<ViewRecord[]> {
     const { rows } = await this.client.query<ViewRow>(
-      `SELECT * FROM assay_views
+      `SELECT * FROM everdict_views
        WHERE tenant=$1 AND (visibility='workspace' OR created_by=$2)
        ORDER BY created_at DESC`,
       [tenant, subject],
@@ -131,13 +131,13 @@ export class PgViewStore implements ViewStore {
     if (!current) return undefined;
     const next: ViewRecord = { ...current, ...patch, id: current.id, tenant: current.tenant };
     await this.client.query(
-      "UPDATE assay_views SET name=$3, config=$4, visibility=$5, updated_at=$6 WHERE tenant=$1 AND id=$2",
+      "UPDATE everdict_views SET name=$3, config=$4, visibility=$5, updated_at=$6 WHERE tenant=$1 AND id=$2",
       [tenant, id, next.name, JSON.stringify(next.config ?? null), next.visibility, next.updatedAt],
     );
     return next;
   }
 
   async remove(tenant: string, id: string): Promise<void> {
-    await this.client.query("DELETE FROM assay_views WHERE tenant=$1 AND id=$2", [tenant, id]);
+    await this.client.query("DELETE FROM everdict_views WHERE tenant=$1 AND id=$2", [tenant, id]);
   }
 }

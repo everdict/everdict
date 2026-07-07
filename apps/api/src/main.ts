@@ -1,4 +1,4 @@
-import { collectAuthEnv } from "@assay/agent";
+import { collectAuthEnv } from "@everdict/agent";
 import {
   type Authenticator,
   apiKeyAuthenticator,
@@ -6,7 +6,7 @@ import {
   githubActionsAuthenticator,
   oidcAuthenticator,
   runnerAuthenticator,
-} from "@assay/auth";
+} from "@everdict/auth";
 import {
   BackendRegistry,
   type BudgetLimit,
@@ -15,8 +15,8 @@ import {
   Scheduler,
   buildRuntimeBackend,
   inMemoryBudget,
-} from "@assay/backends";
-import type { RegistryAuth, RuntimeSpec } from "@assay/core";
+} from "@everdict/backends";
+import type { RegistryAuth, RuntimeSpec } from "@everdict/core";
 import {
   type CommentStore,
   InMemoryCommentStore,
@@ -66,7 +66,7 @@ import {
   makePool,
   migrate,
   sqlClient,
-} from "@assay/db";
+} from "@everdict/db";
 import {
   type BenchmarkRegistry,
   type DatasetRegistry,
@@ -92,10 +92,10 @@ import {
   loadHarnessTaxonomyDir,
   loadJudgeDir,
   loadModelDir,
-} from "@assay/registry";
-import { S3ArtifactStore } from "@assay/storage";
-import { InProcessCallbackRendezvous } from "@assay/topology";
-import { buildTraceSink, buildTraceSource } from "@assay/trace";
+} from "@everdict/registry";
+import { S3ArtifactStore } from "@everdict/storage";
+import { InProcessCallbackRendezvous } from "@everdict/topology";
+import { buildTraceSink, buildTraceSource } from "@everdict/trace";
 import { BenchmarkService } from "./benchmark-service.js";
 import { BundleService } from "./bundle-service.js";
 import { CiLinkService } from "./ci-link-service.js";
@@ -131,8 +131,8 @@ import { WorkspaceService } from "./workspace-service.js";
 async function main(): Promise<void> {
   const port = Number(process.env.PORT ?? "8787");
   const nomadAddr = process.env.NOMAD_ADDR;
-  const k8sContext = process.env.ASSAY_K8S_CONTEXT;
-  const image = process.env.ASSAY_AGENT_IMAGE;
+  const k8sContext = process.env.EVERDICT_K8S_CONTEXT;
+  const image = process.env.EVERDICT_AGENT_IMAGE;
 
   const {
     store,
@@ -192,31 +192,31 @@ async function main(): Promise<void> {
   }
   // 정책(기본): LocalBackend(격리 없는 컨트롤플레인 호스트 in-process)는 절대 등록하지 않는다 — 모든 실행은 등록된
   // 테넌트 런타임 또는 self-hosted 러너(self:<id>/self:ws)를 target 으로 지정해야 한다. 옵트인 env 없이 이게 기본 동작.
-  // (dev/단일-호스트 in-process 실행이 필요하면 apps/cli 의 assay run 을 쓴다 — API 는 관리형/원격 실행만.)
+  // (dev/단일-호스트 in-process 실행이 필요하면 apps/cli 의 everdict run 을 쓴다 — API 는 관리형/원격 실행만.)
   const scheduler = new Scheduler(backends);
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
   // 셀프호스티드 러너 lease 허브 — self:<runnerId> 잡을 파킹하고, 러너 프로토콜(MCP, slice 4)이 가져가/회신한다.
   // 디스패처(파킹)와 MCP lease/result 도구(가져가기/완료)가 공유하는 단일 인스턴스.
   const runnerHub = new RunnerHub(
-    process.env.ASSAY_SELF_HOSTED_QUEUE_TIMEOUT_MS
-      ? { queueTimeoutMs: Number(process.env.ASSAY_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
+    process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS
+      ? { queueTimeoutMs: Number(process.env.EVERDICT_SELF_HOSTED_QUEUE_TIMEOUT_MS) }
       : {},
   );
 
   // front-door callback 완료 모델: 공개 베이스 URL 이 설정되면 in-process 랑데부를 하나 만들어 토폴로지 백엔드(outbound:
   // {{callback_url}}/wait)와 /frontdoor-callback 라우트(inbound: deliver)가 공유한다. 미설정이면 callback 모델은 드라이버에서
   // 명확히 실패(랑데부 없음). 단일 control-plane 프로세스(in-process dispatch) 전제 — 분산은 store-backed 랑데부가 후속.
-  const callbackRendezvous = process.env.ASSAY_CALLBACK_BASE_URL
-    ? new InProcessCallbackRendezvous(process.env.ASSAY_CALLBACK_BASE_URL)
+  const callbackRendezvous = process.env.EVERDICT_CALLBACK_BASE_URL
+    ? new InProcessCallbackRendezvous(process.env.EVERDICT_CALLBACK_BASE_URL)
     : undefined;
-  if (callbackRendezvous) console.log("▶ front-door callback rendezvous:", process.env.ASSAY_CALLBACK_BASE_URL);
+  if (callbackRendezvous) console.log("▶ front-door callback rendezvous:", process.env.EVERDICT_CALLBACK_BASE_URL);
 
   // 테넌트 런타임 라우팅: placement.target 이 테넌트 등록 Runtime 이면 그 백엔드를 빌드/등록해 라우팅(아니면 글로벌 백엔드 그대로).
   const runtimeSecretsFor = (tenant: string) => secretStore.entries(tenant);
   // harness env {secretRef} 해석용 두 티어 — 공유(owner='') + 제출자 개인(owner=subject). run/scorecard 가 제출자로 호출.
   const scopedSecretsFor = (tenant: string, subject?: string) => secretStore.scopedEntries(tenant, subject ?? "");
-  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + assay image push 발행 대상 + pull 자격증명 주입.
+  // 워크스페이스 이미지 레지스트리(BYO) — 하니스 이미지 분류 기준 + everdict image push 발행 대상 + pull 자격증명 주입.
   // 런타임 빌더/디스패치 enrichment 가 pullAuth 를 쓰므로 그 앞에서 생성한다.
   const imageRegistryService = new ImageRegistryService({
     settings: settingsStore,
@@ -352,7 +352,9 @@ async function main(): Promise<void> {
     dispatch: (job) => dispatcher.dispatch(job), // harness judge 도 테넌트 런타임 라우팅 경유
     harnesses: harnessInstanceRegistry,
     models: modelRegistry, // judge.model 이 등록된 model id 면 provider/baseUrl/하부모델을 해석(아니면 raw 문자열)
-    ...(process.env.ASSAY_JUDGE_OPENAI_BASE_URL ? { openaiBaseUrl: process.env.ASSAY_JUDGE_OPENAI_BASE_URL } : {}),
+    ...(process.env.EVERDICT_JUDGE_OPENAI_BASE_URL
+      ? { openaiBaseUrl: process.env.EVERDICT_JUDGE_OPENAI_BASE_URL }
+      : {}),
   });
   // 배치 평가: 데이터셋(케이스 묶음)을 하니스@버전으로 돌려 스코어카드 집계 + 선택한 judge 를 트레이스에 적용.
   const scorecardService = new ScorecardService({
@@ -439,7 +441,7 @@ async function main(): Promise<void> {
 
   // 예약(cron) 스코어카드. SSOT = scheduleStore; Temporal 주소가 설정되면 TemporalScheduleDriver 로 Schedule 동기화
   // (발사 활성화). 발사는 워크플로→internal 라우트→여기 submitScorecard. 미설정이면 CRUD 만(발사 비활성, dev).
-  const temporalAddress = process.env.ASSAY_TEMPORAL_ADDRESS;
+  const temporalAddress = process.env.EVERDICT_TEMPORAL_ADDRESS;
   scheduleService = new ScheduleService({
     store: scheduleStore,
     ...(temporalAddress ? { driver: new TemporalScheduleDriver({ address: temporalAddress }) } : {}),
@@ -498,18 +500,18 @@ async function main(): Promise<void> {
     runnerHub,
     authenticator: buildAuthenticator(keyStore, runnerStore, settingsStore),
     keyStore,
-    internalToken: process.env.ASSAY_INTERNAL_TOKEN,
-    requireAuth: process.env.ASSAY_REQUIRE_AUTH === "1",
+    internalToken: process.env.EVERDICT_INTERNAL_TOKEN,
+    requireAuth: process.env.EVERDICT_REQUIRE_AUTH === "1",
     ...(callbackRendezvous ? { callbackSink: callbackRendezvous } : {}), // /frontdoor-callback inbound 수신(같은 랑데부 인스턴스)
     // 요청/인증 구조화 로그(pino). 기본 info — 인증 거부(401)와 그 사유를 컨트롤플레인 로그로 진단. silent 로 끌 수 있음.
-    logLevel: process.env.ASSAY_LOG_LEVEL ?? "info",
+    logLevel: process.env.EVERDICT_LOG_LEVEL ?? "info",
     // MCP OAuth: Keycloak 을 인가서버로 광고(클라이언트가 로그인 시작). 미설정이면 API 키만.
     ...(process.env.KEYCLOAK_ISSUER ? { authorizationServers: [process.env.KEYCLOAK_ISSUER] } : {}),
   });
 
   await app.listen({ port, host: "0.0.0.0" });
   console.error(
-    `▶ assay-api on :${port} (backend:${nomadAddr ? "nomad" : k8sContext ? "k8s" : "runtime-only"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.ASSAY_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:required)`,
+    `▶ everdict-api on :${port} (backend:${nomadAddr ? "nomad" : k8sContext ? "k8s" : "runtime-only"} store:${process.env.DATABASE_URL ? "postgres" : "memory"} auth:${process.env.EVERDICT_REQUIRE_AUTH === "1" ? "required" : "dev-fallback"} runtime:required)`,
   );
 }
 
@@ -528,7 +530,7 @@ interface Persistence {
   workspaceStore: WorkspaceStore; // 워크스페이스 멤버십(생성/전환) — 항상 사용 가능
   userProfileStore: UserProfileStore; // 유저 프로필(이름/유저네임/아바타) — 항상 사용 가능
   inviteStore: WorkspaceInviteStore; // 멤버 초대(토큰/링크 redemption) — 항상 사용 가능
-  secretStore: SecretStore; // 항상 사용 가능(기본 ON) — KEK 는 ASSAY_SECRETS_KEY, 없으면 임시 키 자동생성
+  secretStore: SecretStore; // 항상 사용 가능(기본 ON) — KEK 는 EVERDICT_SECRETS_KEY, 없으면 임시 키 자동생성
   oauthStateStore: OAuthStateStore; // OAuth authorize→callback 1회용 pending state
   runnerStore: RunnerStore; // 셀프호스티드 러너(개인 디바이스 페어링) — 페어링 토큰은 SHA-256 해시만 보관
   scheduleStore: ScheduleStore; // 예약(cron) 스코어카드 — 저장된 RunScorecardInput + 크론식(SSOT, mutable)
@@ -537,21 +539,21 @@ interface Persistence {
   viewStore: ViewStore; // 저장된 스코어카드 분석 View(이름 붙인 AnalysisConfig, 비공개|공유) — 라이브 재실행
 }
 
-// at-rest 암호화 KEK: ASSAY_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
+// at-rest 암호화 KEK: EVERDICT_SECRETS_KEY(base64 32B) 가 있으면 그걸 쓰고, 없으면 임시 키를 자동생성해
 // 시크릿 기능을 "기본 ON" 으로 유지한다(분기/fail-closed 제거). 자동생성 시 Pg 영속 주의를 한 번 경고한다.
 function resolveSecretCipher(): SecretCipher {
   const fromEnv = cipherFromEnv();
   if (fromEnv) return fromEnv;
   console.error(
-    "▶ ASSAY_SECRETS_KEY 미설정 — 임시 KEK 를 자동생성해 시크릿 기능을 활성화합니다(기본 ON). " +
-      "영속(Postgres) 운영은 ASSAY_SECRETS_KEY(base64 32B)를 고정하세요 — 임시 키는 재기동마다 달라져 기존 시크릿을 복호화할 수 없습니다.",
+    "▶ EVERDICT_SECRETS_KEY 미설정 — 임시 KEK 를 자동생성해 시크릿 기능을 활성화합니다(기본 ON). " +
+      "영속(Postgres) 운영은 EVERDICT_SECRETS_KEY(base64 32B)를 고정하세요 — 임시 키는 재기동마다 달라져 기존 시크릿을 복호화할 수 없습니다.",
   );
   return generatedCipher();
 }
 
 // DATABASE_URL 이 있으면 Postgres(기동 시 마이그레이션 적용), 없으면 in-memory.
-// 시크릿 저장소는 항상 활성(기본 ON). at-rest 암호화 KEK 는 ASSAY_SECRETS_KEY(base64 32B), 미설정이면 임시 키를
-// 자동생성한다 — in-memory 에선 휘발이라 안전하고, Pg 영속 운영은 ASSAY_SECRETS_KEY 로 키를 고정해야 한다(재기동 복호).
+// 시크릿 저장소는 항상 활성(기본 ON). at-rest 암호화 KEK 는 EVERDICT_SECRETS_KEY(base64 32B), 미설정이면 임시 키를
+// 자동생성한다 — in-memory 에선 휘발이라 안전하고, Pg 영속 운영은 EVERDICT_SECRETS_KEY 로 키를 고정해야 한다(재기동 복호).
 async function makePersistence(): Promise<Persistence> {
   const cipher = resolveSecretCipher();
   const url = process.env.DATABASE_URL;
@@ -611,13 +613,13 @@ async function makePersistence(): Promise<Persistence> {
   };
 }
 
-// _shared 하네스 taxonomy(템플릿 대분류 + 인스턴스)를 파일 SSOT 에서 시드. ASSAY_HARNESS_TEMPLATES_DIR
+// _shared 하네스 taxonomy(템플릿 대분류 + 인스턴스)를 파일 SSOT 에서 시드. EVERDICT_HARNESS_TEMPLATES_DIR
 // (없으면 cwd/examples/harness-templates). *.template.json → 템플릿, *.instance.json → 인스턴스. best-effort/멱등.
 async function seedSharedHarnessTaxonomy(
   templates: HarnessTemplateRegistry,
   instances: HarnessInstanceRegistry,
 ): Promise<void> {
-  const dir = process.env.ASSAY_HARNESS_TEMPLATES_DIR ?? `${process.cwd()}/examples/harness-templates`;
+  const dir = process.env.EVERDICT_HARNESS_TEMPLATES_DIR ?? `${process.cwd()}/examples/harness-templates`;
   try {
     await loadHarnessTaxonomyDir(dir, { templates, instances });
     console.error(`▶ shared harness taxonomy seeded from ${dir}`);
@@ -628,7 +630,7 @@ async function seedSharedHarnessTaxonomy(
 
 // _shared(first-party 기본 judge)를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 기본 judge 사용 가능. best-effort/멱등.
 async function seedSharedJudges(registry: JudgeRegistry): Promise<void> {
-  const dir = process.env.ASSAY_JUDGES_DIR ?? `${process.cwd()}/examples/judges`;
+  const dir = process.env.EVERDICT_JUDGES_DIR ?? `${process.cwd()}/examples/judges`;
   try {
     await loadJudgeDir(dir, { into: registry });
     console.error(`▶ shared judges seeded from ${dir}`);
@@ -639,7 +641,7 @@ async function seedSharedJudges(registry: JudgeRegistry): Promise<void> {
 
 // _shared(first-party 기본 모델)를 파일 SSOT 에서 시드 — 새 테넌트도 즉시 등록된 모델을 judge/harness 에서 참조 가능. best-effort/멱등.
 async function seedSharedModels(registry: ModelRegistry): Promise<void> {
-  const dir = process.env.ASSAY_MODELS_DIR ?? `${process.cwd()}/examples/models`;
+  const dir = process.env.EVERDICT_MODELS_DIR ?? `${process.cwd()}/examples/models`;
   try {
     await loadModelDir(dir, { into: registry });
     console.error(`▶ shared models seeded from ${dir}`);
@@ -673,7 +675,7 @@ function buildAuthenticator(
   const authers: Authenticator[] = [];
   // GitHub Actions OIDC 페더레이션 — keyless CI. issuer 프리체크가 있어 Keycloak/기타 JWT 는 조용히 패스하므로
   // OIDC(Keycloak) 인증기보다 앞에 둔다(반대로 두면 CI 토큰이 Keycloak 검증 실패 warn 로그를 남긴다).
-  // 신뢰 = 지목된 워크스페이스(x-assay-workspace)의 repo link(WorkspaceSettings.ci.links) 매칭 → roles=["ci"].
+  // 신뢰 = 지목된 워크스페이스(x-everdict-workspace)의 repo link(WorkspaceSettings.ci.links) 매칭 → roles=["ci"].
   // GHES 도 지원: GHE link 가 있는 host 의 issuer(https://<host>/_services/token)만 동적으로 신뢰(fail-closed),
   // link 매칭은 (host, repository) — github.com 토큰이 같은 이름의 GHE link 를(또는 그 반대로) 통과하지 못한다.
   const normHost = (h?: string): string | undefined => h?.replace(/\/$/, "").toLowerCase();
@@ -723,15 +725,15 @@ function buildAuthenticator(
     );
   }
   authers.push(apiKeyAuthenticator({ keyStore }));
-  // 셀프호스티드 러너 페어링 토큰(rnr_) — `assay runner` 가 MCP 에 인증. owner/workspace/runnerId 로 해석, 최소권한.
+  // 셀프호스티드 러너 페어링 토큰(rnr_) — `everdict runner` 가 MCP 에 인증. owner/workspace/runnerId 로 해석, 최소권한.
   authers.push(runnerAuthenticator({ runnerStore }));
   return compositeAuthenticator(authers);
 }
 
-// 워크스페이스 단위 계측 정책: ASSAY_METER_TENANTS(콤마 목록)이 있으면 그 테넌트만, 없으면 ASSAY_METER_USAGE=1 이
+// 워크스페이스 단위 계측 정책: EVERDICT_METER_TENANTS(콤마 목록)이 있으면 그 테넌트만, 없으면 EVERDICT_METER_USAGE=1 이
 // 전 테넌트 기본값. 요청별 override(POST /runs body.meterUsage)가 항상 우선한다.
 function meterUsagePolicyFromEnv(): (tenant: string) => boolean {
-  const list = process.env.ASSAY_METER_TENANTS;
+  const list = process.env.EVERDICT_METER_TENANTS;
   if (list) {
     const allow = new Set(
       list
@@ -741,13 +743,13 @@ function meterUsagePolicyFromEnv(): (tenant: string) => boolean {
     );
     return (tenant) => allow.has(tenant);
   }
-  const all = process.env.ASSAY_METER_USAGE === "1";
+  const all = process.env.EVERDICT_METER_USAGE === "1";
   return () => all;
 }
 
 function budgetFromEnv(): (tenant: string) => BudgetLimit | undefined {
-  const runs = process.env.ASSAY_TENANT_RUNS ? Number(process.env.ASSAY_TENANT_RUNS) : undefined;
-  const usd = process.env.ASSAY_TENANT_USD ? Number(process.env.ASSAY_TENANT_USD) : undefined;
+  const runs = process.env.EVERDICT_TENANT_RUNS ? Number(process.env.EVERDICT_TENANT_RUNS) : undefined;
+  const usd = process.env.EVERDICT_TENANT_USD ? Number(process.env.EVERDICT_TENANT_USD) : undefined;
   if (runs === undefined && usd === undefined) return () => undefined;
   const limit: BudgetLimit = { ...(runs !== undefined ? { runs } : {}), ...(usd !== undefined ? { usd } : {}) };
   return () => limit;
@@ -756,24 +758,24 @@ function budgetFromEnv(): (tenant: string) => BudgetLimit | undefined {
 // 아티팩트(스크린샷) object storage: env 4개(endpoint/bucket/access/secret)가 모두 있으면 S3/MinIO 스토어 구성 + 버킷 보장.
 // 미설정이면 undefined → os-use 스크린샷은 base64 인라인 폴백(dev). 비밀은 env(시크릿) — 스펙/커밋 금지.
 async function artifactStoreFromEnv(): Promise<S3ArtifactStore | undefined> {
-  const endpoint = process.env.ASSAY_S3_ENDPOINT;
-  const bucket = process.env.ASSAY_S3_BUCKET;
-  const accessKeyId = process.env.ASSAY_S3_ACCESS_KEY;
-  const secretAccessKey = process.env.ASSAY_S3_SECRET_KEY;
+  const endpoint = process.env.EVERDICT_S3_ENDPOINT;
+  const bucket = process.env.EVERDICT_S3_BUCKET;
+  const accessKeyId = process.env.EVERDICT_S3_ACCESS_KEY;
+  const secretAccessKey = process.env.EVERDICT_S3_SECRET_KEY;
   if (!endpoint || !bucket || !accessKeyId || !secretAccessKey) return undefined;
   const store = new S3ArtifactStore({
     endpoint,
     bucket,
     accessKeyId,
     secretAccessKey,
-    ...(process.env.ASSAY_S3_REGION ? { region: process.env.ASSAY_S3_REGION } : {}),
-    ...(process.env.ASSAY_S3_PUBLIC_URL ? { publicBaseUrl: process.env.ASSAY_S3_PUBLIC_URL } : {}),
+    ...(process.env.EVERDICT_S3_REGION ? { region: process.env.EVERDICT_S3_REGION } : {}),
+    ...(process.env.EVERDICT_S3_PUBLIC_URL ? { publicBaseUrl: process.env.EVERDICT_S3_PUBLIC_URL } : {}),
   });
   await store.ensureBucket().catch(() => {});
   return store;
 }
 
 main().catch((err) => {
-  console.error("assay-api failed to start:", err);
+  console.error("everdict-api failed to start:", err);
   process.exit(1);
 });

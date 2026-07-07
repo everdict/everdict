@@ -46,7 +46,7 @@ export class PgRunStore implements RunStore {
 
   async create(r: RunRecord): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_runs
+      `INSERT INTO everdict_runs
         (id, tenant, harness_id, harness_version, case_id, status, result, error, parent_scorecard_id, trigger, created_by, runtime, created_at, updated_at)
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
       [
@@ -92,21 +92,21 @@ export class PgRunStore implements RunStore {
     if (sets.length === 0) return this.get(id);
     vals.push(id);
     const res = await this.client.query<RunRow>(
-      `UPDATE assay_runs SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
+      `UPDATE everdict_runs SET ${sets.join(", ")} WHERE id = $${i} RETURNING *`,
       vals,
     );
     return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
   }
 
   async get(id: string): Promise<RunRecord | undefined> {
-    const res = await this.client.query<RunRow>("SELECT * FROM assay_runs WHERE id = $1", [id]);
+    const res = await this.client.query<RunRow>("SELECT * FROM everdict_runs WHERE id = $1", [id]);
     return res.rows[0] ? rowToRecord(res.rows[0]) : undefined;
   }
 
   async list(tenant?: string, opts?: RunListOptions): Promise<RunRecord[]> {
     // scorecardId 지정 → 그 배치 자식만; 아니면 standalone(부모 없는) run 만(자식 숨김 → 활동 리스트 범람 방지).
     const res = await this.client.query<RunRow>(
-      `SELECT * FROM assay_runs
+      `SELECT * FROM everdict_runs
        WHERE ($1::text IS NULL OR tenant = $1)
          AND (($2::text IS NULL AND parent_scorecard_id IS NULL) OR parent_scorecard_id = $2)
        ORDER BY created_at DESC, id DESC`,

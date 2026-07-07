@@ -1332,7 +1332,7 @@ function ValidateBanner({ result }: { result: ValidateHarnessResult }) {
               {w.image}({w.class === 'local' ? t('imageClassLocal') : t('imageClassUnqualified')})
             </code>
           ))}
-          — <code className="font-mono">assay image push</code> {t('imagePushHint')}
+          — <code className="font-mono">everdict image push</code> {t('imagePushHint')}
         </div>
       )}
     </Callout>

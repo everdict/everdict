@@ -1,4 +1,4 @@
-import type { RunnerHostStatus } from "@assay/runner-core";
+import type { RunnerHostStatus } from "@everdict/runner-core";
 import type { DesktopRunnerStatus, PairPayload } from "./bridge.js";
 
 // 러너 수명주기 컨트롤러 — 페어 상태(토큰/메타) 영속 + RunnerHost 시작/정지 + 상태 브로드캐스트.

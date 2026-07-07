@@ -1,5 +1,5 @@
-import { ForbiddenError, NotFoundError } from "@assay/core";
-import { InMemoryViewStore } from "@assay/db";
+import { ForbiddenError, NotFoundError } from "@everdict/core";
+import { InMemoryViewStore } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { ViewService } from "./view-service.js";
 

@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window-policy.js";
 
-const WEB = "https://app.assay.dev";
+const WEB = "https://app.everdict.dev";
 
 describe("webOriginOf", () => {
   it("URL 에서 origin 만 뽑는다(경로/쿼리 무시)", () => {
-    expect(webOriginOf("https://app.assay.dev/ws/runs?x=1")).toBe("https://app.assay.dev");
+    expect(webOriginOf("https://app.everdict.dev/ws/runs?x=1")).toBe("https://app.everdict.dev");
   });
 
   it("잘못된 웹 URL 은 throw(기동 실패가 맞다)", () => {
@@ -32,7 +32,7 @@ describe("decideWindowOpen", () => {
 
 describe("allowTopLevelNavigation", () => {
   it("OIDC/OAuth 경유를 위해 http/https 탑레벨 네비게이션은 origin 무관 허용", () => {
-    expect(allowTopLevelNavigation("https://keycloak.assay.dev/realms/assay/auth")).toBe(true);
+    expect(allowTopLevelNavigation("https://keycloak.everdict.dev/realms/everdict/auth")).toBe(true);
     expect(allowTopLevelNavigation("https://github.com/login/oauth/authorize")).toBe(true);
   });
 

@@ -1,15 +1,15 @@
 // 라이브 e2e (SLICE 56): per-run judge 모델 설정이 컨트롤플레인 → alloc/agent 로 주입되어 judge 가 작동.
 //   - 모델/프로바이더는 job.judge (시크릿 아님, 컨트롤플레인이 잡에 실음)
 //   - 프로바이더 '키'는 env(OPENAI_API_KEY/BASE_URL = 백엔드 secretEnv 가 alloc 에 주입하는 것을 모사)
-// process.env.ASSAY_JUDGE_MODEL 은 일부러 비운다 → 모델은 오직 job.judge 에서 와야 한다.
+// process.env.EVERDICT_JUDGE_MODEL 은 일부러 비운다 → 모델은 오직 job.judge 에서 와야 한다.
 import process from "node:process";
 import { runAgentJob } from "../../packages/agent/dist/index.js";
 import { buildNomadJob } from "../../packages/backends/dist/index.js";
 
 // biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(모델은 env 가 아니라 job.judge 로만 와야 함을 강제)
-delete process.env.ASSAY_JUDGE_MODEL;
+delete process.env.EVERDICT_JUDGE_MODEL;
 // biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(테스트 격리)
-delete process.env.ASSAY_JUDGE_PROVIDER;
+delete process.env.EVERDICT_JUDGE_PROVIDER;
 
 const job = {
   harness: { id: "scripted", version: "1.0.0" },
@@ -34,15 +34,17 @@ const job = {
   },
 };
 
-// 1) 백엔드 주입 계약: buildNomadJob 이 job.judge → alloc env(ASSAY_JUDGE_MODEL/PROVIDER), 키는 secretEnv.
+// 1) 백엔드 주입 계약: buildNomadJob 이 job.judge → alloc env(EVERDICT_JUDGE_MODEL/PROVIDER), 키는 secretEnv.
 const spec = buildNomadJob(job, {
   addr: "http://nomad:4646",
-  image: "reg/assay-agent:1",
+  image: "reg/everdict-agent:1",
   secretEnv: { OPENAI_API_KEY: process.env.OPENAI_API_KEY ?? "", OPENAI_BASE_URL: process.env.OPENAI_BASE_URL ?? "" },
 });
 const allocEnv = spec.Job.TaskGroups[0]?.Tasks[0]?.Env ?? {};
 console.log("=== 컨트롤플레인 → Nomad alloc env 주입 ===");
-console.log(`  ASSAY_JUDGE_MODEL=${allocEnv.ASSAY_JUDGE_MODEL}  ASSAY_JUDGE_PROVIDER=${allocEnv.ASSAY_JUDGE_PROVIDER}`);
+console.log(
+  `  EVERDICT_JUDGE_MODEL=${allocEnv.EVERDICT_JUDGE_MODEL}  EVERDICT_JUDGE_PROVIDER=${allocEnv.EVERDICT_JUDGE_PROVIDER}`,
+);
 console.log(
   `  OPENAI_API_KEY=${allocEnv.OPENAI_API_KEY ? "<set via secretEnv>" : "<missing>"}  OPENAI_BASE_URL=${allocEnv.OPENAI_BASE_URL || "<unset>"}`,
 );
@@ -56,7 +58,7 @@ console.log(`  judge: graderId=${j?.graderId} pass=${j?.pass} value=${j?.value?.
 console.log(`  judge detail: ${String(j?.detail).slice(0, 120)}`);
 
 const ok =
-  allocEnv.ASSAY_JUDGE_MODEL === job.judge.model &&
+  allocEnv.EVERDICT_JUDGE_MODEL === job.judge.model &&
   allocEnv.OPENAI_API_KEY &&
   j &&
   j.pass === true &&

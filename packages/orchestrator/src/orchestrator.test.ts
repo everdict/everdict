@@ -1,6 +1,6 @@
-import { BackendRegistry, Router } from "@assay/backends";
-import type { Backend } from "@assay/backends";
-import type { AgentJob, CaseResult } from "@assay/core";
+import { BackendRegistry, Router } from "@everdict/backends";
+import type { Backend } from "@everdict/backends";
+import type { AgentJob, CaseResult } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { createActivities } from "./activities.js";
 import { DirectOrchestrator } from "./orchestrator.js";

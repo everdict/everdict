@@ -1,5 +1,5 @@
-import { BadRequestError } from "@assay/core";
-import type { UserProfile, UserProfilePatch, UserProfileStore } from "@assay/db";
+import { BadRequestError } from "@everdict/core";
+import type { UserProfile, UserProfilePatch, UserProfileStore } from "@everdict/db";
 import { validateImageRef } from "./image-ref.js";
 
 // 프로필 수정 코어 — HTTP 라우트(PATCH /me/profile)와 MCP 도구(update_profile)가 공유하는 단일 코어(패리티).

@@ -1,5 +1,5 @@
-import type { Backend, ProbeResult } from "@assay/backends";
-import type { RuntimeSpec } from "@assay/core";
+import type { Backend, ProbeResult } from "@everdict/backends";
+import type { RuntimeSpec } from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { makeRuntimeProber } from "./runtime-probe.js";
 

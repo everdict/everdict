@@ -1,4 +1,4 @@
-import type { TraceEvent } from "@assay/core";
+import type { TraceEvent } from "@everdict/core";
 
 // 케이스 결과(trace+점수)를 외부 관측 플랫폼(MLflow/Langfuse/LangSmith/Phoenix)으로 내보낸다 —
 // TraceSource(인바운드 pull)의 아웃바운드 거울. 스코어카드는 요약+링크만 소개하고 상세는 플랫폼이 진실원천.

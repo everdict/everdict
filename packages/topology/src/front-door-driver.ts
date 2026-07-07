@@ -6,7 +6,7 @@ import {
   InternalError,
   type StatusMatch,
   UpstreamError,
-} from "@assay/core";
+} from "@everdict/core";
 
 // front-door 요청 옵션 — method(submit 동사에서; 미지정 POST) + headers(값 보간 완료) + timeoutMs(소켓 idle 타임아웃).
 // timeoutMs: sync 완료형은 서버가 응답을 붙잡는 동안 데이터가 흐르지 않으므로 소켓 무흐름 상한이 사실상 완료 시한이 된다.
@@ -216,7 +216,7 @@ function completionTimeoutMs(completion: FrontDoorCompletion | undefined): numbe
 
 export type DriveStatus = "done" | "failed" | "timeout";
 export interface DriveOutcome {
-  // 트레이스를 끌어올 상관키. 이 슬라이스에선 injected(= assay runId); #3 에서 returned(에이전트 자체 id)로 일반화.
+  // 트레이스를 끌어올 상관키. 이 슬라이스에선 injected(= everdict runId); #3 에서 returned(에이전트 자체 id)로 일반화.
   traceRef: string;
   status: DriveStatus;
   // 결과 채널 본문 — sync 면 submit 응답, poll 면 완료(done) 상태 본문. sentinel 관측물 회수가 여기서 추출한다.
@@ -231,7 +231,7 @@ export interface FrontDoorDriveRequest {
   completion: FrontDoorCompletion | undefined; // 미지정 = sync
   correlate: FrontDoorCorrelate | undefined; // 미지정 = injected
   wiring: Record<string, string>; // statusPath 보간 변수({run_id} 등)
-  traceRef: string; // injected 상관의 기본 상관키(= assay runId)
+  traceRef: string; // injected 상관의 기본 상관키(= everdict runId)
   headers?: Record<string, string>; // submit/stream/callback 요청 헤더(보간 완료; 미지정 = 없음)
 }
 
@@ -240,7 +240,7 @@ export interface FrontDoorDriver {
   drive(req: FrontDoorDriveRequest): Promise<DriveOutcome>;
 }
 
-// callback 완료 모델의 랑데부 — Assay 가 run 별 콜백 URL 을 노출({{callback_url}})하고, 에이전트의 inbound POST 를 기다린다.
+// callback 완료 모델의 랑데부 — Everdict 가 run 별 콜백 URL 을 노출({{callback_url}})하고, 에이전트의 inbound POST 를 기다린다.
 // 드라이버에서 분리한 seam(주입형): in-process(셀프호스트/dev) | control-plane 엔드포인트(SaaS). egress 관측의 inbound 짝.
 export interface CallbackRendezvous {
   url(runId: string): string; // {{callback_url}} 값(run 별 — 수신기가 runId 로 상관)

@@ -32,11 +32,11 @@ infra (no secrets in the spec; `local` = dev/control-plane-host, superseded for 
   affect conflict/idempotency checks. Surface: `PUT /:id/versions/:version/tags` + MCP `set_*_version_tags`,
   gated by each entity's existing content-mutation action (no new authz action); normalization (trim/dedupe/caps)
   lives in `apps/api` `version-tag-service.ts` — one core, two transports.
-- Validate file/external specs with `HarnessSpecSchema` (`@assay/core`) at the boundary; unknown id/version →
+- Validate file/external specs with `HarnessSpecSchema` (`@everdict/core`) at the boundary; unknown id/version →
   `NotFoundError`; `getService` narrows to `ServiceHarnessSpec` (throws on process).
 - Keep registry impls interchangeable (in-memory / file loader / Postgres) behind the one **async** interface.
   `PgHarnessRegistry`/`PgDatasetRegistry` store the spec/dataset as `jsonb` (PK `(tenant,id,version)`), share
-  `@assay/db`'s SqlClient + migrator (migrations in `packages/db/migrations`), and compare order-independently
+  `@everdict/db`'s SqlClient + migrator (migrations in `packages/db/migrations`), and compare order-independently
   (`specsEqual`) since jsonb doesn't preserve key order — never use raw `JSON.stringify` to compare a row vs input.
 - `CaseResult.harness` must record the **resolved** `id@version` (never the literal `"latest"`) so scorecards /
   regression always name an exact version.

@@ -6,8 +6,8 @@
 //
 // 사전(dev kind 호스트 도달 레시피, aider-k8s 와 동일):
 //   - kind 노드를 기본 도커 브리지에 연결 → 파드가 호스트 LiteLLM(172.17.0.1:4000) 도달(이 스크립트가 idempotent 하게 수행).
-//   - Jaeger(assay-jaeger)는 기본 브리지 컨테이너 → 파드는 그 브리지 IP:4318 로 OTLP 배출, 호스트는 :16686 으로 pull.
-//   - 이미지 kind 로드: 이 스크립트가 `kind load docker-image assay-browseruse:demo --name assay` 수행.
+//   - Jaeger(everdict-jaeger)는 기본 브리지 컨테이너 → 파드는 그 브리지 IP:4318 로 OTLP 배출, 호스트는 :16686 으로 pull.
+//   - 이미지 kind 로드: 이 스크립트가 `kind load docker-image everdict-browseruse:demo --name everdict` 수행.
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -16,10 +16,10 @@ import process from "node:process";
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const CONTEXT = process.env.K8S_CONTEXT ?? "kind-assay";
-const CLUSTER = process.env.KIND_CLUSTER ?? "assay";
-const NODE = process.env.KIND_NODE ?? "assay-control-plane";
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const CONTEXT = process.env.K8S_CONTEXT ?? "kind-everdict";
+const CLUSTER = process.env.KIND_CLUSTER ?? "everdict";
+const NODE = process.env.KIND_NODE ?? "everdict-control-plane";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const POD_PORT = 18080; // front-door 컨테이너 내부 포트(파드 localhost). chromium 이 같은 파드에서 이 포트로 폼 접근.
 const MODEL = process.env.BROWSERUSE_MODEL ?? "gpt-5.4-mini";
 const MAX_STEPS = process.env.BROWSERUSE_MAX_STEPS ?? "6";
@@ -42,13 +42,13 @@ if (!KEY) {
   process.exit(2);
 }
 
-// Jaeger 의 기본 브리지 IP(파드가 OTLP 배출할 대상). assay-jaeger 컨테이너에서 동적 조회.
+// Jaeger 의 기본 브리지 IP(파드가 OTLP 배출할 대상). everdict-jaeger 컨테이너에서 동적 조회.
 function jaegerBridgeIp() {
   if (process.env.JAEGER_IP) return process.env.JAEGER_IP;
   try {
     const out = execFileSync(
       "docker",
-      ["inspect", "assay-jaeger", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"],
+      ["inspect", "everdict-jaeger", "-f", "{{range .NetworkSettings.Networks}}{{.IPAddress}} {{end}}"],
       { encoding: "utf8" },
     );
     return (
@@ -149,10 +149,10 @@ try {
     evalCase: {
       id: "search-form-k8s",
       env: { kind: "browser", url: `http://localhost:${POD_PORT}/form` },
-      task: `Go to http://localhost:${POD_PORT}/form , type "assay eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
+      task: `Go to http://localhost:${POD_PORT}/form , type "everdict eval" into the search input box, then click the Search button. After the results page loads, report the page heading.`,
       graders: [
-        { id: "url-matches", config: { pattern: "[?&]q=assay" } },
-        { id: "dom-contains", config: { text: "Results for assay" } },
+        { id: "url-matches", config: { pattern: "[?&]q=everdict" } },
+        { id: "dom-contains", config: { text: "Results for everdict" } },
         { id: "steps", config: {} },
         { id: "cost", config: {} },
       ],
@@ -176,7 +176,7 @@ try {
       "deploy",
       "browseruse-agent",
       "-n",
-      "assay-default",
+      "everdict-default",
       "-o",
       "jsonpath={.status.readyReplicas}/{.status.replicas}",
     ]);

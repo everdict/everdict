@@ -5,7 +5,7 @@ import { CapabilityNameSchema } from "./capability.js";
 // (docker/topology kind 는 slice 5b 에서 제거 — docker→self-hosted 러너, topology→nomad/k8s 의 traceSource 설정[= topology capability].)
 // 등록 가능한 1급 엔티티(소유/버전/lifecycle 은 하니스·데이터셋·judge 와 동일 패턴, 불변 버전 SSOT).
 // ⚠️ 비밀 금지 — Nomad 토큰/kubeconfig 같은 자격증명은 테넌트 SecretStore 에서 주입(디스패치 시). 여기엔 비-비밀 연결정보만.
-// @assay/backends 의 BackendConfig 와 같은 필드(이름 대신 id/version) — buildRuntimeBackend 가 이걸 라이브 Backend 로 만든다.
+// @everdict/backends 의 BackendConfig 와 같은 필드(이름 대신 id/version) — buildRuntimeBackend 가 이걸 라이브 Backend 로 만든다.
 
 const base = {
   id: z.string(),

@@ -1,15 +1,15 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BadRequestError, ConflictError, type HarnessTemplateSpec, NotFoundError } from "@assay/core";
-import type { SqlClient } from "@assay/db";
+import { BadRequestError, ConflictError, type HarnessTemplateSpec, NotFoundError } from "@everdict/core";
+import type { SqlClient } from "@everdict/db";
 import { describe, expect, it } from "vitest";
 import { loadHarnessTaxonomyDir } from "./load-harness-taxonomy.js";
 import { PgHarnessInstanceRegistry } from "./pg-harness-instance-registry.js";
 import { PgHarnessTemplateRegistry } from "./pg-harness-template-registry.js";
 import { SHARED_TENANT } from "./registry.js";
 
-// 여러 assay_harness_* 테이블을 흉내내는 가짜 SqlClient(테이블명은 쿼리에서 추출; tags = 버전 태그).
+// 여러 everdict_harness_* 테이블을 흉내내는 가짜 SqlClient(테이블명은 쿼리에서 추출; tags = 버전 태그).
 function fakePg(): SqlClient {
   const tables = new Map<
     string,
@@ -27,7 +27,7 @@ function fakePg(): SqlClient {
   return {
     async query<R>(text: string, p: unknown[] = []): Promise<{ rows: R[] }> {
       const t = norm(text);
-      const table = /(?:FROM|INTO|UPDATE)\s+(assay_harness_\w+)/.exec(t)?.[1] ?? "";
+      const table = /(?:FROM|INTO|UPDATE)\s+(everdict_harness_\w+)/.exec(t)?.[1] ?? "";
       const rows = rowsFor(table);
       if (t.startsWith("SELECT spec") && t.includes("version = $3")) {
         const r = rows.find((x) => x.tenant === p[0] && x.id === p[1] && x.version === p[2]);
@@ -146,7 +146,7 @@ describe("PgHarnessTemplateRegistry + PgHarnessInstanceRegistry (fake pg)", () =
 
 describe("loadHarnessTaxonomyDir", () => {
   it("*.template.json + *.instance.json 로드 → resolve", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "assay-tax-"));
+    const dir = mkdtempSync(join(tmpdir(), "everdict-tax-"));
     try {
       writeFileSync(join(dir, "bu.template.json"), JSON.stringify(buTemplate));
       writeFileSync(

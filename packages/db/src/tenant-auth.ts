@@ -7,7 +7,7 @@ import type { SqlClient } from "./client.js";
 //  - label  = 사람이 붙인 이름(선택)
 //  - prefix = ak_abcd… (평문 앞부분 식별 힌트 — 해시/평문이 아님; 목록에서 키를 구분하는 용도)
 //  - scopes = 키별 권한 범위(read|write|admin). 미지정(레거시 행/full access)이면 undefined = 무제한.
-//             권한 매트릭스(scope→action)는 @assay/auth 가 소유한다(여기는 dumb 문자열 저장소; 순환 의존 방지).
+//             권한 매트릭스(scope→action)는 @everdict/auth 가 소유한다(여기는 dumb 문자열 저장소; 순환 의존 방지).
 export interface TenantKeyMeta {
   id: string;
   label?: string;
@@ -101,7 +101,7 @@ export class PgTenantKeyStore implements TenantKeyStore {
     meta?: { id?: string; label?: string; prefix?: string; scopes?: string[]; owner?: string },
   ): Promise<void> {
     await this.client.query(
-      `INSERT INTO assay_tenant_keys (key_hash, tenant, owner, id, label, prefix, scopes, created_at)
+      `INSERT INTO everdict_tenant_keys (key_hash, tenant, owner, id, label, prefix, scopes, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, now()) ON CONFLICT (key_hash) DO NOTHING`,
       [
         keyHash,
@@ -116,7 +116,7 @@ export class PgTenantKeyStore implements TenantKeyStore {
   }
   async resolveByHash(keyHash: string): Promise<ResolvedKey | undefined> {
     const res = await this.client.query<{ tenant: string; owner: string; scopes: string | null }>(
-      "SELECT tenant, owner, scopes FROM assay_tenant_keys WHERE key_hash = $1",
+      "SELECT tenant, owner, scopes FROM everdict_tenant_keys WHERE key_hash = $1",
       [keyHash],
     );
     const row = res.rows[0];
@@ -131,7 +131,7 @@ export class PgTenantKeyStore implements TenantKeyStore {
       scopes: string | null;
       created_at: string;
     }>(
-      "SELECT id, label, COALESCE(prefix, '') AS prefix, scopes, created_at FROM assay_tenant_keys WHERE tenant = $1 AND ($2::text IS NULL OR owner = $2) ORDER BY created_at DESC",
+      "SELECT id, label, COALESCE(prefix, '') AS prefix, scopes, created_at FROM everdict_tenant_keys WHERE tenant = $1 AND ($2::text IS NULL OR owner = $2) ORDER BY created_at DESC",
       [tenant, owner ?? null],
     );
     return res.rows.map((x) => ({
@@ -144,7 +144,7 @@ export class PgTenantKeyStore implements TenantKeyStore {
   }
   async revoke(tenant: string, id: string, owner?: string): Promise<void> {
     await this.client.query(
-      "DELETE FROM assay_tenant_keys WHERE tenant = $1 AND id = $2 AND ($3::text IS NULL OR owner = $3)",
+      "DELETE FROM everdict_tenant_keys WHERE tenant = $1 AND id = $2 AND ($3::text IS NULL OR owner = $3)",
       [tenant, id, owner ?? null],
     );
   }
@@ -161,7 +161,7 @@ export function generateKey(): string {
 
 // 테넌트에 새 키 발급 → 해시 + 비-비밀 메타(id/label/prefix/scopes) 저장, 평문 반환(호출부가 한 번 보여주고 버린다).
 // scopes 미지정이면 무제한(full access)로 저장된다 — 스코프 기본값(예: ["admin"]) 결정은 호출부(API/MCP 경계)의 책임.
-// Bearer 키 → workspace/scopes 해석은 컨트롤플레인 인증 코어(`@assay/auth`의 apiKeyAuthenticator)가
+// Bearer 키 → workspace/scopes 해석은 컨트롤플레인 인증 코어(`@everdict/auth`의 apiKeyAuthenticator)가
 // `resolveByHash(hashKey(...))` 로 직접 수행한다. 여기는 저장소 프리미티브만 제공한다.
 export async function issueKey(
   store: TenantKeyStore,

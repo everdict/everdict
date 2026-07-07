@@ -1,4 +1,4 @@
-import { ConflictError, NotFoundError } from "@assay/core";
+import { ConflictError, NotFoundError } from "@everdict/core";
 import { LATEST, SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 // (tenant, id, version) → T 의 공통 in-memory 저장/해석: _shared 폴백, latest/semver, 버전 불변.

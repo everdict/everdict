@@ -11,9 +11,9 @@ See skill `api-layer`.
 - List endpoints are paginated by default (cursor: `created_at DESC, id DESC`, fetch `size+1`, opaque base64 token). No `pagination` wrapper.
 - OpenAPI `summary` text is **Korean** (language policy). 
 - `/internal/**` routes are guarded by `x-internal-token` (constant-time compare, fail-closed if unset); no end-user auth context. `POST /internal/tenant-keys` issues API keys.
-- Identity comes from the **auth core** (`@assay/auth`): `Authorization: Bearer <jwt|ak_…>` →
+- Identity comes from the **auth core** (`@everdict/auth`): `Authorization: Bearer <jwt|ak_…>` →
   `Principal{subject,workspace,roles,via}` (OIDC/Keycloak + API key, composed). With `requireAuth` a
-  missing/invalid credential is 401, else dev falls back to `x-assay-tenant` (admin). Gate mutating routes with
+  missing/invalid credential is 401, else dev falls back to `x-everdict-tenant` (admin). Gate mutating routes with
   `authorize(principal, action)` (403 on deny); EVERY read/write is **workspace-scoped** (runs + harnesses +
   datasets + judges + scorecards) — never trust a client-supplied tenant when auth is on; another workspace's
   resource reads 404, not 403. See `docs/auth.md` + rule `auth`.

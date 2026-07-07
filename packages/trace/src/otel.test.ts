@@ -1,4 +1,4 @@
-import { AppError } from "@assay/core";
+import { AppError } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { OtelTraceSource } from "./otel.js";
 
@@ -24,7 +24,7 @@ const JAEGER_BODY = {
 };
 
 describe("OtelTraceSource — tag 상관(Jaeger 검색)", () => {
-  it("service+tags(assay.run_id) 검색 URL 로 조회하고 동봉된 스팬을 정규화한다(실 1.62 형태 고정)", async () => {
+  it("service+tags(everdict.run_id) 검색 URL 로 조회하고 동봉된 스팬을 정규화한다(실 1.62 형태 고정)", async () => {
     const fetchImpl = vi.fn((..._args: Parameters<typeof fetch>) =>
       Promise.resolve(new Response(JSON.stringify(JAEGER_BODY), { status: 200 })),
     );
@@ -35,12 +35,12 @@ describe("OtelTraceSource — tag 상관(Jaeger 검색)", () => {
       fetchImpl: fetchImpl as typeof fetch,
     });
 
-    const events = await src.fetch("assay-run-1");
+    const events = await src.fetch("everdict-run-1");
 
     const url = new URL(String(fetchImpl.mock.calls[0]?.[0]));
     expect(url.pathname).toBe("/api/traces"); // id 경로가 아니라 검색
     expect(url.searchParams.get("service")).toBe("instrumented-cli"); // Jaeger 검색의 필수 범위
-    expect(url.searchParams.get("tags")).toBe(JSON.stringify({ "assay.run_id": "assay-run-1" }));
+    expect(url.searchParams.get("tags")).toBe(JSON.stringify({ "everdict.run_id": "everdict-run-1" }));
     expect(events.find((e) => e.kind === "llm_call")).toMatchObject({ model: "gpt-5.4-mini" });
   });
 

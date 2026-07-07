@@ -1,6 +1,6 @@
-import { UpstreamError } from "@assay/core";
-import type { FetchLike } from "@assay/datasets";
-import { InMemoryBenchmarkRegistry, InMemoryDatasetRegistry } from "@assay/registry";
+import { UpstreamError } from "@everdict/core";
+import type { FetchLike } from "@everdict/datasets";
+import { InMemoryBenchmarkRegistry, InMemoryDatasetRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import { BenchmarkService } from "./benchmark-service.js";
 

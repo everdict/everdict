@@ -10,9 +10,9 @@ Two credentials both resolve to a `Principal{ subject, workspace, roles, via }`:
 - **Humans** → Keycloak **OIDC** JWT (via `apps/web`), `via:"oidc"`.
 - **Agents / MCP / CI** → **API key** `ak_…` (`Authorization: Bearer ak_…`), `via:"api-key"`.
 
-Only the **SHA-256 hash** of a key is stored (`assay_tenant_keys`), never the plaintext. With
-`ASSAY_REQUIRE_AUTH=1` a missing/invalid credential is **401**; in dev (default) it falls back to the
-`x-assay-tenant` header (admin). **Key issuance** is operator-only: `POST /internal/tenant-keys` guarded by
+Only the **SHA-256 hash** of a key is stored (`everdict_tenant_keys`), never the plaintext. With
+`EVERDICT_REQUIRE_AUTH=1` a missing/invalid credential is **401**; in dev (default) it falls back to the
+`x-everdict-tenant` header (admin). **Key issuance** is operator-only: `POST /internal/tenant-keys` guarded by
 `x-internal-token` (constant-time, **fail-closed** if unset); the plaintext key is returned **once**.
 
 ```bash
@@ -21,7 +21,7 @@ curl -XPOST $API/internal/tenant-keys -H 'x-internal-token: <T>' -d '{"workspace
 
 ## Workspaces (self-serve membership + 전환)
 A user (subject) can belong to **multiple workspaces**, each with a role. Membership is the control plane's
-SSOT (`@assay/db` `WorkspaceStore`: `assay_workspaces` + `assay_workspace_members(workspace, subject, role, email)`) —
+SSOT (`@everdict/db` `WorkspaceStore`: `everdict_workspaces` + `everdict_workspace_members(workspace, subject, role, email)`) —
 Keycloak supplies the **identity** (subject); the token's `workspace` claim is only a **bootstrap default**. The
 opaque `sub` is the identity key; the token's `email`/`preferred_username` claim is captured into the membership
 row on each login (display only — for a human-readable member list, never an authz input).
@@ -40,11 +40,11 @@ row on each login (display only — for a human-readable member list, never an a
   row (members, settings, secrets, connections, invites, runs, scorecards, all registry tables, tenant keys) then
   the workspace row last (sequential + idempotent — `SqlClient` has no transaction). The web gates the danger zone
   on `owner === subject` and requires typing the workspace name to confirm.
-- **Active workspace** is resolved per request in `apps/api` (`applyActiveWorkspace`): the `x-assay-workspace`
+- **Active workspace** is resolved per request in `apps/api` (`applyActiveWorkspace`): the `x-everdict-workspace`
   header (set by the web from a httpOnly cookie / the sidebar switcher) selects which membership scopes this
   request; `Principal.workspace`+`roles` come from that membership. The token/dev default workspace is
   **bootstrapped** into a membership on first use (existing Keycloak users stay seamless). A non-member
-  `x-assay-workspace` **falls back** to the default (isolation-safe; never a 403 from a stale selection).
+  `x-everdict-workspace` **falls back** to the default (isolation-safe; never a 403 from a stale selection).
 - **Roles are workspace-governed, not derived from the Keycloak realm role.** A workspace role is admin only via
   (a) creating it (`POST /workspaces` → creator is admin), (b) an invite that grants it, or (c) an admin
   promotion. The bootstrap caps the role: a **fresh** workspace (de-facto creator) or a **machine key** (issuance
@@ -70,7 +70,7 @@ Managing **who** is in a workspace and **how they join** — one service core, H
   current role (a shared link can't change privileges). Revoked == unknown (404, no existence leak). MCP:
   `create_invite` / `list_invites` / `revoke_invite` / `accept_invite`.
 
-## Tenant-owned harnesses (`@assay/registry`)
+## Tenant-owned harnesses (`@everdict/registry`)
 The harness registry is keyed by **`(tenant, id, version)`**. A tenant registers and lists only its own
 harnesses; resolution falls back to the **`_shared`** owner for first-party harnesses (e.g. the file-loaded
 `browser-use` spec), so tenants can run shared harnesses without owning them while keeping their own private.
@@ -85,7 +85,7 @@ harnesses; resolution falls back to the **`_shared`** owner for first-party harn
 `POST /runs` requires `runs:submit` (**member+**); `GET /runs`, `GET /runs/:id` require `runs:read` (viewer+).
 All are workspace-scoped: a tenant can only see and act on its own runs (another workspace's run → **404**).
 
-## Tenant-owned datasets (`@assay/registry`)
+## Tenant-owned datasets (`@everdict/registry`)
 Datasets reuse the identical ownership model — keyed by **`(tenant, id, version)`**, owner-first with `_shared`
 fallback (first-party benchmark datasets seeded from `examples/datasets`), immutable versions. They are
 **harness-agnostic** (one dataset, many `harness@version`s). The one difference from harnesses: writes are
@@ -100,7 +100,7 @@ fallback (first-party benchmark datasets seeded from `examples/datasets`), immut
 
 See `docs/datasets.md`.
 
-## Agent Judges (`@assay/registry`)
+## Agent Judges (`@everdict/registry`)
 Judges reuse the identical ownership model — `(tenant, id, version)`, owner-first with `_shared` fallback
 (first-party default judges from `examples/judges`), immutable versions. A judge is `model` (LLM/VLM call) or
 `harness` (delegate to a registered harness). Writes are **member+** (users self-register their judges).
@@ -129,9 +129,9 @@ workspace-scoped (another workspace's scorecard → **404**); the dataset is res
 owner-first/`_shared` rule. See `docs/scorecards.md`.
 
 ## Live-verified (real Postgres)
-`ASSAY_REQUIRE_AUTH=1 ASSAY_INTERNAL_TOKEN=… DATABASE_URL=… node apps/api/dist/main.js`, then: issue keys for
+`EVERDICT_REQUIRE_AUTH=1 EVERDICT_INTERNAL_TOKEN=… DATABASE_URL=… node apps/api/dist/main.js`, then: issue keys for
 `acme`/`beta` → no-key request is `401` → `acme` registers `bu@1.0.0` (`201`) → `acme` lists it, `beta` sees `[]`
-(isolation) → mutated re-register is `409` → the row is `acme | bu | 1.0.0` in `assay_harnesses`.
+(isolation) → mutated re-register is `409` → the row is `acme | bu | 1.0.0` in `everdict_harnesses`.
 
 ## Not yet (next)
 Per-key scopes/expiry; rotating keys. (Workspace **member invites + role management** shipped — see

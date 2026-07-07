@@ -1,4 +1,4 @@
-// 라이브 검증: 하니스 버전 SSOT(@assay/registry)가 실제 K8s 실행을 구동한다.
+// 라이브 검증: 하니스 버전 SSOT(@everdict/registry)가 실제 K8s 실행을 구동한다.
 //
 //  - 파일 SSOT(examples/harnesses/*.json)를 로드 → 버전 목록 + "latest" 해석(semver)
 //  - ServiceTopologyBackend.specFor 를 레지스트리로 연결 → job.harness.version="latest" 가
@@ -11,7 +11,7 @@ import { LATEST, loadHarnessTaxonomyDir } from "../../packages/registry/dist/ind
 import { K8sTopologyRuntime, ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { MlflowTraceSource } from "../../packages/trace/dist/index.js";
 
-const CONTEXT = process.env.KUBE_CONTEXT ?? "kind-assay";
+const CONTEXT = process.env.KUBE_CONTEXT ?? "kind-everdict";
 const MLFLOW = process.env.MLFLOW_ENDPOINT ?? "http://127.0.0.1:5501";
 const DIR = new URL("../../examples/harness-templates", import.meta.url).pathname;
 
@@ -73,7 +73,7 @@ async function main() {
     await runtime
       .teardown(latest, perTenantTrustZones().resolve("acme"))
       .catch((e) => console.log("  teardown:", e.message));
-    console.log("  namespace assay-acme deleted");
+    console.log("  namespace everdict-acme deleted");
   }
 
   banner("RESULT");

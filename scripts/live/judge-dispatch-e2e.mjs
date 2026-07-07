@@ -1,6 +1,6 @@
 // 라이브 e2e: judge grader 가 "일반 dispatch 경로"(runAgentJob)로 흐르는지 — 별도 judge-runner 가 아니라
 // EvalCase.graders 의 judge 프리셋이 실제 평가 루프에서 실 모델 판정으로 채점된다.
-//   환경 O (ASSAY_JUDGE_MODEL + OPENAI 키) → judge grader = 실 모델 판정(pass/score/reason)
+//   환경 O (EVERDICT_JUDGE_MODEL + OPENAI 키) → judge grader = 실 모델 판정(pass/score/reason)
 //   환경 X                                  → judge grader = skip 점수(일반 eval 안 죽음)
 // 하니스는 scripted(키 불필요): `echo hello > out.txt` 를 실제 실행 → 진짜 trace → judge 가 그 trace 를 판정.
 import process from "node:process";
@@ -44,7 +44,7 @@ const realJudge = showJudge("env O", real);
 
 // 2) judge 모델 미구성 → judge 만 skip(나머지 정상).
 // biome-ignore lint/performance/noDelete: process.env 키 제거가 의도(미구성 상태 재현)
-delete process.env.ASSAY_JUDGE_MODEL;
+delete process.env.EVERDICT_JUDGE_MODEL;
 console.log("\n=== runAgentJob (judge 환경 X) — judge 는 skip, eval 은 계속 ===");
 const skipped = await runAgentJob(baseJob);
 const skipJudge = showJudge("env X", skipped);

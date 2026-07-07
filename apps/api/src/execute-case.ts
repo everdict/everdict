@@ -1,6 +1,6 @@
-import type { Dispatcher } from "@assay/backends";
-import { type AgentJob, type CaseResult, type RegistryAuth, imageUsesRegistryHost } from "@assay/core";
-import type { TraceSource, TraceSourceConfig } from "@assay/trace";
+import type { Dispatcher } from "@everdict/backends";
+import { type AgentJob, type CaseResult, type RegistryAuth, imageUsesRegistryHost } from "@everdict/core";
+import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { collectDeferredTrace } from "./collect-trace.js";
 
 // 실행(Execution) 관심사 — 케이스 하나를 돌려 결과를 만드는 순수 유닛. run/scorecard 가 공유한다.
@@ -11,7 +11,7 @@ import { collectDeferredTrace } from "./collect-trace.js";
 // docs/architecture/execution-scoring-orchestration.md
 export interface ExecuteCaseDeps {
   dispatcher: Dispatcher;
-  // 잡 밖 트레이스 수집(collect="control-plane")용 소스 팩토리(@assay/trace). 미설정이면 수집 불가를 가시화.
+  // 잡 밖 트레이스 수집(collect="control-plane")용 소스 팩토리(@everdict/trace). 미설정이면 수집 불가를 가시화.
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource;
   // traceRef.authSecret(이름) 재해석용 테넌트 SecretStore(복호화 값) — 수집 pull 의 Authorization 헤더.
   secretsFor?: (tenant: string) => Promise<Record<string, string>>;

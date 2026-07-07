@@ -30,7 +30,7 @@ const auth = `Basic ${Buffer.from(`admin:${pw}`).toString("base64")}`;
 const PY = `
 import os, mlflow
 mlflow.set_tracking_uri(os.environ["MLFLOW_TRACKING_URI"])
-mlflow.set_experiment("assay-trace-live")
+mlflow.set_experiment("everdict-trace-live")
 with mlflow.start_span(name="chat") as s:
     s.set_inputs({"prompt": "hi"}); s.set_outputs({"reply": "hello"})
     s.set_attribute("mlflow.llm.model", "gpt-5.4-mini")

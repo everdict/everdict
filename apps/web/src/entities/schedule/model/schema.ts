@@ -1,6 +1,6 @@
 import { z } from 'zod'
 
-// 컨트롤플레인 예약(cron) 스코어카드의 클라이언트 미러. 웹은 HTTP 로만 결합 — @assay/* 비의존.
+// 컨트롤플레인 예약(cron) 스코어카드의 클라이언트 미러. 웹은 HTTP 로만 결합 — @everdict/* 비의존.
 // GET /schedules 응답: 워크스페이스의 예약 목록. 발사(Temporal)는 컨트롤플레인 책임.
 export const scheduleOverlapPolicySchema = z.enum(['skip', 'bufferOne', 'allowAll'])
 export type ScheduleOverlapPolicy = z.infer<typeof scheduleOverlapPolicySchema>

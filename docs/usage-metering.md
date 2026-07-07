@@ -1,8 +1,8 @@
 # Usage metering (gateway sidecar)
 
 **Decision (operating model):** model gateways (e.g. LiteLLM) are **BYO** — a workspace/harness points at its own
-endpoint; Assay does **not** mandate one. **Budget stays Assay-owned** (`BudgetTracker`). To still learn what a
-**black-box harness** spent (aider with `trace:none` reports nothing), Assay can put a tiny **usage proxy** in
+endpoint; Everdict does **not** mandate one. **Budget stays Everdict-owned** (`BudgetTracker`). To still learn what a
+**black-box harness** spent (aider with `trace:none` reports nothing), Everdict can put a tiny **usage proxy** in
 front of the BYO endpoint and recover token usage per run.
 
 ## Why a proxy (evidence)
@@ -13,15 +13,15 @@ We probed the workclaw LiteLLM directly:
   **body**, and the **per-call cost** in a response **header** (`x-litellm-response-cost` /
   `x-litellm-response-cost-original`; `0.0` for subscription models, a real `$` for metered ones).
 The only place tokens/cost exist for a black-box harness is the **response**, which the harness discards. A
-forwarding proxy that Assay owns can read both. (This is the "uniform cost/token capture via an LLM-proxy" from
+forwarding proxy that Everdict owns can read both. (This is the "uniform cost/token capture via an LLM-proxy" from
 the original architecture.) **Tokens always; `$` when the gateway prices the model** (subscription → `$0`).
 
-## Mechanism (`@assay/trace`)
+## Mechanism (`@everdict/trace`)
 `createUsageProxy({ upstreamBaseUrl, runHeader?, defaultRunId?, tally? })` → `{ server, tally }` (and
 `startUsageProxy(...)` → listens on `127.0.0.1:0` → `{ url, tally, close }`):
 - A reverse proxy: forwards `/v1/*` to the BYO upstream **verbatim** (request + response bodies unchanged).
 - On each JSON response it parses `usage` (`extractUsage`, body) **and** the cost header (`costFromHeaders`) and
-  tallies by **run** — run id from the `x-assay-run` header (stripped before forwarding, never leaks upstream) or
+  tallies by **run** — run id from the `x-everdict-run` header (stripped before forwarding, never leaks upstream) or
   `defaultRunId` (per-run proxy instance). `inMemoryUsageTally()` keeps
   `{promptTokens, completionTokens, totalTokens, usd, calls}` per run.
 
@@ -32,10 +32,10 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
    Resolution in `RunService` (async): per-run override (`POST /runs` body `meterUsage`) → per-workspace policy
    (`meterUsageFor(tenant)`) → `false`. `main.ts` wires the policy as **durable per-workspace settings → env
    fallback**: `(await settingsStore.get(tenant))?.meterUsage ?? envPolicy(tenant)`, where the
-   `WorkspaceSettingsStore` (`@assay/db`, InMemory/Pg, table `assay_workspace_settings`) is managed by admins via
+   `WorkspaceSettingsStore` (`@everdict/db`, InMemory/Pg, table `everdict_workspace_settings`) is managed by admins via
    **`PUT/GET /workspace/settings`** (`settings:write`/`settings:read`, admin-only), and `envPolicy` is the
-   default from **`ASSAY_METER_TENANTS`** (comma list) or **`ASSAY_METER_USAGE=1`** (all).
-2. `runAgentJob` uses `job.meterUsage` (falls back to the `ASSAY_METER_USAGE` env only for direct
+   default from **`EVERDICT_METER_TENANTS`** (comma list) or **`EVERDICT_METER_USAGE=1`** (all).
+2. `runAgentJob` uses `job.meterUsage` (falls back to the `EVERDICT_METER_USAGE` env only for direct
    `LocalBackend.dispatch` with no control plane) → passes `meterUsage` to `makeHarness`.
 3. `CommandHarness.run` (only when `trace:none` + the model-base env var is present — avoids double-counting a
    harness that already reports its own cost) starts a per-run `startUsageProxy(upstream = OPENAI_API_BASE)`,
@@ -46,7 +46,7 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
    does `budget.settle(tenant, costOf(result))` and persists `result` in the `RunStore`. No RunService change.
 5. **Surfaced on the run record:** `RunStore` get/list/update return `RunRecord.usage`
    (`{promptTokens, completionTokens, totalTokens, usd, calls}`), **derived** from `result.trace` via
-   `usageFromTrace` (`@assay/core`) on read — no column, no migration, always consistent. Clients (API/MCP/web)
+   `usageFromTrace` (`@everdict/core`) on read — no column, no migration, always consistent. Clients (API/MCP/web)
    read `record.usage` without parsing the trace.
 
 ## Verified
@@ -62,7 +62,7 @@ without any cross-network reconfiguration (the agent→upstream path is the one 
 - Live proxy (`scripts/live/usage-proxy.mjs`) vs real workclaw LiteLLM `gpt-5.4-mini`: `run-A` = 2 calls / 3276
   tokens, `run-B` = 1 call / 1642 tokens — captured while responses pass through intact.
 - Live lifecycle (`scripts/live/usage-proxy-run.mjs`): a `command` harness dispatched via `LocalBackend` with
-  `ASSAY_METER_USAGE=1` → `result.trace` carries `llm_call` `{inputTokens: 1637, outputTokens: 6, usd: 0}` →
+  `EVERDICT_METER_USAGE=1` → `result.trace` carries `llm_call` `{inputTokens: 1637, outputTokens: 6, usd: 0}` →
   `sumCost = { usd: 0, tokens: 1643 }` (the exact value `budget.settle` receives). Subscription model = `$0`,
   yet **tokens are metered**.
 

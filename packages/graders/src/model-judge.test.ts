@@ -1,4 +1,4 @@
-import { AppError, type TraceEvent } from "@assay/core";
+import { AppError, type TraceEvent } from "@everdict/core";
 import { describe, expect, it, vi } from "vitest";
 import { anthropicComplete, harnessComplete, modelJudge, openaiComplete, traceToText } from "./model-judge.js";
 

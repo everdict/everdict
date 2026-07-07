@@ -19,8 +19,8 @@ import { runCase } from "../../packages/runner/dist/index.js";
 import { buildTraceSink, buildTraceSource } from "../../packages/trace/dist/index.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const CONTAINER = "assay-trace-collect-phoenix";
-const PROJECT = "assay-collect-e2e";
+const CONTAINER = "everdict-trace-collect-phoenix";
+const PROJECT = "everdict-collect-e2e";
 let bootedDocker = false;
 let ENDPOINT = process.env.PHOENIX_ENDPOINT ?? "";
 
@@ -84,7 +84,7 @@ try {
     id: "instrumented-cli",
     version: "1.0.0",
     setup: [],
-    command: "sh -c 'echo \"run_id=$ASSAY_RUN_ID\" > marker.txt'",
+    command: "sh -c 'echo \"run_id=$EVERDICT_RUN_ID\" > marker.txt'",
     env: {},
     params: {},
     trace: { kind: "phoenix", endpoint: ENDPOINT, project: PROJECT, collect },
@@ -110,7 +110,7 @@ try {
   // 2) P1 — collect="job": 해제 후 buildTraceSource(phoenix) 경유 in-job pull 왕복.
   console.log("\n=== P1: collect=job — 해제 후 in-job pull(팩토리 5종 배선) ===");
   const r1 = await runCase(caseFor("c-job"), depsFor("job", tidJob));
-  assert(r1.snapshot.diff.includes(`run_id=${tidJob}`), "P1 상관 키 왕복(ASSAY_RUN_ID)");
+  assert(r1.snapshot.diff.includes(`run_id=${tidJob}`), "P1 상관 키 왕복(EVERDICT_RUN_ID)");
   const llm1 = r1.trace.find((e) => e.kind === "llm_call");
   assert(llm1?.model === "gpt-5.4-mini", "P1 실 Phoenix 스팬이 trace 로 수집됨");
   assert((score(r1, "steps")?.value ?? 0) > 0, "P1 steps 도출");

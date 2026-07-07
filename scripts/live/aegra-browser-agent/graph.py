@@ -1,9 +1,9 @@
 """Minimal browser agent (LangGraph) for the service-topology e2e.
 
-Acts on a PER-CASE browser: connects to the CDP url Assay's ServiceTopologyBackend
+Acts on a PER-CASE browser: connects to the CDP url Everdict's ServiceTopologyBackend
 provisions (via run config.configurable.browser_cdp_url), navigates to the URL in the
 task, extracts page text, and answers via the configured model (our LiteLLM
-gpt-5.4-mini). Assay then snapshots the same browser (DOM/URL) and grades it.
+gpt-5.4-mini). Everdict then snapshots the same browser (DOM/URL) and grades it.
 """
 
 import os
@@ -39,7 +39,7 @@ async def act(state: MessagesState, config: RunnableConfig) -> dict:
             await page.goto(m.group(0), wait_until="domcontentloaded", timeout=30000)
             url = page.url
             page_text = (await page.inner_text("body"))[:3000]
-            # 원격 chromedp + 페이지 타깃은 Assay 스냅샷용으로 유지(close 안 함)
+            # 원격 chromedp + 페이지 타깃은 Everdict 스냅샷용으로 유지(close 안 함)
 
     prompt = (
         f"Task: {task}\n\nThe browser is at: {url}\nPage text:\n{page_text}\n\n"

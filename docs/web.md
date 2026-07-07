@@ -9,11 +9,11 @@ runs, and harnesses.
   authority**: Auth.js stores (and refreshes) the Keycloak **access token** in the **server-only httpOnly
   encrypted cookie** — it is **never put on the client session** (no `/api/auth/session` leak). The server reads
   it via `getAccessToken()` (`getToken` over the cookie) and `control-plane.ts` forwards it as
-  `Authorization: Bearer <jwt>` to `@assay/api`. The control plane resolves identity — `workspace` + roles come
+  `Authorization: Bearer <jwt>` to `@everdict/api`. The control plane resolves identity — `workspace` + roles come
   from `GET /me`, never decoded from the token by the web. UI is role-gated off `/me` (mirror in
   `shared/auth/can.ts`), but enforcement is always the control plane's (403). Without Keycloak configured the web
-  falls back to the dev `x-assay-tenant=default` path. See `docs/auth.md`.
-- **Agents / MCP / CI → MCP or API keys**: the agent-facing **MCP server** (`@assay/api` `/mcp`) exposes
+  falls back to the dev `x-everdict-tenant=default` path. See `docs/auth.md`.
+- **Agents / MCP / CI → MCP or API keys**: the agent-facing **MCP server** (`@everdict/api` `/mcp`) exposes
   run/harness tools, OAuth-protected via Keycloak ("login like Linear MCP") or an `Authorization: Bearer ak_…`
   API key — same auth core, role-gated. See `docs/mcp.md`.
 
@@ -23,7 +23,7 @@ control-plane `Principal{workspace, roles}`.
 ## i18n
 UI copy lives in next-intl catalogs `messages/{ko,en}.json` — components never hardcode user-facing
 strings (`useTranslations()` client / `getTranslations()` server). The locale is **cookie-based**
-(`assay-locale`; `shared/i18n/request.ts` resolves cookie > `Accept-Language` > `en`) — there is **no
+(`everdict-locale`; `shared/i18n/request.ts` resolves cookie > `Accept-Language` > `en`) — there is **no
 `/[locale]` URL segment**, because the first path segment is the workspace (Linear-style). The
 switcher (`features/switch-locale`) sits in the sidebar footer and persists the cookie via a server
 action. Migration is incremental per slice; `widgets/app-shell` is the reference. New strings go to
@@ -34,21 +34,21 @@ Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 (`@theme inline
 (new-york, neutral base, **Linear-style** indigo `#5e6ad2` primary + tight `0.5rem` radius + near-black dark
 surface; light/dark toggle via `shared/ui/theme-toggle`, no-flash inline script in `layout.tsx`) · TanStack
 Query · zod · Auth.js + Keycloak. Self-contained tooling: **eslint + prettier** (import-order plugin) — NOT the repo Biome (apps/web is
-excluded from root Biome). The web is a pure HTTP client of the control plane — **no `@assay/*` package deps**.
+excluded from root Biome). The web is a pure HTTP client of the control plane — **no `@everdict/*` package deps**.
 
 ## FSD layout (`src/`)
 ```
 app/        Next App Router — landing(/), [workspace]/{layout(shell+멤버십 검증), page(overview), runs, runs/[id],
             harnesses, datasets(+[id],new), scorecards(+[id],new,compare), judges(+[id],new), runtimes(+[id],new),
             account, settings} — Linear 식 /{workspaceSlug}/... ; 워크스페이스 슬러그 없는 최상위 진입점
-            onboarding·new-workspace·invite ; api/auth/[...nextauth] ; middleware(URL 첫 세그먼트 → x-assay-active-workspace 헤더 주입)
+            onboarding·new-workspace·invite ; api/auth/[...nextauth] ; middleware(URL 첫 세그먼트 → x-everdict-active-workspace 헤더 주입)
 widgets/    page-level composition: app-shell (sidebar+topbar), workspace-switcher (Linear-style sidebar dropdown:
             현재 워크스페이스 + 전환(= /{workspace} 로 이동) + "새 워크스페이스"), scorecard-summary, runs-table, trace-timeline
 features/   business actions: submit-run, register-harness, register-dataset, run-scorecard, register-judge, compare-scorecards, register-runtime, ingest-scorecard, create-workspace, manage-workspace-secrets, manage-github-app + manage-mattermost (워크스페이스 소유 통합: GitHub App 조직 설치→선택 repo, Mattermost 알림/슬래시커맨드) (client form/액션 → control plane; 워크스페이스 전환은 URL 이동이라 별도 액션 없음)
 entities/   domain models + zod schemas mirroring the API (run + trace/snapshot, harness, dataset, scorecard, judge, runtime, workspace, secret, github-app, mattermost)
 shared/     ui (button/card/badge/page-header/stat-card/status-pill/empty-state/callout/section-header/theme-toggle), lib (utils, control-plane),
             config (env), providers (query), auth (Keycloak token store/refresh, server-only access-token (getToken),
-            authContext + currentPrincipal + can, workspace-scope(URL↔쿠키↔헤더 상수) + active-workspace cookie → x-assay-workspace)
+            authContext + currentPrincipal + can, workspace-scope(URL↔쿠키↔헤더 상수) + active-workspace cookie → x-everdict-workspace)
 ```
 Import order enforces downward layer deps (app → widgets → features → entities → shared).
 
@@ -141,8 +141,8 @@ panel/list guidance is not.
   5분 캐시)로 읽어 OS 감지(UA) 권장 버튼 + 전 플랫폼 목록 + 설치 후 안내(unsigned 주의 포함)를 렌더링.
   실제 다운로드는 `GET /api/desktop/download?id=…` 라우트가 세션 검사(`currentPrincipal`) + 우리 릴리즈
   에셋 검증 후 GitHub 의 서명된 임시 URL 로 302 — 대용량이 웹 서버를 통과하지 않고, 토큰은 클라이언트로
-  나가지 않는다. 토큰 미설정 시 `DESKTOP_DOWNLOAD_URL` 외부 링크 폴백. See `docs/architecture/desktop-app.md`. **데스크톱 셸 안에서는**(`window.assayDesktop` 감지 —
-  `shared/lib/desktop-bridge.ts` 의 로컬 미러 타입, 웹은 `@assay/*` 미의존) **"이 기기를 러너로 연결"
+  나가지 않는다. 토큰 미설정 시 `DESKTOP_DOWNLOAD_URL` 외부 링크 폴백. See `docs/architecture/desktop-app.md`. **데스크톱 셸 안에서는**(`window.everdictDesktop` 감지 —
+  `shared/lib/desktop-bridge.ts` 의 로컬 미러 타입, 웹은 `@everdict/*` 미의존) **"이 기기를 러너로 연결"
   원클릭**: 라벨=호스트명 자동, 토큰은 화면에 노출되지 않고 브리지로만 하강(OS 키체인 저장); "이 기기" 행은
   lastSeenAt 추정 대신 브리지 **라이브 상태**(실행 중 (n)/온라인 + 라이브 capability, docker 없음 힌트)를
   쓰고, 해제 시 데스크톱 토큰도 함께 정리한다. 브라우저 사용자에게는 `DESKTOP_DOWNLOAD_URL` 설정 시
@@ -162,7 +162,7 @@ All under a shared app shell (sidebar nav + topbar **workspace + role** chip / s
 **server actions** (`'use server'`) that forward the user's token and call the control plane server-side, then
 `revalidatePath`.
 
-The dev server runs on **port 3001** (`pnpm --filter @assay/web dev`).
+The dev server runs on **port 3001** (`pnpm --filter @everdict/web dev`).
 
 ## Run
 ```bash
@@ -171,15 +171,15 @@ pnpm install
 # Keycloak (optional; without it the web runs in dev mode as tenant "default"):
 docker compose -f deploy/keycloak/docker-compose.yaml up -d        # then configure realm/client (see file)
 cp apps/web/.env.example apps/web/.env                              # set CONTROL_PLANE_URL + Keycloak vars
-pnpm --filter @assay/web dev                                       # http://localhost:3001
+pnpm --filter @everdict/web dev                                       # http://localhost:3001
 ```
 Without Keycloak configured, `/{workspace}` (dev: `/default`) renders for the dev `default` workspace (no login
 required) — handy for local dev. With Keycloak configured, `/{workspace}/*` is protected (middleware redirects to
 login) and the workspace/roles come from the control plane's `GET /me` over the forwarded token.
 
 **Linear-style workspace URLs.** The URL's first path segment **is** the active workspace (`/{workspaceSlug}/runs`).
-The `middleware` injects that segment as the `x-assay-active-workspace` request header (and syncs the most-recent
-`assay-workspace` cookie); `authContext` reads the header (cookie fallback) and forwards it as `x-assay-workspace`,
+The `middleware` injects that segment as the `x-everdict-active-workspace` request header (and syncs the most-recent
+`everdict-workspace` cookie); `authContext` reads the header (cookie fallback) and forwards it as `x-everdict-workspace`,
 so every page/action scopes to the URL workspace with no per-page param threading. Switching workspace = navigating
 to `/{id}`. `onboarding`/`new-workspace`/`invite` are slug-less top-level routes (no workspace context yet).
 
@@ -187,7 +187,7 @@ to `/{id}`. `onboarding`/`new-workspace`/`invite` are slug-less top-level routes
 `GET /me` returns, not just on the Keycloak session:
 - **Home `/`** — if `GET /me` confirms a real login (`principal.via === 'oidc'`), the landing is skipped and the
   user is redirected to `/{workspace}` (their **most recent**, from `principal.workspace`); 0 workspaces →
-  `/onboarding`. A `null` principal (control plane unreachable / token rejected) or the dev `x-assay-tenant`
+  `/onboarding`. A `null` principal (control plane unreachable / token rejected) or the dev `x-everdict-tenant`
   fallback (`via !== 'oidc'`) keeps the landing visible — no loop.
 - **`/{workspace}/*`** — `[workspace]/layout` is the authoritative validator: `principal === null` (token rejected
   / control plane unreachable) → redirect to `/`; 0 workspaces → `/onboarding`; the URL slug is not one of my

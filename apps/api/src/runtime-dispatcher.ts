@@ -1,4 +1,4 @@
-import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@assay/backends";
+import { type Backend, type BackendRegistry, type Dispatcher, buildRuntimeBackend } from "@everdict/backends";
 import {
   type AgentJob,
   BadRequestError,
@@ -7,8 +7,8 @@ import {
   type RegistryAuth,
   type RuntimeSpec,
   imageUsesRegistryHost,
-} from "@assay/core";
-import type { RuntimeRegistry } from "@assay/registry";
+} from "@everdict/core";
+import type { RuntimeRegistry } from "@everdict/registry";
 import { jobImages } from "./execute-case.js";
 import { type SelfHostedKey, poolKeyFor, selfHostedBackendName } from "./runner-hub.js";
 
@@ -17,7 +17,7 @@ export interface RuntimeDispatcherDeps {
   backends: BackendRegistry; // Scheduler 의 레지스트리 — 빌드한 테넌트 백엔드를 여기 등록
   runtimes: RuntimeRegistry; // 테넌트 등록 Runtime 해석
   secretsFor: (tenant: string) => Promise<Record<string, string>>; // SecretStore.entries → 백엔드 secretEnv
-  // RuntimeSpec → Backend 빌더(기본 buildRuntimeBackend = local/docker/nomad/k8s). topology 처럼 @assay/backends 가
+  // RuntimeSpec → Backend 빌더(기본 buildRuntimeBackend = local/docker/nomad/k8s). topology 처럼 @everdict/backends 가
   // 의존할 수 없는 백엔드(순환)는 apps/api 가 이걸 주입해 처리한다(buildRuntimeBackend 로 폴백).
   buildBackend?: (
     spec: RuntimeSpec,

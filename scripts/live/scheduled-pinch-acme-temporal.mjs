@@ -3,11 +3,11 @@
 // "pinch 를 돌린 그 하니스" = acme 에 이미 등록된 codex 하니스 + pinch-dashboards 데이터셋(둘 다 acme 에 존재).
 //
 // 전제(외부 인프라 — 다른 live 스크립트가 nomad/k8s 를 전제하듯):
-//   • Postgres @ localhost:5433 (assay/assay), acme 워크스페이스 데이터(codex 하니스 + pinch-dashboards) 존재.
-//   • Keycloak @ KEYCLOAK_ISSUER, 사용자 alice/alice(workspace=acme, member), public client assay-mcp(direct grants).
+//   • Postgres @ localhost:5433 (everdict/everdict), acme 워크스페이스 데이터(codex 하니스 + pinch-dashboards) 존재.
+//   • Keycloak @ KEYCLOAK_ISSUER, 사용자 alice/alice(workspace=acme, member), public client everdict-mcp(direct grants).
 //   • Temporal dev server @ 127.0.0.1:7233.
 //
-// 구성(스크립트가 기동): 컨트롤플레인(:8793, Postgres+auth+Temporal) + assay worker + alice 소유 self-hosted 러너(codex on PATH).
+// 구성(스크립트가 기동): 컨트롤플레인(:8793, Postgres+auth+Temporal) + everdict worker + alice 소유 self-hosted 러너(codex on PATH).
 // 흐름: ① CP ② worker ③ alice 토큰(ROPC) → 러너 페어링+기동 ④ POST /schedules(as alice, cron "* * * * *",
 //   pinch-dashboards×codex×self:<id>) → TemporalScheduleDriver 가 Schedule 생성 ⑤ Temporal 매분 발사 → 워크플로 →
 //   internal fire → 스코어카드 submit(=alice 신원) → 러너가 codex 로 dashboard.json → tests-pass 채점
@@ -19,11 +19,11 @@ import process from "node:process";
 
 const PORT = process.env.CP_PORT ?? "8793";
 const BASE = `http://127.0.0.1:${PORT}`;
-const TEMPORAL = process.env.ASSAY_TEMPORAL_ADDRESS ?? "127.0.0.1:7233";
+const TEMPORAL = process.env.EVERDICT_TEMPORAL_ADDRESS ?? "127.0.0.1:7233";
 const INTERNAL = "dev-internal-token";
-const DATABASE_URL = process.env.DATABASE_URL ?? "postgresql://assay:assay@localhost:5433/assay";
-const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ?? "http://localhost:8081/realms/assay";
-const SECRETS_KEY = process.env.ASSAY_SECRETS_KEY ?? "JIMYnR3k6zSSI7juJhzVQrhgpjnWXeCfBvakUMV2bQY=";
+const DATABASE_URL = process.env.DATABASE_URL ?? "postgresql://everdict:everdict@localhost:5433/everdict";
+const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER ?? "http://localhost:8081/realms/everdict";
+const SECRETS_KEY = process.env.EVERDICT_SECRETS_KEY ?? "JIMYnR3k6zSSI7juJhzVQrhgpjnWXeCfBvakUMV2bQY=";
 const ROOT = new URL("../..", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -34,7 +34,7 @@ async function aliceToken() {
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "password",
-      client_id: "assay-mcp",
+      client_id: "everdict-mcp",
       username: "alice",
       password: "alice",
       scope: "openid",
@@ -58,10 +58,10 @@ const cpEnv = {
   PORT,
   DATABASE_URL,
   KEYCLOAK_ISSUER,
-  ASSAY_REQUIRE_AUTH: "1",
-  ASSAY_INTERNAL_TOKEN: INTERNAL,
-  ASSAY_SECRETS_KEY: SECRETS_KEY,
-  ASSAY_TEMPORAL_ADDRESS: TEMPORAL,
+  EVERDICT_REQUIRE_AUTH: "1",
+  EVERDICT_INTERNAL_TOKEN: INTERNAL,
+  EVERDICT_SECRETS_KEY: SECRETS_KEY,
+  EVERDICT_TEMPORAL_ADDRESS: TEMPORAL,
 };
 
 console.log(`=== ① 컨트롤플레인 기동 (:${PORT}, Postgres+auth+temporal=${TEMPORAL}) ===`);
@@ -89,10 +89,10 @@ try {
   if (me.workspace !== "acme") throw new Error(`alice 워크스페이스가 acme 가 아님: ${me.workspace}`);
 
   // ② worker
-  console.log(`\n=== ② assay worker 기동 (temporal=${TEMPORAL}, API 브리지=${BASE}) ===`);
+  console.log(`\n=== ② everdict worker 기동 (temporal=${TEMPORAL}, API 브리지=${BASE}) ===`);
   worker = spawn("node", ["apps/cli/dist/main.js", "worker", "--temporal-address", TEMPORAL], {
     cwd: ROOT,
-    env: { PATH: process.env.PATH, HOME: process.env.HOME, ASSAY_API_URL: BASE, ASSAY_INTERNAL_TOKEN: INTERNAL },
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, EVERDICT_API_URL: BASE, EVERDICT_INTERNAL_TOKEN: INTERNAL },
     stdio: ["ignore", "pipe", "pipe"],
   });
   worker.stderr.on("data", (d) => process.stderr.write(`  [worker] ${d}`));
@@ -100,7 +100,7 @@ try {
   await sleep(3000);
 
   // ③ alice 소유 self-hosted 러너 페어링 + 기동 (codex on PATH)
-  console.log("\n=== ③ POST /runners (as alice) + assay runner --pair (codex on PATH) ===");
+  console.log("\n=== ③ POST /runners (as alice) + everdict runner --pair (codex on PATH) ===");
   const paired = await post("/runners", { label: "alice-codex-laptop", capabilities: ["repo"] });
   const token = paired.json.token;
   const runnerId = paired.json.runner?.id;

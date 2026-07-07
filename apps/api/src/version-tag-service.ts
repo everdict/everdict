@@ -1,5 +1,5 @@
-import { type Action, type Principal, authorize } from "@assay/auth";
-import { BadRequestError } from "@assay/core";
+import { type Action, type Principal, authorize } from "@everdict/auth";
+import { BadRequestError } from "@everdict/core";
 import { z } from "zod";
 
 // 버전 태그 편집의 공유 코어 — HTTP 라우트(server.ts)와 MCP 도구(mcp.ts)가 같은 로직을 쓴다(BFF↔MCP parity).

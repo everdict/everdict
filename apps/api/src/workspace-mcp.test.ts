@@ -1,7 +1,7 @@
-import type { Principal } from "@assay/auth";
-import type { Dispatcher } from "@assay/backends";
-import type { CaseResult } from "@assay/core";
-import { InMemoryRunStore, InMemoryWorkspaceStore } from "@assay/db";
+import type { Principal } from "@everdict/auth";
+import type { Dispatcher } from "@everdict/backends";
+import type { CaseResult } from "@everdict/core";
+import { InMemoryRunStore, InMemoryWorkspaceStore } from "@everdict/db";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";

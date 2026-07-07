@@ -1,6 +1,6 @@
 # Preflight — 0004_harness_tenant
 
-**Change:** expand — add tenant ownership to `assay_harnesses`. Adds a `tenant` column (NOT NULL DEFAULT
+**Change:** expand — add tenant ownership to `everdict_harnesses`. Adds a `tenant` column (NOT NULL DEFAULT
 `'_shared'`, backfilling existing rows to the first-party shared owner) and **repoints the primary key** to
 `(tenant, id, version)` + a `(tenant, id)` index.
 

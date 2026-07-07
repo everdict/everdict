@@ -1,5 +1,5 @@
-import { CapabilityNameSchema } from "@assay/core";
-import type { PairRunnerInput, PairedRunner, RunnerMeta, RunnerStore } from "@assay/db";
+import { CapabilityNameSchema } from "@everdict/core";
+import type { PairRunnerInput, PairedRunner, RunnerMeta, RunnerStore } from "@everdict/db";
 import { z } from "zod";
 
 // 셀프호스티드 러너 서비스 — 개인 소유 디바이스 페어링의 코어(페어/목록/해제/워크스페이스 로스터).

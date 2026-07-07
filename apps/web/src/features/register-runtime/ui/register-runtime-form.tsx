@@ -320,7 +320,7 @@ export function RegisterRuntimeForm({ workspace }: { workspace: string }) {
               <Input
                 value={f.namespace}
                 onChange={(e) => set('namespace', e.target.value)}
-                placeholder="assay"
+                placeholder="everdict"
                 autoComplete="off"
               />
             </Field>

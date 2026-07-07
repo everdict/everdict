@@ -1,11 +1,11 @@
 // 라이브 e2e (service-topology): 표준 web 벤치마크(WebVoyager) 어댑터 → 데이터셋 → 실 browser-use 하니스 → 스코어카드.
-// importWebVoyager(@assay/datasets) 가 WebVoyager 형식 jsonl(web_name/ques/web/answer)을 browser 케이스로 매핑
+// importWebVoyager(@everdict/datasets) 가 WebVoyager 형식 jsonl(web_name/ques/web/answer)을 browser 케이스로 매핑
 // (task=ques, env=browser{startUrl:web}, graders=[answer-match{answer}, steps, judge]). 여기선 그 데이터셋을 실
 // browser-use front-door 로 돌려 CaseResult[] → Scorecard → summarizeScorecard(정답대조 통과율 + 평균 steps/cost).
 // 채점=answer-match(서버가 최종 답을 trace message 스팬으로 배출 → answer-match 가 trace 의 답을 본다) + steps.
-// (공식 WebVoyager 는 GPT-4V judge — assay 어댑터도 judge 그레이더를 포함하나, 라이브 데모는 결정론적 answer-match 사용.)
+// (공식 WebVoyager 는 GPT-4V judge — everdict 어댑터도 judge 그레이더를 포함하나, 라이브 데모는 결정론적 answer-match 사용.)
 //
-// 사전: docker build -t assay-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
+// 사전: docker build -t everdict-browseruse:demo -f scripts/live/Dockerfile.browseruse scripts/live ; Jaeger(:4318/:16686).
 // 키: OPENAI_API_KEY env 또는 infra/litellm/.env(LITELLM_MASTER_KEY) — 런타임에만, 커밋 안 함.
 import { execFileSync, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
@@ -16,11 +16,11 @@ import { summarizeScorecard } from "../../packages/suite/dist/index.js";
 import { ServiceTopologyBackend } from "../../packages/topology/dist/index.js";
 import { OtelTraceSource } from "../../packages/trace/dist/index.js";
 
-const IMAGE = process.env.BROWSERUSE_IMAGE ?? "assay-browseruse:demo";
+const IMAGE = process.env.BROWSERUSE_IMAGE ?? "everdict-browseruse:demo";
 const PORT = process.env.BROWSERUSE_PORT ?? "18080";
 const MODEL = process.env.BROWSERUSE_MODEL ?? "chatgpt/gpt-5.4"; // 실사이트 → 강한 모델
 const JAEGER_QUERY = process.env.JAEGER_QUERY ?? "http://localhost:16686";
-const NAME = "assay-bu-webvoyager";
+const NAME = "everdict-bu-webvoyager";
 const FRONT = `http://127.0.0.1:${PORT}`;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

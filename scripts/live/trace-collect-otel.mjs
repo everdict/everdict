@@ -1,7 +1,7 @@
 // 라이브 e2e: OTel 태그 상관(correlate="tag")을 *실제 Jaeger* 에 대고 검증 —
 // docs/architecture/streaming-case-pipeline.md D4. 이 스크립트는 mlflow/phoenix e2e 와 달리 시드가 없다:
 // **커맨드(계측 에이전트)가 직접** 자기 mint 한 OTLP trace id 로 스팬을 export 하고, 리소스 속성
-// assay.run_id=$ASSAY_RUN_ID 만 남긴다 — assay 는 runId 를 어디에도 미리 알려주지 않고(runCase 가 mint)
+// everdict.run_id=$EVERDICT_RUN_ID 만 남긴다 — everdict 는 runId 를 어디에도 미리 알려주지 않고(runCase 가 mint)
 // 태그 검색만으로 상관한다. 즉 "실 계측 에이전트 + 주입 env" 계약의 완전한 왕복.
 //   O1 collect="job":           해제 후 collectTrace(runId) 가 Jaeger 검색(service+tags)으로 pull.
 //   O2 collect="control-plane": traceRef{correlate:"tag", service} → executeCase 가 검색 pull + 미뤄진 채점.
@@ -18,7 +18,7 @@ import { runCase } from "../../packages/runner/dist/index.js";
 import { buildTraceSource } from "../../packages/trace/dist/index.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const CONTAINER = "assay-trace-collect-otel";
+const CONTAINER = "everdict-trace-collect-otel";
 const SERVICE = "instrumented-cli";
 let bootedDocker = false;
 let QUERY = process.env.JAEGER_QUERY ?? "";
@@ -60,7 +60,7 @@ function assert(cond, label) {
 }
 
 // 계측 에이전트 역할의 스크립트 — 자기 mint 한 trace id 로 OTLP export, 상관은 리소스 속성으로만.
-// (실 에이전트가 OTEL_RESOURCE_ATTRIBUTES=assay.run_id=… 를 반영하는 것과 동일한 계약을 셸로 재현.)
+// (실 에이전트가 OTEL_RESOURCE_ATTRIBUTES=everdict.run_id=… 를 반영하는 것과 동일한 계약을 셸로 재현.)
 const EMIT_SH = `set -e
 TID=$(od -An -N16 -tx1 /dev/urandom | tr -d ' \\n')
 SID=$(od -An -N8 -tx1 /dev/urandom | tr -d ' \\n')
@@ -69,7 +69,7 @@ NOW=$(date +%s)000000000
 cat > payload.json <<JSON
 {"resourceSpans":[{"resource":{"attributes":[
  {"key":"service.name","value":{"stringValue":"${SERVICE}"}},
- {"key":"assay.run_id","value":{"stringValue":"$ASSAY_RUN_ID"}}]},
+ {"key":"everdict.run_id","value":{"stringValue":"$EVERDICT_RUN_ID"}}]},
  "scopeSpans":[{"scope":{"name":"e2e"},"spans":[
  {"traceId":"$TID","spanId":"$SID","name":"chat","kind":1,
   "startTimeUnixNano":"$NOW","endTimeUnixNano":"$NOW",
@@ -82,7 +82,7 @@ cat > payload.json <<JSON
   {"key":"tool.call_id","value":{"stringValue":"c1"}}]}]}]}]}
 JSON
 curl -sf -X POST -H 'content-type: application/json' --data @payload.json "$OTLP_BASE/v1/traces" > /dev/null
-echo "run_id=$ASSAY_RUN_ID" > marker.txt
+echo "run_id=$EVERDICT_RUN_ID" > marker.txt
 `;
 
 try {
@@ -139,7 +139,7 @@ try {
   assert(score(done, "tests-pass")?.pass === true, "O2 ground-truth 보존");
 
   console.log(
-    "\n✅ trace-collect otel live e2e PASS — 실 Jaeger 상대로 태그 상관 완전 왕복(에이전트-mint trace id, assay 는 assay.run_id 리소스 속성으로만 상관).",
+    "\n✅ trace-collect otel live e2e PASS — 실 Jaeger 상대로 태그 상관 완전 왕복(에이전트-mint trace id, everdict 는 everdict.run_id 리소스 속성으로만 상관).",
   );
 } finally {
   if (bootedDocker) {

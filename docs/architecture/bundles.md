@@ -38,7 +38,7 @@ generalization; `codex`+`pinch` is the bundle that plugs into it.
 ### A `Bundle` is a manifest of existing specs — the applier just fans out
 
 ```ts
-// apps/api (composition layer — it already depends on every registry + @assay/datasets)
+// apps/api (composition layer — it already depends on every registry + @everdict/datasets)
 Bundle = {
   id: string, version: string, description?: string,          // manifest metadata
   harnessTemplates?: HarnessTemplateSpec[],
@@ -113,7 +113,7 @@ Applied via `POST /bundles/apply` (tenant self-serve) OR seeded to `_shared` via
    codex+pinch bundle → runs the real `pinch-building-dashboards` benchmark → prints the `(harness × model)`
    leaderboard row. **Verified locally (exit 0)**: 4/4 bundle items apply `ok`; pinch runs to `succeeded`;
    leaderboard shows a ranked row. Runs on the builtin `scripted` harness by default (zero external deps); swap to
-   real codex via `ASSAY_HARNESS=codex ASSAY_RUNTIME=<codex-image runtime>` (+ LiteLLM for the judge). The
+   real codex via `EVERDICT_HARNESS=codex EVERDICT_RUNTIME=<codex-image runtime>` (+ LiteLLM for the judge). The
    only piece not runnable headlessly here is the real codex CLI itself (needs its image + provider keys).
 
 ## Decisions / non-goals

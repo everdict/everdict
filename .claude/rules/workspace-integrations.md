@@ -45,6 +45,6 @@ never compare registration/installation hosts with `===`. SSOT: `docs/architectu
   runner sits silently queued on GitHub — block before the PR, the earliest observable point). Never
   reintroduce `ubuntu-latest` as a default.
 - **Mattermost**: bot-token notifications (completion/regression) + inbound slash-commands/buttons; inbound is only
-  active when `commandTokenSecretName` is set (verify the command token before acting on `/assay`).
+  active when `commandTokenSecretName` is set (verify the command token before acting on `/everdict`).
 - Remap every GitHub/Mattermost API failure to an `AppError` (never leak a raw upstream error). One service core,
   two transports (HTTP route + MCP tool) — BFF↔MCP parity, see rule `mcp`.

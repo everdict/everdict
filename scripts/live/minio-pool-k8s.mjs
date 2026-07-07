@@ -2,14 +2,14 @@
 // access key + 버킷 + 버킷-한정 정책을 mc 로 mint(서버 이미지에 mc 내장 → exec). 핵심 증명(PG pool 과 동일):
 // 테넌트 A access key 로 테넌트 B 버킷 접근 → AccessDenied, 자기 버킷 → OK.
 //
-// 준비: kind 'assay' + quay.io/minio/minio 노드 로드 + mendhak/http-https-echo.
+// 준비: kind 'everdict' + quay.io/minio/minio 노드 로드 + mendhak/http-https-echo.
 // 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/minio-pool-k8s.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { K8sTopologyRuntime, planTenantStores } from "../../packages/topology/dist/index.js";
 
-const CTX = process.env.KIND_CONTEXT ?? "kind-assay";
-const POOL_NS = "assay-shared";
+const CTX = process.env.KIND_CONTEXT ?? "kind-everdict";
+const POOL_NS = "everdict-shared";
 const kc = (args, input) =>
   execFileSync("kubectl", ["--context", CTX, ...args], { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
 
@@ -26,7 +26,7 @@ const spec = {
 const zone = (id) => ({
   id,
   isolationRuntime: "runc",
-  namespace: `assay-minio-${id}`,
+  namespace: `everdict-minio-${id}`,
   network: "deny-cross-tenant",
   trusted: true,
   storeIsolation: "pool",
@@ -40,7 +40,16 @@ const rt = new K8sTopologyRuntime({
 });
 
 const minioPod = () =>
-  kc(["-n", POOL_NS, "get", "pod", "-l", "app=assay-shared-minio", "-o", "jsonpath={.items[0].metadata.name}"]).trim();
+  kc([
+    "-n",
+    POOL_NS,
+    "get",
+    "pod",
+    "-l",
+    "app=everdict-shared-minio",
+    "-o",
+    "jsonpath={.items[0].metadata.name}",
+  ]).trim();
 // 공유 minio 안에서 임의 access key 로 alias 설정 후 버킷 ls → OK / DENIED.
 const tryAccess = (accessKey, secret, bucket) => {
   try {
@@ -75,7 +84,7 @@ try {
     "--",
     "sh",
     "-c",
-    "mc alias set l http://localhost:9000 assay assaysecret >/dev/null 2>&1; mc ls l",
+    "mc alias set l http://localhost:9000 everdict everdictsecret >/dev/null 2>&1; mc ls l",
   ]);
   console.log(
     "shared minio buckets:",

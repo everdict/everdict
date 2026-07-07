@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { RESULT_SENTINEL } from "@assay/agent";
+import { RESULT_SENTINEL } from "@everdict/agent";
 import {
   type AgentJob,
   type CaseResult,
@@ -12,7 +12,7 @@ import {
   dockerAuthConfigJson,
   imageUsesRegistryHost,
   judgeEnv,
-} from "@assay/core";
+} from "@everdict/core";
 import type { Backend, BackendCapacity, ProbeResult } from "./backend.js";
 import type { SecretProvider } from "./secrets.js";
 import type { TrustZonePolicy } from "./trust-zone.js";
@@ -24,7 +24,7 @@ export interface K8sApi {
   jobStatus(name: string, ns: string): Promise<{ succeeded: number; failed: number }>;
   podLogs(name: string, ns: string): Promise<string>; // job/<name> 의 stdout
   deleteJob(name: string, ns: string): Promise<void>;
-  countActiveJobs(): Promise<number | undefined>; // 용량 프로브(전 네임스페이스의 app=assay 진행중 잡)
+  countActiveJobs(): Promise<number | undefined>; // 용량 프로브(전 네임스페이스의 app=everdict 진행중 잡)
   serverVersion(): Promise<string>; // 연결 테스트 — API 서버 /version(gitVersion). 도달/인증 실패 시 throw.
 }
 
@@ -123,7 +123,7 @@ export function kubectlApi(
       ]);
     },
     async countActiveJobs() {
-      const res = await run(bin, [...ctx, "get", "jobs", "-A", "-l", "app=assay", "-o", "json"]);
+      const res = await run(bin, [...ctx, "get", "jobs", "-A", "-l", "app=everdict", "-o", "json"]);
       if (res.code !== 0) return undefined;
       try {
         const items = (JSON.parse(res.stdout).items ?? []) as Array<{
@@ -152,7 +152,7 @@ export function kubectlApi(
 export interface K8sBackendOptions {
   image: string; // 러너 에이전트 이미지
   api?: K8sApi;
-  context?: string; // kubeconfig 컨텍스트(예: kind-assay)
+  context?: string; // kubeconfig 컨텍스트(예: kind-everdict)
   server?: string; // 외부 API 서버 URL(context 대신 bearer 인증할 때)
   apiToken?: string; // K8s API bearer 토큰(kubectl --token) — 컨트롤플레인↔K8s API 인증. alloc env 와 무관.
   // 전체 kubeconfig YAML(값). 설정되면 디스패치마다 임시파일(0600)에 써서 --kubeconfig 로 인증하고 끝나면 제거.
@@ -181,11 +181,11 @@ export function k8sJobName(job: AgentJob): string {
     .replace(/[^a-z0-9-]/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 50);
-  return `assay-${slug || "case"}`;
+  return `everdict-${slug || "case"}`;
 }
 
 // imagePullSecrets 가 참조하는 Secret 이름 — 네임스페이스당 하나, apply 가 멱등 upsert 한다(잡 삭제와 무관하게 유지).
-export const K8S_REGISTRY_AUTH_SECRET = "assay-registry-auth";
+export const K8S_REGISTRY_AUTH_SECRET = "everdict-registry-auth";
 
 // 워크스페이스 레지스트리 자격증명(job.registryAuth transient) → dockerconfigjson Secret. case.image 가
 // 그 레지스트리 호스트일 때 dispatch 가 Job 과 함께 List 로 apply 한다.
@@ -196,13 +196,13 @@ export function k8sRegistryAuthSecret(
   return {
     apiVersion: "v1",
     kind: "Secret",
-    metadata: { name: K8S_REGISTRY_AUTH_SECRET, namespace: ns, labels: { app: "assay" } },
+    metadata: { name: K8S_REGISTRY_AUTH_SECRET, namespace: ns, labels: { app: "everdict" } },
     type: "kubernetes.io/dockerconfigjson",
     data: { ".dockerconfigjson": Buffer.from(dockerAuthConfigJson(auth)).toString("base64") },
   };
 }
 
-// AgentJob → K8s batch Job. 페이로드는 ASSAY_AGENT_JOB(base64) env. 격리는 runtimeClassName.
+// AgentJob → K8s batch Job. 페이로드는 EVERDICT_AGENT_JOB(base64) env. 격리는 runtimeClassName.
 export function buildK8sJob(
   job: AgentJob,
   opts: K8sBackendOptions,
@@ -211,7 +211,7 @@ export function buildK8sJob(
   runtimeClassName?: string,
 ): Record<string, unknown> {
   const env: Record<string, string> = {
-    ASSAY_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
+    EVERDICT_AGENT_JOB: Buffer.from(JSON.stringify(job)).toString("base64"),
     ...judgeEnv(job.judge), // per-run judge 모델 설정(키는 secretEnv). inline judge grader 가 이 모델로 판정.
     ...opts.secretEnv,
   };
@@ -223,12 +223,12 @@ export function buildK8sJob(
   return {
     apiVersion: "batch/v1",
     kind: "Job",
-    metadata: { name, namespace: ns, labels: { app: "assay", "assay.dev/tenant": tenant } },
+    metadata: { name, namespace: ns, labels: { app: "everdict", "everdict.dev/tenant": tenant } },
     spec: {
       backoffLimit: 0,
       ttlSecondsAfterFinished: opts.ttlSecondsAfterFinished ?? 300,
       template: {
-        metadata: { labels: { app: "assay", "assay.dev/tenant": tenant } },
+        metadata: { labels: { app: "everdict", "everdict.dev/tenant": tenant } },
         spec: {
           restartPolicy: "Never",
           ...(runtimeClassName ? { runtimeClassName } : {}),
@@ -258,7 +258,7 @@ function parseResult(stdout: string): CaseResult {
 // kubeconfig(YAML 값)를 임시파일로 써서 kubectl --kubeconfig 로 쓸 경로를 돌려준다. 복호화된 클러스터 자격증명이므로
 // mode 0600 으로 쓰고, 디스패치가 끝나면 cleanup() 으로 파일+디렉터리를 제거한다(디스크에 오래 남기지 않는다).
 export async function materializeKubeconfig(yaml: string): Promise<{ path: string; cleanup: () => Promise<void> }> {
-  const dir = await mkdtemp(join(tmpdir(), "assay-kcfg-"));
+  const dir = await mkdtemp(join(tmpdir(), "everdict-kcfg-"));
   const path = join(dir, "kubeconfig");
   await writeFile(path, yaml, { mode: 0o600 });
   return { path, cleanup: () => rm(dir, { recursive: true, force: true }) };

@@ -1,6 +1,6 @@
-import type { Principal } from "@assay/auth";
-import type { Dispatcher } from "@assay/backends";
-import type { AgentJob, CaseResult, RuntimeSpec } from "@assay/core";
+import type { Principal } from "@everdict/auth";
+import type { Dispatcher } from "@everdict/backends";
+import type { AgentJob, CaseResult, RuntimeSpec } from "@everdict/core";
 import {
   InMemoryOAuthStateStore,
   InMemoryRunStore,
@@ -12,7 +12,7 @@ import {
   InMemoryWorkspaceInviteStore,
   InMemoryWorkspaceSettingsStore,
   InMemoryWorkspaceStore,
-} from "@assay/db";
+} from "@everdict/db";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
@@ -20,7 +20,7 @@ import {
   InMemoryJudgeRegistry,
   InMemoryModelRegistry,
   InMemoryRuntimeRegistry,
-} from "@assay/registry";
+} from "@everdict/registry";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it } from "vitest";
@@ -100,7 +100,7 @@ function harness() {
       config: {
         webBaseUrl: "http://web.test",
         apiPublicUrl: "http://api.test",
-        githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST-----", slug: "assay-eval" },
+        githubCom: { appId: "111", privateKeyPem: "-----BEGIN TEST-----", slug: "everdict-eval" },
       },
     }),
     mattermostService: new MattermostService(new InMemoryWorkspaceSettingsStore()),
@@ -337,12 +337,12 @@ describe("MCP tools", () => {
 
     // admin 설치 시작 → github.com App 설치 페이지 URL.
     const start = JSON.parse(text(await admin.callTool({ name: "start_workspace_github_app_install", arguments: {} })));
-    expect(start.installUrl).toContain("https://github.com/apps/assay-eval/installations/new");
+    expect(start.installUrl).toContain("https://github.com/apps/everdict-eval/installations/new");
 
     // admin GHE App 등록 → 목록에 1건 + App Setup URL 로 등록할 callbackUrl.
     await admin.callTool({
       name: "register_workspace_github_app",
-      arguments: { host: "https://ghe.acme.io", slug: "assay-ghe", appId: "222", privateKeySecretName: "ghe-key" },
+      arguments: { host: "https://ghe.acme.io", slug: "everdict-ghe", appId: "222", privateKeySecretName: "ghe-key" },
     });
     const view = JSON.parse(text(await admin.callTool({ name: "list_workspace_github_app", arguments: {} })));
     expect(view.registrations).toHaveLength(1);

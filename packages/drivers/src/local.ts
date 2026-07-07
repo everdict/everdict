@@ -10,7 +10,7 @@ import {
   type ExecOpts,
   type ExecResult,
   InternalError,
-} from "@assay/core";
+} from "@everdict/core";
 
 const pexec = promisify(exec);
 const MAX_BUFFER = 64 * 1024 * 1024;
@@ -62,7 +62,7 @@ export class LocalDriver implements Driver {
   readonly id = "local";
 
   async provision(_spec: ComputeSpec): Promise<ComputeHandle> {
-    const root = await mkdtemp(join(tmpdir(), "assay-"));
+    const root = await mkdtemp(join(tmpdir(), "everdict-"));
     return new LocalComputeHandle(root);
   }
 }

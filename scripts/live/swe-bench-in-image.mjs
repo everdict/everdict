@@ -14,7 +14,7 @@ import { SweBenchGrader } from "../../packages/graders/dist/index.js";
 import { ScriptedHarness } from "../../packages/harnesses/dist/index.js";
 import { runCase } from "../../packages/runner/dist/index.js";
 
-const IMAGE = "assay-testbed:demo";
+const IMAGE = "everdict-testbed:demo";
 const BUGGY = "def add(a, b):\n    return a - b  # BUG\n\ndef mul(a, b):\n    return a * b\n";
 const FIXED = "def add(a, b):\n    return a + b\n\ndef mul(a, b):\n    return a * b\n";
 const TEST_BASE = "from calc import mul\n\ndef test_mul():\n    assert mul(2, 3) == 6\n";
@@ -27,8 +27,8 @@ const wd = mkdtempSync(join(tmpdir(), "tb-"));
 const git = (a) => execFileSync("git", ["-C", wd, ...a], { encoding: "utf8" });
 writeFileSync(join(wd, "test_calc.py"), TEST_BASE);
 git(["init", "-q"]);
-git(["-c", "user.email=a@b.c", "-c", "user.name=assay", "add", "-A"]);
-git(["-c", "user.email=a@b.c", "-c", "user.name=assay", "commit", "-q", "-m", "base"]);
+git(["-c", "user.email=a@b.c", "-c", "user.name=everdict", "add", "-A"]);
+git(["-c", "user.email=a@b.c", "-c", "user.name=everdict", "commit", "-q", "-m", "base"]);
 writeFileSync(join(wd, "test_calc.py"), TEST_ADD);
 const TEST_PATCH = git(["diff", "--", "test_calc.py"]);
 rmSync(wd, { recursive: true, force: true });
@@ -40,7 +40,7 @@ RUN mkdir -p /testbed
 WORKDIR /testbed
 RUN python -c "import base64;open('calc.py','wb').write(base64.b64decode('${b64(BUGGY)}'))" \\
  && python -c "import base64;open('test_calc.py','wb').write(base64.b64decode('${b64(TEST_BASE)}'))" \\
- && git init -q && git -c user.email=a@b.c -c user.name=assay add -A && git -c user.email=a@b.c -c user.name=assay commit -q -m base
+ && git init -q && git -c user.email=a@b.c -c user.name=everdict add -A && git -c user.email=a@b.c -c user.name=everdict commit -q -m base
 `;
 console.log("=== prebuilt 대역 이미지 빌드(/testbed repo@baseline + deps, 에이전트 미포함) ===");
 execFileSync("docker", ["build", "-t", IMAGE, "-"], { input: dockerfile, stdio: ["pipe", "ignore", "inherit"] });
@@ -59,7 +59,7 @@ const grader = new SweBenchGrader({
   failToPass: ["test_calc.py::test_add"],
   passToPass: ["test_calc.py::test_mul"],
   testCmd: "python -m pytest -q --no-header",
-  // cwd 기본 "work" → 컨테이너에서 /assay/work → /testbed 심볼릭링크
+  // cwd 기본 "work" → 컨테이너에서 /everdict/work → /testbed 심볼릭링크
 });
 // "에이전트": work(=/testbed) 의 calc.py 를 고친다. (실 코딩 에이전트 자리 — 여기선 scripted.)
 const fixPlan = () => [{ tool: "bash", cmd: `echo ${b64(FIXED)} | base64 -d > calc.py` }];

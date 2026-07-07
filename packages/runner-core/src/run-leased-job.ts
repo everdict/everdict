@@ -1,18 +1,18 @@
-import { type DriverMount, pullWithRegistryAuth, runAgentJob } from "@assay/agent";
+import { type DriverMount, pullWithRegistryAuth, runAgentJob } from "@everdict/agent";
 import {
   type AgentJob,
   type CaseResult,
   type RegistryAuth,
   type ServiceHarnessSpec,
   imageUsesRegistryHost,
-} from "@assay/core";
+} from "@everdict/core";
 import {
   DockerTopologyRuntime,
   type DockerTopologyRuntimeOptions,
   ServiceTopologyBackend,
   type TopologyRuntime,
-} from "@assay/topology";
-import { buildTraceSource } from "@assay/trace";
+} from "@everdict/topology";
+import { buildTraceSource } from "@everdict/trace";
 
 // 러너 프로세스 내 단일 Docker 토폴로지 런타임(lazy 싱글톤). 케이스마다 새 런타임을 만들면 매번 warm-pool 이
 // 비어 같은 토폴로지를 재배포하고, 고정 이름 컨테이너가 docker run --name 충돌로 cascade 실패한다(docker-runtime

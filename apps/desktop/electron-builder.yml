@@ -1,8 +1,8 @@
 # 패키징 — 번들만 담는다(node_modules 미포함; esbuild.mjs 참고). 빌드/릴리즈는 CI 3-OS 매트릭스
 # (.github/workflows/desktop-release.yml, tag desktop-v* → GitHub Releases). 현재 unsigned —
 # 서명은 인증서 확보 후(mac: CSC_LINK/CSC_KEY_PASSWORD + notarize, win: sign 설정) 추가.
-appId: dev.assay.desktop
-productName: Assay
+appId: dev.everdict.desktop
+productName: Everdict
 # 다운로드 링크에서 안전한 결정적 파일명 — 공백 없음, os/arch 명시.
 artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 directories:
@@ -20,10 +20,10 @@ linux:
   target:
     - AppImage
     - deb
-  executableName: assay-desktop
+  executableName: everdict-desktop
   category: Development
   icon: build/icon.png
-  synopsis: Assay desktop — web parity shell + resident self-hosted runner
+  synopsis: Everdict desktop — web parity shell + resident self-hosted runner
 mac:
   category: public.app-category.developer-tools
   # macos-latest 러너는 arm64 — Intel 맥 배포를 위해 두 arch 모두 산출(크로스 arch 빌드 가능).

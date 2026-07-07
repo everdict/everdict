@@ -10,7 +10,7 @@
 
 ## Problem
 
-Today a harness is a single self-contained `HarnessSpec` keyed `(tenant, id, version)` in `@assay/registry`.
+Today a harness is a single self-contained `HarnessSpec` keyed `(tenant, id, version)` in `@everdict/registry`.
 There is **no concept of a family/template**: a browser-agent topology and "the same topology with one service
 bumped for PR #123 / sha abc" are two *unrelated, flat* harness entries. CI that registers a harness per PR/SHA
 produces an explosion of look-alike entries, and the web lists each as an independent harness — impossible to
@@ -40,7 +40,7 @@ Template (대분류)            "the shape"          versions unpinned, declares
   existing `process | service | command` spec the backends/runtime already consume. **Nothing downstream of
   resolution changes** — `AgentJob.harness:{id,version}` still names a concrete, runnable thing.
 
-## Schemas (`@assay/core`)
+## Schemas (`@everdict/core`)
 
 New authoring schemas. The existing `HarnessSpecSchema` (`process|service|command`) is **demoted to the resolved
 form only** — produced by `resolve()`, consumed by backends/runtime, and no longer accepted as a registration
@@ -79,7 +79,7 @@ input.
 For `command`/`process` templates the slots are the versionable params (image, `model`, a skills/workflow set);
 the same template+pins → resolved `CommandHarnessSpec`/`ProcessHarnessSpec`. Topology is the driving case.
 
-## Registry & resolution (`@assay/registry`)
+## Registry & resolution (`@everdict/registry`)
 
 - **Template registry**: `(tenant, templateId, templateVersion) → TemplateSpec`. Immutable versions (re-register
   different shape → `ConflictError`), tenant-owned + `_shared` fallback — identical discipline to harnesses today.
@@ -93,7 +93,7 @@ the same template+pins → resolved `CommandHarnessSpec`/`ProcessHarnessSpec`. T
   `resolveHarness`, `ServiceTopologyBackend.specFor`, and the In-memory/Pg registries are all converted to the
   template/instance shape in the same change set.
 
-## Permissions (`@assay/auth`) — "그 대신 대분류" governance
+## Permissions (`@everdict/auth`) — "그 대신 대분류" governance
 
 | Action | Role | What |
 |---|---|---|
@@ -163,8 +163,8 @@ All Track A phases land together as the clean break (no dual path is ever shippe
    instance table w/ pin diff) + the two forms.
 6. (later) **Track B**: image-source integrations feeding the per-slot pin picker.
 
-> Blast radius (single change set): `@assay/core` harness-spec, `@assay/registry` (in-memory + Pg + loaders +
-> migration), `@assay/auth` authz matrix, `apps/api` (server + mcp + run-service), `apps/web` register-harness +
+> Blast radius (single change set): `@everdict/core` harness-spec, `@everdict/registry` (in-memory + Pg + loaders +
+> migration), `@everdict/auth` authz matrix, `apps/api` (server + mcp + run-service), `apps/web` register-harness +
 > harnesses pages, `examples/harnesses/*`, and the tests across all of them.
 
 ## Cutover map (current state → target) — surveyed Phase 1/2 done
@@ -304,7 +304,7 @@ isolation.
 
 - **Phase 1 — runtime-agnostic, `resolve()`-time only (implemented now):** per-service `env` overlay (service) +
   front-door `request.bodyTemplate` value override (service) + command `env` overlay + command `params` (`{{var}}`).
-  Pure `@assay/core` schema + `resolveHarnessInstance` merge + `CommandHarness` `{{var}}` substitution. Flows
+  Pure `@everdict/core` schema + `resolveHarnessInstance` merge + `CommandHarness` `{{var}}` substitution. Flows
   end-to-end through API/MCP immediately (they validate `HarnessInstanceSpecSchema`, which now accepts `overrides`).
 - **Phase 2 — orchestrator knobs (implemented):** `resources { cpu, memoryMb }` added to `TopologyService` and
   honored by all three runtimes — nomad `Resources.CPU/MemoryMB` (replacing the hardcoded `1000/1024`), k8s
@@ -326,7 +326,7 @@ isolation.
   assembles the spec, `instanceStateFromSpec` round-trips existing overrides back into the fields for
   edit→new-version; the 구성 panel renders the resolved overrides. MCP/HTTP parity is automatic (schema-driven JSON).
 
-> Blast radius: `@assay/core` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
-> `harness-template` `overrides` + resolve), `@assay/harnesses` (`CommandHarness` `{{var}}`), `@assay/topology`
+> Blast radius: `@everdict/core` (`harness-spec` `params`/`ServiceResources`/`TopologyService.resources`,
+> `harness-template` `overrides` + resolve), `@everdict/harnesses` (`CommandHarness` `{{var}}`), `@everdict/topology`
 > (nomad/k8s/docker resources + volumes + readiness honoring), `apps/web` (structured override editor), + tests.
 > No registry, auth, or API route changes (the instance JSON round-trips through the validated schema).

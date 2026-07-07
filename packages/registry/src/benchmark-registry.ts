@@ -1,5 +1,5 @@
-import { ConflictError, NotFoundError } from "@assay/core";
-import type { BenchmarkAdapterSpec } from "@assay/datasets";
+import { ConflictError, NotFoundError } from "@everdict/core";
+import type { BenchmarkAdapterSpec } from "@everdict/datasets";
 import { SHARED_TENANT, compareVersions, resolveRef, specsEqual } from "./registry.js";
 
 // 벤치마크 정의(레시피) SSOT — (tenant, id, version) → BenchmarkAdapterSpec(데이터). 버전 불변.

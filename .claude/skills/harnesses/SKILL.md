@@ -26,7 +26,7 @@ never scores itself — `graders` read the trace and the env snapshot (see skill
 `run` is an `AsyncIterable<TraceEvent>`; `RunContext = { apiKeyEnv, timeoutSec, runId? }` (`runId` = the trace
 correlation key `runCase` mints and later collects by). `apiKeyEnv` is usually
 **empty** — `LocalDriver` uses the machine's own `claude` login (own-pays); keys are injected only in a
-keyless sandbox. The interface lives in `core` (a deliberate inversion of the single-impl "no interfaces" rule — Assay is a
+keyless sandbox. The interface lives in `core` (a deliberate inversion of the single-impl "no interfaces" rule — Everdict is a
 plugin runtime); impls live in `packages/harnesses`. The dispatch factory `makeHarness(id, version, spec?)`
 (`packages/agent/src/registry.ts`) picks the impl: `spec.kind==="command"` → `CommandHarness`, else id-branch.
 
@@ -42,7 +42,7 @@ plugin runtime); impls live in `packages/harnesses`. The dispatch factory `makeH
 **data, not code**: `{ setup[], command, model?, env, params, trace }`. `install()` runs each `setup` line;
 `run()` templates `command` — `{{task}}` (auto shell-quoted via `shq`, don't wrap it), `{{model}}`, `{{run_id}}`,
 plus any `{{key}}` from `params` (reserved tokens substituted first so params can't clobber them) — then
-`compute.exec`s it (cwd `spec.workDir ?? "work"`, with `ASSAY_RUN_ID` + resolved `spec.env`). The control plane
+`compute.exec`s it (cwd `spec.workDir ?? "work"`, with `EVERDICT_RUN_ID` + resolved `spec.env`). The control plane
 resolves the spec from the registry and embeds it in the `AgentJob`; `makeHarness` builds the generic
 `CommandHarness`. Full spec + tokens: `docs/command-harness.md`.
 

@@ -1,5 +1,5 @@
 {
-  "name": "@assay/backends",
+  "name": "@everdict/backends",
   "version": "0.0.0",
   "license": "Apache-2.0",
   "private": true,
@@ -13,9 +13,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@assay/agent": "workspace:*",
-    "@assay/core": "workspace:*",
-    "@assay/drivers": "workspace:*",
+    "@everdict/agent": "workspace:*",
+    "@everdict/core": "workspace:*",
+    "@everdict/drivers": "workspace:*",
     "zod": "^3.24.1"
   }
 }

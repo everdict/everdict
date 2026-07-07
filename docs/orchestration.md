@@ -3,15 +3,15 @@
 Above routing, the control plane can run each case as a **durable Temporal workflow** so runs
 survive control-plane restarts and retry transient backend failures.
 
-## Two orchestrators (`@assay/orchestrator`)
+## Two orchestrators (`@everdict/orchestrator`)
 - `DirectOrchestrator(dispatcher)` — runs in-process via a `Dispatcher` (Router or Scheduler). Simple; dies with the process.
 - `TemporalOrchestrator({address, taskQueue})` — client: starts a workflow and awaits its result.
 
 ## Topology (model B + Temporal)
 ```
-assay run --orchestrator temporal  (client)  ── start workflow ──▶ Temporal Server
+everdict run --orchestrator temporal  (client)  ── start workflow ──▶ Temporal Server
                                                                         │  task queue
-assay worker  (long-running)  ◀── poll ─────────────────────────────────┘
+everdict worker  (long-running)  ◀── poll ─────────────────────────────────┘
    holds Scheduler(registry) → activity dispatchCase(job) = Scheduler.dispatch → Backend → agent → CaseResult
 ```
 - **Workflow** (`evalCaseWorkflow` / `suiteWorkflow`) is deterministic — it only calls the
@@ -28,11 +28,11 @@ assay worker  (long-running)  ◀── poll ───────────�
 docker compose -f deploy/temporal/docker-compose.yaml up -d
 
 # 2) worker — holds the backends (here: default single local backend)
-pnpm assay worker --temporal-address localhost:7233
-#   multi-cluster: pnpm assay worker --backends-config backends.config.json
+pnpm everdict worker --temporal-address localhost:7233
+#   multi-cluster: pnpm everdict worker --backends-config backends.config.json
 
 # 3) client — durable run (blocks until the workflow completes)
-pnpm assay run --orchestrator temporal --task "..." --test "..."
+pnpm everdict run --orchestrator temporal --task "..." --test "..."
 ```
 Jobs route by `placement.target` (set via `--target`); suites fan out via `suiteWorkflow`.
 

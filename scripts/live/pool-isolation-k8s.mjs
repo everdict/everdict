@@ -1,17 +1,17 @@
 // 라이브: pool 스토어 격리(멀티테넌트 SaaS). K8sTopologyRuntime 이 **공유 PG 1대**에 테넌트별 전용
 // DB+role 을 mint 하고, 서비스에 scoped creds 를 주입한다. 핵심 증명: **테넌트 A 자격증명으로 테넌트 B
 // DB 접속 → 거부(DENIED)**, 자기 DB → 허용. (isolateBy 가 아니라 DB/role/creds 가 테넌트 경계임을 라이브로.)
-//   ensureTopology(zone, storeIsolation:pool) → assay-shared-postgres 1회 배포 → CREATE DATABASE tenant_x +
+//   ensureTopology(zone, storeIsolation:pool) → everdict-shared-postgres 1회 배포 → CREATE DATABASE tenant_x +
 //   CREATE ROLE r_x + REVOKE CONNECT FROM PUBLIC → 서비스 env=DATABASE_URL(tenant_x/r_x) → 교차접속 거부 검증.
 //
-// 준비: kind 'assay' + postgres:16-alpine/mendhak/http-https-echo 노드 로드.
+// 준비: kind 'everdict' + postgres:16-alpine/mendhak/http-https-echo 노드 로드.
 // 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/pool-isolation-k8s.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { K8sTopologyRuntime, planTenantStores } from "../../packages/topology/dist/index.js";
 
-const CTX = process.env.KIND_CONTEXT ?? "kind-assay";
-const POOL_NS = "assay-shared";
+const CTX = process.env.KIND_CONTEXT ?? "kind-everdict";
+const POOL_NS = "everdict-shared";
 const kc = (args, input) =>
   execFileSync("kubectl", ["--context", CTX, ...args], { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
 
@@ -30,7 +30,7 @@ const spec = {
 const zone = (id) => ({
   id,
   isolationRuntime: "runc",
-  namespace: `assay-pool-${id}`,
+  namespace: `everdict-pool-${id}`,
   network: "deny-cross-tenant",
   trusted: true,
   storeIsolation: "pool",
@@ -51,7 +51,7 @@ const pgPod = () =>
     "get",
     "pod",
     "-l",
-    "app=assay-shared-postgres",
+    "app=everdict-shared-postgres",
     "-o",
     "jsonpath={.items[0].metadata.name}",
   ]).trim();
@@ -83,7 +83,7 @@ try {
     "--",
     "psql",
     "-U",
-    "assay",
+    "everdict",
     "-tAc",
     "SELECT datname FROM pg_database",
   ]);
@@ -102,7 +102,7 @@ try {
   const acme = planTenantStores(spec, zone("acme"), { poolNamespace: POOL_NS }).serviceEnv.DATABASE_URL;
   const globex = planTenantStores(spec, zone("globex"), { poolNamespace: POOL_NS }).serviceEnv.DATABASE_URL;
   // pg pod 안에서 접속하므로 호스트는 localhost 로(같은 컨테이너). DB/role/비번만 검증 대상.
-  const local = (u) => u.replace("assay-shared-postgres.assay-shared.svc.cluster.local", "127.0.0.1");
+  const local = (u) => u.replace("everdict-shared-postgres.everdict-shared.svc.cluster.local", "127.0.0.1");
   const acmeToGlobex = local(acme).replace("/tenant_acme", "/tenant_globex"); // acme creds → globex DB
 
   const ownAcme = tryConnect(local(acme));

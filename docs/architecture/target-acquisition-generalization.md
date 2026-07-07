@@ -13,14 +13,14 @@
 ## Problem
 
 A `kind:"service"` topology harness is meant to be harness-agnostic. Round 1 generalized *how the agent is driven*.
-But the **target environment** the agent acts on is still hardcoded to one shape: **"a CDP browser that Assay
+But the **target environment** the agent acts on is still hardcoded to one shape: **"a CDP browser that Everdict
 provisions per case."** A real harness often gets its browser elsewhere — a **session API** (Browserbase / Steel /
 a `playwright-server` the topology itself runs) that returns a *bundle* of connection coordinates over HTTP. That
 does not fit today, in three coupled places:
 
 ### The three target hardcodes (current code)
 
-1. **The target is always *provisioned* by Assay.** `dispatch` calls `runtime.provisionBrowserEnv`
+1. **The target is always *provisioned* by Everdict.** `dispatch` calls `runtime.provisionBrowserEnv`
    (`service-backend.ts:77`) whenever `spec.target` is set; each `TopologyRuntime` unconditionally runs a per-case
    headless-Chromium container and discovers its CDP (`docker-runtime.ts:89`, `nomad-runtime.ts:274`,
    `k8s-runtime.ts:202`). There is **no way to say "the browser is provided by service X via an API"** — i.e. open a
@@ -36,7 +36,7 @@ does not fit today, in three coupled places:
    `{{task}}/{{run_id}}/{{thread_id}}…/{{target_cdp_url}}`. **There is no standard path to inject
    `{{playwright_server_url}}` / `{{session_id}}`** that a specific service requires.
 
-These are one problem wearing three hats: the target is modeled as *a CDP browser Assay owns*, not as *an acquired
+These are one problem wearing three hats: the target is modeled as *a CDP browser Everdict owns*, not as *an acquired
 environment that contributes named coordinates + an observation surface*.
 
 ## Root cause — the target axis was never abstracted
@@ -61,7 +61,7 @@ Two changes, mirroring the round-1 pattern (each hardcode → an optional knob d
 1. **Generalize the handle** from one coordinate to a **named bag** that flows into the wiring vocabulary:
 
 ```ts
-// @assay/topology — topology-runtime.ts (replaces BrowserEnvHandle)
+// @everdict/topology — topology-runtime.ts (replaces BrowserEnvHandle)
 interface TargetEnvHandle {
   wiring: Record<string, string>;   // named coordinates → merged into per-run wiring (was: cdpUrl: string)
   snapshot(): Promise<EnvSnapshot>; // observation surface (unchanged; reference-mode pull)
@@ -78,7 +78,7 @@ any coordinate name the target declares.
    `FrontDoorDriver`/`ObservationSource`), selected by a new optional `target.acquire`:
 
 ```ts
-// @assay/topology — target-acquirer.ts (new)
+// @everdict/topology — target-acquirer.ts (new)
 interface TargetAcquirer {
   acquire(req: AcquireRequest): Promise<TargetEnvHandle>;
 }
@@ -87,7 +87,7 @@ function targetAcquirerFor(target: TopologyTarget, runtime: TopologyRuntime, io)
 
 - `acquire: { mode: "provision" }` (**default** — absent `acquire` = this) → delegates to
   `runtime.provisionBrowserEnv` and maps `cdpUrl → wiring.target_cdp_url`. **Bit-for-bit today.**
-- `acquire: { mode: "service", … }` → opens a session on a **declared topology service** over HTTP (no Assay
+- `acquire: { mode: "service", … }` → opens a session on a **declared topology service** over HTTP (no Everdict
   container), maps the response fields into named wiring coordinates, and closes the session on `dispose()`.
   Infra-agnostic (just HTTP to a `topo.endpoints[service]`), so it lives next to `FrontDoorDriver`, **not** in the
   runtime — the runtime only knows how to *provision*, not how to *call a session API*.
@@ -97,14 +97,14 @@ function targetAcquirerFor(target: TopologyTarget, runtime: TopologyRuntime, io)
 
 ### Observation composes with the existing delivery seam — no new path
 
-A `service`-acquired target has no Assay-owned browser to CDP-snapshot. We do **not** invent a new observation
+A `service`-acquired target has no Everdict-owned browser to CDP-snapshot. We do **not** invent a new observation
 method (round 1's `TopologyRuntime.observe` guess). Instead it reuses the **already-landed** `delivery` axis
 (`harness-spec.ts:33-40`, `observation-source.ts`):
 
 - `delivery: sentinel` — the service/agent returns the observation inline on the result channel.
 - `delivery: egress` — the service/agent pushes the observation to a sink; the grader pulls it.
 - default `reference` — the acquirer's own `snapshot()` returns a `{kind:"prompt"}` (trace-only), since there is
-  no Assay-managed store to pull from.
+  no Everdict-managed store to pull from.
 
 So **acquisition (wiring + lifecycle) and observation (delivery) stay orthogonal**, exactly as they already are for
 the provisioned browser.
@@ -122,7 +122,7 @@ Every knob is optional; its default reproduces today's behavior.
 ## Proposed contract (sketch)
 
 ```ts
-// @assay/core — harness-spec.ts: TopologyTargetSchema gains `acquire` (optional; absence = provision = today)
+// @everdict/core — harness-spec.ts: TopologyTargetSchema gains `acquire` (optional; absence = provision = today)
 target?: {
   kind: "browser"; engine: "chromium";
   extension?: { ref: string };
@@ -143,12 +143,12 @@ target?: {
 ```
 
 ```ts
-// @assay/topology — topology-runtime.ts: handle generalized (cdpUrl → wiring)
+// @everdict/topology — topology-runtime.ts: handle generalized (cdpUrl → wiring)
 interface TargetEnvHandle { wiring: Record<string,string>; snapshot(): Promise<EnvSnapshot>; dispose(): Promise<void>; }
 // provisionBrowserEnv keeps its signature but returns wiring:{ target_cdp_url } (all 3 runtimes; internal CDP usage
 // for snapshot() is unaffected — cdpUrl was only ever a wiring coordinate for the agent).
 
-// @assay/topology — target-acquirer.ts (new): the WHAT-target seam
+// @everdict/topology — target-acquirer.ts (new): the WHAT-target seam
 interface TargetAcquirer { acquire(req: AcquireRequest): Promise<TargetEnvHandle>; }
 type AcquireRequest = { spec: ServiceHarnessSpec; runId: string; endpoints: Record<string,string>; zone?: TrustZone };
 // targetAcquirerFor(target, runtime, io):
@@ -165,8 +165,8 @@ It deliberately reuses `methodPath`/`joinUrl`/`interpolatePath`/`getField` from 
 ## "Absorbing the control-plane" — concretely (continued from round 1)
 
 Round 1 absorbed (a) request, (b) hold-until-done, (c) correlate, (e) image. The target was the one piece still
-assumed to be *Assay's own browser*. B1+B2 absorb (d): a harness that brings its own session browser declares
-`acquire: service` + `coordinates`, and Assay opens/maps/closes it as spec data. That completes the absorption.
+assumed to be *Everdict's own browser*. B1+B2 absorb (d): a harness that brings its own session browser declares
+`acquire: service` + `coordinates`, and Everdict opens/maps/closes it as spec data. That completes the absorption.
 
 ## Sequencing (keep the live e2e green)
 

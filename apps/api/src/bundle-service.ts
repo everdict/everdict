@@ -1,4 +1,4 @@
-import type { Action } from "@assay/auth";
+import type { Action } from "@everdict/auth";
 import {
   ConflictError,
   DatasetSchema,
@@ -7,8 +7,8 @@ import {
   JudgeSpecSchema,
   ModelSpecSchema,
   RuntimeSpecSchema,
-} from "@assay/core";
-import { BenchmarkAdapterSpecSchema } from "@assay/datasets";
+} from "@everdict/core";
+import { BenchmarkAdapterSpecSchema } from "@everdict/datasets";
 import type {
   DatasetRegistry,
   HarnessInstanceRegistry,
@@ -16,7 +16,7 @@ import type {
   JudgeRegistry,
   ModelRegistry,
   RuntimeRegistry,
-} from "@assay/registry";
+} from "@everdict/registry";
 import { z } from "zod";
 import type { BenchmarkService } from "./benchmark-service.js";
 

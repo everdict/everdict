@@ -5,15 +5,15 @@ A **Suite** = a set of `EvalCase`s for one harness id. Run it against a harness 
 
 ## Run
 ```bash
-assay suite --suite suite.json --harness-version 1.0.0
+everdict suite --suite suite.json --harness-version 1.0.0
 # regression vs a saved baseline scorecard:
-assay suite --suite suite.json --harness-version 1.1.0 --baseline v1.0.0-scorecard.json
+everdict suite --suite suite.json --harness-version 1.1.0 --baseline v1.0.0-scorecard.json
 ```
-`assay suite` works over any backend/orchestrator (same flags as `assay run` — `--backend`,
+`everdict suite` works over any backend/orchestrator (same flags as `everdict run` — `--backend`,
 `--orchestrator`, `--backends-config`, …): it dispatches each case via the chosen orchestrator and
 aggregates into a Scorecard + a per-metric summary.
 
-## API (`@assay/suite`)
+## API (`@everdict/suite`)
 - `runSuite(suite, version, dispatch, {concurrency})` → `Scorecard`. `dispatch` is any
   `(job) → CaseResult` (a `Backend` / `Router` / `Orchestrator`).
 - `summarizeScorecard(sc)` → per-metric `{count, mean, passRate}`.

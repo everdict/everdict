@@ -1,4 +1,4 @@
-import type { TraceEvent } from "@assay/core";
+import type { TraceEvent } from "@everdict/core";
 
 // 하니스가 OTel/MLflow 로 내보낸 한 run 의 트레이스를 끌어와 정규화 TraceEvent[] 로 돌려준다.
 export interface TraceSource {

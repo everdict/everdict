@@ -24,7 +24,7 @@ export default async function OnboardingPage() {
         <span className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground shadow-[0_0_0_1px_rgba(255,255,255,0.12)_inset,0_6px_18px_-6px_var(--primary)]">
           <FlaskConical className="size-[18px]" />
         </span>
-        <span className="font-display text-[16px] font-[560] tracking-tight">Assay</span>
+        <span className="font-display text-[16px] font-[560] tracking-tight">Everdict</span>
       </div>
       <div className="space-y-2">
         <h1 className="font-display text-[22px] font-[560] tracking-[-0.02em]">{t('title')}</h1>

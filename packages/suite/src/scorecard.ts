@@ -1,4 +1,4 @@
-import type { CaseResult, Score, Scorecard } from "@assay/core";
+import type { CaseResult, Score, Scorecard } from "@everdict/core";
 
 // 케이스 합격 판정 — 권위 기준 우선. ground-truth(실제 상태 검증) > 객관 대조 > 모델 의견 순으로 결정한다.
 // VLM/LLM judge 는 *보조* 다: 객관/ground-truth 그레이더가 있으면 judge 가 그것을 뒤집지 못한다(예: OSWorld 파일저장 —

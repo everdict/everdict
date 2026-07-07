@@ -1,7 +1,7 @@
 // 레퍼런스 데스크탑 에이전트(컴퓨터-유즈 baseline) — hermes SSH 연결 태스크용.
-// assay 의 command 하니스가 os-use env-container 안에서 `node /agent.cjs {{task}}` 로 실행한다(workDir=/tmp, DISPLAY=:99).
+// everdict 의 command 하니스가 os-use env-container 안에서 `node /agent.cjs {{task}}` 로 실행한다(workDir=/tmp, DISPLAY=:99).
 // 역할 = "행동"만: CDP(좌표 파악) + xdotool(실 OS 마우스/키보드)로 SSH 폼을 채우고 연결한다.
-// 관측/채점은 에이전트가 아니라 assay 가 한다(OsUseEnvironment.snapshot 스크린샷 → VLM JudgeGrader). 관심사 분리.
+// 관측/채점은 에이전트가 아니라 everdict 가 한다(OsUseEnvironment.snapshot 스크린샷 → VLM JudgeGrader). 관심사 분리.
 // 실 BYO 에이전트(VLM 루프 등)는 같은 자리에 자기 프로그램을 둔다 — 이건 스크립트형 기준 에이전트.
 const { chromium } = require("/app/node_modules/playwright");
 const { execFileSync } = require("node:child_process");
@@ -78,7 +78,7 @@ const DISPLAY = process.env.DISPLAY || ":99";
   await click(page.getByRole("button", { name: /Connect via SSH/i }));
 
   // 연결 성공 = 메인 UI 진입까지 대기(폼 이탈 → splash "Starting SSH tunnel…" → main). 메인 마커 'Ask anything'
-  // 컴포저가 뜨면 끝. (실패 시 sshError 가 뜨면 중단 — 최종 화면을 assay 가 스냅샷+VLM 으로 채점한다.)
+  // 컴포저가 뜨면 끝. (실패 시 sshError 가 뜨면 중단 — 최종 화면을 everdict 가 스냅샷+VLM 으로 채점한다.)
   const composer = page.getByPlaceholder("Ask anything");
   for (let i = 0; i < 50; i++) {
     await sleep(1000);

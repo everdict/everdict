@@ -1,4 +1,4 @@
-import { ScorecardSchema } from "@assay/core";
+import { ScorecardSchema } from "@everdict/core";
 import { z } from "zod";
 
 // 스코어카드 run 의 수명: 데이터셋×하니스 배치 평가 접수 → 실행 → 성공/실패.
@@ -14,7 +14,7 @@ export const ScorecardRunErrorSchema = z.object({
   phase: z.string().optional(),
 });
 
-// 메트릭별 집계(@assay/suite summarizeScorecard 결과와 동형). db 는 core 만 의존 → 여기서 형태만 미러.
+// 메트릭별 집계(@everdict/suite summarizeScorecard 결과와 동형). db 는 core 만 의존 → 여기서 형태만 미러.
 export const MetricSummarySchema = z.object({
   metric: z.string(),
   count: z.number(),
@@ -23,7 +23,7 @@ export const MetricSummarySchema = z.object({
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
-// 이 run 이 실제로 쓴 모델(리더보드 model 축, @assay/suite scorecardModels 결과와 동형 — 형태만 미러).
+// 이 run 이 실제로 쓴 모델(리더보드 model 축, @everdict/suite scorecardModels 결과와 동형 — 형태만 미러).
 // observed = 트레이스 관측 · declared = spec 선언 · primary = 그룹 키(관측 우선, 없으면 선언). 경량이라 list 에도 포함.
 export const ScorecardModelsSchema = z.object({
   observed: z.array(z.string()).default([]),

@@ -27,7 +27,7 @@ export interface SidebarProps {
 
 // Cmd+K 팔레트 열기 — 모듈 레벨 커스텀 이벤트(컨텍스트 배선 없이 검색 버튼 ↔ 팔레트 연결).
 function openCommandPalette() {
-  window.dispatchEvent(new CustomEvent('assay:command'))
+  window.dispatchEvent(new CustomEvent('everdict:command'))
 }
 
 function isMac() {

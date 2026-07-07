@@ -1,6 +1,6 @@
-import { BadRequestError, type CaseResult } from "@assay/core";
-import type { ScorecardExport, WorkspaceSettings, WorkspaceSettingsStore } from "@assay/db";
-import type { TraceSink, TraceSinkCase, TraceSinkConfig } from "@assay/trace";
+import { BadRequestError, type CaseResult } from "@everdict/core";
+import type { ScorecardExport, WorkspaceSettings, WorkspaceSettingsStore } from "@everdict/db";
+import type { TraceSink, TraceSinkCase, TraceSinkConfig } from "@everdict/trace";
 import { createLimiter } from "./concurrency.js";
 
 // 워크스페이스 트레이스 싱크 통합 — judge 된 스코어카드 상세 결과를 팀 관측 플랫폼(MLflow/Langfuse/LangSmith/Phoenix)에
@@ -23,7 +23,7 @@ type TraceSinkEntry = NonNullable<WorkspaceSettings["traceSinks"]>[number];
 
 export interface TraceSinkServiceDeps {
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // authSecretName → 값 resolve(워크스페이스 SecretStore)
-  buildSink?: (cfg: TraceSinkConfig) => TraceSink; // 설정 → 어댑터(@assay/trace buildTraceSink). 미주입이면 적재 비활성
+  buildSink?: (cfg: TraceSinkConfig) => TraceSink; // 설정 → 어댑터(@everdict/trace buildTraceSink). 미주입이면 적재 비활성
   exportConcurrency?: number; // 케이스 축 export 동시 실행 상한(기본 2) — 싱크 rate-limit 보호
   now?: () => string;
 }

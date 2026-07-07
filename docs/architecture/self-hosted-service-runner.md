@@ -51,7 +51,7 @@ orchestrator-agnostic machinery.
 
 | # | Decision | Shape |
 | --- | --- | --- |
-| D1 | **Local topology** | `DockerTopologyRuntime` (`@assay/topology`) — deploy on the user's Docker daemon; sibling of Nomad/K8s |
+| D1 | **Local topology** | `DockerTopologyRuntime` (`@everdict/topology`) — deploy on the user's Docker daemon; sibling of Nomad/K8s |
 | D2 | **Runner branch** | CLI: `harnessSpec.kind === "service"` → `ServiceTopologyBackend(DockerTopologyRuntime)`; else `runAgentJob` |
 | D3 | **Trace** | degrade-to-snapshot (no local OTel/MLflow needed); the topology's existing trace-fetch guard handles it |
 
@@ -70,12 +70,12 @@ default `execFile("docker", …)`, faked in unit tests like `Kubectl`):
 - **`teardown()`** — remove the topology's containers + network.
 
 ### Runner kind-branch (D2)
-Extract a single `runLeasedJob(job)` (shared by `assay runner`) that branches once:
+Extract a single `runLeasedJob(job)` (shared by `everdict runner`) that branches once:
 ```ts
 if (job.harnessSpec?.kind === "service") {
   const backend = new ServiceTopologyBackend({
     runtime: new DockerTopologyRuntime(),
-    traceSource: buildTraceSource(job.harnessSpec.traceSource),  // @assay/trace
+    traceSource: buildTraceSource(job.harnessSpec.traceSource),  // @everdict/trace
     specFor: () => job.harnessSpec,                              // the leased resolved spec
     // no trustZones (personal host); submit/getJson default to fetch
   });
@@ -83,7 +83,7 @@ if (job.harnessSpec?.kind === "service") {
 }
 return runAgentJob(job);                                          // process/command (today)
 ```
-`apps/cli` gains `@assay/topology` + `@assay/trace` deps (it already has `@assay/agent`/`@assay/backends`).
+`apps/cli` gains `@everdict/topology` + `@everdict/trace` deps (it already has `@everdict/agent`/`@everdict/backends`).
 
 ### Capabilities + routing (D2 cont.)
 The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `repo`/`browser`/`os-use`/`docker`).
@@ -95,7 +95,7 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
 
 ## Slices (sequencing — each merges independently)
 
-1. ✅ **`DockerTopologyRuntime`** (`@assay/topology`) — DONE. `docker.ts` (injectable `Docker` adapter +
+1. ✅ **`DockerTopologyRuntime`** (`@everdict/topology`) — DONE. `docker.ts` (injectable `Docker` adapter +
    `dockerCli()` default + pure `dockerRunArgs`/`parseHostPort`) + `docker-runtime.ts` (`DockerTopologyRuntime`):
    `ensureTopology` (network → dependency stores [`--network-alias <id>-<store>` matching `dependencyConnEnv`, store
    readiness via `docker exec` pg_isready/redis-ping] → services [`--network-alias <name>`, publish port, discover
@@ -108,7 +108,7 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
    "service"` → `ServiceTopologyBackend({ runtime: new DockerTopologyRuntime(), traceSource:
    buildTraceSource(spec.traceSource), specFor: () => spec })` (no trustZones; submit/getJson default fetch); else
    `runAgentJob` (absent `harnessSpec` ⇒ process path = today). The runner loop (`main.ts:273`) calls it instead of
-   `runAgentJob`. `apps/cli` gains `@assay/topology` + `@assay/trace` deps. Injectable `runService`/`runProcess` →
+   `runAgentJob`. `apps/cli` gains `@everdict/topology` + `@everdict/trace` deps. Injectable `runService`/`runProcess` →
    daemon-free unit test of the branch (3 cases). cli build + 3/3 test + full turbo build 20/20 green.
 3. ✅ **Capabilities + routing — DONE (code; live e2e is manual).** Auto-advertise: the CLI runner probes
    `docker version` on start → `capabilities = ["repo", ...(docker ? ["docker","browser"] : [])]`, reported on every
@@ -118,7 +118,7 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
    `self:` branch rejects a `harnessSpec.kind === "service"` job on a runner lacking `docker` with an explicit
    `BadRequest` (blocked before it would fail at `docker run`). Tests: runtime-dispatcher +2 (no-docker → 400 /
    docker → routed), runner-store `setCapabilities`, api 239 / db / cli build green. **Remaining (manual, needs a
-   Docker daemon + a real service-harness image): the live round-trip** — pair a runner, `assay runner`, submit a
+   Docker daemon + a real service-harness image): the live round-trip** — pair a runner, `everdict runner`, submit a
    scorecard with a service harness pinned to `self:<runner>`, assert snapshot-graded result back (trace degraded).
    Tracked like the repo's other live-infra-blocked validations.
 
@@ -138,8 +138,8 @@ The runner already declares `capabilities[]` (`self-hosted-runner.md` D-model: `
   (slice 1); barrel export in `index.ts`.
 - `packages/topology/src/docker-topology.ts` — **new (if needed)**: pure docker-arg builders (deterministic-tested),
   mirroring `nomad-topology.ts`/`k8s-topology.ts`.
-- `apps/cli/src/main.ts` — `runLeasedJob` kind-branch (slice 2); `apps/cli/package.json` deps (`@assay/topology`,
-  `@assay/trace`).
+- `apps/cli/src/main.ts` — `runLeasedJob` kind-branch (slice 2); `apps/cli/package.json` deps (`@everdict/topology`,
+  `@everdict/trace`).
 - `apps/api/src/runner-hub.ts` / `mcp.ts` — `lease_job` capability gating for service jobs (slice 3).
 - Docs/skill: `docs/architecture/self-hosted-runner.md` (link this extension) + the `topology` skill reference
   (the third `TopologyRuntime`) travel with the change.

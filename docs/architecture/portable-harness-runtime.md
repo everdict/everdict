@@ -23,7 +23,7 @@
 
 ## Problem
 
-Assay is a multi-tenant SaaS where a benchmark/harness is **registered as data** (a bundle: harness + recipe +
+Everdict is a multi-tenant SaaS where a benchmark/harness is **registered as data** (a bundle: harness + recipe +
 dataset + runtime), never code. A user must be able to run that definition:
 
 - on a **managed runtime** (control-plane nomad / k8s — both honor `case.image`; the old `kind:"docker"` runtime was

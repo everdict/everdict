@@ -1,6 +1,6 @@
 // 라이브 검증: PgRunStore 가 실제 Postgres 에 run 을 영속한다 (마이그레이션 + 재기동 후에도 조회).
 //
-//  1) preflight → migrate (assay_runs 생성, 멱등)
+//  1) preflight → migrate (everdict_runs 생성, 멱등)
 //  2) PgRunStore: create(queued) → get → update(succeeded,result) → get → list(tenant)
 //  3) 새 풀(= 프로세스 재기동 모사)로 같은 id 조회 → 영속 증명
 //
@@ -70,7 +70,7 @@ async function main() {
   console.log(ok ? "✅ persisted in Postgres across reconnect (real durability)" : "❌ not persisted");
 
   // 정리: 이 데모 row 만 삭제(테이블/마이그레이션은 유지).
-  await sqlClient(pool2).query("DELETE FROM assay_runs WHERE id = $1", [ID]);
+  await sqlClient(pool2).query("DELETE FROM everdict_runs WHERE id = $1", [ID]);
   await pool2.end();
 }
 

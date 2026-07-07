@@ -1,14 +1,14 @@
 import { z } from "zod";
 
-// window.assayDesktop 브리지의 메인 프로세스 쪽 절반 — 채널 상수·페이로드 검증·origin 가드·핸들러 등록.
+// window.everdictDesktop 브리지의 메인 프로세스 쪽 절반 — 채널 상수·페이로드 검증·origin 가드·핸들러 등록.
 // 채널 문자열은 preload.cts 와 수동 동기화(preload 는 CJS 라 이 모듈을 import 하지 못한다).
 // 스킬 desktop 불변식 3(메서드 4개가 전부)·4(권한 경계는 IPC origin 검사).
 export const BRIDGE_CHANNELS = {
-  appInfo: "assay:app-info",
-  pair: "assay:pair-runner",
-  unpair: "assay:unpair-runner",
-  status: "assay:runner-status",
-  statusEvent: "assay:runner-status-event",
+  appInfo: "everdict:app-info",
+  pair: "everdict:pair-runner",
+  unpair: "everdict:unpair-runner",
+  status: "everdict:runner-status",
+  statusEvent: "everdict:runner-status-event",
 } as const;
 
 // 웹(브리지 호출자)이 넘기는 페어링 페이로드 — 경계 Zod 검증. 토큰은 이 경로로 내려와 keychain 에만 저장된다.
@@ -19,7 +19,7 @@ export const PairPayloadSchema = z.object({
 });
 export type PairPayload = z.infer<typeof PairPayloadSchema>;
 
-// 웹에 보여주는 러너 상태 — apps/web `shared/lib/desktop-bridge.ts` 미러와 수동 동기화(웹은 @assay/* 미의존).
+// 웹에 보여주는 러너 상태 — apps/web `shared/lib/desktop-bridge.ts` 미러와 수동 동기화(웹은 @everdict/* 미의존).
 export interface DesktopRunnerStatus {
   paired: boolean;
   runnerId?: string;

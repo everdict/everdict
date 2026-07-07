@@ -13,12 +13,12 @@ into that workspace's runs.
   - **workspace** (`owner=''`) — shared, **admin-managed** (`secrets:write`). Provider keys the whole team uses.
   - **user** (`owner=subject`) — personal, **self-managed** by any member (no admin gate; owner = `principal.subject`).
     Other members never see or use them. A harness that references a user secret is **private to that user** (below).
-- **Encrypted at rest** (`@assay/db` `SecretStore`): AES-256-GCM, KEK from **`ASSAY_SECRETS_KEY`** (base64 32B;
+- **Encrypted at rest** (`@everdict/db` `SecretStore`): AES-256-GCM, KEK from **`EVERDICT_SECRETS_KEY`** (base64 32B;
   `openssl rand -base64 32`). DB holds only ciphertext/iv/tag. Prod should use Vault/KMS for the KEK.
 - **Write-only**: `list` returns `name` + `updatedAt` + `scope` only — values are **never** returned by the API;
   they're decrypted server-side solely to inject into a run (`entries` = workspace-only for legacy consumers;
   `scopedEntries(ws, subject)` = `{workspace, user}` for run/scorecard harness resolution).
-- **Fail-closed**: no `ASSAY_SECRETS_KEY` → no secret store → the routes/tools 404 (feature off).
+- **Fail-closed**: no `EVERDICT_SECRETS_KEY` → no secret store → the routes/tools 404 (feature off).
 
 ## Manage (API + MCP, same core) — scope-aware authz
 `GET /secrets` is open to any authenticated member and returns **your own user secrets always** + **workspace
@@ -37,7 +37,7 @@ the existing per-tenant `SecretProvider` path (now async).
 
 ## Referencing a secret from harness `env` (`{secretRef}`)
 A harness's `env` values are **`string | { secretRef: "NAME", scope?: "user"|"workspace" }`** (`EnvValueSchema`,
-`@assay/core`) — a literal, or a **reference** to a secret by name in a tier (`scope`, default `workspace`). The
+`@everdict/core`) — a literal, or a **reference** to a secret by name in a tier (`scope`, default `workspace`). The
 reference is **content** (part of the immutable spec), so the registry stores **only the name+scope, never the
 plaintext value** — the actual value is injected only at run time. This covers `command` `env`, `service`
 `services[].env`, and instance `overrides.env` (all widened to the union; the resolved `HarnessSpec` env is likewise
@@ -45,7 +45,7 @@ a union until resolution).
 
 ### Private harnesses (referencing a `user` secret)
 A harness whose resolved env references a **`user`-scoped** secret is **private to its creator** — only they can see
-or run it. Two layers enforce it, both **derived** (no extra column): `referencesUserSecret(spec)` (`@assay/core`)
+or run it. Two layers enforce it, both **derived** (no extra column): `referencesUserSecret(spec)` (`@everdict/core`)
 + the instance's `createdBy`.
 - **Can't see** — `GET /harnesses` (+ `list_harnesses`) drops entries where `private && createdBy !== subject`
   (`enrichHarnessList` stamps `private` from the latest resolved instance); `GET /harnesses/:id[/:version]` 404s a
@@ -53,7 +53,7 @@ or run it. Two layers enforce it, both **derived** (no extra column): `reference
 - **Can't run** — even if guessed, `resolveHarnessSecrets` for a non-owner fails: a `user` ref resolves against
   **that submitter's** `user` tier only, which lacks the creator's personal secret → `BadRequestError` (the case
   fails with a clear reason). So privacy is enforced by the secret resolution itself, not just the read filter.
-- **Resolution — `resolveHarnessSecrets(spec, {workspace, user})`** (`@assay/core`, pure): just before dispatch,
+- **Resolution — `resolveHarnessSecrets(spec, {workspace, user})`** (`@everdict/core`, pure): just before dispatch,
   both `RunService.track` (single runs) and `ScorecardService.track` (batches, resolved once per batch) swap every
   `{secretRef, scope}` for its value from the matching tier of `scopedSecretsFor(tenant, submitter)`
   (= `secretStore.scopedEntries` = `{workspace: entries(''), user: entries(submitter)}`), for **all** backends

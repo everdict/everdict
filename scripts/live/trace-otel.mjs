@@ -1,4 +1,4 @@
-// 라이브 e2e (SLICE 90): OtelTraceSource 를 *실제 Jaeger*(assay-jaeger, OTLP in :4318 / query :16686)에 대고 검증.
+// 라이브 e2e (SLICE 90): OtelTraceSource 를 *실제 Jaeger*(everdict-jaeger, OTLP in :4318 / query :16686)에 대고 검증.
 // 지금까지 trace 매퍼는 mock fetch 로만 단위테스트됐다. 여기선 실 OTLP 스팬을 Jaeger 로 보내고, OtelTraceSource 가
 // Jaeger query API(/api/traces/{id})에서 끌어와 정규화 TraceEvent[](llm_call 토큰/모델)로 매핑하는지 라이브로 확인한다.
 // = scorecard pull-ingest(POST /scorecards/ingest/pull) + command 하니스 trace 추출 경로의 실 backend 검증.
@@ -30,8 +30,8 @@ const span = {
 const otlp = {
   resourceSpans: [
     {
-      resource: { attributes: [{ key: "service.name", value: { stringValue: "assay-trace-live" } }] },
-      scopeSpans: [{ scope: { name: "assay-live" }, spans: [span] }],
+      resource: { attributes: [{ key: "service.name", value: { stringValue: "everdict-trace-live" } }] },
+      scopeSpans: [{ scope: { name: "everdict-live" }, spans: [span] }],
     },
   ],
 };

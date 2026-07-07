@@ -14,8 +14,8 @@
 > bundle harness that runs PinchBench). Two live scripts:
 > `scripts/live/scheduled-pinch-temporal.mjs` (in-memory / no-auth) and `scripts/live/scheduled-pinch-acme-temporal.mjs`
 > (**multi-tenant**: real Postgres + Keycloak OIDC, schedule created *as user `alice`* in workspace `acme`).
-> Observed: `POST /schedules` → `TemporalScheduleDriver.ensure` created `assay-sched-<id>`
-> (`temporal schedule describe`: workflow=`scheduledScorecardWorkflow`, tq=`assay-eval`, cron `* * * * *`,
+> Observed: `POST /schedules` → `TemporalScheduleDriver.ensure` created `everdict-sched-<id>`
+> (`temporal schedule describe`: workflow=`scheduledScorecardWorkflow`, tq=`everdict-eval`, cron `* * * * *`,
 > overlap=Skip, args carry `{scheduleId, tenant}`); Temporal fired **exactly at the top-of-minute**
 > (`lastFiredAt=…:00Z`) → workflow → internal `fire` → `ScorecardService.submit` → self-hosted runner ran
 > `codex exec` → `tests_pass` PASS → leaderboard row; schedule record stamped `lastFiredAt`/`lastScorecardId`, and
@@ -23,11 +23,11 @@
 > auto-disable (indirect: schedule→dataset→case.connectionId).**
 >
 > **Driver location (deviation from the table below):** `TemporalScheduleDriver` lives in **`apps/api`**
-> (`temporal-schedule-driver.ts`), not `@assay/orchestrator` — it needs only `@temporalio/client`, and importing
+> (`temporal-schedule-driver.ts`), not `@everdict/orchestrator` — it needs only `@temporalio/client`, and importing
 > the orchestrator index into the API would pull in `@temporalio/worker`'s native bindings. The
-> **workflow + activities** stay in `@assay/orchestrator` (they run in the worker). Driver is **env-gated**:
-> `ASSAY_TEMPORAL_ADDRESS` set on the API ⇒ schedules sync to Temporal and fire; unset ⇒ CRUD-only (dev). The
-> worker bridges back to the API via `ASSAY_API_URL` + `ASSAY_INTERNAL_TOKEN`.
+> **workflow + activities** stay in `@everdict/orchestrator` (they run in the worker). Driver is **env-gated**:
+> `EVERDICT_TEMPORAL_ADDRESS` set on the API ⇒ schedules sync to Temporal and fire; unset ⇒ CRUD-only (dev). The
+> worker bridges back to the API via `EVERDICT_API_URL` + `EVERDICT_INTERNAL_TOKEN`.
 >
 > Like [self-hosted-runner](./self-hosted-runner.md) and [judge-placement-locality](./judge-placement-locality.md):
 > **strict generalization, additive.** The unit of work — `ScorecardService.submit(RunScorecardInput)` — is
@@ -51,10 +51,10 @@ automated regression monitoring with near-zero new analytics code.
 - **Scorecards do NOT go through Temporal today.** `scorecardService` holds a `Dispatcher` and never touches the
   `Orchestrator`. (Single runs via `RunService` *can* use the Orchestrator; scorecards don't.)
 - **Orchestration is optional** — `DirectOrchestrator` (in-process, the `--orchestrator direct` default) vs
-  `TemporalOrchestrator` (durable). The worker (`assay worker` → `runWorker`) holds a `Scheduler` + activities
+  `TemporalOrchestrator` (durable). The worker (`everdict worker` → `runWorker`) holds a `Scheduler` + activities
   (`dispatchCase`); it does **not** hold a `ScorecardService`.
 - **Regression analytics already shipped** — `summarizeScorecard` / `diffScorecards` / `trendSeries`
-  (`@assay/suite`); `onComplete` notifies (Mattermost). Records are workspace-scoped in `ScorecardStore`.
+  (`@everdict/suite`); `onComplete` notifies (Mattermost). Records are workspace-scoped in `ScorecardStore`.
 - **Auth** — `Principal.via ∈ {oidc, api-key, runner}`; `/internal/**` routes are guarded by `x-internal-token`
   (constant-time, fail-closed) — e.g. `POST /internal/tenant-keys`.
 - **`concurrency` (just shipped)** — `RunScorecardInput.concurrency` flows to `runSuite`; a scheduled run carries
@@ -65,7 +65,7 @@ automated regression monitoring with near-zero new analytics code.
 ### The schedule is data; the trigger is reuse
 
 A **`Schedule`** = a stored `RunScorecardInput` + `{ cron, timezone, overlapPolicy, enabled }` + provenance
-(`createdBy`, `lastFiredAt`, `lastStatus`). SSOT = a new **mutable** `ScheduleStore` (`@assay/db`; `InMemory` +
+(`createdBy`, `lastFiredAt`, `lastStatus`). SSOT = a new **mutable** `ScheduleStore` (`@everdict/db`; `InMemory` +
 `Pg` + numbered migration), workspace-scoped. It is mutable (pause/resume/edit) → a **Store**, not the immutable
 versioned registry. **No new execution engine** — firing = calling the existing `submit`.
 
@@ -106,7 +106,7 @@ new **internal route** `POST /internal/schedules/:id/fire` (`x-internal-token` g
 single owner in the API — **no fork, no stores duplicated into the worker**. (Alternative — co-host a
 `ScorecardService` in the worker — rejected: it would need every store/registry the API wires.)
 
-### The Assay-specific decisions
+### The Everdict-specific decisions
 
 - **Identity** — a fire has no live user token. The schedule stores `createdBy` (subject); the run executes as
   that subject: budget → `tenant` (workspace), private-repo case tokens resolve against the **workspace GitHub
@@ -157,9 +157,9 @@ single owner in the API — **no fork, no stores duplicated into the worker**. (
 |---|---|
 | `ScorecardService.submit` / `RunScorecardInput` / `trendSeries` / `diffScorecards` / `onComplete` | **reused verbatim** |
 | Temporal client/worker, `/internal` token guard, `ScorecardStore`, registries | **reused** |
-| `ScheduleStore` (`@assay/db`) + migration | **new** |
+| `ScheduleStore` (`@everdict/db`) + migration | **new** |
 | `ScheduleService` + `ScheduleDriver` (`TemporalScheduleDriver`) | **new** |
-| `scheduledScorecardWorkflow` + activities (submit / status / notify) | **new** (`@assay/orchestrator`) |
+| `scheduledScorecardWorkflow` + activities (submit / status / notify) | **new** (`@everdict/orchestrator`) |
 | `/schedules` routes + MCP tools + `schedules:*` authz | **new** (`apps/api`) |
 | Schedules web page + "예약" button | **new** (`apps/web`) |
 

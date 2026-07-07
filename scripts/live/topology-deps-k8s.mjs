@@ -3,15 +3,15 @@
 //   ensureTopology(provisionDependencies) → PG+Redis Deployment Ready → front-door Ready + endpoint(HTTP 200)
 //   → front-door 파드 env 에 DATABASE_URL/REDIS_URL(스토어 DNS) 확인 → PG 를 그 DNS 로 접속(pg_isready) 확인.
 //
-// 준비: kind 클러스터 'assay' + postgres:16-alpine/redis:7-alpine/mendhak/http-https-echo 가 노드에 로드돼 있어야 함.
-//   kind load docker-image postgres:16-alpine redis:7-alpine mendhak/http-https-echo:latest --name assay
+// 준비: kind 클러스터 'everdict' + postgres:16-alpine/redis:7-alpine/mendhak/http-https-echo 가 노드에 로드돼 있어야 함.
+//   kind load docker-image postgres:16-alpine redis:7-alpine mendhak/http-https-echo:latest --name everdict
 // 사용: PATH=$HOME/.local/bin:$PATH node scripts/live/topology-deps-k8s.mjs
 import { execFileSync } from "node:child_process";
 import process from "node:process";
 import { K8sTopologyRuntime } from "../../packages/topology/dist/index.js";
 
-const CTX = process.env.KIND_CONTEXT ?? "kind-assay";
-const NS = "assay-deps-demo";
+const CTX = process.env.KIND_CONTEXT ?? "kind-everdict";
+const NS = "everdict-deps-demo";
 const kc = (args, input) =>
   execFileSync("kubectl", ["--context", CTX, ...args], { input, encoding: "utf8", stdio: ["pipe", "pipe", "pipe"] });
 
@@ -87,7 +87,7 @@ try {
     console.log("pg-probe  : FAILED", (e.stdout ?? e.message ?? "").toString().slice(0, 200));
   }
 
-  const dbOk = dbUrl === "postgresql://assay:assay@deps-demo-postgres:5432/assay";
+  const dbOk = dbUrl === "postgresql://everdict:everdict@deps-demo-postgres:5432/everdict";
   const redisOk = redisUrl === "redis://deps-demo-redis:6379";
   ok = hasPg && hasRedis && dbOk && redisOk && pgReachable && Object.keys(topo.endpoints).length === 1;
   console.log(

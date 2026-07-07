@@ -1,4 +1,4 @@
-import { UpstreamError } from "@assay/core";
+import { UpstreamError } from "@everdict/core";
 import type {
   TraceSink,
   TraceSinkCase,
@@ -50,8 +50,8 @@ export function phoenixSpans(
       status_message: "",
       attributes: {
         "openinference.span.kind": "CHAIN",
-        "assay.scorecard_id": ctx.scorecardId,
-        "assay.harness": ctx.harness,
+        "everdict.scorecard_id": ctx.scorecardId,
+        "everdict.harness": ctx.harness,
       },
       events: [],
     },

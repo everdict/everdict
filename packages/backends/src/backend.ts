@@ -1,4 +1,4 @@
-import type { AgentJob, CaseResult } from "@assay/core";
+import type { AgentJob, CaseResult } from "@everdict/core";
 
 // 백엔드의 동시 수용 능력. 스케줄러가 자기 in-flight 와 합산해 free 를 계산한다.
 export interface BackendCapacity {

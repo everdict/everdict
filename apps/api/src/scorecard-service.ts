@@ -1,4 +1,4 @@
-import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@assay/backends";
+import { type BudgetTracker, type Dispatcher, billingTenant, costOf } from "@everdict/backends";
 import {
   type AgentJob,
   AppError,
@@ -17,7 +17,7 @@ import {
   type Suite,
   TraceEventSchema,
   resolveHarnessSecrets,
-} from "@assay/core";
+} from "@everdict/core";
 import type {
   RunStore,
   ScorecardExport,
@@ -26,10 +26,10 @@ import type {
   ScorecardStep,
   ScorecardStore,
   ScorecardSubset,
-} from "@assay/db";
-import { costGrader, latencyGrader, stepsGrader } from "@assay/graders";
-import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry } from "@assay/registry";
-import { type ArtifactStore, offloadSnapshot } from "@assay/storage";
+} from "@everdict/db";
+import { costGrader, latencyGrader, stepsGrader } from "@everdict/graders";
+import type { DatasetRegistry, HarnessInstanceRegistry, JudgeRegistry } from "@everdict/registry";
+import { type ArtifactStore, offloadSnapshot } from "@everdict/storage";
 import {
   type Dispatch,
   type Leaderboard,
@@ -42,8 +42,8 @@ import {
   scorecardModels,
   summarizeScorecard,
   trendSeries,
-} from "@assay/suite";
-import type { TraceSource, TraceSourceConfig } from "@assay/trace";
+} from "@everdict/suite";
+import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { z } from "zod";
 import { executeCase } from "./execute-case.js";
 import type { JudgeRunner } from "./judge-runner.js";
@@ -198,7 +198,7 @@ export interface ScorecardServiceDeps {
   // 워크스페이스 기본 judge 모델(inline judge grader 채점용). 요청별 override(RunScorecardInput.judge)가 우선.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
   budget?: BudgetTracker; // 케이스마다 admission/settle
-  buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@assay/trace)
+  buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // pull 인제스트용 trace source 팩토리(@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // 테넌트 SecretStore 값(judge 모델 키 주입)
   // harness env 의 {secretRef} 해석용 — 공유 + 제출자(owner) 개인 시크릿 두 티어. scope 로 골라 주입.
   scopedSecretsFor?: (tenant: string, subject?: string) => Promise<HarnessSecretMaps>;

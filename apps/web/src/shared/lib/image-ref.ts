@@ -1,4 +1,4 @@
-// @assay/core classifyImageRef 의 느슨한 클라이언트 미러(web 은 @assay/* 무의존 — harnessInstanceSpecSchema 미러와 동일 관례).
+// @everdict/core classifyImageRef 의 느슨한 클라이언트 미러(web 은 @everdict/* 무의존 — harnessInstanceSpecSchema 미러와 동일 관례).
 // 워크스페이스 레지스트리 관점의 이미지 참조 4분류. 판정 규칙은 컨트롤플레인이 SSOT
 // (docs/architecture/workspace-image-registry.md) — 여기 미러는 배지 표시용.
 export type ImageRefClass = 'workspace' | 'external' | 'local' | 'unqualified'

@@ -1,6 +1,6 @@
 ---
 name: core-contracts
-description: The @assay/core dependency root — interfaces, Zod schemas, and the AppError model that every other package builds on. No I/O, no SDKs. Use when editing packages/core (contracts/schemas/errors).
+description: The @everdict/core dependency root — interfaces, Zod schemas, and the AppError model that every other package builds on. No I/O, no SDKs. Use when editing packages/core (contracts/schemas/errors).
 allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 # Core contracts (the dependency root)
@@ -18,13 +18,13 @@ Re-exported flat from `packages/core/src/index.ts`.
 6. Verify no forbidden import crept in: `core` may not touch drivers/harnesses/graders/runner/apps/SDKs.
 
 ## Interfaces ARE used here (deliberate inversion)
-Single-impl codebases ban interfaces (one impl per concept); Assay's whole product is pluggable adapters, so the
+Single-impl codebases ban interfaces (one impl per concept); Everdict's whole product is pluggable adapters, so the
 spine contracts MUST be interfaces — many impls live in adapter packages, the interface lives in `core`.
 - `EvaluableHarness` — the agent under test (`harness.ts`); `install`+`run`→`AsyncIterable<TraceEvent>`.
 - `Environment<S>` — the world it acts on (`environment.ts`); `seed(spec)` → `snapshot()` → `EnvSnapshot`.
 - `Driver` + `ComputeHandle` — in-sandbox compute (`compute.ts`); `provision(ComputeSpec)`→handle.
 - `Grader` — scoring, fully separate from the harness (`grader.ts`); `grade(GradeContext)`→`Score`.
-- (`Backend`, the placement analog, is one more — but it lives in `@assay/backends`, not `core`.)
+- (`Backend`, the placement analog, is one more — but it lives in `@everdict/backends`, not `core`.)
 `ComputeHandle` holds a real sandbox: callers always `dispose()` in a `finally` (contract, not impl).
 
 ## The spine, file by file

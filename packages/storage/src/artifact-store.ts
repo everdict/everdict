@@ -1,4 +1,4 @@
-import type { EnvSnapshot } from "@assay/core";
+import type { EnvSnapshot } from "@everdict/core";
 
 // 아티팩트(스크린샷 등 바이너리) 저장 추상화. put 은 가져올 수 있는 ref(URL)를 돌려준다 — presigned GET URL 또는 영구 URL.
 // 구현: S3ArtifactStore(MinIO/S3, presigned), InMemoryArtifactStore(dev/테스트). 컨트롤플레인이 결과 영속화 전에 오프로드.

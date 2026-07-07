@@ -1,4 +1,4 @@
-import type { RunContext } from "@assay/core";
+import type { RunContext } from "@everdict/core";
 
 // claude 인증 env 변수 (claude 바이너리에서 확인). 우선순위: 구독 토큰 → auth 토큰 → API 키.
 const AUTH_VARS = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_API_KEY"] as const;
@@ -18,7 +18,7 @@ export function collectAuthEnv(): Record<string, string> {
 export function runContextFromEnv(): RunContext {
   return {
     apiKeyEnv: collectAuthEnv(),
-    timeoutSec: Number(process.env.ASSAY_TIMEOUT_SEC ?? "300"),
+    timeoutSec: Number(process.env.EVERDICT_TIMEOUT_SEC ?? "300"),
   };
 }
 

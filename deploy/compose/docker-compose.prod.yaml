@@ -1,33 +1,33 @@
-# Assay 풀스택 프로덕션 compose — 웹 + API + Postgres (Keycloak 없음).
+# Everdict 풀스택 프로덕션 compose — 웹 + API + Postgres (Keycloak 없음).
 #
 #   cp deploy/compose/.env.example deploy/compose/.env   # 값 채우기(최소 POSTGRES_PASSWORD)
 #   docker compose -f deploy/compose/docker-compose.prod.yaml --env-file deploy/compose/.env up -d --build
 #
 # dev 와의 차이(하드닝):
 #  - 저장소 Postgres(영속 볼륨, 기동 시 마이그레이션 자동 적용).
-#  - 시크릿 at-rest 암호화(ASSAY_SECRETS_KEY) + 내부 토큰(ASSAY_INTERNAL_TOKEN) + 테넌트 run 예산(선택).
+#  - 시크릿 at-rest 암호화(EVERDICT_SECRETS_KEY) + 내부 토큰(EVERDICT_INTERNAL_TOKEN) + 테넌트 run 예산(선택).
 #  - restart: unless-stopped + 헬스체크 + depends_on(healthy).
 #  - 소스 바인드마운트 없음 — runtime 이미지의 빌드 산출물로만 구동.
 #
-# ⚠️ 인증: Keycloak(OIDC 사람 로그인)을 뺐다. 웹은 정적 API 키 경로가 없어 x-assay-tenant=default 로 동작하므로
-#    API 도 dev-fallback 을 받아야 한다 → ASSAY_REQUIRE_AUTH 를 설정하지 않는다(미강제, 단일 테넌트 default).
+# ⚠️ 인증: Keycloak(OIDC 사람 로그인)을 뺐다. 웹은 정적 API 키 경로가 없어 x-everdict-tenant=default 로 동작하므로
+#    API 도 dev-fallback 을 받아야 한다 → EVERDICT_REQUIRE_AUTH 를 설정하지 않는다(미강제, 단일 테넌트 default).
 #    즉 이 스택은 신뢰된 네트워크/리버스 프록시 뒤를 전제로 한다(공개 노출 금지).
 #    실제 인증이 필요하면:
-#      · 프로그램/MCP 접근  → ASSAY_REQUIRE_AUTH=1 + /internal/tenant-keys 로 API 키 발급(웹 UI 는 그땐 못 씀)
+#      · 프로그램/MCP 접근  → EVERDICT_REQUIRE_AUTH=1 + /internal/tenant-keys 로 API 키 발급(웹 UI 는 그땐 못 씀)
 #      · 사람 SSO          → 앞단에 oauth2-proxy 등 리버스 프록시, 또는 Keycloak 을 다시 추가
-name: assay-prod
+name: everdict-prod
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-assay}
+      POSTGRES_USER: ${POSTGRES_USER:-everdict}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB:-assay}
+      POSTGRES_DB: ${POSTGRES_DB:-everdict}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-assay} -d ${POSTGRES_DB:-assay}"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-everdict} -d ${POSTGRES_DB:-everdict}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -40,13 +40,13 @@ services:
       target: runtime
     environment:
       PORT: "8787"
-      DATABASE_URL: postgresql://${POSTGRES_USER:-assay}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-assay}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-everdict}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-everdict}
       # 시크릿 at-rest 암호화 KEK(base64 32B). 비우면 시크릿 저장소 비활성(fail-closed).
-      ASSAY_SECRETS_KEY: ${ASSAY_SECRETS_KEY:-}
+      EVERDICT_SECRETS_KEY: ${EVERDICT_SECRETS_KEY:-}
       # /internal/**(API 키 발급) 가드 토큰. 비우면 해당 라우트 비활성(fail-closed).
-      ASSAY_INTERNAL_TOKEN: ${ASSAY_INTERNAL_TOKEN:-}
+      EVERDICT_INTERNAL_TOKEN: ${EVERDICT_INTERNAL_TOKEN:-}
       # 테넌트별 동시 run 상한(선택). 비우면 무제한.
-      ASSAY_TENANT_RUNS: ${ASSAY_TENANT_RUNS:-}
+      EVERDICT_TENANT_RUNS: ${EVERDICT_TENANT_RUNS:-}
       # 로컬 백엔드가 claude-code 하니스를 in-process 로 돌릴 때만 필요(테넌트 시크릿으로 대체 가능).
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}

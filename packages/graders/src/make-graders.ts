@@ -1,4 +1,4 @@
-import { BadRequestError, type Grader, type GraderSpec } from "@assay/core";
+import { BadRequestError, type Grader, type GraderSpec } from "@everdict/core";
 import { AnswerMatchGrader, DomContainsGrader, UrlMatchesGrader } from "./browser-graders.js";
 import { CommandGrader } from "./command.js";
 import { type Judge, JudgeGrader } from "./judge.js";

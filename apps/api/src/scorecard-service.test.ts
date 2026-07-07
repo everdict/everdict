@@ -1,4 +1,4 @@
-import type { Dispatcher } from "@assay/backends";
+import type { Dispatcher } from "@everdict/backends";
 import {
   type AgentJob,
   BadRequestError,
@@ -8,15 +8,15 @@ import {
   NotFoundError,
   type Scorecard,
   type TraceEvent,
-} from "@assay/core";
-import { InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@assay/db";
+} from "@everdict/core";
+import { InMemoryRunStore, InMemoryScorecardStore, type ScorecardRecord } from "@everdict/db";
 import {
   InMemoryDatasetRegistry,
   InMemoryHarnessInstanceRegistry,
   InMemoryHarnessTemplateRegistry,
   InMemoryJudgeRegistry,
-} from "@assay/registry";
-import type { TraceSource, TraceSourceConfig } from "@assay/trace";
+} from "@everdict/registry";
+import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 import { describe, expect, it } from "vitest";
 import { ScorecardService } from "./scorecard-service.js";
 import type { CaseExportStream } from "./trace-sink-service.js";

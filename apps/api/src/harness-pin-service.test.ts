@@ -1,5 +1,5 @@
-import { BadRequestError, type HarnessTemplateSpec } from "@assay/core";
-import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@assay/registry";
+import { BadRequestError, type HarnessTemplateSpec } from "@everdict/core";
+import { InMemoryHarnessInstanceRegistry, InMemoryHarnessTemplateRegistry } from "@everdict/registry";
 import { beforeEach, describe, expect, it } from "vitest";
 import { repinHarnessImages } from "./harness-pin-service.js";
 

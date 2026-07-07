@@ -6,7 +6,7 @@ import {
   type ServiceHarnessSpec,
   referencesUserSecret,
   resolveHarnessInstance,
-} from "@assay/core";
+} from "@everdict/core";
 import type { HarnessTemplateRegistry } from "./harness-template-registry.js";
 import { asService } from "./registry.js";
 import { type VersionMeta, VersionedStore } from "./versioned-store.js";

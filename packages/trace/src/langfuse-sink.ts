@@ -1,4 +1,4 @@
-import { UpstreamError } from "@assay/core";
+import { UpstreamError } from "@everdict/core";
 import type { TraceSink, TraceSinkCase, TraceSinkCaseResult, TraceSinkContext, TraceSinkResult } from "./trace-sink.js";
 
 // Langfuse 싱크 — 전 케이스를 배치 ingestion 으로(POST /api/public/ingestion), 점수는 score-create 이벤트.

@@ -5,7 +5,7 @@
 //     402(BUDGET_EXCEEDED)로 즉시 거절된다(버스트여도 admit 가 즉시 예약하므로 상한 보호).
 //     (scripted 하니스는 cost=0 이라 usd/토큰 예산은 트리거 안 됨 → runs 예산으로 시연; usd/토큰은 단위테스트로 검증)
 //
-// 사용: NOMAD_ADDR=http://127.0.0.1:4646 ASSAY_AGENT_IMAGE=assay-agent:local node scripts/live/budget-nomad.mjs
+// 사용: NOMAD_ADDR=http://127.0.0.1:4646 EVERDICT_AGENT_IMAGE=everdict-agent:local node scripts/live/budget-nomad.mjs
 
 import {
   BackendRegistry,
@@ -17,7 +17,7 @@ import {
 } from "../../packages/backends/dist/index.js";
 
 const NOMAD_ADDR = process.env.NOMAD_ADDR ?? "http://127.0.0.1:4646";
-const IMAGE = process.env.ASSAY_AGENT_IMAGE ?? "assay-agent:local";
+const IMAGE = process.env.EVERDICT_AGENT_IMAGE ?? "everdict-agent:local";
 const STAMP = Date.now().toString(36);
 const RUNS_LIMIT = 3;
 const N = 5;

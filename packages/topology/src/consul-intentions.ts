@@ -1,4 +1,4 @@
-import type { ServiceHarnessSpec, TrustZone } from "@assay/core";
+import type { ServiceHarnessSpec, TrustZone } from "@everdict/core";
 import { sanitizeIdent } from "./store-binding.js";
 
 // Nomad 의 네트워크 격리 = Consul Connect intentions(서비스 아이덴티티 기반). K8s NetworkPolicy 의 Nomad 대응.
@@ -35,7 +35,7 @@ export function buildTenantIntentions(spec: ServiceHarnessSpec, zone: TrustZone)
 export function buildSharedStoreIntention(store: string): ServiceIntention {
   return {
     Kind: "service-intentions",
-    Name: `assay-shared-${store}`,
+    Name: `everdict-shared-${store}`,
     Sources: [{ Name: "*", Action: "allow" }],
   };
 }

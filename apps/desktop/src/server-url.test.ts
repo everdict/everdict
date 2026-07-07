@@ -3,7 +3,7 @@ import { normalizeWebUrl, resolveWebUrl } from "./server-url.js";
 
 describe("normalizeWebUrl", () => {
   it("http/https URL 만 허용하고 끝 슬래시를 정리한다", () => {
-    expect(normalizeWebUrl("https://assay.example.com/")).toBe("https://assay.example.com");
+    expect(normalizeWebUrl("https://everdict.example.com/")).toBe("https://everdict.example.com");
     expect(normalizeWebUrl("  http://localhost:3001  ")).toBe("http://localhost:3001");
   });
 

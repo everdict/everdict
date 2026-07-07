@@ -2,7 +2,7 @@
 // 흐름(멀티테넌트 SaaS, HTTP API 만):
 //   ① dev 컨트롤플레인 기동(in-memory, auth 미요구).
 //   ② POST /runners : 이 머신을 러너로 페어링 → rnr_ 토큰.
-//   ③ assay runner --pair : 러너 프로세스 기동(codex 가 PATH 에 있어야 함 — LocalDriver 인프로세스 실행).
+//   ③ everdict runner --pair : 러너 프로세스 기동(codex 가 PATH 에 있어야 함 — LocalDriver 인프로세스 실행).
 //   ④ POST /bundles/apply : codex 하니스 + pinch 벤치마크 번들 원샷 적용.
 //   ⑤ POST /scorecards {dataset: pinch-dashboards, harness: codex, runtime: self:<id>} : self-hosted 로 실행.
 //   ⑥ 폴링 → provenance(ranOn=self-hosted) + 케이스 판정 + GET /scorecards/leaderboard 행 출력.
@@ -15,7 +15,7 @@ import process from "node:process";
 
 const PORT = process.env.CP_PORT ?? "8790";
 const BASE = `http://127.0.0.1:${PORT}`;
-const H = { "content-type": "application/json", "x-assay-tenant": "default" };
+const H = { "content-type": "application/json", "x-everdict-tenant": "default" };
 const ROOT = new URL("../..", import.meta.url).pathname;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const post = async (p, b) => {
@@ -29,7 +29,7 @@ const bundle = JSON.parse(readFileSync(new URL("../../examples/bundles/codex-pin
 console.log(`=== ① 컨트롤플레인 기동 (dev, :${PORT}) ===`);
 const cp = spawn("node", ["apps/api/dist/main.js"], {
   cwd: ROOT,
-  env: { ...process.env, PORT, ASSAY_REQUIRE_AUTH: "", KEYCLOAK_ISSUER: "", DATABASE_URL: "" },
+  env: { ...process.env, PORT, EVERDICT_REQUIRE_AUTH: "", KEYCLOAK_ISSUER: "", DATABASE_URL: "" },
   stdio: ["ignore", "pipe", "pipe"],
 });
 cp.stderr.on("data", (d) => process.stderr.write(`  [cp] ${d}`));
@@ -54,7 +54,7 @@ try {
   if (!token || !runnerId) throw new Error("페어링 실패");
 
   // ③ 러너 프로세스 기동 — codex 가 PATH 에 있어야(LocalDriver 인프로세스). runner 소유자=dev(scorecard 제출자와 동일).
-  console.log("\n=== ③ assay runner --pair (codex on PATH) ===");
+  console.log("\n=== ③ everdict runner --pair (codex on PATH) ===");
   runner = spawn(
     "node",
     ["apps/cli/dist/main.js", "runner", "--pair", token, "--api-url", BASE, "--poll-interval-ms", "1000"],

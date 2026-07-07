@@ -1,4 +1,4 @@
-import { type TraceEvent, UpstreamError } from "@assay/core";
+import { type TraceEvent, UpstreamError } from "@everdict/core";
 import type { TraceSource } from "./trace-source.js";
 
 // LangSmith run — POST /runs/query {trace:<trace_id>} 응답의 RunSchema(선택 필드만).

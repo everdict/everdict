@@ -1,5 +1,5 @@
-import type { CaseResult, Dataset, GradeContext, JudgeSpec, Placement, Score } from "@assay/core";
-import { InMemoryJudgeRegistry } from "@assay/registry";
+import type { CaseResult, Dataset, GradeContext, JudgeSpec, Placement, Score } from "@everdict/core";
+import { InMemoryJudgeRegistry } from "@everdict/registry";
 import { describe, expect, it } from "vitest";
 import type { JudgeRunner } from "./judge-runner.js";
 import { ScoringService } from "./scoring-service.js";

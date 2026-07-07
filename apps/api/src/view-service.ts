@@ -1,5 +1,5 @@
-import { ForbiddenError, NotFoundError } from "@assay/core";
-import type { ViewRecord, ViewStore, ViewVisibility } from "@assay/db";
+import { ForbiddenError, NotFoundError } from "@everdict/core";
+import type { ViewRecord, ViewStore, ViewVisibility } from "@everdict/db";
 
 // 저장된 스코어카드 분석 View CRUD. 워크스페이스(tenant) 스코프. 읽기 = 공유 뷰 + 내 비공개; 수정·삭제 = 소유자 또는 admin.
 // config 는 웹 AnalysisConfig(불투명) — 컨트롤플레인은 형태를 강제하지 않는다. 설계: docs/architecture/scorecard-analysis-views.md.

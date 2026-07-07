@@ -1,13 +1,13 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
 import {
   API_KEY_SCOPES,
-  ASSAY_ROLES,
   type Action,
   type Authenticator,
+  EVERDICT_ROLES,
   type Principal,
   authorize,
   can,
-} from "@assay/auth";
+} from "@everdict/auth";
 import {
   AppError,
   DatasetSchema,
@@ -24,15 +24,15 @@ import {
   imageWarnings,
   referencesUserSecret,
   resolveHarnessInstance,
-} from "@assay/core";
-import { BenchmarkAdapterSpecSchema, diffDatasets } from "@assay/datasets";
+} from "@everdict/core";
+import { BenchmarkAdapterSpecSchema, diffDatasets } from "@everdict/datasets";
 import {
   type SecretStore,
   type TenantKeyStore,
   type WorkspaceSettingsStore,
   type WorkspaceStore,
   issueKey,
-} from "@assay/db";
+} from "@everdict/db";
 import type {
   DatasetRegistry,
   HarnessInstanceRegistry,
@@ -40,8 +40,8 @@ import type {
   JudgeRegistry,
   ModelRegistry,
   RuntimeRegistry,
-} from "@assay/registry";
-import type { CallbackSink } from "@assay/topology";
+} from "@everdict/registry";
+import type { CallbackSink } from "@everdict/topology";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from "fastify";
@@ -226,9 +226,9 @@ export interface ServerDeps {
   keyStore?: TenantKeyStore; // /internal/tenant-keys 발급용
   internalToken?: string; // /internal/** 가드 (없으면 fail-closed)
   requireAuth?: boolean; // true 면 인증 필수(dev 폴백 금지)
-  devTenantHeader?: string; // 미인증 dev 폴백 헤더 (기본 x-assay-tenant)
+  devTenantHeader?: string; // 미인증 dev 폴백 헤더 (기본 x-everdict-tenant)
   authorizationServers?: string[]; // MCP OAuth: protected-resource 메타데이터의 인가서버(Keycloak issuer)
-  logLevel?: string; // pino 로그 레벨(info/debug/warn/…). 없으면 로깅 비활성(테스트 무소음). main 은 ASSAY_LOG_LEVEL 로 주입.
+  logLevel?: string; // pino 로그 레벨(info/debug/warn/…). 없으면 로깅 비활성(테스트 무소음). main 은 EVERDICT_LOG_LEVEL 로 주입.
   callbackSink?: CallbackSink; // front-door callback 완료 모델의 inbound 수신(없으면 /frontdoor-callback 비활성)
 }
 
@@ -240,7 +240,7 @@ async function resolveIdentity(
 ): Promise<Principal | undefined> {
   const authz = req.headers.authorization;
   if (deps.authenticator && typeof authz === "string" && authz.startsWith("Bearer ")) {
-    // workspaceHint(x-assay-workspace) — GitHub Actions 페더레이션이 그 워크스페이스의 repo link 와 대조하는 데 쓴다.
+    // workspaceHint(x-everdict-workspace) — GitHub Actions 페더레이션이 그 워크스페이스의 repo link 와 대조하는 데 쓴다.
     const principal = await deps.authenticator.authenticate(authz.slice(7).trim(), {
       workspaceHint: workspaceHintOf(req),
     });
@@ -262,21 +262,21 @@ async function resolveIdentity(
     return undefined;
   }
   // dev 폴백: 헤더 워크스페이스, 풀 권한.
-  const header = (req.headers as Record<string, unknown>)[deps.devTenantHeader ?? "x-assay-tenant"];
+  const header = (req.headers as Record<string, unknown>)[deps.devTenantHeader ?? "x-everdict-tenant"];
   const workspace = typeof header === "string" && header.length > 0 ? header : "default";
-  req.log.debug({ workspace }, "auth: dev 폴백(x-assay-tenant) — requireAuth 미설정");
+  req.log.debug({ workspace }, "auth: dev 폴백(x-everdict-tenant) — requireAuth 미설정");
   return { subject: "dev", workspace, roles: ["admin"], via: "api-key" };
 }
 
 // 활성 워크스페이스 해석: 멤버십 스토어가 있으면 토큰/dev 기본 워크스페이스를 멤버십으로 부트스트랩하고,
-// x-assay-workspace 헤더가 가리키는 워크스페이스의 멤버이면 그곳으로 전환(roles 도 멤버십 역할로 재해석).
+// x-everdict-workspace 헤더가 가리키는 워크스페이스의 멤버이면 그곳으로 전환(roles 도 멤버십 역할로 재해석).
 // 비멤버 워크스페이스 요청은 403 이 아니라 기본 워크스페이스로 폴백한다(스테일 선택에도 격리 안전 + UX 견고).
 // base.workspace 가 빈 문자열(외부 Keycloak: workspace 클레임 없음)이면 — 쿠키가 가리키는 멤버 워크스페이스로
 // 전환하고, 없으면 workspace="" 그대로 둔다(아직 멤버십 없음 → /me.workspaces=[] → 웹 온보딩). 401 아님.
 // 스토어가 없으면 기존 단일-워크스페이스 동작 그대로(하위호환).
 // 요청이 지목한 활성 워크스페이스 헤더(웹 쿠키/CI 워크플로가 보낸다). 없으면 undefined.
 function workspaceHintOf(req: FastifyRequest): string | undefined {
-  const header = (req.headers as Record<string, unknown>)["x-assay-workspace"];
+  const header = (req.headers as Record<string, unknown>)["x-everdict-workspace"];
   return typeof header === "string" && header.length > 0 ? header : undefined;
 }
 
@@ -307,7 +307,7 @@ async function applyActiveWorkspace(base: Principal, req: FastifyRequest, deps: 
     }
   }
 
-  // x-assay-workspace 헤더(웹의 활성 워크스페이스 쿠키)가 다른 워크스페이스를 가리키고 그 멤버면 전환.
+  // x-everdict-workspace 헤더(웹의 활성 워크스페이스 쿠키)가 다른 워크스페이스를 가리키고 그 멤버면 전환.
   const requested = workspaceHintOf(req) ?? base.workspace;
   if (requested && requested !== base.workspace) {
     const role = await store.roleFor(requested, subject);
@@ -369,7 +369,7 @@ function protectedResourceMetadata(req: FastifyRequest, deps: ServerDeps): Recor
     authorization_servers: deps.authorizationServers ?? [],
     bearer_methods_supported: ["header"],
     scopes_supported: ["openid", "profile"],
-    resource_name: "Assay MCP",
+    resource_name: "Everdict MCP",
   };
 }
 
@@ -493,7 +493,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!deps.membershipService) return reply.code(404).send({ code: "NOT_FOUND", message: "멤버십 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
-    const body = z.object({ role: z.enum(ASSAY_ROLES) }).safeParse(req.body);
+    const body = z.object({ role: z.enum(EVERDICT_ROLES) }).safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
       gate(principal, "members:write");
@@ -549,7 +549,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     const principal = await resolvePrincipal(req, reply, deps);
     if (!principal) return reply;
     const body = z
-      .object({ role: z.enum(ASSAY_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() })
+      .object({ role: z.enum(EVERDICT_ROLES), expiresInHours: z.number().int().positive().max(8760).optional() })
       .safeParse(req.body);
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: body.error.message });
     try {
@@ -2050,7 +2050,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // 디바이스 페어링 — 평문 토큰(rnr_…)은 응답에 한 번만 노출되고 다시 못 본다(저장은 해시). assay runner 가 이 토큰으로 인증.
+  // 디바이스 페어링 — 평문 토큰(rnr_…)은 응답에 한 번만 노출되고 다시 못 본다(저장은 해시). everdict runner 가 이 토큰으로 인증.
   app.post("/runners", async (req, reply) => {
     if (!deps.runnerService) return reply.code(404).send({ code: "NOT_FOUND", message: "runner 서비스 미설정" });
     const principal = await resolvePrincipal(req, reply, deps);
@@ -2525,7 +2525,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // --- 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + assay image push 발행 대상 ---
+  // --- 워크스페이스 이미지 레지스트리(BYO, 복수) — 하니스 이미지 분류 기준 + everdict image push 발행 대상 ---
   // 여러 개를 이름으로 등록하고 push 시 선택한다(분류/pull 인증은 전체 host 매칭). 조회 harnesses:read(viewer+ —
   // 분류 배지는 하니스 읽기 관심사, 뷰는 이름 참조/좌표만) / 등록·해제 settings:write / push 자격증명
   // images:push(member+ — 값 유출을 별도 액션으로 명명). 설계: docs/architecture/workspace-image-registry.md
@@ -2726,7 +2726,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     }
   });
 
-  // GitHub Actions 러너 자가등록 — 한 번의 admin 액션으로 빌드 서버에 GitHub 러너 + Assay 워크스페이스-공유 러너를
+  // GitHub Actions 러너 자가등록 — 한 번의 admin 액션으로 빌드 서버에 GitHub 러너 + Everdict 워크스페이스-공유 러너를
   // 함께 세우는 설치 스크립트를 생성(설계 doc §4). 워크스페이스-공유 러너를 새로 페어링(rnr_ 1회) + 워크스페이스 GitHub App
   // 으로 등록 토큰 mint. settings:write(팀 자원 + repo 신뢰 조작이므로 admin). 응답의 토큰들은 저장하지 않는다.
   app.post("/workspace/runners/github-install", async (req, reply) => {
@@ -2746,7 +2746,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
       })
       .safeParse(req.body ?? {});
     if (!body.success) return reply.code(400).send({ code: "BAD_REQUEST", message: zodIssues(body.error).join("; ") });
-    const defaultLabel = body.data.org ?? body.data.repository?.split("/")[1] ?? "assay-ci";
+    const defaultLabel = body.data.org ?? body.data.repository?.split("/")[1] ?? "everdict-ci";
     try {
       gate(principal, "settings:write");
       return reply.send(
@@ -2984,7 +2984,7 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
           membershipService: deps.membershipService,
           profileService: deps.profileService,
           keyStore: deps.keyStore,
-          apiPublicUrl: baseUrl(req), // github_install_workspace_runner 의 assay runner --api-url
+          apiPublicUrl: baseUrl(req), // github_install_workspace_runner 의 everdict runner --api-url
         },
         principal,
       ).connect(transport);

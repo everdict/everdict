@@ -1,5 +1,5 @@
-import { type Backend, type ProbeResult, buildRuntimeBackend } from "@assay/backends";
-import type { RuntimeSpec } from "@assay/core";
+import { type Backend, type ProbeResult, buildRuntimeBackend } from "@everdict/backends";
+import type { RuntimeSpec } from "@everdict/core";
 
 // 연결 테스트 결과 — 잡 없이 클러스터 도달성/인증만 확인.
 export interface RuntimeProbeResult {
