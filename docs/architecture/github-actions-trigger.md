@@ -33,8 +33,30 @@
 > Routes/MCP grew the optional `host` (`PUT/DELETE /workspace/ci/links`, setup-pr,
 > `link_ci_repository`/`unlink_ci_repository`/`open_ci_setup_pr`).
 >
-> **Open:** live E2E vs real GitHub (github.com + GHES); GitHub App (S4, demand-driven); personal-runner
-> `allowCi` gate; Track B pull-secrets for private GHCR; backend job force-kill for superseded in-flight cases.
+> **PR-comment fire `/evaluate` (ChatOps) — SHIPPED (2026-07-07).** The generated workflow also fires on
+> `issue_comment` (created): a PR-conversation comment starting with `/evaluate` re-runs the PR-mode
+> ephemeral-pin eval on demand — same `ScorecardService.submit` path, same OIDC federation (trust matches
+> `(host, repository)` only, so **zero auth change**). `WorkspaceCiLink.trigger` (`auto | comment | both`,
+> default `both`) picks the PR firing surface (`comment` = on-demand only, for expensive suites); the push
+> re-pin trigger always stays. The template absorbs the three `issue_comment` traps — the event runs in
+> **default-branch context**, so: (a) the job gates on "is PR comment + `/evaluate` prefix +
+> `author_association ∈ OWNER/MEMBER/COLLABORATOR`" (fork-PR defense — the event carries secrets +
+> `id-token`); (b) it checks out `refs/pull/N/head` explicitly and a `Resolve eval head` step derives the
+> evaluated sha via `git rev-parse HEAD` (image tags + the action's new `head-sha` input use it —
+> `GITHUB_SHA` would silently point at main); (c) GitHub attaches **no PR check** to comment fires, so the
+> action replies to the conversation (👀 reaction on receipt, result/failure comment via the new
+> `github-token` input; `issues`/`pull-requests: write` are emitted only when the comment trigger is on).
+> `concurrency` is now grouped by PR number (`pull_request.number || issue.number || ref`) so a comment fire
+> supersedes the same PR's in-flight auto fire GH-side; server-side supersede works unchanged because the
+> action reads `origin.prNumber` from the event payload for comment fires — and `issue_comment` maps to
+> **pr** mode (without that mapping a comment would durable-re-pin the registry). Routes/MCP/web carry the
+> `trigger` knob (`PUT /workspace/ci/links`, `link_ci_repository`, connect-repo dialog + link rows).
+>
+> **Open:** live E2E vs real GitHub (github.com + GHES, incl. an `/evaluate` comment fire); GitHub App (S4,
+> demand-driven — would give webhook-fired `/evaluate` with instant reactions and no workflow file, but no
+> image build: it would reuse the PR's last-built digests or re-dispatch the workflow); personal-runner
+> `allowCi` gate; Track B pull-secrets for private GHCR; backend job force-kill for superseded in-flight
+> cases; `/evaluate` argument parsing (`dataset=… runtime=…` → action inputs).
 >
 > Direction locked with the user (2026-07-03):
 > **(1) Action-as-client, not webhook-receiver** — a first-party GitHub Action calls the Assay API outbound;
@@ -100,6 +122,7 @@ Two lifecycles, two registry treatments:
 | event | semantics | registry | reproducibility anchor |
 |---|---|---|---|
 | `pull_request` | evaluate topology with *this* PR's image in one slot | **untouched** | `origin.pinOverrides` on the scorecard |
+| `issue_comment` `/evaluate` | re-run the PR eval **on demand** (same ephemeral pins; PR head resolved explicitly) | **untouched** | `origin.pinOverrides` + `origin.prNumber`/`sha` |
 | `push` to dev/main | advance the "dev channel" | **new instance version** (re-pin) | immutable instance version vN+1 |
 
 - **PR (ephemeral):** `RunScorecardInput.harness` grows `pins?: Record<slot, imageRef>` — merged over the
@@ -131,6 +154,7 @@ ci?: {
     slots: Record<string, { path?: string }>; // serviceName → optional monorepo path filter
     createdBy: string;                        // audit only — fire-time auth does NOT depend on the creator
     disabled?: boolean;
+    trigger?: "auto" | "comment" | "both";    // PR firing surface (default both); push re-pin always fires
   }>;
 }
 ```

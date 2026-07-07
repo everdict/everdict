@@ -15,6 +15,7 @@ export const UpsertCiLinkBodySchema = z.object({
   slots: z.record(z.object({ path: z.string().optional() })).default({}), // 서비스 슬롯 → 모노레포 path(선택)
   runsOn: z.string().min(1).optional(), // 셀프호스티드 배치(선택) — 워크플로 runs-on(예: "[self-hosted, assay-<id>]")
   runtime: z.string().min(1).optional(), // run-eval runtime 입력(예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서
+  trigger: z.enum(["auto", "comment", "both"]).optional(), // PR 평가 발화 방식(미지정=both) — WorkspaceCiLinkSchema 참고
 });
 export type UpsertCiLinkBody = z.infer<typeof UpsertCiLinkBodySchema>;
 
@@ -83,6 +84,7 @@ export class CiLinkService {
       ...(body.dataset !== undefined ? { dataset: body.dataset } : {}),
       ...(body.runsOn !== undefined ? { runsOn: body.runsOn } : {}),
       ...(body.runtime !== undefined ? { runtime: body.runtime } : {}),
+      ...(body.trigger !== undefined ? { trigger: body.trigger } : {}),
     };
     const rest = current.filter((l) => !sameLinkKey(l, body.repository, body.host));
     await this.deps.settings.set(workspace, { ci: { links: [...rest, next] } });
@@ -235,8 +237,13 @@ function registryFor(host?: string): string {
 }
 
 // link → 워크플로 YAML 합성 — 사용자는 YAML 을 만지지 않는다(zero-input 의 핵심).
-// PR/push 겸용 한 파일: 슬롯별 이미지 빌드(레지스트리는 link.host 에 따라 GHCR/GHE, digest 출력) →
+// PR/push/PR-코멘트(/evaluate) 겸용 한 파일: 슬롯별 이미지 빌드(레지스트리는 link.host 에 따라 GHCR/GHE, digest 출력) →
 // assay run-eval 액션(모드 자동, OIDC keyless — GHES issuer 도 컨트롤플레인이 신뢰).
+// trigger 노브: auto=PR 이벤트 자동만 · comment=/evaluate 코멘트만(비싼 스위트 온디맨드) · both(기본)=둘 다.
+// push(기본 브랜치 재핀)는 항상. issue_comment 의 함정 3개를 이 템플릿이 흡수한다(사용자 YAML 지식 불요):
+//  ① 기본 브랜치 컨텍스트로 돌므로 PR head 를 명시 체크아웃(refs/pull/N/head)하고 sha 는 git 으로 해석,
+//  ② concurrency 그룹을 PR 번호로 묶어 코멘트 발화 ↔ 같은 PR 의 자동 발화가 서로 supersede,
+//  ③ 코멘트 발화는 PR 체크가 안 달리므로(기본 브랜치 런) 대화 코멘트가 유일한 피드백 — 쓰기 권한+토큰을 내려준다.
 // 모노레포 최적화(path filter 로 바뀐 슬롯만 빌드)는 후속 — v1 은 링크된 슬롯 전부 빌드(정확성 우선).
 export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUrl: string): string {
   const registry = registryFor(link.host);
@@ -250,7 +257,7 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
         "        with:",
         `          context: ${cfg.path ?? "."}`,
         "          push: true",
-        `          tags: ${registry}/\${{ github.repository }}/${slot}:\${{ github.sha }}`,
+        `          tags: ${registry}/\${{ github.repository }}/${slot}:\${{ steps.head.outputs.sha }}`,
       ].join("\n"),
     )
     .join("\n");
@@ -263,24 +270,52 @@ export function renderCiWorkflow(link: WorkspaceCiLink, workspace: string, apiUr
   // 셀프호스티드 배치(선택): runsOn 지정 시 그 러너에서 잡을 돌리고, runtime 지정 시 평가를 워크스페이스-공유 러너로.
   const runsOn = link.runsOn ?? "ubuntu-latest";
   const runtimeLine = link.runtime ? `\n          runtime: ${link.runtime}` : "";
-  return `# Assay 가 생성한 CI eval 워크플로 — PR 은 임시 핀 평가, 기본 브랜치 push 는 재핀(새 버전)+평가.
+  const trigger = link.trigger ?? "both";
+  const onBlock = [
+    ...(trigger !== "comment" ? ["  pull_request:"] : []),
+    ...(trigger !== "auto" ? ["  issue_comment:", "    types: [created]"] : []),
+    "  push:",
+    "    branches: [main]",
+  ].join("\n");
+  // 코멘트 발화 피드백(👀 리액션 + 결과 코멘트)용 쓰기 권한/토큰 — 코멘트 트리거가 없으면 부여하지 않는다(최소 권한).
+  const commentPermissions = trigger !== "auto" ? "\n  issues: write\n  pull-requests: write" : "";
+  const commentTokenLine = trigger !== "auto" ? "\n          github-token: ${{ github.token }}" : "";
+  // /evaluate 게이트 — PR 대화의 코멘트이고 작성자가 협력자 이상일 때만(포크 PR 의 임의 코멘트로 평가 발화 방어).
+  const commentGate =
+    trigger !== "auto"
+      ? `
+    if: >-
+      github.event_name != 'issue_comment' ||
+      (github.event.issue.pull_request &&
+      startsWith(github.event.comment.body, '/evaluate') &&
+      contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association))`
+      : "";
+  // 코멘트 발화는 기본 브랜치 컨텍스트 — PR head 를 명시 체크아웃(그 외 이벤트는 빈 ref = 기본 동작).
+  const checkoutRef =
+    trigger !== "auto"
+      ? `
+        with:
+          ref: \${{ github.event_name == 'issue_comment' && format('refs/pull/{0}/head', github.event.issue.number) || '' }}`
+      : "";
+  return `# Assay 가 생성한 CI eval 워크플로 — PR 은 임시 핀 평가, PR 코멘트 /evaluate 는 온디맨드 재평가, 기본 브랜치 push 는 재핀(새 버전)+평가.
 name: assay-eval
 on:
-  pull_request:
-  push:
-    branches: [main]
+${onBlock}
 permissions:
   contents: read
   packages: write
-  id-token: write # Assay OIDC 페더레이션(keyless)
+  id-token: write # Assay OIDC 페더레이션(keyless)${commentPermissions}
 concurrency:
-  group: assay-eval-\${{ github.ref }}
+  group: assay-eval-\${{ github.event.pull_request.number || github.event.issue.number || github.ref }}
   cancel-in-progress: true
 jobs:
   eval:
-    runs-on: ${runsOn}
+    runs-on: ${runsOn}${commentGate}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4${checkoutRef}
+      - name: Resolve eval head
+        id: head
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@v3
         with:
           registry: ${registry}
@@ -294,6 +329,7 @@ ${buildSteps}
           workspace: ${workspace}
           harness: ${link.harness}
           dataset: ${link.dataset ?? "# TODO: 데이터셋 id 를 지정하세요"}
-          images: '${imagesJson}'${runtimeLine}
+          images: '${imagesJson}'
+          head-sha: \${{ steps.head.outputs.sha }}${commentTokenLine}${runtimeLine}
 `;
 }

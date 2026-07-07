@@ -50,6 +50,11 @@ describe("CiLinkService — link CRUD (repository당 1건, 대소문자 무시)"
     expect(await svc.remove("acme", "ACME/APP")).toEqual([]);
   });
 
+  it("trigger 노브(auto|comment|both)가 link 에 저장된다 — setup-PR 워크플로의 PR 발화 방식", async () => {
+    await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {}, trigger: "comment" });
+    expect((await svc.list("acme"))[0]?.trigger).toBe("comment");
+  });
+
   it("다른 워크스페이스 설정을 건드리지 않는다(워크스페이스 스코프)", async () => {
     await svc.upsert("acme", "alice", { repository: "acme/app", harness: "bu", slots: {} });
     expect(await svc.list("beta")).toEqual([]);
@@ -256,7 +261,8 @@ describe("renderCiWorkflow", () => {
       "https://assay.example.com",
     );
     expect(yaml).toContain("registry: ghcr.io");
-    expect(yaml).toContain("tags: ghcr.io/${{ github.repository }}/web:${{ github.sha }}");
+    // 이미지 태그는 체크아웃된 head 의 sha — 코멘트 발화(기본 브랜치 컨텍스트)에서 GITHUB_SHA 는 main 을 가리킨다.
+    expect(yaml).toContain("tags: ghcr.io/${{ github.repository }}/web:${{ steps.head.outputs.sha }}");
   });
 
   it("GHE link 는 그 인스턴스의 컨테이너 레지스트리(containers.<hostname>)로 빌드/푸시한다 — GHES 의 GITHUB_TOKEN 은 ghcr.io 로그인 불가", () => {
@@ -272,9 +278,53 @@ describe("renderCiWorkflow", () => {
       "https://assay.example.com",
     );
     expect(yaml).toContain("registry: containers.ghe.acme.io");
-    expect(yaml).toContain("tags: containers.ghe.acme.io/${{ github.repository }}/web:${{ github.sha }}");
+    expect(yaml).toContain("tags: containers.ghe.acme.io/${{ github.repository }}/web:${{ steps.head.outputs.sha }}");
     expect(yaml).toContain('"web":"containers.ghe.acme.io/${{ github.repository }}/web@');
     expect(yaml).not.toContain("ghcr.io");
+  });
+
+  it("기본(trigger 미지정=both)은 PR 자동 + /evaluate 코멘트 둘 다 발화한다 — issue_comment 함정 3개 흡수", () => {
+    const yaml = renderCiWorkflow(
+      { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a" },
+      "acme",
+      "https://assay.example.com",
+    );
+    expect(yaml).toContain("\n  pull_request:");
+    expect(yaml).toContain("\n  issue_comment:");
+    // ① 게이트 — PR 대화의 /evaluate 이고 작성자가 협력자 이상일 때만(포크 PR 방어).
+    expect(yaml).toContain("startsWith(github.event.comment.body, '/evaluate')");
+    expect(yaml).toContain("github.event.comment.author_association");
+    // ② 기본 브랜치 컨텍스트 함정 — PR head 명시 체크아웃 + sha 는 git 으로 해석.
+    expect(yaml).toContain("format('refs/pull/{0}/head', github.event.issue.number)");
+    expect(yaml).toContain("git rev-parse HEAD");
+    // ③ concurrency 를 PR 번호로 묶어 코멘트 발화 ↔ 같은 PR 의 자동 발화가 서로 supersede.
+    expect(yaml).toContain("github.event.pull_request.number || github.event.issue.number || github.ref");
+    // 대화 회신(유일한 피드백 표면)용 쓰기 권한 + 토큰.
+    expect(yaml).toContain("pull-requests: write");
+    expect(yaml).toContain("github-token: ${{ github.token }}");
+  });
+
+  it("trigger=auto 는 코멘트 트리거/게이트/피드백 권한을 내보내지 않는다(자동 발화만 — 최소 권한)", () => {
+    const yaml = renderCiWorkflow(
+      { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a", trigger: "auto" },
+      "acme",
+      "https://assay.example.com",
+    );
+    expect(yaml).toContain("\n  pull_request:");
+    expect(yaml).not.toContain("issue_comment");
+    expect(yaml).not.toContain("issues: write");
+    expect(yaml).not.toContain("github-token");
+  });
+
+  it("trigger=comment 는 PR 자동 트리거 없이 /evaluate 코멘트만 발화한다(온디맨드) — push 재핀은 유지", () => {
+    const yaml = renderCiWorkflow(
+      { repository: "acme/app", harness: "bu", slots: {}, createdBy: "a", trigger: "comment" },
+      "acme",
+      "https://assay.example.com",
+    );
+    expect(yaml).not.toContain("\n  pull_request:");
+    expect(yaml).toContain("\n  issue_comment:");
+    expect(yaml).toContain("\n  push:");
   });
 });
 

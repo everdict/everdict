@@ -18,6 +18,9 @@ export const WorkspaceCiLinkSchema = z.object({
   // 셀프호스티드 배치(선택) — setup-PR 워크플로가 직접 자가 러너를 타깃하게. 미지정 = ubuntu-latest + 관리형 런타임.
   runsOn: z.string().optional(), // 워크플로 runs-on 값(예: "[self-hosted, assay-<id>]"). github-install 의 러너 라벨.
   runtime: z.string().optional(), // run-eval runtime 입력(예: "self:ws:<id>"). 이 레포 평가를 그 워크스페이스-공유 러너에서.
+  // PR 평가 발화 방식 — auto=PR 이벤트 자동만 · comment=PR 코멘트 /evaluate 만(비싼 스위트 온디맨드) · both(기본).
+  // push(기본 브랜치 재핀)는 항상 발화. 워크플로 YAML 생성(renderCiWorkflow)에만 쓰인다 — 발화 인증(trust)과 무관.
+  trigger: z.enum(["auto", "comment", "both"]).optional(),
 });
 export type WorkspaceCiLink = z.infer<typeof WorkspaceCiLinkSchema>;
 

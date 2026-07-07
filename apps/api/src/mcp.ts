@@ -1546,9 +1546,15 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
             .string()
             .optional()
             .describe('run-eval runtime 입력(선택, 예: "self:ws:<id>") — 평가를 워크스페이스-공유 러너에서'),
+          trigger: z
+            .enum(["auto", "comment", "both"])
+            .optional()
+            .describe(
+              "PR 평가 발화 방식(선택) — auto=PR 이벤트 자동만, comment=PR 코멘트 /evaluate 만(온디맨드), both(기본)=둘 다",
+            ),
         },
       },
-      ({ repository, host, harness, dataset, slots, runsOn, runtime }) =>
+      ({ repository, host, harness, dataset, slots, runsOn, runtime, trigger }) =>
         run(principal, "settings:write", async () =>
           ok({
             links: await ci.upsert(ws, principal.subject, {
@@ -1559,6 +1565,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
               ...(dataset !== undefined ? { dataset } : {}),
               ...(runsOn !== undefined ? { runsOn } : {}),
               ...(runtime !== undefined ? { runtime } : {}),
+              ...(trigger !== undefined ? { trigger } : {}),
             }),
           }),
         ),

@@ -31,7 +31,11 @@ never compare registration/installation hosts with `===`. SSOT: `docs/architectu
   host-strict — a github.com token never satisfies a GHE link of the same name. Installation-token resolution is
   also host-strict (`tokenForRepository(…, host)`). `renderCiWorkflow` emits `id-token: write` + digest-pinned
   image builds against the host's registry (github.com → `ghcr.io`, GHE → `containers.<hostname>` — GHES
-  `GITHUB_TOKEN` cannot log in to ghcr.io).
+  `GITHUB_TOKEN` cannot log in to ghcr.io), and (per `link.trigger` `auto|comment|both`, default both) a
+  `/evaluate` PR-comment trigger — `issue_comment` runs in **default-branch context**, so the template must keep:
+  the author-association gate (fork-PR defense), explicit `refs/pull/N/head` checkout + `git rev-parse HEAD`
+  (`GITHUB_SHA` points at main), PR-number `concurrency`, and conversation feedback via `github-token`
+  (comment fires get no PR check). In run-eval, `issue_comment` maps to **pr** mode — never a durable re-pin.
 - **Mattermost**: bot-token notifications (completion/regression) + inbound slash-commands/buttons; inbound is only
   active when `commandTokenSecretName` is set (verify the command token before acting on `/assay`).
 - Remap every GitHub/Mattermost API failure to an `AppError` (never leak a raw upstream error). One service core,
