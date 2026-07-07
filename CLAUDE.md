@@ -15,6 +15,8 @@ Read the matching `<area>/SKILL.md` first, then pull `references/*.md` on demand
 - `.claude/skills/` + `.claude/rules/` bodies → **English**.
 - Code comments + OpenAPI `summary` → **Korean**.
 - User-facing communication → **Korean**.
+- Commit messages + PR titles/bodies → **English** (public repo).
+- Web UI strings → **message catalogs** (`ko`/`en`), never hardcoded in components (see `docs/web.md`).
 
 ## Essential commands (run in this order)
 1. `pnpm format`   — Biome format (always first)

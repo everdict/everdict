@@ -12,6 +12,7 @@ import {
   Upload,
   type LucideIcon,
 } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { cn } from '@/shared/lib/utils'
 import { Dialog } from '@/shared/ui/dialog'
@@ -39,64 +40,65 @@ function toggleTheme() {
   }
 }
 
-// 액션 경로는 활성 워크스페이스로 prefix(Linear 식 /{workspace}/...).
-function actionsFor(workspace: string): Command[] {
+// 액션 경로는 활성 워크스페이스로 prefix(Linear 식 /{workspace}/...). 라벨은 카탈로그 키로 해석.
+function actionsFor(workspace: string, t: ReturnType<typeof useTranslations>): Command[] {
   const push = (suffix: string) => (r: ReturnType<typeof useRouter>) =>
     r.push(`/${workspace}${suffix}`)
+  const group = t('palette.groupActions')
   return [
     {
       id: 'new-run',
-      label: '새 실행',
+      label: t('palette.newRun'),
       icon: Plus,
-      group: '액션',
+      group,
       keywords: 'run 실행 평가 submit',
       perform: push('/runs/new'),
     },
     {
       id: 'new-scorecard',
-      label: '새 스코어카드 실행',
+      label: t('palette.newScorecard'),
       icon: Plus,
-      group: '액션',
+      group,
       keywords: 'scorecard 배치',
       perform: push('/scorecards/new'),
     },
     {
       id: 'compare-scorecards',
-      label: '스코어카드 비교',
+      label: t('palette.compareScorecards'),
       icon: GitCompareArrows,
-      group: '액션',
+      group,
       keywords: 'compare diff 회귀',
       perform: push('/scorecards/compare'),
     },
     {
       id: 'ingest-trace',
-      label: '트레이스 올리기',
+      label: t('palette.ingestTrace'),
       icon: Upload,
-      group: '액션',
+      group,
       keywords: 'ingest otel mlflow trace',
       perform: push('/scorecards/ingest'),
     },
     {
       id: 'new-dataset',
-      label: '데이터셋 등록',
+      label: t('palette.newDataset'),
       icon: Plus,
-      group: '액션',
+      group,
       keywords: 'dataset 벤치마크',
       perform: push('/datasets/new'),
     },
     {
       id: 'new-judge',
-      label: 'Judge 등록',
+      label: t('palette.newJudge'),
       icon: Plus,
-      group: '액션',
+      group,
       keywords: 'judge 심사',
       perform: push('/judges/new'),
     },
     {
       id: 'toggle-theme',
-      label: '테마 바꾸기',
+      label: t('palette.toggleTheme'),
       icon: SunMoon,
-      group: '액션',
+      group,
       keywords: 'theme dark light 다크 라이트',
       perform: () => toggleTheme(),
     },
@@ -105,6 +107,7 @@ function actionsFor(workspace: string): Command[] {
 
 export function CommandPalette({ workspace }: { workspace: string }) {
   const router = useRouter()
+  const t = useTranslations()
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [selected, setSelected] = useState(0)
@@ -115,15 +118,15 @@ export function CommandPalette({ workspace }: { workspace: string }) {
     () => [
       ...ALL_NAV_ITEMS.map<Command>((item) => ({
         id: `nav:${item.href}`,
-        label: item.label,
+        label: t(`nav.${item.labelKey}`),
         icon: item.icon,
-        group: '이동',
+        group: t('palette.groupNav'),
         keywords: item.keywords,
         perform: (r) => r.push(`/${workspace}${item.href}`),
       })),
-      ...actionsFor(workspace),
+      ...actionsFor(workspace, t),
     ],
-    [workspace]
+    [workspace, t]
   )
 
   const filtered = useMemo(() => {
@@ -207,7 +210,7 @@ export function CommandPalette({ workspace }: { workspace: string }) {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           onKeyDown={onInputKey}
-          placeholder="페이지로 이동하거나 작업 실행…"
+          placeholder={t('palette.placeholder')}
           className="h-12 flex-1 bg-transparent text-[14px] text-foreground outline-none placeholder:text-muted-foreground/70"
         />
         <Kbd>esc</Kbd>
@@ -217,7 +220,7 @@ export function CommandPalette({ workspace }: { workspace: string }) {
         {filtered.length === 0 ? (
           <div className="flex flex-col items-center gap-1 px-4 py-10 text-center">
             <Moon className="size-5 text-muted-foreground/50" />
-            <p className="text-[13px] text-muted-foreground">결과가 없습니다.</p>
+            <p className="text-[13px] text-muted-foreground">{t('palette.empty')}</p>
           </div>
         ) : (
           groups.map(({ group, items }) => (

@@ -1,0 +1,42 @@
+{
+  "nav": {
+    "overview": "Overview",
+    "harnesses": "Harnesses",
+    "benchmarks": "Benchmarks",
+    "scorecards": "Scorecards",
+    "views": "Views",
+    "schedules": "Schedules",
+    "queue": "Queue",
+    "runtimes": "Runtimes",
+    "report": "Report"
+  },
+  "shell": {
+    "searchPlaceholder": "Search…",
+    "account": "Account",
+    "workspaceSettings": "Workspace settings",
+    "toggleTheme": "Toggle theme",
+    "logout": "Log out",
+    "login": "Log in",
+    "openMenu": "Open menu",
+    "search": "Search",
+    "close": "Close"
+  },
+  "palette": {
+    "placeholder": "Go to a page or run an action…",
+    "empty": "No results.",
+    "groupNav": "Go to",
+    "groupActions": "Actions",
+    "newRun": "New run",
+    "newScorecard": "New scorecard run",
+    "compareScorecards": "Compare scorecards",
+    "ingestTrace": "Ingest trace",
+    "newDataset": "Register dataset",
+    "newJudge": "Register judge",
+    "toggleTheme": "Toggle theme"
+  },
+  "locale": {
+    "label": "Language",
+    "ko": "한국어",
+    "en": "English"
+  }
+}

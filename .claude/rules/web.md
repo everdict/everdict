@@ -32,4 +32,8 @@ See `docs/web.md`. This app is SELF-CONTAINED (own eslint+prettier; excluded fro
   grain overlay); `cn()` from `shared/lib/utils`. shadcn new-york conventions. Light **and** dark themes via the
   `.dark` class — toggled by `shared/ui/theme-toggle` (no `next-themes`: `html.dark` + `localStorage`), with a
   no-flash inline script in `app/layout.tsx` (stored choice → else `prefers-color-scheme`).
+- **i18n**: user-facing copy is NEVER hardcoded — next-intl catalogs `messages/{ko,en}.json` (add new strings
+  to BOTH). Locale = cookie > Accept-Language > `en` (`shared/i18n/`), NO `/[locale]` URL segment (first path
+  segment stays the workspace). `useTranslations()` in client, `getTranslations()` in server components; static
+  configs store message keys (`labelKey`) resolved at render. Switcher = `features/switch-locale`.
 - **Tooling**: `pnpm --filter @assay/web {dev,build,lint}`. Don't add it to the root Biome ignore-list removal.

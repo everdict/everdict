@@ -13,12 +13,12 @@ import {
 
 export interface NavItem {
   // 워크스페이스-상대 경로 suffix(예: '' = 개요, '/scorecards'). 렌더 시 활성 워크스페이스로 prefix → /{workspace}{suffix}.
-  // nav-config 는 요청 컨텍스트가 없으므로(모듈 로드 시 워크스페이스 미상) suffix 만 보관한다.
+  // nav-config 는 요청 컨텍스트가 없으므로(모듈 로드 시 워크스페이스·로케일 미상) suffix + 메시지 키만 보관한다.
   href: string
-  label: string
+  labelKey: string // messages/*.json 의 nav.* 키 — 렌더 시 useTranslations 로 해석
   icon: LucideIcon
   exact?: boolean
-  keywords?: string // command 팔레트 퍼지 매칭 보조어
+  keywords?: string // command 팔레트 퍼지 매칭 보조어(한/영 병기)
 }
 
 export interface NavSection {
@@ -32,50 +32,61 @@ export interface NavSection {
 export const NAV_SECTIONS: NavSection[] = [
   {
     items: [
-      { href: '', label: '개요', icon: LayoutDashboard, exact: true, keywords: 'overview home 홈' },
+      {
+        href: '',
+        labelKey: 'overview',
+        icon: LayoutDashboard,
+        exact: true,
+        keywords: 'overview home 홈 개요',
+      },
       {
         href: '/harnesses',
-        label: '하니스',
+        labelKey: 'harnesses',
         icon: Boxes,
-        keywords: 'harness 에이전트 codex claude',
+        keywords: 'harness 하니스 에이전트 agent codex claude',
       },
       {
         href: '/datasets',
-        label: '벤치마크',
+        labelKey: 'benchmarks',
         icon: Database,
-        keywords: 'benchmark 벤치마크 dataset 데이터셋 케이스 pinch',
+        keywords: 'benchmark 벤치마크 dataset 데이터셋 케이스 case pinch',
       },
       {
         href: '/scorecards',
-        label: '스코어카드',
+        labelKey: 'scorecards',
         icon: BarChart3,
-        keywords: 'scorecard 배치 평가 비교 리더보드 leaderboard 추이',
+        keywords: 'scorecard 스코어카드 배치 평가 비교 리더보드 leaderboard 추이',
       },
       {
         href: '/views',
-        label: '뷰',
+        labelKey: 'views',
         icon: Bookmark,
-        keywords: 'view 뷰 분석 저장 대시보드 리더보드 추이 비교 피벗',
+        keywords: 'view 뷰 분석 저장 대시보드 리더보드 추이 비교 피벗 pivot',
       },
       {
         href: '/schedules',
-        label: '예약',
+        labelKey: 'schedules',
         icon: CalendarClock,
-        keywords: 'schedule cron 예약 주기 회귀',
+        keywords: 'schedule cron 예약 주기 회귀 regression',
       },
       {
         href: '/queue',
-        label: '작업',
+        labelKey: 'queue',
         icon: Activity,
-        keywords: 'queue 큐 작업 워크로드 진행 대기 런타임',
+        keywords: 'queue 큐 작업 워크로드 진행 대기 런타임 workload',
       },
       {
         href: '/runtimes',
-        label: '런타임',
+        labelKey: 'runtimes',
         icon: Server,
-        keywords: 'runtime 런타임 실행 인프라 docker k8s nomad 러너',
+        keywords: 'runtime 런타임 실행 인프라 docker k8s nomad 러너 runner',
       },
-      { href: '/report', label: '리포트', icon: FileText, keywords: 'report 회귀 추세' },
+      {
+        href: '/report',
+        labelKey: 'report',
+        icon: FileText,
+        keywords: 'report 리포트 회귀 추세 trend',
+      },
     ],
   },
 ]

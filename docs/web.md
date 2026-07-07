@@ -20,6 +20,15 @@ runs, and harnesses.
 These don't conflict: Keycloak = people in the browser, API keys = machines. Both resolve to the same
 control-plane `Principal{workspace, roles}`.
 
+## i18n
+UI copy lives in next-intl catalogs `messages/{ko,en}.json` — components never hardcode user-facing
+strings (`useTranslations()` client / `getTranslations()` server). The locale is **cookie-based**
+(`assay-locale`; `shared/i18n/request.ts` resolves cookie > `Accept-Language` > `en`) — there is **no
+`/[locale]` URL segment**, because the first path segment is the workspace (Linear-style). The
+switcher (`features/switch-locale`) sits in the sidebar footer and persists the cookie via a server
+action. Migration is incremental per slice; `widgets/app-shell` is the reference. New strings go to
+**both** catalogs in the same PR.
+
 ## Stack
 Next.js 16 (App Router) · React 19 · TypeScript · Tailwind v4 (`@theme inline` tokens) · shadcn-style UI
 (new-york, neutral base, **Linear-style** indigo `#5e6ad2` primary + tight `0.5rem` radius + near-black dark

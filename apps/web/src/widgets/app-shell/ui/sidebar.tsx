@@ -4,9 +4,11 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LogIn, LogOut, Menu, Moon, Search, Settings, Sun, UserCog, X } from 'lucide-react'
+import { useTranslations } from 'next-intl'
 
 import { NotificationBell } from '@/widgets/notification-bell'
 import { WorkspaceSwitcher } from '@/widgets/workspace-switcher'
+import { LocaleSwitcher } from '@/features/switch-locale'
 import type { Workspace } from '@/entities/workspace'
 import { can } from '@/shared/auth/can'
 import { cn } from '@/shared/lib/utils'
@@ -49,6 +51,7 @@ const iconClass =
 
 function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: () => void }) {
   const pathname = usePathname()
+  const t = useTranslations('nav')
   return (
     <nav className="flex flex-col gap-4">
       {NAV_SECTIONS.map((section, i) => (
@@ -90,7 +93,7 @@ function NavLinks({ workspace, onNavigate }: { workspace: string; onNavigate?: (
                   )}
                   strokeWidth={1.75}
                 />
-                {item.label}
+                {t(item.labelKey)}
               </Link>
             )
           })}
@@ -116,6 +119,7 @@ function SidebarFooter({
   onNavigate?: () => void
 }) {
   const pathname = usePathname()
+  const t = useTranslations('shell')
   const accountActive = pathname === `/${workspace}/account`
   const settingsActive = pathname.startsWith(`/${workspace}/settings`)
   return (
@@ -127,7 +131,7 @@ function SidebarFooter({
         className={cn(rowClass, accountActive && 'bg-accent text-foreground')}
       >
         <UserCog className={cn(iconClass, accountActive && 'text-foreground')} strokeWidth={1.75} />
-        계정
+        {t('account')}
       </Link>
       {can(roles, 'settings:read') && (
         <Link
@@ -140,7 +144,7 @@ function SidebarFooter({
             className={cn(iconClass, settingsActive && 'text-foreground')}
             strokeWidth={1.75}
           />
-          워크스페이스 설정
+          {t('workspaceSettings')}
         </Link>
       )}
       <button
@@ -150,8 +154,9 @@ function SidebarFooter({
       >
         <Sun className={cn(iconClass, 'hidden dark:block')} strokeWidth={1.75} />
         <Moon className={cn(iconClass, 'block dark:hidden')} strokeWidth={1.75} />
-        테마 전환
+        {t('toggleTheme')}
       </button>
+      <LocaleSwitcher rowClassName={rowClass} />
       {showLogin &&
         (authed ? (
           <button
@@ -162,7 +167,7 @@ function SidebarFooter({
             className="group flex w-full items-center gap-2.5 rounded-md px-2 py-[7px] text-left text-[13px] font-[510] text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
           >
             <LogOut className="size-[17px] shrink-0" strokeWidth={1.75} />
-            로그아웃
+            {t('logout')}
           </button>
         ) : (
           <button
@@ -173,7 +178,7 @@ function SidebarFooter({
             className={cn(rowClass, 'w-full text-left')}
           >
             <LogIn className={iconClass} strokeWidth={1.75} />
-            로그인
+            {t('login')}
           </button>
         ))}
     </div>
@@ -182,6 +187,7 @@ function SidebarFooter({
 
 function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () => void }) {
   const mac = isMac()
+  const t = useTranslations('shell')
   return (
     <div className="flex h-full flex-col gap-3 px-3 py-3.5">
       <WorkspaceSwitcher current={props.workspace} workspaces={props.workspaces} />
@@ -192,7 +198,7 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
         className="flex items-center gap-2 rounded-md border border-border bg-card/50 px-2 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
       >
         <Search className="size-4" strokeWidth={1.75} />
-        <span className="flex-1 text-left">검색·이동</span>
+        <span className="flex-1 text-left">{t('searchPlaceholder')}</span>
         <Kbd>{mac ? '⌘' : 'Ctrl'} K</Kbd>
       </button>
 
@@ -217,6 +223,7 @@ function SidebarBody({ onNavigate, ...props }: SidebarProps & { onNavigate?: () 
 
 export function Sidebar(props: SidebarProps) {
   const [mobileOpen, setMobileOpen] = useState(false)
+  const t = useTranslations('shell')
   const activeWorkspace = props.workspaces.find((w) => w.id === props.workspace)
   const workspaceLabel = activeWorkspace?.name ?? props.workspace
   return (
@@ -225,7 +232,7 @@ export function Sidebar(props: SidebarProps) {
       <div className="sticky top-0 z-30 flex h-12 items-center gap-2 border-b border-border bg-background/80 px-3 backdrop-blur-xl md:hidden">
         <button
           type="button"
-          aria-label="메뉴 열기"
+          aria-label={t('openMenu')}
           onClick={() => setMobileOpen(true)}
           className="grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -242,7 +249,7 @@ export function Sidebar(props: SidebarProps) {
         </Link>
         <button
           type="button"
-          aria-label="검색"
+          aria-label={t('search')}
           onClick={openCommandPalette}
           className="ml-auto grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
         >
@@ -265,7 +272,7 @@ export function Sidebar(props: SidebarProps) {
           <div className="absolute left-0 top-0 h-full w-[264px] border-r border-border bg-background shadow-pop animate-in slide-in-from-left-2 duration-150">
             <button
               type="button"
-              aria-label="닫기"
+              aria-label={t('close')}
               onClick={() => setMobileOpen(false)}
               className="absolute right-2 top-2.5 z-10 grid size-8 place-items-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground"
             >

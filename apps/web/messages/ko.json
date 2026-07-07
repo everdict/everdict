@@ -1,0 +1,42 @@
+{
+  "nav": {
+    "overview": "개요",
+    "harnesses": "하니스",
+    "benchmarks": "벤치마크",
+    "scorecards": "스코어카드",
+    "views": "뷰",
+    "schedules": "예약",
+    "queue": "작업",
+    "runtimes": "런타임",
+    "report": "리포트"
+  },
+  "shell": {
+    "searchPlaceholder": "검색·이동",
+    "account": "계정",
+    "workspaceSettings": "워크스페이스 설정",
+    "toggleTheme": "테마 전환",
+    "logout": "로그아웃",
+    "login": "로그인",
+    "openMenu": "메뉴 열기",
+    "search": "검색",
+    "close": "닫기"
+  },
+  "palette": {
+    "placeholder": "페이지로 이동하거나 작업 실행…",
+    "empty": "결과가 없습니다.",
+    "groupNav": "이동",
+    "groupActions": "액션",
+    "newRun": "새 실행",
+    "newScorecard": "새 스코어카드 실행",
+    "compareScorecards": "스코어카드 비교",
+    "ingestTrace": "트레이스 올리기",
+    "newDataset": "데이터셋 등록",
+    "newJudge": "Judge 등록",
+    "toggleTheme": "테마 바꾸기"
+  },
+  "locale": {
+    "label": "언어",
+    "ko": "한국어",
+    "en": "English"
+  }
+}

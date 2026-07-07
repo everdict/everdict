@@ -67,8 +67,14 @@ near-black `#08090a` dark surface). Light+dark via the `.dark` class (`@custom-v
   (combobox over preloaded names + "새로" inline create; `defaultMultiline` for PEM/kubeconfig).
   Used by harness env, GHE App private key, Mattermost tokens.
 
-## Language (per CLAUDE.md)
-Skill/rule bodies English; **code comments Korean**, user-facing UI copy Korean.
+## Language & i18n (per CLAUDE.md)
+Skill/rule bodies English; **code comments Korean**. User-facing UI copy is **never hardcoded** —
+it lives in next-intl catalogs `messages/{ko,en}.json` (add every new string to BOTH in the same PR).
+Locale is **cookie-based** (`shared/i18n/`: cookie > Accept-Language > `en`) — NO `/[locale]` URL
+segment (the first path segment stays the workspace). Client components use `useTranslations()`,
+server components `getTranslations()` (`next-intl/server`); the switcher is `features/switch-locale`
+(sidebar footer). Static module configs (e.g. `nav-config.ts`) store message **keys** (`labelKey`),
+resolved with `t()` at render. Reference migration: `widgets/app-shell`.
 
 See `docs/web.md` (screens + run) + `docs/auth.md` + `docs/tenancy.md`; the rule `web.md` has the inlined
 critical rules.

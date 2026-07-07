@@ -1,4 +1,8 @@
 import type { NextConfig } from 'next'
+import createNextIntlPlugin from 'next-intl/plugin'
+
+// i18n 요청 설정(쿠키 기반 로케일 — URL 라우팅 없음). 카탈로그는 messages/{ko,en}.json.
+const withNextIntl = createNextIntlPlugin('./src/shared/i18n/request.ts')
 
 const nextConfig: NextConfig = {
   // 컨트롤플레인(@assay/api) HTTP 클라이언트만 쓰므로 추가 서버 패키지 없음.
@@ -23,4 +27,4 @@ const nextConfig: NextConfig = {
   experimental: { serverActions: { bodySizeLimit: '8mb' } },
 }
 
-export default nextConfig
+export default withNextIntl(nextConfig)
