@@ -1,7 +1,13 @@
 # Everdict full-stack production compose — web + API + Postgres (no Keycloak).
 #
 #   cp deploy/compose/.env.example deploy/compose/.env   # fill in the values (at minimum POSTGRES_PASSWORD)
-#   docker compose -f deploy/compose/docker-compose.prod.yaml --env-file deploy/compose/.env up -d --build
+#
+# Two ways to run:
+#   A) Pull prebuilt images from GHCR (fast, no local build) — needs the packages to be public:
+#        docker compose -f deploy/compose/docker-compose.prod.yaml --env-file deploy/compose/.env up -d
+#   B) Build from source (dev/custom, or when GHCR images aren't available):
+#        docker compose -f deploy/compose/docker-compose.prod.yaml --env-file deploy/compose/.env up -d --build
+#   Pin a released version with EVERDICT_VERSION=0.1.0 in .env (defaults to latest).
 #
 # Differences from dev (hardening):
 #  - Postgres stores (persistent volume, migrations applied automatically at startup).
@@ -34,6 +40,8 @@ services:
     restart: unless-stopped
 
   api:
+    # Pulled by default (GHCR); `up --build` builds this same tag from source instead.
+    image: ghcr.io/everdict/everdict-api:${EVERDICT_VERSION:-latest}
     build:
       context: ../..
       dockerfile: apps/api/Dockerfile
@@ -58,6 +66,8 @@ services:
     restart: unless-stopped
 
   web:
+    # Pulled by default (GHCR); `up --build` builds this same tag from source instead.
+    image: ghcr.io/everdict/everdict-web:${EVERDICT_VERSION:-latest}
     build:
       context: ../..
       dockerfile: apps/web/Dockerfile

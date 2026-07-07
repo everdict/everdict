@@ -54,11 +54,17 @@ control plane on top: apps/api (HTTP+MCP) · apps/web (SaaS web) — see CLAUDE.
 ## Run (Docker Compose quickstart)
 ```bash
 git clone https://github.com/everdict/everdict && cd everdict
+
+# Dev: hot-reload, auth off, in-memory stores (builds from source)
 docker compose -f deploy/compose/docker-compose.dev.yaml up --build
-# web http://localhost:3001 · API http://localhost:8787 — auth off, single tenant, in-memory stores
+# web http://localhost:3001 · API http://localhost:8787
+
+# Or the hardened profile with prebuilt images from GHCR (Postgres persistence, no local build):
+cp deploy/compose/.env.example deploy/compose/.env   # set POSTGRES_PASSWORD
+docker compose -f deploy/compose/docker-compose.prod.yaml --env-file deploy/compose/.env up -d
+# (add --build to build from source instead of pulling ghcr.io/everdict/everdict-{api,web})
 ```
-Hardened profile (Postgres persistence, secrets-at-rest, healthchecks): `deploy/compose/README.md`.
-Human SSO (Keycloak OIDC): `deploy/keycloak/` (realm auto-import) + `docs/dev.md`.
+Details: `deploy/compose/README.md`. Human SSO (Keycloak OIDC): `deploy/keycloak/` (realm auto-import) + `docs/dev.md`.
 
 ## Run (CLI quickstart)
 ```bash
@@ -75,9 +81,10 @@ Pair from the account page with **a single "Connect this device as a runner" but
 keychain). Tray-resident (close = hide), job-completion notifications, auto-start toggle.
 
 ```bash
-# Download the installer: the web's /{workspace}/download — auto OS detection + a 302 proxy after login (keeps the repo private).
-#   (server env: DESKTOP_RELEASES_TOKEN=fine-grained PAT[contents:read]; direct GitHub access is collaborators-only
-#    — https://github.com/everdict/everdict/releases/latest)
+# Download the installer straight from GitHub Releases (the repo is public):
+#   https://github.com/everdict/everdict/releases/latest
+#   (Linux AppImage/deb · macOS dmg/zip [x64+arm64] · Windows exe)
+# Or the web's /{workspace}/download page (auto OS detection).
 # (unsigned — bypass the mac Gatekeeper / win SmartScreen warning to run. Signing once a certificate is obtained.)
 
 # dev run (the web :3000 + control plane :8787 must be up):
@@ -91,8 +98,8 @@ git tag desktop-v0.2.0 && git push origin desktop-v0.2.0
 ```
 
 - Live e2e: `node scripts/live/desktop-runner.mjs` (one-click pair → `self:<id>` run → provenance check).
-- **Auto-update**: the client is built in and verified (detect/download automatic; applying restarts from the tray).
-  It activates once the feed's public location is decided (`electron-builder.yml` publish block) — currently disabled.
+- **Auto-update**: enabled — the client checks GitHub Releases (`everdict/everdict`) on launch + every 6h, downloads
+  in the background, and applies on a user-consented tray restart. Ship an update by pushing a `desktop-v*` tag.
 - Enabling the web download page (`/{ws}/download`): set `DESKTOP_RELEASES_TOKEN` (unset ⇒ falls back to the `DESKTOP_DOWNLOAD_URL` external link).
 
 ## Self-hosted runner (run on your own machine)

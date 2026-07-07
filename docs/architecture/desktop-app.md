@@ -5,18 +5,18 @@
 > the desktop app too** — the desktop must do *everything the web does*, plus what only a native app can do (resident
 > runner, one-click pairing, tray/notifications/autostart).
 > Dev conventions for `apps/desktop` / `packages/runner-core` live in skill `.claude/skills/desktop/`.
-> - **D6 — auto-update: detect/download automatic, APPLY is user-consented (LOCKED); feed location PENDING.**
+> - **D6 — auto-update: detect/download automatic, APPLY is user-consented (LOCKED); ENABLED.**
 >   `electron-updater` in main behind `UpdaterController` (DI): check on launch + every 6h,
 >   `autoDownload`, `autoInstallOnAppQuit`; "Apply" only via the tray restart item — never force-restart
 >   a runner mid-job (apply = graceful runner shutdown → `quitAndInstall`). Activation gate:
->   `app.isPackaged` && (packaged `app-update.yml` [lands when a `publish` config is added] ||
+>   `app.isPackaged` && (packaged `app-update.yml` [shipped by electron-builder's `publish` block] ||
 >   `EVERDICT_UPDATE_FEED_URL` env → generic feed via a userData config injected through
 >   `autoUpdater.updateConfigPath` — `setFeedURL` alone is insufficient: AppImageUpdater reads the
->   on-disk config during download). **The feed's public location is the user's pending decision**:
->   (a) public `everdict-releases` repo (code stays private; needs a cross-repo PAT secret in CI) vs
->   (b) make `everdict/everdict` public (current CI works as-is). Until then the updater is cleanly
->   disabled. mac auto-update stays inert until code signing exists; deb installs don't auto-update
->   (AppImage/NSIS/mac-zip do).
+>   on-disk config during download). **Feed = GitHub Releases of the public `everdict/everdict` repo**
+>   (`electron-builder.yml` `publish: {provider: github, owner: everdict, repo: everdict}`; public repo →
+>   read without a token). Ship an update by pushing a `desktop-v*` tag (release workflow attaches the
+>   installers + `latest*.yml`). mac auto-update stays inert until code signing exists; deb installs don't
+>   auto-update (AppImage/NSIS/mac-zip do).
 > - **D7 — the desktop fully absorbs the pairing surface (LOCKED 2026-07-03).** The browser web no longer
 >   offers manual device pairing (the token-shown-once modal is removed): personal-machine pairing is the
 >   desktop's one-click only, and the browser account page becomes **manage-only** (list · live status ·
