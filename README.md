@@ -53,7 +53,7 @@ control plane on top: apps/api (HTTP+MCP) · apps/web (SaaS web) — see CLAUDE.
 
 ## Run (Docker Compose quickstart)
 ```bash
-git clone https://github.com/Ho2eny/everdict && cd everdict
+git clone https://github.com/everdict/everdict && cd everdict
 docker compose -f deploy/compose/docker-compose.dev.yaml up --build
 # web http://localhost:3001 · API http://localhost:8787 — auth off, single tenant, in-memory stores
 ```
@@ -77,7 +77,7 @@ keychain). Tray-resident (close = hide), job-completion notifications, auto-star
 ```bash
 # Download the installer: the web's /{workspace}/download — auto OS detection + a 302 proxy after login (keeps the repo private).
 #   (server env: DESKTOP_RELEASES_TOKEN=fine-grained PAT[contents:read]; direct GitHub access is collaborators-only
-#    — https://github.com/Ho2eny/everdict/releases/latest)
+#    — https://github.com/everdict/everdict/releases/latest)
 # (unsigned — bypass the mac Gatekeeper / win SmartScreen warning to run. Signing once a certificate is obtained.)
 
 # dev run (the web :3000 + control plane :8787 must be up):
@@ -190,7 +190,7 @@ harness-agnostic **datasets**, user-registered **judges** (model judge live vs L
 invites + per-key API scopes, personal **connected accounts** (GitHub one-click, Mattermost notify),
 **self-hosted runner** (pair → `self:<id>` runs with provenance, cross-workspace, service harnesses on
 local Docker) and the **desktop app** (web-parity Electron shell, one-click pairing, 3-OS release CI →
-[GitHub Releases](https://github.com/Ho2eny/everdict/releases), auto-update client) — all with
+[GitHub Releases](https://github.com/everdict/everdict/releases), auto-update client) — all with
 control-plane-owned auth (real Keycloak OIDC + API keys), Postgres persistence, the web as a BFF token
 courier, and the agent-facing MCP server (full BFF↔MCP parity). Shipped but awaiting a live external
 e2e: GitHub Actions CI triggers (PR pins / merge re-pin, OIDC federation). Still needing your

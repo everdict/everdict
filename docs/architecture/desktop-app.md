@@ -14,7 +14,7 @@
 >   `autoUpdater.updateConfigPath` — `setFeedURL` alone is insufficient: AppImageUpdater reads the
 >   on-disk config during download). **The feed's public location is the user's pending decision**:
 >   (a) public `everdict-releases` repo (code stays private; needs a cross-repo PAT secret in CI) vs
->   (b) make `Ho2eny/everdict` public (current CI works as-is). Until then the updater is cleanly
+>   (b) make `everdict/everdict` public (current CI works as-is). Until then the updater is cleanly
 >   disabled. mac auto-update stays inert until code signing exists; deb installs don't auto-update
 >   (AppImage/NSIS/mac-zip do).
 > - **D7 — the desktop fully absorbs the pairing surface (LOCKED 2026-07-03).** The browser web no longer
@@ -220,7 +220,7 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    artifacts into a single **GitHub Release** (`softprops/action-gh-release`, auto release notes).
    Deterministic artifact names (`Everdict-<ver>-<os>-<arch>.<ext>`). All targets **unsigned** until certs
    exist (`CSC_IDENTITY_AUTO_DISCOVERY=false`); `latest*.yml` uploaded for a future electron-updater.
-   Point the web's `DESKTOP_DOWNLOAD_URL` at `https://github.com/Ho2eny/everdict/releases/latest`.
+   Point the web's `DESKTOP_DOWNLOAD_URL` at `https://github.com/everdict/everdict/releases/latest`.
    **Remaining**: signing certs (mac notarize / win Authenticode) — config hooks noted in
    `electron-builder.yml`.
 7. ✅ **Download page** (D7 follow-up — repo stays private, no public releases repo) —
