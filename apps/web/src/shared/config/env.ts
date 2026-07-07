@@ -4,11 +4,13 @@ import { z } from 'zod'
 const schema = z.object({
   // Control plane (@everdict/api) base URL — called from the server only.
   CONTROL_PLANE_URL: z.string().url().default('http://127.0.0.1:8787'),
-  // GitHub repo + token (server-only secret) the desktop download page (/{ws}/download) reads releases from.
-  // Even if the repo is private, members download it via the /api/desktop/download proxy (302) after web login.
+  // GitHub repo the desktop download page (/{ws}/download) reads releases from. Public (everdict/everdict) → read
+  // unauthenticated; members download via the /api/desktop/download proxy (302) after web login.
   DESKTOP_RELEASES_REPO: z.string().default('everdict/everdict'),
-  DESKTOP_RELEASES_TOKEN: z.string().optional(), // fine-grained PAT(contents:read) — when unset, the page shows a fallback notice
-  // Fallback external link — the alternate URL the download page points to when the token is unset (e.g. a public releases page).
+  // Optional server-only PAT (fine-grained contents:read) — only needed for a PRIVATE releases repo (also lifts the API
+  // rate limit). Unset is fine for the public repo.
+  DESKTOP_RELEASES_TOKEN: z.string().optional(),
+  // Fallback external link — where the download page points when release metadata can't be fetched (e.g. a private repo with no token).
   DESKTOP_DOWNLOAD_URL: z.string().url().optional(),
   // Keycloak (Auth.js)
   AUTH_SECRET: z.string().optional(),

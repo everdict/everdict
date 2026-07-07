@@ -223,16 +223,17 @@ That's the whole API. No generic `invoke`, no fs/shell access, nothing else.
    Point the web's `DESKTOP_DOWNLOAD_URL` at `https://github.com/everdict/everdict/releases/latest`.
    **Remaining**: signing certs (mac notarize / win Authenticode) — config hooks noted in
    `electron-builder.yml`.
-7. ✅ **Download page** (D7 follow-up — repo stays private, no public releases repo) —
-   `/{workspace}/download`: the web **server** reads the latest `desktop-v*` release from GitHub with a
-   server-only PAT (`DESKTOP_RELEASES_REPO`/`DESKTOP_RELEASES_TOKEN`, 5-min cached, `features/download-desktop`),
-   renders OS-detected recommended buttons (UA → linux/mac/win; mac shows arm64+x64 — arch is not UA-reliable)
+7. ✅ **Download page** (D7 follow-up — the `everdict/everdict` repo is public, same feed as the auto-updater) —
+   `/{workspace}/download`: the web **server** reads the latest `desktop-v*` release from GitHub. The public repo
+   reads **unauthenticated** (`DESKTOP_RELEASES_REPO`, 5-min cached, `features/download-desktop`);
+   `DESKTOP_RELEASES_TOKEN` is **optional** — only a private releases repo needs it (it also lifts the rate limit).
+   Renders OS-detected recommended buttons (UA → linux/mac/win; mac shows arm64+x64 — arch is not UA-reliable)
    + an all-platforms list + post-install steps + unsigned caveats. Actual downloads go through
    `GET /api/desktop/download?id=…`: session-checked (`currentPrincipal`), asset id validated against **our**
    desktop release only, then GitHub's octet-stream 302 → **signed temporary URL** is passed to the browser
    (big files never stream through the web server). The Runners tab CTA links here (internal) instead of an
-   external URL; `DESKTOP_DOWNLOAD_URL` remains as the page's fallback when no token is configured.
-   Live-verified: page renders v0.1.0 assets from the private repo; valid id → 302 to
+   external URL; `DESKTOP_DOWNLOAD_URL` remains as the page's fallback when release metadata can't be fetched
+   (a private repo with no token). Live-verified: page renders v0.1.0 assets; valid id → 302 to
    `release-assets.githubusercontent.com`; foreign id → 404.
 8. ✅ **Auto-update client** (D6) — `UpdaterController` (`updater.ts`, DI + vitest) + tray UX
    (`Downloading update… (n%)` disabled row → `Apply vX update (restart)` action) + ready OS

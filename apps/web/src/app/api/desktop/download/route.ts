@@ -5,9 +5,10 @@ import { findDesktopAsset } from '@/features/download-desktop/api/releases'
 import { currentPrincipal } from '@/shared/auth/principal'
 import { env } from '@/shared/config/env'
 
-// Desktop installer download proxy — serves a private repo's release assets only behind web login (members).
+// Desktop installer download proxy — serves release assets behind web login (members).
+// The everdict/everdict repo is public, so assets read unauthenticated; a token is attached only for a private releases repo.
 // Requesting the GitHub asset API as octet-stream returns a 302 to a signed temporary URL, so just redirect it through
-// (large files don't pass through the web server). The token exists only in the server env. Design: docs/architecture/desktop-app.md.
+// (large files don't pass through the web server). Any token stays in the server env. Design: docs/architecture/desktop-app.md.
 export async function GET(request: Request): Promise<Response> {
   const t = await getTranslations('downloadPage')
   const { principal } = await currentPrincipal()
@@ -18,19 +19,18 @@ export async function GET(request: Request): Promise<Response> {
   if (!idRaw || !Number.isInteger(id) || id <= 0)
     return NextResponse.json({ error: t('errorInvalidAsset') }, { status: 400 })
 
-  const token = env.DESKTOP_RELEASES_TOKEN
+  const token = env.DESKTOP_RELEASES_TOKEN // optional — only a private releases repo needs it
   // Allow only assets belonging to our desktop releases — prevent proxying an arbitrary id.
-  const asset = token ? await findDesktopAsset(id) : null
-  if (!asset || !token)
-    return NextResponse.json({ error: t('errorReleaseNotFound') }, { status: 404 })
+  const asset = await findDesktopAsset(id)
+  if (!asset) return NextResponse.json({ error: t('errorReleaseNotFound') }, { status: 404 })
 
   const gh = await fetch(
     `https://api.github.com/repos/${env.DESKTOP_RELEASES_REPO}/releases/assets/${asset.id}`,
     {
       headers: {
-        authorization: `Bearer ${token}`,
         accept: 'application/octet-stream',
         'x-github-api-version': '2022-11-28',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
       },
       redirect: 'manual', // pass the 302's signed URL straight to the browser
       cache: 'no-store',
