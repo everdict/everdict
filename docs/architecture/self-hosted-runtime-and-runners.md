@@ -162,7 +162,7 @@ runner, once configured, holds its own GitHub credential — a company resource,
    signal. **Live e2e:** `scripts/live/workspace-shared-runner.mjs` (pair → `assay runner` → `self:ws:<id>` run →
    `provenance.by="ws:default"` + cross-workspace `NOT_FOUND`); verified PASS.
 4. **GitHub Actions runner co-registration (repo-level). ✅ SHIPPED (backend + MCP).** `CiLinkService.mintRunnerToken`
-   (personal GitHub connection, `repo` scope → `POST /repos/{repo}/actions/runners/registration-token`, short-lived,
+   (workspace GitHub App, `administration:write` → `POST /repos/{repo}/actions/runners/registration-token`, short-lived,
    never stored) + `installGithubWorkspaceRunner` (`github-runner-install.ts`): pairs a workspace runner (fresh
    `rnr_`) + mints the GitHub token + renders a one-shot install script (`config.sh` **and** `assay runner --pair`)
    + a workflow hint (`runs-on: [self-hosted, assay-<id>]` + run-eval `runtime: self:ws:<id>`). Route
@@ -171,8 +171,11 @@ runner, once configured, holds its own GitHub credential — a company resource,
    workspace-shared runner tier**": a `via:"github-actions"` principal targeting `self:ws:<id>` works because the
    dispatcher derives the owner from the job tenant (workspace membership = access). The run-eval action already
    accepts a `runtime` input. **Web + RepoLink — SHIPPED.** Settings › 공유 러너 tab has a **GitHub Actions 러너**
-   dialog (pick a GitHub connection + repo → install script + workflow hint, token-once) when the admin has a
-   GitHub connection. `WorkspaceCiLink` grew optional `runsOn`/`runtime` (additive JSONB) so `renderCiWorkflow`
+   dialog driven by the **workspace GitHub App** (no raw owner/name input): the target is picked from the
+   installations' allowed repos (search + GHE host badge) or the installed orgs; when the App isn't installed the
+   dialog requires it (CTA that switches to the 통합 tab — install first, then pick). The picker threads the
+   installation's `host` so the registration token is minted against the exact installation (host-strict).
+   `WorkspaceCiLink` grew optional `runsOn`/`runtime` (additive JSONB) so `renderCiWorkflow`
    targets self-hosted directly (`runs-on: <label>` + run-eval `runtime: self:ws:<id>`); settable via the CI-links
    connect dialog ("5. 셀프호스티드 러너"), HTTP `PUT /workspace/ci/links`, and MCP `link_ci_repository`.
 5. **Org-level runner registration — ✅ SHIPPED.** Org-level uses
@@ -183,7 +186,10 @@ runner, once configured, holds its own GitHub credential — a company resource,
    (install the workspace App on the org first). `mintRunnerToken` takes a `{repo}|{org}` target;
    `installGithubWorkspaceRunner` accepts `org` (mutually exclusive with `repository`) and points `config.sh --url`
    at the org URL. Surfaced on `POST /workspace/runners/github-install {org?}`, MCP
-   `github_install_workspace_runner {org?}`, and the web dialog (repo/org toggle). **Org runner groups — SHIPPED:** an optional `runnerGroup`
+   `github_install_workspace_runner {org?}`, and the web dialog (repo/org toggle). All three surfaces also take an
+   optional `host` (GHE base URL): given → only that host's installation is used (host-strict, else `NotFound`);
+   omitted → the github.com installation is preferred, then any host (legacy — GHE-only workspaces keep working
+   without a host). **Org runner groups — SHIPPED:** an optional `runnerGroup`
    (org-level only) adds `config.sh --runnergroup <name>` so the org's group access policy applies to the runner
    (route/MCP/web params). **Runner labels for placement — SHIPPED** as capability-gated pool routing (slice 2): the
    pool's lease gate skips runners lacking a job's required capabilities, so `self:ws` routes each job to a suitable

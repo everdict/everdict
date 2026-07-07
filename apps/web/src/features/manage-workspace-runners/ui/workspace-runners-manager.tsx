@@ -1,9 +1,10 @@
 'use client'
 
 import { useEffect, useState, useTransition } from 'react'
-import { Check, Copy, Github, Server, Trash2 } from 'lucide-react'
+import { Check, Copy, Github, Lock, Search, Server, Trash2 } from 'lucide-react'
 import { useLocale, useTranslations } from 'next-intl'
 
+import type { GithubAppInstallation, GithubAppView } from '@/entities/github-app'
 import {
   capabilityMeta,
   type GithubRunnerInstall,
@@ -37,9 +38,13 @@ function isOnline(lastSeenAt?: string): boolean {
 export function WorkspaceRunnersManager({
   runners,
   canWrite,
+  githubApp,
+  onOpenIntegrations,
 }: {
   runners: RunnerMeta[]
   canWrite: boolean
+  githubApp: GithubAppView // GitHub Actions 러너 등록 picker 의 대상 목록(설치 + 허용 레포) — 통합 탭과 같은 스냅샷
+  onOpenIntegrations?: () => void // "GitHub App 설치/관리" CTA — 통합 탭으로 전환(같은 설정 페이지 안)
 }) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
@@ -202,7 +207,14 @@ export function WorkspaceRunnersManager({
       {canWrite && (
         <RegisterRunnerDialog open={registerOpen} onClose={() => setRegisterOpen(false)} />
       )}
-      {canWrite && <GithubInstallDialog open={githubOpen} onClose={() => setGithubOpen(false)} />}
+      {canWrite && (
+        <GithubInstallDialog
+          open={githubOpen}
+          onClose={() => setGithubOpen(false)}
+          installations={githubApp.installations}
+          {...(onOpenIntegrations !== undefined ? { onOpenIntegrations } : {})}
+        />
+      )}
     </div>
   )
 }
@@ -376,14 +388,36 @@ function RegisterRunnerDialog({ open, onClose }: { open: boolean; onClose: () =>
   )
 }
 
-// GitHub Actions 러너 자가등록 모달 — 내 GitHub 연결 + repo 선택 후 생성. 생성되면 빌드 서버에서 실행할 설치
-// 스크립트(GitHub 러너 + Assay 러너)와 워크플로 힌트(runs-on 라벨 + run-eval runtime)를 1회 노출한다.
-function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => void }) {
+// GHE host 표시는 URL 스킴을 뗀 호스트명만(github.com 은 무표기) — picker 행 배지용.
+const hostLabel = (host: string) => host.replace(/^https?:\/\//, '').replace(/\/$/, '')
+
+// picker 선택 좌표 — 같은 "owner/name"/org 가 github.com 과 GHE 양쪽에 있을 수 있어 host 까지가 식별자다.
+interface SelectedTarget {
+  name: string // repo 모드 = "owner/name", org 모드 = org(설치 account)
+  host?: string // GHE 베이스 URL — 미지정 = github.com
+}
+const targetKey = (s: SelectedTarget) => `${s.host ?? 'github.com'}:${s.name}`
+
+// GitHub Actions 러너 자가등록 모달 — 워크스페이스 GitHub App 설치를 전제로, 설치가 허용한 레포/조직에서 대상을
+// 고른다(raw 입력 없음; App 미설치면 통합 탭 설치 CTA). 생성되면 빌드 서버에서 실행할 설치 스크립트(GitHub 러너 +
+// Assay 러너)와 워크플로 힌트(runs-on 라벨 + run-eval runtime)를 1회 노출한다.
+function GithubInstallDialog({
+  open,
+  onClose,
+  installations,
+  onOpenIntegrations,
+}: {
+  open: boolean
+  onClose: () => void
+  installations: GithubAppInstallation[]
+  onOpenIntegrations?: () => void
+}) {
   const t = useTranslations('manageWorkspaceRunners')
   const locale = useLocale()
   const [mode, setMode] = useState<'repo' | 'org'>('repo')
-  const [repository, setRepository] = useState('')
-  const [org, setOrg] = useState('')
+  const [repoQuery, setRepoQuery] = useState('')
+  const [repoSel, setRepoSel] = useState<SelectedTarget>()
+  const [orgSel, setOrgSel] = useState<SelectedTarget>()
   const [runnerGroup, setRunnerGroup] = useState('')
   const [result, setResult] = useState<GithubRunnerInstall>()
   const [copied, setCopied] = useState<'script' | 'hint'>()
@@ -393,28 +427,58 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
   useEffect(() => {
     if (!open) return
     setMode('repo')
-    setRepository('')
-    setOrg('')
+    setRepoQuery('')
+    setRepoSel(undefined)
+    setOrgSel(undefined)
     setRunnerGroup('')
     setResult(undefined)
     setCopied(undefined)
     setError(undefined)
   }, [open])
 
+  const installed = installations.length > 0
+  // repo picker 행 — 각 설치의 허용 레포를 합친다(GHE 레포는 host 를 실어 옴). 조회 실패 설치는 경고로만.
+  const repoRows = installations.flatMap((i) =>
+    (i.repos ?? []).map((r) => ({
+      fullName: r.fullName,
+      ...(r.host !== undefined ? { host: r.host } : {}),
+      private: r.private,
+    }))
+  )
+  const failedAccounts = installations
+    .filter((i) => i.reposError !== undefined)
+    .map((i) => i.account)
+  const filteredRepos = repoRows.filter((r) =>
+    `${r.fullName} ${r.host ? hostLabel(r.host) : ''}`
+      .toLowerCase()
+      .includes(repoQuery.trim().toLowerCase())
+  )
+
+  // "App 설치/저장소 확장" — 통합 탭으로 전환(모달은 닫는다).
+  function goToIntegrations() {
+    onClose()
+    onOpenIntegrations?.()
+  }
+
   function onGenerate() {
     setError(undefined)
-    if (mode === 'repo' && !/^[^/\s]+\/[^/\s]+$/.test(repository.trim())) {
-      setError(t('repoInvalid'))
-      return
-    }
-    if (mode === 'org' && !/^[^/\s]+$/.test(org.trim())) {
-      setError(t('orgInvalid'))
+    const payload =
+      mode === 'org'
+        ? orgSel && {
+            org: orgSel.name,
+            ...(orgSel.host !== undefined ? { host: orgSel.host } : {}),
+            ...(runnerGroup.trim() ? { runnerGroup: runnerGroup.trim() } : {}),
+          }
+        : repoSel && {
+            repository: repoSel.name,
+            ...(repoSel.host !== undefined ? { host: repoSel.host } : {}),
+          }
+    if (!payload) {
+      setError(mode === 'org' ? t('orgSelectRequired') : t('repoSelectRequired'))
       return
     }
     startTransition(async () => {
-      const r = await githubInstallRunnerAction(
-        mode === 'org' ? { org, ...(runnerGroup.trim() ? { runnerGroup } : {}) } : { repository }
-      )
+      const r = await githubInstallRunnerAction(payload)
       if (r.ok && r.install) setResult(r.install)
       else setError(r.error ?? t('generateFailed'))
     })
@@ -490,6 +554,32 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
             </Button>
           </footer>
         </>
+      ) : !installed ? (
+        // App 미설치 — raw 입력으로 우회시키지 않고 설치를 요구한다(설치하면 레포/조직을 바로 고를 수 있다).
+        <>
+          <header className="border-b border-border px-5 py-4">
+            <h2 id="gh-install-title" className="text-[15px] font-[560] text-foreground">
+              {t('githubRegisterTitle')}
+            </h2>
+            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">
+              {t('githubRegisterDesc')}
+            </p>
+          </header>
+          <div className="space-y-3 px-5 py-5">
+            <Callout tone="info">{t('githubAppRequired')}</Callout>
+          </div>
+          <footer className="flex justify-end gap-2 border-t border-border px-5 py-3.5">
+            <Button size="sm" variant="secondary" onClick={onClose}>
+              {t('close')}
+            </Button>
+            {onOpenIntegrations && (
+              <Button size="sm" onClick={goToIntegrations}>
+                <Github />
+                {t('openIntegrations')}
+              </Button>
+            )}
+          </footer>
+        </>
       ) : (
         <>
           <header className="border-b border-border px-5 py-4">
@@ -500,8 +590,7 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
               {t('githubRegisterDesc')}
             </p>
           </header>
-          <div className="space-y-4 px-5 py-4">
-            <p className="text-[12px] text-faint">{t('githubAppHint')}</p>
+          <div className="max-h-[62vh] space-y-4 overflow-y-auto px-5 py-4">
             {/* 대상: 레포 vs 조직(org — 그 org 의 모든 레포 공유) */}
             <div className="space-y-1.5">
               <Label>{t('targetLabel')}</Label>
@@ -524,26 +613,122 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
               </div>
             </div>
             {mode === 'repo' ? (
+              // 레포 picker — App 설치가 허용한 레포만(설치 시 고른 것). 검색은 레포명 + GHE 호스트명.
               <div className="space-y-1.5">
-                <Label htmlFor="gh-repo">{t('repo')}</Label>
-                <Input
-                  id="gh-repo"
-                  value={repository}
-                  onChange={(e) => setRepository(e.target.value)}
-                  placeholder={t('repoPlaceholder')}
-                  autoFocus
-                />
+                <Label>{t('repo')}</Label>
+                {failedAccounts.length > 0 && (
+                  <Callout tone="warning" className="py-1.5">
+                    {t('reposPartialError', { accounts: failedAccounts.join(', ') })}
+                  </Callout>
+                )}
+                {repoRows.length === 0 ? (
+                  <Callout tone="info" className="py-1.5">
+                    {t('noAllowedRepos')}
+                  </Callout>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-1.5 rounded-md border bg-card px-2.5 shadow-raise focus-within:border-primary focus-within:ring-2 focus-within:ring-ring/25">
+                      <Search className="size-3.5 shrink-0 text-muted-foreground/70" />
+                      <input
+                        value={repoQuery}
+                        onChange={(e) => setRepoQuery(e.target.value)}
+                        placeholder={t('repoSearchPlaceholder')}
+                        className="h-8 w-full bg-transparent text-[13px] text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+                      />
+                    </div>
+                    <div className="max-h-48 divide-y divide-border/70 overflow-y-auto rounded-md border bg-card">
+                      {filteredRepos.length === 0 ? (
+                        <p className="px-3 py-4 text-center text-[12px] text-muted-foreground">
+                          {t('noSearchResults')}
+                        </p>
+                      ) : (
+                        filteredRepos.map((r) => {
+                          const row: SelectedTarget = {
+                            name: r.fullName,
+                            ...(r.host !== undefined ? { host: r.host } : {}),
+                          }
+                          const active =
+                            repoSel !== undefined && targetKey(row) === targetKey(repoSel)
+                          return (
+                            <button
+                              key={targetKey(row)}
+                              type="button"
+                              onClick={() => setRepoSel(row)}
+                              className={cn(
+                                'flex w-full items-center gap-2 px-3 py-2 text-left transition-colors',
+                                active ? 'bg-accent' : 'hover:bg-accent/60'
+                              )}
+                            >
+                              <Check
+                                className={cn(
+                                  'size-3.5 shrink-0 text-primary',
+                                  active ? 'opacity-100' : 'opacity-0'
+                                )}
+                              />
+                              <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
+                                {r.fullName}
+                              </span>
+                              {r.host && (
+                                // GHE repo — 어느 인스턴스에서 온 것인지 호스트명으로 구분(github.com 은 무표기).
+                                <span className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
+                                  {hostLabel(r.host)}
+                                </span>
+                              )}
+                              {r.private && (
+                                <Lock className="size-3 shrink-0 text-muted-foreground/70" />
+                              )}
+                            </button>
+                          )
+                        })
+                      )}
+                    </div>
+                  </>
+                )}
               </div>
             ) : (
+              // org picker — App 이 설치된 조직에서 고른다(그 org 의 모든 레포가 이 러너를 공유).
               <div className="space-y-1.5">
-                <Label htmlFor="gh-org">{t('org')}</Label>
-                <Input
-                  id="gh-org"
-                  value={org}
-                  onChange={(e) => setOrg(e.target.value)}
-                  placeholder={t('orgPlaceholder')}
-                  autoFocus
-                />
+                <Label>{t('org')}</Label>
+                <div className="max-h-48 divide-y divide-border/70 overflow-y-auto rounded-md border bg-card">
+                  {installations.map((i) => {
+                    const row: SelectedTarget = {
+                      name: i.account,
+                      ...(i.host !== undefined ? { host: i.host } : {}),
+                    }
+                    const active = orgSel !== undefined && targetKey(row) === targetKey(orgSel)
+                    return (
+                      <button
+                        key={targetKey(row)}
+                        type="button"
+                        onClick={() => setOrgSel(row)}
+                        className={cn(
+                          'flex w-full items-center gap-2 px-3 py-2 text-left transition-colors',
+                          active ? 'bg-accent' : 'hover:bg-accent/60'
+                        )}
+                      >
+                        <Check
+                          className={cn(
+                            'size-3.5 shrink-0 text-primary',
+                            active ? 'opacity-100' : 'opacity-0'
+                          )}
+                        />
+                        <span className="min-w-0 flex-1 truncate font-mono text-[12px] text-foreground">
+                          {i.account}
+                        </span>
+                        {i.host && (
+                          <span className="shrink-0 rounded border border-border bg-muted/40 px-1.5 py-px font-mono text-[10.5px] text-muted-foreground">
+                            {hostLabel(i.host)}
+                          </span>
+                        )}
+                        {i.repos !== undefined && (
+                          <span className="shrink-0 text-[11px] text-faint">
+                            {t('orgRepoCount', { count: i.repos.length })}
+                          </span>
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
                 <p className="text-[12px] text-faint">{t('orgShared')}</p>
                 <Input
                   value={runnerGroup}
@@ -552,19 +737,54 @@ function GithubInstallDialog({ open, onClose }: { open: boolean; onClose: () => 
                 />
               </div>
             )}
+            {/* 원하는 레포/조직이 안 보이면 GitHub App 설치(허용 저장소)를 넓힌다 — 통합 탭에서. */}
+            {onOpenIntegrations && (
+              <p className="text-[12px] text-faint">
+                {t('targetMissingHint')}{' '}
+                <button
+                  type="button"
+                  onClick={goToIntegrations}
+                  className="font-[510] text-primary hover:underline"
+                >
+                  {t('manageInstallations')}
+                </button>
+              </p>
+            )}
             {error && (
               <Callout tone="danger" className="py-1.5">
                 {error}
               </Callout>
             )}
           </div>
-          <footer className="flex justify-end gap-2 border-t border-border px-5 py-3.5">
-            <Button size="sm" variant="secondary" onClick={onClose} disabled={pending}>
-              {t('cancel')}
-            </Button>
-            <Button size="sm" onClick={onGenerate} disabled={pending}>
-              {pending ? t('generating') : t('generateScript')}
-            </Button>
+          <footer className="flex items-center justify-between gap-3 border-t border-border px-5 py-3.5">
+            <span className="min-w-0 truncate text-[12px] text-faint">
+              {mode === 'repo' && repoSel !== undefined && (
+                <span className="font-mono text-muted-foreground">
+                  {repoSel.name}
+                  {repoSel.host ? ` (${hostLabel(repoSel.host)})` : ''}
+                </span>
+              )}
+              {mode === 'org' && orgSel !== undefined && (
+                <span className="font-mono text-muted-foreground">
+                  {orgSel.name}
+                  {orgSel.host ? ` (${hostLabel(orgSel.host)})` : ''}
+                </span>
+              )}
+            </span>
+            <span className="flex shrink-0 items-center gap-2">
+              <Button size="sm" variant="secondary" onClick={onClose} disabled={pending}>
+                {t('cancel')}
+              </Button>
+              <Button
+                size="sm"
+                onClick={onGenerate}
+                disabled={
+                  pending || (mode === 'repo' ? repoSel === undefined : orgSel === undefined)
+                }
+              >
+                {pending ? t('generating') : t('generateScript')}
+              </Button>
+            </span>
           </footer>
         </>
       )}

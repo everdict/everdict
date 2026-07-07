@@ -72,9 +72,11 @@ export interface GithubInstallResult {
 // GitHub Actions 러너 자가등록 — 워크스페이스-공유 러너를 새로 페어링하고 워크스페이스 GitHub App 으로 등록 토큰을
 // 발급해 빌드 서버 한 대에 두 워커(GitHub 러너 + Assay 러너)를 세우는 설치 스크립트를 받는다. admin(settings:write).
 // 대상은 repo(owner/name) 또는 org(org 이름) 정확히 하나 — App 이 그 org/repo 에 설치돼 있어야 한다.
+// host = 그 대상이 속한 installation 의 GHE 베이스 URL(picker 가 실어줌) — 미지정 = github.com 우선.
 export async function githubInstallRunnerAction(input: {
   repository?: string
   org?: string
+  host?: string
   runnerGroup?: string
   label?: string
 }): Promise<GithubInstallResult> {
@@ -85,6 +87,7 @@ export async function githubInstallRunnerAction(input: {
         ? { repository: input.repository.trim() }
         : {}),
       ...(input.org && input.org.trim().length > 0 ? { org: input.org.trim() } : {}),
+      ...(input.host && input.host.trim().length > 0 ? { host: input.host.trim() } : {}),
       ...(input.runnerGroup && input.runnerGroup.trim().length > 0
         ? { runnerGroup: input.runnerGroup.trim() }
         : {}),

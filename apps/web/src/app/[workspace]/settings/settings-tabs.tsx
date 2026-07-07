@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { useTranslations } from 'next-intl'
 
 import { DeleteWorkspaceCard } from '@/features/delete-workspace'
@@ -71,9 +72,11 @@ export function SettingsTabs(props: {
   const defaultTab = requestedTab ?? visible[0]?.key ?? 'general'
   // ?app= 은 네 키 중 하나일 때만 통합 패널의 초기 드릴인으로 넘긴다.
   const initialIntegration = INTEGRATION_KEYS.find((k) => k === props.initialIntegration)
+  // 제어 탭 — 러너 탭의 "GitHub App 설치" CTA 가 통합 탭으로 전환할 수 있게(같은 페이지 내 ?tab= 링크는 상태를 못 바꾼다).
+  const [tab, setTab] = useState<string>(defaultTab)
 
   return (
-    <Tabs defaultValue={defaultTab} className="space-y-5">
+    <Tabs value={tab} onValueChange={setTab} className="space-y-5">
       <TabsList>
         {visible.map((tab) => (
           <TabsTrigger key={tab.key} value={tab.key}>
@@ -125,9 +128,12 @@ export function SettingsTabs(props: {
         <CiLinksSettings initialLinks={props.ciLinks} canWrite={props.canWriteSettings} />
       </TabsContent>
       <TabsContent value="runners">
+        {/* GitHub Actions 러너 등록 picker 용 — 통합 탭이 이미 받는 설치 현황(허용 레포 동봉)을 그대로 스레딩. */}
         <WorkspaceRunnersManager
           runners={props.workspaceRunners}
           canWrite={props.canWriteSettings}
+          githubApp={props.githubApp}
+          onOpenIntegrations={() => setTab('integrations')}
         />
       </TabsContent>
       <TabsContent value="members">
