@@ -68,12 +68,15 @@ export function DropdownItem({
   children,
   onSelect,
   icon,
+  trailing,
   tone = 'default',
   className,
 }: {
   children: ReactNode
   onSelect?: () => void
   icon?: ReactNode
+  // 행 오른쪽 끝에 붙는 후행 슬롯(예: 선택 체크마크) — flex-1 라벨과 형제여야 같은 행에 정렬된다.
+  trailing?: ReactNode
   tone?: 'default' | 'danger'
   className?: string
 }) {
@@ -96,6 +99,7 @@ export function DropdownItem({
     >
       {icon}
       <span className="flex-1 truncate">{children}</span>
+      {trailing}
     </button>
   )
 }

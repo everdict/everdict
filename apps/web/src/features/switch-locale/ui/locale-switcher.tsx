@@ -39,9 +39,12 @@ export function LocaleSwitcher({ rowClassName }: { rowClassName?: string }) {
       )}
     >
       {LOCALES.map((l) => (
-        <DropdownItem key={l} onSelect={() => choose(l)}>
-          <span className="flex-1">{t(l)}</span>
-          {l === locale && <Check className="size-3.5" />}
+        <DropdownItem
+          key={l}
+          onSelect={() => choose(l)}
+          trailing={l === locale ? <Check /> : undefined}
+        >
+          {t(l)}
         </DropdownItem>
       ))}
     </DropdownMenu>
