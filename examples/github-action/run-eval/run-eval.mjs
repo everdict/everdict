@@ -1,9 +1,11 @@
 // Assay run-eval GitHub Action — 의존성 0 의 node20 스크립트(fetch 내장).
 // PR: 제출 시점 임시 핀(pins)으로 이 빌드 이미지를 스왑해 평가(레지스트리 무변경).
+// PR 코멘트 /evaluate(issue_comment): PR 과 동일한 임시 핀 평가 — 이 이벤트는 PR 체크가 안 달리므로
+// 결과를 PR 대화 코멘트로 회신한다(github-token 입력, best-effort).
 // push(dev/main): POST /harnesses/:id/pins 로 durable 재핀(새 인스턴스 버전) 후 그 버전을 평가.
 // 인증: api-key 입력 → 없으면 GitHub OIDC 토큰(aud=assay) 페더레이션(워크스페이스에 repo link 필요).
 // 설계: docs/architecture/github-actions-trigger.md
-import { appendFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 
 // GitHub 가 JS 액션 입력을 INPUT_<대문자> env 로 넘긴다(@actions/core 없이 직접 읽어 zero-dep 유지).
 // GitHub 는 공백만 _ 로 바꾸고 하이픈은 보존한다 → `api-url` = INPUT_API-URL. (하이픈을 _ 로 바꾸면 못 찾음.)
@@ -25,6 +27,40 @@ function summary(md) {
   if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${md}\n`);
   else console.log(md);
 }
+
+// 이벤트 페이로드(웹훅 JSON) — issue_comment 의 PR 번호/코멘트 id 는 env 가 아니라 여기서만 얻을 수 있다.
+function eventPayload() {
+  const path = process.env.GITHUB_EVENT_PATH;
+  if (!path) return {};
+  try {
+    return JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+// PR 대화 피드백(/evaluate 회신) — 실패해도 평가 자체를 깨지 않는다(step summary/exit code 는 남는다).
+async function githubApi(path, body) {
+  const token = input("github-token");
+  if (!token) return;
+  try {
+    await fetch(`${process.env.GITHUB_API_URL ?? "https://api.github.com"}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${token}`,
+        accept: "application/vnd.github+json",
+        "content-type": "application/json",
+        "user-agent": "assay-run-eval",
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    // best-effort — 피드백 실패는 무시.
+  }
+}
+
+// 코멘트 발화의 결과 회신이 성공 경로에서 이미 나갔는지 — catch 핸들러의 이중 코멘트 방지.
+let conversationNotified = false;
 
 // GitHub OIDC 토큰(aud=assay) — 워크플로에 permissions: id-token: write 필요.
 async function githubOidcToken() {
@@ -48,7 +84,14 @@ async function main() {
   const timeoutMs = Number(input("timeout-minutes", "30")) * 60_000;
 
   const event = process.env.GITHUB_EVENT_NAME ?? "";
-  const mode = input("mode", "auto") === "auto" ? (event === "pull_request" ? "pr" : "push") : input("mode");
+  const payload = eventPayload();
+  // 코멘트 발화(/evaluate)도 PR 임시 핀 — push 로 오판하면 코멘트 한 줄이 durable 재핀(새 버전)을 일으킨다.
+  const mode =
+    input("mode", "auto") === "auto"
+      ? event === "pull_request" || event === "issue_comment"
+        ? "pr"
+        : "push"
+      : input("mode");
   const failOnRegression =
     input("fail-on-regression") !== undefined ? input("fail-on-regression") === "true" : mode === "pr"; // PR 기본 true(회귀 시 체크 실패), push 기본 false(리포트만)
 
@@ -67,7 +110,9 @@ async function main() {
   };
 
   // 커밋/PR 좌표(provenance) — 서버가 origin.source 를 결정하고 이 좌표를 scorecard 에 스탬프한다.
-  const sha = process.env.GITHUB_SHA ?? "";
+  // 코멘트 발화는 기본 브랜치 컨텍스트라 GITHUB_SHA 가 main 을 가리킨다 — 워크플로가 체크아웃한 PR head 를
+  // head-sha 입력으로 내려주면 그것이 평가 대상의 진실(provenance/재핀 버전 접두 모두 이 값).
+  const sha = input("head-sha") ?? process.env.GITHUB_SHA ?? "";
   const origin = {
     repo: process.env.GITHUB_REPOSITORY ?? "",
     sha,
@@ -77,7 +122,16 @@ async function main() {
   if (event === "pull_request" && process.env.GITHUB_REF?.startsWith("refs/pull/")) {
     const n = Number(process.env.GITHUB_REF.split("/")[2]);
     if (Number.isFinite(n)) origin.prNumber = n;
+  } else if (event === "issue_comment" && Number.isFinite(Number(payload.issue?.number))) {
+    // 코멘트 발화의 GITHUB_REF 는 기본 브랜치 — PR 좌표는 이벤트 페이로드에서. supersede 키(repo+prNumber)에 필수.
+    origin.prNumber = Number(payload.issue.number);
+    origin.ref = `refs/pull/${origin.prNumber}/head`;
   }
+
+  // /evaluate 접수 확인 — 평가는 몇 분 걸리므로 트리거 코멘트에 즉시 👀 리액션(대화가 유일한 피드백 표면).
+  const commentFire = event === "issue_comment";
+  if (commentFire && payload.comment?.id !== undefined)
+    await githubApi(`/repos/${origin.repo}/issues/comments/${payload.comment.id}/reactions`, { content: "eyes" });
 
   // push 모드 + images: durable 재핀 → 새 인스턴스 버전(dev 채널 전진). 멱등(같은 digest → unchanged).
   let harnessVersion = "latest";
@@ -152,11 +206,26 @@ async function main() {
   }
   summary(lines.join("\n"));
 
+  // 코멘트 발화(/evaluate)는 결과를 대화로 회신 — 성공/실패/회귀 모두(아래 throw 보다 먼저).
+  if (commentFire && origin.prNumber !== undefined) {
+    await githubApi(`/repos/${origin.repo}/issues/${origin.prNumber}/comments`, { body: lines.join("\n") });
+    conversationNotified = true;
+  }
+
   if (record.status === "failed") throw new Error(`scorecard 실패: ${record.error?.message ?? "unknown"}`);
   if (failOnRegression && regressionCount > 0) throw new Error(`baseline 대비 회귀 ${regressionCount}건 — 체크 실패.`);
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err.message ?? err);
+  // 코멘트 발화는 대화가 유일한 피드백 표면 — 결과 회신 전에 죽은 실패(제출/타임아웃 등)도 회신한다.
+  if ((process.env.GITHUB_EVENT_NAME ?? "") === "issue_comment" && !conversationNotified) {
+    const payload = eventPayload();
+    const pr = Number(payload.issue?.number);
+    if (Number.isFinite(pr) && process.env.GITHUB_REPOSITORY)
+      await githubApi(`/repos/${process.env.GITHUB_REPOSITORY}/issues/${pr}/comments`, {
+        body: `### Assay eval 실패\n\n\`\`\`\n${err.message ?? err}\n\`\`\``,
+      });
+  }
   process.exit(1);
 });

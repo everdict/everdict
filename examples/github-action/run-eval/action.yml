@@ -1,8 +1,9 @@
 name: "Assay Run Eval"
 description: >-
   Fire an Assay evaluation from CI. Pull requests run the topology with this build's image
-  swapped in (ephemeral pins — registry untouched); pushes to dev/main re-pin the harness
-  to a new immutable version (the "dev channel") and evaluate it.
+  swapped in (ephemeral pins — registry untouched); /evaluate PR comments (issue_comment)
+  do the same on demand, replying to the PR conversation; pushes to dev/main re-pin the
+  harness to a new immutable version (the "dev channel") and evaluate it.
 author: "assay"
 
 inputs:
@@ -51,6 +52,17 @@ inputs:
     description: "Max minutes to wait for the scorecard to finish"
     required: false
     default: "30"
+  head-sha:
+    description: >-
+      Evaluated commit sha. /evaluate comment fires run in default-branch context (GITHUB_SHA
+      points at main), so the workflow resolves the checked-out PR head and passes it here.
+      Defaults to GITHUB_SHA.
+    required: false
+  github-token:
+    description: >-
+      GitHub token for PR conversation feedback on /evaluate comment fires (pass github.token;
+      needs issues/pull-requests write). Optional — without it feedback is skipped.
+    required: false
 
 outputs:
   scorecard-id:
