@@ -35,3 +35,21 @@ export function allowTopLevelNavigation(target: string): boolean {
   }
   return url.protocol === "http:" || url.protocol === "https:";
 }
+
+// Server-address recovery (D8): when the pinned web URL fails to load, the app window is a dead error page. If the OS
+// tray is unavailable (common on Linux) the only "Change server address" affordance is gone — a mistyped/unreachable
+// URL becomes unrecoverable. So on the *initial* main-frame load failure, fall back to the setup screen. Guards:
+//  - non-main-frame failures (sub-resources/iframes) never strand the user → ignore.
+//  - errorCode -3 (ERR_ABORTED) is a benign navigation abort (OIDC redirects, superseded loads) → ignore.
+//  - once the server has loaded successfully (everLoaded), a later transient failure must NOT yank a working session
+//    back to setup → ignore.
+export function shouldRecoverToSetup(params: {
+  errorCode: number;
+  isMainFrame: boolean;
+  everLoaded: boolean;
+}): boolean {
+  if (!params.isMainFrame) return false;
+  if (params.errorCode === -3) return false;
+  if (params.everLoaded) return false;
+  return true;
+}

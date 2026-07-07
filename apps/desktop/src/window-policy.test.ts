@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window-policy.js";
+import { allowTopLevelNavigation, decideWindowOpen, shouldRecoverToSetup, webOriginOf } from "./window-policy.js";
 
 const WEB = "https://app.everdict.dev";
 
@@ -40,5 +40,25 @@ describe("allowTopLevelNavigation", () => {
     expect(allowTopLevelNavigation("file:///etc/passwd")).toBe(false);
     expect(allowTopLevelNavigation("javascript:alert(1)")).toBe(false);
     expect(allowTopLevelNavigation("nope")).toBe(false);
+  });
+});
+
+describe("shouldRecoverToSetup", () => {
+  it("recovers to setup when the pinned server fails its initial main-frame load (mistyped/unreachable URL)", () => {
+    // Given a wrong/unreachable server URL that has never loaded, When its top-level load fails, Then route to setup.
+    expect(shouldRecoverToSetup({ errorCode: -106, isMainFrame: true, everLoaded: false })).toBe(true); // ERR_INTERNET_DISCONNECTED
+    expect(shouldRecoverToSetup({ errorCode: -102, isMainFrame: true, everLoaded: false })).toBe(true); // ERR_CONNECTION_REFUSED
+  });
+
+  it("ignores sub-resource (non-main-frame) failures so a broken asset doesn't strand the user", () => {
+    expect(shouldRecoverToSetup({ errorCode: -102, isMainFrame: false, everLoaded: false })).toBe(false);
+  });
+
+  it("ignores ERR_ABORTED (-3) — a benign navigation abort during OIDC redirects", () => {
+    expect(shouldRecoverToSetup({ errorCode: -3, isMainFrame: true, everLoaded: false })).toBe(false);
+  });
+
+  it("does not yank a working session to setup once the server has loaded", () => {
+    expect(shouldRecoverToSetup({ errorCode: -102, isMainFrame: true, everLoaded: true })).toBe(false);
   });
 });

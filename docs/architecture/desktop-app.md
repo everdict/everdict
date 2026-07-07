@@ -38,6 +38,12 @@
 >   re-pair callout on the account page. Live-verified end-to-end vs real Keycloak
 >   (`scripts/live/desktop-keycloak.mjs`): fresh machine → setup screen → server saved → OIDC login
 >   (alice) → one-click pair → runner online, against the real-auth control plane.
+>   **Wrong-address recovery**: a mistyped/unreachable server would otherwise strand the app on a dead
+>   error page, and the tray "Change server address…" is unreliable on Linux (no tray on some DEs). So the
+>   pinned window's **initial top-level load failure** (`did-fail-load`, main-frame, not `ERR_ABORTED`, not
+>   yet loaded — `shouldRecoverToSetup`) auto-opens the setup screen, and `createOrFocusWindow` routes to
+>   setup while that failed state holds (reset when a fresh address is saved / the server loads). Recovery
+>   no longer depends on the tray.
 >
 > - **D1 — the UI is the deployed web, not a rebuild.** The desktop shell renders the SaaS web
 >   (`apps/web`) at its deployed URL inside the app window — the Linear/Slack/Notion model. `apps/web`

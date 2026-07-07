@@ -19,7 +19,7 @@ import { normalizeWebUrl, resolveWebUrl } from "./server-url.js";
 import { type TokenIo, clearToken, loadToken, saveToken } from "./token-store.js";
 import { buildTrayMenuTemplate, runnerStatusLabel } from "./tray-menu.js";
 import { type AutoUpdaterLike, UpdaterController, type UpdaterState } from "./updater.js";
-import { allowTopLevelNavigation, decideWindowOpen, webOriginOf } from "./window-policy.js";
+import { allowTopLevelNavigation, decideWindowOpen, shouldRecoverToSetup, webOriginOf } from "./window-policy.js";
 
 // Desktop shell — renders the deployed web as-is (D1: UI SSOT = apps/web), stays resident in the tray, and
 // embeds the self-hosted runner (@everdict/runner-core) in the main process (D3: one-click pairing).
@@ -55,6 +55,9 @@ let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
 let shuttingDown = false;
+// D8 recovery: set when the pinned web URL fails its initial load (wrong/unreachable server). While true, the app window
+// is a dead error page, so createOrFocusWindow routes to the setup screen instead — a tray-independent way back.
+let webUrlLoadFailed = false;
 
 // Store non-secret settings in userData's config.json (autostart · runner meta). The rnr_ token is never allowed here (invariant 5).
 function configIo(): ConfigIo {
@@ -326,8 +329,9 @@ function openSetupWindow(): void {
 }
 
 function createOrFocusWindow(): void {
-  // Server not configured — the setup screen instead of the app window (since the login screen is unreachable).
-  if (webUrl === null || webOrigin === null) {
+  // Server not configured, or the configured server failed to load (wrong/unreachable URL) — show the setup screen
+  // instead of the app window (the login screen is unreachable, and this path does not depend on the OS tray).
+  if (webUrl === null || webOrigin === null || webUrlLoadFailed) {
     openSetupWindow();
     return;
   }
@@ -342,6 +346,18 @@ function createOrFocusWindow(): void {
     width: 1280,
     height: 800,
     webPreferences: securePreferences(origin),
+  });
+  // Recovery (D8): the pinned server URL might be wrong/unreachable. On a successful load, clear the failed flag; on the
+  // initial top-level load failure, mark it and pop the setup screen so the user can fix the address without the tray.
+  let everLoaded = false;
+  win.webContents.on("did-finish-load", () => {
+    everLoaded = true;
+    webUrlLoadFailed = false;
+  });
+  win.webContents.on("did-fail-load", (_event, errorCode, _desc, _failedUrl, isMainFrame) => {
+    if (!shouldRecoverToSetup({ errorCode, isMainFrame, everLoaded })) return;
+    webUrlLoadFailed = true;
+    openSetupWindow();
   });
   // window.open: only the web origin gets a new app window; other http/https go to the system browser (rationale in the window-policy.ts comment).
   win.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -438,6 +454,8 @@ if (!app.requestSingleInstanceLock()) {
       config = { ...loadConfig(configIo()), webUrl: url };
       saveConfig(configIo(), config);
       applyWebUrl(url);
+      // Give the newly-entered URL a fresh attempt — otherwise the load-failed gate would bounce it straight back to setup.
+      webUrlLoadFailed = false;
       // The existing app window holds the previous origin's preload argument, so open a fresh one (destroy it, bypassing the close=hide handler).
       if (mainWindow && !mainWindow.isDestroyed()) {
         const old = mainWindow;
