@@ -45,14 +45,15 @@ export type CaseProvenance = z.infer<typeof CaseProvenanceSchema>;
 // 에이전트가 실어 보내고, executeCase 가 pull+미뤄진 관측물 채점으로 결과를 완성한다(수집 후에도 provenance 로 유지).
 // docs/architecture/streaming-case-pipeline.md D4
 export const TraceRefSchema = z.object({
-  kind: z.enum(["otel", "mlflow"]),
+  kind: z.enum(["otel", "mlflow", "langfuse", "langsmith", "phoenix"]), // buildTraceSource 5종과 동일
   endpoint: z.string(),
   runId: z.string(), // 상관 키(assay.run_id) — 이 값으로 플랫폼에서 트레이스를 찾는다
-  // 인증 시크릿 '이름'(SecretStore) — 컨트롤플레인이 collect 시 값으로 재해석해 verbatim Authorization 헤더로.
-  // 값은 절대 싣지 않는다(CaseResult 는 영속된다).
+  // 인증 시크릿 '이름'(SecretStore) — 컨트롤플레인이 collect 시 값으로 재해석해 어댑터 관례 헤더로
+  // (otel/mlflow=verbatim Authorization, langsmith=x-api-key 등). 값은 절대 싣지 않는다(CaseResult 는 영속된다).
   authSecret: z.string().optional(),
   correlate: z.enum(["id", "tag"]).optional(), // mlflow 전용 — tag 면 assay.run_id 태그 검색으로 상관
   experiment: z.string().optional(), // mlflow tag 상관의 검색 범위(experiment id)
+  project: z.string().optional(), // phoenix 전용 — 스팬 조회 경로의 프로젝트
 });
 export type TraceRef = z.infer<typeof TraceRefSchema>;
 

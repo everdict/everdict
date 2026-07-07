@@ -15,12 +15,13 @@ export interface RunContext {
 // 컨트롤플레인이 CaseResult.traceRef 로 pull(엔드포인트가 컨트롤플레인에서 닿을 때만 —
 // 클러스터 내부 엔드포인트는 job 유지). docs/architecture/streaming-case-pipeline.md D4
 export interface HarnessTraceSource {
-  kind: "otel" | "mlflow";
+  kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix"; // @assay/trace buildTraceSource 5종과 동일
   endpoint: string;
   collect: "job" | "control-plane";
   authSecret?: string; // 인증 시크릿 '이름'(컨트롤플레인이 collect 시 재해석) — 값은 traceRef 에 싣지 않는다
   correlate?: "id" | "tag"; // mlflow 전용 — tag 면 assay.run_id 태그 검색으로 상관
   experiment?: string; // mlflow tag 상관의 검색 범위(experiment id)
+  project?: string; // phoenix 전용 — 스팬 조회 경로의 프로젝트(필수 API 형태)
 }
 
 // 피평가 대상. ComputeHandle(샌드박스) 안에서 구동되며, native 출력을

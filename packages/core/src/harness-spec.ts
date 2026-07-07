@@ -209,11 +209,13 @@ export const ServiceHarnessSpecSchema = z.object({
 });
 export type ServiceHarnessSpec = z.infer<typeof ServiceHarnessSpecSchema>;
 
-// command 하니스의 트레이스 추출: 없음(결과만) | OTel/MLflow pull(runId 로 상관).
+// command 하니스의 트레이스 추출: 없음(결과만) | 플랫폼 pull(otel/mlflow/langfuse/langsmith/phoenix —
+// @assay/trace buildTraceSource 5종과 동일, runId 로 상관).
 // collect: 수집 위치 — "job"(기본, 잡 안에서 compute 해제 후 pull; 클러스터 내부 엔드포인트도 동작) |
 // "control-plane"(잡은 실행에서 끝, 컨트롤플레인이 pull+관측물 채점 — 엔드포인트가 컨트롤플레인에서 닿을 때만).
-// authSecret: 엔드포인트 인증(SecretStore 이름 — 값은 verbatim Authorization 헤더; pull-ingest source.authSecret
-// 과 동일 관례). auth 는 transient — 디스패치 직전 resolveHarnessSecrets 가 값으로 채운다(레지스트리 저장 금지).
+// authSecret: 엔드포인트 인증(SecretStore 이름 — 값의 헤더 배치는 어댑터 관례: otel/mlflow=verbatim
+// Authorization, langsmith=x-api-key 등; pull-ingest source.authSecret 과 동일). auth 는 transient —
+// 디스패치 직전 resolveHarnessSecrets 가 값으로 채운다(레지스트리 저장 금지).
 // docs/architecture/streaming-case-pipeline.md D4
 const commandTraceAuth = {
   authSecret: z.string().optional(),
@@ -231,6 +233,15 @@ export const CommandTraceSpecSchema = z.discriminatedUnion("kind", [
     // 자기 trace 에 남긴 assay.run_id 태그로 검색(id 는 서버 mint — 실 에이전트 경로). tag 는 experiment 필수.
     correlate: z.enum(["id", "tag"]).default("id"),
     experiment: z.string().optional(), // tag 상관의 검색 범위(MLflow traces/search 는 locations 필수)
+  }),
+  z.object({ kind: z.literal("langfuse"), endpoint: z.string(), ...commandTraceAuth }),
+  z.object({ kind: z.literal("langsmith"), endpoint: z.string(), ...commandTraceAuth }),
+  z.object({
+    kind: z.literal("phoenix"),
+    endpoint: z.string(),
+    // Phoenix 스팬은 프로젝트 경유로만 조회된다(/v1/projects/{p}/spans?trace_id=) — 필수.
+    project: z.string(),
+    ...commandTraceAuth,
   }),
 ]);
 export type CommandTraceSpec = z.infer<typeof CommandTraceSpecSchema>;

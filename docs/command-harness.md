@@ -15,8 +15,9 @@ single generic `CommandHarness` interprets it. A SaaS user registers a spec → 
   "command": "aider --yes --no-git --message {{task}} --model {{model}} .",
   "model": "sonnet",
   "env": { },                          // extra env (LLM keys come from per-tenant secrets, not here)
-  "trace": { "kind": "none" }          // | { "kind":"otel"|"mlflow", "endpoint":"…", "collect":"job"|"control-plane",
-                                       //     "authSecret":"…"?, mlflow: "correlate":"id"|"tag"?, "experiment":"…"? }
+  "trace": { "kind": "none" }          // | { "kind":"otel"|"mlflow"|"langfuse"|"langsmith"|"phoenix", "endpoint":"…",
+                                       //     "collect":"job"|"control-plane", "authSecret":"…"?,
+                                       //     mlflow: "correlate":"id"|"tag"?, "experiment":"…"? · phoenix: "project" }
 }
 ```
 Template tokens in `command`: **`{{task}}`** (shell-quoted automatically — don't wrap it in quotes),
@@ -35,8 +36,9 @@ path → runs on **Local / Nomad / K8s** backends with the existing isolation.
   trace event, so prompt-QA benchmarks (`answer-match`/judge — e.g. OfficeQA-style) grade a black-box CLI's
   printed answer; outcome grading (repo diff + `tests-pass`) is unchanged. A non-zero exit yields an `error`
   trace event (never silently swallowed).
-- **`otel` / `mlflow`** — after the command, the trace is pulled via `@assay/trace`
-  (`OtelTraceSource`/`MlflowTraceSource`) by `ASSAY_RUN_ID`. The agent must tag its spans with that id
+- **`otel` / `mlflow` / `langfuse` / `langsmith` / `phoenix`** — after the command, the trace is pulled via
+  `@assay/trace` `buildTraceSource` (the same 5 kinds as pull-ingest; phoenix needs `project`) by
+  `ASSAY_RUN_ID`. The agent must tag its spans with that id
   (`OTEL_RESOURCE_ATTRIBUTES=assay.run_id=…` is injected) — i.e. an instrumented agent; uninstrumented CLIs use
   `none`. **Where the pull happens** is the `collect` knob (2-phase collection,
   `docs/architecture/streaming-case-pipeline.md` D4): `"job"` (default) — `runCase` calls the harness's

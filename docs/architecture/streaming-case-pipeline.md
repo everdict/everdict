@@ -130,10 +130,17 @@ the seeded trace is tagged `assay.run_id` (the real-SDK contract) and an assay-m
 resolves through `traces/search` to the real spans, completing the deferred grading.
 All PASS 2026-07-06.
 
-## Follow-ups (deliberately not in this pass)
+### D4 — command trace kinds are the full 5 (shipped; phoenix live-verified)
 
-- **Command trace kinds beyond otel/mlflow** — langfuse/langsmith/phoenix exist in `buildTraceSource`;
-  extending `CommandTraceSpec` is mechanical once someone needs it.
+`CommandTraceSpec` accepts **otel | mlflow | langfuse | langsmith | phoenix** — the same 5 kinds as
+`buildTraceSource`, which `CommandHarness.collectTrace` now uses directly (one factory, adapter-owned auth
+header conventions: otel/mlflow verbatim `Authorization`, langsmith `x-api-key`). Phoenix requires
+`project` (spans are only addressable per project) — it rides `traceSource()` → `traceRef.project` →
+`TraceSourceConfig.project`, converging with mlflow's `experiment` on the config side. Live-verified vs a
+real Arize Phoenix (`scripts/live/trace-collect-phoenix.mjs`, docker-booted): P1 `collect="job"` post-release
+pull round trip + P2 `collect="control-plane"` completion, both PASS 2026-07-07.
+
+## Follow-ups (deliberately not in this pass)
 - **Tag correlation for OTel** — the Jaeger-style query is also id-addressed; a resource-attribute search
   mode (mirroring the mlflow tag mode) needs a per-backend query shape survey first.
 - **Per-case sink export streaming** — export after each case's judging instead of post-batch; today's export

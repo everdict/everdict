@@ -46,12 +46,14 @@ export async function collectDeferredTrace(
           throw new Error(`인증 시크릿 '${ref.authSecret}' 미등록(워크스페이스 SecretStore) — 수집 불가`);
         headers = { authorization: auth };
       }
+      // 검색 범위: mlflow tag 상관의 experiment | phoenix 의 project — TraceSourceConfig.project 로 수렴.
+      const project = ref.experiment ?? ref.project;
       const source = deps.buildTraceSource({
         kind: ref.kind,
         endpoint: ref.endpoint,
         ...(headers ? { headers } : {}),
         ...(ref.correlate ? { correlate: ref.correlate } : {}),
-        ...(ref.experiment ? { project: ref.experiment } : {}),
+        ...(project ? { project } : {}),
       });
       const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
       let events: Awaited<ReturnType<TraceSource["fetch"]>> = [];

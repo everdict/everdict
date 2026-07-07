@@ -144,7 +144,7 @@ describe("CommandHarness", () => {
   it("trace otel → collectTrace(runId) 가 주입된 소스에서 이벤트를 가져온다(run 과 같은 상관 키)", async () => {
     const { compute, execs } = fakeCompute();
     let fetched = "";
-    const traceSourceFor = (kind: "otel" | "mlflow", endpoint: string): TraceSource => ({
+    const traceSourceFor = (kind: string, endpoint: string): TraceSource => ({
       async fetch(id: string) {
         fetched = `${kind}:${endpoint}:${id}`;
         return [{ t: 0, kind: "tool_call", id: "x", name: "n", args: {} }];
@@ -190,13 +190,13 @@ describe("CommandHarness", () => {
     expect(new CommandHarness(spec()).traceSource()).toBeUndefined(); // trace:none
   });
 
-  it("collectTrace: 해석된 auth(값)·correlate·experiment 를 소스에 전달하고, 0건이면 재시도한다(플러시 지연)", async () => {
-    let seenOpts: { auth?: string; correlate?: "id" | "tag"; experiment?: string } | undefined;
+  it("collectTrace: 해석된 auth(값)·correlate·검색범위(project)를 소스에 전달하고, 0건이면 재시도한다(플러시 지연)", async () => {
+    let seenOpts: { auth?: string; correlate?: "id" | "tag"; project?: string } | undefined;
     let fetches = 0;
     const traceSourceFor = (
-      _k: "otel" | "mlflow",
+      _k: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix",
       _e: string,
-      opts?: { auth?: string; correlate?: "id" | "tag"; experiment?: string },
+      opts?: { auth?: string; correlate?: "id" | "tag"; project?: string },
     ): TraceSource => {
       seenOpts = opts;
       return {
@@ -224,10 +224,47 @@ describe("CommandHarness", () => {
 
     const events = await h.collectTrace("rid");
 
-    expect(seenOpts).toEqual({ auth: "Basic abc", correlate: "tag", experiment: "7" });
+    expect(seenOpts).toEqual({ auth: "Basic abc", correlate: "tag", project: "7" }); // experiment→project 수렴
     expect(fetches).toBe(3); // 0건 → 재시도 → 도착
     expect(slept).toEqual([2000, 2000]);
     expect(events).toHaveLength(1);
+  });
+
+  it("trace kind 5종: phoenix 는 project 를 좌표·소스 설정에 싣고, langfuse/langsmith 도 동일 계약으로 동작한다", async () => {
+    const seen: Array<{ kind: string; project?: string; auth?: string }> = [];
+    const sourceFor = (kind: string) => (opts?: { auth?: string; project?: string }) => {
+      seen.push({
+        kind,
+        ...(opts?.project ? { project: opts.project } : {}),
+        ...(opts?.auth ? { auth: opts.auth } : {}),
+      });
+      return {
+        async fetch(): Promise<TraceEvent[]> {
+          return [{ t: 0, kind: "llm_call", model: "m" }];
+        },
+      };
+    };
+    const phoenix = new CommandHarness(
+      spec({
+        trace: { kind: "phoenix", endpoint: "http://p", project: "assay-e2e", collect: "job", auth: "Bearer k" },
+      }),
+      { traceSourceFor: (k, _e, o) => sourceFor(k)(o) },
+    );
+    expect(await phoenix.collectTrace("tid")).toHaveLength(1);
+    // traceSource() 좌표에도 project 동봉 — control-plane 수집(traceRef)이 그대로 쓴다.
+    expect(phoenix.traceSource()).toMatchObject({ kind: "phoenix", project: "assay-e2e", collect: "job" });
+
+    const langsmith = new CommandHarness(
+      spec({ trace: { kind: "langsmith", endpoint: "http://ls", collect: "job", auth: "lsv2_key" } }),
+      { traceSourceFor: (k, _e, o) => sourceFor(k)(o) },
+    );
+    expect(await langsmith.collectTrace("uuid")).toHaveLength(1);
+    expect(langsmith.traceSource()).toMatchObject({ kind: "langsmith", collect: "job" });
+
+    expect(seen).toEqual([
+      { kind: "phoenix", project: "assay-e2e", auth: "Bearer k" },
+      { kind: "langsmith", auth: "lsv2_key" },
+    ]);
   });
 
   // 사용량 계측: trace:none 하니스의 모델 호출을 usage-proxy 로 통과시켜 토큰을 합성 llm_call 로 회수.

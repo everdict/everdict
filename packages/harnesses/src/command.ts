@@ -8,21 +8,16 @@ import {
   flattenEnv,
   shq,
 } from "@assay/core";
-import {
-  MlflowTraceSource,
-  OtelTraceSource,
-  type StartedUsageProxy,
-  type TraceSource,
-  startUsageProxy,
-} from "@assay/trace";
+import { type StartedUsageProxy, type TraceSource, buildTraceSource, startUsageProxy } from "@assay/trace";
 
 export interface CommandHarnessOptions {
   workDir?: string;
-  // 테스트 주입: trace 소스 팩토리(기본 Otel/Mlflow) + runId 생성기 + 재시도 대기.
+  // 테스트 주입: trace 소스 팩토리(기본 buildTraceSource 5종) + runId 생성기 + 재시도 대기.
+  // opts 는 TraceSourceConfig 관례를 따른다(project = mlflow experiment | phoenix project).
   traceSourceFor?: (
-    kind: "otel" | "mlflow",
+    kind: "otel" | "mlflow" | "langfuse" | "langsmith" | "phoenix",
     endpoint: string,
-    opts?: { auth?: string; correlate?: "id" | "tag"; experiment?: string },
+    opts?: { auth?: string; correlate?: "id" | "tag"; project?: string },
   ) => TraceSource;
   runId?: () => string;
   sleep?: (ms: number) => Promise<void>; // collectTrace 재시도 백오프(기본 setTimeout)
@@ -64,7 +59,7 @@ export class CommandHarness implements EvaluableHarness {
     }
   }
 
-  // 플랫폼 트레이스 좌표(otel/mlflow) — runCase 가 수집 위치(job/control-plane)를 이걸로 분기한다. none 이면 undefined.
+  // 플랫폼 트레이스 좌표(5종) — runCase 가 수집 위치(job/control-plane)를 이걸로 분기한다. none 이면 undefined.
   // authSecret 은 '이름'만 노출(컨트롤플레인이 collect 시 재해석) — 해석된 값(trace.auth)은 traceRef 로 새지 않는다.
   traceSource(): HarnessTraceSource | undefined {
     const trace = this.spec.trace;
@@ -76,33 +71,34 @@ export class CommandHarness implements EvaluableHarness {
       ...(trace.authSecret ? { authSecret: trace.authSecret } : {}),
       ...(trace.kind === "mlflow" && trace.correlate !== "id" ? { correlate: trace.correlate } : {}),
       ...(trace.kind === "mlflow" && trace.experiment ? { experiment: trace.experiment } : {}),
+      ...(trace.kind === "phoenix" ? { project: trace.project } : {}),
     };
   }
 
   // 적재된 트레이스를 runId 로 pull — runCase 가 compute 해제 후 호출한다(플러시 지연 동안 샌드박스 미점유).
   // run() 은 실행 이벤트만 yield 하고 플랫폼 이벤트는 여기서 온다(과거엔 run() 꼬리에서 pull — 샌드박스 점유).
-  // 프로세스 종료 직후는 플랫폼 플러시가 늦을 수 있어 0건이면 짧게 재시도한다(총 3회). 인증은 디스패치 직전
-  // 해석된 trace.auth(verbatim Authorization — resolveHarnessSecrets)로.
+  // 프로세스 종료 직후는 플랫폼 플러시가 늦을 수 있어 0건이면 짧게 재시도한다(총 3회). 소스는 pull-ingest 와
+  // 같은 buildTraceSource 5종 — 인증 값의 헤더 배치는 어댑터 관례(otel/mlflow=verbatim Authorization,
+  // langsmith=x-api-key 등; 팩토리가 headers.authorization 을 신형 3종의 auth 로 승계).
   async collectTrace(runId: string): Promise<TraceEvent[]> {
     const trace = this.spec.trace;
     if (trace.kind === "none") return [];
-    const headers = trace.auth ? { authorization: trace.auth } : undefined;
-    const correlate = trace.kind === "mlflow" ? trace.correlate : undefined;
-    const experiment = trace.kind === "mlflow" ? trace.experiment : undefined;
+    const correlate = trace.kind === "mlflow" && trace.correlate === "tag" ? ("tag" as const) : undefined;
+    // 검색 범위: mlflow tag 상관의 experiment | phoenix 의 project — TraceSourceConfig.project 로 수렴.
+    const project = trace.kind === "mlflow" ? trace.experiment : trace.kind === "phoenix" ? trace.project : undefined;
     const source =
       this.opts.traceSourceFor?.(trace.kind, trace.endpoint, {
         ...(trace.auth ? { auth: trace.auth } : {}),
         ...(correlate ? { correlate } : {}),
-        ...(experiment ? { experiment } : {}),
+        ...(project ? { project } : {}),
       }) ??
-      (trace.kind === "otel"
-        ? new OtelTraceSource({ endpoint: trace.endpoint, ...(headers ? { headers } : {}) })
-        : new MlflowTraceSource({
-            endpoint: trace.endpoint,
-            ...(headers ? { headers } : {}),
-            ...(correlate ? { correlate } : {}),
-            ...(experiment ? { experimentIds: [experiment] } : {}),
-          }));
+      buildTraceSource({
+        kind: trace.kind,
+        endpoint: trace.endpoint,
+        ...(trace.auth ? { headers: { authorization: trace.auth } } : {}),
+        ...(correlate ? { correlate } : {}),
+        ...(project ? { project } : {}),
+      });
     const sleep = this.opts.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
     for (let attempt = 0; ; attempt++) {
       const events = await source.fetch(runId);
