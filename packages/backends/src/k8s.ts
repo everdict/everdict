@@ -27,6 +27,10 @@ export interface K8sApi {
   deleteJob(name: string, ns: string): Promise<void>;
   // Force-stop by label across namespaces (kill(caseId) → everdict.dev/case=<slug>). Best-effort, no wait.
   deleteJobsByLabel(selector: string): Promise<void>;
+  // Adoption lookup — jobs matching a label selector across namespaces (boot recovery finds a dead CP's jobs).
+  jobsByLabel(
+    selector: string,
+  ): Promise<Array<{ name: string; namespace: string; creationTimestamp?: string }> | undefined>;
   // Termination reason of the job's (failed) pod — e.g. "OOMKilled". Best-effort: undefined when unavailable.
   podFailureReason(name: string, ns: string): Promise<string | undefined>;
   countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
@@ -158,6 +162,24 @@ export function kubectlApi(
         "--cascade=background",
         "--wait=false",
       ]);
+    },
+    async jobsByLabel(selector) {
+      const res = await run(bin, [...ctx, "get", "jobs", "-A", "-l", selector, "-o", "json"]);
+      if (res.code !== 0) return undefined;
+      try {
+        const items = (JSON.parse(res.stdout).items ?? []) as Array<{
+          metadata?: { name?: string; namespace?: string; creationTimestamp?: string };
+        }>;
+        return items
+          .filter((j) => j.metadata?.name && j.metadata.namespace)
+          .map((j) => ({
+            name: j.metadata?.name as string,
+            namespace: j.metadata?.namespace as string,
+            ...(j.metadata?.creationTimestamp ? { creationTimestamp: j.metadata.creationTimestamp } : {}),
+          }));
+      } catch {
+        return undefined;
+      }
     },
     async countActiveJobs() {
       const res = await run(bin, [...ctx, "get", "jobs", "-A", "-l", "app=everdict", "-o", "json"]);
@@ -392,6 +414,27 @@ export class K8sBackend implements Backend {
       used: used ?? 0,
       ...(this.opts.memoryBudgetMb !== undefined ? { memoryBudgetMb: this.opts.memoryBudgetMb } : {}),
     };
+  }
+
+  // Adopt an already-dispatched case job (boot recovery): the control plane died after applying the Job — find
+  // the NEWEST job carrying the case label, wait for it like a normal dispatch, and harvest the sentinel from
+  // its pod logs. undefined on any miss (no job / failed / logs unreadable) — the caller re-dispatches.
+  async adopt(caseId: string): Promise<CaseResult | undefined> {
+    try {
+      return await this.withApi(async (api) => {
+        const jobs = await api.jobsByLabel(`everdict.dev/case=${caseSlug(caseId)}`);
+        const newest = (jobs ?? []).sort((a, b) =>
+          (b.creationTimestamp ?? "").localeCompare(a.creationTimestamp ?? ""),
+        )[0];
+        if (!newest) return undefined;
+        await this.waitForJob(api, newest.name, newest.namespace);
+        const result = parseResult(await api.podLogs(newest.name, newest.namespace));
+        await api.deleteJob(newest.name, newest.namespace).catch(() => {}); // same cleanup as a normal dispatch
+        return result;
+      });
+    } catch {
+      return undefined; // adoption is best-effort — any failure falls back to re-dispatch
+    }
   }
 
   // Force-stop every live job of a case (superseded batch reclaim) — by the everdict.dev/case label. Best-effort.

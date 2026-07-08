@@ -139,9 +139,9 @@ Boot resume used to re-dispatch every mid-flight case — correct but double-spe
 dead control plane submitted was often still running (or already finished). Resume now ADOPTS first:
 `Backend.adopt(caseId)` (Nomad) finds the newest `everdict-<caseId>-*` job, waits for its alloc like a normal
 dispatch, and harvests the sentinel result; only when nothing is adoptable does the case fall back to
-re-dispatch (K8s adopt is a follow-up — its cases re-dispatch as before). Live: CP SIGKILLed 8s into a batch of
-sleep-25 cases → the restarted CP resumed with "3 in-flight job(s) adopted without re-running", 3/3 pass,
-Nomad job count unchanged.
+re-dispatch. K8s adopts by the `everdict.dev/case` job label (newest job → waitForJob → pod logs → the same
+cleanup as a dispatch). Live on both: CP SIGKILLed mid-batch of sleep-25 cases → the restarted CP resumed with
+"N in-flight job(s) adopted without re-running" (Nomad 3/3, kind 2/2), job counts unchanged.
 
 Supersede symmetric: the cooperative abort only stops the UN-fired remainder, so a superseded 601-case batch
 kept burning cluster compute to the end. `Backend.kill(caseId)` (Nomad: prefix deregister without purge — the

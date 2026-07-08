@@ -57,6 +57,7 @@ function mockApi(
     version?: string;
     unreachable?: boolean;
     failureReason?: string;
+    labeledJobs?: Array<{ selector: string; name: string; namespace: string; creationTimestamp?: string }>;
   } = {},
 ) {
   const applied: JobManifest[] = [];
@@ -83,6 +84,9 @@ function mockApi(
     },
     async deleteJobsByLabel(selector) {
       deleted.push(`label:${selector}`);
+    },
+    async jobsByLabel(selector) {
+      return opts.labeledJobs?.filter((j) => j.selector === selector) ?? [];
     },
     async countActiveJobs() {
       return opts.active ?? 3;
@@ -118,6 +122,42 @@ describe("buildK8sJob / k8sJobName", () => {
     const backend = new K8sBackend({ image: "i", api });
     await backend.kill("Case_1");
     expect(deleted).toEqual(["label:everdict.dev/case=case-1"]); // slugged the same way as the job label
+  });
+
+  it("adopt finds the NEWEST case-labeled job, waits for it, harvests the sentinel, and cleans up", async () => {
+    const { api, deleted } = mockApi({
+      labeledJobs: [
+        {
+          selector: "everdict.dev/case=c1",
+          name: "everdict-c1-old",
+          namespace: "ns",
+          creationTimestamp: "2026-07-08T01:00:00Z",
+        },
+        {
+          selector: "everdict.dev/case=c1",
+          name: "everdict-c1-new",
+          namespace: "ns",
+          creationTimestamp: "2026-07-08T02:00:00Z",
+        },
+      ],
+    });
+    const backend = new K8sBackend({ image: "i", api, pollIntervalMs: 1 });
+    const adopted = await backend.adopt("c1");
+    expect(adopted?.caseId).toBe("c1"); // harvested without applying a new Job
+    expect(deleted).toContain("everdict-c1-new"); // the adopted job gets the same cleanup as a dispatch
+    expect(deleted).not.toContain("everdict-c1-old");
+  });
+
+  it("adopt returns undefined when no labeled job exists or the job failed — the caller re-dispatches", async () => {
+    const none = new K8sBackend({ image: "i", api: mockApi().api, pollIntervalMs: 1 });
+    expect(await none.adopt("ghost")).toBeUndefined();
+
+    const failing = mockApi({
+      failed: true,
+      labeledJobs: [{ selector: "everdict.dev/case=c1", name: "everdict-c1-x", namespace: "ns" }],
+    });
+    const backend = new K8sBackend({ image: "i", api: failing.api, pollIntervalMs: 1 });
+    expect(await backend.adopt("c1")).toBeUndefined();
   });
 
   it("with evalCase.image, override with the per-case container image (SWE-bench prebuilt)", () => {
