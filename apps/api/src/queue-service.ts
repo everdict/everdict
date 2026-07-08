@@ -94,9 +94,12 @@ export class QueueService {
           const children = this.deps.runs ? await this.deps.runs.list(tenant, { scorecardId: c.id }) : [];
           const done = children.filter((r) => r.status === "succeeded" || r.status === "failed").length;
           const active = children.filter((r) => r.status === "running").length;
-          const total = this.deps.caseCountFor
-            ? await this.deps.caseCountFor(tenant, c.dataset.id, c.dataset.version).catch(() => undefined)
-            : undefined;
+          // A partial run's denominator is the SELECTED subset size — "9/601" for a 12-case subset misreads as 1% done.
+          const total =
+            c.subset?.selected ??
+            (this.deps.caseCountFor
+              ? await this.deps.caseCountFor(tenant, c.dataset.id, c.dataset.version).catch(() => undefined)
+              : undefined);
           progressOf.set(c.id, { done, active, ...(total !== undefined ? { total } : {}) });
         }),
     );

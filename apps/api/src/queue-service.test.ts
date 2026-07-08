@@ -105,6 +105,27 @@ describe("QueueService.snapshot", () => {
     expect(allIds.filter((x) => x.startsWith("child-"))).toEqual([]);
   });
 
+  it("a partial (subset) batch's progress denominator is the selected size, not the full dataset", async () => {
+    const { scorecards, runs } = await fixtures();
+    await scorecards.create(
+      card("sc-subset", {
+        status: "running",
+        runtime: "docker",
+        subset: { total: 601, selected: 12 },
+      }),
+    );
+    await runs.create(runRec("child-a", { status: "succeeded", parentScorecardId: "sc-subset", runtime: "docker" }));
+    const svc = new QueueService({
+      scorecards,
+      runs,
+      caseCountFor: async () => 601, // full dataset size — must NOT be used for a subset run
+      now: () => "2026-07-03T12:00:00.000Z",
+    });
+    const snap = await svc.snapshot("acme", "bob");
+    const item = snap.workspace.flatMap((l) => l.running).find((i) => i.id === "sc-subset");
+    expect(item?.progress).toEqual({ done: 1, active: 0, total: 12 });
+  });
+
   it("the waiting queue is createdAt ascending (FIFO) — the front is the next item", async () => {
     const { scorecards, runs } = await fixtures();
     await scorecards.create(card("later", { createdAt: "2026-07-03T02:00:00.000Z" }));
