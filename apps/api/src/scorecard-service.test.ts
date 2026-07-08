@@ -1839,3 +1839,96 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     await expect(service.retryFailed({ tenant: "beta", id: "sc-clean" })).rejects.toBeInstanceOf(NotFoundError); // other-workspace = 404
   });
 });
+
+describe("ScorecardService.submit — N-trial (pass@k / flakiness)", () => {
+  it("fans each case into N trials, creates a child run per trial, and derives a trialSummary on get()", async () => {
+    // Given: a 1-case dataset and a dispatch where trial 1 fails (2/3 → flaky). job.trial reaches the dispatcher.
+    const seenTrials: Array<number | undefined> = [];
+    const trialDispatch: Dispatcher = {
+      async dispatch(job) {
+        seenTrials.push(job.trial);
+        const pass = job.trial !== 1;
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tests-pass", metric: "tests_pass", value: pass ? 1 : 0, pass }],
+        };
+      },
+    };
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: trialDispatch,
+      store,
+      datasets,
+      runStore,
+      newId: () => `id-${n++}`,
+    });
+
+    // When: submitting with trials=3
+    const created = await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+      trials: 3,
+    });
+    const done = await waitTerminal(store, created.id);
+
+    // Then: 3 dispatches (trials 0..2), one child run per (case, trial), trials persisted for a re-drive
+    expect(done.status).toBe("succeeded");
+    expect(seenTrials.filter((t): t is number => t !== undefined).sort()).toEqual([0, 1, 2]);
+    expect(done.orchestration?.trials).toBe(3);
+    const children = await runStore.list("acme", { scorecardId: created.id });
+    expect(children.filter((c) => c.caseId === "c1")).toHaveLength(3);
+
+    // And: get() derives the trial roll-up — c1 passed 2/3 and is flaky
+    const detail = await service.get(created.id);
+    expect(detail?.trialSummary).toMatchObject({ cases: 1, flakyCases: 1, minTrials: 3, maxTrials: 3 });
+    expect(detail?.trialSummary?.passAt1).toBeCloseTo(2 / 3, 10);
+  });
+
+  it("a single-run batch carries no trial index and no trialSummary (backward compatible)", async () => {
+    const okDispatch: Dispatcher = {
+      async dispatch(job) {
+        return {
+          caseId: job.evalCase.id,
+          harness: `${job.harness.id}@${job.harness.version}`,
+          trace: [],
+          snapshot: { kind: "repo", diff: "", changedFiles: [], headSha: "h" },
+          scores: [{ graderId: "tests-pass", metric: "tests_pass", value: 1, pass: true }],
+        };
+      },
+    };
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", datasetWithCase());
+    const store = new InMemoryScorecardStore();
+    const runStore = new InMemoryRunStore();
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher: okDispatch,
+      store,
+      datasets,
+      runStore,
+      newId: () => `id-${n++}`,
+    });
+
+    const created = await service.submit({
+      tenant: "acme",
+      dataset: { id: "d", version: "1.0.0" },
+      harness: { id: "scripted", version: "0" },
+    });
+    await waitTerminal(store, created.id);
+
+    const children = await runStore.list("acme", { scorecardId: created.id });
+    expect(children.filter((c) => c.caseId === "c1")).toHaveLength(1);
+    expect(children[0]?.result?.trial).toBeUndefined();
+    const detail = await service.get(created.id);
+    expect(detail?.trialSummary).toBeUndefined();
+    expect(detail?.orchestration?.trials).toBeUndefined();
+  });
+});

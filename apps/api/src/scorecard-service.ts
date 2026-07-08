@@ -43,6 +43,7 @@ import {
   runSuite,
   scorecardModels,
   summarizeScorecard,
+  summarizeTrials,
   trendSeries,
 } from "@everdict/suite";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
@@ -60,6 +61,13 @@ function exportStepMessage(e: ScorecardExport): string {
   if (e.status === "succeeded") return `Trace sink (${e.sink}) export complete — ${e.cases?.length ?? 0} case(s)`;
   const label = e.status === "partial" ? "partial export" : "export failed";
   return `Trace sink (${e.sink}) ${label}${e.message ? ` — ${e.message}` : ""}`;
+}
+
+// Child-run key for a (case, trial) pair — a batch with trials>1 fans N children per case, so caseId alone is
+// ambiguous. trial absent (single-run) collapses to "<caseId>#0", so single-run keying is byte-identical.
+// docs/architecture/trial-based-verdict.md
+function childKey(caseId: string, trial?: number): string {
+  return `${caseId}#${trial ?? 0}`;
 }
 
 // One-line case failure/verdict reason — for progress-step messages. Prefer trace error events over a pass:false score.detail. Truncate if long.
@@ -193,6 +201,9 @@ export interface RunScorecardInput {
   // Transient dispatch retries per case (a THROWING dispatch only — a failing eval result is never retried).
   // Default 1. docs/architecture/batch-resilience.md
   retries?: number;
+  // Run each case this many times for pass@k / flakiness (>=1). Absent = 1 (single run). Each case fans out into N
+  // dispatches; the detail carries a derived trialSummary (pass@k / flake rate). docs/architecture/trial-based-verdict.md
+  trials?: number;
 }
 
 export interface ScorecardServiceDeps {
@@ -339,6 +350,8 @@ export class ScorecardService {
     const judge = input.judge ?? (this.deps.judgeFor ? await this.deps.judgeFor(input.tenant) : undefined);
     const concurrency = input.concurrency ?? this.concurrency;
     const retries = input.retries ?? 1; // transient dispatch retry (throw-only) — default one extra attempt
+    // Trials — run each case N times for pass@k / flakiness. Clamp to >=1; 1 keeps single-run behavior byte-identical.
+    const trials = input.trials !== undefined ? Math.max(1, Math.floor(input.trials)) : 1;
 
     const ts = this.now();
     const record: ScorecardRecord = {
@@ -353,7 +366,13 @@ export class ScorecardService {
       ...(subset ? { subset } : {}), // partial-run marker — consumers know it's "not the whole thing"
       // Everything a re-drive needs (restart resume / retry-failed) — persisted at submit so the batch can be
       // reconstructed after a control-plane restart. docs/architecture/batch-resilience.md
-      orchestration: { judges: input.judges ?? [], ...(judge ? { judge } : {}), concurrency, retries },
+      orchestration: {
+        judges: input.judges ?? [],
+        ...(judge ? { judge } : {}),
+        concurrency,
+        retries,
+        ...(trials > 1 ? { trials } : {}),
+      },
       createdAt: ts,
       updatedAt: ts,
     };
@@ -368,7 +387,9 @@ export class ScorecardService {
     // Batch-on-Temporal: when the driver is configured, a durable workflow owns the driver loop (the record is
     // stamped with its workflowId so boot recovery leaves it alone). A failed START degrades gracefully to the
     // in-process loop — the batch must never silently hang on a Temporal outage.
-    if (this.deps.temporalBatches) {
+    // Multi-trial batches (N children per case) stay on the in-process loop — the Temporal driver keys planBatch/
+    // runBatchCase by caseId and would collapse the trials. docs/architecture/trial-based-verdict.md
+    if (this.deps.temporalBatches && trials <= 1) {
       const workflowId = this.deps.temporalBatches.workflowIdFor(record.id);
       await this.deps.store.update(record.id, {
         orchestration: { ...(record.orchestration ?? { judges: [], concurrency, retries }), workflowId },
@@ -398,7 +419,7 @@ export class ScorecardService {
       judge,
       // Request parallelism takes precedence, else the service default. Positive integers only (the boundary is enforced by the route/MCP via Zod).
       concurrency,
-      { retries },
+      { retries, ...(trials > 1 ? { trials } : {}) },
     );
     return record;
   }
@@ -442,12 +463,27 @@ export class ScorecardService {
   // If an embed already exists (no-runStore / ingest / old record), return it as-is. Without a runStore, hydration is impossible → as-is.
   async get(id: string): Promise<ScorecardRecord | undefined> {
     const record = await this.deps.store.get(id);
-    if (!record || record.scorecard || !record.runIds?.length || !this.deps.runStore) return record;
-    const children = await this.deps.runStore.list(record.tenant, { scorecardId: id });
-    const results = children.map((c) => c.result).filter((r): r is CaseResult => r !== undefined);
-    if (results.length === 0) return record;
-    const harness = `${record.harness.id}@${record.harness.version}`;
-    return { ...record, scorecard: { suiteId: record.dataset.id, harness, results } };
+    if (!record) return record;
+    // Hydrate the scorecard from the child runs when stored as references (response shape identical to the embed era).
+    let hydrated = record;
+    if (!record.scorecard && record.runIds?.length && this.deps.runStore) {
+      const children = await this.deps.runStore.list(record.tenant, { scorecardId: id });
+      const results = children.map((c) => c.result).filter((r): r is CaseResult => r !== undefined);
+      if (results.length > 0) {
+        const harness = `${record.harness.id}@${record.harness.version}`;
+        hydrated = { ...record, scorecard: { suiteId: record.dataset.id, harness, results } };
+      }
+    }
+    return this.withTrialSummary(hydrated);
+  }
+
+  // Derive the trial roll-up (pass@k / flakiness) from the scorecard's repeated trials — like RunRecord.usage from the
+  // trace, computed on read and never stored. Attached only when the scorecard actually holds trials (a no-op for a
+  // single-run batch, so the response shape is unchanged there). docs/architecture/trial-based-verdict.md
+  private withTrialSummary(record: ScorecardRecord): ScorecardRecord {
+    const sc = record.scorecard;
+    if (!sc || record.trialSummary || !sc.results.some((r) => r.trial !== undefined)) return record;
+    return { ...record, trialSummary: summarizeTrials(sc) };
   }
 
   list(tenant?: string): Promise<ScorecardRecord[]> {
@@ -465,6 +501,9 @@ export class ScorecardService {
     // A Temporal-owned batch owns itself: the workflow's activity retries ride out a control-plane restart, so
     // boot recovery must neither tombstone nor double-drive it.
     if (rec.orchestration.workflowId) return true;
+    // A multi-trial batch keys child runs by (case, trial); the seed path below dedups by caseId, so a faithful
+    // resume needs (case, trial) seeding — not yet supported. Fall back to the INTERRUPTED tombstone. docs/architecture/trial-based-verdict.md
+    if (rec.orchestration.trials && rec.orchestration.trials > 1) return false;
     let dataset: Dataset;
     let seed: CaseResult[] = [];
     const seedRunIds: string[] = [];
@@ -853,6 +892,13 @@ export class ScorecardService {
         { scorecard: input.id, status: src.status },
         "Only a finished batch can be retried — wait for it to finish (or resume handles interruptions).",
       );
+    // Retrying a multi-trial batch needs per-(case, trial) failure selection (N results per case) — not yet supported.
+    if (src.orchestration?.trials && src.orchestration.trials > 1)
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { scorecard: input.id },
+        "Retrying a multi-trial (pass@k) batch is not yet supported.",
+      );
     const results = src.scorecard?.results ?? [];
     if (results.length === 0)
       throw new BadRequestError("BAD_REQUEST", { scorecard: input.id }, "This batch has no per-case results to retry.");
@@ -1103,7 +1149,7 @@ export class ScorecardService {
     const store = this.deps.runStore;
     if (!store) return;
     for (const r of results) {
-      const childId = caseToChild.get(r.caseId);
+      const childId = caseToChild.get(childKey(r.caseId, r.trial));
       if (childId) await store.update(childId, { result: r, updatedAt: this.now() });
     }
   }
@@ -1126,8 +1172,10 @@ export class ScorecardService {
     //  seedRunIds  — the child-run ids behind the seeds (kept in record.runIds so get() hydration still sees every case).
     //  retries     — transient dispatch retries per case (throw-only).
     //  resumeNote  — a timeline step explaining why this track run starts mid-way.
-    opts: { seed?: CaseResult[]; seedRunIds?: string[]; retries?: number; resumeNote?: string } = {},
+    //  trials      — run each case N times (pass@k / flakiness); one child run per (case, trial). Default 1.
+    opts: { seed?: CaseResult[]; seedRunIds?: string[]; retries?: number; resumeNote?: string; trials?: number } = {},
   ): Promise<void> {
+    const trials = opts.trials ?? 1;
     // If supersede already reclaimed this batch, don't start (prevents reviving queued→superseded back to running).
     if ((await this.deps.store.get(id))?.status === "superseded") return;
     // Register the cooperative-cancellation handle — when supersedeInFlight aborts, runSuite stops firing remaining cases.
@@ -1193,7 +1241,7 @@ export class ScorecardService {
           createdAt: ts,
           updatedAt: ts,
         });
-        caseToChild.set(job.evalCase.id, childId);
+        caseToChild.set(childKey(job.evalCase.id, job.trial), childId);
       }
       try {
         // Resolve env secret references (just before dispatch). If a referenced secret is missing, resolveHarnessSecrets throws → this case is isolated as a failure.
@@ -1274,13 +1322,14 @@ export class ScorecardService {
       pushStep(
         "dispatch",
         "started",
-        `Running ${cases.length} case(s)${seed.length > 0 ? ` (${seed.length} finished result(s) carried over)` : ""}`,
+        `Running ${cases.length} case(s)${trials > 1 ? ` × ${trials} trials` : ""}${seed.length > 0 ? ` (${seed.length} finished result(s) carried over)` : ""}`,
       );
       await flushSteps();
       // onResult: as each case finishes (completion order), record PASS/FAIL + reason as a step — the heart of "progress".
       scorecard = await runSuite(suite, harnessVersion, dispatch, {
         concurrency,
         ...(opts.retries !== undefined ? { retries: opts.retries } : {}), // transient dispatch retry (throw-only)
+        ...(trials > 1 ? { trials } : {}), // fan each case into N trials (pass@k / flakiness)
         signal: controller.signal, // on supersede, don't fire remaining cases (already-fired cases complete naturally)
         onResult: (r) => {
           const v = caseVerdict(r);

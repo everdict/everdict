@@ -23,6 +23,21 @@ export const MetricSummarySchema = z.object({
 });
 export type MetricSummary = z.infer<typeof MetricSummarySchema>;
 
+// Trial-based verdict roll-up (pass@k / flakiness) — isomorphic to @everdict/suite summarizeTrials's result (shape
+// mirror only; db depends on core, not suite). DERIVED on read from the scorecard's repeated trials (like
+// RunRecord.usage from the trace) — never persisted; present only on a multi-trial batch's detail. docs/architecture/trial-based-verdict.md
+export const ScorecardTrialSummarySchema = z.object({
+  cases: z.number(), // cases with >=1 scored trial
+  minTrials: z.number(),
+  maxTrials: z.number(),
+  passAt1: z.number(), // mean over cases of the per-case pass rate
+  k: z.number(), // the k used for passAtK
+  passAtK: z.number(),
+  flakyCases: z.number(), // cases with mixed pass/fail across trials
+  flakeRate: z.number(),
+});
+export type ScorecardTrialSummary = z.infer<typeof ScorecardTrialSummarySchema>;
+
 // The models this run actually used (leaderboard model axis, isomorphic to @everdict/suite scorecardModels's result — shape mirror only).
 // observed = observed from the trace · declared = declared in the spec · primary = group key (observed first, else declared). Lightweight, so included in list too.
 export const ScorecardModelsSchema = z.object({
@@ -103,6 +118,9 @@ export const ScorecardRecordSchema = z.object({
   harness: z.object({ id: z.string(), version: z.string() }), // resolved concrete version (never "latest")
   status: ScorecardStatusSchema,
   summary: z.array(MetricSummarySchema).optional(), // lightweight aggregate (for listing)
+  // Trial roll-up (pass@k / flakiness) — DERIVED on get() from the scorecard's repeated trials, never stored (like
+  // RunRecord.usage). Present only when the batch ran trials>1. docs/architecture/trial-based-verdict.md
+  trialSummary: ScorecardTrialSummarySchema.optional(),
   models: ScorecardModelsSchema.optional(), // the models this run used (leaderboard axis, lightweight → included in list too). Unset for past records.
   // The judge model(s) that scored this run — if the model axis is 'the LLM the harness used', this is the 'grader'. Filter/display
   // for fair comparison (same judge). Distinct of inline judge config.model + registered model-judge spec.model. Lightweight → included in list too.
@@ -123,6 +141,9 @@ export const ScorecardRecordSchema = z.object({
       judge: z.object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() }).optional(),
       concurrency: z.number().int().positive(),
       retries: z.number().int().min(0).default(0),
+      // Run each case N times for pass@k / flakiness. Absent = 1 (single run). Persisted so a re-drive keeps the
+      // trial count. docs/architecture/trial-based-verdict.md
+      trials: z.number().int().positive().optional(),
       // Set when a Temporal workflow owns this batch's driver loop — boot recovery leaves such batches alone
       // (they own themselves) and the web can deep-link the workflow. docs/architecture/temporal-batch-orchestration.md
       workflowId: z.string().optional(),
