@@ -146,7 +146,9 @@ cleanup as a dispatch). Live on both: CP SIGKILLed mid-batch of sleep-25 cases �
 Supersede symmetric: the cooperative abort only stops the UN-fired remainder, so a superseded 601-case batch
 kept burning cluster compute to the end. `Backend.kill(caseId)` (Nomad: prefix deregister without purge — the
 purge saga; K8s: delete by the `everdict.dev/case` label) now force-stops the already-fired jobs of a reclaimed
-batch's running children (best-effort).
+batch's running children (best-effort). Live: a same-PR refire superseded a batch of 3 sleep-25 cases mid-run —
+6s later only the new fire's 3 jobs were running (the reclaimed batch's jobs were deregistered ~15s before
+their natural end) and the record read `superseded/SUPERSEDED`.
 
 ## Tail speculation — stragglers duplicate, first result wins
 
