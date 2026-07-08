@@ -2,7 +2,10 @@ import { type Principal, can } from "@everdict/auth";
 import { ForbiddenError, referencesUserSecret } from "@everdict/core";
 import type { HarnessInstanceRegistry } from "@everdict/registry";
 
-// A private (personal-secret-referencing) harness is visible only to createdBy — decided by resolving the latest version.
+// A private (personal-secret-referencing) harness is visible only to its owner — decided by resolving the latest version.
+// The owner is the creator of that SAME latest version (the version whose spec makes it private) — not the id-level
+// (earliest-version) creator: an id whose first version was registered without a creator stamp (or by someone else)
+// must not hide a later private version from the person who registered it.
 // A resolve failure is treated as "can't determine visibility" and not blocked (the caller's other 404 path handles it).
 // Shared by the HTTP routes (server.ts) and MCP tools (mcp.ts) (BFF↔MCP parity).
 export async function harnessVisibleTo(
@@ -13,7 +16,9 @@ export async function harnessVisibleTo(
   try {
     const resolved = await registry.get(principal.workspace, id);
     if (!referencesUserSecret(resolved)) return true;
-    return (await registry.creatorOf(principal.workspace, id)) === principal.subject;
+    const latest = (await registry.versions(principal.workspace, id)).at(-1);
+    if (latest === undefined) return true;
+    return (await registry.creatorOfVersion(principal.workspace, id, latest)) === principal.subject;
   } catch {
     return true;
   }

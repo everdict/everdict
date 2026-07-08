@@ -20,6 +20,7 @@ export interface VersionMeta {
   latestVersion: string;
   versionCount: number;
   createdBy?: string; // subject of the first registered version
+  latestCreatedBy?: string; // subject of the latest (semver) version — the privacy owner for a user-secret harness (visibility follows the version that decides privacy)
   createdAt?: string; // first registration time (ISO)
   updatedAt?: string; // most recent registration time (ISO)
   versionTags?: Record<string, string[]>; // version → tags (empty versions omitted; if no tags at all, the field itself is omitted)
@@ -149,6 +150,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
       const entries = [...(this.byOwner.get(owner)?.get(id)?.values() ?? [])].sort((a, b) => a.seq - b.seq);
       const earliest = entries[0];
       const latest = entries.at(-1);
+      const latestVersionEntry = this.byOwner.get(owner)?.get(id)?.get(latestVersion); // creator of the semver-latest version (≠ last-registered)
       const versionTags = this.versionTags(owner, id);
       out.push({
         id,
@@ -157,6 +159,7 @@ export class VersionedStore<T extends { id: string; version: string }> {
         latestVersion,
         versionCount: versions.length,
         ...(earliest?.createdBy !== undefined ? { createdBy: earliest.createdBy } : {}),
+        ...(latestVersionEntry?.createdBy !== undefined ? { latestCreatedBy: latestVersionEntry.createdBy } : {}),
         ...(earliest ? { createdAt: earliest.createdAt } : {}),
         ...(latest ? { updatedAt: latest.createdAt } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),

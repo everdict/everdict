@@ -234,7 +234,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           }
           const result = HarnessTemplateSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await templates.register(ws, result.data);
+          await templates.register(ws, result.data, principal.subject); // creator stamp — HTTP parity
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
@@ -250,7 +250,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
         run(principal, "harnesses:read", async () => {
           // A private harness (references a personal secret) is createdBy-only — hidden from other users (same as the HTTP list).
           const entries = await instances.list(ws);
-          return ok(entries.filter((e) => !e.private || e.createdBy === principal.subject));
+          return ok(entries.filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject));
         }),
     );
 
@@ -322,7 +322,8 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           }
           const result = HarnessInstanceSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await instances.register(ws, result.data); // resolve validation (missing template / absent pins → error)
+          // creator stamp = HTTP parity — without it a user-secret (private) instance becomes invisible even to its registrant
+          await instances.register(ws, result.data, principal.subject); // resolve validation (missing template / absent pins → error)
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );
@@ -574,7 +575,7 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
           }
           const result = JudgeSpecSchema.safeParse(parsed);
           if (!result.success) return fail(`BAD_REQUEST: ${result.error.message}`);
-          await judges.register(ws, result.data);
+          await judges.register(ws, result.data, principal.subject); // creator stamp — HTTP parity
           return ok({ workspace: ws, id: result.data.id, version: result.data.version });
         }),
     );

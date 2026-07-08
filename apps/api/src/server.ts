@@ -835,8 +835,9 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     try {
       gate(principal, "harnesses:read");
       const entries = await deps.harnessInstances.list(principal.workspace); // instances grouped by template id
-      // A private harness (references a personal secret) is createdBy-only — hidden from other users' lists.
-      return reply.send(entries.filter((e) => !e.private || e.createdBy === principal.subject));
+      // A private harness (references a personal secret) is owner-only — the owner is the creator of the latest
+      // version (the one that decides privacy), falling back to the id-level creator for older data.
+      return reply.send(entries.filter((e) => !e.private || (e.latestCreatedBy ?? e.createdBy) === principal.subject));
     } catch (err) {
       return sendError(reply, err);
     }

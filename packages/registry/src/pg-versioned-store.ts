@@ -175,6 +175,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
       const byTime = [...r.rows].sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
       const earliest = byTime[0];
       const latest = byTime.at(-1);
+      const latestVersionRow = r.rows.find((x) => x.version === latestVersion); // creator of the semver-latest version (≠ last-registered)
       const versionTags: Record<string, string[]> = {};
       for (const row of r.rows) {
         const tags = parseVersionTags(row.tags);
@@ -187,6 +188,7 @@ export class PgVersionedStore<T extends { id: string; version: string }> {
         latestVersion,
         versionCount: versions.length,
         ...(earliest?.created_by != null ? { createdBy: earliest.created_by } : {}),
+        ...(latestVersionRow?.created_by != null ? { latestCreatedBy: latestVersionRow.created_by } : {}),
         ...(earliest ? { createdAt: new Date(earliest.created_at).toISOString() } : {}),
         ...(latest ? { updatedAt: new Date(latest.created_at).toISOString() } : {}),
         ...(Object.keys(versionTags).length > 0 ? { versionTags } : {}),
