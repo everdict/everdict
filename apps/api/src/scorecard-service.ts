@@ -644,6 +644,7 @@ export class ScorecardService {
       caseIndex: Map<string, EvalCase>; // placement target already assigned (stable round-robin by selected index)
       targets: string[]; // the shard list — spillover candidates (empty = no runtime selection)
       speculation?: SpeculationController; // tail-straggler duplication (sharded batches only)
+      memoryBoostMb?: Record<string, number>; // OOM escalation of a Temporal-owned retry (origin.memoryBoostMb)
       doneIds: Set<string>;
       stepChain: Promise<void>;
     }
@@ -709,6 +710,7 @@ export class ScorecardService {
       ...(secretMap ? { secretMap } : {}),
       caseIndex,
       targets,
+      ...(rec.origin?.memoryBoostMb ? { memoryBoostMb: rec.origin.memoryBoostMb } : {}),
       // Tail speculation — sharded batches only. The controller lives with the batch context (rebuilt with
       // empty duration history on a CP restart — it re-learns the median from the resumed cases).
       ...(targets.length > 1
@@ -810,10 +812,22 @@ export class ScorecardService {
     let ranOn: string | undefined; // the runtime that actually ran the case (spillover provenance)
     for (let attempt = 0; ; attempt++) {
       try {
-        const jobToRun =
+        const resolved =
           ctx.secretMap && baseJob.harnessSpec
             ? { ...baseJob, harnessSpec: resolveHarnessSecrets(baseJob.harnessSpec, ctx.secretMap) }
             : baseJob;
+        // OOM escalation parity with the in-process loop — a Temporal-owned retry applies its boost the same way.
+        const boostMb = ctx.memoryBoostMb?.[caseId];
+        const jobToRun =
+          boostMb !== undefined && resolved.harnessSpec?.kind === "command"
+            ? {
+                ...resolved,
+                harnessSpec: {
+                  ...resolved.harnessSpec,
+                  resources: { ...resolved.harnessSpec.resources, memoryMb: boostMb },
+                },
+              }
+            : resolved;
         // Spillover: same failover as the in-process loop — a retryable infra failure moves the case to the
         // next healthy runtime of the shard list before the transient retry burns attempts on a dead cluster.
         // Tail speculation on top (same semantics as the in-process loop): straggler duplicate, first result wins.
@@ -1071,6 +1085,48 @@ export class ScorecardService {
         }
         recovered.push(attempt);
       }
+      const resumeNote =
+        `Retry of ${src.id} — re-running ${redispatch.length} failed case(s), ${seed.length} passing result(s) carried over` +
+        (recollect.length > 0
+          ? `, ${recollect.length} collect-failed case(s) re-collected without re-run (${healed} recovered)`
+          : "") +
+        (boosted > 0 ? `, ${boosted} OOM case(s) escalated to ${Object.values(memoryBoostMb).join("/")}Mb` : "");
+
+      // Temporal parity: when the batch driver is configured, the retry batch is workflow-owned too — a CP
+      // restart mid-retry must not lose it. Seeds (passes + recovered) are MATERIALIZED as succeeded child runs
+      // first, so the idempotent planBatch naturally skips them and finalize aggregates them; the workflow then
+      // drives only the re-dispatch remainder. Start failure degrades to the in-process loop (same as submit).
+      if (this.deps.temporalBatches && this.deps.runStore) {
+        for (const r of [...seed, ...recovered]) {
+          const ts2 = this.now();
+          await this.deps.runStore.create({
+            id: this.newId(),
+            tenant: input.tenant,
+            harness: src.harness,
+            caseId: r.caseId,
+            status: "succeeded",
+            result: r,
+            parentScorecardId: record.id,
+            trigger: "scorecard",
+            ...(src.runtime ? { runtime: src.runtime } : {}),
+            createdAt: ts2,
+            updatedAt: ts2,
+          });
+        }
+        const workflowId = this.deps.temporalBatches.workflowIdFor(record.id);
+        await this.deps.store.update(record.id, {
+          orchestration: { ...orch, workflowId },
+          steps: [{ ts: this.now(), phase: "resume", status: "info", message: resumeNote }],
+          updatedAt: this.now(),
+        });
+        try {
+          await this.deps.temporalBatches.start(record.id);
+          return;
+        } catch {
+          // Strip the workflow claim and fall through to the in-process loop (same degradation as submit).
+          await this.deps.store.update(record.id, { orchestration: orch, updatedAt: this.now() });
+        }
+      }
       await this.track(
         record.id,
         input.tenant,
@@ -1087,12 +1143,7 @@ export class ScorecardService {
           seed: [...seed, ...recovered],
           retries: orch.retries,
           ...(boosted > 0 ? { memoryBoostMb } : {}),
-          resumeNote:
-            `Retry of ${src.id} — re-running ${redispatch.length} failed case(s), ${seed.length} passing result(s) carried over` +
-            (recollect.length > 0
-              ? `, ${recollect.length} collect-failed case(s) re-collected without re-run (${healed} recovered)`
-              : "") +
-            (boosted > 0 ? `, ${boosted} OOM case(s) escalated to ${Object.values(memoryBoostMb).join("/")}Mb` : ""),
+          resumeNote,
         },
       );
     })();

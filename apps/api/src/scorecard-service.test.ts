@@ -1986,6 +1986,58 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     expect(spec.kind === "command" && spec.resources?.memoryMb).toBe(64);
   });
 
+  it("retryFailed with the Temporal driver: seeds materialize as child runs, the workflow is started, and planBatch sees only the failures", async () => {
+    const { dispatcher } = capturingDispatcher();
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    await datasets.register("acme", threeCaseDataset);
+    const started: string[] = [];
+    let n = 0;
+    const service = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      runStore: runs,
+      newId: () => `tp-${n++}`,
+      temporalBatches: {
+        workflowIdFor: (id) => `everdict-batch-${id}`,
+        start: async (id) => {
+          started.push(id);
+        },
+      },
+    });
+    await store.create({
+      id: "sc-tp",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      orchestration: { judges: [], concurrency: 3, retries: 0 },
+      scorecard: {
+        suiteId: "rd",
+        harness: "h@1",
+        results: [passResult("c1"), passResult("c2", false), passResult("c3")],
+      },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+
+    const rec = await service.retryFailed({ tenant: "acme", id: "sc-tp" });
+    // The async branch stamps + starts — settle it.
+    for (let i = 0; i < 50 && started.length === 0; i++) await new Promise((r) => setTimeout(r, 10));
+
+    expect(started).toEqual([rec.id]); // the retry batch is workflow-owned
+    const stamped = await store.get(rec.id);
+    expect(stamped?.orchestration?.workflowId).toBe(`everdict-batch-${rec.id}`);
+    expect(stamped?.steps?.some((s) => s.phase === "resume" && s.message.includes("Retry of sc-tp"))).toBe(true);
+    // Seeds (c1, c3) materialized as succeeded children → the idempotent plan drives only the failure.
+    const children = await runs.list("acme", { scorecardId: rec.id });
+    expect(children.map((c) => c.caseId).sort()).toEqual(["c1", "c3"]);
+    const plan = await service.planBatch(rec.id);
+    expect(plan.caseIds).toEqual(["c2"]);
+  });
+
   it("retryFailed rejects an in-flight source (400) and an all-pass source (nothing to retry)", async () => {
     const { dispatcher } = capturingDispatcher();
     const { store, datasets, service } = build(dispatcher);

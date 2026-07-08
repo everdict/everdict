@@ -76,6 +76,15 @@ Live e2e: 12-case batch with `continueEvery=5` → plan steps "Running 12" → "
 "Running 2 (10 kept)"; `temporal workflow list` shows ContinuedAsNew ×2 → Completed on one workflowId;
 12/12 pass.
 
+## Retry parity
+
+`retry-failed` batches are workflow-owned too (a CP restart mid-retry must not lose them): the carried seeds
+(passes + re-collected recoveries) are MATERIALIZED as succeeded child runs before the workflow starts, so the
+idempotent `planBatch` naturally drives only the re-dispatch remainder and finalize aggregates everything. The
+OOM escalation boost rides `origin.memoryBoostMb` → batch context → `runBatchCase`, identical to the in-process
+loop. Start failure degrades to the in-process loop, same as submit. Live: an OOM retry chain ran entirely
+workflow-owned (each retry its own Completed workflow), escalated 64 → 128 → 256 and passed.
+
 ## Non-goals
 
 - Moving judge/export streaming into Temporal (they are per-case activities already chained after
