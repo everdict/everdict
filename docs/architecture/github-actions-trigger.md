@@ -110,7 +110,7 @@ repo↔service wiring. Competing products call this an "integration" and make it
 
 ### D1 — Action-as-client (outbound), GitHub App deferred
 
-A published first-party Action (`everdict-ai/run-eval@v1`) calls the Everdict API from the GH runner. Outbound calls
+A published first-party Action (`everdict/run-eval@v1`) calls the Everdict API from the GH runner. Outbound calls
 need no inbound webhook surface, no HMAC verification, no App installation, and work behind NAT. GitHub-side
 writes (PR comment, failing the check) use the workflow's ambient `${{ github.token }}` — **Everdict never holds a
 GitHub credential for CI feedback.** The generated workflow file (D3) makes this invisible to the user.

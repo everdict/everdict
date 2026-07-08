@@ -365,7 +365,7 @@ jobs:
           password: \${{ secrets.GITHUB_TOKEN }}
 ${buildSteps}
       - name: Everdict eval
-        uses: everdict-ai/run-eval@v1
+        uses: everdict/run-eval@v1
         with:
           api-url: ${apiUrl}
           workspace: ${workspace}

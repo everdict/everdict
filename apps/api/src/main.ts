@@ -430,8 +430,11 @@ async function main(): Promise<void> {
   });
   // Batch eval: run a dataset (bundle of cases) against a harness@version, aggregate into a scorecard + apply the selected judges to each trace.
   // Batch-on-Temporal (opt-in): the durable workflow drives batches through the internal routes.
+  // Batch-on-Temporal is DEFAULT-ON once an address is configured (a deployment that stood Temporal up wants the
+  // durability); EVERDICT_TEMPORAL_BATCHES=0 opts back out to the in-process loop. Start failure still degrades
+  // per submit, so a flaky Temporal never blocks evaluation.
   const temporalBatchAddress =
-    process.env.EVERDICT_TEMPORAL_ADDRESS && process.env.EVERDICT_TEMPORAL_BATCHES === "1"
+    process.env.EVERDICT_TEMPORAL_ADDRESS && process.env.EVERDICT_TEMPORAL_BATCHES !== "0"
       ? process.env.EVERDICT_TEMPORAL_ADDRESS
       : undefined;
   // Boot-recovery adoption + supersede force-kill: resolve each runtime of the child's recorded lane (may be a

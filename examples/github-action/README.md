@@ -43,7 +43,7 @@ jobs:
           tags: ghcr.io/${{ github.repository }}:${{ github.sha }}
 
       - name: Everdict eval
-        uses: ./.github/actions/everdict-run-eval   # or everdict-ai/run-eval@v1 once published
+        uses: ./.github/actions/everdict-run-eval   # or everdict/run-eval@v1 once published
         with:
           api-url: https://everdict.example.com
           workspace: acme

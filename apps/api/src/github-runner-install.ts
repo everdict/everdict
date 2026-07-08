@@ -136,7 +136,7 @@ function renderWorkflowHint(githubRunnerLabel: string, runtimeTarget: string): s
     runs-on: [self-hosted, ${githubRunnerLabel}]   # runs on this build server's GitHub runner
     steps:
       # ... build image ...
-      - uses: everdict-ai/run-eval@v1
+      - uses: everdict/run-eval@v1
         with:
           runtime: ${runtimeTarget}                # run the Everdict eval on this workspace-shared runner
           # api-url / workspace / harness / dataset / images ...`;
