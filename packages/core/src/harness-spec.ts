@@ -262,6 +262,10 @@ export const CommandHarnessSpecSchema = z.object({
   id: z.string(),
   version: z.string(),
   image: z.string().optional(), // dispatch image (default agent image if absent). Install tools via setup.
+  // Resource request for the whole job (same convention as TopologyService.resources: cpu 1000=1vCPU/nomad MHz,
+  // memoryMb). Heavier harnesses declare it so nomad/k8s bin-pack correctly and starvation reads as an infra
+  // failure (OOM_KILLED) instead of an agent one. Unset = backend defaults.
+  resources: ServiceResourcesSchema.optional(),
   workDir: z.string().optional(), // setup/command execution directory (default "work"). Environments without a work dir (os-use etc.) use an absolute path (e.g. "/tmp").
   setup: z.array(z.string()).default([]), // run once in the sandbox (e.g. "pip install aider-chat==0.74.0")
   command: z.string(), // e.g. "aider --yes --message {{task}} --model {{model}} --edit-format {{edit_format}} ."

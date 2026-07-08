@@ -1,5 +1,6 @@
 import { RESULT_SENTINEL } from "@everdict/agent";
 import {
+  OOM_KILLED,
   type AgentJob,
   type CaseResult,
   CaseResultSchema,
@@ -133,7 +134,17 @@ export function buildNomadJob(job: AgentJob, opts: NomadBackendOptions, jobId?: 
                 ...(auth ? { auth } : {}),
               },
               Env: env,
-              Resources: { CPU: opts.cpuMhz ?? 1000, MemoryMB: opts.memMb ?? 1024 },
+              // Harness-declared resources win (heavier harnesses get real bin-packing; starvation reads as infra).
+              Resources: {
+                CPU:
+                  (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.cpu : undefined) ??
+                  opts.cpuMhz ??
+                  1000,
+                MemoryMB:
+                  (job.harnessSpec?.kind === "command" ? job.harnessSpec.resources?.memoryMb : undefined) ??
+                  opts.memMb ??
+                  1024,
+              },
             },
           ],
         },
@@ -255,6 +266,29 @@ export class NomadBackend implements Backend {
     }
   }
 
+  // Scan the alloc's task events for an OOM kill (docker driver reports "OOM Killed"/oom notifications).
+  private async allocWasOomKilled(allocId: string): Promise<boolean> {
+    try {
+      const res = await this.http.request("GET", `/v1/allocation/${allocId}`);
+      if (res.status >= 300) return false;
+      const detail = JSON.parse(res.text) as {
+        TaskStates?: Record<
+          string,
+          { Events?: Array<{ Type?: string; DisplayMessage?: string; Details?: Record<string, string> }> }
+        >;
+      };
+      for (const st of Object.values(detail.TaskStates ?? {})) {
+        for (const e of st.Events ?? []) {
+          const text = `${e.Type ?? ""} ${e.DisplayMessage ?? ""} ${e.Details?.oom_killed ?? ""}`.toLowerCase();
+          if (text.includes("oom")) return true;
+        }
+      }
+    } catch {
+      /* detection is best-effort — fall through to the generic alloc-failed error */
+    }
+    return false;
+  }
+
   private readonly purgeQueue: Array<{ jobId: string; ns: string | undefined; at: number }> = [];
   private async sweepPurge(): Promise<void> {
     const cutoff = Date.now() - (this.opts.purgeDelayMs ?? 60_000);
@@ -279,6 +313,14 @@ export class NomadBackend implements Backend {
         if (alloc) {
           if (alloc.ClientStatus === "complete") return alloc.ID;
           if (alloc.ClientStatus === "failed" || alloc.ClientStatus === "lost") {
+            // OOM-killed reads as fatal infra (raise the harness resources), never as an agent failure.
+            if (await this.allocWasOomKilled(alloc.ID)) {
+              throw new UpstreamError(
+                "UPSTREAM_ERROR",
+                { alloc: alloc.ID, signal: OOM_KILLED },
+                "task OOM-killed — raise the harness's resources.memoryMb (infra, not an agent failure)",
+              );
+            }
             throw new UpstreamError("UPSTREAM_ERROR", { alloc: alloc.ID, status: alloc.ClientStatus }, "alloc failed");
           }
         }

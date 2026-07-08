@@ -49,7 +49,14 @@ interface JobManifest {
 const envOf = (m: JobManifest, k: string) => m.spec.template.spec.containers[0]?.env.find((e) => e.name === k)?.value;
 
 function mockApi(
-  opts: { logs?: string; failed?: boolean; active?: number; version?: string; unreachable?: boolean } = {},
+  opts: {
+    logs?: string;
+    failed?: boolean;
+    active?: number;
+    version?: string;
+    unreachable?: boolean;
+    failureReason?: string;
+  } = {},
 ) {
   const applied: JobManifest[] = [];
   const deleted: string[] = [];
@@ -66,6 +73,9 @@ function mockApi(
     },
     async podLogs() {
       return opts.logs ?? `prelude\n${RESULT_SENTINEL}${JSON.stringify(RESULT)}\n`;
+    },
+    async podFailureReason() {
+      return opts.failureReason;
     },
     async deleteJob(name) {
       deleted.push(name);
@@ -290,5 +300,42 @@ describe("K8sBackend.probe", () => {
     const r = await backend.probe();
     expect(r.reachable).toBe(false);
     expect(r.detail).toContain("connection refused");
+  });
+});
+
+// Resource plumbing + OOM classification — heavier harnesses declare their weight; starvation reads as infra.
+describe("K8s harness resources + OOM classification", () => {
+  it("a command harness's declared resources land as requests=limits on the agent container", async () => {
+    const { api, applied } = mockApi();
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
+    await backend.dispatch({
+      ...JOB,
+      harnessSpec: {
+        kind: "command",
+        id: "bu",
+        version: "1",
+        setup: [],
+        command: "run",
+        env: {},
+        params: {},
+        trace: { kind: "none" },
+        resources: { cpu: 500, memoryMb: 2048 },
+      },
+    });
+    const container = (applied[0] as { spec: { template: { spec: { containers: Array<Record<string, unknown>> } } } })
+      .spec.template.spec.containers[0];
+    expect(container?.resources).toEqual({
+      requests: { cpu: "500m", memory: "2048Mi" },
+      limits: { cpu: "500m", memory: "2048Mi" },
+    });
+  });
+
+  it("an OOMKilled pod classifies as fatal infra (OOM_KILLED signal), not a bare job failure", async () => {
+    const { api } = mockApi({ failed: true, failureReason: "OOMKilled" });
+    const backend = new K8sBackend({ image: "img", api, pollIntervalMs: 1 });
+    const err = await backend.dispatch(JOB).catch((e) => e);
+    expect(err).toBeInstanceOf(UpstreamError);
+    expect(err.extra?.signal).toBe("OOM_KILLED");
+    expect(err.message).toContain("resources.memoryMb");
   });
 });

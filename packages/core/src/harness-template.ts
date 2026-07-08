@@ -52,6 +52,7 @@ export const CommandTemplateSpecSchema = z.object({
   kind: z.literal("command"),
   ...templateBase,
   image: z.string().optional(), // default when pins.image is absent
+  resources: ServiceResourcesSchema.optional(), // job-level resource request (cpu/memoryMb) — carried into the resolved spec
   workDir: z.string().optional(),
   setup: z.array(z.string()).default([]),
   command: z.string(),
@@ -244,6 +245,7 @@ export function resolveHarnessInstance(template: HarnessTemplateSpec, instance: 
         ...(image !== undefined ? { image } : {}),
         ...(template.workDir !== undefined ? { workDir: template.workDir } : {}),
         ...(model !== undefined ? { model } : {}),
+        ...(template.resources !== undefined ? { resources: template.resources } : {}),
       });
     }
     case "process":

@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RESULT_SENTINEL } from "@everdict/agent";
 import {
+  OOM_KILLED,
   type AgentJob,
   type CaseResult,
   CaseResultSchema,
@@ -24,6 +25,8 @@ export interface K8sApi {
   jobStatus(name: string, ns: string): Promise<{ succeeded: number; failed: number }>;
   podLogs(name: string, ns: string): Promise<string>; // stdout of job/<name>
   deleteJob(name: string, ns: string): Promise<void>;
+  // Termination reason of the job's (failed) pod — e.g. "OOMKilled". Best-effort: undefined when unavailable.
+  podFailureReason(name: string, ns: string): Promise<string | undefined>;
   countActiveJobs(): Promise<number | undefined>; // capacity probe (in-flight app=everdict jobs across all namespaces)
   serverVersion(): Promise<string>; // connection test — API server /version (gitVersion). Throws on reachability/auth failure.
 }
@@ -108,6 +111,22 @@ export function kubectlApi(
       if (res.code !== 0)
         throw new UpstreamError("UPSTREAM_ERROR", { name }, `log fetch failed: ${res.stderr || res.stdout}`);
       return res.stdout;
+    },
+    async podFailureReason(name, ns) {
+      const res = await run(bin, [
+        ...ctx,
+        "-n",
+        ns,
+        "get",
+        "pods",
+        "-l",
+        `job-name=${name}`,
+        "-o",
+        'jsonpath={range .items[*]}{.status.containerStatuses[*].state.terminated.reason}{" "}{.status.containerStatuses[*].lastState.terminated.reason}{end}',
+      ]);
+      if (res.code !== 0) return undefined;
+      const reason = res.stdout.trim().split(/\s+/).find(Boolean);
+      return reason || undefined;
     },
     async deleteJob(name, ns) {
       await run(bin, [
@@ -245,6 +264,30 @@ export function buildK8sJob(
               image,
               imagePullPolicy: opts.imagePullPolicy ?? "IfNotPresent",
               env: Object.entries(env).map(([n, value]) => ({ name: n, value })),
+              // Harness-declared resources → requests=limits (deterministic OOM instead of noisy-neighbor starvation;
+              // the scheduler bin-packs by the real weight). Unset = cluster defaults.
+              ...(job.harnessSpec?.kind === "command" && job.harnessSpec.resources
+                ? {
+                    resources: {
+                      requests: {
+                        ...(job.harnessSpec.resources.cpu !== undefined
+                          ? { cpu: `${job.harnessSpec.resources.cpu}m` }
+                          : {}),
+                        ...(job.harnessSpec.resources.memoryMb !== undefined
+                          ? { memory: `${job.harnessSpec.resources.memoryMb}Mi` }
+                          : {}),
+                      },
+                      limits: {
+                        ...(job.harnessSpec.resources.cpu !== undefined
+                          ? { cpu: `${job.harnessSpec.resources.cpu}m` }
+                          : {}),
+                        ...(job.harnessSpec.resources.memoryMb !== undefined
+                          ? { memory: `${job.harnessSpec.resources.memoryMb}Mi` }
+                          : {}),
+                      },
+                    },
+                  }
+                : {}),
             },
           ],
         },
@@ -365,7 +408,17 @@ export class K8sBackend implements Backend {
     for (let i = 0; i < maxPolls; i++) {
       const { succeeded, failed } = await api.jobStatus(name, ns);
       if (succeeded > 0) return;
-      if (failed > 0) throw new UpstreamError("UPSTREAM_ERROR", { name, ns }, "K8s Job failed");
+      if (failed > 0) {
+        // OOM-killed reads as fatal infra (raise the harness resources), never as an agent failure.
+        const reason = await api.podFailureReason(name, ns).catch(() => undefined);
+        if (reason === "OOMKilled")
+          throw new UpstreamError(
+            "UPSTREAM_ERROR",
+            { name, ns, signal: OOM_KILLED },
+            "task OOM-killed — raise the harness's resources.memoryMb (infra, not an agent failure)",
+          );
+        throw new UpstreamError("UPSTREAM_ERROR", { name, ns, ...(reason ? { reason } : {}) }, "K8s Job failed");
+      }
       await new Promise((r) => setTimeout(r, interval));
     }
     throw new UpstreamError("UPSTREAM_ERROR", { name, ns }, "timed out waiting for K8s Job completion");
