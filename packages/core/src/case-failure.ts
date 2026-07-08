@@ -25,7 +25,7 @@ export type CaseFailure = z.infer<typeof CaseFailureSchema>;
 // reads as "raise the harness's resources", never as an agent failure.
 export const OOM_KILLED = "OOM_KILLED";
 
-const INFRA_RETRYABLE = new Set(["UPSTREAM_ERROR", "RATE_LIMITED", "DRIVER_PROVISION_FAILED"]);
+const INFRA_RETRYABLE = new Set(["UPSTREAM_ERROR", "RATE_LIMITED", "DRIVER_PROVISION_FAILED", "TRACE_COLLECT_FAILED"]);
 const INFRA_FATAL = new Set(["UPSTREAM_MISCONFIGURED", OOM_KILLED]);
 const CONFIG = new Set(["BAD_REQUEST", "NOT_FOUND", "CONFLICT", "BUDGET_EXCEEDED", "UNAUTHENTICATED", "FORBIDDEN"]);
 const HARNESS = new Set(["HARNESS_INSTALL_FAILED", "HARNESS_RUN_FAILED", "COMPUTE_EXEC_FAILED", "GRADER_FAILED"]);
@@ -44,6 +44,8 @@ export function stageForError(err: unknown): CaseFailure["stage"] {
       return "grade";
     case "DRIVER_PROVISION_FAILED":
       return "dispatch";
+    case "TRACE_COLLECT_FAILED":
+      return "collect";
     default:
       return "run";
   }

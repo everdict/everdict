@@ -11,6 +11,7 @@ import type {
   Score,
   TraceEvent,
 } from "@everdict/core";
+import { UpstreamError } from "@everdict/core";
 import { safeGrade } from "@everdict/graders";
 
 export interface RunCaseDeps {
@@ -91,7 +92,16 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     await release(); // The remaining work (platform pull · observation scoring) doesn't need the environment — release the sandbox here
 
     if (!defer) {
-      if (deps.harness.collectTrace && source) trace.push(...(await deps.harness.collectTrace(runId)));
+      if (deps.harness.collectTrace && source) {
+        try {
+          trace.push(...(await deps.harness.collectTrace(runId)));
+        } catch (err) {
+          // Stage-preserving remap: a platform pull failure is a COLLECT-stage infra problem (endpoint down, auth,
+          // flush lag beyond the adapter's retries) — without the code it would classify as a run-stage crash.
+          const message = err instanceof Error ? err.message : String(err);
+          throw new UpstreamError("TRACE_COLLECT_FAILED", { runId }, `trace collection failed: ${message}`);
+        }
+      }
       for (const [i, grader] of deps.graders.entries()) {
         if (grader.needsCompute !== true) {
           slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot: materialized });

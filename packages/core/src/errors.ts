@@ -14,6 +14,8 @@ export const ErrorCode = {
   HARNESS_RUN_FAILED: "Failed to run the harness.",
   // grader
   GRADER_FAILED: "Grading failed.",
+  // trace collection (post-release platform pull)
+  TRACE_COLLECT_FAILED: "Failed to collect the trace.",
   // upstream — remap external dependency failures to our errors (so monitoring blames us)
   UPSTREAM_MISCONFIGURED: "The external service is misconfigured.",
   UPSTREAM_ERROR: "The external service returned an error.",

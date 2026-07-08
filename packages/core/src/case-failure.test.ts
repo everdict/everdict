@@ -39,3 +39,15 @@ describe("stageForError (which pipeline stage an error code names)", () => {
     expect(stageForError(new Error("raw"))).toBe("run");
   });
 });
+
+describe("collect-stage classification", () => {
+  it("a trace-collection failure is retryable COLLECT-stage infra", () => {
+    const err = new UpstreamError("TRACE_COLLECT_FAILED", { runId: "r1" }, "trace collection failed: 502");
+    expect(stageForError(err)).toBe("collect");
+    expect(classifyFailure(err, stageForError(err))).toMatchObject({
+      stage: "collect",
+      class: "infra",
+      retryable: true,
+    });
+  });
+});
