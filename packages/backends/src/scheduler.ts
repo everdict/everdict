@@ -1,4 +1,4 @@
-import { type AgentJob, type CaseResult, NotFoundError, RateLimitError } from "@everdict/core";
+import { type AgentJob, type CaseResult, InternalError, NotFoundError, RateLimitError } from "@everdict/core";
 import { type BudgetTracker, costOf } from "./budget.js";
 import { FairQueue } from "./fair-queue.js";
 import type { BackendRegistry } from "./registry.js";
@@ -102,6 +102,21 @@ export class Scheduler {
   // Wake the scheduler to re-evaluate the queue when capacity was increased externally (the autoscaler).
   poke(): void {
     void this.pump();
+  }
+
+  // Cancel QUEUED (not-yet-dispatched) jobs matching the predicate — reclaim for a superseded batch or a
+  // speculation loser. The entry's promise rejects with CANCELLED (classified infra-retryable, but every caller
+  // either swallows it [speculation race already settled] or has aborted its retry loop [supersede]). In-flight
+  // jobs are untouched — reclaiming those is Backend.kill's job.
+  cancelQueued(predicate: (job: AgentJob) => boolean): number {
+    let cancelled = 0;
+    for (const entry of this.queue.ordered()) {
+      if (!predicate(entry.job)) continue;
+      this.queue.remove(entry);
+      entry.reject(new InternalError("CANCELLED", { caseId: entry.job.evalCase.id }, "cancelled while queued."));
+      cancelled += 1;
+    }
+    return cancelled;
   }
 
   // A snapshot for observation (test/monitoring).

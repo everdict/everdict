@@ -6,6 +6,7 @@ export const ErrorCode = {
   BAD_REQUEST: "The request is invalid.",
   NOT_FOUND: "The requested resource was not found.",
   CONFLICT: "Conflicts with the current state.",
+  CANCELLED: "The work was cancelled before it ran.",
   // driver / compute
   DRIVER_PROVISION_FAILED: "Failed to provision the sandbox.",
   COMPUTE_EXEC_FAILED: "Failed to execute the sandbox command.",

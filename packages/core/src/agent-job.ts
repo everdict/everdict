@@ -57,6 +57,9 @@ export const AgentJobSchema = z.object({
   // fan-out) in the Scheduler's wait queue, so a 3-case check doesn't sit behind a 601-case batch. Tenant-fair WFQ
   // order is preserved WITHIN each class. Absent = batch-equivalent (only interactive jumps). The agent ignores it.
   priority: z.enum(["interactive", "batch"]).optional(),
+  // Batch id (CP-internal) — lets the scheduler cancel a reclaimed batch's still-queued jobs precisely
+  // (supersede / speculation-loser reclaim). The agent ignores it.
+  batchId: z.string().optional(),
   // Trial index (0-based) when a case is dispatched N times for pass@k / flakiness. runSuite's fan-out stamps it so
   // the orchestration can key one child run per (case, trial) and the resulting CaseResult carries its trial. Absent =
   // single-run. The agent ignores it (it runs exactly one job); the control plane stamps the result. docs/architecture/trial-based-verdict.md

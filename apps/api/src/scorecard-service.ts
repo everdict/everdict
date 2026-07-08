@@ -247,6 +247,8 @@ export interface ScorecardServiceDeps {
   killCase?: (tenant: string, runtime: string | undefined, caseId: string) => Promise<void>;
   // Per-batch trace-sink override validation — does a workspace sink with this name exist? (submit 400s otherwise).
   sinkExists?: (tenant: string, name: string) => Promise<boolean>;
+  // Cancel still-QUEUED scheduler entries matching the predicate (supersede reclaim + speculation-loser reclaim).
+  cancelQueued?: (predicate: (job: AgentJob) => boolean) => number;
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
@@ -484,6 +486,8 @@ export class ScorecardService {
       });
       this.inFlight.get(r.id)?.abort(); // don't fire remaining cases (cooperative) — track attaches partial results and terminates
       await this.cancelWorkflowIfAny(r); // temporal-owned batch → cancel the workflow too (best-effort)
+      // Drop this batch's still-QUEUED scheduler entries — they'd dispatch later only to be discarded.
+      this.deps.cancelQueued?.((j) => j.batchId === r.id);
       // Force-kill the already-fired backend jobs (best-effort) — the abort above only stops the un-fired
       // remainder; without this, a superseded 601-case batch keeps burning cluster compute to the end.
       if (this.deps.killCase && this.deps.runStore) {
@@ -746,6 +750,12 @@ export class ScorecardService {
                   caseId: cid,
                 });
               },
+              ...(this.deps.cancelQueued
+                ? {
+                    cancelQueued: (cid: string) =>
+                      void this.deps.cancelQueued?.((j) => j.batchId === id && j.evalCase.id === cid),
+                  }
+                : {}),
             }),
           }
         : {}),
@@ -821,6 +831,7 @@ export class ScorecardService {
       evalCase,
       harness: { id: ctx.harnessId, version: ctx.harnessVersion },
       tenant: ctx.tenant,
+      batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
       priority: "batch", // fan-out work — yields the queue to interactive single runs
       ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
       ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
@@ -1400,6 +1411,7 @@ export class ScorecardService {
       const enriched: AgentJob = {
         ...job,
         tenant,
+        batchId: id, // scheduler-side reclaim key (supersede / speculation-loser queue cancel)
         priority: "batch", // fan-out work — yields the queue to interactive single runs
         // owner (submitter subject) — self-hosted runner dispatch-ownership check + lease-queue key (same as a single run).
         ...(owner ? { submittedBy: owner } : {}),
@@ -1510,6 +1522,12 @@ export class ScorecardService {
             pushStep("case", "info", `${cid}: tail speculation ${from} ⇢ ${to} (straggler duplicate)`, cid);
             void flushSteps();
           },
+          ...(this.deps.cancelQueued
+            ? {
+                cancelQueued: (cid: string) =>
+                  void this.deps.cancelQueued?.((j) => j.batchId === id && j.evalCase.id === cid),
+              }
+            : {}),
         });
       }
       // judge streaming — fire a case's judge the moment it finishes, without waiting for the whole batch to complete

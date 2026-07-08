@@ -24,6 +24,9 @@ export interface SpeculationOpts {
   setTimer?: (fn: () => void, ms: number) => () => void;
   onSpeculate?: (caseId: string, from: string, to: string) => void;
   onWin?: (caseId: string, winner: string, speculated: boolean) => void;
+  // Reclaim hook — when a speculated case settles, cancel any of its dispatches still QUEUED at the scheduler
+  // (the loser may never have reached a backend; there is no reason to let it).
+  cancelQueued?: (caseId: string) => void;
 }
 
 const DEFAULT_MIN_STRAGGLER_MS = 10_000;
@@ -86,6 +89,7 @@ export class SpeculationController {
             finish(() => {
               this.durations.push(elapsed);
               this.opts.onWin?.(job.evalCase.id, v.target ?? assigned ?? "", speculated);
+              if (speculated) this.opts.cancelQueued?.(job.evalCase.id); // the loser may still be queued — reclaim it
               resolve(v);
             });
           },

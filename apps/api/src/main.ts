@@ -452,6 +452,8 @@ async function main(): Promise<void> {
     // Per-batch sink override validation (submit 400s on an unknown sink name; "none" is always allowed).
     sinkExists: async (tenant, name) =>
       ((await settingsStore.get(tenant))?.traceSinks ?? []).some((e) => e.name === name),
+    // Queued-entry reclaim (supersede / speculation loser) — in-flight jobs stay Backend.kill's concern.
+    cancelQueued: (predicate) => scheduler.cancelQueued(predicate),
     adoptCase: async (tenant, runtimeList, caseId) => {
       let adopted: CaseResult | undefined;
       await eachRuntimeBackend(tenant, runtimeList, async (backend) => {

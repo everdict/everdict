@@ -156,7 +156,9 @@ undispatched work), a case in flight longer than `2 × median completed duration
 duplicate dispatch on another healthy runtime of the same shard list (`SpeculationController`, both dispatch
 paths); the first result wins, the loser is discarded (bounded double compute, tail only, never onto an open
 circuit). The winner's runtime lands as the child run's provenance and a `tail speculation a ⇢ b` step records
-the duplicate. Live: tight(600Mb envelope)+local shard, 8 cases → 18s (vs ~24s serialized tail), 2 speculations
+the duplicate. When the duplicate wins, the loser's still-QUEUED scheduler entry is cancelled
+(`Scheduler.cancelQueued` — rejected `CANCELLED`, never dispatched); a superseded batch's queued entries are
+dropped the same way (`AgentJob.batchId` is the reclaim key). In-flight jobs stay `Backend.kill`'s concern. Live: tight(600Mb envelope)+local shard, 8 cases → 18s (vs ~24s serialized tail), 2 speculations
 fired — one duplicate WON (child runtime=local though assigned tight), one primary won (duplicate discarded),
 8/8 with no double-counted results.
 

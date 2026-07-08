@@ -378,6 +378,30 @@ describe("Scheduler", () => {
     expect(b.dispatchedIds).toEqual(["b0", "i1", "b1", "b2"]); // batch order itself is preserved (WFQ within class)
   });
 
+  it("cancelQueued drops matching QUEUED entries (rejected CANCELLED, never dispatched) and leaves in-flight ones alone", async () => {
+    const b = new ControlledBackend("a", 1);
+    const sched = new Scheduler(new BackendRegistry().register("a", b));
+
+    const running = sched.dispatch({ ...tjob("acme", "r1"), batchId: "batch-x" }); // occupies the slot (in flight)
+    await flush();
+    const queuedX = sched.dispatch({ ...tjob("acme", "q1"), batchId: "batch-x" });
+    const queuedY = sched.dispatch({ ...tjob("acme", "q2"), batchId: "batch-y" });
+    await flush();
+    expect(sched.stats().queued).toBe(2);
+
+    const n = sched.cancelQueued((j) => j.batchId === "batch-x");
+    expect(n).toBe(1); // only the queued batch-x entry — the in-flight one is Backend.kill's concern
+    await expect(queuedX).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(sched.stats().queued).toBe(1);
+
+    b.releaseAll();
+    await flush();
+    b.releaseAll();
+    await flush();
+    await Promise.all([running, queuedY]);
+    expect(b.dispatchedIds).toEqual(["r1", "q2"]); // q1 never reached the backend
+  });
+
   it("a heavy job routes to the backend whose memory envelope fits it", async () => {
     const small = new ControlledBackend("small", 10);
     small.memoryBudgetMb = 256;

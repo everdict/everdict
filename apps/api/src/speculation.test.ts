@@ -152,6 +152,24 @@ describe("SpeculationController — tail straggler duplication", () => {
     await time.advance(1300);
   });
 
+  it("when the duplicate wins, the (possibly still-queued) loser is reclaimed via cancelQueued", async () => {
+    const time = fakeTime();
+    const breaker = new CircuitBreaker({ now: time.now });
+    const exec = fakeExecutor();
+    const reclaimed: string[] = [];
+    const ctl = new SpeculationController({
+      ...baseOpts(time, breaker, 1),
+      cancelQueued: (cid) => reclaimed.push(cid),
+    });
+
+    const p = ctl.run(exec.execute, jobOn("a", "slow-rt"));
+    await time.advance(1200); // duplicate fired
+    exec.release("a@fast-rt", "a", "fast-rt"); // duplicate wins while the primary is still pending
+    const outcome = await p;
+    expect(outcome.target).toBe("fast-rt");
+    expect(reclaimed).toEqual(["a"]); // the loser's queued entry gets cancelled at the scheduler
+  });
+
   it("does not speculate onto an open circuit", async () => {
     const time = fakeTime();
     const breaker = new CircuitBreaker({ threshold: 1, cooldownMs: 60_000, now: time.now });
