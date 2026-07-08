@@ -38,6 +38,15 @@ export {
   billingTenant,
 } from "./budget.js";
 export {
+  type UsageMeter,
+  type UsageSource,
+  type UsageTotals,
+  type TenantUsage,
+  inMemoryUsageMeter,
+  totalUsage,
+  USAGE_SOURCES,
+} from "./usage.js";
+export {
   NomadBackend,
   buildNomadJob,
   fetchHttp,
