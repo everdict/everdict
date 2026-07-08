@@ -128,6 +128,26 @@ describe("NomadBackend.dispatch", () => {
     expect(calls.some((c) => c === "POST /v1/jobs")).toBe(true);
     expect(calls.some((c) => c.includes("/allocations"))).toBe(true);
     expect(calls.some((c) => c.includes("/logs/alloc1"))).toBe(true);
+    // Dead-job purge after capturing the result — without it batch churn crosses the client's gc_max_allocs and
+    // later cases lose the alloc-log race (the whole batch reads as dispatch failures).
+    expect(calls.some((c) => c.startsWith("DELETE /v1/job/everdict-c1") && c.includes("purge=true"))).toBe(true);
+  });
+
+  it("purges the dead job even when the log fetch fails (finally path)", async () => {
+    const calls: string[] = [];
+    const http: NomadHttp = {
+      async request(method, path) {
+        calls.push(`${method} ${path}`);
+        if (path === "/v1/jobs") return { status: 200, text: "{}" };
+        if (path.includes("/allocations"))
+          return { status: 200, text: JSON.stringify([{ ID: "alloc1", ClientStatus: "complete" }]) };
+        if (path.includes("/logs/")) return { status: 404, text: "" }; // alloc dir already GC'd
+        return { status: 200, text: "{}" };
+      },
+    };
+    const backend = new NomadBackend({ addr: "http://nomad:4646", image: "img", http, pollIntervalMs: 1 });
+    await expect(backend.dispatch(JOB)).rejects.toThrow(/gc_max_allocs/); // actionable error, not a bare 404
+    expect(calls.some((c) => c.startsWith("DELETE /v1/job/everdict-c1") && c.includes("purge=true"))).toBe(true);
   });
 
   it("trustZones: applies the tenant zone per job (namespace + strong-isolation runtime)", async () => {

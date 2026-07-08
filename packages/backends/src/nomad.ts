@@ -216,15 +216,32 @@ export class NomadBackend implements Backend {
     if (submit.status >= 300) {
       throw new UpstreamError("UPSTREAM_ERROR", { status: submit.status }, "Nomad job submission failed");
     }
-    const allocId = await this.waitForAlloc(jobId, ns);
-    const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
-    const logs = await this.http.request(
-      "GET",
-      `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
-    );
-    if (logs.status >= 300)
-      throw new UpstreamError("UPSTREAM_ERROR", { status: logs.status }, "alloc log fetch failed");
-    return parseResult(logs.text);
+    try {
+      const allocId = await this.waitForAlloc(jobId, ns);
+      const nsq = ns ? `&namespace=${encodeURIComponent(ns)}` : "";
+      const logs = await this.http.request(
+        "GET",
+        `/v1/client/fs/logs/${allocId}?task=agent&type=stdout&plain=true${nsq}`,
+      );
+      if (logs.status >= 300)
+        throw new UpstreamError(
+          "UPSTREAM_ERROR",
+          { status: logs.status, alloc: allocId },
+          // 404 here almost always means the CLIENT already garbage-collected the terminal alloc dir — that happens
+          // under batch churn once the node exceeds gc_max_allocs (default 50). The purge below keeps steady-state
+          // dead jobs near zero; if a burst still outruns collection, raise client.gc_max_allocs on the Nomad client.
+          logs.status === 404
+            ? "alloc log fetch failed (alloc dir already GC'd — raise the Nomad client's gc_max_allocs for eval churn)"
+            : "alloc log fetch failed",
+        );
+      return parseResult(logs.text);
+    } finally {
+      // Purge the dead job after capturing the result (parity with K8sBackend's deleteJob-in-finally). Without this,
+      // every batch case leaves a dead job+alloc behind; past gc_max_allocs the client instantly GCs each newly
+      // terminal alloc, and the NEXT case's log fetch loses the race → the whole batch reads as dispatch failures.
+      const nsq = ns ? `?purge=true&namespace=${encodeURIComponent(ns)}` : "?purge=true";
+      await this.http.request("DELETE", `/v1/job/${jobId}${nsq}`).catch(() => {});
+    }
   }
 
   private async waitForAlloc(jobId: string, namespace?: string): Promise<string> {
