@@ -56,6 +56,7 @@ import type { JudgeRunner } from "./judge-runner.js";
 import { assertRuntimeTarget } from "./require-runtime.js";
 import { executeWithSpillover } from "./runtime-spillover.js";
 import { ScoringService } from "./scoring-service.js";
+import { SpeculationController } from "./speculation.js";
 import type { CaseExportStream } from "./trace-sink-service.js";
 
 // One-line trace-sink export result — for progress-step messages (success/partial/failure + reason).
@@ -607,6 +608,7 @@ export class ScorecardService {
       secretMap?: HarnessSecretMaps;
       caseIndex: Map<string, EvalCase>; // placement target already assigned (stable round-robin by selected index)
       targets: string[]; // the shard list — spillover candidates (empty = no runtime selection)
+      speculation?: SpeculationController; // tail-straggler duplication (sharded batches only)
       doneIds: Set<string>;
       stepChain: Promise<void>;
     }
@@ -672,6 +674,26 @@ export class ScorecardService {
       ...(secretMap ? { secretMap } : {}),
       caseIndex,
       targets,
+      // Tail speculation — sharded batches only. The controller lives with the batch context (rebuilt with
+      // empty duration history on a CP restart — it re-learns the median from the resumed cases).
+      ...(targets.length > 1
+        ? {
+            speculation: new SpeculationController({
+              targets,
+              tenant: rec.tenant,
+              breaker: this.breaker,
+              totalCases: caseIndex.size,
+              onSpeculate: (cid: string, from: string, to: string) => {
+                void this.appendBatchStep(id, {
+                  phase: "case",
+                  status: "info",
+                  message: `${cid}: tail speculation ${from} ⇢ ${to} (straggler duplicate)`,
+                  caseId: cid,
+                });
+              },
+            }),
+          }
+        : {}),
       doneIds,
       stepChain: Promise.resolve(),
     };
@@ -759,19 +781,22 @@ export class ScorecardService {
             : baseJob;
         // Spillover: same failover as the in-process loop — a retryable infra failure moves the case to the
         // next healthy runtime of the shard list before the transient retry burns attempts on a dead cluster.
-        const outcome = await executeWithSpillover((j) => executeCase(this.deps, ctx.owner, j), jobToRun, {
-          targets: ctx.targets,
-          tenant: ctx.tenant,
-          breaker: this.breaker,
-          onSpill: (cid, from, to, code) => {
-            void this.appendBatchStep(id, {
-              phase: "case",
-              status: "info",
-              message: `${cid}: runtime spillover ${from} → ${to} (${code})`,
-              caseId: cid,
-            });
-          },
-        });
+        // Tail speculation on top (same semantics as the in-process loop): straggler duplicate, first result wins.
+        const exec = (j: AgentJob): Promise<{ result: CaseResult; target?: string }> =>
+          executeWithSpillover((jj) => executeCase(this.deps, ctx.owner, jj), j, {
+            targets: ctx.targets,
+            tenant: ctx.tenant,
+            breaker: this.breaker,
+            onSpill: (cid, from, to, code) => {
+              void this.appendBatchStep(id, {
+                phase: "case",
+                status: "info",
+                message: `${cid}: runtime spillover ${from} → ${to} (${code})`,
+                caseId: cid,
+              });
+            },
+          });
+        const outcome = ctx.speculation ? await ctx.speculation.run(exec, jobToRun) : await exec(jobToRun);
         result = outcome.result;
         ranOn = outcome.target;
         break;
@@ -1221,6 +1246,8 @@ export class ScorecardService {
           .map((t) => t.trim())
           .filter(Boolean)
       : [];
+    // Tail speculation (assigned once the case count is known, below) — the dispatch closure captures the binding.
+    let speculation: SpeculationController | undefined;
     // Per-case dispatch (orchestration per case): admit (per-case since it's a batch) → enrich the job → pure executeCase → settle.
     // The pure execution (token resolve+attach → dispatch) is handled by executeCase (shared with a single run); settlement/child-run lifecycle is handled by the orchestration here.
     // When runStore is set, create a child run (RunRecord) per case so each case becomes an addressable run (trace/usage/provenance).
@@ -1263,10 +1290,10 @@ export class ScorecardService {
             : enriched;
         // Spillover: a retryable infra failure on the assigned runtime moves the case to the next healthy runtime
         // of the shard list; the shared breaker skips runtimes with a known outage entirely.
-        const { result, target: ranOn } = await executeWithSpillover(
-          (j) => executeCase(this.deps, owner, j),
-          jobToRun,
-          {
+        // Tail speculation on top: at the batch tail a straggler gets a duplicate on another healthy runtime and
+        // the first result wins (the duplicate runs through the same spillover-wrapped executor).
+        const exec = (j: AgentJob): Promise<{ result: CaseResult; target?: string }> =>
+          executeWithSpillover((jj) => executeCase(this.deps, owner, jj), j, {
             targets,
             tenant,
             breaker: this.breaker,
@@ -1274,8 +1301,8 @@ export class ScorecardService {
               pushStep("case", "info", `${caseId}: runtime spillover ${from} → ${to} (${code})`, caseId);
               void flushSteps();
             },
-          },
-        );
+          });
+        const { result, target: ranOn } = speculation ? await speculation.run(exec, jobToRun) : await exec(jobToRun);
         // Cost attribution: managed=batch tenant · workspace-shared runner=that workspace (team resource) · personal runner=own-pays. Same as a single run.
         const bill = billingTenant(result, tenant);
         if (bill) this.deps.budget?.settle(bill, costOf(result));
@@ -1316,6 +1343,19 @@ export class ScorecardService {
             }))
           : casesToRun;
       const suite: Suite = { id: dataset.id, harness: { id: harnessId }, cases };
+      // Tail speculation — sharded batches only (single-runtime batches have nowhere to duplicate onto).
+      if (targets.length > 1) {
+        speculation = new SpeculationController({
+          targets,
+          tenant,
+          breaker: this.breaker,
+          totalCases: cases.length,
+          onSpeculate: (cid, from, to) => {
+            pushStep("case", "info", `${cid}: tail speculation ${from} ⇢ ${to} (straggler duplicate)`, cid);
+            void flushSteps();
+          },
+        });
+      }
       // judge streaming — fire a case's judge the moment it finishes, without waiting for the whole batch to complete
       // (case-axis parallel·bounded). Removes the barrier where the slowest case blocked judging of the rest.
       // docs/architecture/streaming-case-pipeline.md
