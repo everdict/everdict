@@ -10,6 +10,39 @@ export interface TenantValueMap {
   get(tenant: string): number | undefined; // undefined = no explicit value and no "*" default
 }
 
+// EVERDICT_AUTOSCALE="min:max[:intervalMs]" — slot autoscaling for the env-registered GLOBAL backends. The
+// scheduler admits up to the current slot count; the autoscaler grows it toward max as the queue deepens (so a
+// cluster autoscaler downstream sees pending work) and shrinks after idle hysteresis. Tenant-runtime backends are
+// NOT autoscaled — their envelope is the tenant's declared spec.
+export interface AutoscaleConfig {
+  min: number;
+  max: number;
+  intervalMs?: number;
+}
+
+export function parseAutoscale(raw: string | undefined): AutoscaleConfig | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const parts = raw.split(":").map((p) => Number(p.trim()));
+  const [min, max, intervalMs] = parts;
+  const valid =
+    (parts.length === 2 || parts.length === 3) &&
+    Number.isInteger(min) &&
+    Number.isInteger(max) &&
+    min !== undefined &&
+    max !== undefined &&
+    min >= 0 &&
+    max >= Math.max(1, min) &&
+    (intervalMs === undefined || (Number.isInteger(intervalMs) && intervalMs >= 100));
+  if (!valid) {
+    throw new BadRequestError(
+      "BAD_REQUEST",
+      { env: "EVERDICT_AUTOSCALE", value: raw },
+      `EVERDICT_AUTOSCALE: malformed value '${raw}' — expected "min:max" or "min:max:intervalMs" (e.g. "1:8" or "1:8:2000").`,
+    );
+  }
+  return { min: min as number, max: max as number, ...(intervalMs !== undefined ? { intervalMs } : {}) };
+}
+
 export function parseTenantMap(raw: string | undefined, envName: string): TenantValueMap | undefined {
   if (raw === undefined || raw.trim() === "") return undefined;
   const entries = new Map<string, number>();

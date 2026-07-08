@@ -1,6 +1,6 @@
 import { BadRequestError } from "@everdict/core";
 import { describe, expect, it } from "vitest";
-import { parseTenantMap } from "./scheduling-config.js";
+import { parseAutoscale, parseTenantMap } from "./scheduling-config.js";
 
 describe("parseTenantMap (operator fairness dials)", () => {
   it("parses tenant=value pairs with a '*' default for unlisted tenants", () => {
@@ -26,5 +26,24 @@ describe("parseTenantMap (operator fairness dials)", () => {
     expect(() => parseTenantMap("acme", "E")).toThrow(BadRequestError);
     expect(() => parseTenantMap("=5", "E")).toThrow(BadRequestError);
     expect(() => parseTenantMap("acme=0", "E")).toThrow(BadRequestError); // zero quota = a typo, not a policy
+  });
+});
+
+describe("parseAutoscale (EVERDICT_AUTOSCALE)", () => {
+  it('parses "min:max" and "min:max:intervalMs"', () => {
+    expect(parseAutoscale("1:8")).toEqual({ min: 1, max: 8 });
+    expect(parseAutoscale("0:16:2000")).toEqual({ min: 0, max: 16, intervalMs: 2000 });
+  });
+
+  it("unset/empty → undefined (autoscaling off)", () => {
+    expect(parseAutoscale(undefined)).toBeUndefined();
+    expect(parseAutoscale(" ")).toBeUndefined();
+  });
+
+  it("malformed values fail the boot loudly", () => {
+    expect(() => parseAutoscale("8")).toThrow(BadRequestError);
+    expect(() => parseAutoscale("8:1")).toThrow(BadRequestError); // min > max
+    expect(() => parseAutoscale("1:abc")).toThrow(BadRequestError);
+    expect(() => parseAutoscale("1:8:50")).toThrow(BadRequestError); // sub-100ms tick = a typo
   });
 });

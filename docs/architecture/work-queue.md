@@ -36,6 +36,16 @@ authoritative; if absent, upcoming is omitted — cron approximation is the web 
 - HTTP: `GET /queue` (`runs:read`, viewer+)
 - MCP: `get_queue` (same gate)
 
+**Scheduler observability** (the seeing half of the fairness/envelope machinery — docs/execution-backends.md):
+the snapshot carries a workspace `scheduler` slice (`{queued, inFlight, quota?}` — THIS tenant's numbers only)
+and each workspace lane an `admission` view (`{inFlight, memInFlightMb?, memoryBudgetMb?, maxConcurrent?,
+circuit?}`). Lane mapping: a tenant runtime's backends `rt:<tenant>:<id>@<ver>` sum into the id's lane (another
+tenant's same-id runtime never counts — filtered inside the service); bare-named global env backends aggregate
+into the `''` (default) lane; self-hosted lanes are lease queues → no admission. `circuit` is the spillover
+breaker state (open = dispatches currently route around this runtime). The web lane header shows the memory
+envelope (`used/budget Mb`) and an open-circuit badge; live-verified: an autoscaled batch showed
+`queued 4 / inFlight 8` + `memInFlightMb 4096`, and a dead-runtime shard surfaced `circuit {open, consecutive 3}`.
+
 ## Web (`/{workspace}/queue`, nav 'Work')
 `widgets/queue-board` — two groups: **workspace queue / my personal queue (self-hosted)**. Each lane card
 (Server/Laptop icon + label + count, idle badge) has 3 columns in **flow direction**:

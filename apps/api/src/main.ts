@@ -8,9 +8,12 @@ import {
   runnerAuthenticator,
 } from "@everdict/auth";
 import {
+  Autoscaler,
   BackendRegistry,
   type BudgetLimit,
+  CircuitBreaker,
   K8sBackend,
+  MutableSlots,
   NomadBackend,
   Scheduler,
   buildRuntimeBackend,
@@ -116,7 +119,7 @@ import { RunnerService } from "./runner-service.js";
 import { RuntimeDispatcher } from "./runtime-dispatcher.js";
 import { makeRuntimeProber } from "./runtime-probe.js";
 import { ScheduleService } from "./schedule-service.js";
-import { parseTenantMap } from "./scheduling-config.js";
+import { parseAutoscale, parseTenantMap } from "./scheduling-config.js";
 import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
@@ -181,10 +184,41 @@ async function main(): Promise<void> {
   const secrets = { secretsFor: (tenant: string) => secretStore.entries(tenant) };
 
   const backends = new BackendRegistry();
+  // Slot autoscaling (EVERDICT_AUTOSCALE="min:max[:intervalMs]") — global env backends only: their slot cap
+  // becomes a MutableSlots the Autoscaler grows with queue depth (a downstream cluster autoscaler then sees the
+  // pending work) and shrinks after idle hysteresis. Tenant runtimes keep their spec-declared envelope.
+  const autoscale = parseAutoscale(process.env.EVERDICT_AUTOSCALE);
+  const scalingTargets: MutableSlots[] = [];
+  const slotsFor = (name: string): MutableSlots | undefined => {
+    if (!autoscale) return undefined;
+    const slots = new MutableSlots(name, Math.max(1, autoscale.min));
+    scalingTargets.push(slots);
+    return slots;
+  };
   if (nomadAddr && image) {
-    backends.register("nomad", new NomadBackend({ addr: nomadAddr, image, secretEnv: collectAuthEnv(), secrets }));
+    const slots = slotsFor("nomad");
+    backends.register(
+      "nomad",
+      new NomadBackend({
+        addr: nomadAddr,
+        image,
+        secretEnv: collectAuthEnv(),
+        secrets,
+        ...(slots ? { maxConcurrent: slots.get } : {}),
+      }),
+    );
   } else if (k8sContext && image) {
-    backends.register("k8s", new K8sBackend({ image, context: k8sContext, secretEnv: collectAuthEnv(), secrets }));
+    const slots = slotsFor("k8s");
+    backends.register(
+      "k8s",
+      new K8sBackend({
+        image,
+        context: k8sContext,
+        secretEnv: collectAuthEnv(),
+        secrets,
+        ...(slots ? { maxConcurrent: slots.get } : {}),
+      }),
+    );
   }
   // Policy (default): never register LocalBackend (unisolated in-process on the control-plane host) — every run must
   // target a registered tenant runtime or a self-hosted runner (self:<id>/self:ws). This is the default with no opt-in env.
@@ -197,6 +231,29 @@ async function main(): Promise<void> {
     ...(tenantQuotas ? { tenantQuota: (t: string) => tenantQuotas.get(t) ?? Number.POSITIVE_INFINITY } : {}),
     ...(tenantWeights ? { weightFor: (t: string) => tenantWeights.get(t) ?? 1 } : {}),
   });
+  // Per-runtime circuit breaker — shared between the batch spillover (ScorecardService) and the queue view
+  // (observability): one health memory, two consumers.
+  const breaker = new CircuitBreaker();
+  if (autoscale && scalingTargets.length > 0) {
+    const autoscaler = new Autoscaler({
+      // Demand = this deployment's whole backlog + what the global backends already run (tenant-runtime jobs
+      // never target these slots, but their queue share still signals pressure — clamped by max anyway).
+      signal: () => {
+        const s = scheduler.stats();
+        const inFlight = scalingTargets.reduce((a, t) => a + (s.inFlight[t.id] ?? 0), 0);
+        return { queued: s.queued, inFlight };
+      },
+      targets: scalingTargets,
+      policy: { min: autoscale.min, max: autoscale.max },
+      ...(autoscale.intervalMs !== undefined ? { intervalMs: autoscale.intervalMs } : {}),
+      onScale: (id, from, to) => console.log(`▶ autoscale ${id}: ${from} → ${to} slots`),
+      onChanged: () => scheduler.poke(), // re-pump so newly-granted slots drain the queue immediately
+    });
+    autoscaler.start();
+    console.log(
+      `▶ autoscale: [${scalingTargets.map((t) => t.id).join(", ")}] slots ${autoscale.min}..${autoscale.max}`,
+    );
+  }
   const budget = inMemoryBudget({ limitFor: budgetFromEnv() });
 
   // Self-hosted runner lease hub — parks self:<runnerId> jobs; the runner protocol (MCP, slice 4) leases/returns them.
@@ -369,6 +426,7 @@ async function main(): Promise<void> {
   const scorecardService = new ScorecardService({
     dispatcher,
     store: scorecardStore,
+    breaker, // shared with the queue view — spillover writes, observability reads
     ...(temporalBatchAddress
       ? {
           temporalBatches: new TemporalBatchDriver({
@@ -498,6 +556,18 @@ async function main(): Promise<void> {
     myRunners: async (subject) => (await runnerService.list(subject)).map((r) => ({ id: r.id, label: r.label })),
     // A batch's progress total = number of dataset cases (omitted if resolution fails — progress then relies only on the child-run count).
     caseCountFor: async (tenant, id, version) => (await datasetRegistry.get(tenant, id, version)).cases.length,
+    // Scheduler observability — lane admission (in-flight/memory envelope/circuit) + the workspace scheduler slice.
+    schedulerStats: () => scheduler.stats(),
+    circuitStats: () => breaker.stats(),
+    ...(tenantQuotas ? { tenantQuotaFor: (t: string) => tenantQuotas.get(t) } : {}),
+    runtimeEnvelopeFor: async (tenant, id) => {
+      const spec = await runtimeRegistry.get(tenant, id).catch(() => undefined);
+      if (!spec) return undefined;
+      return {
+        ...(spec.maxConcurrent !== undefined ? { maxConcurrent: spec.maxConcurrent } : {}),
+        ...(spec.memoryBudgetMb !== undefined ? { memoryBudgetMb: spec.memoryBudgetMb } : {}),
+      };
+    },
   });
 
   // Saved scorecard-analysis Views — store/share a named AnalysisConfig (opaque config) on the workspace. Live re-run, so no snapshot.

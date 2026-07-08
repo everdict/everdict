@@ -153,4 +153,48 @@ describe("QueueService.snapshot", () => {
     const idle = snap.workspace.find((l) => l.runtime === "idle-k8s");
     expect(idle).toMatchObject({ registered: true, running: [], queued: [], upcoming: [] });
   });
+
+  it("lane admission maps scheduler/breaker state per runtime — cross-tenant numbers never leak", async () => {
+    const { scorecards, runs } = await fixtures();
+    const svc = new QueueService({
+      scorecards,
+      runs,
+      runtimes: { list: async () => [{ id: "nomad-local" }, { id: "kind-local" }] },
+      schedulerStats: () => ({
+        queued: 9, // global — never surfaced as-is
+        inFlight: {
+          "rt:acme:nomad-local@1.0.0": 2,
+          "rt:acme:nomad-local@1.0.1": 1, // versions of the same runtime sum into one lane
+          "rt:beta:nomad-local@1.0.0": 7, // ANOTHER tenant's runtime of the same id — must not count
+          nomad: 4, // global env backend → the '' (default) lane
+        },
+        memInFlightMb: { "rt:acme:nomad-local@1.0.1": 512 },
+        tenantInFlight: { acme: 3, beta: 7 },
+        queuedByTenant: { acme: 1, beta: 8 },
+      }),
+      circuitStats: () => ({
+        "acme:nomad-local": { consecutive: 3, open: true },
+        "beta:kind-local": { consecutive: 3, open: true }, // another tenant's circuit — invisible here
+      }),
+      tenantQuotaFor: (t) => (t === "acme" ? 5 : undefined),
+      runtimeEnvelopeFor: async (_t, id) =>
+        id === "nomad-local" ? { maxConcurrent: 10, memoryBudgetMb: 600 } : undefined,
+    });
+
+    const snap = await svc.snapshot("acme");
+    // Workspace scheduler slice — acme's numbers only, plus the operator quota dial.
+    expect(snap.scheduler).toEqual({ queued: 1, inFlight: 3, quota: 5 });
+    const nomadLane = snap.workspace.find((l) => l.runtime === "nomad-local");
+    expect(nomadLane?.admission).toEqual({
+      inFlight: 3, // 2 + 1 (acme's two versions) — beta's 7 excluded
+      memInFlightMb: 512,
+      memoryBudgetMb: 600,
+      maxConcurrent: 10,
+      circuit: { open: true, consecutive: 3 },
+    });
+    const kindLane = snap.workspace.find((l) => l.runtime === "kind-local");
+    expect(kindLane?.admission).toEqual({ inFlight: 0 }); // no envelope declared, no circuit → bare in-flight
+    const defaultLane = snap.workspace.find((l) => l.runtime === "");
+    expect(defaultLane?.admission?.inFlight).toBe(4); // the global env backend's aggregate load
+  });
 });

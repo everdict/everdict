@@ -29,10 +29,22 @@ export const queueUpcomingSchema = z.object({
 })
 export type QueueUpcoming = z.infer<typeof queueUpcomingSchema>
 
+// Scheduler admission view of a lane — in-flight dispatches, the declared memory envelope, and the spillover
+// circuit state (open = the control plane is currently routing around this runtime).
+export const queueLaneAdmissionSchema = z.object({
+  inFlight: z.number(),
+  memInFlightMb: z.number().optional(),
+  memoryBudgetMb: z.number().optional(),
+  maxConcurrent: z.number().optional(),
+  circuit: z.object({ open: z.boolean(), consecutive: z.number() }).optional(),
+})
+export type QueueLaneAdmission = z.infer<typeof queueLaneAdmissionSchema>
+
 export const queueLaneSchema = z.object({
   runtime: z.string(), // '' = default backend, 'self:<id>' = self-hosted runner
   label: z.string().optional(), // human-readable label (personal lane = runner hostname)
   registered: z.boolean(),
+  admission: queueLaneAdmissionSchema.optional(), // absent for self-hosted lanes (lease queues)
   running: z.array(queueItemSchema),
   queued: z.array(queueItemSchema), // FIFO — the front is the next job
   upcoming: z.array(queueUpcomingSchema),
@@ -43,6 +55,10 @@ export type QueueLane = z.infer<typeof queueLaneSchema>
 export const queueSnapshotSchema = z.object({
   generatedAt: z.string(),
   totals: z.object({ running: z.number(), queued: z.number(), upcoming: z.number() }),
+  // This workspace's control-plane scheduler slice (+ the operator quota when dialed in).
+  scheduler: z
+    .object({ queued: z.number(), inFlight: z.number(), quota: z.number().optional() })
+    .optional(),
   workspace: z.array(queueLaneSchema),
   personal: z.array(queueLaneSchema),
 })

@@ -189,6 +189,26 @@ function Lane({
         <span className="shrink-0 text-[11.5px] text-faint">
           {t('laneStats', { running: lane.running.length, queued: lane.queued.length })}
         </span>
+        {lane.admission?.memoryBudgetMb !== undefined && (
+          <span
+            className="shrink-0 font-mono text-[10.5px] tabular-nums text-muted-foreground"
+            title={t('admissionMemoryTitle')}
+          >
+            {t('admissionMemory', {
+              used: lane.admission.memInFlightMb ?? 0,
+              budget: lane.admission.memoryBudgetMb,
+            })}
+          </span>
+        )}
+        {lane.admission?.circuit?.open && (
+          <Badge
+            tone="danger"
+            className="shrink-0"
+            title={t('circuitOpenTitle', { n: lane.admission.circuit.consecutive })}
+          >
+            {t('circuitOpen')}
+          </Badge>
+        )}
         {idle && (
           <Badge tone="neutral" className="ml-auto shrink-0">
             {t('idle')}
@@ -336,6 +356,21 @@ export function QueueBoard({
           value={snapshot.workspace.length + snapshot.personal.length}
         />
       </div>
+
+      {snapshot.scheduler && (
+        <p className="font-mono text-[11px] tabular-nums text-muted-foreground">
+          {t('schedulerLine', {
+            queued: snapshot.scheduler.queued,
+            inFlight: snapshot.scheduler.inFlight,
+          })}
+          {snapshot.scheduler.quota !== undefined && (
+            <span className="text-faint">
+              {' '}
+              {t('schedulerQuotaSuffix', { quota: snapshot.scheduler.quota })}
+            </span>
+          )}
+        </p>
+      )}
 
       <LaneGroup
         title={t('workspaceQueue')}

@@ -29,10 +29,22 @@ export interface QueueUpcoming {
   harness: string;
 }
 
+// Scheduler-level admission view of a lane — what the control plane is actually letting through right now.
+// This is the observability half of the fairness/envelope machinery (docs/execution-backends.md): without it the
+// operator turns the quota/envelope dials blind.
+export interface QueueLaneAdmission {
+  inFlight: number; // scheduler-tracked dispatches currently on this lane's backend(s)
+  memInFlightMb?: number; // sum of in-flight harness-declared memory (resource-aware admission)
+  memoryBudgetMb?: number; // the runtime's declared memory envelope (RuntimeSpec)
+  maxConcurrent?: number; // the runtime's declared slot cap (RuntimeSpec)
+  circuit?: { open: boolean; consecutive: number }; // spillover breaker state (open = dispatches skip this runtime)
+}
+
 export interface QueueLane {
   runtime: string; // '' = default backend
   label?: string; // human-readable label (personal lane = runner hostname). If absent, show runtime as-is.
   registered: boolean; // whether the lane is registered in the runtime registry (to distinguish default/self/deleted)
+  admission?: QueueLaneAdmission; // scheduler admission view (absent for self-hosted lanes — those are lease queues)
   running: QueueItem[]; // running — oldest first
   queued: QueueItem[]; // waiting — FIFO (the front is the next item)
   upcoming: QueueUpcoming[]; // next fires of active schedules aimed at this lane (soonest first)
@@ -44,6 +56,9 @@ export interface QueueLane {
 export interface QueueSnapshot {
   generatedAt: string;
   totals: { running: number; queued: number; upcoming: number }; // sum of visible (workspace+personal) items
+  // THIS workspace's scheduler slice (never another tenant's numbers): jobs waiting in the control-plane
+  // scheduler queue + in-flight, and the operator quota when one is dialed in (EVERDICT_TENANT_QUOTAS).
+  scheduler?: { queued: number; inFlight: number; quota?: number };
   workspace: QueueLane[];
   personal: QueueLane[];
 }
@@ -57,6 +72,22 @@ export interface QueueServiceDeps {
   myRunners?: (subject: string) => Promise<Array<{ id: string; label?: string }>>;
   // Resolve the batch progress total (number of dataset cases) — omitted on failure (progress then shows child counts only).
   caseCountFor?: (tenant: string, datasetId: string, version: string) => Promise<number | undefined>;
+  // Scheduler observability (main.ts injects the live Scheduler/CircuitBreaker) — powers lane admission + the
+  // workspace scheduler slice. All cross-tenant numbers are filtered here, inside the service.
+  schedulerStats?: () => {
+    queued: number;
+    inFlight: Record<string, number>;
+    memInFlightMb: Record<string, number>;
+    tenantInFlight: Record<string, number>;
+    queuedByTenant: Record<string, number>;
+  };
+  circuitStats?: () => Record<string, { consecutive: number; open: boolean }>;
+  tenantQuotaFor?: (tenant: string) => number | undefined; // the operator quota dial (EVERDICT_TENANT_QUOTAS)
+  // The runtime's declared admission envelope (RuntimeSpec.maxConcurrent/memoryBudgetMb) — latest version.
+  runtimeEnvelopeFor?: (
+    tenant: string,
+    runtimeId: string,
+  ) => Promise<{ maxConcurrent?: number; memoryBudgetMb?: number } | undefined>;
   upcomingPerLane?: number;
   now?: () => string;
 }
@@ -166,11 +197,48 @@ export class QueueService {
     const personalLaneKeys = new Set<string>(mySelfLanes);
     for (const { lane } of items) if (mySelfLanes.has(lane)) personalLaneKeys.add(lane);
 
+    // Scheduler admission view per workspace lane. A tenant runtime's backend registers as rt:<tenant>:<id>@<ver>
+    // (one instance per version — summed); a global env backend registers under its bare name; self-hosted lanes
+    // are lease queues (no scheduler backend) → no admission. Cross-tenant filtering happens HERE: only names
+    // derived from THIS tenant (or the shared global backends' aggregate load) ever leave the service.
+    const stats = this.deps.schedulerStats?.();
+    const circuits = this.deps.circuitStats?.();
+    const admissions = new Map<string, QueueLaneAdmission>();
+    if (stats) {
+      const laneMatches = (lane: string, name: string): boolean =>
+        lane === ""
+          ? !name.startsWith("rt:") && !name.startsWith("self:")
+          : name === lane || name.startsWith(`rt:${tenant}:${lane}@`);
+      await Promise.all(
+        [...wsLaneKeys].map(async (lane) => {
+          const sum = (m: Record<string, number>): number =>
+            Object.entries(m)
+              .filter(([n]) => laneMatches(lane, n))
+              .reduce((a, [, v]) => a + v, 0);
+          const inFlight = sum(stats.inFlight);
+          const mem = sum(stats.memInFlightMb);
+          const circuit = circuits?.[`${tenant}:${lane}`];
+          const envelope =
+            lane !== "" && this.deps.runtimeEnvelopeFor
+              ? await this.deps.runtimeEnvelopeFor(tenant, lane).catch(() => undefined)
+              : undefined;
+          admissions.set(lane, {
+            inFlight,
+            ...(mem > 0 || envelope?.memoryBudgetMb !== undefined ? { memInFlightMb: mem } : {}),
+            ...(envelope?.memoryBudgetMb !== undefined ? { memoryBudgetMb: envelope.memoryBudgetMb } : {}),
+            ...(envelope?.maxConcurrent !== undefined ? { maxConcurrent: envelope.maxConcurrent } : {}),
+            ...(circuit ? { circuit: { open: circuit.open, consecutive: circuit.consecutive } } : {}),
+          });
+        }),
+      );
+    }
+
     const byCreatedAsc = (a: QueueItem, b: QueueItem): number => a.createdAt.localeCompare(b.createdAt);
     const buildLane = (key: string): QueueLane => ({
       runtime: key,
       ...(runnerLabel.get(key) ? { label: runnerLabel.get(key) } : {}),
       registered: registered.has(key),
+      ...(admissions.has(key) ? { admission: admissions.get(key) } : {}),
       running: items
         .filter((x) => x.lane === key && x.item.status === "running")
         .map((x) => x.item)
@@ -194,6 +262,7 @@ export class QueueService {
     // totals counts visible items only — another member's personal (self) items are excluded from the tallies too.
     const visibleLanes = new Set([...wsLaneKeys, ...personalLaneKeys]);
     const visible = items.filter((x) => visibleLanes.has(x.lane));
+    const quota = this.deps.tenantQuotaFor?.(tenant);
     return {
       generatedAt: this.now(),
       totals: {
@@ -201,6 +270,15 @@ export class QueueService {
         queued: visible.filter((x) => x.item.status === "queued").length,
         upcoming: upcoming.filter((x) => !isSelf(x.lane) || mySelfLanes.has(x.lane)).length,
       },
+      ...(stats
+        ? {
+            scheduler: {
+              queued: stats.queuedByTenant[tenant] ?? 0,
+              inFlight: stats.tenantInFlight[tenant] ?? 0,
+              ...(quota !== undefined && Number.isFinite(quota) ? { quota } : {}),
+            },
+          }
+        : {}),
       workspace,
       personal,
     };
