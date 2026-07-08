@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CaseFailureSchema } from "./case-failure.js";
 import { EnvSnapshotSchema, EnvSpecSchema } from "./environment.js";
 import { ScoreSchema } from "./grader.js";
 import { TraceEventSchema } from "./trace.js";
@@ -64,6 +65,10 @@ export const CaseResultSchema = z.object({
   trace: z.array(TraceEventSchema),
   snapshot: EnvSnapshotSchema,
   scores: z.array(ScoreSchema),
+  // Classified failure (WHERE it died × WHOSE fault) — set when the case did not produce a normal eval outcome
+  // (dispatch/install/run/collect/grade error). Absent on a clean run, including a legitimate agent FAIL
+  // (that is a grader verdict, not a failure). Drives class-aware retry. docs/architecture/batch-resilience.md
+  failure: CaseFailureSchema.optional(),
   provenance: CaseProvenanceSchema.optional(), // provenance of unmanaged execution like self-hosted (control-plane stamp)
   traceRef: TraceRefSchema.optional(), // control-plane collection target (above) — absent for job collection (default)
 });

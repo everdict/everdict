@@ -1679,11 +1679,16 @@ export function buildServer(deps: ServerDeps): FastifyInstance {
     if (!principal) return reply;
     try {
       gate(principal, "scorecards:run");
+      // Optional failure-class filter (?class=infra) — re-run only that class's casualties (agent FAILs stay carried).
+      const cls = (req.query as { class?: string } | undefined)?.class;
+      if (cls !== undefined && !["infra", "config", "harness", "agent"].includes(cls))
+        return reply.code(400).send({ code: "BAD_REQUEST", message: "class must be infra|config|harness|agent." });
       return reply.code(202).send(
         await deps.scorecardService.retryFailed({
           tenant: principal.workspace,
           id: req.params.id,
           submittedBy: principal.subject,
+          ...(cls ? { failureClass: cls as "infra" | "config" | "harness" | "agent" } : {}),
         }),
       );
     } catch (err) {

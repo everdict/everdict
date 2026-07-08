@@ -887,11 +887,26 @@ export function buildMcpServer(deps: McpDeps, principal: Principal): McpServer {
       {
         description:
           "Retry a finished batch's FAILED cases as a new scorecard — passing results are carried over verbatim (full comparable case set), origin.retryOf keeps the lineage. The source record is never mutated.",
-        inputSchema: { id: z.string().describe("source scorecard id (must be succeeded/failed)") },
+        inputSchema: {
+          id: z.string().describe("source scorecard id (must be succeeded/failed)"),
+          failure_class: z
+            .enum(["infra", "config", "harness", "agent"])
+            .optional()
+            .describe(
+              "re-run only this failure class (e.g. infra after a cluster incident) — agent FAILs stay carried",
+            ),
+        },
       },
-      ({ id }) =>
+      ({ id, failure_class }) =>
         run(principal, "scorecards:run", async () =>
-          ok(await scorecards.retryFailed({ tenant: ws, id, submittedBy: principal.subject })),
+          ok(
+            await scorecards.retryFailed({
+              tenant: ws,
+              id,
+              submittedBy: principal.subject,
+              ...(failure_class ? { failureClass: failure_class } : {}),
+            }),
+          ),
         ),
     );
 

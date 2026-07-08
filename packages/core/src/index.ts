@@ -3,6 +3,7 @@
 export * from "./errors.js";
 export * from "./trace.js";
 export * from "./compute.js";
+export * from "./case-failure.js";
 export * from "./environment.js";
 export * from "./harness.js";
 export * from "./grader.js";

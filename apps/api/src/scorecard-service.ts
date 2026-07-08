@@ -487,7 +487,14 @@ export class ScorecardService {
   // Retry-failed — a NEW scorecard that re-runs only the failed cases of a terminal batch and carries the passing
   // results over verbatim (full, directly comparable case set; origin.retryOf keeps the lineage). The source record
   // is never mutated — eval history stays immutable. docs/architecture/batch-resilience.md
-  async retryFailed(input: { tenant: string; id: string; submittedBy?: string }): Promise<ScorecardRecord> {
+  async retryFailed(input: {
+    tenant: string;
+    id: string;
+    submittedBy?: string;
+    // Failure-class filter — re-run only the cases that died in that class (e.g. "infra" after a cluster incident:
+    // agent FAILs are legitimate results and stay carried over). Unset = every non-passing case (previous behavior).
+    failureClass?: "infra" | "config" | "harness" | "agent";
+  }): Promise<ScorecardRecord> {
     const src = await this.get(input.id); // hydrated (results from child runs when stored as references)
     if (!src || src.tenant !== input.tenant)
       throw new NotFoundError("NOT_FOUND", { scorecard: input.id }, "scorecard not found.");
@@ -500,10 +507,23 @@ export class ScorecardService {
     const results = src.scorecard?.results ?? [];
     if (results.length === 0)
       throw new BadRequestError("BAD_REQUEST", { scorecard: input.id }, "This batch has no per-case results to retry.");
-    const failed = results.filter((r) => caseVerdict(r) !== true);
+    // Class selection: a result with a classified failure matches its class; a plain grader FAIL (no failure field)
+    // is the agent's own outcome → class "agent". Unset = every non-passing case.
+    const classOf = (r: CaseResult): string | undefined =>
+      caseVerdict(r) === true ? undefined : (r.failure?.class ?? "agent");
+    const failed = results.filter((r) =>
+      input.failureClass ? classOf(r) === input.failureClass : caseVerdict(r) !== true,
+    );
     if (failed.length === 0)
-      throw new BadRequestError("BAD_REQUEST", { scorecard: input.id }, "Nothing to retry — every case passed.");
-    const seed = results.filter((r) => caseVerdict(r) === true);
+      throw new BadRequestError(
+        "BAD_REQUEST",
+        { scorecard: input.id, ...(input.failureClass ? { failureClass: input.failureClass } : {}) },
+        input.failureClass
+          ? `Nothing to retry — no ${input.failureClass}-class failures in this batch.`
+          : "Nothing to retry — every case passed.",
+      );
+    const retryIds = new Set(failed.map((r) => r.caseId));
+    const seed = results.filter((r) => !retryIds.has(r.caseId));
 
     const resolved = await this.deps.datasets.get(input.tenant, src.dataset.id, src.dataset.version);
     const { cases } = selectSubsetCases(

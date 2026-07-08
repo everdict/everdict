@@ -1,4 +1,11 @@
-import type { AgentJob, CaseResult, Scorecard, Suite } from "@everdict/core";
+import {
+  type AgentJob,
+  BadRequestError,
+  type CaseResult,
+  type Scorecard,
+  type Suite,
+  UpstreamError,
+} from "@everdict/core";
 import { describe, expect, it } from "vitest";
 import { runSuite } from "./run-suite.js";
 import { caseVerdict, diffScorecards, scorecardPassRate, summarizeScorecard } from "./scorecard.js";
@@ -51,7 +58,7 @@ describe("runSuite", () => {
     const failed = sc.results.find((r) => r.caseId === "a");
     expect(failed?.harness).toBe("claude-code@1.0.0");
     expect(failed?.trace).toEqual([{ t: 0, kind: "error", message: "boom" }]);
-    expect(failed?.scores).toEqual([{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: "boom" }]);
+    expect(failed?.scores).toEqual([{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: "[infra] boom" }]);
     expect(caseVerdict(failed ?? { scores: [] })).toBe(false);
     // the successful case aggregates normally
     expect(caseVerdict(sc.results.find((r) => r.caseId === "b") ?? { scores: [] })).toBe(true);
@@ -218,5 +225,34 @@ describe("runSuite transient retry", () => {
     };
     await runSuite(suite, "1", dispatch, { retries: 3, retryBackoffMs: 1 });
     expect(calls).toBe(1);
+  });
+});
+
+// Class-aware retry — only retryable-classified failures earn attempts; the classified failure rides on the result.
+describe("runSuite failure classification", () => {
+  const suite = {
+    id: "s",
+    harness: { id: "h" },
+    cases: [{ id: "c1", env: { kind: "prompt" as const }, task: "t", graders: [], timeoutSec: 60, tags: [] }],
+  };
+
+  it("a config-class failure (missing secret) is NOT retried — retrying changes nothing", async () => {
+    let calls = 0;
+    const dispatch = async () => {
+      calls++;
+      throw new BadRequestError("BAD_REQUEST", {}, "secret OPENAI_API_KEY is not set");
+    };
+    const sc = await runSuite(suite, "1", dispatch, { retries: 3, retryBackoffMs: 1 });
+    expect(calls).toBe(1);
+    expect(sc.results[0]?.failure).toMatchObject({ class: "config", retryable: false, stage: "dispatch" });
+  });
+
+  it("a retryable infra failure keeps its classification on the frozen result after attempts run out", async () => {
+    const dispatch = async () => {
+      throw new UpstreamError("UPSTREAM_ERROR", {}, "placement blip");
+    };
+    const sc = await runSuite(suite, "1", dispatch, { retries: 1, retryBackoffMs: 1 });
+    expect(sc.results[0]?.failure).toMatchObject({ class: "infra", code: "UPSTREAM_ERROR", retryable: true });
+    expect(String(sc.results[0]?.scores[0]?.detail)).toContain("[infra]");
   });
 });

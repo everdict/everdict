@@ -1472,6 +1472,48 @@ describe("ScorecardService — batch resilience (resume · retry-failed)", () =>
     expect((await store.get("sc-src"))?.scorecard?.results).toHaveLength(3);
   });
 
+  it("retryFailed with failureClass=infra re-runs ONLY infra casualties — agent FAILs stay carried over", async () => {
+    const { dispatched, dispatcher } = capturingDispatcher();
+    const { store, datasets, service } = build(dispatcher);
+    await datasets.register("acme", threeCaseDataset);
+    const infraFailed: CaseResult = {
+      ...passResult("c2", false),
+      failure: {
+        stage: "dispatch",
+        class: "infra",
+        code: "UPSTREAM_ERROR",
+        message: "placement blip",
+        retryable: true,
+      },
+    };
+    await store.create({
+      id: "sc-mixed",
+      tenant: "acme",
+      dataset: { id: "rd", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+      status: "succeeded",
+      orchestration: { judges: [], concurrency: 3, retries: 1 },
+      scorecard: {
+        suiteId: "rd",
+        harness: "h@1",
+        // c1 passes · c2 infra-failed · c3 legitimate agent FAIL (grader verdict, no failure field)
+        results: [passResult("c1"), infraFailed, passResult("c3", false)],
+      },
+      createdAt: "2026-07-08T00:00:00.000Z",
+      updatedAt: "2026-07-08T00:00:00.000Z",
+    });
+
+    const rec = await service.retryFailed({ tenant: "acme", id: "sc-mixed", failureClass: "infra" });
+    await waitTerminal(store, rec.id);
+    expect(dispatched).toEqual(["c2"]); // only the infra casualty re-runs
+    const hydrated = await service.get(rec.id);
+    expect(hydrated?.scorecard?.results.map((r) => r.caseId).sort()).toEqual(["c1", "c2", "c3"]); // agent FAIL carried
+    // Filter with no matches → 400 with a class-specific message.
+    await expect(service.retryFailed({ tenant: "acme", id: "sc-mixed", failureClass: "config" })).rejects.toThrow(
+      /config-class/,
+    );
+  });
+
   it("retryFailed rejects an in-flight source (400) and an all-pass source (nothing to retry)", async () => {
     const { dispatcher } = capturingDispatcher();
     const { store, datasets, service } = build(dispatcher);

@@ -1,19 +1,23 @@
-import type { AgentJob, CaseResult, Scorecard, Suite } from "@everdict/core";
+import { type AgentJob, type CaseResult, type Scorecard, type Suite, classifyFailure } from "@everdict/core";
 
 // Same (job)→CaseResult signature as Backend/Router/Orchestrator.
 export type Dispatch = (job: AgentJob) => Promise<CaseResult>;
 
 // If dispatch throws, don't stop the whole batch (case isolation) — capture it as a failed CaseResult.
 // Record the reason as a trace=error event and put one pass:false score so the pass rate/summary counts this case as a failure.
+// The classified failure (stage × class × retryable) rides on the result so recovery can act by WHERE it died
+// (retry ?class=infra re-runs only infra casualties; agent FAILs are legitimate outcomes and carry no failure).
 function failedCaseResult(job: AgentJob, error: unknown): CaseResult {
   const message = error instanceof Error ? error.message : String(error);
+  const failure = classifyFailure(error, "dispatch");
   return {
     caseId: job.evalCase.id,
     harness: `${job.harness.id}@${job.harness.version}`,
     trace: [{ t: 0, kind: "error", message }],
     snapshot: { kind: "prompt", output: "" },
     // Carry the reason in detail — the web/CLI surface score.detail as-is, so "why it failed" is visible per case.
-    scores: [{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: message }],
+    scores: [{ graderId: "dispatch", metric: "error", value: 0, pass: false, detail: `[${failure.class}] ${message}` }],
+    failure,
   };
 }
 
@@ -65,7 +69,9 @@ export async function runSuite(
         result = await dispatch(job);
         break;
       } catch (error) {
-        if (attempt >= retries) {
+        // Only retryable-classified failures earn another attempt: config errors (missing secret, bad pin) and
+        // fatal infra (OOM with the same limits) fail identically on retry — burning attempts hides the real fix.
+        if (attempt >= retries || !classifyFailure(error, "dispatch").retryable) {
           result = failedCaseResult(job, error);
           break;
         }
