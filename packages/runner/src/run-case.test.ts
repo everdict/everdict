@@ -239,7 +239,8 @@ describe("runCase — early compute release (observation-only graders score afte
     expect(compute.disposed).toBe(true);
   });
 
-  it("compute is released even if a grader throws (finally is a no-op after early release — no double dispose)", async () => {
+  it("isolates a grader that throws — the case survives with a visible error score, sibling graders still score, and compute is released exactly once", async () => {
+    // Given: a throwing grader (a transient judge LLM hiccup) alongside a healthy one
     let disposeCount = 0;
     const compute = fakeCompute({
       async dispose() {
@@ -247,13 +248,30 @@ describe("runCase — early compute release (observation-only graders score afte
       },
     });
     const failing: Grader = {
-      id: "boom",
+      id: "judge",
       async grade(): Promise<Score> {
-        throw new Error("boom");
+        throw new Error("judge upstream 503");
+      },
+    };
+    const healthy: Grader = {
+      id: "steps",
+      async grade(): Promise<Score> {
+        return { graderId: "steps", metric: "tool_calls", value: 3, pass: true };
       },
     };
 
-    await expect(runCase(CASE, fakeDeps(compute, REPO_SNAPSHOT, [failing]))).rejects.toThrow("boom");
+    // When: the case is graded — the throw must NOT propagate out of runCase.
+    // (Pre-fix this rejected, dropping the whole case + the healthy grader's real score.)
+    const result = await runCase(CASE, fakeDeps(compute, REPO_SNAPSHOT, [failing, healthy]));
+
+    // Then: the throw becomes a visible error score (pass undefined → excluded from passRate, not a false FAIL),
+    // the sibling score is intact, and the grader-array order is preserved.
+    expect(result.scores.map((s) => s.graderId)).toEqual(["judge", "steps"]);
+    const judge = result.scores.find((s) => s.graderId === "judge");
+    expect(judge?.pass).toBeUndefined();
+    expect(judge?.detail).toContain("judge upstream 503");
+    expect(result.scores.find((s) => s.graderId === "steps")?.pass).toBe(true);
+    // And compute is still released exactly once (finally is a no-op after early release — no double dispose).
     expect(disposeCount).toBe(1);
   });
 });

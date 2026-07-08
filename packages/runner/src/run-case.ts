@@ -11,6 +11,7 @@ import type {
   Score,
   TraceEvent,
 } from "@everdict/core";
+import { safeGrade } from "@everdict/graders";
 
 export interface RunCaseDeps {
   driver: Driver;
@@ -81,7 +82,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
     const slots: Array<Score | undefined> = new Array(deps.graders.length);
     for (const [i, grader] of deps.graders.entries()) {
       if (grader.needsCompute === true) {
-        slots[i] = await grader.grade({ case: evalCase, trace, snapshot, compute });
+        slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot, compute });
       }
     }
     const materialized = await materializeScreenshot(snapshot, compute, observes || defer);
@@ -93,7 +94,7 @@ export async function runCase(evalCase: EvalCase, deps: RunCaseDeps): Promise<Ca
       if (deps.harness.collectTrace && source) trace.push(...(await deps.harness.collectTrace(runId)));
       for (const [i, grader] of deps.graders.entries()) {
         if (grader.needsCompute !== true) {
-          slots[i] = await grader.grade({ case: evalCase, trace, snapshot: materialized });
+          slots[i] = await safeGrade(grader, { case: evalCase, trace, snapshot: materialized });
         }
       }
     }

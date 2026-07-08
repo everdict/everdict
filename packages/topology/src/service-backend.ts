@@ -11,7 +11,7 @@ import {
   type TrustZone,
   assertHardenedIsolation,
 } from "@everdict/core";
-import { costGrader, latencyGrader, makeGradersFromEnv, stepsGrader } from "@everdict/graders";
+import { costGrader, latencyGrader, makeGradersFromEnv, safeGrade, stepsGrader } from "@everdict/graders";
 import type { TraceSource } from "@everdict/trace";
 import { keysFor, newRunId, wiringVars } from "./environment-manager.js";
 import {
@@ -188,7 +188,7 @@ export class ServiceTopologyBackend implements Backend {
           : [stepsGrader, costGrader, latencyGrader]);
       const scores: Score[] = [];
       for (const grader of graders) {
-        scores.push(await grader.grade({ case: job.evalCase, trace, snapshot }));
+        scores.push(await safeGrade(grader, { case: job.evalCase, trace, snapshot }));
       }
 
       return { caseId: job.evalCase.id, harness: `${spec.id}@${spec.version}`, trace, snapshot, scores };

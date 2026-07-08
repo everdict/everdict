@@ -1,5 +1,5 @@
 import type { CaseResult, EvalCase, GradeContext, Grader, Score } from "@everdict/core";
-import { makeGraders } from "@everdict/graders";
+import { makeGraders, safeGrade } from "@everdict/graders";
 import type { TraceSource, TraceSourceConfig } from "@everdict/trace";
 
 // Out-of-job trace collection (the collection phase of the 2-phase design, D4) — the completion step for spec.trace.collect="control-plane" cases.
@@ -104,7 +104,7 @@ export async function collectDeferredTrace(
       continue;
     }
     if (grader.needsCompute === true) continue; // already scored in the job (before compute was released)
-    scores.push(await grader.grade(ctx));
+    scores.push(await safeGrade(grader, ctx));
   }
 
   return { ...result, trace, scores };
