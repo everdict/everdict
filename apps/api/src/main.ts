@@ -120,6 +120,7 @@ import { ScorecardService } from "./scorecard-service.js";
 import { SelfHostedBackend } from "./self-hosted-backend.js";
 import { buildServer } from "./server.js";
 import { recoverInterrupted } from "./startup-recovery.js";
+import { TemporalBatchDriver } from "./temporal-batch-driver.js";
 import { TemporalScheduleDriver } from "./temporal-schedule-driver.js";
 import { buildTopologyBackend } from "./topology-backend.js";
 import { TraceSinkService } from "./trace-sink-service.js";
@@ -352,9 +353,15 @@ async function main(): Promise<void> {
       : {}),
   });
   // Batch eval: run a dataset (bundle of cases) against a harness@version, aggregate into a scorecard + apply the selected judges to each trace.
+  // Batch-on-Temporal (opt-in): the durable workflow drives batches through the internal routes.
+  const temporalBatchAddress =
+    process.env.EVERDICT_TEMPORAL_ADDRESS && process.env.EVERDICT_TEMPORAL_BATCHES === "1"
+      ? process.env.EVERDICT_TEMPORAL_ADDRESS
+      : undefined;
   const scorecardService = new ScorecardService({
     dispatcher,
     store: scorecardStore,
+    ...(temporalBatchAddress ? { temporalBatches: new TemporalBatchDriver({ address: temporalBatchAddress }) } : {}),
     requireRuntime: true, // policy (default): a batch with no runtime is 400 at submit — the API does not register local
     // Fan out a child run per case (sharing the same RunStore as a single run) — each case becomes an addressable run, hidden by default in the activity list.
     runStore: store,

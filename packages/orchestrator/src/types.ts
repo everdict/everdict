@@ -18,4 +18,13 @@ export interface Activities {
     scorecardId: string;
     previousScorecardId?: string;
   }): Promise<void>;
+
+  // --- Batch-on-Temporal (docs/architecture/temporal-batch-orchestration.md) ---
+  // The control plane owns execution/scoring/streaming (same internal-bridge pattern as scheduled fires — no logic
+  // forks); the workflow owns the DRIVER LOOP's durability. planBatch resolves the remaining case ids (idempotent —
+  // a re-attached workflow gets only what is still unfinished), runBatchCase executes+settles exactly one case
+  // (idempotent — an already-settled case returns skipped), finalizeBatch aggregates and persists the record.
+  planBatch(input: { scorecardId: string }): Promise<{ caseIds: string[]; concurrency: number }>;
+  runBatchCase(input: { scorecardId: string; caseId: string }): Promise<{ settled: boolean; skipped?: boolean }>;
+  finalizeBatch(input: { scorecardId: string }): Promise<void>;
 }

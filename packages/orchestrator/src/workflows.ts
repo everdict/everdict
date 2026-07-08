@@ -49,6 +49,36 @@ export async function suiteWorkflow(jobs: AgentJob[]): Promise<CaseResult[]> {
 const POLL_INTERVAL_MS = 30_000;
 const MAX_POLLS = 480; // ~4-hour cap (30s × 480) — prevents indefinite waiting
 
+// Batch workflow — one scorecard batch = one durable workflow (docs/architecture/temporal-batch-orchestration.md).
+// The control plane executes+settles each case via the internal bridge; this loop only owns durability: if the CP
+// dies mid-case the activity retries against the restarted CP, if the WORKER dies another worker replays the
+// history and picks up exactly where it stopped. Case-level transient retry (failure classes) lives CP-side —
+// the generous activity retry here is for TRANSPORT failures (CP unreachable), not eval semantics.
+const batchActivities = proxyActivities<Activities>({
+  startToCloseTimeout: "1 hour",
+  retry: { maximumAttempts: 10, initialInterval: "5s", maximumInterval: "1 minute" },
+});
+
+// Workflow-side lane cap — the CP's own concurrency figure drives lanes (bounded, deterministic counter pattern).
+const MAX_BATCH_LANES = 64;
+
+export async function scorecardBatchWorkflow(input: { scorecardId: string }): Promise<void> {
+  const plan = await batchActivities.planBatch({ scorecardId: input.scorecardId });
+  const ids = plan.caseIds;
+  let next = 0;
+  const lane = async (): Promise<void> => {
+    while (next < ids.length) {
+      const i = next++;
+      const caseId = ids[i];
+      if (caseId === undefined) continue;
+      await batchActivities.runBatchCase({ scorecardId: input.scorecardId, caseId });
+    }
+  };
+  const lanes = Math.max(1, Math.min(plan.concurrency, MAX_BATCH_LANES, ids.length || 1));
+  await Promise.all(Array.from({ length: lanes }, () => lane()));
+  await batchActivities.finalizeBatch({ scorecardId: input.scorecardId });
+}
+
 export async function scheduledScorecardWorkflow(input: { scheduleId: string; tenant: string }): Promise<void> {
   const { scorecardId, previousScorecardId } = await fireScheduledScorecard(input);
   for (let i = 0; i < MAX_POLLS; i++) {

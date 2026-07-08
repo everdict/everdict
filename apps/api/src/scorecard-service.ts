@@ -4,6 +4,8 @@ import {
   AppError,
   BadRequestError,
   type CaseResult,
+  type EvalCase,
+  classifyFailure,
   type Dataset,
   EnvSnapshotSchema,
   type GradeContext,
@@ -201,6 +203,9 @@ export interface ScorecardServiceDeps {
   // Workspace default judge model (for inline judge-grader scoring). A per-request override (RunScorecardInput.judge) takes precedence.
   judgeFor?: (tenant: string) => JudgeRunConfig | undefined | Promise<JudgeRunConfig | undefined>;
   budget?: BudgetTracker; // admit/settle per case
+  // Batch-on-Temporal driver (docs/architecture/temporal-batch-orchestration.md). When set, submit starts a durable
+  // workflow that drives the batch through the internal routes instead of the in-process track loop.
+  temporalBatches?: { workflowIdFor(scorecardId: string): string; start(scorecardId: string): Promise<void> };
   buildTraceSource?: (cfg: TraceSourceConfig) => TraceSource; // trace source factory for pull-ingest (@everdict/trace)
   secretsFor?: (tenant: string) => Promise<Record<string, string>>; // tenant SecretStore values (inject judge-model keys)
   // For resolving {secretRef} in harness env — two tiers: shared + submitter (owner) personal secrets. Injected by scope.
@@ -333,6 +338,26 @@ export class ScorecardService {
     if (origin?.repo && origin.prNumber !== undefined) {
       await this.supersedeInFlight(input.tenant, origin.repo, origin.prNumber, input.harness.id, dataset.id, record.id);
     }
+    // Batch-on-Temporal: when the driver is configured, a durable workflow owns the driver loop (the record is
+    // stamped with its workflowId so boot recovery leaves it alone). A failed START degrades gracefully to the
+    // in-process loop — the batch must never silently hang on a Temporal outage.
+    if (this.deps.temporalBatches) {
+      const workflowId = this.deps.temporalBatches.workflowIdFor(record.id);
+      await this.deps.store.update(record.id, {
+        orchestration: { ...(record.orchestration ?? { judges: [], concurrency, retries }), workflowId },
+        updatedAt: this.now(),
+      });
+      try {
+        await this.deps.temporalBatches.start(record.id);
+        return (await this.deps.store.get(record.id)) ?? record;
+      } catch {
+        // Strip the workflow claim and fall through to the in-process loop.
+        await this.deps.store.update(record.id, {
+          orchestration: record.orchestration ?? { judges: [], concurrency, retries },
+          updatedAt: this.now(),
+        });
+      }
+    }
     void this.track(
       record.id,
       input.tenant,
@@ -403,6 +428,9 @@ export class ScorecardService {
   async resume(id: string): Promise<boolean> {
     const rec = await this.deps.store.get(id);
     if (!rec || (rec.status !== "queued" && rec.status !== "running") || !rec.orchestration) return false;
+    // A Temporal-owned batch owns itself: the workflow's activity retries ride out a control-plane restart, so
+    // boot recovery must neither tombstone nor double-drive it.
+    if (rec.orchestration.workflowId) return true;
     let dataset: Dataset;
     let seed: CaseResult[] = [];
     const seedRunIds: string[] = [];
@@ -482,6 +510,264 @@ export class ScorecardService {
       },
     );
     return true;
+  }
+
+  // --- Batch-on-Temporal internals (called by the workflow via the internal routes; the CP owns execution/
+  // scoring/streaming, the workflow owns driver-loop durability — docs/architecture/temporal-batch-orchestration.md).
+  // Per-batch resolved context, built by planBatch and reused per case (601 registry hits otherwise). Rebuilt
+  // lazily after a CP restart; stepChain serializes progress-timeline appends across concurrent case calls.
+  private readonly batchContexts = new Map<
+    string,
+    {
+      tenant: string;
+      owner: string;
+      dataset: Dataset;
+      harnessId: string;
+      harnessVersion: string;
+      harnessSpec?: HarnessSpec;
+      judges: Array<{ id: string; version: string }>;
+      judge?: JudgeRunConfig;
+      retries: number;
+      concurrency: number;
+      secretMap?: HarnessSecretMaps;
+      caseIndex: Map<string, EvalCase>; // placement target already assigned (stable round-robin by selected index)
+      doneIds: Set<string>;
+      stepChain: Promise<void>;
+    }
+  >();
+
+  private async buildBatchContext(id: string): Promise<NonNullable<ReturnType<typeof this.batchContexts.get>>> {
+    const rec = await this.deps.store.get(id);
+    if (!rec) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "scorecard not found.");
+    const orch = rec.orchestration;
+    if (!orch) throw new BadRequestError("BAD_REQUEST", { scorecard: id }, "This batch has no orchestration inputs.");
+    const resolved = await this.deps.datasets.get(rec.tenant, rec.dataset.id, rec.dataset.version);
+    const { cases } = selectSubsetCases(
+      resolved,
+      rec.subset ? { ids: rec.subset.ids, tags: rec.subset.tags, limit: rec.subset.limit } : undefined,
+    );
+    // Sharding: same comma-list round-robin as the in-process loop, keyed by the SELECTED index so a re-plan after
+    // a restart assigns every case the same target it had before.
+    const targets = (rec.runtime ?? "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const caseIndex = new Map<string, EvalCase>();
+    cases.forEach((c, i) => {
+      const target = targets.length > 0 ? targets[i % targets.length] : undefined;
+      caseIndex.set(c.id, target ? { ...c, placement: { ...c.placement, target } } : c);
+    });
+    let harnessSpec: HarnessSpec | undefined;
+    const pins = rec.origin?.pinOverrides;
+    if (this.deps.harnesses) {
+      try {
+        harnessSpec =
+          pins && Object.keys(pins).length > 0
+            ? await this.deps.harnesses.resolveWithPins(rec.tenant, rec.harness.id, rec.harness.version, pins)
+            : await this.deps.harnesses.get(rec.tenant, rec.harness.id, rec.harness.version);
+      } catch {
+        // unregistered/built-in → no spec embedded (same as submit)
+      }
+    }
+    const owner = rec.createdBy ?? rec.tenant;
+    const secretMap =
+      harnessSpec && this.deps.scopedSecretsFor ? await this.deps.scopedSecretsFor(rec.tenant, owner) : undefined;
+    const doneIds = new Set<string>();
+    if (this.deps.runStore) {
+      const children = await this.deps.runStore.list(rec.tenant, { scorecardId: id });
+      const latest = new Map<string, (typeof children)[number]>();
+      for (const c of children) {
+        const prev = latest.get(c.caseId);
+        if (!prev || c.updatedAt > prev.updatedAt) latest.set(c.caseId, c);
+      }
+      for (const c of latest.values()) if (c.status === "succeeded" && c.result) doneIds.add(c.caseId);
+    }
+    const ctx = {
+      tenant: rec.tenant,
+      owner,
+      dataset: { ...resolved, cases } as Dataset,
+      harnessId: rec.harness.id,
+      harnessVersion: rec.harness.version,
+      ...(harnessSpec ? { harnessSpec } : {}),
+      judges: orch.judges,
+      ...(orch.judge ? { judge: orch.judge } : {}),
+      retries: orch.retries,
+      concurrency: orch.concurrency,
+      ...(secretMap ? { secretMap } : {}),
+      caseIndex,
+      doneIds,
+      stepChain: Promise.resolve(),
+    };
+    this.batchContexts.set(id, ctx);
+    return ctx;
+  }
+
+  // Serialized progress-step append (read-modify-write on record.steps is racy across concurrent case calls).
+  private appendBatchStep(id: string, step: Omit<ScorecardStep, "ts">): Promise<void> {
+    const ctx = this.batchContexts.get(id);
+    const doAppend = async (): Promise<void> => {
+      const rec = await this.deps.store.get(id);
+      if (!rec) return;
+      await this.deps.store.update(id, {
+        steps: [...(rec.steps ?? []), { ts: this.now(), ...step }],
+        updatedAt: this.now(),
+      });
+    };
+    if (!ctx) return doAppend();
+    ctx.stepChain = ctx.stepChain.then(doAppend, doAppend);
+    return ctx.stepChain;
+  }
+
+  // planBatch — resolve the remaining work (idempotent: a re-attached workflow gets only unfinished cases).
+  async planBatch(id: string): Promise<{ caseIds: string[]; concurrency: number }> {
+    const ctx = await this.buildBatchContext(id);
+    const remaining = [...ctx.caseIndex.keys()].filter((cid) => !ctx.doneIds.has(cid));
+    await this.deps.store.update(id, { status: "running", updatedAt: this.now() });
+    await this.appendBatchStep(id, {
+      phase: "dispatch",
+      status: "started",
+      message: `Running ${remaining.length} case(s) via Temporal workflow${ctx.doneIds.size > 0 ? ` (${ctx.doneIds.size} finished case(s) kept)` : ""}`,
+    });
+    return { caseIds: remaining, concurrency: ctx.concurrency };
+  }
+
+  // runBatchCase — execute + settle exactly one case (idempotent). Mirrors the in-process track dispatch closure:
+  // budget admit → child run → secret resolve → executeCase (CP-side transient retry by failure class) → settle →
+  // per-case judges → progress step. Kept deliberately parallel to track() — the two drivers share every primitive
+  // (executeCase, classifyFailure, applyJudges, billing), only the loop ownership differs.
+  async runBatchCase(id: string, caseId: string): Promise<{ settled: boolean; skipped?: boolean }> {
+    const ctx = this.batchContexts.get(id) ?? (await this.buildBatchContext(id));
+    if (ctx.doneIds.has(caseId)) return { settled: true, skipped: true };
+    const evalCase = ctx.caseIndex.get(caseId);
+    if (!evalCase) throw new NotFoundError("NOT_FOUND", { scorecard: id, caseId }, "case not in this batch.");
+
+    this.deps.budget?.admit(ctx.tenant);
+    const runStore = this.deps.runStore;
+    let childId: string | undefined;
+    if (runStore) {
+      childId = this.newId();
+      const ts = this.now();
+      await runStore.create({
+        id: childId,
+        tenant: ctx.tenant,
+        harness: { id: ctx.harnessId, version: ctx.harnessVersion },
+        caseId,
+        status: "running",
+        parentScorecardId: id,
+        trigger: "scorecard",
+        ...(evalCase.placement?.target ? { runtime: evalCase.placement.target } : {}),
+        createdAt: ts,
+        updatedAt: ts,
+      });
+    }
+    const baseJob: AgentJob = {
+      evalCase,
+      harness: { id: ctx.harnessId, version: ctx.harnessVersion },
+      tenant: ctx.tenant,
+      ...(ctx.owner ? { submittedBy: ctx.owner } : {}),
+      ...(ctx.harnessSpec ? { harnessSpec: ctx.harnessSpec } : {}),
+      ...(ctx.judge ? { judge: ctx.judge } : {}),
+    };
+    let result: CaseResult | undefined;
+    for (let attempt = 0; ; attempt++) {
+      try {
+        const jobToRun =
+          ctx.secretMap && baseJob.harnessSpec
+            ? { ...baseJob, harnessSpec: resolveHarnessSecrets(baseJob.harnessSpec, ctx.secretMap) }
+            : baseJob;
+        result = await executeCase(this.deps, ctx.owner, jobToRun);
+        break;
+      } catch (err) {
+        const failure = classifyFailure(err, "dispatch");
+        if (attempt >= ctx.retries || !failure.retryable) {
+          const message = err instanceof Error ? err.message : String(err);
+          result = {
+            caseId,
+            harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
+            trace: [{ t: 0, kind: "error", message }],
+            snapshot: { kind: "prompt", output: "" },
+            scores: [
+              { graderId: "dispatch", metric: "error", value: 0, pass: false, detail: `[${failure.class}] ${message}` },
+            ],
+            failure,
+          };
+          break;
+        }
+        await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)));
+      }
+    }
+    const bill = billingTenant(result, ctx.tenant);
+    if (bill) this.deps.budget?.settle(bill, costOf(result));
+    // Per-case judge scoring — the same "judge the moment the case lands" semantics as the in-process judge stream.
+    if (ctx.judges.length > 0) {
+      await this.scoring.applyJudges(ctx.tenant, ctx.dataset, [result], ctx.judges).catch(() => {});
+    }
+    if (runStore && childId) await runStore.update(childId, { status: "succeeded", result, updatedAt: this.now() });
+    ctx.doneIds.add(caseId);
+    const v = caseVerdict(result);
+    const reason = caseReason(result);
+    const verdict = v == null ? "no result" : v ? "PASS" : "FAIL";
+    await this.appendBatchStep(id, {
+      phase: "case",
+      status: v === false ? "failed" : "ok",
+      message: `${caseId} → ${verdict}${reason ? ` · ${reason}` : ""}`,
+      caseId,
+    });
+    return { settled: true };
+  }
+
+  // finalizeBatch — aggregate the children into the final record (summary/models/judges/export) and notify.
+  async finalizeBatch(id: string): Promise<void> {
+    const ctx = this.batchContexts.get(id) ?? (await this.buildBatchContext(id));
+    const rec = await this.deps.store.get(id);
+    if (!rec) throw new NotFoundError("NOT_FOUND", { scorecard: id }, "scorecard not found.");
+    const children = this.deps.runStore ? await this.deps.runStore.list(ctx.tenant, { scorecardId: id }) : [];
+    const latest = new Map<string, (typeof children)[number]>();
+    for (const c of children) {
+      const prev = latest.get(c.caseId);
+      if (!prev || c.updatedAt > prev.updatedAt) latest.set(c.caseId, c);
+    }
+    const order = new Map([...ctx.caseIndex.keys()].map((cid, i) => [cid, i] as const));
+    const results = [...latest.values()]
+      .map((c) => c.result)
+      .filter((r): r is CaseResult => r !== undefined)
+      .sort((a, b) => (order.get(a.caseId) ?? 0) - (order.get(b.caseId) ?? 0));
+    const scorecard: Scorecard = {
+      suiteId: rec.dataset.id,
+      harness: `${ctx.harnessId}@${ctx.harnessVersion}`,
+      results,
+    };
+    await this.offloadResults(id, results);
+    // Trace-sink export (batched at finalize on the Temporal path — per-case export streaming stays in-process-only).
+    const exported = this.deps.exportResults
+      ? await this.deps
+          .exportResults(
+            ctx.tenant,
+            { scorecardId: id, dataset: `${rec.dataset.id}@${rec.dataset.version}`, harness: scorecard.harness },
+            results,
+          )
+          .catch(() => undefined)
+      : undefined;
+    const declared = ctx.harnessSpec?.kind === "command" ? ctx.harnessSpec.model : undefined;
+    const judgeModels = await this.scoring.collectJudgeModels(ctx.tenant, ctx.judges, ctx.judge);
+    const runIds = [...latest.values()].map((c) => c.id);
+    await this.appendBatchStep(id, { phase: "persist", status: "ok", message: "aggregated and persisted (temporal)" });
+    const final = await this.deps.store.get(id);
+    await this.deps.store.update(id, {
+      status: "succeeded",
+      summary: summarizeScorecard(scorecard),
+      models: scorecardModels(scorecard, declared),
+      ...(judgeModels.length > 0 ? { judgeModels } : {}),
+      ...(exported ? { export: exported } : {}),
+      steps: final?.steps ?? [],
+      ...(runIds.length > 0 ? { runIds } : { scorecard }),
+      updatedAt: this.now(),
+    });
+    this.batchContexts.delete(id);
+    if (this.deps.onComplete) {
+      const done = await this.deps.store.get(id);
+      if (done) await this.deps.onComplete(ctx.tenant, done).catch(() => {});
+    }
   }
 
   // Retry-failed — a NEW scorecard that re-runs only the failed cases of a terminal batch and carries the passing

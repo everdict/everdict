@@ -1292,6 +1292,176 @@ describe("ScorecardService.submit — partial run (subset)", () => {
 });
 
 // Batch resilience — restart resume + retry-failed + persisted orchestration (docs/architecture/batch-resilience.md).
+describe("ScorecardService — batch-on-Temporal internals (plan → case → finalize)", () => {
+  const threeCases: Dataset = {
+    id: "td",
+    version: "1.0.0",
+    cases: (["c1", "c2", "c3"] as const).map((id) => ({
+      id,
+      env: { kind: "prompt" as const },
+      task: "t",
+      graders: [],
+      timeoutSec: 60,
+      tags: [],
+    })),
+    tags: [],
+  };
+  const ok = (caseId: string): CaseResult => ({
+    caseId,
+    harness: "h@1",
+    trace: [],
+    snapshot: { kind: "prompt", output: "" },
+    scores: [{ graderId: "tests-pass", metric: "tests-pass", value: 1, pass: true }],
+  });
+  function wire(dispatcher: Dispatcher) {
+    const store = new InMemoryScorecardStore();
+    const runs = new InMemoryRunStore();
+    const datasets = new InMemoryDatasetRegistry();
+    let n = 0;
+    const service = new ScorecardService({ dispatcher, store, datasets, runStore: runs, newId: () => `t-${n++}` });
+    return { store, runs, datasets, service };
+  }
+  const record = () => ({
+    id: "sc-t",
+    tenant: "acme",
+    dataset: { id: "td", version: "1.0.0" },
+    harness: { id: "h", version: "1" },
+    status: "queued" as const,
+    runtime: "rt-a,rt-b",
+    orchestration: { judges: [], concurrency: 2, retries: 0, workflowId: "everdict-batch-sc-t" },
+    createdAt: "2026-07-08T00:00:00.000Z",
+    updatedAt: "2026-07-08T00:00:00.000Z",
+  });
+
+  it("the full workflow loop — plan lists remaining cases (sharded targets), each case settles once, finalize aggregates", async () => {
+    const seen: Array<{ id: string; target?: string }> = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job: AgentJob) {
+        seen.push({
+          id: job.evalCase.id,
+          ...(job.evalCase.placement?.target ? { target: job.evalCase.placement.target } : {}),
+        });
+        return ok(job.evalCase.id);
+      },
+    };
+    const { store, service, datasets } = wire(dispatcher);
+    await datasets.register("acme", threeCases);
+    await store.create(record());
+
+    const plan = await service.planBatch("sc-t");
+    expect(plan).toEqual({ caseIds: ["c1", "c2", "c3"], concurrency: 2 });
+
+    for (const cid of plan.caseIds) {
+      expect(await service.runBatchCase("sc-t", cid)).toEqual({ settled: true });
+    }
+    // Idempotency — a retried activity for an already-settled case never re-dispatches.
+    expect(await service.runBatchCase("sc-t", "c1")).toEqual({ settled: true, skipped: true });
+    expect(seen.map((x) => x.id)).toEqual(["c1", "c2", "c3"]);
+    // Sharding parity with the in-process loop: selected-index round-robin over the comma list.
+    expect(seen.map((x) => x.target)).toEqual(["rt-a", "rt-b", "rt-a"]);
+
+    await service.finalizeBatch("sc-t");
+    const rec = await store.get("sc-t");
+    expect(rec?.status).toBe("succeeded");
+    expect(rec?.summary?.[0]).toMatchObject({ metric: "tests-pass", count: 3, passRate: 1 });
+    const hydrated = await service.get("sc-t");
+    expect(hydrated?.scorecard?.results.map((r) => r.caseId)).toEqual(["c1", "c2", "c3"]);
+    expect(rec?.steps?.some((s) => s.phase === "dispatch" && s.message.includes("Temporal"))).toBe(true);
+  });
+
+  it("a re-plan after a restart returns only unfinished cases (done children excluded)", async () => {
+    const dispatcher: Dispatcher = {
+      async dispatch(job: AgentJob) {
+        return ok(job.evalCase.id);
+      },
+    };
+    const { store, runs, service, datasets } = wire(dispatcher);
+    await datasets.register("acme", threeCases);
+    await store.create(record());
+    await runs.create({
+      id: "done-c2",
+      tenant: "acme",
+      harness: { id: "h", version: "1" },
+      caseId: "c2",
+      status: "succeeded",
+      result: ok("c2"),
+      parentScorecardId: "sc-t",
+      createdAt: "2026-07-08T00:00:01.000Z",
+      updatedAt: "2026-07-08T00:00:02.000Z",
+    });
+    const plan = await service.planBatch("sc-t");
+    expect(plan.caseIds).toEqual(["c1", "c3"]);
+  });
+
+  it("submit with a temporal driver stamps workflowId and starts the workflow; a failed start degrades to in-process", async () => {
+    const started: string[] = [];
+    const dispatcher: Dispatcher = {
+      async dispatch(job: AgentJob) {
+        return ok(job.evalCase.id);
+      },
+    };
+    const { store, service, datasets } = wire(dispatcher);
+    await datasets.register("acme", threeCases);
+    const svc = new ScorecardService({
+      dispatcher,
+      store,
+      datasets,
+      newId: () => "sc-wf",
+      temporalBatches: {
+        workflowIdFor: (id) => `everdict-batch-${id}`,
+        start: async (id) => {
+          started.push(id);
+        },
+      },
+    });
+    const rec = await svc.submit({
+      tenant: "acme",
+      dataset: { id: "td", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+    });
+    expect(started).toEqual(["sc-wf"]);
+    expect(rec.orchestration?.workflowId).toBe("everdict-batch-sc-wf");
+    expect((await store.get("sc-wf"))?.status).toBe("queued"); // the workflow drives it — no in-process track
+
+    // Failed start → fall back to the in-process loop (workflowId stripped, batch completes).
+    let m = 0;
+    const store2 = new InMemoryScorecardStore();
+    const svc2 = new ScorecardService({
+      dispatcher,
+      store: store2,
+      datasets,
+      newId: () => `sc-fb-${m++}`,
+      temporalBatches: {
+        workflowIdFor: (id) => `everdict-batch-${id}`,
+        start: async () => {
+          throw new Error("temporal down");
+        },
+      },
+    });
+    const rec2 = await svc2.submit({
+      tenant: "acme",
+      dataset: { id: "td", version: "1.0.0" },
+      harness: { id: "h", version: "1" },
+    });
+    const final = await waitTerminal(store2, rec2.id);
+    expect(final.status).toBe("succeeded");
+    expect(final.orchestration?.workflowId).toBeUndefined();
+  });
+
+  it("boot resume leaves a Temporal-owned batch alone (returns handled without re-driving)", async () => {
+    const dispatcher: Dispatcher = {
+      async dispatch(job: AgentJob) {
+        return ok(job.evalCase.id);
+      },
+    };
+    const { store, service, datasets } = wire(dispatcher);
+    await datasets.register("acme", threeCases);
+    await store.create({ ...record(), status: "running" });
+    expect(await service.resume("sc-t")).toBe(true);
+    expect((await store.get("sc-t"))?.status).toBe("running"); // untouched — the workflow owns it
+  });
+});
+
 describe("ScorecardService — batch resilience (resume · retry-failed)", () => {
   const threeCaseDataset: Dataset = {
     id: "rd",

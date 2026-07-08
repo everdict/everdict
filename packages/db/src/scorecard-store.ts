@@ -123,6 +123,9 @@ export const ScorecardRecordSchema = z.object({
       judge: z.object({ provider: z.enum(["openai", "anthropic"]).optional(), model: z.string() }).optional(),
       concurrency: z.number().int().positive(),
       retries: z.number().int().min(0).default(0),
+      // Set when a Temporal workflow owns this batch's driver loop — boot recovery leaves such batches alone
+      // (they own themselves) and the web can deep-link the workflow. docs/architecture/temporal-batch-orchestration.md
+      workflowId: z.string().optional(),
     })
     .optional(),
   scorecard: ScorecardSchema.optional(), // full per-case results (for detail, heavy)

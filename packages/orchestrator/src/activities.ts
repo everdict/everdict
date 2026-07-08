@@ -71,5 +71,46 @@ export function createActivities(dispatcher: Dispatcher, schedule?: ScheduleActi
       );
       if (!res.ok) throw new Error(`Scheduled finalization failed: ${res.status} ${await res.text()}`);
     },
+
+    // --- Batch-on-Temporal — the same internal bridge (the control plane owns execution/scoring/streaming;
+    // these activities are pure transport, so a CP restart mid-call is just a retryable activity failure). ---
+    async planBatch(input: { scorecardId: string }): Promise<{ caseIds: string[]; concurrency: number }> {
+      if (!schedule) throw new Error("Batch activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/batches/${encodeURIComponent(input.scorecardId)}/plan`,
+        { method: "POST", headers: { "x-internal-token": schedule.internalToken } },
+      );
+      if (!res.ok) throw new Error(`Batch plan failed: ${res.status} ${await res.text()}`);
+      const json = (await res.json()) as { caseIds?: unknown; concurrency?: unknown };
+      if (!Array.isArray(json.caseIds)) throw new Error("The plan response has no caseIds.");
+      return {
+        caseIds: json.caseIds.map(String),
+        concurrency: typeof json.concurrency === "number" ? json.concurrency : 4,
+      };
+    },
+    async runBatchCase(input: {
+      scorecardId: string;
+      caseId: string;
+    }): Promise<{ settled: boolean; skipped?: boolean }> {
+      if (!schedule) throw new Error("Batch activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/batches/${encodeURIComponent(input.scorecardId)}/case`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-internal-token": schedule.internalToken },
+          body: JSON.stringify({ caseId: input.caseId }),
+        },
+      );
+      if (!res.ok) throw new Error(`Batch case failed: ${res.status} ${await res.text()}`);
+      return (await res.json()) as { settled: boolean; skipped?: boolean };
+    },
+    async finalizeBatch(input: { scorecardId: string }): Promise<void> {
+      if (!schedule) throw new Error("Batch activities are not configured (EVERDICT_API_URL/EVERDICT_INTERNAL_TOKEN).");
+      const res = await fetch(
+        `${schedule.apiUrl.replace(/\/$/, "")}/internal/batches/${encodeURIComponent(input.scorecardId)}/finalize`,
+        { method: "POST", headers: { "x-internal-token": schedule.internalToken } },
+      );
+      if (!res.ok) throw new Error(`Batch finalization failed: ${res.status} ${await res.text()}`);
+    },
   };
 }
