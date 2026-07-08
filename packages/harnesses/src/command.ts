@@ -1,4 +1,5 @@
 import {
+  InternalError,
   type CommandHarnessSpec,
   type ComputeHandle,
   type EvaluableHarness,
@@ -55,7 +56,14 @@ export class CommandHarness implements EvaluableHarness {
     const cwd = this.cwd;
     for (const cmd of this.spec.setup) {
       const res = await compute.exec(cmd, { cwd });
-      if (res.exitCode !== 0) throw new Error(`setup failed (exit ${res.exitCode}): ${cmd}\n${res.stderr}`);
+      if (res.exitCode !== 0)
+        // AppError with the harness's own code — the failure taxonomy reads it as stage=install, class=harness
+        // (raw Error would classify as retryable run-stage infra and burn retries on a deterministic setup break).
+        throw new InternalError(
+          "HARNESS_INSTALL_FAILED",
+          { command: cmd, exitCode: res.exitCode },
+          `setup failed (exit ${res.exitCode}): ${cmd}\n${res.stderr}`,
+        );
     }
   }
 
