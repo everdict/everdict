@@ -62,6 +62,10 @@ export type TraceRef = z.infer<typeof TraceRefSchema>;
 export const CaseResultSchema = z.object({
   caseId: z.string(),
   harness: z.string(), // "claude-code@1.2.3"
+  // Trial index (0-based) when the same case is run N times for pass@k / flakiness. Absent (or 0) = a single-run
+  // case — a Scorecard may hold multiple results with the same caseId, distinguished by trial. Aggregation groups
+  // by caseId; the per-trial verdict reuses caseVerdict. docs/architecture/trial-based-verdict.md
+  trial: z.number().int().nonnegative().optional(),
   trace: z.array(TraceEventSchema),
   snapshot: EnvSnapshotSchema,
   scores: z.array(ScoreSchema),
